@@ -167,6 +167,17 @@ func (p *Push) PropValue(typ mapi.PropType, v any) error {
 			return err
 		}
 		return p.Bin(x)
+	case mapi.PtObject:
+		// PT_OBJECT carries no data in address-book mode; elsewhere it is a
+		// binary (e.g. PR_ATTACH_DATA_OBJ during ICS).
+		if p.flags&FlagABK != 0 {
+			return nil
+		}
+		x, err := asType[[]byte](v)
+		if err != nil {
+			return err
+		}
+		return p.Bin(x)
 	case mapi.PtMvShort:
 		return pushMV(p, v, func(p *Push, x int16) error { p.Uint16(uint16(x)); return nil })
 	case mapi.PtMvLong:
@@ -247,6 +258,11 @@ func (p *Pull) PropValue(typ mapi.PropType) (any, error) {
 	case mapi.PtCLSID:
 		return p.GUID()
 	case mapi.PtBinary:
+		return p.Bin()
+	case mapi.PtObject:
+		if p.flags&FlagABK != 0 {
+			return nil, nil
+		}
 		return p.Bin()
 	case mapi.PtMvShort:
 		return pullMV(p, func(p *Pull) (int16, error) { v, err := p.Uint16(); return int16(v), err })

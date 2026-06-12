@@ -139,6 +139,39 @@ func (p *Pull) ProblemArray() ([]mapi.PropertyProblem, error) {
 	return out, nil
 }
 
+// Uint64ArrayShort writes a 16-bit-counted array of 64-bit integers
+// (p_uint64_sa). This is a deliberate exception to the 32-bit multivalue count
+// rule, used where the protocol mandates a 16-bit count for a longlong array.
+func (p *Push) Uint64ArrayShort(vs []uint64) error {
+	if len(vs) > 0xFFFF {
+		return ErrFormat
+	}
+	p.Uint16(uint16(len(vs)))
+	for _, v := range vs {
+		p.Uint64(v)
+	}
+	return nil
+}
+
+// Uint64ArrayShort reads a 16-bit-counted array of 64-bit integers, the inverse
+// of Uint64ArrayShort.
+func (p *Pull) Uint64ArrayShort() ([]uint64, error) {
+	n, err := p.Uint16()
+	if err != nil {
+		return nil, err
+	}
+	if n == 0 {
+		return nil, nil
+	}
+	out := make([]uint64, n)
+	for i := range out {
+		if out[i], err = p.Uint64(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
 // EIDs writes an EID_ARRAY: a uint32 count followed by each 64-bit entry id
 // (p_eid_a, the wide-count form).
 func (p *Push) EIDs(ids []mapi.EID) error {
