@@ -28,6 +28,21 @@ type FolderEntryID struct {
 	Pad1         [2]byte
 }
 
+// StoreEntryID is a wrapped store entry id (MS-OXCDATA §2.2.4.3). The outer
+// wrapper uid is always MuidStoreWrap; the wrapped provider uid selects a
+// private (MuidStorePrivate) or public (MuidStorePublic) store. ServerName and
+// MailboxDN are NUL-terminated 8-bit strings on the wire.
+type StoreEntryID struct {
+	Flags              uint32
+	Version            uint8
+	IVFlag             uint8
+	WrappedFlags       uint32
+	WrappedProviderUID FlatUID
+	WrappedType        uint32
+	ServerName         string
+	MailboxDN          string
+}
+
 // MessageEntryID identifies a message (MS-OXCDATA §2.2.4.2). It carries the
 // folder entry-id fields inline and appends the message's database GUID and
 // global counter.

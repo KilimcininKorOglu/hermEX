@@ -127,6 +127,83 @@ func (p *Pull) FolderEntryID() (mapi.FolderEntryID, error) {
 	return f, nil
 }
 
+// --- STORE_ENTRYID (wrapped) ---
+
+// wrappedProviderDLL is the 14-byte provider DLL name MS-OXCDATA §2.2.4.3
+// embeds in a wrapped store entry id: the literal "emsmdb.dll" plus its NUL
+// terminator, zero-padded to 14 bytes. It is a Microsoft wire constant that
+// clients expect verbatim, not an internal module name.
+var wrappedProviderDLL = [14]byte{'e', 'm', 's', 'm', 'd', 'b', '.', 'd', 'l', 'l'}
+
+// StoreEntryID writes a wrapped store entry id (p_store_eid). It always emits
+// the full inline-flag form: the wrapper uid is forced to MuidStoreWrap and the
+// provider DLL name is the fixed wire constant, regardless of s.IVFlag.
+func (p *Push) StoreEntryID(s mapi.StoreEntryID) {
+	p.Uint32(s.Flags)
+	p.FlatUID(mapi.MuidStoreWrap)
+	p.Uint8(s.Version)
+	p.Uint8(s.IVFlag)
+	p.Raw(wrappedProviderDLL[:])
+	p.Uint32(s.WrappedFlags)
+	p.FlatUID(s.WrappedProviderUID)
+	p.Uint32(s.WrappedType)
+	p.String8(s.ServerName)
+	p.String8(s.MailboxDN)
+}
+
+// StoreEntryID reads a wrapped store entry id (g_store_eid). It validates the
+// wrapper uid and version, then branches on the inline flag: 0 carries the DLL
+// name plus the full wrapped record; 1 carries only the wrapped provider uid
+// with the remaining fields defaulted. Any other value is malformed.
+func (p *Pull) StoreEntryID() (mapi.StoreEntryID, error) {
+	var s mapi.StoreEntryID
+	var err error
+	if s.Flags, err = p.Uint32(); err != nil {
+		return s, err
+	}
+	wrap, err := p.FlatUID()
+	if err != nil {
+		return s, err
+	}
+	if wrap != mapi.MuidStoreWrap {
+		return s, ErrFormat
+	}
+	if s.Version, err = p.Uint8(); err != nil {
+		return s, err
+	}
+	if s.Version != 0 {
+		return s, ErrFormat
+	}
+	if s.IVFlag, err = p.Uint8(); err != nil {
+		return s, err
+	}
+	switch s.IVFlag {
+	case 0:
+		if _, err = p.Raw(14); err != nil { // DLL name, not retained
+			return s, err
+		}
+		if s.WrappedFlags, err = p.Uint32(); err != nil {
+			return s, err
+		}
+		if s.WrappedProviderUID, err = p.FlatUID(); err != nil {
+			return s, err
+		}
+		if s.WrappedType, err = p.Uint32(); err != nil {
+			return s, err
+		}
+		if s.ServerName, err = p.String8(); err != nil {
+			return s, err
+		}
+		s.MailboxDN, err = p.String8()
+		return s, err
+	case 1:
+		s.WrappedProviderUID, err = p.FlatUID()
+		return s, err
+	default:
+		return s, ErrFormat
+	}
+}
+
 // MessageEntryID writes a 70-byte message entry id (p_msg_eid).
 func (p *Push) MessageEntryID(m mapi.MessageEntryID) {
 	p.Uint32(m.Flags)

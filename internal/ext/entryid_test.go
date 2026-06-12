@@ -115,6 +115,72 @@ func TestFolderEntryIDVector(t *testing.T) {
 	}
 }
 
+func TestStoreEntryIDRoundTrip(t *testing.T) {
+	s := mapi.StoreEntryID{
+		Flags:              0,
+		Version:            0,
+		IVFlag:             0,
+		WrappedFlags:       0,
+		WrappedProviderUID: mapi.MuidStorePrivate,
+		WrappedType:        0x0000000C,
+		ServerName:         "mail.example.org",
+		MailboxDN:          "/o=hermex/cn=user",
+	}
+	p := NewPush(0)
+	p.StoreEntryID(s)
+	b := p.Bytes()
+
+	// The wrapper uid sits right after the 4-byte flags, and the fixed provider
+	// DLL name follows version+ivflag at offset 22.
+	if got := b[4:20]; !bytes.Equal(got, mapi.MuidStoreWrap[:]) {
+		t.Fatalf("wrapper uid = % X, want MuidStoreWrap", got)
+	}
+	dll := []byte{'e', 'm', 's', 'm', 'd', 'b', '.', 'd', 'l', 'l', 0, 0, 0, 0}
+	if got := b[22:36]; !bytes.Equal(got, dll) {
+		t.Fatalf("provider DLL = % X, want % X", got, dll)
+	}
+
+	got, err := NewPull(b, 0).StoreEntryID()
+	if err != nil {
+		t.Fatalf("pull StoreEntryID: %v", err)
+	}
+	if got != s {
+		t.Fatalf("round-trip = %+v, want %+v", got, s)
+	}
+}
+
+func TestStoreEntryIDWrapValidation(t *testing.T) {
+	p := NewPush(0)
+	p.StoreEntryID(mapi.StoreEntryID{WrappedProviderUID: mapi.MuidStorePublic})
+	b := p.Bytes()
+	b[4] ^= 0xFF // corrupt the first wrapper-uid byte
+	if _, err := NewPull(b, 0).StoreEntryID(); !errors.Is(err, ErrFormat) {
+		t.Fatalf("corrupt wrap err = %v, want ErrFormat", err)
+	}
+}
+
+func TestStoreEntryIDIVFlag1(t *testing.T) {
+	// Hand-build the short inline-flag-1 form: flags, wrap uid, version 0,
+	// ivflag 1, then only the wrapped provider uid.
+	p := NewPush(0)
+	p.Uint32(0)
+	p.FlatUID(mapi.MuidStoreWrap)
+	p.Uint8(0)
+	p.Uint8(1)
+	p.FlatUID(mapi.MuidStorePrivate)
+
+	got, err := NewPull(p.Bytes(), 0).StoreEntryID()
+	if err != nil {
+		t.Fatalf("pull ivflag=1: %v", err)
+	}
+	if got.IVFlag != 1 || got.WrappedProviderUID != mapi.MuidStorePrivate {
+		t.Fatalf("ivflag=1 parse = %+v", got)
+	}
+	if got.ServerName != "" || got.MailboxDN != "" {
+		t.Fatalf("ivflag=1 names should be empty, got %q/%q", got.ServerName, got.MailboxDN)
+	}
+}
+
 func TestMessageEntryIDRoundTrip(t *testing.T) {
 	m := mapi.MessageEntryID{
 		Flags:         0x01020304,
