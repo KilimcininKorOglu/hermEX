@@ -7,12 +7,29 @@ import (
 	"path/filepath"
 
 	"github.com/klauspost/compress/zstd"
+
+	"hermex/internal/mapi"
 )
 
 // Large property values (message bodies, HTML, attachment data) are not stored
 // inline; they live in content files under <mailbox>/cid/, addressed by the
 // SHA3-256 of their uncompressed bytes and stored zstd-compressed. Identical
 // content is written once (dedup).
+
+// isCIDProp reports whether a property value is offloaded to a content file
+// rather than stored inline in the property tables: message bodies (plain,
+// HTML, RTF), the captured transport headers, and attachment payloads.
+func isCIDProp(tag mapi.PropTag) bool {
+	switch tag {
+	case mapi.PrBody, mapi.PrBodyA,
+		mapi.PrHTML, mapi.PrRTFCompressed,
+		mapi.PrTransportMessageHeaders, mapi.PrTransportMessageHeadersA,
+		mapi.PrAttachDataBin, mapi.PrAttachDataObj:
+		return true
+	default:
+		return false
+	}
+}
 
 // cidEncoder/cidDecoder are stateless and safe for concurrent EncodeAll/DecodeAll.
 var (
