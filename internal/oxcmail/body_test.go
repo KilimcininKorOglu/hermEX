@@ -186,6 +186,94 @@ func TestExportMixedRoundTrip(t *testing.T) {
 	}
 }
 
+// relatedVector is a multipart/related message: an HTML body that references an
+// inline image by Content-ID.
+var relatedVector = []byte("From: a@b.com\r\n" +
+	"Subject: Inline\r\n" +
+	"MIME-Version: 1.0\r\n" +
+	"Content-Type: multipart/related; boundary=\"RR\"\r\n" +
+	"\r\n" +
+	"--RR\r\n" +
+	"Content-Type: text/html; charset=utf-8\r\n" +
+	"\r\n" +
+	"<img src=\"cid:img1\">\r\n" +
+	"--RR\r\n" +
+	"Content-Type: image/png\r\n" +
+	"Content-ID: <img1>\r\n" +
+	"Content-Disposition: inline\r\n" +
+	"Content-Transfer-Encoding: base64\r\n" +
+	"\r\n" +
+	"iVBORw0KGgo=\r\n" +
+	"--RR--\r\n")
+
+// TestImportRelatedInline checks that a multipart/related message yields an HTML
+// body and an inline image attachment flagged ATT_MHTML_REF with its Content-ID.
+func TestImportRelatedInline(t *testing.T) {
+	msg, err := Import(relatedVector, Options{})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if _, ok := bytesProp(msg.Props, mapi.PrHTML); !ok {
+		t.Error("PR_HTML missing")
+	}
+	if len(msg.Attachments) != 1 {
+		t.Fatalf("attachments = %d, want 1", len(msg.Attachments))
+	}
+	att := msg.Attachments[0]
+	if got := propString(att.Props, mapi.PrAttachContentID); got != "img1" {
+		t.Errorf("PR_ATTACH_CONTENT_ID = %q, want img1", got)
+	}
+	if got := propString(att.Props, mapi.PrAttachMimeTag); got != "image/png" {
+		t.Errorf("PR_ATTACH_MIME_TAG = %q", got)
+	}
+	if flags, _ := propInt32(att.Props, mapi.PrAttachFlags); flags&mapi.AttMhtmlRef == 0 {
+		t.Errorf("PR_ATTACH_FLAGS = %d, want ATT_MHTML_REF set", flags)
+	}
+}
+
+// TestExportRelatedRoundTrip checks that an inline image exports to a
+// multipart/related (HTML + image) and re-imports to the same inline attachment.
+func TestExportRelatedRoundTrip(t *testing.T) {
+	msg1, err := Import(relatedVector, Options{})
+	if err != nil {
+		t.Fatalf("Import 1: %v", err)
+	}
+	wire, err := Export(msg1, Options{})
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+
+	tree := mime.ParseStructure(wire)
+	if tree.Type != "multipart" || tree.Subtype != "related" {
+		t.Fatalf("exported top-level = %s/%s, want multipart/related", tree.Type, tree.Subtype)
+	}
+	if len(tree.Children) != 2 {
+		t.Fatalf("exported parts = %d, want 2 (html + image)", len(tree.Children))
+	}
+
+	msg2, err := Import(wire, Options{})
+	if err != nil {
+		t.Fatalf("Import 2: %v", err)
+	}
+	if len(msg2.Attachments) != 1 {
+		t.Fatalf("re-imported attachments = %d, want 1", len(msg2.Attachments))
+	}
+	if propString(msg1.Attachments[0].Props, mapi.PrAttachContentID) !=
+		propString(msg2.Attachments[0].Props, mapi.PrAttachContentID) {
+		t.Errorf("Content-ID drifted")
+	}
+	f1, _ := propInt32(msg1.Attachments[0].Props, mapi.PrAttachFlags)
+	f2, _ := propInt32(msg2.Attachments[0].Props, mapi.PrAttachFlags)
+	if f1 != f2 {
+		t.Errorf("attachment flags drifted: %d -> %d", f1, f2)
+	}
+	d1, _ := bytesProp(msg1.Attachments[0].Props, mapi.PrAttachDataBin)
+	d2, _ := bytesProp(msg2.Attachments[0].Props, mapi.PrAttachDataBin)
+	if !bytes.Equal(d1, d2) {
+		t.Errorf("inline image data drifted")
+	}
+}
+
 // TestExportHTMLOnly checks a message with only an HTML body: import records
 // PR_HTML, export emits a single text/html body, and the HTML survives.
 func TestExportHTMLOnly(t *testing.T) {
