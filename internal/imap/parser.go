@@ -52,6 +52,31 @@ func (t token) str() (string, bool) {
 	return "", false
 }
 
+// tokenCursor walks a lexed token slice during per-command argument parsing.
+type tokenCursor struct {
+	toks []token
+	i    int
+}
+
+func (c *tokenCursor) empty() bool { return c.i >= len(c.toks) }
+
+// peek returns the current token without advancing.
+func (c *tokenCursor) peek() (token, bool) {
+	if c.empty() {
+		return token{}, false
+	}
+	return c.toks[c.i], true
+}
+
+// next returns the current token and advances past it.
+func (c *tokenCursor) next() (token, bool) {
+	t, ok := c.peek()
+	if ok {
+		c.i++
+	}
+	return t, ok
+}
+
 // commandReader lexes whole IMAP command lines off a connection, resolving
 // literals inline (issuing a continuation request for synchronizing literals).
 type commandReader struct {
