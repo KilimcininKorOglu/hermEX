@@ -19,6 +19,7 @@ type Config struct {
 	Hostname    string `json:"hostname"`     // announced in protocol greetings
 	SMTPAddr    string `json:"smtp_addr"`    // MTA listen address (default ":25")
 	POP3Addr    string `json:"pop3_addr"`    // POP3 listen address (default ":110")
+	IMAPAddr    string `json:"imap_addr"`    // IMAP listen address (default ":143")
 }
 
 // Load reads and validates a JSON config file.
