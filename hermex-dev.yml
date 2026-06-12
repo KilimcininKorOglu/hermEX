@@ -1,7 +1,8 @@
 name: hermex
 
-# Development environment for hermEX. No host ports are published yet; service
-# ports (from the reserved 8140-8149 block) are added as daemons land.
+# Development environment for hermEX. The dev container holds the Go toolchain;
+# a MariaDB service backs the directory (account/domain) integration tests. No
+# host ports are published here — service ports (8140-8149) live in the stack.
 services:
   dev:
     container_name: hermex-dev
@@ -16,8 +17,27 @@ services:
       - ./docker-data:/data
     environment:
       - HERMEX_DATA_DIR=/data
+      - HERMEX_TEST_MYSQL_DSN=root:hermexdev@tcp(db:3306)/email?charset=utf8mb4
+    depends_on:
+      db:
+        condition: service_healthy
     command: sleep infinity
+
+  db:
+    container_name: hermex-dev-db
+    image: mariadb:11
+    environment:
+      - MARIADB_ROOT_PASSWORD=hermexdev
+      - MARIADB_DATABASE=email
+    volumes:
+      - hermex-mariadb:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
 volumes:
   hermex-go-build:
   hermex-go-mod:
+  hermex-mariadb:
