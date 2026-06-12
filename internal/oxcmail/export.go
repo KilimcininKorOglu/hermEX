@@ -32,23 +32,45 @@ func Export(msg *Message, opt Options) ([]byte, error) {
 	var b bytes.Buffer
 	writeMailHead(&b, msg)
 
-	bodyHdr, bodyBytes := renderBody(msg)
-	if len(msg.Attachments) == 0 {
-		writeHeaderFields(&b, bodyHdr)
+	// Separate inline (HTML-referenced) attachments from regular ones: inline
+	// images join the HTML body in a multipart/related, regular attachments wrap
+	// everything in a multipart/mixed.
+	var inline, regular []Attachment
+	for _, att := range msg.Attachments {
+		if isInlineAttachment(att) {
+			inline = append(inline, att)
+		} else {
+			regular = append(regular, att)
+		}
+	}
+
+	// The innermost unit is the body, wrapped in multipart/related when it has
+	// inline images.
+	innerHdr, innerBytes := renderBody(msg)
+	if len(inline) > 0 {
+		var err error
+		innerHdr, innerBytes, err = renderRelated(innerHdr, innerBytes, inline)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	if len(regular) == 0 {
+		writeHeaderFields(&b, innerHdr)
 		b.WriteString("\r\n")
-		b.Write(bodyBytes)
+		b.Write(innerBytes)
 		return b.Bytes(), nil
 	}
 
-	// With attachments, wrap the body and the attachments in multipart/mixed.
+	// Regular attachments wrap the inner unit in multipart/mixed.
 	var parts bytes.Buffer
 	mw := multipart.NewWriter(&parts)
-	bw, err := mw.CreatePart(bodyHdr)
+	iw, err := mw.CreatePart(innerHdr)
 	if err != nil {
 		return nil, err
 	}
-	bw.Write(bodyBytes)
-	for _, att := range msg.Attachments {
+	iw.Write(innerBytes)
+	for _, att := range regular {
 		ah, adata := renderAttachment(att)
 		aw, err := mw.CreatePart(ah)
 		if err != nil {
@@ -63,6 +85,39 @@ func Export(msg *Message, opt Options) ([]byte, error) {
 	b.WriteString("\r\n")
 	b.Write(parts.Bytes())
 	return b.Bytes(), nil
+}
+
+// renderRelated wraps the body part and the inline attachments in a
+// multipart/related part (HTML body with its referenced images).
+func renderRelated(bodyHdr textproto.MIMEHeader, bodyBytes []byte, inline []Attachment) (textproto.MIMEHeader, []byte, error) {
+	var parts bytes.Buffer
+	mw := multipart.NewWriter(&parts)
+	bw, err := mw.CreatePart(bodyHdr)
+	if err != nil {
+		return nil, nil, err
+	}
+	bw.Write(bodyBytes)
+	for _, att := range inline {
+		ah, adata := renderAttachment(att)
+		aw, err := mw.CreatePart(ah)
+		if err != nil {
+			return nil, nil, err
+		}
+		aw.Write(adata)
+	}
+	if err := mw.Close(); err != nil {
+		return nil, nil, err
+	}
+	h := textproto.MIMEHeader{}
+	h.Set("Content-Type", "multipart/related; boundary=\""+mw.Boundary()+"\"")
+	return h, parts.Bytes(), nil
+}
+
+// isInlineAttachment reports whether an attachment is an HTML-referenced inline
+// image (PR_ATTACH_FLAGS carries ATT_MHTML_REF).
+func isInlineAttachment(att Attachment) bool {
+	flags, _ := propInt32(att.Props, mapi.PrAttachFlags)
+	return flags&mapi.AttMhtmlRef != 0
 }
 
 // renderBody renders the message body as a MIME part: its header fields and its
