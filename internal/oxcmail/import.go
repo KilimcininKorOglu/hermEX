@@ -54,7 +54,7 @@ func Import(raw []byte, opt Options) (*Message, error) {
 	}
 	msg.Props.Set(mapi.PrCreationTime, stamp)
 
-	parseBody(root, msg)
+	parseContent(root, msg, stamp)
 	return msg, nil
 }
 
@@ -342,11 +342,12 @@ type bodyParts struct {
 	enriched *mime.Part
 }
 
-// parseBody selects the message's body parts and fills the body properties:
-// PR_BODY from the plain part (charset-decoded to UTF-8) and PR_HTML +
-// PR_INTERNET_CPID from a single HTML part (stored as raw bytes in its original
-// charset). Multiple-HTML joining, enriched, and calendar bodies are deferred.
-func parseBody(root *mime.Part, msg *Message) {
+// parseContent selects the message's body parts and attachments. It fills the
+// body properties — PR_BODY from the plain part (charset-decoded to UTF-8) and
+// PR_HTML + PR_INTERNET_CPID from a single HTML part (raw bytes in its original
+// charset) — then turns every non-body leaf part into an attachment.
+// Multiple-HTML joining, enriched, and calendar bodies are deferred.
+func parseContent(root *mime.Part, msg *Message, stamp uint64) {
 	var bp bodyParts
 	selectParts(root, &bp, 0)
 	if bp.plain != nil {
@@ -357,6 +358,92 @@ func parseBody(root *mime.Part, msg *Message) {
 	if len(bp.htmls) == 1 {
 		setHTMLBody(msg, bp.htmls[0])
 	}
+
+	bodySet := map[*mime.Part]bool{}
+	if bp.plain != nil {
+		bodySet[bp.plain] = true
+	}
+	for _, h := range bp.htmls {
+		bodySet[h] = true
+	}
+	if bp.enriched != nil {
+		bodySet[bp.enriched] = true
+	}
+	walkAttachments(root, bodySet, msg, stamp)
+}
+
+// walkAttachments turns every non-body leaf part into an attachment, mirroring
+// the MS-OXCMAIL attachment enumeration: multipart containers are descended into
+// (not themselves attachments), and the parts chosen for the body are skipped.
+func walkAttachments(part *mime.Part, bodySet map[*mime.Part]bool, msg *Message, stamp uint64) {
+	if len(part.Children) > 0 {
+		for _, child := range part.Children {
+			walkAttachments(child, bodySet, msg, stamp)
+		}
+		return
+	}
+	if bodySet[part] {
+		return
+	}
+	msg.Attachments = append(msg.Attachments, buildAttachment(part, stamp))
+}
+
+// buildAttachment constructs one attachment property bag from a leaf MIME part,
+// mirroring the MS-OXCMAIL attachment property set for a by-value attachment:
+// MIME type, filename, optional display name / content id, timestamps, the
+// inline flag for referenced images, the method, and the decoded data.
+func buildAttachment(part *mime.Part, stamp uint64) Attachment {
+	var a Attachment
+	cttype := strings.ToLower(part.Type + "/" + part.Subtype)
+	a.Props.Set(mapi.PrAttachMimeTag, cttype)
+
+	filename := part.Filename()
+	if filename == "" {
+		filename = "attachment" + attachmentExtension(cttype)
+	}
+	a.Props.Set(mapi.PrAttachLongFilename, filename)
+	if ext := filenameExtension(filename); ext != "" {
+		a.Props.Set(mapi.PrAttachExtension, ext)
+	}
+
+	if desc := decodeHeaderWord(part.Description); desc != "" {
+		a.Props.Set(mapi.PrDisplayName, desc)
+	}
+
+	inline := part.Disposition == "inline"
+	if cid := strings.Trim(part.ID, "<>"); cid != "" {
+		a.Props.Set(mapi.PrAttachContentID, cid)
+	}
+	// An inline image referenced by the HTML body is flagged.
+	if inline && part.Type == "image" {
+		a.Props.Set(mapi.PrAttachFlags, int32(mapi.AttMhtmlRef))
+	}
+
+	a.Props.Set(mapi.PrCreationTime, stamp)
+	a.Props.Set(mapi.PrLastModificationTime, stamp)
+	a.Props.Set(mapi.PrAttachMethod, int32(mapi.AttachByValue))
+	if data, err := part.DecodedContent(); err == nil {
+		a.Props.Set(mapi.PrAttachDataBin, data)
+	}
+	return a
+}
+
+// filenameExtension returns the dotted extension of a filename (".pdf"), or ""
+// when there is none within the last 16 characters.
+func filenameExtension(name string) string {
+	if i := strings.LastIndexByte(name, '.'); i >= 0 && len(name)-i < 16 {
+		return name[i:]
+	}
+	return ""
+}
+
+// attachmentExtension proposes a dotted extension for a generated filename from
+// the MIME type, defaulting to ".dat".
+func attachmentExtension(cttype string) string {
+	if exts, err := stdmime.ExtensionsByType(cttype); err == nil && len(exts) > 0 {
+		return exts[0]
+	}
+	return ".dat"
 }
 
 // selectParts walks the MIME tree and selects the parts used for the body,
