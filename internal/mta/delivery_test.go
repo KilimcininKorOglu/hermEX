@@ -17,7 +17,7 @@ import (
 // byte-faithfully, and an unknown recipient must be refused.
 func TestSMTPToStoreDelivery(t *testing.T) {
 	mboxPath := filepath.Join(t.TempDir(), "alice.sqlite3")
-	accounts := directory.StaticAccounts{"alice@test": mboxPath}
+	accounts := directory.StaticAccounts{"alice@test": {MailboxPath: mboxPath}}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
