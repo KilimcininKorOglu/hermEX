@@ -108,6 +108,17 @@ func (r *commandReader) readCommand() ([]token, error) {
 	}
 }
 
+// readLine reads one raw CRLF-terminated line and returns it without the
+// terminator. It is used for SASL continuation data (a bare base64 line), which
+// is not tokenized as a command.
+func (r *commandReader) readLine() (string, error) {
+	line, err := r.br.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(line, "\r\n"), nil
+}
+
 // expectLF consumes the LF following a CR.
 func (r *commandReader) expectLF() error {
 	b, err := r.br.ReadByte()
