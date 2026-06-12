@@ -133,6 +133,28 @@ const (
 	RecipientSendable = 0x1 // recipSendable
 )
 
+// Attachment property tags (one bag per attachment in the attachment table).
+// PR_ATTACH_DATA_BIN lives in the content-offload block above.
+const (
+	PrAttachLongFilename = PropTag(0x3707001F) // PtUnicode
+	PrAttachFilename     = PropTag(0x3704001F) // PtUnicode (8.3 form)
+	PrAttachExtension    = PropTag(0x3703001F) // PtUnicode
+	PrAttachMimeTag      = PropTag(0x370E001F) // PtUnicode
+	PrAttachContentID    = PropTag(0x3712001F) // PtUnicode
+	PrAttachMethod       = PropTag(0x37050003) // PtLong
+	PrAttachFlags        = PropTag(0x37140003) // PtLong
+	PrRenderingPosition  = PropTag(0x370B0003) // PtLong
+	PrAttachNum          = PropTag(0x0E210003) // PtLong (store-assigned)
+)
+
+// Attachment method (PR_ATTACH_METHOD) and flag (PR_ATTACH_FLAGS) values.
+const (
+	AttachNone        = 0    // afNone
+	AttachByValue     = 1    // afByValue
+	AttachEmbeddedMsg = 5    // afEmbeddedMessage
+	AttMhtmlRef       = 0x04 // attachment referenced by the HTML body (inline)
+)
+
 // Common container classes for default folders (PR_CONTAINER_CLASS values).
 const (
 	ContainerClassNote        = "IPF.Note"        // mail folders

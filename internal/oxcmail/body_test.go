@@ -98,6 +98,94 @@ func TestExportAlternativeRoundTrip(t *testing.T) {
 	}
 }
 
+// mixedVector is a multipart/mixed message with a plain body and one attachment.
+var mixedVector = []byte("From: a@b.com\r\n" +
+	"Subject: WithAttach\r\n" +
+	"MIME-Version: 1.0\r\n" +
+	"Content-Type: multipart/mixed; boundary=\"MM\"\r\n" +
+	"\r\n" +
+	"--MM\r\n" +
+	"Content-Type: text/plain; charset=utf-8\r\n" +
+	"\r\n" +
+	"see attached\r\n" +
+	"--MM\r\n" +
+	"Content-Type: text/plain; name=\"note.txt\"\r\n" +
+	"Content-Disposition: attachment; filename=\"note.txt\"\r\n" +
+	"\r\n" +
+	"attachment content\r\n" +
+	"--MM--\r\n")
+
+// TestImportMixedAttachment checks that a multipart/mixed message yields a plain
+// body and one by-value attachment with its MIME type, filename, and data.
+func TestImportMixedAttachment(t *testing.T) {
+	msg, err := Import(mixedVector, Options{})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if got := propString(msg.Props, mapi.PrBody); !bytes.Contains([]byte(got), []byte("see attached")) {
+		t.Errorf("PR_BODY = %q, want it to contain the body", got)
+	}
+	if len(msg.Attachments) != 1 {
+		t.Fatalf("attachments = %d, want 1", len(msg.Attachments))
+	}
+	att := msg.Attachments[0]
+	if got := propString(att.Props, mapi.PrAttachMimeTag); got != "text/plain" {
+		t.Errorf("PR_ATTACH_MIME_TAG = %q", got)
+	}
+	if got := propString(att.Props, mapi.PrAttachLongFilename); got != "note.txt" {
+		t.Errorf("PR_ATTACH_LONG_FILENAME = %q", got)
+	}
+	if v, _ := propInt32(att.Props, mapi.PrAttachMethod); v != mapi.AttachByValue {
+		t.Errorf("PR_ATTACH_METHOD = %d, want ATTACH_BY_VALUE", v)
+	}
+	data, ok := bytesProp(att.Props, mapi.PrAttachDataBin)
+	if !ok || !bytes.Contains(data, []byte("attachment content")) {
+		t.Errorf("PR_ATTACH_DATA_BIN = %q", data)
+	}
+}
+
+// TestExportMixedRoundTrip checks that a message with an attachment exports to a
+// well-formed multipart/mixed (body part + attachment part) and re-imports to
+// the same body and attachment data.
+func TestExportMixedRoundTrip(t *testing.T) {
+	msg1, err := Import(mixedVector, Options{})
+	if err != nil {
+		t.Fatalf("Import 1: %v", err)
+	}
+	wire, err := Export(msg1, Options{})
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+
+	tree := mime.ParseStructure(wire)
+	if tree.Type != "multipart" || tree.Subtype != "mixed" {
+		t.Fatalf("exported top-level = %s/%s, want multipart/mixed", tree.Type, tree.Subtype)
+	}
+	if len(tree.Children) != 2 {
+		t.Fatalf("exported parts = %d, want 2 (body + attachment)", len(tree.Children))
+	}
+
+	msg2, err := Import(wire, Options{})
+	if err != nil {
+		t.Fatalf("Import 2: %v", err)
+	}
+	if propString(msg1.Props, mapi.PrBody) != propString(msg2.Props, mapi.PrBody) {
+		t.Errorf("PR_BODY drifted")
+	}
+	if len(msg2.Attachments) != 1 {
+		t.Fatalf("re-imported attachments = %d, want 1", len(msg2.Attachments))
+	}
+	d1, _ := bytesProp(msg1.Attachments[0].Props, mapi.PrAttachDataBin)
+	d2, _ := bytesProp(msg2.Attachments[0].Props, mapi.PrAttachDataBin)
+	if !bytes.Equal(d1, d2) {
+		t.Errorf("attachment data drifted: %q -> %q", d1, d2)
+	}
+	if propString(msg1.Attachments[0].Props, mapi.PrAttachLongFilename) !=
+		propString(msg2.Attachments[0].Props, mapi.PrAttachLongFilename) {
+		t.Errorf("attachment filename drifted")
+	}
+}
+
 // TestExportHTMLOnly checks a message with only an HTML body: import records
 // PR_HTML, export emits a single text/html body, and the HTML survives.
 func TestExportHTMLOnly(t *testing.T) {
