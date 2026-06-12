@@ -63,6 +63,24 @@ func (s *session) Data(r io.Reader) error {
 func (s *session) Reset()        { s.from = ""; s.targets = nil }
 func (s *session) Logout() error { return nil }
 
+// Deliver resolves each recipient address to its local mailbox and appends the
+// raw message to that mailbox's INBOX. Addresses with no local mailbox are
+// returned as unresolved (there is no outbound relay yet), so callers can
+// report partial delivery rather than silently dropping them.
+func Deliver(accounts directory.Accounts, recipients []string, raw []byte, received time.Time) (unresolved []string, err error) {
+	for _, rcpt := range recipients {
+		path, ok := accounts.Resolve(rcpt)
+		if !ok {
+			unresolved = append(unresolved, rcpt)
+			continue
+		}
+		if err := deliver(path, raw, received); err != nil {
+			return unresolved, err
+		}
+	}
+	return unresolved, nil
+}
+
 // deliver appends a raw message to the INBOX of the mailbox at path, creating
 // the INBOX on first delivery.
 //
