@@ -2,13 +2,21 @@
 <div class="reader">
   <div class="reader-toolbar"><a href="/mail?folder=INBOX">&larr; Back to mailbox</a></div>
   <div class="compose-card">
-    <h2>New message</h2>
+    <h2>{{if .Title}}{{.Title}}{{else}}New message{{end}}</h2>
     {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
     {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
     <form method="post" action="/compose">
+      <input type="hidden" name="inreplyto" value="{{.InReplyTo}}">
+      <input type="hidden" name="references" value="{{.References}}">
+      <input type="hidden" name="attachfolder" value="{{.AttachFolder}}">
+      <input type="hidden" name="attachuid" value="{{.AttachUID}}">
       <div class="field">
         <label>To</label>
         <input name="to" value="{{.To}}" placeholder="user@example.com, other@example.com" autofocus>
+      </div>
+      <div class="field">
+        <label>Cc</label>
+        <input name="cc" value="{{.Cc}}" placeholder="cc@example.com">
       </div>
       <div class="field">
         <label>Subject</label>
@@ -16,7 +24,7 @@
       </div>
       <div class="field">
         <label>Message</label>
-        <textarea name="body" rows="12">{{.Body}}</textarea>
+        <textarea name="body" rows="14">{{.Body}}</textarea>
       </div>
       <button class="primary" type="submit">Send</button>
     </form>
