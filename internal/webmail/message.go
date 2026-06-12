@@ -183,18 +183,8 @@ func formatAddrs(addrs []mime.Address) string {
 	return strings.Join(parts, ", ")
 }
 
-// toUTF8 converts a decoded body to a UTF-8 string per its charset. UTF-8 and
-// US-ASCII pass through; Latin-1 family bytes map to runes; unknown charsets
-// are treated as UTF-8 on a best-effort basis.
+// toUTF8 converts a decoded body to a UTF-8 string per its charset, delegating
+// to the shared MIME charset converter.
 func toUTF8(b []byte, charset string) string {
-	switch strings.ToLower(strings.TrimSpace(charset)) {
-	case "iso-8859-1", "latin1", "iso8859-1", "windows-1252", "cp1252":
-		runes := make([]rune, len(b))
-		for i, c := range b {
-			runes[i] = rune(c)
-		}
-		return string(runes)
-	default:
-		return string(b)
-	}
+	return mime.DecodeCharset(b, charset)
 }
