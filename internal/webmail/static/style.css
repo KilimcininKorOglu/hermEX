@@ -98,3 +98,35 @@ table.messages tr.unread td.subject { font-weight: 600; }
 td.from { width: 220px; color: var(--text); }
 td.date { width: 150px; color: var(--muted); white-space: nowrap; }
 .empty { padding: 40px 20px; color: var(--muted); }
+.muted { color: var(--muted); }
+
+/* Reader */
+.reader { max-width: 900px; margin: 0 auto; padding: 20px; }
+.reader-toolbar { margin-bottom: 16px; }
+.reader-headers {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px 20px;
+  margin-bottom: 16px;
+}
+.reader-headers h2 { margin: 0 0 12px; font-size: 18px; }
+.hrow { margin: 2px 0; }
+.hlabel { display: inline-block; width: 48px; color: var(--muted); }
+.attachments {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 20px;
+  margin-bottom: 16px;
+}
+.attachments ul { margin: 8px 0 0; padding-left: 20px; }
+.attachments li { margin: 4px 0; }
+.reader-body {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+}
+.plainbody { white-space: pre-wrap; word-wrap: break-word; margin: 0; font-family: inherit; }
+.htmlbody { width: 100%; min-height: 480px; border: 0; }
