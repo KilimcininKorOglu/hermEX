@@ -138,6 +138,18 @@ func (c *conn) dispatch(toks []token) {
 		c.ok(tag, "CHECK completed")
 	case "FETCH":
 		c.cmdFetch(tag, args, false)
+	case "STORE":
+		c.cmdStore(tag, args, false)
+	case "SEARCH":
+		c.cmdSearch(tag, args, false)
+	case "COPY":
+		c.cmdCopy(tag, args, false)
+	case "APPEND":
+		c.cmdAppend(tag, args)
+	case "EXPUNGE":
+		c.cmdExpunge(tag)
+	case "CLOSE":
+		c.cmdClose(tag)
 	case "UID":
 		c.cmdUID(tag, args)
 	default:

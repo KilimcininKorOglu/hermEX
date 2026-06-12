@@ -120,14 +120,33 @@ func (c *testClient) expectUntagged(word, what string) string {
 func (c *testClient) do(tag, cmd string) (untagged []string, status string) {
 	c.t.Helper()
 	fmt.Fprintf(c.conn, "%s %s\r\n", tag, cmd)
+	return c.collect(tag)
+}
+
+// collect reads untagged responses until the tagged completion for tag,
+// returning the untagged lines and the tagged status word.
+func (c *testClient) collect(tag string) (untagged []string, status string) {
+	c.t.Helper()
 	for {
 		l := c.line()
 		if strings.HasPrefix(l, tag+" ") {
-			fields := strings.Fields(l)
-			return untagged, fields[1]
+			return untagged, strings.Fields(l)[1]
 		}
 		untagged = append(untagged, l)
 	}
+}
+
+// appendMsg performs an APPEND with a synchronizing literal, exercising the
+// continuation handshake, and returns the tagged status.
+func (c *testClient) appendMsg(tag, mailbox, msg string) string {
+	c.t.Helper()
+	fmt.Fprintf(c.conn, "%s APPEND %s {%d}\r\n", tag, mailbox, len(msg))
+	if cont := c.line(); !strings.HasPrefix(cont, "+") {
+		c.t.Fatalf("APPEND continuation = %q, want +", cont)
+	}
+	fmt.Fprintf(c.conn, "%s\r\n", msg)
+	_, status := c.collect(tag)
+	return status
 }
 
 func (c *testClient) mustOK(tag, cmd string) []string {
@@ -256,6 +275,87 @@ func TestIMAPFetchSeenSemantics(t *testing.T) {
 	}
 	if un := c.mustOK("a6", "FETCH 1 FLAGS"); !containsSubstr(un, `\Seen`) {
 		t.Errorf("\\Seen not persisted: %v", un)
+	}
+}
+
+func TestIMAPStoreAndSearch(t *testing.T) {
+	c, _ := startServer(t)
+	c.mustOK("a1", "LOGIN alice secret")
+	c.mustOK("a2", "SELECT INBOX")
+
+	// STORE reports the new flags as an untagged FETCH.
+	if un := c.mustOK("a3", `STORE 1 +FLAGS (\Flagged)`); !containsSubstr(un, `\Flagged`) {
+		t.Errorf("STORE +FLAGS = %v", un)
+	}
+	// .SILENT suppresses the FETCH echo.
+	if un := c.mustOK("a4", `STORE 1 +FLAGS.SILENT (\Answered)`); containsSubstr(un, "FETCH") {
+		t.Errorf("STORE .SILENT should not echo a FETCH: %v", un)
+	}
+
+	// SEARCH by flag, by header substring, and by UID.
+	if un := c.mustOK("a5", "SEARCH FLAGGED"); !containsSubstr(un, "* SEARCH 1") {
+		t.Errorf("SEARCH FLAGGED = %v", un)
+	}
+	if un := c.mustOK("a6", "SEARCH UNSEEN"); !containsSubstr(un, "* SEARCH 1") {
+		t.Errorf("SEARCH UNSEEN = %v", un)
+	}
+	if un := c.mustOK("a7", `SEARCH SUBJECT "two"`); !containsSubstr(un, "* SEARCH 2") {
+		t.Errorf(`SEARCH SUBJECT "two" = %v`, un)
+	}
+	if un := c.mustOK("a8", "UID SEARCH SEEN"); !containsSubstr(un, "* SEARCH 2") {
+		t.Errorf("UID SEARCH SEEN = %v", un)
+	}
+	// NOT and OR combine.
+	if un := c.mustOK("a9", "SEARCH NOT SEEN"); !containsSubstr(un, "* SEARCH 1") {
+		t.Errorf("SEARCH NOT SEEN = %v", un)
+	}
+}
+
+func TestIMAPCopyAndAppend(t *testing.T) {
+	c, _ := startServer(t)
+	c.mustOK("a1", "LOGIN alice secret")
+	c.mustOK("a2", "CREATE Archive")
+	c.mustOK("a3", "SELECT INBOX")
+
+	// COPY message 1 into Archive, then verify Archive holds exactly one.
+	c.mustOK("a4", "COPY 1 Archive")
+	if un := c.mustOK("a5", "EXAMINE Archive"); !hasPrefixAny(un, "* 1 EXISTS") {
+		t.Errorf("Archive after COPY = %v", un)
+	}
+
+	// APPEND a new message into INBOX (synchronizing literal), then confirm the
+	// selected mailbox count grows from 2 to 3.
+	c.mustOK("a6", "SELECT INBOX")
+	if status := c.appendMsg("a7", "INBOX", "Subject: appended\r\n\r\nhi"); status != "OK" {
+		t.Fatalf("APPEND status = %s", status)
+	}
+	if un := c.mustOK("a8", "STATUS INBOX (MESSAGES)"); !containsSubstr(un, "MESSAGES 3") {
+		t.Errorf("STATUS after APPEND = %v", un)
+	}
+}
+
+func TestIMAPExpungeAndClose(t *testing.T) {
+	c, _ := startServer(t)
+	c.mustOK("a1", "LOGIN alice secret")
+	c.mustOK("a2", "SELECT INBOX")
+
+	// Mark message 1 deleted, then EXPUNGE removes it and renumbers.
+	c.mustOK("a3", `STORE 1 +FLAGS (\Deleted)`)
+	if un := c.mustOK("a4", "EXPUNGE"); !containsSubstr(un, "* 1 EXPUNGE") {
+		t.Errorf("EXPUNGE = %v", un)
+	}
+	if un := c.mustOK("a5", "STATUS INBOX (MESSAGES)"); !containsSubstr(un, "MESSAGES 1") {
+		t.Errorf("STATUS after EXPUNGE = %v", un)
+	}
+
+	// CLOSE expunges silently (no untagged EXPUNGE) and deselects.
+	c.mustOK("a6", `STORE 1 +FLAGS (\Deleted)`)
+	if un, status := c.do("a7", "CLOSE"); status != "OK" || containsSubstr(un, "EXPUNGE") {
+		t.Errorf("CLOSE un=%v status=%s", un, status)
+	}
+	// After CLOSE no mailbox is selected, so FETCH is rejected.
+	if _, status := c.do("a8", "FETCH 1 FLAGS"); status != "NO" {
+		t.Errorf("FETCH after CLOSE status = %s, want NO", status)
 	}
 }
 
