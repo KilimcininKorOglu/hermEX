@@ -6,10 +6,10 @@ import (
 	"testing"
 )
 
-func TestLoadAndAccounts(t *testing.T) {
+func TestLoadAndDerivations(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.json")
-	doc := `{"data_dir":"/data/mb","hostname":"mail.test","smtp_addr":":25",
-	         "pop3_addr":":110","accounts":[{"address":"Alice@Test","password":"secret"}]}`
+	doc := `{"database_dsn":"root:pw@tcp(db:3306)/email","data_dir":"/data/mb",
+	         "hostname":"mail.test","smtp_addr":":25","pop3_addr":":110"}`
 	if err := os.WriteFile(p, []byte(doc), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -17,29 +17,27 @@ func TestLoadAndAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Hostname != "mail.test" || c.DataDir != "/data/mb" {
+	if c.DatabaseDSN == "" || c.Hostname != "mail.test" {
 		t.Fatalf("loaded config = %+v", c)
 	}
-	accts := c.StaticAccounts()
-	// The address is lowercased and mapped to a store path under DataDir.
-	path, ok := accts.Resolve("alice@test")
-	if !ok || path != "/data/mb/alice@test.sqlite3" {
-		t.Errorf("Resolve = %q, %v", path, ok)
+	// Maildir/homedir follow the reference {prefix}/{domain}/{localpart} rule.
+	if got := c.MaildirFor("Alice@Example.com"); got != "/data/mb/user/example.com/alice" {
+		t.Errorf("MaildirFor = %q", got)
 	}
-	if _, ok := accts.Authenticate("alice@test", "secret"); !ok {
-		t.Error("Authenticate(correct) should succeed")
-	}
-	if _, ok := accts.Authenticate("alice@test", "wrong"); ok {
-		t.Error("Authenticate(wrong) should fail")
+	if got := c.HomedirFor("Example.com"); got != "/data/mb/domain/example.com" {
+		t.Errorf("HomedirFor = %q", got)
 	}
 }
 
-func TestLoadMissingDataDir(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "c.json")
-	if err := os.WriteFile(p, []byte(`{"hostname":"x"}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Load(p); err == nil {
-		t.Error("Load should fail when data_dir is missing")
+func TestLoadRequiresDSNandDataDir(t *testing.T) {
+	cases := []string{`{"data_dir":"/x"}`, `{"database_dsn":"d"}`}
+	for _, doc := range cases {
+		p := filepath.Join(t.TempDir(), "c.json")
+		if err := os.WriteFile(p, []byte(doc), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(p); err == nil {
+			t.Errorf("Load(%s) should fail", doc)
+		}
 	}
 }

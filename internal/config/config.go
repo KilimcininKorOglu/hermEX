@@ -1,5 +1,7 @@
-// Package config loads hermEX daemon configuration and derives the runtime
-// account set from it.
+// Package config loads hermEX daemon configuration. Accounts are NOT configured
+// here — they live in the directory database (see internal/directory); config
+// holds only infrastructure settings (the directory DSN, listen addresses, the
+// mailbox data root, and the announced hostname).
 package config
 
 import (
@@ -8,23 +10,15 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"hermex/internal/directory"
 )
 
-// Account is one configured mailbox account.
-type Account struct {
-	Address  string `json:"address"`
-	Password string `json:"password"`
-}
-
-// Config is the JSON configuration shared by the mail daemons.
+// Config is the JSON configuration shared by the mail daemons and the admin CLI.
 type Config struct {
-	DataDir  string    `json:"data_dir"`  // directory holding per-mailbox store files
-	Hostname string    `json:"hostname"`  // announced in protocol greetings
-	SMTPAddr string    `json:"smtp_addr"` // listen address for the MTA (default ":25")
-	POP3Addr string    `json:"pop3_addr"` // listen address for POP3 (default ":110")
-	Accounts []Account `json:"accounts"`
+	DatabaseDSN string `json:"database_dsn"` // MariaDB DSN for the directory (go-sql-driver form)
+	DataDir     string `json:"data_dir"`     // root under which mailbox/domain stores are created
+	Hostname    string `json:"hostname"`     // announced in protocol greetings
+	SMTPAddr    string `json:"smtp_addr"`    // MTA listen address (default ":25")
+	POP3Addr    string `json:"pop3_addr"`    // POP3 listen address (default ":110")
 }
 
 // Load reads and validates a JSON config file.
@@ -37,23 +31,25 @@ func Load(path string) (*Config, error) {
 	if err := json.Unmarshal(data, &c); err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}
+	if c.DatabaseDSN == "" {
+		return nil, fmt.Errorf("config: database_dsn is required")
+	}
 	if c.DataDir == "" {
 		return nil, fmt.Errorf("config: data_dir is required")
 	}
 	return &c, nil
 }
 
-// MailboxPath returns the store-file path for an address under DataDir.
-func (c *Config) MailboxPath(address string) string {
-	return filepath.Join(c.DataDir, strings.ToLower(address)+".sqlite3")
+// MaildirFor derives a user's mailbox directory the reference way
+// (the internal spec §5.5): {DataDir}/user/{domain}/{localpart}. Collision
+// suffixing (~N) is handled by the directory at provisioning time, not here.
+func (c *Config) MaildirFor(address string) string {
+	address = strings.ToLower(address)
+	local, domain, _ := strings.Cut(address, "@")
+	return filepath.Join(c.DataDir, "user", domain, local)
 }
 
-// StaticAccounts builds the directory account set from the configured accounts.
-func (c *Config) StaticAccounts() directory.StaticAccounts {
-	accts := make(directory.StaticAccounts, len(c.Accounts))
-	for _, a := range c.Accounts {
-		addr := strings.ToLower(a.Address)
-		accts[addr] = directory.Account{Password: a.Password, MailboxPath: c.MailboxPath(addr)}
-	}
-	return accts
+// HomedirFor derives a domain's public-store directory: {DataDir}/domain/{domain}.
+func (c *Config) HomedirFor(domain string) string {
+	return filepath.Join(c.DataDir, "domain", strings.ToLower(domain))
 }
