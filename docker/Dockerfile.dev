@@ -1,0 +1,12 @@
+# Development container for hermEX: Go toolchain for building and testing.
+# modernc.org/sqlite is pure Go, so CGO is disabled.
+FROM golang:1.26
+
+WORKDIR /src
+
+ENV CGO_ENABLED=0 \
+    GOFLAGS=-buildvcs=false
+
+# Source and runtime data are bind-mounted at runtime (see hermex-dev.yml);
+# the image carries only the toolchain.
+CMD ["sleep", "infinity"]

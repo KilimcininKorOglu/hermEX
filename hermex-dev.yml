@@ -1,0 +1,23 @@
+name: hermex
+
+# Development environment for hermEX. No host ports are published yet; service
+# ports (from the reserved 8140-8149 block) are added as daemons land.
+services:
+  dev:
+    container_name: hermex-dev
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    working_dir: /src
+    volumes:
+      - .:/src
+      - hermex-go-build:/root/.cache/go-build
+      - hermex-go-mod:/go/pkg/mod
+      - ./docker-data:/data
+    environment:
+      - HERMEX_DATA_DIR=/data
+    command: sleep infinity
+
+volumes:
+  hermex-go-build:
+  hermex-go-mod:

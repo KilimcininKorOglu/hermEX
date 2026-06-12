@@ -1,0 +1,17 @@
+# Local working docs (reference-derived; kept out of the repo)
+contract-map/
+ARCHITECTURE.md
+SLICING-PLAN.md
+
+# Runtime data (Docker-based dev)
+/docker-data/*
+!/docker-data/.gitkeep
+
+# Go build artifacts
+/bin/
+*.test
+*.out
+coverage.*
+
+# Editor / OS
+.DS_Store

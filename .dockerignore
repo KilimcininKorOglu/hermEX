@@ -1,0 +1,5 @@
+.git/
+helper-projects/
+docker-data/
+contract-map/
+*.md
