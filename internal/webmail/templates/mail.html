@@ -10,7 +10,10 @@
     <div class="account">{{.User}}<br><a href="/logout">Sign out</a></div>
   </aside>
   <main class="main">
-    <div class="toolbar"><h2>{{.Current}}</h2></div>
+    <div class="toolbar">
+      <h2>{{.Current}}</h2>
+      <a href="/compose" class="compose-btn">Compose</a>
+    </div>
     {{template "messagelist" .}}
   </main>
 </div>
