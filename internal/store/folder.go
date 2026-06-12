@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"errors"
 	"time"
 )
 
@@ -52,6 +53,25 @@ func (s *Store) UIDValidity(folderID int64) (uint32, error) {
 	var v int64
 	err := s.db.QueryRow(`SELECT uid_validity FROM folders WHERE folder_id = ?`, folderID).Scan(&v)
 	return uint32(v), err
+}
+
+// FolderByName looks up a folder by its parent (nil for root) and display
+// name, reporting ok=false when no such folder exists.
+func (s *Store) FolderByName(parent *int64, name string) (id int64, ok bool, err error) {
+	if parent == nil {
+		err = s.db.QueryRow(
+			`SELECT folder_id FROM folders WHERE parent_id IS NULL AND display_name = ?`, name).Scan(&id)
+	} else {
+		err = s.db.QueryRow(
+			`SELECT folder_id FROM folders WHERE parent_id = ? AND display_name = ?`, *parent, name).Scan(&id)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return id, true, nil
 }
 
 // ListFolders returns every folder in the mailbox, ordered by id.
