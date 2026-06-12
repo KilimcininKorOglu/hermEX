@@ -70,6 +70,9 @@ func (p *Push) PropValue(typ mapi.PropType, v any) error {
 	}
 	switch typ {
 	case mapi.PtNull:
+		// Deliberate deviation: the reference g_propval has no PT_NULL case and
+		// rejects it (bad_switch). PtypNull means "property present, no value",
+		// so we encode it as the empty payload it denotes rather than erroring.
 		return nil
 	case mapi.PtUnspecified:
 		x, err := asType[mapi.TypedPropVal](v)
@@ -222,7 +225,7 @@ func (p *Pull) PropValue(typ mapi.PropType) (any, error) {
 	}
 	switch typ {
 	case mapi.PtNull:
-		return nil, nil
+		return nil, nil // see Push.PropValue: deliberate deviation, no payload
 	case mapi.PtUnspecified:
 		return p.TypedPropVal()
 	case mapi.PtSvrEID:
