@@ -329,19 +329,106 @@ func parseXPriority(s string) int32 {
 	return mapi.ImportanceNormal
 }
 
-// parseBody fills the body properties from the message's text body. The core
-// path handles a single-part text body; multipart bodies are widened in a later
-// slice.
+// maxBodyDepth bounds how deep the body-part search recurses into nested
+// multiparts.
+const maxBodyDepth = 10
+
+// bodyParts holds the parts selected for the body representations. Multiple HTML
+// parts (joined related bodies) and the calendar/enriched tail are recorded but
+// only the single-HTML and plain cases are consumed by the core path.
+type bodyParts struct {
+	plain    *mime.Part
+	htmls    []*mime.Part
+	enriched *mime.Part
+}
+
+// parseBody selects the message's body parts and fills the body properties:
+// PR_BODY from the plain part (charset-decoded to UTF-8) and PR_HTML +
+// PR_INTERNET_CPID from a single HTML part (stored as raw bytes in its original
+// charset). Multiple-HTML joining, enriched, and calendar bodies are deferred.
 func parseBody(root *mime.Part, msg *Message) {
-	if root.Type != "text" {
-		return
-	}
-	switch root.Subtype {
-	case "plain":
-		if text, err := root.DecodedText(); err == nil {
+	var bp bodyParts
+	selectParts(root, &bp, 0)
+	if bp.plain != nil {
+		if text, err := bp.plain.DecodedText(); err == nil {
 			msg.Props.Set(mapi.PrBody, text)
 		}
 	}
+	if len(bp.htmls) == 1 {
+		setHTMLBody(msg, bp.htmls[0])
+	}
+}
+
+// selectParts walks the MIME tree and selects the parts used for the body,
+// porting the MS-OXCMAIL body-part selection. level 0 is the root; a part with a
+// Content-Disposition of attachment is never a body part. A multipart/alternative
+// takes the best of each body type among its children; other multiparts take the
+// first plain part and (when the first child is HTML) join the HTML parts.
+func selectParts(part *mime.Part, info *bodyParts, level int) {
+	if strings.HasPrefix(part.Disposition, "attachment") {
+		return
+	}
+	if len(part.Children) == 0 {
+		switch {
+		case part.Type == "text" && part.Subtype == "plain":
+			info.plain = part
+		case part.Type == "text" && part.Subtype == "html":
+			info.htmls = append(info.htmls, part)
+		case part.Type == "text" && part.Subtype == "enriched":
+			info.enriched = part
+		}
+		return
+	}
+	if level >= maxBodyDepth {
+		return
+	}
+	level++
+	alt := part.Type == "multipart" && part.Subtype == "alternative"
+	hjoinEnabled := false
+	for idx, child := range part.Children {
+		var cld bodyParts
+		selectParts(child, &cld, level)
+		if alt {
+			if cld.plain != nil {
+				info.plain = cld.plain
+			}
+			if len(cld.htmls) > 0 {
+				info.htmls = cld.htmls
+			}
+			if cld.enriched != nil {
+				info.enriched = cld.enriched
+			}
+			continue
+		}
+		if idx == 0 && len(cld.htmls) > 0 {
+			hjoinEnabled = true
+		}
+		if cld.plain != nil && info.plain == nil {
+			info.plain = cld.plain
+		}
+		if hjoinEnabled {
+			info.htmls = append(info.htmls, cld.htmls...)
+		}
+		if cld.enriched != nil && info.enriched == nil {
+			info.enriched = cld.enriched
+		}
+	}
+}
+
+// setHTMLBody stores an HTML part as PR_HTML (transfer-decoded raw bytes in the
+// part's own charset) and PR_INTERNET_CPID (that charset's code page). Unlike
+// the plain body, the HTML is not converted to UTF-8.
+func setHTMLBody(msg *Message, part *mime.Part) {
+	raw, err := part.DecodedContent()
+	if err != nil {
+		return
+	}
+	charset := part.Params["charset"]
+	if charset == "" {
+		charset = "us-ascii"
+	}
+	msg.Props.Set(mapi.PrInternetCodepage, csetToCPID(charset))
+	msg.Props.Set(mapi.PrHTML, raw)
 }
 
 // decodeHeaderWord decodes RFC 2047 encoded-words in a header value, leaving
