@@ -27,7 +27,7 @@ func TestGCValueRoundTrip(t *testing.T) {
 	}
 }
 
-// TestEIDInvariants checks the three relations gromox guarantees for an EID
+// TestEIDInvariants checks the three relations that must hold for an EID
 // built from a replica id and a global counter.
 func TestEIDInvariants(t *testing.T) {
 	replid := uint16(0x1234)

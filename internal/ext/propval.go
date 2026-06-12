@@ -50,7 +50,7 @@ func pullMV[T any](p *Pull, read func(*Pull) (T, error)) (any, error) {
 }
 
 // abkGated reports whether the address-book value-present prefix applies to typ:
-// the reference gates strings, binaries, and any multivalue.
+// the prefix gates strings, binaries, and any multivalue.
 func abkGated(typ mapi.PropType) bool {
 	return typ == mapi.PtString8 || typ == mapi.PtUnicode || typ == mapi.PtBinary || typ.IsMultivalue()
 }
@@ -70,8 +70,8 @@ func (p *Push) PropValue(typ mapi.PropType, v any) error {
 	}
 	switch typ {
 	case mapi.PtNull:
-		// Deliberate deviation: the reference g_propval has no PT_NULL case and
-		// rejects it (bad_switch). PtypNull means "property present, no value",
+		// Deliberate deviation: the standard property codec has no PT_NULL case
+		// and rejects it. PtypNull means "property present, no value",
 		// so we encode it as the empty payload it denotes rather than erroring.
 		return nil
 	case mapi.PtUnspecified:

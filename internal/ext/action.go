@@ -8,14 +8,14 @@ import (
 
 // patchU16 overwrites two already-written bytes at offset with v (little-endian).
 // It is used to backpatch a length prefix once the body it counts has been
-// written, mirroring the reference serializer's reserve-then-rewrite technique.
+// written, using a reserve-then-rewrite technique.
 func (p *Push) patchU16(offset int, v uint16) {
 	binary.LittleEndian.PutUint16(p.buf[offset:], v)
 }
 
 // --- RULE_ACTIONS ---
 
-// RuleActions writes a rule action list (p_rule_actions): a uint16 block count
+// RuleActions writes a rule action list: a uint16 block count
 // (at least one) followed by each action block.
 func (p *Push) RuleActions(r mapi.RuleActions) error {
 	if len(r.Blocks) == 0 || len(r.Blocks) > 0xFFFF {
@@ -30,7 +30,7 @@ func (p *Push) RuleActions(r mapi.RuleActions) error {
 	return nil
 }
 
-// RuleActions reads a rule action list (g_rule_actions); the block count must be
+// RuleActions reads a rule action list; the block count must be
 // at least one.
 func (p *Pull) RuleActions() (mapi.RuleActions, error) {
 	count, err := p.Uint16()

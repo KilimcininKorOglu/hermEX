@@ -11,14 +11,14 @@ import (
 	"github.com/GehirnInc/crypt/sha512_crypt"
 )
 
-// Gromox privilege_bits (authmgr.hpp): the service privileges a user holds.
+// privilege_bits: the service privileges a user holds.
 const (
 	privIMAPPOP3 = 1 << 0
 	privSMTP     = 1 << 1
 )
 
-// SQLDirectory is a MariaDB/MySQL-backed account directory, faithful to Gromox's
-// model (contract-map/06): it resolves an address over username/altname/alias,
+// SQLDirectory is a MariaDB/MySQL-backed account directory (contract-map/06):
+// it resolves an address over username/altname/alias,
 // gates on account status, domain status, and object class, and verifies
 // crypt(3) sha512 passwords. It implements both Accounts and Authenticator.
 type SQLDirectory struct {
@@ -55,7 +55,7 @@ type loginRow struct {
 	domainStatus int
 }
 
-// resolve runs Gromox's meta() three-key resolution: the input must match
+// resolve runs the three-key resolution: the input must match
 // exactly one of users.username, altnames.altname, or aliases.aliasname. Zero
 // rows (no such address) and more than one (ambiguous) are both a non-match.
 func (d *SQLDirectory) resolve(addr string) (loginRow, bool, error) {
@@ -96,8 +96,8 @@ SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status
 	return out[0], true, nil
 }
 
-// Authenticate verifies a login and returns the user's mailbox store path. It
-// mirrors Gromox meta()+login2: resolve to exactly one row, require an active
+// Authenticate verifies a login and returns the user's mailbox store path:
+// resolve to exactly one row, require an active
 // MAILUSER account in an active domain, then verify the crypt(3) password.
 func (d *SQLDirectory) Authenticate(user, password string) (string, bool) {
 	row, ok, err := d.resolve(strings.ToLower(strings.TrimSpace(user)))
@@ -119,7 +119,7 @@ func (d *SQLDirectory) Authenticate(user, password string) (string, bool) {
 
 // Resolve maps a recipient address to the store path it is delivered to,
 // accepting it only when the account can receive (NORMAL or shared mailbox) and
-// its domain is active (Gromox afuser_store_canrecv). Unknown addresses refuse.
+// its domain is active. Unknown addresses refuse.
 func (d *SQLDirectory) Resolve(address string) (string, bool) {
 	row, ok, err := d.resolve(strings.ToLower(strings.TrimSpace(address)))
 	if err != nil || !ok {
@@ -232,7 +232,7 @@ func (d *SQLDirectory) CreateUser(username, password, maildir string) (int64, er
 }
 
 // CreateAlias maps an alternate address (aliasname) to a canonical user
-// (mainname == users.username), matching Gromox's aliases table.
+// (mainname == users.username) in the aliases table.
 func (d *SQLDirectory) CreateAlias(aliasname, mainname string) error {
 	_, err := d.db.Exec(`INSERT INTO aliases (aliasname, mainname) VALUES (?, ?)`,
 		strings.ToLower(strings.TrimSpace(aliasname)), strings.ToLower(strings.TrimSpace(mainname)))
@@ -240,13 +240,13 @@ func (d *SQLDirectory) CreateAlias(aliasname, mainname string) error {
 }
 
 // sqlCryptNewHash produces a sha512-crypt ($6$) hash with a random salt, the
-// same scheme Gromox's sql_crypt_newhash uses by default.
+// default credential scheme for the directory.
 func sqlCryptNewHash(password string) (string, error) {
 	return sha512_crypt.New().Generate([]byte(password), nil)
 }
 
-// sqlCryptVerify checks a password against a stored sha512-crypt hash, mirroring
-// Gromox's sql_crypt_verify. An empty stored hash never matches.
+// sqlCryptVerify checks a password against a stored sha512-crypt hash. An empty
+// stored hash never matches.
 func sqlCryptVerify(password, stored string) bool {
 	if stored == "" {
 		return false

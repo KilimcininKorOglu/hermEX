@@ -42,7 +42,7 @@ func Load(path string) (*Config, error) {
 	return &c, nil
 }
 
-// MaildirFor derives a user's mailbox directory the way Gromox does
+// MaildirFor derives a user's mailbox directory
 // (contract-map/06 §5.5): {DataDir}/user/{domain}/{localpart}. Collision
 // suffixing (~N) is handled by the directory at provisioning time, not here.
 func (c *Config) MaildirFor(address string) string {

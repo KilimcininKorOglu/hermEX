@@ -4,15 +4,15 @@ import "hermex/internal/mapi"
 
 // --- binary blob variants (fixed prefix width, independent of FlagWCount) ---
 //
-// The reference server exposes three blob codecs beside the flag-gated Bin:
-//   - a short form with an always-16-bit count (g_sbin / p_bin_s),
-//   - an extended form with an always-32-bit count (g_bin_ex / p_bin_ex),
-//   - a raw form with no count that runs to the end of the buffer (g_blob).
+// There are three blob codecs beside the flag-gated Bin:
+//   - a short form with an always-16-bit count,
+//   - an extended form with an always-32-bit count,
+//   - a raw form with no count that runs to the end of the buffer.
 // These mirror those exactly so callers can pick the width a structure mandates
 // rather than inheriting the ambient FlagWCount regime.
 
 // BinShort writes a blob with a 16-bit length prefix regardless of FlagWCount.
-// A value too large for the prefix is rejected, matching p_bin_s.
+// A value too large for the prefix is rejected.
 func (p *Push) BinShort(b []byte) error {
 	if len(b) > 0xFFFF {
 		return ErrFormat
@@ -31,8 +31,7 @@ func (p *Pull) BinShort() ([]byte, error) {
 	return p.Raw(int(n))
 }
 
-// BinEx writes a blob with a 32-bit length prefix regardless of FlagWCount,
-// matching p_bin_ex.
+// BinEx writes a blob with a 32-bit length prefix regardless of FlagWCount.
 func (p *Push) BinEx(b []byte) {
 	p.Uint32(uint32(len(b)))
 	p.Raw(b)
@@ -47,19 +46,18 @@ func (p *Pull) BinEx() ([]byte, error) {
 	return p.Raw(int(n))
 }
 
-// Blob writes raw bytes with no length prefix, matching p_blob; the reader must
+// Blob writes raw bytes with no length prefix; the reader must
 // know the length out of band (it consumes the rest of the buffer).
 func (p *Push) Blob(b []byte) { p.Raw(b) }
 
-// Blob reads every remaining byte, matching g_blob (which consumes
+// Blob reads every remaining byte (which consumes
 // m_data_size - m_offset). It returns a fresh copy and never underflows.
 func (p *Pull) Blob() ([]byte, error) { return p.Raw(p.Remaining()) }
 
 // --- SYSTEMTIME (eight little-endian int16 calendar fields) ---
 
 // SystemTime writes a 16-byte SYSTEMTIME: eight little-endian int16 fields in
-// year, month, day-of-week, day, hour, minute, second, millisecond order,
-// matching p_systime.
+// year, month, day-of-week, day, hour, minute, second, millisecond order.
 func (p *Push) SystemTime(t mapi.SystemTime) {
 	p.Uint16(uint16(t.Year))
 	p.Uint16(uint16(t.Month))
@@ -71,8 +69,7 @@ func (p *Push) SystemTime(t mapi.SystemTime) {
 	p.Uint16(uint16(t.Milliseconds))
 }
 
-// SystemTime reads a 16-byte SYSTEMTIME written by SystemTime, matching
-// g_systime.
+// SystemTime reads a 16-byte SYSTEMTIME written by SystemTime.
 func (p *Pull) SystemTime() (mapi.SystemTime, error) {
 	var t mapi.SystemTime
 	fields := [...]*int16{

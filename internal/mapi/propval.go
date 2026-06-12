@@ -25,5 +25,5 @@ type TaggedPropVal struct {
 }
 
 // PropertyValues is an ordered set of tagged property values
-// (MS-OXCDATA PropertyValueArray / Gromox TPROPVAL_ARRAY).
+// (MS-OXCDATA PropertyValueArray).
 type PropertyValues []TaggedPropVal

@@ -8,14 +8,13 @@ import (
 
 // --- TYPED_PROPVAL ---
 
-// TypedPropVal writes a 16-bit type followed by the value of that type
-// (p_typed_pv).
+// TypedPropVal writes a 16-bit type followed by the value of that type.
 func (p *Push) TypedPropVal(t mapi.TypedPropVal) error {
 	p.Uint16(uint16(t.Type))
 	return p.PropValue(t.Type, t.Value)
 }
 
-// TypedPropVal reads a value that carries its own type (g_typed_pv).
+// TypedPropVal reads a value that carries its own type.
 func (p *Pull) TypedPropVal() (mapi.TypedPropVal, error) {
 	typ, err := p.Uint16()
 	if err != nil {
@@ -27,7 +26,7 @@ func (p *Pull) TypedPropVal() (mapi.TypedPropVal, error) {
 
 // --- SVREID ---
 
-// SVREID writes a server entry id (p_svreid). A non-nil Bin selects the binary
+// SVREID writes a server entry id. A non-nil Bin selects the binary
 // form (a u16 length of cb+1, a 0 flag byte, then the bytes); otherwise the
 // long-term form is written with a fixed length of 21 and a 1 flag byte.
 func (p *Push) SVREID(s mapi.SVREID) error {
@@ -48,7 +47,7 @@ func (p *Push) SVREID(s mapi.SVREID) error {
 	return nil
 }
 
-// SVREID reads a server entry id (g_svreid). The leading u16 length counts the
+// SVREID reads a server entry id. The leading u16 length counts the
 // flag byte, so the binary form carries length-1 payload bytes; the long-term
 // form requires length 21.
 func (p *Pull) SVREID() (mapi.SVREID, error) {
@@ -92,7 +91,7 @@ func (p *Pull) SVREID() (mapi.SVREID, error) {
 // --- FLAGGED_PROPVAL ---
 
 // FlaggedPropVal writes a flagged property value for a column of the given
-// proptag (p_flagged_pv). When the column type is PtUnspecified, the with-type
+// proptag. When the column type is PtUnspecified, the with-type
 // form is written: an explicit type (derived from the flag) precedes the flag
 // byte. The address-book (ABK) variant of this form is added with the
 // address-book serialization unit.
@@ -131,7 +130,7 @@ func (p *Push) FlaggedPropVal(tag mapi.PropTag, r mapi.FlaggedPropVal) error {
 }
 
 // FlaggedPropVal reads a flagged property value for a column of the given type
-// (g_flagged_pv). When typ is PtUnspecified, the leading explicit type is read
+// . When typ is PtUnspecified, the leading explicit type is read
 // into the result's Type and used to decode an available value.
 func (p *Pull) FlaggedPropVal(typ mapi.PropType) (mapi.FlaggedPropVal, error) {
 	var r mapi.FlaggedPropVal
