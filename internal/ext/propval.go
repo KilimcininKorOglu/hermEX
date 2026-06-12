@@ -73,6 +73,12 @@ func (p *Push) PropValue(typ mapi.PropType, v any) error {
 			return err
 		}
 		return p.Restriction(x)
+	case mapi.PtActions:
+		x, err := asType[mapi.RuleActions](v)
+		if err != nil {
+			return err
+		}
+		return p.RuleActions(x)
 	case mapi.PtShort:
 		x, err := asType[int16](v)
 		if err != nil {
@@ -182,6 +188,8 @@ func (p *Pull) PropValue(typ mapi.PropType) (any, error) {
 		return p.SVREID()
 	case mapi.PtRestriction:
 		return p.Restriction()
+	case mapi.PtActions:
+		return p.RuleActions()
 	case mapi.PtShort:
 		v, err := p.Uint16()
 		return int16(v), err
