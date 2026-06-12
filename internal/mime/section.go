@@ -67,6 +67,15 @@ func headerOf(p *Part) []byte {
 	return p.raw[:p.bodyOffset]
 }
 
+// PartAt returns the part addressed by a numeric path (empty path = the message
+// itself), or ok=false when the path does not resolve.
+func (msg *Part) PartAt(path []int) (*Part, bool) {
+	if len(path) == 0 {
+		return msg, true
+	}
+	return navigate(msg, path)
+}
+
 // navigate walks a numeric part path from the message root to the target part,
 // descending through multipart children and message/rfc822 encapsulations.
 func navigate(msg *Part, path []int) (*Part, bool) {
