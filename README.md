@@ -29,9 +29,12 @@ See `ARCHITECTURE.md` for the module map and `SLICING-PLAN.md` for the roadmap.
 Development is Docker-based. All runtime data lives under `docker-data/`.
 
 ```sh
-# bring up the dev container (Go toolchain + mounted source + docker-data)
-docker compose -f hermex-dev.yml up -d
-docker compose -f hermex-dev.yml exec dev go test ./...
+# build/test (dev profile: Go toolchain + an isolated test database)
+docker compose -f hermex-compose.yml --profile dev up -d
+docker compose -f hermex-compose.yml exec dev go test ./...
+
+# run the mail server (stack profile: SMTP on 8140, POP3 on 8141, MariaDB on 8142)
+docker compose -f hermex-compose.yml --profile stack up -d
 ```
 
 ## Layout

@@ -1,0 +1,97 @@
+name: hermex
+
+# Single compose file for hermEX, split by profile:
+#   --profile dev    -> Go toolchain (dev) + its own test MariaDB (db-dev), for the build/test loop
+#   --profile stack  -> the runnable mail server: mta + pop3 + their MariaDB (db)
+# The test DB (db-dev) is kept separate from the runtime DB (db) so the directory
+# integration test cannot wipe seeded accounts. Every persistent volume is a
+# docker-data/ bind mount; there are no Docker named volumes.
+services:
+  # --- dev profile ---
+  dev:
+    profiles: ["dev"]
+    container_name: hermex-dev
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    working_dir: /src
+    volumes:
+      - .:/src
+      - ./docker-data/cache/go-build:/root/.cache/go-build
+      - ./docker-data/cache/go-mod:/go/pkg/mod
+      - ./docker-data:/data
+    environment:
+      - HERMEX_DATA_DIR=/data
+      - HERMEX_TEST_MYSQL_DSN=root:hermexdev@tcp(db-dev:3306)/email?charset=utf8mb4
+    depends_on:
+      db-dev:
+        condition: service_healthy
+    command: sleep infinity
+
+  db-dev:
+    profiles: ["dev"]
+    container_name: hermex-db-dev
+    image: mariadb:11
+    environment:
+      - MARIADB_ROOT_PASSWORD=hermexdev
+      - MARIADB_DATABASE=email
+    volumes:
+      - ./docker-data/dev-db:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # --- stack profile ---
+  db:
+    profiles: ["stack"]
+    container_name: hermex-db
+    image: mariadb:11
+    environment:
+      - MARIADB_ROOT_PASSWORD=hermexstack
+      - MARIADB_DATABASE=email
+    volumes:
+      - ./docker-data/db:/var/lib/mysql
+    ports:
+      - "8142:3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  mta:
+    profiles: ["stack"]
+    container_name: hermex-mta
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: ["/usr/local/bin/hermex-mta", "-config", "/config/config.json"]
+    volumes:
+      - ./docker-data/mailboxes:/data/mailboxes
+      - ./docker-data/config.json:/config/config.json:ro
+    ports:
+      - "8140:25"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  pop3:
+    profiles: ["stack"]
+    container_name: hermex-pop3
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: ["/usr/local/bin/hermex-pop3", "-config", "/config/config.json"]
+    volumes:
+      - ./docker-data/mailboxes:/data/mailboxes
+      - ./docker-data/config.json:/config/config.json:ro
+    ports:
+      - "8141:110"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
