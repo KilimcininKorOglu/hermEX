@@ -3,7 +3,7 @@ package store
 // schemaVersion is the current on-disk schema revision. No production data
 // exists yet, so the schema grows by additive migration; bump this when the
 // DDL changes and add an upgrade step.
-const schemaVersion = 1
+const schemaVersion = 2
 
 // schemaDDL is the ordered set of statements that create an empty store. Every
 // statement is idempotent (IF NOT EXISTS) so applying it to an existing store
@@ -19,7 +19,8 @@ var schemaDDL = []string{
 		parent_id    INTEGER REFERENCES folders(folder_id) ON DELETE CASCADE,
 		display_name TEXT NOT NULL,
 		uid_validity INTEGER NOT NULL,
-		next_uid     INTEGER NOT NULL DEFAULT 1
+		next_uid     INTEGER NOT NULL DEFAULT 1,
+		subscribed   INTEGER NOT NULL DEFAULT 1
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders(parent_id)`,
 
