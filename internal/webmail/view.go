@@ -23,6 +23,7 @@ type folderView struct {
 // messageView is one row in the message list.
 type messageView struct {
 	UID     uint32
+	Folder  string // the containing folder path, for action links
 	From    string
 	Subject string
 	Date    string
@@ -81,37 +82,43 @@ func resolveFolder(folders []store.FolderInfo, path string) (int64, bool) {
 
 // buildMessageViews loads each message's envelope to populate the list, newest
 // first.
-func buildMessageViews(st *store.Store, folderID int64) ([]messageView, error) {
+func buildMessageViews(st *store.Store, folderID int64, folder string) ([]messageView, error) {
 	msgs, err := st.ListMessages(folderID)
 	if err != nil {
 		return nil, err
 	}
 	views := make([]messageView, 0, len(msgs))
 	for i := len(msgs) - 1; i >= 0; i-- { // newest first
-		m := msgs[i]
-		v := messageView{
-			UID:     m.UID,
-			Date:    m.InternalDate.Format("2006-01-02 15:04"),
-			Seen:    m.Flags&store.FlagSeen != 0,
-			Flagged: m.Flags&store.FlagFlagged != 0,
-			Deleted: m.Flags&store.FlagDeleted != 0,
-			From:    "(unknown sender)",
-			Subject: "(no subject)",
-		}
-		if raw, err := st.GetMessageRaw(folderID, m.UID); err == nil {
-			if env, err := mime.ParseEnvelope(raw); err == nil {
-				v.From = formatSender(env.From)
-				if env.Subject != "" {
-					v.Subject = env.Subject
-				}
-				if !env.Date.IsZero() {
-					v.Date = env.Date.Format("2006-01-02 15:04")
-				}
-			}
-		}
-		views = append(views, v)
+		views = append(views, messageViewFrom(st, folderID, folder, msgs[i]))
 	}
 	return views, nil
+}
+
+// messageViewFrom builds a single list-row view, enriching the stored metadata
+// with the message's envelope (sender, subject, date).
+func messageViewFrom(st *store.Store, folderID int64, folder string, m store.MessageInfo) messageView {
+	v := messageView{
+		UID:     m.UID,
+		Folder:  folder,
+		Date:    m.InternalDate.Format("2006-01-02 15:04"),
+		Seen:    m.Flags&store.FlagSeen != 0,
+		Flagged: m.Flags&store.FlagFlagged != 0,
+		Deleted: m.Flags&store.FlagDeleted != 0,
+		From:    "(unknown sender)",
+		Subject: "(no subject)",
+	}
+	if raw, err := st.GetMessageRaw(folderID, m.UID); err == nil {
+		if env, err := mime.ParseEnvelope(raw); err == nil {
+			v.From = formatSender(env.From)
+			if env.Subject != "" {
+				v.Subject = env.Subject
+			}
+			if !env.Date.IsZero() {
+				v.Date = env.Date.Format("2006-01-02 15:04")
+			}
+		}
+	}
+	return v
 }
 
 // formatSender renders the first address of a From list for display.

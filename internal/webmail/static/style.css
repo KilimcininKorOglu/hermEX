@@ -97,6 +97,20 @@ table.messages tr.unread { background: var(--unread); }
 table.messages tr.unread td.subject { font-weight: 600; }
 td.from { width: 220px; color: var(--text); }
 td.date { width: 150px; color: var(--muted); white-space: nowrap; }
+td.actions { width: 190px; white-space: nowrap; text-align: right; }
+td.actions button {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 8px;
+  margin-left: 4px;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 12px;
+}
+td.actions button:hover { background: var(--bg); }
+td.actions button.danger { color: #b00020; border-color: #e3b6bd; }
+table.messages tr.flagged td:first-child { box-shadow: inset 3px 0 0 #e0a800; }
 .empty { padding: 40px 20px; color: var(--muted); }
 .muted { color: var(--muted); }
 
