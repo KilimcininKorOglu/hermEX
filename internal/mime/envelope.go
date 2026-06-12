@@ -24,17 +24,22 @@ type Address struct {
 }
 
 // Envelope holds the RFC 5322 envelope headers (the IMAP ENVELOPE fields).
+// Subject and Date are RFC 2047-decoded / parsed for display and search;
+// RawSubject and RawDate retain the original header text, which is what an
+// IMAP ENVELOPE response must carry (7-bit, encoded-words intact).
 type Envelope struct {
-	Date      time.Time
-	Subject   string
-	From      []Address
-	Sender    []Address
-	ReplyTo   []Address
-	To        []Address
-	Cc        []Address
-	Bcc       []Address
-	InReplyTo string
-	MessageID string
+	Date       time.Time
+	RawDate    string
+	Subject    string
+	RawSubject string
+	From       []Address
+	Sender     []Address
+	ReplyTo    []Address
+	To         []Address
+	Cc         []Address
+	Bcc        []Address
+	InReplyTo  string
+	MessageID  string
 }
 
 var wordDecoder = new(stdmime.WordDecoder)
@@ -48,15 +53,17 @@ func ParseEnvelope(raw []byte) (*Envelope, error) {
 	}
 	h := msg.Header
 	env := &Envelope{
-		Subject:   decodeWord(h.Get("Subject")),
-		InReplyTo: h.Get("In-Reply-To"),
-		MessageID: h.Get("Message-ID"),
-		From:      parseAddrList(h.Get("From")),
-		Sender:    parseAddrList(h.Get("Sender")),
-		ReplyTo:   parseAddrList(h.Get("Reply-To")),
-		To:        parseAddrList(h.Get("To")),
-		Cc:        parseAddrList(h.Get("Cc")),
-		Bcc:       parseAddrList(h.Get("Bcc")),
+		Subject:    decodeWord(h.Get("Subject")),
+		RawSubject: h.Get("Subject"),
+		RawDate:    h.Get("Date"),
+		InReplyTo:  h.Get("In-Reply-To"),
+		MessageID:  h.Get("Message-ID"),
+		From:       parseAddrList(h.Get("From")),
+		Sender:     parseAddrList(h.Get("Sender")),
+		ReplyTo:    parseAddrList(h.Get("Reply-To")),
+		To:         parseAddrList(h.Get("To")),
+		Cc:         parseAddrList(h.Get("Cc")),
+		Bcc:        parseAddrList(h.Get("Bcc")),
 	}
 	if d, err := h.Date(); err == nil {
 		env.Date = d
