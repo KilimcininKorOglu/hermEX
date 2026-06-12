@@ -84,6 +84,24 @@ func (s *Store) ListMessages(folderID int64) ([]MessageInfo, error) {
 	return out, rows.Err()
 }
 
+// DeleteMessage removes a message from a folder by its IMAP UID, cascading its
+// property bag. It reports ErrNotFound when no such message exists.
+func (s *Store) DeleteMessage(folderID int64, uid uint32) error {
+	res, err := s.db.Exec(
+		`DELETE FROM messages WHERE folder_id = ? AND imap_uid = ?`, folderID, int64(uid))
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // GetMessageRaw returns the raw RFC822 bytes of a message identified by its
 // folder and IMAP UID.
 func (s *Store) GetMessageRaw(folderID int64, uid uint32) ([]byte, error) {
