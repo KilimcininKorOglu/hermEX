@@ -1,0 +1,130 @@
+package webmail
+
+import (
+	"html/template"
+	"io/fs"
+	"net/http"
+	"time"
+
+	"hermex/internal/directory"
+	"hermex/internal/store"
+)
+
+// Server is the webmail HTTP application. It authenticates against the directory
+// and opens each user's mailbox store directly (in-process) per request.
+type Server struct {
+	auth     directory.Authenticator
+	hostname string
+	tmpl     *template.Template
+	sessions *sessionStore
+}
+
+// NewServer builds a webmail server, compiling the embedded templates.
+func NewServer(auth directory.Authenticator, hostname string) (*Server, error) {
+	tmpl, err := template.ParseFS(templateFS, "templates/*.html")
+	if err != nil {
+		return nil, err
+	}
+	return &Server{auth: auth, hostname: hostname, tmpl: tmpl, sessions: newSessionStore()}, nil
+}
+
+// Handler returns the HTTP handler serving the webmail application.
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	staticSub, _ := fs.Sub(staticFS, "static")
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticSub))))
+	mux.HandleFunc("GET /login", s.handleLoginForm)
+	mux.HandleFunc("POST /login", s.handleLoginSubmit)
+	mux.HandleFunc("GET /logout", s.handleLogout)
+	mux.HandleFunc("GET /mail", s.handleMail)
+	mux.HandleFunc("GET /{$}", s.handleRoot)
+	return mux
+}
+
+func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.sessionFrom(r); ok {
+		http.Redirect(w, r, "/mail", http.StatusSeeOther)
+		return
+	}
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
+func (s *Server) handleLoginForm(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.sessionFrom(r); ok {
+		http.Redirect(w, r, "/mail", http.StatusSeeOther)
+		return
+	}
+	s.render(w, "login", map[string]any{})
+}
+
+func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
+	user := r.FormValue("user")
+	pass := r.FormValue("password")
+	path, ok := s.auth.Authenticate(user, pass)
+	if !ok {
+		w.WriteHeader(http.StatusUnauthorized)
+		s.render(w, "login", map[string]any{"Error": "Invalid email or password.", "User": user})
+		return
+	}
+	token := s.sessions.create(user, path)
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookie,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Expires:  time.Now().Add(sessionTTL),
+	})
+	http.Redirect(w, r, "/mail", http.StatusSeeOther)
+}
+
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if cookie, err := r.Cookie(sessionCookie); err == nil {
+		s.sessions.destroy(cookie.Value)
+	}
+	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Value: "", Path: "/", MaxAge: -1})
+	http.Redirect(w, r, "/login", http.StatusSeeOther)
+}
+
+func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
+	sess, ok := s.sessionFrom(r)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	st, err := store.Open(sess.mailboxPath)
+	if err != nil {
+		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
+		return
+	}
+	defer st.Close()
+
+	folders, err := st.ListFolders()
+	if err != nil {
+		http.Error(w, "cannot read folders", http.StatusInternalServerError)
+		return
+	}
+	current := r.URL.Query().Get("folder")
+	if current == "" {
+		current = inboxName
+	}
+	page := mailPage{
+		User:    sess.user,
+		Current: current,
+		Folders: buildFolderViews(folders),
+	}
+	if id, found := resolveFolder(folders, current); found {
+		if msgs, err := buildMessageViews(st, id); err == nil {
+			page.Messages = msgs
+		}
+	}
+	s.render(w, "mail", page)
+}
+
+// render executes a named template, reporting a 500 on failure.
+func (s *Server) render(w http.ResponseWriter, name string, data any) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.tmpl.ExecuteTemplate(w, name, data); err != nil {
+		http.Error(w, "template error", http.StatusInternalServerError)
+	}
+}
