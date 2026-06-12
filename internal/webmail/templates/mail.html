@@ -1,0 +1,33 @@
+{{define "mail"}}{{template "head" .}}
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">hermEX</div>
+    <nav>
+      {{range .Folders}}
+      <a href="/mail?folder={{.Path}}" class="{{if eq .Path $.Current}}active{{end}}">{{.Name}}</a>
+      {{end}}
+    </nav>
+    <div class="account">{{.User}}<br><a href="/logout">Sign out</a></div>
+  </aside>
+  <main class="main">
+    <div class="toolbar"><h2>{{.Current}}</h2></div>
+    {{template "messagelist" .}}
+  </main>
+</div>
+{{template "foot" .}}{{end}}
+
+{{define "messagelist"}}
+{{if .Messages}}
+<table class="messages">
+  {{range .Messages}}
+  <tr class="{{if not .Seen}}unread{{end}}">
+    <td class="from">{{.From}}</td>
+    <td class="subject"><a href="/message?folder={{$.Current}}&amp;uid={{.UID}}">{{.Subject}}</a></td>
+    <td class="date">{{.Date}}</td>
+  </tr>
+  {{end}}
+</table>
+{{else}}
+<div class="empty">No messages in this folder.</div>
+{{end}}
+{{end}}
