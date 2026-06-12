@@ -1,9 +1,27 @@
-name: hermex
+name: hermex-stack
 
-# Runnable thin mail vertical: the SMTP intake and POP3 retrieval daemons share
-# one mailbox-store volume. Host ports come from the project's 8140-8149 block
-# (8140->25 SMTP, 8141->110 POP3); see ~/.claude/docker-ports.md.
+# Runnable thin mail vertical: SMTP intake + POP3 retrieval, backed by a MariaDB
+# account/domain directory and per-mailbox stores on a shared volume. Host ports
+# come from the project's 8140-8149 block (8140->25 SMTP, 8141->110 POP3,
+# 8142->3306 directory DB); see ~/.claude/docker-ports.md.
 services:
+  db:
+    container_name: hermex-db
+    image: mariadb:11
+    environment:
+      - MARIADB_ROOT_PASSWORD=hermexstack
+      - MARIADB_DATABASE=email
+    volumes:
+      - hermex-stack-mariadb:/var/lib/mysql
+    ports:
+      - "8142:3306"
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
   mta:
     container_name: hermex-mta
     build:
@@ -15,6 +33,9 @@ services:
       - ./docker-data/config.json:/config/config.json:ro
     ports:
       - "8140:25"
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
   pop3:
@@ -28,4 +49,10 @@ services:
       - ./docker-data/config.json:/config/config.json:ro
     ports:
       - "8141:110"
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
+
+volumes:
+  hermex-stack-mariadb:

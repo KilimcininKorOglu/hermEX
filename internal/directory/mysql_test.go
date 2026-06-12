@@ -24,7 +24,7 @@ func openTestDB(t *testing.T) *sql.DB {
 	}
 	// MariaDB may still be starting; ping with a bounded retry.
 	var pingErr error
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		if pingErr = db.Ping(); pingErr == nil {
 			break
 		}
