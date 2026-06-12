@@ -14,6 +14,15 @@ const (
 	// FlagWCount widens the length prefix of a generic binary from 16 to 32
 	// bits (and, later, restriction AND/OR child counts).
 	FlagWCount Flags = 1 << 1
+	// FlagTBLLMT limits packed-representation strings to a fixed length, used by
+	// the contents/hierarchy table fetch paths. Its full effect lands with the
+	// address-book/table serialization unit.
+	FlagTBLLMT Flags = 1 << 2
+	// FlagABK selects the address-book (MH-NSP) serialization mode, which gates
+	// the value-present prefix on strings/binaries/multivalues and the
+	// flagged-property-value type handling. Its full effect lands with the
+	// address-book serialization unit.
+	FlagABK Flags = 1 << 3
 )
 
 // Errors returned by the pull/push primitives. They replace the reference

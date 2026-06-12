@@ -55,6 +55,18 @@ func (p *Push) PropValue(typ mapi.PropType, v any) error {
 	switch typ {
 	case mapi.PtNull:
 		return nil
+	case mapi.PtUnspecified:
+		x, err := asType[mapi.TypedPropVal](v)
+		if err != nil {
+			return err
+		}
+		return p.TypedPropVal(x)
+	case mapi.PtSvrEID:
+		x, err := asType[mapi.SVREID](v)
+		if err != nil {
+			return err
+		}
+		return p.SVREID(x)
 	case mapi.PtShort:
 		x, err := asType[int16](v)
 		if err != nil {
@@ -158,6 +170,10 @@ func (p *Pull) PropValue(typ mapi.PropType) (any, error) {
 	switch typ {
 	case mapi.PtNull:
 		return nil, nil
+	case mapi.PtUnspecified:
+		return p.TypedPropVal()
+	case mapi.PtSvrEID:
+		return p.SVREID()
 	case mapi.PtShort:
 		v, err := p.Uint16()
 		return int16(v), err
