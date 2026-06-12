@@ -49,9 +49,25 @@ func pullMV[T any](p *Pull, read func(*Pull) (T, error)) (any, error) {
 	return xs, nil
 }
 
+// abkGated reports whether the address-book value-present prefix applies to typ:
+// the reference gates strings, binaries, and any multivalue.
+func abkGated(typ mapi.PropType) bool {
+	return typ == mapi.PtString8 || typ == mapi.PtUnicode || typ == mapi.PtBinary || typ.IsMultivalue()
+}
+
 // PropValue writes a bare (untyped) property value of the given type. The Go
 // type expected in v is documented on mapi.TaggedPropVal.
 func (p *Push) PropValue(typ mapi.PropType, v any) error {
+	if p.flags&FlagABK != 0 && abkGated(typ) {
+		// Address-book mode prefixes a value-present byte; a nil value is absent.
+		if v == nil {
+			p.Uint8(0)
+			return nil
+		}
+		p.Uint8(0xFF)
+	} else if typ&mapi.MviFlag == mapi.MviFlag {
+		typ &^= mapi.MviFlag // a multivalue instance is written as a single value
+	}
 	switch typ {
 	case mapi.PtNull:
 		return nil
@@ -179,6 +195,20 @@ func (p *Push) PropValue(typ mapi.PropType, v any) error {
 
 // PropValue reads a bare property value of the given type.
 func (p *Pull) PropValue(typ mapi.PropType) (any, error) {
+	if p.flags&FlagABK != 0 && abkGated(typ) {
+		valueSet, err := p.Uint8()
+		if err != nil {
+			return nil, err
+		}
+		if valueSet == 0 {
+			return nil, nil // value absent
+		}
+		if valueSet != 0xFF {
+			return nil, ErrFormat
+		}
+	} else if typ&mapi.MviFlag == mapi.MviFlag {
+		typ &^= mapi.MviFlag
+	}
 	switch typ {
 	case mapi.PtNull:
 		return nil, nil
