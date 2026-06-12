@@ -80,8 +80,14 @@ func (c *conn) cmdUID(tag string, args []token) {
 	switch strings.ToUpper(sub) {
 	case "FETCH":
 		c.cmdFetch(tag, args[1:], true)
+	case "STORE":
+		c.cmdStore(tag, args[1:], true)
+	case "SEARCH":
+		c.cmdSearch(tag, args[1:], true)
+	case "COPY":
+		c.cmdCopy(tag, args[1:], true)
 	default:
-		c.bad(tag, "UID "+sub+" not yet supported")
+		c.bad(tag, "UID "+sub+" not supported")
 	}
 }
 
