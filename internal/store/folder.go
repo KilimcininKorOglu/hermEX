@@ -1,6 +1,17 @@
 package store
 
-import "time"
+import (
+	"database/sql"
+	"time"
+)
+
+// FolderInfo is the per-folder metadata needed to enumerate a mailbox's folder
+// tree (e.g. for IMAP LIST). ParentID is nil for a root folder.
+type FolderInfo struct {
+	ID          int64
+	ParentID    *int64
+	DisplayName string
+}
 
 // CreateFolder creates a folder under parent (nil for a root folder) and
 // returns its id. A fresh UIDVALIDITY is assigned and the UID sequence starts
@@ -41,4 +52,28 @@ func (s *Store) UIDValidity(folderID int64) (uint32, error) {
 	var v int64
 	err := s.db.QueryRow(`SELECT uid_validity FROM folders WHERE folder_id = ?`, folderID).Scan(&v)
 	return uint32(v), err
+}
+
+// ListFolders returns every folder in the mailbox, ordered by id.
+func (s *Store) ListFolders() ([]FolderInfo, error) {
+	rows, err := s.db.Query(`SELECT folder_id, parent_id, display_name FROM folders ORDER BY folder_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []FolderInfo
+	for rows.Next() {
+		var f FolderInfo
+		var parent sql.NullInt64
+		if err := rows.Scan(&f.ID, &parent, &f.DisplayName); err != nil {
+			return nil, err
+		}
+		if parent.Valid {
+			p := parent.Int64
+			f.ParentID = &p
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
 }
