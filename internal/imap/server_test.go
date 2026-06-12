@@ -309,6 +309,14 @@ func TestIMAPStoreAndSearch(t *testing.T) {
 	if un := c.mustOK("a9", "SEARCH NOT SEEN"); !containsSubstr(un, "* SEARCH 1") {
 		t.Errorf("SEARCH NOT SEEN = %v", un)
 	}
+	// An empty HEADER needle matches messages that HAVE the field (both have
+	// Subject), and never matches when the field is absent (no Message-Id).
+	if un := c.mustOK("a10", `SEARCH HEADER Subject ""`); !containsSubstr(un, "* SEARCH 1 2") {
+		t.Errorf(`SEARCH HEADER Subject "" = %v`, un)
+	}
+	if un := c.mustOK("a11", `SEARCH HEADER Message-Id ""`); !slices.Contains(un, "* SEARCH") {
+		t.Errorf(`SEARCH HEADER Message-Id "" = %v, want empty result`, un)
+	}
 }
 
 func TestIMAPCopyAndAppend(t *testing.T) {
