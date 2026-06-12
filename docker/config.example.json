@@ -1,0 +1,9 @@
+{
+  "data_dir": "/data/mailboxes",
+  "hostname": "mail.hermex.test",
+  "smtp_addr": ":25",
+  "pop3_addr": ":110",
+  "accounts": [
+    { "address": "alice@hermex.test", "password": "change-me" }
+  ]
+}

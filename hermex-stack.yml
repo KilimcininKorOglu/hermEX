@@ -1,0 +1,31 @@
+name: hermex
+
+# Runnable thin mail vertical: the SMTP intake and POP3 retrieval daemons share
+# one mailbox-store volume. Host ports come from the project's 8140-8149 block
+# (8140->25 SMTP, 8141->110 POP3); see ~/.claude/docker-ports.md.
+services:
+  mta:
+    container_name: hermex-mta
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: ["/usr/local/bin/hermex-mta", "-config", "/config/config.json"]
+    volumes:
+      - ./docker-data/mailboxes:/data/mailboxes
+      - ./docker-data/config.json:/config/config.json:ro
+    ports:
+      - "8140:25"
+    restart: unless-stopped
+
+  pop3:
+    container_name: hermex-pop3
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: ["/usr/local/bin/hermex-pop3", "-config", "/config/config.json"]
+    volumes:
+      - ./docker-data/mailboxes:/data/mailboxes
+      - ./docker-data/config.json:/config/config.json:ro
+    ports:
+      - "8141:110"
+    restart: unless-stopped
