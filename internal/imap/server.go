@@ -136,6 +136,10 @@ func (c *conn) dispatch(toks []token) {
 		}
 		c.poll()
 		c.ok(tag, "CHECK completed")
+	case "FETCH":
+		c.cmdFetch(tag, args, false)
+	case "UID":
+		c.cmdUID(tag, args)
 	default:
 		c.bad(tag, "unknown or unimplemented command")
 	}

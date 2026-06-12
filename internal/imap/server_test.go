@@ -4,10 +4,11 @@ import (
 	"bufio"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"net"
-	"net/textproto"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -20,7 +21,7 @@ import (
 type testClient struct {
 	t    *testing.T
 	conn net.Conn
-	r    *textproto.Reader
+	br   *bufio.Reader
 }
 
 func startServer(t *testing.T) (*testClient, string) {
@@ -56,19 +57,52 @@ func startServer(t *testing.T) (*testClient, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { conn.Close() })
-	c := &testClient{t: t, conn: conn, r: textproto.NewReader(bufio.NewReader(conn))}
+	c := &testClient{t: t, conn: conn, br: bufio.NewReader(conn)}
 	c.expectUntagged("OK", "greeting")
 	return c, path
 }
 
-// line reads one response line.
+// line reads one logical response line, inlining any IMAP literals ({n}CRLF +
+// n bytes) so a multi-line literal body comes back as a single string.
 func (c *testClient) line() string {
 	c.t.Helper()
-	l, err := c.r.ReadLine()
+	s, err := c.br.ReadString('\n')
 	if err != nil {
 		c.t.Fatalf("read: %v", err)
 	}
-	return l
+	line := strings.TrimRight(s, "\r\n")
+	for {
+		n, ok := literalSuffix(line)
+		if !ok {
+			return line
+		}
+		buf := make([]byte, n)
+		if _, err := io.ReadFull(c.br, buf); err != nil {
+			c.t.Fatalf("read literal: %v", err)
+		}
+		more, err := c.br.ReadString('\n')
+		if err != nil {
+			c.t.Fatalf("read: %v", err)
+		}
+		line += string(buf) + strings.TrimRight(more, "\r\n")
+	}
+}
+
+// literalSuffix reports whether line ends with a "{n}" literal marker and, if
+// so, returns n.
+func literalSuffix(line string) (int, bool) {
+	if !strings.HasSuffix(line, "}") {
+		return 0, false
+	}
+	i := strings.LastIndex(line, "{")
+	if i < 0 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(line[i+1 : len(line)-1])
+	if err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // expectUntagged reads one untagged line and asserts it begins with "* <word>".
@@ -175,6 +209,54 @@ func TestIMAPAuthenticatePlain(t *testing.T) {
 	ir := base64.StdEncoding.EncodeToString([]byte("\x00alice\x00secret"))
 	c.mustOK("a1", "AUTHENTICATE PLAIN "+ir)
 	c.mustOK("a2", "SELECT INBOX")
+}
+
+func TestIMAPFetch(t *testing.T) {
+	c, _ := startServer(t)
+	c.mustOK("a1", "LOGIN alice secret")
+	c.mustOK("a2", "SELECT INBOX")
+
+	un := c.mustOK("a3", "FETCH 1 (FLAGS RFC822.SIZE ENVELOPE)")
+	if !containsSubstr(un, `"one"`) || !containsSubstr(un, "RFC822.SIZE") || !containsSubstr(un, "ENVELOPE (") {
+		t.Errorf("FETCH envelope = %v", un)
+	}
+
+	if un := c.mustOK("a4", "FETCH 1 BODYSTRUCTURE"); !containsSubstr(un, `("TEXT" "PLAIN"`) {
+		t.Errorf("FETCH BODYSTRUCTURE = %v", un)
+	}
+
+	// BODY.PEEK echoes BODY[...] and returns the header bytes via a literal.
+	if un := c.mustOK("a5", "FETCH 1 BODY.PEEK[HEADER]"); !containsSubstr(un, "Subject: one") {
+		t.Errorf("FETCH BODY.PEEK[HEADER] = %v", un)
+	}
+
+	// UID FETCH names UIDs and always includes the UID in the response.
+	un = c.mustOK("a6", "UID FETCH 2 (FLAGS)")
+	if !containsSubstr(un, "UID 2") || !hasPrefixAny(un, "* 2 FETCH") {
+		t.Errorf("UID FETCH = %v", un)
+	}
+}
+
+func TestIMAPFetchSeenSemantics(t *testing.T) {
+	c, _ := startServer(t)
+	c.mustOK("a1", "LOGIN alice secret")
+	c.mustOK("a2", "SELECT INBOX")
+
+	// PEEK must not set \Seen on the still-unseen message 1.
+	c.mustOK("a3", "FETCH 1 BODY.PEEK[]")
+	if un := c.mustOK("a4", "FETCH 1 FLAGS"); containsSubstr(un, `\Seen`) {
+		t.Errorf("PEEK set \\Seen: %v", un)
+	}
+
+	// A non-peek body fetch sets \Seen and reports the new FLAGS in the same
+	// response.
+	un := c.mustOK("a5", "FETCH 1 BODY[]")
+	if !containsSubstr(un, `\Seen`) {
+		t.Errorf("BODY[] did not report \\Seen: %v", un)
+	}
+	if un := c.mustOK("a6", "FETCH 1 FLAGS"); !containsSubstr(un, `\Seen`) {
+		t.Errorf("\\Seen not persisted: %v", un)
+	}
 }
 
 func hasPrefixAny(lines []string, prefix string) bool {
