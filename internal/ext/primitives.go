@@ -191,9 +191,14 @@ func (p *Pull) Bin() ([]byte, error) {
 // --- strings ---
 
 // String8 writes a NUL-terminated byte string (code-page bytes are written
-// verbatim; no transcoding).
+// verbatim; no transcoding). Under FlagTBLLMT the content is capped at 509
+// bytes, matching the packed table-row string limit.
 func (p *Push) String8(s string) {
-	p.Raw([]byte(s))
+	b := []byte(s)
+	if p.flags&FlagTBLLMT != 0 && len(b) > 509 {
+		b = b[:509]
+	}
+	p.Raw(b)
 	p.Uint8(0)
 }
 
@@ -217,7 +222,13 @@ func (p *Push) Unicode(s string) {
 		p.String8(s)
 		return
 	}
-	for _, u := range utf16.Encode([]rune(s)) {
+	units := utf16.Encode([]rune(s))
+	// Under FlagTBLLMT the encoded form (including its terminator) is capped at
+	// 510 bytes, i.e. 254 content units plus the 00 00 terminator.
+	if p.flags&FlagTBLLMT != 0 && (len(units)+1)*2 > 510 {
+		units = units[:254]
+	}
+	for _, u := range units {
 		p.Uint16(u)
 	}
 	p.Uint16(0)

@@ -47,6 +47,14 @@ const (
 // MvFlag marks a property type as multivalue (MS-OXCDATA's 0x1000 bit).
 const MvFlag PropType = 0x1000
 
+// MvInstance marks a multivalue-instance type (the 0x2000 bit): a single element
+// projected out of a multivalue column for a table row.
+const MvInstance PropType = 0x2000
+
+// MviFlag is MvFlag|MvInstance. A type carrying both bits is serialized as a
+// single value of its scalar base type (the instance bits are stripped).
+const MviFlag PropType = MvFlag | MvInstance
+
 // IsMultivalue reports whether t carries the multivalue flag.
 func (t PropType) IsMultivalue() bool { return t&MvFlag != 0 }
 
