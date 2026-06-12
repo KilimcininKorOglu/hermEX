@@ -28,6 +28,33 @@ func (p *Part) DecodedContent() ([]byte, error) {
 	}
 }
 
+// DecodedText returns the part's body as a UTF-8 string: its transfer encoding
+// removed (DecodedContent) and its declared charset converted to UTF-8
+// (DecodeCharset). It is the text form used for PR_BODY and for display.
+func (p *Part) DecodedText() (string, error) {
+	body, err := p.DecodedContent()
+	if err != nil {
+		return "", err
+	}
+	return DecodeCharset(body, p.Params["charset"]), nil
+}
+
+// DecodeCharset converts bytes in the named charset to a UTF-8 string. UTF-8 and
+// US-ASCII pass through; the Latin-1 / Windows-1252 family maps byte-to-rune;
+// unrecognized charsets are treated as UTF-8 on a best-effort basis.
+func DecodeCharset(b []byte, charset string) string {
+	switch strings.ToLower(strings.TrimSpace(charset)) {
+	case "iso-8859-1", "latin1", "iso8859-1", "windows-1252", "cp1252":
+		runes := make([]rune, len(b))
+		for i, c := range b {
+			runes[i] = rune(c)
+		}
+		return string(runes)
+	default:
+		return string(b)
+	}
+}
+
 // Filename returns the part's suggested file name from its Content-Disposition
 // filename parameter, falling back to the Content-Type name parameter.
 func (p *Part) Filename() string {

@@ -43,6 +43,21 @@ func ParseStructure(raw []byte) *Part {
 	return parseEntity(raw)
 }
 
+// Header parses and returns this entity's header fields. Repeated fields are
+// preserved in order under their canonical key. The parse is performed on each
+// call; callers that iterate heavily should hold the result.
+func (p *Part) Header() textproto.MIMEHeader {
+	return parseHeader(p.raw[:p.bodyOffset])
+}
+
+// RawHeader returns this entity's header block verbatim: every byte from the
+// start of the entity up to (and including) the blank line that separates the
+// header from the body, exactly as stored. This is the form captured into
+// PR_TRANSPORT_MESSAGE_HEADERS, which must preserve the original header bytes.
+func (p *Part) RawHeader() []byte {
+	return p.raw[:p.bodyOffset]
+}
+
 // parseEntity parses one MIME entity (a message or a body part): its header,
 // then its body, recursing for multipart and message/rfc822 content.
 func parseEntity(raw []byte) *Part {

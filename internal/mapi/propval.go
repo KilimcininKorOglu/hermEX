@@ -27,3 +27,32 @@ type TaggedPropVal struct {
 // PropertyValues is an ordered set of tagged property values
 // (MS-OXCDATA PropertyValueArray).
 type PropertyValues []TaggedPropVal
+
+// Get returns the value stored for tag and whether it is present.
+func (pv PropertyValues) Get(tag PropTag) (any, bool) {
+	for i := range pv {
+		if pv[i].Tag == tag {
+			return pv[i].Value, true
+		}
+	}
+	return nil, false
+}
+
+// Has reports whether a value is stored for tag.
+func (pv PropertyValues) Has(tag PropTag) bool {
+	_, ok := pv.Get(tag)
+	return ok
+}
+
+// Set stores val for tag, replacing any existing value for that tag. A property
+// set is keyed by tag (MS-OXCDATA), so setting an existing tag overwrites rather
+// than duplicates; a new tag is appended, preserving insertion order.
+func (pv *PropertyValues) Set(tag PropTag, val any) {
+	for i := range *pv {
+		if (*pv)[i].Tag == tag {
+			(*pv)[i].Value = val
+			return
+		}
+	}
+	*pv = append(*pv, TaggedPropVal{Tag: tag, Value: val})
+}
