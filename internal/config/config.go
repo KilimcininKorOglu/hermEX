@@ -42,7 +42,7 @@ func Load(path string) (*Config, error) {
 	return &c, nil
 }
 
-// MaildirFor derives a user's mailbox directory the reference way
+// MaildirFor derives a user's mailbox directory
 // (the internal spec §5.5): {DataDir}/user/{domain}/{localpart}. Collision
 // suffixing (~N) is handled by the directory at provisioning time, not here.
 func (c *Config) MaildirFor(address string) string {

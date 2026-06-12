@@ -1,12 +1,12 @@
 package directory
 
-// directoryDDL creates the account/domain directory, modeled faithfully on
-// The reference MySQL schema (see the internal spec): the columns the daemons read are
-// preserved with their names and types, including the password VARCHAR(136)
-// holding a crypt(3) string. The one representation change is display_type as a
-// column standing in for the reference PR_DISPLAY_TYPE_EX row in user_properties
-// (the object-class discriminator), keeping the login logic without the EAV
-// table. Statements are idempotent so applying them to an existing DB is a no-op.
+// directoryDDL creates the account/domain directory (see the internal spec): the
+// columns the daemons read are preserved with their names and types, including
+// the password VARCHAR(136) holding a crypt(3) string. The one representation
+// change is display_type as a column standing in for the PR_DISPLAY_TYPE_EX row
+// in user_properties (the object-class discriminator), keeping the login logic
+// without the EAV table. Statements are idempotent so applying them to an
+// existing DB is a no-op.
 var directoryDDL = []string{
 	`CREATE TABLE IF NOT EXISTS domains (
 		id            INT UNSIGNED NOT NULL AUTO_INCREMENT,
@@ -59,8 +59,8 @@ var directoryDDL = []string{
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 }
 
-// address_status packing (the reference directory schema): low nibble = user status,
-// bits 4-5 = domain status. Only AF_USER_NORMAL may log in.
+// address_status packing: low nibble = user status, bits 4-5 = domain status.
+// Only AF_USER_NORMAL may log in.
 const (
 	afUserNormal     = 0x00
 	afUserSuspended  = 0x01

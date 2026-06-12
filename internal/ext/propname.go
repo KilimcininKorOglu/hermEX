@@ -4,7 +4,7 @@ import "hermex/internal/mapi"
 
 // --- PROPERTY_NAME ---
 
-// PropertyName writes a named property (p_propname): the kind, the GUID, then
+// PropertyName writes a named property: the kind, the GUID, then
 // either a 32-bit long id (MnidID) or a one-byte name length followed by the
 // Unicode name (MnidString). KindNone writes nothing after the GUID. The name
 // length counts the encoded name including its terminator and must fit in a
@@ -30,7 +30,7 @@ func (p *Push) PropertyName(n mapi.PropertyName) error {
 	return nil
 }
 
-// PropertyName reads a named property (g_propname). For MnidString the leading
+// PropertyName reads a named property. For MnidString the leading
 // length brackets the name: the Unicode read must not pass it, and the cursor is
 // advanced to exactly that boundary.
 func (p *Pull) PropertyName() (mapi.PropertyName, error) {
@@ -73,7 +73,7 @@ func (p *Pull) PropertyName() (mapi.PropertyName, error) {
 // --- PROPNAME_ARRAY / PROPID_ARRAY ---
 
 // PropertyNames writes a PROPNAME_ARRAY: a uint16 count followed by each named
-// property (p_propname_a).
+// property.
 func (p *Push) PropertyNames(names []mapi.PropertyName) error {
 	if len(names) > 0xFFFF {
 		return ErrFormat
@@ -87,7 +87,7 @@ func (p *Push) PropertyNames(names []mapi.PropertyName) error {
 	return nil
 }
 
-// PropertyNames reads a PROPNAME_ARRAY (g_propname_a).
+// PropertyNames reads a PROPNAME_ARRAY.
 func (p *Pull) PropertyNames() ([]mapi.PropertyName, error) {
 	n, err := p.Uint16()
 	if err != nil {
@@ -106,7 +106,7 @@ func (p *Pull) PropertyNames() ([]mapi.PropertyName, error) {
 }
 
 // PropIDs writes a PROPID_ARRAY: a uint16 count followed by each 16-bit property
-// id (p_propid_a).
+// id.
 func (p *Push) PropIDs(ids []uint16) error {
 	if len(ids) > 0xFFFF {
 		return ErrFormat
@@ -118,7 +118,7 @@ func (p *Push) PropIDs(ids []uint16) error {
 	return nil
 }
 
-// PropIDs reads a PROPID_ARRAY (g_propid_a).
+// PropIDs reads a PROPID_ARRAY.
 func (p *Pull) PropIDs() ([]uint16, error) {
 	n, err := p.Uint16()
 	if err != nil {

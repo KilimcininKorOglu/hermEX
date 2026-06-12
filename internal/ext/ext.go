@@ -25,8 +25,7 @@ const (
 	FlagABK Flags = 1 << 3
 )
 
-// Errors returned by the pull/push primitives. They replace the reference
-// implementation's pack_result channel.
+// Errors returned by the pull/push primitives.
 var (
 	// ErrUnderflow is returned when a read would pass the end of the buffer.
 	ErrUnderflow = errors.New("ext: buffer underflow")

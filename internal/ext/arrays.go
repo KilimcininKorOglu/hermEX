@@ -3,12 +3,13 @@ package ext
 import "hermex/internal/mapi"
 
 // This file holds the wide-count (32-bit) array codecs and the size-prefixed
-// arrays that sit beside the 16-bit PROPTAG_ARRAY / TPROPVAL_ARRAY already in
-// propval.go. The reference keys the count width off the array type, not the
-// encoding flags: the _la siblings and TARRAY_SET use 32-bit counts.
+// arrays that sit beside the 16-bit property-tag and property-value arrays in
+// propval.go. The count width is keyed off the array type, not the encoding
+// flags: these wide-count variants and the TypedPropertyValue set use 32-bit
+// counts.
 
-// PropTagsLong writes an LPROPTAG_ARRAY: a uint32 count followed by each 32-bit
-// tag (p_proptag_la). It differs from PropTags only in the count width.
+// PropTagsLong writes a wide-count property-tag array: a uint32 count followed
+// by each 32-bit tag. It differs from PropTags only in the count width.
 func (p *Push) PropTagsLong(tags []mapi.PropTag) error {
 	p.Uint32(uint32(len(tags)))
 	for _, t := range tags {
@@ -17,7 +18,7 @@ func (p *Push) PropTagsLong(tags []mapi.PropTag) error {
 	return nil
 }
 
-// PropTagsLong reads an LPROPTAG_ARRAY (g_proptag_la).
+// PropTagsLong reads a wide-count property-tag array.
 func (p *Pull) PropTagsLong() ([]mapi.PropTag, error) {
 	n, err := p.Uint32()
 	if err != nil {
@@ -37,9 +38,9 @@ func (p *Pull) PropTagsLong() ([]mapi.PropTag, error) {
 	return out, nil
 }
 
-// PropertyValuesLong writes an LTPROPVAL_ARRAY: a uint32 count followed by each
-// tagged property value (p_tpropval_la). It differs from PropertyValues only in
-// the count width.
+// PropertyValuesLong writes a wide-count property-value array: a uint32 count
+// followed by each tagged property value. It differs from PropertyValues only
+// in the count width.
 func (p *Push) PropertyValuesLong(pv mapi.PropertyValues) error {
 	p.Uint32(uint32(len(pv)))
 	for _, tp := range pv {
@@ -50,7 +51,7 @@ func (p *Push) PropertyValuesLong(pv mapi.PropertyValues) error {
 	return nil
 }
 
-// PropertyValuesLong reads an LTPROPVAL_ARRAY (g_tpropval_la).
+// PropertyValuesLong reads a wide-count property-value array.
 func (p *Pull) PropertyValuesLong() (mapi.PropertyValues, error) {
 	n, err := p.Uint32()
 	if err != nil {
@@ -69,7 +70,7 @@ func (p *Pull) PropertyValuesLong() (mapi.PropertyValues, error) {
 }
 
 // TArraySet writes a TARRAY_SET (row set): a uint32 row count followed by each
-// row as a 16-bit-counted property-value array (p_tarray_set).
+// row as a 16-bit-counted property-value array.
 func (p *Push) TArraySet(rows []mapi.PropertyValues) error {
 	p.Uint32(uint32(len(rows)))
 	for _, row := range rows {
@@ -80,7 +81,7 @@ func (p *Push) TArraySet(rows []mapi.PropertyValues) error {
 	return nil
 }
 
-// TArraySet reads a TARRAY_SET (g_tarray_set).
+// TArraySet reads a TARRAY_SET.
 func (p *Pull) TArraySet() ([]mapi.PropertyValues, error) {
 	n, err := p.Uint32()
 	if err != nil {
@@ -99,7 +100,7 @@ func (p *Pull) TArraySet() ([]mapi.PropertyValues, error) {
 }
 
 // ProblemArray writes a PROBLEM_ARRAY: a uint16 count followed by each problem
-// (index u16, proptag u32, error u32) (p_problem_a).
+// (index u16, proptag u32, error u32).
 func (p *Push) ProblemArray(probs []mapi.PropertyProblem) error {
 	if len(probs) > 0xFFFF {
 		return ErrFormat
@@ -113,7 +114,7 @@ func (p *Push) ProblemArray(probs []mapi.PropertyProblem) error {
 	return nil
 }
 
-// ProblemArray reads a PROBLEM_ARRAY (g_problem_a).
+// ProblemArray reads a PROBLEM_ARRAY.
 func (p *Pull) ProblemArray() ([]mapi.PropertyProblem, error) {
 	n, err := p.Uint16()
 	if err != nil {
@@ -139,9 +140,9 @@ func (p *Pull) ProblemArray() ([]mapi.PropertyProblem, error) {
 	return out, nil
 }
 
-// Uint64ArrayShort writes a 16-bit-counted array of 64-bit integers
-// (p_uint64_sa). This is a deliberate exception to the 32-bit multivalue count
-// rule, used where the protocol mandates a 16-bit count for a longlong array.
+// Uint64ArrayShort writes a 16-bit-counted array of 64-bit integers. This is a
+// deliberate exception to the 32-bit multivalue count rule, used where the
+// protocol mandates a 16-bit count for a longlong array.
 func (p *Push) Uint64ArrayShort(vs []uint64) error {
 	if len(vs) > 0xFFFF {
 		return ErrFormat
@@ -173,7 +174,7 @@ func (p *Pull) Uint64ArrayShort() ([]uint64, error) {
 }
 
 // EIDs writes an EID_ARRAY: a uint32 count followed by each 64-bit entry id
-// (p_eid_a, the wide-count form).
+// (the wide-count form).
 func (p *Push) EIDs(ids []mapi.EID) error {
 	p.Uint32(uint32(len(ids)))
 	for _, id := range ids {
@@ -182,7 +183,7 @@ func (p *Push) EIDs(ids []mapi.EID) error {
 	return nil
 }
 
-// EIDs reads an EID_ARRAY (g_eid_a, the wide-count form).
+// EIDs reads an EID_ARRAY (the wide-count form).
 func (p *Pull) EIDs() ([]mapi.EID, error) {
 	n, err := p.Uint32()
 	if err != nil {

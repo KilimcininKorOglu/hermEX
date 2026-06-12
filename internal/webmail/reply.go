@@ -13,9 +13,9 @@ import (
 
 // buildComposeFromSource prefills the compose view for a reply/forward action
 // on a source message. self is the logged-in user's address, excluded from
-// reply-all recipients. The reference behavior (Re:/Fwd: prefixing, quoted
-// body, In-Reply-To/References linkage, reply-all = original To+Cc minus self)
-// is grounded in the internal spec §4.
+// reply-all recipients. The behavior (Re:/Fwd: prefixing, quoted body,
+// In-Reply-To/References linkage, reply-all = original To+Cc minus self) is
+// grounded in the internal spec §4.
 func buildComposeFromSource(action, folder string, uid uint32, raw []byte, self string) composeView {
 	env, err := mime.ParseEnvelope(raw)
 	if err != nil {

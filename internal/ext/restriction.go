@@ -2,7 +2,7 @@ package ext
 
 import "hermex/internal/mapi"
 
-// Restriction writes a search restriction (p_restriction): a one-byte type tag
+// Restriction writes a search restriction: a one-byte type tag
 // followed by the payload for that type. AND/OR child counts follow FlagWCount
 // (u32 set, u16 clear); COMMENT carries a u8 count (at least one); COUNT carries
 // a u32. The recursion bottoms out at ResNull, which has no payload.
@@ -125,7 +125,7 @@ func (p *Push) Restriction(r mapi.Restriction) error {
 	}
 }
 
-// Restriction reads a search restriction (g_restriction), mirroring the type
+// Restriction reads a search restriction, mirroring the type
 // dispatch and count-width rules of Push.Restriction.
 func (p *Pull) Restriction() (mapi.Restriction, error) {
 	rt, err := p.Uint8()

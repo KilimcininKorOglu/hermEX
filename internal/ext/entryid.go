@@ -36,7 +36,7 @@ func (p *Pull) GlobCnt() (mapi.GlobCnt, error) {
 // --- XID (variable local id) ---
 
 // XID writes an XID: the replica GUID followed by its local-id bytes. The total
-// size (len(LocalID)+16) must fall in 17..24, matching p_xid's validation.
+// size (len(LocalID)+16) must fall in 17..24's validation.
 func (p *Push) XID(x mapi.XID) error {
 	size := 16 + len(x.LocalID)
 	if size < 17 || size > 24 {
@@ -48,7 +48,7 @@ func (p *Push) XID(x mapi.XID) error {
 }
 
 // XID reads an XID of the given total wire size (17..24): the GUID plus
-// size-16 local-id bytes, matching g_xid (the size comes from the caller).
+// size-16 local-id bytes (the size comes from the caller).
 func (p *Pull) XID(size int) (mapi.XID, error) {
 	var x mapi.XID
 	if size < 17 || size > 24 {
@@ -66,14 +66,14 @@ func (p *Pull) XID(size int) (mapi.XID, error) {
 // --- LONG_TERM_ID ---
 
 // LongTermID writes a 24-byte LONG_TERM_ID: GUID, six global-counter bytes, and
-// a 16-bit pad (p_longterm).
+// a 16-bit pad.
 func (p *Push) LongTermID(l mapi.LongTermID) {
 	p.GUID(l.GUID)
 	p.GlobCnt(l.GlobalCounter)
 	p.Uint16(l.Padding)
 }
 
-// LongTermID reads a 24-byte LONG_TERM_ID written by LongTermID (g_longterm).
+// LongTermID reads a 24-byte LONG_TERM_ID written by LongTermID.
 func (p *Pull) LongTermID() (mapi.LongTermID, error) {
 	var l mapi.LongTermID
 	var err error
@@ -89,7 +89,7 @@ func (p *Pull) LongTermID() (mapi.LongTermID, error) {
 
 // --- FOLDER_ENTRYID / MESSAGE_ENTRYID ---
 
-// FolderEntryID writes a 46-byte folder entry id (p_folder_eid).
+// FolderEntryID writes a 46-byte folder entry id.
 func (p *Push) FolderEntryID(f mapi.FolderEntryID) {
 	p.Uint32(f.Flags)
 	p.FlatUID(f.ProviderUID)
@@ -99,8 +99,7 @@ func (p *Push) FolderEntryID(f mapi.FolderEntryID) {
 	p.Raw(f.Pad1[:])
 }
 
-// FolderEntryID reads a 46-byte folder entry id written by FolderEntryID
-// (g_folder_eid).
+// FolderEntryID reads a 46-byte folder entry id written by FolderEntryID.
 func (p *Pull) FolderEntryID() (mapi.FolderEntryID, error) {
 	var f mapi.FolderEntryID
 	var err error
@@ -135,7 +134,7 @@ func (p *Pull) FolderEntryID() (mapi.FolderEntryID, error) {
 // clients expect verbatim, not an internal module name.
 var wrappedProviderDLL = [14]byte{'e', 'm', 's', 'm', 'd', 'b', '.', 'd', 'l', 'l'}
 
-// StoreEntryID writes a wrapped store entry id (p_store_eid). It always emits
+// StoreEntryID writes a wrapped store entry id. It always emits
 // the full inline-flag form: the wrapper uid is forced to MuidStoreWrap and the
 // provider DLL name is the fixed wire constant, regardless of s.IVFlag.
 func (p *Push) StoreEntryID(s mapi.StoreEntryID) {
@@ -151,7 +150,7 @@ func (p *Push) StoreEntryID(s mapi.StoreEntryID) {
 	p.String8(s.MailboxDN)
 }
 
-// StoreEntryID reads a wrapped store entry id (g_store_eid). It validates the
+// StoreEntryID reads a wrapped store entry id. It validates the
 // wrapper uid and version, then branches on the inline flag: 0 carries the DLL
 // name plus the full wrapped record; 1 carries only the wrapped provider uid
 // with the remaining fields defaulted. Any other value is malformed.
@@ -204,7 +203,7 @@ func (p *Pull) StoreEntryID() (mapi.StoreEntryID, error) {
 	}
 }
 
-// MessageEntryID writes a 70-byte message entry id (p_msg_eid).
+// MessageEntryID writes a 70-byte message entry id.
 func (p *Push) MessageEntryID(m mapi.MessageEntryID) {
 	p.Uint32(m.Flags)
 	p.FlatUID(m.ProviderUID)
@@ -217,8 +216,7 @@ func (p *Push) MessageEntryID(m mapi.MessageEntryID) {
 	p.Raw(m.Pad2[:])
 }
 
-// MessageEntryID reads a 70-byte message entry id written by MessageEntryID
-// (g_msg_eid).
+// MessageEntryID reads a 70-byte message entry id written by MessageEntryID.
 func (p *Pull) MessageEntryID() (mapi.MessageEntryID, error) {
 	var m mapi.MessageEntryID
 	var err error

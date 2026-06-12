@@ -20,7 +20,7 @@ func TestLoadAndDerivations(t *testing.T) {
 	if c.DatabaseDSN == "" || c.Hostname != "mail.test" {
 		t.Fatalf("loaded config = %+v", c)
 	}
-	// Maildir/homedir follow the reference {prefix}/{domain}/{localpart} rule.
+	// Maildir/homedir follow the {prefix}/{domain}/{localpart} rule.
 	if got := c.MaildirFor("Alice@Example.com"); got != "/data/mb/user/example.com/alice" {
 		t.Errorf("MaildirFor = %q", got)
 	}
