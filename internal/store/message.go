@@ -84,6 +84,26 @@ func (s *Store) ListMessages(folderID int64) ([]MessageInfo, error) {
 	return out, rows.Err()
 }
 
+// MessageByUID returns a single message's metadata by folder and IMAP UID,
+// reporting ErrNotFound when it does not exist.
+func (s *Store) MessageByUID(folderID int64, uid uint32) (MessageInfo, error) {
+	var m MessageInfo
+	var u, idate int64
+	err := s.db.QueryRow(
+		`SELECT message_id, imap_uid, internal_date, rfc822_size, flags
+		 FROM messages WHERE folder_id = ? AND imap_uid = ?`, folderID, int64(uid)).
+		Scan(&m.ID, &u, &idate, &m.Size, &m.Flags)
+	if errors.Is(err, sql.ErrNoRows) {
+		return MessageInfo{}, ErrNotFound
+	}
+	if err != nil {
+		return MessageInfo{}, err
+	}
+	m.UID = uint32(u)
+	m.InternalDate = time.Unix(idate, 0).UTC()
+	return m, nil
+}
+
 // DeleteMessage removes a message from a folder by its IMAP UID, cascading its
 // property bag. It reports ErrNotFound when no such message exists.
 func (s *Store) DeleteMessage(folderID int64, uid uint32) error {
