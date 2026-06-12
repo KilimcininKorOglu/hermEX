@@ -1,7 +1,10 @@
 // Package mime parses RFC 5322 / MIME messages into the structures the mail
-// protocols need. It currently extracts the message envelope (the addressing
-// and identification headers IMAP's ENVELOPE response is built from); body and
-// MIME-tree decomposition are added as later slices require them.
+// protocols need: the message envelope (the addressing and identification
+// headers IMAP's ENVELOPE response is built from, see ParseEnvelope) and the
+// full MIME body tree with byte-exact section extraction (ParseStructure,
+// Part, and Section, which back IMAP's BODYSTRUCTURE and BODY[...] fetches).
+// Parsing preserves the source bytes verbatim — no transfer decoding, no
+// line-ending normalization — so fetched sections match what was stored.
 package mime
 
 import (
