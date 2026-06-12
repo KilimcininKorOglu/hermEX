@@ -87,10 +87,12 @@ func (s *Store) ensureObjectSchema() error {
 				return fmt.Errorf("exec %q: %w", firstLine(stmt), err)
 			}
 		}
-		_, err := s.objdb.Exec(
+		if _, err := s.objdb.Exec(
 			`INSERT INTO configurations (config_id, config_value) VALUES (?, ?)`,
-			cfgSchemaVersion, objectSchemaVersion)
-		return err
+			cfgSchemaVersion, objectSchemaVersion); err != nil {
+			return err
+		}
+		return s.seedStore()
 	}
 	if err != nil {
 		return err
