@@ -112,3 +112,20 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+
+  webmail:
+    profiles: ["stack"]
+    container_name: hermex-webmail
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: ["/usr/local/bin/hermex-webmail", "-config", "/config/config.json"]
+    volumes:
+      - ./docker-data/mailboxes:/data/mailboxes
+      - ./docker-data/config.json:/config/config.json:ro
+    ports:
+      - "8144:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped

@@ -4,5 +4,6 @@
   "hostname": "mail.hermex.test",
   "smtp_addr": ":25",
   "pop3_addr": ":110",
-  "imap_addr": ":143"
+  "imap_addr": ":143",
+  "webmail_addr": ":8080"
 }
