@@ -281,11 +281,17 @@ func headerMatch(cur *tokenCursor, field string) (matcher, error) {
 }
 
 // headerContains matches messages whose header field contains needle,
-// case-insensitively. An empty needle matches any message that has the field.
+// case-insensitively. Per RFC 3501, an empty needle matches any message that
+// merely HAS the field, so an absent field never matches.
 func headerContains(field, needle string) matcher {
 	low := strings.ToLower(needle)
 	return func(s *searchCtx) bool {
-		return strings.Contains(strings.ToLower(s.header(field)), low)
+		s.load()
+		vals := s.hdr.Values(field)
+		if len(vals) == 0 {
+			return false
+		}
+		return strings.Contains(strings.ToLower(strings.Join(vals, " ")), low)
 	}
 }
 
