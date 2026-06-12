@@ -1,6 +1,7 @@
 package webmail
 
 import (
+	"bytes"
 	"fmt"
 	stdmime "mime"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/directory"
 	"hermex/internal/mta"
 	"hermex/internal/store"
 )
@@ -19,10 +21,16 @@ const sentName = "Sent"
 // compose and a reply/forward prefill.
 type composeView struct {
 	Title        string
+	From         string   // selected sender (defaults to the session user)
+	FromOptions  []string // identities the user may send as (own address + aliases)
 	To           string
 	Cc           string
+	Bcc          string
 	Subject      string
 	Body         string
+	Importance   string // "", "high", "low"
+	Sensitivity  string // "", "personal", "private", "confidential"
+	ReadReceipt  bool
 	InReplyTo    string // carried as a hidden field, written as In-Reply-To on send
 	References   string // carried as a hidden field, written as References on send
 	AttachFolder string // forward-as-attachment: source folder to embed at send
@@ -31,15 +39,47 @@ type composeView struct {
 	Notice       string
 }
 
+// identities returns the addresses user may send as. It fails closed: if the
+// directory cannot enumerate identities, the user may still send as themselves
+// but as no one else.
+func (s *Server) identities(user string) []string {
+	id, ok := s.auth.(directory.Identifier)
+	if !ok {
+		return []string{user}
+	}
+	addrs, err := id.Identities(user)
+	if err != nil || len(addrs) == 0 {
+		return []string{user}
+	}
+	return addrs
+}
+
+// gateFrom returns submitted if it is one of the user's permitted identities
+// (case-insensitive), else the session user. The submitted value is never
+// emitted unless authorized, so an editable From cannot spoof another sender.
+func gateFrom(submitted, sessUser string, allowed []string) string {
+	want := strings.ToLower(strings.TrimSpace(submitted))
+	if want == "" {
+		return sessUser
+	}
+	for _, a := range allowed {
+		if strings.ToLower(a) == want {
+			return submitted
+		}
+	}
+	return sessUser
+}
+
 func (s *Server) handleComposeForm(w http.ResponseWriter, r *http.Request) {
 	sess, ok := s.sessionFrom(r)
 	if !ok {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
+	idents := s.identities(sess.user)
 	action := r.URL.Query().Get("action")
 	if action == "" {
-		s.render(w, "compose", composeView{Title: "New message"})
+		s.render(w, "compose", composeView{Title: "New message", From: sess.user, FromOptions: idents})
 		return
 	}
 	// Reply/forward variants prefill from a source message.
@@ -70,7 +110,10 @@ func (s *Server) handleComposeForm(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	s.render(w, "compose", buildComposeFromSource(action, folder, uint32(uid64), raw, sess.user))
+	v := buildComposeFromSource(action, folder, uint32(uid64), raw, sess.user)
+	v.From = sess.user
+	v.FromOptions = idents
+	s.render(w, "compose", v)
 }
 
 func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
@@ -79,12 +122,19 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
+	idents := s.identities(sess.user)
 	v := composeView{
 		Title:        "New message",
+		From:         gateFrom(r.FormValue("from"), sess.user, idents),
+		FromOptions:  idents,
 		To:           strings.TrimSpace(r.FormValue("to")),
 		Cc:           strings.TrimSpace(r.FormValue("cc")),
+		Bcc:          strings.TrimSpace(r.FormValue("bcc")),
 		Subject:      r.FormValue("subject"),
 		Body:         r.FormValue("body"),
+		Importance:   r.FormValue("importance"),
+		Sensitivity:  r.FormValue("sensitivity"),
+		ReadReceipt:  r.FormValue("readreceipt") != "",
 		InReplyTo:    strings.TrimSpace(r.FormValue("inreplyto")),
 		References:   strings.TrimSpace(r.FormValue("references")),
 		AttachFolder: r.FormValue("attachfolder"),
@@ -92,6 +142,7 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	recipients := append(splitAddresses(v.To), splitAddresses(v.Cc)...)
+	recipients = append(recipients, splitAddresses(v.Bcc)...)
 	if len(recipients) == 0 {
 		v.Error = "At least one recipient is required."
 		s.render(w, "compose", v)
@@ -99,14 +150,17 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	o := outgoing{
-		From:       sess.user,
-		To:         v.To,
-		Cc:         v.Cc,
-		Subject:    v.Subject,
-		Body:       v.Body,
-		InReplyTo:  v.InReplyTo,
-		References: v.References,
-		Hostname:   s.hostname,
+		From:        v.From,
+		To:          v.To,
+		Cc:          v.Cc,
+		Subject:     v.Subject,
+		Body:        v.Body,
+		Importance:  v.Importance,
+		Sensitivity: v.Sensitivity,
+		ReadReceipt: v.ReadReceipt,
+		InReplyTo:   v.InReplyTo,
+		References:  v.References,
+		Hostname:    s.hostname,
 	}
 	// Forward-as-attachment embeds the source message verbatim as message/rfc822.
 	if v.AttachFolder != "" && v.AttachUID != "" {
@@ -114,15 +168,18 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 			o.Embed = embed
 		}
 	}
-	raw := buildMessage(o)
+	// Build the wire message once (no Bcc header — Bcc must not reach To/Cc/Bcc
+	// recipients). The sender's Sent copy carries a Bcc header for the record.
+	deliveryRaw := buildMessage(o)
+	sentRaw := insertBcc(deliveryRaw, v.Bcc)
 
-	unresolved, err := mta.Deliver(s.accounts, recipients, raw, time.Now())
+	unresolved, err := mta.Deliver(s.accounts, recipients, deliveryRaw, time.Now())
 	if err != nil {
 		v.Error = "Delivery failed: " + err.Error()
 		s.render(w, "compose", v)
 		return
 	}
-	if err := saveToSent(sess.mailboxPath, raw); err != nil {
+	if err := saveToSent(sess.mailboxPath, sentRaw); err != nil {
 		v.Error = "Saved no Sent copy: " + err.Error()
 		s.render(w, "compose", v)
 		return
@@ -133,12 +190,35 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 	// rather than pretend they were delivered.
 	if len(unresolved) > 0 {
 		s.render(w, "compose", composeView{
-			Title:  "New message",
-			Notice: "Delivered locally and saved to Sent. No local mailbox (and no external relay yet) for: " + strings.Join(unresolved, ", "),
+			Title:       "New message",
+			From:        sess.user,
+			FromOptions: idents,
+			Notice:      "Delivered locally and saved to Sent. No local mailbox (and no external relay yet) for: " + strings.Join(unresolved, ", "),
 		})
 		return
 	}
 	http.Redirect(w, r, "/mail?folder="+sentName, http.StatusSeeOther)
+}
+
+// insertBcc returns raw with a Bcc header spliced into the top-level header
+// block (just before the header/body separator). The delivered wire copy never
+// carries Bcc; only the sender's Sent copy does, so recipients cannot see the
+// blind-copy list.
+func insertBcc(raw []byte, bcc string) []byte {
+	bcc = strings.TrimSpace(bcc)
+	if bcc == "" {
+		return raw
+	}
+	i := bytes.Index(raw, []byte("\r\n\r\n"))
+	if i < 0 {
+		return raw
+	}
+	var b bytes.Buffer
+	b.Write(raw[:i])
+	b.WriteString("\r\nBcc: ")
+	b.WriteString(bcc)
+	b.Write(raw[i:])
+	return b.Bytes()
 }
 
 // loadRaw opens the mailbox and returns one message's raw bytes by folder path
@@ -166,15 +246,18 @@ func (s *Server) loadRaw(mailboxPath, folder, uidStr string) ([]byte, error) {
 
 // outgoing is the set of fields buildMessage assembles into an RFC 5322 message.
 type outgoing struct {
-	From       string
-	To         string
-	Cc         string
-	Subject    string
-	Body       string
-	InReplyTo  string
-	References string
-	Embed      []byte // when set, the message is multipart/mixed with this raw embedded as message/rfc822
-	Hostname   string
+	From        string
+	To          string
+	Cc          string
+	Subject     string
+	Body        string
+	Importance  string // "high"/"low" → X-Priority + Importance headers
+	Sensitivity string // "personal"/"private"/"confidential" → Sensitivity header
+	ReadReceipt bool   // → Disposition-Notification-To (RFC 8098)
+	InReplyTo   string
+	References  string
+	Embed       []byte // when set, the message is multipart/mixed with this raw embedded as message/rfc822
+	Hostname    string
 }
 
 // buildMessage assembles an RFC 5322 message from the compose fields. With
@@ -200,6 +283,23 @@ func buildMessage(o outgoing) []byte {
 	}
 	if o.References != "" {
 		fmt.Fprintf(&b, "References: %s\r\n", o.References)
+	}
+	switch o.Importance {
+	case "high":
+		b.WriteString("X-Priority: 1\r\nImportance: high\r\n")
+	case "low":
+		b.WriteString("X-Priority: 5\r\nImportance: low\r\n")
+	}
+	switch o.Sensitivity {
+	case "personal":
+		b.WriteString("Sensitivity: Personal\r\n")
+	case "private":
+		b.WriteString("Sensitivity: Private\r\n")
+	case "confidential":
+		b.WriteString("Sensitivity: Company-Confidential\r\n")
+	}
+	if o.ReadReceipt && o.From != "" {
+		fmt.Fprintf(&b, "Disposition-Notification-To: %s\r\n", o.From)
 	}
 	b.WriteString("MIME-Version: 1.0\r\n")
 

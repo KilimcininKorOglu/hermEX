@@ -11,6 +11,12 @@
       <input type="hidden" name="attachfolder" value="{{.AttachFolder}}">
       <input type="hidden" name="attachuid" value="{{.AttachUID}}">
       <div class="field">
+        <label>From</label>
+        <select name="from">
+          {{range .FromOptions}}<option value="{{.}}"{{if eq . $.From}} selected{{end}}>{{.}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
         <label>To</label>
         <input name="to" value="{{.To}}" placeholder="user@example.com, other@example.com" autofocus>
       </div>
@@ -19,8 +25,28 @@
         <input name="cc" value="{{.Cc}}" placeholder="cc@example.com">
       </div>
       <div class="field">
+        <label>Bcc</label>
+        <input name="bcc" value="{{.Bcc}}" placeholder="bcc@example.com">
+      </div>
+      <div class="field">
         <label>Subject</label>
         <input name="subject" value="{{.Subject}}">
+      </div>
+      <div class="field options">
+        <label>Importance</label>
+        <select name="importance">
+          <option value=""{{if eq .Importance ""}} selected{{end}}>Normal</option>
+          <option value="high"{{if eq .Importance "high"}} selected{{end}}>High</option>
+          <option value="low"{{if eq .Importance "low"}} selected{{end}}>Low</option>
+        </select>
+        <label>Sensitivity</label>
+        <select name="sensitivity">
+          <option value=""{{if eq .Sensitivity ""}} selected{{end}}>Normal</option>
+          <option value="personal"{{if eq .Sensitivity "personal"}} selected{{end}}>Personal</option>
+          <option value="private"{{if eq .Sensitivity "private"}} selected{{end}}>Private</option>
+          <option value="confidential"{{if eq .Sensitivity "confidential"}} selected{{end}}>Confidential</option>
+        </select>
+        <label class="check"><input type="checkbox" name="readreceipt" value="1"{{if .ReadReceipt}} checked{{end}}> Request read receipt</label>
       </div>
       <div class="field">
         <label>Message</label>

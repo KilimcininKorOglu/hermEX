@@ -106,11 +106,10 @@ func TestWebmailReplyPrefill(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("replyall prefill = %d", code)
 	}
-	if !strings.Contains(body, "carol@example.com") || !strings.Contains(body, "dave@example.com") {
-		t.Errorf("replyall Cc missing other recipients: %s", body)
-	}
-	if strings.Contains(body, "alice@hermex.test") {
-		t.Errorf("replyall must not include self in recipients: %s", body)
+	// Exact Cc value proves carol+dave are present while self (alice) and the
+	// sender (bob, already in To) are excluded.
+	if !strings.Contains(body, `name="cc" value="Carol &lt;carol@example.com&gt;, dave@example.com"`) {
+		t.Errorf("replyall Cc is not exactly the other recipients: %s", body)
 	}
 
 	// Forward: Fwd: subject, forwarded banner, no In-Reply-To linkage.
