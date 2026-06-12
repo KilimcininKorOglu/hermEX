@@ -22,15 +22,22 @@
 {{define "messagelist"}}
 {{if .Messages}}
 <table class="messages">
-  {{range .Messages}}
-  <tr class="{{if not .Seen}}unread{{end}}">
-    <td class="from">{{.From}}</td>
-    <td class="subject"><a href="/message?folder={{$.Current}}&amp;uid={{.UID}}">{{.Subject}}</a></td>
-    <td class="date">{{.Date}}</td>
-  </tr>
-  {{end}}
+  {{range .Messages}}{{template "messagerow" .}}{{end}}
 </table>
 {{else}}
 <div class="empty">No messages in this folder.</div>
 {{end}}
+{{end}}
+
+{{define "messagerow"}}
+<tr id="msg-{{.UID}}" class="{{if not .Seen}}unread{{end}}{{if .Flagged}} flagged{{end}}">
+  <td class="from">{{.From}}</td>
+  <td class="subject"><a href="/message?folder={{.Folder}}&uid={{.UID}}">{{.Subject}}</a></td>
+  <td class="date">{{.Date}}</td>
+  <td class="actions">
+    <button hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=toggleseen" hx-target="#msg-{{.UID}}" hx-swap="outerHTML">{{if .Seen}}Unread{{else}}Read{{end}}</button>
+    <button hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=toggleflag" hx-target="#msg-{{.UID}}" hx-swap="outerHTML">{{if .Flagged}}Unstar{{else}}Star{{end}}</button>
+    <button class="danger" hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=delete" hx-target="#msg-{{.UID}}" hx-swap="delete" hx-confirm="Delete this message?">Delete</button>
+  </td>
+</tr>
 {{end}}

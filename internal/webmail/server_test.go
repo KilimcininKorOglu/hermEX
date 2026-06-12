@@ -301,3 +301,66 @@ func TestWebmailCompose(t *testing.T) {
 		t.Errorf("unresolved recipient not surfaced: %s", nbody)
 	}
 }
+
+func postAction(t *testing.T, c *http.Client, ts *httptest.Server, query string) (int, string) {
+	t.Helper()
+	resp, err := c.Post(ts.URL+"/action?"+query, "application/x-www-form-urlencoded", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, string(b)
+}
+
+func TestWebmailActions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alice.sqlite3")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inbox, err := st.CreateFolder(nil, inboxName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AppendMessage(inbox, []byte("From: a@example.com\r\nSubject: act\r\n\r\nx"), time.Unix(1, 0), 0); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	// Toggle \Seen: the returned row partial flips to offering "Unread".
+	code, body := postAction(t, c, ts, "folder=INBOX&uid=1&op=toggleseen")
+	if code != 200 || !strings.Contains(body, `id="msg-1"`) || !strings.Contains(body, "Unread") {
+		t.Fatalf("toggleseen row = %d %q", code, body)
+	}
+	// Toggle \Flagged: the row gains the flagged class.
+	if _, body := postAction(t, c, ts, "folder=INBOX&uid=1&op=toggleflag"); !strings.Contains(body, "flagged") {
+		t.Errorf("toggleflag row missing flagged class: %s", body)
+	}
+
+	st2, _ := store.Open(path)
+	if f, _ := st2.MessageFlags(inbox, 1); f&store.FlagSeen == 0 || f&store.FlagFlagged == 0 {
+		t.Errorf("flags not persisted: %d", f)
+	}
+	st2.Close()
+
+	// Delete moves the message to Trash (empty body; htmx removes the row).
+	if code, body := postAction(t, c, ts, "folder=INBOX&uid=1&op=delete"); code != 200 || strings.TrimSpace(body) != "" {
+		t.Errorf("delete = %d %q", code, body)
+	}
+	st3, _ := store.Open(path)
+	defer st3.Close()
+	if msgs, _ := st3.ListMessages(inbox); len(msgs) != 0 {
+		t.Errorf("INBOX still has %d messages after delete", len(msgs))
+	}
+	trash, ok, _ := st3.FolderByName(nil, "Trash")
+	if !ok {
+		t.Fatal("Trash not created on delete")
+	}
+	if msgs, _ := st3.ListMessages(trash); len(msgs) != 1 {
+		t.Errorf("Trash has %d messages, want 1", len(msgs))
+	}
+}
