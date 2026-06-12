@@ -135,6 +135,47 @@ func (d *SQLDirectory) Resolve(address string) (string, bool) {
 	return d.storePath(row.maildir), true
 }
 
+// Identities implements Identifier: the addresses login may send as — its
+// canonical username plus every alias (aliases.mainname) and altname
+// (altnames.user_id) bound to that user. login may itself be a username, alias,
+// or altname; an unknown login yields no identities (the webmail then permits
+// send-as-self only).
+func (d *SQLDirectory) Identities(login string) ([]string, error) {
+	login = strings.ToLower(strings.TrimSpace(login))
+	var id int64
+	var username string
+	err := d.db.QueryRow(`
+SELECT u.id, u.username FROM users u WHERE u.username = ?
+UNION
+SELECT u.id, u.username FROM users u JOIN aliases al ON al.mainname = u.username WHERE al.aliasname = ?
+UNION
+SELECT u.id, u.username FROM users u JOIN altnames a ON a.user_id = u.id WHERE a.altname = ?
+LIMIT 1`, login, login, login).Scan(&id, &username)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := []string{username}
+	rows, err := d.db.Query(`
+SELECT aliasname FROM aliases WHERE mainname = ?
+UNION
+SELECT altname FROM altnames WHERE user_id = ?`, username, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // CreateDomain inserts a domain and returns its id, creating its homedir on disk.
 func (d *SQLDirectory) CreateDomain(domainname, homedir string) (int64, error) {
 	res, err := d.db.Exec(

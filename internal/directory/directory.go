@@ -30,6 +30,15 @@ type Authenticator interface {
 	Authenticate(user, password string) (mailboxPath string, ok bool)
 }
 
+// Identifier optionally enumerates the addresses a user is permitted to send
+// as: their primary address plus any aliases/altnames. It backs the webmail
+// From/send-as gating, which must reject any From not in this set. Directories
+// that do not implement it offer send-as-self only. On-behalf/delegate sending
+// is a separate permissions feature, out of scope here.
+type Identifier interface {
+	Identities(user string) ([]string, error)
+}
+
 // StaticAccounts is a fixed map of lowercase address/username to Account. It
 // implements both Accounts and Authenticator and suits tests and small
 // deployments.
@@ -42,6 +51,14 @@ func (a StaticAccounts) Resolve(address string) (string, bool) {
 		return "", false
 	}
 	return acc.MailboxPath, true
+}
+
+// Identities implements Identifier: a static account may send only as itself.
+func (a StaticAccounts) Identities(user string) ([]string, error) {
+	if _, ok := a[strings.ToLower(user)]; !ok {
+		return nil, nil
+	}
+	return []string{strings.ToLower(user)}, nil
 }
 
 // Authenticate implements Authenticator using a constant-time password compare.
