@@ -4,7 +4,33 @@ import (
 	"bytes"
 	"os"
 	"testing"
+
+	"hermex/internal/mapi"
 )
+
+// TestIsCIDProp checks the offload predicate: bodies, transport headers, and
+// attachment payloads are offloaded; ordinary scalar/string properties are not.
+func TestIsCIDProp(t *testing.T) {
+	offloaded := []mapi.PropTag{
+		mapi.PrBody, mapi.PrBodyA, mapi.PrHTML, mapi.PrRTFCompressed,
+		mapi.PrTransportMessageHeaders, mapi.PrTransportMessageHeadersA,
+		mapi.PrAttachDataBin, mapi.PrAttachDataObj,
+	}
+	for _, tag := range offloaded {
+		if !isCIDProp(tag) {
+			t.Errorf("%s should be cid-offloaded", tag)
+		}
+	}
+	inline := []mapi.PropTag{
+		mapi.PrDisplayName, mapi.PrComment, mapi.PrCreationTime,
+		mapi.PrInternetArticleNumber, mapi.PrChangeKey,
+	}
+	for _, tag := range inline {
+		if isCIDProp(tag) {
+			t.Errorf("%s should be stored inline, not offloaded", tag)
+		}
+	}
+}
 
 func TestContentRoundTripAndDedup(t *testing.T) {
 	s := openTestStore(t)
