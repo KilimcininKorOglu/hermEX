@@ -1,8 +1,8 @@
 name: hermex
 
 # Development environment for hermEX. The dev container holds the Go toolchain;
-# a MariaDB service backs the directory (account/domain) integration tests. No
-# host ports are published here — service ports (8140-8149) live in the stack.
+# a MariaDB service backs the directory integration tests. Every persistent
+# volume is a bind mount under docker-data/ (no Docker named volumes).
 services:
   dev:
     container_name: hermex-dev
@@ -12,8 +12,8 @@ services:
     working_dir: /src
     volumes:
       - .:/src
-      - hermex-go-build:/root/.cache/go-build
-      - hermex-go-mod:/go/pkg/mod
+      - ./docker-data/cache/go-build:/root/.cache/go-build
+      - ./docker-data/cache/go-mod:/go/pkg/mod
       - ./docker-data:/data
     environment:
       - HERMEX_DATA_DIR=/data
@@ -30,14 +30,9 @@ services:
       - MARIADB_ROOT_PASSWORD=hermexdev
       - MARIADB_DATABASE=email
     volumes:
-      - hermex-mariadb:/var/lib/mysql
+      - ./docker-data/dev-db:/var/lib/mysql
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 5s
       timeout: 5s
       retries: 20
-
-volumes:
-  hermex-go-build:
-  hermex-go-mod:
-  hermex-mariadb:
