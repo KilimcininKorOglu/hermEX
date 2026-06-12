@@ -31,6 +31,20 @@ const (
 	PrAssocMessageSizeExtended  = PropTag(0x66B40014) // PtI8
 )
 
+// Large message/attachment content property tags. These hold bodies and
+// attachment payloads and are offloaded to content-addressed files rather than
+// stored inline in the property tables.
+const (
+	PrBody                     = PropTag(0x1000001F) // PtUnicode (PidTagBody)
+	PrBodyA                    = PropTag(0x1000001E) // PtString8
+	PrHTML                     = PropTag(0x10130102) // PtBinary (PidTagHtml)
+	PrRTFCompressed            = PropTag(0x10090102) // PtBinary
+	PrTransportMessageHeaders  = PropTag(0x007D001F) // PtUnicode
+	PrTransportMessageHeadersA = PropTag(0x007D001E) // PtString8
+	PrAttachDataBin            = PropTag(0x37010102) // PtBinary (PidTagAttachDataBinary)
+	PrAttachDataObj            = PropTag(0x3701000D) // PtObject
+)
+
 // Common container classes for default folders (PR_CONTAINER_CLASS values).
 const (
 	ContainerClassNote        = "IPF.Note"        // mail folders
