@@ -46,6 +46,19 @@ func newTestServer(t *testing.T, path string) *httptest.Server {
 	return ts
 }
 
+// authedClient returns an http.Client whose cookie jar holds a valid session.
+func authedClient(t *testing.T, ts *httptest.Server) *http.Client {
+	t.Helper()
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	resp, err := c.PostForm(ts.URL+"/login", url.Values{"user": {"alice@hermex.test"}, "password": {"secret"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	return c
+}
+
 func get(t *testing.T, c *http.Client, url string) (int, string) {
 	t.Helper()
 	resp, err := c.Get(url)
@@ -114,5 +127,63 @@ func TestWebmailLoginAndList(t *testing.T) {
 	}
 	if code, body := get(t, c, ts.URL+"/mail"); code != 200 || !strings.Contains(body, "Sign in") {
 		t.Fatalf("post-logout /mail did not return to login: %d", code)
+	}
+}
+
+func TestWebmailReadMessage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alice.sqlite3")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inbox, err := st.CreateFolder(nil, inboxName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := "From: A <a@example.com>\r\nTo: alice@hermex.test\r\nSubject: plain hello\r\n\r\nThis is plain text.\r\n"
+	if _, err := st.AppendMessage(inbox, []byte(plain), time.Unix(1, 0), 0); err != nil {
+		t.Fatal(err)
+	}
+	multipart := "From: B <b@example.com>\r\nTo: alice@hermex.test\r\nSubject: with attachment\r\n" +
+		"MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"X\"\r\n\r\n" +
+		"--X\r\nContent-Type: text/plain\r\n\r\nSee attached.\r\n" +
+		"--X\r\nContent-Type: application/octet-stream; name=\"data.bin\"\r\n" +
+		"Content-Transfer-Encoding: base64\r\nContent-Disposition: attachment; filename=\"data.bin\"\r\n\r\n" +
+		"SGVsbG8=\r\n--X--\r\n"
+	if _, err := st.AppendMessage(inbox, []byte(multipart), time.Unix(2, 0), 0); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	// Plain message: body and headers render.
+	code, body := get(t, c, ts.URL+"/message?folder=INBOX&uid=1")
+	if code != 200 || !strings.Contains(body, "This is plain text.") {
+		t.Fatalf("read plain = %d, body? %v", code, strings.Contains(body, "This is plain text."))
+	}
+	if !strings.Contains(body, "plain hello") || !strings.Contains(body, "a@example.com") {
+		t.Errorf("plain message headers missing")
+	}
+
+	// Reading marked it \Seen in the store.
+	st2, _ := store.Open(path)
+	flags, _ := st2.MessageFlags(inbox, 1)
+	st2.Close()
+	if flags&store.FlagSeen == 0 {
+		t.Errorf("reading did not set \\Seen (flags=%d)", flags)
+	}
+
+	// Multipart message: text body plus an attachment with a download link.
+	code, body = get(t, c, ts.URL+"/message?folder=INBOX&uid=2")
+	if code != 200 || !strings.Contains(body, "See attached.") {
+		t.Fatalf("read multipart = %d", code)
+	}
+	if !strings.Contains(body, "data.bin") {
+		t.Errorf("attachment filename missing: %s", body)
+	}
+	if !strings.Contains(body, "uid=2&amp;part=2") {
+		t.Errorf("attachment download link (part=2) missing")
 	}
 }

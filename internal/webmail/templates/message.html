@@ -1,0 +1,32 @@
+{{define "message"}}{{template "head" .}}
+<div class="reader">
+  <div class="reader-toolbar">
+    <a href="/mail?folder={{.Folder}}">&larr; Back to {{.Folder}}</a>
+  </div>
+  <div class="reader-headers">
+    <h2>{{.Subject}}</h2>
+    <div class="hrow"><span class="hlabel">From</span> {{.From}}</div>
+    <div class="hrow"><span class="hlabel">To</span> {{.To}}</div>
+    {{if .Cc}}<div class="hrow"><span class="hlabel">Cc</span> {{.Cc}}</div>{{end}}
+    <div class="hrow"><span class="hlabel">Date</span> {{.Date}}</div>
+  </div>
+  {{if .Attachments}}
+  <div class="attachments">
+    <strong>Attachments</strong>
+    <ul>
+      {{range .Attachments}}
+      <li><a href="/attachment?folder={{$.Folder}}&amp;uid={{$.UID}}&amp;part={{.Section}}">{{.Filename}}</a>
+        <span class="muted">{{.ContentType}}, {{.Size}} bytes</span></li>
+      {{end}}
+    </ul>
+  </div>
+  {{end}}
+  <div class="reader-body">
+    {{if .IsHTML}}
+    <iframe class="htmlbody" sandbox="" srcdoc="{{.Body}}"></iframe>
+    {{else}}
+    <pre class="plainbody">{{.Body}}</pre>
+    {{end}}
+  </div>
+</div>
+{{template "foot" .}}{{end}}
