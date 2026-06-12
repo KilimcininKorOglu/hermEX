@@ -1,0 +1,205 @@
+package oxcmail
+
+import (
+	"bytes"
+	stdmime "mime"
+	"net/mail"
+	"testing"
+	"time"
+
+	"hermex/internal/mapi"
+)
+
+// plainVector is a distinct-byte plain-text message used by the round-trip
+// tests.
+var plainVector = []byte("From: Alice Example <alice@example.com>\r\n" +
+	"To: Bob <bob@example.org>, carol@example.net\r\n" +
+	"Cc: Dave <dave@example.com>\r\n" +
+	"Subject: Re: Project status\r\n" +
+	"Date: Mon, 02 Jan 2006 15:04:05 +0000\r\n" +
+	"Message-ID: <msg123@example.com>\r\n" +
+	"References: <prev1@example.com> <prev2@example.com>\r\n" +
+	"In-Reply-To: <prev2@example.com>\r\n" +
+	"Importance: High\r\n" +
+	"\r\n" +
+	"Hello,\r\nThis is the body.\r\n")
+
+// TestExportWellFormed checks that Export produces a message a standard,
+// independent parser (net/mail) accepts, with the key headers decoding to the
+// expected values.
+func TestExportWellFormed(t *testing.T) {
+	msg, err := Import(plainVector, Options{})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	wire, err := Export(msg, Options{})
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+
+	m, err := mail.ReadMessage(bytes.NewReader(wire))
+	if err != nil {
+		t.Fatalf("exported message not parseable by net/mail: %v\n%s", err, wire)
+	}
+
+	from, err := mail.ParseAddress(m.Header.Get("From"))
+	if err != nil {
+		t.Fatalf("From not parseable: %v", err)
+	}
+	if from.Address != "alice@example.com" {
+		t.Errorf("From address = %q", from.Address)
+	}
+	if from.Name != "Alice Example" {
+		t.Errorf("From name = %q", from.Name)
+	}
+	// A message that named only From must not gain a Sender header.
+	if s := m.Header.Get("Sender"); s != "" {
+		t.Errorf("unexpected Sender header %q", s)
+	}
+
+	to, err := m.Header.AddressList("To")
+	if err != nil {
+		t.Fatalf("To not parseable: %v", err)
+	}
+	if len(to) != 2 || to[0].Address != "bob@example.org" || to[1].Address != "carol@example.net" {
+		t.Errorf("To = %+v", to)
+	}
+	cc, err := m.Header.AddressList("Cc")
+	if err != nil || len(cc) != 1 || cc[0].Address != "dave@example.com" {
+		t.Errorf("Cc = %+v (err %v)", cc, err)
+	}
+
+	subj, err := (&stdmime.WordDecoder{}).DecodeHeader(m.Header.Get("Subject"))
+	if err != nil {
+		t.Fatalf("Subject decode: %v", err)
+	}
+	if subj != "Re: Project status" {
+		t.Errorf("Subject = %q", subj)
+	}
+
+	if got := m.Header.Get("Message-ID"); got != "<msg123@example.com>" {
+		t.Errorf("Message-ID = %q", got)
+	}
+
+	d, err := m.Header.Date()
+	if err != nil {
+		t.Fatalf("Date parse: %v", err)
+	}
+	if want := time.Date(2006, 1, 2, 15, 4, 5, 0, time.UTC); !d.Equal(want) {
+		t.Errorf("Date = %v, want %v", d, want)
+	}
+
+	body := make([]byte, 1024)
+	n, _ := m.Body.Read(body)
+	if got := string(body[:n]); got != "Hello,\r\nThis is the body.\r\n" {
+		t.Errorf("body = %q", got)
+	}
+}
+
+// TestExportImportRoundTrip checks that Export(Import(raw)) re-imports to the
+// same core property set: the convert path preserves meaning even though the
+// bytes are regenerated.
+func TestExportImportRoundTrip(t *testing.T) {
+	msg1, err := Import(plainVector, Options{})
+	if err != nil {
+		t.Fatalf("Import 1: %v", err)
+	}
+	wire, err := Export(msg1, Options{})
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	msg2, err := Import(wire, Options{})
+	if err != nil {
+		t.Fatalf("Import 2: %v", err)
+	}
+
+	stringProps := []mapi.PropTag{
+		mapi.PrSubject, mapi.PrSubjectPrefix, mapi.PrNormalizedSubject,
+		mapi.PrSentRepresentingName, mapi.PrSentRepresentingSmtpAddress,
+		mapi.PrSenderSmtpAddress, mapi.PrInternetMessageID,
+		mapi.PrInternetReferences, mapi.PrInReplyToID, mapi.PrBody,
+	}
+	for _, tag := range stringProps {
+		v1 := propString(msg1.Props, tag)
+		v2 := propString(msg2.Props, tag)
+		if v1 != v2 {
+			t.Errorf("%s drifted: %q -> %q", tag, v1, v2)
+		}
+	}
+
+	int32Props := []mapi.PropTag{mapi.PrImportance, mapi.PrSensitivity}
+	for _, tag := range int32Props {
+		v1, _ := propInt32(msg1.Props, tag)
+		v2, _ := propInt32(msg2.Props, tag)
+		if v1 != v2 {
+			t.Errorf("%s drifted: %d -> %d", tag, v1, v2)
+		}
+	}
+
+	if v1, _ := propUint64(msg1.Props, mapi.PrClientSubmitTime); true {
+		v2, _ := propUint64(msg2.Props, mapi.PrClientSubmitTime)
+		if v1 != v2 {
+			t.Errorf("submit time drifted: %d -> %d", v1, v2)
+		}
+	}
+
+	// Recipient set (smtp + type) must be preserved, in order.
+	if len(msg1.Recipients) != len(msg2.Recipients) {
+		t.Fatalf("recipient count drifted: %d -> %d", len(msg1.Recipients), len(msg2.Recipients))
+	}
+	for i := range msg1.Recipients {
+		s1 := propString(msg1.Recipients[i], mapi.PrSmtpAddress)
+		s2 := propString(msg2.Recipients[i], mapi.PrSmtpAddress)
+		t1, _ := propInt32(msg1.Recipients[i], mapi.PrRecipientType)
+		t2, _ := propInt32(msg2.Recipients[i], mapi.PrRecipientType)
+		if s1 != s2 || t1 != t2 {
+			t.Errorf("recipient %d drifted: (%q,%d) -> (%q,%d)", i, s1, t1, s2, t2)
+		}
+	}
+}
+
+// TestExportNonASCII checks that a non-ASCII subject and body survive the
+// convert path: the encoded-word subject and the quoted-printable body decode
+// back to the originals.
+func TestExportNonASCII(t *testing.T) {
+	raw := []byte("From: a@b.com\r\n" +
+		"Subject: =?utf-8?q?Caf=C3=A9_update?=\r\n" +
+		"Content-Type: text/plain; charset=utf-8\r\n" +
+		"Content-Transfer-Encoding: 8bit\r\n" +
+		"\r\n" +
+		"M\xc3\xa9\xc3\xa9sti \xc3\xa7ay\r\n")
+
+	msg1, err := Import(raw, Options{})
+	if err != nil {
+		t.Fatalf("Import 1: %v", err)
+	}
+	if got := propString(msg1.Props, mapi.PrSubject); got != "Café update" {
+		t.Fatalf("subject after import = %q", got)
+	}
+	if got := propString(msg1.Props, mapi.PrBody); got != "Méésti çay\r\n" {
+		t.Fatalf("body after import = %q", got)
+	}
+
+	wire, err := Export(msg1, Options{})
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	// The exported header block must be ASCII (the subject is encoded).
+	headEnd := bytes.Index(wire, []byte("\r\n\r\n"))
+	for i := 0; i < headEnd; i++ {
+		if wire[i] > 0x7E {
+			t.Fatalf("non-ASCII byte 0x%02x in exported header block", wire[i])
+		}
+	}
+
+	msg2, err := Import(wire, Options{})
+	if err != nil {
+		t.Fatalf("Import 2: %v", err)
+	}
+	if got := propString(msg2.Props, mapi.PrSubject); got != "Café update" {
+		t.Errorf("subject round-trip = %q", got)
+	}
+	if got := propString(msg2.Props, mapi.PrBody); got != "Méésti çay\r\n" {
+		t.Errorf("body round-trip = %q", got)
+	}
+}
