@@ -40,21 +40,26 @@ func randomGUID() (mapi.GUID, error) {
 }
 
 // seedStore writes the initial configurations rows and the first EID range for
-// a fresh mailbox: a random store GUID (also used as the mapping signature),
-// the store-level EID cursor starting at customEIDBegin with a maximum of
-// AllocatedEIDRange-1, a zero change-number counter, and the [1, max] allocated
-// range. Built-in folders are created separately and carve their own ranges.
-func (s *Store) seedStore() error {
+// a fresh mailbox: a random store GUID and an independent random mapping
+// signature, the store-level EID cursor starting at customEIDBegin with a
+// maximum of AllocatedEIDRange-1, a zero change-number counter, and the [1, max]
+// allocated range. It returns the store GUID, which the caller uses as the
+// replica GUID when seeding built-in folders (created separately, carving their
+// own ranges above this one).
+func (s *Store) seedStore() (mapi.GUID, error) {
 	g, err := randomGUID()
 	if err != nil {
-		return err
+		return mapi.GUID{}, err
 	}
-	gs := g.String()
+	sig, err := randomGUID()
+	if err != nil {
+		return mapi.GUID{}, err
+	}
 	maxEID := int64(mapi.AllocatedEIDRange) - 1
 
 	tx, err := s.objdb.Begin()
 	if err != nil {
-		return err
+		return mapi.GUID{}, err
 	}
 	defer tx.Rollback()
 
@@ -62,11 +67,11 @@ func (s *Store) seedStore() error {
 		_, err := tx.Exec(`INSERT INTO configurations (config_id, config_value) VALUES (?, ?)`, id, val)
 		return err
 	}
-	if err := ins(cfgMailboxGUID, gs); err != nil {
-		return err
+	if err := ins(cfgMailboxGUID, g.String()); err != nil {
+		return mapi.GUID{}, err
 	}
-	if err := ins(cfgMappingSignature, gs); err != nil {
-		return err
+	if err := ins(cfgMappingSignature, sig.String()); err != nil {
+		return mapi.GUID{}, err
 	}
 	for _, kv := range []struct {
 		id  int
@@ -82,15 +87,18 @@ func (s *Store) seedStore() error {
 		{cfgAnonymousPerm, 0},
 	} {
 		if err := ins(kv.id, kv.val); err != nil {
-			return err
+			return mapi.GUID{}, err
 		}
 	}
 	if _, err := tx.Exec(
 		`INSERT INTO allocated_eids (range_begin, range_end, allocate_time, is_system) VALUES (1, ?, ?, 1)`,
 		maxEID, time.Now().Unix()); err != nil {
-		return err
+		return mapi.GUID{}, err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return mapi.GUID{}, err
+	}
+	return g, nil
 }
 
 // allocateCN returns the next change number, incrementing the stored counter.
@@ -102,6 +110,21 @@ func allocateCN(q sqlExec) (uint64, error) {
 	}
 	last++
 	if _, err := q.Exec(`REPLACE INTO configurations (config_id, config_value) VALUES (?, ?)`, cfgLastChangeNumber, int64(last)); err != nil {
+		return 0, err
+	}
+	return last, nil
+}
+
+// allocateArticle returns the next per-folder article number, incrementing the
+// stored counter.
+func allocateArticle(q sqlExec) (uint64, error) {
+	var last uint64
+	err := q.QueryRow(`SELECT config_value FROM configurations WHERE config_id=?`, cfgLastArticleNumber).Scan(&last)
+	if err != nil && err != sql.ErrNoRows {
+		return 0, err
+	}
+	last++
+	if _, err := q.Exec(`REPLACE INTO configurations (config_id, config_value) VALUES (?, ?)`, cfgLastArticleNumber, int64(last)); err != nil {
 		return 0, err
 	}
 	return last, nil

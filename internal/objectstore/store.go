@@ -17,6 +17,10 @@ type Store struct {
 	dir   string
 	objdb *sql.DB
 	idxdb *sql.DB
+	// seedBuiltins controls whether a freshly created object store is
+	// provisioned with the default folder hierarchy. Real mailboxes always
+	// are; low-level allocator/property tests open a bare store instead.
+	seedBuiltins bool
 }
 
 // dsn builds the modernc.org/sqlite connection string with the pragmas applied
@@ -31,9 +35,17 @@ func dsn(path string) string {
 }
 
 // Open opens the mailbox rooted at dir, creating and initializing it (and its
-// cid/ and eml/ subdirectories) if absent. It fails if either database carries
-// an unsupported schema version.
+// cid/ and eml/ subdirectories) if absent. A freshly created mailbox is
+// provisioned with the default folder hierarchy. It fails if either database
+// carries an unsupported schema version.
 func Open(dir string) (*Store, error) {
+	return open(dir, true)
+}
+
+// open is the shared constructor. seedBuiltins selects whether a fresh object
+// store gets the default folder hierarchy; tests open a bare store to exercise
+// allocators and property tables on a controlled baseline.
+func open(dir string, seedBuiltins bool) (*Store, error) {
 	for _, sub := range []string{"", "cid", "eml"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o700); err != nil {
 			return nil, err
@@ -48,7 +60,7 @@ func Open(dir string) (*Store, error) {
 		objdb.Close()
 		return nil, err
 	}
-	s := &Store{dir: dir, objdb: objdb, idxdb: idxdb}
+	s := &Store{dir: dir, objdb: objdb, idxdb: idxdb, seedBuiltins: seedBuiltins}
 	if err := s.ensureSchema(); err != nil {
 		s.Close()
 		return nil, err
@@ -92,7 +104,14 @@ func (s *Store) ensureObjectSchema() error {
 			cfgSchemaVersion, objectSchemaVersion); err != nil {
 			return err
 		}
-		return s.seedStore()
+		guid, err := s.seedStore()
+		if err != nil {
+			return err
+		}
+		if s.seedBuiltins {
+			return s.seedMailbox(guid)
+		}
+		return nil
 	}
 	if err != nil {
 		return err

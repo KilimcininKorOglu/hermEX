@@ -42,7 +42,21 @@ func asMap(pv mapi.PropertyValues) map[mapi.PropTag]any {
 	return m
 }
 
+// openTestStore opens a bare object store (no built-in folders) so allocator
+// and property-table tests run against a controlled baseline.
 func openTestStore(t *testing.T) *Store {
+	t.Helper()
+	s, err := open(filepath.Join(t.TempDir(), "mbox"), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s
+}
+
+// openSeededStore opens a fully provisioned mailbox (the default folder
+// hierarchy seeded), as real callers get from Open.
+func openSeededStore(t *testing.T) *Store {
 	t.Helper()
 	s, err := Open(filepath.Join(t.TempDir(), "mbox"))
 	if err != nil {
