@@ -22,6 +22,14 @@ type EID uint64
 // (eid_t::GCV_MASK).
 const gcvMask uint64 = 0x0000FFFFFFFFFFFF
 
+// AllocatedEIDRange is the width of one EID allocation block and
+// ChangeNumberBegin the initial change number. The store carves the EID space
+// into AllocatedEIDRange-wide ranges as folders need ids.
+const (
+	AllocatedEIDRange uint64 = 0x10000
+	ChangeNumberBegin uint64 = 0
+)
+
 // ValueToGC encodes the low 48 bits of value as a 6-byte big-endian GlobCnt
 // (rop_util_value_to_gc).
 func ValueToGC(value uint64) GlobCnt {
