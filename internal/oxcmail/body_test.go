@@ -274,6 +274,52 @@ func TestExportRelatedRoundTrip(t *testing.T) {
 	}
 }
 
+// TestHTMLNonUTF8Charset checks that a non-UTF-8 HTML body keeps its raw bytes
+// and code page across the convert path: the HTML is stored verbatim (not
+// transcoded) and the charset round-trips through PR_INTERNET_CPID.
+func TestHTMLNonUTF8Charset(t *testing.T) {
+	// 0xe9 is "é" in ISO-8859-1; it must survive as a raw byte, not be decoded.
+	raw := []byte("From: a@b.com\r\n" +
+		"Subject: Latin\r\n" +
+		"Content-Type: text/html; charset=iso-8859-1\r\n" +
+		"Content-Transfer-Encoding: 8bit\r\n" +
+		"\r\n" +
+		"<p>caf\xe9</p>\r\n")
+
+	msg1, err := Import(raw, Options{})
+	if err != nil {
+		t.Fatalf("Import 1: %v", err)
+	}
+	h1, ok := bytesProp(msg1.Props, mapi.PrHTML)
+	if !ok || !bytes.Contains(h1, []byte{0xe9}) {
+		t.Fatalf("PR_HTML = %q, want the raw 0xe9 byte preserved", h1)
+	}
+	if v, _ := propInt32(msg1.Props, mapi.PrInternetCodepage); v != 28591 {
+		t.Fatalf("PR_INTERNET_CPID = %d, want 28591 (iso-8859-1)", v)
+	}
+
+	wire, err := Export(msg1, Options{})
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if !bytes.Contains(wire, []byte("charset=iso-8859-1")) {
+		t.Errorf("exported message lost the iso-8859-1 charset label")
+	}
+
+	msg2, err := Import(wire, Options{})
+	if err != nil {
+		t.Fatalf("Import 2: %v", err)
+	}
+	h2, _ := bytesProp(msg2.Props, mapi.PrHTML)
+	if !bytes.Equal(h1, h2) {
+		t.Errorf("PR_HTML drifted: %q -> %q", h1, h2)
+	}
+	c2, _ := propInt32(msg2.Props, mapi.PrInternetCodepage)
+	if c2 != 28591 {
+		t.Errorf("PR_INTERNET_CPID round-trip = %d, want 28591", c2)
+	}
+}
+
 // TestExportHTMLOnly checks a message with only an HTML body: import records
 // PR_HTML, export emits a single text/html body, and the HTML survives.
 func TestExportHTMLOnly(t *testing.T) {
