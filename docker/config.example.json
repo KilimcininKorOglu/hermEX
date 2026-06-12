@@ -3,5 +3,6 @@
   "data_dir": "/data/mailboxes",
   "hostname": "mail.hermex.test",
   "smtp_addr": ":25",
-  "pop3_addr": ":110"
+  "pop3_addr": ":110",
+  "imap_addr": ":143"
 }
