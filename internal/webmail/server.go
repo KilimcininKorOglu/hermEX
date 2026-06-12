@@ -38,6 +38,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /logout", s.handleLogout)
 	mux.HandleFunc("GET /mail", s.handleMail)
 	mux.HandleFunc("GET /message", s.handleMessage)
+	mux.HandleFunc("GET /attachment", s.handleAttachment)
 	mux.HandleFunc("GET /{$}", s.handleRoot)
 	return mux
 }

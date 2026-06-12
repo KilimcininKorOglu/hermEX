@@ -187,3 +187,48 @@ func TestWebmailReadMessage(t *testing.T) {
 		t.Errorf("attachment download link (part=2) missing")
 	}
 }
+
+func TestWebmailAttachmentDownload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alice.sqlite3")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inbox, err := st.CreateFolder(nil, inboxName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := "From: B <b@example.com>\r\nSubject: with attachment\r\n" +
+		"MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"X\"\r\n\r\n" +
+		"--X\r\nContent-Type: text/plain\r\n\r\nSee attached.\r\n" +
+		"--X\r\nContent-Type: application/octet-stream; name=\"data.bin\"\r\n" +
+		"Content-Transfer-Encoding: base64\r\nContent-Disposition: attachment; filename=\"data.bin\"\r\n\r\n" +
+		"SGVsbG8=\r\n--X--\r\n"
+	if _, err := st.AppendMessage(inbox, []byte(msg), time.Unix(1, 0), 0); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	resp, err := c.Get(ts.URL + "/attachment?folder=INBOX&uid=1&part=2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		t.Fatalf("attachment status = %d", resp.StatusCode)
+	}
+	// The base64 part decodes to "Hello".
+	if string(body) != "Hello" {
+		t.Errorf("attachment body = %q, want Hello", body)
+	}
+	if cd := resp.Header.Get("Content-Disposition"); !strings.Contains(cd, "data.bin") {
+		t.Errorf("Content-Disposition = %q, want filename data.bin", cd)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/octet-stream" {
+		t.Errorf("Content-Type = %q", ct)
+	}
+}
