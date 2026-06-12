@@ -37,7 +37,7 @@ func seedMailbox(t *testing.T) string {
 func newTestServer(t *testing.T, path string) *httptest.Server {
 	t.Helper()
 	auth := directory.StaticAccounts{"alice@hermex.test": {Password: "secret", MailboxPath: path}}
-	srv, err := NewServer(auth, "mail.test")
+	srv, err := NewServer(auth, auth, "mail.test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,5 +230,74 @@ func TestWebmailAttachmentDownload(t *testing.T) {
 	}
 	if ct := resp.Header.Get("Content-Type"); ct != "application/octet-stream" {
 		t.Errorf("Content-Type = %q", ct)
+	}
+}
+
+func TestWebmailCompose(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alice.sqlite3")
+	st, err := store.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Close() // start empty; delivery creates INBOX and Sent
+
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	// Compose to alice herself (a local recipient resolving to this store).
+	resp, err := c.PostForm(ts.URL+"/compose", url.Values{
+		"to":      {"alice@hermex.test"},
+		"subject": {"Hi there"},
+		"body":    {"Hello from webmail"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 {
+		t.Fatalf("compose status = %d", resp.StatusCode)
+	}
+	// The redirect lands on the Sent folder listing the new message.
+	if !strings.Contains(string(body), "Hi there") {
+		t.Errorf("Sent listing missing the composed message")
+	}
+
+	// The message was delivered to the local INBOX and copied to Sent.
+	st2, _ := store.Open(path)
+	defer st2.Close()
+	inbox, ok, _ := st2.FolderByName(nil, "INBOX")
+	if !ok {
+		t.Fatal("INBOX not created by delivery")
+	}
+	if msgs, _ := st2.ListMessages(inbox); len(msgs) != 1 {
+		t.Errorf("INBOX has %d messages, want 1", len(msgs))
+	}
+	sent, ok, _ := st2.FolderByName(nil, "Sent")
+	if !ok {
+		t.Fatal("Sent not created")
+	}
+	smsgs, _ := st2.ListMessages(sent)
+	if len(smsgs) != 1 {
+		t.Fatalf("Sent has %d messages, want 1", len(smsgs))
+	}
+	raw, _ := st2.GetMessageRaw(sent, smsgs[0].UID)
+	if !strings.Contains(string(raw), "Hello from webmail") || !strings.Contains(string(raw), "Subject: Hi there") {
+		t.Errorf("Sent copy content unexpected: %s", raw)
+	}
+
+	// A non-local recipient is reported (no relay yet), not silently dropped.
+	resp, err = c.PostForm(ts.URL+"/compose", url.Values{
+		"to":      {"nobody@external.invalid"},
+		"subject": {"x"},
+		"body":    {"y"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nbody, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(nbody), "nobody@external.invalid") {
+		t.Errorf("unresolved recipient not surfaced: %s", nbody)
 	}
 }

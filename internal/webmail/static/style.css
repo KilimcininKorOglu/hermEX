@@ -130,3 +130,28 @@ td.date { width: 150px; color: var(--muted); white-space: nowrap; }
 }
 .plainbody { white-space: pre-wrap; word-wrap: break-word; margin: 0; font-family: inherit; }
 .htmlbody { width: 100%; min-height: 480px; border: 0; }
+
+/* Compose */
+.compose-btn {
+  background: var(--accent);
+  color: #fff;
+  padding: 7px 14px;
+  border-radius: 6px;
+}
+.compose-btn:hover { background: #234e96; text-decoration: none; }
+.compose-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+}
+.compose-card h2 { margin: 0 0 16px; font-size: 18px; }
+.compose-card textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 14px;
+}
+.notice { color: #1f6f43; background: #e7f6ec; padding: 8px 12px; border-radius: 6px; margin: 0 0 14px; }

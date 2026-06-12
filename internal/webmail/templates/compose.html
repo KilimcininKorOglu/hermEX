@@ -1,0 +1,25 @@
+{{define "compose"}}{{template "head" .}}
+<div class="reader">
+  <div class="reader-toolbar"><a href="/mail?folder=INBOX">&larr; Back to mailbox</a></div>
+  <div class="compose-card">
+    <h2>New message</h2>
+    {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+    {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
+    <form method="post" action="/compose">
+      <div class="field">
+        <label>To</label>
+        <input name="to" value="{{.To}}" placeholder="user@example.com, other@example.com" autofocus>
+      </div>
+      <div class="field">
+        <label>Subject</label>
+        <input name="subject" value="{{.Subject}}">
+      </div>
+      <div class="field">
+        <label>Message</label>
+        <textarea name="body" rows="12">{{.Body}}</textarea>
+      </div>
+      <button class="primary" type="submit">Send</button>
+    </form>
+  </div>
+</div>
+{{template "foot" .}}{{end}}

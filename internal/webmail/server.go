@@ -12,20 +12,22 @@ import (
 
 // Server is the webmail HTTP application. It authenticates against the directory
 // and opens each user's mailbox store directly (in-process) per request.
+// Accounts resolves recipient addresses for local delivery of composed mail.
 type Server struct {
 	auth     directory.Authenticator
+	accounts directory.Accounts
 	hostname string
 	tmpl     *template.Template
 	sessions *sessionStore
 }
 
 // NewServer builds a webmail server, compiling the embedded templates.
-func NewServer(auth directory.Authenticator, hostname string) (*Server, error) {
+func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostname string) (*Server, error) {
 	tmpl, err := template.ParseFS(templateFS, "templates/*.html")
 	if err != nil {
 		return nil, err
 	}
-	return &Server{auth: auth, hostname: hostname, tmpl: tmpl, sessions: newSessionStore()}, nil
+	return &Server{auth: auth, accounts: accounts, hostname: hostname, tmpl: tmpl, sessions: newSessionStore()}, nil
 }
 
 // Handler returns the HTTP handler serving the webmail application.
@@ -39,6 +41,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /mail", s.handleMail)
 	mux.HandleFunc("GET /message", s.handleMessage)
 	mux.HandleFunc("GET /attachment", s.handleAttachment)
+	mux.HandleFunc("GET /compose", s.handleComposeForm)
+	mux.HandleFunc("POST /compose", s.handleComposeSubmit)
 	mux.HandleFunc("GET /{$}", s.handleRoot)
 	return mux
 }
