@@ -120,6 +120,33 @@
       </div>
       <button class="primary" type="submit">Add category</button>
     </form>
+
+    <h2>Safe senders</h2>
+    <p class="muted">Messages from these addresses or domains may load remote images and other external content. Remote content from every other sender is blocked.</p>
+    {{if .SafeSenders}}
+    <ul class="signature-list">
+      {{range .SafeSenders}}
+      <li>
+        <span>{{.}}</span>
+        <form method="post" action="/settings" class="inline">
+          <input type="hidden" name="action" value="delsafe">
+          <input type="hidden" name="safesender" value="{{.}}">
+          <button type="submit">Delete</button>
+        </form>
+      </li>
+      {{end}}
+    </ul>
+    {{else}}
+    <p class="notice">No safe senders yet &mdash; remote content is blocked for all senders.</p>
+    {{end}}
+    <form method="post" action="/settings" class="catadd">
+      <input type="hidden" name="action" value="addsafe">
+      <div class="field">
+        <label>Address or domain</label>
+        <input name="safesender" placeholder="e.g. news@example.com or example.com" required>
+      </div>
+      <button class="primary" type="submit">Add safe sender</button>
+    </form>
   </div>
 </div>
 <script>

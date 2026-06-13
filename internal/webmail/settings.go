@@ -29,6 +29,7 @@ type webmailSettings struct {
 	PreviewPane           string      `json:"previewPane"`           // reading-pane location: "none" | "right" | "bottom"
 	IncomingRender        string      `json:"incomingRender"`        // how received mail is displayed: "html" | "plain" (force plain text)
 	RequestReceiptDefault bool        `json:"requestReceiptDefault"` // pre-check "request read receipt" on a fresh compose
+	SafeSenders           []string    `json:"safeSenders"`           // addresses/domains allowed to load remote content in the reader
 }
 
 // category is one named, colored label in the mailbox's master category list.
@@ -213,6 +214,12 @@ func (s *Server) handleSettingsSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 	case "delcat":
 		cfg.Categories = removeCategory(cfg.Categories, r.FormValue("catname"))
+	case "addsafe":
+		if e := normalizeSafeSender(r.FormValue("safesender")); e != "" && !containsStr(cfg.SafeSenders, e) {
+			cfg.SafeSenders = append(cfg.SafeSenders, e)
+		}
+	case "delsafe":
+		cfg.SafeSenders = removeStr(cfg.SafeSenders, normalizeSafeSender(r.FormValue("safesender")))
 	default: // save preferences
 		if f := r.FormValue("composeformat"); f == "plain" || f == "html" {
 			cfg.ComposeFormat = f
@@ -264,6 +271,52 @@ func removeCategory(cats []category, name string) []category {
 		}
 	}
 	return out
+}
+
+// normalizeSafeSender trims and lowercases a safe-sender entry for storage and
+// comparison; an entry is a full address ("bob@example.com") or a domain
+// ("example.com" or "@example.com").
+func normalizeSafeSender(s string) string {
+	return strings.ToLower(strings.TrimSpace(s))
+}
+
+// removeStr returns list without the entries equal to v.
+func removeStr(list []string, v string) []string {
+	out := make([]string, 0, len(list))
+	for _, s := range list {
+		if s != v {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// isSafeSender reports whether a parsed sender address is covered by the
+// safe-senders list — an exact address match, or a domain entry matching the
+// sender's domain. Matching is case-insensitive on the parsed address only
+// (never the display name) and does not extend to subdomains.
+func isSafeSender(list []string, addr string) bool {
+	addr = strings.ToLower(strings.TrimSpace(addr))
+	if addr == "" {
+		return false
+	}
+	domain := ""
+	if i := strings.LastIndex(addr, "@"); i >= 0 {
+		domain = addr[i+1:]
+	}
+	for _, e := range list {
+		e = strings.ToLower(strings.TrimSpace(e))
+		if e == "" {
+			continue
+		}
+		if e == addr {
+			return true
+		}
+		if domain != "" && (e == domain || e == "@"+domain) {
+			return true
+		}
+	}
+	return false
 }
 
 // removeSignature returns sigs without the signature whose id matches.
