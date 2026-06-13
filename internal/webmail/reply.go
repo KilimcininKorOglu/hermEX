@@ -85,6 +85,9 @@ func buildComposeFromSource(action, folder string, uid uint32, raw []byte, self 
 		} else {
 			v.Format = "plain"
 		}
+		// Show the draft's existing attachments; the submit path re-reads them
+		// from the store (the browser cannot re-populate a file input).
+		v.Attachments = draftAttachments(raw)
 		return v
 
 	default:

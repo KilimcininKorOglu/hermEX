@@ -131,3 +131,69 @@ func TestComposeUrlEncodedStillWorks(t *testing.T) {
 		t.Errorf("a no-attachment compose should not be multipart/mixed:\n%s", raw)
 	}
 }
+
+// TestDraftAttachmentSurvivesReopenResaveAndSend checks the load-bearing draft
+// round-trip: a file saved into a draft is listed when the draft reopens,
+// survives a url-encoded re-save (the autosave path, which carries no file
+// bytes), and rides along when the draft is finally sent. Without the submit-path
+// re-read, the file would be silently dropped on the first re-save.
+func TestDraftAttachmentSurvivesReopenResaveAndSend(t *testing.T) {
+	path := emptyMailbox(t)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	// Save a draft WITH an uploaded file.
+	body, ctype := multipartCompose(t,
+		map[string]string{"action": "savedraft", "subject": "draft with file", "body": "draft body"},
+		[]uploadFile{{field: "attach", filename: "doc.txt", contentType: "text/plain", data: []byte("attached draft data")}},
+	)
+	resp, err := c.Post(ts.URL+"/compose", ctype, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	drafts := folderMsgs(t, path, draftFID)
+	if len(drafts) != 1 {
+		t.Fatalf("Drafts has %d, want 1", len(drafts))
+	}
+	u1 := drafts[0].UID
+
+	// Reopen: the editdraft page lists the existing attachment.
+	if _, page := get(t, c, ts.URL+"/compose?action=editdraft&folder=Drafts&uid="+itoa(u1)); !strings.Contains(page, "doc.txt") {
+		t.Errorf("editdraft did not list the existing attachment:\n%s", page)
+	}
+
+	// Re-save url-encoded (no file bytes, as autosave does), carrying the draft uid.
+	postForm(t, c, ts.URL+"/compose", map[string][]string{
+		"action": {"savedraft"}, "draftuid": {itoa(u1)}, "draftfolder": {"Drafts"},
+		"subject": {"draft with file"}, "body": {"draft body edited"},
+	})
+	drafts = folderMsgs(t, path, draftFID)
+	if len(drafts) != 1 {
+		t.Fatalf("after re-save Drafts has %d, want 1", len(drafts))
+	}
+	u2 := drafts[0].UID
+	raw := msgRaw(t, path, draftFID, u2)
+	fp := findPart(mime.ParseStructure([]byte(raw)), func(p *mime.Part) bool { return p.Filename() == "doc.txt" })
+	if fp == nil {
+		t.Fatalf("re-saved draft LOST its attachment (the round-trip bug):\n%s", raw)
+	}
+	if fc, _ := fp.DecodedContent(); string(fc) != "attached draft data" {
+		t.Errorf("re-saved attachment content = %q, want %q", fc, "attached draft data")
+	}
+
+	// Send the reopened draft (url-encoded): the attachment rides along to Sent,
+	// and the draft is cleared.
+	postForm(t, c, ts.URL+"/compose", map[string][]string{
+		"action": {"send"}, "draftuid": {itoa(u2)}, "draftfolder": {"Drafts"},
+		"to": {"alice@hermex.test"}, "subject": {"draft with file"}, "body": {"final"},
+	})
+	sent := folderRaw(t, path, "Sent")
+	if findPart(mime.ParseStructure([]byte(sent)), func(p *mime.Part) bool { return p.Filename() == "doc.txt" }) == nil {
+		t.Errorf("sent-from-draft lost the attachment:\n%s", sent)
+	}
+	if n := len(folderMsgs(t, path, draftFID)); n != 0 {
+		t.Errorf("a sent draft must be removed from Drafts, found %d", n)
+	}
+}
