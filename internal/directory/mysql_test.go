@@ -100,3 +100,51 @@ func TestSQLDirectoryFaithfulResolution(t *testing.T) {
 		t.Error("Authenticate should fail for a suspended account")
 	}
 }
+
+// TestSQLDirectoryMaildirs checks that MailboxLister enumerates the store paths
+// of active user mailboxes — the set the send-later spooler scans — and skips a
+// suspended account, so the worker never releases mail on a disabled user's
+// behalf.
+func TestSQLDirectoryMaildirs(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	cleanTables(t, db)
+
+	root := t.TempDir()
+	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "domains", "hermex.test")); err != nil {
+		t.Fatal(err)
+	}
+	aliceDir := filepath.Join(root, "users", "hermex.test", "alice")
+	bobDir := filepath.Join(root, "users", "hermex.test", "bob")
+	carolDir := filepath.Join(root, "users", "hermex.test", "carol")
+	for addr, dir := range map[string]string{
+		"alice@hermex.test": aliceDir,
+		"bob@hermex.test":   bobDir,
+		"carol@hermex.test": carolDir,
+	} {
+		if _, err := d.CreateUser(addr, "secret", dir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Suspend carol: a disabled account's Outbox must not be scanned.
+	if _, err := db.Exec(`UPDATE users SET address_status = ? WHERE username = ?`, afUserSuspended, "carol@hermex.test"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := d.Maildirs()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{aliceDir: true, bobDir: true}
+	if len(got) != len(want) {
+		t.Fatalf("Maildirs = %v, want the 2 active maildirs (carol is suspended)", got)
+	}
+	for _, p := range got {
+		if !want[p] {
+			t.Errorf("unexpected maildir %q (a suspended account leaked into the scan set)", p)
+		}
+	}
+}

@@ -177,6 +177,36 @@ SELECT altname FROM altnames WHERE user_id = ?`, username, id)
 	return out, rows.Err()
 }
 
+// Maildirs implements MailboxLister: the distinct store paths of every
+// login-capable user mailbox — a normal MAILUSER account in an active domain
+// with a maildir. These are exactly the accounts that can schedule a send, so
+// the send-later spooler scans their Outboxes; disabled accounts and non-mailbox
+// objects (distribution lists, rooms) are skipped.
+func (d *SQLDirectory) Maildirs() ([]string, error) {
+	const q = `
+SELECT DISTINCT u.maildir
+  FROM users u JOIN domains d ON u.domain_id = d.id
+ WHERE u.maildir <> ''
+   AND u.display_type = ?
+   AND (u.address_status & ?) = ?
+   AND (u.address_status & ?) = 0
+   AND d.domain_status = 0`
+	rows, err := d.db.Query(q, dtMailuser, afUserMask, afUserNormal, afDomainMask)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var maildir string
+		if err := rows.Scan(&maildir); err != nil {
+			return nil, err
+		}
+		out = append(out, d.storePath(maildir))
+	}
+	return out, rows.Err()
+}
+
 // CreateDomain inserts a domain and returns its id, creating its homedir on disk.
 func (d *SQLDirectory) CreateDomain(domainname, homedir string) (int64, error) {
 	res, err := d.db.Exec(
