@@ -108,6 +108,12 @@ table.messages.density-compact td { padding: 5px 14px; }
 table.messages.density-extended td { padding: 14px; }
 table.messages tr.unread { background: var(--unread); }
 table.messages tr.unread td.subject { font-weight: 600; }
+th.iconcol, td.icons { width: 64px; white-space: nowrap; }
+td.icons { color: var(--muted); }
+td.icons span { margin-right: 3px; }
+td.icons .i-unread { color: #2563eb; }
+td.icons .i-flag { color: #e0a800; }
+td.icons .i-high { color: #b00020; font-weight: 700; }
 td.from { width: 220px; color: var(--text); }
 td.date { width: 150px; color: var(--muted); white-space: nowrap; }
 td.actions { width: 190px; white-space: nowrap; text-align: right; }

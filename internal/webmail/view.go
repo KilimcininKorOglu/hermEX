@@ -38,6 +38,11 @@ type messageView struct {
 	Scheduled bool // a deferred send awaiting release: the row offers a cancel action
 	InTrash   bool // in Deleted Items: the row offers Restore instead of Junk
 	InJunk    bool // in Junk Email: the row offers Restore instead of Junk
+	// Icon-column flags, filled per visible row from the message object (not from
+	// the index projection), so they live outside messageViewFrom.
+	HasAttachment  bool // a real, non-inline attachment is present (paperclip)
+	ImportanceHigh bool // PR_IMPORTANCE high
+	ImportanceLow  bool // PR_IMPORTANCE low
 }
 
 // mailPage is the data the mail template renders. Query/Field/Scope back the
