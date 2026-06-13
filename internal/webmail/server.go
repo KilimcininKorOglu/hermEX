@@ -50,6 +50,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /settings", s.handleSettingsForm)
 	mux.HandleFunc("POST /settings", s.handleSettingsSubmit)
 	mux.HandleFunc("POST /action", s.handleAction)
+	mux.HandleFunc("POST /folder", s.handleFolder)
 	mux.HandleFunc("GET /{$}", s.handleRoot)
 	return mux
 }

@@ -4,9 +4,29 @@
     <div class="brand">hermEX</div>
     <nav>
       {{range .Folders}}
-      <a href="/mail?folder={{.Path}}" class="{{if eq .Path $.Current}}active{{end}}">{{.Name}}</a>
+      <div class="folder-item{{if eq .Path $.Current}} active{{end}}">
+        <a href="/mail?folder={{.Path}}">{{.Name}}</a>
+        {{if .IsUser}}
+        <form method="post" action="/folder" class="folder-rename">
+          <input type="hidden" name="op" value="rename">
+          <input type="hidden" name="id" value="{{.ID}}">
+          <input name="name" value="{{.Name}}" aria-label="Rename folder">
+          <button type="submit">Rename</button>
+        </form>
+        <form method="post" action="/folder" class="folder-delete" onsubmit="return confirm('Permanently delete this folder and all its messages? This cannot be undone.')">
+          <input type="hidden" name="op" value="delete">
+          <input type="hidden" name="id" value="{{.ID}}">
+          <button type="submit" class="danger">Delete</button>
+        </form>
+        {{end}}
+      </div>
       {{end}}
     </nav>
+    <form method="post" action="/folder" class="folder-new">
+      <input type="hidden" name="op" value="create">
+      <input name="name" placeholder="New folder" aria-label="New folder name" required>
+      <button type="submit">Create</button>
+    </form>
     <div class="account">{{.User}}<br><a href="/logout">Sign out</a></div>
   </aside>
   <main class="main">

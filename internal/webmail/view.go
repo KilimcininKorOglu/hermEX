@@ -16,9 +16,10 @@ const (
 
 // folderView is one folder in the sidebar.
 type folderView struct {
-	ID   int64  // fixed folder id, used as the move/copy/CRUD target value
-	Name string // leaf display name
-	Path string // full hierarchical path, e.g. "Archive/2026"
+	ID     int64  // fixed folder id, used as the move/copy/CRUD target value
+	Name   string // leaf display name
+	Path   string // full hierarchical path, e.g. "Archive/2026"
+	IsUser bool   // user-created (id >= unassigned-start): rename/delete allowed
 }
 
 // messageView is one row in the message list.
@@ -73,9 +74,25 @@ func buildFolderViews(folders []objectstore.FolderInfo) []folderView {
 	}
 	views := make([]folderView, 0, len(folders))
 	for _, f := range folders {
-		views = append(views, folderView{ID: f.ID, Name: f.DisplayName, Path: pathOf(f)})
+		views = append(views, folderView{
+			ID:     f.ID,
+			Name:   f.DisplayName,
+			Path:   pathOf(f),
+			IsUser: f.ID >= int64(mapi.PrivateFIDUnassignedStart),
+		})
 	}
 	return views
+}
+
+// folderParent returns a folder's parent id (nil for a top-level folder), used to
+// rename a folder in place without reparenting it.
+func folderParent(folders []objectstore.FolderInfo, id int64) (*int64, bool) {
+	for _, f := range folders {
+		if f.ID == id {
+			return f.ParentID, true
+		}
+	}
+	return nil, false
 }
 
 // moveTargets returns the folders a message may be moved or copied into: mail
