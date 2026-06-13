@@ -61,6 +61,7 @@ const (
 	PrSensitivity         = PropTag(0x00360003) // PtLong
 	PrClientSubmitTime    = PropTag(0x00390040) // PtSysTime
 	PrMessageDeliveryTime = PropTag(0x0E060040) // PtSysTime
+	PrDeferredSendTime    = PropTag(0x3FEF0040) // PtSysTime (PidTagDeferredSendTime, MS-OXOMSG) — absolute time to release a deferred send
 	PrMessageFlags        = PropTag(0x0E070003) // PtLong
 	PrInternetMessageID   = PropTag(0x1035001F) // PtUnicode
 	PrInReplyToID         = PropTag(0x1042001F) // PtUnicode
