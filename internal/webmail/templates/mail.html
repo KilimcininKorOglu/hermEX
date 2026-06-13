@@ -35,18 +35,30 @@
       <a href="/compose" class="compose-btn">Compose</a>
       <a href="/import" class="import-btn">Import</a>
       {{if eq .Filter "unread"}}
-      <a class="filter-toggle active" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter=all&density={{.Density}}&page=1">Unread only</a>
+      <a class="filter-toggle active" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter=all&density={{.Density}}&preview={{.PreviewPane}}&page=1">Unread only</a>
       {{else}}
-      <a class="filter-toggle" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter=unread&density={{.Density}}&page=1">Unread only</a>
+      <a class="filter-toggle" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter=unread&density={{.Density}}&preview={{.PreviewPane}}&page=1">Unread only</a>
       {{end}}
       {{if eq .Density "extended"}}
-      <a class="filter-toggle active" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter={{.Filter}}&density=compact&page={{.Page}}">Comfortable</a>
+      <a class="filter-toggle active" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter={{.Filter}}&density=compact&preview={{.PreviewPane}}&page={{.Page}}">Comfortable</a>
       {{else}}
-      <a class="filter-toggle" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter={{.Filter}}&density=extended&page={{.Page}}">Comfortable</a>
+      <a class="filter-toggle" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter={{.Filter}}&density=extended&preview={{.PreviewPane}}&page={{.Page}}">Comfortable</a>
       {{end}}
+      <span class="preview-toggle" role="group" aria-label="Reading pane">
+        <a class="filter-toggle{{if eq .PreviewPane "none"}} active{{end}}" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter={{.Filter}}&density={{.Density}}&preview=none&page={{.Page}}" title="No reading pane">No preview</a>
+        <a class="filter-toggle{{if eq .PreviewPane "right"}} active{{end}}" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter={{.Filter}}&density={{.Density}}&preview=right&page={{.Page}}" title="Reading pane on the right">Right</a>
+        <a class="filter-toggle{{if eq .PreviewPane "bottom"}} active{{end}}" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter={{.Filter}}&density={{.Density}}&preview=bottom&page={{.Page}}" title="Reading pane at the bottom">Bottom</a>
+      </span>
       {{template "searchform" .}}
     </div>
-    {{template "messagelist" .}}
+    {{if eq .PreviewPane "none"}}
+    <div class="listpane listpane-full">{{template "messagelist" .}}</div>
+    {{else}}
+    <div class="maillayout preview-{{.PreviewPane}}">
+      <div class="listpane">{{template "messagelist" .}}</div>
+      <div id="previewpane" class="previewpane"><div class="preview-empty">Select a message to read it here.</div></div>
+    </div>
+    {{end}}
   </main>
 </div>
 <script>
@@ -68,6 +80,25 @@
   }
   boxes.forEach(function (b) { b.addEventListener("change", update); });
   update();
+})();
+</script>
+<script>
+// Reading pane (#34): clicking a message subject loads it into the preview pane
+// instead of navigating. Delegated on the table so it survives htmx row swaps;
+// inert when no pane is present (preview = none), where the link navigates normally.
+(function () {
+  var pane = document.getElementById("previewpane");
+  var table = document.querySelector("table.messages");
+  if (!pane || !table || typeof htmx === "undefined") { return; }
+  table.addEventListener("click", function (e) {
+    var link = e.target.closest("a.subjlink");
+    if (!link) { return; }
+    e.preventDefault();
+    var row = link.closest("tr");
+    table.querySelectorAll("tr.selected").forEach(function (r) { r.classList.remove("selected"); });
+    if (row) { row.classList.add("selected"); }
+    htmx.ajax("GET", link.getAttribute("href") + "&mode=preview", { target: "#previewpane", swap: "innerHTML" });
+  });
 })();
 </script>
 {{template "foot" .}}{{end}}
@@ -97,7 +128,7 @@
   <thead><tr>
     <th class="selcol"><input type="checkbox" id="selall" aria-label="Select all on page"></th>
     <th class="iconcol"></th>
-    {{range .Columns}}<th class="sortcol{{if .Active}} active{{end}}"><a href="/mail?folder={{$.Current}}&sort={{.Key}}&dir={{.NextDir}}&filter={{$.Filter}}&density={{$.Density}}&page=1">{{.Label}}{{if .Active}} {{.Arrow}}{{end}}</a></th>{{end}}
+    {{range .Columns}}<th class="sortcol{{if .Active}} active{{end}}"><a href="/mail?folder={{$.Current}}&sort={{.Key}}&dir={{.NextDir}}&filter={{$.Filter}}&density={{$.Density}}&preview={{$.PreviewPane}}&page=1">{{.Label}}{{if .Active}} {{.Arrow}}{{end}}</a></th>{{end}}
     <th></th>
   </tr></thead>
   {{range .Messages}}{{template "messagerow" .}}{{end}}
@@ -107,9 +138,9 @@
 {{end}}
 {{if gt .MaxPage 1}}
 <nav class="pager">
-  {{if .PrevPage}}<a href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter={{.Filter}}&density={{.Density}}&page={{.PrevPage}}">Previous</a>{{else}}<span class="disabled">Previous</span>{{end}}
+  {{if .PrevPage}}<a href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter={{.Filter}}&density={{.Density}}&preview={{.PreviewPane}}&page={{.PrevPage}}">Previous</a>{{else}}<span class="disabled">Previous</span>{{end}}
   <span class="pageinfo">Page {{.Page}} of {{.MaxPage}}</span>
-  {{if .NextPage}}<a href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter={{.Filter}}&density={{.Density}}&page={{.NextPage}}">Next</a>{{else}}<span class="disabled">Next</span>{{end}}
+  {{if .NextPage}}<a href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter={{.Filter}}&density={{.Density}}&preview={{.PreviewPane}}&page={{.NextPage}}">Next</a>{{else}}<span class="disabled">Next</span>{{end}}
 </nav>
 {{end}}
 {{end}}
@@ -119,7 +150,7 @@
   <td class="selcol"><input type="checkbox" class="rowcheck" form="bulkform" name="uid" value="{{.UID}}" aria-label="Select"></td>
   <td class="icons">{{if not .Seen}}<span class="i-unread" title="Unread">&#9679;</span>{{end}}{{if .FlagComplete}}<span class="i-flagdone" title="Flag complete">&#10003;</span>{{else if .FlagColor}}<span class="i-flag flag-c{{.FlagColor}}" title="Flagged">&#9873;</span>{{end}}{{if .HasAttachment}}<span class="i-attach" title="Has attachment">&#128206;</span>{{end}}{{if .ImportanceHigh}}<span class="i-high" title="High importance">!</span>{{end}}{{if .ImportanceLow}}<span class="i-low" title="Low importance">&#8595;</span>{{end}}</td>
   <td class="from">{{.From}}</td>
-  <td class="subject">{{if .Draft}}<a href="/compose?action=editdraft&folder={{.Folder}}&uid={{.UID}}">{{.Subject}}</a>{{else}}<a href="/message?folder={{.Folder}}&uid={{.UID}}">{{.Subject}}</a>{{end}}{{range .Categories}} <span class="cat-badge" style="background-color:{{.Color}}">{{.Name}}</span>{{end}}</td>
+  <td class="subject">{{if .Draft}}<a href="/compose?action=editdraft&folder={{.Folder}}&uid={{.UID}}">{{.Subject}}</a>{{else}}<a class="subjlink" href="/message?folder={{.Folder}}&uid={{.UID}}">{{.Subject}}</a>{{end}}{{range .Categories}} <span class="cat-badge" style="background-color:{{.Color}}">{{.Name}}</span>{{end}}</td>
   <td class="date">{{.Date}}</td>
   <td class="actions">
     <button hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=toggleseen" hx-target="#msg-{{.UID}}" hx-swap="outerHTML">{{if .Seen}}Unread{{else}}Read{{end}}</button>
