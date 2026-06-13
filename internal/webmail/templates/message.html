@@ -7,7 +7,7 @@
   <div class="reader-toolbar">
     {{if not .Preview}}<a href="/mail?folder={{.Folder}}">&larr; Back to {{.Folder}}</a>{{end}}
     <a href="/compose?action=reply&folder={{.Folder}}&uid={{.UID}}">Reply</a>
-    <a href="/compose?action=replyall&folder={{.Folder}}&uid={{.UID}}">Reply All</a>
+    <a href="/compose?action=replyall&folder={{.Folder}}&uid={{.UID}}" data-key="replyall">Reply All</a>
     <a href="/compose?action=forward&folder={{.Folder}}&uid={{.UID}}">Forward</a>
     <a href="/compose?action=forwardasattach&folder={{.Folder}}&uid={{.UID}}">Forward as attachment</a>
     <a href="/compose?action=editasnew&folder={{.Folder}}&uid={{.UID}}">Edit as New</a>

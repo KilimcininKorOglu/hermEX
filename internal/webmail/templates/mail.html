@@ -153,18 +153,18 @@
   <td class="subject">{{if .Draft}}<a href="/compose?action=editdraft&folder={{.Folder}}&uid={{.UID}}">{{.Subject}}</a>{{else}}<a class="subjlink" href="/message?folder={{.Folder}}&uid={{.UID}}">{{.Subject}}</a>{{end}}{{range .Categories}} <span class="cat-badge" style="background-color:{{.Color}}">{{.Name}}</span>{{end}}</td>
   <td class="date">{{.Date}}</td>
   <td class="actions">
-    <button hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=toggleseen" hx-target="#msg-{{.UID}}" hx-swap="outerHTML">{{if .Seen}}Unread{{else}}Read{{end}}</button>
+    <button data-key="toggleread" hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=toggleseen" hx-target="#msg-{{.UID}}" hx-swap="outerHTML">{{if .Seen}}Unread{{else}}Read{{end}}</button>
     <details class="flagmenu">
       <summary title="Follow-up flag">&#9873;</summary>
       <div class="flagmenu-pop">
-        <button class="flag-c6" hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=6" hx-target="#msg-{{.UID}}" hx-swap="outerHTML" title="Red">&#9873;</button>
+        <button class="flag-c6" {{if not .FlagColor}}data-key="flagtoggle" {{end}}hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=6" hx-target="#msg-{{.UID}}" hx-swap="outerHTML" title="Red">&#9873;</button>
         <button class="flag-c5" hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=5" hx-target="#msg-{{.UID}}" hx-swap="outerHTML" title="Blue">&#9873;</button>
         <button class="flag-c4" hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=4" hx-target="#msg-{{.UID}}" hx-swap="outerHTML" title="Yellow">&#9873;</button>
         <button class="flag-c3" hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=3" hx-target="#msg-{{.UID}}" hx-swap="outerHTML" title="Green">&#9873;</button>
         <button class="flag-c2" hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=2" hx-target="#msg-{{.UID}}" hx-swap="outerHTML" title="Orange">&#9873;</button>
         <button class="flag-c1" hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=1" hx-target="#msg-{{.UID}}" hx-swap="outerHTML" title="Purple">&#9873;</button>
         <button hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=flagcomplete" hx-target="#msg-{{.UID}}" hx-swap="outerHTML" title="Mark complete">&#10003;</button>
-        <button hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=flagnone" hx-target="#msg-{{.UID}}" hx-swap="outerHTML" title="Clear flag">&#10007;</button>
+        <button {{if .FlagColor}}data-key="flagtoggle" {{end}}hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=flagnone" hx-target="#msg-{{.UID}}" hx-swap="outerHTML" title="Clear flag">&#10007;</button>
       </div>
     </details>
     {{if .Scheduled}}<button hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=unschedule" hx-target="#msg-{{.UID}}" hx-swap="delete" hx-confirm="Cancel this scheduled send and move it back to Drafts?">Cancel send</button>{{end}}
