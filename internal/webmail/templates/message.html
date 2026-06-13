@@ -1,7 +1,11 @@
-{{define "message"}}{{template "head" .}}
-<div class="reader">
+{{define "message"}}{{template "head" .}}{{template "readercontent" .}}{{template "foot" .}}{{end}}
+
+{{define "messagepreview"}}{{template "readercontent" .}}{{end}}
+
+{{define "readercontent"}}
+<div class="reader{{if .Preview}} reader-preview{{end}}">
   <div class="reader-toolbar">
-    <a href="/mail?folder={{.Folder}}">&larr; Back to {{.Folder}}</a>
+    {{if not .Preview}}<a href="/mail?folder={{.Folder}}">&larr; Back to {{.Folder}}</a>{{end}}
     <a href="/compose?action=reply&folder={{.Folder}}&uid={{.UID}}">Reply</a>
     <a href="/compose?action=replyall&folder={{.Folder}}&uid={{.UID}}">Reply All</a>
     <a href="/compose?action=forward&folder={{.Folder}}&uid={{.UID}}">Forward</a>
@@ -71,4 +75,4 @@
     {{end}}
   </div>
 </div>
-{{template "foot" .}}{{end}}
+{{end}}

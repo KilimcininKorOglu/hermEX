@@ -26,6 +26,7 @@ type webmailSettings struct {
 	DefaultSort           string      `json:"defaultSort"`           // default list sort key when no URL param ("" → date)
 	DefaultDir            string      `json:"defaultDir"`            // default list sort direction when no URL param ("" → desc)
 	Categories            []category  `json:"categories"`            // master colored-category list (assigned to messages as PidNameKeywords)
+	PreviewPane           string      `json:"previewPane"`           // reading-pane location: "none" | "right" | "bottom"
 }
 
 // category is one named, colored label in the mailbox's master category list.
@@ -83,7 +84,7 @@ func (s webmailSettings) signatureByID(id string) (signature, bool) {
 // defaultSettings is what a mailbox uses until it saves its own preferences.
 func defaultSettings() webmailSettings {
 	return webmailSettings{
-		SchemaVersion: settingsSchemaVersion, ComposeFormat: "html", Density: "compact", DefaultSort: "date", DefaultDir: "desc",
+		SchemaVersion: settingsSchemaVersion, ComposeFormat: "html", Density: "compact", DefaultSort: "date", DefaultDir: "desc", PreviewPane: "none",
 		Categories: []category{
 			{Name: "Red", Color: "#b00020"},
 			{Name: "Orange", Color: "#e67e22"},
@@ -119,6 +120,9 @@ func loadSettings(st *objectstore.Store) (webmailSettings, error) {
 	}
 	if s.DefaultDir == "" {
 		s.DefaultDir = "desc"
+	}
+	if s.PreviewPane == "" {
+		s.PreviewPane = "none"
 	}
 	return s, nil
 }
@@ -210,6 +214,9 @@ func (s *Server) handleSettingsSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 		if d := r.FormValue("density"); d == "compact" || d == "extended" {
 			cfg.Density = d
+		}
+		if p := r.FormValue("previewpane"); p == "none" || p == "right" || p == "bottom" {
+			cfg.PreviewPane = p
 		}
 		// The default sort order is posted as one "key dir" value (e.g. "date desc").
 		if parts := strings.Fields(r.FormValue("defaultsort")); len(parts) == 2 {

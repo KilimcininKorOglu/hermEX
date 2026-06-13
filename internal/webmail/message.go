@@ -37,6 +37,7 @@ type messageDetail struct {
 	FlagDue       string         // formatted follow-up due date, empty when none
 	Categories    []categoryView // categories assigned to this message, with colors
 	AllCategories []category     // the mailbox's master category list, for the assign control
+	Preview       bool           // rendered inside the reading pane (partial, no page chrome) (#34)
 }
 
 func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
@@ -52,6 +53,7 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid := uint32(uid64)
+	preview := r.URL.Query().Get("mode") == "preview"
 
 	st, err := objectstore.Open(sess.mailboxPath)
 	if err != nil {
@@ -110,6 +112,11 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	detail.Preview = preview
+	if preview {
+		s.render(w, "messagepreview", detail)
+		return
+	}
 	s.render(w, "message", detail)
 }
 

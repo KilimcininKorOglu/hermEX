@@ -147,17 +147,18 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 		Page:   atoiDefault(q.Get("page"), 1),
 	}
 	page := mailPage{
-		User:       sess.user,
-		Current:    current,
-		Folders:    folderViews,
-		Field:      "all",    // search-form defaults (scoped to the current folder)
-		Scope:      "folder", // until the user opens a cross-folder search
-		Sort:       params.Sort,
-		Dir:        params.Dir,
-		Filter:     params.Filter,
-		Density:    whitelist(orDefault(q.Get("density"), cfg.Density), "compact", "extended"),
-		Columns:    listColumns(params.Sort, params.Dir),
-		Categories: cfg.Categories,
+		User:        sess.user,
+		Current:     current,
+		Folders:     folderViews,
+		Field:       "all",    // search-form defaults (scoped to the current folder)
+		Scope:       "folder", // until the user opens a cross-folder search
+		Sort:        params.Sort,
+		Dir:         params.Dir,
+		Filter:      params.Filter,
+		Density:     whitelist(orDefault(q.Get("density"), cfg.Density), "compact", "extended"),
+		Columns:     listColumns(params.Sort, params.Dir),
+		Categories:  cfg.Categories,
+		PreviewPane: whitelist(orDefault(q.Get("preview"), cfg.PreviewPane), "none", "right", "bottom"),
 	}
 	if id, found := resolveFolder(folders, current); found {
 		if res, err := listFolderPage(st, id, current, params, cfg.Categories); err == nil {

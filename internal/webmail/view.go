@@ -82,6 +82,8 @@ type mailPage struct {
 	// Categories is the mailbox's master category list, offered in the
 	// multi-select bulk-categorize control (#33).
 	Categories []category
+	// PreviewPane is the reading-pane location: "none" | "right" | "bottom" (#34).
+	PreviewPane string
 }
 
 // buildFolderViews computes each folder's hierarchical path from the parent

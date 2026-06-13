@@ -17,6 +17,12 @@
         <label class="check"><input type="radio" name="density" value="extended"{{if eq .Density "extended"}} checked{{end}}> Comfortable</label>
       </div>
       <div class="field">
+        <label>Reading pane location</label>
+        <label class="check"><input type="radio" name="previewpane" value="none"{{if eq .PreviewPane "none"}} checked{{end}}> No preview</label>
+        <label class="check"><input type="radio" name="previewpane" value="right"{{if eq .PreviewPane "right"}} checked{{end}}> Right</label>
+        <label class="check"><input type="radio" name="previewpane" value="bottom"{{if eq .PreviewPane "bottom"}} checked{{end}}> Bottom</label>
+      </div>
+      <div class="field">
         {{$cur := printf "%s %s" .DefaultSort .DefaultDir}}
         <label>Default sort order</label>
         <select name="defaultsort">
