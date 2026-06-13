@@ -217,6 +217,50 @@ func TestActionToggleKeepsIconColumns(t *testing.T) {
 	}
 }
 
+// TestActionFollowupFlag checks the six-color follow-up flag actions: applying a
+// color renders the colored flag in the swapped row and sets the IMAP \Flagged
+// bit; marking complete shows the check and clears \Flagged; clearing removes the
+// flag entirely.
+func TestActionFollowupFlag(t *testing.T) {
+	path := emptyMailbox(t)
+	uid := seedMsg(t, path, int64(mapi.PrivateFIDInbox), "flag me", "", "body", 100, 0)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+	flagged := func() int64 {
+		return folderMsgs(t, path, int64(mapi.PrivateFIDInbox))[0].Flags & objectstore.FlagFlagged
+	}
+
+	// Apply a red flag → colored flag icon in the row + \Flagged set.
+	code, body := postForm(t, c, ts.URL+"/action", url.Values{"folder": {"INBOX"}, "uid": {itoa(uid)}, "op": {"flag"}, "color": {"6"}})
+	if code != 200 {
+		t.Fatalf("flag = %d", code)
+	}
+	if !strings.Contains(body, `title="Flagged"`) || !strings.Contains(body, `class="i-flag flag-c6"`) {
+		t.Errorf("flagged row missing the red flag icon:\n%s", body)
+	}
+	if flagged() == 0 {
+		t.Error("applying a flag must set the IMAP \\Flagged bit")
+	}
+
+	// Mark complete → check icon, \Flagged cleared.
+	_, body = postForm(t, c, ts.URL+"/action", url.Values{"folder": {"INBOX"}, "uid": {itoa(uid)}, "op": {"flagcomplete"}})
+	if !strings.Contains(body, `title="Flag complete"`) || strings.Contains(body, `title="Flagged"`) {
+		t.Errorf("completed row should show the check, not a flag:\n%s", body)
+	}
+	if flagged() != 0 {
+		t.Error("completing a flag must clear the IMAP \\Flagged bit")
+	}
+
+	// Clear → no flag and no check.
+	_, body = postForm(t, c, ts.URL+"/action", url.Values{"folder": {"INBOX"}, "uid": {itoa(uid)}, "op": {"flagnone"}})
+	if strings.Contains(body, `title="Flagged"`) || strings.Contains(body, `title="Flag complete"`) {
+		t.Errorf("cleared row should show no flag icon:\n%s", body)
+	}
+	if flagged() != 0 {
+		t.Error("a cleared flag must not be \\Flagged")
+	}
+}
+
 // TestActionUnauthenticated checks /action requires a session.
 func TestActionUnauthenticated(t *testing.T) {
 	path := emptyMailbox(t)

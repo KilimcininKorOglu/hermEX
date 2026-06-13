@@ -113,6 +113,19 @@ td.icons { color: var(--muted); }
 td.icons span { margin-right: 3px; }
 td.icons .i-unread { color: #2563eb; }
 td.icons .i-flag { color: #e0a800; }
+td.icons .i-flagdone { color: #27ae60; }
+.flag-c1 { color: #8e44ad; } /* purple */
+.flag-c2 { color: #e67e22; } /* orange */
+.flag-c3 { color: #27ae60; } /* green */
+.flag-c4 { color: #e0a800; } /* yellow */
+.flag-c5 { color: #2563eb; } /* blue */
+.flag-c6 { color: #b00020; } /* red */
+td.icons .i-flag.flag-c1 { color: #8e44ad; }
+td.icons .i-flag.flag-c2 { color: #e67e22; }
+td.icons .i-flag.flag-c3 { color: #27ae60; }
+td.icons .i-flag.flag-c4 { color: #e0a800; }
+td.icons .i-flag.flag-c5 { color: #2563eb; }
+td.icons .i-flag.flag-c6 { color: #b00020; }
 td.icons .i-high { color: #b00020; font-weight: 700; }
 td.from { width: 220px; color: var(--text); }
 td.date { width: 150px; color: var(--muted); white-space: nowrap; }
@@ -129,6 +142,12 @@ td.actions button {
 }
 td.actions button:hover { background: var(--bg); }
 td.actions button.danger { color: #b00020; border-color: #e3b6bd; }
+.flagmenu { display: inline-block; position: relative; margin-left: 4px; }
+.flagmenu summary { list-style: none; cursor: pointer; border: 1px solid var(--border); border-radius: 5px; padding: 4px 8px; color: #e0a800; font-size: 12px; }
+.flagmenu summary::-webkit-details-marker { display: none; }
+.flagmenu-pop { position: absolute; right: 0; z-index: 10; margin-top: 2px; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 4px; display: flex; gap: 2px; box-shadow: 0 2px 8px rgba(0,0,0,.14); }
+.flagmenu-pop button { border: 0; background: transparent; cursor: pointer; font-size: 15px; line-height: 1; padding: 3px 5px; color: var(--muted); }
+.flagmenu-pop button:hover { background: var(--bg); border-radius: 4px; }
 table.messages tr.flagged td:first-child { box-shadow: inset 3px 0 0 #e0a800; }
 .empty { padding: 40px 20px; color: var(--muted); }
 .pager {

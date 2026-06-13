@@ -40,9 +40,11 @@ type messageView struct {
 	InJunk    bool // in Junk Email: the row offers Restore instead of Junk
 	// Icon-column flags, filled per visible row from the message object (not from
 	// the index projection), so they live outside messageViewFrom.
-	HasAttachment  bool // a real, non-inline attachment is present (paperclip)
-	ImportanceHigh bool // PR_IMPORTANCE high
-	ImportanceLow  bool // PR_IMPORTANCE low
+	HasAttachment  bool  // a real, non-inline attachment is present (paperclip)
+	ImportanceHigh bool  // PR_IMPORTANCE high
+	ImportanceLow  bool  // PR_IMPORTANCE low
+	FlagColor      int32 // follow-up flag color 1-6 (PR_FOLLOWUP_ICON), 0 = none; a legacy \Flagged with no color shows red
+	FlagComplete   bool  // follow-up flag marked complete (shows a check instead of a flag)
 }
 
 // mailPage is the data the mail template renders. Query/Field/Scope back the
