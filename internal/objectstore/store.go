@@ -2,6 +2,7 @@ package objectstore
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,6 +10,9 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+
+// ErrNotFound is reported when a folder or message lookup finds no such object.
+var ErrNotFound = errors.New("objectstore: not found")
 
 // Store is a handle to one mailbox: the MAPI object store (objdb), the IMAP/POP3
 // index (idxdb), and the cid/ and eml/ content directories under a mailbox
