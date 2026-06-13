@@ -3,6 +3,7 @@ package webmail
 import (
 	"bytes"
 	"fmt"
+	"html"
 	stdmime "mime"
 	"net/http"
 	"net/url"
@@ -95,7 +96,9 @@ func (s *Server) handleComposeForm(w http.ResponseWriter, r *http.Request) {
 
 	action := r.URL.Query().Get("action")
 	if action == "" {
-		s.render(w, "compose", composeView{Title: "New message", From: sess.user, FromOptions: idents, Format: settings.ComposeFormat})
+		v := composeView{Title: "New message", From: sess.user, FromOptions: idents, Format: settings.ComposeFormat}
+		applySignature(&v, settings, action)
+		s.render(w, "compose", v)
 		return
 	}
 	// Reply/forward variants prefill from a source message.
@@ -124,7 +127,78 @@ func (s *Server) handleComposeForm(w http.ResponseWriter, r *http.Request) {
 	v.From = sess.user
 	v.FromOptions = idents
 	v.Format = settings.ComposeFormat
+	applySignature(&v, settings, action)
 	s.render(w, "compose", v)
+}
+
+// applySignature top-posts the configured signature into the prefill: the new
+// message signature for a blank compose, the reply/forward signature for those
+// actions, and none for edit-as-new (its body is already complete). The plain
+// rendering goes into Body (the text/plain alternative and no-JS source) and the
+// HTML rendering into BodyHTML, both above the existing quote. The quote itself
+// stays plain text — never the original message's raw markup.
+func applySignature(v *composeView, cfg webmailSettings, action string) {
+	var id string
+	switch action {
+	case "":
+		id = cfg.DefaultSignatureNew
+	case "reply", "replyall", "forward", "forwardasattach":
+		id = cfg.DefaultSignatureReply
+	default: // editasnew or unknown: leave the body untouched
+		return
+	}
+	sig, ok := cfg.signatureByID(id)
+	if !ok {
+		return
+	}
+	sigPlain, sigHTML := signatureBodies(sig)
+	quote := v.Body
+	v.Body = topPost(sigPlain, quote)
+	v.BodyHTML = topPostHTML(sigHTML, quoteToHTML(quote))
+}
+
+// signatureBodies returns a signature's plain-text and HTML renderings. A plain
+// signature is escaped for its HTML form; an HTML signature is stripped to text
+// for its plain form.
+func signatureBodies(sig signature) (plain, htmlBody string) {
+	if sig.IsHTML {
+		return stripHTML(sig.HTML), sig.HTML
+	}
+	return sig.HTML, quoteToHTML(sig.HTML)
+}
+
+// topPost places sig above body, separated by a blank line; either part may be
+// empty.
+func topPost(sig, body string) string {
+	switch {
+	case sig == "":
+		return body
+	case body == "":
+		return sig
+	default:
+		return sig + "\n\n" + body
+	}
+}
+
+// topPostHTML places sigHTML above bodyHTML, separated by a blank line.
+func topPostHTML(sigHTML, bodyHTML string) string {
+	switch {
+	case sigHTML == "":
+		return bodyHTML
+	case bodyHTML == "":
+		return sigHTML
+	default:
+		return sigHTML + "<br><br>" + bodyHTML
+	}
+}
+
+// quoteToHTML renders a plain-text quote as escaped HTML, preserving line breaks,
+// so it can be seeded into the editor without exposing it to markup injection.
+func quoteToHTML(plain string) string {
+	if plain == "" {
+		return ""
+	}
+	return strings.ReplaceAll(html.EscapeString(plain), "\n", "<br>\n")
 }
 
 func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {

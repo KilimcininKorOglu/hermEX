@@ -11,6 +11,41 @@ import (
 	"hermex/internal/objectstore"
 )
 
+// TestComposeInsertsSignature checks that the configured signature is
+// top-posted into the compose prefill: into a new message, and above the quoted
+// original on a reply.
+func TestComposeInsertsSignature(t *testing.T) {
+	path := seedReplyMailbox(t)
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saveSettings(st, webmailSettings{
+		ComposeFormat:         "html",
+		Signatures:            []signature{{ID: "sig1", Name: "Sig", HTML: "<p>Regards, Ali</p>", IsHTML: true}},
+		DefaultSignatureNew:   "sig1",
+		DefaultSignatureReply: "sig1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	if _, body := get(t, c, ts.URL+"/compose"); !strings.Contains(body, "Regards, Ali") {
+		t.Errorf("new compose is missing the signature:\n%s", body)
+	}
+
+	_, body := get(t, c, ts.URL+"/compose?action=reply&folder=INBOX&uid=1")
+	if !strings.Contains(body, "Regards, Ali") {
+		t.Errorf("reply is missing the signature")
+	}
+	if !strings.Contains(body, "Original body line 1") {
+		t.Errorf("reply is missing the quoted original")
+	}
+}
+
 // TestComposeDefaultFormatFromSettings checks that the compose page's send
 // format follows the mailbox's saved default: HTML for a mailbox with no
 // settings, and the saved choice once preferences are stored.
