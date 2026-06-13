@@ -79,6 +79,9 @@ type mailPage struct {
 	Total    int
 	Unread   int
 	Columns  []columnHeader // sortable column headers with precomputed link state
+	// Categories is the mailbox's master category list, offered in the
+	// multi-select bulk-categorize control (#33).
+	Categories []category
 }
 
 // buildFolderViews computes each folder's hierarchical path from the parent

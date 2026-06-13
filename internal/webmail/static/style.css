@@ -95,6 +95,30 @@ button.primary:hover { background: #234e96; }
 .filter-toggle { font-size: 13px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 5px; color: var(--text); white-space: nowrap; }
 .filter-toggle.active { background: var(--accent, #2563eb); border-color: var(--accent, #2563eb); color: #fff; }
 
+/* Multi-select bulk toolbar (#33): acts on the checked rows below it. */
+.bulkbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.bulkbar .bulkcount { color: var(--muted); font-size: 12px; margin-right: 6px; min-width: 70px; }
+.bulkbar button, .bulkbar select {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 4px 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.bulkbar button:hover { background: var(--bg); }
+.bulkbar button.danger { color: #b00020; border-color: #e3b6bd; }
+th.selcol, td.selcol { width: 28px; text-align: center; padding-left: 10px; padding-right: 4px; }
+
 table.messages { width: 100%; border-collapse: collapse; background: var(--panel); }
 table.messages thead th { text-align: left; padding: 8px 14px; border-bottom: 2px solid var(--border); font-size: 12px; color: var(--muted); font-weight: 500; }
 table.messages thead th a { color: var(--muted); }
