@@ -50,6 +50,16 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		s.toggleFlag(w, st, folderID, folder, uid, objectstore.FlagSeen)
 	case "toggleflag":
 		s.toggleFlag(w, st, folderID, folder, uid, objectstore.FlagFlagged)
+	case "flag":
+		color := int32(atoiDefault(r.FormValue("color"), int(objectstore.FlagColorRed)))
+		if color < 1 || color > 6 {
+			color = objectstore.FlagColorRed
+		}
+		s.setFollowup(w, st, folderID, folder, uid, objectstore.FollowupFlag{Status: objectstore.FlagStatusFlagged, Color: color, Request: "Follow up"})
+	case "flagcomplete":
+		s.setFollowup(w, st, folderID, folder, uid, objectstore.FollowupFlag{Status: objectstore.FlagStatusComplete})
+	case "flagnone":
+		s.setFollowup(w, st, folderID, folder, uid, objectstore.FollowupFlag{})
 	case "delete":
 		s.deleteMessage(w, st, folderID, uid)
 	case "unschedule":
@@ -205,6 +215,30 @@ func (s *Server) unscheduleSend(w http.ResponseWriter, st *objectstore.Store, fo
 	}
 	st.DeleteMessage(folderID, uid)
 	w.WriteHeader(http.StatusOK)
+}
+
+// setFollowup writes a message's follow-up flag (six-color / complete / none)
+// and re-renders the row. SetFollowupFlag also syncs the IMAP \Flagged bit, and
+// the row is re-enriched so the colored flag (and the other per-row-read icons)
+// render correctly on the htmx swap.
+func (s *Server) setFollowup(w http.ResponseWriter, st *objectstore.Store, folderID int64, folder string, uid uint32, f objectstore.FollowupFlag) {
+	m, err := st.MessageByUID(folderID, uid)
+	if err != nil {
+		http.NotFound(w, nil)
+		return
+	}
+	if err := st.SetFollowupFlag(m.ID, f); err != nil {
+		http.Error(w, "cannot set flag", http.StatusInternalServerError)
+		return
+	}
+	m, err = st.MessageByUID(folderID, uid) // re-read so \Flagged reflects the new state
+	if err != nil {
+		http.Error(w, "message gone", http.StatusInternalServerError)
+		return
+	}
+	v := messageViewFrom(folderID, folder, m)
+	enrichIcons(st, m.ID, &v)
+	s.render(w, "messagerow", v)
 }
 
 // toggleFlag flips a single flag bit and re-renders the message row. The row is

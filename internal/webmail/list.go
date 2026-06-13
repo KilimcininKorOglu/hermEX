@@ -138,6 +138,15 @@ func enrichIcons(st *objectstore.Store, messageID int64, v *messageView) {
 			}
 		}
 	}
+	if f, err := st.GetFollowupFlag(messageID); err == nil {
+		v.FlagComplete = f.Status == objectstore.FlagStatusComplete
+		switch {
+		case f.Color > 0:
+			v.FlagColor = f.Color
+		case !v.FlagComplete && v.Flagged:
+			v.FlagColor = objectstore.FlagColorRed // legacy \Flagged with no follow-up color shows red
+		}
+	}
 }
 
 // columnHeader is one sortable column heading in the message list. The handler
