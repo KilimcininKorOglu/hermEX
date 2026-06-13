@@ -82,24 +82,29 @@ func (s *Server) handleComposeForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	idents := s.identities(sess.user)
-	action := r.URL.Query().Get("action")
-	if action == "" {
-		s.render(w, "compose", composeView{Title: "New message", From: sess.user, FromOptions: idents})
-		return
-	}
-	// Reply/forward variants prefill from a source message.
-	folder := r.URL.Query().Get("folder")
-	uid64, err := strconv.ParseUint(r.URL.Query().Get("uid"), 10, 32)
-	if err != nil {
-		s.render(w, "compose", composeView{Title: "New message"})
-		return
-	}
 	st, err := objectstore.Open(sess.mailboxPath)
 	if err != nil {
 		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
 		return
 	}
 	defer st.Close()
+	settings, err := loadSettings(st)
+	if err != nil {
+		settings = defaultSettings()
+	}
+
+	action := r.URL.Query().Get("action")
+	if action == "" {
+		s.render(w, "compose", composeView{Title: "New message", From: sess.user, FromOptions: idents, Format: settings.ComposeFormat})
+		return
+	}
+	// Reply/forward variants prefill from a source message.
+	folder := r.URL.Query().Get("folder")
+	uid64, err := strconv.ParseUint(r.URL.Query().Get("uid"), 10, 32)
+	if err != nil {
+		s.render(w, "compose", composeView{Title: "New message", From: sess.user, FromOptions: idents, Format: settings.ComposeFormat})
+		return
+	}
 	folders, err := st.ListFolders()
 	if err != nil {
 		http.Error(w, "cannot read folders", http.StatusInternalServerError)
@@ -118,6 +123,7 @@ func (s *Server) handleComposeForm(w http.ResponseWriter, r *http.Request) {
 	v := buildComposeFromSource(action, folder, uint32(uid64), raw, sess.user)
 	v.From = sess.user
 	v.FromOptions = idents
+	v.Format = settings.ComposeFormat
 	s.render(w, "compose", v)
 }
 

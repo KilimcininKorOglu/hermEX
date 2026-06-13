@@ -11,6 +11,31 @@ import (
 	"hermex/internal/objectstore"
 )
 
+// TestComposeDefaultFormatFromSettings checks that the compose page's send
+// format follows the mailbox's saved default: HTML for a mailbox with no
+// settings, and the saved choice once preferences are stored.
+func TestComposeDefaultFormatFromSettings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alice")
+	st, _ := objectstore.Open(path)
+	st.Close()
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	if _, body := get(t, c, ts.URL+"/compose"); !strings.Contains(body, `id="formatfield" value="html"`) {
+		t.Errorf("default compose format is not html:\n%s", body)
+	}
+
+	st2, _ := objectstore.Open(path)
+	if err := saveSettings(st2, webmailSettings{ComposeFormat: "plain"}); err != nil {
+		t.Fatal(err)
+	}
+	st2.Close()
+
+	if _, body := get(t, c, ts.URL+"/compose"); !strings.Contains(body, `id="formatfield" value="plain"`) {
+		t.Errorf("compose format did not follow the saved default:\n%s", body)
+	}
+}
+
 // TestComposePageHasEditor checks that the compose page renders the rich-text
 // editor scaffolding: the self-hosted editor assets, the editor container, the
 // plain/HTML toggle, and the hidden fields the editor's JS populates on submit.
