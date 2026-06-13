@@ -67,12 +67,14 @@ func TestSQLDirectoryFaithfulResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wantStore := filepath.Join(maildir, "store.sqlite3")
+	// Resolution yields the maildir itself: that is the path handed to
+	// objectstore.Open, which opens objects.sqlite3 + imapindex.sqlite3 inside it.
+	wantMaildir := maildir
 
 	// Authentication: correct password (case-insensitive login), wrong password,
 	// and unknown user.
-	if path, ok := d.Authenticate("alice@hermex.test", "secret"); !ok || path != wantStore {
-		t.Errorf("Authenticate(correct) = %q, %v; want %q, true", path, ok, wantStore)
+	if path, ok := d.Authenticate("alice@hermex.test", "secret"); !ok || path != wantMaildir {
+		t.Errorf("Authenticate(correct) = %q, %v; want %q, true", path, ok, wantMaildir)
 	}
 	if _, ok := d.Authenticate("alice@hermex.test", "wrong"); ok {
 		t.Error("Authenticate(wrong password) should fail")
@@ -82,11 +84,11 @@ func TestSQLDirectoryFaithfulResolution(t *testing.T) {
 	}
 
 	// Recipient resolution: the user, an alias to the user, and an unknown.
-	if path, ok := d.Resolve("alice@hermex.test"); !ok || path != wantStore {
-		t.Errorf("Resolve(user) = %q, %v; want %q, true", path, ok, wantStore)
+	if path, ok := d.Resolve("alice@hermex.test"); !ok || path != wantMaildir {
+		t.Errorf("Resolve(user) = %q, %v; want %q, true", path, ok, wantMaildir)
 	}
-	if path, ok := d.Resolve("postmaster@hermex.test"); !ok || path != wantStore {
-		t.Errorf("Resolve(alias) = %q, %v; want %q, true", path, ok, wantStore)
+	if path, ok := d.Resolve("postmaster@hermex.test"); !ok || path != wantMaildir {
+		t.Errorf("Resolve(alias) = %q, %v; want %q, true", path, ok, wantMaildir)
 	}
 	if _, ok := d.Resolve("nobody@hermex.test"); ok {
 		t.Error("Resolve(unknown) should be refused")
