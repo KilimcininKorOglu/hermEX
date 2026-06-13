@@ -89,6 +89,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	terms := strings.Fields(strings.ToLower(q))
 	type hit struct {
 		info objectstore.MessageInfo
+		id   int64
 		path string
 	}
 	var hits []hit
@@ -104,7 +105,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 				return expensiveText(st, t.id, m.UID)
 			})
 			if matched {
-				hits = append(hits, hit{info: m, path: t.path})
+				hits = append(hits, hit{info: m, id: t.id, path: t.path})
 			} else if fetchErrored {
 				errored = true
 			}
@@ -119,7 +120,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return hits[i].info.InternalDate.After(hits[j].info.InternalDate)
 	})
 	for _, h := range hits {
-		v.Results = append(v.Results, messageViewFrom(h.path, h.info))
+		v.Results = append(v.Results, messageViewFrom(h.id, h.path, h.info))
 	}
 	s.render(w, "search", v)
 }

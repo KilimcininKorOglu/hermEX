@@ -2,6 +2,7 @@ package webmail
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"hermex/internal/mapi"
@@ -53,9 +54,133 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		s.deleteMessage(w, st, folderID, uid)
 	case "unschedule":
 		s.unscheduleSend(w, st, folderID, uid)
+	case "move":
+		s.moveTo(w, r, st, folders, folderID, folder, uid)
+	case "copy":
+		s.copyTo(w, r, st, folders, folderID, uid)
+	case "junk":
+		s.junkMessage(w, st, folderID, uid)
+	case "restore":
+		s.restoreMessage(w, st, folderID, uid)
 	default:
 		http.Error(w, "unknown action", http.StatusBadRequest)
 	}
+}
+
+// copyMessage re-files a message into dst, preserving its flags and internal
+// date (a fresh uid is assigned in dst, and the wire form is re-synthesized — the
+// same copy-then-delete primitive the delete-to-Trash path uses).
+func copyMessage(st *objectstore.Store, src int64, uid uint32, dst int64) error {
+	m, err := st.MessageByUID(src, uid)
+	if err != nil {
+		return err
+	}
+	raw, err := st.GetMessageRaw(src, uid)
+	if err != nil {
+		return err
+	}
+	_, err = st.AppendMessage(dst, raw, m.InternalDate, m.Flags)
+	return err
+}
+
+// moveMessage copies a message into dst then removes the source copy. Not
+// transactional: a crash between the two leaves a duplicate, never data loss
+// (matching the existing delete-to-Trash behavior).
+func moveMessage(st *objectstore.Store, src int64, uid uint32, dst int64) error {
+	if err := copyMessage(st, src, uid, dst); err != nil {
+		return err
+	}
+	return st.DeleteMessage(src, uid)
+}
+
+// folderExists reports whether id is one of the mailbox's visible folders.
+func folderExists(folders []objectstore.FolderInfo, id int64) bool {
+	for _, f := range folders {
+		if f.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+// parseDst reads the "dst" form value (a folder id) and validates it is a known,
+// mail-typed folder (a valid move/copy target).
+func parseDst(r *http.Request, folders []objectstore.FolderInfo) (int64, bool) {
+	dst, err := strconv.ParseInt(r.FormValue("dst"), 10, 64)
+	if err != nil || !folderExists(folders, dst) || !isMailFolder(dst) {
+		return 0, false
+	}
+	return dst, true
+}
+
+// moveTo moves a message to the folder named by the "dst" form value (a folder
+// id). A move onto the same folder is a no-op. On success it asks htmx to
+// navigate back to the source folder, since the message has left the open reader.
+func (s *Server) moveTo(w http.ResponseWriter, r *http.Request, st *objectstore.Store, folders []objectstore.FolderInfo, src int64, folder string, uid uint32) {
+	dst, ok := parseDst(r, folders)
+	if !ok {
+		http.Error(w, "invalid destination folder", http.StatusBadRequest)
+		return
+	}
+	if dst == src {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if err := moveMessage(st, src, uid, dst); err != nil {
+		http.Error(w, "cannot move message", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("HX-Redirect", "/mail?folder="+url.QueryEscape(folder))
+	w.WriteHeader(http.StatusOK)
+}
+
+// copyTo copies a message to the "dst" folder, leaving the source in place (so
+// the reader stays valid; no redirect). A copy onto the same folder is a no-op.
+func (s *Server) copyTo(w http.ResponseWriter, r *http.Request, st *objectstore.Store, folders []objectstore.FolderInfo, src int64, uid uint32) {
+	dst, ok := parseDst(r, folders)
+	if !ok {
+		http.Error(w, "invalid destination folder", http.StatusBadRequest)
+		return
+	}
+	if dst == src {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if err := copyMessage(st, src, uid, dst); err != nil {
+		http.Error(w, "cannot copy message", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// junkMessage moves a message to the Junk Email folder (a no-op when it is
+// already there). The response is empty so htmx removes the row.
+func (s *Server) junkMessage(w http.ResponseWriter, st *objectstore.Store, folderID int64, uid uint32) {
+	junkID := int64(mapi.PrivateFIDJunk)
+	if folderID == junkID {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if err := moveMessage(st, folderID, uid, junkID); err != nil {
+		http.Error(w, "cannot move to Junk", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// restoreMessage moves a message out of Deleted Items or Junk back to the Inbox.
+// It is valid only from those two folders (the row offers Restore only there);
+// from anywhere else it is rejected. The response is empty so htmx removes the row.
+func (s *Server) restoreMessage(w http.ResponseWriter, st *objectstore.Store, folderID int64, uid uint32) {
+	if folderID != int64(mapi.PrivateFIDDeletedItems) && folderID != int64(mapi.PrivateFIDJunk) {
+		http.Error(w, "restore is only valid from Deleted Items or Junk", http.StatusBadRequest)
+		return
+	}
+	if err := moveMessage(st, folderID, uid, int64(mapi.PrivateFIDInbox)); err != nil {
+		http.Error(w, "cannot restore message", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
 }
 
 // unscheduleSend cancels a scheduled send by moving the Outbox message back to
@@ -98,7 +223,7 @@ func (s *Server) toggleFlag(w http.ResponseWriter, st *objectstore.Store, folder
 		http.Error(w, "message gone", http.StatusInternalServerError)
 		return
 	}
-	s.render(w, "messagerow", messageViewFrom(folder, m))
+	s.render(w, "messagerow", messageViewFrom(folderID, folder, m))
 }
 
 // deleteMessage moves a message to the Deleted Items folder, or removes it

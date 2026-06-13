@@ -31,6 +31,7 @@ type messageDetail struct {
 	IsHTML      bool
 	Body        string
 	Attachments []attachmentView
+	Folders     []folderView // move/copy targets (mail folders except this one)
 }
 
 func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
@@ -71,6 +72,7 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	detail := buildMessageDetail(raw, folder, uid)
+	detail.Folders = moveTargets(folders, folderID)
 
 	// Reading a message marks it \Seen (read-modify-write to preserve the rest).
 	if cur, err := st.MessageFlags(folderID, uid); err == nil && cur&objectstore.FlagSeen == 0 {
