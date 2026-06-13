@@ -44,6 +44,10 @@
 {{define "messagelist"}}
 {{if .Messages}}
 <table class="messages">
+  <thead><tr>
+    {{range .Columns}}<th class="sortcol{{if .Active}} active{{end}}"><a href="/mail?folder={{$.Current}}&sort={{.Key}}&dir={{.NextDir}}&filter={{$.Filter}}&page=1">{{.Label}}{{if .Active}} {{.Arrow}}{{end}}</a></th>{{end}}
+    <th></th>
+  </tr></thead>
   {{range .Messages}}{{template "messagerow" .}}{{end}}
 </table>
 {{else}}

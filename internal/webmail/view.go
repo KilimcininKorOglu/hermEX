@@ -63,6 +63,7 @@ type mailPage struct {
 	NextPage int
 	Total    int
 	Unread   int
+	Columns  []columnHeader // sortable column headers with precomputed link state
 }
 
 // buildFolderViews computes each folder's hierarchical path from the parent

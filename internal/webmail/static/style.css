@@ -94,6 +94,9 @@ button.primary:hover { background: #234e96; }
 .toolbar h2 .counts { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 8px; }
 
 table.messages { width: 100%; border-collapse: collapse; background: var(--panel); }
+table.messages thead th { text-align: left; padding: 8px 14px; border-bottom: 2px solid var(--border); font-size: 12px; color: var(--muted); font-weight: 500; }
+table.messages thead th a { color: var(--muted); }
+table.messages thead th.active a { color: var(--text); font-weight: 600; }
 table.messages td {
   padding: 10px 14px;
   border-bottom: 1px solid var(--border);

@@ -108,6 +108,44 @@ func listFolderPage(st *objectstore.Store, folderID int64, folder string, p list
 	return res, nil
 }
 
+// columnHeader is one sortable column heading in the message list. The handler
+// precomputes the link state so the template stays free of URL/sort logic.
+type columnHeader struct {
+	Key     string // sort key carried in the link (matches sortMessages)
+	Label   string // display text
+	Active  bool   // the list is currently sorted by this column
+	NextDir string // direction to request when the header is clicked
+	Arrow   string // ▲ ascending / ▼ descending, shown only on the active column
+}
+
+// listColumns returns the message list's sortable column headers given the
+// current sort key and direction. Clicking the active column toggles its
+// direction; clicking another column starts at its natural direction (date
+// newest-first, text A→Z).
+func listColumns(sort, dir string) []columnHeader {
+	defs := []struct{ key, label string }{
+		{"from", "From"},
+		{"subject", "Subject"},
+		{"date", "Date"},
+	}
+	cols := make([]columnHeader, 0, len(defs))
+	for _, d := range defs {
+		c := columnHeader{Key: d.key, Label: d.label, Active: sort == d.key}
+		switch {
+		case c.Active && dir == "asc":
+			c.NextDir, c.Arrow = "desc", "▲"
+		case c.Active: // dir == "desc"
+			c.NextDir, c.Arrow = "asc", "▼"
+		case d.key == "date":
+			c.NextDir = "desc" // first click on Date shows newest first
+		default:
+			c.NextDir = "asc" // first click on a text column sorts A→Z
+		}
+		cols = append(cols, c)
+	}
+	return cols
+}
+
 // sortMessages orders messages in place by the given key and direction. A strict
 // final tiebreak on UID (unique within a folder) makes the order a total order,
 // so the unstable sort is fully deterministic without needing a stable sort. An
