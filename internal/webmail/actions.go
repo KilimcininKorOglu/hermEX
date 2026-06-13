@@ -67,6 +67,8 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		s.setFollowup(w, r, st, folderID, folder, uid, objectstore.FollowupFlag{Status: objectstore.FlagStatusComplete})
 	case "flagnone":
 		s.setFollowup(w, r, st, folderID, folder, uid, objectstore.FollowupFlag{})
+	case "categorize":
+		s.categorize(w, r, st, folderID, folder, uid, r.FormValue("cat"))
 	case "delete":
 		s.deleteMessage(w, st, folderID, uid)
 	case "unschedule":
@@ -250,7 +252,51 @@ func (s *Server) setFollowup(w http.ResponseWriter, r *http.Request, st *objects
 		return
 	}
 	v := messageViewFrom(folderID, folder, m)
-	enrichIcons(st, m.ID, &v)
+	enrichIcons(st, m.ID, mailboxCategories(st), &v)
+	s.render(w, "messagerow", v)
+}
+
+// categorize toggles a category name on a message (PidNameKeywords) and
+// re-renders. Like the flag actions it branches on HX-Request: the list posts via
+// htmx and gets the row partial; the reader posts a plain form and is redirected
+// back to the message.
+func (s *Server) categorize(w http.ResponseWriter, r *http.Request, st *objectstore.Store, folderID int64, folder string, uid uint32, name string) {
+	if name == "" {
+		http.Error(w, "no category", http.StatusBadRequest)
+		return
+	}
+	m, err := st.MessageByUID(folderID, uid)
+	if err != nil {
+		http.NotFound(w, nil)
+		return
+	}
+	cur, err := st.GetCategories(m.ID)
+	if err != nil {
+		http.Error(w, "cannot read categories", http.StatusInternalServerError)
+		return
+	}
+	out := make([]string, 0, len(cur)+1)
+	found := false
+	for _, c := range cur {
+		if c == name {
+			found = true
+			continue
+		}
+		out = append(out, c)
+	}
+	if !found {
+		out = append(out, name)
+	}
+	if err := st.SetCategories(m.ID, out); err != nil {
+		http.Error(w, "cannot set categories", http.StatusInternalServerError)
+		return
+	}
+	if r.Header.Get("HX-Request") == "" {
+		http.Redirect(w, r, "/message?folder="+url.QueryEscape(folder)+"&uid="+strconv.FormatUint(uint64(uid), 10), http.StatusSeeOther)
+		return
+	}
+	v := messageViewFrom(folderID, folder, m)
+	enrichIcons(st, m.ID, mailboxCategories(st), &v)
 	s.render(w, "messagerow", v)
 }
 
@@ -275,7 +321,7 @@ func (s *Server) toggleFlag(w http.ResponseWriter, st *objectstore.Store, folder
 		return
 	}
 	v := messageViewFrom(folderID, folder, m)
-	enrichIcons(st, m.ID, &v)
+	enrichIcons(st, m.ID, mailboxCategories(st), &v)
 	s.render(w, "messagerow", v)
 }
 

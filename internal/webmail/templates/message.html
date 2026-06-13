@@ -32,6 +32,16 @@
         <input type="datetime-local" name="due" aria-label="Follow-up due date">
       </form>
     </details>
+    {{if .AllCategories}}
+    <details class="flagmenu catmenu">
+      <summary title="Categories">Categorize</summary>
+      <form class="flagmenu-pop catlist" method="post">
+        {{range .AllCategories}}
+        <button type="submit" formaction="/action?folder={{$.Folder}}&uid={{$.UID}}&op=categorize&cat={{.Name}}" style="border-left:5px solid {{.Color}}">{{.Name}}</button>
+        {{end}}
+      </form>
+    </details>
+    {{end}}
   </div>
   <div class="reader-headers">
     <h2>{{.Subject}}</h2>
@@ -40,6 +50,7 @@
     {{if .Cc}}<div class="hrow"><span class="hlabel">Cc</span> {{.Cc}}</div>{{end}}
     <div class="hrow"><span class="hlabel">Date</span> {{.Date}}</div>
     {{if or .FlagColor .FlagComplete}}<div class="hrow"><span class="hlabel">Flag</span> {{if .FlagComplete}}<span class="i-flagdone" title="Complete">&#10003;</span> Complete{{else}}<span class="i-flag flag-c{{.FlagColor}}">&#9873;</span> Follow up{{end}}{{if .FlagDue}} &mdash; due {{.FlagDue}}{{end}}</div>{{end}}
+    {{if .Categories}}<div class="hrow"><span class="hlabel">Tags</span> {{range .Categories}}<span class="cat-badge" style="background-color:{{.Color}}">{{.Name}}</span> {{end}}</div>{{end}}
   </div>
   {{if .Attachments}}
   <div class="attachments">

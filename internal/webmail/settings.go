@@ -25,6 +25,36 @@ type webmailSettings struct {
 	Density               string      `json:"density"`               // message-list row density: "compact" | "extended"
 	DefaultSort           string      `json:"defaultSort"`           // default list sort key when no URL param ("" → date)
 	DefaultDir            string      `json:"defaultDir"`            // default list sort direction when no URL param ("" → desc)
+	Categories            []category  `json:"categories"`            // master colored-category list (assigned to messages as PidNameKeywords)
+}
+
+// category is one named, colored label in the mailbox's master category list.
+// A message carries category names (PidNameKeywords); the color is resolved from
+// this list for display.
+type category struct {
+	Name  string `json:"name"`
+	Color string `json:"color"` // CSS color, e.g. "#b00020"
+}
+
+// mailboxCategories returns a mailbox's master category list, or nil on error —
+// used by the per-row icon enrichment to color category badges.
+func mailboxCategories(st *objectstore.Store) []category {
+	cfg, err := loadSettings(st)
+	if err != nil {
+		return nil
+	}
+	return cfg.Categories
+}
+
+// catColor returns the color for a category name from a master list, or a
+// neutral grey when the name is not present (assigned but since removed).
+func catColor(cats []category, name string) string {
+	for _, c := range cats {
+		if c.Name == name {
+			return c.Color
+		}
+	}
+	return "#6b7280"
 }
 
 // signature is one named signature. HTML holds the signature markup when IsHTML
@@ -52,7 +82,16 @@ func (s webmailSettings) signatureByID(id string) (signature, bool) {
 
 // defaultSettings is what a mailbox uses until it saves its own preferences.
 func defaultSettings() webmailSettings {
-	return webmailSettings{SchemaVersion: settingsSchemaVersion, ComposeFormat: "html", Density: "compact", DefaultSort: "date", DefaultDir: "desc"}
+	return webmailSettings{
+		SchemaVersion: settingsSchemaVersion, ComposeFormat: "html", Density: "compact", DefaultSort: "date", DefaultDir: "desc",
+		Categories: []category{
+			{Name: "Red", Color: "#b00020"},
+			{Name: "Orange", Color: "#e67e22"},
+			{Name: "Green", Color: "#27ae60"},
+			{Name: "Blue", Color: "#2563eb"},
+			{Name: "Purple", Color: "#8e44ad"},
+		},
+	}
 }
 
 // loadSettings reads and decodes a mailbox's webmail settings, returning the
@@ -155,6 +194,16 @@ func (s *Server) handleSettingsSubmit(w http.ResponseWriter, r *http.Request) {
 		if cfg.DefaultSignatureReply == id {
 			cfg.DefaultSignatureReply = ""
 		}
+	case "addcat":
+		if name := strings.TrimSpace(r.FormValue("catname")); name != "" && !categoryExists(cfg.Categories, name) {
+			color := r.FormValue("catcolor")
+			if color == "" {
+				color = "#6b7280"
+			}
+			cfg.Categories = append(cfg.Categories, category{Name: name, Color: color})
+		}
+	case "delcat":
+		cfg.Categories = removeCategory(cfg.Categories, r.FormValue("catname"))
 	default: // save preferences
 		if f := r.FormValue("composeformat"); f == "plain" || f == "html" {
 			cfg.ComposeFormat = f
@@ -176,6 +225,27 @@ func (s *Server) handleSettingsSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
+// categoryExists reports whether a category name is already in the master list.
+func categoryExists(cats []category, name string) bool {
+	for _, c := range cats {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// removeCategory returns cats without the category whose name matches.
+func removeCategory(cats []category, name string) []category {
+	out := make([]category, 0, len(cats))
+	for _, c := range cats {
+		if c.Name != name {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // removeSignature returns sigs without the signature whose id matches.

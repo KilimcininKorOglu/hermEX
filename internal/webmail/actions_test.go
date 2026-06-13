@@ -289,6 +289,62 @@ func TestActionFollowupFlag(t *testing.T) {
 	}
 }
 
+// TestActionCategorize checks that the categorize action toggles a category on a
+// message (PidNameKeywords) and renders the colored badge in the swapped row.
+func TestActionCategorize(t *testing.T) {
+	path := emptyMailbox(t)
+	uid := seedMsg(t, path, int64(mapi.PrivateFIDInbox), "tag me", "", "body", 100, 0)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+	hx := func(vals url.Values) (int, string) {
+		t.Helper()
+		req, err := http.NewRequest("POST", ts.URL+"/action", strings.NewReader(vals.Encode()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("HX-Request", "true")
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	stored := func() []string {
+		st, err := objectstore.Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer st.Close()
+		msgs, _ := st.ListMessages(int64(mapi.PrivateFIDInbox))
+		got, _ := st.GetCategories(msgs[0].ID)
+		return got
+	}
+
+	// Assign "Red" (a default master category) → badge in the row + stored.
+	code, body := hx(url.Values{"folder": {"INBOX"}, "uid": {itoa(uid)}, "op": {"categorize"}, "cat": {"Red"}})
+	if code != 200 {
+		t.Fatalf("categorize = %d", code)
+	}
+	if !strings.Contains(body, `class="cat-badge"`) || !strings.Contains(body, ">Red<") {
+		t.Errorf("categorized row missing the Red badge:\n%s", body)
+	}
+	if got := stored(); len(got) != 1 || got[0] != "Red" {
+		t.Errorf("stored categories = %v, want [Red]", got)
+	}
+
+	// Re-categorize the same name → toggled off.
+	_, body = hx(url.Values{"folder": {"INBOX"}, "uid": {itoa(uid)}, "op": {"categorize"}, "cat": {"Red"}})
+	if strings.Contains(body, ">Red<") {
+		t.Errorf("re-categorizing should remove the badge:\n%s", body)
+	}
+	if got := stored(); len(got) != 0 {
+		t.Errorf("stored categories = %v, want none after toggle", got)
+	}
+}
+
 // TestActionUnauthenticated checks /action requires a session.
 func TestActionUnauthenticated(t *testing.T) {
 	path := emptyMailbox(t)
