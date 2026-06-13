@@ -38,6 +38,8 @@ type messageDetail struct {
 	Categories    []categoryView // categories assigned to this message, with colors
 	AllCategories []category     // the mailbox's master category list, for the assign control
 	Preview       bool           // rendered inside the reading pane (partial, no page chrome) (#34)
+	Importance    string         // "High" | "Low" label for the print header, "" when Normal/absent (#34)
+	Sensitivity   string         // "Personal" | "Private" | "Confidential" for the print header, "" when Normal (#34)
 }
 
 func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
