@@ -175,3 +175,9 @@ table.messages tr.flagged td:first-child { box-shadow: inset 3px 0 0 #e0a800; }
 #htmleditor .ql-container { border-radius: 0 0 6px 6px; }
 #htmleditor .ql-toolbar { border-radius: 6px 6px 0 0; }
 #htmleditor .ql-editor { min-height: 220px; background: #fff; font-size: 14px; }
+#sigeditorbox .ql-editor { min-height: 120px; background: #fff; font-size: 14px; }
+
+/* Signature management list on the settings page. */
+.signature-list { list-style: none; padding: 0; margin: 0 0 16px; }
+.signature-list li { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); }
+form.inline { display: inline; }
