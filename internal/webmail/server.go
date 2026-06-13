@@ -50,6 +50,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /settings", s.handleSettingsForm)
 	mux.HandleFunc("POST /settings", s.handleSettingsSubmit)
 	mux.HandleFunc("POST /action", s.handleAction)
+	mux.HandleFunc("POST /bulk", s.handleBulk)
+	mux.HandleFunc("POST /export", s.handleExport)
 	mux.HandleFunc("POST /folder", s.handleFolder)
 	mux.HandleFunc("GET /{$}", s.handleRoot)
 	return mux
@@ -145,16 +147,17 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 		Page:   atoiDefault(q.Get("page"), 1),
 	}
 	page := mailPage{
-		User:    sess.user,
-		Current: current,
-		Folders: folderViews,
-		Field:   "all",    // search-form defaults (scoped to the current folder)
-		Scope:   "folder", // until the user opens a cross-folder search
-		Sort:    params.Sort,
-		Dir:     params.Dir,
-		Filter:  params.Filter,
-		Density: whitelist(orDefault(q.Get("density"), cfg.Density), "compact", "extended"),
-		Columns: listColumns(params.Sort, params.Dir),
+		User:       sess.user,
+		Current:    current,
+		Folders:    folderViews,
+		Field:      "all",    // search-form defaults (scoped to the current folder)
+		Scope:      "folder", // until the user opens a cross-folder search
+		Sort:       params.Sort,
+		Dir:        params.Dir,
+		Filter:     params.Filter,
+		Density:    whitelist(orDefault(q.Get("density"), cfg.Density), "compact", "extended"),
+		Columns:    listColumns(params.Sort, params.Dir),
+		Categories: cfg.Categories,
 	}
 	if id, found := resolveFolder(folders, current); found {
 		if res, err := listFolderPage(st, id, current, params, cfg.Categories); err == nil {

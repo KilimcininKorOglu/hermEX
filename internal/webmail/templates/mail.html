@@ -49,12 +49,53 @@
     {{template "messagelist" .}}
   </main>
 </div>
+<script>
+(function () {
+  var all = document.getElementById("selall");
+  var boxes = document.querySelectorAll("input.rowcheck");
+  var counter = document.getElementById("bulkcount");
+  function update() {
+    var n = 0;
+    boxes.forEach(function (b) { if (b.checked) { n++; } });
+    if (counter) { counter.textContent = n; }
+    if (all) { all.checked = n > 0 && n === boxes.length; }
+  }
+  if (all) {
+    all.addEventListener("change", function () {
+      boxes.forEach(function (b) { b.checked = all.checked; });
+      update();
+    });
+  }
+  boxes.forEach(function (b) { b.addEventListener("change", update); });
+  update();
+})();
+</script>
 {{template "foot" .}}{{end}}
 
 {{define "messagelist"}}
 {{if .Messages}}
+<form id="bulkform" method="post" action="/bulk" class="bulkbar">
+  <input type="hidden" name="folder" value="{{.Current}}">
+  <span class="bulkcount"><span id="bulkcount">0</span> selected</span>
+  <button type="submit" name="op" value="read">Mark read</button>
+  <button type="submit" name="op" value="unread">Mark unread</button>
+  <button type="submit" name="op" value="flag" class="flag-c6" title="Flag (red)">&#9873; Flag</button>
+  <button type="submit" name="op" value="unflag">Clear flag</button>
+  <button type="submit" name="op" value="junk">Junk</button>
+  <button type="submit" name="op" value="delete" class="danger" onclick="return confirm('Delete the selected messages?')">Delete</button>
+  {{if .Folders}}
+  <select name="dst" aria-label="Move to folder">{{range .Folders}}<option value="{{.ID}}">{{.Path}}</option>{{end}}</select>
+  <button type="submit" name="op" value="move">Move</button>
+  {{end}}
+  {{if .Categories}}
+  <select name="cat" aria-label="Category">{{range .Categories}}<option value="{{.Name}}">{{.Name}}</option>{{end}}</select>
+  <button type="submit" name="op" value="categorize">Categorize</button>
+  {{end}}
+  <button type="submit" formaction="/export" title="Download selected as a zip of .eml files">Export</button>
+</form>
 <table class="messages density-{{.Density}}">
   <thead><tr>
+    <th class="selcol"><input type="checkbox" id="selall" aria-label="Select all on page"></th>
     <th class="iconcol"></th>
     {{range .Columns}}<th class="sortcol{{if .Active}} active{{end}}"><a href="/mail?folder={{$.Current}}&sort={{.Key}}&dir={{.NextDir}}&filter={{$.Filter}}&density={{$.Density}}&page=1">{{.Label}}{{if .Active}} {{.Arrow}}{{end}}</a></th>{{end}}
     <th></th>
@@ -75,6 +116,7 @@
 
 {{define "messagerow"}}
 <tr id="msg-{{.UID}}" class="{{if not .Seen}}unread{{end}}{{if .Flagged}} flagged{{end}}">
+  <td class="selcol"><input type="checkbox" class="rowcheck" form="bulkform" name="uid" value="{{.UID}}" aria-label="Select"></td>
   <td class="icons">{{if not .Seen}}<span class="i-unread" title="Unread">&#9679;</span>{{end}}{{if .FlagComplete}}<span class="i-flagdone" title="Flag complete">&#10003;</span>{{else if .FlagColor}}<span class="i-flag flag-c{{.FlagColor}}" title="Flagged">&#9873;</span>{{end}}{{if .HasAttachment}}<span class="i-attach" title="Has attachment">&#128206;</span>{{end}}{{if .ImportanceHigh}}<span class="i-high" title="High importance">!</span>{{end}}{{if .ImportanceLow}}<span class="i-low" title="Low importance">&#8595;</span>{{end}}</td>
   <td class="from">{{.From}}</td>
   <td class="subject">{{if .Draft}}<a href="/compose?action=editdraft&folder={{.Folder}}&uid={{.UID}}">{{.Subject}}</a>{{else}}<a href="/message?folder={{.Folder}}&uid={{.UID}}">{{.Subject}}</a>{{end}}{{range .Categories}} <span class="cat-badge" style="background-color:{{.Color}}">{{.Name}}</span>{{end}}</td>
