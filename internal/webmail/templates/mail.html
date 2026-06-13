@@ -77,7 +77,7 @@
 <tr id="msg-{{.UID}}" class="{{if not .Seen}}unread{{end}}{{if .Flagged}} flagged{{end}}">
   <td class="icons">{{if not .Seen}}<span class="i-unread" title="Unread">&#9679;</span>{{end}}{{if .FlagComplete}}<span class="i-flagdone" title="Flag complete">&#10003;</span>{{else if .FlagColor}}<span class="i-flag flag-c{{.FlagColor}}" title="Flagged">&#9873;</span>{{end}}{{if .HasAttachment}}<span class="i-attach" title="Has attachment">&#128206;</span>{{end}}{{if .ImportanceHigh}}<span class="i-high" title="High importance">!</span>{{end}}{{if .ImportanceLow}}<span class="i-low" title="Low importance">&#8595;</span>{{end}}</td>
   <td class="from">{{.From}}</td>
-  <td class="subject">{{if .Draft}}<a href="/compose?action=editdraft&folder={{.Folder}}&uid={{.UID}}">{{.Subject}}</a>{{else}}<a href="/message?folder={{.Folder}}&uid={{.UID}}">{{.Subject}}</a>{{end}}</td>
+  <td class="subject">{{if .Draft}}<a href="/compose?action=editdraft&folder={{.Folder}}&uid={{.UID}}">{{.Subject}}</a>{{else}}<a href="/message?folder={{.Folder}}&uid={{.UID}}">{{.Subject}}</a>{{end}}{{range .Categories}} <span class="cat-badge" style="background-color:{{.Color}}">{{.Name}}</span>{{end}}</td>
   <td class="date">{{.Date}}</td>
   <td class="actions">
     <button hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=toggleseen" hx-target="#msg-{{.UID}}" hx-swap="outerHTML">{{if .Seen}}Unread{{else}}Read{{end}}</button>

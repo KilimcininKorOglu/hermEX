@@ -21,20 +21,22 @@ type attachmentView struct {
 
 // messageDetail is the data the message template renders.
 type messageDetail struct {
-	UID          uint32
-	Folder       string
-	From         string
-	To           string
-	Cc           string
-	Subject      string
-	Date         string
-	IsHTML       bool
-	Body         string
-	Attachments  []attachmentView
-	Folders      []folderView // move/copy targets (mail folders except this one)
-	FlagColor    int32        // follow-up flag color 1-6 (0 none), shown in the reader header
-	FlagComplete bool         // follow-up flag marked complete
-	FlagDue      string       // formatted follow-up due date, empty when none
+	UID           uint32
+	Folder        string
+	From          string
+	To            string
+	Cc            string
+	Subject       string
+	Date          string
+	IsHTML        bool
+	Body          string
+	Attachments   []attachmentView
+	Folders       []folderView   // move/copy targets (mail folders except this one)
+	FlagColor     int32          // follow-up flag color 1-6 (0 none), shown in the reader header
+	FlagComplete  bool           // follow-up flag marked complete
+	FlagDue       string         // formatted follow-up due date, empty when none
+	Categories    []categoryView // categories assigned to this message, with colors
+	AllCategories []category     // the mailbox's master category list, for the assign control
 }
 
 func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +88,8 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 			st.SetMessageFlags(folderID, uid, cur|objectstore.FlagSeen)
 		}
 	}
+	cats := mailboxCategories(st)
+	detail.AllCategories = cats
 	if m, err := st.MessageByUID(folderID, uid); err == nil {
 		if f, err := st.GetFollowupFlag(m.ID); err == nil {
 			detail.FlagComplete = f.Status == objectstore.FlagStatusComplete
@@ -97,6 +101,11 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 			}
 			if !f.DueBy.IsZero() {
 				detail.FlagDue = f.DueBy.Format("2006-01-02 15:04")
+			}
+		}
+		if names, err := st.GetCategories(m.ID); err == nil {
+			for _, n := range names {
+				detail.Categories = append(detail.Categories, categoryView{Name: n, Color: catColor(cats, n)})
 			}
 		}
 	}

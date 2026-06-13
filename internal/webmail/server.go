@@ -157,7 +157,7 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 		Columns: listColumns(params.Sort, params.Dir),
 	}
 	if id, found := resolveFolder(folders, current); found {
-		if res, err := listFolderPage(st, id, current, params); err == nil {
+		if res, err := listFolderPage(st, id, current, params, cfg.Categories); err == nil {
 			page.Messages = res.Messages
 			page.Page = res.Page
 			page.MaxPage = res.MaxPage

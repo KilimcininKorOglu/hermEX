@@ -75,6 +75,36 @@
       </div>
       <button class="primary" type="submit">Add signature</button>
     </form>
+
+    <h2>Categories</h2>
+    {{if .Categories}}
+    <ul class="signature-list">
+      {{range .Categories}}
+      <li>
+        <span class="cat-badge" style="background-color:{{.Color}}">{{.Name}}</span>
+        <form method="post" action="/settings" class="inline">
+          <input type="hidden" name="action" value="delcat">
+          <input type="hidden" name="catname" value="{{.Name}}">
+          <button type="submit">Delete</button>
+        </form>
+      </li>
+      {{end}}
+    </ul>
+    {{else}}
+    <p class="notice">No categories yet.</p>
+    {{end}}
+    <form method="post" action="/settings" class="catadd">
+      <input type="hidden" name="action" value="addcat">
+      <div class="field">
+        <label>New category name</label>
+        <input name="catname" placeholder="e.g. Project X" required>
+      </div>
+      <div class="field">
+        <label>Color</label>
+        <input type="color" name="catcolor" value="#2563eb">
+      </div>
+      <button class="primary" type="submit">Add category</button>
+    </form>
   </div>
 </div>
 <script>

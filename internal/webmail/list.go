@@ -59,7 +59,7 @@ type pageResult struct {
 // post-filter count. Only the visible page is mapped to views. Paging is
 // server-controlled but in memory: the folder is read in full, sorted, then
 // sliced, because the sort key can be a field the index does not order by.
-func listFolderPage(st *objectstore.Store, folderID int64, folder string, p listParams) (pageResult, error) {
+func listFolderPage(st *objectstore.Store, folderID int64, folder string, p listParams, cats []category) (pageResult, error) {
 	msgs, err := st.ListMessages(folderID)
 	if err != nil {
 		return pageResult{}, err
@@ -114,7 +114,7 @@ func listFolderPage(st *objectstore.Store, folderID int64, folder string, p list
 	res.Messages = make([]messageView, 0, hi-lo)
 	for _, m := range msgs[lo:hi] {
 		v := messageViewFrom(folderID, folder, m)
-		enrichIcons(st, m.ID, &v)
+		enrichIcons(st, m.ID, cats, &v)
 		res.Messages = append(res.Messages, v)
 	}
 	return res, nil
@@ -126,7 +126,7 @@ func listFolderPage(st *objectstore.Store, folderID int64, folder string, p list
 // messageViewFrom on purpose: the search path also maps views and must not pay
 // for these per-message reads. A read error leaves the flag false (the icon is
 // simply not shown).
-func enrichIcons(st *objectstore.Store, messageID int64, v *messageView) {
+func enrichIcons(st *objectstore.Store, messageID int64, cats []category, v *messageView) {
 	if has, err := st.HasAttachments(messageID); err == nil {
 		v.HasAttachment = has
 	}
@@ -145,6 +145,11 @@ func enrichIcons(st *objectstore.Store, messageID int64, v *messageView) {
 			v.FlagColor = f.Color
 		case !v.FlagComplete && v.Flagged:
 			v.FlagColor = objectstore.FlagColorRed // legacy \Flagged with no follow-up color shows red
+		}
+	}
+	if names, err := st.GetCategories(messageID); err == nil {
+		for _, n := range names {
+			v.Categories = append(v.Categories, categoryView{Name: n, Color: catColor(cats, n)})
 		}
 	}
 }
