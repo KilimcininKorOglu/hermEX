@@ -1,6 +1,11 @@
 package mapi
 
-import "fmt"
+import (
+	"encoding/binary"
+	"encoding/hex"
+	"fmt"
+	"strings"
+)
 
 // GUID is a 128-bit globally unique identifier (MS-DTYP §2.3.4.2), used for
 // PtCLSID property values and named-property namespaces. The field layout
@@ -19,4 +24,26 @@ func (g GUID) String() string {
 		g.Data1, g.Data2, g.Data3,
 		g.Data4[0], g.Data4[1], g.Data4[2], g.Data4[3],
 		g.Data4[4], g.Data4[5], g.Data4[6], g.Data4[7])
+}
+
+// ParseGUID is the inverse of String: it reads the canonical 8-4-4-4-12 hex
+// form back into a GUID. Dashes are optional; the input must hold exactly 32
+// hex digits. Data1-Data3 are read as big-endian hex (as String prints them),
+// Data4 verbatim.
+func ParseGUID(s string) (GUID, error) {
+	clean := strings.ReplaceAll(s, "-", "")
+	if len(clean) != 32 {
+		return GUID{}, fmt.Errorf("mapi: parse guid %q: want 32 hex digits, got %d", s, len(clean))
+	}
+	b, err := hex.DecodeString(clean)
+	if err != nil {
+		return GUID{}, fmt.Errorf("mapi: parse guid %q: %w", s, err)
+	}
+	g := GUID{
+		Data1: binary.BigEndian.Uint32(b[0:4]),
+		Data2: binary.BigEndian.Uint16(b[4:6]),
+		Data3: binary.BigEndian.Uint16(b[6:8]),
+	}
+	copy(g.Data4[:], b[8:16])
+	return g, nil
 }
