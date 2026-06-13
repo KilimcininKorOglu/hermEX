@@ -2,6 +2,8 @@ package webmail
 
 import (
 	"encoding/json"
+	"net/http"
+	"strings"
 
 	"hermex/internal/objectstore"
 )
@@ -65,4 +67,90 @@ func saveSettings(st *objectstore.Store, s webmailSettings) error {
 		return err
 	}
 	return st.SetWebmailSettings(string(b))
+}
+
+// handleSettingsForm renders the settings page: the default compose format and
+// the signature list, with assignments for new messages and replies/forwards.
+func (s *Server) handleSettingsForm(w http.ResponseWriter, r *http.Request) {
+	sess, ok := s.sessionFrom(r)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	st, err := objectstore.Open(sess.mailboxPath)
+	if err != nil {
+		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
+		return
+	}
+	defer st.Close()
+	cfg, err := loadSettings(st)
+	if err != nil {
+		cfg = defaultSettings()
+	}
+	s.render(w, "settings", cfg)
+}
+
+// handleSettingsSubmit applies one settings action — saving preferences, adding
+// a signature, or deleting one — then redirects back to the settings page.
+func (s *Server) handleSettingsSubmit(w http.ResponseWriter, r *http.Request) {
+	sess, ok := s.sessionFrom(r)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	st, err := objectstore.Open(sess.mailboxPath)
+	if err != nil {
+		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
+		return
+	}
+	defer st.Close()
+	cfg, err := loadSettings(st)
+	if err != nil {
+		cfg = defaultSettings()
+	}
+
+	switch r.FormValue("action") {
+	case "addsig":
+		if name := strings.TrimSpace(r.FormValue("signame")); name != "" {
+			sig := signature{ID: randomToken()[:12], Name: name}
+			if html := strings.TrimSpace(r.FormValue("sigbodyhtml")); html != "" {
+				sig.HTML, sig.IsHTML = html, true
+			} else {
+				sig.HTML = r.FormValue("sigbody")
+			}
+			cfg.Signatures = append(cfg.Signatures, sig)
+		}
+	case "delsig":
+		id := r.FormValue("sigid")
+		cfg.Signatures = removeSignature(cfg.Signatures, id)
+		if cfg.DefaultSignatureNew == id {
+			cfg.DefaultSignatureNew = ""
+		}
+		if cfg.DefaultSignatureReply == id {
+			cfg.DefaultSignatureReply = ""
+		}
+	default: // save preferences
+		if f := r.FormValue("composeformat"); f == "plain" || f == "html" {
+			cfg.ComposeFormat = f
+		}
+		cfg.DefaultSignatureNew = r.FormValue("defaultnew")
+		cfg.DefaultSignatureReply = r.FormValue("defaultreply")
+	}
+
+	if err := saveSettings(st, cfg); err != nil {
+		http.Error(w, "cannot save settings", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+}
+
+// removeSignature returns sigs without the signature whose id matches.
+func removeSignature(sigs []signature, id string) []signature {
+	out := make([]signature, 0, len(sigs))
+	for _, sig := range sigs {
+		if sig.ID != id {
+			out = append(out, sig)
+		}
+	}
+	return out
 }

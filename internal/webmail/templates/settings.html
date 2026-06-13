@@ -1,0 +1,91 @@
+{{define "settings"}}{{template "head" .}}
+{{template "editor-assets" .}}
+<div class="reader">
+  <div class="reader-toolbar"><a href="/mail?folder=INBOX">&larr; Back to mailbox</a></div>
+  <div class="compose-card">
+    <h2>Settings</h2>
+    <form method="post" action="/settings">
+      <input type="hidden" name="action" value="save">
+      <div class="field">
+        <label>Default compose format</label>
+        <label class="check"><input type="radio" name="composeformat" value="html"{{if eq .ComposeFormat "html"}} checked{{end}}> HTML</label>
+        <label class="check"><input type="radio" name="composeformat" value="plain"{{if eq .ComposeFormat "plain"}} checked{{end}}> Plain text</label>
+      </div>
+      <div class="field">
+        <label>Signature for new messages</label>
+        <select name="defaultnew">
+          <option value="">None</option>
+          {{range .Signatures}}<option value="{{.ID}}"{{if eq .ID $.DefaultSignatureNew}} selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+      </div>
+      <div class="field">
+        <label>Signature for replies and forwards</label>
+        <select name="defaultreply">
+          <option value="">None</option>
+          {{range .Signatures}}<option value="{{.ID}}"{{if eq .ID $.DefaultSignatureReply}} selected{{end}}>{{.Name}}</option>{{end}}
+        </select>
+      </div>
+      <button class="primary" type="submit">Save preferences</button>
+    </form>
+
+    <h2>Signatures</h2>
+    {{if .Signatures}}
+    <ul class="signature-list">
+      {{range .Signatures}}
+      <li>
+        <span>{{.Name}}</span>
+        <form method="post" action="/settings" class="inline">
+          <input type="hidden" name="action" value="delsig">
+          <input type="hidden" name="sigid" value="{{.ID}}">
+          <button type="submit">Delete</button>
+        </form>
+      </li>
+      {{end}}
+    </ul>
+    {{else}}
+    <p class="notice">No signatures yet.</p>
+    {{end}}
+
+    <form method="post" action="/settings" id="sigform">
+      <input type="hidden" name="action" value="addsig">
+      <div class="field">
+        <label>New signature name</label>
+        <input name="signame" placeholder="e.g. Work">
+      </div>
+      <div class="field">
+        <label>Signature content</label>
+        <textarea name="sigbody" id="sigbody" rows="6"></textarea>
+        <div id="sigeditorbox" style="display:none"><div id="sigeditor"></div></div>
+        <textarea name="sigbodyhtml" id="sigbodyhtml" style="display:none"></textarea>
+      </div>
+      <button class="primary" type="submit">Add signature</button>
+    </form>
+  </div>
+</div>
+<script>
+(function () {
+  if (typeof Quill === "undefined") { return; } // no editor: the plain textarea posts as-is
+  var form = document.getElementById("sigform");
+  var box = document.getElementById("sigeditorbox");
+  var plain = document.getElementById("sigbody");
+  var htmlField = document.getElementById("sigbodyhtml");
+  if (!form || !box || !plain || !htmlField) { return; }
+
+  var quill = new Quill("#sigeditor", {
+    theme: "snow",
+    modules: { toolbar: [
+      ["bold", "italic", "underline"],
+      [{ color: [] }],
+      [{ list: "ordered" }, { list: "bullet" }],
+      ["link"], ["clean"]
+    ] }
+  });
+  box.style.display = "";
+  plain.style.display = "none";
+
+  form.addEventListener("submit", function () {
+    htmlField.value = quill.getSemanticHTML();
+  });
+})();
+</script>
+{{template "foot" .}}{{end}}
