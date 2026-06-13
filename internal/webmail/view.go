@@ -33,12 +33,17 @@ type messageView struct {
 	Scheduled bool // a deferred send awaiting release: the row offers a cancel action
 }
 
-// mailPage is the data the mail template renders.
+// mailPage is the data the mail template renders. Query/Field/Scope back the
+// shared search form rendered in the toolbar (empty/zero on the mail page; the
+// search page fills them in), so the form's defaults select correctly.
 type mailPage struct {
 	User     string
 	Current  string
 	Folders  []folderView
 	Messages []messageView
+	Query    string
+	Field    string
+	Scope    string
 }
 
 // buildFolderViews computes each folder's hierarchical path from the parent

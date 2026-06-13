@@ -14,6 +14,7 @@
       <h2>{{.Current}}</h2>
       <a href="/compose" class="compose-btn">Compose</a>
       <a href="/import" class="import-btn">Import</a>
+      {{template "searchform" .}}
     </div>
     {{template "messagelist" .}}
   </main>

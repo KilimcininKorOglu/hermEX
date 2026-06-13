@@ -39,6 +39,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /login", s.handleLoginSubmit)
 	mux.HandleFunc("GET /logout", s.handleLogout)
 	mux.HandleFunc("GET /mail", s.handleMail)
+	mux.HandleFunc("GET /search", s.handleSearch)
 	mux.HandleFunc("GET /message", s.handleMessage)
 	mux.HandleFunc("GET /attachment", s.handleAttachment)
 	mux.HandleFunc("GET /compose", s.handleComposeForm)
@@ -124,6 +125,8 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 		User:    sess.user,
 		Current: current,
 		Folders: buildFolderViews(folders),
+		Field:   "all",    // search-form defaults (scoped to the current folder)
+		Scope:   "folder", // until the user opens a cross-folder search
 	}
 	if id, found := resolveFolder(folders, current); found {
 		if msgs, err := buildMessageViews(st, id, current); err == nil {

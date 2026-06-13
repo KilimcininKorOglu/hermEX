@@ -1,0 +1,55 @@
+{{define "search"}}{{template "head" .}}
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">hermEX</div>
+    <nav>
+      {{range .Folders}}
+      <a href="/mail?folder={{.Path}}">{{.Name}}</a>
+      {{end}}
+    </nav>
+    <div class="account">{{.User}}<br><a href="/logout">Sign out</a></div>
+  </aside>
+  <main class="main">
+    <div class="toolbar">
+      <h2>Search</h2>
+      {{template "searchform" .}}
+    </div>
+    {{if not .Searched}}
+    <div class="empty">Enter a search term above.</div>
+    {{else}}
+    {{if .Truncated}}<p class="notice">Some folders could not be fully searched: {{range $i, $f := .Truncated}}{{if $i}}, {{end}}{{$f}}{{end}}</p>{{end}}
+    {{if .Results}}
+    <table class="messages searchresults">
+      <thead><tr><th>Folder</th><th>From</th><th>Subject</th><th>Date</th></tr></thead>
+      {{range .Results}}
+      <tr class="{{if not .Seen}}unread{{end}}{{if .Flagged}} flagged{{end}}">
+        <td class="folder">{{.Folder}}</td>
+        <td class="from">{{.From}}</td>
+        <td class="subject">{{if .Draft}}<a href="/compose?action=editdraft&folder={{.Folder}}&uid={{.UID}}">{{.Subject}}</a>{{else}}<a href="/message?folder={{.Folder}}&uid={{.UID}}">{{.Subject}}</a>{{end}}</td>
+        <td class="date">{{.Date}}</td>
+      </tr>
+      {{end}}
+    </table>
+    {{else}}
+    <div class="empty">No messages match &ldquo;{{.Query}}&rdquo;.</div>
+    {{end}}
+    {{end}}
+  </main>
+</div>
+{{template "foot" .}}{{end}}
+
+{{define "searchform"}}
+<form class="searchform" method="get" action="/search">
+  <input type="search" name="q" value="{{.Query}}" placeholder="Search mail" aria-label="Search">
+  <select name="field" aria-label="Search fields">
+    <option value="all"{{if eq .Field "all"}} selected{{end}}>All text fields</option>
+    <option value="subject"{{if eq .Field "subject"}} selected{{end}}>Subject</option>
+  </select>
+  <select name="scope" aria-label="Search scope">
+    <option value="folder"{{if eq .Scope "folder"}} selected{{end}}>This folder</option>
+    <option value="all"{{if eq .Scope "all"}} selected{{end}}>All folders</option>
+  </select>
+  <input type="hidden" name="scopefolder" value="{{.Current}}">
+  <button type="submit">Search</button>
+</form>
+{{end}}
