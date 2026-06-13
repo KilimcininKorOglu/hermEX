@@ -21,15 +21,16 @@ type folderView struct {
 
 // messageView is one row in the message list.
 type messageView struct {
-	UID     uint32
-	Folder  string // the containing folder path, for action links
-	From    string
-	Subject string
-	Date    string
-	Seen    bool
-	Flagged bool
-	Deleted bool
-	Draft   bool // unsent draft: the row opens the compose editor, not the reader
+	UID       uint32
+	Folder    string // the containing folder path, for action links
+	From      string
+	Subject   string
+	Date      string
+	Seen      bool
+	Flagged   bool
+	Deleted   bool
+	Draft     bool // unsent draft: the row opens the compose editor, not the reader
+	Scheduled bool // a deferred send awaiting release: the row offers a cancel action
 }
 
 // mailPage is the data the mail template renders.
@@ -117,6 +118,9 @@ func messageViewFrom(folder string, m objectstore.MessageInfo) messageView {
 		Flagged: m.Flags&objectstore.FlagFlagged != 0,
 		Deleted: m.Flags&objectstore.FlagDeleted != 0,
 		Draft:   m.Flags&objectstore.FlagDraft != 0,
+		// The Outbox holds only deferred sends in this server, so an Outbox row is
+		// a scheduled message the user can cancel.
+		Scheduled: folder == outboxName,
 	}
 }
 

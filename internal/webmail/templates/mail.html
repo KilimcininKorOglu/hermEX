@@ -37,6 +37,7 @@
   <td class="actions">
     <button hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=toggleseen" hx-target="#msg-{{.UID}}" hx-swap="outerHTML">{{if .Seen}}Unread{{else}}Read{{end}}</button>
     <button hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=toggleflag" hx-target="#msg-{{.UID}}" hx-swap="outerHTML">{{if .Flagged}}Unstar{{else}}Star{{end}}</button>
+    {{if .Scheduled}}<button hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=unschedule" hx-target="#msg-{{.UID}}" hx-swap="delete" hx-confirm="Cancel this scheduled send and move it back to Drafts?">Cancel send</button>{{end}}
     <button class="danger" hx-post="/action?folder={{.Folder}}&uid={{.UID}}&op=delete" hx-target="#msg-{{.UID}}" hx-swap="delete" hx-confirm="Delete this message?">Delete</button>
   </td>
 </tr>

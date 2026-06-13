@@ -365,6 +365,54 @@ func TestScheduleSendRejectsPastTime(t *testing.T) {
 	}
 }
 
+// TestCancelScheduledSendMovesToDrafts checks that cancelling a scheduled send
+// moves the Outbox message back to Drafts and drops the deferred-send time, so
+// the worker (which only acts on Outbox messages) would never release it.
+func TestCancelScheduledSendMovesToDrafts(t *testing.T) {
+	path := emptyMailbox(t)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	future := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
+	postForm(t, c, ts.URL+"/compose", url.Values{
+		"action":  {"sendlater"},
+		"to":      {"to@example.com"},
+		"subject": {"later"},
+		"body":    {"scheduled body"},
+		"sendat":  {future},
+	})
+	scheduled := folderMsgs(t, path, int64(mapi.PrivateFIDOutbox))
+	if len(scheduled) != 1 {
+		t.Fatalf("Outbox has %d after scheduling, want 1", len(scheduled))
+	}
+
+	code, _ := postForm(t, c, ts.URL+"/action?folder=Outbox&uid="+itoa(scheduled[0].UID)+"&op=unschedule", url.Values{})
+	if code != 200 {
+		t.Fatalf("unschedule = %d", code)
+	}
+
+	if n := len(folderMsgs(t, path, int64(mapi.PrivateFIDOutbox))); n != 0 {
+		t.Errorf("Outbox should be empty after cancel, has %d", n)
+	}
+	drafts := folderMsgs(t, path, draftFID)
+	if len(drafts) != 1 {
+		t.Fatalf("cancel should leave one Drafts message, has %d", len(drafts))
+	}
+	// The recovered draft carries no deferred-send time.
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	props, err := st.GetMessageProperties(drafts[0].ID, mapi.PrDeferredSendTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := props.Get(mapi.PrDeferredSendTime); ok {
+		t.Error("a cancelled draft must not keep its deferred-send time")
+	}
+}
+
 // postAutosave posts a savedraft the way the browser's autosave fetch does —
 // with Accept: application/json — and returns the status and decoded JSON reply.
 func postAutosave(t *testing.T, c *http.Client, u string, vals url.Values) (int, map[string]string) {

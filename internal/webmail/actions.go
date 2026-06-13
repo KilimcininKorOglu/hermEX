@@ -51,9 +51,35 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		s.toggleFlag(w, st, folderID, folder, uid, objectstore.FlagFlagged)
 	case "delete":
 		s.deleteMessage(w, st, folderID, uid)
+	case "unschedule":
+		s.unscheduleSend(w, st, folderID, uid)
 	default:
 		http.Error(w, "unknown action", http.StatusBadRequest)
 	}
+}
+
+// unscheduleSend cancels a scheduled send by moving the Outbox message back to
+// Drafts. The re-synthesized wire form carries no deferred-send property (it is
+// not a header), so re-filing it produces a plain editable draft without the
+// schedule — the clearest way to drop the deferral. The response is empty so htmx
+// removes the row.
+func (s *Server) unscheduleSend(w http.ResponseWriter, st *objectstore.Store, folderID int64, uid uint32) {
+	m, err := st.MessageByUID(folderID, uid)
+	if err != nil {
+		http.NotFound(w, nil)
+		return
+	}
+	raw, err := st.GetMessageRaw(folderID, uid)
+	if err != nil {
+		http.NotFound(w, nil)
+		return
+	}
+	if _, err := st.AppendMessage(int64(mapi.PrivateFIDDraft), raw, m.InternalDate, objectstore.FlagSeen|objectstore.FlagDraft); err != nil {
+		http.Error(w, "cannot move to Drafts", http.StatusInternalServerError)
+		return
+	}
+	st.DeleteMessage(folderID, uid)
+	w.WriteHeader(http.StatusOK)
 }
 
 // toggleFlag flips a single flag bit and re-renders the message row.
