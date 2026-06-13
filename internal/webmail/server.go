@@ -134,8 +134,8 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 
 	q := r.URL.Query()
 	params := listParams{
-		Sort:   "date", // 31B exposes the other sort fields and the direction
-		Dir:    "desc",
+		Sort:   whitelist(q.Get("sort"), "date", "from", "subject", "size", "flag", "read"),
+		Dir:    whitelist(q.Get("dir"), "desc", "asc"),
 		Filter: "all", // 31C exposes the unread-only filter
 		Page:   atoiDefault(q.Get("page"), 1),
 	}
@@ -148,6 +148,7 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 		Sort:    params.Sort,
 		Dir:     params.Dir,
 		Filter:  params.Filter,
+		Columns: listColumns(params.Sort, params.Dir),
 	}
 	if id, found := resolveFolder(folders, current); found {
 		if res, err := listFolderPage(st, id, current, params); err == nil {

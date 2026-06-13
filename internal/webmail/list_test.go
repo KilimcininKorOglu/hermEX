@@ -1,8 +1,10 @@
 package webmail
 
 import (
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
@@ -10,6 +12,101 @@ import (
 
 // rowCount counts rendered message rows in a mail-page body.
 func rowCount(body string) int { return strings.Count(body, `id="msg-`) }
+
+// firstMsgID returns the UID-bearing id of the first rendered row (e.g. "msg-2").
+func firstMsgID(body string) string {
+	i := strings.Index(body, `id="msg-`)
+	if i < 0 {
+		return ""
+	}
+	rest := body[i+len(`id="`):]
+	j := strings.IndexByte(rest, '"')
+	if j < 0 {
+		return ""
+	}
+	return rest[:j]
+}
+
+// TestSortMessages checks the comparator sorts on the real typed field for every
+// sort key, in both directions, with a deterministic UID tiebreak.
+func TestSortMessages(t *testing.T) {
+	mk := func(uid uint32, date, size int64, sender, subject string, flags int64) objectstore.MessageInfo {
+		return objectstore.MessageInfo{UID: uid, InternalDate: time.Unix(date, 0), Size: size, Sender: sender, Subject: subject, Flags: flags}
+	}
+	// m1 oldest/smallest/"carol"/"banana"/plain, m2 newest/largest/"alice"/"apple"/read,
+	// m3 middle/"bob"/"cherry"/flagged-but-unread.
+	base := []objectstore.MessageInfo{
+		mk(1, 100, 100, "carol", "banana", 0),
+		mk(2, 110, 300, "alice", "apple", objectstore.FlagSeen),
+		mk(3, 105, 200, "bob", "cherry", objectstore.FlagFlagged),
+	}
+	uids := func(ms []objectstore.MessageInfo) []uint32 {
+		out := make([]uint32, len(ms))
+		for i, m := range ms {
+			out[i] = m.UID
+		}
+		return out
+	}
+	cases := []struct {
+		key, dir string
+		want     []uint32
+	}{
+		{"date", "asc", []uint32{1, 3, 2}},
+		{"date", "desc", []uint32{2, 3, 1}},
+		{"from", "asc", []uint32{2, 3, 1}},
+		{"from", "desc", []uint32{1, 3, 2}},
+		{"subject", "asc", []uint32{2, 1, 3}},
+		{"subject", "desc", []uint32{3, 1, 2}},
+		{"size", "asc", []uint32{1, 3, 2}},
+		{"size", "desc", []uint32{2, 3, 1}},
+		{"flag", "asc", []uint32{1, 2, 3}},  // unflagged (uid asc) then flagged
+		{"flag", "desc", []uint32{3, 2, 1}}, // flagged then unflagged (uid desc)
+		{"read", "asc", []uint32{1, 3, 2}},  // unread (uid asc) then read
+		{"read", "desc", []uint32{2, 3, 1}}, // read then unread (uid desc)
+	}
+	for _, c := range cases {
+		ms := slices.Clone(base)
+		sortMessages(ms, c.key, c.dir)
+		if got := uids(ms); !slices.Equal(got, c.want) {
+			t.Errorf("sort %s/%s = %v, want %v", c.key, c.dir, got, c.want)
+		}
+	}
+}
+
+// TestMailSortApplies checks the handler wires the sort/dir params into the
+// pipeline: flipping the direction flips which message lists first.
+func TestMailSortApplies(t *testing.T) {
+	path := emptyMailbox(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	seedMsg(t, path, inbox, "old", "", "b", 100, 0) // uid 1, older
+	seedMsg(t, path, inbox, "new", "", "b", 200, 0) // uid 2, newer
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	if _, b := get(t, c, ts.URL+"/mail?folder=INBOX&sort=date&dir=desc"); firstMsgID(b) != "msg-2" {
+		t.Errorf("date desc should list the newest (msg-2) first, got %q", firstMsgID(b))
+	}
+	if _, b := get(t, c, ts.URL+"/mail?folder=INBOX&sort=date&dir=asc"); firstMsgID(b) != "msg-1" {
+		t.Errorf("date asc should list the oldest (msg-1) first, got %q", firstMsgID(b))
+	}
+}
+
+// TestMailSortHeaders checks the active column shows its direction arrow and the
+// header links carry the other params and reset the page.
+func TestMailSortHeaders(t *testing.T) {
+	path := emptyMailbox(t)
+	seedMsg(t, path, int64(mapi.PrivateFIDInbox), "a", "", "b", 100, 0)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	_, b := get(t, c, ts.URL+"/mail?folder=INBOX&sort=from&dir=asc")
+	if !strings.Contains(b, "sortcol active") || !strings.Contains(b, "▲") {
+		t.Errorf("sorting by From should mark its header active with an ascending arrow:\n%s", b)
+	}
+	if !strings.Contains(b, "filter=all") || !strings.Contains(b, "page=1") {
+		t.Errorf("sort header links must carry filter and reset to page 1")
+	}
+}
 
 // TestMailPagination checks the list is sliced into pages of pageSize, newest
 // first (default date-descending), with a pager that links to the adjacent page.
