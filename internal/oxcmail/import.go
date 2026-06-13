@@ -81,6 +81,14 @@ var (
 		searchKey: mapi.PrSentRepresentingSearchKey,
 		entryID:   mapi.PrSentRepresentingEntryID,
 	}
+	readReceiptTags = addrTags{
+		name:      mapi.PrReadReceiptName,
+		addrType:  mapi.PrReadReceiptAddrType,
+		email:     mapi.PrReadReceiptEmailAddress,
+		smtp:      mapi.PrReadReceiptSmtpAddress,
+		searchKey: mapi.PrReadReceiptSearchKey,
+		entryID:   mapi.PrReadReceiptEntryID,
+	}
 )
 
 // enumMailHead dispatches the core header fields onto message properties per the
@@ -118,6 +126,14 @@ func enumMailHead(hdr textproto.MIMEHeader, msg *Message) {
 	}
 	if v := hdr.Get("Sensitivity"); v != "" {
 		msg.Props.Set(mapi.PrSensitivity, parseSensitivity(v))
+	}
+	// A read-receipt request (Disposition-Notification-To) sets the request
+	// flags and parses the notification address into the read-receipt identity,
+	// which export re-emits.
+	if v := hdr.Get("Disposition-Notification-To"); v != "" {
+		msg.Props.Set(mapi.PrReadReceiptRequested, true)
+		msg.Props.Set(mapi.PrNonReceiptNotificationRequested, true)
+		parseAddress(v, readReceiptTags, &msg.Props)
 	}
 	// Priority: a later header overwrites an earlier one. They are applied
 	// weakest-source-first so the MAPI-native Importance header wins a conflict.
