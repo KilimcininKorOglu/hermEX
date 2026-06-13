@@ -3,20 +3,21 @@ package imap
 import (
 	"strings"
 
-	"hermex/internal/store"
+	"hermex/internal/objectstore"
 )
 
 // hierarchySep is the IMAP hierarchy delimiter announced in LIST responses and
 // used to join folder display names into mailbox paths.
 const hierarchySep = "/"
 
-// inboxName is the reserved, case-insensitive mailbox name. The store keeps the
-// inbox as a root folder literally named "INBOX".
+// inboxName is the reserved, case-insensitive mailbox name. The store's inbox
+// is a top-level folder whose display name matches "INBOX" case-insensitively;
+// its path is normalized to the reserved name here.
 const inboxName = "INBOX"
 
 // folderNode is one folder plus its derived IMAP mailbox path.
 type folderNode struct {
-	info        store.FolderInfo
+	info        objectstore.FolderInfo
 	path        string
 	hasChildren bool
 }
@@ -30,7 +31,7 @@ type folderTree struct {
 }
 
 // loadFolderTree reads every folder from the store and computes mailbox paths.
-func loadFolderTree(st *store.Store) (*folderTree, error) {
+func loadFolderTree(st *objectstore.Store) (*folderTree, error) {
 	folders, err := st.ListFolders()
 	if err != nil {
 		return nil, err

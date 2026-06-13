@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/GehirnInc/crypt/sha512_crypt"
@@ -22,14 +21,13 @@ const (
 // gates on account status, domain status, and object class, and verifies
 // crypt(3) sha512 passwords. It implements both Accounts and Authenticator.
 type SQLDirectory struct {
-	db        *sql.DB
-	storeFile string // store filename inside each maildir
+	db *sql.DB
 }
 
-// NewSQL wraps an open database handle. A user's mailbox store lives at
-// <maildir>/<storeFile>.
+// NewSQL wraps an open database handle. A user's mailbox store is the object
+// store rooted at the maildir directory.
 func NewSQL(db *sql.DB) *SQLDirectory {
-	return &SQLDirectory{db: db, storeFile: "store.sqlite3"}
+	return &SQLDirectory{db: db}
 }
 
 // EnsureSchema applies the directory DDL idempotently.
@@ -42,8 +40,11 @@ func (d *SQLDirectory) EnsureSchema() error {
 	return nil
 }
 
+// storePath returns the object store directory for a maildir. The store is
+// rooted at the maildir itself (its databases and content directories live
+// inside).
 func (d *SQLDirectory) storePath(maildir string) string {
-	return filepath.Join(maildir, d.storeFile)
+	return maildir
 }
 
 // loginRow is one resolved candidate from the username/altname/alias union.

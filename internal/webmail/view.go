@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"hermex/internal/mime"
-	"hermex/internal/store"
+	"hermex/internal/objectstore"
 )
 
 // hierarchySep and inboxName mirror the IMAP folder model so webmail folder
@@ -42,13 +42,13 @@ type mailPage struct {
 
 // buildFolderViews computes each folder's hierarchical path from the parent
 // links, ordered as returned by the store.
-func buildFolderViews(folders []store.FolderInfo) []folderView {
-	byID := make(map[int64]store.FolderInfo, len(folders))
+func buildFolderViews(folders []objectstore.FolderInfo) []folderView {
+	byID := make(map[int64]objectstore.FolderInfo, len(folders))
 	for _, f := range folders {
 		byID[f.ID] = f
 	}
-	var pathOf func(f store.FolderInfo) string
-	pathOf = func(f store.FolderInfo) string {
+	var pathOf func(f objectstore.FolderInfo) string
+	pathOf = func(f objectstore.FolderInfo) string {
 		if f.ParentID == nil {
 			if strings.EqualFold(f.DisplayName, inboxName) {
 				return inboxName
@@ -70,7 +70,7 @@ func buildFolderViews(folders []store.FolderInfo) []folderView {
 
 // resolveFolder finds a folder id by its hierarchical path (INBOX is
 // case-insensitive), reporting ok=false when no such folder exists.
-func resolveFolder(folders []store.FolderInfo, path string) (int64, bool) {
+func resolveFolder(folders []objectstore.FolderInfo, path string) (int64, bool) {
 	views := buildFolderViews(folders)
 	for i, v := range views {
 		if v.Path == path || (strings.EqualFold(path, inboxName) && strings.EqualFold(v.Path, inboxName)) {
@@ -82,7 +82,7 @@ func resolveFolder(folders []store.FolderInfo, path string) (int64, bool) {
 
 // buildMessageViews loads each message's envelope to populate the list, newest
 // first.
-func buildMessageViews(st *store.Store, folderID int64, folder string) ([]messageView, error) {
+func buildMessageViews(st *objectstore.Store, folderID int64, folder string) ([]messageView, error) {
 	msgs, err := st.ListMessages(folderID)
 	if err != nil {
 		return nil, err
@@ -96,14 +96,14 @@ func buildMessageViews(st *store.Store, folderID int64, folder string) ([]messag
 
 // messageViewFrom builds a single list-row view, enriching the stored metadata
 // with the message's envelope (sender, subject, date).
-func messageViewFrom(st *store.Store, folderID int64, folder string, m store.MessageInfo) messageView {
+func messageViewFrom(st *objectstore.Store, folderID int64, folder string, m objectstore.MessageInfo) messageView {
 	v := messageView{
 		UID:     m.UID,
 		Folder:  folder,
 		Date:    m.InternalDate.Format("2006-01-02 15:04"),
-		Seen:    m.Flags&store.FlagSeen != 0,
-		Flagged: m.Flags&store.FlagFlagged != 0,
-		Deleted: m.Flags&store.FlagDeleted != 0,
+		Seen:    m.Flags&objectstore.FlagSeen != 0,
+		Flagged: m.Flags&objectstore.FlagFlagged != 0,
+		Deleted: m.Flags&objectstore.FlagDeleted != 0,
 		From:    "(unknown sender)",
 		Subject: "(no subject)",
 	}

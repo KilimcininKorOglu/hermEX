@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"hermex/internal/store"
+	"hermex/internal/objectstore"
 )
 
 // matcher tests whether a message satisfies a search key.
@@ -19,7 +19,7 @@ type matcher func(*searchCtx) bool
 // raw message lazily (only header/body keys need it).
 type searchCtx struct {
 	seq    uint32
-	msg    store.MessageInfo
+	msg    objectstore.MessageInfo
 	c      *conn
 	raw    []byte
 	hdr    textproto.MIMEHeader
@@ -146,25 +146,25 @@ func parseSearchKey(cur *tokenCursor) (matcher, error) {
 	case "ALL":
 		return func(*searchCtx) bool { return true }, nil
 	case "ANSWERED":
-		return flagSet(store.FlagAnswered, true), nil
+		return flagSet(objectstore.FlagAnswered, true), nil
 	case "UNANSWERED":
-		return flagSet(store.FlagAnswered, false), nil
+		return flagSet(objectstore.FlagAnswered, false), nil
 	case "DELETED":
-		return flagSet(store.FlagDeleted, true), nil
+		return flagSet(objectstore.FlagDeleted, true), nil
 	case "UNDELETED":
-		return flagSet(store.FlagDeleted, false), nil
+		return flagSet(objectstore.FlagDeleted, false), nil
 	case "DRAFT":
-		return flagSet(store.FlagDraft, true), nil
+		return flagSet(objectstore.FlagDraft, true), nil
 	case "UNDRAFT":
-		return flagSet(store.FlagDraft, false), nil
+		return flagSet(objectstore.FlagDraft, false), nil
 	case "FLAGGED":
-		return flagSet(store.FlagFlagged, true), nil
+		return flagSet(objectstore.FlagFlagged, true), nil
 	case "UNFLAGGED":
-		return flagSet(store.FlagFlagged, false), nil
+		return flagSet(objectstore.FlagFlagged, false), nil
 	case "SEEN":
-		return flagSet(store.FlagSeen, true), nil
+		return flagSet(objectstore.FlagSeen, true), nil
 	case "UNSEEN":
-		return flagSet(store.FlagSeen, false), nil
+		return flagSet(objectstore.FlagSeen, false), nil
 	case "NEW", "RECENT":
 		// \Recent is never set, so these never match.
 		return func(*searchCtx) bool { return false }, nil

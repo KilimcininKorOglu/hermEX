@@ -12,21 +12,19 @@ import (
 	"time"
 
 	"hermex/internal/directory"
-	"hermex/internal/store"
+	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
 )
 
 func seedMailbox(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "alice.sqlite3")
-	st, err := store.Open(path)
+	path := filepath.Join(t.TempDir(), "alice")
+	st, err := objectstore.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	inbox, err := st.CreateFolder(nil, inboxName)
-	if err != nil {
-		t.Fatal(err)
-	}
+	inbox := int64(mapi.PrivateFIDInbox)
 	msg := "From: Bob <bob@example.com>\r\nSubject: hello webmail\r\n\r\nbody"
 	if _, err := st.AppendMessage(inbox, []byte(msg), time.Unix(1700000000, 0), 0); err != nil {
 		t.Fatal(err)
@@ -131,15 +129,12 @@ func TestWebmailLoginAndList(t *testing.T) {
 }
 
 func TestWebmailReadMessage(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "alice.sqlite3")
-	st, err := store.Open(path)
+	path := filepath.Join(t.TempDir(), "alice")
+	st, err := objectstore.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	inbox, err := st.CreateFolder(nil, inboxName)
-	if err != nil {
-		t.Fatal(err)
-	}
+	inbox := int64(mapi.PrivateFIDInbox)
 	plain := "From: A <a@example.com>\r\nTo: alice@hermex.test\r\nSubject: plain hello\r\n\r\nThis is plain text.\r\n"
 	if _, err := st.AppendMessage(inbox, []byte(plain), time.Unix(1, 0), 0); err != nil {
 		t.Fatal(err)
@@ -168,10 +163,10 @@ func TestWebmailReadMessage(t *testing.T) {
 	}
 
 	// Reading marked it \Seen in the store.
-	st2, _ := store.Open(path)
+	st2, _ := objectstore.Open(path)
 	flags, _ := st2.MessageFlags(inbox, 1)
 	st2.Close()
-	if flags&store.FlagSeen == 0 {
+	if flags&objectstore.FlagSeen == 0 {
 		t.Errorf("reading did not set \\Seen (flags=%d)", flags)
 	}
 
@@ -189,15 +184,12 @@ func TestWebmailReadMessage(t *testing.T) {
 }
 
 func TestWebmailAttachmentDownload(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "alice.sqlite3")
-	st, err := store.Open(path)
+	path := filepath.Join(t.TempDir(), "alice")
+	st, err := objectstore.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	inbox, err := st.CreateFolder(nil, inboxName)
-	if err != nil {
-		t.Fatal(err)
-	}
+	inbox := int64(mapi.PrivateFIDInbox)
 	msg := "From: B <b@example.com>\r\nSubject: with attachment\r\n" +
 		"MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=\"X\"\r\n\r\n" +
 		"--X\r\nContent-Type: text/plain\r\n\r\nSee attached.\r\n" +
@@ -234,12 +226,12 @@ func TestWebmailAttachmentDownload(t *testing.T) {
 }
 
 func TestWebmailCompose(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "alice.sqlite3")
-	st, err := store.Open(path)
+	path := filepath.Join(t.TempDir(), "alice")
+	st, err := objectstore.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	st.Close() // start empty; delivery creates INBOX and Sent
+	st.Close() // seed the mailbox; delivery files into the built-in Inbox and Sent Items
 
 	ts := newTestServer(t, path)
 	c := authedClient(t, ts)
@@ -263,20 +255,15 @@ func TestWebmailCompose(t *testing.T) {
 		t.Errorf("Sent listing missing the composed message")
 	}
 
-	// The message was delivered to the local INBOX and copied to Sent.
-	st2, _ := store.Open(path)
+	// The message was delivered to the local Inbox and copied to Sent Items
+	// (both built-in folders addressed by their fixed ids).
+	st2, _ := objectstore.Open(path)
 	defer st2.Close()
-	inbox, ok, _ := st2.FolderByName(nil, "INBOX")
-	if !ok {
-		t.Fatal("INBOX not created by delivery")
-	}
+	inbox := int64(mapi.PrivateFIDInbox)
 	if msgs, _ := st2.ListMessages(inbox); len(msgs) != 1 {
-		t.Errorf("INBOX has %d messages, want 1", len(msgs))
+		t.Errorf("Inbox has %d messages, want 1", len(msgs))
 	}
-	sent, ok, _ := st2.FolderByName(nil, "Sent")
-	if !ok {
-		t.Fatal("Sent not created")
-	}
+	sent := int64(mapi.PrivateFIDSentItems)
 	smsgs, _ := st2.ListMessages(sent)
 	if len(smsgs) != 1 {
 		t.Fatalf("Sent has %d messages, want 1", len(smsgs))
@@ -314,15 +301,12 @@ func postAction(t *testing.T, c *http.Client, ts *httptest.Server, query string)
 }
 
 func TestWebmailActions(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "alice.sqlite3")
-	st, err := store.Open(path)
+	path := filepath.Join(t.TempDir(), "alice")
+	st, err := objectstore.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	inbox, err := st.CreateFolder(nil, inboxName)
-	if err != nil {
-		t.Fatal(err)
-	}
+	inbox := int64(mapi.PrivateFIDInbox)
 	if _, err := st.AppendMessage(inbox, []byte("From: a@example.com\r\nSubject: act\r\n\r\nx"), time.Unix(1, 0), 0); err != nil {
 		t.Fatal(err)
 	}
@@ -341,26 +325,23 @@ func TestWebmailActions(t *testing.T) {
 		t.Errorf("toggleflag row missing flagged class: %s", body)
 	}
 
-	st2, _ := store.Open(path)
-	if f, _ := st2.MessageFlags(inbox, 1); f&store.FlagSeen == 0 || f&store.FlagFlagged == 0 {
+	st2, _ := objectstore.Open(path)
+	if f, _ := st2.MessageFlags(inbox, 1); f&objectstore.FlagSeen == 0 || f&objectstore.FlagFlagged == 0 {
 		t.Errorf("flags not persisted: %d", f)
 	}
 	st2.Close()
 
-	// Delete moves the message to Trash (empty body; htmx removes the row).
+	// Delete moves the message to Deleted Items (empty body; htmx removes the row).
 	if code, body := postAction(t, c, ts, "folder=INBOX&uid=1&op=delete"); code != 200 || strings.TrimSpace(body) != "" {
 		t.Errorf("delete = %d %q", code, body)
 	}
-	st3, _ := store.Open(path)
+	st3, _ := objectstore.Open(path)
 	defer st3.Close()
 	if msgs, _ := st3.ListMessages(inbox); len(msgs) != 0 {
-		t.Errorf("INBOX still has %d messages after delete", len(msgs))
+		t.Errorf("Inbox still has %d messages after delete", len(msgs))
 	}
-	trash, ok, _ := st3.FolderByName(nil, "Trash")
-	if !ok {
-		t.Fatal("Trash not created on delete")
-	}
+	trash := int64(mapi.PrivateFIDDeletedItems)
 	if msgs, _ := st3.ListMessages(trash); len(msgs) != 1 {
-		t.Errorf("Trash has %d messages, want 1", len(msgs))
+		t.Errorf("Deleted Items has %d messages, want 1", len(msgs))
 	}
 }

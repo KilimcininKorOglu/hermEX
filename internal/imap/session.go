@@ -1,6 +1,6 @@
 package imap
 
-import "hermex/internal/store"
+import "hermex/internal/objectstore"
 
 // selectedMailbox is a session's view of the currently selected folder: an
 // ordered message snapshot plus the identity needed to report UIDVALIDITY and
@@ -11,11 +11,11 @@ type selectedMailbox struct {
 	path        string
 	uidValidity uint32
 	uidNext     uint32
-	msgs        []store.MessageInfo
+	msgs        []objectstore.MessageInfo
 }
 
 // loadMailbox builds a fresh selected-mailbox view for a folder.
-func loadMailbox(st *store.Store, id int64, path string) (*selectedMailbox, error) {
+func loadMailbox(st *objectstore.Store, id int64, path string) (*selectedMailbox, error) {
 	msgs, err := st.ListMessages(id)
 	if err != nil {
 		return nil, err
@@ -56,7 +56,7 @@ func (m *selectedMailbox) seqOf(uid uint32) (uint32, bool) {
 // \Seen flag, or 0 when every message has been seen.
 func (m *selectedMailbox) firstUnseen() uint32 {
 	for i := range m.msgs {
-		if m.msgs[i].Flags&store.FlagSeen == 0 {
+		if m.msgs[i].Flags&objectstore.FlagSeen == 0 {
 			return uint32(i + 1)
 		}
 	}
@@ -67,7 +67,7 @@ func (m *selectedMailbox) firstUnseen() uint32 {
 func (m *selectedMailbox) countUnseen() int {
 	n := 0
 	for i := range m.msgs {
-		if m.msgs[i].Flags&store.FlagSeen == 0 {
+		if m.msgs[i].Flags&objectstore.FlagSeen == 0 {
 			n++
 		}
 	}

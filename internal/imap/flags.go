@@ -6,7 +6,7 @@ package imap
 import (
 	"strings"
 
-	"hermex/internal/store"
+	"hermex/internal/objectstore"
 )
 
 // systemFlag pairs an IMAP system-flag name with its persisted store bit.
@@ -20,11 +20,11 @@ type systemFlag struct {
 // it is per-session state (RFC 3501 §2.3.2), set by the server on new arrivals
 // and never settable by the client, so it is not stored.
 var systemFlags = []systemFlag{
-	{`\Seen`, store.FlagSeen},
-	{`\Answered`, store.FlagAnswered},
-	{`\Flagged`, store.FlagFlagged},
-	{`\Deleted`, store.FlagDeleted},
-	{`\Draft`, store.FlagDraft},
+	{`\Seen`, objectstore.FlagSeen},
+	{`\Answered`, objectstore.FlagAnswered},
+	{`\Flagged`, objectstore.FlagFlagged},
+	{`\Deleted`, objectstore.FlagDeleted},
+	{`\Draft`, objectstore.FlagDraft},
 }
 
 // flagBit maps an IMAP system-flag name to its store bit. Flag names are

@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"hermex/internal/mime"
-	"hermex/internal/store"
+	"hermex/internal/objectstore"
 )
 
 // fetchItem is one parsed FETCH data item to produce for each message.
@@ -154,8 +154,8 @@ func (c *conn) writeFetch(seq uint32, idx int, items []fetchItem) {
 		}
 	}
 
-	if setSeen && msg.Flags&store.FlagSeen == 0 {
-		msg.Flags |= store.FlagSeen
+	if setSeen && msg.Flags&objectstore.FlagSeen == 0 {
+		msg.Flags |= objectstore.FlagSeen
 		c.st.SetMessageFlags(c.sel.id, msg.UID, msg.Flags)
 		c.sel.msgs[idx].Flags = msg.Flags
 		if !hasFlagsField(fields) {

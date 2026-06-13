@@ -12,22 +12,20 @@ import (
 	"time"
 
 	"hermex/internal/directory"
-	"hermex/internal/store"
+	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
 )
 
 func TestPOP3RetrieveAndDelete(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "alice.sqlite3")
+	path := filepath.Join(t.TempDir(), "alice")
 
 	// Provision a mailbox with two messages; msgB has a line starting with '.'
 	// to exercise dot-stuffing on the wire.
-	st, err := store.Open(path)
+	st, err := objectstore.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	inbox, err := st.CreateFolder(nil, inboxName)
-	if err != nil {
-		t.Fatal(err)
-	}
+	inbox := int64(mapi.PrivateFIDInbox)
 	msgA := "Subject: one\r\n\r\nbody one\r\n"
 	msgB := "Subject: two\r\n\r\n.dotted line\r\nmore\r\n"
 	if _, err := st.AppendMessage(inbox, []byte(msgA), time.Unix(1, 0), 0); err != nil {
@@ -114,16 +112,21 @@ func TestPOP3RetrieveAndDelete(t *testing.T) {
 		t.Errorf("UIDL lines = %v, want [1 1 2 2]", lines)
 	}
 
-	// RETR 2 returns msgB; the wire form is dot-stuffed, so decode it with a
-	// DotReader (which also normalizes CRLF to LF) and compare LF-normalized.
+	// RETR 2 returns msgB re-synthesized from the stored object (not byte
+	// identical to arrival). Its body line starting with '.' is dot-stuffed on
+	// the wire; decode with a DotReader and assert the subject and the
+	// dot-prefixed line survived the round trip and de-stuffing.
 	send("RETR 2")
 	wantOK()
 	body, err := io.ReadAll(r.DotReader())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, want := string(body), strings.ReplaceAll(msgB, "\r\n", "\n"); got != want {
-		t.Errorf("RETR body = %q, want %q", got, want)
+	if !strings.Contains(string(body), "Subject: two") {
+		t.Errorf("RETR body missing subject: %q", body)
+	}
+	if !strings.Contains(string(body), ".dotted line") {
+		t.Errorf("RETR body lost dot-prefixed line after de-stuffing: %q", body)
 	}
 
 	send("DELE 1")
@@ -134,7 +137,7 @@ func TestPOP3RetrieveAndDelete(t *testing.T) {
 	wantOK()
 
 	// The deletion must be committed: message 1 (UID 1) is gone, UID 2 remains.
-	st2, err := store.Open(path)
+	st2, err := objectstore.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"hermex/internal/store"
+	"hermex/internal/objectstore"
 )
 
 // appendDateLayout is the IMAP date-time used by APPEND and INTERNALDATE.
@@ -125,10 +125,10 @@ func (c *conn) cmdExpunge(tag string) {
 // snapshot. When emit is true it sends an untagged EXPUNGE per removed message,
 // numbered against the shrinking mailbox (RFC 3501 §7.4.1).
 func (c *conn) doExpunge(emit bool) {
-	var survivors []store.MessageInfo
+	var survivors []objectstore.MessageInfo
 	seq := uint32(1)
 	for _, m := range c.sel.msgs {
-		if m.Flags&store.FlagDeleted != 0 {
+		if m.Flags&objectstore.FlagDeleted != 0 {
 			if err := c.st.DeleteMessage(c.sel.id, m.UID); err == nil && emit {
 				c.untagged("%d EXPUNGE", seq) // removed; the next message takes this slot
 			}

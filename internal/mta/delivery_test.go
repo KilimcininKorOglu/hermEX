@@ -2,6 +2,7 @@ package mta
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"net"
 	"net/textproto"
@@ -9,14 +10,18 @@ import (
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/mapi"
+	"hermex/internal/mime"
+	"hermex/internal/objectstore"
 	"hermex/internal/smtp"
-	"hermex/internal/store"
 )
 
-// End-to-end: a message accepted over SMTP must land in the recipient's INBOX
-// byte-faithfully, and an unknown recipient must be refused.
+// End-to-end: a message accepted over SMTP must land in the recipient's inbox
+// and be served back as a semantically faithful message (subject and body
+// preserved through the store's parse/re-synthesize round trip), and an unknown
+// recipient must be refused.
 func TestSMTPToStoreDelivery(t *testing.T) {
-	mboxPath := filepath.Join(t.TempDir(), "alice.sqlite3")
+	mboxPath := filepath.Join(t.TempDir(), "alice")
 	accounts := directory.StaticAccounts{"alice@test": {MailboxPath: mboxPath}}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -58,15 +63,12 @@ func TestSMTPToStoreDelivery(t *testing.T) {
 	fmt.Fprint(conn, "QUIT\r\n")
 	expect(221)
 
-	st, err := store.Open(mboxPath)
+	st, err := objectstore.Open(mboxPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	inbox, ok, err := st.FolderByName(nil, "INBOX")
-	if err != nil || !ok {
-		t.Fatalf("INBOX lookup: ok=%v err=%v", ok, err)
-	}
+	inbox := int64(mapi.PrivateFIDInbox)
 	msgs, err := st.ListMessages(inbox)
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +80,16 @@ func TestSMTPToStoreDelivery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(raw) != msg {
-		t.Errorf("stored message = %q, want %q", raw, msg)
+	// The served message is re-synthesized from the stored MAPI object, so it
+	// is not byte-identical to arrival; assert the subject and body survived.
+	env, err := mime.ParseEnvelope(raw)
+	if err != nil {
+		t.Fatalf("parse delivered message: %v", err)
+	}
+	if env.Subject != "hello" {
+		t.Errorf("subject = %q, want %q", env.Subject, "hello")
+	}
+	if !bytes.Contains(raw, []byte("hi alice")) {
+		t.Errorf("body text not preserved in %q", raw)
 	}
 }
