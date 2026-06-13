@@ -63,6 +63,9 @@ const (
 	PrMessageDeliveryTime = PropTag(0x0E060040) // PtSysTime
 	PrDeferredSendTime    = PropTag(0x3FEF0040) // PtSysTime (PidTagDeferredSendTime, MS-OXOMSG) — absolute time to release a deferred send
 	PrMessageFlags        = PropTag(0x0E070003) // PtLong
+	PrFlagStatus          = PropTag(0x10900003) // PtLong (PidTagFlagStatus, MS-OXOFLAG) — 0 none / 1 complete / 2 flagged
+	PrFollowupIcon        = PropTag(0x10950003) // PtLong (PidTagFollowupIcon) — flag color: 0 clear / 1 purple / 2 orange / 3 green / 4 yellow / 5 blue / 6 red
+	PrFlagCompleteTime    = PropTag(0x10910040) // PtSysTime (PidTagFlagCompleteTime) — when the flag was marked complete
 	PrInternetMessageID   = PropTag(0x1035001F) // PtUnicode
 	PrInReplyToID         = PropTag(0x1042001F) // PtUnicode
 	PrInternetReferences  = PropTag(0x1039001F) // PtUnicode
