@@ -39,6 +39,14 @@ type Identifier interface {
 	Identities(user string) ([]string, error)
 }
 
+// MailboxLister enumerates the store paths of every mailbox the directory knows.
+// A background worker with no address to resolve — the send-later spooler, which
+// must scan each user's Outbox — uses it to find all stores. Directories that
+// cannot enumerate may omit it; the spooler then has nothing to scan.
+type MailboxLister interface {
+	Maildirs() ([]string, error)
+}
+
 // StaticAccounts is a fixed map of lowercase address/username to Account. It
 // implements both Accounts and Authenticator and suits tests and small
 // deployments.
@@ -59,6 +67,21 @@ func (a StaticAccounts) Identities(user string) ([]string, error) {
 		return nil, nil
 	}
 	return []string{strings.ToLower(user)}, nil
+}
+
+// Maildirs implements MailboxLister: the distinct mailbox paths of all accounts
+// (several addresses may share one mailbox, so duplicates are collapsed).
+func (a StaticAccounts) Maildirs() ([]string, error) {
+	seen := make(map[string]bool, len(a))
+	out := make([]string, 0, len(a))
+	for _, acc := range a {
+		if acc.MailboxPath == "" || seen[acc.MailboxPath] {
+			continue
+		}
+		seen[acc.MailboxPath] = true
+		out = append(out, acc.MailboxPath)
+	}
+	return out, nil
 }
 
 // Authenticate implements Authenticator using a constant-time password compare.
