@@ -182,7 +182,20 @@ func renderAttachment(att Attachment) (textproto.MIMEHeader, []byte) {
 		ct += "; name=\"" + filename + "\""
 	}
 	h.Set("Content-Type", ct)
-	h.Set("Content-Transfer-Encoding", "base64")
+
+	// RFC 2046 §5.2.1: an encapsulated message (message/*) must use a 7bit,
+	// 8bit, or binary transfer encoding, never base64 or quoted-printable, so
+	// its bytes are emitted verbatim. Every other attachment is base64-encoded.
+	cte, body := "base64", encodeBase64(data)
+	if strings.HasPrefix(mimeType, "message/") {
+		if is7bitClean(data) {
+			cte = "7bit"
+		} else {
+			cte = "8bit"
+		}
+		body = data
+	}
+	h.Set("Content-Transfer-Encoding", cte)
 
 	disposition := "attachment"
 	if flags, _ := propInt32(att.Props, mapi.PrAttachFlags); flags&mapi.AttMhtmlRef != 0 {
@@ -195,7 +208,7 @@ func renderAttachment(att Attachment) (textproto.MIMEHeader, []byte) {
 	if cid := propString(att.Props, mapi.PrAttachContentID); cid != "" {
 		h.Set("Content-ID", "<"+cid+">")
 	}
-	return h, encodeBase64(data)
+	return h, body
 }
 
 // writeHeaderFields writes a part's header fields in a fixed order; used for the
