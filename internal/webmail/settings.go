@@ -33,6 +33,20 @@ type signature struct {
 	IsHTML bool   `json:"isHTML"`
 }
 
+// signatureByID returns the signature with the given id, or false when the id is
+// empty or no longer matches a stored signature (a dangling default reference).
+func (s webmailSettings) signatureByID(id string) (signature, bool) {
+	if id == "" {
+		return signature{}, false
+	}
+	for _, sig := range s.Signatures {
+		if sig.ID == id {
+			return sig, true
+		}
+	}
+	return signature{}, false
+}
+
 // defaultSettings is what a mailbox uses until it saves its own preferences.
 func defaultSettings() webmailSettings {
 	return webmailSettings{SchemaVersion: settingsSchemaVersion, ComposeFormat: "html"}
