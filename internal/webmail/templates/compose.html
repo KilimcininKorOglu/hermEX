@@ -6,7 +6,7 @@
     <h2>{{if .Title}}{{.Title}}{{else}}New message{{end}}</h2>
     {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
     {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
-    <form method="post" action="/compose" id="composeform">
+    <form method="post" action="/compose" id="composeform" enctype="multipart/form-data">
       <input type="hidden" name="inreplyto" value="{{.InReplyTo}}">
       <input type="hidden" name="references" value="{{.References}}">
       <input type="hidden" name="attachfolder" value="{{.AttachFolder}}">
@@ -61,6 +61,11 @@
         <div id="htmleditor" style="display:none"><div id="editor"></div></div>
         <input type="hidden" name="format" id="formatfield" value="{{.Format}}">
         <textarea name="bodyhtml" id="bodyhtmlfield" style="display:none">{{.BodyHTML}}</textarea>
+      </div>
+      <div class="field">
+        <label>Attachments</label>
+        {{if .Attachments}}<ul class="attach-list">{{range .Attachments}}<li>{{.Filename}}</li>{{end}}</ul>{{end}}
+        <input type="file" name="attach" multiple>
       </div>
       <div class="compose-actions">
         <button class="primary" type="submit" name="action" value="send">Send</button>
