@@ -30,7 +30,9 @@ type composeView struct {
 	Cc           string
 	Bcc          string
 	Subject      string
-	Body         string
+	Body         string // plain-text body (also the text/plain alternative in HTML mode)
+	BodyHTML     string // HTML body, set by the editor when Format == "html"
+	Format       string // "", "plain", "html"
 	Importance   string // "", "high", "low"
 	Sensitivity  string // "", "personal", "private", "confidential"
 	ReadReceipt  bool
@@ -135,6 +137,8 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		Bcc:          strings.TrimSpace(r.FormValue("bcc")),
 		Subject:      r.FormValue("subject"),
 		Body:         r.FormValue("body"),
+		BodyHTML:     r.FormValue("bodyhtml"),
+		Format:       r.FormValue("format"),
 		Importance:   r.FormValue("importance"),
 		Sensitivity:  r.FormValue("sensitivity"),
 		ReadReceipt:  r.FormValue("readreceipt") != "",
@@ -158,6 +162,8 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		Cc:          v.Cc,
 		Subject:     v.Subject,
 		Body:        v.Body,
+		BodyHTML:    v.BodyHTML,
+		Format:      v.Format,
 		Importance:  v.Importance,
 		Sensitivity: v.Sensitivity,
 		ReadReceipt: v.ReadReceipt,
@@ -253,7 +259,9 @@ type outgoing struct {
 	To          string
 	Cc          string
 	Subject     string
-	Body        string
+	Body        string // plain-text body, and the text/plain alternative in HTML mode
+	BodyHTML    string // HTML body; with Format=="html" the message is multipart/alternative
+	Format      string // "html" => multipart/alternative (text/plain + text/html)
 	Importance  string // "high"/"low" → X-Priority + Importance headers
 	Sensitivity string // "personal"/"private"/"confidential" → Sensitivity header
 	ReadReceipt bool   // → Disposition-Notification-To (RFC 8098)
@@ -268,9 +276,8 @@ type outgoing struct {
 // original as a message/rfc822 attachment (forward-as-attachment); otherwise a
 // single text/plain body.
 func buildMessage(o outgoing) []byte {
-	// Normalize the textarea's line endings to CRLF for the wire/store.
-	body := strings.ReplaceAll(o.Body, "\r\n", "\n")
-	body = strings.ReplaceAll(body, "\n", "\r\n")
+	// Normalize line endings to CRLF for the wire/store.
+	body := toCRLF(o.Body)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "From: %s\r\n", o.From)
@@ -326,6 +333,30 @@ func buildMessage(o outgoing) []byte {
 		return []byte(b.String())
 	}
 
+	// An HTML compose emits multipart/alternative: the text/plain alternative
+	// (the editor's plain rendering) plus the text/html body, so plain-only
+	// clients still get readable text. If the HTML body is missing (no JS), fall
+	// through to the plain branch below.
+	if o.Format == "html" && strings.TrimSpace(o.BodyHTML) != "" {
+		htmlBody := toCRLF(o.BodyHTML)
+		boundary := randomToken()[:32]
+		fmt.Fprintf(&b, "Content-Type: multipart/alternative; boundary=%q\r\n\r\n", boundary)
+		fmt.Fprintf(&b, "--%s\r\n", boundary)
+		b.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
+		b.WriteString(body)
+		if !strings.HasSuffix(body, "\r\n") {
+			b.WriteString("\r\n")
+		}
+		fmt.Fprintf(&b, "--%s\r\n", boundary)
+		b.WriteString("Content-Type: text/html; charset=utf-8\r\n\r\n")
+		b.WriteString(htmlBody)
+		if !strings.HasSuffix(htmlBody, "\r\n") {
+			b.WriteString("\r\n")
+		}
+		fmt.Fprintf(&b, "--%s--\r\n", boundary)
+		return []byte(b.String())
+	}
+
 	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
 	b.WriteString("\r\n")
 	b.WriteString(body)
@@ -333,6 +364,12 @@ func buildMessage(o outgoing) []byte {
 		b.WriteString("\r\n")
 	}
 	return []byte(b.String())
+}
+
+// toCRLF normalizes a string's line endings to CRLF for the wire/store.
+func toCRLF(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.ReplaceAll(s, "\n", "\r\n")
 }
 
 // saveToSent appends a copy of a sent message to the sender's Sent folder,
