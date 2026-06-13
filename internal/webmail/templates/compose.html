@@ -11,6 +11,8 @@
       <input type="hidden" name="references" value="{{.References}}">
       <input type="hidden" name="attachfolder" value="{{.AttachFolder}}">
       <input type="hidden" name="attachuid" value="{{.AttachUID}}">
+      <input type="hidden" name="draftfolder" value="{{.DraftFolder}}">
+      <input type="hidden" name="draftuid" value="{{.DraftUID}}">
       <div class="field">
         <label>From</label>
         <select name="from">
@@ -60,7 +62,10 @@
         <input type="hidden" name="format" id="formatfield" value="{{.Format}}">
         <textarea name="bodyhtml" id="bodyhtmlfield" style="display:none">{{.BodyHTML}}</textarea>
       </div>
-      <button class="primary" type="submit">Send</button>
+      <div class="compose-actions">
+        <button class="primary" type="submit" name="action" value="send">Send</button>
+        <button type="submit" name="action" value="savedraft" formnovalidate>Save draft</button>
+      </div>
     </form>
   </div>
 </div>

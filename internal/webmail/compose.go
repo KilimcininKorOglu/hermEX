@@ -17,9 +17,13 @@ import (
 	"hermex/internal/objectstore"
 )
 
-// sentName is the display path of the Sent folder, used to navigate there after
-// a message is filed. The copy itself is filed by the folder's fixed id.
-const sentName = "Sent Items"
+// sentName and draftsName are the display paths of the Sent and Drafts folders,
+// used to navigate there after a message is filed. The copies themselves are
+// filed by the folders' fixed ids.
+const (
+	sentName   = "Sent Items"
+	draftsName = "Drafts"
+)
 
 // composeView is the data the compose template renders, covering both a blank
 // compose and a reply/forward prefill.
@@ -41,6 +45,8 @@ type composeView struct {
 	References   string // carried as a hidden field, written as References on send
 	AttachFolder string // forward-as-attachment: source folder to embed at send
 	AttachUID    string // forward-as-attachment: source uid to embed at send
+	DraftFolder  string // draft being edited: source folder (carried so a re-save replaces it)
+	DraftUID     string // draft being edited: source uid
 	Error        string
 	Notice       string
 }
@@ -126,7 +132,13 @@ func (s *Server) handleComposeForm(w http.ResponseWriter, r *http.Request) {
 	v := buildComposeFromSource(action, folder, uint32(uid64), raw, sess.user)
 	v.From = sess.user
 	v.FromOptions = idents
-	v.Format = settings.ComposeFormat
+	// A reopened draft carries its own format (editdraft sets it from the draft's
+	// shape); for new/reply/forward Format is empty, so fall back to the user's
+	// default. The draft's own format must win, or an HTML draft reopened by a
+	// plain-default user would be re-saved as text/plain and lose its markup.
+	if v.Format == "" {
+		v.Format = settings.ComposeFormat
+	}
 	applySignature(&v, settings, action)
 	s.render(w, "compose", v)
 }
@@ -226,6 +238,15 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		References:   strings.TrimSpace(r.FormValue("references")),
 		AttachFolder: r.FormValue("attachfolder"),
 		AttachUID:    r.FormValue("attachuid"),
+		DraftFolder:  r.FormValue("draftfolder"),
+		DraftUID:     r.FormValue("draftuid"),
+	}
+
+	// Saving a draft files the compose in Drafts without sending; no recipients
+	// are required.
+	if r.FormValue("action") == "savedraft" {
+		s.saveDraft(w, sess.mailboxPath, &v)
+		return
 	}
 
 	recipients := append(splitAddresses(v.To), splitAddresses(v.Cc)...)
@@ -274,6 +295,12 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A draft that has now been sent is removed from Drafts (delete only after a
+	// successful send, so a failed send leaves the draft intact).
+	if v.DraftUID != "" {
+		deleteDraft(sess.mailboxPath, v.DraftUID)
+	}
+
 	// Local recipients are delivered and a Sent copy is stored. If some
 	// addresses have no local mailbox, report them (there is no relay yet)
 	// rather than pretend they were delivered.
@@ -287,6 +314,62 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/mail?folder="+url.QueryEscape(sentName), http.StatusSeeOther)
+}
+
+// saveDraft files the compose as a draft in the Drafts folder — replacing the
+// draft being edited when DraftUID is set (there is no in-place updater, so a
+// re-save deletes the old copy and appends a fresh one with a new uid) — then
+// re-renders the compose with the new draft uid so a subsequent save replaces
+// the same draft. The draft keeps Bcc and every field so it re-opens complete.
+func (s *Server) saveDraft(w http.ResponseWriter, mailboxPath string, v *composeView) {
+	o := outgoing{
+		From: v.From, To: v.To, Cc: v.Cc, Subject: v.Subject,
+		Body: v.Body, BodyHTML: v.BodyHTML, Format: v.Format,
+		Importance: v.Importance, Sensitivity: v.Sensitivity,
+		ReadReceipt: v.ReadReceipt, InReplyTo: v.InReplyTo, References: v.References,
+		Hostname: s.hostname,
+	}
+	draftRaw := insertBcc(buildMessage(o), v.Bcc)
+
+	st, err := objectstore.Open(mailboxPath)
+	if err != nil {
+		v.Error = "mailbox unavailable"
+		s.render(w, "compose", *v)
+		return
+	}
+	defer st.Close()
+
+	draftFID := int64(mapi.PrivateFIDDraft)
+	if v.DraftUID != "" {
+		if uid, err := strconv.ParseUint(v.DraftUID, 10, 32); err == nil {
+			st.DeleteMessage(draftFID, uint32(uid))
+		}
+	}
+	info, err := st.AppendMessage(draftFID, draftRaw, time.Now(), objectstore.FlagSeen|objectstore.FlagDraft)
+	if err != nil {
+		v.Error = "Could not save draft: " + err.Error()
+		s.render(w, "compose", *v)
+		return
+	}
+	v.DraftFolder = draftsName
+	v.DraftUID = strconv.FormatUint(uint64(info.UID), 10)
+	v.Notice = "Draft saved."
+	s.render(w, "compose", *v)
+}
+
+// deleteDraft removes a draft from the Drafts folder by its uid (best-effort,
+// used once a draft has been sent).
+func deleteDraft(mailboxPath, uidStr string) {
+	uid, err := strconv.ParseUint(uidStr, 10, 32)
+	if err != nil {
+		return
+	}
+	st, err := objectstore.Open(mailboxPath)
+	if err != nil {
+		return
+	}
+	defer st.Close()
+	st.DeleteMessage(int64(mapi.PrivateFIDDraft), uint32(uid))
 }
 
 // insertBcc returns raw with a Bcc header spliced into the top-level header

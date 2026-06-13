@@ -29,6 +29,7 @@ type messageView struct {
 	Seen    bool
 	Flagged bool
 	Deleted bool
+	Draft   bool // unsent draft: the row opens the compose editor, not the reader
 }
 
 // mailPage is the data the mail template renders.
@@ -115,6 +116,7 @@ func messageViewFrom(folder string, m objectstore.MessageInfo) messageView {
 		Seen:    m.Flags&objectstore.FlagSeen != 0,
 		Flagged: m.Flags&objectstore.FlagFlagged != 0,
 		Deleted: m.Flags&objectstore.FlagDeleted != 0,
+		Draft:   m.Flags&objectstore.FlagDraft != 0,
 	}
 }
 

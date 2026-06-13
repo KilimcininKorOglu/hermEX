@@ -63,6 +63,30 @@ func buildComposeFromSource(action, folder string, uid uint32, raw []byte, self 
 			Body:    text,
 		}
 
+	case "editdraft":
+		// Reopening a saved draft: prefill every field (including Bcc) and carry
+		// the draft's location so a re-save replaces this same draft rather than
+		// accumulating copies. A draft is the user's own content, so its HTML body
+		// is trusted and reopened in HTML mode with its markup intact (the editor
+		// pastes it the same way it restores an in-progress compose on error). The
+		// draft's own format is set here so it wins over the user's compose default.
+		v := composeView{
+			Title:       "Edit draft",
+			To:          formatAddrs(env.To),
+			Cc:          formatAddrs(env.Cc),
+			Bcc:         formatAddrs(env.Bcc),
+			Subject:     env.Subject,
+			Body:        text,
+			DraftFolder: folder,
+			DraftUID:    fmt.Sprint(uid),
+		}
+		if h := bestHTMLBody(raw); h != "" {
+			v.Format, v.BodyHTML = "html", h
+		} else {
+			v.Format = "plain"
+		}
+		return v
+
 	default:
 		return composeView{Title: "New message"}
 	}
@@ -222,6 +246,38 @@ func bestTextBody(raw []byte) string {
 	if htmlp != nil {
 		if c, err := htmlp.DecodedContent(); err == nil {
 			return stripHTML(toUTF8(c, htmlp.Params["charset"]))
+		}
+	}
+	return ""
+}
+
+// bestHTMLBody returns the message's text/html part decoded to UTF-8, or "" when
+// there is none. Unlike bestTextBody it returns the markup verbatim, for
+// reopening a saved HTML draft in the editor with its formatting intact. This is
+// only ever called on the user's own draft — received HTML is never seeded into
+// the editor (it is quoted as escaped plain text instead).
+func bestHTMLBody(raw []byte) string {
+	root := mime.ParseStructure(raw)
+	var htmlp *mime.Part
+	var walk func(p *mime.Part)
+	walk = func(p *mime.Part) {
+		if len(p.Children) > 0 {
+			for _, c := range p.Children {
+				walk(c)
+			}
+			return
+		}
+		if p.Type != "text" || p.Disposition == "attachment" {
+			return
+		}
+		if p.Subtype == "html" && htmlp == nil {
+			htmlp = p
+		}
+	}
+	walk(root)
+	if htmlp != nil {
+		if c, err := htmlp.DecodedContent(); err == nil {
+			return toUTF8(c, htmlp.Params["charset"])
 		}
 	}
 	return ""
