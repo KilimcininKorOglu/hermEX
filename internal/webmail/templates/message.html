@@ -11,6 +11,8 @@
     <a href="/compose?action=forward&folder={{.Folder}}&uid={{.UID}}">Forward</a>
     <a href="/compose?action=forwardasattach&folder={{.Folder}}&uid={{.UID}}">Forward as attachment</a>
     <a href="/compose?action=editasnew&folder={{.Folder}}&uid={{.UID}}">Edit as New</a>
+    <a href="/message?folder={{.Folder}}&uid={{.UID}}" target="_blank" rel="noopener" title="Open in a new window">Pop out</a>
+    <a href="/print?folder={{.Folder}}&uid={{.UID}}" target="_blank" rel="noopener" title="Print this message">Print</a>
     {{if .Folders}}
     <form class="moveform" hx-post="/action" hx-swap="none">
       <input type="hidden" name="folder" value="{{.Folder}}">

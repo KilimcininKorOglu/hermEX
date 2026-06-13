@@ -1,0 +1,46 @@
+{{define "print"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{.Subject}}</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: #1f2329; margin: 24px; font-size: 13px; }
+  h1 { font-size: 18px; margin: 0 0 12px; }
+  table.phdr { border-collapse: collapse; margin-bottom: 12px; }
+  table.phdr th { text-align: left; vertical-align: top; padding: 2px 12px 2px 0; color: #555; font-weight: 600; white-space: nowrap; }
+  table.phdr td { padding: 2px 0; }
+  hr { border: 0; border-top: 1px solid #ccc; margin: 12px 0; }
+  pre.pbody { white-space: pre-wrap; word-wrap: break-word; font-family: inherit; margin: 0; }
+  iframe.pbody { width: 100%; border: 0; }
+  @media print { body { margin: 0; } }
+</style>
+</head>
+<body>
+  <h1>{{.Subject}}</h1>
+  <table class="phdr">
+    <tr><th>From</th><td>{{.From}}</td></tr>
+    <tr><th>Sent</th><td>{{.Date}}</td></tr>
+    <tr><th>To</th><td>{{.To}}</td></tr>
+    {{if .Cc}}<tr><th>Cc</th><td>{{.Cc}}</td></tr>{{end}}
+    {{if .Importance}}<tr><th>Importance</th><td>{{.Importance}}</td></tr>{{end}}
+    {{if .Sensitivity}}<tr><th>Sensitivity</th><td>{{.Sensitivity}}</td></tr>{{end}}
+    {{if .Attachments}}<tr><th>Attachments</th><td>{{range .Attachments}}{{.Filename}} ({{.Size}} bytes); {{end}}</td></tr>{{end}}
+  </table>
+  <hr>
+  {{if .IsHTML}}
+  <iframe id="pbody" class="pbody" sandbox="allow-same-origin" srcdoc="{{.Body}}"></iframe>
+  {{else}}
+  <pre class="pbody">{{.Body}}</pre>
+  {{end}}
+  <script>
+    // Size the (sandboxed, script-disabled) body frame to its content, then print.
+    window.addEventListener("load", function () {
+      var f = document.getElementById("pbody");
+      if (f && f.contentDocument && f.contentDocument.body) {
+        f.style.height = (f.contentDocument.body.scrollHeight + 20) + "px";
+      }
+      window.print();
+    });
+  </script>
+</body>
+</html>{{end}}
