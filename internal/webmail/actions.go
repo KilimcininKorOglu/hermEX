@@ -207,7 +207,11 @@ func (s *Server) unscheduleSend(w http.ResponseWriter, st *objectstore.Store, fo
 	w.WriteHeader(http.StatusOK)
 }
 
-// toggleFlag flips a single flag bit and re-renders the message row.
+// toggleFlag flips a single flag bit and re-renders the message row. The row is
+// enriched with its per-row icon columns (attachment paperclip, importance
+// marker) the same way the list pipeline enriches each visible page row; without
+// this the single-row htmx swap would drop those icons until a full reload, since
+// they come from a per-message object read rather than the index row.
 func (s *Server) toggleFlag(w http.ResponseWriter, st *objectstore.Store, folderID int64, folder string, uid uint32, bit int64) {
 	cur, err := st.MessageFlags(folderID, uid)
 	if err != nil {
@@ -223,7 +227,9 @@ func (s *Server) toggleFlag(w http.ResponseWriter, st *objectstore.Store, folder
 		http.Error(w, "message gone", http.StatusInternalServerError)
 		return
 	}
-	s.render(w, "messagerow", messageViewFrom(folderID, folder, m))
+	v := messageViewFrom(folderID, folder, m)
+	enrichIcons(st, m.ID, &v)
+	s.render(w, "messagerow", v)
 }
 
 // deleteMessage moves a message to the Deleted Items folder, or removes it

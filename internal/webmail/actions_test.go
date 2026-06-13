@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -165,6 +166,54 @@ func TestActionMoveToNonMailRejected(t *testing.T) {
 	}
 	if n := len(folderMsgs(t, path, int64(mapi.PrivateFIDInbox))); n != 1 {
 		t.Errorf("rejected move must leave the message, INBOX has %d want 1", n)
+	}
+}
+
+// TestActionToggleKeepsIconColumns checks that a per-row flag toggle re-renders
+// the row with its icon columns intact. The attachment paperclip and the
+// importance marker come from a per-row object read (enrichIcons), not from the
+// index row messageViewFrom maps, so the htmx single-row swap must run that same
+// enrichment. Without it those icons silently vanish from the clicked row until a
+// full reload — a regression invisible to the full-page list tests.
+func TestActionToggleKeepsIconColumns(t *testing.T) {
+	path := emptyMailbox(t)
+	// A real attachment (no Content-ID) plus an Importance: High header, so the
+	// row carries both per-row-read icons at once.
+	raw := "From: sender@example.com\r\nTo: rcpt@example.com\r\n" +
+		"Subject: report attached\r\nImportance: High\r\nMIME-Version: 1.0\r\n" +
+		"Content-Type: multipart/mixed; boundary=B\r\n\r\n" +
+		"--B\r\nContent-Type: text/plain\r\n\r\nsee attached\r\n" +
+		"--B\r\nContent-Type: application/pdf; name=\"r.pdf\"\r\n" +
+		"Content-Disposition: attachment; filename=\"r.pdf\"\r\n\r\n%PDF data\r\n--B--\r\n"
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Unix(100, 0), 0)
+	st.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	code, body := postForm(t, c, ts.URL+"/action", url.Values{
+		"folder": {"INBOX"}, "uid": {itoa(info.UID)}, "op": {"toggleflag"},
+	})
+	if code != 200 {
+		t.Fatalf("toggleflag = %d", code)
+	}
+	// The toggle set \Flagged; the re-rendered row reflects current state.
+	if !strings.Contains(body, `title="Flagged"`) {
+		t.Errorf("toggled row missing flag icon:\n%s", body)
+	}
+	// Icon columns that require a per-row object read must survive the swap.
+	if !strings.Contains(body, `title="Has attachment"`) {
+		t.Errorf("toggled row dropped the attachment paperclip (enrichIcons not run):\n%s", body)
+	}
+	if !strings.Contains(body, `title="High importance"`) {
+		t.Errorf("toggled row dropped the importance marker (enrichIcons not run):\n%s", body)
 	}
 }
 
