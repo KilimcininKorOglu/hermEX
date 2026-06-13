@@ -29,6 +29,11 @@ const (
 	PrMessageSizeExtended       = PropTag(0x0E080014) // PtI8
 	PrNormalMessageSizeExtended = PropTag(0x66B30014) // PtI8
 	PrAssocMessageSizeExtended  = PropTag(0x66B40014) // PtI8
+	// PrWebmailSettings is the provider-defined store-root property (0x6772)
+	// that holds the webmail client's settings tree as a JSON string, so
+	// settings and signatures persist as a MAPI property rather than in a
+	// dedicated table.
+	PrWebmailSettings = PropTag(0x6772001F) // PtUnicode
 )
 
 // Large message/attachment content property tags. These hold bodies and
