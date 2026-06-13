@@ -8,8 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"hermex/internal/mapi"
 	"hermex/internal/mime"
-	"hermex/internal/store"
+	"hermex/internal/objectstore"
 )
 
 func TestEnsureSubjectPrefix(t *testing.T) {
@@ -49,16 +50,13 @@ func TestReplyAllCc(t *testing.T) {
 // and returns the mailbox path.
 func seedReplyMailbox(t *testing.T) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "alice.sqlite3")
-	st, err := store.Open(path)
+	path := filepath.Join(t.TempDir(), "alice")
+	st, err := objectstore.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	inbox, err := st.CreateFolder(nil, inboxName)
-	if err != nil {
-		t.Fatal(err)
-	}
+	inbox := int64(mapi.PrivateFIDInbox)
 	msg := "From: Bob <bob@example.com>\r\n" +
 		"To: alice@hermex.test, Carol <carol@example.com>\r\n" +
 		"Cc: dave@example.com\r\n" +
@@ -72,6 +70,22 @@ func seedReplyMailbox(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// formFieldValue extracts the value attribute of the named input from rendered
+// compose HTML. The attribute is HTML-escaped, so it contains no raw double
+// quote and ends at the next one.
+func formFieldValue(html, name string) string {
+	marker := `name="` + name + `" value="`
+	i := strings.Index(html, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := html[i+len(marker):]
+	if j := strings.IndexByte(rest, '"'); j >= 0 {
+		return rest[:j]
+	}
+	return rest
 }
 
 func TestWebmailReplyPrefill(t *testing.T) {
@@ -106,10 +120,20 @@ func TestWebmailReplyPrefill(t *testing.T) {
 	if code != 200 {
 		t.Fatalf("replyall prefill = %d", code)
 	}
-	// Exact Cc value proves carol+dave are present while self (alice) and the
-	// sender (bob, already in To) are excluded.
-	if !strings.Contains(body, `name="cc" value="Carol &lt;carol@example.com&gt;, dave@example.com"`) {
-		t.Errorf("replyall Cc is not exactly the other recipients: %s", body)
+	// Cc carries the original To+Cc minus self (alice) and minus the sender
+	// (bob, already the reply target in To). carol keeps its display name; dave,
+	// nameless, round-trips in the reference-faithful `"addr" <addr>` form — so
+	// assert the addresses are present/absent rather than the exact display form.
+	cc := formFieldValue(body, "cc")
+	for _, want := range []string{"carol@example.com", "dave@example.com"} {
+		if !strings.Contains(cc, want) {
+			t.Errorf("replyall Cc missing %q (cc = %q)", want, cc)
+		}
+	}
+	for _, exclude := range []string{"alice@hermex.test", "bob@example.com"} {
+		if strings.Contains(cc, exclude) {
+			t.Errorf("replyall Cc must exclude %q (cc = %q)", exclude, cc)
+		}
 	}
 
 	// Forward: Fwd: subject, forwarded banner, no In-Reply-To linkage.
@@ -131,15 +155,12 @@ func TestWebmailReplyPrefill(t *testing.T) {
 // sentRaw returns the raw bytes of the single message in the Sent folder.
 func sentRaw(t *testing.T, path string) string {
 	t.Helper()
-	st, err := store.Open(path)
+	st, err := objectstore.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	sent, ok, err := st.FolderByName(nil, sentName)
-	if err != nil || !ok {
-		t.Fatalf("Sent folder missing (ok=%v err=%v)", ok, err)
-	}
+	sent := int64(mapi.PrivateFIDSentItems)
 	msgs, _ := st.ListMessages(sent)
 	if len(msgs) != 1 {
 		t.Fatalf("Sent has %d messages, want 1", len(msgs))
@@ -178,8 +199,8 @@ func TestWebmailReplySendThreadingHeaders(t *testing.T) {
 	if !strings.Contains(raw, "References: <root-1@example.com> <orig-123@example.com>") {
 		t.Errorf("Sent copy missing/!wrong References: %s", raw)
 	}
-	if !strings.Contains(raw, "Cc: carol@example.com") {
-		t.Errorf("Sent copy missing Cc header: %s", raw)
+	if cc := headerValue(raw, "Cc"); !strings.Contains(cc, "carol@example.com") {
+		t.Errorf("Sent copy missing Cc header (Cc = %q): %s", cc, raw)
 	}
 }
 

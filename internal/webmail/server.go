@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
-	"hermex/internal/store"
+	"hermex/internal/objectstore"
 )
 
 // Server is the webmail HTTP application. It authenticates against the directory
@@ -99,7 +99,7 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	st, err := store.Open(sess.mailboxPath)
+	st, err := objectstore.Open(sess.mailboxPath)
 	if err != nil {
 		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
 		return

@@ -10,11 +10,10 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
 	"hermex/internal/smtp"
-	"hermex/internal/store"
 )
-
-const inboxName = "INBOX"
 
 // Backend is an smtp.Backend that delivers to per-recipient mailbox stores.
 type Backend struct {
@@ -81,28 +80,16 @@ func Deliver(accounts directory.Accounts, recipients []string, raw []byte, recei
 	return unresolved, nil
 }
 
-// deliver appends a raw message to the INBOX of the mailbox at path, creating
-// the INBOX on first delivery.
-//
-// The lookup-then-create of INBOX is not yet race-safe across concurrent
-// deliveries to the same brand-new mailbox; a unique (parent, name) constraint
-// will harden it once that concurrency is in play.
+// deliver appends a raw message to the inbox of the mailbox at path. The inbox
+// is a built-in folder provisioned when the mailbox is created, so it is
+// addressed directly by its fixed id.
 func deliver(path string, raw []byte, received time.Time) error {
-	st, err := store.Open(path)
+	st, err := objectstore.Open(path)
 	if err != nil {
 		return err
 	}
 	defer st.Close()
 
-	inbox, ok, err := st.FolderByName(nil, inboxName)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		if inbox, err = st.CreateFolder(nil, inboxName); err != nil {
-			return err
-		}
-	}
-	_, err = st.AppendMessage(inbox, raw, received, 0)
+	_, err = st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, received, 0)
 	return err
 }

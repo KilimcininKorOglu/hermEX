@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"hermex/internal/mime"
-	"hermex/internal/store"
+	"hermex/internal/objectstore"
 )
 
 // attachmentView is one downloadable attachment in the message view.
@@ -45,7 +45,7 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	uid := uint32(uid64)
 
-	st, err := store.Open(sess.mailboxPath)
+	st, err := objectstore.Open(sess.mailboxPath)
 	if err != nil {
 		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
 		return
@@ -71,8 +71,8 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 	detail := buildMessageDetail(raw, folder, uid)
 
 	// Reading a message marks it \Seen (read-modify-write to preserve the rest).
-	if cur, err := st.MessageFlags(folderID, uid); err == nil && cur&store.FlagSeen == 0 {
-		st.SetMessageFlags(folderID, uid, cur|store.FlagSeen)
+	if cur, err := st.MessageFlags(folderID, uid); err == nil && cur&objectstore.FlagSeen == 0 {
+		st.SetMessageFlags(folderID, uid, cur|objectstore.FlagSeen)
 	}
 
 	s.render(w, "message", detail)

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"hermex/internal/directory"
-	"hermex/internal/store"
+	"hermex/internal/objectstore"
 )
 
 // capabilities is the untagged CAPABILITY list. LITERAL+ is advertised because
@@ -72,7 +72,7 @@ type conn struct {
 	bw       *bufio.Writer
 	state    connState
 	user     string
-	st       *store.Store
+	st       *objectstore.Store
 	sel      *selectedMailbox
 	readOnly bool
 }
@@ -229,7 +229,7 @@ func (c *conn) finishAuth(tag, user, pass string) {
 		c.no(tag, "[AUTHENTICATIONFAILED] invalid credentials")
 		return
 	}
-	st, err := store.Open(path)
+	st, err := objectstore.Open(path)
 	if err != nil {
 		c.no(tag, "mailbox unavailable")
 		return
@@ -370,7 +370,7 @@ func (c *conn) cmdStatus(tag string, args []token) {
 	uidn, _ := c.st.UIDNext(node.info.ID)
 	unseen := 0
 	for i := range msgs {
-		if msgs[i].Flags&store.FlagSeen == 0 {
+		if msgs[i].Flags&objectstore.FlagSeen == 0 {
 			unseen++
 		}
 	}
@@ -596,7 +596,7 @@ func (c *conn) poll() {
 	}
 	// Emit EXPUNGE for each vanished UID. Sequence numbers are reported against
 	// the shrinking view, so removing index i renumbers everything after it.
-	view := make([]store.MessageInfo, len(c.sel.msgs))
+	view := make([]objectstore.MessageInfo, len(c.sel.msgs))
 	copy(view, c.sel.msgs)
 	for i := 0; i < len(view); {
 		if live[view[i].UID] {

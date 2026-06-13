@@ -12,10 +12,9 @@ import (
 	"strings"
 
 	"hermex/internal/directory"
-	"hermex/internal/store"
+	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
 )
-
-const inboxName = "INBOX"
 
 // Server accepts POP3 connections and serves mailboxes resolved via Auth.
 type Server struct {
@@ -117,29 +116,23 @@ func (s *Server) handle(conn net.Conn) {
 // mailbox is a login-time snapshot of a folder's messages plus per-message
 // deletion marks committed on QUIT.
 type mailbox struct {
-	st      *store.Store
+	st      *objectstore.Store
 	folder  int64
-	msgs    []store.MessageInfo
+	msgs    []objectstore.MessageInfo
 	deleted []bool
 }
 
 func openMailbox(path string) (*mailbox, error) {
-	st, err := store.Open(path)
+	st, err := objectstore.Open(path)
 	if err != nil {
 		return nil, err
 	}
-	mb := &mailbox{st: st}
-	inbox, found, err := st.FolderByName(nil, inboxName)
-	if err != nil {
+	// The inbox is a built-in folder provisioned at mailbox creation, addressed
+	// directly by its fixed id.
+	mb := &mailbox{st: st, folder: int64(mapi.PrivateFIDInbox)}
+	if mb.msgs, err = st.ListMessages(mb.folder); err != nil {
 		st.Close()
 		return nil, err
-	}
-	if found {
-		mb.folder = inbox
-		if mb.msgs, err = st.ListMessages(inbox); err != nil {
-			st.Close()
-			return nil, err
-		}
 	}
 	mb.deleted = make([]bool, len(mb.msgs))
 	return mb, nil

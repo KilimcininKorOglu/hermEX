@@ -5,17 +5,20 @@ import (
 	"fmt"
 	stdmime "mime"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/mapi"
 	"hermex/internal/mta"
-	"hermex/internal/store"
+	"hermex/internal/objectstore"
 )
 
-// sentName is the folder composed mail is filed into.
-const sentName = "Sent"
+// sentName is the display path of the Sent folder, used to navigate there after
+// a message is filed. The copy itself is filed by the folder's fixed id.
+const sentName = "Sent Items"
 
 // composeView is the data the compose template renders, covering both a blank
 // compose and a reply/forward prefill.
@@ -89,7 +92,7 @@ func (s *Server) handleComposeForm(w http.ResponseWriter, r *http.Request) {
 		s.render(w, "compose", composeView{Title: "New message"})
 		return
 	}
-	st, err := store.Open(sess.mailboxPath)
+	st, err := objectstore.Open(sess.mailboxPath)
 	if err != nil {
 		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
 		return
@@ -197,7 +200,7 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	http.Redirect(w, r, "/mail?folder="+sentName, http.StatusSeeOther)
+	http.Redirect(w, r, "/mail?folder="+url.QueryEscape(sentName), http.StatusSeeOther)
 }
 
 // insertBcc returns raw with a Bcc header spliced into the top-level header
@@ -228,7 +231,7 @@ func (s *Server) loadRaw(mailboxPath, folder, uidStr string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	st, err := store.Open(mailboxPath)
+	st, err := objectstore.Open(mailboxPath)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +242,7 @@ func (s *Server) loadRaw(mailboxPath, folder, uidStr string) ([]byte, error) {
 	}
 	folderID, found := resolveFolder(folders, folder)
 	if !found {
-		return nil, store.ErrNotFound
+		return nil, objectstore.ErrNotFound
 	}
 	return st.GetMessageRaw(folderID, uint32(uid64))
 }
@@ -335,21 +338,12 @@ func buildMessage(o outgoing) []byte {
 // saveToSent appends a copy of a sent message to the sender's Sent folder,
 // creating it on first use and marking the copy \Seen.
 func saveToSent(mailboxPath string, raw []byte) error {
-	st, err := store.Open(mailboxPath)
+	st, err := objectstore.Open(mailboxPath)
 	if err != nil {
 		return err
 	}
 	defer st.Close()
-	sent, ok, err := st.FolderByName(nil, sentName)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		if sent, err = st.CreateFolder(nil, sentName); err != nil {
-			return err
-		}
-	}
-	_, err = st.AppendMessage(sent, raw, time.Now(), store.FlagSeen)
+	_, err = st.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), objectstore.FlagSeen)
 	return err
 }
 

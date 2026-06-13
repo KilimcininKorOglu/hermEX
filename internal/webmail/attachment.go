@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"hermex/internal/mime"
-	"hermex/internal/store"
+	"hermex/internal/objectstore"
 )
 
 func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request) {
@@ -28,7 +28,7 @@ func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	st, err := store.Open(sess.mailboxPath)
+	st, err := objectstore.Open(sess.mailboxPath)
 	if err != nil {
 		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
 		return

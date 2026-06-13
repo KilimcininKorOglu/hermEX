@@ -14,7 +14,8 @@ import (
 	"time"
 
 	"hermex/internal/directory"
-	"hermex/internal/store"
+	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
 )
 
 // testClient drives the IMAP server over a real TCP connection.
@@ -26,20 +27,17 @@ type testClient struct {
 
 func startServer(t *testing.T) (*testClient, string) {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "alice.sqlite3")
-	st, err := store.Open(path)
+	path := filepath.Join(t.TempDir(), "alice")
+	st, err := objectstore.Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	inbox, err := st.CreateFolder(nil, inboxName)
-	if err != nil {
-		t.Fatal(err)
-	}
+	inbox := int64(mapi.PrivateFIDInbox)
 	// Two messages: the first unseen, the second \Seen.
 	if _, err := st.AppendMessage(inbox, []byte("Subject: one\r\n\r\nbody"), time.Unix(1, 0), 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.AppendMessage(inbox, []byte("Subject: two\r\n\r\nbody"), time.Unix(2, 0), store.FlagSeen); err != nil {
+	if _, err := st.AppendMessage(inbox, []byte("Subject: two\r\n\r\nbody"), time.Unix(2, 0), objectstore.FlagSeen); err != nil {
 		t.Fatal(err)
 	}
 	st.Close()
