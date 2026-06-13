@@ -13,6 +13,7 @@
     <a href="/compose?action=editasnew&folder={{.Folder}}&uid={{.UID}}">Edit as New</a>
     <a href="/message?folder={{.Folder}}&uid={{.UID}}" target="_blank" rel="noopener" title="Open in a new window">Pop out</a>
     <a href="/print?folder={{.Folder}}&uid={{.UID}}" target="_blank" rel="noopener" title="Print this message">Print</a>
+    <a href="/eml?folder={{.Folder}}&uid={{.UID}}" title="Download as .eml">Save as .eml</a>
     {{if .Folders}}
     <form class="moveform" hx-post="/action" hx-swap="none">
       <input type="hidden" name="folder" value="{{.Folder}}">
