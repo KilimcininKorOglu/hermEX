@@ -258,6 +258,18 @@ func writeMailHead(b *bytes.Buffer, msg *Message) {
 		writeField(b, "Sensitivity", sensitivityText(v))
 	}
 
+	// A requested read receipt re-emits Disposition-Notification-To from the
+	// read-receipt identity, falling back to the sender then the representing
+	// identity, as the export path does.
+	if requested, _ := propBool(msg.Props, mapi.PrReadReceiptRequested); requested {
+		for _, t := range []addrTags{readReceiptTags, senderTags, representingTags} {
+			if addr := identityAddress(msg.Props, t); addr != "" {
+				writeField(b, "Disposition-Notification-To", addr)
+				break
+			}
+		}
+	}
+
 	if v, ok := propUint64(msg.Props, mapi.PrClientSubmitTime); ok {
 		writeField(b, "Date", mapi.NTTimeToUnix(v).UTC().Format(dateLayout))
 	}
@@ -440,4 +452,14 @@ func propUint64(props mapi.PropertyValues, tag mapi.PropTag) (uint64, bool) {
 		}
 	}
 	return 0, false
+}
+
+// propBool returns a bool-typed property and whether it was present.
+func propBool(props mapi.PropertyValues, tag mapi.PropTag) (bool, bool) {
+	if v, ok := props.Get(tag); ok {
+		if b, ok := v.(bool); ok {
+			return b, true
+		}
+	}
+	return false, false
 }
