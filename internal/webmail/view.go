@@ -57,6 +57,7 @@ type mailPage struct {
 	Sort     string
 	Dir      string
 	Filter   string
+	Density  string // message-list row density: "compact" | "extended"
 	Page     int
 	MaxPage  int
 	PrevPage int

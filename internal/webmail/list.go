@@ -10,6 +10,15 @@ import (
 // pageSize is the number of messages shown per page of the message list.
 const pageSize = 50
 
+// orDefault returns v when it is non-empty, else def. It lets a URL parameter
+// override a saved preference: pass the request value and the stored default.
+func orDefault(v, def string) string {
+	if v != "" {
+		return v
+	}
+	return def
+}
+
 // atoiDefault parses s as an int, returning def for empty or non-numeric input.
 // The list pipeline clamps the page to the valid range, so a stray value here is
 // harmless.

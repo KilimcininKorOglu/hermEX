@@ -132,10 +132,15 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Saved preferences supply the list defaults; a URL parameter overrides them.
+	cfg, err := loadSettings(st)
+	if err != nil {
+		cfg = defaultSettings()
+	}
 	q := r.URL.Query()
 	params := listParams{
-		Sort:   whitelist(q.Get("sort"), "date", "from", "subject", "size", "flag", "read"),
-		Dir:    whitelist(q.Get("dir"), "desc", "asc"),
+		Sort:   whitelist(orDefault(q.Get("sort"), cfg.DefaultSort), "date", "from", "subject", "size", "flag", "read"),
+		Dir:    whitelist(orDefault(q.Get("dir"), cfg.DefaultDir), "desc", "asc"),
 		Filter: whitelist(q.Get("filter"), "all", "unread"),
 		Page:   atoiDefault(q.Get("page"), 1),
 	}
@@ -148,6 +153,7 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 		Sort:    params.Sort,
 		Dir:     params.Dir,
 		Filter:  params.Filter,
+		Density: whitelist(orDefault(q.Get("density"), cfg.Density), "compact", "extended"),
 		Columns: listColumns(params.Sort, params.Dir),
 	}
 	if id, found := resolveFolder(folders, current); found {
