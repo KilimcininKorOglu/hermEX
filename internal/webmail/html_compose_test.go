@@ -11,6 +11,30 @@ import (
 	"hermex/internal/objectstore"
 )
 
+// TestComposePageHasEditor checks that the compose page renders the rich-text
+// editor scaffolding: the self-hosted editor assets, the editor container, the
+// plain/HTML toggle, and the hidden fields the editor's JS populates on submit.
+func TestComposePageHasEditor(t *testing.T) {
+	ts := newTestServer(t, seedMailbox(t))
+	c := authedClient(t, ts)
+	code, body := get(t, c, ts.URL+"/compose")
+	if code != 200 {
+		t.Fatalf("GET /compose = %d", code)
+	}
+	for _, want := range []string{
+		"/static/quill.js", "/static/quill.snow.css", // editor assets
+		`id="editor"`,         // editor container
+		`name="formatchoice"`, // plain/HTML toggle
+		`name="format"`,       // submitted format selector
+		`name="bodyhtml"`,     // submitted HTML body
+		`id="composeform"`,    // form the editor JS hooks
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("compose page missing %q", want)
+		}
+	}
+}
+
 // TestWebmailHTMLComposeAlternative checks that composing in HTML mode produces
 // a multipart/alternative message: the editor's plain rendering as the
 // text/plain alternative and the markup as the text/html body, both surviving
