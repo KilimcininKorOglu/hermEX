@@ -203,3 +203,39 @@ func TestExportNonASCII(t *testing.T) {
 		t.Errorf("body round-trip = %q", got)
 	}
 }
+
+// TestExportMessageRFC822Verbatim checks that a message/rfc822 attachment is
+// exported with a 7bit/8bit transfer encoding (never base64, per RFC 2046
+// §5.2.1), so the encapsulated message is emitted verbatim and remains readable.
+func TestExportMessageRFC822Verbatim(t *testing.T) {
+	inner := "From: orig@example.com\r\nTo: rcpt@example.com\r\nSubject: Inner Subject\r\n\r\nInner body line.\r\n"
+	raw := []byte("From: fwd@example.com\r\nTo: dest@example.com\r\nSubject: Fwd\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: multipart/mixed; boundary=\"b0\"\r\n" +
+		"\r\n" +
+		"--b0\r\n" +
+		"Content-Type: text/plain; charset=utf-8\r\n\r\nSee attached.\r\n" +
+		"--b0\r\n" +
+		"Content-Type: message/rfc822\r\n" +
+		"Content-Disposition: attachment\r\n\r\n" +
+		inner +
+		"--b0--\r\n")
+	msg, err := Import(raw, Options{})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	wire, err := Export(msg, Options{})
+	if err != nil {
+		t.Fatalf("Export: %v", err)
+	}
+	if !bytes.Contains(wire, []byte("message/rfc822")) {
+		t.Fatalf("no message/rfc822 part:\n%s", wire)
+	}
+	// The encapsulated message appears verbatim; it would be unreadable if the
+	// part had been base64-encoded instead of emitted 7bit/8bit.
+	for _, want := range []string{"Subject: Inner Subject", "Inner body line."} {
+		if !bytes.Contains(wire, []byte(want)) {
+			t.Errorf("encapsulated message missing %q:\n%s", want, wire)
+		}
+	}
+}
