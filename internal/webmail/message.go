@@ -88,7 +88,7 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	detail := buildMessageDetail(raw, folder, uid, cfg.IncomingRender == "plain")
+	detail := buildMessageDetail(raw, folder, uid, cfg.IncomingRender == "plain", cfg.SafeSenders)
 	detail.Folders = moveTargets(folders, folderID)
 
 	// Reading a message marks it \Seen (read-modify-write to preserve the rest);
@@ -134,13 +134,19 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 // best displayable body and listing attachments. When preferPlain is set (the
 // "display incoming mail as plain text" preference) a text/plain alternative is
 // chosen over HTML, and an HTML-only message is down-converted to text so the
-// reader never shows raw markup.
-func buildMessageDetail(raw []byte, folder string, uid uint32, preferPlain bool) messageDetail {
+// reader never shows raw markup. safeSenders gates remote content in the HTML
+// body: unless the sender is allow-listed, a restrictive CSP meta is injected so
+// the reader loads no remote images (tracking pixels) or other subresources.
+func buildMessageDetail(raw []byte, folder string, uid uint32, preferPlain bool, safeSenders []string) messageDetail {
 	root := mime.ParseStructure(raw)
 	d := messageDetail{UID: uid, Folder: folder, Subject: "(no subject)"}
+	var senderAddr string
 	if env, err := mime.ParseEnvelope(raw); err == nil {
 		if env.Subject != "" {
 			d.Subject = env.Subject
+		}
+		if len(env.From) > 0 {
+			senderAddr = env.From[0].Mailbox + "@" + env.From[0].Host
 		}
 		d.From = formatAddrs(env.From)
 		d.To = formatAddrs(env.To)
@@ -182,7 +188,30 @@ func buildMessageDetail(raw []byte, folder string, uid uint32, preferPlain bool)
 	if d.Body == "" && !isHTML {
 		d.Body = "(no displayable text body)"
 	}
+	// Remote-content policy: prepend a CSP meta into the document the reader
+	// iframe loads. Unless the sender is allow-listed, remote subresources are
+	// forbidden, so tracking pixels and remote images never load; inline (data:)
+	// images and inline styles still render. The iframe's sandbox blocks scripts;
+	// this is the complementary layer sandbox does not cover. As the first node in
+	// srcdoc the meta is foster-parented into the document head and applies to the
+	// whole body, and a body's own CSP can only intersect (most-restrictive wins).
+	if d.IsHTML {
+		d.Body = remoteContentMeta(isSafeSender(safeSenders, senderAddr)) + d.Body
+	}
 	return d
+}
+
+// remoteContentMeta returns the Content-Security-Policy <meta> tag for the reader
+// iframe's document. When the sender is not allow-listed, remote subresources are
+// forbidden (only data: images and inline styles render); when allow-listed,
+// remote images and fonts are permitted too. Scripts, objects, and frames are
+// forbidden in both modes via default-src 'none', complementing the sandbox.
+func remoteContentMeta(allowRemote bool) string {
+	csp := "default-src 'none'; img-src data:; style-src 'unsafe-inline'"
+	if allowRemote {
+		csp = "default-src 'none'; img-src * data:; style-src 'unsafe-inline'; font-src * data:"
+	}
+	return `<meta http-equiv="Content-Security-Policy" content="` + csp + `">`
 }
 
 // cidRef matches an <img> whose src is a cid: URL, capturing the tag text up to
