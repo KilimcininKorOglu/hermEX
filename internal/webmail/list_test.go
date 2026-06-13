@@ -91,6 +91,49 @@ func TestMailSortApplies(t *testing.T) {
 	}
 }
 
+// TestMailUnreadFilter checks the unread-only filter hides read messages,
+// composes with sort, leaves the folder counters unchanged (they are pre-filter),
+// and drives the toolbar toggle.
+func TestMailUnreadFilter(t *testing.T) {
+	path := emptyMailbox(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	seedMsg(t, path, inbox, "u1", "", "b", 100, 0)                           // uid1 unread, oldest
+	seedMsg(t, path, inbox, "r1", "", "b", 101, int64(objectstore.FlagSeen)) // uid2 read
+	seedMsg(t, path, inbox, "u2", "", "b", 102, 0)                           // uid3 unread, newest
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	if _, b := get(t, c, ts.URL+"/mail?folder=INBOX"); rowCount(b) != 3 {
+		t.Errorf("all view rows = %d, want 3", rowCount(b))
+	}
+
+	_, b := get(t, c, ts.URL+"/mail?folder=INBOX&filter=unread")
+	if rowCount(b) != 2 {
+		t.Errorf("unread view rows = %d, want 2", rowCount(b))
+	}
+	if strings.Contains(b, `id="msg-2"`) {
+		t.Errorf("unread view must hide the read message (msg-2)")
+	}
+	// Counters describe the folder, not the filtered view, so they stay put.
+	if !strings.Contains(b, "3 total, 2 unread") {
+		t.Errorf("counters must stay pre-filter (3 total, 2 unread):\n%s", b)
+	}
+	// The toggle is active in the unread view.
+	if !strings.Contains(b, "filter-toggle active") {
+		t.Errorf("unread view should mark the filter toggle active")
+	}
+
+	// Filter composes with sort: oldest unread first under date-asc.
+	if _, b := get(t, c, ts.URL+"/mail?folder=INBOX&filter=unread&sort=date&dir=asc"); firstMsgID(b) != "msg-1" {
+		t.Errorf("unread + date-asc should list the oldest unread (msg-1) first, got %q", firstMsgID(b))
+	}
+
+	// The all view offers a link into the unread filter.
+	if _, all := get(t, c, ts.URL+"/mail?folder=INBOX"); !strings.Contains(all, "filter=unread") {
+		t.Errorf("all view should offer a link to the unread filter")
+	}
+}
+
 // TestMailSortHeaders checks the active column shows its direction arrow and the
 // header links carry the other params and reset the page.
 func TestMailSortHeaders(t *testing.T) {
