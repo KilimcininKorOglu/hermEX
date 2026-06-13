@@ -49,6 +49,7 @@ type composeView struct {
 	InReplyTo    string              // carried as a hidden field, written as In-Reply-To on send
 	References   string              // carried as a hidden field, written as References on send
 	Attachments  []composeAttachment // uploaded files (and, later, inline images) to attach on send
+	Folders      []folderView        // mailbox folders, for the attach-item message picker
 	AttachFolder string              // forward-as-attachment: source folder to embed at send
 	AttachUID    string              // forward-as-attachment: source uid to embed at send
 	DraftFolder  string              // draft being edited: source folder (carried so a re-save replaces it)
@@ -105,10 +106,15 @@ func (s *Server) handleComposeForm(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		settings = defaultSettings()
 	}
+	// The folder list feeds the attach-item picker on every render path; a listing
+	// error only matters for reply/forward (which resolves a source message from
+	// it), checked below — a new compose just gets an empty picker.
+	folders, ferr := st.ListFolders()
+	folderVus := buildFolderViews(folders)
 
 	action := r.URL.Query().Get("action")
 	if action == "" {
-		v := composeView{Title: "New message", From: sess.user, FromOptions: idents, Format: settings.ComposeFormat}
+		v := composeView{Title: "New message", From: sess.user, FromOptions: idents, Format: settings.ComposeFormat, Folders: folderVus}
 		applySignature(&v, settings, action)
 		s.render(w, "compose", v)
 		return
@@ -117,11 +123,10 @@ func (s *Server) handleComposeForm(w http.ResponseWriter, r *http.Request) {
 	folder := r.URL.Query().Get("folder")
 	uid64, err := strconv.ParseUint(r.URL.Query().Get("uid"), 10, 32)
 	if err != nil {
-		s.render(w, "compose", composeView{Title: "New message", From: sess.user, FromOptions: idents, Format: settings.ComposeFormat})
+		s.render(w, "compose", composeView{Title: "New message", From: sess.user, FromOptions: idents, Format: settings.ComposeFormat, Folders: folderVus})
 		return
 	}
-	folders, err := st.ListFolders()
-	if err != nil {
+	if ferr != nil {
 		http.Error(w, "cannot read folders", http.StatusInternalServerError)
 		return
 	}
@@ -138,6 +143,7 @@ func (s *Server) handleComposeForm(w http.ResponseWriter, r *http.Request) {
 	v := buildComposeFromSource(action, folder, uint32(uid64), raw, sess.user)
 	v.From = sess.user
 	v.FromOptions = idents
+	v.Folders = folderVus
 	// A reopened draft carries its own format (editdraft sets it from the draft's
 	// shape); for new/reply/forward Format is empty, so fall back to the user's
 	// default. The draft's own format must win, or an HTML draft reopened by a
@@ -267,6 +273,8 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 			v.Attachments = append(v.Attachments, draftAttachments(raw)...)
 		}
 	}
+	// Folders populate the picker's dropdown on any error re-render.
+	v.Folders = s.folderViews(sess.mailboxPath)
 
 	// Saving a draft files the compose in Drafts without sending; no recipients
 	// are required. Autosave posts the same action with Accept: application/json
@@ -276,6 +284,13 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		s.saveDraft(w, sess.mailboxPath, &v, asJSON)
 		return
 	}
+
+	// Attach-item picks ride only on an actual send (immediate or scheduled), like
+	// forward-as-attachment — resolved here, after the savedraft return, so they are
+	// never embedded into a saved draft. Embedding them in a draft would double them
+	// on the next submit: the draft re-read above would re-supply the pick that its
+	// still-checked form field also re-submits, accumulating one copy per autosave.
+	v.Attachments = append(v.Attachments, s.pickedMessageAttachments(sess.mailboxPath, r.Form["attachmsg"])...)
 
 	// Scheduling a send files the compose in the Outbox with a deferred-send time
 	// instead of delivering now; the worker releases it when due.
@@ -294,6 +309,10 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 
 	o := v.outgoing(s.hostname)
 	// Forward-as-attachment embeds the source message verbatim as message/rfc822.
+	// Unlike attach-item picks (resolved above, so they ride scheduled sends too),
+	// this resolution is send-only by design: a scheduled forward-as-attachment does
+	// not carry the embed — a pre-existing limitation of the forward-as-attachment
+	// path, not introduced here.
 	if v.AttachFolder != "" && v.AttachUID != "" {
 		if embed, err := s.loadRaw(sess.mailboxPath, v.AttachFolder, v.AttachUID); err == nil {
 			o.Embed = embed
@@ -529,6 +548,86 @@ func (s *Server) loadRaw(mailboxPath, folder, uidStr string) ([]byte, error) {
 		return nil, objectstore.ErrNotFound
 	}
 	return st.GetMessageRaw(folderID, uint32(uid64))
+}
+
+// folderViews returns the mailbox's folders as picker/sidebar views (newest list
+// order), or nil on error. Used to populate the attach-item folder dropdown.
+func (s *Server) folderViews(mailboxPath string) []folderView {
+	st, err := objectstore.Open(mailboxPath)
+	if err != nil {
+		return nil
+	}
+	defer st.Close()
+	folders, err := st.ListFolders()
+	if err != nil {
+		return nil
+	}
+	return buildFolderViews(folders)
+}
+
+// pickedMessageAttachments turns the attach-item picker's "uid:folder" selections
+// into message/rfc822 attachments by reading each stored message; the embedded
+// message is emitted verbatim by oxcmail export. Unreadable picks are skipped.
+func (s *Server) pickedMessageAttachments(mailboxPath string, picks []string) []composeAttachment {
+	var out []composeAttachment
+	for _, p := range picks {
+		uidStr, folder, ok := strings.Cut(p, ":")
+		if !ok {
+			continue
+		}
+		raw, err := s.loadRaw(mailboxPath, folder, uidStr)
+		if err != nil {
+			continue
+		}
+		name := "message.eml"
+		if env, err := mime.ParseEnvelope(raw); err == nil && strings.TrimSpace(env.Subject) != "" {
+			name = env.Subject + ".eml"
+		}
+		out = append(out, composeAttachment{
+			Filename:    name,
+			ContentType: "message/rfc822",
+			Data:        raw,
+		})
+	}
+	return out
+}
+
+// handleAttachPick renders a folder's messages as a checkbox list for the
+// attach-item picker, loaded into the compose form via htmx when a folder is
+// chosen. Each checkbox value is "uid:folder", read back on submit.
+func (s *Server) handleAttachPick(w http.ResponseWriter, r *http.Request) {
+	sess, ok := s.sessionFrom(r)
+	if !ok {
+		http.Error(w, "not authenticated", http.StatusUnauthorized)
+		return
+	}
+	folder := r.URL.Query().Get("pickfolder")
+	if folder == "" {
+		s.render(w, "attachpick", nil)
+		return
+	}
+	st, err := objectstore.Open(sess.mailboxPath)
+	if err != nil {
+		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
+		return
+	}
+	defer st.Close()
+	folders, err := st.ListFolders()
+	if err != nil {
+		http.Error(w, "cannot read folders", http.StatusInternalServerError)
+		return
+	}
+	folderID, found := resolveFolder(folders, folder)
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	msgs, err := buildMessageViews(st, folderID, folder)
+	if err != nil {
+		http.Error(w, "cannot read messages", http.StatusInternalServerError)
+		return
+	}
+	s.render(w, "attachpick", msgs)
 }
 
 // maxComposeBytes bounds a multipart compose POST (attachments plus the form
