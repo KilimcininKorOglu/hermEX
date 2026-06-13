@@ -95,9 +95,11 @@ func (s *Store) ensureIndexFolder(tx *sql.Tx, folderID int64) error {
 	if err != nil {
 		return err
 	}
+	// UIDVALIDITY is assigned once at folder-index creation (its initial epoch);
+	// only a reindex that cannot preserve the mid-to-UID mapping bumps it.
 	_, err = tx.Exec(
-		`INSERT INTO folders (folder_id, parent_fid, commit_max, name, uidnext) VALUES (?, ?, ?, ?, 1)`,
-		folderID, parent, commitMax, name)
+		`INSERT INTO folders (folder_id, parent_fid, commit_max, name, uidnext, uidvalidity) VALUES (?, ?, ?, ?, 1, ?)`,
+		folderID, parent, commitMax, name, time.Now().Unix())
 	return err
 }
 

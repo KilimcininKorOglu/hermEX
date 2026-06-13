@@ -6,7 +6,7 @@ package objectstore
 // migration ladder yet).
 const (
 	objectSchemaVersion = 25
-	indexSchemaVersion  = 3
+	indexSchemaVersion  = 4
 )
 
 // configurations config_id rows: store-wide counters and metadata on the object
@@ -224,6 +224,7 @@ var indexDDL = []string{
 		commit_max INTEGER NOT NULL,
 		name TEXT COLLATE NOCASE UNIQUE,
 		uidnext INTEGER DEFAULT 0,
+		uidvalidity INTEGER NOT NULL,
 		unsub INTEGER DEFAULT 0,
 		sort_field INTEGER DEFAULT 0)`,
 	`CREATE INDEX parent_fid_index3 ON folders(parent_fid)`,
