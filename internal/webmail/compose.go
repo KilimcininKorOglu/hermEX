@@ -24,6 +24,7 @@ import (
 const (
 	sentName   = "Sent Items"
 	draftsName = "Drafts"
+	outboxName = "Outbox"
 )
 
 // composeView is the data the compose template renders, covering both a blank
@@ -252,6 +253,13 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Scheduling a send files the compose in the Outbox with a deferred-send time
+	// instead of delivering now; the worker releases it when due.
+	if r.FormValue("action") == "sendlater" {
+		s.scheduleSend(w, r, sess.mailboxPath, &v)
+		return
+	}
+
 	recipients := append(splitAddresses(v.To), splitAddresses(v.Cc)...)
 	recipients = append(recipients, splitAddresses(v.Bcc)...)
 	if len(recipients) == 0 {
@@ -260,21 +268,7 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	o := outgoing{
-		From:        v.From,
-		To:          v.To,
-		Cc:          v.Cc,
-		Subject:     v.Subject,
-		Body:        v.Body,
-		BodyHTML:    v.BodyHTML,
-		Format:      v.Format,
-		Importance:  v.Importance,
-		Sensitivity: v.Sensitivity,
-		ReadReceipt: v.ReadReceipt,
-		InReplyTo:   v.InReplyTo,
-		References:  v.References,
-		Hostname:    s.hostname,
-	}
+	o := v.outgoing(s.hostname)
 	// Forward-as-attachment embeds the source message verbatim as message/rfc822.
 	if v.AttachFolder != "" && v.AttachUID != "" {
 		if embed, err := s.loadRaw(sess.mailboxPath, v.AttachFolder, v.AttachUID); err == nil {
@@ -326,14 +320,7 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 // so it re-opens complete. With asJSON (autosave) it replies with the new draft
 // uid as JSON; otherwise it re-renders the compose page with a confirmation.
 func (s *Server) saveDraft(w http.ResponseWriter, mailboxPath string, v *composeView, asJSON bool) {
-	o := outgoing{
-		From: v.From, To: v.To, Cc: v.Cc, Subject: v.Subject,
-		Body: v.Body, BodyHTML: v.BodyHTML, Format: v.Format,
-		Importance: v.Importance, Sensitivity: v.Sensitivity,
-		ReadReceipt: v.ReadReceipt, InReplyTo: v.InReplyTo, References: v.References,
-		Hostname: s.hostname,
-	}
-	draftRaw := insertBcc(buildMessage(o), v.Bcc)
+	draftRaw := insertBcc(buildMessage(v.outgoing(s.hostname)), v.Bcc)
 
 	st, err := objectstore.Open(mailboxPath)
 	if err != nil {
@@ -382,6 +369,67 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+// scheduleSend files the compose in the Outbox for delayed delivery: it requires
+// at least one recipient and a future time, stores the with-Bcc message (so every
+// recipient is recoverable when the worker releases it), and stamps it with the
+// deferred-send time and the unsent flag. The send-later worker delivers it when
+// due. Scheduling an opened draft removes that draft, which now lives as the
+// Outbox copy.
+func (s *Server) scheduleSend(w http.ResponseWriter, r *http.Request, mailboxPath string, v *composeView) {
+	recipients := append(splitAddresses(v.To), splitAddresses(v.Cc)...)
+	recipients = append(recipients, splitAddresses(v.Bcc)...)
+	if len(recipients) == 0 {
+		v.Error = "At least one recipient is required."
+		s.render(w, "compose", *v)
+		return
+	}
+	// A datetime-local field has no timezone, so it is the user's wall-clock time;
+	// interpret it in the server's local zone and store the absolute instant.
+	when, err := time.ParseInLocation("2006-01-02T15:04", strings.TrimSpace(r.FormValue("sendat")), time.Local)
+	if err != nil {
+		v.Error = "Choose a valid date and time to send."
+		s.render(w, "compose", *v)
+		return
+	}
+	if !when.After(time.Now()) {
+		v.Error = "The scheduled time must be in the future."
+		s.render(w, "compose", *v)
+		return
+	}
+
+	raw := insertBcc(buildMessage(v.outgoing(s.hostname)), v.Bcc)
+	st, err := objectstore.Open(mailboxPath)
+	if err != nil {
+		v.Error = "mailbox unavailable"
+		s.render(w, "compose", *v)
+		return
+	}
+	defer st.Close()
+
+	info, err := st.AppendMessage(int64(mapi.PrivateFIDOutbox), raw, time.Now(), objectstore.FlagSeen)
+	if err != nil {
+		v.Error = "Could not schedule the message: " + err.Error()
+		s.render(w, "compose", *v)
+		return
+	}
+	// The deferred-send time tells the worker when to release the message; the
+	// unsent flag marks it pending submission.
+	if err := st.SetMessageProperties(info.ID, mapi.PropertyValues{
+		{Tag: mapi.PrDeferredSendTime, Value: mapi.UnixToNTTime(when)},
+		{Tag: mapi.PrMessageFlags, Value: int32(mapi.MsgFlagUnsent)},
+	}); err != nil {
+		v.Error = "Could not schedule the message: " + err.Error()
+		s.render(w, "compose", *v)
+		return
+	}
+	if v.DraftUID != "" {
+		if uid, perr := strconv.ParseUint(v.DraftUID, 10, 32); perr == nil {
+			st.DeleteMessage(int64(mapi.PrivateFIDDraft), uint32(uid))
+		}
+	}
+	http.Redirect(w, r, "/mail?folder="+url.QueryEscape(outboxName), http.StatusSeeOther)
 }
 
 // deleteDraft removes a draft from the Drafts folder by its uid (best-effort,
@@ -459,6 +507,19 @@ type outgoing struct {
 	References  string
 	Embed       []byte // when set, the message is multipart/mixed with this raw embedded as message/rfc822
 	Hostname    string
+}
+
+// outgoing assembles the message-building fields shared by sending, saving a
+// draft, and scheduling a send. The caller adds Embed (forward-as-attachment)
+// where it applies.
+func (v composeView) outgoing(hostname string) outgoing {
+	return outgoing{
+		From: v.From, To: v.To, Cc: v.Cc, Subject: v.Subject,
+		Body: v.Body, BodyHTML: v.BodyHTML, Format: v.Format,
+		Importance: v.Importance, Sensitivity: v.Sensitivity,
+		ReadReceipt: v.ReadReceipt, InReplyTo: v.InReplyTo, References: v.References,
+		Hostname: hostname,
+	}
 }
 
 // buildMessage assembles an RFC 5322 message from the compose fields. With

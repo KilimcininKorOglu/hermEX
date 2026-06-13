@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"hermex/internal/mapi"
 	"hermex/internal/mime"
@@ -287,6 +288,80 @@ func TestHTMLDraftPreservesMarkup(t *testing.T) {
 	}
 	if hc, _ := htmlPart.DecodedContent(); !strings.Contains(string(hc), "<strong>bold</strong>") {
 		t.Errorf("re-saved HTML draft lost its markup = %q", hc)
+	}
+}
+
+// TestScheduleSendFilesOutbox checks that a send-later compose is filed in the
+// Outbox (not delivered): the message lands in the Outbox with the blind Bcc
+// preserved and a decodable deferred-send time, and nothing reaches Sent. The
+// worker, not the request, delivers it later.
+func TestScheduleSendFilesOutbox(t *testing.T) {
+	path := emptyMailbox(t)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	future := time.Now().Add(2 * time.Hour).Format("2006-01-02T15:04")
+	postForm(t, c, ts.URL+"/compose", url.Values{
+		"action":  {"sendlater"},
+		"to":      {"to@example.com"},
+		"bcc":     {"bcc@example.com"},
+		"subject": {"later"},
+		"body":    {"scheduled body"},
+		"sendat":  {future},
+	})
+
+	outbox := folderMsgs(t, path, int64(mapi.PrivateFIDOutbox))
+	if len(outbox) != 1 {
+		t.Fatalf("Outbox has %d, want 1", len(outbox))
+	}
+	if n := len(folderMsgs(t, path, sentFID)); n != 0 {
+		t.Errorf("scheduling must not deliver yet, Sent has %d", n)
+	}
+
+	// The Outbox copy keeps the blind Bcc (recoverable when the worker releases it).
+	raw := msgRaw(t, path, int64(mapi.PrivateFIDOutbox), outbox[0].UID)
+	if !strings.Contains(raw, "bcc@example.com") {
+		t.Errorf("Outbox copy lost the Bcc recipient:\n%s", raw)
+	}
+
+	// The deferred-send time decodes back to the requested instant.
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	props, err := st.GetMessageProperties(outbox[0].ID, mapi.PrDeferredSendTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, ok := props.Get(mapi.PrDeferredSendTime)
+	if !ok {
+		t.Fatalf("Outbox message carries no PrDeferredSendTime: %v", props)
+	}
+	want, _ := time.ParseInLocation("2006-01-02T15:04", future, time.Local)
+	if got := mapi.NTTimeToUnix(v.(uint64)); !got.Equal(want) {
+		t.Errorf("deferred send time = %v, want %v", got, want)
+	}
+}
+
+// TestScheduleSendRejectsPastTime checks that a send-later with a non-future time
+// is refused (nothing is filed to the Outbox).
+func TestScheduleSendRejectsPastTime(t *testing.T) {
+	path := emptyMailbox(t)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	past := time.Now().Add(-time.Hour).Format("2006-01-02T15:04")
+	_, body := postForm(t, c, ts.URL+"/compose", url.Values{
+		"action": {"sendlater"},
+		"to":     {"to@example.com"},
+		"sendat": {past},
+	})
+	if !strings.Contains(body, "future") {
+		t.Errorf("a past schedule time should be rejected with a message:\n%s", body)
+	}
+	if n := len(folderMsgs(t, path, int64(mapi.PrivateFIDOutbox))); n != 0 {
+		t.Errorf("a rejected schedule must not file to the Outbox, found %d", n)
 	}
 }
 
