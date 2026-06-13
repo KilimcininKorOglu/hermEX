@@ -6,7 +6,7 @@ package objectstore
 // migration ladder yet).
 const (
 	objectSchemaVersion = 25
-	indexSchemaVersion  = 4
+	indexSchemaVersion  = 5
 )
 
 // configurations config_id rows: store-wide counters and metadata on the object
@@ -216,13 +216,15 @@ var objectDDL = []string{
 
 // indexDDL is the IMAP/POP3 index schema: per-folder UID allocation
 // (folders.uidnext) and a denormalized per-message row carrying the IMAP uid,
-// flags, and envelope projections for fast listing and search.
+// flags, and envelope projections for fast listing and search. Folders are
+// keyed by folder_id; the name column is a non-unique display-name projection
+// for diagnostics (sibling folders may legitimately share a display name).
 var indexDDL = []string{
 	`CREATE TABLE folders (
 		folder_id INTEGER PRIMARY KEY,
 		parent_fid INTEGER NOT NULL,
 		commit_max INTEGER NOT NULL,
-		name TEXT COLLATE NOCASE UNIQUE,
+		name TEXT COLLATE NOCASE,
 		uidnext INTEGER DEFAULT 0,
 		uidvalidity INTEGER NOT NULL,
 		unsub INTEGER DEFAULT 0,
