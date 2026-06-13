@@ -120,14 +120,68 @@
     });
   });
 
-  form.addEventListener("submit", function () {
+  // captureBody syncs the editor content into the hidden fields the server
+  // reads: in HTML mode the semantic HTML plus its plain rendering (the
+  // text/plain alternative); in plain mode the textarea already holds the text.
+  function captureBody() {
     if (fmt.value === "html") {
       htmlField.value = quill.getSemanticHTML();
-      plain.value = quill.getText().replace(/\n+$/, ""); // text/plain alternative
+      plain.value = quill.getText().replace(/\n+$/, "");
     } else {
       htmlField.value = "";
     }
+  }
+
+  var draftuid = form.querySelector("input[name=draftuid]");
+  var sending = false, saving = false, timer = null;
+
+  form.addEventListener("submit", function () {
+    sending = true; // a real send/save must not race a pending autosave
+    if (timer) { clearTimeout(timer); }
+    captureBody();
   });
+
+  // Autosave: after a typing pause (or when the window loses focus) the draft is
+  // filed in the background and the hidden draft uid is updated from the reply,
+  // so the next autosave replaces the same draft instead of accumulating copies.
+  // It is skipped while the compose is empty (no junk drafts) and while a send is
+  // in flight. With JS off, the manual "Save draft" button is the fallback.
+  function bodyText() { return fmt.value === "html" ? quill.getText().trim() : plain.value.trim(); }
+  function isEmpty() {
+    return !form.subject.value.trim() && !bodyText() &&
+      !form.to.value.trim() && !form.cc.value.trim() && !form.bcc.value.trim();
+  }
+  function autosave() {
+    timer = null;
+    if (sending || saving || isEmpty()) { return; }
+    captureBody();
+    saving = true;
+    var data = new URLSearchParams(new FormData(form));
+    data.set("action", "savedraft");
+    fetch(form.getAttribute("action"), {
+      method: "POST",
+      headers: { "Accept": "application/json", "Content-Type": "application/x-www-form-urlencoded" },
+      body: data.toString(),
+      credentials: "same-origin"
+    }).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { if (j && j.draftUid && draftuid) { draftuid.value = j.draftUid; } })
+      .catch(function () {})
+      .then(function () { saving = false; });
+  }
+  function schedule() {
+    if (sending) { return; }
+    if (timer) { clearTimeout(timer); }
+    timer = setTimeout(autosave, 10000);
+  }
+
+  // Wired after the initial seeding above, so prefilling a draft/signature does
+  // not itself trigger an autosave (which would churn the uid on mere opening).
+  quill.on("text-change", schedule);
+  ["to", "cc", "bcc", "subject"].forEach(function (n) {
+    if (form[n]) { form[n].addEventListener("input", schedule); }
+  });
+  plain.addEventListener("input", schedule);
+  window.addEventListener("blur", function () { if (timer) { clearTimeout(timer); } autosave(); });
 })();
 </script>
 {{template "foot" .}}{{end}}

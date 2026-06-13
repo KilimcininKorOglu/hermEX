@@ -1,6 +1,7 @@
 package webmail
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
@@ -286,6 +287,69 @@ func TestHTMLDraftPreservesMarkup(t *testing.T) {
 	}
 	if hc, _ := htmlPart.DecodedContent(); !strings.Contains(string(hc), "<strong>bold</strong>") {
 		t.Errorf("re-saved HTML draft lost its markup = %q", hc)
+	}
+}
+
+// postAutosave posts a savedraft the way the browser's autosave fetch does —
+// with Accept: application/json — and returns the status and decoded JSON reply.
+func postAutosave(t *testing.T, c *http.Client, u string, vals url.Values) (int, map[string]string) {
+	t.Helper()
+	req, err := http.NewRequest("POST", u, strings.NewReader(vals.Encode()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	var m map[string]string
+	json.Unmarshal(b, &m)
+	return resp.StatusCode, m
+}
+
+// TestAutosaveReturnsJSONAndReplaces checks the autosave contract: a savedraft
+// posted with Accept: application/json replies with the new draft uid as JSON
+// instead of a rendered page, and a second autosave carrying that uid replaces
+// the same draft — the Drafts count stays at one and the uid advances — rather
+// than accumulating copies as the user keeps typing.
+func TestAutosaveReturnsJSONAndReplaces(t *testing.T) {
+	path := emptyMailbox(t)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	code, j := postAutosave(t, c, ts.URL+"/compose", url.Values{
+		"action":  {"savedraft"},
+		"subject": {"typing"},
+		"body":    {"a few words"},
+	})
+	if code != 200 {
+		t.Fatalf("autosave = %d", code)
+	}
+	if j["draftUid"] == "" {
+		t.Fatalf("autosave reply carried no draftUid: %v", j)
+	}
+	if n := len(folderMsgs(t, path, draftFID)); n != 1 {
+		t.Fatalf("after first autosave, Drafts has %d, want 1", n)
+	}
+
+	code2, j2 := postAutosave(t, c, ts.URL+"/compose", url.Values{
+		"action":   {"savedraft"},
+		"draftuid": {j["draftUid"]},
+		"subject":  {"typing more"},
+		"body":     {"a few more words"},
+	})
+	if code2 != 200 {
+		t.Fatalf("second autosave = %d", code2)
+	}
+	if n := len(folderMsgs(t, path, draftFID)); n != 1 {
+		t.Fatalf("second autosave must replace the draft, Drafts has %d, want 1", n)
+	}
+	if j2["draftUid"] == "" || j2["draftUid"] == j["draftUid"] {
+		t.Errorf("second autosave uid %q did not advance from %q", j2["draftUid"], j["draftUid"])
 	}
 }
 
