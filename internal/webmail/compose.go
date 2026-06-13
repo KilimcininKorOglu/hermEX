@@ -2,6 +2,7 @@ package webmail
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"html"
 	stdmime "mime"
@@ -243,9 +244,11 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Saving a draft files the compose in Drafts without sending; no recipients
-	// are required.
+	// are required. Autosave posts the same action with Accept: application/json
+	// and gets a small JSON reply instead of a re-rendered page.
 	if r.FormValue("action") == "savedraft" {
-		s.saveDraft(w, sess.mailboxPath, &v)
+		asJSON := strings.Contains(r.Header.Get("Accept"), "application/json")
+		s.saveDraft(w, sess.mailboxPath, &v, asJSON)
 		return
 	}
 
@@ -318,10 +321,11 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 
 // saveDraft files the compose as a draft in the Drafts folder — replacing the
 // draft being edited when DraftUID is set (there is no in-place updater, so a
-// re-save deletes the old copy and appends a fresh one with a new uid) — then
-// re-renders the compose with the new draft uid so a subsequent save replaces
-// the same draft. The draft keeps Bcc and every field so it re-opens complete.
-func (s *Server) saveDraft(w http.ResponseWriter, mailboxPath string, v *composeView) {
+// re-save deletes the old copy and appends a fresh one with a new uid) — so a
+// subsequent save replaces the same draft. The draft keeps Bcc and every field
+// so it re-opens complete. With asJSON (autosave) it replies with the new draft
+// uid as JSON; otherwise it re-renders the compose page with a confirmation.
+func (s *Server) saveDraft(w http.ResponseWriter, mailboxPath string, v *composeView, asJSON bool) {
 	o := outgoing{
 		From: v.From, To: v.To, Cc: v.Cc, Subject: v.Subject,
 		Body: v.Body, BodyHTML: v.BodyHTML, Format: v.Format,
@@ -333,8 +337,7 @@ func (s *Server) saveDraft(w http.ResponseWriter, mailboxPath string, v *compose
 
 	st, err := objectstore.Open(mailboxPath)
 	if err != nil {
-		v.Error = "mailbox unavailable"
-		s.render(w, "compose", *v)
+		s.draftError(w, v, asJSON, "mailbox unavailable")
 		return
 	}
 	defer st.Close()
@@ -347,14 +350,38 @@ func (s *Server) saveDraft(w http.ResponseWriter, mailboxPath string, v *compose
 	}
 	info, err := st.AppendMessage(draftFID, draftRaw, time.Now(), objectstore.FlagSeen|objectstore.FlagDraft)
 	if err != nil {
-		v.Error = "Could not save draft: " + err.Error()
-		s.render(w, "compose", *v)
+		s.draftError(w, v, asJSON, "Could not save draft: "+err.Error())
 		return
 	}
 	v.DraftFolder = draftsName
 	v.DraftUID = strconv.FormatUint(uint64(info.UID), 10)
+	if asJSON {
+		writeJSON(w, http.StatusOK, map[string]string{
+			"draftUid": v.DraftUID,
+			"savedAt":  time.Now().Format(time.RFC3339),
+		})
+		return
+	}
 	v.Notice = "Draft saved."
 	s.render(w, "compose", *v)
+}
+
+// draftError reports a draft-save failure as JSON for autosave, or as an
+// in-page error for the manual save.
+func (s *Server) draftError(w http.ResponseWriter, v *composeView, asJSON bool, msg string) {
+	if asJSON {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": msg})
+		return
+	}
+	v.Error = msg
+	s.render(w, "compose", *v)
+}
+
+// writeJSON writes v as a JSON response with the given status.
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
 }
 
 // deleteDraft removes a draft from the Drafts folder by its uid (best-effort,
