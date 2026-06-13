@@ -18,6 +18,20 @@
       <button type="submit" name="op" value="copy">Copy</button>
     </form>
     {{end}}
+    <details class="flagmenu reader-flag">
+      <summary title="Follow-up flag">&#9873; Flag</summary>
+      <form class="flagmenu-pop" method="post">
+        <button class="flag-c6" type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=6" title="Red">&#9873;</button>
+        <button class="flag-c5" type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=5" title="Blue">&#9873;</button>
+        <button class="flag-c4" type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=4" title="Yellow">&#9873;</button>
+        <button class="flag-c3" type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=3" title="Green">&#9873;</button>
+        <button class="flag-c2" type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=2" title="Orange">&#9873;</button>
+        <button class="flag-c1" type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=1" title="Purple">&#9873;</button>
+        <button type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flagcomplete" title="Mark complete">&#10003;</button>
+        <button type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flagnone" title="Clear flag">&#10007;</button>
+        <input type="datetime-local" name="due" aria-label="Follow-up due date">
+      </form>
+    </details>
   </div>
   <div class="reader-headers">
     <h2>{{.Subject}}</h2>
@@ -25,6 +39,7 @@
     <div class="hrow"><span class="hlabel">To</span> {{.To}}</div>
     {{if .Cc}}<div class="hrow"><span class="hlabel">Cc</span> {{.Cc}}</div>{{end}}
     <div class="hrow"><span class="hlabel">Date</span> {{.Date}}</div>
+    {{if or .FlagColor .FlagComplete}}<div class="hrow"><span class="hlabel">Flag</span> {{if .FlagComplete}}<span class="i-flagdone" title="Complete">&#10003;</span> Complete{{else}}<span class="i-flag flag-c{{.FlagColor}}">&#9873;</span> Follow up{{end}}{{if .FlagDue}} &mdash; due {{.FlagDue}}{{end}}</div>{{end}}
   </div>
   {{if .Attachments}}
   <div class="attachments">

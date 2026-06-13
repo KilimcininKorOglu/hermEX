@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
@@ -55,11 +56,17 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		if color < 1 || color > 6 {
 			color = objectstore.FlagColorRed
 		}
-		s.setFollowup(w, st, folderID, folder, uid, objectstore.FollowupFlag{Status: objectstore.FlagStatusFlagged, Color: color, Request: "Follow up"})
+		f := objectstore.FollowupFlag{Status: objectstore.FlagStatusFlagged, Color: color, Request: "Follow up"}
+		if due := r.FormValue("due"); due != "" {
+			if t, err := time.Parse("2006-01-02T15:04", due); err == nil {
+				f.DueBy = t
+			}
+		}
+		s.setFollowup(w, r, st, folderID, folder, uid, f)
 	case "flagcomplete":
-		s.setFollowup(w, st, folderID, folder, uid, objectstore.FollowupFlag{Status: objectstore.FlagStatusComplete})
+		s.setFollowup(w, r, st, folderID, folder, uid, objectstore.FollowupFlag{Status: objectstore.FlagStatusComplete})
 	case "flagnone":
-		s.setFollowup(w, st, folderID, folder, uid, objectstore.FollowupFlag{})
+		s.setFollowup(w, r, st, folderID, folder, uid, objectstore.FollowupFlag{})
 	case "delete":
 		s.deleteMessage(w, st, folderID, uid)
 	case "unschedule":
@@ -221,7 +228,7 @@ func (s *Server) unscheduleSend(w http.ResponseWriter, st *objectstore.Store, fo
 // and re-renders the row. SetFollowupFlag also syncs the IMAP \Flagged bit, and
 // the row is re-enriched so the colored flag (and the other per-row-read icons)
 // render correctly on the htmx swap.
-func (s *Server) setFollowup(w http.ResponseWriter, st *objectstore.Store, folderID int64, folder string, uid uint32, f objectstore.FollowupFlag) {
+func (s *Server) setFollowup(w http.ResponseWriter, r *http.Request, st *objectstore.Store, folderID int64, folder string, uid uint32, f objectstore.FollowupFlag) {
 	m, err := st.MessageByUID(folderID, uid)
 	if err != nil {
 		http.NotFound(w, nil)
@@ -229,6 +236,12 @@ func (s *Server) setFollowup(w http.ResponseWriter, st *objectstore.Store, folde
 	}
 	if err := st.SetFollowupFlag(m.ID, f); err != nil {
 		http.Error(w, "cannot set flag", http.StatusInternalServerError)
+		return
+	}
+	// The reader's flag control posts a plain form (no htmx): reload the message
+	// so its header reflects the new flag. The list posts via htmx and swaps the row.
+	if r.Header.Get("HX-Request") == "" {
+		http.Redirect(w, r, "/message?folder="+url.QueryEscape(folder)+"&uid="+strconv.FormatUint(uint64(uid), 10), http.StatusSeeOther)
 		return
 	}
 	m, err = st.MessageByUID(folderID, uid) // re-read so \Flagged reflects the new state
