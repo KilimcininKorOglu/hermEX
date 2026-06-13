@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"testing"
 
 	"hermex/internal/mapi"
@@ -149,6 +150,76 @@ func TestBulkExport(t *testing.T) {
 		rc.Close()
 		if len(content) == 0 {
 			t.Errorf("zip entry %s is empty", f.Name)
+		}
+	}
+}
+
+// TestSingleEMLDownload checks that /eml streams one message as an RFC822
+// attachment named after its subject.
+func TestSingleEMLDownload(t *testing.T) {
+	path := emptyMailbox(t)
+	uid := seedMsg(t, path, int64(mapi.PrivateFIDInbox), "Hello World", "", "the body text", 100, 0)
+	ts := newTestServer(t, path)
+	cl := authedClient(t, ts)
+
+	resp, err := cl.Get(ts.URL + "/eml?folder=INBOX&uid=" + itoa(uid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("eml status = %d", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "message/rfc822" {
+		t.Errorf("Content-Type = %q, want message/rfc822", ct)
+	}
+	if cd := resp.Header.Get("Content-Disposition"); !strings.Contains(cd, `Hello World.eml`) {
+		t.Errorf("Content-Disposition = %q, want a Hello World.eml attachment", cd)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(raw), "Subject: Hello World") || !strings.Contains(string(raw), "the body text") {
+		t.Error("downloaded .eml is missing the message content")
+	}
+}
+
+// TestSingleEMLDownloadUnicode checks that a Turkish subject is delivered as an
+// RFC 6266 filename*: the header stays pure ASCII (no raw UTF-8 leaks, which
+// Safari would garble) while the dotless-i is percent-encoded as UTF-8.
+func TestSingleEMLDownloadUnicode(t *testing.T) {
+	path := emptyMailbox(t)
+	uid := seedMsg(t, path, int64(mapi.PrivateFIDInbox), "Toplantı notları", "", "govde", 100, 0)
+	ts := newTestServer(t, path)
+	cl := authedClient(t, ts)
+
+	resp, err := cl.Get(ts.URL + "/eml?folder=INBOX&uid=" + itoa(uid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	cd := resp.Header.Get("Content-Disposition")
+	for i := 0; i < len(cd); i++ {
+		if cd[i] > 0x7f {
+			t.Fatalf("Content-Disposition leaked a non-ASCII byte: %q", cd)
+		}
+	}
+	if !strings.Contains(cd, "filename*=UTF-8''") || !strings.Contains(cd, "%C4%B1") {
+		t.Errorf("Content-Disposition missing RFC 5987 UTF-8 encoding of the Turkish subject: %q", cd)
+	}
+}
+
+// TestSafeEMLName checks subject-to-filename sanitization.
+func TestSafeEMLName(t *testing.T) {
+	cases := map[string]string{
+		"Quarterly sync":   "Quarterly sync.eml",
+		"a/b:c*?":          "a_b_c__.eml",
+		"":                 "message.eml",
+		"   ":              "message.eml",
+		"Re: \"plan\" <x>": "Re_ _plan_ _x_.eml",   // ':' and '"' are sanitized for FS + header safety
+		"Toplantı notları": "Toplantı notları.eml", // Unicode is preserved in the display name
+	}
+	for in, want := range cases {
+		if got := safeEMLName(in); got != want {
+			t.Errorf("safeEMLName(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
