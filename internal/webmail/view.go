@@ -20,6 +20,8 @@ type folderView struct {
 	Name   string // leaf display name
 	Path   string // full hierarchical path, e.g. "Archive/2026"
 	IsUser bool   // user-created (id >= unassigned-start): rename/delete allowed
+	Total  int    // messages in the folder (sidebar badge; populated by the mail handler)
+	Unread int    // unread messages in the folder (sidebar badge)
 }
 
 // messageView is one row in the message list.
@@ -49,6 +51,18 @@ type mailPage struct {
 	Query    string
 	Field    string
 	Scope    string
+	// Message-list state (#31). Sort/Dir/Filter are carried on every list link so
+	// pagination, sorting, and filtering compose; Page..NextPage drive the pager;
+	// Total/Unread are the current folder's counts shown in the toolbar.
+	Sort     string
+	Dir      string
+	Filter   string
+	Page     int
+	MaxPage  int
+	PrevPage int
+	NextPage int
+	Total    int
+	Unread   int
 }
 
 // buildFolderViews computes each folder's hierarchical path from the parent

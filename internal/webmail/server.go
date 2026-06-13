@@ -122,16 +122,42 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 	if current == "" {
 		current = inboxName
 	}
+
+	// Sidebar badges: each folder's total and unread message counts.
+	folderViews := buildFolderViews(folders)
+	for i := range folderViews {
+		if total, unread, err := st.CountMessages(folderViews[i].ID); err == nil {
+			folderViews[i].Total = total
+			folderViews[i].Unread = unread
+		}
+	}
+
+	q := r.URL.Query()
+	params := listParams{
+		Sort:   "date", // 31B exposes the other sort fields and the direction
+		Dir:    "desc",
+		Filter: "all", // 31C exposes the unread-only filter
+		Page:   atoiDefault(q.Get("page"), 1),
+	}
 	page := mailPage{
 		User:    sess.user,
 		Current: current,
-		Folders: buildFolderViews(folders),
+		Folders: folderViews,
 		Field:   "all",    // search-form defaults (scoped to the current folder)
 		Scope:   "folder", // until the user opens a cross-folder search
+		Sort:    params.Sort,
+		Dir:     params.Dir,
+		Filter:  params.Filter,
 	}
 	if id, found := resolveFolder(folders, current); found {
-		if msgs, err := buildMessageViews(st, id, current); err == nil {
-			page.Messages = msgs
+		if res, err := listFolderPage(st, id, current, params); err == nil {
+			page.Messages = res.Messages
+			page.Page = res.Page
+			page.MaxPage = res.MaxPage
+			page.PrevPage = res.PrevPage
+			page.NextPage = res.NextPage
+			page.Total = res.Total
+			page.Unread = res.Unread
 		}
 	}
 	s.render(w, "mail", page)

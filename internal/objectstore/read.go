@@ -65,6 +65,18 @@ func (s *Store) ListMessages(folderID int64) ([]MessageInfo, error) {
 	return out, rows.Err()
 }
 
+// CountMessages returns a folder's total message count and unread count, read
+// directly from the IMAP index. The WHERE clause mirrors ListMessages exactly
+// (folder id only, no flag filter), so a folder's reported counts always agree
+// with the rows the listing enumerates. unread counts messages whose read flag
+// is clear.
+func (s *Store) CountMessages(folderID int64) (total, unread int, err error) {
+	err = s.idxdb.QueryRow(
+		`SELECT COUNT(*), COALESCE(SUM(CASE WHEN read=0 THEN 1 ELSE 0 END), 0) FROM messages WHERE folder_id=?`,
+		folderID).Scan(&total, &unread)
+	return total, unread, err
+}
+
 // MessageByUID returns one message's metadata by folder and IMAP UID, reporting
 // ErrNotFound when it does not exist.
 func (s *Store) MessageByUID(folderID int64, uid uint32) (MessageInfo, error) {

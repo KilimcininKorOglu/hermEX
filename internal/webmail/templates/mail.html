@@ -5,7 +5,7 @@
     <nav>
       {{range .Folders}}
       <div class="folder-item{{if eq .Path $.Current}} active{{end}}">
-        <a href="/mail?folder={{.Path}}">{{.Name}}</a>
+        <a href="/mail?folder={{.Path}}">{{.Name}}{{if .Total}}<span class="fcount{{if .Unread}} has-unread{{end}}">{{if .Unread}}{{.Unread}}/{{end}}{{.Total}}</span>{{end}}</a>
         {{if .IsUser}}
         <form method="post" action="/folder" class="folder-rename">
           <input type="hidden" name="op" value="rename">
@@ -31,7 +31,7 @@
   </aside>
   <main class="main">
     <div class="toolbar">
-      <h2>{{.Current}}</h2>
+      <h2>{{.Current}} <span class="counts">{{.Total}} total, {{.Unread}} unread</span></h2>
       <a href="/compose" class="compose-btn">Compose</a>
       <a href="/import" class="import-btn">Import</a>
       {{template "searchform" .}}
@@ -48,6 +48,13 @@
 </table>
 {{else}}
 <div class="empty">No messages in this folder.</div>
+{{end}}
+{{if gt .MaxPage 1}}
+<nav class="pager">
+  {{if .PrevPage}}<a href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter={{.Filter}}&page={{.PrevPage}}">Previous</a>{{else}}<span class="disabled">Previous</span>{{end}}
+  <span class="pageinfo">Page {{.Page}} of {{.MaxPage}}</span>
+  {{if .NextPage}}<a href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter={{.Filter}}&page={{.NextPage}}">Next</a>{{else}}<span class="disabled">Next</span>{{end}}
+</nav>
 {{end}}
 {{end}}
 
