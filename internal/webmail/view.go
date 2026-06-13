@@ -3,6 +3,7 @@ package webmail
 import (
 	"strings"
 
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
 
@@ -15,6 +16,7 @@ const (
 
 // folderView is one folder in the sidebar.
 type folderView struct {
+	ID   int64  // fixed folder id, used as the move/copy/CRUD target value
 	Name string // leaf display name
 	Path string // full hierarchical path, e.g. "Archive/2026"
 }
@@ -31,6 +33,8 @@ type messageView struct {
 	Deleted   bool
 	Draft     bool // unsent draft: the row opens the compose editor, not the reader
 	Scheduled bool // a deferred send awaiting release: the row offers a cancel action
+	InTrash   bool // in Deleted Items: the row offers Restore instead of Junk
+	InJunk    bool // in Junk Email: the row offers Restore instead of Junk
 }
 
 // mailPage is the data the mail template renders. Query/Field/Scope back the
@@ -69,9 +73,21 @@ func buildFolderViews(folders []objectstore.FolderInfo) []folderView {
 	}
 	views := make([]folderView, 0, len(folders))
 	for _, f := range folders {
-		views = append(views, folderView{Name: f.DisplayName, Path: pathOf(f)})
+		views = append(views, folderView{ID: f.ID, Name: f.DisplayName, Path: pathOf(f)})
 	}
 	return views
+}
+
+// moveTargets returns the folders a message may be moved or copied into: mail
+// folders (per isMailFolder) other than the one it is currently in.
+func moveTargets(folders []objectstore.FolderInfo, currentID int64) []folderView {
+	var out []folderView
+	for _, v := range buildFolderViews(folders) {
+		if v.ID != currentID && isMailFolder(v.ID) {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // resolveFolder finds a folder id by its hierarchical path (INBOX is
@@ -95,7 +111,7 @@ func buildMessageViews(st *objectstore.Store, folderID int64, folder string) ([]
 	}
 	views := make([]messageView, 0, len(msgs))
 	for i := len(msgs) - 1; i >= 0; i-- { // newest first
-		views = append(views, messageViewFrom(folder, msgs[i]))
+		views = append(views, messageViewFrom(folderID, folder, msgs[i]))
 	}
 	return views, nil
 }
@@ -104,7 +120,9 @@ func buildMessageViews(st *objectstore.Store, folderID int64, folder string) ([]
 // envelope projections, so listing a folder needs no per-message wire-form read.
 // The date shown is the message's received (internal) date, as the index carries
 // it; the sender is the originator's display name from the formatted projection.
-func messageViewFrom(folder string, m objectstore.MessageInfo) messageView {
+// folderID is the containing folder's fixed id, used to decide the Trash/Junk
+// row actions from the id (not the mutable display path).
+func messageViewFrom(folderID int64, folder string, m objectstore.MessageInfo) messageView {
 	subject := m.Subject
 	if subject == "" {
 		subject = "(no subject)"
@@ -126,7 +144,22 @@ func messageViewFrom(folder string, m objectstore.MessageInfo) messageView {
 		// The Outbox holds only deferred sends in this server, so an Outbox row is
 		// a scheduled message the user can cancel.
 		Scheduled: folder == outboxName,
+		InTrash:   folderID == int64(mapi.PrivateFIDDeletedItems),
+		InJunk:    folderID == int64(mapi.PrivateFIDJunk),
 	}
+}
+
+// isMailFolder reports whether a folder is a valid message move/copy/junk/restore
+// target: a user-created folder (id >= the unassigned-start id) or one of the
+// well-known mail folders. Non-mail built-ins (calendar, contacts, tasks, notes,
+// journal) and the special Drafts/Outbox are excluded.
+func isMailFolder(id int64) bool {
+	switch id {
+	case int64(mapi.PrivateFIDInbox), int64(mapi.PrivateFIDSentItems),
+		int64(mapi.PrivateFIDDeletedItems), int64(mapi.PrivateFIDJunk):
+		return true
+	}
+	return id >= int64(mapi.PrivateFIDUnassignedStart)
 }
 
 // senderDisplay reduces a formatted originator ("Name <addr>") to its display

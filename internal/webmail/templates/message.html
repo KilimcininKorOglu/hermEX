@@ -7,6 +7,17 @@
     <a href="/compose?action=forward&folder={{.Folder}}&uid={{.UID}}">Forward</a>
     <a href="/compose?action=forwardasattach&folder={{.Folder}}&uid={{.UID}}">Forward as attachment</a>
     <a href="/compose?action=editasnew&folder={{.Folder}}&uid={{.UID}}">Edit as New</a>
+    {{if .Folders}}
+    <form class="moveform" hx-post="/action" hx-swap="none">
+      <input type="hidden" name="folder" value="{{.Folder}}">
+      <input type="hidden" name="uid" value="{{.UID}}">
+      <select name="dst" aria-label="Target folder">
+        {{range .Folders}}<option value="{{.ID}}">{{.Path}}</option>{{end}}
+      </select>
+      <button type="submit" name="op" value="move">Move</button>
+      <button type="submit" name="op" value="copy">Copy</button>
+    </form>
+    {{end}}
   </div>
   <div class="reader-headers">
     <h2>{{.Subject}}</h2>
