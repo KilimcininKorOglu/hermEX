@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
+	mysqldriver "github.com/go-sql-driver/mysql"
 )
 
 // openTestDB connects to the MariaDB given by HERMEX_TEST_MYSQL_DSN, skipping
@@ -18,21 +18,45 @@ func openTestDB(t *testing.T) *sql.DB {
 	if dsn == "" {
 		t.Skip("HERMEX_TEST_MYSQL_DSN not set; skipping MariaDB directory test")
 	}
-	db, err := sql.Open("mysql", dsn)
+	// The DSN names a dedicated test database on the shared dev MariaDB, kept
+	// separate from the runtime 'email' database so the suite never touches live
+	// accounts. Create it on demand: connect with the schema name cleared, issue
+	// CREATE DATABASE IF NOT EXISTS, then open the real DSN.
+	cfg, err := mysqldriver.ParseDSN(dsn)
+	if err != nil {
+		t.Fatalf("parse HERMEX_TEST_MYSQL_DSN: %v", err)
+	}
+	dbName := cfg.DBName
+	cfg.DBName = ""
+	admin, err := sql.Open("mysql", cfg.FormatDSN())
 	if err != nil {
 		t.Fatal(err)
 	}
 	// MariaDB may still be starting; ping with a bounded retry.
 	var pingErr error
 	for range 30 {
-		if pingErr = db.Ping(); pingErr == nil {
+		if pingErr = admin.Ping(); pingErr == nil {
 			break
 		}
 		time.Sleep(time.Second)
 	}
 	if pingErr != nil {
-		db.Close()
+		admin.Close()
 		t.Fatalf("ping: %v", pingErr)
+	}
+	if _, err := admin.Exec("CREATE DATABASE IF NOT EXISTS `" + dbName + "`"); err != nil {
+		admin.Close()
+		t.Fatalf("create test database %q: %v", dbName, err)
+	}
+	admin.Close()
+
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Ping(); err != nil {
+		db.Close()
+		t.Fatalf("ping %q: %v", dbName, err)
 	}
 	t.Cleanup(func() { db.Close() })
 	return db
