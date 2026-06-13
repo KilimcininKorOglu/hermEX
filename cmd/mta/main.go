@@ -7,13 +7,16 @@ import (
 	"flag"
 	"log"
 	"net"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 
 	"hermex/internal/config"
 	"hermex/internal/directory"
 	"hermex/internal/mta"
+	"hermex/internal/objectstore"
 	"hermex/internal/smtp"
+	"hermex/internal/spooler"
 )
 
 func main() {
@@ -42,7 +45,58 @@ func main() {
 	if err != nil {
 		log.Fatalf("hermex-mta: listen %s: %v", addr, err)
 	}
+	// Release scheduled (send-later) messages from every mailbox's Outbox. This
+	// runs in the always-on MTA so it survives webmail restarts.
+	deliver := func(recipients []string, raw []byte, when time.Time) ([]string, error) {
+		return mta.Deliver(dir, recipients, raw, when)
+	}
+	go runSendLater(dir, deliver, sendLaterInterval)
+
 	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir}, Hostname: cfg.Hostname}
 	log.Printf("hermex-mta listening on %s", addr)
 	log.Fatalf("hermex-mta: %v", srv.Serve(ln))
+}
+
+// sendLaterInterval is how often the worker scans every mailbox's Outbox for due
+// scheduled sends. A scheduled message is released at most one interval late, so
+// this bounds the send-time precision.
+const sendLaterInterval = 30 * time.Second
+
+// runSendLater periodically sweeps every mailbox's Outbox, releasing scheduled
+// sends whose time has come. Exactly one process must run this loop: a second
+// concurrent sweeper could re-deliver a message in the window between its
+// delivery and its removal from the Outbox, so it lives in the single always-on
+// MTA daemon, not in the (possibly multi-instance, restartable) webmail.
+func runSendLater(dir directory.MailboxLister, deliver spooler.DeliverFunc, interval time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for range t.C {
+		sweepOutboxes(dir, deliver)
+	}
+}
+
+// sweepOutboxes runs one pass: it opens each known mailbox and releases its due
+// scheduled sends. Per-mailbox failures are logged and skipped so one bad
+// mailbox cannot stall the rest.
+func sweepOutboxes(dir directory.MailboxLister, deliver spooler.DeliverFunc) {
+	maildirs, err := dir.Maildirs()
+	if err != nil {
+		log.Printf("hermex-mta send-later: list mailboxes: %v", err)
+		return
+	}
+	for _, path := range maildirs {
+		st, err := objectstore.Open(path)
+		if err != nil {
+			log.Printf("hermex-mta send-later: open %s: %v", path, err)
+			continue
+		}
+		released, err := spooler.ProcessDueOutbox(st, deliver, time.Now())
+		st.Close()
+		if err != nil {
+			log.Printf("hermex-mta send-later: %s: %v", path, err)
+		}
+		if released > 0 {
+			log.Printf("hermex-mta send-later: released %d scheduled message(s) from %s", released, path)
+		}
+	}
 }
