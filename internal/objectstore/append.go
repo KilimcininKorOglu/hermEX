@@ -18,6 +18,11 @@ type MessageInfo struct {
 	InternalDate time.Time
 	Size         int64
 	Flags        int64
+	// Subject and Sender are the index's denormalized envelope projections,
+	// carried so a folder listing needs no per-message wire-form read. Sender is
+	// the formatted originator ("Name <addr>"); see projectSubject/projectSender.
+	Subject string
+	Sender  string
 }
 
 // AppendMessage stores a raw RFC822 message in a folder as a MAPI object: it
@@ -64,6 +69,8 @@ func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time
 		InternalDate: internalDate.UTC(),
 		Size:         int64(len(eml)),
 		Flags:        flags,
+		Subject:      projectSubject(msg.Props),
+		Sender:       projectSender(msg.Props),
 	}, nil
 }
 

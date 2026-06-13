@@ -3,7 +3,6 @@ package webmail
 import (
 	"strings"
 
-	"hermex/internal/mime"
 	"hermex/internal/objectstore"
 )
 
@@ -89,46 +88,41 @@ func buildMessageViews(st *objectstore.Store, folderID int64, folder string) ([]
 	}
 	views := make([]messageView, 0, len(msgs))
 	for i := len(msgs) - 1; i >= 0; i-- { // newest first
-		views = append(views, messageViewFrom(st, folderID, folder, msgs[i]))
+		views = append(views, messageViewFrom(folder, msgs[i]))
 	}
 	return views, nil
 }
 
-// messageViewFrom builds a single list-row view, enriching the stored metadata
-// with the message's envelope (sender, subject, date).
-func messageViewFrom(st *objectstore.Store, folderID int64, folder string, m objectstore.MessageInfo) messageView {
-	v := messageView{
+// messageViewFrom builds a single list-row view from the index's denormalized
+// envelope projections, so listing a folder needs no per-message wire-form read.
+// The date shown is the message's received (internal) date, as the index carries
+// it; the sender is the originator's display name from the formatted projection.
+func messageViewFrom(folder string, m objectstore.MessageInfo) messageView {
+	subject := m.Subject
+	if subject == "" {
+		subject = "(no subject)"
+	}
+	from := senderDisplay(m.Sender)
+	if from == "" {
+		from = "(unknown sender)"
+	}
+	return messageView{
 		UID:     m.UID,
 		Folder:  folder,
+		From:    from,
+		Subject: subject,
 		Date:    m.InternalDate.Format("2006-01-02 15:04"),
 		Seen:    m.Flags&objectstore.FlagSeen != 0,
 		Flagged: m.Flags&objectstore.FlagFlagged != 0,
 		Deleted: m.Flags&objectstore.FlagDeleted != 0,
-		From:    "(unknown sender)",
-		Subject: "(no subject)",
 	}
-	if raw, err := st.GetMessageRaw(folderID, m.UID); err == nil {
-		if env, err := mime.ParseEnvelope(raw); err == nil {
-			v.From = formatSender(env.From)
-			if env.Subject != "" {
-				v.Subject = env.Subject
-			}
-			if !env.Date.IsZero() {
-				v.Date = env.Date.Format("2006-01-02 15:04")
-			}
-		}
-	}
-	return v
 }
 
-// formatSender renders the first address of a From list for display.
-func formatSender(addrs []mime.Address) string {
-	if len(addrs) == 0 {
-		return "(unknown sender)"
+// senderDisplay reduces a formatted originator ("Name <addr>") to its display
+// name for the list, falling back to the bare address when there is no name.
+func senderDisplay(sender string) string {
+	if i := strings.Index(sender, " <"); i >= 0 {
+		return sender[:i]
 	}
-	a := addrs[0]
-	if a.Name != "" {
-		return a.Name
-	}
-	return a.Mailbox + "@" + a.Host
+	return sender
 }

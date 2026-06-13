@@ -72,7 +72,7 @@ func (s *Server) toggleFlag(w http.ResponseWriter, st *objectstore.Store, folder
 		http.Error(w, "message gone", http.StatusInternalServerError)
 		return
 	}
-	s.render(w, "messagerow", messageViewFrom(st, folderID, folder, m))
+	s.render(w, "messagerow", messageViewFrom(folder, m))
 }
 
 // deleteMessage moves a message to the Deleted Items folder, or removes it
