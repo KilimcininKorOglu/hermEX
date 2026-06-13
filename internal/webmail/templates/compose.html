@@ -1,11 +1,12 @@
 {{define "compose"}}{{template "head" .}}
+{{template "editor-assets" .}}
 <div class="reader">
   <div class="reader-toolbar"><a href="/mail?folder=INBOX">&larr; Back to mailbox</a></div>
   <div class="compose-card">
     <h2>{{if .Title}}{{.Title}}{{else}}New message{{end}}</h2>
     {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
     {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
-    <form method="post" action="/compose">
+    <form method="post" action="/compose" id="composeform">
       <input type="hidden" name="inreplyto" value="{{.InReplyTo}}">
       <input type="hidden" name="references" value="{{.References}}">
       <input type="hidden" name="attachfolder" value="{{.AttachFolder}}">
@@ -50,10 +51,78 @@
       </div>
       <div class="field">
         <label>Message</label>
-        <textarea name="body" rows="14">{{.Body}}</textarea>
+        <div class="compose-format">
+          <label class="check"><input type="radio" name="formatchoice" value="plain"> Plain text</label>
+          <label class="check"><input type="radio" name="formatchoice" value="html"> HTML</label>
+        </div>
+        <textarea name="body" id="plainbody" rows="14">{{.Body}}</textarea>
+        <div id="htmleditor" style="display:none"><div id="editor"></div></div>
+        <input type="hidden" name="format" id="formatfield" value="{{.Format}}">
+        <textarea name="bodyhtml" id="bodyhtmlfield" style="display:none">{{.BodyHTML}}</textarea>
       </div>
       <button class="primary" type="submit">Send</button>
     </form>
   </div>
 </div>
+<script>
+(function () {
+  if (typeof Quill === "undefined") { return; } // no editor: the plain textarea posts as-is
+  var form = document.getElementById("composeform");
+  var plain = document.getElementById("plainbody");
+  var box = document.getElementById("htmleditor");
+  var fmt = document.getElementById("formatfield");
+  var htmlField = document.getElementById("bodyhtmlfield");
+  if (!form || !plain || !box || !fmt || !htmlField) { return; }
+
+  var quill = new Quill("#editor", {
+    theme: "snow",
+    modules: { toolbar: [
+      [{ header: [1, 2, 3, false] }],
+      ["bold", "italic", "underline", "strike"],
+      [{ color: [] }, { background: [] }],
+      [{ list: "ordered" }, { list: "bullet" }],
+      ["blockquote", "link"],
+      ["clean"]
+    ] }
+  });
+
+  function radios() { return form.querySelectorAll("input[name=formatchoice]"); }
+  function setMode(html) {
+    box.style.display = html ? "" : "none";
+    plain.style.display = html ? "none" : "";
+    fmt.value = html ? "html" : "plain";
+    radios().forEach(function (r) { r.checked = (r.value === (html ? "html" : "plain")); });
+  }
+
+  // Seed the editor from any carried HTML: the user's own draft on an error
+  // re-render, or a signature. This is user-trusted content (reply/forward
+  // quoting is inserted as escaped plain text, never raw original markup).
+  if (htmlField.value.trim()) { quill.clipboard.dangerouslyPasteHTML(htmlField.value); }
+
+  var startHTML = fmt.value === "html";
+  if (startHTML && !htmlField.value.trim() && plain.value.trim()) { quill.setText(plain.value); }
+  setMode(startHTML);
+
+  radios().forEach(function (r) {
+    r.addEventListener("change", function () {
+      if (r.value === "html") {
+        if (!quill.getText().trim() && plain.value.trim()) { quill.setText(plain.value); }
+        setMode(true);
+      } else {
+        plain.value = quill.getText().replace(/\n+$/, "");
+        setMode(false);
+      }
+    });
+  });
+
+  form.addEventListener("submit", function () {
+    if (fmt.value === "html") {
+      htmlField.value = quill.getSemanticHTML();
+      plain.value = quill.getText().replace(/\n+$/, ""); // text/plain alternative
+    } else {
+      htmlField.value = "";
+    }
+  });
+})();
+</script>
 {{template "foot" .}}{{end}}

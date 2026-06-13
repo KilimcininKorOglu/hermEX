@@ -11,3 +11,8 @@
 
 {{define "foot"}}</body>
 </html>{{end}}
+
+{{/* editor-assets loads the self-hosted rich-text editor. Included only by the
+compose and settings pages, never emitted globally. */}}
+{{define "editor-assets"}}<link rel="stylesheet" href="/static/quill.snow.css">
+<script src="/static/quill.js"></script>{{end}}

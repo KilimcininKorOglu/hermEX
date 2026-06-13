@@ -169,3 +169,9 @@ table.messages tr.flagged td:first-child { box-shadow: inset 3px 0 0 #e0a800; }
   font-size: 14px;
 }
 .notice { color: #1f6f43; background: #e7f6ec; padding: 8px 12px; border-radius: 6px; margin: 0 0 14px; }
+
+/* Rich-text compose: format toggle + editor container. */
+.compose-format { display: flex; gap: 16px; margin-bottom: 8px; }
+#htmleditor .ql-container { border-radius: 0 0 6px 6px; }
+#htmleditor .ql-toolbar { border-radius: 6px 6px 0 0; }
+#htmleditor .ql-editor { min-height: 220px; background: #fff; font-size: 14px; }
