@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"hermex/internal/mapi"
 	"hermex/internal/mime"
 )
 
@@ -85,5 +86,55 @@ func TestInlineImageDraftKeepsDataURI(t *testing.T) {
 	}
 	if strings.Contains(raw, "cid:") {
 		t.Errorf("saved draft must not rewrite inline images to cid: (that is send-time only):\n%s", raw)
+	}
+}
+
+// TestReaderInlinesCIDImage checks the reader-side display: a received message
+// whose HTML references an image by cid: is rendered with that image inlined as a
+// data: URI (so it shows in the fully-sandboxed iframe with no credentialed
+// subresource), the cid: reference is gone, and the inline image does not also
+// appear in the downloadable attachment list.
+func TestReaderInlinesCIDImage(t *testing.T) {
+	path := emptyMailbox(t)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	// Send an inline image to self; the compose path produces the cid: + related
+	// form, and local delivery files a copy in the reader's INBOX.
+	body := `<p>look <img src="data:image/png;base64,` + onePxPNG + `"></p>`
+	postForm(t, c, ts.URL+"/compose", url.Values{
+		"action": {"send"}, "format": {"html"},
+		"to": {"alice@hermex.test"}, "subject": {"inline to read"},
+		"body": {"look"}, "bodyhtml": {body},
+	})
+
+	inbox := folderMsgs(t, path, int64(mapi.PrivateFIDInbox))
+	if len(inbox) != 1 {
+		t.Fatalf("self-delivery put %d messages in INBOX, want 1", len(inbox))
+	}
+
+	// Assert on the reader detail directly: the served page HTML-escapes the body
+	// into the srcdoc attribute (the browser reverses that on parse), so the raw
+	// rewritten body is the faithful place to check the inlined bytes.
+	raw := msgRaw(t, path, int64(mapi.PrivateFIDInbox), inbox[0].UID)
+	d := buildMessageDetail([]byte(raw), "INBOX", inbox[0].UID)
+	if !strings.Contains(d.Body, "data:image/png;base64,"+onePxPNG) {
+		t.Errorf("reader did not inline the cid image as the original data: URI:\n%s", d.Body)
+	}
+	if strings.Contains(d.Body, "cid:") {
+		t.Errorf("reader left an unresolved cid: reference in the body:\n%s", d.Body)
+	}
+	if len(d.Attachments) != 0 {
+		t.Errorf("an inline image must not also be a downloadable attachment, got %d", len(d.Attachments))
+	}
+
+	// The served page carries the inlined image and keeps the iframe fully
+	// sandboxed (no allow-same-origin: received HTML gets no credentialed request).
+	_, page := get(t, c, ts.URL+"/message?folder=INBOX&uid="+itoa(inbox[0].UID))
+	if !strings.Contains(page, "data:image/png;base64,") {
+		t.Errorf("served reader page did not carry the inlined image")
+	}
+	if !strings.Contains(page, `sandbox=""`) {
+		t.Errorf("reader iframe must stay fully sandboxed (sandbox=\"\")")
 	}
 }
