@@ -104,6 +104,8 @@ table.messages td {
   border-bottom: 1px solid var(--border);
   vertical-align: top;
 }
+table.messages.density-compact td { padding: 5px 14px; }
+table.messages.density-extended td { padding: 14px; }
 table.messages tr.unread { background: var(--unread); }
 table.messages tr.unread td.subject { font-weight: 600; }
 td.from { width: 220px; color: var(--text); }

@@ -12,6 +12,21 @@
         <label class="check"><input type="radio" name="composeformat" value="plain"{{if eq .ComposeFormat "plain"}} checked{{end}}> Plain text</label>
       </div>
       <div class="field">
+        <label>Message list density</label>
+        <label class="check"><input type="radio" name="density" value="compact"{{if eq .Density "compact"}} checked{{end}}> Compact</label>
+        <label class="check"><input type="radio" name="density" value="extended"{{if eq .Density "extended"}} checked{{end}}> Comfortable</label>
+      </div>
+      <div class="field">
+        {{$cur := printf "%s %s" .DefaultSort .DefaultDir}}
+        <label>Default sort order</label>
+        <select name="defaultsort">
+          <option value="date desc"{{if eq $cur "date desc"}} selected{{end}}>Date (newest first)</option>
+          <option value="date asc"{{if eq $cur "date asc"}} selected{{end}}>Date (oldest first)</option>
+          <option value="from asc"{{if eq $cur "from asc"}} selected{{end}}>Sender (A&ndash;Z)</option>
+          <option value="subject asc"{{if eq $cur "subject asc"}} selected{{end}}>Subject (A&ndash;Z)</option>
+        </select>
+      </div>
+      <div class="field">
         <label>Signature for new messages</label>
         <select name="defaultnew">
           <option value="">None</option>

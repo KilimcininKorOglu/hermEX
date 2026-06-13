@@ -35,9 +35,14 @@
       <a href="/compose" class="compose-btn">Compose</a>
       <a href="/import" class="import-btn">Import</a>
       {{if eq .Filter "unread"}}
-      <a class="filter-toggle active" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter=all&page=1">Unread only</a>
+      <a class="filter-toggle active" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter=all&density={{.Density}}&page=1">Unread only</a>
       {{else}}
-      <a class="filter-toggle" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter=unread&page=1">Unread only</a>
+      <a class="filter-toggle" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter=unread&density={{.Density}}&page=1">Unread only</a>
+      {{end}}
+      {{if eq .Density "extended"}}
+      <a class="filter-toggle active" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter={{.Filter}}&density=compact&page={{.Page}}">Comfortable</a>
+      {{else}}
+      <a class="filter-toggle" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter={{.Filter}}&density=extended&page={{.Page}}">Comfortable</a>
       {{end}}
       {{template "searchform" .}}
     </div>
@@ -48,9 +53,9 @@
 
 {{define "messagelist"}}
 {{if .Messages}}
-<table class="messages">
+<table class="messages density-{{.Density}}">
   <thead><tr>
-    {{range .Columns}}<th class="sortcol{{if .Active}} active{{end}}"><a href="/mail?folder={{$.Current}}&sort={{.Key}}&dir={{.NextDir}}&filter={{$.Filter}}&page=1">{{.Label}}{{if .Active}} {{.Arrow}}{{end}}</a></th>{{end}}
+    {{range .Columns}}<th class="sortcol{{if .Active}} active{{end}}"><a href="/mail?folder={{$.Current}}&sort={{.Key}}&dir={{.NextDir}}&filter={{$.Filter}}&density={{$.Density}}&page=1">{{.Label}}{{if .Active}} {{.Arrow}}{{end}}</a></th>{{end}}
     <th></th>
   </tr></thead>
   {{range .Messages}}{{template "messagerow" .}}{{end}}
@@ -60,9 +65,9 @@
 {{end}}
 {{if gt .MaxPage 1}}
 <nav class="pager">
-  {{if .PrevPage}}<a href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter={{.Filter}}&page={{.PrevPage}}">Previous</a>{{else}}<span class="disabled">Previous</span>{{end}}
+  {{if .PrevPage}}<a href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter={{.Filter}}&density={{.Density}}&page={{.PrevPage}}">Previous</a>{{else}}<span class="disabled">Previous</span>{{end}}
   <span class="pageinfo">Page {{.Page}} of {{.MaxPage}}</span>
-  {{if .NextPage}}<a href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter={{.Filter}}&page={{.NextPage}}">Next</a>{{else}}<span class="disabled">Next</span>{{end}}
+  {{if .NextPage}}<a href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter={{.Filter}}&density={{.Density}}&page={{.NextPage}}">Next</a>{{else}}<span class="disabled">Next</span>{{end}}
 </nav>
 {{end}}
 {{end}}

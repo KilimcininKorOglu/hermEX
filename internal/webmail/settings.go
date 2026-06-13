@@ -22,6 +22,9 @@ type webmailSettings struct {
 	Signatures            []signature `json:"signatures"`
 	DefaultSignatureNew   string      `json:"defaultSignatureNew"`   // signature id for new messages, or ""
 	DefaultSignatureReply string      `json:"defaultSignatureReply"` // signature id for replies/forwards, or ""
+	Density               string      `json:"density"`               // message-list row density: "compact" | "extended"
+	DefaultSort           string      `json:"defaultSort"`           // default list sort key when no URL param ("" → date)
+	DefaultDir            string      `json:"defaultDir"`            // default list sort direction when no URL param ("" → desc)
 }
 
 // signature is one named signature. HTML holds the signature markup when IsHTML
@@ -49,7 +52,7 @@ func (s webmailSettings) signatureByID(id string) (signature, bool) {
 
 // defaultSettings is what a mailbox uses until it saves its own preferences.
 func defaultSettings() webmailSettings {
-	return webmailSettings{SchemaVersion: settingsSchemaVersion, ComposeFormat: "html"}
+	return webmailSettings{SchemaVersion: settingsSchemaVersion, ComposeFormat: "html", Density: "compact", DefaultSort: "date", DefaultDir: "desc"}
 }
 
 // loadSettings reads and decodes a mailbox's webmail settings, returning the
@@ -68,6 +71,15 @@ func loadSettings(st *objectstore.Store) (webmailSettings, error) {
 	}
 	if s.ComposeFormat == "" {
 		s.ComposeFormat = "html"
+	}
+	if s.Density == "" {
+		s.Density = "compact"
+	}
+	if s.DefaultSort == "" {
+		s.DefaultSort = "date"
+	}
+	if s.DefaultDir == "" {
+		s.DefaultDir = "desc"
 	}
 	return s, nil
 }
@@ -146,6 +158,14 @@ func (s *Server) handleSettingsSubmit(w http.ResponseWriter, r *http.Request) {
 	default: // save preferences
 		if f := r.FormValue("composeformat"); f == "plain" || f == "html" {
 			cfg.ComposeFormat = f
+		}
+		if d := r.FormValue("density"); d == "compact" || d == "extended" {
+			cfg.Density = d
+		}
+		// The default sort order is posted as one "key dir" value (e.g. "date desc").
+		if parts := strings.Fields(r.FormValue("defaultsort")); len(parts) == 2 {
+			cfg.DefaultSort = whitelist(parts[0], "date", "from", "subject", "size", "flag", "read")
+			cfg.DefaultDir = whitelist(parts[1], "desc", "asc")
 		}
 		cfg.DefaultSignatureNew = r.FormValue("defaultnew")
 		cfg.DefaultSignatureReply = r.FormValue("defaultreply")

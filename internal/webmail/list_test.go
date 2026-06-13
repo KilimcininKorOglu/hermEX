@@ -1,6 +1,7 @@
 package webmail
 
 import (
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
@@ -88,6 +89,79 @@ func TestMailSortApplies(t *testing.T) {
 	}
 	if _, b := get(t, c, ts.URL+"/mail?folder=INBOX&sort=date&dir=asc"); firstMsgID(b) != "msg-1" {
 		t.Errorf("date asc should list the oldest (msg-1) first, got %q", firstMsgID(b))
+	}
+}
+
+// TestMailDensity checks the row-density class is driven by the density param.
+func TestMailDensity(t *testing.T) {
+	path := emptyMailbox(t)
+	seedMsg(t, path, int64(mapi.PrivateFIDInbox), "a", "", "b", 100, 0)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	if _, b := get(t, c, ts.URL+"/mail?folder=INBOX"); !strings.Contains(b, "density-compact") {
+		t.Errorf("default density should render the compact class")
+	}
+	if _, b := get(t, c, ts.URL+"/mail?folder=INBOX&density=extended"); !strings.Contains(b, "density-extended") {
+		t.Errorf("density=extended should render the extended class")
+	}
+}
+
+// TestMailSavedDefaults checks saved preferences supply the list defaults when no
+// URL parameter is present, and a URL parameter overrides the saved value.
+func TestMailSavedDefaults(t *testing.T) {
+	path := emptyMailbox(t)
+	seedMsg(t, path, int64(mapi.PrivateFIDInbox), "a", "", "b", 100, 0)
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saveSettings(st, webmailSettings{Density: "extended", DefaultSort: "from", DefaultDir: "asc"}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	// No params → the saved density and sort apply.
+	_, b := get(t, c, ts.URL+"/mail?folder=INBOX")
+	if !strings.Contains(b, "density-extended") {
+		t.Errorf("saved density (extended) should apply when no density param is given")
+	}
+	if !strings.Contains(b, "From ▲") {
+		t.Errorf("saved default sort (from asc) should make From the active ascending column:\n%s", b)
+	}
+	// A URL param overrides the saved default.
+	if _, b := get(t, c, ts.URL+"/mail?folder=INBOX&density=compact"); !strings.Contains(b, "density-compact") {
+		t.Errorf("density=compact param should override the saved extended default")
+	}
+}
+
+// TestSettingsSaveListPrefs checks the settings form persists the density and
+// default sort order.
+func TestSettingsSaveListPrefs(t *testing.T) {
+	path := emptyMailbox(t)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	postForm(t, c, ts.URL+"/settings", url.Values{
+		"action": {"save"}, "composeformat": {"html"},
+		"density": {"extended"}, "defaultsort": {"from asc"},
+	})
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	cfg, err := loadSettings(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Density != "extended" {
+		t.Errorf("density not persisted: %q", cfg.Density)
+	}
+	if cfg.DefaultSort != "from" || cfg.DefaultDir != "asc" {
+		t.Errorf("default sort not persisted: %q %q", cfg.DefaultSort, cfg.DefaultDir)
 	}
 }
 
