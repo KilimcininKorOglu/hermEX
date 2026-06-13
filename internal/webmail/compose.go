@@ -15,6 +15,7 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
+	"hermex/internal/mime"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcmail"
@@ -257,6 +258,15 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		DraftUID:     r.FormValue("draftuid"),
 	}
 	v.Attachments = readUploads(r)
+	// A reopened draft's existing attachments are not re-uploaded by the browser
+	// (and autosave carries no files at all), so re-read them from the stored
+	// draft and merge them in — keyed on DraftUID, before the draft is replaced —
+	// or every re-save/send would silently drop the files.
+	if v.DraftUID != "" && v.DraftFolder != "" {
+		if raw, err := s.loadRaw(sess.mailboxPath, v.DraftFolder, v.DraftUID); err == nil {
+			v.Attachments = append(v.Attachments, draftAttachments(raw)...)
+		}
+	}
 
 	// Saving a draft files the compose in Drafts without sending; no recipients
 	// are required. Autosave posts the same action with Accept: application/json
@@ -553,6 +563,48 @@ func readUploads(r *http.Request) []composeAttachment {
 			Data:        data,
 		})
 	}
+	return out
+}
+
+// draftAttachments extracts the non-body parts of a stored message as compose
+// attachments, so reopening, re-saving, or sending a draft preserves the files
+// and inline images it already carried. The body parts (the first text/plain and
+// text/html) are skipped — they come from the body fields; the classification
+// mirrors selectParts. Inline parts keep their Content-ID so they round-trip as
+// cid: targets.
+func draftAttachments(raw []byte) []composeAttachment {
+	root := mime.ParseStructure(raw)
+	var plainSeen, htmlSeen bool
+	var out []composeAttachment
+	var walk func(p *mime.Part)
+	walk = func(p *mime.Part) {
+		if len(p.Children) > 0 {
+			for _, ch := range p.Children {
+				walk(ch)
+			}
+			return
+		}
+		isText := p.Type == "text" && p.Disposition != "attachment"
+		switch {
+		case isText && p.Subtype == "html" && !htmlSeen:
+			htmlSeen = true
+		case isText && p.Subtype == "plain" && !plainSeen:
+			plainSeen = true
+		default:
+			data, err := p.DecodedContent()
+			if err != nil {
+				return
+			}
+			out = append(out, composeAttachment{
+				Filename:    p.Filename(),
+				ContentType: p.Type + "/" + p.Subtype,
+				Data:        data,
+				ContentID:   strings.Trim(p.ID, "<>"),
+				Inline:      p.Disposition == "inline",
+			})
+		}
+	}
+	walk(root)
 	return out
 }
 
