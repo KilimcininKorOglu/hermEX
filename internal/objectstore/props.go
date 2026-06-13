@@ -95,6 +95,27 @@ func (s *Store) GetAttachmentProperties(attachmentID int64, tags ...mapi.PropTag
 	return s.getObjectProps("attachment_properties", "attachment_id", attachmentID, tags)
 }
 
+// HasAttachments reports whether a message has a real, non-inline attachment: an
+// attachment part that carries no Content-ID. Parts with a Content-ID are inline
+// payloads (typically cid images referenced by the HTML body), which the reader
+// renders in place rather than listing, so they are excluded here to keep the
+// list's paperclip consistent with the reader. An attachment that happens to
+// carry a Content-ID without being referenced is also treated as inline (an
+// accepted approximation that avoids re-parsing the body per row). The query is
+// index-backed by mid_attachments_index and runs once per listed row.
+func (s *Store) HasAttachments(messageID int64) (bool, error) {
+	var has bool
+	err := s.objdb.QueryRow(
+		`SELECT EXISTS(
+		   SELECT 1 FROM attachments a
+		   WHERE a.message_id = ?
+		     AND NOT EXISTS(
+		       SELECT 1 FROM attachment_properties ap
+		       WHERE ap.attachment_id = a.attachment_id AND ap.proptag = ?))`,
+		messageID, int64(uint32(mapi.PrAttachContentID))).Scan(&has)
+	return has, err
+}
+
 // setObjectProps upserts a property bag into an object's _properties table in
 // its own transaction.
 func (s *Store) setObjectProps(table, idCol string, id int64, props mapi.PropertyValues) error {

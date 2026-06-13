@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strconv"
 
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
 
@@ -112,9 +113,31 @@ func listFolderPage(st *objectstore.Store, folderID int64, folder string, p list
 	}
 	res.Messages = make([]messageView, 0, hi-lo)
 	for _, m := range msgs[lo:hi] {
-		res.Messages = append(res.Messages, messageViewFrom(folderID, folder, m))
+		v := messageViewFrom(folderID, folder, m)
+		enrichIcons(st, m.ID, &v)
+		res.Messages = append(res.Messages, v)
 	}
 	return res, nil
+}
+
+// enrichIcons fills the icon-column flags that require reading the message
+// object — the real-attachment paperclip and the importance markers. It is
+// called only for the rows on the visible page, and lives outside
+// messageViewFrom on purpose: the search path also maps views and must not pay
+// for these per-message reads. A read error leaves the flag false (the icon is
+// simply not shown).
+func enrichIcons(st *objectstore.Store, messageID int64, v *messageView) {
+	if has, err := st.HasAttachments(messageID); err == nil {
+		v.HasAttachment = has
+	}
+	if props, err := st.GetMessageProperties(messageID, mapi.PrImportance); err == nil {
+		if val, ok := props.Get(mapi.PrImportance); ok {
+			if n, ok := val.(int32); ok {
+				v.ImportanceHigh = n == int32(mapi.ImportanceHigh)
+				v.ImportanceLow = n == int32(mapi.ImportanceLow)
+			}
+		}
+	}
 }
 
 // columnHeader is one sortable column heading in the message list. The handler

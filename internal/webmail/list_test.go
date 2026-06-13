@@ -92,6 +92,54 @@ func TestMailSortApplies(t *testing.T) {
 	}
 }
 
+// TestMailIconColumns checks the icon column: an unread dot for unseen rows, a
+// flag for flagged rows, a paperclip only for a real (non-inline) attachment, and
+// the high/low importance markers. Title attributes are counted, which pins each
+// icon to exactly the rows that should carry it.
+func TestMailIconColumns(t *testing.T) {
+	path := emptyMailbox(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := func(raw string, flags int64) {
+		if _, err := st.AppendMessage(inbox, []byte(raw), time.Unix(100, 0), flags); err != nil {
+			t.Fatal(err)
+		}
+	}
+	app("From: a@x.test\r\nSubject: plain\r\n\r\nbody", 0)                                                     // unread, no icons but the dot
+	app("From: a@x.test\r\nSubject: flagged\r\n\r\nbody", int64(objectstore.FlagSeen|objectstore.FlagFlagged)) // read + flagged
+	app("From: a@x.test\r\nSubject: att\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary=B\r\n\r\n--B\r\nContent-Type: text/plain\r\n\r\nhi\r\n--B\r\nContent-Type: application/pdf; name=\"r.pdf\"\r\nContent-Disposition: attachment; filename=\"r.pdf\"\r\n\r\nDATA\r\n--B--\r\n", 0)
+	app("From: a@x.test\r\nSubject: inline\r\nMIME-Version: 1.0\r\nContent-Type: multipart/related; boundary=B\r\n\r\n--B\r\nContent-Type: text/html\r\n\r\n<img src=\"cid:x\">\r\n--B\r\nContent-Type: image/png\r\nContent-ID: <x>\r\nContent-Disposition: inline\r\n\r\nPNGDATA\r\n--B--\r\n", 0)
+	app("From: a@x.test\r\nSubject: high\r\nX-Priority: 1\r\n\r\nbody", 0)  // high importance
+	app("From: a@x.test\r\nSubject: low\r\nImportance: low\r\n\r\nbody", 0) // low importance
+	st.Close()
+
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+	_, b := get(t, c, ts.URL+"/mail?folder=INBOX")
+
+	count := func(s string) int { return strings.Count(b, s) }
+	// 5 of the 6 messages are unread (only the flagged one is read).
+	if n := count(`title="Unread"`); n != 5 {
+		t.Errorf("unread dots = %d, want 5", n)
+	}
+	if n := count(`title="Flagged"`); n != 1 {
+		t.Errorf("flag icons = %d, want 1", n)
+	}
+	// Paperclip only on the real attachment, NOT on the inline-cid-only message.
+	if n := count(`title="Has attachment"`); n != 1 {
+		t.Errorf("paperclips = %d, want 1 (inline-only must not paperclip)", n)
+	}
+	if n := count(`title="High importance"`); n != 1 {
+		t.Errorf("high-importance markers = %d, want 1", n)
+	}
+	if n := count(`title="Low importance"`); n != 1 {
+		t.Errorf("low-importance markers = %d, want 1", n)
+	}
+}
+
 // TestMailDensity checks the row-density class is driven by the density param.
 func TestMailDensity(t *testing.T) {
 	path := emptyMailbox(t)

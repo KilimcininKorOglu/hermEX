@@ -55,6 +55,7 @@
 {{if .Messages}}
 <table class="messages density-{{.Density}}">
   <thead><tr>
+    <th class="iconcol"></th>
     {{range .Columns}}<th class="sortcol{{if .Active}} active{{end}}"><a href="/mail?folder={{$.Current}}&sort={{.Key}}&dir={{.NextDir}}&filter={{$.Filter}}&density={{$.Density}}&page=1">{{.Label}}{{if .Active}} {{.Arrow}}{{end}}</a></th>{{end}}
     <th></th>
   </tr></thead>
@@ -74,6 +75,7 @@
 
 {{define "messagerow"}}
 <tr id="msg-{{.UID}}" class="{{if not .Seen}}unread{{end}}{{if .Flagged}} flagged{{end}}">
+  <td class="icons">{{if not .Seen}}<span class="i-unread" title="Unread">&#9679;</span>{{end}}{{if .Flagged}}<span class="i-flag" title="Flagged">&#9873;</span>{{end}}{{if .HasAttachment}}<span class="i-attach" title="Has attachment">&#128206;</span>{{end}}{{if .ImportanceHigh}}<span class="i-high" title="High importance">!</span>{{end}}{{if .ImportanceLow}}<span class="i-low" title="Low importance">&#8595;</span>{{end}}</td>
   <td class="from">{{.From}}</td>
   <td class="subject">{{if .Draft}}<a href="/compose?action=editdraft&folder={{.Folder}}&uid={{.UID}}">{{.Subject}}</a>{{else}}<a href="/message?folder={{.Folder}}&uid={{.UID}}">{{.Subject}}</a>{{end}}</td>
   <td class="date">{{.Date}}</td>
