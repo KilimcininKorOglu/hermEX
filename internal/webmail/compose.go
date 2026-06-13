@@ -3,10 +3,9 @@ package webmail
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"html"
-	stdmime "mime"
 	"net/http"
+	"net/mail"
 	"net/url"
 	"strconv"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcmail"
 )
 
 // sentName and draftsName are the display paths of the Sent and Drafts folders,
@@ -277,7 +277,12 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	// Build the wire message once (no Bcc header — Bcc must not reach To/Cc/Bcc
 	// recipients). The sender's Sent copy carries a Bcc header for the record.
-	deliveryRaw := buildMessage(o)
+	deliveryRaw, err := buildMessage(o)
+	if err != nil {
+		v.Error = "Could not build the message: " + err.Error()
+		s.render(w, "compose", v)
+		return
+	}
 	sentRaw := insertBcc(deliveryRaw, v.Bcc)
 
 	unresolved, err := mta.Deliver(s.accounts, recipients, deliveryRaw, time.Now())
@@ -320,7 +325,12 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 // so it re-opens complete. With asJSON (autosave) it replies with the new draft
 // uid as JSON; otherwise it re-renders the compose page with a confirmation.
 func (s *Server) saveDraft(w http.ResponseWriter, mailboxPath string, v *composeView, asJSON bool) {
-	draftRaw := insertBcc(buildMessage(v.outgoing(s.hostname)), v.Bcc)
+	built, err := buildMessage(v.outgoing(s.hostname))
+	if err != nil {
+		s.draftError(w, v, asJSON, "Could not build the draft: "+err.Error())
+		return
+	}
+	draftRaw := insertBcc(built, v.Bcc)
 
 	st, err := objectstore.Open(mailboxPath)
 	if err != nil {
@@ -399,7 +409,13 @@ func (s *Server) scheduleSend(w http.ResponseWriter, r *http.Request, mailboxPat
 		return
 	}
 
-	raw := insertBcc(buildMessage(v.outgoing(s.hostname)), v.Bcc)
+	built, err := buildMessage(v.outgoing(s.hostname))
+	if err != nil {
+		v.Error = "Could not build the message: " + err.Error()
+		s.render(w, "compose", *v)
+		return
+	}
+	raw := insertBcc(built, v.Bcc)
 	st, err := objectstore.Open(mailboxPath)
 	if err != nil {
 		v.Error = "mailbox unavailable"
@@ -491,21 +507,57 @@ func (s *Server) loadRaw(mailboxPath, folder, uidStr string) ([]byte, error) {
 	return st.GetMessageRaw(folderID, uint32(uid64))
 }
 
-// outgoing is the set of fields buildMessage assembles into an RFC 5322 message.
+// composeAttachment is one attachment to add to a composed message: an uploaded
+// file, or (when ContentID/Inline is set) an inline image referenced by the HTML
+// body via cid:. It maps to a by-value MAPI attachment bag that oxcmail.Export
+// renders into the MIME tree.
+type composeAttachment struct {
+	Filename    string
+	ContentType string
+	Data        []byte
+	ContentID   string // bare token (no <>); set => inline, referenced by the HTML body
+	Inline      bool   // Content-Disposition: inline (a multipart/related member)
+}
+
+// toAttachment builds the oxcmail attachment bag for this attachment. An inline
+// attachment carries the MHTML-reference flag + Content-ID so Export emits it
+// inside multipart/related as a cid: target.
+func (a composeAttachment) toAttachment() oxcmail.Attachment {
+	var p mapi.PropertyValues
+	p.Set(mapi.PrAttachMethod, int32(mapi.AttachByValue))
+	p.Set(mapi.PrAttachDataBin, a.Data)
+	if a.ContentType != "" {
+		p.Set(mapi.PrAttachMimeTag, a.ContentType)
+	}
+	if a.Filename != "" {
+		p.Set(mapi.PrAttachLongFilename, a.Filename)
+	}
+	if a.ContentID != "" {
+		p.Set(mapi.PrAttachContentID, a.ContentID)
+	}
+	if a.Inline || a.ContentID != "" {
+		p.Set(mapi.PrAttachFlags, int32(mapi.AttMhtmlRef))
+	}
+	return oxcmail.Attachment{Props: p}
+}
+
+// outgoing is the set of fields buildMessage turns into an RFC 5322 message (by
+// building a MAPI object and exporting it through oxcmail).
 type outgoing struct {
 	From        string
 	To          string
 	Cc          string
 	Subject     string
 	Body        string // plain-text body, and the text/plain alternative in HTML mode
-	BodyHTML    string // HTML body; with Format=="html" the message is multipart/alternative
+	BodyHTML    string // HTML body; with Format=="html" the message carries a text/html alternative
 	Format      string // "html" => multipart/alternative (text/plain + text/html)
-	Importance  string // "high"/"low" → X-Priority + Importance headers
+	Importance  string // "high"/"low" → Importance header
 	Sensitivity string // "personal"/"private"/"confidential" → Sensitivity header
 	ReadReceipt bool   // → Disposition-Notification-To (RFC 8098)
 	InReplyTo   string
 	References  string
-	Embed       []byte // when set, the message is multipart/mixed with this raw embedded as message/rfc822
+	Embed       []byte              // forward-as-attachment: embedded as a message/rfc822 attachment
+	Attachments []composeAttachment // uploaded files and inline images
 	Hostname    string
 }
 
@@ -522,99 +574,103 @@ func (v composeView) outgoing(hostname string) outgoing {
 	}
 }
 
-// buildMessage assembles an RFC 5322 message from the compose fields. With
-// o.Embed set it produces a multipart/mixed message carrying the embedded
-// original as a message/rfc822 attachment (forward-as-attachment); otherwise a
-// single text/plain body.
-func buildMessage(o outgoing) []byte {
-	// Normalize line endings to CRLF for the wire/store.
-	body := toCRLF(o.Body)
+// buildMessage assembles an RFC 5322 message from the compose fields by building
+// a MAPI message object and exporting it through oxcmail — the same converter
+// that re-synthesizes every stored message — so multipart/alternative, inline
+// images (multipart/related), and attachments (multipart/mixed) are produced by
+// one proven path. Bcc is never put on the object (Export would emit a Bcc
+// header to recipients); the caller splices it onto the stored copy via insertBcc.
+func buildMessage(o outgoing) ([]byte, error) {
+	return oxcmail.Export(composeToMessage(o), oxcmail.Options{})
+}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "From: %s\r\n", o.From)
-	fmt.Fprintf(&b, "To: %s\r\n", o.To)
-	if strings.TrimSpace(o.Cc) != "" {
-		fmt.Fprintf(&b, "Cc: %s\r\n", o.Cc)
+// composeToMessage maps the compose fields onto a MAPI message object: the
+// sent-representing identity, To/Cc recipient bags, the headers Export
+// re-emits (Subject/Date/Message-ID/Importance/Sensitivity/read-receipt/
+// In-Reply-To/References), the plain and optional HTML body, the
+// forward-as-attachment embed (a message/rfc822 attachment), and any uploaded or
+// inline attachments. Message-ID and Date (PrClientSubmitTime) MUST be set here:
+// Export has no fallback, and the delivered wire copy is not re-imported before
+// it is sent.
+func composeToMessage(o outgoing) *oxcmail.Message {
+	var props mapi.PropertyValues
+	props.Set(mapi.PrMessageClass, "IPM.Note")
+	if o.From != "" {
+		props.Set(mapi.PrSentRepresentingSmtpAddress, o.From)
+		props.Set(mapi.PrSentRepresentingEmailAddress, o.From)
+		props.Set(mapi.PrSentRepresentingAddrType, "SMTP")
 	}
-	fmt.Fprintf(&b, "Subject: %s\r\n", stdmime.QEncoding.Encode("utf-8", o.Subject))
-	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().Format(time.RFC1123Z))
-	fmt.Fprintf(&b, "Message-ID: <%s@%s>\r\n", randomToken()[:24], o.Hostname)
+	props.Set(mapi.PrSubject, o.Subject)
+	props.Set(mapi.PrClientSubmitTime, mapi.UnixToNTTime(time.Now()))
+	props.Set(mapi.PrInternetMessageID, "<"+randomToken()[:24]+"@"+o.Hostname+">")
 	if o.InReplyTo != "" {
-		fmt.Fprintf(&b, "In-Reply-To: %s\r\n", o.InReplyTo)
+		props.Set(mapi.PrInReplyToID, o.InReplyTo)
 	}
 	if o.References != "" {
-		fmt.Fprintf(&b, "References: %s\r\n", o.References)
+		props.Set(mapi.PrInternetReferences, o.References)
 	}
 	switch o.Importance {
 	case "high":
-		b.WriteString("X-Priority: 1\r\nImportance: high\r\n")
+		props.Set(mapi.PrImportance, int32(mapi.ImportanceHigh))
 	case "low":
-		b.WriteString("X-Priority: 5\r\nImportance: low\r\n")
+		props.Set(mapi.PrImportance, int32(mapi.ImportanceLow))
 	}
 	switch o.Sensitivity {
 	case "personal":
-		b.WriteString("Sensitivity: Personal\r\n")
+		props.Set(mapi.PrSensitivity, int32(mapi.SensitivityPersonal))
 	case "private":
-		b.WriteString("Sensitivity: Private\r\n")
+		props.Set(mapi.PrSensitivity, int32(mapi.SensitivityPrivate))
 	case "confidential":
-		b.WriteString("Sensitivity: Company-Confidential\r\n")
+		props.Set(mapi.PrSensitivity, int32(mapi.SensitivityConfidential))
 	}
-	if o.ReadReceipt && o.From != "" {
-		fmt.Fprintf(&b, "Disposition-Notification-To: %s\r\n", o.From)
+	if o.ReadReceipt {
+		props.Set(mapi.PrReadReceiptRequested, true)
 	}
-	b.WriteString("MIME-Version: 1.0\r\n")
+	props.Set(mapi.PrBody, toCRLF(o.Body))
+	if o.Format == "html" && strings.TrimSpace(o.BodyHTML) != "" {
+		props.Set(mapi.PrHTML, []byte(toCRLF(o.BodyHTML)))
+	}
+
+	msg := &oxcmail.Message{Props: props}
+	msg.Recipients = append(recipientBags(o.To, mapi.RecipTo), recipientBags(o.Cc, mapi.RecipCc)...)
 
 	if len(o.Embed) > 0 {
-		boundary := randomToken()[:32]
-		fmt.Fprintf(&b, "Content-Type: multipart/mixed; boundary=%q\r\n\r\n", boundary)
-		fmt.Fprintf(&b, "--%s\r\n", boundary)
-		b.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
-		b.WriteString(body)
-		if !strings.HasSuffix(body, "\r\n") {
-			b.WriteString("\r\n")
-		}
-		fmt.Fprintf(&b, "--%s\r\n", boundary)
-		b.WriteString("Content-Type: message/rfc822\r\n")
-		b.WriteString("Content-Disposition: attachment; filename=\"forwarded.eml\"\r\n\r\n")
-		b.Write(o.Embed)
-		if !strings.HasSuffix(string(o.Embed), "\r\n") {
-			b.WriteString("\r\n")
-		}
-		fmt.Fprintf(&b, "--%s--\r\n", boundary)
-		return []byte(b.String())
+		var att mapi.PropertyValues
+		att.Set(mapi.PrAttachMimeTag, "message/rfc822")
+		att.Set(mapi.PrAttachLongFilename, "forwarded.eml")
+		att.Set(mapi.PrAttachMethod, int32(mapi.AttachByValue))
+		att.Set(mapi.PrAttachDataBin, o.Embed)
+		msg.Attachments = append(msg.Attachments, oxcmail.Attachment{Props: att})
 	}
+	for _, a := range o.Attachments {
+		msg.Attachments = append(msg.Attachments, a.toAttachment())
+	}
+	return msg
+}
 
-	// An HTML compose emits multipart/alternative: the text/plain alternative
-	// (the editor's plain rendering) plus the text/html body, so plain-only
-	// clients still get readable text. If the HTML body is missing (no JS), fall
-	// through to the plain branch below.
-	if o.Format == "html" && strings.TrimSpace(o.BodyHTML) != "" {
-		htmlBody := toCRLF(o.BodyHTML)
-		boundary := randomToken()[:32]
-		fmt.Fprintf(&b, "Content-Type: multipart/alternative; boundary=%q\r\n\r\n", boundary)
-		fmt.Fprintf(&b, "--%s\r\n", boundary)
-		b.WriteString("Content-Type: text/plain; charset=utf-8\r\n\r\n")
-		b.WriteString(body)
-		if !strings.HasSuffix(body, "\r\n") {
-			b.WriteString("\r\n")
+// recipientBags parses a comma-separated address field into one recipient
+// property bag per address, of the given recipient type (To/Cc). A malformed
+// field falls back to treating each comma-separated token as a bare address.
+func recipientBags(field string, rcptType int32) []mapi.PropertyValues {
+	addrs, err := mail.ParseAddressList(field)
+	if err != nil {
+		for _, a := range splitAddresses(field) {
+			addrs = append(addrs, &mail.Address{Address: a})
 		}
-		fmt.Fprintf(&b, "--%s\r\n", boundary)
-		b.WriteString("Content-Type: text/html; charset=utf-8\r\n\r\n")
-		b.WriteString(htmlBody)
-		if !strings.HasSuffix(htmlBody, "\r\n") {
-			b.WriteString("\r\n")
+	}
+	var bags []mapi.PropertyValues
+	for _, a := range addrs {
+		var bag mapi.PropertyValues
+		bag.Set(mapi.PrRecipientType, rcptType)
+		bag.Set(mapi.PrAddrType, "SMTP")
+		bag.Set(mapi.PrEmailAddress, a.Address)
+		bag.Set(mapi.PrSmtpAddress, a.Address)
+		if a.Name != "" {
+			bag.Set(mapi.PrDisplayName, a.Name)
 		}
-		fmt.Fprintf(&b, "--%s--\r\n", boundary)
-		return []byte(b.String())
+		bags = append(bags, bag)
 	}
-
-	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
-	b.WriteString("\r\n")
-	b.WriteString(body)
-	if !strings.HasSuffix(b.String(), "\r\n") {
-		b.WriteString("\r\n")
-	}
-	return []byte(b.String())
+	return bags
 }
 
 // toCRLF normalizes a string's line endings to CRLF for the wire/store.
