@@ -82,6 +82,44 @@ func TestReindexFolder(t *testing.T) {
 	}
 }
 
+// TestReindexPreservesExistingUID checks that reindexing leaves an
+// already-indexed message untouched: its UID (and thus UIDVALIDITY) survives,
+// so a reindex never renumbers messages a client has already seen.
+func TestReindexPreservesExistingUID(t *testing.T) {
+	s := openSeededStore(t)
+
+	raw := []byte("From: a@example.test\r\nTo: b@example.test\r\nSubject: kalıcı\r\n" +
+		"Date: Wed, 15 Nov 2023 10:13:20 +0000\r\n\r\ngövde.\r\n")
+	info, err := s.AppendMessage(mapi.PrivateFIDInbox, raw, time.Unix(1700000000, 0), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.UID == 0 {
+		t.Fatalf("delivered message has UID 0")
+	}
+
+	if err := s.ReindexFolder(mapi.PrivateFIDInbox); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := s.ListMessages(mapi.PrivateFIDInbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *MessageInfo
+	for i := range list {
+		if list[i].ID == info.ID {
+			found = &list[i]
+		}
+	}
+	if found == nil {
+		t.Fatal("message vanished from the index after reindex")
+	}
+	if found.UID != info.UID {
+		t.Errorf("UID changed across reindex: was %d, now %d", info.UID, found.UID)
+	}
+}
+
 // idxCount returns how many index rows reference a message id.
 func idxCount(t *testing.T, s *Store, messageID int64) int {
 	t.Helper()
