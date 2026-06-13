@@ -27,6 +27,8 @@ type webmailSettings struct {
 	DefaultDir            string      `json:"defaultDir"`            // default list sort direction when no URL param ("" → desc)
 	Categories            []category  `json:"categories"`            // master colored-category list (assigned to messages as PidNameKeywords)
 	PreviewPane           string      `json:"previewPane"`           // reading-pane location: "none" | "right" | "bottom"
+	IncomingRender        string      `json:"incomingRender"`        // how received mail is displayed: "html" | "plain" (force plain text)
+	RequestReceiptDefault bool        `json:"requestReceiptDefault"` // pre-check "request read receipt" on a fresh compose
 }
 
 // category is one named, colored label in the mailbox's master category list.
@@ -84,7 +86,7 @@ func (s webmailSettings) signatureByID(id string) (signature, bool) {
 // defaultSettings is what a mailbox uses until it saves its own preferences.
 func defaultSettings() webmailSettings {
 	return webmailSettings{
-		SchemaVersion: settingsSchemaVersion, ComposeFormat: "html", Density: "compact", DefaultSort: "date", DefaultDir: "desc", PreviewPane: "none",
+		SchemaVersion: settingsSchemaVersion, ComposeFormat: "html", Density: "compact", DefaultSort: "date", DefaultDir: "desc", PreviewPane: "none", IncomingRender: "html",
 		Categories: []category{
 			{Name: "Red", Color: "#b00020"},
 			{Name: "Orange", Color: "#e67e22"},
@@ -123,6 +125,9 @@ func loadSettings(st *objectstore.Store) (webmailSettings, error) {
 	}
 	if s.PreviewPane == "" {
 		s.PreviewPane = "none"
+	}
+	if s.IncomingRender == "" {
+		s.IncomingRender = "html"
 	}
 	return s, nil
 }
@@ -218,6 +223,12 @@ func (s *Server) handleSettingsSubmit(w http.ResponseWriter, r *http.Request) {
 		if p := r.FormValue("previewpane"); p == "none" || p == "right" || p == "bottom" {
 			cfg.PreviewPane = p
 		}
+		if v := r.FormValue("incomingrender"); v == "html" || v == "plain" {
+			cfg.IncomingRender = v
+		}
+		// A checkbox posts a value only when checked; its absence on a full "save"
+		// submit therefore clears the preference.
+		cfg.RequestReceiptDefault = r.FormValue("requestreceipt") != ""
 		// The default sort order is posted as one "key dir" value (e.g. "date desc").
 		if parts := strings.Fields(r.FormValue("defaultsort")); len(parts) == 2 {
 			cfg.DefaultSort = whitelist(parts[0], "date", "from", "subject", "size", "flag", "read")

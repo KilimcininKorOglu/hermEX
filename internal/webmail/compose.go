@@ -116,7 +116,7 @@ func (s *Server) handleComposeForm(w http.ResponseWriter, r *http.Request) {
 
 	action := r.URL.Query().Get("action")
 	if action == "" {
-		v := composeView{Title: "New message", From: sess.user, FromOptions: idents, Format: settings.ComposeFormat, Folders: folderVus}
+		v := composeView{Title: "New message", From: sess.user, FromOptions: idents, Format: settings.ComposeFormat, Folders: folderVus, ReadReceipt: settings.RequestReceiptDefault}
 		applySignature(&v, settings, action)
 		s.render(w, "compose", v)
 		return
@@ -152,6 +152,12 @@ func (s *Server) handleComposeForm(w http.ResponseWriter, r *http.Request) {
 	// plain-default user would be re-saved as text/plain and lose its markup.
 	if v.Format == "" {
 		v.Format = settings.ComposeFormat
+	}
+	// "Always request a read receipt" pre-checks the box on fresh outgoing mail
+	// (reply/forward/edit-as-new). A reopened draft (editdraft) keeps its own
+	// state instead, mirroring how its format is preserved above.
+	if action != "editdraft" {
+		v.ReadReceipt = settings.RequestReceiptDefault
 	}
 	applySignature(&v, settings, action)
 	s.render(w, "compose", v)

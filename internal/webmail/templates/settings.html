@@ -12,6 +12,15 @@
         <label class="check"><input type="radio" name="composeformat" value="plain"{{if eq .ComposeFormat "plain"}} checked{{end}}> Plain text</label>
       </div>
       <div class="field">
+        <label>Read receipts</label>
+        <label class="check"><input type="checkbox" name="requestreceipt" value="1"{{if .RequestReceiptDefault}} checked{{end}}> Always request a read receipt when sending</label>
+      </div>
+      <div class="field">
+        <label>Incoming mail display</label>
+        <label class="check"><input type="radio" name="incomingrender" value="html"{{if eq .IncomingRender "html"}} checked{{end}}> Show original HTML</label>
+        <label class="check"><input type="radio" name="incomingrender" value="plain"{{if eq .IncomingRender "plain"}} checked{{end}}> Plain text only</label>
+      </div>
+      <div class="field">
         <label>Message list density</label>
         <label class="check"><input type="radio" name="density" value="compact"{{if eq .Density "compact"}} checked{{end}}> Compact</label>
         <label class="check"><input type="radio" name="density" value="extended"{{if eq .Density "extended"}} checked{{end}}> Comfortable</label>
