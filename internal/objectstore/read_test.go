@@ -2,6 +2,7 @@ package objectstore
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,6 +54,18 @@ func TestMessageListAndFlags(t *testing.T) {
 	}
 	if list[0].Size != i1.Size || list[1].Size != i2.Size {
 		t.Errorf("sizes = %d,%d, want %d,%d", list[0].Size, list[1].Size, i1.Size, i2.Size)
+	}
+	// The index surfaces the envelope projections (subject and sender) so a
+	// listing needs no per-message wire-form read.
+	if list[0].Subject != "bir" || list[1].Subject != "iki" {
+		t.Errorf("subjects = %q,%q, want bir,iki", list[0].Subject, list[1].Subject)
+	}
+	if !strings.Contains(list[0].Sender, "a@example.test") {
+		t.Errorf("sender = %q, want it to carry a@example.test", list[0].Sender)
+	}
+	// AppendMessage returns the same projections it indexed.
+	if i1.Subject != "bir" || !strings.Contains(i1.Sender, "a@example.test") {
+		t.Errorf("AppendMessage projections = subject %q, sender %q", i1.Subject, i1.Sender)
 	}
 
 	// Single lookup by UID.

@@ -7,7 +7,7 @@ import (
 )
 
 // messageInfoCols is the index column list a MessageInfo is scanned from.
-const messageInfoCols = `message_id, uid, received, size, read, replied, flagged, deleted, unsent`
+const messageInfoCols = `message_id, uid, received, size, read, replied, flagged, deleted, unsent, subject, sender`
 
 // composeFlags builds the IMAP flag mask from the index's boolean flag columns.
 func composeFlags(read, answered, flagged, deleted, draft int) int64 {
@@ -37,7 +37,7 @@ func scanMessageInfo(sc interface{ Scan(...any) error }) (MessageInfo, error) {
 		uid, received                           int64
 		read, replied, flagged, deleted, unsent int
 	)
-	if err := sc.Scan(&m.ID, &uid, &received, &m.Size, &read, &replied, &flagged, &deleted, &unsent); err != nil {
+	if err := sc.Scan(&m.ID, &uid, &received, &m.Size, &read, &replied, &flagged, &deleted, &unsent, &m.Subject, &m.Sender); err != nil {
 		return MessageInfo{}, err
 	}
 	m.UID = uint32(uid)
