@@ -43,6 +43,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /attachment", s.handleAttachment)
 	mux.HandleFunc("GET /compose", s.handleComposeForm)
 	mux.HandleFunc("POST /compose", s.handleComposeSubmit)
+	mux.HandleFunc("GET /attachpick", s.handleAttachPick)
 	mux.HandleFunc("GET /settings", s.handleSettingsForm)
 	mux.HandleFunc("POST /settings", s.handleSettingsSubmit)
 	mux.HandleFunc("POST /action", s.handleAction)

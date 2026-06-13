@@ -66,6 +66,15 @@
         <label>Attachments</label>
         {{if .Attachments}}<ul class="attach-list">{{range .Attachments}}<li>{{.Filename}}</li>{{end}}</ul>{{end}}
         <input type="file" name="attach" multiple>
+        <div class="attach-item">
+          <label>Attach a saved message from
+            <select name="pickfolder" hx-get="/attachpick" hx-target="#attachpick-list" hx-swap="innerHTML">
+              <option value="">&mdash; choose a folder &mdash;</option>
+              {{range .Folders}}<option value="{{.Path}}">{{.Path}}</option>{{end}}
+            </select>
+          </label>
+          <div id="attachpick-list"></div>
+        </div>
       </div>
       <div class="compose-actions">
         <button class="primary" type="submit" name="action" value="send">Send</button>
@@ -194,3 +203,7 @@
 })();
 </script>
 {{template "foot" .}}{{end}}
+
+{{define "attachpick"}}{{if .}}<ul class="attachpick-list">
+  {{range .}}<li><label class="check"><input type="checkbox" name="attachmsg" value="{{.UID}}:{{.Folder}}"> {{.From}} &mdash; {{.Subject}}</label></li>
+  {{end}}</ul>{{else}}<p class="muted">No messages to attach.</p>{{end}}{{end}}
