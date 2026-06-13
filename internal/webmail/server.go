@@ -136,7 +136,7 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 	params := listParams{
 		Sort:   whitelist(q.Get("sort"), "date", "from", "subject", "size", "flag", "read"),
 		Dir:    whitelist(q.Get("dir"), "desc", "asc"),
-		Filter: "all", // 31C exposes the unread-only filter
+		Filter: whitelist(q.Get("filter"), "all", "unread"),
 		Page:   atoiDefault(q.Get("page"), 1),
 	}
 	page := mailPage{

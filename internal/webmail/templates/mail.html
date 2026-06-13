@@ -34,6 +34,11 @@
       <h2>{{.Current}} <span class="counts">{{.Total}} total, {{.Unread}} unread</span></h2>
       <a href="/compose" class="compose-btn">Compose</a>
       <a href="/import" class="import-btn">Import</a>
+      {{if eq .Filter "unread"}}
+      <a class="filter-toggle active" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter=all&page=1">Unread only</a>
+      {{else}}
+      <a class="filter-toggle" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter=unread&page=1">Unread only</a>
+      {{end}}
       {{template "searchform" .}}
     </div>
     {{template "messagelist" .}}
