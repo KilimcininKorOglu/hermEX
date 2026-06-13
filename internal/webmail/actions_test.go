@@ -1,6 +1,7 @@
 package webmail
 
 import (
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -230,8 +231,27 @@ func TestActionFollowupFlag(t *testing.T) {
 		return folderMsgs(t, path, int64(mapi.PrivateFIDInbox))[0].Flags & objectstore.FlagFlagged
 	}
 
+	// The list's flag menu posts via htmx; the HX-Request header makes /action
+	// return the row partial (a plain post redirects to the reader instead).
+	hxPost := func(vals url.Values) (int, string) {
+		t.Helper()
+		req, err := http.NewRequest("POST", ts.URL+"/action", strings.NewReader(vals.Encode()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("HX-Request", "true")
+		resp, err := c.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+
 	// Apply a red flag → colored flag icon in the row + \Flagged set.
-	code, body := postForm(t, c, ts.URL+"/action", url.Values{"folder": {"INBOX"}, "uid": {itoa(uid)}, "op": {"flag"}, "color": {"6"}})
+	code, body := hxPost(url.Values{"folder": {"INBOX"}, "uid": {itoa(uid)}, "op": {"flag"}, "color": {"6"}})
 	if code != 200 {
 		t.Fatalf("flag = %d", code)
 	}
@@ -243,7 +263,7 @@ func TestActionFollowupFlag(t *testing.T) {
 	}
 
 	// Mark complete → check icon, \Flagged cleared.
-	_, body = postForm(t, c, ts.URL+"/action", url.Values{"folder": {"INBOX"}, "uid": {itoa(uid)}, "op": {"flagcomplete"}})
+	_, body = hxPost(url.Values{"folder": {"INBOX"}, "uid": {itoa(uid)}, "op": {"flagcomplete"}})
 	if !strings.Contains(body, `title="Flag complete"`) || strings.Contains(body, `title="Flagged"`) {
 		t.Errorf("completed row should show the check, not a flag:\n%s", body)
 	}
@@ -252,12 +272,20 @@ func TestActionFollowupFlag(t *testing.T) {
 	}
 
 	// Clear → no flag and no check.
-	_, body = postForm(t, c, ts.URL+"/action", url.Values{"folder": {"INBOX"}, "uid": {itoa(uid)}, "op": {"flagnone"}})
+	_, body = hxPost(url.Values{"folder": {"INBOX"}, "uid": {itoa(uid)}, "op": {"flagnone"}})
 	if strings.Contains(body, `title="Flagged"`) || strings.Contains(body, `title="Flag complete"`) {
 		t.Errorf("cleared row should show no flag icon:\n%s", body)
 	}
 	if flagged() != 0 {
 		t.Error("a cleared flag must not be \\Flagged")
+	}
+
+	// A plain (non-htmx) post — the reader's flag control — redirects to the message.
+	noredir := *c
+	noredir.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	rcode, _ := postForm(t, &noredir, ts.URL+"/action", url.Values{"folder": {"INBOX"}, "uid": {itoa(uid)}, "op": {"flag"}, "color": {"3"}})
+	if rcode != http.StatusSeeOther {
+		t.Errorf("reader (non-htmx) flag should redirect to the message (303), got %d", rcode)
 	}
 }
 

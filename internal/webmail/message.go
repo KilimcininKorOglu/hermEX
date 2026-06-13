@@ -21,17 +21,20 @@ type attachmentView struct {
 
 // messageDetail is the data the message template renders.
 type messageDetail struct {
-	UID         uint32
-	Folder      string
-	From        string
-	To          string
-	Cc          string
-	Subject     string
-	Date        string
-	IsHTML      bool
-	Body        string
-	Attachments []attachmentView
-	Folders     []folderView // move/copy targets (mail folders except this one)
+	UID          uint32
+	Folder       string
+	From         string
+	To           string
+	Cc           string
+	Subject      string
+	Date         string
+	IsHTML       bool
+	Body         string
+	Attachments  []attachmentView
+	Folders      []folderView // move/copy targets (mail folders except this one)
+	FlagColor    int32        // follow-up flag color 1-6 (0 none), shown in the reader header
+	FlagComplete bool         // follow-up flag marked complete
+	FlagDue      string       // formatted follow-up due date, empty when none
 }
 
 func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
@@ -74,9 +77,28 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 	detail := buildMessageDetail(raw, folder, uid)
 	detail.Folders = moveTargets(folders, folderID)
 
-	// Reading a message marks it \Seen (read-modify-write to preserve the rest).
-	if cur, err := st.MessageFlags(folderID, uid); err == nil && cur&objectstore.FlagSeen == 0 {
-		st.SetMessageFlags(folderID, uid, cur|objectstore.FlagSeen)
+	// Reading a message marks it \Seen (read-modify-write to preserve the rest);
+	// the \Flagged bit also feeds the follow-up flag fallback below.
+	flagged := false
+	if cur, err := st.MessageFlags(folderID, uid); err == nil {
+		flagged = cur&objectstore.FlagFlagged != 0
+		if cur&objectstore.FlagSeen == 0 {
+			st.SetMessageFlags(folderID, uid, cur|objectstore.FlagSeen)
+		}
+	}
+	if m, err := st.MessageByUID(folderID, uid); err == nil {
+		if f, err := st.GetFollowupFlag(m.ID); err == nil {
+			detail.FlagComplete = f.Status == objectstore.FlagStatusComplete
+			switch {
+			case f.Color > 0:
+				detail.FlagColor = f.Color
+			case !detail.FlagComplete && flagged:
+				detail.FlagColor = objectstore.FlagColorRed
+			}
+			if !f.DueBy.IsZero() {
+				detail.FlagDue = f.DueBy.Format("2006-01-02 15:04")
+			}
+		}
 	}
 
 	s.render(w, "message", detail)
