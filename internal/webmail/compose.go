@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"html"
+	"io"
 	"net/http"
 	"net/mail"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -43,12 +45,13 @@ type composeView struct {
 	Importance   string // "", "high", "low"
 	Sensitivity  string // "", "personal", "private", "confidential"
 	ReadReceipt  bool
-	InReplyTo    string // carried as a hidden field, written as In-Reply-To on send
-	References   string // carried as a hidden field, written as References on send
-	AttachFolder string // forward-as-attachment: source folder to embed at send
-	AttachUID    string // forward-as-attachment: source uid to embed at send
-	DraftFolder  string // draft being edited: source folder (carried so a re-save replaces it)
-	DraftUID     string // draft being edited: source uid
+	InReplyTo    string              // carried as a hidden field, written as In-Reply-To on send
+	References   string              // carried as a hidden field, written as References on send
+	Attachments  []composeAttachment // uploaded files (and, later, inline images) to attach on send
+	AttachFolder string              // forward-as-attachment: source folder to embed at send
+	AttachUID    string              // forward-as-attachment: source uid to embed at send
+	DraftFolder  string              // draft being edited: source folder (carried so a re-save replaces it)
+	DraftUID     string              // draft being edited: source uid
 	Error        string
 	Notice       string
 }
@@ -222,6 +225,16 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	idents := s.identities(sess.user)
+	// A file-upload submit is multipart/form-data and must be parsed (with a body
+	// cap) before the form values are read; a url-encoded post (incl. autosave) is
+	// left untouched and carries no files.
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		r.Body = http.MaxBytesReader(w, r.Body, maxComposeBytes)
+		if err := r.ParseMultipartForm(8 << 20); err != nil {
+			s.render(w, "compose", composeView{Title: "New message", From: sess.user, FromOptions: idents, Error: "Attachment too large or the upload failed."})
+			return
+		}
+	}
 	v := composeView{
 		Title:        "New message",
 		From:         gateFrom(r.FormValue("from"), sess.user, idents),
@@ -243,6 +256,7 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		DraftFolder:  r.FormValue("draftfolder"),
 		DraftUID:     r.FormValue("draftuid"),
 	}
+	v.Attachments = readUploads(r)
 
 	// Saving a draft files the compose in Drafts without sending; no recipients
 	// are required. Autosave posts the same action with Accept: application/json
@@ -507,6 +521,41 @@ func (s *Server) loadRaw(mailboxPath, folder, uidStr string) ([]byte, error) {
 	return st.GetMessageRaw(folderID, uint32(uid64))
 }
 
+// maxComposeBytes bounds a multipart compose POST (attachments plus the form
+// fields), so a large upload cannot exhaust memory.
+const maxComposeBytes = 25 << 20
+
+// readUploads collects the files from a multipart compose submit into attachment
+// descriptors. It returns nil for a url-encoded post (incl. autosave), which
+// carries no files. Empty or unreadable parts are skipped.
+func readUploads(r *http.Request) []composeAttachment {
+	if r.MultipartForm == nil {
+		return nil
+	}
+	var out []composeAttachment
+	for _, fh := range r.MultipartForm.File["attach"] {
+		f, err := fh.Open()
+		if err != nil {
+			continue
+		}
+		data, err := io.ReadAll(f)
+		f.Close()
+		if err != nil || len(data) == 0 {
+			continue
+		}
+		ct := fh.Header.Get("Content-Type")
+		if ct == "" {
+			ct = http.DetectContentType(data)
+		}
+		out = append(out, composeAttachment{
+			Filename:    filepath.Base(fh.Filename),
+			ContentType: ct,
+			Data:        data,
+		})
+	}
+	return out
+}
+
 // composeAttachment is one attachment to add to a composed message: an uploaded
 // file, or (when ContentID/Inline is set) an inline image referenced by the HTML
 // body via cid:. It maps to a by-value MAPI attachment bag that oxcmail.Export
@@ -570,7 +619,8 @@ func (v composeView) outgoing(hostname string) outgoing {
 		Body: v.Body, BodyHTML: v.BodyHTML, Format: v.Format,
 		Importance: v.Importance, Sensitivity: v.Sensitivity,
 		ReadReceipt: v.ReadReceipt, InReplyTo: v.InReplyTo, References: v.References,
-		Hostname: hostname,
+		Attachments: v.Attachments,
+		Hostname:    hostname,
 	}
 }
 
