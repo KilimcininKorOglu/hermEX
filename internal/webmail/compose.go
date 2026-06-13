@@ -2,6 +2,7 @@ package webmail
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"html"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"net/mail"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -291,6 +293,16 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 	// on the next submit: the draft re-read above would re-supply the pick that its
 	// still-checked form field also re-submits, accumulating one copy per autosave.
 	v.Attachments = append(v.Attachments, s.pickedMessageAttachments(sess.mailboxPath, r.Form["attachmsg"])...)
+
+	// Inline images: turn the editor's base64 data: <img> sources into cid: parts
+	// so the sent message is multipart/related and no data: URI goes on the wire.
+	// Send-time only, like picks: a saved draft keeps its data: URIs so the editor
+	// can redisplay the images when the draft is reopened.
+	if v.Format == "html" {
+		var inlineAtts []composeAttachment
+		v.BodyHTML, inlineAtts = inlineImages(v.BodyHTML)
+		v.Attachments = append(v.Attachments, inlineAtts...)
+	}
 
 	// Scheduling a send files the compose in the Outbox with a deferred-send time
 	// instead of delivering now; the worker releases it when due.
@@ -590,6 +602,47 @@ func (s *Server) pickedMessageAttachments(mailboxPath string, picks []string) []
 		})
 	}
 	return out
+}
+
+// dataImgRE matches an <img> whose src is a base64 data: URI, capturing the tag
+// text up to src= (1), the media type (2), and the base64 payload (3).
+var dataImgRE = regexp.MustCompile(`(?i)(<img\b[^>]*?\bsrc=)"data:([a-z0-9.+/-]+);base64,([^"]*)"`)
+
+// inlineImages rewrites base64 data: <img> sources in an HTML body to cid:
+// references and returns the extracted images as inline attachments. Each becomes
+// an inline part (a generated Content-ID, AttMhtmlRef) so the exported message is
+// multipart/related and no base64 data: URI is persisted on the wire. The body is
+// the user's own composed HTML, so its images are trusted; a data: payload that
+// will not base64-decode is left in place rather than dropped.
+func inlineImages(body string) (string, []composeAttachment) {
+	locs := dataImgRE.FindAllStringSubmatchIndex(body, -1)
+	if len(locs) == 0 {
+		return body, nil
+	}
+	var b strings.Builder
+	var atts []composeAttachment
+	last := 0
+	for _, m := range locs {
+		data, err := base64.StdEncoding.DecodeString(body[m[6]:m[7]])
+		if err != nil {
+			continue // leave a malformed data: image untouched
+		}
+		token := randomToken()[:24]
+		b.WriteString(body[last:m[0]]) // text before this <img>
+		b.WriteString(body[m[2]:m[3]]) // the "<img ... src=" prefix, unchanged
+		b.WriteString(`"cid:`)
+		b.WriteString(token)
+		b.WriteString(`"`)
+		last = m[1]
+		atts = append(atts, composeAttachment{
+			ContentType: body[m[4]:m[5]],
+			ContentID:   token,
+			Inline:      true,
+			Data:        data,
+		})
+	}
+	b.WriteString(body[last:])
+	return b.String(), atts
 }
 
 // handleAttachPick renders a folder's messages as a checkbox list for the
