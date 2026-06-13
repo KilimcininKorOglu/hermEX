@@ -2,6 +2,7 @@ package webmail
 
 import (
 	"encoding/base64"
+	"html"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -64,6 +65,13 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	defer st.Close()
 
+	// Settings drive both the body render style (force plain text) and the master
+	// category list used to color badges; load once and reuse.
+	cfg, err := loadSettings(st)
+	if err != nil {
+		cfg = defaultSettings()
+	}
+
 	folders, err := st.ListFolders()
 	if err != nil {
 		http.Error(w, "cannot read folders", http.StatusInternalServerError)
@@ -80,7 +88,7 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	detail := buildMessageDetail(raw, folder, uid)
+	detail := buildMessageDetail(raw, folder, uid, cfg.IncomingRender == "plain")
 	detail.Folders = moveTargets(folders, folderID)
 
 	// Reading a message marks it \Seen (read-modify-write to preserve the rest);
@@ -92,7 +100,7 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 			st.SetMessageFlags(folderID, uid, cur|objectstore.FlagSeen)
 		}
 	}
-	cats := mailboxCategories(st)
+	cats := cfg.Categories
 	detail.AllCategories = cats
 	if m, err := st.MessageByUID(folderID, uid); err == nil {
 		if f, err := st.GetFollowupFlag(m.ID); err == nil {
@@ -123,8 +131,11 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 }
 
 // buildMessageDetail parses a raw message into the message view, selecting the
-// best displayable body and listing attachments.
-func buildMessageDetail(raw []byte, folder string, uid uint32) messageDetail {
+// best displayable body and listing attachments. When preferPlain is set (the
+// "display incoming mail as plain text" preference) a text/plain alternative is
+// chosen over HTML, and an HTML-only message is down-converted to text so the
+// reader never shows raw markup.
+func buildMessageDetail(raw []byte, folder string, uid uint32, preferPlain bool) messageDetail {
 	root := mime.ParseStructure(raw)
 	d := messageDetail{UID: uid, Folder: folder, Subject: "(no subject)"}
 	if env, err := mime.ParseEnvelope(raw); err == nil {
@@ -141,12 +152,20 @@ func buildMessageDetail(raw []byte, folder string, uid uint32) messageDetail {
 		}
 	}
 
-	bodyPart, isHTML, atts := selectParts(root)
+	bodyPart, isHTML, atts := selectParts(root, preferPlain)
 	d.IsHTML = isHTML
 	if bodyPart != nil {
 		if content, err := bodyPart.DecodedContent(); err == nil {
 			d.Body = toUTF8(content, bodyPart.Params["charset"])
 		}
+	}
+	// Forced plain view of an HTML-only message: down-convert the markup to text
+	// (selectParts already returned the text/plain part when one existed, so this
+	// only fires when HTML is all there is). Done before the inline-CID step below,
+	// which is then skipped — there is no markup left to host inline images.
+	if isHTML && preferPlain {
+		d.Body = htmlToText(d.Body)
+		d.IsHTML, isHTML = false, false
 	}
 	// Inline images: replace each cid: reference in the HTML body with the
 	// referenced part inlined as a data: URI, and drop those parts from the
@@ -242,7 +261,41 @@ func dropSections(atts []attachmentView, drop map[string]bool) []attachmentView 
 // selectParts walks the MIME tree, choosing a display body (HTML preferred over
 // plain text) and collecting attachments. Each attachment carries its numeric
 // section path for the download link.
-func selectParts(root *mime.Part) (body *mime.Part, isHTML bool, atts []attachmentView) {
+var (
+	// htmlDropBlocks removes <script>/<style> elements with their content.
+	htmlDropBlocks = regexp.MustCompile(`(?is)<(script|style)\b[^>]*>.*?</(script|style)\s*>`)
+	// htmlLineBreaks turns block boundaries into newlines so the text keeps its
+	// paragraph structure once the tags are stripped.
+	htmlLineBreaks = regexp.MustCompile(`(?i)<(br\s*/?|/p|/div|/tr|/li|/h[1-6]|/blockquote)\s*>`)
+	// htmlAnyTag matches any remaining tag for removal.
+	htmlAnyTag = regexp.MustCompile(`(?s)<[^>]+>`)
+	// htmlManyBlankLines collapses three-or-more newlines into a single blank line.
+	htmlManyBlankLines = regexp.MustCompile(`\n{3,}`)
+)
+
+// htmlToText converts an HTML body to a readable plain-text approximation for the
+// "display incoming mail as plain text" preference: script/style content is
+// dropped, block boundaries become newlines, remaining tags are removed, and HTML
+// entities are unescaped. It is a display down-convert, not a faithful renderer.
+func htmlToText(s string) string {
+	s = htmlDropBlocks.ReplaceAllString(s, "")
+	s = htmlLineBreaks.ReplaceAllString(s, "\n")
+	s = htmlAnyTag.ReplaceAllString(s, "")
+	s = html.UnescapeString(s)
+	lines := strings.Split(s, "\n")
+	for i, ln := range lines {
+		lines[i] = strings.TrimRight(ln, " \t\r")
+	}
+	s = strings.Join(lines, "\n")
+	s = htmlManyBlankLines.ReplaceAllString(s, "\n\n")
+	return strings.TrimSpace(s)
+}
+
+// selectParts walks the MIME tree and picks the body part to display plus the
+// attachment list. HTML wins by default; when preferPlain is set a text/plain
+// alternative is chosen instead, and only when none exists does it fall back to
+// the HTML part (which the caller then down-converts to text).
+func selectParts(root *mime.Part, preferPlain bool) (body *mime.Part, isHTML bool, atts []attachmentView) {
 	var html, plain *mime.Part
 	var walk func(p *mime.Part, path []int)
 	walk = func(p *mime.Part, path []int) {
@@ -270,6 +323,9 @@ func selectParts(root *mime.Part) (body *mime.Part, isHTML bool, atts []attachme
 	}
 	walk(root, nil)
 
+	if preferPlain && plain != nil {
+		return plain, false, atts
+	}
 	if html != nil {
 		return html, true, atts
 	}

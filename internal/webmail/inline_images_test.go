@@ -117,7 +117,7 @@ func TestReaderInlinesCIDImage(t *testing.T) {
 	// into the srcdoc attribute (the browser reverses that on parse), so the raw
 	// rewritten body is the faithful place to check the inlined bytes.
 	raw := msgRaw(t, path, int64(mapi.PrivateFIDInbox), inbox[0].UID)
-	d := buildMessageDetail([]byte(raw), "INBOX", inbox[0].UID)
+	d := buildMessageDetail([]byte(raw), "INBOX", inbox[0].UID, false)
 	if !strings.Contains(d.Body, "data:image/png;base64,"+onePxPNG) {
 		t.Errorf("reader did not inline the cid image as the original data: URI:\n%s", d.Body)
 	}

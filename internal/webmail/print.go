@@ -82,6 +82,10 @@ func (s *Server) handlePrint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
+	cfg, err := loadSettings(st)
+	if err != nil {
+		cfg = defaultSettings()
+	}
 	folders, err := st.ListFolders()
 	if err != nil {
 		http.Error(w, "cannot read folders", http.StatusInternalServerError)
@@ -97,7 +101,9 @@ func (s *Server) handlePrint(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	detail := buildMessageDetail(raw, folder, uid)
+	// Print honors the same plain-text display preference as the reader, so the
+	// printout matches what the user sees on screen.
+	detail := buildMessageDetail(raw, folder, uid, cfg.IncomingRender == "plain")
 	if m, err := st.MessageByUID(folderID, uid); err == nil {
 		detail.Importance = importanceLabel(st, m.ID)
 		detail.Sensitivity = sensitivityLabel(st, m.ID)
