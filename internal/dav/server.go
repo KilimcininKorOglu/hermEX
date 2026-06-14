@@ -36,8 +36,17 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// route authenticates, then dispatches on the HTTP method.
+// route handles well-known autodiscovery, then authenticates and dispatches on
+// the HTTP method.
 func (s *Server) route(w http.ResponseWriter, r *http.Request) {
+	// RFC 6764 autodiscovery: a client bootstraps from /.well-known/{carddav,caldav}
+	// and follows the redirect to the DAV root, where a PROPFIND for
+	// current-user-principal continues the chain. The redirect itself is
+	// unauthenticated so a client can find the root before sending credentials.
+	if r.URL.Path == "/.well-known/carddav" || r.URL.Path == "/.well-known/caldav" {
+		http.Redirect(w, r, "/dav/", http.StatusMovedPermanently)
+		return
+	}
 	user, mailbox, ok := s.basicAuth(w, r)
 	if !ok {
 		return

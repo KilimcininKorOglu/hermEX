@@ -85,6 +85,33 @@ func TestRequiresAuth(t *testing.T) {
 	}
 }
 
+// TestWellKnownRedirect confirms RFC 6764 autodiscovery: /.well-known/{carddav,
+// caldav} redirects (301) to the DAV root so a client can bootstrap discovery,
+// and that the redirect is served without authentication (no credentials sent).
+func TestWellKnownRedirect(t *testing.T) {
+	ts := davServer(t)
+	client := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	for _, p := range []string{"/.well-known/carddav", "/.well-known/caldav"} {
+		req, err := http.NewRequest("GET", ts.URL+p, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusMovedPermanently {
+			t.Errorf("%s: status %d, want 301", p, resp.StatusCode)
+		}
+		if loc := resp.Header.Get("Location"); loc != "/dav/" {
+			t.Errorf("%s: Location %q, want /dav/", p, loc)
+		}
+	}
+}
+
 // TestOptions confirms OPTIONS advertises CardDAV support and the implemented
 // methods.
 func TestOptions(t *testing.T) {
