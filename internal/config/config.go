@@ -23,6 +23,7 @@ type Config struct {
 	WebmailAddr    string `json:"webmail_addr"`    // webmail HTTP listen address (default ":8080")
 	DAVAddr        string `json:"dav_addr"`        // CalDAV/CardDAV HTTP listen address (default ":8080")
 	ActiveSyncAddr string `json:"activesync_addr"` // ActiveSync HTTP listen address (default ":8080")
+	EWSAddr        string `json:"ews_addr"`        // EWS (Exchange Web Services) HTTP listen address (default ":8080")
 }
 
 // Load reads and validates a JSON config file.
