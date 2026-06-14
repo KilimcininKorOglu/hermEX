@@ -48,6 +48,12 @@ const (
 	// recipient certificates for encryption as a JSON map of address to base64 DER,
 	// uploaded by the user or harvested from verified signed mail.
 	PrSmimeCertStore = PropTag(0x6776001F) // PtUnicode
+	// PrActiveSyncState is the provider-defined store-root property (0x6777) holding
+	// the ActiveSync per-device sync state as a JSON tree (device records, folder
+	// hierarchy keys, and per-collection sync keys plus the item snapshot the
+	// snapshot-diff Sync compares against). It persists as a property, not a
+	// dedicated table, like the other subsystem state.
+	PrActiveSyncState = PropTag(0x6777001F) // PtUnicode
 )
 
 // Large message/attachment content property tags. These hold bodies and

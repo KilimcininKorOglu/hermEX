@@ -3,9 +3,30 @@ package activesync
 import (
 	"encoding/base64"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
+
+	"hermex/internal/wbxml"
 )
+
+// maxRequestBody caps a command's WBXML request body.
+const maxRequestBody = 4 << 20
+
+// readWBXML reads and decodes the WBXML request body.
+func readWBXML(r *http.Request) (*wbxml.Node, error) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBody))
+	if err != nil {
+		return nil, err
+	}
+	return wbxml.Unmarshal(body)
+}
+
+// writeWBXML encodes a response tree and writes it with the EAS content type.
+func writeWBXML(w http.ResponseWriter, root *wbxml.Node) {
+	w.Header().Set("Content-Type", "application/vnd.ms-sync.wbxml")
+	_, _ = w.Write(wbxml.Marshal(root))
+}
 
 // defaultProtocol is the single EAS protocol version v1 implements and
 // advertises. Clients negotiate down to it via the MS-ASProtocolVersion header.
