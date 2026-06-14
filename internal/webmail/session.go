@@ -1,7 +1,9 @@
 package webmail
 
 import (
+	"crypto"
 	"crypto/rand"
+	"crypto/x509"
 	"encoding/hex"
 	"net/http"
 	"sync"
@@ -15,10 +17,15 @@ const (
 
 // session is one authenticated webmail session. mailboxPath is the store path
 // resolved at login, so requests open the user's mailbox without re-resolving.
+// smimeKey/smimeCert hold the user's S/MIME identity once unlocked with its
+// passphrase this session; they live only in memory (never persisted) and are
+// cleared on logout or when the identity is removed.
 type session struct {
 	user        string
 	mailboxPath string
 	expires     time.Time
+	smimeKey    crypto.PrivateKey
+	smimeCert   *x509.Certificate
 }
 
 // sessionStore holds active sessions keyed by an unguessable random token.
@@ -59,6 +66,27 @@ func (s *sessionStore) get(token string) (*session, bool) {
 func (s *sessionStore) destroy(token string) {
 	s.mu.Lock()
 	delete(s.m, token)
+	s.mu.Unlock()
+}
+
+// unlockSmime stores the unlocked S/MIME identity on a live session, so signing
+// and decryption can use it for the rest of the session without re-entering the
+// passphrase.
+func (s *sessionStore) unlockSmime(token string, key crypto.PrivateKey, cert *x509.Certificate) {
+	s.mu.Lock()
+	if sess, ok := s.m[token]; ok {
+		sess.smimeKey, sess.smimeCert = key, cert
+	}
+	s.mu.Unlock()
+}
+
+// lockSmime clears any unlocked S/MIME identity from a session (on identity
+// removal).
+func (s *sessionStore) lockSmime(token string) {
+	s.mu.Lock()
+	if sess, ok := s.m[token]; ok {
+		sess.smimeKey, sess.smimeCert = nil, nil
+	}
 	s.mu.Unlock()
 }
 
