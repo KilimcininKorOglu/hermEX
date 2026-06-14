@@ -2,6 +2,7 @@ package objectstore
 
 import (
 	"database/sql"
+	"errors"
 
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
@@ -123,6 +124,35 @@ func (s *Store) ListRules(folderID int64) ([]Rule, error) {
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// SetRuleEnabled toggles a rule's ST_ENABLED bit, leaving its other state bits
+// untouched, and reports ErrNotFound when no such rule exists. A disabled rule
+// is kept in the table and skipped during evaluation rather than deleted.
+func (s *Store) SetRuleEnabled(ruleID int64, enabled bool) error {
+	tx, err := s.objdb.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var state int64
+	err = tx.QueryRow(`SELECT state FROM rules WHERE rule_id=?`, ruleID).Scan(&state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if enabled {
+		state |= int64(mapi.RuleStateEnabled)
+	} else {
+		state &^= int64(mapi.RuleStateEnabled)
+	}
+	if _, err := tx.Exec(`UPDATE rules SET state=? WHERE rule_id=?`, state, ruleID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // DeleteRule removes a rule by id, reporting ErrNotFound when no such rule
