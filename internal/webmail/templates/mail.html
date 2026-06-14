@@ -107,7 +107,20 @@
 {{template "foot" .}}{{end}}
 
 {{define "messagelist"}}
-{{if .Messages}}
+{{if .Conversation}}
+{{if .Threads}}
+<div class="conversation-list">
+  {{range .Threads}}
+  <details class="thread"{{if .Open}} open{{end}}>
+    <summary class="thread-summary{{if .AnyUnread}} unread{{end}}"><span class="thread-subject">{{if .Subject}}{{.Subject}}{{else}}(no subject){{end}}</span> <span class="thread-meta">{{.Count}} message{{if ne .Count 1}}s{{end}} &middot; {{.Date}}</span></summary>
+    <table class="messages conversation density-{{$.Density}}">{{range .Messages}}{{template "messagerow" .}}{{end}}</table>
+  </details>
+  {{end}}
+</div>
+{{else}}
+<div class="empty">No messages in this folder.</div>
+{{end}}
+{{else if .Messages}}
 <form id="bulkform" method="post" action="/bulk" class="bulkbar">
   <input type="hidden" name="folder" value="{{.Current}}">
   <span class="bulkcount"><span id="bulkcount">0</span> selected</span>

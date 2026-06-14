@@ -38,6 +38,10 @@ type listParams struct {
 	Dir    string // desc | asc
 	Filter string // all | unread
 	Page   int    // 1-based; clamped to the available range by the pipeline
+	// Conversation switches to the threaded view: messages group into RFC 5256
+	// conversation threads ordered by latest activity, and Sort/Dir are ignored
+	// (a threaded view is inherently newest-activity-first).
+	Conversation bool
 }
 
 // pageResult is the computed message list: the visible page plus paging and
@@ -45,6 +49,7 @@ type listParams struct {
 // the unread-only toggle never changes them.
 type pageResult struct {
 	Messages []messageView
+	Threads  []threadView // populated instead of Messages in conversation view
 	Total    int
 	Unread   int
 	Page     int // clamped current page
@@ -72,6 +77,13 @@ func listFolderPage(st *objectstore.Store, folderID int64, folder string, p list
 		}
 	}
 
+	// The threaded view is a distinct grouping path: counters above stay
+	// message-based (so the sidebar/toolbar numbers keep meaning), but the list
+	// unit becomes a thread.
+	if p.Conversation {
+		return threadedFolderPage(st, folderID, folder, msgs, p, cats, res)
+	}
+
 	if p.Filter == "unread" {
 		kept := make([]objectstore.MessageInfo, 0, len(msgs))
 		for _, m := range msgs {
@@ -84,33 +96,8 @@ func listFolderPage(st *objectstore.Store, folderID int64, folder string, p list
 
 	sortMessages(msgs, p.Sort, p.Dir)
 
-	n := len(msgs)
-	res.MaxPage = (n + pageSize - 1) / pageSize
-	if res.MaxPage < 1 {
-		res.MaxPage = 1
-	}
-	res.Page = p.Page
-	if res.Page < 1 {
-		res.Page = 1
-	}
-	if res.Page > res.MaxPage {
-		res.Page = res.MaxPage
-	}
-	if res.Page > 1 {
-		res.PrevPage = res.Page - 1
-	}
-	if res.Page < res.MaxPage {
-		res.NextPage = res.Page + 1
-	}
-
-	lo := (res.Page - 1) * pageSize
-	hi := lo + pageSize
-	if lo > n {
-		lo = n
-	}
-	if hi > n {
-		hi = n
-	}
+	var lo, hi int
+	res.MaxPage, res.Page, res.PrevPage, res.NextPage, lo, hi = pageBounds(len(msgs), p.Page)
 	res.Messages = make([]messageView, 0, hi-lo)
 	for _, m := range msgs[lo:hi] {
 		v := messageViewFrom(folderID, folder, m)
@@ -118,6 +105,105 @@ func listFolderPage(st *objectstore.Store, folderID int64, folder string, p list
 		res.Messages = append(res.Messages, v)
 	}
 	return res, nil
+}
+
+// pageBounds computes paging state for n items at the given 1-based page: the
+// max page (at least 1), the clamped current page, the previous/next page (0
+// when there is none), and the [lo,hi) slice bounds of the current page. Shared
+// by the flat and threaded list paths so they page identically.
+func pageBounds(n, page int) (maxPage, cur, prev, next, lo, hi int) {
+	maxPage = (n + pageSize - 1) / pageSize
+	if maxPage < 1 {
+		maxPage = 1
+	}
+	cur = page
+	if cur < 1 {
+		cur = 1
+	}
+	if cur > maxPage {
+		cur = maxPage
+	}
+	if cur > 1 {
+		prev = cur - 1
+	}
+	if cur < maxPage {
+		next = cur + 1
+	}
+	lo = (cur - 1) * pageSize
+	hi = lo + pageSize
+	if lo > n {
+		lo = n
+	}
+	if hi > n {
+		hi = n
+	}
+	return
+}
+
+// threadedFolderPage is the conversation-view path: it groups the folder's
+// messages into RFC 5256 threads (their threading headers read in one batch),
+// applies the unread filter at thread granularity (a thread is kept when any
+// member is unread), paginates by thread, and maps the visible threads' members
+// to views. buildThreads already orders threads newest-activity-first, so the
+// column sort key is not applied here.
+func threadedFolderPage(st *objectstore.Store, folderID int64, folder string, msgs []objectstore.MessageInfo, p listParams, cats []category, res pageResult) (pageResult, error) {
+	ids := make([]int64, len(msgs))
+	for i, m := range msgs {
+		ids[i] = m.ID
+	}
+	headers, err := st.ConversationThreading(ids)
+	if err != nil {
+		return pageResult{}, err
+	}
+	threads := buildThreads(msgs, headers)
+
+	if p.Filter == "unread" {
+		kept := make([]thread, 0, len(threads))
+		for _, t := range threads {
+			if threadHasUnread(t) {
+				kept = append(kept, t)
+			}
+		}
+		threads = kept
+	}
+
+	var lo, hi int
+	res.MaxPage, res.Page, res.PrevPage, res.NextPage, lo, hi = pageBounds(len(threads), p.Page)
+	res.Threads = make([]threadView, 0, hi-lo)
+	for _, t := range threads[lo:hi] {
+		res.Threads = append(res.Threads, threadViewFrom(st, folderID, folder, t, cats))
+	}
+	return res, nil
+}
+
+// threadHasUnread reports whether any member of a thread is unread.
+func threadHasUnread(t thread) bool {
+	for _, m := range t.Messages {
+		if m.Flags&objectstore.FlagSeen == 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// threadViewFrom maps a thread to its view: every member becomes an ordinary
+// messageView (icons enriched), so the rows keep their per-message actions. The
+// summary takes the root (oldest member) subject and the latest member's date,
+// and the group starts expanded when the thread has unread mail.
+func threadViewFrom(st *objectstore.Store, folderID int64, folder string, t thread, cats []category) threadView {
+	tv := threadView{Count: len(t.Messages)}
+	for _, m := range t.Messages {
+		v := messageViewFrom(folderID, folder, m)
+		enrichIcons(st, m.ID, cats, &v)
+		if !v.Seen {
+			tv.AnyUnread = true
+		}
+		tv.Messages = append(tv.Messages, v)
+	}
+	tv.Open = tv.AnyUnread
+	tv.Subject = tv.Messages[0].Subject
+	tv.Date = tv.Messages[len(tv.Messages)-1].Date
+	return tv
 }
 
 // enrichIcons fills the icon-column flags that require reading the message
