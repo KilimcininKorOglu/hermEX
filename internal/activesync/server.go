@@ -93,6 +93,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleProvision(w, r)
 	case "FolderSync":
 		s.handleFolderSync(w, r, sess)
+	case "Sync":
+		s.handleSync(w, r, sess)
 	default:
 		http.Error(w, "command not implemented: "+sess.req.cmd, http.StatusNotImplemented)
 	}
