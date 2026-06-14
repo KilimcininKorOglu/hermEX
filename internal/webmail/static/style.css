@@ -310,3 +310,13 @@ table.messages.conversation td.selcol, table.messages.conversation th.selcol { d
 .checknames-status { margin-left: 10px; font-size: 13px; }
 .checknames-status.ok { color: #1a7f37; }
 .checknames-status.error { color: #b00020; }
+
+/* S/MIME certificate settings page (#41). */
+.compose-card h3 { margin: 22px 0 8px; font-size: 15px; }
+dl.smime-cert { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0 0 14px; }
+dl.smime-cert dt { color: var(--muted); }
+dl.smime-cert dd { margin: 0; }
+.smime-form { margin: 8px 0 4px; }
+table.smime-recipients { width: 100%; border-collapse: collapse; margin: 8px 0 14px; }
+table.smime-recipients th, table.smime-recipients td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 14px; }
+table.smime-recipients th { color: var(--muted); font-weight: 600; }

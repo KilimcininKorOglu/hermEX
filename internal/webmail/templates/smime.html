@@ -1,0 +1,90 @@
+{{define "smime"}}{{template "head" .}}
+<div class="reader">
+  <div class="reader-toolbar"><a href="/mail?folder=INBOX">&larr; Back to mailbox</a></div>
+  <div class="compose-card">
+    <h2>S/MIME certificates</h2>
+    <p class="muted">Sign and encrypt mail with an S/MIME certificate. Upload your certificate and key as a password-protected PKCS#12 (.p12 / .pfx) file; the password is asked each session to unlock it and is never stored.</p>
+
+    {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
+    {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+
+    <h3>Your identity</h3>
+    {{if .HasIdentity}}
+      <dl class="smime-cert">
+        <dt>Subject</dt><dd>{{.Subject}}</dd>
+        <dt>Issuer</dt><dd>{{.Issuer}}</dd>
+        <dt>Expires</dt><dd>{{.Expires}}</dd>
+        <dt>Status</dt><dd>{{if .Unlocked}}Unlocked for this session{{else}}Locked &mdash; enter your passphrase to sign or decrypt{{end}}</dd>
+      </dl>
+      {{if not .Unlocked}}
+      <form method="post" action="/smime" enctype="multipart/form-data" class="smime-form">
+        <input type="hidden" name="action" value="unlock">
+        <div class="field">
+          <label for="smime-unlock">Passphrase</label>
+          <input id="smime-unlock" type="password" name="passphrase" autocomplete="off">
+        </div>
+        <button type="submit" class="primary">Unlock</button>
+      </form>
+      {{end}}
+      <form method="post" action="/smime" enctype="multipart/form-data" class="inline" onsubmit="return confirm('Remove your S/MIME certificate?')">
+        <input type="hidden" name="action" value="remove">
+        <button type="submit">Remove certificate</button>
+      </form>
+    {{else}}
+      <p class="muted">No certificate uploaded yet.</p>
+    {{end}}
+
+    <h3>{{if .HasIdentity}}Replace certificate{{else}}Upload certificate{{end}}</h3>
+    <form method="post" action="/smime" enctype="multipart/form-data" class="smime-form">
+      <input type="hidden" name="action" value="upload">
+      <div class="field">
+        <label for="smime-p12">PKCS#12 file (.p12 / .pfx)</label>
+        <input id="smime-p12" type="file" name="p12" accept=".p12,.pfx">
+      </div>
+      <div class="field">
+        <label for="smime-pass">Passphrase</label>
+        <input id="smime-pass" type="password" name="passphrase" autocomplete="off">
+      </div>
+      <button type="submit" class="primary">Upload</button>
+    </form>
+
+    <h3>Recipient certificates</h3>
+    <p class="muted">To encrypt to someone, add their public certificate. Recipients without a certificate here cannot be sent encrypted mail.</p>
+    {{if .Recipients}}
+    <table class="smime-recipients">
+      <thead><tr><th>Address</th><th>Subject</th><th>Expires</th><th></th></tr></thead>
+      <tbody>
+      {{range .Recipients}}
+        <tr>
+          <td>{{.Address}}</td>
+          <td>{{.Subject}}</td>
+          <td>{{.Expires}}</td>
+          <td>
+            <form method="post" action="/smime" enctype="multipart/form-data" class="inline">
+              <input type="hidden" name="action" value="removerecipient">
+              <input type="hidden" name="address" value="{{.Address}}">
+              <button type="submit">Remove</button>
+            </form>
+          </td>
+        </tr>
+      {{end}}
+      </tbody>
+    </table>
+    {{else}}
+      <p class="muted">No recipient certificates added.</p>
+    {{end}}
+    <form method="post" action="/smime" enctype="multipart/form-data" class="smime-form">
+      <input type="hidden" name="action" value="addrecipient">
+      <div class="field">
+        <label for="smime-rcpt-addr">Address</label>
+        <input id="smime-rcpt-addr" type="text" name="address" placeholder="user@example.com">
+      </div>
+      <div class="field">
+        <label for="smime-rcpt-cert">Certificate (PEM or DER)</label>
+        <input id="smime-rcpt-cert" type="file" name="cert" accept=".pem,.crt,.cer,.der">
+      </div>
+      <button type="submit" class="primary">Add recipient</button>
+    </form>
+  </div>
+</div>
+{{template "foot" .}}{{end}}
