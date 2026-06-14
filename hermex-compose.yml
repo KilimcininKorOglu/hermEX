@@ -139,3 +139,19 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+
+  ews:
+    container_name: hermex-ews
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: ["/usr/local/bin/hermex-ews", "-config", "/config/config.json"]
+    volumes:
+      - ./docker-data/mailboxes:/data/mailboxes
+      - ./docker-data/config.json:/config/config.json:ro
+    ports:
+      - "8147:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
