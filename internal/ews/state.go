@@ -10,11 +10,34 @@ import (
 
 // ewsState is the whole mailbox's EWS sync state, persisted as JSON in the
 // store-root PrEwsSyncState property. It mirrors the ActiveSync state store: one
-// blob per mailbox, no dedicated table. The per-folder item snapshot used by
-// SyncFolderItems is added in a later increment.
+// blob per mailbox, no dedicated table.
 type ewsState struct {
-	HierarchyState   string  `json:"hierarchyState,omitempty"`
-	HierarchyFolders []int64 `json:"hierarchyFolders,omitempty"`
+	HierarchyState   string                      `json:"hierarchyState,omitempty"`
+	HierarchyFolders []int64                     `json:"hierarchyFolders,omitempty"`
+	Folders          map[string]*folderItemState `json:"folders,omitempty"`
+}
+
+// folderItemState is one folder's item sync state for SyncFolderItems: the
+// current sync-state token and the item snapshot (opaque ItemId -> flag bits)
+// the snapshot-diff compares the live folder against. Change numbers cannot
+// drive this (they are INSERT-only — read/flag changes and deletes never bump
+// them), so a snapshot diff is the only channel-agnostic way to detect them.
+type folderItemState struct {
+	SyncState string           `json:"syncState,omitempty"`
+	Items     map[string]int64 `json:"items,omitempty"`
+}
+
+// folder returns a folder's item sync state, creating it if absent.
+func (s *ewsState) folder(key string) *folderItemState {
+	if s.Folders == nil {
+		s.Folders = map[string]*folderItemState{}
+	}
+	f := s.Folders[key]
+	if f == nil {
+		f = &folderItemState{}
+		s.Folders[key] = f
+	}
+	return f
 }
 
 // loadState reads the mailbox's EWS state, returning an empty state when no

@@ -111,18 +111,7 @@ func (s *Server) handleFindItem(w http.ResponseWriter, inner []byte, sess *sessi
 		}
 		elems := make([]oxews.Message, 0, len(items))
 		for _, info := range items {
-			hasAttach, _ := st.HasAttachments(info.ID)
-			name, email := splitAddress(info.Sender)
-			elems = append(elems, oxews.BuildSummary(oxews.SummaryMeta{
-				ItemID:         oxews.EncodeItemID(oxews.ItemID{FolderID: tgt.fid, MessageID: info.ID, UID: info.UID}),
-				Subject:        info.Subject,
-				SenderName:     name,
-				SenderEmail:    email,
-				Received:       info.InternalDate,
-				Size:           int(info.Size),
-				IsRead:         info.Flags&objectstore.FlagSeen != 0,
-				HasAttachments: hasAttach,
-			}))
+			elems = append(elems, itemSummary(st, tgt.fid, info))
 		}
 		msgs = append(msgs, findItemResponseMessage{
 			ResponseClass: "Success", ResponseCode: "NoError",
@@ -259,6 +248,23 @@ func findBodyPart(p *mime.Part, subtype string) *mime.Part {
 		}
 	}
 	return nil
+}
+
+// itemSummary builds a summary <t:Message> for an indexed message in the given
+// folder, shared by FindItem and SyncFolderItems.
+func itemSummary(st *objectstore.Store, folderID int64, info objectstore.MessageInfo) oxews.Message {
+	hasAttach, _ := st.HasAttachments(info.ID)
+	name, email := splitAddress(info.Sender)
+	return oxews.BuildSummary(oxews.SummaryMeta{
+		ItemID:         oxews.EncodeItemID(oxews.ItemID{FolderID: folderID, MessageID: info.ID, UID: info.UID}),
+		Subject:        info.Subject,
+		SenderName:     name,
+		SenderEmail:    email,
+		Received:       info.InternalDate,
+		Size:           int(info.Size),
+		IsRead:         info.Flags&objectstore.FlagSeen != 0,
+		HasAttachments: hasAttach,
+	})
 }
 
 // splitAddress splits a formatted originator ("Name <addr>") into name + email.
