@@ -38,6 +38,7 @@ func TestSettingsRoundTrip(t *testing.T) {
 		ComposeFormat:       "plain",
 		Signatures:          []signature{{ID: "a1", Name: "Varsayılan", HTML: "<b>Ali</b>", IsHTML: true}},
 		DefaultSignatureNew: "a1",
+		ConversationView:    true,
 	}
 	if err := saveSettings(st, want); err != nil {
 		t.Fatal(err)
@@ -58,5 +59,8 @@ func TestSettingsRoundTrip(t *testing.T) {
 	// saveSettings stamps the schema version even when the caller left it zero.
 	if got.SchemaVersion != settingsSchemaVersion {
 		t.Errorf("SchemaVersion = %d, want %d", got.SchemaVersion, settingsSchemaVersion)
+	}
+	if !got.ConversationView {
+		t.Errorf("ConversationView = false, want true (round-trip)")
 	}
 }
