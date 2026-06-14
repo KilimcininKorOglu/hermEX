@@ -88,10 +88,11 @@ func (s *Server) basicAuth(w http.ResponseWriter, r *http.Request) (user, mailbo
 	return "", "", false
 }
 
-// handleOptions advertises DAV capabilities. addressbook signals CardDAV support
-// (RFC 6352 §6.1); levels 1 and 3 cover core WebDAV and PROPFIND/REPORT.
+// handleOptions advertises DAV capabilities. addressbook signals CardDAV (RFC
+// 6352 §6.1) and calendar-access signals CalDAV (RFC 4791 §5.1); levels 1 and 3
+// cover core WebDAV and PROPFIND/REPORT.
 func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("DAV", "1, 3, addressbook")
+	w.Header().Set("DAV", "1, 3, addressbook, calendar-access")
 	w.Header().Set("Allow", allowMethods)
 	w.Header().Set("Content-Length", "0")
 	w.WriteHeader(http.StatusOK)
@@ -107,11 +108,18 @@ const (
 	kindHomeSet                  // /dav/addressbooks/{user}/
 	kindAddressbook              // /dav/addressbooks/{user}/contacts/
 	kindObject                   // /dav/addressbooks/{user}/contacts/{name}
+	kindCalHomeSet               // /dav/calendars/{user}/
+	kindCalendar                 // /dav/calendars/{user}/calendar/
+	kindCalObject                // /dav/calendars/{user}/calendar/{name}
 )
 
 // addressbookName is the single address book each mailbox exposes (its Contacts
-// folder). The URL space is /dav/addressbooks/{user}/contacts/.
-const addressbookName = "contacts"
+// folder); calendarName is the single calendar (its Calendar folder). The URL
+// spaces are /dav/addressbooks/{user}/contacts/ and /dav/calendars/{user}/calendar/.
+const (
+	addressbookName = "contacts"
+	calendarName    = "calendar"
+)
 
 // classify parses a request path into a resource kind plus, for an object, its
 // resource name. It does not consult the store.
@@ -144,6 +152,19 @@ func classify(p string) (kind resourceKind, user, object string) {
 				return kindObject, parts[2], parts[4]
 			}
 		}
+	case "calendars":
+		switch len(parts) {
+		case 3:
+			return kindCalHomeSet, parts[2], ""
+		case 4:
+			if parts[3] == calendarName {
+				return kindCalendar, parts[2], ""
+			}
+		case 5:
+			if parts[3] == calendarName {
+				return kindCalObject, parts[2], parts[4]
+			}
+		}
 	}
 	return kindUnknown, "", ""
 }
@@ -155,3 +176,9 @@ func addressbookPath(user string) string {
 	return "/dav/addressbooks/" + user + "/" + addressbookName + "/"
 }
 func objectPath(user, name string) string { return addressbookPath(user) + name }
+
+func calHomeSetPath(user string) string { return "/dav/calendars/" + user + "/" }
+func calendarPath(user string) string {
+	return "/dav/calendars/" + user + "/" + calendarName + "/"
+}
+func calObjectPath(user, name string) string { return calendarPath(user) + name }
