@@ -14,14 +14,15 @@ import (
 
 // Config is the JSON configuration shared by the mail daemons and the admin CLI.
 type Config struct {
-	DatabaseDSN string `json:"database_dsn"` // MariaDB DSN for the directory (go-sql-driver form)
-	DataDir     string `json:"data_dir"`     // root under which mailbox/domain stores are created
-	Hostname    string `json:"hostname"`     // announced in protocol greetings
-	SMTPAddr    string `json:"smtp_addr"`    // MTA listen address (default ":25")
-	POP3Addr    string `json:"pop3_addr"`    // POP3 listen address (default ":110")
-	IMAPAddr    string `json:"imap_addr"`    // IMAP listen address (default ":143")
-	WebmailAddr string `json:"webmail_addr"` // webmail HTTP listen address (default ":8080")
-	DAVAddr     string `json:"dav_addr"`     // CalDAV/CardDAV HTTP listen address (default ":8080")
+	DatabaseDSN    string `json:"database_dsn"`    // MariaDB DSN for the directory (go-sql-driver form)
+	DataDir        string `json:"data_dir"`        // root under which mailbox/domain stores are created
+	Hostname       string `json:"hostname"`        // announced in protocol greetings
+	SMTPAddr       string `json:"smtp_addr"`       // MTA listen address (default ":25")
+	POP3Addr       string `json:"pop3_addr"`       // POP3 listen address (default ":110")
+	IMAPAddr       string `json:"imap_addr"`       // IMAP listen address (default ":143")
+	WebmailAddr    string `json:"webmail_addr"`    // webmail HTTP listen address (default ":8080")
+	DAVAddr        string `json:"dav_addr"`        // CalDAV/CardDAV HTTP listen address (default ":8080")
+	ActiveSyncAddr string `json:"activesync_addr"` // ActiveSync HTTP listen address (default ":8080")
 }
 
 // Load reads and validates a JSON config file.

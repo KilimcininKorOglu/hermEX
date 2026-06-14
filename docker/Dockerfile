@@ -10,7 +10,8 @@ RUN go build -trimpath -o /out/hermex-mta ./cmd/mta \
  && go build -trimpath -o /out/hermex-imap ./cmd/imap \
  && go build -trimpath -o /out/hermex-webmail ./cmd/webmail \
  && go build -trimpath -o /out/hermex-dav ./cmd/dav \
- && go build -trimpath -o /out/hermex-admin ./cmd/admin
+ && go build -trimpath -o /out/hermex-admin ./cmd/admin \
+ && go build -trimpath -o /out/hermex-activesync ./cmd/activesync
 
 # Minimal runtime image. NOTE: this image runs as root so the daemons can bind
 # the privileged mail ports (25/110); a hardened production image should run as
