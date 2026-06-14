@@ -228,6 +228,31 @@ func TestRunRulesEndToEnd(t *testing.T) {
 	}
 }
 
+// TestApplyInboxRulesMalformedBlobIsError verifies that a corrupt stored rule
+// (a condition blob that is not a valid RESTRICTION) surfaces as an error rather
+// than a panic, and that the delivered message is preserved regardless — the
+// delivery path relies on this so a corrupt rule cannot lose mail.
+func TestApplyInboxRulesMalformedBlobIsError(t *testing.T) {
+	s := openSeededStore(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	m := deliverTo(t, s, inbox, ruleMsg("hello", "x@example.com", ""))
+
+	// 0x03 is ResContent, which needs a fuzzy level + tag + value to follow; with
+	// no payload bytes it cannot be decoded.
+	if _, err := s.objdb.Exec(
+		`INSERT INTO rules (provider, sequence, state, condition, actions, folder_id) VALUES (?,?,?,?,?,?)`,
+		"RuleOrganizer", 1, int64(mapi.RuleStateEnabled), []byte{0x03}, []byte{0x00}, inbox); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.ApplyInboxRules(m); err == nil {
+		t.Errorf("ApplyInboxRules should surface a malformed rule blob as an error, got nil")
+	}
+	if _, err := s.MessageByUID(inbox, m.UID); err != nil {
+		t.Errorf("message must survive a malformed-rule error, but it is gone: %v", err)
+	}
+}
+
 // TestRunRulesSkipsDisabled verifies a disabled rule (ST_ENABLED clear) is not
 // applied, while an enabled rule on the same folder still runs.
 func TestRunRulesSkipsDisabled(t *testing.T) {

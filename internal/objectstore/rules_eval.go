@@ -274,6 +274,25 @@ func (s *Store) RunRules(folderID int64) (RuleRunResult, error) {
 	return res, nil
 }
 
+// ApplyInboxRules applies the inbox's enabled rules to a single just-delivered
+// message, in sequence order, stopping at a terminal move or delete. It is the
+// delivery-time entry point. The message is already filed in the inbox before
+// this runs, so a caller on the delivery path must treat a returned error as
+// advisory (log and continue) rather than failing delivery — a rule must never
+// be able to make a sender retry. A mailbox with no inbox rules is a no-op.
+func (s *Store) ApplyInboxRules(m MessageInfo) error {
+	inbox := int64(mapi.PrivateFIDInbox)
+	rules, err := s.ListRules(inbox)
+	if err != nil {
+		return err
+	}
+	if len(rules) == 0 {
+		return nil
+	}
+	_, err = s.applyRulesToMessage(inbox, m, rules)
+	return err
+}
+
 // applyRulesToMessage runs a folder's pre-loaded rules against one message,
 // applying matching rules' actions in sequence order until a terminal action
 // (move/delete) fires or a matching rule carries the ST_EXIT_LEVEL flag. The
