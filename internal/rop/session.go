@@ -12,19 +12,22 @@ import "hermex/internal/objectstore"
 type objKind uint8
 
 const (
-	kindLogon  objKind = iota // an open mailbox store (the logon root)
-	kindFolder                // an opened folder
-	kindTable                 // a contents or hierarchy table
+	kindLogon   objKind = iota // an open mailbox store (the logon root)
+	kindFolder                 // an opened folder
+	kindTable                  // a contents or hierarchy table
+	kindMessage                // an opened message
 )
 
 // object is a server-side MAPI object referenced by a uint32 handle. Fields are
 // populated per kind: a logon holds the open mailbox store, a folder its
-// objectstore id, a table its in-memory row snapshot and column set.
+// objectstore id, a table its in-memory row snapshot and column set, a message
+// its objectstore id.
 type object struct {
-	kind     objKind
-	store    *objectstore.Store // kindLogon
-	folderID int64              // kindFolder
-	table    *tableState        // kindTable
+	kind      objKind
+	store     *objectstore.Store // kindLogon
+	folderID  int64              // kindFolder
+	table     *tableState        // kindTable
+	messageID int64              // kindMessage
 }
 
 // Session is one MAPI/HTTP session's object/handle table — the analogue of a

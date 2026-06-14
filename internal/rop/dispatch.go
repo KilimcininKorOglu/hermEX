@@ -4,15 +4,18 @@ import "hermex/internal/ext"
 
 // ROP operation ids ([MS-OXCROPS] 2.2). v1 handles the read-core set.
 const (
-	ropRelease           uint8 = 0x01
-	ropOpenFolder        uint8 = 0x02
-	ropGetHierarchyTable uint8 = 0x04
-	ropGetContentsTable  uint8 = 0x05
-	ropSetColumns        uint8 = 0x12
-	ropSortTable         uint8 = 0x13
-	ropRestrict          uint8 = 0x14
-	ropQueryRows         uint8 = 0x15
-	ropLogon             uint8 = 0xFE
+	ropRelease               uint8 = 0x01
+	ropOpenFolder            uint8 = 0x02
+	ropOpenMessage           uint8 = 0x03
+	ropGetHierarchyTable     uint8 = 0x04
+	ropGetContentsTable      uint8 = 0x05
+	ropGetPropertiesSpecific uint8 = 0x07
+	ropGetPropertiesAll      uint8 = 0x08
+	ropSetColumns            uint8 = 0x12
+	ropSortTable             uint8 = 0x13
+	ropRestrict              uint8 = 0x14
+	ropQueryRows             uint8 = 0x15
+	ropLogon                 uint8 = 0xFE
 )
 
 // MAPI return codes ([MS-OXCDATA] 2.4.1) carried in a ROP response ReturnValue.
@@ -52,6 +55,18 @@ loop:
 			s.ropRelease(handles, hindex)
 		case ropOpenFolder:
 			if !s.ropOpenFolder(p, out, handles, hindex) {
+				break loop
+			}
+		case ropOpenMessage:
+			if !s.ropOpenMessage(p, out, handles, hindex) {
+				break loop
+			}
+		case ropGetPropertiesSpecific:
+			if !s.ropGetPropertiesSpecific(p, out, handles, hindex) {
+				break loop
+			}
+		case ropGetPropertiesAll:
+			if !s.ropGetPropertiesAll(p, out, handles, hindex) {
 				break loop
 			}
 		case ropGetContentsTable:
