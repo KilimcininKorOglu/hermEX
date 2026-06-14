@@ -1,6 +1,9 @@
 package directory
 
-import "testing"
+import (
+	"sort"
+	"testing"
+)
 
 // TestStaticAccountsMaildirs checks that MailboxLister over the static account
 // map returns each mailbox once: several addresses that share a mailbox collapse
@@ -25,5 +28,52 @@ func TestStaticAccountsMaildirs(t *testing.T) {
 		if !want[p] {
 			t.Errorf("unexpected maildir %q", p)
 		}
+	}
+}
+
+// TestStaticAccountsSearchGAL checks the GAL substring search over the static
+// account map: a case-insensitive address match, collapsing addresses that share
+// a mailbox to one suggestion, skipping accounts with no mailbox, address
+// ordering, the result cap, and the address mirrored into the display name.
+func TestStaticAccountsSearchGAL(t *testing.T) {
+	a := StaticAccounts{
+		"alice@hermex.test":  {Password: "x", MailboxPath: "/m/alice"},
+		"alias@hermex.test":  {Password: "x", MailboxPath: "/m/alice"}, // same mailbox as alice
+		"bob@hermex.test":    {Password: "x", MailboxPath: "/m/bob"},
+		"carol@hermex.test":  {Password: "x", MailboxPath: "/m/carol"},
+		"nopath@hermex.test": {Password: "x", MailboxPath: ""}, // no mailbox: never suggested
+	}
+
+	// "ali" matches both alice and alias, which share a mailbox, so the suggestion
+	// collapses to a single entry.
+	got, err := a.SearchGAL("ali", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("SearchGAL(%q) = %v, want one entry (the shared mailbox collapses)", "ali", got)
+	}
+	if got[0].DisplayName != got[0].Address {
+		t.Errorf("DisplayName %q should mirror Address %q", got[0].DisplayName, got[0].Address)
+	}
+
+	// Matching is case-insensitive.
+	if got, _ := a.SearchGAL("BOB", 0); len(got) != 1 || got[0].Address != "bob@hermex.test" {
+		t.Errorf("SearchGAL(%q) = %v, want [bob@hermex.test]", "BOB", got)
+	}
+
+	// A domain-wide substring returns one entry per distinct mailbox, ordered by
+	// address; the empty-mailbox account is excluded.
+	all, _ := a.SearchGAL("@hermex.test", 0)
+	if len(all) != 3 {
+		t.Fatalf("SearchGAL(domain) = %v, want 3 distinct mailboxes", all)
+	}
+	if !sort.SliceIsSorted(all, func(i, j int) bool { return all[i].Address < all[j].Address }) {
+		t.Errorf("SearchGAL results not ordered by address: %v", all)
+	}
+
+	// The limit caps the result count.
+	if got, _ := a.SearchGAL("@hermex.test", 2); len(got) != 2 {
+		t.Errorf("SearchGAL(domain, limit 2) returned %d entries, want 2", len(got))
 	}
 }
