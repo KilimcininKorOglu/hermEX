@@ -111,16 +111,14 @@ func splitSigned(raw []byte, boundary string) (content, sigDER []byte, err error
 	// The signature part follows: skip its delimiter line and its own headers,
 	// then base64-decode its body up to the closing boundary.
 	sigPart := raw[partStart+next+2:] // past the "\r\n" before the delimiter
-	if dl := bytes.Index(sigPart, []byte("\r\n")); dl >= 0 {
-		sigPart = sigPart[dl+2:]
-	} else {
+	_, sigPart, ok := bytes.Cut(sigPart, []byte("\r\n"))
+	if !ok {
 		return nil, nil, errors.New("smime: malformed signature part")
 	}
-	hb := bytes.Index(sigPart, []byte("\r\n\r\n"))
-	if hb < 0 {
+	_, body, ok := bytes.Cut(sigPart, []byte("\r\n\r\n"))
+	if !ok {
 		return nil, nil, errors.New("smime: signature part has no body")
 	}
-	body := sigPart[hb+4:]
 	if e := bytes.Index(body, delim); e >= 0 {
 		body = body[:e]
 	}
