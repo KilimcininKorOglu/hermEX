@@ -43,7 +43,7 @@ func buildGetProps(ropID, inIdx uint8, cols []mapi.PropTag) []byte {
 func pullTypedString(t *testing.T, p *ext.Pull) string {
 	t.Helper()
 	switch typ := mustU8(t, p, "stringType"); typ {
-	case stringTypeNone, 0x1: // NONE / EMPTY
+	case 0x0, stringTypeEmpty: // NONE / EMPTY (both carry no body)
 		return ""
 	case stringTypeUnicode:
 		s, err := p.Unicode()

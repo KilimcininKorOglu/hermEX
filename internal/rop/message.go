@@ -5,18 +5,19 @@ import (
 	"hermex/internal/mapi"
 )
 
-// TYPED_STRING string types ([MS-OXCDATA] 2.11.4 / p_typed_str). v1 emits NONE
-// for an empty value and UNICODE otherwise.
+// TYPED_STRING string types ([MS-OXCDATA] 2.11.4 / p_typed_str).
 const (
-	stringTypeNone    uint8 = 0x0
+	stringTypeEmpty   uint8 = 0x1
 	stringTypeUnicode uint8 = 0x4
 )
 
 // pushTypedString writes a TYPED_STRING: a 1-byte type then, for UNICODE, the
-// UTF-16LE string. An empty value is encoded as NONE with no body.
+// UTF-16LE string. An empty value is encoded as EMPTY (present but empty) with
+// no body — matching the reference rop_openmessage, which uses EMPTY rather than
+// NONE for an absent subject prefix / normalized subject.
 func pushTypedString(out *ext.Push, s string) {
 	if s == "" {
-		out.Uint8(stringTypeNone)
+		out.Uint8(stringTypeEmpty)
 		return
 	}
 	out.Uint8(stringTypeUnicode)
