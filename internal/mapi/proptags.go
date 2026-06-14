@@ -38,6 +38,16 @@ const (
 	// the out-of-office configuration (reply text, subject, schedule) as a JSON
 	// string. The on/off flag is mirrored into the standard PrOOFState boolean.
 	PrOOFSettings = PropTag(0x6773001F) // PtUnicode
+	// PrSmimeIdentity is the provider-defined store-root property (0x6775) holding
+	// the user's S/MIME identity as JSON: the password-protected PKCS#12 container
+	// and its public certificate, both base64. The container stays encrypted at
+	// rest under its own passphrase, which the webmail unlocks per session and
+	// never persists.
+	PrSmimeIdentity = PropTag(0x6775001F) // PtUnicode
+	// PrSmimeCertStore is the provider-defined store-root property (0x6776) holding
+	// recipient certificates for encryption as a JSON map of address to base64 DER,
+	// uploaded by the user or harvested from verified signed mail.
+	PrSmimeCertStore = PropTag(0x6776001F) // PtUnicode
 )
 
 // Large message/attachment content property tags. These hold bodies and
