@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/oxmapihttp"
 )
 
 const (
@@ -207,5 +208,49 @@ func TestNspiRouted(t *testing.T) {
 	defer resp.Body.Close()
 	if got := resp.Header.Get("X-ResponseCode"); got != "0" {
 		t.Errorf("NSPI PING: X-ResponseCode = %q, want 0", got)
+	}
+}
+
+// TestExecuteRopFraming confirms the Execute response carries a valid, decodable
+// RPC_HEADER_EXT ROP buffer (the transport <-> oxmapihttp codec wiring). The ROP
+// layer fills in the per-ROP responses; the skeleton frames an empty buffer.
+func TestExecuteRopFraming(t *testing.T) {
+	ts := newTestServer(t)
+	conn := mapiPost(t, ts, "/mapi/emsmdb", "Connect", connectBody(), nil)
+	conn.Body.Close()
+	sid, seq := cookieByName(conn, "sid"), cookieByName(conn, "sequence")
+
+	// Execute carrying a real (1-ROP) request buffer.
+	reqRop := oxmapihttp.EncodeExecute([]byte{0xFE}, nil)
+	var eb []byte
+	eb = binary.LittleEndian.AppendUint32(eb, 0)                   // Flags
+	eb = binary.LittleEndian.AppendUint32(eb, uint32(len(reqRop))) // RopBufferSize
+	eb = append(eb, reqRop...)                                     // RopBuffer
+	eb = binary.LittleEndian.AppendUint32(eb, 0x10000)             // MaxRopOut
+
+	resp := mapiPost(t, ts, "/mapi/emsmdb", "Execute", eb, func(r *http.Request) {
+		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
+		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
+	})
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	// strip the meta preamble; payload = execute_response: Status|Error|Flags|RopBufferSize|RopBuffer|AuxBufSize
+	_, payload, found := bytes.Cut(body, []byte("\r\n\r\n"))
+	if !found {
+		t.Fatal("response missing meta preamble terminator")
+	}
+	if len(payload) < 16 {
+		t.Fatalf("execute response too short: %d bytes", len(payload))
+	}
+	cbOut := binary.LittleEndian.Uint32(payload[12:])
+	if int(16+cbOut) > len(payload) {
+		t.Fatalf("RopBufferSize %d overruns payload %d", cbOut, len(payload))
+	}
+	rops, handles, err := oxmapihttp.DecodeExecute(payload[16 : 16+cbOut])
+	if err != nil {
+		t.Fatalf("Execute response RopBuffer did not decode: %v", err)
+	}
+	if len(rops) != 0 || len(handles) != 0 {
+		t.Errorf("skeleton response should be an empty ROP buffer, got rops=%x handles=%v", rops, handles)
 	}
 }

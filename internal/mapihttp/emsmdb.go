@@ -3,6 +3,8 @@ package mapihttp
 import (
 	"io"
 	"net/http"
+
+	"hermex/internal/oxmapihttp"
 )
 
 // serveEmsmdb authenticates and dispatches the EMSMDB endpoint (/mapi/emsmdb) by
@@ -92,7 +94,7 @@ func (s *Server) emsExecute(w http.ResponseWriter, r *http.Request, sess *sessio
 	rd := &reader{b: body}
 	rd.u32()           // Flags
 	cbIn := rd.u32()   // RopBufferSize
-	rd.take(int(cbIn)) // RopBuffer (decoded by the ROP layer in the next increment)
+	rd.take(int(cbIn)) // RopBuffer (parsed and dispatched by the ROP layer in 4-C)
 	rd.u32()           // MaxRopOut
 	if rd.err {
 		writeRespError(w, r, "Execute", rcInvalidReqBody)
@@ -100,12 +102,16 @@ func (s *Server) emsExecute(w http.ResponseWriter, r *http.Request, sess *sessio
 	}
 	setCookie(w, "sequence", newSeq)
 
+	// The skeleton frames an empty ROP response buffer — a valid, final
+	// RPC_HEADER_EXT envelope. The ROP layer fills in the per-ROP responses.
+	respRop := oxmapihttp.EncodeExecute(nil, nil)
 	var out writer
-	out.u32(rcSuccess) // StatusCode
-	out.u32(0)         // ErrorCode
-	out.u32(0)         // Flags
-	out.u32(0)         // RopBufferSize (empty until the ROP layer fills it)
-	out.u32(0)         // AuxiliaryBufferSize
+	out.u32(rcSuccess)            // StatusCode
+	out.u32(0)                    // ErrorCode
+	out.u32(0)                    // Flags
+	out.u32(uint32(len(respRop))) // RopBufferSize
+	out.raw(respRop)              // RopBuffer
+	out.u32(0)                    // AuxiliaryBufferSize
 	writeNormal(w, r, "Execute", out.b)
 }
 
