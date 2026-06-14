@@ -174,3 +174,61 @@ func TestSQLDirectoryMaildirs(t *testing.T) {
 		}
 	}
 }
+
+// TestSQLDirectorySearchGAL checks GAL recipient search over the SQL directory:
+// a case-insensitive substring match on the usernames of active mailbox users,
+// excluding a suspended account, ordered by address, with the result cap honored
+// and the address mirrored into the display name.
+func TestSQLDirectorySearchGAL(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	cleanTables(t, db)
+
+	root := t.TempDir()
+	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "domains", "hermex.test")); err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range []string{"alice@hermex.test", "albert@hermex.test", "bob@hermex.test"} {
+		if _, err := d.CreateUser(u, "secret", filepath.Join(root, "users", u)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Suspend albert: a disabled account must not surface in the address list.
+	if _, err := db.Exec(`UPDATE users SET address_status = ? WHERE username = ?`, afUserSuspended, "albert@hermex.test"); err != nil {
+		t.Fatal(err)
+	}
+
+	// "al" substring-matches alice and albert, but albert is suspended, so only
+	// alice remains. The query is case-insensitive.
+	for _, q := range []string{"al", "AL"} {
+		got, err := d.SearchGAL(q, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(got) != 1 || got[0].Address != "alice@hermex.test" {
+			t.Errorf("SearchGAL(%q) = %v, want [alice@hermex.test] (albert is suspended)", q, got)
+		} else if got[0].DisplayName != got[0].Address {
+			t.Errorf("DisplayName %q should mirror Address %q", got[0].DisplayName, got[0].Address)
+		}
+	}
+
+	// A domain-wide query returns every active user ordered by address.
+	all, err := d.SearchGAL("hermex.test", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("SearchGAL(domain) = %v, want alice and bob (albert is suspended)", all)
+	}
+	if all[0].Address != "alice@hermex.test" || all[1].Address != "bob@hermex.test" {
+		t.Errorf("SearchGAL(domain) = %v, want ordered [alice, bob]", all)
+	}
+
+	// The limit caps the result count.
+	if got, _ := d.SearchGAL("hermex.test", 1); len(got) != 1 {
+		t.Errorf("SearchGAL(domain, limit 1) returned %d, want 1", len(got))
+	}
+}

@@ -6,6 +6,7 @@ package directory
 
 import (
 	"crypto/subtle"
+	"sort"
 	"strings"
 )
 
@@ -47,6 +48,25 @@ type MailboxLister interface {
 	Maildirs() ([]string, error)
 }
 
+// GALEntry is one Global Address List entry returned by a recipient search: a
+// directory user's address and a display name for it. Until per-user display
+// names are stored — they live in user_properties (contract-map/06 §2.10),
+// resolved PR_DISPLAY_NAME → PR_NICKNAME → username, which the directory-database
+// slice will add — DisplayName falls back to the address. That is the
+// degenerate-correct case of the same GAL, not a placeholder.
+type GALEntry struct {
+	DisplayName string
+	Address     string
+}
+
+// GAL optionally searches the Global Address List — the directory's mailbox
+// users — for entries whose address matches a typed query, backing webmail
+// recipient autocomplete and "check names" resolution. Directories that cannot
+// enumerate users may omit it; webmail then offers no suggestions.
+type GAL interface {
+	SearchGAL(query string, limit int) ([]GALEntry, error)
+}
+
 // StaticAccounts is a fixed map of lowercase address/username to Account. It
 // implements both Accounts and Authenticator and suits tests and small
 // deployments.
@@ -80,6 +100,35 @@ func (a StaticAccounts) Maildirs() ([]string, error) {
 		}
 		seen[acc.MailboxPath] = true
 		out = append(out, acc.MailboxPath)
+	}
+	return out, nil
+}
+
+// SearchGAL implements GAL: a case-insensitive substring match over the account
+// addresses, collapsed to one entry per mailbox so aliases that share a mailbox
+// do not suggest the same person twice. Results are ordered by address and
+// capped at limit (limit <= 0 means no cap). DisplayName mirrors the address.
+func (a StaticAccounts) SearchGAL(query string, limit int) ([]GALEntry, error) {
+	q := strings.ToLower(strings.TrimSpace(query))
+	addrs := make([]string, 0, len(a))
+	for addr := range a {
+		if q == "" || strings.Contains(strings.ToLower(addr), q) {
+			addrs = append(addrs, addr)
+		}
+	}
+	sort.Strings(addrs)
+	seen := make(map[string]bool, len(addrs))
+	out := make([]GALEntry, 0, len(addrs))
+	for _, addr := range addrs {
+		if mbox := a[addr].MailboxPath; mbox == "" || seen[mbox] {
+			continue
+		} else {
+			seen[mbox] = true
+		}
+		out = append(out, GALEntry{DisplayName: addr, Address: addr})
+		if limit > 0 && len(out) >= limit {
+			break
+		}
 	}
 	return out, nil
 }

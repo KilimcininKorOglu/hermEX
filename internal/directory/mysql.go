@@ -207,6 +207,50 @@ SELECT DISTINCT u.maildir
 	return out, rows.Err()
 }
 
+// SearchGAL implements GAL: a case-insensitive substring match over the
+// addresses of login-capable mailbox users — the same set Maildirs enumerates (a
+// normal MAILUSER account in an active domain with a maildir) — ordered by
+// address and capped at limit. It returns one entry per user: aliases and
+// altnames are deliberately not searched, since inbound alias delivery already
+// works via Resolve and folding them in would suggest one person several times.
+// DisplayName falls back to the address; per-user display names live in
+// user_properties (contract-map/06 §2.10), which the directory-database slice
+// will add, at which point this query gains a LEFT JOIN for the name.
+func (d *SQLDirectory) SearchGAL(query string, limit int) ([]GALEntry, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	// Escape LIKE metacharacters so a typed % or _ matches literally; the pattern
+	// is a bound parameter, so only the ESCAPE clause sits in the SQL text (where
+	// '\\' is how MySQL spells a single backslash escape character).
+	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(strings.ToLower(strings.TrimSpace(query)))
+	const q = `
+SELECT u.username
+  FROM users u JOIN domains d ON u.domain_id = d.id
+ WHERE u.maildir <> ''
+   AND u.display_type = ?
+   AND (u.address_status & ?) = ?
+   AND (u.address_status & ?) = 0
+   AND d.domain_status = 0
+   AND u.username LIKE ? ESCAPE '\\'
+ ORDER BY u.username
+ LIMIT ?`
+	rows, err := d.db.Query(q, dtMailuser, afUserMask, afUserNormal, afDomainMask, "%"+esc+"%", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []GALEntry
+	for rows.Next() {
+		var addr string
+		if err := rows.Scan(&addr); err != nil {
+			return nil, err
+		}
+		out = append(out, GALEntry{DisplayName: addr, Address: addr})
+	}
+	return out, rows.Err()
+}
+
 // CreateDomain inserts a domain and returns its id, creating its homedir on disk.
 func (d *SQLDirectory) CreateDomain(domainname, homedir string) (int64, error) {
 	res, err := d.db.Exec(
