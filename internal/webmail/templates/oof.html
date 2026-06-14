@@ -1,0 +1,45 @@
+{{define "oof"}}{{template "head" .}}
+<div class="reader">
+  <div class="reader-toolbar"><a href="/mail?folder=INBOX">&larr; Back to mailbox</a></div>
+  <div class="compose-card">
+    <h2>Out of office</h2>
+    <p class="muted">Automatically reply once to each person who emails you while this is on. Replies are not sent to mailing lists, bulk mail, or other automatic messages.</p>
+
+    {{if .Saved}}<p class="notice">Out-of-office settings saved.</p>{{end}}
+
+    <form method="post" action="/oof">
+      <div class="field">
+        <label><input type="checkbox" name="enabled" value="1" {{if .Enabled}}checked{{end}}> Send automatic replies</label>
+      </div>
+
+      <div class="field">
+        <label for="oof-subject">Subject</label>
+        <input id="oof-subject" type="text" name="subject" value="{{.Subject}}" placeholder="Automatic reply">
+      </div>
+
+      <div class="field">
+        <label for="oof-internal">Reply to people inside the organization</label>
+        <textarea id="oof-internal" name="internalreply" rows="5">{{.InternalReply}}</textarea>
+      </div>
+
+      <fieldset class="field">
+        <label><input type="checkbox" name="externalenabled" value="1" {{if .ExternalEnabled}}checked{{end}}> Also reply to senders outside the organization</label>
+        <textarea name="externalreply" rows="5">{{.ExternalReply}}</textarea>
+        <p class="muted">External replies require an outbound mail relay, which is not available yet, so senders outside the organization will not receive a reply even when this is on. Replies to local users work today.</p>
+      </fieldset>
+
+      <div class="field">
+        <label for="oof-start">Start (optional)</label>
+        <input id="oof-start" type="datetime-local" name="start" value="{{.Start}}">
+      </div>
+      <div class="field">
+        <label for="oof-end">End (optional)</label>
+        <input id="oof-end" type="datetime-local" name="end" value="{{.End}}">
+      </div>
+      <p class="muted">Leave the times empty to keep replying for as long as automatic replies are on.</p>
+
+      <button type="submit" class="primary">Save</button>
+    </form>
+  </div>
+</div>
+{{template "foot" .}}{{end}}
