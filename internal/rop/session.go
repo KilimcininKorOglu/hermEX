@@ -7,19 +7,24 @@ package rop
 
 import "hermex/internal/objectstore"
 
-// objKind classifies the server object behind a handle. The browse/read
-// increments add folder, table, message, stream, and attachment kinds.
+// objKind classifies the server object behind a handle. The message + stream/
+// attachment increments add further kinds.
 type objKind uint8
 
 const (
-	kindLogon objKind = iota // an open mailbox store (the logon root)
+	kindLogon  objKind = iota // an open mailbox store (the logon root)
+	kindFolder                // an opened folder
+	kindTable                 // a contents or hierarchy table
 )
 
 // object is a server-side MAPI object referenced by a uint32 handle. Fields are
-// populated per kind; a logon object holds the open mailbox store.
+// populated per kind: a logon holds the open mailbox store, a folder its
+// objectstore id, a table its in-memory row snapshot and column set.
 type object struct {
-	kind  objKind
-	store *objectstore.Store
+	kind     objKind
+	store    *objectstore.Store // kindLogon
+	folderID int64              // kindFolder
+	table    *tableState        // kindTable
 }
 
 // Session is one MAPI/HTTP session's object/handle table — the analogue of a
@@ -46,6 +51,10 @@ func (s *Session) alloc(o *object) uint32 {
 	s.handles[h] = o
 	return h
 }
+
+// get returns the object behind a handle, or nil when the handle is unknown
+// (including the 0xFFFFFFFF null handle).
+func (s *Session) get(h uint32) *object { return s.handles[h] }
 
 // release frees a handle, closing the mailbox store if it was a logon root.
 func (s *Session) release(h uint32) {

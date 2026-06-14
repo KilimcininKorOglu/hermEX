@@ -217,6 +217,21 @@ func (s *Store) DeleteFolder(folderID int64) error {
 	return nil
 }
 
+// FolderExists reports whether a live (non-deleted) folder with the given id
+// exists in the object store.
+func (s *Store) FolderExists(folderID int64) (bool, error) {
+	var dummy int
+	err := s.objdb.QueryRow(
+		`SELECT 1 FROM folders WHERE folder_id=? AND is_deleted=0`, folderID).Scan(&dummy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // SetSubscribed sets a folder's IMAP subscription state, creating the folder's
 // index row if it does not yet exist. It reports ErrNotFound when no such
 // folder exists in the object store.

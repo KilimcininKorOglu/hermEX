@@ -2,17 +2,20 @@ package rop
 
 import "hermex/internal/ext"
 
-// ROP operation ids ([MS-OXCROPS] 2.2). v1 handles the read-core set; this
-// increment implements Logon and Release.
+// ROP operation ids ([MS-OXCROPS] 2.2). v1 handles the read-core set.
 const (
-	ropRelease uint8 = 0x01
-	ropLogon   uint8 = 0xFE
+	ropRelease          uint8 = 0x01
+	ropOpenFolder       uint8 = 0x02
+	ropGetContentsTable uint8 = 0x05
+	ropSetColumns       uint8 = 0x12
+	ropLogon            uint8 = 0xFE
 )
 
 // MAPI return codes ([MS-OXCDATA] 2.4.1) carried in a ROP response ReturnValue.
 const (
-	ecSuccess uint32 = 0x00000000
-	ecError   uint32 = 0x80004005 // generic failure / unimplemented ROP
+	ecSuccess  uint32 = 0x00000000
+	ecError    uint32 = 0x80004005 // generic failure / unimplemented ROP
+	ecNotFound uint32 = 0x8004010F // MAPI_E_NOT_FOUND (no such folder/object)
 )
 
 // Dispatch parses the request ROP list and returns the response ROP bytes plus
@@ -43,6 +46,18 @@ loop:
 			}
 		case ropRelease:
 			s.ropRelease(handles, hindex)
+		case ropOpenFolder:
+			if !s.ropOpenFolder(p, out, handles, hindex) {
+				break loop
+			}
+		case ropGetContentsTable:
+			if !s.ropGetContentsTable(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSetColumns:
+			if !s.ropSetColumns(p, out, handles, hindex) {
+				break loop
+			}
 		default:
 			writeErr(out, ropID, hindex, ecError)
 			break loop
