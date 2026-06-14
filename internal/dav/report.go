@@ -10,6 +10,7 @@ import (
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcical"
 	"hermex/internal/oxvcard"
 )
 
@@ -26,7 +27,7 @@ type reportReq struct {
 // collection: addressbook-multiget, addressbook-query, and sync-collection
 // (RFC 6578). Each returns 207 Multistatus with the requested vCards.
 func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox string) {
-	_, user, _ := classify(r.URL.Path)
+	kind, user, _ := classify(r.URL.Path)
 	if user == "" {
 		http.Error(w, "not a collection", http.StatusBadRequest)
 		return
@@ -54,8 +55,19 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox st
 		s.reportMultiget(w, st, req.Hrefs)
 	case "addressbook-query":
 		s.reportQueryOrSync(w, st, user, 0, false)
+	case "calendar-multiget":
+		s.reportCalMultiget(w, st, req.Hrefs)
+	case "calendar-query":
+		s.reportCalQueryOrSync(w, st, user, 0, false)
+	case "free-busy-query":
+		// Free/busy aggregation is not implemented in v1; return an empty result.
+		writeMultistatus(w, &multistatus{})
 	case "sync-collection":
-		s.reportQueryOrSync(w, st, user, parseSyncToken(req.SyncToken), true)
+		if kind == kindCalendar {
+			s.reportCalQueryOrSync(w, st, user, parseSyncToken(req.SyncToken), true)
+		} else {
+			s.reportQueryOrSync(w, st, user, parseSyncToken(req.SyncToken), true)
+		}
 	default:
 		http.Error(w, "unsupported report", http.StatusForbidden)
 	}
@@ -141,6 +153,91 @@ func addressDataResponse(href string, cn uint64, data string) msResponse {
 		Href: href,
 		Propstat: []msPropstat{{
 			Prop:   msProp{GetETag: etag(cn), AddressData: data},
+			Status: statusOK,
+		}},
+	}
+}
+
+// reportCalMultiget returns calendar-data for each requested href, mirroring
+// reportMultiget for the Calendar folder.
+func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store, hrefs []string) {
+	ms := &multistatus{}
+	for _, h := range hrefs {
+		name := path.Base(strings.TrimRight(h, "/"))
+		obj, found, err := findObjectByName(st, mapi.PrivateFIDCalendar, ".ics", name)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !found {
+			ms.Responses = append(ms.Responses, msResponse{Href: h, Status: statusNotFound})
+			continue
+		}
+		data, err := calendarData(st, obj.ID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		ms.Responses = append(ms.Responses, calendarDataResponse(h, obj.ChangeNumber, data))
+	}
+	writeMultistatus(w, ms)
+}
+
+// reportCalQueryOrSync returns calendar-data for the Calendar folder's members,
+// mirroring reportQueryOrSync. calendar-query filtering is not applied: every
+// member is returned (a documented v1 simplification, and a heavier one than for
+// contacts because a calendar grows unbounded over time and the client re-pulls
+// it each query). Deletions are not reported incrementally — the store
+// hard-deletes without a tombstone.
+func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Store, user string, sinceToken uint64, sync bool) {
+	objs, err := st.ListFolderObjects(mapi.PrivateFIDCalendar)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	max, err := st.FolderMaxChangeNumber(mapi.PrivateFIDCalendar)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	ms := &multistatus{}
+	for _, o := range objs {
+		if sync && o.ChangeNumber <= sinceToken {
+			continue
+		}
+		data, err := calendarData(st, o.ID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		href := calObjectPath(user, objectName(st, o.ID, ".ics"))
+		ms.Responses = append(ms.Responses, calendarDataResponse(href, o.ChangeNumber, data))
+	}
+	if sync {
+		ms.SyncToken = syncToken(max)
+	}
+	writeMultistatus(w, ms)
+}
+
+// calendarData exports a stored appointment to its iCalendar text.
+func calendarData(st *objectstore.Store, id int64) (string, error) {
+	msg, err := st.OpenMessage(id)
+	if err != nil {
+		return "", err
+	}
+	ics, err := oxcical.Export(msg, icalOptions(st))
+	if err != nil {
+		return "", err
+	}
+	return string(ics), nil
+}
+
+// calendarDataResponse builds a 200 response carrying a member's ETag and iCalendar.
+func calendarDataResponse(href string, cn uint64, data string) msResponse {
+	return msResponse{
+		Href: href,
+		Propstat: []msPropstat{{
+			Prop:   msProp{GetETag: etag(cn), CalendarData: data},
 			Status: statusOK,
 		}},
 	}

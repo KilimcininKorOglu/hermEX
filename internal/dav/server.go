@@ -51,6 +51,10 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Object methods dispatch by collection: a calendar .ics object is served by
+	// the CalDAV handlers, everything else by the CardDAV handlers.
+	kind, _, _ := classify(r.URL.Path)
+	calObject := kind == kindCalObject
 	switch r.Method {
 	case "OPTIONS":
 		s.handleOptions(w, r)
@@ -59,11 +63,23 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	case "REPORT":
 		s.handleReport(w, r, mailbox)
 	case http.MethodGet, http.MethodHead:
-		s.handleGet(w, r, mailbox)
+		if calObject {
+			s.handleCalGet(w, r, mailbox)
+		} else {
+			s.handleGet(w, r, mailbox)
+		}
 	case http.MethodPut:
-		s.handlePut(w, r, mailbox)
+		if calObject {
+			s.handleCalPut(w, r, mailbox)
+		} else {
+			s.handlePut(w, r, mailbox)
+		}
 	case http.MethodDelete:
-		s.handleDelete(w, r, mailbox)
+		if calObject {
+			s.handleCalDelete(w, r, mailbox)
+		} else {
+			s.handleDelete(w, r, mailbox)
+		}
 	default:
 		w.Header().Set("Allow", allowMethods)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
