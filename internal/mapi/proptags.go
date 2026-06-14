@@ -209,3 +209,53 @@ const (
 	ContainerClassStickyNote  = "IPF.StickyNote"  // notes
 	ContainerClassJournal     = "IPF.Journal"     // journal
 )
+
+// Contact (IPM.Contact) properties (PidTag*, MS-OXOCNTC). The email addresses,
+// work address, file-as, IM address, and has-picture flag are NAMED properties
+// in PSETID_Address (see namedprops.go); the tags below are the static PidTag
+// contact properties carried directly on the message object.
+const (
+	// Name and identity.
+	PrGivenName         = PropTag(0x3A06001F) // PtUnicode (PidTagGivenName)
+	PrSurname           = PropTag(0x3A11001F) // PtUnicode (PidTagSurname)
+	PrMiddleName        = PropTag(0x3A44001F) // PtUnicode (PidTagMiddleName)
+	PrDisplayNamePrefix = PropTag(0x3A45001F) // PtUnicode (PidTagDisplayNamePrefix, e.g. "Dr.")
+	PrGeneration        = PropTag(0x3A05001F) // PtUnicode (PidTagGeneration, e.g. "Jr.")
+	PrNickname          = PropTag(0x3A4F001F) // PtUnicode (PidTagNickname)
+	PrTitle             = PropTag(0x3A17001F) // PtUnicode (PidTagTitle, job title)
+	PrCompanyName       = PropTag(0x3A16001F) // PtUnicode (PidTagCompanyName)
+	PrDepartmentName    = PropTag(0x3A18001F) // PtUnicode (PidTagDepartmentName)
+	PrProfession        = PropTag(0x3A46001F) // PtUnicode (PidTagProfession)
+	PrBirthday          = PropTag(0x3A420040) // PtSysTime (PidTagBirthday)
+	PrBusinessHomePage  = PropTag(0x3A51001F) // PtUnicode (PidTagBusinessHomePage)
+	PrPersonalHomePage  = PropTag(0x3A50001F) // PtUnicode (PidTagPersonalHomePage)
+
+	// Telephone numbers.
+	PrBusinessTelephoneNumber  = PropTag(0x3A08001F) // PtUnicode (also the office number)
+	PrHomeTelephoneNumber      = PropTag(0x3A09001F) // PtUnicode
+	PrPrimaryTelephoneNumber   = PropTag(0x3A1A001F) // PtUnicode
+	PrBusiness2TelephoneNumber = PropTag(0x3A1B001F) // PtUnicode
+	PrMobileTelephoneNumber    = PropTag(0x3A1C001F) // PtUnicode
+	PrCarTelephoneNumber       = PropTag(0x3A1E001F) // PtUnicode
+	PrOtherTelephoneNumber     = PropTag(0x3A1F001F) // PtUnicode
+	PrPagerTelephoneNumber     = PropTag(0x3A21001F) // PtUnicode
+	PrBusinessFaxNumber        = PropTag(0x3A24001F) // PtUnicode
+	PrHomeFaxNumber            = PropTag(0x3A25001F) // PtUnicode
+	PrHome2TelephoneNumber     = PropTag(0x3A2F001F) // PtUnicode
+
+	// Home postal address.
+	PrHomeAddressStreet          = PropTag(0x3A5D001F) // PtUnicode
+	PrHomeAddressCity            = PropTag(0x3A59001F) // PtUnicode
+	PrHomeAddressStateOrProvince = PropTag(0x3A5C001F) // PtUnicode
+	PrHomeAddressPostalCode      = PropTag(0x3A5B001F) // PtUnicode
+	PrHomeAddressCountry         = PropTag(0x3A5A001F) // PtUnicode
+	PrHomeAddressPostOfficeBox   = PropTag(0x3A5E001F) // PtUnicode
+
+	// Other postal address.
+	PrOtherAddressStreet          = PropTag(0x3A63001F) // PtUnicode
+	PrOtherAddressCity            = PropTag(0x3A5F001F) // PtUnicode
+	PrOtherAddressStateOrProvince = PropTag(0x3A62001F) // PtUnicode
+	PrOtherAddressPostalCode      = PropTag(0x3A61001F) // PtUnicode
+	PrOtherAddressCountry         = PropTag(0x3A60001F) // PtUnicode
+	PrOtherAddressPostOfficeBox   = PropTag(0x3A64001F) // PtUnicode
+)
