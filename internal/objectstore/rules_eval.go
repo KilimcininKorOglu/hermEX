@@ -1,0 +1,441 @@
+package objectstore
+
+import (
+	"strings"
+
+	"hermex/internal/mapi"
+)
+
+// Fuzzy-level bits for a ContentRestriction (MS-OXCDATA §2.12.3.1). The low word
+// selects the match kind; the high word carries case/diacritic flags.
+const (
+	flFullString = 0x0000 // match the whole value
+	flSubstring  = 0x0001 // match a substring
+	flPrefix     = 0x0002 // match a leading prefix
+	flIgnoreCase = 0x00010000
+)
+
+// ruleFuzzyContains is the fuzzy level the curated "contains" conditions use:
+// a case-insensitive substring match.
+const ruleFuzzyContains = flSubstring | flIgnoreCase
+
+// evalRestriction reports whether a restriction matches a message's property
+// bag. It is a pure recursive walk over the restriction tree; an absent property
+// fails a leaf rather than erroring, so a rule simply does not match a message
+// that lacks the tested property. Node kinds the rule editor does not produce
+// (recipient sub-objects, property-to-property compares, counts) evaluate to
+// false — they are never silently treated as a match.
+func evalRestriction(r mapi.Restriction, props mapi.PropertyValues) bool {
+	switch r.Type {
+	case mapi.ResAnd:
+		kids, _ := r.Value.([]mapi.Restriction)
+		for _, k := range kids {
+			if !evalRestriction(k, props) {
+				return false
+			}
+		}
+		return true
+	case mapi.ResOr:
+		kids, _ := r.Value.([]mapi.Restriction)
+		for _, k := range kids {
+			if evalRestriction(k, props) {
+				return true
+			}
+		}
+		return false
+	case mapi.ResNot:
+		inner, ok := r.Value.(mapi.Restriction)
+		if !ok {
+			return false
+		}
+		return !evalRestriction(inner, props)
+	case mapi.ResContent:
+		c, ok := r.Value.(mapi.ContentRestriction)
+		return ok && evalContent(c, props)
+	case mapi.ResProperty:
+		pr, ok := r.Value.(mapi.PropertyRestriction)
+		return ok && evalProperty(pr, props)
+	case mapi.ResBitmask:
+		b, ok := r.Value.(mapi.BitmaskRestriction)
+		return ok && evalBitmask(b, props)
+	case mapi.ResSize:
+		sz, ok := r.Value.(mapi.SizeRestriction)
+		return ok && evalSize(sz, props)
+	case mapi.ResExist:
+		e, ok := r.Value.(mapi.ExistRestriction)
+		return ok && props.Has(e.PropTag)
+	case mapi.ResComment:
+		// A comment annotates an optional child restriction; the annotation
+		// itself imposes no constraint, so an absent child matches.
+		c, ok := r.Value.(mapi.CommentRestriction)
+		if !ok {
+			return false
+		}
+		if c.Res == nil {
+			return true
+		}
+		return evalRestriction(*c.Res, props)
+	case mapi.ResNull:
+		// A null restriction is the absence of a constraint: it matches every
+		// message (MS-OXCDATA). The rule editor never emits this.
+		return true
+	default:
+		// ResSub, ResPropCompare, ResCount, ResAnnotation, unknown: unsupported.
+		return false
+	}
+}
+
+// evalContent matches a string property against the search value with the
+// fuzzy level's match kind and case sensitivity. Only string-valued properties
+// participate; a non-string property or value fails the match.
+func evalContent(c mapi.ContentRestriction, props mapi.PropertyValues) bool {
+	v, ok := props.Get(c.PropTag)
+	if !ok {
+		return false
+	}
+	hay, ok := v.(string)
+	if !ok {
+		return false
+	}
+	needle, ok := c.PropVal.Value.(string)
+	if !ok {
+		return false
+	}
+	if c.FuzzyLevel&flIgnoreCase != 0 {
+		hay = strings.ToLower(hay)
+		needle = strings.ToLower(needle)
+	}
+	switch c.FuzzyLevel & 0x0000FFFF {
+	case flFullString:
+		return hay == needle
+	case flPrefix:
+		return strings.HasPrefix(hay, needle)
+	default: // flSubstring and any unrecognized low word
+		return strings.Contains(hay, needle)
+	}
+}
+
+// evalProperty compares a property against a value with a relational operator.
+// Integer-typed values (importance, message size, delivery time) compare
+// numerically; string values compare lexically. A type mismatch fails.
+func evalProperty(pr mapi.PropertyRestriction, props mapi.PropertyValues) bool {
+	have, ok := props.Get(pr.PropTag)
+	if !ok {
+		return false
+	}
+	if hn, hok := toInt64(have); hok {
+		if wn, wok := toInt64(pr.PropVal.Value); wok {
+			return applyRelop(cmpInt64(hn, wn), pr.Relop)
+		}
+		return false
+	}
+	if hs, hok := have.(string); hok {
+		if ws, wok := pr.PropVal.Value.(string); wok {
+			return applyRelop(strings.Compare(hs, ws), pr.Relop)
+		}
+	}
+	return false
+}
+
+// evalBitmask tests masked bits of an integer property.
+func evalBitmask(b mapi.BitmaskRestriction, props mapi.PropertyValues) bool {
+	v, ok := props.Get(b.PropTag)
+	if !ok {
+		return false
+	}
+	n, ok := toInt64(v)
+	if !ok {
+		return false
+	}
+	masked := uint32(n) & b.Mask
+	if b.Relop == mapi.BmrEqz {
+		return masked == 0
+	}
+	return masked != 0
+}
+
+// evalSize compares the byte size of a property's value against a threshold.
+func evalSize(sz mapi.SizeRestriction, props mapi.PropertyValues) bool {
+	v, ok := props.Get(sz.PropTag)
+	if !ok {
+		return false
+	}
+	return applyRelop(cmpInt64(int64(valueByteSize(v)), int64(sz.Size)), sz.Relop)
+}
+
+// toInt64 coerces an integer-typed property value to int64, reporting ok=false
+// for non-integer values. It covers the MAPI integer types a rule condition
+// compares (PtLong int32, PtI8/PtCurrency int64, PtSysTime uint64).
+func toInt64(v any) (int64, bool) {
+	switch n := v.(type) {
+	case int32:
+		return int64(n), true
+	case int64:
+		return n, true
+	case int16:
+		return int64(n), true
+	case uint32:
+		return int64(n), true
+	case uint64:
+		return int64(n), true
+	case int:
+		return int64(n), true
+	default:
+		return 0, false
+	}
+}
+
+// valueByteSize returns the byte length of a property value for a size
+// restriction: the length of a string or binary, or the fixed width of a scalar.
+func valueByteSize(v any) int {
+	switch x := v.(type) {
+	case string:
+		return len(x)
+	case []byte:
+		return len(x)
+	case int16:
+		return 2
+	case int32, uint32:
+		return 4
+	case int64, uint64:
+		return 8
+	default:
+		return 0
+	}
+}
+
+// cmpInt64 returns -1, 0, or 1 as a is less than, equal to, or greater than b.
+func cmpInt64(a, b int64) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	default:
+		return 0
+	}
+}
+
+// applyRelop maps a comparison sign (-1/0/1) through a relational operator. The
+// regex operator is not supported here and never matches.
+func applyRelop(cmp int, op mapi.Relop) bool {
+	switch op {
+	case mapi.RelopLT:
+		return cmp < 0
+	case mapi.RelopLE:
+		return cmp <= 0
+	case mapi.RelopGT:
+		return cmp > 0
+	case mapi.RelopGE:
+		return cmp >= 0
+	case mapi.RelopEQ:
+		return cmp == 0
+	case mapi.RelopNE:
+		return cmp != 0
+	default:
+		return false
+	}
+}
+
+// RuleRunResult summarizes an on-demand rule run over a folder.
+type RuleRunResult struct {
+	Evaluated int // messages examined
+	Affected  int // messages a matching rule acted on (moved, deleted, or marked read)
+}
+
+// RunRules evaluates a folder's enabled rules against every message in it, in
+// PR_RULE_SEQUENCE order, applying the actions of each matching rule. It is the
+// on-demand entry point (a user's "apply rules now"); incoming mail is processed
+// per-message as it is delivered. A move or delete is terminal for that message:
+// once it leaves the folder, no further rule is evaluated against it.
+func (s *Store) RunRules(folderID int64) (RuleRunResult, error) {
+	var res RuleRunResult
+	rules, err := s.ListRules(folderID)
+	if err != nil {
+		return res, err
+	}
+	if len(rules) == 0 {
+		return res, nil
+	}
+	msgs, err := s.ListMessages(folderID)
+	if err != nil {
+		return res, err
+	}
+	for _, m := range msgs {
+		res.Evaluated++
+		acted, err := s.applyRulesToMessage(folderID, m, rules)
+		if err != nil {
+			return res, err
+		}
+		if acted {
+			res.Affected++
+		}
+	}
+	return res, nil
+}
+
+// applyRulesToMessage runs a folder's pre-loaded rules against one message,
+// applying matching rules' actions in sequence order until a terminal action
+// (move/delete) fires or a matching rule carries the ST_EXIT_LEVEL flag. The
+// message's byte size is injected as PR_MESSAGE_SIZE so size conditions work
+// against a value the property bag does not itself store. It reports whether any
+// rule acted on the message.
+func (s *Store) applyRulesToMessage(folderID int64, m MessageInfo, rules []Rule) (bool, error) {
+	props, err := s.GetMessageProperties(m.ID)
+	if err != nil {
+		return false, err
+	}
+	props.Set(mapi.PrMessageSize, int32(m.Size))
+
+	acted := false
+	for _, r := range rules {
+		if !r.Enabled() {
+			continue
+		}
+		if !evalRestriction(r.Condition, props) {
+			continue
+		}
+		terminal, err := s.applyRuleActions(folderID, m.UID, r.Actions)
+		if err != nil {
+			return acted, err
+		}
+		acted = true
+		if terminal || r.State&mapi.RuleStateExitLevel != 0 {
+			return acted, nil
+		}
+	}
+	return acted, nil
+}
+
+// applyRuleActions applies a matched rule's action blocks to a message in
+// srcFolder. It returns terminal=true once an action moves or deletes the
+// message, since its uid in srcFolder is then no longer valid and no further
+// rule may run against it. Unsupported action types are skipped.
+func (s *Store) applyRuleActions(srcFolder int64, uid uint32, acts mapi.RuleActions) (bool, error) {
+	for _, b := range acts.Blocks {
+		switch b.Type {
+		case mapi.OpMarkAsRead:
+			cur, err := s.MessageFlags(srcFolder, uid)
+			if err != nil {
+				return false, err
+			}
+			if cur&FlagSeen == 0 {
+				if err := s.SetMessageFlags(srcFolder, uid, cur|FlagSeen); err != nil {
+					return false, err
+				}
+			}
+		case mapi.OpMove:
+			dst, ok := moveTargetFolder(b.Data)
+			if !ok {
+				continue
+			}
+			if err := s.moveMessage(srcFolder, uid, dst); err != nil {
+				return false, err
+			}
+			return true, nil
+		case mapi.OpDelete:
+			trash := int64(mapi.PrivateFIDDeletedItems)
+			if srcFolder == trash {
+				if err := s.DeleteMessage(srcFolder, uid); err != nil {
+					return false, err
+				}
+			} else if err := s.moveMessage(srcFolder, uid, trash); err != nil {
+				return false, err
+			}
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// moveTargetFolder extracts the destination folder id from a same-store
+// MoveCopyAction, whose FolderEID carries an SVREID holding the folder id.
+func moveTargetFolder(data any) (int64, bool) {
+	mc, ok := data.(mapi.MoveCopyAction)
+	if !ok {
+		return 0, false
+	}
+	svr, ok := mc.FolderEID.(mapi.SVREID)
+	if !ok {
+		return 0, false
+	}
+	return int64(svr.FolderID), true
+}
+
+// moveMessage re-files a message into dst, preserving its flags and internal
+// date, then removes it from src. This mirrors the copy-then-delete move the
+// webmail action path performs.
+func (s *Store) moveMessage(src int64, uid uint32, dst int64) error {
+	m, err := s.MessageByUID(src, uid)
+	if err != nil {
+		return err
+	}
+	raw, err := s.GetMessageRaw(src, uid)
+	if err != nil {
+		return err
+	}
+	if _, err := s.AppendMessage(dst, raw, m.InternalDate, m.Flags); err != nil {
+		return err
+	}
+	return s.DeleteMessage(src, uid)
+}
+
+// The Rule* constructors below build the curated condition and action vocabulary
+// the rule editor exposes. Centralizing them keeps the RESTRICTION fuzzy levels
+// and the move action's SVREID encoding in one place, shared by the editor and
+// the tests.
+
+// RuleSubjectContains matches messages whose subject contains text
+// (case-insensitive).
+func RuleSubjectContains(text string) mapi.Restriction {
+	return contentContains(mapi.PrSubject, text)
+}
+
+// RuleFromContains matches messages whose sender SMTP address contains text
+// (case-insensitive).
+func RuleFromContains(text string) mapi.Restriction {
+	return contentContains(mapi.PrSenderSmtpAddress, text)
+}
+
+// contentContains builds a case-insensitive substring ResContent on tag.
+func contentContains(tag mapi.PropTag, text string) mapi.Restriction {
+	return mapi.Restriction{Type: mapi.ResContent, Value: mapi.ContentRestriction{
+		FuzzyLevel: ruleFuzzyContains,
+		PropTag:    tag,
+		PropVal:    mapi.TaggedPropVal{Tag: tag, Value: text},
+	}}
+}
+
+// RuleImportanceIs matches messages whose PR_IMPORTANCE equals level
+// (mapi.ImportanceLow/Normal/High).
+func RuleImportanceIs(level int) mapi.Restriction {
+	return mapi.Restriction{Type: mapi.ResProperty, Value: mapi.PropertyRestriction{
+		Relop:   mapi.RelopEQ,
+		PropTag: mapi.PrImportance,
+		PropVal: mapi.TaggedPropVal{Tag: mapi.PrImportance, Value: int32(level)},
+	}}
+}
+
+// RuleSizeAtLeast matches messages of at least the given byte size.
+func RuleSizeAtLeast(bytes int) mapi.Restriction {
+	return mapi.Restriction{Type: mapi.ResProperty, Value: mapi.PropertyRestriction{
+		Relop:   mapi.RelopGE,
+		PropTag: mapi.PrMessageSize,
+		PropVal: mapi.TaggedPropVal{Tag: mapi.PrMessageSize, Value: int32(bytes)},
+	}}
+}
+
+// RuleMarkReadAction marks a matching message as read.
+func RuleMarkReadAction() mapi.ActionBlock { return mapi.ActionBlock{Type: mapi.OpMarkAsRead} }
+
+// RuleDeleteAction moves a matching message to Deleted Items.
+func RuleDeleteAction() mapi.ActionBlock { return mapi.ActionBlock{Type: mapi.OpDelete} }
+
+// RuleMoveAction moves a matching message to the target folder. The destination
+// is carried in a same-store MoveCopyAction whose SVREID holds the folder id.
+func RuleMoveAction(targetFolderID int64) mapi.ActionBlock {
+	return mapi.ActionBlock{Type: mapi.OpMove, Data: mapi.MoveCopyAction{
+		SameStore: true,
+		FolderEID: mapi.SVREID{FolderID: mapi.EID(uint64(targetFolderID))},
+	}}
+}
