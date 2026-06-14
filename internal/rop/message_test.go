@@ -175,3 +175,52 @@ func TestOpenMessageNotFound(t *testing.T) {
 		t.Errorf("OpenMessage(bogus) ReturnValue = %#x, want ecNotFound (%#x)", ec, ecNotFound)
 	}
 }
+
+// TestBrowseOpenChain proves the end-to-end read path: browse a folder with
+// PrMid in the column set, take the message id the row hands back, and
+// OpenMessage it. PrMid is synthesized in the row projection, so this is the
+// integration check that the browse->open chain actually closes.
+func TestBrowseOpenChain(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxMessage(t, dir, "CHAINMSG")
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+
+	sess := NewSession(dir)
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	folderH := h[1]
+	_, h = sess.Dispatch(buildGetContentsTable(0, 1), []uint32{folderH, 0xFFFFFFFF})
+	tableH := h[1]
+
+	cols := []mapi.PropTag{mapi.PrMid, mapi.PrSubject}
+	sess.Dispatch(buildSetColumns(0, cols), []uint32{tableH})
+	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
+	_, rows := queryRowsResponse(t, qr, cols)
+	if len(rows) != 1 {
+		t.Fatalf("browse returned %d rows, want 1", len(rows))
+	}
+	midVal, ok := rows[0].Get(mapi.PrMid)
+	if !ok {
+		t.Fatal("row has no PrMid — the browse->open chain is broken (no id to open)")
+	}
+	mid, ok := midVal.(int64)
+	if !ok {
+		t.Fatalf("PrMid value type = %T, want int64", midVal)
+	}
+
+	// Open the message by exactly the id the browse handed back.
+	om, _ := sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mid)), []uint32{logonH, 0xFFFFFFFF})
+	p := ext.NewPull(om, ext.FlagUTF16)
+	mustU8(t, p, "RopId")
+	mustU8(t, p, "ohindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("OpenMessage via browsed PrMid: ec = %#x (chain broken)", ec)
+	}
+	mustU8(t, p, "hasNamedProperties")
+	pullTypedString(t, p) // SubjectPrefix
+	if got := pullTypedString(t, p); got != "CHAINMSG" {
+		t.Errorf("opened-message subject = %q, want \"CHAINMSG\"", got)
+	}
+}

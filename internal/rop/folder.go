@@ -1,6 +1,8 @@
 package rop
 
 import (
+	"slices"
+
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
@@ -39,11 +41,30 @@ func (t *tableState) total() int {
 
 // rowProps projects the column set for the row at idx from the store: a message
 // property bag for a contents table, a folder property bag for a hierarchy one.
+// The row identity (PrMid / PrFolderID) is the object's EID, not a stored
+// property, so it is synthesized when requested — without it the client has no
+// id to OpenMessage / OpenFolder the row it just found (the browse->open chain).
 func (t *tableState) rowProps(store *objectstore.Store, idx int) (mapi.PropertyValues, error) {
 	if t.kind == tableHierarchy {
-		return store.GetFolderProperties(t.folders[idx].ID, t.columns...)
+		fid := t.folders[idx].ID
+		props, err := store.GetFolderProperties(fid, t.columns...)
+		if err != nil {
+			return nil, err
+		}
+		if slices.Contains(t.columns, mapi.PrFolderID) {
+			props.Set(mapi.PrFolderID, int64(mapi.MakeEIDEx(1, uint64(fid))))
+		}
+		return props, nil
 	}
-	return store.GetMessageProperties(t.messages[idx].ID, t.columns...)
+	mid := t.messages[idx].ID
+	props, err := store.GetMessageProperties(mid, t.columns...)
+	if err != nil {
+		return nil, err
+	}
+	if slices.Contains(t.columns, mapi.PrMid) {
+		props.Set(mapi.PrMid, int64(mapi.MakeEIDEx(1, uint64(mid))))
+	}
+	return props, nil
 }
 
 // ropOpenFolder handles RopOpenFolder ([MS-OXCFOLD] 2.2.1.1): it resolves the

@@ -21,6 +21,7 @@ const (
 	PrHierarchyChangeNum        = PropTag(0x663E0003) // PtLong
 	PrParentFolderID            = PropTag(0x67490014) // PtI8 (PidTagParentFolderId)
 	PrFolderID                  = PropTag(0x67480014) // PtI8 (PidTagFolderId)
+	PrMid                       = PropTag(0x674A0014) // PtI8 (PidTagMid, the message id)
 )
 
 // Store-root property tags written when seeding a mailbox.
