@@ -34,6 +34,10 @@ const (
 	// settings and signatures persist as a MAPI property rather than in a
 	// dedicated table.
 	PrWebmailSettings = PropTag(0x6772001F) // PtUnicode
+	// PrOOFSettings is the provider-defined store-root property (0x6773) holding
+	// the out-of-office configuration (reply text, subject, schedule) as a JSON
+	// string. The on/off flag is mirrored into the standard PrOOFState boolean.
+	PrOOFSettings = PropTag(0x6773001F) // PtUnicode
 )
 
 // Large message/attachment content property tags. These hold bodies and
