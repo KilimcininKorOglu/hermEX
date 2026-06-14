@@ -27,7 +27,11 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleGetAttachment(w, inner, sess)
 	case "SyncFolderItems":
 		s.handleSyncFolderItems(w, inner, sess)
-	// CreateItem, UpdateItem, DeleteItem are added in later increments.
+	case "CreateItem":
+		s.handleCreateItem(w, inner, sess)
+	case "ResolveNames":
+		s.handleResolveNames(w, inner, sess)
+	// UpdateItem, DeleteItem are added in a later increment.
 	default:
 		writeSOAPFault(w, "ErrorInvalidRequest", "unsupported operation: "+op)
 	}
