@@ -159,6 +159,45 @@ func TestDeleteRule(t *testing.T) {
 	}
 }
 
+// TestSetRuleEnabled checks the enable/disable toggle flips only ST_ENABLED,
+// preserves the rule's other state bits, and reports ErrNotFound for a missing
+// rule.
+func TestSetRuleEnabled(t *testing.T) {
+	s := openSeededStore(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+
+	// Start enabled, with an extra state bit set to prove it is preserved.
+	r := subjectContainsMarkRead("toggle me", "x")
+	r.State = mapi.RuleStateEnabled | mapi.RuleStateExitLevel
+	id, err := s.AddRule(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SetRuleEnabled(id, false); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+	rules, _ := s.ListRules(inbox)
+	if rules[0].Enabled() {
+		t.Errorf("rule still enabled after disable")
+	}
+	if rules[0].State&mapi.RuleStateExitLevel == 0 {
+		t.Errorf("disable cleared an unrelated state bit (ST_EXIT_LEVEL)")
+	}
+
+	if err := s.SetRuleEnabled(id, true); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	rules, _ = s.ListRules(inbox)
+	if !rules[0].Enabled() {
+		t.Errorf("rule not enabled after enable")
+	}
+
+	if err := s.SetRuleEnabled(999999, true); !errors.Is(err, ErrNotFound) {
+		t.Errorf("SetRuleEnabled on a missing rule = %v, want ErrNotFound", err)
+	}
+}
+
 // TestListRulesEmpty checks a folder with no rules yields an empty slice and no
 // error (not a nil-dereference or a spurious row).
 func TestListRulesEmpty(t *testing.T) {
