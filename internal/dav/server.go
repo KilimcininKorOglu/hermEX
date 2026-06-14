@@ -47,6 +47,8 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.handleOptions(w, r)
 	case "PROPFIND":
 		s.handlePropfind(w, r, user, mailbox)
+	case "REPORT":
+		s.handleReport(w, r, mailbox)
 	case http.MethodGet, http.MethodHead:
 		s.handleGet(w, r, mailbox)
 	case http.MethodPut:
@@ -59,9 +61,8 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// allowMethods lists the methods implemented so far; the REPORT increment adds
-// CardDAV reports to this set.
-const allowMethods = "OPTIONS, PROPFIND, GET, HEAD, PUT, DELETE"
+// allowMethods lists the DAV methods the server implements.
+const allowMethods = "OPTIONS, PROPFIND, REPORT, GET, HEAD, PUT, DELETE"
 
 // basicAuth validates HTTP Basic credentials against the directory and returns
 // the user and mailbox path. On failure it writes a 401 challenge and returns
