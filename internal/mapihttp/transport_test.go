@@ -212,15 +212,17 @@ func TestNspiRouted(t *testing.T) {
 }
 
 // TestExecuteRopFraming confirms the Execute response carries a valid, decodable
-// RPC_HEADER_EXT ROP buffer (the transport <-> oxmapihttp codec wiring). The ROP
-// layer fills in the per-ROP responses; the skeleton frames an empty buffer.
+// RPC_HEADER_EXT ROP buffer (the transport <-> oxmapihttp codec wiring). A
+// truncated ROP (a bare RopId) cannot complete its header, so dispatch yields an
+// empty but valid buffer; TestExecuteRopLogon drives a full RopLogon end to end.
 func TestExecuteRopFraming(t *testing.T) {
 	ts := newTestServer(t)
 	conn := mapiPost(t, ts, "/mapi/emsmdb", "Connect", connectBody(), nil)
 	conn.Body.Close()
 	sid, seq := cookieByName(conn, "sid"), cookieByName(conn, "sequence")
 
-	// Execute carrying a real (1-ROP) request buffer.
+	// Execute carrying a truncated ROP (RopId only): dispatch can't read the
+	// rest of the header, so the response is an empty buffer.
 	reqRop := oxmapihttp.EncodeExecute([]byte{0xFE}, nil)
 	var eb []byte
 	eb = binary.LittleEndian.AppendUint32(eb, 0)                   // Flags
@@ -251,6 +253,65 @@ func TestExecuteRopFraming(t *testing.T) {
 		t.Fatalf("Execute response RopBuffer did not decode: %v", err)
 	}
 	if len(rops) != 0 || len(handles) != 0 {
-		t.Errorf("skeleton response should be an empty ROP buffer, got rops=%x handles=%v", rops, handles)
+		t.Errorf("truncated ROP should frame an empty buffer, got rops=%x handles=%v", rops, handles)
+	}
+}
+
+// TestExecuteRopLogon drives a complete RopLogon through the full stack —
+// Connect, then Execute with a real ROP buffer — and confirms the decoded
+// response carries a non-null output handle plus the 13 special-folder EIDs.
+// This exercises the DecodeExecute -> Dispatch -> EncodeExecute path that
+// cross-Execute handle persistence rides on.
+func TestExecuteRopLogon(t *testing.T) {
+	ts := newTestServer(t)
+	conn := mapiPost(t, ts, "/mapi/emsmdb", "Connect", connectBody(), nil)
+	conn.Body.Close()
+	sid, seq := cookieByName(conn, "sid"), cookieByName(conn, "sequence")
+
+	// RopLogon request: header (RopId, LogonId, OutputHandleIndex) + private
+	// LOGON_REQUEST body (LogonFlags, OpenFlags, StoreState, EssdnSize).
+	ropReq := []byte{0xFE, 0x00, 0x00, 0x01}             // Logon, LogonId, hindex, LogonFlags=Private
+	ropReq = binary.LittleEndian.AppendUint32(ropReq, 0) // OpenFlags
+	ropReq = binary.LittleEndian.AppendUint32(ropReq, 0) // StoreState
+	ropReq = binary.LittleEndian.AppendUint16(ropReq, 0) // EssdnSize
+	reqRop := oxmapihttp.EncodeExecute(ropReq, []uint32{0xFFFFFFFF})
+
+	var eb []byte
+	eb = binary.LittleEndian.AppendUint32(eb, 0)                   // Flags
+	eb = binary.LittleEndian.AppendUint32(eb, uint32(len(reqRop))) // RopBufferSize
+	eb = append(eb, reqRop...)                                     // RopBuffer
+	eb = binary.LittleEndian.AppendUint32(eb, 0x10000)             // MaxRopOut
+
+	resp := mapiPost(t, ts, "/mapi/emsmdb", "Execute", eb, func(r *http.Request) {
+		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
+		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
+	})
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	_, payload, found := bytes.Cut(body, []byte("\r\n\r\n"))
+	if !found || len(payload) < 16 {
+		t.Fatalf("malformed execute response (%d bytes)", len(payload))
+	}
+	cbOut := binary.LittleEndian.Uint32(payload[12:])
+	if int(16+cbOut) > len(payload) {
+		t.Fatalf("RopBufferSize %d overruns payload %d", cbOut, len(payload))
+	}
+	rops, handles, err := oxmapihttp.DecodeExecute(payload[16 : 16+cbOut])
+	if err != nil {
+		t.Fatalf("decode logon response: %v", err)
+	}
+	if len(handles) != 1 || handles[0] == 0xFFFFFFFF {
+		t.Fatalf("logon did not set the output handle: %v", handles)
+	}
+	// Response: RopId(0xFE), OutputHandleIndex(0), ReturnValue(0), LogonFlags,
+	// then 13 FolderId EIDs. Confirm the header and that all 13 EIDs fit.
+	if len(rops) < 3+1+13*8 {
+		t.Fatalf("logon response too short: %d bytes", len(rops))
+	}
+	if rops[0] != 0xFE || rops[1] != 0x00 {
+		t.Errorf("response header = % x, want FE 00", rops[0:2])
+	}
+	if ec := binary.LittleEndian.Uint32(rops[2:]); ec != 0 {
+		t.Errorf("ReturnValue = %#x, want 0", ec)
 	}
 }
