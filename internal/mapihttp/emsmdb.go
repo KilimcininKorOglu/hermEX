@@ -74,9 +74,9 @@ func (s *Server) emsConnect(w http.ResponseWriter, r *http.Request, sess *sessio
 	writeNormal(w, r, "Connect", out.b)
 }
 
-// emsExecute carries one ROP request buffer. The skeleton validates the session
-// cookies and frames an empty ROP response; the ROP buffer codec and dispatch
-// land in the next increment.
+// emsExecute carries one ROP request buffer: it validates the session cookies,
+// decodes the RPC_HEADER_EXT-framed request ROPs, dispatches them against the
+// session's object/handle table, and re-frames the response ROPs.
 func (s *Server) emsExecute(w http.ResponseWriter, r *http.Request, sess *session) {
 	sid, errSid := r.Cookie("sid")
 	seq, errSeq := r.Cookie("sequence")
@@ -84,27 +84,42 @@ func (s *Server) emsExecute(w http.ResponseWriter, r *http.Request, sess *sessio
 		writeRespError(w, r, "Execute", rcMissingCookie)
 		return
 	}
-	newSeq, _, code := s.sessions.execute(sid.Value, seq.Value, sess.user)
+	newSeq, ctx, code := s.sessions.execute(sid.Value, seq.Value, sess.user)
 	if code != rcSuccess {
 		writeRespError(w, r, "Execute", code)
 		return
 	}
+	// The sequence is rolled atomically by execute; advertise the new value
+	// before any later error return so the client stays in lockstep.
+	setCookie(w, "sequence", newSeq)
 
 	body, _ := io.ReadAll(r.Body)
 	rd := &reader{b: body}
-	rd.u32()           // Flags
-	cbIn := rd.u32()   // RopBufferSize
-	rd.take(int(cbIn)) // RopBuffer (parsed and dispatched by the ROP layer in 4-C)
-	rd.u32()           // MaxRopOut
+	rd.u32()                     // Flags
+	cbIn := rd.u32()             // RopBufferSize
+	ropBuf := rd.take(int(cbIn)) // RopBuffer
+	rd.u32()                     // MaxRopOut
 	if rd.err {
 		writeRespError(w, r, "Execute", rcInvalidReqBody)
 		return
 	}
-	setCookie(w, "sequence", newSeq)
 
-	// The skeleton frames an empty ROP response buffer — a valid, final
-	// RPC_HEADER_EXT envelope. The ROP layer fills in the per-ROP responses.
-	respRop := oxmapihttp.EncodeExecute(nil, nil)
+	// An empty buffer is a valid no-op; a non-empty buffer that fails to decode
+	// is a malformed request. A decoded buffer is dispatched against the table.
+	var respRop []byte
+	switch {
+	case len(ropBuf) == 0:
+		respRop = oxmapihttp.EncodeExecute(nil, nil)
+	default:
+		reqRops, reqHandles, err := oxmapihttp.DecodeExecute(ropBuf)
+		if err != nil {
+			writeRespError(w, r, "Execute", rcInvalidReqBody)
+			return
+		}
+		respRops, respHandles := ctx.ropSess.Dispatch(reqRops, reqHandles)
+		respRop = oxmapihttp.EncodeExecute(respRops, respHandles)
+	}
+
 	var out writer
 	out.u32(rcSuccess)            // StatusCode
 	out.u32(0)                    // ErrorCode
