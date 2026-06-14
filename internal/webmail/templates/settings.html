@@ -26,6 +26,10 @@
         <label class="check"><input type="radio" name="density" value="extended"{{if eq .Density "extended"}} checked{{end}}> Comfortable</label>
       </div>
       <div class="field">
+        <label>Conversations</label>
+        <label class="check"><input type="checkbox" name="conversationview" value="1"{{if .ConversationView}} checked{{end}}> Group the message list into conversation threads</label>
+      </div>
+      <div class="field">
         <label>Reading pane location</label>
         <label class="check"><input type="radio" name="previewpane" value="none"{{if eq .PreviewPane "none"}} checked{{end}}> No preview</label>
         <label class="check"><input type="radio" name="previewpane" value="right"{{if eq .PreviewPane "right"}} checked{{end}}> Right</label>

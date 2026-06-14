@@ -30,6 +30,7 @@ type webmailSettings struct {
 	IncomingRender        string      `json:"incomingRender"`        // how received mail is displayed: "html" | "plain" (force plain text)
 	RequestReceiptDefault bool        `json:"requestReceiptDefault"` // pre-check "request read receipt" on a fresh compose
 	SafeSenders           []string    `json:"safeSenders"`           // addresses/domains allowed to load remote content in the reader
+	ConversationView      bool        `json:"conversationView"`      // group the message list into RFC 5256 conversation threads
 }
 
 // category is one named, colored label in the mailbox's master category list.
@@ -236,6 +237,7 @@ func (s *Server) handleSettingsSubmit(w http.ResponseWriter, r *http.Request) {
 		// A checkbox posts a value only when checked; its absence on a full "save"
 		// submit therefore clears the preference.
 		cfg.RequestReceiptDefault = r.FormValue("requestreceipt") != ""
+		cfg.ConversationView = r.FormValue("conversationview") != ""
 		// The default sort order is posted as one "key dir" value (e.g. "date desc").
 		if parts := strings.Fields(r.FormValue("defaultsort")); len(parts) == 2 {
 			cfg.DefaultSort = whitelist(parts[0], "date", "from", "subject", "size", "flag", "read")
