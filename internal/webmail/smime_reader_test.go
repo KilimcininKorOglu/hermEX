@@ -48,8 +48,9 @@ func readMessage(t *testing.T, c *http.Client, ts string, uid uint32) string {
 	return body
 }
 
-// TestReaderSignedVerified stores a signed message and confirms the reader shows
-// the verified banner and the signed content.
+// TestReaderSignedVerified stores a signed message whose signer certificate
+// matches the From address and confirms the reader names the signer (an honest
+// "Signed by", not an over-claimed "verified") and shows the signed content.
 func TestReaderSignedVerified(t *testing.T) {
 	path := emptyMailbox(t)
 	_, key, cert := identityP12(t, "alice@hermex.test", "pass")
@@ -62,10 +63,42 @@ func TestReaderSignedVerified(t *testing.T) {
 
 	ts := newTestServer(t, path)
 	body := readMessage(t, authedClient(t, ts), ts.URL, uid)
-	for _, want := range []string{"Signed", "verified", "Verified body text."} {
+	for _, want := range []string{"Signed by alice@hermex.test", "smime-banner ok", "Verified body text."} {
 		if !strings.Contains(body, want) {
 			t.Errorf("signed reader missing %q", want)
 		}
+	}
+	// The banner must not over-claim trust: no CA chain is checked here.
+	if strings.Contains(body, "Signed — verified") {
+		t.Error("banner must not claim plain 'verified' without a trust anchor")
+	}
+}
+
+// TestReaderSignedSenderMismatch is the security-critical case: a cryptographically
+// valid signature whose certificate speaks for a DIFFERENT address than From. This
+// is the cheap spoof (a self-signed cert minted for the victim's name, sent under
+// the victim's From by an attacker who controls neither). The signature is valid,
+// so the content is still shown, but the banner must WARN of the mismatch and must
+// NOT render the positive (green) state.
+func TestReaderSignedSenderMismatch(t *testing.T) {
+	path := emptyMailbox(t)
+	_, key, cert := identityP12(t, "mallory@evil.test", "pass")
+	signed, err := smime.Sign([]byte("Content-Type: text/plain; charset=utf-8\r\n\r\nTrust me, I am alice.\r\n"), cert, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := append([]byte("From: alice@hermex.test\r\nTo: alice@hermex.test\r\nSubject: spoofed\r\n"), signed...)
+	uid := storeRaw(t, path, msg)
+
+	ts := newTestServer(t, path)
+	body := readMessage(t, authedClient(t, ts), ts.URL, uid)
+	for _, want := range []string{"does NOT match the sender", "mallory@evil.test", "alice@hermex.test", "smime-banner warn"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("mismatch banner missing %q", want)
+		}
+	}
+	if strings.Contains(body, "smime-banner ok") {
+		t.Error("a signer/sender mismatch must not render the positive banner")
 	}
 }
 
