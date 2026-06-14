@@ -3,10 +3,12 @@
 package main
 
 import (
+	"bytes"
 	"database/sql"
 	"flag"
 	"log"
 	"net"
+	"net/mail"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql"
@@ -18,6 +20,23 @@ import (
 	"hermex/internal/smtp"
 	"hermex/internal/spooler"
 )
+
+// senderOf returns the envelope sender for a released Outbox message: the
+// address in its From header. The spooler hands the worker only the recipients
+// and the raw message, so the return-path an out-of-office auto-reply targets is
+// recovered from the message itself. An unparseable or missing From yields "",
+// which the delivery path treats as a null return-path (no auto-reply).
+func senderOf(raw []byte) string {
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		return ""
+	}
+	addrs, err := msg.Header.AddressList("From")
+	if err != nil || len(addrs) == 0 {
+		return ""
+	}
+	return addrs[0].Address
+}
 
 func main() {
 	cfgPath := flag.String("config", "/etc/hermex/config.json", "path to the JSON config file")
@@ -48,7 +67,7 @@ func main() {
 	// Release scheduled (send-later) messages from every mailbox's Outbox. This
 	// runs in the always-on MTA so it survives webmail restarts.
 	deliver := func(recipients []string, raw []byte, when time.Time) ([]string, error) {
-		return mta.Deliver(dir, recipients, raw, when)
+		return mta.Deliver(dir, senderOf(raw), recipients, raw, when)
 	}
 	go runSendLater(dir, deliver, sendLaterInterval)
 
