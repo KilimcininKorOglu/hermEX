@@ -44,10 +44,11 @@ func streamBytes(typ mapi.PropType, v any) []byte {
 }
 
 // streamData reads the bytes a stream exposes for the property tag on the parent
-// object. v1 streams a message property; the attachment branch lands with the
-// attachment ROPs.
+// object — a message property (via the store) or an opened attachment's
+// property bag (e.g. PrAttachDataBin).
 func (s *Session) streamData(parent *object, tag mapi.PropTag) ([]byte, error) {
-	if parent.kind == kindMessage && parent.store != nil {
+	switch {
+	case parent.kind == kindMessage && parent.store != nil:
 		props, err := parent.store.GetMessageProperties(parent.messageID, tag)
 		if err != nil {
 			return nil, err
@@ -57,8 +58,15 @@ func (s *Session) streamData(parent *object, tag mapi.PropTag) ([]byte, error) {
 			return nil, errNoStreamProp
 		}
 		return streamBytes(tag.Type(), v), nil
+	case parent.kind == kindAttachment:
+		v, ok := parent.attachProps.Get(tag)
+		if !ok {
+			return nil, errNoStreamProp
+		}
+		return streamBytes(tag.Type(), v), nil
+	default:
+		return nil, errNoStreamProp
 	}
-	return nil, errNoStreamProp
 }
 
 // ropOpenStream handles RopOpenStream ([MS-OXCPRPT] 2.2.2.14): it snapshots the

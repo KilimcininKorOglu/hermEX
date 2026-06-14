@@ -5,31 +5,37 @@
 // folder/table browse, message read, and stream/attachment read follow.
 package rop
 
-import "hermex/internal/objectstore"
+import (
+	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
+)
 
 // objKind classifies the server object behind a handle. The message + stream/
 // attachment increments add further kinds.
 type objKind uint8
 
 const (
-	kindLogon   objKind = iota // an open mailbox store (the logon root)
-	kindFolder                 // an opened folder
-	kindTable                  // a contents or hierarchy table
-	kindMessage                // an opened message
-	kindStream                 // an open property stream
+	kindLogon      objKind = iota // an open mailbox store (the logon root)
+	kindFolder                    // an opened folder
+	kindTable                     // a contents, hierarchy, or attachment table
+	kindMessage                   // an opened message
+	kindStream                    // an open property stream
+	kindAttachment                // an opened attachment
 )
 
 // object is a server-side MAPI object referenced by a uint32 handle. Fields are
 // populated per kind: a logon holds the open mailbox store, a folder its
 // objectstore id, a table its in-memory row snapshot and column set, a message
-// its objectstore id, a stream its in-memory bytes and read cursor.
+// its objectstore id, a stream its in-memory bytes and read cursor, an
+// attachment its property bag.
 type object struct {
-	kind      objKind
-	store     *objectstore.Store // kindLogon
-	folderID  int64              // kindFolder
-	table     *tableState        // kindTable
-	messageID int64              // kindMessage
-	stream    *streamState       // kindStream
+	kind        objKind
+	store       *objectstore.Store  // kindLogon
+	folderID    int64               // kindFolder
+	table       *tableState         // kindTable
+	messageID   int64               // kindMessage
+	stream      *streamState        // kindStream
+	attachProps mapi.PropertyValues // kindAttachment
 }
 
 // Session is one MAPI/HTTP session's object/handle table — the analogue of a
