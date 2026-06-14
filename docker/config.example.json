@@ -5,5 +5,6 @@
   "smtp_addr": ":25",
   "pop3_addr": ":110",
   "imap_addr": ":143",
-  "webmail_addr": ":8080"
+  "webmail_addr": ":8080",
+  "dav_addr": ":8080"
 }

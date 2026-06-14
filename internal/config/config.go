@@ -21,6 +21,7 @@ type Config struct {
 	POP3Addr    string `json:"pop3_addr"`    // POP3 listen address (default ":110")
 	IMAPAddr    string `json:"imap_addr"`    // IMAP listen address (default ":143")
 	WebmailAddr string `json:"webmail_addr"` // webmail HTTP listen address (default ":8080")
+	DAVAddr     string `json:"dav_addr"`     // CalDAV/CardDAV HTTP listen address (default ":8080")
 }
 
 // Load reads and validates a JSON config file.
