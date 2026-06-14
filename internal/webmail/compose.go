@@ -48,6 +48,8 @@ type composeView struct {
 	Importance   string // "", "high", "low"
 	Sensitivity  string // "", "personal", "private", "confidential"
 	ReadReceipt  bool
+	Sign         bool                // S/MIME sign on send (immediate send only)
+	Encrypt      bool                // S/MIME encrypt on send (immediate send only)
 	InReplyTo    string              // carried as a hidden field, written as In-Reply-To on send
 	References   string              // carried as a hidden field, written as References on send
 	Attachments  []composeAttachment // uploaded files (and, later, inline images) to attach on send
@@ -264,6 +266,8 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		Importance:   r.FormValue("importance"),
 		Sensitivity:  r.FormValue("sensitivity"),
 		ReadReceipt:  r.FormValue("readreceipt") != "",
+		Sign:         r.FormValue("sign") != "",
+		Encrypt:      r.FormValue("encrypt") != "",
 		InReplyTo:    strings.TrimSpace(r.FormValue("inreplyto")),
 		References:   strings.TrimSpace(r.FormValue("references")),
 		AttachFolder: r.FormValue("attachfolder"),
@@ -343,6 +347,24 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		v.Error = "Could not build the message: " + err.Error()
 		s.render(w, "compose", v)
 		return
+	}
+	// Sign and/or encrypt before delivery (immediate send only). The S/MIME
+	// message is what is delivered and what is filed in Sent.
+	if v.Sign || v.Encrypt {
+		st, err := objectstore.Open(sess.mailboxPath)
+		if err != nil {
+			v.Error = "mailbox unavailable"
+			s.render(w, "compose", v)
+			return
+		}
+		smimeRaw, serr := s.applySmime(sess, st, deliveryRaw, recipients, v.Sign, v.Encrypt)
+		st.Close()
+		if serr != nil {
+			v.Error = "S/MIME: " + serr.Error()
+			s.render(w, "compose", v)
+			return
+		}
+		deliveryRaw = smimeRaw
 	}
 	sentRaw := insertBcc(deliveryRaw, v.Bcc)
 

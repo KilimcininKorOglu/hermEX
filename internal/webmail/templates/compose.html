@@ -54,6 +54,8 @@
           <option value="confidential"{{if eq .Sensitivity "confidential"}} selected{{end}}>Confidential</option>
         </select>
         <label class="check"><input type="checkbox" name="readreceipt" value="1"{{if .ReadReceipt}} checked{{end}}> Request read receipt</label>
+        <label class="check"><input type="checkbox" name="sign" value="1"{{if .Sign}} checked{{end}}> Sign (S/MIME)</label>
+        <label class="check"><input type="checkbox" name="encrypt" value="1"{{if .Encrypt}} checked{{end}}> Encrypt (S/MIME)</label>
       </div>
       <div class="field">
         <label>Message</label>
