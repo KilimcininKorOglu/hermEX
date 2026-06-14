@@ -31,7 +31,18 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleCreateItem(w, inner, sess)
 	case "ResolveNames":
 		s.handleResolveNames(w, inner, sess)
-	// UpdateItem, DeleteItem are added in a later increment.
+	case "UpdateItem":
+		s.handleUpdateItem(w, inner, sess)
+	case "DeleteItem":
+		s.handleDeleteItem(w, inner, sess)
+	case "MoveItem":
+		s.handleMoveItem(w, inner, sess)
+	case "CopyItem":
+		s.handleCopyItem(w, inner, sess)
+	case "CreateFolder":
+		s.handleCreateFolder(w, inner, sess)
+	case "DeleteFolder":
+		s.handleDeleteFolder(w, inner, sess)
 	default:
 		writeSOAPFault(w, "ErrorInvalidRequest", "unsupported operation: "+op)
 	}
