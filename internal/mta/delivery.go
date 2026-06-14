@@ -7,6 +7,7 @@ package mta
 import (
 	"fmt"
 	"io"
+	"log"
 	"time"
 
 	"hermex/internal/directory"
@@ -90,6 +91,29 @@ func deliver(path string, raw []byte, received time.Time) error {
 	}
 	defer st.Close()
 
-	_, err = st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, received, 0)
-	return err
+	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, received, 0)
+	if err != nil {
+		return err
+	}
+	// The message is delivered the moment it is filed. Inbox rules then run as
+	// best-effort decoration on top of that successful delivery: any rule error
+	// or panic is logged and swallowed, never returned, so a misbehaving rule
+	// cannot fail delivery and make the sender retry (which would duplicate the
+	// message).
+	applyInboxRules(st, info)
+	return nil
+}
+
+// applyInboxRules runs the mailbox's inbox rules against a just-delivered
+// message, swallowing any error or panic. See deliver for why a rule must never
+// surface an error onto the delivery path.
+func applyInboxRules(st *objectstore.Store, m objectstore.MessageInfo) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("mta: inbox rule pass panicked for uid %d, skipped: %v", m.UID, r)
+		}
+	}()
+	if err := st.ApplyInboxRules(m); err != nil {
+		log.Printf("mta: inbox rule pass failed for uid %d, skipped: %v", m.UID, err)
+	}
 }
