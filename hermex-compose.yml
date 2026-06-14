@@ -155,3 +155,19 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+
+  mapi:
+    container_name: hermex-mapi
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: ["/usr/local/bin/hermex-mapi", "-config", "/config/config.json"]
+    volumes:
+      - ./docker-data/mailboxes:/data/mailboxes
+      - ./docker-data/config.json:/config/config.json:ro
+    ports:
+      - "8148:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped

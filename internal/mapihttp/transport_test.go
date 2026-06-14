@@ -1,0 +1,211 @@
+package mapihttp
+
+import (
+	"bytes"
+	"encoding/binary"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"hermex/internal/directory"
+)
+
+const (
+	testUser = "alice@hermex.test"
+	testPass = "test1234"
+)
+
+// newTestServer builds a MAPI/HTTP server over a single static account.
+func newTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: t.TempDir()}}
+	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// mapiPost issues a MAPI/HTTP request. headers controls X-RequestId/X-ClientInfo
+// presence; auth toggles Basic credentials; cookies are forwarded.
+func mapiPost(t *testing.T, ts *httptest.Server, path, reqType string, body []byte, opts func(*http.Request)) *http.Response {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, ts.URL+path, bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.SetBasicAuth(testUser, testPass)
+	req.Header.Set("X-RequestType", reqType)
+	req.Header.Set("X-RequestId", "req-1")
+	req.Header.Set("X-ClientInfo", "client-1")
+	if opts != nil {
+		opts(req)
+	}
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp
+}
+
+// connectBody is a minimal well-formed Connect request body.
+func connectBody() []byte {
+	b := []byte{0}                        // UserDn (empty NUL-terminated ASCII)
+	return append(b, make([]byte, 16)...) // Flags, DefaultCodePage, LcidString, LcidSort
+}
+
+// executeBody is a minimal Execute request body with an empty ROP buffer.
+func executeBody() []byte {
+	var b []byte
+	b = binary.LittleEndian.AppendUint32(b, 0) // Flags
+	b = binary.LittleEndian.AppendUint32(b, 0) // RopBufferSize
+	b = binary.LittleEndian.AppendUint32(b, 0) // MaxRopOut
+	return b
+}
+
+func cookieByName(resp *http.Response, name string) string {
+	for _, c := range resp.Cookies() {
+		if c.Name == name {
+			return c.Value
+		}
+	}
+	return ""
+}
+
+// TestAuthRequired confirms the EMSMDB endpoint rejects an unauthenticated request.
+func TestAuthRequired(t *testing.T) {
+	ts := newTestServer(t)
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mapi/emsmdb", nil)
+	req.Header.Set("X-RequestType", "PING")
+	resp, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("status = %d, want 401", resp.StatusCode)
+	}
+}
+
+// TestMissingHeader confirms a request without X-RequestId fails with the
+// missing-header response code.
+func TestMissingHeader(t *testing.T) {
+	ts := newTestServer(t)
+	resp := mapiPost(t, ts, "/mapi/emsmdb", "PING", nil, func(r *http.Request) {
+		r.Header.Del("X-RequestId")
+	})
+	defer resp.Body.Close()
+	if got := resp.Header.Get("X-ResponseCode"); got != "3" {
+		t.Errorf("X-ResponseCode = %q, want 3 (missing header)", got)
+	}
+}
+
+// TestInvalidRequestType confirms an unknown X-RequestType is rejected.
+func TestInvalidRequestType(t *testing.T) {
+	ts := newTestServer(t)
+	resp := mapiPost(t, ts, "/mapi/emsmdb", "Bogus", nil, nil)
+	defer resp.Body.Close()
+	if got := resp.Header.Get("X-ResponseCode"); got != "8" {
+		t.Errorf("X-ResponseCode = %q, want 8 (invalid request type)", got)
+	}
+}
+
+// TestConnectFraming confirms Connect succeeds, sets the sid + sequence cookies,
+// and frames the chunked PROCESSING/DONE body.
+func TestConnectFraming(t *testing.T) {
+	ts := newTestServer(t)
+	resp := mapiPost(t, ts, "/mapi/emsmdb", "Connect", connectBody(), nil)
+	defer resp.Body.Close()
+	if got := resp.Header.Get("X-ResponseCode"); got != "0" {
+		t.Errorf("X-ResponseCode = %q, want 0", got)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "application/mapi-http" {
+		t.Errorf("Content-Type = %q", ct)
+	}
+	if cookieByName(resp, "sid") == "" || cookieByName(resp, "sequence") == "" {
+		t.Errorf("Connect did not set sid + sequence cookies")
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.HasPrefix(string(body), "PROCESSING\r\nDONE\r\n") {
+		t.Errorf("body missing PROCESSING/DONE preamble: %q", body[:min(40, len(body))])
+	}
+}
+
+// TestExecuteFlow confirms the cookie lifecycle: Execute needs the cookies,
+// succeeds with them, and rolls the sequence; a bad sid is rejected.
+func TestExecuteFlow(t *testing.T) {
+	ts := newTestServer(t)
+	conn := mapiPost(t, ts, "/mapi/emsmdb", "Connect", connectBody(), nil)
+	conn.Body.Close()
+	sid, seq := cookieByName(conn, "sid"), cookieByName(conn, "sequence")
+	if sid == "" || seq == "" {
+		t.Fatal("no cookies from Connect")
+	}
+
+	// Execute without cookies -> missing cookie (6).
+	noCookie := mapiPost(t, ts, "/mapi/emsmdb", "Execute", executeBody(), nil)
+	noCookie.Body.Close()
+	if got := noCookie.Header.Get("X-ResponseCode"); got != "6" {
+		t.Errorf("Execute without cookies: X-ResponseCode = %q, want 6", got)
+	}
+
+	// Execute with valid cookies -> success, rolled sequence.
+	ok := mapiPost(t, ts, "/mapi/emsmdb", "Execute", executeBody(), func(r *http.Request) {
+		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
+		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
+	})
+	ok.Body.Close()
+	if got := ok.Header.Get("X-ResponseCode"); got != "0" {
+		t.Errorf("Execute with cookies: X-ResponseCode = %q, want 0", got)
+	}
+	if newSeq := cookieByName(ok, "sequence"); newSeq == "" || newSeq == seq {
+		t.Errorf("Execute did not roll the sequence cookie (was %q, got %q)", seq, newSeq)
+	}
+
+	// Execute with a bogus sid -> invalid context cookie (2).
+	bad := mapiPost(t, ts, "/mapi/emsmdb", "Execute", executeBody(), func(r *http.Request) {
+		r.AddCookie(&http.Cookie{Name: "sid", Value: "nope"})
+		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
+	})
+	bad.Body.Close()
+	if got := bad.Header.Get("X-ResponseCode"); got != "2" {
+		t.Errorf("Execute with bad sid: X-ResponseCode = %q, want 2", got)
+	}
+}
+
+// TestDisconnect confirms Disconnect drops the session and that the dropped
+// session no longer validates on Execute.
+func TestDisconnect(t *testing.T) {
+	ts := newTestServer(t)
+	conn := mapiPost(t, ts, "/mapi/emsmdb", "Connect", connectBody(), nil)
+	conn.Body.Close()
+	sid, seq := cookieByName(conn, "sid"), cookieByName(conn, "sequence")
+
+	disc := mapiPost(t, ts, "/mapi/emsmdb", "Disconnect", nil, func(r *http.Request) {
+		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
+	})
+	disc.Body.Close()
+	if got := disc.Header.Get("X-ResponseCode"); got != "0" {
+		t.Errorf("Disconnect: X-ResponseCode = %q, want 0", got)
+	}
+
+	after := mapiPost(t, ts, "/mapi/emsmdb", "Execute", executeBody(), func(r *http.Request) {
+		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
+		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
+	})
+	after.Body.Close()
+	if got := after.Header.Get("X-ResponseCode"); got != "2" {
+		t.Errorf("Execute after Disconnect: X-ResponseCode = %q, want 2 (invalid context)", got)
+	}
+}
+
+// TestNspiRouted confirms the NSPI endpoint is routed and authenticated (it
+// answers PING; the address-book calls land in a later sub-slice).
+func TestNspiRouted(t *testing.T) {
+	ts := newTestServer(t)
+	resp := mapiPost(t, ts, "/mapi/nspi", "PING", nil, nil)
+	defer resp.Body.Close()
+	if got := resp.Header.Get("X-ResponseCode"); got != "0" {
+		t.Errorf("NSPI PING: X-ResponseCode = %q, want 0", got)
+	}
+}
