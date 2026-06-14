@@ -52,6 +52,12 @@ const (
 	PrTransportMessageHeadersA = PropTag(0x007D001E) // PtString8
 	PrAttachDataBin            = PropTag(0x37010102) // PtBinary (PidTagAttachDataBinary)
 	PrAttachDataObj            = PropTag(0x3701000D) // PtObject
+	// PrSmimeOriginal is the provider-defined message property (0x6774) holding
+	// the original wire bytes of a signed or encrypted S/MIME message. The store
+	// serves these verbatim instead of re-synthesizing the message, because
+	// oxcmail.Export rebuilds the MIME tree and would invalidate the signature or
+	// mangle the envelope. Offloaded to a content file like other large content.
+	PrSmimeOriginal = PropTag(0x67740102) // PtBinary
 )
 
 // Message envelope property tags (MS-OXCMAIL / MS-OXOMSG): the standard

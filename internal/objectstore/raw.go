@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 
+	"hermex/internal/mapi"
 	"hermex/internal/oxcmail"
 )
 
@@ -43,6 +44,18 @@ func (s *Store) GetMessageRaw(folderID int64, uid uint32) ([]byte, error) {
 // RFC822.SIZE matches the bytes now served (a regenerated message uses fresh
 // MIME boundaries and may differ in length from any earlier rendering).
 func (s *Store) regenerateEML(messageID int64, mid string) ([]byte, error) {
+	// A preserved S/MIME original is served verbatim: re-synthesizing it would
+	// destroy the signature or envelope, so it is never regenerated via Export.
+	if props, err := s.GetMessageProperties(messageID, mapi.PrSmimeOriginal); err == nil {
+		if v, ok := props.Get(mapi.PrSmimeOriginal); ok {
+			if orig, ok := v.([]byte); ok && len(orig) > 0 {
+				if err := s.writeEML(mid, orig); err != nil {
+					return nil, err
+				}
+				return orig, nil
+			}
+		}
+	}
 	msg, err := s.OpenMessage(messageID)
 	if err != nil {
 		return nil, err
