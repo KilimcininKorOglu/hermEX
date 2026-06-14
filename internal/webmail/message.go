@@ -1,6 +1,7 @@
 package webmail
 
 import (
+	"crypto/x509"
 	"encoding/base64"
 	"html"
 	"net/http"
@@ -161,7 +162,8 @@ func (s *Server) openSmime(sess *session, raw []byte) (display []byte, status st
 			if verr != nil {
 				return spliceIdentity(identity, inner), "Encrypted, but the signature could not be verified.", false
 			}
-			return spliceIdentity(identity, content), "Encrypted and signed — verified (" + certName(signer.Subject) + ").", true
+			sigStatus, trusted := signerStatus(signer, raw)
+			return spliceIdentity(identity, content), "Encrypted. " + sigStatus, trusted
 		}
 		return spliceIdentity(identity, inner), "Encrypted — decrypted with your certificate.", true
 	case smime.IsSigned(raw):
@@ -170,10 +172,56 @@ func (s *Server) openSmime(sess *session, raw []byte) (display []byte, status st
 			return raw, "Signed message — the signature could NOT be verified.", false
 		}
 		identity, _ := splitForSmime(raw)
-		return spliceIdentity(identity, content), "Signed — verified (" + certName(signer.Subject) + ").", true
+		status, trusted := signerStatus(signer, raw)
+		return spliceIdentity(identity, content), status, trusted
 	default:
 		return raw, "", false
 	}
+}
+
+// signerStatus produces an honest banner for a cryptographically valid signature.
+// A valid signature proves only that the holder of the signer certificate's
+// private key produced it — NOT that the certificate is trusted (no CA chain or
+// TOFU anchor is checked here) and NOT, on its own, that the sender is genuine.
+// So the banner says "Signed by <signer>" rather than "verified", and binds the
+// signer to the envelope: if the certificate's email does not match the From
+// address, that is reported as a warning (a self-signed certificate minted with
+// the victim's address is the cheap spoof this catches). Full chain/TOFU
+// validation is deliberately left as future work; the wording must not promise
+// more trust than was established.
+func signerStatus(signer *x509.Certificate, raw []byte) (status string, ok bool) {
+	who := signerEmail(signer)
+	from := fromAddress(raw)
+	if from != "" && !strings.EqualFold(who, from) {
+		return "Signed by " + who + ", which does NOT match the sender (" + from + ").", false
+	}
+	return "Signed by " + who + " (signature valid; certificate not checked against a trusted authority).", true
+}
+
+// signerEmail is the address a certificate speaks for: the first rfc822Name SAN
+// if present, otherwise the subject common name. Used to bind a signer to the
+// message's From address.
+func signerEmail(cert *x509.Certificate) string {
+	if cert == nil {
+		return "an unknown signer"
+	}
+	if len(cert.EmailAddresses) > 0 {
+		return cert.EmailAddresses[0]
+	}
+	if cert.Subject.CommonName != "" {
+		return cert.Subject.CommonName
+	}
+	return "an unnamed certificate"
+}
+
+// fromAddress extracts the bare From address (lowercased) from a raw message, or
+// "" when it cannot be parsed.
+func fromAddress(raw []byte) string {
+	env, err := mime.ParseEnvelope(raw)
+	if err != nil || len(env.From) == 0 {
+		return ""
+	}
+	return strings.ToLower(env.From[0].Mailbox + "@" + env.From[0].Host)
 }
 
 // buildMessageDetail parses a raw message into the message view, selecting the
