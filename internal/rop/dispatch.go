@@ -15,6 +15,7 @@ const (
 	ropSetProperties         uint8 = 0x0A
 	ropSaveChangesMessage    uint8 = 0x0C
 	ropModifyRecipients      uint8 = 0x0E
+	ropSubmitMessage         uint8 = 0x32
 	ropSetColumns            uint8 = 0x12
 	ropSortTable             uint8 = 0x13
 	ropRestrict              uint8 = 0x14
@@ -88,6 +89,10 @@ loop:
 			}
 		case ropModifyRecipients:
 			if !s.ropModifyRecipients(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSubmitMessage:
+			if !s.ropSubmitMessage(p, out, handles, hindex) {
 				break loop
 			}
 		case ropSaveChangesMessage:

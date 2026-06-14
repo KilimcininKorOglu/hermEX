@@ -1,8 +1,10 @@
 package rop
 
 import (
+	"bytes"
 	"testing"
 
+	"hermex/internal/directory"
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
@@ -153,7 +155,7 @@ func TestCreateFillSaveRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 
-	sess := NewSession(dir)
+	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
 	logonH := h[0]
@@ -272,4 +274,152 @@ func TestCreateFillSaveRoundTrip(t *testing.T) {
 	if v, _ := saved.Recipients[0].Get(mapi.PrRecipientType); v != int32(mapi.RecipTo) {
 		t.Errorf("recipient PrRecipientType = %v, want %d", v, mapi.RecipTo)
 	}
+}
+
+// buildSubmitMessage builds a RopSubmitMessage request (SubmitFlags only).
+func buildSubmitMessage(inIdx uint8) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropSubmitMessage)
+	b.Uint8(0) // LogonId
+	b.Uint8(inIdx)
+	b.Uint8(0) // SubmitFlags
+	return b.Bytes()
+}
+
+// TestCreateFillSaveSubmitDelivers drives the full compose-and-send ROP sequence
+// through to actual delivery: a message addressed To alice and Bcc carol is
+// created in Drafts, filled, saved, and submitted. It then confirms the message
+// reached both recipients' mailboxes, that the wire copy carries a From line for
+// the session owner but never discloses the Bcc recipient, that a Sent Items copy
+// was filed, and that the source draft was consumed.
+func TestCreateFillSaveSubmitDelivers(t *testing.T) {
+	ownerDir, aliceDir, carolDir := t.TempDir(), t.TempDir(), t.TempDir()
+	accounts := directory.StaticAccounts{
+		"owner@hermex.test": {MailboxPath: ownerDir},
+		"alice@hermex.test": {MailboxPath: aliceDir},
+		"carol@hermex.test": {MailboxPath: carolDir},
+	}
+	draftsEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))
+
+	sess := NewSession(ownerDir, accounts, "owner@hermex.test")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+
+	// CreateMessage in Drafts (the source folder); new message at slot 1.
+	_, h = sess.Dispatch(buildCreateMessage(0, 1, draftsEID), []uint32{logonH, 0xFFFFFFFF})
+	msgH := h[1]
+
+	// SetProperties: subject + body.
+	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+		{Tag: mapi.PrSubject, Value: "SUBMITMSG"},
+		{Tag: mapi.PrBody, Value: "hello from the rop submit path"},
+	}), []uint32{msgH})
+
+	// ModifyRecipients: alice as To, carol as Bcc.
+	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
+	bccRow := buildSMTPRecipientRow(1, mapi.RecipBcc, "carol@hermex.test", "Carol")
+	sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow, bccRow), []uint32{msgH})
+
+	// SaveChangesMessage: message at slot 1 (ihindex2).
+	sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
+
+	// SubmitMessage.
+	sub, _ := sess.Dispatch(buildSubmitMessage(0), []uint32{msgH})
+	p := ext.NewPull(sub, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropSubmitMessage {
+		t.Fatalf("SubmitMessage RopId = %#x", id)
+	}
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("SubmitMessage ReturnValue = %#x", ec)
+	}
+
+	// alice (To) received it: the wire copy must carry a From line for the owner
+	// and the subject, and must never disclose the Bcc recipient.
+	aliceRaw := firstInboxRaw(t, aliceDir)
+	if !hasFromOwner(aliceRaw, "owner@hermex.test") {
+		t.Errorf("delivered message has no From line for the owner:\n%s", aliceRaw)
+	}
+	if !bytes.Contains(aliceRaw, []byte("SUBMITMSG")) {
+		t.Errorf("delivered message missing subject SUBMITMSG:\n%s", aliceRaw)
+	}
+	if bytes.Contains(aliceRaw, []byte("carol")) || bytes.Contains(bytes.ToLower(aliceRaw), []byte("bcc:")) {
+		t.Errorf("Bcc recipient leaked onto the wire copy:\n%s", aliceRaw)
+	}
+
+	// carol (Bcc) was delivered to as well — blind, but delivered.
+	if n := inboxCount(t, carolDir); n != 1 {
+		t.Errorf("carol (Bcc) inbox = %d messages, want 1", n)
+	}
+
+	// owner: a Sent Items copy exists and the source draft was consumed.
+	st, err := objectstore.Open(ownerDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if sent, err := st.ListMessages(int64(mapi.PrivateFIDSentItems)); err != nil {
+		t.Fatal(err)
+	} else if len(sent) != 1 {
+		t.Errorf("owner Sent Items = %d messages, want 1", len(sent))
+	}
+	if drafts, err := st.ListMessages(int64(mapi.PrivateFIDDraft)); err != nil {
+		t.Fatal(err)
+	} else if len(drafts) != 0 {
+		t.Errorf("source draft = %d messages, want 0 (consumed on submit)", len(drafts))
+	}
+}
+
+// firstInboxRaw opens a mailbox and returns the re-synthesized raw of the single
+// message in its inbox, failing if the count is not exactly one.
+func firstInboxRaw(t *testing.T, dir string) []byte {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("inbox at %s = %d messages, want 1", dir, len(msgs))
+	}
+	raw, err := st.GetMessageRaw(int64(mapi.PrivateFIDInbox), msgs[0].UID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+// inboxCount returns the number of messages in a mailbox's inbox.
+func inboxCount(t *testing.T, dir string) int {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(msgs)
+}
+
+// hasFromOwner reports whether the message header block carries a From line that
+// names owner — the proof that submit stamped (and Export emitted) the sender
+// identity rather than shipping a From-less message.
+func hasFromOwner(raw []byte, owner string) bool {
+	for _, line := range bytes.Split(raw, []byte("\r\n")) {
+		if len(line) == 0 {
+			break // end of header block
+		}
+		if bytes.HasPrefix(line, []byte("From:")) && bytes.Contains(line, []byte(owner)) {
+			return true
+		}
+	}
+	return false
 }

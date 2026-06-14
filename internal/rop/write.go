@@ -2,9 +2,13 @@ package rop
 
 import (
 	"errors"
+	"strings"
+	"time"
 
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
+	"hermex/internal/mta"
+	"hermex/internal/objectstore"
 	"hermex/internal/oxcmail"
 )
 
@@ -390,4 +394,114 @@ func pullPropertyRow(p *ext.Pull, columns []mapi.PropTag, bag *mapi.PropertyValu
 		return errRecipientFraming
 	}
 	return nil
+}
+
+// ropSubmitMessage handles RopSubmitMessage ([MS-OXOMSG] 2.2.3.1.1 /
+// [MS-OXCROPS] 2.2.7.1.1). Mirroring the reference submit path, it requires the
+// composed message to have been saved and to carry at least one routable
+// recipient, stamps the sender identity the wire copy needs, exports the message
+// through oxcmail, hands it to the MTA bridge, files a copy in Sent Items, and
+// consumes the source draft so the submitted message is not left duplicated.
+// Single input handle; the response is the bare header.
+func (s *Session) ropSubmitMessage(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	if _, err := p.Uint8(); err != nil { // SubmitFlags (PreProcess/NeedsSpooler — v1 ignores)
+		return false
+	}
+	obj := s.get(handleAt(handles, hindex))
+	if obj == nil || obj.kind != kindNewMessage || obj.newMsg == nil {
+		writeErr(out, ropSubmitMessage, hindex, ecNotFound)
+		return true
+	}
+	nm := obj.newMsg
+	// The message must be persisted (the reference checks the assigned id is
+	// non-zero) and the session must have an MTA bridge wired (a read-only
+	// session carries none).
+	if !nm.saved || nm.savedID == 0 || s.accounts == nil {
+		writeErr(out, ropSubmitMessage, hindex, ecNotSupported)
+		return true
+	}
+
+	// Split the recipient bags: the delivery list takes every resolvable SMTP
+	// address (To+Cc+Bcc), while the exported wire copy carries only To+Cc bags —
+	// oxcmail.Export writes a Bcc header for any RecipBcc bag, so leaving Bcc in
+	// the wire copy would disclose blind recipients to the To/Cc readers.
+	var recipients []string
+	wire := make([]mapi.PropertyValues, 0, len(nm.recipients))
+	for _, bag := range nm.recipients {
+		if addr := recipientSMTP(bag); addr != "" {
+			recipients = append(recipients, addr)
+		}
+		if rt, _ := bag.Get(mapi.PrRecipientType); rt != int32(mapi.RecipBcc) {
+			wire = append(wire, bag)
+		}
+	}
+	if len(recipients) == 0 {
+		writeErr(out, ropSubmitMessage, hindex, ecNotFound) // no routable recipient
+		return true
+	}
+
+	// Stamp the sender-representing identity + submit time when the client left
+	// them unset (the reference rectifies the message at submit the same way):
+	// Export derives From from the representing identity, so an unstamped message
+	// ships From-less and is rejected downstream. Copy the bag first so the
+	// in-memory draft is untouched.
+	props := append(mapi.PropertyValues(nil), nm.props...)
+	stampSubmitIdentity(&props, s.owner)
+
+	raw, err := oxcmail.Export(&oxcmail.Message{Props: props, Recipients: wire}, oxcmail.Options{})
+	if err != nil {
+		writeErr(out, ropSubmitMessage, hindex, ecError)
+		return true
+	}
+	if _, err := mta.Deliver(s.accounts, s.owner, recipients, raw, time.Now()); err != nil {
+		writeErr(out, ropSubmitMessage, hindex, ecError)
+		return true
+	}
+	// Delivery has succeeded. Filing the Sent Items copy and consuming the source
+	// draft are best-effort follow-up — a failure here must not re-fail a message
+	// that has already gone out (which would make the client resend it).
+	_, _ = obj.store.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), int64(objectstore.FlagSeen))
+	_ = obj.store.DeleteObject(nm.savedID)
+	nm.saved = false // the saved message is gone; a re-submit must not re-send
+
+	out.Uint8(ropSubmitMessage)
+	out.Uint8(hindex)
+	out.Uint32(ecSuccess)
+	return true
+}
+
+// recipientSMTP extracts a routable SMTP address from a recipient bag: the
+// explicit PR_SMTP_ADDRESS if present, else PR_EMAIL_ADDRESS when the address
+// type is SMTP. X500/EX recipients (resolved through NSPI) carry no SMTP address
+// and yield "" — v1 cannot route them.
+func recipientSMTP(bag mapi.PropertyValues) string {
+	if v, ok := bag.Get(mapi.PrSmtpAddress); ok {
+		if s, _ := v.(string); s != "" {
+			return s
+		}
+	}
+	if v, ok := bag.Get(mapi.PrAddrType); ok {
+		if at, _ := v.(string); strings.EqualFold(at, "SMTP") {
+			if e, ok := bag.Get(mapi.PrEmailAddress); ok {
+				if s, _ := e.(string); s != "" {
+					return s
+				}
+			}
+		}
+	}
+	return ""
+}
+
+// stampSubmitIdentity fills the sender-representing identity and submit time on a
+// message about to be exported, when the client did not set them. owner is the
+// session owner's SMTP address.
+func stampSubmitIdentity(props *mapi.PropertyValues, owner string) {
+	if v, ok := props.Get(mapi.PrSentRepresentingSmtpAddress); owner != "" && (!ok || v == "") {
+		props.Set(mapi.PrSentRepresentingSmtpAddress, owner)
+		props.Set(mapi.PrSentRepresentingEmailAddress, owner)
+		props.Set(mapi.PrSentRepresentingAddrType, "SMTP")
+	}
+	if _, ok := props.Get(mapi.PrClientSubmitTime); !ok {
+		props.Set(mapi.PrClientSubmitTime, mapi.UnixToNTTime(time.Now()))
+	}
 }

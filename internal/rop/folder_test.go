@@ -49,7 +49,7 @@ func buildSetColumns(inIdx uint8, cols []mapi.PropTag) []byte {
 // response header plus that the freshly seeded Inbox reports zero rows and the
 // column set is stored.
 func TestContentsTableBrowse(t *testing.T) {
-	sess := NewSession(t.TempDir())
+	sess := NewSession(t.TempDir(), nil, "")
 	defer sess.Close()
 
 	// Logon -> store handle at slot 0.
@@ -122,7 +122,7 @@ func TestContentsTableBrowse(t *testing.T) {
 // TestOpenFolderNotFound confirms opening an entry id with no backing folder
 // returns ecNotFound.
 func TestOpenFolderNotFound(t *testing.T) {
-	sess := NewSession(t.TempDir())
+	sess := NewSession(t.TempDir(), nil, "")
 	defer sess.Close()
 
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})

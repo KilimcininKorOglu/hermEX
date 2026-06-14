@@ -6,6 +6,7 @@
 package rop
 
 import (
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -58,16 +59,24 @@ type newMessageState struct {
 // per-logon object graph. It is created on Connect and closed on Disconnect.
 // Access is serialized by the MAPI/HTTP sequence cookie (exactly one Execute
 // proceeds per session at a time), so the table carries no lock of its own.
+//
+// accounts and owner are the submit context: the recipient directory the MTA
+// bridge resolves against and the session owner's SMTP address (the From of a
+// submitted message). They are nil/empty for a read-only session (the read-core
+// tests), in which case RopSubmitMessage reports MAPI_E_NO_SUPPORT.
 type Session struct {
-	mailbox string
-	handles map[uint32]*object
-	next    uint32
+	mailbox  string
+	accounts directory.Accounts
+	owner    string
+	handles  map[uint32]*object
+	next     uint32
 }
 
-// NewSession builds an empty session bound to a mailbox maildir path. The store
-// is not opened until RopLogon.
-func NewSession(mailbox string) *Session {
-	return &Session{mailbox: mailbox, handles: make(map[uint32]*object), next: 1}
+// NewSession builds an empty session bound to a mailbox maildir path. accounts
+// and owner supply the submit context (see Session); pass nil/"" for a read-only
+// session. The store is not opened until RopLogon.
+func NewSession(mailbox string, accounts directory.Accounts, owner string) *Session {
+	return &Session{mailbox: mailbox, accounts: accounts, owner: owner, handles: make(map[uint32]*object), next: 1}
 }
 
 // alloc registers an object under a fresh handle and returns the handle. Handles

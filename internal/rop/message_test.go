@@ -87,7 +87,7 @@ func TestOpenMessageAndGetProps(t *testing.T) {
 	msgEID := uint64(mapi.MakeEIDEx(1, uint64(msgID)))
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 
-	sess := NewSession(dir)
+	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
 	logonH := h[0]
@@ -160,7 +160,7 @@ func TestOpenMessageAndGetProps(t *testing.T) {
 // ecNotFound.
 func TestOpenMessageNotFound(t *testing.T) {
 	dir := t.TempDir()
-	sess := NewSession(dir)
+	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
 	logonH := h[0]
@@ -185,7 +185,7 @@ func TestBrowseOpenChain(t *testing.T) {
 	seedInboxMessage(t, dir, "CHAINMSG")
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 
-	sess := NewSession(dir)
+	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
 	logonH := h[0]

@@ -28,7 +28,7 @@ func logonRequest(hindex uint8, logonFlags uint8) []byte {
 // LogonTime, GwartTime, StoreState — and registers a logon object at the slot.
 func TestRopLogonResponse(t *testing.T) {
 	dir := t.TempDir()
-	sess := NewSession(dir)
+	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 
 	const logonFlags = 0x01 // Private
@@ -108,7 +108,7 @@ func TestRopLogonResponse(t *testing.T) {
 
 // TestRopRelease confirms Release frees the handle and emits no response bytes.
 func TestRopRelease(t *testing.T) {
-	sess := NewSession(t.TempDir())
+	sess := NewSession(t.TempDir(), nil, "")
 	defer sess.Close()
 
 	_, handles := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
@@ -130,7 +130,7 @@ func TestRopRelease(t *testing.T) {
 // TestDispatchUnknownRop confirms an unimplemented ROP yields the 6-byte generic
 // error (RopId, HandleIndex, ec) and that dispatch then stops.
 func TestDispatchUnknownRop(t *testing.T) {
-	sess := NewSession(t.TempDir())
+	sess := NewSession(t.TempDir(), nil, "")
 	defer sess.Close()
 
 	const unknown = 0x55
@@ -143,7 +143,7 @@ func TestDispatchUnknownRop(t *testing.T) {
 
 // TestDispatchEmpty confirms an empty ROP list yields an empty response.
 func TestDispatchEmpty(t *testing.T) {
-	sess := NewSession(t.TempDir())
+	sess := NewSession(t.TempDir(), nil, "")
 	defer sess.Close()
 
 	resp, handles := sess.Dispatch(nil, nil)

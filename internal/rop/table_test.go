@@ -164,7 +164,7 @@ func TestQueryRowsContents(t *testing.T) {
 	}
 	st.Close()
 
-	sess := NewSession(dir)
+	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
@@ -208,7 +208,7 @@ func contentsRowCount(t *testing.T, resp []byte) uint32 {
 // rows include the Inbox by display name.
 func TestQueryRowsHierarchy(t *testing.T) {
 	dir := t.TempDir()
-	sess := NewSession(dir)
+	sess := NewSession(dir, nil, "")
 	defer sess.Close()
 
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
