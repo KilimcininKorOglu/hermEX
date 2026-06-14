@@ -132,6 +132,9 @@ const (
 	PVStatus          Tag = 0x0E0B
 	PVRemoteWipe      Tag = 0x0E0C
 	PVEASProvisionDoc Tag = 0x0E0D
+	// PVDevicePasswordEnabled (0x0E) is the one policy-detail token v1 emits, set
+	// to 0 for a permissive (no device password) policy.
+	PVDevicePasswordEnabled Tag = 0x0E0E
 )
 
 // AirSyncBase (code page 0x11).

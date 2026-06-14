@@ -89,6 +89,10 @@ type session struct {
 // per increment; an unrecognized or not-yet-implemented command returns 501.
 func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session) {
 	switch sess.req.cmd {
+	case "Provision":
+		s.handleProvision(w, r)
+	case "FolderSync":
+		s.handleFolderSync(w, r, sess)
 	default:
 		http.Error(w, "command not implemented: "+sess.req.cmd, http.StatusNotImplemented)
 	}
