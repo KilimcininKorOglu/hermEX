@@ -13,8 +13,9 @@ import (
 )
 
 // seededWithMessage builds an EWS server over a mailbox seeded with the given
-// raw messages appended to the Inbox.
-func seededWithMessage(t *testing.T, raws ...string) *httptest.Server {
+// raw messages appended to the Inbox, returning the server and the mailbox dir
+// (so a test can mutate the store directly).
+func seededWithMessage(t *testing.T, raws ...string) (*httptest.Server, string) {
 	t.Helper()
 	dir := t.TempDir()
 	st, err := objectstore.Open(dir)
@@ -31,7 +32,7 @@ func seededWithMessage(t *testing.T, raws ...string) *httptest.Server {
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
 	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
 	t.Cleanup(ts.Close)
-	return ts
+	return ts, dir
 }
 
 var (
@@ -85,7 +86,7 @@ const attachMessage = "From: Bob <bob@hermex.test>\r\n" +
 // TestFindItemAndGetItem confirms FindItem lists a message and GetItem returns
 // its body and metadata.
 func TestFindItemAndGetItem(t *testing.T) {
-	ts := seededWithMessage(t, plainMessage)
+	ts, _ := seededWithMessage(t, plainMessage)
 
 	resp, out := soapPost(t, ts, findItemReq("inbox"), true)
 	if resp.StatusCode != 200 {
@@ -114,7 +115,7 @@ func TestFindItemAndGetItem(t *testing.T) {
 // TestGetAttachment confirms GetItem lists an attachment and GetAttachment
 // returns its base64 content.
 func TestGetAttachment(t *testing.T) {
-	ts := seededWithMessage(t, attachMessage)
+	ts, _ := seededWithMessage(t, attachMessage)
 
 	_, out := soapPost(t, ts, findItemReq("inbox"), true)
 	itemID := itemIDRE.FindStringSubmatch(out)
