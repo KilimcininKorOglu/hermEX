@@ -290,3 +290,23 @@ details.thread > summary:hover { background: var(--bg); }
 .thread-meta { font-size: 12px; color: var(--muted); white-space: nowrap; }
 table.messages.conversation { border-top: 1px solid var(--border); }
 table.messages.conversation td.selcol, table.messages.conversation th.selcol { display: none; }
+
+/* GAL recipient autocomplete + "check names" on the compose form (#40). The
+   dropdown anchors to its recipient input via a relatively-positioned wrapper. */
+.rcpt-wrap { position: relative; }
+.gal-suggest {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
+  margin: 2px 0 0; padding: 0; list-style: none;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .14); max-height: 220px; overflow-y: auto;
+}
+.gal-suggest li { padding: 7px 10px; cursor: pointer; font-size: 14px; }
+.gal-suggest li:hover { background: var(--unread); }
+.rcpt-check button {
+  border: 1px solid var(--border); border-radius: 6px; background: transparent;
+  color: var(--text); padding: 7px 12px; font-size: 13px; cursor: pointer;
+}
+.rcpt-check button:hover { background: var(--bg); }
+.checknames-status { margin-left: 10px; font-size: 13px; }
+.checknames-status.ok { color: #1a7f37; }
+.checknames-status.error { color: #b00020; }
