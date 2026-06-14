@@ -16,6 +16,15 @@ var (
 	// (person) named properties: the three email slots, the work address,
 	// file-as, instant-messaging address, and the has-picture flag.
 	PsetidAddress = GUID{Data1: 0x00062004, Data4: [8]byte{0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}}
+	// PsetidAppointment {00062002-0000-0000-C000-000000000046} holds the calendar
+	// (appointment) named properties: start/end, location, busy status, subtype,
+	// and sequence.
+	PsetidAppointment = GUID{Data1: 0x00062002, Data4: [8]byte{0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}}
+	// PsetidMeeting {6ED8DA90-450B-101B-98DA-00AA003F1305} holds meeting-object
+	// named properties such as the global object id (UID). Unlike the other
+	// namespaces it is NOT a member of the {...-C000-...-46} family — it is a
+	// distinct literal GUID, so its Data2/Data3/Data4 differ.
+	PsetidMeeting = GUID{Data1: 0x6ED8DA90, Data2: 0x450B, Data3: 0x101B, Data4: [8]byte{0x98, 0xDA, 0x00, 0xAA, 0x00, 0x3F, 0x13, 0x05}}
 )
 
 var (
@@ -54,4 +63,23 @@ var (
 	NameFileAs                  = PropertyName{Kind: MnidID, GUID: PsetidAddress, LID: 0x8005} // PtUnicode, file-as / sort name
 	NameInstantMessagingAddress = PropertyName{Kind: MnidID, GUID: PsetidAddress, LID: 0x8062} // PtUnicode
 	NameHasPicture              = PropertyName{Kind: MnidID, GUID: PsetidAddress, LID: 0x8015} // PtBoolean, contact photo present
+
+	// Calendar (appointment) named properties (PSETID_Appointment). DTSTART/DTEND
+	// map to the "whole" start/end as a UTC PtSysTime; the time zone is carried
+	// separately (deferred). NameAppointmentSubType true marks an all-day event.
+	NameAppointmentSequence   = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8201} // PtLong
+	NameBusyStatus            = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8205} // PtLong (free/tentative/busy/oof)
+	NameAppointmentLocation   = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8208} // PtUnicode
+	NameAppointmentStartWhole = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x820D} // PtSysTime, UTC
+	NameAppointmentEndWhole   = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x820E} // PtSysTime, UTC
+	NameAppointmentSubType    = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8215} // PtBoolean, all-day
+
+	// Reminder named properties (PSETID_Common) — VALARM maps here.
+	NameReminderDelta = PropertyName{Kind: MnidID, GUID: PsetidCommon, LID: 0x8501} // PtLong, minutes before start
+	NameReminderSet   = PropertyName{Kind: MnidID, GUID: PsetidCommon, LID: 0x8503} // PtBoolean
+
+	// Meeting named properties (PSETID_Meeting). The global object id carries the
+	// iCalendar UID; v1 keeps the UID as a string property instead (the wrapped
+	// binary encoding is deferred), so this is reserved for that later work.
+	NameGlobalObjectId = PropertyName{Kind: MnidID, GUID: PsetidMeeting, LID: 0x0003} // PtBinary
 )

@@ -82,6 +82,8 @@ const (
 	PrClientSubmitTime    = PropTag(0x00390040) // PtSysTime
 	PrMessageDeliveryTime = PropTag(0x0E060040) // PtSysTime
 	PrDeferredSendTime    = PropTag(0x3FEF0040) // PtSysTime (PidTagDeferredSendTime, MS-OXOMSG) — absolute time to release a deferred send
+	PrStartDate           = PropTag(0x00600040) // PtSysTime (PidTagStartDate) — appointment start, mirrors PidLidAppointmentStartWhole
+	PrEndDate             = PropTag(0x00610040) // PtSysTime (PidTagEndDate) — appointment end, mirrors PidLidAppointmentEndWhole
 	PrMessageFlags        = PropTag(0x0E070003) // PtLong
 	PrMessageSize         = PropTag(0x0E080003) // PtLong (PidTagMessageSize) — total message size in bytes
 	PrFlagStatus          = PropTag(0x10900003) // PtLong (PidTagFlagStatus, MS-OXOFLAG) — 0 none / 1 complete / 2 flagged
