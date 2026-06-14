@@ -25,6 +25,7 @@ type Message struct {
 	Importance       string          `xml:"Importance,omitempty"`
 	DateTimeSent     string          `xml:"DateTimeSent,omitempty"`
 	HasAttachments   bool            `xml:"HasAttachments"`
+	Sender           *Recipient      `xml:"Sender,omitempty"`
 	From             *Recipient      `xml:"From,omitempty"`
 	ToRecipients     *RecipientList  `xml:"ToRecipients,omitempty"`
 	CcRecipients     *RecipientList  `xml:"CcRecipients,omitempty"`
@@ -99,7 +100,10 @@ func BuildItem(msg *oxcmail.Message, meta ItemMeta) Message {
 	}
 	m.Attachments = BuildAttachments(meta.MessageID, msg.Attachments)
 	if mb := senderMailbox(msg.Props); mb != nil {
+		// EWS exposes both Sender (the submitting mailbox) and From (the author);
+		// without a delegate/send-on-behalf identity they are the same mailbox.
 		m.From = &Recipient{Mailbox: *mb}
+		m.Sender = &Recipient{Mailbox: *mb}
 	}
 	to, cc := recipientMailboxes(msg.Recipients)
 	if len(to) > 0 {

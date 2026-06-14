@@ -140,3 +140,27 @@ func TestGetAttachment(t *testing.T) {
 		t.Errorf("GetAttachment missing content: %s", ga)
 	}
 }
+
+// TestSplitAddress guards the FindItem/SyncFolderItems summary sender. The index
+// stores the originator as a formatted string; for a sender with no display name
+// it is "addr <addr>", whose bare-address display name net/mail rejects. The
+// summary must still expose a clean EmailAddress (not the whole malformed string)
+// so a client populates its list view and reply-to correctly — this is exactly
+// where the FindItem path differs from GetItem, which reads the address property
+// directly.
+func TestSplitAddress(t *testing.T) {
+	cases := []struct {
+		in, wantName, wantEmail string
+	}{
+		{"Bob <bob@hermex.test>", "Bob", "bob@hermex.test"},
+		{"ops@hermex.test <ops@hermex.test>", "", "ops@hermex.test"}, // no display name
+		{"plain@hermex.test", "", "plain@hermex.test"},
+		{"", "", ""},
+	}
+	for _, c := range cases {
+		name, email := splitAddress(c.in)
+		if name != c.wantName || email != c.wantEmail {
+			t.Errorf("splitAddress(%q) = (%q, %q), want (%q, %q)", c.in, name, email, c.wantName, c.wantEmail)
+		}
+	}
+}
