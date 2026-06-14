@@ -54,6 +54,12 @@ const (
 	// snapshot-diff Sync compares against). It persists as a property, not a
 	// dedicated table, like the other subsystem state.
 	PrActiveSyncState = PropTag(0x6777001F) // PtUnicode
+	// PrEwsSyncState is the provider-defined store-root property (0x6778) holding
+	// the EWS sync state as a JSON tree (the folder-hierarchy sync state plus the
+	// per-folder item snapshot the SyncFolderItems snapshot-diff compares against).
+	// It persists as a property, not a dedicated table, like the other subsystem
+	// state.
+	PrEwsSyncState = PropTag(0x6778001F) // PtUnicode
 )
 
 // Large message/attachment content property tags. These hold bodies and

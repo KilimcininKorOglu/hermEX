@@ -87,6 +87,17 @@ func writeSOAP(w http.ResponseWriter, innerXML []byte) {
 	_, _ = io.WriteString(w, soapEnvelopeClose)
 }
 
+// writeResponse marshals an operation response struct and wraps it in the SOAP
+// envelope. On a marshal error it falls back to a SOAP Fault.
+func writeResponse(w http.ResponseWriter, v any) {
+	out, err := xml.Marshal(v)
+	if err != nil {
+		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		return
+	}
+	writeSOAP(w, out)
+}
+
 // writeSOAPFault writes an envelope-level SOAP 1.1 Fault carrying an EWS
 // response code in the detail. Used for malformed envelopes and unsupported
 // operations (the request never reaches a per-operation response message).
