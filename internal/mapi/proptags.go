@@ -181,6 +181,8 @@ const (
 	PrDisplayType             = PropTag(0x39000003) // PtLong
 	PrResponsibility          = PropTag(0x0E0F000B) // PtBoolean
 	PrRecipientFlags          = PropTag(0x5FFD0003) // PtLong
+	PrRowid                   = PropTag(0x30000003) // PtLong (PidTagRowid, recipient row id)
+	PrSendRichInfo            = PropTag(0x3A40000B) // PtBoolean (PidTagSendRichInfo)
 )
 
 // Recipient type values (PR_RECIPIENT_TYPE).

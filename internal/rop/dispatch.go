@@ -9,8 +9,12 @@ const (
 	ropOpenMessage           uint8 = 0x03
 	ropGetHierarchyTable     uint8 = 0x04
 	ropGetContentsTable      uint8 = 0x05
+	ropCreateMessage         uint8 = 0x06
 	ropGetPropertiesSpecific uint8 = 0x07
 	ropGetPropertiesAll      uint8 = 0x08
+	ropSetProperties         uint8 = 0x0A
+	ropSaveChangesMessage    uint8 = 0x0C
+	ropModifyRecipients      uint8 = 0x0E
 	ropSetColumns            uint8 = 0x12
 	ropSortTable             uint8 = 0x13
 	ropRestrict              uint8 = 0x14
@@ -24,9 +28,10 @@ const (
 
 // MAPI return codes ([MS-OXCDATA] 2.4.1) carried in a ROP response ReturnValue.
 const (
-	ecSuccess  uint32 = 0x00000000
-	ecError    uint32 = 0x80004005 // generic failure / unimplemented ROP
-	ecNotFound uint32 = 0x8004010F // MAPI_E_NOT_FOUND (no such folder/object)
+	ecSuccess      uint32 = 0x00000000
+	ecError        uint32 = 0x80004005 // generic failure / unimplemented ROP
+	ecNotFound     uint32 = 0x8004010F // MAPI_E_NOT_FOUND (no such folder/object)
+	ecNotSupported uint32 = 0x80040102 // MAPI_E_NO_SUPPORT (unsupported request, e.g. FAI create)
 )
 
 // Dispatch parses the request ROP list and returns the response ROP bytes plus
@@ -71,6 +76,22 @@ loop:
 			}
 		case ropGetPropertiesAll:
 			if !s.ropGetPropertiesAll(p, out, handles, hindex) {
+				break loop
+			}
+		case ropCreateMessage:
+			if !s.ropCreateMessage(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSetProperties:
+			if !s.ropSetProperties(p, out, handles, hindex) {
+				break loop
+			}
+		case ropModifyRecipients:
+			if !s.ropModifyRecipients(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSaveChangesMessage:
+			if !s.ropSaveChangesMessage(p, out, handles, hindex) {
 				break loop
 			}
 		case ropGetAttachmentTable:

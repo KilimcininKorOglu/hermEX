@@ -21,6 +21,7 @@ const (
 	kindMessage                   // an opened message
 	kindStream                    // an open property stream
 	kindAttachment                // an opened attachment
+	kindNewMessage                // a message being composed in memory (pre-save)
 )
 
 // object is a server-side MAPI object referenced by a uint32 handle. Fields are
@@ -30,12 +31,27 @@ const (
 // attachment its property bag.
 type object struct {
 	kind        objKind
-	store       *objectstore.Store  // kindLogon
+	store       *objectstore.Store  // kindLogon, and inherited by every child object
 	folderID    int64               // kindFolder
 	table       *tableState         // kindTable
 	messageID   int64               // kindMessage
 	stream      *streamState        // kindStream
 	attachProps mapi.PropertyValues // kindAttachment
+	newMsg      *newMessageState    // kindNewMessage
+}
+
+// newMessageState accumulates a message being composed over the ROP write
+// sequence: CreateMessage opens it, SetProperties merges into props,
+// ModifyRecipients replaces recipients, and SaveChangesMessage persists it via
+// objectstore.CreateMessage. It is in memory until the first save; savedID then
+// holds the persisted message EID so a re-save updates in place rather than
+// inserting a duplicate.
+type newMessageState struct {
+	folderID   int64
+	props      mapi.PropertyValues
+	recipients []mapi.PropertyValues
+	saved      bool
+	savedID    int64
 }
 
 // Session is one MAPI/HTTP session's object/handle table — the analogue of a
