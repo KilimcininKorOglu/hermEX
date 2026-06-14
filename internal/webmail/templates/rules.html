@@ -1,0 +1,107 @@
+{{define "rules"}}{{template "head" .}}
+<div class="reader">
+  <div class="reader-toolbar"><a href="/mail?folder=INBOX">&larr; Back to mailbox</a></div>
+  <div class="compose-card">
+    <h2>Inbox rules</h2>
+    <p class="muted">Rules run on each message as it arrives in your inbox, in order, top to bottom. Use &ldquo;Apply rules now&rdquo; to run them over the messages already in your inbox.</p>
+
+    {{if .Err}}<p class="notice">{{.Err}}</p>{{end}}
+    {{if .Ran}}<p class="notice">Applied rules to your inbox: {{.Affected}} of {{.Evaluated}} message(s) affected.</p>{{end}}
+
+    {{if .Rules}}
+    <ul class="signature-list">
+      {{range .Rules}}
+      <li>
+        <span>{{if .Name}}<strong>{{.Name}}</strong> &mdash; {{end}}{{.Summary}}{{if not .Enabled}} <em class="muted">(disabled)</em>{{end}}</span>
+        <span class="rule-actions">
+          <form method="post" action="/rules" class="inline">
+            <input type="hidden" name="action" value="toggle">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <input type="hidden" name="enabled" value="{{if .Enabled}}0{{else}}1{{end}}">
+            <button type="submit">{{if .Enabled}}Disable{{else}}Enable{{end}}</button>
+          </form>
+          <form method="post" action="/rules" class="inline" onsubmit="return confirm('Delete this rule?')">
+            <input type="hidden" name="action" value="delete">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <button type="submit" class="danger">Delete</button>
+          </form>
+        </span>
+      </li>
+      {{end}}
+    </ul>
+    <form method="post" action="/rules" class="inline">
+      <input type="hidden" name="action" value="run">
+      <button class="primary" type="submit">Apply rules now</button>
+    </form>
+    {{else}}
+    <p class="notice">No rules yet. Add one below.</p>
+    {{end}}
+
+    <h2>Add a rule</h2>
+    <form method="post" action="/rules" id="ruleform">
+      <input type="hidden" name="action" value="add">
+      <div class="field">
+        <label>Rule name (optional)</label>
+        <input name="name" placeholder="e.g. File invoices">
+      </div>
+      <div class="field">
+        <label>When an incoming message matches</label>
+        <select name="condfield" id="condfield">
+          <option value="subject">Subject contains</option>
+          <option value="from">Sender contains</option>
+          <option value="importance">Importance is</option>
+          <option value="size">Size at least (KB)</option>
+        </select>
+        <span class="cond-input" data-cond="subject from">
+          <input name="condvalue" placeholder="text to match">
+        </span>
+        <span class="cond-input" data-cond="importance">
+          <select name="condimportance">
+            <option value="high">High</option>
+            <option value="normal">Normal</option>
+            <option value="low">Low</option>
+          </select>
+        </span>
+        <span class="cond-input" data-cond="size">
+          <input type="number" name="condsize" min="0" placeholder="KB">
+        </span>
+      </div>
+      <div class="field">
+        <label>Then</label>
+        <select name="actiontype" id="actiontype">
+          <option value="move">Move it to folder</option>
+          <option value="markread">Mark it as read</option>
+          <option value="delete">Delete it</option>
+        </select>
+        <span class="action-input" data-action="move">
+          <select name="actiontarget">
+            {{range .Folders}}<option value="{{.ID}}">{{.Path}}</option>{{end}}
+          </select>
+        </span>
+      </div>
+      <button class="primary" type="submit">Add rule</button>
+    </form>
+  </div>
+</div>
+<script>
+(function () {
+  // Show only the value input relevant to the chosen condition/action. Without
+  // JS every input stays visible and the form still posts correctly.
+  function sync(selectId, inputClass, dataAttr) {
+    var sel = document.getElementById(selectId);
+    if (!sel) { return; }
+    var inputs = document.querySelectorAll("." + inputClass);
+    function apply() {
+      inputs.forEach(function (el) {
+        var tokens = (el.getAttribute(dataAttr) || "").split(" ");
+        el.style.display = tokens.indexOf(sel.value) >= 0 ? "" : "none";
+      });
+    }
+    sel.addEventListener("change", apply);
+    apply();
+  }
+  sync("condfield", "cond-input", "data-cond");
+  sync("actiontype", "action-input", "data-action");
+})();
+</script>
+{{template "foot" .}}{{end}}

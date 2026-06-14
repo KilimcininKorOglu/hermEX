@@ -51,6 +51,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /import", s.handleImportSubmit)
 	mux.HandleFunc("GET /settings", s.handleSettingsForm)
 	mux.HandleFunc("POST /settings", s.handleSettingsSubmit)
+	mux.HandleFunc("GET /rules", s.handleRulesForm)
+	mux.HandleFunc("POST /rules", s.handleRulesSubmit)
 	mux.HandleFunc("POST /action", s.handleAction)
 	mux.HandleFunc("POST /bulk", s.handleBulk)
 	mux.HandleFunc("POST /export", s.handleExport)
