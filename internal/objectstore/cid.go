@@ -18,13 +18,15 @@ import (
 
 // isCIDProp reports whether a property value is offloaded to a content file
 // rather than stored inline in the property tables: message bodies (plain,
-// HTML, RTF), the captured transport headers, and attachment payloads.
+// HTML, RTF), the captured transport headers, attachment payloads, and the
+// preserved original of an S/MIME message.
 func isCIDProp(tag mapi.PropTag) bool {
 	switch tag {
 	case mapi.PrBody, mapi.PrBodyA,
 		mapi.PrHTML, mapi.PrRTFCompressed,
 		mapi.PrTransportMessageHeaders, mapi.PrTransportMessageHeadersA,
-		mapi.PrAttachDataBin, mapi.PrAttachDataObj:
+		mapi.PrAttachDataBin, mapi.PrAttachDataObj,
+		mapi.PrSmimeOriginal:
 		return true
 	default:
 		return false

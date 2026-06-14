@@ -8,6 +8,7 @@ import (
 
 	"hermex/internal/mapi"
 	"hermex/internal/oxcmail"
+	"hermex/internal/smime"
 )
 
 // MessageInfo is the per-message metadata IMAP and POP3 need without loading
@@ -51,9 +52,22 @@ func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time
 	}
 	mid := midString(uint64(eid))
 
-	eml, err := oxcmail.Export(msg, resolver)
-	if err != nil {
-		return MessageInfo{}, fmt.Errorf("objectstore: export: %w", err)
+	// S/MIME messages must be served byte-for-byte: oxcmail.Export rebuilds the
+	// MIME tree, which invalidates a signature and turns an envelope into plain
+	// multipart/mixed (verified). For those, preserve the arrival bytes on the
+	// message and serve them verbatim; every other message is re-synthesized.
+	eml := raw
+	if smime.IsSMIME(raw) {
+		if err := s.SetMessageProperties(eid, mapi.PropertyValues{
+			{Tag: mapi.PrSmimeOriginal, Value: raw},
+		}); err != nil {
+			return MessageInfo{}, err
+		}
+	} else {
+		eml, err = oxcmail.Export(msg, resolver)
+		if err != nil {
+			return MessageInfo{}, fmt.Errorf("objectstore: export: %w", err)
+		}
 	}
 	if err := s.writeEML(mid, eml); err != nil {
 		return MessageInfo{}, err
