@@ -346,7 +346,7 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	sentRaw := insertBcc(deliveryRaw, v.Bcc)
 
-	unresolved, err := mta.Deliver(s.accounts, recipients, deliveryRaw, time.Now())
+	unresolved, err := mta.Deliver(s.accounts, v.From, recipients, deliveryRaw, time.Now())
 	if err != nil {
 		v.Error = "Delivery failed: " + err.Error()
 		s.render(w, "compose", v)

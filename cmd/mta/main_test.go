@@ -47,7 +47,7 @@ func TestSweepOutboxesDeliversDueScheduledSend(t *testing.T) {
 		"bob@hermex.test":   {MailboxPath: bobDir},
 	}
 	deliver := func(recipients []string, raw []byte, when time.Time) ([]string, error) {
-		return mta.Deliver(accounts, recipients, raw, when)
+		return mta.Deliver(accounts, senderOf(raw), recipients, raw, when)
 	}
 
 	sweepOutboxes(accounts, deliver)
