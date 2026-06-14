@@ -75,3 +75,28 @@ func TestListFolderObjects(t *testing.T) {
 		t.Errorf("max change number %d, want %d", max, objs[1].ChangeNumber)
 	}
 }
+
+// TestDeleteObject deletes an object-store-only object (a contact) by EID, the
+// path the DAV layer uses since such objects never enter the IMAP index and so
+// have no UID for DeleteMessage.
+func TestDeleteObject(t *testing.T) {
+	s := openSeededStore(t)
+	eid, err := s.CreateMessage(mapi.PrivateFIDContacts, contactMsg("Edsger Dijkstra"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteObject(eid); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.OpenMessage(eid); err != ErrNotFound {
+		t.Errorf("OpenMessage after delete: err %v, want ErrNotFound", err)
+	}
+	if objs, err := s.ListFolderObjects(mapi.PrivateFIDContacts); err != nil {
+		t.Fatal(err)
+	} else if len(objs) != 0 {
+		t.Errorf("got %d objects after delete, want 0", len(objs))
+	}
+	if err := s.DeleteObject(eid); err != ErrNotFound {
+		t.Errorf("second delete: err %v, want ErrNotFound", err)
+	}
+}

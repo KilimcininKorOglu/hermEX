@@ -134,7 +134,7 @@ func (s *Server) addressbookResponses(mailbox, user, depth string) ([]msResponse
 	}
 	for _, o := range objs {
 		responses = append(responses, msResponse{
-			Href: objectPath(user, resourceName(st, o.ID)),
+			Href: objectPath(user, objectName(st, o.ID)),
 			Propstat: []msPropstat{{
 				Prop: msProp{
 					GetETag:        etag(o.ChangeNumber),
@@ -168,10 +168,3 @@ func ctag(max uint64) string { return strconv.FormatUint(max, 10) }
 // syncToken is an opaque RFC 6578 sync token carrying the collection's change
 // high-water mark.
 func syncToken(max uint64) string { return "hermex:sync:" + strconv.FormatUint(max, 10) }
-
-// resourceName is the last path segment of an object's URL. It falls back to the
-// object EID; the object lifecycle increment stores the client-chosen name as a
-// property and prefers it here.
-func resourceName(st *objectstore.Store, id int64) string {
-	return strconv.FormatInt(id, 10) + ".vcf"
-}

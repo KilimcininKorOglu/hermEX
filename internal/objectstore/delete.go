@@ -41,3 +41,32 @@ func (s *Store) DeleteMessage(folderID int64, uid uint32) error {
 	_ = os.Remove(s.emlPath(mid))
 	return nil
 }
+
+// DeleteObject removes a message from the object store by its EID, regardless of
+// whether it was ever placed in the IMAP index. Mail is indexed and deleted by
+// IMAP UID (DeleteMessage); non-mail objects (contacts, calendar items) live
+// only in the object store, so the DAV layer deletes them here. The object's
+// foreign-key cascade drops its property bags, recipients, and attachments; any
+// stale index row, mapping, and cached eml are cleaned up too. It reports
+// ErrNotFound when no such object exists.
+func (s *Store) DeleteObject(messageID int64) error {
+	var mid string
+	err := s.objdb.QueryRow(`SELECT mid_string FROM messages WHERE message_id=?`, messageID).Scan(&mid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := s.objdb.Exec(`DELETE FROM messages WHERE message_id=?`, messageID); err != nil {
+		return err
+	}
+	if _, err := s.idxdb.Exec(`DELETE FROM messages WHERE message_id=?`, messageID); err != nil {
+		return err
+	}
+	if _, err := s.idxdb.Exec(`DELETE FROM mapping WHERE message_id=?`, messageID); err != nil {
+		return err
+	}
+	_ = os.Remove(s.emlPath(mid))
+	return nil
+}
