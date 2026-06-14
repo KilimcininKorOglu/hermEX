@@ -64,6 +64,37 @@ func TestCreateItemSaveOnly(t *testing.T) {
 	}
 }
 
+// TestCreateItemSendOnly confirms SendOnly delivers (loopback) but files no Sent
+// copy, and — the regression guard — that the response still carries an <Items>
+// container. A real EWS client rejects a CreateItemResponseMessage with no Items
+// element; SendOnly persists nothing, so its container is present but empty. The
+// store-only assertions in the sibling tests passed while this wire shape was
+// malformed (the container omitted entirely), which is exactly how the defect
+// reached the live smoke — so this test gates the shape, not just the effect.
+func TestCreateItemSendOnly(t *testing.T) {
+	ts, dir := seededWithMessage(t)
+	_, out := soapPost(t, ts, createItemReq("SendOnly", testUser, "Send via EWS", "fire and forget"), true)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("not success: %s", out)
+	}
+	if !strings.Contains(out, "<Items") {
+		t.Errorf("SendOnly response omits the <Items> container (clients reject its absence): %s", out)
+	}
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	inbox, _ := st.ListMessages(int64(mapi.PrivateFIDInbox))
+	sent, _ := st.ListMessages(int64(mapi.PrivateFIDSentItems))
+	if len(inbox) != 1 {
+		t.Errorf("inbox = %d, want 1 (delivered to self)", len(inbox))
+	}
+	if len(sent) != 0 {
+		t.Errorf("sent = %d, want 0 (SendOnly files no copy)", len(sent))
+	}
+}
+
 // multiAccountServer builds an EWS server over a directory with several accounts
 // (for ResolveNames).
 func multiAccountServer(t *testing.T) *httptest.Server {
