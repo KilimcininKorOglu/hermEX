@@ -95,6 +95,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleFolderSync(w, r, sess)
 	case "Sync":
 		s.handleSync(w, r, sess)
+	case "SendMail", "SmartReply", "SmartForward":
+		s.handleSendMail(w, r, sess)
 	default:
 		http.Error(w, "command not implemented: "+sess.req.cmd, http.StatusNotImplemented)
 	}
