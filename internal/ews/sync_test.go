@@ -24,6 +24,14 @@ func syncItemsReq(folder, syncState string, maxChanges int) string {
 	return wrapRequest(body)
 }
 
+// countChange counts change elements of one kind in the response. The change
+// elements live in the types namespace (t:Create/t:Update/t:Delete) inside the
+// m:Changes wrapper — the shape EWS clients require to key the change type — so
+// the assertions match that exact wire form, not a namespace-naive tag.
+func countChange(out, kind string) int {
+	return strings.Count(out, "<"+kind+` xmlns="`+nsTypes+`">`)
+}
+
 // inboxUIDs opens the store and returns the Inbox message UIDs.
 func inboxUIDs(t *testing.T, dir string) (*objectstore.Store, []objectstore.MessageInfo) {
 	t.Helper()
@@ -44,7 +52,7 @@ func inboxUIDs(t *testing.T, dir string) (*objectstore.Store, []objectstore.Mess
 func TestSyncFolderItemsPrime(t *testing.T) {
 	ts, _ := seededWithMessage(t, plainMessage, plainMessage)
 	_, out := soapPost(t, ts, syncItemsReq("inbox", "", 0), true)
-	if got := strings.Count(out, "<Create>"); got != 2 {
+	if got := countChange(out, "Create"); got != 2 {
 		t.Errorf("prime creates = %d, want 2: %s", got, out)
 	}
 	if extractSyncState(out) == "" {
@@ -59,7 +67,7 @@ func TestSyncFolderItemsNoChange(t *testing.T) {
 	_, out := soapPost(t, ts, syncItemsReq("inbox", "", 0), true)
 	token := extractSyncState(out)
 	_, out2 := soapPost(t, ts, syncItemsReq("inbox", token, 0), true)
-	if strings.Contains(out2, "<Create>") || strings.Contains(out2, "<Update>") || strings.Contains(out2, "<Delete>") {
+	if countChange(out2, "Create")+countChange(out2, "Update")+countChange(out2, "Delete") > 0 {
 		t.Errorf("no-change sync reported changes: %s", out2)
 	}
 }
@@ -79,7 +87,7 @@ func TestSyncFolderItemsDetectsAdd(t *testing.T) {
 	st.Close()
 
 	_, out2 := soapPost(t, ts, syncItemsReq("inbox", token, 0), true)
-	if got := strings.Count(out2, "<Create>"); got != 1 {
+	if got := countChange(out2, "Create"); got != 1 {
 		t.Errorf("adds = %d, want 1: %s", got, out2)
 	}
 }
@@ -104,7 +112,7 @@ func TestSyncFolderItemsDetectsFlagChange(t *testing.T) {
 	st.Close()
 
 	_, out2 := soapPost(t, ts, syncItemsReq("inbox", token, 0), true)
-	if got := strings.Count(out2, "<Update>"); got != 1 {
+	if got := countChange(out2, "Update"); got != 1 {
 		t.Errorf("flag-change updates = %d, want 1 (the keystone): %s", got, out2)
 	}
 }
@@ -124,7 +132,7 @@ func TestSyncFolderItemsDetectsDelete(t *testing.T) {
 	st.Close()
 
 	_, out2 := soapPost(t, ts, syncItemsReq("inbox", token, 0), true)
-	if got := strings.Count(out2, "<Delete>"); got != 1 {
+	if got := countChange(out2, "Delete"); got != 1 {
 		t.Errorf("deletes = %d, want 1: %s", got, out2)
 	}
 }
@@ -134,7 +142,7 @@ func TestSyncFolderItemsDetectsDelete(t *testing.T) {
 func TestSyncFolderItemsCap(t *testing.T) {
 	ts, _ := seededWithMessage(t, plainMessage, plainMessage, plainMessage)
 	_, out := soapPost(t, ts, syncItemsReq("inbox", "", 2), true)
-	if got := strings.Count(out, "<Create>"); got != 2 {
+	if got := countChange(out, "Create"); got != 2 {
 		t.Errorf("capped creates = %d, want 2: %s", got, out)
 	}
 	if !strings.Contains(out, "<IncludesLastItemInRange>false</IncludesLastItemInRange>") {
@@ -142,7 +150,7 @@ func TestSyncFolderItemsCap(t *testing.T) {
 	}
 	token := extractSyncState(out)
 	_, out2 := soapPost(t, ts, syncItemsReq("inbox", token, 2), true)
-	if got := strings.Count(out2, "<Create>"); got != 1 {
+	if got := countChange(out2, "Create"); got != 1 {
 		t.Errorf("second batch creates = %d, want 1: %s", got, out2)
 	}
 }

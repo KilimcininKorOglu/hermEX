@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"net/http"
 	"net/mail"
+	"strings"
 
 	"hermex/internal/mime"
 	"hermex/internal/objectstore"
@@ -71,9 +72,11 @@ type itemsWrap struct {
 }
 
 type findItemRoot struct {
-	TotalItemsInView        int       `xml:"TotalItemsInView,attr"`
-	IncludesLastItemInRange bool      `xml:"IncludesLastItemInRange,attr"`
-	Items                   itemsWrap `xml:"Items"`
+	TotalItemsInView        int  `xml:"TotalItemsInView,attr"`
+	IncludesLastItemInRange bool `xml:"IncludesLastItemInRange,attr"`
+	// In Find* responses the collection under m:RootFolder is in the types
+	// namespace (t:Items), unlike the messages-namespace m:Items of GetItem.
+	Items itemsWrap `xml:"http://schemas.microsoft.com/exchange/services/2006/types Items"`
 }
 
 // attachmentsWrap holds an <Attachments> list of types-namespace FileAttachments.
@@ -101,7 +104,7 @@ func (s *Server) handleFindItem(w http.ResponseWriter, inner []byte, sess *sessi
 	var msgs []findItemResponseMessage
 	for _, tgt := range resolveTargets(req.ParentFolderIDs) {
 		if !tgt.ok {
-			msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInvalidRequest"})
+			msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: tgt.code})
 			continue
 		}
 		items, err := st.ListMessages(tgt.fid)
@@ -162,6 +165,7 @@ func (s *Server) handleGetItem(w http.ResponseWriter, inner []byte, sess *sessio
 		elem := oxews.BuildItem(msg, oxews.ItemMeta{
 			ItemID:         ref.ID,
 			MessageID:      id.MessageID,
+			ChangeKey:      oxews.ChangeKey(uint64(id.MessageID)),
 			IsRead:         info.Flags&objectstore.FlagSeen != 0,
 			HasAttachments: hasAttach,
 			Received:       info.InternalDate,
@@ -257,6 +261,7 @@ func itemSummary(st *objectstore.Store, folderID int64, info objectstore.Message
 	name, email := splitAddress(info.Sender)
 	return oxews.BuildSummary(oxews.SummaryMeta{
 		ItemID:         oxews.EncodeItemID(oxews.ItemID{FolderID: folderID, MessageID: info.ID, UID: info.UID}),
+		ChangeKey:      oxews.ChangeKey(uint64(info.ID)),
 		Subject:        info.Subject,
 		SenderName:     name,
 		SenderEmail:    email,
@@ -274,6 +279,15 @@ func splitAddress(s string) (name, email string) {
 	}
 	if a, err := mail.ParseAddress(s); err == nil {
 		return a.Name, a.Address
+	}
+	// ParseAddress rejects a display name that is itself a bare address (an
+	// unquoted '@', which the index emits for a sender with no display name, e.g.
+	// "ops@x <ops@x>"); fall back to the angle-addr so the summary carries a clean
+	// EmailAddress rather than the whole malformed string.
+	if i := strings.LastIndex(s, "<"); i >= 0 {
+		if j := strings.Index(s[i:], ">"); j > 1 {
+			return "", strings.TrimSpace(s[i+1 : i+j])
+		}
 	}
 	return "", s
 }

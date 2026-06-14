@@ -89,7 +89,7 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, inner []byte, sess *ses
 		}
 		msgs = append(msgs, itemResponseMessage{
 			ResponseClass: "Success", ResponseCode: "NoError",
-			Items: &itemsWrap{Messages: []oxews.Message{{ItemID: oxews.ItemIDElem{ID: ch.ItemID.ID}}}},
+			Items: &itemsWrap{Messages: []oxews.Message{{ItemID: oxews.ItemIDElem{ID: ch.ItemID.ID, ChangeKey: oxews.ChangeKey(uint64(id.MessageID))}}}},
 		})
 	}
 	writeResponse(w, updateItemResponse{Messages: msgs})
@@ -184,8 +184,12 @@ func (s *Server) moveOrCopy(w http.ResponseWriter, inner []byte, sess *session, 
 		return
 	}
 	targets := resolveTargets(req.ToFolderID)
-	if len(targets) == 0 || !targets[0].ok {
+	if len(targets) == 0 {
 		writeMoveCopy(w, remove, []itemResponseMessage{itemError("ErrorInvalidRequest")})
+		return
+	}
+	if !targets[0].ok {
+		writeMoveCopy(w, remove, []itemResponseMessage{itemError(targets[0].code)})
 		return
 	}
 	toFID := targets[0].fid
@@ -217,7 +221,7 @@ func (s *Server) moveOrCopy(w http.ResponseWriter, inner []byte, sess *session, 
 		newID := oxews.EncodeItemID(oxews.ItemID{FolderID: toFID, MessageID: info.ID, UID: info.UID})
 		msgs = append(msgs, itemResponseMessage{
 			ResponseClass: "Success", ResponseCode: "NoError",
-			Items: &itemsWrap{Messages: []oxews.Message{{ItemID: oxews.ItemIDElem{ID: newID}}}},
+			Items: &itemsWrap{Messages: []oxews.Message{{ItemID: oxews.ItemIDElem{ID: newID, ChangeKey: oxews.ChangeKey(uint64(info.ID))}}}},
 		})
 	}
 	writeMoveCopy(w, remove, msgs)

@@ -80,14 +80,19 @@ type foldersWrap struct {
 }
 
 type findRootFolder struct {
-	TotalItemsInView        int         `xml:"TotalItemsInView,attr"`
-	IncludesLastItemInRange bool        `xml:"IncludesLastItemInRange,attr"`
-	Folders                 foldersWrap `xml:"Folders"`
+	TotalItemsInView        int  `xml:"TotalItemsInView,attr"`
+	IncludesLastItemInRange bool `xml:"IncludesLastItemInRange,attr"`
+	// In Find* responses the collection under m:RootFolder is in the types
+	// namespace (t:Folders), unlike the messages-namespace m:Folders of GetFolder.
+	Folders foldersWrap `xml:"http://schemas.microsoft.com/exchange/services/2006/types Folders"`
 }
 
+// hierarchyChanges is the m:Changes wrapper (messages namespace, inherited); the
+// individual change elements are in the types namespace (t:Create/t:Delete),
+// which is how clients key the change type.
 type hierarchyChanges struct {
-	Create []createFolderChange `xml:"Create"`
-	Delete []deleteFolderChange `xml:"Delete"`
+	Create []createFolderChange `xml:"http://schemas.microsoft.com/exchange/services/2006/types Create"`
+	Delete []deleteFolderChange `xml:"http://schemas.microsoft.com/exchange/services/2006/types Delete"`
 }
 
 type createFolderChange struct {
@@ -118,7 +123,7 @@ func (s *Server) handleGetFolder(w http.ResponseWriter, inner []byte, sess *sess
 	var msgs []folderResponseMessage
 	for _, tgt := range resolveTargets(req.FolderIDs) {
 		if !tgt.ok {
-			msgs = append(msgs, folderResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInvalidRequest"})
+			msgs = append(msgs, folderResponseMessage{ResponseClass: "Error", ResponseCode: tgt.code})
 			continue
 		}
 		f, code, err := folderElement(st, tgt.fid, idx, all)
@@ -155,7 +160,7 @@ func (s *Server) handleFindFolder(w http.ResponseWriter, inner []byte, sess *ses
 	var msgs []findFolderResponseMessage
 	for _, tgt := range resolveTargets(req.ParentFolderIDs) {
 		if !tgt.ok {
-			msgs = append(msgs, findFolderResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInvalidRequest"})
+			msgs = append(msgs, findFolderResponseMessage{ResponseClass: "Error", ResponseCode: tgt.code})
 			continue
 		}
 		elems, err := folderElements(st, collectChildren(all, tgt.fid, deep), all)
@@ -277,21 +282,37 @@ func openFolders(w http.ResponseWriter, sess *session) (*objectstore.Store, []ob
 }
 
 type folderTarget struct {
-	fid int64
-	ok  bool
+	fid  int64
+	ok   bool
+	code string // when ok is false, the per-folder error code to report
 }
 
 // resolveTargets resolves the requested folder ids — distinguished names via the
-// built-in map, opaque ids via the id codec.
+// built-in map, opaque ids via the id codec. An unresolved id carries the right
+// error code: a distinguished name we do not map is a folder this mailbox lacks
+// (ErrorFolderNotFound), while an undecodable opaque id is malformed
+// (ErrorInvalidRequest).
 func resolveTargets(refs folderRefs) []folderTarget {
 	var out []folderTarget
 	for _, d := range refs.Distinguished {
-		fid, ok := distinguishedFolders[strings.ToLower(d.ID)]
-		out = append(out, folderTarget{fid, ok})
+		if fid, ok := distinguishedFolders[strings.ToLower(d.ID)]; ok {
+			out = append(out, folderTarget{fid: fid, ok: true})
+		} else {
+			// A distinguished id is a fixed EWS enum; one we do not map is a
+			// folder this mailbox does not have (recoverable-items, search
+			// folders, voicemail), not a bad request. ErrorFolderNotFound lets a
+			// client that probes the whole distinguished set (enumerating the
+			// mailbox root) skip the absent folders instead of aborting the
+			// entire batch.
+			out = append(out, folderTarget{code: "ErrorFolderNotFound"})
+		}
 	}
 	for _, f := range refs.Folders {
-		fid, err := oxews.DecodeFolderID(f.ID)
-		out = append(out, folderTarget{fid, err == nil})
+		if fid, err := oxews.DecodeFolderID(f.ID); err == nil {
+			out = append(out, folderTarget{fid: fid, ok: true})
+		} else {
+			out = append(out, folderTarget{code: "ErrorInvalidRequest"})
+		}
 	}
 	return out
 }
@@ -335,8 +356,16 @@ func buildFolderElem(st *objectstore.Store, info objectstore.FolderInfo, all []o
 	if err != nil {
 		return oxews.Folder{}, err
 	}
+	// A top-level folder (nil store parent) hangs off the IPM subtree root, so
+	// clients can place it under the mailbox root when building the tree.
+	parent := info.ParentID
+	if parent == nil {
+		root := int64(mapi.PrivateFIDIPMSubtree)
+		parent = &root
+	}
 	return oxews.BuildFolder(oxews.FolderInput{
 		FolderID:     info.ID,
+		ParentID:     parent,
 		ChangeNumber: cn,
 		DisplayName:  info.DisplayName,
 		Total:        total,

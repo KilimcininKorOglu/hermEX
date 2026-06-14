@@ -38,10 +38,13 @@ type syncItemsResponseMessage struct {
 	Changes                 *itemChanges `xml:"Changes,omitempty"`
 }
 
+// itemChanges is the m:Changes wrapper (messages namespace, inherited); the
+// individual change elements are in the types namespace (t:Create/t:Update/
+// t:Delete), which is how clients key the change type.
 type itemChanges struct {
-	Create []itemChange       `xml:"Create"`
-	Update []itemChange       `xml:"Update"`
-	Delete []deleteItemChange `xml:"Delete"`
+	Create []itemChange       `xml:"http://schemas.microsoft.com/exchange/services/2006/types Create"`
+	Update []itemChange       `xml:"http://schemas.microsoft.com/exchange/services/2006/types Update"`
+	Delete []deleteItemChange `xml:"http://schemas.microsoft.com/exchange/services/2006/types Delete"`
 }
 
 type itemChange struct {
@@ -65,8 +68,12 @@ func (s *Server) handleSyncFolderItems(w http.ResponseWriter, inner []byte, sess
 		return
 	}
 	targets := resolveTargets(req.SyncFolderID)
-	if len(targets) == 0 || !targets[0].ok {
+	if len(targets) == 0 {
 		writeSyncItemsError(w, "ErrorInvalidRequest")
+		return
+	}
+	if !targets[0].ok {
+		writeSyncItemsError(w, targets[0].code)
 		return
 	}
 	fid := targets[0].fid

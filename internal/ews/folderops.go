@@ -34,8 +34,12 @@ func (s *Server) handleCreateFolder(w http.ResponseWriter, inner []byte, sess *s
 		return
 	}
 	targets := resolveTargets(req.ParentFolderID)
-	if len(targets) == 0 || !targets[0].ok {
+	if len(targets) == 0 {
 		writeResponse(w, createFolderResponse{Messages: []folderResponseMessage{folderError("ErrorInvalidRequest")}})
+		return
+	}
+	if !targets[0].ok {
+		writeResponse(w, createFolderResponse{Messages: []folderResponseMessage{folderError(targets[0].code)}})
 		return
 	}
 	parentFID := targets[0].fid
