@@ -46,6 +46,25 @@ func (s *Server) handlePropfind(w http.ResponseWriter, r *http.Request, user, ma
 			return
 		}
 		responses = rs
+	case kindCalHomeSet:
+		responses = []msResponse{calHomeSetResponse(pathUser)}
+		if depth != "0" {
+			rs, err := s.calendarResponses(mailbox, pathUser, depth)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			// At the home set, Depth 1 lists the calendars it contains, not their
+			// members.
+			responses = append(responses, rs[0])
+		}
+	case kindCalendar:
+		rs, err := s.calendarResponses(mailbox, pathUser, depth)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		responses = rs
 	default:
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -77,6 +96,7 @@ func principalResponse(user string) msResponse {
 				DisplayName:        user,
 				PrincipalURL:       &href{Href: principalPath(user)},
 				AddressbookHomeSet: &href{Href: homeSetPath(user)},
+				CalendarHomeSet:    &href{Href: calHomeSetPath(user)},
 				CurrentUserPrOne:   &href{Href: principalPath(user)},
 			},
 			Status: statusOK,
@@ -134,11 +154,75 @@ func (s *Server) addressbookResponses(mailbox, user, depth string) ([]msResponse
 	}
 	for _, o := range objs {
 		responses = append(responses, msResponse{
-			Href: objectPath(user, objectName(st, o.ID)),
+			Href: objectPath(user, objectName(st, o.ID, ".vcf")),
 			Propstat: []msPropstat{{
 				Prop: msProp{
 					GetETag:        etag(o.ChangeNumber),
 					GetContentType: "text/vcard; charset=utf-8",
+				},
+				Status: statusOK,
+			}},
+		})
+	}
+	return responses, nil
+}
+
+// calHomeSetResponse describes the calendar-home-set collection.
+func calHomeSetResponse(user string) msResponse {
+	return msResponse{
+		Href: calHomeSetPath(user),
+		Propstat: []msPropstat{{
+			Prop: msProp{
+				ResourceType: &resourceType{Collection: empty},
+				DisplayName:  "Calendars",
+			},
+			Status: statusOK,
+		}},
+	}
+}
+
+// calendarResponses returns the Calendar collection response, followed (when
+// depth != "0") by one response per member .ics object.
+func (s *Server) calendarResponses(mailbox, user, depth string) ([]msResponse, error) {
+	st, err := objectstore.Open(mailbox)
+	if err != nil {
+		return nil, err
+	}
+	defer st.Close()
+
+	max, err := st.FolderMaxChangeNumber(mapi.PrivateFIDCalendar)
+	if err != nil {
+		return nil, err
+	}
+	coll := msResponse{
+		Href: calendarPath(user),
+		Propstat: []msPropstat{{
+			Prop: msProp{
+				ResourceType:     calendarResourceType(),
+				DisplayName:      "Calendar",
+				GetCTag:          ctag(max),
+				SyncToken:        syncToken(max),
+				SupportedCalComp: eventComponentSet(),
+			},
+			Status: statusOK,
+		}},
+	}
+	responses := []msResponse{coll}
+	if depth == "0" {
+		return responses, nil
+	}
+
+	objs, err := st.ListFolderObjects(mapi.PrivateFIDCalendar)
+	if err != nil {
+		return nil, err
+	}
+	for _, o := range objs {
+		responses = append(responses, msResponse{
+			Href: calObjectPath(user, objectName(st, o.ID, ".ics")),
+			Propstat: []msPropstat{{
+				Prop: msProp{
+					GetETag:        etag(o.ChangeNumber),
+					GetContentType: "text/calendar; charset=utf-8",
 				},
 				Status: statusOK,
 			}},

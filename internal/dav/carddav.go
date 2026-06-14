@@ -36,9 +36,10 @@ func resourceNameTag(st *objectstore.Store, create bool) (mapi.PropTag, bool, er
 	return mapi.PropTag(uint32(ids[0])<<16 | uint32(mapi.PtUnicode)), true, nil
 }
 
-// objectName returns a contact's DAV resource name: the stored resource-name
-// property if present, else a stable fallback derived from its EID.
-func objectName(st *objectstore.Store, id int64) string {
+// objectName returns an object's DAV resource name: the stored resource-name
+// property if present, else a stable fallback derived from its EID with the
+// collection's extension (".vcf" for contacts, ".ics" for calendar events).
+func objectName(st *objectstore.Store, id int64, ext string) string {
 	if tag, ok, err := resourceNameTag(st, false); err == nil && ok {
 		if props, err := st.GetMessageProperties(id); err == nil {
 			if v, ok := props.Get(tag); ok {
@@ -48,19 +49,19 @@ func objectName(st *objectstore.Store, id int64) string {
 			}
 		}
 	}
-	return strconv.FormatInt(id, 10) + ".vcf"
+	return strconv.FormatInt(id, 10) + ext
 }
 
-// findObjectByName resolves a contact URL segment to its stored object. The scan
-// is O(folder size) per request, acceptable for typical address books; a
-// property index is a later optimization.
-func findObjectByName(st *objectstore.Store, name string) (objectstore.FolderObject, bool, error) {
-	objs, err := st.ListFolderObjects(mapi.PrivateFIDContacts)
+// findObjectByName resolves a URL segment to its stored object within the given
+// folder. The scan is O(folder size) per request, acceptable for typical
+// collections; a property index is a later optimization.
+func findObjectByName(st *objectstore.Store, folderID int64, ext, name string) (objectstore.FolderObject, bool, error) {
+	objs, err := st.ListFolderObjects(folderID)
 	if err != nil {
 		return objectstore.FolderObject{}, false, err
 	}
 	for _, o := range objs {
-		if objectName(st, o.ID) == name {
+		if objectName(st, o.ID, ext) == name {
 			return o, true, nil
 		}
 	}
@@ -82,7 +83,7 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, mailbox strin
 	}
 	defer st.Close()
 
-	obj, found, err := findObjectByName(st, name)
+	obj, found, err := findObjectByName(st, mapi.PrivateFIDContacts, ".vcf", name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -126,7 +127,7 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request, mailbox strin
 	}
 	defer st.Close()
 
-	existing, found, err := findObjectByName(st, name)
+	existing, found, err := findObjectByName(st, mapi.PrivateFIDContacts, ".vcf", name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -172,7 +173,7 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request, mailbox strin
 		return
 	}
 
-	created, _, err := findObjectByName(st, name)
+	created, _, err := findObjectByName(st, mapi.PrivateFIDContacts, ".vcf", name)
 	if err == nil && created.ChangeNumber != 0 {
 		w.Header().Set("ETag", etag(created.ChangeNumber))
 	}
@@ -197,7 +198,7 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request, mailbox st
 	}
 	defer st.Close()
 
-	obj, found, err := findObjectByName(st, name)
+	obj, found, err := findObjectByName(st, mapi.PrivateFIDContacts, ".vcf", name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

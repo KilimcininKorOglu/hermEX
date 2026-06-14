@@ -67,7 +67,7 @@ func (s *Server) reportMultiget(w http.ResponseWriter, st *objectstore.Store, hr
 	ms := &multistatus{}
 	for _, h := range hrefs {
 		name := path.Base(strings.TrimRight(h, "/"))
-		obj, found, err := findObjectByName(st, name)
+		obj, found, err := findObjectByName(st, mapi.PrivateFIDContacts, ".vcf", name)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -113,7 +113,7 @@ func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store,
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		href := objectPath(user, objectName(st, o.ID))
+		href := objectPath(user, objectName(st, o.ID, ".vcf"))
 		ms.Responses = append(ms.Responses, addressDataResponse(href, o.ChangeNumber, data))
 	}
 	if sync {
