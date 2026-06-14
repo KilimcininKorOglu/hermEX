@@ -202,6 +202,38 @@ func TestCalReportMultiget(t *testing.T) {
 	}
 }
 
+// TestCalReportQuery confirms calendar-query returns every member's
+// calendar-data unfiltered and without a sync-token (it is not an incremental
+// sync). This is the report Apple Calendar and iOS fire first on a freshly
+// added account, so a regression here would break initial population even when
+// multiget and sync-collection still pass.
+func TestCalReportQuery(t *testing.T) {
+	ts := davServerCal(t)
+	doFull(t, ts, "PUT", calURL("plan.ics"), timedEventICS, nil)
+	review := strings.Replace(timedEventICS, "UID:cal-1\r\nSUMMARY:Planning", "UID:cal-2\r\nSUMMARY:Review", 1)
+	doFull(t, ts, "PUT", calURL("review.ics"), review, nil)
+
+	body := `<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:prop><d:getetag/><c:calendar-data/></d:prop>
+  <c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT"/></c:comp-filter></c:filter>
+</c:calendar-query>`
+	resp, out := doFull(t, ts, "REPORT", calURL(""), body, map[string]string{"Depth": "1"})
+	if resp.StatusCode != http.StatusMultiStatus {
+		t.Fatalf("status %d, want 207\n%s", resp.StatusCode, out)
+	}
+	for _, want := range []string{"SUMMARY:Planning", "SUMMARY:Review", "calendar-data"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("calendar-query missing %q\n%s", want, out)
+		}
+	}
+	if n := strings.Count(out, "BEGIN:VEVENT"); n != 2 {
+		t.Errorf("calendar-query returned %d events, want 2\n%s", n, out)
+	}
+	if token := syncTokenRE.FindString(out); token != "" {
+		t.Errorf("calendar-query must not carry a sync-token, got %q", token)
+	}
+}
+
 // TestCalReportSync checks incremental sync: an initial sync returns the member
 // and a token; after a new PUT, a sync with that token returns only the new one.
 func TestCalReportSync(t *testing.T) {
