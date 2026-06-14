@@ -4,16 +4,19 @@ import (
 	"crypto/rand"
 	"fmt"
 	"sync"
+
+	"hermex/internal/rop"
 )
 
 // sessionContext is the server-side state a MAPI/HTTP Connect establishes; the
 // client holds only the opaque sid cookie that maps here. The per-Execute
-// sequence cookie is an ordering/replay guard. (The ROP logon and object handle
-// state is added when the ROP layer lands.)
+// sequence cookie is an ordering/replay guard. ropSess holds the ROP object and
+// handle table, which lives across Execute calls until Disconnect.
 type sessionContext struct {
 	user     string
 	mailbox  string
 	sequence string
+	ropSess  *rop.Session
 }
 
 // sessionStore maps sid cookies to live session contexts. A mailbox is normally
@@ -31,7 +34,7 @@ func newSessionStore() *sessionStore {
 func (s *sessionStore) create(user, mailbox string) (sid, sequence string) {
 	sid, sequence = newGUID(), newGUID()
 	s.mu.Lock()
-	s.m[sid] = &sessionContext{user: user, mailbox: mailbox, sequence: sequence}
+	s.m[sid] = &sessionContext{user: user, mailbox: mailbox, sequence: sequence, ropSess: rop.NewSession(mailbox)}
 	s.mu.Unlock()
 	return sid, sequence
 }
@@ -58,11 +61,16 @@ func (s *sessionStore) execute(sid, seq, user string) (newSeq string, ctx *sessi
 	return c.sequence, c, rcSuccess
 }
 
-// drop discards a session (Disconnect).
+// drop discards a session (Disconnect), closing its ROP object table (and any
+// open store) outside the lock.
 func (s *sessionStore) drop(sid string) {
 	s.mu.Lock()
+	c := s.m[sid]
 	delete(s.m, sid)
 	s.mu.Unlock()
+	if c != nil && c.ropSess != nil {
+		c.ropSess.Close()
+	}
 }
 
 // newGUID mints a random hyphenated GUID string. MAPI/HTTP cookies are opaque to
