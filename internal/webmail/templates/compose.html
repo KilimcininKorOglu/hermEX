@@ -31,6 +31,10 @@
         <label>Bcc</label>
         <input name="bcc" value="{{.Bcc}}" placeholder="bcc@example.com">
       </div>
+      <div class="field rcpt-check">
+        <button type="button" id="checknames">Check names</button>
+        <span id="checknames-status" class="checknames-status" aria-live="polite"></span>
+      </div>
       <div class="field">
         <label>Subject</label>
         <input name="subject" value="{{.Subject}}">
@@ -202,6 +206,7 @@
   window.addEventListener("blur", function () { if (timer) { clearTimeout(timer); } autosave(); });
 })();
 </script>
+<script src="/static/recipients.js"></script>
 {{template "foot" .}}{{end}}
 
 {{define "attachpick"}}{{if .}}<ul class="attachpick-list">
