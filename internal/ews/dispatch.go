@@ -19,8 +19,14 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleFindFolder(w, inner, sess)
 	case "SyncFolderHierarchy":
 		s.handleSyncFolderHierarchy(w, inner, sess)
-	// Item operations (FindItem, GetItem, SyncFolderItems, CreateItem, ...) are
-	// added in later increments.
+	case "FindItem":
+		s.handleFindItem(w, inner, sess)
+	case "GetItem":
+		s.handleGetItem(w, inner, sess)
+	case "GetAttachment":
+		s.handleGetAttachment(w, inner, sess)
+	// SyncFolderItems, CreateItem, UpdateItem, DeleteItem are added in later
+	// increments.
 	default:
 		writeSOAPFault(w, "ErrorInvalidRequest", "unsupported operation: "+op)
 	}
