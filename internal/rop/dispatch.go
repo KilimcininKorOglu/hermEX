@@ -4,11 +4,15 @@ import "hermex/internal/ext"
 
 // ROP operation ids ([MS-OXCROPS] 2.2). v1 handles the read-core set.
 const (
-	ropRelease          uint8 = 0x01
-	ropOpenFolder       uint8 = 0x02
-	ropGetContentsTable uint8 = 0x05
-	ropSetColumns       uint8 = 0x12
-	ropLogon            uint8 = 0xFE
+	ropRelease           uint8 = 0x01
+	ropOpenFolder        uint8 = 0x02
+	ropGetHierarchyTable uint8 = 0x04
+	ropGetContentsTable  uint8 = 0x05
+	ropSetColumns        uint8 = 0x12
+	ropSortTable         uint8 = 0x13
+	ropRestrict          uint8 = 0x14
+	ropQueryRows         uint8 = 0x15
+	ropLogon             uint8 = 0xFE
 )
 
 // MAPI return codes ([MS-OXCDATA] 2.4.1) carried in a ROP response ReturnValue.
@@ -56,6 +60,22 @@ loop:
 			}
 		case ropSetColumns:
 			if !s.ropSetColumns(p, out, handles, hindex) {
+				break loop
+			}
+		case ropGetHierarchyTable:
+			if !s.ropGetHierarchyTable(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSortTable:
+			if !s.ropSortTable(p, out, handles, hindex) {
+				break loop
+			}
+		case ropRestrict:
+			if !s.ropRestrict(p, out, handles, hindex) {
+				break loop
+			}
+		case ropQueryRows:
+			if !s.ropQueryRows(p, out, handles, hindex) {
 				break loop
 			}
 		default:
