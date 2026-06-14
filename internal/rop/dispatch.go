@@ -15,6 +15,8 @@ const (
 	ropSortTable             uint8 = 0x13
 	ropRestrict              uint8 = 0x14
 	ropQueryRows             uint8 = 0x15
+	ropGetAttachmentTable    uint8 = 0x21
+	ropOpenAttachment        uint8 = 0x22
 	ropOpenStream            uint8 = 0x2B
 	ropReadStream            uint8 = 0x2C
 	ropLogon                 uint8 = 0xFE
@@ -69,6 +71,14 @@ loop:
 			}
 		case ropGetPropertiesAll:
 			if !s.ropGetPropertiesAll(p, out, handles, hindex) {
+				break loop
+			}
+		case ropGetAttachmentTable:
+			if !s.ropGetAttachmentTable(p, out, handles, hindex) {
+				break loop
+			}
+		case ropOpenAttachment:
+			if !s.ropOpenAttachment(p, out, handles, hindex) {
 				break loop
 			}
 		case ropGetContentsTable:

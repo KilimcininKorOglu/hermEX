@@ -12,8 +12,9 @@ import (
 type tableKind uint8
 
 const (
-	tableContents  tableKind = iota // the folder's messages
-	tableHierarchy                  // the folder's child folders
+	tableContents   tableKind = iota // the folder's messages
+	tableHierarchy                   // the folder's child folders
+	tableAttachment                  // a message's attachments
 )
 
 // tableStatus values ([MS-OXCTABL] 2.2.2.1.3). v1 builds the table eagerly, so
@@ -24,19 +25,24 @@ const tableStatusComplete uint8 = 0x00
 // rows taken at creation plus the client's chosen column set and a forward
 // cursor. QueryRows pages over the snapshot, projecting the columns per row.
 type tableState struct {
-	kind     tableKind
-	columns  []mapi.PropTag
-	messages []objectstore.MessageInfo // tableContents rows
-	folders  []objectstore.FolderInfo  // tableHierarchy rows
-	cursor   int
+	kind        tableKind
+	columns     []mapi.PropTag
+	messages    []objectstore.MessageInfo // tableContents rows
+	folders     []objectstore.FolderInfo  // tableHierarchy rows
+	attachments []mapi.PropertyValues     // tableAttachment rows (attachment property bags)
+	cursor      int
 }
 
-// total reports the snapshot row count for either table kind.
+// total reports the snapshot row count for the table kind.
 func (t *tableState) total() int {
-	if t.kind == tableHierarchy {
+	switch t.kind {
+	case tableHierarchy:
 		return len(t.folders)
+	case tableAttachment:
+		return len(t.attachments)
+	default:
+		return len(t.messages)
 	}
-	return len(t.messages)
 }
 
 // rowProps projects the column set for the row at idx from the store: a message
@@ -55,6 +61,15 @@ func (t *tableState) rowProps(store *objectstore.Store, idx int) (mapi.PropertyV
 			props.Set(mapi.PrFolderID, int64(mapi.MakeEIDEx(1, uint64(fid))))
 		}
 		return props, nil
+	}
+	if t.kind == tableAttachment {
+		// The bags are already in memory; copy before synthesizing PR_ATTACH_NUM
+		// so the stored snapshot is not mutated. PR_ATTACH_NUM is the row index.
+		row := append(mapi.PropertyValues(nil), t.attachments[idx]...)
+		if slices.Contains(t.columns, mapi.PrAttachNum) {
+			row.Set(mapi.PrAttachNum, int32(idx))
+		}
+		return row, nil
 	}
 	mid := t.messages[idx].ID
 	props, err := store.GetMessageProperties(mid, t.columns...)
