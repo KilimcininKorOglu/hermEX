@@ -16,18 +16,20 @@ const (
 	kindFolder                 // an opened folder
 	kindTable                  // a contents or hierarchy table
 	kindMessage                // an opened message
+	kindStream                 // an open property stream
 )
 
 // object is a server-side MAPI object referenced by a uint32 handle. Fields are
 // populated per kind: a logon holds the open mailbox store, a folder its
 // objectstore id, a table its in-memory row snapshot and column set, a message
-// its objectstore id.
+// its objectstore id, a stream its in-memory bytes and read cursor.
 type object struct {
 	kind      objKind
 	store     *objectstore.Store // kindLogon
 	folderID  int64              // kindFolder
 	table     *tableState        // kindTable
 	messageID int64              // kindMessage
+	stream    *streamState       // kindStream
 }
 
 // Session is one MAPI/HTTP session's object/handle table — the analogue of a

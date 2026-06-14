@@ -15,6 +15,8 @@ const (
 	ropSortTable             uint8 = 0x13
 	ropRestrict              uint8 = 0x14
 	ropQueryRows             uint8 = 0x15
+	ropOpenStream            uint8 = 0x2B
+	ropReadStream            uint8 = 0x2C
 	ropLogon                 uint8 = 0xFE
 )
 
@@ -91,6 +93,14 @@ loop:
 			}
 		case ropQueryRows:
 			if !s.ropQueryRows(p, out, handles, hindex) {
+				break loop
+			}
+		case ropOpenStream:
+			if !s.ropOpenStream(p, out, handles, hindex) {
+				break loop
+			}
+		case ropReadStream:
+			if !s.ropReadStream(p, out, handles, hindex) {
 				break loop
 			}
 		default:
