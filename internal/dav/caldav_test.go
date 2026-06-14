@@ -95,3 +95,141 @@ func TestPropfindCalendar(t *testing.T) {
 		t.Errorf("got %d .ics hrefs, want 2\n%s", n, body)
 	}
 }
+
+func calURL(name string) string {
+	return "/dav/calendars/" + testUser + "/calendar/" + name
+}
+
+const timedEventICS = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\nBEGIN:VEVENT\r\n" +
+	"UID:cal-1\r\nSUMMARY:Planning\r\nDTSTART:20260615T140000Z\r\nDTEND:20260615T150000Z\r\n" +
+	"END:VEVENT\r\nEND:VCALENDAR\r\n"
+
+const recurringEventICS = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:rec-1\r\nSUMMARY:Weekly\r\n" +
+	"DTSTART:20260615T140000Z\r\nRRULE:FREQ=WEEKLY;BYDAY=MO\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+
+// TestCalPutGetRoundTrip stores a VEVENT with PUT and reads it back, confirming
+// the event survives conversion to MAPI and back and is listed in the collection.
+func TestCalPutGetRoundTrip(t *testing.T) {
+	ts := davServerCal(t)
+	url := calURL("plan.ics")
+
+	resp, body := doFull(t, ts, "PUT", url, timedEventICS, map[string]string{"Content-Type": "text/calendar"})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("PUT status %d, want 201\n%s", resp.StatusCode, body)
+	}
+	if resp.Header.Get("ETag") == "" {
+		t.Error("PUT did not return an ETag")
+	}
+
+	resp, body = doFull(t, ts, "GET", url, "", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET status %d, want 200", resp.StatusCode)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/calendar") {
+		t.Errorf("GET content-type %q", ct)
+	}
+	for _, want := range []string{"BEGIN:VCALENDAR", "SUMMARY:Planning", "DTSTART:20260615T140000Z", "END:VCALENDAR"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("GET body missing %q\n%s", want, body)
+		}
+	}
+	_, pf := doFull(t, ts, "PROPFIND", calURL(""), "", map[string]string{"Depth": "1"})
+	if !strings.Contains(pf, "plan.ics") {
+		t.Errorf("PROPFIND lacks the PUT resource name plan.ics\n%s", pf)
+	}
+}
+
+// TestCalRecurringVerbatim confirms a recurring event survives PUT/GET with its
+// RRULE intact (stored verbatim, not synthesized).
+func TestCalRecurringVerbatim(t *testing.T) {
+	ts := davServerCal(t)
+	url := calURL("weekly.ics")
+	resp, body := doFull(t, ts, "PUT", url, recurringEventICS, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("PUT status %d, want 201\n%s", resp.StatusCode, body)
+	}
+	_, get := doFull(t, ts, "GET", url, "", nil)
+	if !strings.Contains(get, "RRULE:FREQ=WEEKLY;BYDAY=MO") {
+		t.Errorf("recurring GET lost its RRULE\n%s", get)
+	}
+}
+
+// TestCalIfMatchConflict confirms a stale If-Match is rejected with 412.
+func TestCalIfMatchConflict(t *testing.T) {
+	ts := davServerCal(t)
+	url := calURL("plan.ics")
+	doFull(t, ts, "PUT", url, timedEventICS, nil)
+	resp, _ := doFull(t, ts, "PUT", url, timedEventICS, map[string]string{"If-Match": `"99999"`})
+	if resp.StatusCode != http.StatusPreconditionFailed {
+		t.Errorf("stale If-Match: status %d, want 412", resp.StatusCode)
+	}
+}
+
+// TestCalDelete removes an event and confirms it is then absent.
+func TestCalDelete(t *testing.T) {
+	ts := davServerCal(t)
+	url := calURL("plan.ics")
+	doFull(t, ts, "PUT", url, timedEventICS, nil)
+
+	resp, _ := doFull(t, ts, "DELETE", url, "", nil)
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("DELETE status %d, want 204", resp.StatusCode)
+	}
+	resp, _ = doFull(t, ts, "GET", url, "", nil)
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("GET after delete: status %d, want 404", resp.StatusCode)
+	}
+}
+
+// TestCalReportMultiget requests a named event and confirms its calendar-data
+// comes back.
+func TestCalReportMultiget(t *testing.T) {
+	ts := davServerCal(t)
+	doFull(t, ts, "PUT", calURL("plan.ics"), timedEventICS, nil)
+
+	body := `<c:calendar-multiget xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:prop><d:getetag/><c:calendar-data/></d:prop>
+  <d:href>` + calURL("plan.ics") + `</d:href>
+</c:calendar-multiget>`
+	resp, out := doFull(t, ts, "REPORT", calURL(""), body, map[string]string{"Depth": "1"})
+	if resp.StatusCode != http.StatusMultiStatus {
+		t.Fatalf("status %d, want 207\n%s", resp.StatusCode, out)
+	}
+	for _, want := range []string{"SUMMARY:Planning", "calendar-data", "getetag"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("multiget missing %q\n%s", want, out)
+		}
+	}
+}
+
+// TestCalReportSync checks incremental sync: an initial sync returns the member
+// and a token; after a new PUT, a sync with that token returns only the new one.
+func TestCalReportSync(t *testing.T) {
+	ts := davServerCal(t)
+	doFull(t, ts, "PUT", calURL("plan.ics"), timedEventICS, nil)
+
+	initial := `<d:sync-collection xmlns:d="DAV:"><d:sync-token/><d:sync-level>1</d:sync-level><d:prop><d:getetag/></d:prop></d:sync-collection>`
+	resp, out := doFull(t, ts, "REPORT", calURL(""), initial, nil)
+	if resp.StatusCode != http.StatusMultiStatus {
+		t.Fatalf("initial sync status %d, want 207\n%s", resp.StatusCode, out)
+	}
+	token := syncTokenRE.FindString(out)
+	if token == "" {
+		t.Fatalf("initial sync returned no sync-token\n%s", out)
+	}
+
+	second := strings.Replace(recurringEventICS, "rec-1", "rec-2", 1)
+	doFull(t, ts, "PUT", calURL("weekly.ics"), second, nil)
+
+	next := `<d:sync-collection xmlns:d="DAV:"><d:sync-token>` + token + `</d:sync-token><d:sync-level>1</d:sync-level><d:prop><d:getetag/></d:prop></d:sync-collection>`
+	resp, out = doFull(t, ts, "REPORT", calURL(""), next, nil)
+	if resp.StatusCode != http.StatusMultiStatus {
+		t.Fatalf("incremental sync status %d, want 207\n%s", resp.StatusCode, out)
+	}
+	if !strings.Contains(out, "weekly.ics") {
+		t.Errorf("incremental sync missing the new member\n%s", out)
+	}
+	if strings.Contains(out, "plan.ics") {
+		t.Errorf("incremental sync re-sent an unchanged member\n%s", out)
+	}
+}
