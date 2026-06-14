@@ -1,0 +1,291 @@
+package objectstore
+
+import (
+	"testing"
+	"time"
+
+	"hermex/internal/mapi"
+)
+
+// sampleBag is the property bag of a representative delivered message, used to
+// drive the pure-evaluator tests. The size is supplied separately at evaluation
+// in production (injected as PR_MESSAGE_SIZE); here it is set directly.
+func sampleBag() mapi.PropertyValues {
+	return mapi.PropertyValues{
+		{Tag: mapi.PrSubject, Value: "Quarterly Invoice 2026"},
+		{Tag: mapi.PrSenderSmtpAddress, Value: "billing@acme.com"},
+		{Tag: mapi.PrImportance, Value: int32(mapi.ImportanceHigh)},
+		{Tag: mapi.PrMessageSize, Value: int32(50000)},
+	}
+}
+
+// TestEvalRestrictionLeaves checks each curated condition matches the right
+// messages and, crucially, that an absent property fails the leaf instead of
+// matching or panicking — the difference between a rule that fires correctly and
+// one that fires on everything or nothing.
+func TestEvalRestrictionLeaves(t *testing.T) {
+	bag := sampleBag()
+	cases := []struct {
+		name string
+		r    mapi.Restriction
+		want bool
+	}{
+		{"subject contains (case-insensitive)", RuleSubjectContains("invoice"), true},
+		{"subject contains miss", RuleSubjectContains("refund"), false},
+		{"from contains domain", RuleFromContains("acme.com"), true},
+		{"from contains miss", RuleFromContains("gmail.com"), false},
+		{"importance is high", RuleImportanceIs(mapi.ImportanceHigh), true},
+		{"importance is low", RuleImportanceIs(mapi.ImportanceLow), false},
+		{"size at least below", RuleSizeAtLeast(10000), true},
+		{"size at least above", RuleSizeAtLeast(100000), false},
+		{"exists present", mapi.Restriction{Type: mapi.ResExist, Value: mapi.ExistRestriction{PropTag: mapi.PrSubject}}, true},
+		{"exists absent", mapi.Restriction{Type: mapi.ResExist, Value: mapi.ExistRestriction{PropTag: mapi.PrBody}}, false},
+		{"content present match", RuleSubjectContains("2026"), true},
+		{"content on missing property", contentContains(mapi.PrBody, "anything"), false},
+		{"null matches all", mapi.Restriction{Type: mapi.ResNull}, true},
+		{"unsupported sub is no match", mapi.Restriction{Type: mapi.ResSub}, false},
+	}
+	for _, c := range cases {
+		if got := evalRestriction(c.r, bag); got != c.want {
+			t.Errorf("%s: evalRestriction = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestEvalRestrictionTree checks the boolean combinators compose the leaves
+// correctly, including De Morgan-style cases and an empty AND/OR.
+func TestEvalRestrictionTree(t *testing.T) {
+	bag := sampleBag()
+	hit := RuleSubjectContains("invoice") // true on the sample
+	miss := RuleSubjectContains("refund") // false on the sample
+	and := func(rs ...mapi.Restriction) mapi.Restriction {
+		return mapi.Restriction{Type: mapi.ResAnd, Value: rs}
+	}
+	or := func(rs ...mapi.Restriction) mapi.Restriction {
+		return mapi.Restriction{Type: mapi.ResOr, Value: rs}
+	}
+	not := func(r mapi.Restriction) mapi.Restriction {
+		return mapi.Restriction{Type: mapi.ResNot, Value: r}
+	}
+	cases := []struct {
+		name string
+		r    mapi.Restriction
+		want bool
+	}{
+		{"and all true", and(hit, RuleFromContains("acme.com")), true},
+		{"and one false", and(hit, miss), false},
+		{"or one true", or(miss, hit), true},
+		{"or all false", or(miss, RuleFromContains("gmail.com")), false},
+		{"not false is true", not(miss), true},
+		{"not true is false", not(hit), false},
+		{"empty and is true", and(), true},
+		{"empty or is false", or(), false},
+	}
+	for _, c := range cases {
+		if got := evalRestriction(c.r, bag); got != c.want {
+			t.Errorf("%s: evalRestriction = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestEvalContentFuzzyKinds checks the fuzzy match kinds and case handling: a
+// substring rule ignores case, a prefix rule anchors at the start, and a
+// full-string rule requires the whole value to equal.
+func TestEvalContentFuzzyKinds(t *testing.T) {
+	bag := mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "Hello World"}}
+	content := func(fuzzy uint32, needle string) mapi.Restriction {
+		return mapi.Restriction{Type: mapi.ResContent, Value: mapi.ContentRestriction{
+			FuzzyLevel: fuzzy, PropTag: mapi.PrSubject,
+			PropVal: mapi.TaggedPropVal{Tag: mapi.PrSubject, Value: needle}}}
+	}
+	cases := []struct {
+		name  string
+		fuzzy uint32
+		ndl   string
+		want  bool
+	}{
+		{"substring ignorecase", flSubstring | flIgnoreCase, "world", true},
+		{"substring case-sensitive miss", flSubstring, "world", false},
+		{"substring case-sensitive hit", flSubstring, "World", true},
+		{"prefix hit", flPrefix | flIgnoreCase, "hello", true},
+		{"prefix miss", flPrefix | flIgnoreCase, "world", false},
+		{"fullstring hit", flFullString | flIgnoreCase, "hello world", true},
+		{"fullstring miss", flFullString, "Hello", false},
+	}
+	for _, c := range cases {
+		if got := evalRestriction(content(c.fuzzy, c.ndl), bag); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// deliverTo files a raw RFC822 message into a folder and returns its index info,
+// running the same Import path delivery uses so the property bag under test is
+// exactly the one production rules see.
+func deliverTo(t *testing.T, s *Store, fid int64, raw string) MessageInfo {
+	t.Helper()
+	info, err := s.AppendMessage(fid, []byte(raw), time.Unix(1700000000, 0), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info
+}
+
+func ruleMsg(subject, from, extraHeader string) string {
+	h := "From: " + from + "\r\nTo: bob@hermex.test\r\nSubject: " + subject + "\r\n"
+	if extraHeader != "" {
+		h += extraHeader + "\r\n"
+	}
+	return h + "Content-Type: text/plain; charset=utf-8\r\n\r\nbody\r\n"
+}
+
+// TestRunRulesEndToEnd is the discriminating test: it delivers real messages
+// through the real Import path, then runs rules and asserts on the actual store
+// state — a message moved to the target folder, another marked read, an
+// unmatched one untouched. It would fail if Import stored the subject or sender
+// under a tag the evaluator does not read, which a pure-evaluator test cannot
+// catch. It also locks the terminal-action invariant: a message a move rule
+// claims is not re-evaluated by a later rule.
+func TestRunRulesEndToEnd(t *testing.T) {
+	s := openSeededStore(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	filed, err := s.CreateFolder(nil, "Filed")
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+
+	a := deliverTo(t, s, inbox, ruleMsg("Quarterly Invoice 12345", "billing@acme.com", ""))
+	b := deliverTo(t, s, inbox, ruleMsg("lunch?", "bob@example.com", ""))
+	c := deliverTo(t, s, inbox, ruleMsg("Weekly newsletter", "news@promo.com", ""))
+	d := deliverTo(t, s, inbox, ruleMsg("Invoice from promo", "promo@vendor.com", ""))
+
+	// rule 1 (sequence 1): subject contains "invoice" -> move to Filed (terminal)
+	if _, err := s.AddRule(Rule{
+		FolderID: inbox, Name: "file invoices", State: mapi.RuleStateEnabled,
+		Condition: RuleSubjectContains("invoice"),
+		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{RuleMoveAction(filed)}},
+	}); err != nil {
+		t.Fatalf("AddRule 1: %v", err)
+	}
+	// rule 2 (sequence 2): from contains "promo" -> mark read
+	if _, err := s.AddRule(Rule{
+		FolderID: inbox, Name: "read promos", State: mapi.RuleStateEnabled,
+		Condition: RuleFromContains("promo"),
+		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{RuleMarkReadAction()}},
+	}); err != nil {
+		t.Fatalf("AddRule 2: %v", err)
+	}
+
+	res, err := s.RunRules(inbox)
+	if err != nil {
+		t.Fatalf("RunRules: %v", err)
+	}
+	if res.Evaluated != 4 {
+		t.Errorf("evaluated = %d, want 4", res.Evaluated)
+	}
+	// a (invoice) moved, c (promo) marked read, d (invoice+promo) moved -> 3 acted.
+	if res.Affected != 3 {
+		t.Errorf("affected = %d, want 3", res.Affected)
+	}
+
+	// Filed now holds the two invoice messages (a and d); inbox holds b and c.
+	filedMsgs, err := s.ListMessages(filed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(filedMsgs) != 2 {
+		t.Fatalf("Filed has %d messages, want 2 (the two invoices)", len(filedMsgs))
+	}
+	inboxMsgs, err := s.ListMessages(inbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inboxMsgs) != 2 {
+		t.Fatalf("inbox has %d messages, want 2 (lunch + newsletter)", len(inboxMsgs))
+	}
+
+	// a and d must be gone from the inbox (moved by the terminal move rule).
+	for _, m := range inboxMsgs {
+		if m.UID == a.UID || m.UID == d.UID {
+			t.Errorf("a moved/invoice message uid %d still in inbox", m.UID)
+		}
+	}
+
+	// c (promo) stayed in the inbox and is now read; b is untouched and unread.
+	cInfo, err := s.MessageByUID(inbox, c.UID)
+	if err != nil {
+		t.Fatalf("newsletter (promo) message gone from inbox: %v", err)
+	}
+	if cInfo.Flags&FlagSeen == 0 {
+		t.Errorf("promo message was not marked read by the rule")
+	}
+	bInfo, err := s.MessageByUID(inbox, b.UID)
+	if err != nil {
+		t.Fatalf("lunch message gone from inbox: %v", err)
+	}
+	if bInfo.Flags&FlagSeen != 0 {
+		t.Errorf("unmatched lunch message was marked read")
+	}
+}
+
+// TestRunRulesSkipsDisabled verifies a disabled rule (ST_ENABLED clear) is not
+// applied, while an enabled rule on the same folder still runs.
+func TestRunRulesSkipsDisabled(t *testing.T) {
+	s := openSeededStore(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	m := deliverTo(t, s, inbox, ruleMsg("disabled rule target", "x@example.com", ""))
+
+	// A disabled mark-read rule that matches the message.
+	if _, err := s.AddRule(Rule{
+		FolderID: inbox, Name: "disabled", State: 0, // not enabled
+		Condition: RuleSubjectContains("disabled"),
+		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{RuleMarkReadAction()}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.RunRules(inbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Affected != 0 {
+		t.Errorf("affected = %d, want 0 (rule is disabled)", res.Affected)
+	}
+	info, err := s.MessageByUID(inbox, m.UID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Flags&FlagSeen != 0 {
+		t.Errorf("disabled rule marked the message read")
+	}
+}
+
+// TestRuleMoveActionRoundTrip locks the move target encoding end-to-end through
+// storage: a move action built for an arbitrary allocated folder id survives
+// serialization and decodes back to the same folder id, so a stored move rule
+// targets the folder the editor chose.
+func TestRuleMoveActionRoundTrip(t *testing.T) {
+	s := openSeededStore(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	target, err := s.CreateFolder(nil, "Target")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddRule(Rule{
+		FolderID: inbox, Name: "mv", State: mapi.RuleStateEnabled,
+		Condition: RuleSubjectContains("x"),
+		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{RuleMoveAction(target)}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rules, err := s.ListRules(inbox)
+	if err != nil || len(rules) != 1 {
+		t.Fatalf("ListRules: %v len=%d", err, len(rules))
+	}
+	got, ok := moveTargetFolder(rules[0].Actions.Blocks[0].Data)
+	if !ok {
+		t.Fatalf("move action did not decode a target folder")
+	}
+	if got != target {
+		t.Errorf("decoded move target = %d, want %d", got, target)
+	}
+}
