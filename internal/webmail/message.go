@@ -10,6 +10,7 @@ import (
 
 	"hermex/internal/mime"
 	"hermex/internal/objectstore"
+	"hermex/internal/smime"
 )
 
 // attachmentView is one downloadable attachment in the message view.
@@ -41,6 +42,8 @@ type messageDetail struct {
 	Preview       bool           // rendered inside the reading pane (partial, no page chrome) (#34)
 	Importance    string         // "High" | "Low" label for the print header, "" when Normal/absent (#34)
 	Sensitivity   string         // "Personal" | "Private" | "Confidential" for the print header, "" when Normal (#34)
+	Smime         string         // S/MIME status banner text ("" when not an S/MIME message) (#41)
+	SmimeOK       bool           // true when verified/decrypted (positive banner), false for a warning
 }
 
 func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
@@ -88,7 +91,13 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	detail := buildMessageDetail(raw, folder, uid, cfg.IncomingRender == "plain", cfg.SafeSenders)
+	// S/MIME: verify a signature and/or decrypt before rendering, so the reader
+	// shows the real content with a trust banner rather than the opaque container.
+	displayRaw, smimeStatus, smimeOK := s.openSmime(sess, raw)
+
+	detail := buildMessageDetail(displayRaw, folder, uid, cfg.IncomingRender == "plain", cfg.SafeSenders)
+	detail.Smime = smimeStatus
+	detail.SmimeOK = smimeOK
 	detail.Folders = moveTargets(folders, folderID)
 
 	// Reading a message marks it \Seen (read-modify-write to preserve the rest);
@@ -128,6 +137,43 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, "message", detail)
+}
+
+// openSmime prepares a message for display: a signed message is verified and an
+// encrypted message is decrypted with the session's unlocked identity. It returns
+// a renderable message — the inner content spliced under the original identity
+// headers — plus a status banner and whether it is a positive (verified/decrypted)
+// result. A message that is not S/MIME is returned unchanged with no banner; one
+// that cannot be opened is returned unchanged with a warning banner.
+func (s *Server) openSmime(sess *session, raw []byte) (display []byte, status string, ok bool) {
+	switch {
+	case smime.IsEncrypted(raw):
+		if sess.smimeKey == nil || sess.smimeCert == nil {
+			return raw, "Encrypted message. Unlock your certificate on the Certificates page to read it.", false
+		}
+		inner, err := smime.Decrypt(raw, sess.smimeCert, sess.smimeKey)
+		if err != nil {
+			return raw, "Encrypted message — it could not be decrypted with your certificate.", false
+		}
+		identity, _ := splitForSmime(raw)
+		if smime.IsSigned(inner) {
+			signer, content, verr := smime.Verify(inner)
+			if verr != nil {
+				return spliceIdentity(identity, inner), "Encrypted, but the signature could not be verified.", false
+			}
+			return spliceIdentity(identity, content), "Encrypted and signed — verified (" + certName(signer.Subject) + ").", true
+		}
+		return spliceIdentity(identity, inner), "Encrypted — decrypted with your certificate.", true
+	case smime.IsSigned(raw):
+		signer, content, err := smime.Verify(raw)
+		if err != nil {
+			return raw, "Signed message — the signature could NOT be verified.", false
+		}
+		identity, _ := splitForSmime(raw)
+		return spliceIdentity(identity, content), "Signed — verified (" + certName(signer.Subject) + ").", true
+	default:
+		return raw, "", false
+	}
 }
 
 // buildMessageDetail parses a raw message into the message view, selecting the

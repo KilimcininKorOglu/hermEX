@@ -70,6 +70,7 @@
     </ul>
   </div>
   {{end}}
+  {{if .Smime}}<p class="smime-banner {{if .SmimeOK}}ok{{else}}warn{{end}}">{{.Smime}}</p>{{end}}
   <div class="reader-body">
     {{if .IsHTML}}
     <iframe class="htmlbody" sandbox="" srcdoc="{{.Body}}"></iframe>

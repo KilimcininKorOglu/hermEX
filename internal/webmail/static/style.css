@@ -320,3 +320,6 @@ dl.smime-cert dd { margin: 0; }
 table.smime-recipients { width: 100%; border-collapse: collapse; margin: 8px 0 14px; }
 table.smime-recipients th, table.smime-recipients td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 14px; }
 table.smime-recipients th { color: var(--muted); font-weight: 600; }
+.smime-banner { margin: 0 0 12px; padding: 8px 12px; border-radius: 6px; font-size: 13px; }
+.smime-banner.ok { background: #e7f6ec; color: #1a7f37; border: 1px solid #abdbb8; }
+.smime-banner.warn { background: #fbeaea; color: #b00020; border: 1px solid #e6b3ba; }
