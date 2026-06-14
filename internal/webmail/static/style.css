@@ -276,3 +276,17 @@ table.messages tr.flagged td:first-child { box-shadow: inset 3px 0 0 #e0a800; }
 form.inline { display: inline; }
 .rule-actions { display: inline-flex; gap: 8px; flex: none; }
 .cond-input, .action-input { margin-left: 6px; }
+
+/* Conversation (threaded) view (#39): each thread is a collapsible <details>
+   group; the member rows reuse the flat message row, minus the bulk checkbox. */
+.conversation-list { background: var(--panel); }
+details.thread { border-bottom: 1px solid var(--border); }
+details.thread > summary { padding: 10px 14px; cursor: pointer; display: flex; justify-content: space-between; gap: 12px; align-items: baseline; list-style: none; }
+details.thread > summary::-webkit-details-marker { display: none; }
+details.thread > summary::before { content: "\25B8"; margin-right: 6px; color: var(--muted); }
+details.thread[open] > summary::before { content: "\25BE"; }
+details.thread > summary:hover { background: var(--bg); }
+.thread-summary.unread .thread-subject { font-weight: 600; }
+.thread-meta { font-size: 12px; color: var(--muted); white-space: nowrap; }
+table.messages.conversation { border-top: 1px solid var(--border); }
+table.messages.conversation td.selcol, table.messages.conversation th.selcol { display: none; }

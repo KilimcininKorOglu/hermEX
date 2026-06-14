@@ -84,6 +84,25 @@ type mailPage struct {
 	Categories []category
 	// PreviewPane is the reading-pane location: "none" | "right" | "bottom" (#34).
 	PreviewPane string
+	// Conversation switches the list to the threaded (conversation) view (#39).
+	// When true the template renders Threads instead of the flat Messages, and
+	// the sortable column headers and bulk toolbar (both flat-view features) are
+	// not shown.
+	Conversation bool
+	Threads      []threadView
+}
+
+// threadView is one conversation thread rendered as a collapsible group: a
+// summary (root subject, member count, latest-message date, unread state) over
+// the member rows, which are ordinary messageViews so they keep their per-row
+// actions. Open requests the group start expanded (threads with unread mail).
+type threadView struct {
+	Subject   string
+	Count     int
+	Date      string // the latest member's date
+	AnyUnread bool
+	Open      bool
+	Messages  []messageView // members, oldest-first
 }
 
 // buildFolderViews computes each folder's hierarchical path from the parent

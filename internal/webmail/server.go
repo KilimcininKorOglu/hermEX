@@ -147,28 +147,31 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	params := listParams{
-		Sort:   whitelist(orDefault(q.Get("sort"), cfg.DefaultSort), "date", "from", "subject", "size", "flag", "read"),
-		Dir:    whitelist(orDefault(q.Get("dir"), cfg.DefaultDir), "desc", "asc"),
-		Filter: whitelist(q.Get("filter"), "all", "unread"),
-		Page:   atoiDefault(q.Get("page"), 1),
+		Sort:         whitelist(orDefault(q.Get("sort"), cfg.DefaultSort), "date", "from", "subject", "size", "flag", "read"),
+		Dir:          whitelist(orDefault(q.Get("dir"), cfg.DefaultDir), "desc", "asc"),
+		Filter:       whitelist(q.Get("filter"), "all", "unread"),
+		Page:         atoiDefault(q.Get("page"), 1),
+		Conversation: cfg.ConversationView,
 	}
 	page := mailPage{
-		User:        sess.user,
-		Current:     current,
-		Folders:     folderViews,
-		Field:       "all",    // search-form defaults (scoped to the current folder)
-		Scope:       "folder", // until the user opens a cross-folder search
-		Sort:        params.Sort,
-		Dir:         params.Dir,
-		Filter:      params.Filter,
-		Density:     whitelist(orDefault(q.Get("density"), cfg.Density), "compact", "extended"),
-		Columns:     listColumns(params.Sort, params.Dir),
-		Categories:  cfg.Categories,
-		PreviewPane: whitelist(orDefault(q.Get("preview"), cfg.PreviewPane), "none", "right", "bottom"),
+		User:         sess.user,
+		Current:      current,
+		Folders:      folderViews,
+		Field:        "all",    // search-form defaults (scoped to the current folder)
+		Scope:        "folder", // until the user opens a cross-folder search
+		Sort:         params.Sort,
+		Dir:          params.Dir,
+		Filter:       params.Filter,
+		Density:      whitelist(orDefault(q.Get("density"), cfg.Density), "compact", "extended"),
+		Columns:      listColumns(params.Sort, params.Dir),
+		Categories:   cfg.Categories,
+		PreviewPane:  whitelist(orDefault(q.Get("preview"), cfg.PreviewPane), "none", "right", "bottom"),
+		Conversation: params.Conversation,
 	}
 	if id, found := resolveFolder(folders, current); found {
 		if res, err := listFolderPage(st, id, current, params, cfg.Categories); err == nil {
 			page.Messages = res.Messages
+			page.Threads = res.Threads
 			page.Page = res.Page
 			page.MaxPage = res.MaxPage
 			page.PrevPage = res.PrevPage
