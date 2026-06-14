@@ -68,6 +68,13 @@ const (
 	// oxcmail.Export rebuilds the MIME tree and would invalidate the signature or
 	// mangle the envelope. Offloaded to a content file like other large content.
 	PrSmimeOriginal = PropTag(0x67740102) // PtBinary
+	// PrIcalOriginal is the provider-defined message property (0x6775) holding the
+	// original iCalendar bytes of a RECURRING appointment. v1 cannot synthesize the
+	// binary recurrence pattern, so a recurring event is preserved verbatim and
+	// served unchanged rather than re-synthesized through oxcical.Export (the same
+	// strategy as PrSmimeOriginal). Offloaded to a content file like other large
+	// content. Non-recurring events do not set this and round-trip through Export.
+	PrIcalOriginal = PropTag(0x67750102) // PtBinary
 )
 
 // Message envelope property tags (MS-OXCMAIL / MS-OXOMSG): the standard

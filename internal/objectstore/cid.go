@@ -26,7 +26,7 @@ func isCIDProp(tag mapi.PropTag) bool {
 		mapi.PrHTML, mapi.PrRTFCompressed,
 		mapi.PrTransportMessageHeaders, mapi.PrTransportMessageHeadersA,
 		mapi.PrAttachDataBin, mapi.PrAttachDataObj,
-		mapi.PrSmimeOriginal:
+		mapi.PrSmimeOriginal, mapi.PrIcalOriginal:
 		return true
 	default:
 		return false
