@@ -105,7 +105,12 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 			}
 		}
 
-		rm := itemResponseMessage{ResponseClass: "Success", ResponseCode: "NoError"}
+		// Every successful CreateItemResponseMessage carries an <m:Items>
+		// container — clients reject its absence. It is empty for SendOnly
+		// (nothing is persisted) and holds the stored item's id (with a
+		// ChangeKey, as every other returned ItemId does) for SaveOnly and
+		// SendAndSaveCopy.
+		rm := itemResponseMessage{ResponseClass: "Success", ResponseCode: "NoError", Items: &itemsWrap{}}
 		if save {
 			folder := int64(mapi.PrivateFIDSentItems)
 			flags := int64(objectstore.FlagSeen)
@@ -115,7 +120,7 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 			}
 			if info, err := st.AppendMessage(folder, raw, time.Now(), flags); err == nil {
 				id := oxews.EncodeItemID(oxews.ItemID{FolderID: folder, MessageID: info.ID, UID: info.UID})
-				rm.Items = &itemsWrap{Messages: []oxews.Message{{ItemID: oxews.ItemIDElem{ID: id}}}}
+				rm.Items.Messages = []oxews.Message{{ItemID: oxews.ItemIDElem{ID: id, ChangeKey: oxews.ChangeKey(uint64(info.ID))}}}
 			}
 		}
 		msgs = append(msgs, rm)
