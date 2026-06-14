@@ -20,13 +20,30 @@ const tableStatusComplete uint8 = 0x00
 
 // tableState is the in-memory table a Get*Table ROP builds: a snapshot of the
 // rows taken at creation plus the client's chosen column set and a forward
-// cursor. QueryRows (next increment) pages over the snapshot, projecting the
-// columns per row.
+// cursor. QueryRows pages over the snapshot, projecting the columns per row.
 type tableState struct {
 	kind     tableKind
 	columns  []mapi.PropTag
 	messages []objectstore.MessageInfo // tableContents rows
+	folders  []objectstore.FolderInfo  // tableHierarchy rows
 	cursor   int
+}
+
+// total reports the snapshot row count for either table kind.
+func (t *tableState) total() int {
+	if t.kind == tableHierarchy {
+		return len(t.folders)
+	}
+	return len(t.messages)
+}
+
+// rowProps projects the column set for the row at idx from the store: a message
+// property bag for a contents table, a folder property bag for a hierarchy one.
+func (t *tableState) rowProps(store *objectstore.Store, idx int) (mapi.PropertyValues, error) {
+	if t.kind == tableHierarchy {
+		return store.GetFolderProperties(t.folders[idx].ID, t.columns...)
+	}
+	return store.GetMessageProperties(t.messages[idx].ID, t.columns...)
 }
 
 // ropOpenFolder handles RopOpenFolder ([MS-OXCFOLD] 2.2.1.1): it resolves the
