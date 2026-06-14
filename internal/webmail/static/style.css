@@ -272,5 +272,7 @@ table.messages tr.flagged td:first-child { box-shadow: inset 3px 0 0 #e0a800; }
 
 /* Signature management list on the settings page. */
 .signature-list { list-style: none; padding: 0; margin: 0 0 16px; }
-.signature-list li { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); }
+.signature-list li { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); gap: 12px; }
 form.inline { display: inline; }
+.rule-actions { display: inline-flex; gap: 8px; flex: none; }
+.cond-input, .action-input { margin-left: 6px; }
