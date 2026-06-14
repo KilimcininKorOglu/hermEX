@@ -1,8 +1,6 @@
 package rop
 
 import (
-	"crypto/sha256"
-	"encoding/binary"
 	"time"
 
 	"hermex/internal/ext"
@@ -27,6 +25,18 @@ var logonFolderFIDs = [13]uint64{
 // id 1 (the store's own replica), per the EID encoding below.
 const privateReplID uint16 = 5
 
+// LOGON_PMB_RESPONSE ResponseFlags bits ([MS-OXCSTOR] 2.2.1.1.3).
+const (
+	responseFlagReserved    = 0x01
+	responseFlagOwnerRight  = 0x02
+	responseFlagSendAsRight = 0x04
+)
+
+// ownerResponseFlags is what a single-owner mailbox logon reports: the
+// authenticated user owns the mailbox, so it carries owner and send-as rights.
+// (OOF state is not folded in here; v1 keeps it in the webmail settings.)
+const ownerResponseFlags = responseFlagReserved | responseFlagOwnerRight | responseFlagSendAsRight
+
 // ropLogon handles RopLogon ([MS-OXCSTOR] 2.2.1.1): it opens the mailbox store,
 // registers the logon object at the output handle slot, and writes the private
 // LOGON_PMB_RESPONSE. It returns false only when the request body is malformed
@@ -49,6 +59,17 @@ func (s *Session) ropLogon(p *ext.Pull, out *ext.Push, handles []uint32, hindex 
 		writeErr(out, ropLogon, hindex, ecError)
 		return true
 	}
+	// Mirror the reference logon's identity: MailboxGuid is the store record key
+	// (the mailbox GUID) and ReplGuid is the mapping signature, both persisted at
+	// mailbox creation, so the entry ids the store later hands out resolve
+	// against the same GUIDs this logon advertises.
+	mailboxGUID, errM := st.StoreGUID()
+	replGUID, errR := st.MappingSignature()
+	if errM != nil || errR != nil {
+		_ = st.Close()
+		writeErr(out, ropLogon, hindex, ecError)
+		return true
+	}
 	h := s.alloc(&object{kind: kindLogon, store: st})
 	setHandle(handles, hindex, h)
 
@@ -61,13 +82,13 @@ func (s *Session) ropLogon(p *ext.Pull, out *ext.Push, handles []uint32, hindex 
 	for _, fid := range logonFolderFIDs {
 		out.Uint64(uint64(mapi.MakeEIDEx(1, fid)))
 	}
-	out.Uint8(0)                               // ResponseFlags
-	out.GUID(deriveGUID("mailbox", s.mailbox)) // MailboxGuid
-	out.Uint16(privateReplID)                  // ReplId
-	out.GUID(deriveGUID("replica", s.mailbox)) // ReplGuid
-	pushLogonTime(out, time.Now().UTC())       // LogonTime (8 bytes)
-	out.Uint64(0)                              // GwartTime
-	out.Uint32(0)                              // StoreState
+	out.Uint8(ownerResponseFlags)        // ResponseFlags (single-owner mailbox)
+	out.GUID(mailboxGUID)                // MailboxGuid (PR_STORE_RECORD_KEY)
+	out.Uint16(privateReplID)            // ReplId
+	out.GUID(replGUID)                   // ReplGuid (PR_MAPPING_SIGNATURE)
+	pushLogonTime(out, time.Now().UTC()) // LogonTime (8 bytes)
+	out.Uint64(0)                        // GwartTime
+	out.Uint32(0)                        // StoreState
 	return true
 }
 
@@ -88,18 +109,4 @@ func pushLogonTime(out *ext.Push, t time.Time) {
 	out.Uint8(uint8(t.Day()))
 	out.Uint8(uint8(t.Month()))
 	out.Uint16(uint16(t.Year()))
-}
-
-// deriveGUID builds a stable GUID for a mailbox-scoped purpose from a hash of
-// the purpose and mailbox path. The value is opaque to the client (it uses the
-// pair for replica identity within the session) and stays constant for a given
-// mailbox across the session.
-func deriveGUID(purpose, mailbox string) mapi.GUID {
-	sum := sha256.Sum256([]byte("hermex-rop:" + purpose + ":" + mailbox))
-	var g mapi.GUID
-	g.Data1 = binary.LittleEndian.Uint32(sum[0:4])
-	g.Data2 = binary.LittleEndian.Uint16(sum[4:6])
-	g.Data3 = binary.LittleEndian.Uint16(sum[6:8])
-	copy(g.Data4[:], sum[8:16])
-	return g
 }

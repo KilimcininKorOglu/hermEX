@@ -221,3 +221,20 @@ func (s *Store) storeGUID() (string, error) {
 	}
 	return g, nil
 }
+
+// StoreGUID returns the mailbox's store GUID (its PR_STORE_RECORD_KEY identity),
+// recorded at creation. It is the same value stamped as the replica GUID into
+// folder change keys, so a logon advertising it stays consistent with the entry
+// ids the store hands out.
+func (s *Store) StoreGUID() (mapi.GUID, error) { return s.replicaGUID() }
+
+// MappingSignature returns the mailbox's mapping-signature GUID
+// (PR_MAPPING_SIGNATURE), recorded at creation. A private-mailbox logon reports
+// it as the replica GUID for the per-MDB replid mapping.
+func (s *Store) MappingSignature() (mapi.GUID, error) {
+	var str string
+	if err := s.objdb.QueryRow(`SELECT config_value FROM configurations WHERE config_id=?`, cfgMappingSignature).Scan(&str); err != nil {
+		return mapi.GUID{}, fmt.Errorf("objectstore: read mapping signature: %w", err)
+	}
+	return mapi.ParseGUID(str)
+}

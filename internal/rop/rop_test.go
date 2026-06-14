@@ -62,22 +62,30 @@ func TestRopLogonResponse(t *testing.T) {
 			t.Errorf("FolderId[%d] = %#x, want %#x", i, got, want)
 		}
 	}
-	if got := mustU8(t, p, "ResponseFlags"); got != 0 {
-		t.Errorf("ResponseFlags = %#x, want 0", got)
+	if got := mustU8(t, p, "ResponseFlags"); got != ownerResponseFlags {
+		t.Errorf("ResponseFlags = %#x, want %#x (owner)", got, ownerResponseFlags)
 	}
-	mbg := mustGUID(t, p, "MailboxGuid")
-	if want := deriveGUID("mailbox", dir); mbg != want {
-		t.Errorf("MailboxGuid = %s, want %s", mbg, want)
+	// MailboxGuid is the store record key; ReplGuid is the mapping signature —
+	// both sourced from the store's persisted identity, not derived ad hoc.
+	wantMbg, err := obj.store.StoreGUID()
+	if err != nil {
+		t.Fatalf("StoreGUID: %v", err)
+	}
+	wantRg, err := obj.store.MappingSignature()
+	if err != nil {
+		t.Fatalf("MappingSignature: %v", err)
+	}
+	if mbg := mustGUID(t, p, "MailboxGuid"); mbg != wantMbg {
+		t.Errorf("MailboxGuid = %s, want %s (store record key)", mbg, wantMbg)
 	}
 	if got := mustU16(t, p, "ReplId"); got != privateReplID {
 		t.Errorf("ReplId = %d, want %d", got, privateReplID)
 	}
-	rg := mustGUID(t, p, "ReplGuid")
-	if want := deriveGUID("replica", dir); rg != want {
-		t.Errorf("ReplGuid = %s, want %s", rg, want)
+	if rg := mustGUID(t, p, "ReplGuid"); rg != wantRg {
+		t.Errorf("ReplGuid = %s, want %s (mapping signature)", rg, wantRg)
 	}
-	if mbg == rg {
-		t.Error("MailboxGuid and ReplGuid must be distinct")
+	if wantMbg == wantRg {
+		t.Error("store record key and mapping signature must be distinct GUIDs")
 	}
 	// LogonTime: 6 bytes + a 16-bit year. The year must be a real decomposed
 	// time, not a zeroed field.
