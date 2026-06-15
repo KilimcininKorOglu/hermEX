@@ -323,6 +323,13 @@ func ParsePDU(buf []byte) (*PDU, error) {
 	return pdu, nil
 }
 
+// ParseHeader decodes just the 16-byte NCACN header from the front of buf. The
+// transport uses it to frame PDUs off a stream: read 16 bytes, then FragLen-16
+// more. It rejects non-RPC-5 and big-endian peers like the full parse.
+func ParseHeader(buf []byte) (Header, error) {
+	return pullHeader(NewPull(buf))
+}
+
 // Frame wraps a pre-built body in the 16-byte NCACN header, computing
 // frag_length. The body must already be 4-byte aligned (the body builders end
 // with a trailer alignment); v1 emits no auth verifier (auth_length 0).
