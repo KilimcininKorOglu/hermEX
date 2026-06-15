@@ -42,7 +42,7 @@ func TestSnapshotMIDs(t *testing.T) {
 	wantOrder := []string{"alice@hermex.test", "bob@hermex.test", "carol@hermex.test"}
 	for i, w := range wantOrder {
 		if g.users[i].smtp != w {
-			t.Errorf("user[%d] = %q, want %q (address-sorted)", i, g.users[i].smtp, w)
+			t.Errorf("user[%d] = %q, want %q (display-name order; display == address here)", i, g.users[i].smtp, w)
 		}
 		if want := midBase + uint32(i); g.users[i].mid != want {
 			t.Errorf("user[%d] MId = %#x, want %#x", i, g.users[i].mid, want)
@@ -57,6 +57,33 @@ func TestSnapshotMIDs(t *testing.T) {
 	}
 	if _, ok := g.byMID(midBase + 99); ok {
 		t.Error("byMID resolved an out-of-range MId")
+	}
+}
+
+// TestGalLess pins the GAL's display-name-primary total order with the SMTP
+// address as the tiebreaker: a later display name sorts after an earlier one
+// regardless of address, and equal display names fall back to the address. This
+// is the comparison snapshot() sorts by and SeekEntries searches with; it fails
+// if the GAL reverts to address-only ordering.
+func TestGalLess(t *testing.T) {
+	// Display name dominates the address: "Adams" (addr zzz) precedes "Baker"
+	// (addr aaa) although its address sorts later.
+	if !galLess("Adams", "zzz@x", "Baker", "aaa@x") {
+		t.Error("display name must dominate the address in the GAL order")
+	}
+	if galLess("Baker", "aaa@x", "Adams", "zzz@x") {
+		t.Error("ordering is not antisymmetric on display name")
+	}
+	// The display comparison is case-insensitive.
+	if !galLess("adams", "a@x", "BAKER", "b@x") {
+		t.Error("display-name comparison must be case-insensitive")
+	}
+	// Equal display names fall back to the address (keeps MIds stable per call).
+	if !galLess("Same", "alice@x", "Same", "bob@x") {
+		t.Error("equal display names must break ties by address")
+	}
+	if galLess("Same", "bob@x", "Same", "alice@x") {
+		t.Error("address tiebreaker is not antisymmetric")
 	}
 }
 

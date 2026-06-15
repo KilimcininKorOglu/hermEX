@@ -54,15 +54,28 @@ type galUser struct {
 	smtp    string
 }
 
-// gal is the address-sorted Global Address List with MId assignment. It is
-// recomputed per request (the STAT cursor is client-carried, so the server
+// gal is the Global Address List in display-name order with MId assignment. It
+// is recomputed per request (the STAT cursor is client-carried, so the server
 // keeps no snapshot), and MId = midBase + index is stable as long as the GAL set
 // is unchanged within a session.
 type gal struct {
 	users []galUser
 }
 
-// snapshot builds the GAL: every directory user, sorted by SMTP address, each
+// galLess is the total order the GAL is presented in for the display-name sort
+// every NSPI client uses: case-insensitively by display name, with the unique
+// SMTP address as the deterministic tiebreaker. The tiebreaker keeps the order
+// stable across the per-request snapshot, so a client's cached MIds keep
+// pointing at the same entry. SeekEntries searches with the same comparison.
+func galLess(aDisplay, aSMTP, bDisplay, bSMTP string) bool {
+	if ad, bd := strings.ToLower(aDisplay), strings.ToLower(bDisplay); ad != bd {
+		return ad < bd
+	}
+	return strings.ToLower(aSMTP) < strings.ToLower(bSMTP)
+}
+
+// snapshot builds the GAL: every directory user, ordered for the display-name
+// sort every NSPI client uses (galLess: display name, then address), each
 // assigned a stable MId by position. An empty GAL (no GAL backing, or a lookup
 // error) is a valid empty address book.
 func (s *Server) snapshot() gal {
@@ -73,7 +86,9 @@ func (s *Server) snapshot() gal {
 	if err != nil {
 		return gal{}
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Address < entries[j].Address })
+	sort.Slice(entries, func(i, j int) bool {
+		return galLess(entries[i].DisplayName, entries[i].Address, entries[j].DisplayName, entries[j].Address)
+	})
 	users := make([]galUser, len(entries))
 	for i, e := range entries {
 		users[i] = galUser{mid: midBase + uint32(i), display: e.DisplayName, smtp: e.Address}
