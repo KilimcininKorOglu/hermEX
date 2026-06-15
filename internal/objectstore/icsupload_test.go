@@ -317,6 +317,75 @@ func TestImportMessageFullLoop(t *testing.T) {
 	}
 }
 
+// TestImportMessageAssociatedRoundTrip closes the FAI flag end-to-end: an
+// associated message downloaded with SYNC_ASSOCIATED carries PR_ASSOCIATED, which
+// the upload transform turns back into the import-associated flag, so the
+// reconstructed message is associated again — and its body still matches by value.
+func TestImportMessageAssociatedRoundTrip(t *testing.T) {
+	s := openSeededStore(t)
+	fld := int64(mapi.PrivateFIDContacts)
+	mid, err := s.CreateMessage(fld, richMsg("fai"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.objdb.Exec(`UPDATE messages SET is_associated=1 WHERE message_id=?`, mid); err != nil {
+		t.Fatal(err)
+	}
+	orig, err := s.OpenMessage(mid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dc, err := s.NewContentDownload(fld, downloadState(t, s), SyncAssociated, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := drainDownload(t, dc, 64)
+
+	if err := s.DeleteObject(mid); err != nil {
+		t.Fatal(err)
+	}
+	mids := uploadDownloadStream(t, s, fld, items, 16)
+	if len(mids) != 1 || mids[0] != uint64(mid) {
+		t.Fatalf("reconstructed %v, want [%d]", mids, mid)
+	}
+
+	var assoc int
+	if err := s.objdb.QueryRow(`SELECT is_associated FROM messages WHERE message_id=?`, mid).Scan(&assoc); err != nil {
+		t.Fatal(err)
+	}
+	if assoc != 1 {
+		t.Errorf("is_associated = %d after round trip, want 1 (FAI flag lost)", assoc)
+	}
+	got, err := s.OpenMessage(int64(mid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertMessageEqual(t, "fai message", orig, got)
+}
+
+// TestImportAdvancesFolderCursor makes the folder-cursor advance load-bearing:
+// importing a brand-new message at exactly the folder's next allocation id must
+// push that cursor, so a later server-side create cannot reuse the id.
+func TestImportAdvancesFolderCursor(t *testing.T) {
+	s := openSeededStore(t)
+	fld := int64(mapi.PrivateFIDContacts)
+	var cur int64
+	if err := s.objdb.QueryRow(`SELECT cur_eid FROM folders WHERE folder_id=?`, fld).Scan(&cur); err != nil {
+		t.Fatal(err)
+	}
+	mid := uint64(cur)
+	importOne(t, s, fld, mid, 0, encodeStream(t, propItem(mapi.PrMessageClass, "IPM.Note")))
+
+	other, err := s.CreateMessage(fld, richMsg("after"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if uint64(other) == mid {
+		t.Fatalf("CreateMessage reused imported id %#x — the folder cursor was not advanced", mid)
+	}
+}
+
 // TestImportMessageByteTearing feeds a body carrying a long string through tiny
 // PutBuffer chunks, so the value is torn at many boundaries. The collector's
 // parser must reassemble it exactly — surface the Inc 2 parser tests did not
@@ -690,6 +759,30 @@ func TestImportHierarchyUpdate(t *testing.T) {
 	}
 	if count != 1 {
 		t.Errorf("folder rows at %#x = %d, want 1 (re-import must update, not duplicate)", fid, count)
+	}
+}
+
+// TestImportHierarchyAdvancesStoreCursor makes the store-cursor advance
+// load-bearing for folder imports: importing a folder at exactly the store's next
+// object id must push that cursor, so a later folder create gets a distinct id
+// rather than colliding with the import.
+func TestImportHierarchyAdvancesStoreCursor(t *testing.T) {
+	s := openSeededStore(t)
+	root := int64(mapi.PrivateFIDIPMSubtree)
+	var cur int64
+	if err := s.objdb.QueryRow(`SELECT config_value FROM configurations WHERE config_id=?`, cfgCurrentEID).Scan(&cur); err != nil {
+		t.Fatal(err)
+	}
+	fid := uint64(cur)
+	if _, err := s.ImportHierarchyChange(root, hierHeader(t, s, fid, nil, "AtCursor"), nil); err != nil {
+		t.Fatal(err)
+	}
+	other, err := s.CreateFolder(nil, "after")
+	if err != nil {
+		t.Fatalf("CreateFolder after import: %v (store cursor likely collided with the import)", err)
+	}
+	if uint64(other) == fid {
+		t.Fatalf("CreateFolder reused imported id %#x — the store cursor was not advanced", fid)
 	}
 }
 
