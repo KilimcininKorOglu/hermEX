@@ -154,6 +154,26 @@ loop:
 			if !s.ropReadStream(p, out, handles, hindex) {
 				break loop
 			}
+		case ropSynchronizationConfigure:
+			if !s.ropSynchronizationConfigure(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSyncUploadStateStreamBegin:
+			if !s.ropSyncUploadStateStreamBegin(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSyncUploadStateStreamContinue:
+			if !s.ropSyncUploadStateStreamContinue(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSyncUploadStateStreamEnd:
+			if !s.ropSyncUploadStateStreamEnd(p, out, handles, hindex) {
+				break loop
+			}
+		case ropFastTransferSourceGetBuffer:
+			if !s.ropFastTransferSourceGetBuffer(p, out, handles, hindex) {
+				break loop
+			}
 		default:
 			writeErr(out, ropID, hindex, ecError)
 			break loop

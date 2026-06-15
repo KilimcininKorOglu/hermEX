@@ -23,6 +23,7 @@ const (
 	kindStream                    // an open property stream
 	kindAttachment                // an opened attachment
 	kindNewMessage                // a message being composed in memory (pre-save)
+	kindSync                      // an ICS/FastTransfer sync context
 )
 
 // object is a server-side MAPI object referenced by a uint32 handle. Fields are
@@ -39,6 +40,8 @@ type object struct {
 	stream      *streamState        // kindStream
 	attachProps mapi.PropertyValues // kindAttachment
 	newMsg      *newMessageState    // kindNewMessage
+	fastSrc     fastTransferSource  // kindSync: what GetBuffer drains
+	stateSink   stateStreamSink     // kindSync: what the state-stream ROPs populate
 }
 
 // newMessageState accumulates a message being composed over the ROP write
