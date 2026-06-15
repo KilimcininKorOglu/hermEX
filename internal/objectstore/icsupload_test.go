@@ -587,3 +587,135 @@ func TestImportReadStateChanges(t *testing.T) {
 		t.Errorf("re-applying the same read flag reported %v, want none", again)
 	}
 }
+
+// hierHeader builds the fixed-order hierarchy-change identity set for a home folder
+// id. A nil parent source key (sent as empty) parents the folder under the
+// collector root.
+func hierHeader(t *testing.T, s *Store, fid uint64, parentSK []byte, dispName string) mapi.PropertyValues {
+	t.Helper()
+	home, err := s.replicaGUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ck, err := changeKey(home, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pcl, err := predecessorChangeList(home, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parentSK == nil {
+		parentSK = []byte{}
+	}
+	return mapi.PropertyValues{
+		{Tag: mapi.PrParentSourceKey, Value: parentSK},
+		{Tag: mapi.PrSourceKey, Value: sourceKey(home, fid)},
+		{Tag: mapi.PrLastModificationTime, Value: mapi.UnixToNTTime(time.Now())},
+		{Tag: mapi.PrChangeKey, Value: ck},
+		{Tag: mapi.PrPredecessorChangeList, Value: pcl},
+		{Tag: mapi.PrDisplayName, Value: dispName},
+	}
+}
+
+// TestImportHierarchyCreate imports a new folder by its home source key and asserts
+// it lands at that id under the collector root with the uploaded display name and a
+// store-derived change key.
+func TestImportHierarchyCreate(t *testing.T) {
+	s := openSeededStore(t)
+	root := int64(mapi.PrivateFIDIPMSubtree)
+	fid := uint64(0x200001)
+	got, err := s.ImportHierarchyChange(root, hierHeader(t, s, fid, nil, "Imported"),
+		mapi.PropertyValues{{Tag: mapi.PrContainerClass, Value: mapi.ContainerClassNote}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != fid {
+		t.Fatalf("folder id = %#x, want %#x", got, fid)
+	}
+	exists, err := s.FolderExists(int64(fid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		t.Fatal("imported folder does not exist")
+	}
+	props, err := s.GetFolderProperties(int64(fid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := props.Get(mapi.PrDisplayName); v != "Imported" {
+		t.Errorf("display name = %v, want Imported", v)
+	}
+	if _, ok := props.Get(mapi.PrChangeKey); !ok {
+		t.Error("imported folder missing the store-derived PR_CHANGE_KEY")
+	}
+	var parent int64
+	if err := s.objdb.QueryRow(`SELECT parent_id FROM folders WHERE folder_id=?`, int64(fid)).Scan(&parent); err != nil {
+		t.Fatal(err)
+	}
+	if parent != root {
+		t.Errorf("parent = %d, want %d (the collector root)", parent, root)
+	}
+}
+
+// TestImportHierarchyUpdate re-imports an existing folder with a new name and
+// asserts it is updated in place — name changed, change number bumped, not
+// duplicated.
+func TestImportHierarchyUpdate(t *testing.T) {
+	s := openSeededStore(t)
+	root := int64(mapi.PrivateFIDIPMSubtree)
+	fid := uint64(0x200002)
+	if _, err := s.ImportHierarchyChange(root, hierHeader(t, s, fid, nil, "v1"), nil); err != nil {
+		t.Fatal(err)
+	}
+	c1 := folderCN(t, s, int64(fid))
+	if _, err := s.ImportHierarchyChange(root, hierHeader(t, s, fid, nil, "v2"), nil); err != nil {
+		t.Fatal(err)
+	}
+	c2 := folderCN(t, s, int64(fid))
+	if c2 <= c1 {
+		t.Fatalf("re-import did not bump the folder change number (c1=%d, c2=%d)", c1, c2)
+	}
+	props, err := s.GetFolderProperties(int64(fid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := props.Get(mapi.PrDisplayName); v != "v2" {
+		t.Errorf("display name = %v, want v2", v)
+	}
+	var count int
+	if err := s.objdb.QueryRow(`SELECT COUNT(*) FROM folders WHERE folder_id=?`, int64(fid)).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Errorf("folder rows at %#x = %d, want 1 (re-import must update, not duplicate)", fid, count)
+	}
+}
+
+// TestImportHierarchyParentResolution imports a child folder whose parent source
+// key names a previously imported folder and asserts the child is parented under
+// it.
+func TestImportHierarchyParentResolution(t *testing.T) {
+	s := openSeededStore(t)
+	root := int64(mapi.PrivateFIDIPMSubtree)
+	home, err := s.replicaGUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	parentFID := uint64(0x200003)
+	if _, err := s.ImportHierarchyChange(root, hierHeader(t, s, parentFID, nil, "Parent"), nil); err != nil {
+		t.Fatal(err)
+	}
+	childFID := uint64(0x200004)
+	if _, err := s.ImportHierarchyChange(root, hierHeader(t, s, childFID, sourceKey(home, parentFID), "Child"), nil); err != nil {
+		t.Fatal(err)
+	}
+	var parent int64
+	if err := s.objdb.QueryRow(`SELECT parent_id FROM folders WHERE folder_id=?`, int64(childFID)).Scan(&parent); err != nil {
+		t.Fatal(err)
+	}
+	if uint64(parent) != parentFID {
+		t.Errorf("child parent = %d, want %#x", parent, parentFID)
+	}
+}

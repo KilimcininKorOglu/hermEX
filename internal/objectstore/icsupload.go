@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"hermex/internal/ics"
 	"hermex/internal/mapi"
@@ -478,4 +479,191 @@ func (s *Store) ImportReadStateChanges(folderID int64, changes []ReadStateChange
 		}
 	}
 	return readCNs, nil
+}
+
+// ImportHierarchyChange creates or updates a folder a client uploaded
+// ([MS-OXCFXICS] 3.3.5.10). hichyvals carries the fixed-order identity set the wire
+// sends — parent source key, source key, last-modification time, change key,
+// predecessor list, display name — and propvals any further folder properties. The
+// source key names a home folder id; an empty parent source key parents the folder
+// under the collector's root folder, otherwise the parent source key resolves to a
+// home folder. An absent id is created at that id under the parent (its message-id
+// range carved and the store cursor advanced past it); an existing id is updated
+// and moved if its parent changed. Either way a fresh change number is allocated
+// and the change key and predecessor list are derived from it — the client's are
+// accepted but not stored — so v1 does no predecessor-list conflict detection. A
+// foreign-replica source key (a cross-store import) is rejected in v1. It returns
+// the folder id.
+func (s *Store) ImportHierarchyChange(rootFID int64, hichyvals, propvals mapi.PropertyValues) (uint64, error) {
+	home, err := s.replicaGUID()
+	if err != nil {
+		return 0, err
+	}
+	sk, ok := propBytes(hichyvals, mapi.PrSourceKey)
+	if !ok {
+		return 0, fmt.Errorf("objectstore: import hierarchy change missing PR_SOURCE_KEY")
+	}
+	fid, foreign, err := parseSourceKeyMID(sk, home)
+	if err != nil {
+		return 0, err
+	}
+	if foreign {
+		return 0, fmt.Errorf("objectstore: cross-store folder import is not supported in v1")
+	}
+	parent := uint64(rootFID)
+	if psk, ok := propBytes(hichyvals, mapi.PrParentSourceKey); ok && len(psk) > 0 {
+		p, pforeign, err := parseSourceKeyMID(psk, home)
+		if err != nil {
+			return 0, err
+		}
+		if pforeign {
+			return 0, fmt.Errorf("objectstore: cross-store folder parent is not supported in v1")
+		}
+		parent = p
+	}
+	dispName, hasName := "", false
+	if v, ok := hichyvals.Get(mapi.PrDisplayName); ok {
+		dispName, _ = v.(string)
+		hasName = true
+	}
+
+	exists, err := s.FolderExists(int64(fid))
+	if err != nil {
+		return 0, err
+	}
+
+	tx, err := s.objdb.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	cn, err := allocateCN(tx)
+	if err != nil {
+		return 0, err
+	}
+	ntNow := mapi.UnixToNTTime(time.Now())
+
+	if exists {
+		if _, err := tx.Exec(
+			`UPDATE folders SET parent_id=?, change_number=? WHERE folder_id=?`,
+			int64(parent), int64(cn), int64(fid)); err != nil {
+			return 0, err
+		}
+		bag, err := updatedFolderBag(home, cn, ntNow, dispName, hasName, propvals)
+		if err != nil {
+			return 0, err
+		}
+		if err := s.insertProps(tx, "folder_properties", "folder_id", int64(fid), bag); err != nil {
+			return 0, err
+		}
+	} else {
+		begin, end, err := allocateRange(tx)
+		if err != nil {
+			return 0, err
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO folders (folder_id, parent_id, change_number, cur_eid, max_eid) VALUES (?, ?, ?, ?, ?)`,
+			int64(fid), int64(parent), int64(cn), int64(begin), int64(end)); err != nil {
+			return 0, err
+		}
+		if err := advanceStoreEID(tx, fid); err != nil {
+			return 0, err
+		}
+		bag, err := newFolderBag(tx, home, cn, ntNow, dispName, propvals)
+		if err != nil {
+			return 0, err
+		}
+		if err := s.insertProps(tx, "folder_properties", "folder_id", int64(fid), bag); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return fid, nil
+}
+
+// newFolderBag builds the property bag for a freshly imported folder: the standard
+// bag (counters, timestamps, computed change key and predecessor list) with the
+// client's display name and container class, overlaid with any other client
+// properties the store does not recompute.
+func newFolderBag(tx *sql.Tx, replica mapi.GUID, cn, ntNow uint64, dispName string, propvals mapi.PropertyValues) (mapi.PropertyValues, error) {
+	contClass := ""
+	if v, ok := propvals.Get(mapi.PrContainerClass); ok {
+		contClass, _ = v.(string)
+	}
+	hidden := false
+	if v, ok := propvals.Get(mapi.PrAttrHidden); ok {
+		hidden, _ = v.(bool)
+	}
+	bag, err := folderPropertyBag(tx, replica, ntNow, cn, dispName, contClass, true, hidden)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range propvals {
+		if omitImportedFolderProp(p.Tag) {
+			continue
+		}
+		bag.Set(p.Tag, p.Value)
+	}
+	return bag, nil
+}
+
+// updatedFolderBag builds the property changes for an existing folder: the
+// recomputed change key and predecessor list, the modification time, the display
+// name when the upload carried one, and the client's other non-recomputed
+// properties. Stored properties not mentioned are left as they were.
+func updatedFolderBag(replica mapi.GUID, cn, ntNow uint64, dispName string, hasName bool, propvals mapi.PropertyValues) (mapi.PropertyValues, error) {
+	ck, err := changeKey(replica, cn)
+	if err != nil {
+		return nil, err
+	}
+	pcl, err := predecessorChangeList(replica, cn)
+	if err != nil {
+		return nil, err
+	}
+	bag := mapi.PropertyValues{
+		{Tag: mapi.PrChangeKey, Value: ck},
+		{Tag: mapi.PrPredecessorChangeList, Value: pcl},
+		{Tag: mapi.PrLastModificationTime, Value: ntNow},
+	}
+	if hasName {
+		bag = append(bag, mapi.TaggedPropVal{Tag: mapi.PrDisplayName, Value: dispName})
+	}
+	for _, p := range propvals {
+		if omitImportedFolderProp(p.Tag) {
+			continue
+		}
+		bag = append(bag, p)
+	}
+	return bag, nil
+}
+
+// omitImportedFolderProp reports whether a folder property from an upload is
+// dropped: the identity keys and the change key / predecessor list the store
+// derives itself, the counters and sizes the receiver recomputes, and named
+// properties (which the hierarchy download strips).
+func omitImportedFolderProp(tag mapi.PropTag) bool {
+	switch tag {
+	case mapi.PrSourceKey, mapi.PrParentSourceKey, mapi.PrChangeKey, mapi.PrPredecessorChangeList:
+		return true
+	}
+	if _, ok := folderChangeOmit[tag]; ok {
+		return true
+	}
+	return tag.ID() >= 0x8000
+}
+
+// advanceStoreEID bumps the store-level object-id cursor past a folder id imported
+// into the current range, so a later allocation never reuses it. An id below the
+// cursor (already allocated) or beyond the current range (a separately reserved
+// block) matches nothing and is left alone.
+func advanceStoreEID(q sqlExec, fid uint64) error {
+	_, err := q.Exec(
+		`UPDATE configurations SET config_value=?+1
+		   WHERE config_id=? AND ?>=config_value
+		     AND ?+1 <= (SELECT config_value FROM configurations WHERE config_id=?)`,
+		int64(fid), cfgCurrentEID, int64(fid), int64(fid), cfgMaximumEID)
+	return err
 }
