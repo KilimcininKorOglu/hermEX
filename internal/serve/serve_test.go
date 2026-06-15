@@ -97,6 +97,49 @@ func TestServeTLS(t *testing.T) {
 	}
 }
 
+// TestTLSListener proves TLSListener yields a listener that terminates TLS for
+// the mail daemons, and errors when no certificate is configured.
+func TestTLSListener(t *testing.T) {
+	dir := t.TempDir()
+	certPath, keyPath := writeSelfSignedCert(t, dir)
+	cfg := &config.Config{TLSCert: certPath, TLSKey: keyPath}
+
+	ln, err := TLSListener("127.0.0.1:0", cfg)
+	if err != nil {
+		t.Fatalf("TLSListener: %v", err)
+	}
+	defer ln.Close()
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_ = conn.(*tls.Conn).Handshake()
+	}()
+
+	pemBytes, err := os.ReadFile(certPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pemBytes) {
+		t.Fatal("AppendCertsFromPEM: no cert added")
+	}
+	conn, err := tls.Dial("tcp", ln.Addr().String(), &tls.Config{RootCAs: pool})
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+	if v := conn.ConnectionState().Version; v < tls.VersionTLS12 {
+		t.Errorf("negotiated version = %#x, want >= TLS 1.2", v)
+	}
+
+	if _, err := TLSListener("127.0.0.1:0", &config.Config{}); err == nil {
+		t.Error("TLSListener without a certificate should error")
+	}
+}
+
 // writeSelfSignedCert generates an ECDSA P-256 self-signed certificate valid for
 // localhost/127.0.0.1 and writes the PEM cert/key to dir, returning their paths.
 func writeSelfSignedCert(t *testing.T, dir string) (certPath, keyPath string) {

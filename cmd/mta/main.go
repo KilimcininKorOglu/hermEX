@@ -17,6 +17,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
+	"hermex/internal/serve"
 	"hermex/internal/smtp"
 	"hermex/internal/spooler"
 )
@@ -72,6 +73,18 @@ func main() {
 	go runSendLater(dir, deliver, sendLaterInterval)
 
 	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir}, Hostname: cfg.Hostname}
+
+	// Optional implicit-TLS listener (e.g. :465) served alongside the plaintext
+	// one; the stateless server handles both concurrently.
+	if cfg.TLSEnabled() && cfg.SMTPSAddr != "" {
+		tln, err := serve.TLSListener(cfg.SMTPSAddr, cfg)
+		if err != nil {
+			log.Fatalf("hermex-mta: implicit TLS on %s: %v", cfg.SMTPSAddr, err)
+		}
+		log.Printf("hermex-mta listening on %s (implicit TLS)", cfg.SMTPSAddr)
+		go func() { log.Fatalf("hermex-mta: %v", srv.Serve(tln)) }()
+	}
+
 	log.Printf("hermex-mta listening on %s", addr)
 	log.Fatalf("hermex-mta: %v", srv.Serve(ln))
 }

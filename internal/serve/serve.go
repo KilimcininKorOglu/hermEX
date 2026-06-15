@@ -37,3 +37,19 @@ func Serve(ln net.Listener, h http.Handler, cfg *config.Config) error {
 	}
 	return (&http.Server{Handler: h}).Serve(ln)
 }
+
+// TLSListener binds addr and returns a listener that terminates TLS with the
+// hardened config.TLSConfig — the implicit-TLS entry point for the mail daemons
+// (IMAPS/POP3S/SMTPS), whose protocol servers accept the returned net.Listener
+// directly. It errors if cfg has no certificate.
+func TLSListener(addr string, cfg *config.Config) (net.Listener, error) {
+	tc, err := cfg.TLSConfig()
+	if err != nil {
+		return nil, err
+	}
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
+	return tls.NewListener(ln, tc), nil
+}

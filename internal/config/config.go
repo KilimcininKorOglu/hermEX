@@ -28,6 +28,9 @@ type Config struct {
 	MapiAddr       string `json:"mapi_addr"`       // MAPI/HTTP (native Outlook) HTTP listen address (default ":8080")
 	TLSCert        string `json:"tls_cert"`        // PEM certificate (chain) for implicit-TLS/HTTPS listeners
 	TLSKey         string `json:"tls_key"`         // PEM private key paired with tls_cert
+	IMAPSAddr      string `json:"imaps_addr"`      // IMAP implicit-TLS listen address (e.g. ":993"); empty disables
+	POP3SAddr      string `json:"pop3s_addr"`      // POP3 implicit-TLS listen address (e.g. ":995"); empty disables
+	SMTPSAddr      string `json:"smtps_addr"`      // SMTP implicit-TLS listen address (e.g. ":465"); empty disables
 }
 
 // Load reads and validates a JSON config file.

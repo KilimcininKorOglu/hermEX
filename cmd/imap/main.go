@@ -13,6 +13,7 @@ import (
 	"hermex/internal/config"
 	"hermex/internal/directory"
 	"hermex/internal/imap"
+	"hermex/internal/serve"
 )
 
 func main() {
@@ -42,6 +43,18 @@ func main() {
 		log.Fatalf("hermex-imap: listen %s: %v", addr, err)
 	}
 	srv := &imap.Server{Auth: dir, Hostname: cfg.Hostname}
+
+	// Optional implicit-TLS listener (e.g. :993) served alongside the plaintext
+	// one; the stateless server handles both concurrently.
+	if cfg.TLSEnabled() && cfg.IMAPSAddr != "" {
+		tln, err := serve.TLSListener(cfg.IMAPSAddr, cfg)
+		if err != nil {
+			log.Fatalf("hermex-imap: implicit TLS on %s: %v", cfg.IMAPSAddr, err)
+		}
+		log.Printf("hermex-imap listening on %s (implicit TLS)", cfg.IMAPSAddr)
+		go func() { log.Fatalf("hermex-imap: %v", srv.Serve(tln)) }()
+	}
+
 	log.Printf("hermex-imap listening on %s", addr)
 	log.Fatalf("hermex-imap: %v", srv.Serve(ln))
 }
