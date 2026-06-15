@@ -87,7 +87,23 @@ const (
 	MarkerEndToRecip         = markerEndToRecip
 	MarkerNewAttach          = markerNewAttach
 	MarkerEndAttach          = markerEndAttach
+	MarkerStartMessage       = markerStartMessage
+	MarkerEndMessage         = markerEndMessage
+	MarkerStartEmbed         = markerStartEmbed
+	MarkerEndEmbed           = markerEndEmbed
 )
+
+// IsStateMetaTag reports whether a property tag is one of the ICS state idset
+// meta-tags (given / cnset-seen / cnset-seen-fai / cnset-read). These travel only
+// via the upload-state-stream ROPs; a content-upload parser must reject them
+// rather than store them as ordinary properties ([MS-OXCFXICS] 3.3.5.2).
+func IsStateMetaTag(tag uint32) bool {
+	switch tag {
+	case metaTagIdsetGiven, metaTagIdsetGiven1, metaTagCnsetSeen, metaTagCnsetSeenFAI, metaTagCnsetRead:
+		return true
+	}
+	return false
+}
 
 // Per-sync meta-tags computed and written directly into a download stream; they
 // are NOT ics State members ([MS-OXCFXICS] 2.2.4.3). MetaTagFXDelProp is a
