@@ -370,3 +370,150 @@ func TestSortTableRejectsCategorized(t *testing.T) {
 		t.Errorf("categorized SortTable ec = %#x, want ecNotSupported (%#x)", ec, ecNotSupported)
 	}
 }
+
+// buildRestrict builds a RopRestrict request carrying r (nil clears the filter,
+// sending a zero-length restriction).
+func buildRestrict(inIdx uint8, r *mapi.Restriction) []byte {
+	var data []byte
+	if r != nil {
+		rd := ext.NewPush(ext.FlagUTF16)
+		_ = rd.Restriction(*r)
+		data = rd.Bytes()
+	}
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropRestrict)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	b.Uint8(0) // RestrictFlags
+	b.Uint16(uint16(len(data)))
+	b.Raw(data)
+	return b.Bytes()
+}
+
+// propEq is a PR_SUBJECT-style equality PropertyRestriction.
+func propEq(tag mapi.PropTag, val any) *mapi.Restriction {
+	return &mapi.Restriction{Type: mapi.ResProperty, Value: mapi.PropertyRestriction{
+		Relop: mapi.RelopEQ, PropTag: tag, PropVal: mapi.TaggedPropVal{Tag: tag, Value: val},
+	}}
+}
+
+// TestRestrictFiltersByProperty pins the correctness fix: RopRestrict must filter
+// the rows QueryRows returns (it previously consumed the restriction and returned
+// every row). A second restriction must widen back to the full base before
+// re-filtering, and an empty restriction must restore every row.
+func TestRestrictFiltersByProperty(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxMessage(t, dir, "Apple")
+	seedInboxMessage(t, dir, "Banana")
+	seedInboxMessage(t, dir, "Cherry")
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	tableH := openInboxContentsTable(t, sess)
+	cols := []mapi.PropTag{mapi.PrSubject}
+	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
+
+	mustDispatchOK(t, sess, buildRestrict(0, propEq(mapi.PrSubject, "Banana")), []uint32{tableH}, ropRestrict)
+	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
+	_, rows := queryRowsResponse(t, qr, cols)
+	assertSubjects(t, rows, "Banana")
+
+	mustDispatchOK(t, sess, buildRestrict(0, propEq(mapi.PrSubject, "Cherry")), []uint32{tableH}, ropRestrict)
+	qr, _ = sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
+	_, rows = queryRowsResponse(t, qr, cols)
+	assertSubjects(t, rows, "Cherry")
+
+	mustDispatchOK(t, sess, buildRestrict(0, nil), []uint32{tableH}, ropRestrict)
+	qr, _ = sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
+	_, rows = queryRowsResponse(t, qr, cols)
+	assertSubjects(t, rows, "Apple", "Banana", "Cherry")
+}
+
+// TestRestrictContentSubstring covers a case-insensitive substring content match.
+func TestRestrictContentSubstring(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxMessage(t, dir, "Weekly Report A")
+	seedInboxMessage(t, dir, "Summary")
+	seedInboxMessage(t, dir, "report B") // lowercase, matched via IGNORECASE
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	tableH := openInboxContentsTable(t, sess)
+	cols := []mapi.PropTag{mapi.PrSubject}
+	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
+
+	content := &mapi.Restriction{Type: mapi.ResContent, Value: mapi.ContentRestriction{
+		FuzzyLevel: fuzzySubString | fuzzyIgnoreCase, PropTag: mapi.PrSubject,
+		PropVal: mapi.TaggedPropVal{Tag: mapi.PrSubject, Value: "report"},
+	}}
+	mustDispatchOK(t, sess, buildRestrict(0, content), []uint32{tableH}, ropRestrict)
+	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
+	_, rows := queryRowsResponse(t, qr, cols)
+	assertSubjects(t, rows, "Weekly Report A", "report B")
+}
+
+// TestRestrictNot covers the boolean tree: NOT(subject == Banana) keeps the rest.
+func TestRestrictNot(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxMessage(t, dir, "Apple")
+	seedInboxMessage(t, dir, "Banana")
+	seedInboxMessage(t, dir, "Cherry")
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	tableH := openInboxContentsTable(t, sess)
+	cols := []mapi.PropTag{mapi.PrSubject}
+	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
+
+	not := &mapi.Restriction{Type: mapi.ResNot, Value: *propEq(mapi.PrSubject, "Banana")}
+	mustDispatchOK(t, sess, buildRestrict(0, not), []uint32{tableH}, ropRestrict)
+	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
+	_, rows := queryRowsResponse(t, qr, cols)
+	assertSubjects(t, rows, "Apple", "Cherry")
+}
+
+// TestRestrictRejectsUnsupported confirms a restriction outside the v1 subset (here
+// a regular-expression relop) fails loud rather than returning an unfiltered table.
+func TestRestrictRejectsUnsupported(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxMessage(t, dir, "x")
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	tableH := openInboxContentsTable(t, sess)
+
+	re := &mapi.Restriction{Type: mapi.ResProperty, Value: mapi.PropertyRestriction{
+		Relop: mapi.RelopRE, PropTag: mapi.PrSubject,
+		PropVal: mapi.TaggedPropVal{Tag: mapi.PrSubject, Value: "x"},
+	}}
+	resp, _ := sess.Dispatch(buildRestrict(0, re), []uint32{tableH})
+	p := ext.NewPull(resp, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropRestrict {
+		t.Fatalf("RopId = %#x", id)
+	}
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecNotSupported {
+		t.Errorf("unsupported relop ec = %#x, want ecNotSupported (%#x)", ec, ecNotSupported)
+	}
+}
+
+// TestRestrictThenSort confirms rebuildView filters before sorting: the surviving
+// rows come back in sorted order, the filtered-out row absent.
+func TestRestrictThenSort(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxMessage(t, dir, "box")
+	seedInboxMessage(t, dir, "apple") // no 'x' -> filtered out
+	seedInboxMessage(t, dir, "fox")
+	seedInboxMessage(t, dir, "axe")
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	tableH := openInboxContentsTable(t, sess)
+	cols := []mapi.PropTag{mapi.PrSubject}
+	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
+
+	content := &mapi.Restriction{Type: mapi.ResContent, Value: mapi.ContentRestriction{
+		FuzzyLevel: fuzzySubString, PropTag: mapi.PrSubject,
+		PropVal: mapi.TaggedPropVal{Tag: mapi.PrSubject, Value: "x"},
+	}}
+	mustDispatchOK(t, sess, buildRestrict(0, content), []uint32{tableH}, ropRestrict)
+	mustDispatchOK(t, sess, buildSortTable(0, 0, 0, []sortOrderEntry{{mapi.PrSubject, sortAscend}}), []uint32{tableH}, ropSortTable)
+	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
+	_, rows := queryRowsResponse(t, qr, cols)
+	assertSubjects(t, rows, "axe", "box", "fox")
+}

@@ -35,6 +35,7 @@ type tableState struct {
 	folders     []objectstore.FolderInfo  // tableHierarchy base rows
 	attachments []mapi.PropertyValues     // tableAttachment base rows (attachment property bags)
 	sortKeys    []sortKey                 // RopSortTable order; empty = store order
+	restriction *mapi.Restriction         // RopRestrict filter; nil = no filter
 	view        []int                     // base-row indices in display order; nil = identity
 	cursor      int
 }
