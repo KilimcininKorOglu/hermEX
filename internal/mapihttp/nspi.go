@@ -32,9 +32,32 @@ func (s *Server) serveNspi(w http.ResponseWriter, r *http.Request) {
 		s.nspiBind(w, r, user)
 	case "Unbind":
 		s.nspiUnbind(w, r)
+	case "GetSpecialTable":
+		s.nspiOp(w, r, user, "GetSpecialTable", s.nsp.GetSpecialTable)
 	default:
 		writeRespError(w, r, reqType, rcInvalidReqType)
 	}
+}
+
+// nspiOp runs a sequenced NSPI op (everything past Bind/Unbind/PING): it
+// validates the session cookies, rolls the sequence, decodes the request body,
+// runs handler, and frames the response. handler maps the request body to the
+// NSPI response body.
+func (s *Server) nspiOp(w http.ResponseWriter, r *http.Request, user, reqType string, handler func([]byte) []byte) {
+	sid, errSid := r.Cookie("sid")
+	seq, errSeq := r.Cookie("sequence")
+	if errSid != nil || errSeq != nil {
+		writeRespError(w, r, reqType, rcMissingCookie)
+		return
+	}
+	newSeq, code := s.nspiSessions.validate(sid.Value, seq.Value, user)
+	if code != rcSuccess {
+		writeRespError(w, r, reqType, code)
+		return
+	}
+	setNspiCookie(w, "sequence", newSeq)
+	body, _ := io.ReadAll(r.Body)
+	writeNormal(w, r, reqType, handler(body))
 }
 
 // nspiBind decodes the Bind request, runs it against the NSPI server, and — only

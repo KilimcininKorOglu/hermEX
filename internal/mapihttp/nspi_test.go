@@ -17,6 +17,17 @@ func bindBody(flags uint32) []byte {
 	return b
 }
 
+// specialTableBody frames a minimal GetSpecialTable request: flags + no STAT +
+// no version + empty auxin.
+func specialTableBody() []byte {
+	var b []byte
+	b = binary.LittleEndian.AppendUint32(b, 0) // flags
+	b = append(b, 0)                           // hasStat = 0
+	b = append(b, 0)                           // hasVersion = 0
+	b = binary.LittleEndian.AppendUint32(b, 0) // cb_auxin
+	return b
+}
+
 // nspiPayload strips the chunked PROCESSING/DONE meta preamble and returns the
 // NSPI response body bytes.
 func nspiPayload(t *testing.T, resp *http.Response) []byte {
@@ -91,5 +102,52 @@ func TestNspiBindAnonymousRejected(t *testing.T) {
 	}
 	if result := binary.LittleEndian.Uint32(p[4:]); result == 0 {
 		t.Error("anonymous Bind result = success, want a failure code")
+	}
+}
+
+// TestNspiGetSpecialTable drives Bind then GetSpecialTable within the session:
+// it needs the cookies, rolls the sequence, and returns the single GAL container
+// row.
+func TestNspiGetSpecialTable(t *testing.T) {
+	ts := newTestServer(t)
+	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
+	bind.Body.Close()
+	sid, seq := cookieByName(bind, "sid"), cookieByName(bind, "sequence")
+	if sid == "" || seq == "" {
+		t.Fatal("no cookies from Bind")
+	}
+
+	// Without cookies -> missing cookie (6).
+	noCookie := mapiPost(t, ts, "/mapi/nspi", "GetSpecialTable", specialTableBody(), nil)
+	noCookie.Body.Close()
+	if got := noCookie.Header.Get("X-ResponseCode"); got != "6" {
+		t.Errorf("GetSpecialTable without cookies: X-ResponseCode = %q, want 6", got)
+	}
+
+	// With the bound session -> success, sequence rolled, one container row.
+	gst := mapiPost(t, ts, "/mapi/nspi", "GetSpecialTable", specialTableBody(), func(r *http.Request) {
+		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
+		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
+	})
+	defer gst.Body.Close()
+	if got := gst.Header.Get("X-ResponseCode"); got != "0" {
+		t.Fatalf("GetSpecialTable: X-ResponseCode = %q, want 0", got)
+	}
+	if newSeq := cookieByName(gst, "sequence"); newSeq == "" || newSeq == seq {
+		t.Errorf("GetSpecialTable did not roll the sequence (was %q, got %q)", seq, newSeq)
+	}
+	p := nspiPayload(t, gst)
+	// status(0:4) + result(4:8) + codepage(8:12) + version-marker(12) + HasRows(13) + count(14:18)
+	if len(p) < 18 {
+		t.Fatalf("response too short: %d bytes", len(p))
+	}
+	if result := binary.LittleEndian.Uint32(p[4:]); result != 0 {
+		t.Errorf("result = %#x, want 0", result)
+	}
+	if p[13] != 0xFF {
+		t.Errorf("HasRows byte = %#x, want 0xFF", p[13])
+	}
+	if count := binary.LittleEndian.Uint32(p[14:]); count != 1 {
+		t.Errorf("container row count = %d, want 1", count)
 	}
 }

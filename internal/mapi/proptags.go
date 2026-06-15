@@ -185,6 +185,14 @@ const (
 	PrSendRichInfo            = PropTag(0x3A40000B) // PtBoolean (PidTagSendRichInfo)
 )
 
+// Address-book container proptags (NSPI GetSpecialTable, [MS-OXNSPI] / [MS-OXOABK]).
+const (
+	PrContainerFlags   = PropTag(0x36000003) // PtLong (PidTagContainerFlags)
+	PrDepth            = PropTag(0x30050003) // PtLong (PidTagDepth)
+	PrEmsAbContainerID = PropTag(0xFFFD0003) // PtLong (PidTagAddressBookContainerId)
+	PrEmsAbIsMaster    = PropTag(0xFFFB000B) // PtBoolean (PidTagAddressBookIsMaster)
+)
+
 // Recipient type values (PR_RECIPIENT_TYPE).
 const (
 	RecipTo  = 1 // mapiTo
