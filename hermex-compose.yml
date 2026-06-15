@@ -171,3 +171,25 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+
+  # Single-FQDN front door: reverse-proxies to the HTTP daemons by path prefix so
+  # one host serves autodiscover/EWS/MAPI/RPC/ActiveSync/DAV/webmail. Pure proxy
+  # (no DB/store), configured via env. TLS is off until HERMEX_TLS_CERT and
+  # HERMEX_TLS_KEY are set (added with the cert at the live-smoke step).
+  gateway:
+    container_name: hermex-gateway
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: ["/usr/local/bin/hermex-gateway"]
+    environment:
+      - HERMEX_GATEWAY_ADDR=:8080
+    ports:
+      - "8149:8080"
+    depends_on:
+      - mapi
+      - ews
+      - activesync
+      - dav
+      - webmail
+    restart: unless-stopped
