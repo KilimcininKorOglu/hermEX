@@ -34,6 +34,12 @@ func (s *Server) serveNspi(w http.ResponseWriter, r *http.Request) {
 		s.nspiUnbind(w, r)
 	case "GetSpecialTable":
 		s.nspiOp(w, r, user, "GetSpecialTable", s.nsp.GetSpecialTable)
+	case "QueryRows":
+		s.nspiOp(w, r, user, "QueryRows", s.nsp.QueryRows)
+	case "UpdateStat":
+		s.nspiOp(w, r, user, "UpdateStat", s.nsp.UpdateStat)
+	case "QueryColumns":
+		s.nspiOp(w, r, user, "QueryColumns", s.nsp.QueryColumns)
 	default:
 		writeRespError(w, r, reqType, rcInvalidReqType)
 	}

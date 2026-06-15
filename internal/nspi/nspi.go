@@ -23,11 +23,15 @@ const (
 	cpWinUnicode    uint32 = 0x04B0 // CP_WINUNICODE (1200): NSPI cannot bind in Unicode
 )
 
-// MAPI return codes ([MS-OXCDATA] 2.4) carried in an NSPI response result.
+// MAPI return codes ([MS-OXCDATA] 2.4) carried in an NSPI response result, or in
+// a row's per-column error marker.
 const (
 	ecSuccess      uint32 = 0x00000000
 	ecError        uint32 = 0x80004005
 	ecNotSupported uint32 = 0x80040102
+	ecNotFound     uint32 = 0x8004010F // a requested column has no value for the row
+	ecInvalidParam uint32 = 0x80070057 // e.g. QueryRows count == 0
+	ecTableTooBig  uint32 = 0x80040403 // more than 100 columns requested
 )
 
 // Server answers NSPI requests against the directory GAL. serverGUID identifies

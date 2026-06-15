@@ -28,6 +28,27 @@ func specialTableBody() []byte {
 	return b
 }
 
+// queryRowsBody frames a QueryRows request: flags + a STAT (cursor at the table
+// start, code page 1252) + an empty explicit MId list + count + no columns +
+// empty auxin.
+func queryRowsBody() []byte {
+	var b []byte
+	b = binary.LittleEndian.AppendUint32(b, 0) // flags
+	b = append(b, 1)                           // hasStat
+	for i := 0; i < 9; i++ {                   // STAT: 9 u32 fields
+		v := uint32(0)
+		if i == 6 { // codepage
+			v = 1252
+		}
+		b = binary.LittleEndian.AppendUint32(b, v)
+	}
+	b = binary.LittleEndian.AppendUint32(b, 0)  // explicit MId count = 0
+	b = binary.LittleEndian.AppendUint32(b, 10) // count
+	b = append(b, 0)                            // hasColumns = 0
+	b = binary.LittleEndian.AppendUint32(b, 0)  // cb_auxin
+	return b
+}
+
 // nspiPayload strips the chunked PROCESSING/DONE meta preamble and returns the
 // NSPI response body bytes.
 func nspiPayload(t *testing.T, resp *http.Response) []byte {
@@ -149,5 +170,39 @@ func TestNspiGetSpecialTable(t *testing.T) {
 	}
 	if count := binary.LittleEndian.Uint32(p[14:]); count != 1 {
 		t.Errorf("container row count = %d, want 1", count)
+	}
+}
+
+// TestNspiQueryRows drives Bind then QueryRows within the session and confirms
+// the transport round-trips a successful row set (the single seeded user).
+func TestNspiQueryRows(t *testing.T) {
+	ts := newTestServer(t)
+	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
+	bind.Body.Close()
+	sid, seq := cookieByName(bind, "sid"), cookieByName(bind, "sequence")
+	if sid == "" || seq == "" {
+		t.Fatal("no cookies from Bind")
+	}
+	qr := mapiPost(t, ts, "/mapi/nspi", "QueryRows", queryRowsBody(), func(r *http.Request) {
+		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
+		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
+	})
+	defer qr.Body.Close()
+	if got := qr.Header.Get("X-ResponseCode"); got != "0" {
+		t.Fatalf("QueryRows: X-ResponseCode = %q, want 0", got)
+	}
+	p := nspiPayload(t, qr)
+	// status(0:4) + result(4:8) + STAT-marker(8) + STAT(9:45) + rows-marker(45)
+	if len(p) < 46 {
+		t.Fatalf("response too short: %d bytes", len(p))
+	}
+	if result := binary.LittleEndian.Uint32(p[4:]); result != 0 {
+		t.Errorf("result = %#x, want 0", result)
+	}
+	if p[8] != 0xFF {
+		t.Errorf("STAT marker = %#x, want 0xFF", p[8])
+	}
+	if p[45] != 0xFF {
+		t.Errorf("rows marker = %#x, want 0xFF (a row set follows)", p[45])
 	}
 }
