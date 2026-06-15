@@ -23,18 +23,24 @@ const tableStatusComplete uint8 = 0x00
 
 // tableState is the in-memory table a Get*Table ROP builds: a snapshot of the
 // rows taken at creation plus the client's chosen column set and a forward
-// cursor. QueryRows pages over the snapshot, projecting the columns per row.
+// cursor. The snapshot slices (messages/folders/attachments) are the immutable
+// base; view holds the base-row indices in QueryRows order after RopSortTable /
+// RopRestrict have been applied (nil means the identity order). Keeping the base
+// immutable lets a later RopRestrict widen back to the full set. QueryRows pages
+// over view, projecting the columns per row.
 type tableState struct {
 	kind        tableKind
 	columns     []mapi.PropTag
-	messages    []objectstore.MessageInfo // tableContents rows
-	folders     []objectstore.FolderInfo  // tableHierarchy rows
-	attachments []mapi.PropertyValues     // tableAttachment rows (attachment property bags)
+	messages    []objectstore.MessageInfo // tableContents base rows
+	folders     []objectstore.FolderInfo  // tableHierarchy base rows
+	attachments []mapi.PropertyValues     // tableAttachment base rows (attachment property bags)
+	sortKeys    []sortKey                 // RopSortTable order; empty = store order
+	view        []int                     // base-row indices in display order; nil = identity
 	cursor      int
 }
 
-// total reports the snapshot row count for the table kind.
-func (t *tableState) total() int {
+// baseCount reports the immutable base row count for the table kind.
+func (t *tableState) baseCount() int {
 	switch t.kind {
 	case tableHierarchy:
 		return len(t.folders)
@@ -45,14 +51,32 @@ func (t *tableState) total() int {
 	}
 }
 
+// total reports the number of rows QueryRows can page: the view length once a
+// sort or restriction has been applied, else the full base.
+func (t *tableState) total() int {
+	if t.view != nil {
+		return len(t.view)
+	}
+	return t.baseCount()
+}
+
+// baseIndex maps a view position to its immutable base-row index.
+func (t *tableState) baseIndex(idx int) int {
+	if t.view != nil {
+		return t.view[idx]
+	}
+	return idx
+}
+
 // rowProps projects the column set for the row at idx from the store: a message
 // property bag for a contents table, a folder property bag for a hierarchy one.
 // The row identity (PrMid / PrFolderID) is the object's EID, not a stored
 // property, so it is synthesized when requested — without it the client has no
 // id to OpenMessage / OpenFolder the row it just found (the browse->open chain).
 func (t *tableState) rowProps(store *objectstore.Store, idx int) (mapi.PropertyValues, error) {
+	base := t.baseIndex(idx)
 	if t.kind == tableHierarchy {
-		fid := t.folders[idx].ID
+		fid := t.folders[base].ID
 		props, err := store.GetFolderProperties(fid, t.columns...)
 		if err != nil {
 			return nil, err
@@ -64,14 +88,14 @@ func (t *tableState) rowProps(store *objectstore.Store, idx int) (mapi.PropertyV
 	}
 	if t.kind == tableAttachment {
 		// The bags are already in memory; copy before synthesizing PR_ATTACH_NUM
-		// so the stored snapshot is not mutated. PR_ATTACH_NUM is the row index.
-		row := append(mapi.PropertyValues(nil), t.attachments[idx]...)
+		// so the stored snapshot is not mutated. PR_ATTACH_NUM is the base row index.
+		row := append(mapi.PropertyValues(nil), t.attachments[base]...)
 		if slices.Contains(t.columns, mapi.PrAttachNum) {
-			row.Set(mapi.PrAttachNum, int32(idx))
+			row.Set(mapi.PrAttachNum, int32(base))
 		}
 		return row, nil
 	}
-	mid := t.messages[idx].ID
+	mid := t.messages[base].ID
 	props, err := store.GetMessageProperties(mid, t.columns...)
 	if err != nil {
 		return nil, err

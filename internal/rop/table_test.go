@@ -237,3 +237,136 @@ func TestQueryRowsHierarchy(t *testing.T) {
 		t.Errorf("hierarchy rows did not include Inbox (%d rows)", len(rows))
 	}
 }
+
+// sortOrderEntry is one SortOrder for buildSortTable.
+type sortOrderEntry struct {
+	tag   mapi.PropTag
+	order uint8
+}
+
+// buildSortTable builds a RopSortTable request: TableFlags, SortOrderCount,
+// CategoryCount, ExpandedCount, then a PropertyType/PropertyId/Order per key.
+func buildSortTable(inIdx uint8, catCount, expanded uint16, keys []sortOrderEntry) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropSortTable)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	b.Uint8(0)                  // TableFlags
+	b.Uint16(uint16(len(keys))) // SortOrderCount
+	b.Uint16(catCount)
+	b.Uint16(expanded)
+	for _, k := range keys {
+		b.Uint16(uint16(k.tag.Type()))
+		b.Uint16(k.tag.ID())
+		b.Uint8(k.order)
+	}
+	return b.Bytes()
+}
+
+// openInboxContentsTable walks Logon -> OpenFolder(Inbox) -> GetContentsTable and
+// returns the contents-table handle.
+func openInboxContentsTable(t *testing.T, sess *Session) uint32 {
+	t.Helper()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
+	folderH := h[1]
+	_, h = sess.Dispatch(buildGetContentsTable(0, 1), []uint32{folderH, 0xFFFFFFFF})
+	return h[1]
+}
+
+// assertSubjects checks the rows' PR_SUBJECT values match want, in order.
+func assertSubjects(t *testing.T, rows []mapi.PropertyValues, want ...string) {
+	t.Helper()
+	if len(rows) != len(want) {
+		t.Fatalf("got %d rows, want %d", len(rows), len(want))
+	}
+	for i, w := range want {
+		if subj, _ := rows[i].Get(mapi.PrSubject); subj != w {
+			t.Errorf("row %d subject = %v, want %q", i, subj, w)
+		}
+	}
+}
+
+// TestSortTableOrdersContents pins the correctness fix: RopSortTable must actually
+// reorder the rows QueryRows returns (it previously parsed the order and discarded
+// it, returning store order). The messages are delivered out of alphabetical order
+// so store order differs from sorted order, and a descending re-sort must replace
+// the ascending one and re-page from the top.
+func TestSortTableOrdersContents(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxMessage(t, dir, "Charlie")
+	seedInboxMessage(t, dir, "Alpha")
+	seedInboxMessage(t, dir, "Bravo")
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	tableH := openInboxContentsTable(t, sess)
+	cols := []mapi.PropTag{mapi.PrSubject}
+	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
+
+	mustDispatchOK(t, sess, buildSortTable(0, 0, 0, []sortOrderEntry{{mapi.PrSubject, sortAscend}}), []uint32{tableH}, ropSortTable)
+	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
+	_, rows := queryRowsResponse(t, qr, cols)
+	assertSubjects(t, rows, "Alpha", "Bravo", "Charlie")
+
+	mustDispatchOK(t, sess, buildSortTable(0, 0, 0, []sortOrderEntry{{mapi.PrSubject, sortDescend}}), []uint32{tableH}, ropSortTable)
+	qr, _ = sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
+	_, rows = queryRowsResponse(t, qr, cols)
+	assertSubjects(t, rows, "Charlie", "Bravo", "Alpha")
+}
+
+// TestSortTableSortsOnNonDisplayedProperty guards the trap that the sort key need
+// not be a displayed column: the table sorts by PR_SUBJECT while projecting only
+// PR_MID, so the returned ids must come back in subject order.
+func TestSortTableSortsOnNonDisplayedProperty(t *testing.T) {
+	dir := t.TempDir()
+	cID := seedInboxMessage(t, dir, "Charlie")
+	aID := seedInboxMessage(t, dir, "Alpha")
+	bID := seedInboxMessage(t, dir, "Bravo")
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	tableH := openInboxContentsTable(t, sess)
+	cols := []mapi.PropTag{mapi.PrMid}
+	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
+	mustDispatchOK(t, sess, buildSortTable(0, 0, 0, []sortOrderEntry{{mapi.PrSubject, sortAscend}}), []uint32{tableH}, ropSortTable)
+	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
+	_, rows := queryRowsResponse(t, qr, cols)
+
+	wantMIDs := []int64{
+		int64(mapi.MakeEIDEx(1, uint64(aID))),
+		int64(mapi.MakeEIDEx(1, uint64(bID))),
+		int64(mapi.MakeEIDEx(1, uint64(cID))),
+	}
+	if len(rows) != 3 {
+		t.Fatalf("got %d rows, want 3", len(rows))
+	}
+	for i, want := range wantMIDs {
+		mid, _ := rows[i].Get(mapi.PrMid)
+		if mid != want {
+			t.Errorf("row %d MID = %v, want %d (subject-sorted order)", i, mid, want)
+		}
+	}
+}
+
+// TestSortTableRejectsCategorized confirms a categorized sort fails loud rather
+// than silently returning a flattened table — the same silent-error class the
+// non-categorized fix closes.
+func TestSortTableRejectsCategorized(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxMessage(t, dir, "x")
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	tableH := openInboxContentsTable(t, sess)
+
+	resp, _ := sess.Dispatch(buildSortTable(0, 1, 0, []sortOrderEntry{{mapi.PrSubject, sortAscend}}), []uint32{tableH})
+	p := ext.NewPull(resp, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropSortTable {
+		t.Fatalf("RopId = %#x", id)
+	}
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecNotSupported {
+		t.Errorf("categorized SortTable ec = %#x, want ecNotSupported (%#x)", ec, ecNotSupported)
+	}
+}

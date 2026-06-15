@@ -1,6 +1,11 @@
 package rop
 
 import (
+	"bytes"
+	"cmp"
+	"slices"
+	"strings"
+
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
@@ -163,26 +168,204 @@ func (s *Session) ropGetHierarchyTable(p *ext.Pull, out *ext.Push, handles []uin
 	return true
 }
 
-// ropSortTable handles RopSortTable ([MS-OXCTABL] 2.2.2.3). v1 builds the table
-// eagerly in default (store) order, so the sort is parsed (to consume the bytes
-// and keep the batch aligned) but not applied; the table reports complete.
+// SortOrder Order values ([MS-OXCTABL] 2.2.1.3). v1 applies ascending/descending;
+// the category orders (e.g. MAXIMUM_CATEGORY = 0x04) drive categorized tables,
+// which RopSortTable rejects rather than silently flattening.
+const (
+	sortAscend  uint8 = 0x00
+	sortDescend uint8 = 0x01
+)
+
+// sortKey is one resolved RopSortTable column: the property to order by and the
+// direction.
+type sortKey struct {
+	tag        mapi.PropTag
+	descending bool
+}
+
+// sortableType reports whether a property type has a defined sort order. Any other
+// type (objects, restrictions, multivalue, ...) makes RopSortTable fail loud rather
+// than return an unsorted table — the silent-error class this handler closes.
+func sortableType(t mapi.PropType) bool {
+	switch t {
+	case mapi.PtShort, mapi.PtLong, mapi.PtCurrency, mapi.PtI8, mapi.PtSysTime,
+		mapi.PtFloat, mapi.PtDouble, mapi.PtAppTime, mapi.PtBoolean,
+		mapi.PtString8, mapi.PtUnicode, mapi.PtBinary:
+		return true
+	}
+	return false
+}
+
+// compareValues orders two present property values. They are the Go types
+// Push.PropValue emits for the column's type; a type mismatch (which the store
+// should never produce) compares equal, so the stable sort keeps input order.
+func compareValues(a, b any) int {
+	switch x := a.(type) {
+	case int16:
+		if y, ok := b.(int16); ok {
+			return cmp.Compare(x, y)
+		}
+	case int32:
+		if y, ok := b.(int32); ok {
+			return cmp.Compare(x, y)
+		}
+	case int64:
+		if y, ok := b.(int64); ok {
+			return cmp.Compare(x, y)
+		}
+	case uint64:
+		if y, ok := b.(uint64); ok {
+			return cmp.Compare(x, y)
+		}
+	case float32:
+		if y, ok := b.(float32); ok {
+			return cmp.Compare(x, y)
+		}
+	case float64:
+		if y, ok := b.(float64); ok {
+			return cmp.Compare(x, y)
+		}
+	case bool:
+		if y, ok := b.(bool); ok {
+			switch {
+			case x == y:
+				return 0
+			case !x:
+				return -1
+			default:
+				return 1
+			}
+		}
+	case string:
+		if y, ok := b.(string); ok {
+			return strings.Compare(x, y)
+		}
+	case []byte:
+		if y, ok := b.([]byte); ok {
+			return bytes.Compare(x, y)
+		}
+	}
+	return 0
+}
+
+// sortKeyBags fetches each base row's sort-key values, read independently of the
+// column set since a client routinely sorts on a property it does not display.
+// This projects every base row (an O(N) store walk, acceptable for v1's eager
+// tables).
+func (t *tableState) sortKeyBags(store *objectstore.Store) ([]mapi.PropertyValues, error) {
+	tags := make([]mapi.PropTag, len(t.sortKeys))
+	for i, k := range t.sortKeys {
+		tags[i] = k.tag
+	}
+	n := t.baseCount()
+	bags := make([]mapi.PropertyValues, n)
+	for i := range n {
+		switch t.kind {
+		case tableHierarchy:
+			b, err := store.GetFolderProperties(t.folders[i].ID, tags...)
+			if err != nil {
+				return nil, err
+			}
+			bags[i] = b
+		case tableAttachment:
+			bags[i] = t.attachments[i] // already in memory
+		default:
+			b, err := store.GetMessageProperties(t.messages[i].ID, tags...)
+			if err != nil {
+				return nil, err
+			}
+			bags[i] = b
+		}
+	}
+	return bags, nil
+}
+
+// rebuildView recomputes the QueryRows view from the immutable base and resets the
+// cursor to the beginning ([MS-OXCTABL]: RopSortTable repositions to row 0). With
+// no sort keys the view is the identity (store order). A present value always sorts
+// before an absent one, independent of direction, so a missing sort key is
+// deterministic.
+func (t *tableState) rebuildView(store *objectstore.Store) error {
+	n := t.baseCount()
+	view := make([]int, n)
+	for i := range view {
+		view[i] = i
+	}
+	if len(t.sortKeys) > 0 {
+		bags, err := t.sortKeyBags(store)
+		if err != nil {
+			return err
+		}
+		slices.SortStableFunc(view, func(a, b int) int {
+			for _, k := range t.sortKeys {
+				av, aok := bags[a].Get(k.tag)
+				bv, bok := bags[b].Get(k.tag)
+				if !aok || !bok {
+					if aok == bok {
+						continue // both absent: tie on this key
+					}
+					if !aok {
+						return 1 // a absent -> after b
+					}
+					return -1 // b absent -> a before b
+				}
+				c := compareValues(av, bv)
+				if k.descending {
+					c = -c
+				}
+				if c != 0 {
+					return c
+				}
+			}
+			return 0
+		})
+	}
+	t.view = view
+	t.cursor = 0
+	return nil
+}
+
+// ropSortTable handles RopSortTable ([MS-OXCTABL] 2.2.2.3): it orders the table's
+// rows by the requested columns and repositions the cursor. Categorized sorts and
+// non-sortable column types are not implemented and fail loud rather than returning
+// a wrongly-ordered table the client would trust.
 func (s *Session) ropSortTable(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	_, e1 := p.Uint8()      // TableFlags
-	count, e2 := p.Uint16() // SortOrderCount
-	_, e3 := p.Uint16()     // CategoryCount
-	_, e4 := p.Uint16()     // ExpandedCount
+	_, e1 := p.Uint8()         // TableFlags
+	count, e2 := p.Uint16()    // SortOrderCount
+	catCount, e3 := p.Uint16() // CategoryCount
+	expanded, e4 := p.Uint16() // ExpandedCount
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
 		return false
 	}
-	for i := 0; i < int(count); i++ {
-		_, ea := p.Uint16() // PropertyType
-		_, eb := p.Uint16() // PropertyId
-		_, ec := p.Uint8()  // Order
+	keys := make([]sortKey, 0, count)
+	unsupported := false
+	for range int(count) {
+		ptype, ea := p.Uint16() // PropertyType
+		pid, eb := p.Uint16()   // PropertyId
+		order, ec := p.Uint8()  // Order
 		if ea != nil || eb != nil || ec != nil {
 			return false
 		}
+		desc := order == sortDescend
+		if order != sortAscend && order != sortDescend {
+			unsupported = true // a category order, not plain ascending/descending
+		}
+		if !sortableType(mapi.PropType(ptype)) {
+			unsupported = true
+		}
+		keys = append(keys, sortKey{tag: mapi.MakeTag(pid, mapi.PropType(ptype)), descending: desc})
 	}
-	if table := s.get(handleAt(handles, hindex)); table == nil || table.kind != kindTable {
+	table := s.get(handleAt(handles, hindex))
+	if table == nil || table.kind != kindTable || table.store == nil {
+		writeErr(out, ropSortTable, hindex, ecError)
+		return true
+	}
+	if catCount != 0 || expanded != 0 || unsupported {
+		writeErr(out, ropSortTable, hindex, ecNotSupported)
+		return true
+	}
+	table.table.sortKeys = keys
+	if err := table.table.rebuildView(table.store); err != nil {
 		writeErr(out, ropSortTable, hindex, ecError)
 		return true
 	}
