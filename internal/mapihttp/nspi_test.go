@@ -250,7 +250,7 @@ func TestNspiResolveNames(t *testing.T) {
 	if sid == "" || seq == "" {
 		t.Fatal("no cookies from Bind")
 	}
-	rn := mapiPost(t, ts, "/mapi/nspi", "ResolveNamesW", resolveNamesBody("alice"), func(r *http.Request) {
+	rn := mapiPost(t, ts, "/mapi/nspi", "ResolveNames", resolveNamesBody("alice"), func(r *http.Request) {
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
 	})
