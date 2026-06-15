@@ -5,6 +5,7 @@ package pop3
 
 import (
 	"bufio"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/textproto"
@@ -18,8 +19,9 @@ import (
 
 // Server accepts POP3 connections and serves mailboxes resolved via Auth.
 type Server struct {
-	Auth     directory.Authenticator
-	Hostname string
+	Auth      directory.Authenticator
+	Hostname  string
+	TLSConfig *tls.Config // when non-nil, advertise (CAPA) and accept STLS
 }
 
 // Serve accepts connections on l until it is closed.
@@ -34,9 +36,10 @@ func (s *Server) Serve(l net.Listener) error {
 }
 
 func (s *Server) handle(conn net.Conn) {
-	defer conn.Close()
+	defer func() { conn.Close() }() // closes the upgraded conn after an STLS swap
 	w := bufio.NewWriter(conn)
 	tp := textproto.NewReader(bufio.NewReader(conn))
+	_, isTLS := conn.(*tls.Conn)
 
 	var mb *mailbox
 	defer func() {
@@ -75,6 +78,26 @@ func (s *Server) handle(conn net.Conn) {
 				}
 				mb = m
 				ok(w, fmt.Sprintf("%d messages", mb.count()))
+			case "CAPA":
+				s.writeCapa(w, isTLS)
+			case "STLS":
+				if s.TLSConfig == nil || isTLS {
+					errLine(w, "STLS not available")
+					continue
+				}
+				if tp.R.Buffered() > 0 {
+					return // pipelined plaintext behind STLS; abort the connection
+				}
+				ok(w, "begin TLS negotiation")
+				tc := tls.Server(conn, s.TLSConfig)
+				if err := tc.Handshake(); err != nil {
+					return // handshake failed; deferred close fires
+				}
+				conn = tc
+				w = bufio.NewWriter(tc)
+				tp = textproto.NewReader(bufio.NewReader(tc))
+				isTLS = true
+				user = "" // discard any USER given before TLS
 			case "QUIT":
 				ok(w, "bye")
 				return
@@ -246,6 +269,18 @@ func writeDotStuffed(w *bufio.Writer, data []byte) {
 		w.WriteString("\r\n")
 	}
 	w.WriteString(".\r\n")
+}
+
+// writeCapa emits the RFC 2449 CAPA list, advertising STLS (RFC 2595) only when
+// a TLS config is present and the link is not already encrypted.
+func (s *Server) writeCapa(w *bufio.Writer, isTLS bool) {
+	w.WriteString("+OK capabilities follow\r\n")
+	w.WriteString("USER\r\n")
+	if s.TLSConfig != nil && !isTLS {
+		w.WriteString("STLS\r\n")
+	}
+	w.WriteString(".\r\n")
+	w.Flush()
 }
 
 func ok(w *bufio.Writer, msg string) {

@@ -73,6 +73,13 @@ func main() {
 	go runSendLater(dir, deliver, sendLaterInterval)
 
 	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir}, Hostname: cfg.Hostname}
+	if cfg.TLSEnabled() {
+		tc, err := cfg.TLSConfig()
+		if err != nil {
+			log.Fatalf("hermex-mta: tls: %v", err)
+		}
+		srv.TLSConfig = tc // enables STARTTLS on the plaintext listener
+	}
 
 	// Optional implicit-TLS listener (e.g. :465) served alongside the plaintext
 	// one; the stateless server handles both concurrently.

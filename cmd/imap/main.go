@@ -43,6 +43,13 @@ func main() {
 		log.Fatalf("hermex-imap: listen %s: %v", addr, err)
 	}
 	srv := &imap.Server{Auth: dir, Hostname: cfg.Hostname}
+	if cfg.TLSEnabled() {
+		tc, err := cfg.TLSConfig()
+		if err != nil {
+			log.Fatalf("hermex-imap: tls: %v", err)
+		}
+		srv.TLSConfig = tc // enables STARTTLS on the plaintext listener
+	}
 
 	// Optional implicit-TLS listener (e.g. :993) served alongside the plaintext
 	// one; the stateless server handles both concurrently.

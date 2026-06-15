@@ -6,6 +6,7 @@ package smtp
 
 import (
 	"bufio"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -33,9 +34,10 @@ type Session interface {
 
 // Server accepts SMTP connections and drives them against its Backend.
 type Server struct {
-	Backend  Backend
-	Hostname string // announced in the greeting and EHLO; defaults to "localhost"
-	MaxSize  int64  // advertised/enforced max message size in bytes; 0 means no limit
+	Backend   Backend
+	Hostname  string      // announced in the greeting and EHLO; defaults to "localhost"
+	MaxSize   int64       // advertised/enforced max message size in bytes; 0 means no limit
+	TLSConfig *tls.Config // when non-nil, advertise (EHLO) and accept STARTTLS
 }
 
 // Serve accepts connections on l until it is closed.
@@ -57,9 +59,10 @@ func (s *Server) hostname() string {
 }
 
 func (s *Server) handle(conn net.Conn) {
-	defer conn.Close()
+	defer func() { conn.Close() }() // closes the upgraded conn after a STARTTLS swap
 	w := bufio.NewWriter(conn)
 	tp := textproto.NewReader(bufio.NewReader(conn))
+	_, isTLS := conn.(*tls.Conn)
 
 	sess, err := s.Backend.NewSession(conn.RemoteAddr().String())
 	if err != nil {
@@ -86,7 +89,28 @@ func (s *Server) handle(conn net.Conn) {
 		case "EHLO":
 			hasFrom, rcptCount = false, 0
 			sess.Reset()
-			s.greetEHLO(w, arg)
+			s.greetEHLO(w, arg, isTLS)
+		case "STARTTLS":
+			if s.TLSConfig == nil || isTLS {
+				reply(w, 502, "STARTTLS not available")
+				continue
+			}
+			if tp.R.Buffered() > 0 {
+				return // pipelined plaintext behind STARTTLS; abort the connection
+			}
+			reply(w, 220, "ready to start TLS")
+			tc := tls.Server(conn, s.TLSConfig)
+			if err := tc.Handshake(); err != nil {
+				return // handshake failed; deferred close fires
+			}
+			conn = tc
+			w = bufio.NewWriter(tc)
+			tp = textproto.NewReader(bufio.NewReader(tc))
+			isTLS = true
+			// RFC 3207: discard all state negotiated before TLS; the client
+			// re-issues EHLO over the secured link.
+			sess.Reset()
+			hasFrom, rcptCount = false, 0
 		case "MAIL":
 			addr, ok := extractPath(arg, "FROM:")
 			if !ok {
@@ -210,7 +234,7 @@ func (d *dotReader) fill() error {
 	return nil
 }
 
-func (s *Server) greetEHLO(w *bufio.Writer, arg string) {
+func (s *Server) greetEHLO(w *bufio.Writer, arg string, isTLS bool) {
 	lines := []string{
 		fmt.Sprintf("%s Hello %s", s.hostname(), strings.TrimSpace(arg)),
 		"PIPELINING",
@@ -218,6 +242,9 @@ func (s *Server) greetEHLO(w *bufio.Writer, arg string) {
 	}
 	if s.MaxSize > 0 {
 		lines = append(lines, fmt.Sprintf("SIZE %d", s.MaxSize))
+	}
+	if s.TLSConfig != nil && !isTLS {
+		lines = append(lines, "STARTTLS")
 	}
 	for i, l := range lines {
 		sep := "-"

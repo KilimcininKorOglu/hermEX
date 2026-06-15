@@ -2,6 +2,7 @@ package imap
 
 import (
 	"bufio"
+	"crypto/tls"
 	"encoding/base64"
 	"fmt"
 	"net"
@@ -28,8 +29,9 @@ const (
 
 // Server accepts IMAP connections and serves mailboxes resolved via Auth.
 type Server struct {
-	Auth     directory.Authenticator
-	Hostname string
+	Auth      directory.Authenticator
+	Hostname  string
+	TLSConfig *tls.Config // when non-nil, advertise and accept STARTTLS
 }
 
 // Serve accepts connections on l until it is closed.
@@ -44,16 +46,19 @@ func (s *Server) Serve(l net.Listener) error {
 }
 
 func (s *Server) handle(nc net.Conn) {
-	defer nc.Close()
-	c := &conn{srv: s, bw: bufio.NewWriter(nc), state: stateNotAuth}
+	c := &conn{srv: s, bw: bufio.NewWriter(nc), state: stateNotAuth, nc: nc}
 	c.rd = &commandReader{br: bufio.NewReader(nc), bw: c.bw}
+	if _, ok := nc.(*tls.Conn); ok {
+		c.isTLS = true
+	}
+	defer func() { c.nc.Close() }() // closes the upgraded conn after a STARTTLS swap
 	defer func() {
 		if c.st != nil {
 			c.st.Close()
 		}
 	}()
 
-	c.untagged("OK [CAPABILITY %s] hermEX IMAP4rev1 ready", capabilities)
+	c.untagged("OK [CAPABILITY %s] hermEX IMAP4rev1 ready", c.caps())
 	c.flush()
 
 	for c.state != stateLogout {
@@ -68,6 +73,7 @@ func (s *Server) handle(nc net.Conn) {
 // conn is one IMAP client connection.
 type conn struct {
 	srv      *Server
+	nc       net.Conn // underlying connection, swapped for the TLS conn on STARTTLS
 	rd       *commandReader
 	bw       *bufio.Writer
 	state    connState
@@ -75,6 +81,17 @@ type conn struct {
 	st       *objectstore.Store
 	sel      *selectedMailbox
 	readOnly bool
+	isTLS    bool
+}
+
+// caps returns the CAPABILITY list for this connection's current state. STARTTLS
+// is advertised only when the server has a TLS config and the link is not
+// already encrypted (RFC 3501 §6.2.1).
+func (c *conn) caps() string {
+	if c.srv.TLSConfig != nil && !c.isTLS {
+		return capabilities + " STARTTLS"
+	}
+	return capabilities
 }
 
 // dispatch routes one lexed command to its handler.
@@ -96,8 +113,10 @@ func (c *conn) dispatch(toks []token) {
 
 	switch strings.ToUpper(name) {
 	case "CAPABILITY":
-		c.untagged("CAPABILITY %s", capabilities)
+		c.untagged("CAPABILITY %s", c.caps())
 		c.ok(tag, "CAPABILITY completed")
+	case "STARTTLS":
+		c.cmdStartTLS(tag)
 	case "NOOP":
 		c.poll()
 		c.ok(tag, "NOOP completed")
@@ -237,7 +256,49 @@ func (c *conn) finishAuth(tag, user, pass string) {
 	c.st = st
 	c.user = user
 	c.state = stateAuth
-	c.ok(tag, "[CAPABILITY "+capabilities+"] LOGIN completed")
+	c.ok(tag, "[CAPABILITY "+c.caps()+"] LOGIN completed")
+}
+
+// cmdStartTLS upgrades the connection to TLS in place (RFC 3501 §6.2.1). It is
+// valid only before login and only once. Before replying it verifies the
+// command reader holds no buffered data: any bytes pipelined behind STARTTLS
+// would be plaintext smuggled across the TLS boundary (the CVE-2011-0411
+// plaintext-injection class), so their presence tears the connection down. The
+// TLS handshake runs over the raw connection and a fresh reader/writer is built
+// over the TLS conn, so no pre-TLS buffered byte can survive into the secure
+// session.
+func (c *conn) cmdStartTLS(tag string) {
+	if c.srv.TLSConfig == nil {
+		c.no(tag, "STARTTLS not available")
+		return
+	}
+	if c.isTLS {
+		c.bad(tag, "TLS already active")
+		return
+	}
+	if c.state != stateNotAuth {
+		c.bad(tag, "STARTTLS only allowed before login")
+		return
+	}
+	if c.rd.br.Buffered() > 0 {
+		// Pipelined plaintext behind STARTTLS (injection attempt): end the
+		// session without replying so the smuggled command never runs. Setting
+		// stateLogout breaks the dispatch loop — a bare return here would only
+		// leave cmdStartTLS and let handle read the injected command next.
+		c.state = stateLogout
+		return
+	}
+	c.ok(tag, "Begin TLS negotiation now")
+
+	tc := tls.Server(c.nc, c.srv.TLSConfig)
+	if err := tc.Handshake(); err != nil {
+		c.state = stateLogout // handshake failed; end the session
+		return
+	}
+	c.nc = tc
+	c.bw = bufio.NewWriter(tc)
+	c.rd = &commandReader{br: bufio.NewReader(tc), bw: c.bw}
+	c.isTLS = true
 }
 
 // --- mailbox selection ---

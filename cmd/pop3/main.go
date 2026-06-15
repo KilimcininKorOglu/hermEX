@@ -43,6 +43,13 @@ func main() {
 		log.Fatalf("hermex-pop3: listen %s: %v", addr, err)
 	}
 	srv := &pop3.Server{Auth: dir, Hostname: cfg.Hostname}
+	if cfg.TLSEnabled() {
+		tc, err := cfg.TLSConfig()
+		if err != nil {
+			log.Fatalf("hermex-pop3: tls: %v", err)
+		}
+		srv.TLSConfig = tc // enables STLS on the plaintext listener
+	}
 
 	// Optional implicit-TLS listener (e.g. :995) served alongside the plaintext
 	// one; the stateless server handles both concurrently.
