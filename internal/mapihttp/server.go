@@ -15,20 +15,40 @@ import (
 	"strings"
 
 	"hermex/internal/directory"
+	"hermex/internal/mapi"
+	"hermex/internal/nspi"
 )
 
 // Server answers MAPI/HTTP EMSMDB and NSPI requests for authenticated users.
 type Server struct {
-	auth     directory.Authenticator
-	accounts directory.Accounts
-	hostname string
-	sessions *sessionStore
+	auth         directory.Authenticator
+	accounts     directory.Accounts
+	hostname     string
+	sessions     *sessionStore
+	nsp          *nspi.Server
+	nspiSessions *nspiSessionStore
 }
 
-// NewServer builds a MAPI/HTTP server backed by the directory for authentication
-// (accounts is reserved for the NSPI GAL and ROP recipient resolution).
+// NewServer builds a MAPI/HTTP server backed by the directory for authentication.
+// The NSPI address book runs over the directory GAL when the directory can
+// enumerate users (accounts implements directory.GAL); otherwise the GAL is
+// empty. accounts also serves ROP recipient resolution.
 func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostname string) *Server {
-	return &Server{auth: auth, accounts: accounts, hostname: hostname, sessions: newSessionStore()}
+	var gal directory.GAL
+	if g, ok := accounts.(directory.GAL); ok {
+		gal = g
+	}
+	// A process-stable GUID identifies this server instance to NSPI clients for
+	// the lifetime of a binding; a restart re-mints it and clients re-bind.
+	serverGUID, _ := mapi.ParseGUID(newGUID())
+	return &Server{
+		auth:         auth,
+		accounts:     accounts,
+		hostname:     hostname,
+		sessions:     newSessionStore(),
+		nsp:          nspi.NewServer(gal, serverGUID),
+		nspiSessions: newNspiSessionStore(),
+	}
 }
 
 // Handler returns the HTTP handler. One handler routes the two MAPI/HTTP paths;
