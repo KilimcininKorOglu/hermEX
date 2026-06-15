@@ -1,0 +1,324 @@
+package nspi
+
+import (
+	"slices"
+	"sort"
+	"strings"
+
+	"hermex/internal/ext"
+	"hermex/internal/mapi"
+)
+
+// SeekEntries handles the NSPI SeekEntries request ([MS-OXNSPI] 2.2.4): it
+// positions the cursor at the first entry whose display name is at or after a
+// target value, returning that entry's row. v1 supports the display-name sort
+// (the only sort an online client uses for the GAL). With an explicit MId list
+// the search runs in that list's order; otherwise it binary-searches the
+// display-name-ordered GAL — the same comparison snapshot() sorts by.
+func (s *Server) SeekEntries(body []byte) []byte {
+	req, err := pullSeekEntries(body)
+	if err != nil {
+		return s.encodeSeekEntries(ecError, stat{}, nil, nil)
+	}
+	st := req.stat
+	if st.codePage == cpWinUnicode || req.reserved != 0 {
+		return s.encodeSeekEntries(ecNotSupported, st, nil, nil)
+	}
+	if !isDisplayNameSort(st.sortType) {
+		return s.encodeSeekEntries(ecError, st, nil, nil)
+	}
+	// The target seeks on the display name; accept either the Unicode or the
+	// ANSI variant (same property ID, the reference checks both).
+	if req.target.Tag.ID() != mapi.PrDisplayName.ID() {
+		return s.encodeSeekEntries(ecError, st, nil, nil)
+	}
+	target, _ := req.target.Value.(string)
+	cols := req.columns
+	if !req.hasCols || len(cols) == 0 {
+		cols = defaultColumns
+	}
+	if len(cols) > 100 {
+		return s.encodeSeekEntries(ecTableTooBig, st, nil, nil)
+	}
+
+	g := s.snapshot()
+	found, pos, ok := g.seek(target, req.table)
+	if !ok {
+		return s.encodeSeekEntries(ecNotFound, st, nil, nil)
+	}
+	st.curRec = found.mid
+	st.numPos = uint32(pos)
+	st.totalRec = uint32(len(g.users))
+	rows := []mapi.PropertyValues{galUserProps(found)}
+	return s.encodeSeekEntries(ecSuccess, st, cols, rows)
+}
+
+// seek positions at the first entry whose display name is >= target
+// (case-insensitively, the comparison snapshot() orders by). With an explicit
+// MId list the scan runs in that list's order; otherwise it binary-searches the
+// display-ordered GAL. The returned position is the entry's GAL index.
+func (g gal) seek(target string, table []uint32) (galUser, int, bool) {
+	t := strings.ToLower(target)
+	if table != nil {
+		for _, mid := range table {
+			if u, ok := g.byMID(mid); ok && strings.ToLower(u.display) >= t {
+				return u, int(mid - midBase), true
+			}
+		}
+		return galUser{}, 0, false
+	}
+	i := sort.Search(len(g.users), func(i int) bool {
+		return strings.ToLower(g.users[i].display) >= t
+	})
+	if i >= len(g.users) {
+		return galUser{}, 0, false
+	}
+	return g.users[i], i, true
+}
+
+// seekEntriesRequest is the decoded SeekEntries body ([MS-OXNSPI] 2.2.4): a
+// reserved word, an optional STAT, the target value to seek, an optional
+// explicit MId list to seek within, and an optional column set.
+type seekEntriesRequest struct {
+	reserved uint32
+	stat     stat
+	target   mapi.TaggedPropVal
+	table    []uint32
+	columns  []mapi.PropTag
+	hasCols  bool
+}
+
+func pullSeekEntries(body []byte) (seekEntriesRequest, error) {
+	p := ext.NewPull(body, abkFlags)
+	var r seekEntriesRequest
+	var err error
+	if r.reserved, err = p.Uint32(); err != nil {
+		return r, err
+	}
+	hasStat, err := p.Uint8()
+	if err != nil {
+		return r, err
+	}
+	if hasStat != 0 {
+		if r.stat, err = pullStat(p); err != nil {
+			return r, err
+		}
+	}
+	hasTarget, err := p.Uint8()
+	if err != nil {
+		return r, err
+	}
+	if hasTarget != 0 {
+		if r.target, err = p.TaggedPropVal(); err != nil {
+			return r, err
+		}
+	}
+	hasTable, err := p.Uint8()
+	if err != nil {
+		return r, err
+	}
+	if hasTable != 0 {
+		tags, terr := p.PropTagsLong()
+		if terr != nil {
+			return r, terr
+		}
+		r.table = make([]uint32, len(tags))
+		for i, t := range tags {
+			r.table[i] = uint32(t)
+		}
+	}
+	hasCols, err := p.Uint8()
+	if err != nil {
+		return r, err
+	}
+	if hasCols != 0 {
+		r.hasCols = true
+		if r.columns, err = p.PropTagsLong(); err != nil {
+			return r, err
+		}
+	}
+	return r, skipAuxIn(p)
+}
+
+// encodeSeekEntries frames a SeekEntries response: status + result + the updated
+// STAT (always present) + the row set on success (else a single 0), then an
+// empty AuxiliaryBuffer.
+func (s *Server) encodeSeekEntries(result uint32, st stat, cols []mapi.PropTag, rows []mapi.PropertyValues) []byte {
+	p := ext.NewPush(abkFlags)
+	p.Uint32(0)      // status
+	p.Uint32(result) // result
+	p.Uint8(0xFF)    // STAT present (always)
+	pushStat(p, st)
+	if result != ecSuccess {
+		p.Uint8(0)
+	} else {
+		p.Uint8(0xFF)
+		_ = pushColRow(p, cols, rows)
+	}
+	p.Uint32(0) // AuxiliaryBufferSize
+	return p.Bytes()
+}
+
+// CompareMids handles the NSPI CompareMids request ([MS-OXNSPI] 2.2.4): it
+// returns the relative table order of two MIds. Because our MId encodes the
+// entry's display-name position, the comparison is the position difference. Both
+// MIds must exist, else the comparison is an error.
+func (s *Server) CompareMids(body []byte) []byte {
+	req, err := pullCompareMids(body)
+	if err != nil {
+		return s.encodeCompareMids(ecError, 0)
+	}
+	if req.stat.codePage == cpWinUnicode {
+		return s.encodeCompareMids(ecNotSupported, 0)
+	}
+	g := s.snapshot()
+	_, ok1 := g.byMID(req.mid1)
+	_, ok2 := g.byMID(req.mid2)
+	if !ok1 || !ok2 {
+		return s.encodeCompareMids(ecError, 0)
+	}
+	p1, p2 := g.position(req.mid1), g.position(req.mid2)
+	var cmp int32
+	switch {
+	case p2 < p1:
+		cmp = -1
+	case p2 > p1:
+		cmp = 1
+	}
+	return s.encodeCompareMids(ecSuccess, cmp)
+}
+
+// compareMidsRequest is the decoded CompareMids body ([MS-OXNSPI] 2.2.4): a
+// reserved word, an optional STAT, and the two MIds to compare.
+type compareMidsRequest struct {
+	stat       stat
+	mid1, mid2 uint32
+}
+
+func pullCompareMids(body []byte) (compareMidsRequest, error) {
+	p := ext.NewPull(body, abkFlags)
+	var r compareMidsRequest
+	if _, err := p.Uint32(); err != nil { // reserved
+		return r, err
+	}
+	hasStat, err := p.Uint8()
+	if err != nil {
+		return r, err
+	}
+	if hasStat != 0 {
+		if r.stat, err = pullStat(p); err != nil {
+			return r, err
+		}
+	}
+	if r.mid1, err = p.Uint32(); err != nil {
+		return r, err
+	}
+	if r.mid2, err = p.Uint32(); err != nil {
+		return r, err
+	}
+	return r, skipAuxIn(p)
+}
+
+// encodeCompareMids frames a CompareMids response: status + the comparison
+// result + the return code + an empty AuxiliaryBuffer. The comparison precedes
+// the result and is always present.
+func (s *Server) encodeCompareMids(result uint32, cmp int32) []byte {
+	p := ext.NewPush(abkFlags)
+	p.Uint32(0)           // status
+	p.Uint32(uint32(cmp)) // comparison result (signed)
+	p.Uint32(result)      // result
+	p.Uint32(0)           // AuxiliaryBufferSize
+	return p.Bytes()
+}
+
+// ResortRestriction handles the NSPI ResortRestriction request ([MS-OXNSPI]
+// 2.2.4): it sorts a client-supplied MId list into display-name order. Because
+// our MId encodes the display-name position, the sort is numeric on the MIds.
+// Non-existent MIds are dropped; if the STAT's current record is no longer in
+// the set, the cursor resets to the table start.
+func (s *Server) ResortRestriction(body []byte) []byte {
+	req, err := pullResortRestriction(body)
+	if err != nil {
+		return s.encodeResortRestriction(ecError, stat{}, nil)
+	}
+	st := req.stat
+	if st.codePage == cpWinUnicode {
+		return s.encodeResortRestriction(ecNotSupported, st, nil)
+	}
+	g := s.snapshot()
+	var out []uint32
+	found := false
+	for _, mid := range req.inmids {
+		if _, ok := g.byMID(mid); ok {
+			out = append(out, mid)
+			if mid == st.curRec {
+				found = true
+			}
+		}
+	}
+	slices.Sort(out) // ascending MId == display-name order
+	st.totalRec = uint32(len(out))
+	if !found {
+		st.curRec = midBeginningOfTable
+		st.numPos = 0
+	}
+	return s.encodeResortRestriction(ecSuccess, st, out)
+}
+
+// resortRestrictionRequest is the decoded ResortRestriction body ([MS-OXNSPI]
+// 2.2.4): a reserved word, an optional STAT, and the MId list to reorder.
+type resortRestrictionRequest struct {
+	stat   stat
+	inmids []uint32
+}
+
+func pullResortRestriction(body []byte) (resortRestrictionRequest, error) {
+	p := ext.NewPull(body, abkFlags)
+	var r resortRestrictionRequest
+	if _, err := p.Uint32(); err != nil { // reserved
+		return r, err
+	}
+	hasStat, err := p.Uint8()
+	if err != nil {
+		return r, err
+	}
+	if hasStat != 0 {
+		if r.stat, err = pullStat(p); err != nil {
+			return r, err
+		}
+	}
+	hasInMids, err := p.Uint8()
+	if err != nil {
+		return r, err
+	}
+	if hasInMids != 0 {
+		tags, terr := p.PropTagsLong()
+		if terr != nil {
+			return r, terr
+		}
+		r.inmids = make([]uint32, len(tags))
+		for i, t := range tags {
+			r.inmids[i] = uint32(t)
+		}
+	}
+	return r, skipAuxIn(p)
+}
+
+// encodeResortRestriction frames a ResortRestriction response: status + result +
+// the updated STAT (always present) + the reordered MId array on success (else a
+// single 0), then an empty AuxiliaryBuffer.
+func (s *Server) encodeResortRestriction(result uint32, st stat, mids []uint32) []byte {
+	p := ext.NewPush(abkFlags)
+	p.Uint32(0)      // status
+	p.Uint32(result) // result
+	p.Uint8(0xFF)    // STAT present (always)
+	pushStat(p, st)
+	if result != ecSuccess {
+		p.Uint8(0)
+	} else {
+		p.Uint8(0xFF)
+		_ = midArray(p, mids)
+	}
+	p.Uint32(0) // AuxiliaryBufferSize
+	return p.Bytes()
+}

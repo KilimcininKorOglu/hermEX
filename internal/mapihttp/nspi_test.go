@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -431,5 +432,137 @@ func TestNspiGetPropList(t *testing.T) {
 	}
 	if p[8] != 0xFF {
 		t.Errorf("tags marker = %#x, want 0xFF (a tag list follows)", p[8])
+	}
+}
+
+// seekEntriesBody frames a SeekEntries request with a PR_DISPLAY_NAME target
+// encoded as UTF-16LE — a hand-built wire vector that proves the seek target's
+// address-book string decodes correctly off the wire.
+func seekEntriesBody(target string) []byte {
+	var b []byte
+	b = binary.LittleEndian.AppendUint32(b, 0)          // reserved
+	b = append(b, 1)                                    // hasStat
+	b = append(b, statBytes(0)...)                      // sort type 0 (display name), cur_rec 0
+	b = append(b, 1)                                    // hasTarget
+	b = binary.LittleEndian.AppendUint32(b, 0x3001001F) // PR_DISPLAY_NAME
+	b = append(b, 0xFF)                                 // ABK value-present marker
+	for _, c := range []byte(target) {                  // ASCII -> UTF-16LE
+		b = append(b, c, 0)
+	}
+	b = append(b, 0, 0)                        // UTF-16 NUL terminator
+	b = append(b, 0)                           // hasTable = 0
+	b = append(b, 0)                           // hasColumns = 0
+	b = binary.LittleEndian.AppendUint32(b, 0) // cb_auxin
+	return b
+}
+
+// boundSession runs Bind and returns the session cookies, failing the test if
+// the bind did not establish them.
+func boundSession(t *testing.T, ts *httptest.Server) (sid, seq string) {
+	t.Helper()
+	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
+	bind.Body.Close()
+	sid, seq = cookieByName(bind, "sid"), cookieByName(bind, "sequence")
+	if sid == "" || seq == "" {
+		t.Fatal("no cookies from Bind")
+	}
+	return sid, seq
+}
+
+// withSession adds the bound session cookies to a request.
+func withSession(sid, seq string) func(*http.Request) {
+	return func(r *http.Request) {
+		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
+		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
+	}
+}
+
+// TestNspiSeekEntries drives Bind then SeekEntries with a UTF-16 display-name
+// target and confirms the seeded entry is positioned and projected.
+func TestNspiSeekEntries(t *testing.T) {
+	ts := newTestServer(t)
+	sid, seq := boundSession(t, ts)
+	se := mapiPost(t, ts, "/mapi/nspi", "SeekEntries", seekEntriesBody("alice"), withSession(sid, seq))
+	defer se.Body.Close()
+	if got := se.Header.Get("X-ResponseCode"); got != "0" {
+		t.Fatalf("SeekEntries: X-ResponseCode = %q, want 0", got)
+	}
+	p := nspiPayload(t, se)
+	// status(0:4) + result(4:8) + STAT-marker(8) + STAT(9:45) + rows-marker(45)
+	if len(p) < 46 {
+		t.Fatalf("response too short: %d bytes", len(p))
+	}
+	if result := binary.LittleEndian.Uint32(p[4:]); result != 0 {
+		t.Errorf("result = %#x, want 0", result)
+	}
+	if p[8] != 0xFF {
+		t.Errorf("STAT marker = %#x, want 0xFF", p[8])
+	}
+	if p[45] != 0xFF {
+		t.Errorf("rows marker = %#x, want 0xFF (a row follows)", p[45])
+	}
+	if u16 := []byte{'a', 0, 'l', 0, 'i', 0, 'c', 0, 'e', 0}; !bytes.Contains(p, u16) {
+		t.Error("SeekEntries response does not carry the positioned entry as UTF-16LE")
+	}
+}
+
+// TestNspiCompareMids drives Bind then CompareMids and confirms the route
+// returns a success comparison (the exact "CompareMIds" request type matters).
+func TestNspiCompareMids(t *testing.T) {
+	ts := newTestServer(t)
+	sid, seq := boundSession(t, ts)
+	var body []byte
+	body = binary.LittleEndian.AppendUint32(body, 0)    // reserved
+	body = append(body, 1)                              // hasStat
+	body = append(body, statBytes(0)...)                // STAT
+	body = binary.LittleEndian.AppendUint32(body, 0x10) // mid1 = midBase
+	body = binary.LittleEndian.AppendUint32(body, 0x10) // mid2 = midBase
+	body = binary.LittleEndian.AppendUint32(body, 0)    // cb_auxin
+	cm := mapiPost(t, ts, "/mapi/nspi", "CompareMIds", body, withSession(sid, seq))
+	defer cm.Body.Close()
+	if got := cm.Header.Get("X-ResponseCode"); got != "0" {
+		t.Fatalf("CompareMIds: X-ResponseCode = %q, want 0", got)
+	}
+	p := nspiPayload(t, cm)
+	// status(0:4) + cmp(4:8) + result(8:12) + auxout(12:16)
+	if len(p) < 16 {
+		t.Fatalf("response too short: %d bytes", len(p))
+	}
+	if cmp := int32(binary.LittleEndian.Uint32(p[4:])); cmp != 0 {
+		t.Errorf("cmp = %d, want 0 (same MId)", cmp)
+	}
+	if result := binary.LittleEndian.Uint32(p[8:]); result != 0 {
+		t.Errorf("result = %#x, want 0", result)
+	}
+}
+
+// TestNspiResortRestriction drives Bind then ResortRestriction and confirms the
+// route reorders the seeded entry's MId.
+func TestNspiResortRestriction(t *testing.T) {
+	ts := newTestServer(t)
+	sid, seq := boundSession(t, ts)
+	var body []byte
+	body = binary.LittleEndian.AppendUint32(body, 0)    // reserved
+	body = append(body, 1)                              // hasStat
+	body = append(body, statBytes(0)...)                // STAT
+	body = append(body, 1)                              // hasInMids
+	body = binary.LittleEndian.AppendUint32(body, 1)    // MId count
+	body = binary.LittleEndian.AppendUint32(body, 0x10) // midBase
+	body = binary.LittleEndian.AppendUint32(body, 0)    // cb_auxin
+	rr := mapiPost(t, ts, "/mapi/nspi", "ResortRestriction", body, withSession(sid, seq))
+	defer rr.Body.Close()
+	if got := rr.Header.Get("X-ResponseCode"); got != "0" {
+		t.Fatalf("ResortRestriction: X-ResponseCode = %q, want 0", got)
+	}
+	p := nspiPayload(t, rr)
+	// status(0:4) + result(4:8) + STAT-marker(8) + STAT(9:45) + mids-marker(45)
+	if len(p) < 46 {
+		t.Fatalf("response too short: %d bytes", len(p))
+	}
+	if result := binary.LittleEndian.Uint32(p[4:]); result != 0 {
+		t.Errorf("result = %#x, want 0", result)
+	}
+	if p[45] != 0xFF {
+		t.Errorf("mids marker = %#x, want 0xFF (a reordered list follows)", p[45])
 	}
 }

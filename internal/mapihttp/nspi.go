@@ -8,10 +8,9 @@ import (
 // serveNspi authenticates and dispatches the NSPI endpoint (/mapi/nspi) by the
 // X-RequestType header. Bind establishes the session (sid + sequence cookies);
 // the remaining address-book ops run within it. PING is a session-less liveness
-// probe. The address-book navigation set Outlook needs to browse the GAL and
-// resolve names is served; the few ops not yet implemented (SeekEntries,
-// CompareMids, ResortRestriction, and the template/link ops) report an invalid
-// request type.
+// probe. The full online address-book op set Outlook uses to browse, navigate,
+// and resolve against the GAL is served; the write/template ops (ModProps,
+// ModLinkAtt, GetTemplateInfo) report an invalid request type.
 func (s *Server) serveNspi(w http.ResponseWriter, r *http.Request) {
 	user, _, ok := s.basicAuth(w, r)
 	if !ok {
@@ -52,6 +51,12 @@ func (s *Server) serveNspi(w http.ResponseWriter, r *http.Request) {
 		s.nspiOp(w, r, user, "GetProps", s.nsp.GetProps)
 	case "GetPropList":
 		s.nspiOp(w, r, user, "GetPropList", s.nsp.GetPropList)
+	case "SeekEntries":
+		s.nspiOp(w, r, user, "SeekEntries", s.nsp.SeekEntries)
+	case "CompareMIds":
+		s.nspiOp(w, r, user, "CompareMIds", s.nsp.CompareMids)
+	case "ResortRestriction":
+		s.nspiOp(w, r, user, "ResortRestriction", s.nsp.ResortRestriction)
 	default:
 		writeRespError(w, r, reqType, rcInvalidReqType)
 	}
