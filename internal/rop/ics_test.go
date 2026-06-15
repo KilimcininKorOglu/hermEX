@@ -476,6 +476,82 @@ func TestSyncImportMessageBody(t *testing.T) {
 	}
 }
 
+// TestSyncDownloadBatchAlignment puts SyncConfigure and GetBuffer in ONE Execute
+// buffer. SyncConfigure carries a non-empty property-tag array (a variable-length
+// parse); if its parser miscounts those bytes, GetBuffer's header reads from the
+// wrong offset and its RopId comes back wrong. A real client batches ROPs, so this
+// is the only shape that catches a byte-misaligned request parser.
+func TestSyncDownloadBatchAlignment(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxMessage(t, dir, "batch")
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	folderH := h[1]
+
+	batch := append(
+		buildSyncConfigure(1, 2, objectstore.SyncTypeContents, objectstore.SyncNormal, 0, []mapi.PropTag{mapi.PrSubject, mapi.PrDisplayName, mapi.PrMessageClass}),
+		buildGetBuffer(2, 0x1000)...,
+	)
+	sr, _ := sess.Dispatch(batch, []uint32{logonH, folderH, 0xFFFFFFFF})
+	p := ext.NewPull(sr, ext.FlagUTF16)
+
+	if id := mustU8(t, p, "RopId"); id != ropSynchronizationConfigure {
+		t.Fatalf("first response RopId = %#x, want SyncConfigure", id)
+	}
+	mustU8(t, p, "ohindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("SyncConfigure ec = %#x", ec)
+	}
+	if id := mustU8(t, p, "RopId"); id != ropFastTransferSourceGetBuffer {
+		t.Fatalf("second response RopId = %#x, want GetBuffer (SyncConfigure parser misaligned)", id)
+	}
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("GetBuffer ec = %#x", ec)
+	}
+}
+
+// TestSyncUploadBatchAlignment batches three upload ROPs in one buffer:
+// ImportReadStateChanges (a length-prefixed-then-raw parse), ImportDeletes (a
+// TPROPVAL_ARRAY parse), then GetTransferState. Each parser's byte alignment is
+// proven by the next ROP's RopId reading correctly.
+func TestSyncUploadBatchAlignment(t *testing.T) {
+	dir := t.TempDir()
+	readID := seedInboxMessage(t, dir, "read-me")
+	delID := seedInboxMessage(t, dir, "delete-me")
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	folderH := h[1]
+	h, _ = mustDispatchOK(t, sess, buildOpenCollector(1, 2, 1), []uint32{logonH, folderH, 0xFFFFFFFF}, ropSyncOpenCollector)
+	collectorH := h[2]
+
+	batch := buildImportReadState(2, homeSourceKey(t, dir, uint64(readID)), true)
+	batch = append(batch, buildImportDeletes(2, homeSourceKey(t, dir, uint64(delID)))...)
+	batch = append(batch, buildGetTransferState(2, 3)...)
+	sr, _ := sess.Dispatch(batch, []uint32{logonH, folderH, collectorH, 0xFFFFFFFF})
+	p := ext.NewPull(sr, ext.FlagUTF16)
+
+	for _, want := range []uint8{ropSyncImportReadStateChanges, ropSyncImportDeletes, ropSyncGetTransferState} {
+		if id := mustU8(t, p, "RopId"); id != want {
+			t.Fatalf("batch response RopId = %#x, want %#x (a prior parser misaligned)", id, want)
+		}
+		mustU8(t, p, "hindex")
+		if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+			t.Fatalf("ROP %#x ec = %#x", want, ec)
+		}
+	}
+}
+
 func buildGetLocalReplicaIds(inIdx uint8, count uint32) []byte {
 	b := ext.NewPush(ext.FlagUTF16)
 	b.Uint8(ropGetLocalReplicaIds)
