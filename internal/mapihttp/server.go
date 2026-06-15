@@ -54,10 +54,16 @@ func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostna
 		nspiSessions: newNspiSessionStore(),
 	}
 	// RPC/HTTP (Outlook Anywhere) shares the directory and HTTP Basic auth; the
-	// EMSMDB interface is registered on its DCE/RPC dispatcher.
+	// EMSMDB store interface and the NSPI address-book interface are registered on
+	// its DCE/RPC dispatcher. NSPI reuses the same GAL-backed server the MAPI/HTTP
+	// endpoint drives; the adapter discards the transport session because the GAL
+	// is global to every authenticated caller.
 	ems := rpchttp.NewEMSMDB(accounts)
 	disp := rpchttp.NewDispatcher()
 	disp.Register(rpchttp.EMSMDBUUID, rpchttp.EMSMDBVersion, ems.Handle)
+	disp.Register(nspi.RPCInterfaceUUID, nspi.RPCInterfaceVersion, func(_ *rpchttp.Session, opnum uint16, stub []byte) ([]byte, uint32) {
+		return s.nsp.DispatchRPC(opnum, stub)
+	})
 	s.rpc = rpchttp.NewServer(rpchttp.Config{Auth: s.basicAuth, Dispatch: disp.Dispatch})
 	return s
 }

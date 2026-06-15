@@ -12,6 +12,8 @@
 package nspi
 
 import (
+	"sync/atomic"
+
 	"hermex/internal/directory"
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
@@ -50,6 +52,7 @@ const abkFlags = ext.FlagUTF16 | ext.FlagWCount | ext.FlagABK
 type Server struct {
 	gal        directory.GAL
 	serverGUID mapi.GUID
+	rpcSeq     atomic.Uint32 // mints distinct NspiBind context handles over RPC/HTTP
 }
 
 // NewServer builds an NSPI server over the GAL with a stable server GUID.
