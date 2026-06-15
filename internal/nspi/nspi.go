@@ -67,16 +67,21 @@ func (s *Server) Bind(body []byte) (resp []byte, ok bool) {
 	if err != nil {
 		return s.encodeBind(ecError), false
 	}
-	var result uint32
+	result := s.bindCore(req)
+	return s.encodeBind(result), result == ecSuccess
+}
+
+// bindCore runs the NSPI Bind admission check on a decoded request,
+// transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it. It
+// rejects an anonymous bind and a Unicode code page, else admits the session.
+func (s *Server) bindCore(req bindRequest) uint32 {
 	switch {
 	case req.flags&fAnonymousLogin != 0:
-		result = ecNotSupported
+		return ecNotSupported
 	case req.stat.codePage == cpWinUnicode:
-		result = ecNotSupported
-	default:
-		result = ecSuccess
+		return ecNotSupported
 	}
-	return s.encodeBind(result), result == ecSuccess
+	return ecSuccess
 }
 
 // encodeBind frames a Bind response: status(0) + result + server GUID (zeroed on

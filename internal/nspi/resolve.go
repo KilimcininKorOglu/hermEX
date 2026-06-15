@@ -80,7 +80,13 @@ func (s *Server) DNToMId(body []byte) []byte {
 	if err := skipAuxIn(p); err != nil {
 		return s.encodeDNToMId(ecError, nil)
 	}
+	return s.encodeDNToMId(ecSuccess, s.dnToMidCore(names))
+}
 
+// dnToMidCore maps each input distinguished name to its MId (or MID_UNRESOLVED),
+// transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it. The
+// NSPI result is always ecSuccess; an unresolvable DN yields MID_UNRESOLVED.
+func (s *Server) dnToMidCore(names []string) []uint32 {
 	g := s.snapshot()
 	mids := make([]uint32, len(names))
 	for i, dn := range names {
@@ -91,7 +97,7 @@ func (s *Server) DNToMId(body []byte) []byte {
 			}
 		}
 	}
-	return s.encodeDNToMId(ecSuccess, mids)
+	return mids
 }
 
 func (s *Server) encodeDNToMId(result uint32, mids []uint32) []byte {
@@ -160,15 +166,33 @@ func (s *Server) ResolveNamesW(body []byte) []byte {
 	if err != nil {
 		return s.encodeResolveNames(ecError, 0, nil, nil, nil)
 	}
+	r := s.resolveNamesCore(req)
+	return s.encodeResolveNames(r.result, r.codePage, r.mids, r.cols, r.rows)
+}
+
+// resolveNamesResult is the transport-neutral outcome of ResolveNamesW: a
+// result code, the echoed code page, the per-name MId result array, and the
+// resolved-row set.
+type resolveNamesResult struct {
+	result   uint32
+	codePage uint32
+	mids     []uint32
+	cols     []mapi.PropTag
+	rows     []mapi.PropertyValues
+}
+
+// resolveNamesCore runs the ResolveNamesW semantics on a decoded request,
+// transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it.
+func (s *Server) resolveNamesCore(req resolveNamesRequest) resolveNamesResult {
 	if req.stat.codePage == cpWinUnicode {
-		return s.encodeResolveNames(ecNotSupported, req.stat.codePage, nil, nil, nil)
+		return resolveNamesResult{result: ecNotSupported, codePage: req.stat.codePage}
 	}
 	cols := req.columns
 	if len(cols) == 0 {
 		cols = defaultColumns
 	}
 	if len(cols) > 100 {
-		return s.encodeResolveNames(ecTableTooBig, req.stat.codePage, nil, nil, nil)
+		return resolveNamesResult{result: ecTableTooBig, codePage: req.stat.codePage}
 	}
 
 	g := s.snapshot()
@@ -188,7 +212,7 @@ func (s *Server) ResolveNamesW(body []byte) []byte {
 			}
 		}
 	}
-	return s.encodeResolveNames(ecSuccess, req.stat.codePage, mids, cols, rows)
+	return resolveNamesResult{result: ecSuccess, codePage: req.stat.codePage, mids: mids, cols: cols, rows: rows}
 }
 
 // encodeResolveNames frames a ResolveNamesW response: status + result + the

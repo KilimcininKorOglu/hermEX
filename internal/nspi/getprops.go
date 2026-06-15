@@ -55,11 +55,27 @@ func (s *Server) GetProps(body []byte) []byte {
 	if err != nil {
 		return s.encodeGetProps(ecError, 0, nil)
 	}
+	r := s.getPropsCore(req)
+	return s.encodeGetProps(r.result, r.codePage, r.row)
+}
+
+// getPropsResult is the transport-neutral outcome of GetProps: a result code,
+// the echoed code page, and the single property row (PT_ERROR markers ride
+// inside it on a warn-with-errors).
+type getPropsResult struct {
+	result   uint32
+	codePage uint32
+	row      mapi.PropertyValues
+}
+
+// getPropsCore runs the GetProps semantics on a decoded request,
+// transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it.
+func (s *Server) getPropsCore(req getPropsRequest) getPropsResult {
 	if req.stat.codePage == cpWinUnicode {
-		return s.encodeGetProps(ecNotSupported, req.stat.codePage, nil)
+		return getPropsResult{result: ecNotSupported, codePage: req.stat.codePage}
 	}
 	if len(req.proptags) > 100 {
-		return s.encodeGetProps(ecTableTooBig, req.stat.codePage, nil)
+		return getPropsResult{result: ecTableTooBig, codePage: req.stat.codePage}
 	}
 
 	g := s.snapshot()
@@ -70,19 +86,19 @@ func (s *Server) GetProps(body []byte) []byte {
 			tags = defaultColumns
 		}
 		row, _ := projectProps(nil, tags)
-		return s.encodeGetProps(ecWarnWithErrors, req.stat.codePage, row)
+		return getPropsResult{result: ecWarnWithErrors, codePage: req.stat.codePage, row: row}
 	}
 
 	bag := galUserProps(u)
 	if !req.hasTags {
-		return s.encodeGetProps(ecSuccess, req.stat.codePage, bag)
+		return getPropsResult{result: ecSuccess, codePage: req.stat.codePage, row: bag}
 	}
 	row, hasErr := projectProps(bag, req.proptags)
 	result := ecSuccess
 	if hasErr {
 		result = ecWarnWithErrors
 	}
-	return s.encodeGetProps(result, req.stat.codePage, row)
+	return getPropsResult{result: result, codePage: req.stat.codePage, row: row}
 }
 
 // projectProps builds a GetProps row: each requested tag maps to the entry's

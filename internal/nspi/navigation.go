@@ -20,17 +20,24 @@ func (s *Server) SeekEntries(body []byte) []byte {
 	if err != nil {
 		return s.encodeSeekEntries(ecError, stat{}, nil, nil)
 	}
+	r := s.seekEntriesCore(req)
+	return s.encodeSeekEntries(r.result, r.stat, r.cols, r.rows)
+}
+
+// seekEntriesCore runs the SeekEntries semantics on a decoded request,
+// transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it.
+func (s *Server) seekEntriesCore(req seekEntriesRequest) rowsetResult {
 	st := req.stat
 	if st.codePage == cpWinUnicode || req.reserved != 0 {
-		return s.encodeSeekEntries(ecNotSupported, st, nil, nil)
+		return rowsetResult{result: ecNotSupported, stat: st}
 	}
 	if !isDisplayNameSort(st.sortType) {
-		return s.encodeSeekEntries(ecError, st, nil, nil)
+		return rowsetResult{result: ecError, stat: st}
 	}
 	// The target seeks on the display name; accept either the Unicode or the
 	// ANSI variant (same property ID, the reference checks both).
 	if req.target.Tag.ID() != mapi.PrDisplayName.ID() {
-		return s.encodeSeekEntries(ecError, st, nil, nil)
+		return rowsetResult{result: ecError, stat: st}
 	}
 	target, _ := req.target.Value.(string)
 	cols := req.columns
@@ -38,19 +45,19 @@ func (s *Server) SeekEntries(body []byte) []byte {
 		cols = defaultColumns
 	}
 	if len(cols) > 100 {
-		return s.encodeSeekEntries(ecTableTooBig, st, nil, nil)
+		return rowsetResult{result: ecTableTooBig, stat: st}
 	}
 
 	g := s.snapshot()
 	found, pos, ok := g.seek(target, req.table)
 	if !ok {
-		return s.encodeSeekEntries(ecNotFound, st, nil, nil)
+		return rowsetResult{result: ecNotFound, stat: st}
 	}
 	st.curRec = found.mid
 	st.numPos = uint32(pos)
 	st.totalRec = uint32(len(g.users))
 	rows := []mapi.PropertyValues{galUserProps(found)}
-	return s.encodeSeekEntries(ecSuccess, st, cols, rows)
+	return rowsetResult{result: ecSuccess, stat: st, cols: cols, rows: rows}
 }
 
 // seek positions at the first entry whose display name is >= target
@@ -168,14 +175,28 @@ func (s *Server) CompareMids(body []byte) []byte {
 	if err != nil {
 		return s.encodeCompareMids(ecError, 0)
 	}
+	r := s.compareMidsCore(req)
+	return s.encodeCompareMids(r.result, r.cmp)
+}
+
+// compareMidsResult is the transport-neutral outcome of CompareMids: a result
+// code and the signed table-order comparison of the two MIds.
+type compareMidsResult struct {
+	result uint32
+	cmp    int32
+}
+
+// compareMidsCore runs the CompareMids semantics on a decoded request,
+// transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it.
+func (s *Server) compareMidsCore(req compareMidsRequest) compareMidsResult {
 	if req.stat.codePage == cpWinUnicode {
-		return s.encodeCompareMids(ecNotSupported, 0)
+		return compareMidsResult{result: ecNotSupported}
 	}
 	g := s.snapshot()
 	_, ok1 := g.byMID(req.mid1)
 	_, ok2 := g.byMID(req.mid2)
 	if !ok1 || !ok2 {
-		return s.encodeCompareMids(ecError, 0)
+		return compareMidsResult{result: ecError}
 	}
 	p1, p2 := g.position(req.mid1), g.position(req.mid2)
 	var cmp int32
@@ -185,7 +206,7 @@ func (s *Server) CompareMids(body []byte) []byte {
 	case p2 > p1:
 		cmp = 1
 	}
-	return s.encodeCompareMids(ecSuccess, cmp)
+	return compareMidsResult{result: ecSuccess, cmp: cmp}
 }
 
 // compareMidsRequest is the decoded CompareMids body ([MS-OXNSPI] 2.2.4): a
@@ -241,9 +262,25 @@ func (s *Server) ResortRestriction(body []byte) []byte {
 	if err != nil {
 		return s.encodeResortRestriction(ecError, stat{}, nil)
 	}
+	r := s.resortRestrictionCore(req)
+	return s.encodeResortRestriction(r.result, r.stat, r.mids)
+}
+
+// resortResult is the transport-neutral outcome of ResortRestriction: a result
+// code, the updated cursor, and the reordered MId list.
+type resortResult struct {
+	result uint32
+	stat   stat
+	mids   []uint32
+}
+
+// resortRestrictionCore runs the ResortRestriction semantics on a decoded
+// request, transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share
+// it.
+func (s *Server) resortRestrictionCore(req resortRestrictionRequest) resortResult {
 	st := req.stat
 	if st.codePage == cpWinUnicode {
-		return s.encodeResortRestriction(ecNotSupported, st, nil)
+		return resortResult{result: ecNotSupported, stat: st}
 	}
 	g := s.snapshot()
 	var out []uint32
@@ -262,7 +299,7 @@ func (s *Server) ResortRestriction(body []byte) []byte {
 		st.curRec = midBeginningOfTable
 		st.numPos = 0
 	}
-	return s.encodeResortRestriction(ecSuccess, st, out)
+	return resortResult{result: ecSuccess, stat: st, mids: out}
 }
 
 // resortRestrictionRequest is the decoded ResortRestriction body ([MS-OXNSPI]

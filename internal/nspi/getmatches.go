@@ -115,22 +115,40 @@ func (s *Server) GetMatches(body []byte) []byte {
 	if err != nil {
 		return s.encodeGetMatches(ecError, stat{}, nil, nil, nil)
 	}
+	r := s.getMatchesCore(req)
+	return s.encodeGetMatches(r.result, r.stat, r.mids, r.cols, r.rows)
+}
+
+// getMatchesResult is the transport-neutral outcome of GetMatches: a result
+// code, the updated cursor, the matched MId list, and the column-projected row
+// set.
+type getMatchesResult struct {
+	result uint32
+	stat   stat
+	mids   []uint32
+	cols   []mapi.PropTag
+	rows   []mapi.PropertyValues
+}
+
+// getMatchesCore runs the GetMatches semantics on a decoded request,
+// transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it.
+func (s *Server) getMatchesCore(req getMatchesRequest) getMatchesResult {
 	st := req.stat
 	if st.codePage == cpWinUnicode {
-		return s.encodeGetMatches(ecNotSupported, st, nil, nil, nil)
+		return getMatchesResult{result: ecNotSupported, stat: st}
 	}
 	if !isDisplayNameSort(st.sortType) {
-		return s.encodeGetMatches(ecNotSupported, st, nil, nil, nil)
+		return getMatchesResult{result: ecNotSupported, stat: st}
 	}
 	if req.reserved1 != 0 || req.hasPropName {
-		return s.encodeGetMatches(ecNotSupported, st, nil, nil, nil)
+		return getMatchesResult{result: ecNotSupported, stat: st}
 	}
 	cols := req.columns
 	if !req.hasCols || len(cols) == 0 {
 		cols = defaultColumns
 	}
 	if len(cols) > 100 {
-		return s.encodeGetMatches(ecTableTooBig, st, nil, nil, nil)
+		return getMatchesResult{result: ecTableTooBig, stat: st}
 	}
 
 	g := s.snapshot()
@@ -145,7 +163,7 @@ func (s *Server) GetMatches(body []byte) []byte {
 	}
 	// [MS-OXNSPI] 3.1.4.1.10 point 16: the container bookmark becomes cur_rec.
 	st.containerID = st.curRec
-	return s.encodeGetMatches(ecSuccess, st, mids, cols, rows)
+	return getMatchesResult{result: ecSuccess, stat: st, mids: mids, cols: cols, rows: rows}
 }
 
 // matchAll returns the MIds of GAL entries satisfying the filter, walking from

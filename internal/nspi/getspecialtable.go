@@ -64,6 +64,23 @@ func (s *Server) GetSpecialTable(body []byte) []byte {
 	if err != nil {
 		return s.encodeGetSpecialTable(ecError, 0, nil)
 	}
+	r := s.getSpecialTableCore(req)
+	return s.encodeGetSpecialTable(r.result, r.codePage, r.rows)
+}
+
+// getSpecialTableResult is the transport-neutral outcome of GetSpecialTable: a
+// result code, the echoed code page, and the address-book container rows.
+type getSpecialTableResult struct {
+	result   uint32
+	codePage uint32
+	rows     []mapi.PropertyValues
+}
+
+// getSpecialTableCore runs the GetSpecialTable semantics on a decoded request,
+// transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it. v1
+// exposes one flat GAL container, so the response carries a single container row
+// and the result is always ecSuccess.
+func (s *Server) getSpecialTableCore(req getSpecialTableRequest) getSpecialTableResult {
 	row := mapi.PropertyValues{
 		{Tag: mapi.PrEntryID, Value: permanentEntryID(dtContainer, "/")},
 		{Tag: mapi.PrContainerFlags, Value: abRecipients | abUnmodifiable},
@@ -72,7 +89,7 @@ func (s *Server) GetSpecialTable(body []byte) []byte {
 		{Tag: mapi.PrDisplayName, Value: galContainerName},
 		{Tag: mapi.PrEmsAbIsMaster, Value: false},
 	}
-	return s.encodeGetSpecialTable(ecSuccess, req.stat.codePage, []mapi.PropertyValues{row})
+	return getSpecialTableResult{result: ecSuccess, codePage: req.stat.codePage, rows: []mapi.PropertyValues{row}}
 }
 
 // encodeGetSpecialTable frames a GetSpecialTable response: status + result +

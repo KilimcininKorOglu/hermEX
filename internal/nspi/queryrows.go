@@ -60,6 +60,17 @@ func pullQueryRows(body []byte) (queryRowsRequest, error) {
 	return r, skipAuxIn(p)
 }
 
+// rowsetResult is the transport-neutral outcome of a STAT-cursor table query
+// (QueryRows, SeekEntries): a result code, the updated cursor, and the
+// column-projected row set. Both the MAPI/HTTP handler and the RPC/HTTP stub
+// frame it with their own wire encoder.
+type rowsetResult struct {
+	result uint32
+	stat   stat
+	cols   []mapi.PropTag
+	rows   []mapi.PropertyValues
+}
+
 // QueryRows handles the NSPI QueryRows request: it returns address-book rows
 // either for an explicit MId list or by walking the STAT cursor forward.
 func (s *Server) QueryRows(body []byte) []byte {
@@ -67,18 +78,25 @@ func (s *Server) QueryRows(body []byte) []byte {
 	if err != nil {
 		return s.encodeQueryRows(ecError, stat{}, nil, nil)
 	}
+	r := s.queryRowsCore(req)
+	return s.encodeQueryRows(r.result, r.stat, r.cols, r.rows)
+}
+
+// queryRowsCore runs the QueryRows semantics on a decoded request,
+// transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it.
+func (s *Server) queryRowsCore(req queryRowsRequest) rowsetResult {
 	if req.count == 0 { // [MS-OXNSPI] 3.1.4.1.8: count must be non-zero
-		return s.encodeQueryRows(ecInvalidParam, req.stat, nil, nil)
+		return rowsetResult{result: ecInvalidParam, stat: req.stat}
 	}
 	if req.stat.codePage == cpWinUnicode {
-		return s.encodeQueryRows(ecNotSupported, req.stat, nil, nil)
+		return rowsetResult{result: ecNotSupported, stat: req.stat}
 	}
 	cols := req.columns
 	if len(cols) == 0 {
 		cols = defaultColumns
 	}
 	if len(cols) > 100 {
-		return s.encodeQueryRows(ecTableTooBig, req.stat, nil, nil)
+		return rowsetResult{result: ecTableTooBig, stat: req.stat}
 	}
 
 	g := s.snapshot()
@@ -97,7 +115,7 @@ func (s *Server) QueryRows(body []byte) []byte {
 	} else {
 		rows, st = g.walk(st, req.count)
 	}
-	return s.encodeQueryRows(ecSuccess, st, cols, rows)
+	return rowsetResult{result: ecSuccess, stat: st, cols: cols, rows: rows}
 }
 
 // walk advances the cursor: it positions at STAT.cur_rec, applies the signed
@@ -185,6 +203,16 @@ func pullUpdateStat(body []byte) (updateStatRequest, error) {
 	return r, skipAuxIn(p)
 }
 
+// updateStatResult is the transport-neutral outcome of UpdateStat: a result
+// code, the repositioned cursor, and the applied row delta (reported only when
+// the client requested it).
+type updateStatResult struct {
+	result   uint32
+	stat     stat
+	hasDelta bool
+	delta    int32
+}
+
 // UpdateStat repositions the cursor by STAT.delta without returning rows,
 // reporting the applied row delta when the client asked for it.
 func (s *Server) UpdateStat(body []byte) []byte {
@@ -192,8 +220,15 @@ func (s *Server) UpdateStat(body []byte) []byte {
 	if err != nil {
 		return s.encodeUpdateStat(ecError, stat{}, false, 0)
 	}
+	r := s.updateStatCore(req)
+	return s.encodeUpdateStat(r.result, r.stat, r.hasDelta, r.delta)
+}
+
+// updateStatCore runs the UpdateStat semantics on a decoded request,
+// transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it.
+func (s *Server) updateStatCore(req updateStatRequest) updateStatResult {
 	if req.stat.codePage == cpWinUnicode {
-		return s.encodeUpdateStat(ecNotSupported, req.stat, false, 0)
+		return updateStatResult{result: ecNotSupported, stat: req.stat}
 	}
 	g := s.snapshot()
 	st := req.stat
@@ -215,7 +250,7 @@ func (s *Server) UpdateStat(body []byte) []byte {
 	st.delta = 0
 	st.numPos = uint32(row)
 	st.totalRec = uint32(total)
-	return s.encodeUpdateStat(ecSuccess, st, req.deltaRequested, delta)
+	return updateStatResult{result: ecSuccess, stat: st, hasDelta: req.deltaRequested, delta: delta}
 }
 
 // encodeUpdateStat frames an UpdateStat response: status + result + the updated
@@ -250,7 +285,13 @@ func (s *Server) QueryColumns(body []byte) []byte {
 	if err := skipAuxIn(p); err != nil {
 		return s.encodeQueryColumns(ecError, nil)
 	}
-	return s.encodeQueryColumns(ecSuccess, defaultColumns)
+	return s.encodeQueryColumns(ecSuccess, s.queryColumnsCore())
+}
+
+// queryColumnsCore returns the fixed address-book column set every GAL row
+// supplies; the NSPI result is always ecSuccess. Transport-neutral.
+func (s *Server) queryColumnsCore() []mapi.PropTag {
+	return defaultColumns
 }
 
 // encodeQueryColumns frames a QueryColumns response: status + result + the

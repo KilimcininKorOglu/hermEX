@@ -41,14 +41,28 @@ func (s *Server) GetPropList(body []byte) []byte {
 	if err != nil {
 		return s.encodeGetPropList(ecError, nil)
 	}
+	r := s.getPropListCore(req)
+	return s.encodeGetPropList(r.result, r.tags)
+}
+
+// getPropListResult is the transport-neutral outcome of GetPropList: a result
+// code and the available property-tag set for the entry.
+type getPropListResult struct {
+	result uint32
+	tags   []mapi.PropTag
+}
+
+// getPropListCore runs the GetPropList semantics on a decoded request,
+// transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it.
+func (s *Server) getPropListCore(req getPropListRequest) getPropListResult {
 	if req.mid == 0 {
-		return s.encodeGetPropList(ecInvalidObject, nil)
+		return getPropListResult{result: ecInvalidObject}
 	}
 	g := s.snapshot()
 	if _, ok := g.byMID(req.mid); !ok {
-		return s.encodeGetPropList(ecInvalidObject, nil)
+		return getPropListResult{result: ecInvalidObject}
 	}
-	return s.encodeGetPropList(ecSuccess, defaultColumns)
+	return getPropListResult{result: ecSuccess, tags: defaultColumns}
 }
 
 // encodeGetPropList frames a GetPropList response: status + result + the
