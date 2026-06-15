@@ -9,11 +9,18 @@ import (
 
 // Session is the per-virtual-connection state shared across the connection-
 // oriented PDUs that arrive on the IN channel. The transport fills User and
-// Mailbox from the HTTP authentication; the bind/dispatch engine and the EMSMDB
-// context handle are attached by later increments.
+// Mailbox from the HTTP authentication; the bind/dispatch engine attaches the
+// presentation-context bindings and request-reassembly state. A session's PDUs
+// are processed sequentially by the single IN-channel goroutine, so this state
+// needs no locking.
 type Session struct {
 	User    string
 	Mailbox string
+
+	contexts   map[uint16]*registeredIface // context id -> bound interface
+	assocGroup uint32
+	maxFrag    int               // negotiated client max_recv_frag (response chunk bound)
+	reasm      map[uint32][]byte // call id -> accumulated request stub (fragmented requests)
 }
 
 // vconn is one RPC-over-HTTP virtual connection: the rendezvous between the
