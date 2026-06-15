@@ -5,6 +5,7 @@
 package config
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -25,6 +26,8 @@ type Config struct {
 	ActiveSyncAddr string `json:"activesync_addr"` // ActiveSync HTTP listen address (default ":8080")
 	EWSAddr        string `json:"ews_addr"`        // EWS (Exchange Web Services) HTTP listen address (default ":8080")
 	MapiAddr       string `json:"mapi_addr"`       // MAPI/HTTP (native Outlook) HTTP listen address (default ":8080")
+	TLSCert        string `json:"tls_cert"`        // PEM certificate (chain) for implicit-TLS/HTTPS listeners
+	TLSKey         string `json:"tls_key"`         // PEM private key paired with tls_cert
 }
 
 // Load reads and validates a JSON config file.
@@ -44,6 +47,25 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("config: data_dir is required")
 	}
 	return &c, nil
+}
+
+// TLSConfig builds a hardened server TLS configuration from the configured
+// certificate and key files. It enforces a TLS 1.2 floor; the cipher suites are
+// left to the Go runtime, whose TLS 1.2 defaults are already restricted to
+// AEAD/forward-secret suites and whose TLS 1.3 suites are not configurable.
+// It returns an error if no certificate is configured or the pair fails to load.
+func (c *Config) TLSConfig() (*tls.Config, error) {
+	if c.TLSCert == "" || c.TLSKey == "" {
+		return nil, fmt.Errorf("config: tls_cert and tls_key are required for TLS")
+	}
+	cert, err := tls.LoadX509KeyPair(c.TLSCert, c.TLSKey)
+	if err != nil {
+		return nil, fmt.Errorf("config: load tls keypair: %w", err)
+	}
+	return &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	}, nil
 }
 
 // MaildirFor derives a user's mailbox directory
