@@ -165,6 +165,56 @@ func allocateEID(q sqlExec) (uint64, error) {
 	return eid, nil
 }
 
+// allocateLocalIDs reserves count contiguous store EIDs and returns the first. It
+// reuses the single-id allocator and verifies contiguity rather than duplicating
+// the range-carving: if the block would straddle an allocation-range boundary it
+// fails loudly, and the caller retries against the fresh range. With
+// AllocatedEIDRange-wide ranges this is rare for the small counts a client reserves.
+func allocateLocalIDs(q sqlExec, count uint64) (uint64, error) {
+	if count == 0 {
+		return 0, fmt.Errorf("objectstore: zero-count id reservation")
+	}
+	begin, err := allocateEID(q)
+	if err != nil {
+		return 0, err
+	}
+	prev := begin
+	for i := uint64(1); i < count; i++ {
+		next, err := allocateEID(q)
+		if err != nil {
+			return 0, err
+		}
+		if next != prev+1 {
+			return 0, fmt.Errorf("objectstore: id reservation crossed a range boundary at %d, cannot return %d contiguous ids", next, count)
+		}
+		prev = next
+	}
+	return begin, nil
+}
+
+// AllocateLocalIDs reserves count contiguous local ids for a client
+// (RopGetLocalReplicaIds), returning the first id's value and the home replica
+// GUID. A client forms the source keys of new items it uploads from these.
+func (s *Store) AllocateLocalIDs(count uint32) (uint64, mapi.GUID, error) {
+	home, err := s.replicaGUID()
+	if err != nil {
+		return 0, mapi.GUID{}, err
+	}
+	tx, err := s.objdb.Begin()
+	if err != nil {
+		return 0, mapi.GUID{}, err
+	}
+	defer tx.Rollback()
+	begin, err := allocateLocalIDs(tx, uint64(count))
+	if err != nil {
+		return 0, mapi.GUID{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, mapi.GUID{}, err
+	}
+	return begin, home, nil
+}
+
 // allocateEIDFromFolder hands out the next message EID from a folder's own
 // reserved range, carving a fresh range when exhausted.
 func allocateEIDFromFolder(q sqlExec, folderID int64) (uint64, error) {

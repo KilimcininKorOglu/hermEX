@@ -476,6 +476,79 @@ func TestSyncImportMessageBody(t *testing.T) {
 	}
 }
 
+func buildGetLocalReplicaIds(inIdx uint8, count uint32) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropGetLocalReplicaIds)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	b.Uint32(count)
+	return b.Bytes()
+}
+
+func homeGUID(t *testing.T, dir string) mapi.GUID {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	m, err := st.ReplicaMapper()
+	if err != nil {
+		t.Fatal(err)
+	}
+	g, ok := m.ToGUID(1)
+	if !ok {
+		t.Fatal("no home replica GUID")
+	}
+	return g
+}
+
+// TestGetLocalReplicaIds reserves two id blocks through RopGetLocalReplicaIds and
+// asserts the response carries the home replica GUID, a non-zero starting global
+// counter, and that the second block does not overlap the first — proving the
+// store allocator advances across reservations.
+func TestGetLocalReplicaIds(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxMessage(t, dir, "anchor")
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	handles := []uint32{h[0]}
+
+	_, p := mustDispatchOK(t, sess, buildGetLocalReplicaIds(0, 5), handles, ropGetLocalReplicaIds)
+	g, err := p.GUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g != homeGUID(t, dir) {
+		t.Errorf("replguid = %v, want the home replica GUID", g)
+	}
+	gcb, err := p.Raw(6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gc mapi.GlobCnt
+	copy(gc[:], gcb)
+	begin := mapi.GCToValue(gc)
+	if begin == 0 {
+		t.Error("reserved begin id is zero")
+	}
+
+	_, p2 := mustDispatchOK(t, sess, buildGetLocalReplicaIds(0, 5), handles, ropGetLocalReplicaIds)
+	if _, err := p2.GUID(); err != nil {
+		t.Fatal(err)
+	}
+	gcb2, err := p2.Raw(6)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var gc2 mapi.GlobCnt
+	copy(gc2[:], gcb2)
+	if begin2 := mapi.GCToValue(gc2); begin2 < begin+5 {
+		t.Errorf("second reservation %d overlaps the first block [%d, %d)", begin2, begin, begin+5)
+	}
+}
+
 // TestSyncDownloadContents drives the full ICS download path through the ROP
 // dispatch: logon, open inbox, SyncConfigure, then GetBuffer to completion. It
 // asserts the reassembled stream carries one change per seeded message, a state

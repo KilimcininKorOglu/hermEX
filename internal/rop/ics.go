@@ -20,6 +20,7 @@ const (
 	ropSyncUploadStateStreamContinue uint8 = 0x76
 	ropSyncUploadStateStreamEnd      uint8 = 0x77
 	ropSyncOpenCollector             uint8 = 0x7E
+	ropGetLocalReplicaIds            uint8 = 0x7F
 	ropSyncImportReadStateChanges    uint8 = 0x80
 	ropSyncGetTransferState          uint8 = 0x82
 )
@@ -451,6 +452,34 @@ func (s *Session) ropFastTransferDestPutBuffer(p *ext.Pull, out *ext.Push, handl
 	out.Uint16(1)                 // TotalStepCount
 	out.Uint8(0)                  // Reserved
 	out.Uint16(uint16(len(data))) // UsedSize
+	return true
+}
+
+// ropGetLocalReplicaIds handles RopGetLocalReplicaIds ([MS-OXCFXICS] 2.2.3.2.1.3):
+// it reserves a contiguous block of local ids from the store and answers with the
+// home replica GUID and the starting global counter, from which the client mints
+// source keys for the new items it uploads.
+func (s *Session) ropGetLocalReplicaIds(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	count, e1 := p.Uint32()
+	if e1 != nil {
+		return false
+	}
+	o := s.get(handleAt(handles, hindex))
+	if o == nil || o.store == nil {
+		writeErr(out, ropGetLocalReplicaIds, hindex, ecError)
+		return true
+	}
+	begin, replica, err := o.store.AllocateLocalIDs(count)
+	if err != nil {
+		writeErr(out, ropGetLocalReplicaIds, hindex, ecError)
+		return true
+	}
+	out.Uint8(ropGetLocalReplicaIds)
+	out.Uint8(hindex)
+	out.Uint32(ecSuccess)
+	out.GUID(replica)
+	gc := mapi.ValueToGC(begin)
+	out.Raw(gc[:])
 	return true
 }
 

@@ -206,6 +206,10 @@ loop:
 			if !s.ropSyncGetTransferState(p, out, handles, hindex) {
 				break loop
 			}
+		case ropGetLocalReplicaIds:
+			if !s.ropGetLocalReplicaIds(p, out, handles, hindex) {
+				break loop
+			}
 		default:
 			writeErr(out, ropID, hindex, ecError)
 			break loop
