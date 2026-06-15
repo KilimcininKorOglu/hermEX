@@ -65,9 +65,11 @@ func (s *Store) NewHierarchyUpload(rootFID int64) (*UploadCollector, error) {
 func (c *UploadCollector) State() *ics.State { return c.state }
 
 // BeginStateStream opens an idset state stream under metaTag. The whole state must
-// be replayed before the first import (the mark-started gate): a stream opened
-// after an import, a non-state meta-tag, or a second stream opened while one is
-// still open is rejected.
+// be replayed before the first import (the mark-started gate). A stream opened
+// after an import, a non-state meta-tag, a contents-only set (cnset-seen-fai /
+// cnset-read) on a hierarchy upload, or a second stream opened while one is still
+// open is rejected. A given set is accepted for every sync type but, per the
+// protocol, retained by none (see ContinueStateStream).
 func (c *UploadCollector) BeginStateStream(metaTag uint32) error {
 	if c.started {
 		return fmt.Errorf("objectstore: state stream opened after an import")
@@ -78,34 +80,50 @@ func (c *UploadCollector) BeginStateStream(metaTag uint32) error {
 	if !ics.IsStateMetaTag(metaTag) {
 		return fmt.Errorf("objectstore: %#x is not a state meta-tag", metaTag)
 	}
+	if c.syncType != SyncTypeContents && ics.IsContentsOnlyStateMetaTag(metaTag) {
+		return fmt.Errorf("objectstore: %#x is a contents-only state on a hierarchy upload", metaTag)
+	}
 	c.streamTag = metaTag
 	c.streamBuf = nil
 	return nil
 }
 
-// ContinueStateStream appends a chunk to the open state stream.
+// ContinueStateStream appends a chunk to the open state stream. A given stream is
+// accepted but its bytes are dropped: an importing context keeps no record of the
+// ids the client already holds, so the given set is never reconstructed.
 func (c *UploadCollector) ContinueStateStream(data []byte) error {
+	if c.started {
+		return fmt.Errorf("objectstore: state stream continued after an import")
+	}
 	if c.streamTag == 0 {
 		return fmt.Errorf("objectstore: no open state stream")
+	}
+	if ics.IsGivenStateMetaTag(c.streamTag) {
+		return nil
 	}
 	c.streamBuf = append(c.streamBuf, data...)
 	return nil
 }
 
 // EndStateStream folds the buffered idset into the collector state under the open
-// meta-tag and closes the stream. An empty buffer yields an empty idset (an
-// initial-sync upload), not an error.
+// meta-tag and closes the stream. A given stream closes without folding anything
+// in (its bytes were dropped); an empty buffer for any other set yields an empty
+// idset (an initial-sync upload), not an error.
 func (c *UploadCollector) EndStateStream() error {
+	if c.started {
+		return fmt.Errorf("objectstore: state stream ended after an import")
+	}
 	if c.streamTag == 0 {
 		return fmt.Errorf("objectstore: no open state stream to end")
 	}
 	tag := c.streamTag
+	buf := c.streamBuf
 	c.streamTag = 0
-	if err := c.state.AppendIDSet(tag, c.streamBuf); err != nil {
-		return err
-	}
 	c.streamBuf = nil
-	return nil
+	if ics.IsGivenStateMetaTag(tag) {
+		return nil
+	}
+	return c.state.AppendIDSet(tag, buf)
 }
 
 // ImportReadStateChanges applies read-flag changes through the store and folds the

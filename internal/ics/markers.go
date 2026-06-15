@@ -105,6 +105,22 @@ func IsStateMetaTag(tag uint32) bool {
 	return false
 }
 
+// IsGivenStateMetaTag reports whether a state meta-tag carries a given idset (the
+// set of ids the client already holds). An upload-state collector accepts it for
+// protocol compliance but retains nothing — an importing context needs no record
+// of what the client has — so the given stream is discarded ([MS-OXCFXICS]
+// 3.3.5.2).
+func IsGivenStateMetaTag(tag uint32) bool {
+	return tag == metaTagIdsetGiven || tag == metaTagIdsetGiven1
+}
+
+// IsContentsOnlyStateMetaTag reports whether a state meta-tag (cnset-seen-fai /
+// cnset-read) applies only to a contents sync; a hierarchy upload must reject it
+// ([MS-OXCFXICS] 3.3.5.2).
+func IsContentsOnlyStateMetaTag(tag uint32) bool {
+	return tag == metaTagCnsetSeenFAI || tag == metaTagCnsetRead
+}
+
 // Per-sync meta-tags computed and written directly into a download stream; they
 // are NOT ics State members ([MS-OXCFXICS] 2.2.4.3). MetaTagFXDelProp is a
 // PT_LONG propvalue whose value is the affected proptag (PR_MESSAGE_RECIPIENTS /

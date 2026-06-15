@@ -168,6 +168,100 @@ func TestUploadCollectorHierarchyFeedsState(t *testing.T) {
 	}
 }
 
+// TestUploadStateStreamDiscardsGiven asserts the upload path accepts the client's
+// given set (protocol compliance) but never echoes it back: an importing context
+// keeps no record of what the client already holds, while a seen set it must track
+// does round-trip. Without the discard, the contents serialize would emit the
+// given set straight back to the client.
+func TestUploadStateStreamDiscardsGiven(t *testing.T) {
+	s := openSeededStore(t)
+	m, err := s.ReplicaMapper()
+	if err != nil {
+		t.Fatal(err)
+	}
+	col, err := s.NewContentUpload(int64(mapi.PrivateFIDContacts))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	given := ics.NewIDSet(ics.FormGUIDLoose, m)
+	given.AppendRange(homeReplID, 100, 200)
+	gb, err := given.Serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const idsetGiven1 = 0x40170102
+	if err := col.BeginStateStream(idsetGiven1); err != nil {
+		t.Fatal(err)
+	}
+	if err := col.ContinueStateStream(gb); err != nil {
+		t.Fatal(err)
+	}
+	if err := col.EndStateStream(); err != nil {
+		t.Fatal(err)
+	}
+
+	seen := ics.NewIDSet(ics.FormGUIDLoose, m)
+	seen.AppendRange(homeReplID, 1, 20)
+	sb, err := seen.Serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const cnsetSeen = 0x67960102
+	if err := col.BeginStateStream(cnsetSeen); err != nil {
+		t.Fatal(err)
+	}
+	if err := col.ContinueStateStream(sb); err != nil {
+		t.Fatal(err)
+	}
+	if err := col.EndStateStream(); err != nil {
+		t.Fatal(err)
+	}
+
+	items := parseStream(t, mustTransferState(t, col))
+	if _, ok := streamPropBytes(items, mapi.PropTag(idsetGiven1)); ok {
+		t.Error("upload transfer state echoed the client given set; it must be discarded")
+	}
+	if _, ok := streamPropBytes(items, mapi.PropTag(cnsetSeen)); !ok {
+		t.Error("upload transfer state dropped the tracked seen set")
+	}
+}
+
+// TestUploadStateStreamHierarchyRejectsContentsOnly asserts a hierarchy upload
+// rejects the contents-only sets (cnset-seen-fai / cnset-read) while still
+// accepting the seen set that applies to every sync type.
+func TestUploadStateStreamHierarchyRejectsContentsOnly(t *testing.T) {
+	s := openSeededStore(t)
+	hcol, err := s.NewHierarchyUpload(int64(mapi.PrivateFIDIPMSubtree))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const (
+		cnsetSeenFAI = 0x67DA0102
+		cnsetRead    = 0x67D20102
+		cnsetSeen    = 0x67960102
+	)
+	if err := hcol.BeginStateStream(cnsetSeenFAI); err == nil {
+		t.Error("hierarchy upload accepted a contents-only FAI seen set")
+	}
+	if err := hcol.BeginStateStream(cnsetRead); err == nil {
+		t.Error("hierarchy upload accepted a contents-only read set")
+	}
+	if err := hcol.BeginStateStream(cnsetSeen); err != nil {
+		t.Errorf("hierarchy upload rejected the seen set valid for all sync types: %v", err)
+	}
+}
+
+// mustTransferState renders the collector's transfer state or fails the test.
+func mustTransferState(t *testing.T, col *UploadCollector) []byte {
+	t.Helper()
+	stream, err := col.GetTransferState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stream
+}
+
 // TestUploadStateStreamGate covers the state-stream guards: a non-state meta-tag is
 // rejected, the mark-started gate blocks a state stream opened after an import, and
 // a continue/end with no open stream is an error rather than a silent no-op.
@@ -198,5 +292,23 @@ func TestUploadStateStreamGate(t *testing.T) {
 	}
 	if err := hcol.BeginStateStream(0x67960102); err == nil {
 		t.Error("BeginStateStream succeeded after an import (mark-started gate not enforced)")
+	}
+
+	// A stream still open when an import runs can no longer be continued or ended.
+	ocol, err := s.NewHierarchyUpload(int64(mapi.PrivateFIDIPMSubtree))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ocol.BeginStateStream(0x67960102); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ocol.ImportHierarchyChange(hierHeader(t, s, 0x200003, nil, "Open"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := ocol.ContinueStateStream([]byte{0}); err == nil {
+		t.Error("ContinueStateStream succeeded after an import")
+	}
+	if err := ocol.EndStateStream(); err == nil {
+		t.Error("EndStateStream succeeded after an import")
 	}
 }
