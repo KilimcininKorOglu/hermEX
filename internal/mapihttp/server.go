@@ -64,6 +64,10 @@ func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostna
 	disp.Register(nspi.RPCInterfaceUUID, nspi.RPCInterfaceVersion, func(_ *rpchttp.Session, opnum uint16, stub []byte) ([]byte, uint32) {
 		return s.nsp.DispatchRPC(opnum, stub)
 	})
+	// The address-book referral interface points a client at this host as its
+	// directory server, so a desktop Outlook that queries it first finds the NSPI
+	// endpoint here.
+	disp.Register(rpchttp.RFRUUID, rpchttp.RFRVersion, rpchttp.NewRFR(hostname).Handle)
 	s.rpc = rpchttp.NewServer(rpchttp.Config{Auth: s.basicAuth, Dispatch: disp.Dispatch})
 	return s
 }
