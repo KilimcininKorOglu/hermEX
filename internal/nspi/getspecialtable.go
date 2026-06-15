@@ -28,7 +28,7 @@ type getSpecialTableRequest struct {
 }
 
 func pullGetSpecialTable(body []byte) (getSpecialTableRequest, error) {
-	p := ext.NewPull(body, 0)
+	p := ext.NewPull(body, abkFlags)
 	var r getSpecialTableRequest
 	var err error
 	if r.flags, err = p.Uint32(); err != nil {
@@ -82,7 +82,7 @@ func (s *Server) GetSpecialTable(body []byte) []byte {
 // value encoding. A failure or an empty set writes a single 0 in place of the
 // rows.
 func (s *Server) encodeGetSpecialTable(result, codePage uint32, rows []mapi.PropertyValues) []byte {
-	p := ext.NewPush(ext.FlagABK)
+	p := ext.NewPush(abkFlags)
 	p.Uint32(0)        // status: MAPI/HTTP-level, always 0
 	p.Uint32(result)   // result: the NSPI return code
 	p.Uint32(codePage) // CodePage (echoed from the request STAT)

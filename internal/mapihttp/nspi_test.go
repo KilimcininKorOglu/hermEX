@@ -49,6 +49,32 @@ func queryRowsBody() []byte {
 	return b
 }
 
+// resolveNamesBody frames a ResolveNamesW request: reserved + a STAT (code page
+// 1252) + no columns + the (ASCII) names as a UTF-16LE array.
+func resolveNamesBody(names ...string) []byte {
+	var b []byte
+	b = binary.LittleEndian.AppendUint32(b, 0) // reserved
+	b = append(b, 1)                           // hasStat
+	for i := range 9 {                         // STAT
+		v := uint32(0)
+		if i == 6 { // codepage
+			v = 1252
+		}
+		b = binary.LittleEndian.AppendUint32(b, v)
+	}
+	b = append(b, 0) // hasColumns = 0
+	b = append(b, 1) // hasNames
+	b = binary.LittleEndian.AppendUint32(b, uint32(len(names)))
+	for _, n := range names {
+		for _, c := range []byte(n) { // ASCII -> UTF-16LE
+			b = append(b, c, 0)
+		}
+		b = append(b, 0, 0) // UTF-16 NUL terminator
+	}
+	b = binary.LittleEndian.AppendUint32(b, 0) // cb_auxin
+	return b
+}
+
 // nspiPayload strips the chunked PROCESSING/DONE meta preamble and returns the
 // NSPI response body bytes.
 func nspiPayload(t *testing.T, resp *http.Response) []byte {
@@ -204,5 +230,43 @@ func TestNspiQueryRows(t *testing.T) {
 	}
 	if p[45] != 0xFF {
 		t.Errorf("rows marker = %#x, want 0xFF (a row set follows)", p[45])
+	}
+	// The display name must ride the wire as UTF-16LE, not UTF-8: the seeded
+	// user's address appears with interleaved zero bytes. This checks the
+	// address-book string encoding independent of our own encoder.
+	u16 := []byte{'a', 0, 'l', 0, 'i', 0, 'c', 0, 'e', 0}
+	if !bytes.Contains(p, u16) {
+		t.Error("QueryRows response does not carry the display name as UTF-16LE")
+	}
+}
+
+// TestNspiResolveNames drives Bind then ResolveNamesW within the session and
+// confirms the route resolves the seeded user (the exact X-RequestType matters).
+func TestNspiResolveNames(t *testing.T) {
+	ts := newTestServer(t)
+	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
+	bind.Body.Close()
+	sid, seq := cookieByName(bind, "sid"), cookieByName(bind, "sequence")
+	if sid == "" || seq == "" {
+		t.Fatal("no cookies from Bind")
+	}
+	rn := mapiPost(t, ts, "/mapi/nspi", "ResolveNamesW", resolveNamesBody("alice"), func(r *http.Request) {
+		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
+		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
+	})
+	defer rn.Body.Close()
+	if got := rn.Header.Get("X-ResponseCode"); got != "0" {
+		t.Fatalf("ResolveNamesW: X-ResponseCode = %q, want 0", got)
+	}
+	p := nspiPayload(t, rn)
+	// status(0:4) + result(4:8) + codepage(8:12) + mids-marker(12)
+	if len(p) < 13 {
+		t.Fatalf("response too short: %d bytes", len(p))
+	}
+	if result := binary.LittleEndian.Uint32(p[4:]); result != 0 {
+		t.Errorf("result = %#x, want 0", result)
+	}
+	if p[12] != 0xFF {
+		t.Errorf("mids marker = %#x, want 0xFF (a resolution follows)", p[12])
 	}
 }

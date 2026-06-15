@@ -38,6 +38,15 @@ func dnToSMTP(dn string) (string, bool) {
 	return smtp, true
 }
 
+// NSPI name-resolution result codes ([MS-OXNSPI] 2.2.1.1), returned per input
+// name by ResolveNamesW. They numerically alias the table bookmarks but form a
+// distinct semantic space.
+const (
+	midUnresolved uint32 = 0x0
+	midAmbiguous  uint32 = 0x1
+	midResolved   uint32 = 0x2
+)
+
 // galUser is one GAL entry with its assigned MId.
 type galUser struct {
 	mid     uint32
@@ -107,6 +116,39 @@ func (g gal) midAt(i int) uint32 {
 		return midEndOfTable
 	}
 	return g.users[i].mid
+}
+
+// resolve matches a token (a name or address) case-insensitively as a substring
+// of each user's display name or SMTP address, mirroring the reference's
+// resolve-node behavior: exactly one match resolves to that MId (midResolved),
+// more than one is midAmbiguous, none is midUnresolved.
+func (g gal) resolve(token string) (mid, status uint32) {
+	tok := strings.ToLower(token)
+	found := -1
+	for i, u := range g.users {
+		if strings.Contains(strings.ToLower(u.smtp), tok) ||
+			strings.Contains(strings.ToLower(u.display), tok) {
+			if found >= 0 {
+				return 0, midAmbiguous
+			}
+			found = i
+		}
+	}
+	if found < 0 {
+		return 0, midUnresolved
+	}
+	return g.users[found].mid, midResolved
+}
+
+// byAddress resolves an exact (case-insensitive) SMTP address to its MId — the
+// reverse DNToMId applies after recovering the address from a PR_ENTRYID's DN.
+func (g gal) byAddress(smtp string) (uint32, bool) {
+	for _, u := range g.users {
+		if strings.EqualFold(u.smtp, smtp) {
+			return u.mid, true
+		}
+	}
+	return 0, false
 }
 
 // galUserProps projects a GAL user into the address-book property bag a row

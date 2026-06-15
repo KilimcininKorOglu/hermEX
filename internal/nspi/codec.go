@@ -76,7 +76,7 @@ type bindRequest struct {
 // pullBindRequest decodes a Bind request body. A zero presence byte means the
 // client sent no STAT, so the default (zeroed) cursor stands.
 func pullBindRequest(body []byte) (bindRequest, error) {
-	p := ext.NewPull(body, 0)
+	p := ext.NewPull(body, abkFlags)
 	var r bindRequest
 	var err error
 	if r.flags, err = p.Uint32(); err != nil {
@@ -98,7 +98,7 @@ func pullBindRequest(body []byte) (bindRequest, error) {
 // [MS-OXCMAPIHTTP] 2.2.5.2.1): a reserved u32 then the AuxiliaryBuffer. It
 // carries no actionable fields.
 func pullUnbindRequest(body []byte) error {
-	p := ext.NewPull(body, 0)
+	p := ext.NewPull(body, abkFlags)
 	if _, err := p.Uint32(); err != nil { // Reserved
 		return err
 	}

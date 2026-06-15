@@ -17,12 +17,12 @@ func TestStatRoundTrip(t *testing.T) {
 		sortType: 1, containerID: 0, curRec: 0x10, delta: -5,
 		numPos: 3, totalRec: 42, codePage: 1252, tplLocale: 0x0409, sortLocale: 0x0409,
 	}
-	p := ext.NewPush(0)
+	p := ext.NewPush(abkFlags)
 	pushStat(p, in)
 	if got := len(p.Bytes()); got != 36 {
 		t.Fatalf("STAT encoded to %d bytes, want 36", got)
 	}
-	out, err := pullStat(ext.NewPull(p.Bytes(), 0))
+	out, err := pullStat(ext.NewPull(p.Bytes(), abkFlags))
 	if err != nil {
 		t.Fatalf("pullStat: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestStatRoundTrip(t *testing.T) {
 // buildBind frames a Bind request body: flags + optional STAT + an auxiliary
 // buffer (here empty). codePage is only written when withStat is set.
 func buildBind(flags uint32, withStat bool, codePage uint32) []byte {
-	p := ext.NewPush(0)
+	p := ext.NewPush(abkFlags)
 	p.Uint32(flags)
 	if withStat {
 		p.Uint8(1)
@@ -49,7 +49,7 @@ func buildBind(flags uint32, withStat bool, codePage uint32) []byte {
 // decodeBindResp reads a Bind response: status + result + server GUID + auxout.
 func decodeBindResp(t *testing.T, resp []byte) (status, result uint32, guid mapi.GUID) {
 	t.Helper()
-	p := ext.NewPull(resp, 0)
+	p := ext.NewPull(resp, abkFlags)
 	status, _ = p.Uint32()
 	result, _ = p.Uint32()
 	g, err := p.GUID()
@@ -117,7 +117,7 @@ func TestBindRejectsUnicodeCodepage(t *testing.T) {
 func TestUnbindSucceeds(t *testing.T) {
 	s := NewServer(nil, testGUID)
 	resp := s.Unbind([]byte{0, 0, 0, 0, 0, 0, 0, 0}) // reserved u32 + cb_auxin u32
-	p := ext.NewPull(resp, 0)
+	p := ext.NewPull(resp, abkFlags)
 	status, _ := p.Uint32()
 	result, _ := p.Uint32()
 	aux, _ := p.Uint32()

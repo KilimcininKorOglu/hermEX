@@ -20,7 +20,7 @@ func TestPushPropertyRowForms(t *testing.T) {
 
 	// NONE form: every column present.
 	none := []mapi.PropTag{mapi.PrDisplayName, mapi.PrObjectType}
-	p := ext.NewPush(ext.FlagABK)
+	p := ext.NewPush(abkFlags)
 	if err := pushPropertyRow(p, none, bag); err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +28,7 @@ func TestPushPropertyRowForms(t *testing.T) {
 	if b[0] != propRowNone {
 		t.Fatalf("NONE flag = %#x, want 0x00", b[0])
 	}
-	pull := ext.NewPull(b, ext.FlagABK)
+	pull := ext.NewPull(b, abkFlags)
 	mustU8(t, pull, "flag")
 	if v, _ := pull.PropValue(mapi.PtUnicode); v != "Alice" {
 		t.Errorf("NONE display = %v, want Alice", v)
@@ -39,7 +39,7 @@ func TestPushPropertyRowForms(t *testing.T) {
 
 	// FLAGGED form: PrSmtpAddress is absent -> a PT_ERROR (ecNotFound) marker.
 	flagged := []mapi.PropTag{mapi.PrDisplayName, mapi.PrSmtpAddress}
-	p2 := ext.NewPush(ext.FlagABK)
+	p2 := ext.NewPush(abkFlags)
 	if err := pushPropertyRow(p2, flagged, bag); err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +47,7 @@ func TestPushPropertyRowForms(t *testing.T) {
 	if b2[0] != propRowFlagged {
 		t.Fatalf("FLAGGED flag = %#x, want 0x01", b2[0])
 	}
-	pull2 := ext.NewPull(b2, ext.FlagABK)
+	pull2 := ext.NewPull(b2, abkFlags)
 	mustU8(t, pull2, "flag")
 	if fpv, _ := pull2.FlaggedPropVal(mapi.PtUnicode); fpv.Flag != mapi.FlaggedAvailable || fpv.Value != "Alice" {
 		t.Errorf("present column = %+v, want available Alice", fpv)
@@ -63,7 +63,7 @@ func TestPushPropertyRowForms(t *testing.T) {
 
 // buildQueryRows frames a QueryRows request.
 func buildQueryRows(st stat, explicit []uint32, count uint32, columns []mapi.PropTag) []byte {
-	p := ext.NewPush(ext.FlagABK)
+	p := ext.NewPush(abkFlags)
 	p.Uint32(0) // flags
 	p.Uint8(1)  // hasStat
 	pushStat(p, st)
@@ -113,7 +113,7 @@ func decodeRow(t *testing.T, p *ext.Pull, cols []mapi.PropTag) mapi.PropertyValu
 func TestQueryRowsWalk(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test", "carol@hermex.test")
 	body := buildQueryRows(stat{curRec: midBeginningOfTable, codePage: 1252}, nil, 10, nil)
-	p := ext.NewPull(s.QueryRows(body), ext.FlagABK)
+	p := ext.NewPull(s.QueryRows(body), abkFlags)
 
 	if status := mustU32(t, p, "status"); status != 0 {
 		t.Fatalf("status = %#x, want 0", status)
@@ -157,7 +157,7 @@ func TestQueryRowsWalk(t *testing.T) {
 func TestQueryRowsExplicit(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test")
 	body := buildQueryRows(stat{codePage: 1252}, []uint32{midBase + 1, 0x9999}, 10, nil)
-	p := ext.NewPull(s.QueryRows(body), ext.FlagABK)
+	p := ext.NewPull(s.QueryRows(body), abkFlags)
 	mustU32(t, p, "status")
 	if result := mustU32(t, p, "result"); result != ecSuccess {
 		t.Fatalf("result = %#x", result)
@@ -183,14 +183,14 @@ func TestQueryRowsExplicit(t *testing.T) {
 // and reports the applied row delta when requested.
 func TestUpdateStatAdvance(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test", "carol@hermex.test")
-	p := ext.NewPush(0)
+	p := ext.NewPush(abkFlags)
 	p.Uint32(0) // reserved
 	p.Uint8(1)  // hasStat
 	pushStat(p, stat{curRec: midBeginningOfTable, delta: 2, codePage: 1252})
 	p.Uint8(1)  // delta_requested
 	p.Uint32(0) // cb_auxin
 
-	pr := ext.NewPull(s.UpdateStat(p.Bytes()), 0)
+	pr := ext.NewPull(s.UpdateStat(p.Bytes()), abkFlags)
 	mustU32(t, pr, "status")
 	if result := mustU32(t, pr, "result"); result != ecSuccess {
 		t.Fatalf("result = %#x", result)
@@ -216,7 +216,7 @@ func TestUpdateStatAdvance(t *testing.T) {
 func TestQueryColumns(t *testing.T) {
 	s := testGAL("alice@hermex.test")
 	body := []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0} // reserved + flags + cb_auxin
-	p := ext.NewPull(s.QueryColumns(body), ext.FlagABK)
+	p := ext.NewPull(s.QueryColumns(body), abkFlags)
 	mustU32(t, p, "status")
 	if result := mustU32(t, p, "result"); result != ecSuccess {
 		t.Fatalf("result = %#x", result)
@@ -234,7 +234,7 @@ func TestQueryColumns(t *testing.T) {
 func TestQueryRowsZeroCount(t *testing.T) {
 	s := testGAL("alice@hermex.test")
 	body := buildQueryRows(stat{codePage: 1252}, nil, 0, nil)
-	p := ext.NewPull(s.QueryRows(body), ext.FlagABK)
+	p := ext.NewPull(s.QueryRows(body), abkFlags)
 	mustU32(t, p, "status")
 	if result := mustU32(t, p, "result"); result != ecInvalidParam {
 		t.Errorf("count=0 result = %#x, want ecInvalidParam", result)

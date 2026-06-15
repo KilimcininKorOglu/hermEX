@@ -34,6 +34,13 @@ const (
 	ecTableTooBig  uint32 = 0x80040403 // more than 100 columns requested
 )
 
+// abkFlags is the EXT flag set every NSPI body is (de)serialized under, matching
+// the MAPI/HTTP NSPI wire (EXT_FLAG_UTF16 | EXT_FLAG_WCOUNT | EXT_FLAG_ABK): all
+// strings are UTF-16LE, a binary value's length prefix is 32-bit, and address-book
+// property values carry the present/absent marker. Fields that touch none of these
+// (u32 scalars, STAT, proptag/MId arrays) serialize identically regardless.
+const abkFlags = ext.FlagUTF16 | ext.FlagWCount | ext.FlagABK
+
 // Server answers NSPI requests against the directory GAL. serverGUID identifies
 // this server instance in a Bind response (the client caches it for the bound
 // session). gal may be nil when the directory cannot enumerate users; Bind still
@@ -73,7 +80,7 @@ func (s *Server) Bind(body []byte) (resp []byte, ok bool) {
 // encodeBind frames a Bind response: status(0) + result + server GUID (zeroed on
 // failure) + an empty AuxiliaryBuffer.
 func (s *Server) encodeBind(result uint32) []byte {
-	p := ext.NewPush(0)
+	p := ext.NewPush(abkFlags)
 	p.Uint32(0)      // status: MAPI/HTTP-level, always 0 (request processed)
 	p.Uint32(result) // result: the NSPI return code
 	if result == ecSuccess {
@@ -89,7 +96,7 @@ func (s *Server) encodeBind(result uint32) []byte {
 // unconditionally; the transport drops the session keyed by the sid cookie.
 func (s *Server) Unbind(body []byte) []byte {
 	_ = pullUnbindRequest(body) // body carries no actionable fields
-	p := ext.NewPush(0)
+	p := ext.NewPush(abkFlags)
 	p.Uint32(0)         // status
 	p.Uint32(ecSuccess) // result
 	p.Uint32(0)         // AuxiliaryBufferSize

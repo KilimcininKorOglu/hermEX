@@ -40,6 +40,10 @@ func (s *Server) serveNspi(w http.ResponseWriter, r *http.Request) {
 		s.nspiOp(w, r, user, "UpdateStat", s.nsp.UpdateStat)
 	case "QueryColumns":
 		s.nspiOp(w, r, user, "QueryColumns", s.nsp.QueryColumns)
+	case "ResolveNamesW":
+		s.nspiOp(w, r, user, "ResolveNamesW", s.nsp.ResolveNamesW)
+	case "DNToMId":
+		s.nspiOp(w, r, user, "DNToMId", s.nsp.DNToMId)
 	default:
 		writeRespError(w, r, reqType, rcInvalidReqType)
 	}

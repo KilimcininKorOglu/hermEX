@@ -23,7 +23,7 @@ type queryRowsRequest struct {
 }
 
 func pullQueryRows(body []byte) (queryRowsRequest, error) {
-	p := ext.NewPull(body, ext.FlagABK)
+	p := ext.NewPull(body, abkFlags)
 	var r queryRowsRequest
 	if _, err := p.Uint32(); err != nil { // flags (Ephemeral/Unicode; v1 emits permanent EIDs)
 		return r, err
@@ -139,7 +139,7 @@ func (g gal) walk(st stat, count uint32) ([]mapi.PropertyValues, stat) {
 // STAT (always present) + the row set (columns + rows) on success, or a single 0
 // in place of the rows on failure, then an empty AuxiliaryBuffer.
 func (s *Server) encodeQueryRows(result uint32, st stat, cols []mapi.PropTag, rows []mapi.PropertyValues) []byte {
-	p := ext.NewPush(ext.FlagABK)
+	p := ext.NewPush(abkFlags)
 	p.Uint32(0)      // status
 	p.Uint32(result) // result
 	p.Uint8(0xFF)    // STAT present
@@ -163,7 +163,7 @@ type updateStatRequest struct {
 }
 
 func pullUpdateStat(body []byte) (updateStatRequest, error) {
-	p := ext.NewPull(body, 0)
+	p := ext.NewPull(body, abkFlags)
 	var r updateStatRequest
 	if _, err := p.Uint32(); err != nil { // reserved
 		return r, err
@@ -222,7 +222,7 @@ func (s *Server) UpdateStat(body []byte) []byte {
 // STAT (always present) + the applied delta (present only when requested on a
 // success), then an empty AuxiliaryBuffer.
 func (s *Server) encodeUpdateStat(result uint32, st stat, hasDelta bool, delta int32) []byte {
-	p := ext.NewPush(0)
+	p := ext.NewPush(abkFlags)
 	p.Uint32(0)      // status
 	p.Uint32(result) // result
 	p.Uint8(0xFF)    // STAT present
@@ -240,7 +240,7 @@ func (s *Server) encodeUpdateStat(result uint32, st stat, hasDelta bool, delta i
 // QueryColumns handles the NSPI QueryColumns request: it reports the column set
 // the server can supply for address-book rows.
 func (s *Server) QueryColumns(body []byte) []byte {
-	p := ext.NewPull(body, 0)
+	p := ext.NewPull(body, abkFlags)
 	if _, err := p.Uint32(); err != nil { // reserved
 		return s.encodeQueryColumns(ecError, nil)
 	}
@@ -257,7 +257,7 @@ func (s *Server) QueryColumns(body []byte) []byte {
 // column proptag array on success (else a single 0), then an empty
 // AuxiliaryBuffer.
 func (s *Server) encodeQueryColumns(result uint32, cols []mapi.PropTag) []byte {
-	p := ext.NewPush(ext.FlagABK)
+	p := ext.NewPush(abkFlags)
 	p.Uint32(0)      // status
 	p.Uint32(result) // result
 	if result != ecSuccess {

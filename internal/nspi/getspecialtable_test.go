@@ -33,7 +33,7 @@ func TestPermanentEntryIDLayout(t *testing.T) {
 // buildGetSpecialTable frames a GetSpecialTable request: flags + a STAT (carrying
 // the code page) + no version + an empty auxiliary buffer.
 func buildGetSpecialTable(codePage uint32) []byte {
-	p := ext.NewPush(0)
+	p := ext.NewPush(abkFlags)
 	p.Uint32(0) // flags
 	p.Uint8(1)  // hasStat
 	pushStat(p, stat{codePage: codePage})
@@ -49,7 +49,7 @@ func TestGetSpecialTable(t *testing.T) {
 	s := NewServer(nil, testGUID)
 	resp := s.GetSpecialTable(buildGetSpecialTable(1252))
 
-	p := ext.NewPull(resp, ext.FlagABK)
+	p := ext.NewPull(resp, abkFlags)
 	status := mustU32(t, p, "status")
 	result := mustU32(t, p, "result")
 	if status != 0 || result != ecSuccess {
