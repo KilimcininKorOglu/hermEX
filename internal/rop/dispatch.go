@@ -178,6 +178,18 @@ loop:
 			if !s.ropSyncOpenCollector(p, out, handles, hindex) {
 				break loop
 			}
+		case ropSyncImportMessageChange:
+			if !s.ropSyncImportMessageChange(p, out, handles, hindex) {
+				break loop
+			}
+		case ropFastTransferDestConfigure:
+			if !s.ropFastTransferDestConfigure(p, out, handles, hindex) {
+				break loop
+			}
+		case ropFastTransferDestPutBuffer:
+			if !s.ropFastTransferDestPutBuffer(p, out, handles, hindex) {
+				break loop
+			}
 		case ropSyncImportHierarchyChange:
 			if !s.ropSyncImportHierarchyChange(p, out, handles, hindex) {
 				break loop

@@ -16,14 +16,16 @@ import (
 type objKind uint8
 
 const (
-	kindLogon      objKind = iota // an open mailbox store (the logon root)
-	kindFolder                    // an opened folder
-	kindTable                     // a contents, hierarchy, or attachment table
-	kindMessage                   // an opened message
-	kindStream                    // an open property stream
-	kindAttachment                // an opened attachment
-	kindNewMessage                // a message being composed in memory (pre-save)
-	kindSync                      // an ICS/FastTransfer sync context
+	kindLogon         objKind = iota // an open mailbox store (the logon root)
+	kindFolder                       // an opened folder
+	kindTable                        // a contents, hierarchy, or attachment table
+	kindMessage                      // an opened message
+	kindStream                       // an open property stream
+	kindAttachment                   // an opened attachment
+	kindNewMessage                   // a message being composed in memory (pre-save)
+	kindSync                         // an ICS/FastTransfer sync context
+	kindUploadMessage                // an ICS-imported message awaiting its body + save
+	kindFastUpload                   // a FastTransfer destination feeding an upload message
 )
 
 // object is a server-side MAPI object referenced by a uint32 handle. Fields are
@@ -32,17 +34,19 @@ const (
 // its objectstore id, a stream its in-memory bytes and read cursor, an
 // attachment its property bag.
 type object struct {
-	kind        objKind
-	store       *objectstore.Store           // kindLogon, and inherited by every child object
-	folderID    int64                        // kindFolder
-	table       *tableState                  // kindTable
-	messageID   int64                        // kindMessage
-	stream      *streamState                 // kindStream
-	attachProps mapi.PropertyValues          // kindAttachment
-	newMsg      *newMessageState             // kindNewMessage
-	fastSrc     fastTransferSource           // kindSync: what GetBuffer drains
-	stateSink   stateStreamSink              // kindSync: what the state-stream ROPs populate
-	upload      *objectstore.UploadCollector // kindSync (upload): the import target
+	kind         objKind
+	store        *objectstore.Store            // kindLogon, and inherited by every child object
+	folderID     int64                         // kindFolder
+	table        *tableState                   // kindTable
+	messageID    int64                         // kindMessage
+	stream       *streamState                  // kindStream
+	attachProps  mapi.PropertyValues           // kindAttachment
+	newMsg       *newMessageState              // kindNewMessage
+	fastSrc      fastTransferSource            // kindSync: what GetBuffer drains
+	stateSink    stateStreamSink               // kindSync: what the state-stream ROPs populate
+	upload       *objectstore.UploadCollector  // kindSync (upload): the import target
+	uploadMsg    *objectstore.UploadMessage    // kindUploadMessage: the message being imported
+	msgCollector *objectstore.MessageCollector // kindFastUpload: the body parser
 }
 
 // newMessageState accumulates a message being composed over the ROP write

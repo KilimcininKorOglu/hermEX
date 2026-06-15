@@ -9,8 +9,11 @@ import (
 // ICS / FastTransfer ROP opcodes ([MS-OXCROPS] 2.2.3). v1 wires the download path
 // plus the pure-ROP upload collector imports (hierarchy / deletes / read-state).
 const (
+	ropFastTransferDestConfigure     uint8 = 0x53
+	ropFastTransferDestPutBuffer     uint8 = 0x54
 	ropFastTransferSourceGetBuffer   uint8 = 0x4E
 	ropSynchronizationConfigure      uint8 = 0x70
+	ropSyncImportMessageChange       uint8 = 0x72
 	ropSyncImportHierarchyChange     uint8 = 0x73
 	ropSyncImportDeletes             uint8 = 0x74
 	ropSyncUploadStateStreamBegin    uint8 = 0x75
@@ -20,6 +23,11 @@ const (
 	ropSyncImportReadStateChanges    uint8 = 0x80
 	ropSyncGetTransferState          uint8 = 0x82
 )
+
+// fastCopyTo is the FastTransfer destination source-operation for a message-content
+// copy (COPYTO) — the only mode the ICS message-body upload uses ([MS-OXCFXICS]
+// 2.2.3.1.2.1.1).
+const fastCopyTo uint8 = 0x01
 
 // importDeletesTag is the single multivalue-binary property an ImportDeletes
 // request carries — PROP_TAG(PT_MV_BINARY, 0) — whose values are the 22-byte
@@ -353,6 +361,96 @@ func (s *Session) ropSyncGetTransferState(p *ext.Pull, out *ext.Push, handles []
 	out.Uint8(ropSyncGetTransferState)
 	out.Uint8(ohindex)
 	out.Uint32(ecSuccess)
+	return true
+}
+
+// ropSyncImportMessageChange handles RopSynchronizationImportMessageChange
+// ([MS-OXCFXICS] 2.2.3.2.4.2): it opens an imported message from its four-property
+// identity header and returns a message handle whose body is then filled over a
+// FastTransfer destination and persisted by RopSaveChangesMessage. The response
+// message id is zero — the client reads the server change number off the saved
+// message, not from here.
+func (s *Session) ropSyncImportMessageChange(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	ohindex, e1 := p.Uint8()
+	importFlags, e2 := p.Uint8()
+	header, e3 := p.PropertyValues()
+	if e1 != nil || e2 != nil || e3 != nil {
+		return false
+	}
+	o := s.get(handleAt(handles, hindex))
+	if o == nil || o.upload == nil {
+		writeErr(out, ropSyncImportMessageChange, ohindex, ecError)
+		return true
+	}
+	um, err := o.upload.ImportMessageChange(importFlags, header)
+	if err != nil {
+		writeErr(out, ropSyncImportMessageChange, ohindex, ecError)
+		return true
+	}
+	h := s.alloc(&object{kind: kindUploadMessage, store: o.store, uploadMsg: um})
+	setHandle(handles, ohindex, h)
+	out.Uint8(ropSyncImportMessageChange)
+	out.Uint8(ohindex)
+	out.Uint32(ecSuccess)
+	out.Uint64(0) // MessageId
+	return true
+}
+
+// ropFastTransferDestConfigure handles RopFastTransferDestinationConfigure
+// ([MS-OXCFXICS] 2.2.3.1.2.1): on an imported message it opens a FastTransfer
+// destination (COPYTO, message-content mode) whose PutBuffer chunks reconstruct the
+// message body. Only the message-content copy used by ICS upload is supported.
+func (s *Session) ropFastTransferDestConfigure(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	ohindex, e1 := p.Uint8()
+	sourceOp, e2 := p.Uint8()
+	_, e3 := p.Uint8() // CopyFlags — only MOVE (0x01); the ICS message copy sets none
+	if e1 != nil || e2 != nil || e3 != nil {
+		return false
+	}
+	o := s.get(handleAt(handles, hindex))
+	if o == nil || o.kind != kindUploadMessage || o.uploadMsg == nil {
+		writeErr(out, ropFastTransferDestConfigure, ohindex, ecError)
+		return true
+	}
+	if sourceOp != fastCopyTo {
+		writeErr(out, ropFastTransferDestConfigure, ohindex, ecNotSupported)
+		return true
+	}
+	mc := objectstore.NewMessageCollector(o.uploadMsg)
+	h := s.alloc(&object{kind: kindFastUpload, store: o.store, msgCollector: mc})
+	setHandle(handles, ohindex, h)
+	out.Uint8(ropFastTransferDestConfigure)
+	out.Uint8(ohindex)
+	out.Uint32(ecSuccess)
+	return true
+}
+
+// ropFastTransferDestPutBuffer handles RopFastTransferDestinationPutBuffer
+// ([MS-OXCFXICS] 2.2.3.1.2.2): it feeds one chunk of the FastTransfer body into the
+// message collector. The destination's transfer status is always zero (it consumes
+// the whole chunk); used size echoes the bytes accepted.
+func (s *Session) ropFastTransferDestPutBuffer(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	data, e1 := p.BinShort()
+	if e1 != nil {
+		return false
+	}
+	o := s.get(handleAt(handles, hindex))
+	if o == nil || o.msgCollector == nil {
+		writeErr(out, ropFastTransferDestPutBuffer, hindex, ecError)
+		return true
+	}
+	if err := o.msgCollector.PutBuffer(data); err != nil {
+		writeErr(out, ropFastTransferDestPutBuffer, hindex, ecError)
+		return true
+	}
+	out.Uint8(ropFastTransferDestPutBuffer)
+	out.Uint8(hindex)
+	out.Uint32(ecSuccess)
+	out.Uint16(0)                 // TransferStatus (0 = ready for a destination)
+	out.Uint16(0)                 // InProgressCount
+	out.Uint16(1)                 // TotalStepCount
+	out.Uint8(0)                  // Reserved
+	out.Uint16(uint16(len(data))) // UsedSize
 	return true
 }
 

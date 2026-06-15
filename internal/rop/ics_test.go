@@ -2,6 +2,7 @@ package rop
 
 import (
 	"testing"
+	"time"
 
 	"hermex/internal/ext"
 	"hermex/internal/ics"
@@ -361,6 +362,117 @@ func TestSyncCollectorImportDeletes(t *testing.T) {
 	}
 	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), id2); f == -1 {
 		t.Error("kept message vanished")
+	}
+}
+
+func buildImportMessageChange(inIdx, outIdx, importFlags uint8, header mapi.PropertyValues) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropSyncImportMessageChange)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	b.Uint8(outIdx)
+	b.Uint8(importFlags)
+	_ = b.PropertyValues(header)
+	return b.Bytes()
+}
+
+func buildDestConfigure(inIdx, outIdx, sourceOp uint8) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropFastTransferDestConfigure)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	b.Uint8(outIdx)
+	b.Uint8(sourceOp)
+	b.Uint8(0) // CopyFlags
+	return b.Bytes()
+}
+
+func buildDestPutBuffer(inIdx uint8, data []byte) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropFastTransferDestPutBuffer)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	_ = b.BinShort(data)
+	return b.Bytes()
+}
+
+// messageContentBody renders a message-content FastTransfer body (bare properties,
+// no STARTMESSAGE framing) the way a client streams it through PutBuffer.
+func messageContentBody(class, subject string) []byte {
+	pr := &ics.Producer{}
+	_ = pr.WriteProp(ics.StreamProp{Tag: mapi.PrMessageClass, Value: class})
+	_ = pr.WriteProp(ics.StreamProp{Tag: mapi.PrSubject, Value: subject})
+	var out []byte
+	for {
+		chunk, last := pr.ReadBuffer(1 << 16)
+		out = append(out, chunk...)
+		if last {
+			break
+		}
+	}
+	return out
+}
+
+// TestSyncImportMessageBody drives the full ICS message-upload choreography through
+// the ROP dispatch: open a collector, import a new message by source key, configure
+// a FastTransfer destination on it, stream its body, and save. The committed
+// message must carry the uploaded subject — proving ImportMessageChange,
+// DestinationConfigure, PutBuffer, and the SaveChangesMessage commit branch link up.
+func TestSyncImportMessageBody(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxMessage(t, dir, "anchor")
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	folderH := h[1]
+	handles := []uint32{logonH, folderH, 0xFFFFFFFF}
+	h, _ = mustDispatchOK(t, sess, buildOpenCollector(1, 2, 1), handles, ropSyncOpenCollector)
+	collectorH := h[2]
+
+	const newMid = 0x9000
+	key := homeSourceKey(t, dir, newMid)
+	header := mapi.PropertyValues{
+		{Tag: mapi.PrSourceKey, Value: key},
+		{Tag: mapi.PrLastModificationTime, Value: mapi.UnixToNTTime(time.Now())},
+		{Tag: mapi.PrChangeKey, Value: key},                  // not stored for a new message
+		{Tag: mapi.PrPredecessorChangeList, Value: []byte{}}, // empty PCL
+	}
+	handles = []uint32{logonH, folderH, collectorH, 0xFFFFFFFF}
+	h, _ = mustDispatchOK(t, sess, buildImportMessageChange(2, 3, 0, header), handles, ropSyncImportMessageChange)
+	msgH := h[3]
+
+	handles = []uint32{logonH, folderH, collectorH, msgH, 0xFFFFFFFF}
+	h, _ = mustDispatchOK(t, sess, buildDestConfigure(3, 4, fastCopyTo), handles, ropFastTransferDestConfigure)
+	fastH := h[4]
+
+	body := messageContentBody("IPM.Note", "Imported Subject")
+	handles = []uint32{logonH, folderH, collectorH, msgH, fastH}
+	_, pb := mustDispatchOK(t, sess, buildDestPutBuffer(4, body), handles, ropFastTransferDestPutBuffer)
+	mustU16(t, pb, "transfer_status")
+	mustU16(t, pb, "in_progress")
+	mustU16(t, pb, "total_step")
+	mustU8(t, pb, "reserved")
+	if used := mustU16(t, pb, "used_size"); int(used) != len(body) {
+		t.Errorf("PutBuffer used_size = %d, want %d", used, len(body))
+	}
+
+	mustDispatchOK(t, sess, buildSaveChangesMessage(0, 3), handles, ropSaveChangesMessage)
+
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	props, err := st.GetMessageProperties(newMid, mapi.PrSubject)
+	if err != nil {
+		t.Fatalf("imported message not found: %v", err)
+	}
+	if v, _ := props.Get(mapi.PrSubject); v != "Imported Subject" {
+		t.Errorf("imported subject = %q, want %q", v, "Imported Subject")
 	}
 }
 

@@ -168,7 +168,30 @@ func (s *Session) ropSaveChangesMessage(p *ext.Pull, out *ext.Push, handles []ui
 		return false
 	}
 	obj := s.get(handleAt(handles, ihindex2))
-	if obj == nil || obj.kind != kindNewMessage || obj.store == nil {
+	if obj == nil || obj.store == nil {
+		writeErr(out, ropSaveChangesMessage, hindex, ecError)
+		return true
+	}
+	// An ICS-imported message commits its FastTransfer-uploaded body here, the same
+	// point a composed message is saved ([MS-OXCFXICS] 3.3.5.6).
+	if obj.kind == kindUploadMessage {
+		if obj.uploadMsg == nil {
+			writeErr(out, ropSaveChangesMessage, hindex, ecError)
+			return true
+		}
+		mid, err := obj.uploadMsg.Commit()
+		if err != nil {
+			writeErr(out, ropSaveChangesMessage, hindex, ecError)
+			return true
+		}
+		out.Uint8(ropSaveChangesMessage)
+		out.Uint8(hindex)
+		out.Uint32(ecSuccess)
+		out.Uint8(ihindex2)
+		out.Uint64(uint64(mapi.MakeEIDEx(1, mid)))
+		return true
+	}
+	if obj.kind != kindNewMessage {
 		writeErr(out, ropSaveChangesMessage, hindex, ecError)
 		return true
 	}

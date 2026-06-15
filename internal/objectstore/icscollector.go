@@ -165,6 +165,18 @@ func (c *UploadCollector) ImportHierarchyChange(hichyvals, propvals mapi.Propert
 	return fid, nil
 }
 
+// ImportMessageChange opens an imported message from its fixed four-property
+// identity header, returning the in-progress message whose body the caller fills
+// over a FastTransfer destination before committing ([MS-OXCFXICS] 3.3.5.6). It is
+// a contents-only operation and marks the collector started.
+func (c *UploadCollector) ImportMessageChange(importFlags uint8, header mapi.PropertyValues) (*UploadMessage, error) {
+	if c.syncType != SyncTypeContents {
+		return nil, fmt.Errorf("objectstore: message import requires a contents collector")
+	}
+	c.started = true
+	return c.store.ImportMessageChange(c.folderID, importFlags, header)
+}
+
 // ImportDeletes hard-deletes the messages named by their home source keys through
 // the store. Deletes carry no change number, so nothing is folded into the state;
 // the import only marks the collector started ([MS-OXCFXICS] 3.3.5.6).
