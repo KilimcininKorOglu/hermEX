@@ -7,13 +7,13 @@ import (
 	"database/sql"
 	"flag"
 	"log"
-	"net/http"
 
 	_ "github.com/go-sql-driver/mysql"
 
 	"hermex/internal/config"
 	"hermex/internal/dav"
 	"hermex/internal/directory"
+	"hermex/internal/serve"
 )
 
 func main() {
@@ -40,5 +40,5 @@ func main() {
 		addr = ":8080"
 	}
 	log.Printf("hermex-dav listening on %s", addr)
-	log.Fatalf("hermex-dav: %v", http.ListenAndServe(addr, srv.Handler()))
+	log.Fatalf("hermex-dav: %v", serve.ListenAndServe(addr, srv.Handler(), cfg))
 }

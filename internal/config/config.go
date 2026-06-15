@@ -68,6 +68,12 @@ func (c *Config) TLSConfig() (*tls.Config, error) {
 	}, nil
 }
 
+// TLSEnabled reports whether a certificate and key are both configured, i.e.
+// whether listeners should terminate TLS rather than fall back to plaintext.
+func (c *Config) TLSEnabled() bool {
+	return c.TLSCert != "" && c.TLSKey != ""
+}
+
 // MaildirFor derives a user's mailbox directory
 // (the internal spec §5.5): {DataDir}/user/{domain}/{localpart}. Collision
 // suffixing (~N) is handled by the directory at provisioning time, not here.

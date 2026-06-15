@@ -8,13 +8,13 @@ import (
 	"database/sql"
 	"flag"
 	"log"
-	"net/http"
 
 	_ "github.com/go-sql-driver/mysql"
 
 	"hermex/internal/activesync"
 	"hermex/internal/config"
 	"hermex/internal/directory"
+	"hermex/internal/serve"
 )
 
 func main() {
@@ -41,5 +41,5 @@ func main() {
 		addr = ":8080"
 	}
 	log.Printf("hermex-activesync listening on %s", addr)
-	log.Fatalf("hermex-activesync: %v", http.ListenAndServe(addr, srv.Handler()))
+	log.Fatalf("hermex-activesync: %v", serve.ListenAndServe(addr, srv.Handler(), cfg))
 }

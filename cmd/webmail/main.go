@@ -6,12 +6,12 @@ import (
 	"database/sql"
 	"flag"
 	"log"
-	"net/http"
 
 	_ "github.com/go-sql-driver/mysql"
 
 	"hermex/internal/config"
 	"hermex/internal/directory"
+	"hermex/internal/serve"
 	"hermex/internal/webmail"
 )
 
@@ -42,5 +42,5 @@ func main() {
 		addr = ":8080"
 	}
 	log.Printf("hermex-webmail listening on %s", addr)
-	log.Fatalf("hermex-webmail: %v", http.ListenAndServe(addr, srv.Handler()))
+	log.Fatalf("hermex-webmail: %v", serve.ListenAndServe(addr, srv.Handler(), cfg))
 }
