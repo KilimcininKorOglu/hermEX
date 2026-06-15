@@ -168,6 +168,99 @@ func TestContentDownloadIncremental(t *testing.T) {
 	}
 }
 
+// hierarchyState returns an empty HierarchyDown state against the store mapper.
+func hierarchyState(t *testing.T, s *Store) *ics.State {
+	t.Helper()
+	m, err := s.ReplicaMapper()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ics.NewState(ics.HierarchyDown, m)
+}
+
+// TestHierarchyDownloadInitialSync drives an initial hierarchy sync over a
+// controlled subtree: every subfolder is a change carrying its source key and
+// display name, and the stream ends with a HierarchyDown state block (given +
+// seen) and INCRSYNCEND.
+func TestHierarchyDownloadInitialSync(t *testing.T) {
+	s := openSeededStore(t)
+	parent, err := s.CreateFolder(nil, "sync-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateFolder(&parent, "A"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateFolder(&parent, "B"); err != nil {
+		t.Fatal(err)
+	}
+
+	dc, err := s.NewHierarchyDownload(parent, hierarchyState(t, s), 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := drainDownload(t, dc, 40)
+
+	if n := countMarkers(items, ics.MarkerIncrSyncChg); n != 2 {
+		t.Errorf("INCRSYNCCHG count = %d, want 2 (one per subfolder)", n)
+	}
+	if !hasProp(items, mapi.PrSourceKey) {
+		t.Error("folder change missing PR_SOURCE_KEY")
+	}
+	if !hasProp(items, mapi.PrDisplayName) {
+		t.Error("folder change missing PR_DISPLAY_NAME")
+	}
+	if !hasProp(items, mapi.PropTag(0x40170102)) { // MetaTagIdsetGiven1
+		t.Error("state block missing the given id set")
+	}
+	if !hasProp(items, mapi.PropTag(0x67960102)) { // MetaTagCnsetSeen
+		t.Error("state block missing the seen change-number set")
+	}
+	if last := items[len(items)-1]; !last.IsMarker || last.Marker != ics.MarkerIncrSyncEnd {
+		t.Errorf("stream does not end with INCRSYNCEND: %+v", last)
+	}
+}
+
+// TestHierarchyDownloadIncremental drives a second hierarchy sync where the
+// client holds the first subfolder: only the second is a change, and a given FID
+// no longer present is reported deleted.
+func TestHierarchyDownloadIncremental(t *testing.T) {
+	s := openSeededStore(t)
+	parent, err := s.CreateFolder(nil, "sync-root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fa, err := s.CreateFolder(&parent, "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateFolder(&parent, "B"); err != nil {
+		t.Fatal(err)
+	}
+
+	state := hierarchyState(t, s)
+	state.Given().Append(mapi.MakeEIDEx(homeReplID, uint64(fa)))
+	state.Seen().AppendRange(homeReplID, 1, folderCN(t, s, fa))
+	phantom := uint64(fa) + 1_000_000
+	state.Given().Append(mapi.MakeEIDEx(homeReplID, phantom))
+
+	dc, err := s.NewHierarchyDownload(parent, state, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := drainDownload(t, dc, 64)
+
+	if n := countMarkers(items, ics.MarkerIncrSyncChg); n != 1 {
+		t.Errorf("INCRSYNCCHG count = %d, want 1 (only the second subfolder changed)", n)
+	}
+	if countMarkers(items, ics.MarkerIncrSyncDel) != 1 {
+		t.Error("expected an INCRSYNCDEL marker for the phantom given FID")
+	}
+	if !hasProp(items, mapi.PropTag(0x67E50102)) { // MetaTagIdsetDeleted
+		t.Error("deletions block missing MetaTagIdsetDeleted")
+	}
+}
+
 // TestContentDownloadPropertyFilter checks the exclusion filter: a message class
 // excluded by the SyncConfigure proptag list does not appear in the body, while
 // an unlisted property still does.

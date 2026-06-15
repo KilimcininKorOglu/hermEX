@@ -118,6 +118,8 @@ type DownloadContext struct {
 	producer   *ics.Producer
 	mapper     ics.ReplicaMapper
 	replica    mapi.GUID
+	syncType   uint8
+	rootFID    int64 // hierarchy: the configured folder whose subtree is synced
 	syncFlags  uint16
 	extraFlags uint32
 	proptags   map[mapi.PropTag]struct{} // the SyncConfigure property filter
@@ -163,6 +165,7 @@ func (s *Store) NewContentDownload(folderID int64, state *ics.State, syncFlags u
 		producer:     &ics.Producer{},
 		mapper:       storeMapper{home: replica},
 		replica:      replica,
+		syncType:     SyncTypeContents,
 		syncFlags:    syncFlags,
 		extraFlags:   extraFlags,
 		proptags:     make(map[mapi.PropTag]struct{}, len(proptags)),
@@ -196,6 +199,108 @@ func (s *Store) NewContentDownload(folderID int64, state *ics.State, syncFlags u
 	}
 	dc.flow = append(dc.flow, flowNode{kind: flowState}, flowNode{kind: flowEnd})
 	return dc, nil
+}
+
+// folderChangeOmit are server-internal/computed folder properties never sent in
+// a hierarchy change ([MS-OXCFXICS] 3.3.5.12; the reference strips these). The
+// counters and sizes are recomputed by the receiver; the rest of the bag (change
+// key, PCL, display name, container class, timestamps, hidden flag) travels.
+var folderChangeOmit = map[mapi.PropTag]struct{}{
+	mapi.PrDeletedFolderCount:        {},
+	mapi.PrInternetArticleNumberNext: {},
+	mapi.PrMessageSizeExtended:       {},
+	mapi.PrNormalMessageSizeExtended: {},
+	mapi.PrAssocMessageSizeExtended:  {},
+}
+
+// NewHierarchyDownload computes the subfolder delta for a folder subtree against
+// the client's prior state and builds the whole hierarchy stream eagerly — folder
+// changes, then deletions, then the new high-water state, then INCRSYNCEND
+// ([MS-OXCFXICS] 3.3.5.12). A hierarchy is small, so unlike contents it is not
+// drained through a flow list; GetBuffer simply chunks the produced bytes.
+//
+// v1 emits each folder's stored bag (minus server-internal tags and named
+// properties) plus the computed source/parent-source keys; the root folder's
+// Outlook special-folder entryid set (PR_IPM_*_ENTRYID, PR_FREEBUSY_ENTRYIDS)
+// and the PidTagFolderId/ParentFolderId pair are deferred refinements.
+func (s *Store) NewHierarchyDownload(folderID int64, state *ics.State, syncFlags uint16, proptags []mapi.PropTag) (*DownloadContext, error) {
+	replica, err := s.replicaGUID()
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.GetHierarchySync(HierarchySyncRequest{FolderID: folderID, Given: state.Given(), Seen: state.Seen()})
+	if err != nil {
+		return nil, err
+	}
+	dc := &DownloadContext{
+		store:       s,
+		producer:    &ics.Producer{},
+		mapper:      storeMapper{home: replica},
+		replica:     replica,
+		syncType:    SyncTypeHierarchy,
+		rootFID:     folderID,
+		syncFlags:   syncFlags,
+		proptags:    make(map[mapi.PropTag]struct{}, len(proptags)),
+		givenKeep:   res.GivenFIDs,
+		deletedMIDs: res.DeletedFIDs,
+		lastCN:      res.LastCN,
+	}
+	for _, t := range proptags {
+		dc.proptags[t] = struct{}{}
+	}
+	for _, fid := range res.ChangedFIDs {
+		if err := dc.writeFolderChange(fid); err != nil {
+			return nil, err
+		}
+	}
+	if syncFlags&SyncNoDeletions == 0 {
+		if err := dc.writeDeletions(); err != nil {
+			return nil, err
+		}
+	}
+	if err := dc.writeState(); err != nil {
+		return nil, err
+	}
+	dc.producer.WriteMarker(ics.MarkerIncrSyncEnd)
+	return dc, nil
+}
+
+// writeFolderChange emits one folder as INCRSYNCCHG + its property bag: the
+// stored bag minus server-internal tags and named properties, plus the computed
+// source key and parent source key (empty when the parent is the sync root).
+func (dc *DownloadContext) writeFolderChange(fid uint64) error {
+	props, err := dc.store.GetFolderProperties(int64(fid))
+	if err != nil {
+		return err
+	}
+	var parent sql.NullInt64
+	if err := dc.store.objdb.QueryRow(
+		`SELECT parent_id FROM folders WHERE folder_id=? AND is_deleted=0`, int64(fid)).Scan(&parent); err != nil {
+		return err
+	}
+	out := make(mapi.PropertyValues, 0, len(props)+2)
+	for _, p := range props {
+		if _, omit := folderChangeOmit[p.Tag]; omit {
+			continue
+		}
+		if uint64(uint16(uint32(p.Tag)>>16)) >= namedPropBase {
+			continue // named props are stripped from folder changes
+		}
+		if p.Tag == mapi.PrSourceKey || p.Tag == mapi.PrParentSourceKey {
+			continue // recomputed below
+		}
+		out = append(out, p)
+	}
+	out = append(out, mapi.TaggedPropVal{Tag: mapi.PrSourceKey, Value: sourceKey(dc.replica, fid)})
+	psk := []byte{}
+	if parent.Valid && parent.Int64 != dc.rootFID {
+		psk = sourceKey(dc.replica, uint64(parent.Int64))
+	}
+	out = append(out, mapi.TaggedPropVal{Tag: mapi.PrParentSourceKey, Value: psk})
+
+	out = dc.filter(out)
+	dc.producer.WriteMarker(ics.MarkerIncrSyncChg)
+	return dc.writeProps(out)
 }
 
 // GetBuffer serves up to maxLen bytes of the synchronization stream, feeding flow
@@ -370,18 +475,29 @@ func (dc *DownloadContext) writeReadState() error {
 // seen/seenFAI/read change-number sets become a single high-water range over the
 // enabled classes ([MS-OXCFXICS] 3.3.5.13; the download replaces, never merges).
 func (dc *DownloadContext) writeState() error {
-	out := ics.NewState(ics.ContentsDown, dc.mapper)
-	for _, mid := range dc.givenKeep {
-		out.Given().Append(mapi.MakeEIDEx(homeReplID, mid))
+	var out *ics.State
+	if dc.syncType == SyncTypeHierarchy {
+		out = ics.NewState(ics.HierarchyDown, dc.mapper)
+	} else {
+		out = ics.NewState(ics.ContentsDown, dc.mapper)
 	}
-	if dc.syncFlags&SyncNormal != 0 && dc.lastCN != 0 {
-		out.Seen().AppendRange(homeReplID, 1, dc.lastCN)
+	for _, id := range dc.givenKeep {
+		out.Given().Append(mapi.MakeEIDEx(homeReplID, id))
 	}
-	if dc.syncFlags&SyncAssociated != 0 && dc.lastCN != 0 {
-		out.SeenFAI().AppendRange(homeReplID, 1, dc.lastCN)
-	}
-	if dc.syncFlags&SyncReadState != 0 && dc.lastReadCN != 0 {
-		out.Read().AppendRange(homeReplID, 1, dc.lastReadCN)
+	if dc.syncType == SyncTypeHierarchy {
+		if dc.lastCN != 0 {
+			out.Seen().AppendRange(homeReplID, 1, dc.lastCN)
+		}
+	} else {
+		if dc.syncFlags&SyncNormal != 0 && dc.lastCN != 0 {
+			out.Seen().AppendRange(homeReplID, 1, dc.lastCN)
+		}
+		if dc.syncFlags&SyncAssociated != 0 && dc.lastCN != 0 {
+			out.SeenFAI().AppendRange(homeReplID, 1, dc.lastCN)
+		}
+		if dc.syncFlags&SyncReadState != 0 && dc.lastReadCN != 0 {
+			out.Read().AppendRange(homeReplID, 1, dc.lastReadCN)
+		}
 	}
 	props, err := out.Serialize()
 	if err != nil {
