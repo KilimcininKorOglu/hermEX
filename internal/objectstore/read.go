@@ -125,13 +125,16 @@ func (s *Store) SetMessageFlags(folderID int64, uid uint32, flags int64) error {
 	if err != nil {
 		return err
 	}
+	// The object store is authoritative for read_state and its read_cn, so mirror
+	// the read bit there first — allocating a read_cn when it actually flips — before
+	// rewriting the IMAP mask. Ordering it first keeps a failed mask update from
+	// leaving a read change without the read_cn the ICS download depends on.
+	if _, err := s.setObjReadState(messageID, bit(FlagSeen)); err != nil {
+		return err
+	}
 	if _, err := s.idxdb.Exec(
 		`UPDATE messages SET read=?, replied=?, flagged=?, deleted=?, unsent=? WHERE message_id=?`,
 		bit(FlagSeen), bit(FlagAnswered), bit(FlagFlagged), bit(FlagDeleted), bit(FlagDraft), messageID); err != nil {
-		return err
-	}
-	if _, err := s.objdb.Exec(
-		`UPDATE messages SET read_state=? WHERE message_id=?`, bit(FlagSeen), messageID); err != nil {
 		return err
 	}
 	return nil
@@ -147,19 +150,60 @@ func (s *Store) SetMessageReadState(messageID int64, read bool) error {
 	if read {
 		b = 1
 	}
-	res, err := s.idxdb.Exec(`UPDATE messages SET read=? WHERE message_id=?`, b, messageID)
+	// Drive existence and the actual-change check from the object store: it holds
+	// every message type, while the IMAP index holds only mail, so a non-mail item
+	// (a calendar or contact a MAPI client marks read) would otherwise be dropped
+	// here and never reach the ICS read-state download.
+	found, err := s.setObjReadState(messageID, b)
 	if err != nil {
 		return err
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
+	if !found {
 		return ErrNotFound
 	}
-	if _, err := s.objdb.Exec(`UPDATE messages SET read_state=? WHERE message_id=?`, b, messageID); err != nil {
+	// Mirror into the IMAP index. A non-mail message is not indexed, where the
+	// zero-row update is a harmless no-op.
+	if _, err := s.idxdb.Exec(`UPDATE messages SET read=? WHERE message_id=?`, b, messageID); err != nil {
 		return err
 	}
 	return nil
+}
+
+// setObjReadState mirrors a message's read flag into the object store, allocating a
+// fresh read_cn from the mailbox change-number counter only when the state actually
+// flips, so the ICS read-state download branch can report the change. The counter
+// read and the row update share one transaction, so concurrent flips cannot land on
+// the same change number (the read_cn UNIQUE column is the backstop). Folder-
+// associated messages carry no read state and are left untouched. It reports whether
+// the message exists in the object store — the store of record for every message
+// type, mail or not.
+func (s *Store) setObjReadState(messageID int64, want int) (found bool, err error) {
+	tx, err := s.objdb.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	var cur, assoc int
+	err = tx.QueryRow(`SELECT read_state, is_associated FROM messages WHERE message_id=?`, messageID).Scan(&cur, &assoc)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if assoc != 0 || cur == want {
+		return true, nil // associated (no read state) or already in state — no new read_cn
+	}
+	rcn, err := allocateCN(tx)
+	if err != nil {
+		return true, err
+	}
+	if _, err := tx.Exec(
+		`UPDATE messages SET read_state=?, read_cn=? WHERE message_id=?`, want, int64(rcn), messageID); err != nil {
+		return true, err
+	}
+	if err := tx.Commit(); err != nil {
+		return true, err
+	}
+	return true, nil
 }

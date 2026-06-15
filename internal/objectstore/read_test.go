@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"database/sql"
 	"errors"
 	"strings"
 	"testing"
@@ -101,5 +102,110 @@ func TestMessageListAndFlags(t *testing.T) {
 
 	if err := s.SetMessageFlags(mapi.PrivateFIDInbox, 999, FlagSeen); !errors.Is(err, ErrNotFound) {
 		t.Errorf("SetMessageFlags(missing) err = %v, want ErrNotFound", err)
+	}
+}
+
+// TestSetReadStateFeedsContentSync drives the real read-state write path on a
+// non-mail message and confirms the change reaches the ICS read-state download.
+// A contact lives only in the object store (the IMAP index holds mail), so this
+// also pins that SetMessageReadState resolves the message from the object store,
+// not the index — an index-gated path would return ErrNotFound and silently drop
+// every calendar/contact read a MAPI client makes.
+func TestSetReadStateFeedsContentSync(t *testing.T) {
+	s := openSeededStore(t)
+	fld := int64(mapi.PrivateFIDContacts)
+	mid, err := s.CreateMessage(fld, contactMsg("readme"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SetMessageReadState(mid, true); err != nil {
+		t.Fatalf("SetMessageReadState on a non-mail message: %v", err)
+	}
+
+	var readState int
+	var readCN sql.NullInt64
+	if err := s.objdb.QueryRow(`SELECT read_state, read_cn FROM messages WHERE message_id=?`, mid).Scan(&readState, &readCN); err != nil {
+		t.Fatal(err)
+	}
+	if readState != 1 {
+		t.Errorf("read_state = %d, want 1", readState)
+	}
+	if !readCN.Valid {
+		t.Fatal("read_cn was not allocated on the read-state flip")
+	}
+
+	// The body is acknowledged (in Seen) but the read change is not (Read is empty
+	// with SYNC_READ_STATE on), so the download must report the message as read.
+	res, err := s.GetContentSync(ContentSyncRequest{
+		FolderID: fld,
+		Given:    looseSet(uint64(mid)),
+		Seen:     looseSet(msgCN(t, s, mid)),
+		Read:     looseSet(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eqSet(t, "ReadMIDs", res.ReadMIDs, uint64(mid))
+	if res.LastReadCN != uint64(readCN.Int64) {
+		t.Errorf("LastReadCN = %d, want %d (the read_cn the flip allocated)", res.LastReadCN, readCN.Int64)
+	}
+}
+
+// TestSetReadStateNoOp pins the "gerçek değişimde" rule: re-setting a message to a
+// read state it already holds allocates no new read_cn and does not advance the
+// mailbox change-number counter.
+func TestSetReadStateNoOp(t *testing.T) {
+	s := openSeededStore(t)
+	mid, err := s.CreateMessage(int64(mapi.PrivateFIDContacts), contactMsg("noop"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetMessageReadState(mid, true); err != nil {
+		t.Fatal(err)
+	}
+	var firstCN int64
+	if err := s.objdb.QueryRow(`SELECT read_cn FROM messages WHERE message_id=?`, mid).Scan(&firstCN); err != nil {
+		t.Fatal(err)
+	}
+	counterBefore := configVal(t, s, cfgLastChangeNumber)
+
+	if err := s.SetMessageReadState(mid, true); err != nil {
+		t.Fatal(err)
+	}
+	var secondCN int64
+	if err := s.objdb.QueryRow(`SELECT read_cn FROM messages WHERE message_id=?`, mid).Scan(&secondCN); err != nil {
+		t.Fatal(err)
+	}
+	if secondCN != firstCN {
+		t.Errorf("re-setting the same read state reallocated read_cn: %d -> %d", firstCN, secondCN)
+	}
+	if got := configVal(t, s, cfgLastChangeNumber); got != counterBefore {
+		t.Errorf("no-op read-state set bumped the change-number counter: %d -> %d", counterBefore, got)
+	}
+}
+
+// TestSetMessageFlagsWritesReadCN confirms the IMAP flag-store path also records a
+// read_cn when \Seen first appears, so a message read in IMAP propagates to a
+// MAPI/ICS client.
+func TestSetMessageFlagsWritesReadCN(t *testing.T) {
+	s := openSeededStore(t)
+	raw := []byte("From: a@example.test\r\nTo: b@example.test\r\nSubject: imapread\r\n" +
+		"Date: Wed, 15 Nov 2023 10:13:20 +0000\r\n\r\ngövde.\r\n")
+	info, err := s.AppendMessage(mapi.PrivateFIDInbox, raw, time.Unix(1700000000, 0), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SetMessageFlags(mapi.PrivateFIDInbox, 1, FlagSeen); err != nil {
+		t.Fatal(err)
+	}
+	var readState int
+	var readCN sql.NullInt64
+	if err := s.objdb.QueryRow(`SELECT read_state, read_cn FROM messages WHERE message_id=?`, info.ID).Scan(&readState, &readCN); err != nil {
+		t.Fatal(err)
+	}
+	if readState != 1 || !readCN.Valid {
+		t.Errorf("after \\Seen: read_state=%d read_cn.valid=%v, want 1/true", readState, readCN.Valid)
 	}
 }
