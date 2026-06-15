@@ -52,6 +52,21 @@ func (pr *Producer) WriteProp(p StreamProp) error {
 // Pending reports whether any bytes remain to be drained.
 func (pr *Producer) Pending() bool { return pr.head < len(pr.queue) }
 
+// PendingLen reports the number of undrained bytes queued, counting the partial
+// progress through the current element. The download flow uses it to feed just
+// enough elements to fill a chunk rather than buffering the whole stream.
+func (pr *Producer) PendingLen() int {
+	n := 0
+	for i := pr.head; i < len(pr.queue); i++ {
+		e := &pr.queue[i]
+		if !e.headerDone {
+			n += len(e.header)
+		}
+		n += len(e.body) - e.bodyPos
+	}
+	return n
+}
+
 // ReadBuffer serves up to maxLen bytes of the pending stream. It emits whole
 // elements, splitting only inside a large value's body when a single element
 // exceeds maxLen. last reports the stream is fully drained, after which the

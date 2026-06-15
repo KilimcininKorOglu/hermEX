@@ -70,3 +70,33 @@ const (
 	fxCodepageFlag   uint16 = 0x8000
 	propIDMessageCls uint16 = 0x001A // PR_MESSAGE_CLASS — always written PT_STRING8
 )
+
+// Exported FastTransfer markers the sync context objects emit. The download and
+// upload paths live in internal/objectstore (objectstore imports ics, so ics
+// cannot import it) and drive the producer/parser with these — exported aliases
+// of the single-source words above so a caller need not hard-code wire values.
+const (
+	MarkerIncrSyncChg        = markerIncrSyncChg
+	MarkerIncrSyncMessage    = markerIncrSyncMessage
+	MarkerIncrSyncDel        = markerIncrSyncDel
+	MarkerIncrSyncRead       = markerIncrSyncRead
+	MarkerIncrSyncStateBegin = markerIncrSyncStateBegin
+	MarkerIncrSyncStateEnd   = markerIncrSyncStateEnd
+	MarkerIncrSyncEnd        = markerIncrSyncEnd
+	MarkerStartRecip         = markerStartRecip
+	MarkerEndToRecip         = markerEndToRecip
+	MarkerNewAttach          = markerNewAttach
+	MarkerEndAttach          = markerEndAttach
+)
+
+// Per-sync meta-tags computed and written directly into a download stream; they
+// are NOT ics State members ([MS-OXCFXICS] 2.2.4.3). MetaTagFXDelProp is a
+// PT_LONG propvalue whose value is the affected proptag (PR_MESSAGE_RECIPIENTS /
+// PR_MESSAGE_ATTACHMENTS); the idset meta-tags are PT_BINARY idset payloads.
+const (
+	MetaTagFXDelProp            uint32 = 0x40160003
+	MetaTagIdsetDeleted         uint32 = 0x67E50102
+	MetaTagIdsetNoLongerInScope uint32 = 0x40210102
+	MetaTagIdsetRead            uint32 = 0x402D0102
+	MetaTagIdsetUnread          uint32 = 0x402E0102
+)

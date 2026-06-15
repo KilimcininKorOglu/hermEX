@@ -24,6 +24,19 @@ const (
 	PrMid                       = PropTag(0x674A0014) // PtI8 (PidTagMid, the message id)
 )
 
+// ICS / FastTransfer object-identity property tags (MS-OXCFXICS): the change
+// identification a message change header carries and the recipient/attachment
+// object containers a message-change stream delimits with MetaTagFXDelProp.
+const (
+	PrSourceKey          = PropTag(0x65E00102) // PtBinary (PidTagSourceKey)
+	PrParentSourceKey    = PropTag(0x65E10102) // PtBinary (PidTagParentSourceKey)
+	PrChangeNumber       = PropTag(0x67A40014) // PtI8 (PidTagChangeNumber)
+	PrAssociated         = PropTag(0x67AA000B) // PtBoolean (PidTagAssociated)
+	PrMsgStatus          = PropTag(0x0E170003) // PtLong (PidTagMessageStatus)
+	PrMessageRecipients  = PropTag(0x0E12000D) // PtObject (PidTagMessageRecipients)
+	PrMessageAttachments = PropTag(0x0E13000D) // PtObject (PidTagMessageAttachments)
+)
+
 // Store-root property tags written when seeding a mailbox.
 const (
 	PrOOFState                  = PropTag(0x661D000B) // PtBoolean (out-of-office)
