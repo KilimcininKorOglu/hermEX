@@ -52,8 +52,16 @@ func isMarker(w uint32) bool { _, ok := markerSet[w]; return ok }
 // PT_BINARY form (0x40170102). ([MS-OXCFXICS] 3.2.5.2.1.)
 const metaTagIdsetGiven uint32 = 0x40170003
 
-// metaTagIdsetGiven1 is the honest PT_BINARY form a producer emits.
-const metaTagIdsetGiven1 = 0x40170102
+// State meta-tags ([MS-OXCFXICS] 2.2.1.1). The given/seen idsets an ics State
+// serialises ride the stream under these PT_BINARY tags. metaTagIdsetGiven1 is
+// the honest PT_BINARY form a producer emits for the given set (vs the lying
+// PT_LONG metaTagIdsetGiven a reader must also accept).
+const (
+	metaTagIdsetGiven1  uint32 = 0x40170102
+	metaTagCnsetSeen    uint32 = 0x67960102
+	metaTagCnsetSeenFAI uint32 = 0x67DA0102
+	metaTagCnsetRead    uint32 = 0x67D20102
+)
 
 // cpUTF16 is the code-page id (1200) meaning UTF-16LE in the FastTransfer
 // code-page string flag (FXICS_CODEPAGE_FLAG = 0x8000).
