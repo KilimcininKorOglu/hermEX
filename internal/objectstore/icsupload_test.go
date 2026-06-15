@@ -2,6 +2,8 @@ package objectstore
 
 import (
 	"bytes"
+	"database/sql"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -476,5 +478,112 @@ func TestImportRejectsStateMetaTag(t *testing.T) {
 	}})
 	if err := col.PutBuffer(body); err == nil {
 		t.Fatal("expected an ICS state meta-tag in the content stream to be rejected")
+	}
+}
+
+// TestImportDeletes deletes one of two messages by its home-replica source key and
+// asserts the named message is gone, the other survives, and a repeat delete of an
+// absent id is an idempotent no-op.
+func TestImportDeletes(t *testing.T) {
+	s := openSeededStore(t)
+	fld := int64(mapi.PrivateFIDContacts)
+	m1, err := s.CreateMessage(fld, richMsg("keep"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m2, err := s.CreateMessage(fld, richMsg("drop"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := s.replicaGUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	deleted, err := s.ImportDeletes(fld, [][]byte{sourceKey(home, uint64(m2))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deleted) != 1 || deleted[0] != uint64(m2) {
+		t.Fatalf("deleted = %v, want [%d]", deleted, m2)
+	}
+	if _, err := s.OpenMessage(m2); !errors.Is(err, ErrNotFound) {
+		t.Errorf("deleted message still present (err=%v)", err)
+	}
+	if _, err := s.OpenMessage(m1); err != nil {
+		t.Errorf("kept message vanished: %v", err)
+	}
+
+	again, err := s.ImportDeletes(fld, [][]byte{sourceKey(home, uint64(m2))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again) != 0 {
+		t.Errorf("re-delete of an absent id reported %v, want none", again)
+	}
+}
+
+// TestImportReadStateChanges marks a message read by its source key and asserts the
+// stored flag flipped, a read change number was recorded, and a download holding
+// the body but not that read change is told the read state changed — the engine's
+// read-state branch, which only this write path feeds with a real read change
+// number. A repeat of the same flag is a no-op.
+func TestImportReadStateChanges(t *testing.T) {
+	s := openSeededStore(t)
+	fld := int64(mapi.PrivateFIDContacts)
+	mid, err := s.CreateMessage(fld, richMsg("unread"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, err := s.replicaGUID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cn := msgCN(t, s, mid)
+
+	readCNs, err := s.ImportReadStateChanges(fld, []ReadStateChange{
+		{SourceKey: sourceKey(home, uint64(mid)), MarkRead: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(readCNs) != 1 {
+		t.Fatalf("read change numbers = %v, want one", readCNs)
+	}
+	var read int
+	var rcn sql.NullInt64
+	if err := s.objdb.QueryRow(`SELECT read_state, read_cn FROM messages WHERE message_id=?`, mid).Scan(&read, &rcn); err != nil {
+		t.Fatal(err)
+	}
+	if read != 1 {
+		t.Errorf("read_state = %d, want 1", read)
+	}
+	if !rcn.Valid || uint64(rcn.Int64) != readCNs[0] {
+		t.Errorf("stored read_cn = %v, want %d", rcn, readCNs[0])
+	}
+
+	seen := ics.NewIDSet(ics.FormIDLoose, nil)
+	seen.AppendRange(homeReplID, 1, cn)
+	res, err := s.GetContentSync(ContentSyncRequest{
+		FolderID: fld,
+		Given:    looseSet(uint64(mid)),
+		Seen:     seen,
+		Read:     ics.NewIDSet(ics.FormIDLoose, nil), // read class enabled, the read change unseen
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(res.ReadMIDs, uint64(mid)) {
+		t.Errorf("read-state change for %#x not reported (read=%v unread=%v)", mid, res.ReadMIDs, res.UnreadMIDs)
+	}
+
+	again, err := s.ImportReadStateChanges(fld, []ReadStateChange{
+		{SourceKey: sourceKey(home, uint64(mid)), MarkRead: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(again) != 0 {
+		t.Errorf("re-applying the same read flag reported %v, want none", again)
 	}
 }

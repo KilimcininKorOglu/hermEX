@@ -3,6 +3,7 @@ package objectstore
 import (
 	"bytes"
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"hermex/internal/ics"
@@ -355,4 +356,126 @@ func advanceFolderEID(q sqlExec, folderID int64, mid uint64) error {
 		`UPDATE folders SET cur_eid=?+1 WHERE folder_id=? AND ?>=cur_eid AND ?<=max_eid`,
 		int64(mid), folderID, int64(mid), int64(mid))
 	return err
+}
+
+// ImportDeletes removes the messages a client reports gone from a folder
+// ([MS-OXCFXICS] 3.3.5.10). Each source key is a 22-byte XID; a home-replica one
+// names a message id, which is deleted when it is present in the folder.
+// Foreign-replica keys (cross-store) and ids absent from the folder are skipped,
+// so the operation is idempotent. v1 always hard-deletes — the store keeps no
+// soft-delete state — so the soft/hard distinction the wire carries is a
+// documented limitation. It returns the ids actually deleted.
+func (s *Store) ImportDeletes(folderID int64, sourceKeys [][]byte) ([]uint64, error) {
+	home, err := s.replicaGUID()
+	if err != nil {
+		return nil, err
+	}
+	var deleted []uint64
+	for _, sk := range sourceKeys {
+		mid, foreign, err := parseSourceKeyMID(sk, home)
+		if err != nil {
+			return nil, err
+		}
+		if foreign {
+			continue
+		}
+		var present int
+		err = s.objdb.QueryRow(`SELECT 1 FROM messages WHERE message_id=? AND parent_fid=?`, int64(mid), folderID).Scan(&present)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if err := s.DeleteObject(int64(mid)); err != nil && !errors.Is(err, ErrNotFound) {
+			return nil, err
+		}
+		deleted = append(deleted, mid)
+	}
+	return deleted, nil
+}
+
+// ReadStateChange is one entry of a RopSynchronizationImportReadStateChanges
+// request: the 22-byte source key naming a message and the read flag to apply.
+type ReadStateChange struct {
+	SourceKey []byte
+	MarkRead  bool
+}
+
+// ImportReadStateChanges applies read-flag changes a client uploaded
+// ([MS-OXCFXICS] 3.3.5.10). For each home-replica message in the folder whose flag
+// actually differs (associated messages, which have no read state, are skipped) it
+// records the new flag and a freshly allocated read change number — the version
+// the contents delta diffs against a client's read set, and the first write path
+// to record one. It returns those read change numbers (the upload state collector
+// folds them into its read set). Foreign keys, absent ids, and no-op changes are
+// skipped. The IMAP read flag is mirrored best-effort for any indexed message.
+func (s *Store) ImportReadStateChanges(folderID int64, changes []ReadStateChange) ([]uint64, error) {
+	home, err := s.replicaGUID()
+	if err != nil {
+		return nil, err
+	}
+	tx, err := s.objdb.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	type applied struct {
+		mid  uint64
+		read int
+	}
+	var readCNs []uint64
+	var mirror []applied
+	for _, c := range changes {
+		mid, foreign, err := parseSourceKeyMID(c.SourceKey, home)
+		if err != nil {
+			return nil, err
+		}
+		if foreign {
+			continue
+		}
+		var cur, assoc int
+		err = tx.QueryRow(
+			`SELECT read_state, is_associated FROM messages WHERE message_id=? AND parent_fid=? AND is_deleted=0`,
+			int64(mid), folderID).Scan(&cur, &assoc)
+		if errors.Is(err, sql.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if assoc != 0 {
+			continue // associated messages carry no read state
+		}
+		want := 0
+		if c.MarkRead {
+			want = 1
+		}
+		if cur == want {
+			continue // already in the requested state
+		}
+		rcn, err := allocateCN(tx)
+		if err != nil {
+			return nil, err
+		}
+		if _, err := tx.Exec(
+			`UPDATE messages SET read_state=?, read_cn=? WHERE message_id=?`,
+			want, int64(rcn), int64(mid)); err != nil {
+			return nil, err
+		}
+		readCNs = append(readCNs, rcn)
+		mirror = append(mirror, applied{mid: mid, read: want})
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	for _, m := range mirror {
+		// The message need not be in the IMAP index (only mail is); a no-op update
+		// there is harmless.
+		if _, err := s.idxdb.Exec(`UPDATE messages SET read=? WHERE message_id=?`, m.read, int64(m.mid)); err != nil {
+			return nil, err
+		}
+	}
+	return readCNs, nil
 }
