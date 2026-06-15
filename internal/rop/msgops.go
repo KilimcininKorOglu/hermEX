@@ -6,10 +6,20 @@ import (
 	"hermex/internal/objectstore"
 )
 
-// ReadFlags bits ([MS-OXCMSG] 2.2.3.10.1). v1 honors only the read/unread
-// distinction; the suppress-receipt and notify bits are accepted but not acted
-// on (read receipts are a delivery-time concern, outside the ROP write core).
-const readFlagClearRead uint8 = 0x04 // rfClearReadFlag: mark the message unread
+// ReadFlags ([MS-OXCMSG] 2.2.3.10.1): the request flag byte, with the reserved
+// bits masked off, selects one action by exact value (not a per-bit test). v1
+// implements the read/unread state change; the receipt and notify bits are
+// accepted but leave the read state untouched, since read receipts and change
+// notifications are not implemented.
+const (
+	rfDefault             uint8 = 0x00 // mark the message read
+	rfSuppressReceipt     uint8 = 0x01 // mark read without sending a read receipt
+	rfClearReadFlag       uint8 = 0x04 // mark the message unread
+	rfReserved            uint8 = 0x0A // reserved bits, masked off before dispatch
+	rfGenerateReceiptOnly uint8 = 0x10 // send a read receipt only; no state change
+	rfClearNotifyRead     uint8 = 0x20 // clear a pending read notification; no state change
+	rfClearNotifyUnread   uint8 = 0x40 // clear a pending non-read notification; no state change
+)
 
 // ropSetMessageReadFlag handles RopSetMessageReadFlag ([MS-OXCMSG] 2.2.3.10 /
 // [MS-OXCROPS] 2.2.7.10). It marks an opened message read (ReadFlags default) or
@@ -29,11 +39,23 @@ func (s *Session) ropSetMessageReadFlag(p *ext.Pull, out *ext.Push, handles []ui
 		writeErr(out, ropSetMessageReadFlag, hindex, ecError)
 		return true
 	}
-	// The default (rfDefault) marks the message read; rfClearReadFlag clears it.
-	read := flags&readFlagClearRead == 0
-	if err := obj.store.SetMessageReadState(obj.messageID, read); err != nil {
-		writeErr(out, ropSetMessageReadFlag, hindex, ecError)
-		return true
+	// [MS-OXCMSG] 2.2.3.10: dispatch on the whole flag byte (reserved bits
+	// masked), not a per-bit test. Only rfDefault/rfSuppressReceipt mark the
+	// message read and only rfClearReadFlag (optionally with rfSuppressReceipt)
+	// marks it unread; the receipt-only and notify-clear flags change no read
+	// state. Write only when the action changes state, so the call is idempotent.
+	var read, change bool
+	switch flags &^ rfReserved {
+	case rfDefault, rfSuppressReceipt:
+		read, change = true, true
+	case rfClearReadFlag, rfClearReadFlag | rfSuppressReceipt:
+		change = true
+	}
+	if change {
+		if err := obj.store.SetMessageReadState(obj.messageID, read); err != nil {
+			writeErr(out, ropSetMessageReadFlag, hindex, ecError)
+			return true
+		}
 	}
 	out.Uint8(ropSetMessageReadFlag)
 	out.Uint8(hindex)
