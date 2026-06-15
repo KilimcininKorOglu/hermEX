@@ -174,8 +174,9 @@ services:
 
   # Single-FQDN front door: reverse-proxies to the HTTP daemons by path prefix so
   # one host serves autodiscover/EWS/MAPI/RPC/ActiveSync/DAV/webmail. Pure proxy
-  # (no DB/store), configured via env. TLS is off until HERMEX_TLS_CERT and
-  # HERMEX_TLS_KEY are set (added with the cert at the live-smoke step).
+  # (no DB/store), configured via env. Terminates TLS with the dev cert from
+  # scripts/gen-dev-cert.sh (docker-data/tls/, gitignored); the backends stay
+  # plaintext on the internal network.
   gateway:
     container_name: hermex-gateway
     build:
@@ -184,6 +185,10 @@ services:
     command: ["/usr/local/bin/hermex-gateway"]
     environment:
       - HERMEX_GATEWAY_ADDR=:8080
+      - HERMEX_TLS_CERT=/config/tls/cert.pem
+      - HERMEX_TLS_KEY=/config/tls/key.pem
+    volumes:
+      - ./docker-data/tls:/config/tls:ro
     ports:
       - "8149:8080"
     depends_on:
