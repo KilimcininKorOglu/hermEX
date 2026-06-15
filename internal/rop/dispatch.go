@@ -16,6 +16,9 @@ const (
 	ropSaveChangesMessage    uint8 = 0x0C
 	ropModifyRecipients      uint8 = 0x0E
 	ropSubmitMessage         uint8 = 0x32
+	ropSetMessageReadFlag    uint8 = 0x11
+	ropDeleteMessages        uint8 = 0x1E
+	ropMoveCopyMessages      uint8 = 0x33
 	ropSetColumns            uint8 = 0x12
 	ropSortTable             uint8 = 0x13
 	ropRestrict              uint8 = 0x14
@@ -93,6 +96,18 @@ loop:
 			}
 		case ropSubmitMessage:
 			if !s.ropSubmitMessage(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSetMessageReadFlag:
+			if !s.ropSetMessageReadFlag(p, out, handles, hindex) {
+				break loop
+			}
+		case ropDeleteMessages:
+			if !s.ropDeleteMessages(p, out, handles, hindex) {
+				break loop
+			}
+		case ropMoveCopyMessages:
+			if !s.ropMoveCopyMessages(p, out, handles, hindex) {
 				break loop
 			}
 		case ropSaveChangesMessage:

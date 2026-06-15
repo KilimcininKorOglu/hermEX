@@ -136,3 +136,30 @@ func (s *Store) SetMessageFlags(folderID int64, uid uint32, flags int64) error {
 	}
 	return nil
 }
+
+// SetMessageReadState sets or clears a single message's read flag by its object
+// id, touching only the read bit — unlike SetMessageFlags, which replaces the
+// whole IMAP flag mask and so would clobber the answered/flagged/deleted bits.
+// It mirrors the state into both the index and the object store and reports
+// ErrNotFound when no such message exists.
+func (s *Store) SetMessageReadState(messageID int64, read bool) error {
+	var b int
+	if read {
+		b = 1
+	}
+	res, err := s.idxdb.Exec(`UPDATE messages SET read=? WHERE message_id=?`, b, messageID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	if _, err := s.objdb.Exec(`UPDATE messages SET read_state=? WHERE message_id=?`, b, messageID); err != nil {
+		return err
+	}
+	return nil
+}
