@@ -174,6 +174,26 @@ loop:
 			if !s.ropFastTransferSourceGetBuffer(p, out, handles, hindex) {
 				break loop
 			}
+		case ropSyncOpenCollector:
+			if !s.ropSyncOpenCollector(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSyncImportHierarchyChange:
+			if !s.ropSyncImportHierarchyChange(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSyncImportDeletes:
+			if !s.ropSyncImportDeletes(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSyncImportReadStateChanges:
+			if !s.ropSyncImportReadStateChanges(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSyncGetTransferState:
+			if !s.ropSyncGetTransferState(p, out, handles, hindex) {
+				break loop
+			}
 		default:
 			writeErr(out, ropID, hindex, ecError)
 			break loop

@@ -2,17 +2,29 @@ package rop
 
 import (
 	"hermex/internal/ext"
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
 
-// ICS / FastTransfer ROP opcodes ([MS-OXCROPS] 2.2.3). v1 wires the download path.
+// ICS / FastTransfer ROP opcodes ([MS-OXCROPS] 2.2.3). v1 wires the download path
+// plus the pure-ROP upload collector imports (hierarchy / deletes / read-state).
 const (
 	ropFastTransferSourceGetBuffer   uint8 = 0x4E
 	ropSynchronizationConfigure      uint8 = 0x70
+	ropSyncImportHierarchyChange     uint8 = 0x73
+	ropSyncImportDeletes             uint8 = 0x74
 	ropSyncUploadStateStreamBegin    uint8 = 0x75
 	ropSyncUploadStateStreamContinue uint8 = 0x76
 	ropSyncUploadStateStreamEnd      uint8 = 0x77
+	ropSyncOpenCollector             uint8 = 0x7E
+	ropSyncImportReadStateChanges    uint8 = 0x80
+	ropSyncGetTransferState          uint8 = 0x82
 )
+
+// importDeletesTag is the single multivalue-binary property an ImportDeletes
+// request carries — PROP_TAG(PT_MV_BINARY, 0) — whose values are the 22-byte
+// source keys to delete ([MS-OXCFXICS] 2.2.3.2.4.5).
+const importDeletesTag uint32 = 0x00001102
 
 // FastTransfer transfer-status values ([MS-OXCFXICS] 2.2.3.1.1.5.1 / mapi_types).
 const (
@@ -191,6 +203,171 @@ func (s *Session) ropFastTransferSourceGetBuffer(p *ext.Pull, out *ext.Push, han
 	out.Uint8(0)            // Reserved
 	_ = out.BinShort(chunk) // chunk <= fastChunkCap < 0xFFFF, so this never errors
 	return true
+}
+
+// ropSyncOpenCollector handles RopSynchronizationOpenCollector ([MS-OXCFXICS]
+// 2.2.3.2.1.2): it opens an upload collector on a folder for inline imports
+// (hierarchy / deletes / read-state). The collector is both the import target and
+// the state-stream sink, and its serialized state is read back via GetTransferState.
+func (s *Session) ropSyncOpenCollector(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	ohindex, e1 := p.Uint8()
+	isContent, e2 := p.Uint8()
+	if e1 != nil || e2 != nil {
+		return false
+	}
+	folder := s.get(handleAt(handles, hindex))
+	if folder == nil || folder.kind != kindFolder || folder.store == nil {
+		writeErr(out, ropSyncOpenCollector, ohindex, ecError)
+		return true
+	}
+	var col *objectstore.UploadCollector
+	var err error
+	if isContent != 0 {
+		col, err = folder.store.NewContentUpload(folder.folderID)
+	} else {
+		col, err = folder.store.NewHierarchyUpload(folder.folderID)
+	}
+	if err != nil {
+		writeErr(out, ropSyncOpenCollector, ohindex, ecError)
+		return true
+	}
+	h := s.alloc(&object{kind: kindSync, store: folder.store, upload: col, stateSink: col})
+	setHandle(handles, ohindex, h)
+	out.Uint8(ropSyncOpenCollector)
+	out.Uint8(ohindex)
+	out.Uint32(ecSuccess)
+	return true
+}
+
+// ropSyncImportHierarchyChange handles RopSynchronizationImportHierarchyChange
+// ([MS-OXCFXICS] 2.2.3.2.4.2): it creates or updates a folder from the uploaded
+// identity and property sets and answers with the resulting folder id.
+func (s *Session) ropSyncImportHierarchyChange(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	hichyvals, e1 := p.PropertyValues()
+	propvals, e2 := p.PropertyValues()
+	if e1 != nil || e2 != nil {
+		return false
+	}
+	o := s.get(handleAt(handles, hindex))
+	if o == nil || o.upload == nil {
+		writeErr(out, ropSyncImportHierarchyChange, hindex, ecError)
+		return true
+	}
+	fid, err := o.upload.ImportHierarchyChange(hichyvals, propvals)
+	if err != nil {
+		writeErr(out, ropSyncImportHierarchyChange, hindex, ecError)
+		return true
+	}
+	out.Uint8(ropSyncImportHierarchyChange)
+	out.Uint8(hindex)
+	out.Uint32(ecSuccess)
+	out.Uint64(uint64(mapi.MakeEIDEx(1, fid)))
+	return true
+}
+
+// ropSyncImportDeletes handles RopSynchronizationImportDeletes ([MS-OXCFXICS]
+// 2.2.3.2.4.5): the request carries one multivalue-binary property whose values
+// are the source keys to hard-delete.
+func (s *Session) ropSyncImportDeletes(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	_, e1 := p.Uint8() // ImportDeleteFlags — v1 always hard-deletes
+	propvals, e2 := p.PropertyValues()
+	if e1 != nil || e2 != nil {
+		return false
+	}
+	o := s.get(handleAt(handles, hindex))
+	if o == nil || o.upload == nil {
+		writeErr(out, ropSyncImportDeletes, hindex, ecError)
+		return true
+	}
+	if len(propvals) != 1 || uint32(propvals[0].Tag) != importDeletesTag {
+		writeErr(out, ropSyncImportDeletes, hindex, ecError)
+		return true
+	}
+	keys, ok := propvals[0].Value.([][]byte)
+	if !ok {
+		writeErr(out, ropSyncImportDeletes, hindex, ecError)
+		return true
+	}
+	if _, err := o.upload.ImportDeletes(keys); err != nil {
+		writeErr(out, ropSyncImportDeletes, hindex, ecError)
+		return true
+	}
+	writeStatusHead(out, ropSyncImportDeletes, hindex)
+	return true
+}
+
+// ropSyncImportReadStateChanges handles RopSynchronizationImportReadStateChanges
+// ([MS-OXCFXICS] 2.2.3.2.4.6): a length-prefixed block of {source key, read flag}
+// records. Each record is a u16-length-prefixed source key followed by a one-byte
+// read flag.
+func (s *Session) ropSyncImportReadStateChanges(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	size, e1 := p.Uint16()
+	block, e2 := p.Raw(int(size))
+	if e1 != nil || e2 != nil {
+		return false
+	}
+	o := s.get(handleAt(handles, hindex))
+	if o == nil || o.upload == nil {
+		writeErr(out, ropSyncImportReadStateChanges, hindex, ecError)
+		return true
+	}
+	var changes []objectstore.ReadStateChange
+	bp := ext.NewPull(block, ext.FlagUTF16)
+	for bp.Remaining() > 0 {
+		sk, e3 := bp.BinShort()
+		mark, e4 := bp.Uint8()
+		if e3 != nil || e4 != nil {
+			writeErr(out, ropSyncImportReadStateChanges, hindex, ecError)
+			return true
+		}
+		changes = append(changes, objectstore.ReadStateChange{SourceKey: sk, MarkRead: mark != 0})
+	}
+	if err := o.upload.ImportReadStateChanges(changes); err != nil {
+		writeErr(out, ropSyncImportReadStateChanges, hindex, ecError)
+		return true
+	}
+	writeStatusHead(out, ropSyncImportReadStateChanges, hindex)
+	return true
+}
+
+// ropSyncGetTransferState handles RopSynchronizationGetTransferState ([MS-OXCFXICS]
+// 2.2.3.2.3.1): it serializes the collector's state into a fresh FastTransfer
+// source the client drains via RopFastTransferSourceGetBuffer.
+func (s *Session) ropSyncGetTransferState(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	ohindex, e1 := p.Uint8()
+	if e1 != nil {
+		return false
+	}
+	o := s.get(handleAt(handles, hindex))
+	if o == nil || o.upload == nil {
+		writeErr(out, ropSyncGetTransferState, ohindex, ecError)
+		return true
+	}
+	state, err := o.upload.GetTransferState()
+	if err != nil {
+		writeErr(out, ropSyncGetTransferState, ohindex, ecError)
+		return true
+	}
+	h := s.alloc(&object{kind: kindSync, store: o.store, fastSrc: &transferStateSource{data: state}})
+	setHandle(handles, ohindex, h)
+	out.Uint8(ropSyncGetTransferState)
+	out.Uint8(ohindex)
+	out.Uint32(ecSuccess)
+	return true
+}
+
+// transferStateSource streams a pre-rendered transfer-state buffer as a FastTransfer
+// source. The state is small, so it is held whole rather than produced lazily.
+type transferStateSource struct {
+	data []byte
+	off  int
+}
+
+func (b *transferStateSource) GetBuffer(maxLen int) (chunk []byte, last bool, err error) {
+	end := min(b.off+maxLen, len(b.data))
+	chunk = b.data[b.off:end]
+	b.off = end
+	return chunk, b.off >= len(b.data), nil
 }
 
 // stateSink resolves a sync-context handle to its state-stream sink, or nil.

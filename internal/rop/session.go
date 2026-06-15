@@ -33,15 +33,16 @@ const (
 // attachment its property bag.
 type object struct {
 	kind        objKind
-	store       *objectstore.Store  // kindLogon, and inherited by every child object
-	folderID    int64               // kindFolder
-	table       *tableState         // kindTable
-	messageID   int64               // kindMessage
-	stream      *streamState        // kindStream
-	attachProps mapi.PropertyValues // kindAttachment
-	newMsg      *newMessageState    // kindNewMessage
-	fastSrc     fastTransferSource  // kindSync: what GetBuffer drains
-	stateSink   stateStreamSink     // kindSync: what the state-stream ROPs populate
+	store       *objectstore.Store           // kindLogon, and inherited by every child object
+	folderID    int64                        // kindFolder
+	table       *tableState                  // kindTable
+	messageID   int64                        // kindMessage
+	stream      *streamState                 // kindStream
+	attachProps mapi.PropertyValues          // kindAttachment
+	newMsg      *newMessageState             // kindNewMessage
+	fastSrc     fastTransferSource           // kindSync: what GetBuffer drains
+	stateSink   stateStreamSink              // kindSync: what the state-stream ROPs populate
+	upload      *objectstore.UploadCollector // kindSync (upload): the import target
 }
 
 // newMessageState accumulates a message being composed over the ROP write

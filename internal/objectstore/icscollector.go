@@ -165,6 +165,14 @@ func (c *UploadCollector) ImportHierarchyChange(hichyvals, propvals mapi.Propert
 	return fid, nil
 }
 
+// ImportDeletes hard-deletes the messages named by their home source keys through
+// the store. Deletes carry no change number, so nothing is folded into the state;
+// the import only marks the collector started ([MS-OXCFXICS] 3.3.5.6).
+func (c *UploadCollector) ImportDeletes(sourceKeys [][]byte) ([]uint64, error) {
+	c.started = true
+	return c.store.ImportDeletes(c.folderID, sourceKeys)
+}
+
 // GetTransferState renders the collected synchronization state as a FastTransfer
 // stream the client reads back to adopt as its next checkpoint: INCRSYNCSTATEBEGIN,
 // one property per populated idset, INCRSYNCSTATEEND ([MS-OXCFXICS] 3.2.5.5). It

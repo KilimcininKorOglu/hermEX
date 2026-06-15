@@ -140,6 +140,230 @@ func configureInboxSync(t *testing.T, sess *Session, syncFlags uint16) []uint32 
 	return h
 }
 
+func buildOpenCollector(inIdx, outIdx, isContent uint8) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropSyncOpenCollector)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	b.Uint8(outIdx)
+	b.Uint8(isContent)
+	return b.Bytes()
+}
+
+func buildGetTransferState(inIdx, outIdx uint8) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropSyncGetTransferState)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	b.Uint8(outIdx)
+	return b.Bytes()
+}
+
+func buildImportDeletes(inIdx uint8, key []byte) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropSyncImportDeletes)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	b.Uint8(0) // ImportDeleteFlags
+	_ = b.PropertyValues(mapi.PropertyValues{{Tag: mapi.MakeTag(0x0000, mapi.PtMvBinary), Value: [][]byte{key}}})
+	return b.Bytes()
+}
+
+func buildImportReadState(inIdx uint8, key []byte, read bool) []byte {
+	blk := ext.NewPush(ext.FlagUTF16)
+	_ = blk.BinShort(key)
+	if read {
+		blk.Uint8(1)
+	} else {
+		blk.Uint8(0)
+	}
+	body := blk.Bytes()
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropSyncImportReadStateChanges)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	b.Uint16(uint16(len(body)))
+	return append(b.Bytes(), body...)
+}
+
+// homeSourceKey builds the 22-byte home source key (replica GUID + GC value) for
+// an object id, exactly as the store derives it on download.
+func homeSourceKey(t *testing.T, dir string, value uint64) []byte {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	m, err := st.ReplicaMapper()
+	if err != nil {
+		t.Fatal(err)
+	}
+	home, ok := m.ToGUID(1)
+	if !ok {
+		t.Fatal("no home replica GUID")
+	}
+	f := home.Flat()
+	gc := mapi.ValueToGC(value)
+	return append(f[:], gc[:]...)
+}
+
+// serializedSeenSet builds a wire-form seen idset over [lo,hi] for the home replica.
+func serializedSeenSet(t *testing.T, dir string, lo, hi uint64) []byte {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	m, err := st.ReplicaMapper()
+	if err != nil {
+		t.Fatal(err)
+	}
+	set := ics.NewIDSet(ics.FormGUIDLoose, m)
+	set.AppendRange(1, lo, hi)
+	b, err := set.Serialize()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func mustDispatchOK(t *testing.T, sess *Session, req []byte, handles []uint32, wantRop uint8) ([]uint32, *ext.Pull) {
+	t.Helper()
+	sr, h := sess.Dispatch(req, handles)
+	p := ext.NewPull(sr, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != wantRop {
+		t.Fatalf("RopId = %#x, want %#x", id, wantRop)
+	}
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("ROP %#x ReturnValue = %#x", wantRop, ec)
+	}
+	return h, p
+}
+
+// TestSyncCollectorTransferStateRoundTrip drives the upload-collector path: open a
+// content collector, replay a seen set through the state-stream ROPs, then read it
+// back via GetTransferState drained over FastTransferSourceGetBuffer. The seen
+// range must survive the round trip, proving OpenCollector, the state-stream sink,
+// GetTransferState, and its buffer source are wired end to end.
+func TestSyncCollectorTransferStateRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	folderH := h[1]
+
+	handles := []uint32{logonH, folderH, 0xFFFFFFFF}
+	h, _ = mustDispatchOK(t, sess, buildOpenCollector(1, 2, 1), handles, ropSyncOpenCollector)
+	collectorH := h[2]
+
+	const cnsetSeen = 0x67960102
+	seen := serializedSeenSet(t, dir, 1, 20)
+	handles = []uint32{logonH, folderH, collectorH}
+	mustDispatchOK(t, sess, buildStateStreamBegin(2, cnsetSeen), handles, ropSyncUploadStateStreamBegin)
+	mustDispatchOK(t, sess, buildStateStreamContinue(2, seen), handles, ropSyncUploadStateStreamContinue)
+	mustDispatchOK(t, sess, buildStateStreamEnd(2), handles, ropSyncUploadStateStreamEnd)
+
+	handles = []uint32{logonH, folderH, collectorH, 0xFFFFFFFF}
+	h, _ = mustDispatchOK(t, sess, buildGetTransferState(2, 3), handles, ropSyncGetTransferState)
+	handles = []uint32{logonH, folderH, collectorH, h[3]}
+	items := drainSyncDownload(t, sess, handles, 3)
+
+	var seenBytes []byte
+	for _, it := range items {
+		if !it.IsMarker && it.Prop != nil && it.Prop.Tag == mapi.PropTag(cnsetSeen) {
+			seenBytes, _ = it.Prop.Value.([]byte)
+		}
+	}
+	if seenBytes == nil {
+		t.Fatal("transfer state missing the seen change-number set")
+	}
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	m, _ := st.ReplicaMapper()
+	got := ics.NewIDSet(ics.FormGUIDPacked, m)
+	if err := got.Deserialize(seenBytes); err != nil {
+		t.Fatal(err)
+	}
+	if !got.Convert() {
+		t.Fatal("cannot resolve the round-tripped seen set")
+	}
+	if !got.Contains(mapi.MakeEIDEx(1, 10)) {
+		t.Error("round-tripped seen set lost a change number inside [1,20]")
+	}
+}
+
+// TestSyncCollectorImportReadState opens a content collector and marks a seeded
+// message read by its source key through RopSyncImportReadStateChanges, asserting
+// the stored read flag flipped.
+func TestSyncCollectorImportReadState(t *testing.T) {
+	dir := t.TempDir()
+	msgID := seedInboxMessage(t, dir, "Unread")
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	folderH := h[1]
+	handles := []uint32{logonH, folderH, 0xFFFFFFFF}
+	h, _ = mustDispatchOK(t, sess, buildOpenCollector(1, 2, 1), handles, ropSyncOpenCollector)
+	collectorH := h[2]
+
+	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), msgID); f&objectstore.FlagSeen != 0 {
+		t.Fatalf("seeded message already read (flags=%#x)", f)
+	}
+	key := homeSourceKey(t, dir, uint64(msgID))
+	handles = []uint32{logonH, folderH, collectorH}
+	mustDispatchOK(t, sess, buildImportReadState(2, key, true), handles, ropSyncImportReadStateChanges)
+
+	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), msgID); f&objectstore.FlagSeen == 0 {
+		t.Errorf("after import read-state, flags=%#x, want FlagSeen set", f)
+	}
+}
+
+// TestSyncCollectorImportDeletes opens a content collector and deletes one of two
+// seeded messages by source key through RopSyncImportDeletes, asserting the target
+// is gone and the other remains — exercising the multivalue-binary source-key
+// extraction.
+func TestSyncCollectorImportDeletes(t *testing.T) {
+	dir := t.TempDir()
+	id1 := seedInboxMessage(t, dir, "DELME")
+	id2 := seedInboxMessage(t, dir, "KEEPME")
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	folderH := h[1]
+	handles := []uint32{logonH, folderH, 0xFFFFFFFF}
+	h, _ = mustDispatchOK(t, sess, buildOpenCollector(1, 2, 1), handles, ropSyncOpenCollector)
+	collectorH := h[2]
+
+	key := homeSourceKey(t, dir, uint64(id1))
+	handles = []uint32{logonH, folderH, collectorH}
+	mustDispatchOK(t, sess, buildImportDeletes(2, key), handles, ropSyncImportDeletes)
+
+	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), id1); f != -1 {
+		t.Errorf("deleted message still present (flags=%#x)", f)
+	}
+	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), id2); f == -1 {
+		t.Error("kept message vanished")
+	}
+}
+
 // TestSyncDownloadContents drives the full ICS download path through the ROP
 // dispatch: logon, open inbox, SyncConfigure, then GetBuffer to completion. It
 // asserts the reassembled stream carries one change per seeded message, a state
