@@ -64,7 +64,35 @@ func (s *Server) DispatchRPC(opnum uint16, stub []byte) (out []byte, fault uint3
 		return s.rpcBind(stub)
 	case opNspiUnbind:
 		return s.rpcUnbind(stub)
+	case opNspiUpdateStat:
+		return s.rpcUpdateStat(stub)
+	case opNspiQueryRows:
+		return s.rpcQueryRows(stub)
+	case opNspiSeekEntries:
+		return s.rpcSeekEntries(stub)
+	case opNspiGetMatches:
+		return s.rpcGetMatches(stub)
+	case opNspiResortRestriction:
+		return s.rpcResortRestriction(stub)
+	case opNspiDNToMId:
+		return s.rpcDNToMid(stub)
+	case opNspiGetPropList:
+		return s.rpcGetPropList(stub)
+	case opNspiGetProps:
+		return s.rpcGetProps(stub)
+	case opNspiCompareMIds:
+		return s.rpcCompareMids(stub)
+	case opNspiGetSpecialTable:
+		return s.rpcGetSpecialTable(stub)
+	case opNspiQueryColumns:
+		return s.rpcQueryColumns(stub)
+	case opNspiResolveNames:
+		return s.rpcResolveNames(stub, false)
+	case opNspiResolveNamesW:
+		return s.rpcResolveNames(stub, true)
 	default:
+		// ModProps (11), GetTemplateInfo (13), ModLinkAtt (14) and any unknown
+		// opnum fall through: the GAL is read-only.
 		return nil, ndr.FaultOpRngError
 	}
 }
