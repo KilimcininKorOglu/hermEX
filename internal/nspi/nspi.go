@@ -26,12 +26,14 @@ const (
 // MAPI return codes ([MS-OXCDATA] 2.4) carried in an NSPI response result, or in
 // a row's per-column error marker.
 const (
-	ecSuccess      uint32 = 0x00000000
-	ecError        uint32 = 0x80004005
-	ecNotSupported uint32 = 0x80040102
-	ecNotFound     uint32 = 0x8004010F // a requested column has no value for the row
-	ecInvalidParam uint32 = 0x80070057 // e.g. QueryRows count == 0
-	ecTableTooBig  uint32 = 0x80040403 // more than 100 columns requested
+	ecSuccess        uint32 = 0x00000000
+	ecError          uint32 = 0x80004005
+	ecNotSupported   uint32 = 0x80040102
+	ecNotFound       uint32 = 0x8004010F // a requested column has no value for the row
+	ecInvalidParam   uint32 = 0x80070057 // e.g. QueryRows count == 0
+	ecTableTooBig    uint32 = 0x80040403 // more than 100 columns requested
+	ecInvalidObject  uint32 = 0x80040108 // GetProps/GetPropList: no such MId
+	ecWarnWithErrors uint32 = 0x00040380 // GetProps: row carries PT_ERROR markers
 )
 
 // abkFlags is the EXT flag set every NSPI body is (de)serialized under, matching

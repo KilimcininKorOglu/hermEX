@@ -118,16 +118,24 @@ func (g gal) midAt(i int) uint32 {
 	return g.users[i].mid
 }
 
-// resolve matches a token (a name or address) case-insensitively as a substring
-// of each user's display name or SMTP address, mirroring the reference's
-// resolve-node behavior: exactly one match resolves to that MId (midResolved),
-// more than one is midAmbiguous, none is midUnresolved.
-func (g gal) resolve(token string) (mid, status uint32) {
+// matchesToken reports whether a search token matches this user
+// case-insensitively, as a substring of its SMTP address or display name. It is
+// the single predicate shared by ResolveNamesW's resolve and GetMatches' PR_ANR
+// restriction, so both return the same set for the same token.
+func (u galUser) matchesToken(token string) bool {
 	tok := strings.ToLower(token)
+	return strings.Contains(strings.ToLower(u.smtp), tok) ||
+		strings.Contains(strings.ToLower(u.display), tok)
+}
+
+// resolve matches a token (a name or address) against each user via
+// matchesToken, mirroring the reference's resolve-node behavior: exactly one
+// match resolves to that MId (midResolved), more than one is midAmbiguous, none
+// is midUnresolved.
+func (g gal) resolve(token string) (mid, status uint32) {
 	found := -1
 	for i, u := range g.users {
-		if strings.Contains(strings.ToLower(u.smtp), tok) ||
-			strings.Contains(strings.ToLower(u.display), tok) {
+		if u.matchesToken(token) {
 			if found >= 0 {
 				return 0, midAmbiguous
 			}
@@ -149,6 +157,23 @@ func (g gal) byAddress(smtp string) (uint32, bool) {
 		}
 	}
 	return 0, false
+}
+
+// resolveEntry returns the GAL user a STAT.cur_rec addresses for a single-entry
+// fetch (GetProps). An entry MId (>= midBase) is a direct lookup; a table
+// bookmark or positional value resolves by position. Because our entry MIds
+// start exactly at midBase, the boundary is >= midBase (not the reference's
+// hashed-minid > 0x10), so the first GAL entry routes to a direct lookup. ok is
+// false when the cursor addresses no row (END_OF_TABLE, or an out-of-range MId).
+func (g gal) resolveEntry(curRec uint32) (galUser, bool) {
+	if curRec >= midBase {
+		return g.byMID(curRec)
+	}
+	i := g.position(curRec)
+	if i < 0 || i >= len(g.users) {
+		return galUser{}, false
+	}
+	return g.users[i], true
 }
 
 // galUserProps projects a GAL user into the address-book property bag a row

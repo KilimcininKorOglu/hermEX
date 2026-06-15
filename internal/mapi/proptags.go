@@ -193,6 +193,14 @@ const (
 	PrEmsAbIsMaster    = PropTag(0xFFFB000B) // PtBoolean (PidTagAddressBookIsMaster)
 )
 
+// Ambiguous-name-resolution proptags (NSPI GetMatches restrictions, [MS-OXNSPI]
+// / [MS-OXOABK]). PR_ANR is not a stored property; it is a search directive that
+// matches a token against an entry's account/SMTP and display name.
+const (
+	PrAnr  = PropTag(0x360A001F) // PtUnicode (PidTagAnr)
+	PrAnrA = PropTag(0x360A001E) // PtString8 (PidTagAnr, ANSI)
+)
+
 // Recipient type values (PR_RECIPIENT_TYPE).
 const (
 	RecipTo  = 1 // mapiTo

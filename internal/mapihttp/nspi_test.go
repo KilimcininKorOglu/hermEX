@@ -270,3 +270,166 @@ func TestNspiResolveNames(t *testing.T) {
 		t.Errorf("mids marker = %#x, want 0xFF (a resolution follows)", p[12])
 	}
 }
+
+// statBytes frames a STAT with the given cur_rec and code page 1252 (sort type 0
+// = display name); the other fields are zero.
+func statBytes(curRec uint32) []byte {
+	var b []byte
+	for i := range 9 {
+		v := uint32(0)
+		switch i {
+		case 2: // cur_rec
+			v = curRec
+		case 6: // codepage
+			v = 1252
+		}
+		b = binary.LittleEndian.AppendUint32(b, v)
+	}
+	return b
+}
+
+// getMatchesBody frames a GetMatches request with a PR_ANR restriction whose
+// search token is encoded as UTF-16LE — a hand-built wire vector independent of
+// our own encoder, so it proves the restriction's address-book string decodes
+// correctly off the wire.
+func getMatchesBody(token string) []byte {
+	var b []byte
+	b = binary.LittleEndian.AppendUint32(b, 0) // reserved1
+	b = append(b, 1)                           // hasStat
+	b = append(b, statBytes(0)...)             // cursor at table start
+	b = append(b, 0)                           // hasInMids = 0
+	b = binary.LittleEndian.AppendUint32(b, 0) // reserved
+	b = append(b, 1)                           // hasFilter
+	// RESTRICTION: ResProperty(0x04) + RelopEQ(0x04) + PR_ANR proptag + a
+	// TaggedPropVal whose PtUnicode value carries the ABK present marker + UTF-16.
+	b = append(b, 0x04)                                 // ResProperty
+	b = append(b, 0x04)                                 // RelopEQ
+	b = binary.LittleEndian.AppendUint32(b, 0x360A001F) // PR_ANR
+	b = binary.LittleEndian.AppendUint32(b, 0x360A001F) // TaggedPropVal tag
+	b = append(b, 0xFF)                                 // ABK value-present marker
+	for _, c := range []byte(token) {                   // ASCII -> UTF-16LE
+		b = append(b, c, 0)
+	}
+	b = append(b, 0, 0)                         // UTF-16 NUL terminator
+	b = append(b, 0)                            // hasPropName = 0
+	b = binary.LittleEndian.AppendUint32(b, 50) // rowCount
+	b = append(b, 0)                            // hasColumns = 0
+	b = binary.LittleEndian.AppendUint32(b, 0)  // cb_auxin
+	return b
+}
+
+// TestNspiGetMatches drives Bind then GetMatches with a UTF-16 PR_ANR
+// restriction and confirms the seeded user is matched and projected — the
+// address-book acid test for the restriction's string encoding on the wire.
+func TestNspiGetMatches(t *testing.T) {
+	ts := newTestServer(t)
+	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
+	bind.Body.Close()
+	sid, seq := cookieByName(bind, "sid"), cookieByName(bind, "sequence")
+	if sid == "" || seq == "" {
+		t.Fatal("no cookies from Bind")
+	}
+	gm := mapiPost(t, ts, "/mapi/nspi", "GetMatches", getMatchesBody("alice"), func(r *http.Request) {
+		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
+		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
+	})
+	defer gm.Body.Close()
+	if got := gm.Header.Get("X-ResponseCode"); got != "0" {
+		t.Fatalf("GetMatches: X-ResponseCode = %q, want 0", got)
+	}
+	p := nspiPayload(t, gm)
+	// status(0:4) + result(4:8) + STAT-marker(8) + STAT(9:45) + mids-marker(45)
+	if len(p) < 46 {
+		t.Fatalf("response too short: %d bytes", len(p))
+	}
+	if result := binary.LittleEndian.Uint32(p[4:]); result != 0 {
+		t.Errorf("result = %#x, want 0", result)
+	}
+	if p[8] != 0xFF {
+		t.Errorf("STAT marker = %#x, want 0xFF", p[8])
+	}
+	if p[45] != 0xFF {
+		t.Errorf("mids marker = %#x, want 0xFF (a match follows)", p[45])
+	}
+	// The matched row carries alice as UTF-16LE: the UTF-16 ANR token decoded,
+	// matched, and the row projected — all independent of our own encoder.
+	if u16 := []byte{'a', 0, 'l', 0, 'i', 0, 'c', 0, 'e', 0}; !bytes.Contains(p, u16) {
+		t.Error("GetMatches response does not carry the matched user as UTF-16LE")
+	}
+}
+
+// TestNspiGetProps drives Bind then GetProps for the first GAL entry (cur_rec at
+// the lowest entry MId) and confirms the route returns its property row.
+func TestNspiGetProps(t *testing.T) {
+	ts := newTestServer(t)
+	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
+	bind.Body.Close()
+	sid, seq := cookieByName(bind, "sid"), cookieByName(bind, "sequence")
+	if sid == "" || seq == "" {
+		t.Fatal("no cookies from Bind")
+	}
+	var body []byte
+	body = binary.LittleEndian.AppendUint32(body, 0) // flags
+	body = append(body, 1)                           // hasStat
+	body = append(body, statBytes(0x10)...)          // cur_rec = midBase (first entry)
+	body = append(body, 0)                           // hasTags = 0 (default bag)
+	body = binary.LittleEndian.AppendUint32(body, 0) // cb_auxin
+	gp := mapiPost(t, ts, "/mapi/nspi", "GetProps", body, func(r *http.Request) {
+		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
+		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
+	})
+	defer gp.Body.Close()
+	if got := gp.Header.Get("X-ResponseCode"); got != "0" {
+		t.Fatalf("GetProps: X-ResponseCode = %q, want 0", got)
+	}
+	p := nspiPayload(t, gp)
+	// status(0:4) + result(4:8) + codepage(8:12) + row-marker(12)
+	if len(p) < 13 {
+		t.Fatalf("response too short: %d bytes", len(p))
+	}
+	if result := binary.LittleEndian.Uint32(p[4:]); result != 0 {
+		t.Errorf("result = %#x, want 0 (ecSuccess)", result)
+	}
+	if p[12] != 0xFF {
+		t.Errorf("row marker = %#x, want 0xFF (a row follows)", p[12])
+	}
+	if u16 := []byte{'a', 0, 'l', 0, 'i', 0, 'c', 0, 'e', 0}; !bytes.Contains(p, u16) {
+		t.Error("GetProps row does not carry the entry as UTF-16LE")
+	}
+}
+
+// TestNspiGetPropList drives Bind then GetPropList for the first entry MId and
+// confirms the route returns a property-tag list.
+func TestNspiGetPropList(t *testing.T) {
+	ts := newTestServer(t)
+	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
+	bind.Body.Close()
+	sid, seq := cookieByName(bind, "sid"), cookieByName(bind, "sequence")
+	if sid == "" || seq == "" {
+		t.Fatal("no cookies from Bind")
+	}
+	var body []byte
+	body = binary.LittleEndian.AppendUint32(body, 0)    // flags
+	body = binary.LittleEndian.AppendUint32(body, 0x10) // MId = midBase
+	body = binary.LittleEndian.AppendUint32(body, 1252) // code page
+	body = binary.LittleEndian.AppendUint32(body, 0)    // cb_auxin
+	gpl := mapiPost(t, ts, "/mapi/nspi", "GetPropList", body, func(r *http.Request) {
+		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
+		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
+	})
+	defer gpl.Body.Close()
+	if got := gpl.Header.Get("X-ResponseCode"); got != "0" {
+		t.Fatalf("GetPropList: X-ResponseCode = %q, want 0", got)
+	}
+	p := nspiPayload(t, gpl)
+	// status(0:4) + result(4:8) + tags-marker(8) + count(9:13)
+	if len(p) < 13 {
+		t.Fatalf("response too short: %d bytes", len(p))
+	}
+	if result := binary.LittleEndian.Uint32(p[4:]); result != 0 {
+		t.Errorf("result = %#x, want 0", result)
+	}
+	if p[8] != 0xFF {
+		t.Errorf("tags marker = %#x, want 0xFF (a tag list follows)", p[8])
+	}
+}
