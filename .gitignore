@@ -2,6 +2,7 @@
 contract-map/
 ARCHITECTURE.md
 SLICING-PLAN.md
+plan.md
 
 # Runtime data (Docker-based dev)
 /docker-data/*
