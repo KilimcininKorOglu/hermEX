@@ -135,7 +135,9 @@ func TestMalformedEnvelope(t *testing.T) {
 	}
 }
 
-// TestAutodiscover confirms the Outlook Autodiscover response carries the EWS URL.
+// TestAutodiscover confirms the Outlook Autodiscover response carries the EWS URL
+// and advertises Outlook Anywhere (RPC/HTTP) so a desktop Outlook would attempt
+// the /rpc/rpcproxy.dll endpoint.
 func TestAutodiscover(t *testing.T) {
 	ts := newTestServer(t)
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/autodiscover/autodiscover.xml", strings.NewReader("<Autodiscover/>"))
@@ -146,10 +148,18 @@ func TestAutodiscover(t *testing.T) {
 	}
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(data), "https://mail.hermex.test/EWS/Exchange.asmx") {
-		t.Errorf("autodiscover missing EwsUrl, got: %s", data)
+	body := string(data)
+	if !strings.Contains(body, "https://mail.hermex.test/EWS/Exchange.asmx") {
+		t.Errorf("autodiscover missing EwsUrl, got: %s", body)
 	}
-	if !strings.Contains(string(data), "outlook/responseschema/2006a") {
-		t.Errorf("autodiscover missing Outlook schema, got: %s", data)
+	if !strings.Contains(body, "outlook/responseschema/2006a") {
+		t.Errorf("autodiscover missing Outlook schema, got: %s", body)
+	}
+	// Outlook Anywhere (RPC/HTTP) markers: the EXPR provider must carry the
+	// HTTP-only connect directive and the auth package the transport accepts.
+	for _, want := range []string{"<ServerExclusiveConnect>On</ServerExclusiveConnect>", "<AuthPackage>Basic</AuthPackage>"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("autodiscover missing RPC/HTTP marker %q, got: %s", want, body)
+		}
 	}
 }

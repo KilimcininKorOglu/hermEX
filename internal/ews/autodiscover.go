@@ -37,6 +37,12 @@ type adProtocol struct {
 	Type   string `xml:"Type"`
 	Server string `xml:"Server"`
 	EwsURL string `xml:"EwsUrl"`
+	// Outlook Anywhere (RPC/HTTP, [MS-OXDSCLI] 2.2.4.1.1.2.3) advertising: the
+	// EXPR provider's Server is the RPC proxy host, so a desktop Outlook builds
+	// https://<Server>/rpc/rpcproxy.dll and connects with HTTP Basic over TLS.
+	SSL                    string `xml:"SSL,omitempty"`
+	AuthPackage            string `xml:"AuthPackage,omitempty"`
+	ServerExclusiveConnect string `xml:"ServerExclusiveConnect,omitempty"`
 }
 
 // serveAutodiscover answers the Outlook Autodiscover request (MS-OXDSCLI): it
@@ -66,9 +72,12 @@ func (s *Server) serveAutodiscover(w http.ResponseWriter, r *http.Request) {
 				AccountType: "email",
 				Action:      "settings",
 				Protocol: adProtocol{
-					Type:   "EXPR",
-					Server: host,
-					EwsURL: "https://" + host + "/EWS/Exchange.asmx",
+					Type:                   "EXPR",
+					Server:                 host,
+					EwsURL:                 "https://" + host + "/EWS/Exchange.asmx",
+					SSL:                    "On",
+					AuthPackage:            "Basic",
+					ServerExclusiveConnect: "On",
 				},
 			},
 		},
