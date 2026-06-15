@@ -1,9 +1,10 @@
-// Package mapihttp serves a mailbox over the native Outlook transport,
-// MAPI/HTTP ([MS-OXCMAPIHTTP]): the EMSMDB endpoint on /mapi/emsmdb (the
-// store/ROP channel) and the NSPI endpoint on /mapi/nspi (the address book).
-// It authenticates each request with HTTP Basic against the directory — modern
-// Outlook over MAPI/HTTP accepts Basic, so no NTLM subsystem is required — and
-// frames responses in the application/mapi-http chunked PROCESSING/DONE form.
+// Package mapihttp serves a mailbox over the native Outlook transports: MAPI/HTTP
+// ([MS-OXCMAPIHTTP]) — the EMSMDB endpoint on /mapi/emsmdb (the store/ROP channel)
+// and the NSPI endpoint on /mapi/nspi (the address book) — and RPC-over-HTTP
+// ([MS-RPCH], "Outlook Anywhere") on /rpc/rpcproxy.dll, which carries the same ROP
+// and address-book calls over a DCE/RPC tunnel. It authenticates each request with
+// HTTP Basic against the directory — modern Outlook over either transport accepts
+// Basic, so no NTLM subsystem is required.
 //
 // This package owns the transport: routing, request-type dispatch, the session
 // cookies, and the response framing. The ROP buffer carried inside Execute and
@@ -17,9 +18,11 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/nspi"
+	"hermex/internal/rpchttp"
 )
 
-// Server answers MAPI/HTTP EMSMDB and NSPI requests for authenticated users.
+// Server answers MAPI/HTTP EMSMDB and NSPI requests, and RPC/HTTP requests, for
+// authenticated users.
 type Server struct {
 	auth         directory.Authenticator
 	accounts     directory.Accounts
@@ -27,6 +30,7 @@ type Server struct {
 	sessions     *sessionStore
 	nsp          *nspi.Server
 	nspiSessions *nspiSessionStore
+	rpc          *rpchttp.Server
 }
 
 // NewServer builds a MAPI/HTTP server backed by the directory for authentication.
@@ -41,7 +45,7 @@ func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostna
 	// A process-stable GUID identifies this server instance to NSPI clients for
 	// the lifetime of a binding; a restart re-mints it and clients re-bind.
 	serverGUID, _ := mapi.ParseGUID(newGUID())
-	return &Server{
+	s := &Server{
 		auth:         auth,
 		accounts:     accounts,
 		hostname:     hostname,
@@ -49,6 +53,13 @@ func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostna
 		nsp:          nspi.NewServer(gal, serverGUID),
 		nspiSessions: newNspiSessionStore(),
 	}
+	// RPC/HTTP (Outlook Anywhere) shares the directory and HTTP Basic auth; the
+	// EMSMDB interface is registered on its DCE/RPC dispatcher.
+	ems := rpchttp.NewEMSMDB(accounts)
+	disp := rpchttp.NewDispatcher()
+	disp.Register(rpchttp.EMSMDBUUID, rpchttp.EMSMDBVersion, ems.Handle)
+	s.rpc = rpchttp.NewServer(rpchttp.Config{Auth: s.basicAuth, Dispatch: disp.Dispatch})
+	return s
 }
 
 // Handler returns the HTTP handler. One handler routes the two MAPI/HTTP paths;
@@ -66,6 +77,8 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.serveEmsmdb(w, r)
 	case strings.HasPrefix(p, "/mapi/nspi"):
 		s.serveNspi(w, r)
+	case strings.HasPrefix(p, "/rpc/rpcproxy.dll"), strings.HasPrefix(p, "/rpcwithcert/rpcproxy.dll"):
+		s.rpc.ServeHTTP(w, r)
 	default:
 		http.NotFound(w, r)
 	}
