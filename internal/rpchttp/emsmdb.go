@@ -7,6 +7,8 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/ndr"
+	"hermex/internal/oxmapihttp"
+	"hermex/internal/rop"
 )
 
 // EMSMDB interface identity ([MS-OXCRPC] 1.9): the store/ROP RPC interface.
@@ -27,8 +29,16 @@ const (
 	opEcDoRpcExt2    uint16 = 11
 )
 
-// ecSuccess is the MAPI success code returned in the RPC result field.
-const ecSuccess uint32 = 0
+// MAPI result codes returned in the RPC result field.
+const (
+	ecSuccess        uint32 = 0
+	ecResponseTooBig uint32 = 0x0000047D // the ROP response exceeds the offered buffer
+)
+
+// maxROPBuffer bounds the ROP response buffer the EcDoRpcExt2 codec can frame; it
+// matches the oxmapihttp envelope's 32 KiB cap (its SizeActual is a uint16). A
+// larger response is reported as ecResponseTooBig rather than silently truncated.
+const maxROPBuffer = 0x8000
 
 // serverVersion is the 3×uint16 server version reported in EcDoConnectEx
 // ([MS-OXCRPC] 2.2.2.2.2). A plausible modern value; a real client only acts on
@@ -43,13 +53,15 @@ type ContextHandle struct {
 	GUID       mapi.GUID
 }
 
-// emsmdbSession is the per-logon state keyed by the context handle. v1 holds the
-// authenticated identity and the connect code page; the ROP session is attached
-// when EcDoRpcExt2 lands.
+// emsmdbSession is the per-logon state keyed by the context handle: the
+// authenticated identity, the connect code page, and the ROP object/handle table
+// (the same session type the MAPI/HTTP Execute path drives). The ROP store opens
+// lazily when the client's first EcDoRpcExt2 carries a RopLogon.
 type emsmdbSession struct {
 	user    string
 	mailbox string
 	cpid    uint32
+	rop     *rop.Session
 }
 
 // EMSMDB is the EMSMDB RPC interface stub: it manages logon sessions keyed by
@@ -74,11 +86,47 @@ func (e *EMSMDB) Handle(sess *Session, opnum uint16, stub []byte) ([]byte, uint3
 	switch opnum {
 	case opEcDoConnectEx:
 		return e.connectEx(sess, stub)
+	case opEcDoRpcExt2:
+		return e.rpcExt2(stub)
 	case opEcDoDisconnect:
 		return e.disconnect(stub)
 	default:
 		return nil, ndr.FaultOpRngError
 	}
+}
+
+// rpcExt2 handles EcDoRpcExt2 (opnum 11): it unwraps the NDR parameters, runs
+// the carried ROP buffer through the same decode/dispatch/encode path the
+// MAPI/HTTP Execute uses (byte-for-byte the same buffer), and re-wraps the
+// response. A response that overflows the codec or the client's buffer is
+// reported as ecResponseTooBig rather than truncated.
+func (e *EMSMDB) rpcExt2(stub []byte) ([]byte, uint32) {
+	in, err := pullRpcExt2(stub)
+	if err != nil {
+		return nil, ndr.FaultNdr
+	}
+	s, ok := e.lookup(in.cxh.GUID)
+	if !ok {
+		return nil, ndr.FaultContextMismatch
+	}
+	if len(in.pin) == 0 {
+		return pushRpcExt2Out(in.cxh, oxmapihttp.EncodeExecute(nil, nil), ecSuccess), 0
+	}
+	reqRops, reqHandles, derr := oxmapihttp.DecodeExecute(in.pin)
+	if derr != nil {
+		return nil, ndr.FaultNdr
+	}
+	respRops, respHandles := s.rop.Dispatch(reqRops, reqHandles)
+	if ropBufferSize(respRops, respHandles) > maxROPBuffer || ropBufferSize(respRops, respHandles)+8 > int(in.cbOut) {
+		return pushRpcExt2Out(in.cxh, nil, ecResponseTooBig), 0
+	}
+	return pushRpcExt2Out(in.cxh, oxmapihttp.EncodeExecute(respRops, respHandles), ecSuccess), 0
+}
+
+// ropBufferSize is the wire size of the ROP region: RopSize + the ROP commands +
+// the server-object handle table.
+func ropBufferSize(rops []byte, handles []uint32) int {
+	return 2 + len(rops) + 4*len(handles)
 }
 
 // mintHandle allocates a fresh context handle. The GUID is a per-session counter
@@ -98,7 +146,12 @@ func (e *EMSMDB) connectEx(sess *Session, stub []byte) ([]byte, uint32) {
 	}
 	cxh := e.mintHandle()
 	e.mu.Lock()
-	e.sessions[cxh.GUID] = &emsmdbSession{user: sess.User, mailbox: sess.Mailbox, cpid: in.cpid}
+	e.sessions[cxh.GUID] = &emsmdbSession{
+		user:    sess.User,
+		mailbox: sess.Mailbox,
+		cpid:    in.cpid,
+		rop:     rop.NewSession(sess.Mailbox, e.accounts, sess.User),
+	}
 	e.mu.Unlock()
 	return pushConnectExOut(cxh, sess.User, ecSuccess), 0
 }
@@ -111,7 +164,10 @@ func (e *EMSMDB) disconnect(stub []byte) ([]byte, uint32) {
 		return nil, ndr.FaultNdr
 	}
 	e.mu.Lock()
-	delete(e.sessions, h.GUID)
+	if s, ok := e.sessions[h.GUID]; ok {
+		s.rop.Close()
+		delete(e.sessions, h.GUID)
+	}
 	e.mu.Unlock()
 	out := ndr.NewPush()
 	pushCtxHandle(out, ContextHandle{}) // zeroed on disconnect
@@ -263,4 +319,75 @@ func trimNUL(b []byte) string {
 		}
 	}
 	return string(b)
+}
+
+// rpcExt2In is the decoded EcDoRpcExt2 request ([MS-OXCRPC] 2.2.2.3): the context
+// handle, flags, the opaque ROP buffer, and the client's output-buffer size.
+type rpcExt2In struct {
+	cxh   ContextHandle
+	flags uint32
+	pin   []byte
+	cbOut uint32
+}
+
+// pullRpcExt2 decodes the EcDoRpcExt2 request stub. The ROP buffer (pin) is a
+// conformant byte array carried verbatim; the trailing AUX-in buffer and the
+// redundant length words are read past but unused.
+func pullRpcExt2(stub []byte) (*rpcExt2In, error) {
+	p := ndr.NewPull(stub)
+	r := &rpcExt2In{}
+	var err error
+	if r.cxh, err = pullCtxHandle(p); err != nil {
+		return nil, err
+	}
+	if r.flags, err = p.Uint32(); err != nil {
+		return nil, err
+	}
+	size, err := p.Uint32() // pin max_count
+	if err != nil {
+		return nil, err
+	}
+	if r.pin, err = p.Raw(int(size)); err != nil {
+		return nil, err
+	}
+	cbIn, err := p.Uint32() // cb_in
+	if err != nil {
+		return nil, err
+	}
+	if cbIn != size {
+		return nil, ndr.ErrFormat
+	}
+	if r.cbOut, err = p.Uint32(); err != nil {
+		return nil, err
+	}
+	auxSize, err := p.Uint32() // AUX-in max_count
+	if err != nil {
+		return nil, err
+	}
+	if _, err = p.Raw(int(auxSize)); err != nil {
+		return nil, err
+	}
+	return r, nil // cb_auxin / cb_auxout follow but are not needed
+}
+
+// pushRpcExt2Out marshals the EcDoRpcExt2 response ([MS-OXCRPC] 2.2.2.3): the
+// echoed context handle, flags, the conformant ROP response buffer, an empty
+// AUX-out buffer, the transfer time, and the result.
+func pushRpcExt2Out(cxh ContextHandle, pout []byte, result uint32) []byte {
+	p := ndr.NewPush()
+	pushCtxHandle(p, cxh)
+	p.Uint32(0) // flags
+	n := uint32(len(pout))
+	p.Uint32(n) // cb_out max_count
+	p.Uint32(0) // offset
+	p.Uint32(n) // actual_count
+	p.Raw(pout)
+	p.Uint32(n)      // cb_out (redundant)
+	p.Uint32(0)      // AUX max_count
+	p.Uint32(0)      // AUX offset
+	p.Uint32(0)      // AUX actual_count
+	p.Uint32(0)      // cb_auxout (redundant)
+	p.Uint32(0)      // trans_time
+	p.Uint32(result) // err32
+	return p.Bytes()
 }

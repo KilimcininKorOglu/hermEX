@@ -59,11 +59,12 @@ const BindNakReasonNotSpecified uint16 = 0
 
 // NCA fault status codes ([MS-RPCE] / C706) used in FAULT PDUs.
 const (
-	FaultOpRngError   uint32 = 0x1C010002
-	FaultUnkIf        uint32 = 0x1C010003
-	FaultProtoError   uint32 = 0x1C01000B
-	FaultNdr          uint32 = 0x000006F7
-	FaultAccessDenied uint32 = 0x00000005
+	FaultOpRngError      uint32 = 0x1C010002
+	FaultUnkIf           uint32 = 0x1C010003
+	FaultProtoError      uint32 = 0x1C01000B
+	FaultContextMismatch uint32 = 0x1C00001A
+	FaultNdr             uint32 = 0x000006F7
+	FaultAccessDenied    uint32 = 0x00000005
 )
 
 // TransferSyntaxNDR is the well-known NDR (v2) transfer syntax abstract id a
