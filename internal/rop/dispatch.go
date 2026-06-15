@@ -23,6 +23,8 @@ const (
 	ropSortTable             uint8 = 0x13
 	ropRestrict              uint8 = 0x14
 	ropQueryRows             uint8 = 0x15
+	ropSeekRow               uint8 = 0x18
+	ropResetTable            uint8 = 0x81
 	ropGetAttachmentTable    uint8 = 0x21
 	ropOpenAttachment        uint8 = 0x22
 	ropOpenStream            uint8 = 0x2B
@@ -144,6 +146,14 @@ loop:
 			}
 		case ropQueryRows:
 			if !s.ropQueryRows(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSeekRow:
+			if !s.ropSeekRow(p, out, handles, hindex) {
+				break loop
+			}
+		case ropResetTable:
+			if !s.ropResetTable(p, out, handles, hindex) {
 				break loop
 			}
 		case ropOpenStream:

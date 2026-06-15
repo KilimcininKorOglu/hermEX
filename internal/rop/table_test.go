@@ -517,3 +517,108 @@ func TestRestrictThenSort(t *testing.T) {
 	_, rows := queryRowsResponse(t, qr, cols)
 	assertSubjects(t, rows, "axe", "box", "fox")
 }
+
+// buildSeekRow builds a RopSeekRow request (Origin, signed Offset, WantRowMovedCount).
+func buildSeekRow(inIdx, seekPos uint8, offset int32) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropSeekRow)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	b.Uint8(seekPos)
+	b.Uint32(uint32(offset))
+	b.Uint8(0) // WantRowMovedCount
+	return b.Bytes()
+}
+
+// buildResetTable builds a RopResetTable request (no body).
+func buildResetTable(inIdx uint8) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropResetTable)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	return b.Bytes()
+}
+
+// seekRowResponse parses a SeekRow response: HasSoughtLess + the signed RowsSought.
+func seekRowResponse(t *testing.T, resp []byte) (hasSoughtLess uint8, sought int32) {
+	t.Helper()
+	p := ext.NewPull(resp, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropSeekRow {
+		t.Fatalf("RopId = %#x, want SeekRow", id)
+	}
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("SeekRow ec = %#x", ec)
+	}
+	hasSoughtLess = mustU8(t, p, "hasSoughtLess")
+	sought = int32(mustU32(t, p, "offsetSought"))
+	return hasSoughtLess, sought
+}
+
+// TestSeekRow moves the cursor forward from the beginning and confirms the next
+// QueryRows pages from the sought position.
+func TestSeekRow(t *testing.T) {
+	dir := t.TempDir()
+	for _, s := range []string{"m0", "m1", "m2", "m3", "m4"} {
+		seedInboxMessage(t, dir, s)
+	}
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	tableH := openInboxContentsTable(t, sess)
+	cols := []mapi.PropTag{mapi.PrSubject}
+	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
+
+	resp, _ := sess.Dispatch(buildSeekRow(0, bookmarkBeginning, 2), []uint32{tableH})
+	if hl, sought := seekRowResponse(t, resp); hl != 0 || sought != 2 {
+		t.Fatalf("SeekRow(+2 from start) = (hasSoughtLess %d, sought %d), want (0, 2)", hl, sought)
+	}
+	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
+	_, rows := queryRowsResponse(t, qr, cols)
+	assertSubjects(t, rows, "m2", "m3", "m4")
+}
+
+// TestSeekRowClampsAtEnd confirms a seek past the end stops at the last row and
+// reports HasSoughtLess.
+func TestSeekRowClampsAtEnd(t *testing.T) {
+	dir := t.TempDir()
+	for _, s := range []string{"a", "b", "c"} {
+		seedInboxMessage(t, dir, s)
+	}
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	tableH := openInboxContentsTable(t, sess)
+	mustDispatchOK(t, sess, buildSetColumns(0, []mapi.PropTag{mapi.PrSubject}), []uint32{tableH}, ropSetColumns)
+
+	resp, _ := sess.Dispatch(buildSeekRow(0, bookmarkBeginning, 100), []uint32{tableH})
+	if hl, sought := seekRowResponse(t, resp); hl != 1 || sought != 3 {
+		t.Errorf("SeekRow(+100) = (hasSoughtLess %d, sought %d), want (1, 3)", hl, sought)
+	}
+}
+
+// TestResetTable confirms RopResetTable clears the column set, sort order, and
+// restriction: after a filtered + sorted view, a reset and a fresh SetColumns
+// return every row in store order.
+func TestResetTable(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxMessage(t, dir, "Charlie")
+	seedInboxMessage(t, dir, "Alpha")
+	seedInboxMessage(t, dir, "Bravo")
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	tableH := openInboxContentsTable(t, sess)
+	cols := []mapi.PropTag{mapi.PrSubject}
+	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
+	mustDispatchOK(t, sess, buildSortTable(0, 0, 0, []sortOrderEntry{{mapi.PrSubject, sortDescend}}), []uint32{tableH}, ropSortTable)
+	mustDispatchOK(t, sess, buildRestrict(0, propEq(mapi.PrSubject, "Charlie")), []uint32{tableH}, ropRestrict)
+	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
+	_, rows := queryRowsResponse(t, qr, cols)
+	assertSubjects(t, rows, "Charlie")
+
+	mustDispatchOK(t, sess, buildResetTable(0), []uint32{tableH}, ropResetTable)
+	// The reset cleared the columns too, so set them afresh; every row then returns
+	// in store order with no filter or sort applied.
+	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
+	qr, _ = sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
+	_, rows = queryRowsResponse(t, qr, cols)
+	assertSubjects(t, rows, "Charlie", "Alpha", "Bravo")
+}

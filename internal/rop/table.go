@@ -641,6 +641,77 @@ func evalBitmask(b mapi.BitmaskRestriction, props mapi.PropertyValues) bool {
 	return false
 }
 
+// ropSeekRow handles RopSeekRow ([MS-OXCTABL] 2.2.2.6): it moves the cursor by a
+// signed offset from an origin (beginning/current/end), clamped to the view, and
+// reports whether it stopped short and how many rows it actually moved.
+func (s *Session) ropSeekRow(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	seekPos, e1 := p.Uint8()
+	off, e2 := p.Uint32() // Offset, signed
+	_, e3 := p.Uint8()    // WantRowMovedCount
+	if e1 != nil || e2 != nil || e3 != nil {
+		return false
+	}
+	table := s.get(handleAt(handles, hindex))
+	if table == nil || table.kind != kindTable {
+		writeErr(out, ropSeekRow, hindex, ecError)
+		return true
+	}
+	ts := table.table
+	total := ts.total()
+	var origin int
+	switch seekPos {
+	case bookmarkBeginning:
+		origin = 0
+	case bookmarkCurrent:
+		origin = ts.cursor
+	case bookmarkEnd:
+		origin = total
+	default:
+		writeErr(out, ropSeekRow, hindex, ecError)
+		return true
+	}
+	offset := int32(off)
+	target := origin + int(offset)
+	if target < 0 {
+		target = 0
+	} else if target > total {
+		target = total
+	}
+	ts.cursor = target
+	sought := int32(target - origin)
+	var hasSoughtLess uint8
+	if sought != offset {
+		hasSoughtLess = 1
+	}
+	out.Uint8(ropSeekRow)
+	out.Uint8(hindex)
+	out.Uint32(ecSuccess)
+	out.Uint8(hasSoughtLess)
+	out.Uint32(uint32(sought))
+	return true
+}
+
+// ropResetTable handles RopResetTable ([MS-OXCTABL] 2.2.2.14): it returns the table
+// to its initial state — clearing the column set, sort order, restriction, and
+// cursor — so the client starts a fresh SetColumns / Sort / Restrict cycle.
+func (s *Session) ropResetTable(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	table := s.get(handleAt(handles, hindex))
+	if table == nil || table.kind != kindTable {
+		writeErr(out, ropResetTable, hindex, ecError)
+		return true
+	}
+	ts := table.table
+	ts.columns = nil
+	ts.sortKeys = nil
+	ts.restriction = nil
+	ts.view = nil
+	ts.cursor = 0
+	out.Uint8(ropResetTable)
+	out.Uint8(hindex)
+	out.Uint32(ecSuccess)
+	return true
+}
+
 // childFolders returns a folder's direct children from the user-visible tree.
 // ListFolders reports the IPM subtree's own children with a nil ParentID, so a
 // hierarchy table opened on the IPM subtree enumerates exactly those.
