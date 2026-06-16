@@ -24,6 +24,7 @@ const (
 	ropRestrict              uint8 = 0x14
 	ropQueryRows             uint8 = 0x15
 	ropSeekRow               uint8 = 0x18
+	ropFindRow               uint8 = 0x4F
 	ropResetTable            uint8 = 0x81
 	ropGetAttachmentTable    uint8 = 0x21
 	ropOpenAttachment        uint8 = 0x22
@@ -150,6 +151,10 @@ loop:
 			}
 		case ropSeekRow:
 			if !s.ropSeekRow(p, out, handles, hindex) {
+				break loop
+			}
+		case ropFindRow:
+			if !s.ropFindRow(p, out, handles, hindex) {
 				break loop
 			}
 		case ropResetTable:

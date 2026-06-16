@@ -622,3 +622,87 @@ func TestResetTable(t *testing.T) {
 	_, rows = queryRowsResponse(t, qr, cols)
 	assertSubjects(t, rows, "Charlie", "Alpha", "Bravo")
 }
+
+// buildFindRow builds a RopFindRow request (Flags, the restriction, Origin, and an
+// empty Bookmark).
+func buildFindRow(inIdx, flags, seekPos uint8, r *mapi.Restriction) []byte {
+	var data []byte
+	if r != nil {
+		rd := ext.NewPush(ext.FlagUTF16)
+		_ = rd.Restriction(*r)
+		data = rd.Bytes()
+	}
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropFindRow)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	b.Uint8(flags)
+	b.Uint16(uint16(len(data)))
+	b.Raw(data)
+	b.Uint8(seekPos)
+	_ = b.BinShort(nil) // empty Bookmark
+	return b.Bytes()
+}
+
+// findRowResponse parses a FindRow response: RowNoLongerVisible, HasRowData, and the
+// row (when present).
+func findRowResponse(t *testing.T, resp []byte, cols []mapi.PropTag) (found bool, row mapi.PropertyValues) {
+	t.Helper()
+	p := ext.NewPull(resp, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropFindRow {
+		t.Fatalf("RopId = %#x, want FindRow", id)
+	}
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("FindRow ec = %#x", ec)
+	}
+	mustU8(t, p, "rowNoLongerVisible")
+	if hasRow := mustU8(t, p, "hasRowData"); hasRow == 0 {
+		return false, nil
+	}
+	return true, decodeRow(t, p, cols)
+}
+
+// TestFindRow finds the first row matching a restriction from the beginning and
+// confirms it lands the cursor on that row.
+func TestFindRow(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxMessage(t, dir, "Apple")
+	seedInboxMessage(t, dir, "Banana")
+	seedInboxMessage(t, dir, "Cherry")
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	tableH := openInboxContentsTable(t, sess)
+	cols := []mapi.PropTag{mapi.PrSubject}
+	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
+
+	resp, _ := sess.Dispatch(buildFindRow(0, 0, bookmarkBeginning, propEq(mapi.PrSubject, "Banana")), []uint32{tableH})
+	found, row := findRowResponse(t, resp, cols)
+	if !found {
+		t.Fatal("FindRow(Banana) found no row")
+	}
+	if subj, _ := row.Get(mapi.PrSubject); subj != "Banana" {
+		t.Errorf("FindRow returned subject %v, want Banana", subj)
+	}
+	// The cursor now sits on the found row, so QueryRows pages from it.
+	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
+	_, rows := queryRowsResponse(t, qr, cols)
+	assertSubjects(t, rows, "Banana", "Cherry")
+}
+
+// TestFindRowNoMatch confirms a search that matches nothing reports HasRowData=0
+// rather than erroring.
+func TestFindRowNoMatch(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxMessage(t, dir, "Apple")
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	tableH := openInboxContentsTable(t, sess)
+	cols := []mapi.PropTag{mapi.PrSubject}
+	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
+
+	resp, _ := sess.Dispatch(buildFindRow(0, 0, bookmarkBeginning, propEq(mapi.PrSubject, "Zucchini")), []uint32{tableH})
+	if found, _ := findRowResponse(t, resp, cols); found {
+		t.Error("FindRow(Zucchini) reported a row, want no match")
+	}
+}

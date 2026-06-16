@@ -691,6 +691,130 @@ func (s *Session) ropSeekRow(p *ext.Pull, out *ext.Push, handles []uint32, hinde
 	return true
 }
 
+// FindRow direction flag ([MS-OXCTABL] 2.2.2.13): forward (0x00) scans from the
+// origin toward the end, backward toward the beginning.
+const findRowBackward uint8 = 0x01
+
+// matchRow reports whether the row at the given view position satisfies the
+// restriction (a nil restriction matches every row), projecting the restriction's
+// properties for that row independently of the column set.
+func (t *tableState) matchRow(store *objectstore.Store, viewIdx int, r *mapi.Restriction) (bool, error) {
+	if r == nil {
+		return true, nil
+	}
+	props, err := t.rowKeyProps(store, t.baseIndex(viewIdx), restrictionTags(*r))
+	if err != nil {
+		return false, err
+	}
+	return evalRestriction(*r, props), nil
+}
+
+// ropFindRow handles RopFindRow ([MS-OXCTABL] 2.2.2.13): it scans the view from an
+// origin (beginning/current/end) for the first row matching a restriction, moves
+// the cursor there, and returns that row. With no match it reports HasRowData=0.
+// The custom-bookmark origin needs bookmarks and is not yet supported.
+func (s *Session) ropFindRow(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	flags, e1 := p.Uint8()
+	resSize, e2 := p.Uint16()
+	if e1 != nil || e2 != nil {
+		return false
+	}
+	raw, e3 := p.Raw(int(resSize)) // RestrictionData
+	if e3 != nil {
+		return false
+	}
+	seekPos, e4 := p.Uint8()
+	_, e5 := p.BinShort() // Bookmark (used only for the custom origin, deferred)
+	if e4 != nil || e5 != nil {
+		return false
+	}
+	table := s.get(handleAt(handles, hindex))
+	if table == nil || table.kind != kindTable || table.store == nil || table.table.columns == nil {
+		writeErr(out, ropFindRow, hindex, ecError)
+		return true
+	}
+	ts := table.table
+	var restriction *mapi.Restriction
+	if resSize > 0 {
+		r, err := ext.NewPull(raw, ext.FlagUTF16).Restriction()
+		if err != nil {
+			writeErr(out, ropFindRow, hindex, ecError)
+			return true
+		}
+		if !restrictionSupported(r) {
+			writeErr(out, ropFindRow, hindex, ecNotSupported)
+			return true
+		}
+		restriction = &r
+	}
+	total := ts.total()
+	var start int
+	switch seekPos {
+	case bookmarkBeginning:
+		start = 0
+	case bookmarkCurrent:
+		start = ts.cursor
+	case bookmarkEnd:
+		start = total
+	default:
+		writeErr(out, ropFindRow, hindex, ecNotSupported) // custom bookmark / invalid
+		return true
+	}
+
+	found := -1
+	var scanErr error
+	probe := func(i int) bool {
+		m, err := ts.matchRow(table.store, i, restriction)
+		if err != nil {
+			scanErr = err
+			return true
+		}
+		if m {
+			found = i
+		}
+		return m
+	}
+	if flags&findRowBackward == 0 {
+		for i := start; i < total && !probe(i); i++ {
+		}
+	} else {
+		for i := start - 1; i >= 0 && !probe(i); i-- {
+		}
+	}
+	if scanErr != nil {
+		writeErr(out, ropFindRow, hindex, ecError)
+		return true
+	}
+
+	var rowBytes []byte
+	if found >= 0 {
+		ts.cursor = found
+		row, err := ts.rowProps(table.store, found)
+		if err != nil {
+			writeErr(out, ropFindRow, hindex, ecError)
+			return true
+		}
+		rp := ext.NewPush(ext.FlagUTF16)
+		if err := buildPropertyRow(rp, ts.columns, row); err != nil {
+			writeErr(out, ropFindRow, hindex, ecError)
+			return true
+		}
+		rowBytes = rp.Bytes()
+	}
+
+	out.Uint8(ropFindRow)
+	out.Uint8(hindex)
+	out.Uint32(ecSuccess)
+	out.Uint8(0) // RowNoLongerVisible (bookmark origin always valid here)
+	if rowBytes == nil {
+		out.Uint8(0) // HasRowData = 0: no row matched
+		return true
+	}
+	out.Uint8(1) // HasRowData = 1
+	out.Raw(rowBytes)
+	return true
+}
+
 // ropResetTable handles RopResetTable ([MS-OXCTABL] 2.2.2.14): it returns the table
 // to its initial state — clearing the column set, sort order, restriction, and
 // cursor — so the client starts a fresh SetColumns / Sort / Restrict cycle.
