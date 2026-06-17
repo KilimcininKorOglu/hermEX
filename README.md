@@ -1,16 +1,15 @@
 # hermEX Mail Server
 
 hermEX is a fully original, modular native Microsoft Exchange Server replacement written
-entirely in Go. It implements the external client protocols an Exchange server must speak —
-IMAP, POP3, SMTP/LMTP, CalDAV, CardDAV, ActiveSync, EWS, MAPI/HTTP with ROP, and NSPI for the
-global address list — with no PHP and no C++ in the product. Server, webmail UI, admin UI, admin
-API, and all sync interfaces are Go.
+entirely in Go. It implements IMAP, POP3, SMTP/LMTP, CalDAV, CardDAV, ActiveSync, EWS,
+MAPI/HTTP with ROP, and NSPI (global address list). Server, webmail UI, admin CLI,
+and all sync interfaces are Go.
 
 ## Status
 
-Early development. The build order favors externally observable capabilities first: a working
-mail vertical (SMTP in, IMAP/POP3 out, minimal webmail) precedes the Exchange-native surfaces
-(MAPI/ROP, NSPI, EWS), which come last. See `SLICING-PLAN.md`.
+Active development. The mail vertical (SMTP in, IMAP/POP3 out, Go webmail) is functionally
+complete and verified against Thunderbird. CalDAV/CardDAV, ActiveSync, and the Exchange-native
+protocols (EWS, MAPI/HTTP + ROP, NSPI) are wired and partially implemented.
 
 ## Design
 
@@ -19,33 +18,61 @@ mail vertical (SMTP in, IMAP/POP3 out, minimal webmail) precedes the Exchange-na
 - The logical MAPI model (property tags, named properties, object semantics, ICS state, and the
   property value encoding inside ROP/NSPI/EWS responses) is preserved because the external
   protocols dictate it.
-- Correctness is verified against real clients (Thunderbird, Outlook, mobile) and a reference
-  oracle running in a test-only Docker container.
-
-See `ARCHITECTURE.md` for the module map and `SLICING-PLAN.md` for the roadmap.
+- Correctness is verified against real clients (Thunderbird, Outlook, mobile).
 
 ## Development
 
-Development is Docker-based. All runtime data lives under `docker-data/`.
+Development is Docker-based.
 
 ```sh
-# bring up the whole dev environment: one MariaDB + the Go toolchain (dev) and
-# the mail services (SMTP 8140, POP3 8141, MariaDB 8142, IMAP 8143, webmail 8144)
+# Bring up the whole dev environment: one MariaDB + Go toolchain + all services
 docker compose -f hermex-compose.yml up -d
 
-# build/test in the toolchain container; DB-backed tests use a separate
-# hermex_test schema on the same MariaDB, kept apart from the runtime accounts
-docker compose -f hermex-compose.yml exec dev go test ./...
+# Build + test in the container (always use -count=1)
+docker compose -f hermex-compose.yml exec dev go build ./...
+docker compose -f hermex-compose.yml exec dev go test -count=1 ./...
+
+# Single package or test
+docker compose -f hermex-compose.yml exec dev go test -count=1 ./internal/objectstore
+docker compose -f hermex-compose.yml exec dev go test -count=1 -run TestCreateMessage ./internal/objectstore
+
+# Lint / vet
+docker compose -f hermex-compose.yml exec dev gofmt -l .
+docker compose -f hermex-compose.yml exec dev go vet ./...
+
+# Rebuild a service after code change
+docker compose -f hermex-compose.yml build webmail && docker compose -f hermex-compose.yml up -d --no-deps webmail
 ```
+
+### Service ports
+
+| Service       | Host | Container |
+|---------------|------|-----------|
+| SMTP (mta)    | 8140 | 25        |
+| POP3          | 8141 | 110       |
+| MariaDB       | 8142 | 3306      |
+| IMAP          | 8143 | 143       |
+| Webmail       | 8144 | 8080      |
+| DAV           | 8145 | 8080      |
+| ActiveSync    | 8146 | 8080      |
+| EWS           | 8147 | 8080      |
+| MAPI/HTTP     | 8148 | 8080      |
+| Gateway (TLS) | 8149 | 8080      |
+
+### Key facts
+
+- **Database:** MariaDB (`email`) via `go-sql-driver/mysql`. Password hashing: `crypt_sha512`.
+- **Mailbox store:** `internal/objectstore` — per-mailbox SQLite (`objects.sqlite3` + `imapindex.sqlite3` + `cid/` + `eml/`).
+- **Auth:** `internal/directory` backed by MariaDB. Config JSON holds infra only (DB DSN, hostname, data_dir).
+- **Mail construction:** `internal/oxcmail.Export()` is the single path from MAPI object to MIME bytes.
 
 ## Layout
 
-| Path | Purpose |
-|------|---------|
-| `cmd/` | Service executables (mailstore, indexer, mta, imap, pop3, gateway, dav, webmail, admin) |
-| `internal/` | Shared libraries (mapi, ext, store, mime, protocol implementations) |
-| `test/` | Oracle diff harness and golden vectors |
-| `docker/` | Dev and service container images |
+| Path        | Purpose                                                                                        |
+|-------------|------------------------------------------------------------------------------------------------|
+| `cmd/`      | Service executables (mta, imap, pop3, webmail, dav, activesync, ews, mapihttp, gateway, admin) |
+| `internal/` | Shared libraries — mapi, ext, objectstore, mime, oxcmail, protocol implementations             |
+| `docker/`   | Dev and service container images                                                               |
 
 ## License
 
