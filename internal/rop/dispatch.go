@@ -36,6 +36,12 @@ const (
 	ropOpenStream            uint8 = 0x2B
 	ropReadStream            uint8 = 0x2C
 	ropLogon                 uint8 = 0xFE
+	ropCreateFolder          uint8 = 0x1C
+	ropDeleteFolder          uint8 = 0x1D
+	ropMoveFolder            uint8 = 0x35
+	ropCopyFolder            uint8 = 0x36
+	ropEmptyFolder           uint8 = 0x58
+	ropHardDeleteMessages     uint8 = 0x91
 )
 
 // MAPI return codes ([MS-OXCDATA] 2.4.1) carried in a ROP response ReturnValue.
@@ -116,6 +122,30 @@ loop:
 			}
 		case ropMoveCopyMessages:
 			if !s.ropMoveCopyMessages(p, out, handles, hindex) {
+				break loop
+			}
+		case ropCreateFolder:
+			if !s.ropCreateFolder(p, out, handles, hindex) {
+				break loop
+			}
+		case ropDeleteFolder:
+			if !s.ropDeleteFolder(p, out, handles, hindex) {
+				break loop
+			}
+		case ropMoveFolder:
+			if !s.ropMoveFolder(p, out, handles, hindex) {
+				break loop
+			}
+		case ropCopyFolder:
+			if !s.ropCopyFolder(p, out, handles, hindex) {
+				break loop
+			}
+		case ropEmptyFolder:
+			if !s.ropEmptyFolder(p, out, handles, hindex) {
+				break loop
+			}
+		case ropHardDeleteMessages:
+			if !s.ropHardDeleteMessages(p, out, handles, hindex) {
 				break loop
 			}
 		case ropSaveChangesMessage:
