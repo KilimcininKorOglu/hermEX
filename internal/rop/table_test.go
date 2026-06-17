@@ -706,3 +706,149 @@ func TestFindRowNoMatch(t *testing.T) {
 		t.Error("FindRow(Zucchini) reported a row, want no match")
 	}
 }
+
+// buildCreateBookmark builds a RopCreateBookmark request (no body).
+func buildCreateBookmark(inIdx uint8) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropCreateBookmark)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	return b.Bytes()
+}
+
+// createBookmarkResponse parses a CreateBookmark response and returns the bookmark bytes.
+func createBookmarkResponse(t *testing.T, resp []byte) []byte {
+	t.Helper()
+	p := ext.NewPull(resp, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropCreateBookmark {
+		t.Fatalf("RopId = %#x, want CreateBookmark", id)
+	}
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("CreateBookmark ec = %#x", ec)
+	}
+	bk, err := p.BinShort()
+	if err != nil {
+		t.Fatalf("CreateBookmark BinShort: %v", err)
+	}
+	return bk
+}
+
+// buildSeekRowBookmark builds a RopSeekRowBookmark request (bookmark, offset, WantMovedCount).
+func buildSeekRowBookmark(inIdx uint8, bookmark []byte, offset int32) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropSeekRowBookmark)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	b.BinShort(bookmark)
+	b.Uint32(uint32(offset))
+	b.Uint8(0) // WantRowMovedCount
+	return b.Bytes()
+}
+
+// seekRowBookmarkResponse parses a SeekRowBookmark response.
+func seekRowBookmarkResponse(t *testing.T, resp []byte) (invisible uint8, hasSoughtLess uint8, sought int32) {
+	t.Helper()
+	p := ext.NewPull(resp, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropSeekRowBookmark {
+		t.Fatalf("RopId = %#x, want SeekRowBookmark", id)
+	}
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("SeekRowBookmark ec = %#x", ec)
+	}
+	invisible = mustU8(t, p, "rowInvisible")
+	hasSoughtLess = mustU8(t, p, "hasSoughtLess")
+	sought = int32(mustU32(t, p, "offsetSought"))
+	return
+}
+
+
+
+// TestCreateBookmark creates a bookmark, seeks away, then seeks back via the bookmark.
+func TestCreateBookmark(t *testing.T) {
+	dir := t.TempDir()
+	for _, s := range []string{"m0", "m1", "m2", "m3", "m4"} {
+		seedInboxMessage(t, dir, s)
+	}
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	tableH := openInboxContentsTable(t, sess)
+
+	// Seek to row 2 first
+	mustDispatchOK(t, sess, buildSeekRow(0, bookmarkBeginning, 2), []uint32{tableH}, ropSeekRow)
+
+	// Create bookmark at current cursor (row 2)
+	resp, _ := sess.Dispatch(buildCreateBookmark(0), []uint32{tableH})
+	bk := createBookmarkResponse(t, resp)
+
+	// Seek forward to row 4
+	mustDispatchOK(t, sess, buildSeekRow(0, bookmarkCurrent, 2), []uint32{tableH}, ropSeekRow)
+
+	// Seek back to bookmark (should land at row 2)
+	resp2, _ := sess.Dispatch(buildSeekRowBookmark(0, bk, 0), []uint32{tableH})
+	invisible, hl, sought := seekRowBookmarkResponse(t, resp2)
+	if invisible != 0 || hl != 0 || sought != 0 {
+		t.Errorf("SeekRowBookmark(+0) = (invis %d, hl %d, sought %d), want (0,0,0)", invisible, hl, sought)
+	}
+
+	// QueryRows from the bookmarked position — should see m2 onwards
+	mustDispatchOK(t, sess, buildSetColumns(0, []mapi.PropTag{mapi.PrSubject}), []uint32{tableH}, ropSetColumns)
+	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 3, 32), []uint32{tableH})
+	_, rows := queryRowsResponse(t, qr, []mapi.PropTag{mapi.PrSubject})
+	assertSubjects(t, rows, "m2", "m3", "m4")
+}
+
+// TestSeekRowBookmarkNotFound returns ecNotFound for a non-existent bookmark.
+func TestSeekRowBookmarkNotFound(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxMessage(t, dir, "m0")
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	tableH := openInboxContentsTable(t, sess)
+
+	resp, _ := sess.Dispatch(buildSeekRowBookmark(0, []byte{0xFF, 0xFF}, 0), []uint32{tableH})
+	p := ext.NewPull(resp, ext.FlagUTF16)
+	mustU8(t, p, "ropId")   // ropSeekRowBookmark
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecNotFound {
+		t.Errorf("SeekRowBookmark ec = %#x, want ecNotFound", ec)
+	}
+}
+
+
+// buildSingleROP builds a minimal single-opcode ROP request for ROPs that have no
+// body (or whose body is not consumed when returning ecNotSupported).
+func buildSingleROP(ropID uint8, inIdx uint8) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropID)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	return b.Bytes()
+}
+// TestExpandCollapseUnsupported verifies expand/collapse ROPs return ecNotSupported
+// since uncategorized (flat) tables have no category state.
+func TestExpandCollapseUnsupported(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxMessage(t, dir, "m0")
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	tableH := openInboxContentsTable(t, sess)
+
+	for _, tc := range []struct {
+		name string
+		req  []byte
+	}{
+		{"ExpandRow", buildSingleROP(ropExpandRow, 0)},
+		{"CollapseRow", buildSingleROP(ropCollapseRow, 0)},
+		{"SetCollapseState", buildSingleROP(ropSetCollapseState, 0)},
+	} {
+		resp, _ := sess.Dispatch(tc.req, []uint32{tableH})
+		p := ext.NewPull(resp, ext.FlagUTF16)
+		mustU8(t, p, "ropId")
+		mustU8(t, p, "hindex")
+		if ec := mustU32(t, p, "ec"); ec != ecNotSupported {
+			t.Errorf("%s: ec = %#x, want ecNotSupported", tc.name, ec)
+		}
+	}
+}

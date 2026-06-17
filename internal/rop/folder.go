@@ -38,6 +38,8 @@ type tableState struct {
 	restriction *mapi.Restriction         // RopRestrict filter; nil = no filter
 	view        []int                     // base-row indices in display order; nil = identity
 	cursor      int
+	bookmarks   map[uint16]int // named cursor positions keyed by bookmark index
+	nextBookmark uint16
 }
 
 // baseCount reports the immutable base row count for the table kind.

@@ -836,6 +836,130 @@ func (s *Session) ropResetTable(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	return true
 }
 
+	// ensureBookmarks makes the bookmark map lazy on first use.
+	func (ts *tableState) ensureBookmarks() {
+		if ts.bookmarks == nil {
+			ts.bookmarks = make(map[uint16]int)
+		}
+	}
+
+	// ropCreateBookmark handles RopCreateBookmark ([MS-OXCTABL] 2.2.2.1): it stores the
+	// current cursor position under a new bookmark index and returns that index as a
+	// BinShort. The bookmark persists until the table is released.
+	func (s *Session) ropCreateBookmark(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+		table := s.get(handleAt(handles, hindex))
+		if table == nil || table.kind != kindTable {
+			writeErr(out, ropCreateBookmark, hindex, ecError)
+			return true
+		}
+		ts := table.table
+		ts.ensureBookmarks()
+		idx := ts.nextBookmark
+		ts.nextBookmark++
+		ts.bookmarks[idx] = ts.cursor
+
+		out.Uint8(ropCreateBookmark)
+		out.Uint8(hindex)
+		out.Uint32(ecSuccess)
+		out.BinShort([]byte{byte(idx >> 8), byte(idx & 0xFF)})
+		return true
+	}
+
+	// ropSeekRowBookmark handles RopSeekRowBookmark ([MS-OXCTABL] 2.2.2.4): it seeks
+	// relative to a stored bookmark the same way ropSeekRow seeks relative to
+	// BEGINNING/CURRENT/END. If the bookmark is not found it returns ecNotFound so the
+	// client can recreate it.
+	func (s *Session) ropSeekRowBookmark(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+		bk, e1 := p.BinShort()  // Bookmark
+		offset, e2 := p.Uint32() // Offset, signed
+		_, e3 := p.Uint8()       // WantRowMovedCount
+		if e1 != nil || e2 != nil || e3 != nil {
+			return false
+		}
+		table := s.get(handleAt(handles, hindex))
+		if table == nil || table.kind != kindTable {
+			writeErr(out, ropSeekRowBookmark, hindex, ecError)
+			return true
+		}
+		ts := table.table
+		ts.ensureBookmarks()
+		if len(bk) < 2 {
+			writeErr(out, ropSeekRowBookmark, hindex, ecError)
+			return true
+		}
+		idx := (uint16(bk[0]) << 8) | uint16(bk[1])
+		origin, ok := ts.bookmarks[idx]
+		if !ok {
+			writeErr(out, ropSeekRowBookmark, hindex, ecNotFound)
+			return true
+		}
+		total := ts.total()
+		off := int32(offset)
+		target := origin + int(off)
+		if target < 0 {
+			target = 0
+		} else if target > total {
+			target = total
+		}
+		ts.cursor = target
+		sought := int32(target - origin)
+		var hasSoughtLess uint8
+		if sought != off {
+			hasSoughtLess = 1
+		}
+		out.Uint8(ropSeekRowBookmark)
+		out.Uint8(hindex)
+		out.Uint32(ecSuccess)
+		out.Uint8(0) // RowInvisible \u2014 bookmark origin always valid
+		out.Uint8(hasSoughtLess)
+		out.Uint32(uint32(sought))
+		return true
+	}
+
+	// ropExpandRow handles RopExpandRow ([MS-OXCTABL] 2.2.2.8): it expands a collapsed
+	// category to show its child rows. Uncategorized (flat) tables have no categories,
+	// so this ROP always returns ecNotSupported. The body (MaxCount u32 + CategoryID u64)
+	// is NOT consumed here — this ROP must be alone in its batch.
+	func (s *Session) ropExpandRow(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+		table := s.get(handleAt(handles, hindex))
+		if table == nil || table.kind != kindTable {
+			writeErr(out, ropExpandRow, hindex, ecError)
+			return true
+		}
+		writeErr(out, ropExpandRow, hindex, ecNotSupported)
+		return true
+	}
+
+	// ropCollapseRow handles RopCollapseRow ([MS-OXCTABL] 2.2.2.7): it collapses an
+	// expanded category to hide its child rows. Uncategorized (flat) tables have no
+	// categories, so this ROP always returns ecNotSupported. The body (CategoryID u64)
+	// is NOT consumed here — this ROP must be alone in its batch.
+	func (s *Session) ropCollapseRow(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+		table := s.get(handleAt(handles, hindex))
+		if table == nil || table.kind != kindTable {
+			writeErr(out, ropCollapseRow, hindex, ecError)
+			return true
+		}
+		writeErr(out, ropCollapseRow, hindex, ecNotSupported)
+		return true
+	}
+
+	// ropSetCollapseState handles RopSetCollapseState ([MS-OXCTABL] 2.2.2.11): it sets
+	// the collapsed/expanded state of all categories in the table. Uncategorized
+	// (flat) tables have no categories, so this ROP always returns ecNotSupported.
+	// The body (collapse_state binary blob) is NOT consumed here — this ROP must be
+	// alone in its batch.
+	func (s *Session) ropSetCollapseState(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+		table := s.get(handleAt(handles, hindex))
+		if table == nil || table.kind != kindTable {
+			writeErr(out, ropSetCollapseState, hindex, ecError)
+			return true
+		}
+		writeErr(out, ropSetCollapseState, hindex, ecNotSupported)
+		return true
+	}
+
+
 // childFolders returns a folder's direct children from the user-visible tree.
 // ListFolders reports the IPM subtree's own children with a nil ParentID, so a
 // hierarchy table opened on the IPM subtree enumerates exactly those.

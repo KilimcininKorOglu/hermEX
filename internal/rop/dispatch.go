@@ -24,7 +24,12 @@ const (
 	ropRestrict              uint8 = 0x14
 	ropQueryRows             uint8 = 0x15
 	ropSeekRow               uint8 = 0x18
+	ropSeekRowBookmark       uint8 = 0x19
+	ropCreateBookmark        uint8 = 0x1B
 	ropFindRow               uint8 = 0x4F
+	ropExpandRow             uint8 = 0x59
+	ropCollapseRow           uint8 = 0x5A
+	ropSetCollapseState       uint8 = 0x6C
 	ropResetTable            uint8 = 0x81
 	ropGetAttachmentTable    uint8 = 0x21
 	ropOpenAttachment        uint8 = 0x22
@@ -153,10 +158,30 @@ loop:
 			if !s.ropSeekRow(p, out, handles, hindex) {
 				break loop
 			}
+			case ropSeekRowBookmark:
+				if !s.ropSeekRowBookmark(p, out, handles, hindex) {
+					break loop
+				}
+			case ropCreateBookmark:
+				if !s.ropCreateBookmark(p, out, handles, hindex) {
+					break loop
+				}
 		case ropFindRow:
 			if !s.ropFindRow(p, out, handles, hindex) {
 				break loop
 			}
+			case ropExpandRow:
+				if !s.ropExpandRow(p, out, handles, hindex) {
+					break loop
+				}
+			case ropCollapseRow:
+				if !s.ropCollapseRow(p, out, handles, hindex) {
+					break loop
+				}
+			case ropSetCollapseState:
+				if !s.ropSetCollapseState(p, out, handles, hindex) {
+					break loop
+				}
 		case ropResetTable:
 			if !s.ropResetTable(p, out, handles, hindex) {
 				break loop
