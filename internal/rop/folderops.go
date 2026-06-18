@@ -258,7 +258,7 @@ func (s *Session) ropHardDeleteMessages(p *ext.Pull, out *ext.Push, handles []ui
 // search-folder backend, so the request body is fully consumed (to keep the parser
 // aligned in a multi-ROP batch) and ecNotSupported is returned. The body is
 // RestrictionDataSize (u16) + RestrictionData + FolderIds (EID_ARRAY) + SearchFlags (u32).
-func (s *Session) ropSetSearchCriteria(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+func (s *Session) ropSetSearchCriteria(p *ext.Pull, out *ext.Push, _ []uint32, hindex uint8) bool {
 	resSize, e1 := p.Uint16() // RestrictionDataSize
 	if e1 != nil {
 		return false
@@ -280,7 +280,7 @@ func (s *Session) ropSetSearchCriteria(p *ext.Pull, out *ext.Push, handles []uin
 // returns the restriction, scope folders, and search status of a search folder.
 // v1 has no search-folder backend, so the request body (three u8 flags) is
 // consumed and ecNotSupported is returned.
-func (s *Session) ropGetSearchCriteria(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+func (s *Session) ropGetSearchCriteria(p *ext.Pull, out *ext.Push, _ []uint32, hindex uint8) bool {
 	_ /* useUnicode */, e1 := p.Uint8()
 	_ /* includeRestriction */, e2 := p.Uint8()
 	_ /* includeFolders */, e3 := p.Uint8()

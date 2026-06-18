@@ -158,7 +158,7 @@ func (s *Session) ropSyncUploadStateStreamContinue(p *ext.Pull, out *ext.Push, h
 
 // ropSyncUploadStateStreamEnd handles RopSyncUploadStateStreamEnd ([MS-OXCFXICS]
 // 2.2.3.2.2.3): it folds the buffered idset into the sync context's state.
-func (s *Session) ropSyncUploadStateStreamEnd(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+func (s *Session) ropSyncUploadStateStreamEnd(_ *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	sink := s.stateSink(handles, hindex)
 	if sink == nil {
 		writeErr(out, ropSyncUploadStateStreamEnd, hindex, ecError)

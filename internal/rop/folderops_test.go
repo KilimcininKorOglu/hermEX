@@ -21,7 +21,9 @@ func toROPRequest(ropID uint8, hindex uint8, body []byte) []byte {
 func readEC(t *testing.T, resp []byte, wantID uint8) uint32 {
 	t.Helper()
 	p := ext.NewPull(resp, ext.FlagUTF16)
-	mustU8(t, p, "ropId")
+	if id := mustU8(t, p, "ropId"); id != wantID {
+		t.Fatalf("RopId = %#x, want %#x", id, wantID)
+	}
 	mustU8(t, p, "hindex")
 	return mustU32(t, p, "ec")
 }
