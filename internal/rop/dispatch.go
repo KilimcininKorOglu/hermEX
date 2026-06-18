@@ -60,16 +60,20 @@ const (
 	ropDeletePropertiesNoReplicate uint8 = 0x7A
 	ropGetNamesFromPropertyIds     uint8 = 0x55
 	ropGetPropertyIdsFromNames     uint8 = 0x56
+	ropCopyTo                      uint8 = 0x39
+	ropCopyProperties              uint8 = 0x67
 )
 
 // MAPI return codes ([MS-OXCDATA] 2.4.1) carried in a ROP response ReturnValue.
 const (
-	ecSuccess      uint32 = 0x00000000
-	ecError        uint32 = 0x80004005 // generic failure / unimplemented ROP
-	ecNotFound     uint32 = 0x8004010F // MAPI_E_NOT_FOUND (no such folder/object)
-	ecNotSupported uint32 = 0x80040102 // MAPI_E_NO_SUPPORT (unsupported request)
-	ecAccessDenied uint32 = 0x80070005 // MAPI_E_NO_ACCESS (e.g. setting the in-conflict status bit)
-	ecInvalidParam uint32 = 0x80070057 // MAPI_E_INVALID_PARAMETER (e.g. a bad stream-seek origin)
+	ecSuccess       uint32 = 0x00000000
+	ecError         uint32 = 0x80004005 // generic failure / unimplemented ROP
+	ecNotFound      uint32 = 0x8004010F // MAPI_E_NOT_FOUND (no such folder/object)
+	ecNotSupported  uint32 = 0x80040102 // MAPI_E_NO_SUPPORT (unsupported request)
+	ecAccessDenied  uint32 = 0x80070005 // MAPI_E_NO_ACCESS (e.g. setting the in-conflict status bit)
+	ecInvalidParam  uint32 = 0x80070057 // MAPI_E_INVALID_PARAMETER (e.g. a bad stream-seek origin)
+	ecDstNullObject uint32 = 0x00000503 // a copy's destination handle resolves to no object
+	ecDeclineCopy   uint32 = 0x80040306 // MAPI_E_DECLINE_COPY (copy between mismatched object types)
 )
 
 // Dispatch parses the request ROP list and returns the response ROP bytes plus
@@ -138,6 +142,14 @@ loop:
 			}
 		case ropGetNamesFromPropertyIds:
 			if !s.ropGetNamesFromPropertyIds(p, out, handles, hindex) {
+				break loop
+			}
+		case ropCopyProperties:
+			if !s.ropCopyProperties(p, out, handles, hindex) {
+				break loop
+			}
+		case ropCopyTo:
+			if !s.ropCopyTo(p, out, handles, hindex) {
 				break loop
 			}
 		case ropModifyRecipients:
