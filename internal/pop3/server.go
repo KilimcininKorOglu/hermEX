@@ -5,6 +5,7 @@ package pop3
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"fmt"
 	"net"
@@ -13,6 +14,7 @@ import (
 	"strings"
 
 	"hermex/internal/directory"
+	"hermex/internal/lifecycle"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -22,18 +24,23 @@ type Server struct {
 	Auth      directory.Authenticator
 	Hostname  string
 	TLSConfig *tls.Config // when non-nil, advertise (CAPA) and accept STLS
+
+	conns lifecycle.ConnGroup
 }
 
-// Serve accepts connections on l until it is closed.
-func (s *Server) Serve(l net.Listener) error {
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			return err
-		}
-		go s.handle(conn)
-	}
-}
+// AddListener registers a listener (the plaintext and any implicit-TLS one) for
+// Start to serve. Call it before Start.
+func (s *Server) AddListener(l net.Listener) { s.conns.AddListener(l) }
+
+// Start serves every registered listener until Shutdown, satisfying
+// lifecycle.Component.
+func (s *Server) Start() error { return s.conns.Start(s.handle) }
+
+// Serve accepts connections on l until it is closed; tests drive it directly.
+func (s *Server) Serve(l net.Listener) error { return s.conns.Serve(l, s.handle) }
+
+// Shutdown stops accepting and drains in-flight sessions within ctx's deadline.
+func (s *Server) Shutdown(ctx context.Context) error { return s.conns.Shutdown(ctx) }
 
 func (s *Server) handle(conn net.Conn) {
 	defer func() { conn.Close() }() // closes the upgraded conn after an STLS swap

@@ -6,6 +6,7 @@ package smtp
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
@@ -13,6 +14,8 @@ import (
 	"net"
 	"net/textproto"
 	"strings"
+
+	"hermex/internal/lifecycle"
 )
 
 // Backend creates a Session for each accepted connection.
@@ -38,18 +41,23 @@ type Server struct {
 	Hostname  string      // announced in the greeting and EHLO; defaults to "localhost"
 	MaxSize   int64       // advertised/enforced max message size in bytes; 0 means no limit
 	TLSConfig *tls.Config // when non-nil, advertise (EHLO) and accept STARTTLS
+
+	conns lifecycle.ConnGroup
 }
 
-// Serve accepts connections on l until it is closed.
-func (s *Server) Serve(l net.Listener) error {
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			return err
-		}
-		go s.handle(conn)
-	}
-}
+// AddListener registers a listener (the plaintext and any implicit-TLS one) for
+// Start to serve. Call it before Start.
+func (s *Server) AddListener(l net.Listener) { s.conns.AddListener(l) }
+
+// Start serves every registered listener until Shutdown, satisfying
+// lifecycle.Component.
+func (s *Server) Start() error { return s.conns.Start(s.handle) }
+
+// Serve accepts connections on l until it is closed; tests drive it directly.
+func (s *Server) Serve(l net.Listener) error { return s.conns.Serve(l, s.handle) }
+
+// Shutdown stops accepting and drains in-flight sessions within ctx's deadline.
+func (s *Server) Shutdown(ctx context.Context) error { return s.conns.Shutdown(ctx) }
 
 func (s *Server) hostname() string {
 	if s.Hostname != "" {

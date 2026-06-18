@@ -2,6 +2,7 @@ package imap
 
 import (
 	"bufio"
+	"context"
 	"crypto/tls"
 	"encoding/base64"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	"hermex/internal/directory"
+	"hermex/internal/lifecycle"
 	"hermex/internal/objectstore"
 )
 
@@ -32,18 +34,23 @@ type Server struct {
 	Auth      directory.Authenticator
 	Hostname  string
 	TLSConfig *tls.Config // when non-nil, advertise and accept STARTTLS
+
+	conns lifecycle.ConnGroup
 }
 
-// Serve accepts connections on l until it is closed.
-func (s *Server) Serve(l net.Listener) error {
-	for {
-		nc, err := l.Accept()
-		if err != nil {
-			return err
-		}
-		go s.handle(nc)
-	}
-}
+// AddListener registers a listener (the plaintext and any implicit-TLS one) for
+// Start to serve. Call it before Start.
+func (s *Server) AddListener(l net.Listener) { s.conns.AddListener(l) }
+
+// Start serves every registered listener until Shutdown, satisfying
+// lifecycle.Component.
+func (s *Server) Start() error { return s.conns.Start(s.handle) }
+
+// Serve accepts connections on l until it is closed; tests drive it directly.
+func (s *Server) Serve(l net.Listener) error { return s.conns.Serve(l, s.handle) }
+
+// Shutdown stops accepting and drains in-flight sessions within ctx's deadline.
+func (s *Server) Shutdown(ctx context.Context) error { return s.conns.Shutdown(ctx) }
 
 func (s *Server) handle(nc net.Conn) {
 	c := &conn{srv: s, bw: bufio.NewWriter(nc), state: stateNotAuth, nc: nc}

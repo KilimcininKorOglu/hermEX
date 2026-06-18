@@ -3,16 +3,21 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"flag"
 	"log"
 	"net"
+	"os"
+	"os/signal"
+	"syscall"
 
 	_ "github.com/go-sql-driver/mysql"
 
 	"hermex/internal/config"
 	"hermex/internal/directory"
 	"hermex/internal/imap"
+	"hermex/internal/lifecycle"
 	"hermex/internal/serve"
 )
 
@@ -28,7 +33,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("hermex-imap: open directory: %v", err)
 	}
-	defer db.Close()
 	if err := db.Ping(); err != nil {
 		log.Fatalf("hermex-imap: directory unreachable: %v", err)
 	}
@@ -50,6 +54,8 @@ func main() {
 		}
 		srv.TLSConfig = tc // enables STARTTLS on the plaintext listener
 	}
+	srv.AddListener(ln)
+	log.Printf("hermex-imap listening on %s", addr)
 
 	// Optional implicit-TLS listener (e.g. :993) served alongside the plaintext
 	// one; the stateless server handles both concurrently.
@@ -58,10 +64,13 @@ func main() {
 		if err != nil {
 			log.Fatalf("hermex-imap: implicit TLS on %s: %v", cfg.IMAPSAddr, err)
 		}
+		srv.AddListener(tln)
 		log.Printf("hermex-imap listening on %s (implicit TLS)", cfg.IMAPSAddr)
-		go func() { log.Fatalf("hermex-imap: %v", srv.Serve(tln)) }()
 	}
 
-	log.Printf("hermex-imap listening on %s", addr)
-	log.Fatalf("hermex-imap: %v", srv.Serve(ln))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{srv}, db.Close); err != nil {
+		log.Fatalf("hermex-imap: %v", err)
+	}
 }

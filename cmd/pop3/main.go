@@ -3,15 +3,20 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"flag"
 	"log"
 	"net"
+	"os"
+	"os/signal"
+	"syscall"
 
 	_ "github.com/go-sql-driver/mysql"
 
 	"hermex/internal/config"
 	"hermex/internal/directory"
+	"hermex/internal/lifecycle"
 	"hermex/internal/pop3"
 	"hermex/internal/serve"
 )
@@ -28,7 +33,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("hermex-pop3: open directory: %v", err)
 	}
-	defer db.Close()
 	if err := db.Ping(); err != nil {
 		log.Fatalf("hermex-pop3: directory unreachable: %v", err)
 	}
@@ -50,6 +54,8 @@ func main() {
 		}
 		srv.TLSConfig = tc // enables STLS on the plaintext listener
 	}
+	srv.AddListener(ln)
+	log.Printf("hermex-pop3 listening on %s", addr)
 
 	// Optional implicit-TLS listener (e.g. :995) served alongside the plaintext
 	// one; the stateless server handles both concurrently.
@@ -58,10 +64,13 @@ func main() {
 		if err != nil {
 			log.Fatalf("hermex-pop3: implicit TLS on %s: %v", cfg.POP3SAddr, err)
 		}
+		srv.AddListener(tln)
 		log.Printf("hermex-pop3 listening on %s (implicit TLS)", cfg.POP3SAddr)
-		go func() { log.Fatalf("hermex-pop3: %v", srv.Serve(tln)) }()
 	}
 
-	log.Printf("hermex-pop3 listening on %s", addr)
-	log.Fatalf("hermex-pop3: %v", srv.Serve(ln))
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{srv}, db.Close); err != nil {
+		log.Fatalf("hermex-pop3: %v", err)
+	}
 }
