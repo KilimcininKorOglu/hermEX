@@ -7,6 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
+
+	"hermex/internal/logging"
 
 	_ "modernc.org/sqlite"
 )
@@ -17,6 +20,24 @@ var ErrNotFound = errors.New("objectstore: not found")
 // ErrFolderCycle is reported when a folder copy would place a folder inside its
 // own subtree, which would recurse without end.
 var ErrFolderCycle = errors.New("objectstore: folder copied into its own subtree")
+
+// defaultLogger is the central activity log stamped onto every Store opened
+// after a daemon installs it. Logging is a cross-cutting concern: every mailbox
+// store in a process belongs to one daemon and shares its log, so a package-level
+// default avoids threading a logger through Open's many call sites — a deliberate
+// exception to the per-server Logger field used elsewhere. It is set once at
+// daemon startup (before serving) and read-only thereafter; the atomic makes that
+// publication race-clean. A nil default (the test and library baseline) disables
+// store logging.
+var defaultLogger atomic.Pointer[logging.Logger]
+
+// SetDefaultLogger installs the activity log that newly opened stores report
+// infrastructure failures to. A daemon calls it once at startup; passing nil
+// disables store logging. Stores already open keep the logger they were stamped
+// with at Open.
+func SetDefaultLogger(l *logging.Logger) {
+	defaultLogger.Store(l)
+}
 
 // Store is a handle to one mailbox: the MAPI object store (objdb), the IMAP/POP3
 // index (idxdb), and the cid/ and eml/ content directories under a mailbox
@@ -29,6 +50,24 @@ type Store struct {
 	// provisioned with the default folder hierarchy. Real mailboxes always
 	// are; low-level allocator/property tests open a bare store instead.
 	seedBuiltins bool
+	// logger receives store infrastructure failures (SQL/IO errors); nil
+	// disables logging. Stamped from defaultLogger at Open.
+	logger *logging.Logger
+}
+
+// logStoreError reports a store infrastructure failure (a SQL or filesystem
+// error from the underlying databases or content files) to the central log under
+// the store subsystem. Logical outcomes like ErrNotFound are not infrastructure
+// failures and must not be passed here. The mailbox directory identifies which
+// store failed; no message content is logged.
+func (s *Store) logStoreError(op string, err error) {
+	s.logger.Emit(logging.Event{
+		Level:     logging.LevelError,
+		Subsystem: logging.Store,
+		Name:      "error",
+		Fields:    logging.Fields{"op": op, "mailbox": s.dir},
+		Err:       err.Error(),
+	})
 }
 
 // dsn builds the modernc.org/sqlite connection string with the pragmas applied
@@ -68,7 +107,7 @@ func open(dir string, seedBuiltins bool) (*Store, error) {
 		objdb.Close()
 		return nil, err
 	}
-	s := &Store{dir: dir, objdb: objdb, idxdb: idxdb, seedBuiltins: seedBuiltins}
+	s := &Store{dir: dir, objdb: objdb, idxdb: idxdb, seedBuiltins: seedBuiltins, logger: defaultLogger.Load()}
 	if err := s.ensureSchema(); err != nil {
 		s.Close()
 		return nil, err

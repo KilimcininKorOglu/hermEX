@@ -20,6 +20,7 @@ import (
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/mapihttp"
+	"hermex/internal/objectstore"
 	"hermex/internal/serve"
 )
 
@@ -40,6 +41,7 @@ func main() {
 	}
 	dir := directory.NewSQL(db)
 	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
+	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
 
 	srv := mapihttp.NewServer(dir, dir, cfg.Hostname)
 	srv.Logger = logger

@@ -34,7 +34,15 @@ type MessageInfo struct {
 // arrival. The eml is generated now (rather than lazily) so the index records
 // the exact RFC822 size IMAP reports for the message. It returns the message's
 // index metadata, including its allocated UID.
-func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time, flags int64) (MessageInfo, error) {
+func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time, flags int64) (info MessageInfo, err error) {
+	// Every error exit here is a real store failure (a conversion, SQL, or IO
+	// error) — there is no benign not-found path on the write side — so report
+	// any of them under the store subsystem.
+	defer func() {
+		if err != nil {
+			s.logStoreError("append", err)
+		}
+	}()
 	resolver := oxcmail.Options{Resolver: s.GetNamedPropIDs}
 
 	msg, err := oxcmail.Import(raw, resolver)

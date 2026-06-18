@@ -16,10 +16,19 @@ import (
 // form from the stored object, caches it, and updates the index size so
 // RFC822.SIZE always equals the bytes served. It reports ErrNotFound when no
 // such message exists.
-func (s *Store) GetMessageRaw(folderID int64, uid uint32) ([]byte, error) {
+func (s *Store) GetMessageRaw(folderID int64, uid uint32) (raw []byte, err error) {
+	// A read failure during serving (a FETCH, a RETR, a webmail render) is
+	// otherwise invisible — the protocol layer only logs the request, not the
+	// store error underneath it. Report any infrastructure failure here; a
+	// benign ErrNotFound is not one.
+	defer func() {
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			s.logStoreError("read", err)
+		}
+	}()
 	var messageID int64
 	var mid string
-	err := s.idxdb.QueryRow(
+	err = s.idxdb.QueryRow(
 		`SELECT message_id, mid_string FROM messages WHERE folder_id=? AND uid=?`,
 		folderID, int64(uid)).Scan(&messageID, &mid)
 	if errors.Is(err, sql.ErrNoRows) {

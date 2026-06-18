@@ -62,6 +62,7 @@ func main() {
 	}
 	dir := directory.NewSQL(db)
 	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
+	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
 
 	addr := cfg.SMTPAddr
 	if addr == "" {
