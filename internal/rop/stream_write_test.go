@@ -259,3 +259,31 @@ func TestStreamReadComposeAttachment(t *testing.T) {
 		t.Errorf("read-mode stream over compose attachment = %q, want %q", got, want)
 	}
 }
+
+// TestStreamReadPersistedAttachmentAfterSave reads an attachment's data back over
+// its write handle after SaveChangesAttachment has flushed it to the store. The
+// pending buffer is empty by then, so the read must fall back to the stored row
+// rather than report not-found.
+func TestStreamReadPersistedAttachmentAfterSave(t *testing.T) {
+	dir := t.TempDir()
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	mid := seedInboxMessage(t, dir, "PERSATT")
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(mid)))), []uint32{logonH, 0xFFFFFFFF})
+	msgH := h[1]
+
+	// Create the attachment on a persisted message (a real store row), set data, save.
+	_, attH := createAttachmentNum(t, sess, msgH)
+	want := []byte("persisted-attach")
+	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrAttachDataBin, Value: want}}), []uint32{attH})
+	sess.Dispatch(buildSaveChangesAttachment(0, 1), []uint32{msgH, attH})
+
+	// After the save the pending buffer is empty; the read falls back to the store row.
+	if got := openReadStreamAll(t, sess, attH, uint32(mapi.PrAttachDataBin)); !bytes.Equal(got, want) {
+		t.Errorf("post-save read over persisted attachment write handle = %q, want %q", got, want)
+	}
+}
