@@ -5,15 +5,20 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"flag"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
 	_ "github.com/go-sql-driver/mysql"
 
 	"hermex/internal/activesync"
 	"hermex/internal/config"
 	"hermex/internal/directory"
+	"hermex/internal/lifecycle"
 	"hermex/internal/serve"
 )
 
@@ -29,7 +34,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("hermex-activesync: open directory: %v", err)
 	}
-	defer db.Close()
 	if err := db.Ping(); err != nil {
 		log.Fatalf("hermex-activesync: directory unreachable: %v", err)
 	}
@@ -40,6 +44,15 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
+	hs, err := serve.New(addr, srv.Handler(), cfg)
+	if err != nil {
+		log.Fatalf("hermex-activesync: %v", err)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	log.Printf("hermex-activesync listening on %s", addr)
-	log.Fatalf("hermex-activesync: %v", serve.ListenAndServe(addr, srv.Handler(), cfg))
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, db.Close); err != nil {
+		log.Fatalf("hermex-activesync: %v", err)
+	}
 }

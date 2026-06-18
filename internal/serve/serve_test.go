@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -26,17 +27,17 @@ func okHandler() http.Handler {
 	})
 }
 
-// TestServePlaintext proves that with no certificate configured Serve falls back
+// TestServePlaintext proves that with no certificate configured New falls back
 // to plaintext HTTP (backward compatible with the pre-TLS daemons).
 func TestServePlaintext(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	hs, err := New("127.0.0.1:0", okHandler(), &config.Config{}) // TLS disabled
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
-	go Serve(ln, okHandler(), &config.Config{}) // TLS disabled
+	go hs.Start()
+	defer hs.Shutdown(context.Background())
 
-	resp, err := http.Get("http://" + ln.Addr().String() + "/")
+	resp, err := http.Get("http://" + hs.Addr().String() + "/")
 	if err != nil {
 		t.Fatalf("GET: %v", err)
 	}
@@ -49,7 +50,7 @@ func TestServePlaintext(t *testing.T) {
 	}
 }
 
-// TestServeTLS proves that with a certificate configured Serve terminates TLS,
+// TestServeTLS proves that with a certificate configured New terminates TLS,
 // that a client trusting the cert completes the request, and that the TLS 1.2
 // floor rejects an older client.
 func TestServeTLS(t *testing.T) {
@@ -57,12 +58,12 @@ func TestServeTLS(t *testing.T) {
 	certPath, keyPath := writeSelfSignedCert(t, dir)
 	cfg := &config.Config{TLSCert: certPath, TLSKey: keyPath}
 
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	hs, err := New("127.0.0.1:0", okHandler(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer ln.Close()
-	go Serve(ln, okHandler(), cfg)
+	go hs.Start()
+	defer hs.Shutdown(context.Background())
 
 	pemBytes, err := os.ReadFile(certPath)
 	if err != nil {
@@ -72,7 +73,7 @@ func TestServeTLS(t *testing.T) {
 	if !pool.AppendCertsFromPEM(pemBytes) {
 		t.Fatal("AppendCertsFromPEM: no cert added")
 	}
-	url := "https://" + ln.Addr().String() + "/"
+	url := "https://" + hs.Addr().String() + "/"
 
 	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
 	resp, err := client.Get(url)
@@ -94,6 +95,64 @@ func TestServeTLS(t *testing.T) {
 	}}}
 	if _, err := old.Get(url); err == nil {
 		t.Error("TLS 1.1 client should be rejected by the 1.2 floor")
+	}
+}
+
+// TestServerGracefulDrain proves Shutdown drains an in-flight request instead of
+// cutting it off: a request enters a blocked handler, Shutdown is started while
+// it is still running, and only then is the handler released — the response must
+// still complete with its body, and Shutdown must report success. A hard close
+// would fail the in-flight request instead.
+func TestServerGracefulDrain(t *testing.T) {
+	handlerEntered := make(chan struct{})
+	releaseHandler := make(chan struct{})
+	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(handlerEntered)
+		<-releaseHandler
+		io.WriteString(w, "drained")
+	})
+	hs, err := New("127.0.0.1:0", h, &config.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go hs.Start()
+
+	type result struct {
+		body string
+		err  error
+	}
+	resc := make(chan result, 1)
+	go func() {
+		resp, err := http.Get("http://" + hs.Addr().String() + "/")
+		if err != nil {
+			resc <- result{err: err}
+			return
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		resc <- result{body: string(b)}
+	}()
+
+	<-handlerEntered // the request is now in-flight inside the handler
+
+	shutDone := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		shutDone <- hs.Shutdown(ctx)
+	}()
+	time.Sleep(50 * time.Millisecond) // let Shutdown begin while the handler is still blocked
+	close(releaseHandler)
+
+	got := <-resc
+	if got.err != nil {
+		t.Fatalf("in-flight request failed during shutdown: %v", got.err)
+	}
+	if got.body != "drained" {
+		t.Errorf("in-flight body = %q, want \"drained\"", got.body)
+	}
+	if err := <-shutDone; err != nil {
+		t.Errorf("Shutdown = %v, want nil after draining", err)
 	}
 }
 

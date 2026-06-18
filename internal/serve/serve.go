@@ -6,6 +6,7 @@
 package serve
 
 import (
+	"context"
 	"crypto/tls"
 	"net"
 	"net/http"
@@ -13,30 +14,45 @@ import (
 	"hermex/internal/config"
 )
 
-// ListenAndServe binds addr and serves h, terminating TLS when cfg supplies a
-// certificate and serving plaintext otherwise. It blocks until the listener is
-// closed or the bind fails.
-func ListenAndServe(addr string, h http.Handler, cfg *config.Config) error {
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return err
-	}
-	return Serve(ln, h, cfg)
+// Server is a bound HTTP server ready to start and shut down gracefully. It
+// satisfies lifecycle.Component (Start blocks serving; Shutdown drains in-flight
+// requests within the context's deadline), so a daemon hands it straight to
+// lifecycle.Run.
+type Server struct {
+	httpSrv *http.Server
+	ln      net.Listener
 }
 
-// Serve serves h on ln. When cfg supplies a certificate it wraps ln in a TLS
-// listener built from the hardened config.TLSConfig; otherwise it serves
-// plaintext. It blocks until ln is closed and closes ln on return.
-func Serve(ln net.Listener, h http.Handler, cfg *config.Config) error {
+// New binds addr and returns a Server ready to Start, terminating TLS when cfg
+// supplies a certificate and serving plaintext otherwise. Binding eagerly here
+// surfaces an address-in-use error before the daemon's run loop begins.
+func New(addr string, h http.Handler, cfg *config.Config) (*Server, error) {
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		return nil, err
+	}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()
 		if err != nil {
-			return err
+			ln.Close()
+			return nil, err
 		}
 		ln = tls.NewListener(ln, tc)
 	}
-	return (&http.Server{Handler: h}).Serve(ln)
+	return &Server{httpSrv: &http.Server{Handler: h}, ln: ln}, nil
 }
+
+// Addr reports the bound listen address, including the resolved port when addr
+// requested an ephemeral one (":0").
+func (s *Server) Addr() net.Addr { return s.ln.Addr() }
+
+// Start serves until Shutdown is called; it returns http.ErrServerClosed on a
+// graceful stop (the normal path) and closes the listener on return.
+func (s *Server) Start() error { return s.httpSrv.Serve(s.ln) }
+
+// Shutdown stops accepting new connections and drains in-flight requests, giving
+// up when ctx's deadline passes.
+func (s *Server) Shutdown(ctx context.Context) error { return s.httpSrv.Shutdown(ctx) }
 
 // TLSListener binds addr and returns a listener that terminates TLS with the
 // hardened config.TLSConfig — the implicit-TLS entry point for the mail daemons

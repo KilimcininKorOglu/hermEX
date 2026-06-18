@@ -15,6 +15,11 @@ import (
 	"time"
 )
 
+// DefaultShutdownTimeout is the deadline a daemon gives its components to drain
+// in-flight work once shutdown is requested. It is the conventional value mains
+// pass to Run; a component that cannot drain within it is force-released.
+const DefaultShutdownTimeout = 30 * time.Second
+
 // Component is one long-running part of a daemon. Start runs it and blocks until
 // it stops; Shutdown asks it to stop gracefully within ctx's deadline. Start is
 // expected to return once Shutdown has been invoked, and that post-shutdown

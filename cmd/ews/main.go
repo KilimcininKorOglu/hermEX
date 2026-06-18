@@ -4,15 +4,20 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"flag"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 
 	_ "github.com/go-sql-driver/mysql"
 
 	"hermex/internal/config"
 	"hermex/internal/directory"
 	"hermex/internal/ews"
+	"hermex/internal/lifecycle"
 	"hermex/internal/serve"
 )
 
@@ -28,7 +33,6 @@ func main() {
 	if err != nil {
 		log.Fatalf("hermex-ews: open directory: %v", err)
 	}
-	defer db.Close()
 	if err := db.Ping(); err != nil {
 		log.Fatalf("hermex-ews: directory unreachable: %v", err)
 	}
@@ -39,6 +43,15 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
+	hs, err := serve.New(addr, srv.Handler(), cfg)
+	if err != nil {
+		log.Fatalf("hermex-ews: %v", err)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	log.Printf("hermex-ews listening on %s", addr)
-	log.Fatalf("hermex-ews: %v", serve.ListenAndServe(addr, srv.Handler(), cfg))
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, db.Close); err != nil {
+		log.Fatalf("hermex-ews: %v", err)
+	}
 }

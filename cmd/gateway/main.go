@@ -12,11 +12,15 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"hermex/internal/config"
 	"hermex/internal/gateway"
+	"hermex/internal/lifecycle"
 	"hermex/internal/serve"
 )
 
@@ -55,11 +59,20 @@ func main() {
 		log.Fatalf("hermex-gateway: %v", err)
 	}
 
-	// serve.ListenAndServe terminates TLS when the (cert,key) pair is set and
-	// serves plaintext otherwise; the gateway needs only those fields, so a
-	// minimal config is constructed rather than loaded.
+	// serve.New terminates TLS when the (cert,key) pair is set and serves
+	// plaintext otherwise; the gateway needs only those fields, so a minimal
+	// config is constructed rather than loaded.
 	cfg := &config.Config{TLSCert: os.Getenv("HERMEX_TLS_CERT"), TLSKey: os.Getenv("HERMEX_TLS_KEY")}
 	addr := env("HERMEX_GATEWAY_ADDR", ":8080")
+	hs, err := serve.New(addr, h, cfg)
+	if err != nil {
+		log.Fatalf("hermex-gateway: %v", err)
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 	log.Printf("hermex-gateway listening on %s", addr)
-	log.Fatalf("hermex-gateway: %v", serve.ListenAndServe(addr, h, cfg))
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}); err != nil {
+		log.Fatalf("hermex-gateway: %v", err)
+	}
 }
