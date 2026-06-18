@@ -1,7 +1,10 @@
 package rop
 
 import (
+	"errors"
+
 	"hermex/internal/ext"
+	"hermex/internal/objectstore"
 )
 
 // ropCreateFolder handles RopCreateFolder ([MS-OXCFOLD] 2.2.1.1): it creates a new
@@ -125,31 +128,60 @@ func (s *Session) ropMoveFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	return true
 }
 
-// ropCopyFolder handles RopCopyFolder ([MS-OXCFOLD] 2.2.1.4): it copies a folder
-// and its contents to a destination folder. v1 returns ecNotSupported because
-// recursive copy semantics are complex and no consumer is known to require this yet.
-// The body is consumed so the parser stays aligned in a multi-ROP batch.
+// ropCopyFolder handles RopCopyFolder ([MS-OXCFOLD] 2.2.1.4): it copies the folder
+// identified by fid (with its messages, and — when WantRecursive is set — its
+// subfolders) under the destination folder at DestHandleIndex, with the supplied
+// new name. Copying a folder into its own subtree is refused with
+// MAPI_E_FOLDER_CYCLE. v1 is always synchronous.
 func (s *Session) ropCopyFolder(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	_ /* dhindex */, e0 := p.Uint8()
+	dhindex, e0 := p.Uint8()
 	_ /* wantAsync */, e1 := p.Uint8()
-	_ /* wantRecursive */, e2 := p.Uint8()
+	wantRecursive, e2 := p.Uint8()
 	uv, e3 := p.Uint8()
-	_ /* fid */, e4 := p.Uint64()
+	fid, e4 := p.Uint64()
 	if e0 != nil || e1 != nil || e2 != nil || e3 != nil || e4 != nil {
 		return false
 	}
+	var newName string
 	if uv != 0 {
-		_, e5 := p.Unicode()
+		n, e5 := p.Unicode()
 		if e5 != nil {
 			return false
 		}
+		newName = n
 	} else {
-		_, e5 := p.String8()
+		n, e5 := p.String8()
 		if e5 != nil {
 			return false
 		}
+		newName = n
 	}
-	writeErr(out, ropCopyFolder, hindex, ecNotSupported)
+
+	folder := s.get(handleAt(handles, hindex))
+	if folder == nil || folder.kind != kindFolder || folder.store == nil {
+		writeErr(out, ropCopyFolder, hindex, ecError)
+		return true
+	}
+	dest := s.get(handleAt(handles, dhindex))
+	if dest == nil || dest.kind != kindFolder {
+		writeErr(out, ropCopyFolder, hindex, ecError)
+		return true
+	}
+	if _, err := folder.store.CopyFolder(int64(fid), dest.folderID, newName, wantRecursive != 0); err != nil {
+		switch {
+		case errors.Is(err, objectstore.ErrFolderCycle):
+			writeErr(out, ropCopyFolder, hindex, ecFolderCycle)
+		case errors.Is(err, objectstore.ErrNotFound):
+			writeErr(out, ropCopyFolder, hindex, ecNotFound)
+		default:
+			writeErr(out, ropCopyFolder, hindex, ecError)
+		}
+		return true
+	}
+	out.Uint8(ropCopyFolder)
+	out.Uint8(hindex)
+	out.Uint32(ecSuccess)
+	out.Uint8(0) // PartialCompletion
 	return true
 }
 

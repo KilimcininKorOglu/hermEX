@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"os"
+	"slices"
 	"time"
 
 	"hermex/internal/mapi"
@@ -215,6 +216,87 @@ func (s *Store) DeleteFolder(folderID int64) error {
 		}
 	}
 	return nil
+}
+
+// CopyFolder copies the folder srcFolderID under newParent with the display name
+// newName and returns the new folder's id. The folder's messages are re-filed into
+// the copy (preserving each message's flags and received date); with recursive
+// set, its live subfolders are copied depth-first, each under the new folder.
+// Copying a folder into its own subtree is refused with ErrFolderCycle (it would
+// recurse without end). v1 carries the display name and contents; other
+// folder-level properties are not yet copied.
+func (s *Store) CopyFolder(srcFolderID, newParent int64, newName string, recursive bool) (int64, error) {
+	exists, err := s.FolderExists(srcFolderID)
+	if err != nil {
+		return 0, err
+	}
+	if !exists {
+		return 0, ErrNotFound
+	}
+	subtree, err := s.folderSubtreeIDs(srcFolderID)
+	if err != nil {
+		return 0, err
+	}
+	if slices.Contains(subtree, newParent) {
+		return 0, ErrFolderCycle
+	}
+	return s.copyFolderInto(srcFolderID, newParent, newName, recursive)
+}
+
+// copyFolderInto is the recursion body of CopyFolder, run after the cycle check.
+func (s *Store) copyFolderInto(srcFolderID, newParent int64, newName string, recursive bool) (int64, error) {
+	newID, err := s.CreateFolder(&newParent, newName)
+	if err != nil {
+		return 0, err
+	}
+	msgs, err := s.ListMessages(srcFolderID)
+	if err != nil {
+		return 0, err
+	}
+	for _, m := range msgs {
+		raw, err := s.GetMessageRaw(srcFolderID, m.UID)
+		if err != nil {
+			return 0, err
+		}
+		if _, err := s.AppendMessage(newID, raw, m.InternalDate, m.Flags); err != nil {
+			return 0, err
+		}
+	}
+	if recursive {
+		children, err := s.childFolderIDs(srcFolderID)
+		if err != nil {
+			return 0, err
+		}
+		for _, childID := range children {
+			props, err := s.GetFolderProperties(childID, mapi.PrDisplayName)
+			if err != nil {
+				return 0, err
+			}
+			childName, _ := stringProp(props, mapi.PrDisplayName)
+			if _, err := s.copyFolderInto(childID, newID, childName, true); err != nil {
+				return 0, err
+			}
+		}
+	}
+	return newID, nil
+}
+
+// childFolderIDs returns the ids of a folder's direct, live subfolders.
+func (s *Store) childFolderIDs(folderID int64) ([]int64, error) {
+	rows, err := s.objdb.Query(`SELECT folder_id FROM folders WHERE parent_id=? AND is_deleted=0`, folderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // FolderExists reports whether a live (non-deleted) folder with the given id

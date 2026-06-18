@@ -14,6 +14,10 @@ import (
 // ErrNotFound is reported when a folder or message lookup finds no such object.
 var ErrNotFound = errors.New("objectstore: not found")
 
+// ErrFolderCycle is reported when a folder copy would place a folder inside its
+// own subtree, which would recurse without end.
+var ErrFolderCycle = errors.New("objectstore: folder copied into its own subtree")
+
 // Store is a handle to one mailbox: the MAPI object store (objdb), the IMAP/POP3
 // index (idxdb), and the cid/ and eml/ content directories under a mailbox
 // directory.

@@ -74,6 +74,7 @@ const (
 	ecInvalidParam  uint32 = 0x80070057 // MAPI_E_INVALID_PARAMETER (e.g. a bad stream-seek origin)
 	ecDstNullObject uint32 = 0x00000503 // a copy's destination handle resolves to no object
 	ecDeclineCopy   uint32 = 0x80040306 // MAPI_E_DECLINE_COPY (copy between mismatched object types)
+	ecFolderCycle   uint32 = 0x8004060B // MAPI_E_FOLDER_CYCLE (folder copied into its own subtree)
 )
 
 // Dispatch parses the request ROP list and returns the response ROP bytes plus

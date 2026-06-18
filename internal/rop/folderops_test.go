@@ -2,9 +2,11 @@ package rop
 
 import (
 	"testing"
+	"time"
 
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
 )
 
 func toROPRequest(ropID uint8, hindex uint8, body []byte) []byte {
@@ -194,23 +196,83 @@ func TestMoveFolder(t *testing.T) {
 	}
 }
 
-func TestCopyFolderReturnsNotSupported(t *testing.T) {
+// TestCopyFolderRecursiveAndCycle drives RopCopyFolder over the wire: a folder
+// with a message is copied under a destination folder (the copy appears there),
+// and copying a folder into its own subtree is refused with MAPI_E_FOLDER_CYCLE.
+func TestCopyFolderRecursiveAndCycle(t *testing.T) {
 	dir := t.TempDir()
 	sess := NewSession(dir, nil, "")
 	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	store := sess.get(logonH).store
+	ipm := int64(mapi.PrivateFIDIPMSubtree)
 
-	body := ext.NewPush(ext.FlagUTF16)
-	body.Uint8(0)
-	body.Uint8(0)
-	body.Uint8(0)
-	body.Uint8(1)
-	body.Uint64(0)
-	body.Unicode("")
-
-	resp, _ := sess.Dispatch(toROPRequest(ropCopyFolder, 0, body.Bytes()), []uint32{0})
-	if ec := readEC(t, resp, ropCopyFolder); ec != ecNotSupported {
-		t.Errorf("CopyFolder ec = %#x, want ecNotSupported", ec)
+	src, err := store.CreateFolder(&ipm, "Src")
+	if err != nil {
+		t.Fatal(err)
 	}
+	if _, err := store.AppendMessage(src, []byte("From: a@hermex.test\r\nTo: b@hermex.test\r\nSubject: X\r\n\r\nbody\r\n"), time.Now(), 0); err != nil {
+		t.Fatal(err)
+	}
+	dst, err := store.CreateFolder(&ipm, "Dst")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Open the IPM subtree (source parent / store provider) and the destination.
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDIPMSubtree))), []uint32{logonH, 0xFFFFFFFF})
+	ipmH := h[1]
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(dst)))), []uint32{logonH, 0xFFFFFFFF})
+	dstH := h[1]
+
+	copyBody := func(destIdx uint8, srcFID int64, name string) []byte {
+		b := ext.NewPush(ext.FlagUTF16)
+		b.Uint8(destIdx)         // DestHandleIndex
+		b.Uint8(0)               // WantAsynchronous
+		b.Uint8(1)               // WantRecursive
+		b.Uint8(1)               // UseUnicode
+		b.Uint64(uint64(srcFID)) // FolderId (raw FID, matching RopDeleteFolder/RopMoveFolder)
+		b.Unicode(name)
+		return b.Bytes()
+	}
+
+	// Copy Src -> Dst as "Copy": success, and the copy appears under Dst.
+	resp, _ := sess.Dispatch(toROPRequest(ropCopyFolder, 0, copyBody(1, src, "Copy")), []uint32{ipmH, dstH})
+	if ec := readEC(t, resp, ropCopyFolder); ec != ecSuccess {
+		t.Fatalf("CopyFolder ec = %#x, want success", ec)
+	}
+	if !folderNamedUnder(t, store, dst, "Copy") {
+		t.Error("copied folder \"Copy\" not found under the destination")
+	}
+
+	// Cycle: copying Src into its own subfolder is refused with ecFolderCycle.
+	sub, err := store.CreateFolder(&src, "Sub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, uint64(sub)))), []uint32{logonH, 0xFFFFFFFF})
+	subH := h[1]
+	resp2, _ := sess.Dispatch(toROPRequest(ropCopyFolder, 0, copyBody(1, src, "Loop")), []uint32{ipmH, subH})
+	if ec := readEC(t, resp2, ropCopyFolder); ec != ecFolderCycle {
+		t.Errorf("cycle CopyFolder ec = %#x, want ecFolderCycle (%#x)", ec, ecFolderCycle)
+	}
+}
+
+// folderNamedUnder reports whether a folder with the given display name exists
+// directly under parentID.
+func folderNamedUnder(t *testing.T, store *objectstore.Store, parentID int64, name string) bool {
+	t.Helper()
+	folders, err := store.ListFolders()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range folders {
+		if f.DisplayName == name && f.ParentID != nil && *f.ParentID == parentID {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSetSearchCriteriaReturnsNotSupported(t *testing.T) {
