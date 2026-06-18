@@ -133,7 +133,7 @@ func TestDispatchUnknownRop(t *testing.T) {
 	sess := NewSession(t.TempDir(), nil, "")
 	defer sess.Close()
 
-	const unknown = 0x55
+	const unknown = 0xF0 // an unassigned ROP id (the dispatch implements no handler for it)
 	resp, _ := sess.Dispatch([]byte{unknown, 0x00, 0x02}, []uint32{0, 0, 0xFFFFFFFF})
 	want := []byte{unknown, 0x02, 0x05, 0x40, 0x00, 0x80} // ec 0x80004005, little-endian
 	if !bytes.Equal(resp, want) {

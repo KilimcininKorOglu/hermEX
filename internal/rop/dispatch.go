@@ -58,6 +58,8 @@ const (
 	ropGetSearchCriteria           uint8 = 0x31
 	ropDeleteProperties            uint8 = 0x0B
 	ropDeletePropertiesNoReplicate uint8 = 0x7A
+	ropGetNamesFromPropertyIds     uint8 = 0x55
+	ropGetPropertyIdsFromNames     uint8 = 0x56
 )
 
 // MAPI return codes ([MS-OXCDATA] 2.4.1) carried in a ROP response ReturnValue.
@@ -128,6 +130,14 @@ loop:
 			}
 		case ropDeletePropertiesNoReplicate:
 			if !s.ropDeletePropertiesNoReplicate(p, out, handles, hindex) {
+				break loop
+			}
+		case ropGetPropertyIdsFromNames:
+			if !s.ropGetPropertyIdsFromNames(p, out, handles, hindex) {
+				break loop
+			}
+		case ropGetNamesFromPropertyIds:
+			if !s.ropGetNamesFromPropertyIds(p, out, handles, hindex) {
 				break loop
 			}
 		case ropModifyRecipients:
