@@ -96,6 +96,77 @@ func TestRpcExt2Logon(t *testing.T) {
 	}
 }
 
+// openFolderExecuteBuffer builds the ROP buffer for a RopOpenFolder(Inbox) that
+// resolves the logon handle a prior Execute minted (slot 0) and places the opened
+// folder in slot 1.
+func openFolderExecuteBuffer(logonH uint32) []byte {
+	rb := ext.NewPush(ext.FlagUTF16)
+	rb.Uint8(0x02) // RopOpenFolder ([MS-OXCROPS] 2.2.4.1)
+	rb.Uint8(0)    // LogonId
+	rb.Uint8(0)    // InputHandleIndex (slot 0 = logon handle)
+	rb.Uint8(1)    // OutputHandleIndex (slot 1 = opened folder)
+	rb.Uint64(uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox)))
+	rb.Uint8(0) // OpenModeFlags
+	return oxmapihttp.EncodeExecute(rb.Bytes(), []uint32{logonH, 0xFFFFFFFF})
+}
+
+// TestRpcExt2CrossExecuteHandle proves the EcDoRpcExt2 session keyed by the
+// context handle persists the ROP object/handle table across separate Execute
+// calls: a RopLogon in the first Execute mints a logon handle, and a RopOpenFolder
+// in a second Execute on the same context handle resolves that handle to open the
+// Inbox. Both calls go through ems.Handle, so it is the cxh -> session lookup
+// (distinct code from the MAPI/HTTP sid-cookie map) that is exercised; if that
+// lookup ever stopped persisting handles, the second Execute's OpenFolder would
+// fail to resolve the logon handle and return ecError.
+func TestRpcExt2CrossExecuteHandle(t *testing.T) {
+	ems := NewEMSMDB(nil)
+	out, _ := ems.Handle(&Session{User: "alice@hermex.test", Mailbox: t.TempDir()}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
+	cxh, _ := parseConnectExOut(t, out)
+
+	// Execute #1: RopLogon -> the logon handle lands in the response handle table.
+	resp, fault := ems.Handle(&Session{}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, logonExecuteBuffer()))
+	if fault != 0 {
+		t.Fatalf("logon EcDoRpcExt2 fault = %#x", fault)
+	}
+	_, pout, result := parseRpcExt2Out(t, resp)
+	if result != ecSuccess {
+		t.Fatalf("logon result = %#x, want ecSuccess", result)
+	}
+	_, handles, err := oxmapihttp.DecodeExecute(pout)
+	if err != nil {
+		t.Fatalf("decode logon response: %v", err)
+	}
+	if len(handles) != 1 || handles[0] == 0xFFFFFFFF {
+		t.Fatalf("logon did not mint a handle: %v", handles)
+	}
+	logonH := handles[0]
+
+	// Execute #2 on the same context handle: RopOpenFolder(Inbox) reusing the logon
+	// handle the first Execute minted.
+	resp, fault = ems.Handle(&Session{}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, openFolderExecuteBuffer(logonH)))
+	if fault != 0 {
+		t.Fatalf("open-folder EcDoRpcExt2 fault = %#x", fault)
+	}
+	_, pout, result = parseRpcExt2Out(t, resp)
+	if result != ecSuccess {
+		t.Fatalf("open-folder EcDoRpcExt2 result = %#x, want ecSuccess", result)
+	}
+	rops, handles, err := oxmapihttp.DecodeExecute(pout)
+	if err != nil {
+		t.Fatalf("decode open-folder response: %v", err)
+	}
+	rp := ext.NewPull(rops, ext.FlagUTF16)
+	ropID, _ := rp.Uint8()
+	rp.Uint8()           // OutputHandleIndex
+	rv, _ := rp.Uint32() // ReturnValue
+	if ropID != 0x02 || rv != ecSuccess {
+		t.Fatalf("open-folder response = (RopId %#x, ReturnValue %#x), want (0x02, 0) — the logon handle did not survive into the second Execute", ropID, rv)
+	}
+	if len(handles) != 2 || handles[1] == 0xFFFFFFFF {
+		t.Fatalf("open-folder did not mint a folder handle in slot 1: %v", handles)
+	}
+}
+
 // TestRpcExt2UnknownHandleFaults proves EcDoRpcExt2 with an unknown context
 // handle faults (context mismatch) rather than acting on a missing session.
 func TestRpcExt2UnknownHandleFaults(t *testing.T) {
