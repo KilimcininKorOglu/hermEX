@@ -232,3 +232,30 @@ func TestStreamWriteMechanics(t *testing.T) {
 		t.Errorf("SeekStream(END,0) NewPosition = %d, want 1", pos)
 	}
 }
+
+// TestStreamReadComposeAttachment opens a read-mode stream over a created
+// attachment that has not been saved yet and reads back the property the client
+// just set — read-your-writes on a compose attachment, the attachment counterpart
+// of the message read overlay. Previously a read-mode stream over a kindAttachWrite
+// had no backing and reported not-found.
+func TestStreamReadComposeAttachment(t *testing.T) {
+	dir := t.TempDir()
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+
+	// Compose a message, create an attachment on it (in memory), set its data.
+	_, h = sess.Dispatch(buildCreateMessage(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	msgH := h[1]
+	_, attH := createAttachmentNum(t, sess, msgH)
+	want := []byte("compose-attach-bytes")
+	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrAttachDataBin, Value: want}}), []uint32{attH})
+
+	// Read it back over a read-mode stream before any SaveChangesAttachment.
+	if got := openReadStreamAll(t, sess, attH, uint32(mapi.PrAttachDataBin)); !bytes.Equal(got, want) {
+		t.Errorf("read-mode stream over compose attachment = %q, want %q", got, want)
+	}
+}

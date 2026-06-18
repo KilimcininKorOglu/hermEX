@@ -91,6 +91,20 @@ func (s *Session) streamData(parent *object, tag mapi.PropTag) ([]byte, error) {
 			return nil, errNoStreamProp
 		}
 		return streamBytes(tag.Type(), v), nil
+	case parent.kind == kindAttachWrite && parent.attachW != nil:
+		// A created attachment being filled: read its buffered write bag, so a
+		// read-mode stream sees the client's own writes before SaveChangesAttachment
+		// (read-your-writes on a compose attachment). After the save the staged bag is
+		// flushed to the in-memory compose attachment, read here as a fallback.
+		if v, ok := parent.attachW.pending.Get(tag); ok {
+			return streamBytes(tag.Type(), v), nil
+		}
+		if parent.attachW.inMem != nil {
+			if v, ok := parent.attachW.inMem.props.Get(tag); ok {
+				return streamBytes(tag.Type(), v), nil
+			}
+		}
+		return nil, errNoStreamProp
 	default:
 		return nil, errNoStreamProp
 	}
