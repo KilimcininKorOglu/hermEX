@@ -61,7 +61,7 @@ func (s *Store) CreateMessage(folderID int64, msg *oxcmail.Message) (int64, erro
 		}
 	}
 
-	for _, att := range msg.Attachments {
+	for i, att := range msg.Attachments {
 		res, err := tx.Exec(`INSERT INTO attachments (message_id) VALUES (?)`, id)
 		if err != nil {
 			return 0, err
@@ -70,7 +70,17 @@ func (s *Store) CreateMessage(folderID int64, msg *oxcmail.Message) (int64, erro
 		if err != nil {
 			return 0, err
 		}
-		if err := s.insertProps(tx, "attachment_properties", "attachment_id", aid, att.Props); err != nil {
+		// Assign a stable per-message attach number (PidTagAttachNumber) when the
+		// source did not carry one — mail import does not, an ICS upload does. The
+		// number is the ordinal here, matching the 0-based sequence CreateAttachment
+		// continues, so the read path can resolve an attachment by it rather than by
+		// a position that shifts on a sibling delete.
+		aprops := att.Props
+		if _, ok := aprops.Get(mapi.PrAttachNum); !ok {
+			aprops = append(mapi.PropertyValues(nil), att.Props...)
+			aprops.Set(mapi.PrAttachNum, int32(i))
+		}
+		if err := s.insertProps(tx, "attachment_properties", "attachment_id", aid, aprops); err != nil {
 			return 0, err
 		}
 	}

@@ -21,6 +21,28 @@ func messageAttachmentBags(o *object) ([]mapi.PropertyValues, error) {
 	return bags, nil
 }
 
+// resolveAttachment finds the attachment bag a client's AttachmentId addresses.
+// AttachmentId is the stored PidTagAttachNumber, which is stable across sibling
+// deletes; the match is therefore by that property, not by row position. When no
+// bag carries a stored number (legacy data predating stored attach numbers),
+// AttachmentId is treated as the row ordinal — the same fallback the attachment
+// table's column synthesis uses, so the two read paths agree.
+func resolveAttachment(bags []mapi.PropertyValues, attachID uint32) (mapi.PropertyValues, bool) {
+	anyNumbered := false
+	for _, b := range bags {
+		if v, ok := b.Get(mapi.PrAttachNum); ok {
+			anyNumbered = true
+			if n, ok := v.(int32); ok && uint32(n) == attachID {
+				return b, true
+			}
+		}
+	}
+	if !anyNumbered && int(attachID) < len(bags) {
+		return bags[attachID], true
+	}
+	return nil, false
+}
+
 // ropGetAttachmentTable handles RopGetAttachmentTable ([MS-OXCMSG] 2.2.3.18): it
 // snapshots the message's attachments into a new attachment table. The response
 // is the bare header — the client reads the rows with QueryRows (the row count
@@ -72,11 +94,16 @@ func (s *Session) ropOpenAttachment(p *ext.Pull, out *ext.Push, handles []uint32
 		return true
 	}
 	bags, err := messageAttachmentBags(msg)
-	if err != nil || int(attachID) >= len(bags) {
+	if err != nil {
 		writeErr(out, ropOpenAttachment, ohindex, ecNotFound)
 		return true
 	}
-	h := s.alloc(&object{kind: kindAttachment, store: msg.store, attachProps: bags[attachID]})
+	bag, ok := resolveAttachment(bags, attachID)
+	if !ok {
+		writeErr(out, ropOpenAttachment, ohindex, ecNotFound)
+		return true
+	}
+	h := s.alloc(&object{kind: kindAttachment, store: msg.store, attachProps: bag})
 	setHandle(handles, ohindex, h)
 
 	out.Uint8(ropOpenAttachment)

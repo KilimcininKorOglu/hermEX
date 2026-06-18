@@ -91,10 +91,14 @@ func (t *tableState) rowProps(store *objectstore.Store, idx int) (mapi.PropertyV
 	}
 	if t.kind == tableAttachment {
 		// The bags are already in memory; copy before synthesizing PR_ATTACH_NUM
-		// so the stored snapshot is not mutated. PR_ATTACH_NUM is the base row index.
+		// so the stored snapshot is not mutated. A stored attach number is
+		// authoritative; only when one is absent (legacy data that predates stored
+		// numbers) is the base row index used as a fallback.
 		row := append(mapi.PropertyValues(nil), t.attachments[base]...)
 		if slices.Contains(t.columns, mapi.PrAttachNum) {
-			row.Set(mapi.PrAttachNum, int32(base))
+			if _, ok := row.Get(mapi.PrAttachNum); !ok {
+				row.Set(mapi.PrAttachNum, int32(base))
+			}
 		}
 		return row, nil
 	}
