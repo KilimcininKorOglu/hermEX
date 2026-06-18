@@ -76,10 +76,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      mongo:
-        # Ordering only, not a health gate: the log sink self-heals (spills to disk
-        # and reconnects) if Mongo is not yet up, so mail must never wait on it.
-        condition: service_started
+      # No dependency on mongo: the log sink self-heals (spills to disk and
+      # reconnects), so mail must start and serve even if the log store is absent.
     restart: unless-stopped
 
   pop3:
@@ -96,10 +94,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      mongo:
-        # Ordering only, not a health gate: the log sink self-heals (spills to disk
-        # and reconnects) if Mongo is not yet up, so mail must never wait on it.
-        condition: service_started
+      # No dependency on mongo: the log sink self-heals (spills to disk and
+      # reconnects), so mail must start and serve even if the log store is absent.
     restart: unless-stopped
 
   imap:
@@ -116,10 +112,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      mongo:
-        # Ordering only, not a health gate: the log sink self-heals (spills to disk
-        # and reconnects) if Mongo is not yet up, so mail must never wait on it.
-        condition: service_started
+      # No dependency on mongo: the log sink self-heals (spills to disk and
+      # reconnects), so mail must start and serve even if the log store is absent.
     restart: unless-stopped
 
   webmail:
@@ -136,10 +130,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      mongo:
-        # Ordering only, not a health gate: the log sink self-heals (spills to disk
-        # and reconnects) if Mongo is not yet up, so mail must never wait on it.
-        condition: service_started
+      # No dependency on mongo: the log sink self-heals (spills to disk and
+      # reconnects), so mail must start and serve even if the log store is absent.
     restart: unless-stopped
 
   dav:
@@ -156,10 +148,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      mongo:
-        # Ordering only, not a health gate: the log sink self-heals (spills to disk
-        # and reconnects) if Mongo is not yet up, so mail must never wait on it.
-        condition: service_started
+      # No dependency on mongo: the log sink self-heals (spills to disk and
+      # reconnects), so mail must start and serve even if the log store is absent.
     restart: unless-stopped
 
   activesync:
@@ -176,10 +166,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      mongo:
-        # Ordering only, not a health gate: the log sink self-heals (spills to disk
-        # and reconnects) if Mongo is not yet up, so mail must never wait on it.
-        condition: service_started
+      # No dependency on mongo: the log sink self-heals (spills to disk and
+      # reconnects), so mail must start and serve even if the log store is absent.
     restart: unless-stopped
 
   ews:
@@ -196,10 +184,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      mongo:
-        # Ordering only, not a health gate: the log sink self-heals (spills to disk
-        # and reconnects) if Mongo is not yet up, so mail must never wait on it.
-        condition: service_started
+      # No dependency on mongo: the log sink self-heals (spills to disk and
+      # reconnects), so mail must start and serve even if the log store is absent.
     restart: unless-stopped
 
   mapi:
@@ -216,10 +202,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      mongo:
-        # Ordering only, not a health gate: the log sink self-heals (spills to disk
-        # and reconnects) if Mongo is not yet up, so mail must never wait on it.
-        condition: service_started
+      # No dependency on mongo: the log sink self-heals (spills to disk and
+      # reconnects), so mail must start and serve even if the log store is absent.
     restart: unless-stopped
 
   # Single-FQDN front door: reverse-proxies to the HTTP daemons by path prefix so
@@ -249,5 +233,4 @@ services:
       - activesync
       - dav
       - webmail
-      - mongo
     restart: unless-stopped
