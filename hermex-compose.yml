@@ -25,6 +25,21 @@ services:
       retries: 20
     restart: unless-stopped
 
+  # Central log store (Slice N). Internal-only: the daemons and the test harness
+  # reach it as mongo:27017 on the compose network, so no host port is exposed
+  # (the admin panel, not direct access, is how logs are inspected).
+  mongo:
+    container_name: hermex-mongo
+    image: mongo:7
+    volumes:
+      - ./docker-data/mongo:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
   dev:
     container_name: hermex-dev
     build:
@@ -39,8 +54,11 @@ services:
     environment:
       - HERMEX_DATA_DIR=/data
       - HERMEX_TEST_MYSQL_DSN=root:hermexstack@tcp(db:3306)/hermex_test?charset=utf8mb4
+      - HERMEX_TEST_MONGO_URI=mongodb://mongo:27017
     depends_on:
       db:
+        condition: service_healthy
+      mongo:
         condition: service_healthy
     command: sleep infinity
 
