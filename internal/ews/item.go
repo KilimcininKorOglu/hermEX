@@ -79,9 +79,11 @@ type findItemRoot struct {
 	Items itemsWrap `xml:"http://schemas.microsoft.com/exchange/services/2006/types Items"`
 }
 
-// attachmentsWrap holds an <Attachments> list of types-namespace FileAttachments.
+// attachmentsWrap holds an <Attachments> list of types-namespace File and Item
+// attachments.
 type attachmentsWrap struct {
 	Files []oxews.FileAttachment `xml:"http://schemas.microsoft.com/exchange/services/2006/types FileAttachment"`
+	Items []oxews.ItemAttachment `xml:"http://schemas.microsoft.com/exchange/services/2006/types ItemAttachment"`
 }
 
 // --- handlers ---
@@ -209,7 +211,18 @@ func (s *Server) handleGetAttachment(w http.ResponseWriter, inner []byte, sess *
 			msgs = append(msgs, getAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorItemNotFound"})
 			continue
 		}
-		fa := oxews.BuildAttachmentContent(mid, idx, msg.Attachments[idx])
+		att := msg.Attachments[idx]
+		if oxews.IsEmbeddedAttachment(att) {
+			// An embedded message is returned as an ItemAttachment carrying the nested
+			// message item, not a file blob.
+			ia := oxews.BuildItemAttachmentContent(mid, idx, att)
+			msgs = append(msgs, getAttachmentResponseMessage{
+				ResponseClass: "Success", ResponseCode: "NoError",
+				Attachments: &attachmentsWrap{Items: []oxews.ItemAttachment{ia}},
+			})
+			continue
+		}
+		fa := oxews.BuildAttachmentContent(mid, idx, att)
 		msgs = append(msgs, getAttachmentResponseMessage{
 			ResponseClass: "Success", ResponseCode: "NoError",
 			Attachments: &attachmentsWrap{Files: []oxews.FileAttachment{fa}},
