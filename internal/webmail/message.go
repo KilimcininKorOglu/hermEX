@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 
+	"hermex/internal/logging"
 	"hermex/internal/mime"
 	"hermex/internal/objectstore"
 	"hermex/internal/smime"
@@ -154,25 +155,31 @@ func (s *Server) openSmime(sess *session, raw []byte) (display []byte, status st
 		}
 		inner, err := smime.Decrypt(raw, sess.smimeCert, sess.smimeKey)
 		if err != nil {
+			s.smimeEvent(logging.LevelWarn, sess.user, "smime.decrypt", err.Error(), nil)
 			return raw, "Encrypted message — it could not be decrypted with your certificate.", false
 		}
+		s.smimeEvent(logging.LevelInfo, sess.user, "smime.decrypt", "", nil)
 		identity, _ := splitForSmime(raw)
 		if smime.IsSigned(inner) {
 			signer, content, verr := smime.Verify(inner)
 			if verr != nil {
+				s.smimeEvent(logging.LevelWarn, sess.user, "smime.verify", verr.Error(), nil)
 				return spliceIdentity(identity, inner), "Encrypted, but the signature could not be verified.", false
 			}
 			sigStatus, trusted := signerStatus(signer, raw)
+			s.smimeEvent(logging.LevelInfo, sess.user, "smime.verify", "", logging.Fields{"signer": signer.Subject.CommonName, "trusted": trusted})
 			return spliceIdentity(identity, content), "Encrypted. " + sigStatus, trusted
 		}
 		return spliceIdentity(identity, inner), "Encrypted — decrypted with your certificate.", true
 	case smime.IsSigned(raw):
 		signer, content, err := smime.Verify(raw)
 		if err != nil {
+			s.smimeEvent(logging.LevelWarn, sess.user, "smime.verify", err.Error(), nil)
 			return raw, "Signed message — the signature could NOT be verified.", false
 		}
 		identity, _ := splitForSmime(raw)
 		status, trusted := signerStatus(signer, raw)
+		s.smimeEvent(logging.LevelInfo, sess.user, "smime.verify", "", logging.Fields{"signer": signer.Subject.CommonName, "trusted": trusted})
 		return spliceIdentity(identity, content), status, trusted
 	default:
 		return raw, "", false

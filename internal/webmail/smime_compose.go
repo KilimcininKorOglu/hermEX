@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"hermex/internal/logging"
 	"hermex/internal/objectstore"
 	"hermex/internal/smime"
 )
@@ -28,8 +29,10 @@ func (s *Server) applySmime(sess *session, st *objectstore.Store, raw []byte, re
 		}
 		signed, err := smime.Sign(inner, sess.smimeCert, sess.smimeKey)
 		if err != nil {
+			s.smimeEvent(logging.LevelWarn, sess.user, "smime.sign", err.Error(), nil)
 			return nil, err
 		}
+		s.smimeEvent(logging.LevelInfo, sess.user, "smime.sign", "", nil)
 		if !encrypt {
 			return spliceIdentity(identity, signed), nil
 		}
@@ -46,8 +49,10 @@ func (s *Server) applySmime(sess *session, st *objectstore.Store, raw []byte, re
 	}
 	env, err := smime.Encrypt(inner, certs)
 	if err != nil {
+		s.smimeEvent(logging.LevelWarn, sess.user, "smime.encrypt", err.Error(), nil)
 		return nil, err
 	}
+	s.smimeEvent(logging.LevelInfo, sess.user, "smime.encrypt", "", logging.Fields{"recipients": len(certs)})
 	return spliceIdentity(identity, env), nil
 }
 
@@ -150,8 +155,9 @@ func splitHeaderLines(hdr []byte) [][]byte {
 
 // headerName returns the field name of a header line (the text before the colon).
 func headerName(line []byte) string {
-	if i := bytes.IndexByte(line, ':'); i >= 0 {
-		return string(bytes.TrimSpace(line[:i]))
+	name, _, found := bytes.Cut(line, []byte{':'})
+	if !found {
+		return ""
 	}
-	return ""
+	return string(bytes.TrimSpace(name))
 }

@@ -43,6 +43,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("hermex-webmail: %v", err)
 	}
+	srv.Logger = logger
 	addr := cfg.WebmailAddr
 	if addr == "" {
 		addr = ":8080"

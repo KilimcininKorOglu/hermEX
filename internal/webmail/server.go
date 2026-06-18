@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/objectstore"
 )
 
@@ -19,6 +20,13 @@ type Server struct {
 	hostname string
 	tmpl     *template.Template
 	sessions *sessionStore
+	Logger   *logging.Logger // central activity log; nil disables logging
+}
+
+// smimeEvent logs an S/MIME crypto operation under the smime subsystem, tagged
+// with the acting user. errMsg is empty on success. A nil logger is a no-op.
+func (s *Server) smimeEvent(level logging.Level, user, name, errMsg string, f logging.Fields) {
+	s.Logger.Emit(logging.Event{Level: level, Subsystem: logging.SMIME, Name: name, User: user, Err: errMsg, Fields: f})
 }
 
 // NewServer builds a webmail server, compiling the embedded templates.
