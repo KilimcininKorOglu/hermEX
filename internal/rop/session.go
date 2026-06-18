@@ -139,6 +139,7 @@ type Session struct {
 	owner    string
 	handles  map[uint32]*object
 	next     uint32
+	pending  []queuedNotify // notifications awaiting delivery in an Execute response (the notify drain)
 }
 
 // NewSession builds an empty session bound to a mailbox maildir path. accounts

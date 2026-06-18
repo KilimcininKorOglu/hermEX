@@ -68,6 +68,7 @@ const (
 	ropGetStoreState               uint8 = 0x7B
 	ropRegisterNotification        uint8 = 0x29
 	ropNotify                      uint8 = 0x2A
+	ropPending                     uint8 = 0x6E
 )
 
 // MAPI return codes ([MS-OXCDATA] 2.4.1) carried in a ROP response ReturnValue.
@@ -417,6 +418,11 @@ loop:
 			break loop
 		}
 	}
+	// After the ROP batch, drain notifications into the same response — mirroring
+	// the reference's end-of-Execute notify drain. This runs on every Execute,
+	// including an empty one (a wake-up Execute that exists only to collect pending
+	// notifications), and is a no-op when the session has no subscriptions.
+	s.poll(out)
 	return out.Bytes(), handles
 }
 
