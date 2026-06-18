@@ -131,6 +131,48 @@ func TestNotificationWaitPending(t *testing.T) {
 	}
 }
 
+// TestNotificationWaitWakesMidWait proves the long-poll's reason for being: a wait
+// that begins on a quiet (but subscribed) mailbox is woken by a delivery that lands
+// DURING the wait, not only by one that preceded it. The wait must return
+// EventPending=1; a timeout would return 0, so the flag alone proves the mid-wait
+// poll detected the delivery rather than the wait expiring. The delivery comes from a
+// separate store handle, as a separate daemon's MTA would.
+func TestNotificationWaitWakesMidWait(t *testing.T) {
+	mailbox := t.TempDir()
+	ts, srv := notifyTestServer(t, mailbox)
+	sid := notifyConnect(t, ts)
+	sc := srv.sessions.lookup(sid)
+	if sc == nil {
+		t.Fatal("session not found after Connect")
+	}
+	subscribeInbox(t, sc.ropSess)
+
+	flags := make(chan uint32, 1)
+	go func() { flags <- notificationWaitFlags(t, ts, sid) }()
+
+	// Deliver after the wait has begun polling a quiet mailbox, so the wake can only
+	// come from a mid-wait poll detecting this delivery.
+	time.Sleep(40 * time.Millisecond)
+	st, err := objectstore.Open(mailbox)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	_, err = st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0)
+	st.Close()
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	select {
+	case got := <-flags:
+		if got != flagNotificationPending {
+			t.Errorf("mid-wait delivery: EventPending = %d, want %d (the long-poll did not wake on the delivery)", got, flagNotificationPending)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("NotificationWait never returned")
+	}
+}
+
 // TestWaitForNotificationContextCancel proves the loop bails as soon as the client
 // drops the connection, rather than holding the full interval.
 func TestWaitForNotificationContextCancel(t *testing.T) {
