@@ -223,12 +223,13 @@ func (s *Session) ropSaveChangesMessage(p *ext.Pull, out *ext.Push, handles []ui
 	// attachment-only change carries no pending properties, so ModifyMessageProperties
 	// runs with an empty bag and advances only the change number.
 	if obj.kind == kindMessage {
-		if len(obj.pendingProps) > 0 || obj.touched {
-			if err := obj.store.ModifyMessageProperties(obj.messageID, obj.pendingProps); err != nil {
+		if len(obj.pendingProps) > 0 || len(obj.pendingDeletes) > 0 || obj.touched {
+			if err := obj.store.ModifyMessageProperties(obj.messageID, obj.pendingProps, obj.pendingDeletes...); err != nil {
 				writeErr(out, ropSaveChangesMessage, hindex, ecError)
 				return true
 			}
 			obj.pendingProps = nil
+			obj.pendingDeletes = nil
 			obj.touched = false
 		}
 		out.Uint8(ropSaveChangesMessage)

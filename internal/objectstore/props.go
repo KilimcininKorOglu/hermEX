@@ -83,7 +83,7 @@ func (s *Store) GetMessageProperties(messageID int64, tags ...mapi.PropTag) (map
 // updated only when that column advances, so this is what drives the "updated"
 // branch of GetContentSync. The message_size column is left stale (v1 does not
 // recompute it on edit).
-func (s *Store) ModifyMessageProperties(messageID int64, props mapi.PropertyValues) error {
+func (s *Store) ModifyMessageProperties(messageID int64, props mapi.PropertyValues, deletes ...mapi.PropTag) error {
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return err
@@ -91,6 +91,11 @@ func (s *Store) ModifyMessageProperties(messageID int64, props mapi.PropertyValu
 	defer tx.Rollback()
 	if err := s.insertProps(tx, "message_properties", "message_id", messageID, props); err != nil {
 		return err
+	}
+	if len(deletes) > 0 {
+		if err := s.deleteProps(tx, "message_properties", "message_id", messageID, deletes); err != nil {
+			return err
+		}
 	}
 	cn, err := allocateCN(tx)
 	if err != nil {
@@ -179,6 +184,25 @@ func (s *Store) insertProps(tx *sql.Tx, table, idCol string, id int64, props map
 			return fmt.Errorf("objectstore: encode %s: %w", p.Tag, err)
 		}
 		if _, err := stmt.Exec(id, int64(uint32(p.Tag)), enc); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// deleteProps removes the given proptags from an object's _properties table
+// within the caller's transaction. table and idCol are internal constants, never
+// caller input, so interpolating them into the SQL is safe. A content-offloaded
+// property's content file is left in place (an orphan reclaimed by a future GC),
+// matching v1's no-content-GC posture.
+func (s *Store) deleteProps(tx *sql.Tx, table, idCol string, id int64, tags []mapi.PropTag) error {
+	stmt, err := tx.Prepare(fmt.Sprintf(`DELETE FROM %s WHERE %s = ? AND proptag = ?`, table, idCol))
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, t := range tags {
+		if _, err := stmt.Exec(id, int64(uint32(t))); err != nil {
 			return err
 		}
 	}

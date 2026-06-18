@@ -84,23 +84,24 @@ type newAttachment struct {
 // its objectstore id, a stream its in-memory bytes and read cursor, an
 // attachment its property bag.
 type object struct {
-	kind         objKind
-	store        *objectstore.Store            // kindLogon, and inherited by every child object
-	folderID     int64                         // kindFolder
-	table        *tableState                   // kindTable
-	messageID    int64                         // kindMessage
-	pendingProps mapi.PropertyValues           // kindMessage: in-place edits buffered until SaveChangesMessage
-	touched      bool                          // kindMessage: an attachment add/delete dirtied the message (bump CN on save)
-	attachW      *attachWrite                  // kindAttachWrite
-	embedded     *embeddedMessage              // kindEmbedded
-	stream       *streamState                  // kindStream
-	attachProps  mapi.PropertyValues           // kindAttachment
-	newMsg       *newMessageState              // kindNewMessage
-	fastSrc      fastTransferSource            // kindSync: what GetBuffer drains
-	stateSink    stateStreamSink               // kindSync: what the state-stream ROPs populate
-	upload       *objectstore.UploadCollector  // kindSync (upload): the import target
-	uploadMsg    *objectstore.UploadMessage    // kindUploadMessage: the message being imported
-	msgCollector *objectstore.MessageCollector // kindFastUpload: the body parser
+	kind           objKind
+	store          *objectstore.Store            // kindLogon, and inherited by every child object
+	folderID       int64                         // kindFolder
+	table          *tableState                   // kindTable
+	messageID      int64                         // kindMessage
+	pendingProps   mapi.PropertyValues           // kindMessage: in-place edits buffered until SaveChangesMessage
+	pendingDeletes []mapi.PropTag                // kindMessage: property removals buffered until SaveChangesMessage
+	touched        bool                          // kindMessage: an attachment add/delete dirtied the message (bump CN on save)
+	attachW        *attachWrite                  // kindAttachWrite
+	embedded       *embeddedMessage              // kindEmbedded
+	stream         *streamState                  // kindStream
+	attachProps    mapi.PropertyValues           // kindAttachment
+	newMsg         *newMessageState              // kindNewMessage
+	fastSrc        fastTransferSource            // kindSync: what GetBuffer drains
+	stateSink      stateStreamSink               // kindSync: what the state-stream ROPs populate
+	upload         *objectstore.UploadCollector  // kindSync (upload): the import target
+	uploadMsg      *objectstore.UploadMessage    // kindUploadMessage: the message being imported
+	msgCollector   *objectstore.MessageCollector // kindFastUpload: the body parser
 }
 
 // newMessageState accumulates a message being composed over the ROP write

@@ -4,58 +4,60 @@ import "hermex/internal/ext"
 
 // ROP operation ids ([MS-OXCROPS] 2.2). v1 handles the read-core set.
 const (
-	ropRelease               uint8 = 0x01
-	ropOpenFolder            uint8 = 0x02
-	ropOpenMessage           uint8 = 0x03
-	ropGetHierarchyTable     uint8 = 0x04
-	ropGetContentsTable      uint8 = 0x05
-	ropCreateMessage         uint8 = 0x06
-	ropGetPropertiesSpecific uint8 = 0x07
-	ropGetPropertiesAll      uint8 = 0x08
-	ropSetProperties         uint8 = 0x0A
-	ropSaveChangesMessage    uint8 = 0x0C
-	ropModifyRecipients      uint8 = 0x0E
-	ropReloadCachedInfo      uint8 = 0x10
-	ropGetMessageStatus      uint8 = 0x1F
-	ropSetMessageStatus      uint8 = 0x20
-	ropSubmitMessage         uint8 = 0x32
-	ropSetMessageReadFlag    uint8 = 0x11
-	ropDeleteMessages        uint8 = 0x1E
-	ropMoveCopyMessages      uint8 = 0x33
-	ropSetColumns            uint8 = 0x12
-	ropSortTable             uint8 = 0x13
-	ropRestrict              uint8 = 0x14
-	ropQueryRows             uint8 = 0x15
-	ropSeekRow               uint8 = 0x18
-	ropSeekRowBookmark       uint8 = 0x19
-	ropCreateBookmark        uint8 = 0x1B
-	ropFindRow               uint8 = 0x4F
-	ropExpandRow             uint8 = 0x59
-	ropCollapseRow           uint8 = 0x5A
-	ropSetCollapseState      uint8 = 0x6C
-	ropResetTable            uint8 = 0x81
-	ropGetAttachmentTable    uint8 = 0x21
-	ropOpenAttachment        uint8 = 0x22
-	ropCreateAttachment      uint8 = 0x23
-	ropDeleteAttachment      uint8 = 0x24
-	ropSaveChangesAttachment uint8 = 0x25
-	ropOpenEmbeddedMessage   uint8 = 0x46
-	ropOpenStream            uint8 = 0x2B
-	ropReadStream            uint8 = 0x2C
-	ropWriteStream           uint8 = 0x2D
-	ropSeekStream            uint8 = 0x2E
-	ropSetStreamSize         uint8 = 0x2F
-	ropCommitStream          uint8 = 0x5D
-	ropGetStreamSize         uint8 = 0x5E
-	ropLogon                 uint8 = 0xFE
-	ropCreateFolder          uint8 = 0x1C
-	ropDeleteFolder          uint8 = 0x1D
-	ropMoveFolder            uint8 = 0x35
-	ropCopyFolder            uint8 = 0x36
-	ropEmptyFolder           uint8 = 0x58
-	ropHardDeleteMessages    uint8 = 0x91
-	ropSetSearchCriteria     uint8 = 0x30
-	ropGetSearchCriteria     uint8 = 0x31
+	ropRelease                     uint8 = 0x01
+	ropOpenFolder                  uint8 = 0x02
+	ropOpenMessage                 uint8 = 0x03
+	ropGetHierarchyTable           uint8 = 0x04
+	ropGetContentsTable            uint8 = 0x05
+	ropCreateMessage               uint8 = 0x06
+	ropGetPropertiesSpecific       uint8 = 0x07
+	ropGetPropertiesAll            uint8 = 0x08
+	ropSetProperties               uint8 = 0x0A
+	ropSaveChangesMessage          uint8 = 0x0C
+	ropModifyRecipients            uint8 = 0x0E
+	ropReloadCachedInfo            uint8 = 0x10
+	ropGetMessageStatus            uint8 = 0x1F
+	ropSetMessageStatus            uint8 = 0x20
+	ropSubmitMessage               uint8 = 0x32
+	ropSetMessageReadFlag          uint8 = 0x11
+	ropDeleteMessages              uint8 = 0x1E
+	ropMoveCopyMessages            uint8 = 0x33
+	ropSetColumns                  uint8 = 0x12
+	ropSortTable                   uint8 = 0x13
+	ropRestrict                    uint8 = 0x14
+	ropQueryRows                   uint8 = 0x15
+	ropSeekRow                     uint8 = 0x18
+	ropSeekRowBookmark             uint8 = 0x19
+	ropCreateBookmark              uint8 = 0x1B
+	ropFindRow                     uint8 = 0x4F
+	ropExpandRow                   uint8 = 0x59
+	ropCollapseRow                 uint8 = 0x5A
+	ropSetCollapseState            uint8 = 0x6C
+	ropResetTable                  uint8 = 0x81
+	ropGetAttachmentTable          uint8 = 0x21
+	ropOpenAttachment              uint8 = 0x22
+	ropCreateAttachment            uint8 = 0x23
+	ropDeleteAttachment            uint8 = 0x24
+	ropSaveChangesAttachment       uint8 = 0x25
+	ropOpenEmbeddedMessage         uint8 = 0x46
+	ropOpenStream                  uint8 = 0x2B
+	ropReadStream                  uint8 = 0x2C
+	ropWriteStream                 uint8 = 0x2D
+	ropSeekStream                  uint8 = 0x2E
+	ropSetStreamSize               uint8 = 0x2F
+	ropCommitStream                uint8 = 0x5D
+	ropGetStreamSize               uint8 = 0x5E
+	ropLogon                       uint8 = 0xFE
+	ropCreateFolder                uint8 = 0x1C
+	ropDeleteFolder                uint8 = 0x1D
+	ropMoveFolder                  uint8 = 0x35
+	ropCopyFolder                  uint8 = 0x36
+	ropEmptyFolder                 uint8 = 0x58
+	ropHardDeleteMessages          uint8 = 0x91
+	ropSetSearchCriteria           uint8 = 0x30
+	ropGetSearchCriteria           uint8 = 0x31
+	ropDeleteProperties            uint8 = 0x0B
+	ropDeletePropertiesNoReplicate uint8 = 0x7A
 )
 
 // MAPI return codes ([MS-OXCDATA] 2.4.1) carried in a ROP response ReturnValue.
@@ -118,6 +120,14 @@ loop:
 			}
 		case ropSetProperties:
 			if !s.ropSetProperties(p, out, handles, hindex) {
+				break loop
+			}
+		case ropDeleteProperties:
+			if !s.ropDeleteProperties(p, out, handles, hindex) {
+				break loop
+			}
+		case ropDeletePropertiesNoReplicate:
+			if !s.ropDeletePropertiesNoReplicate(p, out, handles, hindex) {
 				break loop
 			}
 		case ropModifyRecipients:
