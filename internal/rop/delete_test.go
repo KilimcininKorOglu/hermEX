@@ -102,3 +102,44 @@ func TestDeleteMessageProperties(t *testing.T) {
 		t.Errorf("DeletePropertiesNoReplicate ReturnValue = %#x", ec)
 	}
 }
+
+// TestSetAfterDeleteWins drives the reverse of the delete-after-set case: a
+// property is deleted then set again before any save. The buffered set must
+// supersede the buffered delete so the value survives — otherwise
+// SaveChangesMessage would insert the row and then delete it in the same
+// transaction, losing the client's write.
+func TestSetAfterDeleteWins(t *testing.T) {
+	dir := t.TempDir()
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	mid := uint64(seedInboxMessage(t, dir, "SETWINS"))
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	store := sess.get(logonH).store
+
+	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
+	msgH := h[1]
+
+	// PrImportance is present on the seeded message. Delete it, then set it to a new
+	// value in the same edit session, then save.
+	before, _ := store.GetMessageProperties(int64(mid), mapi.PrImportance)
+	if _, ok := before.Get(mapi.PrImportance); !ok {
+		t.Fatal("PrImportance missing on the seeded message")
+	}
+	sess.Dispatch(buildDeletePropsOp(ropDeleteProperties, 0, []mapi.PropTag{mapi.PrImportance}), []uint32{msgH})
+	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrImportance, Value: int32(2)}}), []uint32{msgH})
+	sc, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
+	saveChangesEID(t, sc)
+
+	// The set wins: the stored value is the one set after the delete, not absent.
+	after, _ := store.GetMessageProperties(int64(mid), mapi.PrImportance)
+	v, ok := after.Get(mapi.PrImportance)
+	if !ok {
+		t.Fatal("PrImportance was dropped: the buffered delete overrode the later set")
+	}
+	if v != int32(2) {
+		t.Errorf("PrImportance = %v, want 2 (the value set after the delete)", v)
+	}
+}

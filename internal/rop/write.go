@@ -121,6 +121,11 @@ func (s *Session) ropSetProperties(p *ext.Pull, out *ext.Push, handles []uint32,
 	case kindMessage:
 		for _, tv := range propvals {
 			obj.pendingProps.Set(tv.Tag, tv.Value)
+			// A set supersedes a buffered delete for the same tag: drop the tag from
+			// pendingDeletes so SaveChangesMessage does not delete the row it just
+			// inserted (delete-then-set within one edit session). This is the mirror
+			// of deleteProperties dropping a buffered set.
+			obj.pendingDeletes = dropDeleteTag(obj.pendingDeletes, tv.Tag)
 		}
 	case kindAttachWrite:
 		for _, tv := range propvals {

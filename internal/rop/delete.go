@@ -74,3 +74,16 @@ func removeTag(pv mapi.PropertyValues, tag mapi.PropTag) mapi.PropertyValues {
 	}
 	return out
 }
+
+// dropDeleteTag returns a copy of tags with every occurrence of tag removed — the
+// PropTag-slice counterpart of removeTag, used when a buffered set supersedes a
+// pending delete for the same tag.
+func dropDeleteTag(tags []mapi.PropTag, tag mapi.PropTag) []mapi.PropTag {
+	var out []mapi.PropTag
+	for _, t := range tags {
+		if t != tag {
+			out = append(out, t)
+		}
+	}
+	return out
+}
