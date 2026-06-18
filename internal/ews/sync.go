@@ -62,6 +62,7 @@ type deleteItemChange struct {
 // drive this — they are INSERT-only, so flag toggles and deletes are invisible
 // to them; the snapshot diff is the only channel-agnostic detector.
 func (s *Server) handleSyncFolderItems(w http.ResponseWriter, inner []byte, sess *session) {
+	s.icsSync(sess.user, "folder-items")
 	var req syncFolderItemsRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
 		writeSOAPFault(w, "ErrorInvalidRequest", "SyncFolderItems: "+err.Error())

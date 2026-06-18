@@ -185,6 +185,7 @@ func (s *Server) handleFindFolder(w http.ResponseWriter, inner []byte, sess *ses
 // SyncState reports the folders added/removed since, by diffing the live folder
 // set against the snapshot persisted under the previous SyncState.
 func (s *Server) handleSyncFolderHierarchy(w http.ResponseWriter, inner []byte, sess *session) {
+	s.icsSync(sess.user, "folder-hierarchy")
 	var req syncFolderHierarchyRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
 		writeSOAPFault(w, "ErrorInvalidRequest", "SyncFolderHierarchy: "+err.Error())

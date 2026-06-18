@@ -29,6 +29,12 @@ func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostna
 	return &Server{auth: auth, accounts: accounts, hostname: hostname}
 }
 
+// icsSync logs an ICS synchronization under the ics subsystem; EWS folder and item
+// sync are ICS-backed. The client address rides on the correlated operation event.
+func (s *Server) icsSync(user, scope string) {
+	s.Logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.ICS, Name: "sync", User: user, Fields: logging.Fields{"scope": scope}})
+}
+
 // Handler returns the HTTP handler. One handler routes the two EWS paths by a
 // case-insensitive match, since clients vary the casing of both.
 func (s *Server) Handler() http.Handler {

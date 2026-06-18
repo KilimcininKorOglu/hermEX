@@ -57,3 +57,23 @@ func TestEWSLogsOperation(t *testing.T) {
 		t.Errorf("remote = %q, want the X-Forwarded-For client 203.0.113.9", e.RemoteAddr)
 	}
 }
+
+// TestEWSLogsICSSync proves a folder-hierarchy sync emits an ics sync event under
+// the ics subsystem (EWS sync is ICS-backed). The handler logs before parsing, so
+// a malformed body keeps the test off the store while still emitting the event.
+func TestEWSLogsICSSync(t *testing.T) {
+	sink := &captureSink{}
+	srv := &Server{Logger: logging.New(sink)}
+	srv.handleSyncFolderHierarchy(httptest.NewRecorder(), []byte("not xml"), &session{user: "alice@test"})
+
+	e, ok := sink.find("sync")
+	if !ok {
+		t.Fatal("no ics sync event")
+	}
+	if e.Subsystem != logging.ICS || e.Fields["scope"] != "folder-hierarchy" {
+		t.Errorf("sync event = subsystem %q scope %v, want ics/folder-hierarchy", e.Subsystem, e.Fields["scope"])
+	}
+	if e.User != "alice@test" {
+		t.Errorf("user = %q, want alice@test", e.User)
+	}
+}
