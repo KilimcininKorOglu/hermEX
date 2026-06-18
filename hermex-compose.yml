@@ -71,6 +71,11 @@ services:
     volumes:
       - ./docker-data/mailboxes:/data/mailboxes
       - ./docker-data/config.json:/config/config.json:ro
+      # Persist the log spill across container recreate so an outage+restart loses
+      # no buffered events (a fresh sink replays a leftover logspill.jsonl). A
+      # per-daemon subdir is required: each daemon writes its own logspill.jsonl, so
+      # a shared dir would race on concurrent append and replay-delete.
+      - ./docker-data/spill/mta:/data/logspill
     ports:
       - "8140:25"
     depends_on:
@@ -89,6 +94,7 @@ services:
     volumes:
       - ./docker-data/mailboxes:/data/mailboxes
       - ./docker-data/config.json:/config/config.json:ro
+      - ./docker-data/spill/pop3:/data/logspill
     ports:
       - "8141:110"
     depends_on:
@@ -107,6 +113,7 @@ services:
     volumes:
       - ./docker-data/mailboxes:/data/mailboxes
       - ./docker-data/config.json:/config/config.json:ro
+      - ./docker-data/spill/imap:/data/logspill
     ports:
       - "8143:143"
     depends_on:
@@ -125,6 +132,7 @@ services:
     volumes:
       - ./docker-data/mailboxes:/data/mailboxes
       - ./docker-data/config.json:/config/config.json:ro
+      - ./docker-data/spill/webmail:/data/logspill
     ports:
       - "8144:8080"
     depends_on:
@@ -143,6 +151,7 @@ services:
     volumes:
       - ./docker-data/mailboxes:/data/mailboxes
       - ./docker-data/config.json:/config/config.json:ro
+      - ./docker-data/spill/dav:/data/logspill
     ports:
       - "8145:8080"
     depends_on:
@@ -161,6 +170,7 @@ services:
     volumes:
       - ./docker-data/mailboxes:/data/mailboxes
       - ./docker-data/config.json:/config/config.json:ro
+      - ./docker-data/spill/activesync:/data/logspill
     ports:
       - "8146:8080"
     depends_on:
@@ -179,6 +189,7 @@ services:
     volumes:
       - ./docker-data/mailboxes:/data/mailboxes
       - ./docker-data/config.json:/config/config.json:ro
+      - ./docker-data/spill/ews:/data/logspill
     ports:
       - "8147:8080"
     depends_on:
@@ -197,6 +208,7 @@ services:
     volumes:
       - ./docker-data/mailboxes:/data/mailboxes
       - ./docker-data/config.json:/config/config.json:ro
+      - ./docker-data/spill/mapi:/data/logspill
     ports:
       - "8148:8080"
     depends_on:
@@ -225,6 +237,7 @@ services:
       - HERMEX_LOG_SPILL_DIR=/data/logspill
     volumes:
       - ./docker-data/tls:/config/tls:ro
+      - ./docker-data/spill/gateway:/data/logspill
     ports:
       - "8149:8080"
     depends_on:
