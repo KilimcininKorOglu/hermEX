@@ -1,6 +1,7 @@
 package rpchttp
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -155,31 +156,7 @@ func TestAsyncWaitExNotificationPending(t *testing.T) {
 	async := NewAsyncEMSMDB(ems)
 	const user = "alice@hermex.test"
 	mailbox := t.TempDir()
-	out, _ := ems.Handle(&Session{User: user, Mailbox: mailbox}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
-	cxh, _ := parseConnectExOut(t, out)
-
-	// Logon opens the ROP store; its response handle table carries the logon handle.
-	lresp, fault := ems.Handle(&Session{}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, logonExecuteBuffer()))
-	if fault != 0 {
-		t.Fatalf("logon fault = %#x", fault)
-	}
-	_, lpout, _ := parseRpcExt2Out(t, lresp)
-	_, lhandles, derr := oxmapihttp.DecodeExecute(lpout)
-	if derr != nil {
-		t.Fatalf("decode logon response: %v", derr)
-	}
-	if len(lhandles) != 1 || lhandles[0] == 0xFFFFFFFF {
-		t.Fatalf("logon did not mint a handle: %v", lhandles)
-	}
-
-	// Register a whole-store notification on the logon handle.
-	resp, fault := ems.Handle(&Session{}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, registerNotifyExecuteBuffer(lhandles[0])))
-	if fault != 0 {
-		t.Fatalf("register-notification fault = %#x", fault)
-	}
-	if _, _, result := parseRpcExt2Out(t, resp); result != ecSuccess {
-		t.Fatalf("register-notification result = %#x, want ecSuccess", result)
-	}
+	cxh, _ := connectLogonRegister(t, ems, user, mailbox)
 
 	aout, _ := ems.Handle(&Session{User: user}, opEcDoAsyncConnectEx, buildAsyncConnectExStub(cxh))
 	acxh, _ := parseAsyncConnectExOut(t, aout)
@@ -201,11 +178,209 @@ func TestAsyncWaitExNotificationPending(t *testing.T) {
 		t.Fatalf("append: %v", err)
 	}
 
-	wout, fault = async.Handle(&Session{User: user}, opEcDoAsyncWaitEx, buildAsyncWaitExStub(acxh))
+	wout, fault := async.Handle(&Session{User: user}, opEcDoAsyncWaitEx, buildAsyncWaitExStub(acxh))
 	if fault != 0 {
 		t.Fatalf("async wait fault = %#x", fault)
 	}
 	if flags, result := parseAsyncWaitExOut(t, wout); flags != flagNotificationPending || result != ecSuccess {
 		t.Errorf("wait after delivery = (flags %#x, result %#x), want (FLAG_NOTIFICATION_PENDING, ecSuccess)", flags, result)
+	}
+}
+
+// connectLogonRegister drives a session to the point a whole-store notification is
+// registered: EcDoConnectEx, an EcDoRpcExt2 RopLogon (which opens the ROP store), and
+// an EcDoRpcExt2 RopRegisterNotification on the logon handle. It returns the context
+// handle and the logon handle.
+func connectLogonRegister(t *testing.T, ems *EMSMDB, user, mailbox string) (ContextHandle, uint32) {
+	t.Helper()
+	out, _ := ems.Handle(&Session{User: user, Mailbox: mailbox}, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
+	cxh, _ := parseConnectExOut(t, out)
+
+	lresp, fault := ems.Handle(&Session{}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, logonExecuteBuffer()))
+	if fault != 0 {
+		t.Fatalf("logon fault = %#x", fault)
+	}
+	_, lpout, _ := parseRpcExt2Out(t, lresp)
+	_, lhandles, derr := oxmapihttp.DecodeExecute(lpout)
+	if derr != nil {
+		t.Fatalf("decode logon response: %v", derr)
+	}
+	if len(lhandles) != 1 || lhandles[0] == 0xFFFFFFFF {
+		t.Fatalf("logon did not mint a handle: %v", lhandles)
+	}
+
+	resp, fault := ems.Handle(&Session{}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, registerNotifyExecuteBuffer(lhandles[0])))
+	if fault != 0 {
+		t.Fatalf("register-notification fault = %#x", fault)
+	}
+	if _, _, result := parseRpcExt2Out(t, resp); result != ecSuccess {
+		t.Fatalf("register-notification result = %#x, want ecSuccess", result)
+	}
+	return cxh, lhandles[0]
+}
+
+// testVconn builds a virtual connection a parked wait can deliver its reply on,
+// without the full RTS handshake — the OUT channel is read directly.
+func testVconn() *vconn {
+	return &vconn{out: make(chan []byte, 16), closed: make(chan struct{})}
+}
+
+// readParkedReply reads one PDU off the OUT channel and returns its response stub,
+// failing if none arrives.
+func readParkedReply(t *testing.T, vc *vconn) []byte {
+	t.Helper()
+	select {
+	case pdu := <-vc.out:
+		return responseStub(t, pdu)
+	case <-time.After(2 * time.Second):
+		t.Fatal("no parked reply delivered on the OUT channel")
+		return nil
+	}
+}
+
+// asyncConnect runs EcDoAsyncConnectEx and returns the async context handle.
+func asyncConnect(t *testing.T, ems *EMSMDB, user string, cxh ContextHandle) ContextHandle {
+	t.Helper()
+	aout, _ := ems.Handle(&Session{User: user}, opEcDoAsyncConnectEx, buildAsyncConnectExStub(cxh))
+	acxh, _ := parseAsyncConnectExOut(t, aout)
+	return acxh
+}
+
+// TestAsyncWaitExParksThenWakesOnDelivery proves the long-poll: a wait on a quiet
+// mailbox parks (returns faultParked, no synchronous reply), and the parked poller
+// delivers FLAG_NOTIFICATION_PENDING on the OUT channel once a message lands through a
+// separate store handle. A second wait while one is parked is dropped immediately, so
+// only one poller runs per session.
+func TestAsyncWaitExParksThenWakesOnDelivery(t *testing.T) {
+	ems := NewEMSMDB(nil)
+	async := NewAsyncEMSMDB(ems)
+	async.cadence = 10 * time.Millisecond
+	async.waitInterval = 2 * time.Second
+	const user = "alice@hermex.test"
+	mailbox := t.TempDir()
+	cxh, _ := connectLogonRegister(t, ems, user, mailbox)
+	acxh := asyncConnect(t, ems, user, cxh)
+
+	vc := testVconn()
+	sess := &Session{User: user, vc: vc, curCallID: 0x99, maxFrag: 4096}
+	if out, fault := async.asyncWaitEx(sess, buildAsyncWaitExStub(acxh)); fault != faultParked {
+		t.Fatalf("quiet-mailbox wait = (out %v, fault %#x), want it to park", out, fault)
+	}
+
+	// A second wait while one is parked is dropped (no second poller), returning 0.
+	if out2, fault2 := async.asyncWaitEx(&Session{User: user, vc: testVconn(), maxFrag: 4096}, buildAsyncWaitExStub(acxh)); fault2 == faultParked {
+		t.Error("a second wait parked a second poller; want a dropped immediate reply")
+	} else if flags, result := parseAsyncWaitExOut(t, out2); flags != 0 || result != ecSuccess {
+		t.Errorf("dropped second wait = (flags %#x, result %#x), want (0, ecSuccess)", flags, result)
+	}
+
+	// Deliver a message through a separate store handle; the parked poller wakes.
+	st, err := objectstore.Open(mailbox)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer st.Close()
+	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	if flags, result := parseAsyncWaitExOut(t, readParkedReply(t, vc)); flags != flagNotificationPending || result != ecSuccess {
+		t.Errorf("parked reply = (flags %#x, result %#x), want (FLAG_NOTIFICATION_PENDING, ecSuccess)", flags, result)
+	}
+}
+
+// TestAsyncWaitExParkTimesOut proves a parked wait with nothing pending delivers a
+// flags_out 0 reply when the wait interval elapses — the timeout the client renews.
+func TestAsyncWaitExParkTimesOut(t *testing.T) {
+	ems := NewEMSMDB(nil)
+	async := NewAsyncEMSMDB(ems)
+	async.cadence = 10 * time.Millisecond
+	async.waitInterval = 60 * time.Millisecond
+	const user = "alice@hermex.test"
+	cxh, _ := connectLogonRegister(t, ems, user, t.TempDir())
+	acxh := asyncConnect(t, ems, user, cxh)
+
+	vc := testVconn()
+	if _, fault := async.asyncWaitEx(&Session{User: user, vc: vc, maxFrag: 4096}, buildAsyncWaitExStub(acxh)); fault != faultParked {
+		t.Fatalf("quiet-mailbox wait did not park")
+	}
+	if flags, result := parseAsyncWaitExOut(t, readParkedReply(t, vc)); flags != 0 || result != ecSuccess {
+		t.Errorf("timed-out parked reply = (flags %#x, result %#x), want (0, ecSuccess)", flags, result)
+	}
+}
+
+// TestAsyncWaitExParkAbortsOnTeardown proves the parked poller abandons its reply and
+// frees the per-session wait slot when the virtual connection tears down, rather than
+// polling a closing store for the full wait interval.
+func TestAsyncWaitExParkAbortsOnTeardown(t *testing.T) {
+	ems := NewEMSMDB(nil)
+	async := NewAsyncEMSMDB(ems)
+	async.cadence = 10 * time.Millisecond
+	async.waitInterval = 10 * time.Second // long, so only teardown ends the wait
+	const user = "alice@hermex.test"
+	cxh, _ := connectLogonRegister(t, ems, user, t.TempDir())
+	acxh := asyncConnect(t, ems, user, cxh)
+	s, _ := ems.lookup(cxh.GUID)
+
+	vc := testVconn()
+	if _, fault := async.asyncWaitEx(&Session{User: user, vc: vc, maxFrag: 4096}, buildAsyncWaitExStub(acxh)); fault != faultParked {
+		t.Fatalf("quiet-mailbox wait did not park")
+	}
+	close(vc.closed) // tear the connection down
+
+	deadline := time.Now().Add(2 * time.Second)
+	for s.waiting.Load() {
+		if time.Now().After(deadline) {
+			t.Fatal("parked poller did not exit after teardown")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	select {
+	case pdu := <-vc.out:
+		t.Errorf("teardown should abandon the reply, got %d bytes on the OUT channel", len(pdu))
+	default:
+	}
+}
+
+// TestAsyncWaitExConcurrentParkAndExecute runs a parked poll concurrently with
+// Executes on the same session — the poller's PollForChange against the Executes'
+// Dispatch on the shared rop.Session. Under `go test -race` it proves the session
+// mutex guards that concurrency, mirroring the MAPI/HTTP NotificationWait race test.
+func TestAsyncWaitExConcurrentParkAndExecute(t *testing.T) {
+	ems := NewEMSMDB(nil)
+	async := NewAsyncEMSMDB(ems)
+	async.cadence = 2 * time.Millisecond
+	async.waitInterval = 500 * time.Millisecond
+	const user = "alice@hermex.test"
+	mailbox := t.TempDir()
+	cxh, logonH := connectLogonRegister(t, ems, user, mailbox)
+	acxh := asyncConnect(t, ems, user, cxh)
+
+	vc := testVconn()
+	defer close(vc.closed)
+	if _, fault := async.asyncWaitEx(&Session{User: user, vc: vc, maxFrag: 4096}, buildAsyncWaitExStub(acxh)); fault != faultParked {
+		t.Fatalf("quiet-mailbox wait did not park")
+	}
+
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for range 20 {
+			ems.Handle(&Session{}, opEcDoRpcExt2, buildRpcExt2Stub(cxh, openFolderExecuteBuffer(logonH)))
+		}
+	})
+	wg.Go(func() {
+		st, err := objectstore.Open(mailbox)
+		if err != nil {
+			return
+		}
+		defer st.Close()
+		st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0)
+	})
+	wg.Wait()
+
+	// Drain the parked reply if the delivery woke it (either outcome is race-clean).
+	select {
+	case <-vc.out:
+	case <-time.After(time.Second):
 	}
 }

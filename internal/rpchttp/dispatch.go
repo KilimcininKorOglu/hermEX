@@ -146,12 +146,25 @@ func (d *Dispatcher) handleRequest(sess *Session, h ndr.Header, req *ndr.Request
 	if ri == nil {
 		return [][]byte{ndr.FrameFault(h.CallID, req.ContextID, ndr.FaultUnkIf)}
 	}
+	// Stamp the in-flight request's framing so a handler that parks a long-poll can
+	// frame its deferred reply to match this call; the IN goroutine is the only writer.
+	sess.curCallID = h.CallID
+	sess.curContextID = req.ContextID
 	out, fault := ri.handler(sess, req.Opnum, stub)
+	if fault == faultParked {
+		return nil // the handler parked; its reply is delivered later on the OUT channel
+	}
 	if fault != 0 {
 		return [][]byte{ndr.FrameFault(h.CallID, req.ContextID, fault)}
 	}
 	return fragmentResponse(h.CallID, req.ContextID, out, sess.maxFrag)
 }
+
+// faultParked is the sentinel an interface handler returns to signal that it has
+// parked the call (e.g. EcDoAsyncWaitEx's long-poll): no reply is framed now; the
+// handler delivers its response on the OUT channel when it completes. It is not a
+// DCE/RPC NCA fault code — handleRequest intercepts it before any fault framing.
+const faultParked uint32 = 0xFFFFFFFF
 
 // offersNDR reports whether the client offered the NDR (v2) transfer syntax.
 func offersNDR(syntaxes []ndr.SyntaxID) bool {

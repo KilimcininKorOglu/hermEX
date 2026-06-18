@@ -21,6 +21,15 @@ type Session struct {
 	assocGroup uint32
 	maxFrag    int               // negotiated client max_recv_frag (response chunk bound)
 	reasm      map[uint32][]byte // call id -> accumulated request stub (fragmented requests)
+
+	// vc is the owning virtual connection, set once at creation; it is how a handler
+	// that parks a long-poll (EcDoAsyncWaitEx) delivers its deferred reply on the OUT
+	// channel. nil when there is no transport (direct handler unit tests). curCallID
+	// and curContextID are the in-flight request's framing, stamped before each
+	// handler call so a parked handler can frame its later reply to match.
+	vc           *vconn
+	curCallID    uint32
+	curContextID uint16
 }
 
 // vconn is one RPC-over-HTTP virtual connection: the rendezvous between the
@@ -96,6 +105,7 @@ func (s *Server) getOrCreate(key, user, mailbox string) *vconn {
 		out:    make(chan []byte, 16),
 		closed: make(chan struct{}),
 	}
+	vc.sess.vc = vc // the back-ref a parked long-poll uses to reply on the OUT channel
 	s.conns[key] = vc
 	return vc
 }

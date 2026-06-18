@@ -63,6 +63,7 @@ type emsmdbSession struct {
 	mailbox string
 	cpid    uint32
 	rop     *rop.Session
+	waiting atomic.Bool // one outstanding EcDoAsyncWaitEx long-poll per session
 }
 
 // EMSMDB is the EMSMDB RPC interface stub: it manages logon sessions keyed by

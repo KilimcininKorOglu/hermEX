@@ -1,6 +1,8 @@
 package rpchttp
 
 import (
+	"time"
+
 	"hermex/internal/mapi"
 	"hermex/internal/ndr"
 )
@@ -34,17 +36,28 @@ const flagNotificationPending uint32 = 0x00000001
 // belongs to another authenticated user.
 const ecRejected uint32 = 0x000007EE
 
+// The long-poll holds the call until a notification arrives or the wait interval
+// elapses. The interval is held just under the [MS-OXCRPC] client expectation so the
+// reply beats the client's own timeout; the cadence bounds how long an Execute can
+// wait behind a poll for the shared store lock.
+const (
+	asyncWaitInterval = 297 * time.Second
+	asyncPollCadence  = 5 * time.Second
+)
+
 // AsyncEMSMDB is the AsyncEMSMDB RPC interface stub: the EcDoAsyncWaitEx long-poll
 // that reports whether a notification is queued for the session. It shares the
 // EMSMDB stub's session table, resolving the async context handle to a session by
 // the GUID the handle carries.
 type AsyncEMSMDB struct {
-	ems *EMSMDB
+	ems          *EMSMDB
+	waitInterval time.Duration // how long a parked wait holds before a timeout reply
+	cadence      time.Duration // how often the parked wait polls the shared store
 }
 
 // NewAsyncEMSMDB returns an AsyncEMSMDB stub over the given EMSMDB stub's sessions.
 func NewAsyncEMSMDB(ems *EMSMDB) *AsyncEMSMDB {
-	return &AsyncEMSMDB{ems: ems}
+	return &AsyncEMSMDB{ems: ems, waitInterval: asyncWaitInterval, cadence: asyncPollCadence}
 }
 
 // Handle is the IfaceHandler the dispatcher calls for an AsyncEMSMDB request.
@@ -86,13 +99,16 @@ func pushAsyncWaitExOut(flagsOut, result uint32) []byte {
 
 // asyncWaitEx handles EcDoAsyncWaitEx (opnum 0): it reports whether a notification
 // is queued for the session named by the async context handle. A queued notification
-// yields FLAG_NOTIFICATION_PENDING; an empty queue yields 0. An async handle naming
-// no live session, or one owned by another user, is rejected.
+// yields FLAG_NOTIFICATION_PENDING; an async handle naming no live session, or one
+// owned by another user, is rejected.
 //
-// v1 answers from the immediate poll. The long-poll that parks the call until a
-// notification arrives or the wait interval elapses is a later increment; until then
-// a client re-polls, which is wire-valid (an empty wait returns flags_out 0, the same
-// value the parked wait returns on timeout).
+// When nothing is pending, the call PARKS: a goroutine polls the shared store off the
+// IN goroutine and delivers the reply on the OUT channel once a notification arrives
+// or the wait interval elapses (flags_out 0). Parking returns faultParked so the
+// dispatcher frames no synchronous reply. Only one wait parks per session; a second
+// while one is parked returns flags_out 0 immediately rather than stacking a poller.
+// Without a transport (a direct unit test, sess.vc nil) the wait cannot park, so it
+// answers from the immediate poll.
 func (a *AsyncEMSMDB) asyncWaitEx(sess *Session, stub []byte) ([]byte, uint32) {
 	in, err := pullAsyncWaitEx(stub)
 	if err != nil {
@@ -102,9 +118,44 @@ func (a *AsyncEMSMDB) asyncWaitEx(sess *Session, stub []byte) ([]byte, uint32) {
 	if !ok || s.user != sess.User {
 		return pushAsyncWaitExOut(0, ecRejected), 0
 	}
-	flagsOut := uint32(0)
 	if s.rop != nil && s.rop.PollForChange() {
-		flagsOut = flagNotificationPending
+		return pushAsyncWaitExOut(flagNotificationPending, ecSuccess), 0
 	}
-	return pushAsyncWaitExOut(flagsOut, ecSuccess), 0
+	if sess.vc == nil || !s.waiting.CompareAndSwap(false, true) {
+		// No transport to park on, or a wait is already parked for this session.
+		return pushAsyncWaitExOut(0, ecSuccess), 0
+	}
+	// Capture the framing on the IN goroutine before the poller starts.
+	go a.parkAndReply(s, sess.vc, sess.curCallID, sess.curContextID, sess.maxFrag)
+	return nil, faultParked
+}
+
+// parkAndReply polls the session's shared store until a notification is queued or the
+// wait interval elapses, then frames the EcDoAsyncWaitEx reply (FLAG_NOTIFICATION_
+// PENDING on a notification, 0 on timeout) to match the parked request and delivers it
+// on the OUT channel. It abandons the reply if the virtual connection tears down. The
+// poll reuses the same PollForChange wake primitive the MAPI/HTTP NotificationWait
+// drives, so a delivery made through any store handle wakes it.
+func (a *AsyncEMSMDB) parkAndReply(s *emsmdbSession, vc *vconn, callID uint32, contextID uint16, maxFrag int) {
+	defer s.waiting.Store(false)
+	deadline := time.Now().Add(a.waitInterval)
+	flagsOut := uint32(0)
+	for {
+		if s.rop != nil && s.rop.PollForChange() {
+			flagsOut = flagNotificationPending
+			break
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			break // timeout: flags_out stays 0
+		}
+		select {
+		case <-vc.closed:
+			return // the connection tore down; abandon the parked reply
+		case <-time.After(min(a.cadence, remaining)):
+		}
+	}
+	for _, pdu := range fragmentResponse(callID, contextID, pushAsyncWaitExOut(flagsOut, ecSuccess), maxFrag) {
+		vc.send(pdu)
+	}
 }
