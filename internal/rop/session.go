@@ -29,6 +29,7 @@ const (
 	kindFastUpload                   // a FastTransfer destination feeding an upload message
 	kindAttachWrite                  // a created attachment being filled (CreateAttachment → SaveChangesAttachment)
 	kindEmbedded                     // a message encapsulated in an attachment, opened via OpenEmbeddedMessage
+	kindSubscription                 // a RopRegisterNotification interest in mailbox events
 )
 
 // attachWrite is an attachment created on an open message and accumulating its
@@ -103,6 +104,8 @@ type object struct {
 	upload         *objectstore.UploadCollector  // kindSync (upload): the import target
 	uploadMsg      *objectstore.UploadMessage    // kindUploadMessage: the message being imported
 	msgCollector   *objectstore.MessageCollector // kindFastUpload: the body parser
+	sub            subscription                  // kindSubscription: the registered notification interest
+	subSnapshot    folderSnapshot                // kindSubscription: the subscribed folder's poll baseline (refreshed each poll)
 }
 
 // newMessageState accumulates a message being composed over the ROP write

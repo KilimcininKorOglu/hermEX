@@ -66,6 +66,7 @@ const (
 	ropGetReceiveFolder            uint8 = 0x27
 	ropGetReceiveFolderTable       uint8 = 0x68
 	ropGetStoreState               uint8 = 0x7B
+	ropRegisterNotification        uint8 = 0x29
 	ropNotify                      uint8 = 0x2A
 )
 
@@ -173,6 +174,10 @@ loop:
 			}
 		case ropGetStoreState:
 			if !s.ropGetStoreState(p, out, handles, hindex) {
+				break loop
+			}
+		case ropRegisterNotification:
+			if !s.ropRegisterNotification(p, out, handles, hindex) {
 				break loop
 			}
 		case ropModifyRecipients:
