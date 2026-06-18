@@ -76,6 +76,15 @@ func (s *Session) streamData(parent *object, tag mapi.PropTag) ([]byte, error) {
 			return nil, errNoStreamProp
 		}
 		return streamBytes(tag.Type(), v), nil
+	case parent.kind == kindEmbedded:
+		if parent.embedded == nil || parent.embedded.msg == nil {
+			return nil, errNoStreamProp
+		}
+		v, ok := parent.embedded.msg.Props.Get(tag)
+		if !ok {
+			return nil, errNoStreamProp
+		}
+		return streamBytes(tag.Type(), v), nil
 	case parent.kind == kindAttachment:
 		v, ok := parent.attachProps.Get(tag)
 		if !ok {

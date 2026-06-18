@@ -20,12 +20,14 @@ func (s *Session) ropReloadCachedInformation(p *ext.Pull, out *ext.Push, handles
 		return false
 	}
 	msg := s.get(handleAt(handles, hindex))
-	if msg == nil || msg.kind != kindMessage || msg.store == nil {
+	if msg == nil {
 		writeErr(out, ropReloadCachedInfo, hindex, ecError)
 		return true
 	}
-	props, err := msg.store.GetMessageProperties(msg.messageID, mapi.PrSubjectPrefix, mapi.PrNormalizedSubject)
-	if err != nil {
+	// readMessageProps serves both an opened store message and an embedded message,
+	// so RopReloadCachedInformation refreshes the header of either.
+	props, ok, err := msg.readMessageProps(mapi.PrSubjectPrefix, mapi.PrNormalizedSubject)
+	if !ok || err != nil {
 		writeErr(out, ropReloadCachedInfo, hindex, ecError)
 		return true
 	}

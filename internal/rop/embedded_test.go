@@ -290,3 +290,120 @@ func TestComposeEmbeddedMessage(t *testing.T) {
 		t.Errorf("read-back embedded body = %q, want to contain %q", s, "Composed body.")
 	}
 }
+
+// emlNestedAttach is a carrier whose message/rfc822 attachment is itself a
+// multipart message with a body and a file attachment — so an embedded message
+// opened from it has its own nested attachment to enumerate.
+const emlNestedAttach = "From: fwd@hermex.test\r\nTo: dest@hermex.test\r\nSubject: Carrier2\r\n" +
+	"MIME-Version: 1.0\r\n" +
+	"Content-Type: multipart/mixed; boundary=\"out\"\r\n\r\n" +
+	"--out\r\n" +
+	"Content-Type: text/plain\r\n\r\nOuter body.\r\n" +
+	"--out\r\n" +
+	"Content-Type: message/rfc822\r\n" +
+	"Content-Disposition: attachment\r\n\r\n" +
+	"From: orig@hermex.test\r\nTo: rcpt@hermex.test\r\nSubject: Nested Subject\r\n" +
+	"MIME-Version: 1.0\r\n" +
+	"Content-Type: multipart/mixed; boundary=\"in\"\r\n\r\n" +
+	"--in\r\n" +
+	"Content-Type: text/plain\r\n\r\nNested body line.\r\n" +
+	"--in\r\n" +
+	"Content-Type: application/octet-stream; name=\"inner.bin\"\r\n" +
+	"Content-Disposition: attachment; filename=\"inner.bin\"\r\n" +
+	"Content-Transfer-Encoding: base64\r\n\r\nSGVsbG8=\r\n" + // "Hello"
+	"--in--\r\n" +
+	"--out--\r\n"
+
+// openReadStreamAll opens a read-only stream over a property of parentH and returns
+// its full bytes.
+func openReadStreamAll(t *testing.T, sess *Session, parentH uint32, tag uint32) []byte {
+	t.Helper()
+	os, h := sess.Dispatch(buildOpenStream(0, 1, tag, 0), []uint32{parentH, 0xFFFFFFFF})
+	p := ext.NewPull(os, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropOpenStream {
+		t.Fatalf("OpenStream RopId = %#x", id)
+	}
+	mustU8(t, p, "ohindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("OpenStream(%#x) ReturnValue = %#x", tag, ec)
+	}
+	mustU32(t, p, "StreamSize")
+	return readStreamChunk(t, sess, h[1], 0xBABE, 0xFFFF)
+}
+
+// TestEmbeddedMessageReadSurface proves the read ROPs are kind-aware for an
+// embedded message: after opening the encapsulated message, RopReloadCachedInformation
+// returns its subject, OpenStream reads its body, GetAttachmentTable lists its
+// nested attachment, and OpenAttachment + OpenStream read that nested attachment's
+// data. Each of these previously rejected a kindEmbedded handle.
+func TestEmbeddedMessageReadSurface(t *testing.T) {
+	dir := t.TempDir()
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	store := sess.get(logonH).store
+
+	_, mid := seedCarrier(t, store, emlNestedAttach)
+
+	// OpenMessage -> OpenAttachment(0) -> OpenEmbeddedMessage.
+	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(mid)))), []uint32{logonH, 0xFFFFFFFF})
+	msgH := h[1]
+	_, h = sess.Dispatch(buildOpenAttachment(0, 1, 0), []uint32{msgH, 0xFFFFFFFF})
+	attH := h[1]
+	_, h = sess.Dispatch(buildOpenEmbeddedMessage(0, 1, mapiModify), []uint32{attH, 0xFFFFFFFF})
+	embH := h[1]
+
+	// RopReloadCachedInformation on the embedded handle returns the embedded subject.
+	rc, _ := sess.Dispatch(buildReloadCachedInfo(0), []uint32{embH})
+	p := ext.NewPull(rc, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropReloadCachedInfo {
+		t.Fatalf("ReloadCachedInformation RopId = %#x", id)
+	}
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("ReloadCachedInformation(embedded) ReturnValue = %#x", ec)
+	}
+	mustU8(t, p, "HasNamedProperties")
+	readTypedString(t, p) // SubjectPrefix
+	if subj := readTypedString(t, p); subj != "Nested Subject" {
+		t.Errorf("ReloadCachedInformation embedded subject = %q, want Nested Subject", subj)
+	}
+
+	// OpenStream over the embedded body reads the nested body.
+	if got := decodeUTF16LE(openReadStreamAll(t, sess, embH, uint32(mapi.PrBody))); !strings.Contains(got, "Nested body line.") {
+		t.Errorf("embedded body stream = %q, want it to contain %q", got, "Nested body line.")
+	}
+
+	// GetAttachmentTable on the embedded handle lists the nested attachment.
+	gat, h := sess.Dispatch(buildGetAttachmentTable(0, 1), []uint32{embH, 0xFFFFFFFF})
+	p = ext.NewPull(gat, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropGetAttachmentTable {
+		t.Fatalf("GetAttachmentTable(embedded) RopId = %#x", id)
+	}
+	mustU8(t, p, "ohindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("GetAttachmentTable(embedded) ReturnValue = %#x", ec)
+	}
+	tableH := h[1]
+	cols := []mapi.PropTag{mapi.PrAttachNum, mapi.PrAttachLongFilename}
+	sess.Dispatch(buildSetColumns(0, cols), []uint32{tableH})
+	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 1, 32), []uint32{tableH})
+	_, rows := queryRowsResponse(t, qr, cols)
+	if len(rows) != 1 {
+		t.Fatalf("embedded attachment table rows = %d, want 1 (the nested attachment)", len(rows))
+	}
+	if fn, _ := rows[0].Get(mapi.PrAttachLongFilename); fn != "inner.bin" {
+		t.Errorf("nested attachment filename = %v, want inner.bin", fn)
+	}
+
+	// OpenAttachment(0) on the embedded handle opens the nested attachment; a stream
+	// over its data reads the nested file content.
+	_, h = sess.Dispatch(buildOpenAttachment(0, 1, 0), []uint32{embH, 0xFFFFFFFF})
+	nAttH := h[1]
+	if data := openReadStreamAll(t, sess, nAttH, uint32(mapi.PrAttachDataBin)); string(data) != "Hello" {
+		t.Errorf("nested attachment data = %q, want Hello", data)
+	}
+}

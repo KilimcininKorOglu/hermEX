@@ -7,20 +7,38 @@ import (
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcmail"
 )
 
-// messageAttachmentBags reads a message's attachments as their property bags.
-// objectstore exposes attachments only through the re-synthesized message, so
-// the bags are taken from there; PR_ATTACH_NUM (the row index) is synthesized
-// by the table/open layer, not stored.
+// readableMessage reports whether a handle is a message whose attachments and
+// property streams can be read: an opened store message, or an embedded message
+// opened over an attachment's encapsulated bytes.
+func readableMessage(o *object) bool {
+	return o != nil && (o.kind == kindMessage || o.kind == kindEmbedded)
+}
+
+// messageAttachmentBags reads a message's attachments as their property bags. A
+// stored message exposes attachments through the re-synthesized message; an
+// embedded message reads them from its in-memory imported message. PR_ATTACH_NUM
+// (the row index) is synthesized by the table/open layer, not stored.
 func messageAttachmentBags(o *object) ([]mapi.PropertyValues, error) {
-	msg, err := o.store.OpenMessage(o.messageID)
-	if err != nil {
-		return nil, err
+	var attachments []oxcmail.Attachment
+	switch o.kind {
+	case kindEmbedded:
+		if o.embedded == nil || o.embedded.msg == nil {
+			return nil, nil
+		}
+		attachments = o.embedded.msg.Attachments
+	default:
+		msg, err := o.store.OpenMessage(o.messageID)
+		if err != nil {
+			return nil, err
+		}
+		attachments = msg.Attachments
 	}
-	bags := make([]mapi.PropertyValues, len(msg.Attachments))
-	for i := range msg.Attachments {
-		bags[i] = msg.Attachments[i].Props
+	bags := make([]mapi.PropertyValues, len(attachments))
+	for i := range attachments {
+		bags[i] = attachments[i].Props
 	}
 	return bags, nil
 }
@@ -58,7 +76,7 @@ func (s *Session) ropGetAttachmentTable(p *ext.Pull, out *ext.Push, handles []ui
 		return false
 	}
 	msg := s.get(handleAt(handles, hindex))
-	if msg == nil || msg.kind != kindMessage || msg.store == nil {
+	if !readableMessage(msg) || msg.store == nil {
 		writeErr(out, ropGetAttachmentTable, ohindex, ecError)
 		return true
 	}
@@ -93,7 +111,7 @@ func (s *Session) ropOpenAttachment(p *ext.Pull, out *ext.Push, handles []uint32
 		return false
 	}
 	msg := s.get(handleAt(handles, hindex))
-	if msg == nil || msg.kind != kindMessage || msg.store == nil {
+	if !readableMessage(msg) || msg.store == nil {
 		writeErr(out, ropOpenAttachment, ohindex, ecError)
 		return true
 	}
