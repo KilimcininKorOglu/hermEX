@@ -161,3 +161,51 @@ func TestMongoSinkIntegration(t *testing.T) {
 		t.Error("no TTL index (expireAfterSeconds) was created")
 	}
 }
+
+// TestMongoSinkNoTTLWhenRetentionZero proves the keep-forever guard: a zero
+// retention must NOT create a TTL index. Without the guard ensureIndexes would
+// call SetExpireAfterSeconds(0), which MongoDB treats as "expire immediately" —
+// silently deleting every log within a minute and destroying the audit trail.
+func TestMongoSinkNoTTLWhenRetentionZero(t *testing.T) {
+	uri := os.Getenv("HERMEX_TEST_MONGO_URI")
+	if uri == "" {
+		t.Skip("HERMEX_TEST_MONGO_URI not set (needs the dev container's mongo)")
+	}
+	const db = "hermex_logttltest"
+	bg := context.Background()
+
+	raw, err := mongo.Connect(options.Client().ApplyURI(uri))
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer raw.Disconnect(bg)
+	raw.Database(db).Drop(bg)
+	defer raw.Database(db).Drop(bg)
+
+	sink, err := NewMongoSink(uri, db, "", 0)
+	if err != nil {
+		t.Fatalf("NewMongoSink: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(bg, 5*time.Second)
+	defer cancel()
+	if err := sink.Close(ctx); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	cur, err := raw.Database(db).Collection("logs").Indexes().List(ctx)
+	if err != nil {
+		t.Fatalf("list indexes: %v", err)
+	}
+	var idx []bson.M
+	if err := cur.All(ctx, &idx); err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range idx {
+		if _, ok := m["expireAfterSeconds"]; ok {
+			t.Fatalf("a TTL index was created for retention 0: %v — logs would expire immediately", m)
+		}
+	}
+	if len(idx) < 4 {
+		t.Errorf("got %d indexes, want >= 4 (3 filter indexes + _id, no TTL)", len(idx))
+	}
+}

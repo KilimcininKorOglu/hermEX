@@ -31,6 +31,12 @@ type Config struct {
 	IMAPSAddr      string `json:"imaps_addr"`      // IMAP implicit-TLS listen address (e.g. ":993"); empty disables
 	POP3SAddr      string `json:"pop3s_addr"`      // POP3 implicit-TLS listen address (e.g. ":995"); empty disables
 	SMTPSAddr      string `json:"smtps_addr"`      // SMTP implicit-TLS listen address (e.g. ":465"); empty disables
+
+	// Centralized logging (MongoDB). Empty MongoURI keeps logging to stderr only.
+	MongoURI         string `json:"mongo_uri"`          // MongoDB URI for the central log store (empty = stderr only)
+	LogDatabase      string `json:"log_database"`       // Mongo database holding the logs collection (default "hermex")
+	LogRetentionDays int    `json:"log_retention_days"` // TTL window in days; 0 or negative keeps logs forever
+	LogSpillDir      string `json:"log_spill_dir"`      // local dir for log batches buffered while Mongo is unreachable
 }
 
 // Load reads and validates a JSON config file.

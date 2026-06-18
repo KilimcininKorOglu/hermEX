@@ -27,7 +27,7 @@ func TestMultiSinkFansOut(t *testing.T) {
 // TestBuildStderrOnlyWhenNoMongo proves Build returns a working stderr logger when
 // no Mongo URI is configured.
 func TestBuildStderrOnlyWhenNoMongo(t *testing.T) {
-	log, closeFn := logging.Build("", "db", "", time.Hour)
+	log, closeFn := logging.Build("", "db", "", 30)
 	if log == nil {
 		t.Fatal("Build returned a nil logger")
 	}
@@ -40,7 +40,7 @@ func TestBuildStderrOnlyWhenNoMongo(t *testing.T) {
 // TestBuildFallsBackOnUnreachableMongo proves logging never blocks a daemon from
 // starting: a bad Mongo URI yields a working stderr logger, not an error.
 func TestBuildFallsBackOnUnreachableMongo(t *testing.T) {
-	log, closeFn := logging.Build("http://invalid", "db", "", time.Hour)
+	log, closeFn := logging.Build("http://invalid", "db", "", 30)
 	if log == nil {
 		t.Fatal("Build returned a nil logger when Mongo was unavailable")
 	}
@@ -68,7 +68,7 @@ func TestBuildIntegration(t *testing.T) {
 	raw.Database(db).Drop(bg)
 	defer raw.Database(db).Drop(bg)
 
-	log, closeFn := logging.Build(uri, db, t.TempDir(), time.Hour)
+	log, closeFn := logging.Build(uri, db, t.TempDir(), 1)
 	log.Info(logging.System, "startup", logging.Fields{"daemon": "test"})
 	ctx, cancel := context.WithTimeout(bg, 5*time.Second)
 	defer cancel()

@@ -203,16 +203,24 @@ func toDoc(e Event) mongoDoc {
 	}
 }
 
-// ensureIndexes creates the TTL index that ages out documents past the retention
-// window and the compound indexes the admin panel filters on (subsystem, user,
-// level — each paired with a descending time for recent-first scans).
+// ensureIndexes creates the compound indexes the admin panel filters on
+// (subsystem, user, level — each paired with a descending time for recent-first
+// scans) and, for a positive retention, a TTL index that ages out old documents.
+// A zero or negative retention means keep forever: it must NOT become
+// SetExpireAfterSeconds(0), which MongoDB would treat as "expire immediately" and
+// delete every log within a minute.
 func ensureIndexes(ctx context.Context, coll *mongo.Collection, retention time.Duration) error {
-	ttl := int32(retention / time.Second)
-	_, err := coll.Indexes().CreateMany(ctx, []mongo.IndexModel{
-		{Keys: bson.D{{Key: "ts", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(ttl)},
+	models := []mongo.IndexModel{
 		{Keys: bson.D{{Key: "subsystem", Value: 1}, {Key: "ts", Value: -1}}},
 		{Keys: bson.D{{Key: "user", Value: 1}, {Key: "ts", Value: -1}}},
 		{Keys: bson.D{{Key: "level", Value: 1}, {Key: "ts", Value: -1}}},
-	})
+	}
+	if retention > 0 {
+		models = append(models, mongo.IndexModel{
+			Keys:    bson.D{{Key: "ts", Value: 1}},
+			Options: options.Index().SetExpireAfterSeconds(int32(retention / time.Second)),
+		})
+	}
+	_, err := coll.Indexes().CreateMany(ctx, models)
 	return err
 }

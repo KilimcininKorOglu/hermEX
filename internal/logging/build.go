@@ -36,19 +36,28 @@ func (m *MultiSink) Write(e Event) {
 // and returns a stderr-only logger rather than an error. It returns the logger
 // and a close function (flush + disconnect) to run as a shutdown cleanup.
 //
-// database is the Mongo database holding the logs collection; spillDir, when set,
-// is where failed batches are buffered while Mongo is unreachable; retention is
-// the TTL window.
-func Build(mongoURI, database, spillDir string, retention time.Duration) (*Logger, func(context.Context) error) {
+// database is the Mongo database holding the logs collection (defaults to
+// "hermex" when empty); spillDir, when set, is where failed batches are buffered
+// while Mongo is unreachable; retentionDays is the TTL window in days — zero or
+// negative keeps logs forever (no TTL index), which is the safe default for an
+// unset value rather than expiring everything immediately.
+func Build(mongoURI, database, spillDir string, retentionDays int) (*Logger, func(context.Context) error) {
 	stderr := NewStderrSink(nil)
 	noop := func(context.Context) error { return nil }
 	if mongoURI == "" {
 		return New(stderr), noop
 	}
+	if database == "" {
+		database = "hermex"
+	}
 
 	spillPath := ""
 	if spillDir != "" {
 		spillPath = filepath.Join(spillDir, "logspill.jsonl")
+	}
+	var retention time.Duration
+	if retentionDays > 0 {
+		retention = time.Duration(retentionDays) * 24 * time.Hour
 	}
 	ms, err := NewMongoSink(mongoURI, database, spillPath, retention)
 	if err != nil {
