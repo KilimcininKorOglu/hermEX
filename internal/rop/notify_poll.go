@@ -55,6 +55,12 @@ func folderMetaSnapshot(st *objectstore.Store, folders []objectstore.FolderInfo)
 // modifies come first in folder-id order, then deletes in id order, for a
 // deterministic batch. Folder counts are message-derived, so a new subfolder does not
 // itself modify its parent here — its own create event signals it to the client.
+//
+// The modify trigger is count-only: a rename or other property change that leaves
+// (total, unread) unchanged produces no event (folderMeta tracks no display name), and
+// a folder move is the separate fnevObjectMoved increment. Both are deliberate
+// deferrals — the events this emits are the ones a client needs to keep the tree's
+// unread badges live.
 func detectFolderChanges(prev, cur map[int64]folderMeta) []notification {
 	var out []notification
 	ids := make([]int64, 0, len(cur))

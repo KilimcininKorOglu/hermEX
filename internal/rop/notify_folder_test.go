@@ -176,3 +176,72 @@ func TestWholeStoreFolderModifiedCounts(t *testing.T) {
 		t.Errorf("trailing bytes after the folder-modified RopNotify: %d", p.Remaining())
 	}
 }
+
+// TestWholeStoreMessageEmitsFolderModifiedAndMessageCreated pins the real Outlook
+// flow, which the type-isolated tests above cannot: a client registers created AND
+// modified together, so one message into the Inbox yields BOTH the folder-modified
+// that refreshes the tree's unread badge AND the message-created for the content
+// table, delivered in one drain. The hierarchy pass runs before the message sweep, so
+// the folder-modified comes first; this guards against a future reorder.
+func TestWholeStoreMessageEmitsFolderModifiedAndMessageCreated(t *testing.T) {
+	sess := NewSession(t.TempDir(), nil, "")
+	defer sess.Close()
+
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	st := sess.get(logonH).store
+
+	const ntypes = uint8(fnevObjectCreated | fnevObjectModified)
+	_, h = sess.Dispatch(buildRegisterNotification(0, 1, ntypes, 1, 0, 0), []uint32{logonH, 0xFFFFFFFF})
+	subH := h[1]
+
+	inbox := int64(mapi.PrivateFIDInbox)
+	inboxEID := uint64(mapi.MakeEIDEx(1, uint64(inbox)))
+	info, err := st.AppendMessage(inbox, []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0)
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	resp, _ := sess.Dispatch(nil, nil)
+	p := ext.NewPull(resp, ext.FlagUTF16)
+
+	// First: the folder-modified for the Inbox (the hierarchy pass precedes the sweep).
+	if id := mustU8(t, p, "RopId#1"); id != ropNotify {
+		t.Fatalf("first RopId = %#x, want RopNotify", id)
+	}
+	if got := mustU32(t, p, "handle#1"); got != subH {
+		t.Errorf("first NotificationHandle = %d, want %d", got, subH)
+	}
+	mustU8(t, p, "logon#1")
+	if nf := mustU16(t, p, "nflags#1"); nf != uint16(fnevObjectModified|nfHasTotal|nfHasUnread) {
+		t.Errorf("first event nflags = %#x, want folder-modified|hasTotal|hasUnread %#x", nf, fnevObjectModified|nfHasTotal|nfHasUnread)
+	}
+	if fid := mustU64(t, p, "folder#1"); fid != inboxEID {
+		t.Errorf("first event FolderId = %#x, want Inbox %#x", fid, inboxEID)
+	}
+	mustU16(t, p, "proptag count#1")
+	if total := mustU32(t, p, "total#1"); total != 1 {
+		t.Errorf("folder-modified total = %d, want 1", total)
+	}
+	mustU32(t, p, "unread#1")
+
+	// Second: the message-created for the delivered message.
+	if id := mustU8(t, p, "RopId#2"); id != ropNotify {
+		t.Fatalf("second RopId = %#x, want RopNotify (the message-created)", id)
+	}
+	mustU32(t, p, "handle#2")
+	mustU8(t, p, "logon#2")
+	if nf := mustU16(t, p, "nflags#2"); nf != uint16(fnevObjectCreated|nfByMessage) {
+		t.Errorf("second event nflags = %#x, want message-created|byMessage %#x", nf, fnevObjectCreated|nfByMessage)
+	}
+	if fid := mustU64(t, p, "folder#2"); fid != inboxEID {
+		t.Errorf("second event FolderId = %#x, want Inbox %#x", fid, inboxEID)
+	}
+	if mid := mustU64(t, p, "msg#2"); mid != uint64(mapi.MakeEIDEx(1, uint64(info.ID))) {
+		t.Errorf("second event MessageId = %#x, want the delivered message %#x", mid, uint64(mapi.MakeEIDEx(1, uint64(info.ID))))
+	}
+	mustU16(t, p, "proptag count#2")
+	if p.Remaining() != 0 {
+		t.Errorf("trailing bytes after the two notifications: %d (want exactly folder-modified + message-created)", p.Remaining())
+	}
+}
