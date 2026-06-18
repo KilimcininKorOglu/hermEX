@@ -763,8 +763,6 @@ func seekRowBookmarkResponse(t *testing.T, resp []byte) (invisible uint8, hasSou
 	return
 }
 
-
-
 // TestCreateBookmark creates a bookmark, seeks away, then seeks back via the bookmark.
 func TestCreateBookmark(t *testing.T) {
 	dir := t.TempDir()
@@ -809,13 +807,12 @@ func TestSeekRowBookmarkNotFound(t *testing.T) {
 
 	resp, _ := sess.Dispatch(buildSeekRowBookmark(0, []byte{0xFF, 0xFF}, 0), []uint32{tableH})
 	p := ext.NewPull(resp, ext.FlagUTF16)
-	mustU8(t, p, "ropId")   // ropSeekRowBookmark
+	mustU8(t, p, "ropId") // ropSeekRowBookmark
 	mustU8(t, p, "hindex")
 	if ec := mustU32(t, p, "ec"); ec != ecNotFound {
 		t.Errorf("SeekRowBookmark ec = %#x, want ecNotFound", ec)
 	}
 }
-
 
 // buildSingleROP builds a minimal single-opcode ROP request for ROPs that have no
 // body (or whose body is not consumed when returning ecNotSupported).
@@ -826,6 +823,7 @@ func buildSingleROP(ropID uint8, inIdx uint8) []byte {
 	b.Uint8(inIdx)
 	return b.Bytes()
 }
+
 // TestExpandCollapseUnsupported verifies expand/collapse ROPs return ecNotSupported
 // since uncategorized (flat) tables have no category state.
 func TestExpandCollapseUnsupported(t *testing.T) {

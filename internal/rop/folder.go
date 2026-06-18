@@ -29,16 +29,16 @@ const tableStatusComplete uint8 = 0x00
 // immutable lets a later RopRestrict widen back to the full set. QueryRows pages
 // over view, projecting the columns per row.
 type tableState struct {
-	kind        tableKind
-	columns     []mapi.PropTag
-	messages    []objectstore.MessageInfo // tableContents base rows
-	folders     []objectstore.FolderInfo  // tableHierarchy base rows
-	attachments []mapi.PropertyValues     // tableAttachment base rows (attachment property bags)
-	sortKeys    []sortKey                 // RopSortTable order; empty = store order
-	restriction *mapi.Restriction         // RopRestrict filter; nil = no filter
-	view        []int                     // base-row indices in display order; nil = identity
-	cursor      int
-	bookmarks   map[uint16]int // named cursor positions keyed by bookmark index
+	kind         tableKind
+	columns      []mapi.PropTag
+	messages     []objectstore.MessageInfo // tableContents base rows
+	folders      []objectstore.FolderInfo  // tableHierarchy base rows
+	attachments  []mapi.PropertyValues     // tableAttachment base rows (attachment property bags)
+	sortKeys     []sortKey                 // RopSortTable order; empty = store order
+	restriction  *mapi.Restriction         // RopRestrict filter; nil = no filter
+	view         []int                     // base-row indices in display order; nil = identity
+	cursor       int
+	bookmarks    map[uint16]int // named cursor positions keyed by bookmark index
 	nextBookmark uint16
 }
 
