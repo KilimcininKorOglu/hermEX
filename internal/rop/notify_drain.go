@@ -25,10 +25,10 @@ type queuedNotify struct {
 
 // poll detects mailbox changes for the session's subscriptions and drains the
 // resulting notifications into the Execute response. It mirrors the reference's
-// end-of-Execute notify drain (the reference ROP processor) but is sourced by polling the
-// shared store rather than an async push queue, since hermEX has no central store
-// daemon to push from (the internal spec §9). It runs after the ROP batch on
-// every Execute — including an empty one, which is how a wake-up Execute collects
+// end-of-Execute notify drain but is sourced by polling the shared store rather
+// than an async push queue, since hermEX has no central store daemon to push from
+// (the internal spec §9). It runs after the ROP batch on every Execute —
+// including an empty one, which is how a wake-up Execute collects
 // pending notifications — and is a no-op when the session has no subscriptions or
 // pending events.
 func (s *Session) poll(out *ext.Push) {
