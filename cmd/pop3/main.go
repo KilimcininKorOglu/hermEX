@@ -38,6 +38,7 @@ func main() {
 		log.Fatalf("hermex-pop3: directory unreachable: %v", err)
 	}
 	dir := directory.NewSQL(db)
+	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
 
 	addr := cfg.POP3Addr
 	if addr == "" {
@@ -47,7 +48,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("hermex-pop3: listen %s: %v", addr, err)
 	}
-	srv := &pop3.Server{Auth: dir, Hostname: cfg.Hostname}
+	srv := &pop3.Server{Auth: dir, Hostname: cfg.Hostname, Logger: logger}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()
 		if err != nil {
@@ -69,7 +70,6 @@ func main() {
 		log.Printf("hermex-pop3 listening on %s (implicit TLS)", cfg.POP3SAddr)
 	}
 
-	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
 	logger.Info(logging.System, "daemon.startup", logging.Fields{"daemon": "pop3", "addr": addr})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

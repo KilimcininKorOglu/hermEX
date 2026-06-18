@@ -15,6 +15,7 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/lifecycle"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -23,7 +24,8 @@ import (
 type Server struct {
 	Auth      directory.Authenticator
 	Hostname  string
-	TLSConfig *tls.Config // when non-nil, advertise (CAPA) and accept STLS
+	TLSConfig *tls.Config     // when non-nil, advertise (CAPA) and accept STLS
+	Logger    *logging.Logger // central activity log; nil disables logging
 
 	conns lifecycle.ConnGroup
 }
@@ -58,6 +60,21 @@ func (s *Server) handle(conn net.Conn) {
 	ok(w, "hermEX POP3 ready")
 
 	var user string
+	// event logs through the server's logger, reading the live user and connection
+	// (both change mid-session: user on login, conn on an STLS upgrade). A nil
+	// logger is a no-op.
+	event := func(level logging.Level, name string, f logging.Fields) {
+		s.Logger.Emit(logging.Event{
+			Level:      level,
+			Subsystem:  logging.POP3,
+			Name:       name,
+			User:       user,
+			RemoteAddr: conn.RemoteAddr().String(),
+			Fields:     f,
+		})
+	}
+	event(logging.LevelInfo, "conn.accept", logging.Fields{"tls": isTLS})
+
 	for {
 		line, err := tp.ReadLine()
 		if err != nil {
@@ -65,6 +82,10 @@ func (s *Server) handle(conn net.Conn) {
 		}
 		cmd, arg, _ := strings.Cut(line, " ")
 		cmd = strings.ToUpper(cmd)
+
+		// Per-command audit at debug level — the verb only, never the argument
+		// (PASS's argument is the password).
+		event(logging.LevelDebug, "command", logging.Fields{"cmd": cmd})
 
 		if mb == nil { // AUTHORIZATION state
 			switch cmd {
@@ -74,16 +95,19 @@ func (s *Server) handle(conn net.Conn) {
 			case "PASS":
 				path, authed := s.Auth.Authenticate(user, arg)
 				if user == "" || !authed {
+					event(logging.LevelWarn, "auth.fail", nil) // attempted login still in user
 					user = ""
 					errLine(w, "authentication failed")
 					continue
 				}
 				m, err := openMailbox(path)
 				if err != nil {
+					s.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.POP3, Name: "auth.fail", User: user, RemoteAddr: conn.RemoteAddr().String(), Err: err.Error()})
 					errLine(w, "mailbox unavailable")
 					continue
 				}
 				mb = m
+				event(logging.LevelInfo, "auth.ok", nil)
 				ok(w, fmt.Sprintf("%d messages", mb.count()))
 			case "CAPA":
 				s.writeCapa(w, isTLS)
@@ -93,6 +117,7 @@ func (s *Server) handle(conn net.Conn) {
 					continue
 				}
 				if tp.R.Buffered() > 0 {
+					event(logging.LevelWarn, "stls.injection", nil)
 					return // pipelined plaintext behind STLS; abort the connection
 				}
 				ok(w, "begin TLS negotiation")
@@ -105,6 +130,7 @@ func (s *Server) handle(conn net.Conn) {
 				tp = textproto.NewReader(bufio.NewReader(tc))
 				isTLS = true
 				user = "" // discard any USER given before TLS
+				event(logging.LevelInfo, "stls", nil)
 			case "QUIT":
 				ok(w, "bye")
 				return
