@@ -33,6 +33,9 @@ const (
 	ropResetTable            uint8 = 0x81
 	ropGetAttachmentTable    uint8 = 0x21
 	ropOpenAttachment        uint8 = 0x22
+	ropCreateAttachment      uint8 = 0x23
+	ropDeleteAttachment      uint8 = 0x24
+	ropSaveChangesAttachment uint8 = 0x25
 	ropOpenStream            uint8 = 0x2B
 	ropReadStream            uint8 = 0x2C
 	ropLogon                 uint8 = 0xFE
@@ -168,6 +171,18 @@ loop:
 			}
 		case ropOpenAttachment:
 			if !s.ropOpenAttachment(p, out, handles, hindex) {
+				break loop
+			}
+		case ropCreateAttachment:
+			if !s.ropCreateAttachment(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSaveChangesAttachment:
+			if !s.ropSaveChangesAttachment(p, out, handles, hindex) {
+				break loop
+			}
+		case ropDeleteAttachment:
+			if !s.ropDeleteAttachment(p, out, handles, hindex) {
 				break loop
 			}
 		case ropGetContentsTable:

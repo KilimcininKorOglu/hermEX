@@ -132,7 +132,7 @@ func TestInPlaceModifyBumpsChangeNumber(t *testing.T) {
 
 // TestOpenSaveNoEditKeepsChangeNumber guards the no-spurious-bump rule: opening a
 // message and saving it without any SetProperties must leave the change number
-// untouched (the reference's !b_touched early-out). A bump here would make every
+// untouched (the reference's untouched-message early-out). A bump here would make every
 // read-only open-then-save re-sync the message to every client.
 func TestOpenSaveNoEditKeepsChangeNumber(t *testing.T) {
 	dir := t.TempDir()

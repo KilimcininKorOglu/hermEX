@@ -121,6 +121,10 @@ func (s *Session) ropSetProperties(p *ext.Pull, out *ext.Push, handles []uint32,
 		for _, tv := range propvals {
 			obj.pendingProps.Set(tv.Tag, tv.Value)
 		}
+	case kindAttachWrite:
+		for _, tv := range propvals {
+			obj.attachW.pending.Set(tv.Tag, tv.Value)
+		}
 	default:
 		writeErr(out, ropSetProperties, hindex, ecError)
 		return true
@@ -205,16 +209,20 @@ func (s *Session) ropSaveChangesMessage(p *ext.Pull, out *ext.Push, handles []ui
 		return true
 	}
 	// An existing message opened for edit flushes its buffered property changes
-	// in place, reallocating the change number so ICS observes the edit. With no
-	// pending changes the save is a no-op success (no spurious change-number bump),
-	// matching the reference's !b_touched early-out.
+	// in place, reallocating the change number so ICS observes the edit. A pending
+	// property change or a touched flag (set when an attachment was added or
+	// deleted) bumps the change number; with neither, the save is a no-op success
+	// (no spurious bump), matching the reference's untouched-message early-out. An
+	// attachment-only change carries no pending properties, so ModifyMessageProperties
+	// runs with an empty bag and advances only the change number.
 	if obj.kind == kindMessage {
-		if len(obj.pendingProps) > 0 {
+		if len(obj.pendingProps) > 0 || obj.touched {
 			if err := obj.store.ModifyMessageProperties(obj.messageID, obj.pendingProps); err != nil {
 				writeErr(out, ropSaveChangesMessage, hindex, ecError)
 				return true
 			}
 			obj.pendingProps = nil
+			obj.touched = false
 		}
 		out.Uint8(ropSaveChangesMessage)
 		out.Uint8(hindex)

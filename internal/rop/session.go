@@ -26,7 +26,21 @@ const (
 	kindSync                         // an ICS/FastTransfer sync context
 	kindUploadMessage                // an ICS-imported message awaiting its body + save
 	kindFastUpload                   // a FastTransfer destination feeding an upload message
+	kindAttachWrite                  // a created attachment being filled (CreateAttachment → SaveChangesAttachment)
 )
+
+// attachWrite is an attachment created on an open message and accumulating its
+// properties before SaveChangesAttachment persists them. CreateAttachment inserts
+// the (empty) row up front so the attach number can be assigned and returned, then
+// SetProperties buffers the payload/filename into pending and SaveChangesAttachment
+// flushes it to the stored row. messageID is the parent so the parent can be
+// marked touched (its change number advances on the message's own save, not here).
+type attachWrite struct {
+	messageID    int64
+	attachmentID int64
+	attachNum    uint32
+	pending      mapi.PropertyValues
+}
 
 // object is a server-side MAPI object referenced by a uint32 handle. Fields are
 // populated per kind: a logon holds the open mailbox store, a folder its
@@ -40,6 +54,8 @@ type object struct {
 	table        *tableState                   // kindTable
 	messageID    int64                         // kindMessage
 	pendingProps mapi.PropertyValues           // kindMessage: in-place edits buffered until SaveChangesMessage
+	touched      bool                          // kindMessage: an attachment add/delete dirtied the message (bump CN on save)
+	attachW      *attachWrite                  // kindAttachWrite
 	stream       *streamState                  // kindStream
 	attachProps  mapi.PropertyValues           // kindAttachment
 	newMsg       *newMessageState              // kindNewMessage

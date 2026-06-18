@@ -1,8 +1,12 @@
 package rop
 
 import (
+	"errors"
+	"time"
+
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
 )
 
 // messageAttachmentBags reads a message's attachments as their property bags.
@@ -108,6 +112,119 @@ func (s *Session) ropOpenAttachment(p *ext.Pull, out *ext.Push, handles []uint32
 
 	out.Uint8(ropOpenAttachment)
 	out.Uint8(ohindex)
+	out.Uint32(ecSuccess)
+	return true
+}
+
+// ropCreateAttachment handles RopCreateAttachment ([MS-OXCMSG] 2.2.3.6): it
+// creates a new attachment on the open message and returns its assigned attach
+// number. The attachment row is inserted up front (with the opening properties
+// the reference stamps on a new attachment) so the number can be assigned and
+// returned now; the client then fills the payload via SetProperties and persists
+// it with SaveChangesAttachment. The input handle is the parent message; the
+// output handle receives the attachment object. v1 supports this only on an
+// opened (persisted) message — a not-yet-saved composed message has no store row
+// to attach to.
+func (s *Session) ropCreateAttachment(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	ohindex, e1 := p.Uint8() // OutputHandleIndex
+	if e1 != nil {
+		return false
+	}
+	msg := s.get(handleAt(handles, hindex))
+	if msg == nil || msg.kind != kindMessage || msg.store == nil {
+		writeErr(out, ropCreateAttachment, ohindex, ecNotSupported)
+		return true
+	}
+	now := mapi.UnixToNTTime(time.Now())
+	initial := mapi.PropertyValues{
+		{Tag: mapi.PrRenderingPosition, Value: int32(-1)}, // 0xFFFFFFFF: not rendered in the body
+		{Tag: mapi.PrCreationTime, Value: now},
+		{Tag: mapi.PrLastModificationTime, Value: now},
+	}
+	aid, num, err := msg.store.CreateAttachment(msg.messageID, initial)
+	if err != nil {
+		writeErr(out, ropCreateAttachment, ohindex, ecError)
+		return true
+	}
+	h := s.alloc(&object{
+		kind:    kindAttachWrite,
+		store:   msg.store,
+		attachW: &attachWrite{messageID: msg.messageID, attachmentID: aid, attachNum: num},
+	})
+	setHandle(handles, ohindex, h)
+
+	out.Uint8(ropCreateAttachment)
+	out.Uint8(ohindex)
+	out.Uint32(ecSuccess)
+	out.Uint32(num) // AttachmentID (= PidTagAttachNumber)
+	return true
+}
+
+// ropSaveChangesAttachment handles RopSaveChangesAttachment ([MS-OXCMSG] 2.2.3.8):
+// it flushes the attachment's buffered properties to its stored row. The handle
+// wiring is asymmetric with CreateAttachment and load-bearing: the common-header
+// handle resolves the parent MESSAGE, while the body's InputHandleIndex (ihindex2)
+// resolves the ATTACHMENT being saved. The save marks the parent message dirty so
+// its own SaveChangesMessage advances the change number — an attachment change is
+// observed by ICS only through the message's change number, which this ROP does
+// not itself bump.
+func (s *Session) ropSaveChangesAttachment(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	ihindex2, e1 := p.Uint8() // InputHandleIndex (indexes the attachment object)
+	_, e2 := p.Uint8()        // SaveFlags
+	if e1 != nil || e2 != nil {
+		return false
+	}
+	att := s.get(handleAt(handles, ihindex2))
+	if att == nil || att.kind != kindAttachWrite || att.attachW == nil || att.store == nil {
+		writeErr(out, ropSaveChangesAttachment, hindex, ecError)
+		return true
+	}
+	if len(att.attachW.pending) > 0 {
+		if err := att.store.SetAttachmentProperties(att.attachW.attachmentID, att.attachW.pending); err != nil {
+			writeErr(out, ropSaveChangesAttachment, hindex, ecError)
+			return true
+		}
+		att.attachW.pending = nil
+	}
+	// Mark the parent message (the common-header handle) dirty so SaveChangesMessage
+	// bumps its change number even when no top-level property changed.
+	if msg := s.get(handleAt(handles, hindex)); msg != nil && msg.kind == kindMessage {
+		msg.touched = true
+	}
+
+	out.Uint8(ropSaveChangesAttachment)
+	out.Uint8(hindex)
+	out.Uint32(ecSuccess)
+	return true
+}
+
+// ropDeleteAttachment handles RopDeleteAttachment ([MS-OXCMSG] 2.2.3.7): it
+// deletes the attachment the message holds at AttachmentId (its stored attach
+// number), reporting MAPI_E_NOT_FOUND when none exists there. The input handle is
+// the parent message; the response is the bare header. It marks the message dirty
+// so a following SaveChangesMessage advances the change number.
+func (s *Session) ropDeleteAttachment(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	attachID, e1 := p.Uint32() // AttachmentId (= PidTagAttachNumber)
+	if e1 != nil {
+		return false
+	}
+	msg := s.get(handleAt(handles, hindex))
+	if msg == nil || msg.kind != kindMessage || msg.store == nil {
+		writeErr(out, ropDeleteAttachment, hindex, ecError)
+		return true
+	}
+	if err := msg.store.DeleteAttachment(msg.messageID, attachID); err != nil {
+		if errors.Is(err, objectstore.ErrNotFound) {
+			writeErr(out, ropDeleteAttachment, hindex, ecNotFound)
+			return true
+		}
+		writeErr(out, ropDeleteAttachment, hindex, ecError)
+		return true
+	}
+	msg.touched = true
+
+	out.Uint8(ropDeleteAttachment)
+	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
 	return true
 }
