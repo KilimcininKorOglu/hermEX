@@ -107,6 +107,7 @@ const (
 // header-derived properties an imported message carries.
 const (
 	PrMessageClass        = PropTag(0x001A001F) // PtUnicode (PidTagMessageClass)
+	PrMessageClassA       = PropTag(0x001A001E) // PtString8 (PidTagMessageClass, ASCII — receive-folder table)
 	PrSubject             = PropTag(0x0037001F) // PtUnicode
 	PrSubjectPrefix       = PropTag(0x003D001F) // PtUnicode
 	PrNormalizedSubject   = PropTag(0x0E1D001F) // PtUnicode
