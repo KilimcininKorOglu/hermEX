@@ -108,7 +108,8 @@ type object struct {
 	msgCollector   *objectstore.MessageCollector // kindFastUpload: the body parser
 	sub            subscription                  // kindSubscription: the registered notification interest
 	subSnapshot    folderSnapshot                // kindSubscription (folder/message scope): the subscribed folder's poll baseline
-	subFolders     map[int64]folderSnapshot      // kindSubscription (whole-store): a poll baseline per content folder, refreshed as folders come and go
+	subFolders     map[int64]folderSnapshot      // kindSubscription (whole-store): a per-folder message baseline, refreshed as folders come and go
+	subFolderMeta  map[int64]folderMeta          // kindSubscription (whole-store): a per-folder (parent, total, unread) baseline for folder-hierarchy events
 }
 
 // newMessageState accumulates a message being composed over the ROP write

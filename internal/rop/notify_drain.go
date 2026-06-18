@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"hermex/internal/ext"
+	"hermex/internal/objectstore"
 )
 
 // notifyBufferCap bounds one Execute response's ROP buffer, matching the reference's
@@ -77,11 +78,12 @@ func (s *Session) pollFolder(o *object, folderID int64, prev folderSnapshot) fol
 	return snap
 }
 
-// enqueueWholeStore polls every content folder for a whole-store subscription,
-// keeping one snapshot per folder. A folder created since the last poll is diffed
-// against a nil baseline, so a message that arrives in it surfaces as a create; a
-// folder that has vanished is dropped from the baseline — its folder-level delete
-// event is a later increment, so here only its messages stop being polled.
+// enqueueWholeStore polls a whole-store subscription: first the folder hierarchy
+// (folders created, deleted, or with changed counts), then every content folder's
+// messages, keeping one message snapshot per folder. A folder created since the last
+// poll is diffed against a nil message baseline, so a message already in it surfaces
+// as a create; a folder that has vanished is dropped from the message baseline (its
+// folder-level delete was emitted by the hierarchy pass).
 func (s *Session) enqueueWholeStore(o *object) {
 	folders, err := o.store.ListFolders()
 	if err != nil {
@@ -90,6 +92,7 @@ func (s *Session) enqueueWholeStore(o *object) {
 	if o.subFolders == nil {
 		o.subFolders = make(map[int64]folderSnapshot, len(folders))
 	}
+	s.enqueueFolderHierarchy(o, folders)
 	live := make(map[int64]bool, len(folders))
 	for _, f := range folders {
 		live[f.ID] = true
@@ -100,6 +103,34 @@ func (s *Session) enqueueWholeStore(o *object) {
 			delete(o.subFolders, fid)
 		}
 	}
+}
+
+// enqueueFolderHierarchy diffs the whole-store subscription's folder-hierarchy
+// snapshot against the listed folders and enqueues every folder created, deleted, or
+// count-modified event the subscription's type bits select. Folder-hierarchy events
+// are a whole-store concern: Outlook registers a whole-store subscription to watch the
+// folder tree, so a folder-scoped subscription is deliberately not delivered a
+// folder-modified for its own folder (a parent-folder-scoped hierarchy interest is not
+// yet needed). On a store error the snapshot is kept so the next poll retries the diff
+// rather than losing a change.
+func (s *Session) enqueueFolderHierarchy(o *object, folders []objectstore.FolderInfo) {
+	cur, err := folderMetaSnapshot(o.store, folders)
+	if err != nil {
+		return
+	}
+	if o.subFolderMeta == nil {
+		// No registration baseline (defensive): seed without flooding the client.
+		o.subFolderMeta = cur
+		return
+	}
+	events := detectFolderChanges(o.subFolderMeta, cur)
+	for i := range events {
+		typeBit := uint8(events[i].flags) // the fnev type is the low byte; modifiers ride above it
+		if o.sub.matches(0, 0, typeBit) {
+			s.pending = append(s.pending, queuedNotify{handle: o.sub.handle, logonID: o.sub.logonID, n: events[i]})
+		}
+	}
+	o.subFolderMeta = cur
 }
 
 // drainNotifications serializes queued notifications into the response until the next

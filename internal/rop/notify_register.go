@@ -22,8 +22,9 @@ import (
 // existing message as an ObjectCreated. A folder- or message-scoped subscription
 // baselines and polls its one folder (the classifier filters per scope); a
 // whole-store subscription baselines every content folder and is polled across all of
-// them. Folder-hierarchy events (a folder itself created, deleted, or modified) are a
-// later increment; this delivers message events store-wide.
+// them. A whole-store subscription also baselines the folder hierarchy itself (each
+// folder's parent and message counts), so the first poll likewise reports no spurious
+// folder created/deleted/modified for the tree that existed at subscribe time.
 func (s *Session) ropRegisterNotification(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8()   // OutputHandleIndex
 	ntypes, e2 := p.Uint8()    // NotificationTypes (one byte; subscribable types fit 0x02..0x80)
@@ -80,6 +81,14 @@ func (s *Session) ropRegisterNotification(p *ext.Pull, out *ext.Push, handles []
 			}
 			obj.subFolders[f.ID] = snap
 		}
+		// Baseline the folder hierarchy too, so the first poll reports no spurious
+		// folder created/deleted/modified for the tree present at subscribe time.
+		meta, err := folderMetaSnapshot(parent.store, folders)
+		if err != nil {
+			writeErr(out, ropRegisterNotification, ohindex, ecError)
+			return true
+		}
+		obj.subFolderMeta = meta
 	} else {
 		snap, err := parent.store.FolderMessageChangeNumbers(folderID)
 		if err != nil {
