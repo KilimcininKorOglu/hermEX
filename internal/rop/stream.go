@@ -210,6 +210,10 @@ func (s *Session) ropReadStream(p *ext.Pull, out *ext.Push, handles []uint32, hi
 // buffer when the write runs past the end, then advances the cursor. The data is a
 // 16-bit-length-prefixed binary, so a single write carries at most 0xFFFF bytes.
 // The bytes are not yet staged to the parent — that happens at CommitStream.
+//
+// v1 reallocates the whole buffer on each past-end write, so streaming a large
+// property in 0xFFFF-byte chunks is O(n^2); acceptable for v1's small streams, but
+// a chunked-append/preallocate would be the fix if large stream writes appear.
 func (s *Session) ropWriteStream(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	data, e1 := p.BinShort()
 	if e1 != nil {
