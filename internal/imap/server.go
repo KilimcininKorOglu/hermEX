@@ -11,6 +11,7 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/lifecycle"
+	"hermex/internal/logging"
 	"hermex/internal/objectstore"
 )
 
@@ -33,9 +34,32 @@ const (
 type Server struct {
 	Auth      directory.Authenticator
 	Hostname  string
-	TLSConfig *tls.Config // when non-nil, advertise and accept STARTTLS
+	TLSConfig *tls.Config     // when non-nil, advertise and accept STARTTLS
+	Logger    *logging.Logger // central activity log; nil disables logging
 
 	conns lifecycle.ConnGroup
+}
+
+// event emits a log event for this connection through the server's logger, tagged
+// with the connection's current user and remote address. A nil logger is a no-op,
+// so call sites need no guard.
+func (c *conn) event(level logging.Level, name string, f logging.Fields) {
+	c.srv.Logger.Emit(logging.Event{
+		Level:      level,
+		Subsystem:  logging.IMAP,
+		Name:       name,
+		User:       c.user,
+		RemoteAddr: remoteHost(c.nc),
+		Fields:     f,
+	})
+}
+
+// remoteHost returns nc's remote address, or "" when unavailable.
+func remoteHost(nc net.Conn) string {
+	if nc == nil {
+		return ""
+	}
+	return nc.RemoteAddr().String()
 }
 
 // AddListener registers a listener (the plaintext and any implicit-TLS one) for
@@ -65,6 +89,7 @@ func (s *Server) handle(nc net.Conn) {
 		}
 	}()
 
+	c.event(logging.LevelInfo, "conn.accept", logging.Fields{"tls": c.isTLS})
 	c.untagged("OK [CAPABILITY %s] hermEX IMAP4rev1 ready", c.caps())
 	c.flush()
 
@@ -117,6 +142,10 @@ func (c *conn) dispatch(toks []token) {
 	}
 	name, _ := toks[1].str()
 	args := toks[2:]
+
+	// Per-command audit at debug level — the command name only, never its
+	// arguments (LOGIN/AUTHENTICATE arguments carry credentials).
+	c.event(logging.LevelDebug, "command", logging.Fields{"cmd": strings.ToUpper(name)})
 
 	switch strings.ToUpper(name) {
 	case "CAPABILITY":
@@ -252,17 +281,22 @@ func decodeSASLPlain(b64 string) (user, pass string, ok bool) {
 func (c *conn) finishAuth(tag, user, pass string) {
 	path, ok := c.srv.Auth.Authenticate(user, pass)
 	if !ok {
+		// Log the attempted login (an identifier, useful for spotting brute force);
+		// never the password.
+		c.srv.Logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.IMAP, Name: "auth.fail", User: user, RemoteAddr: remoteHost(c.nc)})
 		c.no(tag, "[AUTHENTICATIONFAILED] invalid credentials")
 		return
 	}
 	st, err := objectstore.Open(path)
 	if err != nil {
+		c.srv.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.IMAP, Name: "auth.fail", User: user, RemoteAddr: remoteHost(c.nc), Err: err.Error()})
 		c.no(tag, "mailbox unavailable")
 		return
 	}
 	c.st = st
 	c.user = user
 	c.state = stateAuth
+	c.event(logging.LevelInfo, "auth.ok", nil)
 	c.ok(tag, "[CAPABILITY "+c.caps()+"] LOGIN completed")
 }
 
@@ -292,6 +326,7 @@ func (c *conn) cmdStartTLS(tag string) {
 		// session without replying so the smuggled command never runs. Setting
 		// stateLogout breaks the dispatch loop — a bare return here would only
 		// leave cmdStartTLS and let handle read the injected command next.
+		c.event(logging.LevelWarn, "starttls.injection", nil)
 		c.state = stateLogout
 		return
 	}
@@ -306,6 +341,7 @@ func (c *conn) cmdStartTLS(tag string) {
 	c.bw = bufio.NewWriter(tc)
 	c.rd = &commandReader{br: bufio.NewReader(tc), bw: c.bw}
 	c.isTLS = true
+	c.event(logging.LevelInfo, "starttls", nil)
 }
 
 // --- mailbox selection ---

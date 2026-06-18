@@ -38,6 +38,7 @@ func main() {
 		log.Fatalf("hermex-imap: directory unreachable: %v", err)
 	}
 	dir := directory.NewSQL(db)
+	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
 
 	addr := cfg.IMAPAddr
 	if addr == "" {
@@ -47,7 +48,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("hermex-imap: listen %s: %v", addr, err)
 	}
-	srv := &imap.Server{Auth: dir, Hostname: cfg.Hostname}
+	srv := &imap.Server{Auth: dir, Hostname: cfg.Hostname, Logger: logger}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()
 		if err != nil {
@@ -69,7 +70,6 @@ func main() {
 		log.Printf("hermex-imap listening on %s (implicit TLS)", cfg.IMAPSAddr)
 	}
 
-	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
 	logger.Info(logging.System, "daemon.startup", logging.Fields{"daemon": "imap", "addr": addr})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
