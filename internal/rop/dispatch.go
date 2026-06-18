@@ -66,6 +66,7 @@ const (
 	ropGetReceiveFolder            uint8 = 0x27
 	ropGetReceiveFolderTable       uint8 = 0x68
 	ropGetStoreState               uint8 = 0x7B
+	ropNotify                      uint8 = 0x2A
 )
 
 // MAPI return codes ([MS-OXCDATA] 2.4.1) carried in a ROP response ReturnValue.
