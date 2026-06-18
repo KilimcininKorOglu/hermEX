@@ -20,7 +20,7 @@ PKG ?= ./internal/... ./cmd/...
 RUN ?=
 RUNFLAG := $(if $(RUN),-run $(RUN),)
 
-.PHONY: all build test test-host vet fmt fmt-check gate up down rebuild clean help
+.PHONY: all build test test-host test-race vet fmt fmt-check gate up down rebuild clean help
 
 all: build
 
@@ -40,6 +40,10 @@ test:
 ## test-host: host quick-feedback test run (DB-backed tests skip; same PKG/RUN)
 test-host:
 	go test -count=1 $(RUNFLAG) $(PKG)
+
+## test-race: race-detector test run in the dev container (same PKG/RUN); needs cgo
+test-race:
+	$(COMPOSE) exec -T -e CGO_ENABLED=1 dev go test -race -count=1 $(RUNFLAG) $(PKG)
 
 ## vet: go vet in the dev container
 vet:
