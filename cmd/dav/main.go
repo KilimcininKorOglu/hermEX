@@ -38,18 +38,18 @@ func main() {
 		log.Fatalf("hermex-dav: directory unreachable: %v", err)
 	}
 	dir := directory.NewSQL(db)
+	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
 
 	srv := dav.NewServer(dir, dir, cfg.Hostname)
 	addr := cfg.DAVAddr
 	if addr == "" {
 		addr = ":8080"
 	}
-	hs, err := serve.New(addr, srv.Handler(), cfg)
+	hs, err := serve.New(addr, srv.Handler(), cfg, logger, logging.DAV)
 	if err != nil {
 		log.Fatalf("hermex-dav: %v", err)
 	}
 
-	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
 	logger.Info(logging.System, "daemon.startup", logging.Fields{"daemon": "dav", "addr": addr})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

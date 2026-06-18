@@ -39,18 +39,18 @@ func main() {
 		log.Fatalf("hermex-mapi: directory unreachable: %v", err)
 	}
 	dir := directory.NewSQL(db)
+	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
 
 	srv := mapihttp.NewServer(dir, dir, cfg.Hostname)
 	addr := cfg.MapiAddr
 	if addr == "" {
 		addr = ":8080"
 	}
-	hs, err := serve.New(addr, srv.Handler(), cfg)
+	hs, err := serve.New(addr, srv.Handler(), cfg, logger, logging.MAPI)
 	if err != nil {
 		log.Fatalf("hermex-mapi: %v", err)
 	}
 
-	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
 	logger.Info(logging.System, "daemon.startup", logging.Fields{"daemon": "mapihttp", "addr": addr})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

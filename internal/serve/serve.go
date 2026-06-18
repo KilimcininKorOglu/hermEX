@@ -12,6 +12,7 @@ import (
 	"net/http"
 
 	"hermex/internal/config"
+	"hermex/internal/logging"
 )
 
 // Server is a bound HTTP server ready to start and shut down gracefully. It
@@ -25,8 +26,10 @@ type Server struct {
 
 // New binds addr and returns a Server ready to Start, terminating TLS when cfg
 // supplies a certificate and serving plaintext otherwise. Binding eagerly here
-// surfaces an address-in-use error before the daemon's run loop begins.
-func New(addr string, h http.Handler, cfg *config.Config) (*Server, error) {
+// surfaces an address-in-use error before the daemon's run loop begins. Every
+// request is logged through logger under subsystem (method/path/status/duration/
+// client/user/request-id); a nil logger disables request logging.
+func New(addr string, h http.Handler, cfg *config.Config, logger *logging.Logger, subsystem logging.Subsystem) (*Server, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
@@ -39,7 +42,7 @@ func New(addr string, h http.Handler, cfg *config.Config) (*Server, error) {
 		}
 		ln = tls.NewListener(ln, tc)
 	}
-	return &Server{httpSrv: &http.Server{Handler: h}, ln: ln}, nil
+	return &Server{httpSrv: &http.Server{Handler: logMiddleware(h, logger, subsystem)}, ln: ln}, nil
 }
 
 // Addr reports the bound listen address, including the resolved port when addr

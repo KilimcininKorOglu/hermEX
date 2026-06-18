@@ -37,6 +37,7 @@ func main() {
 		log.Fatalf("hermex-webmail: directory unreachable: %v", err)
 	}
 	dir := directory.NewSQL(db)
+	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
 
 	srv, err := webmail.NewServer(dir, dir, cfg.Hostname)
 	if err != nil {
@@ -46,12 +47,11 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
-	hs, err := serve.New(addr, srv.Handler(), cfg)
+	hs, err := serve.New(addr, srv.Handler(), cfg, logger, logging.Webmail)
 	if err != nil {
 		log.Fatalf("hermex-webmail: %v", err)
 	}
 
-	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
 	logger.Info(logging.System, "daemon.startup", logging.Fields{"daemon": "webmail", "addr": addr})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

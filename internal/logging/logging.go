@@ -72,6 +72,7 @@ const (
 	SMIME      Subsystem = "smime"
 	TLS        Subsystem = "tls"
 	Webmail    Subsystem = "webmail"
+	Gateway    Subsystem = "gateway"
 	Admin      Subsystem = "admin"
 	Store      Subsystem = "store"
 	Directory  Subsystem = "directory"

@@ -68,15 +68,17 @@ func main() {
 	// config is constructed rather than loaded.
 	cfg := &config.Config{TLSCert: os.Getenv("HERMEX_TLS_CERT"), TLSKey: os.Getenv("HERMEX_TLS_KEY")}
 	addr := env("HERMEX_GATEWAY_ADDR", ":8080")
-	hs, err := serve.New(addr, h, cfg)
-	if err != nil {
-		log.Fatalf("hermex-gateway: %v", err)
-	}
 
 	// The gateway loads no shared config, so its central-logging settings come from
 	// the environment like the rest of its configuration.
 	retentionDays, _ := strconv.Atoi(os.Getenv("HERMEX_LOG_RETENTION_DAYS"))
 	logger, logClose := logging.Build(os.Getenv("HERMEX_LOG_MONGO_URI"), os.Getenv("HERMEX_LOG_DATABASE"), os.Getenv("HERMEX_LOG_SPILL_DIR"), retentionDays)
+
+	hs, err := serve.New(addr, h, cfg, logger, logging.Gateway)
+	if err != nil {
+		log.Fatalf("hermex-gateway: %v", err)
+	}
+
 	logger.Info(logging.System, "daemon.startup", logging.Fields{"daemon": "gateway", "addr": addr})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

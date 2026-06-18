@@ -15,10 +15,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"hermex/internal/config"
+	"hermex/internal/logging"
 )
 
 func okHandler() http.Handler {
@@ -30,7 +33,7 @@ func okHandler() http.Handler {
 // TestServePlaintext proves that with no certificate configured New falls back
 // to plaintext HTTP (backward compatible with the pre-TLS daemons).
 func TestServePlaintext(t *testing.T) {
-	hs, err := New("127.0.0.1:0", okHandler(), &config.Config{}) // TLS disabled
+	hs, err := New("127.0.0.1:0", okHandler(), &config.Config{}, nil, logging.System) // TLS disabled
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +61,7 @@ func TestServeTLS(t *testing.T) {
 	certPath, keyPath := writeSelfSignedCert(t, dir)
 	cfg := &config.Config{TLSCert: certPath, TLSKey: keyPath}
 
-	hs, err := New("127.0.0.1:0", okHandler(), cfg)
+	hs, err := New("127.0.0.1:0", okHandler(), cfg, nil, logging.System)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +114,7 @@ func TestServerGracefulDrain(t *testing.T) {
 		<-releaseHandler
 		io.WriteString(w, "drained")
 	})
-	hs, err := New("127.0.0.1:0", h, &config.Config{})
+	hs, err := New("127.0.0.1:0", h, &config.Config{}, nil, logging.System)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,6 +199,97 @@ func TestTLSListener(t *testing.T) {
 
 	if _, err := TLSListener("127.0.0.1:0", &config.Config{}); err == nil {
 		t.Error("TLSListener without a certificate should error")
+	}
+}
+
+// captureSink records every event the logger emits, for asserting the request log.
+type captureSink struct {
+	mu     sync.Mutex
+	events []logging.Event
+}
+
+func (c *captureSink) Write(e logging.Event) {
+	c.mu.Lock()
+	c.events = append(c.events, e)
+	c.mu.Unlock()
+}
+
+func (c *captureSink) last() (logging.Event, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.events) == 0 {
+		return logging.Event{}, false
+	}
+	return c.events[len(c.events)-1], true
+}
+
+// TestRequestLoggingEmitsEvent proves the serve middleware records one structured
+// event per request — method, path, status (and a 4xx level), the presented
+// Basic-auth user, the real client from X-Forwarded-For, and the inbound request
+// id — and that the password never reaches the event. This is the seam the central
+// log uses to reconstruct who did what over HTTP.
+func TestRequestLoggingEmitsEvent(t *testing.T) {
+	sink := &captureSink{}
+	logger := logging.New(sink)
+	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot) // a 4xx, to assert the warn level
+	})
+	hs, err := New("127.0.0.1:0", h, &config.Config{}, logger, logging.Webmail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go hs.Start()
+	defer hs.Shutdown(context.Background())
+
+	req, _ := http.NewRequest(http.MethodGet, "http://"+hs.Addr().String()+"/mail/inbox", nil)
+	req.SetBasicAuth("alice@hermex.test", "hunter2")
+	req.Header.Set("X-Forwarded-For", "203.0.113.7, 10.0.0.1")
+	req.Header.Set("X-Request-Id", "req-123")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	resp.Body.Close()
+
+	// Emit runs after ServeHTTP returns, which can lag the client's response; poll
+	// briefly for the (synchronous) sink to receive it.
+	var e logging.Event
+	for range 50 {
+		if got, ok := sink.last(); ok {
+			e = got
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if e.Name != "http.request" {
+		t.Fatalf("event name = %q, want http.request (middleware did not log)", e.Name)
+	}
+	if e.Subsystem != logging.Webmail {
+		t.Errorf("subsystem = %q, want webmail", e.Subsystem)
+	}
+	if e.User != "alice@hermex.test" {
+		t.Errorf("user = %q, want alice@hermex.test", e.User)
+	}
+	if e.RemoteAddr != "203.0.113.7" {
+		t.Errorf("remote = %q, want the first X-Forwarded-For hop 203.0.113.7", e.RemoteAddr)
+	}
+	if e.RequestID != "req-123" {
+		t.Errorf("request id = %q, want the inbound req-123", e.RequestID)
+	}
+	if e.Fields["method"] != http.MethodGet || e.Fields["path"] != "/mail/inbox" {
+		t.Errorf("method/path = %v/%v, want GET /mail/inbox", e.Fields["method"], e.Fields["path"])
+	}
+	if e.Fields["status"] != http.StatusTeapot {
+		t.Errorf("status = %v, want %d", e.Fields["status"], http.StatusTeapot)
+	}
+	if e.Level != logging.LevelWarn {
+		t.Errorf("level = %v, want warn for a 4xx response", e.Level)
+	}
+	// The password must never appear anywhere in the rendered event.
+	var rendered strings.Builder
+	logging.NewStderrSink(&rendered).Write(e)
+	if strings.Contains(rendered.String(), "hunter2") {
+		t.Error("the request password leaked into the logged event")
 	}
 }
 
