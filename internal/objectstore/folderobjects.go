@@ -57,3 +57,31 @@ func (s *Store) FolderMaxChangeNumber(folderID int64) (uint64, error) {
 	}
 	return uint64(max.Int64), nil
 }
+
+// FolderMessageChangeNumbers returns each live, non-associated message's objectstore
+// id mapped to its latest modification counter — the per-message snapshot a
+// notification poll diffs against. Against a prior snapshot: a new id is a create, a
+// vanished id a delete, and a changed counter a modify. The counter is
+// MAX(change_number, read_cn): both columns draw from the one mailbox change-number
+// counter, but a read/unread flip advances read_cn (not change_number), so taking
+// the max lets the poll see a read-state change as a modify too. (Neither counter
+// advances on a hard delete — the store keeps no tombstone — so deletes are detected
+// by the id's absence, matching FolderMaxChangeNumber's contract.)
+func (s *Store) FolderMessageChangeNumbers(folderID int64) (map[int64]uint64, error) {
+	rows, err := s.objdb.Query(
+		`SELECT message_id, MAX(change_number, COALESCE(read_cn, 0)) FROM messages
+		 WHERE parent_fid=? AND is_deleted=0 AND is_associated=0`, folderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[int64]uint64)
+	for rows.Next() {
+		var id, cn int64
+		if err := rows.Scan(&id, &cn); err != nil {
+			return nil, err
+		}
+		out[id] = uint64(cn)
+	}
+	return out, rows.Err()
+}
