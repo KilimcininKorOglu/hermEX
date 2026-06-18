@@ -42,6 +42,11 @@ const (
 	ropOpenEmbeddedMessage   uint8 = 0x46
 	ropOpenStream            uint8 = 0x2B
 	ropReadStream            uint8 = 0x2C
+	ropWriteStream           uint8 = 0x2D
+	ropSeekStream            uint8 = 0x2E
+	ropSetStreamSize         uint8 = 0x2F
+	ropCommitStream          uint8 = 0x5D
+	ropGetStreamSize         uint8 = 0x5E
 	ropLogon                 uint8 = 0xFE
 	ropCreateFolder          uint8 = 0x1C
 	ropDeleteFolder          uint8 = 0x1D
@@ -60,6 +65,7 @@ const (
 	ecNotFound     uint32 = 0x8004010F // MAPI_E_NOT_FOUND (no such folder/object)
 	ecNotSupported uint32 = 0x80040102 // MAPI_E_NO_SUPPORT (unsupported request)
 	ecAccessDenied uint32 = 0x80070005 // MAPI_E_NO_ACCESS (e.g. setting the in-conflict status bit)
+	ecInvalidParam uint32 = 0x80070057 // MAPI_E_INVALID_PARAMETER (e.g. a bad stream-seek origin)
 )
 
 // Dispatch parses the request ROP list and returns the response ROP bytes plus
@@ -268,6 +274,26 @@ loop:
 			}
 		case ropReadStream:
 			if !s.ropReadStream(p, out, handles, hindex) {
+				break loop
+			}
+		case ropWriteStream:
+			if !s.ropWriteStream(p, out, handles, hindex) {
+				break loop
+			}
+		case ropCommitStream:
+			if !s.ropCommitStream(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSeekStream:
+			if !s.ropSeekStream(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSetStreamSize:
+			if !s.ropSetStreamSize(p, out, handles, hindex) {
+				break loop
+			}
+		case ropGetStreamSize:
+			if !s.ropGetStreamSize(p, out, handles, hindex) {
 				break loop
 			}
 		case ropSynchronizationConfigure:
