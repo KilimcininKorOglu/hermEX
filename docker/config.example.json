@@ -10,5 +10,5 @@
   "mongo_uri": "mongodb://mongo:27017",
   "log_database": "hermex",
   "log_retention_days": 0,
-  "log_spill_dir": ""
+  "log_spill_dir": "/data/logspill"
 }

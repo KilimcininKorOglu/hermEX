@@ -77,7 +77,9 @@ services:
       db:
         condition: service_healthy
       mongo:
-        condition: service_healthy
+        # Ordering only, not a health gate: the log sink self-heals (spills to disk
+        # and reconnects) if Mongo is not yet up, so mail must never wait on it.
+        condition: service_started
     restart: unless-stopped
 
   pop3:
@@ -95,7 +97,9 @@ services:
       db:
         condition: service_healthy
       mongo:
-        condition: service_healthy
+        # Ordering only, not a health gate: the log sink self-heals (spills to disk
+        # and reconnects) if Mongo is not yet up, so mail must never wait on it.
+        condition: service_started
     restart: unless-stopped
 
   imap:
@@ -113,7 +117,9 @@ services:
       db:
         condition: service_healthy
       mongo:
-        condition: service_healthy
+        # Ordering only, not a health gate: the log sink self-heals (spills to disk
+        # and reconnects) if Mongo is not yet up, so mail must never wait on it.
+        condition: service_started
     restart: unless-stopped
 
   webmail:
@@ -131,7 +137,9 @@ services:
       db:
         condition: service_healthy
       mongo:
-        condition: service_healthy
+        # Ordering only, not a health gate: the log sink self-heals (spills to disk
+        # and reconnects) if Mongo is not yet up, so mail must never wait on it.
+        condition: service_started
     restart: unless-stopped
 
   dav:
@@ -149,7 +157,9 @@ services:
       db:
         condition: service_healthy
       mongo:
-        condition: service_healthy
+        # Ordering only, not a health gate: the log sink self-heals (spills to disk
+        # and reconnects) if Mongo is not yet up, so mail must never wait on it.
+        condition: service_started
     restart: unless-stopped
 
   activesync:
@@ -167,7 +177,9 @@ services:
       db:
         condition: service_healthy
       mongo:
-        condition: service_healthy
+        # Ordering only, not a health gate: the log sink self-heals (spills to disk
+        # and reconnects) if Mongo is not yet up, so mail must never wait on it.
+        condition: service_started
     restart: unless-stopped
 
   ews:
@@ -185,7 +197,9 @@ services:
       db:
         condition: service_healthy
       mongo:
-        condition: service_healthy
+        # Ordering only, not a health gate: the log sink self-heals (spills to disk
+        # and reconnects) if Mongo is not yet up, so mail must never wait on it.
+        condition: service_started
     restart: unless-stopped
 
   mapi:
@@ -203,7 +217,9 @@ services:
       db:
         condition: service_healthy
       mongo:
-        condition: service_healthy
+        # Ordering only, not a health gate: the log sink self-heals (spills to disk
+        # and reconnects) if Mongo is not yet up, so mail must never wait on it.
+        condition: service_started
     restart: unless-stopped
 
   # Single-FQDN front door: reverse-proxies to the HTTP daemons by path prefix so
@@ -222,6 +238,7 @@ services:
       - HERMEX_TLS_CERT=/config/tls/cert.pem
       - HERMEX_TLS_KEY=/config/tls/key.pem
       - HERMEX_LOG_MONGO_URI=mongodb://mongo:27017
+      - HERMEX_LOG_SPILL_DIR=/data/logspill
     volumes:
       - ./docker-data/tls:/config/tls:ro
     ports:

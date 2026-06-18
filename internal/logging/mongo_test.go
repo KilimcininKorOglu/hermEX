@@ -17,6 +17,12 @@ type inserterFunc func(context.Context, []any) error
 
 func (f inserterFunc) InsertMany(ctx context.Context, docs []any) error { return f(ctx, docs) }
 
+// readyConn adapts an already-usable inserter to a connector that connects on the
+// first call, for tests that inject a fake inserter instead of a live store.
+func readyConn(ins inserter) connector {
+	return func(context.Context) (inserter, error) { return ins, nil }
+}
+
 // fakeInserter records every document handed to InsertMany.
 type fakeInserter struct {
 	mu    sync.Mutex
@@ -42,7 +48,7 @@ func (f *fakeInserter) totals() (calls, docs int) {
 // the inserter — Close drains the buffer and makes a final flush.
 func TestMongoSinkFlushesBufferedEventsOnClose(t *testing.T) {
 	fi := &fakeInserter{}
-	s := newAsyncSink(fi, "")
+	s := newAsyncSink(readyConn(fi), "")
 	const n = 10
 	for range n {
 		s.Write(Event{Subsystem: IMAP, Name: "conn.accept"})
@@ -70,7 +76,7 @@ func TestMongoSinkWriteNeverBlocks(t *testing.T) {
 		<-block
 		return nil
 	})
-	s := newAsyncSink(stalled, "")
+	s := newAsyncSink(readyConn(stalled), "")
 
 	const flood = mongoBufferSize + mongoBatchSize + 5000
 	done := make(chan struct{})
@@ -186,6 +192,9 @@ func TestMongoSinkNoTTLWhenRetentionZero(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewMongoSink: %v", err)
 	}
+	// The connection (and its indexes) are established lazily on the first write,
+	// so log an event before closing to make the index set observable.
+	sink.Write(Event{Time: time.Now().UTC(), Level: LevelInfo, Subsystem: System, Name: "startup"})
 	ctx, cancel := context.WithTimeout(bg, 5*time.Second)
 	defer cancel()
 	if err := sink.Close(ctx); err != nil {

@@ -32,6 +32,14 @@ func (c collInserter) InsertMany(ctx context.Context, docs []any) error {
 	return err
 }
 
+// connector establishes (and validates) the connection to the log store and
+// returns the inserter to write through. The writer goroutine calls it lazily and
+// retries it on every flush until it first succeeds, so a sink whose store is down
+// at startup keeps buffering to disk and self-heals when the store comes up —
+// logging never blocks a daemon, and no events are lost to a store that is merely
+// late to start.
+type connector func(ctx context.Context) (inserter, error)
+
 // MongoSink writes events to MongoDB in batches from one background goroutine.
 // Write never blocks: when the buffer is full the event is dropped and counted,
 // so logging can never stall a protocol hot path. It satisfies Sink.
@@ -40,52 +48,58 @@ type MongoSink struct {
 	closing chan struct{}
 	closed  chan struct{}
 	dropped atomic.Uint64
-	ins     inserter
-	client  *mongo.Client // nil in unit tests that inject an inserter
+	connect connector     // opens/validates the store connection; retried until it succeeds
+	ins     inserter      // run()-owned; nil until the first successful connect
+	client  *mongo.Client // nil in unit tests that inject a connector; Close disconnects it
 
-	// Degradation: when an InsertMany fails the batch is appended to spillPath, and
-	// the next successful write replays it. spillPath/hasSpill are touched only by
-	// the single run() goroutine, so they need no synchronization.
+	// Degradation: when a write fails, or the store is not yet reachable, the batch
+	// is appended to spillPath and a later flush replays it. spillPath/hasSpill are
+	// touched only by the single run() goroutine, so they need no synchronization.
 	spillPath string
 	hasSpill  bool
 }
 
-// NewMongoSink connects to uri, ensures the log collection's indexes (a TTL index
-// enforcing the retention window plus indexes on the admin panel's filter keys),
-// and starts the background writer. The log collection is "logs" in database.
-// spillPath is the local file failed batches are appended to while MongoDB is
-// unreachable (empty disables the spill — events are then dropped on failure).
+// NewMongoSink prepares a sink for the log collection "logs" in database at uri and
+// starts the background writer. It returns an error only for a permanently broken
+// (malformed) URI — a store that is merely unreachable is NOT an error: mongo.Connect
+// is lazy, so the sink starts, spills to disk, and connects (Ping + index creation)
+// on the first flush that finds the store up. This keeps a daemon serving even when
+// the log store is down at boot. spillPath is the local file batches are appended to
+// while the store is unreachable (empty disables the spill — events drop on failure).
 func NewMongoSink(uri, database, spillPath string, retention time.Duration) (*MongoSink, error) {
 	client, err := mongo.Connect(options.Client().ApplyURI(uri))
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), mongoWriteTimeout)
-	defer cancel()
-	if err := client.Ping(ctx, nil); err != nil {
-		client.Disconnect(context.Background())
-		return nil, err
-	}
 	coll := client.Database(database).Collection("logs")
-	if err := ensureIndexes(ctx, coll, retention); err != nil {
-		client.Disconnect(context.Background())
-		return nil, err
+	// Ping and index creation are deferred to the writer goroutine so a store that
+	// is down at startup does not fail construction. ensureIndexes is idempotent, so
+	// running it on the first reachable flush is safe; every daemon logs a startup
+	// event, so the indexes are created promptly in practice.
+	connect := func(ctx context.Context) (inserter, error) {
+		if err := client.Ping(ctx, nil); err != nil {
+			return nil, err
+		}
+		if err := ensureIndexes(ctx, coll, retention); err != nil {
+			return nil, err
+		}
+		return collInserter{coll: coll}, nil
 	}
-	s := newAsyncSink(collInserter{coll: coll}, spillPath)
+	s := newAsyncSink(connect, spillPath)
 	s.client = client
 	return s, nil
 }
 
-// newAsyncSink starts the buffered writer over ins, spilling failed batches to
-// spillPath. It is split out from NewMongoSink so the buffering and spill can be
-// tested with a fake inserter. A spill file left by a previous run is replayed on
-// the first successful write.
-func newAsyncSink(ins inserter, spillPath string) *MongoSink {
+// newAsyncSink starts the buffered writer that connects through connect and spills
+// failed batches to spillPath. It is split out from NewMongoSink so the buffering,
+// reconnection, and spill can be tested with a fake connector. A spill file left by
+// a previous run is replayed on the first flush that reaches the store.
+func newAsyncSink(connect connector, spillPath string) *MongoSink {
 	s := &MongoSink{
 		in:        make(chan Event, mongoBufferSize),
 		closing:   make(chan struct{}),
 		closed:    make(chan struct{}),
-		ins:       ins,
+		connect:   connect,
 		spillPath: spillPath,
 	}
 	s.hasSpill = spillFileHasData(spillPath)
@@ -114,22 +128,38 @@ func (s *MongoSink) run() {
 	batch := make([]Event, 0, mongoBatchSize)
 
 	flush := func() {
-		if len(batch) == 0 {
+		// Nothing buffered and nothing spilled — no reason to touch the store.
+		if len(batch) == 0 && !s.hasSpill {
 			return
 		}
-		docs := make([]any, len(batch))
-		for i, e := range batch {
-			docs[i] = toDoc(e)
-		}
 		ctx, cancel := context.WithTimeout(context.Background(), mongoWriteTimeout)
-		err := s.ins.InsertMany(ctx, docs)
-		cancel()
-		if err != nil {
-			s.spill(batch) // MongoDB unreachable — preserve the batch on disk
-		} else {
-			s.replaySpill() // MongoDB is up — drain anything spilled earlier
+		defer cancel()
+		// Lazily open the connection; while the store is down this fails, so the
+		// batch is spilled and the connection is retried on the next flush.
+		if s.ins == nil {
+			ins, err := s.connect(ctx)
+			if err != nil {
+				if len(batch) > 0 {
+					s.spill(batch)
+					batch = batch[:0]
+				}
+				return
+			}
+			s.ins = ins
 		}
-		batch = batch[:0]
+		if len(batch) > 0 {
+			docs := make([]any, len(batch))
+			for i, e := range batch {
+				docs[i] = toDoc(e)
+			}
+			if err := s.ins.InsertMany(ctx, docs); err != nil {
+				s.spill(batch) // transient write failure — preserve and replay later
+				batch = batch[:0]
+				return
+			}
+			batch = batch[:0]
+		}
+		s.replaySpill() // connected and caught up — drain anything spilled earlier
 	}
 
 	for {

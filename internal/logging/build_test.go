@@ -37,12 +37,14 @@ func TestBuildStderrOnlyWhenNoMongo(t *testing.T) {
 	}
 }
 
-// TestBuildFallsBackOnUnreachableMongo proves logging never blocks a daemon from
-// starting: a bad Mongo URI yields a working stderr logger, not an error.
-func TestBuildFallsBackOnUnreachableMongo(t *testing.T) {
+// TestBuildFallsBackOnBadURI proves logging never blocks a daemon from starting: a
+// permanently broken (malformed) Mongo URI yields a working stderr logger, not an
+// error. A valid-but-unreachable URI is different — that sink is created and
+// self-heals (see TestConnectFailureSpillsThenRecovers), so it does not fall back.
+func TestBuildFallsBackOnBadURI(t *testing.T) {
 	log, closeFn := logging.Build("http://invalid", "db", "", 30)
 	if log == nil {
-		t.Fatal("Build returned a nil logger when Mongo was unavailable")
+		t.Fatal("Build returned a nil logger for a malformed Mongo URI")
 	}
 	log.Info(logging.System, "startup", nil) // stderr path, must not panic
 	if err := closeFn(); err != nil {

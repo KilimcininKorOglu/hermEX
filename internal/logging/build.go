@@ -2,6 +2,7 @@ package logging
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"time"
 )
@@ -59,7 +60,13 @@ func Build(mongoURI, database, spillDir string, retentionDays int) (*Logger, fun
 
 	spillPath := ""
 	if spillDir != "" {
-		spillPath = filepath.Join(spillDir, "logspill.jsonl")
+		// Ensure the directory exists so the sink can spill while Mongo is down; if
+		// it cannot be created, leave spill disabled rather than failing the daemon.
+		if err := os.MkdirAll(spillDir, 0o700); err != nil {
+			stderr.Write(Event{Level: LevelWarn, Subsystem: System, Name: "logging.spill.unavailable", Err: err.Error()})
+		} else {
+			spillPath = filepath.Join(spillDir, "logspill.jsonl")
+		}
 	}
 	var retention time.Duration
 	if retentionDays > 0 {
