@@ -13,6 +13,7 @@ import (
 
 	"hermex/internal/config"
 	"hermex/internal/directory"
+	"hermex/internal/objectstore"
 )
 
 func usage() {
@@ -22,6 +23,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  create-domain <domainname>")
 	fmt.Fprintln(os.Stderr, "  create-user <email> <password>")
 	fmt.Fprintln(os.Stderr, "  create-alias <alias-address> <user-email>")
+	fmt.Fprintln(os.Stderr, "  sweep-content <email>   (reclaim orphan content files; run with the mailbox idle)")
 	os.Exit(2)
 }
 
@@ -74,6 +76,24 @@ func main() {
 			log.Fatalf("hermex-admin: %v", err)
 		}
 		fmt.Printf("alias %s -> %s created\n", args[1], args[2])
+	case "sweep-content":
+		if len(args) != 2 {
+			usage()
+		}
+		maildir, ok := dir.Resolve(args[1])
+		if !ok {
+			log.Fatalf("hermex-admin: unknown or unreceivable mailbox: %s", args[1])
+		}
+		store, err := objectstore.Open(maildir)
+		if err != nil {
+			log.Fatalf("hermex-admin: open mailbox: %v", err)
+		}
+		defer store.Close()
+		removed, err := store.SweepOrphanContent()
+		if err != nil {
+			log.Fatalf("hermex-admin: sweep: %v", err)
+		}
+		fmt.Printf("swept %d orphan content file(s) from %s\n", removed, args[1])
 	default:
 		usage()
 	}
