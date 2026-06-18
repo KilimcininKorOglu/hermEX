@@ -3,6 +3,8 @@ package mapihttp
 import (
 	"io"
 	"net/http"
+
+	"hermex/internal/logging"
 )
 
 // serveNspi authenticates and dispatches the NSPI endpoint (/mapi/nspi) by the
@@ -79,6 +81,7 @@ func (s *Server) nspiOp(w http.ResponseWriter, r *http.Request, user, reqType st
 		return
 	}
 	setNspiCookie(w, "sequence", newSeq)
+	s.mapiEvent(r, logging.LevelDebug, logging.NSPI, "operation", user, logging.Fields{"op": reqType})
 	body, _ := io.ReadAll(r.Body)
 	writeNormal(w, r, reqType, handler(body))
 }
@@ -93,6 +96,7 @@ func (s *Server) nspiBind(w http.ResponseWriter, r *http.Request, user string) {
 		setNspiCookie(w, "sid", sid)
 		setNspiCookie(w, "sequence", sequence)
 	}
+	s.mapiEvent(r, logging.LevelInfo, logging.NSPI, "bind", user, logging.Fields{"ok": ok})
 	writeNormal(w, r, "Bind", resp)
 }
 

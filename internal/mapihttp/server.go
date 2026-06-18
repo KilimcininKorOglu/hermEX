@@ -16,9 +16,11 @@ import (
 	"strings"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/nspi"
 	"hermex/internal/rpchttp"
+	"hermex/internal/serve"
 )
 
 // Server answers MAPI/HTTP EMSMDB and NSPI requests, and RPC/HTTP requests, for
@@ -31,6 +33,13 @@ type Server struct {
 	nsp          *nspi.Server
 	nspiSessions *nspiSessionStore
 	rpc          *rpchttp.Server
+	Logger       *logging.Logger // central activity log; nil disables logging
+}
+
+// mapiEvent logs a MAPI/HTTP operation tagged with the client address (and, when
+// known, the user). A nil logger is a no-op.
+func (s *Server) mapiEvent(r *http.Request, level logging.Level, sub logging.Subsystem, name, user string, f logging.Fields) {
+	s.Logger.Emit(logging.Event{Level: level, Subsystem: sub, Name: name, User: user, RemoteAddr: serve.ClientAddr(r), Fields: f})
 }
 
 // NewServer builds a MAPI/HTTP server backed by the directory for authentication.
@@ -88,6 +97,7 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(p, "/mapi/nspi"):
 		s.serveNspi(w, r)
 	case strings.HasPrefix(p, "/rpc/rpcproxy.dll"), strings.HasPrefix(p, "/rpcwithcert/rpcproxy.dll"):
+		s.mapiEvent(r, logging.LevelDebug, logging.RPC, "request", "", logging.Fields{"path": r.URL.Path})
 		s.rpc.ServeHTTP(w, r)
 	default:
 		http.NotFound(w, r)

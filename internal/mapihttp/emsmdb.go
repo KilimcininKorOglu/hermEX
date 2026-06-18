@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 
+	"hermex/internal/logging"
 	"hermex/internal/oxmapihttp"
 )
 
@@ -26,6 +27,11 @@ func (s *Server) serveEmsmdb(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess := &session{user: user, mailbox: mailbox}
+	// Log the MAPI session lifecycle (logon/logoff); the high-frequency Execute
+	// batch is left to the request-level http.request log to avoid flooding.
+	if reqType == "Connect" || reqType == "Disconnect" {
+		s.mapiEvent(r, logging.LevelInfo, logging.ROP, "session", user, logging.Fields{"req": reqType})
+	}
 	switch reqType {
 	case "Connect":
 		s.emsConnect(w, r, sess)
