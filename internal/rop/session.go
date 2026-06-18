@@ -35,11 +35,28 @@ const (
 // SetProperties buffers the payload/filename into pending and SaveChangesAttachment
 // flushes it to the stored row. messageID is the parent so the parent can be
 // marked touched (its change number advances on the message's own save, not here).
+//
+// inMem is non-nil when the parent message is still being composed (not yet
+// persisted): there is no store row to attach to, so the attachment is staged in
+// the parent's newMessageState and written together when SaveChangesMessage calls
+// CreateMessage. In that mode messageID/attachmentID are unset and
+// SaveChangesAttachment merges pending into inMem.props rather than the store.
 type attachWrite struct {
 	messageID    int64
 	attachmentID int64
 	attachNum    uint32
 	pending      mapi.PropertyValues
+	inMem        *newAttachment
+}
+
+// newAttachment is an attachment staged on a not-yet-persisted compose message.
+// CreateAttachment assigns its attachNum (per-message MAX+1, mirroring the store)
+// and stamps the opening properties; SaveChangesAttachment merges the client's
+// filename/payload into props; SaveChangesMessage hands the whole set to
+// CreateMessage, which writes the attachment rows.
+type newAttachment struct {
+	attachNum uint32
+	props     mapi.PropertyValues
 }
 
 // object is a server-side MAPI object referenced by a uint32 handle. Fields are
@@ -68,16 +85,18 @@ type object struct {
 
 // newMessageState accumulates a message being composed over the ROP write
 // sequence: CreateMessage opens it, SetProperties merges into props,
-// ModifyRecipients replaces recipients, and SaveChangesMessage persists it via
+// ModifyRecipients replaces recipients, CreateAttachment stages attachments, and
+// SaveChangesMessage persists it (with its attachments) via
 // objectstore.CreateMessage. It is in memory until the first save; savedID then
 // holds the persisted message EID so a re-save updates in place rather than
 // inserting a duplicate.
 type newMessageState struct {
-	folderID   int64
-	props      mapi.PropertyValues
-	recipients []mapi.PropertyValues
-	saved      bool
-	savedID    int64
+	folderID    int64
+	props       mapi.PropertyValues
+	recipients  []mapi.PropertyValues
+	attachments []*newAttachment // staged before the first save (compose-with-attachment)
+	saved       bool
+	savedID     int64
 }
 
 // Session is one MAPI/HTTP session's object/handle table — the analogue of a
@@ -116,6 +135,23 @@ func (s *Session) alloc(o *object) uint32 {
 // get returns the object behind a handle, or nil when the handle is unknown
 // (including the 0xFFFFFFFF null handle).
 func (s *Session) get(h uint32) *object { return s.handles[h] }
+
+// persistedMessageID returns the store message id behind a message object when it
+// refers to a row that already exists — an opened message, or a compose message
+// after its first save — so attachment writes can target the real message. It
+// reports false for a compose message still in memory (no row yet) or a non-message
+// object.
+func persistedMessageID(o *object) (int64, bool) {
+	switch o.kind {
+	case kindMessage:
+		return o.messageID, true
+	case kindNewMessage:
+		if o.newMsg != nil && o.newMsg.saved {
+			return o.newMsg.savedID, true
+		}
+	}
+	return 0, false
+}
 
 // release frees a handle, closing the mailbox store if it was a logon root.
 func (s *Session) release(h uint32) {

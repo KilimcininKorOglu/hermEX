@@ -247,9 +247,15 @@ func (s *Session) ropSaveChangesMessage(p *ext.Pull, out *ext.Push, handles []ui
 		err = obj.store.ModifyMessageProperties(nm.savedID, nm.props)
 		id = nm.savedID
 	} else {
+		// The attachments staged during compose are written together with the message.
+		atts := make([]oxcmail.Attachment, len(nm.attachments))
+		for i, a := range nm.attachments {
+			atts[i] = oxcmail.Attachment{Props: a.props}
+		}
 		id, err = obj.store.CreateMessage(nm.folderID, &oxcmail.Message{
-			Props:      nm.props,
-			Recipients: nm.recipients,
+			Props:       nm.props,
+			Recipients:  nm.recipients,
+			Attachments: atts,
 		})
 	}
 	if err != nil {

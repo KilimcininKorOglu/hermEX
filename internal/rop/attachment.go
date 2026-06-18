@@ -118,30 +118,65 @@ func (s *Session) ropOpenAttachment(p *ext.Pull, out *ext.Push, handles []uint32
 
 // ropCreateAttachment handles RopCreateAttachment ([MS-OXCMSG] 2.2.3.6): it
 // creates a new attachment on the open message and returns its assigned attach
-// number. The attachment row is inserted up front (with the opening properties
-// the reference stamps on a new attachment) so the number can be assigned and
-// returned now; the client then fills the payload via SetProperties and persists
-// it with SaveChangesAttachment. The input handle is the parent message; the
-// output handle receives the attachment object. v1 supports this only on an
-// opened (persisted) message — a not-yet-saved composed message has no store row
-// to attach to.
+// number. The opening properties the reference stamps on a new attachment are
+// applied so the number can be assigned and returned now; the client then fills
+// the payload via SetProperties and persists it with SaveChangesAttachment. The
+// input handle is the parent message; the output handle receives the attachment
+// object. It works on an opened (persisted) message and on a message being
+// composed: a compose message not yet saved stages the attachment in memory until
+// SaveChangesMessage writes it, while one already saved once has a real row and is
+// written through the store like an opened message.
 func (s *Session) ropCreateAttachment(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8() // OutputHandleIndex
 	if e1 != nil {
 		return false
 	}
 	msg := s.get(handleAt(handles, hindex))
-	if msg == nil || msg.kind != kindMessage || msg.store == nil {
+	if msg == nil || msg.store == nil {
 		writeErr(out, ropCreateAttachment, ohindex, ecNotSupported)
 		return true
 	}
 	now := mapi.UnixToNTTime(time.Now())
+
+	// Compose message not yet persisted: stage the attachment in memory. The whole
+	// message — including its attachments — is written when SaveChangesMessage calls
+	// CreateMessage, so the attach number is assigned here (MAX+1, like the store)
+	// and the opening properties carried on the in-memory attachment.
+	if msg.kind == kindNewMessage && !msg.newMsg.saved {
+		nm := msg.newMsg
+		num := nextNewAttachNum(nm.attachments)
+		na := &newAttachment{attachNum: num, props: mapi.PropertyValues{
+			{Tag: mapi.PrAttachNum, Value: int32(num)},
+			{Tag: mapi.PrRenderingPosition, Value: int32(-1)}, // 0xFFFFFFFF: not rendered in the body
+			{Tag: mapi.PrCreationTime, Value: now},
+			{Tag: mapi.PrLastModificationTime, Value: now},
+		}}
+		nm.attachments = append(nm.attachments, na)
+		h := s.alloc(&object{
+			kind:    kindAttachWrite,
+			store:   msg.store,
+			attachW: &attachWrite{attachNum: num, inMem: na},
+		})
+		setHandle(handles, ohindex, h)
+
+		out.Uint8(ropCreateAttachment)
+		out.Uint8(ohindex)
+		out.Uint32(ecSuccess)
+		out.Uint32(num)
+		return true
+	}
+
+	messageID, ok := persistedMessageID(msg)
+	if !ok {
+		writeErr(out, ropCreateAttachment, ohindex, ecNotSupported)
+		return true
+	}
 	initial := mapi.PropertyValues{
 		{Tag: mapi.PrRenderingPosition, Value: int32(-1)}, // 0xFFFFFFFF: not rendered in the body
 		{Tag: mapi.PrCreationTime, Value: now},
 		{Tag: mapi.PrLastModificationTime, Value: now},
 	}
-	aid, num, err := msg.store.CreateAttachment(msg.messageID, initial)
+	aid, num, err := msg.store.CreateAttachment(messageID, initial)
 	if err != nil {
 		writeErr(out, ropCreateAttachment, ohindex, ecError)
 		return true
@@ -149,7 +184,7 @@ func (s *Session) ropCreateAttachment(p *ext.Pull, out *ext.Push, handles []uint
 	h := s.alloc(&object{
 		kind:    kindAttachWrite,
 		store:   msg.store,
-		attachW: &attachWrite{messageID: msg.messageID, attachmentID: aid, attachNum: num},
+		attachW: &attachWrite{messageID: messageID, attachmentID: aid, attachNum: num},
 	})
 	setHandle(handles, ohindex, h)
 
@@ -158,6 +193,20 @@ func (s *Session) ropCreateAttachment(p *ext.Pull, out *ext.Push, handles []uint
 	out.Uint32(ecSuccess)
 	out.Uint32(num) // AttachmentID (= PidTagAttachNumber)
 	return true
+}
+
+// nextNewAttachNum returns the attach number to assign to a new in-memory
+// attachment: one past the highest existing number, mirroring the store's
+// per-message MAX(attach_num)+1. A freed highest number can be reused (matching the
+// persisted path), while lower numbers stay stable across a sibling delete.
+func nextNewAttachNum(atts []*newAttachment) uint32 {
+	highest := int64(-1)
+	for _, a := range atts {
+		if int64(a.attachNum) > highest {
+			highest = int64(a.attachNum)
+		}
+	}
+	return uint32(highest + 1)
 }
 
 // ropSaveChangesAttachment handles RopSaveChangesAttachment ([MS-OXCMSG] 2.2.3.8):
@@ -179,12 +228,27 @@ func (s *Session) ropSaveChangesAttachment(p *ext.Pull, out *ext.Push, handles [
 		writeErr(out, ropSaveChangesAttachment, hindex, ecError)
 		return true
 	}
-	if len(att.attachW.pending) > 0 {
-		if err := att.store.SetAttachmentProperties(att.attachW.attachmentID, att.attachW.pending); err != nil {
+	aw := att.attachW
+	if aw.inMem != nil {
+		// Compose-time attachment: merge the buffered properties into the in-memory
+		// attachment. The message (with its attachments) is written when its own
+		// SaveChangesMessage calls CreateMessage, so there is no store row to flush
+		// to and no parent change number to bump here.
+		for _, tv := range aw.pending {
+			aw.inMem.props.Set(tv.Tag, tv.Value)
+		}
+		aw.pending = nil
+		out.Uint8(ropSaveChangesAttachment)
+		out.Uint8(hindex)
+		out.Uint32(ecSuccess)
+		return true
+	}
+	if len(aw.pending) > 0 {
+		if err := att.store.SetAttachmentProperties(aw.attachmentID, aw.pending); err != nil {
 			writeErr(out, ropSaveChangesAttachment, hindex, ecError)
 			return true
 		}
-		att.attachW.pending = nil
+		aw.pending = nil
 	}
 	// Mark the parent message (the common-header handle) dirty so SaveChangesMessage
 	// bumps its change number even when no top-level property changed.
@@ -199,21 +263,45 @@ func (s *Session) ropSaveChangesAttachment(p *ext.Pull, out *ext.Push, handles [
 }
 
 // ropDeleteAttachment handles RopDeleteAttachment ([MS-OXCMSG] 2.2.3.7): it
-// deletes the attachment the message holds at AttachmentId (its stored attach
-// number), reporting MAPI_E_NOT_FOUND when none exists there. The input handle is
-// the parent message; the response is the bare header. It marks the message dirty
-// so a following SaveChangesMessage advances the change number.
+// deletes the attachment the message holds at AttachmentId (its attach number),
+// reporting MAPI_E_NOT_FOUND when none exists there. The input handle is the parent
+// message; the response is the bare header. On a persisted message it deletes the
+// store row and marks the message dirty so a following SaveChangesMessage advances
+// the change number; on a compose message not yet saved it drops the staged
+// attachment in memory.
 func (s *Session) ropDeleteAttachment(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	attachID, e1 := p.Uint32() // AttachmentId (= PidTagAttachNumber)
 	if e1 != nil {
 		return false
 	}
 	msg := s.get(handleAt(handles, hindex))
-	if msg == nil || msg.kind != kindMessage || msg.store == nil {
+	if msg == nil || msg.store == nil {
 		writeErr(out, ropDeleteAttachment, hindex, ecError)
 		return true
 	}
-	if err := msg.store.DeleteAttachment(msg.messageID, attachID); err != nil {
+
+	// Compose message not yet persisted: drop the staged attachment in memory.
+	if msg.kind == kindNewMessage && !msg.newMsg.saved {
+		nm := msg.newMsg
+		for i, a := range nm.attachments {
+			if a.attachNum == attachID {
+				nm.attachments = append(nm.attachments[:i], nm.attachments[i+1:]...)
+				out.Uint8(ropDeleteAttachment)
+				out.Uint8(hindex)
+				out.Uint32(ecSuccess)
+				return true
+			}
+		}
+		writeErr(out, ropDeleteAttachment, hindex, ecNotFound)
+		return true
+	}
+
+	messageID, ok := persistedMessageID(msg)
+	if !ok {
+		writeErr(out, ropDeleteAttachment, hindex, ecError)
+		return true
+	}
+	if err := msg.store.DeleteAttachment(messageID, attachID); err != nil {
 		if errors.Is(err, objectstore.ErrNotFound) {
 			writeErr(out, ropDeleteAttachment, hindex, ecNotFound)
 			return true
