@@ -4,6 +4,7 @@ import (
 	"errors"
 
 	"hermex/internal/ext"
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
 
@@ -51,10 +52,10 @@ func (s *Session) ropCreateFolder(p *ext.Pull, out *ext.Push, handles []uint32, 
 	out.Uint8(ropCreateFolder)
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
-	out.Uint64(uint64(folderID)) // FolderId (FID)
-	out.Uint8(0)                 // IsExisting
-	out.Uint8(0)                 // HasRules
-	out.Uint64(0)                // Ghost (unused)
+	out.Uint64(uint64(mapi.MakeEIDEx(1, uint64(folderID)))) // FolderId (EID, matching RopLogon's encoding)
+	out.Uint8(0)                                            // IsExisting
+	out.Uint8(0)                                            // HasRules
+	out.Uint64(0)                                           // Ghost (unused)
 	return true
 }
 
@@ -71,7 +72,7 @@ func (s *Session) ropDeleteFolder(p *ext.Pull, out *ext.Push, handles []uint32, 
 		writeErr(out, ropDeleteFolder, hindex, ecError)
 		return true
 	}
-	if err := folder.store.DeleteFolder(int64(fid)); err != nil {
+	if err := folder.store.DeleteFolder(int64(mapi.EID(fid).GCValue())); err != nil {
 		writeErr(out, ropDeleteFolder, hindex, ecError)
 		return true
 	}
@@ -117,7 +118,7 @@ func (s *Session) ropMoveFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	if dest != nil && dest.kind == kindFolder {
 		newParent = &dest.folderID
 	}
-	if err := folder.store.RenameFolder(int64(fid), newParent, newName); err != nil {
+	if err := folder.store.RenameFolder(int64(mapi.EID(fid).GCValue()), newParent, newName); err != nil {
 		writeErr(out, ropMoveFolder, hindex, ecError)
 		return true
 	}
@@ -167,7 +168,7 @@ func (s *Session) ropCopyFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 		writeErr(out, ropCopyFolder, hindex, ecError)
 		return true
 	}
-	if _, err := folder.store.CopyFolder(int64(fid), dest.folderID, newName, wantRecursive != 0); err != nil {
+	if _, err := folder.store.CopyFolder(int64(mapi.EID(fid).GCValue()), dest.folderID, newName, wantRecursive != 0); err != nil {
 		switch {
 		case errors.Is(err, objectstore.ErrFolderCycle):
 			writeErr(out, ropCopyFolder, hindex, ecFolderCycle)
@@ -231,16 +232,15 @@ func (s *Session) ropHardDeleteMessages(p *ext.Pull, out *ext.Push, handles []ui
 		writeErr(out, ropHardDeleteMessages, hindex, ecError)
 		return true
 	}
-	// MessageIds is a flat sequence of 8-byte little-endian IDs
+	// MessageIds is a flat sequence of 8-byte little-endian message EIDs; the store
+	// row is the EID's global-counter value (the same extraction RopMoveCopyMessages
+	// uses), not the raw EID.
 	for i := 0; i+8 <= len(mids); i += 8 {
-		mid := int64(uint64(mids[i]) | uint64(mids[i+1])<<8 |
+		eid := uint64(mids[i]) | uint64(mids[i+1])<<8 |
 			uint64(mids[i+2])<<16 | uint64(mids[i+3])<<24 |
 			uint64(mids[i+4])<<32 | uint64(mids[i+5])<<40 |
-			uint64(mids[i+6])<<48 | uint64(mids[i+7])<<56)
-		// The spec says these are FIDs (folder IDs), but the reference passes
-		// them to delete_folder_messages which expects message IDs. In v1 we
-		// interpret them as message object IDs — the store's DeleteObject.
-		_ = mid
+			uint64(mids[i+6])<<48 | uint64(mids[i+7])<<56
+		mid := int64(mapi.EID(eid).GCValue())
 		if err := folder.store.DeleteObject(mid); err != nil {
 			writeErr(out, ropHardDeleteMessages, hindex, ecError)
 			return true

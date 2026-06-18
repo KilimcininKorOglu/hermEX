@@ -102,8 +102,8 @@ func TestHardDeleteMessagesRemovesCorrect(t *testing.T) {
 			byte(v), byte(v>>8), byte(v>>16), byte(v>>24),
 			byte(v>>32), byte(v>>40), byte(v>>48), byte(v>>56)
 	}
-	put64(blob[0:8], midA)
-	put64(blob[8:16], msgB)
+	put64(blob[0:8], int64(mapi.MakeEIDEx(1, uint64(midA)))) // message ids on the wire are EIDs
+	put64(blob[8:16], int64(mapi.MakeEIDEx(1, uint64(msgB))))
 
 	body := ext.NewPush(ext.FlagUTF16)
 	body.Uint8(0)
@@ -142,7 +142,7 @@ func TestDeleteFolder(t *testing.T) {
 
 	body := ext.NewPush(ext.FlagUTF16)
 	body.Uint8(0)
-	body.Uint64(uint64(subFID))
+	body.Uint64(uint64(mapi.MakeEIDEx(1, uint64(subFID)))) // FolderId as an EID, like a real client
 
 	resp, _ := sess.Dispatch(toROPRequest(ropDeleteFolder, 0, body.Bytes()), []uint32{storeH})
 	if ec := readEC(t, resp, ropDeleteFolder); ec != ecSuccess {
@@ -183,7 +183,7 @@ func TestMoveFolder(t *testing.T) {
 	body.Uint8(0)
 	body.Uint8(0)
 	body.Uint8(1)
-	body.Uint64(uint64(subFID))
+	body.Uint64(uint64(mapi.MakeEIDEx(1, uint64(subFID)))) // FolderId as an EID, like a real client
 	body.Unicode("RenamedSub")
 
 	resp, _ := sess.Dispatch(toROPRequest(ropMoveFolder, 0, body.Bytes()), []uint32{storeH})
@@ -228,11 +228,11 @@ func TestCopyFolderRecursiveAndCycle(t *testing.T) {
 
 	copyBody := func(destIdx uint8, srcFID int64, name string) []byte {
 		b := ext.NewPush(ext.FlagUTF16)
-		b.Uint8(destIdx)         // DestHandleIndex
-		b.Uint8(0)               // WantAsynchronous
-		b.Uint8(1)               // WantRecursive
-		b.Uint8(1)               // UseUnicode
-		b.Uint64(uint64(srcFID)) // FolderId (raw FID, matching RopDeleteFolder/RopMoveFolder)
+		b.Uint8(destIdx)                                    // DestHandleIndex
+		b.Uint8(0)                                          // WantAsynchronous
+		b.Uint8(1)                                          // WantRecursive
+		b.Uint8(1)                                          // UseUnicode
+		b.Uint64(uint64(mapi.MakeEIDEx(1, uint64(srcFID)))) // FolderId as an EID, like a real client
 		b.Unicode(name)
 		return b.Bytes()
 	}
