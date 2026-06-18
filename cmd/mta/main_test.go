@@ -50,7 +50,7 @@ func TestSweepOutboxesDeliversDueScheduledSend(t *testing.T) {
 		return mta.Deliver(accounts, senderOf(raw), recipients, raw, when)
 	}
 
-	sweepOutboxes(accounts, deliver)
+	sweepOutboxes(accounts, deliver, nil)
 
 	if n := folderCount(t, aliceDir, int64(mapi.PrivateFIDOutbox)); n != 0 {
 		t.Errorf("alice Outbox has %d after sweep, want 0 (released)", n)

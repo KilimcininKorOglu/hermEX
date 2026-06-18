@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/smtp"
@@ -19,17 +20,20 @@ import (
 // Backend is an smtp.Backend that delivers to per-recipient mailbox stores.
 type Backend struct {
 	Accounts directory.Accounts
+	Logger   *logging.Logger // central activity log; nil disables logging
 }
 
 // NewSession implements smtp.Backend.
-func (b *Backend) NewSession(string) (smtp.Session, error) {
-	return &session{accounts: b.Accounts}, nil
+func (b *Backend) NewSession(remoteAddr string) (smtp.Session, error) {
+	return &session{accounts: b.Accounts, logger: b.Logger, remoteAddr: remoteAddr}, nil
 }
 
 type session struct {
-	accounts directory.Accounts
-	from     string
-	targets  []target
+	accounts   directory.Accounts
+	logger     *logging.Logger
+	remoteAddr string
+	from       string
+	targets    []target
 }
 
 // target is one resolved recipient: the address it was accepted for (used as
@@ -62,8 +66,10 @@ func (s *session) Data(r io.Reader) error {
 	received := time.Now()
 	for _, t := range s.targets {
 		if err := deliver(s.accounts, s.from, t.addr, t.path, raw, received); err != nil {
+			s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "delivery.fail", User: t.addr, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}, Err: err.Error()})
 			return err
 		}
+		s.logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "delivery.ok", User: t.addr, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}})
 	}
 	return nil
 }

@@ -72,7 +72,7 @@ func main() {
 		log.Fatalf("hermex-mta: listen %s: %v", addr, err)
 	}
 
-	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir}, Hostname: cfg.Hostname, Logger: logger}
+	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Logger: logger}, Hostname: cfg.Hostname, Logger: logger}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()
 		if err != nil {
@@ -102,7 +102,7 @@ func main() {
 	}
 	slCtx, slCancel := context.WithCancel(context.Background())
 	sendLater := lifecycle.Func{
-		StartFn:    func() error { runSendLater(slCtx, dir, deliver, sendLaterInterval); return nil },
+		StartFn:    func() error { runSendLater(slCtx, dir, deliver, sendLaterInterval, logger); return nil },
 		ShutdownFn: func(context.Context) error { slCancel(); return nil },
 	}
 
@@ -125,7 +125,7 @@ const sendLaterInterval = 30 * time.Second
 // this loop: a second concurrent sweeper could re-deliver a message in the window
 // between its delivery and its removal from the Outbox, so it lives in the single
 // always-on MTA daemon, not in the (possibly multi-instance, restartable) webmail.
-func runSendLater(ctx context.Context, dir directory.MailboxLister, deliver spooler.DeliverFunc, interval time.Duration) {
+func runSendLater(ctx context.Context, dir directory.MailboxLister, deliver spooler.DeliverFunc, interval time.Duration, logger *logging.Logger) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -133,7 +133,7 @@ func runSendLater(ctx context.Context, dir directory.MailboxLister, deliver spoo
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			sweepOutboxes(dir, deliver)
+			sweepOutboxes(dir, deliver, logger)
 		}
 	}
 }
@@ -141,7 +141,7 @@ func runSendLater(ctx context.Context, dir directory.MailboxLister, deliver spoo
 // sweepOutboxes runs one pass: it opens each known mailbox and releases its due
 // scheduled sends. Per-mailbox failures are logged and skipped so one bad
 // mailbox cannot stall the rest.
-func sweepOutboxes(dir directory.MailboxLister, deliver spooler.DeliverFunc) {
+func sweepOutboxes(dir directory.MailboxLister, deliver spooler.DeliverFunc, logger *logging.Logger) {
 	maildirs, err := dir.Maildirs()
 	if err != nil {
 		log.Printf("hermex-mta send-later: list mailboxes: %v", err)
@@ -157,9 +157,11 @@ func sweepOutboxes(dir directory.MailboxLister, deliver spooler.DeliverFunc) {
 		st.Close()
 		if err != nil {
 			log.Printf("hermex-mta send-later: %s: %v", path, err)
+			logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "sendlater.error", Fields: logging.Fields{"mailbox": path}, Err: err.Error()})
 		}
 		if released > 0 {
 			log.Printf("hermex-mta send-later: released %d scheduled message(s) from %s", released, path)
+			logger.Info(logging.MTA, "sendlater.release", logging.Fields{"count": released, "mailbox": path})
 		}
 	}
 }
