@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"hermex/internal/lifecycle"
+	"hermex/internal/logging"
 )
 
 // Backend creates a Session for each accepted connection.
@@ -38,9 +39,10 @@ type Session interface {
 // Server accepts SMTP connections and drives them against its Backend.
 type Server struct {
 	Backend   Backend
-	Hostname  string      // announced in the greeting and EHLO; defaults to "localhost"
-	MaxSize   int64       // advertised/enforced max message size in bytes; 0 means no limit
-	TLSConfig *tls.Config // when non-nil, advertise (EHLO) and accept STARTTLS
+	Hostname  string          // announced in the greeting and EHLO; defaults to "localhost"
+	MaxSize   int64           // advertised/enforced max message size in bytes; 0 means no limit
+	TLSConfig *tls.Config     // when non-nil, advertise (EHLO) and accept STARTTLS
+	Logger    *logging.Logger // central activity log; nil disables logging
 
 	conns lifecycle.ConnGroup
 }
@@ -72,14 +74,24 @@ func (s *Server) handle(conn net.Conn) {
 	tp := textproto.NewReader(bufio.NewReader(conn))
 	_, isTLS := conn.(*tls.Conn)
 
-	sess, err := s.Backend.NewSession(conn.RemoteAddr().String())
+	remote := conn.RemoteAddr().String()
+	// event logs through the server's logger, tagged with the client address. SMTP
+	// intake has no authenticated user, so the envelope sender goes in Fields, not
+	// the User column. A nil logger is a no-op.
+	event := func(level logging.Level, name string, f logging.Fields) {
+		s.Logger.Emit(logging.Event{Level: level, Subsystem: logging.SMTP, Name: name, RemoteAddr: remote, Fields: f})
+	}
+
+	sess, err := s.Backend.NewSession(remote)
 	if err != nil {
+		event(logging.LevelWarn, "conn.reject", logging.Fields{"reason": err.Error()})
 		reply(w, 421, s.hostname()+" service not available")
 		return
 	}
 	defer sess.Logout()
 
 	reply(w, 220, s.hostname()+" ESMTP hermEX")
+	event(logging.LevelInfo, "conn.accept", logging.Fields{"tls": isTLS})
 
 	var hasFrom bool
 	var rcptCount int
@@ -89,6 +101,7 @@ func (s *Server) handle(conn net.Conn) {
 			return
 		}
 		cmd, arg, _ := strings.Cut(line, " ")
+		event(logging.LevelDebug, "command", logging.Fields{"cmd": strings.ToUpper(cmd)})
 		switch strings.ToUpper(cmd) {
 		case "HELO":
 			hasFrom, rcptCount = false, 0
@@ -104,6 +117,7 @@ func (s *Server) handle(conn net.Conn) {
 				continue
 			}
 			if tp.R.Buffered() > 0 {
+				event(logging.LevelWarn, "starttls.injection", nil)
 				return // pipelined plaintext behind STARTTLS; abort the connection
 			}
 			reply(w, 220, "ready to start TLS")
@@ -119,6 +133,7 @@ func (s *Server) handle(conn net.Conn) {
 			// re-issues EHLO over the secured link.
 			sess.Reset()
 			hasFrom, rcptCount = false, 0
+			event(logging.LevelInfo, "starttls", nil)
 		case "MAIL":
 			addr, ok := extractPath(arg, "FROM:")
 			if !ok {
@@ -130,6 +145,7 @@ func (s *Server) handle(conn net.Conn) {
 				continue
 			}
 			hasFrom, rcptCount = true, 0
+			event(logging.LevelInfo, "mail.from", logging.Fields{"from": addr})
 			reply(w, 250, "OK")
 		case "RCPT":
 			if !hasFrom {
@@ -146,6 +162,7 @@ func (s *Server) handle(conn net.Conn) {
 				continue
 			}
 			rcptCount++
+			event(logging.LevelInfo, "rcpt.to", logging.Fields{"to": addr})
 			reply(w, 250, "OK")
 		case "DATA":
 			if rcptCount == 0 {
@@ -159,8 +176,10 @@ func (s *Server) handle(conn net.Conn) {
 				} else {
 					reply(w, 554, "transaction failed: "+err.Error())
 				}
+				event(logging.LevelWarn, "message.reject", logging.Fields{"recipients": rcptCount, "reason": err.Error()})
 			} else {
 				reply(w, 250, "OK")
+				event(logging.LevelInfo, "message.accept", logging.Fields{"recipients": rcptCount})
 			}
 			hasFrom, rcptCount = false, 0
 		case "RSET":

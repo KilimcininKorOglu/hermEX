@@ -61,6 +61,7 @@ func main() {
 		log.Fatalf("hermex-mta: directory unreachable: %v", err)
 	}
 	dir := directory.NewSQL(db)
+	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
 
 	addr := cfg.SMTPAddr
 	if addr == "" {
@@ -71,7 +72,7 @@ func main() {
 		log.Fatalf("hermex-mta: listen %s: %v", addr, err)
 	}
 
-	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir}, Hostname: cfg.Hostname}
+	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir}, Hostname: cfg.Hostname, Logger: logger}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()
 		if err != nil {
@@ -105,7 +106,6 @@ func main() {
 		ShutdownFn: func(context.Context) error { slCancel(); return nil },
 	}
 
-	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
 	logger.Info(logging.System, "daemon.startup", logging.Fields{"daemon": "mta", "addr": addr})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
