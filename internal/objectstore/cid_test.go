@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"hermex/internal/mapi"
+	"hermex/internal/oxcmail"
 )
 
 // TestIsCIDProp checks the offload predicate: bodies, transport headers, and
@@ -87,5 +88,55 @@ func TestContentRoundTripAndDedup(t *testing.T) {
 	// The cid format is the sharded "S-XX/<62 hex>" form.
 	if len(cid1) != len("S-")+2+1+62 || cid1[:2] != "S-" || cid1[4] != '/' {
 		t.Errorf("unexpected cid format: %q", cid1)
+	}
+}
+
+// TestSweepOrphanContent proves the content sweep reclaims only unreferenced
+// files: a stray content file no property points to is removed, while a content
+// file two messages share (dedup) survives and both messages still read it. This
+// is the safety property the inline-delete alternative would violate.
+func TestSweepOrphanContent(t *testing.T) {
+	s := openSeededStore(t)
+
+	body := "SHARED BODY THAT TWO MESSAGES DEDUP TO ONE CONTENT FILE"
+	mk := func(subj string) int64 {
+		id, err := s.CreateMessage(int64(mapi.PrivateFIDInbox), &oxcmail.Message{Props: mapi.PropertyValues{
+			{Tag: mapi.PrMessageClass, Value: "IPM.Note"},
+			{Tag: mapi.PrSubject, Value: subj},
+			{Tag: mapi.PrBody, Value: body},
+		}})
+		if err != nil {
+			t.Fatalf("CreateMessage(%s): %v", subj, err)
+		}
+		return id
+	}
+	m1, m2 := mk("one"), mk("two")
+
+	// A stray content file that no property references.
+	orphan, err := s.putContent([]byte("ORPHAN DATA -- NOTHING REFERENCES THIS"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := s.SweepOrphanContent()
+	if err != nil {
+		t.Fatalf("SweepOrphanContent: %v", err)
+	}
+	if removed != 1 {
+		t.Errorf("removed %d content files, want 1 (the stray orphan only)", removed)
+	}
+	if _, err := s.getContent(orphan); err == nil {
+		t.Error("the orphan content file survived the sweep")
+	}
+
+	// The shared body file survived; both messages still read it.
+	for _, id := range []int64{m1, m2} {
+		msg, err := s.OpenMessage(id)
+		if err != nil {
+			t.Fatalf("OpenMessage(%d): %v", id, err)
+		}
+		if b, _ := msg.Props.Get(mapi.PrBody); b != body {
+			t.Errorf("message %d body = %v, want %q (shared content file wrongly reclaimed?)", id, b, body)
+		}
 	}
 }
