@@ -65,6 +65,15 @@ func (s *sessionStore) execute(sid, seq, user string) (newSeq string, ctx *sessi
 	return c.sequence, c, rcSuccess
 }
 
+// lookup resolves a session by its sid cookie without rolling the sequence — for
+// NotificationWait, which runs on a parallel connection outside the Execute
+// sequence. It returns nil when the sid is unknown.
+func (s *sessionStore) lookup(sid string) *sessionContext {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.m[sid]
+}
+
 // drop discards a session (Disconnect), closing its ROP object table (and any
 // open store) outside the lock.
 func (s *sessionStore) drop(sid string) {

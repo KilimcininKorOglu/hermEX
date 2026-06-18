@@ -14,6 +14,7 @@ package mapihttp
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"hermex/internal/directory"
 	"hermex/internal/logging"
@@ -26,14 +27,16 @@ import (
 // Server answers MAPI/HTTP EMSMDB and NSPI requests, and RPC/HTTP requests, for
 // authenticated users.
 type Server struct {
-	auth         directory.Authenticator
-	accounts     directory.Accounts
-	hostname     string
-	sessions     *sessionStore
-	nsp          *nspi.Server
-	nspiSessions *nspiSessionStore
-	rpc          *rpchttp.Server
-	Logger       *logging.Logger // central activity log; nil disables logging
+	auth          directory.Authenticator
+	accounts      directory.Accounts
+	hostname      string
+	sessions      *sessionStore
+	nsp           *nspi.Server
+	nspiSessions  *nspiSessionStore
+	rpc           *rpchttp.Server
+	notifyWait    time.Duration   // how long a NotificationWait long-poll holds before reporting "no events"
+	notifyCadence time.Duration   // how often that long-poll re-checks the shared store
+	Logger        *logging.Logger // central activity log; nil disables logging
 }
 
 // mapiEvent logs a MAPI/HTTP operation tagged with the client address (and, when
@@ -55,12 +58,14 @@ func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostna
 	// the lifetime of a binding; a restart re-mints it and clients re-bind.
 	serverGUID, _ := mapi.ParseGUID(newGUID())
 	s := &Server{
-		auth:         auth,
-		accounts:     accounts,
-		hostname:     hostname,
-		sessions:     newSessionStore(),
-		nsp:          nspi.NewServer(gal, serverGUID),
-		nspiSessions: newNspiSessionStore(),
+		auth:          auth,
+		accounts:      accounts,
+		hostname:      hostname,
+		sessions:      newSessionStore(),
+		nsp:           nspi.NewServer(gal, serverGUID),
+		nspiSessions:  newNspiSessionStore(),
+		notifyWait:    notifyWaitInterval,
+		notifyCadence: notifyPollCadence,
 	}
 	// RPC/HTTP (Outlook Anywhere) shares the directory and HTTP Basic auth; the
 	// EMSMDB store interface and the NSPI address-book interface are registered on

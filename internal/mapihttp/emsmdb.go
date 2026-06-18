@@ -1,11 +1,26 @@
 package mapihttp
 
 import (
+	"context"
 	"io"
 	"net/http"
+	"time"
 
 	"hermex/internal/logging"
 	"hermex/internal/oxmapihttp"
+	"hermex/internal/rop"
+)
+
+// MAPI/HTTP notification long-poll tuning. PollsMax is the window the Connect
+// response advertises as the client's NotificationWait timeout ([MS-OXCMAPIHTTP]
+// 2.2.4.1.2); 60000ms (60s) matches what Exchange advertises. The server holds a wait
+// a touch under that so its reply reaches the client before the client gives up,
+// re-checking the shared store at notifyPollCadence (the ActiveSync Ping cadence).
+const (
+	pollsMaxMs              uint32 = 60000
+	notifyWaitInterval             = 50 * time.Second
+	notifyPollCadence              = 5 * time.Second
+	flagNotificationPending uint32 = 0x00000001 // EventPending: events are queued; call Execute to drain them
 )
 
 // serveEmsmdb authenticates and dispatches the EMSMDB endpoint (/mapi/emsmdb) by
@@ -71,7 +86,7 @@ func (s *Server) emsConnect(w http.ResponseWriter, r *http.Request, sess *sessio
 	var out writer
 	out.u32(rcSuccess)  // StatusCode
 	out.u32(0)          // ErrorCode
-	out.u32(60000)      // PollsMax (ms)
+	out.u32(pollsMaxMs) // PollsMax (ms)
 	out.u32(60)         // RetryCount
 	out.u32(10)         // RetryDelay
 	out.str("")         // DnPrefix (ASCII)
@@ -152,18 +167,60 @@ func (s *Server) emsDisconnect(w http.ResponseWriter, r *http.Request) {
 	writeNormal(w, r, "Disconnect", out.b)
 }
 
-// emsNotificationWait answers the notification long-poll. v1 has no live push,
-// so it returns immediately with no events pending.
+// emsNotificationWait is the notification long-poll. hermEX has no central daemon to
+// push from, so it polls the session's subscriptions against the shared store (the
+// same model as the IMAP poll and ActiveSync Ping loops) and reports
+// FLAG_NOTIFICATION_PENDING the moment a subscribed change appears, or a clear flag
+// once the hold elapses. The reply is only a wake signal — the matching RopNotify
+// bytes follow on the client's next Execute drain. Only folder- and message-scoped
+// subscriptions wake it; a whole-store subscription is accepted at registration but
+// not yet polled (D.Inc 2b), so a client that registers only whole-store will not be
+// woken here.
 func (s *Server) emsNotificationWait(w http.ResponseWriter, r *http.Request) {
-	if _, err := r.Cookie("sid"); err != nil {
+	sid, err := r.Cookie("sid")
+	if err != nil {
 		writeRespError(w, r, "NotificationWait", rcMissingCookie)
 		return
 	}
+	ctx := s.sessions.lookup(sid.Value)
+	if ctx == nil {
+		writeRespError(w, r, "NotificationWait", rcInvalidCtxCookie)
+		return
+	}
+
+	var flags uint32
+	if s.waitForNotification(r.Context(), ctx.ropSess) {
+		flags = flagNotificationPending
+	}
+
 	var out writer
 	out.u32(rcSuccess) // StatusCode
 	out.u32(0)         // ErrorCode
-	out.u32(0)         // EventPending flags (none)
+	out.u32(flags)     // EventPending flags
+	out.u32(0)         // AuxiliaryBufferSize
 	writeNormal(w, r, "NotificationWait", out.b)
+}
+
+// waitForNotification holds the request open, polling the session for a deliverable
+// notification until one appears (true) or the hold elapses (false). It polls before
+// each sleep so an already-pending change returns on the first iteration, and bails
+// immediately if the client drops the connection.
+func (s *Server) waitForNotification(reqCtx context.Context, sess *rop.Session) bool {
+	deadline := time.Now().Add(s.notifyWait)
+	for {
+		if sess.PollForChange() {
+			return true
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false
+		}
+		select {
+		case <-reqCtx.Done():
+			return false
+		case <-time.After(min(s.notifyCadence, remaining)):
+		}
+	}
 }
 
 // setCookie sets a MAPI/HTTP session cookie scoped to the EMSMDB endpoint.
