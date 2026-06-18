@@ -105,14 +105,15 @@ type flowNode struct {
 // folder: it holds the computed delta, the new high-water state to hand the
 // client, and a flow list it drains through an ics producer one element at a time
 // across GetBuffer calls. It is created from a client's prior state and consumed
-// by the ROP FastTransferSourceGetBuffer handler (wired in a later increment);
-// here it is driven directly and verified by parsing the stream back.
+// by the ROP FastTransferSourceGetBuffer handler; it can also be driven directly
+// and verified by parsing the stream back.
 //
 // v1 scope (documented deferrals, matching the slice plan): SYNC_PROGRESS_MODE,
 // restriction filtering, and delivery-time ordering are not honored; the changed
 // set is emitted in MID order. The read-state and modification ("updated")
-// branches depend on the store recording read_cn / bumping change_number, which
-// no write path does yet (see the engine's dormant-branch note).
+// branches are live: the store bumps change_number (ModifyMessageProperties) and
+// records read_cn (read.go, ImportReadStateChanges), so an in-place edit or a
+// read-flag flip reaches the client.
 type DownloadContext struct {
 	store      *Store
 	producer   *ics.Producer

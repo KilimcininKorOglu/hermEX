@@ -57,13 +57,12 @@ type ContentSyncResult struct {
 // up to date, content-changed, or read-state-changed against the client's given/
 // seen/read idsets, then enumerates the given set to find deletions.
 //
-// Two branches are coded but dormant until the write path records their version:
-// the "updated" (content-changed) branch fires only once a message-modification
-// path bumps change_number, and the read-state branch fires only once a
-// read-state change allocates a read_cn (the column is currently never written).
-// Both are exercised here by constructed test state and faithful seeded data,
-// and activate end to end when the download path's producers begin recording
-// those versions. v1 reads only live (is_deleted=0) rows, so a soft-deleted
+// Both classification branches are live end to end. The "updated" (content-
+// changed) branch fires because ModifyMessageProperties bumps change_number on an
+// in-place edit; the read-state branch fires because a read-flag flip allocates a
+// read_cn — the authoritative path in read.go, and the ImportReadStateChanges
+// upload path. A client that has not seen the new change_number / read_cn is sent
+// the message again. v1 reads only live (is_deleted=0) rows, so a soft-deleted
 // given MID is reported as deleted rather than no-longer; the changed set is
 // emitted in MID order, not delivery-time order. The given set is assumed to be
 // a well-formed idset sized to a real mailbox.
