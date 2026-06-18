@@ -56,12 +56,6 @@ func (s *Session) ropCreateMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 		writeErr(out, ropCreateMessage, ohindex, ecError)
 		return true
 	}
-	if associated != 0 {
-		// Associated (FAI) messages are out of v1 scope; reject rather than
-		// silently store a normal message the client believes is associated.
-		writeErr(out, ropCreateMessage, ohindex, ecNotSupported)
-		return true
-	}
 	fid := int64(mapi.EID(folderEID).GCValue())
 	exists, err := parent.store.FolderExists(fid)
 	if err != nil {
@@ -72,10 +66,17 @@ func (s *Session) ropCreateMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 		writeErr(out, ropCreateMessage, ohindex, ecNotFound)
 		return true
 	}
+	props := mapi.PropertyValues{}
+	if associated != 0 {
+		// Mark the message folder-associated (FAI); the store reads PidTagAssociated
+		// at save and records it on the message row, so a hidden setting/rule message
+		// is not stored as a visible item.
+		props.Set(mapi.PrAssociated, true)
+	}
 	h := s.alloc(&object{
 		kind:   kindNewMessage,
 		store:  parent.store,
-		newMsg: &newMessageState{folderID: fid, props: mapi.PropertyValues{}},
+		newMsg: &newMessageState{folderID: fid, props: props},
 	})
 	setHandle(handles, ohindex, h)
 

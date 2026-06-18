@@ -15,6 +15,9 @@ const (
 	ropSetProperties         uint8 = 0x0A
 	ropSaveChangesMessage    uint8 = 0x0C
 	ropModifyRecipients      uint8 = 0x0E
+	ropReloadCachedInfo      uint8 = 0x10
+	ropGetMessageStatus      uint8 = 0x1F
+	ropSetMessageStatus      uint8 = 0x20
 	ropSubmitMessage         uint8 = 0x32
 	ropSetMessageReadFlag    uint8 = 0x11
 	ropDeleteMessages        uint8 = 0x1E
@@ -54,7 +57,8 @@ const (
 	ecSuccess      uint32 = 0x00000000
 	ecError        uint32 = 0x80004005 // generic failure / unimplemented ROP
 	ecNotFound     uint32 = 0x8004010F // MAPI_E_NOT_FOUND (no such folder/object)
-	ecNotSupported uint32 = 0x80040102 // MAPI_E_NO_SUPPORT (unsupported request, e.g. FAI create)
+	ecNotSupported uint32 = 0x80040102 // MAPI_E_NO_SUPPORT (unsupported request)
+	ecAccessDenied uint32 = 0x80070005 // MAPI_E_NO_ACCESS (e.g. setting the in-conflict status bit)
 )
 
 // Dispatch parses the request ROP list and returns the response ROP bytes plus
@@ -111,6 +115,18 @@ loop:
 			}
 		case ropModifyRecipients:
 			if !s.ropModifyRecipients(p, out, handles, hindex) {
+				break loop
+			}
+		case ropReloadCachedInfo:
+			if !s.ropReloadCachedInformation(p, out, handles, hindex) {
+				break loop
+			}
+		case ropGetMessageStatus:
+			if !s.ropGetMessageStatus(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSetMessageStatus:
+			if !s.ropSetMessageStatus(p, out, handles, hindex) {
 				break loop
 			}
 		case ropSubmitMessage:

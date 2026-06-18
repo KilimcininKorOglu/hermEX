@@ -38,13 +38,23 @@ func (s *Store) CreateMessage(folderID int64, msg *oxcmail.Message) (int64, erro
 	if _, err := tx.Exec(
 		`INSERT INTO messages
 		   (message_id, parent_fid, is_associated, change_number, read_state, message_size, mid_string)
-		 VALUES (?, ?, 0, ?, ?, ?, ?)`,
-		id, folderID, int64(cn), readState(msg.Props), messageSize(msg), mid); err != nil {
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		id, folderID, isAssociated(msg.Props), int64(cn), readState(msg.Props), messageSize(msg), mid); err != nil {
 		return 0, err
 	}
 
 	if err := s.insertProps(tx, "message_properties", "message_id", id, msg.Props); err != nil {
 		return 0, err
+	}
+
+	// Every message carries PidTagMessageStatus so the status ROPs can read and
+	// modify it; the reference forces it present at write time. Seed 0 when the
+	// caller did not supply one (status is otherwise managed via RopSetMessageStatus).
+	if _, ok := msg.Props.Get(mapi.PrMsgStatus); !ok {
+		if err := s.insertProps(tx, "message_properties", "message_id", id,
+			mapi.PropertyValues{{Tag: mapi.PrMsgStatus, Value: int32(0)}}); err != nil {
+			return 0, err
+		}
 	}
 
 	for _, rcpt := range msg.Recipients {
@@ -101,6 +111,19 @@ func (s *Store) CreateMessage(folderID int64, msg *oxcmail.Message) (int64, erro
 // life. The "m" prefix keeps it textually distinct from any bare-numeric id.
 func midString(eid uint64) string {
 	return "m" + strconv.FormatUint(eid, 10)
+}
+
+// isAssociated reports the stored associated flag for a new message: a message
+// is folder-associated (FAI — a hidden setting/rule/form, not a visible item)
+// when it carries PidTagAssociated set true. The flag is fixed at creation; the
+// contents-table query splits associated from normal messages by this column.
+func isAssociated(props mapi.PropertyValues) int {
+	if v, ok := props.Get(mapi.PrAssociated); ok {
+		if b, ok := v.(bool); ok && b {
+			return 1
+		}
+	}
+	return 0
 }
 
 // readState reports the stored read flag for a new message: delivered mail is
