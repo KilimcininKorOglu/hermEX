@@ -126,6 +126,12 @@ func (s *Session) ropSetProperties(p *ext.Pull, out *ext.Push, handles []uint32,
 		for _, tv := range propvals {
 			obj.attachW.pending.Set(tv.Tag, tv.Value)
 		}
+	case kindEmbedded:
+		// A composed embedded message buffers its edits in memory; they are exported
+		// into the parent attachment when SaveChangesMessage runs.
+		for _, tv := range propvals {
+			obj.embedded.msg.Props.Set(tv.Tag, tv.Value)
+		}
 	default:
 		writeErr(out, ropSetProperties, hindex, ecError)
 		return true
@@ -230,6 +236,33 @@ func (s *Session) ropSaveChangesMessage(p *ext.Pull, out *ext.Push, handles []ui
 		out.Uint32(ecSuccess)
 		out.Uint8(ihindex2)
 		out.Uint64(uint64(mapi.MakeEIDEx(1, uint64(obj.messageID))))
+		return true
+	}
+	// A composed embedded message is persisted by exporting it back into its parent
+	// attachment: the export bytes, method, and MIME tag are staged into the
+	// attachment's pending bag, which the client's SaveChangesAttachment then writes
+	// through the ordinary attachment path. A read-only embedded message (opened over
+	// an existing attachment) has no write-back target and cannot be saved.
+	if obj.kind == kindEmbedded {
+		emb := obj.embedded
+		if emb == nil || emb.writeback == nil {
+			writeErr(out, ropSaveChangesMessage, hindex, ecNotSupported)
+			return true
+		}
+		raw, err := oxcmail.Export(emb.msg, oxcmail.Options{})
+		if err != nil {
+			writeErr(out, ropSaveChangesMessage, hindex, ecError)
+			return true
+		}
+		emb.writeback.pending.Set(mapi.PrAttachMethod, int32(mapi.AttachEmbeddedMsg))
+		emb.writeback.pending.Set(mapi.PrAttachMimeTag, "message/rfc822")
+		emb.writeback.pending.Set(mapi.PrAttachDataBin, raw)
+
+		out.Uint8(ropSaveChangesMessage)
+		out.Uint8(hindex)
+		out.Uint32(ecSuccess)
+		out.Uint8(ihindex2)
+		out.Uint64(uint64(mapi.MakeEIDEx(1, uint64(handleAt(handles, ihindex2)))))
 		return true
 	}
 	if obj.kind != kindNewMessage {

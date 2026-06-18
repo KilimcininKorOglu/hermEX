@@ -56,10 +56,16 @@ type attachWrite struct {
 // as the raw RFC822 bytes in the parent attachment's PR_ATTACH_DATA_BIN rather
 // than as a recursive store row; OpenEmbeddedMessage imports those bytes into msg
 // to serve reads, and a compose/edit exports msg back into the parent attachment.
-// attachmentID identifies the parent attachment row for that write-back.
+//
+// writeback is the parent created-attachment a composed (MAPI_CREATE) embedded
+// message exports itself into on SaveChangesMessage: the export bytes, method, and
+// MIME tag are buffered into the attachment's pending bag, which the client's
+// SaveChangesAttachment then persists through the ordinary attachment write path.
+// It is nil for a read-only embedded message (one opened over an existing
+// attachment), which has no write-back target.
 type embeddedMessage struct {
-	msg          *oxcmail.Message
-	attachmentID int64
+	msg       *oxcmail.Message
+	writeback *attachWrite
 }
 
 // newAttachment is an attachment staged on a not-yet-persisted compose message.

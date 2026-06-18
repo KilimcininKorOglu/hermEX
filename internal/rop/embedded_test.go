@@ -174,8 +174,119 @@ func TestOpenEmbeddedMessageErrors(t *testing.T) {
 	if ec := openEmbeddedEC(attH, 0); ec != ecNotFound {
 		t.Errorf("OpenEmbeddedMessage on a plain attachment = %#x, want ecNotFound", ec)
 	}
-	// MAPI_CREATE compose is deferred (reported, not silently stubbed).
+	// MAPI_CREATE compose over an opened attachment is deferred (the compose path
+	// runs over a freshly created attachment, exercised by TestComposeEmbeddedMessage).
 	if ec := openEmbeddedEC(attH, mapiCreate); ec != ecNotSupported {
-		t.Errorf("OpenEmbeddedMessage MAPI_CREATE = %#x, want ecNotSupported (compose deferred)", ec)
+		t.Errorf("OpenEmbeddedMessage MAPI_CREATE over an opened attachment = %#x, want ecNotSupported", ec)
+	}
+}
+
+// TestComposeEmbeddedMessage drives the embedded-message write path end to end: a
+// new attachment is created on a carrier message, OpenEmbeddedMessage(MAPI_CREATE)
+// opens an empty embedded message to compose, its subject and body are set, and
+// SaveChangesMessage exports it into the parent attachment. After the attachment
+// and carrier are saved, the composed message is re-opened through the read path
+// and its subject and body are read back — proving the compose → export → store →
+// import round-trip, and that the parent attachment ends up tagged method-5.
+func TestComposeEmbeddedMessage(t *testing.T) {
+	dir := t.TempDir()
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	mid := uint64(seedInboxMessage(t, dir, "CARRIER"))
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	store := sess.get(logonH).store
+
+	// Open the carrier, create an attachment, open a new embedded message to compose.
+	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
+	msgH := h[1]
+	num, attH := createAttachmentNum(t, sess, msgH)
+	if num != 0 {
+		t.Fatalf("attach number = %d, want 0", num)
+	}
+
+	oem, h := sess.Dispatch(buildOpenEmbeddedMessage(0, 1, mapiCreate), []uint32{attH, 0xFFFFFFFF})
+	embH := h[1]
+	p := ext.NewPull(oem, ext.FlagUTF16)
+	mustU8(t, p, "RopId")
+	mustU8(t, p, "ohindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("OpenEmbeddedMessage(MAPI_CREATE) ReturnValue = %#x", ec)
+	}
+
+	// Fill the embedded message and save it: that exports it into the parent attachment.
+	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+		{Tag: mapi.PrSubject, Value: "Composed Inner"},
+		{Tag: mapi.PrBody, Value: "Composed body."},
+	}), []uint32{embH})
+	scm, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, embH})
+	p = ext.NewPull(scm, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropSaveChangesMessage {
+		t.Fatalf("SaveChangesMessage(embedded) RopId = %#x", id)
+	}
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("SaveChangesMessage(embedded) ReturnValue = %#x", ec)
+	}
+
+	// Persist the attachment (flush the exported bytes), then save the carrier.
+	scA, _ := sess.Dispatch(buildSaveChangesAttachment(0, 1), []uint32{msgH, attH})
+	pa := ext.NewPull(scA, ext.FlagUTF16)
+	mustU8(t, pa, "RopId")
+	mustU8(t, pa, "hindex")
+	if ec := mustU32(t, pa, "ec"); ec != ecSuccess {
+		t.Fatalf("SaveChangesAttachment ReturnValue = %#x", ec)
+	}
+	sc, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
+	saveChangesEID(t, sc)
+
+	// White-box: the parent attachment is now a method-5 embedded message.
+	saved, err := store.OpenMessage(int64(mid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved.Attachments) != 1 {
+		t.Fatalf("carrier has %d attachments, want 1", len(saved.Attachments))
+	}
+	if m, _ := saved.Attachments[0].Props.Get(mapi.PrAttachMethod); m != int32(mapi.AttachEmbeddedMsg) {
+		t.Errorf("composed attachment method = %v, want %d (afEmbeddedMessage)", m, mapi.AttachEmbeddedMsg)
+	}
+
+	// Read the composed embedded message back through the read path.
+	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
+	reMsgH := h[1]
+	_, h = sess.Dispatch(buildOpenAttachment(0, 1, 0), []uint32{reMsgH, 0xFFFFFFFF})
+	reAttH := h[1]
+	oem2, h := sess.Dispatch(buildOpenEmbeddedMessage(0, 1, mapiModify), []uint32{reAttH, 0xFFFFFFFF})
+	reEmbH := h[1]
+	p = ext.NewPull(oem2, ext.FlagUTF16)
+	mustU8(t, p, "RopId")
+	mustU8(t, p, "ohindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("OpenEmbeddedMessage(read-back) ReturnValue = %#x (composed embedded must round-trip)", ec)
+	}
+	mustU8(t, p, "Reserved")
+	p.Uint64() // MessageId
+	mustU8(t, p, "HasNamedProperties")
+	readTypedString(t, p) // SubjectPrefix
+	if subj := readTypedString(t, p); subj != "Composed Inner" {
+		t.Errorf("read-back embedded subject = %q, want Composed Inner", subj)
+	}
+
+	// The body survived the export/import round-trip.
+	cols := []mapi.PropTag{mapi.PrBody}
+	gps, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{reEmbH})
+	p = ext.NewPull(gps, ext.FlagUTF16)
+	mustU8(t, p, "RopId")
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("GetPropertiesSpecific(read-back embedded) = %#x", ec)
+	}
+	row := decodeRow(t, p, cols)
+	body, _ := row.Get(mapi.PrBody)
+	if s, _ := body.(string); !strings.Contains(s, "Composed body.") {
+		t.Errorf("read-back embedded body = %q, want to contain %q", s, "Composed body.")
 	}
 }
