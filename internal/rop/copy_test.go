@@ -1,10 +1,13 @@
 package rop
 
 import (
+	"bytes"
 	"testing"
 
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
+	"hermex/internal/oxcmail"
 )
 
 // buildCopyProperties builds a RopCopyProperties request: source at srcIdx,
@@ -181,6 +184,138 @@ func TestCopyReflectsBufferedEdits(t *testing.T) {
 	if v, ok := props.Get(mapi.PrImportance); !ok || v != int32(7) {
 		t.Errorf("CopyTo importance = %v (present=%v), want the source's buffered 7", v, ok)
 	}
+}
+
+// buildCopyToWS builds a RopCopyTo request with an explicit WantSubObjects byte,
+// for the sub-object copy tests.
+func buildCopyToWS(srcIdx, dstIdx, wantSub, copyFlags uint8, excluded []mapi.PropTag) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropCopyTo)
+	b.Uint8(0) // LogonId
+	b.Uint8(srcIdx)
+	b.Uint8(dstIdx)
+	b.Uint8(0) // WantAsynchronous
+	b.Uint8(wantSub)
+	b.Uint8(copyFlags)
+	_ = b.PropTags(excluded)
+	return b.Bytes()
+}
+
+// seedMessageWithSubObjects writes an Inbox message carrying one recipient and one
+// by-value attachment (a forward scenario), so a copy of it has sub-objects to
+// carry. Returns the stored message id.
+func seedMessageWithSubObjects(t *testing.T, dir string) int64 {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	msg := &oxcmail.Message{
+		Props: mapi.PropertyValues{
+			{Tag: mapi.PrMessageClass, Value: "IPM.Note"},
+			{Tag: mapi.PrSubject, Value: "FWDSRC"},
+		},
+		Recipients: []mapi.PropertyValues{{
+			{Tag: mapi.PrRecipientType, Value: int32(mapi.RecipTo)},
+			{Tag: mapi.PrDisplayName, Value: "Bob"},
+			{Tag: mapi.PrEmailAddress, Value: "bob@hermex.test"},
+			{Tag: mapi.PrAddrType, Value: "SMTP"},
+			{Tag: mapi.PrSmtpAddress, Value: "bob@hermex.test"},
+		}},
+		Attachments: []oxcmail.Attachment{{Props: mapi.PropertyValues{
+			{Tag: mapi.PrAttachMethod, Value: int32(mapi.AttachByValue)},
+			{Tag: mapi.PrAttachLongFilename, Value: "note.txt"},
+			{Tag: mapi.PrAttachDataBin, Value: []byte("attached-bytes")},
+		}}},
+	}
+	id, err := st.CreateMessage(int64(mapi.PrivateFIDInbox), msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// TestCopyToSubObjects proves RopCopyTo carries a message's sub-objects: with
+// WantSubObjects set, the recipient and the attachment (including its data) are
+// copied into the compose destination; excluding PR_MESSAGE_ATTACHMENTS suppresses
+// the attachment while keeping the recipient; and without WantSubObjects neither
+// sub-object is copied (only scalar properties). This is the gap the earlier code
+// left when it copied scalar properties only.
+func TestCopyToSubObjects(t *testing.T) {
+	dir := t.TempDir()
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	srcID := uint64(seedMessageWithSubObjects(t, dir))
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	store := sess.get(logonH).store
+
+	// Open the source, CopyTo into a fresh compose message, save it, and return the
+	// stored destination message.
+	copyInto := func(wantSub uint8, excluded []mapi.PropTag) *oxcmail.Message {
+		t.Helper()
+		_, hh := sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, srcID))), []uint32{logonH, 0xFFFFFFFF})
+		sH := hh[1]
+		_, hh = sess.Dispatch(buildCreateMessage(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+		dH := hh[1]
+		resp, _ := sess.Dispatch(buildCopyToWS(0, 1, wantSub, 0, excluded), []uint32{sH, dH})
+		p := ext.NewPull(resp, ext.FlagUTF16)
+		if id := mustU8(t, p, "RopId"); id != ropCopyTo {
+			t.Fatalf("CopyTo RopId = %#x", id)
+		}
+		mustU8(t, p, "hindex")
+		if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+			t.Fatalf("CopyTo ReturnValue = %#x", ec)
+		}
+		dstID := int64(mapi.EID(saveChangesEID(t, mustDispatch(sess, buildSaveChangesMessage(0, 1), logonH, dH))).GCValue())
+		m, err := store.OpenMessage(dstID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+
+	// WantSubObjects: recipient and attachment (with data) both copied.
+	full := copyInto(1, nil)
+	if len(full.Recipients) != 1 {
+		t.Fatalf("recipients copied = %d, want 1", len(full.Recipients))
+	}
+	if e, _ := full.Recipients[0].Get(mapi.PrSmtpAddress); e != "bob@hermex.test" {
+		t.Errorf("copied recipient smtp = %v, want bob@hermex.test", e)
+	}
+	if len(full.Attachments) != 1 {
+		t.Fatalf("attachments copied = %d, want 1", len(full.Attachments))
+	}
+	if data, _ := full.Attachments[0].Props.Get(mapi.PrAttachDataBin); !bytes.Equal(asBytes(data), []byte("attached-bytes")) {
+		t.Errorf("copied attachment data = %q, want attached-bytes", asBytes(data))
+	}
+
+	// Exclude PR_MESSAGE_ATTACHMENTS: recipient still copied, attachment suppressed.
+	noAtt := copyInto(1, []mapi.PropTag{mapi.PrMessageAttachments})
+	if len(noAtt.Recipients) != 1 {
+		t.Errorf("recipients with attachments excluded = %d, want 1", len(noAtt.Recipients))
+	}
+	if len(noAtt.Attachments) != 0 {
+		t.Errorf("attachment not suppressed by exclude = %d, want 0", len(noAtt.Attachments))
+	}
+
+	// WantSubObjects FALSE: no sub-objects, but scalar properties still copied.
+	none := copyInto(0, nil)
+	if len(none.Recipients) != 0 || len(none.Attachments) != 0 {
+		t.Errorf("sub-objects copied without WantSubObjects: recips=%d attachs=%d", len(none.Recipients), len(none.Attachments))
+	}
+	if subj, _ := none.Props.Get(mapi.PrSubject); subj != "FWDSRC" {
+		t.Errorf("scalar subject not copied = %v, want FWDSRC", subj)
+	}
+}
+
+// asBytes coerces a property value to its byte slice (PtBinary), or nil.
+func asBytes(v any) []byte {
+	b, _ := v.([]byte)
+	return b
 }
 
 // mustDispatch dispatches a single ROP with a two-slot handle array and returns the
