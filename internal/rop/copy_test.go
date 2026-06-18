@@ -151,6 +151,38 @@ func TestCopyPropertiesErrors(t *testing.T) {
 	}
 }
 
+// TestCopyReflectsBufferedEdits proves CopyTo copies the source's open working
+// copy: a property set on the source but not yet saved is carried into the
+// destination. Reading the source from the store alone would copy the stale value.
+func TestCopyReflectsBufferedEdits(t *testing.T) {
+	dir := t.TempDir()
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	mid := uint64(seedInboxMessage(t, dir, "COPYBUF"))
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	store := sess.get(logonH).store
+
+	// Open the source and set importance to 7 without saving.
+	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
+	srcH := h[1]
+	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrImportance, Value: int32(7)}}), []uint32{srcH})
+
+	// CopyTo into a fresh compose message, excluding nothing, then save it.
+	_, h = sess.Dispatch(buildCreateMessage(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	dstH := h[1]
+	sess.Dispatch(buildCopyTo(0, 1, 0, nil), []uint32{srcH, dstH})
+	dstID := int64(mapi.EID(saveChangesEID(t, mustDispatch(sess, buildSaveChangesMessage(0, 1), logonH, dstH))).GCValue())
+
+	// The destination carries the buffered importance, not the source's stored 1.
+	props, _ := store.GetMessageProperties(dstID, mapi.PrImportance)
+	if v, ok := props.Get(mapi.PrImportance); !ok || v != int32(7) {
+		t.Errorf("CopyTo importance = %v (present=%v), want the source's buffered 7", v, ok)
+	}
+}
+
 // mustDispatch dispatches a single ROP with a two-slot handle array and returns the
 // response bytes — a small helper for the save steps in the copy tests.
 func mustDispatch(sess *Session, rop []byte, h0, h1 uint32) []byte {

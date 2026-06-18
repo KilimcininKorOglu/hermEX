@@ -1,6 +1,8 @@
 package rop
 
 import (
+	"slices"
+
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
 )
@@ -75,10 +77,13 @@ func (s *Session) ropOpenMessage(p *ext.Pull, out *ext.Push, handles []uint32, h
 }
 
 // readMessageProps returns the requested properties of a message-kind object. An
-// opened store message reads from the store; an embedded message reads from the
-// in-memory message imported from its parent attachment's encapsulated bytes. An
-// empty tag list returns the full bag (matching GetMessageProperties). The bool
-// reports whether the object is a readable message kind.
+// opened store message reads from the store and then overlays its buffered edits
+// so a read reflects the open working copy (MAPI's read-your-writes contract: a
+// SetProperties/DeleteProperties before SaveChangesMessage is visible to a
+// GetProperties on the same handle). An embedded message reads from the in-memory
+// message imported from its parent attachment's encapsulated bytes. An empty tag
+// list returns the full bag (matching GetMessageProperties). The bool reports
+// whether the object is a readable message kind.
 func (o *object) readMessageProps(tags ...mapi.PropTag) (mapi.PropertyValues, bool, error) {
 	switch o.kind {
 	case kindMessage:
@@ -86,7 +91,10 @@ func (o *object) readMessageProps(tags ...mapi.PropTag) (mapi.PropertyValues, bo
 			return nil, false, nil
 		}
 		props, err := o.store.GetMessageProperties(o.messageID, tags...)
-		return props, true, err
+		if err != nil {
+			return nil, true, err
+		}
+		return o.applyPending(props, tags), true, nil
 	case kindEmbedded:
 		if o.embedded == nil || o.embedded.msg == nil {
 			return nil, false, nil
@@ -94,6 +102,28 @@ func (o *object) readMessageProps(tags ...mapi.PropTag) (mapi.PropertyValues, bo
 		return selectProps(o.embedded.msg.Props, tags), true, nil
 	}
 	return nil, false, nil
+}
+
+// applyPending overlays an opened message's buffered edits onto a freshly read
+// store property bag so a read reflects the working copy: a buffered delete drops
+// its tag, a buffered set overrides (or adds) its value. tags is the read's
+// requested tag filter (empty = all); a buffered set is surfaced only when it
+// falls within that filter, matching how the store read itself narrows. After fix
+// of the set/delete buffers, the two are mutually exclusive per tag, so the order
+// (deletes then sets) is incidental.
+func (o *object) applyPending(props mapi.PropertyValues, tags []mapi.PropTag) mapi.PropertyValues {
+	if len(o.pendingDeletes) == 0 && len(o.pendingProps) == 0 {
+		return props
+	}
+	for _, t := range o.pendingDeletes {
+		props = removeTag(props, t)
+	}
+	for _, pv := range o.pendingProps {
+		if len(tags) == 0 || slices.Contains(tags, pv.Tag) {
+			props.Set(pv.Tag, pv.Value)
+		}
+	}
+	return props
 }
 
 // selectProps narrows a property bag to the requested tags, keeping only the ones

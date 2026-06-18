@@ -132,8 +132,9 @@ func objectCategory(o *object) int {
 }
 
 // objectAllProps reads an object's full property bag for a copy source: a stored
-// message reads from the store (its buffered edits are not included in a copy in
-// v1); the in-memory kinds return their bag directly.
+// message reads from the store and overlays its buffered edits, so a copy reflects
+// the open working copy the same way a read does; the in-memory kinds return their
+// bag directly.
 func (s *Session) objectAllProps(o *object) (mapi.PropertyValues, bool) {
 	switch o.kind {
 	case kindMessage:
@@ -141,7 +142,7 @@ func (s *Session) objectAllProps(o *object) (mapi.PropertyValues, bool) {
 		if err != nil {
 			return nil, false
 		}
-		return props, true
+		return o.applyPending(props, nil), true
 	case kindNewMessage:
 		return o.newMsg.props, true
 	case kindEmbedded:

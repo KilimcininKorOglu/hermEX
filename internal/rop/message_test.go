@@ -156,6 +156,59 @@ func TestOpenMessageAndGetProps(t *testing.T) {
 	}
 }
 
+// TestReadReflectsBufferedEdits locks MAPI's read-your-writes contract on an
+// opened message: a SetProperties and a DeleteProperties issued before any
+// SaveChangesMessage are visible to a GetProperties on the same handle, while the
+// store stays untouched until the save. Without the overlay a read would return
+// the stale persisted values.
+func TestReadReflectsBufferedEdits(t *testing.T) {
+	dir := t.TempDir()
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	mid := uint64(seedInboxMessage(t, dir, "RYW"))
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	store := sess.get(logonH).store
+
+	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
+	msgH := h[1]
+
+	// Buffer a set (importance -> 2, distinct from the seed's normal/1) and a delete
+	// (subject) without saving.
+	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrImportance, Value: int32(2)}}), []uint32{msgH})
+	sess.Dispatch(buildDeletePropsOp(ropDeleteProperties, 0, []mapi.PropTag{mapi.PrSubject}), []uint32{msgH})
+
+	// GetPropertiesSpecific reflects the working copy: importance is the set value,
+	// subject is absent (the buffered delete).
+	cols := []mapi.PropTag{mapi.PrImportance, mapi.PrSubject}
+	gps, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{msgH})
+	p := ext.NewPull(gps, ext.FlagUTF16)
+	mustU8(t, p, "RopId")
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("GetPropertiesSpecific ec = %#x", ec)
+	}
+	row := decodeRow(t, p, cols)
+	if v, ok := row.Get(mapi.PrImportance); !ok || v != int32(2) {
+		t.Errorf("read importance = %v (present=%v), want the buffered 2", v, ok)
+	}
+	if _, ok := row.Get(mapi.PrSubject); ok {
+		t.Error("read still returned the subject after a buffered delete")
+	}
+
+	// The store is untouched until SaveChangesMessage: the persisted subject is
+	// still there and importance is not the buffered value.
+	stored, _ := store.GetMessageProperties(int64(mid), mapi.PrSubject, mapi.PrImportance)
+	if _, ok := stored.Get(mapi.PrSubject); !ok {
+		t.Error("the buffered delete was persisted before SaveChangesMessage")
+	}
+	if v, _ := stored.Get(mapi.PrImportance); v == int32(2) {
+		t.Error("the buffered set was persisted before SaveChangesMessage")
+	}
+}
+
 // TestOpenMessageNotFound confirms opening a non-existent message id yields
 // ecNotFound.
 func TestOpenMessageNotFound(t *testing.T) {
