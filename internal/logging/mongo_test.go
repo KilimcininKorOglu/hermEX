@@ -42,9 +42,9 @@ func (f *fakeInserter) totals() (calls, docs int) {
 // the inserter — Close drains the buffer and makes a final flush.
 func TestMongoSinkFlushesBufferedEventsOnClose(t *testing.T) {
 	fi := &fakeInserter{}
-	s := newAsyncSink(fi)
+	s := newAsyncSink(fi, "")
 	const n = 10
-	for i := 0; i < n; i++ {
+	for range n {
 		s.Write(Event{Subsystem: IMAP, Name: "conn.accept"})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -70,12 +70,12 @@ func TestMongoSinkWriteNeverBlocks(t *testing.T) {
 		<-block
 		return nil
 	})
-	s := newAsyncSink(stalled)
+	s := newAsyncSink(stalled, "")
 
 	const flood = mongoBufferSize + mongoBatchSize + 5000
 	done := make(chan struct{})
 	go func() {
-		for i := 0; i < flood; i++ {
+		for range flood {
 			s.Write(Event{Subsystem: System, Name: "x"})
 		}
 		close(done)
@@ -114,7 +114,7 @@ func TestMongoSinkIntegration(t *testing.T) {
 	raw.Database(db).Drop(bg) // clean slate
 	defer raw.Database(db).Drop(bg)
 
-	sink, err := NewMongoSink(uri, db, time.Hour)
+	sink, err := NewMongoSink(uri, db, "", time.Hour)
 	if err != nil {
 		t.Fatalf("NewMongoSink: %v", err)
 	}

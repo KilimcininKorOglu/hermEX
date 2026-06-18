@@ -42,12 +42,20 @@ type MongoSink struct {
 	dropped atomic.Uint64
 	ins     inserter
 	client  *mongo.Client // nil in unit tests that inject an inserter
+
+	// Degradation: when an InsertMany fails the batch is appended to spillPath, and
+	// the next successful write replays it. spillPath/hasSpill are touched only by
+	// the single run() goroutine, so they need no synchronization.
+	spillPath string
+	hasSpill  bool
 }
 
 // NewMongoSink connects to uri, ensures the log collection's indexes (a TTL index
 // enforcing the retention window plus indexes on the admin panel's filter keys),
 // and starts the background writer. The log collection is "logs" in database.
-func NewMongoSink(uri, database string, retention time.Duration) (*MongoSink, error) {
+// spillPath is the local file failed batches are appended to while MongoDB is
+// unreachable (empty disables the spill — events are then dropped on failure).
+func NewMongoSink(uri, database, spillPath string, retention time.Duration) (*MongoSink, error) {
 	client, err := mongo.Connect(options.Client().ApplyURI(uri))
 	if err != nil {
 		return nil, err
@@ -63,20 +71,24 @@ func NewMongoSink(uri, database string, retention time.Duration) (*MongoSink, er
 		client.Disconnect(context.Background())
 		return nil, err
 	}
-	s := newAsyncSink(collInserter{coll: coll})
+	s := newAsyncSink(collInserter{coll: coll}, spillPath)
 	s.client = client
 	return s, nil
 }
 
-// newAsyncSink starts the buffered writer over ins. It is split out from
-// NewMongoSink so the buffering can be tested with a fake inserter.
-func newAsyncSink(ins inserter) *MongoSink {
+// newAsyncSink starts the buffered writer over ins, spilling failed batches to
+// spillPath. It is split out from NewMongoSink so the buffering and spill can be
+// tested with a fake inserter. A spill file left by a previous run is replayed on
+// the first successful write.
+func newAsyncSink(ins inserter, spillPath string) *MongoSink {
 	s := &MongoSink{
-		in:      make(chan Event, mongoBufferSize),
-		closing: make(chan struct{}),
-		closed:  make(chan struct{}),
-		ins:     ins,
+		in:        make(chan Event, mongoBufferSize),
+		closing:   make(chan struct{}),
+		closed:    make(chan struct{}),
+		ins:       ins,
+		spillPath: spillPath,
 	}
+	s.hasSpill = spillFileHasData(spillPath)
 	go s.run()
 	return s
 }
@@ -110,8 +122,13 @@ func (s *MongoSink) run() {
 			docs[i] = toDoc(e)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), mongoWriteTimeout)
-		s.ins.InsertMany(ctx, docs) // a write failure degrades to disk spill in N.Inc 1b
+		err := s.ins.InsertMany(ctx, docs)
 		cancel()
+		if err != nil {
+			s.spill(batch) // MongoDB unreachable — preserve the batch on disk
+		} else {
+			s.replaySpill() // MongoDB is up — drain anything spilled earlier
+		}
 		batch = batch[:0]
 	}
 
