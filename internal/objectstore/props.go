@@ -73,6 +73,35 @@ func (s *Store) GetMessageProperties(messageID int64, tags ...mapi.PropTag) (map
 	return s.getObjectProps("message_properties", "message_id", messageID, tags)
 }
 
+// ModifyMessageProperties upserts properties on an existing message and, in the
+// same transaction, reallocates the message's change number — the in-place-edit
+// counterpart to SetMessageProperties (a pure upsert that leaves the change
+// number untouched). The reference allocates a fresh PidTagChangeNumber on every
+// dirty message save — for a modify exactly as for a create — so an edited-and-
+// resaved message is observed as changed. The load-bearing write is the
+// messages-row change_number bump: ICS content-sync reports the message as
+// updated only when that column advances, so this is what drives the "updated"
+// branch of GetContentSync. The message_size column is left stale (v1 does not
+// recompute it on edit).
+func (s *Store) ModifyMessageProperties(messageID int64, props mapi.PropertyValues) error {
+	tx, err := s.objdb.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := s.insertProps(tx, "message_properties", "message_id", messageID, props); err != nil {
+		return err
+	}
+	cn, err := allocateCN(tx)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE messages SET change_number=? WHERE message_id=?`, int64(cn), messageID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // SetRecipientProperties upserts properties on a recipient.
 func (s *Store) SetRecipientProperties(recipientID int64, props mapi.PropertyValues) error {
 	return s.setObjectProps("recipients_properties", "recipient_id", recipientID, props)

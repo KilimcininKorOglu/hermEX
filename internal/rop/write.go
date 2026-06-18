@@ -89,8 +89,11 @@ func (s *Session) ropCreateMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 // ropSetProperties handles RopSetProperties ([MS-OXCPRPT] 2.2.2.5): it merges
 // the request's TPROPVAL_ARRAY into the open message's property bag. The values
 // occupy a length-bounded region, read from an isolated slice so trailing bytes
-// in that region cannot be over-read. v1 supports it on a message being
-// composed; it reports no property problems.
+// in that region cannot be over-read. It supports both a message being composed
+// (kindNewMessage) and an existing message opened for edit (kindMessage), whose
+// changes are buffered in pendingProps and flushed by SaveChangesMessage —
+// MAPI's transactional semantics keep an edit invisible until that save. It
+// reports no property problems.
 func (s *Session) ropSetProperties(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	size, e1 := p.Uint16() // PropertyValueSize
 	if e1 != nil {
@@ -105,12 +108,22 @@ func (s *Session) ropSetProperties(p *ext.Pull, out *ext.Push, handles []uint32,
 		return false
 	}
 	obj := s.get(handleAt(handles, hindex))
-	if obj == nil || obj.kind != kindNewMessage {
+	if obj == nil {
 		writeErr(out, ropSetProperties, hindex, ecError)
 		return true
 	}
-	for _, tv := range propvals {
-		obj.newMsg.props.Set(tv.Tag, tv.Value)
+	switch obj.kind {
+	case kindNewMessage:
+		for _, tv := range propvals {
+			obj.newMsg.props.Set(tv.Tag, tv.Value)
+		}
+	case kindMessage:
+		for _, tv := range propvals {
+			obj.pendingProps.Set(tv.Tag, tv.Value)
+		}
+	default:
+		writeErr(out, ropSetProperties, hindex, ecError)
+		return true
 	}
 
 	out.Uint8(ropSetProperties)
@@ -191,6 +204,25 @@ func (s *Session) ropSaveChangesMessage(p *ext.Pull, out *ext.Push, handles []ui
 		out.Uint64(uint64(mapi.MakeEIDEx(1, mid)))
 		return true
 	}
+	// An existing message opened for edit flushes its buffered property changes
+	// in place, reallocating the change number so ICS observes the edit. With no
+	// pending changes the save is a no-op success (no spurious change-number bump),
+	// matching the reference's !b_touched early-out.
+	if obj.kind == kindMessage {
+		if len(obj.pendingProps) > 0 {
+			if err := obj.store.ModifyMessageProperties(obj.messageID, obj.pendingProps); err != nil {
+				writeErr(out, ropSaveChangesMessage, hindex, ecError)
+				return true
+			}
+			obj.pendingProps = nil
+		}
+		out.Uint8(ropSaveChangesMessage)
+		out.Uint8(hindex)
+		out.Uint32(ecSuccess)
+		out.Uint8(ihindex2)
+		out.Uint64(uint64(mapi.MakeEIDEx(1, uint64(obj.messageID))))
+		return true
+	}
 	if obj.kind != kindNewMessage {
 		writeErr(out, ropSaveChangesMessage, hindex, ecError)
 		return true
@@ -199,7 +231,11 @@ func (s *Session) ropSaveChangesMessage(p *ext.Pull, out *ext.Push, handles []ui
 	var id int64
 	var err error
 	if nm.saved {
-		err = obj.store.SetMessageProperties(nm.savedID, nm.props)
+		// A composed message re-saved after its first persist is an in-place edit:
+		// reallocate the change number through the same path an opened message
+		// uses, rather than a pure upsert (which would leave the message looking
+		// unchanged to ICS).
+		err = obj.store.ModifyMessageProperties(nm.savedID, nm.props)
 		id = nm.savedID
 	} else {
 		id, err = obj.store.CreateMessage(nm.folderID, &oxcmail.Message{

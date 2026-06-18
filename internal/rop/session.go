@@ -39,6 +39,7 @@ type object struct {
 	folderID     int64                         // kindFolder
 	table        *tableState                   // kindTable
 	messageID    int64                         // kindMessage
+	pendingProps mapi.PropertyValues           // kindMessage: in-place edits buffered until SaveChangesMessage
 	stream       *streamState                  // kindStream
 	attachProps  mapi.PropertyValues           // kindAttachment
 	newMsg       *newMessageState              // kindNewMessage
