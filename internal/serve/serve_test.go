@@ -223,6 +223,64 @@ func (c *captureSink) last() (logging.Event, bool) {
 	return c.events[len(c.events)-1], true
 }
 
+func (c *captureSink) find(name string) (logging.Event, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, e := range c.events {
+		if e.Name == name {
+			return e, true
+		}
+	}
+	return logging.Event{}, false
+}
+
+// TestTLSHandshakeLogged proves serve logs a tls.handshake event (version + cipher)
+// for a completed TLS handshake, so the central log records how clients connect.
+func TestTLSHandshakeLogged(t *testing.T) {
+	dir := t.TempDir()
+	certPath, keyPath := writeSelfSignedCert(t, dir)
+	sink := &captureSink{}
+	hs, err := New("127.0.0.1:0", okHandler(), &config.Config{TLSCert: certPath, TLSKey: keyPath}, logging.New(sink), logging.System)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go hs.Start()
+	defer hs.Shutdown(context.Background())
+
+	pemBytes, err := os.ReadFile(certPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pemBytes) {
+		t.Fatal("AppendCertsFromPEM: no cert added")
+	}
+	client := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
+	resp, err := client.Get("https://" + hs.Addr().String() + "/")
+	if err != nil {
+		t.Fatalf("HTTPS GET: %v", err)
+	}
+	resp.Body.Close()
+
+	var e logging.Event
+	var ok bool
+	for range 50 {
+		if e, ok = sink.find("handshake"); ok {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !ok {
+		t.Fatal("no tls.handshake event")
+	}
+	if e.Subsystem != logging.TLS {
+		t.Errorf("handshake subsystem = %q, want tls", e.Subsystem)
+	}
+	if e.Fields["version"] == nil || e.Fields["cipher"] == nil {
+		t.Errorf("handshake missing version/cipher: %v", e.Fields)
+	}
+}
+
 // TestRequestLoggingEmitsEvent proves the serve middleware records one structured
 // event per request — method, path, status (and a 4xx level), the presented
 // Basic-auth user, the real client from X-Forwarded-For, and the inbound request

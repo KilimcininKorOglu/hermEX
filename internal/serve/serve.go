@@ -40,9 +40,41 @@ func New(addr string, h http.Handler, cfg *config.Config, logger *logging.Logger
 			ln.Close()
 			return nil, err
 		}
+		if logger != nil {
+			// Log each completed TLS handshake (version + cipher) under the tls
+			// subsystem. VerifyConnection runs once per connection after the normal
+			// verification; returning nil leaves that verification unchanged.
+			tc = tc.Clone()
+			tc.VerifyConnection = func(cs tls.ConnectionState) error {
+				logger.Emit(logging.Event{
+					Level:     logging.LevelInfo,
+					Subsystem: logging.TLS,
+					Name:      "handshake",
+					Fields:    logging.Fields{"version": tlsVersionName(cs.Version), "cipher": tls.CipherSuiteName(cs.CipherSuite)},
+				})
+				return nil
+			}
+		}
 		ln = tls.NewListener(ln, tc)
 	}
 	return &Server{httpSrv: &http.Server{Handler: logMiddleware(h, logger, subsystem)}, ln: ln}, nil
+}
+
+// tlsVersionName renders a TLS version constant as a human-readable number for the
+// handshake log.
+func tlsVersionName(v uint16) string {
+	switch v {
+	case tls.VersionTLS13:
+		return "1.3"
+	case tls.VersionTLS12:
+		return "1.2"
+	case tls.VersionTLS11:
+		return "1.1"
+	case tls.VersionTLS10:
+		return "1.0"
+	default:
+		return "unknown"
+	}
 }
 
 // Addr reports the bound listen address, including the resolved port when addr
