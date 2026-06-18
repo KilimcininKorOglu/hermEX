@@ -9,10 +9,10 @@ import (
 // comment are parsed but not yet acted on (v1 always creates, never reopens).
 func (s *Session) ropCreateFolder(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	_ /* ohindex */, eh := p.Uint8() // output handle index (v1 does not allocate)
-	_ /* ft */, e0 := p.Uint8()       // FolderType
-	uv, e1 := p.Uint8()                // UseUnicode
-	_ /* oe */, e2 := p.Uint8()        // OpenExisting
-	_ /* rs */, e3 := p.Uint32()       // Reserved
+	_ /* ft */, e0 := p.Uint8()      // FolderType
+	uv, e1 := p.Uint8()              // UseUnicode
+	_ /* oe */, e2 := p.Uint8()      // OpenExisting
+	_ /* rs */, e3 := p.Uint32()     // Reserved
 	if eh != nil || e0 != nil || e1 != nil || e2 != nil || e3 != nil {
 		return false
 	}
@@ -49,9 +49,9 @@ func (s *Session) ropCreateFolder(p *ext.Pull, out *ext.Push, handles []uint32, 
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
 	out.Uint64(uint64(folderID)) // FolderId (FID)
-	out.Uint8(0)                  // IsExisting
-	out.Uint8(0)                  // HasRules
-	out.Uint64(0)                 // Ghost (unused)
+	out.Uint8(0)                 // IsExisting
+	out.Uint8(0)                 // HasRules
+	out.Uint64(0)                // Ghost (unused)
 	return true
 }
 
@@ -218,6 +218,44 @@ func (s *Session) ropHardDeleteMessages(p *ext.Pull, out *ext.Push, handles []ui
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
 	out.Uint8(0) // PartialCompletion
+	return true
+}
+
+// ropSetSearchCriteria handles RopSetSearchCriteria ([MS-OXCFOLD] 2.2.1.4): it sets
+// the restriction, scope folders, and search flags on a search folder. v1 has no
+// search-folder backend, so the request body is fully consumed (to keep the parser
+// aligned in a multi-ROP batch) and ecNotSupported is returned. The body is
+// RestrictionDataSize (u16) + RestrictionData + FolderIds (EID_ARRAY) + SearchFlags (u32).
+func (s *Session) ropSetSearchCriteria(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	resSize, e1 := p.Uint16() // RestrictionDataSize
+	if e1 != nil {
+		return false
+	}
+	if _, err := p.Raw(int(resSize)); err != nil { // RestrictionData
+		return false
+	}
+	if _, err := p.EIDs(); err != nil { // FolderIds (EID_ARRAY, wide-count)
+		return false
+	}
+	if _, err := p.Uint32(); err != nil { // SearchFlags
+		return false
+	}
+	writeErr(out, ropSetSearchCriteria, hindex, ecNotSupported)
+	return true
+}
+
+// ropGetSearchCriteria handles RopGetSearchCriteria ([MS-OXCFOLD] 2.2.1.5): it
+// returns the restriction, scope folders, and search status of a search folder.
+// v1 has no search-folder backend, so the request body (three u8 flags) is
+// consumed and ecNotSupported is returned.
+func (s *Session) ropGetSearchCriteria(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	_ /* useUnicode */, e1 := p.Uint8()
+	_ /* includeRestriction */, e2 := p.Uint8()
+	_ /* includeFolders */, e3 := p.Uint8()
+	if e1 != nil || e2 != nil || e3 != nil {
+		return false
+	}
+	writeErr(out, ropGetSearchCriteria, hindex, ecNotSupported)
 	return true
 }
 

@@ -29,7 +29,7 @@ const (
 	ropFindRow               uint8 = 0x4F
 	ropExpandRow             uint8 = 0x59
 	ropCollapseRow           uint8 = 0x5A
-	ropSetCollapseState       uint8 = 0x6C
+	ropSetCollapseState      uint8 = 0x6C
 	ropResetTable            uint8 = 0x81
 	ropGetAttachmentTable    uint8 = 0x21
 	ropOpenAttachment        uint8 = 0x22
@@ -41,7 +41,9 @@ const (
 	ropMoveFolder            uint8 = 0x35
 	ropCopyFolder            uint8 = 0x36
 	ropEmptyFolder           uint8 = 0x58
-	ropHardDeleteMessages     uint8 = 0x91
+	ropHardDeleteMessages    uint8 = 0x91
+	ropSetSearchCriteria     uint8 = 0x30
+	ropGetSearchCriteria     uint8 = 0x31
 )
 
 // MAPI return codes ([MS-OXCDATA] 2.4.1) carried in a ROP response ReturnValue.
@@ -148,6 +150,14 @@ loop:
 			if !s.ropHardDeleteMessages(p, out, handles, hindex) {
 				break loop
 			}
+		case ropSetSearchCriteria:
+			if !s.ropSetSearchCriteria(p, out, handles, hindex) {
+				break loop
+			}
+		case ropGetSearchCriteria:
+			if !s.ropGetSearchCriteria(p, out, handles, hindex) {
+				break loop
+			}
 		case ropSaveChangesMessage:
 			if !s.ropSaveChangesMessage(p, out, handles, hindex) {
 				break loop
@@ -188,30 +198,30 @@ loop:
 			if !s.ropSeekRow(p, out, handles, hindex) {
 				break loop
 			}
-			case ropSeekRowBookmark:
-				if !s.ropSeekRowBookmark(p, out, handles, hindex) {
-					break loop
-				}
-			case ropCreateBookmark:
-				if !s.ropCreateBookmark(p, out, handles, hindex) {
-					break loop
-				}
+		case ropSeekRowBookmark:
+			if !s.ropSeekRowBookmark(p, out, handles, hindex) {
+				break loop
+			}
+		case ropCreateBookmark:
+			if !s.ropCreateBookmark(p, out, handles, hindex) {
+				break loop
+			}
 		case ropFindRow:
 			if !s.ropFindRow(p, out, handles, hindex) {
 				break loop
 			}
-			case ropExpandRow:
-				if !s.ropExpandRow(p, out, handles, hindex) {
-					break loop
-				}
-			case ropCollapseRow:
-				if !s.ropCollapseRow(p, out, handles, hindex) {
-					break loop
-				}
-			case ropSetCollapseState:
-				if !s.ropSetCollapseState(p, out, handles, hindex) {
-					break loop
-				}
+		case ropExpandRow:
+			if !s.ropExpandRow(p, out, handles, hindex) {
+				break loop
+			}
+		case ropCollapseRow:
+			if !s.ropCollapseRow(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSetCollapseState:
+			if !s.ropSetCollapseState(p, out, handles, hindex) {
+				break loop
+			}
 		case ropResetTable:
 			if !s.ropResetTable(p, out, handles, hindex) {
 				break loop
