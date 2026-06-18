@@ -249,24 +249,29 @@ func (s *Session) ropSaveChangesAttachment(p *ext.Pull, out *ext.Push, handles [
 	aw := att.attachW
 	if aw.inMem != nil {
 		// Compose-time attachment: merge the buffered properties into the in-memory
-		// attachment. The message (with its attachments) is written when its own
-		// SaveChangesMessage calls CreateMessage, so there is no store row to flush
-		// to and no parent change number to bump here.
+		// attachment and drop the buffered deletes. The message (with its attachments)
+		// is written when its own SaveChangesMessage calls CreateMessage, so there is no
+		// store row to flush to and no parent change number to bump here.
 		for _, tv := range aw.pending {
 			aw.inMem.props.Set(tv.Tag, tv.Value)
 		}
+		for _, t := range aw.pendingDeletes {
+			aw.inMem.props = removeTag(aw.inMem.props, t)
+		}
 		aw.pending = nil
+		aw.pendingDeletes = nil
 		out.Uint8(ropSaveChangesAttachment)
 		out.Uint8(hindex)
 		out.Uint32(ecSuccess)
 		return true
 	}
-	if len(aw.pending) > 0 {
-		if err := att.store.SetAttachmentProperties(aw.attachmentID, aw.pending); err != nil {
+	if len(aw.pending) > 0 || len(aw.pendingDeletes) > 0 {
+		if err := att.store.SetAttachmentProperties(aw.attachmentID, aw.pending, aw.pendingDeletes...); err != nil {
 			writeErr(out, ropSaveChangesAttachment, hindex, ecError)
 			return true
 		}
 		aw.pending = nil
+		aw.pendingDeletes = nil
 	}
 	// Mark the parent message (the common-header handle) dirty so SaveChangesMessage
 	// bumps its change number even when no top-level property changed.

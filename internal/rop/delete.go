@@ -49,6 +49,11 @@ func (s *Session) deleteProperties(ropID uint8, p *ext.Pull, out *ext.Push, hand
 			obj.embedded.msg.Props = removeTag(obj.embedded.msg.Props, t)
 		}
 	case kindAttachWrite:
+		// Buffer the removals like an opened message: drop any buffered set for the
+		// tag, and stage the delete so SaveChangesAttachment removes it from the stored
+		// attachment row (a property persisted at CreateAttachment is otherwise only
+		// dropped from the pending bag, leaving the store row untouched).
+		obj.attachW.pendingDeletes = append(obj.attachW.pendingDeletes, tags...)
 		for _, t := range tags {
 			obj.attachW.pending = removeTag(obj.attachW.pending, t)
 		}

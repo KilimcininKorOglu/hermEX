@@ -1,6 +1,7 @@
 package rop
 
 import (
+	"bytes"
 	"testing"
 
 	"hermex/internal/ext"
@@ -141,5 +142,71 @@ func TestSetAfterDeleteWins(t *testing.T) {
 	}
 	if v != int32(2) {
 		t.Errorf("PrImportance = %v, want 2 (the value set after the delete)", v)
+	}
+}
+
+// storeAttachment reads the single attachment's property bag from the stored
+// message, for the attachment-delete test.
+func storeAttachment(t *testing.T, store *objectstore.Store, mid int64) mapi.PropertyValues {
+	t.Helper()
+	m, err := store.OpenMessage(mid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Attachments) != 1 {
+		t.Fatalf("stored message has %d attachments, want 1", len(m.Attachments))
+	}
+	return m.Attachments[0].Props
+}
+
+// TestDeleteAttachmentPropertyReachesStore drives RopDeleteProperties on a created
+// attachment whose properties are already persisted: a filename is set and saved,
+// then deleted and saved again. The delete must reach the stored attachment row,
+// not just the pending bag (a property persisted at CreateAttachment or an earlier
+// save was otherwise only dropped from the pending bag). It also locks the
+// set-after-delete order on an attachment: a property deleted then set again in one
+// edit survives.
+func TestDeleteAttachmentPropertyReachesStore(t *testing.T) {
+	dir := t.TempDir()
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	mid := seedInboxMessage(t, dir, "ATTDELHOST")
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	store := sess.get(logonH).store
+
+	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(mid)))), []uint32{logonH, 0xFFFFFFFF})
+	msgH := h[1]
+
+	// Create an attachment (a real store row), set filename + data, and save them.
+	_, attH := createAttachmentNum(t, sess, msgH)
+	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+		{Tag: mapi.PrAttachLongFilename, Value: "doc.txt"},
+		{Tag: mapi.PrAttachDataBin, Value: []byte("DATA")},
+	}), []uint32{attH})
+	sess.Dispatch(buildSaveChangesAttachment(0, 1), []uint32{msgH, attH})
+	if fn, _ := storeAttachment(t, store, mid).Get(mapi.PrAttachLongFilename); fn != "doc.txt" {
+		t.Fatalf("persisted filename = %v, want doc.txt", fn)
+	}
+
+	// Delete the filename and save: the store row must lose it, the data stays.
+	sess.Dispatch(buildDeletePropsOp(ropDeleteProperties, 0, []mapi.PropTag{mapi.PrAttachLongFilename}), []uint32{attH})
+	sess.Dispatch(buildSaveChangesAttachment(0, 1), []uint32{msgH, attH})
+	att1 := storeAttachment(t, store, mid)
+	if _, ok := att1.Get(mapi.PrAttachLongFilename); ok {
+		t.Error("attachment filename survived DeleteProperties in the store")
+	}
+	if d, _ := att1.Get(mapi.PrAttachDataBin); !bytes.Equal(asBytes(d), []byte("DATA")) {
+		t.Errorf("attachment data lost on filename delete: %q", asBytes(d))
+	}
+
+	// Set-after-delete: delete then set the filename in one edit; the set wins.
+	sess.Dispatch(buildDeletePropsOp(ropDeleteProperties, 0, []mapi.PropTag{mapi.PrAttachLongFilename}), []uint32{attH})
+	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrAttachLongFilename, Value: "again.txt"}}), []uint32{attH})
+	sess.Dispatch(buildSaveChangesAttachment(0, 1), []uint32{msgH, attH})
+	if fn, _ := storeAttachment(t, store, mid).Get(mapi.PrAttachLongFilename); fn != "again.txt" {
+		t.Errorf("set-after-delete attachment filename = %v, want again.txt", fn)
 	}
 }

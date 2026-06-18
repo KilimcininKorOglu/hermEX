@@ -118,9 +118,27 @@ func (s *Store) GetRecipientProperties(recipientID int64, tags ...mapi.PropTag) 
 	return s.getObjectProps("recipients_properties", "recipient_id", recipientID, tags)
 }
 
-// SetAttachmentProperties upserts properties on an attachment.
-func (s *Store) SetAttachmentProperties(attachmentID int64, props mapi.PropertyValues) error {
-	return s.setObjectProps("attachment_properties", "attachment_id", attachmentID, props)
+// SetAttachmentProperties upserts properties on an attachment and, when deletes are
+// given, removes those property tags in the same transaction (the attachment
+// counterpart of ModifyMessageProperties). An attachment carries no change number
+// of its own — the parent message's change number advances on its own save — so
+// this does not bump one.
+func (s *Store) SetAttachmentProperties(attachmentID int64, props mapi.PropertyValues, deletes ...mapi.PropTag) error {
+	if len(deletes) == 0 {
+		return s.setObjectProps("attachment_properties", "attachment_id", attachmentID, props)
+	}
+	tx, err := s.objdb.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := s.insertProps(tx, "attachment_properties", "attachment_id", attachmentID, props); err != nil {
+		return err
+	}
+	if err := s.deleteProps(tx, "attachment_properties", "attachment_id", attachmentID, deletes); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // GetAttachmentProperties returns the requested attachment properties; with no

@@ -130,6 +130,7 @@ func (s *Session) ropSetProperties(p *ext.Pull, out *ext.Push, handles []uint32,
 	case kindAttachWrite:
 		for _, tv := range propvals {
 			obj.attachW.pending.Set(tv.Tag, tv.Value)
+			obj.attachW.pendingDeletes = dropDeleteTag(obj.attachW.pendingDeletes, tv.Tag)
 		}
 	case kindEmbedded:
 		// A composed embedded message buffers its edits in memory; they are exported

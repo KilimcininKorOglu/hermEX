@@ -44,11 +44,12 @@ const (
 // CreateMessage. In that mode messageID/attachmentID are unset and
 // SaveChangesAttachment merges pending into inMem.props rather than the store.
 type attachWrite struct {
-	messageID    int64
-	attachmentID int64
-	attachNum    uint32
-	pending      mapi.PropertyValues
-	inMem        *newAttachment
+	messageID      int64
+	attachmentID   int64
+	attachNum      uint32
+	pending        mapi.PropertyValues
+	pendingDeletes []mapi.PropTag
+	inMem          *newAttachment
 }
 
 // embeddedMessage is a message encapsulated in an attachment (a message/rfc822
