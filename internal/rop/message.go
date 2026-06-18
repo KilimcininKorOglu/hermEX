@@ -74,6 +74,45 @@ func (s *Session) ropOpenMessage(p *ext.Pull, out *ext.Push, handles []uint32, h
 	return true
 }
 
+// readMessageProps returns the requested properties of a message-kind object. An
+// opened store message reads from the store; an embedded message reads from the
+// in-memory message imported from its parent attachment's encapsulated bytes. An
+// empty tag list returns the full bag (matching GetMessageProperties). The bool
+// reports whether the object is a readable message kind.
+func (o *object) readMessageProps(tags ...mapi.PropTag) (mapi.PropertyValues, bool, error) {
+	switch o.kind {
+	case kindMessage:
+		if o.store == nil {
+			return nil, false, nil
+		}
+		props, err := o.store.GetMessageProperties(o.messageID, tags...)
+		return props, true, err
+	case kindEmbedded:
+		if o.embedded == nil || o.embedded.msg == nil {
+			return nil, false, nil
+		}
+		return selectProps(o.embedded.msg.Props, tags), true, nil
+	}
+	return nil, false, nil
+}
+
+// selectProps narrows a property bag to the requested tags, keeping only the ones
+// present; an empty tag list returns the whole bag. It mirrors the store's
+// GetMessageProperties shape so the read ROPs treat an in-memory embedded message
+// the same as a stored one.
+func selectProps(all mapi.PropertyValues, tags []mapi.PropTag) mapi.PropertyValues {
+	if len(tags) == 0 {
+		return all
+	}
+	var out mapi.PropertyValues
+	for _, t := range tags {
+		if v, ok := all.Get(t); ok {
+			out.Set(t, v)
+		}
+	}
+	return out
+}
+
 // ropGetPropertiesSpecific handles RopGetPropertiesSpecific ([MS-OXCPRPT]
 // 2.2.2.10): it returns the requested columns of the open message as a single
 // PROPERTY_ROW.
@@ -85,12 +124,12 @@ func (s *Session) ropGetPropertiesSpecific(p *ext.Pull, out *ext.Push, handles [
 		return false
 	}
 	msg := s.get(handleAt(handles, hindex))
-	if msg == nil || msg.kind != kindMessage || msg.store == nil {
+	if msg == nil {
 		writeErr(out, ropGetPropertiesSpecific, hindex, ecError)
 		return true
 	}
-	props, err := msg.store.GetMessageProperties(msg.messageID, cols...)
-	if err != nil {
+	props, ok, err := msg.readMessageProps(cols...)
+	if !ok || err != nil {
 		writeErr(out, ropGetPropertiesSpecific, hindex, ecError)
 		return true
 	}
@@ -118,12 +157,12 @@ func (s *Session) ropGetPropertiesAll(p *ext.Pull, out *ext.Push, handles []uint
 		return false
 	}
 	msg := s.get(handleAt(handles, hindex))
-	if msg == nil || msg.kind != kindMessage || msg.store == nil {
+	if msg == nil {
 		writeErr(out, ropGetPropertiesAll, hindex, ecError)
 		return true
 	}
-	props, err := msg.store.GetMessageProperties(msg.messageID)
-	if err != nil {
+	props, ok, err := msg.readMessageProps()
+	if !ok || err != nil {
 		writeErr(out, ropGetPropertiesAll, hindex, ecError)
 		return true
 	}

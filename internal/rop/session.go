@@ -9,6 +9,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcmail"
 )
 
 // objKind classifies the server object behind a handle. The message + stream/
@@ -27,6 +28,7 @@ const (
 	kindUploadMessage                // an ICS-imported message awaiting its body + save
 	kindFastUpload                   // a FastTransfer destination feeding an upload message
 	kindAttachWrite                  // a created attachment being filled (CreateAttachment → SaveChangesAttachment)
+	kindEmbedded                     // a message encapsulated in an attachment, opened via OpenEmbeddedMessage
 )
 
 // attachWrite is an attachment created on an open message and accumulating its
@@ -47,6 +49,17 @@ type attachWrite struct {
 	attachNum    uint32
 	pending      mapi.PropertyValues
 	inMem        *newAttachment
+}
+
+// embeddedMessage is a message encapsulated in an attachment (a message/rfc822
+// part, PR_ATTACH_METHOD = afEmbeddedMessage). hermEX stores the embedded message
+// as the raw RFC822 bytes in the parent attachment's PR_ATTACH_DATA_BIN rather
+// than as a recursive store row; OpenEmbeddedMessage imports those bytes into msg
+// to serve reads, and a compose/edit exports msg back into the parent attachment.
+// attachmentID identifies the parent attachment row for that write-back.
+type embeddedMessage struct {
+	msg          *oxcmail.Message
+	attachmentID int64
 }
 
 // newAttachment is an attachment staged on a not-yet-persisted compose message.
@@ -73,6 +86,7 @@ type object struct {
 	pendingProps mapi.PropertyValues           // kindMessage: in-place edits buffered until SaveChangesMessage
 	touched      bool                          // kindMessage: an attachment add/delete dirtied the message (bump CN on save)
 	attachW      *attachWrite                  // kindAttachWrite
+	embedded     *embeddedMessage              // kindEmbedded
 	stream       *streamState                  // kindStream
 	attachProps  mapi.PropertyValues           // kindAttachment
 	newMsg       *newMessageState              // kindNewMessage

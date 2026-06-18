@@ -39,6 +39,7 @@ const (
 	ropCreateAttachment      uint8 = 0x23
 	ropDeleteAttachment      uint8 = 0x24
 	ropSaveChangesAttachment uint8 = 0x25
+	ropOpenEmbeddedMessage   uint8 = 0x46
 	ropOpenStream            uint8 = 0x2B
 	ropReadStream            uint8 = 0x2C
 	ropLogon                 uint8 = 0xFE
@@ -187,6 +188,10 @@ loop:
 			}
 		case ropOpenAttachment:
 			if !s.ropOpenAttachment(p, out, handles, hindex) {
+				break loop
+			}
+		case ropOpenEmbeddedMessage:
+			if !s.ropOpenEmbeddedMessage(p, out, handles, hindex) {
 				break loop
 			}
 		case ropCreateAttachment:

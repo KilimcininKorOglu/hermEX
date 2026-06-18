@@ -437,7 +437,16 @@ func buildAttachment(part *mime.Part, stamp uint64) Attachment {
 
 	a.Props.Set(mapi.PrCreationTime, stamp)
 	a.Props.Set(mapi.PrLastModificationTime, stamp)
-	a.Props.Set(mapi.PrAttachMethod, int32(mapi.AttachByValue))
+	// A message/rfc822 part is an embedded message: report it as method-5
+	// (afEmbeddedMessage) so a MAPI/ROP client opens it with RopOpenEmbeddedMessage
+	// rather than streaming the raw bytes. The encapsulated message stays as the raw
+	// RFC822 bytes in PR_ATTACH_DATA_BIN (re-parsed by oxcmail.Import when the client
+	// opens it); export still emits it verbatim by its message/rfc822 MIME tag.
+	method := mapi.AttachByValue
+	if cttype == "message/rfc822" {
+		method = mapi.AttachEmbeddedMsg
+	}
+	a.Props.Set(mapi.PrAttachMethod, int32(method))
 	if data, err := part.DecodedContent(); err == nil {
 		a.Props.Set(mapi.PrAttachDataBin, data)
 	}
