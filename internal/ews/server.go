@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 )
 
 // Server answers EWS and Autodiscover requests for authenticated users.
@@ -19,6 +20,7 @@ type Server struct {
 	auth     directory.Authenticator
 	accounts directory.Accounts
 	hostname string
+	Logger   *logging.Logger // central activity log; nil disables logging
 }
 
 // NewServer builds an EWS server backed by the directory for authentication and

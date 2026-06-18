@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
+	"hermex/internal/serve"
 )
 
 // Server answers ActiveSync and Autodiscover requests for authenticated users.
@@ -18,6 +20,7 @@ type Server struct {
 	auth     directory.Authenticator
 	accounts directory.Accounts
 	hostname string
+	Logger   *logging.Logger // central activity log; nil disables logging
 }
 
 // NewServer builds an ActiveSync server backed by the directory for
@@ -88,6 +91,14 @@ type session struct {
 // dispatch routes a parsed command to its handler. Command handlers are added
 // per increment; an unrecognized or not-yet-implemented command returns 501.
 func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session) {
+	s.Logger.Emit(logging.Event{
+		Level:      logging.LevelInfo,
+		Subsystem:  logging.ActiveSync,
+		Name:       "command",
+		User:       sess.user,
+		RemoteAddr: serve.ClientAddr(r),
+		Fields:     logging.Fields{"cmd": sess.req.cmd},
+	})
 	switch sess.req.cmd {
 	case "Provision":
 		s.handleProvision(w, r)

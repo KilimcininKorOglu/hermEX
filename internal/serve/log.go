@@ -35,7 +35,7 @@ func logMiddleware(h http.Handler, logger *logging.Logger, subsystem logging.Sub
 			Subsystem:  subsystem,
 			Name:       "http.request",
 			User:       user,
-			RemoteAddr: clientAddr(r),
+			RemoteAddr: ClientAddr(r),
 			RequestID:  rid,
 			DurationMs: time.Since(start).Milliseconds(),
 			Fields: logging.Fields{
@@ -88,9 +88,10 @@ func levelForStatus(status int) logging.Level {
 	}
 }
 
-// clientAddr returns the originating client address: the first X-Forwarded-For hop
-// when a proxy (the gateway) set it, otherwise the connection's RemoteAddr.
-func clientAddr(r *http.Request) string {
+// ClientAddr returns the originating client address: the first X-Forwarded-For hop
+// when a proxy (the gateway) set it, otherwise the connection's RemoteAddr. It is
+// exported so the protocol packages behind the gateway log the real client too.
+func ClientAddr(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		first, _, _ := strings.Cut(xff, ",")
 		return strings.TrimSpace(first)

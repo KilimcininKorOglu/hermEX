@@ -41,6 +41,7 @@ func main() {
 	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
 
 	srv := ews.NewServer(dir, dir, cfg.Hostname)
+	srv.Logger = logger
 	addr := cfg.EWSAddr
 	if addr == "" {
 		addr = ":8080"

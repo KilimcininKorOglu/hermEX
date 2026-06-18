@@ -42,6 +42,7 @@ func main() {
 	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
 
 	srv := activesync.NewServer(dir, dir, cfg.Hostname)
+	srv.Logger = logger
 	addr := cfg.ActiveSyncAddr
 	if addr == "" {
 		addr = ":8080"

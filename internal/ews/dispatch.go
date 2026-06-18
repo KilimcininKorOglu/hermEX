@@ -1,6 +1,11 @@
 package ews
 
-import "net/http"
+import (
+	"net/http"
+
+	"hermex/internal/logging"
+	"hermex/internal/serve"
+)
 
 // dispatch parses the SOAP request and routes the operation to its handler.
 // Handlers are added per increment; an unrecognized or not-yet-implemented
@@ -12,6 +17,14 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		writeSOAPFault(w, "ErrorInvalidRequest", "could not parse SOAP envelope: "+err.Error())
 		return
 	}
+	s.Logger.Emit(logging.Event{
+		Level:      logging.LevelInfo,
+		Subsystem:  logging.EWS,
+		Name:       "operation",
+		User:       sess.user,
+		RemoteAddr: serve.ClientAddr(r),
+		Fields:     logging.Fields{"op": op},
+	})
 	switch op {
 	case "GetFolder":
 		s.handleGetFolder(w, inner, sess)
