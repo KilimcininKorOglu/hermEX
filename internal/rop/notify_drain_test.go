@@ -122,3 +122,46 @@ func TestNotifyDrainOverflowEmitsPendingAndRequeues(t *testing.T) {
 		t.Errorf("second drain = %d bytes, want %d (%d notifications, no RopPending)", got, want, total-fit)
 	}
 }
+
+// TestWholeStoreDeliversCreateInAnyFolder proves a whole-store subscription is woken
+// by a message that lands in a folder other than the Inbox — the sweep covers every
+// content folder, not just one. A message is delivered into Sent Items and the next
+// Execute drains a RopNotify for it.
+func TestWholeStoreDeliversCreateInAnyFolder(t *testing.T) {
+	sess := NewSession(t.TempDir(), nil, "")
+	defer sess.Close()
+
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	st := sess.get(logonH).store
+
+	// Whole-store subscription for created events (WantWholeStore=1, no folder scope).
+	_, h = sess.Dispatch(buildRegisterNotification(0, 1, uint8(fnevObjectCreated), 1, 0, 0), []uint32{logonH, 0xFFFFFFFF})
+	subH := h[1]
+
+	// The message lands in Sent Items, not the Inbox.
+	sent := int64(mapi.PrivateFIDSentItems)
+	info, err := st.AppendMessage(sent, []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0)
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
+
+	resp, _ := sess.Dispatch(nil, nil)
+	p := ext.NewPull(resp, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropNotify {
+		t.Fatalf("RopId = %#x, want RopNotify %#x", id, ropNotify)
+	}
+	if got := mustU32(t, p, "NotificationHandle"); got != subH {
+		t.Errorf("NotificationHandle = %d, want the whole-store subscription handle %d", got, subH)
+	}
+	mustU8(t, p, "LogonId")
+	if nflags := mustU16(t, p, "nflags"); nflags != uint16(fnevObjectCreated|nfByMessage) {
+		t.Errorf("nflags = %#x, want %#x (created|byMessage)", nflags, fnevObjectCreated|nfByMessage)
+	}
+	if fid := mustU64(t, p, "FolderId"); fid != uint64(mapi.MakeEIDEx(1, uint64(sent))) {
+		t.Errorf("FolderId = %#x, want Sent Items %#x", fid, uint64(mapi.MakeEIDEx(1, uint64(sent))))
+	}
+	if mid := mustU64(t, p, "MessageId"); mid != uint64(mapi.MakeEIDEx(1, uint64(info.ID))) {
+		t.Errorf("MessageId = %#x, want %#x", mid, uint64(mapi.MakeEIDEx(1, uint64(info.ID))))
+	}
+}

@@ -36,32 +36,68 @@ func (s *Session) poll(out *ext.Push) {
 	s.drainNotifications(out)
 }
 
-// enqueueChanges polls each folder-scoped subscription's folder, advances its
-// baseline snapshot, and appends every matching event to the session notify queue.
-// Subscriptions are visited in handle order for a deterministic batch. A whole-store
-// subscription is skipped (its all-folders sweep is a later increment); a store error
-// skips that one subscription without advancing its snapshot, so the next poll
-// retries the same diff rather than losing the change.
+// enqueueChanges polls every subscription and appends each matching event to the
+// session notify queue. Subscriptions are visited in handle order for a deterministic
+// batch; a folder- or message-scoped one polls its single folder, a whole-store one
+// sweeps every content folder. A store error skips that subscription without advancing
+// its baseline, so the next poll retries the same diff rather than losing a change.
 func (s *Session) enqueueChanges() {
 	subs := make([]uint32, 0)
 	for h, o := range s.handles {
-		if o.kind == kindSubscription && !o.sub.wholeStore && o.store != nil && o.sub.folderID != 0 {
+		if o.kind == kindSubscription && o.store != nil {
 			subs = append(subs, h)
 		}
 	}
 	slices.Sort(subs)
 	for _, h := range subs {
 		o := s.handles[h]
-		events, snap, err := detectContentChanges(o.store, o.sub.folderID, o.subSnapshot)
-		if err != nil {
-			continue
+		switch {
+		case o.sub.wholeStore:
+			s.enqueueWholeStore(o)
+		case o.sub.folderID != 0:
+			o.subSnapshot = s.pollFolder(o, o.sub.folderID, o.subSnapshot)
 		}
-		o.subSnapshot = snap
-		for i := range events {
-			scopeMessageID, typeBit := classifyScope(&events[i])
-			if o.sub.matches(o.sub.folderID, scopeMessageID, typeBit) {
-				s.pending = append(s.pending, queuedNotify{handle: o.sub.handle, logonID: o.sub.logonID, n: events[i]})
-			}
+	}
+}
+
+// pollFolder diffs one folder against its prior snapshot, enqueues every event the
+// subscription matches, and returns the refreshed snapshot. On a store error it keeps
+// the old baseline so the next poll retries the same diff rather than dropping a change.
+func (s *Session) pollFolder(o *object, folderID int64, prev folderSnapshot) folderSnapshot {
+	events, snap, err := detectContentChanges(o.store, folderID, prev)
+	if err != nil {
+		return prev
+	}
+	for i := range events {
+		scopeMessageID, typeBit := classifyScope(&events[i])
+		if o.sub.matches(folderID, scopeMessageID, typeBit) {
+			s.pending = append(s.pending, queuedNotify{handle: o.sub.handle, logonID: o.sub.logonID, n: events[i]})
+		}
+	}
+	return snap
+}
+
+// enqueueWholeStore polls every content folder for a whole-store subscription,
+// keeping one snapshot per folder. A folder created since the last poll is diffed
+// against a nil baseline, so a message that arrives in it surfaces as a create; a
+// folder that has vanished is dropped from the baseline — its folder-level delete
+// event is a later increment, so here only its messages stop being polled.
+func (s *Session) enqueueWholeStore(o *object) {
+	folders, err := o.store.ListFolders()
+	if err != nil {
+		return
+	}
+	if o.subFolders == nil {
+		o.subFolders = make(map[int64]folderSnapshot, len(folders))
+	}
+	live := make(map[int64]bool, len(folders))
+	for _, f := range folders {
+		live[f.ID] = true
+		o.subFolders[f.ID] = s.pollFolder(o, f.ID, o.subFolders[f.ID])
+	}
+	for fid := range o.subFolders {
+		if !live[fid] {
+			delete(o.subFolders, fid)
 		}
 	}
 }

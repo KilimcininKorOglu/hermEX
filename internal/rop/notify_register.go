@@ -19,11 +19,11 @@ import (
 // snapshot load-bearing here: it MUST be taken at registration so the first poll
 // diffs against the state at subscribe time and reports nothing for messages that
 // already existed — otherwise the first drain would flood the client with every
-// existing message as an ObjectCreated. v1 services folder- and message-scoped
-// subscriptions (both poll the subscribed folder; the classifier filters per scope).
-// A whole-store subscription is accepted and given a handle but is not yet serviced
-// by the poll — the all-folders sweep it needs lands in a later increment — so its
-// baseline is left nil.
+// existing message as an ObjectCreated. A folder- or message-scoped subscription
+// baselines and polls its one folder (the classifier filters per scope); a
+// whole-store subscription baselines every content folder and is polled across all of
+// them. Folder-hierarchy events (a folder itself created, deleted, or modified) are a
+// later increment; this delivers message events store-wide.
 func (s *Session) ropRegisterNotification(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8()   // OutputHandleIndex
 	ntypes, e2 := p.Uint8()    // NotificationTypes (one byte; subscribable types fit 0x02..0x80)
@@ -61,10 +61,26 @@ func (s *Session) ropRegisterNotification(p *ext.Pull, out *ext.Push, handles []
 			messageID:  messageID,
 		},
 	}
-	// Baseline the subscribed folder at registration (see the doc comment). A
-	// message-scoped subscription baselines the same folder — the poll diffs the
-	// folder and the classifier narrows to the message.
-	if !wholeStore {
+	// Baseline at registration (see the doc comment). A folder- or message-scoped
+	// subscription baselines its one folder — the poll diffs the folder and the
+	// classifier narrows to the message. A whole-store subscription baselines every
+	// content folder, so its first poll likewise reports nothing pre-existing.
+	if wholeStore {
+		folders, err := parent.store.ListFolders()
+		if err != nil {
+			writeErr(out, ropRegisterNotification, ohindex, ecError)
+			return true
+		}
+		obj.subFolders = make(map[int64]folderSnapshot, len(folders))
+		for _, f := range folders {
+			snap, err := parent.store.FolderMessageChangeNumbers(f.ID)
+			if err != nil {
+				writeErr(out, ropRegisterNotification, ohindex, ecError)
+				return true
+			}
+			obj.subFolders[f.ID] = snap
+		}
+	} else {
 		snap, err := parent.store.FolderMessageChangeNumbers(folderID)
 		if err != nil {
 			writeErr(out, ropRegisterNotification, ohindex, ecError)

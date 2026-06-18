@@ -115,6 +115,13 @@ func TestRegisterNotificationWholeStore(t *testing.T) {
 
 	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
 	logonH := h[0]
+	st := sess.get(logonH).store
+
+	// Seed a message before subscribing so the whole-store baseline captures it.
+	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0)
+	if err != nil {
+		t.Fatalf("append: %v", err)
+	}
 
 	const ntypes = uint8(fnevNewMail | fnevObjectCreated)
 	resp, h := sess.Dispatch(buildRegisterNotification(0, 1, ntypes, 1, 0, 0), []uint32{logonH, 0xFFFFFFFF})
@@ -136,6 +143,15 @@ func TestRegisterNotificationWholeStore(t *testing.T) {
 		t.Errorf("whole-store scope = (folder %d, msg %d), want (0, 0)", obj.sub.folderID, obj.sub.messageID)
 	}
 	if obj.subSnapshot != nil {
-		t.Errorf("whole-store subscription has a folder snapshot %v, want nil (deferred poll)", obj.subSnapshot)
+		t.Errorf("whole-store subscription set the single-folder snapshot, want nil (it uses the per-folder map)")
+	}
+	// The baseline spans every content folder and captured the pre-existing message,
+	// so the first poll reports nothing for it.
+	if len(obj.subFolders) < 2 {
+		t.Errorf("whole-store baseline spans %d folders, want the full content tree (>1)", len(obj.subFolders))
+	}
+	inbox := int64(mapi.PrivateFIDInbox)
+	if _, ok := obj.subFolders[inbox][info.ID]; !ok {
+		t.Errorf("whole-store baseline missing the pre-existing Inbox message %d: %v", info.ID, obj.subFolders[inbox])
 	}
 }
