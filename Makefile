@@ -20,7 +20,7 @@ PKG ?= ./internal/... ./cmd/...
 RUN ?=
 RUNFLAG := $(if $(RUN),-run $(RUN),)
 
-.PHONY: all build test test-host test-race vet fmt fmt-check gate up down rebuild clean help
+.PHONY: all build test test-host test-race vet fmt fmt-check gate tidy up down rebuild clean help
 
 all: build
 
@@ -59,6 +59,10 @@ fmt-check:
 
 ## gate: fmt-check + vet + full test — the pre-commit gate
 gate: fmt-check vet test
+
+## tidy: sync go.mod/go.sum in the dev container (downloads any new dependency)
+tidy:
+	$(COMPOSE) exec -T dev go mod tidy
 
 ## up: start the dev environment (MariaDB + toolchain + mail services)
 up:
