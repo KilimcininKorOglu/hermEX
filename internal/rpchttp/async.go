@@ -136,6 +136,13 @@ func (a *AsyncEMSMDB) asyncWaitEx(sess *Session, stub []byte) ([]byte, uint32) {
 // on the OUT channel. It abandons the reply if the virtual connection tears down. The
 // poll reuses the same PollForChange wake primitive the MAPI/HTTP NotificationWait
 // drives, so a delivery made through any store handle wakes it.
+//
+// The reply rides the OUT channel concurrently with the IN goroutine's synchronous
+// fragments. send() preserves PDU framing, so the worst case is PDU-order interleaving
+// (this reply spliced between two fragments of an Execute response), never byte
+// corruption — and only when an Execute response exceeds ourMaxFrag (5840) and so
+// fragments. In the [MS-OXCRPC] topology AsyncEMSMDB binds as its own interface on a
+// connection that carries no Execute traffic, so that window does not arise in practice.
 func (a *AsyncEMSMDB) parkAndReply(s *emsmdbSession, vc *vconn, callID uint32, contextID uint16, maxFrag int) {
 	defer s.waiting.Store(false)
 	deadline := time.Now().Add(a.waitInterval)
