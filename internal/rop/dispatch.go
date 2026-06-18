@@ -95,6 +95,8 @@ const (
 // stops, since the remaining ROPs in the batch can no longer be located. A
 // short or truncated header likewise ends the batch.
 func (s *Session) Dispatch(ropList []byte, reqHandles []uint32) (respRops []byte, respHandles []uint32) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	handles := append([]uint32(nil), reqHandles...)
 	p := ext.NewPull(ropList, ext.FlagUTF16)
 	out := ext.NewPush(ext.FlagUTF16)

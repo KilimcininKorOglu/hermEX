@@ -6,6 +6,8 @@
 package rop
 
 import (
+	"sync"
+
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
@@ -126,14 +128,20 @@ type newMessageState struct {
 
 // Session is one MAPI/HTTP session's object/handle table — the analogue of a
 // per-logon object graph. It is created on Connect and closed on Disconnect.
-// Access is serialized by the MAPI/HTTP sequence cookie (exactly one Execute
-// proceeds per session at a time), so the table carries no lock of its own.
+//
+// Execute requests are serialized by the MAPI/HTTP sequence cookie, but a
+// NotificationWait long-poll runs on a parallel connection without that cookie,
+// concurrently with an Execute. mu therefore guards the object table, the snapshots,
+// and the pending queue: Dispatch, PollForChange, and Close each take it at their
+// boundary, while the internal alloc/get/release/poll helpers assume the caller
+// already holds it.
 //
 // accounts and owner are the submit context: the recipient directory the MTA
 // bridge resolves against and the session owner's SMTP address (the From of a
 // submitted message). They are nil/empty for a read-only session (the read-core
 // tests), in which case RopSubmitMessage reports MAPI_E_NO_SUPPORT.
 type Session struct {
+	mu       sync.Mutex
 	mailbox  string
 	accounts directory.Accounts
 	owner    string
@@ -191,9 +199,26 @@ func (s *Session) release(h uint32) {
 	delete(s.handles, h)
 }
 
-// Close releases every handle (Disconnect), closing any open store.
+// Close releases every handle (Disconnect), closing any open store. It takes the
+// lock because a parked NotificationWait may be reading the object table on a
+// parallel connection when Disconnect lands.
 func (s *Session) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for h := range s.handles {
 		s.release(h)
 	}
+}
+
+// PollForChange runs one notification poll under the session lock and reports
+// whether any notification is now queued for delivery. It is the wake signal a
+// NotificationWait long-poll calls each iteration: a true result means the next
+// Execute will drain RopNotify bytes, so the wait returns FLAG_NOTIFICATION_PENDING.
+// The caller sleeps between calls outside the lock, so an Execute is never blocked
+// for longer than one poll.
+func (s *Session) PollForChange() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.enqueueChanges()
+	return len(s.pending) > 0
 }
