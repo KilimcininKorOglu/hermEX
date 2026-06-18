@@ -6,6 +6,11 @@ import (
 	"time"
 )
 
+// logFlushTimeout bounds the final flush + disconnect the close function performs
+// at shutdown. lifecycle.Run hands cleanups no context, so the deadline is baked
+// in here rather than supplied by the caller.
+const logFlushTimeout = 10 * time.Second
+
 // MultiSink fans each event out to several sinks — e.g. stderr for operator
 // visibility plus MongoDB for the queryable store. A member's Write is best
 // effort; one slow or failing sink does not stop the others.
@@ -34,16 +39,17 @@ func (m *MultiSink) Write(e Event) {
 // set. Logging must never stop a daemon from starting, so if the Mongo sink
 // cannot be created (server unreachable, bad URI) Build logs a warning to stderr
 // and returns a stderr-only logger rather than an error. It returns the logger
-// and a close function (flush + disconnect) to run as a shutdown cleanup.
+// and a close function (flush + disconnect) to run as a shutdown cleanup; it has
+// the func() error shape lifecycle.Run expects and bounds its own flush deadline.
 //
 // database is the Mongo database holding the logs collection (defaults to
 // "hermex" when empty); spillDir, when set, is where failed batches are buffered
 // while Mongo is unreachable; retentionDays is the TTL window in days — zero or
 // negative keeps logs forever (no TTL index), which is the safe default for an
 // unset value rather than expiring everything immediately.
-func Build(mongoURI, database, spillDir string, retentionDays int) (*Logger, func(context.Context) error) {
+func Build(mongoURI, database, spillDir string, retentionDays int) (*Logger, func() error) {
 	stderr := NewStderrSink(nil)
-	noop := func(context.Context) error { return nil }
+	noop := func() error { return nil }
 	if mongoURI == "" {
 		return New(stderr), noop
 	}
@@ -69,5 +75,10 @@ func Build(mongoURI, database, spillDir string, retentionDays int) (*Logger, fun
 		})
 		return New(stderr), noop
 	}
-	return New(NewMultiSink(stderr, ms)), ms.Close
+	closeFn := func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), logFlushTimeout)
+		defer cancel()
+		return ms.Close(ctx)
+	}
+	return New(NewMultiSink(stderr, ms)), closeFn
 }

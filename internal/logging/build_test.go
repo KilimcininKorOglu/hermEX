@@ -32,7 +32,7 @@ func TestBuildStderrOnlyWhenNoMongo(t *testing.T) {
 		t.Fatal("Build returned a nil logger")
 	}
 	log.Info(logging.System, "startup", nil) // must not panic
-	if err := closeFn(context.Background()); err != nil {
+	if err := closeFn(); err != nil {
 		t.Errorf("close: %v", err)
 	}
 }
@@ -45,7 +45,7 @@ func TestBuildFallsBackOnUnreachableMongo(t *testing.T) {
 		t.Fatal("Build returned a nil logger when Mongo was unavailable")
 	}
 	log.Info(logging.System, "startup", nil) // stderr path, must not panic
-	if err := closeFn(context.Background()); err != nil {
+	if err := closeFn(); err != nil {
 		t.Errorf("close: %v", err)
 	}
 }
@@ -72,7 +72,7 @@ func TestBuildIntegration(t *testing.T) {
 	log.Info(logging.System, "startup", logging.Fields{"daemon": "test"})
 	ctx, cancel := context.WithTimeout(bg, 5*time.Second)
 	defer cancel()
-	if err := closeFn(ctx); err != nil {
+	if err := closeFn(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 

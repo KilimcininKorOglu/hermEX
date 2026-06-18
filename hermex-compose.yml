@@ -76,6 +76,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      mongo:
+        condition: service_healthy
     restart: unless-stopped
 
   pop3:
@@ -91,6 +93,8 @@ services:
       - "8141:110"
     depends_on:
       db:
+        condition: service_healthy
+      mongo:
         condition: service_healthy
     restart: unless-stopped
 
@@ -108,6 +112,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      mongo:
+        condition: service_healthy
     restart: unless-stopped
 
   webmail:
@@ -123,6 +129,8 @@ services:
       - "8144:8080"
     depends_on:
       db:
+        condition: service_healthy
+      mongo:
         condition: service_healthy
     restart: unless-stopped
 
@@ -140,6 +148,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      mongo:
+        condition: service_healthy
     restart: unless-stopped
 
   activesync:
@@ -155,6 +165,8 @@ services:
       - "8146:8080"
     depends_on:
       db:
+        condition: service_healthy
+      mongo:
         condition: service_healthy
     restart: unless-stopped
 
@@ -172,6 +184,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      mongo:
+        condition: service_healthy
     restart: unless-stopped
 
   mapi:
@@ -187,6 +201,8 @@ services:
       - "8148:8080"
     depends_on:
       db:
+        condition: service_healthy
+      mongo:
         condition: service_healthy
     restart: unless-stopped
 
@@ -205,6 +221,7 @@ services:
       - HERMEX_GATEWAY_ADDR=:8080
       - HERMEX_TLS_CERT=/config/tls/cert.pem
       - HERMEX_TLS_KEY=/config/tls/key.pem
+      - HERMEX_LOG_MONGO_URI=mongodb://mongo:27017
     volumes:
       - ./docker-data/tls:/config/tls:ro
     ports:
@@ -215,4 +232,5 @@ services:
       - activesync
       - dav
       - webmail
+      - mongo
     restart: unless-stopped

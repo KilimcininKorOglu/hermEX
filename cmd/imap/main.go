@@ -18,6 +18,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/imap"
 	"hermex/internal/lifecycle"
+	"hermex/internal/logging"
 	"hermex/internal/serve"
 )
 
@@ -68,9 +69,12 @@ func main() {
 		log.Printf("hermex-imap listening on %s (implicit TLS)", cfg.IMAPSAddr)
 	}
 
+	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
+	logger.Info(logging.System, "daemon.startup", logging.Fields{"daemon": "imap", "addr": addr})
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{srv}, db.Close); err != nil {
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{srv}, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-imap: %v", err)
 	}
 }

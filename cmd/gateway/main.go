@@ -8,7 +8,9 @@
 // config (which requires a DSN it would never use). HERMEX_GATEWAY_ADDR sets the
 // listen address; HERMEX_TLS_CERT/HERMEX_TLS_KEY enable TLS (absent => plaintext,
 // for terminating TLS at a separate proxy); HERMEX_BACKEND_* override the backend
-// base URLs, which default to the compose service names.
+// base URLs, which default to the compose service names; HERMEX_LOG_MONGO_URI (with
+// HERMEX_LOG_DATABASE/HERMEX_LOG_SPILL_DIR/HERMEX_LOG_RETENTION_DAYS) enables the
+// central MongoDB log store, defaulting to stderr-only when unset.
 package main
 
 import (
@@ -16,11 +18,13 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 
 	"hermex/internal/config"
 	"hermex/internal/gateway"
 	"hermex/internal/lifecycle"
+	"hermex/internal/logging"
 	"hermex/internal/serve"
 )
 
@@ -69,10 +73,16 @@ func main() {
 		log.Fatalf("hermex-gateway: %v", err)
 	}
 
+	// The gateway loads no shared config, so its central-logging settings come from
+	// the environment like the rest of its configuration.
+	retentionDays, _ := strconv.Atoi(os.Getenv("HERMEX_LOG_RETENTION_DAYS"))
+	logger, logClose := logging.Build(os.Getenv("HERMEX_LOG_MONGO_URI"), os.Getenv("HERMEX_LOG_DATABASE"), os.Getenv("HERMEX_LOG_SPILL_DIR"), retentionDays)
+	logger.Info(logging.System, "daemon.startup", logging.Fields{"daemon": "gateway", "addr": addr})
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log.Printf("hermex-gateway listening on %s", addr)
-	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}); err != nil {
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, logClose); err != nil {
 		log.Fatalf("hermex-gateway: %v", err)
 	}
 }

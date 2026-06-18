@@ -6,5 +6,9 @@
   "pop3_addr": ":110",
   "imap_addr": ":143",
   "webmail_addr": ":8080",
-  "dav_addr": ":8080"
+  "dav_addr": ":8080",
+  "mongo_uri": "mongodb://mongo:27017",
+  "log_database": "hermex",
+  "log_retention_days": 0,
+  "log_spill_dir": ""
 }

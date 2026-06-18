@@ -18,6 +18,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/ews"
 	"hermex/internal/lifecycle"
+	"hermex/internal/logging"
 	"hermex/internal/serve"
 )
 
@@ -48,10 +49,13 @@ func main() {
 		log.Fatalf("hermex-ews: %v", err)
 	}
 
+	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
+	logger.Info(logging.System, "daemon.startup", logging.Fields{"daemon": "ews", "addr": addr})
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log.Printf("hermex-ews listening on %s", addr)
-	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, db.Close); err != nil {
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-ews: %v", err)
 	}
 }
