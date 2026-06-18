@@ -61,8 +61,13 @@ fmt-check:
 gate: fmt-check vet test
 
 ## tidy: sync go.mod/go.sum in the dev container (downloads any new dependency)
+# The -e flag is required: the module cache bind-mounts under docker-data/ are
+# visible inside the /src tree, so a plain `go mod tidy` (which walks the whole
+# module) trips over their @version paths. -e proceeds past those and still
+# resolves go.mod/go.sum correctly; the package build/test targets use explicit
+# ./internal/... ./cmd/... patterns and are unaffected.
 tidy:
-	$(COMPOSE) exec -T dev go mod tidy
+	$(COMPOSE) exec -T dev go mod tidy -e
 
 ## up: start the dev environment (MariaDB + toolchain + mail services)
 up:
