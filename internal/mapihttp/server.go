@@ -75,6 +75,9 @@ func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostna
 	ems := rpchttp.NewEMSMDB(accounts)
 	disp := rpchttp.NewDispatcher()
 	disp.Register(rpchttp.EMSMDBUUID, rpchttp.EMSMDBVersion, ems.Handle)
+	// The AsyncEMSMDB interface carries the EcDoAsyncWaitEx notification long-poll;
+	// it shares the EMSMDB sessions, resolving its async handle to one by the GUID.
+	disp.Register(rpchttp.AsyncEMSMDBUUID, rpchttp.AsyncEMSMDBVersion, rpchttp.NewAsyncEMSMDB(ems).Handle)
 	disp.Register(nspi.RPCInterfaceUUID, nspi.RPCInterfaceVersion, func(_ *rpchttp.Session, opnum uint16, stub []byte) ([]byte, uint32) {
 		return s.nsp.DispatchRPC(opnum, stub)
 	})

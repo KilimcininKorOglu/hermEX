@@ -24,9 +24,10 @@ var (
 
 // EMSMDB opnums dispatched by the interface ([MS-OXCRPC] 3.1.4).
 const (
-	opEcDoDisconnect uint16 = 1
-	opEcDoConnectEx  uint16 = 10
-	opEcDoRpcExt2    uint16 = 11
+	opEcDoDisconnect     uint16 = 1
+	opEcDoConnectEx      uint16 = 10
+	opEcDoRpcExt2        uint16 = 11
+	opEcDoAsyncConnectEx uint16 = 14
 )
 
 // MAPI result codes returned in the RPC result field.
@@ -88,11 +89,33 @@ func (e *EMSMDB) Handle(sess *Session, opnum uint16, stub []byte) ([]byte, uint3
 		return e.connectEx(sess, stub)
 	case opEcDoRpcExt2:
 		return e.rpcExt2(stub)
+	case opEcDoAsyncConnectEx:
+		return e.asyncConnectEx(stub)
 	case opEcDoDisconnect:
 		return e.disconnect(stub)
 	default:
 		return nil, ndr.FaultOpRngError
 	}
+}
+
+// asyncConnectEx handles EcDoAsyncConnectEx (opnum 14): it converts a session
+// context handle into an async context handle for the AsyncEMSMDB interface's
+// EcDoAsyncWaitEx long-poll. The async handle is the same session GUID re-tagged
+// with the async discriminator ([MS-OXCRPC] 3.1.4.4), so the async interface
+// resolves it back to this session by the GUID. IN is the CXH; OUT is the ACXH and
+// the result.
+func (e *EMSMDB) asyncConnectEx(stub []byte) ([]byte, uint32) {
+	cxh, err := pullCtxHandle(ndr.NewPull(stub))
+	if err != nil {
+		return nil, ndr.FaultNdr
+	}
+	if _, ok := e.lookup(cxh.GUID); !ok {
+		return nil, ndr.FaultContextMismatch
+	}
+	out := ndr.NewPush()
+	pushCtxHandle(out, ContextHandle{HandleType: asyncHandleType, GUID: cxh.GUID})
+	out.Uint32(ecSuccess)
+	return out.Bytes(), 0
 }
 
 // rpcExt2 handles EcDoRpcExt2 (opnum 11): it unwraps the NDR parameters, runs
