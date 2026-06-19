@@ -1,6 +1,87 @@
 package directory
 
-import "testing"
+import (
+	"path/filepath"
+	"testing"
+)
+
+// stubVerifier is a test LDAPVerifier that records the inputs it was called with
+// and returns a fixed verdict.
+type stubVerifier struct {
+	result   bool
+	err      error
+	gotCfg   LDAPConfig
+	gotLogin string
+	gotPass  string
+}
+
+func (s *stubVerifier) Verify(cfg LDAPConfig, login, password string) (bool, error) {
+	s.gotCfg, s.gotLogin, s.gotPass = cfg, login, password
+	return s.result, s.err
+}
+
+// TestAuthenticateLDAPBranch proves the auth chain queries MySQL first, then
+// routes by externid: a local account verifies against its crypt hash, an
+// LDAP-mastered account against the verifier (and is denied — never falling back
+// to the local hash — when no verifier is installed).
+func TestAuthenticateLDAPBranch(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	cleanTables(t, db)
+
+	root := t.TempDir()
+	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "domains", "hermex.test")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.CreateUser("local@hermex.test", "localpass", filepath.Join(root, "users", "local")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.CreateUser("ext@hermex.test", "ignored-local-hash", filepath.Join(root, "users", "ext")); err != nil {
+		t.Fatal(err)
+	}
+	// Master ext@ in LDAP (externid set) and give its org a directory config.
+	if _, err := db.Exec(`UPDATE users SET externid=? WHERE username=?`, []byte{0x01, 0x02}, "ext@hermex.test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetLDAPConfig(0, LDAPConfig{URI: "ldap://ad.hermex.test", BaseDN: "dc=hermex,dc=test", UsernameAttr: "mail"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// 1. A local account still authenticates against its crypt hash.
+	if _, ok := d.Authenticate("local@hermex.test", "localpass"); !ok {
+		t.Error("local crypt authentication failed")
+	}
+
+	// 2. An LDAP-mastered account is denied with no verifier — and must NOT be
+	// admitted by its (irrelevant) local hash.
+	if _, ok := d.Authenticate("ext@hermex.test", "anything"); ok {
+		t.Error("LDAP-mastered login succeeded with no verifier installed")
+	}
+	if _, ok := d.Authenticate("ext@hermex.test", "ignored-local-hash"); ok {
+		t.Error("LDAP-mastered login fell back to the local crypt hash")
+	}
+
+	// 3. With an accepting verifier it authenticates, and the verifier receives
+	// the resolved config plus the login and password.
+	stub := &stubVerifier{result: true}
+	d.SetLDAPVerifier(stub)
+	if _, ok := d.Authenticate("ext@hermex.test", "ldappass"); !ok {
+		t.Fatal("LDAP authentication with an accepting verifier failed")
+	}
+	if stub.gotLogin != "ext@hermex.test" || stub.gotPass != "ldappass" || stub.gotCfg.URI != "ldap://ad.hermex.test" {
+		t.Errorf("verifier saw cfg=%+v login=%q pass=%q; want the resolved config + login/password",
+			stub.gotCfg, stub.gotLogin, stub.gotPass)
+	}
+
+	// 4. A rejecting verifier denies the login.
+	d.SetLDAPVerifier(&stubVerifier{result: false})
+	if _, ok := d.Authenticate("ext@hermex.test", "wrong"); ok {
+		t.Error("LDAP authentication succeeded when the verifier rejected")
+	}
+}
 
 // TestLDAPConfigRoundTrip stores an organization's LDAP configuration and reads
 // it back, confirms SetLDAPConfig replaces rather than duplicates, and confirms

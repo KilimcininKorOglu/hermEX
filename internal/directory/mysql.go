@@ -21,7 +21,8 @@ const (
 // gates on account status, domain status, and object class, and verifies
 // crypt(3) sha512 passwords. It implements both Accounts and Authenticator.
 type SQLDirectory struct {
-	db *sql.DB
+	db       *sql.DB
+	verifier LDAPVerifier // verifies LDAP-mastered (externid) logins; nil => denied
 }
 
 // NewSQL wraps an open database handle. A user's mailbox store is the object
@@ -54,6 +55,8 @@ type loginRow struct {
 	addrStatus   int
 	displayType  int
 	domainStatus int
+	externid     []byte // non-nil => the account is mastered in an LDAP directory
+	orgID        int64  // the account's organization (selects its LDAP config)
 }
 
 // resolve runs the three-key resolution: the input must match
@@ -61,16 +64,16 @@ type loginRow struct {
 // rows (no such address) and more than one (ambiguous) are both a non-match.
 func (d *SQLDirectory) resolve(addr string) (loginRow, bool, error) {
 	const q = `
-SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status
+SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, d.org_id
   FROM users u JOIN domains d ON u.domain_id = d.id
  WHERE u.username = ?
 UNION
-SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status
+SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, d.org_id
   FROM users u JOIN domains d ON u.domain_id = d.id
   JOIN altnames a ON a.user_id = u.id
  WHERE a.altname = ?
 UNION
-SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status
+SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, d.org_id
   FROM users u JOIN domains d ON u.domain_id = d.id
   JOIN aliases al ON al.mainname = u.username
  WHERE al.aliasname = ?
@@ -83,7 +86,7 @@ SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status
 	var out []loginRow
 	for rows.Next() {
 		var r loginRow
-		if err := rows.Scan(&r.password, &r.maildir, &r.addrStatus, &r.displayType, &r.domainStatus); err != nil {
+		if err := rows.Scan(&r.password, &r.maildir, &r.addrStatus, &r.displayType, &r.domainStatus, &r.externid, &r.orgID); err != nil {
 			return loginRow{}, false, err
 		}
 		out = append(out, r)
@@ -101,7 +104,8 @@ SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status
 // resolve to exactly one row, require an active
 // MAILUSER account in an active domain, then verify the crypt(3) password.
 func (d *SQLDirectory) Authenticate(user, password string) (string, bool) {
-	row, ok, err := d.resolve(strings.ToLower(strings.TrimSpace(user)))
+	login := strings.ToLower(strings.TrimSpace(user))
+	row, ok, err := d.resolve(login)
 	if err != nil || !ok {
 		return "", false
 	}
@@ -112,10 +116,31 @@ func (d *SQLDirectory) Authenticate(user, password string) (string, bool) {
 	if row.addrStatus&afUserMask != afUserNormal || row.addrStatus&afDomainMask != 0 || row.domainStatus != 0 {
 		return "", false
 	}
-	if row.maildir == "" || !sqlCryptVerify(password, row.password) {
+	if row.maildir == "" || !d.verifyPassword(row, login, password) {
 		return "", false
 	}
 	return d.storePath(row.maildir), true
+}
+
+// verifyPassword checks a login's password the way its account is mastered: an
+// account with an externid is verified against its organization's LDAP directory
+// (bind-to-verify), every other account against its stored crypt(3) hash. An
+// LDAP-mastered account whose org has no configured directory — or for which no
+// verifier is installed — is denied rather than silently falling back to a local
+// hash it does not own.
+func (d *SQLDirectory) verifyPassword(row loginRow, login, password string) bool {
+	if len(row.externid) == 0 {
+		return sqlCryptVerify(password, row.password)
+	}
+	if d.verifier == nil {
+		return false
+	}
+	cfg, ok, err := d.GetLDAPConfig(row.orgID)
+	if err != nil || !ok {
+		return false
+	}
+	verified, err := d.verifier.Verify(cfg, login, password)
+	return err == nil && verified
 }
 
 // Resolve maps a recipient address to the store path it is delivered to,

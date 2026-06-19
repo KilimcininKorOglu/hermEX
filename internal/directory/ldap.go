@@ -5,6 +5,19 @@ import (
 	"errors"
 )
 
+// LDAPVerifier verifies a login against an organization's LDAP directory by
+// bind-to-verify (search for the login's DN under the config, then simple-bind as
+// it with the supplied password). The LDAP client — which carries the external
+// LDAP dependency — implements this; a SQLDirectory with no verifier denies
+// LDAP-mastered logins rather than checking them against the local crypt hash.
+type LDAPVerifier interface {
+	Verify(cfg LDAPConfig, login, password string) (bool, error)
+}
+
+// SetLDAPVerifier installs the verifier used for accounts mastered in LDAP (those
+// with an externid). Without one, such accounts cannot authenticate.
+func (d *SQLDirectory) SetLDAPVerifier(v LDAPVerifier) { d.verifier = v }
+
 // LDAPConfig is one organization's LDAP/AD bind-to-verify configuration: where
 // the directory lives, how to reach it, the service account that searches for a
 // login's distinguished name, and the attribute a login is matched against. An
