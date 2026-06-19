@@ -16,6 +16,7 @@ type fakeDir struct {
 	uid     int64
 	roles   []directory.AdminRole
 	domains []directory.DomainInfo
+	users   []directory.UserInfo
 }
 
 func (f *fakeDir) Authenticate(_, _ string) (string, bool) {
@@ -27,6 +28,7 @@ func (f *fakeDir) Authenticate(_, _ string) (string, bool) {
 func (f *fakeDir) UserID(_ string) (int64, bool, error)            { return f.uid, f.uid != 0, nil }
 func (f *fakeDir) AdminRoles(int64) ([]directory.AdminRole, error) { return f.roles, nil }
 func (f *fakeDir) ListDomains() ([]directory.DomainInfo, error)    { return f.domains, nil }
+func (f *fakeDir) ListUsers() ([]directory.UserInfo, error)        { return f.users, nil }
 
 func adminServer(t *testing.T, d Directory) *httptest.Server {
 	t.Helper()

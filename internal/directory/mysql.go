@@ -320,6 +320,38 @@ func (d *SQLDirectory) ListDomains() ([]DomainInfo, error) {
 	return out, rows.Err()
 }
 
+// UserInfo is a user's administrative summary. LDAP is true when the account is
+// LDAP-mastered (its externid is set), so it authenticates against LDAP rather
+// than the local hash.
+type UserInfo struct {
+	ID       int64
+	Username string
+	DomainID int64
+	Status   int
+	LDAP     bool
+}
+
+// ListUsers returns every user, ordered by name, for the admin API.
+func (d *SQLDirectory) ListUsers() ([]UserInfo, error) {
+	rows, err := d.db.Query(
+		`SELECT id, username, domain_id, address_status, externid IS NOT NULL FROM users ORDER BY username`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []UserInfo
+	for rows.Next() {
+		var ui UserInfo
+		var ldap int
+		if err := rows.Scan(&ui.ID, &ui.Username, &ui.DomainID, &ui.Status, &ldap); err != nil {
+			return nil, err
+		}
+		ui.LDAP = ldap != 0
+		out = append(out, ui)
+	}
+	return out, rows.Err()
+}
+
 // CreateDomain inserts a domain and returns its id, creating its homedir on disk.
 func (d *SQLDirectory) CreateDomain(domainname, homedir string) (int64, error) {
 	res, err := d.db.Exec(

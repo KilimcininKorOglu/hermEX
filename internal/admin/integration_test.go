@@ -139,7 +139,18 @@ func TestAdminServerIntegration(t *testing.T) {
 		t.Errorf("domains body = %s, want hermex.test", domBody)
 	}
 
-	// 4. A wrong password is refused against the stored hash.
+	// 4. The user listing returns the provisioned admin account.
+	usr := authedGET(t, ts, "/admin/users", session)
+	defer usr.Body.Close()
+	if usr.StatusCode != http.StatusOK {
+		t.Fatalf("users status %d, want 200", usr.StatusCode)
+	}
+	usrBody, _ := io.ReadAll(usr.Body)
+	if !strings.Contains(string(usrBody), "boss@hermex.test") {
+		t.Errorf("users body = %s, want boss@hermex.test", usrBody)
+	}
+
+	// 5. A wrong password is refused against the stored hash.
 	bad, err := http.Post(ts.URL+"/admin/login", "application/json",
 		strings.NewReader(`{"login":"boss@hermex.test","password":"wrong"}`))
 	if err != nil {
