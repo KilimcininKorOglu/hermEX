@@ -130,6 +130,80 @@ func TestAvailabilityCrossUserFreeBusy(t *testing.T) {
 	}
 }
 
+// TestAvailabilityCrossUserDetailed confirms an exact free/busy-detailed grant
+// to the caller yields the detailed view with subject — and, since the grant is
+// keyed by the caller's authenticated address, that the resolver matches the
+// permission username against the request's user form.
+func TestAvailabilityCrossUserDetailed(t *testing.T) {
+	ts, paths := availabilityServer(t)
+	bob, err := objectstore.Open(paths["bob@hermex.test"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Grant alice (the soapPost requester) an exact detailed free/busy right.
+	if err := bob.ModifyPermissions(int64(mapi.PrivateFIDCalendar), false, []objectstore.PermissionChange{
+		{Op: objectstore.PermAdd, Username: "alice@hermex.test", Rights: mapi.FrightsFreeBusyDetailed | mapi.FrightsVisible},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	bob.Close()
+	start := time.Date(2026, 6, 19, 10, 15, 0, 0, time.UTC)
+	end := time.Date(2026, 6, 19, 10, 45, 0, 0, time.UTC)
+	seedAppointment(t, paths["bob@hermex.test"], start, end, 2, "Budget review", false)
+
+	_, out := soapPost(t, ts, availabilityReq("bob@hermex.test", winStart, winEnd, true), true)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("not success: %s", out)
+	}
+	if !strings.Contains(out, ">Detailed<") {
+		t.Errorf("an exact FreeBusyDetailed grant must yield the Detailed view: %s", out)
+	}
+	if !strings.Contains(out, "CalendarEventDetails") || !strings.Contains(out, ">Budget review<") {
+		t.Errorf("delegated detailed view must carry the subject: %s", out)
+	}
+}
+
+// TestAvailabilityMultiMailbox confirms several mailboxes in one request pair 1:1
+// with the response array in order — Outlook's scheduling assistant sends all
+// attendees at once and relies on positional pairing.
+func TestAvailabilityMultiMailbox(t *testing.T) {
+	ts, paths := availabilityServer(t)
+	// alice (owner) is permitted; strip bob's free/busy so he is denied.
+	bob, err := objectstore.Open(paths["bob@hermex.test"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := bob.ModifyPermissions(int64(mapi.PrivateFIDCalendar), false, []objectstore.PermissionChange{
+		{Op: objectstore.PermModify, MemberID: mapi.MemberIDDefault, Rights: mapi.FrightsVisible},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	bob.Close()
+
+	inner := `<GetUserAvailabilityRequest xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
+		`<t:TimeZone><t:Bias>0</t:Bias></t:TimeZone>` +
+		`<t:MailboxDataArray>` +
+		`<t:MailboxData><t:Email><t:Address>alice@hermex.test</t:Address></t:Email></t:MailboxData>` +
+		`<t:MailboxData><t:Email><t:Address>bob@hermex.test</t:Address></t:Email></t:MailboxData>` +
+		`</t:MailboxDataArray>` +
+		`<t:FreeBusyViewOptions><t:TimeWindow>` +
+		`<t:StartTime>` + winStart + `</t:StartTime><t:EndTime>` + winEnd + `</t:EndTime>` +
+		`</t:TimeWindow></t:FreeBusyViewOptions></GetUserAvailabilityRequest>`
+	_, out := soapPost(t, ts, wrapRequest(inner), true)
+
+	okIdx := strings.Index(out, `ResponseClass="Success"`)
+	errIdx := strings.Index(out, `ResponseClass="Error"`)
+	if okIdx < 0 || errIdx < 0 {
+		t.Fatalf("expected one Success and one Error response, got: %s", out)
+	}
+	if okIdx > errIdx {
+		t.Errorf("responses must pair 1:1 in request order (alice before bob): %s", out)
+	}
+	if !strings.Contains(out, "ErrorFreeBusyGenerationFailed") {
+		t.Errorf("bob (no free/busy right) must report ErrorFreeBusyGenerationFailed: %s", out)
+	}
+}
+
 // TestAvailabilityDenied confirms a calendar whose default grant carries no
 // free/busy right denies the caller per-mailbox (not an empty all-free view).
 func TestAvailabilityDenied(t *testing.T) {

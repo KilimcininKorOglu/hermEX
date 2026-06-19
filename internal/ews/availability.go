@@ -164,9 +164,17 @@ func (s *Server) freeBusyForTarget(sess *session, email string, windowStart, win
 	}
 	defer st.Close()
 
+	// An owner querying their own calendar gets implicit full (detailed) access.
+	// Match on the address as well as the resolved path: Authenticate (which set
+	// sess.mailbox) and Resolve are separate directory lookups that may normalize
+	// differently, and a client may list the requester's own address among the
+	// attendees — the address compare cannot over-grant (it is the same identity)
+	// and catches a path divergence the path compare would miss.
+	owner := strings.EqualFold(email, sess.user) || targetPath == sess.mailbox
+
 	var detailed bool
-	if targetPath == sess.mailbox {
-		detailed = true // owner self-query: implicit full access to one's own calendar
+	if owner {
+		detailed = true
 	} else {
 		perm, err := st.ResolvePermission(int64(mapi.PrivateFIDCalendar), sess.user)
 		if err != nil {
