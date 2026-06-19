@@ -168,6 +168,34 @@ func TestImportMethodMessageClass(t *testing.T) {
 	}
 }
 
+// TestImportOrganizer confirms a scheduling message's ORGANIZER is preserved as
+// the sent-representing identity (the address a response is sent back to), while a
+// plain appointment with an ORGANIZER leaves that identity unset.
+func TestImportOrganizer(t *testing.T) {
+	const head = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
+	const vev = "BEGIN:VEVENT\r\nUID:m-org\r\nSUMMARY:Plan\r\nDTSTART:20260701T140000Z\r\n" +
+		`ORGANIZER;CN="The Boss":mailto:boss@hermex.test` + "\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+
+	req, err := Import([]byte(head+"METHOD:REQUEST\r\n"+vev), newResolver().opt())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := str(req, mapi.PrSentRepresentingSmtpAddress); got != "boss@hermex.test" {
+		t.Errorf("request organizer smtp = %q, want boss@hermex.test", got)
+	}
+	if got := str(req, mapi.PrSentRepresentingName); got != "The Boss" {
+		t.Errorf("request organizer name = %q, want The Boss", got)
+	}
+
+	plain, err := Import([]byte(head+vev), newResolver().opt())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := str(plain, mapi.PrSentRepresentingSmtpAddress); got != "" {
+		t.Errorf("plain appointment must not set an organizer identity, got %q", got)
+	}
+}
+
 // TestExportReplyIdentity confirms a meeting-response message exports an iTIP REPLY:
 // a METHOD:REPLY, the organizer being answered, and the responder as the sole
 // attendee carrying the response in PARTSTAT — the inverse of the import mapping.

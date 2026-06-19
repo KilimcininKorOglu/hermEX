@@ -45,7 +45,15 @@ func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 
 	msg := &oxcmail.Message{}
 	p := &msg.Props
-	p.Set(mapi.PrMessageClass, meetingClass(cal, vev))
+	class := meetingClass(cal, vev)
+	p.Set(mapi.PrMessageClass, class)
+
+	// A scheduling message names its organizer; preserve it as the representing
+	// identity so a response can address its REPLY back to them. A plain
+	// appointment is left untouched.
+	if class != "IPM.Appointment" {
+		setOrganizer(p, vev.prop("ORGANIZER"))
+	}
 
 	uid := strings.TrimSpace(vev.propText("UID"))
 	if uid == "" {
@@ -132,6 +140,28 @@ func replyPartStat(vev *icomp) string {
 		return l.param("PARTSTAT")
 	}
 	return ""
+}
+
+// setOrganizer records an iCalendar ORGANIZER line as the sent-representing
+// identity — its mailto address and optional CN — so a meeting response can
+// address the organizer. A nil or address-less line is ignored.
+func setOrganizer(p *mapi.PropertyValues, l *iline) {
+	if l == nil {
+		return
+	}
+	addr := strings.TrimSpace(l.value)
+	if i := strings.IndexByte(addr, ':'); i >= 0 && strings.EqualFold(addr[:i], "mailto") {
+		addr = addr[i+1:]
+	}
+	if addr == "" {
+		return
+	}
+	p.Set(mapi.PrSentRepresentingSmtpAddress, addr)
+	p.Set(mapi.PrSentRepresentingEmailAddress, addr)
+	p.Set(mapi.PrSentRepresentingAddrType, "SMTP")
+	if cn := l.param("CN"); cn != "" {
+		p.Set(mapi.PrSentRepresentingName, cn)
+	}
 }
 
 // eventEnd resolves the event end from DTEND, else DTSTART+DURATION, else (for an
