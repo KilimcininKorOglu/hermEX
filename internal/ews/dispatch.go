@@ -58,6 +58,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleCreateFolder(w, inner, sess)
 	case "DeleteFolder":
 		s.handleDeleteFolder(w, inner, sess)
+	case "UpdateFolder":
+		s.handleUpdateFolder(w, inner, sess)
 	case "GetUserAvailabilityRequest":
 		// MS-OXWSAVAIL names the request element GetUserAvailabilityRequest (the
 		// "Request" suffix is unlike the other operations' bare names).

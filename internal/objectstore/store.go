@@ -21,6 +21,10 @@ var ErrNotFound = errors.New("objectstore: not found")
 // own subtree, which would recurse without end.
 var ErrFolderCycle = errors.New("objectstore: folder copied into its own subtree")
 
+// ErrFolderExists is reported when a folder rename or move would collide with a
+// live sibling that already holds the target name.
+var ErrFolderExists = errors.New("objectstore: a folder with that name already exists")
+
 // defaultLogger is the central activity log stamped onto every Store opened
 // after a daemon installs it. Logging is a cross-cutting concern: every mailbox
 // store in a process belongs to one daemon and shares its log, so a package-level

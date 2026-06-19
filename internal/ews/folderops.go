@@ -2,6 +2,7 @@ package ews
 
 import (
 	"encoding/xml"
+	"errors"
 	"net/http"
 
 	"hermex/internal/mapi"
@@ -126,7 +127,109 @@ func (s *Server) handleDeleteFolder(w http.ResponseWriter, inner []byte, sess *s
 	writeResponse(w, deleteFolderResponse{Messages: msgs})
 }
 
+// --- UpdateFolder ---
+
+type updateFolderRequest struct {
+	FolderChanges struct {
+		Changes []folderChange `xml:"FolderChange"`
+	} `xml:"FolderChanges"`
+}
+
+// folderChange targets one folder (by FolderId or DistinguishedFolderId, via the
+// embedded folderRefs) with a set of field updates.
+type folderChange struct {
+	folderRefs
+	Updates struct {
+		Sets []setFolderField `xml:"SetFolderField"`
+	} `xml:"Updates"`
+}
+
+// setFolderField carries a FieldURI and the new value inside a <Folder>. v1
+// applies only folder:DisplayName (a rename); other fields are accepted but not
+// applied, matching the reference's silent drop of unmapped fields.
+type setFolderField struct {
+	FieldURI struct {
+		URI string `xml:"FieldURI,attr"`
+	} `xml:"FieldURI"`
+	Folder struct {
+		DisplayName *string `xml:"DisplayName"`
+	} `xml:"Folder"`
+}
+
+type updateFolderResponse struct {
+	XMLName  xml.Name                `xml:"http://schemas.microsoft.com/exchange/services/2006/messages UpdateFolderResponse"`
+	Messages []folderResponseMessage `xml:"ResponseMessages>UpdateFolderResponseMessage"`
+}
+
+// handleUpdateFolder answers UpdateFolder: it applies a folder:DisplayName
+// SetFolderField as an in-place rename. A well-known (distinguished) folder's name
+// is fixed — renaming it would desync the IMAP well-known projection — so it is
+// refused. Other updatable fields are accepted as a no-op success, as the
+// reference silently drops fields it has no converter for.
+func (s *Server) handleUpdateFolder(w http.ResponseWriter, inner []byte, sess *session) {
+	var req updateFolderRequest
+	if err := xml.Unmarshal(inner, &req); err != nil {
+		writeSOAPFault(w, "ErrorInvalidRequest", "UpdateFolder: "+err.Error())
+		return
+	}
+	st, err := objectstore.Open(sess.mailbox)
+	if err != nil {
+		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		return
+	}
+	defer st.Close()
+
+	var msgs []folderResponseMessage
+	for _, ch := range req.FolderChanges.Changes {
+		targets := resolveTargets(ch.folderRefs)
+		if len(targets) != 1 {
+			msgs = append(msgs, folderError("ErrorInvalidRequest"))
+			continue
+		}
+		if !targets[0].ok {
+			msgs = append(msgs, folderError(targets[0].code))
+			continue
+		}
+		fid := targets[0].fid
+
+		var newName string
+		for _, set := range ch.Updates.Sets {
+			if set.FieldURI.URI == "folder:DisplayName" && set.Folder.DisplayName != nil {
+				newName = *set.Folder.DisplayName
+			}
+		}
+		if newName == "" {
+			// No supported (or empty) rename — accept as a no-op, returning the id.
+			msgs = append(msgs, folderOK(fid))
+			continue
+		}
+		if fid < mapi.PrivateFIDUnassignedStart {
+			msgs = append(msgs, folderError("ErrorAccessDenied"))
+			continue
+		}
+		switch err := st.SetFolderName(fid, newName); {
+		case err == nil:
+			msgs = append(msgs, folderOK(fid))
+		case errors.Is(err, objectstore.ErrFolderExists):
+			msgs = append(msgs, folderError("ErrorFolderExists"))
+		case errors.Is(err, objectstore.ErrNotFound):
+			msgs = append(msgs, folderError("ErrorFolderNotFound"))
+		default:
+			msgs = append(msgs, folderError("ErrorFolderSave"))
+		}
+	}
+	writeResponse(w, updateFolderResponse{Messages: msgs})
+}
+
 // folderError builds an error folder response message.
 func folderError(code string) folderResponseMessage {
 	return folderResponseMessage{ResponseClass: "Error", ResponseCode: code}
+}
+
+// folderOK builds a success folder response message carrying the folder's id.
+func folderOK(fid int64) folderResponseMessage {
+	return folderResponseMessage{
+		ResponseClass: "Success", ResponseCode: "NoError",
+		Folders: &foldersWrap{Folders: []oxews.Folder{oxews.BuildFolder(oxews.FolderInput{FolderID: fid})}},
+	}
 }

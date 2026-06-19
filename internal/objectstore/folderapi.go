@@ -198,6 +198,38 @@ func (s *Store) RenameFolder(folderID int64, newParent *int64, newName string) e
 	return err
 }
 
+// SetFolderName renames a folder in place: it updates the display name and the
+// index projection's name (keeping the IMAP listing in step) without changing the
+// folder's parent — the half of RenameFolder a pure rename needs. It refuses a
+// name already held by a live sibling (ErrFolderExists) so name-based resolution
+// stays unambiguous, and reports ErrNotFound when the folder is missing.
+func (s *Store) SetFolderName(folderID int64, newName string) error {
+	var parentFID int64
+	err := s.objdb.QueryRow(
+		`SELECT parent_id FROM folders WHERE folder_id=? AND is_deleted=0`, folderID).Scan(&parentFID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	var parentArg *int64
+	if parentFID != ipmSubtree {
+		parentArg = &parentFID
+	}
+	if existing, ok, err := s.FolderByName(parentArg, newName); err != nil {
+		return err
+	} else if ok && existing != folderID {
+		return ErrFolderExists
+	}
+	if err := s.SetFolderProperties(folderID,
+		mapi.PropertyValues{{Tag: mapi.PrDisplayName, Value: newName}}); err != nil {
+		return err
+	}
+	_, err = s.idxdb.Exec(`UPDATE folders SET name=? WHERE folder_id=?`, newName, folderID)
+	return err
+}
+
 // DeleteFolder removes a folder and its descendants: the object subtree (a
 // foreign-key cascade drops child folders, messages, and property bags) and
 // the matching index rows, mappings, and cached eml files. It reports

@@ -184,6 +184,43 @@ func TestRenameFolder(t *testing.T) {
 	}
 }
 
+// TestSetFolderName confirms an in-place rename keeps the parent, updates the
+// name, refuses a live-sibling collision, allows renaming to the folder's own
+// name, and reports ErrNotFound for a missing folder.
+func TestSetFolderName(t *testing.T) {
+	s := openSeededStore(t)
+	parent, err := s.CreateFolder(nil, "P")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := s.CreateFolder(&parent, "A")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateFolder(&parent, "B"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.SetFolderName(a, "A2"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := s.FolderByName(&parent, "A2"); !ok {
+		t.Error("renamed folder not found under its original parent (name or parent lost)")
+	}
+	if _, ok, _ := s.FolderByName(&parent, "A"); ok {
+		t.Error("old name still resolves after rename")
+	}
+	if err := s.SetFolderName(a, "B"); !errors.Is(err, ErrFolderExists) {
+		t.Errorf("rename onto a sibling = %v, want ErrFolderExists", err)
+	}
+	if err := s.SetFolderName(a, "A2"); err != nil {
+		t.Errorf("rename to own current name = %v, want nil", err)
+	}
+	if err := s.SetFolderName(99999, "X"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("SetFolderName(missing) = %v, want ErrNotFound", err)
+	}
+}
+
 // TestRenameFolderRejectsCycle confirms reparenting a folder into itself or one
 // of its descendants is refused (it would make the folder its own ancestor),
 // while a legitimate reparent under a non-ancestor still succeeds.
