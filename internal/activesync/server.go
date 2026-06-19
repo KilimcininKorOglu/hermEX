@@ -128,6 +128,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleFolderUpdate(w, r, sess)
 	case "ResolveRecipients":
 		s.handleResolveRecipients(w, r, sess)
+	case "Search":
+		s.handleSearch(w, r, sess)
 	default:
 		http.Error(w, "command not implemented: "+sess.req.cmd, http.StatusNotImplemented)
 	}

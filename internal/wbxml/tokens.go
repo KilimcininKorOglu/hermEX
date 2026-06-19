@@ -22,6 +22,8 @@ const (
 	PageResolveRecips   = 0x0A
 	PagePing            = 0x0D
 	PageProvision       = 0x0E
+	PageSearch          = 0x0F
+	PageGAL             = 0x10
 	PageAirSyncBase     = 0x11
 	PageSettings        = 0x12
 	PageItemOperations  = 0x14
@@ -152,6 +154,30 @@ const (
 	// PVDevicePasswordEnabled (0x0E) is the one policy-detail token v1 emits, set
 	// to 0 for a permissive (no device password) policy.
 	PVDevicePasswordEnabled Tag = 0x0E0E
+)
+
+// Search (code page 0x0F). v1 serves the GAL-store subset; the mailbox-query
+// operators (And/Or/FreeText/GreaterThan/…) are not modeled.
+const (
+	SRSearch     Tag = 0x0F05
+	SRStore      Tag = 0x0F07
+	SRName       Tag = 0x0F08
+	SRQuery      Tag = 0x0F09
+	SROptions    Tag = 0x0F0A
+	SRRange      Tag = 0x0F0B
+	SRStatus     Tag = 0x0F0C
+	SRResponse   Tag = 0x0F0D
+	SRResult     Tag = 0x0F0E
+	SRProperties Tag = 0x0F0F
+	SRTotal      Tag = 0x0F10
+)
+
+// GAL (code page 0x10) — the address-book properties a Search result carries.
+// v1 populates the display name and address; the GALEntry model holds no other
+// fields (phone, office, title, …).
+const (
+	GALDisplayName  Tag = 0x1005
+	GALEmailAddress Tag = 0x100F
 )
 
 // AirSyncBase (code page 0x11).
