@@ -46,7 +46,7 @@ func Export(msg *Message, opt Options) ([]byte, error) {
 
 	// The innermost unit is the body, wrapped in multipart/related when it has
 	// inline images.
-	innerHdr, innerBytes := renderBody(msg)
+	innerHdr, innerBytes := renderBody(msg, opt)
 	if len(inline) > 0 {
 		var err error
 		innerHdr, innerBytes, err = renderRelated(innerHdr, innerBytes, inline)
@@ -123,9 +123,14 @@ func isInlineAttachment(att Attachment) bool {
 // renderBody renders the message body as a MIME part: its header fields and its
 // transfer-encoded content. The shape is multipart/alternative when both plain
 // and HTML bodies are present, text/html when only HTML, text/plain otherwise.
-func renderBody(msg *Message) (textproto.MIMEHeader, []byte) {
+// When opt carries a calendar body (an iTIP message), the body becomes a
+// multipart/alternative whose final alternative is that text/calendar part.
+func renderBody(msg *Message, opt Options) (textproto.MIMEHeader, []byte) {
 	plain := propString(msg.Props, mapi.PrBody)
 	html, hasHTML := bytesProp(msg.Props, mapi.PrHTML)
+	if len(opt.CalendarBody) > 0 {
+		return renderCalendarAlternative(plain, html, hasHTML, htmlCharset(msg.Props), opt.CalendarBody, opt.CalendarMethod)
+	}
 	switch {
 	case hasHTML && plain != "":
 		return renderAlternative(plain, html, htmlCharset(msg.Props))
@@ -134,6 +139,38 @@ func renderBody(msg *Message) (textproto.MIMEHeader, []byte) {
 	default:
 		return renderLeaf("text/plain; charset=utf-8", []byte(plain))
 	}
+}
+
+// renderCalendarAlternative builds a multipart/alternative whose alternatives are
+// the text body (plain, and HTML when present) and the iTIP calendar part. A
+// receiving client renders the text it understands or processes the calendar
+// part; the method on the part's Content-Type must match the METHOD inside the
+// iCalendar, so it is carried through rather than re-parsed.
+func renderCalendarAlternative(plain string, html []byte, hasHTML bool, htmlCset string, ical []byte, method string) (textproto.MIMEHeader, []byte) {
+	var parts bytes.Buffer
+	mw := multipart.NewWriter(&parts)
+	ph, penc := renderLeaf("text/plain; charset=utf-8", []byte(plain))
+	if pw, err := mw.CreatePart(ph); err == nil {
+		pw.Write(penc)
+	}
+	if hasHTML {
+		hh, henc := renderLeaf("text/html; charset="+htmlCset, html)
+		if hw, err := mw.CreatePart(hh); err == nil {
+			hw.Write(henc)
+		}
+	}
+	ct := "text/calendar; charset=utf-8"
+	if method != "" {
+		ct += "; method=" + method
+	}
+	ch, cenc := renderLeaf(ct, ical)
+	if cw, err := mw.CreatePart(ch); err == nil {
+		cw.Write(cenc)
+	}
+	mw.Close()
+	h := textproto.MIMEHeader{}
+	h.Set("Content-Type", "multipart/alternative; boundary=\""+mw.Boundary()+"\"")
+	return h, parts.Bytes()
 }
 
 // renderLeaf renders a single content part: a Content-Type and the

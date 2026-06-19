@@ -39,7 +39,14 @@ const (
 // Options configures a conversion. Resolver supplies named-property ids and is
 // required whenever the message carries named properties. BodyFormat selects
 // the body representation Export emits (the zero value emits plain and HTML).
+//
+// CalendarBody, when set, is a pre-rendered iCalendar object (an iTIP message
+// the caller built through oxcical, which oxcmail cannot import without a cycle)
+// that Export carries as a text/calendar alternative beside the text body;
+// CalendarMethod is its METHOD, surfaced on the part's Content-Type.
 type Options struct {
-	Resolver   PropIDResolver
-	BodyFormat BodyFormat
+	Resolver       PropIDResolver
+	BodyFormat     BodyFormat
+	CalendarBody   []byte
+	CalendarMethod string
 }
