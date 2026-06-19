@@ -26,6 +26,8 @@ type Config struct {
 	ActiveSyncAddr string `json:"activesync_addr"` // ActiveSync HTTP listen address (default ":8080")
 	EWSAddr        string `json:"ews_addr"`        // EWS (Exchange Web Services) HTTP listen address (default ":8080")
 	MapiAddr       string `json:"mapi_addr"`       // MAPI/HTTP (native Outlook) HTTP listen address (default ":8080")
+	AdminAddr      string `json:"admin_addr"`      // admin API HTTP listen address (default ":8081")
+	AdminSecret    string `json:"admin_secret"`    // signing key for admin session tokens; required to serve the admin API
 	TLSCert        string `json:"tls_cert"`        // PEM certificate (chain) for implicit-TLS/HTTPS listeners
 	TLSKey         string `json:"tls_key"`         // PEM private key paired with tls_cert
 	IMAPSAddr      string `json:"imaps_addr"`      // IMAP implicit-TLS listen address (e.g. ":993"); empty disables

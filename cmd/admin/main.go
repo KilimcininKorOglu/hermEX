@@ -1,22 +1,34 @@
 // Command admin provisions the hermEX directory: it ensures the schema and
-// creates domains, users, and aliases in the directory database.
+// creates domains, users, and aliases in the directory database, and serves the
+// admin API.
 package main
 
 import (
+	"context"
 	"database/sql"
 	"flag"
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 
 	_ "github.com/go-sql-driver/mysql"
 
+	"hermex/internal/admin"
 	"hermex/internal/config"
 	"hermex/internal/directory"
 	"hermex/internal/ldapauth"
+	"hermex/internal/lifecycle"
+	"hermex/internal/logging"
 	"hermex/internal/objectstore"
+	"hermex/internal/serve"
 )
+
+// The admin server consumes the directory through its own interface; this proves
+// the concrete *SQLDirectory satisfies it.
+var _ admin.Directory = (*directory.SQLDirectory)(nil)
 
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: hermex-admin -config <file> <command> [args]")
@@ -27,6 +39,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  create-alias <alias-address> <user-email>")
 	fmt.Fprintln(os.Stderr, "  sweep-content <email>   (reclaim orphan content files; run with the mailbox idle)")
 	fmt.Fprintln(os.Stderr, "  ldap-sync <org-id>      (import the org's LDAP/AD accounts into the directory)")
+	fmt.Fprintln(os.Stderr, "  grant-admin <email> <system|org|domain> [scope-id]")
+	fmt.Fprintln(os.Stderr, "  serve                   (run the admin API HTTP server)")
 	os.Exit(2)
 }
 
@@ -133,6 +147,48 @@ func main() {
 		}
 		fmt.Printf("ldap-sync org %d: %d created, %d updated (of %d directory entries)\n",
 			orgID, created, updated, len(users))
+	case "grant-admin":
+		if len(args) < 3 || len(args) > 4 {
+			usage()
+		}
+		uid, ok, err := dir.UserID(args[1])
+		if err != nil {
+			log.Fatalf("hermex-admin: %v", err)
+		}
+		if !ok {
+			log.Fatalf("hermex-admin: unknown user: %s", args[1])
+		}
+		var scope int64
+		if len(args) == 4 {
+			if scope, err = strconv.ParseInt(args[3], 10, 64); err != nil {
+				log.Fatalf("hermex-admin: scope id %q: %v", args[3], err)
+			}
+		}
+		if err := dir.GrantAdminRole(uid, args[2], scope); err != nil {
+			log.Fatalf("hermex-admin: %v", err)
+		}
+		fmt.Printf("granted %s the %s admin role (scope %d)\n", args[1], args[2], scope)
+	case "serve":
+		if cfg.AdminSecret == "" {
+			log.Fatal("hermex-admin: admin_secret is required to serve the admin API")
+		}
+		addr := cfg.AdminAddr
+		if addr == "" {
+			addr = ":8081"
+		}
+		dir.SetLDAPVerifier(ldapauth.New()) // an administrator may be LDAP-mastered
+		logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
+		hs, err := serve.New(addr, admin.NewServer(dir, []byte(cfg.AdminSecret)).Handler(), cfg, logger, logging.Admin)
+		if err != nil {
+			log.Fatalf("hermex-admin: %v", err)
+		}
+		logger.Info(logging.Admin, "daemon.startup", logging.Fields{"daemon": "admin", "addr": addr})
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		log.Printf("hermex-admin serving the admin API on %s", addr)
+		if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, logClose); err != nil {
+			log.Fatalf("hermex-admin: %v", err)
+		}
 	default:
 		usage()
 	}
