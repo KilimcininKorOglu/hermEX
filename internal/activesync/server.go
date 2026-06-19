@@ -124,6 +124,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleFolderCreate(w, r, sess)
 	case "FolderDelete":
 		s.handleFolderDelete(w, r, sess)
+	case "FolderUpdate":
+		s.handleFolderUpdate(w, r, sess)
 	default:
 		http.Error(w, "command not implemented: "+sess.req.cmd, http.StatusNotImplemented)
 	}

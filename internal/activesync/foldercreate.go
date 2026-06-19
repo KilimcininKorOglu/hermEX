@@ -60,8 +60,9 @@ func (s *Server) handleFolderCreate(w http.ResponseWriter, r *http.Request, sess
 		return
 	}
 
-	parent, ok := resolveFolderParent(w, st, parentID)
-	if !ok {
+	parent, code := resolveFolderParent(st, parentID)
+	if code != 0 {
+		writeWBXML(w, folderCreateStatus(code))
 		return
 	}
 
@@ -88,27 +89,26 @@ func (s *Server) handleFolderCreate(w http.ResponseWriter, r *http.Request, sess
 }
 
 // resolveFolderParent maps an EAS ParentId to a store parent: "0" (or empty) is
-// the mailbox root (nil), any other id must name an existing folder. On a missing
-// or malformed parent it writes the status reply and reports ok=false.
-func resolveFolderParent(w http.ResponseWriter, st *objectstore.Store, parentID string) (*int64, bool) {
+// the mailbox root (nil), any other id must name an existing folder. It returns a
+// non-zero FolderHierarchy status code when the parent is malformed or missing,
+// leaving the caller to emit it under its own command element (FolderCreate vs
+// FolderUpdate); a zero code means the parent resolved.
+func resolveFolderParent(st *objectstore.Store, parentID string) (*int64, int) {
 	if parentID == "" || parentID == "0" {
-		return nil, true
+		return nil, 0
 	}
 	pid, err := strconv.ParseInt(parentID, 10, 64)
 	if err != nil {
-		writeWBXML(w, folderCreateStatus(fhStatusParentNotFound))
-		return nil, false
+		return nil, fhStatusParentNotFound
 	}
 	exists, err := st.FolderExists(pid)
 	if err != nil {
-		writeWBXML(w, folderCreateStatus(fhStatusServerError))
-		return nil, false
+		return nil, fhStatusServerError
 	}
 	if !exists {
-		writeWBXML(w, folderCreateStatus(fhStatusParentNotFound))
-		return nil, false
+		return nil, fhStatusParentNotFound
 	}
-	return &pid, true
+	return &pid, 0
 }
 
 // folderCreateResponse builds a Status-1 FolderCreate reply carrying the advanced
