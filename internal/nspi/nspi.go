@@ -36,6 +36,14 @@ const (
 	ecTableTooBig    uint32 = 0x80040403 // more than 100 columns requested
 	ecInvalidObject  uint32 = 0x80040108 // GetProps/GetPropList: no such MId
 	ecWarnWithErrors uint32 = 0x00040380 // GetProps: row carries PT_ERROR markers
+	ecUnknownLcid    uint32 = 0x8004011F // GetTemplateInfo: no display-table for this locale
+)
+
+// NspiGetTemplateInfo Flags ([MS-OXNSPI] 2.2.4 / 3.1.4.10): the reference accepts
+// only TI_TEMPLATE alone — a request carrying TI_SCRIPT (or neither) is ecNotSupported.
+const (
+	tiTemplate uint32 = 0x00000001
+	tiScript   uint32 = 0x00000004
 )
 
 // abkFlags is the EXT flag set every NSPI body is (de)serialized under, matching

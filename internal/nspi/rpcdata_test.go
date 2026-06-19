@@ -338,6 +338,79 @@ func TestRPCGetSpecialTable(t *testing.T) {
 	}
 }
 
+// --- write-range opnums: each must answer with a MAPI error, never fault. The
+// load-bearing assertion in every case is fault==0 AND the expected result: a
+// result-only check would still pass while the op silently faulted. ---
+
+// TestRPCModPropsNotSupported: the GAL is read-only, so ModProps answers
+// ecNotSupported (the bare result, no echoed row) instead of an op-range fault.
+func TestRPCModPropsNotSupported(t *testing.T) {
+	s := testGAL("alice@hermex.test")
+	out, fault := s.DispatchRPC(opNspiModProps, inHandle().Bytes())
+	if fault != 0 {
+		t.Fatalf("ModProps faulted %#x; the write-range opnums must answer, not fault", fault)
+	}
+	if len(out) != 4 {
+		t.Fatalf("OUT = %d bytes, want 4 (bare result)", len(out))
+	}
+	if tailResult(out) != ecNotSupported {
+		t.Errorf("result %#x, want ecNotSupported", tailResult(out))
+	}
+}
+
+// TestRPCModLinkAttNotSupported: hermEX has no delegate/DL-membership editing, so
+// ModLinkAtt answers a blanket ecNotSupported.
+func TestRPCModLinkAttNotSupported(t *testing.T) {
+	s := testGAL("alice@hermex.test")
+	out, fault := s.DispatchRPC(opNspiModLinkAtt, inHandle().Bytes())
+	if fault != 0 {
+		t.Fatalf("ModLinkAtt faulted %#x; the write-range opnums must answer, not fault", fault)
+	}
+	if len(out) != 4 {
+		t.Fatalf("OUT = %d bytes, want 4 (bare result)", len(out))
+	}
+	if tailResult(out) != ecNotSupported {
+		t.Errorf("result %#x, want ecNotSupported", tailResult(out))
+	}
+}
+
+// TestRPCGetTemplateInfoNoTemplate: a well-formed TI_TEMPLATE request finds no
+// display-table archive, so the OUT is a null pData pointer then ecUnknownLcid.
+func TestRPCGetTemplateInfoNoTemplate(t *testing.T) {
+	s := testGAL("alice@hermex.test")
+	p := inHandle()
+	p.Uint32(tiTemplate) // Flags
+	out, fault := s.DispatchRPC(opNspiGetTemplateInfo, p.Bytes())
+	if fault != 0 {
+		t.Fatalf("GetTemplateInfo faulted %#x; it must answer, not fault", fault)
+	}
+	if ref, _ := ndr.NewPull(out).Uint32(); ref != 0 {
+		t.Errorf("pData referent = %#x, want 0 (no template row)", ref)
+	}
+	if tailResult(out) != ecUnknownLcid {
+		t.Errorf("result %#x, want ecUnknownLcid", tailResult(out))
+	}
+}
+
+// TestRPCGetTemplateInfoScriptNotSupported: a request that is not TI_TEMPLATE alone
+// (here it also carries TI_SCRIPT) is rejected with ecNotSupported, mirroring the
+// reference flags rung — the branch the no-template case does not exercise.
+func TestRPCGetTemplateInfoScriptNotSupported(t *testing.T) {
+	s := testGAL("alice@hermex.test")
+	p := inHandle()
+	p.Uint32(tiTemplate | tiScript) // Flags carry TI_SCRIPT
+	out, fault := s.DispatchRPC(opNspiGetTemplateInfo, p.Bytes())
+	if fault != 0 {
+		t.Fatalf("GetTemplateInfo faulted %#x", fault)
+	}
+	if ref, _ := ndr.NewPull(out).Uint32(); ref != 0 {
+		t.Errorf("pData referent = %#x, want 0", ref)
+	}
+	if tailResult(out) != ecNotSupported {
+		t.Errorf("result %#x, want ecNotSupported", tailResult(out))
+	}
+}
+
 // TestRPCDNToMid maps a distinguished name back to its MId.
 func TestRPCDNToMid(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test")

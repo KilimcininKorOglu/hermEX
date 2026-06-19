@@ -382,6 +382,65 @@ func (s *Server) rpcGetSpecialTable(stub []byte) ([]byte, uint32) {
 	return out.Bytes(), 0
 }
 
+// --- write-range ops: the GAL is read-only, so each decodes the handle and answers
+// with a faithful MAPI error instead of an op-range fault. NSPI dispatches one opnum
+// per stub, so the request body past what a handler reads is left unconsumed safely:
+// there is no successor op to misalign. ---
+
+// rpcModProps handles NspiModProps (opnum 11): nothing in the GAL is writable, so it
+// returns ecNotSupported unconditionally — the exact reference behavior. The body past
+// the handle (STAT, the delete-proptag array, the value row) is not decoded. OUT: the
+// bare result.
+func (s *Server) rpcModProps(stub []byte) ([]byte, uint32) {
+	p := ndr.NewPull(stub)
+	if err := pullHandle(p); err != nil {
+		return nil, ndr.FaultNdr
+	}
+	out := ndr.NewPush()
+	out.Uint32(ecNotSupported)
+	return out.Bytes(), 0
+}
+
+// rpcGetTemplateInfo handles NspiGetTemplateInfo (opnum 13). hermEX ships no
+// display-table (.abkt) archive, so a well-formed template request is permanently "no
+// template for this locale" → ecUnknownLcid; a request that is not TI_TEMPLATE alone
+// (e.g. one carrying TI_SCRIPT) is ecNotSupported, mirroring the reference's flags
+// rung. The handle and Flags are read; Type/DN/CodePage/LocaleID are not — the answer
+// never depends on them. OUT: a null pData unique-ptr then the result.
+func (s *Server) rpcGetTemplateInfo(stub []byte) ([]byte, uint32) {
+	p := ndr.NewPull(stub)
+	if err := pullHandle(p); err != nil {
+		return nil, ndr.FaultNdr
+	}
+	flags, err := p.Uint32()
+	if err != nil {
+		return nil, ndr.FaultNdr
+	}
+	result := ecUnknownLcid
+	if flags&(tiTemplate|tiScript) != tiTemplate {
+		result = ecNotSupported
+	}
+	out := ndr.NewPush()
+	out.UniquePtr(false) // pData: no template row
+	out.Uint32(result)
+	return out.Bytes(), 0
+}
+
+// rpcModLinkAtt handles NspiModLinkAtt (opnum 14): the reference edits the caller's
+// public-delegates list, which hermEX does not implement, so it returns a blanket
+// ecNotSupported. It does not replicate the reference's mid==0 → ecInvalidObject rung,
+// since the op is supported for no proptag at all. Only the handle is decoded. OUT: the
+// bare result.
+func (s *Server) rpcModLinkAtt(stub []byte) ([]byte, uint32) {
+	p := ndr.NewPull(stub)
+	if err := pullHandle(p); err != nil {
+		return nil, ndr.FaultNdr
+	}
+	out := ndr.NewPush()
+	out.Uint32(ecNotSupported)
+	return out.Bytes(), 0
+}
+
 // --- resolve / match ops ---
 
 // rpcDNToMid handles NspiDNToMId (opnum 7): handle, reserved, and an 8-bit

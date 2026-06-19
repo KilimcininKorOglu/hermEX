@@ -23,8 +23,9 @@ var (
 )
 
 // NSPI opnums ([MS-OXNSPI] 3.1.4). The write/template ops — ModProps (11),
-// GetTemplateInfo (13), ModLinkAtt (14) — are intentionally absent: the GAL is
-// read-only, so they fall through to an op-range fault.
+// GetTemplateInfo (13), ModLinkAtt (14) — answer with a faithful MAPI error rather
+// than an op-range fault: the GAL is read-only (ModProps/ModLinkAtt → ecNotSupported)
+// and there is no display-table archive (GetTemplateInfo → ecUnknownLcid).
 const (
 	opNspiBind              uint16 = 0
 	opNspiUnbind            uint16 = 1
@@ -37,7 +38,10 @@ const (
 	opNspiGetPropList       uint16 = 8
 	opNspiGetProps          uint16 = 9
 	opNspiCompareMIds       uint16 = 10
+	opNspiModProps          uint16 = 11
 	opNspiGetSpecialTable   uint16 = 12
+	opNspiGetTemplateInfo   uint16 = 13
+	opNspiModLinkAtt        uint16 = 14
 	opNspiQueryColumns      uint16 = 16
 	opNspiResolveNames      uint16 = 19
 	opNspiResolveNamesW     uint16 = 20
@@ -82,8 +86,14 @@ func (s *Server) DispatchRPC(opnum uint16, stub []byte) (out []byte, fault uint3
 		return s.rpcGetProps(stub)
 	case opNspiCompareMIds:
 		return s.rpcCompareMids(stub)
+	case opNspiModProps:
+		return s.rpcModProps(stub)
 	case opNspiGetSpecialTable:
 		return s.rpcGetSpecialTable(stub)
+	case opNspiGetTemplateInfo:
+		return s.rpcGetTemplateInfo(stub)
+	case opNspiModLinkAtt:
+		return s.rpcModLinkAtt(stub)
 	case opNspiQueryColumns:
 		return s.rpcQueryColumns(stub)
 	case opNspiResolveNames:
@@ -91,8 +101,8 @@ func (s *Server) DispatchRPC(opnum uint16, stub []byte) (out []byte, fault uint3
 	case opNspiResolveNamesW:
 		return s.rpcResolveNames(stub, true)
 	default:
-		// ModProps (11), GetTemplateInfo (13), ModLinkAtt (14) and any unknown
-		// opnum fall through: the GAL is read-only.
+		// Any unknown opnum (15, 17, 18, and out-of-range) faults: it is not a
+		// defined NSPI operation.
 		return nil, ndr.FaultOpRngError
 	}
 }

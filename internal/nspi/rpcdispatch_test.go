@@ -165,15 +165,17 @@ func TestRPCUnbind(t *testing.T) {
 	}
 }
 
-// TestRPCUnsupportedOpnum proves a write/template opnum the GAL never serves
-// (ModProps = 11) returns an op-range fault, not a silent empty response.
+// TestRPCUnsupportedOpnum proves a genuinely undefined NSPI opnum (17 is not a
+// defined operation) returns an op-range fault, not a silent empty response. The
+// write/template opnums 11/13/14 are no longer here — they now answer with a faithful
+// MAPI error (covered by the write-range tests in rpcdata_test.go).
 func TestRPCUnsupportedOpnum(t *testing.T) {
 	s := NewServer(nil, testServerGUID)
-	out, fault := s.DispatchRPC(11, nil) // ModProps: a read-only GAL never serves it
+	out, fault := s.DispatchRPC(17, nil) // opnum 17: not a defined NSPI operation
 	if fault != ndr.FaultOpRngError {
-		t.Errorf("opnum 11 fault = %#x, want FaultOpRngError", fault)
+		t.Errorf("opnum 17 fault = %#x, want FaultOpRngError", fault)
 	}
 	if out != nil {
-		t.Errorf("opnum 11 out = %x, want nil", out)
+		t.Errorf("opnum 17 out = %x, want nil", out)
 	}
 }
