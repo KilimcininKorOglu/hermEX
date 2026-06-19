@@ -1,0 +1,23 @@
+{{define "head"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>hermEX Admin</title>
+<link rel="stylesheet" href="/admin/static/style.css">
+</head>
+<body>{{end}}
+
+{{define "foot"}}</body>
+</html>{{end}}
+
+{{define "topbar"}}<header class="topbar">
+<span class="brand">hermEX Admin</span>
+<nav>
+<a href="/admin/ui/">Dashboard</a>
+</nav>
+<form class="logout" method="post" action="/admin/ui/logout">
+<input type="hidden" name="_csrf" value="{{.CSRF}}">
+<button type="submit">Sign out</button>
+</form>
+</header>{{end}}

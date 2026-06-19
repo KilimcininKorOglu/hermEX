@@ -1,0 +1,15 @@
+{{define "login.html"}}{{template "head" .}}
+<main class="login">
+<h1>hermEX Admin</h1>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<form method="post" action="/admin/ui/login">
+<label>Email
+<input type="email" name="login" required autofocus>
+</label>
+<label>Password
+<input type="password" name="password" required>
+</label>
+<button type="submit">Sign in</button>
+</form>
+</main>
+{{template "foot" .}}{{end}}

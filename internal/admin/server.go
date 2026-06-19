@@ -79,6 +79,13 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /admin/aliases", s.protect(s.requireSystem(s.handleCreateAlias)))
 	mux.Handle("GET /admin/orgs/{orgID}/ldap", s.protect(http.HandlerFunc(s.handleGetLDAP)))
 	mux.Handle("PUT /admin/orgs/{orgID}/ldap", s.protect(http.HandlerFunc(s.handlePutLDAP)))
+
+	// Web UI (server-rendered HTML) and its assets.
+	mux.Handle("GET /admin/static/", staticHandler())
+	mux.HandleFunc("GET /admin/ui/login", s.handleUILoginPage)
+	mux.HandleFunc("POST /admin/ui/login", s.handleUILoginSubmit)
+	mux.HandleFunc("POST /admin/ui/logout", s.handleUILogout)
+	mux.HandleFunc("GET /admin/ui/", s.handleUIDashboard)
 	return mux
 }
 

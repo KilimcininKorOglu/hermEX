@@ -1,0 +1,12 @@
+{{define "dashboard.html"}}{{template "head" .}}
+{{template "topbar" .}}
+<main>
+<h1>Dashboard</h1>
+<p class="signed-in">Signed in as {{.Login}}.</p>
+<section class="cards">
+<div class="card"><span class="num">{{.UserCount}}</span><span class="label">Users</span></div>
+<div class="card"><span class="num">{{.DomainCount}}</span><span class="label">Domains</span></div>
+<div class="card"><span class="num">{{.AliasCount}}</span><span class="label">Aliases</span></div>
+</section>
+</main>
+{{template "foot" .}}{{end}}
