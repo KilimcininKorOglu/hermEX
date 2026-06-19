@@ -73,6 +73,8 @@ const (
 	ropModifyPermissions           uint8 = 0x40
 	ropGetRulesTable               uint8 = 0x3F
 	ropModifyRules                 uint8 = 0x41
+	ropSetSpooler                  uint8 = 0x47
+	ropGetTransportFolder          uint8 = 0x6D
 )
 
 // MAPI return codes ([MS-OXCDATA] 2.4.1) carried in a ROP response ReturnValue.
@@ -297,6 +299,14 @@ loop:
 			}
 		case ropModifyRules:
 			if !s.ropModifyRules(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSetSpooler:
+			if !s.ropSetSpooler(p, out, handles, hindex) {
+				break loop
+			}
+		case ropGetTransportFolder:
+			if !s.ropGetTransportFolder(p, out, handles, hindex) {
 				break loop
 			}
 		case ropSetColumns:
