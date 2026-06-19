@@ -34,3 +34,25 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSONStatus(w, http.StatusCreated, map[string]any{"id": id, "email": req.Email})
 }
+
+// handleSetPassword replaces a user's local password (system administrators
+// only). The user is named in the path; the new password is the request body.
+func (s *Server) handleSetPassword(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Password == "" {
+		http.Error(w, "a password is required", http.StatusBadRequest)
+		return
+	}
+	found, err := s.dir.SetPassword(r.PathValue("email"), req.Password)
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.Error(w, "no such user", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

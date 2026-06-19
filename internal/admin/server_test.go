@@ -24,6 +24,8 @@ type fakeDir struct {
 	createdDomain, createdHomedir string
 	createdUser, createdMaildir   string
 	createdAlias, createdAliasTo  string
+	setPwUser, setPwValue         string
+	setPwMissing                  bool
 	createErr                     error
 }
 
@@ -50,6 +52,13 @@ func (f *fakeDir) CreateUser(username, _, maildir string) (int64, error) {
 	}
 	f.createdUser, f.createdMaildir = username, maildir
 	return 43, nil
+}
+func (f *fakeDir) SetPassword(username, password string) (bool, error) {
+	if f.createErr != nil {
+		return false, f.createErr
+	}
+	f.setPwUser, f.setPwValue = username, password
+	return !f.setPwMissing, nil
 }
 func (f *fakeDir) ListAliases() ([]directory.AliasInfo, error) { return f.aliases, nil }
 func (f *fakeDir) CreateAlias(aliasname, mainname string) error {

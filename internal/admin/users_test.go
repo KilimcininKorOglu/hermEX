@@ -85,3 +85,37 @@ func TestAdminCreateUserValidates(t *testing.T) {
 		t.Errorf("an invalid request still provisioned %q", d.createdUser)
 	}
 }
+
+// TestAdminSetPassword proves a system admin resets a user's password.
+func TestAdminSetPassword(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedPOST(t, ts, "/admin/users/boss@hermex.test/password", session, csrf, `{"password":"newpass"}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("set password status %d, want 204", resp.StatusCode)
+	}
+	if d.setPwUser != "boss@hermex.test" || d.setPwValue != "newpass" {
+		t.Errorf("set password for %q = %q, want boss@hermex.test = newpass", d.setPwUser, d.setPwValue)
+	}
+}
+
+// TestAdminSetPasswordNotFound proves resetting an unknown user's password is a
+// 404.
+func TestAdminSetPasswordNotFound(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7,
+		roles:        []directory.AdminRole{{Role: directory.AdminSystem}},
+		setPwMissing: true,
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedPOST(t, ts, "/admin/users/ghost@hermex.test/password", session, csrf, `{"password":"x"}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("set password for unknown user = %d, want 404", resp.StatusCode)
+	}
+}

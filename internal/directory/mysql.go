@@ -407,6 +407,23 @@ func (d *SQLDirectory) CreateUser(username, password, maildir string) (int64, er
 	return res.LastInsertId()
 }
 
+// SetPassword replaces a user's local password hash, reporting whether the user
+// existed. For an LDAP-mastered account the stored hash is inert (authentication
+// goes to LDAP), but it is updated regardless.
+func (d *SQLDirectory) SetPassword(username, password string) (bool, error) {
+	hash, err := sqlCryptNewHash(password)
+	if err != nil {
+		return false, err
+	}
+	res, err := d.db.Exec(`UPDATE users SET password = ? WHERE username = ?`,
+		hash, strings.ToLower(strings.TrimSpace(username)))
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
 // CreateAlias maps an alternate address (aliasname) to a canonical user
 // (mainname == users.username) in the aliases table.
 func (d *SQLDirectory) CreateAlias(aliasname, mainname string) error {

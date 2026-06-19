@@ -197,4 +197,19 @@ func TestAdminServerIntegration(t *testing.T) {
 	if strings.Contains(string(ldapBody), "topsecret") {
 		t.Errorf("the bind password leaked from the real config: %s", ldapBody)
 	}
+
+	// 8. Reset the new user's password through the API; the new password must
+	// authenticate against the real hash and the old one must not.
+	pwReset := authedPOST(t, ts, "/admin/users/intern@hermex.test/password", session, csrf,
+		`{"password":"pw3"}`)
+	pwReset.Body.Close()
+	if pwReset.StatusCode != http.StatusNoContent {
+		t.Fatalf("password reset status %d, want 204", pwReset.StatusCode)
+	}
+	if _, ok := dir.Authenticate("intern@hermex.test", "pw3"); !ok {
+		t.Error("the API-reset password does not authenticate")
+	}
+	if _, ok := dir.Authenticate("intern@hermex.test", "pw2"); ok {
+		t.Error("the old password still authenticates after a reset")
+	}
 }

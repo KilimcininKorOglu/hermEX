@@ -23,6 +23,7 @@ type Directory interface {
 	ListAliases() ([]directory.AliasInfo, error)
 	CreateDomain(domainname, homedir string) (int64, error)
 	CreateUser(username, password, maildir string) (int64, error)
+	SetPassword(username, password string) (bool, error)
 	CreateAlias(aliasname, mainname string) error
 	GetLDAPConfig(orgID int64) (directory.LDAPConfig, bool, error)
 	SetLDAPConfig(orgID int64, cfg directory.LDAPConfig) error
@@ -68,6 +69,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /admin/domains", s.protect(s.requireSystem(s.handleCreateDomain)))
 	mux.Handle("GET /admin/users", s.protect(s.requireSystem(s.handleListUsers)))
 	mux.Handle("POST /admin/users", s.protect(s.requireSystem(s.handleCreateUser)))
+	mux.Handle("POST /admin/users/{email}/password", s.protect(s.requireSystem(s.handleSetPassword)))
 	mux.Handle("GET /admin/aliases", s.protect(s.requireSystem(s.handleListAliases)))
 	mux.Handle("POST /admin/aliases", s.protect(s.requireSystem(s.handleCreateAlias)))
 	mux.Handle("GET /admin/orgs/{orgID}/ldap", s.protect(http.HandlerFunc(s.handleGetLDAP)))
