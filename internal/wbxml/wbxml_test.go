@@ -166,6 +166,52 @@ func TestRoundTripMultiPage(t *testing.T) {
 	}
 }
 
+// TestRoundTripCalendar exercises the Calendar code page (0x04, MS-ASCAL): a Sync
+// ApplicationData carrying an appointment's fields switches AirSync → Calendar and
+// back, with a nested Recurrence subtree, and survives encode+decode unchanged.
+func TestRoundTripCalendar(t *testing.T) {
+	tree := Elem(ASSync,
+		Elem(ASCollection,
+			Elem(ASCommands,
+				Elem(ASAdd,
+					Str(ASServerID, "3"),
+					Elem(ASData,
+						Str(CalSubject, "Standup"),
+						Str(CalStartTime, "20260619T090000Z"),
+						Str(CalEndTime, "20260619T093000Z"),
+						Str(CalUID, "abc-123"),
+						Str(CalBusyStatus, "2"),
+						Str(CalAllDayEvent, "0"),
+						Elem(CalRecurrence,
+							Str(CalType, "1"),
+							Str(CalInterval, "1"),
+							Str(CalDayOfWeek, "16"),
+						),
+					),
+				),
+			),
+		),
+	)
+	got, err := Unmarshal(Marshal(tree))
+	if err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(got, tree) {
+		t.Fatalf("calendar round-trip mismatch:\n got %#v\nwant %#v", got, tree)
+	}
+	// The appointment keeps its Calendar-page fields after the page switch back.
+	data := got.Child(ASCollection).Child(ASCommands).Child(ASAdd).Child(ASData)
+	if data == nil {
+		t.Fatal("navigation lost the ApplicationData node")
+	}
+	if st := data.ChildText(CalStartTime); st != "20260619T090000Z" {
+		t.Errorf("CalStartTime = %q, want the round-tripped value", st)
+	}
+	if rec := data.Child(CalRecurrence); rec == nil || rec.ChildText(CalType) != "1" {
+		t.Errorf("Recurrence subtree lost across the page switch: %#v", rec)
+	}
+}
+
 // TestRejectAttributes confirms a tag carrying the attribute bit (0x80) is
 // rejected: ActiveSync never uses WBXML attributes.
 func TestRejectAttributes(t *testing.T) {

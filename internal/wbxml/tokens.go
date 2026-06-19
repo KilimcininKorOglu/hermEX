@@ -16,6 +16,7 @@ func (t Tag) Token() byte { return byte(t) }
 const (
 	PageAirSync         = 0x00
 	PageEmail           = 0x02
+	PageCalendar        = 0x04
 	PageMove            = 0x05
 	PageGetItemEstimate = 0x06
 	PageFolderHierarchy = 0x07
@@ -81,6 +82,49 @@ const (
 	EMFlag         Tag = 0x023A
 	EMFlagStatus   Tag = 0x023B
 	EMContentClass Tag = 0x023C
+)
+
+// Calendar (code page 0x04, MS-ASCAL). The deprecated 2.5 RTF/Body/inline-
+// attachment tokens are omitted; 12.0+ carries the body under AirSyncBase.
+const (
+	CalTimezone             Tag = 0x0405
+	CalAllDayEvent          Tag = 0x0406
+	CalAttendees            Tag = 0x0407
+	CalAttendee             Tag = 0x0408
+	CalEmail                Tag = 0x0409
+	CalName                 Tag = 0x040A
+	CalBusyStatus           Tag = 0x040D
+	CalCategories           Tag = 0x040E
+	CalCategory             Tag = 0x040F
+	CalDtStamp              Tag = 0x0411
+	CalEndTime              Tag = 0x0412
+	CalException            Tag = 0x0413
+	CalExceptions           Tag = 0x0414
+	CalDeleted              Tag = 0x0415
+	CalExceptionStartTime   Tag = 0x0416
+	CalLocation             Tag = 0x0417
+	CalMeetingStatus        Tag = 0x0418
+	CalOrganizerEmail       Tag = 0x0419
+	CalOrganizerName        Tag = 0x041A
+	CalRecurrence           Tag = 0x041B
+	CalType                 Tag = 0x041C
+	CalUntil                Tag = 0x041D
+	CalOccurrences          Tag = 0x041E
+	CalInterval             Tag = 0x041F
+	CalDayOfWeek            Tag = 0x0420
+	CalDayOfMonth           Tag = 0x0421
+	CalWeekOfMonth          Tag = 0x0422
+	CalMonthOfYear          Tag = 0x0423
+	CalReminder             Tag = 0x0424
+	CalSensitivity          Tag = 0x0425
+	CalSubject              Tag = 0x0426
+	CalStartTime            Tag = 0x0427
+	CalUID                  Tag = 0x0428
+	CalAttendeeStatus       Tag = 0x0429
+	CalAttendeeType         Tag = 0x042A
+	CalResponseRequested    Tag = 0x0434
+	CalAppointmentReplyTime Tag = 0x0435
+	CalResponseType         Tag = 0x0436
 )
 
 // GetItemEstimate (code page 0x06).
