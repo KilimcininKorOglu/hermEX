@@ -73,6 +73,7 @@ var (
 	NameAppointmentStartWhole = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x820D} // PtSysTime, UTC
 	NameAppointmentEndWhole   = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x820E} // PtSysTime, UTC
 	NameAppointmentSubType    = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8215} // PtBoolean, all-day
+	NameRecurring             = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8223} // PtBoolean, recurring series master
 
 	// Reminder named properties (PSETID_Common) — VALARM maps here.
 	NameReminderDelta = PropertyName{Kind: MnidID, GUID: PsetidCommon, LID: 0x8501} // PtLong, minutes before start
