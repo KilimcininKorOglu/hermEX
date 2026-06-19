@@ -12,7 +12,6 @@ import (
 	"net/mail"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -69,7 +68,7 @@ func main() {
 	// The outbound relay spool holds external recipients of authenticated
 	// submissions until the relay worker delivers them. A single spool serves all
 	// users; it lives under the data root alongside the mailbox stores.
-	spool, err := relay.Open(filepath.Join(cfg.DataDir, "relay.sqlite3"))
+	spool, err := relay.Open(cfg.RelaySpoolPath())
 	if err != nil {
 		log.Fatalf("hermex-mta: open relay spool: %v", err)
 	}

@@ -96,3 +96,12 @@ func (c *Config) MaildirFor(address string) string {
 func (c *Config) HomedirFor(domain string) string {
 	return filepath.Join(c.DataDir, "domain", strings.ToLower(domain))
 }
+
+// RelaySpoolPath is the single outbound relay spool shared by every daemon:
+// {DataDir}/relay.sqlite3. Each user-facing protocol enqueues external mail
+// here and the MTA's relay worker drains it, so all daemons MUST derive the path
+// through this one helper — a divergent path would split the queue and strand
+// mail in a spool nothing drains.
+func (c *Config) RelaySpoolPath() string {
+	return filepath.Join(c.DataDir, "relay.sqlite3")
+}
