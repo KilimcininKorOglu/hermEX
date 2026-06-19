@@ -1,0 +1,25 @@
+{{define "logs.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>Logs</h1>
+{{if .Disabled}}
+<p class="muted">Central logging is not configured.</p>
+{{else}}
+<form class="create-form" method="get" action="/admin/ui/logs">
+<input type="text" name="subsystem" value="{{.Subsystem}}" placeholder="Filter by subsystem (e.g. imap)">
+<button type="submit">Filter</button>
+</form>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<table class="grid">
+<thead><tr><th>Time</th><th>Level</th><th>Subsystem</th><th>Event</th><th>User</th><th>Address</th></tr></thead>
+<tbody>
+{{range .Entries}}<tr><td>{{.Time.Format "2006-01-02 15:04:05"}}</td><td>{{.Level}}</td><td>{{.Subsystem}}</td><td>{{.Name}}{{if .Err}} — {{.Err}}{{end}}</td><td>{{.User}}</td><td>{{.RemoteAddr}}</td></tr>
+{{else}}<tr><td colspan="6" class="empty">No log events.</td></tr>
+{{end}}
+</tbody>
+</table>
+{{end}}
+</main>
+</div>
+{{template "foot" .}}{{end}}

@@ -19,6 +19,7 @@
 <a href="/admin/ui/users" class="{{if eq .Nav "users"}}active{{end}}">Users</a>
 <a href="/admin/ui/domains" class="{{if eq .Nav "domains"}}active{{end}}">Domains</a>
 <a href="/admin/ui/aliases" class="{{if eq .Nav "aliases"}}active{{end}}">Aliases</a>
+<a href="/admin/ui/logs" class="{{if eq .Nav "logs"}}active{{end}}">Logs</a>
 </nav>
 <form class="logout" method="post" action="/admin/ui/logout">
 <input type="hidden" name="_csrf" value="{{.CSRF}}">

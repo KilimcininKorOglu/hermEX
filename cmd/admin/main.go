@@ -178,7 +178,17 @@ func main() {
 		}
 		dir.SetLDAPVerifier(ldapauth.New()) // an administrator may be LDAP-mastered
 		logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
-		hs, err := serve.New(addr, admin.NewServer(dir, cfg, []byte(cfg.AdminSecret)).Handler(), cfg, logger, logging.Admin)
+		srv := admin.NewServer(dir, cfg, []byte(cfg.AdminSecret))
+		cleanups := []func() error{logClose}
+		if cfg.MongoURI != "" {
+			reader, err := logging.NewReader(cfg.MongoURI, cfg.LogDatabase)
+			if err != nil {
+				log.Fatalf("hermex-admin: log reader: %v", err)
+			}
+			srv.SetLogReader(reader) // enables the web UI log viewer
+			cleanups = append(cleanups, reader.Close)
+		}
+		hs, err := serve.New(addr, srv.Handler(), cfg, logger, logging.Admin)
 		if err != nil {
 			log.Fatalf("hermex-admin: %v", err)
 		}
@@ -186,7 +196,7 @@ func main() {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		log.Printf("hermex-admin serving the admin API on %s", addr)
-		if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, logClose); err != nil {
+		if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, cleanups...); err != nil {
 			log.Fatalf("hermex-admin: %v", err)
 		}
 	default:

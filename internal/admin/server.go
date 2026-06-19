@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 )
 
 // Directory is what the admin server needs from the account directory: password
@@ -38,6 +39,12 @@ type Paths interface {
 	MaildirFor(address string) string
 }
 
+// LogReader queries the central log store for the log viewer. It is optional —
+// the viewer reports logging as unconfigured when none is set.
+type LogReader interface {
+	Recent(ctx context.Context, subsystem string, limit int64) ([]logging.LogEntry, error)
+}
+
 const (
 	sessionCookie = "hermex_admin"
 	csrfCookie    = "hermex_admin_csrf"
@@ -53,6 +60,7 @@ type Server struct {
 	dir    Directory
 	paths  Paths
 	secret []byte
+	logs   LogReader
 }
 
 // NewServer builds an admin server backed by the directory, deriving new
@@ -60,6 +68,9 @@ type Server struct {
 func NewServer(dir Directory, paths Paths, secret []byte) *Server {
 	return &Server{dir: dir, paths: paths, secret: secret}
 }
+
+// SetLogReader attaches a log store reader, enabling the log viewer.
+func (s *Server) SetLogReader(r LogReader) { s.logs = r }
 
 // Handler returns the admin HTTP handler.
 func (s *Server) Handler() http.Handler {
@@ -91,6 +102,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/domains", s.handleUICreateDomain)
 	mux.HandleFunc("GET /admin/ui/aliases", s.handleUIAliases)
 	mux.HandleFunc("POST /admin/ui/aliases", s.handleUICreateAlias)
+	mux.HandleFunc("GET /admin/ui/logs", s.handleUILogs)
 	mux.HandleFunc("GET /admin/ui/", s.handleUIDashboard)
 	return mux
 }

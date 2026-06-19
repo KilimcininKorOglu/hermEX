@@ -181,3 +181,5 @@ table.grid th {
 
 table.grid tr:last-child td { border-bottom: none; }
 table.grid td.empty { color: var(--muted); text-align: center; }
+
+.muted { color: var(--muted); }
