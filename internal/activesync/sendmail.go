@@ -38,7 +38,7 @@ func (s *Server) handleSendMail(w http.ResponseWriter, r *http.Request, sess *se
 
 	// Deliver with Bcc stripped so recipients never see the blind list; the
 	// saved copy keeps the full headers for the sender's record.
-	if _, err := mta.Deliver(s.accounts, sess.user, recipients, stripBcc(message), time.Now()); err != nil {
+	if _, err := mta.DeliverAndRelay(s.accounts, s.Spool, sess.user, recipients, stripBcc(message), time.Now()); err != nil {
 		http.Error(w, "delivery failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}

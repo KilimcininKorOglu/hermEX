@@ -12,6 +12,7 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/logging"
+	"hermex/internal/relay"
 	"hermex/internal/serve"
 )
 
@@ -21,6 +22,7 @@ type Server struct {
 	accounts directory.Accounts
 	hostname string
 	Logger   *logging.Logger // central activity log; nil disables logging
+	Spool    *relay.Spool    // outbound relay queue; nil sends local-only
 }
 
 // NewServer builds an ActiveSync server backed by the directory for

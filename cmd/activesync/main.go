@@ -21,6 +21,7 @@ import (
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/objectstore"
+	"hermex/internal/relay"
 	"hermex/internal/serve"
 )
 
@@ -45,6 +46,13 @@ func main() {
 
 	srv := activesync.NewServer(dir, dir, cfg.Hostname)
 	srv.Logger = logger
+	// Enqueue external recipients of SendMail into the shared relay spool the MTA
+	// drains; without it ActiveSync would send local-only.
+	spool, err := relay.Open(cfg.RelaySpoolPath())
+	if err != nil {
+		log.Fatalf("hermex-activesync: open relay spool: %v", err)
+	}
+	srv.Spool = spool
 	addr := cfg.ActiveSyncAddr
 	if addr == "" {
 		addr = ":8080"
@@ -59,7 +67,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log.Printf("hermex-activesync listening on %s", addr)
-	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, logClose, db.Close); err != nil {
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, spool.Close, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-activesync: %v", err)
 	}
 }
