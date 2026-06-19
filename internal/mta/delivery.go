@@ -15,28 +15,32 @@ import (
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/relay"
 	"hermex/internal/smtp"
 )
 
 // Backend is an smtp.Backend that delivers to per-recipient mailbox stores.
 type Backend struct {
 	Accounts directory.Accounts
+	Spool    *relay.Spool    // outbound relay queue; nil disables external relay
 	Logger   *logging.Logger // central activity log; nil disables logging
 }
 
 // NewSession implements smtp.Backend.
 func (b *Backend) NewSession(remoteAddr string) (smtp.Session, error) {
-	return &session{accounts: b.Accounts, logger: b.Logger, remoteAddr: remoteAddr}, nil
+	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr}, nil
 }
 
 type session struct {
-	accounts    directory.Accounts
-	logger      *logging.Logger
-	remoteAddr  string
-	from        string
-	targets     []target
-	authUser    string // set on a successful AUTH; empty for unauthenticated intake
-	authMailbox string // the authenticated user's mailbox store path
+	accounts     directory.Accounts
+	spool        *relay.Spool
+	logger       *logging.Logger
+	remoteAddr   string
+	from         string
+	targets      []target // local recipients, filed into mailboxes
+	relayTargets []string // external recipients, spooled for outbound relay
+	authUser     string   // set on a successful AUTH; empty for unauthenticated intake
+	authMailbox  string   // the authenticated user's mailbox store path
 }
 
 // Auth implements smtp.Authenticator: it validates submission credentials against
@@ -105,13 +109,53 @@ func (s *session) identities() []string {
 	return addrs
 }
 
+// Rcpt routes one recipient. A recipient that resolves to a local mailbox is
+// filed there. A recipient that does not resolve is refused unless this is an
+// authenticated submission relaying to an external domain: only an authenticated
+// user may relay (no open relay), and only to a domain this server is not
+// authoritative for — an unresolved address in a local domain is a genuine
+// user-unknown that must never be relayed (it would loop straight back).
 func (s *session) Rcpt(to string) error {
-	path, ok := s.accounts.Resolve(to)
-	if !ok {
+	if path, ok := s.accounts.Resolve(to); ok {
+		s.targets = append(s.targets, target{addr: to, path: path})
+		return nil
+	}
+	if s.authUser == "" {
 		return fmt.Errorf("relay denied for <%s>", to)
 	}
-	s.targets = append(s.targets, target{addr: to, path: path})
+	external, err := s.isExternal(to)
+	if err != nil {
+		return fmt.Errorf("cannot route <%s>: %w", to, err)
+	}
+	if !external {
+		return fmt.Errorf("no such user <%s>", to)
+	}
+	if s.spool == nil {
+		return fmt.Errorf("relay denied for <%s>", to)
+	}
+	s.relayTargets = append(s.relayTargets, to)
 	return nil
+}
+
+// isExternal reports whether to's domain lies outside this server's authority,
+// so it must be relayed rather than delivered. It fails closed: when the
+// directory cannot enumerate local domains, no domain can be confirmed external,
+// so the recipient is treated as local (and thus refused as user-unknown) rather
+// than relayed, which avoids an accidental open relay or mail loop.
+func (s *session) isExternal(to string) (bool, error) {
+	ld, ok := s.accounts.(directory.LocalDomains)
+	if !ok {
+		return false, nil
+	}
+	i := strings.LastIndex(to, "@")
+	if i < 0 || i == len(to)-1 {
+		return false, nil // no domain part: cannot be confirmed external
+	}
+	local, err := ld.IsLocalDomain(to[i+1:])
+	if err != nil {
+		return false, err
+	}
+	return !local, nil
 }
 
 func (s *session) Data(r io.Reader) error {
@@ -127,10 +171,20 @@ func (s *session) Data(r io.Reader) error {
 		}
 		s.logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "delivery.ok", User: t.addr, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}})
 	}
+	// External recipients are handed to the durable relay spool. Once Enqueue
+	// commits, the worker owns their delivery (and retry), so returning success
+	// here lets the server answer 250 — the message is no longer at risk of loss.
+	if len(s.relayTargets) > 0 {
+		if err := s.spool.Enqueue(s.from, s.relayTargets, raw, received); err != nil {
+			s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "relay.fail", User: s.authUser, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "recipients": len(s.relayTargets)}, Err: err.Error()})
+			return err
+		}
+		s.logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "relay.queued", User: s.authUser, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "recipients": len(s.relayTargets)}})
+	}
 	return nil
 }
 
-func (s *session) Reset()        { s.from = ""; s.targets = nil }
+func (s *session) Reset()        { s.from = ""; s.targets = nil; s.relayTargets = nil }
 func (s *session) Logout() error { return nil }
 
 // Deliver resolves each recipient address to its local mailbox and appends the
