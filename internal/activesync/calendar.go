@@ -2,6 +2,7 @@ package activesync
 
 import (
 	"encoding/base64"
+	"sort"
 	"strconv"
 	"time"
 
@@ -125,4 +126,75 @@ func boolStr(b bool) string {
 		return "1"
 	}
 	return "0"
+}
+
+// calendarChanges diffs the calendar folder's stored appointments against the
+// device snapshot — keyed by object id -> change number, since calendar items
+// carry no IMAP flags — and builds the Add/Change/Delete commands, capped at the
+// window. A new id is an Add, a bumped change number a Change, a vanished id a
+// Delete; the snapshot records the change number of every item it sends, so a
+// capped-out item is re-detected on the next sync.
+func calendarChanges(st *objectstore.Store, folderID int64, cstate *collectionState, window int) ([]*wbxml.Node, bool, error) {
+	objs, err := st.ListFolderObjects(folderID)
+	if err != nil {
+		return nil, false, err
+	}
+	type change struct {
+		kind int
+		sid  string
+		id   int64
+		cn   int64
+	}
+	var pending []change
+	live := make(map[string]bool, len(objs))
+	for _, o := range objs {
+		sid := strconv.FormatInt(o.ID, 10)
+		live[sid] = true
+		switch prev, ok := cstate.Items[sid]; {
+		case !ok:
+			pending = append(pending, change{changeAdd, sid, o.ID, int64(o.ChangeNumber)})
+		case prev != int64(o.ChangeNumber):
+			pending = append(pending, change{changeChange, sid, o.ID, int64(o.ChangeNumber)})
+		}
+	}
+	var deletes []string
+	for sid := range cstate.Items {
+		if !live[sid] {
+			deletes = append(deletes, sid)
+		}
+	}
+	sort.Slice(deletes, func(i, j int) bool { return lessSID(deletes[i], deletes[j]) })
+	for _, sid := range deletes {
+		pending = append(pending, change{kind: changeDelete, sid: sid})
+	}
+
+	more := false
+	if len(pending) > window {
+		pending = pending[:window]
+		more = true
+	}
+
+	var cmds []*wbxml.Node
+	for _, ch := range pending {
+		switch ch.kind {
+		case changeAdd, changeChange:
+			data, err := calendarAppData(st, ch.id)
+			if err != nil {
+				return nil, false, err
+			}
+			if data == nil {
+				continue // not an appointment; nothing to stream
+			}
+			tag := wbxml.ASAdd
+			if ch.kind == changeChange {
+				tag = wbxml.ASChange
+			}
+			cmds = append(cmds, wbxml.Elem(tag, wbxml.Str(wbxml.ASServerID, ch.sid), data))
+			cstate.Items[ch.sid] = ch.cn
+		case changeDelete:
+			cmds = append(cmds, wbxml.Elem(wbxml.ASDelete, wbxml.Str(wbxml.ASServerID, ch.sid)))
+			delete(cstate.Items, ch.sid)
+		}
+	}
+	return cmds, more, nil
 }

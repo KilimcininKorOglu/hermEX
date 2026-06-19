@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/wbxml"
 )
@@ -112,6 +113,19 @@ func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node) (*wb
 	}
 	if cstate.Items == nil {
 		cstate.Items = map[string]int64{}
+	}
+
+	// Calendar collections take a separate path: their items are read from the
+	// object store (never the IMAP index) and versioned by change number, not IMAP
+	// flags. This increment streams server-side appointment changes; client-side
+	// calendar edits are a later increment, so its client commands are not applied.
+	if folderID == int64(mapi.PrivateFIDCalendar) {
+		cmds, more, err := calendarChanges(st, folderID, cstate, window)
+		if err != nil {
+			return nil, err
+		}
+		cstate.SyncKey = nextSyncKey(clientKey)
+		return syncResponse(collID, cstate.SyncKey, cmds, more), nil
 	}
 
 	// Apply the client's commands first, folding each into the snapshot so the
