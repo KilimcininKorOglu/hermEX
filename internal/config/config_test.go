@@ -8,10 +8,13 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"fmt"
 	"math/big"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -36,6 +39,65 @@ func TestLoadAndDerivations(t *testing.T) {
 	}
 	if got := c.HomedirFor("Example.com"); got != "/data/mb/domain/example.com" {
 		t.Errorf("HomedirFor = %q", got)
+	}
+}
+
+// TestMaildirForPartitions proves data_partitions spreads new mailboxes across
+// roots by a stable hash: an empty pool leaves every mailbox under DataDir, while
+// a configured pool places each user deterministically (same address — even
+// across casing — always the same root, so a re-derivation never relocates a live
+// mailbox), always inside the pool, keeping the {root}/user/{domain}/{local}
+// shape, and actually using more than one partition.
+func TestMaildirForPartitions(t *testing.T) {
+	// Empty pool: byte-identical to the single-root rule.
+	single := &Config{DataDir: "/data/mb"}
+	if got := single.MaildirFor("alice@example.com"); got != "/data/mb/user/example.com/alice" {
+		t.Errorf("empty-pool MaildirFor = %q, want the DataDir path", got)
+	}
+
+	pool := []string{"/p0", "/p1", "/p2"}
+	c := &Config{DataDir: "/data/mb", DataPartitions: pool}
+
+	// Stable across casing: the same user always lands on the same partition.
+	if a, b := c.MaildirFor("alice@example.com"), c.MaildirFor("Alice@Example.com"); a != b {
+		t.Errorf("MaildirFor not stable across casing: %q vs %q", a, b)
+	}
+
+	roots := map[string]bool{}
+	for i := range 20 {
+		addr := fmt.Sprintf("user%d@example.com", i)
+		path := c.MaildirFor(addr)
+		tail := fmt.Sprintf("/user/example.com/user%d", i)
+		root, ok := strings.CutSuffix(path, tail)
+		if !ok {
+			t.Fatalf("MaildirFor(%q) = %q, want a {root}%s path", addr, path, tail)
+		}
+		if !slices.Contains(pool, root) {
+			t.Errorf("MaildirFor(%q) root = %q, not in the pool %v", addr, root, pool)
+		}
+		roots[root] = true
+	}
+	// The whole point of a pool is to spread: a hash that parked everyone on one
+	// partition would defeat it.
+	if len(roots) < 2 {
+		t.Errorf("partition hash used only %d root(s): %v — it does not spread", len(roots), roots)
+	}
+}
+
+// TestLoadParsesDataPartitions proves the placement pool survives JSON
+// unmarshalling so the daemons agree on where new mailboxes land.
+func TestLoadParsesDataPartitions(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	doc := `{"database_dsn":"d","data_dir":"/data","data_partitions":["/disk0","/disk1"]}`
+	if err := os.WriteFile(p, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.DataPartitions) != 2 || c.DataPartitions[0] != "/disk0" || c.DataPartitions[1] != "/disk1" {
+		t.Errorf("DataPartitions = %v, want the two configured roots", c.DataPartitions)
 	}
 }
 
