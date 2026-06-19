@@ -94,6 +94,31 @@ func TestResolveRecipientsMultipleQueries(t *testing.T) {
 	}
 }
 
+// TestResolveRecipientsAmbiguous proves a single query matching two GAL users
+// returns both recipients with RecipientCount 2 — the multi-recipient path a
+// single match would not exercise.
+func TestResolveRecipientsAmbiguous(t *testing.T) {
+	ts := galServer(t)
+
+	_, root := postCommand(t, ts, "ResolveRecipients", resolveReq("al"))
+	resp := responseFor(root, "al")
+	if resp == nil {
+		t.Fatal("no Response for the ambiguous query")
+	}
+	if c := resp.ChildText(wbxml.RRRecipientCount); c != "2" {
+		t.Errorf("RecipientCount = %q, want 2", c)
+	}
+	n := 0
+	for _, c := range resp.Children {
+		if c.Tag == wbxml.RRRecipient {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Errorf("Recipient count = %d, want 2", n)
+	}
+}
+
 // TestResolveRecipientsEmpty proves a request naming no recipient reports the
 // protocol-error status.
 func TestResolveRecipientsEmpty(t *testing.T) {

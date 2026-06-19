@@ -29,6 +29,21 @@ func seededServer(t *testing.T) (*httptest.Server, string) {
 	return ts, dir
 }
 
+// galServer starts an ActiveSync server whose directory holds two GAL users that
+// share a common prefix ("al"), so a single query resolves to more than one
+// match — exercising the multi-recipient paths (RecipientCount, result Range and
+// Total) that a single match would not.
+func galServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	accs := directory.StaticAccounts{
+		"alice@hermex.test":  {Password: testPass, MailboxPath: filepath.Join(t.TempDir(), "alice")},
+		"albert@hermex.test": {Password: testPass, MailboxPath: filepath.Join(t.TempDir(), "albert")},
+	}
+	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
+	t.Cleanup(ts.Close)
+	return ts
+}
+
 // postCommand POSTs a WBXML command to the live endpoint and decodes the reply.
 func postCommand(t *testing.T, ts *httptest.Server, cmd string, root *wbxml.Node) (*http.Response, *wbxml.Node) {
 	t.Helper()

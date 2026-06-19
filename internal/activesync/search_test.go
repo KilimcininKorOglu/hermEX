@@ -67,6 +67,31 @@ func TestSearchGAL(t *testing.T) {
 	}
 }
 
+// TestSearchGALMultiple proves a query matching two GAL users returns both
+// Results with a correct Range ("0-1") and Total ("2") — the off-by-one a single
+// match would hide.
+func TestSearchGALMultiple(t *testing.T) {
+	ts := galServer(t)
+
+	_, root := postCommand(t, ts, "Search", searchReq("GAL", "al"))
+	store := searchStore(t, root)
+	if total := store.ChildText(wbxml.SRTotal); total != "2" {
+		t.Errorf("Total = %q, want 2", total)
+	}
+	if rng := store.ChildText(wbxml.SRRange); rng != "0-1" {
+		t.Errorf("Range = %q, want 0-1", rng)
+	}
+	n := 0
+	for _, c := range store.Children {
+		if c.Tag == wbxml.SRResult {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Errorf("Result count = %d, want 2", n)
+	}
+}
+
 // TestSearchGALNoMatch proves a GAL Search that matches nothing reports a
 // successful store with no Result and no Total.
 func TestSearchGALNoMatch(t *testing.T) {
