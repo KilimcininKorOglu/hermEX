@@ -67,10 +67,14 @@ func bounceText(failed, reason string) string {
 }
 
 // deliveryStatus is the machine-readable message/delivery-status part (RFC 3464):
-// a per-message block (the reporting MTA) then a per-recipient block naming the
-// failed address, the permanent-failure action and status, and the SMTP
-// diagnostic. Status 5.0.0 is the generic permanent failure (RFC 3463); the full
-// remote response rides in Diagnostic-Code.
+// a per-message block (the reporting MTA, "dns;<host>", and the arrival date) then
+// a per-recipient block naming the failed address, the permanent-failure action
+// and status, and the SMTP diagnostic. The Reporting-MTA/Arrival-Date/
+// Final-Recipient "rfc822;"/Action:failed/Status 5.0.0 fields match the reference
+// MDA bounce; Diagnostic-Code (the remote response) and Last-Attempt-Date are
+// added — both RFC 3464 standard. Remote-MTA is omitted: the reference reports its
+// own host there for a local-delivery bounce, which would misattribute a relay
+// failure to this server, and the failed exchanger's name is not threaded here.
 func deliveryStatus(reportingMTA, failed, reason string, when time.Time) string {
 	if reportingMTA == "" {
 		reportingMTA = "localhost"
@@ -78,6 +82,7 @@ func deliveryStatus(reportingMTA, failed, reason string, when time.Time) string 
 	date := when.UTC().Format(dateLayout)
 	var b bytes.Buffer
 	fmt.Fprintf(&b, "Reporting-MTA: dns;%s\r\n", reportingMTA)
+	fmt.Fprintf(&b, "Arrival-Date: %s\r\n", date)
 	b.WriteString("\r\n") // blank line separates the per-message and per-recipient blocks
 	fmt.Fprintf(&b, "Final-Recipient: rfc822;%s\r\n", failed)
 	b.WriteString("Action: failed\r\n")
