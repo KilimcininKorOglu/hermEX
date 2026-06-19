@@ -221,6 +221,136 @@ func (s *Server) handleUpdateFolder(w http.ResponseWriter, inner []byte, sess *s
 	writeResponse(w, updateFolderResponse{Messages: msgs})
 }
 
+// --- MoveFolder / CopyFolder ---
+
+// moveCopyFolderRequest is the shared shape of MoveFolder and CopyFolder: a single
+// destination parent plus the folders to move or copy into it.
+type moveCopyFolderRequest struct {
+	ToFolderID folderRefs `xml:"ToFolderId"`
+	FolderIDs  folderRefs `xml:"FolderIds"`
+}
+
+type moveFolderResponse struct {
+	XMLName  xml.Name                `xml:"http://schemas.microsoft.com/exchange/services/2006/messages MoveFolderResponse"`
+	Messages []folderResponseMessage `xml:"ResponseMessages>MoveFolderResponseMessage"`
+}
+
+type copyFolderResponse struct {
+	XMLName  xml.Name                `xml:"http://schemas.microsoft.com/exchange/services/2006/messages CopyFolderResponse"`
+	Messages []folderResponseMessage `xml:"ResponseMessages>CopyFolderResponseMessage"`
+}
+
+// handleMoveFolder reparents each folder under the destination, keeping its id.
+func (s *Server) handleMoveFolder(w http.ResponseWriter, inner []byte, sess *session) {
+	s.moveCopyFolders(w, inner, sess, false)
+}
+
+// handleCopyFolder copies each folder (recursively, with its contents) under the
+// destination, returning the copy's new id.
+func (s *Server) handleCopyFolder(w http.ResponseWriter, inner []byte, sess *session) {
+	s.moveCopyFolders(w, inner, sess, true)
+}
+
+// moveCopyFolders is the shared MoveFolder/CopyFolder body. A move keeps the
+// folder name and id and refuses a distinguished source (reparenting a well-known
+// folder corrupts the hierarchy); a copy is recursive and assigns a new id, and a
+// distinguished source is allowed (copying the Inbox into a user folder is
+// legitimate). Both refuse a name already present in the destination
+// (ErrorFolderExists) and report a cycle (a folder into its own subtree) as
+// ErrorMoveCopyFailed.
+func (s *Server) moveCopyFolders(w http.ResponseWriter, inner []byte, sess *session, copy bool) {
+	var req moveCopyFolderRequest
+	if err := xml.Unmarshal(inner, &req); err != nil {
+		writeSOAPFault(w, "ErrorInvalidRequest", "MoveCopyFolder: "+err.Error())
+		return
+	}
+	dests := resolveTargets(req.ToFolderID)
+	if len(dests) != 1 || !dests[0].ok {
+		code := "ErrorInvalidRequest"
+		if len(dests) == 1 && dests[0].code != "" {
+			code = dests[0].code
+		}
+		writeResponse(w, moveCopyResponse(copy, []folderResponseMessage{folderError(code)}))
+		return
+	}
+	dest := dests[0].fid
+	var destArg *int64
+	if dest != mapi.PrivateFIDIPMSubtree && dest != mapi.PrivateFIDRoot {
+		d := dest
+		destArg = &d
+	}
+
+	st, err := objectstore.Open(sess.mailbox)
+	if err != nil {
+		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		return
+	}
+	defer st.Close()
+
+	var msgs []folderResponseMessage
+	for _, src := range resolveTargets(req.FolderIDs) {
+		if !src.ok {
+			msgs = append(msgs, folderError(src.code))
+			continue
+		}
+		fid := src.fid
+		if !copy && fid < mapi.PrivateFIDUnassignedStart {
+			msgs = append(msgs, folderError("ErrorMoveDistinguishedFolder"))
+			continue
+		}
+		props, err := st.GetFolderProperties(fid, mapi.PrDisplayName)
+		if err != nil {
+			msgs = append(msgs, folderError("ErrorFolderNotFound"))
+			continue
+		}
+		name, _ := props.Get(mapi.PrDisplayName)
+		folderName, _ := name.(string)
+		// Reject a destination name collision. A move excludes the folder itself
+		// (moving it to where it already sits is a no-op, not a collision); a copy
+		// does not (a copy beside an identically named sibling is a real clash).
+		if existing, ok, err := st.FolderByName(destArg, folderName); err != nil {
+			msgs = append(msgs, folderError("ErrorFolderNotFound"))
+			continue
+		} else if ok && (copy || existing != fid) {
+			msgs = append(msgs, folderError("ErrorFolderExists"))
+			continue
+		}
+		if copy {
+			newID, err := st.CopyFolder(fid, dest, folderName, true)
+			msgs = append(msgs, moveCopyResult(newID, err))
+		} else {
+			msgs = append(msgs, moveCopyResult(fid, st.RenameFolder(fid, &dest, folderName)))
+		}
+	}
+	writeResponse(w, moveCopyResponse(copy, msgs))
+}
+
+// moveCopyResult maps a move/copy store outcome to a response message carrying the
+// resulting folder id on success.
+func moveCopyResult(fid int64, err error) folderResponseMessage {
+	switch {
+	case err == nil:
+		return folderOK(fid)
+	case errors.Is(err, objectstore.ErrFolderCycle):
+		return folderError("ErrorMoveCopyFailed")
+	case errors.Is(err, objectstore.ErrFolderExists):
+		return folderError("ErrorFolderExists")
+	case errors.Is(err, objectstore.ErrNotFound):
+		return folderError("ErrorFolderNotFound")
+	default:
+		return folderError("ErrorMoveCopyFailed")
+	}
+}
+
+// moveCopyResponse wraps the response messages in the MoveFolder or CopyFolder
+// response envelope.
+func moveCopyResponse(copy bool, msgs []folderResponseMessage) any {
+	if copy {
+		return copyFolderResponse{Messages: msgs}
+	}
+	return moveFolderResponse{Messages: msgs}
+}
+
 // folderError builds an error folder response message.
 func folderError(code string) folderResponseMessage {
 	return folderResponseMessage{ResponseClass: "Error", ResponseCode: code}
