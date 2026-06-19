@@ -212,4 +212,32 @@ func TestAdminServerIntegration(t *testing.T) {
 	if _, ok := dir.Authenticate("intern@hermex.test", "pw2"); ok {
 		t.Error("the old password still authenticates after a reset")
 	}
+
+	// 9. Grant then revoke an admin role through the API against the real
+	// admin_roles table, and confirm an unknown role tier is rejected.
+	internUID, ok, _ := dir.UserID("intern@hermex.test")
+	if !ok {
+		t.Fatal("the intern user vanished")
+	}
+	grant := authedPOST(t, ts, "/admin/users/intern@hermex.test/roles", session, csrf, `{"role":"org","scopeID":5}`)
+	grant.Body.Close()
+	if grant.StatusCode != http.StatusNoContent {
+		t.Fatalf("grant role status %d, want 204", grant.StatusCode)
+	}
+	if roles, _ := dir.AdminRoles(internUID); len(roles) != 1 || roles[0].Role != directory.AdminOrg || roles[0].ScopeID != 5 {
+		t.Errorf("after grant, roles = %+v, want one org:5", roles)
+	}
+	revoke := authedDELETE(t, ts, "/admin/users/intern@hermex.test/roles", session, csrf, `{"role":"org","scopeID":5}`)
+	revoke.Body.Close()
+	if revoke.StatusCode != http.StatusNoContent {
+		t.Fatalf("revoke role status %d, want 204", revoke.StatusCode)
+	}
+	if roles, _ := dir.AdminRoles(internUID); len(roles) != 0 {
+		t.Errorf("after revoke, roles = %+v, want none", roles)
+	}
+	badRole := authedPOST(t, ts, "/admin/users/intern@hermex.test/roles", session, csrf, `{"role":"wizard"}`)
+	badRole.Body.Close()
+	if badRole.StatusCode != http.StatusBadRequest {
+		t.Errorf("granting an unknown role tier = %d, want 400", badRole.StatusCode)
+	}
 }

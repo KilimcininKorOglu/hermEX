@@ -26,6 +26,8 @@ type fakeDir struct {
 	createdAlias, createdAliasTo  string
 	setPwUser, setPwValue         string
 	setPwMissing                  bool
+	grantedRole, revokedRole      string
+	grantedScope, revokedScope    int64
 	createErr                     error
 }
 
@@ -37,8 +39,19 @@ func (f *fakeDir) Authenticate(_, _ string) (string, bool) {
 }
 func (f *fakeDir) UserID(_ string) (int64, bool, error)            { return f.uid, f.uid != 0, nil }
 func (f *fakeDir) AdminRoles(int64) ([]directory.AdminRole, error) { return f.roles, nil }
-func (f *fakeDir) ListDomains() ([]directory.DomainInfo, error)    { return f.domains, nil }
-func (f *fakeDir) ListUsers() ([]directory.UserInfo, error)        { return f.users, nil }
+func (f *fakeDir) GrantAdminRole(_ int64, role string, scopeID int64) error {
+	if f.createErr != nil {
+		return f.createErr
+	}
+	f.grantedRole, f.grantedScope = role, scopeID
+	return nil
+}
+func (f *fakeDir) RevokeAdminRole(_ int64, role string, scopeID int64) error {
+	f.revokedRole, f.revokedScope = role, scopeID
+	return nil
+}
+func (f *fakeDir) ListDomains() ([]directory.DomainInfo, error) { return f.domains, nil }
+func (f *fakeDir) ListUsers() ([]directory.UserInfo, error)     { return f.users, nil }
 func (f *fakeDir) CreateDomain(name, homedir string) (int64, error) {
 	if f.createErr != nil {
 		return 0, f.createErr

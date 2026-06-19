@@ -18,6 +18,8 @@ type Directory interface {
 	Authenticate(user, password string) (mailboxPath string, ok bool)
 	UserID(login string) (id int64, ok bool, err error)
 	AdminRoles(userID int64) ([]directory.AdminRole, error)
+	GrantAdminRole(userID int64, role string, scopeID int64) error
+	RevokeAdminRole(userID int64, role string, scopeID int64) error
 	ListDomains() ([]directory.DomainInfo, error)
 	ListUsers() ([]directory.UserInfo, error)
 	ListAliases() ([]directory.AliasInfo, error)
@@ -70,6 +72,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /admin/users", s.protect(s.requireSystem(s.handleListUsers)))
 	mux.Handle("POST /admin/users", s.protect(s.requireSystem(s.handleCreateUser)))
 	mux.Handle("POST /admin/users/{email}/password", s.protect(s.requireSystem(s.handleSetPassword)))
+	mux.Handle("GET /admin/users/{email}/roles", s.protect(s.requireSystem(s.handleListRoles)))
+	mux.Handle("POST /admin/users/{email}/roles", s.protect(s.requireSystem(s.handleGrantRole)))
+	mux.Handle("DELETE /admin/users/{email}/roles", s.protect(s.requireSystem(s.handleRevokeRole)))
 	mux.Handle("GET /admin/aliases", s.protect(s.requireSystem(s.handleListAliases)))
 	mux.Handle("POST /admin/aliases", s.protect(s.requireSystem(s.handleCreateAlias)))
 	mux.Handle("GET /admin/orgs/{orgID}/ldap", s.protect(http.HandlerFunc(s.handleGetLDAP)))

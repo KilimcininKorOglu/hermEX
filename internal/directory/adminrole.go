@@ -53,6 +53,15 @@ func (d *SQLDirectory) GrantAdminRole(userID int64, role string, scopeID int64) 
 	return err
 }
 
+// RevokeAdminRole removes an administrative role at the given scope. Revoking a
+// role the user does not hold is a no-op.
+func (d *SQLDirectory) RevokeAdminRole(userID int64, role string, scopeID int64) error {
+	_, err := d.db.Exec(
+		`DELETE FROM admin_roles WHERE user_id = ? AND role = ? AND scope_id = ?`,
+		userID, role, scopeID)
+	return err
+}
+
 // AdminRoles returns every administrative role a user holds (empty for a
 // non-admin).
 func (d *SQLDirectory) AdminRoles(userID int64) ([]AdminRole, error) {
