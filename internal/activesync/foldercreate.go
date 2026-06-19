@@ -13,6 +13,8 @@ import (
 const (
 	fhStatusOK             = 1
 	fhStatusExists         = 2  // a folder with that name already exists at the parent
+	fhStatusSpecial        = 3  // the target is a special system folder and is protected
+	fhStatusNotFound       = 4  // the target folder does not exist
 	fhStatusParentNotFound = 5  // the named parent folder does not exist
 	fhStatusServerError    = 6  // an error occurred on the server
 	fhStatusBadSyncKey     = 9  // the hierarchy sync key did not match — device must re-prime
