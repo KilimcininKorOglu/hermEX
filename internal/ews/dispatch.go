@@ -64,6 +64,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleMoveFolder(w, inner, sess)
 	case "CopyFolder":
 		s.handleCopyFolder(w, inner, sess)
+	case "GetServerTimeZones":
+		s.handleGetServerTimeZones(w, inner, sess)
 	case "GetUserAvailabilityRequest":
 		// MS-OXWSAVAIL names the request element GetUserAvailabilityRequest (the
 		// "Request" suffix is unlike the other operations' bare names).
