@@ -6,7 +6,6 @@ plan.md
 
 # Runtime data (Docker-based dev)
 /docker-data/*
-!/docker-data/.gitkeep
 
 # Go build artifacts
 /bin/
