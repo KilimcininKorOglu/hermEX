@@ -61,6 +61,10 @@ func TestSearchGAL(t *testing.T) {
 	if props.ChildText(wbxml.GALDisplayName) == "" {
 		t.Error("Result carried no display name")
 	}
+	// Some clients refuse to render a GAL entry without these elements present.
+	if props.Child(wbxml.GALFirstName) == nil || props.Child(wbxml.GALLastName) == nil {
+		t.Error("Result must carry FirstName and LastName elements")
+	}
 }
 
 // TestSearchGALNoMatch proves a GAL Search that matches nothing reports a

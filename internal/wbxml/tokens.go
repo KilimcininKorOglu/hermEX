@@ -174,9 +174,12 @@ const (
 
 // GAL (code page 0x10) — the address-book properties a Search result carries.
 // v1 populates the display name and address; the GALEntry model holds no other
-// fields (phone, office, title, …).
+// fields (phone, office, title, …). FirstName/LastName are emitted empty because
+// some clients require the elements to be present to render an entry at all.
 const (
 	GALDisplayName  Tag = 0x1005
+	GALFirstName    Tag = 0x100B
+	GALLastName     Tag = 0x100C
 	GALEmailAddress Tag = 0x100F
 )
 

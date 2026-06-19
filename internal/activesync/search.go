@@ -59,9 +59,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, _ *session
 func searchStoreReply(storeStatus int, entries []directory.GALEntry) *wbxml.Node {
 	store := []*wbxml.Node{wbxml.Str(wbxml.SRStatus, strconv.Itoa(storeStatus))}
 	for _, e := range entries {
+		// FirstName/LastName are emitted (empty) because some clients will not
+		// render an entry without them; the GALEntry model carries no name parts.
 		store = append(store, wbxml.Elem(wbxml.SRResult,
 			wbxml.Elem(wbxml.SRProperties,
 				wbxml.Str(wbxml.GALDisplayName, e.DisplayName),
+				wbxml.Str(wbxml.GALFirstName, ""),
+				wbxml.Str(wbxml.GALLastName, ""),
 				wbxml.Str(wbxml.GALEmailAddress, e.Address))))
 	}
 	if len(entries) > 0 {
