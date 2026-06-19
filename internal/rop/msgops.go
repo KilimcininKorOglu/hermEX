@@ -8,9 +8,10 @@ import (
 
 // ReadFlags ([MS-OXCMSG] 2.2.3.10.1): the request flag byte, with the reserved
 // bits masked off, selects one action by exact value (not a per-bit test). v1
-// implements the read/unread state change; the receipt and notify bits are
-// accepted but leave the read state untouched, since read receipts and change
-// notifications are not implemented.
+// implements the read/unread state change and read-receipt (MDN) generation
+// (rfDefault on the unread→read transition, or rfGenerateReceiptOnly, when the
+// message requested one and rfSuppressReceipt is not set); the notify-clear bits
+// are accepted but no-op, since change notifications are not implemented.
 const (
 	rfDefault             uint8 = 0x00 // mark the message read
 	rfSuppressReceipt     uint8 = 0x01 // mark read without sending a read receipt
@@ -39,23 +40,42 @@ func (s *Session) ropSetMessageReadFlag(p *ext.Pull, out *ext.Push, handles []ui
 		writeErr(out, ropSetMessageReadFlag, hindex, ecError)
 		return true
 	}
+	// The read-receipt trigger gates on the unread→read transition, so read the
+	// prior state before the write: a message already read through another
+	// protocol (an IMAP \Seen) leaves PR_READ_RECEIPT_REQUESTED set, and a
+	// flag-only gate would fire a spurious receipt when an Outlook client later
+	// opens it. (IMAP \Seen itself generates no receipt — read receipts are a
+	// ROP-surface feature in v1.)
+	wasRead, err := obj.store.GetMessageReadState(obj.messageID)
+	if err != nil {
+		writeErr(out, ropSetMessageReadFlag, hindex, ecError)
+		return true
+	}
 	// [MS-OXCMSG] 2.2.3.10: dispatch on the whole flag byte (reserved bits
 	// masked), not a per-bit test. Only rfDefault/rfSuppressReceipt mark the
 	// message read and only rfClearReadFlag (optionally with rfSuppressReceipt)
 	// marks it unread; the receipt-only and notify-clear flags change no read
 	// state. Write only when the action changes state, so the call is idempotent.
-	var read, change bool
+	var read, change, receipt bool
 	switch flags &^ rfReserved {
-	case rfDefault, rfSuppressReceipt:
+	case rfDefault:
 		read, change = true, true
+		receipt = !wasRead // only the unread→read transition owes a receipt
+	case rfSuppressReceipt:
+		read, change = true, true // marked read, receipt explicitly suppressed
 	case rfClearReadFlag, rfClearReadFlag | rfSuppressReceipt:
 		change = true
+	case rfGenerateReceiptOnly:
+		receipt = true // send the receipt without changing read state
 	}
 	if change {
 		if err := obj.store.SetMessageReadState(obj.messageID, read); err != nil {
 			writeErr(out, ropSetMessageReadFlag, hindex, ecError)
 			return true
 		}
+	}
+	if receipt {
+		s.maybeReadReceipt(obj.store, obj.messageID)
 	}
 	out.Uint8(ropSetMessageReadFlag)
 	out.Uint8(hindex)

@@ -169,6 +169,24 @@ func (s *Store) SetMessageReadState(messageID int64, read bool) error {
 	return nil
 }
 
+// GetMessageReadState reports whether a message is currently marked read, reading
+// the object store's read_state column — the store of record SetMessageReadState
+// writes. It reports ErrNotFound when no such message exists. The read-receipt
+// trigger reads this before SetMessageReadState so it can fire only on an
+// unread→read transition: a message already read through another protocol (an
+// IMAP \Seen, say) must not re-fire a receipt when an Outlook client opens it.
+func (s *Store) GetMessageReadState(messageID int64) (bool, error) {
+	var rs int
+	err := s.objdb.QueryRow(`SELECT read_state FROM messages WHERE message_id=?`, messageID).Scan(&rs)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrNotFound
+	}
+	if err != nil {
+		return false, err
+	}
+	return rs != 0, nil
+}
+
 // setObjReadState mirrors a message's read flag into the object store, allocating a
 // fresh read_cn from the mailbox change-number counter only when the state actually
 // flips, so the ICS read-state download branch can report the change. The counter
