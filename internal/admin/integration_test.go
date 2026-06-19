@@ -94,7 +94,7 @@ func TestAdminServerIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ts := httptest.NewServer(NewServer(dir, []byte("integration-secret")).Handler())
+	ts := httptest.NewServer(NewServer(dir, fakePaths{root: root}, []byte("integration-secret")).Handler())
 	t.Cleanup(ts.Close)
 
 	// 1. Login with the real credentials issues a session cookie.
@@ -107,14 +107,17 @@ func TestAdminServerIntegration(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("login status %d, want 200", resp.StatusCode)
 	}
-	var session string
+	var session, csrf string
 	for _, sc := range resp.Header["Set-Cookie"] {
 		if strings.HasPrefix(sc, sessionCookie+"=") {
 			session = cookieValue(sc, sessionCookie)
 		}
+		if strings.HasPrefix(sc, csrfCookie+"=") {
+			csrf = cookieValue(sc, csrfCookie)
+		}
 	}
-	if session == "" {
-		t.Fatal("login set no session cookie")
+	if session == "" || csrf == "" {
+		t.Fatal("login set no session/CSRF cookie")
 	}
 
 	// 2. whoami reports the real identity and system role.
@@ -159,5 +162,18 @@ func TestAdminServerIntegration(t *testing.T) {
 	bad.Body.Close()
 	if bad.StatusCode != http.StatusUnauthorized {
 		t.Errorf("wrong-password login = %d, want 401", bad.StatusCode)
+	}
+
+	// 6. Provision a new user through the API (a state-changing request with CSRF)
+	// and confirm it lands in the directory — proving the create path and the
+	// config-derived maildir end-to-end.
+	cr := authedPOST(t, ts, "/admin/users", session, csrf,
+		`{"email":"intern@hermex.test","password":"pw2"}`)
+	cr.Body.Close()
+	if cr.StatusCode != http.StatusCreated {
+		t.Fatalf("API create-user status %d, want 201", cr.StatusCode)
+	}
+	if _, ok, _ := dir.UserID("intern@hermex.test"); !ok {
+		t.Error("the API-created user did not land in the directory")
 	}
 }

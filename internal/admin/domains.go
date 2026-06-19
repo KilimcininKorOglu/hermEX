@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"encoding/json"
 	"net/http"
 
 	"hermex/internal/directory"
@@ -47,4 +48,22 @@ func (s *Server) handleListDomains(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeJSON(w, domains)
+}
+
+// handleCreateDomain provisions a domain (system administrators only); its
+// homedir is derived from the configured data root.
+func (s *Server) handleCreateDomain(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
+		http.Error(w, "a domain name is required", http.StatusBadRequest)
+		return
+	}
+	id, err := s.dir.CreateDomain(req.Name, s.paths.HomedirFor(req.Name))
+	if err != nil {
+		http.Error(w, "could not create domain: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeJSONStatus(w, http.StatusCreated, map[string]any{"id": id, "name": req.Name})
 }

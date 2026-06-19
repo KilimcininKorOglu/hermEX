@@ -20,6 +20,15 @@ type Directory interface {
 	AdminRoles(userID int64) ([]directory.AdminRole, error)
 	ListDomains() ([]directory.DomainInfo, error)
 	ListUsers() ([]directory.UserInfo, error)
+	CreateDomain(domainname, homedir string) (int64, error)
+	CreateUser(username, password, maildir string) (int64, error)
+}
+
+// Paths derives a new domain's homedir and a new user's maildir from the
+// configured data root; *config.Config satisfies it.
+type Paths interface {
+	HomedirFor(domain string) string
+	MaildirFor(address string) string
 }
 
 const (
@@ -35,13 +44,14 @@ type ctxKey struct{}
 // Server answers the admin API. Build one with NewServer.
 type Server struct {
 	dir    Directory
+	paths  Paths
 	secret []byte
 }
 
-// NewServer builds an admin server backed by the directory and signing sessions
-// with secret.
-func NewServer(dir Directory, secret []byte) *Server {
-	return &Server{dir: dir, secret: secret}
+// NewServer builds an admin server backed by the directory, deriving new
+// resources' on-disk paths with paths and signing sessions with secret.
+func NewServer(dir Directory, paths Paths, secret []byte) *Server {
+	return &Server{dir: dir, paths: paths, secret: secret}
 }
 
 // Handler returns the admin HTTP handler.
@@ -51,7 +61,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /admin/logout", s.protect(http.HandlerFunc(s.handleLogout)))
 	mux.Handle("GET /admin/whoami", s.protect(http.HandlerFunc(s.handleWhoami)))
 	mux.Handle("GET /admin/domains", s.protect(s.requireSystem(s.handleListDomains)))
+	mux.Handle("POST /admin/domains", s.protect(s.requireSystem(s.handleCreateDomain)))
 	mux.Handle("GET /admin/users", s.protect(s.requireSystem(s.handleListUsers)))
+	mux.Handle("POST /admin/users", s.protect(s.requireSystem(s.handleCreateUser)))
 	return mux
 }
 
@@ -195,8 +207,16 @@ func (s *Server) adminRoles(uid int64, resolved bool) ([]directory.AdminRole, er
 	return s.dir.AdminRoles(uid)
 }
 
-// writeJSON encodes v as the JSON response body.
+// writeJSON encodes v as a 200 JSON response body.
 func writeJSON(w http.ResponseWriter, v any) {
+	writeJSONStatus(w, http.StatusOK, v)
+}
+
+// writeJSONStatus writes status and encodes v as the JSON response body. The
+// content type must be set before the status, so callers go through here rather
+// than calling WriteHeader directly.
+func writeJSONStatus(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
 }

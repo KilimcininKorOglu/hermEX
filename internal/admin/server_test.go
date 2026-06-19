@@ -17,6 +17,11 @@ type fakeDir struct {
 	roles   []directory.AdminRole
 	domains []directory.DomainInfo
 	users   []directory.UserInfo
+
+	// captured by the create handlers
+	createdDomain, createdHomedir string
+	createdUser, createdMaildir   string
+	createErr                     error
 }
 
 func (f *fakeDir) Authenticate(_, _ string) (string, bool) {
@@ -29,10 +34,30 @@ func (f *fakeDir) UserID(_ string) (int64, bool, error)            { return f.ui
 func (f *fakeDir) AdminRoles(int64) ([]directory.AdminRole, error) { return f.roles, nil }
 func (f *fakeDir) ListDomains() ([]directory.DomainInfo, error)    { return f.domains, nil }
 func (f *fakeDir) ListUsers() ([]directory.UserInfo, error)        { return f.users, nil }
+func (f *fakeDir) CreateDomain(name, homedir string) (int64, error) {
+	if f.createErr != nil {
+		return 0, f.createErr
+	}
+	f.createdDomain, f.createdHomedir = name, homedir
+	return 42, nil
+}
+func (f *fakeDir) CreateUser(username, _, maildir string) (int64, error) {
+	if f.createErr != nil {
+		return 0, f.createErr
+	}
+	f.createdUser, f.createdMaildir = username, maildir
+	return 43, nil
+}
+
+// fakePaths derives resource paths under a fixed root for the tests.
+type fakePaths struct{ root string }
+
+func (p fakePaths) HomedirFor(domain string) string  { return p.root + "/dom/" + domain }
+func (p fakePaths) MaildirFor(address string) string { return p.root + "/mbox/" + address }
 
 func adminServer(t *testing.T, d Directory) *httptest.Server {
 	t.Helper()
-	ts := httptest.NewServer(NewServer(d, []byte("test-secret")).Handler())
+	ts := httptest.NewServer(NewServer(d, fakePaths{root: t.TempDir()}, []byte("test-secret")).Handler())
 	t.Cleanup(ts.Close)
 	return ts
 }

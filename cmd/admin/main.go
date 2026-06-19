@@ -178,7 +178,7 @@ func main() {
 		}
 		dir.SetLDAPVerifier(ldapauth.New()) // an administrator may be LDAP-mastered
 		logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
-		hs, err := serve.New(addr, admin.NewServer(dir, []byte(cfg.AdminSecret)).Handler(), cfg, logger, logging.Admin)
+		hs, err := serve.New(addr, admin.NewServer(dir, cfg, []byte(cfg.AdminSecret)).Handler(), cfg, logger, logging.Admin)
 		if err != nil {
 			log.Fatalf("hermex-admin: %v", err)
 		}
