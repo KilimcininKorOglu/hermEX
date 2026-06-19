@@ -48,6 +48,17 @@ type MailboxLister interface {
 	Maildirs() ([]string, error)
 }
 
+// LocalDomains optionally reports whether a domain is one this server is
+// authoritative for. Outbound relay routing consults it after a recipient fails
+// to resolve to a mailbox: an unresolved address in a local domain is a genuine
+// "user unknown" — never relayed, since relaying it would loop straight back —
+// while an address in a non-local domain is a remote recipient eligible for
+// relay. Directories that cannot enumerate domains may omit it; outbound relay
+// is then disabled, since no domain can be confirmed remote.
+type LocalDomains interface {
+	IsLocalDomain(domain string) (bool, error)
+}
+
 // GALEntry is one Global Address List entry returned by a recipient search: a
 // directory user's address and a display name for it. Until per-user display
 // names are stored — they live in user_properties (the internal spec §2.10),
@@ -87,6 +98,19 @@ func (a StaticAccounts) Identities(user string) ([]string, error) {
 		return nil, nil
 	}
 	return []string{strings.ToLower(user)}, nil
+}
+
+// IsLocalDomain implements LocalDomains: a domain is local when some account
+// address belongs to it. The match is case-insensitive (the map keys are stored
+// lowercase).
+func (a StaticAccounts) IsLocalDomain(domain string) (bool, error) {
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	for addr := range a {
+		if i := strings.LastIndex(addr, "@"); i >= 0 && addr[i+1:] == domain {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Maildirs implements MailboxLister: the distinct mailbox paths of all accounts

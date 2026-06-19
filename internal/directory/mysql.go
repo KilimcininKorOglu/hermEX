@@ -136,6 +136,23 @@ func (d *SQLDirectory) Resolve(address string) (string, bool) {
 	return d.storePath(row.maildir), true
 }
 
+// IsLocalDomain implements LocalDomains: a domain is local when it exists in the
+// domains table and is active (domain_status = 0). The lookup is
+// case-insensitive, matching how domain names are stored.
+func (d *SQLDirectory) IsLocalDomain(domain string) (bool, error) {
+	var one int
+	err := d.db.QueryRow(
+		`SELECT 1 FROM domains WHERE domainname = ? AND domain_status = 0`,
+		strings.ToLower(strings.TrimSpace(domain))).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 // Identities implements Identifier: the addresses login may send as — its
 // canonical username plus every alias (aliases.mainname) and altname
 // (altnames.user_id) bound to that user. login may itself be a username, alias,

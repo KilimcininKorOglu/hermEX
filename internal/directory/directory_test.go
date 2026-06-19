@@ -31,6 +31,34 @@ func TestStaticAccountsMaildirs(t *testing.T) {
 	}
 }
 
+// TestStaticAccountsIsLocalDomain checks the LocalDomains predicate over the
+// static account map: a domain that hosts an account is local, an outside domain
+// is not, and the match is case-insensitive. Relay routing depends on this to
+// avoid relaying mail back at a domain this server serves.
+func TestStaticAccountsIsLocalDomain(t *testing.T) {
+	a := StaticAccounts{
+		"alice@hermex.test": {Password: "x", MailboxPath: "/m/alice"},
+		"bob@hermex.test":   {Password: "x", MailboxPath: "/m/bob"},
+	}
+	for _, tc := range []struct {
+		domain string
+		want   bool
+	}{
+		{"hermex.test", true},
+		{"Hermex.Test", true}, // case-insensitive
+		{"gmail.com", false},
+		{"", false},
+	} {
+		got, err := a.IsLocalDomain(tc.domain)
+		if err != nil {
+			t.Fatalf("IsLocalDomain(%q): %v", tc.domain, err)
+		}
+		if got != tc.want {
+			t.Errorf("IsLocalDomain(%q) = %v, want %v", tc.domain, got, tc.want)
+		}
+	}
+}
+
 // TestStaticAccountsSearchGAL checks the GAL substring search over the static
 // account map: a case-insensitive address match, collapsing addresses that share
 // a mailbox to one suggestion, skipping accounts with no mailbox, address

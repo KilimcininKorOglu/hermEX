@@ -127,6 +127,40 @@ func TestSQLDirectoryFaithfulResolution(t *testing.T) {
 	}
 }
 
+// TestSQLDirectoryIsLocalDomain checks the LocalDomains predicate against the
+// domains table: an active domain is local, an unknown domain is not, and a
+// suspended domain (domain_status != 0) is treated as non-local so its mail is
+// not delivered or looped. Relay routing relies on this to decide deliver vs.
+// relay-out.
+func TestSQLDirectoryIsLocalDomain(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	cleanTables(t, db)
+
+	root := t.TempDir()
+	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "domains", "hermex.test")); err != nil {
+		t.Fatal(err)
+	}
+
+	if ok, err := d.IsLocalDomain("Hermex.Test"); err != nil || !ok {
+		t.Errorf("IsLocalDomain(active, mixed case) = %v, %v; want true, nil", ok, err)
+	}
+	if ok, err := d.IsLocalDomain("gmail.com"); err != nil || ok {
+		t.Errorf("IsLocalDomain(unknown) = %v, %v; want false, nil", ok, err)
+	}
+
+	// A suspended domain must not be treated as local.
+	if _, err := db.Exec(`UPDATE domains SET domain_status = 1 WHERE domainname = ?`, "hermex.test"); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := d.IsLocalDomain("hermex.test"); err != nil || ok {
+		t.Errorf("IsLocalDomain(suspended) = %v, %v; want false, nil", ok, err)
+	}
+}
+
 // TestSQLDirectoryMaildirs checks that MailboxLister enumerates the store paths
 // of active user mailboxes — the set the send-later spooler scans — and skips a
 // suspended account, so the worker never releases mail on a disabled user's
