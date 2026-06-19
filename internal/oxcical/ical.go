@@ -96,7 +96,7 @@ func splitLine(line string) (name string, params map[string][]string, value stri
 			continue
 		}
 		key = strings.ToUpper(strings.TrimSpace(key))
-		for _, v := range strings.Split(val, ",") {
+		for v := range strings.SplitSeq(val, ",") {
 			params[key] = append(params[key], strings.Trim(strings.TrimSpace(v), `"`))
 		}
 	}

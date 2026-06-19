@@ -8,6 +8,7 @@ import (
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcical"
 	"hermex/internal/wbxml"
 )
 
@@ -49,13 +50,26 @@ func calendarAppData(st *objectstore.Store, objectID int64) (*wbxml.Node, error)
 	allDayTag := mapi.MakeTag(ids[4], mapi.PtBoolean)
 
 	pv, err := st.GetMessageProperties(objectID, startTag, endTag, busyTag, locTag, allDayTag,
-		mapi.PrSubject, mapi.PrLastModificationTime)
+		mapi.PrSubject, mapi.PrLastModificationTime, mapi.PrIcalOriginal)
 	if err != nil {
 		return nil, err
 	}
-	start, ok1 := ntTimeProp(pv, startTag)
-	end, ok2 := ntTimeProp(pv, endTag)
-	if !ok1 || !ok2 {
+	start, ok := ntTimeProp(pv, startTag)
+	if !ok {
+		return nil, nil // no start: not an appointment
+	}
+	end, hasEnd := ntTimeProp(pv, endTag)
+
+	// A recurring appointment stores only its start named property plus the
+	// verbatim iCal; its end and recurrence pattern come from there.
+	var recurrence *wbxml.Node
+	if ical, ok := bytesProp(pv, mapi.PrIcalOriginal); ok && len(ical) > 0 {
+		if s, e, r, ok := oxcical.ParseRecurrence(ical); ok {
+			start, end, hasEnd = s, e, true
+			recurrence = easRecurrence(r)
+		}
+	}
+	if !hasEnd {
 		return nil, nil
 	}
 	stamp := start
@@ -71,13 +85,94 @@ func calendarAppData(st *objectstore.Store, objectID int64) (*wbxml.Node, error)
 		wbxml.Str(wbxml.CalEndTime, easCalTime(end)),
 		wbxml.Str(wbxml.CalBusyStatus, strconv.Itoa(int(longProp(pv, busyTag)))),
 		wbxml.Str(wbxml.CalAllDayEvent, boolStr(boolProp(pv, allDayTag))),
-		// No attendees are emitted yet, so the appointment is not a meeting.
-		wbxml.Str(wbxml.CalMeetingStatus, "0"),
 	)
+	if recurrence != nil {
+		data.Children = append(data.Children, recurrence)
+	}
+	// No attendees are emitted yet, so the appointment is not a meeting.
+	data.Children = append(data.Children, wbxml.Str(wbxml.CalMeetingStatus, "0"))
 	if loc := stringProp(pv, locTag); loc != "" {
 		data.Children = append(data.Children, wbxml.Str(wbxml.CalLocation, loc))
 	}
 	return data, nil
+}
+
+// easRecurrence renders a parsed recurrence as the MS-ASCAL Recurrence element.
+// The end bound is at most one of Until (an instant) or Occurrences (a count);
+// the by-rules attach only for the recurrence types that use them.
+func easRecurrence(rec oxcical.Recurrence) *wbxml.Node {
+	typ, dayOfWeek := recurrenceType(rec)
+	n := wbxml.Elem(wbxml.CalRecurrence, wbxml.Str(wbxml.CalType, strconv.Itoa(typ)))
+	if !rec.Until.IsZero() {
+		n.Children = append(n.Children, wbxml.Str(wbxml.CalUntil, easCalTime(rec.Until)))
+	} else if rec.Count > 0 {
+		n.Children = append(n.Children, wbxml.Str(wbxml.CalOccurrences, strconv.Itoa(rec.Count)))
+	}
+	n.Children = append(n.Children, wbxml.Str(wbxml.CalInterval, strconv.Itoa(rec.Interval)))
+	if dayOfWeek != 0 {
+		n.Children = append(n.Children, wbxml.Str(wbxml.CalDayOfWeek, strconv.Itoa(dayOfWeek)))
+	}
+	if rec.MonthDay != 0 {
+		n.Children = append(n.Children, wbxml.Str(wbxml.CalDayOfMonth, strconv.Itoa(rec.MonthDay)))
+	}
+	if typ == 3 || typ == 6 { // nth-weekday of month/year
+		week := rec.SetPos
+		if week < 0 {
+			week = 5 // EAS encodes "last" as week 5
+		}
+		if week != 0 {
+			n.Children = append(n.Children, wbxml.Str(wbxml.CalWeekOfMonth, strconv.Itoa(week)))
+		}
+	}
+	if rec.Month != 0 {
+		n.Children = append(n.Children, wbxml.Str(wbxml.CalMonthOfYear, strconv.Itoa(rec.Month)))
+	}
+	return n
+}
+
+// recurrenceType maps a parsed recurrence to its MS-ASCAL Type (0 daily, 1 weekly,
+// 2 monthly-by-day, 3 monthly-nth-weekday, 5 yearly, 6 yearly-nth-weekday) and the
+// DayOfWeek bitmask the weekly and nth-weekday types carry.
+func recurrenceType(rec oxcical.Recurrence) (typ, dayOfWeek int) {
+	dow := weekdayBitmask(rec.Weekdays)
+	switch rec.Freq {
+	case "DAILY":
+		return 0, 0
+	case "WEEKLY":
+		return 1, dow
+	case "MONTHLY":
+		if len(rec.Weekdays) > 0 {
+			return 3, dow
+		}
+		return 2, 0
+	case "YEARLY":
+		if len(rec.Weekdays) > 0 {
+			return 6, dow
+		}
+		return 5, 0
+	}
+	return 0, 0
+}
+
+// weekdayBitmask folds BYDAY weekday tokens into the MS-ASCAL DayOfWeek bitmask
+// (Sunday 1, Monday 2, ... Saturday 64).
+func weekdayBitmask(days []string) int {
+	bits := map[string]int{"SU": 1, "MO": 2, "TU": 4, "WE": 8, "TH": 16, "FR": 32, "SA": 64}
+	mask := 0
+	for _, d := range days {
+		mask |= bits[d]
+	}
+	return mask
+}
+
+// bytesProp reads a PtBinary property as raw bytes.
+func bytesProp(pv mapi.PropertyValues, tag mapi.PropTag) ([]byte, bool) {
+	if v, ok := pv.Get(tag); ok {
+		if b, ok := v.([]byte); ok {
+			return b, true
+		}
+	}
+	return nil, false
 }
 
 // ntTimeProp reads a PtSysTime property (stored as an NT-time uint64) as a UTC
