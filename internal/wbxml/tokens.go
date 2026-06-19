@@ -154,16 +154,30 @@ const (
 
 // Settings (code page 0x12).
 const (
-	STSettings          Tag = 0x1205
-	STStatus            Tag = 0x1206
-	STGet               Tag = 0x1207
-	STSet               Tag = 0x1208
-	STDeviceInformation Tag = 0x1216
-	STModel             Tag = 0x1217
-	STUserInformation   Tag = 0x121D
-	STEmailAddresses    Tag = 0x121E
-	STSmtpAddress       Tag = 0x121F
-	STPrimarySmtpAddr   Tag = 0x1223
+	STSettings                 Tag = 0x1205
+	STStatus                   Tag = 0x1206
+	STGet                      Tag = 0x1207
+	STSet                      Tag = 0x1208
+	STOof                      Tag = 0x1209
+	STOofState                 Tag = 0x120A
+	STStartTime                Tag = 0x120B
+	STEndTime                  Tag = 0x120C
+	STOofMessage               Tag = 0x120D
+	STAppliesToInternal        Tag = 0x120E
+	STAppliesToExternalKnown   Tag = 0x120F
+	STAppliesToExternalUnknown Tag = 0x1210
+	STEnabled                  Tag = 0x1211
+	STReplyMessage             Tag = 0x1212
+	STBodyType                 Tag = 0x1213
+	STDevicePassword           Tag = 0x1214
+	STDeviceInformation        Tag = 0x1216
+	STModel                    Tag = 0x1217
+	STUserInformation          Tag = 0x121D
+	STEmailAddresses           Tag = 0x121E
+	STSmtpAddress              Tag = 0x121F
+	STPrimarySmtpAddr          Tag = 0x1223
+	STAccounts                 Tag = 0x1224
+	STAccount                  Tag = 0x1225
 )
 
 // ComposeMail (code page 0x15, ActiveSync 14.0+).

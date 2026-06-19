@@ -112,6 +112,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleGetItemEstimate(w, r, sess)
 	case "Ping":
 		s.handlePing(w, r, sess)
+	case "Settings":
+		s.handleSettings(w, r, sess)
 	default:
 		http.Error(w, "command not implemented: "+sess.req.cmd, http.StatusNotImplemented)
 	}
