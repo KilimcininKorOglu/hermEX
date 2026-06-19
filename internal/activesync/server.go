@@ -120,6 +120,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleItemOperations(w, r, sess)
 	case "MoveItems":
 		s.handleMoveItems(w, r, sess)
+	case "FolderCreate":
+		s.handleFolderCreate(w, r, sess)
 	default:
 		http.Error(w, "command not implemented: "+sess.req.cmd, http.StatusNotImplemented)
 	}

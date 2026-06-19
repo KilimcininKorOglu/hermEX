@@ -31,8 +31,10 @@ const (
 
 // handleFolderSync answers FolderSync. SyncKey 0 primes the hierarchy and
 // returns the mail folders with a fresh key; a matching key returns the same key
-// with no changes (the v1 hierarchy is static); a stale key returns Status 9 so
-// the device re-primes.
+// with no changes; a stale key returns Status 9 so the device re-primes.
+// FolderSync itself never sends incremental changes — a folder created through
+// FolderCreate reaches the device in that command's own reply, and any later
+// divergence is reconciled by a re-prime from key 0.
 func (s *Server) handleFolderSync(w http.ResponseWriter, r *http.Request, sess *session) {
 	root, err := readWBXML(r)
 	if err != nil {
