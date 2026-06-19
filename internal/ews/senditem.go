@@ -110,7 +110,7 @@ func (s *Server) sendOne(st *objectstore.Store, sess *session, itemID string, sa
 		return itemError("ErrorInvalidRecipients")
 	}
 	msg.Recipients = wire
-	raw, err := oxcmail.Export(msg, oxcmail.Options{Resolver: st.GetNamedPropIDs})
+	raw, err := oxcmail.Export(msg, oxcmail.Options{Resolver: st.GetNamedPropIDs, GenerateMessageID: true})
 	if err != nil {
 		return itemError("ErrorInternalServerError")
 	}

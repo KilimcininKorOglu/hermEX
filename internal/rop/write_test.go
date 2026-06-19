@@ -413,7 +413,7 @@ func inboxCount(t *testing.T, dir string) int {
 // names owner — the proof that submit stamped (and Export emitted) the sender
 // identity rather than shipping a From-less message.
 func hasFromOwner(raw []byte, owner string) bool {
-	for _, line := range bytes.Split(raw, []byte("\r\n")) {
+	for line := range bytes.SplitSeq(raw, []byte("\r\n")) {
 		if len(line) == 0 {
 			break // end of header block
 		}

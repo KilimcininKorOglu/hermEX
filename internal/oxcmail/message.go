@@ -49,4 +49,10 @@ type Options struct {
 	BodyFormat     BodyFormat
 	CalendarBody   []byte
 	CalendarMethod string
+	// GenerateMessageID mints a Message-ID for an originating message that has no
+	// PR_INTERNET_MESSAGE_ID (RFC 5322 requires one on transmitted mail). Set it
+	// only on the outbound/submission path; leave it false when re-exporting a
+	// stored message for serving, so a message without an id keeps the same bytes
+	// on every read instead of getting a fresh id each time.
+	GenerateMessageID bool
 }

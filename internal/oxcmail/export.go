@@ -2,7 +2,9 @@ package oxcmail
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	stdmime "mime"
 	"mime/multipart"
 	"mime/quotedprintable"
@@ -30,7 +32,7 @@ const dateLayout = "Mon, 02 Jan 2006 15:04:05 -0700"
 // property set carries no named properties).
 func Export(msg *Message, opt Options) ([]byte, error) {
 	var b bytes.Buffer
-	writeMailHead(&b, msg)
+	writeMailHead(&b, msg, opt.GenerateMessageID)
 
 	// Separate inline (HTML-referenced) attachments from regular ones: inline
 	// images join the HTML body in a multipart/related, regular attachments wrap
@@ -275,7 +277,7 @@ func encodeBase64(data []byte) []byte {
 // writeMailHead synthesizes the message header block (no trailing blank line;
 // the body writer appends the content headers and the separator), following the
 // header order of the MS-OXCMAIL export path.
-func writeMailHead(b *bytes.Buffer, msg *Message) {
+func writeMailHead(b *bytes.Buffer, msg *Message, generateMessageID bool) {
 	writeField(b, "MIME-Version", "1.0")
 
 	// From carries the sent-representing identity.
@@ -331,6 +333,10 @@ func writeMailHead(b *bytes.Buffer, msg *Message) {
 	}
 	if id := propString(msg.Props, mapi.PrInternetMessageID); id != "" {
 		writeField(b, "Message-ID", id)
+	} else if generateMessageID {
+		if id := newMessageID(msg.Props); id != "" {
+			writeField(b, "Message-ID", id)
+		}
 	}
 	if refs := propString(msg.Props, mapi.PrInternetReferences); refs != "" {
 		writeField(b, "References", refs)
@@ -338,6 +344,32 @@ func writeMailHead(b *bytes.Buffer, msg *Message) {
 	if irt := propString(msg.Props, mapi.PrInReplyToID); irt != "" {
 		writeField(b, "In-Reply-To", irt)
 	}
+}
+
+// newMessageID mints an RFC 5322 Message-ID for an originating message that lacks
+// one: a 128-bit random token at the sender's domain (sender, then representing
+// identity, falling back to "localhost"). It is generated once at send time, so
+// the transmitted message carries a single stable id. An empty result (the
+// random source failed) tells the caller to omit the header rather than emit a
+// predictable id.
+func newMessageID(props mapi.PropertyValues) string {
+	host := "localhost"
+	for _, t := range []addrTags{senderTags, representingTags} {
+		if addr := identityAddress(props, t); addr != "" {
+			// identityAddress may return a header-formatted value (e.g.
+			// "<alice@example.com>"); strip the brackets before taking the domain.
+			addr = strings.Trim(addr, "<> ")
+			if i := strings.LastIndexByte(addr, '@'); i >= 0 && i < len(addr)-1 {
+				host = addr[i+1:]
+			}
+			break
+		}
+	}
+	var buf [16]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return ""
+	}
+	return "<" + hex.EncodeToString(buf[:]) + "@" + host + ">"
 }
 
 // encodeForTransfer picks a content-transfer-encoding for raw and returns the
@@ -454,8 +486,7 @@ func encodeText(s string) string {
 // is7bitClean reports whether b is safe to emit as 7bit: only printable ASCII
 // plus tab, CR, and LF.
 func is7bitClean(b []byte) bool {
-	for i := 0; i < len(b); i++ {
-		c := b[i]
+	for _, c := range b {
 		if c == '\t' || c == '\r' || c == '\n' {
 			continue
 		}

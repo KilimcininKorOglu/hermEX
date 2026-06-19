@@ -4,6 +4,7 @@ import (
 	"bytes"
 	stdmime "mime"
 	"net/mail"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,6 +100,54 @@ func TestExportWellFormed(t *testing.T) {
 // TestExportImportRoundTrip checks that Export(Import(raw)) re-imports to the
 // same core property set: the convert path preserves meaning even though the
 // bytes are regenerated.
+// TestExportGenerateMessageID covers the originating-message Message-ID policy:
+// with GenerateMessageID and no PR_INTERNET_MESSAGE_ID, Export mints a unique id
+// at the sender's domain; an explicit id is preserved, never overridden; and
+// without the option an id-less message gets no header, so re-exporting a stored
+// message yields the same bytes on every read.
+func TestExportGenerateMessageID(t *testing.T) {
+	newSender := func() *Message {
+		return &Message{Props: mapi.PropertyValues{
+			{Tag: mapi.PrSenderSmtpAddress, Value: "alice@example.com"},
+			{Tag: mapi.PrSenderAddrType, Value: "SMTP"},
+			{Tag: mapi.PrSenderEmailAddress, Value: "alice@example.com"},
+			{Tag: mapi.PrSubject, Value: "hi"},
+		}}
+	}
+	mid := func(t *testing.T, m *Message, opt Options) string {
+		t.Helper()
+		wire, err := Export(m, opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parsed, err := mail.ReadMessage(bytes.NewReader(wire))
+		if err != nil {
+			t.Fatalf("exported message not parseable: %v\n%s", err, wire)
+		}
+		return parsed.Header.Get("Message-ID")
+	}
+
+	// Minted at the sender's domain when absent and the option is on.
+	id := mid(t, newSender(), Options{GenerateMessageID: true})
+	if !strings.HasPrefix(id, "<") || !strings.HasSuffix(id, "@example.com>") {
+		t.Errorf("minted Message-ID = %q, want <token@example.com>", id)
+	}
+	// Each send mints a unique id (a transmitted message needs a distinct one).
+	if id2 := mid(t, newSender(), Options{GenerateMessageID: true}); id2 == id {
+		t.Errorf("two mints produced the same id %q, want random", id)
+	}
+	// An explicit Message-ID is preserved, never overridden.
+	withID := newSender()
+	withID.Props = append(withID.Props, mapi.TaggedPropVal{Tag: mapi.PrInternetMessageID, Value: "<keep@host>"})
+	if got := mid(t, withID, Options{GenerateMessageID: true}); got != "<keep@host>" {
+		t.Errorf("explicit Message-ID = %q, want it preserved", got)
+	}
+	// Without the option an id-less message gets no header (re-serve stability).
+	if got := mid(t, newSender(), Options{}); got != "" {
+		t.Errorf("Message-ID = %q without the option, want none", got)
+	}
+}
+
 func TestExportImportRoundTrip(t *testing.T) {
 	msg1, err := Import(plainVector, Options{})
 	if err != nil {
@@ -186,7 +235,7 @@ func TestExportNonASCII(t *testing.T) {
 	}
 	// The exported header block must be ASCII (the subject is encoded).
 	headEnd := bytes.Index(wire, []byte("\r\n\r\n"))
-	for i := 0; i < headEnd; i++ {
+	for i := range headEnd {
 		if wire[i] > 0x7E {
 			t.Fatalf("non-ASCII byte 0x%02x in exported header block", wire[i])
 		}

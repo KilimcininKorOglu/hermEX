@@ -173,7 +173,7 @@ func (s *Server) notifyOrganizer(st *objectstore.Store, sess *session, req *oxcm
 	if err != nil {
 		return err
 	}
-	raw, err := oxcmail.Export(respMsg, oxcmail.Options{Resolver: st.GetNamedPropIDs, CalendarBody: ical, CalendarMethod: "REPLY"})
+	raw, err := oxcmail.Export(respMsg, oxcmail.Options{Resolver: st.GetNamedPropIDs, CalendarBody: ical, CalendarMethod: "REPLY", GenerateMessageID: true})
 	if err != nil {
 		return err
 	}

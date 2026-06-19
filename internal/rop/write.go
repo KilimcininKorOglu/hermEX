@@ -163,7 +163,7 @@ func (s *Session) ropModifyRecipients(p *ext.Pull, out *ext.Push, handles []uint
 		return false
 	}
 	var recipients []mapi.PropertyValues
-	for i := 0; i < int(count); i++ {
+	for range int(count) {
 		bag, ok, err := pullModifyRecipientBag(p, columns)
 		if err != nil {
 			return false // framing desync — the batch can no longer be located
@@ -594,7 +594,7 @@ func (s *Session) deliverComposed(nm *newMessageState) ([]byte, error) {
 	props := append(mapi.PropertyValues(nil), nm.props...)
 	stampSubmitIdentity(&props, s.owner)
 
-	raw, err := oxcmail.Export(&oxcmail.Message{Props: props, Recipients: wire}, oxcmail.Options{})
+	raw, err := oxcmail.Export(&oxcmail.Message{Props: props, Recipients: wire}, oxcmail.Options{GenerateMessageID: true})
 	if err != nil {
 		return nil, err
 	}
