@@ -3,6 +3,7 @@ package objectstore
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
@@ -170,4 +171,207 @@ func (s *Store) DeleteRule(ruleID int64) error {
 		return ErrNotFound
 	}
 	return nil
+}
+
+// RuleOp is a decoded RopModifyRules row operation (the RuleData flags). The zero
+// value is invalid so a half-built change is rejected rather than treated as an add.
+type RuleOp uint8
+
+const (
+	RuleAdd    RuleOp = iota + 1 // ROW_ADD: store a new rule
+	RuleModify                   // ROW_MODIFY: update an existing rule's present columns
+	RuleRemove                   // ROW_REMOVE: drop a rule by id
+)
+
+// RulePatch is a RopModifyRules row's rule columns, with a nil pointer meaning the
+// property was absent from the wire row. An Add carries the rule's required columns; a
+// Modify carries only the columns the client actually sent — the store updates those
+// and leaves the rest unchanged, mirroring the reference's present-only merge (an
+// omitted column is never wiped). hermEX models the six columns its rules table holds;
+// the reference's level/user_flags/provider_data are not stored.
+type RulePatch struct {
+	Name      *string
+	Provider  *string
+	Sequence  *int32
+	State     *uint32
+	Condition *mapi.Restriction
+	Actions   *mapi.RuleActions
+}
+
+// RuleChange is one decoded RopModifyRules row. RuleID is the PR_RULE_ID a Modify or
+// Remove targets (the client got it from RopGetRulesTable); an Add ignores it and the
+// store assigns the id. Patch carries the row's properties.
+type RuleChange struct {
+	Op     RuleOp
+	RuleID int64
+	Patch  RulePatch
+}
+
+// ModifyRules applies a decoded RopModifyRules batch to a folder in one transaction.
+// When replace is set the folder's whole rule set is cleared first (the REPLACE flag,
+// under which the wire carries only adds). An Add inserts a new rule; a Modify updates
+// the present columns of the rule with the given id (only when it belongs to the
+// folder); a Remove drops it. A Modify or Remove of an absent or foreign rule is a
+// no-op, not a fault — the reference tolerates a stale id within a batch.
+func (s *Store) ModifyRules(folderID int64, replace bool, changes []RuleChange) error {
+	tx, err := s.objdb.Begin()
+	if err != nil {
+		s.logStoreError("modify-rules", err)
+		return err
+	}
+	defer tx.Rollback()
+
+	if replace {
+		if _, err := tx.Exec(`DELETE FROM rules WHERE folder_id=?`, folderID); err != nil {
+			s.logStoreError("modify-rules", err)
+			return err
+		}
+	}
+
+	for _, c := range changes {
+		switch c.Op {
+		case RuleAdd:
+			err = insertRulePatch(tx, folderID, c.Patch)
+		case RuleModify:
+			err = updateRulePatch(tx, folderID, c.RuleID, c.Patch)
+		case RuleRemove:
+			_, err = tx.Exec(`DELETE FROM rules WHERE folder_id=? AND rule_id=?`, folderID, c.RuleID)
+		default:
+			return fmt.Errorf("objectstore: unknown rule op %d", c.Op)
+		}
+		if err != nil {
+			s.logStoreError("modify-rules", err)
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// insertRulePatch inserts a new rule from an Add row's patch: provider defaults to the
+// standard user-rule provider, a non-positive sequence appends after the folder's
+// highest, and an absent condition/actions stores as the empty form (matching a direct
+// AddRule of a zero-valued Rule).
+func insertRulePatch(tx *sql.Tx, folderID int64, p RulePatch) error {
+	cond, err := marshalRestriction(p.Condition)
+	if err != nil {
+		return err
+	}
+	acts, err := marshalRuleActions(p.Actions)
+	if err != nil {
+		return err
+	}
+	provider := ruleProviderDefault
+	if p.Provider != nil && *p.Provider != "" {
+		provider = *p.Provider
+	}
+	var name string
+	if p.Name != nil {
+		name = *p.Name
+	}
+	var state uint32
+	if p.State != nil {
+		state = *p.State
+	}
+	var seq int32
+	if p.Sequence != nil {
+		seq = *p.Sequence
+	}
+	if seq <= 0 {
+		var max sql.NullInt64
+		if err := tx.QueryRow(`SELECT MAX(sequence) FROM rules WHERE folder_id=?`, folderID).Scan(&max); err != nil {
+			return err
+		}
+		seq = int32(max.Int64) + 1
+	}
+	_, err = tx.Exec(
+		`INSERT INTO rules (name, provider, sequence, state, condition, actions, folder_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		name, provider, seq, int64(state), cond, acts, folderID)
+	return err
+}
+
+// updateRulePatch updates only the columns a Modify row carried, keyed by (folder_id,
+// rule_id) — the reference's per-column present-only merge. It first confirms the rule
+// belongs to the folder; a missing or foreign rule is a silent no-op. (hermEX also
+// honors a present PR_RULE_NAME on modify, which the reference omits — a harmless
+// superset, since a client sending the name expects it applied.)
+func updateRulePatch(tx *sql.Tx, folderID, ruleID int64, p RulePatch) error {
+	var owner int64
+	switch err := tx.QueryRow(`SELECT folder_id FROM rules WHERE rule_id=?`, ruleID).Scan(&owner); {
+	case errors.Is(err, sql.ErrNoRows):
+		return nil // absent rule: skip, matching the reference
+	case err != nil:
+		return err
+	case owner != folderID:
+		return nil // foreign rule: skip
+	}
+
+	if p.Name != nil {
+		if _, err := tx.Exec(`UPDATE rules SET name=? WHERE rule_id=?`, *p.Name, ruleID); err != nil {
+			return err
+		}
+	}
+	if p.Provider != nil {
+		if _, err := tx.Exec(`UPDATE rules SET provider=? WHERE rule_id=?`, *p.Provider, ruleID); err != nil {
+			return err
+		}
+	}
+	if p.Sequence != nil {
+		if _, err := tx.Exec(`UPDATE rules SET sequence=? WHERE rule_id=?`, *p.Sequence, ruleID); err != nil {
+			return err
+		}
+	}
+	if p.State != nil {
+		if _, err := tx.Exec(`UPDATE rules SET state=? WHERE rule_id=?`, int64(*p.State), ruleID); err != nil {
+			return err
+		}
+	}
+	if p.Condition != nil {
+		blob, err := marshalRestriction(p.Condition)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE rules SET condition=? WHERE rule_id=?`, blob, ruleID); err != nil {
+			return err
+		}
+	}
+	if p.Actions != nil {
+		blob, err := marshalRuleActions(p.Actions)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(`UPDATE rules SET actions=? WHERE rule_id=?`, blob, ruleID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// marshalRestriction serializes a rule condition to its stored blob; a nil pointer
+// stores the empty RESTRICTION form (the zero value, as AddRule does for an unset
+// condition).
+func marshalRestriction(r *mapi.Restriction) ([]byte, error) {
+	var v mapi.Restriction
+	if r != nil {
+		v = *r
+	}
+	p := ext.NewPush(ruleExtFlags)
+	if err := p.Restriction(v); err != nil {
+		return nil, err
+	}
+	return p.Bytes(), nil
+}
+
+// marshalRuleActions serializes rule actions to their stored blob; a nil pointer
+// stores the empty RULE_ACTIONS form.
+func marshalRuleActions(a *mapi.RuleActions) ([]byte, error) {
+	var v mapi.RuleActions
+	if a != nil {
+		v = *a
+	}
+	p := ext.NewPush(ruleExtFlags)
+	if err := p.RuleActions(v); err != nil {
+		return nil, err
+	}
+	return p.Bytes(), nil
 }
