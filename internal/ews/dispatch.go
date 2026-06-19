@@ -44,6 +44,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleSyncFolderItems(w, inner, sess)
 	case "CreateItem":
 		s.handleCreateItem(w, inner, sess)
+	case "SendItem":
+		s.handleSendItem(w, inner, sess)
 	case "ResolveNames":
 		s.handleResolveNames(w, inner, sess)
 	case "UpdateItem":

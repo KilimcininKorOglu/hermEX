@@ -109,11 +109,12 @@ func TestFirstElementName(t *testing.T) {
 	}
 }
 
-// TestUnsupportedOperation confirms an operation outside the v1 surface (SendItem
-// is a deferred send op) returns a SOAP Fault carrying an EWS response code.
+// TestUnsupportedOperation confirms an operation outside the v1 surface (ExpandDL
+// is a deferred op — DL membership is not modelled) returns a SOAP Fault carrying
+// an EWS response code.
 func TestUnsupportedOperation(t *testing.T) {
 	ts := newTestServer(t)
-	resp, body := soapPost(t, ts, wrapRequest(`<SendItem xmlns="`+nsMessages+`"/>`), true)
+	resp, body := soapPost(t, ts, wrapRequest(`<ExpandDL xmlns="`+nsMessages+`"/>`), true)
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", resp.StatusCode)
 	}
