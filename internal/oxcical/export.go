@@ -16,9 +16,20 @@ import (
 // simply does not appear.
 func Export(msg *oxcmail.Message, opt Options) ([]byte, error) {
 	p := &msg.Props
-	if v, ok := p.Get(mapi.PrIcalOriginal); ok {
-		if raw, ok := v.([]byte); ok && len(raw) > 0 {
-			return raw, nil
+
+	// A meeting response carries an iTIP METHOD:REPLY with organizer/attendee
+	// identity; a plain appointment emits none of that, so its output is unchanged.
+	partstat := responsePartStat(getStr(p, mapi.PrMessageClass))
+
+	// A recurring event preserved verbatim is returned unchanged — but only when
+	// rendering the appointment itself. A response synthesizes a REPLY below;
+	// returning the preserved REQUEST verbatim would send the invitation back to the
+	// organizer instead of the attendee's reply.
+	if partstat == "" {
+		if v, ok := p.Get(mapi.PrIcalOriginal); ok {
+			if raw, ok := v.([]byte); ok && len(raw) > 0 {
+				return raw, nil
+			}
 		}
 	}
 
@@ -30,10 +41,6 @@ func Export(msg *oxcmail.Message, opt Options) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	// A meeting response carries an iTIP METHOD:REPLY with organizer/attendee
-	// identity; a plain appointment emits none of that, so its output is unchanged.
-	partstat := responsePartStat(getStr(p, mapi.PrMessageClass))
 
 	b := &builder{}
 	b.add("BEGIN:VCALENDAR")

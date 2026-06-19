@@ -229,6 +229,39 @@ func TestExportReplyIdentity(t *testing.T) {
 	}
 }
 
+// TestExportReplyOverridesVerbatim proves a meeting response that carries the
+// verbatim original of a recurring request (PrIcalOriginal) still exports an iTIP
+// REPLY, not the preserved REQUEST: responding to a recurring meeting must answer the
+// organizer with the attendee's PARTSTAT, never echo the invitation back.
+func TestExportReplyOverridesVerbatim(t *testing.T) {
+	r := newResolver()
+	r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID})
+	verbatimRequest := "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:rec-1\r\n" +
+		"RRULE:FREQ=WEEKLY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	msg := &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Schedule.Meeting.Resp.Pos"},
+		{Tag: mapi.PrIcalOriginal, Value: []byte(verbatimRequest)},
+		{Tag: r.tag(mapi.NameAppointmentStartWhole, mapi.PtSysTime), Value: mapi.UnixToNTTime(time.Date(2026, 7, 1, 14, 0, 0, 0, time.UTC))},
+		{Tag: r.tag(nameICalUID, mapi.PtUnicode), Value: "rec-1"},
+		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "organizer@hermex.test"},
+		{Tag: mapi.PrSenderSmtpAddress, Value: "alice@hermex.test"},
+	}}
+	out, err := Export(msg, r.opt())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	if !strings.Contains(s, "METHOD:REPLY") {
+		t.Errorf("recurring response did not synthesize a REPLY:\n%s", s)
+	}
+	if strings.Contains(s, "METHOD:REQUEST") {
+		t.Errorf("recurring response echoed the verbatim REQUEST instead of a REPLY:\n%s", s)
+	}
+	if !strings.Contains(s, "PARTSTAT=ACCEPTED") {
+		t.Errorf("recurring response REPLY missing the attendee's PARTSTAT:\n%s", s)
+	}
+}
+
 // TestExportPlainAppointmentNoItip is the byte-identical guard: a plain appointment
 // must export with no METHOD/ORGANIZER/ATTENDEE even when it carries sender and
 // representing identities (a CalDAV PUT does), so the REPLY support never stamps an
