@@ -212,6 +212,30 @@ func TestRoundTripCalendar(t *testing.T) {
 	}
 }
 
+// TestRoundTripMeetingResponse exercises the MeetingResponse code page (0x08): the
+// first MeetingResponse tag switches AirSync -> MeetingResponse, and a Result tree
+// survives encode+decode unchanged.
+func TestRoundTripMeetingResponse(t *testing.T) {
+	tree := Elem(MRMeetingResponse,
+		Elem(MRResult,
+			Str(MRRequestID, "42"),
+			Str(MRStatus, "1"),
+			Str(MRCalendarID, "7"),
+		),
+	)
+	got, err := Unmarshal(Marshal(tree))
+	if err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(got, tree) {
+		t.Fatalf("meeting-response round-trip mismatch:\n got %#v\nwant %#v", got, tree)
+	}
+	res := got.Child(MRResult)
+	if res == nil || res.ChildText(MRStatus) != "1" || res.ChildText(MRCalendarID) != "7" {
+		t.Errorf("Result subtree lost across the page switch: %#v", res)
+	}
+}
+
 // TestRejectAttributes confirms a tag carrying the attribute bit (0x80) is
 // rejected: ActiveSync never uses WBXML attributes.
 func TestRejectAttributes(t *testing.T) {

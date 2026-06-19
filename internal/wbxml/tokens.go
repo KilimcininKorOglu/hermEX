@@ -20,6 +20,7 @@ const (
 	PageMove            = 0x05
 	PageGetItemEstimate = 0x06
 	PageFolderHierarchy = 0x07
+	PageMeetingResponse = 0x08
 	PageResolveRecips   = 0x0A
 	PageValidateCert    = 0x0B
 	PagePing            = 0x0D
@@ -125,6 +126,21 @@ const (
 	CalResponseRequested    Tag = 0x0434
 	CalAppointmentReplyTime Tag = 0x0435
 	CalResponseType         Tag = 0x0436
+)
+
+// MeetingResponse (code page 0x08, MS-ASCMD). The 16.x ProposedStart/EndTime and
+// the deprecated 2.0 Version tokens are omitted.
+const (
+	MRCalendarID      Tag = 0x0805
+	MRFolderID        Tag = 0x0806
+	MRMeetingResponse Tag = 0x0807
+	MRRequestID       Tag = 0x0808
+	MRRequest         Tag = 0x0809
+	MRResult          Tag = 0x080A
+	MRStatus          Tag = 0x080B
+	MRUserResponse    Tag = 0x080C
+	MRInstanceID      Tag = 0x080E
+	MRSendResponse    Tag = 0x0812
 )
 
 // GetItemEstimate (code page 0x06).
