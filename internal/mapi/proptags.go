@@ -324,3 +324,23 @@ const (
 	PrMemberNameA  = PropTag(0x6672001E) // PtString8 (PidTagMemberName, ANSI)
 	PrMemberRights = PropTag(0x66730003) // PtLong (PidTagMemberRights)
 )
+
+// Rule row proptags (MS-OXORULE §2.2.1 / §2.2.4). One bag per rule in the table a
+// RopGetRulesTable handle enumerates, and the columns a RopModifyRules RuleData row
+// carries. PrRuleId (PtI8) keys a MODIFY/REMOVE; PrRuleCondition (PtRestriction) and
+// PrRuleActions (PtActions) self-describe via their proptag type. Provider/Name have
+// ANSI siblings for down-conversion to a client code page.
+const (
+	PrRuleID           = PropTag(0x66740014) // PtI8 (PidTagRuleId)
+	PrRuleSequence     = PropTag(0x66760003) // PtLong (PidTagRuleSequence)
+	PrRuleState        = PropTag(0x66770003) // PtLong (PidTagRuleState)
+	PrRuleUserFlags    = PropTag(0x66780003) // PtLong (PidTagRuleUserFlags)
+	PrRuleCondition    = PropTag(0x667900FD) // PtRestriction (PidTagRuleCondition)
+	PrRuleActions      = PropTag(0x668000FE) // PtActions (PidTagRuleActions)
+	PrRuleProvider     = PropTag(0x6681001F) // PtUnicode (PidTagRuleProvider)
+	PrRuleProviderA    = PropTag(0x6681001E) // PtString8 (PidTagRuleProvider, ANSI)
+	PrRuleName         = PropTag(0x6682001F) // PtUnicode (PidTagRuleName)
+	PrRuleNameA        = PropTag(0x6682001E) // PtString8 (PidTagRuleName, ANSI)
+	PrRuleLevel        = PropTag(0x66830003) // PtLong (PidTagRuleLevel)
+	PrRuleProviderData = PropTag(0x66840102) // PtBinary (PidTagRuleProviderData)
+)
