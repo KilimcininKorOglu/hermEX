@@ -130,7 +130,7 @@ func main() {
 		// report to the (local, authenticated) sender through the local delivery
 		// path, so a failed send is reported rather than lost silently.
 		OnGiveUp: func(it relay.Item, cause error) {
-			report := mta.Bounce(it.From, it.Recipient, cause.Error(), time.Now())
+			report := mta.Bounce(cfg.Hostname, it.From, it.Recipient, cause.Error(), time.Now())
 			unresolved, err := mta.Deliver(dir, "", []string{it.From}, report, time.Now())
 			if err != nil || len(unresolved) > 0 {
 				logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "relay.bounce.undelivered", User: it.From, Fields: logging.Fields{"recipient": it.Recipient}})
