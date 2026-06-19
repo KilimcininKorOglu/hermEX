@@ -44,9 +44,21 @@ const (
 // the caller built through oxcical, which oxcmail cannot import without a cycle)
 // that Export carries as a text/calendar alternative beside the text body;
 // CalendarMethod is its METHOD, surfaced on the part's Content-Type.
+//
+// CalendarImporter is the import-side counterpart: it parses a text/calendar part
+// the caller's iCalendar converter understands, letting Import overlay a scheduling
+// message's class and appointment properties (see CalendarImporter).
 type Options struct {
-	Resolver       PropIDResolver
-	BodyFormat     BodyFormat
-	CalendarBody   []byte
-	CalendarMethod string
+	Resolver         PropIDResolver
+	BodyFormat       BodyFormat
+	CalendarBody     []byte
+	CalendarMethod   string
+	CalendarImporter CalendarImporter
 }
+
+// CalendarImporter parses a text/calendar body (a UTF-8 iCalendar object) into the
+// MAPI properties of the scheduling object it describes. The caller supplies it to
+// bridge to the iCalendar converter that oxcmail cannot import directly (it would
+// form an import cycle); a nil importer leaves calendar parts unparsed (carried as
+// attachments). It returns an error when the body is not a parseable calendar.
+type CalendarImporter func(ical []byte) (mapi.PropertyValues, error)

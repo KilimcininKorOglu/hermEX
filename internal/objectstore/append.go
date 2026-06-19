@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"hermex/internal/mapi"
+	"hermex/internal/oxcical"
 	"hermex/internal/oxcmail"
 	"hermex/internal/smime"
 )
@@ -43,7 +44,20 @@ func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time
 			s.logStoreError("append", err)
 		}
 	}()
-	resolver := oxcmail.Options{Resolver: s.GetNamedPropIDs}
+	resolver := oxcmail.Options{
+		Resolver: s.GetNamedPropIDs,
+		// A delivered meeting request/response carries its appointment as a
+		// text/calendar part; bridge to the iCalendar converter (oxcmail cannot
+		// import it directly without a cycle) so Import overlays the scheduling
+		// class and appointment properties onto the stored message.
+		CalendarImporter: func(ical []byte) (mapi.PropertyValues, error) {
+			m, err := oxcical.Import(ical, oxcical.Options{Resolver: s.GetNamedPropIDs})
+			if err != nil {
+				return nil, err
+			}
+			return m.Props, nil
+		},
+	}
 
 	msg, err := oxcmail.Import(raw, resolver)
 	if err != nil {

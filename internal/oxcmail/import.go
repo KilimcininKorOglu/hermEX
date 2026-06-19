@@ -54,7 +54,7 @@ func Import(raw []byte, opt Options) (*Message, error) {
 	}
 	msg.Props.Set(mapi.PrCreationTime, stamp)
 
-	parseContent(root, msg, stamp)
+	parseContent(root, msg, stamp, opt.CalendarImporter)
 	return msg, nil
 }
 
@@ -356,6 +356,7 @@ type bodyParts struct {
 	plain    *mime.Part
 	htmls    []*mime.Part
 	enriched *mime.Part
+	calendar *mime.Part
 }
 
 // parseContent selects the message's body parts and attachments. It fills the
@@ -363,7 +364,7 @@ type bodyParts struct {
 // PR_HTML + PR_INTERNET_CPID from a single HTML part (raw bytes in its original
 // charset) — then turns every non-body leaf part into an attachment.
 // Multiple-HTML joining, enriched, and calendar bodies are deferred.
-func parseContent(root *mime.Part, msg *Message, stamp uint64) {
+func parseContent(root *mime.Part, msg *Message, stamp uint64, calImport CalendarImporter) {
 	var bp bodyParts
 	selectParts(root, &bp, 0)
 	if bp.plain != nil {
@@ -373,6 +374,9 @@ func parseContent(root *mime.Part, msg *Message, stamp uint64) {
 	}
 	if len(bp.htmls) == 1 {
 		setHTMLBody(msg, bp.htmls[0])
+	}
+	if bp.calendar != nil && calImport != nil {
+		mergeCalendar(msg, bp.calendar, calImport)
 	}
 
 	bodySet := map[*mime.Part]bool{}
@@ -386,6 +390,30 @@ func parseContent(root *mime.Part, msg *Message, stamp uint64) {
 		bodySet[bp.enriched] = true
 	}
 	walkAttachments(root, bodySet, msg, stamp)
+}
+
+// mergeCalendar parses a text/calendar part through the injected importer and, when
+// it yields a scheduling object (one carrying a message class — a meeting request,
+// response, or cancellation), overlays that object's message class and named
+// appointment properties onto the message. Only the scheduling properties the header
+// parse cannot carry are added; the email's own body, subject, and envelope are left
+// intact, and the part stays in place to be enumerated as an attachment (as an
+// unparsed calendar part already is). A non-scheduling calendar object (no message
+// class) is left untouched.
+func mergeCalendar(msg *Message, part *mime.Part, calImport CalendarImporter) {
+	ical, err := part.DecodedText()
+	if err != nil {
+		return
+	}
+	calProps, err := calImport([]byte(ical))
+	if err != nil || !calProps.Has(mapi.PrMessageClass) {
+		return
+	}
+	for _, pv := range calProps {
+		if pv.Tag == mapi.PrMessageClass || pv.Tag.ID() >= 0x8000 {
+			msg.Props.Set(pv.Tag, pv.Value)
+		}
+	}
 }
 
 // walkAttachments turns every non-body leaf part into an attachment, mirroring
@@ -488,6 +516,8 @@ func selectParts(part *mime.Part, info *bodyParts, level int) {
 			info.htmls = append(info.htmls, part)
 		case part.Type == "text" && part.Subtype == "enriched":
 			info.enriched = part
+		case part.Type == "text" && part.Subtype == "calendar":
+			info.calendar = part
 		}
 		return
 	}
@@ -510,6 +540,9 @@ func selectParts(part *mime.Part, info *bodyParts, level int) {
 			if cld.enriched != nil {
 				info.enriched = cld.enriched
 			}
+			if cld.calendar != nil {
+				info.calendar = cld.calendar
+			}
 			continue
 		}
 		if idx == 0 && len(cld.htmls) > 0 {
@@ -523,6 +556,9 @@ func selectParts(part *mime.Part, info *bodyParts, level int) {
 		}
 		if cld.enriched != nil && info.enriched == nil {
 			info.enriched = cld.enriched
+		}
+		if cld.calendar != nil && info.calendar == nil {
+			info.calendar = cld.calendar
 		}
 	}
 }
