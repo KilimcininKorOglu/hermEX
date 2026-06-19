@@ -68,6 +68,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleGetServerTimeZones(w, inner, sess)
 	case "GetInboxRules":
 		s.handleGetInboxRules(w, inner, sess)
+	case "UpdateInboxRules":
+		s.handleUpdateInboxRules(w, inner, sess)
 	case "GetUserAvailabilityRequest":
 		// MS-OXWSAVAIL names the request element GetUserAvailabilityRequest (the
 		// "Request" suffix is unlike the other operations' bare names).

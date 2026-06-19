@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 
 	"hermex/internal/mapi"
@@ -198,3 +199,160 @@ func contentContainsTag(tag mapi.PropTag, text string) mapi.Restriction {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+// --- UpdateInboxRules (write) test helpers ---
+
+func updateInboxRulesReq(ops string) string {
+	return wrapRequest(`<UpdateInboxRules xmlns="` + nsMessages + `">` +
+		`<MailboxSmtpAddress>` + testUser + `</MailboxSmtpAddress>` +
+		`<Operations xmlns:t="` + nsTypes + `">` + ops + `</Operations>` +
+		`</UpdateInboxRules>`)
+}
+
+func createRuleOp(rule string) string {
+	return `<t:CreateRuleOperation><t:Rule>` + rule + `</t:Rule></t:CreateRuleOperation>`
+}
+func setRuleOp(rule string) string {
+	return `<t:SetRuleOperation><t:Rule>` + rule + `</t:Rule></t:SetRuleOperation>`
+}
+func deleteRuleOp(id string) string {
+	return `<t:DeleteRuleOperation><t:RuleId>` + id + `</t:RuleId></t:DeleteRuleOperation>`
+}
+
+// ruleBody builds a <t:Rule> body (the caller prepends a RuleId for a Set).
+func ruleBody(name string, priority int, conds, actions string) string {
+	return `<t:DisplayName>` + name + `</t:DisplayName>` +
+		`<t:Priority>` + strconv.Itoa(priority) + `</t:Priority>` +
+		`<t:IsEnabled>true</t:IsEnabled>` +
+		`<t:Conditions>` + conds + `</t:Conditions>` +
+		`<t:Actions>` + actions + `</t:Actions>`
+}
+
+func subjectCond(s string) string {
+	return `<t:ContainsSubjectStrings><t:String>` + s + `</t:String></t:ContainsSubjectStrings>`
+}
+
+// storeRules opens the store and returns the inbox rules.
+func storeRules(t *testing.T, dir string) []objectstore.Rule {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	rules, err := st.ListRules(int64(mapi.PrivateFIDInbox))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rules
+}
+
+// opErrorIndexes parses the OperationIndex of each RuleOperationError.
+func opErrorIndexes(t *testing.T, out string) []int {
+	t.Helper()
+	var env struct {
+		Indexes []int `xml:"Body>UpdateInboxRulesResponse>RuleOperationErrors>RuleOperationError>OperationIndex"`
+	}
+	if err := xml.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("unmarshal RuleOperationErrors: %v\n%s", err, out)
+	}
+	return env.Indexes
+}
+
+// TestUpdateInboxRulesCreateRoundTrip creates a curated rule via UpdateInboxRules
+// and reads back the same predicates and action via GetInboxRules.
+func TestUpdateInboxRulesCreateRoundTrip(t *testing.T) {
+	ts, dir := seededEWS(t)
+	target := oxews.EncodeFolderID(int64(mapi.PrivateFIDDeletedItems))
+	actions := `<t:MoveToFolder><t:FolderId Id="` + target + `"/></t:MoveToFolder>`
+	rule := ruleBody("Sale", 1, subjectCond("sale"), actions)
+
+	resp, out := soapPost(t, ts, updateInboxRulesReq(createRuleOp(rule)), true)
+	if resp.StatusCode != 200 || !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("Create not success (%d): %s", resp.StatusCode, out)
+	}
+	if rules := storeRules(t, dir); len(rules) != 1 || rules[0].Name != "Sale" {
+		t.Fatalf("store has %d rules, want 1 named Sale", len(rules))
+	}
+
+	_, got := getInboxRules(t, ts)
+	if len(got) != 1 {
+		t.Fatalf("GetInboxRules returned %d rules, want 1", len(got))
+	}
+	r := got[0]
+	if r.IsNotSupported {
+		t.Error("a round-tripped curated rule must not be IsNotSupported")
+	}
+	if len(r.Conditions.ContainsSubjectStrings) != 1 || r.Conditions.ContainsSubjectStrings[0] != "sale" {
+		t.Errorf("subject = %v, want [sale]", r.Conditions.ContainsSubjectStrings)
+	}
+	if r.Actions.MoveToFolder.FolderID.ID != target {
+		t.Errorf("move target = %q, want %q", r.Actions.MoveToFolder.FolderID.ID, target)
+	}
+}
+
+// TestUpdateInboxRulesSetDelete modifies then removes a rule, verifying each via
+// GetInboxRules.
+func TestUpdateInboxRulesSetDelete(t *testing.T) {
+	ts, dir := seededEWS(t)
+	id := seedRule(t, dir, objectstore.Rule{
+		Name: "Orig", Sequence: 1, State: mapi.RuleStateEnabled,
+		Condition: objectstore.RuleSubjectContains("a"),
+		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{objectstore.RuleDeleteAction()}},
+	})
+
+	setRule := `<t:RuleId>` + itoa(id) + `</t:RuleId>` +
+		ruleBody("Renamed", 2, `<t:ContainsSenderStrings><t:String>spam@</t:String></t:ContainsSenderStrings>`, `<t:MarkAsRead>true</t:MarkAsRead>`)
+	if _, out := soapPost(t, ts, updateInboxRulesReq(setRuleOp(setRule)), true); !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("Set not success: %s", out)
+	}
+	_, got := getInboxRules(t, ts)
+	if len(got) != 1 || got[0].DisplayName != "Renamed" {
+		t.Fatalf("set did not rename: %+v", got)
+	}
+	if len(got[0].Conditions.ContainsSenderStrings) != 1 || !got[0].Actions.MarkAsRead {
+		t.Errorf("set did not replace condition/action: %+v", got[0])
+	}
+
+	if _, out := soapPost(t, ts, updateInboxRulesReq(deleteRuleOp(itoa(id))), true); !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("Delete not success: %s", out)
+	}
+	if _, got := getInboxRules(t, ts); len(got) != 0 {
+		t.Errorf("delete left %d rules", len(got))
+	}
+}
+
+// TestUpdateInboxRulesUnsupportedRejected confirms a predicate outside the curated
+// vocabulary fails validation and stores nothing.
+func TestUpdateInboxRulesUnsupportedRejected(t *testing.T) {
+	ts, dir := seededEWS(t)
+	rule := ruleBody("Bad", 1, `<t:HasAttachments>true</t:HasAttachments>`, `<t:Delete>true</t:Delete>`)
+	_, out := soapPost(t, ts, updateInboxRulesReq(createRuleOp(rule)), true)
+	if !strings.Contains(out, "ErrorInboxRulesValidationError") {
+		t.Errorf("an unsupported predicate must be ErrorInboxRulesValidationError: %s", out)
+	}
+	if idx := opErrorIndexes(t, out); len(idx) != 1 || idx[0] != 0 {
+		t.Errorf("operation error index = %v, want [0]", idx)
+	}
+	if rules := storeRules(t, dir); len(rules) != 0 {
+		t.Errorf("an unsupported rule must not be stored, got %d", len(rules))
+	}
+}
+
+// TestUpdateInboxRulesAtomic confirms a batch with one valid and one invalid
+// operation applies neither (atomic), and reports the invalid one's index.
+func TestUpdateInboxRulesAtomic(t *testing.T) {
+	ts, dir := seededEWS(t)
+	good := createRuleOp(ruleBody("Good", 1, subjectCond("x"), `<t:Delete>true</t:Delete>`))
+	bad := createRuleOp(ruleBody("Bad", 2, `<t:HasAttachments>true</t:HasAttachments>`, `<t:Delete>true</t:Delete>`))
+	_, out := soapPost(t, ts, updateInboxRulesReq(good+bad), true)
+	if !strings.Contains(out, "ErrorInboxRulesValidationError") {
+		t.Fatalf("a batch with an invalid op must fail: %s", out)
+	}
+	if idx := opErrorIndexes(t, out); len(idx) != 1 || idx[0] != 1 {
+		t.Errorf("error index = %v, want [1] (the second op)", idx)
+	}
+	if rules := storeRules(t, dir); len(rules) != 0 {
+		t.Errorf("atomic batch must store nothing, got %d rules", len(rules))
+	}
+}
