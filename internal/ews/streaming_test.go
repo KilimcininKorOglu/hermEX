@@ -64,6 +64,55 @@ func TestGetStreamingEventsDelivers(t *testing.T) {
 	if !strings.Contains(body, ">Closed</ConnectionStatus>") {
 		t.Errorf("stream must end with ConnectionStatus Closed: %s", body)
 	}
+	// The XML declaration rides only the first chunk; continuations are decl-less.
+	if n := strings.Count(body, "<?xml"); n != 1 {
+		t.Errorf("XML declaration must appear once (first chunk only), got %d: %s", n, body)
+	}
+}
+
+// TestGetStreamingEventsMultiSub confirms several subscriptions stream over one
+// connection: each gets its own Notification in a continuation, and a change in
+// one subscription's scope does not surface under another. Multi-subscription is
+// the primary streaming case (Outlook batches all its folders onto one stream).
+func TestGetStreamingEventsMultiSub(t *testing.T) {
+	srv, ts, path := streamServer(t)
+	sess := &session{user: testUser, mailbox: path}
+	inbox := subscribe(t, srv, sess, subscribeInner(false, "inbox", "CreatedEvent"))
+	sent := subscribe(t, srv, sess, subscribeInner(false, "sentitems", "CreatedEvent"))
+	seedInbox(t, path, "for inbox sub")
+
+	body := streamPost(t, ts, []string{inbox, sent}, 1)
+	if !strings.Contains(body, inbox) || !strings.Contains(body, sent) {
+		t.Errorf("both subscriptions must appear in the stream (per-sub Notifications): %s", body)
+	}
+	if !strings.Contains(body, "CreatedEvent") {
+		t.Errorf("the inbox change must surface for the inbox subscription: %s", body)
+	}
+	// The change is in inbox scope only; the sentitems sub never sees a create —
+	// the demux guarantee (a whole-store sub instead would also see it).
+	if !strings.Contains(body, "StatusEvent") {
+		t.Errorf("the out-of-scope subscription must heartbeat, not carry the create: %s", body)
+	}
+}
+
+// TestGetStreamingEventsMixedValidInvalid confirms one invalid id among valid
+// ones is reported in ErrorSubscriptionIds while the valid subscriptions still
+// stream (an Error response class coexisting with a live stream).
+func TestGetStreamingEventsMixedValidInvalid(t *testing.T) {
+	srv, ts, path := streamServer(t)
+	sess := &session{user: testUser, mailbox: path}
+	id := subscribe(t, srv, sess, subscribeInner(true, "", "CreatedEvent"))
+
+	body := streamPost(t, ts, []string{id, "Zm9vYmFyMDA="}, 1)
+	if !strings.Contains(body, "ErrorInvalidSubscription") {
+		t.Errorf("the unknown id must be reported in ErrorSubscriptionIds: %s", body)
+	}
+	if !strings.Contains(body, "StatusEvent") {
+		t.Errorf("the valid subscription must keep streaming despite the invalid one: %s", body)
+	}
+	if !strings.Contains(body, ">Closed</ConnectionStatus>") {
+		t.Errorf("stream must still close at the window: %s", body)
+	}
 }
 
 // TestGetStreamingEventsHeartbeat confirms an idle stream emits StatusEvent
