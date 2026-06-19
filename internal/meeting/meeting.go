@@ -100,10 +100,15 @@ func Respond(st *objectstore.Store, accounts directory.Accounts, spool *relay.Sp
 	}
 
 	var calendarID int64
-	if response != ResponseDeclined {
-		if calendarID, err = file(st, req, tags, response, now); err != nil {
+	if response == ResponseDeclined {
+		// Declining takes the meeting off the calendar: remove any appointment a
+		// prior accept or tentative filed (the reference's doDecline deletes the
+		// calendar items matching the meeting's UID).
+		if err := removeAppointment(st, req, tags); err != nil {
 			return 0, err
 		}
+	} else if calendarID, err = file(st, req, tags, response, now); err != nil {
+		return 0, err
 	}
 	if send {
 		if err := notifyOrganizer(st, accounts, spool, sender, req, response); err != nil {
@@ -124,14 +129,29 @@ func file(st *objectstore.Store, req *oxcmail.Message, tags Tags, response int32
 	cal.Set(tags.State, asfMeeting|asfReceived)
 	cal.Set(tags.Busy, meetingBusy(response))
 
-	uid := ""
-	if v, ok := req.Props.Get(tags.UID); ok {
-		uid, _ = v.(string)
-	}
-	if existing, ok := findCalendarByUID(st, tags.UID, uid); ok {
+	if existing, ok := findCalendarByUID(st, tags.UID, uidOf(req.Props, tags)); ok {
 		return existing, st.ModifyMessageProperties(existing, cal)
 	}
 	return st.CreateMessage(int64(mapi.PrivateFIDCalendar), &oxcmail.Message{Props: cal})
+}
+
+// removeAppointment deletes the Calendar appointment a prior accept or tentative
+// filed for the meeting request, matched by its iCalendar UID. A request with no
+// filed appointment (or no UID) removes nothing.
+func removeAppointment(st *objectstore.Store, req *oxcmail.Message, tags Tags) error {
+	if existing, ok := findCalendarByUID(st, tags.UID, uidOf(req.Props, tags)); ok {
+		return st.DeleteObject(existing)
+	}
+	return nil
+}
+
+// uidOf reads the iCalendar UID a scheduling message carries, or "".
+func uidOf(props mapi.PropertyValues, tags Tags) string {
+	if v, ok := props.Get(tags.UID); ok {
+		s, _ := v.(string)
+		return s
+	}
+	return ""
 }
 
 // notifyOrganizer sends the organizer an iTIP REPLY for the response: the request is
