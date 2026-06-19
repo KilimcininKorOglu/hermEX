@@ -3,9 +3,11 @@ package relay
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/smtp"
+	"net/textproto"
 	"strings"
 	"time"
 
@@ -24,23 +26,30 @@ type Dialer func(host string) (net.Conn, error)
 
 // Worker drains the spool: it claims due recipients, delivers each over SMTP to
 // its domain's mail exchanger, and settles the attempt — Sent on success, Retry
-// after a failure. Permanent-failure bouncing and an attempt cap arrive with the
-// retry-policy slice; until then every failure is retried.
+// after a transient failure, or give up (settle and bounce) on a permanent
+// rejection or once attempts are exhausted.
 type Worker struct {
-	Spool    *Spool
-	HeloName string        // the name announced in EHLO; "localhost" if empty
-	Router   Router        // nil uses LookupMX
-	Dialer   Dialer        // nil dials the host on port 25
-	Backoff  time.Duration // delay before a failed recipient is retried
-	Batch    int           // max recipients claimed per pass; <=0 uses a default
+	Spool       *Spool
+	HeloName    string        // the name announced in EHLO; "localhost" if empty
+	Router      Router        // nil uses LookupMX
+	Dialer      Dialer        // nil dials the host on port 25
+	Backoff     time.Duration // base delay before a retry; doubles each attempt
+	MaxAttempts int           // attempts before giving up; <=0 uses a default
+	Batch       int           // max recipients claimed per pass; <=0 uses a default
+	// OnGiveUp, if set, is called when a recipient is abandoned (permanent
+	// rejection or attempts exhausted) just before it is settled, so the caller
+	// can notify the sender. cause is the failure that ended delivery.
+	OnGiveUp func(it Item, cause error)
 	Logger   *logging.Logger
 }
 
 const (
-	defaultBatch   = 64
-	defaultBackoff = 5 * time.Minute
-	dialTimeout    = 30 * time.Second
-	sessionTimeout = 5 * time.Minute
+	defaultBatch       = 64
+	defaultBackoff     = 5 * time.Minute
+	defaultMaxAttempts = 10
+	maxBackoff         = 6 * time.Hour
+	dialTimeout        = 30 * time.Second
+	sessionTimeout     = 5 * time.Minute
 )
 
 // Run drains the spool on every tick until ctx is cancelled. A scan error is
@@ -74,24 +83,70 @@ func (w *Worker) ProcessDue(now time.Time) (sent int, err error) {
 		return 0, err
 	}
 	for _, it := range items {
-		if e := w.deliver(it); e != nil {
-			backoff := w.Backoff
-			if backoff <= 0 {
-				backoff = defaultBackoff
+		e := w.deliver(it)
+		if e == nil {
+			if se := w.Spool.Sent(it.RecipientID); se != nil {
+				return sent, se
 			}
-			if re := w.Spool.Retry(it.RecipientID, now.Add(backoff), e.Error()); re != nil {
-				return sent, re
-			}
-			w.log(logging.LevelWarn, "relay.defer", it, e)
+			sent++
+			w.log(logging.LevelInfo, "relay.sent", it, nil)
 			continue
 		}
-		if e := w.Spool.Sent(it.RecipientID); e != nil {
-			return sent, e
+		// Give up on a permanent rejection or once attempts are exhausted; the
+		// sender is told (OnGiveUp) and the recipient settled. Otherwise defer with
+		// an exponential backoff so a transient outage is retried, not lost.
+		if isPermanent(e) || it.Attempts+1 >= w.maxAttempts() {
+			w.giveUp(it, e)
+			if fe := w.Spool.Fail(it.RecipientID); fe != nil {
+				return sent, fe
+			}
+			continue
 		}
-		sent++
-		w.log(logging.LevelInfo, "relay.sent", it, nil)
+		if re := w.Spool.Retry(it.RecipientID, now.Add(w.retryDelay(it.Attempts)), e.Error()); re != nil {
+			return sent, re
+		}
+		w.log(logging.LevelWarn, "relay.defer", it, e)
 	}
 	return sent, nil
+}
+
+// giveUp abandons a recipient: it logs loudly and notifies the sender via the
+// OnGiveUp hook (if any). The caller settles the recipient afterwards.
+func (w *Worker) giveUp(it Item, cause error) {
+	w.log(logging.LevelError, "relay.bounce", it, cause)
+	if w.OnGiveUp != nil {
+		w.OnGiveUp(it, cause)
+	}
+}
+
+func (w *Worker) maxAttempts() int {
+	if w.MaxAttempts > 0 {
+		return w.MaxAttempts
+	}
+	return defaultMaxAttempts
+}
+
+// retryDelay is the wait before the next attempt: the base backoff doubled once
+// per attempt already made, capped so it cannot overflow or grow without bound.
+func (w *Worker) retryDelay(attempts int) time.Duration {
+	base := w.Backoff
+	if base <= 0 {
+		base = defaultBackoff
+	}
+	d := base << attempts
+	if d <= 0 || d > maxBackoff {
+		return maxBackoff
+	}
+	return d
+}
+
+// isPermanent reports whether err is a permanent SMTP rejection (a 5xx reply),
+// which must not be retried. Network and 4xx errors are transient.
+func isPermanent(err error) bool {
+	if terr, ok := errors.AsType[*textproto.Error](err); ok {
+		return terr.Code >= 500 && terr.Code < 600
+	}
+	return false
 }
 
 // deliver resolves the recipient's domain to its mail exchangers and tries each

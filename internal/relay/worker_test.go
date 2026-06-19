@@ -16,8 +16,9 @@ import (
 // its envelope and body, standing in for a remote mail exchanger so the relay
 // path can be exercised end to end without the network.
 type recordingBackend struct {
-	mu   sync.Mutex
-	msgs []recordedMsg
+	mu      sync.Mutex
+	msgs    []recordedMsg
+	rcptErr error // when set, RCPT is refused (the server replies 5xx)
 }
 
 type recordedMsg struct {
@@ -42,7 +43,13 @@ type recordingSession struct {
 }
 
 func (s *recordingSession) Mail(from string) error { s.cur.from = from; return nil }
-func (s *recordingSession) Rcpt(to string) error   { s.cur.rcpt = append(s.cur.rcpt, to); return nil }
+func (s *recordingSession) Rcpt(to string) error {
+	if s.b.rcptErr != nil {
+		return s.b.rcptErr
+	}
+	s.cur.rcpt = append(s.cur.rcpt, to)
+	return nil
+}
 func (s *recordingSession) Data(r io.Reader) error {
 	raw, err := io.ReadAll(r)
 	if err != nil {
@@ -162,5 +169,75 @@ func TestWorkerRetriesTransientFailure(t *testing.T) {
 	}
 	if got := sink.recorded(); len(got) != 1 || got[0].rcpt[0] != "bob@remote" {
 		t.Fatalf("sink after retry = %v, want one message to bob@remote", got)
+	}
+}
+
+// TestWorkerBouncesPermanentFailure proves a permanent (5xx) rejection is not
+// retried: the recipient is abandoned at once, the sender is notified through
+// OnGiveUp, and the spool empties.
+func TestWorkerBouncesPermanentFailure(t *testing.T) {
+	sink, addr := startSink(t)
+	sink.rcptErr = fmt.Errorf("mailbox does not exist") // the sink replies 5xx to RCPT
+	sp := openSpool(t)
+	t0 := time.Unix(5_000_000, 0)
+	if err := sp.Enqueue("alice@local", []string{"bob@remote"}, []byte("raw\r\n"), t0); err != nil {
+		t.Fatal(err)
+	}
+
+	var bounced []Item
+	w := &Worker{
+		Spool:    sp,
+		Router:   func(string) ([]string, error) { return []string{"sink"}, nil },
+		Dialer:   func(string) (net.Conn, error) { return net.Dial("tcp", addr) },
+		OnGiveUp: func(it Item, _ error) { bounced = append(bounced, it) },
+	}
+
+	if sent, err := w.ProcessDue(t0); err != nil || sent != 0 {
+		t.Fatalf("permanent failure: sent=%d err=%v, want 0, nil", sent, err)
+	}
+	if len(bounced) != 1 || bounced[0].Recipient != "bob@remote" {
+		t.Fatalf("OnGiveUp fired %v, want once for bob@remote", bounced)
+	}
+	if due, _ := sp.Claim(t0, 10); len(due) != 0 {
+		t.Errorf("a permanently-failed recipient was left in the spool: %v", due)
+	}
+}
+
+// TestWorkerGivesUpAfterMaxAttempts proves a recipient that keeps failing
+// transiently is eventually abandoned rather than retried forever: with two
+// attempts allowed, the second failure bounces it.
+func TestWorkerGivesUpAfterMaxAttempts(t *testing.T) {
+	sp := openSpool(t)
+	t0 := time.Unix(6_000_000, 0)
+	if err := sp.Enqueue("alice@local", []string{"bob@remote"}, []byte("raw\r\n"), t0); err != nil {
+		t.Fatal(err)
+	}
+
+	var bounced []Item
+	w := &Worker{
+		Spool:       sp,
+		Backoff:     time.Minute,
+		MaxAttempts: 2,
+		Router:      func(string) ([]string, error) { return []string{"sink"}, nil },
+		Dialer:      func(string) (net.Conn, error) { return nil, fmt.Errorf("connection refused") },
+		OnGiveUp:    func(it Item, _ error) { bounced = append(bounced, it) },
+	}
+
+	// First attempt: transient failure, deferred.
+	if sent, _ := w.ProcessDue(t0); sent != 0 {
+		t.Fatal("first attempt should not deliver")
+	}
+	if len(bounced) != 0 {
+		t.Fatal("a recipient was abandoned before its attempts were exhausted")
+	}
+	// Second attempt, after the backoff: attempts are now exhausted, so it bounces.
+	if sent, _ := w.ProcessDue(t0.Add(time.Minute)); sent != 0 {
+		t.Fatal("second attempt should not deliver")
+	}
+	if len(bounced) != 1 || bounced[0].Recipient != "bob@remote" {
+		t.Fatalf("OnGiveUp fired %v, want once after attempts exhausted", bounced)
+	}
+	if due, _ := sp.Claim(t0.Add(time.Hour), 10); len(due) != 0 {
+		t.Errorf("an exhausted recipient was left in the spool: %v", due)
 	}
 }
