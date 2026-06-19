@@ -12,6 +12,7 @@ import (
 	"net/mail"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -23,6 +24,7 @@ import (
 	"hermex/internal/logging"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
+	"hermex/internal/relay"
 	"hermex/internal/serve"
 	"hermex/internal/smtp"
 	"hermex/internal/spooler"
@@ -64,6 +66,14 @@ func main() {
 	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
 
+	// The outbound relay spool holds external recipients of authenticated
+	// submissions until the relay worker delivers them. A single spool serves all
+	// users; it lives under the data root alongside the mailbox stores.
+	spool, err := relay.Open(filepath.Join(cfg.DataDir, "relay.sqlite3"))
+	if err != nil {
+		log.Fatalf("hermex-mta: open relay spool: %v", err)
+	}
+
 	addr := cfg.SMTPAddr
 	if addr == "" {
 		addr = ":25"
@@ -73,7 +83,7 @@ func main() {
 		log.Fatalf("hermex-mta: listen %s: %v", addr, err)
 	}
 
-	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Logger: logger}, Hostname: cfg.Hostname, Logger: logger}
+	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger}, Hostname: cfg.Hostname, Logger: logger}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()
 		if err != nil {
@@ -107,11 +117,22 @@ func main() {
 		ShutdownFn: func(context.Context) error { slCancel(); return nil },
 	}
 
+	// Drain the outbound relay spool: deliver each authenticated submission's
+	// external recipients to their mail exchangers, retrying transient failures.
+	// Like the send-later sweep this is a single always-on loop, cancelled on
+	// shutdown.
+	relayWorker := &relay.Worker{Spool: spool, HeloName: cfg.Hostname, Logger: logger}
+	rwCtx, rwCancel := context.WithCancel(context.Background())
+	relayLoop := lifecycle.Func{
+		StartFn:    func() error { relayWorker.Run(rwCtx, relayInterval); return nil },
+		ShutdownFn: func(context.Context) error { rwCancel(); return nil },
+	}
+
 	logger.Info(logging.System, "daemon.startup", logging.Fields{"daemon": "mta", "addr": addr})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{srv, sendLater}, logClose, db.Close); err != nil {
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{srv, sendLater, relayLoop}, spool.Close, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-mta: %v", err)
 	}
 }
@@ -120,6 +141,11 @@ func main() {
 // scheduled sends. A scheduled message is released at most one interval late, so
 // this bounds the send-time precision.
 const sendLaterInterval = 30 * time.Second
+
+// relayInterval is how often the relay worker scans the outbound spool. A freshly
+// submitted external message waits at most this long for its first delivery
+// attempt; deferred recipients wait for their own backoff regardless.
+const relayInterval = 15 * time.Second
 
 // runSendLater periodically sweeps every mailbox's Outbox, releasing scheduled
 // sends whose time has come, until ctx is cancelled. Exactly one process must run
