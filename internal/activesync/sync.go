@@ -117,9 +117,11 @@ func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node) (*wb
 
 	// Calendar collections take a separate path: their items are read from the
 	// object store (never the IMAP index) and versioned by change number, not IMAP
-	// flags. This increment streams server-side appointment changes; client-side
-	// calendar edits are a later increment, so its client commands are not applied.
+	// flags. The device's Change/Delete edits are applied first (folded into the
+	// snapshot so they are not echoed back), then server-side changes are streamed.
+	// Client-side adds (server-id mapping) and recurrence edits are later increments.
 	if folderID == int64(mapi.PrivateFIDCalendar) {
+		applyCalendarClientCommands(st, cstate, c)
 		cmds, more, err := calendarChanges(st, folderID, cstate, window)
 		if err != nil {
 			return nil, err

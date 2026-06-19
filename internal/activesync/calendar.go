@@ -165,6 +165,88 @@ func weekdayBitmask(days []string) int {
 	return mask
 }
 
+// parseEASCalTime parses MS-ASCAL's compact appointment time (YYYYMMDDThhmmssZ).
+func parseEASCalTime(s string) (time.Time, bool) {
+	if t, err := time.Parse("20060102T150405Z", s); err == nil {
+		return t.UTC(), true
+	}
+	return time.Time{}, false
+}
+
+// parseCalendarItem builds the appointment named properties from a device's
+// MS-ASCAL ApplicationData (start/end/subject/location/busy-status/all-day).
+// Recurrence is not reversed in this increment, so a client edit to a recurring
+// series rewrites only its scalar fields.
+func parseCalendarItem(st *objectstore.Store, data *wbxml.Node) (mapi.PropertyValues, error) {
+	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{
+		mapi.NameAppointmentStartWhole,
+		mapi.NameAppointmentEndWhole,
+		mapi.NameBusyStatus,
+		mapi.NameAppointmentLocation,
+		mapi.NameAppointmentSubType,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var props mapi.PropertyValues
+	if t, ok := parseEASCalTime(data.ChildText(wbxml.CalStartTime)); ok {
+		props = append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(ids[0], mapi.PtSysTime), Value: mapi.UnixToNTTime(t)})
+	}
+	if t, ok := parseEASCalTime(data.ChildText(wbxml.CalEndTime)); ok {
+		props = append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(ids[1], mapi.PtSysTime), Value: mapi.UnixToNTTime(t)})
+	}
+	if b := data.ChildText(wbxml.CalBusyStatus); b != "" {
+		if n, err := strconv.Atoi(b); err == nil {
+			props = append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(ids[2], mapi.PtLong), Value: int32(n)})
+		}
+	}
+	if loc := data.ChildText(wbxml.CalLocation); loc != "" {
+		props = append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(ids[3], mapi.PtUnicode), Value: loc})
+	}
+	if ad := data.ChildText(wbxml.CalAllDayEvent); ad != "" {
+		props = append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(ids[4], mapi.PtBoolean), Value: ad == "1"})
+	}
+	if subj := data.ChildText(wbxml.CalSubject); subj != "" {
+		props = append(props, mapi.TaggedPropVal{Tag: mapi.PrSubject, Value: subj})
+	}
+	return props, nil
+}
+
+// applyCalendarClientCommands applies a device's Change and Delete commands to the
+// calendar folder. A Change rewrites the appointment's scalar fields without
+// bumping the change number (SetMessageProperties), so it is not echoed back to
+// the device that made it. Client-side adds (which need a server-id mapping) and
+// recurrence edits are later increments.
+func applyCalendarClientCommands(st *objectstore.Store, cstate *collectionState, c *wbxml.Node) {
+	cmds := c.Child(wbxml.ASCommands)
+	if cmds == nil {
+		return
+	}
+	for _, cmd := range cmds.Children {
+		sid := cmd.ChildText(wbxml.ASServerID)
+		id, err := strconv.ParseInt(sid, 10, 64)
+		if err != nil {
+			continue
+		}
+		switch cmd.Tag {
+		case wbxml.ASChange:
+			data := cmd.Child(wbxml.ASData)
+			if data == nil {
+				continue
+			}
+			props, err := parseCalendarItem(st, data)
+			if err != nil || len(props) == 0 {
+				continue
+			}
+			_ = st.SetMessageProperties(id, props)
+		case wbxml.ASDelete:
+			if st.DeleteObject(id) == nil {
+				delete(cstate.Items, sid)
+			}
+		}
+	}
+}
+
 // bytesProp reads a PtBinary property as raw bytes.
 func bytesProp(pv mapi.PropertyValues, tag mapi.PropTag) ([]byte, bool) {
 	if v, ok := pv.Get(tag); ok {

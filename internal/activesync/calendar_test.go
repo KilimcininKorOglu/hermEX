@@ -108,6 +108,70 @@ func TestSyncCalendarStreamsAppointment(t *testing.T) {
 	}
 }
 
+// TestSyncCalendarClientEdits proves the calendar Sync path applies a device's
+// Change (persisted, and not echoed back to the device that made it) and Delete.
+func TestSyncCalendarClientEdits(t *testing.T) {
+	ts, dir := seededServer(t)
+	seedAppointment(t, dir, "Standup",
+		time.Date(2026, 6, 19, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 6, 19, 9, 30, 0, 0, time.UTC))
+	calID := strconv.FormatInt(int64(mapi.PrivateFIDCalendar), 10)
+	calReq := func(key string, cmds ...*wbxml.Node) *wbxml.Node {
+		coll := []*wbxml.Node{wbxml.Str(wbxml.ASSyncKey, key), wbxml.Str(wbxml.ASCollectionID, calID)}
+		if len(cmds) > 0 {
+			coll = append(coll, wbxml.Elem(wbxml.ASCommands, cmds...))
+		}
+		return wbxml.Elem(wbxml.ASSync, wbxml.Elem(wbxml.ASCollections, wbxml.Elem(wbxml.ASCollection, coll...)))
+	}
+
+	postCommand(t, ts, "Sync", calReq("0"))
+	_, root := postCommand(t, ts, "Sync", calReq("1"))
+	coll := respColl(t, root)
+	sid := coll.Child(wbxml.ASCommands).Children[0].ChildText(wbxml.ASServerID)
+	id, err := strconv.ParseInt(sid, 10, 64)
+	if err != nil {
+		t.Fatalf("bad server id %q", sid)
+	}
+
+	// Client Change: rename the appointment.
+	change := wbxml.Elem(wbxml.ASChange, wbxml.Str(wbxml.ASServerID, sid),
+		wbxml.Elem(wbxml.ASData, wbxml.Str(wbxml.CalSubject, "Renamed")))
+	_, root = postCommand(t, ts, "Sync", calReq(coll.ChildText(wbxml.ASSyncKey), change))
+	if adds, changes, _ := countCmds(respColl(t, root)); adds+changes != 0 {
+		t.Errorf("the client's change was echoed back: adds=%d changes=%d", adds, changes)
+	}
+	if got := storedSubject(t, dir, id); got != "Renamed" {
+		t.Errorf("stored subject = %q, want the client's edit Renamed", got)
+	}
+
+	// Client Delete: the appointment is removed.
+	del := wbxml.Elem(wbxml.ASDelete, wbxml.Str(wbxml.ASServerID, sid))
+	postCommand(t, ts, "Sync", calReq(respColl(t, root).ChildText(wbxml.ASSyncKey), del))
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar)); err != nil || len(objs) != 0 {
+		t.Errorf("calendar still has %d object(s) after the client delete (err %v)", len(objs), err)
+	}
+}
+
+// storedSubject reads a stored object's PR_SUBJECT.
+func storedSubject(t *testing.T, dir string, id int64) string {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	pv, err := st.GetMessageProperties(id, mapi.PrSubject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return stringProp(pv, mapi.PrSubject)
+}
+
 // seedAppointment stores one appointment in the mailbox's Calendar folder.
 func seedAppointment(t *testing.T, dir, subject string, start, end time.Time) {
 	t.Helper()
