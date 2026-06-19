@@ -22,6 +22,7 @@ const (
 	PageProvision       = 0x0E
 	PageAirSyncBase     = 0x11
 	PageSettings        = 0x12
+	PageItemOperations  = 0x14
 	PageComposeMail     = 0x15
 )
 
@@ -194,4 +195,14 @@ const (
 	CMClientID        Tag = 0x1511
 	CMStatus          Tag = 0x1512
 	CMAccountID       Tag = 0x1513
+)
+
+// ItemOperations (code page 0x14, ActiveSync 12.0+).
+const (
+	IOItemOperations Tag = 0x1405
+	IOFetch          Tag = 0x1406
+	IOStore          Tag = 0x1407
+	IOProperties     Tag = 0x140B
+	IOStatus         Tag = 0x140D
+	IOResponse       Tag = 0x140E
 )

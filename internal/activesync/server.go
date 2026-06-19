@@ -114,6 +114,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handlePing(w, r, sess)
 	case "Settings":
 		s.handleSettings(w, r, sess)
+	case "ItemOperations":
+		s.handleItemOperations(w, r, sess)
 	default:
 		http.Error(w, "command not implemented: "+sess.req.cmd, http.StatusNotImplemented)
 	}
