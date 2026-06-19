@@ -18,6 +18,7 @@ type Directory interface {
 	Authenticate(user, password string) (mailboxPath string, ok bool)
 	UserID(login string) (id int64, ok bool, err error)
 	AdminRoles(userID int64) ([]directory.AdminRole, error)
+	ListDomains() ([]directory.DomainInfo, error)
 }
 
 const (
@@ -48,6 +49,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/login", s.handleLogin)
 	mux.Handle("POST /admin/logout", s.protect(http.HandlerFunc(s.handleLogout)))
 	mux.Handle("GET /admin/whoami", s.protect(http.HandlerFunc(s.handleWhoami)))
+	mux.Handle("GET /admin/domains", s.protect(s.requireSystem(s.handleListDomains)))
 	return mux
 }
 

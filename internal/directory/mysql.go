@@ -294,6 +294,32 @@ SELECT u.username
 	return out, rows.Err()
 }
 
+// DomainInfo is a domain's administrative summary.
+type DomainInfo struct {
+	ID     int64
+	Name   string
+	OrgID  int64
+	Status int
+}
+
+// ListDomains returns every domain, ordered by name, for the admin API.
+func (d *SQLDirectory) ListDomains() ([]DomainInfo, error) {
+	rows, err := d.db.Query(`SELECT id, domainname, org_id, domain_status FROM domains ORDER BY domainname`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DomainInfo
+	for rows.Next() {
+		var di DomainInfo
+		if err := rows.Scan(&di.ID, &di.Name, &di.OrgID, &di.Status); err != nil {
+			return nil, err
+		}
+		out = append(out, di)
+	}
+	return out, rows.Err()
+}
+
 // CreateDomain inserts a domain and returns its id, creating its homedir on disk.
 func (d *SQLDirectory) CreateDomain(domainname, homedir string) (int64, error) {
 	res, err := d.db.Exec(

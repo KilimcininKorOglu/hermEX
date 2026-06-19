@@ -12,9 +12,10 @@ import (
 
 // fakeDir is a scripted Directory for the admin server tests.
 type fakeDir struct {
-	authOK bool
-	uid    int64
-	roles  []directory.AdminRole
+	authOK  bool
+	uid     int64
+	roles   []directory.AdminRole
+	domains []directory.DomainInfo
 }
 
 func (f *fakeDir) Authenticate(_, _ string) (string, bool) {
@@ -25,6 +26,7 @@ func (f *fakeDir) Authenticate(_, _ string) (string, bool) {
 }
 func (f *fakeDir) UserID(_ string) (int64, bool, error)            { return f.uid, f.uid != 0, nil }
 func (f *fakeDir) AdminRoles(int64) ([]directory.AdminRole, error) { return f.roles, nil }
+func (f *fakeDir) ListDomains() ([]directory.DomainInfo, error)    { return f.domains, nil }
 
 func adminServer(t *testing.T, d Directory) *httptest.Server {
 	t.Helper()
