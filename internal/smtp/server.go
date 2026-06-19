@@ -171,15 +171,15 @@ func (s *Server) handle(conn net.Conn) {
 			}
 			reply(w, 354, "end data with <CR><LF>.<CR><LF>")
 			if err := s.consumeData(tp, sess); err != nil {
+				event(logging.LevelWarn, "message.reject", logging.Fields{"recipients": rcptCount, "reason": err.Error()})
 				if errors.Is(err, errTooLarge) {
 					reply(w, 552, "message exceeds size limit")
 				} else {
 					reply(w, 554, "transaction failed: "+err.Error())
 				}
-				event(logging.LevelWarn, "message.reject", logging.Fields{"recipients": rcptCount, "reason": err.Error()})
 			} else {
-				reply(w, 250, "OK")
 				event(logging.LevelInfo, "message.accept", logging.Fields{"recipients": rcptCount})
+				reply(w, 250, "OK")
 			}
 			hasFrom, rcptCount = false, 0
 		case "RSET":
