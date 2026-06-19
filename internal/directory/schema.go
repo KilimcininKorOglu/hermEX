@@ -57,6 +57,21 @@ var directoryDDL = []string{
 		CONSTRAINT altnames_user_fk FOREIGN KEY (user_id)
 			REFERENCES users (id) ON DELETE CASCADE ON UPDATE CASCADE
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+	// ldap_config holds one LDAP/AD bind-to-verify configuration per organization
+	// (domains.org_id). A user whose externid is set authenticates against their
+	// org's directory here; users with no externid stay on local crypt. Keyed by
+	// org so a multi-tenant deployment points each org at its own directory.
+	`CREATE TABLE IF NOT EXISTS ldap_config (
+		org_id        INT UNSIGNED NOT NULL,
+		uri           VARCHAR(255) NOT NULL DEFAULT '',
+		start_tls     TINYINT NOT NULL DEFAULT 0,
+		bind_dn       VARCHAR(255) NOT NULL DEFAULT '',
+		bind_password VARCHAR(255) NOT NULL DEFAULT '',
+		base_dn       VARCHAR(255) NOT NULL DEFAULT '',
+		username_attr VARCHAR(64) NOT NULL DEFAULT 'mail',
+		PRIMARY KEY (org_id)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 }
 
 // address_status packing: low nibble = user status, bits 4-5 = domain status.
