@@ -23,6 +23,7 @@ import (
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/mta"
+	"hermex/internal/mtasts"
 	"hermex/internal/objectstore"
 	"hermex/internal/relay"
 	"hermex/internal/serve"
@@ -126,6 +127,10 @@ func main() {
 		Spool:    spool,
 		HeloName: cfg.Hostname,
 		Logger:   logger,
+		// Honor recipients' published MTA-STS policies (RFC 8461): a domain in
+		// enforce mode gets validated TLS to a policy-listed MX or no delivery. This
+		// only changes behavior for domains that opt in by publishing a policy.
+		Policy: (&mtasts.Resolver{}).Lookup,
 		// When the worker abandons an external recipient, return a non-delivery
 		// report to the (local, authenticated) sender through the local delivery
 		// path, so a failed send is reported rather than lost silently.

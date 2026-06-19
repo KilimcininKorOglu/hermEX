@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"hermex/internal/mtasts"
 	hsmtp "hermex/internal/smtp"
 )
 
@@ -119,6 +120,58 @@ func TestWorkerDeliversToSink(t *testing.T) {
 	}
 	if due, _ := sp.Claim(t0, 10); len(due) != 0 {
 		t.Errorf("spool not drained after delivery: %v", due)
+	}
+}
+
+// TestWorkerMTASTSEnforceSkipsUnlistedMX proves an enforce-mode policy excludes a
+// mail exchanger it does not list: the worker never opens a session to an MX
+// outside the policy, which is the downgrade resistance MTA-STS exists for.
+func TestWorkerMTASTSEnforceSkipsUnlistedMX(t *testing.T) {
+	sink, addr := startSink(t)
+	sp := openSpool(t)
+	t0 := time.Unix(3_000_000, 0)
+	if err := sp.Enqueue("alice@local", []string{"bob@remote"}, []byte("hi\r\n"), t0); err != nil {
+		t.Fatal(err)
+	}
+	w := &Worker{
+		Spool:  sp,
+		Router: func(string) ([]string, error) { return []string{"sink"}, nil },
+		Dialer: func(string) (net.Conn, error) { return net.Dial("tcp", addr) },
+		Policy: func(string) (*mtasts.Policy, error) {
+			return &mtasts.Policy{Mode: mtasts.ModeEnforce, MX: []string{"approved.mx"}}, nil
+		},
+	}
+	if _, err := w.ProcessDue(t0); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+	if got := len(sink.recorded()); got != 0 {
+		t.Errorf("delivered to an unlisted MX %d time(s), want 0", got)
+	}
+}
+
+// TestWorkerMTASTSEnforceRequiresTLS proves that to a policy-listed MX offering no
+// STARTTLS, enforce mode refuses to deliver in the clear (the sink here advertises
+// no STARTTLS, so a delivered message would mean a downgrade).
+func TestWorkerMTASTSEnforceRequiresTLS(t *testing.T) {
+	sink, addr := startSink(t)
+	sp := openSpool(t)
+	t0 := time.Unix(3_000_000, 0)
+	if err := sp.Enqueue("alice@local", []string{"bob@remote"}, []byte("hi\r\n"), t0); err != nil {
+		t.Fatal(err)
+	}
+	w := &Worker{
+		Spool:  sp,
+		Router: func(string) ([]string, error) { return []string{"sink"}, nil },
+		Dialer: func(string) (net.Conn, error) { return net.Dial("tcp", addr) },
+		Policy: func(string) (*mtasts.Policy, error) {
+			return &mtasts.Policy{Mode: mtasts.ModeEnforce, MX: []string{"sink"}}, nil
+		},
+	}
+	if _, err := w.ProcessDue(t0); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+	if got := len(sink.recorded()); got != 0 {
+		t.Errorf("delivered in the clear to a STARTTLS-less MX %d time(s), want 0", got)
 	}
 }
 

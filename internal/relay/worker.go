@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"hermex/internal/logging"
+	"hermex/internal/mtasts"
 )
 
 // Router resolves a recipient domain to the mail exchangers to try, in priority
@@ -41,6 +42,12 @@ type Worker struct {
 	// can notify the sender. cause is the failure that ended delivery.
 	OnGiveUp func(it Item, cause error)
 	Logger   *logging.Logger
+	// Policy returns the MTA-STS policy for a recipient domain (nil, nil when the
+	// domain publishes none); nil disables MTA-STS, leaving every delivery on
+	// opportunistic STARTTLS. An enforce-mode policy makes TLS to a policy-matched
+	// mail exchanger mandatory and certificate-validated, and excludes any MX host
+	// the policy does not list.
+	Policy func(domain string) (*mtasts.Policy, error)
 }
 
 const (
@@ -172,18 +179,37 @@ func (w *Worker) deliver(it Item) error {
 	if len(hosts) == 0 {
 		return fmt.Errorf("no mail exchanger for %s", domain)
 	}
+	// Look up the domain's MTA-STS policy once. A lookup failure does not block
+	// mail — it falls back to opportunistic TLS (the pre-MTA-STS behaviour); the
+	// resolver's cache is what carries a published policy through a transient
+	// policy-host outage, so this fallback only fires before a policy is ever seen.
+	var pol *mtasts.Policy
+	if w.Policy != nil {
+		if pol, err = w.Policy(domain); err != nil {
+			w.log(logging.LevelWarn, "mtasts.lookup", it, err)
+			pol = nil
+		}
+	}
+	enforce := pol != nil && pol.Mode == mtasts.ModeEnforce
 	var lastErr error
 	for _, host := range hosts {
-		if lastErr = w.send(host, it); lastErr == nil {
+		// In enforce mode, deliver only to a mail exchanger the policy lists.
+		if enforce && !pol.MatchesMX(host) {
+			lastErr = fmt.Errorf("mtasts: %s is not listed in the enforce policy for %s", host, domain)
+			continue
+		}
+		if lastErr = w.send(host, it, enforce); lastErr == nil {
 			return nil
 		}
 	}
 	return lastErr
 }
 
-// send delivers one message to one mail exchanger over SMTP, upgrading to TLS
-// opportunistically.
-func (w *Worker) send(host string, it Item) error {
+// send delivers one message to one mail exchanger over SMTP. When requireTLS is
+// set (the recipient's MTA-STS policy is in enforce mode and this host matched
+// it), STARTTLS is mandatory and the certificate is validated; otherwise TLS is
+// opportunistic.
+func (w *Worker) send(host string, it Item, requireTLS bool) error {
 	dial := w.Dialer
 	if dial == nil {
 		dial = dialPort25
@@ -203,14 +229,17 @@ func (w *Worker) send(host string, it Item) error {
 	if err := c.Hello(w.heloName()); err != nil {
 		return err
 	}
-	// Opportunistic STARTTLS (RFC 7435): encrypt when the server advertises it,
-	// accepting any certificate — the alternative is cleartext, so encryption
-	// without authentication is strictly better. Strict verification via
-	// DANE/MTA-STS is a later refinement.
+	// MTA-STS enforce (RFC 8461): the certificate is validated against host (which
+	// already matched the policy), and a server that does not offer STARTTLS is
+	// refused rather than used in the clear. Otherwise STARTTLS is opportunistic
+	// (RFC 7435): encrypt when advertised, accepting any certificate, since the
+	// alternative is cleartext and encryption without authentication is still better.
 	if ok, _ := c.Extension("STARTTLS"); ok {
-		if err := c.StartTLS(&tls.Config{ServerName: host, InsecureSkipVerify: true}); err != nil {
+		if err := c.StartTLS(&tls.Config{ServerName: host, InsecureSkipVerify: !requireTLS}); err != nil {
 			return err
 		}
+	} else if requireTLS {
+		return fmt.Errorf("mtasts: %s requires STARTTLS but %s does not offer it", domainPart(it.Recipient), host)
 	}
 	if err := c.Mail(it.From); err != nil {
 		return err
