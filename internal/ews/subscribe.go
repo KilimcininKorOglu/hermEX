@@ -301,7 +301,7 @@ func (s *Server) getEvents(id, user string) (getEventsResponseMessage, error) {
 	notif := &notification{SubscriptionID: id, Events: events}
 	if len(events) == 0 {
 		// An empty queue still carries a single StatusEvent (the heartbeat).
-		notif.Events = []notifEvent{{XMLName: xml.Name{Space: nsTypes, Local: "StatusEvent"}}}
+		notif.Events = []notifEvent{statusEvent()}
 	}
 	return getEventsResponseMessage{ResponseClass: "Success", ResponseCode: "NoError", Notification: notif}, nil
 }

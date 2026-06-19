@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"hermex/internal/directory"
 	"hermex/internal/logging"
@@ -31,6 +32,12 @@ type Server struct {
 	subMu  sync.Mutex
 	subs   map[string]*ewsSubscription
 	subSeq uint32 // monotonic SubscriptionId key counter (0 reserved)
+
+	// Streaming-notification cadence and lifetime. Both zero in production: the
+	// interval falls back to the default continuation cadence and the lifetime to
+	// the request's ConnectionTimeout. Tests set them small to drive the loop fast.
+	streamInterval time.Duration
+	streamWindow   time.Duration
 }
 
 // NewServer builds an EWS server backed by the directory for authentication and

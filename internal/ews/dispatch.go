@@ -66,6 +66,10 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleUnsubscribe(w, inner, sess)
 	case "GetEvents":
 		s.handleGetEvents(w, inner, sess)
+	case "GetStreamingEvents":
+		// Streaming holds the connection open and writes chunked continuations, so
+		// it needs the request (its context signals client disconnect).
+		s.handleGetStreamingEvents(w, r, inner, sess)
 	default:
 		writeSOAPFault(w, "ErrorInvalidRequest", "unsupported operation: "+op)
 	}
