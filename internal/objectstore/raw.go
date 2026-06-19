@@ -53,10 +53,16 @@ func (s *Store) GetMessageRaw(folderID int64, uid uint32) (raw []byte, err error
 // RFC822.SIZE matches the bytes now served (a regenerated message uses fresh
 // MIME boundaries and may differ in length from any earlier rendering).
 func (s *Store) regenerateEML(messageID int64, mid string) ([]byte, error) {
-	// A preserved S/MIME original is served verbatim: re-synthesizing it would
-	// destroy the signature or envelope, so it is never regenerated via Export.
-	if props, err := s.GetMessageProperties(messageID, mapi.PrSmimeOriginal); err == nil {
-		if v, ok := props.Get(mapi.PrSmimeOriginal); ok {
+	// A preserved original — an S/MIME message, or a scheduling message whose
+	// text/calendar body re-export would demote to an attachment — is served
+	// verbatim: re-synthesizing it would destroy the signature, the envelope, or the
+	// invitation, so it is never regenerated via Export.
+	for _, tag := range []mapi.PropTag{mapi.PrSmimeOriginal, mapi.PrScheduleOriginal} {
+		props, err := s.GetMessageProperties(messageID, tag)
+		if err != nil {
+			continue
+		}
+		if v, ok := props.Get(tag); ok {
 			if orig, ok := v.([]byte); ok && len(orig) > 0 {
 				if err := s.writeEML(mid, orig); err != nil {
 					return nil, err

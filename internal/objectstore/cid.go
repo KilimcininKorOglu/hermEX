@@ -30,7 +30,7 @@ var cidPropTags = []mapi.PropTag{
 	mapi.PrHTML, mapi.PrRTFCompressed,
 	mapi.PrTransportMessageHeaders, mapi.PrTransportMessageHeadersA,
 	mapi.PrAttachDataBin, mapi.PrAttachDataObj,
-	mapi.PrSmimeOriginal, mapi.PrIcalOriginal,
+	mapi.PrSmimeOriginal, mapi.PrIcalOriginal, mapi.PrScheduleOriginal,
 }
 
 // isCIDProp reports whether a property value is offloaded to a content file

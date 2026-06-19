@@ -101,6 +101,13 @@ const (
 	// strategy as PrSmimeOriginal). Offloaded to a content file like other large
 	// content. Non-recurring events do not set this and round-trip through Export.
 	PrIcalOriginal = PropTag(0x67750102) // PtBinary
+	// PrScheduleOriginal is the provider-defined message property (0x6776) holding
+	// the original wire bytes of a delivered scheduling message (a meeting request,
+	// response, or cancellation). The store serves these verbatim: re-synthesizing
+	// through oxcmail.Export would demote the text/calendar invitation from a body
+	// alternative to an attachment. Offloaded to a content file like other large
+	// content. (Same strategy as PrSmimeOriginal.)
+	PrScheduleOriginal = PropTag(0x67760102) // PtBinary
 )
 
 // Message envelope property tags (MS-OXCMAIL / MS-OXOMSG): the standard

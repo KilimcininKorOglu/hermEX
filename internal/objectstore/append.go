@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"hermex/internal/mapi"
@@ -11,6 +12,16 @@ import (
 	"hermex/internal/oxcmail"
 	"hermex/internal/smime"
 )
+
+// isSchedulingMessage reports whether a message is an iTIP scheduling message — a
+// meeting request, response, or cancellation, by its IPM.Schedule message class.
+// Such a message carries its invitation as a text/calendar body that re-export
+// would demote to an attachment, so the store preserves it verbatim.
+func isSchedulingMessage(msg *oxcmail.Message) bool {
+	v, _ := msg.Props.Get(mapi.PrMessageClass)
+	class, _ := v.(string)
+	return strings.HasPrefix(class, "IPM.Schedule")
+}
 
 // MessageInfo is the per-message metadata IMAP and POP3 need without loading
 // the full message body.
@@ -74,18 +85,27 @@ func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time
 	}
 	mid := midString(uint64(eid))
 
-	// S/MIME messages must be served byte-for-byte: oxcmail.Export rebuilds the
-	// MIME tree, which invalidates a signature and turns an envelope into plain
-	// multipart/mixed (verified). For those, preserve the arrival bytes on the
-	// message and serve them verbatim; every other message is re-synthesized.
+	// Some messages must be served byte-for-byte rather than re-synthesized:
+	// oxcmail.Export rebuilds the MIME tree, which invalidates an S/MIME signature
+	// (turning an envelope into plain multipart/mixed) and demotes a meeting
+	// invitation's text/calendar body to an attachment. For those, preserve the
+	// arrival bytes on the message and serve them verbatim; every other message is
+	// re-synthesized.
 	eml := raw
-	if smime.IsSMIME(raw) {
+	switch {
+	case smime.IsSMIME(raw):
 		if err := s.SetMessageProperties(eid, mapi.PropertyValues{
 			{Tag: mapi.PrSmimeOriginal, Value: raw},
 		}); err != nil {
 			return MessageInfo{}, err
 		}
-	} else {
+	case isSchedulingMessage(msg):
+		if err := s.SetMessageProperties(eid, mapi.PropertyValues{
+			{Tag: mapi.PrScheduleOriginal, Value: raw},
+		}); err != nil {
+			return MessageInfo{}, err
+		}
+	default:
 		eml, err = oxcmail.Export(msg, resolver)
 		if err != nil {
 			return MessageInfo{}, fmt.Errorf("objectstore: export: %w", err)
