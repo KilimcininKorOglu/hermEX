@@ -36,7 +36,14 @@ func (s *Server) handleItemOperations(w http.ResponseWriter, r *http.Request, se
 
 	var fetches []*wbxml.Node
 	for _, op := range root.Children {
-		if op.Tag == wbxml.IOFetch {
+		if op.Tag != wbxml.IOFetch {
+			continue
+		}
+		// A Fetch carrying a FileReference retrieves an attachment; one with a
+		// collection and server id retrieves the message itself.
+		if ref := op.ChildText(wbxml.ABFileReference); ref != "" {
+			fetches = append(fetches, fetchAttachment(st, ref))
+		} else {
 			fetches = append(fetches, fetchMessage(st, op))
 		}
 	}
@@ -74,4 +81,39 @@ func fetchMessage(st *objectstore.Store, fetch *wbxml.Node) *wbxml.Node {
 				wbxml.Str(wbxml.ABType, "4"),
 				wbxml.Str(wbxml.ABEstimatedDataSize, strconv.Itoa(len(raw))),
 				wbxml.Opaque(wbxml.ABData, raw))))
+}
+
+// fetchAttachment resolves one Fetch by FileReference to an attachment's decoded
+// bytes, returning its content type and data. The FileReference echoes the
+// request so the client can match the response; a reference that does not resolve
+// to an existing attachment reports a per-Fetch error status with no data.
+func fetchAttachment(st *objectstore.Store, ref string) *wbxml.Node {
+	collID, serverID, index, ok := parseFileRef(ref)
+	folderID, ferr := strconv.ParseInt(collID, 10, 64)
+	uid64, uerr := strconv.ParseUint(serverID, 10, 32)
+	if !ok || ferr != nil || uerr != nil {
+		return attachmentError(ref, ioStatusProtocol)
+	}
+	raw, err := st.GetMessageRaw(folderID, uint32(uid64))
+	if err != nil {
+		return attachmentError(ref, ioStatusConvFail)
+	}
+	data, contentType, ok := attachmentContent(raw, index)
+	if !ok {
+		return attachmentError(ref, ioStatusConvFail)
+	}
+	return wbxml.Elem(wbxml.IOFetch,
+		wbxml.Str(wbxml.IOStatus, ioStatusSuccess),
+		wbxml.Str(wbxml.ABFileReference, ref),
+		wbxml.Elem(wbxml.IOProperties,
+			wbxml.Str(wbxml.ABContentType, contentType),
+			wbxml.Opaque(wbxml.IOData, data)))
+}
+
+// attachmentError builds an error reply for one attachment Fetch, echoing the
+// FileReference so the client can match it.
+func attachmentError(ref, status string) *wbxml.Node {
+	return wbxml.Elem(wbxml.IOFetch,
+		wbxml.Str(wbxml.IOStatus, status),
+		wbxml.Str(wbxml.ABFileReference, ref))
 }

@@ -276,6 +276,7 @@ const (
 	IOFetch          Tag = 0x1406
 	IOStore          Tag = 0x1407
 	IOProperties     Tag = 0x140B
+	IOData           Tag = 0x140C
 	IOStatus         Tag = 0x140D
 	IOResponse       Tag = 0x140E
 )

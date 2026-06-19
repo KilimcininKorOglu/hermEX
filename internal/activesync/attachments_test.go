@@ -100,3 +100,63 @@ func TestSyncNoAttachmentsWhenPlain(t *testing.T) {
 		t.Error("a plain message must expose no Attachments element")
 	}
 }
+
+// TestItemOperationsFetchAttachment proves the FileReference a Sync exposed
+// fetches the attachment's decoded content and content type through
+// ItemOperations.
+func TestItemOperationsFetchAttachment(t *testing.T) {
+	ts, dir := seededServer(t)
+	seedInboxAttachment(t, dir)
+	postCommand(t, ts, "Sync", syncReq("0", ""))
+	_, sync := postCommand(t, ts, "Sync", syncReq("1", ""))
+	att := respColl(t, sync).Child(wbxml.ASCommands).Child(wbxml.ASAdd).
+		Child(wbxml.ASData).Child(wbxml.ABAttachments).Child(wbxml.ABAttachment)
+	ref := att.ChildText(wbxml.ABFileReference)
+	if ref == "" {
+		t.Fatal("Sync exposed no FileReference to fetch")
+	}
+
+	req := wbxml.Elem(wbxml.IOItemOperations,
+		wbxml.Elem(wbxml.IOFetch,
+			wbxml.Str(wbxml.IOStore, "Mailbox"),
+			wbxml.Str(wbxml.ABFileReference, ref)))
+	_, root := postCommand(t, ts, "ItemOperations", req)
+
+	fetch := root.Child(wbxml.IOResponse).Child(wbxml.IOFetch)
+	if s := fetch.ChildText(wbxml.IOStatus); s != "1" {
+		t.Fatalf("Fetch Status = %q, want 1", s)
+	}
+	if fetch.ChildText(wbxml.ABFileReference) != ref {
+		t.Error("Fetch did not echo the FileReference")
+	}
+	props := fetch.Child(wbxml.IOProperties)
+	if ct := props.ChildText(wbxml.ABContentType); ct != "text/plain" {
+		t.Errorf("ContentType = %q, want text/plain", ct)
+	}
+	data := props.Child(wbxml.IOData)
+	got := ""
+	if data != nil {
+		got = string(data.Opaque)
+	}
+	if got != "hello world" {
+		t.Errorf("attachment data = %q, want %q", got, "hello world")
+	}
+}
+
+// TestItemOperationsFetchBadReference proves a malformed FileReference reports a
+// per-Fetch error status and still echoes the reference.
+func TestItemOperationsFetchBadReference(t *testing.T) {
+	ts, _ := seededServer(t)
+
+	req := wbxml.Elem(wbxml.IOItemOperations,
+		wbxml.Elem(wbxml.IOFetch, wbxml.Str(wbxml.ABFileReference, "not-a-valid-ref")))
+	_, root := postCommand(t, ts, "ItemOperations", req)
+
+	fetch := root.Child(wbxml.IOResponse).Child(wbxml.IOFetch)
+	if s := fetch.ChildText(wbxml.IOStatus); s == "1" {
+		t.Errorf("Fetch of a malformed reference reported success")
+	}
+	if fetch.ChildText(wbxml.ABFileReference) != "not-a-valid-ref" {
+		t.Error("error Fetch did not echo the FileReference")
+	}
+}
