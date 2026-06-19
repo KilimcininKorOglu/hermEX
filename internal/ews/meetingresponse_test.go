@@ -10,6 +10,7 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
+	"hermex/internal/meeting"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcical"
 	"hermex/internal/oxews"
@@ -111,16 +112,16 @@ func TestMeetingResponseAccept(t *testing.T) {
 	if len(cal) != 1 {
 		t.Fatalf("calendar = %d items, want 1 (accepted appointment)", len(cal))
 	}
-	if busy, ok := calendarLong(t, st, cal[0].ID, mapi.NameBusyStatus); !ok || busy != busyBusy {
-		t.Errorf("appointment busy = %d (ok=%v), want %d (busy)", busy, ok, busyBusy)
+	if busy, ok := calendarLong(t, st, cal[0].ID, mapi.NameBusyStatus); !ok || busy != int32(2) {
+		t.Errorf("appointment busy = %d (ok=%v), want %d (busy)", busy, ok, int32(2))
 	}
-	if resp, ok := calendarLong(t, st, cal[0].ID, mapi.NameResponseStatus); !ok || resp != respAccepted {
-		t.Errorf("appointment response = %d (ok=%v), want %d (accepted)", resp, ok, respAccepted)
+	if resp, ok := calendarLong(t, st, cal[0].ID, mapi.NameResponseStatus); !ok || resp != meeting.ResponseAccepted {
+		t.Errorf("appointment response = %d (ok=%v), want %d (accepted)", resp, ok, meeting.ResponseAccepted)
 	}
 	// the request itself is stamped responded
 	reqID := decodeMID(t, itemID)
-	if resp, ok := calendarLong(t, st, reqID, mapi.NameResponseStatus); !ok || resp != respAccepted {
-		t.Errorf("request response stamp = %d (ok=%v), want %d (accepted)", resp, ok, respAccepted)
+	if resp, ok := calendarLong(t, st, reqID, mapi.NameResponseStatus); !ok || resp != meeting.ResponseAccepted {
+		t.Errorf("request response stamp = %d (ok=%v), want %d (accepted)", resp, ok, meeting.ResponseAccepted)
 	}
 }
 
@@ -147,8 +148,8 @@ func TestMeetingResponseDecline(t *testing.T) {
 	if len(cal) != 0 {
 		t.Errorf("calendar = %d items, want 0 (a declined meeting files no appointment)", len(cal))
 	}
-	if resp, ok := calendarLong(t, st, decodeMID(t, itemID), mapi.NameResponseStatus); !ok || resp != respDeclined {
-		t.Errorf("request response stamp = %d (ok=%v), want %d (declined)", resp, ok, respDeclined)
+	if resp, ok := calendarLong(t, st, decodeMID(t, itemID), mapi.NameResponseStatus); !ok || resp != meeting.ResponseDeclined {
+		t.Errorf("request response stamp = %d (ok=%v), want %d (declined)", resp, ok, meeting.ResponseDeclined)
 	}
 }
 
@@ -179,8 +180,8 @@ func TestMeetingResponseTentativeDedup(t *testing.T) {
 	if len(cal) != 1 {
 		t.Fatalf("calendar = %d items, want 1 (re-response updates, not duplicates)", len(cal))
 	}
-	if busy, ok := calendarLong(t, st, cal[0].ID, mapi.NameBusyStatus); !ok || busy != busyBusy {
-		t.Errorf("updated appointment busy = %d, want %d (the later accept)", busy, busyBusy)
+	if busy, ok := calendarLong(t, st, cal[0].ID, mapi.NameBusyStatus); !ok || busy != int32(2) {
+		t.Errorf("updated appointment busy = %d, want %d (the later accept)", busy, int32(2))
 	}
 }
 
