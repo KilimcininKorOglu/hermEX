@@ -32,7 +32,7 @@ const dateLayout = "Mon, 02 Jan 2006 15:04:05 -0700"
 // property set carries no named properties).
 func Export(msg *Message, opt Options) ([]byte, error) {
 	var b bytes.Buffer
-	writeMailHead(&b, msg, opt.GenerateMessageID)
+	writeMailHead(&b, msg)
 
 	// Separate inline (HTML-referenced) attachments from regular ones: inline
 	// images join the HTML body in a multipart/related, regular attachments wrap
@@ -277,7 +277,7 @@ func encodeBase64(data []byte) []byte {
 // writeMailHead synthesizes the message header block (no trailing blank line;
 // the body writer appends the content headers and the separator), following the
 // header order of the MS-OXCMAIL export path.
-func writeMailHead(b *bytes.Buffer, msg *Message, generateMessageID bool) {
+func writeMailHead(b *bytes.Buffer, msg *Message) {
 	writeField(b, "MIME-Version", "1.0")
 
 	// From carries the sent-representing identity.
@@ -333,10 +333,6 @@ func writeMailHead(b *bytes.Buffer, msg *Message, generateMessageID bool) {
 	}
 	if id := propString(msg.Props, mapi.PrInternetMessageID); id != "" {
 		writeField(b, "Message-ID", id)
-	} else if generateMessageID {
-		if id := newMessageID(msg.Props); id != "" {
-			writeField(b, "Message-ID", id)
-		}
 	}
 	if refs := propString(msg.Props, mapi.PrInternetReferences); refs != "" {
 		writeField(b, "References", refs)
@@ -346,12 +342,24 @@ func writeMailHead(b *bytes.Buffer, msg *Message, generateMessageID bool) {
 	}
 }
 
+// EnsureMessageID assigns PR_INTERNET_MESSAGE_ID to an originating message that
+// has none, so the transmitted message carries an RFC 5322 Message-ID. A
+// submission path calls it before Export, the way the reference assigns the id on
+// the message rather than synthesizing it during serialization — Export itself
+// only emits a present id. A message that already has one is left unchanged.
+func EnsureMessageID(props *mapi.PropertyValues) {
+	if propString(*props, mapi.PrInternetMessageID) != "" {
+		return
+	}
+	if id := newMessageID(*props); id != "" {
+		props.Set(mapi.PrInternetMessageID, id)
+	}
+}
+
 // newMessageID mints an RFC 5322 Message-ID for an originating message that lacks
 // one: a 128-bit random token at the sender's domain (sender, then representing
-// identity, falling back to "localhost"). It is generated once at send time, so
-// the transmitted message carries a single stable id. An empty result (the
-// random source failed) tells the caller to omit the header rather than emit a
-// predictable id.
+// identity, falling back to "localhost"). An empty result (the random source
+// failed) tells the caller to leave the id unset rather than use a predictable one.
 func newMessageID(props mapi.PropertyValues) string {
 	host := "localhost"
 	for _, t := range []addrTags{senderTags, representingTags} {

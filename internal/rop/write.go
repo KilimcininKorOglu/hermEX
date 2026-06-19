@@ -593,8 +593,9 @@ func (s *Session) deliverComposed(nm *newMessageState) ([]byte, error) {
 	// draft is untouched.
 	props := append(mapi.PropertyValues(nil), nm.props...)
 	stampSubmitIdentity(&props, s.owner)
+	oxcmail.EnsureMessageID(&props)
 
-	raw, err := oxcmail.Export(&oxcmail.Message{Props: props, Recipients: wire}, oxcmail.Options{GenerateMessageID: true})
+	raw, err := oxcmail.Export(&oxcmail.Message{Props: props, Recipients: wire}, oxcmail.Options{})
 	if err != nil {
 		return nil, err
 	}

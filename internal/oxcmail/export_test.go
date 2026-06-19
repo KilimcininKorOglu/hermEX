@@ -100,23 +100,23 @@ func TestExportWellFormed(t *testing.T) {
 // TestExportImportRoundTrip checks that Export(Import(raw)) re-imports to the
 // same core property set: the convert path preserves meaning even though the
 // bytes are regenerated.
-// TestExportGenerateMessageID covers the originating-message Message-ID policy:
-// with GenerateMessageID and no PR_INTERNET_MESSAGE_ID, Export mints a unique id
-// at the sender's domain; an explicit id is preserved, never overridden; and
-// without the option an id-less message gets no header, so re-exporting a stored
-// message yields the same bytes on every read.
-func TestExportGenerateMessageID(t *testing.T) {
-	newSender := func() *Message {
-		return &Message{Props: mapi.PropertyValues{
+// TestEnsureMessageID covers the originating-message Message-ID policy: a
+// submission path calls EnsureMessageID before Export, which assigns a unique id
+// at the sender's domain when absent and preserves an explicit one; Export itself
+// emits only a present id (so re-exporting a stored id-less message yields the same
+// bytes on every read).
+func TestEnsureMessageID(t *testing.T) {
+	newSender := func() mapi.PropertyValues {
+		return mapi.PropertyValues{
 			{Tag: mapi.PrSenderSmtpAddress, Value: "alice@example.com"},
 			{Tag: mapi.PrSenderAddrType, Value: "SMTP"},
 			{Tag: mapi.PrSenderEmailAddress, Value: "alice@example.com"},
 			{Tag: mapi.PrSubject, Value: "hi"},
-		}}
+		}
 	}
-	mid := func(t *testing.T, m *Message, opt Options) string {
+	exported := func(t *testing.T, props mapi.PropertyValues) string {
 		t.Helper()
-		wire, err := Export(m, opt)
+		wire, err := Export(&Message{Props: props}, Options{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -127,24 +127,29 @@ func TestExportGenerateMessageID(t *testing.T) {
 		return parsed.Header.Get("Message-ID")
 	}
 
-	// Minted at the sender's domain when absent and the option is on.
-	id := mid(t, newSender(), Options{GenerateMessageID: true})
+	// Assigned at the sender's domain when absent, and emitted by Export.
+	p1 := newSender()
+	EnsureMessageID(&p1)
+	id := exported(t, p1)
 	if !strings.HasPrefix(id, "<") || !strings.HasSuffix(id, "@example.com>") {
-		t.Errorf("minted Message-ID = %q, want <token@example.com>", id)
+		t.Errorf("assigned Message-ID = %q, want <token@example.com>", id)
 	}
-	// Each send mints a unique id (a transmitted message needs a distinct one).
-	if id2 := mid(t, newSender(), Options{GenerateMessageID: true}); id2 == id {
-		t.Errorf("two mints produced the same id %q, want random", id)
+	// Each assignment is unique (a transmitted message needs a distinct one).
+	p2 := newSender()
+	EnsureMessageID(&p2)
+	if id2 := exported(t, p2); id2 == id {
+		t.Errorf("two assignments produced the same id %q, want random", id)
 	}
 	// An explicit Message-ID is preserved, never overridden.
-	withID := newSender()
-	withID.Props = append(withID.Props, mapi.TaggedPropVal{Tag: mapi.PrInternetMessageID, Value: "<keep@host>"})
-	if got := mid(t, withID, Options{GenerateMessageID: true}); got != "<keep@host>" {
+	p3 := append(newSender(), mapi.TaggedPropVal{Tag: mapi.PrInternetMessageID, Value: "<keep@host>"})
+	EnsureMessageID(&p3)
+	if got := exported(t, p3); got != "<keep@host>" {
 		t.Errorf("explicit Message-ID = %q, want it preserved", got)
 	}
-	// Without the option an id-less message gets no header (re-serve stability).
-	if got := mid(t, newSender(), Options{}); got != "" {
-		t.Errorf("Message-ID = %q without the option, want none", got)
+	// Export alone (no EnsureMessageID) emits no Message-ID — the reference
+	// behaviour, keeping a re-served stored message byte-stable.
+	if got := exported(t, newSender()); got != "" {
+		t.Errorf("Export emitted Message-ID %q without one set, want none", got)
 	}
 }
 
