@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"hermex/internal/directory"
+	"hermex/internal/relay"
 	"hermex/internal/rop"
 )
 
@@ -35,10 +36,10 @@ func newSessionStore() *sessionStore {
 // accounts is the recipient directory the session's ROP layer resolves against
 // when submitting mail; the authenticated user doubles as the session owner's
 // SMTP address (the From of a submitted message).
-func (s *sessionStore) create(user, mailbox string, accounts directory.Accounts) (sid, sequence string) {
+func (s *sessionStore) create(user, mailbox string, accounts directory.Accounts, spool *relay.Spool) (sid, sequence string) {
 	sid, sequence = newGUID(), newGUID()
 	s.mu.Lock()
-	s.m[sid] = &sessionContext{user: user, mailbox: mailbox, sequence: sequence, ropSess: rop.NewSession(mailbox, accounts, user)}
+	s.m[sid] = &sessionContext{user: user, mailbox: mailbox, sequence: sequence, ropSess: rop.NewSession(mailbox, accounts, user, rop.WithSpool(spool))}
 	s.mu.Unlock()
 	return sid, sequence
 }

@@ -156,7 +156,7 @@ func TestExecuteRopSyncDownload(t *testing.T) {
 	seedSyncMessage(t, dir, "SYNCME")
 
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
-	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
+	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test", nil).Handler())
 	defer ts.Close()
 
 	conn := mapiPost(t, ts, "/mapi/emsmdb", "Connect", connectBody(), nil)

@@ -23,7 +23,7 @@ import (
 func notifyTestServer(t *testing.T, mailbox string) (*httptest.Server, *Server) {
 	t.Helper()
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: mailbox}}
-	srv := NewServer(accs, accs, "mail.hermex.test")
+	srv := NewServer(accs, accs, "mail.hermex.test", nil)
 	srv.notifyWait = 200 * time.Millisecond
 	srv.notifyCadence = 10 * time.Millisecond
 	ts := httptest.NewServer(srv.Handler())
@@ -177,7 +177,7 @@ func TestNotificationWaitWakesMidWait(t *testing.T) {
 // drops the connection, rather than holding the full interval.
 func TestWaitForNotificationContextCancel(t *testing.T) {
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: t.TempDir()}}
-	srv := NewServer(accs, accs, "mail.hermex.test")
+	srv := NewServer(accs, accs, "mail.hermex.test", nil)
 	srv.notifyWait = 30 * time.Second // long, so only ctx cancellation can end the wait quickly
 	srv.notifyCadence = 10 * time.Millisecond
 

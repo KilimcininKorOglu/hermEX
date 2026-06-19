@@ -598,7 +598,7 @@ func (s *Session) deliverComposed(nm *newMessageState) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := mta.Deliver(s.accounts, s.owner, recipients, raw, time.Now()); err != nil {
+	if _, err := mta.DeliverAndRelay(s.accounts, s.spool, s.owner, recipients, raw, time.Now()); err != nil {
 		return nil, err
 	}
 	return raw, nil

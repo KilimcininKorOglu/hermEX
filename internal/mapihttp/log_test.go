@@ -39,7 +39,7 @@ func (c *captureSink) find(name string) (logging.Event, bool) {
 func TestMAPILogsNspiBind(t *testing.T) {
 	sink := &captureSink{}
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: t.TempDir()}}
-	srv := NewServer(accs, accs, "mail.hermex.test")
+	srv := NewServer(accs, accs, "mail.hermex.test", nil)
 	srv.Logger = logging.New(sink)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

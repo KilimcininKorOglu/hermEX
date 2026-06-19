@@ -22,7 +22,7 @@ const (
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: t.TempDir()}}
-	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test").Handler())
+	ts := httptest.NewServer(NewServer(accs, accs, "mail.hermex.test", nil).Handler())
 	t.Cleanup(ts.Close)
 	return ts
 }

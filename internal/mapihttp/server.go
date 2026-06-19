@@ -20,6 +20,7 @@ import (
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/nspi"
+	"hermex/internal/relay"
 	"hermex/internal/rpchttp"
 	"hermex/internal/serve"
 )
@@ -29,6 +30,7 @@ import (
 type Server struct {
 	auth          directory.Authenticator
 	accounts      directory.Accounts
+	spool         *relay.Spool // outbound relay queue for submitted mail; nil sends local-only
 	hostname      string
 	sessions      *sessionStore
 	nsp           *nspi.Server
@@ -49,7 +51,7 @@ func (s *Server) mapiEvent(r *http.Request, level logging.Level, sub logging.Sub
 // The NSPI address book runs over the directory GAL when the directory can
 // enumerate users (accounts implements directory.GAL); otherwise the GAL is
 // empty. accounts also serves ROP recipient resolution.
-func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostname string) *Server {
+func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostname string, spool *relay.Spool) *Server {
 	var gal directory.GAL
 	if g, ok := accounts.(directory.GAL); ok {
 		gal = g
@@ -60,6 +62,7 @@ func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostna
 	s := &Server{
 		auth:          auth,
 		accounts:      accounts,
+		spool:         spool,
 		hostname:      hostname,
 		sessions:      newSessionStore(),
 		nsp:           nspi.NewServer(gal, serverGUID),
@@ -73,6 +76,7 @@ func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostna
 	// endpoint drives; the adapter discards the transport session because the GAL
 	// is global to every authenticated caller.
 	ems := rpchttp.NewEMSMDB(accounts)
+	ems.Spool = spool // external recipients of RPC/HTTP submissions are relayed
 	disp := rpchttp.NewDispatcher()
 	disp.Register(rpchttp.EMSMDBUUID, rpchttp.EMSMDBVersion, ems.Handle)
 	// The AsyncEMSMDB interface carries the EcDoAsyncWaitEx notification long-poll;

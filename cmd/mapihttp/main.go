@@ -21,6 +21,7 @@ import (
 	"hermex/internal/logging"
 	"hermex/internal/mapihttp"
 	"hermex/internal/objectstore"
+	"hermex/internal/relay"
 	"hermex/internal/serve"
 )
 
@@ -43,7 +44,13 @@ func main() {
 	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
 
-	srv := mapihttp.NewServer(dir, dir, cfg.Hostname)
+	// Enqueue external recipients of submitted mail into the shared relay spool the
+	// MTA drains; without it native Outlook would send local-only.
+	spool, err := relay.Open(cfg.RelaySpoolPath())
+	if err != nil {
+		log.Fatalf("hermex-mapi: open relay spool: %v", err)
+	}
+	srv := mapihttp.NewServer(dir, dir, cfg.Hostname, spool)
 	srv.Logger = logger
 	addr := cfg.MapiAddr
 	if addr == "" {
@@ -59,7 +66,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log.Printf("hermex-mapi listening on %s", addr)
-	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, logClose, db.Close); err != nil {
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, spool.Close, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-mapi: %v", err)
 	}
 }

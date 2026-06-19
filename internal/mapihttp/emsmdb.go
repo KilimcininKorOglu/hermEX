@@ -79,7 +79,7 @@ func (s *Server) emsConnect(w http.ResponseWriter, r *http.Request, sess *sessio
 		writeRespError(w, r, "Connect", rcInvalidReqBody)
 		return
 	}
-	sid, sequence := s.sessions.create(sess.user, sess.mailbox, s.accounts)
+	sid, sequence := s.sessions.create(sess.user, sess.mailbox, s.accounts, s.spool)
 	setCookie(w, "sid", sid)
 	setCookie(w, "sequence", sequence)
 

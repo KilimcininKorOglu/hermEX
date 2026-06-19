@@ -8,6 +8,7 @@ import (
 	"hermex/internal/mapi"
 	"hermex/internal/ndr"
 	"hermex/internal/oxmapihttp"
+	"hermex/internal/relay"
 	"hermex/internal/rop"
 )
 
@@ -71,6 +72,7 @@ type emsmdbSession struct {
 // is registered on a Dispatcher.
 type EMSMDB struct {
 	accounts directory.Accounts
+	Spool    *relay.Spool // outbound relay queue for submitted mail; nil sends local-only
 
 	mu       sync.Mutex
 	sessions map[mapi.GUID]*emsmdbSession
@@ -174,7 +176,7 @@ func (e *EMSMDB) connectEx(sess *Session, stub []byte) ([]byte, uint32) {
 		user:    sess.User,
 		mailbox: sess.Mailbox,
 		cpid:    in.cpid,
-		rop:     rop.NewSession(sess.Mailbox, e.accounts, sess.User),
+		rop:     rop.NewSession(sess.Mailbox, e.accounts, sess.User, rop.WithSpool(e.Spool)),
 	}
 	e.mu.Unlock()
 	return pushConnectExOut(cxh, sess.User, ecSuccess), 0

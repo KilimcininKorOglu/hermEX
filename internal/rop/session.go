@@ -12,6 +12,7 @@ import (
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcmail"
+	"hermex/internal/relay"
 )
 
 // objKind classifies the server object behind a handle. The message + stream/
@@ -147,16 +148,30 @@ type Session struct {
 	mailbox  string
 	accounts directory.Accounts
 	owner    string
+	spool    *relay.Spool // outbound relay queue for external recipients; nil sends local-only
 	handles  map[uint32]*object
 	next     uint32
 	pending  []queuedNotify // notifications awaiting delivery in an Execute response (the notify drain)
 }
 
+// SessionOption configures an optional Session dependency at construction.
+type SessionOption func(*Session)
+
+// WithSpool supplies the outbound relay spool a submitted message's external
+// recipients are queued into. Without it, external recipients are not relayed.
+func WithSpool(sp *relay.Spool) SessionOption {
+	return func(s *Session) { s.spool = sp }
+}
+
 // NewSession builds an empty session bound to a mailbox maildir path. accounts
 // and owner supply the submit context (see Session); pass nil/"" for a read-only
 // session. The store is not opened until RopLogon.
-func NewSession(mailbox string, accounts directory.Accounts, owner string) *Session {
-	return &Session{mailbox: mailbox, accounts: accounts, owner: owner, handles: make(map[uint32]*object), next: 1}
+func NewSession(mailbox string, accounts directory.Accounts, owner string, opts ...SessionOption) *Session {
+	s := &Session{mailbox: mailbox, accounts: accounts, owner: owner, handles: make(map[uint32]*object), next: 1}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // alloc registers an object under a fresh handle and returns the handle. Handles
