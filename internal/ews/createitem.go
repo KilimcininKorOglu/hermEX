@@ -99,7 +99,7 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 				msgs = append(msgs, itemError("ErrorInvalidRecipients"))
 				continue
 			}
-			if _, err := mta.Deliver(s.accounts, sess.user, recips, raw, time.Now()); err != nil {
+			if _, err := mta.DeliverAndRelay(s.accounts, s.Spool, sess.user, recips, raw, time.Now()); err != nil {
 				msgs = append(msgs, itemError("ErrorInternalServerError"))
 				continue
 			}

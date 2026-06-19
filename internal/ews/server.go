@@ -15,6 +15,7 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/logging"
+	"hermex/internal/relay"
 )
 
 // Server answers EWS and Autodiscover requests for authenticated users.
@@ -23,6 +24,7 @@ type Server struct {
 	accounts directory.Accounts
 	hostname string
 	Logger   *logging.Logger // central activity log; nil disables logging
+	Spool    *relay.Spool    // outbound relay queue; nil sends local-only
 
 	// Notification subscriptions (MS-OXWSNTIF). The registry is in-memory and
 	// process-local: Subscribe and GetEvents are separate HTTP requests that must
