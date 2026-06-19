@@ -20,6 +20,22 @@ func (s *Server) uiClaims(r *http.Request) (claims, bool) {
 	return cl, true
 }
 
+// uiRequireSystemPage gates a UI read page on a session and the system role: no
+// session redirects to login; a non-system admin gets 403. ok=false means a
+// response was already written.
+func (s *Server) uiRequireSystemPage(w http.ResponseWriter, r *http.Request) bool {
+	cl, ok := s.uiClaims(r)
+	if !ok {
+		http.Redirect(w, r, "/admin/ui/login", http.StatusSeeOther)
+		return false
+	}
+	if !s.isSystemAdmin(cl.UserID) {
+		http.Error(w, "forbidden: requires a system administrator", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
 // render writes an HTML template response.
 func (s *Server) render(w http.ResponseWriter, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

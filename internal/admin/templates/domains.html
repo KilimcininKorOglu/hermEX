@@ -1,0 +1,24 @@
+{{define "domains.html"}}{{template "head" .}}
+{{template "topbar" .}}
+<main>
+<h1>Domains</h1>
+<form class="create-form" hx-post="/admin/ui/domains" hx-target="#domains-panel" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<input type="text" name="name" placeholder="example.com" required>
+<button type="submit">Add domain</button>
+</form>
+{{template "domains-panel" .}}
+</main>
+{{template "foot" .}}{{end}}
+
+{{define "domains-panel"}}<div id="domains-panel">
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<table class="grid">
+<thead><tr><th>Domain</th><th>Organization</th><th>Status</th></tr></thead>
+<tbody>
+{{range .Domains}}<tr><td>{{.Name}}</td><td>{{.OrgID}}</td><td>{{if eq .Status 0}}Active{{else}}Suspended{{end}}</td></tr>
+{{else}}<tr><td colspan="3" class="empty">No domains yet.</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>{{end}}

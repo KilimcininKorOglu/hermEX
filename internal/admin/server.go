@@ -87,6 +87,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/logout", s.handleUILogout)
 	mux.HandleFunc("GET /admin/ui/users", s.handleUIUsers)
 	mux.HandleFunc("POST /admin/ui/users", s.handleUICreateUser)
+	mux.HandleFunc("GET /admin/ui/domains", s.handleUIDomains)
+	mux.HandleFunc("POST /admin/ui/domains", s.handleUICreateDomain)
+	mux.HandleFunc("GET /admin/ui/aliases", s.handleUIAliases)
+	mux.HandleFunc("POST /admin/ui/aliases", s.handleUICreateAlias)
 	mux.HandleFunc("GET /admin/ui/", s.handleUIDashboard)
 	return mux
 }

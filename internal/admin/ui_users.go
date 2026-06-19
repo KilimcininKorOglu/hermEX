@@ -24,13 +24,7 @@ func (s *Server) uiAuthorized(w http.ResponseWriter, r *http.Request) (claims, b
 
 // handleUIUsers renders the users management page (system administrators only).
 func (s *Server) handleUIUsers(w http.ResponseWriter, r *http.Request) {
-	cl, ok := s.uiClaims(r)
-	if !ok {
-		http.Redirect(w, r, "/admin/ui/login", http.StatusSeeOther)
-		return
-	}
-	if !s.isSystemAdmin(cl.UserID) {
-		http.Error(w, "forbidden: requires a system administrator", http.StatusForbidden)
+	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
 	users, _ := s.dir.ListUsers()

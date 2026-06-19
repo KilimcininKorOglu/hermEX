@@ -1,0 +1,25 @@
+{{define "aliases.html"}}{{template "head" .}}
+{{template "topbar" .}}
+<main>
+<h1>Aliases</h1>
+<form class="create-form" hx-post="/admin/ui/aliases" hx-target="#aliases-panel" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<input type="email" name="alias" placeholder="alias@example.com" required>
+<input type="email" name="main" placeholder="user@example.com" required>
+<button type="submit">Add alias</button>
+</form>
+{{template "aliases-panel" .}}
+</main>
+{{template "foot" .}}{{end}}
+
+{{define "aliases-panel"}}<div id="aliases-panel">
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<table class="grid">
+<thead><tr><th>Alias</th><th>Forwards to</th></tr></thead>
+<tbody>
+{{range .Aliases}}<tr><td>{{.Alias}}</td><td>{{.Main}}</td></tr>
+{{else}}<tr><td colspan="2" class="empty">No aliases yet.</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>{{end}}

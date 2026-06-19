@@ -5,8 +5,8 @@
 <p class="signed-in">Signed in as {{.Login}}.</p>
 <section class="cards">
 <a class="card" href="/admin/ui/users"><span class="num">{{.UserCount}}</span><span class="label">Users</span></a>
-<div class="card"><span class="num">{{.DomainCount}}</span><span class="label">Domains</span></div>
-<div class="card"><span class="num">{{.AliasCount}}</span><span class="label">Aliases</span></div>
+<a class="card" href="/admin/ui/domains"><span class="num">{{.DomainCount}}</span><span class="label">Domains</span></a>
+<a class="card" href="/admin/ui/aliases"><span class="num">{{.AliasCount}}</span><span class="label">Aliases</span></a>
 </section>
 </main>
 {{template "foot" .}}{{end}}
