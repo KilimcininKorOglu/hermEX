@@ -92,6 +92,37 @@ func TestCreateAttachmentBaseCountOffset(t *testing.T) {
 	}
 }
 
+// TestCreateAttachmentMultiple confirms two FileAttachments in a single request
+// each get a distinct id resolving to their own content — the per-loop offset
+// (created advancing within one request) the single-attachment tests cannot reach.
+func TestCreateAttachmentMultiple(t *testing.T) {
+	ts, _ := seededWithMessage(t, plainMessage)
+	parent := parentItemID(t, ts)
+	p1 := base64.StdEncoding.EncodeToString([]byte("FIRST"))
+	p2 := base64.StdEncoding.EncodeToString([]byte("SECOND"))
+	req := wrapRequest(`<CreateAttachment xmlns="` + nsMessages + `">` +
+		`<ParentItemId Id="` + parent + `"/>` +
+		`<Attachments xmlns:t="` + nsTypes + `">` +
+		`<t:FileAttachment><t:Name>a.txt</t:Name><t:Content>` + p1 + `</t:Content></t:FileAttachment>` +
+		`<t:FileAttachment><t:Name>b.txt</t:Name><t:Content>` + p2 + `</t:Content></t:FileAttachment>` +
+		`</Attachments></CreateAttachment>`)
+
+	_, out := soapPost(t, ts, req, true)
+	ids := attachIDRE.FindAllStringSubmatch(out, -1)
+	if len(ids) != 2 {
+		t.Fatalf("expected 2 AttachmentIds, got %d: %s", len(ids), out)
+	}
+	if ids[0][1] == ids[1][1] {
+		t.Fatalf("the two attachments must get distinct ids: %s", out)
+	}
+	if _, got := soapPost(t, ts, getAttachmentReq(ids[0][1]), true); !strings.Contains(got, p1) {
+		t.Errorf("first id must resolve to FIRST: %s", got)
+	}
+	if _, got := soapPost(t, ts, getAttachmentReq(ids[1][1]), true); !strings.Contains(got, p2) {
+		t.Errorf("second id must resolve to SECOND: %s", got)
+	}
+}
+
 // TestCreateAttachmentBumpsChangeNumber confirms adding an attachment advances the
 // parent message's change number, so ICS content sync observes it.
 func TestCreateAttachmentBumpsChangeNumber(t *testing.T) {
