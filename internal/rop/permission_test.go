@@ -464,6 +464,51 @@ func TestModifyRemoveMember(t *testing.T) {
 	}
 }
 
+// TestModifyPermissionsBatchAlignment proves the RopModifyPermissions request decoder
+// consumes its body exactly — ModifyFlags, the count, and every PermissionData with
+// its TPROPVAL_ARRAY — so a following ROP in the same Execute batch parses from the
+// right offset. A short or long read would surface as the second RopId coming back
+// wrong. The single-ROP tests pin the response framing; this pins the request side.
+func TestModifyPermissionsBatchAlignment(t *testing.T) {
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	sess, folderH := openFolderSession(t, dir, testAccounts("heidi@hermex.test"), mapi.PrivateFIDInbox)
+
+	// Batch: ModifyPermissions (a non-trivial PermissionData) then GetPermissionsTable.
+	modify := buildModifyPermissions(t, 0, modifyPermIncludeFreeBusy, []permDataRow{{
+		flags: permRowAdd,
+		props: []mapi.TaggedPropVal{
+			{Tag: mapi.PrSmtpAddress, Value: "heidi@hermex.test"},
+			{Tag: mapi.PrMemberRights, Value: int32(mapi.RightsEditor)},
+		},
+	}})
+	batch := append(modify, buildGetPermissionsTable(0, 1, permTableIncludeFreeBusy)...)
+
+	resp, _ := sess.Dispatch(batch, []uint32{folderH, 0xFFFFFFFF})
+	p := ext.NewPull(resp, ext.FlagUTF16)
+
+	if id := mustU8(t, p, "RopId"); id != ropModifyPermissions {
+		t.Fatalf("first RopId = %#x, want ModifyPermissions", id)
+	}
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("ModifyPermissions ec = %#x", ec)
+	}
+	// The second response can only land here if the decoder stayed aligned.
+	if id := mustU8(t, p, "RopId"); id != ropGetPermissionsTable {
+		t.Fatalf("second RopId = %#x, want GetPermissionsTable (request decoder misaligned)", id)
+	}
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Errorf("GetPermissionsTable ec = %#x", ec)
+	}
+}
+
 // TestModifyReplaceRows confirms the ReplaceRows flag wipes the folder's stored
 // permissions before applying the batch: the seeded Calendar default is cleared, and
 // only the new member (plus the always-synthesized specials) remains.
