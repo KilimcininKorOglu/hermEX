@@ -24,7 +24,7 @@ type namedField struct {
 // nameICalUID preserves the iCalendar UID as a named string property (a neutral
 // name in the public-strings namespace) so Export can re-emit a stable UID on the
 // synthesized path. (Recurring events carry the UID inside their verbatim bytes.)
-var nameICalUID = mapi.PropertyName{Kind: mapi.MnidString, GUID: mapi.PsPublicStrings, Name: "ICalUID"}
+var nameICalUID = mapi.NameICalUID
 
 // appointmentNamed is the fixed set of calendar named properties oxcical maps,
 // resolved as a batch through the resolver. Order is irrelevant — results are

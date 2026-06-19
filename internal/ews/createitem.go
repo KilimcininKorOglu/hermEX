@@ -19,7 +19,10 @@ import (
 type createItemRequest struct {
 	MessageDisposition string `xml:"MessageDisposition,attr"`
 	Items              struct {
-		Messages []createMessage `xml:"Message"`
+		Messages          []createMessage   `xml:"Message"`
+		Accept            []meetingResponse `xml:"AcceptItem"`
+		TentativelyAccept []meetingResponse `xml:"TentativelyAcceptItem"`
+		Decline           []meetingResponse `xml:"DeclineItem"`
 	} `xml:"Items"`
 }
 
@@ -124,6 +127,19 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 			}
 		}
 		msgs = append(msgs, rm)
+	}
+
+	// Meeting responses ([MS-OXWSMTGS]): an Accept/Tentative/Decline answers the
+	// referenced meeting request. The attendee's calendar and the request are
+	// updated here; notifying the organizer is a later increment.
+	for _, mr := range req.Items.Accept {
+		msgs = append(msgs, meetingRespond(st, mr.ReferenceItemID, respAccepted))
+	}
+	for _, mr := range req.Items.TentativelyAccept {
+		msgs = append(msgs, meetingRespond(st, mr.ReferenceItemID, respTentative))
+	}
+	for _, mr := range req.Items.Decline {
+		msgs = append(msgs, meetingRespond(st, mr.ReferenceItemID, respDeclined))
 	}
 	writeResponse(w, createItemResponse{Messages: msgs})
 }

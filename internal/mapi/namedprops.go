@@ -75,6 +75,13 @@ var (
 	NameAppointmentSubType    = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8215} // PtBoolean, all-day
 	NameRecurring             = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8223} // PtBoolean, recurring series master
 
+	// Meeting-workflow named properties (PSETID_Appointment). An attendee's
+	// response to a meeting request stamps these on both the request and the
+	// resulting calendar item.
+	NameAppointmentStateFlags = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8217} // PtLong, asfMeeting|asfReceived|asfCanceled
+	NameResponseStatus        = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8218} // PtLong, respTentative/Accepted/Declined
+	NameAppointmentReplyTime  = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8220} // PtSysTime, when the attendee responded
+
 	// Reminder named properties (PSETID_Common) — VALARM maps here.
 	NameReminderDelta = PropertyName{Kind: MnidID, GUID: PsetidCommon, LID: 0x8501} // PtLong, minutes before start
 	NameReminderSet   = PropertyName{Kind: MnidID, GUID: PsetidCommon, LID: 0x8503} // PtBoolean
@@ -83,4 +90,9 @@ var (
 	// iCalendar UID; v1 keeps the UID as a string property instead (the wrapped
 	// binary encoding is deferred), so this is reserved for that later work.
 	NameGlobalObjectId = PropertyName{Kind: MnidID, GUID: PsetidMeeting, LID: 0x0003} // PtBinary
+
+	// NameICalUID preserves the iCalendar UID as a named string (PS_PUBLIC_STRINGS),
+	// the v1 stand-in for the binary global object id — the stable identity that
+	// matches a meeting response back to its appointment.
+	NameICalUID = PropertyName{Kind: MnidString, GUID: PsPublicStrings, Name: "ICalUID"} // PtUnicode
 )
