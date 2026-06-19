@@ -184,6 +184,34 @@ func TestRenameFolder(t *testing.T) {
 	}
 }
 
+// TestRenameFolderRejectsCycle confirms reparenting a folder into itself or one
+// of its descendants is refused (it would make the folder its own ancestor),
+// while a legitimate reparent under a non-ancestor still succeeds.
+func TestRenameFolderRejectsCycle(t *testing.T) {
+	s := openSeededStore(t)
+	parent, err := s.CreateFolder(nil, "Parent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := s.CreateFolder(&parent, "Child")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RenameFolder(parent, &child, "Parent"); !errors.Is(err, ErrFolderCycle) {
+		t.Errorf("move into descendant = %v, want ErrFolderCycle", err)
+	}
+	if err := s.RenameFolder(parent, &parent, "Parent"); !errors.Is(err, ErrFolderCycle) {
+		t.Errorf("move into self = %v, want ErrFolderCycle", err)
+	}
+	other, err := s.CreateFolder(nil, "Other")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RenameFolder(other, &parent, "Other"); err != nil {
+		t.Errorf("legitimate reparent under a non-ancestor = %v, want nil", err)
+	}
+}
+
 // TestSetSubscribed toggles subscription on a built-in folder (no index row
 // yet) and confirms the listing reflects it, including resubscription.
 func TestSetSubscribed(t *testing.T) {

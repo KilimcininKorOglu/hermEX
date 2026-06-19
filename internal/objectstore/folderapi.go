@@ -165,6 +165,17 @@ func (s *Store) RenameFolder(folderID int64, newParent *int64, newName string) e
 	parentFID := ipmSubtree
 	if newParent != nil {
 		parentFID = *newParent
+		// Reparenting a folder into itself or one of its own descendants would
+		// make the folder its own ancestor (an unwalkable cycle); refuse it, as
+		// CopyFolder does. folderSubtreeIDs includes the folder itself, so this
+		// catches both the self-move and the descendant-move.
+		subtree, err := s.folderSubtreeIDs(folderID)
+		if err != nil {
+			return err
+		}
+		if slices.Contains(subtree, parentFID) {
+			return ErrFolderCycle
+		}
 	}
 	res, err := s.objdb.Exec(
 		`UPDATE folders SET parent_id=? WHERE folder_id=? AND is_deleted=0`, parentFID, folderID)
