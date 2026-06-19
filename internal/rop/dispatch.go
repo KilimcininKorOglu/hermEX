@@ -71,6 +71,8 @@ const (
 	ropPending                     uint8 = 0x6E
 	ropGetPermissionsTable         uint8 = 0x3E
 	ropModifyPermissions           uint8 = 0x40
+	ropGetRulesTable               uint8 = 0x3F
+	ropModifyRules                 uint8 = 0x41
 )
 
 // MAPI return codes ([MS-OXCDATA] 2.4.1) carried in a ROP response ReturnValue.
@@ -287,6 +289,14 @@ loop:
 			}
 		case ropModifyPermissions:
 			if !s.ropModifyPermissions(p, out, handles, hindex) {
+				break loop
+			}
+		case ropGetRulesTable:
+			if !s.ropGetRulesTable(p, out, handles, hindex) {
+				break loop
+			}
+		case ropModifyRules:
+			if !s.ropModifyRules(p, out, handles, hindex) {
 				break loop
 			}
 		case ropSetColumns:
