@@ -93,6 +93,9 @@ func (s *Server) handle(conn net.Conn) {
 	reply(w, 220, s.hostname()+" ESMTP hermEX")
 	event(logging.LevelInfo, "conn.accept", logging.Fields{"tls": isTLS})
 
+	// A session that can validate credentials enables AUTH — but only over TLS,
+	// so the EHLO advertisement is also gated on the link being secured.
+	_, canAuth := sess.(Authenticator)
 	var hasFrom bool
 	var rcptCount int
 	for {
@@ -110,7 +113,9 @@ func (s *Server) handle(conn net.Conn) {
 		case "EHLO":
 			hasFrom, rcptCount = false, 0
 			sess.Reset()
-			s.greetEHLO(w, arg, isTLS)
+			s.greetEHLO(w, arg, isTLS, canAuth && isTLS)
+		case "AUTH":
+			s.handleAuth(w, tp, arg, sess, isTLS, canAuth)
 		case "STARTTLS":
 			if s.TLSConfig == nil || isTLS {
 				reply(w, 502, "STARTTLS not available")
@@ -261,7 +266,7 @@ func (d *dotReader) fill() error {
 	return nil
 }
 
-func (s *Server) greetEHLO(w *bufio.Writer, arg string, isTLS bool) {
+func (s *Server) greetEHLO(w *bufio.Writer, arg string, isTLS, authAvailable bool) {
 	lines := []string{
 		fmt.Sprintf("%s Hello %s", s.hostname(), strings.TrimSpace(arg)),
 		"PIPELINING",
@@ -272,6 +277,9 @@ func (s *Server) greetEHLO(w *bufio.Writer, arg string, isTLS bool) {
 	}
 	if s.TLSConfig != nil && !isTLS {
 		lines = append(lines, "STARTTLS")
+	}
+	if authAvailable {
+		lines = append(lines, "AUTH PLAIN LOGIN")
 	}
 	for i, l := range lines {
 		sep := "-"

@@ -29,11 +29,29 @@ func (b *Backend) NewSession(remoteAddr string) (smtp.Session, error) {
 }
 
 type session struct {
-	accounts   directory.Accounts
-	logger     *logging.Logger
-	remoteAddr string
-	from       string
-	targets    []target
+	accounts    directory.Accounts
+	logger      *logging.Logger
+	remoteAddr  string
+	from        string
+	targets     []target
+	authUser    string // set on a successful AUTH; empty for unauthenticated intake
+	authMailbox string // the authenticated user's mailbox store path
+}
+
+// Auth implements smtp.Authenticator: it validates submission credentials against
+// the directory and records the authenticated identity for send authorization. It
+// reports false when the directory cannot authenticate or the credentials fail.
+func (s *session) Auth(username, password string) bool {
+	authn, ok := s.accounts.(directory.Authenticator)
+	if !ok {
+		return false
+	}
+	path, ok := authn.Authenticate(username, password)
+	if !ok {
+		return false
+	}
+	s.authUser, s.authMailbox = username, path
+	return true
 }
 
 // target is one resolved recipient: the address it was accepted for (used as
