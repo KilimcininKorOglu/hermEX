@@ -110,6 +110,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleFolderSync(w, r, sess)
 	case "Sync":
 		s.handleSync(w, r, sess)
+	case "MeetingResponse":
+		s.handleMeetingResponse(w, r, sess)
 	case "SendMail", "SmartReply", "SmartForward":
 		s.handleSendMail(w, r, sess)
 	case "GetItemEstimate":
