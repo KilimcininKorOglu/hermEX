@@ -83,14 +83,17 @@ func TestServerTransaction(t *testing.T) {
 		t.Errorf("rcpts = %v", sess.rcpts)
 	}
 	// Every accepted message is stamped with a Received: trace header (RFC 5321
-	// §4.4) ahead of the body, recording the EHLO name and the client IP. The
-	// dot-unstuffed body must then follow it intact.
+	// §4.4) ahead of the body, recording the helo name, the resolved name and IP,
+	// and the SMTP protocol. The dot-unstuffed body must then follow it intact.
 	got := string(sess.data)
-	if !strings.HasPrefix(got, "Received: from client.test ([") {
+	if !strings.HasPrefix(got, "Received: from client.test (") {
 		t.Errorf("data missing the Received: trace header: %q", got)
 	}
-	if !strings.Contains(got, " with ESMTP;") {
-		t.Errorf("Received: header should record the ESMTP protocol: %q", got)
+	if !strings.Contains(got, "[127.0.0.1])") {
+		t.Errorf("Received: header should record the client IP: %q", got)
+	}
+	if !strings.Contains(got, " with SMTP;") {
+		t.Errorf("Received: header should record the SMTP protocol: %q", got)
 	}
 	body := "Subject: hi\r\n\r\nline one\r\n.dotstuffed\r\n"
 	if !strings.HasSuffix(got, body) {
@@ -98,28 +101,27 @@ func TestServerTransaction(t *testing.T) {
 	}
 }
 
-// TestBuildReceived covers the RFC 3848 "with" protocol token across greeting and
-// security states, plus the header shape: the EHLO name and client IP are
-// recorded, an empty HELO degrades to "unknown", and the host:port is reduced to
-// the bare IP. hermEX requires TLS before AUTH, so an authenticated session is
-// always ESMTPSA, never bare ESMTPA.
+// TestBuildReceived covers the reference Received form: the helo name plus the
+// reverse-DNS name and client IP in the from-clause, the SMTP/SMTPS "with" token
+// (SMTPS only over TLS — neither EHLO nor AUTH is recorded there), an empty helo or
+// rDNS degrading to "unknown", and an IPv6 client address carrying the "IPv6:" tag.
 func TestBuildReceived(t *testing.T) {
 	when := time.Date(2026, 6, 19, 22, 9, 21, 0, time.FixedZone("", 3*3600))
 	cases := []struct {
 		name               string
-		helo               string
-		esmtp, tls, authed bool
+		helo, rdns, remote string
+		tls                bool
 		wantFrom, wantTok  string
 	}{
-		{"helo", "client.test", false, false, false, "from client.test ([198.51.100.7])", "with SMTP;"},
-		{"ehlo", "client.test", true, false, false, "from client.test ([198.51.100.7])", "with ESMTP;"},
-		{"ehlo+tls", "client.test", true, true, false, "from client.test ([198.51.100.7])", "with ESMTPS;"},
-		{"ehlo+tls+auth", "client.test", true, true, true, "from client.test ([198.51.100.7])", "with ESMTPSA;"},
-		{"no-helo", "", true, false, false, "from unknown ([198.51.100.7])", "with ESMTP;"},
+		{"plain", "client.test", "mx.client.test", "198.51.100.7:54321", false, "from client.test (mx.client.test [198.51.100.7])", "with SMTP;"},
+		{"tls", "client.test", "mx.client.test", "198.51.100.7:54321", true, "from client.test (mx.client.test [198.51.100.7])", "with SMTPS;"},
+		{"no-helo", "", "mx.client.test", "198.51.100.7:54321", false, "from unknown (mx.client.test [198.51.100.7])", "with SMTP;"},
+		{"no-rdns", "client.test", "", "198.51.100.7:54321", false, "from client.test (unknown [198.51.100.7])", "with SMTP;"},
+		{"ipv6", "client.test", "mx.client.test", "[2001:db8::1]:54321", false, "from client.test (mx.client.test [IPv6:2001:db8::1])", "with SMTP;"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := buildReceived(c.helo, "198.51.100.7:54321", "mail.hermex.test", c.esmtp, c.tls, c.authed, when)
+			got := buildReceived(c.helo, c.remote, c.rdns, "mail.hermex.test", c.tls, when)
 			if !strings.HasPrefix(got, "Received: "+c.wantFrom) {
 				t.Errorf("from clause = %q, want prefix %q", got, "Received: "+c.wantFrom)
 			}

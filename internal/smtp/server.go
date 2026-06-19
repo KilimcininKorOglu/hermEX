@@ -99,12 +99,10 @@ func (s *Server) handle(conn net.Conn) {
 	_, canAuth := sess.(Authenticator)
 	var hasFrom bool
 	var rcptCount int
-	// Trace context for the Received: header stamped at DATA time. helo is the
-	// HELO/EHLO argument, esmtp records which greeting was used, and authed/isTLS
-	// select the RFC 3848 "with" protocol token. authed is cleared by STARTTLS,
-	// which discards all prior session state (RFC 3207).
+	// Trace context for the Received: header stamped at DATA time: the HELO/EHLO
+	// argument names the connecting client. It is cleared by STARTTLS, which
+	// discards all prior session state (RFC 3207).
 	var helo string
-	var esmtp, authed bool
 	for {
 		line, err := tp.ReadLine()
 		if err != nil {
@@ -115,18 +113,16 @@ func (s *Server) handle(conn net.Conn) {
 		switch strings.ToUpper(cmd) {
 		case "HELO":
 			hasFrom, rcptCount = false, 0
-			helo, esmtp = arg, false
+			helo = arg
 			sess.Reset()
 			reply(w, 250, s.hostname())
 		case "EHLO":
 			hasFrom, rcptCount = false, 0
-			helo, esmtp = arg, true
+			helo = arg
 			sess.Reset()
 			s.greetEHLO(w, arg, isTLS, canAuth && isTLS)
 		case "AUTH":
-			if s.handleAuth(w, tp, arg, sess, isTLS, canAuth) {
-				authed = true
-			}
+			s.handleAuth(w, tp, arg, sess, isTLS, canAuth)
 		case "STARTTLS":
 			if s.TLSConfig == nil || isTLS {
 				reply(w, 502, "STARTTLS not available")
@@ -149,7 +145,7 @@ func (s *Server) handle(conn net.Conn) {
 			// re-issues EHLO over the secured link.
 			sess.Reset()
 			hasFrom, rcptCount = false, 0
-			helo, esmtp, authed = "", false, false
+			helo = ""
 			event(logging.LevelInfo, "starttls", nil)
 		case "MAIL":
 			addr, ok := extractPath(arg, "FROM:")
@@ -187,7 +183,8 @@ func (s *Server) handle(conn net.Conn) {
 				continue
 			}
 			reply(w, 354, "end data with <CR><LF>.<CR><LF>")
-			trace := buildReceived(helo, remote, s.hostname(), esmtp, isTLS, authed, time.Now())
+			rdns := lookupRDNS(remote)
+			trace := buildReceived(helo, remote, rdns, s.hostname(), isTLS, time.Now())
 			if err := s.consumeData(tp, sess, trace); err != nil {
 				event(logging.LevelWarn, "message.reject", logging.Fields{"recipients": rcptCount, "reason": err.Error()})
 				if errors.Is(err, errTooLarge) {
