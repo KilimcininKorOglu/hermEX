@@ -130,16 +130,16 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 	}
 
 	// Meeting responses ([MS-OXWSMTGS]): an Accept/Tentative/Decline answers the
-	// referenced meeting request. The attendee's calendar and the request are
-	// updated here; notifying the organizer is a later increment.
+	// referenced meeting request — updating the attendee's calendar and the request,
+	// and (when the disposition sends) notifying the organizer with an iTIP REPLY.
 	for _, mr := range req.Items.Accept {
-		msgs = append(msgs, meetingRespond(st, mr.ReferenceItemID, respAccepted))
+		msgs = append(msgs, s.meetingRespond(st, sess, mr.ReferenceItemID, respAccepted, send))
 	}
 	for _, mr := range req.Items.TentativelyAccept {
-		msgs = append(msgs, meetingRespond(st, mr.ReferenceItemID, respTentative))
+		msgs = append(msgs, s.meetingRespond(st, sess, mr.ReferenceItemID, respTentative, send))
 	}
 	for _, mr := range req.Items.Decline {
-		msgs = append(msgs, meetingRespond(st, mr.ReferenceItemID, respDeclined))
+		msgs = append(msgs, s.meetingRespond(st, sess, mr.ReferenceItemID, respDeclined, send))
 	}
 	writeResponse(w, createItemResponse{Messages: msgs})
 }

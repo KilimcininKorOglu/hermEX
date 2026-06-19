@@ -1,15 +1,19 @@
 package ews
 
 import (
+	"bytes"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcical"
 	"hermex/internal/oxews"
+	"hermex/internal/relay"
 )
 
 const meetingRequestICS = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\n" +
@@ -47,7 +51,11 @@ func seedMeetingRequest(t *testing.T) (string, string) {
 }
 
 func meetingResponseReq(verb, refItemID string) string {
-	return wrapRequest(`<CreateItem MessageDisposition="SaveOnly" xmlns="` + nsMessages + `">` +
+	return meetingResponseReqDisp(verb, refItemID, "SaveOnly")
+}
+
+func meetingResponseReqDisp(verb, refItemID, disp string) string {
+	return wrapRequest(`<CreateItem MessageDisposition="` + disp + `" xmlns="` + nsMessages + `">` +
 		`<Items><t:` + verb + ` xmlns:t="` + nsTypes + `">` +
 		`<t:ReferenceItemId Id="` + refItemID + `"/>` +
 		`</t:` + verb + `></Items></CreateItem>`)
@@ -173,6 +181,65 @@ func TestMeetingResponseTentativeDedup(t *testing.T) {
 	}
 	if busy, ok := calendarLong(t, st, cal[0].ID, mapi.NameBusyStatus); !ok || busy != busyBusy {
 		t.Errorf("updated appointment busy = %d, want %d (the later accept)", busy, busyBusy)
+	}
+}
+
+// TestMeetingResponseNotifiesOrganizer proves a SendAndSaveCopy accept notifies the
+// organizer with an iTIP REPLY: the response is routed (here, to a foreign-domain
+// organizer, so it queues for relay) as the responder, carrying METHOD:REPLY with
+// the attendee's ACCEPTED participation status.
+func TestMeetingResponseNotifiesOrganizer(t *testing.T) {
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\n" +
+		"BEGIN:VEVENT\r\nUID:meeting-99\r\nSUMMARY:Budget\r\n" +
+		"DTSTART:20260701T140000Z\r\nDTEND:20260701T150000Z\r\n" +
+		`ORGANIZER;CN="The Boss":mailto:boss@external.test` + "\r\n" +
+		"ATTENDEE:mailto:alice@hermex.test\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	req, err := oxcical.Import([]byte(ics), oxcical.Options{Resolver: st.GetNamedPropIDs})
+	if err != nil {
+		st.Close()
+		t.Fatal(err)
+	}
+	reqID, err := st.CreateMessage(int64(mapi.PrivateFIDInbox), req)
+	if err != nil {
+		st.Close()
+		t.Fatal(err)
+	}
+	st.Close()
+
+	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
+	srv := NewServer(accs, accs, "mail.hermex.test")
+	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sp.Close()
+	srv.Spool = sp
+	ts := httptest.NewServer(srv.Handler())
+	defer ts.Close()
+
+	itemID := oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDInbox), MessageID: reqID})
+	_, out := soapPost(t, ts, meetingResponseReqDisp("AcceptItem", itemID, "SendAndSaveCopy"), true)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("AcceptItem not success: %s", out)
+	}
+
+	due, err := sp.Claim(time.Now(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(due) != 1 || due[0].Recipient != "boss@external.test" {
+		t.Fatalf("relay spool = %v, want the reply queued to boss@external.test", due)
+	}
+	if due[0].From != testUser {
+		t.Errorf("reply envelope From = %q, want %q", due[0].From, testUser)
+	}
+	if !bytes.Contains(due[0].Body, []byte("METHOD:REPLY")) || !bytes.Contains(due[0].Body, []byte("PARTSTAT=ACCEPTED")) {
+		t.Errorf("reply body is not an iTIP REPLY accept:\n%s", due[0].Body)
 	}
 }
 

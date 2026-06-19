@@ -163,6 +163,10 @@ const (
 	PrSentRepresentingSmtpAddress  = PropTag(0x5D02001F) // PtUnicode
 	PrSentRepresentingEntryID      = PropTag(0x00410102) // PtBinary
 	PrSentRepresentingSearchKey    = PropTag(0x003B0102) // PtBinary
+
+	// PrResponseRequested is set by a meeting organizer that wants attendees to
+	// reply; an explicit false suppresses the response notification.
+	PrResponseRequested = PropTag(0x0063000B) // PtBoolean
 )
 
 // Read-receipt (MDN) property tags. A Disposition-Notification-To header sets
