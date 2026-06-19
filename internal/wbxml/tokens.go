@@ -19,6 +19,7 @@ const (
 	PageMove            = 0x05
 	PageGetItemEstimate = 0x06
 	PageFolderHierarchy = 0x07
+	PageResolveRecips   = 0x0A
 	PagePing            = 0x0D
 	PageProvision       = 0x0E
 	PageAirSyncBase     = 0x11
@@ -108,6 +109,20 @@ const (
 	FHFolderUpdate Tag = 0x0715
 	FHFolderSync   Tag = 0x0716
 	FHCount        Tag = 0x0717
+)
+
+// ResolveRecipients (code page 0x0A). v1 carries the GAL-resolution subset; the
+// certificate, availability, and picture tokens are not yet served.
+const (
+	RRResolveRecipients Tag = 0x0A05
+	RRResponse          Tag = 0x0A06
+	RRStatus            Tag = 0x0A07
+	RRType              Tag = 0x0A08
+	RRRecipient         Tag = 0x0A09
+	RRDisplayName       Tag = 0x0A0A
+	RREmailAddress      Tag = 0x0A0B
+	RRTo                Tag = 0x0A10
+	RRRecipientCount    Tag = 0x0A12
 )
 
 // Ping (code page 0x0D).
