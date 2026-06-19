@@ -535,40 +535,13 @@ func (s *Session) ropSubmitMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 		return true
 	}
 
-	// Split the recipient bags: the delivery list takes every resolvable SMTP
-	// address (To+Cc+Bcc), while the exported wire copy carries only To+Cc bags —
-	// oxcmail.Export writes a Bcc header for any RecipBcc bag, so leaving Bcc in
-	// the wire copy would disclose blind recipients to the To/Cc readers.
-	var recipients []string
-	wire := make([]mapi.PropertyValues, 0, len(nm.recipients))
-	for _, bag := range nm.recipients {
-		if addr := recipientSMTP(bag); addr != "" {
-			recipients = append(recipients, addr)
-		}
-		if rt, _ := bag.Get(mapi.PrRecipientType); rt != int32(mapi.RecipBcc) {
-			wire = append(wire, bag)
-		}
-	}
-	if len(recipients) == 0 {
-		writeErr(out, ropSubmitMessage, hindex, ecNotFound) // no routable recipient
-		return true
-	}
-
-	// Stamp the sender-representing identity + submit time when the client left
-	// them unset (the reference rectifies the message at submit the same way):
-	// Export derives From from the representing identity, so an unstamped message
-	// ships From-less and is rejected downstream. Copy the bag first so the
-	// in-memory draft is untouched.
-	props := append(mapi.PropertyValues(nil), nm.props...)
-	stampSubmitIdentity(&props, s.owner)
-
-	raw, err := oxcmail.Export(&oxcmail.Message{Props: props, Recipients: wire}, oxcmail.Options{})
+	raw, err := s.deliverComposed(nm)
 	if err != nil {
-		writeErr(out, ropSubmitMessage, hindex, ecError)
-		return true
-	}
-	if _, err := mta.Deliver(s.accounts, s.owner, recipients, raw, time.Now()); err != nil {
-		writeErr(out, ropSubmitMessage, hindex, ecError)
+		if errors.Is(err, errNoRecipient) {
+			writeErr(out, ropSubmitMessage, hindex, ecNotFound) // no routable recipient
+		} else {
+			writeErr(out, ropSubmitMessage, hindex, ecError)
+		}
 		return true
 	}
 	// Delivery has succeeded. Filing the Sent Items copy and consuming the source
@@ -582,6 +555,53 @@ func (s *Session) ropSubmitMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
 	return true
+}
+
+// errNoRecipient is returned by deliverComposed when a saved composed message
+// carries no routable SMTP recipient.
+var errNoRecipient = errors.New("rop: no routable recipient")
+
+// deliverComposed exports a saved composed message through oxcmail and hands it to
+// the MTA bridge — the export+deliver core shared by RopSubmitMessage and
+// RopTransportSend, the single proven outbound path the oxcmail.Export invariant
+// protects. It splits the recipient bags (the delivery list takes every resolvable
+// SMTP address To+Cc+Bcc, while the exported wire copy carries only To+Cc bags —
+// oxcmail.Export writes a Bcc header for any RecipBcc bag, so leaving Bcc in the
+// wire copy would disclose blind recipients to the To/Cc readers), stamps the
+// sender-representing identity the wire copy needs, and returns the delivered raw
+// bytes. It reports errNoRecipient when nothing is routable; the caller maps that
+// (and any export/deliver fault) to its own ROP error code. The caller has already
+// verified nm.saved, nm.savedID, and s.accounts.
+func (s *Session) deliverComposed(nm *newMessageState) ([]byte, error) {
+	var recipients []string
+	wire := make([]mapi.PropertyValues, 0, len(nm.recipients))
+	for _, bag := range nm.recipients {
+		if addr := recipientSMTP(bag); addr != "" {
+			recipients = append(recipients, addr)
+		}
+		if rt, _ := bag.Get(mapi.PrRecipientType); rt != int32(mapi.RecipBcc) {
+			wire = append(wire, bag)
+		}
+	}
+	if len(recipients) == 0 {
+		return nil, errNoRecipient
+	}
+	// Stamp the sender-representing identity + submit time when the client left them
+	// unset (the reference rectifies the message at send the same way): Export
+	// derives From from the representing identity, so an unstamped message ships
+	// From-less and is rejected downstream. Copy the bag first so the in-memory
+	// draft is untouched.
+	props := append(mapi.PropertyValues(nil), nm.props...)
+	stampSubmitIdentity(&props, s.owner)
+
+	raw, err := oxcmail.Export(&oxcmail.Message{Props: props, Recipients: wire}, oxcmail.Options{})
+	if err != nil {
+		return nil, err
+	}
+	if _, err := mta.Deliver(s.accounts, s.owner, recipients, raw, time.Now()); err != nil {
+		return nil, err
+	}
+	return raw, nil
 }
 
 // recipientSMTP extracts a routable SMTP address from a recipient bag: the

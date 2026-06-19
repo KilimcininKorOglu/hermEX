@@ -74,6 +74,7 @@ const (
 	ropGetRulesTable               uint8 = 0x3F
 	ropModifyRules                 uint8 = 0x41
 	ropSetSpooler                  uint8 = 0x47
+	ropTransportSend               uint8 = 0x4A
 	ropGetTransportFolder          uint8 = 0x6D
 )
 
@@ -307,6 +308,10 @@ loop:
 			}
 		case ropGetTransportFolder:
 			if !s.ropGetTransportFolder(p, out, handles, hindex) {
+				break loop
+			}
+		case ropTransportSend:
+			if !s.ropTransportSend(p, out, handles, hindex) {
 				break loop
 			}
 		case ropSetColumns:
