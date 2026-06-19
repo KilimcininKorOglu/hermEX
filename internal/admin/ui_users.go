@@ -29,6 +29,7 @@ func (s *Server) handleUIUsers(w http.ResponseWriter, r *http.Request) {
 	}
 	users, _ := s.dir.ListUsers()
 	s.render(w, "users.html", map[string]any{
+		"Nav":   "users",
 		"CSRF":  csrfCookieValue(r),
 		"Users": users,
 	})

@@ -1,5 +1,6 @@
 {{define "aliases.html"}}{{template "head" .}}
-{{template "topbar" .}}
+<div class="layout">
+{{template "sidebar" .}}
 <main>
 <h1>Aliases</h1>
 <form class="create-form" hx-post="/admin/ui/aliases" hx-target="#aliases-panel" hx-swap="outerHTML"
@@ -10,6 +11,7 @@
 </form>
 {{template "aliases-panel" .}}
 </main>
+</div>
 {{template "foot" .}}{{end}}
 
 {{define "aliases-panel"}}<div id="aliases-panel">

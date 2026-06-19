@@ -1,5 +1,6 @@
 {{define "dashboard.html"}}{{template "head" .}}
-{{template "topbar" .}}
+<div class="layout">
+{{template "sidebar" .}}
 <main>
 <h1>Dashboard</h1>
 <p class="signed-in">Signed in as {{.Login}}.</p>
@@ -9,4 +10,5 @@
 <a class="card" href="/admin/ui/aliases"><span class="num">{{.AliasCount}}</span><span class="label">Aliases</span></a>
 </section>
 </main>
+</div>
 {{template "foot" .}}{{end}}

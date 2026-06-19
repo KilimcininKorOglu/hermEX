@@ -8,7 +8,7 @@ func (s *Server) handleUIDomains(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	domains, _ := s.dir.ListDomains()
-	s.render(w, "domains.html", map[string]any{"CSRF": csrfCookieValue(r), "Domains": domains})
+	s.render(w, "domains.html", map[string]any{"Nav": "domains", "CSRF": csrfCookieValue(r), "Domains": domains})
 }
 
 // handleUICreateDomain creates a domain from the management form and returns the
@@ -34,7 +34,7 @@ func (s *Server) handleUIAliases(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	aliases, _ := s.dir.ListAliases()
-	s.render(w, "aliases.html", map[string]any{"CSRF": csrfCookieValue(r), "Aliases": aliases})
+	s.render(w, "aliases.html", map[string]any{"Nav": "aliases", "CSRF": csrfCookieValue(r), "Aliases": aliases})
 }
 
 // handleUICreateAlias creates an alias from the management form and returns the

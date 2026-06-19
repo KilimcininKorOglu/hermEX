@@ -1,5 +1,6 @@
 {{define "domains.html"}}{{template "head" .}}
-{{template "topbar" .}}
+<div class="layout">
+{{template "sidebar" .}}
 <main>
 <h1>Domains</h1>
 <form class="create-form" hx-post="/admin/ui/domains" hx-target="#domains-panel" hx-swap="outerHTML"
@@ -9,6 +10,7 @@
 </form>
 {{template "domains-panel" .}}
 </main>
+</div>
 {{template "foot" .}}{{end}}
 
 {{define "domains-panel"}}<div id="domains-panel">

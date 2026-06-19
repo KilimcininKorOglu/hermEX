@@ -92,6 +92,7 @@ func (s *Server) handleUIDashboard(w http.ResponseWriter, r *http.Request) {
 	domains, _ := s.dir.ListDomains()
 	aliases, _ := s.dir.ListAliases()
 	s.render(w, "dashboard.html", map[string]any{
+		"Nav":         "dashboard",
 		"Login":       cl.Login,
 		"CSRF":        csrfCookieValue(r),
 		"UserCount":   len(users),

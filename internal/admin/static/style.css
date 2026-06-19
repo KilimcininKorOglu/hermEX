@@ -20,28 +20,50 @@ body {
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
-.topbar {
-	display: flex;
-	align-items: center;
-	gap: 1.5rem;
-	padding: 0.75rem 1.5rem;
+.layout { display: flex; min-height: 100vh; }
+
+.sidebar {
+	width: 220px;
+	flex-shrink: 0;
 	background: var(--panel);
-	border-bottom: 1px solid var(--border);
+	border-right: 1px solid var(--border);
+	display: flex;
+	flex-direction: column;
+	padding: 1.25rem 0;
 }
 
-.topbar .brand { font-weight: 600; }
-.topbar nav { flex: 1; }
-.topbar nav a { margin-right: 1rem; color: var(--ink); }
-.topbar .logout button {
+.sidebar .brand { font-weight: 600; font-size: 1.05rem; padding: 0 1.5rem 1.25rem; }
+
+.sidebar nav { display: flex; flex-direction: column; flex: 1; }
+
+.sidebar nav a {
+	padding: 0.6rem 1.5rem;
+	color: var(--ink);
+	border-left: 3px solid transparent;
+}
+
+.sidebar nav a:hover { background: var(--bg); text-decoration: none; }
+
+.sidebar nav a.active {
+	border-left-color: var(--accent);
+	color: var(--accent);
+	font-weight: 600;
+	background: var(--bg);
+}
+
+.sidebar .logout { padding: 0 1.5rem; }
+
+.sidebar .logout button {
+	width: 100%;
 	background: none;
 	border: 1px solid var(--border);
 	border-radius: 6px;
-	padding: 0.35rem 0.75rem;
+	padding: 0.5rem;
 	cursor: pointer;
 	color: var(--muted);
 }
 
-main { max-width: 960px; margin: 0 auto; padding: 1.5rem; }
+main { flex: 1; padding: 1.5rem 2rem; }
 
 h1 { font-size: 1.4rem; margin: 0 0 1rem; }
 

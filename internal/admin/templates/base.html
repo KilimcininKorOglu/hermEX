@@ -12,13 +12,16 @@
 {{define "foot"}}</body>
 </html>{{end}}
 
-{{define "topbar"}}<header class="topbar">
-<span class="brand">hermEX Admin</span>
+{{define "sidebar"}}<aside class="sidebar">
+<div class="brand">hermEX Admin</div>
 <nav>
-<a href="/admin/ui/">Dashboard</a>
+<a href="/admin/ui/" class="{{if eq .Nav "dashboard"}}active{{end}}">Dashboard</a>
+<a href="/admin/ui/users" class="{{if eq .Nav "users"}}active{{end}}">Users</a>
+<a href="/admin/ui/domains" class="{{if eq .Nav "domains"}}active{{end}}">Domains</a>
+<a href="/admin/ui/aliases" class="{{if eq .Nav "aliases"}}active{{end}}">Aliases</a>
 </nav>
 <form class="logout" method="post" action="/admin/ui/logout">
 <input type="hidden" name="_csrf" value="{{.CSRF}}">
 <button type="submit">Sign out</button>
 </form>
-</header>{{end}}
+</aside>{{end}}
