@@ -385,18 +385,30 @@ func moveTargetFolder(data any) (int64, bool) {
 // date, then removes it from src. This mirrors the copy-then-delete move the
 // webmail action path performs.
 func (s *Store) moveMessage(src int64, uid uint32, dst int64) error {
+	_, err := s.MoveMessage(src, uid, dst)
+	return err
+}
+
+// MoveMessage moves a message from the src folder to dst by copying its raw
+// content, date, and flags into dst and deleting the source. It returns the
+// destination copy's info, whose UID is the new per-folder server id.
+func (s *Store) MoveMessage(src int64, uid uint32, dst int64) (MessageInfo, error) {
 	m, err := s.MessageByUID(src, uid)
 	if err != nil {
-		return err
+		return MessageInfo{}, err
 	}
 	raw, err := s.GetMessageRaw(src, uid)
 	if err != nil {
-		return err
+		return MessageInfo{}, err
 	}
-	if _, err := s.AppendMessage(dst, raw, m.InternalDate, m.Flags); err != nil {
-		return err
+	info, err := s.AppendMessage(dst, raw, m.InternalDate, m.Flags)
+	if err != nil {
+		return MessageInfo{}, err
 	}
-	return s.DeleteMessage(src, uid)
+	if err := s.DeleteMessage(src, uid); err != nil {
+		return MessageInfo{}, err
+	}
+	return info, nil
 }
 
 // The Rule* constructors below build the curated condition and action vocabulary

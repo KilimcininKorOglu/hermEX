@@ -16,6 +16,7 @@ func (t Tag) Token() byte { return byte(t) }
 const (
 	PageAirSync         = 0x00
 	PageEmail           = 0x02
+	PageMove            = 0x05
 	PageGetItemEstimate = 0x06
 	PageFolderHierarchy = 0x07
 	PagePing            = 0x0D
@@ -195,6 +196,18 @@ const (
 	CMClientID        Tag = 0x1511
 	CMStatus          Tag = 0x1512
 	CMAccountID       Tag = 0x1513
+)
+
+// Move (code page 0x05) — the MoveItems command.
+const (
+	MOMoves    Tag = 0x0505
+	MOMove     Tag = 0x0506
+	MOSrcMsgId Tag = 0x0507
+	MOSrcFldId Tag = 0x0508
+	MODstFldId Tag = 0x0509
+	MOResponse Tag = 0x050A
+	MOStatus   Tag = 0x050B
+	MODstMsgId Tag = 0x050C
 )
 
 // ItemOperations (code page 0x14, ActiveSync 12.0+).
