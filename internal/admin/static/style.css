@@ -87,7 +87,6 @@ h1 { font-size: 1.4rem; margin: 0 0 1rem; }
 }
 
 button[type="submit"] {
-	width: 100%;
 	padding: 0.65rem;
 	background: var(--accent);
 	color: #fff;
