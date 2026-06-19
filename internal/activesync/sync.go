@@ -104,7 +104,7 @@ func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node) (*wb
 	if clientKey == "0" {
 		cstate.SyncKey = nextSyncKey("0")
 		cstate.Items = map[string]int64{}
-		return syncResponse(collID, cstate.SyncKey, nil, false), nil
+		return syncResponse(collID, cstate.SyncKey, nil, nil, false), nil
 	}
 	// A key that is not the one we last issued forces a re-prime (Status 3). v1
 	// does not replay a dropped response; the client recovers by re-priming.
@@ -121,13 +121,13 @@ func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node) (*wb
 	// snapshot so they are not echoed back), then server-side changes are streamed.
 	// Client-side adds (server-id mapping) and recurrence edits are later increments.
 	if folderID == int64(mapi.PrivateFIDCalendar) {
-		applyCalendarClientCommands(st, cstate, c)
+		responses := applyCalendarClientCommands(st, cstate, c)
 		cmds, more, err := calendarChanges(st, folderID, cstate, window)
 		if err != nil {
 			return nil, err
 		}
 		cstate.SyncKey = nextSyncKey(clientKey)
-		return syncResponse(collID, cstate.SyncKey, cmds, more), nil
+		return syncResponse(collID, cstate.SyncKey, cmds, responses, more), nil
 	}
 
 	// Apply the client's commands first, folding each into the snapshot so the
@@ -167,7 +167,7 @@ func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node) (*wb
 		}
 	}
 	cstate.SyncKey = nextSyncKey(clientKey)
-	return syncResponse(collID, cstate.SyncKey, cmds, more), nil
+	return syncResponse(collID, cstate.SyncKey, cmds, nil, more), nil
 }
 
 // diffSnapshot compares the device's last-synced snapshot to the live folder and
@@ -279,11 +279,16 @@ func readFlag(flags int64) string {
 }
 
 // syncResponse builds a Status-1 Collection reply with the new key and commands.
-func syncResponse(collID, key string, cmds []*wbxml.Node, more bool) *wbxml.Node {
+func syncResponse(collID, key string, cmds, responses []*wbxml.Node, more bool) *wbxml.Node {
 	children := []*wbxml.Node{
 		wbxml.Str(wbxml.ASSyncKey, key),
 		wbxml.Str(wbxml.ASCollectionID, collID),
 		wbxml.Str(wbxml.ASStatus, strconv.Itoa(syncStatusOK)),
+	}
+	// Responses (the outcome of the device's own commands, e.g. an Add's assigned
+	// server id) precede the server-to-client Commands (MS-ASCMD 2.2.2.20).
+	if len(responses) > 0 {
+		children = append(children, wbxml.Elem(wbxml.ASResponses, responses...))
 	}
 	if len(cmds) > 0 {
 		children = append(children, wbxml.Elem(wbxml.ASCommands, cmds...))

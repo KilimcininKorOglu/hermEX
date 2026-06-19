@@ -157,6 +157,56 @@ func TestSyncCalendarClientEdits(t *testing.T) {
 	}
 }
 
+// TestSyncCalendarClientAdd proves a device-created appointment is stored and
+// answered with a client-id -> server-id mapping in the Responses section, and is
+// not echoed back to the device that created it.
+func TestSyncCalendarClientAdd(t *testing.T) {
+	ts, dir := seededServer(t)
+	calID := strconv.FormatInt(int64(mapi.PrivateFIDCalendar), 10)
+	calReq := func(key string, cmds ...*wbxml.Node) *wbxml.Node {
+		coll := []*wbxml.Node{wbxml.Str(wbxml.ASSyncKey, key), wbxml.Str(wbxml.ASCollectionID, calID)}
+		if len(cmds) > 0 {
+			coll = append(coll, wbxml.Elem(wbxml.ASCommands, cmds...))
+		}
+		return wbxml.Elem(wbxml.ASSync, wbxml.Elem(wbxml.ASCollections, wbxml.Elem(wbxml.ASCollection, coll...)))
+	}
+
+	postCommand(t, ts, "Sync", calReq("0"))
+	add := wbxml.Elem(wbxml.ASAdd, wbxml.Str(wbxml.ASClientID, "cli-1"),
+		wbxml.Elem(wbxml.ASData,
+			wbxml.Str(wbxml.CalSubject, "From Phone"),
+			wbxml.Str(wbxml.CalStartTime, "20260620T140000Z"),
+			wbxml.Str(wbxml.CalEndTime, "20260620T150000Z")))
+	_, root := postCommand(t, ts, "Sync", calReq("1", add))
+	coll := respColl(t, root)
+
+	resp := coll.Child(wbxml.ASResponses)
+	if resp == nil {
+		t.Fatal("no Responses section for the client add")
+	}
+	addResp := resp.Child(wbxml.ASAdd)
+	if addResp == nil {
+		t.Fatal("no Add response")
+	}
+	if got := addResp.ChildText(wbxml.ASClientID); got != "cli-1" {
+		t.Errorf("response ClientId = %q, want cli-1", got)
+	}
+	sid := addResp.ChildText(wbxml.ASServerID)
+	if sid == "" {
+		t.Fatal("Add response has no ServerId")
+	}
+	if adds, _, _ := countCmds(coll); adds != 0 {
+		t.Errorf("the client's add was echoed back as a server add (%d)", adds)
+	}
+	id, err := strconv.ParseInt(sid, 10, 64)
+	if err != nil {
+		t.Fatalf("bad server id %q", sid)
+	}
+	if got := storedSubject(t, dir, id); got != "From Phone" {
+		t.Errorf("stored subject = %q, want From Phone", got)
+	}
+}
+
 // storedSubject reads a stored object's PR_SUBJECT.
 func storedSubject(t *testing.T, dir string, id int64) string {
 	t.Helper()

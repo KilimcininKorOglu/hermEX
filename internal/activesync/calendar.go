@@ -9,6 +9,7 @@ import (
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcical"
+	"hermex/internal/oxcmail"
 	"hermex/internal/wbxml"
 )
 
@@ -217,19 +218,43 @@ func parseCalendarItem(st *objectstore.Store, data *wbxml.Node) (mapi.PropertyVa
 // bumping the change number (SetMessageProperties), so it is not echoed back to
 // the device that made it. Client-side adds (which need a server-id mapping) and
 // recurrence edits are later increments.
-func applyCalendarClientCommands(st *objectstore.Store, cstate *collectionState, c *wbxml.Node) {
+func applyCalendarClientCommands(st *objectstore.Store, cstate *collectionState, c *wbxml.Node) []*wbxml.Node {
 	cmds := c.Child(wbxml.ASCommands)
 	if cmds == nil {
-		return
+		return nil
 	}
+	var responses []*wbxml.Node
+	added := map[string]bool{}
 	for _, cmd := range cmds.Children {
-		sid := cmd.ChildText(wbxml.ASServerID)
-		id, err := strconv.ParseInt(sid, 10, 64)
-		if err != nil {
-			continue
-		}
 		switch cmd.Tag {
+		case wbxml.ASAdd:
+			// A device add carries a client id (not a server id); the server
+			// creates the appointment and returns the id it assigned.
+			clientID := cmd.ChildText(wbxml.ASClientID)
+			data := cmd.Child(wbxml.ASData)
+			if clientID == "" || data == nil {
+				continue
+			}
+			props, err := parseCalendarItem(st, data)
+			if err != nil {
+				continue
+			}
+			props = append(props, mapi.TaggedPropVal{Tag: mapi.PrMessageClass, Value: "IPM.Appointment"})
+			id, err := st.CreateMessage(int64(mapi.PrivateFIDCalendar), &oxcmail.Message{Props: props})
+			if err != nil {
+				continue
+			}
+			sid := strconv.FormatInt(id, 10)
+			added[sid] = true
+			responses = append(responses, wbxml.Elem(wbxml.ASAdd,
+				wbxml.Str(wbxml.ASClientID, clientID),
+				wbxml.Str(wbxml.ASServerID, sid),
+				wbxml.Str(wbxml.ASStatus, strconv.Itoa(syncStatusOK))))
 		case wbxml.ASChange:
+			id, err := strconv.ParseInt(cmd.ChildText(wbxml.ASServerID), 10, 64)
+			if err != nil {
+				continue
+			}
 			data := cmd.Child(wbxml.ASData)
 			if data == nil {
 				continue
@@ -240,11 +265,28 @@ func applyCalendarClientCommands(st *objectstore.Store, cstate *collectionState,
 			}
 			_ = st.SetMessageProperties(id, props)
 		case wbxml.ASDelete:
+			sid := cmd.ChildText(wbxml.ASServerID)
+			id, err := strconv.ParseInt(sid, 10, 64)
+			if err != nil {
+				continue
+			}
 			if st.DeleteObject(id) == nil {
 				delete(cstate.Items, sid)
 			}
 		}
 	}
+	// Fold the just-added appointments into the snapshot so calendarChanges does
+	// not echo them back as server adds to the device that just created them.
+	if len(added) > 0 {
+		if objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar)); err == nil {
+			for _, o := range objs {
+				if sid := strconv.FormatInt(o.ID, 10); added[sid] {
+					cstate.Items[sid] = int64(o.ChangeNumber)
+				}
+			}
+		}
+	}
+	return responses
 }
 
 // bytesProp reads a PtBinary property as raw bytes.
