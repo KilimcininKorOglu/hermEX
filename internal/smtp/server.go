@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/textproto"
 	"strings"
+	"time"
 
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
@@ -98,6 +99,12 @@ func (s *Server) handle(conn net.Conn) {
 	_, canAuth := sess.(Authenticator)
 	var hasFrom bool
 	var rcptCount int
+	// Trace context for the Received: header stamped at DATA time. helo is the
+	// HELO/EHLO argument, esmtp records which greeting was used, and authed/isTLS
+	// select the RFC 3848 "with" protocol token. authed is cleared by STARTTLS,
+	// which discards all prior session state (RFC 3207).
+	var helo string
+	var esmtp, authed bool
 	for {
 		line, err := tp.ReadLine()
 		if err != nil {
@@ -108,14 +115,18 @@ func (s *Server) handle(conn net.Conn) {
 		switch strings.ToUpper(cmd) {
 		case "HELO":
 			hasFrom, rcptCount = false, 0
+			helo, esmtp = arg, false
 			sess.Reset()
 			reply(w, 250, s.hostname())
 		case "EHLO":
 			hasFrom, rcptCount = false, 0
+			helo, esmtp = arg, true
 			sess.Reset()
 			s.greetEHLO(w, arg, isTLS, canAuth && isTLS)
 		case "AUTH":
-			s.handleAuth(w, tp, arg, sess, isTLS, canAuth)
+			if s.handleAuth(w, tp, arg, sess, isTLS, canAuth) {
+				authed = true
+			}
 		case "STARTTLS":
 			if s.TLSConfig == nil || isTLS {
 				reply(w, 502, "STARTTLS not available")
@@ -138,6 +149,7 @@ func (s *Server) handle(conn net.Conn) {
 			// re-issues EHLO over the secured link.
 			sess.Reset()
 			hasFrom, rcptCount = false, 0
+			helo, esmtp, authed = "", false, false
 			event(logging.LevelInfo, "starttls", nil)
 		case "MAIL":
 			addr, ok := extractPath(arg, "FROM:")
@@ -175,7 +187,8 @@ func (s *Server) handle(conn net.Conn) {
 				continue
 			}
 			reply(w, 354, "end data with <CR><LF>.<CR><LF>")
-			if err := s.consumeData(tp, sess); err != nil {
+			trace := buildReceived(helo, remote, s.hostname(), esmtp, isTLS, authed, time.Now())
+			if err := s.consumeData(tp, sess, trace); err != nil {
 				event(logging.LevelWarn, "message.reject", logging.Fields{"recipients": rcptCount, "reason": err.Error()})
 				if errors.Is(err, errTooLarge) {
 					reply(w, 552, "message exceeds size limit")
@@ -207,12 +220,16 @@ var errTooLarge = errors.New("message too large")
 // consumeData reads the dot-terminated message body and hands it to the
 // session, enforcing MaxSize when set. The body is always drained so the
 // protocol stays in sync even when delivery is rejected.
-func (s *Server) consumeData(tp *textproto.Reader, sess Session) error {
+func (s *Server) consumeData(tp *textproto.Reader, sess Session, trace string) error {
 	dot := newDotReader(tp.R)
-	var r io.Reader = dot
+	var body io.Reader = dot
 	if s.MaxSize > 0 {
-		r = &limitedReader{r: dot, remaining: s.MaxSize}
+		body = &limitedReader{r: dot, remaining: s.MaxSize}
 	}
+	// Prepend the Received: trace header OUTSIDE the size limiter, so it is neither
+	// counted against the client's size budget nor truncated when the body is at
+	// the limit. The dot-decoded body keeps its CRLF endings, matching the header.
+	r := io.MultiReader(strings.NewReader(trace), body)
 	err := sess.Data(r)
 	// Always drain the underlying dot-encoded body so the next command reads
 	// cleanly, even when delivery was rejected or the size limit tripped.

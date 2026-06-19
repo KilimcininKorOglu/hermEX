@@ -6,7 +6,9 @@ import (
 	"io"
 	"net"
 	"net/textproto"
+	"strings"
 	"testing"
+	"time"
 )
 
 type fakeSession struct {
@@ -80,9 +82,57 @@ func TestServerTransaction(t *testing.T) {
 	if len(sess.rcpts) != 2 || sess.rcpts[0] != "bob@test" || sess.rcpts[1] != "carol@test" {
 		t.Errorf("rcpts = %v", sess.rcpts)
 	}
-	want := "Subject: hi\r\n\r\nline one\r\n.dotstuffed\r\n"
-	if string(sess.data) != want {
-		t.Errorf("data = %q, want %q", sess.data, want)
+	// Every accepted message is stamped with a Received: trace header (RFC 5321
+	// §4.4) ahead of the body, recording the EHLO name and the client IP. The
+	// dot-unstuffed body must then follow it intact.
+	got := string(sess.data)
+	if !strings.HasPrefix(got, "Received: from client.test ([") {
+		t.Errorf("data missing the Received: trace header: %q", got)
+	}
+	if !strings.Contains(got, " with ESMTP;") {
+		t.Errorf("Received: header should record the ESMTP protocol: %q", got)
+	}
+	body := "Subject: hi\r\n\r\nline one\r\n.dotstuffed\r\n"
+	if !strings.HasSuffix(got, body) {
+		t.Errorf("body after the trace header = %q, want it to end with %q", got, body)
+	}
+}
+
+// TestBuildReceived covers the RFC 3848 "with" protocol token across greeting and
+// security states, plus the header shape: the EHLO name and client IP are
+// recorded, an empty HELO degrades to "unknown", and the host:port is reduced to
+// the bare IP. hermEX requires TLS before AUTH, so an authenticated session is
+// always ESMTPSA, never bare ESMTPA.
+func TestBuildReceived(t *testing.T) {
+	when := time.Date(2026, 6, 19, 22, 9, 21, 0, time.FixedZone("", 3*3600))
+	cases := []struct {
+		name               string
+		helo               string
+		esmtp, tls, authed bool
+		wantFrom, wantTok  string
+	}{
+		{"helo", "client.test", false, false, false, "from client.test ([198.51.100.7])", "with SMTP;"},
+		{"ehlo", "client.test", true, false, false, "from client.test ([198.51.100.7])", "with ESMTP;"},
+		{"ehlo+tls", "client.test", true, true, false, "from client.test ([198.51.100.7])", "with ESMTPS;"},
+		{"ehlo+tls+auth", "client.test", true, true, true, "from client.test ([198.51.100.7])", "with ESMTPSA;"},
+		{"no-helo", "", true, false, false, "from unknown ([198.51.100.7])", "with ESMTP;"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := buildReceived(c.helo, "198.51.100.7:54321", "mail.hermex.test", c.esmtp, c.tls, c.authed, when)
+			if !strings.HasPrefix(got, "Received: "+c.wantFrom) {
+				t.Errorf("from clause = %q, want prefix %q", got, "Received: "+c.wantFrom)
+			}
+			if !strings.Contains(got, c.wantTok) {
+				t.Errorf("protocol token: got %q, want %q", got, c.wantTok)
+			}
+			if !strings.Contains(got, "by mail.hermex.test ") {
+				t.Errorf("missing the by-hostname clause: %q", got)
+			}
+			if !strings.HasSuffix(got, "Fri, 19 Jun 2026 22:09:21 +0300\r\n") {
+				t.Errorf("date tail = %q, want the RFC 5322 date", got)
+			}
+		})
 	}
 }
 
