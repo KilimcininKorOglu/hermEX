@@ -17,6 +17,7 @@ import (
 
 	"hermex/internal/config"
 	"hermex/internal/directory"
+	"hermex/internal/ldapauth"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/mapihttp"
@@ -41,6 +42,7 @@ func main() {
 		log.Fatalf("hermex-mapi: directory unreachable: %v", err)
 	}
 	dir := directory.NewSQL(db)
+	dir.SetLDAPVerifier(ldapauth.New())
 	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
 
