@@ -139,7 +139,7 @@ func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node) (*wb
 				return nil, err
 			}
 			cmds = append(cmds, wbxml.Elem(wbxml.ASAdd,
-				wbxml.Str(wbxml.ASServerID, ch.sid), emailAppData(raw, ch.m)))
+				wbxml.Str(wbxml.ASServerID, ch.sid), emailAppData(raw, ch.m, collID, ch.sid)))
 			cstate.Items[ch.sid] = ch.m.Flags
 		case changeChange:
 			cmds = append(cmds, wbxml.Elem(wbxml.ASChange,
@@ -226,10 +226,12 @@ func applyClientCommands(st *objectstore.Store, folderID int64, cstate *collecti
 }
 
 // emailAppData builds the ApplicationData for an Email-class item: the listing
-// properties from the index plus the full message as a MIME body. v1 serves the
-// body as MIME (Type 4); honoring fine-grained body preferences is later work.
-func emailAppData(raw []byte, m objectstore.MessageInfo) *wbxml.Node {
-	return wbxml.Elem(wbxml.ASData,
+// properties from the index, the full message as a MIME body, and — when the
+// message carries attachments — an AirSyncBase Attachments listing whose
+// FileReferences the device fetches through ItemOperations. v1 serves the body
+// as MIME (Type 4); honoring fine-grained body preferences is later work.
+func emailAppData(raw []byte, m objectstore.MessageInfo, collID, serverID string) *wbxml.Node {
+	data := wbxml.Elem(wbxml.ASData,
 		wbxml.Str(wbxml.EMSubject, m.Subject),
 		wbxml.Str(wbxml.EMFrom, m.Sender),
 		wbxml.Str(wbxml.EMDateReceived, m.InternalDate.UTC().Format("2006-01-02T15:04:05.000Z")),
@@ -241,6 +243,10 @@ func emailAppData(raw []byte, m objectstore.MessageInfo) *wbxml.Node {
 			wbxml.Opaque(wbxml.ABData, raw),
 		),
 	)
+	if atts := attachmentsNode(collID, serverID, messageAttachments(raw)); atts != nil {
+		data.Children = append(data.Children, atts)
+	}
+	return data
 }
 
 // readAppData builds the minimal ApplicationData for a flag change: just the

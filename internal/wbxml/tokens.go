@@ -204,6 +204,11 @@ const (
 	ABData              Tag = 0x110B
 	ABEstimatedDataSize Tag = 0x110C
 	ABTruncated         Tag = 0x110D
+	ABAttachments       Tag = 0x110E
+	ABAttachment        Tag = 0x110F
+	ABAttDisplayName    Tag = 0x1110
+	ABFileReference     Tag = 0x1111
+	ABMethod            Tag = 0x1112
 	ABNativeBodyType    Tag = 0x1116
 	ABContentType       Tag = 0x1117
 	ABPreview           Tag = 0x1118
