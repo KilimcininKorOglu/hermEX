@@ -83,6 +83,41 @@ func TestAuthenticateLDAPBranch(t *testing.T) {
 	}
 }
 
+// TestUpsertLDAPUser proves a downsync marks an existing user LDAP-mastered (sets
+// its externid) and creates a brand-new user carrying its externid.
+func TestUpsertLDAPUser(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	cleanTables(t, db)
+
+	root := t.TempDir()
+	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "dom")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.CreateUser("alice@hermex.test", "localpw", filepath.Join(root, "alice")); err != nil {
+		t.Fatal(err)
+	}
+
+	// An existing user gains its externid (created=false).
+	if created, err := d.UpsertLDAPUser("alice@hermex.test", []byte{0x01, 0x02}, ""); err != nil || created {
+		t.Fatalf("upsert existing = (created %v, err %v); want (false, nil)", created, err)
+	}
+	if row, ok, err := d.resolve("alice@hermex.test"); err != nil || !ok || len(row.externid) == 0 {
+		t.Errorf("existing user not marked LDAP-mastered (externid=%v, ok=%v, err=%v)", row.externid, ok, err)
+	}
+
+	// A new login is created with its externid (created=true).
+	if created, err := d.UpsertLDAPUser("bob@hermex.test", []byte{0x03, 0x04}, filepath.Join(root, "bob")); err != nil || !created {
+		t.Fatalf("upsert new = (created %v, err %v); want (true, nil)", created, err)
+	}
+	if row, ok, err := d.resolve("bob@hermex.test"); err != nil || !ok || len(row.externid) == 0 {
+		t.Errorf("new LDAP user not created with externid (ok=%v, err=%v)", ok, err)
+	}
+}
+
 // TestLDAPConfigRoundTrip stores an organization's LDAP configuration and reads
 // it back, confirms SetLDAPConfig replaces rather than duplicates, and confirms
 // an org with no configuration reports ok=false (so its users fall back to local

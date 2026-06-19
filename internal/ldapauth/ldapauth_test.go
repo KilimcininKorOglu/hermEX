@@ -1,6 +1,7 @@
 package ldapauth
 
 import (
+	"bytes"
 	"crypto/tls"
 	"errors"
 	"testing"
@@ -110,5 +111,36 @@ func TestVerifyServiceBindError(t *testing.T) {
 	ok, err := verifierWith(fc).Verify(cfg, "alice@hermex.test", "x")
 	if ok || err == nil {
 		t.Errorf("service bind failure = (%v, %v), want (false, error)", ok, err)
+	}
+}
+
+// dirEntry builds a directory search entry with a mail value and (optionally) a
+// binary objectGUID.
+func dirEntry(dn, mail string, guid []byte) *ldap.Entry {
+	attrs := []*ldap.EntryAttribute{{Name: "mail", Values: []string{mail}, ByteValues: [][]byte{[]byte(mail)}}}
+	if guid != nil {
+		attrs = append(attrs, &ldap.EntryAttribute{Name: "objectGUID", ByteValues: [][]byte{guid}})
+	}
+	return &ldap.Entry{DN: dn, Attributes: attrs}
+}
+
+// TestSync proves a downsync returns each directory account's login and stable
+// identifier, skipping an entry that carries no stable identifier (there is
+// nothing to bind its externid to).
+func TestSync(t *testing.T) {
+	guid := []byte{0x01, 0x02, 0x03, 0x04}
+	fc := &fakeConn{searchRes: &ldap.SearchResult{Entries: []*ldap.Entry{
+		dirEntry("uid=alice,dc=hermex,dc=test", "alice@hermex.test", guid),
+		dirEntry("uid=noid,dc=hermex,dc=test", "noid@hermex.test", nil),
+	}}}
+	users, err := verifierWith(fc).Sync(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 1 {
+		t.Fatalf("Sync returned %d users, want 1 (the entry with no stable id is skipped)", len(users))
+	}
+	if users[0].Username != "alice@hermex.test" || !bytes.Equal(users[0].ExternID, guid) {
+		t.Errorf("synced user = %+v, want alice@hermex.test with the objectGUID", users[0])
 	}
 }

@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 
 	_ "github.com/go-sql-driver/mysql"
 
 	"hermex/internal/config"
 	"hermex/internal/directory"
+	"hermex/internal/ldapauth"
 	"hermex/internal/objectstore"
 )
 
@@ -24,6 +26,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  create-user <email> <password>")
 	fmt.Fprintln(os.Stderr, "  create-alias <alias-address> <user-email>")
 	fmt.Fprintln(os.Stderr, "  sweep-content <email>   (reclaim orphan content files; run with the mailbox idle)")
+	fmt.Fprintln(os.Stderr, "  ldap-sync <org-id>      (import the org's LDAP/AD accounts into the directory)")
 	os.Exit(2)
 }
 
@@ -94,6 +97,42 @@ func main() {
 			log.Fatalf("hermex-admin: sweep: %v", err)
 		}
 		fmt.Printf("swept %d orphan content file(s) from %s\n", removed, args[1])
+	case "ldap-sync":
+		if len(args) != 2 {
+			usage()
+		}
+		orgID, err := strconv.ParseInt(args[1], 10, 64)
+		if err != nil {
+			log.Fatalf("hermex-admin: org id %q: %v", args[1], err)
+		}
+		lcfg, ok, err := dir.GetLDAPConfig(orgID)
+		if err != nil {
+			log.Fatalf("hermex-admin: ldap config: %v", err)
+		}
+		if !ok {
+			log.Fatalf("hermex-admin: organization %d has no LDAP configuration", orgID)
+		}
+		users, err := ldapauth.New().Sync(lcfg)
+		if err != nil {
+			log.Fatalf("hermex-admin: ldap sync: %v", err)
+		}
+		var created, updated int
+		for _, u := range users {
+			// A directory entry whose mail domain is not provisioned locally is
+			// skipped (logged) rather than aborting the whole sync.
+			isNew, err := dir.UpsertLDAPUser(u.Username, u.ExternID, cfg.MaildirFor(u.Username))
+			if err != nil {
+				log.Printf("hermex-admin: skip %s: %v", u.Username, err)
+				continue
+			}
+			if isNew {
+				created++
+			} else {
+				updated++
+			}
+		}
+		fmt.Printf("ldap-sync org %d: %d created, %d updated (of %d directory entries)\n",
+			orgID, created, updated, len(users))
 	default:
 		usage()
 	}

@@ -43,32 +43,16 @@ func (v *Verifier) Verify(cfg directory.LDAPConfig, login, password string) (boo
 	if password == "" || cfg.URI == "" {
 		return false, nil
 	}
-	c, err := v.dial(cfg.URI)
+	c, err := v.connect(cfg)
 	if err != nil {
 		return false, err
 	}
 	defer c.Close()
 
-	if cfg.StartTLS {
-		host, _ := hostOf(cfg.URI)
-		if err := c.StartTLS(&tls.Config{ServerName: host}); err != nil {
-			return false, err
-		}
-	}
-	// Bind as the search service account (anonymous when none is configured).
-	if cfg.BindDN != "" {
-		if err := c.Bind(cfg.BindDN, cfg.BindPassword); err != nil {
-			return false, err
-		}
-	}
 	// Resolve the login to exactly one distinguished name.
-	attr := cfg.UsernameAttr
-	if attr == "" {
-		attr = "mail"
-	}
 	res, err := c.Search(ldap.NewSearchRequest(
 		cfg.BaseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 2, 10, false,
-		fmt.Sprintf("(%s=%s)", attr, ldap.EscapeFilter(login)),
+		fmt.Sprintf("(%s=%s)", loginAttr(cfg), ldap.EscapeFilter(login)),
 		[]string{"dn"}, nil))
 	if err != nil {
 		return false, err
@@ -81,6 +65,84 @@ func (v *Verifier) Verify(cfg directory.LDAPConfig, login, password string) (boo
 		return false, nil
 	}
 	return true, nil
+}
+
+// connect dials the directory, optionally upgrades with StartTLS, and binds the
+// search service account (an anonymous bind when none is configured). The caller
+// closes the returned connection.
+func (v *Verifier) connect(cfg directory.LDAPConfig) (conn, error) {
+	c, err := v.dial(cfg.URI)
+	if err != nil {
+		return nil, err
+	}
+	if cfg.StartTLS {
+		host, _ := hostOf(cfg.URI)
+		if err := c.StartTLS(&tls.Config{ServerName: host}); err != nil {
+			c.Close()
+			return nil, err
+		}
+	}
+	if cfg.BindDN != "" {
+		if err := c.Bind(cfg.BindDN, cfg.BindPassword); err != nil {
+			c.Close()
+			return nil, err
+		}
+	}
+	return c, nil
+}
+
+// loginAttr is the directory attribute a login is matched against (the login's
+// e-mail address by default).
+func loginAttr(cfg directory.LDAPConfig) string {
+	if cfg.UsernameAttr != "" {
+		return cfg.UsernameAttr
+	}
+	return "mail"
+}
+
+// SyncedUser is one account discovered in the directory: its login (the value of
+// the configured login attribute) and the directory's stable identifier (the
+// account's externid — objectGUID on Active Directory, entryUUID on OpenLDAP).
+type SyncedUser struct {
+	Username string
+	ExternID []byte
+}
+
+// Sync lists the directory's accounts for downsync into the local directory: it
+// searches the base for every entry carrying the login attribute and returns
+// each one's login and stable identifier. An entry with no stable identifier is
+// skipped — there is nothing to bind its externid to.
+func (v *Verifier) Sync(cfg directory.LDAPConfig) ([]SyncedUser, error) {
+	c, err := v.connect(cfg)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+
+	attr := loginAttr(cfg)
+	res, err := c.Search(ldap.NewSearchRequest(
+		cfg.BaseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
+		fmt.Sprintf("(%s=*)", attr),
+		[]string{attr, "objectGUID", "entryUUID"}, nil))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SyncedUser, 0, len(res.Entries))
+	for _, e := range res.Entries {
+		login := e.GetAttributeValue(attr)
+		if login == "" {
+			continue
+		}
+		id := e.GetRawAttributeValue("objectGUID")
+		if len(id) == 0 {
+			id = e.GetRawAttributeValue("entryUUID")
+		}
+		if len(id) == 0 {
+			continue
+		}
+		out = append(out, SyncedUser{Username: login, ExternID: id})
+	}
+	return out, nil
 }
 
 // hostOf extracts the host (for the TLS ServerName) from an LDAP URI.

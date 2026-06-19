@@ -3,6 +3,9 @@ package directory
 import (
 	"database/sql"
 	"errors"
+	"fmt"
+	"os"
+	"strings"
 )
 
 // LDAPVerifier verifies a login against an organization's LDAP directory by
@@ -48,6 +51,48 @@ func (d *SQLDirectory) GetLDAPConfig(orgID int64) (cfg LDAPConfig, ok bool, err 
 	}
 	cfg.StartTLS = startTLS != 0
 	return cfg, true, nil
+}
+
+// UpsertLDAPUser records an account discovered in an LDAP downsync: an existing
+// user (matched by username) has its externid set, marking it LDAP-mastered; a
+// new user is created with that externid, an empty local password (it
+// authenticates only against LDAP), and the given maildir. It reports whether a
+// new user was created; the user's domain must already exist.
+func (d *SQLDirectory) UpsertLDAPUser(username string, externid []byte, maildir string) (created bool, err error) {
+	username = strings.ToLower(strings.TrimSpace(username))
+	var id int64
+	switch err = d.db.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&id); {
+	case err == nil:
+		_, err = d.db.Exec(`UPDATE users SET externid = ? WHERE id = ?`, externid, id)
+		return false, err
+	case !errors.Is(err, sql.ErrNoRows):
+		return false, err
+	}
+	at := strings.LastIndexByte(username, '@')
+	if at <= 0 {
+		return false, errors.New("directory: username must be an email address")
+	}
+	domain := username[at+1:]
+	var domainID int64
+	switch err = d.db.QueryRow(`SELECT id FROM domains WHERE domainname = ?`, domain).Scan(&domainID); {
+	case errors.Is(err, sql.ErrNoRows):
+		return false, fmt.Errorf("directory: domain %q not found", domain)
+	case err != nil:
+		return false, err
+	}
+	if _, err = d.db.Exec(
+		`INSERT INTO users
+		   (username, password, domain_id, homeserver, maildir, lang, timezone, privilege_bits, address_status, display_type, externid)
+		 VALUES (?, '', ?, 0, ?, '', '', ?, 0, 0, ?)`,
+		username, domainID, maildir, privIMAPPOP3|privSMTP, externid); err != nil {
+		return false, err
+	}
+	if maildir != "" {
+		if err = os.MkdirAll(maildir, 0o700); err != nil {
+			return false, err
+		}
+	}
+	return true, nil
 }
 
 // SetLDAPConfig stores (replacing any existing) an organization's LDAP
