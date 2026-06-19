@@ -72,12 +72,12 @@ func TestUnauthenticated(t *testing.T) {
 }
 
 // TestPlainQueryDispatch confirms a plain-query command reaches dispatch.
-// ValidateCert is not implemented in v1, so it returns 501 — proving the
+// GetAttachment is not implemented in v1, so it returns 501 — proving the
 // transport and parse path works end to end (implemented commands are exercised
 // by the command tests).
 func TestPlainQueryDispatch(t *testing.T) {
 	ts := testServer(t)
-	resp, _ := do(t, ts, "POST", "/Microsoft-Server-ActiveSync?Cmd=ValidateCert&User="+testUser+"&DeviceId=dev1&DeviceType=iPhone", "", true)
+	resp, _ := do(t, ts, "POST", "/Microsoft-Server-ActiveSync?Cmd=GetAttachment&User="+testUser+"&DeviceId=dev1&DeviceType=iPhone", "", true)
 	if resp.StatusCode != http.StatusNotImplemented {
 		t.Fatalf("status %d, want 501 (dispatch reached)", resp.StatusCode)
 	}
@@ -110,10 +110,10 @@ func TestParseBase64Query(t *testing.T) {
 }
 
 // TestBase64QueryDispatch confirms a base64-packed command also routes through
-// the live endpoint to dispatch (command code 22 = ValidateCert, unimplemented in v1).
+// the live endpoint to dispatch (command code 4 = GetAttachment, unimplemented in v1).
 func TestBase64QueryDispatch(t *testing.T) {
 	ts := testServer(t)
-	packed := []byte{0x0E, 0x16, 0x09, 0x04, 0x04, 'd', 'e', 'v', '1', 0x00, 0x03, 'A', 'n', 'd'}
+	packed := []byte{0x0E, 0x04, 0x09, 0x04, 0x04, 'd', 'e', 'v', '1', 0x00, 0x03, 'A', 'n', 'd'}
 	resp, _ := do(t, ts, "POST", "/Microsoft-Server-ActiveSync?"+base64.StdEncoding.EncodeToString(packed), "", true)
 	if resp.StatusCode != http.StatusNotImplemented {
 		t.Fatalf("status %d, want 501 (base64 command reached dispatch)", resp.StatusCode)

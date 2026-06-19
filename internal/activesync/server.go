@@ -7,6 +7,7 @@
 package activesync
 
 import (
+	"crypto/x509"
 	"net/http"
 	"strings"
 
@@ -23,6 +24,7 @@ type Server struct {
 	hostname string
 	Logger   *logging.Logger // central activity log; nil disables logging
 	Spool    *relay.Spool    // outbound relay queue; nil sends local-only
+	roots    *x509.CertPool  // S/MIME trust anchors for ValidateCert; nil = system roots
 }
 
 // NewServer builds an ActiveSync server backed by the directory for
@@ -130,6 +132,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleResolveRecipients(w, r, sess)
 	case "Search":
 		s.handleSearch(w, r, sess)
+	case "ValidateCert":
+		s.handleValidateCert(w, r, sess)
 	default:
 		http.Error(w, "command not implemented: "+sess.req.cmd, http.StatusNotImplemented)
 	}

@@ -20,6 +20,7 @@ const (
 	PageGetItemEstimate = 0x06
 	PageFolderHierarchy = 0x07
 	PageResolveRecips   = 0x0A
+	PageValidateCert    = 0x0B
 	PagePing            = 0x0D
 	PageProvision       = 0x0E
 	PageSearch          = 0x0F
@@ -125,6 +126,16 @@ const (
 	RREmailAddress      Tag = 0x0A0B
 	RRTo                Tag = 0x0A10
 	RRRecipientCount    Tag = 0x0A12
+)
+
+// ValidateCert (code page 0x0B) — S/MIME certificate validation.
+const (
+	VCValidateCert     Tag = 0x0B05
+	VCCertificates     Tag = 0x0B06
+	VCCertificate      Tag = 0x0B07
+	VCCertificateChain Tag = 0x0B08
+	VCCheckCRL         Tag = 0x0B09
+	VCStatus           Tag = 0x0B0A
 )
 
 // Ping (code page 0x0D).
