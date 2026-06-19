@@ -71,11 +71,17 @@ func rightsForLevel(level string) uint32 {
 
 // levelForRights names the canned PermissionLevel whose mask equals the stored
 // rights, or "Custom" when none does. The stored rights are normalized (the store
-// fills implied bits on write — e.g. Owner implies visible|contact), so each
-// profile mask is normalized before the exact compare; a raw compare would miss.
+// fills implied bits on write — e.g. Owner implies visible|contact, and a read right
+// implies free/busy), so each profile mask is normalized the same way before the
+// compare; a raw compare would miss. The free/busy bits are then stripped from both
+// sides: they are a calendar concept absent from the non-calendar PermissionLevel
+// set, and dropping them lets a synthesized None (raw 0) and a written None
+// (free/busy-filled) both resolve to None.
 func levelForRights(rights uint32) string {
+	const freeBusy = mapi.FrightsFreeBusySimple | mapi.FrightsFreeBusyDetailed
+	core := rights &^ freeBusy
 	for _, l := range permissionLevels {
-		if mapi.NormalizeRights(l.mask, true) == rights {
+		if mapi.NormalizeRights(l.mask, false) == core {
 			return l.name
 		}
 	}

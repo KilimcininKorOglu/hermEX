@@ -1,6 +1,7 @@
 package ews
 
 import (
+	"encoding/xml"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -342,5 +343,103 @@ func TestUpdateFolderPermissionSetDistinguishedAllowed(t *testing.T) {
 	}
 	if want := mapi.NormalizeRights(mapi.RightsReviewer, true); folderPerms(t, dir, int64(mapi.PrivateFIDInbox))["default"] != want {
 		t.Errorf("inbox default rights not stored as Reviewer %#x", want)
+	}
+}
+
+// getFolderPermsReq builds a GetFolder request that asks for folder:PermissionSet
+// in AdditionalProperties.
+func getFolderPermsReq(folderRef string) string {
+	return wrapRequest(`<GetFolder xmlns="` + nsMessages + `">` +
+		`<FolderShape><BaseShape>Default</BaseShape>` +
+		`<t:AdditionalProperties xmlns:t="` + nsTypes + `">` +
+		`<t:FieldURI FieldURI="folder:PermissionSet"/>` +
+		`</t:AdditionalProperties></FolderShape>` +
+		`<FolderIds>` + folderRef + `</FolderIds></GetFolder>`)
+}
+
+// permSetResp is a namespace-agnostic view of a returned folder's PermissionSet.
+type permSetResp struct {
+	Permissions []struct {
+		UserID struct {
+			PrimarySmtpAddress string `xml:"PrimarySmtpAddress"`
+			DistinguishedUser  string `xml:"DistinguishedUser"`
+		} `xml:"UserId"`
+		PermissionLevel string `xml:"PermissionLevel"`
+	} `xml:"Permissions>Permission"`
+}
+
+// parsePermSet extracts a GetFolder response's PermissionSet, keyed by member
+// (DistinguishedUser name or SMTP address) to PermissionLevel.
+func parsePermSet(t *testing.T, out string) map[string]string {
+	t.Helper()
+	var env struct {
+		Perms permSetResp `xml:"Body>GetFolderResponse>ResponseMessages>GetFolderResponseMessage>Folders>Folder>PermissionSet"`
+	}
+	if err := xml.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("unmarshal PermissionSet: %v\n%s", err, out)
+	}
+	levels := map[string]string{}
+	for _, p := range env.Perms.Permissions {
+		key := p.UserID.DistinguishedUser
+		if key == "" {
+			key = p.UserID.PrimarySmtpAddress
+		}
+		levels[key] = p.PermissionLevel
+	}
+	return levels
+}
+
+// TestGetFolderPermissionSetRoundTrip is the end-to-end check: permissions written
+// via UpdateFolder are read back via GetFolder with the same levels. It exercises
+// the whole wire->store->wire path through both real handlers.
+func TestGetFolderPermissionSetRoundTrip(t *testing.T) {
+	ts, _ := seededEWS(t)
+	box := createUserFolder(t, ts, "inbox", "Shared")
+
+	perms := permissionXML(`<t:DistinguishedUser>Default</t:DistinguishedUser>`, "Editor") +
+		permissionXML(`<t:PrimarySmtpAddress>alice@hermex.test</t:PrimarySmtpAddress>`, "Reviewer")
+	if _, out := soapPost(t, ts, updatePermsReq(`<t:FolderId Id="`+box+`"/>`, perms), true); !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("UpdateFolder PermissionSet not success: %s", out)
+	}
+
+	_, out := soapPost(t, ts, getFolderPermsReq(`<t:FolderId Id="`+box+`" xmlns:t="`+nsTypes+`"/>`), true)
+	levels := parsePermSet(t, out)
+	if levels["Default"] != "Editor" {
+		t.Errorf("Default level = %q, want Editor", levels["Default"])
+	}
+	if levels["alice@hermex.test"] != "Reviewer" {
+		t.Errorf("alice level = %q, want Reviewer", levels["alice@hermex.test"])
+	}
+	if _, ok := levels["Anonymous"]; !ok {
+		t.Error("Anonymous member must be synthesized on read")
+	}
+}
+
+// TestGetFolderPermissionSetOmittedByDefault confirms PermissionSet is returned only
+// when folder:PermissionSet is requested — a plain GetFolder must not carry it.
+func TestGetFolderPermissionSetOmittedByDefault(t *testing.T) {
+	ts, _ := seededEWS(t)
+	box := createUserFolder(t, ts, "inbox", "Shared")
+	req := wrapRequest(`<GetFolder xmlns="` + nsMessages + `">` +
+		`<FolderShape><BaseShape>AllProperties</BaseShape></FolderShape>` +
+		`<FolderIds><t:FolderId Id="` + box + `" xmlns:t="` + nsTypes + `"/></FolderIds></GetFolder>`)
+	if _, out := soapPost(t, ts, req, true); strings.Contains(out, "PermissionSet") {
+		t.Errorf("PermissionSet must be absent unless requested (even for AllProperties): %s", out)
+	}
+}
+
+// TestGetFolderPermissionSetSynthesizesDefaults confirms a folder with no stored
+// permissions still reports the always-present Default and Anonymous members at the
+// None level.
+func TestGetFolderPermissionSetSynthesizesDefaults(t *testing.T) {
+	ts, _ := seededEWS(t)
+	box := createUserFolder(t, ts, "inbox", "Fresh")
+	_, out := soapPost(t, ts, getFolderPermsReq(`<t:FolderId Id="`+box+`" xmlns:t="`+nsTypes+`"/>`), true)
+	levels := parsePermSet(t, out)
+	if levels["Default"] != "None" {
+		t.Errorf("Default level = %q, want None", levels["Default"])
+	}
+	if levels["Anonymous"] != "None" {
+		t.Errorf("Anonymous level = %q, want None", levels["Anonymous"])
 	}
 }

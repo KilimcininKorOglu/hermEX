@@ -33,6 +33,19 @@ func TestPermissionLevelRoundTrip(t *testing.T) {
 	}
 }
 
+// TestPermissionLevelFreeBusyAgnostic confirms the level lookup tolerates the
+// free/busy fill: a member with raw RightsNone (as the read path synthesizes for an
+// absent Default/Anonymous) reads back as None, and a free/busy-filled Reviewer (as
+// the store records it) still reads as Reviewer.
+func TestPermissionLevelFreeBusyAgnostic(t *testing.T) {
+	if got := levelForRights(mapi.RightsNone); got != "None" {
+		t.Errorf("raw RightsNone → %q, want None", got)
+	}
+	if got := levelForRights(mapi.NormalizeRights(mapi.RightsReviewer, true)); got != "Reviewer" {
+		t.Errorf("free/busy-filled Reviewer → %q, want Reviewer", got)
+	}
+}
+
 // TestPermissionEditDeleteAllRoundTrip confirms EditItems/DeleteItems="All" survive
 // the round-trip. The reference's write loses the Owned bit on "All"; the store's
 // normalize fills it (editAny implies editOwned), so "All" reads back as "All" —

@@ -23,7 +23,32 @@ type refID struct {
 }
 
 type getFolderRequest struct {
-	FolderIDs folderRefs `xml:"FolderIds"`
+	FolderShape folderShape `xml:"FolderShape"`
+	FolderIDs   folderRefs  `xml:"FolderIds"`
+}
+
+// folderShape carries the requested BaseShape and the AdditionalProperties FieldURI
+// list. v1 reads it only to detect a folder:PermissionSet request — the base shape
+// is otherwise always served as the same folder subset.
+type folderShape struct {
+	BaseShape            string `xml:"BaseShape"`
+	AdditionalProperties struct {
+		FieldURIs []struct {
+			URI string `xml:"FieldURI,attr"`
+		} `xml:"FieldURI"`
+	} `xml:"AdditionalProperties"`
+}
+
+// wantsPermissionSet reports whether the shape's AdditionalProperties requested
+// folder:PermissionSet. Permissions are returned only when explicitly asked for,
+// never in the Default or AllProperties base shape.
+func (sh folderShape) wantsPermissionSet() bool {
+	for _, fu := range sh.AdditionalProperties.FieldURIs {
+		if fu.URI == "folder:PermissionSet" {
+			return true
+		}
+	}
+	return false
 }
 
 type findFolderRequest struct {
@@ -119,6 +144,7 @@ func (s *Server) handleGetFolder(w http.ResponseWriter, inner []byte, sess *sess
 	}
 	defer st.Close()
 	idx := folderIndex(all)
+	wantPerms := req.FolderShape.wantsPermissionSet()
 
 	var msgs []folderResponseMessage
 	for _, tgt := range resolveTargets(req.FolderIDs) {
@@ -130,16 +156,56 @@ func (s *Server) handleGetFolder(w http.ResponseWriter, inner []byte, sess *sess
 		switch {
 		case err != nil:
 			msgs = append(msgs, folderResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
+			continue
 		case code != "":
 			msgs = append(msgs, folderResponseMessage{ResponseClass: "Error", ResponseCode: code})
-		default:
-			msgs = append(msgs, folderResponseMessage{
-				ResponseClass: "Success", ResponseCode: "NoError",
-				Folders: &foldersWrap{Folders: []oxews.Folder{f}},
-			})
+			continue
 		}
+		if wantPerms {
+			ps, err := folderPermissionSet(st, tgt.fid)
+			if err != nil {
+				msgs = append(msgs, folderResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
+				continue
+			}
+			f.PermissionSet = ps
+		}
+		msgs = append(msgs, folderResponseMessage{
+			ResponseClass: "Success", ResponseCode: "NoError",
+			Folders: &foldersWrap{Folders: []oxews.Folder{f}},
+		})
 	}
 	writeResponse(w, getFolderResponse{Messages: msgs})
+}
+
+// folderPermissionSet reads a folder's access-control list as a wire PermissionSet.
+// The always-present Default and Anonymous members are synthesized at no rights when
+// the folder stores no row for them, so a reader always sees them (mirroring the
+// permission table the store presents elsewhere).
+func folderPermissionSet(st *objectstore.Store, fid int64) (*oxews.PermissionSet, error) {
+	entries, err := st.ListPermissions(fid)
+	if err != nil {
+		return nil, err
+	}
+	haveDefault, haveAnon := false, false
+	for _, e := range entries {
+		switch e.MemberID {
+		case mapi.MemberIDDefault:
+			haveDefault = true
+		case mapi.MemberIDAnonymous:
+			haveAnon = true
+		}
+	}
+	if !haveDefault {
+		entries = append(entries, objectstore.PermissionEntry{MemberID: mapi.MemberIDDefault, Name: "default", Rights: mapi.RightsNone})
+	}
+	if !haveAnon {
+		entries = append(entries, objectstore.PermissionEntry{MemberID: mapi.MemberIDAnonymous, Name: "anonymous", Rights: mapi.RightsNone})
+	}
+	perms := make([]oxews.Permission, 0, len(entries))
+	for _, e := range entries {
+		perms = append(perms, oxews.PermissionFromRights(e.MemberID, e.Name, e.Rights))
+	}
+	return &oxews.PermissionSet{Permissions: perms}, nil
 }
 
 // handleFindFolder answers FindFolder: it enumerates the children of each parent
