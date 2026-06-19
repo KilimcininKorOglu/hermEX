@@ -27,6 +27,10 @@ const (
 // hierarchy key (the same key a FolderSync handed out); a mismatch reports
 // Status 9 so the device re-primes from key 0. "0" names the mailbox root (a
 // top-level folder); any other ParentId names an existing folder.
+//
+// The request's folder Type is not honored: every folder is created as a mail
+// (note) folder, the only collection class v1 synchronizes — a calendar or
+// contact folder type would not sync anyway.
 func (s *Server) handleFolderCreate(w http.ResponseWriter, r *http.Request, sess *session) {
 	root, err := readWBXML(r)
 	if err != nil {
