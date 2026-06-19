@@ -45,7 +45,7 @@ func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 
 	msg := &oxcmail.Message{}
 	p := &msg.Props
-	p.Set(mapi.PrMessageClass, "IPM.Appointment")
+	p.Set(mapi.PrMessageClass, meetingClass(cal, vev))
 
 	uid := strings.TrimSpace(vev.propText("UID"))
 	if uid == "" {
@@ -100,6 +100,38 @@ func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 		}
 	}
 	return msg, nil
+}
+
+// meetingClass derives the MAPI message class from the iCalendar METHOD (RFC 5546
+// iTIP). REQUEST and CANCEL are scheduling messages an attendee acts on; a REPLY
+// names the attendee's response in its class suffix (PARTSTAT). PUBLISH, an absent
+// METHOD, or an unrecognized one is a plain appointment — the prior default.
+func meetingClass(cal, vev *icomp) string {
+	switch strings.ToUpper(strings.TrimSpace(cal.propText("METHOD"))) {
+	case "REQUEST":
+		return "IPM.Schedule.Meeting.Request"
+	case "CANCEL":
+		return "IPM.Schedule.Meeting.Canceled"
+	case "REPLY":
+		switch strings.ToUpper(strings.TrimSpace(replyPartStat(vev))) {
+		case "DECLINED":
+			return "IPM.Schedule.Meeting.Resp.Neg"
+		case "TENTATIVE":
+			return "IPM.Schedule.Meeting.Resp.Tent"
+		default: // ACCEPTED or unspecified
+			return "IPM.Schedule.Meeting.Resp.Pos"
+		}
+	}
+	return "IPM.Appointment"
+}
+
+// replyPartStat returns the PARTSTAT of the reply's attendee line, which names the
+// response (ACCEPTED / DECLINED / TENTATIVE) carried by a METHOD:REPLY object.
+func replyPartStat(vev *icomp) string {
+	if l := vev.prop("ATTENDEE"); l != nil {
+		return l.param("PARTSTAT")
+	}
+	return ""
 }
 
 // eventEnd resolves the event end from DTEND, else DTSTART+DURATION, else (for an

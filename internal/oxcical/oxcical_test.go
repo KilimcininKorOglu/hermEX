@@ -131,6 +131,43 @@ func TestImportTimed(t *testing.T) {
 	}
 }
 
+// TestImportMethodMessageClass confirms the iTIP METHOD selects the scheduling
+// message class: a REQUEST is a meeting-request an attendee responds to, CANCEL a
+// cancellation, REPLY the attendee's response (by PARTSTAT), and a method-less or
+// PUBLISH object a plain appointment — the prior default. The class is what lets a
+// responder tell an invitation apart from an appointment already on the calendar.
+func TestImportMethodMessageClass(t *testing.T) {
+	cases := []struct {
+		name     string
+		method   string
+		attendee string
+		want     string
+	}{
+		{"request", "METHOD:REQUEST\r\n", "", "IPM.Schedule.Meeting.Request"},
+		{"cancel", "METHOD:CANCEL\r\n", "", "IPM.Schedule.Meeting.Canceled"},
+		{"reply-accepted", "METHOD:REPLY\r\n", "ATTENDEE;PARTSTAT=ACCEPTED:mailto:a@x.test\r\n", "IPM.Schedule.Meeting.Resp.Pos"},
+		{"reply-declined", "METHOD:REPLY\r\n", "ATTENDEE;PARTSTAT=DECLINED:mailto:a@x.test\r\n", "IPM.Schedule.Meeting.Resp.Neg"},
+		{"reply-tentative", "METHOD:REPLY\r\n", "ATTENDEE;PARTSTAT=TENTATIVE:mailto:a@x.test\r\n", "IPM.Schedule.Meeting.Resp.Tent"},
+		{"publish", "METHOD:PUBLISH\r\n", "", "IPM.Appointment"},
+		{"none", "", "", "IPM.Appointment"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ics := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n" + tc.method +
+				"BEGIN:VEVENT\r\nUID:m-1\r\nSUMMARY:Plan\r\n" +
+				"DTSTART:20260612T090000Z\r\nDTEND:20260612T093000Z\r\n" + tc.attendee +
+				"END:VEVENT\r\nEND:VCALENDAR\r\n"
+			msg, err := Import([]byte(ics), newResolver().opt())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := str(msg, mapi.PrMessageClass); got != tc.want {
+				t.Errorf("class %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestRoundTripTimed exports an imported event and re-parses it, confirming the
 // core fields survive synthesis.
 func TestRoundTripTimed(t *testing.T) {
