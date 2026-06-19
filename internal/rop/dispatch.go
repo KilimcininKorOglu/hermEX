@@ -69,6 +69,7 @@ const (
 	ropRegisterNotification        uint8 = 0x29
 	ropNotify                      uint8 = 0x2A
 	ropPending                     uint8 = 0x6E
+	ropGetPermissionsTable         uint8 = 0x3E
 )
 
 // MAPI return codes ([MS-OXCDATA] 2.4.1) carried in a ROP response ReturnValue.
@@ -277,6 +278,10 @@ loop:
 			}
 		case ropGetContentsTable:
 			if !s.ropGetContentsTable(p, out, handles, hindex) {
+				break loop
+			}
+		case ropGetPermissionsTable:
+			if !s.ropGetPermissionsTable(p, out, handles, hindex) {
 				break loop
 			}
 		case ropSetColumns:

@@ -15,6 +15,7 @@ const (
 	tableContents   tableKind = iota // the folder's messages
 	tableHierarchy                   // the folder's child folders
 	tableAttachment                  // a message's attachments
+	tablePermission                  // a folder's permission members
 )
 
 // tableStatus values ([MS-OXCTABL] 2.2.2.1.3). v1 builds the table eagerly, so
@@ -34,6 +35,7 @@ type tableState struct {
 	messages     []objectstore.MessageInfo // tableContents base rows
 	folders      []objectstore.FolderInfo  // tableHierarchy base rows
 	attachments  []mapi.PropertyValues     // tableAttachment base rows (attachment property bags)
+	permissions  []mapi.PropertyValues     // tablePermission base rows (member property bags)
 	sortKeys     []sortKey                 // RopSortTable order; empty = store order
 	restriction  *mapi.Restriction         // RopRestrict filter; nil = no filter
 	view         []int                     // base-row indices in display order; nil = identity
@@ -49,6 +51,8 @@ func (t *tableState) baseCount() int {
 		return len(t.folders)
 	case tableAttachment:
 		return len(t.attachments)
+	case tablePermission:
+		return len(t.permissions)
 	default:
 		return len(t.messages)
 	}
@@ -88,6 +92,11 @@ func (t *tableState) rowProps(store *objectstore.Store, idx int) (mapi.PropertyV
 			props.Set(mapi.PrFolderID, int64(mapi.MakeEIDEx(1, uint64(fid))))
 		}
 		return props, nil
+	}
+	if t.kind == tablePermission {
+		// The member bags are built complete at GetPermissionsTable time and never
+		// mutated, so the requested columns project straight from the snapshot.
+		return t.permissions[base], nil
 	}
 	if t.kind == tableAttachment {
 		// The bags are already in memory; copy before synthesizing PR_ATTACH_NUM
