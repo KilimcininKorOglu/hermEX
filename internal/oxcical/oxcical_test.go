@@ -168,6 +168,65 @@ func TestImportMethodMessageClass(t *testing.T) {
 	}
 }
 
+// TestExportReplyIdentity confirms a meeting-response message exports an iTIP REPLY:
+// a METHOD:REPLY, the organizer being answered, and the responder as the sole
+// attendee carrying the response in PARTSTAT — the inverse of the import mapping.
+func TestExportReplyIdentity(t *testing.T) {
+	r := newResolver()
+	r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID}) // allocate named ids, as a writer would
+	msg := &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Schedule.Meeting.Resp.Neg"},
+		{Tag: r.tag(mapi.NameAppointmentStartWhole, mapi.PtSysTime), Value: mapi.UnixToNTTime(time.Date(2026, 7, 1, 14, 0, 0, 0, time.UTC))},
+		{Tag: r.tag(nameICalUID, mapi.PtUnicode), Value: "meeting-42"},
+		{Tag: mapi.PrSubject, Value: "Quarterly Review"},
+		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "organizer@hermex.test"},
+		{Tag: mapi.PrSentRepresentingName, Value: "The Organizer"},
+		{Tag: mapi.PrSenderSmtpAddress, Value: "alice@hermex.test"},
+		{Tag: mapi.PrSenderName, Value: "Alice"},
+	}}
+	out, err := Export(msg, r.opt())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	for _, want := range []string{
+		"METHOD:REPLY",
+		`ORGANIZER;CN="The Organizer":mailto:organizer@hermex.test`,
+		`ATTENDEE;PARTSTAT=DECLINED;CN="Alice":mailto:alice@hermex.test`,
+		"UID:meeting-42",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("reply export missing %q\n%s", want, s)
+		}
+	}
+}
+
+// TestExportPlainAppointmentNoItip is the byte-identical guard: a plain appointment
+// must export with no METHOD/ORGANIZER/ATTENDEE even when it carries sender and
+// representing identities (a CalDAV PUT does), so the REPLY support never stamps an
+// ordinary calendar event.
+func TestExportPlainAppointmentNoItip(t *testing.T) {
+	r := newResolver()
+	r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole}) // allocate named ids, as a writer would
+	msg := &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Appointment"},
+		{Tag: r.tag(mapi.NameAppointmentStartWhole, mapi.PtSysTime), Value: mapi.UnixToNTTime(time.Date(2026, 7, 1, 14, 0, 0, 0, time.UTC))},
+		{Tag: mapi.PrSubject, Value: "Standup"},
+		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "organizer@hermex.test"},
+		{Tag: mapi.PrSenderSmtpAddress, Value: "alice@hermex.test"},
+	}}
+	out, err := Export(msg, r.opt())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	for _, banned := range []string{"METHOD:", "ORGANIZER", "ATTENDEE"} {
+		if strings.Contains(s, banned) {
+			t.Errorf("plain appointment export must not emit %q\n%s", banned, s)
+		}
+	}
+}
+
 // TestRoundTripTimed exports an imported event and re-parses it, confirming the
 // core fields survive synthesis.
 func TestRoundTripTimed(t *testing.T) {

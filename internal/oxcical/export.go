@@ -2,6 +2,7 @@ package oxcical
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"hermex/internal/mapi"
@@ -30,10 +31,17 @@ func Export(msg *oxcmail.Message, opt Options) ([]byte, error) {
 		return nil, err
 	}
 
+	// A meeting response carries an iTIP METHOD:REPLY with organizer/attendee
+	// identity; a plain appointment emits none of that, so its output is unchanged.
+	partstat := responsePartStat(getStr(p, mapi.PrMessageClass))
+
 	b := &builder{}
 	b.add("BEGIN:VCALENDAR")
 	b.add("VERSION:2.0")
 	b.add("PRODID:-//hermEX//CalDAV//EN")
+	if partstat != "" {
+		b.add("METHOD:REPLY")
+	}
 	b.add("BEGIN:VEVENT")
 
 	uid := ""
@@ -94,9 +102,55 @@ func Export(msg *oxcmail.Message, opt Options) ([]byte, error) {
 		}
 	}
 
+	// iTIP REPLY identity (RFC 5546 §3.2.3): the organizer being answered and the
+	// one responding attendee, the response carried as the attendee's PARTSTAT.
+	if partstat != "" {
+		if v := mailtoParams(p, mapi.PrSentRepresentingSmtpAddress, mapi.PrSentRepresentingName, ""); v != "" {
+			b.add("ORGANIZER" + v)
+		}
+		if v := mailtoParams(p, mapi.PrSenderSmtpAddress, mapi.PrSenderName, partstat); v != "" {
+			b.add("ATTENDEE" + v)
+		}
+	}
+
 	b.add("END:VEVENT")
 	b.add("END:VCALENDAR")
 	return b.buf.Bytes(), nil
+}
+
+// responsePartStat maps a meeting-response message class to the iCalendar PARTSTAT
+// its REPLY reports — the inverse of import's meetingClass mapping, kept beside it
+// so the two directions cannot drift. A non-response class yields "" (no METHOD,
+// organizer, or attendee is emitted, leaving a plain appointment's output as is).
+func responsePartStat(class string) string {
+	switch class {
+	case "IPM.Schedule.Meeting.Resp.Pos":
+		return "ACCEPTED"
+	case "IPM.Schedule.Meeting.Resp.Neg":
+		return "DECLINED"
+	case "IPM.Schedule.Meeting.Resp.Tent":
+		return "TENTATIVE"
+	}
+	return ""
+}
+
+// mailtoParams renders the parameters and mailto value of an ORGANIZER/ATTENDEE
+// line from a stored identity: an optional PARTSTAT, an optional CN from the
+// display name, and ":mailto:addr". It returns "" when no address is stored, so the
+// caller emits nothing.
+func mailtoParams(p *mapi.PropertyValues, smtpTag, nameTag mapi.PropTag, partstat string) string {
+	addr := getStr(p, smtpTag)
+	if addr == "" {
+		return ""
+	}
+	s := ""
+	if partstat != "" {
+		s += ";PARTSTAT=" + partstat
+	}
+	if cn := getStr(p, nameTag); cn != "" {
+		s += ";CN=\"" + strings.ReplaceAll(cn, "\"", "") + "\""
+	}
+	return s + ":mailto:" + addr
 }
 
 // dtLine renders a DTSTART/DTEND line: a date-only value for an all-day event,
