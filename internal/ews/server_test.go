@@ -110,11 +110,11 @@ func TestFirstElementName(t *testing.T) {
 }
 
 // TestUnsupportedOperation confirms an operation outside the v1 surface
-// (Subscribe is a deferred push-notification op) returns a SOAP Fault carrying
-// an EWS response code.
+// (GetStreamingEvents is a deferred streaming-notification op) returns a SOAP
+// Fault carrying an EWS response code.
 func TestUnsupportedOperation(t *testing.T) {
 	ts := newTestServer(t)
-	resp, body := soapPost(t, ts, wrapRequest(`<Subscribe xmlns="`+nsMessages+`"/>`), true)
+	resp, body := soapPost(t, ts, wrapRequest(`<GetStreamingEvents xmlns="`+nsMessages+`"/>`), true)
 	if resp.StatusCode != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", resp.StatusCode)
 	}

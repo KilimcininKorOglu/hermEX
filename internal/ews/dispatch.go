@@ -60,6 +60,12 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		// MS-OXWSAVAIL names the request element GetUserAvailabilityRequest (the
 		// "Request" suffix is unlike the other operations' bare names).
 		s.handleGetUserAvailability(w, inner, sess)
+	case "Subscribe":
+		s.handleSubscribe(w, inner, sess)
+	case "Unsubscribe":
+		s.handleUnsubscribe(w, inner, sess)
+	case "GetEvents":
+		s.handleGetEvents(w, inner, sess)
 	default:
 		writeSOAPFault(w, "ErrorInvalidRequest", "unsupported operation: "+op)
 	}

@@ -10,6 +10,7 @@ package ews
 import (
 	"net/http"
 	"strings"
+	"sync"
 
 	"hermex/internal/directory"
 	"hermex/internal/logging"
@@ -21,12 +22,26 @@ type Server struct {
 	accounts directory.Accounts
 	hostname string
 	Logger   *logging.Logger // central activity log; nil disables logging
+
+	// Notification subscriptions (MS-OXWSNTIF). The registry is in-memory and
+	// process-local: Subscribe and GetEvents are separate HTTP requests that must
+	// reach the same process, which the gateway guarantees by routing /ews to a
+	// single backend target (a horizontally-scaled EWS service would break this,
+	// the same per-process constraint the reference's subscription cache has).
+	subMu  sync.Mutex
+	subs   map[string]*ewsSubscription
+	subSeq uint32 // monotonic SubscriptionId key counter (0 reserved)
 }
 
 // NewServer builds an EWS server backed by the directory for authentication and
 // recipient resolution (the latter used by CreateItem/ResolveNames).
 func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostname string) *Server {
-	return &Server{auth: auth, accounts: accounts, hostname: hostname}
+	return &Server{
+		auth:     auth,
+		accounts: accounts,
+		hostname: hostname,
+		subs:     make(map[string]*ewsSubscription),
+	}
 }
 
 // icsSync logs an ICS synchronization under the ics subsystem; EWS folder and item

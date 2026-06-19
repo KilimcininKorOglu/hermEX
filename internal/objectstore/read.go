@@ -89,6 +89,25 @@ func (s *Store) MessageByUID(folderID int64, uid uint32) (MessageInfo, error) {
 	return m, err
 }
 
+// MessageUIDByID resolves a message's IMAP UID from its object-store id, reading
+// the index. ok is false when the message has no index entry: a calendar or
+// contact item is created with CreateMessage and never enters the IMAP index, so
+// a poll over such a folder yields an item with no UID (and a (folder, UID)-keyed
+// body read is then unavailable — a documented limit for non-mail notification
+// targets). A missing row is not an error.
+func (s *Store) MessageUIDByID(folderID, messageID int64) (uint32, bool, error) {
+	var uid int64
+	err := s.idxdb.QueryRow(
+		`SELECT uid FROM messages WHERE folder_id=? AND message_id=?`, folderID, messageID).Scan(&uid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return uint32(uid), true, nil
+}
+
 // MessageFlags returns a message's current IMAP flag mask, reporting ErrNotFound
 // when no such message exists.
 func (s *Store) MessageFlags(folderID int64, uid uint32) (int64, error) {
