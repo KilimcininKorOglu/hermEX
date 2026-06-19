@@ -38,6 +38,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleGetItem(w, inner, sess)
 	case "GetAttachment":
 		s.handleGetAttachment(w, inner, sess)
+	case "CreateAttachment":
+		s.handleCreateAttachment(w, inner, sess)
 	case "SyncFolderItems":
 		s.handleSyncFolderItems(w, inner, sess)
 	case "CreateItem":
