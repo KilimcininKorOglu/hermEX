@@ -18,6 +18,7 @@ type fakeDir struct {
 	domains []directory.DomainInfo
 	users   []directory.UserInfo
 	aliases []directory.AliasInfo
+	ldap    map[int64]directory.LDAPConfig
 
 	// captured by the create handlers
 	createdDomain, createdHomedir string
@@ -56,6 +57,17 @@ func (f *fakeDir) CreateAlias(aliasname, mainname string) error {
 		return f.createErr
 	}
 	f.createdAlias, f.createdAliasTo = aliasname, mainname
+	return nil
+}
+func (f *fakeDir) GetLDAPConfig(orgID int64) (directory.LDAPConfig, bool, error) {
+	c, ok := f.ldap[orgID]
+	return c, ok, nil
+}
+func (f *fakeDir) SetLDAPConfig(orgID int64, cfg directory.LDAPConfig) error {
+	if f.ldap == nil {
+		f.ldap = map[int64]directory.LDAPConfig{}
+	}
+	f.ldap[orgID] = cfg
 	return nil
 }
 

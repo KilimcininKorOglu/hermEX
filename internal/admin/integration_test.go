@@ -176,4 +176,25 @@ func TestAdminServerIntegration(t *testing.T) {
 	if _, ok, _ := dir.UserID("intern@hermex.test"); !ok {
 		t.Error("the API-created user did not land in the directory")
 	}
+
+	// 7. Set then read an org's LDAP config through the API (real ldap_config
+	// table); the read must not echo the bind password.
+	put := authedPUT(t, ts, "/admin/orgs/5/ldap", session, csrf,
+		`{"URI":"ldaps://dc.hermex.test","BindDN":"cn=svc","BindPassword":"topsecret","BaseDN":"dc=hermex,dc=test"}`)
+	put.Body.Close()
+	if put.StatusCode != http.StatusNoContent {
+		t.Fatalf("put ldap status %d, want 204", put.StatusCode)
+	}
+	got := authedGET(t, ts, "/admin/orgs/5/ldap", session)
+	defer got.Body.Close()
+	if got.StatusCode != http.StatusOK {
+		t.Fatalf("get ldap status %d, want 200", got.StatusCode)
+	}
+	ldapBody, _ := io.ReadAll(got.Body)
+	if !strings.Contains(string(ldapBody), "ldaps://dc.hermex.test") {
+		t.Errorf("ldap body = %s, want the stored URI", ldapBody)
+	}
+	if strings.Contains(string(ldapBody), "topsecret") {
+		t.Errorf("the bind password leaked from the real config: %s", ldapBody)
+	}
 }

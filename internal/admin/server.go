@@ -24,6 +24,8 @@ type Directory interface {
 	CreateDomain(domainname, homedir string) (int64, error)
 	CreateUser(username, password, maildir string) (int64, error)
 	CreateAlias(aliasname, mainname string) error
+	GetLDAPConfig(orgID int64) (directory.LDAPConfig, bool, error)
+	SetLDAPConfig(orgID int64, cfg directory.LDAPConfig) error
 }
 
 // Paths derives a new domain's homedir and a new user's maildir from the
@@ -68,6 +70,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /admin/users", s.protect(s.requireSystem(s.handleCreateUser)))
 	mux.Handle("GET /admin/aliases", s.protect(s.requireSystem(s.handleListAliases)))
 	mux.Handle("POST /admin/aliases", s.protect(s.requireSystem(s.handleCreateAlias)))
+	mux.Handle("GET /admin/orgs/{orgID}/ldap", s.protect(http.HandlerFunc(s.handleGetLDAP)))
+	mux.Handle("PUT /admin/orgs/{orgID}/ldap", s.protect(http.HandlerFunc(s.handlePutLDAP)))
 	return mux
 }
 
