@@ -368,7 +368,7 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	sentRaw := insertBcc(deliveryRaw, v.Bcc)
 
-	unresolved, err := mta.Deliver(s.accounts, v.From, recipients, deliveryRaw, time.Now())
+	unresolved, err := mta.DeliverAndRelay(s.accounts, s.Spool, v.From, recipients, deliveryRaw, time.Now())
 	if err != nil {
 		v.Error = "Delivery failed: " + err.Error()
 		s.render(w, "compose", v)
@@ -386,15 +386,15 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		deleteDraft(sess.mailboxPath, v.DraftUID)
 	}
 
-	// Local recipients are delivered and a Sent copy is stored. If some
-	// addresses have no local mailbox, report them (there is no relay yet)
-	// rather than pretend they were delivered.
+	// Recipients are delivered locally or queued for outbound relay, and a Sent
+	// copy is stored. Any address left unresolved is a genuine unknown — a local
+	// domain with no such mailbox — so report it rather than pretend it was sent.
 	if len(unresolved) > 0 {
 		s.render(w, "compose", composeView{
 			Title:       "New message",
 			From:        sess.user,
 			FromOptions: idents,
-			Notice:      "Delivered locally and saved to Sent. No local mailbox (and no external relay yet) for: " + strings.Join(unresolved, ", "),
+			Notice:      "Sent and saved to Sent. No such recipient here: " + strings.Join(unresolved, ", "),
 		})
 		return
 	}

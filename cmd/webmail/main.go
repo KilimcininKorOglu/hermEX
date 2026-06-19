@@ -18,6 +18,7 @@ import (
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/objectstore"
+	"hermex/internal/relay"
 	"hermex/internal/serve"
 	"hermex/internal/webmail"
 )
@@ -46,6 +47,13 @@ func main() {
 		log.Fatalf("hermex-webmail: %v", err)
 	}
 	srv.Logger = logger
+	// Enqueue external recipients of composed mail into the shared relay spool the
+	// MTA drains; without it webmail would deliver local-only.
+	spool, err := relay.Open(cfg.RelaySpoolPath())
+	if err != nil {
+		log.Fatalf("hermex-webmail: open relay spool: %v", err)
+	}
+	srv.Spool = spool
 	addr := cfg.WebmailAddr
 	if addr == "" {
 		addr = ":8080"
@@ -60,7 +68,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log.Printf("hermex-webmail listening on %s", addr)
-	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, logClose, db.Close); err != nil {
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, spool.Close, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-webmail: %v", err)
 	}
 }

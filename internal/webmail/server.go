@@ -9,6 +9,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/logging"
 	"hermex/internal/objectstore"
+	"hermex/internal/relay"
 )
 
 // Server is the webmail HTTP application. It authenticates against the directory
@@ -21,6 +22,7 @@ type Server struct {
 	tmpl     *template.Template
 	sessions *sessionStore
 	Logger   *logging.Logger // central activity log; nil disables logging
+	Spool    *relay.Spool    // outbound relay queue; nil sends local-only
 }
 
 // smimeEvent logs an S/MIME crypto operation under the smime subsystem, tagged
