@@ -84,3 +84,47 @@ func TestSubmissionRelayRouting(t *testing.T) {
 		t.Error("unauthenticated relay to an external recipient must be refused")
 	}
 }
+
+// TestDeliverAndRelayRoutesExternal proves the shared user-composed send path —
+// used by webmail compose and the send-later release — relays a foreign-domain
+// recipient through the spool while still filing local ones and reporting a
+// genuine local-domain user-unknown. With a nil spool it does not relay.
+func TestDeliverAndRelayRoutesExternal(t *testing.T) {
+	mbox := filepath.Join(t.TempDir(), "alice")
+	accounts := directory.StaticAccounts{"alice@local": {MailboxPath: mbox}}
+	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sp.Close()
+
+	raw := []byte("Subject: hi\r\n\r\nhello\r\n")
+	unresolved, err := DeliverAndRelay(accounts, sp, "alice@local",
+		[]string{"alice@local", "bob@remote", "ghost@local"}, raw, time.Now())
+	if err != nil {
+		t.Fatalf("deliver-and-relay: %v", err)
+	}
+	// Only the local-domain user-unknown is reported; the external is relayed.
+	if len(unresolved) != 1 || unresolved[0] != "ghost@local" {
+		t.Fatalf("unresolved = %v, want only ghost@local", unresolved)
+	}
+
+	st, err := objectstore.Open(mbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if msgs, _ := st.ListMessages(int64(mapi.PrivateFIDInbox)); len(msgs) != 1 {
+		t.Fatalf("local inbox has %d messages, want 1", len(msgs))
+	}
+	due, _ := sp.Claim(time.Now(), 10)
+	if len(due) != 1 || due[0].Recipient != "bob@remote" {
+		t.Fatalf("spool = %v, want bob@remote queued for relay", due)
+	}
+
+	// With a nil spool the external recipient falls back to unresolved.
+	un2, _ := DeliverAndRelay(accounts, nil, "alice@local", []string{"bob@remote"}, raw, time.Now())
+	if len(un2) != 1 || un2[0] != "bob@remote" {
+		t.Errorf("nil-spool unresolved = %v, want bob@remote (no relay)", un2)
+	}
+}

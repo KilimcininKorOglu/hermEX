@@ -123,7 +123,7 @@ func (s *session) Rcpt(to string) error {
 	if s.authUser == "" {
 		return fmt.Errorf("relay denied for <%s>", to)
 	}
-	external, err := s.isExternal(to)
+	external, err := isExternalDomain(s.accounts, to)
 	if err != nil {
 		return fmt.Errorf("cannot route <%s>: %w", to, err)
 	}
@@ -137,21 +137,21 @@ func (s *session) Rcpt(to string) error {
 	return nil
 }
 
-// isExternal reports whether to's domain lies outside this server's authority,
-// so it must be relayed rather than delivered. It fails closed: when the
-// directory cannot enumerate local domains, no domain can be confirmed external,
-// so the recipient is treated as local (and thus refused as user-unknown) rather
-// than relayed, which avoids an accidental open relay or mail loop.
-func (s *session) isExternal(to string) (bool, error) {
-	ld, ok := s.accounts.(directory.LocalDomains)
+// isExternalDomain reports whether rcpt's domain lies outside this server's
+// authority, so it may be relayed rather than delivered. It fails closed: when
+// the directory cannot enumerate local domains, no domain can be confirmed
+// external, so the recipient is treated as local (and thus undeliverable here
+// rather than relayed), which avoids an accidental open relay or mail loop.
+func isExternalDomain(accounts directory.Accounts, rcpt string) (bool, error) {
+	ld, ok := accounts.(directory.LocalDomains)
 	if !ok {
 		return false, nil
 	}
-	i := strings.LastIndex(to, "@")
-	if i < 0 || i == len(to)-1 {
+	i := strings.LastIndex(rcpt, "@")
+	if i < 0 || i == len(rcpt)-1 {
 		return false, nil // no domain part: cannot be confirmed external
 	}
-	local, err := ld.IsLocalDomain(to[i+1:])
+	local, err := ld.IsLocalDomain(rcpt[i+1:])
 	if err != nil {
 		return false, err
 	}
@@ -190,9 +190,11 @@ func (s *session) Logout() error { return nil }
 // Deliver resolves each recipient address to its local mailbox and appends the
 // raw message to that mailbox's INBOX. from is the envelope sender (the
 // return-path), used as the destination of any out-of-office auto-reply.
-// Addresses with no local mailbox are returned as unresolved (there is no
-// outbound relay yet), so callers can report partial delivery rather than
-// silently dropping them.
+// Addresses with no local mailbox are returned as unresolved, so callers can
+// report partial delivery rather than silently dropping them. Deliver never
+// relays: automated notifications (auto-reply, read receipt, bounce) use it so a
+// message can never be sent off-server. User-composed send paths that should
+// relay external recipients use DeliverAndRelay.
 func Deliver(accounts directory.Accounts, from string, recipients []string, raw []byte, received time.Time) (unresolved []string, err error) {
 	for _, rcpt := range recipients {
 		path, ok := accounts.Resolve(rcpt)
@@ -205,6 +207,35 @@ func Deliver(accounts directory.Accounts, from string, recipients []string, raw 
 		}
 	}
 	return unresolved, nil
+}
+
+// DeliverAndRelay is Deliver plus outbound relay: after local delivery, each
+// recipient with no local mailbox that belongs to a foreign domain is queued in
+// spool for delivery to its mail exchanger, instead of being returned
+// unresolved. from is the relay envelope sender. Only authorized, user-composed
+// send paths pass a non-nil spool; with a nil spool it is exactly Deliver.
+//
+// The returned unresolved holds only the genuinely undeliverable — a user-unknown
+// in a local domain, or (when spool is nil) every external address.
+func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from string, recipients []string, raw []byte, received time.Time) (unresolved []string, err error) {
+	unresolved, err = Deliver(accounts, from, recipients, raw, received)
+	if err != nil || spool == nil || len(unresolved) == 0 {
+		return unresolved, err
+	}
+	var external, stuck []string
+	for _, rcpt := range unresolved {
+		if ext, e := isExternalDomain(accounts, rcpt); e == nil && ext {
+			external = append(external, rcpt)
+		} else {
+			stuck = append(stuck, rcpt)
+		}
+	}
+	if len(external) > 0 {
+		if e := spool.Enqueue(from, external, raw, received); e != nil {
+			return stuck, e
+		}
+	}
+	return stuck, nil
 }
 
 // deliver appends a raw message to the inbox of the mailbox at path. The inbox

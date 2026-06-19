@@ -109,7 +109,7 @@ func main() {
 	// runs in the always-on MTA so it survives webmail restarts. It is a lifecycle
 	// component so shutdown cancels its loop alongside draining the SMTP server.
 	deliver := func(recipients []string, raw []byte, when time.Time) ([]string, error) {
-		return mta.Deliver(dir, senderOf(raw), recipients, raw, when)
+		return mta.DeliverAndRelay(dir, spool, senderOf(raw), recipients, raw, when)
 	}
 	slCtx, slCancel := context.WithCancel(context.Background())
 	sendLater := lifecycle.Func{
