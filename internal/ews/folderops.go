@@ -145,14 +145,16 @@ type folderChange struct {
 }
 
 // setFolderField carries a FieldURI and the new value inside a <Folder>. v1
-// applies only folder:DisplayName (a rename); other fields are accepted but not
-// applied, matching the reference's silent drop of unmapped fields.
+// applies folder:DisplayName (a rename) and folder:PermissionSet (an access-control
+// replace); other fields are accepted but not applied, matching the reference's
+// silent drop of unmapped fields.
 type setFolderField struct {
 	FieldURI struct {
 		URI string `xml:"FieldURI,attr"`
 	} `xml:"FieldURI"`
 	Folder struct {
-		DisplayName *string `xml:"DisplayName"`
+		DisplayName   *string              `xml:"DisplayName"`
+		PermissionSet *oxews.PermissionSet `xml:"PermissionSet"`
 	} `xml:"Folder"`
 }
 
@@ -162,10 +164,13 @@ type updateFolderResponse struct {
 }
 
 // handleUpdateFolder answers UpdateFolder: it applies a folder:DisplayName
-// SetFolderField as an in-place rename. A well-known (distinguished) folder's name
-// is fixed — renaming it would desync the IMAP well-known projection — so it is
-// refused. Other updatable fields are accepted as a no-op success, as the
-// reference silently drops fields it has no converter for.
+// SetFolderField as an in-place rename and a folder:PermissionSet SetFolderField as
+// a full access-control replace. A well-known (distinguished) folder's name is
+// fixed — renaming it would desync the IMAP well-known projection — so a rename of
+// one is refused; a permission change on one is allowed (sharing a well-known
+// folder is legitimate and does not touch the name projection). Other updatable
+// fields are accepted as a no-op success, as the reference silently drops fields it
+// has no converter for.
 func (s *Server) handleUpdateFolder(w http.ResponseWriter, inner []byte, sess *session) {
 	var req updateFolderRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
@@ -193,32 +198,103 @@ func (s *Server) handleUpdateFolder(w http.ResponseWriter, inner []byte, sess *s
 		fid := targets[0].fid
 
 		var newName string
+		var permSet *oxews.PermissionSet
 		for _, set := range ch.Updates.Sets {
-			if set.FieldURI.URI == "folder:DisplayName" && set.Folder.DisplayName != nil {
-				newName = *set.Folder.DisplayName
+			switch set.FieldURI.URI {
+			case "folder:DisplayName":
+				if set.Folder.DisplayName != nil {
+					newName = *set.Folder.DisplayName
+				}
+			case "folder:PermissionSet":
+				if set.Folder.PermissionSet != nil {
+					permSet = set.Folder.PermissionSet
+				}
 			}
 		}
-		if newName == "" {
-			// No supported (or empty) rename — accept as a no-op, returning the id.
-			msgs = append(msgs, folderOK(fid))
-			continue
+
+		if newName != "" {
+			if fid < mapi.PrivateFIDUnassignedStart {
+				msgs = append(msgs, folderError("ErrorAccessDenied"))
+				continue
+			}
+			if msg, ok := applyFolderRename(st, fid, newName); !ok {
+				msgs = append(msgs, msg)
+				continue
+			}
 		}
-		if fid < mapi.PrivateFIDUnassignedStart {
-			msgs = append(msgs, folderError("ErrorAccessDenied"))
-			continue
+		if permSet != nil {
+			if msg, ok := s.applyPermissionSet(st, fid, permSet); !ok {
+				msgs = append(msgs, msg)
+				continue
+			}
 		}
-		switch err := st.SetFolderName(fid, newName); {
-		case err == nil:
-			msgs = append(msgs, folderOK(fid))
-		case errors.Is(err, objectstore.ErrFolderExists):
-			msgs = append(msgs, folderError("ErrorFolderExists"))
-		case errors.Is(err, objectstore.ErrNotFound):
-			msgs = append(msgs, folderError("ErrorFolderNotFound"))
-		default:
-			msgs = append(msgs, folderError("ErrorFolderSave"))
-		}
+		msgs = append(msgs, folderOK(fid))
 	}
 	writeResponse(w, updateFolderResponse{Messages: msgs})
+}
+
+// applyFolderRename renames the folder, mapping store errors to response codes. It
+// returns ok=true on success (with an empty message the caller ignores) and
+// ok=false with the error message to emit.
+func applyFolderRename(st *objectstore.Store, fid int64, newName string) (folderResponseMessage, bool) {
+	switch err := st.SetFolderName(fid, newName); {
+	case err == nil:
+		return folderResponseMessage{}, true
+	case errors.Is(err, objectstore.ErrFolderExists):
+		return folderError("ErrorFolderExists"), false
+	case errors.Is(err, objectstore.ErrNotFound):
+		return folderError("ErrorFolderNotFound"), false
+	default:
+		return folderError("ErrorFolderSave"), false
+	}
+}
+
+// applyPermissionSet replaces a folder's whole permission table with the wire
+// PermissionSet — MS-OXWSFOLD UpdateFolder is a full ACL replace, not a diff. Each
+// member's rights are masked to the client-sendable set and normalized as the store
+// contract requires. A real member whose address does not resolve in the directory
+// is skipped (matching the ROP permission path); because this is a full replace,
+// skipping silently drops that member from the new ACL.
+func (s *Server) applyPermissionSet(st *objectstore.Store, fid int64, set *oxews.PermissionSet) (folderResponseMessage, bool) {
+	changes := make([]objectstore.PermissionChange, 0, len(set.Permissions))
+	for _, p := range set.Permissions {
+		memberID, username, ok := s.resolvePermissionUser(p.UserID)
+		if !ok {
+			continue
+		}
+		rights := mapi.NormalizeRights(oxews.PermissionRights(p)&mapi.RightsMaxROP, true)
+		changes = append(changes, objectstore.PermissionChange{
+			Op: objectstore.PermAdd, MemberID: memberID, Username: username, Rights: rights,
+		})
+	}
+	if err := st.ModifyPermissions(fid, true, changes); err != nil {
+		return folderError("ErrorFolderSave"), false
+	}
+	return folderResponseMessage{}, true
+}
+
+// resolvePermissionUser maps a wire UserId to a store permission member: a
+// DistinguishedUser is the always-present Default (id 0) or Anonymous (id -1)
+// member; a real member is keyed by its PrimarySmtpAddress, confirmed to exist in
+// the directory. An unresolvable or identity-less entry yields ok=false so the
+// caller skips it rather than faulting.
+func (s *Server) resolvePermissionUser(u oxews.UserID) (memberID int64, username string, ok bool) {
+	switch u.DistinguishedUser {
+	case "Default":
+		return mapi.MemberIDDefault, "", true
+	case "Anonymous":
+		return mapi.MemberIDAnonymous, "", true
+	}
+	smtp := u.PrimarySmtpAddress
+	if smtp == "" {
+		return 0, "", false
+	}
+	if s.accounts != nil {
+		if _, ok := s.accounts.Resolve(smtp); !ok {
+			return 0, "", false
+		}
+	}
+	return 0, smtp, true
 }
 
 // --- MoveFolder / CopyFolder ---

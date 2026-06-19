@@ -12,7 +12,10 @@ type Folder struct {
 	DisplayName      string    `xml:"DisplayName"`
 	TotalCount       int       `xml:"TotalCount"`
 	ChildFolderCount int       `xml:"ChildFolderCount"`
-	UnreadCount      int       `xml:"UnreadCount"`
+	// PermissionSet precedes UnreadCount per the FolderType schema sequence; it is
+	// emitted only when GetFolder requested folder:PermissionSet (otherwise nil).
+	PermissionSet *PermissionSet `xml:"PermissionSet,omitempty"`
+	UnreadCount   int            `xml:"UnreadCount"`
 }
 
 // FolderID is the EWS <t:FolderId> element: an opaque id plus a change key, both

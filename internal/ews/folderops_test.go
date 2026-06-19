@@ -226,3 +226,121 @@ func TestCopyFolder(t *testing.T) {
 		t.Errorf("source folder must remain after a copy: %s", listing)
 	}
 }
+
+// permissionXML builds a single <t:Permission> with the given UserId inner XML and
+// canned PermissionLevel.
+func permissionXML(userID, level string) string {
+	return `<t:Permission><t:UserId>` + userID + `</t:UserId>` +
+		`<t:PermissionLevel>` + level + `</t:PermissionLevel></t:Permission>`
+}
+
+// updatePermsReq builds an UpdateFolder request setting folder:PermissionSet on a
+// folder (addressed by the given <t:FolderId>/<t:DistinguishedFolderId> element) to
+// the given permission members.
+func updatePermsReq(folderRef, permissions string) string {
+	return wrapRequest(`<UpdateFolder xmlns="` + nsMessages + `">` +
+		`<FolderChanges><t:FolderChange xmlns:t="` + nsTypes + `">` +
+		folderRef +
+		`<t:Updates><t:SetFolderField>` +
+		`<t:FieldURI FieldURI="folder:PermissionSet"/>` +
+		`<t:Folder><t:PermissionSet><t:Permissions>` + permissions + `</t:Permissions></t:PermissionSet></t:Folder>` +
+		`</t:SetFolderField></t:Updates>` +
+		`</t:FolderChange></FolderChanges></UpdateFolder>`)
+}
+
+// folderPerms reads a folder's stored permission rows keyed by member name (the
+// special members are "default"/"anonymous", a real member its SMTP address).
+func folderPerms(t *testing.T, dir string, fid int64) map[string]uint32 {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	entries, err := st.ListPermissions(fid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := map[string]uint32{}
+	for _, e := range entries {
+		m[e.Name] = e.Rights
+	}
+	return m
+}
+
+// TestUpdateFolderPermissionSetReplaces confirms a folder:PermissionSet write
+// stores each member's rights and that a second write fully replaces the ACL (a
+// member absent from the second set is dropped — MS-OXWSFOLD replace semantics).
+func TestUpdateFolderPermissionSetReplaces(t *testing.T) {
+	ts, dir := seededEWS(t)
+	box := createUserFolder(t, ts, "inbox", "Shared")
+	fid, err := oxews.DecodeFolderID(box)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	perms := permissionXML(`<t:DistinguishedUser>Default</t:DistinguishedUser>`, "Reviewer") +
+		permissionXML(`<t:PrimarySmtpAddress>alice@hermex.test</t:PrimarySmtpAddress>`, "Author")
+	resp, out := soapPost(t, ts, updatePermsReq(`<t:FolderId Id="`+box+`"/>`, perms), true)
+	if resp.StatusCode != 200 || !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("UpdateFolder PermissionSet not success (%d): %s", resp.StatusCode, out)
+	}
+	got := folderPerms(t, dir, fid)
+	if want := mapi.NormalizeRights(mapi.RightsReviewer, true); got["default"] != want {
+		t.Errorf("default rights = %#x, want Reviewer %#x", got["default"], want)
+	}
+	if want := mapi.NormalizeRights(mapi.RightsAuthor, true); got["alice@hermex.test"] != want {
+		t.Errorf("alice rights = %#x, want Author %#x", got["alice@hermex.test"], want)
+	}
+
+	// A second set with only the default member replaces the whole ACL.
+	perms2 := permissionXML(`<t:DistinguishedUser>Default</t:DistinguishedUser>`, "Editor")
+	if _, out := soapPost(t, ts, updatePermsReq(`<t:FolderId Id="`+box+`"/>`, perms2), true); !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("second UpdateFolder not success: %s", out)
+	}
+	got = folderPerms(t, dir, fid)
+	if _, ok := got["alice@hermex.test"]; ok {
+		t.Error("a full replace must drop alice from the ACL")
+	}
+	if want := mapi.NormalizeRights(mapi.RightsEditor, true); got["default"] != want {
+		t.Errorf("default rights after replace = %#x, want Editor %#x", got["default"], want)
+	}
+}
+
+// TestUpdateFolderPermissionSetUnknownMemberSkipped confirms a member whose address
+// does not resolve in the directory is skipped, while resolvable members still apply.
+func TestUpdateFolderPermissionSetUnknownMemberSkipped(t *testing.T) {
+	ts, dir := seededEWS(t)
+	box := createUserFolder(t, ts, "inbox", "Shared")
+	fid, err := oxews.DecodeFolderID(box)
+	if err != nil {
+		t.Fatal(err)
+	}
+	perms := permissionXML(`<t:DistinguishedUser>Default</t:DistinguishedUser>`, "Reviewer") +
+		permissionXML(`<t:PrimarySmtpAddress>nobody@hermex.test</t:PrimarySmtpAddress>`, "Author")
+	if _, out := soapPost(t, ts, updatePermsReq(`<t:FolderId Id="`+box+`"/>`, perms), true); !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("UpdateFolder not success: %s", out)
+	}
+	got := folderPerms(t, dir, fid)
+	if _, ok := got["nobody@hermex.test"]; ok {
+		t.Error("an unresolvable member must be skipped")
+	}
+	if _, ok := got["default"]; !ok {
+		t.Error("the resolvable default member must still be applied")
+	}
+}
+
+// TestUpdateFolderPermissionSetDistinguishedAllowed confirms a permission write to a
+// well-known folder is allowed (unlike a rename, which is refused) — sharing a
+// distinguished folder is legitimate and does not touch the name projection.
+func TestUpdateFolderPermissionSetDistinguishedAllowed(t *testing.T) {
+	ts, dir := seededEWS(t)
+	perms := permissionXML(`<t:DistinguishedUser>Default</t:DistinguishedUser>`, "Reviewer")
+	req := updatePermsReq(`<t:DistinguishedFolderId Id="inbox"/>`, perms)
+	if _, out := soapPost(t, ts, req, true); !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("permission change on a distinguished folder must succeed: %s", out)
+	}
+	if want := mapi.NormalizeRights(mapi.RightsReviewer, true); folderPerms(t, dir, int64(mapi.PrivateFIDInbox))["default"] != want {
+		t.Errorf("inbox default rights not stored as Reviewer %#x", want)
+	}
+}
