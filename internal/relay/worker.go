@@ -54,6 +54,10 @@ const (
 
 // Run drains the spool on every tick until ctx is cancelled. A scan error is
 // logged and the loop continues, so a transient store error does not stop relay.
+//
+// Exactly one process must run this loop. Claim does not lease the rows it
+// returns, so a second concurrent drainer would deliver the same recipient
+// twice; like the send-later sweep it lives in the single always-on MTA daemon.
 func (w *Worker) Run(ctx context.Context, interval time.Duration) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
