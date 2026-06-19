@@ -8,6 +8,8 @@ import (
 	"time"
 
 	mysqldriver "github.com/go-sql-driver/mysql"
+
+	"hermex/internal/objectstore"
 )
 
 // openTestDB connects to the MariaDB given by HERMEX_TEST_MYSQL_DSN, skipping
@@ -158,6 +160,63 @@ func TestSQLDirectoryIsLocalDomain(t *testing.T) {
 	}
 	if ok, err := d.IsLocalDomain("hermex.test"); err != nil || ok {
 		t.Errorf("IsLocalDomain(suspended) = %v, %v; want false, nil", ok, err)
+	}
+}
+
+// TestResolveOpensStoreAcrossPartitions proves mailbox reading is
+// partition-agnostic: two users provisioned under two distinct storage roots
+// each resolve to their own root — never the other's — and the resolved path
+// opens as a real, seeded object store. The directory carries the full maildir
+// verbatim, so a mailbox may live on any partition without the read path knowing
+// where; an alias chains to the user's one stored path rather than re-deriving a
+// default location.
+func TestResolveOpensStoreAcrossPartitions(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	cleanTables(t, db)
+
+	if _, err := d.CreateDomain("hermex.test", filepath.Join(t.TempDir(), "domains", "hermex.test")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two independent storage roots stand in for two data partitions.
+	part0, part1 := t.TempDir(), t.TempDir()
+	aliceDir := filepath.Join(part0, "user", "hermex.test", "alice")
+	bobDir := filepath.Join(part1, "user", "hermex.test", "bob")
+	if _, err := d.CreateUser("alice@hermex.test", "pw", aliceDir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.CreateUser("bob@hermex.test", "pw", bobDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.CreateAlias("a@hermex.test", "alice@hermex.test"); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct{ addr, want string }{
+		{"alice@hermex.test", aliceDir},
+		{"bob@hermex.test", bobDir},
+		{"a@hermex.test", aliceDir}, // alias -> alice's partition, not bob's, not a default
+	} {
+		path, ok := d.Resolve(tc.addr)
+		if !ok || path != tc.want {
+			t.Fatalf("Resolve(%q) = %q, %v; want %q, true", tc.addr, path, ok, tc.want)
+		}
+		store, err := objectstore.Open(path)
+		if err != nil {
+			t.Fatalf("objectstore.Open(%q): %v", path, err)
+		}
+		folders, err := store.ListFolders()
+		store.Close()
+		if err != nil {
+			t.Fatalf("ListFolders on the store at %q: %v", path, err)
+		}
+		if len(folders) == 0 {
+			t.Errorf("store at %q opened with no folders; it was not initialized", path)
+		}
 	}
 }
 
