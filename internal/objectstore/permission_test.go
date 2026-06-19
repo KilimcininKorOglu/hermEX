@@ -241,3 +241,59 @@ func TestAddDefaultUpsertsNoDuplicate(t *testing.T) {
 		t.Errorf("default rights = 0x%X, want 0x%X", e.Rights, mapi.RightsOwner)
 	}
 }
+
+// TestResolvePermissionExactWinsOverDefault is the resolver's load-bearing rule:
+// an exact-username grant takes precedence over the "default" member grant, and a
+// user with no exact grant falls through to default. Distinct rights make the
+// precedence observable — a resolver that returned default for everyone, or
+// exact-or-nothing, would fail one of the two assertions.
+func TestResolvePermissionExactWinsOverDefault(t *testing.T) {
+	s := openSeededStore(t)
+	fid := int64(mapi.PrivateFIDInbox)
+	if err := s.ModifyPermissions(fid, false, []PermissionChange{
+		{Op: PermAdd, Username: "alice@test", Rights: mapi.RightsEditor},
+		{Op: PermAdd, MemberID: mapi.MemberIDDefault, Rights: mapi.FrightsFreeBusySimple},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if r, err := s.ResolvePermission(fid, "alice@test"); err != nil || r != mapi.RightsEditor {
+		t.Errorf("alice = 0x%X (err %v), want her exact RightsEditor 0x%X", r, err, mapi.RightsEditor)
+	}
+	if r, err := s.ResolvePermission(fid, "bob@test"); err != nil || r != mapi.FrightsFreeBusySimple {
+		t.Errorf("bob = 0x%X (err %v), want the default grant 0x%X", r, err, mapi.FrightsFreeBusySimple)
+	}
+}
+
+// TestResolvePermissionNoDefaultIsNone confirms a user with neither an exact grant
+// nor a "default" member grant resolves to no rights (0), not an error — the inert
+// state a seeded folder without a default has.
+func TestResolvePermissionNoDefaultIsNone(t *testing.T) {
+	s := openSeededStore(t)
+	fid := int64(mapi.PrivateFIDInbox)
+	if err := s.ModifyPermissions(fid, false, []PermissionChange{
+		{Op: PermAdd, Username: "alice@test", Rights: mapi.RightsEditor},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := s.ResolvePermission(fid, "bob@test"); err != nil || r != 0 {
+		t.Errorf("bob with no default = 0x%X (err %v), want 0 (no rights)", r, err)
+	}
+}
+
+// TestResolvePermissionAnonymous confirms an anonymous caller (empty username)
+// matches the stored anonymous ("") row through the exact lookup, ahead of the
+// "default" member.
+func TestResolvePermissionAnonymous(t *testing.T) {
+	s := openSeededStore(t)
+	fid := int64(mapi.PrivateFIDInbox)
+	if err := s.ModifyPermissions(fid, false, []PermissionChange{
+		{Op: PermAdd, MemberID: mapi.MemberIDAnonymous, Rights: mapi.FrightsFreeBusySimple},
+		{Op: PermAdd, MemberID: mapi.MemberIDDefault, Rights: mapi.RightsReviewer},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if r, err := s.ResolvePermission(fid, ""); err != nil || r != mapi.FrightsFreeBusySimple {
+		t.Errorf("anonymous = 0x%X (err %v), want the anonymous grant 0x%X", r, err, mapi.FrightsFreeBusySimple)
+	}
+}

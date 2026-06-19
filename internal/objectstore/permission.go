@@ -2,6 +2,7 @@ package objectstore
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"hermex/internal/mapi"
@@ -128,6 +129,41 @@ func (s *Store) ModifyPermissions(folderID int64, replace bool, changes []Permis
 		}
 	}
 	return tx.Commit()
+}
+
+// ResolvePermission computes a user's effective rights on a folder, following the
+// MS-OXCPERM resolution order: an exact-username grant wins; absent that, the
+// "default" member grant applies; absent that, no rights. The group/DL step the
+// reference unions in (every mailing-list grant the user belongs to) is a documented
+// v1 gap — hermEX models aliases/altnames, not mailing lists — and is skipped; the
+// store-level configurations fallback (config_id 8/9) is unused in v1 and likewise
+// yields no rights. An anonymous caller (empty username) matches the stored
+// anonymous ("") row through the exact lookup. Rights come back as the stored,
+// already-normalized bitfield for the caller (free/busy, delegate access) to read.
+func (s *Store) ResolvePermission(folderID int64, username string) (uint32, error) {
+	if rights, ok, err := s.lookupPermission(folderID, username); err != nil || ok {
+		return rights, err
+	}
+	// The DL/group union is the documented v1 gap (no mailing-list model), skipped.
+	rights, _, err := s.lookupPermission(folderID, "default")
+	return rights, err
+}
+
+// lookupPermission reads the rights stored for an exact username on a folder,
+// reporting whether such a row exists. A missing row is not an error.
+func (s *Store) lookupPermission(folderID int64, username string) (uint32, bool, error) {
+	var perm int64
+	err := s.objdb.QueryRow(
+		`SELECT permission FROM permissions WHERE folder_id=? AND username=?`,
+		folderID, username).Scan(&perm)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		s.logStoreError("resolve-permission", err)
+		return 0, false, err
+	}
+	return uint32(perm), true, nil
 }
 
 // wireMemberID maps a stored row to its PR_MEMBER_ID: the "default" username reports
