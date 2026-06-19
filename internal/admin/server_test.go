@@ -43,10 +43,26 @@ func login(t *testing.T, ts *httptest.Server) (*http.Response, string) {
 	return resp, resp.Header.Get("Set-Cookie")
 }
 
-// sessionValue extracts the token from a Set-Cookie header (the Secure session
-// cookie would otherwise not ride back over httptest's plain HTTP).
-func sessionValue(setCookie string) string {
-	return strings.SplitN(strings.TrimPrefix(setCookie, sessionCookie+"="), ";", 2)[0]
+// cookieValue extracts a named cookie's value from a Set-Cookie header (the
+// Secure cookies would otherwise not ride back over httptest's plain HTTP).
+func cookieValue(setCookie, name string) string {
+	return strings.SplitN(strings.TrimPrefix(setCookie, name+"="), ";", 2)[0]
+}
+
+// loginCookies logs in and returns the session and CSRF cookie values.
+func loginCookies(t *testing.T, ts *httptest.Server) (session, csrf string) {
+	t.Helper()
+	resp, _ := login(t, ts)
+	resp.Body.Close()
+	for _, sc := range resp.Header["Set-Cookie"] {
+		if strings.HasPrefix(sc, sessionCookie+"=") {
+			session = cookieValue(sc, sessionCookie)
+		}
+		if strings.HasPrefix(sc, csrfCookie+"=") {
+			csrf = cookieValue(sc, csrfCookie)
+		}
+	}
+	return session, csrf
 }
 
 // TestAdminLoginAndWhoami proves a valid admin login sets a session and whoami
@@ -65,7 +81,7 @@ func TestAdminLoginAndWhoami(t *testing.T) {
 	}
 
 	req, _ := http.NewRequest("GET", ts.URL+"/admin/whoami", nil)
-	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: sessionValue(setCookie)})
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: cookieValue(setCookie, sessionCookie)})
 	who, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -98,6 +114,40 @@ func TestAdminLoginNonAdmin(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("non-admin status %d, want 403", resp.StatusCode)
+	}
+}
+
+// TestAdminCSRF proves a state-changing request needs a matching CSRF token: a
+// logout with the session but no CSRF header is refused, and one carrying the
+// header succeeds.
+func TestAdminCSRF(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	if session == "" || csrf == "" {
+		t.Fatalf("login set session=%q csrf=%q, want both", session, csrf)
+	}
+
+	withCookies := func(setHeader bool) int {
+		req, _ := http.NewRequest("POST", ts.URL+"/admin/logout", nil)
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
+		req.AddCookie(&http.Cookie{Name: csrfCookie, Value: csrf})
+		if setHeader {
+			req.Header.Set(csrfHeader, csrf)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if code := withCookies(false); code != http.StatusForbidden {
+		t.Errorf("logout without CSRF header = %d, want 403", code)
+	}
+	if code := withCookies(true); code != http.StatusNoContent {
+		t.Errorf("logout with CSRF header = %d, want 204", code)
 	}
 }
 

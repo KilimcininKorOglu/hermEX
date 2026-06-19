@@ -2,6 +2,9 @@ package admin
 
 import (
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -19,6 +22,8 @@ type Directory interface {
 
 const (
 	sessionCookie = "hermex_admin"
+	csrfCookie    = "hermex_admin_csrf"
+	csrfHeader    = "X-CSRF-Token"
 	sessionTTL    = 8 * time.Hour
 )
 
@@ -41,8 +46,8 @@ func NewServer(dir Directory, secret []byte) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /admin/login", s.handleLogin)
-	mux.HandleFunc("POST /admin/logout", s.handleLogout)
-	mux.Handle("GET /admin/whoami", s.auth(http.HandlerFunc(s.handleWhoami)))
+	mux.Handle("POST /admin/logout", s.protect(http.HandlerFunc(s.handleLogout)))
+	mux.Handle("GET /admin/whoami", s.protect(http.HandlerFunc(s.handleWhoami)))
 	return mux
 }
 
@@ -91,7 +96,18 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Secure:   true,
 		SameSite: http.SameSiteStrictMode,
 	})
-	writeJSON(w, map[string]any{"login": req.Login, "roles": roles})
+	// The CSRF cookie is readable (not HttpOnly) so the client echoes it in the
+	// X-CSRF-Token header on state-changing requests (double-submit).
+	csrf := newCSRFToken()
+	http.SetCookie(w, &http.Cookie{
+		Name:     csrfCookie,
+		Value:    csrf,
+		Path:     "/admin",
+		MaxAge:   int(sessionTTL.Seconds()),
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+	})
+	writeJSON(w, map[string]any{"login": req.Login, "roles": roles, "csrfToken": csrf})
 }
 
 // handleLogout clears the session cookie.
@@ -114,9 +130,11 @@ func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"login": cl.Login, "roles": roles})
 }
 
-// auth wraps a handler so it runs only with a valid session cookie, stashing the
-// claims in the request context.
-func (s *Server) auth(next http.Handler) http.Handler {
+// protect wraps a handler so it runs only with a valid session cookie, and — for
+// a state-changing method — a matching CSRF token (double-submit: the
+// X-CSRF-Token header must equal the CSRF cookie). It stashes the claims in the
+// request context.
+func (s *Server) protect(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, err := r.Cookie(sessionCookie)
 		if err != nil {
@@ -128,8 +146,40 @@ func (s *Server) auth(next http.Handler) http.Handler {
 			http.Error(w, "invalid session", http.StatusUnauthorized)
 			return
 		}
+		if isUnsafeMethod(r.Method) && !validCSRF(r) {
+			http.Error(w, "missing or invalid CSRF token", http.StatusForbidden)
+			return
+		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, cl)))
 	})
+}
+
+// newCSRFToken mints a random double-submit CSRF token.
+func newCSRFToken() string {
+	b := make([]byte, 32)
+	_, _ = rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// isUnsafeMethod reports whether an HTTP method changes state and so needs CSRF
+// protection.
+func isUnsafeMethod(m string) bool {
+	switch m {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		return true
+	}
+	return false
+}
+
+// validCSRF reports whether the request carries a CSRF header equal to its CSRF
+// cookie (compared in constant time).
+func validCSRF(r *http.Request) bool {
+	cookie, err := r.Cookie(csrfCookie)
+	if err != nil || cookie.Value == "" {
+		return false
+	}
+	header := r.Header.Get(csrfHeader)
+	return header != "" && hmac.Equal([]byte(cookie.Value), []byte(header))
 }
 
 // adminRoles returns a resolved user's admin roles, or none when the login did
