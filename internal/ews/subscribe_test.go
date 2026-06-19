@@ -115,6 +115,37 @@ func TestGetEventsCreated(t *testing.T) {
 	}
 }
 
+// TestSubscribeScopeIsolation confirms an explicit single-folder subscription
+// reports changes only in that folder: a message delivered to a sibling folder
+// is invisible, while one in the subscribed folder fires. A whole-store
+// subscription cannot catch a scoping bug because it watches everything.
+func TestSubscribeScopeIsolation(t *testing.T) {
+	srv, sess, path := subServer(t)
+	id := subscribe(t, srv, sess, subscribeInner(false, "inbox", "CreatedEvent"))
+
+	// A message outside the subscribed folder must not fire.
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte("From: a@x.test\r\nTo: b@x.test\r\nSubject: elsewhere\r\n" +
+		"Date: Wed, 15 Nov 2023 10:13:20 +0000\r\n\r\nbody\r\n")
+	if _, err := st.AppendMessage(mapi.PrivateFIDSentItems, raw, time.Unix(1700000000, 0), 0); err != nil {
+		st.Close()
+		t.Fatal(err)
+	}
+	st.Close()
+	if out := getEvents(t, srv, sess, id); strings.Contains(out, "CreatedEvent") {
+		t.Errorf("a create outside the subscribed folder must not fire: %s", out)
+	}
+
+	// A message in the subscribed folder fires.
+	seedInbox(t, path, "in scope")
+	if out := getEvents(t, srv, sess, id); !strings.Contains(out, "CreatedEvent") {
+		t.Errorf("a create in the subscribed folder must fire: %s", out)
+	}
+}
+
 // TestGetEventsModified confirms a read-state flip (the change-number signal the
 // poll folds in) is reported as a ModifiedEvent.
 func TestGetEventsModified(t *testing.T) {
