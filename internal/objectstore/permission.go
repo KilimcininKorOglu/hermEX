@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"database/sql"
 	"fmt"
 
 	"hermex/internal/mapi"
@@ -104,18 +105,20 @@ func (s *Store) ModifyPermissions(folderID int64, replace bool, changes []Permis
 	for _, c := range changes {
 		switch c.Op {
 		case PermAdd:
-			_, err = tx.Exec(
-				`INSERT INTO permissions (folder_id, username, permission) VALUES (?, ?, ?)
-				 ON CONFLICT(folder_id, username) DO UPDATE SET permission=excluded.permission`,
-				folderID, addUsername(c), int64(c.Rights))
+			err = upsertPermission(tx, folderID, addUsername(c), c.Rights)
 		case PermModify:
-			clause, arg := memberLocator(c.MemberID)
-			params := append([]any{int64(c.Rights), folderID}, arg...)
-			_, err = tx.Exec(`UPDATE permissions SET permission=? WHERE folder_id=? AND `+clause, params...)
+			if username, special := specialUsername(c.MemberID); special {
+				// A Modify of the default/anonymous member must create its row when
+				// none is stored (the client edits the synthesized member), so it
+				// upserts by username — never a no-op UPDATE that drops the edit.
+				err = upsertPermission(tx, folderID, username, c.Rights)
+			} else {
+				_, err = tx.Exec(`UPDATE permissions SET permission=? WHERE folder_id=? AND member_id=?`,
+					int64(c.Rights), folderID, c.MemberID)
+			}
 		case PermRemove:
 			clause, arg := memberLocator(c.MemberID)
-			params := append([]any{folderID}, arg...)
-			_, err = tx.Exec(`DELETE FROM permissions WHERE folder_id=? AND `+clause, params...)
+			_, err = tx.Exec(`DELETE FROM permissions WHERE folder_id=? AND `+clause, append([]any{folderID}, arg...)...)
 		default:
 			return fmt.Errorf("objectstore: unknown permission op %d", c.Op)
 		}
@@ -150,6 +153,30 @@ func memberDisplayName(username string) string {
 	return username
 }
 
+// upsertPermission inserts a member's row or updates its rights, keyed by the unique
+// (folder_id, username) index — the shared write for an Add and for a Modify of a
+// special member that has no stored row yet.
+func upsertPermission(tx *sql.Tx, folderID int64, username string, rights uint32) error {
+	_, err := tx.Exec(
+		`INSERT INTO permissions (folder_id, username, permission) VALUES (?, ?, ?)
+		 ON CONFLICT(folder_id, username) DO UPDATE SET permission=excluded.permission`,
+		folderID, username, int64(rights))
+	return err
+}
+
+// specialUsername maps a special member id to its stored username — 0 → "default",
+// -1 → "" (anonymous) — reporting false for a real member (addressed by row id).
+func specialUsername(memberID int64) (string, bool) {
+	switch memberID {
+	case mapi.MemberIDDefault:
+		return "default", true
+	case mapi.MemberIDAnonymous:
+		return "", true
+	default:
+		return "", false
+	}
+}
+
 // addUsername resolves the storage username for an Add. A real-member Add carries a
 // resolved Username (an SMTP address, never the literal "default"/"anonymous"), so a
 // non-empty Username wins and MemberID is ignored — this is what keeps a real Add
@@ -160,10 +187,8 @@ func addUsername(c PermissionChange) string {
 	if c.Username != "" {
 		return c.Username
 	}
-	if c.MemberID == mapi.MemberIDAnonymous {
-		return ""
-	}
-	return "default"
+	username, _ := specialUsername(c.MemberID)
+	return username
 }
 
 // memberLocator returns the WHERE-clause fragment and its bound arguments that select

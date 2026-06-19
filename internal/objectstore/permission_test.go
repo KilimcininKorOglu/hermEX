@@ -148,6 +148,28 @@ func TestAddRealMemberThenModifyAndRemove(t *testing.T) {
 	}
 }
 
+// TestModifyUnstoredDefaultCreatesRow guards the synthesized-member edit: a folder
+// with no stored Default row still presents one (id 0) to the client, so a Modify of
+// it must CREATE the row rather than no-op an UPDATE that silently drops the grant.
+// The Inbox carries no seeded permissions.
+func TestModifyUnstoredDefaultCreatesRow(t *testing.T) {
+	s := openSeededStore(t)
+	fid := int64(mapi.PrivateFIDInbox)
+
+	if m := permByMember(t, s, fid); len(m) != 0 {
+		t.Fatalf("precondition: Inbox has %d stored permission rows, want 0", len(m))
+	}
+	if err := s.ModifyPermissions(fid, false, []PermissionChange{
+		{Op: PermModify, MemberID: mapi.MemberIDDefault, Rights: mapi.RightsReviewer},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m := permByMember(t, s, fid)
+	if e, ok := m[mapi.MemberIDDefault]; !ok || e.Rights != mapi.RightsReviewer {
+		t.Errorf("after editing the synthesized Default: row = %+v (ok=%v), want id 0/rights 0x%X (the edit was dropped)", e, ok, mapi.RightsReviewer)
+	}
+}
+
 // TestAddAnonymousStoresEmptyUsername proves an anonymous Add (wire id -1) lands as
 // the empty-username row and reads back as id -1 / "anonymous".
 func TestAddAnonymousStoresEmptyUsername(t *testing.T) {
