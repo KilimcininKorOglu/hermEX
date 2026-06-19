@@ -313,3 +313,14 @@ const (
 	PrOtherAddressCountry         = PropTag(0x3A60001F) // PtUnicode
 	PrOtherAddressPostOfficeBox   = PropTag(0x3A64001F) // PtUnicode
 )
+
+// Folder-permission row proptags (MS-OXCPERM). One bag per member in the
+// permissions table a RopGetPermissionsTable handle enumerates; PrEntryID (above)
+// carries the member's address-book EntryID. PrMemberName has an ANSI sibling for
+// down-conversion to a client code page.
+const (
+	PrMemberID     = PropTag(0x66710014) // PtI8 (PidTagMemberId; 0/-1 = default/anonymous)
+	PrMemberName   = PropTag(0x6672001F) // PtUnicode (PidTagMemberName)
+	PrMemberNameA  = PropTag(0x6672001E) // PtString8 (PidTagMemberName, ANSI)
+	PrMemberRights = PropTag(0x66730003) // PtLong (PidTagMemberRights)
+)
