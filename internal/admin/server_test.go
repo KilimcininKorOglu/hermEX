@@ -28,6 +28,8 @@ type fakeDir struct {
 	setPwMissing                  bool
 	grantedRole, revokedRole      string
 	grantedScope, revokedScope    int64
+	upsertedUsers                 []string
+	upsertNew                     bool
 	createErr                     error
 }
 
@@ -91,6 +93,10 @@ func (f *fakeDir) SetLDAPConfig(orgID int64, cfg directory.LDAPConfig) error {
 	}
 	f.ldap[orgID] = cfg
 	return nil
+}
+func (f *fakeDir) UpsertLDAPUser(username string, _ []byte, _ string) (bool, error) {
+	f.upsertedUsers = append(f.upsertedUsers, username)
+	return f.upsertNew, nil
 }
 
 // fakePaths derives resource paths under a fixed root for the tests.

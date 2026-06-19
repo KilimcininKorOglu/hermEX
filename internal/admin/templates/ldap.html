@@ -1,0 +1,39 @@
+{{define "ldap.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>Directory Sync</h1>
+{{template "ldap-panel" .}}
+</main>
+</div>
+{{template "foot" .}}{{end}}
+
+{{define "ldap-panel"}}<div id="ldap-panel">
+{{if .Saved}}<p class="ok">Configuration saved.</p>{{end}}
+{{if .SyncResult}}<p class="ok">{{.SyncResult}}</p>{{end}}
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<form class="ldap-form" hx-post="/admin/ui/ldap" hx-target="#ldap-panel" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Directory URI
+<input type="text" name="uri" value="{{.Config.URI}}" placeholder="ldaps://dc.example.com:636">
+</label>
+<label class="check"><input type="checkbox" name="starttls" {{if .Config.StartTLS}}checked{{end}}> Upgrade with StartTLS</label>
+<label>Bind DN
+<input type="text" name="bind_dn" value="{{.Config.BindDN}}" placeholder="cn=svc,dc=example,dc=com">
+</label>
+<label>Bind password
+<input type="password" name="bind_password" placeholder="{{if .BindPasswordSet}}(unchanged){{else}}(unset){{end}}">
+</label>
+<label>Search base
+<input type="text" name="base_dn" value="{{.Config.BaseDN}}" placeholder="ou=people,dc=example,dc=com">
+</label>
+<label>Username attribute
+<input type="text" name="username_attr" value="{{.Config.UsernameAttr}}" placeholder="mail">
+</label>
+<button type="submit">Save configuration</button>
+</form>
+<form class="sync-form" hx-post="/admin/ui/ldap/sync" hx-target="#ldap-panel" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<button type="submit">Sync now</button>
+</form>
+</div>{{end}}

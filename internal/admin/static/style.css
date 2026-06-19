@@ -183,3 +183,42 @@ table.grid tr:last-child td { border-bottom: none; }
 table.grid td.empty { color: var(--muted); text-align: center; }
 
 .muted { color: var(--muted); }
+
+.ok {
+	background: #eaf6ec;
+	color: #1e7a34;
+	border: 1px solid #bfe3c6;
+	border-radius: 8px;
+	padding: 0.6rem 0.75rem;
+	margin-bottom: 1rem;
+	font-size: 0.9rem;
+}
+
+.ldap-form {
+	display: flex;
+	flex-direction: column;
+	gap: 0.75rem;
+	max-width: 480px;
+	margin-bottom: 1rem;
+}
+
+.ldap-form label { color: var(--muted); font-size: 0.85rem; }
+.ldap-form label.check { display: flex; align-items: center; gap: 0.5rem; }
+
+.ldap-form input[type="text"], .ldap-form input[type="password"] {
+	display: block;
+	width: 100%;
+	margin-top: 0.3rem;
+	padding: 0.5rem 0.7rem;
+	border: 1px solid var(--border);
+	border-radius: 8px;
+	font-size: 0.95rem;
+}
+
+.ldap-form button { align-self: flex-start; }
+
+.sync-form button {
+	background: none;
+	border: 1px solid var(--accent);
+	color: var(--accent);
+}

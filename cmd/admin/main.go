@@ -176,9 +176,11 @@ func main() {
 		if addr == "" {
 			addr = ":8081"
 		}
-		dir.SetLDAPVerifier(ldapauth.New()) // an administrator may be LDAP-mastered
+		ldapVerifier := ldapauth.New()
+		dir.SetLDAPVerifier(ldapVerifier) // an administrator may be LDAP-mastered
 		logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
 		srv := admin.NewServer(dir, cfg, []byte(cfg.AdminSecret))
+		srv.SetLDAPSyncer(ldapVerifier) // enables the Directory Sync trigger
 		cleanups := []func() error{logClose}
 		if cfg.MongoURI != "" {
 			reader, err := logging.NewReader(cfg.MongoURI, cfg.LogDatabase)

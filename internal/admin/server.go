@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/ldapauth"
 	"hermex/internal/logging"
 )
 
@@ -30,6 +31,14 @@ type Directory interface {
 	CreateAlias(aliasname, mainname string) error
 	GetLDAPConfig(orgID int64) (directory.LDAPConfig, bool, error)
 	SetLDAPConfig(orgID int64, cfg directory.LDAPConfig) error
+	UpsertLDAPUser(username string, externid []byte, maildir string) (created bool, err error)
+}
+
+// LDAPSyncer downsyncs an organization's directory accounts. It is optional —
+// the Directory Sync page reports sync as unavailable when none is set. The
+// concrete *ldapauth.Verifier satisfies it.
+type LDAPSyncer interface {
+	Sync(cfg directory.LDAPConfig) ([]ldapauth.SyncedUser, error)
 }
 
 // Paths derives a new domain's homedir and a new user's maildir from the
@@ -61,6 +70,7 @@ type Server struct {
 	paths  Paths
 	secret []byte
 	logs   LogReader
+	syncer LDAPSyncer
 }
 
 // NewServer builds an admin server backed by the directory, deriving new
@@ -71,6 +81,9 @@ func NewServer(dir Directory, paths Paths, secret []byte) *Server {
 
 // SetLogReader attaches a log store reader, enabling the log viewer.
 func (s *Server) SetLogReader(r LogReader) { s.logs = r }
+
+// SetLDAPSyncer attaches a directory syncer, enabling the Directory Sync trigger.
+func (s *Server) SetLDAPSyncer(syncer LDAPSyncer) { s.syncer = syncer }
 
 // Handler returns the admin HTTP handler.
 func (s *Server) Handler() http.Handler {
@@ -103,6 +116,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/ui/aliases", s.handleUIAliases)
 	mux.HandleFunc("POST /admin/ui/aliases", s.handleUICreateAlias)
 	mux.HandleFunc("GET /admin/ui/logs", s.handleUILogs)
+	mux.HandleFunc("GET /admin/ui/ldap", s.handleUILDAP)
+	mux.HandleFunc("POST /admin/ui/ldap", s.handleUISaveLDAP)
+	mux.HandleFunc("POST /admin/ui/ldap/sync", s.handleUISyncLDAP)
 	mux.HandleFunc("GET /admin/ui/", s.handleUIDashboard)
 	return mux
 }
