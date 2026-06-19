@@ -9,13 +9,6 @@ import (
 	"hermex/internal/mapi"
 )
 
-// Default-user folder rights seeded so free/busy lookups resolve: visibility
-// plus simple (availability-only) free/busy access.
-const (
-	frightsVisible        = 0x400
-	frightsFreeBusySimple = 0x800
-)
-
 // builtinFolder describes one default folder to seed on a fresh mailbox: its
 // fixed id, its parent (0 = no parent, used by the root), the display name, the
 // container class ("" = none), and whether it is hidden from clients.
@@ -288,10 +281,10 @@ func seedReceiveTable(tx *sql.Tx, ntNow uint64) error {
 func seedDefaultPermissions(tx *sql.Tx) error {
 	rows := []struct {
 		fid  uint64
-		perm int
+		perm uint32
 	}{
-		{mapi.PrivateFIDCalendar, frightsFreeBusySimple | frightsVisible},
-		{mapi.PrivateFIDLocalFreebusy, frightsFreeBusySimple},
+		{mapi.PrivateFIDCalendar, mapi.FrightsFreeBusySimple | mapi.FrightsVisible},
+		{mapi.PrivateFIDLocalFreebusy, mapi.FrightsFreeBusySimple},
 	}
 	for _, r := range rows {
 		if _, err := tx.Exec(

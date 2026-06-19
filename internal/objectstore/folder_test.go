@@ -195,17 +195,20 @@ func TestSeedMailboxReceiveAndPermissions(t *testing.T) {
 		t.Errorf("receive_table rows = %d, want 4", rcvCount)
 	}
 
+	// Pin the seeded bytes to the literal rights, independent of the mapi
+	// constants that feed the seed: 0xC00 = FreeBusySimple|Visible, 0x800 =
+	// FreeBusySimple. A drift in either constant or the seed fails here.
 	var perm int
 	if err := s.objdb.QueryRow(`SELECT permission FROM permissions WHERE folder_id=? AND username='default'`, mapi.PrivateFIDCalendar).Scan(&perm); err != nil {
 		t.Fatal(err)
 	}
-	if perm != frightsFreeBusySimple|frightsVisible {
-		t.Errorf("calendar default permission = %#x, want %#x", perm, frightsFreeBusySimple|frightsVisible)
+	if perm != 0xC00 {
+		t.Errorf("calendar default permission = %#x, want 0xC00 (FreeBusySimple|Visible)", perm)
 	}
 	if err := s.objdb.QueryRow(`SELECT permission FROM permissions WHERE folder_id=? AND username='default'`, mapi.PrivateFIDLocalFreebusy).Scan(&perm); err != nil {
 		t.Fatal(err)
 	}
-	if perm != frightsFreeBusySimple {
-		t.Errorf("free/busy default permission = %#x, want %#x", perm, frightsFreeBusySimple)
+	if perm != 0x800 {
+		t.Errorf("free/busy default permission = %#x, want 0x800 (FreeBusySimple)", perm)
 	}
 }
