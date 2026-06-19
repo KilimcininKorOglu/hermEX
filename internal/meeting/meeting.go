@@ -8,6 +8,7 @@ package meeting
 
 import (
 	"errors"
+	"slices"
 	"time"
 
 	"hermex/internal/directory"
@@ -122,7 +123,7 @@ func Respond(st *objectstore.Store, accounts directory.Accounts, spool *relay.Sp
 // accepted/tentative meeting from the request's own properties, re-classed and
 // carrying the response stamps. It returns the appointment's message id.
 func file(st *objectstore.Store, req *oxcmail.Message, tags Tags, response int32, now uint64) (int64, error) {
-	cal := append(mapi.PropertyValues(nil), req.Props...)
+	cal := stripInboundCruft(req.Props)
 	cal.Set(mapi.PrMessageClass, "IPM.Appointment")
 	cal.Set(tags.Resp, response)
 	cal.Set(tags.Reply, now)
@@ -154,6 +155,30 @@ func uidOf(props mapi.PropertyValues, tags Tags) string {
 	return ""
 }
 
+// inboundCruft is the set of inbound-mail properties that must not ride along when a
+// delivered request is reshaped into a derived object: a filed appointment and an
+// organizer response are new messages, not the email that carried the invitation.
+// In particular the request's Message-ID must be dropped so the response mints its
+// own (two messages may not share one), and the verbatim transport headers and
+// threading have no place on either.
+var inboundCruft = []mapi.PropTag{
+	mapi.PrInternetMessageID,
+	mapi.PrInternetReferences,
+	mapi.PrInReplyToID,
+	mapi.PrTransportMessageHeaders,
+}
+
+// stripInboundCruft copies props with the inbound-mail cruft removed.
+func stripInboundCruft(props mapi.PropertyValues) mapi.PropertyValues {
+	out := make(mapi.PropertyValues, 0, len(props))
+	for _, pv := range props {
+		if !slices.Contains(inboundCruft, pv.Tag) {
+			out = append(out, pv)
+		}
+	}
+	return out
+}
+
 // notifyOrganizer sends the organizer an iTIP REPLY for the response: the request is
 // reshaped into a response message (re-classed, sent as the responder while keeping
 // the organizer as the representing identity so oxcical's REPLY names them), rendered
@@ -168,7 +193,7 @@ func notifyOrganizer(st *objectstore.Store, accounts directory.Accounts, spool *
 		return nil
 	}
 
-	resp := append(mapi.PropertyValues(nil), req.Props...)
+	resp := stripInboundCruft(req.Props)
 	resp.Set(mapi.PrMessageClass, responseClass(response))
 	resp.Set(mapi.PrSenderSmtpAddress, sender)
 	resp.Set(mapi.PrSenderEmailAddress, sender)
