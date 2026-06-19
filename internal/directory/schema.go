@@ -58,6 +58,19 @@ var directoryDDL = []string{
 			REFERENCES users (id) ON DELETE CASCADE ON UPDATE CASCADE
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
+	// admin_roles grants a user administrative authority for the admin API. The
+	// role is the tier — system (every org and domain), org (one organization),
+	// or domain (one domain) — and scope_id names the org or domain it is bound to
+	// (0 for system). A user may hold several roles.
+	`CREATE TABLE IF NOT EXISTS admin_roles (
+		user_id  INT UNSIGNED NOT NULL,
+		role     VARCHAR(16) CHARACTER SET ascii NOT NULL,
+		scope_id INT UNSIGNED NOT NULL DEFAULT 0,
+		PRIMARY KEY (user_id, role, scope_id),
+		CONSTRAINT admin_roles_user_fk FOREIGN KEY (user_id)
+			REFERENCES users (id) ON DELETE CASCADE ON UPDATE CASCADE
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
 	// ldap_config holds one LDAP/AD bind-to-verify configuration per organization
 	// (domains.org_id). A user whose externid is set authenticates against their
 	// org's directory here; users with no externid stay on local crypt. Keyed by
