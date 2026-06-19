@@ -17,10 +17,11 @@ const (
 )
 
 // Ping status codes (MS-ASCMD): 1 the heartbeat expired with no change, 2 one
-// or more watched folders changed.
+// or more watched folders changed, 5 the requested heartbeat is out of range.
 const (
-	pingStatusExpired = 1
-	pingStatusChanges = 2
+	pingStatusExpired      = 1
+	pingStatusChanges      = 2
+	pingStatusBadHeartbeat = 5
 )
 
 // handlePing answers Ping: it holds the request open for the heartbeat interval,
@@ -34,7 +35,14 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request, sess *sessio
 		return
 	}
 	folderIDs := pingFolders(root)
-	heartbeat := clampHeartbeat(root.ChildText(wbxml.PGHeartbeatInt))
+	heartbeat, ok := parseHeartbeat(root.ChildText(wbxml.PGHeartbeatInt))
+	if !ok {
+		// The requested interval is out of range: tell the device the nearest
+		// acceptable value (Status 5) so it retries, rather than silently holding
+		// for a different interval than it asked for.
+		writeWBXML(w, pingOutOfRange(heartbeat))
+		return
+	}
 
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
@@ -112,21 +120,32 @@ func pingFolders(root *wbxml.Node) []string {
 	return out
 }
 
-// clampHeartbeat parses the requested heartbeat seconds and clamps it to the
-// supported range.
-func clampHeartbeat(s string) time.Duration {
+// parseHeartbeat parses the requested heartbeat seconds. ok is false when the
+// value was present but out of the supported range — the caller replies Status 5
+// with the returned nearest bound so the device retries with an acceptable
+// interval. A missing or unparseable value defaults to the maximum with ok true.
+func parseHeartbeat(s string) (d time.Duration, ok bool) {
 	n, err := strconv.Atoi(s)
 	if err != nil || n <= 0 {
-		return maxHeartbeat
+		return maxHeartbeat, true
 	}
-	d := time.Duration(n) * time.Second
+	d = time.Duration(n) * time.Second
 	if d < minHeartbeat {
-		return minHeartbeat
+		return minHeartbeat, false
 	}
 	if d > maxHeartbeat {
-		return maxHeartbeat
+		return maxHeartbeat, false
 	}
-	return d
+	return d, true
+}
+
+// pingOutOfRange builds a Status-5 reply naming the nearest acceptable heartbeat
+// (in seconds) so the device retries with an in-range interval.
+func pingOutOfRange(bound time.Duration) *wbxml.Node {
+	return wbxml.Elem(wbxml.PGPing,
+		wbxml.Str(wbxml.PGStatus, strconv.Itoa(pingStatusBadHeartbeat)),
+		wbxml.Str(wbxml.PGHeartbeatInt, strconv.Itoa(int(bound/time.Second))),
+	)
 }
 
 // pingResponse builds a Ping reply with the given status and, for Status 2, the

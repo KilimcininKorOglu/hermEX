@@ -55,6 +55,21 @@ func TestGetItemEstimateNotPrimed(t *testing.T) {
 	}
 }
 
+// TestPingHeartbeatOutOfRange confirms an out-of-range heartbeat reports Status 5
+// with the nearest acceptable interval, rather than silently holding for a
+// different interval than the device asked for.
+func TestPingHeartbeatOutOfRange(t *testing.T) {
+	ts, _ := seededServer(t)
+
+	_, root := postCommand(t, ts, "Ping", pingReq("99999"))
+	if s := root.ChildText(wbxml.PGStatus); s != "5" {
+		t.Errorf("status = %q, want 5 (heartbeat out of range)", s)
+	}
+	if hb := root.ChildText(wbxml.PGHeartbeatInt); hb != "3540" {
+		t.Errorf("HeartbeatInterval = %q, want 3540 (the upper bound)", hb)
+	}
+}
+
 // TestPingNoChange confirms the heartbeat expires with Status 1 when nothing
 // changes.
 func TestPingNoChange(t *testing.T) {
