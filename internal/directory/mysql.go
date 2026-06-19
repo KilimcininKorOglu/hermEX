@@ -415,6 +415,31 @@ func (d *SQLDirectory) CreateAlias(aliasname, mainname string) error {
 	return err
 }
 
+// AliasInfo is an alias address and the primary address it forwards to.
+type AliasInfo struct {
+	ID    int64
+	Alias string
+	Main  string
+}
+
+// ListAliases returns every alias, ordered by alias address, for the admin API.
+func (d *SQLDirectory) ListAliases() ([]AliasInfo, error) {
+	rows, err := d.db.Query(`SELECT id, aliasname, mainname FROM aliases ORDER BY aliasname`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AliasInfo
+	for rows.Next() {
+		var ai AliasInfo
+		if err := rows.Scan(&ai.ID, &ai.Alias, &ai.Main); err != nil {
+			return nil, err
+		}
+		out = append(out, ai)
+	}
+	return out, rows.Err()
+}
+
 // sqlCryptNewHash produces a sha512-crypt ($6$) hash with a random salt, the
 // default credential scheme for the directory.
 func sqlCryptNewHash(password string) (string, error) {

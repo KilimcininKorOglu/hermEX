@@ -20,8 +20,10 @@ type Directory interface {
 	AdminRoles(userID int64) ([]directory.AdminRole, error)
 	ListDomains() ([]directory.DomainInfo, error)
 	ListUsers() ([]directory.UserInfo, error)
+	ListAliases() ([]directory.AliasInfo, error)
 	CreateDomain(domainname, homedir string) (int64, error)
 	CreateUser(username, password, maildir string) (int64, error)
+	CreateAlias(aliasname, mainname string) error
 }
 
 // Paths derives a new domain's homedir and a new user's maildir from the
@@ -64,6 +66,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /admin/domains", s.protect(s.requireSystem(s.handleCreateDomain)))
 	mux.Handle("GET /admin/users", s.protect(s.requireSystem(s.handleListUsers)))
 	mux.Handle("POST /admin/users", s.protect(s.requireSystem(s.handleCreateUser)))
+	mux.Handle("GET /admin/aliases", s.protect(s.requireSystem(s.handleListAliases)))
+	mux.Handle("POST /admin/aliases", s.protect(s.requireSystem(s.handleCreateAlias)))
 	return mux
 }
 

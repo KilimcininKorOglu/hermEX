@@ -17,10 +17,12 @@ type fakeDir struct {
 	roles   []directory.AdminRole
 	domains []directory.DomainInfo
 	users   []directory.UserInfo
+	aliases []directory.AliasInfo
 
 	// captured by the create handlers
 	createdDomain, createdHomedir string
 	createdUser, createdMaildir   string
+	createdAlias, createdAliasTo  string
 	createErr                     error
 }
 
@@ -47,6 +49,14 @@ func (f *fakeDir) CreateUser(username, _, maildir string) (int64, error) {
 	}
 	f.createdUser, f.createdMaildir = username, maildir
 	return 43, nil
+}
+func (f *fakeDir) ListAliases() ([]directory.AliasInfo, error) { return f.aliases, nil }
+func (f *fakeDir) CreateAlias(aliasname, mainname string) error {
+	if f.createErr != nil {
+		return f.createErr
+	}
+	f.createdAlias, f.createdAliasTo = aliasname, mainname
+	return nil
 }
 
 // fakePaths derives resource paths under a fixed root for the tests.
