@@ -180,13 +180,14 @@ func TestAdminLoginBadCreds(t *testing.T) {
 }
 
 // TestAdminLoginNonAdmin proves a user who authenticates but holds no admin role
-// is refused.
+// is refused with 401 — the same status as wrong credentials, so a valid
+// non-admin login is not an oracle confirming the password was correct.
 func TestAdminLoginNonAdmin(t *testing.T) {
 	ts := adminServer(t, &fakeDir{authOK: true, uid: 7, roles: nil})
 	resp, _ := login(t, ts)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("non-admin status %d, want 403", resp.StatusCode)
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("non-admin status %d, want 401", resp.StatusCode)
 	}
 }
 

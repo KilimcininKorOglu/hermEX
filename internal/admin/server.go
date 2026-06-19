@@ -83,9 +83,10 @@ func (s *Server) Handler() http.Handler {
 }
 
 // handleLogin authenticates an administrator and, on success, sets the session
-// cookie. Authentication requires valid credentials AND at least one admin role
-// — a regular mailbox user who authenticates is still refused (403). The login
-// must be the account's primary address; an alias is not resolved here.
+// and CSRF cookies. Authentication requires valid credentials AND at least one
+// admin role; both wrong credentials and a valid non-admin yield 401, never
+// revealing that the credentials were correct. The login must be the account's
+// primary address; an alias is not resolved here.
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Login    string `json:"login"`
@@ -95,50 +96,67 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "malformed request", http.StatusBadRequest)
 		return
 	}
-	if _, ok := s.dir.Authenticate(req.Login, req.Password); !ok {
+	uid, roles, ok, err := s.authAdmin(req.Login, req.Password)
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
-	uid, ok, err := s.dir.UserID(req.Login)
+	session, csrf := s.issueSession(req.Login, uid)
+	setSessionCookies(w, session, csrf)
+	writeJSON(w, map[string]any{"login": req.Login, "roles": roles, "csrfToken": csrf})
+}
+
+// authAdmin authenticates a login and returns the user id and admin roles when
+// the credentials are valid AND the user holds at least one admin role. ok is
+// false alike for wrong credentials, an unknown user, and a non-admin; err is
+// set only for an infrastructure failure.
+func (s *Server) authAdmin(login, password string) (uid int64, roles []directory.AdminRole, ok bool, err error) {
+	if _, authed := s.dir.Authenticate(login, password); !authed {
+		return 0, nil, false, nil
+	}
+	id, found, err := s.dir.UserID(login)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
-		return
+		return 0, nil, false, err
 	}
-	roles, err := s.adminRoles(uid, ok)
+	if !found {
+		return 0, nil, false, nil
+	}
+	r, err := s.dir.AdminRoles(id)
 	if err != nil {
-		http.Error(w, "server error", http.StatusInternalServerError)
-		return
+		return 0, nil, false, err
 	}
-	if len(roles) == 0 {
-		http.Error(w, "not an administrator", http.StatusForbidden)
-		return
+	if len(r) == 0 {
+		return 0, nil, false, nil
 	}
-	tok := signToken(s.secret, claims{
-		Login:  req.Login,
+	return id, r, true, nil
+}
+
+// issueSession mints the session and CSRF tokens for an authenticated admin.
+func (s *Server) issueSession(login string, uid int64) (session, csrf string) {
+	session = signToken(s.secret, claims{
+		Login:  login,
 		UserID: uid,
 		Expiry: time.Now().Add(sessionTTL).Unix(),
 	})
+	return session, newCSRFToken()
+}
+
+// setSessionCookies writes the session and CSRF cookies. The session cookie is
+// HttpOnly; the CSRF cookie is readable so the client echoes it back (the
+// double-submit token).
+func setSessionCookies(w http.ResponseWriter, session, csrf string) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    tok,
-		Path:     "/admin",
-		MaxAge:   int(sessionTTL.Seconds()),
-		HttpOnly: true,
-		Secure:   true,
-		SameSite: http.SameSiteStrictMode,
+		Name: sessionCookie, Value: session, Path: "/admin",
+		MaxAge: int(sessionTTL.Seconds()), HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
 	})
-	// The CSRF cookie is readable (not HttpOnly) so the client echoes it in the
-	// X-CSRF-Token header on state-changing requests (double-submit).
-	csrf := newCSRFToken()
 	http.SetCookie(w, &http.Cookie{
-		Name:     csrfCookie,
-		Value:    csrf,
-		Path:     "/admin",
-		MaxAge:   int(sessionTTL.Seconds()),
-		Secure:   true,
-		SameSite: http.SameSiteStrictMode,
+		Name: csrfCookie, Value: csrf, Path: "/admin",
+		MaxAge: int(sessionTTL.Seconds()), Secure: true, SameSite: http.SameSiteStrictMode,
 	})
-	writeJSON(w, map[string]any{"login": req.Login, "roles": roles, "csrfToken": csrf})
 }
 
 // handleLogout clears the session cookie.
@@ -211,15 +229,6 @@ func validCSRF(r *http.Request) bool {
 	}
 	header := r.Header.Get(csrfHeader)
 	return header != "" && hmac.Equal([]byte(cookie.Value), []byte(header))
-}
-
-// adminRoles returns a resolved user's admin roles, or none when the login did
-// not resolve to a user.
-func (s *Server) adminRoles(uid int64, resolved bool) ([]directory.AdminRole, error) {
-	if !resolved {
-		return nil, nil
-	}
-	return s.dir.AdminRoles(uid)
 }
 
 // writeJSON encodes v as a 200 JSON response body.
