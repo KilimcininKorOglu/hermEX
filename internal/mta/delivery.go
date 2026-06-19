@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strings"
 	"time"
 
 	"hermex/internal/directory"
@@ -62,9 +63,46 @@ type target struct {
 	path string
 }
 
+// Mail records the envelope sender. On an authenticated submission it first
+// enforces send-as authorization: the sender must be an address the logged-in
+// user owns, so an authenticated account cannot forge mail from another. Inbound
+// intake (no AUTH) keeps an unrestricted sender — a remote MTA legitimately
+// relays mail from any origin.
 func (s *session) Mail(from string) error {
+	if s.authUser != "" && !s.authorizedSender(from) {
+		return fmt.Errorf("5.7.1 <%s> is not an address you may send as", from)
+	}
 	s.from = from
 	return nil
+}
+
+// authorizedSender reports whether the authenticated user may use from as the
+// envelope sender, matching case-insensitively against the addresses the
+// directory says they own.
+func (s *session) authorizedSender(from string) bool {
+	want := strings.ToLower(strings.TrimSpace(from))
+	for _, a := range s.identities() {
+		if strings.ToLower(a) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// identities returns the addresses the authenticated user may send as. It fails
+// closed exactly like the webmail compose gate: when the directory cannot
+// enumerate identities, the user may still send as themselves but as no one
+// else.
+func (s *session) identities() []string {
+	id, ok := s.accounts.(directory.Identifier)
+	if !ok {
+		return []string{s.authUser}
+	}
+	addrs, err := id.Identities(s.authUser)
+	if err != nil || len(addrs) == 0 {
+		return []string{s.authUser}
+	}
+	return addrs
 }
 
 func (s *session) Rcpt(to string) error {
