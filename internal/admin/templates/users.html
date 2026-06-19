@@ -1,0 +1,25 @@
+{{define "users.html"}}{{template "head" .}}
+{{template "topbar" .}}
+<main>
+<h1>Users</h1>
+<form class="create-form" hx-post="/admin/ui/users" hx-target="#users-panel" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<input type="email" name="email" placeholder="user@example.com" required>
+<input type="password" name="password" placeholder="Password" required>
+<button type="submit">Add user</button>
+</form>
+{{template "users-panel" .}}
+</main>
+{{template "foot" .}}{{end}}
+
+{{define "users-panel"}}<div id="users-panel">
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<table class="grid">
+<thead><tr><th>Email</th><th>Auth</th><th>Status</th></tr></thead>
+<tbody>
+{{range .Users}}<tr><td>{{.Username}}</td><td>{{if .LDAP}}LDAP{{else}}local{{end}}</td><td>{{if eq .Status 0}}Active{{else}}Suspended{{end}}</td></tr>
+{{else}}<tr><td colspan="3" class="empty">No users yet.</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>{{end}}
