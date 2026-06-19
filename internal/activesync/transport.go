@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"hermex/internal/wbxml"
 )
@@ -185,12 +186,24 @@ func (p *packed) lenPrefixed() ([]byte, bool) {
 	return v, true
 }
 
+// supportedCommands is the MS-ASCMD command set this server dispatches, advertised
+// to clients in the OPTIONS response. It must stay in step with the dispatch
+// switch (server.go): a client reads this header to learn which commands the
+// server supports, so a command omitted here is one the client will not use even
+// though the server handles it.
+var supportedCommands = []string{
+	"Provision", "FolderSync", "FolderCreate", "FolderDelete", "FolderUpdate",
+	"Sync", "GetItemEstimate", "Ping", "SendMail", "SmartForward", "SmartReply",
+	"Settings", "ItemOperations", "MoveItems", "ResolveRecipients", "Search",
+	"ValidateCert",
+}
+
 // handleOptions answers an EAS OPTIONS request with the capability headers: the
 // supported protocol versions and the advertised command set (MS-ASHTTP §3.1).
 func (s *Server) handleOptions(w http.ResponseWriter) {
 	w.Header().Set("MS-Server-ActiveSync", defaultProtocol)
 	w.Header().Set("MS-ASProtocolVersions", defaultProtocol)
-	w.Header().Set("MS-ASProtocolCommands", "Provision,FolderSync,Sync,GetItemEstimate,Ping,SendMail,SmartForward,SmartReply,Settings")
+	w.Header().Set("MS-ASProtocolCommands", strings.Join(supportedCommands, ","))
 	w.Header().Set("Content-Length", "0")
 	w.WriteHeader(http.StatusOK)
 }

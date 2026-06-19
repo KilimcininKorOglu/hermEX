@@ -120,6 +120,29 @@ func TestBase64QueryDispatch(t *testing.T) {
 	}
 }
 
+// TestOptionsAdvertisesDispatchedCommands proves the OPTIONS capability header
+// advertises every command the server dispatches: a command the server handles
+// but omits here is one clients never send. Each advertised command is confirmed
+// to reach a handler (an empty body may error, but never the 501 not-implemented
+// path).
+func TestOptionsAdvertisesDispatchedCommands(t *testing.T) {
+	ts := testServer(t)
+	resp, _ := do(t, ts, "OPTIONS", "/Microsoft-Server-ActiveSync", "", true)
+	advertised := resp.Header.Get("MS-ASProtocolCommands")
+	if advertised == "" {
+		t.Fatal("OPTIONS advertised no commands")
+	}
+	for _, cmd := range supportedCommands {
+		if !strings.Contains(","+advertised+",", ","+cmd+",") {
+			t.Errorf("MS-ASProtocolCommands omits %s: %q", cmd, advertised)
+		}
+		r, _ := do(t, ts, "POST", "/Microsoft-Server-ActiveSync?Cmd="+cmd+"&User="+testUser+"&DeviceId=dev1&DeviceType=iPhone", "", true)
+		if r.StatusCode == http.StatusNotImplemented {
+			t.Errorf("advertised command %s is not dispatched (501)", cmd)
+		}
+	}
+}
+
 // TestAutodiscover confirms the mobilesync Autodiscover response carries the
 // ActiveSync URL and the authenticated identity.
 func TestAutodiscover(t *testing.T) {
