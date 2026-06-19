@@ -101,8 +101,9 @@ func (s *Server) DispatchRPC(opnum uint16, stub []byte) (out []byte, fault uint3
 	case opNspiResolveNamesW:
 		return s.rpcResolveNames(stub, true)
 	default:
-		// Any unknown opnum (15, 17, 18, and out-of-range) faults: it is not a
-		// defined NSPI operation.
+		// Opnums 15/17/18 are reserved/unused in the NSPI interface (the reference
+		// enum omits them too), and anything past 20 is out of range; none is a
+		// defined operation, so all fault.
 		return nil, ndr.FaultOpRngError
 	}
 }
