@@ -16,12 +16,16 @@ const (
 	pingPoll     = 5 * time.Second
 )
 
-// Ping status codes (MS-ASCMD): 1 the heartbeat expired with no change, 2 one
-// or more watched folders changed, 5 the requested heartbeat is out of range.
+// Ping status codes (MS-ASCMD 2.2.3.166): 1 the heartbeat expired with no
+// change, 2 one or more watched folders changed, 3 the request named no folder
+// to watch, 5 the requested heartbeat is out of range, 7 a watched folder has
+// not been synced (the device must sync it before Ping can watch it).
 const (
 	pingStatusExpired      = 1
 	pingStatusChanges      = 2
+	pingStatusNoFolders    = 3
 	pingStatusBadHeartbeat = 5
+	pingStatusFolderSync   = 7
 )
 
 // handlePing answers Ping: it holds the request open for the heartbeat interval,
@@ -43,6 +47,11 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request, sess *sessio
 		writeWBXML(w, pingOutOfRange(heartbeat))
 		return
 	}
+	if len(folderIDs) == 0 {
+		// Nothing to watch: the device must name at least one folder.
+		writeWBXML(w, pingResponse(pingStatusNoFolders, nil))
+		return
+	}
 
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
@@ -56,6 +65,16 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request, sess *sessio
 		return
 	}
 	dev := state.device(sess.req.deviceID)
+
+	// Ping can only watch a folder the device has already synced (its snapshot is
+	// the change baseline). A watched folder with no snapshot means the device
+	// must sync first — report Status 7 rather than silently ignoring it.
+	for _, id := range folderIDs {
+		if dev.Collections[id] == nil {
+			writeWBXML(w, pingResponse(pingStatusFolderSync, nil))
+			return
+		}
+	}
 
 	deadline := time.Now().Add(heartbeat)
 	for {

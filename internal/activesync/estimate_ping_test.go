@@ -70,6 +70,29 @@ func TestPingHeartbeatOutOfRange(t *testing.T) {
 	}
 }
 
+// TestPingNoFolders confirms a Ping naming no folder to watch reports Status 3.
+func TestPingNoFolders(t *testing.T) {
+	ts, _ := seededServer(t)
+
+	_, root := postCommand(t, ts, "Ping", wbxml.Elem(wbxml.PGPing, wbxml.Str(wbxml.PGHeartbeatInt, "30")))
+	if s := root.ChildText(wbxml.PGStatus); s != "3" {
+		t.Errorf("status = %q, want 3 (no pingable folders)", s)
+	}
+}
+
+// TestPingFolderNotSynced confirms watching a folder the device has not synced
+// reports Status 7 (the device must sync it first) rather than silently ignoring
+// it and holding the heartbeat.
+func TestPingFolderNotSynced(t *testing.T) {
+	ts, dir := seededServer(t)
+	seedInbox(t, dir, 1)
+
+	_, root := postCommand(t, ts, "Ping", pingReq("30"))
+	if s := root.ChildText(wbxml.PGStatus); s != "7" {
+		t.Errorf("status = %q, want 7 (folder needs sync)", s)
+	}
+}
+
 // TestPingNoChange confirms the heartbeat expires with Status 1 when nothing
 // changes.
 func TestPingNoChange(t *testing.T) {
