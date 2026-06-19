@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/GehirnInc/crypt/md5_crypt"
 	"github.com/GehirnInc/crypt/sha512_crypt"
 )
 
@@ -362,11 +363,18 @@ func sqlCryptNewHash(password string) (string, error) {
 	return sha512_crypt.New().Generate([]byte(password), nil)
 }
 
-// sqlCryptVerify checks a password against a stored sha512-crypt hash. An empty
-// stored hash never matches.
+// sqlCryptVerify checks a password against a stored crypt(3) hash, dispatching on
+// the hash's scheme prefix so a password set by an external crypt(3) tool
+// interoperates: $6$ (sha512-crypt, the directory's own default) and $1$
+// (md5-crypt) are both accepted. An empty hash, or one of an unrecognized
+// scheme, never matches.
 func sqlCryptVerify(password, stored string) bool {
-	if stored == "" {
+	switch {
+	case strings.HasPrefix(stored, "$6$"):
+		return sha512_crypt.New().Verify(stored, []byte(password)) == nil
+	case strings.HasPrefix(stored, "$1$"):
+		return md5_crypt.New().Verify(stored, []byte(password)) == nil
+	default:
 		return false
 	}
-	return sha512_crypt.New().Verify(stored, []byte(password)) == nil
 }
