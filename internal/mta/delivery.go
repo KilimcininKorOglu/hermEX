@@ -76,6 +76,11 @@ func (s *session) Mail(from string) error {
 	if s.authUser != "" && !s.authorizedSender(from) {
 		return fmt.Errorf("5.7.1 <%s> is not an address you may send as", from)
 	}
+	if s.authUser != "" {
+		if err := overSendQuota(s.accounts, from); err != nil {
+			return err
+		}
+	}
 	s.from = from
 	return nil
 }
@@ -166,6 +171,35 @@ func overReceiveQuota(path string) error {
 	return nil
 }
 
+// overSendQuota refuses an outbound submission when the sender's own mailbox is
+// at or above its send quota. The sender is resolved to a local mailbox; an
+// address with no local mailbox (or a store error) is not blocked — send quota
+// governs only local senders, and an infra hiccup must never strand a user's
+// mail. The limit is in KiB, 0 means unlimited, and the comparison is 64-bit.
+func overSendQuota(accounts directory.Accounts, sender string) error {
+	path, ok := accounts.Resolve(sender)
+	if !ok {
+		return nil
+	}
+	st, err := objectstore.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer st.Close()
+	q, err := st.GetQuota()
+	if err != nil || q.SendKB == 0 {
+		return nil
+	}
+	size, err := st.MailboxSize()
+	if err != nil {
+		return nil
+	}
+	if size > int64(q.SendKB)*1024 {
+		return fmt.Errorf("mailbox is full (over send quota)")
+	}
+	return nil
+}
+
 // isExternalDomain reports whether rcpt's domain lies outside this server's
 // authority, so it may be relayed rather than delivered. It fails closed: when
 // the directory cannot enumerate local domains, no domain can be confirmed
@@ -247,6 +281,9 @@ func Deliver(accounts directory.Accounts, from string, recipients []string, raw 
 // The returned unresolved holds only the genuinely undeliverable — a user-unknown
 // in a local domain, or (when spool is nil) every external address.
 func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from string, recipients []string, raw []byte, received time.Time) (unresolved []string, err error) {
+	if err := overSendQuota(accounts, from); err != nil {
+		return recipients, err
+	}
 	unresolved, err = Deliver(accounts, from, recipients, raw, received)
 	if err != nil || spool == nil || len(unresolved) == 0 {
 		return unresolved, err
