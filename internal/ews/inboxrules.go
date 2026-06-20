@@ -588,7 +588,7 @@ func blocksFromActions(a ruleActions) (mapi.RuleActions, bool) {
 // opaque FolderId or a distinguished folder name.
 func resolveMoveTarget(t targetFolder) (int64, bool) {
 	if t.FolderID != nil && t.FolderID.ID != "" {
-		fid, err := oxews.DecodeFolderID(t.FolderID.ID)
+		fid, _, err := oxews.DecodeFolderID(t.FolderID.ID)
 		return fid, err == nil
 	}
 	if t.Distinguished != nil {

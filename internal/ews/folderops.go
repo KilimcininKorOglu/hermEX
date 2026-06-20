@@ -109,7 +109,7 @@ func (s *Server) handleDeleteFolder(w http.ResponseWriter, inner []byte, sess *s
 
 	var msgs []folderResponseMessage
 	for _, ref := range req.FolderIDs.Folders {
-		fid, err := oxews.DecodeFolderID(ref.ID)
+		fid, _, err := oxews.DecodeFolderID(ref.ID)
 		if err != nil {
 			msgs = append(msgs, folderError("ErrorInvalidRequest"))
 			continue

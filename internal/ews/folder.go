@@ -402,7 +402,7 @@ func resolveTargets(refs folderRefs) []folderTarget {
 		}
 	}
 	for _, f := range refs.Folders {
-		if fid, err := oxews.DecodeFolderID(f.ID); err == nil {
+		if fid, _, err := oxews.DecodeFolderID(f.ID); err == nil {
 			out = append(out, folderTarget{fid: fid, ok: true, mailbox: refMailbox(f.Mailbox)})
 		} else {
 			out = append(out, folderTarget{code: "ErrorInvalidRequest"})

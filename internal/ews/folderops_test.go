@@ -162,7 +162,7 @@ func TestMoveFolderCollision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	destFID, _ := oxews.DecodeFolderID(dest)
+	destFID, _, _ := oxews.DecodeFolderID(dest)
 	if _, err := st.CreateFolder(&destFID, "Box"); err != nil {
 		st.Close()
 		t.Fatal(err)
@@ -275,7 +275,7 @@ func folderPerms(t *testing.T, dir string, fid int64) map[string]uint32 {
 func TestUpdateFolderPermissionSetReplaces(t *testing.T) {
 	ts, dir := seededEWS(t)
 	box := createUserFolder(t, ts, "inbox", "Shared")
-	fid, err := oxews.DecodeFolderID(box)
+	fid, _, err := oxews.DecodeFolderID(box)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +313,7 @@ func TestUpdateFolderPermissionSetReplaces(t *testing.T) {
 func TestUpdateFolderPermissionSetUnknownMemberSkipped(t *testing.T) {
 	ts, dir := seededEWS(t)
 	box := createUserFolder(t, ts, "inbox", "Shared")
-	fid, err := oxews.DecodeFolderID(box)
+	fid, _, err := oxews.DecodeFolderID(box)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -20,21 +20,39 @@ type ItemID struct {
 	FolderID  int64
 	MessageID int64
 	UID       uint32
+	// Mailbox is the target mailbox's SMTP address when the item lives in another
+	// mailbox the caller was granted access to; empty for the caller's own mailbox.
+	// It rides in the opaque token so a later GetItem/Update/Delete reopens the same
+	// mailbox the item was found in. An "|" separates it from the dotted coordinates
+	// because an SMTP address itself contains dots.
+	Mailbox string
 }
 
-// EncodeItemID encodes an item id as an opaque base64 token.
+// EncodeItemID encodes an item id as an opaque base64 token. A token from another
+// mailbox carries its SMTP after a "|"; an own-mailbox token keeps the original
+// three-field form, so ids minted before this field decode unchanged.
 func EncodeItemID(id ItemID) string {
 	s := fmt.Sprintf("%d.%d.%d", id.FolderID, id.MessageID, id.UID)
+	if id.Mailbox != "" {
+		s += "|" + id.Mailbox
+	}
 	return base64.RawURLEncoding.EncodeToString([]byte(s))
 }
 
-// DecodeItemID reverses EncodeItemID.
+// DecodeItemID reverses EncodeItemID. A token with no "|" segment decodes to an
+// own-mailbox id (empty Mailbox), preserving compatibility with older tokens.
 func DecodeItemID(s string) (ItemID, error) {
 	raw, err := base64.RawURLEncoding.DecodeString(s)
 	if err != nil {
 		return ItemID{}, errBadID
 	}
-	parts := strings.Split(string(raw), ".")
+	str := string(raw)
+	mailbox := ""
+	if i := strings.IndexByte(str, '|'); i >= 0 {
+		mailbox = str[i+1:]
+		str = str[:i]
+	}
+	parts := strings.Split(str, ".")
 	if len(parts) != 3 {
 		return ItemID{}, errBadID
 	}
@@ -44,25 +62,48 @@ func DecodeItemID(s string) (ItemID, error) {
 	if err1 != nil || err2 != nil || err3 != nil {
 		return ItemID{}, errBadID
 	}
-	return ItemID{FolderID: fid, MessageID: mid, UID: uint32(uid)}, nil
+	return ItemID{FolderID: fid, MessageID: mid, UID: uint32(uid), Mailbox: mailbox}, nil
 }
 
-// EncodeFolderID encodes a folder id (the objdb folder id) as an opaque token.
+// EncodeFolderID encodes an own-mailbox folder id as an opaque token.
 func EncodeFolderID(folderID int64) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(strconv.FormatInt(folderID, 10)))
+	return encodeFolderID(folderID, "")
 }
 
-// DecodeFolderID reverses EncodeFolderID.
-func DecodeFolderID(s string) (int64, error) {
-	raw, err := base64.RawURLEncoding.DecodeString(s)
-	if err != nil {
-		return 0, errBadID
+// EncodeFolderIDFor encodes a folder id in another mailbox, carrying the target SMTP
+// so a later request reopens the same mailbox. An empty mailbox yields the own-mailbox
+// form, identical to EncodeFolderID.
+func EncodeFolderIDFor(folderID int64, mailbox string) string {
+	return encodeFolderID(folderID, mailbox)
+}
+
+func encodeFolderID(folderID int64, mailbox string) string {
+	s := strconv.FormatInt(folderID, 10)
+	if mailbox != "" {
+		s += "|" + mailbox
 	}
-	id, err := strconv.ParseInt(string(raw), 10, 64)
-	if err != nil {
-		return 0, errBadID
+	return base64.RawURLEncoding.EncodeToString([]byte(s))
+}
+
+// DecodeFolderID reverses the folder-id encoding, returning the folder id and the
+// target mailbox SMTP (empty for the caller's own mailbox). A token with no "|"
+// segment decodes to an own-mailbox id, so ids minted before the field decode
+// unchanged.
+func DecodeFolderID(s string) (folderID int64, mailbox string, err error) {
+	raw, e := base64.RawURLEncoding.DecodeString(s)
+	if e != nil {
+		return 0, "", errBadID
 	}
-	return id, nil
+	str := string(raw)
+	if i := strings.IndexByte(str, '|'); i >= 0 {
+		mailbox = str[i+1:]
+		str = str[:i]
+	}
+	folderID, e = strconv.ParseInt(str, 10, 64)
+	if e != nil {
+		return 0, "", errBadID
+	}
+	return folderID, mailbox, nil
 }
 
 // ChangeKey encodes a change number as an opaque EWS change key (a client uses
