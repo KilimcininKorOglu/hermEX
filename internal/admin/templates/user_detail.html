@@ -67,6 +67,9 @@
 <button type="submit">Save out-of-office</button>
 </form>
 
+<h2>Mobile devices</h2>
+{{template "user-devices" .}}
+
 <h2>Alternative login names</h2>
 <form class="altnames-form" hx-put="/admin/ui/users/{{.User.Username}}/altnames" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
@@ -97,6 +100,48 @@
 
 {{define "user-status"}}<div id="user-status">
 {{if .Error}}<p class="error">{{.Error}}</p>{{else if .Saved}}<p class="ok">Saved.</p>{{end}}
+</div>{{end}}
+
+{{define "user-devices"}}<div id="user-devices">
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<table class="grid">
+<thead><tr><th>Device ID</th><th>User</th><th>Type / Agent</th><th>First sync</th><th>Last connection</th><th>AS version</th><th>Folders</th><th>Status</th><th>Actions</th></tr></thead>
+<tbody>
+{{range .Devices}}<tr>
+<td>{{.DeviceID}}</td>
+<td>{{.DeviceUser}}</td>
+<td>{{.DeviceType}}{{if .UserAgent}} / {{.UserAgent}}{{end}}</td>
+<td>{{.FirstSync}}</td>
+<td>{{.LastSync}}</td>
+<td>{{.ASVersion}}</td>
+<td>{{.FoldersSynced}}</td>
+<td>{{.Status}}</td>
+<td class="device-actions">
+<form hx-post="/admin/ui/users/{{$.Email}}/devices/action" hx-target="#user-devices" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
+<input type="hidden" name="deviceID" value="{{.DeviceID}}"><input type="hidden" name="action" value="resync">
+<button type="submit">Resync</button></form>
+{{if .CanWipe}}
+<form hx-post="/admin/ui/users/{{$.Email}}/devices/action" hx-target="#user-devices" hx-swap="outerHTML" hx-confirm="Remote wipe {{.DeviceID}}? This erases the device." hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
+<input type="hidden" name="deviceID" value="{{.DeviceID}}"><input type="hidden" name="action" value="wipe">
+<button type="submit" class="danger">Wipe</button></form>
+<form hx-post="/admin/ui/users/{{$.Email}}/devices/action" hx-target="#user-devices" hx-swap="outerHTML" hx-confirm="Account-only wipe {{.DeviceID}}? This removes the account from the device." hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
+<input type="hidden" name="deviceID" value="{{.DeviceID}}"><input type="hidden" name="action" value="wipe-account">
+<button type="submit" class="danger">Account wipe</button></form>
+{{end}}
+{{if .CanCancel}}
+<form hx-post="/admin/ui/users/{{$.Email}}/devices/action" hx-target="#user-devices" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
+<input type="hidden" name="deviceID" value="{{.DeviceID}}"><input type="hidden" name="action" value="cancel">
+<button type="submit">Cancel wipe</button></form>
+{{end}}
+<form hx-post="/admin/ui/users/{{$.Email}}/devices/action" hx-target="#user-devices" hx-swap="outerHTML" hx-confirm="Delete {{.DeviceID}}?" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
+<input type="hidden" name="deviceID" value="{{.DeviceID}}"><input type="hidden" name="action" value="delete">
+<button type="submit" class="danger">Delete</button></form>
+</td>
+</tr>
+{{else}}<tr><td colspan="9" class="empty">No mobile devices.</td></tr>
+{{end}}
+</tbody>
+</table>
 </div>{{end}}
 
 {{define "user-roles"}}<div id="user-roles">

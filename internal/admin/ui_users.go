@@ -82,6 +82,7 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 	roles, _ := s.dir.AdminRoles(u.ID)
 	props, _ := s.dir.GetUserProperties(u.Username)
 	oof, _ := s.store.GetOOFSettings(u.Maildir)
+	devs, _ := s.store.ListDevices(u.Maildir)
 	s.render(w, "user_detail.html", map[string]any{
 		"Nav":      "users",
 		"CSRF":     csrfCookieValue(r),
@@ -92,6 +93,7 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 		"Roles":    roles,
 		"Contact":  contactValues(props),
 		"OOF":      oofViewOf(oof),
+		"Devices":  deviceViewsOf(devs),
 	})
 }
 

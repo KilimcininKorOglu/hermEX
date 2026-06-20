@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"hermex/internal/activesync"
 	"hermex/internal/directory"
 	"hermex/internal/objectstore"
 )
@@ -176,14 +177,20 @@ type fakePaths struct{ root string }
 func (p fakePaths) HomedirFor(domain string) string  { return p.root + "/dom/" + domain }
 func (p fakePaths) MaildirFor(address string) string { return p.root + "/mbox/" + address }
 
-// fakeStore is a scripted MailboxStore for the admin OOF tests: it holds the
-// out-of-office settings keyed by maildir and captures the last write.
+// fakeStore is a scripted MailboxStore for the admin store-backed tabs: it holds
+// the out-of-office settings and the device list keyed by maildir, and captures
+// the last write or device action.
 type fakeStore struct {
 	oof    map[string]objectstore.OOFSettings
 	setDir string
 	setOOF objectstore.OOFSettings
 	getErr error
 	setErr error
+
+	devices         map[string][]activesync.DeviceInfo
+	deviceAction    string // "resync"/"delete"/"wipe"/"wipe-account"/"cancel"
+	deviceActionDir string
+	deviceActionID  string
 }
 
 func (f *fakeStore) GetOOFSettings(maildir string) (objectstore.OOFSettings, error) {
@@ -202,6 +209,42 @@ func (f *fakeStore) SetOOFSettings(maildir string, cfg objectstore.OOFSettings) 
 	}
 	f.oof[maildir] = cfg
 	f.setDir, f.setOOF = maildir, cfg
+	return nil
+}
+
+func (f *fakeStore) ListDevices(maildir string) ([]activesync.DeviceInfo, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	return f.devices[maildir], nil
+}
+
+func (f *fakeStore) ResyncDevice(maildir, deviceID string) error {
+	return f.recordDeviceAction("resync", maildir, deviceID)
+}
+
+func (f *fakeStore) DeleteDevice(maildir, deviceID string) error {
+	return f.recordDeviceAction("delete", maildir, deviceID)
+}
+
+func (f *fakeStore) WipeDevice(maildir, deviceID string, accountOnly bool) error {
+	action := "wipe"
+	if accountOnly {
+		action = "wipe-account"
+	}
+	return f.recordDeviceAction(action, maildir, deviceID)
+}
+
+func (f *fakeStore) CancelDeviceWipe(maildir, deviceID string) error {
+	return f.recordDeviceAction("cancel", maildir, deviceID)
+}
+
+// recordDeviceAction captures the last per-device action for assertions.
+func (f *fakeStore) recordDeviceAction(action, maildir, deviceID string) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+	f.deviceAction, f.deviceActionDir, f.deviceActionID = action, maildir, deviceID
 	return nil
 }
 
