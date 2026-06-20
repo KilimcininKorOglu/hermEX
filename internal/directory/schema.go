@@ -129,6 +129,39 @@ var directoryDDL = []string{
 		PRIMARY KEY (org_id)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
+	// fetchmail holds a local user's remote-account poll configurations: the
+	// fetch-worker periodically connects to each active entry's source POP3/IMAP
+	// server and delivers new mail into the local mailbox. mailbox is the local
+	// username (a plain string like forwards, removed explicitly on user delete).
+	`CREATE TABLE IF NOT EXISTS fetchmail (
+		id           INT UNSIGNED NOT NULL AUTO_INCREMENT,
+		mailbox      VARCHAR(320) CHARACTER SET ascii NOT NULL,
+		active       TINYINT NOT NULL DEFAULT 1,
+		src_server   VARCHAR(255) NOT NULL,
+		src_port     INT UNSIGNED NOT NULL DEFAULT 0,
+		src_user     VARCHAR(255) NOT NULL,
+		src_password VARCHAR(255) NOT NULL DEFAULT '',
+		protocol     VARCHAR(8) NOT NULL DEFAULT 'POP3',
+		src_folder   VARCHAR(255) NOT NULL DEFAULT 'INBOX',
+		fetchall     TINYINT NOT NULL DEFAULT 0,
+		keep         TINYINT NOT NULL DEFAULT 0,
+		use_ssl      TINYINT NOT NULL DEFAULT 1,
+		ssl_verify   TINYINT NOT NULL DEFAULT 1,
+		PRIMARY KEY (id),
+		KEY fetchmail_mailbox (mailbox)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+	// fetchmail_seen records the source-message identifiers (POP3 UIDL or IMAP UID)
+	// already delivered for a kept (non-deleting) entry, so a later poll does not
+	// re-deliver them. Rows are scoped to a fetchmail entry and cascade on its delete.
+	`CREATE TABLE IF NOT EXISTS fetchmail_seen (
+		config_id INT UNSIGNED NOT NULL,
+		uid       VARCHAR(255) NOT NULL,
+		PRIMARY KEY (config_id, uid),
+		CONSTRAINT fetchmail_seen_fk FOREIGN KEY (config_id)
+			REFERENCES fetchmail (id) ON DELETE CASCADE ON UPDATE CASCADE
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
 	// mlists is a distribution list: a users row (display_type = DT_DISTLIST, no
 	// maildir or password — it cannot log in) extended with its expansion policy.
 	// list_type selects how membership is computed (normal = the explicit

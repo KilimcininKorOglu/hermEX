@@ -656,6 +656,11 @@ func (d *SQLDirectory) DeleteUser(username string, deleteFiles bool) (bool, erro
 	if _, err := tx.Exec(`DELETE FROM forwards WHERE username = ?`, username); err != nil {
 		return false, err
 	}
+	// fetchmail.mailbox is likewise a plain string; remove the entries (the cascade
+	// then clears their fetchmail_seen rows).
+	if _, err := tx.Exec(`DELETE FROM fetchmail WHERE mailbox = ?`, username); err != nil {
+		return false, err
+	}
 	if _, err := tx.Exec(`DELETE FROM users WHERE username = ?`, username); err != nil {
 		return false, err
 	}
