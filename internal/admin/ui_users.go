@@ -86,6 +86,7 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 	qlimits, qused, _ := s.store.GetQuota(u.Maildir)
 	delegates, _ := s.store.GetDelegates(u.Maildir)
 	sendAs, _ := s.store.GetSendAs(u.Maildir)
+	storeOwners, _ := s.store.GetStoreOwners(u.Maildir)
 	meetingCfg, _ := s.store.GetMeetingConfig(u.Maildir)
 	folders, _ := s.store.ListFolders(u.Maildir)
 	s.render(w, "user_detail.html", map[string]any{
@@ -103,9 +104,10 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 		"Quota":     quotaViewOf(qlimits, qused),
 		"Hide":      hideViewOf(props),
 		"Delegates": strings.Join(delegates, "\n"),
-		"SendAs":    strings.Join(sendAs, "\n"),
-		"Meeting":   meetingCfg,
-		"Folders":   folders,
+		"SendAs":      strings.Join(sendAs, "\n"),
+		"StoreOwners": strings.Join(storeOwners, "\n"),
+		"Meeting":     meetingCfg,
+		"Folders":     folders,
 	})
 }
 
