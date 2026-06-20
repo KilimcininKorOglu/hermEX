@@ -29,6 +29,23 @@ type Accounts interface {
 // path. ok is false when the user is unknown or the password is wrong.
 type Authenticator interface {
 	Authenticate(user, password string) (mailboxPath string, ok bool)
+	// Privileges reports the user's permitted login services; ok is false for an
+	// unknown user. A protocol checks its own service after a successful
+	// Authenticate and refuses a user whose access the administrator has revoked.
+	// A directory without a privilege model reports every service permitted.
+	Privileges(user string) (ServicePrivileges, bool)
+}
+
+// ServicePrivileges reports which login services a user may use. Each protocol
+// gates on its own service after authentication, so an administrator can revoke a
+// single service (e.g. ActiveSync) without disabling the whole account.
+type ServicePrivileges struct {
+	POP3IMAP  bool
+	SMTP      bool
+	ChgPasswd bool
+	Web       bool
+	EAS       bool
+	DAV       bool
 }
 
 // Identifier optionally enumerates the addresses a user is permitted to send
@@ -168,4 +185,13 @@ func (a StaticAccounts) Authenticate(user, password string) (string, bool) {
 		return "", false
 	}
 	return acc.MailboxPath, true
+}
+
+// Privileges implements Authenticator: a static account has no privilege model,
+// so every service is permitted for an account that exists.
+func (a StaticAccounts) Privileges(user string) (ServicePrivileges, bool) {
+	if _, ok := a[strings.ToLower(user)]; !ok {
+		return ServicePrivileges{}, false
+	}
+	return ServicePrivileges{POP3IMAP: true, SMTP: true, ChgPasswd: true, Web: true, EAS: true, DAV: true}, true
 }

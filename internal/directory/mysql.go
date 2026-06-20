@@ -11,10 +11,22 @@ import (
 	"github.com/GehirnInc/crypt/sha512_crypt"
 )
 
-// privilege_bits: the service privileges a user holds.
+// privilege_bits: the service privileges a user holds. The bit positions match
+// the reference's wire-shared column, so a value reads the same regardless of who
+// wrote it. POP3/IMAP, SMTP and CHGPASSWD are plain bits (set = granted). WEB/EAS/
+// DAV use the DETAIL1 opt-out convention: they default to granted and are revoked
+// only when DETAIL1 is set AND the service's own bit is clear, so a legacy row
+// (DETAIL1 unset) reads every service granted. (Chat/Video/Files/Archive bits
+// exist in the reference but address subsystems hermEX does not have, so they are
+// not modeled here; UpdateUser preserves them untouched.)
 const (
-	privIMAPPOP3 = 1 << 0
-	privSMTP     = 1 << 1
+	privIMAPPOP3  = 1 << 0
+	privSMTP      = 1 << 1
+	privChgPasswd = 1 << 2
+	privDetail1   = 1 << 8
+	privWeb       = 1 << 9
+	privEAS       = 1 << 10
+	privDAV       = 1 << 11
 )
 
 // SQLDirectory is a MariaDB/MySQL-backed account directory (the internal spec):
@@ -446,6 +458,10 @@ type UserDetail struct {
 	Maildir     string
 	POP3IMAP    bool
 	SMTP        bool
+	ChgPasswd   bool
+	Web         bool
+	EAS         bool
+	DAV         bool
 	LDAP        bool
 }
 
@@ -468,10 +484,42 @@ func (d *SQLDirectory) GetUser(username string) (UserDetail, bool, error) {
 		return UserDetail{}, false, err
 	}
 	u.Status = addrStatus & 0x0F
-	u.POP3IMAP = priv&privIMAPPOP3 != 0
-	u.SMTP = priv&privSMTP != 0
+	sp := privilegesFromBits(priv)
+	u.POP3IMAP, u.SMTP, u.ChgPasswd = sp.POP3IMAP, sp.SMTP, sp.ChgPasswd
+	u.Web, u.EAS, u.DAV = sp.Web, sp.EAS, sp.DAV
 	u.LDAP = externid != nil
 	return u, true, nil
+}
+
+// privilegesFromBits decodes the privilege_bits column. POP3/IMAP, SMTP and
+// CHGPASSWD are plain bits; WEB/EAS/DAV follow the DETAIL1 opt-out convention, so
+// they read as granted unless DETAIL1 is set and the service's own bit is clear.
+func privilegesFromBits(priv uint32) ServicePrivileges {
+	return ServicePrivileges{
+		POP3IMAP:  priv&privIMAPPOP3 != 0,
+		SMTP:      priv&privSMTP != 0,
+		ChgPasswd: priv&privChgPasswd != 0,
+		Web:       priv&(privWeb|privDetail1) != privDetail1,
+		EAS:       priv&(privEAS|privDetail1) != privDetail1,
+		DAV:       priv&(privDAV|privDetail1) != privDetail1,
+	}
+}
+
+// Privileges reports a user's permitted login services, derived from
+// privilege_bits; ok is false when no user has that username.
+func (d *SQLDirectory) Privileges(user string) (ServicePrivileges, bool) {
+	u, ok, err := d.GetUser(user)
+	if err != nil || !ok {
+		return ServicePrivileges{}, false
+	}
+	return ServicePrivileges{
+		POP3IMAP:  u.POP3IMAP,
+		SMTP:      u.SMTP,
+		ChgPasswd: u.ChgPasswd,
+		Web:       u.Web,
+		EAS:       u.EAS,
+		DAV:       u.DAV,
+	}, true
 }
 
 // UserUpdate is the editable subset of a user's record. Identity fields
