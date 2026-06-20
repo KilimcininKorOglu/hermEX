@@ -19,6 +19,10 @@ type MListExpander interface {
 	ExpandMList(listAddr, from string) ([]string, directory.MListResult, error)
 }
 
+// The real directory must satisfy MListExpander, so a signature drift turns into
+// a build error rather than lists silently never expanding at runtime.
+var _ MListExpander = (*directory.SQLDirectory)(nil)
+
 // expandMailingList resolves a recipient address to its final non-list member
 // addresses, recursively expanding nested lists. from is the original sender,
 // re-checked at every level — a nested list that refuses the sender contributes

@@ -67,6 +67,10 @@ type mlistExpander interface {
 	ExpandMList(listAddr, from string) ([]string, directory.MListResult, error)
 }
 
+// The real directory must satisfy mlistExpander, so a signature drift becomes a
+// build error rather than list membership silently expanding to nothing at runtime.
+var _ mlistExpander = (*directory.SQLDirectory)(nil)
+
 // galUser is one GAL entry with its assigned MId. hidden is the PR_ATTR_HIDDEN
 // mask the directory supplied; the surface applying it decides which bit matters.
 // dt is the entry's address-book display type (dtMailuser or dtDistlist).
