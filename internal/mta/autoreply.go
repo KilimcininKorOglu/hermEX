@@ -72,12 +72,24 @@ func sendAutoReply(accounts directory.Accounts, st *objectstore.Store, selfAddr,
 	// not by string-matching domains.
 	_, internal := accounts.Resolve(to)
 
-	body, send := autoReplyDecision(msg.Header, envelopeSender, selfAddr, cfg, internal)
+	// The "known senders only" external audience needs to know whether the sender
+	// is in the mailbox's contacts. Resolve it only when it can change the outcome
+	// — an external sender under that audience — so ordinary delivery pays nothing.
+	senderKnown := false
+	if !internal && cfg.ExternalEnabled && cfg.ExternalAudience == objectstore.OOFExternalKnown {
+		known, err := st.ContactHasAddress(to)
+		if err != nil {
+			return err
+		}
+		senderKnown = known
+	}
+
+	subject, body, send := autoReplyDecision(msg.Header, envelopeSender, selfAddr, cfg, internal, senderKnown)
 	if !send {
 		return nil
 	}
 
-	reply := buildAutoReply(selfAddr, to, cfg.Subject, body, msg.Header.Get("Message-ID"), received)
+	reply := buildAutoReply(selfAddr, to, subject, body, msg.Header.Get("Message-ID"), received)
 
 	// Deliver the reply through the normal path. A local recipient receives it
 	// in their inbox; its Auto-Submitted header makes their own out-of-office
@@ -91,24 +103,29 @@ func sendAutoReply(accounts directory.Accounts, st *objectstore.Store, selfAddr,
 }
 
 // autoReplyDecision is the pure out-of-office decision for a mailbox whose
-// out-of-office is already known to be active. It returns the reply body and
-// whether to send. send is false for a suppressed sender (see
-// autoReplySuppressed) and for an external sender (no local mailbox) when
-// external replies are not enabled; internal senders always get the internal
-// reply. Keeping the decision pure makes every branch — including the external
-// one, which the delivery path cannot exercise without an outbound relay —
-// unit-testable.
-func autoReplyDecision(hdr mail.Header, envelopeSender, selfAddr string, cfg objectstore.OOFSettings, internal bool) (body string, send bool) {
+// out-of-office is already known to be active. It returns the reply subject and
+// body and whether to send. send is false for a suppressed sender (see
+// autoReplySuppressed); for an external sender (no local mailbox) when external
+// replies are not enabled; and for an external sender outside the configured
+// audience — when ExternalAudience is OOFExternalKnown, only a sender already in
+// the mailbox's contacts (senderKnown) is replied to. Internal senders always get
+// the internal reply. Keeping the decision pure — senderKnown is resolved by the
+// caller — makes every branch, including the external ones the delivery path
+// cannot exercise without an outbound relay, unit-testable.
+func autoReplyDecision(hdr mail.Header, envelopeSender, selfAddr string, cfg objectstore.OOFSettings, internal, senderKnown bool) (subject, body string, send bool) {
 	if autoReplySuppressed(hdr, envelopeSender, selfAddr) {
-		return "", false
+		return "", "", false
 	}
 	if internal {
-		return cfg.InternalReply, true
+		return cfg.InternalSubject, cfg.InternalReply, true
 	}
 	if !cfg.ExternalEnabled {
-		return "", false
+		return "", "", false
 	}
-	return cfg.ExternalReply, true
+	if cfg.ExternalAudience == objectstore.OOFExternalKnown && !senderKnown {
+		return "", "", false
+	}
+	return cfg.ExternalSubject, cfg.ExternalReply, true
 }
 
 // autoReplySuppressed reports whether an out-of-office auto-reply MUST NOT be

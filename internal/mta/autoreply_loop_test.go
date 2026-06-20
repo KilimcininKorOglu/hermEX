@@ -38,7 +38,7 @@ func enableOOF(t *testing.T, path string) {
 	}
 	defer st.Close()
 	if err := st.SetOOFSettings(objectstore.OOFSettings{
-		Enabled: true, Subject: "Away", InternalReply: "Away, back later.",
+		Enabled: true, InternalSubject: "Away", InternalReply: "Away, back later.",
 	}); err != nil {
 		t.Fatal(err)
 	}

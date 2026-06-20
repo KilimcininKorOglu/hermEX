@@ -11,15 +11,20 @@ import (
 // oofPage is the view model for the out-of-office settings form. Start and End
 // are rendered as datetime-local field values ("2006-01-02T15:04", empty when
 // unset); the handler converts to and from the stored unix seconds.
+// ExternalKnownOnly is the OOFExternalKnown audience rendered as a checkbox:
+// checked replies only to known contacts, unchecked replies to every external
+// sender.
 type oofPage struct {
-	Enabled         bool
-	Subject         string
-	InternalReply   string
-	ExternalReply   string
-	ExternalEnabled bool
-	Start           string
-	End             string
-	Saved           bool
+	Enabled           bool
+	InternalSubject   string
+	InternalReply     string
+	ExternalSubject   string
+	ExternalReply     string
+	ExternalEnabled   bool
+	ExternalKnownOnly bool
+	Start             string
+	End               string
+	Saved             bool
 }
 
 // oofTimeLayout is the wire form of an HTML datetime-local field: wall-clock
@@ -70,14 +75,16 @@ func (s *Server) handleOOFForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, "oof", oofPage{
-		Enabled:         cfg.Enabled,
-		Subject:         cfg.Subject,
-		InternalReply:   cfg.InternalReply,
-		ExternalReply:   cfg.ExternalReply,
-		ExternalEnabled: cfg.ExternalEnabled,
-		Start:           formatOOFTime(cfg.Start),
-		End:             formatOOFTime(cfg.End),
-		Saved:           r.URL.Query().Get("saved") == "1",
+		Enabled:           cfg.Enabled,
+		InternalSubject:   cfg.InternalSubject,
+		InternalReply:     cfg.InternalReply,
+		ExternalSubject:   cfg.ExternalSubject,
+		ExternalReply:     cfg.ExternalReply,
+		ExternalEnabled:   cfg.ExternalEnabled,
+		ExternalKnownOnly: cfg.ExternalAudience == objectstore.OOFExternalKnown,
+		Start:             formatOOFTime(cfg.Start),
+		End:               formatOOFTime(cfg.End),
+		Saved:             r.URL.Query().Get("saved") == "1",
 	})
 }
 
@@ -101,14 +108,20 @@ func (s *Server) handleOOFSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	defer st.Close()
 
+	audience := objectstore.OOFExternalAll
+	if r.FormValue("externalknownonly") != "" {
+		audience = objectstore.OOFExternalKnown
+	}
 	cfg := objectstore.OOFSettings{
-		Enabled:         r.FormValue("enabled") != "",
-		Subject:         strings.TrimSpace(r.FormValue("subject")),
-		InternalReply:   r.FormValue("internalreply"),
-		ExternalReply:   r.FormValue("externalreply"),
-		ExternalEnabled: r.FormValue("externalenabled") != "",
-		Start:           parseOOFTime(r.FormValue("start")),
-		End:             parseOOFTime(r.FormValue("end")),
+		Enabled:          r.FormValue("enabled") != "",
+		InternalSubject:  strings.TrimSpace(r.FormValue("internalsubject")),
+		InternalReply:    r.FormValue("internalreply"),
+		ExternalSubject:  strings.TrimSpace(r.FormValue("externalsubject")),
+		ExternalReply:    r.FormValue("externalreply"),
+		ExternalEnabled:  r.FormValue("externalenabled") != "",
+		ExternalAudience: audience,
+		Start:            parseOOFTime(r.FormValue("start")),
+		End:              parseOOFTime(r.FormValue("end")),
 	}
 	if err := st.SetOOFSettings(cfg); err != nil {
 		http.Error(w, "could not save out-of-office settings", http.StatusInternalServerError)

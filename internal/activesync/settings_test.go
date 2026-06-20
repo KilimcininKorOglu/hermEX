@@ -102,38 +102,77 @@ func TestSettingsOofTimeBased(t *testing.T) {
 	}
 }
 
-// TestSettingsOofExternalMirror confirms hermEX's single external reply is mirrored
-// into both EAS external buckets on Get, and collapsed back on Set.
-func TestSettingsOofExternalMirror(t *testing.T) {
-	ts, _ := seededServer(t)
-	set := wbxml.Elem(wbxml.STOof, wbxml.Elem(wbxml.STSet,
+// TestSettingsOofExternalAudience confirms the external audience round-trips
+// through EAS's two external buckets: a Known-only Set (only ExternalKnown
+// enabled) enables just the ExternalKnown bucket on Get, while an All Set
+// (ExternalUnknown also enabled) enables both — the single reply text reaches both
+// buckets either way.
+func TestSettingsOofExternalAudience(t *testing.T) {
+	ts, dir := seededServer(t)
+
+	// Known-only: the client enables ExternalKnown but not ExternalUnknown.
+	known := wbxml.Elem(wbxml.STOof, wbxml.Elem(wbxml.STSet,
 		wbxml.Str(wbxml.STOofState, "1"),
 		oofMessageNode(wbxml.STAppliesToInternal, "1", "internal"),
-		oofMessageNode(wbxml.STAppliesToExternalKnown, "1", "external")))
-	postCommand(t, ts, "Settings", settingsReq(set))
+		oofMessageNode(wbxml.STAppliesToExternalKnown, "1", "external"),
+		oofMessageNode(wbxml.STAppliesToExternalUnknown, "0", "external")))
+	postCommand(t, ts, "Settings", settingsReq(known))
+
+	st, _ := objectstore.Open(dir)
+	cfg, _ := st.GetOOFSettings()
+	st.Close()
+	if !cfg.ExternalEnabled || cfg.ExternalAudience != objectstore.OOFExternalKnown {
+		t.Fatalf("known-only Set: ExternalEnabled=%v audience=%d, want enabled Known", cfg.ExternalEnabled, cfg.ExternalAudience)
+	}
 
 	_, root := postCommand(t, ts, "Settings", settingsReq(wbxml.Elem(wbxml.STOof, wbxml.Empty(wbxml.STGet))))
 	get := root.Child(wbxml.STOof).Child(wbxml.STGet)
-	known := oofMessageFor(get, wbxml.STAppliesToExternalKnown)
-	unknown := oofMessageFor(get, wbxml.STAppliesToExternalUnknown)
-	if known == nil || unknown == nil {
-		t.Fatal("both external buckets must be emitted")
+	kn := oofMessageFor(get, wbxml.STAppliesToExternalKnown)
+	un := oofMessageFor(get, wbxml.STAppliesToExternalUnknown)
+	if kn.ChildText(wbxml.STEnabled) != "1" || un.ChildText(wbxml.STEnabled) != "0" {
+		t.Errorf("known-only Get: known enabled=%q unknown enabled=%q, want 1/0", kn.ChildText(wbxml.STEnabled), un.ChildText(wbxml.STEnabled))
 	}
-	if known.ChildText(wbxml.STReplyMessage) != "external" || unknown.ChildText(wbxml.STReplyMessage) != "external" {
-		t.Errorf("external reply not mirrored to both buckets: known=%q unknown=%q",
-			known.ChildText(wbxml.STReplyMessage), unknown.ChildText(wbxml.STReplyMessage))
+	if kn.ChildText(wbxml.STReplyMessage) != "external" || un.ChildText(wbxml.STReplyMessage) != "external" {
+		t.Errorf("reply text must reach both buckets: known=%q unknown=%q", kn.ChildText(wbxml.STReplyMessage), un.ChildText(wbxml.STReplyMessage))
+	}
+
+	// All: the client also enables ExternalUnknown.
+	all := wbxml.Elem(wbxml.STOof, wbxml.Elem(wbxml.STSet,
+		wbxml.Str(wbxml.STOofState, "1"),
+		oofMessageNode(wbxml.STAppliesToExternalKnown, "1", "external"),
+		oofMessageNode(wbxml.STAppliesToExternalUnknown, "1", "external")))
+	postCommand(t, ts, "Settings", settingsReq(all))
+
+	st, _ = objectstore.Open(dir)
+	cfg, _ = st.GetOOFSettings()
+	st.Close()
+	if !cfg.ExternalEnabled || cfg.ExternalAudience != objectstore.OOFExternalAll {
+		t.Fatalf("all Set: ExternalEnabled=%v audience=%d, want enabled All", cfg.ExternalEnabled, cfg.ExternalAudience)
+	}
+
+	_, root = postCommand(t, ts, "Settings", settingsReq(wbxml.Elem(wbxml.STOof, wbxml.Empty(wbxml.STGet))))
+	get = root.Child(wbxml.STOof).Child(wbxml.STGet)
+	kn = oofMessageFor(get, wbxml.STAppliesToExternalKnown)
+	un = oofMessageFor(get, wbxml.STAppliesToExternalUnknown)
+	if kn.ChildText(wbxml.STEnabled) != "1" || un.ChildText(wbxml.STEnabled) != "1" {
+		t.Errorf("all Get: known enabled=%q unknown enabled=%q, want 1/1", kn.ChildText(wbxml.STEnabled), un.ChildText(wbxml.STEnabled))
 	}
 }
 
-// TestSettingsOofPreservesSubject confirms an Oof Set (which carries no subject)
-// read-merges, leaving a subject set elsewhere intact.
+// TestSettingsOofPreservesSubject confirms an Oof Set (which carries no subject and
+// here no external buckets) read-merges, leaving the per-audience subjects and the
+// external audience set elsewhere intact.
 func TestSettingsOofPreservesSubject(t *testing.T) {
 	ts, dir := seededServer(t)
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SetOOFSettings(objectstore.OOFSettings{Subject: "On vacation"}); err != nil {
+	if err := st.SetOOFSettings(objectstore.OOFSettings{
+		InternalSubject:  "On vacation",
+		ExternalSubject:  "Out of office",
+		ExternalAudience: objectstore.OOFExternalKnown,
+	}); err != nil {
 		t.Fatal(err)
 	}
 	st.Close()
@@ -146,8 +185,11 @@ func TestSettingsOofPreservesSubject(t *testing.T) {
 	st, _ = objectstore.Open(dir)
 	cfg, _ := st.GetOOFSettings()
 	st.Close()
-	if cfg.Subject != "On vacation" {
-		t.Errorf("Subject = %q, want preserved 'On vacation'", cfg.Subject)
+	if cfg.InternalSubject != "On vacation" || cfg.ExternalSubject != "Out of office" {
+		t.Errorf("subjects not preserved: internal=%q external=%q", cfg.InternalSubject, cfg.ExternalSubject)
+	}
+	if cfg.ExternalAudience != objectstore.OOFExternalKnown {
+		t.Errorf("ExternalAudience = %d, want preserved Known", cfg.ExternalAudience)
 	}
 	if !cfg.Enabled || cfg.InternalReply != "away" {
 		t.Errorf("OOF Set did not apply: %+v", cfg)

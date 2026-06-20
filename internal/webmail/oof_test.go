@@ -31,9 +31,13 @@ func TestOOFFormRoundTrip(t *testing.T) {
 	c := authedClient(t, ts)
 
 	if code, _ := postForm(t, c, ts.URL+"/oof", url.Values{
-		"enabled":       {"1"},
-		"subject":       {"On vacation"},
-		"internalreply": {"Back Monday."},
+		"enabled":           {"1"},
+		"internalsubject":   {"On vacation"},
+		"internalreply":     {"Back Monday."},
+		"externalenabled":   {"1"},
+		"externalsubject":   {"Out of office"},
+		"externalreply":     {"Away from email."},
+		"externalknownonly": {"1"},
 	}); code != 200 && code != 303 {
 		t.Fatalf("submit = %d", code)
 	}
@@ -42,12 +46,17 @@ func TestOOFFormRoundTrip(t *testing.T) {
 	if !cfg.Enabled {
 		t.Error("out-of-office not enabled after submit")
 	}
-	if cfg.Subject != "On vacation" || cfg.InternalReply != "Back Monday." {
-		t.Errorf("stored cfg = %+v, want subject/internal reply set", cfg)
+	if cfg.InternalSubject != "On vacation" || cfg.InternalReply != "Back Monday." {
+		t.Errorf("stored cfg = %+v, want internal subject/reply set", cfg)
+	}
+	// The full form must carry every external field too, or a Save would zero them.
+	if !cfg.ExternalEnabled || cfg.ExternalSubject != "Out of office" || cfg.ExternalReply != "Away from email." ||
+		cfg.ExternalAudience != objectstore.OOFExternalKnown {
+		t.Errorf("stored cfg = %+v, want external subject/reply/known-only audience set", cfg)
 	}
 
 	_, body := get(t, c, ts.URL+"/oof")
-	for _, want := range []string{"On vacation", "Back Monday.", "checked"} {
+	for _, want := range []string{"On vacation", "Back Monday.", "Out of office", "Away from email.", "checked"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("form missing %q:\n%s", want, body)
 		}
@@ -61,12 +70,12 @@ func TestOOFDisable(t *testing.T) {
 	ts := newTestServer(t, path)
 	c := authedClient(t, ts)
 
-	postForm(t, c, ts.URL+"/oof", url.Values{"enabled": {"1"}, "subject": {"Away"}})
+	postForm(t, c, ts.URL+"/oof", url.Values{"enabled": {"1"}, "internalsubject": {"Away"}})
 	if !oofOf(t, path).Enabled {
 		t.Fatal("precondition: should be enabled")
 	}
 	// Resubmit without "enabled" (the box was unchecked).
-	postForm(t, c, ts.URL+"/oof", url.Values{"subject": {"Away"}})
+	postForm(t, c, ts.URL+"/oof", url.Values{"internalsubject": {"Away"}})
 	if oofOf(t, path).Enabled {
 		t.Error("out-of-office still enabled after unchecking the box")
 	}

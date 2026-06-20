@@ -12,19 +12,17 @@
         <label><input type="checkbox" name="enabled" value="1" {{if .Enabled}}checked{{end}}> Send automatic replies</label>
       </div>
 
-      <div class="field">
-        <label for="oof-subject">Subject</label>
-        <input id="oof-subject" type="text" name="subject" value="{{.Subject}}" placeholder="Automatic reply">
-      </div>
-
-      <div class="field">
-        <label for="oof-internal">Reply to people inside the organization</label>
+      <fieldset class="field">
+        <label for="oof-internal-subject">Reply to people inside the organization</label>
+        <input id="oof-internal-subject" type="text" name="internalsubject" value="{{.InternalSubject}}" placeholder="Automatic reply">
         <textarea id="oof-internal" name="internalreply" rows="5">{{.InternalReply}}</textarea>
-      </div>
+      </fieldset>
 
       <fieldset class="field">
         <label><input type="checkbox" name="externalenabled" value="1" {{if .ExternalEnabled}}checked{{end}}> Also reply to senders outside the organization</label>
+        <input type="text" name="externalsubject" value="{{.ExternalSubject}}" placeholder="Automatic reply">
         <textarea name="externalreply" rows="5">{{.ExternalReply}}</textarea>
+        <label><input type="checkbox" name="externalknownonly" value="1" {{if .ExternalKnownOnly}}checked{{end}}> Only reply to senders already in my contacts</label>
         <p class="muted">External replies require an outbound mail relay, which is not available yet, so senders outside the organization will not receive a reply even when this is on. Replies to local users work today.</p>
       </fieldset>
 

@@ -55,34 +55,45 @@ func TestAutoReplySuppressed(t *testing.T) {
 	}
 }
 
-// TestAutoReplyDecision covers body selection and the external-reply gate. The
-// external-enabled row is the one the delivery-path tests cannot reach (an
-// external sender has no local mailbox, so its reply is dropped), so it is
-// pinned here.
+// TestAutoReplyDecision covers subject/body selection and the external-reply
+// gate, including the external audience. The external rows are the ones the
+// delivery-path tests cannot reach (an external sender has no local mailbox, so
+// its reply is dropped), so they are pinned here — in particular that the
+// known-only audience withholds the reply from an unknown sender.
 func TestAutoReplyDecision(t *testing.T) {
-	cfg := objectstore.OOFSettings{InternalReply: "internal text", ExternalReply: "external text"}
-	cfgExt := cfg
-	cfgExt.ExternalEnabled = true
+	cfg := objectstore.OOFSettings{
+		InternalSubject: "internal subj", InternalReply: "internal text",
+		ExternalSubject: "external subj", ExternalReply: "external text",
+	}
+	cfgExtAll := cfg
+	cfgExtAll.ExternalEnabled = true // ExternalAudience defaults to All (0)
+	cfgExtKnown := cfg
+	cfgExtKnown.ExternalEnabled = true
+	cfgExtKnown.ExternalAudience = objectstore.OOFExternalKnown
 
 	cases := []struct {
-		name     string
-		hdr      mail.Header
-		sender   string
-		cfg      objectstore.OOFSettings
-		internal bool
-		wantBody string
-		wantSend bool
+		name        string
+		hdr         mail.Header
+		sender      string
+		cfg         objectstore.OOFSettings
+		internal    bool
+		senderKnown bool
+		wantSubject string
+		wantBody    string
+		wantSend    bool
 	}{
-		{"internal sender gets internal reply", mail.Header{}, "bob@example.com", cfg, true, "internal text", true},
-		{"external sender with external disabled is silent", mail.Header{}, "bob@example.com", cfg, false, "", false},
-		{"external sender with external enabled gets external reply", mail.Header{}, "bob@example.com", cfgExt, false, "external text", true},
-		{"automated sender suppressed despite internal", mail.Header{"Auto-Submitted": {"auto-replied"}}, "bob@example.com", cfgExt, true, "", false},
-		{"self suppressed", mail.Header{}, selfAddr, cfg, true, "", false},
+		{"internal sender gets internal reply", mail.Header{}, "bob@example.com", cfg, true, false, "internal subj", "internal text", true},
+		{"external sender with external disabled is silent", mail.Header{}, "bob@example.com", cfg, false, false, "", "", false},
+		{"external all replies to an unknown sender", mail.Header{}, "bob@example.com", cfgExtAll, false, false, "external subj", "external text", true},
+		{"external known replies to a known sender", mail.Header{}, "bob@example.com", cfgExtKnown, false, true, "external subj", "external text", true},
+		{"external known is silent to an unknown sender", mail.Header{}, "bob@example.com", cfgExtKnown, false, false, "", "", false},
+		{"automated sender suppressed despite internal", mail.Header{"Auto-Submitted": {"auto-replied"}}, "bob@example.com", cfgExtAll, true, false, "", "", false},
+		{"self suppressed", mail.Header{}, selfAddr, cfg, true, false, "", "", false},
 	}
 	for _, c := range cases {
-		body, send := autoReplyDecision(c.hdr, c.sender, selfAddr, c.cfg, c.internal)
-		if send != c.wantSend || body != c.wantBody {
-			t.Errorf("%s: decision = (%q,%v), want (%q,%v)", c.name, body, send, c.wantBody, c.wantSend)
+		subject, body, send := autoReplyDecision(c.hdr, c.sender, selfAddr, c.cfg, c.internal, c.senderKnown)
+		if send != c.wantSend || body != c.wantBody || subject != c.wantSubject {
+			t.Errorf("%s: decision = (%q,%q,%v), want (%q,%q,%v)", c.name, subject, body, send, c.wantSubject, c.wantBody, c.wantSend)
 		}
 	}
 }

@@ -76,9 +76,11 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request, sess *se
 }
 
 // oofGetResponse reads the mailbox OOF settings and renders the Oof Get response.
-// hermEX's single external reply is mirrored into both EAS external buckets
-// (ExternalKnown and ExternalUnknown), which is honest: the 3rd bucket is a finer
-// distinction hermEX does not make, not data it narrows.
+// hermEX's single external reply text is sent to both EAS external buckets, but
+// their Enabled bits follow the audience: ExternalKnown is enabled whenever
+// external replies are on, while ExternalUnknown is enabled only for the All
+// audience — so a known-only configuration reports unknown senders as not replied
+// to.
 func oofGetResponse(st *objectstore.Store) *wbxml.Node {
 	cfg, err := st.GetOOFSettings()
 	if err != nil {
@@ -102,7 +104,8 @@ func oofGetResponse(st *objectstore.Store) *wbxml.Node {
 	get = append(get,
 		oofMessage(wbxml.STAppliesToInternal, cfg.Enabled, cfg.InternalReply),
 		oofMessage(wbxml.STAppliesToExternalKnown, cfg.ExternalEnabled, cfg.ExternalReply),
-		oofMessage(wbxml.STAppliesToExternalUnknown, cfg.ExternalEnabled, cfg.ExternalReply),
+		oofMessage(wbxml.STAppliesToExternalUnknown,
+			cfg.ExternalEnabled && cfg.ExternalAudience == objectstore.OOFExternalAll, cfg.ExternalReply),
 	)
 	return wbxml.Elem(wbxml.STOof,
 		wbxml.Str(wbxml.STStatus, "1"),
@@ -122,9 +125,12 @@ func oofMessage(appliesTo wbxml.Tag, enabled bool, reply string) *wbxml.Node {
 }
 
 // applyOofSet writes an Oof Set into the mailbox OOF settings. It read-merges so a
-// field the EAS wire does not carry (the subject set via webmail) survives, and
-// collapses the two EAS external buckets into hermEX's single external reply
-// (ExternalKnown is authoritative when both are sent).
+// field the EAS wire does not carry — the per-audience subjects set via webmail or
+// the admin UI — survives. The two EAS external buckets map onto hermEX's single
+// external reply plus an audience selector: ExternalUnknown enabled is the All
+// audience, only ExternalKnown enabled is the Known (contacts-only) audience, and
+// neither enabled turns external replies off. The reply text comes from the
+// ExternalKnown bucket a client always sends, falling back to ExternalUnknown.
 func applyOofSet(st *objectstore.Store, set *wbxml.Node) error {
 	cfg, err := st.GetOOFSettings()
 	if err != nil {
@@ -142,7 +148,8 @@ func applyOofSet(st *objectstore.Store, set *wbxml.Node) error {
 		cfg.End = parseEASTime(set.ChildText(wbxml.STEndTime))
 	}
 
-	var sawExternalKnown bool
+	var sawKnown, knownEnabled, sawUnknown, unknownEnabled bool
+	var knownReply, unknownReply string
 	for _, m := range set.Children {
 		if m.Tag != wbxml.STOofMessage {
 			continue
@@ -153,14 +160,25 @@ func applyOofSet(st *objectstore.Store, set *wbxml.Node) error {
 		case m.Child(wbxml.STAppliesToInternal) != nil:
 			cfg.InternalReply = reply
 		case m.Child(wbxml.STAppliesToExternalKnown) != nil:
-			cfg.ExternalReply = reply
-			cfg.ExternalEnabled = enabled
-			sawExternalKnown = true
+			sawKnown, knownEnabled, knownReply = true, enabled, reply
 		case m.Child(wbxml.STAppliesToExternalUnknown) != nil:
-			if !sawExternalKnown {
-				cfg.ExternalReply = reply
-				cfg.ExternalEnabled = enabled
-			}
+			sawUnknown, unknownEnabled, unknownReply = true, enabled, reply
+		}
+	}
+	if sawKnown || sawUnknown {
+		switch {
+		case unknownEnabled:
+			cfg.ExternalEnabled, cfg.ExternalAudience = true, objectstore.OOFExternalAll
+		case knownEnabled:
+			cfg.ExternalEnabled, cfg.ExternalAudience = true, objectstore.OOFExternalKnown
+		default:
+			cfg.ExternalEnabled = false
+		}
+		switch {
+		case sawKnown && knownReply != "":
+			cfg.ExternalReply = knownReply
+		case sawUnknown && unknownReply != "":
+			cfg.ExternalReply = unknownReply
 		}
 	}
 	return st.SetOOFSettings(cfg)

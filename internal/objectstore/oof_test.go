@@ -22,13 +22,15 @@ func TestOOFSettingsRoundTrip(t *testing.T) {
 	}
 
 	want := OOFSettings{
-		Enabled:         true,
-		Subject:         "Away until Monday",
-		InternalReply:   "I am out of the office, back Monday.",
-		ExternalReply:   "Thanks for your message; I will reply when I return.",
-		ExternalEnabled: true,
-		Start:           1700000000,
-		End:             1700600000,
+		Enabled:          true,
+		InternalSubject:  "Away until Monday",
+		InternalReply:    "I am out of the office, back Monday.",
+		ExternalSubject:  "Out of office",
+		ExternalReply:    "Thanks for your message; I will reply when I return.",
+		ExternalEnabled:  true,
+		ExternalAudience: OOFExternalKnown,
+		Start:            1700000000,
+		End:              1700600000,
 	}
 	if err := s.SetOOFSettings(want); err != nil {
 		t.Fatal(err)
@@ -58,6 +60,29 @@ func TestOOFSettingsRoundTrip(t *testing.T) {
 	props, _ = s.GetStoreProperties(mapi.PrOOFState)
 	if v, _ := props.Get(mapi.PrOOFState); v != false {
 		t.Errorf("PR_OOF_STATE = %v, want false after disabling", v)
+	}
+}
+
+// TestOOFSettingsLegacySubject proves a config stored before the subject was split
+// per audience — carrying the single "subject" key — still surfaces its reply
+// subject after the upgrade, folded into InternalSubject rather than silently lost.
+func TestOOFSettingsLegacySubject(t *testing.T) {
+	s := openTestStore(t)
+	legacy := `{"enabled":true,"subject":"Away until Monday","internalReply":"Back Monday."}`
+	if err := s.SetStoreProperties(mapi.PropertyValues{
+		{Tag: mapi.PrOOFSettings, Value: legacy},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetOOFSettings()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.InternalSubject != "Away until Monday" {
+		t.Errorf("legacy subject = %q, want it folded into InternalSubject", got.InternalSubject)
+	}
+	if !got.Enabled || got.InternalReply != "Back Monday." {
+		t.Errorf("legacy blob mis-decoded: %+v", got)
 	}
 }
 
