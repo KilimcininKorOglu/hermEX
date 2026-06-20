@@ -20,6 +20,8 @@ type MailboxStore interface {
 	DeleteDevice(maildir, deviceID string) error
 	WipeDevice(maildir, deviceID string, accountOnly bool) error
 	CancelDeviceWipe(maildir, deviceID string) error
+	GetQuota(maildir string) (objectstore.QuotaLimits, int64, error)
+	SetQuota(maildir string, q objectstore.QuotaLimits) error
 }
 
 // mailboxStore is the production MailboxStore: it opens the object store at the
@@ -69,6 +71,27 @@ func (mailboxStore) WipeDevice(maildir, deviceID string, accountOnly bool) error
 
 func (mailboxStore) CancelDeviceWipe(maildir, deviceID string) error {
 	return withStore(maildir, func(st *objectstore.Store) error { return activesync.CancelWipe(st, deviceID) })
+}
+
+func (mailboxStore) GetQuota(maildir string) (objectstore.QuotaLimits, int64, error) {
+	st, err := objectstore.Open(maildir)
+	if err != nil {
+		return objectstore.QuotaLimits{}, 0, err
+	}
+	defer st.Close()
+	q, err := st.GetQuota()
+	if err != nil {
+		return objectstore.QuotaLimits{}, 0, err
+	}
+	used, err := st.MailboxSize()
+	if err != nil {
+		return q, 0, err
+	}
+	return q, used, nil
+}
+
+func (mailboxStore) SetQuota(maildir string, q objectstore.QuotaLimits) error {
+	return withStore(maildir, func(st *objectstore.Store) error { return st.SetQuota(q) })
 }
 
 // withStore opens the object store at maildir, runs fn, and closes it — the

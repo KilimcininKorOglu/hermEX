@@ -30,6 +30,16 @@
 </form>
 {{template "user-status" .}}
 
+<h2>Storage quota</h2>
+<form class="quota-form" hx-put="/admin/ui/users/{{.User.Username}}/quota" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<p>Used space: {{.Quota.UsedMB}} MiB</p>
+<label>Send quota limit (MiB, 0 = unlimited) <input type="number" name="sendmb" value="{{.Quota.SendMB}}" min="0"></label>
+<label>Receive quota limit (MiB, 0 = unlimited) <input type="number" name="receivemb" value="{{.Quota.ReceiveMB}}" min="0"></label>
+<label>Storage quota / warning (MiB, 0 = unlimited) <input type="number" name="storagemb" value="{{.Quota.StorageMB}}" min="0"></label>
+<button type="submit">Save quota</button>
+</form>
+
 <h2>Contact details</h2>
 <form class="contact-form" hx-put="/admin/ui/users/{{.User.Username}}/contact" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>

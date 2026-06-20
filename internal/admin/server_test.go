@@ -191,6 +191,11 @@ type fakeStore struct {
 	deviceAction    string // "resync"/"delete"/"wipe"/"wipe-account"/"cancel"
 	deviceActionDir string
 	deviceActionID  string
+
+	quota       map[string]objectstore.QuotaLimits
+	used        map[string]int64
+	setQuotaDir string
+	setQuotaVal objectstore.QuotaLimits
 }
 
 func (f *fakeStore) GetOOFSettings(maildir string) (objectstore.OOFSettings, error) {
@@ -245,6 +250,21 @@ func (f *fakeStore) recordDeviceAction(action, maildir, deviceID string) error {
 		return f.setErr
 	}
 	f.deviceAction, f.deviceActionDir, f.deviceActionID = action, maildir, deviceID
+	return nil
+}
+
+func (f *fakeStore) GetQuota(maildir string) (objectstore.QuotaLimits, int64, error) {
+	if f.getErr != nil {
+		return objectstore.QuotaLimits{}, 0, f.getErr
+	}
+	return f.quota[maildir], f.used[maildir], nil
+}
+
+func (f *fakeStore) SetQuota(maildir string, q objectstore.QuotaLimits) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+	f.setQuotaDir, f.setQuotaVal = maildir, q
 	return nil
 }
 

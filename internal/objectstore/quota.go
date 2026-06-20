@@ -8,9 +8,9 @@ import "hermex/internal/mapi"
 // the store. The store only holds the limits; the delivery and submission paths
 // decide what to enforce against the live MailboxSize.
 type QuotaLimits struct {
-	SendKB    uint32 // PR_PROHIBIT_SEND_QUOTA — block submission above this
-	ReceiveKB uint32 // PR_PROHIBIT_RECEIVE_QUOTA — block delivery above this
-	StorageKB uint32 // PR_STORAGE_QUOTA_LIMIT — warning threshold
+	SendKB    uint32 `json:"sendKB"`    // PR_PROHIBIT_SEND_QUOTA — block submission above this
+	ReceiveKB uint32 `json:"receiveKB"` // PR_PROHIBIT_RECEIVE_QUOTA — block delivery above this
+	StorageKB uint32 `json:"storageKB"` // PR_STORAGE_QUOTA_LIMIT — warning threshold
 }
 
 // GetQuota returns the mailbox's store quota limits; an unset limit reads as 0
