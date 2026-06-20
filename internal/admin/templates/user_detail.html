@@ -1,0 +1,44 @@
+{{define "user_detail.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>User: {{.User.Username}}</h1>
+<p><a href="/admin/ui/users">&larr; Back to users</a></p>
+
+<form class="edit-form" hx-put="/admin/ui/users/{{.User.Username}}" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Username <input type="text" value="{{.User.Username}}" disabled></label>
+<label>Authentication <input type="text" value="{{if .User.LDAP}}LDAP{{else}}local{{end}}" disabled></label>
+<label>Status
+<select name="status">
+<option value="0"{{if eq .User.Status 0}} selected{{end}}>Normal</option>
+<option value="1"{{if eq .User.Status 1}} selected{{end}}>Suspended</option>
+<option value="4"{{if eq .User.Status 4}} selected{{end}}>Shared mailbox</option>
+</select></label>
+<label>Type
+<select name="displayType">
+<option value="0"{{if eq .User.DisplayType 0}} selected{{end}}>User</option>
+<option value="7"{{if eq .User.DisplayType 7}} selected{{end}}>Room</option>
+<option value="8"{{if eq .User.DisplayType 8}} selected{{end}}>Equipment</option>
+</select></label>
+<label>Language <input type="text" name="lang" value="{{.User.Lang}}" placeholder="en_US"></label>
+<label>Timezone <input type="text" name="timezone" value="{{.User.Timezone}}" placeholder="Europe/Istanbul"></label>
+<label>Homeserver <input type="number" name="homeserver" value="{{.User.Homeserver}}" min="0" max="255"></label>
+<label class="check"><input type="checkbox" name="pop3_imap"{{if .User.POP3IMAP}} checked{{end}}> Allow POP3/IMAP logins</label>
+<label class="check"><input type="checkbox" name="smtp"{{if .User.SMTP}} checked{{end}}> Allow SMTP sending</label>
+<button type="submit">Save</button>
+</form>
+{{template "user-status" .}}
+
+<form class="delete-form" hx-post="/admin/ui/users/{{.User.Username}}/delete" hx-confirm="Delete {{.User.Username}}? This cannot be undone."
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label class="check"><input type="checkbox" name="deleteFiles"> Also delete the mailbox files from disk</label>
+<button type="submit" class="danger">Delete user</button>
+</form>
+</main>
+</div>
+{{template "foot" .}}{{end}}
+
+{{define "user-status"}}<div id="user-status">
+{{if .Error}}<p class="error">{{.Error}}</p>{{else if .Saved}}<p class="ok">Saved.</p>{{end}}
+</div>{{end}}

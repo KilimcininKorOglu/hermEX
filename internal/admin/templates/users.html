@@ -19,7 +19,7 @@
 <table class="grid">
 <thead><tr><th>Email</th><th>Auth</th><th>Status</th></tr></thead>
 <tbody>
-{{range .Users}}<tr><td>{{.Username}}</td><td>{{if .LDAP}}LDAP{{else}}local{{end}}</td><td>{{if eq .Status 0}}Active{{else}}Suspended{{end}}</td></tr>
+{{range .Users}}<tr><td><a href="/admin/ui/users/{{.Username}}">{{.Username}}</a></td><td>{{if .LDAP}}LDAP{{else}}local{{end}}</td><td>{{if eq .Status 0}}Active{{else}}Suspended{{end}}</td></tr>
 {{else}}<tr><td colspan="3" class="empty">No users yet.</td></tr>
 {{end}}
 </tbody>
