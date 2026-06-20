@@ -42,6 +42,7 @@ func dialIMAP(server string, port int, ssl, verify bool) (*imapConn, error) {
 		return nil, err
 	}
 	c := &imapConn{conn: conn, r: bufio.NewReader(conn)}
+	setDeadline(conn)
 	line, err := c.r.ReadString('\n')
 	if err != nil {
 		conn.Close()
@@ -57,6 +58,7 @@ func dialIMAP(server string, port int, ssl, verify bool) (*imapConn, error) {
 // do sends a tagged command and reads to its completion, returning the untagged response
 // lines. It is for line-based commands; fetchBody handles the literal-bearing FETCH.
 func (c *imapConn) do(cmd string) ([]string, error) {
+	setDeadline(c.conn)
 	c.tag++
 	tag := fmt.Sprintf("a%d", c.tag)
 	if _, err := io.WriteString(c.conn, tag+" "+cmd+"\r\n"); err != nil {
@@ -109,6 +111,7 @@ func (c *imapConn) search(criteria string) ([]string, error) {
 
 // fetchBody downloads one message's full body by UID, reading the literal precisely.
 func (c *imapConn) fetchBody(uid string) ([]byte, error) {
+	setDeadline(c.conn)
 	c.tag++
 	tag := fmt.Sprintf("a%d", c.tag)
 	if _, err := io.WriteString(c.conn, tag+" UID FETCH "+uid+" (BODY.PEEK[])\r\n"); err != nil {
@@ -122,6 +125,7 @@ func (c *imapConn) fetchBody(uid string) ([]byte, error) {
 		}
 		t := strings.TrimRight(line, "\r\n")
 		if n, ok := literalSize(t); ok {
+			setDeadline(c.conn)
 			buf := make([]byte, n)
 			if _, err := io.ReadFull(c.r, buf); err != nil {
 				return nil, err

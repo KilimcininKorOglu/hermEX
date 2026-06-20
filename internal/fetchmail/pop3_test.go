@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakePOP3 scripts a minimal POP3 server over one accepted connection: it serves the
@@ -111,5 +112,40 @@ func TestPOP3Client(t *testing.T) {
 	}
 	if len(*deleted) != 1 || (*deleted)[0] != 1 {
 		t.Errorf("server saw deletions %v, want [1]", *deleted)
+	}
+}
+
+// TestPOP3StallTimesOut proves the post-connect I/O deadline ends a session against a server
+// that accepts the connection but never responds, instead of hanging the worker forever.
+func TestPOP3StallTimesOut(t *testing.T) {
+	old := opTimeout
+	opTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { opTimeout = old })
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	stop := make(chan struct{})
+	t.Cleanup(func() { close(stop) })
+	go func() {
+		conn, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		<-stop // accept but never send the greeting; hold the conn open until cleanup
+	}()
+
+	h, p, _ := net.SplitHostPort(ln.Addr().String())
+	pn, _ := strconv.Atoi(p)
+
+	start := time.Now()
+	if _, err := dialPOP3(h, pn, false, false); err == nil {
+		t.Fatal("dial against a stalled server returned no error")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("dial took %v, want it bounded by the I/O deadline", elapsed)
 	}
 }
