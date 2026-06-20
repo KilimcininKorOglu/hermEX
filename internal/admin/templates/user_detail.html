@@ -162,6 +162,7 @@
 <form class="syncpolicy-form" hx-put="/admin/ui/users/{{.User.Username}}/syncpolicy" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <p class="hint">Each field overrides the server default; leave blank (or "inherit") to take the default.</p>
+<p class="hint">Password rules (length, complex characters, expiration, history, failed-attempt limit) apply only when DevicePasswordEnabled is Yes.</p>
 <div class="policy-grid">
 {{range .SyncPolicy}}
 <label class="policy-field">{{.Name}}

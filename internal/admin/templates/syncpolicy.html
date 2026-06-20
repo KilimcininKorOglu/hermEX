@@ -4,6 +4,7 @@
 <main>
 <h1>ActiveSync device policy (server default)</h1>
 <p class="hint">The baseline policy served to every device before a per-user override is merged on top. Leave a field unset to leave it unenforced.</p>
+<p class="hint">Password rules (length, complex characters, expiration, history, failed-attempt limit) apply only when DevicePasswordEnabled is Yes.</p>
 <form class="syncpolicy-form" hx-put="/admin/ui/syncpolicy" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <div class="policy-grid">
