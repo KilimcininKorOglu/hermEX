@@ -101,6 +101,11 @@ func (s *Server) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		s.render(w, "login", map[string]any{"Error": "Invalid email or password.", "User": user})
 		return
 	}
+	if privs, _ := s.auth.Privileges(user); !privs.Web {
+		w.WriteHeader(http.StatusForbidden)
+		s.render(w, "login", map[string]any{"Error": "Webmail access is disabled for this account.", "User": user})
+		return
+	}
 	token := s.sessions.create(user, path)
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
