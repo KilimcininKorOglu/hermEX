@@ -67,6 +67,35 @@ func (d *SQLDirectory) CreateContact(email, displayName, domain string) (int64, 
 	return id, tx.Commit()
 }
 
+// UpdateContact changes an org mail contact's display name (PR_DISPLAY_NAME),
+// identified by its address; the address and filing domain are immutable (to
+// change them, delete and re-add). An empty name clears the property so the GAL
+// falls back to the address. It reports whether a contact was found; a row that
+// is not a contact (display_type ≠ DT_REMOTE_MAILUSER) is left untouched.
+func (d *SQLDirectory) UpdateContact(email, displayName string) (bool, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	var id int64
+	err := d.db.QueryRow(
+		`SELECT id FROM users WHERE username = ? AND display_type = ?`, email, dtContact).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if name := strings.TrimSpace(displayName); name != "" {
+		_, err = d.db.Exec(
+			`INSERT INTO user_properties (user_id, proptag, order_id, propval_str, propval_bin) VALUES (?, ?, 1, ?, NULL)
+			 ON DUPLICATE KEY UPDATE propval_str = VALUES(propval_str), propval_bin = NULL`,
+			id, prDisplayName, name)
+		return true, err
+	}
+	_, err = d.db.Exec(
+		`DELETE FROM user_properties WHERE user_id = ? AND proptag = ? AND order_id = 1`,
+		id, prDisplayName)
+	return true, err
+}
+
 // DeleteContact removes an org mail contact, reporting whether one was removed.
 // Deleting its users row cascades to its user_properties.
 func (d *SQLDirectory) DeleteContact(email string) (bool, error) {

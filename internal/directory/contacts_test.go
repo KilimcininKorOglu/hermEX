@@ -72,6 +72,59 @@ func TestCreateContactDomainMustExist(t *testing.T) {
 	}
 }
 
+// TestUpdateContact renames a contact (PR_DISPLAY_NAME upsert), clears it back to
+// the address fallback, and sets a name onto a contact that had none — the GAL
+// reflects each.
+func TestUpdateContact(t *testing.T) {
+	d := contactTestDir(t)
+	if _, err := d.CreateContact("john@partner.example", "John Partner", "hermex.test"); err != nil {
+		t.Fatalf("CreateContact: %v", err)
+	}
+	if ok, err := d.UpdateContact("john@partner.example", "Jonathan Partner"); err != nil || !ok {
+		t.Fatalf("UpdateContact rename = (%v, %v), want (true, nil)", ok, err)
+	}
+	if e := galEntryFor(t, d, "john@partner.example"); e.DisplayName != "Jonathan Partner" {
+		t.Errorf("after rename DisplayName = %q, want Jonathan Partner", e.DisplayName)
+	}
+	// an empty name clears the property → the GAL falls back to the address
+	if ok, err := d.UpdateContact("john@partner.example", "  "); err != nil || !ok {
+		t.Fatalf("UpdateContact clear = (%v, %v), want (true, nil)", ok, err)
+	}
+	if e := galEntryFor(t, d, "john@partner.example"); e.DisplayName != "john@partner.example" {
+		t.Errorf("after clear DisplayName = %q, want the address fallback", e.DisplayName)
+	}
+	// set a name onto a contact created without one
+	if _, err := d.CreateContact("kate@vendor.example", "", "hermex.test"); err != nil {
+		t.Fatalf("CreateContact kate: %v", err)
+	}
+	if ok, err := d.UpdateContact("kate@vendor.example", "Kate Vendor"); err != nil || !ok {
+		t.Fatalf("UpdateContact set = (%v, %v), want (true, nil)", ok, err)
+	}
+	if e := galEntryFor(t, d, "kate@vendor.example"); e.DisplayName != "Kate Vendor" {
+		t.Errorf("after set DisplayName = %q, want Kate Vendor", e.DisplayName)
+	}
+}
+
+// TestUpdateContactGuard pins that UpdateContact only touches contacts: handed a
+// mailbox user's address it reports not-found and writes nothing.
+func TestUpdateContactGuard(t *testing.T) {
+	d := contactTestDir(t)
+	if ok, err := d.UpdateContact("alice@hermex.test", "Imposter"); err != nil || ok {
+		t.Fatalf("UpdateContact on a mailbox user = (%v, %v), want (false, nil)", ok, err)
+	}
+	if e := galEntryFor(t, d, "alice@hermex.test"); e.DisplayName == "Imposter" {
+		t.Error("UpdateContact wrote a display name onto a mailbox user it must not touch")
+	}
+}
+
+// TestUpdateContactMissing reports not-found for an unknown address.
+func TestUpdateContactMissing(t *testing.T) {
+	d := contactTestDir(t)
+	if ok, err := d.UpdateContact("nobody@nowhere.example", "X"); err != nil || ok {
+		t.Fatalf("UpdateContact on an unknown address = (%v, %v), want (false, nil)", ok, err)
+	}
+}
+
 // TestDeleteContact round-trips a removal: the contact leaves the GAL, the call
 // reports it removed one, and a second delete reports none.
 func TestDeleteContact(t *testing.T) {

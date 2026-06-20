@@ -38,6 +38,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  create-user <email> <password>")
 	fmt.Fprintln(os.Stderr, "  create-alias <alias-address> <user-email>")
 	fmt.Fprintln(os.Stderr, "  create-contact <email> <domain> [display-name]   (an org mail contact in the GAL)")
+	fmt.Fprintln(os.Stderr, "  update-contact <email> <display-name>   (rename; an empty name clears it)")
 	fmt.Fprintln(os.Stderr, "  delete-contact <email>")
 	fmt.Fprintln(os.Stderr, "  list-contacts")
 	fmt.Fprintln(os.Stderr, "  sweep-content <email>   (reclaim orphan content files; run with the mailbox idle)")
@@ -108,6 +109,18 @@ func main() {
 			log.Fatalf("hermex-admin: %v", err)
 		}
 		fmt.Printf("contact %s created\n", args[1])
+	case "update-contact":
+		if len(args) != 3 {
+			usage()
+		}
+		found, err := dir.UpdateContact(args[1], args[2])
+		if err != nil {
+			log.Fatalf("hermex-admin: %v", err)
+		}
+		if !found {
+			log.Fatalf("hermex-admin: no such contact: %s", args[1])
+		}
+		fmt.Printf("contact %s updated\n", args[1])
 	case "delete-contact":
 		if len(args) != 2 {
 			usage()
