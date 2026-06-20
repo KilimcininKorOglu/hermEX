@@ -14,12 +14,13 @@ var apBase = time.Date(2026, 6, 20, 10, 0, 0, 0, time.UTC)
 
 // seedRequest files a meeting request in the inbox with a time window, returning its
 // store id (the id the delivery path hands the auto-processor).
-func seedRequest(t *testing.T, st *objectstore.Store, tags apptTags, start, end time.Time, recurring bool) int64 {
+func seedRequest(t *testing.T, st *objectstore.Store, tags apptTags, uid string, start, end time.Time, recurring bool) int64 {
 	t.Helper()
 	id, err := st.CreateMessage(int64(mapi.PrivateFIDInbox), &oxcmail.Message{Props: mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: "IPM.Schedule.Meeting.Request"},
 		{Tag: mapi.PrSubject, Value: "Sync"},
 		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "organizer@hermex.test"},
+		{Tag: tags.uid, Value: uid},
 		{Tag: tags.start, Value: mapi.UnixToNTTime(start)},
 		{Tag: tags.end, Value: mapi.UnixToNTTime(end)},
 		{Tag: tags.recur, Value: recurring},
@@ -31,10 +32,11 @@ func seedRequest(t *testing.T, st *objectstore.Store, tags apptTags, start, end 
 }
 
 // seedAppointment files an existing Calendar appointment with the given busy status.
-func seedAppointment(t *testing.T, st *objectstore.Store, tags apptTags, start, end time.Time, busy int32) {
+func seedAppointment(t *testing.T, st *objectstore.Store, tags apptTags, uid string, start, end time.Time, busy int32) {
 	t.Helper()
 	if _, err := st.CreateMessage(int64(mapi.PrivateFIDCalendar), &oxcmail.Message{Props: mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: "IPM.Appointment"},
+		{Tag: tags.uid, Value: uid},
 		{Tag: tags.start, Value: mapi.UnixToNTTime(start)},
 		{Tag: tags.end, Value: mapi.UnixToNTTime(end)},
 		{Tag: tags.busy, Value: busy},
@@ -91,7 +93,7 @@ func calBusyStatuses(t *testing.T, st *objectstore.Store, tags apptTags) []int32
 // not handled (so the out-of-office pass still runs).
 func TestAutoProcessMasterOff(t *testing.T) {
 	st, tags, accounts := apSetup(t, objectstore.MeetingConfig{AutoAccept: false, DeclineRecurring: true})
-	id := seedRequest(t, st, tags, apBase, apBase.Add(time.Hour), false)
+	id := seedRequest(t, st, tags, "", apBase, apBase.Add(time.Hour), false)
 
 	handled, err := AutoProcess(st, accounts, nil, "room@hermex.test", id)
 	if err != nil {
@@ -128,7 +130,7 @@ func TestAutoProcessSkipsNonMeeting(t *testing.T) {
 // it is filed in the calendar as busy and reported handled.
 func TestAutoProcessAcceptsConflictFree(t *testing.T) {
 	st, tags, accounts := apSetup(t, objectstore.MeetingConfig{AutoAccept: true})
-	id := seedRequest(t, st, tags, apBase, apBase.Add(time.Hour), false)
+	id := seedRequest(t, st, tags, "", apBase, apBase.Add(time.Hour), false)
 
 	handled, err := AutoProcess(st, accounts, nil, "room@hermex.test", id)
 	if err != nil {
@@ -147,7 +149,7 @@ func TestAutoProcessAcceptsConflictFree(t *testing.T) {
 // configured: nothing is filed.
 func TestAutoProcessDeclinesRecurring(t *testing.T) {
 	st, tags, accounts := apSetup(t, objectstore.MeetingConfig{AutoAccept: true, DeclineRecurring: true})
-	id := seedRequest(t, st, tags, apBase, apBase.Add(time.Hour), true)
+	id := seedRequest(t, st, tags, "", apBase, apBase.Add(time.Hour), true)
 
 	handled, err := AutoProcess(st, accounts, nil, "room@hermex.test", id)
 	if err != nil {
@@ -165,8 +167,8 @@ func TestAutoProcessDeclinesRecurring(t *testing.T) {
 // configured: the conflicting appointment stays and nothing new is filed.
 func TestAutoProcessDeclinesConflict(t *testing.T) {
 	st, tags, accounts := apSetup(t, objectstore.MeetingConfig{AutoAccept: true, DeclineConflict: true})
-	seedAppointment(t, st, tags, apBase, apBase.Add(time.Hour), busyBusy) // existing booking
-	id := seedRequest(t, st, tags, apBase.Add(30*time.Minute), apBase.Add(90*time.Minute), false)
+	seedAppointment(t, st, tags, "", apBase, apBase.Add(time.Hour), busyBusy) // existing booking
+	id := seedRequest(t, st, tags, "", apBase.Add(30*time.Minute), apBase.Add(90*time.Minute), false)
 
 	handled, err := AutoProcess(st, accounts, nil, "room@hermex.test", id)
 	if err != nil {
@@ -177,6 +179,30 @@ func TestAutoProcessDeclinesConflict(t *testing.T) {
 	}
 	if got := calBusyStatuses(t, st, tags); len(got) != 1 {
 		t.Errorf("calendar = %v, want only the existing booking (conflicting request declined)", got)
+	}
+}
+
+// TestAutoProcessUpdateNotSelfConflict proves a meeting update does not conflict with
+// its own prior booking. A room that auto-accepts and declines conflicts has already
+// filed the meeting under its iCal UID; when the organizer reschedules and re-sends
+// the same UID, the existing appointment must be updated in place, not declined as a
+// conflict with itself. Without UID-aware conflict detection this auto-declined every
+// update, removing the meeting the room already held.
+func TestAutoProcessUpdateNotSelfConflict(t *testing.T) {
+	st, tags, accounts := apSetup(t, objectstore.MeetingConfig{AutoAccept: true, DeclineConflict: true})
+	seedAppointment(t, st, tags, "meeting-x", apBase, apBase.Add(time.Hour), busyBusy) // already accepted
+	id := seedRequest(t, st, tags, "meeting-x", apBase.Add(30*time.Minute), apBase.Add(90*time.Minute), false)
+
+	handled, err := AutoProcess(st, accounts, nil, "room@hermex.test", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !handled {
+		t.Fatal("AutoProcess did not handle the meeting update")
+	}
+	got := calBusyStatuses(t, st, tags)
+	if len(got) != 1 || got[0] != busyBusy {
+		t.Errorf("calendar busy statuses = %v, want [%d] (update accepted in place, not self-declined)", got, busyBusy)
 	}
 }
 
@@ -242,8 +268,8 @@ func TestAutoProcessDeliveredInvite(t *testing.T) {
 // DeclineConflict is off, it is filed tentatively (not accepted, not declined).
 func TestAutoProcessTentativeOnConflict(t *testing.T) {
 	st, tags, accounts := apSetup(t, objectstore.MeetingConfig{AutoAccept: true}) // no DeclineConflict
-	seedAppointment(t, st, tags, apBase, apBase.Add(time.Hour), busyBusy)
-	id := seedRequest(t, st, tags, apBase.Add(30*time.Minute), apBase.Add(90*time.Minute), false)
+	seedAppointment(t, st, tags, "", apBase, apBase.Add(time.Hour), busyBusy)
+	id := seedRequest(t, st, tags, "", apBase.Add(30*time.Minute), apBase.Add(90*time.Minute), false)
 
 	handled, err := AutoProcess(st, accounts, nil, "room@hermex.test", id)
 	if err != nil {

@@ -54,16 +54,17 @@ func AutoProcess(st *objectstore.Store, accounts directory.Accounts, spool *rela
 
 // apptTags are the appointment named-property tags the auto-processor reads.
 type apptTags struct {
-	start, end, busy, recur mapi.PropTag
+	start, end, busy, recur, uid mapi.PropTag
 }
 
-// resolveApptTags resolves the appointment start/end/busy/recurring named tags.
+// resolveApptTags resolves the appointment start/end/busy/recurring/UID named tags.
 func resolveApptTags(st *objectstore.Store) (apptTags, error) {
 	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{
 		mapi.NameAppointmentStartWhole,
 		mapi.NameAppointmentEndWhole,
 		mapi.NameBusyStatus,
 		mapi.NameRecurring,
+		mapi.NameICalUID,
 	})
 	if err != nil {
 		return apptTags{}, err
@@ -73,6 +74,7 @@ func resolveApptTags(st *objectstore.Store) (apptTags, error) {
 		end:   mapi.MakeTag(ids[1], mapi.PtSysTime),
 		busy:  mapi.MakeTag(ids[2], mapi.PtLong),
 		recur: mapi.MakeTag(ids[3], mapi.PtBoolean),
+		uid:   mapi.MakeTag(ids[4], mapi.PtUnicode),
 	}, nil
 }
 
@@ -110,13 +112,21 @@ func hasConflict(st *objectstore.Store, req *oxcmail.Message, t apptTags) (bool,
 	if !ok1 || !ok2 {
 		return false, nil // a request with no time window cannot be judged in conflict
 	}
+	reqUID := propStr(req.Props, t.uid)
 	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
 	if err != nil {
 		return false, err
 	}
 	for _, obj := range objs {
-		pv, err := st.GetMessageProperties(obj.ID, t.start, t.end, t.busy, t.recur)
+		pv, err := st.GetMessageProperties(obj.ID, t.start, t.end, t.busy, t.recur, t.uid)
 		if err != nil {
+			continue
+		}
+		// The request's own prior booking is not a conflict with itself: a meeting
+		// update re-sends the same iCal UID, and accepting it updates that appointment
+		// in place rather than double-booking against it. The booking path dedups on
+		// the same UID; the conflict check must too.
+		if reqUID != "" && propStr(pv, t.uid) == reqUID {
 			continue
 		}
 		if boolVal(pv, t.recur) {
