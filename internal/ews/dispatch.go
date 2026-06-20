@@ -74,6 +74,12 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleUpdateInboxRules(w, inner, sess)
 	case "GetDelegate":
 		s.handleGetDelegate(w, inner, sess)
+	case "AddDelegate":
+		s.handleAddDelegate(w, inner, sess)
+	case "RemoveDelegate":
+		s.handleRemoveDelegate(w, inner, sess)
+	case "UpdateDelegate":
+		s.handleUpdateDelegate(w, inner, sess)
 	case "GetUserAvailabilityRequest":
 		// MS-OXWSAVAIL names the request element GetUserAvailabilityRequest (the
 		// "Request" suffix is unlike the other operations' bare names).

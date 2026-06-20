@@ -267,3 +267,287 @@ func (s *Server) handleGetDelegate(w http.ResponseWriter, inner []byte, sess *se
 		DeliverMeetingRequests: "DelegatesAndMe", // v1 default; routing scope is not modelled
 	})
 }
+
+// --- delegate mutation (Add/Remove/Update) ---
+
+// addDelegateRequest and updateDelegateRequest carry the delegates to add or
+// re-permission; removeDelegateRequest carries bare UserIds.
+type addDelegateRequest struct {
+	XMLName       xml.Name          `xml:"AddDelegate"`
+	Mailbox       delegateMailbox   `xml:"Mailbox"`
+	DelegateUsers []reqDelegateUser `xml:"DelegateUsers>DelegateUser"`
+}
+
+type updateDelegateRequest struct {
+	XMLName       xml.Name          `xml:"UpdateDelegate"`
+	Mailbox       delegateMailbox   `xml:"Mailbox"`
+	DelegateUsers []reqDelegateUser `xml:"DelegateUsers>DelegateUser"`
+}
+
+type removeDelegateRequest struct {
+	XMLName xml.Name            `xml:"RemoveDelegate"`
+	Mailbox delegateMailbox     `xml:"Mailbox"`
+	UserIds []delegateReqUserId `xml:"UserIds>UserId"`
+}
+
+// reqDelegateUser is a request DelegateUser: the delegate's SMTP plus the per-folder
+// levels to set. A folder absent from DelegatePermissions is left unchanged; a
+// present level (including None) is written. An entirely absent DelegatePermissions
+// block (nil) touches no folder.
+type reqDelegateUser struct {
+	UserId              delegateReqUserId    `xml:"UserId"`
+	DelegatePermissions *delegatePermissions `xml:"DelegatePermissions"`
+}
+
+// --- mutation response (a per-delegate result list; no DeliverMeetingRequests) ---
+
+type delegateWriteResponse struct {
+	XMLName       xml.Name
+	ResponseClass string                 `xml:"ResponseClass,attr"`
+	ResponseCode  string                 `xml:"ResponseCode"`
+	Messages      []delegateWriteMessage `xml:"ResponseMessages>DelegateUserResponseMessageType"`
+}
+
+type delegateWriteMessage struct {
+	ResponseClass string             `xml:"ResponseClass,attr"`
+	ResponseCode  string             `xml:"ResponseCode"`
+	MessageText   string             `xml:"MessageText,omitempty"`
+	DelegateUser  *writeDelegateUser `xml:"http://schemas.microsoft.com/exchange/services/2006/types DelegateUser,omitempty"`
+}
+
+type writeDelegateUser struct {
+	UserId delegateUserId `xml:"UserId"`
+}
+
+func delegateOK(addr string) delegateWriteMessage {
+	return delegateWriteMessage{
+		ResponseClass: "Success", ResponseCode: "NoError",
+		DelegateUser: &writeDelegateUser{UserId: delegateUserId{PrimarySmtpAddress: addr}},
+	}
+}
+
+func delegateErr(code, text, addr string) delegateWriteMessage {
+	m := delegateWriteMessage{ResponseClass: "Error", ResponseCode: code, MessageText: text}
+	if addr != "" {
+		m.DelegateUser = &writeDelegateUser{UserId: delegateUserId{PrimarySmtpAddress: addr}}
+	}
+	return m
+}
+
+func writeDelegateMutationResponse(w http.ResponseWriter, element string, msgs []delegateWriteMessage) {
+	writeResponse(w, delegateWriteResponse{
+		XMLName:       xml.Name{Space: nsMessages, Local: element},
+		ResponseClass: "Success",
+		ResponseCode:  "NoError",
+		Messages:      msgs,
+	})
+}
+
+// delegateLevelToFrights maps a DelegateFolderPermissionLevelType to its frights
+// mask. Only the three settable roles map to rights; None, Custom, and any
+// unrecognized level clear the grant — Custom is not a writable role through this
+// enum. The role constants already carry their implied bits and free/busy is left to
+// the mailbox's default grant, so the mask is stored as-is (the read mapping strips
+// the ambient free/busy bits back off).
+func delegateLevelToFrights(level string) uint32 {
+	switch level {
+	case "Editor":
+		return mapi.RightsEditor
+	case "Reviewer":
+		return mapi.RightsReviewer
+	case "Author":
+		return mapi.RightsAuthor
+	default: // None, Custom, or unrecognized
+		return 0
+	}
+}
+
+// writeDelegateGrants applies a delegate's per-folder levels to the mailbox's folder
+// ACLs. A folder absent from the request (empty level) is left unchanged; a present
+// level upserts the delegate's grant on that folder (None/Custom clear it to zero).
+func writeDelegateGrants(st *objectstore.Store, username string, dp *delegatePermissions) error {
+	if dp == nil {
+		return nil
+	}
+	for _, fl := range []struct {
+		fid   int64
+		level string
+	}{
+		{mapi.PrivateFIDCalendar, dp.CalendarFolderPermissionLevel},
+		{mapi.PrivateFIDTasks, dp.TasksFolderPermissionLevel},
+		{mapi.PrivateFIDInbox, dp.InboxFolderPermissionLevel},
+		{mapi.PrivateFIDContacts, dp.ContactsFolderPermissionLevel},
+		{mapi.PrivateFIDNotes, dp.NotesFolderPermissionLevel},
+		{mapi.PrivateFIDJournal, dp.JournalFolderPermissionLevel},
+	} {
+		if fl.level == "" {
+			continue
+		}
+		if err := st.ModifyPermissions(fl.fid, false, []objectstore.PermissionChange{
+			{Op: objectstore.PermAdd, Username: username, Rights: delegateLevelToFrights(fl.level)},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// indexFold returns the index of the first case-insensitive match of s in list, or -1.
+func indexFold(list []string, s string) int {
+	for i, v := range list {
+		if strings.EqualFold(v, s) {
+			return i
+		}
+	}
+	return -1
+}
+
+// handleAddDelegate adds delegates to the mailbox's delegate list and writes their
+// per-folder grants. A delegate already on the list reports ErrorDelegateAlreadyExists
+// and an entry with no address ErrorDelegateNoUser. The delegate identity is stored
+// verbatim in both the list and the folder ACLs (the case-folded list match and the
+// NOCASE permission column keep the two in agreement with the ROP enforcement path).
+// v1 manages only the caller's own mailbox.
+func (s *Server) handleAddDelegate(w http.ResponseWriter, inner []byte, sess *session) {
+	var req addDelegateRequest
+	if err := xml.Unmarshal(inner, &req); err != nil {
+		writeSOAPFault(w, "ErrorInvalidRequest", "AddDelegate: "+err.Error())
+		return
+	}
+	if !s.isOwnMailbox(sess, req.Mailbox.EmailAddress) {
+		writeSOAPFault(w, "ErrorAccessDenied", "AddDelegate: managing another mailbox's delegates is not supported")
+		return
+	}
+	st, err := objectstore.Open(sess.mailbox)
+	if err != nil {
+		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		return
+	}
+	defer st.Close()
+	list, err := st.GetDelegates()
+	if err != nil {
+		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		return
+	}
+
+	msgs := make([]delegateWriteMessage, 0, len(req.DelegateUsers))
+	for _, du := range req.DelegateUsers {
+		addr := du.UserId.PrimarySmtpAddress
+		switch {
+		case addr == "":
+			msgs = append(msgs, delegateErr("ErrorDelegateNoUser", "No user specified", ""))
+			continue
+		case containsFold(list, addr):
+			msgs = append(msgs, delegateErr("ErrorDelegateAlreadyExists", "Delegate already exists", addr))
+			continue
+		}
+		// Write the grants before recording the list entry so a grant failure leaves no
+		// half-configured delegate on the list.
+		if err := writeDelegateGrants(st, addr, du.DelegatePermissions); err != nil {
+			msgs = append(msgs, delegateErr("ErrorInternalServerError", err.Error(), addr))
+			continue
+		}
+		list = append(list, addr)
+		msgs = append(msgs, delegateOK(addr))
+	}
+	if err := st.SetDelegates(list); err != nil {
+		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		return
+	}
+	writeDelegateMutationResponse(w, "AddDelegateResponse", msgs)
+}
+
+// handleRemoveDelegate removes delegates from the mailbox's delegate list. A delegate
+// not on the list reports ErrorDelegateNotFound. Removal revokes the send-on-behalf
+// right and delegate-list store-open, but leaves any explicit folder grants in place
+// (those are independent shares, not part of the delegate designation). v1 manages
+// only the caller's own mailbox.
+func (s *Server) handleRemoveDelegate(w http.ResponseWriter, inner []byte, sess *session) {
+	var req removeDelegateRequest
+	if err := xml.Unmarshal(inner, &req); err != nil {
+		writeSOAPFault(w, "ErrorInvalidRequest", "RemoveDelegate: "+err.Error())
+		return
+	}
+	if !s.isOwnMailbox(sess, req.Mailbox.EmailAddress) {
+		writeSOAPFault(w, "ErrorAccessDenied", "RemoveDelegate: managing another mailbox's delegates is not supported")
+		return
+	}
+	st, err := objectstore.Open(sess.mailbox)
+	if err != nil {
+		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		return
+	}
+	defer st.Close()
+	list, err := st.GetDelegates()
+	if err != nil {
+		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		return
+	}
+
+	msgs := make([]delegateWriteMessage, 0, len(req.UserIds))
+	for _, uid := range req.UserIds {
+		addr := uid.PrimarySmtpAddress
+		if addr == "" {
+			msgs = append(msgs, delegateErr("ErrorDelegateNoUser", "No user specified", ""))
+			continue
+		}
+		idx := indexFold(list, addr)
+		if idx < 0 {
+			msgs = append(msgs, delegateErr("ErrorDelegateNotFound", "Delegate not found", addr))
+			continue
+		}
+		list = append(list[:idx], list[idx+1:]...)
+		msgs = append(msgs, delegateOK(addr))
+	}
+	if err := st.SetDelegates(list); err != nil {
+		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		return
+	}
+	writeDelegateMutationResponse(w, "RemoveDelegateResponse", msgs)
+}
+
+// handleUpdateDelegate rewrites the per-folder grants of delegates already on the
+// list. A delegate not on the list reports ErrorDelegateNotFound. It changes only
+// permissions, so the list membership is left untouched. v1 manages only the caller's
+// own mailbox.
+func (s *Server) handleUpdateDelegate(w http.ResponseWriter, inner []byte, sess *session) {
+	var req updateDelegateRequest
+	if err := xml.Unmarshal(inner, &req); err != nil {
+		writeSOAPFault(w, "ErrorInvalidRequest", "UpdateDelegate: "+err.Error())
+		return
+	}
+	if !s.isOwnMailbox(sess, req.Mailbox.EmailAddress) {
+		writeSOAPFault(w, "ErrorAccessDenied", "UpdateDelegate: managing another mailbox's delegates is not supported")
+		return
+	}
+	st, err := objectstore.Open(sess.mailbox)
+	if err != nil {
+		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		return
+	}
+	defer st.Close()
+	list, err := st.GetDelegates()
+	if err != nil {
+		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		return
+	}
+
+	msgs := make([]delegateWriteMessage, 0, len(req.DelegateUsers))
+	for _, du := range req.DelegateUsers {
+		addr := du.UserId.PrimarySmtpAddress
+		switch {
+		case addr == "":
+			msgs = append(msgs, delegateErr("ErrorDelegateNoUser", "No user specified", ""))
+			continue
+		case !containsFold(list, addr):
+			msgs = append(msgs, delegateErr("ErrorDelegateNotFound", "Delegate not found", addr))
+			continue
+		}
+		if err := writeDelegateGrants(st, addr, du.DelegatePermissions); err != nil {
+			msgs = append(msgs, delegateErr("ErrorInternalServerError", err.Error(), addr))
+			continue
+		}
+		msgs = append(msgs, delegateOK(addr))
+	}
+	writeDelegateMutationResponse(w, "UpdateDelegateResponse", msgs)
+}

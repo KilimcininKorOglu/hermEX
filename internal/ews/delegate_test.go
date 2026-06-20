@@ -208,3 +208,262 @@ func TestGetDelegateUserIdsFilter(t *testing.T) {
 		t.Errorf("requested-but-absent delegate must report ErrorDelegateNotFound:\n%s", out)
 	}
 }
+
+// mutateDelegateReq builds an AddDelegate/UpdateDelegate request for one delegate with
+// the given per-folder levels (folder name -> level). A nil levels map omits the
+// DelegatePermissions block entirely.
+func mutateDelegateReq(op, mailbox, delegate string, levels map[string]string) string {
+	perms := ""
+	if levels != nil {
+		perms = "<t:DelegatePermissions>"
+		for _, f := range []string{"Calendar", "Tasks", "Inbox", "Contacts", "Notes", "Journal"} {
+			if lv, ok := levels[f]; ok {
+				perms += "<t:" + f + "FolderPermissionLevel>" + lv + "</t:" + f + "FolderPermissionLevel>"
+			}
+		}
+		perms += "</t:DelegatePermissions>"
+	}
+	return wrapRequest(`<` + op + ` xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
+		`<Mailbox><t:EmailAddress>` + mailbox + `</t:EmailAddress></Mailbox>` +
+		`<DelegateUsers><t:DelegateUser><t:UserId><t:PrimarySmtpAddress>` + delegate + `</t:PrimarySmtpAddress></t:UserId>` +
+		perms +
+		`</t:DelegateUser></DelegateUsers>` +
+		`</` + op + `>`)
+}
+
+func removeDelegateReq(mailbox, delegate string) string {
+	return wrapRequest(`<RemoveDelegate xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
+		`<Mailbox><t:EmailAddress>` + mailbox + `</t:EmailAddress></Mailbox>` +
+		`<UserIds><t:UserId><t:PrimarySmtpAddress>` + delegate + `</t:PrimarySmtpAddress></t:UserId></UserIds>` +
+		`</RemoveDelegate>`)
+}
+
+// resolveGrant reads a user's effective rights on a folder of the mailbox at path.
+func resolveGrant(t *testing.T, path string, fid int64, username string) uint32 {
+	t.Helper()
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	r, err := st.ResolvePermission(fid, username)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+// ownFolderGrant returns a user's OWN explicit grant on a folder and whether such a
+// row exists — distinct from ResolvePermission, which falls back to the seeded
+// "default" free/busy grant when the user has no row of their own.
+func ownFolderGrant(t *testing.T, path string, fid int64, username string) (uint32, bool) {
+	t.Helper()
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	entries, err := st.ListPermissions(fid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.MemberID > 0 && strings.EqualFold(e.Name, username) {
+			return e.Rights, true
+		}
+	}
+	return 0, false
+}
+
+// delegateListOf returns the mailbox's delegate list.
+func delegateListOf(t *testing.T, path string) []string {
+	t.Helper()
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	list, err := st.GetDelegates()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return list
+}
+
+// TestAddDelegateCreatesListAndGrants confirms AddDelegate records the delegate on the
+// list and writes the requested per-folder grants to the mailbox ACLs.
+func TestAddDelegateCreatesListAndGrants(t *testing.T) {
+	ts, paths := delegateServer(t)
+
+	_, out := soapPost(t, ts, mutateDelegateReq("AddDelegate", testUser, "del@hermex.test",
+		map[string]string{"Calendar": "Editor", "Inbox": "Reviewer"}), true)
+	if !strings.Contains(out, `ResponseClass="Success"`) || !strings.Contains(out, "PrimarySmtpAddress>del@hermex.test<") {
+		t.Fatalf("AddDelegate must succeed for the delegate:\n%s", out)
+	}
+
+	if !containsFold(delegateListOf(t, paths[testUser]), "del@hermex.test") {
+		t.Errorf("delegate must be recorded on the list")
+	}
+	if r := resolveGrant(t, paths[testUser], int64(mapi.PrivateFIDCalendar), "del@hermex.test"); r&mapi.FrightsEditAny == 0 {
+		t.Errorf("Calendar Editor grant must carry edit-any, got %#x", r)
+	}
+	if r := resolveGrant(t, paths[testUser], int64(mapi.PrivateFIDInbox), "del@hermex.test"); r&mapi.FrightsReadAny == 0 || r&mapi.FrightsEditAny != 0 {
+		t.Errorf("Inbox Reviewer grant must be read-only, got %#x", r)
+	}
+}
+
+// TestAddDelegateClosesRopJoinAcrossCase is the cross-protocol proof: a delegate added
+// via EWS under one case must be seen by the ROP enforcement path under another. The
+// ROP path reads exactly GetDelegates (case-folded) and ResolvePermission (NOCASE
+// column), so querying those with a differently-cased address proves EWS writes and
+// ROP reads agree on the same delegate's identity and access.
+func TestAddDelegateClosesRopJoinAcrossCase(t *testing.T) {
+	ts, paths := delegateServer(t)
+
+	_, out := soapPost(t, ts, mutateDelegateReq("AddDelegate", testUser, "Delegate@HermEX.test",
+		map[string]string{"Calendar": "Editor"}), true)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("AddDelegate must succeed:\n%s", out)
+	}
+
+	// The ROP logon presents the authenticated login, which may differ in case.
+	if !containsFold(delegateListOf(t, paths[testUser]), "delegate@hermex.test") {
+		t.Errorf("delegate list must match the ROP caller case-insensitively")
+	}
+	if r := resolveGrant(t, paths[testUser], int64(mapi.PrivateFIDCalendar), "delegate@hermex.test"); r&mapi.FrightsEditAny == 0 {
+		t.Errorf("folder grant must resolve for the lowercased login the ROP path presents, got %#x", r)
+	}
+}
+
+// TestAddDelegateDuplicateRejected confirms re-adding an existing delegate reports
+// ErrorDelegateAlreadyExists rather than duplicating the list entry.
+func TestAddDelegateDuplicateRejected(t *testing.T) {
+	ts, paths := delegateServer(t)
+	setDelegateList(t, paths[testUser], []string{"del@hermex.test"})
+
+	_, out := soapPost(t, ts, mutateDelegateReq("AddDelegate", testUser, "del@hermex.test", nil), true)
+	if !strings.Contains(out, "ErrorDelegateAlreadyExists") {
+		t.Errorf("re-adding an existing delegate must be rejected:\n%s", out)
+	}
+	if list := delegateListOf(t, paths[testUser]); len(list) != 1 {
+		t.Errorf("the list must not gain a duplicate entry, got %v", list)
+	}
+}
+
+// TestAddDelegateForeignMailboxDenied confirms AddDelegate refuses another mailbox and
+// writes nothing.
+func TestAddDelegateForeignMailboxDenied(t *testing.T) {
+	ts, paths := delegateServer(t)
+
+	_, out := soapPost(t, ts, mutateDelegateReq("AddDelegate", "bob@hermex.test", "del@hermex.test",
+		map[string]string{"Calendar": "Editor"}), true)
+	if !strings.Contains(out, "ErrorAccessDenied") {
+		t.Errorf("managing a foreign mailbox must be denied:\n%s", out)
+	}
+	if list := delegateListOf(t, paths["bob@hermex.test"]); len(list) != 0 {
+		t.Errorf("a denied request must not write to the target mailbox, got %v", list)
+	}
+}
+
+// TestRemoveDelegateDropsListKeepsGrants confirms RemoveDelegate removes the list
+// entry but leaves any explicit folder grant in place (an independent share, not part
+// of the delegate designation).
+func TestRemoveDelegateDropsListKeepsGrants(t *testing.T) {
+	ts, paths := delegateServer(t)
+	setDelegateList(t, paths[testUser], []string{"del@hermex.test"})
+	grantFolder(t, paths[testUser], int64(mapi.PrivateFIDCalendar), "del@hermex.test", mapi.RightsEditor)
+
+	_, out := soapPost(t, ts, removeDelegateReq(testUser, "del@hermex.test"), true)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("RemoveDelegate must succeed:\n%s", out)
+	}
+	if containsFold(delegateListOf(t, paths[testUser]), "del@hermex.test") {
+		t.Errorf("delegate must be removed from the list")
+	}
+	if r := resolveGrant(t, paths[testUser], int64(mapi.PrivateFIDCalendar), "del@hermex.test"); r&mapi.FrightsEditAny == 0 {
+		t.Errorf("an explicit folder grant must survive delegate removal, got %#x", r)
+	}
+}
+
+// TestRemoveDelegateNotFound confirms removing a non-member reports ErrorDelegateNotFound.
+func TestRemoveDelegateNotFound(t *testing.T) {
+	ts, paths := delegateServer(t)
+	_ = paths
+
+	_, out := soapPost(t, ts, removeDelegateReq(testUser, "nobody@hermex.test"), true)
+	if !strings.Contains(out, "ErrorDelegateNotFound") {
+		t.Errorf("removing a non-member must report ErrorDelegateNotFound:\n%s", out)
+	}
+}
+
+// TestUpdateDelegateChangesGrants confirms UpdateDelegate rewrites an existing
+// delegate's folder grant (upsert) without changing list membership.
+func TestUpdateDelegateChangesGrants(t *testing.T) {
+	ts, paths := delegateServer(t)
+	setDelegateList(t, paths[testUser], []string{"del@hermex.test"})
+	grantFolder(t, paths[testUser], int64(mapi.PrivateFIDCalendar), "del@hermex.test", mapi.RightsReviewer)
+
+	_, out := soapPost(t, ts, mutateDelegateReq("UpdateDelegate", testUser, "del@hermex.test",
+		map[string]string{"Calendar": "Editor"}), true)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("UpdateDelegate must succeed:\n%s", out)
+	}
+	if r := resolveGrant(t, paths[testUser], int64(mapi.PrivateFIDCalendar), "del@hermex.test"); r&mapi.FrightsEditAny == 0 {
+		t.Errorf("Calendar grant must be raised to Editor, got %#x", r)
+	}
+	if list := delegateListOf(t, paths[testUser]); len(list) != 1 {
+		t.Errorf("UpdateDelegate must not change list membership, got %v", list)
+	}
+}
+
+// TestUpdateDelegateNotFound confirms updating a non-member reports ErrorDelegateNotFound
+// and writes no grant.
+func TestUpdateDelegateNotFound(t *testing.T) {
+	ts, paths := delegateServer(t)
+
+	_, out := soapPost(t, ts, mutateDelegateReq("UpdateDelegate", testUser, "ghost@hermex.test",
+		map[string]string{"Calendar": "Editor"}), true)
+	if !strings.Contains(out, "ErrorDelegateNotFound") {
+		t.Errorf("updating a non-member must report ErrorDelegateNotFound:\n%s", out)
+	}
+	if _, found := ownFolderGrant(t, paths[testUser], int64(mapi.PrivateFIDCalendar), "ghost@hermex.test"); found {
+		t.Errorf("no own grant row must be written for a non-member")
+	}
+}
+
+// TestUpdateDelegateNoneClearsGrant confirms a level of None clears the delegate's
+// grant on that folder.
+func TestUpdateDelegateNoneClearsGrant(t *testing.T) {
+	ts, paths := delegateServer(t)
+	setDelegateList(t, paths[testUser], []string{"del@hermex.test"})
+	grantFolder(t, paths[testUser], int64(mapi.PrivateFIDCalendar), "del@hermex.test", mapi.RightsEditor)
+
+	_, out := soapPost(t, ts, mutateDelegateReq("UpdateDelegate", testUser, "del@hermex.test",
+		map[string]string{"Calendar": "None"}), true)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("UpdateDelegate must succeed:\n%s", out)
+	}
+	if r := resolveGrant(t, paths[testUser], int64(mapi.PrivateFIDCalendar), "del@hermex.test"); r != 0 {
+		t.Errorf("a None level must clear the grant, got %#x", r)
+	}
+}
+
+// TestAddThenGetDelegateRoundTrip confirms a grant written by AddDelegate reads back at
+// the same level through GetDelegate — the two EWS operations agree end to end.
+func TestAddThenGetDelegateRoundTrip(t *testing.T) {
+	ts, _ := delegateServer(t)
+
+	soapPost(t, ts, mutateDelegateReq("AddDelegate", testUser, "del@hermex.test",
+		map[string]string{"Calendar": "Editor", "Tasks": "Author"}), true)
+
+	_, out := soapPost(t, ts, getDelegateReq(testUser, true), true)
+	if !strings.Contains(out, "PrimarySmtpAddress>del@hermex.test<") {
+		t.Errorf("GetDelegate must list the added delegate:\n%s", out)
+	}
+	if !strings.Contains(out, "CalendarFolderPermissionLevel>Editor<") {
+		t.Errorf("Calendar Editor must round-trip:\n%s", out)
+	}
+	if !strings.Contains(out, "TasksFolderPermissionLevel>Author<") {
+		t.Errorf("Tasks Author must round-trip:\n%s", out)
+	}
+}
