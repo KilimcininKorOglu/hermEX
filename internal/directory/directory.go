@@ -92,6 +92,10 @@ type LocalDomains interface {
 type GALEntry struct {
 	DisplayName string
 	Address     string
+	// HiddenFrom is the address-book hide mask (the PtLong form of PR_ATTR_HIDDEN):
+	// a directory holds the raw bits and the NSPI layer applies them per surface.
+	// Zero means visible everywhere. The static directory never hides.
+	HiddenFrom uint32
 }
 
 // GAL optionally searches the Global Address List — the directory's mailbox

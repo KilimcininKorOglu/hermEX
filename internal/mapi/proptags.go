@@ -14,6 +14,7 @@ const (
 	PrChangeKey                 = PropTag(0x65E20102) // PtBinary (XID)
 	PrPredecessorChangeList     = PropTag(0x65E30102) // PtBinary (PCL)
 	PrAttrHidden                = PropTag(0x10F4000B) // PtBoolean
+	PrAttrHiddenMask            = PropTag(0x10F40003) // PtLong (address-book hide mask)
 	PrInternetArticleNumber     = PropTag(0x0E230003) // PtLong
 	PrInternetArticleNumberNext = PropTag(0x67510003) // PtLong
 	PrDeletedCountTotal         = PropTag(0x670B0003) // PtLong

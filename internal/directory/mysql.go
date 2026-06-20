@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/GehirnInc/crypt/md5_crypt"
@@ -279,11 +280,19 @@ func (d *SQLDirectory) SearchGAL(query string, limit int) ([]GALEntry, error) {
 	// is a bound parameter, so only the ESCAPE clause sits in the SQL text (where
 	// '\\' is how MySQL spells a single backslash escape character).
 	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(strings.ToLower(strings.TrimSpace(query)))
-	const prDisplayName = 0x3001001F // PR_DISPLAY_NAME (PtUnicode)
+	const prDisplayName = 0x3001001F    // PR_DISPLAY_NAME (PtUnicode)
+	const prAttrHiddenMask = 0x10F40003 // PR_ATTR_HIDDEN, PtLong mask form
+	const prAttrHiddenBool = 0x10F4000B // PR_ATTR_HIDDEN, PtBoolean legacy form
+	// The hide mask is loaded but NOT filtered here: SearchGAL feeds both GAL
+	// enumeration and name resolution, which hide on different bits, so the
+	// per-surface filtering lives in the NSPI layer. The SQL only loads the raw
+	// mask; the address-book code applies the bit appropriate to each query.
 	const q = `
-SELECT u.username, dn.propval_str
+SELECT u.username, dn.propval_str, hg.propval_str, hb.propval_str
   FROM users u JOIN domains d ON u.domain_id = d.id
   LEFT JOIN user_properties dn ON dn.user_id = u.id AND dn.proptag = ? AND dn.order_id = 1
+  LEFT JOIN user_properties hg ON hg.user_id = u.id AND hg.proptag = ? AND hg.order_id = 1
+  LEFT JOIN user_properties hb ON hb.user_id = u.id AND hb.proptag = ? AND hb.order_id = 1
  WHERE u.maildir <> ''
    AND u.display_type = ?
    AND (u.address_status & ?) = ?
@@ -292,7 +301,7 @@ SELECT u.username, dn.propval_str
    AND u.username LIKE ? ESCAPE '\\'
  ORDER BY u.username
  LIMIT ?`
-	rows, err := d.db.Query(q, prDisplayName, dtMailuser, afUserMask, afUserNormal, afDomainMask, "%"+esc+"%", limit)
+	rows, err := d.db.Query(q, prDisplayName, prAttrHiddenMask, prAttrHiddenBool, dtMailuser, afUserMask, afUserNormal, afDomainMask, "%"+esc+"%", limit)
 	if err != nil {
 		return nil, err
 	}
@@ -300,17 +309,36 @@ SELECT u.username, dn.propval_str
 	var out []GALEntry
 	for rows.Next() {
 		var addr string
-		var name sql.NullString
-		if err := rows.Scan(&addr, &name); err != nil {
+		var name, hideMask, hideBool sql.NullString
+		if err := rows.Scan(&addr, &name, &hideMask, &hideBool); err != nil {
 			return nil, err
 		}
 		display := addr
 		if name.Valid && name.String != "" {
 			display = name.String
 		}
-		out = append(out, GALEntry{DisplayName: display, Address: addr})
+		out = append(out, GALEntry{DisplayName: display, Address: addr, HiddenFrom: hideMaskFromProps(hideMask, hideBool)})
 	}
 	return out, rows.Err()
+}
+
+// hideMaskFromProps decodes a user's address-book hide mask from its two source
+// properties. The PtLong mask form of PR_ATTR_HIDDEN is parsed base-0 (so "0x03"
+// and "3" both work) and wins when present; absent that, the legacy boolean form,
+// when truthy, means hidden from the GAL and address lists (mask 0x03). An
+// unparsable value reads as visible.
+func hideMaskFromProps(mask, boolean sql.NullString) uint32 {
+	if mask.Valid && mask.String != "" {
+		if v, err := strconv.ParseUint(strings.TrimSpace(mask.String), 0, 32); err == nil {
+			return uint32(v)
+		}
+	}
+	if boolean.Valid {
+		if v, err := strconv.ParseUint(strings.TrimSpace(boolean.String), 0, 32); err == nil && v != 0 {
+			return 0x03
+		}
+	}
+	return 0
 }
 
 // DomainInfo is a domain's administrative summary.
