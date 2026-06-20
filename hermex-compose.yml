@@ -247,3 +247,21 @@ services:
       - dav
       - webmail
     restart: unless-stopped
+
+  # Fetch-worker: polls configured remote POP3/IMAP accounts and delivers their new
+  # mail into local mailboxes. Outbound-only — it binds no port. A single instance must
+  # run this loop (two would double-fetch), so it is its own always-on daemon.
+  fetchmail:
+    container_name: hermex-fetchmail
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: ["/usr/local/bin/hermex-fetchmail", "-config", "/config/config.json"]
+    volumes:
+      - ./docker-data/mailboxes:/data/mailboxes
+      - ./docker-data/config.json:/config/config.json:ro
+      - ./docker-data/spill/fetchmail:/data/logspill
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
