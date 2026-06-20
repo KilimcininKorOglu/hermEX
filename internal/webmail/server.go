@@ -66,6 +66,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /rules", s.handleRulesSubmit)
 	mux.HandleFunc("GET /oof", s.handleOOFForm)
 	mux.HandleFunc("POST /oof", s.handleOOFSubmit)
+	mux.HandleFunc("GET /password", s.handlePasswordForm)
+	mux.HandleFunc("POST /password", s.handlePasswordSubmit)
 	mux.HandleFunc("GET /smime", s.handleSmimeForm)
 	mux.HandleFunc("POST /smime", s.handleSmimeSubmit)
 	mux.HandleFunc("POST /action", s.handleAction)

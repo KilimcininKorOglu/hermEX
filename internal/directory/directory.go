@@ -48,6 +48,14 @@ type ServicePrivileges struct {
 	DAV       bool
 }
 
+// PasswordSetter is the optional directory capability of replacing a user's
+// password. The webmail change-password page uses it after verifying the current
+// password and the change-password privilege; a directory that does not implement
+// it (e.g. a static test directory) offers no self-service password change.
+type PasswordSetter interface {
+	SetPassword(user, newPassword string) (ok bool, err error)
+}
+
 // Identifier optionally enumerates the addresses a user is permitted to send
 // as: their primary address plus any aliases/altnames. It backs the webmail
 // From/send-as gating, which must reject any From not in this set. Directories
