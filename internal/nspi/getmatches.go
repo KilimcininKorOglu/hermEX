@@ -153,15 +153,24 @@ func (s *Server) getMatchesCore(req getMatchesRequest) getMatchesResult {
 
 	g := s.snapshot()
 	var mids []uint32
-	if st.containerID == uint32(mapi.PrEmsAbMember) {
+	switch {
+	case st.containerID == uint32(mapi.PrEmsAbMember):
 		// Expand the distribution list at cur_rec into its members ([MS-OXNSPI]
 		// 3.1.4.1.10): the client selects the PR_EMS_AB_MEMBER container to read a
 		// list's membership. Members hidden from address lists are dropped.
 		if exp, ok := s.gal.(mlistExpander); ok {
 			mids = g.memberMIDs(st.curRec, exp, int(req.rowCount))
 		}
-	} else {
-		mids = g.matchAll(req.filter, req.rowCount, st)
+	case st.containerID == uint32(galContainerID):
+		// The GAL honors both the GAL-browse and the name-resolution hide bits.
+		mids = g.matchAll(req.filter, req.rowCount, st, abHideFromGAL|abHideResolve, nil)
+	default:
+		// A named address list: restrict to its recipient type and honor the
+		// address-list and name-resolution hide bits. An unknown container matches
+		// nothing.
+		if al, ok := addressListByID(int32(st.containerID)); ok {
+			mids = g.matchAll(req.filter, req.rowCount, st, abHideFromAL|abHideResolve, &al)
+		}
 	}
 	rows := make([]mapi.PropertyValues, len(mids))
 	for i, mid := range mids {
@@ -176,11 +185,13 @@ func (s *Server) getMatchesCore(req getMatchesRequest) getMatchesResult {
 	return getMatchesResult{result: ecSuccess, stat: st, mids: mids, cols: cols, rows: rows}
 }
 
-// matchAll returns the MIds of GAL entries satisfying the filter, walking from
-// the STAT position and capped at rowCount. A nil filter matches the single
-// entry at cur_rec (the reference's no-filter branch); otherwise every entry
-// from the position onward is tested via matchNode.
-func (g gal) matchAll(filter *mapi.Restriction, rowCount uint32, st stat) []uint32 {
+// matchAll returns the MIds of a container's entries satisfying the filter,
+// walking from the STAT position and capped at rowCount. A nil filter matches the
+// single entry at cur_rec (the reference's no-filter branch); otherwise every
+// eligible entry from the position onward is tested via matchNode. An entry is
+// eligible when none of hideMask's bits are set and, for a named list, its
+// recipient display type matches the list (list is nil for the GAL).
+func (g gal) matchAll(filter *mapi.Restriction, rowCount uint32, st stat, hideMask uint32, list *addressList) []uint32 {
 	if filter == nil {
 		if u, ok := g.resolveEntry(st.curRec); ok {
 			return []uint32{u.mid}
@@ -192,13 +203,15 @@ func (g gal) matchAll(filter *mapi.Restriction, rowCount uint32, st stat) []uint
 		if uint32(len(mids)) >= rowCount {
 			break
 		}
-		// GetMatches over the GAL container is a resolution-style query, so it
-		// honors both the GAL-browse and the name-resolution hide bits.
-		if g.users[i].hidden&(abHideFromGAL|abHideResolve) != 0 {
+		u := g.users[i]
+		if u.hidden&hideMask != 0 {
 			continue
 		}
-		if matchNode(g.users[i], filter) {
-			mids = append(mids, g.users[i].mid)
+		if list != nil && u.dispType != list.dispType {
+			continue
+		}
+		if matchNode(u, filter) {
+			mids = append(mids, u.mid)
 		}
 	}
 	return mids

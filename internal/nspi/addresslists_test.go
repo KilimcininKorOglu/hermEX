@@ -115,3 +115,39 @@ func TestUnknownContainerBrowsesNothing(t *testing.T) {
 		t.Errorf("browse of an entry-MId container = %v, want empty", got)
 	}
 }
+
+// TestGetMatchesInNamedListFiltersTypeAndHide proves an ANR search inside a named
+// list keeps only the list's recipient type and honors the address-list and
+// name-resolution hide bits: a matching room is excluded by type, a member hidden
+// from address lists (0x02) or from resolution (0x08) is dropped, but a member
+// hidden only from the GAL (0x01) is still matched (the bits are independent).
+func TestGetMatchesInNamedListFiltersTypeAndHide(t *testing.T) {
+	s := NewServer(maskedGAL{
+		{DisplayName: "team-alice", Address: "alice@hermex.test", DisplayType: rtUser},
+		{DisplayName: "team-room", Address: "alice-room@hermex.test", DisplayType: rtRoom},
+		{DisplayName: "team-galhid", Address: "alice-gal@hermex.test", DisplayType: rtUser, HiddenFrom: abHideFromGAL},
+		{DisplayName: "team-alhid", Address: "alice-al@hermex.test", DisplayType: rtUser, HiddenFrom: abHideFromAL},
+		{DisplayName: "team-reshid", Address: "alice-res@hermex.test", DisplayType: rtUser, HiddenFrom: abHideResolve},
+	}, testGUID)
+	f := anrFilter("alice")
+	r := s.getMatchesCore(getMatchesRequest{
+		stat:     stat{sortType: sortTypeDisplayName, codePage: 1252, containerID: uint32(alContainerUsers), curRec: midBeginningOfTable},
+		filter:   &f,
+		rowCount: 50,
+	})
+	if r.result != ecSuccess {
+		t.Fatalf("result = %#x, want ecSuccess", r.result)
+	}
+	var got []string
+	for _, row := range r.rows {
+		if v, ok := row.Get(mapi.PrSmtpAddress); ok {
+			got = append(got, v.(string))
+		}
+	}
+	slices.Sort(got)
+	// Room excluded by type; AL- and resolve-hidden dropped; GAL-hidden kept.
+	want := []string{"alice-gal@hermex.test", "alice@hermex.test"}
+	if !slices.Equal(got, want) {
+		t.Errorf("All Users GetMatches = %v, want %v", got, want)
+	}
+}
