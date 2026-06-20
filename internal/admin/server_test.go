@@ -72,6 +72,13 @@ type fakeDir struct {
 	setSpecifiedsUser  string
 	setSpecifieds      []string
 	mlistMissing       bool
+
+	contacts             []directory.ContactInfo
+	createdContact       string
+	createdContactName   string
+	createdContactDomain string
+	deletedContact       string
+	deleteContactMissing bool
 }
 
 func (f *fakeDir) Authenticate(_, _ string) (string, bool) {
@@ -203,6 +210,18 @@ func (f *fakeDir) SetSpecifieds(listname string, senders []string) (bool, error)
 	}
 	f.setSpecifiedsUser, f.setSpecifieds = listname, senders
 	return !f.mlistMissing, nil
+}
+func (f *fakeDir) ListContacts() ([]directory.ContactInfo, error) { return f.contacts, nil }
+func (f *fakeDir) CreateContact(email, displayName, domain string) (int64, error) {
+	if f.createErr != nil {
+		return 0, f.createErr
+	}
+	f.createdContact, f.createdContactName, f.createdContactDomain = email, displayName, domain
+	return 1, nil
+}
+func (f *fakeDir) DeleteContact(email string) (bool, error) {
+	f.deletedContact = email
+	return !f.deleteContactMissing, nil
 }
 func (f *fakeDir) GetUserProperties(string) (map[uint32]string, error) { return f.userProps, nil }
 func (f *fakeDir) SetUserProperties(username string, props map[uint32]string) (bool, error) {
