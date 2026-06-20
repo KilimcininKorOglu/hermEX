@@ -18,7 +18,7 @@ CMDS    := mta imap pop3 webmail dav activesync ews mapihttp gateway admin fetch
 # Test/lint scope. Override PKG (and optionally RUN) for a subset.
 PKG ?= ./internal/... ./cmd/...
 RUN ?=
-RUNFLAG := $(if $(RUN),-run $(RUN),)
+RUNFLAG := $(if $(RUN),-run '$(RUN)',)
 
 .PHONY: all build test test-host test-race vet fmt fmt-check gate tidy up down rebuild clean help compose-check
 
