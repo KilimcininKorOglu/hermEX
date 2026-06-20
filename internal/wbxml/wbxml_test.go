@@ -125,6 +125,50 @@ func TestMBUint(t *testing.T) {
 	}
 }
 
+// TestProvisionPolicyDocVector pins the EASProvisionDoc policy-detail token values
+// against hand-authored bytes ([MS-ASWBXML] code page 14): a wrong constant would emit
+// a token a device rejects, so this is the byte-exact oracle for the new policy tokens.
+func TestProvisionPolicyDocVector(t *testing.T) {
+	want := append(append([]byte{}, header...),
+		0x00, 0x0E, // SWITCH_PAGE 14 (Provision)
+		0x45,                        // Provision | content
+		0x46,                        // Policies | content
+		0x47,                        // Policy | content
+		0x4A,                        // Data | content
+		0x4D,                        // EASProvisionDoc | content
+		0x4E, 0x03, '1', 0x00, 0x01, // DevicePasswordEnabled "1"
+		0x54, 0x03, '6', 0x00, 0x01, // MinDevicePasswordLength "6"
+		0x55, 0x03, '9', '0', '0', 0x00, 0x01, // MaxInactivityTimeDeviceLock "900"
+		0x5D, 0x03, '1', 0x00, 0x01, // RequireDeviceEncryption "1"
+		0x01, // END EASProvisionDoc
+		0x01, // END Data
+		0x01, // END Policy
+		0x01, // END Policies
+		0x01, // END Provision
+	)
+	tree := Elem(PVProvision,
+		Elem(PVPolicies,
+			Elem(PVPolicy,
+				Elem(PVData,
+					Elem(PVEASProvisionDoc,
+						Str(PVDevicePasswordEnabled, "1"),
+						Str(PVMinDevicePasswordLength, "6"),
+						Str(PVMaxInactivityTimeDeviceLock, "900"),
+						Str(PVRequireDeviceEncryption, "1"),
+					)))))
+
+	if got := Marshal(tree); !bytes.Equal(got, want) {
+		t.Errorf("Marshal = % x\nwant     % x", got, want)
+	}
+	got, err := Unmarshal(want)
+	if err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(got, tree) {
+		t.Errorf("Unmarshal = %#v\nwant      %#v", got, tree)
+	}
+}
+
 // TestRoundTripMultiPage exercises SWITCH_PAGE in both directions (AirSync →
 // Email → AirSyncBase → back) plus opaque content, then checks the tree
 // survives encode+decode unchanged.

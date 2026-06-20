@@ -210,8 +210,9 @@ const (
 	PGMaxFolders   Tag = 0x0D0D
 )
 
-// Provision (code page 0x0E). Only the handshake tokens are modeled; the policy
-// detail tokens are not needed for the trivial issue-a-key flow.
+// Provision (code page 0x0E). The handshake tokens plus the full EASProvisionDoc
+// policy-detail set ([MS-ASWBXML] 2.1.2.1.16 / [MS-ASPROV] 2.2.2.44), so the server
+// can serve a complete device policy, not only the permissive default.
 const (
 	PVProvision       Tag = 0x0E05
 	PVPolicies        Tag = 0x0E06
@@ -222,9 +223,54 @@ const (
 	PVStatus          Tag = 0x0E0B
 	PVRemoteWipe      Tag = 0x0E0C
 	PVEASProvisionDoc Tag = 0x0E0D
-	// PVDevicePasswordEnabled (0x0E) is the one policy-detail token v1 emits, set
-	// to 0 for a permissive (no device password) policy.
-	PVDevicePasswordEnabled Tag = 0x0E0E
+	// EASProvisionDoc policy-detail tokens. Each maps a SyncPolicy field to its wire
+	// element; token 0x12 (DocumentBrowseEnabled) is deprecated and intentionally
+	// omitted. Token 0x10 is RequireStorageCardEncryption (the renamed
+	// DeviceEncryptionEnabled).
+	PVDevicePasswordEnabled                    Tag = 0x0E0E
+	PVAlphanumericDevicePasswordRequired       Tag = 0x0E0F
+	PVRequireStorageCardEncryption             Tag = 0x0E10
+	PVPasswordRecoveryEnabled                  Tag = 0x0E11
+	PVAttachmentsEnabled                       Tag = 0x0E13
+	PVMinDevicePasswordLength                  Tag = 0x0E14
+	PVMaxInactivityTimeDeviceLock              Tag = 0x0E15
+	PVMaxDevicePasswordFailedAttempts          Tag = 0x0E16
+	PVMaxAttachmentSize                        Tag = 0x0E17
+	PVAllowSimpleDevicePassword                Tag = 0x0E18
+	PVDevicePasswordExpiration                 Tag = 0x0E19
+	PVDevicePasswordHistory                    Tag = 0x0E1A
+	PVAllowStorageCard                         Tag = 0x0E1B
+	PVAllowCamera                              Tag = 0x0E1C
+	PVRequireDeviceEncryption                  Tag = 0x0E1D
+	PVAllowUnsignedApplications                Tag = 0x0E1E
+	PVAllowUnsignedInstallationPackages        Tag = 0x0E1F
+	PVMinDevicePasswordComplexCharacters       Tag = 0x0E20
+	PVAllowWiFi                                Tag = 0x0E21
+	PVAllowTextMessaging                       Tag = 0x0E22
+	PVAllowPOPIMAPEmail                        Tag = 0x0E23
+	PVAllowBluetooth                           Tag = 0x0E24
+	PVAllowIrDA                                Tag = 0x0E25
+	PVRequireManualSyncWhenRoaming             Tag = 0x0E26
+	PVAllowDesktopSync                         Tag = 0x0E27
+	PVMaxCalendarAgeFilter                     Tag = 0x0E28
+	PVAllowHTMLEmail                           Tag = 0x0E29
+	PVMaxEmailAgeFilter                        Tag = 0x0E2A
+	PVMaxEmailBodyTruncationSize               Tag = 0x0E2B
+	PVMaxEmailHTMLBodyTruncationSize           Tag = 0x0E2C
+	PVRequireSignedSMIMEMessages               Tag = 0x0E2D
+	PVRequireEncryptedSMIMEMessages            Tag = 0x0E2E
+	PVRequireSignedSMIMEAlgorithm              Tag = 0x0E2F
+	PVRequireEncryptionSMIMEAlgorithm          Tag = 0x0E30
+	PVAllowSMIMEEncryptionAlgorithmNegotiation Tag = 0x0E31
+	PVAllowSMIMESoftCerts                      Tag = 0x0E32
+	PVAllowBrowser                             Tag = 0x0E33
+	PVAllowConsumerEmail                       Tag = 0x0E34
+	PVAllowRemoteDesktop                       Tag = 0x0E35
+	PVAllowInternetSharing                     Tag = 0x0E36
+	PVUnapprovedInROMApplicationList           Tag = 0x0E37
+	PVApplicationName                          Tag = 0x0E38
+	PVApprovedApplicationList                  Tag = 0x0E39
+	PVHash                                     Tag = 0x0E3A
 	// PVAccountOnlyRemoteWipe (since EAS 16.1) signals a wipe that removes only the
 	// account from the device, not a full device reset.
 	PVAccountOnlyRemoteWipe Tag = 0x0E3B
