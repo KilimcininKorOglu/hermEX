@@ -70,6 +70,25 @@ func (s *Server) resolveMaildir(w http.ResponseWriter, r *http.Request) (string,
 	return u.Maildir, true
 }
 
+// canonicalMember lowercases a typed member address and confirms it names a real
+// user, returning the canonical form to store. An empty, alias, or unknown address is
+// rejected (ok=false). This is the folder-permission counterpart of the resolution
+// the protocol grant path performs: ResolvePermission compares the stored member name
+// verbatim against the authenticated login, so a grant stored under a name no login
+// resolves to (a typo, or an alias the primary login never matches) would be silently
+// inert. Rejecting it here turns that silent miss into an explicit error.
+func (s *Server) canonicalMember(username string) (member string, ok bool, err error) {
+	member = strings.ToLower(strings.TrimSpace(username))
+	if member == "" {
+		return "", false, nil
+	}
+	_, found, err := s.dir.GetUser(member)
+	if err != nil || !found {
+		return "", false, err
+	}
+	return member, true, nil
+}
+
 // handleListUserFolders returns a user's folder tree (system administrators only).
 func (s *Server) handleListUserFolders(w http.ResponseWriter, r *http.Request) {
 	maildir, ok := s.resolveMaildir(w, r)
@@ -129,11 +148,20 @@ func (s *Server) handleSetFolderPermission(w http.ResponseWriter, r *http.Reques
 		Username string `json:"username"`
 		Rights   uint32 `json:"rights"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&in); err != nil || in.Username == "" {
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	if err := s.store.SetFolderPermission(maildir, fid, in.Username, in.Rights); err != nil {
+	member, ok, err := s.canonicalMember(in.Username)
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "no such member user", http.StatusNotFound)
+		return
+	}
+	if err := s.store.SetFolderPermission(maildir, fid, member, in.Rights); err != nil {
 		http.Error(w, "could not set permission: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -222,12 +250,17 @@ func (s *Server) handleUISetFolderPerm(w http.ResponseWriter, r *http.Request) {
 	}
 	fid, _ := strconv.ParseInt(r.PostFormValue("fid"), 10, 64)
 	rights, _ := strconv.ParseUint(r.PostFormValue("rights"), 10, 32)
-	username := strings.TrimSpace(r.PostFormValue("username"))
+	member, memberOK, mErr := s.canonicalMember(r.PostFormValue("username"))
 	errMsg := ""
-	if username == "" {
-		errMsg = "A user is required."
-	} else if err := s.store.SetFolderPermission(u.Maildir, fid, username, uint32(rights)); err != nil {
-		errMsg = "Could not grant: " + err.Error()
+	switch {
+	case mErr != nil:
+		errMsg = "Could not look up user: " + mErr.Error()
+	case !memberOK:
+		errMsg = "No such user. Grant to the recipient's primary address."
+	default:
+		if err := s.store.SetFolderPermission(u.Maildir, fid, member, uint32(rights)); err != nil {
+			errMsg = "Could not grant: " + err.Error()
+		}
 	}
 	s.renderFolderPerms(w, u.Username, u.Maildir, fid, csrfCookieValue(r), errMsg)
 }

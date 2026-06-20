@@ -37,6 +37,7 @@ type fakeDir struct {
 	// captured/scripted by the user detail/edit/delete handlers
 	userDetail           directory.UserDetail
 	getUserMissing       bool
+	knownUsers           map[string]directory.UserDetail // when set, GetUser resolves per-name
 	gotUser, updatedUser string
 	updateUser           directory.UserUpdate
 	updateMissing        bool
@@ -158,6 +159,10 @@ func (f *fakeDir) UpsertLDAPUser(username string, _ []byte, _ string) (bool, err
 }
 func (f *fakeDir) GetUser(username string) (directory.UserDetail, bool, error) {
 	f.gotUser = username
+	if f.knownUsers != nil {
+		u, ok := f.knownUsers[strings.ToLower(strings.TrimSpace(username))]
+		return u, ok, nil
+	}
 	if f.getUserMissing {
 		return directory.UserDetail{}, false, nil
 	}

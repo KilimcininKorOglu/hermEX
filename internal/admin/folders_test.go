@@ -216,3 +216,69 @@ func TestUIRemoveFolderPerm(t *testing.T) {
 		t.Errorf("captured = %q/%d/%d, want /mb/alice/12/5", store.rmPermDir, store.rmPermFolder, store.rmPermMember)
 	}
 }
+
+// knownAlice is a directory that resolves only alice's primary address, so a grant to
+// any other address is an unknown user.
+func knownAlice() *fakeDir {
+	d := folderUserDir()
+	d.knownUsers = map[string]directory.UserDetail{
+		"alice@hermex.test": {Username: "alice@hermex.test", Maildir: "/mb/alice"},
+	}
+	return d
+}
+
+// TestSetFolderPermissionRejectsUnknownMember proves a grant to an address that names
+// no real user is refused — not silently stored as a row the access path (which
+// compares the stored name verbatim against the login) would never match.
+func TestSetFolderPermissionRejectsUnknownMember(t *testing.T) {
+	store := &fakeStore{}
+	ts := adminServerStore(t, knownAlice(), store)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/folders/12/permissions", session, csrf,
+		`{"username":"ghost@hermex.test","rights":1}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown-member grant status %d, want 404", resp.StatusCode)
+	}
+	if store.setPermUser != "" {
+		t.Errorf("unknown member was stored as %q, want no store call", store.setPermUser)
+	}
+}
+
+// TestSetFolderPermissionCanonicalizes proves a mixed-case, padded address is stored
+// in the lowercased trimmed form the access path compares against.
+func TestSetFolderPermissionCanonicalizes(t *testing.T) {
+	store := &fakeStore{}
+	ts := adminServerStore(t, folderUserDir(), store) // resolves any user
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/folders/12/permissions", session, csrf,
+		`{"username":"  BOB@Hermex.Test  ","rights":1}`)
+	resp.Body.Close()
+	if store.setPermUser != "bob@hermex.test" {
+		t.Errorf("stored member = %q, want lowercased bob@hermex.test", store.setPermUser)
+	}
+}
+
+// TestUISetFolderPermRejectsUnknownMember proves the grant form refuses an unknown
+// address and reports it in the panel rather than storing an inert grant.
+func TestUISetFolderPermRejectsUnknownMember(t *testing.T) {
+	store := &fakeStore{}
+	ts := adminServerStore(t, knownAlice(), store)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/users/alice@hermex.test/folder-perms/set", session, csrf, url.Values{
+		"fid":      {"12"},
+		"username": {"ghost@hermex.test"},
+		"rights":   {fmt.Sprintf("%d", mapi.RightsReviewer)},
+	})
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if store.setPermUser != "" {
+		t.Errorf("unknown member was stored as %q, want no store call", store.setPermUser)
+	}
+	if !strings.Contains(string(body), "No such user") {
+		t.Errorf("panel did not report the unknown user:\n%s", body)
+	}
+}
