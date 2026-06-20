@@ -20,6 +20,9 @@ type folderRefs struct {
 
 type refID struct {
 	ID string `xml:"Id,attr"`
+	// Mailbox names another mailbox to target the folder in (MS-OXWSCDATA
+	// DistinguishedFolderId/Mailbox). Absent for the caller's own mailbox.
+	Mailbox *delegateMailbox `xml:"Mailbox"`
 }
 
 type getFolderRequest struct {
@@ -138,33 +141,47 @@ func (s *Server) handleGetFolder(w http.ResponseWriter, inner []byte, sess *sess
 		writeSOAPFault(w, "ErrorInvalidRequest", "GetFolder: "+err.Error())
 		return
 	}
-	st, all, ok := openFolders(w, sess)
-	if !ok {
-		return
-	}
-	defer st.Close()
-	idx := folderIndex(all)
+	cache := s.newStoreCache()
+	defer cache.closeAll()
 	wantPerms := req.FolderShape.wantsPermissionSet()
 
 	var msgs []folderResponseMessage
 	for _, tgt := range resolveTargets(req.FolderIDs) {
 		if !tgt.ok {
-			msgs = append(msgs, folderResponseMessage{ResponseClass: "Error", ResponseCode: tgt.code})
+			msgs = append(msgs, folderErr(tgt.code))
 			continue
 		}
-		f, code, err := folderElement(st, tgt.fid, idx, all)
+		st, all, isOwn, code := cache.open(sess, tgt.mailbox)
+		if code != "" {
+			msgs = append(msgs, folderErr(code))
+			continue
+		}
+		// A delegated (non-own) mailbox is gated per folder: the caller must hold at
+		// least visibility on the folder, the same right the ROP enforcement path uses.
+		if !isOwn {
+			rights, err := st.ResolvePermission(tgt.fid, sess.user)
+			if err != nil {
+				msgs = append(msgs, folderErr("ErrorInternalServerError"))
+				continue
+			}
+			if rights&mapi.FrightsVisible == 0 {
+				msgs = append(msgs, folderErr("ErrorAccessDenied"))
+				continue
+			}
+		}
+		f, code, err := folderElement(st, tgt.fid, folderIndex(all), all)
 		switch {
 		case err != nil:
-			msgs = append(msgs, folderResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
+			msgs = append(msgs, folderErr("ErrorInternalServerError"))
 			continue
 		case code != "":
-			msgs = append(msgs, folderResponseMessage{ResponseClass: "Error", ResponseCode: code})
+			msgs = append(msgs, folderErr(code))
 			continue
 		}
 		if wantPerms {
 			ps, err := folderPermissionSet(st, tgt.fid)
 			if err != nil {
-				msgs = append(msgs, folderResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
+				msgs = append(msgs, folderErr("ErrorInternalServerError"))
 				continue
 			}
 			f.PermissionSet = ps
@@ -349,9 +366,19 @@ func openFolders(w http.ResponseWriter, sess *session) (*objectstore.Store, []ob
 }
 
 type folderTarget struct {
-	fid  int64
-	ok   bool
-	code string // when ok is false, the per-folder error code to report
+	fid     int64
+	ok      bool
+	code    string // when ok is false, the per-folder error code to report
+	mailbox string // target mailbox SMTP from the ref's Mailbox child; "" = the caller's own
+}
+
+// refMailbox returns the target SMTP a folder reference names via its Mailbox child,
+// or "" when it targets the caller's own mailbox.
+func refMailbox(m *delegateMailbox) string {
+	if m != nil {
+		return m.EmailAddress
+	}
+	return ""
 }
 
 // resolveTargets resolves the requested folder ids — distinguished names via the
@@ -363,7 +390,7 @@ func resolveTargets(refs folderRefs) []folderTarget {
 	var out []folderTarget
 	for _, d := range refs.Distinguished {
 		if fid, ok := distinguishedFolders[strings.ToLower(d.ID)]; ok {
-			out = append(out, folderTarget{fid: fid, ok: true})
+			out = append(out, folderTarget{fid: fid, ok: true, mailbox: refMailbox(d.Mailbox)})
 		} else {
 			// A distinguished id is a fixed EWS enum; one we do not map is a
 			// folder this mailbox does not have (recoverable-items, search
@@ -376,12 +403,72 @@ func resolveTargets(refs folderRefs) []folderTarget {
 	}
 	for _, f := range refs.Folders {
 		if fid, err := oxews.DecodeFolderID(f.ID); err == nil {
-			out = append(out, folderTarget{fid: fid, ok: true})
+			out = append(out, folderTarget{fid: fid, ok: true, mailbox: refMailbox(f.Mailbox)})
 		} else {
 			out = append(out, folderTarget{code: "ErrorInvalidRequest"})
 		}
 	}
 	return out
+}
+
+// storeCache opens mailbox stores on demand within one request and closes them all at
+// the end, so a multi-folder request that crosses mailboxes opens each distinct store
+// only once.
+type storeCache struct {
+	s       *Server
+	stores  map[string]*objectstore.Store
+	folders map[string][]objectstore.FolderInfo
+}
+
+func (s *Server) newStoreCache() *storeCache {
+	return &storeCache{
+		s:       s,
+		stores:  map[string]*objectstore.Store{},
+		folders: map[string][]objectstore.FolderInfo{},
+	}
+}
+
+// open resolves a target mailbox (the caller's own when mailbox is empty or names the
+// caller), opens it once, and returns its folder list and whether it is the caller's
+// own mailbox. A non-empty code names the per-folder error to report instead.
+func (c *storeCache) open(sess *session, mailbox string) (*objectstore.Store, []objectstore.FolderInfo, bool, string) {
+	dir := sess.mailbox
+	isOwn := true
+	if mailbox != "" && !strings.EqualFold(mailbox, sess.user) {
+		path, ok := c.s.accounts.Resolve(mailbox)
+		if !ok {
+			return nil, nil, false, "ErrorNonExistentMailbox"
+		}
+		if path != sess.mailbox {
+			dir, isOwn = path, false
+		}
+	}
+	if st, ok := c.stores[dir]; ok {
+		return st, c.folders[dir], isOwn, ""
+	}
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		return nil, nil, false, "ErrorInternalServerError"
+	}
+	all, err := st.ListFolders()
+	if err != nil {
+		st.Close()
+		return nil, nil, false, "ErrorInternalServerError"
+	}
+	c.stores[dir] = st
+	c.folders[dir] = all
+	return st, all, isOwn, ""
+}
+
+func (c *storeCache) closeAll() {
+	for _, st := range c.stores {
+		st.Close()
+	}
+}
+
+// folderErr builds a per-folder error response message.
+func folderErr(code string) folderResponseMessage {
+	return folderResponseMessage{ResponseClass: "Error", ResponseCode: code}
 }
 
 // folderElement resolves one folder id to its element, returning a non-empty

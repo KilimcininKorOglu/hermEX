@@ -467,3 +467,63 @@ func TestAddThenGetDelegateRoundTrip(t *testing.T) {
 		t.Errorf("Tasks Author must round-trip:\n%s", out)
 	}
 }
+
+// crossMailboxGetFolder builds a GetFolder request for a distinguished folder, targeting
+// another mailbox when mailbox is non-empty.
+func crossMailboxGetFolder(distinguishedID, mailbox string) string {
+	mb := ""
+	if mailbox != "" {
+		mb = `<t:Mailbox><t:EmailAddress>` + mailbox + `</t:EmailAddress></t:Mailbox>`
+	}
+	return wrapRequest(`<GetFolder xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
+		`<FolderShape><t:BaseShape>IdOnly</t:BaseShape></FolderShape>` +
+		`<FolderIds><t:DistinguishedFolderId Id="` + distinguishedID + `">` + mb + `</t:DistinguishedFolderId></FolderIds>` +
+		`</GetFolder>`)
+}
+
+// TestGetFolderCrossMailboxWithGrant confirms a caller granted access on another
+// mailbox's folder reads that folder through a Mailbox-targeted GetFolder — the EWS
+// access path honoring the same grant the ROP path does.
+func TestGetFolderCrossMailboxWithGrant(t *testing.T) {
+	ts, paths := delegateServer(t)
+	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.RightsReviewer)
+
+	_, out := soapPost(t, ts, crossMailboxGetFolder("inbox", "bob@hermex.test"), true)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Errorf("a granted caller must read the target folder:\n%s", out)
+	}
+}
+
+// TestGetFolderCrossMailboxDeniedWithoutGrant confirms a caller with no permission on
+// another mailbox's folder is denied, not silently served. The inbox carries no
+// default grant, so visibility comes only from an explicit grant.
+func TestGetFolderCrossMailboxDeniedWithoutGrant(t *testing.T) {
+	ts, _ := delegateServer(t)
+
+	_, out := soapPost(t, ts, crossMailboxGetFolder("inbox", "bob@hermex.test"), true)
+	if !strings.Contains(out, "ErrorAccessDenied") {
+		t.Errorf("an ungranted caller must be denied the target folder:\n%s", out)
+	}
+}
+
+// TestGetFolderCrossMailboxUnknownMailbox confirms targeting a non-existent mailbox
+// reports ErrorNonExistentMailbox.
+func TestGetFolderCrossMailboxUnknownMailbox(t *testing.T) {
+	ts, _ := delegateServer(t)
+
+	_, out := soapPost(t, ts, crossMailboxGetFolder("inbox", "ghost@nowhere.test"), true)
+	if !strings.Contains(out, "ErrorNonExistentMailbox") {
+		t.Errorf("an unknown target mailbox must report ErrorNonExistentMailbox:\n%s", out)
+	}
+}
+
+// TestGetFolderOwnMailboxViaMailboxElement confirms a Mailbox naming the caller's own
+// mailbox is served without delegate enforcement (the owner path is unchanged).
+func TestGetFolderOwnMailboxViaMailboxElement(t *testing.T) {
+	ts, _ := delegateServer(t)
+
+	_, out := soapPost(t, ts, crossMailboxGetFolder("inbox", testUser), true)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Errorf("the caller's own mailbox must be served without a grant:\n%s", out)
+	}
+}
