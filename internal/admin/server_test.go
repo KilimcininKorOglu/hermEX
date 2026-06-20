@@ -54,6 +54,13 @@ type fakeDir struct {
 	setAliasesUser string
 	aliasesMissing bool
 
+	forward        directory.ForwardInfo
+	forwardSet     bool
+	setForwardUser string
+	setForwardType int
+	setForwardDest string
+	forwardMissing bool
+
 	userProps       map[uint32]string
 	setProps        map[uint32]string
 	setPropsUser    string
@@ -185,6 +192,16 @@ func (f *fakeDir) SetAliasesFor(username string, aliases []string) (bool, error)
 	}
 	f.setAliasesUser, f.setAliases = username, aliases
 	return !f.aliasesMissing, nil
+}
+func (f *fakeDir) GetForward(string) (directory.ForwardInfo, bool, error) {
+	return f.forward, f.forwardSet, nil
+}
+func (f *fakeDir) SetForward(username string, forwardType int, destination string) (bool, error) {
+	if f.createErr != nil {
+		return false, f.createErr
+	}
+	f.setForwardUser, f.setForwardType, f.setForwardDest = username, forwardType, destination
+	return !f.forwardMissing, nil
 }
 func (f *fakeDir) ListMLists() ([]directory.MListInfo, error) { return f.mlists, nil }
 func (f *fakeDir) CreateMList(listname string, listType, listPriv int) (int64, error) {

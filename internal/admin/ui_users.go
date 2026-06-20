@@ -92,6 +92,7 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 		"Email":     u.Username,
 		"Altnames":  strings.Join(altnames, "\n"),
 		"Aliases":   strings.Join(aliases, "\n"),
+		"Forward":   s.forwardViewOf(u.Username),
 		"Roles":     roles,
 		"Contact":   contactValues(props),
 		"OOF":       oofViewOf(oof),

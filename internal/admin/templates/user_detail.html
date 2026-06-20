@@ -111,6 +111,19 @@
 <button type="submit">Save aliases</button>
 </form>
 
+<h2>Forward</h2>
+<form class="forward-form" hx-put="/admin/ui/users/{{.User.Username}}/forward" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Type
+<select name="forwardtype">
+<option value=""{{if eq .Forward.Type ""}} selected{{end}}>&mdash; No forwarding</option>
+<option value="cc"{{if eq .Forward.Type "cc"}} selected{{end}}>Keep a copy and forward (CC)</option>
+<option value="redirect"{{if eq .Forward.Type "redirect"}} selected{{end}}>Forward only (Redirect)</option>
+</select></label>
+<label>Destination <input type="email" name="destination" value="{{.Forward.Destination}}" placeholder="boss@example.com"></label>
+<button type="submit">Save forward</button>
+</form>
+
 <h2>Delegates</h2>
 <form class="delegates-form" hx-put="/admin/ui/users/{{.User.Username}}/delegates" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
