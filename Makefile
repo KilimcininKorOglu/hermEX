@@ -20,7 +20,7 @@ PKG ?= ./internal/... ./cmd/...
 RUN ?=
 RUNFLAG := $(if $(RUN),-run $(RUN),)
 
-.PHONY: all build test test-host test-race vet fmt fmt-check gate tidy up down rebuild clean help
+.PHONY: all build test test-host test-race vet fmt fmt-check gate tidy up down rebuild clean help compose-check
 
 all: build
 
@@ -81,6 +81,10 @@ down:
 rebuild:
 	@test -n "$(SVC)" || { echo "set SVC=<service>"; exit 2; }
 	$(COMPOSE) build $(SVC) && $(COMPOSE) up -d --no-deps $(SVC)
+
+## compose-check: validate the compose file syntax
+compose-check:
+	$(COMPOSE) config -q
 
 ## clean: remove built binaries
 clean:
