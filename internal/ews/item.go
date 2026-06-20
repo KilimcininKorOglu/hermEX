@@ -200,7 +200,9 @@ func (s *Server) handleGetItem(w http.ResponseWriter, inner []byte, sess *sessio
 		}
 		elem := oxews.BuildItem(msg, oxews.ItemMeta{
 			ItemID:         ref.ID,
+			FolderID:       id.FolderID,
 			MessageID:      id.MessageID,
+			Mailbox:        id.Mailbox,
 			ChangeKey:      oxews.ChangeKey(uint64(id.MessageID)),
 			IsRead:         info.Flags&objectstore.FlagSeen != 0,
 			HasAttachments: hasAttach,
@@ -226,19 +228,34 @@ func (s *Server) handleGetAttachment(w http.ResponseWriter, inner []byte, sess *
 		writeSOAPFault(w, "ErrorInvalidRequest", "GetAttachment: "+err.Error())
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
-	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
-		return
-	}
-	defer st.Close()
+	cache := s.newStoreCache()
+	defer cache.closeAll()
 
 	var msgs []getAttachmentResponseMessage
 	for _, ref := range req.AttachmentIDs.IDs {
-		mid, idx, err := oxews.DecodeAttachmentID(ref.ID)
+		folderID, mid, idx, mailbox, err := oxews.DecodeAttachmentID(ref.ID)
 		if err != nil {
 			msgs = append(msgs, getAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInvalidRequest"})
 			continue
+		}
+		// The id self-encodes its mailbox and parent folder; a delegated attachment is
+		// gated on read access to that folder (reference: GetAttachment checks
+		// frightsReadAny on the attachment's parent folder).
+		st, _, isOwn, code := cache.open(sess, mailbox)
+		if code != "" {
+			msgs = append(msgs, getAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: code})
+			continue
+		}
+		if !isOwn {
+			rights, err := st.ResolvePermission(folderID, sess.user)
+			if err != nil {
+				msgs = append(msgs, getAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
+				continue
+			}
+			if rights&mapi.FrightsReadAny == 0 {
+				msgs = append(msgs, getAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorAccessDenied"})
+				continue
+			}
 		}
 		msg, err := st.OpenMessage(mid)
 		if err != nil || idx < 0 || idx >= len(msg.Attachments) {
@@ -249,14 +266,14 @@ func (s *Server) handleGetAttachment(w http.ResponseWriter, inner []byte, sess *
 		if oxews.IsEmbeddedAttachment(att) {
 			// An embedded message is returned as an ItemAttachment carrying the nested
 			// message item, not a file blob.
-			ia := oxews.BuildItemAttachmentContent(mid, idx, att)
+			ia := oxews.BuildItemAttachmentContent(folderID, mid, idx, att, mailbox)
 			msgs = append(msgs, getAttachmentResponseMessage{
 				ResponseClass: "Success", ResponseCode: "NoError",
 				Attachments: &attachmentsWrap{Items: []oxews.ItemAttachment{ia}},
 			})
 			continue
 		}
-		fa := oxews.BuildAttachmentContent(mid, idx, att)
+		fa := oxews.BuildAttachmentContent(folderID, mid, idx, att, mailbox)
 		msgs = append(msgs, getAttachmentResponseMessage{
 			ResponseClass: "Success", ResponseCode: "NoError",
 			Attachments: &attachmentsWrap{Files: []oxews.FileAttachment{fa}},

@@ -54,44 +54,69 @@ type AttachmentIDElem struct {
 	ID string `xml:"Id,attr"`
 }
 
-// EncodeAttachmentID encodes (message id, attachment index) as an opaque token.
-// The index is the attachment's position in the message's attachment_id order,
-// which OpenMessage returns stably.
-func EncodeAttachmentID(messageID int64, index int) string {
-	return base64.RawURLEncoding.EncodeToString(fmt.Appendf(nil, "%d.%d", messageID, index))
+// EncodeAttachmentID encodes (folder id, message id, attachment index) as an opaque
+// token, tagged with the target mailbox SMTP when the message lives in another mailbox
+// the caller was granted access to. The folder id lets GetAttachment enforce read
+// access on the parent folder; the mailbox routes it to the right store. The index is
+// the attachment's position in the message's attachment_id order, which OpenMessage
+// returns stably. An "|" precedes the mailbox (an SMTP address contains dots). A token
+// with no mailbox segment decodes to an own-mailbox id; the legacy two-field form
+// (message id, index) still decodes, with an unknown folder.
+func EncodeAttachmentID(folderID, messageID int64, index int, mailbox string) string {
+	s := fmt.Sprintf("%d.%d.%d", folderID, messageID, index)
+	if mailbox != "" {
+		s += "|" + mailbox
+	}
+	return base64.RawURLEncoding.EncodeToString([]byte(s))
 }
 
-// DecodeAttachmentID reverses EncodeAttachmentID.
-func DecodeAttachmentID(s string) (messageID int64, index int, err error) {
-	raw, err := base64.RawURLEncoding.DecodeString(s)
-	if err != nil {
-		return 0, 0, errBadID
+// DecodeAttachmentID reverses EncodeAttachmentID. A legacy two-field token decodes with
+// folderID=0 (folder unknown) and an empty mailbox.
+func DecodeAttachmentID(s string) (folderID, messageID int64, index int, mailbox string, err error) {
+	raw, e := base64.RawURLEncoding.DecodeString(s)
+	if e != nil {
+		return 0, 0, 0, "", errBadID
 	}
-	parts := strings.Split(string(raw), ".")
-	if len(parts) != 2 {
-		return 0, 0, errBadID
+	str := string(raw)
+	if i := strings.IndexByte(str, '|'); i >= 0 {
+		mailbox = str[i+1:]
+		str = str[:i]
 	}
-	mid, e1 := strconv.ParseInt(parts[0], 10, 64)
-	idx, e2 := strconv.Atoi(parts[1])
-	if e1 != nil || e2 != nil {
-		return 0, 0, errBadID
+	parts := strings.Split(str, ".")
+	switch len(parts) {
+	case 2: // legacy: message id, index (own mailbox, folder unknown)
+		mid, e1 := strconv.ParseInt(parts[0], 10, 64)
+		idx, e2 := strconv.Atoi(parts[1])
+		if e1 != nil || e2 != nil {
+			return 0, 0, 0, "", errBadID
+		}
+		return 0, mid, idx, mailbox, nil
+	case 3:
+		fid, e1 := strconv.ParseInt(parts[0], 10, 64)
+		mid, e2 := strconv.ParseInt(parts[1], 10, 64)
+		idx, e3 := strconv.Atoi(parts[2])
+		if e1 != nil || e2 != nil || e3 != nil {
+			return 0, 0, 0, "", errBadID
+		}
+		return fid, mid, idx, mailbox, nil
+	default:
+		return 0, 0, 0, "", errBadID
 	}
-	return mid, idx, nil
 }
 
 // BuildAttachments builds the metadata-only attachment list for an item, or nil
 // when there are none. An embedded message is listed as an ItemAttachment; every
 // other attachment is a FileAttachment.
-func BuildAttachments(messageID int64, atts []oxcmail.Attachment) *AttachmentList {
+func BuildAttachments(folderID, messageID int64, atts []oxcmail.Attachment, mailbox string) *AttachmentList {
 	if len(atts) == 0 {
 		return nil
 	}
 	list := &AttachmentList{}
 	for i, att := range atts {
 		if IsEmbeddedAttachment(att) {
-			list.Items = append(list.Items, itemAttachmentMeta(messageID, i, att))
+			list.Items = append(list.Items, itemAttachmentMeta(folderID, messageID, i, att, mailbox))
 		} else {
-			list.Files = append(list.Files, attachmentMeta(messageID, i, att))
+			list.Files = append(list.Files, attachmentMeta(folderID, messageID, i, att, mailbox))
 		}
 	}
 	return list
@@ -101,8 +126,8 @@ func BuildAttachments(messageID int64, atts []oxcmail.Attachment) *AttachmentLis
 // message item) for GetAttachment: the embedded message's raw bytes are parsed
 // and rendered as a nested <t:Message>. The nested item's own attachments are
 // listed as metadata only.
-func BuildItemAttachmentContent(messageID int64, index int, att oxcmail.Attachment) ItemAttachment {
-	ia := itemAttachmentMeta(messageID, index, att)
+func BuildItemAttachmentContent(folderID, messageID int64, index int, att oxcmail.Attachment, mailbox string) ItemAttachment {
+	ia := itemAttachmentMeta(folderID, messageID, index, att, mailbox)
 	raw := binProp(att.Props, mapi.PrAttachDataBin)
 	emb, err := oxcmail.Import(raw, oxcmail.Options{})
 	if err != nil {
@@ -110,8 +135,10 @@ func BuildItemAttachmentContent(messageID int64, index int, att oxcmail.Attachme
 	}
 	content, bodyType := embeddedBodyContent(emb)
 	nested := BuildItem(emb, ItemMeta{
-		ItemID:         EncodeAttachmentID(messageID, index),
+		ItemID:         EncodeAttachmentID(folderID, messageID, index, mailbox),
+		FolderID:       folderID,
 		MessageID:      messageID,
+		Mailbox:        mailbox,
 		Body:           content,
 		BodyType:       bodyType,
 		Size:           len(raw),
@@ -136,9 +163,9 @@ func embeddedBodyContent(emb *oxcmail.Message) (content, bodyType string) {
 }
 
 // itemAttachmentMeta builds the metadata-only ItemAttachment (no nested item).
-func itemAttachmentMeta(messageID int64, index int, att oxcmail.Attachment) ItemAttachment {
+func itemAttachmentMeta(folderID, messageID int64, index int, att oxcmail.Attachment, mailbox string) ItemAttachment {
 	return ItemAttachment{
-		AttachmentID: AttachmentIDElem{ID: EncodeAttachmentID(messageID, index)},
+		AttachmentID: AttachmentIDElem{ID: EncodeAttachmentID(folderID, messageID, index, mailbox)},
 		Name:         attachName(att.Props),
 		ContentType:  stringProp(att.Props, mapi.PrAttachMimeTag),
 		Size:         len(binProp(att.Props, mapi.PrAttachDataBin)),
@@ -147,16 +174,16 @@ func itemAttachmentMeta(messageID int64, index int, att oxcmail.Attachment) Item
 
 // BuildAttachmentContent builds the full FileAttachment (with base64 content)
 // for GetAttachment.
-func BuildAttachmentContent(messageID int64, index int, att oxcmail.Attachment) FileAttachment {
-	fa := attachmentMeta(messageID, index, att)
+func BuildAttachmentContent(folderID, messageID int64, index int, att oxcmail.Attachment, mailbox string) FileAttachment {
+	fa := attachmentMeta(folderID, messageID, index, att, mailbox)
 	fa.Content = base64.StdEncoding.EncodeToString(binProp(att.Props, mapi.PrAttachDataBin))
 	return fa
 }
 
 // attachmentMeta builds the metadata-only FileAttachment (no Content).
-func attachmentMeta(messageID int64, index int, att oxcmail.Attachment) FileAttachment {
+func attachmentMeta(folderID, messageID int64, index int, att oxcmail.Attachment, mailbox string) FileAttachment {
 	return FileAttachment{
-		AttachmentID: AttachmentIDElem{ID: EncodeAttachmentID(messageID, index)},
+		AttachmentID: AttachmentIDElem{ID: EncodeAttachmentID(folderID, messageID, index, mailbox)},
 		Name:         attachName(att.Props),
 		ContentType:  stringProp(att.Props, mapi.PrAttachMimeTag),
 		ContentID:    stringProp(att.Props, mapi.PrAttachContentID),

@@ -140,7 +140,7 @@ func (s *Server) handleCreateAttachment(w http.ResponseWriter, inner []byte, ses
 			msgs = append(msgs, createAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorItemSave"})
 			continue
 		}
-		id := oxews.EncodeAttachmentID(parent.MessageID, baseCount+created)
+		id := oxews.EncodeAttachmentID(parent.FolderID, parent.MessageID, baseCount+created, parent.Mailbox)
 		created++
 		msgs = append(msgs, createAttachmentResponseMessage{
 			ResponseClass: "Success", ResponseCode: "NoError",

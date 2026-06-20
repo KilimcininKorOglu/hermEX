@@ -35,7 +35,7 @@ func fileAtt() oxcmail.Attachment {
 // a nested <Message>.
 func TestEmbeddedAttachmentRoutedAsItemAttachment(t *testing.T) {
 	// Metadata list: embedded -> Items, file -> Files.
-	list := BuildAttachments(42, []oxcmail.Attachment{embeddedAtt(), fileAtt()})
+	list := BuildAttachments(13, 42, []oxcmail.Attachment{embeddedAtt(), fileAtt()}, "")
 	if list == nil {
 		t.Fatal("BuildAttachments returned nil")
 	}
@@ -53,7 +53,7 @@ func TestEmbeddedAttachmentRoutedAsItemAttachment(t *testing.T) {
 	}
 
 	// GetAttachment content: the nested Message item is filled.
-	ia := BuildItemAttachmentContent(42, 0, embeddedAtt())
+	ia := BuildItemAttachmentContent(13, 42, 0, embeddedAtt(), "")
 	if ia.Message == nil {
 		t.Fatal("BuildItemAttachmentContent produced no nested message item")
 	}

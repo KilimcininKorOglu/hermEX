@@ -831,6 +831,66 @@ func TestGetFolderReturnsMailboxEncodedID(t *testing.T) {
 	}
 }
 
+// must returns the response body from a soapPost call, discarding the response handle.
+func must(_ any, out string) string { return out }
+
+// seedInboxMessageWithAttachment appends a multipart message carrying one file
+// attachment to a mailbox's inbox.
+func seedInboxMessageWithAttachment(t *testing.T, path, subject string) {
+	t.Helper()
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	raw := "From: sender@example.test\r\n" +
+		"Subject: " + subject + "\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: multipart/mixed; boundary=\"b\"\r\n\r\n" +
+		"--b\r\nContent-Type: text/plain\r\n\r\nbody\r\n" +
+		"--b\r\nContent-Type: text/plain; name=\"a.txt\"\r\n" +
+		"Content-Disposition: attachment; filename=\"a.txt\"\r\n\r\nattached\r\n" +
+		"--b--\r\n"
+	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Unix(1718200000, 0), 0); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestGetAttachmentCrossMailboxWithGrant confirms the attachment id returned for a
+// cross-mailbox item encodes the target, and a granted caller can fetch it from that
+// mailbox.
+func TestGetAttachmentCrossMailboxWithGrant(t *testing.T) {
+	ts, paths := delegateServer(t)
+	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.RightsReviewer)
+	seedInboxMessageWithAttachment(t, paths["bob@hermex.test"], "Report")
+
+	itemID := firstItemID(must(soapPost(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test"), true)))
+	getOut := must(soapPost(t, ts, getItemReq(itemID), true))
+	m := attachIDRE.FindStringSubmatch(getOut)
+	if m == nil {
+		t.Fatalf("no attachment id in GetItem response:\n%s", getOut)
+	}
+	attachID := m[1]
+	if _, _, _, mb, err := oxews.DecodeAttachmentID(attachID); err != nil || mb != "bob@hermex.test" {
+		t.Fatalf("attachment id must encode the target mailbox, got mb=%q (%v)", mb, err)
+	}
+	if attOut := must(soapPost(t, ts, getAttachmentReq(attachID), true)); !strings.Contains(attOut, `ResponseClass="Success"`) {
+		t.Errorf("a granted caller must fetch the attachment:\n%s", attOut)
+	}
+}
+
+// TestGetAttachmentCrossMailboxDenied confirms an ungranted caller cannot fetch an
+// attachment in another mailbox: the read gate fires before the message is opened.
+func TestGetAttachmentCrossMailboxDenied(t *testing.T) {
+	ts, _ := delegateServer(t)
+	foreign := oxews.EncodeAttachmentID(int64(mapi.PrivateFIDInbox), 1, 0, "bob@hermex.test")
+
+	_, out := soapPost(t, ts, getAttachmentReq(foreign), true)
+	if !strings.Contains(out, "ErrorAccessDenied") {
+		t.Errorf("an ungranted cross-mailbox GetAttachment must be denied:\n%s", out)
+	}
+}
+
 // TestSyncFolderItemsCrossMailboxRejected confirms incremental sync of another mailbox
 // is refused: the per-folder sync state is not yet isolated per caller, so a foreign
 // target is rejected rather than colliding with the target's own state.

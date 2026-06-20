@@ -74,12 +74,12 @@ func TestFolderIDMailboxRoundTrip(t *testing.T) {
 // TestAttachmentIDRoundTrip confirms an attachment id encodes and decodes
 // losslessly.
 func TestAttachmentIDRoundTrip(t *testing.T) {
-	mid, idx, err := DecodeAttachmentID(EncodeAttachmentID(0x20001, 3))
+	fid, mid, idx, mb, err := DecodeAttachmentID(EncodeAttachmentID(13, 0x20001, 3, "boss@hermex.test"))
 	if err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if mid != 0x20001 || idx != 3 {
-		t.Errorf("round trip = (%d, %d), want (131073, 3)", mid, idx)
+	if fid != 13 || mid != 0x20001 || idx != 3 || mb != "boss@hermex.test" {
+		t.Errorf("round trip = (%d, %d, %d, %q), want (13, 131073, 3, boss@hermex.test)", fid, mid, idx, mb)
 	}
 }
 
@@ -88,7 +88,7 @@ func TestDecodeBadID(t *testing.T) {
 	if _, err := DecodeItemID("not-base64!!!"); err == nil {
 		t.Error("expected error for malformed item id")
 	}
-	if _, _, err := DecodeAttachmentID("@@@"); err == nil {
+	if _, _, _, _, err := DecodeAttachmentID("@@@"); err == nil {
 		t.Error("expected error for malformed attachment id")
 	}
 }

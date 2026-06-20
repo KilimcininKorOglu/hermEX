@@ -66,7 +66,9 @@ type Mailbox struct {
 // message's RFC822 form).
 type ItemMeta struct {
 	ItemID         string
+	FolderID       int64  // parent folder, encoded into attachment ids for read enforcement
 	MessageID      int64
+	Mailbox        string // target mailbox SMTP when the item lives in another mailbox; empty for own
 	ChangeKey      string
 	IsRead         bool
 	HasAttachments bool
@@ -98,7 +100,7 @@ func BuildItem(msg *oxcmail.Message, meta ItemMeta) Message {
 	if meta.Body != "" {
 		m.Body = &Body{BodyType: meta.BodyType, Content: meta.Body}
 	}
-	m.Attachments = BuildAttachments(meta.MessageID, msg.Attachments)
+	m.Attachments = BuildAttachments(meta.FolderID, meta.MessageID, msg.Attachments, meta.Mailbox)
 	if mb := senderMailbox(msg.Props); mb != nil {
 		// EWS exposes both Sender (the submitting mailbox) and From (the author);
 		// without a delegate/send-on-behalf identity they are the same mailbox.
