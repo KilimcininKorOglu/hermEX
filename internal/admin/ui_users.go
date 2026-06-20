@@ -84,19 +84,21 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 	oof, _ := s.store.GetOOFSettings(u.Maildir)
 	devs, _ := s.store.ListDevices(u.Maildir)
 	qlimits, qused, _ := s.store.GetQuota(u.Maildir)
+	delegates, _ := s.store.GetDelegates(u.Maildir)
 	s.render(w, "user_detail.html", map[string]any{
-		"Nav":      "users",
-		"CSRF":     csrfCookieValue(r),
-		"User":     u,
-		"Email":    u.Username,
-		"Altnames": strings.Join(altnames, "\n"),
-		"Aliases":  strings.Join(aliases, "\n"),
-		"Roles":    roles,
-		"Contact":  contactValues(props),
-		"OOF":      oofViewOf(oof),
-		"Devices":  deviceViewsOf(devs),
-		"Quota":    quotaViewOf(qlimits, qused),
-		"Hide":     hideViewOf(props),
+		"Nav":       "users",
+		"CSRF":      csrfCookieValue(r),
+		"User":      u,
+		"Email":     u.Username,
+		"Altnames":  strings.Join(altnames, "\n"),
+		"Aliases":   strings.Join(aliases, "\n"),
+		"Roles":     roles,
+		"Contact":   contactValues(props),
+		"OOF":       oofViewOf(oof),
+		"Devices":   deviceViewsOf(devs),
+		"Quota":     quotaViewOf(qlimits, qused),
+		"Hide":      hideViewOf(props),
+		"Delegates": strings.Join(delegates, "\n"),
 	})
 }
 

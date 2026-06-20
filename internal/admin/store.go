@@ -22,6 +22,8 @@ type MailboxStore interface {
 	CancelDeviceWipe(maildir, deviceID string) error
 	GetQuota(maildir string) (objectstore.QuotaLimits, int64, error)
 	SetQuota(maildir string, q objectstore.QuotaLimits) error
+	GetDelegates(maildir string) ([]string, error)
+	SetDelegates(maildir string, list []string) error
 }
 
 // mailboxStore is the production MailboxStore: it opens the object store at the
@@ -92,6 +94,19 @@ func (mailboxStore) GetQuota(maildir string) (objectstore.QuotaLimits, int64, er
 
 func (mailboxStore) SetQuota(maildir string, q objectstore.QuotaLimits) error {
 	return withStore(maildir, func(st *objectstore.Store) error { return st.SetQuota(q) })
+}
+
+func (mailboxStore) GetDelegates(maildir string) ([]string, error) {
+	st, err := objectstore.Open(maildir)
+	if err != nil {
+		return nil, err
+	}
+	defer st.Close()
+	return st.GetDelegates()
+}
+
+func (mailboxStore) SetDelegates(maildir string, list []string) error {
+	return withStore(maildir, func(st *objectstore.Store) error { return st.SetDelegates(list) })
 }
 
 // withStore opens the object store at maildir, runs fn, and closes it — the

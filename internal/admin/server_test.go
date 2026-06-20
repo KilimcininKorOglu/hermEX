@@ -238,6 +238,10 @@ type fakeStore struct {
 	used        map[string]int64
 	setQuotaDir string
 	setQuotaVal objectstore.QuotaLimits
+
+	delegates       map[string][]string
+	setDelegatesDir string
+	setDelegatesVal []string
 }
 
 func (f *fakeStore) GetOOFSettings(maildir string) (objectstore.OOFSettings, error) {
@@ -307,6 +311,25 @@ func (f *fakeStore) SetQuota(maildir string, q objectstore.QuotaLimits) error {
 		return f.setErr
 	}
 	f.setQuotaDir, f.setQuotaVal = maildir, q
+	return nil
+}
+
+func (f *fakeStore) GetDelegates(maildir string) ([]string, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	return f.delegates[maildir], nil
+}
+
+func (f *fakeStore) SetDelegates(maildir string, list []string) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+	if f.delegates == nil {
+		f.delegates = map[string][]string{}
+	}
+	f.delegates[maildir] = list
+	f.setDelegatesDir, f.setDelegatesVal = maildir, list
 	return nil
 }
 

@@ -111,6 +111,14 @@
 <button type="submit">Save aliases</button>
 </form>
 
+<h2>Delegates</h2>
+<form class="delegates-form" hx-put="/admin/ui/users/{{.User.Username}}/delegates" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>One delegate address per line
+<textarea name="delegates" rows="4" placeholder="assistant@example.com">{{.Delegates}}</textarea></label>
+<button type="submit">Save delegates</button>
+</form>
+
 <h2>Admin roles</h2>
 {{template "user-roles" .}}
 
