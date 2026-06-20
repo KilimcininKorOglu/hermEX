@@ -100,6 +100,12 @@ func (s *Server) handle(conn net.Conn) {
 					errLine(w, "authentication failed")
 					continue
 				}
+				if privs, _ := s.Auth.Privileges(user); !privs.POP3IMAP {
+					event(logging.LevelWarn, "auth.denied", logging.Fields{"service": "pop3imap"})
+					user = ""
+					errLine(w, "POP3/IMAP access is disabled for this account")
+					continue
+				}
 				m, err := openMailbox(path)
 				if err != nil {
 					s.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.POP3, Name: "auth.fail", User: user, RemoteAddr: conn.RemoteAddr().String(), Err: err.Error()})

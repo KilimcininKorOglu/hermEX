@@ -287,6 +287,11 @@ func (c *conn) finishAuth(tag, user, pass string) {
 		c.no(tag, "[AUTHENTICATIONFAILED] invalid credentials")
 		return
 	}
+	if privs, _ := c.srv.Auth.Privileges(user); !privs.POP3IMAP {
+		c.srv.Logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.IMAP, Name: "auth.denied", User: user, RemoteAddr: remoteHost(c.nc), Fields: logging.Fields{"service": "pop3imap"}})
+		c.no(tag, "[AUTHORIZATIONFAILED] IMAP access is disabled for this account")
+		return
+	}
 	st, err := objectstore.Open(path)
 	if err != nil {
 		c.srv.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.IMAP, Name: "auth.fail", User: user, RemoteAddr: remoteHost(c.nc), Err: err.Error()})
