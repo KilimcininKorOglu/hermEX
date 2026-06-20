@@ -87,6 +87,13 @@ const (
 	// remote-wipe status). It is a sibling of PrActiveSyncState so a best-effort
 	// metadata write never collides with the sync-state blob a command updates.
 	PrActiveSyncDevices = PropTag(0x6779001F) // PtUnicode
+	// PrAbDelegates is the provider-defined store-root property (0x677A) holding the
+	// mailbox's public-delegate list — the addresses permitted to act for this
+	// mailbox — as a JSON array of SMTP addresses. NSPI serves it on the
+	// PR_EMS_AB_PUBLIC_DELEGATES container and edits it via ModLinkAtt; the admin
+	// console manages the same list. It is per-mailbox (a store property, not the
+	// directory DB), like the other subsystem state.
+	PrAbDelegates = PropTag(0x677A001F) // PtUnicode
 )
 
 // Large message/attachment content property tags. These hold bodies and
