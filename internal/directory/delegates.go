@@ -19,3 +19,18 @@ func (d *SQLDirectory) Delegates(userAddr string) ([]string, error) {
 	defer st.Close()
 	return st.GetDelegates()
 }
+
+// SetDelegates replaces the public-delegate list of the mailbox at userAddr. An
+// address with no local mailbox is a no-op (there is no store to write).
+func (d *SQLDirectory) SetDelegates(userAddr string, list []string) error {
+	maildir, ok := d.Resolve(userAddr)
+	if !ok {
+		return nil
+	}
+	st, err := objectstore.Open(maildir)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	return st.SetDelegates(list)
+}

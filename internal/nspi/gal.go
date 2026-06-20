@@ -85,6 +85,17 @@ type delegateReader interface {
 // build error rather than delegate lists silently reading as empty at runtime.
 var _ delegateReader = (*directory.SQLDirectory)(nil)
 
+// delegateWriter is delegateReader plus the capability to replace a mailbox's
+// public-delegate list, used by ModLinkAtt to edit the caller's own list.
+// *directory.SQLDirectory satisfies it by opening the mailbox store; a directory
+// without it cannot edit delegates, so ModLinkAtt reports the op unsupported.
+type delegateWriter interface {
+	delegateReader
+	SetDelegates(userAddr string, list []string) error
+}
+
+var _ delegateWriter = (*directory.SQLDirectory)(nil)
+
 // galUser is one GAL entry with its assigned MId. hidden is the PR_ATTR_HIDDEN
 // mask the directory supplied; the surface applying it decides which bit matters.
 // dt is the entry's address-book object flavor for the EntryID (dtMailuser or

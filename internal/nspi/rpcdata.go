@@ -426,11 +426,11 @@ func (s *Server) rpcGetTemplateInfo(stub []byte) ([]byte, uint32) {
 	return out.Bytes(), 0
 }
 
-// rpcModLinkAtt handles NspiModLinkAtt (opnum 14): the reference edits the caller's
-// public-delegates list, which hermEX does not implement, so it returns a blanket
-// ecNotSupported. It does not replicate the reference's mid==0 → ecInvalidObject rung,
-// since the op is supported for no proptag at all. Only the handle is decoded. OUT: the
-// bare result.
+// rpcModLinkAtt handles NspiModLinkAtt (opnum 14) over RPC/HTTP: editing the
+// public-delegates list needs the caller's identity for the owner-only access
+// check, which the RPC/HTTP dispatcher does not thread through, so this returns a
+// blanket ecNotSupported. The op is served over MAPI/HTTP — the transport modern
+// Outlook uses — by ModLinkAtt. Only the handle is decoded. OUT: the bare result.
 func (s *Server) rpcModLinkAtt(stub []byte) ([]byte, uint32) {
 	p := ndr.NewPull(stub)
 	if err := pullHandle(p); err != nil {

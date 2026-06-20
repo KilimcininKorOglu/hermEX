@@ -37,6 +37,7 @@ const (
 	ecInvalidObject  uint32 = 0x80040108 // GetProps/GetPropList: no such MId
 	ecWarnWithErrors uint32 = 0x00040380 // GetProps: row carries PT_ERROR markers
 	ecUnknownLcid    uint32 = 0x8004011F // GetTemplateInfo: no display-table for this locale
+	ecAccessDenied   uint32 = 0x80070005 // ModLinkAtt: editing another user's delegate list
 )
 
 // NspiGetTemplateInfo Flags ([MS-OXNSPI] 2.2.4 / 3.1.4.10): the reference accepts

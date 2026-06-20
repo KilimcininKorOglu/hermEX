@@ -11,8 +11,9 @@ import (
 // X-RequestType header. Bind establishes the session (sid + sequence cookies);
 // the remaining address-book ops run within it. PING is a session-less liveness
 // probe. The full online address-book op set Outlook uses to browse, navigate,
-// and resolve against the GAL is served; the write/template ops (ModProps,
-// ModLinkAtt, GetTemplateInfo) report an invalid request type.
+// and resolve against the GAL is served, plus ModLinkAtt (editing the caller's
+// own delegate list); the other write/template ops (ModProps, GetTemplateInfo)
+// report an invalid request type.
 func (s *Server) serveNspi(w http.ResponseWriter, r *http.Request) {
 	user, _, ok := s.basicAuth(w, r)
 	if !ok {
@@ -59,16 +60,26 @@ func (s *Server) serveNspi(w http.ResponseWriter, r *http.Request) {
 		s.nspiOp(w, r, user, "CompareMIds", s.nsp.CompareMids)
 	case "ResortRestriction":
 		s.nspiOp(w, r, user, "ResortRestriction", s.nsp.ResortRestriction)
+	case "ModLinkAtt":
+		s.nspiOpAuth(w, r, user, "ModLinkAtt", s.nsp.ModLinkAtt)
 	default:
 		writeRespError(w, r, reqType, rcInvalidReqType)
 	}
 }
 
-// nspiOp runs a sequenced NSPI op (everything past Bind/Unbind/PING): it
-// validates the session cookies, rolls the sequence, decodes the request body,
-// runs handler, and frames the response. handler maps the request body to the
-// NSPI response body.
+// nspiOp runs a sequenced NSPI op whose handler needs only the request body. It
+// is nspiOpAuth with the authenticated user discarded.
 func (s *Server) nspiOp(w http.ResponseWriter, r *http.Request, user, reqType string, handler func([]byte) []byte) {
+	s.nspiOpAuth(w, r, user, reqType, func(body []byte, _ string) []byte {
+		return handler(body)
+	})
+}
+
+// nspiOpAuth runs a sequenced NSPI op (everything past Bind/Unbind/PING): it
+// validates the session cookies, rolls the sequence, decodes the request body,
+// runs handler, and frames the response. handler also receives the authenticated
+// user, which an identity-bearing op (ModLinkAtt) needs for its access check.
+func (s *Server) nspiOpAuth(w http.ResponseWriter, r *http.Request, user, reqType string, handler func([]byte, string) []byte) {
 	sid, errSid := r.Cookie("sid")
 	seq, errSeq := r.Cookie("sequence")
 	if errSid != nil || errSeq != nil {
@@ -83,7 +94,7 @@ func (s *Server) nspiOp(w http.ResponseWriter, r *http.Request, user, reqType st
 	setNspiCookie(w, "sequence", newSeq)
 	s.mapiEvent(r, logging.LevelDebug, logging.NSPI, "operation", user, logging.Fields{"op": reqType})
 	body, _ := io.ReadAll(r.Body)
-	writeNormal(w, r, reqType, handler(body))
+	writeNormal(w, r, reqType, handler(body, user))
 }
 
 // nspiBind decodes the Bind request, runs it against the NSPI server, and — only
