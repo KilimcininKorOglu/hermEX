@@ -117,6 +117,9 @@ func (s *session) identities() []string {
 // user-unknown that must never be relayed (it would loop straight back).
 func (s *session) Rcpt(to string) error {
 	if path, ok := s.accounts.Resolve(to); ok {
+		if err := overReceiveQuota(path); err != nil {
+			return err
+		}
 		s.targets = append(s.targets, target{addr: to, path: path})
 		return nil
 	}
@@ -134,6 +137,32 @@ func (s *session) Rcpt(to string) error {
 		return fmt.Errorf("relay denied for <%s>", to)
 	}
 	s.relayTargets = append(s.relayTargets, to)
+	return nil
+}
+
+// overReceiveQuota refuses a local recipient whose mailbox already sits at or
+// above its receive quota, so an over-quota mailbox is rejected permanently at
+// RCPT (no message accepted, no bounce backscatter). A store open or read error
+// does NOT block delivery — quota is a soft administrative limit, never a reason
+// to lose mail on an infrastructure hiccup. The limit is in KiB and 0 means
+// unlimited; the comparison is done in 64-bit since limit*1024 overflows uint32.
+func overReceiveQuota(path string) error {
+	st, err := objectstore.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer st.Close()
+	q, err := st.GetQuota()
+	if err != nil || q.ReceiveKB == 0 {
+		return nil
+	}
+	size, err := st.MailboxSize()
+	if err != nil {
+		return nil
+	}
+	if size > int64(q.ReceiveKB)*1024 {
+		return fmt.Errorf("mailbox is full (over receive quota)")
+	}
 	return nil
 }
 
