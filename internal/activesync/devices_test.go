@@ -116,6 +116,64 @@ func TestAdvanceProvisionWipe(t *testing.T) {
 	}
 }
 
+// TestDeviceMutations proves the management actions on device state: resync
+// clears a device's sync state but keeps it listed, a queued wipe survives a
+// later contact (so it actually reaches the device) and can be cancelled, an
+// account-only wipe takes the account-pending status, and delete removes the
+// device entirely.
+func TestDeviceMutations(t *testing.T) {
+	st := deviceTestStore(t)
+
+	if _, err := recordDeviceContact(st, "dev1", "alice@hermex.test", "iPhone", "ua", "14.1", 1000); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	state, _ := loadState(st)
+	state.device("dev1").collection("1").SyncKey = "1"
+	state.device("dev1").collection("2").SyncKey = "1"
+	if err := saveState(st, state); err != nil {
+		t.Fatalf("seed state: %v", err)
+	}
+
+	if err := ResyncDevice(st, "dev1"); err != nil {
+		t.Fatalf("resync: %v", err)
+	}
+	devs, _ := Devices(st)
+	if len(devs) != 1 || devs[0].FoldersSynced != 0 {
+		t.Fatalf("after resync devices = %+v, want dev1 listed with 0 folders", devs)
+	}
+
+	if err := RequestWipe(st, "dev1", false); err != nil {
+		t.Fatalf("wipe: %v", err)
+	}
+	if _, err := recordDeviceContact(st, "dev1", "alice@hermex.test", "iPhone", "ua", "14.1", 2000); err != nil {
+		t.Fatalf("contact after wipe: %v", err)
+	}
+	if got := deviceWipe(t, st, "dev1"); got != WipeStatusPending {
+		t.Errorf("queued wipe after contact = %d, want pending(%d) — a contact must not cancel a wipe", got, WipeStatusPending)
+	}
+	if err := CancelWipe(st, "dev1"); err != nil {
+		t.Fatalf("cancel: %v", err)
+	}
+	if got := deviceWipe(t, st, "dev1"); got != WipeStatusOK {
+		t.Errorf("after cancel = %d, want OK(%d)", got, WipeStatusOK)
+	}
+
+	if err := RequestWipe(st, "dev1", true); err != nil {
+		t.Fatalf("account wipe: %v", err)
+	}
+	if got := deviceWipe(t, st, "dev1"); got != WipeStatusAccountPending {
+		t.Errorf("account wipe = %d, want account-pending(%d)", got, WipeStatusAccountPending)
+	}
+
+	if err := DeleteDevice(st, "dev1"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	devs, _ = Devices(st)
+	if len(devs) != 0 {
+		t.Errorf("after delete devices = %+v, want empty", devs)
+	}
+}
+
 // TestRecordDeviceContactBlank proves a request with no device id records nothing.
 func TestRecordDeviceContactBlank(t *testing.T) {
 	st := deviceTestStore(t)

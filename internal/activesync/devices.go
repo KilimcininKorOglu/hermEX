@@ -113,6 +113,10 @@ func recordDeviceContact(st *objectstore.Store, deviceID, user, deviceType, user
 	d := m.device(deviceID)
 	if d.FirstSync == 0 {
 		d.FirstSync = now
+	}
+	// Initialize an unseen device to OK, but never overwrite a wipe an
+	// administrator may have queued before the device's first contact landed.
+	if d.WipeStatus == WipeStatusUnknown {
 		d.WipeStatus = WipeStatusOK
 	}
 	d.LastSync = now
@@ -167,6 +171,73 @@ func advanceProvisionWipe(st *objectstore.Store, deviceID string, acked bool) (i
 		return wipeEmitNone, err
 	}
 	return emit, nil
+}
+
+// ResyncDevice clears a device's sync state so it re-primes its folder hierarchy
+// and collections on the next sync, while leaving the device recorded (it stays
+// in the device list with its metadata).
+func ResyncDevice(st *objectstore.Store, deviceID string) error {
+	state, err := loadState(st)
+	if err != nil {
+		return err
+	}
+	if _, ok := state.Devices[deviceID]; !ok {
+		return nil
+	}
+	delete(state.Devices, deviceID)
+	return saveState(st, state)
+}
+
+// DeleteDevice removes a device entirely — both its sync state and its recorded
+// metadata — so it disappears from the device list until it next connects.
+func DeleteDevice(st *objectstore.Store, deviceID string) error {
+	state, err := loadState(st)
+	if err != nil {
+		return err
+	}
+	if _, ok := state.Devices[deviceID]; ok {
+		delete(state.Devices, deviceID)
+		if err := saveState(st, state); err != nil {
+			return err
+		}
+	}
+	meta, err := loadDevices(st)
+	if err != nil {
+		return err
+	}
+	if _, ok := meta.Devices[deviceID]; ok {
+		delete(meta.Devices, deviceID)
+		return saveDevices(st, meta)
+	}
+	return nil
+}
+
+// RequestWipe queues a remote wipe for a device: a full device reset, or an
+// account-only wipe when accountOnly is set. The wipe is delivered on the
+// device's next Provision exchange (forced by HTTP 449 on other commands).
+func RequestWipe(st *objectstore.Store, deviceID string, accountOnly bool) error {
+	status := WipeStatusPending
+	if accountOnly {
+		status = WipeStatusAccountPending
+	}
+	return setDeviceWipeStatus(st, deviceID, status)
+}
+
+// CancelWipe clears a queued remote wipe for a device, returning it to OK. It has
+// no effect once the device has acknowledged the wipe.
+func CancelWipe(st *objectstore.Store, deviceID string) error {
+	return setDeviceWipeStatus(st, deviceID, WipeStatusOK)
+}
+
+// setDeviceWipeStatus sets a recorded device's wipe status, creating the metadata
+// record if the administrator acts before the device's first contact lands.
+func setDeviceWipeStatus(st *objectstore.Store, deviceID string, status int) error {
+	meta, err := loadDevices(st)
+	if err != nil {
+		return err
+	}
+	meta.device(deviceID).WipeStatus = status
+	return saveDevices(st, meta)
 }
 
 // DeviceInfo is the read-only view of one ActiveSync device for the management
