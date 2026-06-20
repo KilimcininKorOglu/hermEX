@@ -152,7 +152,17 @@ func (s *Server) getMatchesCore(req getMatchesRequest) getMatchesResult {
 	}
 
 	g := s.snapshot()
-	mids := g.matchAll(req.filter, req.rowCount, st)
+	var mids []uint32
+	if st.containerID == uint32(mapi.PrEmsAbMember) {
+		// Expand the distribution list at cur_rec into its members ([MS-OXNSPI]
+		// 3.1.4.1.10): the client selects the PR_EMS_AB_MEMBER container to read a
+		// list's membership. Members hidden from address lists are dropped.
+		if exp, ok := s.gal.(mlistExpander); ok {
+			mids = g.memberMIDs(st.curRec, exp, int(req.rowCount))
+		}
+	} else {
+		mids = g.matchAll(req.filter, req.rowCount, st)
+	}
 	rows := make([]mapi.PropertyValues, len(mids))
 	for i, mid := range mids {
 		if u, ok := g.byMID(mid); ok {

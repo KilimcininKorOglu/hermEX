@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strings"
 
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 )
 
@@ -50,12 +51,21 @@ const (
 // Address-book hide bits (the PR_ATTR_HIDDEN mask): each NSPI surface hides on
 // its own bit, so an admin can hide a user from GAL browse yet keep them
 // resolvable by name. GAL browse honors abHideFromGAL; name resolution honors
-// abHideResolve. Direct fetches by a MId the client already holds are never
-// hidden — asking for a specific entry opens it.
+// abHideResolve; distribution-list member expansion honors abHideFromAL. Direct
+// fetches by a MId the client already holds are never hidden — asking for a
+// specific entry opens it.
 const (
 	abHideFromGAL uint32 = 0x01
+	abHideFromAL  uint32 = 0x02
 	abHideResolve uint32 = 0x08
 )
+
+// mlistExpander is the optional directory capability the NSPI layer uses to
+// expand a distribution list's members for the address book. *directory.SQLDirectory
+// satisfies it; the static directory does not, so lists simply expand to nothing.
+type mlistExpander interface {
+	ExpandMList(listAddr, from string) ([]string, directory.MListResult, error)
+}
 
 // galUser is one GAL entry with its assigned MId. hidden is the PR_ATTR_HIDDEN
 // mask the directory supplied; the surface applying it decides which bit matters.
@@ -250,12 +260,50 @@ func (g gal) resolve(token string) (mid, status uint32) {
 // byAddress resolves an exact (case-insensitive) SMTP address to its MId — the
 // reverse DNToMId applies after recovering the address from a PR_ENTRYID's DN.
 func (g gal) byAddress(smtp string) (uint32, bool) {
-	for _, u := range g.users {
-		if strings.EqualFold(u.smtp, smtp) {
-			return u.mid, true
-		}
+	if u, ok := g.userByAddress(smtp); ok {
+		return u.mid, true
 	}
 	return 0, false
+}
+
+// userByAddress finds the GAL entry with an exact (case-insensitive) SMTP address.
+func (g gal) userByAddress(smtp string) (galUser, bool) {
+	for _, u := range g.users {
+		if strings.EqualFold(u.smtp, smtp) {
+			return u, true
+		}
+	}
+	return galUser{}, false
+}
+
+// memberMIDs expands the distribution list at curRec into the MIds of its members
+// that appear in the GAL, dropping any member hidden from address lists
+// (abHideFromAL) — the member-expansion half of the address-list hide bit. The
+// list is expanded with from == its own address, the address-book bypass, so
+// browsing members is not gated by the list's posting privilege. exp is the
+// directory's list expander; without one a list has no members. limit caps the
+// returned set (0 means no cap).
+func (g gal) memberMIDs(curRec uint32, exp mlistExpander, limit int) []uint32 {
+	u, ok := g.resolveEntry(curRec)
+	if !ok || u.dt != dtDistlist {
+		return nil
+	}
+	members, res, err := exp.ExpandMList(u.smtp, u.smtp)
+	if err != nil || res != directory.MListOK {
+		return nil
+	}
+	var mids []uint32
+	for _, m := range members {
+		if limit > 0 && len(mids) >= limit {
+			break
+		}
+		mu, ok := g.userByAddress(m)
+		if !ok || mu.hidden&abHideFromAL != 0 {
+			continue
+		}
+		mids = append(mids, mu.mid)
+	}
+	return mids
 }
 
 // resolveEntry returns the GAL user a STAT.cur_rec addresses for a single-entry
