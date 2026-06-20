@@ -24,6 +24,10 @@ type MailboxStore interface {
 	SetQuota(maildir string, q objectstore.QuotaLimits) error
 	GetDelegates(maildir string) ([]string, error)
 	SetDelegates(maildir string, list []string) error
+	ListFolders(maildir string) ([]objectstore.FolderInfo, error)
+	ListFolderPermissions(maildir string, folderID int64) ([]objectstore.PermissionEntry, error)
+	SetFolderPermission(maildir string, folderID int64, username string, rights uint32) error
+	RemoveFolderPermission(maildir string, folderID, memberID int64) error
 }
 
 // mailboxStore is the production MailboxStore: it opens the object store at the
@@ -107,6 +111,46 @@ func (mailboxStore) GetDelegates(maildir string) ([]string, error) {
 
 func (mailboxStore) SetDelegates(maildir string, list []string) error {
 	return withStore(maildir, func(st *objectstore.Store) error { return st.SetDelegates(list) })
+}
+
+func (mailboxStore) ListFolders(maildir string) ([]objectstore.FolderInfo, error) {
+	st, err := objectstore.Open(maildir)
+	if err != nil {
+		return nil, err
+	}
+	defer st.Close()
+	return st.ListFolders()
+}
+
+func (mailboxStore) ListFolderPermissions(maildir string, folderID int64) ([]objectstore.PermissionEntry, error) {
+	st, err := objectstore.Open(maildir)
+	if err != nil {
+		return nil, err
+	}
+	defer st.Close()
+	return st.ListPermissions(folderID)
+}
+
+// SetFolderPermission grants or updates one member's rights on a folder. PermAdd
+// upserts the member's row (replace=false leaves every other member — including the
+// seeded default/anonymous free-busy rows — untouched). The rights value is a
+// canonical level (mapi.Rights*), so it is persisted as the protocol layer would.
+func (mailboxStore) SetFolderPermission(maildir string, folderID int64, username string, rights uint32) error {
+	return withStore(maildir, func(st *objectstore.Store) error {
+		return st.ModifyPermissions(folderID, false, []objectstore.PermissionChange{
+			{Op: objectstore.PermAdd, Username: username, Rights: rights},
+		})
+	})
+}
+
+// RemoveFolderPermission drops one member's row from a folder, addressed by its wire
+// member id (0=default, -1=anonymous, else the row id).
+func (mailboxStore) RemoveFolderPermission(maildir string, folderID, memberID int64) error {
+	return withStore(maildir, func(st *objectstore.Store) error {
+		return st.ModifyPermissions(folderID, false, []objectstore.PermissionChange{
+			{Op: objectstore.PermRemove, MemberID: memberID},
+		})
+	})
 }
 
 // withStore opens the object store at maildir, runs fn, and closes it — the

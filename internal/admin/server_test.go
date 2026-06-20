@@ -285,6 +285,17 @@ type fakeStore struct {
 	delegates       map[string][]string
 	setDelegatesDir string
 	setDelegatesVal []string
+
+	folders     map[string][]objectstore.FolderInfo
+	folderPerms map[string][]objectstore.PermissionEntry
+
+	setPermDir    string
+	setPermFolder int64
+	setPermUser   string
+	setPermRights uint32
+	rmPermDir     string
+	rmPermFolder  int64
+	rmPermMember  int64
 }
 
 func (f *fakeStore) GetOOFSettings(maildir string) (objectstore.OOFSettings, error) {
@@ -373,6 +384,36 @@ func (f *fakeStore) SetDelegates(maildir string, list []string) error {
 	}
 	f.delegates[maildir] = list
 	f.setDelegatesDir, f.setDelegatesVal = maildir, list
+	return nil
+}
+
+func (f *fakeStore) ListFolders(maildir string) ([]objectstore.FolderInfo, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	return f.folders[maildir], nil
+}
+
+func (f *fakeStore) ListFolderPermissions(maildir string, folderID int64) ([]objectstore.PermissionEntry, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	return f.folderPerms[maildir], nil
+}
+
+func (f *fakeStore) SetFolderPermission(maildir string, folderID int64, username string, rights uint32) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+	f.setPermDir, f.setPermFolder, f.setPermUser, f.setPermRights = maildir, folderID, username, rights
+	return nil
+}
+
+func (f *fakeStore) RemoveFolderPermission(maildir string, folderID, memberID int64) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+	f.rmPermDir, f.rmPermFolder, f.rmPermMember = maildir, folderID, memberID
 	return nil
 }
 
