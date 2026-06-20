@@ -183,3 +183,28 @@ func TestGetDelegateForeignMailboxDenied(t *testing.T) {
 		t.Errorf("a denied request must not leak the caller's own delegate list:\n%s", out)
 	}
 }
+
+// TestGetDelegateUserIdsFilter confirms a UserIds filter narrows the result to the
+// named delegates and reports a requested-but-absent delegate as ErrorDelegateNotFound,
+// instead of returning the whole list.
+func TestGetDelegateUserIdsFilter(t *testing.T) {
+	ts, paths := delegateServer(t)
+	setDelegateList(t, paths[testUser], []string{"a@hermex.test", "b@hermex.test"})
+
+	body := wrapRequest(`<GetDelegate xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `" IncludePermissions="false">` +
+		`<Mailbox><t:EmailAddress>` + testUser + `</t:EmailAddress></Mailbox>` +
+		`<UserIds><t:UserId><t:PrimarySmtpAddress>a@hermex.test</t:PrimarySmtpAddress></t:UserId>` +
+		`<t:UserId><t:PrimarySmtpAddress>missing@hermex.test</t:PrimarySmtpAddress></t:UserId></UserIds>` +
+		`</GetDelegate>`)
+	_, out := soapPost(t, ts, body, true)
+
+	if !strings.Contains(out, "PrimarySmtpAddress>a@hermex.test<") {
+		t.Errorf("requested delegate must be returned:\n%s", out)
+	}
+	if strings.Contains(out, "PrimarySmtpAddress>b@hermex.test<") {
+		t.Errorf("unrequested delegate must be filtered out:\n%s", out)
+	}
+	if !strings.Contains(out, "ErrorDelegateNotFound") || !strings.Contains(out, "PrimarySmtpAddress>missing@hermex.test<") {
+		t.Errorf("requested-but-absent delegate must report ErrorDelegateNotFound:\n%s", out)
+	}
+}

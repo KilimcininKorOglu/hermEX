@@ -22,15 +22,33 @@ import (
 // Mailbox names the principal whose delegate list is read, and IncludePermissions
 // asks for each delegate's per-folder permission levels.
 type getDelegateRequest struct {
-	XMLName            xml.Name        `xml:"GetDelegate"`
-	IncludePermissions bool            `xml:"IncludePermissions,attr"`
-	Mailbox            delegateMailbox `xml:"Mailbox"`
+	XMLName            xml.Name            `xml:"GetDelegate"`
+	IncludePermissions bool                `xml:"IncludePermissions,attr"`
+	Mailbox            delegateMailbox     `xml:"Mailbox"`
+	UserIds            []delegateReqUserId `xml:"UserIds>UserId"`
 }
 
 // delegateMailbox is an EmailAddressType: the principal's SMTP address rides in the
 // EmailAddress child (types namespace on the wire, matched namespace-agnostically).
 type delegateMailbox struct {
 	EmailAddress string `xml:"EmailAddress"`
+}
+
+// delegateReqUserId is a request-side UserIdType: only the PrimarySmtpAddress is
+// consulted (the identity key the delegate list and folder ACLs are stored under).
+type delegateReqUserId struct {
+	PrimarySmtpAddress string `xml:"PrimarySmtpAddress"`
+}
+
+// containsFold reports whether list holds s under case-insensitive comparison — the
+// same case-folded identity the ROP delegate-list check uses.
+func containsFold(list []string, s string) bool {
+	for _, v := range list {
+		if strings.EqualFold(v, s) {
+			return true
+		}
+	}
+	return false
 }
 
 // --- response types (the top element declares the messages namespace; children
@@ -203,8 +221,21 @@ func (s *Server) handleGetDelegate(w http.ResponseWriter, inner []byte, sess *se
 		}
 	}
 
+	// An optional UserIds filter narrows the result to specific delegates; absent it,
+	// every delegate is returned.
+	var requested []string
+	for _, u := range req.UserIds {
+		if u.PrimarySmtpAddress != "" {
+			requested = append(requested, u.PrimarySmtpAddress)
+		}
+	}
+
 	msgs := make([]delegateUserResponseMessage, 0, len(delegates))
+	found := make([]string, 0, len(requested))
 	for _, d := range delegates {
+		if len(requested) > 0 && !containsFold(requested, d) {
+			continue
+		}
 		du := &delegateUser{UserId: delegateUserId{PrimarySmtpAddress: d}}
 		if req.IncludePermissions {
 			lv := grants.levelsFor(d)
@@ -215,6 +246,18 @@ func (s *Server) handleGetDelegate(w http.ResponseWriter, inner []byte, sess *se
 			ResponseCode:  "NoError",
 			DelegateUser:  du,
 		})
+		found = append(found, d)
+	}
+	// A requested delegate that is not on the list is reported per id, mirroring the
+	// per-delegate result model.
+	for _, r := range requested {
+		if !containsFold(found, r) {
+			msgs = append(msgs, delegateUserResponseMessage{
+				ResponseClass: "Error",
+				ResponseCode:  "ErrorDelegateNotFound",
+				DelegateUser:  &delegateUser{UserId: delegateUserId{PrimarySmtpAddress: r}},
+			})
+		}
 	}
 
 	writeResponse(w, getDelegateResponse{
