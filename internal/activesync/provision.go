@@ -81,17 +81,14 @@ func (s *Server) devicePolicy(sess *session) easpolicy.Policy {
 	return easpolicy.Merge(def, override)
 }
 
-// provisionPolicyKey is the single policy key v1 issues. Provisioning is a
-// formality here: the server requires no device policy, so the same key is
-// handed out and never enforced on later commands.
-const provisionPolicyKey = "1"
-
 // handleProvision answers the two-phase EAS provisioning handshake. Phase one
-// (the request carries no policy key, or key 0) returns a temporary key plus a
-// permissive policy document; phase two (the device echoes the key) returns the
-// final key. Both responses report Status 1. When a remote wipe is outstanding
-// for the device, the response also carries the wipe directive, and the device's
-// acknowledgement in the request advances the wipe to its completed state.
+// (the request carries no policy key, or key 0) returns the policy key plus the
+// policy document; phase two (the device echoes the key) returns the key alone.
+// Both responses report Status 1. The key is the policy's generation token
+// (easpolicy.Key) — it changes when the resolved policy changes, which is how a
+// later command carrying a stale key is detected and forced to re-provision. When
+// a remote wipe is outstanding the response also carries the wipe directive, and
+// the device's acknowledgement in the request advances the wipe to completed.
 func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request, sess *session) {
 	root, err := readWBXML(r)
 	if err != nil {
@@ -100,11 +97,12 @@ func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request, sess *s
 	}
 	phaseOne := requestPolicyKey(root) == "" || requestPolicyKey(root) == "0"
 	wipe := s.provisionWipe(sess, requestWipeAck(root))
+	merged := s.devicePolicy(sess)
 	var policy easpolicy.Policy
 	if phaseOne {
-		policy = s.devicePolicy(sess) // the document rides only on phase one
+		policy = merged // the document rides only on phase one
 	}
-	writeWBXML(w, provisionResponse(provisionPolicyKey, phaseOne, wipe, policy))
+	writeWBXML(w, provisionResponse(easpolicy.Key(merged), phaseOne, wipe, policy))
 }
 
 // provisionWipe advances and reports the device's outstanding remote wipe for

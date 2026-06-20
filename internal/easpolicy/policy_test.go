@@ -2,6 +2,34 @@ package easpolicy
 
 import "testing"
 
+// TestKey proves the policy-generation token behaves as the staleness detector requires:
+// an empty policy is the reserved baseline "1" (so an unconfigured server never forces
+// re-provisioning), identical content always yields the same token regardless of map
+// build order (so an unchanged device is not falsely flagged stale), a content change
+// yields a different token (so a real change propagates), and a non-empty policy never
+// collides with the reserved "0"/"1".
+func TestKey(t *testing.T) {
+	if Key(nil) != "1" || Key(Policy{}) != "1" {
+		t.Fatalf("empty policy key = %q/%q, want the baseline \"1\"", Key(nil), Key(Policy{}))
+	}
+
+	a := Policy{"DevicePasswordEnabled": 1, "MinDevicePasswordLength": 8}
+	b := Policy{}
+	b["MinDevicePasswordLength"] = 8
+	b["DevicePasswordEnabled"] = 1
+	if Key(a) != Key(b) {
+		t.Errorf("same content built in different order gave different keys: %q vs %q", Key(a), Key(b))
+	}
+
+	changed := Policy{"DevicePasswordEnabled": 1, "MinDevicePasswordLength": 6}
+	if Key(a) == Key(changed) {
+		t.Errorf("a value change did not change the key (%q) — a policy edit would not propagate", Key(a))
+	}
+	if k := Key(a); k == "0" || k == "1" {
+		t.Errorf("a non-empty policy collided with a reserved key: %q", k)
+	}
+}
+
 // TestMergeOverrideWins proves the two-layer resolution: a mailbox override replaces
 // the global default for the fields it sets, the default supplies the rest, and neither
 // input is mutated. Getting this wrong would serve a device the wrong security policy.

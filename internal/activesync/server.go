@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/easpolicy"
 	"hermex/internal/logging"
 	"hermex/internal/objectstore"
 	"hermex/internal/relay"
@@ -123,6 +124,26 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		})
 		w.WriteHeader(449)
 		return
+	}
+	// A configured device policy must be acknowledged: a non-Provision command carrying a
+	// stale or missing policy key is answered with 449, forcing the device to re-provision
+	// and apply the current policy — this is how a policy change reaches an already-enrolled
+	// device. A mailbox with no policy resolves to the baseline key "1" and requires no
+	// provisioning, so unconfigured deployments never churn. (This resolves the policy per
+	// command; a generation cache is a future optimization if it ever matters.)
+	if sess.req.cmd != "Provision" && sess.req.deviceID != "" {
+		if want := easpolicy.Key(s.devicePolicy(sess)); want != "1" && sess.req.policyKey != want {
+			s.Logger.Emit(logging.Event{
+				Level:      logging.LevelInfo,
+				Subsystem:  logging.ActiveSync,
+				Name:       "provision.force",
+				User:       sess.user,
+				RemoteAddr: serve.ClientAddr(r),
+				Fields:     logging.Fields{"device": sess.req.deviceID, "cmd": sess.req.cmd, "reason": "stale-policy-key"},
+			})
+			w.WriteHeader(449)
+			return
+		}
 	}
 	switch sess.req.cmd {
 	case "Provision":

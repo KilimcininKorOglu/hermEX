@@ -7,7 +7,9 @@ package easpolicy
 
 import (
 	"fmt"
+	"hash/fnv"
 	"maps"
+	"strconv"
 )
 
 // Kind distinguishes a boolean toggle from a numeric limit, so an editor renders the
@@ -122,4 +124,29 @@ func (p Policy) Clone() Policy {
 	out := make(Policy, len(p))
 	maps.Copy(out, p)
 	return out
+}
+
+// Key returns a stable policy-generation token for p — a value that changes whenever the
+// policy's content changes, so a device holding an old token can be detected as stale and
+// forced to re-provision. An empty policy returns "1", the baseline token an unconfigured
+// server has always issued, so existing devices are not churned until a policy is actually
+// set. The token is a uint32 rendered as decimal, matching the 4-byte policy key the wire
+// packs; 0 (no key) and 1 (the baseline) are reserved, so a non-empty policy never maps to
+// them. Iteration follows the canonical field order, not Go's randomized map order, so the
+// same policy always hashes the same.
+func Key(p Policy) string {
+	if len(p) == 0 {
+		return "1"
+	}
+	h := fnv.New32a()
+	for _, f := range Fields {
+		if v, ok := p[f.Name]; ok {
+			fmt.Fprintf(h, "%s=%d;", f.Name, v)
+		}
+	}
+	sum := h.Sum32()
+	if sum <= 1 {
+		sum += 2
+	}
+	return strconv.FormatUint(uint64(sum), 10)
 }
