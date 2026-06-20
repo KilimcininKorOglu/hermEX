@@ -105,12 +105,28 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		RemoteAddr: serve.ClientAddr(r),
 		Fields:     logging.Fields{"cmd": sess.req.cmd},
 	})
+	var wipeStatus int
 	if sess.req.deviceID != "" {
-		s.recordDevice(r, sess)
+		wipeStatus = s.recordDevice(r, sess)
+	}
+	// A pending remote wipe is delivered only through a Provision exchange, so any
+	// other command from a device awaiting a wipe is answered with HTTP 449, which
+	// forces the device to re-provision and pick the wipe up immediately.
+	if sess.req.cmd != "Provision" && wipeOutstanding(wipeStatus) {
+		s.Logger.Emit(logging.Event{
+			Level:      logging.LevelInfo,
+			Subsystem:  logging.ActiveSync,
+			Name:       "provision.force",
+			User:       sess.user,
+			RemoteAddr: serve.ClientAddr(r),
+			Fields:     logging.Fields{"device": sess.req.deviceID, "cmd": sess.req.cmd},
+		})
+		w.WriteHeader(449)
+		return
 	}
 	switch sess.req.cmd {
 	case "Provision":
-		s.handleProvision(w, r)
+		s.handleProvision(w, r, sess)
 	case "FolderSync":
 		s.handleFolderSync(w, r, sess)
 	case "Sync":
@@ -161,18 +177,21 @@ func (s *Server) basicAuth(w http.ResponseWriter, r *http.Request) (user, mailbo
 }
 
 // recordDevice stamps the calling device's metadata (type, agent, negotiated
-// version, last-seen time) for the management console's mobile-devices view.
-// Best-effort: it opens its own store handle and writes a sibling property apart
-// from the sync-state blob, so a failure here is logged and never affects the
-// command response. Skipped by the caller when the request carries no device id.
-func (s *Server) recordDevice(r *http.Request, sess *session) {
+// version, last-seen time) for the management console's mobile-devices view and
+// returns the device's current remote-wipe status so dispatch can force a
+// pending wipe. Best-effort: it opens its own store handle and writes a sibling
+// property apart from the sync-state blob, so a failure here is logged and never
+// affects the command response. Skipped by the caller when the request carries
+// no device id.
+func (s *Server) recordDevice(r *http.Request, sess *session) int {
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		return
+		return WipeStatusUnknown
 	}
 	defer st.Close()
-	if err := recordDeviceContact(st, sess.req.deviceID, sess.user, sess.req.deviceType,
-		r.Header.Get("User-Agent"), sess.protocol, time.Now().Unix()); err != nil {
+	status, err := recordDeviceContact(st, sess.req.deviceID, sess.user, sess.req.deviceType,
+		r.Header.Get("User-Agent"), sess.protocol, time.Now().Unix())
+	if err != nil {
 		s.Logger.Emit(logging.Event{
 			Level:      logging.LevelDebug,
 			Subsystem:  logging.ActiveSync,
@@ -181,5 +200,7 @@ func (s *Server) recordDevice(r *http.Request, sess *session) {
 			RemoteAddr: serve.ClientAddr(r),
 			Fields:     logging.Fields{"device": sess.req.deviceID, "error": err.Error()},
 		})
+		return WipeStatusUnknown
 	}
+	return status
 }

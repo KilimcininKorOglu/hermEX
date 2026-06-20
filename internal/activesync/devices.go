@@ -10,17 +10,34 @@ import (
 
 // ActiveSync device-status codes, mirroring the remote-wipe lifecycle a
 // management console drives. A freshly-seen device is OK; an administrator can
-// request a full or account-only wipe (pending), the device acknowledges it
-// (wiped), or the administrator cancels it before the device picks it up (back
-// to OK). The numeric values match the wire/console status enumeration.
+// request a full or account-only wipe (pending), the server delivers it on a
+// Provision exchange (requested), the device acknowledges it (wiped), or the
+// administrator cancels it before the device picks it up (back to OK). The
+// numeric values match the wire/console status enumeration.
 const (
-	WipeStatusUnknown     = 0  // no status recorded
-	WipeStatusOK          = 1  // active, no wipe outstanding
-	WipeStatusPending     = 2  // full wipe requested, not yet delivered
-	WipeStatusRequested   = 4  // wipe delivered, awaiting device acknowledgement
-	WipeStatusWiped       = 8  // device acknowledged the wipe
-	WipeStatusAccountWipe = 16 // account-only wipe pending
+	WipeStatusUnknown          = 0  // no status recorded
+	WipeStatusOK               = 1  // active, no wipe outstanding
+	WipeStatusPending          = 2  // full wipe requested, not yet delivered
+	WipeStatusRequested        = 4  // full wipe delivered, awaiting acknowledgement
+	WipeStatusWiped            = 8  // device acknowledged the full wipe
+	WipeStatusAccountPending   = 16 // account-only wipe requested, not yet delivered
+	WipeStatusAccountRequested = 32 // account-only wipe delivered, awaiting acknowledgement
+	WipeStatusAccountWiped     = 64 // device acknowledged the account-only wipe
 )
+
+// Provision wipe-emit selector: which remote-wipe element a Provision response
+// must carry for a device, if any.
+const (
+	wipeEmitNone    = iota // no wipe outstanding
+	wipeEmitFull           // a <RemoteWipe/> element (full device reset)
+	wipeEmitAccount        // an <AccountOnlyRemoteWipe/> element
+)
+
+// wipeOutstanding reports whether a remote wipe is pending delivery or
+// acknowledgement for a device — anything at or past the pending threshold.
+func wipeOutstanding(status int) bool {
+	return status >= WipeStatusPending
+}
 
 // deviceMeta is one device's ActiveSync metadata, recorded best-effort on each
 // command so the management console can show what last connected. It is stored
@@ -80,17 +97,18 @@ func saveDevices(st *objectstore.Store, m *devicesMeta) error {
 	return st.SetActiveSyncDevices(string(b))
 }
 
-// recordDeviceContact stamps a device's metadata on the store. The caller treats
-// it as best-effort — it is a pure side effect that must never alter or fail a
-// command response. firstSync and the OK status are set once; lastSync and the
-// live attributes refresh every call. A blank device id is a no-op.
-func recordDeviceContact(st *objectstore.Store, deviceID, user, deviceType, userAgent, asVersion string, now int64) error {
+// recordDeviceContact stamps a device's metadata on the store and returns the
+// device's current wipe status. The caller treats the write as best-effort — it
+// is a pure side effect that must never alter or fail a command response.
+// firstSync and the OK status are set once; lastSync and the live attributes
+// refresh every call. A blank device id is a no-op.
+func recordDeviceContact(st *objectstore.Store, deviceID, user, deviceType, userAgent, asVersion string, now int64) (int, error) {
 	if deviceID == "" {
-		return nil
+		return WipeStatusUnknown, nil
 	}
 	m, err := loadDevices(st)
 	if err != nil {
-		return err
+		return WipeStatusUnknown, err
 	}
 	d := m.device(deviceID)
 	if d.FirstSync == 0 {
@@ -108,7 +126,47 @@ func recordDeviceContact(st *objectstore.Store, deviceID, user, deviceType, user
 	if asVersion != "" {
 		d.ASVersion = asVersion
 	}
-	return saveDevices(st, m)
+	if err := saveDevices(st, m); err != nil {
+		return WipeStatusUnknown, err
+	}
+	return d.WipeStatus, nil
+}
+
+// advanceProvisionWipe reads a device's outstanding remote-wipe state, advances
+// it for one Provision exchange, and reports which wipe element the response must
+// carry (wipeEmitNone/Full/Account). The device's acknowledgement (acked) drives
+// the transition into the wiped state; otherwise the wipe moves to "requested"
+// and is re-sent until the device acknowledges. A device with no outstanding wipe
+// yields wipeEmitNone and is left untouched.
+func advanceProvisionWipe(st *objectstore.Store, deviceID string, acked bool) (int, error) {
+	m, err := loadDevices(st)
+	if err != nil {
+		return wipeEmitNone, err
+	}
+	d := m.Devices[deviceID]
+	if d == nil || !wipeOutstanding(d.WipeStatus) {
+		return wipeEmitNone, nil
+	}
+	var emit int
+	if d.WipeStatus <= WipeStatusWiped {
+		emit = wipeEmitFull
+		if acked {
+			d.WipeStatus = WipeStatusWiped
+		} else {
+			d.WipeStatus = WipeStatusRequested
+		}
+	} else {
+		emit = wipeEmitAccount
+		if acked {
+			d.WipeStatus = WipeStatusAccountWiped
+		} else {
+			d.WipeStatus = WipeStatusAccountRequested
+		}
+	}
+	if err := saveDevices(st, m); err != nil {
+		return wipeEmitNone, err
+	}
+	return emit, nil
 }
 
 // DeviceInfo is the read-only view of one ActiveSync device for the management

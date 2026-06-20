@@ -24,7 +24,7 @@ func deviceTestStore(t *testing.T) *objectstore.Store {
 func TestRecordDeviceContact(t *testing.T) {
 	st := deviceTestStore(t)
 
-	if err := recordDeviceContact(st, "dev1", "alice@hermex.test", "iPhone", "Apple-iPhone/1", "14.1", 1000); err != nil {
+	if _, err := recordDeviceContact(st, "dev1", "alice@hermex.test", "iPhone", "Apple-iPhone/1", "14.1", 1000); err != nil {
 		t.Fatalf("first record: %v", err)
 	}
 	m, err := loadDevices(st)
@@ -42,7 +42,7 @@ func TestRecordDeviceContact(t *testing.T) {
 	if err := saveDevices(st, m); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	if err := recordDeviceContact(st, "dev1", "alice@hermex.test", "iPhone", "Apple-iPhone/2", "14.1", 2000); err != nil {
+	if _, err := recordDeviceContact(st, "dev1", "alice@hermex.test", "iPhone", "Apple-iPhone/2", "14.1", 2000); err != nil {
 		t.Fatalf("second record: %v", err)
 	}
 	m, _ = loadDevices(st)
@@ -52,10 +52,74 @@ func TestRecordDeviceContact(t *testing.T) {
 	}
 }
 
+// setDeviceWipe forces a device's stored remote-wipe status.
+func setDeviceWipe(t *testing.T, st *objectstore.Store, id string, status int) {
+	t.Helper()
+	m, err := loadDevices(st)
+	if err != nil {
+		t.Fatalf("load devices: %v", err)
+	}
+	m.device(id).WipeStatus = status
+	if err := saveDevices(st, m); err != nil {
+		t.Fatalf("save devices: %v", err)
+	}
+}
+
+// deviceWipe reads a device's stored remote-wipe status.
+func deviceWipe(t *testing.T, st *objectstore.Store, id string) int {
+	t.Helper()
+	m, err := loadDevices(st)
+	if err != nil {
+		t.Fatalf("load devices: %v", err)
+	}
+	if d := m.Devices[id]; d != nil {
+		return d.WipeStatus
+	}
+	return WipeStatusUnknown
+}
+
+// TestAdvanceProvisionWipe proves the remote-wipe lifecycle across Provision
+// exchanges: a device with no outstanding wipe emits nothing (so a normal
+// Provision never carries a spurious directive), a pending wipe emits the wipe
+// element and moves to requested, an acknowledgement moves it to wiped, and an
+// account-only wipe takes the account path.
+func TestAdvanceProvisionWipe(t *testing.T) {
+	st := deviceTestStore(t)
+
+	if _, err := recordDeviceContact(st, "dev1", "alice@hermex.test", "iPhone", "ua", "14.1", 1000); err != nil {
+		t.Fatalf("seed dev1: %v", err)
+	}
+	if emit, err := advanceProvisionWipe(st, "dev1", false); err != nil || emit != wipeEmitNone {
+		t.Fatalf("no-wipe device = (%d,%v), want wipeEmitNone", emit, err)
+	}
+
+	setDeviceWipe(t, st, "dev1", WipeStatusPending)
+	if emit, err := advanceProvisionWipe(st, "dev1", false); err != nil || emit != wipeEmitFull {
+		t.Fatalf("pending wipe = (%d,%v), want wipeEmitFull", emit, err)
+	}
+	if got := deviceWipe(t, st, "dev1"); got != WipeStatusRequested {
+		t.Errorf("after delivery status = %d, want requested(%d)", got, WipeStatusRequested)
+	}
+	if emit, _ := advanceProvisionWipe(st, "dev1", true); emit != wipeEmitFull {
+		t.Errorf("acked wipe emit = %d, want wipeEmitFull", emit)
+	}
+	if got := deviceWipe(t, st, "dev1"); got != WipeStatusWiped {
+		t.Errorf("after ack status = %d, want wiped(%d)", got, WipeStatusWiped)
+	}
+
+	setDeviceWipe(t, st, "dev1", WipeStatusAccountPending)
+	if emit, _ := advanceProvisionWipe(st, "dev1", false); emit != wipeEmitAccount {
+		t.Errorf("account-only pending emit = %d, want wipeEmitAccount", emit)
+	}
+	if got := deviceWipe(t, st, "dev1"); got != WipeStatusAccountRequested {
+		t.Errorf("after account delivery status = %d, want account-requested(%d)", got, WipeStatusAccountRequested)
+	}
+}
+
 // TestRecordDeviceContactBlank proves a request with no device id records nothing.
 func TestRecordDeviceContactBlank(t *testing.T) {
 	st := deviceTestStore(t)
-	if err := recordDeviceContact(st, "", "alice@hermex.test", "iPhone", "ua", "14.1", 1000); err != nil {
+	if _, err := recordDeviceContact(st, "", "alice@hermex.test", "iPhone", "ua", "14.1", 1000); err != nil {
 		t.Fatalf("blank record: %v", err)
 	}
 	m, _ := loadDevices(st)
@@ -71,10 +135,10 @@ func TestDevicesMerge(t *testing.T) {
 	st := deviceTestStore(t)
 
 	// dev-b has metadata and sync state; dev-c has only metadata.
-	if err := recordDeviceContact(st, "dev-b", "alice@hermex.test", "Android", "ua-b", "14.1", 5000); err != nil {
+	if _, err := recordDeviceContact(st, "dev-b", "alice@hermex.test", "Android", "ua-b", "14.1", 5000); err != nil {
 		t.Fatalf("record dev-b: %v", err)
 	}
-	if err := recordDeviceContact(st, "dev-c", "alice@hermex.test", "iPhone", "ua-c", "14.1", 6000); err != nil {
+	if _, err := recordDeviceContact(st, "dev-c", "alice@hermex.test", "iPhone", "ua-c", "14.1", 6000); err != nil {
 		t.Fatalf("record dev-c: %v", err)
 	}
 	// dev-a has only sync state (1 collection); dev-b has 2 collections.

@@ -106,6 +106,71 @@ func TestProvisionTwoPhase(t *testing.T) {
 	}
 }
 
+// rawCommandStatus POSTs a command and returns the HTTP status code without
+// requiring success, for asserting the provisioning-required (449) response that
+// postCommand would reject.
+func rawCommandStatus(t *testing.T, ts *httptest.Server, cmd string, root *wbxml.Node) int {
+	t.Helper()
+	url := ts.URL + "/Microsoft-Server-ActiveSync?Cmd=" + cmd + "&User=" + testUser + "&DeviceId=dev1&DeviceType=iPhone"
+	req, err := http.NewRequest("POST", url, bytes.NewReader(wbxml.Marshal(root)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.SetBasicAuth(testUser, testPass)
+	req.Header.Set("Content-Type", "application/vnd.ms-sync.wbxml")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+// TestProvisionRemoteWipe proves the remote-wipe delivery path end to end: once a
+// wipe is queued, any non-Provision command is answered with HTTP 449 to force
+// re-provisioning, the Provision response then carries the RemoteWipe directive
+// and advances the status to requested, and the device's acknowledgement
+// completes the wipe.
+func TestProvisionRemoteWipe(t *testing.T) {
+	ts, dir := seededServer(t)
+
+	// Record the device first (so a later contact won't reset its wipe status),
+	// then queue a full remote wipe.
+	postCommand(t, ts, "FolderSync", wbxml.Elem(wbxml.FHFolderSync, wbxml.Str(wbxml.FHSyncKey, "0")))
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	setDeviceWipe(t, st, "dev1", WipeStatusPending)
+	st.Close()
+
+	if code := rawCommandStatus(t, ts, "FolderSync", wbxml.Elem(wbxml.FHFolderSync, wbxml.Str(wbxml.FHSyncKey, "1"))); code != 449 {
+		t.Fatalf("pending-wipe FolderSync status %d, want 449", code)
+	}
+
+	provision := wbxml.Elem(wbxml.PVProvision,
+		wbxml.Elem(wbxml.PVPolicies, wbxml.Elem(wbxml.PVPolicy,
+			wbxml.Str(wbxml.PVPolicyType, "MS-EAS-Provisioning-WBXML"))))
+	_, root := postCommand(t, ts, "Provision", provision)
+	if root.Child(wbxml.PVRemoteWipe) == nil {
+		t.Error("Provision response missing the RemoteWipe directive")
+	}
+	st, _ = objectstore.Open(dir)
+	if got := deviceWipe(t, st, "dev1"); got != WipeStatusRequested {
+		t.Errorf("after delivery status = %d, want requested(%d)", got, WipeStatusRequested)
+	}
+	st.Close()
+
+	ack := wbxml.Elem(wbxml.PVProvision,
+		wbxml.Elem(wbxml.PVRemoteWipe, wbxml.Str(wbxml.PVStatus, "1")))
+	postCommand(t, ts, "Provision", ack)
+	st, _ = objectstore.Open(dir)
+	if got := deviceWipe(t, st, "dev1"); got != WipeStatusWiped {
+		t.Errorf("after ack status = %d, want wiped(%d)", got, WipeStatusWiped)
+	}
+	st.Close()
+}
+
 // TestFolderSyncPrime confirms SyncKey 0 returns Status 1, a fresh key, and the
 // Inbox (folder type 2) among the changes.
 func TestFolderSyncPrime(t *testing.T) {

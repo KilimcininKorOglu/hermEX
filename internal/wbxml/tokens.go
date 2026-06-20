@@ -225,6 +225,9 @@ const (
 	// PVDevicePasswordEnabled (0x0E) is the one policy-detail token v1 emits, set
 	// to 0 for a permissive (no device password) policy.
 	PVDevicePasswordEnabled Tag = 0x0E0E
+	// PVAccountOnlyRemoteWipe (since EAS 16.1) signals a wipe that removes only the
+	// account from the device, not a full device reset.
+	PVAccountOnlyRemoteWipe Tag = 0x0E3B
 )
 
 // Search (code page 0x0F). v1 serves the GAL-store subset; the mailbox-query
