@@ -36,7 +36,7 @@ func queryRowsBody() []byte {
 	var b []byte
 	b = binary.LittleEndian.AppendUint32(b, 0) // flags
 	b = append(b, 1)                           // hasStat
-	for i := 0; i < 9; i++ {                   // STAT: 9 u32 fields
+	for i := range 9 { // STAT: 9 u32 fields
 		v := uint32(0)
 		if i == 6 { // codepage
 			v = 1252
@@ -154,8 +154,8 @@ func TestNspiBindAnonymousRejected(t *testing.T) {
 }
 
 // TestNspiGetSpecialTable drives Bind then GetSpecialTable within the session:
-// it needs the cookies, rolls the sequence, and returns the single GAL container
-// row.
+// it needs the cookies, rolls the sequence, and returns the GAL container plus
+// the named address-list rows.
 func TestNspiGetSpecialTable(t *testing.T) {
 	ts := newTestServer(t)
 	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
@@ -172,7 +172,7 @@ func TestNspiGetSpecialTable(t *testing.T) {
 		t.Errorf("GetSpecialTable without cookies: X-ResponseCode = %q, want 6", got)
 	}
 
-	// With the bound session -> success, sequence rolled, one container row.
+	// With the bound session -> success, sequence rolled, the GAL + named-list rows.
 	gst := mapiPost(t, ts, "/mapi/nspi", "GetSpecialTable", specialTableBody(), func(r *http.Request) {
 		r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
@@ -195,8 +195,8 @@ func TestNspiGetSpecialTable(t *testing.T) {
 	if p[13] != 0xFF {
 		t.Errorf("HasRows byte = %#x, want 0xFF", p[13])
 	}
-	if count := binary.LittleEndian.Uint32(p[14:]); count != 1 {
-		t.Errorf("container row count = %d, want 1", count)
+	if count := binary.LittleEndian.Uint32(p[14:]); count != 6 {
+		t.Errorf("container row count = %d, want 6 (GAL + 5 named address lists)", count)
 	}
 }
 

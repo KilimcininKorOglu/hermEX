@@ -12,8 +12,8 @@ const (
 )
 
 // galContainerName is the display name, and galContainerID the address-book
-// container id, of the single v1 GAL container (STAT.container_id selects it on
-// QueryRows).
+// container id, of the GAL container (STAT.container_id 0 selects it; the named
+// address lists use the ids in addresslists.go).
 const (
 	galContainerName       = "Global Address List"
 	galContainerID   int32 = 0
@@ -56,9 +56,9 @@ func pullGetSpecialTable(body []byte) (getSpecialTableRequest, error) {
 }
 
 // GetSpecialTable handles the NSPI GetSpecialTable request ([MS-OXNSPI] 2.2.4 /
-// [MS-OXCMAPIHTTP] 2.2.5.3), which returns the address-book container hierarchy.
-// v1 exposes one flat GAL container, so the response carries exactly one
-// container row.
+// [MS-OXCMAPIHTTP] 2.2.5.3), which returns the address-book container hierarchy:
+// the Global Address List plus the named, type-defined address lists, all at the
+// top level.
 func (s *Server) GetSpecialTable(body []byte) []byte {
 	req, err := pullGetSpecialTable(body)
 	if err != nil {
@@ -77,19 +77,30 @@ type getSpecialTableResult struct {
 }
 
 // getSpecialTableCore runs the GetSpecialTable semantics on a decoded request,
-// transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it. v1
-// exposes one flat GAL container, so the response carries a single container row
-// and the result is always ecSuccess.
+// transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it. The
+// hierarchy is flat (depth 0): the GAL container followed by the named,
+// type-defined address lists. The result is always ecSuccess.
 func (s *Server) getSpecialTableCore(req getSpecialTableRequest) getSpecialTableResult {
-	row := mapi.PropertyValues{
-		{Tag: mapi.PrEntryID, Value: permanentEntryID(dtContainer, "/")},
+	rows := []mapi.PropertyValues{containerRow(galContainerID, galContainerName, "/")}
+	for _, al := range addressLists {
+		rows = append(rows, containerRow(al.id, al.name, "/cn=Address Lists/cn="+al.name))
+	}
+	return getSpecialTableResult{result: ecSuccess, codePage: req.stat.codePage, rows: rows}
+}
+
+// containerRow builds one address-book container row: a DT_CONTAINER permanent
+// EntryID carrying the container's distinguished name, the read-only-recipients
+// flags, top-level depth, the id a STAT selects the container by, and its
+// display name.
+func containerRow(id int32, name, dn string) mapi.PropertyValues {
+	return mapi.PropertyValues{
+		{Tag: mapi.PrEntryID, Value: permanentEntryID(dtContainer, dn)},
 		{Tag: mapi.PrContainerFlags, Value: abRecipients | abUnmodifiable},
 		{Tag: mapi.PrDepth, Value: int32(0)},
-		{Tag: mapi.PrEmsAbContainerID, Value: int32(galContainerID)},
-		{Tag: mapi.PrDisplayName, Value: galContainerName},
+		{Tag: mapi.PrEmsAbContainerID, Value: id},
+		{Tag: mapi.PrDisplayName, Value: name},
 		{Tag: mapi.PrEmsAbIsMaster, Value: false},
 	}
-	return getSpecialTableResult{result: ecSuccess, codePage: req.stat.codePage, rows: []mapi.PropertyValues{row}}
 }
 
 // encodeGetSpecialTable frames a GetSpecialTable response: status + result +

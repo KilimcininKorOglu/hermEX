@@ -42,9 +42,10 @@ func buildGetSpecialTable(codePage uint32) []byte {
 	return p.Bytes()
 }
 
-// TestGetSpecialTable proves the v1 GAL hierarchy is a single container row with
-// the six grounded properties, the code page is echoed, and the row decodes
-// cleanly under the address-book value encoding.
+// TestGetSpecialTable proves the hierarchy is the GAL container followed by the
+// named address lists (in registry order, each with its own container id, name,
+// and a distinct EntryID), the code page is echoed, and the rows decode cleanly
+// under the address-book value encoding.
 func TestGetSpecialTable(t *testing.T) {
 	s := NewServer(nil, testGUID)
 	resp := s.GetSpecialTable(buildGetSpecialTable(1252))
@@ -64,14 +65,22 @@ func TestGetSpecialTable(t *testing.T) {
 	if hr := mustU8(t, p, "HasRows"); hr != 0xFF {
 		t.Fatalf("HasRows = %#x, want 0xFF", hr)
 	}
-	if n := mustU32(t, p, "row count"); n != 1 {
-		t.Fatalf("row count = %d, want 1", n)
+	wantRows := 1 + len(addressLists)
+	n := mustU32(t, p, "row count")
+	if int(n) != wantRows {
+		t.Fatalf("row count = %d, want %d (GAL + %d named lists)", n, wantRows, len(addressLists))
 	}
-	row, err := p.PropertyValuesLong()
-	if err != nil {
-		t.Fatalf("decode container row: %v", err)
+	rows := make([]mapi.PropertyValues, n)
+	for i := range rows {
+		row, err := p.PropertyValuesLong()
+		if err != nil {
+			t.Fatalf("decode container row %d: %v", i, err)
+		}
+		rows[i] = row
 	}
 
+	// Row 0 is the GAL: the six grounded properties, PR_ENTRYID a DT_CONTAINER
+	// PermanentEntryID with dn "/".
 	scalars := map[mapi.PropTag]any{
 		mapi.PrContainerFlags:   abRecipients | abUnmodifiable,
 		mapi.PrDepth:            int32(0),
@@ -80,22 +89,36 @@ func TestGetSpecialTable(t *testing.T) {
 		mapi.PrEmsAbIsMaster:    false,
 	}
 	for tag, exp := range scalars {
-		got, ok := row.Get(tag)
+		got, ok := rows[0].Get(tag)
 		if !ok {
-			t.Errorf("container row missing %#x", uint32(tag))
+			t.Errorf("GAL row missing %#x", uint32(tag))
 			continue
 		}
 		if got != exp {
 			t.Errorf("%#x = %v (%T), want %v (%T)", uint32(tag), got, got, exp, exp)
 		}
 	}
-	// PR_ENTRYID is the container's PermanentEntryID (DT_CONTAINER, dn "/").
-	eid, ok := row.Get(mapi.PrEntryID)
-	if !ok {
-		t.Fatal("container row missing PR_ENTRYID")
+	if galEID, ok := rows[0].Get(mapi.PrEntryID); !ok {
+		t.Error("GAL row missing PR_ENTRYID")
+	} else if b, isBin := galEID.([]byte); !isBin || !bytes.Equal(b, permanentEntryID(dtContainer, "/")) {
+		t.Errorf("GAL PR_ENTRYID = % x, want the container PermanentEntryID", galEID)
 	}
-	if b, isBin := eid.([]byte); !isBin || !bytes.Equal(b, permanentEntryID(dtContainer, "/")) {
-		t.Errorf("PR_ENTRYID = % x, want the container PermanentEntryID", eid)
+
+	// Rows 1..N are the named address lists, in registry order, each carrying its
+	// own container id and display name and a distinct EntryID (not the GAL's).
+	for i, al := range addressLists {
+		row := rows[i+1]
+		if id, _ := row.Get(mapi.PrEmsAbContainerID); id != al.id {
+			t.Errorf("%q container id = %v, want %#x", al.name, id, al.id)
+		}
+		if name, _ := row.Get(mapi.PrDisplayName); name != al.name {
+			t.Errorf("named list %d display name = %v, want %q", i, name, al.name)
+		}
+		if eid, ok := row.Get(mapi.PrEntryID); !ok {
+			t.Errorf("%q missing PR_ENTRYID", al.name)
+		} else if b, _ := eid.([]byte); bytes.Equal(b, permanentEntryID(dtContainer, "/")) {
+			t.Errorf("%q shares the GAL EntryID; each container needs a distinct one", al.name)
+		}
 	}
 
 	if aux := mustU32(t, p, "AuxiliaryBufferSize"); aux != 0 {
