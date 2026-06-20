@@ -26,6 +26,129 @@ func authedPUT(t *testing.T, ts *httptest.Server, path, session, csrf, body stri
 	return resp
 }
 
+// TestAdminOrgCRUD proves a system admin can create, list, read, update, and
+// delete an organization through the JSON API.
+func TestAdminOrgCRUD(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedPOST(t, ts, "/admin/orgs", session, csrf, `{"name":"Acme","description":"The Acme org"}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create status %d, want 201", resp.StatusCode)
+	}
+	if len(d.orgs) != 1 {
+		t.Fatalf("org not stored: %v", d.orgs)
+	}
+	var id int64
+	for k := range d.orgs {
+		id = k
+	}
+
+	list := authedGET(t, ts, "/admin/orgs", session)
+	lbody, _ := io.ReadAll(list.Body)
+	list.Body.Close()
+	if !strings.Contains(string(lbody), "Acme") {
+		t.Errorf("list missing the org: %s", lbody)
+	}
+
+	get := authedGET(t, ts, "/admin/orgs/"+itoa(id), session)
+	gbody, _ := io.ReadAll(get.Body)
+	get.Body.Close()
+	if get.StatusCode != http.StatusOK || !strings.Contains(string(gbody), "The Acme org") {
+		t.Errorf("get = %d %s", get.StatusCode, gbody)
+	}
+
+	upd := authedPUT(t, ts, "/admin/orgs/"+itoa(id), session, csrf, `{"name":"Acme Inc","description":"renamed"}`)
+	upd.Body.Close()
+	if upd.StatusCode != http.StatusNoContent {
+		t.Fatalf("update status %d, want 204", upd.StatusCode)
+	}
+	if d.orgs[id].Name != "Acme Inc" {
+		t.Errorf("org not updated: %+v", d.orgs[id])
+	}
+
+	del := authedDELETE(t, ts, "/admin/orgs/"+itoa(id), session, csrf, "")
+	del.Body.Close()
+	if del.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete status %d, want 204", del.StatusCode)
+	}
+	if len(d.orgs) != 0 {
+		t.Errorf("org not deleted: %v", d.orgs)
+	}
+
+	missing := authedGET(t, ts, "/admin/orgs/"+itoa(id), session)
+	missing.Body.Close()
+	if missing.StatusCode != http.StatusNotFound {
+		t.Errorf("get of a deleted org = %d, want 404", missing.StatusCode)
+	}
+}
+
+// TestAdminDeleteOrgZeroRefused proves deleting the reserved organizationless id
+// 0 is refused with a 400 (the directory rejects it), never silently accepted.
+func TestAdminDeleteOrgZeroRefused(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedDELETE(t, ts, "/admin/orgs/0", session, csrf, "")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("delete org 0 = %d, want 400", resp.StatusCode)
+	}
+}
+
+// TestAdminAssignOrgDomain proves attaching and detaching a domain reaches the
+// directory with the right ids and that an unknown domain is a 404.
+func TestAdminAssignOrgDomain(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	att := authedPUT(t, ts, "/admin/orgs/5/domains/42", session, csrf, "")
+	att.Body.Close()
+	if att.StatusCode != http.StatusNoContent {
+		t.Fatalf("attach status %d, want 204", att.StatusCode)
+	}
+	if d.assignDomainID != 42 || d.assignOrgID != 5 {
+		t.Errorf("attach called with (%d,%d), want (42,5)", d.assignDomainID, d.assignOrgID)
+	}
+
+	det := authedDELETE(t, ts, "/admin/orgs/5/domains/42", session, csrf, "")
+	det.Body.Close()
+	if det.StatusCode != http.StatusNoContent {
+		t.Fatalf("detach status %d, want 204", det.StatusCode)
+	}
+	if d.assignOrgID != 0 {
+		t.Errorf("detach assigned org %d, want 0", d.assignOrgID)
+	}
+
+	d.assignDomainMissing = true
+	miss := authedPUT(t, ts, "/admin/orgs/5/domains/999", session, csrf, "")
+	miss.Body.Close()
+	if miss.StatusCode != http.StatusNotFound {
+		t.Errorf("attach unknown domain = %d, want 404", miss.StatusCode)
+	}
+}
+
+// TestAdminOrgRequiresSystem proves a domain admin cannot manage organizations.
+func TestAdminOrgRequiresSystem(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	get := authedGET(t, ts, "/admin/orgs", session)
+	get.Body.Close()
+	post := authedPOST(t, ts, "/admin/orgs", session, csrf, `{"name":"X"}`)
+	post.Body.Close()
+	del := authedDELETE(t, ts, "/admin/orgs/1", session, csrf, "")
+	del.Body.Close()
+	if get.StatusCode != http.StatusForbidden || post.StatusCode != http.StatusForbidden || del.StatusCode != http.StatusForbidden {
+		t.Errorf("domain-admin org access = GET %d / POST %d / DELETE %d, want all 403", get.StatusCode, post.StatusCode, del.StatusCode)
+	}
+}
+
 // TestAdminGetLDAP proves a system admin reads an org's LDAP config without the
 // bind password leaking into the response.
 func TestAdminGetLDAP(t *testing.T) {

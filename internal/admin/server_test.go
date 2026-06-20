@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -25,6 +26,12 @@ type fakeDir struct {
 	defaultSyncPolicy easpolicy.Policy
 	fetchmail         map[string][]directory.FetchmailEntry
 	nextFMID          int64
+	orgs              map[int64]directory.OrgInfo
+	nextOrgID         int64
+
+	// captured by AssignDomainToOrg; assignDomainMissing makes it report ok=false
+	assignDomainID, assignOrgID int64
+	assignDomainMissing         bool
 
 	// captured by the create handlers
 	createdDomain, createdHomedir string
@@ -145,6 +152,51 @@ func (f *fakeDir) CreateAlias(aliasname, mainname string) error {
 	}
 	f.createdAlias, f.createdAliasTo = aliasname, mainname
 	return nil
+}
+func (f *fakeDir) ListOrgs() ([]directory.OrgInfo, error) {
+	out := make([]directory.OrgInfo, 0, len(f.orgs))
+	for _, o := range f.orgs {
+		out = append(out, o)
+	}
+	return out, nil
+}
+func (f *fakeDir) GetOrg(id int64) (directory.OrgInfo, bool, error) {
+	o, ok := f.orgs[id]
+	return o, ok, nil
+}
+func (f *fakeDir) CreateOrg(name, description string) (int64, error) {
+	if f.createErr != nil {
+		return 0, f.createErr
+	}
+	if f.orgs == nil {
+		f.orgs = map[int64]directory.OrgInfo{}
+	}
+	f.nextOrgID++
+	f.orgs[f.nextOrgID] = directory.OrgInfo{ID: f.nextOrgID, Name: name, Description: description}
+	return f.nextOrgID, nil
+}
+func (f *fakeDir) UpdateOrg(id int64, name, description string) (bool, error) {
+	o, ok := f.orgs[id]
+	if !ok {
+		return false, nil
+	}
+	o.Name, o.Description = name, description
+	f.orgs[id] = o
+	return true, nil
+}
+func (f *fakeDir) DeleteOrg(id int64) (bool, error) {
+	if id == 0 {
+		return false, errors.New("cannot delete the reserved organizationless id 0")
+	}
+	if _, ok := f.orgs[id]; !ok {
+		return false, nil
+	}
+	delete(f.orgs, id)
+	return true, nil
+}
+func (f *fakeDir) AssignDomainToOrg(domainID, orgID int64) (bool, error) {
+	f.assignDomainID, f.assignOrgID = domainID, orgID
+	return !f.assignDomainMissing, nil
 }
 func (f *fakeDir) GetLDAPConfig(orgID int64) (directory.LDAPConfig, bool, error) {
 	c, ok := f.ldap[orgID]
