@@ -1,6 +1,7 @@
 package fetchmail
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -89,6 +90,38 @@ func TestPollPOP3KeepDedup(t *testing.T) {
 	}
 	if len(*deleted) != 0 {
 		t.Errorf("a kept account deleted from the source: %v", *deleted)
+	}
+}
+
+// TestPollPOP3KeepRecordsBeforeLaterFailure proves a kept POP3 account records each id as it
+// is delivered, not after the whole batch: when delivery fails on a later message, the ones
+// already delivered stay recorded so the next poll does not re-deliver them.
+func TestPollPOP3KeepRecordsBeforeLaterFailure(t *testing.T) {
+	msgs := []string{"From: a\r\n\r\none", "From: b\r\n\r\ntwo"}
+	host, port, _ := fakePOP3(t, msgs)
+	store := &fakeWorkerStore{configs: []directory.FetchmailEntry{{
+		ID: 1, Mailbox: "alice@hermex.test", Active: true,
+		SrcServer: host, SrcPort: port, SrcUser: "alice", SrcPassword: "pw",
+		Protocol: "POP3", Keep: true,
+	}}}
+	calls := 0
+	deliver := func(_ string, _ []byte, _ time.Time) error {
+		calls++
+		if calls == 2 {
+			return fmt.Errorf("delivery failed")
+		}
+		return nil
+	}
+
+	n, errs := Poll(store, deliver, pollTime)
+	if len(errs) == 0 {
+		t.Fatal("expected the later delivery failure to be reported")
+	}
+	if n != 1 {
+		t.Errorf("delivered %d, want 1 before the failure", n)
+	}
+	if got := store.marked[1]; len(got) != 1 || got[0] != "uid1" {
+		t.Errorf("recorded seen = %v, want [uid1]: the delivered message must survive the failure", got)
 	}
 }
 

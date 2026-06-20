@@ -75,7 +75,6 @@ func pollPOP3(s Store, deliver Deliverer, cfg directory.FetchmailEntry, now time
 		}
 	}
 	delivered := 0
-	var fresh []string
 	for _, n := range sortedKeys(uids) {
 		uid := uids[n]
 		if seen[uid] {
@@ -89,14 +88,14 @@ func pollPOP3(s Store, deliver Deliverer, cfg directory.FetchmailEntry, now time
 			return delivered, err
 		}
 		delivered++
+		// Record (or delete) immediately after each delivery, never after the loop: a
+		// failure on a later message must not re-deliver the ones already handled. This
+		// mirrors the IMAP path, which marks each \Seen in place.
 		if cfg.Keep {
-			fresh = append(fresh, uid)
+			if err := s.MarkFetchmailSeen(cfg.ID, []string{uid}); err != nil {
+				return delivered, err
+			}
 		} else if err := c.dele(n); err != nil {
-			return delivered, err
-		}
-	}
-	if len(fresh) > 0 {
-		if err := s.MarkFetchmailSeen(cfg.ID, fresh); err != nil {
 			return delivered, err
 		}
 	}
