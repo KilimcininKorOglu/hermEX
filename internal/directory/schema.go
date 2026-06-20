@@ -118,6 +118,17 @@ var directoryDDL = []string{
 		PRIMARY KEY (org_id)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
+	// sync_policy holds the server-wide default ActiveSync device policy as a JSON
+	// object of policy field → value, keyed by organization (the single global row is
+	// org_id 0). It is the base a mailbox's per-user override is merged over at device
+	// provisioning. Keyed by org so a multi-tenant deployment can later default each
+	// org independently.
+	`CREATE TABLE IF NOT EXISTS sync_policy (
+		org_id INT UNSIGNED NOT NULL DEFAULT 0,
+		policy TEXT NOT NULL,
+		PRIMARY KEY (org_id)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
 	// mlists is a distribution list: a users row (display_type = DT_DISTLIST, no
 	// maildir or password — it cannot log in) extended with its expansion policy.
 	// list_type selects how membership is computed (normal = the explicit

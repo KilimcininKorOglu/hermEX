@@ -116,6 +116,12 @@ const (
 	// folder-permission edits. Permission resolution grants a listed owner full member
 	// rights on every folder, and the store-open gate admits them.
 	PrAbStoreOwners = PropTag(0x677C001F) // PtUnicode
+	// PrSyncPolicy is the provider-defined store-root property (0x677D) holding a
+	// mailbox's per-user ActiveSync device-policy override as a JSON object of policy
+	// field → value. It is merged beneath the global default at device provisioning;
+	// an unset field inherits the default. Per-mailbox (a store property) like the
+	// other per-user settings.
+	PrSyncPolicy = PropTag(0x677D001F) // PtUnicode
 )
 
 // Large message/attachment content property tags. These hold bodies and
