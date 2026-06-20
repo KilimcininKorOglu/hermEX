@@ -214,3 +214,71 @@ func TestSQLDirectoryAltnames(t *testing.T) {
 		t.Errorf("a rejected replace changed the set to %v, want [alice3] preserved", got)
 	}
 }
+
+// TestSQLDirectoryUserAliases proves per-user e-mail aliases round-trip through
+// Set/ListAliasesFor — normalized, de-duplicated, a replace overwrites, an
+// unknown user is not-found, an in-use address is rejected with the prior set
+// intact — and that a saved alias actually routes mail (Resolve follows it).
+func TestSQLDirectoryUserAliases(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	cleanTables(t, db)
+
+	root := t.TempDir()
+	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "dom")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.CreateUser("alice@hermex.test", "pw", filepath.Join(root, "alice")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.CreateUser("bob@hermex.test", "pw", filepath.Join(root, "bob")); err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := d.SetAliasesFor("alice@hermex.test",
+		[]string{"  Sales@Hermex.Test ", "sales@hermex.test", "", "info@hermex.test"})
+	if err != nil || !found {
+		t.Fatalf("SetAliasesFor = %v, %v; want found", found, err)
+	}
+	got, err := d.ListAliasesFor("alice@hermex.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != "info@hermex.test" || got[1] != "sales@hermex.test" {
+		t.Errorf("ListAliasesFor = %v, want [info@ sales@] (normalized, deduped, ordered)", got)
+	}
+	// A saved alias must actually deliver to the user.
+	if _, ok := d.Resolve("sales@hermex.test"); !ok {
+		t.Error("a saved alias does not resolve to the user")
+	}
+
+	// A replace overwrites entirely; the dropped alias stops resolving.
+	if _, err := d.SetAliasesFor("alice@hermex.test", []string{"only@hermex.test"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := d.ListAliasesFor("alice@hermex.test"); len(got) != 1 || got[0] != "only@hermex.test" {
+		t.Errorf("after replace = %v, want [only@hermex.test]", got)
+	}
+	if _, ok := d.Resolve("sales@hermex.test"); ok {
+		t.Error("a removed alias still resolves")
+	}
+
+	// Unknown user → not-found.
+	if found, _ := d.SetAliasesFor("ghost@hermex.test", []string{"x@hermex.test"}); found {
+		t.Error("SetAliasesFor(unknown) should report not-found")
+	}
+
+	// An address already in use is rejected and alice's set is preserved.
+	if _, err := d.SetAliasesFor("bob@hermex.test", []string{"bobalias@hermex.test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.SetAliasesFor("alice@hermex.test", []string{"bobalias@hermex.test"}); err == nil {
+		t.Error("SetAliasesFor with an in-use address should be rejected")
+	}
+	if got, _ := d.ListAliasesFor("alice@hermex.test"); len(got) != 1 || got[0] != "only@hermex.test" {
+		t.Errorf("a rejected replace changed the set to %v, want [only@hermex.test] preserved", got)
+	}
+}

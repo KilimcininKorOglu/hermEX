@@ -162,3 +162,39 @@ func (s *Server) handleSetAltnames(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// handleListUserAliases returns the e-mail aliases that deliver to a user (system
+// administrators only).
+func (s *Server) handleListUserAliases(w http.ResponseWriter, r *http.Request) {
+	aliases, err := s.dir.ListAliasesFor(r.PathValue("email"))
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+	if aliases == nil {
+		aliases = []string{}
+	}
+	writeJSON(w, aliases)
+}
+
+// handleSetUserAliases replaces the e-mail aliases delivering to a user (system
+// administrators only). An address already in use is rejected.
+func (s *Server) handleSetUserAliases(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Aliases []string `json:"aliases"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	found, err := s.dir.SetAliasesFor(r.PathValue("email"), req.Aliases)
+	if err != nil {
+		http.Error(w, "could not set aliases: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if !found {
+		http.Error(w, "no such user", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

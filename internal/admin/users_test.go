@@ -328,3 +328,58 @@ func TestAdminSetAltnamesNotFound(t *testing.T) {
 		t.Errorf("set altnames for unknown user = %d, want 404", resp.StatusCode)
 	}
 }
+
+// TestAdminListUserAliases proves a system admin reads a user's e-mail aliases.
+func TestAdminListUserAliases(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		userAliases: []string{"info@hermex.test", "sales@hermex.test"},
+	}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+
+	resp := authedGET(t, ts, "/admin/users/alice@hermex.test/aliases", session)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list user aliases status %d, want 200", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "sales@hermex.test") {
+		t.Errorf("aliases body = %s, want the aliases", body)
+	}
+}
+
+// TestAdminSetUserAliases proves a system admin replaces a user's e-mail aliases
+// and the submitted set reaches the directory.
+func TestAdminSetUserAliases(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/aliases", session, csrf,
+		`{"aliases":["info@hermex.test","sales@hermex.test"]}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("set user aliases status %d, want 204", resp.StatusCode)
+	}
+	if d.setAliasesUser != "alice@hermex.test" || len(d.setAliases) != 2 {
+		t.Errorf("SetAliasesFor = (%q, %v), want alice@hermex.test with 2 aliases", d.setAliasesUser, d.setAliases)
+	}
+}
+
+// TestAdminSetUserAliasesNotFound proves setting aliases for an unknown user is a
+// 404.
+func TestAdminSetUserAliasesNotFound(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		aliasesMissing: true,
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedPUT(t, ts, "/admin/users/ghost@hermex.test/aliases", session, csrf, `{"aliases":["x@hermex.test"]}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("set aliases for unknown user = %d, want 404", resp.StatusCode)
+	}
+}

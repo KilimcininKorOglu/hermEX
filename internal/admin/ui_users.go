@@ -78,12 +78,34 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	altnames, _ := s.dir.ListAltnames(u.Username)
+	aliases, _ := s.dir.ListAliasesFor(u.Username)
 	s.render(w, "user_detail.html", map[string]any{
 		"Nav":      "users",
 		"CSRF":     csrfCookieValue(r),
 		"User":     u,
 		"Altnames": strings.Join(altnames, "\n"),
+		"Aliases":  strings.Join(aliases, "\n"),
 	})
+}
+
+// handleUIUserAliases replaces the user's e-mail aliases from the textarea
+// (whitespace-separated) and returns the refreshed status panel; an address
+// already in use is reported there.
+func (s *Server) handleUIUserAliases(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	found, err := s.dir.SetAliasesFor(r.PathValue("email"), strings.Fields(r.PostFormValue("aliases")))
+	data := map[string]any{}
+	switch {
+	case err != nil:
+		data["Error"] = "Could not save aliases: " + err.Error()
+	case !found:
+		data["Error"] = "No such user."
+	default:
+		data["Saved"] = true
+	}
+	s.render(w, "user-status", data)
 }
 
 // handleUIUserAltnames replaces the user's alternative login names from the

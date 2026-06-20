@@ -178,3 +178,32 @@ func TestUIUserAltnames(t *testing.T) {
 		t.Errorf("altnames save response = %s, want a success acknowledgement", rb)
 	}
 }
+
+// TestUIUserAliases proves the detail page seeds the aliases textarea and the
+// save splits on whitespace before replacing the set through the directory.
+func TestUIUserAliases(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		userDetail:  directory.UserDetail{Username: "alice@hermex.test"},
+		userAliases: []string{"info@hermex.test", "sales@hermex.test"},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	page := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
+	body, _ := io.ReadAll(page.Body)
+	page.Body.Close()
+	if !strings.Contains(string(body), "sales@hermex.test") || !strings.Contains(string(body), "E-mail aliases") {
+		t.Errorf("detail page missing the aliases section/values:\n%s", body)
+	}
+
+	resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/aliases", session, csrf,
+		url.Values{"aliases": {"a@hermex.test\nb@hermex.test"}})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("aliases save status %d, want 200", resp.StatusCode)
+	}
+	if d.setAliasesUser != "alice@hermex.test" || len(d.setAliases) != 2 {
+		t.Errorf("SetAliasesFor = (%q, %v), want alice@hermex.test with 2 aliases", d.setAliasesUser, d.setAliases)
+	}
+}

@@ -609,6 +609,67 @@ func (d *SQLDirectory) SetAltnames(username string, altnames []string) (bool, er
 	return true, tx.Commit()
 }
 
+// ListAliasesFor returns the e-mail aliases that deliver to a user (the aliases
+// whose mainname is the user), ordered, for the admin detail view.
+func (d *SQLDirectory) ListAliasesFor(username string) ([]string, error) {
+	rows, err := d.db.Query(
+		`SELECT aliasname FROM aliases WHERE mainname = ? ORDER BY aliasname`,
+		strings.ToLower(strings.TrimSpace(username)))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// SetAliasesFor replaces the e-mail aliases delivering to a user with the given
+// set (lowercased, trimmed, de-duplicated, blanks dropped), reporting whether the
+// user existed. The replace runs in one transaction; the aliasname UNIQUE key
+// rejects an address already in use, rolling the change back.
+func (d *SQLDirectory) SetAliasesFor(username string, aliases []string) (bool, error) {
+	username = strings.ToLower(strings.TrimSpace(username))
+	var id int64
+	err := d.db.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	seen := map[string]bool{}
+	var clean []string
+	for _, a := range aliases {
+		a = strings.ToLower(strings.TrimSpace(a))
+		if a == "" || seen[a] {
+			continue
+		}
+		seen[a] = true
+		clean = append(clean, a)
+	}
+	tx, err := d.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM aliases WHERE mainname = ?`, username); err != nil {
+		return false, err
+	}
+	for _, a := range clean {
+		if _, err := tx.Exec(`INSERT INTO aliases (aliasname, mainname) VALUES (?, ?)`, a, username); err != nil {
+			return false, err
+		}
+	}
+	return true, tx.Commit()
+}
+
 // CreateAlias maps an alternate address (aliasname) to a canonical user
 // (mainname == users.username) in the aliases table.
 func (d *SQLDirectory) CreateAlias(aliasname, mainname string) error {
