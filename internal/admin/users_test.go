@@ -383,3 +383,64 @@ func TestAdminSetUserAliasesNotFound(t *testing.T) {
 		t.Errorf("set aliases for unknown user = %d, want 404", resp.StatusCode)
 	}
 }
+
+// TestAdminGetContact proves a system admin reads a user's contact fields mapped
+// from proptags back to field names.
+func TestAdminGetContact(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		userProps: map[uint32]string{0x3001001F: "Alice Liddell", 0x3A4F001F: "Ali"},
+	}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+
+	resp := authedGET(t, ts, "/admin/users/alice@hermex.test/contact", session)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get contact status %d, want 200", resp.StatusCode)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `"displayname":"Alice Liddell"`) || !strings.Contains(string(body), `"nickname":"Ali"`) {
+		t.Errorf("contact body = %s, want the named fields", body)
+	}
+}
+
+// TestAdminSetContact proves a system admin writes contact fields mapped to their
+// proptags, and that an unknown field name is dropped rather than stored.
+func TestAdminSetContact(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test/contact", session, csrf,
+		`{"displayname":"Alice Liddell","title":"Curiouser","unknownfield":"ignored"}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("set contact status %d, want 204", resp.StatusCode)
+	}
+	if d.setPropsUser != "alice@hermex.test" {
+		t.Errorf("SetUserProperties called for %q, want alice@hermex.test", d.setPropsUser)
+	}
+	if d.setProps[0x3001001F] != "Alice Liddell" || d.setProps[0x3A17001F] != "Curiouser" {
+		t.Errorf("set props = %v, want displayname+title mapped to proptags", d.setProps)
+	}
+	if len(d.setProps) != 2 {
+		t.Errorf("set props has %d entries, want 2 — an unknown field name must not become a property", len(d.setProps))
+	}
+}
+
+// TestAdminSetContactNotFound proves writing contact for an unknown user is a 404.
+func TestAdminSetContactNotFound(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		setPropsMissing: true,
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedPUT(t, ts, "/admin/users/ghost@hermex.test/contact", session, csrf, `{"displayname":"x"}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("set contact for unknown user = %d, want 404", resp.StatusCode)
+	}
+}

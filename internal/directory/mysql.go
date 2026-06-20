@@ -670,6 +670,71 @@ func (d *SQLDirectory) SetAliasesFor(username string, aliases []string) (bool, e
 	return true, tx.Commit()
 }
 
+// GetUserProperties returns a user's string-valued (PtUnicode) MAPI properties,
+// keyed by full 32-bit proptag, for the admin contact/detail view. Binary
+// properties and multi-valued rows (order_id > 1) are not returned.
+func (d *SQLDirectory) GetUserProperties(username string) (map[uint32]string, error) {
+	rows, err := d.db.Query(
+		`SELECT p.proptag, p.propval_str
+		   FROM user_properties p JOIN users u ON p.user_id = u.id
+		  WHERE u.username = ? AND p.order_id = 1 AND p.propval_str IS NOT NULL`,
+		strings.ToLower(strings.TrimSpace(username)))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[uint32]string{}
+	for rows.Next() {
+		var tag uint32
+		var val string
+		if err := rows.Scan(&tag, &val); err != nil {
+			return nil, err
+		}
+		out[tag] = val
+	}
+	return out, rows.Err()
+}
+
+// SetUserProperties writes the given string-valued MAPI properties for a user,
+// reporting whether the user existed. It touches ONLY the proptags in the map:
+// user_properties is a shared EAV table, so a non-empty value upserts that one
+// proptag and an empty value deletes it, while every other property of the user
+// (creationtime, address-book cloak bits, ...) is left intact. order_id is 1.
+func (d *SQLDirectory) SetUserProperties(username string, props map[uint32]string) (bool, error) {
+	username = strings.ToLower(strings.TrimSpace(username))
+	var id int64
+	err := d.db.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	tx, err := d.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	for tag, val := range props {
+		val = strings.TrimSpace(val)
+		if val == "" {
+			if _, err := tx.Exec(
+				`DELETE FROM user_properties WHERE user_id = ? AND proptag = ? AND order_id = 1`,
+				id, tag); err != nil {
+				return false, err
+			}
+			continue
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO user_properties (user_id, proptag, order_id, propval_str, propval_bin) VALUES (?, ?, 1, ?, NULL)
+			 ON DUPLICATE KEY UPDATE propval_str = VALUES(propval_str), propval_bin = NULL`,
+			id, tag, val); err != nil {
+			return false, err
+		}
+	}
+	return true, tx.Commit()
+}
+
 // CreateAlias maps an alternate address (aliasname) to a canonical user
 // (mainname == users.username) in the aliases table.
 func (d *SQLDirectory) CreateAlias(aliasname, mainname string) error {

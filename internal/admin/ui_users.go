@@ -80,6 +80,7 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 	altnames, _ := s.dir.ListAltnames(u.Username)
 	aliases, _ := s.dir.ListAliasesFor(u.Username)
 	roles, _ := s.dir.AdminRoles(u.ID)
+	props, _ := s.dir.GetUserProperties(u.Username)
 	s.render(w, "user_detail.html", map[string]any{
 		"Nav":      "users",
 		"CSRF":     csrfCookieValue(r),
@@ -88,7 +89,31 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 		"Altnames": strings.Join(altnames, "\n"),
 		"Aliases":  strings.Join(aliases, "\n"),
 		"Roles":    roles,
+		"Contact":  contactValues(props),
 	})
+}
+
+// handleUIUserContact saves the user's contact/detail fields from the form and
+// returns the refreshed status panel; an empty field clears that property.
+func (s *Server) handleUIUserContact(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	in := map[string]string{}
+	for _, f := range contactFields {
+		in[f.Field] = r.PostFormValue(f.Field)
+	}
+	found, err := s.dir.SetUserProperties(r.PathValue("email"), contactProps(in))
+	data := map[string]any{}
+	switch {
+	case err != nil:
+		data["Error"] = "Could not save contact: " + err.Error()
+	case !found:
+		data["Error"] = "No such user."
+	default:
+		data["Saved"] = true
+	}
+	s.render(w, "user-status", data)
 }
 
 // renderUserRoles re-renders the admin-roles panel for htmx after a grant or

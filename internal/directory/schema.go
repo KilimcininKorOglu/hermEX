@@ -71,6 +71,24 @@ var directoryDDL = []string{
 			REFERENCES users (id) ON DELETE CASCADE ON UPDATE CASCADE
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
+	// user_properties is the per-user MAPI property store (EAV): one row per
+	// (user, property tag, order). It holds the directory-visible properties that
+	// are not promoted to a users column — display name, nickname, the contact
+	// fields, address-book cloak bits — keyed by the full 32-bit proptag. String
+	// values live in propval_str, binary in propval_bin. order_id is 1 for a
+	// single-valued property. (display_type stays a users column and is NOT
+	// duplicated here.)
+	`CREATE TABLE IF NOT EXISTS user_properties (
+		user_id     INT UNSIGNED NOT NULL,
+		proptag     INT UNSIGNED NOT NULL,
+		order_id    INT UNSIGNED NOT NULL DEFAULT 1,
+		propval_bin VARBINARY(4096) DEFAULT NULL,
+		propval_str VARCHAR(4096) DEFAULT NULL,
+		PRIMARY KEY (user_id, proptag, order_id),
+		CONSTRAINT user_properties_user_fk FOREIGN KEY (user_id)
+			REFERENCES users (id) ON DELETE CASCADE ON UPDATE CASCADE
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
 	// ldap_config holds one LDAP/AD bind-to-verify configuration per organization
 	// (domains.org_id). A user whose externid is set authenticates against their
 	// org's directory here; users with no externid stay on local crypt. Keyed by

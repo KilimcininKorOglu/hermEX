@@ -245,3 +245,35 @@ func TestUIUserRoles(t *testing.T) {
 		t.Errorf("revoked (%q, %d), want (domain, 3)", d.revokedRole, d.revokedScope)
 	}
 }
+
+// TestUIUserContact proves the detail page seeds the contact form with stored
+// values and the save maps the named form fields to their proptags in the
+// directory.
+func TestUIUserContact(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		userDetail: directory.UserDetail{Username: "alice@hermex.test"},
+		userProps:  map[uint32]string{0x3001001F: "Alice Liddell"},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	page := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
+	body, _ := io.ReadAll(page.Body)
+	page.Body.Close()
+	if !strings.Contains(string(body), "Contact details") || !strings.Contains(string(body), "Alice Liddell") {
+		t.Errorf("detail page missing the contact section/values:\n%s", body)
+	}
+
+	resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/contact", session, csrf, url.Values{
+		"displayname": {"Alice L."},
+		"title":       {"Curiouser"},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("contact save status %d, want 200", resp.StatusCode)
+	}
+	if d.setPropsUser != "alice@hermex.test" || d.setProps[0x3001001F] != "Alice L." || d.setProps[0x3A17001F] != "Curiouser" {
+		t.Errorf("SetUserProperties = (%q, %v), want the form fields mapped to proptags", d.setPropsUser, d.setProps)
+	}
+}

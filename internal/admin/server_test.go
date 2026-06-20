@@ -51,6 +51,11 @@ type fakeDir struct {
 	setAliases     []string
 	setAliasesUser string
 	aliasesMissing bool
+
+	userProps       map[uint32]string
+	setProps        map[uint32]string
+	setPropsUser    string
+	setPropsMissing bool
 }
 
 func (f *fakeDir) Authenticate(_, _ string) (string, bool) {
@@ -154,6 +159,14 @@ func (f *fakeDir) SetAliasesFor(username string, aliases []string) (bool, error)
 	}
 	f.setAliasesUser, f.setAliases = username, aliases
 	return !f.aliasesMissing, nil
+}
+func (f *fakeDir) GetUserProperties(string) (map[uint32]string, error) { return f.userProps, nil }
+func (f *fakeDir) SetUserProperties(username string, props map[uint32]string) (bool, error) {
+	if f.createErr != nil {
+		return false, f.createErr
+	}
+	f.setPropsUser, f.setProps = username, props
+	return !f.setPropsMissing, nil
 }
 
 // fakePaths derives resource paths under a fixed root for the tests.

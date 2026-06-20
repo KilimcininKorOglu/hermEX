@@ -282,3 +282,72 @@ func TestSQLDirectoryUserAliases(t *testing.T) {
 		t.Errorf("a rejected replace changed the set to %v, want [only@hermex.test] preserved", got)
 	}
 }
+
+// TestSQLDirectoryUserProperties proves the EAV property store round-trips and,
+// critically, that SetUserProperties touches ONLY the proptags it is given: a
+// property written by another subsystem survives an unrelated contact edit, and
+// an empty value clears just its own proptag.
+func TestSQLDirectoryUserProperties(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	cleanTables(t, db)
+
+	root := t.TempDir()
+	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "dom")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.CreateUser("alice@hermex.test", "pw", filepath.Join(root, "alice")); err != nil {
+		t.Fatal(err)
+	}
+	var uid int64
+	if err := db.QueryRow(`SELECT id FROM users WHERE username = ?`, "alice@hermex.test").Scan(&uid); err != nil {
+		t.Fatal(err)
+	}
+	// A property owned by another subsystem — a tag the contact editor never manages.
+	const foreignTag = 0x0FFF001F
+	if _, err := db.Exec(`INSERT INTO user_properties (user_id, proptag, order_id, propval_str) VALUES (?, ?, 1, ?)`,
+		uid, foreignTag, "do-not-touch"); err != nil {
+		t.Fatal(err)
+	}
+
+	const prDisplayName, prNickname = 0x3001001F, 0x3A4F001F
+	found, err := d.SetUserProperties("alice@hermex.test", map[uint32]string{
+		prDisplayName: "Alice Liddell",
+		prNickname:    "Ali",
+	})
+	if err != nil || !found {
+		t.Fatalf("SetUserProperties = %v, %v; want found", found, err)
+	}
+	got, err := d.GetUserProperties("alice@hermex.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[prDisplayName] != "Alice Liddell" || got[prNickname] != "Ali" {
+		t.Errorf("GetUserProperties = %v, want display name + nickname set", got)
+	}
+	// The blocking correctness point: the foreign property survives a contact edit.
+	if got[foreignTag] != "do-not-touch" {
+		t.Errorf("a contact edit wiped a foreign property (tag %#x); user_properties must not be wholesale-replaced", foreignTag)
+	}
+
+	// An empty value clears only that one proptag; the others (and the foreign
+	// one) are untouched.
+	if _, err := d.SetUserProperties("alice@hermex.test", map[uint32]string{prNickname: ""}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = d.GetUserProperties("alice@hermex.test")
+	if _, ok := got[prNickname]; ok {
+		t.Error("an empty value did not clear the nickname")
+	}
+	if got[prDisplayName] != "Alice Liddell" || got[foreignTag] != "do-not-touch" {
+		t.Errorf("clearing one property disturbed others: %v", got)
+	}
+
+	// Unknown user → not found.
+	if found, _ := d.SetUserProperties("ghost@hermex.test", map[uint32]string{prDisplayName: "x"}); found {
+		t.Error("SetUserProperties(unknown) should report not-found")
+	}
+}

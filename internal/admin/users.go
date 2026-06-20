@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"hermex/internal/directory"
+	"hermex/internal/mapi"
 )
 
 // handleListUsers lists every user. This first increment is system-admin only;
@@ -190,6 +191,85 @@ func (s *Server) handleSetUserAliases(w http.ResponseWriter, r *http.Request) {
 	found, err := s.dir.SetAliasesFor(r.PathValue("email"), req.Aliases)
 	if err != nil {
 		http.Error(w, "could not set aliases: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if !found {
+		http.Error(w, "no such user", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// contactFields maps the user contact/detail form field names to their MAPI
+// property tags in user_properties. The handlers only ever read and write these
+// known tags; a raw proptag is never accepted from the client.
+var contactFields = []struct {
+	Field string
+	Tag   uint32
+}{
+	{"displayname", uint32(mapi.PrDisplayName)},
+	{"nickname", uint32(mapi.PrNickname)},
+	{"nameprefix", uint32(mapi.PrDisplayNamePrefix)},
+	{"givenname", uint32(mapi.PrGivenName)},
+	{"surname", uint32(mapi.PrSurname)},
+	{"title", uint32(mapi.PrTitle)},
+	{"company", uint32(mapi.PrCompanyName)},
+	{"department", uint32(mapi.PrDepartmentName)},
+	{"office_phone", uint32(mapi.PrBusinessTelephoneNumber)},
+	{"mobile_phone", uint32(mapi.PrMobileTelephoneNumber)},
+	{"home_phone", uint32(mapi.PrHomeTelephoneNumber)},
+	{"fax", uint32(mapi.PrBusinessFaxNumber)},
+	{"pager", uint32(mapi.PrPagerTelephoneNumber)},
+	{"comment", uint32(mapi.PrComment)},
+}
+
+// contactValues maps a stored proptag→value map to the named contact fields for
+// rendering or JSON output.
+func contactValues(props map[uint32]string) map[string]string {
+	out := map[string]string{}
+	for _, f := range contactFields {
+		if v, ok := props[f.Tag]; ok {
+			out[f.Field] = v
+		}
+	}
+	return out
+}
+
+// contactProps maps a field-name→value map (from a JSON body or a form) to a
+// proptag→value map, keeping only the known contact fields.
+func contactProps(in map[string]string) map[uint32]string {
+	out := map[uint32]string{}
+	for _, f := range contactFields {
+		if v, ok := in[f.Field]; ok {
+			out[f.Tag] = v
+		}
+	}
+	return out
+}
+
+// handleGetContact returns a user's contact/detail fields (system administrators
+// only), keyed by field name.
+func (s *Server) handleGetContact(w http.ResponseWriter, r *http.Request) {
+	props, err := s.dir.GetUserProperties(r.PathValue("email"))
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, contactValues(props))
+}
+
+// handleSetContact writes a user's contact/detail fields (system administrators
+// only). Only the known contact fields are written; an empty value clears that
+// property and unknown JSON keys are ignored.
+func (s *Server) handleSetContact(w http.ResponseWriter, r *http.Request) {
+	var req map[string]string
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	found, err := s.dir.SetUserProperties(r.PathValue("email"), contactProps(req))
+	if err != nil {
+		http.Error(w, "could not set contact: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	if !found {

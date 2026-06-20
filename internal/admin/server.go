@@ -35,6 +35,8 @@ type Directory interface {
 	SetAltnames(username string, altnames []string) (bool, error)
 	ListAliasesFor(username string) ([]string, error)
 	SetAliasesFor(username string, aliases []string) (bool, error)
+	GetUserProperties(username string) (map[uint32]string, error)
+	SetUserProperties(username string, props map[uint32]string) (bool, error)
 	CreateAlias(aliasname, mainname string) error
 	GetLDAPConfig(orgID int64) (directory.LDAPConfig, bool, error)
 	SetLDAPConfig(orgID int64, cfg directory.LDAPConfig) error
@@ -109,6 +111,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /admin/users/{email}/altnames", s.protect(s.requireSystem(s.handleSetAltnames)))
 	mux.Handle("GET /admin/users/{email}/aliases", s.protect(s.requireSystem(s.handleListUserAliases)))
 	mux.Handle("PUT /admin/users/{email}/aliases", s.protect(s.requireSystem(s.handleSetUserAliases)))
+	mux.Handle("GET /admin/users/{email}/contact", s.protect(s.requireSystem(s.handleGetContact)))
+	mux.Handle("PUT /admin/users/{email}/contact", s.protect(s.requireSystem(s.handleSetContact)))
 	mux.Handle("POST /admin/users/{email}/password", s.protect(s.requireSystem(s.handleSetPassword)))
 	mux.Handle("GET /admin/users/{email}/roles", s.protect(s.requireSystem(s.handleListRoles)))
 	mux.Handle("POST /admin/users/{email}/roles", s.protect(s.requireSystem(s.handleGrantRole)))
@@ -130,6 +134,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/users/{email}/delete", s.handleUIUserDelete)
 	mux.HandleFunc("PUT /admin/ui/users/{email}/altnames", s.handleUIUserAltnames)
 	mux.HandleFunc("PUT /admin/ui/users/{email}/aliases", s.handleUIUserAliases)
+	mux.HandleFunc("PUT /admin/ui/users/{email}/contact", s.handleUIUserContact)
 	mux.HandleFunc("POST /admin/ui/users/{email}/roles/grant", s.handleUIUserGrantRole)
 	mux.HandleFunc("POST /admin/ui/users/{email}/roles/revoke", s.handleUIUserRevokeRole)
 	mux.HandleFunc("GET /admin/ui/domains", s.handleUIDomains)

@@ -30,6 +30,26 @@
 </form>
 {{template "user-status" .}}
 
+<h2>Contact details</h2>
+<form class="contact-form" hx-put="/admin/ui/users/{{.User.Username}}/contact" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Display name <input type="text" name="displayname" value="{{index .Contact "displayname"}}"></label>
+<label>Nickname <input type="text" name="nickname" value="{{index .Contact "nickname"}}"></label>
+<label>Name prefix <input type="text" name="nameprefix" value="{{index .Contact "nameprefix"}}"></label>
+<label>First name <input type="text" name="givenname" value="{{index .Contact "givenname"}}"></label>
+<label>Surname <input type="text" name="surname" value="{{index .Contact "surname"}}"></label>
+<label>Job title <input type="text" name="title" value="{{index .Contact "title"}}"></label>
+<label>Company <input type="text" name="company" value="{{index .Contact "company"}}"></label>
+<label>Department <input type="text" name="department" value="{{index .Contact "department"}}"></label>
+<label>Office phone <input type="text" name="office_phone" value="{{index .Contact "office_phone"}}"></label>
+<label>Mobile phone <input type="text" name="mobile_phone" value="{{index .Contact "mobile_phone"}}"></label>
+<label>Home phone <input type="text" name="home_phone" value="{{index .Contact "home_phone"}}"></label>
+<label>Fax <input type="text" name="fax" value="{{index .Contact "fax"}}"></label>
+<label>Pager <input type="text" name="pager" value="{{index .Contact "pager"}}"></label>
+<label>Comment <input type="text" name="comment" value="{{index .Contact "comment"}}"></label>
+<button type="submit">Save contact</button>
+</form>
+
 <h2>Alternative login names</h2>
 <form class="altnames-form" hx-put="/admin/ui/users/{{.User.Username}}/altnames" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
