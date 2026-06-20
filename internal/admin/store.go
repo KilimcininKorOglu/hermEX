@@ -24,6 +24,8 @@ type MailboxStore interface {
 	SetQuota(maildir string, q objectstore.QuotaLimits) error
 	GetDelegates(maildir string) ([]string, error)
 	SetDelegates(maildir string, list []string) error
+	GetSendAs(maildir string) ([]string, error)
+	SetSendAs(maildir string, list []string) error
 	ListFolders(maildir string) ([]objectstore.FolderInfo, error)
 	ListFolderPermissions(maildir string, folderID int64) ([]objectstore.PermissionEntry, error)
 	SetFolderPermission(maildir string, folderID int64, username string, rights uint32) error
@@ -111,6 +113,19 @@ func (mailboxStore) GetDelegates(maildir string) ([]string, error) {
 
 func (mailboxStore) SetDelegates(maildir string, list []string) error {
 	return withStore(maildir, func(st *objectstore.Store) error { return st.SetDelegates(list) })
+}
+
+func (mailboxStore) GetSendAs(maildir string) ([]string, error) {
+	st, err := objectstore.Open(maildir)
+	if err != nil {
+		return nil, err
+	}
+	defer st.Close()
+	return st.GetSendAs()
+}
+
+func (mailboxStore) SetSendAs(maildir string, list []string) error {
+	return withStore(maildir, func(st *objectstore.Store) error { return st.SetSendAs(list) })
 }
 
 func (mailboxStore) ListFolders(maildir string) ([]objectstore.FolderInfo, error) {

@@ -291,6 +291,10 @@ type fakeStore struct {
 	setDelegatesDir string
 	setDelegatesVal []string
 
+	sendAs       map[string][]string
+	setSendAsDir string
+	setSendAsVal []string
+
 	folders     map[string][]objectstore.FolderInfo
 	folderPerms map[string][]objectstore.PermissionEntry
 
@@ -389,6 +393,25 @@ func (f *fakeStore) SetDelegates(maildir string, list []string) error {
 	}
 	f.delegates[maildir] = list
 	f.setDelegatesDir, f.setDelegatesVal = maildir, list
+	return nil
+}
+
+func (f *fakeStore) GetSendAs(maildir string) ([]string, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	return f.sendAs[maildir], nil
+}
+
+func (f *fakeStore) SetSendAs(maildir string, list []string) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+	if f.sendAs == nil {
+		f.sendAs = map[string][]string{}
+	}
+	f.sendAs[maildir] = list
+	f.setSendAsDir, f.setSendAsVal = maildir, list
 	return nil
 }
 
