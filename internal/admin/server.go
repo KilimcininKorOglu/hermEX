@@ -57,6 +57,9 @@ type Directory interface {
 	UpsertLDAPUser(username string, externid []byte, maildir string) (created bool, err error)
 	GetDefaultSyncPolicy() (easpolicy.Policy, error)
 	SetDefaultSyncPolicy(p easpolicy.Policy) error
+	ListFetchmail(mailbox string) ([]directory.FetchmailEntry, error)
+	CreateFetchmail(e directory.FetchmailEntry) (int64, error)
+	DeleteFetchmail(id int64) (bool, error)
 }
 
 // LDAPSyncer downsyncs an organization's directory accounts. It is optional —
@@ -146,6 +149,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /admin/users/{email}/syncpolicy", s.protect(s.requireSystem(s.handleSetUserSyncPolicy)))
 	mux.Handle("GET /admin/syncpolicy", s.protect(s.requireSystem(s.handleGetDefaultSyncPolicy)))
 	mux.Handle("PUT /admin/syncpolicy", s.protect(s.requireSystem(s.handleSetDefaultSyncPolicy)))
+	mux.Handle("GET /admin/users/{email}/fetchmail", s.protect(s.requireSystem(s.handleListUserFetchmail)))
+	mux.Handle("POST /admin/users/{email}/fetchmail", s.protect(s.requireSystem(s.handleCreateUserFetchmail)))
+	mux.Handle("DELETE /admin/users/{email}/fetchmail/{id}", s.protect(s.requireSystem(s.handleDeleteUserFetchmail)))
 	mux.Handle("GET /admin/users/{email}/contact", s.protect(s.requireSystem(s.handleGetContact)))
 	mux.Handle("PUT /admin/users/{email}/contact", s.protect(s.requireSystem(s.handleSetContact)))
 	mux.Handle("GET /admin/users/{email}/oof", s.protect(s.requireSystem(s.handleGetUserOOF)))
@@ -184,6 +190,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /admin/ui/users/{email}/meeting", s.handleUIUserMeeting)
 	mux.HandleFunc("PUT /admin/ui/users/{email}/storeowners", s.handleUIUserStoreOwners)
 	mux.HandleFunc("PUT /admin/ui/users/{email}/syncpolicy", s.handleUIUserSyncPolicy)
+	mux.HandleFunc("POST /admin/ui/users/{email}/fetchmail", s.handleUIUserAddFetchmail)
+	mux.HandleFunc("POST /admin/ui/users/{email}/fetchmail/{id}/delete", s.handleUIUserDeleteFetchmail)
 	mux.HandleFunc("PUT /admin/ui/users/{email}/contact", s.handleUIUserContact)
 	mux.HandleFunc("PUT /admin/ui/users/{email}/oof", s.handleUIUserOOF)
 	mux.HandleFunc("POST /admin/ui/users/{email}/devices/action", s.handleUIUserDevices)

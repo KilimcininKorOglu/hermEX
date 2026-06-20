@@ -89,6 +89,7 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 	storeOwners, _ := s.store.GetStoreOwners(u.Maildir)
 	meetingCfg, _ := s.store.GetMeetingConfig(u.Maildir)
 	syncPol, _ := s.store.GetSyncPolicy(u.Maildir)
+	fmEntries, _ := s.dir.ListFetchmail(u.Username)
 	folders, _ := s.store.ListFolders(u.Maildir)
 	s.render(w, "user_detail.html", map[string]any{
 		"Nav":       "users",
@@ -109,6 +110,7 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 		"StoreOwners": strings.Join(storeOwners, "\n"),
 		"Meeting":     meetingCfg,
 		"SyncPolicy":  policyView(syncPol),
+		"Fetchmail":   fetchmailViews(fmEntries),
 		"Folders":     folders,
 	})
 }

@@ -174,6 +174,25 @@
 <button type="submit">Save device policy</button>
 </form>
 
+<h2>Fetchmail (remote accounts)</h2>
+<p class="hint">Remote POP3/IMAP accounts polled and delivered into this mailbox. "Keep on server" leaves the originals on the source; otherwise they are deleted after fetching.</p>
+{{template "fetchmail-panel" .}}
+<form class="create-form" hx-post="/admin/ui/users/{{.User.Username}}/fetchmail" hx-target="#fetchmail-panel" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<input type="text" name="srcServer" placeholder="mail.example.com" required>
+<input type="number" name="srcPort" placeholder="port (0=default)" min="0">
+<input type="text" name="srcUser" placeholder="remote user" required>
+<input type="password" name="srcPassword" placeholder="remote password">
+<select name="protocol"><option value="POP3">POP3</option><option value="IMAP">IMAP</option></select>
+<input type="text" name="srcFolder" placeholder="INBOX (IMAP folder)">
+<label><input type="checkbox" name="fetchall"> Fetch all</label>
+<label><input type="checkbox" name="keep"> Keep on server</label>
+<label><input type="checkbox" name="useSSL" checked> SSL</label>
+<label><input type="checkbox" name="sslVerify" checked> Verify cert</label>
+<label><input type="checkbox" name="active" checked> Active</label>
+<button type="submit">Add account</button>
+</form>
+
 <h2>Folders</h2>
 <form class="folders-form">
 <label>Folder
@@ -284,4 +303,18 @@
 <input type="number" name="scopeID" value="0" min="0" title="Org or domain id; 0 for a system role">
 <button type="submit">Grant role</button>
 </form>
+</div>{{end}}
+
+{{define "fetchmail-panel"}}<div id="fetchmail-panel">
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<table class="grid">
+<thead><tr><th>Server</th><th>User</th><th>Protocol</th><th>Folder</th><th>Keep</th><th>SSL</th><th>Active</th><th></th></tr></thead>
+<tbody>
+{{range .Fetchmail}}<tr><td>{{.SrcServer}}{{if .SrcPort}}:{{.SrcPort}}{{end}}</td><td>{{.SrcUser}}</td><td>{{.Protocol}}</td><td>{{.SrcFolder}}</td><td>{{if .Keep}}yes{{else}}no{{end}}</td><td>{{if .UseSSL}}yes{{else}}no{{end}}</td><td>{{if .Active}}yes{{else}}no{{end}}</td>
+<td><form hx-post="/admin/ui/users/{{$.Email}}/fetchmail/{{.ID}}/delete" hx-target="#fetchmail-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
+<button type="submit" class="danger">Delete</button></form></td></tr>
+{{else}}<tr><td colspan="8" class="empty">No remote accounts.</td></tr>
+{{end}}
+</tbody>
+</table>
 </div>{{end}}

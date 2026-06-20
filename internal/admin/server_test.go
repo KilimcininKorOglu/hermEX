@@ -23,6 +23,8 @@ type fakeDir struct {
 	aliases []directory.AliasInfo
 	ldap              map[int64]directory.LDAPConfig
 	defaultSyncPolicy easpolicy.Policy
+	fetchmail         map[string][]directory.FetchmailEntry
+	nextFMID          int64
 
 	// captured by the create handlers
 	createdDomain, createdHomedir string
@@ -165,6 +167,32 @@ func (f *fakeDir) GetDefaultSyncPolicy() (easpolicy.Policy, error) {
 func (f *fakeDir) SetDefaultSyncPolicy(p easpolicy.Policy) error {
 	f.defaultSyncPolicy = p
 	return nil
+}
+func (f *fakeDir) ListFetchmail(mailbox string) ([]directory.FetchmailEntry, error) {
+	return f.fetchmail[mailbox], nil
+}
+func (f *fakeDir) CreateFetchmail(e directory.FetchmailEntry) (int64, error) {
+	if err := e.Validate(); err != nil {
+		return 0, err
+	}
+	if f.fetchmail == nil {
+		f.fetchmail = map[string][]directory.FetchmailEntry{}
+	}
+	f.nextFMID++
+	e.ID = f.nextFMID
+	f.fetchmail[e.Mailbox] = append(f.fetchmail[e.Mailbox], e)
+	return e.ID, nil
+}
+func (f *fakeDir) DeleteFetchmail(id int64) (bool, error) {
+	for mb, list := range f.fetchmail {
+		for i, e := range list {
+			if e.ID == id {
+				f.fetchmail[mb] = append(list[:i], list[i+1:]...)
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }
 func (f *fakeDir) GetUser(username string) (directory.UserDetail, bool, error) {
 	f.gotUser = username
