@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/easpolicy"
 	"hermex/internal/ldapauth"
 	"hermex/internal/logging"
 )
@@ -54,6 +55,8 @@ type Directory interface {
 	GetLDAPConfig(orgID int64) (directory.LDAPConfig, bool, error)
 	SetLDAPConfig(orgID int64, cfg directory.LDAPConfig) error
 	UpsertLDAPUser(username string, externid []byte, maildir string) (created bool, err error)
+	GetDefaultSyncPolicy() (easpolicy.Policy, error)
+	SetDefaultSyncPolicy(p easpolicy.Policy) error
 }
 
 // LDAPSyncer downsyncs an organization's directory accounts. It is optional —
@@ -141,6 +144,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /admin/users/{email}/storeowners", s.protect(s.requireSystem(s.handleSetUserStoreOwners)))
 	mux.Handle("GET /admin/users/{email}/syncpolicy", s.protect(s.requireSystem(s.handleGetUserSyncPolicy)))
 	mux.Handle("PUT /admin/users/{email}/syncpolicy", s.protect(s.requireSystem(s.handleSetUserSyncPolicy)))
+	mux.Handle("GET /admin/syncpolicy", s.protect(s.requireSystem(s.handleGetDefaultSyncPolicy)))
+	mux.Handle("PUT /admin/syncpolicy", s.protect(s.requireSystem(s.handleSetDefaultSyncPolicy)))
 	mux.Handle("GET /admin/users/{email}/contact", s.protect(s.requireSystem(s.handleGetContact)))
 	mux.Handle("PUT /admin/users/{email}/contact", s.protect(s.requireSystem(s.handleSetContact)))
 	mux.Handle("GET /admin/users/{email}/oof", s.protect(s.requireSystem(s.handleGetUserOOF)))
@@ -186,6 +191,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /admin/ui/users/{email}/hide", s.handleUIUserHide)
 	mux.HandleFunc("POST /admin/ui/users/{email}/roles/grant", s.handleUIUserGrantRole)
 	mux.HandleFunc("POST /admin/ui/users/{email}/roles/revoke", s.handleUIUserRevokeRole)
+	mux.HandleFunc("GET /admin/ui/syncpolicy", s.handleUISyncPolicy)
+	mux.HandleFunc("PUT /admin/ui/syncpolicy", s.handleUISaveSyncPolicy)
 	mux.HandleFunc("GET /admin/ui/domains", s.handleUIDomains)
 	mux.HandleFunc("POST /admin/ui/domains", s.handleUICreateDomain)
 	mux.HandleFunc("GET /admin/ui/aliases", s.handleUIAliases)

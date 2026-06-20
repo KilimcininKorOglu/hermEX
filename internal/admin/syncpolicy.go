@@ -121,3 +121,70 @@ func (s *Server) handleUIUserSyncPolicy(w http.ResponseWriter, r *http.Request) 
 	}
 	s.render(w, "user-status", data)
 }
+
+// handleGetDefaultSyncPolicy returns the server-wide default device policy (system
+// administrators only).
+func (s *Server) handleGetDefaultSyncPolicy(w http.ResponseWriter, r *http.Request) {
+	p, err := s.dir.GetDefaultSyncPolicy()
+	if err != nil {
+		http.Error(w, "could not read default sync policy", http.StatusInternalServerError)
+		return
+	}
+	if p == nil {
+		p = easpolicy.Policy{}
+	}
+	writeJSON(w, p)
+}
+
+// handleSetDefaultSyncPolicy replaces the server-wide default device policy (system
+// administrators only).
+func (s *Server) handleSetDefaultSyncPolicy(w http.ResponseWriter, r *http.Request) {
+	var in easpolicy.Policy
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	if err := in.Validate(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := s.dir.SetDefaultSyncPolicy(in); err != nil {
+		http.Error(w, "could not set default sync policy: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleUISyncPolicy renders the server-default device-policy editor page.
+func (s *Server) handleUISyncPolicy(w http.ResponseWriter, r *http.Request) {
+	if !s.uiRequireSystemPage(w, r) {
+		return
+	}
+	p, _ := s.dir.GetDefaultSyncPolicy()
+	s.render(w, "syncpolicy.html", map[string]any{
+		"Nav":    "syncpolicy",
+		"CSRF":   csrfCookieValue(r),
+		"Fields": policyView(p),
+	})
+}
+
+// handleUISaveSyncPolicy saves the server-default device policy from the editor and
+// returns the refreshed status panel.
+func (s *Server) handleUISaveSyncPolicy(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	p, err := policyFromForm(r)
+	data := map[string]any{}
+	switch {
+	case err != nil:
+		data["Error"] = "Invalid value: " + err.Error()
+	default:
+		if err := s.dir.SetDefaultSyncPolicy(p); err != nil {
+			data["Error"] = "Could not save: " + err.Error()
+		} else {
+			data["Saved"] = true
+		}
+	}
+	s.render(w, "user-status", data)
+}

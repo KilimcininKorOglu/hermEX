@@ -21,7 +21,8 @@ type fakeDir struct {
 	domains []directory.DomainInfo
 	users   []directory.UserInfo
 	aliases []directory.AliasInfo
-	ldap    map[int64]directory.LDAPConfig
+	ldap              map[int64]directory.LDAPConfig
+	defaultSyncPolicy easpolicy.Policy
 
 	// captured by the create handlers
 	createdDomain, createdHomedir string
@@ -157,6 +158,13 @@ func (f *fakeDir) SetLDAPConfig(orgID int64, cfg directory.LDAPConfig) error {
 func (f *fakeDir) UpsertLDAPUser(username string, _ []byte, _ string) (bool, error) {
 	f.upsertedUsers = append(f.upsertedUsers, username)
 	return f.upsertNew, nil
+}
+func (f *fakeDir) GetDefaultSyncPolicy() (easpolicy.Policy, error) {
+	return f.defaultSyncPolicy, nil
+}
+func (f *fakeDir) SetDefaultSyncPolicy(p easpolicy.Policy) error {
+	f.defaultSyncPolicy = p
+	return nil
 }
 func (f *fakeDir) GetUser(username string) (directory.UserDetail, bool, error) {
 	f.gotUser = username

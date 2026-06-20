@@ -1,0 +1,22 @@
+{{define "syncpolicy.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>ActiveSync device policy (server default)</h1>
+<p class="hint">The baseline policy served to every device before a per-user override is merged on top. Leave a field unset to leave it unenforced.</p>
+<form class="syncpolicy-form" hx-put="/admin/ui/syncpolicy" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<div class="policy-grid">
+{{range .Fields}}
+<label class="policy-field">{{.Name}}
+{{if .Bool}}<select name="{{.Name}}"><option value="">(unset)</option><option value="1"{{if eq .Value "1"}} selected{{end}}>Yes</option><option value="0"{{if eq .Value "0"}} selected{{end}}>No</option></select>
+{{else}}<input type="number" min="0" name="{{.Name}}" value="{{.Value}}" placeholder="(unset)">{{end}}
+</label>
+{{end}}
+</div>
+<button type="submit">Save default policy</button>
+</form>
+<div id="user-status"></div>
+</main>
+</div>
+{{template "foot" .}}{{end}}
