@@ -134,13 +134,13 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 	// referenced meeting request — updating the attendee's calendar and the request,
 	// and (when the disposition sends) notifying the organizer with an iTIP REPLY.
 	for _, mr := range req.Items.Accept {
-		msgs = append(msgs, s.meetingRespond(st, sess, mr.ReferenceItemID, meeting.ResponseAccepted, send))
+		msgs = append(msgs, s.meetingRespond(sess, mr.ReferenceItemID, meeting.ResponseAccepted, send))
 	}
 	for _, mr := range req.Items.TentativelyAccept {
-		msgs = append(msgs, s.meetingRespond(st, sess, mr.ReferenceItemID, meeting.ResponseTentative, send))
+		msgs = append(msgs, s.meetingRespond(sess, mr.ReferenceItemID, meeting.ResponseTentative, send))
 	}
 	for _, mr := range req.Items.Decline {
-		msgs = append(msgs, s.meetingRespond(st, sess, mr.ReferenceItemID, meeting.ResponseDeclined, send))
+		msgs = append(msgs, s.meetingRespond(sess, mr.ReferenceItemID, meeting.ResponseDeclined, send))
 	}
 	writeResponse(w, createItemResponse{Messages: msgs})
 }

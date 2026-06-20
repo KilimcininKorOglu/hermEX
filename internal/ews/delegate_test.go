@@ -10,6 +10,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcical"
 	"hermex/internal/oxews"
 )
 
@@ -959,6 +960,52 @@ func TestSendItemCrossMailboxDenied(t *testing.T) {
 	_, out := soapPost(t, ts, sendDelegateItemReq(foreign), true)
 	if !strings.Contains(out, "ErrorAccessDenied") {
 		t.Errorf("sending without draft read access must be denied:\n%s", out)
+	}
+}
+
+// seedMeetingRequestInBob imports a meeting request (attended by bob) into bob's inbox
+// and returns its mailbox-encoded item id.
+func seedMeetingRequestInBob(t *testing.T, path string) string {
+	t.Helper()
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ics := strings.Replace(meetingRequestICS, "alice@hermex.test", "bob@hermex.test", 1)
+	req, err := oxcical.Import([]byte(ics), oxcical.Options{Resolver: st.GetNamedPropIDs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reqID, err := st.CreateMessage(int64(mapi.PrivateFIDInbox), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDInbox), MessageID: reqID, Mailbox: "bob@hermex.test"})
+}
+
+// TestMeetingResponseCrossMailboxWithGrant confirms an editor delegate can respond to a
+// meeting request in another mailbox on its behalf.
+func TestMeetingResponseCrossMailboxWithGrant(t *testing.T) {
+	ts, paths := delegateServer(t)
+	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.RightsEditor)
+	refID := seedMeetingRequestInBob(t, paths["bob@hermex.test"])
+
+	_, out := soapPost(t, ts, meetingResponseReq("AcceptItem", refID), true)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Errorf("an editor delegate must respond to the target's meeting:\n%s", out)
+	}
+}
+
+// TestMeetingResponseCrossMailboxDenied confirms responding to a meeting in another
+// mailbox without edit access is denied.
+func TestMeetingResponseCrossMailboxDenied(t *testing.T) {
+	ts, _ := delegateServer(t)
+	foreign := oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDInbox), MessageID: 1, Mailbox: "bob@hermex.test"})
+
+	_, out := soapPost(t, ts, meetingResponseReq("AcceptItem", foreign), true)
+	if !strings.Contains(out, "ErrorAccessDenied") {
+		t.Errorf("responding without edit access must be denied:\n%s", out)
 	}
 }
 
