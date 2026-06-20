@@ -471,6 +471,29 @@ func (c *storeCache) closeAll() {
 	}
 }
 
+// openForItem opens the mailbox an item id targets — the caller's own when the id
+// carries no mailbox — and enforces the caller's access to the item's folder. need is
+// the frights bit the operation requires (read, edit, delete). A non-empty code names
+// the per-item error to report; own-mailbox access is never gated. This is the single
+// chokepoint every item-id-driven handler routes through, so a delegated id can never
+// be misapplied to the caller's own store.
+func (c *storeCache) openForItem(sess *session, id oxews.ItemID, need uint32) (*objectstore.Store, string) {
+	st, _, isOwn, code := c.open(sess, id.Mailbox)
+	if code != "" {
+		return nil, code
+	}
+	if !isOwn {
+		rights, err := st.ResolvePermission(id.FolderID, sess.user)
+		if err != nil {
+			return nil, "ErrorInternalServerError"
+		}
+		if rights&need == 0 {
+			return nil, "ErrorAccessDenied"
+		}
+	}
+	return st, ""
+}
+
 // folderErr builds a per-folder error response message.
 func folderErr(code string) folderResponseMessage {
 	return folderResponseMessage{ResponseClass: "Error", ResponseCode: code}

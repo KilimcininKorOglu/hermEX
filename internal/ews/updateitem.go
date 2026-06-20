@@ -49,18 +49,20 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, inner []byte, sess *ses
 		writeSOAPFault(w, "ErrorInvalidRequest", "UpdateItem: "+err.Error())
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
-	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
-		return
-	}
-	defer st.Close()
+	cache := s.newStoreCache()
+	defer cache.closeAll()
 
 	var msgs []itemResponseMessage
 	for _, ch := range req.ItemChanges.Changes {
 		id, err := oxews.DecodeItemID(ch.ItemID.ID)
 		if err != nil {
 			msgs = append(msgs, itemError("ErrorInvalidRequest"))
+			continue
+		}
+		// The id self-encodes its mailbox; a delegated item is gated on edit access.
+		st, code := cache.openForItem(sess, id, mapi.FrightsEditAny)
+		if code != "" {
+			msgs = append(msgs, itemError(code))
 			continue
 		}
 		failed := false
@@ -117,18 +119,20 @@ func (s *Server) handleDeleteItem(w http.ResponseWriter, inner []byte, sess *ses
 		writeSOAPFault(w, "ErrorInvalidRequest", "DeleteItem: "+err.Error())
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
-	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
-		return
-	}
-	defer st.Close()
+	cache := s.newStoreCache()
+	defer cache.closeAll()
 
 	var msgs []itemResponseMessage
 	for _, ref := range req.ItemIDs.Items {
 		id, err := oxews.DecodeItemID(ref.ID)
 		if err != nil {
 			msgs = append(msgs, itemError("ErrorInvalidRequest"))
+			continue
+		}
+		// The id self-encodes its mailbox; a delegated item is gated on delete access.
+		st, code := cache.openForItem(sess, id, mapi.FrightsDeleteAny)
+		if code != "" {
+			msgs = append(msgs, itemError(code))
 			continue
 		}
 		var derr error
@@ -194,12 +198,30 @@ func (s *Server) moveOrCopy(w http.ResponseWriter, inner []byte, sess *session, 
 	}
 	toFID := targets[0].fid
 
-	st, err := objectstore.Open(sess.mailbox)
-	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+	cache := s.newStoreCache()
+	defer cache.closeAll()
+
+	// Open and gate the destination once: a non-own target folder requires create access.
+	destSt, _, destOwn, code := cache.open(sess, targets[0].mailbox)
+	if code != "" {
+		writeMoveCopy(w, remove, []itemResponseMessage{itemError(code)})
 		return
 	}
-	defer st.Close()
+	if !destOwn {
+		rights, err := destSt.ResolvePermission(toFID, sess.user)
+		if err != nil {
+			writeMoveCopy(w, remove, []itemResponseMessage{itemError("ErrorInternalServerError")})
+			return
+		}
+		if rights&mapi.FrightsCreate == 0 {
+			writeMoveCopy(w, remove, []itemResponseMessage{itemError("ErrorAccessDenied")})
+			return
+		}
+	}
+	destMailbox := ""
+	if !destOwn {
+		destMailbox = targets[0].mailbox
+	}
 
 	var msgs []itemResponseMessage
 	for _, ref := range req.ItemIDs.Items {
@@ -208,17 +230,44 @@ func (s *Server) moveOrCopy(w http.ResponseWriter, inner []byte, sess *session, 
 			msgs = append(msgs, itemError("ErrorInvalidRequest"))
 			continue
 		}
+		srcSt, _, srcOwn, code := cache.open(sess, id.Mailbox)
+		if code != "" {
+			msgs = append(msgs, itemError(code))
+			continue
+		}
+		// The copy runs within a single store; moving an item across mailboxes is not
+		// supported (the source and destination must be the same mailbox).
+		if srcSt != destSt {
+			msgs = append(msgs, itemError("ErrorAccessDenied"))
+			continue
+		}
+		// A non-own source is gated on delete (move) or read (copy) of the source folder.
+		if !srcOwn {
+			need := mapi.FrightsReadAny
+			if remove {
+				need = mapi.FrightsDeleteAny
+			}
+			rights, err := srcSt.ResolvePermission(id.FolderID, sess.user)
+			if err != nil {
+				msgs = append(msgs, itemError("ErrorInternalServerError"))
+				continue
+			}
+			if rights&need == 0 {
+				msgs = append(msgs, itemError("ErrorAccessDenied"))
+				continue
+			}
+		}
 		var info objectstore.MessageInfo
 		if remove {
-			info, err = moveMessage(st, id.FolderID, id.UID, toFID)
+			info, err = moveMessage(destSt, id.FolderID, id.UID, toFID)
 		} else {
-			info, err = copyMessage(st, id.FolderID, id.UID, toFID)
+			info, err = copyMessage(destSt, id.FolderID, id.UID, toFID)
 		}
 		if err != nil {
 			msgs = append(msgs, itemError("ErrorItemNotFound"))
 			continue
 		}
-		newID := oxews.EncodeItemID(oxews.ItemID{FolderID: toFID, MessageID: info.ID, UID: info.UID})
+		newID := oxews.EncodeItemID(oxews.ItemID{FolderID: toFID, MessageID: info.ID, UID: info.UID, Mailbox: destMailbox})
 		msgs = append(msgs, itemResponseMessage{
 			ResponseClass: "Success", ResponseCode: "NoError",
 			Items: &itemsWrap{Messages: []oxews.Message{{ItemID: oxews.ItemIDElem{ID: newID, ChangeKey: oxews.ChangeKey(uint64(info.ID))}}}},

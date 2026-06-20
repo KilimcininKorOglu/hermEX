@@ -23,6 +23,10 @@ func (s *Server) meetingRespond(st *objectstore.Store, sess *session, ref refID,
 	if err != nil {
 		return itemError("ErrorInvalidRequest")
 	}
+	if id.Mailbox != "" {
+		// Responding to another mailbox's meeting on its behalf is not yet supported.
+		return itemError("ErrorAccessDenied")
+	}
 	if _, err := meeting.Respond(st, s.accounts, s.Spool, sess.user, id.MessageID, response, send); err != nil {
 		if errors.Is(err, meeting.ErrRequestNotFound) {
 			return itemError("ErrorItemNotFound")

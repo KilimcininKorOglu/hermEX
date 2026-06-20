@@ -91,6 +91,11 @@ func (s *Server) sendOne(st *objectstore.Store, sess *session, itemID string, sa
 	if err != nil {
 		return itemError("ErrorInvalidRequest")
 	}
+	if id.Mailbox != "" {
+		// Sending another mailbox's draft on its behalf is not yet supported; reject
+		// rather than operate on the caller's own store with a foreign id.
+		return itemError("ErrorAccessDenied")
+	}
 	msg, err := st.OpenMessage(id.MessageID)
 	if err != nil {
 		return itemError("ErrorItemNotFound")

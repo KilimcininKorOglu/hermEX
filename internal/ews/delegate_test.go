@@ -644,3 +644,119 @@ func TestCrossMailboxTwoTierVisibleListsButReadDenied(t *testing.T) {
 		t.Errorf("reading an item without read access must be denied:\n%s", getOut)
 	}
 }
+
+// bobItemIDWithGrant grants the right on bob's inbox, seeds one message, lists it, and
+// returns its mailbox-encoded item id (the cross-mailbox id a write op then targets).
+func bobItemIDWithGrant(t *testing.T, ts *httptest.Server, paths map[string]string, right uint32) string {
+	t.Helper()
+	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, right)
+	seedInboxMessage(t, paths["bob@hermex.test"], "Quarterly numbers")
+	_, out := soapPost(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test"), true)
+	id := firstItemID(out)
+	if id == "" {
+		t.Fatalf("no item id from FindItem:\n%s", out)
+	}
+	return id
+}
+
+func updateItemReadReq(itemID string) string {
+	return wrapRequest(`<UpdateItem xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `" ConflictResolution="AlwaysOverwrite">` +
+		`<ItemChanges><t:ItemChange><t:ItemId Id="` + itemID + `"/>` +
+		`<t:Updates><t:SetItemField><t:FieldURI FieldURI="message:IsRead"/>` +
+		`<t:Message><t:IsRead>true</t:IsRead></t:Message></t:SetItemField></t:Updates>` +
+		`</t:ItemChange></ItemChanges></UpdateItem>`)
+}
+
+func deleteItemHardReq(itemID string) string {
+	return wrapRequest(`<DeleteItem xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `" DeleteType="HardDelete">` +
+		`<ItemIds><t:ItemId Id="` + itemID + `"/></ItemIds>` +
+		`</DeleteItem>`)
+}
+
+func moveItemReq(itemID, destDistinguished, destMailbox string) string {
+	mb := ""
+	if destMailbox != "" {
+		mb = `<t:Mailbox><t:EmailAddress>` + destMailbox + `</t:EmailAddress></t:Mailbox>`
+	}
+	return wrapRequest(`<MoveItem xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
+		`<ToFolderId><t:DistinguishedFolderId Id="` + destDistinguished + `">` + mb + `</t:DistinguishedFolderId></ToFolderId>` +
+		`<ItemIds><t:ItemId Id="` + itemID + `"/></ItemIds>` +
+		`</MoveItem>`)
+}
+
+// TestUpdateItemCrossMailboxWithGrant confirms an editor-rights delegate can update an
+// item in another mailbox.
+func TestUpdateItemCrossMailboxWithGrant(t *testing.T) {
+	ts, paths := delegateServer(t)
+	id := bobItemIDWithGrant(t, ts, paths, mapi.RightsEditor)
+
+	_, out := soapPost(t, ts, updateItemReadReq(id), true)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Errorf("an editor delegate must update the target item:\n%s", out)
+	}
+}
+
+// TestUpdateItemCrossMailboxDenied confirms a read-only (reviewer) delegate cannot edit
+// an item in another mailbox — editing needs edit access, which visibility/read lack.
+func TestUpdateItemCrossMailboxDenied(t *testing.T) {
+	ts, paths := delegateServer(t)
+	id := bobItemIDWithGrant(t, ts, paths, mapi.RightsReviewer)
+
+	_, out := soapPost(t, ts, updateItemReadReq(id), true)
+	if !strings.Contains(out, "ErrorAccessDenied") {
+		t.Errorf("a reviewer delegate must not edit the target item:\n%s", out)
+	}
+}
+
+// TestDeleteItemCrossMailboxWithGrant confirms an editor-rights delegate can delete an
+// item in another mailbox.
+func TestDeleteItemCrossMailboxWithGrant(t *testing.T) {
+	ts, paths := delegateServer(t)
+	id := bobItemIDWithGrant(t, ts, paths, mapi.RightsEditor)
+
+	_, out := soapPost(t, ts, deleteItemHardReq(id), true)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Errorf("an editor delegate must delete the target item:\n%s", out)
+	}
+}
+
+// TestDeleteItemCrossMailboxDenied confirms a reviewer delegate cannot delete an item
+// in another mailbox.
+func TestDeleteItemCrossMailboxDenied(t *testing.T) {
+	ts, paths := delegateServer(t)
+	id := bobItemIDWithGrant(t, ts, paths, mapi.RightsReviewer)
+
+	_, out := soapPost(t, ts, deleteItemHardReq(id), true)
+	if !strings.Contains(out, "ErrorAccessDenied") {
+		t.Errorf("a reviewer delegate must not delete the target item:\n%s", out)
+	}
+}
+
+// TestMoveItemCrossStoreRejected confirms moving an item from another mailbox into the
+// caller's own mailbox is refused: the copy runs within a single store, so a move that
+// would span mailboxes (and could misapply a foreign id) is rejected.
+func TestMoveItemCrossStoreRejected(t *testing.T) {
+	ts, paths := delegateServer(t)
+	id := bobItemIDWithGrant(t, ts, paths, mapi.RightsEditor)
+
+	// Destination is the caller's own deleted-items (no Mailbox element).
+	_, out := soapPost(t, ts, moveItemReq(id, "deleteditems", ""), true)
+	if !strings.Contains(out, "ErrorAccessDenied") {
+		t.Errorf("a cross-mailbox move must be rejected:\n%s", out)
+	}
+}
+
+// TestCreateAttachmentCrossMailboxRejected confirms the safety guard: an item-id-driven
+// op not yet wired for cross-mailbox refuses a foreign id rather than misapplying it to
+// the caller's own store.
+func TestCreateAttachmentCrossMailboxRejected(t *testing.T) {
+	ts, _ := delegateServer(t)
+	foreign := oxews.EncodeItemID(oxews.ItemID{
+		FolderID: int64(mapi.PrivateFIDInbox), MessageID: 1, UID: 1, Mailbox: "bob@hermex.test",
+	})
+
+	_, out := soapPost(t, ts, createAttachmentReq(foreign, "note.txt", "text/plain", "aGk="), true)
+	if !strings.Contains(out, "ErrorAccessDenied") {
+		t.Errorf("a foreign parent id must be rejected:\n%s", out)
+	}
+}

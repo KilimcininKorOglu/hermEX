@@ -88,6 +88,12 @@ func (s *Server) handleCreateAttachment(w http.ResponseWriter, inner []byte, ses
 		errAll("ErrorInvalidId")
 		return
 	}
+	if parent.Mailbox != "" {
+		// Attaching to another mailbox's item is not yet supported; reject rather than
+		// operate on the caller's own store with a foreign id.
+		errAll("ErrorAccessDenied")
+		return
+	}
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
 		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
