@@ -1,10 +1,13 @@
 package mta
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/objectstore"
 )
 
 // fakeIdentifier is a directory.Accounts that also enumerates a fixed identity
@@ -81,5 +84,84 @@ func TestSendAsFailsClosed(t *testing.T) {
 	}
 	if s := (&session{accounts: accounts, authUser: "alice@test"}); s.Mail("sales@test") == nil {
 		t.Error("send-as-other allowed under fail-closed directory; must be refused")
+	}
+}
+
+// TestSendAsGrantAuthorizes proves an authenticated user may put another mailbox in
+// the envelope sender when that mailbox has granted them send-as, and may not
+// otherwise. The grant lives on the target mailbox's store.
+func TestSendAsGrantAuthorizes(t *testing.T) {
+	pathA := filepath.Join(t.TempDir(), "alice")
+	st, err := objectstore.Open(pathA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSendAs([]string{"bob@test"}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	accounts := fakeIdentifier{
+		StaticAccounts: directory.StaticAccounts{
+			"alice@test": {MailboxPath: pathA},
+			"bob@test":   {MailboxPath: filepath.Join(t.TempDir(), "bob")},
+			"carol@test": {MailboxPath: filepath.Join(t.TempDir(), "carol")},
+		},
+		idents: map[string][]string{
+			"bob@test":   {"bob@test"},
+			"carol@test": {"carol@test"},
+		},
+	}
+	// bob, granted send-as on alice, may put alice in the From.
+	if s := (&session{accounts: accounts, authUser: "bob@test"}); s.Mail("alice@test") != nil {
+		t.Error("granted send-as refused")
+	}
+	// carol, not granted, may not.
+	if s := (&session{accounts: accounts, authUser: "carol@test"}); s.Mail("alice@test") == nil {
+		t.Error("ungranted user sent as alice; must be refused")
+	}
+}
+
+// TestSendAsGrantMatchesGranteeAlias proves the grant is honored when it names any of
+// the grantee's identities — a grant to an alias authorizes the owner of that alias.
+func TestSendAsGrantMatchesGranteeAlias(t *testing.T) {
+	pathA := filepath.Join(t.TempDir(), "alice")
+	st, err := objectstore.Open(pathA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetSendAs([]string{"robert@test"}); err != nil { // bob's alias
+		t.Fatal(err)
+	}
+	st.Close()
+
+	accounts := fakeIdentifier{
+		StaticAccounts: directory.StaticAccounts{
+			"alice@test": {MailboxPath: pathA},
+			"bob@test":   {MailboxPath: filepath.Join(t.TempDir(), "bob")},
+		},
+		idents: map[string][]string{"bob@test": {"bob@test", "robert@test"}},
+	}
+	if s := (&session{accounts: accounts, authUser: "bob@test"}); s.Mail("alice@test") != nil {
+		t.Error("send-as grant to the grantee's alias was not honored")
+	}
+}
+
+// TestSendAsFailsClosedOnUnopenableStore proves the grant denies when the target
+// mailbox resolves but its store cannot be opened — the fail-closed security branch.
+// A regular file where the mailbox directory should be makes Open's MkdirAll fail, so
+// the test exercises the Open-fails path, not merely the empty-list path.
+func TestSendAsFailsClosedOnUnopenableStore(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "not-a-store")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := objectstore.Open(blocker); err == nil {
+		st.Close()
+		t.Fatal("precondition: Open succeeded on a file path; cannot exercise the broken-store branch")
+	}
+	accounts := resolveOnly{"victim@test": blocker}
+	if s := (&session{accounts: accounts, authUser: "bob@test"}); s.Mail("victim@test") == nil {
+		t.Error("send-as allowed when the target store could not be opened; must fail closed")
 	}
 }

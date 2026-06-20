@@ -94,12 +94,50 @@ func (s *session) Mail(from string) error {
 }
 
 // authorizedSender reports whether the authenticated user may use from as the
-// envelope sender, matching case-insensitively against the addresses the
-// directory says they own.
+// envelope sender. It is allowed when from is an address the user owns (their own
+// primary or alias) or when the mailbox that owns from has granted the user a
+// send-as permission. The send-as path fails closed: only a grant that can be
+// positively confirmed lets an authenticated user put another mailbox in the From.
 func (s *session) authorizedSender(from string) bool {
 	want := strings.ToLower(strings.TrimSpace(from))
-	for _, a := range s.identities() {
-		if strings.ToLower(a) == want {
+	ids := s.identities()
+	if containsFold(ids, want) {
+		return true
+	}
+	return s.grantedSendAs(want, ids)
+}
+
+// grantedSendAs reports whether one of the authenticated user's identities appears
+// in the send-as list of the mailbox that owns from. It fails closed: an address
+// that resolves to no local mailbox, a store that will not open, or an unreadable
+// list denies the grant rather than risking a forged sender.
+func (s *session) grantedSendAs(from string, ids []string) bool {
+	path, ok := s.accounts.Resolve(from)
+	if !ok {
+		return false
+	}
+	st, err := objectstore.Open(path)
+	if err != nil {
+		return false
+	}
+	defer st.Close()
+	list, err := st.GetSendAs()
+	if err != nil {
+		return false
+	}
+	for _, g := range list {
+		if containsFold(ids, strings.ToLower(strings.TrimSpace(g))) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsFold reports whether want (already lowercased) equals any address in
+// list, compared case-insensitively after trimming.
+func containsFold(list []string, want string) bool {
+	for _, a := range list {
+		if strings.ToLower(strings.TrimSpace(a)) == want {
 			return true
 		}
 	}
