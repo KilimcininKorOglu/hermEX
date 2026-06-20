@@ -8,6 +8,21 @@ package directory
 // without the EAV table. Statements are idempotent so applying them to an
 // existing DB is a no-op.
 var directoryDDL = []string{
+	// orgs is an organization: a named grouping of domains for multi-tenant
+	// administration. A domain's membership is its domains.org_id (a soft
+	// reference, no FK — DeleteOrg detaches its domains explicitly), and the
+	// org-scoped configuration (ldap_config, sync_policy, org-admin grants) keys
+	// on the same id. Id 0 is the reserved "organizationless" sentinel and is
+	// never a real row (AUTO_INCREMENT starts at 1), so the global-default
+	// sync_policy row (org_id 0) is never mistaken for an organization.
+	`CREATE TABLE IF NOT EXISTS orgs (
+		id          INT UNSIGNED NOT NULL AUTO_INCREMENT,
+		name        VARCHAR(32) NOT NULL,
+		description VARCHAR(255) NOT NULL DEFAULT '',
+		PRIMARY KEY (id),
+		UNIQUE KEY name (name)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
 	`CREATE TABLE IF NOT EXISTS domains (
 		id            INT UNSIGNED NOT NULL AUTO_INCREMENT,
 		org_id        INT UNSIGNED NOT NULL DEFAULT 0,
