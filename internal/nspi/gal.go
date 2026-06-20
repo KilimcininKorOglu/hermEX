@@ -55,9 +55,10 @@ const (
 // fetches by a MId the client already holds are never hidden — asking for a
 // specific entry opens it.
 const (
-	abHideFromGAL uint32 = 0x01
-	abHideFromAL  uint32 = 0x02
-	abHideResolve uint32 = 0x08
+	abHideFromGAL  uint32 = 0x01
+	abHideFromAL   uint32 = 0x02
+	abHideDelegate uint32 = 0x04
+	abHideResolve  uint32 = 0x08
 )
 
 // mlistExpander is the optional directory capability the NSPI layer uses to
@@ -70,6 +71,19 @@ type mlistExpander interface {
 // The real directory must satisfy mlistExpander, so a signature drift becomes a
 // build error rather than list membership silently expanding to nothing at runtime.
 var _ mlistExpander = (*directory.SQLDirectory)(nil)
+
+// delegateReader is the optional directory capability the NSPI layer uses to read
+// a mailbox's public-delegate list for the address book's public-delegates
+// container. *directory.SQLDirectory satisfies it by opening the mailbox store; the
+// static directory does not, so a mailbox simply exposes no delegates. Reading is
+// world-readable by design, so it takes no caller identity.
+type delegateReader interface {
+	Delegates(userAddr string) ([]string, error)
+}
+
+// The real directory must satisfy delegateReader, so a signature drift becomes a
+// build error rather than delegate lists silently reading as empty at runtime.
+var _ delegateReader = (*directory.SQLDirectory)(nil)
 
 // galUser is one GAL entry with its assigned MId. hidden is the PR_ATTR_HIDDEN
 // mask the directory supplied; the surface applying it decides which bit matters.
@@ -339,6 +353,39 @@ func (g gal) memberMIDs(curRec uint32, exp mlistExpander, limit int) []uint32 {
 			continue
 		}
 		mids = append(mids, mu.mid)
+	}
+	return mids
+}
+
+// delegateMIDs reads the public-delegate list of the mailbox at curRec and returns
+// the MIds of its delegates that appear in the GAL, dropping any delegate hidden
+// from the delegate list (abHideDelegate) and any the filter excludes — the
+// delegate-list half of the address-book hide mask. reader is the directory's
+// per-mailbox delegate reader; without one a mailbox has no delegates. limit caps
+// the returned set (0 means no cap). Reading is world-readable, so it takes no
+// caller identity.
+func (g gal) delegateMIDs(curRec uint32, reader delegateReader, filter *mapi.Restriction, limit int) []uint32 {
+	u, ok := g.resolveEntry(curRec)
+	if !ok {
+		return nil
+	}
+	delegates, err := reader.Delegates(u.smtp)
+	if err != nil {
+		return nil
+	}
+	var mids []uint32
+	for _, d := range delegates {
+		if limit > 0 && len(mids) >= limit {
+			break
+		}
+		du, ok := g.userByAddress(d)
+		if !ok || du.hidden&abHideDelegate != 0 {
+			continue
+		}
+		if filter != nil && !matchNode(du, filter) {
+			continue
+		}
+		mids = append(mids, du.mid)
 	}
 	return mids
 }

@@ -237,6 +237,10 @@ const (
 	PrEmsAbContainerID = PropTag(0xFFFD0003) // PtLong (PidTagAddressBookContainerId)
 	PrEmsAbIsMaster    = PropTag(0xFFFB000B) // PtBoolean (PidTagAddressBookIsMaster)
 	PrEmsAbMember      = PropTag(0x8009000D) // PtObject (PidTagAddressBookMember); a STAT container id selecting a list's members
+	// PrEmsAbPublicDelegates is a STAT container id selecting a mailbox's public
+	// delegates: GetMatches reads the delegate list of the entry at cur_rec, and
+	// ModLinkAtt edits the caller's own list (PidTagAddressBookPublicDelegates).
+	PrEmsAbPublicDelegates = PropTag(0x8015000D) // PtObject
 )
 
 // Ambiguous-name-resolution proptags (NSPI GetMatches restrictions, [MS-OXNSPI]

@@ -161,6 +161,14 @@ func (s *Server) getMatchesCore(req getMatchesRequest) getMatchesResult {
 		if exp, ok := s.gal.(mlistExpander); ok {
 			mids = g.memberMIDs(st.curRec, exp, int(req.rowCount))
 		}
+	case st.containerID == uint32(mapi.PrEmsAbPublicDelegates):
+		// Read the public-delegate list of the mailbox at cur_rec ([MS-OXNSPI]
+		// 3.1.4.1.10): delegates hidden from the delegate list, and any the filter
+		// excludes, are dropped. Public delegates are world-readable, so this takes
+		// no caller identity.
+		if reader, ok := s.gal.(delegateReader); ok {
+			mids = g.delegateMIDs(st.curRec, reader, req.filter, int(req.rowCount))
+		}
 	case st.containerID == uint32(galContainerID):
 		// The GAL honors both the GAL-browse and the name-resolution hide bits.
 		mids = g.matchAll(req.filter, req.rowCount, st, abHideFromGAL|abHideResolve, nil)
