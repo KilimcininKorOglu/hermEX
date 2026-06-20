@@ -92,6 +92,10 @@ type LocalDomains interface {
 type GALEntry struct {
 	DisplayName string
 	Address     string
+	// DisplayType is the entry's PR_DISPLAY_TYPE_EX object class: a mailbox user
+	// (DT_MAILUSER, the zero value) or a distribution list (DT_DISTLIST). The NSPI
+	// layer renders the right address-book object type and EntryID flavor from it.
+	DisplayType int
 	// HiddenFrom is the address-book hide mask (the PtLong form of PR_ATTR_HIDDEN):
 	// a directory holds the raw bits and the NSPI layer applies them per surface.
 	// Zero means visible everywhere. The static directory never hides.

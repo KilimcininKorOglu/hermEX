@@ -145,6 +145,29 @@ func TestExpandMListNotAList(t *testing.T) {
 	}
 }
 
+// TestSearchGALIncludesDistlist proves a distribution list (which has no mailbox)
+// appears in the GAL carrying DT_DISTLIST, while a mailbox user keeps DT_MAILUSER,
+// so the address book can render each with the right object class.
+func TestSearchGALIncludesDistlist(t *testing.T) {
+	d := mlistTestDir(t)
+	mkList(t, d, "team@hermex.test", mlistTypeNormal, mlistPrivAll)
+
+	lists, err := d.SearchGAL("team", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lists) != 1 || lists[0].Address != "team@hermex.test" || lists[0].DisplayType != dtDistlist {
+		t.Errorf("SearchGAL(team) = %+v, want one team@hermex.test with DisplayType DT_DISTLIST", lists)
+	}
+	users, err := d.SearchGAL("alice", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 1 || users[0].DisplayType != dtMailuser {
+		t.Errorf("SearchGAL(alice) = %+v, want alice with DisplayType DT_MAILUSER", users)
+	}
+}
+
 // TestMListCRUD proves the create/list/membership/delete round-trip, including
 // that deleting a list cascades its membership away.
 func TestMListCRUD(t *testing.T) {

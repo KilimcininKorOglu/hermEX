@@ -159,6 +159,30 @@ func TestSeekEntriesSkipsGALHidden(t *testing.T) {
 	}
 }
 
+// TestDistlistRendersAsDistList proves a GAL entry that is a distribution list
+// carries the DT_DISTLIST object/display type (and not the mailuser default), so
+// a client shows it as a list it can expand rather than a person.
+func TestDistlistRendersAsDistList(t *testing.T) {
+	s := NewServer(maskedGAL{
+		{DisplayName: "team", Address: "team@hermex.test", DisplayType: mapi.DisplayTypeDistList},
+		{DisplayName: "alice", Address: "alice@hermex.test", DisplayType: mapi.DisplayTypeMailUser},
+	}, testGUID)
+	g := s.snapshot()
+	props := map[string]mapi.PropertyValues{}
+	for _, u := range g.users {
+		props[u.smtp] = galUserProps(u)
+	}
+	if ot, _ := props["team@hermex.test"].Get(mapi.PrObjectType); ot != int32(mapi.ObjectTypeDistList) {
+		t.Errorf("list object type = %v, want %d (distlist)", ot, mapi.ObjectTypeDistList)
+	}
+	if dt, _ := props["team@hermex.test"].Get(mapi.PrDisplayType); dt != int32(mapi.DisplayTypeDistList) {
+		t.Errorf("list display type = %v, want %d (distlist)", dt, mapi.DisplayTypeDistList)
+	}
+	if ot, _ := props["alice@hermex.test"].Get(mapi.PrObjectType); ot != int32(mapi.ObjectTypeMailUser) {
+		t.Errorf("user object type = %v, want %d (mailuser)", ot, mapi.ObjectTypeMailUser)
+	}
+}
+
 // TestGetPropsDirectOpenIgnoresHide proves a direct GetProps by a hidden user's
 // cursor still returns its row: hiding governs browse and resolution, not the
 // ability to open a specific entry the client already addresses.

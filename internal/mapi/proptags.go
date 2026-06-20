@@ -252,6 +252,7 @@ const (
 	ObjectTypeDistList = 8 // mapi_object_type::distlist
 
 	DisplayTypeMailUser = 0 // DT_MAILUSER
+	DisplayTypeDistList = 1 // DT_DISTLIST
 
 	RecipientSendable = 0x1 // recipSendable
 )

@@ -59,11 +59,23 @@ const (
 
 // galUser is one GAL entry with its assigned MId. hidden is the PR_ATTR_HIDDEN
 // mask the directory supplied; the surface applying it decides which bit matters.
+// dt is the entry's address-book display type (dtMailuser or dtDistlist).
 type galUser struct {
 	mid     uint32
 	display string
 	smtp    string
 	hidden  uint32
+	dt      uint32
+}
+
+// abDisplayType maps a directory object's display_type to the NSPI entry display
+// type used for its EntryID and PR_DISPLAY_TYPE: a distribution list, else a
+// mailbox user.
+func abDisplayType(displayType int) uint32 {
+	if displayType == mapi.DisplayTypeDistList {
+		return dtDistlist
+	}
+	return dtMailuser
 }
 
 // gal is the Global Address List in display-name order with MId assignment. It
@@ -103,7 +115,7 @@ func (s *Server) snapshot() gal {
 	})
 	users := make([]galUser, len(entries))
 	for i, e := range entries {
-		users[i] = galUser{mid: midBase + uint32(i), display: e.DisplayName, smtp: e.Address, hidden: e.HiddenFrom}
+		users[i] = galUser{mid: midBase + uint32(i), display: e.DisplayName, smtp: e.Address, hidden: e.HiddenFrom, dt: abDisplayType(e.DisplayType)}
 	}
 	return gal{users: users}
 }
@@ -267,13 +279,17 @@ func (g gal) resolveEntry(curRec uint32) (galUser, bool) {
 // carries: the permanent EntryID (with the reversible DN), the display name, the
 // SMTP address under the standard address tags, and the object/display types.
 func galUserProps(u galUser) mapi.PropertyValues {
+	objType, dispType := int32(mapi.ObjectTypeMailUser), int32(mapi.DisplayTypeMailUser)
+	if u.dt == dtDistlist {
+		objType, dispType = int32(mapi.ObjectTypeDistList), int32(mapi.DisplayTypeDistList)
+	}
 	return mapi.PropertyValues{
-		{Tag: mapi.PrEntryID, Value: permanentEntryID(dtMailuser, userDN(u.smtp))},
+		{Tag: mapi.PrEntryID, Value: permanentEntryID(u.dt, userDN(u.smtp))},
 		{Tag: mapi.PrDisplayName, Value: u.display},
 		{Tag: mapi.PrAddrType, Value: "SMTP"},
 		{Tag: mapi.PrEmailAddress, Value: u.smtp},
 		{Tag: mapi.PrSmtpAddress, Value: u.smtp},
-		{Tag: mapi.PrObjectType, Value: int32(mapi.ObjectTypeMailUser)},
-		{Tag: mapi.PrDisplayType, Value: int32(mapi.DisplayTypeMailUser)},
+		{Tag: mapi.PrObjectType, Value: objType},
+		{Tag: mapi.PrDisplayType, Value: dispType},
 	}
 }

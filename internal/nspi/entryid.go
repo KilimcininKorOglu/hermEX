@@ -13,6 +13,7 @@ var abProviderGUID = [16]byte{
 // Address-book display types ([MS-OXNSPI] / mapidefs).
 const (
 	dtMailuser  uint32 = 0x00000000 // DT_MAILUSER
+	dtDistlist  uint32 = 0x00000001 // DT_DISTLIST
 	dtContainer uint32 = 0x00000100 // DT_CONTAINER
 )
 

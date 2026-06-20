@@ -264,14 +264,14 @@ SELECT DISTINCT u.maildir
 }
 
 // SearchGAL implements GAL: a case-insensitive substring match over the
-// addresses of login-capable mailbox users — the same set Maildirs enumerates (a
-// normal MAILUSER account in an active domain with a maildir) — ordered by
-// address and capped at limit. It returns one entry per user: aliases and
-// altnames are deliberately not searched, since inbound alias delivery already
-// works via Resolve and folding them in would suggest one person several times.
-// DisplayName is the user's PR_DISPLAY_NAME from user_properties, falling back to
-// the address when no such property is set. The object class is filtered on the
-// users.display_type column, not joined from user_properties.
+// addresses of the address-book objects in an active domain — mailbox users with
+// a maildir (DT_MAILUSER) and distribution lists (DT_DISTLIST, which have no
+// mailbox) — ordered by address and capped at limit. It returns one entry per
+// object: aliases and altnames are deliberately not searched, since inbound alias
+// delivery already works via Resolve and folding them in would suggest one person
+// several times. DisplayName is the object's PR_DISPLAY_NAME from user_properties,
+// falling back to the address when none is set; DisplayType carries the object
+// class (the users.display_type column, not joined from user_properties).
 func (d *SQLDirectory) SearchGAL(query string, limit int) ([]GALEntry, error) {
 	if limit <= 0 {
 		limit = 20
@@ -288,20 +288,20 @@ func (d *SQLDirectory) SearchGAL(query string, limit int) ([]GALEntry, error) {
 	// per-surface filtering lives in the NSPI layer. The SQL only loads the raw
 	// mask; the address-book code applies the bit appropriate to each query.
 	const q = `
-SELECT u.username, dn.propval_str, hg.propval_str, hb.propval_str
+SELECT u.username, u.display_type, dn.propval_str, hg.propval_str, hb.propval_str
   FROM users u JOIN domains d ON u.domain_id = d.id
   LEFT JOIN user_properties dn ON dn.user_id = u.id AND dn.proptag = ? AND dn.order_id = 1
   LEFT JOIN user_properties hg ON hg.user_id = u.id AND hg.proptag = ? AND hg.order_id = 1
   LEFT JOIN user_properties hb ON hb.user_id = u.id AND hb.proptag = ? AND hb.order_id = 1
- WHERE u.maildir <> ''
-   AND u.display_type = ?
+ WHERE u.display_type IN (?, ?)
+   AND (u.maildir <> '' OR u.display_type = ?)
    AND (u.address_status & ?) = ?
    AND (u.address_status & ?) = 0
    AND d.domain_status = 0
    AND u.username LIKE ? ESCAPE '\\'
  ORDER BY u.username
  LIMIT ?`
-	rows, err := d.db.Query(q, prDisplayName, prAttrHiddenMask, prAttrHiddenBool, dtMailuser, afUserMask, afUserNormal, afDomainMask, "%"+esc+"%", limit)
+	rows, err := d.db.Query(q, prDisplayName, prAttrHiddenMask, prAttrHiddenBool, dtMailuser, dtDistlist, dtDistlist, afUserMask, afUserNormal, afDomainMask, "%"+esc+"%", limit)
 	if err != nil {
 		return nil, err
 	}
@@ -309,15 +309,16 @@ SELECT u.username, dn.propval_str, hg.propval_str, hb.propval_str
 	var out []GALEntry
 	for rows.Next() {
 		var addr string
+		var displayType int
 		var name, hideMask, hideBool sql.NullString
-		if err := rows.Scan(&addr, &name, &hideMask, &hideBool); err != nil {
+		if err := rows.Scan(&addr, &displayType, &name, &hideMask, &hideBool); err != nil {
 			return nil, err
 		}
 		display := addr
 		if name.Valid && name.String != "" {
 			display = name.String
 		}
-		out = append(out, GALEntry{DisplayName: display, Address: addr, HiddenFrom: hideMaskFromProps(hideMask, hideBool)})
+		out = append(out, GALEntry{DisplayName: display, Address: addr, DisplayType: displayType, HiddenFrom: hideMaskFromProps(hideMask, hideBool)})
 	}
 	return out, rows.Err()
 }
