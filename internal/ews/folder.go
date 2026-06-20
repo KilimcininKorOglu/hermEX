@@ -169,7 +169,11 @@ func (s *Server) handleGetFolder(w http.ResponseWriter, inner []byte, sess *sess
 				continue
 			}
 		}
-		f, code, err := folderElement(st, tgt.fid, folderIndex(all), all)
+		idMailbox := ""
+		if !isOwn {
+			idMailbox = tgt.mailbox
+		}
+		f, code, err := folderElement(st, tgt.fid, folderIndex(all), all, idMailbox)
 		switch {
 		case err != nil:
 			msgs = append(msgs, folderErr("ErrorInternalServerError"))
@@ -233,11 +237,8 @@ func (s *Server) handleFindFolder(w http.ResponseWriter, inner []byte, sess *ses
 		writeSOAPFault(w, "ErrorInvalidRequest", "FindFolder: "+err.Error())
 		return
 	}
-	st, all, ok := openFolders(w, sess)
-	if !ok {
-		return
-	}
-	defer st.Close()
+	cache := s.newStoreCache()
+	defer cache.closeAll()
 	deep := strings.EqualFold(req.Traversal, "Deep")
 
 	var msgs []findFolderResponseMessage
@@ -246,7 +247,28 @@ func (s *Server) handleFindFolder(w http.ResponseWriter, inner []byte, sess *ses
 			msgs = append(msgs, findFolderResponseMessage{ResponseClass: "Error", ResponseCode: tgt.code})
 			continue
 		}
-		elems, err := folderElements(st, collectChildren(all, tgt.fid, deep), all)
+		st, all, isOwn, code := cache.open(sess, tgt.mailbox)
+		if code != "" {
+			msgs = append(msgs, findFolderResponseMessage{ResponseClass: "Error", ResponseCode: code})
+			continue
+		}
+		// Enumerating another mailbox's subfolders requires visibility on the parent.
+		if !isOwn {
+			rights, err := st.ResolvePermission(tgt.fid, sess.user)
+			if err != nil {
+				msgs = append(msgs, findFolderResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
+				continue
+			}
+			if rights&mapi.FrightsVisible == 0 {
+				msgs = append(msgs, findFolderResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorAccessDenied"})
+				continue
+			}
+		}
+		idMailbox := ""
+		if !isOwn {
+			idMailbox = tgt.mailbox
+		}
+		elems, err := folderElements(st, collectChildren(all, tgt.fid, deep), all, idMailbox)
 		if err != nil {
 			msgs = append(msgs, findFolderResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
 			continue
@@ -295,7 +317,7 @@ func (s *Server) handleSyncFolderHierarchy(w http.ResponseWriter, inner []byte, 
 	var changes hierarchyChanges
 	primed := req.SyncState != "" && req.SyncState == state.HierarchyState
 	if !primed {
-		elems, err := folderElements(st, all, all)
+		elems, err := folderElements(st, all, all, "")
 		if err != nil {
 			writeSOAPFault(w, "ErrorInternalServerError", err.Error())
 			return
@@ -310,7 +332,7 @@ func (s *Server) handleSyncFolderHierarchy(w http.ResponseWriter, inner []byte, 
 		}
 		for _, f := range all {
 			if !prevSet[f.ID] {
-				e, err := buildFolderElem(st, f, all)
+				e, err := buildFolderElem(st, f, all, "")
 				if err != nil {
 					writeSOAPFault(w, "ErrorInternalServerError", err.Error())
 					return
@@ -502,23 +524,25 @@ func folderErr(code string) folderResponseMessage {
 // folderElement resolves one folder id to its element, returning a non-empty
 // error code when the folder is absent. The IPM subtree root is synthesized
 // (it is not itself in the listing).
-func folderElement(st *objectstore.Store, fid int64, idx map[int64]objectstore.FolderInfo, all []objectstore.FolderInfo) (oxews.Folder, string, error) {
+func folderElement(st *objectstore.Store, fid int64, idx map[int64]objectstore.FolderInfo, all []objectstore.FolderInfo, mailbox string) (oxews.Folder, string, error) {
 	if fid == mapi.PrivateFIDIPMSubtree || fid == mapi.PrivateFIDRoot {
-		return syntheticRoot(all), "", nil
+		return syntheticRoot(all, mailbox), "", nil
 	}
 	info, ok := idx[fid]
 	if !ok {
 		return oxews.Folder{}, "ErrorItemNotFound", nil
 	}
-	f, err := buildFolderElem(st, info, all)
+	f, err := buildFolderElem(st, info, all, mailbox)
 	return f, "", err
 }
 
-// folderElements builds folder elements for a slice of folder infos.
-func folderElements(st *objectstore.Store, infos, all []objectstore.FolderInfo) ([]oxews.Folder, error) {
+// folderElements builds folder elements for a slice of folder infos. mailbox is the
+// target mailbox SMTP when the folders live in another mailbox (so the minted folder
+// ids reopen it); empty for the caller's own.
+func folderElements(st *objectstore.Store, infos, all []objectstore.FolderInfo, mailbox string) ([]oxews.Folder, error) {
 	out := make([]oxews.Folder, 0, len(infos))
 	for _, info := range infos {
-		f, err := buildFolderElem(st, info, all)
+		f, err := buildFolderElem(st, info, all, mailbox)
 		if err != nil {
 			return nil, err
 		}
@@ -528,8 +552,8 @@ func folderElements(st *objectstore.Store, infos, all []objectstore.FolderInfo) 
 }
 
 // buildFolderElem renders a folder element with its live item counts and child
-// count.
-func buildFolderElem(st *objectstore.Store, info objectstore.FolderInfo, all []objectstore.FolderInfo) (oxews.Folder, error) {
+// count. mailbox tags the minted folder ids with the target mailbox (empty for own).
+func buildFolderElem(st *objectstore.Store, info objectstore.FolderInfo, all []objectstore.FolderInfo, mailbox string) (oxews.Folder, error) {
 	total, unread, err := st.CountMessages(info.ID)
 	if err != nil {
 		return oxews.Folder{}, err
@@ -553,16 +577,18 @@ func buildFolderElem(st *objectstore.Store, info objectstore.FolderInfo, all []o
 		Total:        total,
 		Unread:       unread,
 		Children:     childCount(all, info.ID),
+		Mailbox:      mailbox,
 	}), nil
 }
 
 // syntheticRoot renders the IPM subtree root, which is not itself enumerated by
 // ListFolders; its children are the top-level folders.
-func syntheticRoot(all []objectstore.FolderInfo) oxews.Folder {
+func syntheticRoot(all []objectstore.FolderInfo, mailbox string) oxews.Folder {
 	return oxews.BuildFolder(oxews.FolderInput{
 		FolderID:    mapi.PrivateFIDIPMSubtree,
 		DisplayName: "Top of Information Store",
 		Children:    childCount(all, mapi.PrivateFIDIPMSubtree),
+		Mailbox:     mailbox,
 	})
 }
 

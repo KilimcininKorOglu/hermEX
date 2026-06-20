@@ -37,19 +37,23 @@ type FolderInput struct {
 	Total        int
 	Unread       int
 	Children     int
+	// Mailbox is the target mailbox SMTP when the folder lives in another mailbox the
+	// caller was granted access to; empty for the caller's own. It is encoded into the
+	// folder and parent ids so a later request reopens the same mailbox.
+	Mailbox string
 }
 
 // BuildFolder renders a <t:Folder> element from store folder data.
 func BuildFolder(in FolderInput) Folder {
 	f := Folder{
-		FolderID:         FolderID{ID: EncodeFolderID(in.FolderID), ChangeKey: ChangeKey(in.ChangeNumber)},
+		FolderID:         FolderID{ID: EncodeFolderIDFor(in.FolderID, in.Mailbox), ChangeKey: ChangeKey(in.ChangeNumber)},
 		DisplayName:      in.DisplayName,
 		TotalCount:       in.Total,
 		ChildFolderCount: in.Children,
 		UnreadCount:      in.Unread,
 	}
 	if in.ParentID != nil {
-		f.ParentFolderID = &FolderID{ID: EncodeFolderID(*in.ParentID)}
+		f.ParentFolderID = &FolderID{ID: EncodeFolderIDFor(*in.ParentID, in.Mailbox)}
 	}
 	return f
 }

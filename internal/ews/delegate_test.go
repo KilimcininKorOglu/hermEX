@@ -760,3 +760,73 @@ func TestCreateAttachmentCrossMailboxRejected(t *testing.T) {
 		t.Errorf("a foreign parent id must be rejected:\n%s", out)
 	}
 }
+
+// crossMailboxFindFolder builds a FindFolder request whose parent folder targets
+// another mailbox when mailbox is non-empty.
+func crossMailboxFindFolder(distinguishedID, mailbox string) string {
+	mb := ""
+	if mailbox != "" {
+		mb = `<t:Mailbox><t:EmailAddress>` + mailbox + `</t:EmailAddress></t:Mailbox>`
+	}
+	return wrapRequest(`<FindFolder xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `" Traversal="Shallow">` +
+		`<FolderShape><t:BaseShape>Default</t:BaseShape></FolderShape>` +
+		`<ParentFolderIds><t:DistinguishedFolderId Id="` + distinguishedID + `">` + mb + `</t:DistinguishedFolderId></ParentFolderIds>` +
+		`</FindFolder>`)
+}
+
+// firstFolderID extracts the first FolderId Id attribute value (the folder's own id,
+// emitted before its ParentFolderId) from a SOAP response.
+func firstFolderID(out string) string {
+	const marker = `<FolderId Id="`
+	i := strings.Index(out, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := out[i+len(marker):]
+	j := strings.IndexByte(rest, '"')
+	if j < 0 {
+		return ""
+	}
+	return rest[:j]
+}
+
+// TestFindFolderCrossMailboxWithGrant confirms a caller granted visibility on another
+// mailbox's root can enumerate its folders, and the returned folder ids encode the
+// target mailbox so navigation continues there.
+func TestFindFolderCrossMailboxWithGrant(t *testing.T) {
+	ts, paths := delegateServer(t)
+	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDIPMSubtree), testUser, mapi.RightsReviewer)
+
+	_, out := soapPost(t, ts, crossMailboxFindFolder("msgfolderroot", "bob@hermex.test"), true)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("a granted caller must enumerate the target's folders:\n%s", out)
+	}
+	fid, mb, err := oxews.DecodeFolderID(firstFolderID(out))
+	if err != nil || mb != "bob@hermex.test" || fid == 0 {
+		t.Errorf("a returned folder id must encode the target mailbox, got fid=%d mb=%q (%v)", fid, mb, err)
+	}
+}
+
+// TestFindFolderCrossMailboxDenied confirms a caller without visibility on another
+// mailbox's root cannot enumerate it.
+func TestFindFolderCrossMailboxDenied(t *testing.T) {
+	ts, _ := delegateServer(t)
+
+	_, out := soapPost(t, ts, crossMailboxFindFolder("msgfolderroot", "bob@hermex.test"), true)
+	if !strings.Contains(out, "ErrorAccessDenied") {
+		t.Errorf("an ungranted caller must be denied folder enumeration:\n%s", out)
+	}
+}
+
+// TestGetFolderReturnsMailboxEncodedID confirms a cross-mailbox GetFolder returns a
+// folder id that encodes the target, so a follow-up request stays in that mailbox.
+func TestGetFolderReturnsMailboxEncodedID(t *testing.T) {
+	ts, paths := delegateServer(t)
+	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.RightsReviewer)
+
+	_, out := soapPost(t, ts, crossMailboxGetFolder("inbox", "bob@hermex.test"), true)
+	_, mb, err := oxews.DecodeFolderID(firstFolderID(out))
+	if err != nil || mb != "bob@hermex.test" {
+		t.Errorf("GetFolder must return a mailbox-encoded id, got mb=%q (%v)", mb, err)
+	}
+}
