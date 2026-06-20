@@ -145,3 +145,36 @@ func TestUIUserEditRequiresCSRF(t *testing.T) {
 		t.Errorf("a CSRF-less edit still updated %q", d.updatedUser)
 	}
 }
+
+// TestUIUserAltnames proves the detail page seeds the alternative-names textarea
+// with the current set and the save splits the textarea on whitespace before
+// replacing the set through the directory.
+func TestUIUserAltnames(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		userDetail: directory.UserDetail{Username: "alice@hermex.test"},
+		altnames:   []string{"ali", "alice2"},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	page := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
+	body, _ := io.ReadAll(page.Body)
+	page.Body.Close()
+	if !strings.Contains(string(body), "ali") || !strings.Contains(string(body), "Alternative login names") {
+		t.Errorf("detail page missing the altnames section/values:\n%s", body)
+	}
+
+	resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/altnames", session, csrf,
+		url.Values{"altnames": {"newone\nnewtwo  three"}})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("altnames save status %d, want 200", resp.StatusCode)
+	}
+	if d.setAltnamesUser != "alice@hermex.test" || len(d.setAltnames) != 3 {
+		t.Errorf("SetAltnames = (%q, %v), want alice@hermex.test split into 3 names", d.setAltnamesUser, d.setAltnames)
+	}
+	if rb, _ := io.ReadAll(resp.Body); !strings.Contains(string(rb), "Saved") {
+		t.Errorf("altnames save response = %s, want a success acknowledgement", rb)
+	}
+}

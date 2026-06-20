@@ -547,6 +547,68 @@ func (d *SQLDirectory) DeleteUser(username string, deleteFiles bool) (bool, erro
 	return true, nil
 }
 
+// ListAltnames returns a user's alternative login names, ordered, for the admin
+// detail view; an unknown user simply has none.
+func (d *SQLDirectory) ListAltnames(username string) ([]string, error) {
+	rows, err := d.db.Query(
+		`SELECT a.altname FROM altnames a JOIN users u ON a.user_id = u.id
+		 WHERE u.username = ? ORDER BY a.altname`,
+		strings.ToLower(strings.TrimSpace(username)))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// SetAltnames replaces a user's alternative login names with the given set
+// (lowercased, trimmed, de-duplicated, blanks dropped), reporting whether the
+// user existed. The replace runs in one transaction; the altname UNIQUE key
+// rejects a name already taken by another account, rolling the change back.
+func (d *SQLDirectory) SetAltnames(username string, altnames []string) (bool, error) {
+	username = strings.ToLower(strings.TrimSpace(username))
+	var id int64
+	err := d.db.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	seen := map[string]bool{}
+	var clean []string
+	for _, a := range altnames {
+		a = strings.ToLower(strings.TrimSpace(a))
+		if a == "" || seen[a] {
+			continue
+		}
+		seen[a] = true
+		clean = append(clean, a)
+	}
+	tx, err := d.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM altnames WHERE user_id = ?`, id); err != nil {
+		return false, err
+	}
+	for _, a := range clean {
+		if _, err := tx.Exec(`INSERT INTO altnames (user_id, altname) VALUES (?, ?)`, id, a); err != nil {
+			return false, err
+		}
+	}
+	return true, tx.Commit()
+}
+
 // CreateAlias maps an alternate address (aliasname) to a canonical user
 // (mainname == users.username) in the aliases table.
 func (d *SQLDirectory) CreateAlias(aliasname, mainname string) error {

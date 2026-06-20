@@ -152,3 +152,65 @@ func TestSQLDirectoryDeleteUserKeepsFiles(t *testing.T) {
 		t.Errorf("a delete without deleteFiles removed the maildir at %q (stat err %v)", maildir, err)
 	}
 }
+
+// TestSQLDirectoryAltnames proves alternative login names round-trip through
+// Set/ListAltnames: the set is normalized and de-duplicated, a replace overwrites
+// the prior set, an unknown user reports not-found, and a name already owned by
+// another account is rejected with the prior set left intact.
+func TestSQLDirectoryAltnames(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	cleanTables(t, db)
+
+	root := t.TempDir()
+	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "dom")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.CreateUser("alice@hermex.test", "pw", filepath.Join(root, "alice")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.CreateUser("bob@hermex.test", "pw", filepath.Join(root, "bob")); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set normalizes (lowercase/trim), de-duplicates, and drops blanks.
+	found, err := d.SetAltnames("alice@hermex.test", []string{"  Ali  ", "ali", "", "alice2"})
+	if err != nil || !found {
+		t.Fatalf("SetAltnames = %v, %v; want found", found, err)
+	}
+	got, err := d.ListAltnames("alice@hermex.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != "ali" || got[1] != "alice2" {
+		t.Errorf("ListAltnames = %v, want [ali alice2] (normalized, deduped, ordered)", got)
+	}
+
+	// A replace overwrites the prior set entirely.
+	if _, err := d.SetAltnames("alice@hermex.test", []string{"alice3"}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := d.ListAltnames("alice@hermex.test"); len(got) != 1 || got[0] != "alice3" {
+		t.Errorf("after replace ListAltnames = %v, want [alice3]", got)
+	}
+
+	// An unknown user is reported not-found.
+	if found, _ := d.SetAltnames("ghost@hermex.test", []string{"x"}); found {
+		t.Error("SetAltnames(unknown) should report not-found")
+	}
+
+	// A name owned by another account is rejected (the altname UNIQUE key), and
+	// alice's set survives the rolled-back transaction.
+	if _, err := d.SetAltnames("bob@hermex.test", []string{"bobalt"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.SetAltnames("alice@hermex.test", []string{"bobalt"}); err == nil {
+		t.Error("SetAltnames with another user's altname should be rejected")
+	}
+	if got, _ := d.ListAltnames("alice@hermex.test"); len(got) != 1 || got[0] != "alice3" {
+		t.Errorf("a rejected replace changed the set to %v, want [alice3] preserved", got)
+	}
+}

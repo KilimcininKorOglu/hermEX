@@ -30,6 +30,14 @@
 </form>
 {{template "user-status" .}}
 
+<h2>Alternative login names</h2>
+<form class="altnames-form" hx-put="/admin/ui/users/{{.User.Username}}/altnames" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>One name per line
+<textarea name="altnames" rows="4" placeholder="alias-login">{{.Altnames}}</textarea></label>
+<button type="submit">Save names</button>
+</form>
+
 <form class="delete-form" hx-post="/admin/ui/users/{{.User.Username}}/delete" hx-confirm="Delete {{.User.Username}}? This cannot be undone."
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label class="check"><input type="checkbox" name="deleteFiles"> Also delete the mailbox files from disk</label>

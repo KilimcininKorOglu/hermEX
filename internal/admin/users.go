@@ -126,3 +126,39 @@ func (s *Server) handleDeleteUser(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+// handleListAltnames returns a user's alternative login names (system
+// administrators only).
+func (s *Server) handleListAltnames(w http.ResponseWriter, r *http.Request) {
+	names, err := s.dir.ListAltnames(r.PathValue("email"))
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+	if names == nil {
+		names = []string{}
+	}
+	writeJSON(w, names)
+}
+
+// handleSetAltnames replaces a user's alternative login names (system
+// administrators only). A name already taken by another account is rejected.
+func (s *Server) handleSetAltnames(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Altnames []string `json:"altnames"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	found, err := s.dir.SetAltnames(r.PathValue("email"), req.Altnames)
+	if err != nil {
+		http.Error(w, "could not set alternative names: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if !found {
+		http.Error(w, "no such user", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

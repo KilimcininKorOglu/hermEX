@@ -3,6 +3,7 @@ package admin
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"hermex/internal/directory"
 )
@@ -76,11 +77,33 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no such user", http.StatusNotFound)
 		return
 	}
+	altnames, _ := s.dir.ListAltnames(u.Username)
 	s.render(w, "user_detail.html", map[string]any{
-		"Nav":  "users",
-		"CSRF": csrfCookieValue(r),
-		"User": u,
+		"Nav":      "users",
+		"CSRF":     csrfCookieValue(r),
+		"User":     u,
+		"Altnames": strings.Join(altnames, "\n"),
 	})
+}
+
+// handleUIUserAltnames replaces the user's alternative login names from the
+// textarea (whitespace-separated) and returns the refreshed status panel; a name
+// already taken by another account is reported there.
+func (s *Server) handleUIUserAltnames(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	found, err := s.dir.SetAltnames(r.PathValue("email"), strings.Fields(r.PostFormValue("altnames")))
+	data := map[string]any{}
+	switch {
+	case err != nil:
+		data["Error"] = "Could not save alternative names: " + err.Error()
+	case !found:
+		data["Error"] = "No such user."
+	default:
+		data["Saved"] = true
+	}
+	s.render(w, "user-status", data)
 }
 
 // handleUIUserEdit saves the edited account fields and returns the refreshed
