@@ -47,6 +47,20 @@ func setDelegateList(t *testing.T, dir string, list []string) {
 	}
 }
 
+// setStoreOwners grants full mailbox access to the given users on a mailbox by opening
+// the store directly (the provisioning side), so a later logon resolves it.
+func setStoreOwners(t *testing.T, dir string, list []string) {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.SetStoreOwners(list); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // readLogonResponseFlags pulls a RopLogon response's ReturnValue and (on success)
 // its ResponseFlags byte, skipping the LogonFlags and the 13 special-folder EIDs.
 func readLogonResponseFlags(t *testing.T, resp []byte) (ec uint32, flags uint8) {
@@ -136,6 +150,35 @@ func TestDelegateLogonDeniedWithoutAccess(t *testing.T) {
 	}
 	if len(sess.delegateCallers) != 0 {
 		t.Errorf("a denied logon registered a delegate context: %v", sess.delegateCallers)
+	}
+}
+
+// TestDelegateLogonViaStoreOwner proves the third open path: an additional store owner
+// (full mailbox access), though not on the delegate list and holding no folder grant,
+// may open the target store. Ownership confers access, not send-on-behalf, so the
+// response carries no send-as right.
+func TestDelegateLogonViaStoreOwner(t *testing.T) {
+	callerDir := t.TempDir()
+	targetDir := t.TempDir()
+	setStoreOwners(t, targetDir, []string{"owner@hermex.test"})
+	accounts := directory.StaticAccounts{
+		"boss@hermex.test":  {MailboxPath: targetDir},
+		"owner@hermex.test": {MailboxPath: callerDir},
+	}
+	sess := NewSession(callerDir, accounts, "owner@hermex.test")
+	defer sess.Close()
+
+	resp, h := sess.Dispatch(delegateLogonRequest(0, 0x01, userDNFor("boss@hermex.test")), []uint32{0xFFFFFFFF})
+	ec, flags := readLogonResponseFlags(t, resp)
+	if ec != ecSuccess {
+		t.Fatalf("store-owner logon ec = %#x, want success", ec)
+	}
+	// Store ownership is access, not send-on-behalf: the send-as right must be off.
+	if flags&responseFlagSendAsRight != 0 {
+		t.Errorf("store-owner ResponseFlags = %#x, set the send-as right; ownership is not send-on-behalf", flags)
+	}
+	if logon := sess.get(h[0]); logon == nil || sess.delegateCallers[logon.store] != "owner@hermex.test" {
+		t.Error("store-owner delegate context not registered")
 	}
 }
 

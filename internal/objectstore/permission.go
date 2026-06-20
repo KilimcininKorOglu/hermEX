@@ -141,6 +141,15 @@ func (s *Store) ModifyPermissions(folderID int64, replace bool, changes []Permis
 // anonymous ("") row through the exact lookup. Rights come back as the stored,
 // already-normalized bitfield for the caller (free/busy, delegate access) to read.
 func (s *Store) ResolvePermission(folderID int64, username string) (uint32, error) {
+	// A store owner has read-write access to every object in the mailbox, so it
+	// resolves to full member rights on any folder regardless of that folder's own
+	// ACL. Checking here keeps the elevation in the single permission resolver every
+	// access goes through, rather than at each call site where one could be missed.
+	if owner, err := s.IsStoreOwner(username); err != nil {
+		return 0, err
+	} else if owner {
+		return mapi.RightsMaxROP, nil
+	}
 	if rights, ok, err := s.lookupPermission(folderID, username); err != nil || ok {
 		return rights, err
 	}

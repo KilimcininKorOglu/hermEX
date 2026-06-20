@@ -107,6 +107,15 @@ const (
 	// the MTA consults it to authorize an authenticated submission whose envelope
 	// sender is another mailbox, and the admin console manages the same list.
 	PrAbSendAs = PropTag(0x677B001F) // PtUnicode
+	// PrAbStoreOwners is the provider-defined store-root property (0x677C) holding the
+	// mailbox's additional store-owner list — the addresses granted read-write access
+	// to every object in the mailbox (full mailbox access) — as a JSON array of SMTP
+	// addresses. It is per-mailbox (a store property, not the directory DB) like
+	// PrAbDelegates and, deliberately, not the wire-editable folder permission table:
+	// the privileged store-owner grant is admin-managed and must survive a client's
+	// folder-permission edits. Permission resolution grants a listed owner full member
+	// rights on every folder, and the store-open gate admits them.
+	PrAbStoreOwners = PropTag(0x677C001F) // PtUnicode
 )
 
 // Large message/attachment content property tags. These hold bodies and

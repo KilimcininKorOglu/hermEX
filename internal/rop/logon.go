@@ -178,20 +178,25 @@ func essdnToSMTP(dn string) (string, bool) {
 
 // mayOpenDelegate reports whether caller may open store as a delegate and whether
 // they are on its delegate list. A caller may open when designated on the delegate
-// list, or when they hold an explicit per-user grant on any folder. The open gate is
-// deliberately caller-specific — it counts only the caller's OWN grants, never the
-// universal "default" member, so the always-present default free/busy grant does not
-// let every authenticated user open every mailbox. (The per-folder gates then govern
-// what the opened session can actually read and change, and those DO honour the
-// default grant — open vs per-folder use different criteria on purpose.) A
-// default-member or group grant alone does not enable a store-open; that is the
-// documented v1 limitation (free/busy is served via NSPI/EWS/CalDAV, not a ROP logon,
-// so free/busy sharing is unaffected). onList reports the delegate-list membership the
-// caller separately needs to send on the mailbox's behalf.
+// list, when they are an additional store owner (full mailbox access), or when they
+// hold an explicit per-user grant on any folder. The open gate is deliberately
+// caller-specific — it counts only the caller's OWN grants, never the universal
+// "default" member, so the always-present default free/busy grant does not let every
+// authenticated user open every mailbox. (The per-folder gates then govern what the
+// opened session can actually read and change, and those DO honour the default grant —
+// open vs per-folder use different criteria on purpose.) A default-member or group
+// grant alone does not enable a store-open; that is the documented v1 limitation
+// (free/busy is served via NSPI/EWS/CalDAV, not a ROP logon, so free/busy sharing is
+// unaffected). onList reports the delegate-list membership the caller separately needs
+// to send on the mailbox's behalf — store ownership confers access, not send-on-behalf.
 func (s *Session) mayOpenDelegate(store *objectstore.Store, caller string) (mayOpen, onList bool, err error) {
 	onList, err = s.onDelegateList(store, caller)
 	if err != nil || onList {
 		return onList, onList, err
+	}
+	owner, err := store.IsStoreOwner(caller)
+	if err != nil || owner {
+		return owner, false, err
 	}
 	grant, err := store.HasFolderGrant(caller)
 	return grant, false, err
