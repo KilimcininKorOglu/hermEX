@@ -270,8 +270,9 @@ func TestSQLDirectoryMaildirs(t *testing.T) {
 
 // TestSQLDirectorySearchGAL checks GAL recipient search over the SQL directory:
 // a case-insensitive substring match on the usernames of active mailbox users,
-// excluding a suspended account, ordered by address, with the result cap honored
-// and the address mirrored into the display name.
+// excluding a suspended account, ordered by address, with the result cap honored,
+// the display name taken from PR_DISPLAY_NAME in user_properties, and the address
+// used as the fallback when no display name is set.
 func TestSQLDirectorySearchGAL(t *testing.T) {
 	db := openTestDB(t)
 	d := NewSQL(db)
@@ -291,6 +292,11 @@ func TestSQLDirectorySearchGAL(t *testing.T) {
 	}
 	// Suspend albert: a disabled account must not surface in the address list.
 	if _, err := db.Exec(`UPDATE users SET address_status = ? WHERE username = ?`, afUserSuspended, "albert@hermex.test"); err != nil {
+		t.Fatal(err)
+	}
+	// Give bob a PR_DISPLAY_NAME so the GAL returns the name, not the address;
+	// alice keeps none, exercising the address fallback.
+	if _, err := d.SetUserProperties("bob@hermex.test", map[uint32]string{0x3001001F: "Bob Builder"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -323,5 +329,12 @@ func TestSQLDirectorySearchGAL(t *testing.T) {
 	// The limit caps the result count.
 	if got, _ := d.SearchGAL("hermex.test", 1); len(got) != 1 {
 		t.Errorf("SearchGAL(domain, limit 1) returned %d, want 1", len(got))
+	}
+
+	// bob's PR_DISPLAY_NAME surfaces as the display name (the LEFT JOIN), while
+	// alice with none keeps the address fallback asserted above.
+	bob, _ := d.SearchGAL("bob", 0)
+	if len(bob) != 1 || bob[0].Address != "bob@hermex.test" || bob[0].DisplayName != "Bob Builder" {
+		t.Errorf("SearchGAL(bob) = %v, want bob@hermex.test displayed as %q", bob, "Bob Builder")
 	}
 }

@@ -256,9 +256,9 @@ SELECT DISTINCT u.maildir
 // address and capped at limit. It returns one entry per user: aliases and
 // altnames are deliberately not searched, since inbound alias delivery already
 // works via Resolve and folding them in would suggest one person several times.
-// DisplayName falls back to the address; per-user display names live in
-// user_properties (the internal spec §2.10), which the directory-database slice
-// will add, at which point this query gains a LEFT JOIN for the name.
+// DisplayName is the user's PR_DISPLAY_NAME from user_properties, falling back to
+// the address when no such property is set. The object class is filtered on the
+// users.display_type column, not joined from user_properties.
 func (d *SQLDirectory) SearchGAL(query string, limit int) ([]GALEntry, error) {
 	if limit <= 0 {
 		limit = 20
@@ -267,9 +267,11 @@ func (d *SQLDirectory) SearchGAL(query string, limit int) ([]GALEntry, error) {
 	// is a bound parameter, so only the ESCAPE clause sits in the SQL text (where
 	// '\\' is how MySQL spells a single backslash escape character).
 	esc := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(strings.ToLower(strings.TrimSpace(query)))
+	const prDisplayName = 0x3001001F // PR_DISPLAY_NAME (PtUnicode)
 	const q = `
-SELECT u.username
+SELECT u.username, dn.propval_str
   FROM users u JOIN domains d ON u.domain_id = d.id
+  LEFT JOIN user_properties dn ON dn.user_id = u.id AND dn.proptag = ? AND dn.order_id = 1
  WHERE u.maildir <> ''
    AND u.display_type = ?
    AND (u.address_status & ?) = ?
@@ -278,7 +280,7 @@ SELECT u.username
    AND u.username LIKE ? ESCAPE '\\'
  ORDER BY u.username
  LIMIT ?`
-	rows, err := d.db.Query(q, dtMailuser, afUserMask, afUserNormal, afDomainMask, "%"+esc+"%", limit)
+	rows, err := d.db.Query(q, prDisplayName, dtMailuser, afUserMask, afUserNormal, afDomainMask, "%"+esc+"%", limit)
 	if err != nil {
 		return nil, err
 	}
@@ -286,10 +288,15 @@ SELECT u.username
 	var out []GALEntry
 	for rows.Next() {
 		var addr string
-		if err := rows.Scan(&addr); err != nil {
+		var name sql.NullString
+		if err := rows.Scan(&addr, &name); err != nil {
 			return nil, err
 		}
-		out = append(out, GALEntry{DisplayName: addr, Address: addr})
+		display := addr
+		if name.Valid && name.String != "" {
+			display = name.String
+		}
+		out = append(out, GALEntry{DisplayName: display, Address: addr})
 	}
 	return out, rows.Err()
 }

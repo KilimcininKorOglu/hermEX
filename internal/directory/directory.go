@@ -60,11 +60,10 @@ type LocalDomains interface {
 }
 
 // GALEntry is one Global Address List entry returned by a recipient search: a
-// directory user's address and a display name for it. Until per-user display
-// names are stored — they live in user_properties (the internal spec §2.10),
-// resolved PR_DISPLAY_NAME → PR_NICKNAME → username, which the directory-database
-// slice will add — DisplayName falls back to the address. That is the
-// degenerate-correct case of the same GAL, not a placeholder.
+// directory user's address and a display name for it. The SQL directory resolves
+// DisplayName from PR_DISPLAY_NAME in user_properties, falling back to the address
+// when none is set; the static (config) directory mirrors the address. The
+// fallback is the degenerate-correct case of the same GAL, not a placeholder.
 type GALEntry struct {
 	DisplayName string
 	Address     string
