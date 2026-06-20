@@ -37,7 +37,7 @@ func wellKnownFID(t *testing.T, name string) int64 {
 // round-trips as `"addr" <addr>`, the reference-faithful form).
 func headerValue(raw, name string) string {
 	prefix := name + ":"
-	for _, line := range strings.Split(raw, "\r\n") {
+	for line := range strings.SplitSeq(raw, "\r\n") {
 		if line == "" {
 			break // blank line ends the header block
 		}

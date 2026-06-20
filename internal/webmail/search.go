@@ -2,6 +2,7 @@ package webmail
 
 import (
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 
@@ -206,10 +207,8 @@ func mailFolderIDs(st *objectstore.Store, folders []objectstore.FolderInfo) map[
 // whitelist returns v if it is one of allowed, else the first allowed value (the
 // default), guarding a query parameter against arbitrary input.
 func whitelist(v string, allowed ...string) string {
-	for _, a := range allowed {
-		if v == a {
-			return v
-		}
+	if slices.Contains(allowed, v) {
+		return v
 	}
 	return allowed[0]
 }

@@ -236,8 +236,8 @@ func isMailFolder(id int64) bool {
 // senderDisplay reduces a formatted originator ("Name <addr>") to its display
 // name for the list, falling back to the bare address when there is no name.
 func senderDisplay(sender string) string {
-	if i := strings.Index(sender, " <"); i >= 0 {
-		return sender[:i]
+	if before, _, ok := strings.Cut(sender, " <"); ok {
+		return before
 	}
 	return sender
 }

@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -262,10 +263,5 @@ func parseUIDs(raw []string) []uint32 {
 
 // containsStr reports whether s is in xs.
 func containsStr(xs []string, s string) bool {
-	for _, x := range xs {
-		if x == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(xs, s)
 }

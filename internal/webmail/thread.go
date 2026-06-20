@@ -40,7 +40,7 @@ func buildThreads(msgs []objectstore.MessageInfo, headers map[int64]objectstore.
 		}
 		keyOf[m.ID] = key
 		uf.add(key)
-		for _, anc := range strings.Fields(h.References + " " + h.InReplyTo) {
+		for anc := range strings.FieldsSeq(h.References + " " + h.InReplyTo) {
 			uf.union(key, anc)
 		}
 	}

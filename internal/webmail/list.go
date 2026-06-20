@@ -112,17 +112,9 @@ func listFolderPage(st *objectstore.Store, folderID int64, folder string, p list
 // when there is none), and the [lo,hi) slice bounds of the current page. Shared
 // by the flat and threaded list paths so they page identically.
 func pageBounds(n, page int) (maxPage, cur, prev, next, lo, hi int) {
-	maxPage = (n + pageSize - 1) / pageSize
-	if maxPage < 1 {
-		maxPage = 1
-	}
-	cur = page
-	if cur < 1 {
-		cur = 1
-	}
-	if cur > maxPage {
-		cur = maxPage
-	}
+	maxPage = max((n+pageSize-1)/pageSize, 1)
+	cur = max(page, 1)
+	cur = min(cur, maxPage)
 	if cur > 1 {
 		prev = cur - 1
 	}

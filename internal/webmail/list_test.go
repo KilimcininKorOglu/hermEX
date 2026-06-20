@@ -21,11 +21,11 @@ func firstMsgID(body string) string {
 		return ""
 	}
 	rest := body[i+len(`id="`):]
-	j := strings.IndexByte(rest, '"')
-	if j < 0 {
+	before, _, ok := strings.Cut(rest, "\"")
+	if !ok {
 		return ""
 	}
-	return rest[:j]
+	return before
 }
 
 // TestSortMessages checks the comparator sorts on the real typed field for every
@@ -279,7 +279,7 @@ func TestMailPagination(t *testing.T) {
 	path := emptyMailbox(t)
 	inbox := int64(mapi.PrivateFIDInbox)
 	const total = pageSize + 5 // two pages: 50 + 5
-	for i := 0; i < total; i++ {
+	for i := range total {
 		// Increasing received time → message i+1 (uid i+1) is newer than its predecessors.
 		seedMsg(t, path, inbox, "m", "", "body", int64(1000+i), 0)
 	}
@@ -322,7 +322,7 @@ func TestMailPagination(t *testing.T) {
 func TestMailPageOutOfRange(t *testing.T) {
 	path := emptyMailbox(t)
 	inbox := int64(mapi.PrivateFIDInbox)
-	for i := 0; i < pageSize+5; i++ {
+	for i := range pageSize + 5 {
 		seedMsg(t, path, inbox, "m", "", "body", int64(1000+i), 0)
 	}
 	ts := newTestServer(t, path)

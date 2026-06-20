@@ -77,13 +77,13 @@ func seedReplyMailbox(t *testing.T) string {
 // quote and ends at the next one.
 func formFieldValue(html, name string) string {
 	marker := `name="` + name + `" value="`
-	i := strings.Index(html, marker)
-	if i < 0 {
+	_, after, ok := strings.Cut(html, marker)
+	if !ok {
 		return ""
 	}
-	rest := html[i+len(marker):]
-	if j := strings.IndexByte(rest, '"'); j >= 0 {
-		return rest[:j]
+	rest := after
+	if before, _, ok := strings.Cut(rest, "\""); ok {
+		return before
 	}
 	return rest
 }

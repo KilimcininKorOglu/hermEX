@@ -99,14 +99,14 @@ func TestComposeAttachItem(t *testing.T) {
 	if len(embeds) != 2 {
 		t.Fatalf("want 2 message/rfc822 attachments, got %d:\n%s", len(embeds), raw)
 	}
-	var joined string
+	var joined strings.Builder
 	for _, e := range embeds {
 		ec, _ := e.DecodedContent()
-		joined += string(ec)
+		joined.WriteString(string(ec))
 	}
 	for _, want := range []string{"first picked", "body one", "second picked", "body two"} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("embedded messages missing %q:\n%s", want, joined)
+		if !strings.Contains(joined.String(), want) {
+			t.Errorf("embedded messages missing %q:\n%s", want, joined.String())
 		}
 	}
 }
