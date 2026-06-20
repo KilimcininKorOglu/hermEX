@@ -39,6 +39,22 @@ func (s *Server) handleUICreateContact(w http.ResponseWriter, r *http.Request) {
 	s.renderContactsPanel(w, r, errMsg)
 }
 
+// handleUIUpdateContact renames the contact named in the path from the inline
+// edit form (an empty name clears it) and returns the refreshed panel for htmx to
+// swap in.
+func (s *Server) handleUIUpdateContact(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	var errMsg string
+	if found, err := s.dir.UpdateContact(r.PathValue("email"), r.PostFormValue("displayname")); err != nil {
+		errMsg = "Could not update contact: " + err.Error()
+	} else if !found {
+		errMsg = "No such contact."
+	}
+	s.renderContactsPanel(w, r, errMsg)
+}
+
 // handleUIDeleteContact deletes an org mail contact named in the path and returns
 // the refreshed panel for htmx to swap in.
 func (s *Server) handleUIDeleteContact(w http.ResponseWriter, r *http.Request) {

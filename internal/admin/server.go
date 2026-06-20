@@ -47,6 +47,7 @@ type Directory interface {
 	SetSpecifieds(listname string, senders []string) (bool, error)
 	ListContacts() ([]directory.ContactInfo, error)
 	CreateContact(email, displayName, domain string) (int64, error)
+	UpdateContact(email, displayName string) (bool, error)
 	DeleteContact(email string) (bool, error)
 	GetLDAPConfig(orgID int64) (directory.LDAPConfig, bool, error)
 	SetLDAPConfig(orgID int64, cfg directory.LDAPConfig) error
@@ -173,6 +174,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/mlists/{addr}/delete", s.handleUIDeleteMList)
 	mux.HandleFunc("GET /admin/ui/contacts", s.handleUIContacts)
 	mux.HandleFunc("POST /admin/ui/contacts", s.handleUICreateContact)
+	mux.HandleFunc("PUT /admin/ui/contacts/{email}", s.handleUIUpdateContact)
 	mux.HandleFunc("POST /admin/ui/contacts/{email}/delete", s.handleUIDeleteContact)
 	mux.HandleFunc("GET /admin/ui/logs", s.handleUILogs)
 	mux.HandleFunc("GET /admin/ui/ldap", s.handleUILDAP)

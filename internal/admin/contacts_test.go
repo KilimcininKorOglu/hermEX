@@ -53,6 +53,29 @@ func TestUICreateContactRequiresDomain(t *testing.T) {
 	}
 }
 
+// TestUIUpdateContact proves the inline edit form renames the contact through to
+// the directory and returns the refreshed panel.
+func TestUIUpdateContact(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPUT(t, ts, "/admin/ui/contacts/john@partner.example", session, csrf,
+		url.Values{"displayname": {"Jonathan Partner"}})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("update contact status %d, want 200", resp.StatusCode)
+	}
+	if d.updatedContact != "john@partner.example" || d.updatedContactName != "Jonathan Partner" {
+		t.Errorf("updated contact = %q name=%q, want john@partner.example / Jonathan Partner",
+			d.updatedContact, d.updatedContactName)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), `id="contacts-panel"`) {
+		t.Errorf("response is not the contacts panel fragment: %s", body)
+	}
+}
+
 // TestUIDeleteContact proves deletion reaches the directory and returns the
 // refreshed panel.
 func TestUIDeleteContact(t *testing.T) {

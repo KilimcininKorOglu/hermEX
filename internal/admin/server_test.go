@@ -77,6 +77,9 @@ type fakeDir struct {
 	createdContact       string
 	createdContactName   string
 	createdContactDomain string
+	updatedContact       string
+	updatedContactName   string
+	updateContactMissing bool
 	deletedContact       string
 	deleteContactMissing bool
 }
@@ -218,6 +221,10 @@ func (f *fakeDir) CreateContact(email, displayName, domain string) (int64, error
 	}
 	f.createdContact, f.createdContactName, f.createdContactDomain = email, displayName, domain
 	return 1, nil
+}
+func (f *fakeDir) UpdateContact(email, displayName string) (bool, error) {
+	f.updatedContact, f.updatedContactName = email, displayName
+	return !f.updateContactMissing, nil
 }
 func (f *fakeDir) DeleteContact(email string) (bool, error) {
 	f.deletedContact = email
