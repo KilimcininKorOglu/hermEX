@@ -40,7 +40,7 @@ func queryRowsBodyContainer(containerID uint32) []byte {
 	var b []byte
 	b = binary.LittleEndian.AppendUint32(b, 0) // flags
 	b = append(b, 1)                           // hasStat
-	for i := range 9 { // STAT: 9 u32 fields
+	for i := range 9 {                         // STAT: 9 u32 fields
 		v := uint32(0)
 		switch i {
 		case 1: // container_id

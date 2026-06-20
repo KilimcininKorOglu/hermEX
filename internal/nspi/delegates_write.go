@@ -13,9 +13,9 @@ import (
 const (
 	modFlagDelete uint32 = 0x00000001 // remove the entry ids rather than add them
 
-	entryidTypeEphemeral byte   = 0x87       // EphemeralEntryID first byte
-	entryidTypePermanent uint32 = 0x00000000 // PermanentEntryID flags word
-	permanentEIDHeaderLen       = 28         // flags(4) + provider GUID(16) + version(4) + display type(4)
+	entryidTypeEphemeral  byte   = 0x87       // EphemeralEntryID first byte
+	entryidTypePermanent  uint32 = 0x00000000 // PermanentEntryID flags word
+	permanentEIDHeaderLen        = 28         // flags(4) + provider GUID(16) + version(4) + display type(4)
 )
 
 // modLinkAttRequest is the decoded NspiModLinkAtt body ([MS-OXCMAPIHTTP] 2.2.5.10):
