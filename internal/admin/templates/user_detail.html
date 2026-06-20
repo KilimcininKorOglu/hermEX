@@ -146,6 +146,7 @@
 <label class="check"><input type="checkbox" name="autoaccept"{{if .Meeting.AutoAccept}} checked{{end}}> Accept conflict-free meeting requests (otherwise added to the calendar as tentative only, with no response to the organizer)</label>
 <label class="check"><input type="checkbox" name="declinerecurring"{{if .Meeting.DeclineRecurring}} checked{{end}}> Decline all recurring meeting requests</label>
 <label class="check"><input type="checkbox" name="declineconflict"{{if .Meeting.DeclineConflict}} checked{{end}}> Decline all meeting requests with scheduling conflicts</label>
+<p class="hint">Automatic processing requires "Accept conflict-free meeting requests". With it unchecked the mailbox does no automatic processing, so the two decline options have no effect on their own.</p>
 <button type="submit">Save meeting settings</button>
 </form>
 
