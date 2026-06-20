@@ -339,6 +339,13 @@ func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from strin
 	// A distribution-list recipient expands to its members before delivery; a list
 	// whose posting privilege refuses this sender is reported as undeliverable.
 	leaves, refused := expandRecipientList(accounts, from, recipients)
+	// A recipient with a mail-forward directive routes a copy to its destination; a
+	// Redirect also drops the local copy. Destinations join the delivery set and flow
+	// through the same local-then-relay path below, so a destination in a foreign
+	// domain is relayed and an undeliverable one surfaces as unresolved for the caller
+	// to bounce — never a silent drop.
+	leaves, dests := applyForwards(accounts, leaves)
+	leaves = append(leaves, dests...)
 	unresolved, err = Deliver(accounts, from, leaves, raw, received)
 	if err != nil {
 		return append(unresolved, refused...), err
@@ -360,6 +367,44 @@ func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from strin
 		unresolved = stuck
 	}
 	return append(unresolved, refused...), nil
+}
+
+// applyForwards consults each resolved recipient's mail-forward directive and splits
+// the set into the addresses delivered to their own mailbox (every recipient without
+// a forward, and every CC recipient — which keeps its local copy) and the forward
+// destinations to route. A Redirect recipient is dropped from the local set so only
+// the destination receives it. Destinations are de-duplicated and a self-forward
+// (destination equal to the recipient) is ignored. A directory without a Forwarder
+// has no forwarding and the recipients pass through unchanged.
+//
+// The destinations are routed by the caller through the ordinary local-then-relay
+// path, so a forwarded copy is never itself re-forwarded (one hop) and an
+// undeliverable destination becomes unresolved rather than vanishing. The copy keeps
+// the original envelope sender: a copy relayed to a foreign domain may therefore fail
+// SPF/DMARC and bounce to the original sender — sender rewriting (SRS) is a later
+// refinement, deliberately omitted in v1.
+func applyForwards(accounts directory.Accounts, recipients []string) (locals, dests []string) {
+	fwder, ok := accounts.(directory.Forwarder)
+	if !ok {
+		return recipients, nil
+	}
+	seen := map[string]bool{}
+	for _, rcpt := range recipients {
+		fi, has, err := fwder.GetForward(rcpt)
+		if err != nil || !has || fi.Destination == "" || strings.EqualFold(fi.Destination, rcpt) {
+			locals = append(locals, rcpt)
+			continue
+		}
+		if fi.Type == directory.ForwardCC {
+			locals = append(locals, rcpt)
+		}
+		dest := strings.ToLower(strings.TrimSpace(fi.Destination))
+		if !seen[dest] {
+			seen[dest] = true
+			dests = append(dests, dest)
+		}
+	}
+	return locals, dests
 }
 
 // deliver appends a raw message to the inbox of the mailbox at path. The inbox
