@@ -180,6 +180,64 @@ func TestAutoProcessDeclinesConflict(t *testing.T) {
 	}
 }
 
+// TestAutoProcessDeliveredInvite is the end-to-end feasibility proof: a real meeting
+// invitation delivered as MIME (text/calendar; method=REQUEST) — not a hand-built
+// property bag — must, once AppendMessage imports it, carry the message class and the
+// appointment window the auto-processor reads. It confirms the delivery path populates
+// exactly the properties the engine depends on; a unit test that sets those properties
+// directly would not catch an import that failed to produce them.
+func TestAutoProcessDeliveredInvite(t *testing.T) {
+	st, tags, accounts := apSetup(t, objectstore.MeetingConfig{AutoAccept: true})
+
+	invite := []byte("From: organizer@hermex.test\r\n" +
+		"To: room@hermex.test\r\n" +
+		"Subject: Project sync\r\n" +
+		"MIME-Version: 1.0\r\n" +
+		"Content-Type: text/calendar; method=REQUEST; charset=UTF-8\r\n" +
+		"\r\n" +
+		"BEGIN:VCALENDAR\r\n" +
+		"VERSION:2.0\r\n" +
+		"PRODID:-//hermEX//test//EN\r\n" +
+		"METHOD:REQUEST\r\n" +
+		"BEGIN:VEVENT\r\n" +
+		"UID:e2e-invite-1\r\n" +
+		"DTSTAMP:20260619T090000Z\r\n" +
+		"DTSTART:20260620T100000Z\r\n" +
+		"DTEND:20260620T110000Z\r\n" +
+		"SUMMARY:Project sync\r\n" +
+		"ORGANIZER:mailto:organizer@hermex.test\r\n" +
+		"ATTENDEE:mailto:room@hermex.test\r\n" +
+		"END:VEVENT\r\n" +
+		"END:VCALENDAR\r\n")
+
+	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), invite, apBase, 0)
+	if err != nil {
+		t.Fatalf("AppendMessage(invite): %v", err)
+	}
+	// The import must have produced the meeting class and a time window from the MIME.
+	stored, err := st.OpenMessage(info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := stored.Props.Get(mapi.PrMessageClass); got != "IPM.Schedule.Meeting.Request" {
+		t.Fatalf("delivered invite class = %v, want IPM.Schedule.Meeting.Request", got)
+	}
+	if _, ok := ntTime(stored.Props, tags.start); !ok {
+		t.Fatal("delivered invite has no appointment start; the engine would see an empty window")
+	}
+
+	handled, err := AutoProcess(st, accounts, nil, "room@hermex.test", info.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !handled {
+		t.Fatal("AutoProcess did not handle a delivered meeting invitation")
+	}
+	if got := calBusyStatuses(t, st, tags); len(got) != 1 || got[0] != busyBusy {
+		t.Errorf("calendar busy statuses = %v, want [%d] (delivered invite accepted)", got, busyBusy)
+	}
+}
+
 // TestAutoProcessTentativeOnConflict proves that when a request conflicts but
 // DeclineConflict is off, it is filed tentatively (not accepted, not declined).
 func TestAutoProcessTentativeOnConflict(t *testing.T) {
