@@ -44,6 +44,17 @@
 <button type="submit">Save quota</button>
 </form>
 
+<h2>Address-book visibility</h2>
+<form class="hide-form" hx-put="/admin/ui/users/{{.User.Username}}/hide" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<p>Hide this user from:</p>
+<label class="check"><input type="checkbox" name="hide_gal"{{if .Hide.GAL}} checked{{end}}> Global Address List</label>
+<label class="check"><input type="checkbox" name="hide_al"{{if .Hide.AL}} checked{{end}}> Address/Member lists</label>
+<label class="check"><input type="checkbox" name="hide_delegate"{{if .Hide.Delegate}} checked{{end}}> Delegate lists</label>
+<label class="check"><input type="checkbox" name="hide_anr"{{if .Hide.ANR}} checked{{end}}> Name resolution (Check Names)</label>
+<button type="submit">Save visibility</button>
+</form>
+
 <h2>Contact details</h2>
 <form class="contact-form" hx-put="/admin/ui/users/{{.User.Username}}/contact" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>

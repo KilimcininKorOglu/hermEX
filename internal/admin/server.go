@@ -147,6 +147,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /admin/ui/users/{email}/oof", s.handleUIUserOOF)
 	mux.HandleFunc("POST /admin/ui/users/{email}/devices/action", s.handleUIUserDevices)
 	mux.HandleFunc("PUT /admin/ui/users/{email}/quota", s.handleUIUserQuota)
+	mux.HandleFunc("PUT /admin/ui/users/{email}/hide", s.handleUIUserHide)
 	mux.HandleFunc("POST /admin/ui/users/{email}/roles/grant", s.handleUIUserGrantRole)
 	mux.HandleFunc("POST /admin/ui/users/{email}/roles/revoke", s.handleUIUserRevokeRole)
 	mux.HandleFunc("GET /admin/ui/domains", s.handleUIDomains)

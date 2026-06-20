@@ -96,6 +96,7 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 		"OOF":      oofViewOf(oof),
 		"Devices":  deviceViewsOf(devs),
 		"Quota":    quotaViewOf(qlimits, qused),
+		"Hide":     hideViewOf(props),
 	})
 }
 
