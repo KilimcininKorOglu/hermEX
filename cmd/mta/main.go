@@ -22,6 +22,7 @@ import (
 	"hermex/internal/ldapauth"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
+	"hermex/internal/meeting"
 	"hermex/internal/mta"
 	"hermex/internal/mtasts"
 	"hermex/internal/objectstore"
@@ -74,6 +75,21 @@ func main() {
 	spool, err := relay.Open(cfg.RelaySpoolPath())
 	if err != nil {
 		log.Fatalf("hermex-mta: open relay spool: %v", err)
+	}
+
+	// Automatic meeting-request processing runs at delivery for mailboxes configured
+	// for it (resource rooms, auto-accepting users). Wired here, not in the mta
+	// package, to break the meeting→mta import cycle. The organizer notification is
+	// kept local-only (a nil spool): an internal organizer is notified, while an
+	// external organizer is not — auto-relaying machine-generated replies to arbitrary
+	// external addresses is a backscatter vector, gated separately like the
+	// out-of-office reply.
+	mta.OnMeetingRequest = func(st *objectstore.Store, accounts directory.Accounts, recipient string, msgID int64) bool {
+		handled, err := meeting.AutoProcess(st, accounts, nil, recipient, msgID)
+		if err != nil {
+			log.Printf("hermex-mta: meeting auto-process for <%s>: %v", recipient, err)
+		}
+		return handled
 	}
 
 	addr := cfg.SMTPAddr
