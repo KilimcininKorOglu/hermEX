@@ -830,3 +830,20 @@ func TestGetFolderReturnsMailboxEncodedID(t *testing.T) {
 		t.Errorf("GetFolder must return a mailbox-encoded id, got mb=%q (%v)", mb, err)
 	}
 }
+
+// TestSyncFolderItemsCrossMailboxRejected confirms incremental sync of another mailbox
+// is refused: the per-folder sync state is not yet isolated per caller, so a foreign
+// target is rejected rather than colliding with the target's own state.
+func TestSyncFolderItemsCrossMailboxRejected(t *testing.T) {
+	ts, paths := delegateServer(t)
+	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.RightsReviewer)
+
+	body := wrapRequest(`<SyncFolderItems xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
+		`<ItemShape><t:BaseShape>Default</t:BaseShape></ItemShape>` +
+		`<SyncFolderId><t:DistinguishedFolderId Id="inbox"><t:Mailbox><t:EmailAddress>bob@hermex.test</t:EmailAddress></t:Mailbox></t:DistinguishedFolderId></SyncFolderId>` +
+		`</SyncFolderItems>`)
+	_, out := soapPost(t, ts, body, true)
+	if !strings.Contains(out, "ErrorAccessDenied") {
+		t.Errorf("cross-mailbox SyncFolderItems must be rejected:\n%s", out)
+	}
+}

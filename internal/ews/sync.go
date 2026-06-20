@@ -77,6 +77,13 @@ func (s *Server) handleSyncFolderItems(w http.ResponseWriter, inner []byte, sess
 		writeSyncItemsError(w, targets[0].code)
 		return
 	}
+	if !s.isOwnMailbox(sess, targets[0].mailbox) {
+		// Cross-mailbox incremental sync needs per-caller sync-state isolation (the state
+		// is keyed per folder, not per caller), which is not yet modelled; reject rather
+		// than collide with the target's own sync state or return the caller's own folder.
+		writeSyncItemsError(w, "ErrorAccessDenied")
+		return
+	}
 	fid := targets[0].fid
 
 	st, err := objectstore.Open(sess.mailbox)
