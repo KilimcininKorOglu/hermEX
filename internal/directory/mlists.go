@@ -53,9 +53,9 @@ func addrDomain(addr string) string {
 }
 
 // ExpandMList resolves a distribution-list address to its direct members,
-// applying the list's posting privilege against the sender (from). It mirrors the
-// the reference list-member lookup: one level only — a member that is itself a list is
-// returned verbatim, and the caller recurses under its own loop guard. The
+// applying the list's posting privilege against the sender (from). It expands
+// one level only — a member that is itself a list is returned verbatim, and the
+// caller recurses under its own loop guard. The
 // address-book uses from == listAddr to bypass the privilege gate; the MTA passes
 // the real sender. A non-OK result means no members are returned: MListNone says
 // "not a list, resolve it normally", the PRIVIL_* codes are posting refusals.
