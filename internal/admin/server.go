@@ -80,12 +80,15 @@ type Server struct {
 	secret []byte
 	logs   LogReader
 	syncer LDAPSyncer
+	store  MailboxStore
 }
 
 // NewServer builds an admin server backed by the directory, deriving new
-// resources' on-disk paths with paths and signing sessions with secret.
+// resources' on-disk paths with paths and signing sessions with secret. The
+// mailbox store opens each user's object store on demand for the store-backed
+// tabs (out-of-office).
 func NewServer(dir Directory, paths Paths, secret []byte) *Server {
-	return &Server{dir: dir, paths: paths, secret: secret}
+	return &Server{dir: dir, paths: paths, secret: secret, store: mailboxStore{}}
 }
 
 // SetLogReader attaches a log store reader, enabling the log viewer.
@@ -113,6 +116,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /admin/users/{email}/aliases", s.protect(s.requireSystem(s.handleSetUserAliases)))
 	mux.Handle("GET /admin/users/{email}/contact", s.protect(s.requireSystem(s.handleGetContact)))
 	mux.Handle("PUT /admin/users/{email}/contact", s.protect(s.requireSystem(s.handleSetContact)))
+	mux.Handle("GET /admin/users/{email}/oof", s.protect(s.requireSystem(s.handleGetUserOOF)))
+	mux.Handle("PUT /admin/users/{email}/oof", s.protect(s.requireSystem(s.handleSetUserOOF)))
 	mux.Handle("POST /admin/users/{email}/password", s.protect(s.requireSystem(s.handleSetPassword)))
 	mux.Handle("GET /admin/users/{email}/roles", s.protect(s.requireSystem(s.handleListRoles)))
 	mux.Handle("POST /admin/users/{email}/roles", s.protect(s.requireSystem(s.handleGrantRole)))
@@ -135,6 +140,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /admin/ui/users/{email}/altnames", s.handleUIUserAltnames)
 	mux.HandleFunc("PUT /admin/ui/users/{email}/aliases", s.handleUIUserAliases)
 	mux.HandleFunc("PUT /admin/ui/users/{email}/contact", s.handleUIUserContact)
+	mux.HandleFunc("PUT /admin/ui/users/{email}/oof", s.handleUIUserOOF)
 	mux.HandleFunc("POST /admin/ui/users/{email}/roles/grant", s.handleUIUserGrantRole)
 	mux.HandleFunc("POST /admin/ui/users/{email}/roles/revoke", s.handleUIUserRevokeRole)
 	mux.HandleFunc("GET /admin/ui/domains", s.handleUIDomains)

@@ -81,6 +81,7 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 	aliases, _ := s.dir.ListAliasesFor(u.Username)
 	roles, _ := s.dir.AdminRoles(u.ID)
 	props, _ := s.dir.GetUserProperties(u.Username)
+	oof, _ := s.store.GetOOFSettings(u.Maildir)
 	s.render(w, "user_detail.html", map[string]any{
 		"Nav":      "users",
 		"CSRF":     csrfCookieValue(r),
@@ -90,6 +91,7 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 		"Aliases":  strings.Join(aliases, "\n"),
 		"Roles":    roles,
 		"Contact":  contactValues(props),
+		"OOF":      oofViewOf(oof),
 	})
 }
 

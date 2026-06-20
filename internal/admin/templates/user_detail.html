@@ -50,6 +50,23 @@
 <button type="submit">Save contact</button>
 </form>
 
+<h2>Out of office</h2>
+<form class="oof-form" hx-put="/admin/ui/users/{{.User.Username}}/oof" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label class="check"><input type="checkbox" name="enabled"{{if .OOF.Enabled}} checked{{end}}> Send automatic replies</label>
+<label>Internal subject <input type="text" name="internalsubject" value="{{.OOF.InternalSubject}}" placeholder="Automatic reply"></label>
+<label>Reply to people inside the organization
+<textarea name="internalreply" rows="4">{{.OOF.InternalReply}}</textarea></label>
+<label class="check"><input type="checkbox" name="externalenabled"{{if .OOF.ExternalEnabled}} checked{{end}}> Also reply to senders outside the organization</label>
+<label>External subject <input type="text" name="externalsubject" value="{{.OOF.ExternalSubject}}" placeholder="Automatic reply"></label>
+<label>Reply to senders outside the organization
+<textarea name="externalreply" rows="4">{{.OOF.ExternalReply}}</textarea></label>
+<label class="check"><input type="checkbox" name="externalknownonly"{{if .OOF.KnownOnly}} checked{{end}}> Only reply to senders already in the user's contacts</label>
+<label>Start <input type="datetime-local" name="start" value="{{.OOF.Start}}"></label>
+<label>End <input type="datetime-local" name="end" value="{{.OOF.End}}"></label>
+<button type="submit">Save out-of-office</button>
+</form>
+
 <h2>Alternative login names</h2>
 <form class="altnames-form" hx-put="/admin/ui/users/{{.User.Username}}/altnames" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/objectstore"
 )
 
 // fakeDir is a scripted Directory for the admin server tests.
@@ -175,9 +176,49 @@ type fakePaths struct{ root string }
 func (p fakePaths) HomedirFor(domain string) string  { return p.root + "/dom/" + domain }
 func (p fakePaths) MaildirFor(address string) string { return p.root + "/mbox/" + address }
 
+// fakeStore is a scripted MailboxStore for the admin OOF tests: it holds the
+// out-of-office settings keyed by maildir and captures the last write.
+type fakeStore struct {
+	oof    map[string]objectstore.OOFSettings
+	setDir string
+	setOOF objectstore.OOFSettings
+	getErr error
+	setErr error
+}
+
+func (f *fakeStore) GetOOFSettings(maildir string) (objectstore.OOFSettings, error) {
+	if f.getErr != nil {
+		return objectstore.OOFSettings{}, f.getErr
+	}
+	return f.oof[maildir], nil
+}
+
+func (f *fakeStore) SetOOFSettings(maildir string, cfg objectstore.OOFSettings) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+	if f.oof == nil {
+		f.oof = map[string]objectstore.OOFSettings{}
+	}
+	f.oof[maildir] = cfg
+	f.setDir, f.setOOF = maildir, cfg
+	return nil
+}
+
+// adminServer builds a test server with an empty fake mailbox store, so no test
+// ever opens a real object store. OOF tests that inspect the store use
+// adminServerStore.
 func adminServer(t *testing.T, d Directory) *httptest.Server {
+	return adminServerStore(t, d, &fakeStore{})
+}
+
+// adminServerStore builds a test server whose store-backed tabs are served by the
+// given MailboxStore, which the caller keeps a handle to for assertions.
+func adminServerStore(t *testing.T, d Directory, store MailboxStore) *httptest.Server {
 	t.Helper()
-	ts := httptest.NewServer(NewServer(d, fakePaths{root: t.TempDir()}, []byte("test-secret")).Handler())
+	srv := NewServer(d, fakePaths{root: t.TempDir()}, []byte("test-secret"))
+	srv.store = store
+	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	return ts
 }
