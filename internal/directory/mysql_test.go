@@ -66,10 +66,75 @@ func openTestDB(t *testing.T) *sql.DB {
 
 func cleanTables(t *testing.T, db *sql.DB) {
 	t.Helper()
-	for _, tbl := range []string{"altnames", "aliases", "admin_roles", "associations", "specifieds", "mlists", "users", "domains", "ldap_config"} {
+	for _, tbl := range []string{"altnames", "aliases", "forwards", "admin_roles", "associations", "specifieds", "mlists", "users", "domains", "ldap_config"} {
 		if _, err := db.Exec("DELETE FROM " + tbl); err != nil {
 			t.Fatalf("clean %s: %v", tbl, err)
 		}
+	}
+}
+
+// TestForwardDirective covers the forwards model: a directive set on a user is read
+// back, an alias to that user resolves to the same directive (canonical keying — mail
+// to an alias must not bypass the forward), clearing removes it, an unknown user is
+// reported absent, and DeleteUser leaves no orphan forward row.
+func TestForwardDirective(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	cleanTables(t, db)
+
+	root := t.TempDir()
+	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "domains", "hermex.test")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.CreateUser("alice@hermex.test", "secret", filepath.Join(root, "alice")); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.CreateAlias("sales@hermex.test", "alice@hermex.test"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set a Redirect and read it back by canonical username.
+	if existed, err := d.SetForward("alice@hermex.test", ForwardRedirect, "boss@external.test"); err != nil || !existed {
+		t.Fatalf("SetForward = %v, %v; want true, nil", existed, err)
+	}
+	if fi, ok, err := d.GetForward("alice@hermex.test"); err != nil || !ok || fi.Type != ForwardRedirect || fi.Destination != "boss@external.test" {
+		t.Errorf("GetForward(user) = %+v, %v, %v; want {Redirect boss@external.test}, true", fi, ok, err)
+	}
+	// An alias to the user must resolve to the same directive — keying on the raw
+	// alias would let mail to sales@ bypass alice's forward.
+	if fi, ok, err := d.GetForward("sales@hermex.test"); err != nil || !ok || fi.Destination != "boss@external.test" {
+		t.Errorf("GetForward(alias) = %+v, %v, %v; want the user's directive", fi, ok, err)
+	}
+
+	// An empty destination clears the forward.
+	if existed, err := d.SetForward("alice@hermex.test", ForwardCC, ""); err != nil || !existed {
+		t.Fatalf("SetForward(clear) = %v, %v; want true, nil", existed, err)
+	}
+	if _, ok, err := d.GetForward("alice@hermex.test"); err != nil || ok {
+		t.Errorf("GetForward after clear = ok %v, %v; want false", ok, err)
+	}
+
+	// An unknown user is reported absent, not created.
+	if existed, err := d.SetForward("ghost@hermex.test", ForwardCC, "x@y.test"); err != nil || existed {
+		t.Errorf("SetForward(unknown) = %v, %v; want false, nil", existed, err)
+	}
+
+	// DeleteUser leaves no orphan forward row.
+	if _, err := d.SetForward("alice@hermex.test", ForwardCC, "boss@external.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.DeleteUser("alice@hermex.test", false); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM forwards WHERE username = ?`, "alice@hermex.test").Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 0 {
+		t.Errorf("forwards rows after DeleteUser = %d, want 0", n)
 	}
 }
 

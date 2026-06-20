@@ -49,6 +49,20 @@ var directoryDDL = []string{
 		KEY mainname (mainname)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
+	// forwards holds a user's mail-forward directive: a single destination address
+	// and the forward_type that selects whether the original is also kept locally
+	// (0 = CC: keep a local copy and forward one; 1 = Redirect: forward only). One
+	// row per user (username UNIQUE). username is a plain address string with no FK
+	// (as aliases.mainname is), so DeleteUser removes the row explicitly.
+	`CREATE TABLE IF NOT EXISTS forwards (
+		id           INT UNSIGNED NOT NULL AUTO_INCREMENT,
+		username     VARCHAR(320) CHARACTER SET ascii NOT NULL,
+		forward_type TINYINT NOT NULL DEFAULT 0,
+		destination  VARCHAR(320) CHARACTER SET ascii NOT NULL,
+		PRIMARY KEY (id),
+		UNIQUE KEY username (username)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
 	`CREATE TABLE IF NOT EXISTS altnames (
 		user_id INT UNSIGNED NOT NULL,
 		altname VARCHAR(320) CHARACTER SET ascii NOT NULL,

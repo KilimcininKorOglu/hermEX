@@ -84,6 +84,31 @@ type LocalDomains interface {
 	IsLocalDomain(domain string) (bool, error)
 }
 
+// Forward type constants for ForwardInfo.Type ([MS] forward_type): CC keeps a
+// local copy and forwards one, Redirect forwards only with no local copy.
+const (
+	ForwardCC       = 0
+	ForwardRedirect = 1
+)
+
+// ForwardInfo is a user's resolved mail-forward directive: where copies go and
+// whether the original is also kept in the local mailbox.
+type ForwardInfo struct {
+	Type        int // ForwardCC or ForwardRedirect
+	Destination string
+}
+
+// Forwarder optionally reports a user's mail-forward directive. The MTA consults
+// it at delivery for each resolved local recipient: a Redirect routes the message
+// to the destination instead of the local inbox, a CC routes a copy in addition to
+// local delivery. The address may be any form the user receives at (primary,
+// alias, or altname); the lookup resolves it to the canonical user so a forward set
+// on the account applies no matter which address the mail arrived at. Directories
+// that do not implement it have no forwarding.
+type Forwarder interface {
+	GetForward(address string) (ForwardInfo, bool, error)
+}
+
 // GALEntry is one Global Address List entry returned by a recipient search: a
 // directory user's address and a display name for it. The SQL directory resolves
 // DisplayName from PR_DISPLAY_NAME in user_properties, falling back to the address

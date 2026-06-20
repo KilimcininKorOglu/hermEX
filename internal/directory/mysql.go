@@ -652,6 +652,10 @@ func (d *SQLDirectory) DeleteUser(username string, deleteFiles bool) (bool, erro
 	if _, err := tx.Exec(`DELETE FROM aliases WHERE mainname = ?`, username); err != nil {
 		return false, err
 	}
+	// forwards.username is a plain string with no FK, so the row is removed explicitly.
+	if _, err := tx.Exec(`DELETE FROM forwards WHERE username = ?`, username); err != nil {
+		return false, err
+	}
 	if _, err := tx.Exec(`DELETE FROM users WHERE username = ?`, username); err != nil {
 		return false, err
 	}
@@ -785,6 +789,58 @@ func (d *SQLDirectory) SetAliasesFor(username string, aliases []string) (bool, e
 		}
 	}
 	return true, tx.Commit()
+}
+
+// GetForward implements Forwarder: it returns the forward directive of the user the
+// address resolves to (its canonical username, an alias, or an altname), or ok=false
+// when no forward is set. The lookup is canonical so a forward configured on the
+// account applies regardless of which receiving address the mail arrived at — keying
+// on the raw alias would let mail to an alias bypass the forward.
+func (d *SQLDirectory) GetForward(address string) (ForwardInfo, bool, error) {
+	addr := strings.ToLower(strings.TrimSpace(address))
+	var fi ForwardInfo
+	err := d.db.QueryRow(`
+SELECT f.forward_type, f.destination FROM forwards f
+ WHERE f.username = (
+   SELECT u.username FROM users u WHERE u.username = ?
+   UNION SELECT u.username FROM users u JOIN altnames a ON a.user_id = u.id WHERE a.altname = ?
+   UNION SELECT u.username FROM users u JOIN aliases al ON al.mainname = u.username WHERE al.aliasname = ?
+   LIMIT 1)`, addr, addr, addr).Scan(&fi.Type, &fi.Destination)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ForwardInfo{}, false, nil
+	}
+	if err != nil {
+		return ForwardInfo{}, false, err
+	}
+	return fi, true, nil
+}
+
+// SetForward sets a user's forward directive, keyed by canonical username, reporting
+// whether the user existed. An empty destination clears the forward (the "—" / none
+// choice). forwardType is ForwardCC or ForwardRedirect; any other value is rejected.
+func (d *SQLDirectory) SetForward(username string, forwardType int, destination string) (bool, error) {
+	username = strings.ToLower(strings.TrimSpace(username))
+	destination = strings.ToLower(strings.TrimSpace(destination))
+	if destination != "" && forwardType != ForwardCC && forwardType != ForwardRedirect {
+		return false, fmt.Errorf("directory: invalid forward type %d", forwardType)
+	}
+	var id int64
+	err := d.db.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if destination == "" {
+		_, err := d.db.Exec(`DELETE FROM forwards WHERE username = ?`, username)
+		return err == nil, err
+	}
+	_, err = d.db.Exec(
+		`INSERT INTO forwards (username, forward_type, destination) VALUES (?, ?, ?)
+		 ON DUPLICATE KEY UPDATE forward_type = VALUES(forward_type), destination = VALUES(destination)`,
+		username, forwardType, destination)
+	return err == nil, err
 }
 
 // GetUserProperties returns a user's string-valued (PtUnicode) MAPI properties,
