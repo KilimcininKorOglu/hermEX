@@ -746,10 +746,9 @@ func TestMoveItemCrossStoreRejected(t *testing.T) {
 	}
 }
 
-// TestCreateAttachmentCrossMailboxRejected confirms the safety guard: an item-id-driven
-// op not yet wired for cross-mailbox refuses a foreign id rather than misapplying it to
-// the caller's own store.
-func TestCreateAttachmentCrossMailboxRejected(t *testing.T) {
+// TestCreateAttachmentCrossMailboxDenied confirms attaching to an item in another
+// mailbox without edit access is denied (the edit gate fires before the item opens).
+func TestCreateAttachmentCrossMailboxDenied(t *testing.T) {
 	ts, _ := delegateServer(t)
 	foreign := oxews.EncodeItemID(oxews.ItemID{
 		FolderID: int64(mapi.PrivateFIDInbox), MessageID: 1, UID: 1, Mailbox: "bob@hermex.test",
@@ -757,7 +756,21 @@ func TestCreateAttachmentCrossMailboxRejected(t *testing.T) {
 
 	_, out := soapPost(t, ts, createAttachmentReq(foreign, "note.txt", "text/plain", "aGk="), true)
 	if !strings.Contains(out, "ErrorAccessDenied") {
-		t.Errorf("a foreign parent id must be rejected:\n%s", out)
+		t.Errorf("attaching without edit access must be denied:\n%s", out)
+	}
+}
+
+// TestCreateAttachmentCrossMailboxWithGrant confirms an editor-rights delegate can
+// attach to an item in another mailbox.
+func TestCreateAttachmentCrossMailboxWithGrant(t *testing.T) {
+	ts, paths := delegateServer(t)
+	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.RightsEditor)
+	seedInboxMessage(t, paths["bob@hermex.test"], "Report")
+	itemID := firstItemID(must(soapPost(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test"), true)))
+
+	_, out := soapPost(t, ts, createAttachmentReq(itemID, "note.txt", "text/plain", "aGk="), true)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Errorf("an editor delegate must attach to the target item:\n%s", out)
 	}
 }
 

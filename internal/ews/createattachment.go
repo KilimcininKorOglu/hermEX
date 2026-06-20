@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"hermex/internal/mapi"
-	"hermex/internal/objectstore"
 	"hermex/internal/oxews"
 )
 
@@ -88,18 +87,16 @@ func (s *Server) handleCreateAttachment(w http.ResponseWriter, inner []byte, ses
 		errAll("ErrorInvalidId")
 		return
 	}
-	if parent.Mailbox != "" {
-		// Attaching to another mailbox's item is not yet supported; reject rather than
-		// operate on the caller's own store with a foreign id.
-		errAll("ErrorAccessDenied")
+	// The parent id self-encodes its mailbox; attaching to a delegated item is gated on
+	// edit access to its folder (reference: CreateAttachment checks frightsEditAny on
+	// the parent item's folder).
+	cache := s.newStoreCache()
+	defer cache.closeAll()
+	st, code := cache.openForItem(sess, parent, mapi.FrightsEditAny)
+	if code != "" {
+		errAll(code)
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
-	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
-		return
-	}
-	defer st.Close()
 
 	msg, err := st.OpenMessage(parent.MessageID)
 	if err != nil {
