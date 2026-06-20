@@ -128,6 +128,37 @@ func (d *SQLDirectory) DeleteFetchmail(id int64) (bool, error) {
 	return n > 0, nil
 }
 
+// FetchmailSeen returns the set of source unique-ids already delivered for a kept POP3
+// entry, so the worker can skip them. (IMAP dedup uses the server's \Seen flag, not this
+// table, so only POP3 needs it.)
+func (d *SQLDirectory) FetchmailSeen(configID int64) (map[string]bool, error) {
+	rows, err := d.db.Query(`SELECT uid FROM fetchmail_seen WHERE config_id = ?`, configID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	seen := map[string]bool{}
+	for rows.Next() {
+		var uid string
+		if err := rows.Scan(&uid); err != nil {
+			return nil, err
+		}
+		seen[uid] = true
+	}
+	return seen, rows.Err()
+}
+
+// MarkFetchmailSeen records source unique-ids as delivered for a kept POP3 entry. A uid
+// already present is ignored, so a re-recorded id is harmless.
+func (d *SQLDirectory) MarkFetchmailSeen(configID int64, uids []string) error {
+	for _, uid := range uids {
+		if _, err := d.db.Exec(`INSERT IGNORE INTO fetchmail_seen (config_id, uid) VALUES (?, ?)`, configID, uid); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // b2i maps a bool to the TINYINT the schema stores.
 func b2i(b bool) int {
 	if b {

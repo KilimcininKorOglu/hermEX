@@ -82,3 +82,50 @@ func TestFetchmailCRUD(t *testing.T) {
 		t.Errorf("after user delete, fetchmail entries = %v; want none", list)
 	}
 }
+
+// TestFetchmailSeen covers the POP3 dedup state: recorded ids read back, a re-record is
+// idempotent, and deleting the owning entry cascades its seen rows away.
+func TestFetchmailSeen(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	cleanTables(t, db)
+
+	root := t.TempDir()
+	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "hermex.test")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.CreateUser("alice@hermex.test", "pw", filepath.Join(root, "alice")); err != nil {
+		t.Fatal(err)
+	}
+	id, err := d.CreateFetchmail(FetchmailEntry{
+		Mailbox: "alice@hermex.test", Active: true, SrcServer: "s", SrcUser: "u", Protocol: "POP3", Keep: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := d.MarkFetchmailSeen(id, []string{"uidA", "uidB"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.MarkFetchmailSeen(id, []string{"uidA"}); err != nil { // idempotent re-record
+		t.Fatalf("re-record: %v", err)
+	}
+	seen, err := d.FetchmailSeen(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(seen) != 2 || !seen["uidA"] || !seen["uidB"] {
+		t.Errorf("seen = %v, want {uidA, uidB}", seen)
+	}
+
+	// Deleting the entry cascades its seen rows.
+	if _, err := d.DeleteFetchmail(id); err != nil {
+		t.Fatal(err)
+	}
+	if seen, _ := d.FetchmailSeen(id); len(seen) != 0 {
+		t.Errorf("after entry delete, seen = %v; want none (cascade)", seen)
+	}
+}
