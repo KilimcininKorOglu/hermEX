@@ -94,12 +94,27 @@ func IsField(name string) bool {
 // value; an absent field is not enforced and inherits the lower layer.
 type Policy map[string]int
 
-// Validate rejects any field name not in the canonical set, so an unknown key can
-// never be stored and then silently ignored at provisioning time.
+// Validate rejects a field name not in the canonical set (so an unknown key can never be
+// stored and then silently ignored at provisioning) and an out-of-range value: a toggle
+// must be 0 or 1 and a numeric limit must not be negative. It does not enforce per-field
+// upper bounds (those vary by field and EAS version); the guard's purpose is to keep a
+// grossly invalid value — a negative limit, a non-boolean toggle — out of the document a
+// device might otherwise reject wholesale.
 func (p Policy) Validate() error {
-	for name := range p {
-		if !IsField(name) {
+	for name, v := range p {
+		f, ok := known[name]
+		if !ok {
 			return fmt.Errorf("unknown sync-policy field %q", name)
+		}
+		switch f.Kind {
+		case Bool:
+			if v != 0 && v != 1 {
+				return fmt.Errorf("sync-policy field %q is a toggle: want 0 or 1, got %d", name, v)
+			}
+		case Num:
+			if v < 0 {
+				return fmt.Errorf("sync-policy field %q cannot be negative: got %d", name, v)
+			}
 		}
 	}
 	return nil

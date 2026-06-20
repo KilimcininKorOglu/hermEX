@@ -34,7 +34,8 @@ func policyView(p easpolicy.Policy) []policyFieldView {
 
 // policyFromForm reads a submitted policy editor: a field left blank is omitted (it
 // inherits the layer below), a field with a value is enforced at that integer. An
-// unparseable value is reported rather than silently dropped.
+// unparseable or out-of-range value is reported rather than silently dropped, so a
+// crafted form post cannot bypass the same range check the JSON API applies.
 func policyFromForm(r *http.Request) (easpolicy.Policy, error) {
 	p := easpolicy.Policy{}
 	for _, f := range easpolicy.Fields {
@@ -47,6 +48,9 @@ func policyFromForm(r *http.Request) (easpolicy.Policy, error) {
 			return nil, fmt.Errorf("%s: %q is not a number", f.Name, v)
 		}
 		p[f.Name] = n
+	}
+	if err := p.Validate(); err != nil {
+		return nil, err
 	}
 	return p, nil
 }

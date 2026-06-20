@@ -78,6 +78,21 @@ func TestValidateRejectsUnknownField(t *testing.T) {
 	}
 }
 
+// TestValidateRejectsOutOfRange proves a grossly invalid value is refused before it can
+// reach a device: a non-boolean toggle and a negative numeric limit, while in-range
+// values (including a numeric 0) pass.
+func TestValidateRejectsOutOfRange(t *testing.T) {
+	if err := (Policy{"DevicePasswordEnabled": 2}).Validate(); err == nil {
+		t.Error("a toggle value of 2 was accepted; want rejected")
+	}
+	if err := (Policy{"MinDevicePasswordLength": -1}).Validate(); err == nil {
+		t.Error("a negative numeric limit was accepted; want rejected")
+	}
+	if err := (Policy{"DevicePasswordEnabled": 0, "MinDevicePasswordLength": 0, "MaxInactivityTimeDeviceLock": 900}).Validate(); err != nil {
+		t.Errorf("in-range values were rejected: %v", err)
+	}
+}
+
 // TestFieldsCoverTokens is a guard that the canonical field set stays the expected
 // size, so a field dropped in a refactor is caught rather than silently un-enforced.
 func TestFieldsCoverTokens(t *testing.T) {
