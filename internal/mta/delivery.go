@@ -57,8 +57,10 @@ func (s *session) Auth(username, password string) bool {
 	}
 	// The SMTP privilege gates authenticated submission only; inbound intake never
 	// authenticates, so a user whose SMTP privilege is revoked can still receive
-	// mail but cannot submit.
-	if privs, ok := authn.Privileges(username); ok && !privs.SMTP {
+	// mail but cannot submit. Fail closed (discard ok) to match every other
+	// protocol's gate: a privilege lookup that fails after a successful
+	// Authenticate denies submission rather than waving it through.
+	if privs, _ := authn.Privileges(username); !privs.SMTP {
 		return false
 	}
 	s.authUser, s.authMailbox = username, path
