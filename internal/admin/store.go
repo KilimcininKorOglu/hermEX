@@ -2,6 +2,7 @@ package admin
 
 import (
 	"hermex/internal/activesync"
+	"hermex/internal/easpolicy"
 	"hermex/internal/objectstore"
 )
 
@@ -30,6 +31,8 @@ type MailboxStore interface {
 	SetMeetingConfig(maildir string, cfg objectstore.MeetingConfig) error
 	GetStoreOwners(maildir string) ([]string, error)
 	SetStoreOwners(maildir string, list []string) error
+	GetSyncPolicy(maildir string) (easpolicy.Policy, error)
+	SetSyncPolicy(maildir string, p easpolicy.Policy) error
 	ListFolders(maildir string) ([]objectstore.FolderInfo, error)
 	ListFolderPermissions(maildir string, folderID int64) ([]objectstore.PermissionEntry, error)
 	SetFolderPermission(maildir string, folderID int64, username string, rights uint32) error
@@ -156,6 +159,19 @@ func (mailboxStore) GetStoreOwners(maildir string) ([]string, error) {
 
 func (mailboxStore) SetStoreOwners(maildir string, list []string) error {
 	return withStore(maildir, func(st *objectstore.Store) error { return st.SetStoreOwners(list) })
+}
+
+func (mailboxStore) GetSyncPolicy(maildir string) (easpolicy.Policy, error) {
+	st, err := objectstore.Open(maildir)
+	if err != nil {
+		return nil, err
+	}
+	defer st.Close()
+	return st.GetSyncPolicy()
+}
+
+func (mailboxStore) SetSyncPolicy(maildir string, p easpolicy.Policy) error {
+	return withStore(maildir, func(st *objectstore.Store) error { return st.SetSyncPolicy(p) })
 }
 
 func (mailboxStore) ListFolders(maildir string) ([]objectstore.FolderInfo, error) {

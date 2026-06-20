@@ -9,6 +9,7 @@ import (
 
 	"hermex/internal/activesync"
 	"hermex/internal/directory"
+	"hermex/internal/easpolicy"
 	"hermex/internal/objectstore"
 )
 
@@ -303,6 +304,10 @@ type fakeStore struct {
 	setStoreOwnersDir string
 	setStoreOwnersVal []string
 
+	syncPolicy    map[string]easpolicy.Policy
+	setSyncDir    string
+	setSyncPolicy easpolicy.Policy
+
 	folders     map[string][]objectstore.FolderInfo
 	folderPerms map[string][]objectstore.PermissionEntry
 
@@ -416,6 +421,25 @@ func (f *fakeStore) GetStoreOwners(maildir string) ([]string, error) {
 		return nil, f.getErr
 	}
 	return f.storeOwners[maildir], nil
+}
+
+func (f *fakeStore) GetSyncPolicy(maildir string) (easpolicy.Policy, error) {
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	return f.syncPolicy[maildir], nil
+}
+
+func (f *fakeStore) SetSyncPolicy(maildir string, p easpolicy.Policy) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+	if f.syncPolicy == nil {
+		f.syncPolicy = map[string]easpolicy.Policy{}
+	}
+	f.syncPolicy[maildir] = p
+	f.setSyncDir, f.setSyncPolicy = maildir, p
+	return nil
 }
 
 func (f *fakeStore) SetStoreOwners(maildir string, list []string) error {

@@ -158,6 +158,21 @@
 <button type="submit">Save meeting settings</button>
 </form>
 
+<h2>ActiveSync device policy (per-user override)</h2>
+<form class="syncpolicy-form" hx-put="/admin/ui/users/{{.User.Username}}/syncpolicy" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<p class="hint">Each field overrides the server default; leave blank (or "inherit") to take the default.</p>
+<div class="policy-grid">
+{{range .SyncPolicy}}
+<label class="policy-field">{{.Name}}
+{{if .Bool}}<select name="{{.Name}}"><option value="">(inherit)</option><option value="1"{{if eq .Value "1"}} selected{{end}}>Yes</option><option value="0"{{if eq .Value "0"}} selected{{end}}>No</option></select>
+{{else}}<input type="number" min="0" name="{{.Name}}" value="{{.Value}}" placeholder="(inherit)">{{end}}
+</label>
+{{end}}
+</div>
+<button type="submit">Save device policy</button>
+</form>
+
 <h2>Folders</h2>
 <form class="folders-form">
 <label>Folder
