@@ -113,17 +113,19 @@ func (s *Server) queryRowsCore(req queryRowsRequest) rowsetResult {
 			}
 		}
 	} else {
-		rows, st = g.walk(st, req.count)
+		rows, st = g.browseView().walk(st, req.count)
 	}
 	return rowsetResult{result: ecSuccess, stat: st, cols: cols, rows: rows}
 }
 
 // walk advances the cursor: it positions at STAT.cur_rec, applies the signed
 // delta, fetches up to count rows, and returns the rows plus the updated STAT
-// (cur_rec at the next row or END_OF_TABLE, num_pos/total_rec refreshed).
-func (g gal) walk(st stat, count uint32) ([]mapi.PropertyValues, stat) {
-	total := len(g.users)
-	start := g.position(st.curRec)
+// (cur_rec at the next row or END_OF_TABLE, num_pos/total_rec refreshed). It runs
+// over the GAL-browse view, so users hidden from the GAL are skipped while their
+// MIds stay valid for a direct fetch.
+func (v galView) walk(st stat, count uint32) ([]mapi.PropertyValues, stat) {
+	total := v.total()
+	start := v.position(st.curRec)
 	if st.delta >= 0 {
 		start += int(st.delta)
 		if start > total {
@@ -140,12 +142,12 @@ func (g gal) walk(st stat, count uint32) ([]mapi.PropertyValues, stat) {
 	n := min(total-start, int(count))
 	var rows []mapi.PropertyValues
 	for i := start; i < start+n; i++ {
-		rows = append(rows, galUserProps(g.users[i]))
+		rows = append(rows, galUserProps(v.userAt(i)))
 	}
 	if start+n >= total {
 		st.curRec = midEndOfTable
 	} else {
-		st.curRec = g.midAt(start + n)
+		st.curRec = v.midAt(start + n)
 	}
 	st.delta = 0
 	st.numPos = uint32(start + n)
@@ -230,10 +232,10 @@ func (s *Server) updateStatCore(req updateStatRequest) updateStatResult {
 	if req.stat.codePage == cpWinUnicode {
 		return updateStatResult{result: ecNotSupported, stat: req.stat}
 	}
-	g := s.snapshot()
+	v := s.snapshot().browseView()
 	st := req.stat
-	total := len(g.users)
-	initRow := g.position(st.curRec)
+	total := v.total()
+	initRow := v.position(st.curRec)
 	row := initRow
 	if st.delta < 0 && uint32(-st.delta) >= uint32(row) {
 		row = 0
@@ -244,7 +246,7 @@ func (s *Server) updateStatCore(req updateStatRequest) updateStatResult {
 		row = total
 		st.curRec = midEndOfTable
 	} else {
-		st.curRec = g.midAt(row)
+		st.curRec = v.midAt(row)
 	}
 	delta := int32(row - initRow)
 	st.delta = 0

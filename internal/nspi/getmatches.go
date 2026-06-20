@@ -182,6 +182,11 @@ func (g gal) matchAll(filter *mapi.Restriction, rowCount uint32, st stat) []uint
 		if uint32(len(mids)) >= rowCount {
 			break
 		}
+		// GetMatches over the GAL container is a resolution-style query, so it
+		// honors both the GAL-browse and the name-resolution hide bits.
+		if g.users[i].hidden&(abHideFromGAL|abHideResolve) != 0 {
+			continue
+		}
 		if matchNode(g.users[i], filter) {
 			mids = append(mids, g.users[i].mid)
 		}

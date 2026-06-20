@@ -47,11 +47,23 @@ const (
 	midResolved   uint32 = 0x2
 )
 
-// galUser is one GAL entry with its assigned MId.
+// Address-book hide bits (the PR_ATTR_HIDDEN mask): each NSPI surface hides on
+// its own bit, so an admin can hide a user from GAL browse yet keep them
+// resolvable by name. GAL browse honors abHideFromGAL; name resolution honors
+// abHideResolve. Direct fetches by a MId the client already holds are never
+// hidden — asking for a specific entry opens it.
+const (
+	abHideFromGAL uint32 = 0x01
+	abHideResolve uint32 = 0x08
+)
+
+// galUser is one GAL entry with its assigned MId. hidden is the PR_ATTR_HIDDEN
+// mask the directory supplied; the surface applying it decides which bit matters.
 type galUser struct {
 	mid     uint32
 	display string
 	smtp    string
+	hidden  uint32
 }
 
 // gal is the Global Address List in display-name order with MId assignment. It
@@ -91,7 +103,7 @@ func (s *Server) snapshot() gal {
 	})
 	users := make([]galUser, len(entries))
 	for i, e := range entries {
-		users[i] = galUser{mid: midBase + uint32(i), display: e.DisplayName, smtp: e.Address}
+		users[i] = galUser{mid: midBase + uint32(i), display: e.DisplayName, smtp: e.Address, hidden: e.HiddenFrom}
 	}
 	return gal{users: users}
 }
@@ -133,6 +145,63 @@ func (g gal) midAt(i int) uint32 {
 	return g.users[i].mid
 }
 
+// galView is the hide-filtered cursor view of the GAL for table walks (QueryRows,
+// SeekEntries, UpdateStat). vis holds the ascending full-snapshot indices of the
+// users visible on the GAL-browse surface, so the cursor walks the subsequence
+// while each row keeps its full-snapshot MId (direct GetProps by that MId still
+// works). With nothing hidden, vis is every index and the view behaves exactly
+// like the full GAL, so the existing cursor semantics and their tests are
+// unchanged.
+type galView struct {
+	g   gal
+	vis []int
+}
+
+// browseView builds the GAL-browse view: the users not hidden from the GAL
+// (mask bit abHideFromGAL), preserving the display-name order of the snapshot.
+func (g gal) browseView() galView {
+	vis := make([]int, 0, len(g.users))
+	for i, u := range g.users {
+		if u.hidden&abHideFromGAL == 0 {
+			vis = append(vis, i)
+		}
+	}
+	return galView{g: g, vis: vis}
+}
+
+// total is the number of rows in the browse view.
+func (v galView) total() int { return len(v.vis) }
+
+// userAt returns the user at a visible-space row index (0 <= pos < total).
+func (v galView) userAt(pos int) galUser { return v.g.users[v.vis[pos]] }
+
+// position maps a STAT.cur_rec to a 0-based visible-space row index: the
+// table-start/-end bookmarks clamp to the ends; an entry MId maps to the first
+// visible row at or after its full-snapshot position, so a cursor parked on a
+// now-hidden entry advances to the next visible one.
+func (v galView) position(curRec uint32) int {
+	switch curRec {
+	case midBeginningOfTable:
+		return 0
+	case midEndOfTable:
+		return len(v.vis)
+	}
+	full := int(curRec) - int(midBase)
+	if full < 0 {
+		return 0
+	}
+	return sort.Search(len(v.vis), func(i int) bool { return v.vis[i] >= full })
+}
+
+// midAt returns the MId of the visible row at index i, or MID_END_OF_TABLE when i
+// is at or past the end of the view.
+func (v galView) midAt(i int) uint32 {
+	if i < 0 || i >= len(v.vis) {
+		return midEndOfTable
+	}
+	return v.g.users[v.vis[i]].mid
+}
+
 // matchesToken reports whether a search token matches this user
 // case-insensitively, as a substring of its SMTP address or display name. It is
 // the single predicate shared by ResolveNamesW's resolve and GetMatches' PR_ANR
@@ -150,6 +219,9 @@ func (u galUser) matchesToken(token string) bool {
 func (g gal) resolve(token string) (mid, status uint32) {
 	found := -1
 	for i, u := range g.users {
+		if u.hidden&abHideResolve != 0 {
+			continue // hidden from name resolution
+		}
 		if u.matchesToken(token) {
 			if found >= 0 {
 				return 0, midAmbiguous

@@ -49,38 +49,58 @@ func (s *Server) seekEntriesCore(req seekEntriesRequest) rowsetResult {
 	}
 
 	g := s.snapshot()
-	found, pos, ok := g.seek(target, req.table)
+	var found galUser
+	var pos, total int
+	var ok bool
+	if req.table != nil {
+		// An explicit MId list is the client's own selection: scan it directly,
+		// unfiltered, over the full snapshot.
+		found, pos, ok = g.seekTable(target, req.table)
+		total = len(g.users)
+	} else {
+		// A plain seek walks the GAL-browse view, so users hidden from the GAL
+		// are not landed on.
+		view := g.browseView()
+		found, pos, ok = view.seek(target)
+		total = view.total()
+	}
 	if !ok {
 		return rowsetResult{result: ecNotFound, stat: st}
 	}
 	st.curRec = found.mid
 	st.numPos = uint32(pos)
-	st.totalRec = uint32(len(g.users))
+	st.totalRec = uint32(total)
 	rows := []mapi.PropertyValues{galUserProps(found)}
 	return rowsetResult{result: ecSuccess, stat: st, cols: cols, rows: rows}
 }
 
-// seek positions at the first entry whose display name is >= target
-// (case-insensitively, the comparison snapshot() orders by). With an explicit
-// MId list the scan runs in that list's order; otherwise it binary-searches the
-// display-ordered GAL. The returned position is the entry's GAL index.
-func (g gal) seek(target string, table []uint32) (galUser, int, bool) {
+// seekTable positions at the first entry of a client-supplied MId list whose
+// display name is >= target, scanning in the list's order. The list is the
+// client's own selection (a direct reference), so hidden entries are not
+// filtered. The returned position is the entry's full-snapshot GAL index.
+func (g gal) seekTable(target string, table []uint32) (galUser, int, bool) {
 	t := strings.ToLower(target)
-	if table != nil {
-		for _, mid := range table {
-			if u, ok := g.byMID(mid); ok && strings.ToLower(u.display) >= t {
-				return u, int(mid - midBase), true
-			}
+	for _, mid := range table {
+		if u, ok := g.byMID(mid); ok && strings.ToLower(u.display) >= t {
+			return u, int(mid - midBase), true
 		}
-		return galUser{}, 0, false
 	}
-	i := sort.Search(len(g.users), func(i int) bool {
-		return strings.ToLower(g.users[i].display) >= t
+	return galUser{}, 0, false
+}
+
+// seek binary-searches the GAL-browse view for the first entry whose display
+// name is >= target (case-insensitively, the order snapshot() sorts by). The
+// view is the display-ordered subsequence visible in the GAL, so the returned
+// position is a visible-space index.
+func (v galView) seek(target string) (galUser, int, bool) {
+	t := strings.ToLower(target)
+	i := sort.Search(v.total(), func(i int) bool {
+		return strings.ToLower(v.userAt(i).display) >= t
 	})
-	if i >= len(g.users) {
+	if i >= v.total() {
 		return galUser{}, 0, false
 	}
-	return g.users[i], i, true
+	return v.userAt(i), i, true
 }
 
 // seekEntriesRequest is the decoded SeekEntries body ([MS-OXNSPI] 2.2.4): a
