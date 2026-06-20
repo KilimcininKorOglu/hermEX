@@ -168,6 +168,10 @@ func (s *Server) basicAuth(w http.ResponseWriter, r *http.Request) (user, mailbo
 	u, p, hasAuth := r.BasicAuth()
 	if hasAuth {
 		if path, good := s.auth.Authenticate(u, p); good {
+			if privs, _ := s.auth.Privileges(u); !privs.EAS {
+				http.Error(w, "ActiveSync access is disabled for this account", http.StatusForbidden)
+				return "", "", false
+			}
 			return u, path, true
 		}
 	}
