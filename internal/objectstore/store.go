@@ -59,6 +59,13 @@ type Store struct {
 	logger *logging.Logger
 }
 
+// Dir returns the mailbox directory this store is rooted at — its stable
+// physical identity. Two stores opened over the same mailbox report the same
+// Dir even though they are distinct handles, so a caller can tell whether two
+// handles address the same physical mailbox (as opposed to comparing the
+// *Store pointers, which differ per Open).
+func (s *Store) Dir() string { return s.dir }
+
 // logStoreError reports a store infrastructure failure (a SQL or filesystem
 // error from the underlying databases or content files) to the central log under
 // the store subsystem. Logical outcomes like ErrNotFound are not infrastructure

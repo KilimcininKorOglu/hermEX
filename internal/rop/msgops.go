@@ -143,9 +143,26 @@ func (s *Session) ropMoveCopyMessages(p *ext.Pull, out *ext.Push, handles []uint
 		writeErr(out, ropMoveCopyMessages, hindex, ecError)
 		return true
 	}
-	// A delegate move/copy spans two folders (source + destination rights); it is
-	// refused outright until that two-sided gate lands.
-	if s.denyDelegate(out, ropMoveCopyMessages, hindex, src.store) {
+	// A move/copy spans two folders. The copy runs entirely through the source
+	// store, so source and destination must be the same physical mailbox; a
+	// delegate session can hold handles into two mailboxes, and the well-known
+	// folder ids collide across mailboxes, so a cross-mailbox move/copy would file
+	// into the wrong store. It is refused (an owner never crosses mailboxes, so
+	// this is inert for an owner). Then the two-sided rights gate: a copy reads the
+	// source (ReadAny) while a move removes from it (DeleteAny), and either adds to
+	// the destination (Create). For an owner both authorize checks short-circuit.
+	if dst.store == nil || src.store.Dir() != dst.store.Dir() {
+		writeErr(out, ropMoveCopyMessages, hindex, ecNotSupported)
+		return true
+	}
+	srcRight := uint32(mapi.FrightsReadAny)
+	if wantCopy == 0 {
+		srcRight = mapi.FrightsDeleteAny // a move deletes from the source
+	}
+	if s.denyWrite(out, ropMoveCopyMessages, hindex, src.store, src.folderID, srcRight) {
+		return true
+	}
+	if s.denyWrite(out, ropMoveCopyMessages, hindex, dst.store, dst.folderID, mapi.FrightsCreate) {
 		return true
 	}
 	// Resolve each message id to its uid within the source folder; the raw

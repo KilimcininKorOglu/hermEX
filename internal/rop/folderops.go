@@ -120,17 +120,30 @@ func (s *Session) ropMoveFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 		writeErr(out, ropMoveFolder, hindex, ecError)
 		return true
 	}
-	// A delegate move spans two folders (source + destination rights); it is refused
-	// outright until that two-sided gate lands.
-	if s.denyDelegate(out, ropMoveFolder, hindex, folder.store) {
+	movedFID := int64(mapi.EID(fid).GCValue())
+	// Moving (or renaming) a folder modifies the folder itself: it requires owner
+	// rights on the folder being moved — the same right RopDeleteFolder requires to
+	// remove one. For an owner this short-circuits.
+	if s.denyWrite(out, ropMoveFolder, hindex, folder.store, movedFID, mapi.FrightsOwner) {
 		return true
 	}
 	dest := s.get(handleAt(handles, dhindex))
 	var newParent *int64
 	if dest != nil && dest.kind == kindFolder {
+		// A reparent files the folder under a new parent. RenameFolder runs through
+		// the source store, so the new parent must be the same physical mailbox (a
+		// cross-mailbox reparent would collide on well-known ids); the caller then
+		// needs CreateSubfolder on that parent.
+		if dest.store == nil || folder.store.Dir() != dest.store.Dir() {
+			writeErr(out, ropMoveFolder, hindex, ecNotSupported)
+			return true
+		}
+		if s.denyWrite(out, ropMoveFolder, hindex, dest.store, dest.folderID, mapi.FrightsCreateSubfolder) {
+			return true
+		}
 		newParent = &dest.folderID
 	}
-	if err := folder.store.RenameFolder(int64(mapi.EID(fid).GCValue()), newParent, newName); err != nil {
+	if err := folder.store.RenameFolder(movedFID, newParent, newName); err != nil {
 		writeErr(out, ropMoveFolder, hindex, ecError)
 		return true
 	}
@@ -175,17 +188,29 @@ func (s *Session) ropCopyFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 		writeErr(out, ropCopyFolder, hindex, ecError)
 		return true
 	}
-	// A delegate copy spans two folders (source read + destination create rights); it
-	// is refused outright until that two-sided gate lands.
-	if s.denyDelegate(out, ropCopyFolder, hindex, folder.store) {
+	copiedFID := int64(mapi.EID(fid).GCValue())
+	// Copying a folder reads its contents: it requires ReadAny on the folder being
+	// copied (denyWrite gates an arbitrary right, not only writes). For an owner the
+	// authorize check short-circuits.
+	if s.denyWrite(out, ropCopyFolder, hindex, folder.store, copiedFID, mapi.FrightsReadAny) {
 		return true
 	}
 	dest := s.get(handleAt(handles, dhindex))
-	if dest == nil || dest.kind != kindFolder {
+	if dest == nil || dest.kind != kindFolder || dest.store == nil {
 		writeErr(out, ropCopyFolder, hindex, ecError)
 		return true
 	}
-	if _, err := folder.store.CopyFolder(int64(mapi.EID(fid).GCValue()), dest.folderID, newName, wantRecursive != 0); err != nil {
+	// CopyFolder runs through the source store, so the copy lands under a parent in
+	// the same physical mailbox (a cross-mailbox copy would collide on well-known
+	// ids); creating the new subfolder there needs CreateSubfolder.
+	if folder.store.Dir() != dest.store.Dir() {
+		writeErr(out, ropCopyFolder, hindex, ecNotSupported)
+		return true
+	}
+	if s.denyWrite(out, ropCopyFolder, hindex, dest.store, dest.folderID, mapi.FrightsCreateSubfolder) {
+		return true
+	}
+	if _, err := folder.store.CopyFolder(copiedFID, dest.folderID, newName, wantRecursive != 0); err != nil {
 		switch {
 		case errors.Is(err, objectstore.ErrFolderCycle):
 			writeErr(out, ropCopyFolder, hindex, ecFolderCycle)

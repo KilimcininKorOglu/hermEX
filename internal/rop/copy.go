@@ -88,10 +88,12 @@ func (s *Session) copyProperties(ropID uint8, out *ext.Push, handles []uint32, h
 		writeErr(out, ropID, hindex, ecDeclineCopy)
 		return true
 	}
-	// A property copy writes the destination object; in a delegate session that is a
-	// write to a non-owned mailbox, refused outright until the per-folder copy gate
-	// lands (alongside move/copy's two-sided rights).
-	if s.denyDelegate(out, ropID, hindex, dst.store) {
+	// A property copy writes the destination object — SetProperties reached through a
+	// different entry — so it gates the same way: editing an existing stored message
+	// requires EditAny on its folder. A compose message, a created attachment, and a
+	// composed embedded message are gated at their own create chokepoints and persist
+	// only through the parent message's gated save, so they take no copy-time gate.
+	if dst.kind == kindMessage && s.denyWrite(out, ropID, hindex, dst.store, dst.folderID, mapi.FrightsEditAny) {
 		return true
 	}
 

@@ -431,9 +431,10 @@ func TestDelegateWritesDeniedForReviewer(t *testing.T) {
 }
 
 // TestDelegateEditorWritesAndSendBoundary proves the gates are rights-aware, not a
-// blanket: an Editor-equivalent delegate (granted owner rights on the folder)
-// performs the writes its grant covers, yet the operations governed by send-on-behalf
-// and the two-sided move/copy rights stay refused regardless of folder rights.
+// blanket: an Editor-equivalent delegate (granted owner rights on the folder) performs
+// the writes its grant covers — including a move/copy WITHIN the mailbox once it holds
+// the two-sided rights (ReadAny on the source, Create on the destination) — yet
+// send-on-behalf (Submit/TransportSend) stays refused regardless of folder rights.
 func TestDelegateEditorWritesAndSendBoundary(t *testing.T) {
 	dir := t.TempDir()
 	const delegate = "delegate@hermex.test"
@@ -461,7 +462,15 @@ func TestDelegateEditorWritesAndSendBoundary(t *testing.T) {
 		t.Errorf("Editor SetProperties ec = %#x, want success", ec)
 	}
 
-	// Send and cross-folder copy stay denied even with full folder rights.
+	// A move/copy WITHIN the delegated mailbox is permitted once the two-sided rights
+	// are held: owner rights on the Inbox cover both the source ReadAny and the
+	// destination Create, so an in-mailbox copy succeeds (Inc 2 refused it outright).
+	if ec := ropResultEC(t, mustDispatchN(sess, buildMoveCopyMessages(0, 1, 1, msgEID), []uint32{inboxH, inboxH})); ec != ecSuccess {
+		t.Errorf("Editor in-mailbox MoveCopyMessages ec = %#x, want success (two-sided rights held)", ec)
+	}
+
+	// Send-on-behalf stays denied even with full folder rights: submitting and
+	// transport-sending from another's mailbox await the send-on-behalf increment.
 	boundary := []struct {
 		name string
 		req  []byte
@@ -469,12 +478,54 @@ func TestDelegateEditorWritesAndSendBoundary(t *testing.T) {
 	}{
 		{"SubmitMessage", buildSubmitMessage(0), []uint32{newMsgH}},
 		{"TransportSend", buildTransportHeaderOnly(ropTransportSend, 0), []uint32{newMsgH}},
-		{"MoveCopyMessages", buildMoveCopyMessages(0, 1, 1, msgEID), []uint32{inboxH, inboxH}},
 	}
 	for _, b := range boundary {
 		if ec := ropResultEC(t, mustDispatchN(sess, b.req, b.h)); ec != ecAccessDenied {
-			t.Errorf("%s ec = %#x, want AccessDenied (send/move not yet permitted to a delegate)", b.name, ec)
+			t.Errorf("%s ec = %#x, want AccessDenied (send-on-behalf not yet permitted to a delegate)", b.name, ec)
 		}
+	}
+}
+
+// TestDelegateMoveCopyCrossMailboxUnsupported proves the cross-store guard: a delegate
+// holding two logons — their own mailbox and one they fully control as a delegate —
+// may not move/copy ACROSS the two mailboxes even with full rights on both sides. The
+// copy runs single-store and the well-known folder ids collide across mailboxes, so a
+// cross-mailbox move/copy would file into the wrong store; it is refused NotSupported.
+func TestDelegateMoveCopyCrossMailboxUnsupported(t *testing.T) {
+	ownDir := t.TempDir()
+	bossDir := t.TempDir()
+	const delegate = "delegate@hermex.test"
+	grantFolderPermission(t, bossDir, int64(mapi.PrivateFIDInbox), delegate, mapi.RightsOwner)
+	msgID := seedFolderMessage(t, ownDir, int64(mapi.PrivateFIDInbox), "MINE")
+	accounts := directory.StaticAccounts{
+		"boss@hermex.test": {MailboxPath: bossDir},
+		delegate:           {MailboxPath: ownDir},
+	}
+	sess := NewSession(ownDir, accounts, delegate)
+	defer sess.Close()
+
+	// Logon 1: the delegate's own mailbox (its self-Essdn keeps it an owner logon);
+	// logon 2: the boss's mailbox (delegate mode, opened via the full grant above).
+	_, h1 := sess.Dispatch(delegateLogonRequest(0, 0x01, userDNFor(delegate)), []uint32{0xFFFFFFFF})
+	ownLogonH := h1[0]
+	_, h2 := sess.Dispatch(delegateLogonRequest(0, 0x01, userDNFor("boss@hermex.test")), []uint32{0xFFFFFFFF})
+	bossLogonH := h2[0]
+
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	_, oh := sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{ownLogonH, 0xFFFFFFFF})
+	ownInboxH := oh[1]
+	_, bh := sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{bossLogonH, 0xFFFFFFFF})
+	bossInboxH := bh[1]
+	if ownInboxH == 0xFFFFFFFF || bossInboxH == 0xFFFFFFFF {
+		t.Fatal("could not open both mailboxes' Inbox")
+	}
+
+	// Copy from the delegate's own Inbox into the boss's Inbox: both sides are fully
+	// permitted, but the operation crosses physical mailboxes and is unsupported.
+	msgEID := uint64(mapi.MakeEIDEx(1, uint64(msgID)))
+	resp := mustDispatchN(sess, buildMoveCopyMessages(0, 1, 1, msgEID), []uint32{ownInboxH, bossInboxH})
+	if ec := ropResultEC(t, resp); ec != ecNotSupported {
+		t.Errorf("cross-mailbox MoveCopyMessages ec = %#x, want NotSupported", ec)
 	}
 }
 
