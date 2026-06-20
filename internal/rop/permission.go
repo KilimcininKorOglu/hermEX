@@ -152,6 +152,11 @@ func (s *Session) ropModifyPermissions(p *ext.Pull, out *ext.Push, handles []uin
 		writeErr(out, ropModifyPermissions, hindex, ecError)
 		return true
 	}
+	// Editing a folder's permission table requires owner rights — the gate that
+	// stops a delegate from granting themselves broader access on the owner's folders.
+	if s.denyWrite(out, ropModifyPermissions, hindex, folder.store, folder.folderID, mapi.FrightsOwner) {
+		return true
+	}
 
 	includeFB := flags&modifyPermIncludeFreeBusy != 0
 	changes := make([]objectstore.PermissionChange, 0, len(rows))

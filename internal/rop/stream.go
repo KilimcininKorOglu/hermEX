@@ -143,6 +143,13 @@ func (s *Session) ropOpenStream(p *ext.Pull, out *ext.Push, handles []uint32, hi
 
 	var st *streamState
 	if mode&streamWriteMode != 0 && isStreamWritable(parent) {
+		// A writable stream over an existing message edits it: gate EditAny here (the
+		// write chokepoint) since the stream object carries no folder of its own. The
+		// other writable parents (a created attachment, a compose/embedded message)
+		// were gated at their own create/open.
+		if parent.kind == kindMessage && s.denyWrite(out, ropOpenStream, ohindex, parent.store, parent.folderID, mapi.FrightsEditAny) {
+			return true
+		}
 		st = &streamState{data: s.writeStreamInitial(parent, tag), writable: true, parent: parent, tag: tag}
 	} else {
 		data, err := s.streamData(parent, tag)

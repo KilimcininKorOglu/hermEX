@@ -104,6 +104,10 @@ func (s *Session) ropSetMessageStatus(p *ext.Pull, out *ext.Push, handles []uint
 		writeErr(out, ropSetMessageStatus, hindex, ecNotSupported)
 		return true
 	}
+	// Changing a message's status modifies it: a delegate needs EditAny on the folder.
+	if s.denyWrite(out, ropSetMessageStatus, hindex, folder.store, folder.folderID, mapi.FrightsEditAny) {
+		return true
+	}
 	mid := int64(mapi.EID(msgEID).GCValue())
 	props, err := folder.store.GetMessageProperties(mid, mapi.PrMsgStatus)
 	if err != nil {

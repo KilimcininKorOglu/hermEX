@@ -40,6 +40,11 @@ func (s *Session) ropSetMessageReadFlag(p *ext.Pull, out *ext.Push, handles []ui
 		writeErr(out, ropSetMessageReadFlag, hindex, ecError)
 		return true
 	}
+	// Changing a message's read state modifies it: a delegate needs EditAny on the
+	// folder (a read-only Reviewer may not flip read state in a shared mailbox).
+	if s.denyWrite(out, ropSetMessageReadFlag, hindex, obj.store, obj.folderID, mapi.FrightsEditAny) {
+		return true
+	}
 	// The read-receipt trigger gates on the unread→read transition, so read the
 	// prior state before the write: a message already read through another
 	// protocol (an IMAP \Seen) leaves PR_READ_RECEIPT_REQUESTED set, and a
@@ -100,6 +105,10 @@ func (s *Session) ropDeleteMessages(p *ext.Pull, out *ext.Push, handles []uint32
 		writeErr(out, ropDeleteMessages, hindex, ecError)
 		return true
 	}
+	// Deleting messages from the folder requires DeleteAny.
+	if s.denyWrite(out, ropDeleteMessages, hindex, folder.store, folder.folderID, mapi.FrightsDeleteAny) {
+		return true
+	}
 	var partial uint8
 	for _, eid := range ids {
 		if err := folder.store.DeleteObject(int64(mapi.EID(eid).GCValue())); err != nil {
@@ -132,6 +141,11 @@ func (s *Session) ropMoveCopyMessages(p *ext.Pull, out *ext.Push, handles []uint
 	dst := s.get(handleAt(handles, dhindex))
 	if src == nil || src.kind != kindFolder || src.store == nil || dst == nil || dst.kind != kindFolder {
 		writeErr(out, ropMoveCopyMessages, hindex, ecError)
+		return true
+	}
+	// A delegate move/copy spans two folders (source + destination rights); it is
+	// refused outright until that two-sided gate lands.
+	if s.denyDelegate(out, ropMoveCopyMessages, hindex, src.store) {
 		return true
 	}
 	// Resolve each message id to its uid within the source folder; the raw

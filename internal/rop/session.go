@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"hermex/internal/directory"
+	"hermex/internal/ext"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcmail"
@@ -219,6 +220,21 @@ func persistedMessageID(o *object) (int64, bool) {
 	return 0, false
 }
 
+// messageFolder returns the folder whose permissions govern writes to a
+// message-kind object — a composed message's target folder or an opened message's
+// cached parent folder — and whether o is such an object.
+func (o *object) messageFolder() (int64, bool) {
+	switch o.kind {
+	case kindMessage:
+		return o.folderID, true
+	case kindNewMessage:
+		if o.newMsg != nil {
+			return o.newMsg.folderID, true
+		}
+	}
+	return 0, false
+}
+
 // release frees a handle, closing the mailbox store if it was a logon root and
 // dropping any delegate authorization the logon carried.
 func (s *Session) release(h uint32) {
@@ -251,6 +267,36 @@ func (s *Session) authorize(store *objectstore.Store, folderID int64, need uint3
 		return false, err
 	}
 	return rights&need == need, nil
+}
+
+// denyWrite writes an access-denied (or error) response and reports true when the
+// caller may not exercise need on folderID — the per-operation write gate the
+// mutating ROP handlers call after resolving their target folder. An owner logon
+// short-circuits inside authorize, so this is a no-op for an owner session.
+func (s *Session) denyWrite(out *ext.Push, ropID, hindex uint8, store *objectstore.Store, folderID int64, need uint32) bool {
+	ok, err := s.authorize(store, folderID, need)
+	if err != nil {
+		writeErr(out, ropID, hindex, ecError)
+		return true
+	}
+	if !ok {
+		writeErr(out, ropID, hindex, ecAccessDenied)
+		return true
+	}
+	return false
+}
+
+// denyDelegate writes an access-denied response and reports true when store is a
+// delegate logon. It blanket-refuses, for a non-owner caller, the operations not yet
+// mapped to folder rights: message submission (governed by send-on-behalf) and
+// cross-folder move/copy (governed by combined source-and-destination rights). An
+// owner logon (store absent from delegateCallers) passes.
+func (s *Session) denyDelegate(out *ext.Push, ropID, hindex uint8, store *objectstore.Store) bool {
+	if _, isDelegate := s.delegateCallers[store]; isDelegate {
+		writeErr(out, ropID, hindex, ecAccessDenied)
+		return true
+	}
+	return false
 }
 
 // Close releases every handle (Disconnect), closing any open store. It takes the

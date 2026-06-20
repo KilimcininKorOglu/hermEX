@@ -112,6 +112,10 @@ func (s *Session) ropModifyRules(p *ext.Pull, out *ext.Push, handles []uint32, h
 		writeErr(out, ropModifyRules, hindex, ecError)
 		return true
 	}
+	// Editing a folder's rule table requires owner rights.
+	if s.denyWrite(out, ropModifyRules, hindex, folder.store, folder.folderID, mapi.FrightsOwner) {
+		return true
+	}
 
 	changes := make([]objectstore.RuleChange, 0, len(rows))
 	for _, r := range rows {

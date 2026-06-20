@@ -184,6 +184,13 @@ func (s *Session) ropCreateAttachment(p *ext.Pull, out *ext.Push, handles []uint
 		return true
 	}
 
+	// Attaching to an existing message modifies it: a delegate needs EditAny on its
+	// folder (a compose message trusts the Create gate it was opened with). This is
+	// the attachment write's open chokepoint — the attachment handle it returns is
+	// then trusted by SaveChangesAttachment.
+	if msg.kind == kindMessage && s.denyWrite(out, ropCreateAttachment, ohindex, msg.store, msg.folderID, mapi.FrightsEditAny) {
+		return true
+	}
 	messageID, ok := persistedMessageID(msg)
 	if !ok {
 		writeErr(out, ropCreateAttachment, ohindex, ecNotSupported)
@@ -319,6 +326,11 @@ func (s *Session) ropDeleteAttachment(p *ext.Pull, out *ext.Push, handles []uint
 		return true
 	}
 
+	// Removing an attachment from a persisted message modifies it: EditAny on its
+	// folder (a compose message trusted its Create gate above).
+	if msg.kind == kindMessage && s.denyWrite(out, ropDeleteAttachment, hindex, msg.store, msg.folderID, mapi.FrightsEditAny) {
+		return true
+	}
 	messageID, ok := persistedMessageID(msg)
 	if !ok {
 		writeErr(out, ropDeleteAttachment, hindex, ecError)

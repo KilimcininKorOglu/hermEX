@@ -78,7 +78,10 @@ func (s *Session) ropOpenMessage(p *ext.Pull, out *ext.Push, handles []uint32, h
 		writeErr(out, ropOpenMessage, ohindex, ecNotFound)
 		return true
 	}
-	h := s.alloc(&object{kind: kindMessage, store: parent.store, messageID: msgID})
+	// folderID caches the message's real parent folder so a later write on this
+	// handle (SetProperties, SaveChanges, …) authorizes against the right folder's
+	// permissions without re-resolving it.
+	h := s.alloc(&object{kind: kindMessage, store: parent.store, messageID: msgID, folderID: parentFID})
 	setHandle(handles, ohindex, h)
 
 	out.Uint8(ropOpenMessage)

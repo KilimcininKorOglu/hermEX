@@ -88,6 +88,12 @@ func (s *Session) copyProperties(ropID uint8, out *ext.Push, handles []uint32, h
 		writeErr(out, ropID, hindex, ecDeclineCopy)
 		return true
 	}
+	// A property copy writes the destination object; in a delegate session that is a
+	// write to a non-owned mailbox, refused outright until the per-folder copy gate
+	// lands (alongside move/copy's two-sided rights).
+	if s.denyDelegate(out, ropID, hindex, dst.store) {
+		return true
+	}
 
 	// Decide the sub-object copy up front (only meaningful for a message source):
 	// a CopyTo with WantSubObjects copies each collection unless its tag is excluded;

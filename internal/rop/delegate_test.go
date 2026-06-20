@@ -4,10 +4,160 @@ import (
 	"testing"
 	"time"
 
+	"hermex/internal/directory"
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
+
+// userDNFor builds the reversible address-book DN the GAL hands out for a mailbox,
+// the form a client echoes back in RopLogon's Essdn (the final cn= is the SMTP).
+func userDNFor(smtp string) string {
+	return "/o=hermex/ou=hermex/cn=Recipients/cn=" + smtp
+}
+
+// delegateLogonRequest builds a RopLogon carrying an Essdn that names a (possibly
+// other) target mailbox, NUL-terminated as on the wire.
+func delegateLogonRequest(hindex, logonFlags uint8, essdn string) []byte {
+	rb := ext.NewPush(ext.FlagUTF16)
+	rb.Uint8(ropLogon)
+	rb.Uint8(0)
+	rb.Uint8(hindex)
+	rb.Uint8(logonFlags)
+	rb.Uint32(0) // OpenFlags
+	rb.Uint32(0) // StoreState
+	raw := append([]byte(essdn), 0)
+	rb.Uint16(uint16(len(raw)))
+	rb.Raw(raw)
+	return rb.Bytes()
+}
+
+// setDelegateList designates the given addresses as delegates of the mailbox by
+// opening its store directly (the provisioning side).
+func setDelegateList(t *testing.T, dir string, list []string) {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.SetDelegates(list); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// readLogonResponseFlags pulls a RopLogon response's ReturnValue and (on success)
+// its ResponseFlags byte, skipping the LogonFlags and the 13 special-folder EIDs.
+func readLogonResponseFlags(t *testing.T, resp []byte) (ec uint32, flags uint8) {
+	t.Helper()
+	p := ext.NewPull(resp, ext.FlagUTF16)
+	mustU8(t, p, "RopId")
+	mustU8(t, p, "ohindex")
+	if ec = mustU32(t, p, "ec"); ec != ecSuccess {
+		return ec, 0
+	}
+	mustU8(t, p, "LogonFlags")
+	for i := 0; i < 13; i++ {
+		mustU64(t, p, "FolderId")
+	}
+	return ec, mustU8(t, p, "ResponseFlags")
+}
+
+// TestDelegateLogonViaDelegateList drives the real logon path: a caller designated
+// on the target's delegate list opens the target mailbox in delegate mode (Reserved
+// response flags, no owner/send-as) and is registered for per-folder authorization.
+func TestDelegateLogonViaDelegateList(t *testing.T) {
+	callerDir := t.TempDir()
+	targetDir := t.TempDir()
+	setDelegateList(t, targetDir, []string{"delegate@hermex.test"})
+	accounts := directory.StaticAccounts{
+		"boss@hermex.test":     {MailboxPath: targetDir},
+		"delegate@hermex.test": {MailboxPath: callerDir},
+	}
+	sess := NewSession(callerDir, accounts, "delegate@hermex.test")
+	defer sess.Close()
+
+	resp, h := sess.Dispatch(delegateLogonRequest(0, 0x01, userDNFor("boss@hermex.test")), []uint32{0xFFFFFFFF})
+	ec, flags := readLogonResponseFlags(t, resp)
+	if ec != ecSuccess {
+		t.Fatalf("delegate logon ec = %#x, want success", ec)
+	}
+	if flags != responseFlagReserved {
+		t.Errorf("delegate ResponseFlags = %#x, want %#x (reserved only)", flags, responseFlagReserved)
+	}
+	logon := sess.get(h[0])
+	if logon == nil || logon.store == nil {
+		t.Fatal("delegate logon registered no store")
+	}
+	if caller, ok := sess.delegateCallers[logon.store]; !ok || caller != "delegate@hermex.test" {
+		t.Errorf("delegate context = %q (ok=%v), want delegate@hermex.test", caller, ok)
+	}
+}
+
+// TestDelegateLogonViaFolderGrant proves the other open path: a caller with a folder
+// permission on the target (but not on its delegate list) may also open it.
+func TestDelegateLogonViaFolderGrant(t *testing.T) {
+	callerDir := t.TempDir()
+	targetDir := t.TempDir()
+	grantFolderPermission(t, targetDir, int64(mapi.PrivateFIDInbox), "delegate@hermex.test", mapi.RightsReviewer)
+	accounts := directory.StaticAccounts{
+		"boss@hermex.test":     {MailboxPath: targetDir},
+		"delegate@hermex.test": {MailboxPath: callerDir},
+	}
+	sess := NewSession(callerDir, accounts, "delegate@hermex.test")
+	defer sess.Close()
+
+	resp, h := sess.Dispatch(delegateLogonRequest(0, 0x01, userDNFor("boss@hermex.test")), []uint32{0xFFFFFFFF})
+	if ec, _ := readLogonResponseFlags(t, resp); ec != ecSuccess {
+		t.Fatalf("folder-grant delegate logon ec = %#x, want success", ec)
+	}
+	if logon := sess.get(h[0]); logon == nil || sess.delegateCallers[logon.store] != "delegate@hermex.test" {
+		t.Error("folder-grant delegate not registered")
+	}
+}
+
+// TestDelegateLogonDeniedWithoutAccess proves the gate: a caller with neither a
+// delegate designation nor any folder grant on the target is refused at logon.
+func TestDelegateLogonDeniedWithoutAccess(t *testing.T) {
+	callerDir := t.TempDir()
+	targetDir := t.TempDir()
+	accounts := directory.StaticAccounts{
+		"boss@hermex.test":     {MailboxPath: targetDir},
+		"stranger@hermex.test": {MailboxPath: callerDir},
+	}
+	sess := NewSession(callerDir, accounts, "stranger@hermex.test")
+	defer sess.Close()
+
+	resp, _ := sess.Dispatch(delegateLogonRequest(0, 0x01, userDNFor("boss@hermex.test")), []uint32{0xFFFFFFFF})
+	if ec := ropResultEC(t, resp); ec != ecAccessDenied {
+		t.Errorf("stranger delegate logon ec = %#x, want AccessDenied", ec)
+	}
+	if len(sess.delegateCallers) != 0 {
+		t.Errorf("a denied logon registered a delegate context: %v", sess.delegateCallers)
+	}
+}
+
+// TestOwnerLogonWithSelfEssdn confirms an owner logon naming its own mailbox in the
+// Essdn stays an owner logon (full response flags, no delegate registration) — the
+// path an alias login must not misroute.
+func TestOwnerLogonWithSelfEssdn(t *testing.T) {
+	dir := t.TempDir()
+	accounts := directory.StaticAccounts{"owner@hermex.test": {MailboxPath: dir}}
+	sess := NewSession(dir, accounts, "owner@hermex.test")
+	defer sess.Close()
+
+	resp, _ := sess.Dispatch(delegateLogonRequest(0, 0x01, userDNFor("owner@hermex.test")), []uint32{0xFFFFFFFF})
+	ec, flags := readLogonResponseFlags(t, resp)
+	if ec != ecSuccess {
+		t.Fatalf("owner self-Essdn logon ec = %#x, want success", ec)
+	}
+	if flags != ownerResponseFlags {
+		t.Errorf("owner ResponseFlags = %#x, want %#x", flags, ownerResponseFlags)
+	}
+	if len(sess.delegateCallers) != 0 {
+		t.Errorf("owner logon registered a delegate context: %v", sess.delegateCallers)
+	}
+}
 
 // grantFolderPermission stores a delegate's rights on one folder of a mailbox by
 // opening the store directly (the provisioning side), so a later logon resolves
@@ -150,6 +300,188 @@ func TestDelegateMessageGateUsesRealParent(t *testing.T) {
 	if ec := ropResultEC(t, resp); ec != ecAccessDenied {
 		t.Errorf("OpenMessage with spoofed FolderId ec = %#x, want AccessDenied (real parent has no ReadAny)", ec)
 	}
+}
+
+// buildEmptyFolder, buildCreateFolder, buildDeleteFolder, buildMoveFolder, and
+// buildCopyFolder build the folder-mutation requests the exhaustiveness test drives
+// (the other write ROPs already have builders in their own test files).
+func buildEmptyFolder(inIdx uint8) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropEmptyFolder)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	b.Uint8(0) // WantAsynchronous
+	b.Uint8(0) // WantDeleteAssociated
+	return b.Bytes()
+}
+
+func buildCreateFolder(inIdx uint8, name string) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropCreateFolder)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	b.Uint8(1) // OutputHandleIndex
+	b.Uint8(1) // FolderType
+	b.Uint8(1) // UseUnicode
+	b.Uint8(0) // OpenExisting
+	b.Uint32(0)
+	b.Unicode(name)
+	b.Unicode("")
+	return b.Bytes()
+}
+
+func buildDeleteFolder(inIdx uint8, folderEID uint64) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropDeleteFolder)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	b.Uint8(0) // DeleteFlags
+	b.Uint64(folderEID)
+	return b.Bytes()
+}
+
+func buildMoveFolder(inIdx, destIdx uint8, folderEID uint64, name string) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropMoveFolder)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	b.Uint8(destIdx)
+	b.Uint8(0) // WantAsynchronous
+	b.Uint8(1) // UseUnicode
+	b.Uint64(folderEID)
+	b.Unicode(name)
+	return b.Bytes()
+}
+
+func buildCopyFolder(inIdx, destIdx uint8, folderEID uint64, name string) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropCopyFolder)
+	b.Uint8(0)
+	b.Uint8(inIdx)
+	b.Uint8(destIdx)
+	b.Uint8(0) // WantAsynchronous
+	b.Uint8(0) // WantRecursive
+	b.Uint8(1) // UseUnicode
+	b.Uint64(folderEID)
+	b.Unicode(name)
+	return b.Bytes()
+}
+
+// TestDelegateWritesDeniedForReviewer is the exhaustiveness keystone: a read-only
+// (Reviewer) delegate — granted ReadAny|Visible, no write bits — must be refused
+// EVERY mutating ROP it can reach with its read handles. A handler that forgot its
+// write gate returns ecSuccess here and fails the test.
+func TestDelegateWritesDeniedForReviewer(t *testing.T) {
+	dir := t.TempDir()
+	const delegate = "delegate@hermex.test"
+	msgID := seedFolderMessage(t, dir, int64(mapi.PrivateFIDInbox), "X")
+	grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, mapi.RightsReviewer)
+
+	sess, logonH := delegateLogon(t, dir, delegate)
+	defer sess.Close()
+
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	msgEID := uint64(mapi.MakeEIDEx(1, uint64(msgID)))
+
+	// A Reviewer may open the folder and read a message; those handles then feed the
+	// write attempts below.
+	_, h := sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	inboxH := h[1]
+	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, msgEID), []uint32{logonH, 0xFFFFFFFF})
+	msgH := h[1]
+	if inboxH == 0xFFFFFFFF || msgH == 0xFFFFFFFF {
+		t.Fatal("Reviewer could not open the folder/message it holds read rights to")
+	}
+
+	props := mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "edited"}}
+	tags := []mapi.PropTag{mapi.PrSubject}
+	writes := []struct {
+		name string
+		req  []byte
+		h    []uint32
+	}{
+		{"CreateMessage", buildCreateMessage(0, 1, inboxEID), []uint32{inboxH, 0xFFFFFFFF}},
+		{"DeleteMessages", buildDeleteMessages(0, msgEID), []uint32{inboxH}},
+		{"EmptyFolder", buildEmptyFolder(0), []uint32{inboxH}},
+		{"CreateFolder", buildCreateFolder(0, "Sub"), []uint32{inboxH, 0xFFFFFFFF}},
+		{"DeleteFolder", buildDeleteFolder(0, inboxEID), []uint32{inboxH}},
+		{"ModifyPermissions", buildModifyPermissions(t, 0, 0, nil), []uint32{inboxH}},
+		{"ModifyRules", buildModifyRules(t, 0, 0, nil), []uint32{inboxH}},
+		{"SetMessageStatus", buildSetMessageStatus(0, msgEID, 0, 0xFFFFFFFF), []uint32{inboxH}},
+		{"SyncOpenCollector", buildOpenCollector(0, 1, 1), []uint32{inboxH, 0xFFFFFFFF}},
+		{"SetProperties", buildSetProperties(0, props), []uint32{msgH}},
+		{"DeleteProperties", buildDeletePropsOp(ropDeleteProperties, 0, tags), []uint32{msgH}},
+		{"SaveChangesMessage", buildSaveChangesMessage(0, 0), []uint32{msgH}},
+		{"SetMessageReadFlag", buildSetMessageReadFlag(0, 0, rfDefault), []uint32{msgH}},
+		{"CreateAttachment", buildCreateAttachment(0, 1), []uint32{msgH, 0xFFFFFFFF}},
+		{"OpenStream(write)", buildOpenStream(0, 1, uint32(mapi.PrBody), streamWriteMode), []uint32{msgH, 0xFFFFFFFF}},
+		{"MoveCopyMessages", buildMoveCopyMessages(0, 1, 1, msgEID), []uint32{inboxH, inboxH}},
+		{"MoveFolder", buildMoveFolder(0, 1, inboxEID, "x"), []uint32{inboxH, inboxH}},
+		{"CopyFolder", buildCopyFolder(0, 1, inboxEID, "x"), []uint32{inboxH, inboxH}},
+		{"CopyTo", buildCopyTo(0, 1, 0, nil), []uint32{msgH, msgH}},
+		{"CopyProperties", buildCopyProperties(0, 1, 0, tags), []uint32{msgH, msgH}},
+		{"SetReceiveFolder", buildSetReceiveFolder(0, inboxEID, "IPM.Note"), []uint32{logonH}},
+	}
+	for _, w := range writes {
+		resp, _ := sess.Dispatch(w.req, w.h)
+		if ec := ropResultEC(t, resp); ec != ecAccessDenied {
+			t.Errorf("%s ec = %#x, want AccessDenied (read-only delegate)", w.name, ec)
+		}
+	}
+}
+
+// TestDelegateEditorWritesAndSendBoundary proves the gates are rights-aware, not a
+// blanket: an Editor-equivalent delegate (granted owner rights on the folder)
+// performs the writes its grant covers, yet the operations governed by send-on-behalf
+// and the two-sided move/copy rights stay refused regardless of folder rights.
+func TestDelegateEditorWritesAndSendBoundary(t *testing.T) {
+	dir := t.TempDir()
+	const delegate = "delegate@hermex.test"
+	msgID := seedFolderMessage(t, dir, int64(mapi.PrivateFIDInbox), "X")
+	grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, mapi.RightsOwner)
+
+	sess, logonH := delegateLogon(t, dir, delegate)
+	defer sess.Close()
+
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	msgEID := uint64(mapi.MakeEIDEx(1, uint64(msgID)))
+
+	_, h := sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	inboxH := h[1]
+	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, msgEID), []uint32{logonH, 0xFFFFFFFF})
+	msgH := h[1]
+
+	// Granted writes succeed: create a message, edit the opened one.
+	createResp, ch := sess.Dispatch(buildCreateMessage(0, 1, inboxEID), []uint32{inboxH, 0xFFFFFFFF})
+	if ec := ropResultEC(t, createResp); ec != ecSuccess {
+		t.Fatalf("Editor CreateMessage ec = %#x, want success", ec)
+	}
+	newMsgH := ch[1]
+	if ec := ropResultEC(t, mustDispatch(sess, buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "ok"}}), msgH, 0xFFFFFFFF)); ec != ecSuccess {
+		t.Errorf("Editor SetProperties ec = %#x, want success", ec)
+	}
+
+	// Send and cross-folder copy stay denied even with full folder rights.
+	boundary := []struct {
+		name string
+		req  []byte
+		h    []uint32
+	}{
+		{"SubmitMessage", buildSubmitMessage(0), []uint32{newMsgH}},
+		{"TransportSend", buildTransportHeaderOnly(ropTransportSend, 0), []uint32{newMsgH}},
+		{"MoveCopyMessages", buildMoveCopyMessages(0, 1, 1, msgEID), []uint32{inboxH, inboxH}},
+	}
+	for _, b := range boundary {
+		if ec := ropResultEC(t, mustDispatchN(sess, b.req, b.h)); ec != ecAccessDenied {
+			t.Errorf("%s ec = %#x, want AccessDenied (send/move not yet permitted to a delegate)", b.name, ec)
+		}
+	}
+}
+
+// mustDispatchN runs one ROP with an arbitrary handle array and returns the response.
+func mustDispatchN(sess *Session, req []byte, handles []uint32) []byte {
+	resp, _ := sess.Dispatch(req, handles)
+	return resp
 }
 
 // TestOwnerBypassUnaffectedByGates proves the gates are inert for an owner: the same

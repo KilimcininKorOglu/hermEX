@@ -64,6 +64,11 @@ func (s *Session) ropTransportSend(_ *ext.Pull, out *ext.Push, handles []uint32,
 		writeErr(out, ropTransportSend, hindex, ecNotFound)
 		return true
 	}
+	// Sending is governed by send-on-behalf (the delegate list), a later increment;
+	// a delegate may not transmit from another's mailbox until then.
+	if s.denyDelegate(out, ropTransportSend, hindex, obj.store) {
+		return true
+	}
 	nm := obj.newMsg
 	if !nm.saved || nm.savedID == 0 || s.accounts == nil {
 		writeErr(out, ropTransportSend, hindex, ecNotSupported)

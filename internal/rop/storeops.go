@@ -58,6 +58,11 @@ func (s *Session) ropSetReceiveFolder(p *ext.Pull, out *ext.Push, handles []uint
 		writeErr(out, ropSetReceiveFolder, hindex, ecError)
 		return true
 	}
+	// Re-targeting a receive folder is a store-level configuration change reserved to
+	// the owner; a delegate may not rewire another's mailbox delivery.
+	if s.denyDelegate(out, ropSetReceiveFolder, hindex, logon.store) {
+		return true
+	}
 	fid := int64(mapi.EID(fidRaw).GCValue())
 	if class == "" && fid == 0 {
 		writeErr(out, ropSetReceiveFolder, hindex, ecError) // cannot remove the default with a zero folder

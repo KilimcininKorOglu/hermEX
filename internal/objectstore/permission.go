@@ -166,6 +166,30 @@ func (s *Store) lookupPermission(folderID int64, username string) (uint32, bool,
 	return uint32(perm), true, nil
 }
 
+// HasFolderGrant reports whether the user holds a non-zero permission on any folder
+// under their OWN username — a caller-specific grant, distinct from the universal
+// "default" member. It is the store-open primitive: a delegate logon requires this or
+// a delegate designation, so the always-present default free/busy grant does not by
+// itself let every authenticated user open every mailbox. The per-folder
+// ResolvePermission still honours the default grant — the open gate and the
+// per-folder gate use different criteria on purpose ("may you get a session at all"
+// vs "what may you do once in"). A default-member or group grant alone therefore does
+// not enable a ROP store-open (free/busy is served via NSPI/EWS/CalDAV, not a logon);
+// the group/mailing-list case is the same documented v1 gap as ResolvePermission.
+func (s *Store) HasFolderGrant(username string) (bool, error) {
+	var one int
+	err := s.objdb.QueryRow(
+		`SELECT 1 FROM permissions WHERE username=? AND permission!=0 LIMIT 1`, username).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		s.logStoreError("has-folder-grant", err)
+		return false, err
+	}
+	return true, nil
+}
+
 // wireMemberID maps a stored row to its PR_MEMBER_ID: the "default" username reports
 // 0, the empty (anonymous) username reports -1, every real member reports its row id.
 func wireMemberID(rowID int64, username string) int64 {

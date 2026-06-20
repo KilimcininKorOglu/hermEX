@@ -36,6 +36,11 @@ func (s *Session) deleteProperties(ropID uint8, p *ext.Pull, out *ext.Push, hand
 	}
 	switch obj.kind {
 	case kindMessage:
+		// Editing an existing message requires EditAny on its folder; compose and
+		// attachment writes are gated at their own create chokepoints.
+		if s.denyWrite(out, ropID, hindex, obj.store, obj.folderID, mapi.FrightsEditAny) {
+			return true
+		}
 		obj.pendingDeletes = append(obj.pendingDeletes, tags...)
 		for _, t := range tags {
 			obj.pendingProps = removeTag(obj.pendingProps, t)

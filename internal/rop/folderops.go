@@ -44,6 +44,9 @@ func (s *Session) ropCreateFolder(p *ext.Pull, out *ext.Push, handles []uint32, 
 		writeErr(out, ropCreateFolder, hindex, ecError)
 		return true
 	}
+	if s.denyWrite(out, ropCreateFolder, hindex, folder.store, folder.folderID, mapi.FrightsCreateSubfolder) {
+		return true
+	}
 	folderID, err := folder.store.CreateFolder(&folder.folderID, name)
 	if err != nil {
 		writeErr(out, ropCreateFolder, hindex, ecError)
@@ -70,6 +73,10 @@ func (s *Session) ropDeleteFolder(p *ext.Pull, out *ext.Push, handles []uint32, 
 	folder := s.get(handleAt(handles, hindex))
 	if folder == nil || folder.kind != kindFolder || folder.store == nil {
 		writeErr(out, ropDeleteFolder, hindex, ecError)
+		return true
+	}
+	// Deleting a folder requires owner rights on the folder being removed.
+	if s.denyWrite(out, ropDeleteFolder, hindex, folder.store, int64(mapi.EID(fid).GCValue()), mapi.FrightsOwner) {
 		return true
 	}
 	if err := folder.store.DeleteFolder(int64(mapi.EID(fid).GCValue())); err != nil {
@@ -111,6 +118,11 @@ func (s *Session) ropMoveFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	folder := s.get(handleAt(handles, hindex))
 	if folder == nil || folder.kind != kindFolder || folder.store == nil {
 		writeErr(out, ropMoveFolder, hindex, ecError)
+		return true
+	}
+	// A delegate move spans two folders (source + destination rights); it is refused
+	// outright until that two-sided gate lands.
+	if s.denyDelegate(out, ropMoveFolder, hindex, folder.store) {
 		return true
 	}
 	dest := s.get(handleAt(handles, dhindex))
@@ -163,6 +175,11 @@ func (s *Session) ropCopyFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 		writeErr(out, ropCopyFolder, hindex, ecError)
 		return true
 	}
+	// A delegate copy spans two folders (source read + destination create rights); it
+	// is refused outright until that two-sided gate lands.
+	if s.denyDelegate(out, ropCopyFolder, hindex, folder.store) {
+		return true
+	}
 	dest := s.get(handleAt(handles, dhindex))
 	if dest == nil || dest.kind != kindFolder {
 		writeErr(out, ropCopyFolder, hindex, ecError)
@@ -200,6 +217,10 @@ func (s *Session) ropEmptyFolder(p *ext.Pull, out *ext.Push, handles []uint32, h
 		writeErr(out, ropEmptyFolder, hindex, ecError)
 		return true
 	}
+	// Emptying a folder deletes its items: it requires DeleteAny on the folder.
+	if s.denyWrite(out, ropEmptyFolder, hindex, folder.store, folder.folderID, mapi.FrightsDeleteAny) {
+		return true
+	}
 	msgs, err := folder.store.ListMessages(folder.folderID)
 	if err != nil {
 		writeErr(out, ropEmptyFolder, hindex, ecError)
@@ -230,6 +251,10 @@ func (s *Session) ropHardDeleteMessages(p *ext.Pull, out *ext.Push, handles []ui
 	folder := s.get(handleAt(handles, hindex))
 	if folder == nil || folder.kind != kindFolder || folder.store == nil {
 		writeErr(out, ropHardDeleteMessages, hindex, ecError)
+		return true
+	}
+	// Deleting messages from the folder requires DeleteAny.
+	if s.denyWrite(out, ropHardDeleteMessages, hindex, folder.store, folder.folderID, mapi.FrightsDeleteAny) {
 		return true
 	}
 	// MessageIds is a flat sequence of 8-byte little-endian message EIDs; the store

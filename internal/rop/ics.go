@@ -242,6 +242,12 @@ func (s *Session) ropSyncOpenCollector(p *ext.Pull, out *ext.Push, handles []uin
 		writeErr(out, ropSyncOpenCollector, ohindex, ecError)
 		return true
 	}
+	// An upload collector imports message/hierarchy changes into the folder — a bulk
+	// write. A delegate may open one only with EditAny on the folder (this is the
+	// upload's write chokepoint; the import ROPs that follow trust the collector).
+	if s.denyWrite(out, ropSyncOpenCollector, ohindex, folder.store, folder.folderID, mapi.FrightsEditAny) {
+		return true
+	}
 	var col *objectstore.UploadCollector
 	var err error
 	if isContent != 0 {

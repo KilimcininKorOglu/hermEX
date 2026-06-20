@@ -66,6 +66,12 @@ func (s *Session) ropCreateMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 		writeErr(out, ropCreateMessage, ohindex, ecNotFound)
 		return true
 	}
+	// Creating a message in the folder requires the Create right; this is the
+	// compose handle's gate, so the SetProperties/ModifyRecipients/SaveChanges that
+	// fill it inherit it.
+	if s.denyWrite(out, ropCreateMessage, ohindex, parent.store, fid, mapi.FrightsCreate) {
+		return true
+	}
 	props := mapi.PropertyValues{}
 	if associated != 0 {
 		// Mark the message folder-associated (FAI); the store reads PidTagAssociated
@@ -119,6 +125,12 @@ func (s *Session) ropSetProperties(p *ext.Pull, out *ext.Push, handles []uint32,
 			obj.newMsg.props.Set(tv.Tag, tv.Value)
 		}
 	case kindMessage:
+		// Editing an existing message requires EditAny on its folder (the read-mode
+		// open only proved ReadAny). Compose (kindNewMessage) and attachment writes
+		// are gated at their own create chokepoints.
+		if s.denyWrite(out, ropSetProperties, hindex, obj.store, obj.folderID, mapi.FrightsEditAny) {
+			return true
+		}
 		for _, tv := range propvals {
 			obj.pendingProps.Set(tv.Tag, tv.Value)
 			// A set supersedes a buffered delete for the same tag: drop the tag from
@@ -229,6 +241,10 @@ func (s *Session) ropSaveChangesMessage(p *ext.Pull, out *ext.Push, handles []ui
 	// attachment-only change carries no pending properties, so ModifyMessageProperties
 	// runs with an empty bag and advances only the change number.
 	if obj.kind == kindMessage {
+		// Persisting an edit to an existing message requires EditAny on its folder.
+		if s.denyWrite(out, ropSaveChangesMessage, hindex, obj.store, obj.folderID, mapi.FrightsEditAny) {
+			return true
+		}
 		if len(obj.pendingProps) > 0 || len(obj.pendingDeletes) > 0 || obj.touched {
 			if err := obj.store.ModifyMessageProperties(obj.messageID, obj.pendingProps, obj.pendingDeletes...); err != nil {
 				writeErr(out, ropSaveChangesMessage, hindex, ecError)
@@ -524,6 +540,11 @@ func (s *Session) ropSubmitMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 	obj := s.get(handleAt(handles, hindex))
 	if obj == nil || obj.kind != kindNewMessage || obj.newMsg == nil {
 		writeErr(out, ropSubmitMessage, hindex, ecNotFound)
+		return true
+	}
+	// Submitting is governed by send-on-behalf (the delegate list), a later
+	// increment; a delegate may not submit from another's mailbox until then.
+	if s.denyDelegate(out, ropSubmitMessage, hindex, obj.store) {
 		return true
 	}
 	nm := obj.newMsg
