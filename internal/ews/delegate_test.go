@@ -1009,19 +1009,78 @@ func TestMeetingResponseCrossMailboxDenied(t *testing.T) {
 	}
 }
 
-// TestSyncFolderItemsCrossMailboxRejected confirms incremental sync of another mailbox
-// is refused: the per-folder sync state is not yet isolated per caller, so a foreign
-// target is rejected rather than colliding with the target's own state.
-func TestSyncFolderItemsCrossMailboxRejected(t *testing.T) {
+// firstSyncState extracts the SyncState token from a SyncFolderItems response.
+func firstSyncState(out string) string {
+	const open = "<SyncState>"
+	i := strings.Index(out, open)
+	if i < 0 {
+		return ""
+	}
+	rest := out[i+len(open):]
+	j := strings.Index(rest, "</SyncState>")
+	if j < 0 {
+		return ""
+	}
+	return rest[:j]
+}
+
+func crossMailboxSyncItems(mailbox string) string {
+	return wrapRequest(`<SyncFolderItems xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
+		`<ItemShape><t:BaseShape>Default</t:BaseShape></ItemShape>` +
+		`<SyncFolderId><t:DistinguishedFolderId Id="inbox"><t:Mailbox><t:EmailAddress>` + mailbox + `</t:EmailAddress></t:Mailbox></t:DistinguishedFolderId></SyncFolderId>` +
+		`</SyncFolderItems>`)
+}
+
+// TestSyncFolderItemsCrossMailboxWithGrant confirms a granted delegate can sync another
+// mailbox's folder, and the synced item id encodes the target so a follow-up reopens it.
+func TestSyncFolderItemsCrossMailboxWithGrant(t *testing.T) {
 	ts, paths := delegateServer(t)
 	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.RightsReviewer)
+	seedInboxMessage(t, paths["bob@hermex.test"], "Synced")
 
+	_, out := soapPost(t, ts, crossMailboxSyncItems("bob@hermex.test"), true)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("a granted delegate must sync the target folder:\n%s", out)
+	}
+	if dec, err := oxews.DecodeItemID(firstItemID(out)); err != nil || dec.Mailbox != "bob@hermex.test" {
+		t.Errorf("a synced item id must encode the target mailbox, got mb=%q (%v)", dec.Mailbox, err)
+	}
+}
+
+// TestSyncFolderItemsCrossMailboxDenied confirms an ungranted cross-mailbox sync is
+// refused (read access to the folder is required).
+func TestSyncFolderItemsCrossMailboxDenied(t *testing.T) {
+	ts, _ := delegateServer(t)
+
+	_, out := soapPost(t, ts, crossMailboxSyncItems("bob@hermex.test"), true)
+	if !strings.Contains(out, "ErrorAccessDenied") {
+		t.Errorf("an ungranted cross-mailbox sync must be denied:\n%s", out)
+	}
+}
+
+// TestSyncFolderItemsCrossMailboxStateIsolated confirms the delegate's cross-mailbox
+// sync cursor persists in the delegate's own store, keyed to the target: priming the
+// sync returns the item as a Create, and re-syncing with the returned token reports no
+// new creates — the state advanced and was not lost or mis-keyed.
+func TestSyncFolderItemsCrossMailboxStateIsolated(t *testing.T) {
+	ts, paths := delegateServer(t)
+	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.RightsReviewer)
+	seedInboxMessage(t, paths["bob@hermex.test"], "First")
+
+	_, first := soapPost(t, ts, crossMailboxSyncItems("bob@hermex.test"), true)
+	if !strings.Contains(first, ">First<") {
+		t.Fatalf("priming must return the item as a create:\n%s", first)
+	}
+	token := firstSyncState(first)
+	if token == "" {
+		t.Fatalf("no SyncState in first response:\n%s", first)
+	}
 	body := wrapRequest(`<SyncFolderItems xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
 		`<ItemShape><t:BaseShape>Default</t:BaseShape></ItemShape>` +
 		`<SyncFolderId><t:DistinguishedFolderId Id="inbox"><t:Mailbox><t:EmailAddress>bob@hermex.test</t:EmailAddress></t:Mailbox></t:DistinguishedFolderId></SyncFolderId>` +
-		`</SyncFolderItems>`)
-	_, out := soapPost(t, ts, body, true)
-	if !strings.Contains(out, "ErrorAccessDenied") {
-		t.Errorf("cross-mailbox SyncFolderItems must be rejected:\n%s", out)
+		`<SyncState>` + token + `</SyncState></SyncFolderItems>`)
+	_, second := soapPost(t, ts, body, true)
+	if strings.Contains(second, ">First<") {
+		t.Errorf("the advanced cursor must not re-report the primed item:\n%s", second)
 	}
 }

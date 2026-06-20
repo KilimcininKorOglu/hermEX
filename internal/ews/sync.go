@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxews"
 )
@@ -77,27 +78,49 @@ func (s *Server) handleSyncFolderItems(w http.ResponseWriter, inner []byte, sess
 		writeSyncItemsError(w, targets[0].code)
 		return
 	}
-	if !s.isOwnMailbox(sess, targets[0].mailbox) {
-		// Cross-mailbox incremental sync needs per-caller sync-state isolation (the state
-		// is keyed per folder, not per caller), which is not yet modelled; reject rather
-		// than collide with the target's own sync state or return the caller's own folder.
-		writeSyncItemsError(w, "ErrorAccessDenied")
-		return
-	}
 	fid := targets[0].fid
 
-	st, err := objectstore.Open(sess.mailbox)
+	cache := s.newStoreCache()
+	defer cache.closeAll()
+	// Items come from the target mailbox; syncing a delegated folder requires read access.
+	st, _, isOwn, code := cache.open(sess, targets[0].mailbox)
+	if code != "" {
+		writeSyncItemsError(w, code)
+		return
+	}
+	if !isOwn {
+		rights, perr := st.ResolvePermission(fid, sess.user)
+		if perr != nil {
+			writeSOAPFault(w, "ErrorInternalServerError", perr.Error())
+			return
+		}
+		if rights&mapi.FrightsReadAny == 0 {
+			writeSyncItemsError(w, "ErrorAccessDenied")
+			return
+		}
+	}
+	// The sync state is kept in the caller's OWN store, keyed per (target, folder), so a
+	// delegate's sync cursor never collides with the target owner's own state; item ids
+	// carry the target mailbox so the client reopens it on a follow-up.
+	idMailbox := ""
+	stateStore := st
+	stateKey := strconv.FormatInt(fid, 10)
+	if !isOwn {
+		idMailbox = targets[0].mailbox
+		stateKey = targets[0].mailbox + ":" + stateKey
+		own, _, _, oc := cache.open(sess, "")
+		if oc != "" {
+			writeSyncItemsError(w, oc)
+			return
+		}
+		stateStore = own
+	}
+	state, err := loadState(stateStore)
 	if err != nil {
 		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
 		return
 	}
-	defer st.Close()
-	state, err := loadState(st)
-	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
-		return
-	}
-	fstate := state.folder(strconv.FormatInt(fid, 10))
+	fstate := state.folder(stateKey)
 
 	// Choose the baseline snapshot from the supplied SyncState.
 	var snap map[string]int64
@@ -134,7 +157,7 @@ func (s *Server) handleSyncFolderItems(w http.ResponseWriter, inner []byte, sess
 	liveSet := make(map[string]bool, len(live))
 	var all []pending
 	for _, info := range live {
-		id := oxews.EncodeItemID(oxews.ItemID{FolderID: fid, MessageID: info.ID, UID: info.UID})
+		id := oxews.EncodeItemID(oxews.ItemID{FolderID: fid, MessageID: info.ID, UID: info.UID, Mailbox: idMailbox})
 		liveSet[id] = true
 		if prev, ok := snap[id]; !ok {
 			all = append(all, pending{kind: "create", id: id, flag: info.Flags, info: info})
@@ -167,10 +190,10 @@ func (s *Server) handleSyncFolderItems(w http.ResponseWriter, inner []byte, sess
 	for _, p := range all {
 		switch p.kind {
 		case "create":
-			changes.Create = append(changes.Create, itemChange{Message: itemSummary(st, fid, p.info, "")})
+			changes.Create = append(changes.Create, itemChange{Message: itemSummary(st, fid, p.info, idMailbox)})
 			newSnap[p.id] = p.flag
 		case "update":
-			changes.Update = append(changes.Update, itemChange{Message: itemSummary(st, fid, p.info, "")})
+			changes.Update = append(changes.Update, itemChange{Message: itemSummary(st, fid, p.info, idMailbox)})
 			newSnap[p.id] = p.flag
 		case "delete":
 			changes.Delete = append(changes.Delete, deleteItemChange{ItemID: oxews.ItemIDElem{ID: p.id}})
@@ -181,7 +204,7 @@ func (s *Server) handleSyncFolderItems(w http.ResponseWriter, inner []byte, sess
 	newToken := nextSyncState(fstate.SyncState)
 	fstate.SyncState = newToken
 	fstate.Items = newSnap
-	if err := saveState(st, state); err != nil {
+	if err := saveState(stateStore, state); err != nil {
 		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
 		return
 	}
