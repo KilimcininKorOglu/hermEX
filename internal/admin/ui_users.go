@@ -85,6 +85,7 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 	devs, _ := s.store.ListDevices(u.Maildir)
 	qlimits, qused, _ := s.store.GetQuota(u.Maildir)
 	delegates, _ := s.store.GetDelegates(u.Maildir)
+	folders, _ := s.store.ListFolders(u.Maildir)
 	s.render(w, "user_detail.html", map[string]any{
 		"Nav":       "users",
 		"CSRF":      csrfCookieValue(r),
@@ -100,6 +101,7 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 		"Quota":     quotaViewOf(qlimits, qused),
 		"Hide":      hideViewOf(props),
 		"Delegates": strings.Join(delegates, "\n"),
+		"Folders":   folders,
 	})
 }
 

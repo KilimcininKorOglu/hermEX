@@ -132,6 +132,17 @@
 <button type="submit">Save delegates</button>
 </form>
 
+<h2>Folders</h2>
+<form class="folders-form">
+<label>Folder
+<select name="fid" hx-get="/admin/ui/users/{{.User.Username}}/folder-perms" hx-target="#folder-perms" hx-swap="innerHTML" hx-trigger="change"
+        hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<option value="">&mdash; Select a folder &mdash;</option>
+{{range .Folders}}<option value="{{.ID}}">{{.DisplayName}}</option>{{end}}
+</select></label>
+</form>
+<div id="folder-perms"></div>
+
 <h2>Admin roles</h2>
 {{template "user-roles" .}}
 
@@ -147,6 +158,28 @@
 {{define "user-status"}}<div id="user-status">
 {{if .Error}}<p class="error">{{.Error}}</p>{{else if .Saved}}<p class="ok">Saved.</p>{{end}}
 </div>{{end}}
+
+{{define "folder-perms"}}
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if .FID}}
+<table class="grid">
+<thead><tr><th>Member</th><th>Level</th><th></th></tr></thead>
+<tbody>
+{{range .Members}}<tr>
+<td>{{.Name}}</td><td>{{.Level}}</td>
+<td><form hx-post="/admin/ui/users/{{$.Email}}/folder-perms/remove" hx-target="#folder-perms" hx-swap="innerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
+<input type="hidden" name="fid" value="{{$.FID}}"><input type="hidden" name="memberID" value="{{.MemberID}}">
+<button type="submit">Remove</button></form></td></tr>{{end}}
+</tbody>
+</table>
+<form class="folder-grant-form" hx-post="/admin/ui/users/{{.Email}}/folder-perms/set" hx-target="#folder-perms" hx-swap="innerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<input type="hidden" name="fid" value="{{.FID}}">
+<label>User <input type="email" name="username" placeholder="bob@example.com" required></label>
+<label>Level <select name="rights">{{range .Levels}}<option value="{{.Rights}}">{{.Name}}</option>{{end}}</select></label>
+<button type="submit">Grant</button>
+</form>
+{{end}}{{end}}
 
 {{define "user-devices"}}<div id="user-devices">
 {{if .Error}}<p class="error">{{.Error}}</p>{{end}}

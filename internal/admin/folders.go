@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 )
 
@@ -160,4 +162,91 @@ func (s *Server) handleRemoveFolderPermission(w http.ResponseWriter, r *http.Req
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// renderFolderPerms lists a folder's permission members and renders the permission
+// panel (the htmx swap target), carrying an optional error message. A zero fid means
+// no folder is selected and the panel renders empty.
+func (s *Server) renderFolderPerms(w http.ResponseWriter, email, maildir string, fid int64, csrf, errMsg string) {
+	if fid == 0 {
+		s.render(w, "folder-perms", map[string]any{"Email": email, "CSRF": csrf})
+		return
+	}
+	perms, err := s.store.ListFolderPermissions(maildir, fid)
+	if err != nil && errMsg == "" {
+		errMsg = "Could not read permissions: " + err.Error()
+	}
+	members := make([]folderMemberJSON, 0, len(perms))
+	for _, p := range perms {
+		members = append(members, folderMemberJSON{MemberID: p.MemberID, Name: p.Name, Rights: p.Rights, Level: rightsLevelName(p.Rights)})
+	}
+	s.render(w, "folder-perms", map[string]any{
+		"Email": email, "CSRF": csrf, "FID": fid, "Members": members, "Levels": folderRightsLevels, "Error": errMsg,
+	})
+}
+
+// uiFolderUser resolves the user named in a UI folder request; on failure it renders
+// the panel with an error and reports ok=false.
+func (s *Server) uiFolderUser(w http.ResponseWriter, r *http.Request) (directory.UserDetail, bool) {
+	u, ok, err := s.dir.GetUser(r.PathValue("email"))
+	if err != nil || !ok {
+		s.render(w, "folder-perms", map[string]any{"Error": "No such user."})
+		return directory.UserDetail{}, false
+	}
+	return u, true
+}
+
+// handleUIFolderPerms renders the permission panel for the folder selected in the
+// detail form's folder picker.
+func (s *Server) handleUIFolderPerms(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	u, ok := s.uiFolderUser(w, r)
+	if !ok {
+		return
+	}
+	fid, _ := strconv.ParseInt(r.FormValue("fid"), 10, 64)
+	s.renderFolderPerms(w, u.Username, u.Maildir, fid, csrfCookieValue(r), "")
+}
+
+// handleUISetFolderPerm grants or updates a member's rights on the selected folder
+// from the panel's add form and re-renders the panel.
+func (s *Server) handleUISetFolderPerm(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	u, ok := s.uiFolderUser(w, r)
+	if !ok {
+		return
+	}
+	fid, _ := strconv.ParseInt(r.PostFormValue("fid"), 10, 64)
+	rights, _ := strconv.ParseUint(r.PostFormValue("rights"), 10, 32)
+	username := strings.TrimSpace(r.PostFormValue("username"))
+	errMsg := ""
+	if username == "" {
+		errMsg = "A user is required."
+	} else if err := s.store.SetFolderPermission(u.Maildir, fid, username, uint32(rights)); err != nil {
+		errMsg = "Could not grant: " + err.Error()
+	}
+	s.renderFolderPerms(w, u.Username, u.Maildir, fid, csrfCookieValue(r), errMsg)
+}
+
+// handleUIRemoveFolderPerm drops a member from the selected folder and re-renders the
+// panel.
+func (s *Server) handleUIRemoveFolderPerm(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	u, ok := s.uiFolderUser(w, r)
+	if !ok {
+		return
+	}
+	fid, _ := strconv.ParseInt(r.PostFormValue("fid"), 10, 64)
+	memberID, _ := strconv.ParseInt(r.PostFormValue("memberID"), 10, 64)
+	errMsg := ""
+	if err := s.store.RemoveFolderPermission(u.Maildir, fid, memberID); err != nil {
+		errMsg = "Could not remove: " + err.Error()
+	}
+	s.renderFolderPerms(w, u.Username, u.Maildir, fid, csrfCookieValue(r), errMsg)
 }
