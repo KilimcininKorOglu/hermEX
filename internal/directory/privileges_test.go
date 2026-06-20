@@ -47,3 +47,31 @@ func TestPrivilegesFromBits(t *testing.T) {
 		})
 	}
 }
+
+// TestPrivilegeBitsRoundTrip proves the admin write (privilegeBitsFor) and the
+// protocol read (privilegesFromBits) are inverse over the managed services, so a
+// service disabled in the admin form is exactly what the protocol later reads and
+// enforces — not silently re-granted by the DETAIL1 default.
+func TestPrivilegeBitsRoundTrip(t *testing.T) {
+	cases := []UserUpdate{
+		{}, // every service off
+		{POP3IMAP: true, SMTP: true, ChgPasswd: true, Web: true, EAS: true, DAV: true}, // every service on
+		{POP3IMAP: true, Web: true},        // a plain+detail mix
+		{SMTP: true, EAS: true},            // a different mix
+		{Web: true, EAS: false, DAV: true}, // one detail service revoked
+	}
+	for _, u := range cases {
+		got := privilegesFromBits(uint32(privilegeBitsFor(u)))
+		want := ServicePrivileges{
+			POP3IMAP:  u.POP3IMAP,
+			SMTP:      u.SMTP,
+			ChgPasswd: u.ChgPasswd,
+			Web:       u.Web,
+			EAS:       u.EAS,
+			DAV:       u.DAV,
+		}
+		if got != want {
+			t.Errorf("round-trip of %+v = %+v, want %+v", u, got, want)
+		}
+	}
+}

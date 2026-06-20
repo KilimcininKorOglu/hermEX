@@ -229,6 +229,10 @@ func (s *Server) handleUIUserEdit(w http.ResponseWriter, r *http.Request) {
 		Homeserver:  atoi(r.PostFormValue("homeserver")),
 		POP3IMAP:    r.PostFormValue("pop3_imap") != "",
 		SMTP:        r.PostFormValue("smtp") != "",
+		ChgPasswd:   r.PostFormValue("chgpasswd") != "",
+		Web:         r.PostFormValue("web") != "",
+		EAS:         r.PostFormValue("eas") != "",
+		DAV:         r.PostFormValue("dav") != "",
 	})
 	data := map[string]any{}
 	switch {

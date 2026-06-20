@@ -26,6 +26,10 @@
 <label>Homeserver <input type="number" name="homeserver" value="{{.User.Homeserver}}" min="0" max="255"></label>
 <label class="check"><input type="checkbox" name="pop3_imap"{{if .User.POP3IMAP}} checked{{end}}> Allow POP3/IMAP logins</label>
 <label class="check"><input type="checkbox" name="smtp"{{if .User.SMTP}} checked{{end}}> Allow SMTP sending</label>
+<label class="check"><input type="checkbox" name="web"{{if .User.Web}} checked{{end}}> Allow webmail logins</label>
+<label class="check"><input type="checkbox" name="eas"{{if .User.EAS}} checked{{end}}> Allow ActiveSync (mobile)</label>
+<label class="check"><input type="checkbox" name="dav"{{if .User.DAV}} checked{{end}}> Allow CalDAV/CardDAV</label>
+<label class="check"><input type="checkbox" name="chgpasswd"{{if .User.ChgPasswd}} checked{{end}}> Allow password changes</label>
 <button type="submit">Save</button>
 </form>
 {{template "user-status" .}}

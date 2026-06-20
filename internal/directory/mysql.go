@@ -533,6 +533,10 @@ type UserUpdate struct {
 	Homeserver  int
 	POP3IMAP    bool
 	SMTP        bool
+	ChgPasswd   bool
+	Web         bool
+	EAS         bool
+	DAV         bool
 }
 
 // UpdateUser writes the editable subset of a user's record, reporting whether the
@@ -549,13 +553,6 @@ func (d *SQLDirectory) UpdateUser(username string, u UserUpdate) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	var priv uint64
-	if u.POP3IMAP {
-		priv |= privIMAPPOP3
-	}
-	if u.SMTP {
-		priv |= privSMTP
-	}
 	_, err = d.db.Exec(
 		`UPDATE users SET
 		   address_status = (address_status & 0x30) | ?,
@@ -563,8 +560,41 @@ func (d *SQLDirectory) UpdateUser(username string, u UserUpdate) (bool, error) {
 		   privilege_bits = (privilege_bits & ?) | ?
 		 WHERE username = ?`,
 		u.Status&0x0F, u.Lang, u.Timezone, u.DisplayType, u.Homeserver,
-		^uint64(privIMAPPOP3|privSMTP), priv, username)
+		^uint64(managedPrivileges), privilegeBitsFor(u), username)
 	return err == nil, err
+}
+
+// managedPrivileges is the set of privilege_bits the admin update owns; UpdateUser
+// clears exactly these before writing the new value, preserving the reference's
+// other bits (Chat/Video/Files/Archive/PubAddr) untouched.
+const managedPrivileges = privIMAPPOP3 | privSMTP | privChgPasswd | privDetail1 | privWeb | privEAS | privDAV
+
+// privilegeBitsFor builds the managed privilege_bits for an update: POP3/IMAP,
+// SMTP and CHGPASSWD as plain bits, and WEB/EAS/DAV under DETAIL1 (always set so
+// the explicit service bits are honored). It is the inverse of privilegesFromBits
+// over the managed bits.
+func privilegeBitsFor(u UserUpdate) uint64 {
+	var priv uint64
+	if u.POP3IMAP {
+		priv |= privIMAPPOP3
+	}
+	if u.SMTP {
+		priv |= privSMTP
+	}
+	if u.ChgPasswd {
+		priv |= privChgPasswd
+	}
+	priv |= privDetail1
+	if u.Web {
+		priv |= privWeb
+	}
+	if u.EAS {
+		priv |= privEAS
+	}
+	if u.DAV {
+		priv |= privDAV
+	}
+	return priv
 }
 
 // DeleteUser removes a user and its dependent rows, reporting whether the user

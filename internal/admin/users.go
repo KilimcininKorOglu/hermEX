@@ -87,6 +87,10 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		Homeserver  int    `json:"homeserver"`
 		POP3IMAP    bool   `json:"pop3_imap"`
 		SMTP        bool   `json:"smtp"`
+		ChgPasswd   bool   `json:"chgpasswd"`
+		Web         bool   `json:"web"`
+		EAS         bool   `json:"eas"`
+		DAV         bool   `json:"dav"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
@@ -100,6 +104,10 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		Homeserver:  req.Homeserver,
 		POP3IMAP:    req.POP3IMAP,
 		SMTP:        req.SMTP,
+		ChgPasswd:   req.ChgPasswd,
+		Web:         req.Web,
+		EAS:         req.EAS,
+		DAV:         req.DAV,
 	})
 	if err != nil {
 		http.Error(w, "could not update user: "+err.Error(), http.StatusBadRequest)
