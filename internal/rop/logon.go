@@ -63,11 +63,13 @@ func (s *Session) ropLogon(p *ext.Pull, out *ext.Push, handles []uint32, hindex 
 	// whose Essdn names the primary address).
 	maildir := s.mailbox
 	delegate := false
+	var ownerSMTP string // the delegated mailbox owner's address (the send-on-behalf From)
 	if essdnSize > 0 && s.accounts != nil {
 		if smtp, ok := essdnToSMTP(string(essdn)); ok {
 			if md, ok := s.accounts.Resolve(smtp); ok && md != s.mailbox {
 				maildir = md
 				delegate = true
+				ownerSMTP = smtp
 			}
 		}
 	}
@@ -77,11 +79,13 @@ func (s *Session) ropLogon(p *ext.Pull, out *ext.Push, handles []uint32, hindex 
 		writeErr(out, ropLogon, hindex, ecError)
 		return true
 	}
+	sendsOnBehalf := false
 	if delegate {
 		// A delegate may open the mailbox only with some access to it — a designated
 		// delegate, or a grant on any folder. The per-folder gates then govern what
-		// they can actually read and change.
-		ok, err := s.mayOpenDelegate(st, s.owner)
+		// they can actually read and change. Delegate-list membership additionally
+		// confers the send-on-behalf right, advertised in the response flags below.
+		ok, onList, err := s.mayOpenDelegate(st, s.owner)
 		if err != nil {
 			_ = st.Close()
 			writeErr(out, ropLogon, hindex, ecError)
@@ -92,6 +96,7 @@ func (s *Session) ropLogon(p *ext.Pull, out *ext.Push, handles []uint32, hindex 
 			writeErr(out, ropLogon, hindex, ecAccessDenied)
 			return true
 		}
+		sendsOnBehalf = onList
 	}
 	// Mirror the reference logon's identity: MailboxGuid is the store record key
 	// (the mailbox GUID) and ReplGuid is the mapping signature, both persisted at
@@ -107,8 +112,10 @@ func (s *Session) ropLogon(p *ext.Pull, out *ext.Push, handles []uint32, hindex 
 	if delegate {
 		// Register the caller as this store's delegate so every folder/message op
 		// authorizes against the caller's permissions (the owner short-circuit in
-		// authorize covers an owner logon, which is never registered here).
+		// authorize covers an owner logon, which is never registered here), and record
+		// the mailbox owner as the From identity a send-on-behalf submit goes out under.
 		s.delegateCallers[st] = s.owner
+		s.delegateOwners[st] = ownerSMTP
 	}
 	h := s.alloc(&object{kind: kindLogon, store: st})
 	setHandle(handles, hindex, h)
@@ -122,12 +129,17 @@ func (s *Session) ropLogon(p *ext.Pull, out *ext.Push, handles []uint32, hindex 
 	for _, fid := range logonFolderFIDs {
 		out.Uint64(uint64(mapi.MakeEIDEx(1, fid)))
 	}
-	// An owner logon carries owner + send-as rights; a delegate logon carries
-	// neither in v1 (send-on-behalf, which would add the send-as right, is a later
-	// increment) — only the reserved bit.
+	// An owner logon carries owner + send-as rights. A delegate logon carries the
+	// reserved bit, plus the send-as right when the caller is on the mailbox's
+	// delegate list and so may send on its behalf; a folder-grant-only delegate
+	// carries the reserved bit alone. (hermEX advertises send-on-behalf capability
+	// through this bit; it models no separate send-as list.)
 	responseFlags := uint8(ownerResponseFlags)
 	if delegate {
 		responseFlags = responseFlagReserved
+		if sendsOnBehalf {
+			responseFlags |= responseFlagSendAsRight
+		}
 	}
 	out.Uint8(responseFlags)             // ResponseFlags
 	out.GUID(mailboxGUID)                // MailboxGuid (PR_STORE_RECORD_KEY)
@@ -164,27 +176,25 @@ func essdnToSMTP(dn string) (string, bool) {
 	return smtp, true
 }
 
-// mayOpenDelegate reports whether caller may open store as a delegate: they are a
-// designated delegate of the mailbox, or they hold an explicit per-user grant on any
-// of its folders. The open gate is deliberately caller-specific — it counts only the
-// caller's OWN grants, never the universal "default" member, so the always-present
-// default free/busy grant does not let every authenticated user open every mailbox.
-// (The per-folder gates then govern what the opened session can actually read and
-// change, and those DO honour the default grant — open vs per-folder use different
-// criteria on purpose.) A default-member or group grant alone does not enable a
-// store-open; that is the documented v1 limitation (free/busy is served via
-// NSPI/EWS/CalDAV, not a ROP logon, so free/busy sharing is unaffected).
-func (s *Session) mayOpenDelegate(store *objectstore.Store, caller string) (bool, error) {
-	delegates, err := store.GetDelegates()
-	if err != nil {
-		return false, err
+// mayOpenDelegate reports whether caller may open store as a delegate and whether
+// they are on its delegate list. A caller may open when designated on the delegate
+// list, or when they hold an explicit per-user grant on any folder. The open gate is
+// deliberately caller-specific — it counts only the caller's OWN grants, never the
+// universal "default" member, so the always-present default free/busy grant does not
+// let every authenticated user open every mailbox. (The per-folder gates then govern
+// what the opened session can actually read and change, and those DO honour the
+// default grant — open vs per-folder use different criteria on purpose.) A
+// default-member or group grant alone does not enable a store-open; that is the
+// documented v1 limitation (free/busy is served via NSPI/EWS/CalDAV, not a ROP logon,
+// so free/busy sharing is unaffected). onList reports the delegate-list membership the
+// caller separately needs to send on the mailbox's behalf.
+func (s *Session) mayOpenDelegate(store *objectstore.Store, caller string) (mayOpen, onList bool, err error) {
+	onList, err = s.onDelegateList(store, caller)
+	if err != nil || onList {
+		return onList, onList, err
 	}
-	for _, d := range delegates {
-		if strings.EqualFold(d, caller) {
-			return true, nil
-		}
-	}
-	return store.HasFolderGrant(caller)
+	grant, err := store.HasFolderGrant(caller)
+	return grant, false, err
 }
 
 // pushLogonTime serializes a LogonTime ([MS-OXCROPS] 2.2.1.1.3): Seconds,

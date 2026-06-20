@@ -6,6 +6,7 @@
 package rop
 
 import (
+	"strings"
 	"sync"
 
 	"hermex/internal/directory"
@@ -163,6 +164,12 @@ type Session struct {
 	// map-miss (the regression-safe default). Populated at delegate logon, dropped
 	// when the logon store closes (release/Close).
 	delegateCallers map[*objectstore.Store]string
+
+	// delegateOwners records, for each delegate logon, the SMTP address of the
+	// mailbox owner (the Essdn target). It is the sent-representing identity a
+	// send-on-behalf message goes out From, keyed by the same store as
+	// delegateCallers and dropped alongside it. An owner logon carries no entry.
+	delegateOwners map[*objectstore.Store]string
 }
 
 // SessionOption configures an optional Session dependency at construction.
@@ -183,6 +190,7 @@ func NewSession(mailbox string, accounts directory.Accounts, owner string, opts 
 		handles:         make(map[uint32]*object),
 		next:            1,
 		delegateCallers: make(map[*objectstore.Store]string),
+		delegateOwners:  make(map[*objectstore.Store]string),
 	}
 	for _, opt := range opts {
 		opt(s)
@@ -244,6 +252,7 @@ func (s *Session) release(h uint32) {
 	}
 	if o.kind == kindLogon && o.store != nil {
 		delete(s.delegateCallers, o.store)
+		delete(s.delegateOwners, o.store)
 		_ = o.store.Close()
 	}
 	delete(s.handles, h)
@@ -287,16 +296,56 @@ func (s *Session) denyWrite(out *ext.Push, ropID, hindex uint8, store *objectsto
 }
 
 // denyDelegate writes an access-denied response and reports true when store is a
-// delegate logon. It blanket-refuses, for a non-owner caller, the operations not yet
-// mapped to folder rights: message submission (governed by send-on-behalf) and
-// cross-folder move/copy (governed by combined source-and-destination rights). An
-// owner logon (store absent from delegateCallers) passes.
+// delegate logon. It refuses, for a non-owner caller, the store-level configuration
+// reserved to the mailbox owner — re-targeting a receive folder — which is not
+// expressible as a per-folder right. An owner logon (store absent from
+// delegateCallers) passes.
 func (s *Session) denyDelegate(out *ext.Push, ropID, hindex uint8, store *objectstore.Store) bool {
 	if _, isDelegate := s.delegateCallers[store]; isDelegate {
 		writeErr(out, ropID, hindex, ecAccessDenied)
 		return true
 	}
 	return false
+}
+
+// onDelegateList reports whether caller is a designated delegate of the mailbox —
+// the send-on-behalf grant (and one of the two store-open paths). The match is
+// case-insensitive, like the logon-time delegate check.
+func (s *Session) onDelegateList(store *objectstore.Store, caller string) (bool, error) {
+	delegates, err := store.GetDelegates()
+	if err != nil {
+		return false, err
+	}
+	for _, d := range delegates {
+		if strings.EqualFold(d, caller) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// delegateSendIdentity resolves the sent-representing and sender identities for a
+// submit/transport out of store, and whether the caller may send. An owner logon
+// (store absent from delegateCallers) sends as itself: representing is the owner and
+// sender is empty (no distinct Sender header), always permitted. A delegate may send
+// only when designated on the mailbox's delegate list (send-on-behalf); then the
+// message goes out From the mailbox owner with the delegate as its Sender. A delegate
+// admitted by a folder grant alone — not on the list — is refused: folder permissions
+// do not by themselves confer the right to send as the mailbox. hermEX models a single
+// delegate list, mapped to send-on-behalf, so the sender always names the delegate
+// (full send-as impersonation, where the message hides the delegate, is not offered).
+func (s *Session) delegateSendIdentity(store *objectstore.Store) (representing, sender string, allowed bool, err error) {
+	if _, isDelegate := s.delegateCallers[store]; !isDelegate {
+		return s.owner, "", true, nil // owner sends as itself
+	}
+	onList, err := s.onDelegateList(store, s.owner)
+	if err != nil {
+		return "", "", false, err
+	}
+	if !onList {
+		return "", "", false, nil
+	}
+	return s.delegateOwners[store], s.owner, true, nil
 }
 
 // Close releases every handle (Disconnect), closing any open store. It takes the

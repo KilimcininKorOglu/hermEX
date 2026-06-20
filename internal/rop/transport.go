@@ -64,9 +64,16 @@ func (s *Session) ropTransportSend(_ *ext.Pull, out *ext.Push, handles []uint32,
 		writeErr(out, ropTransportSend, hindex, ecNotFound)
 		return true
 	}
-	// Sending is governed by send-on-behalf (the delegate list), a later increment;
-	// a delegate may not transmit from another's mailbox until then.
-	if s.denyDelegate(out, ropTransportSend, hindex, obj.store) {
+	// Sending is governed by send-on-behalf: an owner sends as itself, a delegate only
+	// when designated on the mailbox's delegate list. The resolved identities are
+	// stamped into the transmitted copy.
+	representing, sender, allowed, err := s.delegateSendIdentity(obj.store)
+	if err != nil {
+		writeErr(out, ropTransportSend, hindex, ecError)
+		return true
+	}
+	if !allowed {
+		writeErr(out, ropTransportSend, hindex, ecAccessDenied)
 		return true
 	}
 	nm := obj.newMsg
@@ -74,7 +81,7 @@ func (s *Session) ropTransportSend(_ *ext.Pull, out *ext.Push, handles []uint32,
 		writeErr(out, ropTransportSend, hindex, ecNotSupported)
 		return true
 	}
-	if _, err := s.deliverComposed(nm); err != nil {
+	if _, err = s.deliverComposed(nm, representing, sender); err != nil {
 		if errors.Is(err, errNoRecipient) {
 			writeErr(out, ropTransportSend, hindex, ecNotFound)
 		} else {

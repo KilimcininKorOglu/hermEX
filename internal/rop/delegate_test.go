@@ -1,6 +1,7 @@
 package rop
 
 import (
+	"bytes"
 	"testing"
 	"time"
 
@@ -63,9 +64,10 @@ func readLogonResponseFlags(t *testing.T, resp []byte) (ec uint32, flags uint8) 
 	return ec, mustU8(t, p, "ResponseFlags")
 }
 
-// TestDelegateLogonViaDelegateList drives the real logon path: a caller designated
-// on the target's delegate list opens the target mailbox in delegate mode (Reserved
-// response flags, no owner/send-as) and is registered for per-folder authorization.
+// TestDelegateLogonViaDelegateList drives the real logon path: a caller designated on
+// the target's delegate list opens the target mailbox in delegate mode (Reserved plus
+// the send-as bit — list membership confers send-on-behalf — but not the owner right)
+// and is registered for per-folder authorization.
 func TestDelegateLogonViaDelegateList(t *testing.T) {
 	callerDir := t.TempDir()
 	targetDir := t.TempDir()
@@ -82,8 +84,8 @@ func TestDelegateLogonViaDelegateList(t *testing.T) {
 	if ec != ecSuccess {
 		t.Fatalf("delegate logon ec = %#x, want success", ec)
 	}
-	if flags != responseFlagReserved {
-		t.Errorf("delegate ResponseFlags = %#x, want %#x (reserved only)", flags, responseFlagReserved)
+	if want := uint8(responseFlagReserved | responseFlagSendAsRight); flags != want {
+		t.Errorf("delegate ResponseFlags = %#x, want %#x (reserved + send-as: on the delegate list)", flags, want)
 	}
 	logon := sess.get(h[0])
 	if logon == nil || logon.store == nil {
@@ -562,4 +564,143 @@ func TestOwnerBypassUnaffectedByGates(t *testing.T) {
 	if ec := ropResultEC(t, mustDispatch(sess, buildOpenMessage(0, 1, deletedEID, msgEID), logonH, 0xFFFFFFFF)); ec != ecSuccess {
 		t.Errorf("owner OpenMessage(DeletedItems msg) ec = %#x, want success", ec)
 	}
+}
+
+// TestDelegateSendsOnBehalf drives the real send-on-behalf path end to end: a delegate
+// on the boss's delegate list composes a message in the boss's mailbox and submits it.
+// The delivered message must go out From the boss (the represented principal) with the
+// delegate named as its Sender — the "<delegate> on behalf of <boss>" wire form — the
+// Sent Items copy must land in the boss's mailbox (not the delegate's), and the logon
+// must have advertised the send-as right.
+func TestDelegateSendsOnBehalf(t *testing.T) {
+	bossDir, delegateDir, aliceDir := t.TempDir(), t.TempDir(), t.TempDir()
+	const delegate = "delegate@hermex.test"
+	const boss = "boss@hermex.test"
+	// On the delegate list (the send-on-behalf grant) and holding Create on the boss's
+	// Drafts so the compose chain runs.
+	setDelegateList(t, bossDir, []string{delegate})
+	grantFolderPermission(t, bossDir, int64(mapi.PrivateFIDDraft), delegate, mapi.RightsOwner)
+	accounts := directory.StaticAccounts{
+		boss:                {MailboxPath: bossDir},
+		delegate:            {MailboxPath: delegateDir},
+		"alice@hermex.test": {MailboxPath: aliceDir},
+	}
+	sess := NewSession(delegateDir, accounts, delegate)
+	defer sess.Close()
+
+	logonResp, h := sess.Dispatch(delegateLogonRequest(0, 0x01, userDNFor(boss)), []uint32{0xFFFFFFFF})
+	ec, flags := readLogonResponseFlags(t, logonResp)
+	if ec != ecSuccess {
+		t.Fatalf("delegate logon ec = %#x, want success", ec)
+	}
+	if flags&responseFlagSendAsRight == 0 {
+		t.Errorf("delegate logon ResponseFlags = %#x, want the send-as bit set (on the list)", flags)
+	}
+	logonH := h[0]
+
+	// Compose To alice in the boss's Drafts, save, and submit.
+	draftsEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))
+	_, ch := sess.Dispatch(buildCreateMessage(0, 1, draftsEID), []uint32{logonH, 0xFFFFFFFF})
+	msgH := ch[1]
+	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+		{Tag: mapi.PrSubject, Value: "ONBEHALF"},
+		{Tag: mapi.PrBody, Value: "sent by the secretary"},
+	}), []uint32{msgH})
+	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
+	sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), []uint32{msgH})
+	sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
+
+	if ec := ropResultEC(t, mustDispatchN(sess, buildSubmitMessage(0), []uint32{msgH})); ec != ecSuccess {
+		t.Fatalf("delegate SubmitMessage ec = %#x, want success", ec)
+	}
+
+	// The delivered copy carries From: boss and Sender: delegate.
+	aliceRaw := firstInboxRaw(t, aliceDir)
+	if !headerNames(aliceRaw, "From:", boss) {
+		t.Errorf("delivered From does not name the principal %q:\n%s", boss, aliceRaw)
+	}
+	if !headerNames(aliceRaw, "Sender:", delegate) {
+		t.Errorf("delivered Sender does not name the delegate %q:\n%s", delegate, aliceRaw)
+	}
+
+	// The Sent Items copy files in the principal's mailbox, not the delegate's.
+	if n := sentItemsCount(t, bossDir); n != 1 {
+		t.Errorf("boss Sent Items = %d, want 1 (send-on-behalf files in the principal's mailbox)", n)
+	}
+	if n := sentItemsCount(t, delegateDir); n != 0 {
+		t.Errorf("delegate Sent Items = %d, want 0", n)
+	}
+}
+
+// TestDelegateFolderGrantCannotSend proves the send grant is distinct from folder
+// rights: a delegate admitted by a folder grant alone (full owner rights on the boss's
+// Drafts, but not on the delegate list) may compose, but its submit is refused — and
+// its logon never advertised the send-as right.
+func TestDelegateFolderGrantCannotSend(t *testing.T) {
+	bossDir, delegateDir, aliceDir := t.TempDir(), t.TempDir(), t.TempDir()
+	const delegate = "delegate@hermex.test"
+	const boss = "boss@hermex.test"
+	grantFolderPermission(t, bossDir, int64(mapi.PrivateFIDDraft), delegate, mapi.RightsOwner)
+	accounts := directory.StaticAccounts{
+		boss:                {MailboxPath: bossDir},
+		delegate:            {MailboxPath: delegateDir},
+		"alice@hermex.test": {MailboxPath: aliceDir},
+	}
+	sess := NewSession(delegateDir, accounts, delegate)
+	defer sess.Close()
+
+	logonResp, h := sess.Dispatch(delegateLogonRequest(0, 0x01, userDNFor(boss)), []uint32{0xFFFFFFFF})
+	ec, flags := readLogonResponseFlags(t, logonResp)
+	if ec != ecSuccess {
+		t.Fatalf("folder-grant delegate logon ec = %#x, want success", ec)
+	}
+	if flags&responseFlagSendAsRight != 0 {
+		t.Errorf("folder-grant delegate logon advertised the send-as bit (%#x); it is not on the list", flags)
+	}
+	logonH := h[0]
+
+	draftsEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))
+	_, ch := sess.Dispatch(buildCreateMessage(0, 1, draftsEID), []uint32{logonH, 0xFFFFFFFF})
+	msgH := ch[1]
+	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "NOPE"}}), []uint32{msgH})
+	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
+	sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), []uint32{msgH})
+	sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
+
+	if ec := ropResultEC(t, mustDispatchN(sess, buildSubmitMessage(0), []uint32{msgH})); ec != ecAccessDenied {
+		t.Errorf("folder-grant delegate SubmitMessage ec = %#x, want AccessDenied (not on the delegate list)", ec)
+	}
+	// Nothing was sent: the boss's Sent Items stays empty.
+	if n := sentItemsCount(t, bossDir); n != 0 {
+		t.Errorf("boss Sent Items = %d, want 0 (submit was refused)", n)
+	}
+}
+
+// headerNames reports whether the message header block carries a header line with the
+// given prefix (e.g. "From:" / "Sender:") that names addr.
+func headerNames(raw []byte, prefix, addr string) bool {
+	for line := range bytes.SplitSeq(raw, []byte("\r\n")) {
+		if len(line) == 0 {
+			break // end of header block
+		}
+		if bytes.HasPrefix(line, []byte(prefix)) && bytes.Contains(line, []byte(addr)) {
+			return true
+		}
+	}
+	return false
+}
+
+// sentItemsCount returns the number of messages in a mailbox's Sent Items folder.
+func sentItemsCount(t *testing.T, dir string) int {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	msgs, err := st.ListMessages(int64(mapi.PrivateFIDSentItems))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(msgs)
 }

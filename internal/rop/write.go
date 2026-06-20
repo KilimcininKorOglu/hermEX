@@ -542,9 +542,16 @@ func (s *Session) ropSubmitMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 		writeErr(out, ropSubmitMessage, hindex, ecNotFound)
 		return true
 	}
-	// Submitting is governed by send-on-behalf (the delegate list), a later
-	// increment; a delegate may not submit from another's mailbox until then.
-	if s.denyDelegate(out, ropSubmitMessage, hindex, obj.store) {
+	// Submitting is governed by send-on-behalf: an owner sends as itself, a delegate
+	// only when designated on the mailbox's delegate list (folder rights alone do not
+	// confer it). The resolved identities are stamped into the outgoing copy below.
+	representing, sender, allowed, err := s.delegateSendIdentity(obj.store)
+	if err != nil {
+		writeErr(out, ropSubmitMessage, hindex, ecError)
+		return true
+	}
+	if !allowed {
+		writeErr(out, ropSubmitMessage, hindex, ecAccessDenied)
 		return true
 	}
 	nm := obj.newMsg
@@ -556,7 +563,7 @@ func (s *Session) ropSubmitMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 		return true
 	}
 
-	raw, err := s.deliverComposed(nm)
+	raw, err := s.deliverComposed(nm, representing, sender)
 	if err != nil {
 		if errors.Is(err, errNoRecipient) {
 			writeErr(out, ropSubmitMessage, hindex, ecNotFound) // no routable recipient
@@ -565,9 +572,11 @@ func (s *Session) ropSubmitMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 		}
 		return true
 	}
-	// Delivery has succeeded. Filing the Sent Items copy and consuming the source
-	// draft are best-effort follow-up — a failure here must not re-fail a message
-	// that has already gone out (which would make the client resend it).
+	// Delivery has succeeded. The Sent Items copy is filed in the mailbox the message
+	// was sent from — for a send-on-behalf submit that is the principal's mailbox, not
+	// the delegate's (a deliberate v1 default). Filing the copy and consuming the
+	// source draft are best-effort follow-up — a failure here must not re-fail a
+	// message that has already gone out (which would make the client resend it).
 	_, _ = obj.store.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), int64(objectstore.FlagSeen))
 	_ = obj.store.DeleteObject(nm.savedID)
 	nm.saved = false // the saved message is gone; a re-submit must not re-send
@@ -589,11 +598,12 @@ var errNoRecipient = errors.New("rop: no routable recipient")
 // SMTP address To+Cc+Bcc, while the exported wire copy carries only To+Cc bags —
 // oxcmail.Export writes a Bcc header for any RecipBcc bag, so leaving Bcc in the
 // wire copy would disclose blind recipients to the To/Cc readers), stamps the
-// sender-representing identity the wire copy needs, and returns the delivered raw
-// bytes. It reports errNoRecipient when nothing is routable; the caller maps that
-// (and any export/deliver fault) to its own ROP error code. The caller has already
-// verified nm.saved, nm.savedID, and s.accounts.
-func (s *Session) deliverComposed(nm *newMessageState) ([]byte, error) {
+// representing and sender identities the caller resolved (representing is the From; a
+// non-empty sender adds the on-behalf Sender), and returns the delivered raw bytes. It
+// reports errNoRecipient when nothing is routable; the caller maps that (and any
+// export/deliver fault) to its own ROP error code. The caller has already verified
+// nm.saved, nm.savedID, and s.accounts.
+func (s *Session) deliverComposed(nm *newMessageState, representing, sender string) ([]byte, error) {
 	var recipients []string
 	wire := make([]mapi.PropertyValues, 0, len(nm.recipients))
 	for _, bag := range nm.recipients {
@@ -607,13 +617,11 @@ func (s *Session) deliverComposed(nm *newMessageState) ([]byte, error) {
 	if len(recipients) == 0 {
 		return nil, errNoRecipient
 	}
-	// Stamp the sender-representing identity + submit time when the client left them
-	// unset (the reference rectifies the message at send the same way): Export
-	// derives From from the representing identity, so an unstamped message ships
-	// From-less and is rejected downstream. Copy the bag first so the in-memory
-	// draft is untouched.
+	// Stamp the representing/sender identities + submit time: Export derives From from
+	// the representing identity, so an unstamped message ships From-less and is
+	// rejected downstream. Copy the bag first so the in-memory draft is untouched.
 	props := append(mapi.PropertyValues(nil), nm.props...)
-	stampSubmitIdentity(&props, s.owner)
+	stampSubmitIdentity(&props, representing, sender)
 	oxcmail.EnsureMessageID(&props)
 
 	raw, err := oxcmail.Export(&oxcmail.Message{Props: props, Recipients: wire}, oxcmail.Options{})
@@ -648,16 +656,38 @@ func recipientSMTP(bag mapi.PropertyValues) string {
 	return ""
 }
 
-// stampSubmitIdentity fills the sender-representing identity and submit time on a
-// message about to be exported, when the client did not set them. owner is the
-// session owner's SMTP address.
-func stampSubmitIdentity(props *mapi.PropertyValues, owner string) {
-	if v, ok := props.Get(mapi.PrSentRepresentingSmtpAddress); owner != "" && (!ok || v == "") {
-		props.Set(mapi.PrSentRepresentingSmtpAddress, owner)
-		props.Set(mapi.PrSentRepresentingEmailAddress, owner)
-		props.Set(mapi.PrSentRepresentingAddrType, "SMTP")
+// stampSubmitIdentity fixes the representing/sender identities and submit time on a
+// message about to be exported. An owner send (sender == "") stamps the representing
+// identity only when the client left it unset — a client composing in its own mailbox
+// may legitimately name its own From. A delegate send-on-behalf (sender != "") FORCES
+// both identities, overwriting whatever the client supplied, so a client cannot
+// dictate who the message claims to be from: the representing identity is the mailbox
+// owner (the From) and the sender is the delegate (the Sender). Export emits a Sender
+// header whenever the two differ, producing the "<delegate> on behalf of <owner>" form.
+func stampSubmitIdentity(props *mapi.PropertyValues, representing, sender string) {
+	if sender == "" {
+		if v, ok := props.Get(mapi.PrSentRepresentingSmtpAddress); representing != "" && (!ok || v == "") {
+			setRepresenting(props, representing)
+		}
+	} else {
+		setRepresenting(props, representing)
+		setSender(props, sender)
 	}
 	if _, ok := props.Get(mapi.PrClientSubmitTime); !ok {
 		props.Set(mapi.PrClientSubmitTime, mapi.UnixToNTTime(time.Now()))
 	}
+}
+
+// setRepresenting and setSender write the SMTP-address trio Export reads to format the
+// From (representing) and Sender (sender) headers.
+func setRepresenting(props *mapi.PropertyValues, addr string) {
+	props.Set(mapi.PrSentRepresentingSmtpAddress, addr)
+	props.Set(mapi.PrSentRepresentingEmailAddress, addr)
+	props.Set(mapi.PrSentRepresentingAddrType, "SMTP")
+}
+
+func setSender(props *mapi.PropertyValues, addr string) {
+	props.Set(mapi.PrSenderSmtpAddress, addr)
+	props.Set(mapi.PrSenderEmailAddress, addr)
+	props.Set(mapi.PrSenderAddrType, "SMTP")
 }
