@@ -130,6 +130,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/users/{email}/delete", s.handleUIUserDelete)
 	mux.HandleFunc("PUT /admin/ui/users/{email}/altnames", s.handleUIUserAltnames)
 	mux.HandleFunc("PUT /admin/ui/users/{email}/aliases", s.handleUIUserAliases)
+	mux.HandleFunc("POST /admin/ui/users/{email}/roles/grant", s.handleUIUserGrantRole)
+	mux.HandleFunc("POST /admin/ui/users/{email}/roles/revoke", s.handleUIUserRevokeRole)
 	mux.HandleFunc("GET /admin/ui/domains", s.handleUIDomains)
 	mux.HandleFunc("POST /admin/ui/domains", s.handleUICreateDomain)
 	mux.HandleFunc("GET /admin/ui/aliases", s.handleUIAliases)

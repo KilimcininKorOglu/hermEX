@@ -207,3 +207,41 @@ func TestUIUserAliases(t *testing.T) {
 		t.Errorf("SetAliasesFor = (%q, %v), want alice@hermex.test with 2 aliases", d.setAliasesUser, d.setAliases)
 	}
 }
+
+// TestUIUserRoles proves the detail page shows the admin-roles panel and that the
+// grant and revoke controls carry the role and its scope to the directory.
+func TestUIUserRoles(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		userDetail: directory.UserDetail{ID: 5, Username: "alice@hermex.test"},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	page := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
+	body, _ := io.ReadAll(page.Body)
+	page.Body.Close()
+	if !strings.Contains(string(body), "Grant role") || !strings.Contains(string(body), "Admin roles") {
+		t.Errorf("detail page missing the roles panel:\n%s", body)
+	}
+
+	grant := htmxPOST(t, ts, "/admin/ui/users/alice@hermex.test/roles/grant", session, csrf,
+		url.Values{"role": {"domain"}, "scopeID": {"3"}})
+	grant.Body.Close()
+	if grant.StatusCode != http.StatusOK {
+		t.Fatalf("grant status %d, want 200", grant.StatusCode)
+	}
+	if d.grantedRole != "domain" || d.grantedScope != 3 {
+		t.Errorf("granted (%q, %d), want (domain, 3)", d.grantedRole, d.grantedScope)
+	}
+
+	revoke := htmxPOST(t, ts, "/admin/ui/users/alice@hermex.test/roles/revoke", session, csrf,
+		url.Values{"role": {"domain"}, "scopeID": {"3"}})
+	revoke.Body.Close()
+	if revoke.StatusCode != http.StatusOK {
+		t.Fatalf("revoke status %d, want 200", revoke.StatusCode)
+	}
+	if d.revokedRole != "domain" || d.revokedScope != 3 {
+		t.Errorf("revoked (%q, %d), want (domain, 3)", d.revokedRole, d.revokedScope)
+	}
+}

@@ -79,13 +79,67 @@ func (s *Server) handleUIUserDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	altnames, _ := s.dir.ListAltnames(u.Username)
 	aliases, _ := s.dir.ListAliasesFor(u.Username)
+	roles, _ := s.dir.AdminRoles(u.ID)
 	s.render(w, "user_detail.html", map[string]any{
 		"Nav":      "users",
 		"CSRF":     csrfCookieValue(r),
 		"User":     u,
+		"Email":    u.Username,
 		"Altnames": strings.Join(altnames, "\n"),
 		"Aliases":  strings.Join(aliases, "\n"),
+		"Roles":    roles,
 	})
+}
+
+// renderUserRoles re-renders the admin-roles panel for htmx after a grant or
+// revoke, carrying an optional error message.
+func (s *Server) renderUserRoles(w http.ResponseWriter, email, csrf string, uid int64, errMsg string) {
+	roles, err := s.dir.AdminRoles(uid)
+	if err != nil && errMsg == "" {
+		errMsg = "Could not load roles: " + err.Error()
+	}
+	s.render(w, "user-roles", map[string]any{
+		"Email": email,
+		"CSRF":  csrf,
+		"Roles": roles,
+		"Error": errMsg,
+	})
+}
+
+// handleUIUserGrantRole grants the user an admin role from the detail form and
+// returns the refreshed roles panel.
+func (s *Server) handleUIUserGrantRole(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	uid, ok := s.resolveUser(w, r)
+	if !ok {
+		return
+	}
+	scopeID, _ := strconv.ParseInt(r.PostFormValue("scopeID"), 10, 64)
+	errMsg := ""
+	if err := s.dir.GrantAdminRole(uid, r.PostFormValue("role"), scopeID); err != nil {
+		errMsg = "Could not grant role: " + err.Error()
+	}
+	s.renderUserRoles(w, r.PathValue("email"), csrfCookieValue(r), uid, errMsg)
+}
+
+// handleUIUserRevokeRole removes one of the user's admin roles and returns the
+// refreshed roles panel.
+func (s *Server) handleUIUserRevokeRole(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	uid, ok := s.resolveUser(w, r)
+	if !ok {
+		return
+	}
+	scopeID, _ := strconv.ParseInt(r.PostFormValue("scopeID"), 10, 64)
+	errMsg := ""
+	if err := s.dir.RevokeAdminRole(uid, r.PostFormValue("role"), scopeID); err != nil {
+		errMsg = "Could not revoke role: " + err.Error()
+	}
+	s.renderUserRoles(w, r.PathValue("email"), csrfCookieValue(r), uid, errMsg)
 }
 
 // handleUIUserAliases replaces the user's e-mail aliases from the textarea
