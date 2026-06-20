@@ -169,6 +169,12 @@ func TestProvisionRemoteWipe(t *testing.T) {
 		t.Errorf("after ack status = %d, want wiped(%d)", got, WipeStatusWiped)
 	}
 	st.Close()
+
+	// A wiped device is terminal: it is no longer forced to re-provision, so an
+	// ordinary command succeeds rather than looping on 449.
+	if code := rawCommandStatus(t, ts, "FolderSync", wbxml.Elem(wbxml.FHFolderSync, wbxml.Str(wbxml.FHSyncKey, "1"))); code != http.StatusOK {
+		t.Errorf("post-wipe FolderSync status %d, want 200 (no 449 loop)", code)
+	}
 }
 
 // TestFolderSyncPrime confirms SyncKey 0 returns Status 1, a fresh key, and the

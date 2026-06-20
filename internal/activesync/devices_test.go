@@ -107,6 +107,15 @@ func TestAdvanceProvisionWipe(t *testing.T) {
 		t.Errorf("after ack status = %d, want wiped(%d)", got, WipeStatusWiped)
 	}
 
+	// Wiped is terminal: a further exchange emits nothing and stays wiped, so a
+	// device that reconnects is not wiped again in a loop.
+	if emit, err := advanceProvisionWipe(st, "dev1", false); err != nil || emit != wipeEmitNone {
+		t.Errorf("post-wiped advance = (%d,%v), want wipeEmitNone", emit, err)
+	}
+	if got := deviceWipe(t, st, "dev1"); got != WipeStatusWiped {
+		t.Errorf("post-wiped status = %d, want it to stay wiped(%d)", got, WipeStatusWiped)
+	}
+
 	setDeviceWipe(t, st, "dev1", WipeStatusAccountPending)
 	if emit, _ := advanceProvisionWipe(st, "dev1", false); emit != wipeEmitAccount {
 		t.Errorf("account-only pending emit = %d, want wipeEmitAccount", emit)

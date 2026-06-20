@@ -33,10 +33,17 @@ const (
 	wipeEmitAccount        // an <AccountOnlyRemoteWipe/> element
 )
 
-// wipeOutstanding reports whether a remote wipe is pending delivery or
-// acknowledgement for a device — anything at or past the pending threshold.
+// wipeOutstanding reports whether a remote wipe is pending delivery or awaiting
+// the device's acknowledgement — the states that force re-provisioning and re-emit
+// the directive. The terminal wiped states are NOT outstanding: a device that
+// completed a wipe (and, after an account-only wipe, may re-add the account on the
+// same hardware) must not be wiped again in a loop.
 func wipeOutstanding(status int) bool {
-	return status >= WipeStatusPending
+	switch status {
+	case WipeStatusPending, WipeStatusRequested, WipeStatusAccountPending, WipeStatusAccountRequested:
+		return true
+	}
+	return false
 }
 
 // deviceMeta is one device's ActiveSync metadata, recorded best-effort on each
