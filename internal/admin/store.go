@@ -26,6 +26,8 @@ type MailboxStore interface {
 	SetDelegates(maildir string, list []string) error
 	GetSendAs(maildir string) ([]string, error)
 	SetSendAs(maildir string, list []string) error
+	GetMeetingConfig(maildir string) (objectstore.MeetingConfig, error)
+	SetMeetingConfig(maildir string, cfg objectstore.MeetingConfig) error
 	ListFolders(maildir string) ([]objectstore.FolderInfo, error)
 	ListFolderPermissions(maildir string, folderID int64) ([]objectstore.PermissionEntry, error)
 	SetFolderPermission(maildir string, folderID int64, username string, rights uint32) error
@@ -126,6 +128,19 @@ func (mailboxStore) GetSendAs(maildir string) ([]string, error) {
 
 func (mailboxStore) SetSendAs(maildir string, list []string) error {
 	return withStore(maildir, func(st *objectstore.Store) error { return st.SetSendAs(list) })
+}
+
+func (mailboxStore) GetMeetingConfig(maildir string) (objectstore.MeetingConfig, error) {
+	st, err := objectstore.Open(maildir)
+	if err != nil {
+		return objectstore.MeetingConfig{}, err
+	}
+	defer st.Close()
+	return st.GetMeetingConfig()
+}
+
+func (mailboxStore) SetMeetingConfig(maildir string, cfg objectstore.MeetingConfig) error {
+	return withStore(maildir, func(st *objectstore.Store) error { return st.SetMeetingConfig(cfg) })
 }
 
 func (mailboxStore) ListFolders(maildir string) ([]objectstore.FolderInfo, error) {

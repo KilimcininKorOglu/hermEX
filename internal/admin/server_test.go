@@ -295,6 +295,10 @@ type fakeStore struct {
 	setSendAsDir string
 	setSendAsVal []string
 
+	meetingConfig    map[string]objectstore.MeetingConfig
+	setMeetingDir    string
+	setMeetingConfig objectstore.MeetingConfig
+
 	folders     map[string][]objectstore.FolderInfo
 	folderPerms map[string][]objectstore.PermissionEntry
 
@@ -401,6 +405,25 @@ func (f *fakeStore) GetSendAs(maildir string) ([]string, error) {
 		return nil, f.getErr
 	}
 	return f.sendAs[maildir], nil
+}
+
+func (f *fakeStore) GetMeetingConfig(maildir string) (objectstore.MeetingConfig, error) {
+	if f.getErr != nil {
+		return objectstore.MeetingConfig{}, f.getErr
+	}
+	return f.meetingConfig[maildir], nil
+}
+
+func (f *fakeStore) SetMeetingConfig(maildir string, cfg objectstore.MeetingConfig) error {
+	if f.setErr != nil {
+		return f.setErr
+	}
+	if f.meetingConfig == nil {
+		f.meetingConfig = map[string]objectstore.MeetingConfig{}
+	}
+	f.meetingConfig[maildir] = cfg
+	f.setMeetingDir, f.setMeetingConfig = maildir, cfg
+	return nil
 }
 
 func (f *fakeStore) SetSendAs(maildir string, list []string) error {

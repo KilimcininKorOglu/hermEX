@@ -15,6 +15,12 @@ const (
 	PrPredecessorChangeList     = PropTag(0x65E30102) // PtBinary (PCL)
 	PrAttrHidden                = PropTag(0x10F4000B) // PtBoolean
 	PrAttrHiddenMask            = PropTag(0x10F40003) // PtLong (address-book hide mask)
+	// PR_SCHDINFO_* store properties (MS-OXOSFB) configuring a mailbox's automatic
+	// meeting-request processing: auto-accept conflict-free requests, and decline
+	// recurring / conflicting ones. The delivery engine reads them per-mailbox.
+	PrScheduleInfoAutoAccept        = PropTag(0x686D000B) // PtBoolean (PidTagScheduleInfoAutoAcceptAppointments)
+	PrScheduleInfoDisallowRecurring = PropTag(0x686E000B) // PtBoolean (PidTagScheduleInfoDisallowRecurringAppts)
+	PrScheduleInfoDisallowOverlap   = PropTag(0x686F000B) // PtBoolean (PidTagScheduleInfoDisallowOverlappingAppts)
 	PrInternetArticleNumber     = PropTag(0x0E230003) // PtLong
 	PrInternetArticleNumberNext = PropTag(0x67510003) // PtLong
 	PrDeletedCountTotal         = PropTag(0x670B0003) // PtLong
