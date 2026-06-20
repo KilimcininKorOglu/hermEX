@@ -58,9 +58,10 @@ func (s *Server) seekEntriesCore(req seekEntriesRequest) rowsetResult {
 		found, pos, ok = g.seekTable(target, req.table)
 		total = len(g.users)
 	} else {
-		// A plain seek walks the GAL-browse view, so users hidden from the GAL
-		// are not landed on.
-		view := g.browseView()
+		// A plain seek walks the view the container selected (the GAL browse view,
+		// or a named list's type view), so entries hidden on that surface are not
+		// landed on.
+		view := g.viewFor(st.containerID)
 		found, pos, ok = view.seek(target)
 		total = view.total()
 	}

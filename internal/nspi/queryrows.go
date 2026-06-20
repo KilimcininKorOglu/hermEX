@@ -113,7 +113,7 @@ func (s *Server) queryRowsCore(req queryRowsRequest) rowsetResult {
 			}
 		}
 	} else {
-		rows, st = g.browseView().walk(st, req.count)
+		rows, st = g.viewFor(st.containerID).walk(st, req.count)
 	}
 	return rowsetResult{result: ecSuccess, stat: st, cols: cols, rows: rows}
 }
@@ -121,8 +121,9 @@ func (s *Server) queryRowsCore(req queryRowsRequest) rowsetResult {
 // walk advances the cursor: it positions at STAT.cur_rec, applies the signed
 // delta, fetches up to count rows, and returns the rows plus the updated STAT
 // (cur_rec at the next row or END_OF_TABLE, num_pos/total_rec refreshed). It runs
-// over the GAL-browse view, so users hidden from the GAL are skipped while their
-// MIds stay valid for a direct fetch.
+// over whichever view the container selected (the GAL browse view, or a named
+// list's type view), skipping the entries hidden on that surface while their MIds
+// stay valid for a direct fetch.
 func (v galView) walk(st stat, count uint32) ([]mapi.PropertyValues, stat) {
 	total := v.total()
 	start := v.position(st.curRec)
@@ -232,8 +233,8 @@ func (s *Server) updateStatCore(req updateStatRequest) updateStatResult {
 	if req.stat.codePage == cpWinUnicode {
 		return updateStatResult{result: ecNotSupported, stat: req.stat}
 	}
-	v := s.snapshot().browseView()
 	st := req.stat
+	v := s.snapshot().viewFor(st.containerID)
 	total := v.total()
 	initRow := v.position(st.curRec)
 	row := initRow

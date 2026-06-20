@@ -73,13 +73,16 @@ var _ mlistExpander = (*directory.SQLDirectory)(nil)
 
 // galUser is one GAL entry with its assigned MId. hidden is the PR_ATTR_HIDDEN
 // mask the directory supplied; the surface applying it decides which bit matters.
-// dt is the entry's address-book display type (dtMailuser or dtDistlist).
+// dt is the entry's address-book object flavor for the EntryID (dtMailuser or
+// dtDistlist); dispType is the raw recipient display type (rtUser/rtRoom/…) the
+// named address lists classify on.
 type galUser struct {
-	mid     uint32
-	display string
-	smtp    string
-	hidden  uint32
-	dt      uint32
+	mid      uint32
+	display  string
+	smtp     string
+	hidden   uint32
+	dt       uint32
+	dispType int
 }
 
 // abDisplayType maps a directory object's display_type to the NSPI entry display
@@ -129,7 +132,7 @@ func (s *Server) snapshot() gal {
 	})
 	users := make([]galUser, len(entries))
 	for i, e := range entries {
-		users[i] = galUser{mid: midBase + uint32(i), display: e.DisplayName, smtp: e.Address, hidden: e.HiddenFrom, dt: abDisplayType(e.DisplayType)}
+		users[i] = galUser{mid: midBase + uint32(i), display: e.DisplayName, smtp: e.Address, hidden: e.HiddenFrom, dt: abDisplayType(e.DisplayType), dispType: e.DisplayType}
 	}
 	return gal{users: users}
 }
@@ -189,6 +192,36 @@ func (g gal) browseView() galView {
 	vis := make([]int, 0, len(g.users))
 	for i, u := range g.users {
 		if u.hidden&abHideFromGAL == 0 {
+			vis = append(vis, i)
+		}
+	}
+	return galView{g: g, vis: vis}
+}
+
+// viewFor builds the cursor view a STAT container id browses: the GAL-browse view
+// for container 0, or a named address list's type-filtered view for the ids in
+// addressLists. Any other container id (an entry MId, the member selector, an
+// unknown value) yields an empty view, so a stray container browses nothing
+// rather than the wrong table.
+func (g gal) viewFor(containerID uint32) galView {
+	if containerID == uint32(galContainerID) {
+		return g.browseView()
+	}
+	if al, ok := addressListByID(int32(containerID)); ok {
+		return g.listView(al)
+	}
+	return galView{g: g}
+}
+
+// listView builds a named address list's cursor view: the GAL entries whose
+// recipient display type matches the list and that are not hidden from address
+// lists (abHideFromAL). Unlike browseView it does NOT apply the GAL-hide bit, so
+// a user hidden only from the GAL still appears in its type list — the two hide
+// bits are independent.
+func (g gal) listView(al addressList) galView {
+	vis := make([]int, 0, len(g.users))
+	for i, u := range g.users {
+		if u.dispType == al.dispType && u.hidden&abHideFromAL == 0 {
 			vis = append(vis, i)
 		}
 	}
