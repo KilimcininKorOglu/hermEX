@@ -29,16 +29,23 @@ func specialTableBody() []byte {
 	return b
 }
 
-// queryRowsBody frames a QueryRows request: flags + a STAT (cursor at the table
-// start, code page 1252) + an empty explicit MId list + count + no columns +
-// empty auxin.
-func queryRowsBody() []byte {
+// queryRowsBody frames a QueryRows request over the GAL (container 0): flags + a
+// STAT (cursor at the table start, code page 1252) + an empty explicit MId list +
+// count + no columns + empty auxin.
+func queryRowsBody() []byte { return queryRowsBodyContainer(0) }
+
+// queryRowsBodyContainer frames a QueryRows request that selects the given
+// address-book container id in the STAT, otherwise identical to queryRowsBody.
+func queryRowsBodyContainer(containerID uint32) []byte {
 	var b []byte
 	b = binary.LittleEndian.AppendUint32(b, 0) // flags
 	b = append(b, 1)                           // hasStat
 	for i := range 9 { // STAT: 9 u32 fields
 		v := uint32(0)
-		if i == 6 { // codepage
+		switch i {
+		case 1: // container_id
+			v = containerID
+		case 6: // codepage
 			v = 1252
 		}
 		b = binary.LittleEndian.AppendUint32(b, v)
@@ -238,6 +245,42 @@ func TestNspiQueryRows(t *testing.T) {
 	u16 := []byte{'a', 0, 'l', 0, 'i', 0, 'c', 0, 'e', 0}
 	if !bytes.Contains(p, u16) {
 		t.Error("QueryRows response does not carry the display name as UTF-16LE")
+	}
+}
+
+// TestNspiQueryRowsNamedContainer proves a named address-list container survives
+// the transport and filters by type: QueryRows on All Users (0x3) returns the
+// seeded mailuser, while QueryRows on All Rooms (0x6) filters it out. If the STAT
+// container_id were dropped on the wire, both would browse the GAL and the
+// mailuser would appear in each. The sequence cookie is rolled between the calls.
+func TestNspiQueryRowsNamedContainer(t *testing.T) {
+	ts := newTestServer(t)
+	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
+	bind.Body.Close()
+	sid, seq := cookieByName(bind, "sid"), cookieByName(bind, "sequence")
+	if sid == "" || seq == "" {
+		t.Fatal("no cookies from Bind")
+	}
+	query := func(container uint32) []byte {
+		resp := mapiPost(t, ts, "/mapi/nspi", "QueryRows", queryRowsBodyContainer(container), func(r *http.Request) {
+			r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
+			r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
+		})
+		defer resp.Body.Close()
+		if got := resp.Header.Get("X-ResponseCode"); got != "0" {
+			t.Fatalf("QueryRows(container %#x): X-ResponseCode = %q, want 0", container, got)
+		}
+		if ns := cookieByName(resp, "sequence"); ns != "" {
+			seq = ns // roll the cursor for the next call
+		}
+		return nspiPayload(t, resp)
+	}
+	alice16 := []byte{'a', 0, 'l', 0, 'i', 0, 'c', 0, 'e', 0}
+	if !bytes.Contains(query(0x3), alice16) { // All Users
+		t.Error("QueryRows(All Users) does not carry the seeded mailuser")
+	}
+	if bytes.Contains(query(0x6), alice16) { // All Rooms
+		t.Error("QueryRows(All Rooms) carries the mailuser; container_id was dropped or not type-filtered")
 	}
 }
 
