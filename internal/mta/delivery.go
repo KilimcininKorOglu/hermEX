@@ -129,6 +129,32 @@ func (s *session) identities() []string {
 // authoritative for — an unresolved address in a local domain is a genuine
 // user-unknown that must never be relayed (it would loop straight back).
 func (s *session) Rcpt(to string) error {
+	// A distribution-list recipient expands to its members. The posting-privilege
+	// gate refuses here (a 550 — no message accepted, no backscatter, exactly like
+	// the receive-quota gate); members are then routed leniently, since a stale
+	// member must never fail delivery to the rest of the list.
+	if exp, ok := s.accounts.(MListExpander); ok {
+		leaves, isList, res, err := expandMailingList(exp, s.from, to)
+		if err != nil {
+			return fmt.Errorf("cannot route <%s>: %w", to, err)
+		}
+		if isList {
+			if res != directory.MListOK {
+				return fmt.Errorf("5.7.1 posting to list <%s> is not permitted", to)
+			}
+			for _, m := range leaves {
+				s.routeListMember(m)
+			}
+			return nil
+		}
+	}
+	return s.routeRecipient(to)
+}
+
+// routeRecipient files a single ordinary recipient: a local mailbox becomes a
+// delivery target; an unresolved address is refused unless this is an
+// authenticated submission relaying to an external domain.
+func (s *session) routeRecipient(to string) error {
 	if path, ok := s.accounts.Resolve(to); ok {
 		if err := overReceiveQuota(path); err != nil {
 			return err
@@ -151,6 +177,24 @@ func (s *session) Rcpt(to string) error {
 	}
 	s.relayTargets = append(s.relayTargets, to)
 	return nil
+}
+
+// routeListMember files one expanded distribution-list member: a local mailbox
+// becomes a delivery target (skipped when over its receive quota), an external
+// member is relayed when a spool is available. A member that resolves to nothing
+// is dropped — a list must not bounce because one member went stale.
+func (s *session) routeListMember(m string) {
+	if path, ok := s.accounts.Resolve(m); ok {
+		if overReceiveQuota(path) == nil {
+			s.targets = append(s.targets, target{addr: m, path: path})
+		}
+		return
+	}
+	if s.spool != nil {
+		if ext, err := isExternalDomain(s.accounts, m); err == nil && ext {
+			s.relayTargets = append(s.relayTargets, m)
+		}
+	}
 }
 
 // overReceiveQuota refuses a local recipient whose mailbox already sits at or
@@ -292,24 +336,30 @@ func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from strin
 	if err := overSendQuota(accounts, from); err != nil {
 		return recipients, err
 	}
-	unresolved, err = Deliver(accounts, from, recipients, raw, received)
-	if err != nil || spool == nil || len(unresolved) == 0 {
-		return unresolved, err
+	// A distribution-list recipient expands to its members before delivery; a list
+	// whose posting privilege refuses this sender is reported as undeliverable.
+	leaves, refused := expandRecipientList(accounts, from, recipients)
+	unresolved, err = Deliver(accounts, from, leaves, raw, received)
+	if err != nil {
+		return append(unresolved, refused...), err
 	}
-	var external, stuck []string
-	for _, rcpt := range unresolved {
-		if ext, e := isExternalDomain(accounts, rcpt); e == nil && ext {
-			external = append(external, rcpt)
-		} else {
-			stuck = append(stuck, rcpt)
+	if spool != nil && len(unresolved) > 0 {
+		var external, stuck []string
+		for _, rcpt := range unresolved {
+			if ext, e := isExternalDomain(accounts, rcpt); e == nil && ext {
+				external = append(external, rcpt)
+			} else {
+				stuck = append(stuck, rcpt)
+			}
 		}
-	}
-	if len(external) > 0 {
-		if e := spool.Enqueue(from, external, raw, received); e != nil {
-			return stuck, e
+		if len(external) > 0 {
+			if e := spool.Enqueue(from, external, raw, received); e != nil {
+				return append(stuck, refused...), e
+			}
 		}
+		unresolved = stuck
 	}
-	return stuck, nil
+	return append(unresolved, refused...), nil
 }
 
 // deliver appends a raw message to the inbox of the mailbox at path. The inbox
