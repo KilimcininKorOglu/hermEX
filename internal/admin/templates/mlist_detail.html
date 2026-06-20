@@ -1,0 +1,33 @@
+{{define "mlist_detail.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>{{.List.Listname}}</h1>
+<p><a href="/admin/ui/mlists">&larr; Back to mailing lists</a></p>
+<p>Type: {{.List.TypeLabel}} &middot; Who may post: {{.List.PrivLabel}}</p>
+
+<h2>Members</h2>
+<form class="members-form" hx-put="/admin/ui/mlists/{{.List.Listname}}/members" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<p>One address per line. Applies to normal-type lists; a member may itself be a list.</p>
+<textarea name="members" rows="6">{{.Members}}</textarea>
+<button type="submit">Save members</button>
+</form>
+{{template "user-status" .}}
+
+<h2>Permitted senders</h2>
+<form class="specifieds-form" hx-put="/admin/ui/mlists/{{.List.Listname}}/specifieds" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<p>One address or bare domain per line. Used when "Who may post" is "Specified senders".</p>
+<textarea name="specifieds" rows="4">{{.Specifieds}}</textarea>
+<button type="submit">Save permitted senders</button>
+</form>
+
+<h2>Delete</h2>
+<form class="delete-form" hx-post="/admin/ui/mlists/{{.List.Listname}}/delete" hx-confirm="Delete {{.List.Listname}}? This cannot be undone."
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<button type="submit" class="danger">Delete list</button>
+</form>
+</main>
+</div>
+{{template "foot" .}}{{end}}

@@ -58,6 +58,20 @@ type fakeDir struct {
 	setProps        map[uint32]string
 	setPropsUser    string
 	setPropsMissing bool
+
+	mlists             []directory.MListInfo
+	createdMList       string
+	createdMListType   int
+	createdMListPriv   int
+	deletedMList       string
+	deleteMListMissing bool
+	mlistMembers       []string
+	setMembersUser     string
+	setMembers         []string
+	mlistSpecifieds    []string
+	setSpecifiedsUser  string
+	setSpecifieds      []string
+	mlistMissing       bool
 }
 
 func (f *fakeDir) Authenticate(_, _ string) (string, bool) {
@@ -161,6 +175,34 @@ func (f *fakeDir) SetAliasesFor(username string, aliases []string) (bool, error)
 	}
 	f.setAliasesUser, f.setAliases = username, aliases
 	return !f.aliasesMissing, nil
+}
+func (f *fakeDir) ListMLists() ([]directory.MListInfo, error) { return f.mlists, nil }
+func (f *fakeDir) CreateMList(listname string, listType, listPriv int) (int64, error) {
+	if f.createErr != nil {
+		return 0, f.createErr
+	}
+	f.createdMList, f.createdMListType, f.createdMListPriv = listname, listType, listPriv
+	return 1, nil
+}
+func (f *fakeDir) DeleteMList(listname string) (bool, error) {
+	f.deletedMList = listname
+	return !f.deleteMListMissing, nil
+}
+func (f *fakeDir) ListMembers(string) ([]string, error) { return f.mlistMembers, nil }
+func (f *fakeDir) SetMembers(listname string, members []string) (bool, error) {
+	if f.createErr != nil {
+		return false, f.createErr
+	}
+	f.setMembersUser, f.setMembers = listname, members
+	return !f.mlistMissing, nil
+}
+func (f *fakeDir) ListSpecifieds(string) ([]string, error) { return f.mlistSpecifieds, nil }
+func (f *fakeDir) SetSpecifieds(listname string, senders []string) (bool, error) {
+	if f.createErr != nil {
+		return false, f.createErr
+	}
+	f.setSpecifiedsUser, f.setSpecifieds = listname, senders
+	return !f.mlistMissing, nil
 }
 func (f *fakeDir) GetUserProperties(string) (map[uint32]string, error) { return f.userProps, nil }
 func (f *fakeDir) SetUserProperties(username string, props map[uint32]string) (bool, error) {
