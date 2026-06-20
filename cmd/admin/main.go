@@ -37,6 +37,9 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  create-domain <domainname>")
 	fmt.Fprintln(os.Stderr, "  create-user <email> <password>")
 	fmt.Fprintln(os.Stderr, "  create-alias <alias-address> <user-email>")
+	fmt.Fprintln(os.Stderr, "  create-contact <email> <domain> [display-name]   (an org mail contact in the GAL)")
+	fmt.Fprintln(os.Stderr, "  delete-contact <email>")
+	fmt.Fprintln(os.Stderr, "  list-contacts")
 	fmt.Fprintln(os.Stderr, "  sweep-content <email>   (reclaim orphan content files; run with the mailbox idle)")
 	fmt.Fprintln(os.Stderr, "  ldap-sync <org-id>      (import the org's LDAP/AD accounts into the directory)")
 	fmt.Fprintln(os.Stderr, "  grant-admin <email> <system|org|domain> [scope-id]")
@@ -93,6 +96,38 @@ func main() {
 			log.Fatalf("hermex-admin: %v", err)
 		}
 		fmt.Printf("alias %s -> %s created\n", args[1], args[2])
+	case "create-contact":
+		if len(args) < 3 || len(args) > 4 {
+			usage()
+		}
+		name := ""
+		if len(args) == 4 {
+			name = args[3]
+		}
+		if _, err := dir.CreateContact(args[1], name, args[2]); err != nil {
+			log.Fatalf("hermex-admin: %v", err)
+		}
+		fmt.Printf("contact %s created\n", args[1])
+	case "delete-contact":
+		if len(args) != 2 {
+			usage()
+		}
+		removed, err := dir.DeleteContact(args[1])
+		if err != nil {
+			log.Fatalf("hermex-admin: %v", err)
+		}
+		if !removed {
+			log.Fatalf("hermex-admin: no such contact: %s", args[1])
+		}
+		fmt.Printf("contact %s deleted\n", args[1])
+	case "list-contacts":
+		contacts, err := dir.ListContacts()
+		if err != nil {
+			log.Fatalf("hermex-admin: %v", err)
+		}
+		for _, c := range contacts {
+			fmt.Printf("%s\t%s\t%s\n", c.Address, c.DisplayName, c.Domain)
+		}
 	case "sweep-content":
 		if len(args) != 2 {
 			usage()
