@@ -103,6 +103,49 @@ var directoryDDL = []string{
 		username_attr VARCHAR(64) NOT NULL DEFAULT 'mail',
 		PRIMARY KEY (org_id)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+	// mlists is a distribution list: a users row (display_type = DT_DISTLIST, no
+	// maildir or password — it cannot log in) extended with its expansion policy.
+	// list_type selects how membership is computed (normal = the explicit
+	// associations rows, domain = every mailuser in domain_id); list_privilege
+	// gates who may send to the list. listname references the users row, so the
+	// list's GAL entry, hide mask, and properties come from the shared tables.
+	`CREATE TABLE IF NOT EXISTS mlists (
+		id             INT UNSIGNED NOT NULL AUTO_INCREMENT,
+		listname       VARCHAR(320) CHARACTER SET ascii NOT NULL,
+		domain_id      INT UNSIGNED NOT NULL,
+		list_type      TINYINT NOT NULL DEFAULT 0,
+		list_privilege TINYINT NOT NULL DEFAULT 0,
+		PRIMARY KEY (id),
+		UNIQUE KEY listname (listname),
+		KEY domain_id (domain_id),
+		CONSTRAINT mlists_user_fk FOREIGN KEY (listname)
+			REFERENCES users (username) ON DELETE CASCADE ON UPDATE CASCADE
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+	// associations holds the explicit members of a normal-type list: one member
+	// address per row. A member may itself be a list, which the expander resolves
+	// recursively under a loop guard.
+	`CREATE TABLE IF NOT EXISTS associations (
+		list_id  INT UNSIGNED NOT NULL,
+		username VARCHAR(320) CHARACTER SET ascii NOT NULL,
+		PRIMARY KEY (list_id, username),
+		KEY list_id (list_id),
+		CONSTRAINT associations_list_fk FOREIGN KEY (list_id)
+			REFERENCES mlists (id) ON DELETE CASCADE ON UPDATE CASCADE
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+	// specifieds names the senders permitted to post to a list whose privilege is
+	// "specified": a full address or a bare domain matches.
+	`CREATE TABLE IF NOT EXISTS specifieds (
+		id       INT UNSIGNED NOT NULL AUTO_INCREMENT,
+		list_id  INT UNSIGNED NOT NULL,
+		username VARCHAR(320) CHARACTER SET ascii NOT NULL,
+		PRIMARY KEY (id),
+		KEY list_id (list_id),
+		CONSTRAINT specifieds_list_fk FOREIGN KEY (list_id)
+			REFERENCES mlists (id) ON DELETE CASCADE ON UPDATE CASCADE
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 }
 
 // address_status packing: low nibble = user status, bits 4-5 = domain status.
@@ -115,5 +158,10 @@ const (
 	afDomainMask     = 0x30
 )
 
-// dtMailuser is PR_DISPLAY_TYPE_EX == DT_MAILUSER; login requires it.
-const dtMailuser = 0
+// display_type (PR_DISPLAY_TYPE_EX) values. dtMailuser is a normal mailbox user
+// and login requires it; dtDistlist is a distribution list (a users row with no
+// mailbox, expanded by the address book and the MTA).
+const (
+	dtMailuser = 0
+	dtDistlist = 1
+)
