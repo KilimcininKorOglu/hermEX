@@ -293,15 +293,18 @@ SELECT u.username, u.display_type, dn.propval_str, hg.propval_str, hb.propval_st
   LEFT JOIN user_properties dn ON dn.user_id = u.id AND dn.proptag = ? AND dn.order_id = 1
   LEFT JOIN user_properties hg ON hg.user_id = u.id AND hg.proptag = ? AND hg.order_id = 1
   LEFT JOIN user_properties hb ON hb.user_id = u.id AND hb.proptag = ? AND hb.order_id = 1
- WHERE u.display_type IN (?, ?)
-   AND (u.maildir <> '' OR u.display_type = ?)
+ WHERE u.display_type IN (?, ?, ?, ?, ?)
+   AND (u.maildir <> '' OR u.display_type IN (?, ?))
    AND (u.address_status & ?) = ?
    AND (u.address_status & ?) = 0
    AND d.domain_status = 0
    AND u.username LIKE ? ESCAPE '\\'
  ORDER BY u.username
  LIMIT ?`
-	rows, err := d.db.Query(q, prDisplayName, prAttrHiddenMask, prAttrHiddenBool, dtMailuser, dtDistlist, dtDistlist, afUserMask, afUserNormal, afDomainMask, "%"+esc+"%", limit)
+	rows, err := d.db.Query(q, prDisplayName, prAttrHiddenMask, prAttrHiddenBool,
+		dtMailuser, dtDistlist, dtContact, dtRoom, dtEquipment, // display_type IN
+		dtDistlist, dtContact, // maildir-exempt types (no mailbox)
+		afUserMask, afUserNormal, afDomainMask, "%"+esc+"%", limit)
 	if err != nil {
 		return nil, err
 	}

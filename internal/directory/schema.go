@@ -160,8 +160,14 @@ const (
 
 // display_type (PR_DISPLAY_TYPE_EX) values. dtMailuser is a normal mailbox user
 // and login requires it; dtDistlist is a distribution list (a users row with no
-// mailbox, expanded by the address book and the MTA).
+// mailbox, expanded by the address book and the MTA). dtRoom/dtEquipment are
+// resource mailboxes; dtContact is a mail contact (an external address with no
+// mailbox). All five are address-book recipients and classify the named address
+// lists (All Users/Distribution Lists/Contacts/Rooms/Equipment).
 const (
-	dtMailuser = 0
-	dtDistlist = 1
+	dtMailuser  = 0
+	dtDistlist  = 1
+	dtContact   = 6 // DT_REMOTE_MAILUSER
+	dtRoom      = 7 // DT_ROOM
+	dtEquipment = 8 // DT_EQUIPMENT
 )
