@@ -5,10 +5,12 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxews"
 )
 
 // delegateServer builds an EWS server over alice (the soapPost requester) and bob,
@@ -525,5 +527,120 @@ func TestGetFolderOwnMailboxViaMailboxElement(t *testing.T) {
 	_, out := soapPost(t, ts, crossMailboxGetFolder("inbox", testUser), true)
 	if !strings.Contains(out, `ResponseClass="Success"`) {
 		t.Errorf("the caller's own mailbox must be served without a grant:\n%s", out)
+	}
+}
+
+// crossMailboxFindItem builds a FindItem request whose parent folder targets another
+// mailbox when mailbox is non-empty.
+func crossMailboxFindItem(distinguishedID, mailbox string) string {
+	mb := ""
+	if mailbox != "" {
+		mb = `<t:Mailbox><t:EmailAddress>` + mailbox + `</t:EmailAddress></t:Mailbox>`
+	}
+	return wrapRequest(`<FindItem xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `" Traversal="Shallow">` +
+		`<ItemShape><t:BaseShape>IdOnly</t:BaseShape></ItemShape>` +
+		`<ParentFolderIds><t:DistinguishedFolderId Id="` + distinguishedID + `">` + mb + `</t:DistinguishedFolderId></ParentFolderIds>` +
+		`</FindItem>`)
+}
+
+// firstItemID extracts the first ItemId Id attribute value from a SOAP response.
+func firstItemID(out string) string {
+	const marker = `ItemId Id="`
+	i := strings.Index(out, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := out[i+len(marker):]
+	j := strings.IndexByte(rest, '"')
+	if j < 0 {
+		return ""
+	}
+	return rest[:j]
+}
+
+// seedInboxMessage appends one message with the given subject to a mailbox's inbox,
+// indexing it so FindItem/ListMessages enumerate it (the IMAP-index delivery path,
+// unlike CreateMessage which writes only the object store).
+func seedInboxMessage(t *testing.T, path, subject string) {
+	t.Helper()
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	raw := "From: sender@example.test\r\nSubject: " + subject + "\r\n\r\nbody\r\n"
+	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), time.Unix(1718200000, 0), 0); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestFindItemCrossMailboxWithGrant confirms a caller granted visibility on another
+// mailbox's folder can list its items, and that each returned item id encodes the
+// target mailbox so a later request reopens it.
+func TestFindItemCrossMailboxWithGrant(t *testing.T) {
+	ts, paths := delegateServer(t)
+	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.RightsReviewer)
+	seedInboxMessage(t, paths["bob@hermex.test"], "Quarterly numbers")
+
+	_, out := soapPost(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test"), true)
+	if !strings.Contains(out, "Quarterly numbers") {
+		t.Fatalf("a granted caller must list the target's items:\n%s", out)
+	}
+	id := firstItemID(out)
+	dec, err := oxews.DecodeItemID(id)
+	if err != nil || !strings.EqualFold(dec.Mailbox, "bob@hermex.test") {
+		t.Errorf("the returned item id must encode the target mailbox, got %q (%v)", dec.Mailbox, err)
+	}
+}
+
+// TestFindItemCrossMailboxDenied confirms a caller with no visibility on another
+// mailbox's folder cannot list it.
+func TestFindItemCrossMailboxDenied(t *testing.T) {
+	ts, paths := delegateServer(t)
+	seedInboxMessage(t, paths["bob@hermex.test"], "secret")
+
+	_, out := soapPost(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test"), true)
+	if !strings.Contains(out, "ErrorAccessDenied") {
+		t.Errorf("an ungranted caller must be denied the listing:\n%s", out)
+	}
+}
+
+// TestCrossMailboxFindThenGetItem confirms the full chain: a granted caller lists
+// another mailbox's item and then fetches it by the returned id, which reopens the
+// target mailbox and passes the read gate.
+func TestCrossMailboxFindThenGetItem(t *testing.T) {
+	ts, paths := delegateServer(t)
+	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.RightsReviewer)
+	seedInboxMessage(t, paths["bob@hermex.test"], "Quarterly numbers")
+
+	_, findOut := soapPost(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test"), true)
+	id := firstItemID(findOut)
+	if id == "" {
+		t.Fatalf("no item id returned:\n%s", findOut)
+	}
+	_, getOut := soapPost(t, ts, getItemReq(id), true)
+	if !strings.Contains(getOut, `ResponseClass="Success"`) {
+		t.Errorf("GetItem on the cross-mailbox id must succeed:\n%s", getOut)
+	}
+}
+
+// TestCrossMailboxTwoTierVisibleListsButReadDenied confirms the two-tier gate: a
+// visibility-only grant lets the caller LIST the folder (FindItem) but not READ an
+// item's content (GetItem), which requires read access. This is the exact distinction
+// the EWS enforcement contract draws between folder visibility and item read.
+func TestCrossMailboxTwoTierVisibleListsButReadDenied(t *testing.T) {
+	ts, paths := delegateServer(t)
+	// A visibility-only grant: the folder is listable but its items are not readable.
+	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.FrightsVisible)
+	seedInboxMessage(t, paths["bob@hermex.test"], "Quarterly numbers")
+
+	_, findOut := soapPost(t, ts, crossMailboxFindItem("inbox", "bob@hermex.test"), true)
+	if !strings.Contains(findOut, "Quarterly numbers") {
+		t.Fatalf("visibility must allow listing:\n%s", findOut)
+	}
+	id := firstItemID(findOut)
+	_, getOut := soapPost(t, ts, getItemReq(id), true)
+	if !strings.Contains(getOut, "ErrorAccessDenied") {
+		t.Errorf("reading an item without read access must be denied:\n%s", getOut)
 	}
 }

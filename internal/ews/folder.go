@@ -402,8 +402,13 @@ func resolveTargets(refs folderRefs) []folderTarget {
 		}
 	}
 	for _, f := range refs.Folders {
-		if fid, _, err := oxews.DecodeFolderID(f.ID); err == nil {
-			out = append(out, folderTarget{fid: fid, ok: true, mailbox: refMailbox(f.Mailbox)})
+		if fid, mb, err := oxews.DecodeFolderID(f.ID); err == nil {
+			// The mailbox embedded in the opaque id is authoritative (the id is
+			// self-contained); fall back to the Mailbox element when the id carries none.
+			if mb == "" {
+				mb = refMailbox(f.Mailbox)
+			}
+			out = append(out, folderTarget{fid: fid, ok: true, mailbox: mb})
 		} else {
 			out = append(out, folderTarget{code: "ErrorInvalidRequest"})
 		}

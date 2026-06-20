@@ -160,10 +160,10 @@ func (s *Server) handleSyncFolderItems(w http.ResponseWriter, inner []byte, sess
 	for _, p := range all {
 		switch p.kind {
 		case "create":
-			changes.Create = append(changes.Create, itemChange{Message: itemSummary(st, fid, p.info)})
+			changes.Create = append(changes.Create, itemChange{Message: itemSummary(st, fid, p.info, "")})
 			newSnap[p.id] = p.flag
 		case "update":
-			changes.Update = append(changes.Update, itemChange{Message: itemSummary(st, fid, p.info)})
+			changes.Update = append(changes.Update, itemChange{Message: itemSummary(st, fid, p.info, "")})
 			newSnap[p.id] = p.flag
 		case "delete":
 			changes.Delete = append(changes.Delete, deleteItemChange{ItemID: oxews.ItemIDElem{ID: p.id}})

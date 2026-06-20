@@ -6,6 +6,7 @@ import (
 	"net/mail"
 	"strings"
 
+	"hermex/internal/mapi"
 	"hermex/internal/mime"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxews"
@@ -96,12 +97,8 @@ func (s *Server) handleFindItem(w http.ResponseWriter, inner []byte, sess *sessi
 		writeSOAPFault(w, "ErrorInvalidRequest", "FindItem: "+err.Error())
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
-	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
-		return
-	}
-	defer st.Close()
+	cache := s.newStoreCache()
+	defer cache.closeAll()
 
 	var msgs []findItemResponseMessage
 	for _, tgt := range resolveTargets(req.ParentFolderIDs) {
@@ -109,14 +106,37 @@ func (s *Server) handleFindItem(w http.ResponseWriter, inner []byte, sess *sessi
 			msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: tgt.code})
 			continue
 		}
+		st, _, isOwn, code := cache.open(sess, tgt.mailbox)
+		if code != "" {
+			msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: code})
+			continue
+		}
+		// Listing another mailbox's folder requires only folder visibility; reading an
+		// item's content (GetItem) is separately gated on read access. This two-tier
+		// model matches the EWS enforcement contract.
+		if !isOwn {
+			rights, err := st.ResolvePermission(tgt.fid, sess.user)
+			if err != nil {
+				msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
+				continue
+			}
+			if rights&mapi.FrightsVisible == 0 {
+				msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorAccessDenied"})
+				continue
+			}
+		}
 		items, err := st.ListMessages(tgt.fid)
 		if err != nil {
 			msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorItemNotFound"})
 			continue
 		}
+		idMailbox := ""
+		if !isOwn {
+			idMailbox = tgt.mailbox
+		}
 		elems := make([]oxews.Message, 0, len(items))
 		for _, info := range items {
-			elems = append(elems, itemSummary(st, tgt.fid, info))
+			elems = append(elems, itemSummary(st, tgt.fid, info, idMailbox))
 		}
 		msgs = append(msgs, findItemResponseMessage{
 			ResponseClass: "Success", ResponseCode: "NoError",
@@ -139,12 +159,8 @@ func (s *Server) handleGetItem(w http.ResponseWriter, inner []byte, sess *sessio
 		writeSOAPFault(w, "ErrorInvalidRequest", "GetItem: "+err.Error())
 		return
 	}
-	st, err := objectstore.Open(sess.mailbox)
-	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
-		return
-	}
-	defer st.Close()
+	cache := s.newStoreCache()
+	defer cache.closeAll()
 
 	var msgs []itemResponseMessage
 	for _, ref := range req.ItemIDs.Items {
@@ -152,6 +168,24 @@ func (s *Server) handleGetItem(w http.ResponseWriter, inner []byte, sess *sessio
 		if err != nil {
 			msgs = append(msgs, itemResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInvalidRequest"})
 			continue
+		}
+		// The id self-encodes its mailbox: an own-mailbox id (empty) opens the caller's
+		// store, a delegated id opens the target and is gated on the caller's read access.
+		st, _, isOwn, code := cache.open(sess, id.Mailbox)
+		if code != "" {
+			msgs = append(msgs, itemResponseMessage{ResponseClass: "Error", ResponseCode: code})
+			continue
+		}
+		if !isOwn {
+			rights, err := st.ResolvePermission(id.FolderID, sess.user)
+			if err != nil {
+				msgs = append(msgs, itemResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
+				continue
+			}
+			if rights&mapi.FrightsReadAny == 0 {
+				msgs = append(msgs, itemResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorAccessDenied"})
+				continue
+			}
 		}
 		msg, err := st.OpenMessage(id.MessageID)
 		if err != nil {
@@ -268,12 +302,14 @@ func findBodyPart(p *mime.Part, subtype string) *mime.Part {
 }
 
 // itemSummary builds a summary <t:Message> for an indexed message in the given
-// folder, shared by FindItem and SyncFolderItems.
-func itemSummary(st *objectstore.Store, folderID int64, info objectstore.MessageInfo) oxews.Message {
+// folder, shared by FindItem and SyncFolderItems. mailbox is the target mailbox SMTP
+// when the folder lives in another mailbox (so the minted item id reopens it later);
+// empty for the caller's own mailbox.
+func itemSummary(st *objectstore.Store, folderID int64, info objectstore.MessageInfo, mailbox string) oxews.Message {
 	hasAttach, _ := st.HasAttachments(info.ID)
 	name, email := splitAddress(info.Sender)
 	return oxews.BuildSummary(oxews.SummaryMeta{
-		ItemID:         oxews.EncodeItemID(oxews.ItemID{FolderID: folderID, MessageID: info.ID, UID: info.UID}),
+		ItemID:         oxews.EncodeItemID(oxews.ItemID{FolderID: folderID, MessageID: info.ID, UID: info.UID, Mailbox: mailbox}),
 		ChangeKey:      oxews.ChangeKey(uint64(info.ID)),
 		Subject:        info.Subject,
 		SenderName:     name,
