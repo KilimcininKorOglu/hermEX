@@ -43,6 +43,12 @@ const (
 	PrMessageSizeExtended       = PropTag(0x0E080014) // PtI8
 	PrNormalMessageSizeExtended = PropTag(0x66B30014) // PtI8
 	PrAssocMessageSizeExtended  = PropTag(0x66B40014) // PtI8
+	// Store quota limits (store-root, PtLong, in kibibytes; 0 = unlimited). The
+	// store enforces receive/send against the live PR_MESSAGE_SIZE_EXTENDED usage;
+	// storage is the warning threshold.
+	PrStorageQuotaLimit    = PropTag(0x66720003) // PtLong (warn quota, KiB)
+	PrProhibitReceiveQuota = PropTag(0x666A0003) // PtLong (block delivery, KiB)
+	PrProhibitSendQuota    = PropTag(0x666E0003) // PtLong (block submission, KiB)
 	// PrWebmailSettings is the provider-defined store-root property (0x6772)
 	// that holds the webmail client's settings tree as a JSON string, so
 	// settings and signatures persist as a MAPI property rather than in a
