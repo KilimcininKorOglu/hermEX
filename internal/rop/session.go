@@ -152,6 +152,16 @@ type Session struct {
 	handles  map[uint32]*object
 	next     uint32
 	pending  []queuedNotify // notifications awaiting delivery in an Execute response (the notify drain)
+
+	// delegateCallers registers the logons that opened a mailbox the caller does
+	// not own. The key is the open store (objectstore.Open mints a fresh *Store per
+	// logon, so two logons never collide); the value is the caller's normalized
+	// (primary-SMTP) identity, against which the caller's folder permissions are
+	// resolved. A store ABSENT from the map is an owner logon with unrestricted
+	// access — the common case — so owner sessions carry no entry and the gate is a
+	// map-miss (the regression-safe default). Populated at delegate logon, dropped
+	// when the logon store closes (release/Close).
+	delegateCallers map[*objectstore.Store]string
 }
 
 // SessionOption configures an optional Session dependency at construction.
@@ -167,7 +177,12 @@ func WithSpool(sp *relay.Spool) SessionOption {
 // and owner supply the submit context (see Session); pass nil/"" for a read-only
 // session. The store is not opened until RopLogon.
 func NewSession(mailbox string, accounts directory.Accounts, owner string, opts ...SessionOption) *Session {
-	s := &Session{mailbox: mailbox, accounts: accounts, owner: owner, handles: make(map[uint32]*object), next: 1}
+	s := &Session{
+		mailbox: mailbox, accounts: accounts, owner: owner,
+		handles:         make(map[uint32]*object),
+		next:            1,
+		delegateCallers: make(map[*objectstore.Store]string),
+	}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -204,16 +219,38 @@ func persistedMessageID(o *object) (int64, bool) {
 	return 0, false
 }
 
-// release frees a handle, closing the mailbox store if it was a logon root.
+// release frees a handle, closing the mailbox store if it was a logon root and
+// dropping any delegate authorization the logon carried.
 func (s *Session) release(h uint32) {
 	o := s.handles[h]
 	if o == nil {
 		return
 	}
 	if o.kind == kindLogon && o.store != nil {
+		delete(s.delegateCallers, o.store)
 		_ = o.store.Close()
 	}
 	delete(s.handles, h)
+}
+
+// authorize reports whether the logon that owns store may exercise the need rights
+// on folderID. An owner logon (store not registered in delegateCallers) is
+// unrestricted — it short-circuits to granted without consulting the permission
+// table, because the owner holds no permission row of their own and routing them
+// through ResolvePermission would fall to the (empty) default grant and lock them
+// out of their own mailbox. A delegate logon resolves the caller's effective folder
+// rights and checks that they include every requested bit. need is one or a union
+// of mapi.Frights* bits.
+func (s *Session) authorize(store *objectstore.Store, folderID int64, need uint32) (bool, error) {
+	caller, delegate := s.delegateCallers[store]
+	if !delegate {
+		return true, nil
+	}
+	rights, err := store.ResolvePermission(folderID, caller)
+	if err != nil {
+		return false, err
+	}
+	return rights&need == need, nil
 }
 
 // Close releases every handle (Disconnect), closing any open store. It takes the

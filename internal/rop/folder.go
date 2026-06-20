@@ -156,6 +156,14 @@ func (s *Session) ropOpenFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 		writeErr(out, ropOpenFolder, ohindex, ecNotFound)
 		return true
 	}
+	// A delegate may open only a folder visible to them; an owner is unrestricted.
+	if ok, err := s.authorize(parent.store, fid, mapi.FrightsVisible); err != nil {
+		writeErr(out, ropOpenFolder, ohindex, ecError)
+		return true
+	} else if !ok {
+		writeErr(out, ropOpenFolder, ohindex, ecAccessDenied)
+		return true
+	}
 	h := s.alloc(&object{kind: kindFolder, store: parent.store, folderID: fid})
 	setHandle(handles, ohindex, h)
 
@@ -180,6 +188,14 @@ func (s *Session) ropGetContentsTable(p *ext.Pull, out *ext.Push, handles []uint
 	folder := s.get(handleAt(handles, hindex))
 	if folder == nil || folder.kind != kindFolder || folder.store == nil {
 		writeErr(out, ropGetContentsTable, ohindex, ecError)
+		return true
+	}
+	// Opening the folder required only Visible; reading its items requires ReadAny.
+	if ok, err := s.authorize(folder.store, folder.folderID, mapi.FrightsReadAny); err != nil {
+		writeErr(out, ropGetContentsTable, ohindex, ecError)
+		return true
+	} else if !ok {
+		writeErr(out, ropGetContentsTable, ohindex, ecAccessDenied)
 		return true
 	}
 	msgs, err := folder.store.ListMessages(folder.folderID)

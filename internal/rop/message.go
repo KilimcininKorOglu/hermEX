@@ -56,6 +56,23 @@ func (s *Session) ropOpenMessage(p *ext.Pull, out *ext.Push, handles []uint32, h
 		return true
 	}
 	msgID := int64(mapi.EID(messageEID).GCValue())
+	// A delegate may read a message only with ReadAny on its REAL parent folder,
+	// resolved from the store — never the wire FolderId, which is informational and
+	// could name a folder the caller can read to reach one they cannot. The lookup
+	// also serves as the existence check (ErrNotFound → ecNotFound), so an owner,
+	// who is unrestricted, sees identical behavior.
+	parentFID, err := parent.store.MessageFolder(msgID)
+	if err != nil {
+		writeErr(out, ropOpenMessage, ohindex, ecNotFound)
+		return true
+	}
+	if ok, err := s.authorize(parent.store, parentFID, mapi.FrightsReadAny); err != nil {
+		writeErr(out, ropOpenMessage, ohindex, ecError)
+		return true
+	} else if !ok {
+		writeErr(out, ropOpenMessage, ohindex, ecAccessDenied)
+		return true
+	}
 	msg, err := parent.store.OpenMessage(msgID)
 	if err != nil {
 		writeErr(out, ropOpenMessage, ohindex, ecNotFound)

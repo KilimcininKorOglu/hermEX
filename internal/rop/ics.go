@@ -91,6 +91,19 @@ func (s *Session) ropSynchronizationConfigure(p *ext.Pull, out *ext.Push, handle
 		writeErr(out, ropSynchronizationConfigure, ohindex, ecError)
 		return true
 	}
+	// A contents download bulk-reads the folder's items, bypassing per-message open,
+	// so a delegate needs ReadAny; a hierarchy download reads only subfolder
+	// metadata, covered by the Visible the folder was opened with. Owner is
+	// unrestricted.
+	if syncType == objectstore.SyncTypeContents {
+		if ok, err := s.authorize(folder.store, folder.folderID, mapi.FrightsReadAny); err != nil {
+			writeErr(out, ropSynchronizationConfigure, ohindex, ecError)
+			return true
+		} else if !ok {
+			writeErr(out, ropSynchronizationConfigure, ohindex, ecAccessDenied)
+			return true
+		}
+	}
 	var col *objectstore.DownloadCollector
 	var err error
 	switch syncType {

@@ -56,6 +56,24 @@ func (s *Store) OpenMessage(messageID int64) (*oxcmail.Message, error) {
 	return msg, nil
 }
 
+// MessageFolder returns the object-store id of the folder a top-level message
+// lives in (its parent_fid), reporting ErrNotFound when no such message exists. It
+// is the access-control primitive a delegate read uses: the caller's folder rights
+// must be resolved against the message's REAL parent folder, never a folder id the
+// client supplies. An embedded message (parent_fid NULL, addressed by parent_attid)
+// reports 0 — it is reached through its parent attachment, not by folder id.
+func (s *Store) MessageFolder(messageID int64) (int64, error) {
+	var fid sql.NullInt64
+	err := s.objdb.QueryRow(`SELECT parent_fid FROM messages WHERE message_id=?`, messageID).Scan(&fid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, err
+	}
+	return fid.Int64, nil
+}
+
 // objChildIDs returns the ids of a message's recipient or attachment rows, in
 // ascending id order.
 func (s *Store) objChildIDs(query string, messageID int64) ([]int64, error) {
