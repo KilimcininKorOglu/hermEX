@@ -119,3 +119,159 @@ func TestAdminSetPasswordNotFound(t *testing.T) {
 		t.Errorf("set password for unknown user = %d, want 404", resp.StatusCode)
 	}
 }
+
+// TestAdminGetUser proves a system admin reads a single user's detail record.
+func TestAdminGetUser(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7,
+		roles:      []directory.AdminRole{{Role: directory.AdminSystem}},
+		userDetail: directory.UserDetail{ID: 5, Username: "alice@hermex.test", DomainID: 1, Status: 1, Lang: "de", DisplayType: 7, POP3IMAP: true, LDAP: true},
+	}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+
+	resp := authedGET(t, ts, "/admin/users/alice@hermex.test", session)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get user status %d, want 200", resp.StatusCode)
+	}
+	if d.gotUser != "alice@hermex.test" {
+		t.Errorf("GetUser called for %q, want alice@hermex.test", d.gotUser)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "alice@hermex.test") || !strings.Contains(string(body), `"Lang":"de"`) {
+		t.Errorf("get user body = %s, want the detail record", body)
+	}
+}
+
+// TestAdminGetUserNotFound proves reading an unknown user is a 404.
+func TestAdminGetUserNotFound(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7,
+		roles:          []directory.AdminRole{{Role: directory.AdminSystem}},
+		getUserMissing: true,
+	}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+
+	resp := authedGET(t, ts, "/admin/users/ghost@hermex.test", session)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("get unknown user = %d, want 404", resp.StatusCode)
+	}
+}
+
+// TestAdminUpdateUser proves a system admin edits a user's account fields and the
+// whole editable subset reaches the directory.
+func TestAdminUpdateUser(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	body := `{"status":1,"lang":"de","timezone":"Europe/Berlin","displayType":7,"homeserver":2,"pop3_imap":true,"smtp":false}`
+	resp := authedPUT(t, ts, "/admin/users/alice@hermex.test", session, csrf, body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("update user status %d, want 204", resp.StatusCode)
+	}
+	if d.updatedUser != "alice@hermex.test" {
+		t.Errorf("UpdateUser called for %q, want alice@hermex.test", d.updatedUser)
+	}
+	if d.updateUser.Status != 1 || d.updateUser.Lang != "de" || d.updateUser.DisplayType != 7 ||
+		d.updateUser.Homeserver != 2 || !d.updateUser.POP3IMAP || d.updateUser.SMTP {
+		t.Errorf("update payload = %+v, want the submitted fields", d.updateUser)
+	}
+}
+
+// TestAdminUpdateUserNotFound proves editing an unknown user is a 404.
+func TestAdminUpdateUserNotFound(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7,
+		roles:         []directory.AdminRole{{Role: directory.AdminSystem}},
+		updateMissing: true,
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedPUT(t, ts, "/admin/users/ghost@hermex.test", session, csrf, `{"status":0}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("update unknown user = %d, want 404", resp.StatusCode)
+	}
+}
+
+// TestAdminDeleteUser proves a system admin deletes a user and that the
+// deleteFiles intent is carried to the directory.
+func TestAdminDeleteUser(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedDELETE(t, ts, "/admin/users/alice@hermex.test?deleteFiles=true", session, csrf, "")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete user status %d, want 204", resp.StatusCode)
+	}
+	if d.deletedUser != "alice@hermex.test" {
+		t.Errorf("DeleteUser called for %q, want alice@hermex.test", d.deletedUser)
+	}
+	if !d.deleteFiles {
+		t.Error("deleteFiles=true was not carried to the directory")
+	}
+}
+
+// TestAdminDeleteUserKeepsFilesByDefault proves the maildir is preserved unless
+// deleteFiles is explicitly requested — a missing flag must never destroy mail.
+func TestAdminDeleteUserKeepsFilesByDefault(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedDELETE(t, ts, "/admin/users/alice@hermex.test", session, csrf, "")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("delete user status %d, want 204", resp.StatusCode)
+	}
+	if d.deleteFiles {
+		t.Error("deleteFiles defaulted to true; the maildir would be destroyed without opt-in")
+	}
+}
+
+// TestAdminDeleteUserNotFound proves deleting an unknown user is a 404.
+func TestAdminDeleteUserNotFound(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7,
+		roles:         []directory.AdminRole{{Role: directory.AdminSystem}},
+		deleteMissing: true,
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedDELETE(t, ts, "/admin/users/ghost@hermex.test", session, csrf, "")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("delete unknown user = %d, want 404", resp.StatusCode)
+	}
+}
+
+// TestAdminUserDetailRequiresSystem proves a domain admin cannot read, edit, or
+// delete users through the system-scoped detail endpoints.
+func TestAdminUserDetailRequiresSystem(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7,
+		roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	get := authedGET(t, ts, "/admin/users/alice@hermex.test", session)
+	get.Body.Close()
+	put := authedPUT(t, ts, "/admin/users/alice@hermex.test", session, csrf, `{"status":0}`)
+	put.Body.Close()
+	del := authedDELETE(t, ts, "/admin/users/alice@hermex.test", session, csrf, "")
+	del.Body.Close()
+	if get.StatusCode != http.StatusForbidden || put.StatusCode != http.StatusForbidden || del.StatusCode != http.StatusForbidden {
+		t.Errorf("domain-admin detail access = GET %d / PUT %d / DELETE %d, want all 403",
+			get.StatusCode, put.StatusCode, del.StatusCode)
+	}
+}

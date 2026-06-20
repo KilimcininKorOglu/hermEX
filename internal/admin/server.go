@@ -28,6 +28,9 @@ type Directory interface {
 	CreateDomain(domainname, homedir string) (int64, error)
 	CreateUser(username, password, maildir string) (int64, error)
 	SetPassword(username, password string) (bool, error)
+	GetUser(username string) (directory.UserDetail, bool, error)
+	UpdateUser(username string, u directory.UserUpdate) (bool, error)
+	DeleteUser(username string, deleteFiles bool) (bool, error)
 	CreateAlias(aliasname, mainname string) error
 	GetLDAPConfig(orgID int64) (directory.LDAPConfig, bool, error)
 	SetLDAPConfig(orgID int64, cfg directory.LDAPConfig) error
@@ -95,6 +98,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /admin/domains", s.protect(s.requireSystem(s.handleCreateDomain)))
 	mux.Handle("GET /admin/users", s.protect(s.requireSystem(s.handleListUsers)))
 	mux.Handle("POST /admin/users", s.protect(s.requireSystem(s.handleCreateUser)))
+	mux.Handle("GET /admin/users/{email}", s.protect(s.requireSystem(s.handleGetUser)))
+	mux.Handle("PUT /admin/users/{email}", s.protect(s.requireSystem(s.handleUpdateUser)))
+	mux.Handle("DELETE /admin/users/{email}", s.protect(s.requireSystem(s.handleDeleteUser)))
 	mux.Handle("POST /admin/users/{email}/password", s.protect(s.requireSystem(s.handleSetPassword)))
 	mux.Handle("GET /admin/users/{email}/roles", s.protect(s.requireSystem(s.handleListRoles)))
 	mux.Handle("POST /admin/users/{email}/roles", s.protect(s.requireSystem(s.handleGrantRole)))

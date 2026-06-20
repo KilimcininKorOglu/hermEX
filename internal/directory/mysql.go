@@ -424,6 +424,129 @@ func (d *SQLDirectory) SetPassword(username, password string) (bool, error) {
 	return n > 0, err
 }
 
+// UserDetail is a user's full administrative record for the detail/edit view.
+// Status is the user-status nibble of address_status (the domain-status bits,
+// 0x30, are kept separate); LDAP is true when the account is LDAP-mastered.
+type UserDetail struct {
+	ID          int64
+	Username    string
+	DomainID    int64
+	Status      int
+	Lang        string
+	Timezone    string
+	DisplayType int
+	Homeserver  int
+	Maildir     string
+	POP3IMAP    bool
+	SMTP        bool
+	LDAP        bool
+}
+
+// GetUser returns one user's administrative record, ok=false when no user has
+// that username.
+func (d *SQLDirectory) GetUser(username string) (UserDetail, bool, error) {
+	username = strings.ToLower(strings.TrimSpace(username))
+	var u UserDetail
+	var addrStatus int
+	var priv uint32
+	var externid []byte
+	err := d.db.QueryRow(
+		`SELECT id, username, domain_id, address_status, lang, timezone, privilege_bits, display_type, homeserver, maildir, externid
+		   FROM users WHERE username = ?`, username).
+		Scan(&u.ID, &u.Username, &u.DomainID, &addrStatus, &u.Lang, &u.Timezone, &priv, &u.DisplayType, &u.Homeserver, &u.Maildir, &externid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return UserDetail{}, false, nil
+	}
+	if err != nil {
+		return UserDetail{}, false, err
+	}
+	u.Status = addrStatus & 0x0F
+	u.POP3IMAP = priv&privIMAPPOP3 != 0
+	u.SMTP = priv&privSMTP != 0
+	u.LDAP = externid != nil
+	return u, true, nil
+}
+
+// UserUpdate is the editable subset of a user's record. Identity fields
+// (username, domain, maildir, externid) are not editable here. Updating replaces
+// the whole subset.
+type UserUpdate struct {
+	Status      int
+	Lang        string
+	Timezone    string
+	DisplayType int
+	Homeserver  int
+	POP3IMAP    bool
+	SMTP        bool
+}
+
+// UpdateUser writes the editable subset of a user's record, reporting whether the
+// user existed. The user-status nibble is replaced while the domain-status bits
+// (0x30) are preserved in SQL; privilege bits beyond the two hermEX defines are
+// likewise preserved.
+func (d *SQLDirectory) UpdateUser(username string, u UserUpdate) (bool, error) {
+	username = strings.ToLower(strings.TrimSpace(username))
+	var id int64
+	err := d.db.QueryRow(`SELECT id FROM users WHERE username = ?`, username).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	var priv uint64
+	if u.POP3IMAP {
+		priv |= privIMAPPOP3
+	}
+	if u.SMTP {
+		priv |= privSMTP
+	}
+	_, err = d.db.Exec(
+		`UPDATE users SET
+		   address_status = (address_status & 0x30) | ?,
+		   lang = ?, timezone = ?, display_type = ?, homeserver = ?,
+		   privilege_bits = (privilege_bits & ?) | ?
+		 WHERE username = ?`,
+		u.Status&0x0F, u.Lang, u.Timezone, u.DisplayType, u.Homeserver,
+		^uint64(privIMAPPOP3|privSMTP), priv, username)
+	return err == nil, err
+}
+
+// DeleteUser removes a user and its dependent rows, reporting whether the user
+// existed. altnames and admin_roles cascade via their foreign keys; aliases have
+// no FK (mainname is a plain string), so they are deleted explicitly — otherwise
+// an orphaned alias would keep its UNIQUE address and block re-creating it. When
+// deleteFiles is set the maildir is removed from disk after the row is gone.
+func (d *SQLDirectory) DeleteUser(username string, deleteFiles bool) (bool, error) {
+	username = strings.ToLower(strings.TrimSpace(username))
+	var maildir string
+	err := d.db.QueryRow(`SELECT maildir FROM users WHERE username = ?`, username).Scan(&maildir)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	tx, err := d.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(`DELETE FROM aliases WHERE mainname = ?`, username); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(`DELETE FROM users WHERE username = ?`, username); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	if deleteFiles && maildir != "" {
+		_ = os.RemoveAll(maildir) // best-effort: the row is gone; an orphaned maildir is harmless
+	}
+	return true, nil
+}
+
 // CreateAlias maps an alternate address (aliasname) to a canonical user
 // (mainname == users.username) in the aliases table.
 func (d *SQLDirectory) CreateAlias(aliasname, mainname string) error {

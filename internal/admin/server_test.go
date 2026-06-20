@@ -31,6 +31,16 @@ type fakeDir struct {
 	upsertedUsers                 []string
 	upsertNew                     bool
 	createErr                     error
+
+	// captured/scripted by the user detail/edit/delete handlers
+	userDetail           directory.UserDetail
+	getUserMissing       bool
+	gotUser, updatedUser string
+	updateUser           directory.UserUpdate
+	updateMissing        bool
+	deletedUser          string
+	deleteFiles          bool
+	deleteMissing        bool
 }
 
 func (f *fakeDir) Authenticate(_, _ string) (string, bool) {
@@ -97,6 +107,27 @@ func (f *fakeDir) SetLDAPConfig(orgID int64, cfg directory.LDAPConfig) error {
 func (f *fakeDir) UpsertLDAPUser(username string, _ []byte, _ string) (bool, error) {
 	f.upsertedUsers = append(f.upsertedUsers, username)
 	return f.upsertNew, nil
+}
+func (f *fakeDir) GetUser(username string) (directory.UserDetail, bool, error) {
+	f.gotUser = username
+	if f.getUserMissing {
+		return directory.UserDetail{}, false, nil
+	}
+	return f.userDetail, true, nil
+}
+func (f *fakeDir) UpdateUser(username string, u directory.UserUpdate) (bool, error) {
+	if f.createErr != nil {
+		return false, f.createErr
+	}
+	f.updatedUser, f.updateUser = username, u
+	return !f.updateMissing, nil
+}
+func (f *fakeDir) DeleteUser(username string, deleteFiles bool) (bool, error) {
+	if f.createErr != nil {
+		return false, f.createErr
+	}
+	f.deletedUser, f.deleteFiles = username, deleteFiles
+	return !f.deleteMissing, nil
 }
 
 // fakePaths derives resource paths under a fixed root for the tests.
