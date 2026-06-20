@@ -27,3 +27,29 @@ func (s *Store) SetActiveSyncState(stateJSON string) error {
 		{Tag: mapi.PrActiveSyncState, Value: stateJSON},
 	})
 }
+
+// GetActiveSyncDevices returns the ActiveSync device-metadata JSON stored on the
+// store root, or the empty string when no device has been recorded yet. It is a
+// sibling property of PrActiveSyncState: device metadata (type, agent, last seen,
+// wipe status) lives apart from the sync-state blob so a best-effort metadata
+// write cannot clobber a concurrent sync-key update.
+func (s *Store) GetActiveSyncDevices() (string, error) {
+	props, err := s.GetStoreProperties(mapi.PrActiveSyncDevices)
+	if err != nil {
+		return "", err
+	}
+	if v, ok := props.Get(mapi.PrActiveSyncDevices); ok {
+		if str, ok := v.(string); ok {
+			return str, nil
+		}
+	}
+	return "", nil
+}
+
+// SetActiveSyncDevices saves the ActiveSync device-metadata JSON as the store-root
+// property, replacing any previous value.
+func (s *Store) SetActiveSyncDevices(devicesJSON string) error {
+	return s.SetStoreProperties(mapi.PropertyValues{
+		{Tag: mapi.PrActiveSyncDevices, Value: devicesJSON},
+	})
+}

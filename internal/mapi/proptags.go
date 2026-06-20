@@ -74,6 +74,12 @@ const (
 	// It persists as a property, not a dedicated table, like the other subsystem
 	// state.
 	PrEwsSyncState = PropTag(0x6778001F) // PtUnicode
+	// PrActiveSyncDevices is the provider-defined store-root property (0x6779)
+	// holding ActiveSync device metadata as a JSON tree (per device: type,
+	// user-agent, negotiated protocol version, first/last connection time, and
+	// remote-wipe status). It is a sibling of PrActiveSyncState so a best-effort
+	// metadata write never collides with the sync-state blob a command updates.
+	PrActiveSyncDevices = PropTag(0x6779001F) // PtUnicode
 )
 
 // Large message/attachment content property tags. These hold bodies and

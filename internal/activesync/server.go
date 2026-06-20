@@ -10,9 +10,11 @@ import (
 	"crypto/x509"
 	"net/http"
 	"strings"
+	"time"
 
 	"hermex/internal/directory"
 	"hermex/internal/logging"
+	"hermex/internal/objectstore"
 	"hermex/internal/relay"
 	"hermex/internal/serve"
 )
@@ -103,6 +105,9 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		RemoteAddr: serve.ClientAddr(r),
 		Fields:     logging.Fields{"cmd": sess.req.cmd},
 	})
+	if sess.req.deviceID != "" {
+		s.recordDevice(r, sess)
+	}
 	switch sess.req.cmd {
 	case "Provision":
 		s.handleProvision(w, r)
@@ -153,4 +158,28 @@ func (s *Server) basicAuth(w http.ResponseWriter, r *http.Request) (user, mailbo
 	w.Header().Set("WWW-Authenticate", `Basic realm="hermEX"`)
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
 	return "", "", false
+}
+
+// recordDevice stamps the calling device's metadata (type, agent, negotiated
+// version, last-seen time) for the management console's mobile-devices view.
+// Best-effort: it opens its own store handle and writes a sibling property apart
+// from the sync-state blob, so a failure here is logged and never affects the
+// command response. Skipped by the caller when the request carries no device id.
+func (s *Server) recordDevice(r *http.Request, sess *session) {
+	st, err := objectstore.Open(sess.mailbox)
+	if err != nil {
+		return
+	}
+	defer st.Close()
+	if err := recordDeviceContact(st, sess.req.deviceID, sess.user, sess.req.deviceType,
+		r.Header.Get("User-Agent"), sess.protocol, time.Now().Unix()); err != nil {
+		s.Logger.Emit(logging.Event{
+			Level:      logging.LevelDebug,
+			Subsystem:  logging.ActiveSync,
+			Name:       "device.record.fail",
+			User:       sess.user,
+			RemoteAddr: serve.ClientAddr(r),
+			Fields:     logging.Fields{"device": sess.req.deviceID, "error": err.Error()},
+		})
+	}
 }
