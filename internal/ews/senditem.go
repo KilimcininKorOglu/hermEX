@@ -66,16 +66,12 @@ func (s *Server) handleSendItem(w http.ResponseWriter, inner []byte, sess *sessi
 		saveFID = targets[0].fid
 	}
 
-	st, err := objectstore.Open(sess.mailbox)
-	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
-		return
-	}
-	defer st.Close()
+	cache := s.newStoreCache()
+	defer cache.closeAll()
 
 	msgs := make([]itemResponseMessage, 0, len(req.ItemIDs))
 	for _, ref := range req.ItemIDs {
-		msgs = append(msgs, s.sendOne(st, sess, ref.ID, save, saveFID))
+		msgs = append(msgs, s.sendOne(cache, sess, ref.ID, save, saveFID))
 	}
 	writeResponse(w, sendItemResponse{Messages: msgs})
 }
@@ -86,15 +82,36 @@ func (s *Server) handleSendItem(w http.ResponseWriter, inner []byte, sess *sessi
 // outbound path) with Bcc bags dropped — Export writes a Bcc header for any Bcc
 // bag, so leaving them in the wire copy would disclose blind recipients to the
 // To/Cc readers.
-func (s *Server) sendOne(st *objectstore.Store, sess *session, itemID string, save bool, saveFID int64) itemResponseMessage {
+func (s *Server) sendOne(cache *storeCache, sess *session, itemID string, save bool, saveFID int64) itemResponseMessage {
 	id, err := oxews.DecodeItemID(itemID)
 	if err != nil {
 		return itemError("ErrorInvalidRequest")
 	}
-	if id.Mailbox != "" {
-		// Sending another mailbox's draft on its behalf is not yet supported; reject
-		// rather than operate on the caller's own store with a foreign id.
-		return itemError("ErrorAccessDenied")
+	// Open the draft's mailbox. Sending another mailbox's draft (send-on-behalf: the
+	// draft already carries the principal's From) is gated on read access to its folder;
+	// filing the sent copy needs create access to the save folder. Both gates and the
+	// filed copy resolve in the draft's own mailbox.
+	st, _, isOwn, code := cache.open(sess, id.Mailbox)
+	if code != "" {
+		return itemError(code)
+	}
+	if !isOwn {
+		rights, err := st.ResolvePermission(id.FolderID, sess.user)
+		if err != nil {
+			return itemError("ErrorInternalServerError")
+		}
+		if rights&mapi.FrightsReadAny == 0 {
+			return itemError("ErrorAccessDenied")
+		}
+		if save {
+			srights, err := st.ResolvePermission(saveFID, sess.user)
+			if err != nil {
+				return itemError("ErrorInternalServerError")
+			}
+			if srights&mapi.FrightsCreate == 0 {
+				return itemError("ErrorAccessDenied")
+			}
+		}
 	}
 	msg, err := st.OpenMessage(id.MessageID)
 	if err != nil {

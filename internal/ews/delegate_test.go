@@ -904,6 +904,64 @@ func TestGetAttachmentCrossMailboxDenied(t *testing.T) {
 	}
 }
 
+// seedDraftMessage appends a sendable draft (addressed to one recipient) to a
+// mailbox's Drafts folder.
+func seedDraftMessage(t *testing.T, path, to, subject string) {
+	t.Helper()
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	raw := "From: bob@hermex.test\r\nTo: " + to + "\r\nSubject: " + subject + "\r\n\r\nbody\r\n"
+	if _, err := st.AppendMessage(int64(mapi.PrivateFIDDraft), []byte(raw), time.Unix(1718200000, 0), 0); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func sendDelegateItemReq(itemID string) string {
+	return wrapRequest(`<SendItem SaveItemToFolder="false" xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
+		`<ItemIds><t:ItemId Id="` + itemID + `"/></ItemIds>` +
+		`</SendItem>`)
+}
+
+// TestSendItemCrossMailboxWithGrant confirms a delegate with read access to another
+// mailbox's drafts can send one on its behalf (the draft already carries the
+// principal's From), and the draft is consumed in that mailbox.
+func TestSendItemCrossMailboxWithGrant(t *testing.T) {
+	ts, paths := delegateServer(t)
+	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDDraft), testUser, mapi.RightsReviewer)
+	seedDraftMessage(t, paths["bob@hermex.test"], testUser, "On behalf")
+	itemID := firstItemID(must(soapPost(t, ts, crossMailboxFindItem("drafts", "bob@hermex.test"), true)))
+
+	_, out := soapPost(t, ts, sendDelegateItemReq(itemID), true)
+	if !strings.Contains(out, `ResponseClass="Success"`) {
+		t.Fatalf("a delegate with draft read access must send on behalf:\n%s", out)
+	}
+	st, err := objectstore.Open(paths["bob@hermex.test"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if drafts, _ := st.ListMessages(int64(mapi.PrivateFIDDraft)); len(drafts) != 0 {
+		t.Errorf("the sent draft must be consumed in the target mailbox, got %d", len(drafts))
+	}
+}
+
+// TestSendItemCrossMailboxDenied confirms sending another mailbox's draft without read
+// access is denied (the read gate fires before the draft opens).
+func TestSendItemCrossMailboxDenied(t *testing.T) {
+	ts, _ := delegateServer(t)
+	foreign := oxews.EncodeItemID(oxews.ItemID{
+		FolderID: int64(mapi.PrivateFIDDraft), MessageID: 1, UID: 1, Mailbox: "bob@hermex.test",
+	})
+
+	_, out := soapPost(t, ts, sendDelegateItemReq(foreign), true)
+	if !strings.Contains(out, "ErrorAccessDenied") {
+		t.Errorf("sending without draft read access must be denied:\n%s", out)
+	}
+}
+
 // TestSyncFolderItemsCrossMailboxRejected confirms incremental sync of another mailbox
 // is refused: the per-folder sync state is not yet isolated per caller, so a foreign
 // target is rejected rather than colliding with the target's own state.
