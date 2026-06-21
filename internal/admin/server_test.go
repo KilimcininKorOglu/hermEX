@@ -38,6 +38,7 @@ type fakeDir struct {
 	effectiveUserDefaults      directory.ResolvedUserDefaults
 	setCreateDefaultsScope     int64
 	deletedCreateDefaultsScope int64
+	activeSessions             []directory.SessionRecord
 	fetchmail                  map[string][]directory.FetchmailEntry
 	nextFMID                   int64
 	orgs                       map[int64]directory.OrgInfo
@@ -362,6 +363,9 @@ func (f *fakeDir) GetCreateDefaults(scopeID int64) (directory.CreateDefaults, bo
 }
 func (f *fakeDir) EffectiveUserDefaults(int64) (directory.ResolvedUserDefaults, error) {
 	return f.effectiveUserDefaults, nil
+}
+func (f *fakeDir) ListActiveSessions(int64) ([]directory.SessionRecord, error) {
+	return f.activeSessions, nil
 }
 func (f *fakeDir) SetCreateDefaults(scopeID int64, cd directory.CreateDefaults) error {
 	if f.createDefaults == nil {

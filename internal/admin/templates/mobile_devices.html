@@ -1,0 +1,29 @@
+{{define "mobile_devices.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>Mobile devices</h1>
+<p class="hint">Live ActiveSync sessions across all users (refreshes every 2 seconds).</p>
+{{template "sessions-panel" .}}
+</main>
+</div>
+{{template "foot" .}}{{end}}
+
+{{define "sessions-panel"}}<div id="sessions-panel" hx-get="/admin/ui/mobile-devices/panel" hx-trigger="every 2s" hx-swap="outerHTML">
+<table class="grid">
+<thead><tr><th>User</th><th>IP</th><th>Device</th><th>Command</th><th>EAS</th><th>Last activity</th><th>Status</th></tr></thead>
+<tbody>
+{{range .Sessions}}<tr>
+<td>{{.User}}</td>
+<td>{{.IP}}</td>
+<td>{{.DeviceType}} <small>{{.DeviceID}}</small></td>
+<td>{{.Command}}{{if .Push}} <span class="badge">push</span>{{end}}</td>
+<td>{{.ASVersion}}</td>
+<td>{{.AgeSec}}s ago</td>
+<td>{{.Status}}</td>
+</tr>
+{{else}}<tr><td colspan="7" class="empty">No active sessions.</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>{{end}}

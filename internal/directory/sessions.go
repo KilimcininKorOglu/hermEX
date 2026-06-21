@@ -12,19 +12,19 @@ const (
 // SessionRecord is one live ActiveSync request's telemetry row. Timestamps are
 // unix seconds; EndedAt is 0 while the request is still running.
 type SessionRecord struct {
-	ID         string
-	Username   string
-	DeviceID   string
-	DeviceType string
-	UserAgent  string
-	IP         string
-	Command    string
-	ASVersion  string
-	StartAt    int64
-	LastUpdate int64
-	EndedAt    int64
-	Push       bool
-	AddInfo    string
+	ID         string `json:"id"`
+	Username   string `json:"username"`
+	DeviceID   string `json:"deviceID"`
+	DeviceType string `json:"deviceType"`
+	UserAgent  string `json:"userAgent"`
+	IP         string `json:"ip"`
+	Command    string `json:"command"`
+	ASVersion  string `json:"asVersion"`
+	StartAt    int64  `json:"startAt"`
+	LastUpdate int64  `json:"lastUpdate"`
+	EndedAt    int64  `json:"endedAt"`
+	Push       bool   `json:"push"`
+	AddInfo    string `json:"addInfo"`
 }
 
 // UpsertSession writes or refreshes a live-session row keyed by ID. The EAS server
