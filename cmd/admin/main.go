@@ -229,6 +229,11 @@ func main() {
 		logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
 		srv := admin.NewServer(dir, cfg, []byte(cfg.AdminSecret))
 		srv.SetLDAPSyncer(ldapVerifier) // enables the Directory Sync trigger
+		var targets []admin.HealthTarget
+		for _, t := range cfg.HealthTargets {
+			targets = append(targets, admin.HealthTarget{Name: t.Name, URL: t.URL})
+		}
+		srv.SetHealthTargets(targets) // enables the Live status monitor
 		cleanups := []func() error{logClose}
 		if cfg.MongoURI != "" {
 			reader, err := logging.NewReader(cfg.MongoURI, cfg.LogDatabase)

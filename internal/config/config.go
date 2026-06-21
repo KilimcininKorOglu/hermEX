@@ -42,6 +42,15 @@ type Config struct {
 	LogDatabase      string `json:"log_database"`       // Mongo database holding the logs collection (default "hermex")
 	LogRetentionDays int    `json:"log_retention_days"` // TTL window in days; 0 or negative keeps logs forever
 	LogSpillDir      string `json:"log_spill_dir"`      // local dir for log batches buffered while Mongo is unreachable
+
+	HealthTargets []HealthTarget `json:"health_targets"` // daemons the admin Live status page probes (each daemon's /healthz URL)
+}
+
+// HealthTarget names a daemon and the URL of its /healthz endpoint, probed by the
+// admin Live status page.
+type HealthTarget struct {
+	Name string `json:"name"`
+	URL  string `json:"url"`
 }
 
 // Load reads and validates a JSON config file.

@@ -119,15 +119,16 @@ type ctxKey struct{}
 
 // Server answers the admin API. Build one with NewServer.
 type Server struct {
-	dir      Directory
-	paths    Paths
-	secret   []byte
-	logs     LogReader
-	syncer   LDAPSyncer
-	store    MailboxStore
-	pub      *publicfolder.Service
-	mailq    MailQueue
-	resolver dnsResolver
+	dir           Directory
+	paths         Paths
+	secret        []byte
+	logs          LogReader
+	syncer        LDAPSyncer
+	store         MailboxStore
+	pub           *publicfolder.Service
+	mailq         MailQueue
+	resolver      dnsResolver
+	healthTargets []HealthTarget
 }
 
 // NewServer builds an admin server backed by the directory, deriving new
@@ -201,6 +202,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /admin/mailq", s.protect(s.requireSystem(s.handleGetMailq)))
 	mux.Handle("POST /admin/mailq/{id}/retry", s.protect(s.requireSystem(s.handleRetryMailq)))
 	mux.Handle("DELETE /admin/mailq/{id}", s.protect(s.requireSystem(s.handleDeleteMailq)))
+	mux.Handle("GET /admin/status", s.protect(s.requireSystem(s.handleGetStatus)))
 	mux.Handle("GET /admin/mobile-devices", s.protect(s.requireSystem(s.handleGetMobileDevices)))
 	mux.Handle("GET /admin/public-folders", s.protect(s.requireSystem(s.handleGetPublicFolders)))
 	mux.Handle("GET /admin/users/{email}/fetchmail", s.protect(s.requireUserScope(s.handleListUserFetchmail)))
@@ -277,6 +279,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/ui/mailq/panel", s.handleUIMailqPanel)
 	mux.HandleFunc("POST /admin/ui/mailq/retry", s.handleUIMailqRetry)
 	mux.HandleFunc("POST /admin/ui/mailq/delete", s.handleUIMailqDelete)
+	mux.HandleFunc("GET /admin/ui/status", s.handleUIStatus)
+	mux.HandleFunc("GET /admin/ui/status/panel", s.handleUIStatusPanel)
 	mux.HandleFunc("GET /admin/ui/public-folders", s.handleUIPublicFolders)
 	mux.HandleFunc("GET /admin/ui/public-folders/panel", s.handleUIPublicFoldersPanel)
 	mux.HandleFunc("POST /admin/ui/public-folders/folder", s.handleUICreatePublicFolder)

@@ -1,0 +1,28 @@
+{{define "status.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>Live status</h1>
+<p class="hint">Each daemon's /healthz endpoint, probed live. Up means the daemon answered and its readiness checks passed; Degraded means it answered but a dependency check (such as the directory database) failed; Down means it could not be reached. The table refreshes automatically.</p>
+<div id="status-panel" hx-get="/admin/ui/status/panel" hx-trigger="every 10s" hx-swap="innerHTML">{{template "status-panel" .}}</div>
+</main>
+</div>
+{{template "foot" .}}{{end}}
+
+{{define "status-panel"}}
+<table class="grid">
+<thead><tr><th>Service</th><th>Status</th><th>Latency</th><th>Uptime</th><th>Version</th><th>Detail</th></tr></thead>
+<tbody>
+{{range .Results}}<tr>
+<td>{{.Name}}</td>
+<td>{{.Status}}</td>
+<td>{{.LatencyMS}} ms</td>
+<td>{{.Uptime}} s</td>
+<td>{{.Version}}</td>
+<td><small>{{.Err}}</small></td>
+</tr>
+{{else}}<tr><td colspan="6" class="empty">{{if .Configured}}No daemons responded.{{else}}No health targets configured.{{end}}</td></tr>
+{{end}}
+</tbody>
+</table>
+{{end}}
