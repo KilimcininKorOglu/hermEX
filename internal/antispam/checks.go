@@ -57,17 +57,32 @@ func realDMARC(domain string) (policy string, ok bool) {
 	return string(rec.Policy), true
 }
 
-// realDNSBL reports whether the client IP is listed on a DNS blocklist zone: the
-// reversed-IP query name resolving to any address means listed. A lookup error
-// (including NXDOMAIN, the not-listed answer) reports not listed, so DNSBL is
-// fail-open like every other check.
+// realDNSBL reports whether the client IP is listed on a DNS blocklist zone. A
+// lookup error (including NXDOMAIN, the not-listed answer) reports not listed, so
+// DNSBL is fail-open like every other check.
 func realDNSBL(ip net.IP, zone string) bool {
 	q := dnsblQuery(ip, zone)
 	if q == "" {
 		return false
 	}
-	addrs, err := net.LookupHost(q)
-	return err == nil && len(addrs) > 0
+	addrs, err := net.LookupIP(q)
+	if err != nil {
+		return false
+	}
+	return isListed(addrs)
+}
+
+// isListed reports whether a DNSBL response signals a real listing: an answer in
+// 127.0.0.0/8 (the RFC 5782 convention). Any other address — a hijacked or
+// wildcard resolver returning a public A record — is rejected: a false positive
+// would file a legitimate sender's mail to Junk, so the bar is the standard one.
+func isListed(addrs []net.IP) bool {
+	for _, a := range addrs {
+		if a4 := a.To4(); a4 != nil && a4[0] == 127 {
+			return true
+		}
+	}
+	return false
 }
 
 // dnsblQuery builds the DNSBL lookup name for an IP and zone: the IP's octets

@@ -168,3 +168,17 @@ func TestDNSBLQuery(t *testing.T) {
 		t.Errorf("IPv6 query = %q, want %q", q, want6)
 	}
 }
+
+// TestDNSBLIsListed proves only a 127.0.0.0/8 answer counts as a listing: a
+// public A record (a hijacked or wildcard resolver) must not condemn the sender.
+func TestDNSBLIsListed(t *testing.T) {
+	if !isListed([]net.IP{net.IPv4(127, 0, 0, 2)}) {
+		t.Error("127.0.0.2 must count as listed")
+	}
+	if isListed([]net.IP{net.IPv4(93, 184, 216, 34)}) {
+		t.Error("a public A record must not count as listed")
+	}
+	if isListed(nil) {
+		t.Error("no answer is not a listing")
+	}
+}
