@@ -100,6 +100,45 @@ var directoryDDL = []string{
 			REFERENCES users (id) ON DELETE CASCADE ON UPDATE CASCADE
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
+	// roles is a named administrative role: a label carrying a set of fine-grained
+	// permissions, assignable to any number of users. It expresses authority the
+	// coarse admin_roles tiers cannot — read-only access, per-domain purge,
+	// password reset — and is the source of truth for those capabilities. The two
+	// models coexist: the permission resolver unions a role's permissions with the
+	// equivalents of a user's direct admin_roles grants.
+	`CREATE TABLE IF NOT EXISTS roles (
+		id          INT UNSIGNED NOT NULL AUTO_INCREMENT,
+		name        VARCHAR(64) NOT NULL,
+		description VARCHAR(255) NOT NULL DEFAULT '',
+		PRIMARY KEY (id),
+		UNIQUE KEY name (name)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+	// role_permissions is the permission set of a role: one row per granted
+	// capability. permission is the capability name; params scopes it — the
+	// decimal id of one org or domain, "*" for all of them, or empty for an
+	// unscoped capability. A role may hold several permissions.
+	`CREATE TABLE IF NOT EXISTS role_permissions (
+		role_id    INT UNSIGNED NOT NULL,
+		permission VARCHAR(32) CHARACTER SET ascii NOT NULL,
+		params     VARCHAR(64) CHARACTER SET ascii NOT NULL DEFAULT '',
+		PRIMARY KEY (role_id, permission, params),
+		CONSTRAINT role_permissions_role_fk FOREIGN KEY (role_id)
+			REFERENCES roles (id) ON DELETE CASCADE ON UPDATE CASCADE
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+	// user_roles assigns named roles to users (many-to-many). Both sides cascade:
+	// deleting a user or a role removes its assignments.
+	`CREATE TABLE IF NOT EXISTS user_roles (
+		user_id INT UNSIGNED NOT NULL,
+		role_id INT UNSIGNED NOT NULL,
+		PRIMARY KEY (user_id, role_id),
+		CONSTRAINT user_roles_user_fk FOREIGN KEY (user_id)
+			REFERENCES users (id) ON DELETE CASCADE ON UPDATE CASCADE,
+		CONSTRAINT user_roles_role_fk FOREIGN KEY (role_id)
+			REFERENCES roles (id) ON DELETE CASCADE ON UPDATE CASCADE
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
 	// user_properties is the per-user MAPI property store (EAV): one row per
 	// (user, property tag, order). It holds the directory-visible properties that
 	// are not promoted to a users column — display name, nickname, the contact
