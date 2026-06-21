@@ -40,6 +40,23 @@ type Item struct {
 	Attempts    int
 }
 
+// QueueEntry is one queued recipient delivery as shown in the administrative
+// mail-queue view: the message it belongs to, its envelope sender and single
+// recipient, how many times delivery has been attempted, when it was enqueued and
+// is next eligible, the last transient error (empty before the first attempt), and
+// the message size. It is a read-only projection joined across the two tables.
+type QueueEntry struct {
+	RecipientID int64
+	MessageID   int64
+	From        string
+	Recipient   string
+	Attempts    int
+	EnqueuedAt  time.Time
+	NextAttempt time.Time
+	LastError   string
+	Size        int
+}
+
 // dsn mirrors the object store's connection string: a busy timeout, WAL
 // journaling, enforced foreign keys, and FULL synchronous mode for durability.
 func dsn(path string) string {
@@ -170,6 +187,49 @@ func (s *Spool) Retry(recipientID int64, nextAttempt time.Time, lastErr string) 
 		nextAttempt.Unix(), lastErr, recipientID)
 	return err
 }
+
+// List returns every queued recipient delivery joined with its message, newest
+// enqueue first, for the administrative mail-queue view. It reads all rows: the
+// outbound spool is a transient backlog, not a mailbox, so no pagination.
+func (s *Spool) List() ([]QueueEntry, error) {
+	rows, err := s.db.Query(`
+SELECT r.id, m.id, m.envelope_from, r.recipient, r.attempts,
+       m.enqueued_at, r.next_attempt, r.last_error, LENGTH(m.body)
+  FROM recipients r JOIN messages m ON m.id = r.message_id
+ ORDER BY m.enqueued_at DESC, r.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []QueueEntry
+	for rows.Next() {
+		var e QueueEntry
+		var enq, next int64
+		if err := rows.Scan(&e.RecipientID, &e.MessageID, &e.From, &e.Recipient,
+			&e.Attempts, &enq, &next, &e.LastError, &e.Size); err != nil {
+			return nil, err
+		}
+		e.EnqueuedAt = time.Unix(enq, 0).UTC()
+		e.NextAttempt = time.Unix(next, 0).UTC()
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// RetryNow makes a deferred recipient eligible for immediate delivery by moving
+// its next-attempt time to when (the worker claims rows whose time has arrived).
+// It is the administrative "flush" action; the attempt count and last error are
+// kept so the delivery history is preserved. A recipient already gone is a no-op.
+func (s *Spool) RetryNow(recipientID int64, when time.Time) error {
+	_, err := s.db.Exec(`UPDATE recipients SET next_attempt = ? WHERE id = ?`,
+		when.Unix(), recipientID)
+	return err
+}
+
+// Delete removes a queued recipient at an administrator's request, dropping the
+// message body once no recipient remains — without emitting a bounce (unlike
+// Fail, the worker's permanent-failure path). A recipient already gone is a no-op.
+func (s *Spool) Delete(recipientID int64) error { return s.settle(recipientID) }
 
 // settle deletes a recipient row and, when its message has no recipients left,
 // the message itself. A recipient already gone is treated as settled.
