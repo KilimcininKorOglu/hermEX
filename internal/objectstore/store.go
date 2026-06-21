@@ -18,6 +18,11 @@ import (
 // ErrNotFound is reported when a folder or message lookup finds no such object.
 var ErrNotFound = errors.New("objectstore: not found")
 
+// ErrNotProvisioned is reported by OpenPublicExisting when a domain has no public
+// store yet. Read surfaces treat it as "this domain has no public folders" rather
+// than provisioning one as a side effect of a read.
+var ErrNotProvisioned = errors.New("objectstore: public store not provisioned")
+
 // ErrFolderCycle is reported when a folder copy would place a folder inside its
 // own subtree, which would recurse without end.
 var ErrFolderCycle = errors.New("objectstore: folder copied into its own subtree")
@@ -134,6 +139,21 @@ func Open(dir string) (*Store, error) {
 // public IPM subtree. dir is the domain's public-store directory (Config.HomedirFor).
 func OpenPublic(dir string) (*Store, error) {
 	return openKind(dir, true, storePublic)
+}
+
+// OpenPublicExisting opens a per-domain public-folder store only when it already
+// exists, never creating one. It returns ErrNotProvisioned when no store has been
+// provisioned at dir, so a read surface can distinguish a domain whose public
+// folders are enabled (store present) from one where the feature is simply absent,
+// without seeding an empty store as a side effect.
+func OpenPublicExisting(dir string) (*Store, error) {
+	if _, err := os.Stat(filepath.Join(dir, "objects.sqlite3")); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrNotProvisioned
+		}
+		return nil, err
+	}
+	return OpenPublic(dir)
 }
 
 // open is the shared constructor for a private-kind store. seedBuiltins selects
