@@ -195,6 +195,17 @@ var directoryDDL = []string{
 		PRIMARY KEY (org_id)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
+	// create_defaults holds the default parameters pre-filled into the new-domain
+	// and new-user forms, as a JSON object {domain:{...},user:{...}}, keyed by
+	// scope: scope_id 0 is the system-wide default, a nonzero scope_id is a
+	// per-domain override of the user defaults for accounts in that domain. Stored
+	// like sync_policy (JSON-TEXT, absent row = no defaults).
+	`CREATE TABLE IF NOT EXISTS create_defaults (
+		scope_id INT UNSIGNED NOT NULL DEFAULT 0,
+		params   TEXT NOT NULL,
+		PRIMARY KEY (scope_id)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
 	// fetchmail holds a local user's remote-account poll configurations: the
 	// fetch-worker periodically connects to each active entry's source POP3/IMAP
 	// server and delivers new mail into the local mailbox. mailbox is the local
