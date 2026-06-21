@@ -153,8 +153,40 @@ func (c *conn) selectPublic(tag, name, sub string, examine bool) {
 	c.sel = sel
 	c.selPublic = true
 	c.state = stateSelected
-	c.readOnly = examine || rights&mapi.FrightsCreate == 0
+	// Read-write enables unrestricted STORE and EXPUNGE on the folder's existing
+	// items, which the store applies without per-item ownership checks — so it
+	// requires the "any" edit/delete rights (Editor level), not merely the create
+	// right. A pure poster (Create only) gets a read-only selection but can still
+	// APPEND, the post-without-modify semantics public folders want; this is also
+	// why FrightsEditOwned/DeleteOwned alone do not grant read-write (the store
+	// cannot enforce the owned-only restriction over IMAP).
+	c.readOnly = examine || rights&(mapi.FrightsEditAny|mapi.FrightsDeleteAny) == 0
 	c.emitSelected(tag, sel, examine)
+}
+
+// statusPublic answers STATUS for a public folder. A folder LIST advertises must
+// also answer STATUS (clients poll it for unread badges), so the gate is the same
+// visibility check LIST uses; the counts come from the public store.
+func (c *conn) statusPublic(tag, name, sub string, items []string) {
+	if sub == "" {
+		c.no(tag, "no such mailbox")
+		return
+	}
+	f, _, found := c.resolvePublicFolder(sub)
+	if !found {
+		c.no(tag, "no such mailbox")
+		return
+	}
+	st := c.pubStore // resolvePublicFolder opened it
+	msgs, err := st.ListMessages(f.ID)
+	if err != nil {
+		c.no(tag, "cannot read mailbox")
+		return
+	}
+	uidv, _ := st.UIDValidity(f.ID)
+	uidn, _ := st.UIDNext(f.ID)
+	c.untagged("STATUS %s (%s)", quoteString(name), statusParts(items, msgs, uidv, uidn))
+	c.ok(tag, "STATUS completed")
 }
 
 // emitSelected writes the untagged SELECT/EXAMINE response and the tagged OK,

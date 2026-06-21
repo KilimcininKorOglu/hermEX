@@ -458,6 +458,10 @@ func (c *conn) cmdStatus(tag string, args []token) {
 		return
 	}
 	items := parenAtoms(args[1:])
+	if sub, isPub := isPublicName(name); isPub {
+		c.statusPublic(tag, name, sub, items)
+		return
+	}
 	tree, err := loadFolderTree(c.st)
 	if err != nil {
 		c.no(tag, "cannot read mailbox list")
@@ -475,6 +479,12 @@ func (c *conn) cmdStatus(tag string, args []token) {
 	}
 	uidv, _ := c.st.UIDValidity(node.info.ID)
 	uidn, _ := c.st.UIDNext(node.info.ID)
+	c.untagged("STATUS %s (%s)", quoteString(node.path), statusParts(items, msgs, uidv, uidn))
+	c.ok(tag, "STATUS completed")
+}
+
+// statusParts builds the parenthesized STATUS item list for the requested items.
+func statusParts(items []string, msgs []objectstore.MessageInfo, uidv, uidn uint32) string {
 	unseen := 0
 	for i := range msgs {
 		if msgs[i].Flags&objectstore.FlagSeen == 0 {
@@ -496,8 +506,7 @@ func (c *conn) cmdStatus(tag string, args []token) {
 			parts = append(parts, fmt.Sprintf("UNSEEN %d", unseen))
 		}
 	}
-	c.untagged("STATUS %s (%s)", quoteString(node.path), strings.Join(parts, " "))
-	c.ok(tag, "STATUS completed")
+	return strings.Join(parts, " ")
 }
 
 // --- folder management ---

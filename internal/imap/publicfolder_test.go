@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
@@ -120,9 +121,14 @@ func TestIMAPPublicFolders(t *testing.T) {
 	ann, _ := ps.CreateFolder(nil, "Announcements")
 	bul, _ := ps.CreateFolder(nil, "Bulletin")
 	staff, _ := ps.CreateFolder(nil, "Staff")
+	team, _ := ps.CreateFolder(nil, "Team")
 	grantAnyone(t, ps, ann, mapi.FrightsVisible|mapi.FrightsReadAny)                                      // read-only for everyone
-	grantUser(t, ps, bul, "alice@local.test", mapi.FrightsVisible|mapi.FrightsReadAny|mapi.FrightsCreate) // alice may post
+	grantUser(t, ps, bul, "alice@local.test", mapi.FrightsVisible|mapi.FrightsReadAny|mapi.FrightsCreate) // alice may post, not modify
 	grantUser(t, ps, staff, "bob@local.test", mapi.FrightsVisible|mapi.FrightsReadAny)                    // bob only
+	grantUser(t, ps, team, "alice@local.test", mapi.RightsEditor)                                         // alice may edit/delete any
+	if _, err := ps.AppendMessage(team, []byte("Subject: t\r\n\r\nteam body"), time.Unix(2, 0), 0); err != nil {
+		t.Fatal(err)
+	}
 	ps.Close()
 
 	accounts := directory.StaticAccounts{"alice@local.test": {Password: "secret", MailboxPath: mbox}}
@@ -162,21 +168,42 @@ func TestIMAPPublicFolders(t *testing.T) {
 		t.Errorf("APPEND to read-only Announcements = %s, want NO", status)
 	}
 
-	// Bulletin: alice has post rights → read-write, APPEND succeeds.
+	// Bulletin: alice has the Create right (post) but not edit/delete. She may
+	// APPEND, but the selection is read-only — a poster must not be able to modify
+	// or delete others' messages.
 	if status := c.appendMsg("a2", `"Public Folders/Bulletin"`, "Subject: hi\r\n\r\nhello world"); status != "OK" {
 		t.Fatalf("APPEND to Bulletin = %s, want OK", status)
 	}
 	selUn, tagged := c.doFull("s2", `SELECT "Public Folders/Bulletin"`)
-	if !strings.Contains(tagged, "OK") || !strings.Contains(tagged, "[READ-WRITE]") {
-		t.Errorf("SELECT Bulletin = %q, want OK [READ-WRITE]", tagged)
+	if !strings.Contains(tagged, "OK") || !strings.Contains(tagged, "[READ-ONLY]") {
+		t.Errorf("SELECT Bulletin (poster, no edit/delete) = %q, want OK [READ-ONLY]", tagged)
 	}
 	if !hasLine(selUn, "1 EXISTS") {
 		t.Errorf("SELECT Bulletin should show 1 EXISTS after the post: %v", selUn)
 	}
-	// The posted message reads back from the public store (cross-store FETCH).
+	// A poster cannot mutate existing items: STORE is refused on the read-only selection.
+	if _, status := c.do("st", `STORE 1 +FLAGS (\Deleted)`); status != "NO" {
+		t.Errorf("STORE on a poster's read-only public selection = %s, want NO", status)
+	}
+	// The posted message still reads back from the public store (cross-store FETCH).
 	fetchUn := c.mustOK("f", "FETCH 1 (BODY[TEXT])")
 	if !hasLine(fetchUn, "hello world") {
 		t.Errorf("FETCH from public folder did not return the body: %v", fetchUn)
+	}
+
+	// Team: alice is an Editor (edit/delete any) → read-write selection, STORE works.
+	_, tagged = c.doFull("s3", `SELECT "Public Folders/Team"`)
+	if !strings.Contains(tagged, "OK") || !strings.Contains(tagged, "[READ-WRITE]") {
+		t.Errorf("SELECT Team (editor) = %q, want OK [READ-WRITE]", tagged)
+	}
+	if _, status := c.do("st2", `STORE 1 +FLAGS (\Flagged)`); status != "OK" {
+		t.Errorf("STORE on an editor's public selection = %s, want OK", status)
+	}
+
+	// STATUS answers for a LIST-advertised public folder (clients poll it for badges).
+	stUn, _ := c.doFull("status", `STATUS "Public Folders/Announcements" (MESSAGES UNSEEN)`)
+	if !hasLine(stUn, "MESSAGES") {
+		t.Errorf("STATUS on a public folder should return counts: %v", stUn)
 	}
 }
 
