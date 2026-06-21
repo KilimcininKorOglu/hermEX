@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 	"unicode"
 )
@@ -86,6 +87,30 @@ func LoadBayesModel(r io.Reader) (*BayesModel, error) {
 		m.HamTokens = map[string]int{}
 	}
 	return m, nil
+}
+
+// TrainFromDir trains the model on every regular file in dir with the given label
+// and returns the number of messages trained. Each file is one raw message,
+// reduced to MessageText so training matches live scoring. os.ReadDir returns
+// entries in sorted order, so rebuilding from the same corpus is reproducible.
+func TrainFromDir(m *BayesModel, dir string, spam bool) (int, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, err
+	}
+	n := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return n, err
+		}
+		m.Train(MessageText(data), spam)
+		n++
+	}
+	return n, nil
 }
 
 // LoadModelFile reads a Bayes model from path. A missing file returns (nil, nil)

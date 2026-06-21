@@ -87,10 +87,12 @@ func isListed(addrs []net.IP) bool {
 	return false
 }
 
-// realBayesText extracts the text the Bayes model classifies: the subject plus
-// the decoded text/* body parts. It is best-effort — on a parse error it returns
-// whatever was gathered (possibly just the subject).
-func realBayesText(raw []byte) string {
+// MessageText extracts the text the Bayes model classifies: the subject plus the
+// decoded text/* body parts. Training (the bootstrap tool, self-training) and
+// live scoring must both go through it so their token vocabularies match. It is
+// best-effort — on a parse error it returns whatever was gathered (possibly just
+// the subject).
+func MessageText(raw []byte) string {
 	var b strings.Builder
 	if env, err := mime.ParseEnvelope(raw); err == nil {
 		b.WriteString(env.Subject)

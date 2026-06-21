@@ -99,7 +99,7 @@ func New(w Weights, threshold int) *Scorer {
 	return &Scorer{
 		Weights: w, Threshold: threshold,
 		checkSPF: realSPF, checkDKIM: realDKIM, lookupDMARC: realDMARC, checkDNSBL: realDNSBL,
-		extractText: realBayesText,
+		extractText: MessageText,
 	}
 }
 

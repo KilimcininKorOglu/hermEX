@@ -13,7 +13,7 @@
 
 COMPOSE := docker compose -f hermex-compose.yml
 BIN     := bin
-CMDS    := mta imap pop3 webmail dav activesync ews mapihttp gateway admin fetchmail
+CMDS    := mta imap pop3 webmail dav activesync ews mapihttp gateway admin fetchmail antispam-bootstrap
 
 # Test/lint scope. Override PKG (and optionally RUN) for a subset.
 PKG ?= ./internal/... ./cmd/...

@@ -2,9 +2,45 @@ package antispam
 
 import (
 	"bytes"
+	"os"
 	"path/filepath"
 	"testing"
 )
+
+// TestTrainFromDir proves the corpus trainer reads every file, labels it, and
+// reduces it via MessageText so the trained vocabulary matches live scoring.
+func TestTrainFromDir(t *testing.T) {
+	dir := t.TempDir()
+	spam := filepath.Join(dir, "spam")
+	ham := filepath.Join(dir, "ham")
+	if err := os.Mkdir(spam, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(ham, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(spam, "1.eml"), []byte("Subject: cheap pills\r\n\r\nbuy now discount viagra"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ham, "1.eml"), []byte("Subject: meeting\r\n\r\nproject schedule review"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewBayesModel()
+	if n, err := TrainFromDir(m, spam, true); err != nil || n != 1 {
+		t.Fatalf("spam train = (%d, %v), want (1, nil)", n, err)
+	}
+	if n, err := TrainFromDir(m, ham, false); err != nil || n != 1 {
+		t.Fatalf("ham train = (%d, %v), want (1, nil)", n, err)
+	}
+	if m.SpamMsgs != 1 || m.HamMsgs != 1 {
+		t.Fatalf("message counts = spam %d ham %d, want 1/1", m.SpamMsgs, m.HamMsgs)
+	}
+	// MessageText pulled the subject and body, so spam vocabulary is present.
+	if m.SpamTokens["cheap"] != 1 || m.SpamTokens["viagra"] != 1 {
+		t.Errorf("spam tokens missing subject/body words: %v", m.SpamTokens)
+	}
+}
 
 // TestScoreBayesConfidentSpam proves a trained model wired into the Scorer adds
 // the Bayes weight and records the probability when content is confidently spam.
