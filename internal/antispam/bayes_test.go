@@ -80,9 +80,9 @@ func TestScoreBayesConfidentSpam(t *testing.T) {
 	}
 	s := &Scorer{
 		Weights: DefaultWeights, Threshold: DefaultThreshold,
-		Model:       m,
 		extractText: func(raw []byte) string { return string(raw) },
 	}
+	s.SetModel(m)
 	v := s.Score(Input{Raw: []byte("cheap pills discount buy now viagra cialis offer")})
 	if v.BayesProb < bayesSpamProb {
 		t.Fatalf("BayesProb = %.3f, want >= %.2f", v.BayesProb, bayesSpamProb)

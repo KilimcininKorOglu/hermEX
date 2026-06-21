@@ -105,20 +105,24 @@ func main() {
 
 	scorer := antispam.New(antispam.DefaultWeights, antispam.DefaultThreshold)
 	scorer.Zones = antispam.ParseZones(os.Getenv("HERMEX_DNSBL_ZONES")) // comma-separated DNSBL zones; empty leaves DNSBL off
-	// The Bayesian model is loaded once at startup (a retrain takes effect on the
-	// next restart): a data_dir model when present, otherwise the embedded floor.
+	// The Bayesian model is loaded at startup — a data_dir model when present,
+	// otherwise the embedded floor — and hot-reloaded after a retrain (below).
 	model, err := antispam.LoadModel(cfg.DataDir)
 	if err != nil {
 		log.Printf("hermex-mta: anti-spam model load failed, using embedded floor: %v", err)
 	}
-	scorer.Model = model
+	scorer.SetModel(model)
 	// The SpamAssassin ruleset is seeded into data_dir on first run and loaded from
-	// there once at startup (an edit or refresh takes effect on the next restart).
+	// there at startup.
 	rules, err := antispam.LoadRules(cfg.DataDir)
 	if err != nil {
 		log.Printf("hermex-mta: anti-spam ruleset load failed, using embedded baseline: %v", err)
 	}
-	scorer.SARules = rules
+	scorer.SetRules(rules)
+	// Hot-reload the ruleset and Bayesian model when their data_dir files change,
+	// so a refresh or retrain takes effect without restarting the MTA — mail flow
+	// never pauses.
+	go antispam.NewReloader(scorer, cfg.DataDir, log.Printf).Run(context.Background(), time.Minute)
 	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer}, Hostname: cfg.Hostname, Logger: logger}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()

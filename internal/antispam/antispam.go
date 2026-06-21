@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync/atomic"
 
 	"golang.org/x/net/publicsuffix"
 )
@@ -90,11 +91,15 @@ type DKIMResult struct {
 // Scorer computes verdicts. The check functions are injected (New wires the
 // production library-backed implementations); tests supply deterministic ones.
 type Scorer struct {
-	Weights     Weights
-	Threshold   int
-	Zones       []string    // DNS blocklist zones to query the client IP against; empty disables DNSBL
-	Model       *BayesModel // the Bayesian content model; nil leaves content scoring dormant
-	SARules     *SARuleSet  // the SpamAssassin rule subset; nil leaves rule scoring dormant
+	Weights   Weights
+	Threshold int
+	Zones     []string // DNS blocklist zones to query the client IP against; empty disables DNSBL
+	// model and saRules are held behind atomic pointers so the MTA can hot-swap a
+	// retrained model or a refreshed ruleset while Score runs concurrently, without
+	// a restart. A nil value leaves that signal dormant. Set them via SetModel and
+	// SetRules.
+	model       atomic.Pointer[BayesModel]
+	saRules     atomic.Pointer[SARuleSet]
 	checkSPF    func(ip net.IP, helo, mailFrom string) AuthResult
 	checkDKIM   func(raw []byte) []DKIMResult
 	lookupDMARC func(domain string) (policy string, ok bool)
@@ -102,9 +107,20 @@ type Scorer struct {
 	extractText func(raw []byte) string
 }
 
+// SetModel installs (or replaces) the Bayesian content model. It is safe to call
+// concurrently with Score, so a retrained model can be hot-swapped in without a
+// restart; a nil model leaves content scoring dormant.
+func (s *Scorer) SetModel(m *BayesModel) { s.model.Store(m) }
+
+// SetRules installs (or replaces) the SpamAssassin ruleset. It is safe to call
+// concurrently with Score, so a refreshed ruleset applies without a restart; a
+// nil ruleset leaves rule scoring dormant.
+func (s *Scorer) SetRules(rs *SARuleSet) { s.saRules.Store(rs) }
+
 // New returns a Scorer wired to the real SPF, DKIM, DMARC, and DNSBL checks,
 // flagging a message as spam once its score reaches threshold. DNSBL stays
-// dormant until Zones is set, and Bayesian content scoring until Model is set.
+// dormant until Zones is set, Bayesian content scoring until SetModel is called,
+// and SpamAssassin rules until SetRules is called.
 func New(w Weights, threshold int) *Scorer {
 	return &Scorer{
 		Weights: w, Threshold: threshold,
@@ -180,8 +196,8 @@ func (s *Scorer) Score(in Input) Verdict {
 
 	// Bayesian content score: only a confident spam probability contributes, so a
 	// weak or unbootstrapped model never condemns mail on content alone.
-	if s.Model != nil && s.extractText != nil && len(in.Raw) > 0 {
-		v.BayesProb = s.Model.Score(s.extractText(in.Raw))
+	if m := s.model.Load(); m != nil && s.extractText != nil && len(in.Raw) > 0 {
+		v.BayesProb = m.Score(s.extractText(in.Raw))
 		if v.BayesProb >= bayesSpamProb {
 			v.Score += s.Weights.BayesSpam
 			v.Reasons = append(v.Reasons, "Bayesian: likely spam")
@@ -192,8 +208,8 @@ func (s *Scorer) Score(in Input) Verdict {
 	// bounded signal — it contributes a single weight once it crosses the SA
 	// threshold, however many rules matched, so the subset's score never dominates
 	// the verdict on its own.
-	if s.SARules != nil && len(in.Raw) > 0 {
-		v.SAScore, v.SAHits = s.SARules.Evaluate(in.Raw)
+	if rs := s.saRules.Load(); rs != nil && len(in.Raw) > 0 {
+		v.SAScore, v.SAHits = rs.Evaluate(in.Raw)
 		if v.SAScore >= SAScoreThreshold {
 			v.Score += s.Weights.SARulesHit
 			v.Reasons = append(v.Reasons, fmt.Sprintf("SpamAssassin rules (score %.1f)", v.SAScore))

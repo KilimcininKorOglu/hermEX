@@ -53,7 +53,7 @@ func main() {
 	if err := writeAtomic(*out, payload); err != nil {
 		log.Fatalf("antispam-rules: write %s: %v", *out, err)
 	}
-	log.Printf("antispam-rules: wrote %s — restart the MTA to load it", *out)
+	log.Printf("antispam-rules: wrote %s — the MTA picks it up automatically within a minute (no restart)", *out)
 }
 
 // writeAtomic writes data to path via a temp file in the same directory, then

@@ -33,7 +33,7 @@ const seededHeader = `# hermEX anti-spam ruleset (live copy under data_dir).
 # Seeded once from the vendored Apache SpamAssassin baseline (Apache-2.0).
 # Edit or replace this file to tune the rules; the refresh tool overwrites it.
 # Only header/body/rawbody/uri/meta rules are evaluated; network/plugin rules are
-# ignored. Changes take effect on the next MTA restart.
+# ignored. Changes are picked up automatically within about a minute — no restart.
 
 `
 

@@ -182,7 +182,8 @@ score  SUBJ_URGENT  2.5
 // summed score crosses the threshold it adds one bounded weight (not the raw SA
 // score) and records the score and the rules that fired.
 func TestScoreSARulesContributes(t *testing.T) {
-	s := &Scorer{Weights: DefaultWeights, Threshold: DefaultThreshold, SARules: ParseSARules(saScoreRules)}
+	s := &Scorer{Weights: DefaultWeights, Threshold: DefaultThreshold}
+	s.SetRules(ParseSARules(saScoreRules))
 	raw := []byte("Subject: URGENT notice\r\n\r\nYou win a prize today!\r\n")
 
 	v := s.Score(Input{Raw: raw})
@@ -200,7 +201,8 @@ func TestScoreSARulesContributes(t *testing.T) {
 // TestScoreSARulesBelowThreshold proves a sub-threshold SA score records the score
 // and hits for transparency but contributes no weight.
 func TestScoreSARulesBelowThreshold(t *testing.T) {
-	s := &Scorer{Weights: DefaultWeights, Threshold: DefaultThreshold, SARules: ParseSARules(saScoreRules)}
+	s := &Scorer{Weights: DefaultWeights, Threshold: DefaultThreshold}
+	s.SetRules(ParseSARules(saScoreRules))
 	raw := []byte("Subject: hello\r\n\r\nYou win a prize today!\r\n") // only WIN_PRIZE (3.0)
 
 	v := s.Score(Input{Raw: raw})
