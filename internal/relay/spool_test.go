@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
@@ -15,6 +16,48 @@ func openSpool(t *testing.T) *Spool {
 	}
 	t.Cleanup(func() { s.Close() })
 	return s
+}
+
+// TestSpoolBaselineAdoption proves an existing, unversioned spool — tables present
+// and user_version 0, as written before the spool was versioned — is adopted as
+// v1 on open without disturbing its queued data.
+func TestSpoolBaselineAdoption(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "relay.sqlite3")
+
+	// Create the spool the pre-migration way: raw tables, no version stamp.
+	raw, err := sql.Open("sqlite", dsn(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stmt := range []string{
+		`CREATE TABLE messages (id INTEGER PRIMARY KEY, envelope_from TEXT NOT NULL, body BLOB NOT NULL, enqueued_at INTEGER NOT NULL)`,
+		`CREATE TABLE recipients (id INTEGER PRIMARY KEY, message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE, recipient TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_attempt INTEGER NOT NULL, last_error TEXT NOT NULL DEFAULT '')`,
+		`CREATE INDEX recipients_due ON recipients(next_attempt)`,
+		`INSERT INTO messages (envelope_from, body, enqueued_at) VALUES ('a@x.test', 'hi', 1)`,
+	} {
+		if _, err := raw.Exec(stmt); err != nil {
+			t.Fatalf("seed pre-migration spool: %v", err)
+		}
+	}
+	var v int
+	if err := raw.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 0 {
+		t.Fatalf("seeded user_version = %d (err %v), want 0", v, err)
+	}
+	raw.Close()
+
+	// Opening through the spool adopts the baseline and records the version.
+	s, err := Open(path)
+	if err != nil {
+		t.Fatalf("open existing spool: %v", err)
+	}
+	defer s.Close()
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 1 {
+		t.Fatalf("user_version after adoption = %d (err %v), want 1", v, err)
+	}
+	var n int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM messages").Scan(&n); err != nil || n != 1 {
+		t.Fatalf("messages after adoption = %d (err %v), want 1 — adoption must not disturb data", n, err)
+	}
 }
 
 // TestSpoolListRetryDelete proves the administrative mail-queue projection and

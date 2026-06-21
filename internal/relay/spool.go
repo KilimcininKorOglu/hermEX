@@ -14,13 +14,24 @@
 package relay
 
 import (
+	"context"
 	"database/sql"
+	"embed"
 	"errors"
 	"fmt"
 	"time"
 
+	"hermex/internal/migrate"
+
 	_ "modernc.org/sqlite"
 )
+
+//go:embed migrations/*.sql
+var spoolMigrationFS embed.FS
+
+// spoolMigrations is the spool's schema history. v1 is the baseline; an existing
+// unversioned spool adopts it as a no-op and records the version.
+var spoolMigrations = migrate.MustLoadFS(spoolMigrationFS, "migrations")
 
 // Spool is the durable outbound queue backed by a single SQLite database. A
 // message row holds the raw bytes once; a recipient row per external address
@@ -67,26 +78,6 @@ func dsn(path string) string {
 		"&_pragma=synchronous(FULL)"
 }
 
-// spoolDDL is applied idempotently on open. The recipients-by-due index backs
-// the worker's claim scan.
-var spoolDDL = []string{
-	`CREATE TABLE IF NOT EXISTS messages (
-		id            INTEGER PRIMARY KEY,
-		envelope_from TEXT    NOT NULL,
-		body          BLOB    NOT NULL,
-		enqueued_at   INTEGER NOT NULL
-	)`,
-	`CREATE TABLE IF NOT EXISTS recipients (
-		id           INTEGER PRIMARY KEY,
-		message_id   INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
-		recipient    TEXT    NOT NULL,
-		attempts     INTEGER NOT NULL DEFAULT 0,
-		next_attempt INTEGER NOT NULL,
-		last_error   TEXT    NOT NULL DEFAULT ''
-	)`,
-	`CREATE INDEX IF NOT EXISTS recipients_due ON recipients(next_attempt)`,
-}
-
 // Open opens the relay spool at path, creating and initializing it if absent.
 func Open(path string) (*Spool, error) {
 	db, err := sql.Open("sqlite", dsn(path))
@@ -105,10 +96,9 @@ func Open(path string) (*Spool, error) {
 func (s *Spool) Close() error { return s.db.Close() }
 
 func (s *Spool) ensureSchema() error {
-	for _, stmt := range spoolDDL {
-		if _, err := s.db.Exec(stmt); err != nil {
-			return fmt.Errorf("relay: apply spool schema: %w", err)
-		}
+	if err := migrate.Run(context.Background(),
+		&migrate.SQLiteDriver{DB: s.db, Ver: migrate.UserVersion()}, 0, spoolMigrations); err != nil {
+		return fmt.Errorf("relay: apply spool schema: %w", err)
 	}
 	return nil
 }
