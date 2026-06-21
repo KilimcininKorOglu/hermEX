@@ -28,6 +28,81 @@ func authedReq(t *testing.T, ts *httptest.Server, method, path, session, csrf, b
 	return resp
 }
 
+// statusOf returns a response's status and closes its body.
+func statusOf(resp *http.Response) int {
+	defer resp.Body.Close()
+	return resp.StatusCode
+}
+
+// TestDomainAdminScopedAccess proves a domain admin manages users in its own
+// domain but is refused — both read and write — for another domain's users.
+func TestDomainAdminScopedAccess(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7,
+		perms: []directory.Permission{{Name: directory.PermDomainAdmin, Params: "1"}},
+		knownUsers: map[string]directory.UserDetail{
+			"in@acme.test":   {Username: "in@acme.test", ID: 10, DomainID: 1},
+			"out@other.test": {Username: "out@other.test", ID: 11, DomainID: 2},
+		},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	if s := statusOf(authedGET(t, ts, "/admin/users/in@acme.test", session)); s == http.StatusForbidden {
+		t.Errorf("domain admin denied read of own-domain user (403)")
+	}
+	if s := statusOf(authedReq(t, ts, "PUT", "/admin/users/in@acme.test", session, csrf, `{}`)); s == http.StatusForbidden {
+		t.Errorf("domain admin denied write of own-domain user (403)")
+	}
+	if s := statusOf(authedGET(t, ts, "/admin/users/out@other.test", session)); s != http.StatusForbidden {
+		t.Errorf("domain admin read of other-domain user = %d, want 403", s)
+	}
+	if s := statusOf(authedReq(t, ts, "PUT", "/admin/users/out@other.test", session, csrf, `{}`)); s != http.StatusForbidden {
+		t.Errorf("domain admin write of other-domain user = %d, want 403", s)
+	}
+}
+
+// TestDomainAdminROReadOnly proves a read-only domain admin reads its domain's
+// users but cannot write them.
+func TestDomainAdminROReadOnly(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7,
+		perms:      []directory.Permission{{Name: directory.PermDomainAdminRO, Params: "1"}},
+		knownUsers: map[string]directory.UserDetail{"u@acme.test": {Username: "u@acme.test", ID: 10, DomainID: 1}},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	if s := statusOf(authedGET(t, ts, "/admin/users/u@acme.test", session)); s == http.StatusForbidden {
+		t.Errorf("read-only domain admin denied read of own-domain user (403)")
+	}
+	if s := statusOf(authedReq(t, ts, "PUT", "/admin/users/u@acme.test", session, csrf, `{}`)); s != http.StatusForbidden {
+		t.Errorf("read-only domain admin write = %d, want 403", s)
+	}
+}
+
+// TestDomainAdminCannotGrantRoles is the privilege-escalation boundary: a domain
+// admin — even over all domains — cannot create roles or grant any tier to a
+// user, so it can never escalate itself to system authority. Role administration
+// stays full-system-admin-only.
+func TestDomainAdminCannotGrantRoles(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7,
+		perms:      []directory.Permission{{Name: directory.PermDomainAdmin, Params: "*"}},
+		knownUsers: map[string]directory.UserDetail{"u@acme.test": {Username: "u@acme.test", ID: 10, DomainID: 1}},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	if s := statusOf(authedReq(t, ts, "POST", "/admin/roles", session, csrf, `{"name":"X"}`)); s != http.StatusForbidden {
+		t.Errorf("domain admin create named role = %d, want 403", s)
+	}
+	if s := statusOf(authedReq(t, ts, "POST", "/admin/users/u@acme.test/roles", session, csrf, `{"role":"system"}`)); s != http.StatusForbidden {
+		t.Errorf("domain admin grant tier = %d, want 403 (escalation boundary)", s)
+	}
+	if s := statusOf(authedGET(t, ts, "/admin/users/u@acme.test/roles", session)); s != http.StatusForbidden {
+		t.Errorf("domain admin list user roles = %d, want 403", s)
+	}
+}
+
 // TestReadOnlyAdminReadWriteSplit is the two-direction enforcement guarantee for
 // a read-only system administrator: every read is admitted (never 403) and every
 // state-changing request is refused (403). It pins the method-aware chokepoint —
@@ -80,7 +155,7 @@ func TestReadOnlyAdminReadWriteSplit(t *testing.T) {
 
 	// Mutations: refused on every state change.
 	muts := []struct{ method, path, body string }{
-		{"POST", "/admin/users", `{"username":"x@hermex.test","password":"p"}`},
+		{"POST", "/admin/users", `{"email":"x@hermex.test","password":"p"}`},
 		{"PUT", "/admin/users/u@hermex.test", `{}`},
 		{"DELETE", "/admin/users/u@hermex.test", `{}`},
 		{"POST", "/admin/domains", `{"name":"x.test"}`},

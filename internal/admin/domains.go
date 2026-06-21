@@ -42,13 +42,23 @@ func (s *Server) requireSystem(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// handleListDomains lists every domain (system administrators only — domains span
-// organizations).
-func (s *Server) handleListDomains(w http.ResponseWriter, _ *http.Request) {
+// handleListDomains lists the domains the caller may read: a system read admin
+// (or a domain admin over all) sees every domain, a scoped domain admin only its
+// own.
+func (s *Server) handleListDomains(w http.ResponseWriter, r *http.Request) {
 	domains, err := s.dir.ListDomains()
 	if err != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
+	}
+	if all, ids := s.scopedReadDomains(claimsOf(r).UserID); !all {
+		var scoped []directory.DomainInfo
+		for _, d := range domains {
+			if ids[d.ID] {
+				scoped = append(scoped, d)
+			}
+		}
+		domains = scoped
 	}
 	writeJSON(w, domains)
 }

@@ -31,21 +31,30 @@ func TestAdminListUsers(t *testing.T) {
 	}
 }
 
-// TestAdminListUsersRequiresSystem proves a domain admin (not a system admin) is
-// refused the global user list.
-func TestAdminListUsersRequiresSystem(t *testing.T) {
+// TestAdminListUsersScopeFiltered proves the user list is scope-filtered: a
+// domain admin sees only its own domain's users, never another domain's. The
+// filter must not leak out-of-scope rows.
+func TestAdminListUsersScopeFiltered(t *testing.T) {
 	d := &fakeDir{
 		authOK: true,
 		uid:    7,
 		roles:  []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		users: []directory.UserInfo{
+			{ID: 10, Username: "a@acme.test", DomainID: 1},
+			{ID: 11, Username: "b@other.test", DomainID: 2},
+		},
 	}
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/users", session)
+	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("domain-admin list users = %d, want 403", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("domain-admin list users = %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "a@acme.test") || strings.Contains(string(body), "b@other.test") {
+		t.Errorf("domain admin saw out-of-scope users: %s", body)
 	}
 }
 

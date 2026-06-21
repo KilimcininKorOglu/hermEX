@@ -3,24 +3,36 @@ package admin
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
 )
 
-// handleListUsers lists every user. This first increment is system-admin only;
-// org- and domain-scoped listing is a later refinement.
-func (s *Server) handleListUsers(w http.ResponseWriter, _ *http.Request) {
+// handleListUsers lists the users the caller may read: a system read admin (or
+// a domain admin over all) sees everyone, a scoped domain admin only its own
+// domains' users.
+func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {
 	users, err := s.dir.ListUsers()
 	if err != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
 	}
+	if all, ids := s.scopedReadDomains(claimsOf(r).UserID); !all {
+		var scoped []directory.UserInfo
+		for _, u := range users {
+			if ids[u.DomainID] {
+				scoped = append(scoped, u)
+			}
+		}
+		users = scoped
+	}
 	writeJSON(w, users)
 }
 
-// handleCreateUser provisions a user (system administrators only); its maildir is
-// derived from the configured data root. The domain must already exist.
+// handleCreateUser provisions a user; its maildir is derived from the configured
+// data root. The domain must already exist, and the caller must have write scope
+// over it (a full system admin, or a domain admin of that domain).
 func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Email    string `json:"email"`
@@ -30,12 +42,41 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "an email and password are required", http.StatusBadRequest)
 		return
 	}
+	if !s.canCreateInDomainOf(claimsOf(r).UserID, req.Email) {
+		http.Error(w, "forbidden: requires an administrator of this user's domain", http.StatusForbidden)
+		return
+	}
 	id, err := s.dir.CreateUser(req.Email, req.Password, s.paths.MaildirFor(req.Email))
 	if err != nil {
 		http.Error(w, "could not create user: "+err.Error(), http.StatusBadRequest)
 		return
 	}
 	writeJSONStatus(w, http.StatusCreated, map[string]any{"id": id, "email": req.Email})
+}
+
+// canCreateInDomainOf reports whether the caller may create a user in the domain
+// of the given address. A full system admin may (CreateUser then validates the
+// domain exists); a domain admin must hold write scope over that specific domain.
+func (s *Server) canCreateInDomainOf(userID int64, email string) bool {
+	perms := s.adminPerms(userID)
+	if hasPerm(perms, directory.PermSystemAdmin, "") {
+		return true
+	}
+	at := strings.LastIndexByte(email, '@')
+	if at <= 0 {
+		return false
+	}
+	domain := strings.ToLower(strings.TrimSpace(email[at+1:]))
+	domains, err := s.dir.ListDomains()
+	if err != nil {
+		return false
+	}
+	for _, d := range domains {
+		if strings.EqualFold(d.Name, domain) {
+			return domainWriteAllowed(perms, d.ID)
+		}
+	}
+	return false
 }
 
 // handleSetPassword replaces a user's local password (system administrators

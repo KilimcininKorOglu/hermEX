@@ -60,21 +60,27 @@ func TestAdminListDomains(t *testing.T) {
 	}
 }
 
-// TestAdminListDomainsRequiresSystem proves an org admin (not a system admin) is
-// refused: domains span organizations.
-func TestAdminListDomainsRequiresSystem(t *testing.T) {
+// TestAdminListDomainsScopeFiltered proves the domain list is scope-filtered: a
+// domain admin sees only its own domain, never another's. The filter must not
+// leak out-of-scope rows.
+func TestAdminListDomainsScopeFiltered(t *testing.T) {
 	d := &fakeDir{
-		authOK: true,
-		uid:    7,
-		roles:  []directory.AdminRole{{Role: directory.AdminOrg, ScopeID: 1}},
+		authOK:  true,
+		uid:     7,
+		roles:   []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		domains: []directory.DomainInfo{{ID: 1, Name: "acme.test"}, {ID: 2, Name: "other.test"}},
 	}
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
 
 	resp := authedGET(t, ts, "/admin/domains", session)
+	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden {
-		t.Errorf("org-admin list domains = %d, want 403", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("domain-admin list domains = %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "acme.test") || strings.Contains(string(body), "other.test") {
+		t.Errorf("domain admin saw out-of-scope domains: %s", body)
 	}
 }
 
