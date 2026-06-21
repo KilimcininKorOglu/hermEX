@@ -1,6 +1,9 @@
 package admin
 
-import "net/http"
+import (
+	"net/http"
+	"strconv"
+)
 
 // handleUIDomains renders the domains management page (system administrators only).
 func (s *Server) handleUIDomains(w http.ResponseWriter, r *http.Request) {
@@ -25,7 +28,25 @@ func (s *Server) handleUICreateDomain(w http.ResponseWriter, r *http.Request) {
 		errMsg = "Could not create domain: " + err.Error()
 	}
 	domains, _ := s.dir.ListDomains()
-	s.render(w, "domains-panel", map[string]any{"Domains": domains, "Error": errMsg})
+	s.render(w, "domains-panel", map[string]any{"Domains": domains, "Error": errMsg, "CSRF": csrfCookieValue(r)})
+}
+
+// handleUIPurgeDomain purges a domain from the management page and returns the
+// refreshed panel; deleteFiles also removes the on-disk mailboxes. It is gated by
+// uiAuthorized (full system admin) — the same as every other console mutation.
+func (s *Server) handleUIPurgeDomain(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	var errMsg string
+	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
+	if err != nil {
+		errMsg = "Invalid domain id."
+	} else if _, err := s.dir.PurgeDomain(id, r.PostFormValue("deleteFiles") == "true"); err != nil {
+		errMsg = "Could not purge domain: " + err.Error()
+	}
+	domains, _ := s.dir.ListDomains()
+	s.render(w, "domains-panel", map[string]any{"Domains": domains, "Error": errMsg, "CSRF": csrfCookieValue(r)})
 }
 
 // handleUIAliases renders the aliases management page (system administrators only).

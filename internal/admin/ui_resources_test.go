@@ -48,6 +48,29 @@ func TestUICreateDomain(t *testing.T) {
 	}
 }
 
+// TestUIDomainPurge proves the domains page purge action purges the domain and
+// passes the deleteFiles flag through, refreshing the panel.
+func TestUIDomainPurge(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		domains: []directory.DomainInfo{{ID: 3, Name: "acme.test"}},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	resp := htmxPOST(t, ts, "/admin/ui/domains/3/purge", session, csrf, url.Values{"deleteFiles": {"true"}})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("purge status %d, want 200", resp.StatusCode)
+	}
+	if d.purgedDomain != 3 || !d.purgeFiles {
+		t.Errorf("purge invoked id=%d files=%v, want 3/true", d.purgedDomain, d.purgeFiles)
+	}
+	if !strings.Contains(string(body), `id="domains-panel"`) {
+		t.Errorf("response is not the domains panel: %s", body)
+	}
+}
+
 // TestUIDomainsPageRequiresSystem proves the system gate covers the new pages.
 func TestUIDomainsPageRequiresSystem(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}
