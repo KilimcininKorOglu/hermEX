@@ -11,6 +11,7 @@ require (
 	github.com/klauspost/compress v1.18.4
 	github.com/smallstep/pkcs7 v0.2.1
 	go.mongodb.org/mongo-driver/v2 v2.7.0
+	golang.org/x/net v0.50.0
 	modernc.org/sqlite v1.52.0
 	software.sslmate.com/src/go-pkcs12 v0.7.2
 )

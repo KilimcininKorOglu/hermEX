@@ -1,13 +1,18 @@
 // Package antispam scores inbound mail for spam likelihood. It composes sender
-// authentication (SPF, DKIM, and — in a later increment — DMARC), DNS blocklists,
-// and a Bayesian content model into a single verdict. The MTA calls it inline at
-// delivery and is fail-open: a scoring error never blocks mail.
+// authentication (SPF, DKIM, DMARC), DNS blocklists, and a Bayesian content model
+// into a single verdict. The MTA calls it inline at delivery and is fail-open: a
+// scoring error never blocks mail.
 //
 // The library-backed checks live in checks.go and are injected into Scorer so the
 // scoring logic is unit-tested without live DNS.
 package antispam
 
-import "net"
+import (
+	"net"
+	"strings"
+
+	"golang.org/x/net/publicsuffix"
+)
 
 // AuthResult is the outcome of one sender-authentication check.
 type AuthResult string
@@ -23,10 +28,11 @@ const (
 
 // Input is everything the scorer needs about one inbound message.
 type Input struct {
-	Raw      []byte // the raw RFC 5322 message, for DKIM verification
-	ClientIP net.IP // the connecting SMTP client's IP, for SPF (and later DNSBL)
-	HeloName string // the SMTP HELO/EHLO domain, the SPF fallback when MailFrom has none
-	MailFrom string // the envelope sender, for SPF
+	Raw        []byte // the raw RFC 5322 message, for DKIM verification
+	ClientIP   net.IP // the connecting SMTP client's IP, for SPF (and later DNSBL)
+	HeloName   string // the SMTP HELO/EHLO domain, the SPF fallback when MailFrom has none
+	MailFrom   string // the envelope sender, for SPF and DMARC SPF-alignment
+	FromDomain string // the From-header domain, for DMARC alignment
 }
 
 // Weights assigns each signal's contribution to the spam score. A higher value
@@ -35,10 +41,11 @@ type Weights struct {
 	SPFFail     int
 	SPFSoftFail int
 	DKIMFail    int // no valid DKIM signature on the message
+	DMARCFail   int // DMARC published an enforcing policy and the message did not align
 }
 
 // DefaultWeights is a conservative starting point; the admin can tune them later.
-var DefaultWeights = Weights{SPFFail: 5, SPFSoftFail: 2, DKIMFail: 3}
+var DefaultWeights = Weights{SPFFail: 5, SPFSoftFail: 2, DKIMFail: 3, DMARCFail: 6}
 
 // Verdict is the aggregated result for one message.
 type Verdict struct {
@@ -46,6 +53,7 @@ type Verdict struct {
 	Spam    bool
 	SPF     AuthResult
 	DKIM    AuthResult
+	DMARC   AuthResult
 	Reasons []string
 }
 
@@ -55,26 +63,30 @@ type DKIMResult struct {
 	Valid  bool
 }
 
-// Scorer computes verdicts. checkSPF and checkDKIM are injected (New wires the
+// Scorer computes verdicts. The check functions are injected (New wires the
 // production library-backed implementations); tests supply deterministic ones.
 type Scorer struct {
-	Weights   Weights
-	Threshold int
-	checkSPF  func(ip net.IP, helo, mailFrom string) AuthResult
-	checkDKIM func(raw []byte) []DKIMResult
+	Weights     Weights
+	Threshold   int
+	checkSPF    func(ip net.IP, helo, mailFrom string) AuthResult
+	checkDKIM   func(raw []byte) []DKIMResult
+	lookupDMARC func(domain string) (policy string, ok bool)
 }
 
-// New returns a Scorer wired to the real SPF and DKIM libraries, flagging a
-// message as spam once its score reaches threshold.
+// New returns a Scorer wired to the real SPF, DKIM, and DMARC libraries, flagging
+// a message as spam once its score reaches threshold.
 func New(w Weights, threshold int) *Scorer {
-	return &Scorer{Weights: w, Threshold: threshold, checkSPF: realSPF, checkDKIM: realDKIM}
+	return &Scorer{
+		Weights: w, Threshold: threshold,
+		checkSPF: realSPF, checkDKIM: realDKIM, lookupDMARC: realDMARC,
+	}
 }
 
 // Score runs the configured checks and aggregates a verdict. A check is skipped
-// when its inputs are absent (e.g. no client IP), so a partial message still
-// gets a usable result; the caller treats scoring as advisory and fail-open.
+// when its inputs are absent, so a partial message still gets a usable result;
+// the caller treats scoring as advisory and fail-open.
 func (s *Scorer) Score(in Input) Verdict {
-	v := Verdict{SPF: AuthNone, DKIM: AuthNone}
+	v := Verdict{SPF: AuthNone, DKIM: AuthNone, DMARC: AuthNone}
 
 	if s.checkSPF != nil && in.ClientIP != nil && in.MailFrom != "" {
 		v.SPF = s.checkSPF(in.ClientIP, in.HeloName, in.MailFrom)
@@ -88,15 +100,14 @@ func (s *Scorer) Score(in Input) Verdict {
 		}
 	}
 
+	var validDKIM []string
 	if s.checkDKIM != nil && len(in.Raw) > 0 {
-		valid := false
 		for _, d := range s.checkDKIM(in.Raw) {
 			if d.Valid {
-				valid = true
-				break
+				validDKIM = append(validDKIM, d.Domain)
 			}
 		}
-		if valid {
+		if len(validDKIM) > 0 {
 			v.DKIM = AuthPass
 		} else {
 			v.DKIM = AuthFail
@@ -105,6 +116,66 @@ func (s *Scorer) Score(in Input) Verdict {
 		}
 	}
 
+	// DMARC: the message passes when an authenticated identifier (SPF or DKIM)
+	// aligns, under the relaxed organizational-domain rule, with the From domain.
+	// Otherwise the domain's published policy decides whether this is a failure.
+	if s.lookupDMARC != nil && in.FromDomain != "" {
+		policy, ok := s.lookupDMARC(in.FromDomain)
+		switch {
+		case !ok:
+			v.DMARC = AuthNone
+		case dmarcAligned(in.FromDomain, in.MailFrom, v.SPF, validDKIM):
+			v.DMARC = AuthPass
+		default:
+			v.DMARC = AuthFail
+			if policy == "reject" || policy == "quarantine" {
+				v.Score += s.Weights.DMARCFail
+				v.Reasons = append(v.Reasons, "DMARC fail (policy "+policy+")")
+			}
+		}
+	}
+
 	v.Spam = v.Score >= s.Threshold
 	return v
+}
+
+// dmarcAligned reports whether an authenticated identifier aligns with the From
+// domain under DMARC relaxed alignment: a passing SPF on a MailFrom that shares
+// the From domain's organizational domain, or a valid DKIM signature whose domain
+// does.
+func dmarcAligned(fromDomain, mailFrom string, spf AuthResult, validDKIM []string) bool {
+	fromOrg := orgDomain(fromDomain)
+	if fromOrg == "" {
+		return false
+	}
+	if spf == AuthPass && orgDomain(domainOf(mailFrom)) == fromOrg {
+		return true
+	}
+	for _, d := range validDKIM {
+		if orgDomain(d) == fromOrg {
+			return true
+		}
+	}
+	return false
+}
+
+// orgDomain returns a domain's organizational domain (eTLD+1), the unit DMARC
+// relaxed alignment compares. It falls back to the input on a parse failure.
+func orgDomain(d string) string {
+	d = strings.ToLower(strings.TrimSpace(d))
+	if d == "" {
+		return ""
+	}
+	if e, err := publicsuffix.EffectiveTLDPlusOne(d); err == nil {
+		return e
+	}
+	return d
+}
+
+// domainOf extracts the lowercased domain from an address, or "" when it has none.
+func domainOf(addr string) string {
+	if _, dom, ok := strings.Cut(strings.ToLower(strings.TrimSpace(addr)), "@"); ok {
+		return dom
+	}
+	return ""
 }

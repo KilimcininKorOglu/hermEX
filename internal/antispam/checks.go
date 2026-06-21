@@ -6,6 +6,7 @@ import (
 
 	"blitiri.com.ar/go/spf"
 	"github.com/emersion/go-msgauth/dkim"
+	"github.com/emersion/go-msgauth/dmarc"
 )
 
 // realSPF evaluates SPF for the connecting client and maps the RFC 7208 result to
@@ -42,4 +43,14 @@ func realDKIM(raw []byte) []DKIMResult {
 		out = append(out, DKIMResult{Domain: v.Domain, Valid: v.Err == nil})
 	}
 	return out
+}
+
+// realDMARC fetches the From domain's published DMARC policy. ok is false when no
+// record exists (or the lookup errors), which the scorer treats as no policy.
+func realDMARC(domain string) (policy string, ok bool) {
+	rec, err := dmarc.Lookup(domain)
+	if err != nil || rec == nil {
+		return "", false
+	}
+	return string(rec.Policy), true
 }

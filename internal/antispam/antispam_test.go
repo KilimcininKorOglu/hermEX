@@ -57,10 +57,44 @@ func TestScoreSkipsChecksWithoutInputs(t *testing.T) {
 	}
 }
 
-// TestNewWiresChecks proves the production constructor wires both real checks.
+// TestNewWiresChecks proves the production constructor wires all real checks.
 func TestNewWiresChecks(t *testing.T) {
 	s := New(DefaultWeights, 5)
-	if s.checkSPF == nil || s.checkDKIM == nil {
-		t.Fatal("New must wire the real SPF and DKIM checks")
+	if s.checkSPF == nil || s.checkDKIM == nil || s.lookupDMARC == nil {
+		t.Fatal("New must wire the real SPF, DKIM, and DMARC checks")
+	}
+}
+
+// TestScoreDMARCFailEnforced proves an unaligned message under an enforcing DMARC
+// policy adds the DMARC weight and is flagged spam.
+func TestScoreDMARCFailEnforced(t *testing.T) {
+	s := &Scorer{
+		Weights: DefaultWeights, Threshold: 5,
+		checkSPF:    func(net.IP, string, string) AuthResult { return AuthFail },
+		checkDKIM:   func([]byte) []DKIMResult { return nil },
+		lookupDMARC: func(string) (string, bool) { return "reject", true },
+	}
+	v := s.Score(Input{Raw: []byte("x"), ClientIP: net.IPv4(1, 2, 3, 4), MailFrom: "a@evil.example", FromDomain: "bank.example"})
+	if v.DMARC != AuthFail {
+		t.Errorf("DMARC = %s, want fail", v.DMARC)
+	}
+	want := DefaultWeights.SPFFail + DefaultWeights.DKIMFail + DefaultWeights.DMARCFail
+	if v.Score != want || !v.Spam {
+		t.Fatalf("verdict = %+v, want score %d and spam", v, want)
+	}
+}
+
+// TestScoreDMARCAlignedPass proves a DKIM signature on a subdomain of the From
+// domain aligns (relaxed, organizational-domain) and makes DMARC pass even with
+// no SPF.
+func TestScoreDMARCAlignedPass(t *testing.T) {
+	s := &Scorer{
+		Weights: DefaultWeights, Threshold: 100,
+		checkDKIM:   func([]byte) []DKIMResult { return []DKIMResult{{Domain: "mail.bank.example", Valid: true}} },
+		lookupDMARC: func(string) (string, bool) { return "reject", true },
+	}
+	v := s.Score(Input{Raw: []byte("x"), FromDomain: "bank.example"})
+	if v.DMARC != AuthPass {
+		t.Errorf("DMARC = %s, want pass (DKIM aligned by organizational domain)", v.DMARC)
 	}
 }
