@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"embed"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 )
 
@@ -81,6 +83,31 @@ func LoadRules(dataDir string) (*SARuleSet, error) {
 		return EmbeddedRules(), err
 	}
 	return rs, nil
+}
+
+// ConcatRulesDir reads every .cf file in dir (in sorted order) and concatenates
+// them into one ruleset, the form LoadRulesFile parses. It is how the refresh
+// tool turns a directory of upstream rule files (e.g. an sa-update output or a
+// rules checkout) into the single data_dir ruleset. It errors if dir has no .cf.
+func ConcatRulesDir(dir string) ([]byte, error) {
+	matches, err := filepath.Glob(filepath.Join(dir, "*.cf"))
+	if err != nil {
+		return nil, err
+	}
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("no .cf files in %s", dir)
+	}
+	sort.Strings(matches)
+	var b bytes.Buffer
+	for _, m := range matches {
+		data, err := os.ReadFile(m)
+		if err != nil {
+			return nil, err
+		}
+		b.Write(data)
+		b.WriteByte('\n')
+	}
+	return b.Bytes(), nil
 }
 
 // LoadRulesFile parses a .cf ruleset file. A missing file returns (nil, nil) so

@@ -75,3 +75,31 @@ func TestLoadRulesFileMissing(t *testing.T) {
 		t.Errorf("LoadRulesFile(missing) = (%v, %v), want (nil, nil)", rs, err)
 	}
 }
+
+// TestConcatRulesDir proves the refresh helper concatenates a directory's .cf
+// files (sorted) into a parseable ruleset, and errors on a directory with none.
+func TestConcatRulesDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "20_a.cf"), []byte("body A /alpha/\nscore A 1.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "20_b.cf"), []byte("body B /bravo/\nscore B 2.0\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A non-.cf file must be ignored.
+	if err := os.WriteFile(filepath.Join(dir, "README"), []byte("not a rule"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := ConcatRulesDir(dir)
+	if err != nil {
+		t.Fatalf("ConcatRulesDir: %v", err)
+	}
+	if rules, _ := ParseSARules(string(data)).RuleCount(); rules != 2 {
+		t.Errorf("concatenated ruleset has %d rules, want 2 (A and B)", rules)
+	}
+
+	if _, err := ConcatRulesDir(t.TempDir()); err == nil {
+		t.Error("ConcatRulesDir on an empty directory should error")
+	}
+}
