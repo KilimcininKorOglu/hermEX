@@ -21,6 +21,7 @@ import (
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/objectstore"
+	"hermex/internal/publicfolder"
 	"hermex/internal/serve"
 )
 
@@ -52,7 +53,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("hermex-imap: listen %s: %v", addr, err)
 	}
-	srv := &imap.Server{Auth: dir, Hostname: cfg.Hostname, Logger: logger}
+	srv := &imap.Server{Auth: dir, Hostname: cfg.Hostname, Logger: logger, Pub: publicfolder.New(cfg)}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()
 		if err != nil {

@@ -13,12 +13,13 @@ import (
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/objectstore"
+	"hermex/internal/publicfolder"
 )
 
 // capabilities is the untagged CAPABILITY list. LITERAL+ is advertised because
 // the lexer accepts non-synchronizing literals; AUTH=PLAIN because the server
 // implements the SASL PLAIN mechanism.
-const capabilities = "IMAP4rev1 LITERAL+ AUTH=PLAIN"
+const capabilities = "IMAP4rev1 LITERAL+ NAMESPACE AUTH=PLAIN"
 
 // connState is the IMAP connection state (RFC 3501 §3).
 type connState int
@@ -34,8 +35,9 @@ const (
 type Server struct {
 	Auth      directory.Authenticator
 	Hostname  string
-	TLSConfig *tls.Config     // when non-nil, advertise and accept STARTTLS
-	Logger    *logging.Logger // central activity log; nil disables logging
+	TLSConfig *tls.Config           // when non-nil, advertise and accept STARTTLS
+	Logger    *logging.Logger       // central activity log; nil disables logging
+	Pub       *publicfolder.Service // per-domain public folders; nil disables them
 
 	conns lifecycle.ConnGroup
 }
@@ -87,6 +89,9 @@ func (s *Server) handle(nc net.Conn) {
 		if c.st != nil {
 			c.st.Close()
 		}
+		if c.pubStore != nil {
+			c.pubStore.Close()
+		}
 	}()
 
 	c.event(logging.LevelInfo, "conn.accept", logging.Fields{"tls": c.isTLS})
@@ -104,16 +109,18 @@ func (s *Server) handle(nc net.Conn) {
 
 // conn is one IMAP client connection.
 type conn struct {
-	srv      *Server
-	nc       net.Conn // underlying connection, swapped for the TLS conn on STARTTLS
-	rd       *commandReader
-	bw       *bufio.Writer
-	state    connState
-	user     string
-	st       *objectstore.Store
-	sel      *selectedMailbox
-	readOnly bool
-	isTLS    bool
+	srv       *Server
+	nc        net.Conn // underlying connection, swapped for the TLS conn on STARTTLS
+	rd        *commandReader
+	bw        *bufio.Writer
+	state     connState
+	user      string
+	st        *objectstore.Store
+	pubStore  *objectstore.Store // caller's own-domain public store, opened lazily; nil until first public access
+	sel       *selectedMailbox
+	selPublic bool // the current selection lives in pubStore, not st
+	readOnly  bool
+	isTLS     bool
 }
 
 // caps returns the CAPABILITY list for this connection's current state. STARTTLS
@@ -172,6 +179,8 @@ func (c *conn) dispatch(toks []token) {
 		c.cmdList(tag, args, false)
 	case "LSUB":
 		c.cmdList(tag, args, true)
+	case "NAMESPACE":
+		c.cmdNamespace(tag)
 	case "STATUS":
 		c.cmdStatus(tag, args)
 	case "CREATE":
@@ -361,6 +370,10 @@ func (c *conn) cmdSelect(tag string, args []token, examine bool) {
 		c.bad(tag, "SELECT requires a mailbox name")
 		return
 	}
+	if sub, isPub := isPublicName(name); isPub {
+		c.selectPublic(tag, name, sub, examine)
+		return
+	}
 	tree, err := loadFolderTree(c.st)
 	if err != nil {
 		c.no(tag, "cannot read mailbox list")
@@ -370,6 +383,7 @@ func (c *conn) cmdSelect(tag string, args []token, examine bool) {
 	if !found {
 		c.state = stateAuth // a failed SELECT deselects any current mailbox
 		c.sel = nil
+		c.selPublic = false
 		c.no(tag, "no such mailbox")
 		return
 	}
@@ -379,27 +393,10 @@ func (c *conn) cmdSelect(tag string, args []token, examine bool) {
 		return
 	}
 	c.sel = sel
+	c.selPublic = false
 	c.state = stateSelected
 	c.readOnly = examine
-
-	c.untagged("%d EXISTS", sel.maxSeq())
-	c.untagged("0 RECENT")
-	c.untagged(`FLAGS (%s)`, supportedFlagNames())
-	if examine {
-		c.untagged(`OK [PERMANENTFLAGS ()] read-only, no permanent flags`)
-	} else {
-		c.untagged(`OK [PERMANENTFLAGS (%s)] limited`, supportedFlagNames())
-	}
-	c.untagged("OK [UIDVALIDITY %d] validity", sel.uidValidity)
-	c.untagged("OK [UIDNEXT %d] next uid", sel.uidNext)
-	if u := sel.firstUnseen(); u != 0 {
-		c.untagged("OK [UNSEEN %d] first unseen", u)
-	}
-	if examine {
-		c.ok(tag, "[READ-ONLY] EXAMINE completed")
-	} else {
-		c.ok(tag, "[READ-WRITE] SELECT completed")
-	}
+	c.emitSelected(tag, sel, examine)
 }
 
 // --- listing ---
@@ -444,6 +441,7 @@ func (c *conn) cmdList(tag string, args []token, lsub bool) {
 		}
 		c.untagged(`%s (%s) "%s" %s`, verb, attr, hierarchySep, quoteString(n.path))
 	}
+	c.listPublicFolders(verb, full)
 	c.ok(tag, verb+" completed")
 }
 
@@ -695,7 +693,7 @@ func (c *conn) poll() {
 	if c.state != stateSelected || c.sel == nil {
 		return
 	}
-	fresh, err := loadMailbox(c.st, c.sel.id, c.sel.path)
+	fresh, err := loadMailbox(c.curStore(), c.sel.id, c.sel.path)
 	if err != nil {
 		return
 	}

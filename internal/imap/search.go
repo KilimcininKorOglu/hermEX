@@ -32,7 +32,7 @@ func (s *searchCtx) load() {
 		return
 	}
 	s.loaded = true
-	s.raw, _ = s.c.st.GetMessageRaw(s.c.sel.id, s.msg.UID)
+	s.raw, _ = s.c.curStore().GetMessageRaw(s.c.sel.id, s.msg.UID)
 	off := bodyStart(s.raw)
 	tr := textproto.NewReader(bufio.NewReader(bytes.NewReader(s.raw[:off])))
 	s.hdr, _ = tr.ReadMIMEHeader()

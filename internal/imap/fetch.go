@@ -110,7 +110,7 @@ func (c *conn) writeFetch(seq uint32, idx int, items []fetchItem) {
 	var structure *mime.Part
 	loadRaw := func() []byte {
 		if !rawLoaded {
-			raw, _ = c.st.GetMessageRaw(c.sel.id, msg.UID)
+			raw, _ = c.curStore().GetMessageRaw(c.sel.id, msg.UID)
 			rawLoaded = true
 		}
 		return raw
@@ -154,9 +154,11 @@ func (c *conn) writeFetch(seq uint32, idx int, items []fetchItem) {
 		}
 	}
 
-	if setSeen && msg.Flags&objectstore.FlagSeen == 0 {
+	// A read-only selection (EXAMINE, or a public folder the caller cannot post to)
+	// must not implicitly set \Seen — and must never write to the public store.
+	if setSeen && !c.readOnly && msg.Flags&objectstore.FlagSeen == 0 {
 		msg.Flags |= objectstore.FlagSeen
-		c.st.SetMessageFlags(c.sel.id, msg.UID, msg.Flags)
+		c.curStore().SetMessageFlags(c.sel.id, msg.UID, msg.Flags)
 		c.sel.msgs[idx].Flags = msg.Flags
 		if !hasFlagsField(fields) {
 			fields = append(fields, fmt.Sprintf(`FLAGS (%s)`, formatFlags(msg.Flags, false)))

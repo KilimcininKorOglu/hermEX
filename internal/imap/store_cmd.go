@@ -55,7 +55,7 @@ func (c *conn) cmdStore(tag string, args []token, byUID bool) {
 		}
 		newFlags := applyFlagNames(c.sel.msgs[i].Flags, mode, names)
 		if newFlags != c.sel.msgs[i].Flags {
-			if err := c.st.SetMessageFlags(c.sel.id, c.sel.msgs[i].UID, newFlags); err != nil {
+			if err := c.curStore().SetMessageFlags(c.sel.id, c.sel.msgs[i].UID, newFlags); err != nil {
 				continue
 			}
 			c.sel.msgs[i].Flags = newFlags
@@ -129,7 +129,7 @@ func (c *conn) doExpunge(emit bool) {
 	seq := uint32(1)
 	for _, m := range c.sel.msgs {
 		if m.Flags&objectstore.FlagDeleted != 0 {
-			if err := c.st.DeleteMessage(c.sel.id, m.UID); err == nil && emit {
+			if err := c.curStore().DeleteMessage(c.sel.id, m.UID); err == nil && emit {
 				c.untagged("%d EXPUNGE", seq) // removed; the next message takes this slot
 			}
 			continue
@@ -152,6 +152,7 @@ func (c *conn) cmdClose(tag string) {
 		c.doExpunge(false)
 	}
 	c.sel = nil
+	c.selPublic = false
 	c.state = stateAuth
 	c.ok(tag, "CLOSE completed")
 }
@@ -174,14 +175,9 @@ func (c *conn) cmdCopy(tag string, args []token, byUID bool) {
 		return
 	}
 	dest, _ := args[1].str()
-	tree, err := loadFolderTree(c.st)
-	if err != nil {
-		c.no(tag, "cannot read mailbox list")
-		return
-	}
-	node, found := tree.resolve(dest)
-	if !found {
-		c.no(tag, "[TRYCREATE] no such mailbox")
+	destStore, destFID, ok, errText := c.resolveAppendDest(dest)
+	if !ok {
+		c.no(tag, errText)
 		return
 	}
 
@@ -189,6 +185,7 @@ func (c *conn) cmdCopy(tag string, args []token, byUID bool) {
 	if byUID {
 		max = c.sel.maxUID()
 	}
+	src := c.curStore()
 	for i := range c.sel.msgs {
 		key := uint32(i + 1)
 		if byUID {
@@ -197,12 +194,12 @@ func (c *conn) cmdCopy(tag string, args []token, byUID bool) {
 		if !set.contains(key, max) {
 			continue
 		}
-		raw, err := c.st.GetMessageRaw(c.sel.id, c.sel.msgs[i].UID)
+		raw, err := src.GetMessageRaw(c.sel.id, c.sel.msgs[i].UID)
 		if err != nil {
 			c.no(tag, "copy failed")
 			return
 		}
-		if _, err := c.st.AppendMessage(node.info.ID, raw, c.sel.msgs[i].InternalDate, c.sel.msgs[i].Flags); err != nil {
+		if _, err := destStore.AppendMessage(destFID, raw, c.sel.msgs[i].InternalDate, c.sel.msgs[i].Flags); err != nil {
 			c.no(tag, "copy failed")
 			return
 		}
@@ -240,22 +237,19 @@ func (c *conn) cmdAppend(tag string, args []token) {
 		return
 	}
 
-	tree, err := loadFolderTree(c.st)
-	if err != nil {
-		c.no(tag, "cannot read mailbox list")
+	destStore, destFID, ok, errText := c.resolveAppendDest(mailbox)
+	if !ok {
+		c.no(tag, errText)
 		return
 	}
-	node, found := tree.resolve(mailbox)
-	if !found {
-		c.no(tag, "[TRYCREATE] no such mailbox")
-		return
-	}
-	if _, err := c.st.AppendMessage(node.info.ID, []byte(msg), date, flags); err != nil {
+	if _, err := destStore.AppendMessage(destFID, []byte(msg), date, flags); err != nil {
 		c.no(tag, "APPEND failed")
 		return
 	}
-	// If the appended-to mailbox is the selected one, surface the new count.
-	if c.state == stateSelected && c.sel.id == node.info.ID {
+	// Surface the new count only when the destination IS the selected folder. Folder
+	// ids are not unique across the own and public stores, so the selection's store
+	// and id must both match — comparing ids alone would falsely fire across stores.
+	if c.state == stateSelected && c.curStore() == destStore && c.sel.id == destFID {
 		c.poll()
 	}
 	c.ok(tag, "APPEND completed")
