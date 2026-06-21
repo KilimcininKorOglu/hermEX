@@ -2,8 +2,22 @@ package antispam
 
 import (
 	"net"
+	"strings"
 	"testing"
 )
+
+// TestTag proves the verdict is rendered into X-Spam headers prepended to the
+// message, with the original body preserved.
+func TestTag(t *testing.T) {
+	orig := "Subject: hi\r\n\r\nbody"
+	out := string(Tag([]byte(orig), Verdict{Score: 9, Spam: true}))
+	if !strings.Contains(out, "X-Spam-Flag: YES") || !strings.Contains(out, "X-Spam-Score: 9") {
+		t.Fatalf("missing spam headers: %q", out)
+	}
+	if !strings.HasSuffix(out, orig) {
+		t.Errorf("original message not preserved: %q", out)
+	}
+}
 
 // newTestScorer builds a Scorer with injected deterministic checks so the scoring
 // logic is exercised without live DNS.

@@ -8,6 +8,7 @@
 package antispam
 
 import (
+	"fmt"
 	"net"
 	"strings"
 
@@ -46,6 +47,11 @@ type Weights struct {
 
 // DefaultWeights is a conservative starting point; the admin can tune them later.
 var DefaultWeights = Weights{SPFFail: 5, SPFSoftFail: 2, DKIMFail: 3, DMARCFail: 6}
+
+// DefaultThreshold is the score at or above which a message is flagged spam. It
+// is deliberately above any single check so one failure alone never condemns a
+// message; the admin can tune it later.
+const DefaultThreshold = 8
 
 // Verdict is the aggregated result for one message.
 type Verdict struct {
@@ -170,6 +176,22 @@ func orgDomain(d string) string {
 		return e
 	}
 	return d
+}
+
+// Tag prepends advisory X-Spam headers to a raw RFC 5322 message reflecting the
+// verdict, so downstream clients and mailbox rules can act on it. The original is
+// not modified; a new slice is returned.
+func Tag(raw []byte, v Verdict) []byte {
+	status, flag := "No", "NO"
+	if v.Spam {
+		status, flag = "Yes", "YES"
+	}
+	hdr := fmt.Sprintf("X-Spam-Flag: %s\r\nX-Spam-Score: %d\r\nX-Spam-Status: %s, score=%d\r\n",
+		flag, v.Score, status, v.Score)
+	out := make([]byte, 0, len(hdr)+len(raw))
+	out = append(out, hdr...)
+	out = append(out, raw...)
+	return out
 }
 
 // domainOf extracts the lowercased domain from an address, or "" when it has none.

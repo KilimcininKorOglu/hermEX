@@ -5,12 +5,16 @@
 package mta
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"log"
+	"net"
+	"net/mail"
 	"strings"
 	"time"
 
+	"hermex/internal/antispam"
 	"hermex/internal/directory"
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
@@ -19,16 +23,23 @@ import (
 	"hermex/internal/smtp"
 )
 
+// SpamScorer scores an inbound message for spam. *antispam.Scorer satisfies it;
+// it is an interface so the MTA can be exercised with a deterministic scorer.
+type SpamScorer interface {
+	Score(antispam.Input) antispam.Verdict
+}
+
 // Backend is an smtp.Backend that delivers to per-recipient mailbox stores.
 type Backend struct {
 	Accounts directory.Accounts
 	Spool    *relay.Spool    // outbound relay queue; nil disables external relay
 	Logger   *logging.Logger // central activity log; nil disables logging
+	Scorer   SpamScorer      // inbound spam scorer; nil disables scoring
 }
 
 // NewSession implements smtp.Backend.
 func (b *Backend) NewSession(remoteAddr string) (smtp.Session, error) {
-	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr}, nil
+	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer}, nil
 }
 
 type session struct {
@@ -36,6 +47,7 @@ type session struct {
 	spool        *relay.Spool
 	logger       *logging.Logger
 	remoteAddr   string
+	scorer       SpamScorer
 	from         string
 	targets      []target // local recipients, filed into mailboxes
 	relayTargets []string // external recipients, spooled for outbound relay
@@ -317,8 +329,22 @@ func (s *session) Data(r io.Reader) error {
 		return err
 	}
 	received := time.Now()
+	// Inbound (unauthenticated) mail bound for a local mailbox is spam-scored and
+	// the tagged copy is what gets filed. Scoring is fail-open — it never blocks
+	// delivery — and authenticated submission (the user's own outbound) is never
+	// scanned. The relay copy below keeps the untagged original.
+	localRaw := raw
+	if s.scorer != nil && s.authUser == "" && len(s.targets) > 0 {
+		v := s.scorer.Score(antispam.Input{
+			Raw: raw, ClientIP: clientIP(s.remoteAddr), MailFrom: s.from, FromDomain: fromHeaderDomain(raw),
+		})
+		localRaw = antispam.Tag(raw, v)
+		if s.logger != nil {
+			s.logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "spam.scored", RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "score": v.Score, "spam": v.Spam}})
+		}
+	}
 	for _, t := range s.targets {
-		if err := deliver(s.accounts, s.from, t.addr, t.path, raw, received); err != nil {
+		if err := deliver(s.accounts, s.from, t.addr, t.path, localRaw, received); err != nil {
 			s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "delivery.fail", User: t.addr, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}, Err: err.Error()})
 			return err
 		}
@@ -339,6 +365,33 @@ func (s *session) Data(r io.Reader) error {
 
 func (s *session) Reset()        { s.from = ""; s.targets = nil; s.relayTargets = nil }
 func (s *session) Logout() error { return nil }
+
+// clientIP extracts the IP from a "host:port" remote address (nil if unparseable),
+// for SPF and DNS blocklist checks.
+func clientIP(remoteAddr string) net.IP {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	return net.ParseIP(host)
+}
+
+// fromHeaderDomain parses the From header's domain from a raw message for DMARC
+// alignment, or "" when the header is absent or unparseable.
+func fromHeaderDomain(raw []byte) string {
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		return ""
+	}
+	addr, err := mail.ParseAddress(msg.Header.Get("From"))
+	if err != nil {
+		return ""
+	}
+	if at := strings.LastIndex(addr.Address, "@"); at >= 0 {
+		return strings.ToLower(addr.Address[at+1:])
+	}
+	return ""
+}
 
 // Deliver resolves each recipient address to its local mailbox and appends the
 // raw message to that mailbox's INBOX. from is the envelope sender (the

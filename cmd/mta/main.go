@@ -17,6 +17,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 
+	"hermex/internal/antispam"
 	"hermex/internal/config"
 	"hermex/internal/directory"
 	"hermex/internal/health"
@@ -102,7 +103,7 @@ func main() {
 		log.Fatalf("hermex-mta: listen %s: %v", addr, err)
 	}
 
-	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger}, Hostname: cfg.Hostname, Logger: logger}
+	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: antispam.New(antispam.DefaultWeights, antispam.DefaultThreshold)}, Hostname: cfg.Hostname, Logger: logger}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()
 		if err != nil {
