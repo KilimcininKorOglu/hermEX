@@ -3,7 +3,9 @@ module hermex
 go 1.26.2
 
 require (
+	blitiri.com.ar/go/spf v1.5.1
 	github.com/GehirnInc/crypt v0.0.0-20230320061759-8cc1b52080c5
+	github.com/emersion/go-msgauth v0.7.0
 	github.com/go-ldap/ldap/v3 v3.4.13
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/klauspost/compress v1.18.4
