@@ -38,6 +38,14 @@ type fakeDir struct {
 	purgeFiles         bool
 	purgeDomainMissing bool
 
+	// GetDomain returns domainDetail (getDomainMissing => not found); UpdateDomain
+	// records its id and argument (updateDomainMissing => not found)
+	domainDetail        directory.DomainDetail
+	getDomainMissing    bool
+	updatedDomain       int64
+	updateDomainArg     directory.DomainUpdate
+	updateDomainMissing bool
+
 	// captured by AssignDomainToOrg; assignDomainMissing makes it report ok=false
 	assignDomainID, assignOrgID int64
 	assignDomainMissing         bool
@@ -230,6 +238,19 @@ func (f *fakeDir) CreateDomain(name, homedir string) (int64, error) {
 func (f *fakeDir) PurgeDomain(domainID int64, deleteFiles bool) (bool, error) {
 	f.purgedDomain, f.purgeFiles = domainID, deleteFiles
 	return !f.purgeDomainMissing, nil
+}
+func (f *fakeDir) GetDomain(id int64) (directory.DomainDetail, bool, error) {
+	if f.getDomainMissing {
+		return directory.DomainDetail{}, false, nil
+	}
+	return f.domainDetail, true, nil
+}
+func (f *fakeDir) UpdateDomain(id int64, u directory.DomainUpdate) (bool, error) {
+	if f.createErr != nil {
+		return false, f.createErr
+	}
+	f.updatedDomain, f.updateDomainArg = id, u
+	return !f.updateDomainMissing, nil
 }
 func (f *fakeDir) CreateUser(username, _, maildir string) (int64, error) {
 	if f.createErr != nil {

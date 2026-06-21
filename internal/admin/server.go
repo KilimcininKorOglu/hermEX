@@ -33,6 +33,8 @@ type Directory interface {
 	ListUsers() ([]directory.UserInfo, error)
 	ListAliases() ([]directory.AliasInfo, error)
 	CreateDomain(domainname, homedir string) (int64, error)
+	GetDomain(id int64) (directory.DomainDetail, bool, error)
+	UpdateDomain(id int64, u directory.DomainUpdate) (bool, error)
 	PurgeDomain(domainID int64, deleteFiles bool) (bool, error)
 	CreateUser(username, password, maildir string) (int64, error)
 	SetPassword(username, password string) (bool, error)
@@ -139,6 +141,8 @@ func (s *Server) Handler() http.Handler {
 	// domain is a system-level operation, not a domain admin's.
 	mux.Handle("GET /admin/domains", s.protect(http.HandlerFunc(s.handleListDomains)))
 	mux.Handle("POST /admin/domains", s.protect(s.requireSystem(s.handleCreateDomain)))
+	mux.Handle("GET /admin/domains/{domainID}", s.protect(http.HandlerFunc(s.handleGetDomain)))
+	mux.Handle("PUT /admin/domains/{domainID}", s.protect(s.requireSystem(s.handleUpdateDomain)))
 	mux.Handle("DELETE /admin/domains/{domainID}", s.protect(s.requirePurge(s.handleDeleteDomain)))
 	// User list/create: list is scope-filtered, create checks the new user's
 	// domain scope — both in the handler since the target is not a path value.

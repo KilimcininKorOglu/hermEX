@@ -84,6 +84,95 @@ func TestAdminListDomainsScopeFiltered(t *testing.T) {
 	}
 }
 
+// TestAdminGetDomain proves a system admin reads one domain's full record,
+// including its user counts.
+func TestAdminGetDomain(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test", MaxUser: 50, ActiveUsers: 3},
+	}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+	resp := authedGET(t, ts, "/admin/domains/1", session)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get domain status %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "acme.test") || !strings.Contains(string(body), "\"ActiveUsers\":3") {
+		t.Errorf("get domain body = %s, want the detail with counts", body)
+	}
+}
+
+// TestAdminGetDomainScoped proves the single-domain read is scope-gated: a domain
+// admin reads its own domain but is refused another's.
+func TestAdminGetDomainScoped(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7,
+		perms:        []directory.Permission{{Name: directory.PermDomainAdmin, Params: "1"}},
+		domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test"},
+	}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+	if s := statusOf(authedGET(t, ts, "/admin/domains/1", session)); s == http.StatusForbidden {
+		t.Errorf("domain admin denied read of own domain (403)")
+	}
+	if s := statusOf(authedGET(t, ts, "/admin/domains/2", session)); s != http.StatusForbidden {
+		t.Errorf("domain admin read of other domain = %d, want 403", s)
+	}
+}
+
+// TestAdminUpdateDomain proves a system admin edits a domain and that the update
+// is a read-merge: a field omitted from the request keeps its current value
+// rather than being zeroed.
+func TestAdminUpdateDomain(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test", Title: "Keep Me", Tel: "555"},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	resp := authedReq(t, ts, "PUT", "/admin/domains/1", session, csrf, `{"status":1,"maxUser":50}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("update domain status %d, want 204", resp.StatusCode)
+	}
+	if d.updatedDomain != 1 || d.updateDomainArg.Status != 1 || d.updateDomainArg.MaxUser != 50 {
+		t.Errorf("update arg = %+v, want status 1 / maxUser 50", d.updateDomainArg)
+	}
+	if d.updateDomainArg.Title != "Keep Me" || d.updateDomainArg.Tel != "555" {
+		t.Errorf("read-merge zeroed an omitted field: %+v", d.updateDomainArg)
+	}
+}
+
+// TestAdminUpdateDomainNotFound proves editing an unknown domain is a 404.
+func TestAdminUpdateDomainNotFound(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		getDomainMissing: true,
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	if s := statusOf(authedReq(t, ts, "PUT", "/admin/domains/9", session, csrf, `{"status":1}`)); s != http.StatusNotFound {
+		t.Errorf("update unknown domain = %d, want 404", s)
+	}
+}
+
+// TestAdminUpdateDomainReadOnly proves domain edit requires full system authority:
+// a read-only system admin is refused.
+func TestAdminUpdateDomainReadOnly(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7,
+		perms:        []directory.Permission{{Name: directory.PermSystemAdminRO}},
+		domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test"},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	if s := statusOf(authedReq(t, ts, "PUT", "/admin/domains/1", session, csrf, `{"status":1}`)); s != http.StatusForbidden {
+		t.Errorf("read-only admin domain edit = %d, want 403", s)
+	}
+}
+
 // TestAdminCreateDomain proves a system admin provisions a domain whose homedir
 // is derived through the Paths deriver.
 func TestAdminCreateDomain(t *testing.T) {
