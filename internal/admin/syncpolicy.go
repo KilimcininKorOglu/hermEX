@@ -159,6 +159,103 @@ func (s *Server) handleSetDefaultSyncPolicy(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleGetDomainSyncPolicy returns a domain's device-policy override. The route
+// carries the domain id; the directory stores the policy by name, so the domain is
+// resolved first (an unknown id is 404).
+func (s *Server) handleGetDomainSyncPolicy(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid domain id", http.StatusBadRequest)
+		return
+	}
+	dd, found, err := s.dir.GetDomain(id)
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.Error(w, "no such domain", http.StatusNotFound)
+		return
+	}
+	p, err := s.dir.GetDomainSyncPolicy(dd.Name)
+	if err != nil {
+		http.Error(w, "could not read sync policy", http.StatusInternalServerError)
+		return
+	}
+	if p == nil {
+		p = easpolicy.Policy{}
+	}
+	writeJSON(w, p)
+}
+
+// handleSetDomainSyncPolicy replaces a domain's device-policy override. An unknown
+// field is refused so it cannot be stored and then dropped at provisioning.
+func (s *Server) handleSetDomainSyncPolicy(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid domain id", http.StatusBadRequest)
+		return
+	}
+	dd, found, err := s.dir.GetDomain(id)
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.Error(w, "no such domain", http.StatusNotFound)
+		return
+	}
+	var in easpolicy.Policy
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	if err := in.Validate(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if _, err := s.dir.SetDomainSyncPolicy(dd.Name, in); err != nil {
+		http.Error(w, "could not set sync policy: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleUISaveDomainSyncPolicy saves a domain's device-policy override from the
+// domain detail form and returns the refreshed status panel.
+func (s *Server) handleUISaveDomainSyncPolicy(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	data := map[string]any{}
+	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
+	if err != nil {
+		data["Error"] = "Invalid domain id."
+		s.render(w, "user-status", data)
+		return
+	}
+	dd, found, err := s.dir.GetDomain(id)
+	switch {
+	case err != nil:
+		data["Error"] = "Server error."
+	case !found:
+		data["Error"] = "No such domain."
+	default:
+		p, perr := policyFromForm(r)
+		switch {
+		case perr != nil:
+			data["Error"] = "Invalid value: " + perr.Error()
+		default:
+			if _, err := s.dir.SetDomainSyncPolicy(dd.Name, p); err != nil {
+				data["Error"] = "Could not save sync policy: " + err.Error()
+			} else {
+				data["Saved"] = true
+			}
+		}
+	}
+	s.render(w, "user-status", data)
+}
+
 // handleUISyncPolicy renders the server-default device-policy editor page.
 func (s *Server) handleUISyncPolicy(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {

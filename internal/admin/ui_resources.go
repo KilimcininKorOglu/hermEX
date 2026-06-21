@@ -80,8 +80,10 @@ func (s *Server) handleUIDomainDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	orgs, _ := s.dir.ListOrgs()
+	policy, _ := s.dir.GetDomainSyncPolicy(dd.Name)
 	s.render(w, "domain_detail.html", map[string]any{
 		"Nav": "domains", "CSRF": csrfCookieValue(r), "Domain": dd, "Orgs": orgs,
+		"PolicyFields": policyView(policy),
 	})
 }
 

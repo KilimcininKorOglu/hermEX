@@ -26,12 +26,18 @@ type fakeDir struct {
 	aliases           []directory.AliasInfo
 	ldap              map[int64]directory.LDAPConfig
 	defaultSyncPolicy easpolicy.Policy
-	fetchmail         map[string][]directory.FetchmailEntry
-	nextFMID          int64
-	orgs              map[int64]directory.OrgInfo
-	nextOrgID         int64
-	namedRoles        map[int64]directory.RoleDetail
-	nextRoleID        int64
+
+	// domain device-policy override: GetDomainSyncPolicy returns domainSyncPolicy;
+	// SetDomainSyncPolicy records it and the domain (domainSyncPolicyMissing => not found)
+	domainSyncPolicy          easpolicy.Policy
+	setDomainSyncPolicyDomain string
+	domainSyncPolicyMissing   bool
+	fetchmail                 map[string][]directory.FetchmailEntry
+	nextFMID                  int64
+	orgs                      map[int64]directory.OrgInfo
+	nextOrgID                 int64
+	namedRoles                map[int64]directory.RoleDetail
+	nextRoleID                int64
 
 	// captured by PurgeDomain; purgeDomainMissing makes it report ok=false
 	purgedDomain       int64
@@ -340,6 +346,13 @@ func (f *fakeDir) GetDefaultSyncPolicy() (easpolicy.Policy, error) {
 func (f *fakeDir) SetDefaultSyncPolicy(p easpolicy.Policy) error {
 	f.defaultSyncPolicy = p
 	return nil
+}
+func (f *fakeDir) GetDomainSyncPolicy(string) (easpolicy.Policy, error) {
+	return f.domainSyncPolicy, nil
+}
+func (f *fakeDir) SetDomainSyncPolicy(domain string, p easpolicy.Policy) (bool, error) {
+	f.setDomainSyncPolicyDomain, f.domainSyncPolicy = domain, p
+	return !f.domainSyncPolicyMissing, nil
 }
 func (f *fakeDir) ListFetchmail(mailbox string) ([]directory.FetchmailEntry, error) {
 	return f.fetchmail[mailbox], nil
