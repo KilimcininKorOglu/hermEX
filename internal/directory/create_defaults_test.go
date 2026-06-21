@@ -2,8 +2,6 @@ package directory
 
 import "testing"
 
-func ptr[T any](v T) *T { return &v }
-
 // TestCreateDefaultsRoundTrip proves a scope's defaults store and read back, and
 // that a per-domain scope is independent of the system scope.
 func TestCreateDefaultsRoundTrip(t *testing.T) {
@@ -20,7 +18,7 @@ func TestCreateDefaultsRoundTrip(t *testing.T) {
 
 	sys := CreateDefaults{
 		Domain: DomainCreateDefaults{MaxUser: 50},
-		User:   UserCreateDefaults{Lang: ptr("tr"), Web: ptr(false), StorageKB: ptr(int64(1024))},
+		User:   UserCreateDefaults{Lang: new("tr"), Web: new(false), StorageKB: new(int64(1024))},
 	}
 	if err := d.SetCreateDefaults(0, sys); err != nil {
 		t.Fatal(err)
@@ -35,7 +33,7 @@ func TestCreateDefaultsRoundTrip(t *testing.T) {
 	}
 
 	// A per-domain scope is stored independently.
-	if err := d.SetCreateDefaults(5, CreateDefaults{User: UserCreateDefaults{EAS: ptr(false)}}); err != nil {
+	if err := d.SetCreateDefaults(5, CreateDefaults{User: UserCreateDefaults{EAS: new(false)}}); err != nil {
 		t.Fatal(err)
 	}
 	if dom, ok, _ := d.GetCreateDefaults(5); !ok || dom.User.EAS == nil || *dom.User.EAS != false {
@@ -69,7 +67,7 @@ func TestEffectiveUserDefaults(t *testing.T) {
 
 	// System layer turns Web off, sets lang and a storage quota.
 	if err := d.SetCreateDefaults(0, CreateDefaults{
-		User: UserCreateDefaults{Lang: ptr("tr"), Web: ptr(false), StorageKB: ptr(int64(2048))},
+		User: UserCreateDefaults{Lang: new("tr"), Web: new(false), StorageKB: new(int64(2048))},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +78,7 @@ func TestEffectiveUserDefaults(t *testing.T) {
 
 	// Domain 5 re-enables Web and turns EAS off; lang/quota inherit from system.
 	if err := d.SetCreateDefaults(5, CreateDefaults{
-		User: UserCreateDefaults{Web: ptr(true), EAS: ptr(false)},
+		User: UserCreateDefaults{Web: new(true), EAS: new(false)},
 	}); err != nil {
 		t.Fatal(err)
 	}
