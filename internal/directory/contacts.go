@@ -137,3 +137,33 @@ SELECT u.username, dn.propval_str, dm.domainname
 	}
 	return out, rows.Err()
 }
+
+// ListContactsInDomain returns one domain's mail contacts, ordered by address,
+// for the per-domain admin views.
+func (d *SQLDirectory) ListContactsInDomain(domainID int64) ([]ContactInfo, error) {
+	rows, err := d.db.Query(`
+SELECT u.username, dn.propval_str, dm.domainname
+  FROM users u
+  JOIN domains dm ON dm.id = u.domain_id
+  LEFT JOIN user_properties dn ON dn.user_id = u.id AND dn.proptag = ? AND dn.order_id = 1
+ WHERE u.display_type = ? AND u.domain_id = ?
+ ORDER BY u.username`, prDisplayName, dtContact, domainID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ContactInfo
+	for rows.Next() {
+		var c ContactInfo
+		var name sql.NullString
+		if err := rows.Scan(&c.Address, &name, &c.Domain); err != nil {
+			return nil, err
+		}
+		c.DisplayName = c.Address
+		if name.Valid && name.String != "" {
+			c.DisplayName = name.String
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}

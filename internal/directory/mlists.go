@@ -263,6 +263,26 @@ func (d *SQLDirectory) ListMLists() ([]MListInfo, error) {
 	return out, rows.Err()
 }
 
+// ListMListsInDomain returns one domain's distribution lists, ordered by address,
+// for the per-domain admin views.
+func (d *SQLDirectory) ListMListsInDomain(domainID int64) ([]MListInfo, error) {
+	rows, err := d.db.Query(
+		`SELECT id, listname, list_type, list_privilege FROM mlists WHERE domain_id = ? ORDER BY listname`, domainID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MListInfo
+	for rows.Next() {
+		var m MListInfo
+		if err := rows.Scan(&m.ID, &m.Listname, &m.ListType, &m.ListPriv); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 // SetMembers replaces a normal-type list's explicit members with the given set
 // (lowercased, trimmed, de-duplicated, blanks dropped), in one transaction,
 // reporting whether the list existed.

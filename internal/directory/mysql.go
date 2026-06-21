@@ -407,6 +407,28 @@ func (d *SQLDirectory) ListUsers() ([]UserInfo, error) {
 	return out, rows.Err()
 }
 
+// ListUsersInDomain returns the users of one domain, ordered by name, for the
+// per-domain admin views.
+func (d *SQLDirectory) ListUsersInDomain(domainID int64) ([]UserInfo, error) {
+	rows, err := d.db.Query(
+		`SELECT id, username, domain_id, address_status, externid IS NOT NULL FROM users WHERE domain_id = ? ORDER BY username`, domainID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []UserInfo
+	for rows.Next() {
+		var ui UserInfo
+		var ldap int
+		if err := rows.Scan(&ui.ID, &ui.Username, &ui.DomainID, &ui.Status, &ldap); err != nil {
+			return nil, err
+		}
+		ui.LDAP = ldap != 0
+		out = append(out, ui)
+	}
+	return out, rows.Err()
+}
+
 // CreateDomain inserts a domain and returns its id, creating its homedir on disk.
 func (d *SQLDirectory) CreateDomain(domainname, homedir string) (int64, error) {
 	res, err := d.db.Exec(
