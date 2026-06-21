@@ -155,6 +155,53 @@ func TestCreateUserMaxUser(t *testing.T) {
 	}
 }
 
+// TestSchemaUpgradeAddsDomainColumns proves the idempotent ALTERs actually upgrade
+// a pre-existing domains table that lacks the new columns — the path no fresh-DB
+// test exercises (CREATE TABLE already carries them there). It drops the added
+// columns to simulate an old database, re-runs EnsureSchema, then confirms the
+// columns are back by driving the operations that read them: CreateUser selects
+// max_user (so every user creation depends on this upgrade), GetDomain selects all
+// of them, and GetDomainSyncPolicy selects sync_policy.
+func TestSchemaUpgradeAddsDomainColumns(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	cleanTables(t, db)
+
+	// Simulate a database created before the columns existed.
+	for _, col := range []string{"max_user", "title", "address", "admin_name", "tel", "sync_policy"} {
+		if _, err := db.Exec("ALTER TABLE domains DROP COLUMN IF EXISTS " + col); err != nil {
+			t.Fatalf("drop column %s: %v", col, err)
+		}
+	}
+
+	// The upgrade must re-add every column.
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatalf("upgrade EnsureSchema: %v", err)
+	}
+
+	root := t.TempDir()
+	id, err := d.CreateDomain("acme.test", filepath.Join(root, "acme.test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// CreateUser reads max_user — this fails outright if the column was not re-added.
+	if _, err := d.CreateUser("u@acme.test", "pw", filepath.Join(root, "u")); err != nil {
+		t.Fatalf("CreateUser after upgrade: %v", err)
+	}
+	if ok, err := d.UpdateDomain(id, DomainUpdate{MaxUser: 5, Title: "Acme"}); err != nil || !ok {
+		t.Fatalf("UpdateDomain after upgrade = %v, %v", ok, err)
+	}
+	if dd, ok, err := d.GetDomain(id); err != nil || !ok || dd.MaxUser != 5 || dd.Title != "Acme" {
+		t.Fatalf("GetDomain after upgrade = %+v, ok %v, err %v", dd, ok, err)
+	}
+	if ok, err := d.SetDomainSyncPolicy("acme.test", easpolicy.Policy{"DevicePasswordEnabled": 1}); err != nil || !ok {
+		t.Fatalf("SetDomainSyncPolicy after upgrade = %v, %v", ok, err)
+	}
+}
+
 // TestDomainSyncPolicyRoundTrip proves a domain's device-policy override round-trips
 // by domain name, that an empty policy clears it, and that an unknown domain is
 // reported as not found.
