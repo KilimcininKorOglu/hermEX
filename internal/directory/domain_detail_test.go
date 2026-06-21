@@ -170,9 +170,16 @@ func TestSchemaUpgradeAddsDomainColumns(t *testing.T) {
 	}
 	cleanTables(t, db)
 
-	// Simulate a database created before the columns existed.
+	// Simulate a database created before the columns existed. The drop rebuilds the
+	// table (ALGORITHM=COPY) instead of MariaDB's default instant DROP: an instant
+	// drop leaves per-column metadata that the matching instant re-add (EnsureSchema
+	// below) compounds, and against the persistent test database this accumulates
+	// across runs until it crosses the InnoDB row-size limit and every EnsureSchema
+	// fails with "Row size too large". A copy rebuild leaves the table clean each
+	// run, and also more faithfully mirrors an old database (built before instant
+	// DDL existed).
 	for _, col := range []string{"max_user", "title", "address", "admin_name", "tel", "sync_policy"} {
-		if _, err := db.Exec("ALTER TABLE domains DROP COLUMN IF EXISTS " + col); err != nil {
+		if _, err := db.Exec("ALTER TABLE domains DROP COLUMN IF EXISTS " + col + ", ALGORITHM=COPY"); err != nil {
 			t.Fatalf("drop column %s: %v", col, err)
 		}
 	}
