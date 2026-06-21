@@ -18,7 +18,7 @@
 <table class="grid">
 <thead><tr><th>Domain</th><th>Organization</th><th>Status</th><th></th></tr></thead>
 <tbody>
-{{range .Domains}}<tr><td>{{.Name}}</td><td>{{.OrgID}}</td><td>{{if eq .Status 0}}Active{{else}}Suspended{{end}}</td>
+{{range .Domains}}<tr><td><a href="/admin/ui/domains/{{.ID}}">{{.Name}}</a></td><td>{{.OrgID}}</td><td>{{if eq .Status 0}}Active{{else}}Suspended{{end}}</td>
 <td><form hx-post="/admin/ui/domains/{{.ID}}/purge" hx-target="#domains-panel" hx-swap="outerHTML"
       hx-confirm="Purge {{.Name}}? This permanently removes the domain and every user, alias, and list in it."
       hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>

@@ -1,0 +1,50 @@
+{{define "domain_detail.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>{{.Domain.Name}}</h1>
+<p><a href="/admin/ui/domains">&larr; Back to domains</a></p>
+
+<h2>Details</h2>
+<form class="domain-form" hx-put="/admin/ui/domains/{{.Domain.ID}}" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Domain <input type="text" value="{{.Domain.Name}}" disabled></label>
+<label>Status
+<select name="status">
+<option value="0"{{if eq .Domain.Status 0}} selected{{end}}>Active</option>
+<option value="1"{{if eq .Domain.Status 1}} selected{{end}}>Suspended</option>
+</select>
+</label>
+<label>Organization
+<select name="org">
+<option value="0"{{if eq .Domain.OrgID 0}} selected{{end}}>None</option>
+{{range .Orgs}}<option value="{{.ID}}"{{if eq .ID $.Domain.OrgID}} selected{{end}}>{{.Name}}</option>
+{{end}}
+</select>
+</label>
+<label>Maximum users <input type="number" name="maxUser" value="{{.Domain.MaxUser}}" min="0"> <small>(0 = unlimited)</small></label>
+<label>Title <input type="text" name="title" value="{{.Domain.Title}}" maxlength="128"></label>
+<label>Address <input type="text" name="address" value="{{.Domain.Address}}" maxlength="128"></label>
+<label>Administrator <input type="text" name="adminName" value="{{.Domain.AdminName}}" maxlength="32"></label>
+<label>Telephone <input type="text" name="tel" value="{{.Domain.Tel}}" maxlength="64"></label>
+<button type="submit">Save</button>
+</form>
+{{template "user-status" .}}
+
+<h2>Usage</h2>
+<table class="grid">
+<thead><tr><th>Active</th><th>Inactive</th><th>Virtual</th></tr></thead>
+<tbody><tr><td>{{.Domain.ActiveUsers}}</td><td>{{.Domain.InactiveUsers}}</td><td>{{.Domain.VirtualUsers}}</td></tr></tbody>
+</table>
+
+<h2>Delete</h2>
+<form class="delete-form" hx-post="/admin/ui/domains/{{.Domain.ID}}/purge"
+      hx-confirm="Purge {{.Domain.Name}}? This permanently removes the domain and every user, alias, and list in it."
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<input type="hidden" name="from" value="detail">
+<label class="check"><input type="checkbox" name="deleteFiles" value="true"> delete files</label>
+<button type="submit" class="danger">Purge domain</button>
+</form>
+</main>
+</div>
+{{template "foot" .}}{{end}}
