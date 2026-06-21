@@ -244,8 +244,9 @@ func TestSchemaBaselineAdoption(t *testing.T) {
 		t.Fatalf("baseline adoption: %v", err)
 	}
 	var ver int
-	if err := db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&ver); err != nil || ver != 1 {
-		t.Fatalf("recorded version = %d (err %v), want 1", ver, err)
+	want := directoryMigrations[len(directoryMigrations)-1].Version // the latest migration
+	if err := db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&ver); err != nil || ver != want {
+		t.Fatalf("recorded version = %d (err %v), want %d (the latest migration)", ver, err, want)
 	}
 	// The existing domain — and so all data — survived the adoption.
 	if dd, ok, err := d.GetDomain(id); err != nil || !ok || dd.Name != "base.test" {
