@@ -62,6 +62,53 @@ func TestOpenCreatesSchema(t *testing.T) {
 	}
 }
 
+// setObjectVersion overwrites the recorded object-store schema version directly,
+// to simulate a database written by a different binary.
+func setObjectVersion(t *testing.T, dir string, v int) {
+	t.Helper()
+	db, err := sql.Open("sqlite", dsn(filepath.Join(dir, "objects.sqlite3")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`UPDATE configurations SET config_value=? WHERE config_id=?`, v, cfgSchemaVersion); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestOpenRefusesNewerSchema proves a store recorded newer than this binary is
+// refused rather than opened — the downgrade guard that protects data written
+// under a schema the binary does not understand.
+func TestOpenRefusesNewerSchema(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "future")
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	setObjectVersion(t, dir, objectSchemaVersion+1)
+	if s, err := Open(dir); err == nil {
+		s.Close()
+		t.Fatalf("opened a store at version %d (binary supports %d); want refusal", objectSchemaVersion+1, objectSchemaVersion)
+	}
+}
+
+// TestOpenRefusesPreBaselineSchema proves a store below the baseline — a
+// disposable pre-migration dev schema — is still refused.
+func TestOpenRefusesPreBaselineSchema(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "ancient")
+	s, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	setObjectVersion(t, dir, objectSchemaVersion-1)
+	if s, err := Open(dir); err == nil {
+		s.Close()
+		t.Fatalf("opened a pre-baseline store at version %d; want refusal", objectSchemaVersion-1)
+	}
+}
+
 func TestReopenIsIdempotent(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "bob")
 	s, err := Open(dir)

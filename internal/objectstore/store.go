@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
+	"hermex/internal/migrate"
 
 	_ "modernc.org/sqlite"
 )
@@ -214,8 +216,10 @@ func (s *Store) ensureObjectSchema() error {
 	var name string
 	err := s.objdb.QueryRow(
 		`SELECT name FROM sqlite_master WHERE type='table' AND name='configurations'`).Scan(&name)
-	if err == sql.ErrNoRows {
-		for _, stmt := range objectDDL {
+	switch {
+	case err == sql.ErrNoRows:
+		// Fresh store: create the baseline schema, stamp its version, and seed.
+		for _, stmt := range objectBaseline {
 			if _, err := s.objdb.Exec(stmt); err != nil {
 				return fmt.Errorf("exec %q: %w", firstLine(stmt), err)
 			}
@@ -231,51 +235,86 @@ func (s *Store) ensureObjectSchema() error {
 		}
 		if s.seedBuiltins {
 			if s.kind == storePublic {
-				return s.seedPublicStore(guid)
+				if err := s.seedPublicStore(guid); err != nil {
+					return err
+				}
+			} else if err := s.seedMailbox(guid); err != nil {
+				return err
 			}
-			return s.seedMailbox(guid)
 		}
-		return nil
-	}
-	if err != nil {
+	case err != nil:
 		return err
+	default:
+		// Existing store: a version below the baseline is a pre-migration dev
+		// schema (disposable, never deployed), so it is still refused. Versions at
+		// or above the baseline are carried forward by the runner below.
+		var v int
+		if err := s.objdb.QueryRow(
+			`SELECT config_value FROM configurations WHERE config_id=?`, cfgSchemaVersion).Scan(&v); err != nil {
+			return fmt.Errorf("read schema version: %w", err)
+		}
+		if v < objectSchemaVersion {
+			return fmt.Errorf("schema version %d unsupported (want %d)", v, objectSchemaVersion)
+		}
 	}
-	var v int
-	if err := s.objdb.QueryRow(
-		`SELECT config_value FROM configurations WHERE config_id=?`, cfgSchemaVersion).Scan(&v); err != nil {
-		return fmt.Errorf("read schema version: %w", err)
+	// Fresh and existing stores converge here: apply any migrations beyond the
+	// baseline once, and refuse a store recorded newer than this binary.
+	return migrate.Run(context.Background(), s.objectDriver(), objectSchemaVersion, objectMigrations)
+}
+
+// objectDriver migrates objects.sqlite3, whose schema version lives in the
+// configurations table rather than PRAGMA user_version.
+func (s *Store) objectDriver() *migrate.SQLiteDriver {
+	return &migrate.SQLiteDriver{
+		DB: s.objdb,
+		Ver: migrate.SQLiteVersion{
+			Read: func(ctx context.Context, c *sql.Conn) (int, error) {
+				var v int
+				err := c.QueryRowContext(ctx,
+					`SELECT config_value FROM configurations WHERE config_id=?`, cfgSchemaVersion).Scan(&v)
+				return v, err
+			},
+			Write: func(ctx context.Context, c *sql.Conn, v int) error {
+				_, err := c.ExecContext(ctx,
+					`UPDATE configurations SET config_value=? WHERE config_id=?`, v, cfgSchemaVersion)
+				return err
+			},
+		},
 	}
-	if v != objectSchemaVersion {
-		return fmt.Errorf("schema version %d unsupported (want %d)", v, objectSchemaVersion)
-	}
-	return nil
 }
 
 func (s *Store) ensureIndexSchema() error {
 	var name string
 	err := s.idxdb.QueryRow(
 		`SELECT name FROM sqlite_master WHERE type='table' AND name='folders'`).Scan(&name)
-	if err == sql.ErrNoRows {
-		for _, stmt := range indexDDL {
+	switch {
+	case err == sql.ErrNoRows:
+		// Fresh index: create the baseline schema and stamp its version.
+		for _, stmt := range indexBaseline {
 			if _, err := s.idxdb.Exec(stmt); err != nil {
 				return fmt.Errorf("exec %q: %w", firstLine(stmt), err)
 			}
 		}
 		// PRAGMA does not accept bound parameters; the value is a trusted constant.
-		_, err := s.idxdb.Exec(fmt.Sprintf("PRAGMA user_version=%d", indexSchemaVersion))
+		if _, err := s.idxdb.Exec(fmt.Sprintf("PRAGMA user_version=%d", indexSchemaVersion)); err != nil {
+			return err
+		}
+	case err != nil:
 		return err
+	default:
+		// Existing index: refuse a pre-baseline dev schema; carry the rest forward.
+		var v int
+		if err := s.idxdb.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
+			return err
+		}
+		if v < indexSchemaVersion {
+			return fmt.Errorf("schema version %d unsupported (want %d)", v, indexSchemaVersion)
+		}
 	}
-	if err != nil {
-		return err
-	}
-	var v int
-	if err := s.idxdb.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
-		return err
-	}
-	if v != indexSchemaVersion {
-		return fmt.Errorf("schema version %d unsupported (want %d)", v, indexSchemaVersion)
-	}
-	return nil
+	// Fresh and existing indexes converge here: apply any migrations beyond the
+	// baseline once, and refuse an index recorded newer than this binary.
+	return migrate.Run(context.Background(),
+		&migrate.SQLiteDriver{DB: s.idxdb, Ver: migrate.UserVersion()}, indexSchemaVersion, indexMigrations)
 }
 
 // firstLine returns the first non-blank line of a SQL statement for error
