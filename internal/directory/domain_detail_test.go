@@ -110,6 +110,49 @@ func TestDomainStatusEnforcement(t *testing.T) {
 	}
 }
 
+// TestCreateUserMaxUser proves the domain mailbox cap is enforced at user
+// creation: max_user 0 is unlimited (the default, so existing domains are not
+// suddenly closed), a positive cap rejects creation once reached, and raising or
+// clearing the cap reopens creation.
+func TestCreateUserMaxUser(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	cleanTables(t, db)
+	root := t.TempDir()
+
+	id, err := d.CreateDomain("acme.test", filepath.Join(root, "acme.test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Default max_user 0 means unlimited — creation is not blocked.
+	if _, err := d.CreateUser("u1@acme.test", "pw", filepath.Join(root, "u1")); err != nil {
+		t.Fatalf("max_user 0 (unlimited) blocked a create: %v", err)
+	}
+
+	// Cap at 2: one more is allowed (count 1 < 2), then the next is refused.
+	if ok, err := d.UpdateDomain(id, DomainUpdate{MaxUser: 2}); err != nil || !ok {
+		t.Fatalf("set max_user = %v, %v", ok, err)
+	}
+	if _, err := d.CreateUser("u2@acme.test", "pw", filepath.Join(root, "u2")); err != nil {
+		t.Fatalf("create within cap blocked: %v", err)
+	}
+	if _, err := d.CreateUser("u3@acme.test", "pw", filepath.Join(root, "u3")); err == nil {
+		t.Error("create over the cap succeeded, want the limit error")
+	}
+
+	// Clearing the cap reopens creation.
+	if ok, err := d.UpdateDomain(id, DomainUpdate{MaxUser: 0}); err != nil || !ok {
+		t.Fatalf("clear max_user = %v, %v", ok, err)
+	}
+	if _, err := d.CreateUser("u3@acme.test", "pw", filepath.Join(root, "u3")); err != nil {
+		t.Errorf("create after clearing the cap blocked: %v", err)
+	}
+}
+
 // TestGetUpdateDomainUnknown proves an unknown domain id is reported as not found
 // rather than as an error or a phantom success.
 func TestGetUpdateDomainUnknown(t *testing.T) {

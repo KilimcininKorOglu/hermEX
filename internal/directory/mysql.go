@@ -514,13 +514,24 @@ func (d *SQLDirectory) CreateUser(username, password, maildir string) (int64, er
 		return 0, errors.New("directory: username must be an email address")
 	}
 	domain := username[at+1:]
-	var domainID int64
-	err := d.db.QueryRow(`SELECT id FROM domains WHERE domainname = ?`, domain).Scan(&domainID)
+	var domainID, maxUser int64
+	err := d.db.QueryRow(`SELECT id, max_user FROM domains WHERE domainname = ?`, domain).Scan(&domainID, &maxUser)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, fmt.Errorf("directory: domain %q not found", domain)
 	}
 	if err != nil {
 		return 0, err
+	}
+	// Enforce the domain's mailbox cap (0 = unlimited). The count is every user
+	// row in the domain, matching the reference, so distribution lists count too.
+	if maxUser > 0 {
+		var count int64
+		if err := d.db.QueryRow(`SELECT COUNT(*) FROM users WHERE domain_id = ?`, domainID).Scan(&count); err != nil {
+			return 0, err
+		}
+		if count >= maxUser {
+			return 0, fmt.Errorf("directory: domain %q has reached its user limit of %d", domain, maxUser)
+		}
 	}
 	hash, err := sqlCryptNewHash(password)
 	if err != nil {
