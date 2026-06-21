@@ -195,6 +195,30 @@ var directoryDDL = []string{
 		PRIMARY KEY (org_id)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
+	// active_sessions is the live ActiveSync telemetry table: the EAS server upserts
+	// one row per in-flight request (keyed by a synthetic per-connection id, never
+	// the OS pid — a single Go process would collapse concurrent sessions onto one
+	// row), refreshing last_update while it runs and stamping ended_at when it
+	// finishes. The admin "Mobile devices" monitor reads non-stale rows; a periodic
+	// sweep deletes aged rows. Timestamps are unix seconds.
+	`CREATE TABLE IF NOT EXISTS active_sessions (
+		session_id  VARCHAR(64)  NOT NULL,
+		username    VARCHAR(320) NOT NULL DEFAULT '',
+		device_id   VARCHAR(64)  NOT NULL DEFAULT '',
+		device_type VARCHAR(64)  NOT NULL DEFAULT '',
+		user_agent  VARCHAR(255) NOT NULL DEFAULT '',
+		ip          VARCHAR(64)  NOT NULL DEFAULT '',
+		command     VARCHAR(32)  NOT NULL DEFAULT '',
+		as_version  VARCHAR(16)  NOT NULL DEFAULT '',
+		start_at    BIGINT       NOT NULL DEFAULT 0,
+		last_update BIGINT       NOT NULL DEFAULT 0,
+		ended_at    BIGINT       NOT NULL DEFAULT 0,
+		push        TINYINT(1)   NOT NULL DEFAULT 0,
+		addinfo     VARCHAR(128) NOT NULL DEFAULT '',
+		PRIMARY KEY (session_id),
+		KEY last_update (last_update)
+	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
 	// create_defaults holds the default parameters pre-filled into the new-domain
 	// and new-user forms, as a JSON object {domain:{...},user:{...}}, keyed by
 	// scope: scope_id 0 is the system-wide default, a nonzero scope_id is a
