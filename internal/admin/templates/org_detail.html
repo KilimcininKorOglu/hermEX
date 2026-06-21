@@ -1,0 +1,50 @@
+{{define "org_detail.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>{{.Org.Name}}</h1>
+<p><a href="/admin/ui/orgs">&larr; Back to organizations</a></p>
+
+<h2>Details</h2>
+<form class="org-form" hx-put="/admin/ui/orgs/{{.Org.ID}}" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Name <input type="text" name="name" value="{{.Org.Name}}" maxlength="32" required></label>
+<label>Description <input type="text" name="description" value="{{.Org.Description}}"></label>
+<button type="submit">Save</button>
+</form>
+{{template "user-status" .}}
+
+<h2>Domains</h2>
+<p>One LDAP directory serves every domain in an organization; a domain that needs a different directory belongs in its own organization. Edit a directory under <a href="/admin/ui/ldap">Directory Sync</a>.</p>
+{{template "org-domains-panel" .}}
+
+<h2>Delete</h2>
+<form class="delete-form" hx-post="/admin/ui/orgs/{{.Org.ID}}/delete" hx-confirm="Delete {{.Org.Name}}? Its domains become organizationless and its LDAP config, sync policy, and org-admin grants are removed."
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<button type="submit" class="danger">Delete organization</button>
+</form>
+</main>
+</div>
+{{template "foot" .}}{{end}}
+
+{{define "org-domains-panel"}}<div id="org-domains-panel">
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<table class="grid">
+<thead><tr><th>Domain</th><th></th></tr></thead>
+<tbody>
+{{range .Attached}}<tr><td>{{.Name}}</td>
+<td><button class="danger" hx-post="/admin/ui/orgs/{{$.OrgID}}/domains/{{.ID}}/delete" hx-target="#org-domains-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>Remove</button></td></tr>
+{{else}}<tr><td colspan="2" class="empty">No domains in this organization.</td></tr>
+{{end}}
+</tbody>
+</table>
+<form class="add-domain-form" hx-post="/admin/ui/orgs/{{.OrgID}}/domains" hx-target="#org-domains-panel" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<select name="domainID">
+{{range .Available}}<option value="{{.ID}}">{{.Name}}</option>
+{{else}}<option value="">No unassigned domains</option>
+{{end}}
+</select>
+<button type="submit">Add domain</button>
+</form>
+</div>{{end}}

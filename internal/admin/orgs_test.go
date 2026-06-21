@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -146,6 +147,89 @@ func TestAdminOrgRequiresSystem(t *testing.T) {
 	del.Body.Close()
 	if get.StatusCode != http.StatusForbidden || post.StatusCode != http.StatusForbidden || del.StatusCode != http.StatusForbidden {
 		t.Errorf("domain-admin org access = GET %d / POST %d / DELETE %d, want all 403", get.StatusCode, post.StatusCode, del.StatusCode)
+	}
+}
+
+// TestUIOrgsPage proves the organizations page lists a seeded organization.
+func TestUIOrgsPage(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		orgs:   map[int64]directory.OrgInfo{1: {ID: 1, Name: "Acme", Description: "desc", DomainCount: 2}},
+	}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+	resp := authedGET(t, ts, "/admin/ui/orgs", session)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Acme") {
+		t.Errorf("orgs page = %d, body lacks the org: %s", resp.StatusCode, body)
+	}
+}
+
+// TestUIOrgCreate proves the create form stores an org and returns the refreshed
+// panel showing it.
+func TestUIOrgCreate(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	resp := htmxPOST(t, ts, "/admin/ui/orgs", session, csrf, url.Values{"name": {"Acme"}, "description": {"d"}})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create status %d, want 200", resp.StatusCode)
+	}
+	if len(d.orgs) != 1 {
+		t.Fatalf("org not stored: %v", d.orgs)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "Acme") {
+		t.Errorf("refreshed panel missing the new org: %s", body)
+	}
+}
+
+// TestUIOrgDetailAttach proves the detail page lists an unassigned domain and the
+// add-domain form reaches the directory with the right ids.
+func TestUIOrgDetailAttach(t *testing.T) {
+	d := &fakeDir{
+		authOK:  true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		orgs:    map[int64]directory.OrgInfo{1: {ID: 1, Name: "Acme"}},
+		domains: []directory.DomainInfo{{ID: 42, Name: "acme.test", OrgID: 0}},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	get := authedGET(t, ts, "/admin/ui/orgs/1", session)
+	gbody, _ := io.ReadAll(get.Body)
+	get.Body.Close()
+	if get.StatusCode != http.StatusOK || !strings.Contains(string(gbody), "acme.test") {
+		t.Errorf("detail = %d, body lacks the available domain: %s", get.StatusCode, gbody)
+	}
+
+	att := htmxPOST(t, ts, "/admin/ui/orgs/1/domains", session, csrf, url.Values{"domainID": {"42"}})
+	att.Body.Close()
+	if att.StatusCode != http.StatusOK {
+		t.Fatalf("attach status %d, want 200", att.StatusCode)
+	}
+	if d.assignDomainID != 42 || d.assignOrgID != 1 {
+		t.Errorf("attach reached the directory with (%d,%d), want (42,1)", d.assignDomainID, d.assignOrgID)
+	}
+}
+
+// TestUIOrgDelete proves the detail delete removes the org and redirects htmx
+// back to the organizations page.
+func TestUIOrgDelete(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		orgs:   map[int64]directory.OrgInfo{1: {ID: 1, Name: "Acme"}},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	resp := htmxPOST(t, ts, "/admin/ui/orgs/1/delete", session, csrf, url.Values{})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || resp.Header.Get("HX-Redirect") != "/admin/ui/orgs" {
+		t.Errorf("delete = %d, HX-Redirect %q; want 200 + /admin/ui/orgs", resp.StatusCode, resp.Header.Get("HX-Redirect"))
+	}
+	if len(d.orgs) != 0 {
+		t.Errorf("org not deleted: %v", d.orgs)
 	}
 }
 

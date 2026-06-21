@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"hermex/internal/directory"
 )
@@ -241,4 +242,157 @@ func (s *Server) handlePutLDAP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Web UI (server-rendered HTML + htmx) ---
+
+// handleUIOrgs renders the organizations management page (system administrators
+// only).
+func (s *Server) handleUIOrgs(w http.ResponseWriter, r *http.Request) {
+	if !s.uiRequireSystemPage(w, r) {
+		return
+	}
+	orgs, _ := s.dir.ListOrgs()
+	s.render(w, "orgs.html", map[string]any{
+		"Nav": "orgs", "CSRF": csrfCookieValue(r), "Orgs": orgs,
+	})
+}
+
+// handleUICreateOrg creates an organization from the management form and returns
+// the refreshed panel for htmx to swap in.
+func (s *Server) handleUICreateOrg(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	var errMsg string
+	if name := strings.TrimSpace(r.PostFormValue("name")); name == "" {
+		errMsg = "An organization name is required."
+	} else if _, err := s.dir.CreateOrg(name, r.PostFormValue("description")); err != nil {
+		errMsg = "Could not create organization: " + err.Error()
+	}
+	orgs, _ := s.dir.ListOrgs()
+	s.render(w, "orgs-panel", map[string]any{"Orgs": orgs, "Error": errMsg})
+}
+
+// orgDomainsData gathers an org's attached domains and the unassigned domains
+// that can be added to it, for the domains panel on the detail page.
+func (s *Server) orgDomainsData(orgID int64, csrf, errMsg string) map[string]any {
+	domains, _ := s.dir.ListDomains()
+	var attached, available []directory.DomainInfo
+	for _, dm := range domains {
+		switch dm.OrgID {
+		case orgID:
+			attached = append(attached, dm)
+		case 0:
+			available = append(available, dm)
+		}
+	}
+	return map[string]any{
+		"OrgID": orgID, "CSRF": csrf,
+		"Attached": attached, "Available": available, "Error": errMsg,
+	}
+}
+
+// handleUIOrgDetail renders one organization's management page: edit its name and
+// description, attach or detach its domains, and delete it.
+func (s *Server) handleUIOrgDetail(w http.ResponseWriter, r *http.Request) {
+	if !s.uiRequireSystemPage(w, r) {
+		return
+	}
+	id, ok := orgIDParam(w, r)
+	if !ok {
+		return
+	}
+	org, found, err := s.dir.GetOrg(id)
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.Error(w, "no such organization", http.StatusNotFound)
+		return
+	}
+	data := s.orgDomainsData(id, csrfCookieValue(r), "")
+	data["Nav"] = "orgs"
+	data["Org"] = org
+	s.render(w, "org_detail.html", data)
+}
+
+// handleUIUpdateOrg saves an org's name and description from the detail form and
+// returns the refreshed status panel.
+func (s *Server) handleUIUpdateOrg(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	id, ok := orgIDParam(w, r)
+	if !ok {
+		return
+	}
+	data := map[string]any{}
+	found, err := s.dir.UpdateOrg(id, r.PostFormValue("name"), r.PostFormValue("description"))
+	switch {
+	case err != nil:
+		data["Error"] = "Could not save: " + err.Error()
+	case !found:
+		data["Error"] = "No such organization."
+	default:
+		data["Saved"] = true
+	}
+	s.render(w, "user-status", data)
+}
+
+// handleUIDeleteOrg deletes an org and redirects htmx back to the organizations
+// page.
+func (s *Server) handleUIDeleteOrg(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	id, ok := orgIDParam(w, r)
+	if !ok {
+		return
+	}
+	if _, err := s.dir.DeleteOrg(id); err != nil {
+		http.Error(w, "could not delete organization: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	w.Header().Set("HX-Redirect", "/admin/ui/orgs")
+	w.WriteHeader(http.StatusOK)
+}
+
+// handleUIOrgAttachDomain attaches the form-selected domain to the org and
+// returns the refreshed domains panel.
+func (s *Server) handleUIOrgAttachDomain(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	id, ok := orgIDParam(w, r)
+	if !ok {
+		return
+	}
+	var errMsg string
+	if domID, err := strconv.ParseInt(r.PostFormValue("domainID"), 10, 64); err != nil {
+		errMsg = "Select a domain to add."
+	} else if _, err := s.dir.AssignDomainToOrg(domID, id); err != nil {
+		errMsg = "Could not attach domain: " + err.Error()
+	}
+	s.render(w, "org-domains-panel", s.orgDomainsData(id, csrfCookieValue(r), errMsg))
+}
+
+// handleUIOrgDetachDomain detaches the path domain from the org (org_id 0) and
+// returns the refreshed domains panel.
+func (s *Server) handleUIOrgDetachDomain(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	id, ok := orgIDParam(w, r)
+	if !ok {
+		return
+	}
+	var errMsg string
+	if domID, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64); err != nil {
+		errMsg = "Invalid domain."
+	} else if _, err := s.dir.AssignDomainToOrg(domID, 0); err != nil {
+		errMsg = "Could not detach domain: " + err.Error()
+	}
+	s.render(w, "org-domains-panel", s.orgDomainsData(id, csrfCookieValue(r), errMsg))
 }
