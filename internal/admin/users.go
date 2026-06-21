@@ -201,6 +201,10 @@ func (s *Server) handleSetAltnames(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
+	if bad, ok := s.aliasValueScopeError(s.adminPerms(claimsOf(r).UserID), req.Altnames); !ok {
+		http.Error(w, scopeRefusal("alternative name", bad), http.StatusForbidden)
+		return
+	}
 	found, err := s.dir.SetAltnames(r.PathValue("email"), req.Altnames)
 	if err != nil {
 		http.Error(w, "could not set alternative names: "+err.Error(), http.StatusBadRequest)
@@ -235,6 +239,10 @@ func (s *Server) handleSetUserAliases(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	if bad, ok := s.aliasValueScopeError(s.adminPerms(claimsOf(r).UserID), req.Aliases); !ok {
+		http.Error(w, scopeRefusal("alias", bad), http.StatusForbidden)
 		return
 	}
 	found, err := s.dir.SetAliasesFor(r.PathValue("email"), req.Aliases)

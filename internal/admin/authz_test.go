@@ -80,6 +80,67 @@ func TestDomainAdminROReadOnly(t *testing.T) {
 	}
 }
 
+// TestDomainAdminAliasValueScope is the value-namespace boundary for a domain
+// admin: editing an in-scope user, it may set an alias or alternative name only in
+// a served domain it administers. A value in a foreign served domain is refused —
+// otherwise the domain admin could alias one of its users to ceo@other.test and
+// silently intercept that domain's mail and logins (the resolver matches inbound
+// addresses over username/altname/alias). Bare alternative-login names carry no
+// domain and stay allowed.
+func TestDomainAdminAliasValueScope(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7,
+		perms:   []directory.Permission{{Name: directory.PermDomainAdmin, Params: "1"}},
+		domains: []directory.DomainInfo{{ID: 1, Name: "acme.test"}, {ID: 2, Name: "other.test"}},
+		knownUsers: map[string]directory.UserDetail{
+			"in@acme.test": {Username: "in@acme.test", ID: 10, DomainID: 1},
+		},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	// Own-domain alias: allowed (not refused by the value-scope gate).
+	if s := statusOf(authedReq(t, ts, "PUT", "/admin/users/in@acme.test/aliases", session, csrf,
+		`{"aliases":["sales@acme.test"]}`)); s == http.StatusForbidden {
+		t.Errorf("domain admin own-domain alias refused (403)")
+	}
+	// Foreign served-domain alias: refused — this is the interception boundary.
+	if s := statusOf(authedReq(t, ts, "PUT", "/admin/users/in@acme.test/aliases", session, csrf,
+		`{"aliases":["ceo@other.test"]}`)); s != http.StatusForbidden {
+		t.Errorf("domain admin foreign-domain alias = %d, want 403", s)
+	}
+	// Bare alternative-login name: allowed (no domain to claim).
+	if s := statusOf(authedReq(t, ts, "PUT", "/admin/users/in@acme.test/altnames", session, csrf,
+		`{"altnames":["ali"]}`)); s == http.StatusForbidden {
+		t.Errorf("domain admin bare altname refused (403)")
+	}
+	// Domain-qualified foreign altname: refused (it too feeds the resolver).
+	if s := statusOf(authedReq(t, ts, "PUT", "/admin/users/in@acme.test/altnames", session, csrf,
+		`{"altnames":["ceo@other.test"]}`)); s != http.StatusForbidden {
+		t.Errorf("domain admin foreign-domain altname = %d, want 403", s)
+	}
+}
+
+// TestSystemAdminAliasValueUnrestricted is the positive control: a full system
+// admin is never refused by the value-scope gate, so the gate contains domain
+// admins without constraining the trusted system role.
+func TestSystemAdminAliasValueUnrestricted(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 1,
+		roles:   []directory.AdminRole{{Role: directory.AdminSystem}},
+		domains: []directory.DomainInfo{{ID: 1, Name: "acme.test"}},
+		knownUsers: map[string]directory.UserDetail{
+			"in@acme.test": {Username: "in@acme.test", ID: 10, DomainID: 1},
+		},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	if s := statusOf(authedReq(t, ts, "PUT", "/admin/users/in@acme.test/aliases", session, csrf,
+		`{"aliases":["anything@elsewhere.test"]}`)); s == http.StatusForbidden {
+		t.Errorf("system admin alias refused by value-scope gate (403)")
+	}
+}
+
 // TestDomainAdminCannotGrantRoles is the privilege-escalation boundary: a domain
 // admin — even over all domains — cannot create roles or grant any tier to a
 // user, so it can never escalate itself to system authority. Role administration

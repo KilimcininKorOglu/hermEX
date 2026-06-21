@@ -3,6 +3,7 @@ package admin
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"hermex/internal/directory"
 )
@@ -107,6 +108,58 @@ func (s *Server) requireUserScope(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+// aliasValueScopeError reports the first alias or alternative-name value whose
+// e-mail domain the caller may not write to, or ok=true when every value is in
+// scope. It closes a value-namespace hole that requireUserScope cannot see:
+// requireUserScope authorizes the TARGET user's domain, but an alias/altname is a
+// SECOND address written into the global resolver (resolve() and GetForward() match
+// inbound mail and logins over username/altname/alias). Without this check a domain
+// admin could edit an in-scope user yet set a value in a foreign served domain
+// (e.g. aliasing alice@acme.test to ceo@victim.test), silently redirecting that
+// domain's mail and logins to the attacker's mailbox.
+//
+// A full system administrator is unrestricted (every value passes), matching their
+// authority over the whole deployment. For any other caller, a domain-qualified
+// value must name a SERVED domain the caller administers (domainWriteAllowed) — a
+// domain admin over "*" passes any served domain, a scoped one only its own. Bare
+// values (no "@", used as alternative login names) carry no domain to escape into
+// and are always allowed. On a directory-resolution failure it denies (fail closed).
+func (s *Server) aliasValueScopeError(perms []directory.Permission, values []string) (bad string, ok bool) {
+	if hasPerm(perms, directory.PermSystemAdmin, "") {
+		return "", true
+	}
+	domains, err := s.dir.ListDomains()
+	if err != nil {
+		return "", false
+	}
+	idByName := make(map[string]int64, len(domains))
+	for _, d := range domains {
+		idByName[strings.ToLower(d.Name)] = d.ID
+	}
+	for _, v := range values {
+		v = strings.ToLower(strings.TrimSpace(v))
+		at := strings.LastIndex(v, "@")
+		if at < 0 {
+			continue // bare login name: no domain to claim
+		}
+		id, served := idByName[v[at+1:]]
+		if !served || !domainWriteAllowed(perms, id) {
+			return v, false
+		}
+	}
+	return "", true
+}
+
+// scopeRefusal builds the 403 message for an out-of-scope alias/altname value. It
+// names the offending address when known, falling back to a generic message when
+// the denial came from a resolution failure (bad == "").
+func scopeRefusal(kind, bad string) string {
+	if bad == "" {
+		return "forbidden: an " + kind + " is outside your administrative domains"
+	}
+	return "forbidden: " + kind + " " + bad + " is outside your administrative domains"
 }
 
 // requirePurge gates the destructive domain-purge endpoint: a full system admin,
