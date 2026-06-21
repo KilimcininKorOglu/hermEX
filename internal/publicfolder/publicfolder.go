@@ -69,6 +69,19 @@ func (svc *Service) Provision(domain string) error {
 	return st.Close()
 }
 
+// DirForCaller returns the public-store directory for the caller's own domain, or
+// "" when the address carries no domain. It performs no I/O and does not report
+// whether the store is provisioned — it is the tenant-isolation routing in a form a
+// caller (e.g. the EWS store cache) can key its own handle cache on, while keeping
+// the "domain comes from the authenticated caller" rule in this one place.
+func (svc *Service) DirForCaller(callerEmail string) string {
+	domain := domainOf(callerEmail)
+	if domain == "" {
+		return ""
+	}
+	return svc.paths.HomedirFor(domain)
+}
+
 // OpenForDomain opens an administrative handle on a domain's public store (read
 // and write), without creating it. It returns ErrNotProvisioned when the domain
 // has no public store. The caller owns the returned store and must Close it. This

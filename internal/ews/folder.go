@@ -2,6 +2,7 @@ package ews
 
 import (
 	"encoding/xml"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -152,6 +153,9 @@ func (s *Server) handleGetFolder(w http.ResponseWriter, inner []byte, sess *sess
 			continue
 		}
 		st, all, isOwn, code := cache.open(sess, tgt.mailbox)
+		if code == codePublicAbsent {
+			code = "ErrorFolderNotFound" // a public folder whose domain store is gone
+		}
 		if code != "" {
 			msgs = append(msgs, folderErr(code))
 			continue
@@ -231,6 +235,17 @@ func folderPermissionSet(st *objectstore.Store, fid int64) (*oxews.PermissionSet
 
 // handleFindFolder answers FindFolder: it enumerates the children of each parent
 // (Shallow = direct children, Deep = the whole subtree).
+// emptyFindFolder is a successful FindFolder result with no folders — the answer
+// for a public folders root the caller can see nothing in (or whose domain has no
+// public store): publicfoldersroot is a distinguished folder the protocol treats as
+// always present, so "empty for you" is the honest, uniform response.
+func emptyFindFolder() findFolderResponseMessage {
+	return findFolderResponseMessage{
+		ResponseClass: "Success", ResponseCode: "NoError",
+		RootFolder: &findRootFolder{IncludesLastItemInRange: true},
+	}
+}
+
 func (s *Server) handleFindFolder(w http.ResponseWriter, inner []byte, sess *session) {
 	var req findFolderRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
@@ -248,27 +263,58 @@ func (s *Server) handleFindFolder(w http.ResponseWriter, inner []byte, sess *ses
 			continue
 		}
 		st, all, isOwn, code := cache.open(sess, tgt.mailbox)
+		if tgt.public && code == codePublicAbsent {
+			// The caller's domain has no public store: the public folders root is
+			// simply empty for them, not an error (same response as a provisioned
+			// store with no folders the caller may see).
+			msgs = append(msgs, emptyFindFolder())
+			continue
+		}
+		if code == codePublicAbsent {
+			code = "ErrorFolderNotFound" // a specific public folder in an un-provisioned domain
+		}
 		if code != "" {
 			msgs = append(msgs, findFolderResponseMessage{ResponseClass: "Error", ResponseCode: code})
 			continue
 		}
-		// Enumerating another mailbox's subfolders requires visibility on the parent.
-		if !isOwn {
-			rights, err := st.ResolvePermission(tgt.fid, sess.user)
+		var children []objectstore.FolderInfo
+		if tgt.public {
+			// all is already the public store's IPM-subtree folders (ListFolders roots
+			// there). Shallow takes the top-level ones (nil parent under the subtree),
+			// Deep takes the whole set. The IPM subtree itself carries no grant, so
+			// filter its children per folder.
+			var under []objectstore.FolderInfo
+			for _, f := range all {
+				if deep || f.ParentID == nil {
+					under = append(under, f)
+				}
+			}
+			vis, err := filterVisible(st, under, sess.user)
 			if err != nil {
 				msgs = append(msgs, findFolderResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
 				continue
 			}
-			if rights&mapi.FrightsVisible == 0 {
-				msgs = append(msgs, findFolderResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorAccessDenied"})
-				continue
+			children = vis
+		} else {
+			// Enumerating another mailbox's subfolders requires visibility on the parent.
+			if !isOwn {
+				rights, err := st.ResolvePermission(tgt.fid, sess.user)
+				if err != nil {
+					msgs = append(msgs, findFolderResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
+					continue
+				}
+				if rights&mapi.FrightsVisible == 0 {
+					msgs = append(msgs, findFolderResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorAccessDenied"})
+					continue
+				}
 			}
+			children = collectChildren(all, tgt.fid, deep)
 		}
 		idMailbox := ""
 		if !isOwn {
 			idMailbox = tgt.mailbox
 		}
-		elems, err := folderElements(st, collectChildren(all, tgt.fid, deep), all, idMailbox)
+		elems, err := folderElements(st, children, all, idMailbox)
 		if err != nil {
 			msgs = append(msgs, findFolderResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
 			continue
@@ -387,11 +433,44 @@ func openFolders(w http.ResponseWriter, sess *session) (*objectstore.Store, []ob
 	return st, all, true
 }
 
+// publicMailboxToken is the reserved "mailbox" that routes a folder id to the
+// caller's own domain public store instead of a user mailbox. It contains
+// characters no SMTP address can, so it never collides with a real mailbox; it is
+// only ever encoded inside opaque folder ids, never rendered to the client. The
+// store cache resolves it through the publicfolder service, which derives the
+// domain from the authenticated caller — so a crafted id can never reach another
+// tenant's public store.
+const publicMailboxToken = "\x00public-folders"
+
+// codePublicAbsent is an internal store-cache result meaning the caller's domain
+// has no public store. It is never written to the wire: the publicfoldersroot
+// enumeration maps it to an empty success, and a specific public-folder id maps it
+// to ErrorFolderNotFound.
+const codePublicAbsent = "\x00public-absent"
+
 type folderTarget struct {
 	fid     int64
 	ok      bool
 	code    string // when ok is false, the per-folder error code to report
 	mailbox string // target mailbox SMTP from the ref's Mailbox child; "" = the caller's own
+	public  bool   // the publicfoldersroot distinguished id: enumerate the domain public store
+}
+
+// filterVisible keeps only the folders the caller may see — those on which their
+// effective rights include FrightsVisible — the per-folder ACL gate public-folder
+// enumeration needs (grants live on each folder, not on the IPM subtree parent).
+func filterVisible(st *objectstore.Store, infos []objectstore.FolderInfo, user string) ([]objectstore.FolderInfo, error) {
+	out := make([]objectstore.FolderInfo, 0, len(infos))
+	for _, f := range infos {
+		rights, err := st.ResolvePermission(f.ID, user)
+		if err != nil {
+			return nil, err
+		}
+		if rights&mapi.FrightsVisible != 0 {
+			out = append(out, f)
+		}
+	}
+	return out, nil
 }
 
 // refMailbox returns the target SMTP a folder reference names via its Mailbox child,
@@ -411,7 +490,11 @@ func refMailbox(m *delegateMailbox) string {
 func resolveTargets(refs folderRefs) []folderTarget {
 	var out []folderTarget
 	for _, d := range refs.Distinguished {
-		if fid, ok := distinguishedFolders[strings.ToLower(d.ID)]; ok {
+		if strings.EqualFold(d.ID, "publicfoldersroot") {
+			// The public folders root is not a folder in the caller's mailbox: it is
+			// the caller's domain public store IPM subtree, enumerated per-child by ACL.
+			out = append(out, folderTarget{fid: int64(mapi.PublicFIDIPMSubtree), ok: true, mailbox: publicMailboxToken, public: true})
+		} else if fid, ok := distinguishedFolders[strings.ToLower(d.ID)]; ok {
 			out = append(out, folderTarget{fid: fid, ok: true, mailbox: refMailbox(d.Mailbox)})
 		} else {
 			// A distinguished id is a fixed EWS enum; one we do not map is a
@@ -459,6 +542,9 @@ func (s *Server) newStoreCache() *storeCache {
 // caller), opens it once, and returns its folder list and whether it is the caller's
 // own mailbox. A non-empty code names the per-folder error to report instead.
 func (c *storeCache) open(sess *session, mailbox string) (*objectstore.Store, []objectstore.FolderInfo, bool, string) {
+	if mailbox == publicMailboxToken {
+		return c.openPublic(sess)
+	}
 	dir := sess.mailbox
 	isOwn := true
 	if mailbox != "" && !strings.EqualFold(mailbox, sess.user) {
@@ -485,6 +571,38 @@ func (c *storeCache) open(sess *session, mailbox string) (*objectstore.Store, []
 	c.stores[dir] = st
 	c.folders[dir] = all
 	return st, all, isOwn, ""
+}
+
+// openPublic resolves the caller's own domain public store (never another tenant's:
+// the domain comes from the authenticated caller, not from any id). It returns
+// codePublicAbsent when the domain has no public store, isOwn=false so the per-folder
+// ACL gate applies, and caches the handle by directory like any other store.
+func (c *storeCache) openPublic(sess *session) (*objectstore.Store, []objectstore.FolderInfo, bool, string) {
+	if c.s.Pub == nil {
+		return nil, nil, false, codePublicAbsent
+	}
+	dir := c.s.Pub.DirForCaller(sess.user)
+	if dir == "" {
+		return nil, nil, false, codePublicAbsent
+	}
+	if st, ok := c.stores[dir]; ok {
+		return st, c.folders[dir], false, ""
+	}
+	st, err := objectstore.OpenPublicExisting(dir)
+	if errors.Is(err, objectstore.ErrNotProvisioned) {
+		return nil, nil, false, codePublicAbsent
+	}
+	if err != nil {
+		return nil, nil, false, "ErrorInternalServerError"
+	}
+	all, err := st.ListFolders()
+	if err != nil {
+		st.Close()
+		return nil, nil, false, "ErrorInternalServerError"
+	}
+	c.stores[dir] = st
+	c.folders[dir] = all
+	return st, all, false, ""
 }
 
 func (c *storeCache) closeAll() {
@@ -563,10 +681,15 @@ func buildFolderElem(st *objectstore.Store, info objectstore.FolderInfo, all []o
 		return oxews.Folder{}, err
 	}
 	// A top-level folder (nil store parent) hangs off the IPM subtree root, so
-	// clients can place it under the mailbox root when building the tree.
+	// clients can place it under the mailbox root when building the tree. A public
+	// store's top-level folders hang off the public IPM subtree (publicfoldersroot),
+	// not the private one, so the parent id round-trips to the right root.
 	parent := info.ParentID
 	if parent == nil {
 		root := int64(mapi.PrivateFIDIPMSubtree)
+		if mailbox == publicMailboxToken {
+			root = int64(mapi.PublicFIDIPMSubtree)
+		}
 		parent = &root
 	}
 	return oxews.BuildFolder(oxews.FolderInput{

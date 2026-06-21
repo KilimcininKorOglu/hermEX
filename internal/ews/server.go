@@ -15,6 +15,7 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/logging"
+	"hermex/internal/publicfolder"
 	"hermex/internal/relay"
 )
 
@@ -23,8 +24,9 @@ type Server struct {
 	auth     directory.Authenticator
 	accounts directory.Accounts
 	hostname string
-	Logger   *logging.Logger // central activity log; nil disables logging
-	Spool    *relay.Spool    // outbound relay queue; nil sends local-only
+	Logger   *logging.Logger       // central activity log; nil disables logging
+	Spool    *relay.Spool          // outbound relay queue; nil sends local-only
+	Pub      *publicfolder.Service // per-domain public folders; nil disables them
 
 	// Notification subscriptions (MS-OXWSNTIF). The registry is in-memory and
 	// process-local: Subscribe and GetEvents are separate HTTP requests that must

@@ -21,6 +21,7 @@ import (
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/objectstore"
+	"hermex/internal/publicfolder"
 	"hermex/internal/relay"
 	"hermex/internal/serve"
 )
@@ -47,6 +48,7 @@ func main() {
 
 	srv := ews.NewServer(dir, dir, cfg.Hostname)
 	srv.Logger = logger
+	srv.Pub = publicfolder.New(cfg) // per-domain public folders rooted at HomedirFor
 	// Enqueue external recipients of sent items into the shared relay spool the
 	// MTA drains; without it EWS would send local-only.
 	spool, err := relay.Open(cfg.RelaySpoolPath())
