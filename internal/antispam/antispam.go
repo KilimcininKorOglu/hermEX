@@ -224,7 +224,7 @@ func domainOf(addr string) string {
 // slice, dropping blanks and surrounding whitespace.
 func ParseZones(s string) []string {
 	var zones []string
-	for _, z := range strings.Split(s, ",") {
+	for z := range strings.SplitSeq(s, ",") {
 		if z = strings.TrimSpace(z); z != "" {
 			zones = append(zones, z)
 		}

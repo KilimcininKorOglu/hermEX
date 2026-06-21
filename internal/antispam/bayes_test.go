@@ -11,7 +11,7 @@ import (
 // not merely if Train/Score execute.
 func TestBayesClassifies(t *testing.T) {
 	m := NewBayesModel()
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		m.Train("cheap viagra pills buy now discount pharmacy offer", true)
 		m.Train("meeting notes project schedule please review attached report", false)
 	}
