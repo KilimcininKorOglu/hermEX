@@ -154,7 +154,7 @@ func TestAdminOrgRequiresSystem(t *testing.T) {
 func TestUIOrgsPage(t *testing.T) {
 	d := &fakeDir{
 		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
-		orgs:   map[int64]directory.OrgInfo{1: {ID: 1, Name: "Acme", Description: "desc", DomainCount: 2}},
+		orgs: map[int64]directory.OrgInfo{1: {ID: 1, Name: "Acme", Description: "desc", DomainCount: 2}},
 	}
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
@@ -190,7 +190,7 @@ func TestUIOrgCreate(t *testing.T) {
 // add-domain form reaches the directory with the right ids.
 func TestUIOrgDetailAttach(t *testing.T) {
 	d := &fakeDir{
-		authOK:  true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
 		orgs:    map[int64]directory.OrgInfo{1: {ID: 1, Name: "Acme"}},
 		domains: []directory.DomainInfo{{ID: 42, Name: "acme.test", OrgID: 0}},
 	}
@@ -219,7 +219,7 @@ func TestUIOrgDetailAttach(t *testing.T) {
 func TestUIOrgDelete(t *testing.T) {
 	d := &fakeDir{
 		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
-		orgs:   map[int64]directory.OrgInfo{1: {ID: 1, Name: "Acme"}},
+		orgs: map[int64]directory.OrgInfo{1: {ID: 1, Name: "Acme"}},
 	}
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)

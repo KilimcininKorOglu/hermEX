@@ -66,7 +66,7 @@ type Mailbox struct {
 // message's RFC822 form).
 type ItemMeta struct {
 	ItemID         string
-	FolderID       int64  // parent folder, encoded into attachment ids for read enforcement
+	FolderID       int64 // parent folder, encoded into attachment ids for read enforcement
 	MessageID      int64
 	Mailbox        string // target mailbox SMTP when the item lives in another mailbox; empty for own
 	ChangeKey      string

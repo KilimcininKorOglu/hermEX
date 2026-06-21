@@ -16,12 +16,12 @@ import (
 
 // fakeDir is a scripted Directory for the admin server tests.
 type fakeDir struct {
-	authOK  bool
-	uid     int64
-	roles   []directory.AdminRole
-	domains []directory.DomainInfo
-	users   []directory.UserInfo
-	aliases []directory.AliasInfo
+	authOK            bool
+	uid               int64
+	roles             []directory.AdminRole
+	domains           []directory.DomainInfo
+	users             []directory.UserInfo
+	aliases           []directory.AliasInfo
 	ldap              map[int64]directory.LDAPConfig
 	defaultSyncPolicy easpolicy.Policy
 	fetchmail         map[string][]directory.FetchmailEntry
