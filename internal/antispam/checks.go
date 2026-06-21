@@ -2,7 +2,9 @@ package antispam
 
 import (
 	"bytes"
+	"fmt"
 	"net"
+	"strings"
 
 	"blitiri.com.ar/go/spf"
 	"github.com/emersion/go-msgauth/dkim"
@@ -53,4 +55,35 @@ func realDMARC(domain string) (policy string, ok bool) {
 		return "", false
 	}
 	return string(rec.Policy), true
+}
+
+// realDNSBL reports whether the client IP is listed on a DNS blocklist zone: the
+// reversed-IP query name resolving to any address means listed. A lookup error
+// (including NXDOMAIN, the not-listed answer) reports not listed, so DNSBL is
+// fail-open like every other check.
+func realDNSBL(ip net.IP, zone string) bool {
+	q := dnsblQuery(ip, zone)
+	if q == "" {
+		return false
+	}
+	addrs, err := net.LookupHost(q)
+	return err == nil && len(addrs) > 0
+}
+
+// dnsblQuery builds the DNSBL lookup name for an IP and zone: the IP's octets
+// (IPv4) or nibbles (IPv6) reversed and prefixed to the zone. It returns "" for
+// an IP it cannot represent.
+func dnsblQuery(ip net.IP, zone string) string {
+	if v4 := ip.To4(); v4 != nil {
+		return fmt.Sprintf("%d.%d.%d.%d.%s", v4[3], v4[2], v4[1], v4[0], zone)
+	}
+	if v6 := ip.To16(); v6 != nil {
+		var b strings.Builder
+		for i := len(v6) - 1; i >= 0; i-- {
+			fmt.Fprintf(&b, "%x.%x.", v6[i]&0x0f, v6[i]>>4)
+		}
+		b.WriteString(zone)
+		return b.String()
+	}
+	return ""
 }

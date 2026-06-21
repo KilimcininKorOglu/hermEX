@@ -112,3 +112,59 @@ func TestScoreDMARCAlignedPass(t *testing.T) {
 		t.Errorf("DMARC = %s, want pass (DKIM aligned by organizational domain)", v.DMARC)
 	}
 }
+
+// TestScoreDNSBLHit proves each blocklist zone listing the client IP adds the
+// DNSBL weight and is recorded.
+func TestScoreDNSBLHit(t *testing.T) {
+	s := &Scorer{
+		Weights: DefaultWeights, Threshold: DefaultThreshold,
+		Zones:      []string{"zen.example", "bl.example"},
+		checkDNSBL: func(ip net.IP, zone string) bool { return zone == "zen.example" },
+	}
+	v := s.Score(Input{ClientIP: net.IPv4(10, 0, 0, 1)})
+	if len(v.DNSBL) != 1 || v.DNSBL[0] != "zen.example" {
+		t.Fatalf("DNSBL = %v, want [zen.example]", v.DNSBL)
+	}
+	if v.Score != DefaultWeights.DNSBLHit {
+		t.Errorf("score = %d, want %d", v.Score, DefaultWeights.DNSBLHit)
+	}
+}
+
+// TestScoreDNSBLDormantWithoutZones proves no DNSBL lookup runs when no zones are
+// configured, so the real DNS-hitting probe is never reached.
+func TestScoreDNSBLDormantWithoutZones(t *testing.T) {
+	called := false
+	s := &Scorer{
+		Weights: DefaultWeights, Threshold: DefaultThreshold,
+		checkDNSBL: func(net.IP, string) bool { called = true; return true },
+	}
+	v := s.Score(Input{ClientIP: net.IPv4(10, 0, 0, 1)})
+	if called {
+		t.Error("DNSBL was checked with no zones configured")
+	}
+	if len(v.DNSBL) != 0 || v.Score != 0 {
+		t.Errorf("verdict = %+v, want clean", v)
+	}
+}
+
+// TestParseZones proves the comma-separated zone list parses and trims blanks.
+func TestParseZones(t *testing.T) {
+	got := ParseZones(" zen.example , , bl.example ")
+	if len(got) != 2 || got[0] != "zen.example" || got[1] != "bl.example" {
+		t.Errorf("ParseZones = %v, want [zen.example bl.example]", got)
+	}
+	if ParseZones("") != nil {
+		t.Error(`ParseZones("") should be nil`)
+	}
+}
+
+// TestDNSBLQuery proves the reversed-IP query name is built for IPv4 and IPv6.
+func TestDNSBLQuery(t *testing.T) {
+	if q := dnsblQuery(net.IPv4(1, 2, 3, 4), "zen.example"); q != "4.3.2.1.zen.example" {
+		t.Errorf("IPv4 query = %q, want 4.3.2.1.zen.example", q)
+	}
+	want6 := "1.0." + strings.Repeat("0.0.", 15) + "z"
+	if q := dnsblQuery(net.ParseIP("::1"), "z"); q != want6 {
+		t.Errorf("IPv6 query = %q, want %q", q, want6)
+	}
+}

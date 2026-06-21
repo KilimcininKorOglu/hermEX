@@ -43,10 +43,11 @@ type Weights struct {
 	SPFSoftFail int
 	DKIMFail    int // no valid DKIM signature on the message
 	DMARCFail   int // DMARC published an enforcing policy and the message did not align
+	DNSBLHit    int // the client IP is listed on a DNS blocklist (added per listing zone)
 }
 
 // DefaultWeights is a conservative starting point; the admin can tune them later.
-var DefaultWeights = Weights{SPFFail: 5, SPFSoftFail: 2, DKIMFail: 3, DMARCFail: 6}
+var DefaultWeights = Weights{SPFFail: 5, SPFSoftFail: 2, DKIMFail: 3, DMARCFail: 6, DNSBLHit: 6}
 
 // DefaultThreshold is the score at or above which a message is flagged spam. It
 // is deliberately above any single check so one failure alone never condemns a
@@ -60,6 +61,7 @@ type Verdict struct {
 	SPF     AuthResult
 	DKIM    AuthResult
 	DMARC   AuthResult
+	DNSBL   []string // the blocklist zones that listed the client IP
 	Reasons []string
 }
 
@@ -74,17 +76,20 @@ type DKIMResult struct {
 type Scorer struct {
 	Weights     Weights
 	Threshold   int
+	Zones       []string // DNS blocklist zones to query the client IP against; empty disables DNSBL
 	checkSPF    func(ip net.IP, helo, mailFrom string) AuthResult
 	checkDKIM   func(raw []byte) []DKIMResult
 	lookupDMARC func(domain string) (policy string, ok bool)
+	checkDNSBL  func(ip net.IP, zone string) bool
 }
 
-// New returns a Scorer wired to the real SPF, DKIM, and DMARC libraries, flagging
-// a message as spam once its score reaches threshold.
+// New returns a Scorer wired to the real SPF, DKIM, DMARC, and DNSBL checks,
+// flagging a message as spam once its score reaches threshold. DNSBL stays
+// dormant until Zones is set.
 func New(w Weights, threshold int) *Scorer {
 	return &Scorer{
 		Weights: w, Threshold: threshold,
-		checkSPF: realSPF, checkDKIM: realDKIM, lookupDMARC: realDMARC,
+		checkSPF: realSPF, checkDKIM: realDKIM, lookupDMARC: realDMARC, checkDNSBL: realDNSBL,
 	}
 }
 
@@ -137,6 +142,18 @@ func (s *Scorer) Score(in Input) Verdict {
 			if policy == "reject" || policy == "quarantine" {
 				v.Score += s.Weights.DMARCFail
 				v.Reasons = append(v.Reasons, "DMARC fail (policy "+policy+")")
+			}
+		}
+	}
+
+	// DNSBL: a client IP listed on a configured blocklist zone is a strong signal;
+	// each listing zone adds its weight.
+	if s.checkDNSBL != nil && in.ClientIP != nil {
+		for _, zone := range s.Zones {
+			if s.checkDNSBL(in.ClientIP, zone) {
+				v.DNSBL = append(v.DNSBL, zone)
+				v.Score += s.Weights.DNSBLHit
+				v.Reasons = append(v.Reasons, "listed on DNSBL "+zone)
 			}
 		}
 	}
@@ -201,4 +218,16 @@ func domainOf(addr string) string {
 		return dom
 	}
 	return ""
+}
+
+// ParseZones splits a comma-separated list of DNS blocklist zones into a clean
+// slice, dropping blanks and surrounding whitespace.
+func ParseZones(s string) []string {
+	var zones []string
+	for _, z := range strings.Split(s, ",") {
+		if z = strings.TrimSpace(z); z != "" {
+			zones = append(zones, z)
+		}
+	}
+	return zones
 }

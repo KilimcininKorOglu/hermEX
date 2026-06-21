@@ -103,7 +103,9 @@ func main() {
 		log.Fatalf("hermex-mta: listen %s: %v", addr, err)
 	}
 
-	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: antispam.New(antispam.DefaultWeights, antispam.DefaultThreshold)}, Hostname: cfg.Hostname, Logger: logger}
+	scorer := antispam.New(antispam.DefaultWeights, antispam.DefaultThreshold)
+	scorer.Zones = antispam.ParseZones(os.Getenv("HERMEX_DNSBL_ZONES")) // comma-separated DNSBL zones; empty leaves DNSBL off
+	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer}, Hostname: cfg.Hostname, Logger: logger}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()
 		if err != nil {
