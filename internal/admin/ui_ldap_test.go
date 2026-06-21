@@ -106,7 +106,9 @@ func TestUISaveLDAPPreservesPassword(t *testing.T) {
 	}
 }
 
-// TestUISyncLDAP proves the sync trigger imports every returned directory entry.
+// TestUISyncLDAP proves the sync trigger enqueues an async task rather than
+// syncing inline: the response acknowledges the queued task and nothing is
+// upserted until the worker runs it.
 func TestUISyncLDAP(t *testing.T) {
 	d := &fakeDir{
 		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
@@ -121,12 +123,44 @@ func TestUISyncLDAP(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("sync status %d, want 200", resp.StatusCode)
 	}
-	if len(d.upsertedUsers) != 2 {
-		t.Errorf("upserted %v, want both directory entries", d.upsertedUsers)
-	}
 	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "2 created") {
-		t.Errorf("sync response missing the counts: %s", body)
+	if !strings.Contains(string(body), "queued") {
+		t.Errorf("sync response should acknowledge the queued task: %s", body)
+	}
+	if len(d.upsertedUsers) != 0 {
+		t.Errorf("enqueue must not sync inline, but upserted %v", d.upsertedUsers)
+	}
+	if len(d.tasks) != 1 || d.tasks[0].Type != "ldapsync" || d.tasks[0].Status != directory.TaskPending {
+		t.Errorf("expected one pending ldapsync task, got %+v", d.tasks)
+	}
+}
+
+// TestTaskWorkerLDAPSync proves the worker claims a pending ldapsync task, runs
+// the real sync (upserting every entry), and records a done status with counts.
+func TestTaskWorkerLDAPSync(t *testing.T) {
+	d := &fakeDir{
+		ldap: map[int64]directory.LDAPConfig{0: {URI: "ldap://x"}}, upsertNew: true,
+	}
+	syncer := &fakeSyncer{users: []ldapauth.SyncedUser{{Username: "a@test"}, {Username: "b@test"}}}
+	srv := NewServer(d, fakePaths{root: t.TempDir()}, []byte("test-secret"))
+	srv.SetLDAPSyncer(syncer)
+
+	id, err := d.CreateTask("ldapsync", "", "admin@test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ran, err := srv.runNextTask()
+	if !ran || err != nil {
+		t.Fatalf("runNextTask ran=%v err=%v, want it to run the task", ran, err)
+	}
+	if len(d.upsertedUsers) != 2 {
+		t.Errorf("worker upserted %v, want both directory entries", d.upsertedUsers)
+	}
+	if got, ok, _ := d.GetTask(id); !ok || got.Status != directory.TaskDone || !strings.Contains(got.Message, "2 created") {
+		t.Errorf("task = %+v, want done with the counts", got)
+	}
+	if ran, _ := srv.runNextTask(); ran {
+		t.Errorf("a second runNextTask ran, want the queue empty")
 	}
 }
 

@@ -125,6 +125,7 @@ type fakeDir struct {
 	contacts             []directory.ContactInfo
 	createdContact       string
 	createdContactName   string
+	tasks                []directory.TaskInfo
 	createdContactDomain string
 	updatedContact       string
 	updatedContactName   string
@@ -346,6 +347,40 @@ func (f *fakeDir) SetLDAPConfig(orgID int64, cfg directory.LDAPConfig) error {
 func (f *fakeDir) UpsertLDAPUser(username string, _ []byte, _ string) (bool, error) {
 	f.upsertedUsers = append(f.upsertedUsers, username)
 	return f.upsertNew, nil
+}
+func (f *fakeDir) CreateTask(taskType, params, createdBy string) (int64, error) {
+	id := int64(len(f.tasks) + 1)
+	f.tasks = append(f.tasks, directory.TaskInfo{
+		ID: id, Type: taskType, Status: directory.TaskPending, Params: params, CreatedBy: createdBy,
+	})
+	return id, nil
+}
+func (f *fakeDir) ListTasks(int) ([]directory.TaskInfo, error) { return f.tasks, nil }
+func (f *fakeDir) GetTask(id int64) (directory.TaskInfo, bool, error) {
+	for _, t := range f.tasks {
+		if t.ID == id {
+			return t, true, nil
+		}
+	}
+	return directory.TaskInfo{}, false, nil
+}
+func (f *fakeDir) ClaimNextTask() (directory.TaskInfo, bool, error) {
+	for i := range f.tasks {
+		if f.tasks[i].Status == directory.TaskPending {
+			f.tasks[i].Status = directory.TaskRunning
+			return f.tasks[i], true, nil
+		}
+	}
+	return directory.TaskInfo{}, false, nil
+}
+func (f *fakeDir) FinishTask(id int64, status, message string) error {
+	for i := range f.tasks {
+		if f.tasks[i].ID == id {
+			f.tasks[i].Status, f.tasks[i].Message = status, message
+			return nil
+		}
+	}
+	return nil
 }
 func (f *fakeDir) GetDefaultSyncPolicy() (easpolicy.Policy, error) {
 	return f.defaultSyncPolicy, nil

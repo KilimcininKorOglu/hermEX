@@ -69,39 +69,24 @@ func (s *Server) handleUISaveLDAP(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "ldap-panel", s.ldapPanelData(r, true, "", ""))
 }
 
-// handleUISyncLDAP runs the directory downsync for the default org and returns
-// the panel with the import counts. A user whose mail domain is not provisioned
-// locally is skipped rather than failing the whole sync.
+// handleUISyncLDAP enqueues the directory downsync as an async task and returns
+// the panel acknowledging it. A directory sync can be long-running, so it runs on
+// the task worker rather than blocking the request; its result appears on the Task
+// queue page. The actual sync is performLDAPSync, shared with the worker.
 func (s *Server) handleUISyncLDAP(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.uiAuthorized(w, r); !ok {
+	cl, ok := s.uiAuthorized(w, r)
+	if !ok {
 		return
 	}
 	if s.syncer == nil {
 		s.render(w, "ldap-panel", s.ldapPanelData(r, false, "", "Directory sync is not available."))
 		return
 	}
-	cfg, ok, err := s.dir.GetLDAPConfig(defaultOrgID)
-	if err != nil || !ok {
-		s.render(w, "ldap-panel", s.ldapPanelData(r, false, "", "No directory is configured yet."))
-		return
-	}
-	users, err := s.syncer.Sync(cfg)
+	id, err := s.dir.CreateTask("ldapsync", "", cl.Login)
 	if err != nil {
-		s.render(w, "ldap-panel", s.ldapPanelData(r, false, "", "Sync failed: "+err.Error()))
+		s.render(w, "ldap-panel", s.ldapPanelData(r, false, "", "Could not queue the sync: "+err.Error()))
 		return
 	}
-	var created, updated int
-	for _, u := range users {
-		isNew, err := s.dir.UpsertLDAPUser(u.Username, u.ExternID, s.paths.MaildirFor(u.Username))
-		if err != nil {
-			continue
-		}
-		if isNew {
-			created++
-		} else {
-			updated++
-		}
-	}
-	msg := fmt.Sprintf("Synced %d directory entries: %d created, %d updated.", len(users), created, updated)
-	s.render(w, "ldap-panel", s.ldapPanelData(r, false, msg, ""))
+	s.render(w, "ldap-panel", s.ldapPanelData(r, false,
+		fmt.Sprintf("Directory sync queued as task #%d — watch the Task queue for its result.", id), ""))
 }

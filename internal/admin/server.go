@@ -87,6 +87,11 @@ type Directory interface {
 	ListFetchmail(mailbox string) ([]directory.FetchmailEntry, error)
 	CreateFetchmail(e directory.FetchmailEntry) (int64, error)
 	DeleteFetchmail(id int64) (bool, error)
+	CreateTask(taskType, params, createdBy string) (int64, error)
+	ListTasks(limit int) ([]directory.TaskInfo, error)
+	GetTask(id int64) (directory.TaskInfo, bool, error)
+	ClaimNextTask() (directory.TaskInfo, bool, error)
+	FinishTask(id int64, status, message string) error
 }
 
 // LDAPSyncer downsyncs an organization's directory accounts. It is optional —

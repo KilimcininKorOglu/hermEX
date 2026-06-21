@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"strconv"
 	"syscall"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 
@@ -250,6 +251,7 @@ func main() {
 		logger.Info(logging.Admin, "daemon.startup", logging.Fields{"daemon": "admin", "addr": addr})
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
+		go srv.RunTaskWorker(ctx, 5*time.Second) // drains the async admin task queue
 		log.Printf("hermex-admin serving the admin API on %s", addr)
 		if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, cleanups...); err != nil {
 			log.Fatalf("hermex-admin: %v", err)
