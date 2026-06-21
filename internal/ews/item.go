@@ -106,7 +106,19 @@ func (s *Server) handleFindItem(w http.ResponseWriter, inner []byte, sess *sessi
 			msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: tgt.code})
 			continue
 		}
+		if tgt.public {
+			// The public folders root is a container holding no items of its own; its
+			// public child folders carry the items and are addressed by their own ids.
+			msgs = append(msgs, findItemResponseMessage{
+				ResponseClass: "Success", ResponseCode: "NoError",
+				RootFolder: &findItemRoot{IncludesLastItemInRange: true},
+			})
+			continue
+		}
 		st, _, isOwn, code := cache.open(sess, tgt.mailbox)
+		if code == codePublicAbsent {
+			code = "ErrorFolderNotFound" // a public folder whose domain store is gone
+		}
 		if code != "" {
 			msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: code})
 			continue
@@ -172,6 +184,9 @@ func (s *Server) handleGetItem(w http.ResponseWriter, inner []byte, sess *sessio
 		// The id self-encodes its mailbox: an own-mailbox id (empty) opens the caller's
 		// store, a delegated id opens the target and is gated on the caller's read access.
 		st, _, isOwn, code := cache.open(sess, id.Mailbox)
+		if code == codePublicAbsent {
+			code = "ErrorItemNotFound" // a public item whose domain store is gone
+		}
 		if code != "" {
 			msgs = append(msgs, itemResponseMessage{ResponseClass: "Error", ResponseCode: code})
 			continue
@@ -242,6 +257,9 @@ func (s *Server) handleGetAttachment(w http.ResponseWriter, inner []byte, sess *
 		// gated on read access to that folder (reference: GetAttachment checks
 		// frightsReadAny on the attachment's parent folder).
 		st, _, isOwn, code := cache.open(sess, mailbox)
+		if code == codePublicAbsent {
+			code = "ErrorItemNotFound" // a public attachment whose domain store is gone
+		}
 		if code != "" {
 			msgs = append(msgs, getAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: code})
 			continue

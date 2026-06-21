@@ -152,6 +152,13 @@ func (s *Server) handleGetFolder(w http.ResponseWriter, inner []byte, sess *sess
 			msgs = append(msgs, folderErr(tgt.code))
 			continue
 		}
+		if tgt.public {
+			// The public folders root carries no grant of its own (its children do),
+			// so it cannot go through the per-folder visibility gate below — it is a
+			// distinguished, always-present container rendered synthetically.
+			msgs = append(msgs, s.getPublicRoot(cache, sess))
+			continue
+		}
 		st, all, isOwn, code := cache.open(sess, tgt.mailbox)
 		if code == codePublicAbsent {
 			code = "ErrorFolderNotFound" // a public folder whose domain store is gone
@@ -235,6 +242,40 @@ func folderPermissionSet(st *objectstore.Store, fid int64) (*oxews.PermissionSet
 
 // handleFindFolder answers FindFolder: it enumerates the children of each parent
 // (Shallow = direct children, Deep = the whole subtree).
+// getPublicRoot renders the public folders root as a synthetic, always-present
+// container whose child count is the folders the caller may see. It never denies:
+// an un-provisioned domain simply has zero visible children, the same uniform
+// answer FindFolder gives. The root carries no grant of its own, so it is never
+// run through the per-folder visibility gate.
+func (s *Server) getPublicRoot(cache *storeCache, sess *session) folderResponseMessage {
+	st, all, _, code := cache.open(sess, publicMailboxToken)
+	if code != "" && code != codePublicAbsent {
+		return folderErr(code)
+	}
+	count := 0
+	if code == "" {
+		for _, f := range all {
+			if f.ParentID != nil {
+				continue
+			}
+			rights, err := st.ResolvePermission(f.ID, sess.user)
+			if err == nil && rights&mapi.FrightsVisible != 0 {
+				count++
+			}
+		}
+	}
+	f := oxews.BuildFolder(oxews.FolderInput{
+		FolderID:    int64(mapi.PublicFIDIPMSubtree),
+		DisplayName: "Public Folders",
+		Children:    count,
+		Mailbox:     publicMailboxToken,
+	})
+	return folderResponseMessage{
+		ResponseClass: "Success", ResponseCode: "NoError",
+		Folders: &foldersWrap{Folders: []oxews.Folder{f}},
+	}
+}
+
 // emptyFindFolder is a successful FindFolder result with no folders — the answer
 // for a public folders root the caller can see nothing in (or whose domain has no
 // public store): publicfoldersroot is a distinguished folder the protocol treats as
@@ -513,7 +554,11 @@ func resolveTargets(refs folderRefs) []folderTarget {
 			if mb == "" {
 				mb = refMailbox(f.Mailbox)
 			}
-			out = append(out, folderTarget{fid: fid, ok: true, mailbox: mb})
+			// A public-store IPM subtree id (the public root, e.g. minted as a public
+			// child's ParentFolderId) is the public folders root, enumerated per-child
+			// by ACL — the same as the publicfoldersroot distinguished name.
+			public := mb == publicMailboxToken && fid == int64(mapi.PublicFIDIPMSubtree)
+			out = append(out, folderTarget{fid: fid, ok: true, mailbox: mb, public: public})
 		} else {
 			out = append(out, folderTarget{code: "ErrorInvalidRequest"})
 		}
