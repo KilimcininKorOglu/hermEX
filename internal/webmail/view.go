@@ -90,6 +90,9 @@ type mailPage struct {
 	// not shown.
 	Conversation bool
 	Threads      []threadView
+	// PublicFolders is true when the server has public folders wired, gating the
+	// "Public folders" discovery link in the toolbar.
+	PublicFolders bool
 }
 
 // threadView is one conversation thread rendered as a collapsible group: a

@@ -9,6 +9,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/logging"
 	"hermex/internal/objectstore"
+	"hermex/internal/publicfolder"
 	"hermex/internal/relay"
 )
 
@@ -21,8 +22,9 @@ type Server struct {
 	hostname string
 	tmpl     *template.Template
 	sessions *sessionStore
-	Logger   *logging.Logger // central activity log; nil disables logging
-	Spool    *relay.Spool    // outbound relay queue; nil sends local-only
+	Logger   *logging.Logger       // central activity log; nil disables logging
+	Spool    *relay.Spool          // outbound relay queue; nil sends local-only
+	Pub      *publicfolder.Service // per-domain public folders; nil disables them
 }
 
 // smimeEvent logs an S/MIME crypto operation under the smime subsystem, tagged
@@ -74,6 +76,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /bulk", s.handleBulk)
 	mux.HandleFunc("POST /export", s.handleExport)
 	mux.HandleFunc("POST /folder", s.handleFolder)
+	mux.HandleFunc("GET /public-folders", s.handlePublicFolders)
+	mux.HandleFunc("GET /public-message", s.handlePublicMessage)
+	mux.HandleFunc("GET /public-attachment", s.handlePublicAttachment)
 	mux.HandleFunc("GET /{$}", s.handleRoot)
 	return mux
 }
@@ -174,19 +179,20 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 		Conversation: cfg.ConversationView,
 	}
 	page := mailPage{
-		User:         sess.user,
-		Current:      current,
-		Folders:      folderViews,
-		Field:        "all",    // search-form defaults (scoped to the current folder)
-		Scope:        "folder", // until the user opens a cross-folder search
-		Sort:         params.Sort,
-		Dir:          params.Dir,
-		Filter:       params.Filter,
-		Density:      whitelist(orDefault(q.Get("density"), cfg.Density), "compact", "extended"),
-		Columns:      listColumns(params.Sort, params.Dir),
-		Categories:   cfg.Categories,
-		PreviewPane:  whitelist(orDefault(q.Get("preview"), cfg.PreviewPane), "none", "right", "bottom"),
-		Conversation: params.Conversation,
+		User:          sess.user,
+		Current:       current,
+		Folders:       folderViews,
+		Field:         "all",    // search-form defaults (scoped to the current folder)
+		Scope:         "folder", // until the user opens a cross-folder search
+		Sort:          params.Sort,
+		Dir:           params.Dir,
+		Filter:        params.Filter,
+		Density:       whitelist(orDefault(q.Get("density"), cfg.Density), "compact", "extended"),
+		Columns:       listColumns(params.Sort, params.Dir),
+		Categories:    cfg.Categories,
+		PreviewPane:   whitelist(orDefault(q.Get("preview"), cfg.PreviewPane), "none", "right", "bottom"),
+		Conversation:  params.Conversation,
+		PublicFolders: s.Pub != nil,
 	}
 	if id, found := resolveFolder(folders, current); found {
 		if res, err := listFolderPage(st, id, current, params, cfg.Categories); err == nil {

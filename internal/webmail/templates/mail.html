@@ -39,6 +39,7 @@
       <a href="/smime" class="import-btn">Certificates</a>
       <a href="/password" class="import-btn">Change password</a>
       <a href="/settings" class="import-btn">Settings</a>
+      {{if .PublicFolders}}<a href="/public-folders" class="import-btn">Public folders</a>{{end}}
       {{if eq .Filter "unread"}}
       <a class="filter-toggle active" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter=all&density={{.Density}}&preview={{.PreviewPane}}&page=1">Unread only</a>
       {{else}}

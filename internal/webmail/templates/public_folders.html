@@ -1,0 +1,76 @@
+{{define "public_folders"}}{{template "head" .}}
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">hermEX</div>
+    <nav>
+      {{range .Folders}}
+      <div class="folder-item{{if eq .ID $.CurrentFID}} active{{end}}">
+        <a href="/public-folders?fid={{.ID}}">{{.Name}}{{if .Total}}<span class="fcount{{if .Unread}} has-unread{{end}}">{{if .Unread}}{{.Unread}}/{{end}}{{.Total}}</span>{{end}}</a>
+      </div>
+      {{else}}
+      <p class="empty">No public folders available.</p>
+      {{end}}
+    </nav>
+    <div class="account">{{.User}}<br><a href="/mail">&larr; Back to mail</a></div>
+  </aside>
+  <main class="main">
+    {{if .Current}}
+    <div class="toolbar">
+      <h2>Public Folders / {{.Current}} <span class="counts">{{.Total}} total, {{.Unread}} unread</span></h2>
+    </div>
+    <div class="listpane listpane-full">
+      <table class="messagelist">
+        <tbody>
+        {{range .Messages}}
+        <tr class="msgrow{{if not .Seen}} unread{{end}}">
+          <td class="col-from">{{.From}}</td>
+          <td class="col-subject"><a href="/public-message?fid={{$.CurrentFID}}&amp;uid={{.UID}}">{{.Subject}}</a></td>
+          <td class="col-date">{{.Date}}</td>
+        </tr>
+        {{else}}
+        <tr><td colspan="3" class="empty">This folder is empty.</td></tr>
+        {{end}}
+        </tbody>
+      </table>
+      {{if gt .MaxPage 1}}
+      <div class="pager">
+        {{if .PrevPage}}<a href="/public-folders?fid={{.CurrentFID}}&amp;page={{.PrevPage}}">&larr; Prev</a>{{end}}
+        <span>Page {{.Page}} of {{.MaxPage}}</span>
+        {{if .NextPage}}<a href="/public-folders?fid={{.CurrentFID}}&amp;page={{.NextPage}}">Next &rarr;</a>{{end}}
+      </div>
+      {{end}}
+    </div>
+    {{else}}
+    <div class="toolbar"><h2>Public folders</h2></div>
+    <p class="hint">Shared folders for your organization. Select a folder to read its messages.</p>
+    {{end}}
+  </main>
+</div>
+{{template "foot" .}}{{end}}
+
+{{define "public_message"}}{{template "head" .}}
+<div class="reader">
+  <div class="reader-toolbar">
+    <a href="/public-folders?fid={{.FID}}">&larr; Back to folder</a>
+  </div>
+  <div class="reader-headers">
+    <h2>{{.Detail.Subject}}</h2>
+    <div class="rh"><span class="label">From</span> {{.Detail.From}}</div>
+    {{if .Detail.To}}<div class="rh"><span class="label">To</span> {{.Detail.To}}</div>{{end}}
+    {{if .Detail.Cc}}<div class="rh"><span class="label">Cc</span> {{.Detail.Cc}}</div>{{end}}
+    <div class="rh"><span class="label">Date</span> {{.Detail.Date}}</div>
+  </div>
+  {{if .Detail.Attachments}}
+  <ul class="attachments">
+    {{range .Detail.Attachments}}
+    <li><a href="/public-attachment?fid={{$.FID}}&amp;uid={{$.Detail.UID}}&amp;part={{.Section}}">{{.Filename}}</a></li>
+    {{end}}
+  </ul>
+  {{end}}
+  {{if .Detail.IsHTML}}
+  <iframe class="htmlbody" sandbox="" srcdoc="{{.Detail.Body}}"></iframe>
+  {{else}}
+  <pre class="plainbody">{{.Detail.Body}}</pre>
+  {{end}}
+</div>
+{{template "foot" .}}{{end}}

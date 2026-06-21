@@ -19,6 +19,7 @@ import (
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/objectstore"
+	"hermex/internal/publicfolder"
 	"hermex/internal/relay"
 	"hermex/internal/serve"
 	"hermex/internal/webmail"
@@ -49,6 +50,7 @@ func main() {
 		log.Fatalf("hermex-webmail: %v", err)
 	}
 	srv.Logger = logger
+	srv.Pub = publicfolder.New(cfg) // per-domain public folders rooted at HomedirFor
 	// Enqueue external recipients of composed mail into the shared relay spool the
 	// MTA drains; without it webmail would deliver local-only.
 	spool, err := relay.Open(cfg.RelaySpoolPath())
