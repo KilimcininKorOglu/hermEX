@@ -2,6 +2,7 @@ package admin
 
 import (
 	"fmt"
+	"net/http"
 
 	"hermex/internal/antispam"
 	"hermex/internal/mapi"
@@ -38,6 +39,49 @@ func (s *Server) performBayesRetrain() (string, error) {
 		return "", err
 	}
 	return fmt.Sprintf("Retrained on %d spam + %d ham messages from %d mailboxes.", nspam, nham, nbox), nil
+}
+
+// antispamPageData builds the anti-spam page model: the built-in scoring defaults
+// and the status of the Bayesian model file (a trained model vs the embedded
+// floor).
+func (s *Server) antispamPageData(r *http.Request, notice string) map[string]any {
+	data := map[string]any{
+		"Nav":       "antispam",
+		"CSRF":      csrfCookieValue(r),
+		"Notice":    notice,
+		"Threshold": antispam.DefaultThreshold,
+		"Weights":   antispam.DefaultWeights,
+	}
+	if m, err := antispam.LoadModelFile(s.paths.AntispamModelPath()); err == nil && m != nil {
+		data["ModelTrained"] = true
+		data["SpamMsgs"] = m.SpamMsgs
+		data["HamMsgs"] = m.HamMsgs
+	}
+	return data
+}
+
+// handleUIAntispam renders the anti-spam page (system admins).
+func (s *Server) handleUIAntispam(w http.ResponseWriter, r *http.Request) {
+	if !s.uiRequireSystemPage(w, r) {
+		return
+	}
+	s.render(w, "antispam.html", s.antispamPageData(r, ""))
+}
+
+// handleUIRetrainBayes enqueues a Bayesian model retrain as an async task and
+// re-renders the page acknowledging it; the result appears on the Task queue.
+func (s *Server) handleUIRetrainBayes(w http.ResponseWriter, r *http.Request) {
+	cl, ok := s.uiAuthorized(w, r)
+	if !ok {
+		return
+	}
+	id, err := s.dir.CreateTask("bayes-retrain", "", cl.Login)
+	if err != nil {
+		s.render(w, "antispam-panel", s.antispamPageData(r, "Could not queue the retrain: "+err.Error()))
+		return
+	}
+	s.render(w, "antispam-panel", s.antispamPageData(r,
+		fmt.Sprintf("Retrain queued as task #%d — watch the Task queue for its result.", id)))
 }
 
 // trainFolder trains the model on up to retrainSampleCap of a folder's most recent

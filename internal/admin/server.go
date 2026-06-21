@@ -294,6 +294,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/ui/status/panel", s.handleUIStatusPanel)
 	mux.HandleFunc("GET /admin/ui/taskq", s.handleUITaskq)
 	mux.HandleFunc("GET /admin/ui/taskq/panel", s.handleUITaskqPanel)
+	mux.HandleFunc("GET /admin/ui/antispam", s.handleUIAntispam)
+	mux.HandleFunc("POST /admin/ui/antispam/retrain", s.handleUIRetrainBayes)
 	mux.HandleFunc("GET /admin/ui/public-folders", s.handleUIPublicFolders)
 	mux.HandleFunc("GET /admin/ui/public-folders/panel", s.handleUIPublicFoldersPanel)
 	mux.HandleFunc("POST /admin/ui/public-folders/folder", s.handleUICreatePublicFolder)

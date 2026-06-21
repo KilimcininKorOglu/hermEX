@@ -1,15 +1,58 @@
 package admin
 
 import (
+	"io"
+	"net/http"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"hermex/internal/antispam"
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
+
+// TestAntispamPageRenders proves the anti-spam page renders for a system admin
+// with the retrain control and the scoring weights.
+func TestAntispamPageRenders(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+
+	resp := authedGET(t, ts, "/admin/ui/antispam", session)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("antispam page = %d, want 200", resp.StatusCode)
+	}
+	page := string(body)
+	if !strings.Contains(page, "Retrain from mailboxes") || !strings.Contains(page, "Bayesian spam") {
+		t.Errorf("antispam page missing expected content:\n%s", page)
+	}
+}
+
+// TestRetrainEnqueues proves the retrain button queues a bayes-retrain task.
+func TestRetrainEnqueues(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/antispam/retrain", session, csrf, url.Values{})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("retrain POST = %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "Retrain queued") {
+		t.Errorf("retrain response missing acknowledgment:\n%s", body)
+	}
+	if len(d.tasks) != 1 || d.tasks[0].Type != "bayes-retrain" {
+		t.Errorf("tasks = %+v, want one bayes-retrain task", d.tasks)
+	}
+}
 
 // TestPerformBayesRetrain proves the retrain task reads each mailbox's Junk as
 // spam and inbox as ham, trains a model, and writes it to the MTA's model path.
