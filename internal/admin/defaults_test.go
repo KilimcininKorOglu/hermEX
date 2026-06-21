@@ -101,11 +101,10 @@ func TestUISaveDomainDefaults(t *testing.T) {
 // TestUIDomainDetailShowsOverride proves the override section pre-fills a stored
 // per-domain toggle.
 func TestUIDomainDetailShowsOverride(t *testing.T) {
-	webOff := false
 	d := &fakeDir{
 		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
 		domainDetail:   directory.DomainDetail{ID: 3, Name: "acme.test"},
-		createDefaults: map[int64]directory.CreateDefaults{3: {User: directory.UserCreateDefaults{Web: &webOff}}},
+		createDefaults: map[int64]directory.CreateDefaults{3: {User: directory.UserCreateDefaults{Web: new(false)}}},
 	}
 	ts := adminServer(t, d)
 	session, _ := loginCookies(t, ts)
