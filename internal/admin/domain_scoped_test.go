@@ -44,4 +44,7 @@ func TestDomainDetailScopedLists(t *testing.T) {
 	if !strings.Contains(page, "list@one.test") {
 		t.Errorf("domain detail missing the domain's group")
 	}
+	if !strings.Contains(page, "/admin/ui/public-folders?domain=one.test") {
+		t.Errorf("domain detail missing the per-domain public-folders link")
+	}
 }

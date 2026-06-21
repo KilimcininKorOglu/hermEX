@@ -64,6 +64,9 @@
 </tbody>
 </table>
 
+<h2>Public folders</h2>
+<p><a href="/admin/ui/public-folders?domain={{.Domain.Name}}">Manage this domain's public folders &rarr;</a></p>
+
 <h2>Device policy</h2>
 <p class="hint">Overrides the server default for this domain's devices; a per-user override is merged on top. Leave a field unset to inherit. Password rules apply only when DevicePasswordEnabled is Yes.</p>
 <form class="syncpolicy-form" hx-put="/admin/ui/domains/{{.Domain.ID}}/syncpolicy" hx-target="#user-status" hx-swap="outerHTML"
