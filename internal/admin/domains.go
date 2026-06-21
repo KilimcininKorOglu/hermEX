@@ -155,7 +155,8 @@ func (s *Server) handleUpdateDomain(w http.ResponseWriter, r *http.Request) {
 // homedir is derived from the configured data root.
 func (s *Server) handleCreateDomain(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name string `json:"name"`
+		Name    string `json:"name"`
+		MaxUser int64  `json:"maxUser"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
 		http.Error(w, "a domain name is required", http.StatusBadRequest)
@@ -165,6 +166,12 @@ func (s *Server) handleCreateDomain(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, "could not create domain: "+err.Error(), http.StatusBadRequest)
 		return
+	}
+	if req.MaxUser > 0 {
+		if _, err := s.dir.UpdateDomain(id, directory.DomainUpdate{MaxUser: req.MaxUser}); err != nil {
+			http.Error(w, "created the domain, but could not set the user limit: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 	writeJSONStatus(w, http.StatusCreated, map[string]any{"id": id, "name": req.Name})
 }

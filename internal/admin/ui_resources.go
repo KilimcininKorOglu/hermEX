@@ -13,21 +13,32 @@ func (s *Server) handleUIDomains(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	domains, _ := s.dir.ListDomains()
-	s.render(w, "domains.html", map[string]any{"Nav": "domains", "CSRF": csrfCookieValue(r), "Domains": domains})
+	def, _, _ := s.dir.GetCreateDefaults(0)
+	s.render(w, "domains.html", map[string]any{
+		"Nav": "domains", "CSRF": csrfCookieValue(r), "Domains": domains,
+		"DefaultMaxUser": def.Domain.MaxUser,
+	})
 }
 
 // handleUICreateDomain creates a domain from the management form and returns the
-// refreshed panel for htmx to swap in.
+// refreshed panel for htmx to swap in. The form carries the maximum-users limit
+// (pre-filled from the system create-default); a positive value is applied to the
+// new domain.
 func (s *Server) handleUICreateDomain(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.uiAuthorized(w, r); !ok {
 		return
 	}
 	name := r.PostFormValue("name")
+	maxUser, _ := strconv.ParseInt(r.PostFormValue("maxUser"), 10, 64)
 	var errMsg string
 	if name == "" {
 		errMsg = "A domain name is required."
-	} else if _, err := s.dir.CreateDomain(name, s.paths.HomedirFor(name)); err != nil {
+	} else if id, err := s.dir.CreateDomain(name, s.paths.HomedirFor(name)); err != nil {
 		errMsg = "Could not create domain: " + err.Error()
+	} else if maxUser > 0 {
+		if _, err := s.dir.UpdateDomain(id, directory.DomainUpdate{MaxUser: maxUser}); err != nil {
+			errMsg = "Created the domain, but could not set the user limit: " + err.Error()
+		}
 	}
 	domains, _ := s.dir.ListDomains()
 	s.render(w, "domains-panel", map[string]any{"Domains": domains, "Error": errMsg, "CSRF": csrfCookieValue(r)})

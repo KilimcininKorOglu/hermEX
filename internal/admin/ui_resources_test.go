@@ -48,6 +48,42 @@ func TestUICreateDomain(t *testing.T) {
 	}
 }
 
+// TestUICreateDomainWithMaxUser proves the create form applies the posted user
+// limit to the new domain.
+func TestUICreateDomainWithMaxUser(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	resp := htmxPOST(t, ts, "/admin/ui/domains", session, csrf, url.Values{"name": {"new.test"}, "maxUser": {"25"}})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create domain status %d, want 200", resp.StatusCode)
+	}
+	if d.createdDomain != "new.test" || d.updateDomainArg.MaxUser != 25 {
+		t.Errorf("create+limit = %q / maxUser %d, want new.test / 25", d.createdDomain, d.updateDomainArg.MaxUser)
+	}
+}
+
+// TestUIDomainsPagePrefillsMaxUser proves the create form pre-fills the system
+// create-default for the user limit.
+func TestUIDomainsPagePrefillsMaxUser(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		createDefaults: map[int64]directory.CreateDefaults{0: {Domain: directory.DomainCreateDefaults{MaxUser: 50}}},
+	}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+	resp := authedGET(t, ts, "/admin/ui/domains", session)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("domains page status %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), `name="maxUser"`) || !strings.Contains(string(body), `value="50"`) {
+		t.Errorf("domains page did not pre-fill maxUser=50:\n%s", body)
+	}
+}
+
 // TestUIDomainPurge proves the domains page purge action purges the domain and
 // passes the deleteFiles flag through, refreshing the panel.
 func TestUIDomainPurge(t *testing.T) {

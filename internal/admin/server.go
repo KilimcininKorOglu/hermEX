@@ -75,6 +75,7 @@ type Directory interface {
 	SetDefaultSyncPolicy(p easpolicy.Policy) error
 	GetDomainSyncPolicy(domain string) (easpolicy.Policy, error)
 	SetDomainSyncPolicy(domain string, p easpolicy.Policy) (bool, error)
+	GetCreateDefaults(scopeID int64) (directory.CreateDefaults, bool, error)
 	ListFetchmail(mailbox string) ([]directory.FetchmailEntry, error)
 	CreateFetchmail(e directory.FetchmailEntry) (int64, error)
 	DeleteFetchmail(id int64) (bool, error)

@@ -6,6 +6,7 @@
 <form class="create-form" hx-post="/admin/ui/domains" hx-target="#domains-panel" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <input type="text" name="name" placeholder="example.com" required>
+<label>Max users <input type="number" name="maxUser" min="0" value="{{.DefaultMaxUser}}"> <small>(0 = unlimited)</small></label>
 <button type="submit">Add domain</button>
 </form>
 {{template "domains-panel" .}}

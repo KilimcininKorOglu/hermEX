@@ -193,6 +193,23 @@ func TestAdminCreateDomain(t *testing.T) {
 	}
 }
 
+// TestAdminCreateDomainWithMaxUser proves the create endpoint applies a posted
+// user limit to the new domain.
+func TestAdminCreateDomainWithMaxUser(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	resp := authedPOST(t, ts, "/admin/domains", session, csrf, `{"name":"new.test","maxUser":25}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create domain status %d, want 201", resp.StatusCode)
+	}
+	if d.createdDomain != "new.test" || d.updatedDomain != 42 || d.updateDomainArg.MaxUser != 25 {
+		t.Errorf("create+limit = domain %q, updated id %d, maxUser %d; want new.test / 42 / 25",
+			d.createdDomain, d.updatedDomain, d.updateDomainArg.MaxUser)
+	}
+}
+
 // TestAdminCreateDomainNeedsCSRF proves the create route is CSRF-protected: a
 // POST with the session but no CSRF header is refused (and provisions nothing).
 func TestAdminCreateDomainNeedsCSRF(t *testing.T) {
