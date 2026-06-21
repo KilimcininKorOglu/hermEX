@@ -1,0 +1,58 @@
+{{define "public_folders.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>Public folders</h1>
+<p class="hint">Per-domain shared folders. Pick a domain, create folders, then grant access to "anyone" in the domain or to a specific user. A domain's public folders are enabled the moment its first folder is created.</p>
+<form>
+<label>Domain
+<select name="domain" hx-get="/admin/ui/public-folders/panel" hx-trigger="change" hx-target="#pf-panel" hx-swap="innerHTML">
+<option value="">— select a domain —</option>
+{{range .Domains}}<option value="{{.Name}}"{{if eq .Name $.Domain}} selected{{end}}>{{.Name}}</option>{{end}}
+</select>
+</label>
+</form>
+<div id="pf-panel">{{template "public-folders-panel" .}}</div>
+</main>
+</div>
+{{template "foot" .}}{{end}}
+
+{{define "public-folders-panel"}}
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if .Domain}}
+<form class="pf-create-form" hx-post="/admin/ui/public-folders/folder" hx-target="#pf-panel" hx-swap="innerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<input type="hidden" name="domain" value="{{.Domain}}">
+<label>New folder <input type="text" name="name" placeholder="Announcements" required></label>
+<button type="submit">Create folder</button>
+</form>
+{{range .Folders}}
+{{$fid := .ID}}
+<section class="pf-folder">
+<h3>{{.Name}}
+<form class="pf-inline" hx-post="/admin/ui/public-folders/folder/delete" hx-target="#pf-panel" hx-swap="innerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'
+      hx-confirm="Delete public folder {{.Name}}? This removes the folder and its messages.">
+<input type="hidden" name="domain" value="{{$.Domain}}"><input type="hidden" name="fid" value="{{$fid}}">
+<button type="submit">Delete folder</button></form>
+</h3>
+<table class="grid">
+<thead><tr><th>Grantee</th><th>Level</th><th></th></tr></thead>
+<tbody>
+{{range .Grants}}<tr>
+<td>{{.Name}}</td><td>{{.Level}}</td>
+<td><form hx-post="/admin/ui/public-folders/grant/remove" hx-target="#pf-panel" hx-swap="innerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
+<input type="hidden" name="domain" value="{{$.Domain}}"><input type="hidden" name="fid" value="{{$fid}}"><input type="hidden" name="memberID" value="{{.MemberID}}">
+<button type="submit">Remove</button></form></td></tr>
+{{else}}<tr><td colspan="3" class="empty">No grants yet — nobody can see this folder.</td></tr>
+{{end}}
+</tbody>
+</table>
+<form class="pf-grant-form" hx-post="/admin/ui/public-folders/grant" hx-target="#pf-panel" hx-swap="innerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
+<input type="hidden" name="domain" value="{{$.Domain}}"><input type="hidden" name="fid" value="{{$fid}}">
+<label>Grantee <input type="text" name="grantee" placeholder="anyone or bob@{{$.Domain}}" required></label>
+<label>Level <select name="rights">{{range $.Levels}}<option value="{{.Rights}}">{{.Name}}</option>{{end}}</select></label>
+<button type="submit">Grant</button>
+</form>
+</section>
+{{else}}<p class="empty">No public folders for this domain yet. Create one to enable public folders.</p>
+{{end}}
+{{end}}{{end}}

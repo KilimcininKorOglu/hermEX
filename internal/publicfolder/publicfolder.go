@@ -20,6 +20,12 @@ import (
 	"hermex/internal/objectstore"
 )
 
+// ErrStructuralFolder is returned by DeleteFolder when the target is one of the
+// store's built-in skeleton folders (Root / IPM_SUBTREE / NON_IPM_SUBTREE / EFORMS
+// REGISTRY), which must never be deleted. Only administrator-created folders, whose
+// ids start at PublicFIDUnassignedStart, may be removed.
+var ErrStructuralFolder = errors.New("publicfolder: cannot delete a structural folder")
+
 // Paths supplies the per-domain public-store directory. *config.Config satisfies
 // it via HomedirFor, the documented domain public-store directory.
 type Paths interface {
@@ -122,4 +128,80 @@ func (svc *Service) VisibleFolders(callerEmail string) ([]Folder, error) {
 		out = append(out, Folder{ID: f.ID, DisplayName: f.DisplayName, Rights: rights})
 	}
 	return out, nil
+}
+
+// FolderWithGrants is the administrative view of a public folder: its identity and
+// its full permission table (every member, not ACL-filtered for a caller).
+type FolderWithGrants struct {
+	ID          int64
+	DisplayName string
+	Grants      []objectstore.PermissionEntry
+}
+
+// Folders returns every public folder in a domain with its full permission table,
+// for administrative management. It returns nil when the domain has no public store
+// yet, never creating one (a management read must not provision as a side effect).
+func (svc *Service) Folders(domain string) ([]FolderWithGrants, error) {
+	st, err := svc.OpenForDomain(domain)
+	if errors.Is(err, objectstore.ErrNotProvisioned) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer st.Close()
+
+	folders, err := st.ListFolders()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]FolderWithGrants, 0, len(folders))
+	for _, f := range folders {
+		grants, err := st.ListPermissions(f.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, FolderWithGrants{ID: f.ID, DisplayName: f.DisplayName, Grants: grants})
+	}
+	return out, nil
+}
+
+// CreateFolder provisions the domain's public store if absent and creates a folder
+// named name directly under its IPM subtree, returning the new folder id. Creating
+// the first folder is what enables a domain's public folders.
+func (svc *Service) CreateFolder(domain, name string) (int64, error) {
+	st, err := objectstore.OpenPublic(svc.paths.HomedirFor(strings.ToLower(domain)))
+	if err != nil {
+		return 0, err
+	}
+	defer st.Close()
+	return st.CreateFolder(nil, name)
+}
+
+// DeleteFolder removes an administrator-created public folder by id. It refuses a
+// structural id (below PublicFIDUnassignedStart) with ErrStructuralFolder so a
+// request cannot delete the store's skeleton, and ErrNotProvisioned when the domain
+// has no public store.
+func (svc *Service) DeleteFolder(domain string, fid int64) error {
+	if fid < int64(mapi.PublicFIDUnassignedStart) {
+		return ErrStructuralFolder
+	}
+	st, err := svc.OpenForDomain(domain)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	return st.DeleteFolder(fid)
+}
+
+// Grant applies one permission change (an add/modify/remove the admin has already
+// shaped) to a public folder. The store must already exist; it is never created by
+// a grant.
+func (svc *Service) Grant(domain string, fid int64, change objectstore.PermissionChange) error {
+	st, err := svc.OpenForDomain(domain)
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	return st.ModifyPermissions(fid, false, []objectstore.PermissionChange{change})
 }
