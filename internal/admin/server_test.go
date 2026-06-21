@@ -33,6 +33,11 @@ type fakeDir struct {
 	namedRoles        map[int64]directory.RoleDetail
 	nextRoleID        int64
 
+	// captured by PurgeDomain; purgeDomainMissing makes it report ok=false
+	purgedDomain       int64
+	purgeFiles         bool
+	purgeDomainMissing bool
+
 	// captured by AssignDomainToOrg; assignDomainMissing makes it report ok=false
 	assignDomainID, assignOrgID int64
 	assignDomainMissing         bool
@@ -220,6 +225,11 @@ func (f *fakeDir) CreateDomain(name, homedir string) (int64, error) {
 	}
 	f.createdDomain, f.createdHomedir = name, homedir
 	return 42, nil
+}
+
+func (f *fakeDir) PurgeDomain(domainID int64, deleteFiles bool) (bool, error) {
+	f.purgedDomain, f.purgeFiles = domainID, deleteFiles
+	return !f.purgeDomainMissing, nil
 }
 func (f *fakeDir) CreateUser(username, _, maildir string) (int64, error) {
 	if f.createErr != nil {

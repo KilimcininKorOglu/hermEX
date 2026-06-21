@@ -103,6 +103,55 @@ func TestDomainAdminCannotGrantRoles(t *testing.T) {
 	}
 }
 
+// TestDomainPurgeCapability proves the destructive domain-purge endpoint honors
+// the DomainPurge capability: a full system admin and a DomainPurge holder may
+// purge (and the deleteFiles query flag reaches the store), while a read-only
+// admin or a domain admin without the capability may not.
+func TestDomainPurgeCapability(t *testing.T) {
+	sys := systemAdminDir()
+	ts := adminServer(t, sys)
+	session, csrf := loginCookies(t, ts)
+	if s := statusOf(authedReq(t, ts, "DELETE", "/admin/domains/5?deleteFiles=true", session, csrf, "")); s != http.StatusNoContent {
+		t.Errorf("system admin purge = %d, want 204", s)
+	}
+	if sys.purgedDomain != 5 || !sys.purgeFiles {
+		t.Errorf("purge invoked with id=%d files=%v, want 5/true", sys.purgedDomain, sys.purgeFiles)
+	}
+
+	purger := &fakeDir{authOK: true, uid: 2, perms: []directory.Permission{{Name: directory.PermDomainPurge}}}
+	tsP := adminServer(t, purger)
+	sP, cP := loginCookies(t, tsP)
+	if s := statusOf(authedReq(t, tsP, "DELETE", "/admin/domains/9", sP, cP, "")); s != http.StatusNoContent {
+		t.Errorf("DomainPurge holder purge = %d, want 204", s)
+	}
+	if purger.purgeFiles {
+		t.Errorf("deleteFiles defaulted true without the query flag")
+	}
+
+	denied := []struct {
+		name string
+		dir  *fakeDir
+	}{
+		{"read-only admin", &fakeDir{authOK: true, uid: 3, perms: []directory.Permission{{Name: directory.PermSystemAdminRO}}}},
+		{"domain admin without purge", &fakeDir{authOK: true, uid: 4, perms: []directory.Permission{{Name: directory.PermDomainAdmin, Params: "*"}}}},
+	}
+	for _, c := range denied {
+		tsx := adminServer(t, c.dir)
+		sx, cx := loginCookies(t, tsx)
+		if s := statusOf(authedReq(t, tsx, "DELETE", "/admin/domains/9", sx, cx, "")); s != http.StatusForbidden {
+			t.Errorf("%s purge = %d, want 403", c.name, s)
+		}
+	}
+
+	missing := systemAdminDir()
+	missing.purgeDomainMissing = true
+	tsM := adminServer(t, missing)
+	sM, cM := loginCookies(t, tsM)
+	if s := statusOf(authedReq(t, tsM, "DELETE", "/admin/domains/999", sM, cM, "")); s != http.StatusNotFound {
+		t.Errorf("purge unknown domain = %d, want 404", s)
+	}
+}
+
 // TestReadOnlyAdminReadWriteSplit is the two-direction enforcement guarantee for
 // a read-only system administrator: every read is admitted (never 403) and every
 // state-changing request is refused (403). It pins the method-aware chokepoint —

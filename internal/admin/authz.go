@@ -109,6 +109,20 @@ func (s *Server) requireUserScope(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+// requirePurge gates the destructive domain-purge endpoint: a full system admin,
+// or any holder of the DomainPurge capability. No other admin — not even a domain
+// admin of the target — may purge, matching the capability's all-or-nothing scope.
+func (s *Server) requirePurge(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		perms := s.adminPerms(claimsOf(r).UserID)
+		if hasPerm(perms, directory.PermSystemAdmin, "") || hasPerm(perms, directory.PermDomainPurge, "") {
+			next(w, r)
+			return
+		}
+		http.Error(w, "forbidden: requires domain-purge authority", http.StatusForbidden)
+	}
+}
+
 // requirePasswordScope gates the password-reset endpoint: a ResetPasswd holder
 // (any user, the additive capability), or an administrator with write scope over
 // the target user's domain (which covers a full system admin). A read-only admin

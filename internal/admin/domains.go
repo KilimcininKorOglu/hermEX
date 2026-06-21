@@ -3,6 +3,7 @@ package admin
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 
 	"hermex/internal/directory"
 )
@@ -79,4 +80,26 @@ func (s *Server) handleCreateDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSONStatus(w, http.StatusCreated, map[string]any{"id": id, "name": req.Name})
+}
+
+// handleDeleteDomain purges a domain and everything scoped to it (its
+// requirePurge wrapper gates on the DomainPurge capability). The on-disk
+// mailboxes and domain directory are removed only when ?deleteFiles=true. An
+// unknown domain id is 404.
+func (s *Server) handleDeleteDomain(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid domain id", http.StatusBadRequest)
+		return
+	}
+	ok, err := s.dir.PurgeDomain(id, r.URL.Query().Get("deleteFiles") == "true")
+	if err != nil {
+		http.Error(w, "could not purge domain: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "no such domain", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
