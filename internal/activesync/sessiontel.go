@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/serve"
 )
 
@@ -55,7 +56,24 @@ func (s *Server) beginSession(r *http.Request, sess *session) {
 		Push:       sess.req.cmd == "Ping",
 	}
 	sess.telOn = true
-	_ = s.Sessions.UpsertSession(sess.tel)
+	if err := s.Sessions.UpsertSession(sess.tel); err != nil {
+		s.logSessionFail("session.begin.fail", sess, err)
+	}
+}
+
+// logSessionFail records a best-effort telemetry write failure at debug, matching
+// recordDevice's idiom so a silently-dead monitor (a column/type mismatch on the
+// real write path that tests with a fake recorder never exercise) is diagnosable
+// instead of invisible.
+func (s *Server) logSessionFail(name string, sess *session, err error) {
+	s.Logger.Emit(logging.Event{
+		Level:      logging.LevelDebug,
+		Subsystem:  logging.ActiveSync,
+		Name:       name,
+		User:       sess.user,
+		RemoteAddr: sess.tel.IP,
+		Fields:     logging.Fields{"device": sess.req.deviceID, "error": err.Error()},
+	})
 }
 
 // touchSession refreshes a running session's last-update so a long-held request
@@ -78,5 +96,7 @@ func (s *Server) finishSession(sess *session) {
 	now := time.Now().Unix()
 	sess.tel.LastUpdate = now
 	sess.tel.EndedAt = now
-	_ = s.Sessions.UpsertSession(sess.tel)
+	if err := s.Sessions.UpsertSession(sess.tel); err != nil {
+		s.logSessionFail("session.finish.fail", sess, err)
+	}
 }

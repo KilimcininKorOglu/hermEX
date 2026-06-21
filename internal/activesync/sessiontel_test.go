@@ -1,26 +1,30 @@
 package activesync
 
 import (
+	"errors"
 	"net/http/httptest"
 	"path/filepath"
 	"sync"
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/objectstore"
 )
 
-// fakeRecorder captures UpsertSession calls for the telemetry tests.
+// fakeRecorder captures UpsertSession calls for the telemetry tests. When err is
+// set every write fails, exercising the best-effort error path.
 type fakeRecorder struct {
 	mu   sync.Mutex
 	recs []directory.SessionRecord
+	err  error
 }
 
 func (f *fakeRecorder) UpsertSession(s directory.SessionRecord) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.recs = append(f.recs, s)
-	return nil
+	return f.err
 }
 
 func (f *fakeRecorder) all() []directory.SessionRecord {
@@ -92,6 +96,36 @@ func TestSessionTouchAndPush(t *testing.T) {
 	}
 	if recs[2].EndedAt == 0 {
 		t.Errorf("finish did not stamp ended: %+v", recs[2])
+	}
+}
+
+// TestSessionWriteFailureLogged proves a failed telemetry write is best-effort:
+// the command path is untouched and the failure is logged at debug so a silently
+// dead monitor (a broken real write path the fake recorder never exercises) is
+// diagnosable instead of invisible.
+func TestSessionWriteFailureLogged(t *testing.T) {
+	sink := &captureSink{}
+	rec := &fakeRecorder{err: errors.New("column mismatch")}
+	srv := &Server{Sessions: rec, Logger: logging.New(sink)}
+	r := httptest.NewRequest("POST", "/Microsoft-Server-ActiveSync?Cmd=Ping&DeviceId=d3", nil)
+	sess := &session{user: "carol@hermex.test", req: asRequest{cmd: "Ping", deviceID: "d3"}}
+
+	srv.beginSession(r, sess)
+	srv.finishSession(sess)
+
+	// The command path still completed: telemetry stayed on and both writes ran.
+	if !sess.telOn {
+		t.Errorf("a write failure disabled telemetry; it must be best-effort")
+	}
+	be, ok := sink.find("session.begin.fail")
+	if !ok {
+		t.Fatalf("begin write failure was not logged")
+	}
+	if be.Level != logging.LevelDebug || be.Fields["error"] != "column mismatch" || be.Fields["device"] != "d3" {
+		t.Errorf("begin.fail event = %+v, want debug level with the device and error", be)
+	}
+	if _, ok := sink.find("session.finish.fail"); !ok {
+		t.Errorf("finish write failure was not logged")
 	}
 }
 
