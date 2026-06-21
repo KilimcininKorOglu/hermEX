@@ -34,13 +34,14 @@ type fakeDir struct {
 	domainSyncPolicyMissing   bool
 
 	// create-defaults by scope (0 = system, domain id = override); set in a test
-	createDefaults map[int64]directory.CreateDefaults
-	fetchmail      map[string][]directory.FetchmailEntry
-	nextFMID       int64
-	orgs           map[int64]directory.OrgInfo
-	nextOrgID      int64
-	namedRoles     map[int64]directory.RoleDetail
-	nextRoleID     int64
+	createDefaults        map[int64]directory.CreateDefaults
+	effectiveUserDefaults directory.ResolvedUserDefaults
+	fetchmail             map[string][]directory.FetchmailEntry
+	nextFMID              int64
+	orgs                  map[int64]directory.OrgInfo
+	nextOrgID             int64
+	namedRoles            map[int64]directory.RoleDetail
+	nextRoleID            int64
 
 	// captured by PurgeDomain; purgeDomainMissing makes it report ok=false
 	purgedDomain       int64
@@ -356,6 +357,9 @@ func (f *fakeDir) GetDomainSyncPolicy(string) (easpolicy.Policy, error) {
 func (f *fakeDir) GetCreateDefaults(scopeID int64) (directory.CreateDefaults, bool, error) {
 	cd, ok := f.createDefaults[scopeID]
 	return cd, ok, nil
+}
+func (f *fakeDir) EffectiveUserDefaults(int64) (directory.ResolvedUserDefaults, error) {
+	return f.effectiveUserDefaults, nil
 }
 func (f *fakeDir) SetDomainSyncPolicy(domain string, p easpolicy.Policy) (bool, error) {
 	f.setDomainSyncPolicyDomain, f.domainSyncPolicy = domain, p

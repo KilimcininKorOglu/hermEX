@@ -5,14 +5,33 @@
 <h1>Users</h1>
 <form class="create-form" hx-post="/admin/ui/users" hx-target="#users-panel" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<input type="email" name="email" placeholder="user@example.com" required>
+<input type="text" name="local" placeholder="username" required> @
+<select name="domain" hx-get="/admin/ui/user-create-fields" hx-target="#user-create-fields" hx-swap="outerHTML" hx-trigger="change">
+{{range .Domains}}<option value="{{.ID}}">{{.Name}}</option>
+{{else}}<option value="">No domains yet</option>
+{{end}}
+</select>
 <input type="password" name="password" placeholder="Password" required>
+{{template "user-create-fields" .Fields}}
 <button type="submit">Add user</button>
 </form>
 {{template "users-panel" .}}
 </main>
 </div>
 {{template "foot" .}}{{end}}
+
+{{define "user-create-fields"}}<div id="user-create-fields" class="create-fields">
+<label>Language <input type="text" name="lang" value="{{.Lang}}" placeholder="(default)"></label>
+<label class="check"><input type="checkbox" name="pop3_imap"{{if .POP3IMAP}} checked{{end}}> POP3/IMAP</label>
+<label class="check"><input type="checkbox" name="smtp"{{if .SMTP}} checked{{end}}> SMTP</label>
+<label class="check"><input type="checkbox" name="chgpasswd"{{if .ChgPasswd}} checked{{end}}> Change password</label>
+<label class="check"><input type="checkbox" name="web"{{if .Web}} checked{{end}}> Web</label>
+<label class="check"><input type="checkbox" name="eas"{{if .EAS}} checked{{end}}> EAS</label>
+<label class="check"><input type="checkbox" name="dav"{{if .DAV}} checked{{end}}> DAV</label>
+<label>Storage quota (MiB) <input type="number" name="storagemb" min="0" value="{{.StorageMB}}"></label>
+<label>Receive quota (MiB) <input type="number" name="receivemb" min="0" value="{{.ReceiveMB}}"></label>
+<label>Send quota (MiB) <input type="number" name="sendmb" min="0" value="{{.SendMB}}"></label>
+</div>{{end}}
 
 {{define "users-panel"}}<div id="users-panel">
 {{if .Error}}<p class="error">{{.Error}}</p>{{end}}

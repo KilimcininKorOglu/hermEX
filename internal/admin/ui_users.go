@@ -35,11 +35,60 @@ func (s *Server) handleUIUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	users, _ := s.dir.ListUsers()
+	domains, _ := s.dir.ListDomains()
+	// The create form pre-fills its per-user defaults for the first domain; the
+	// domain selector re-fetches the fields when the admin picks another.
+	var initDomain int64
+	if len(domains) > 0 {
+		initDomain = domains[0].ID
+	}
+	rd, _ := s.dir.EffectiveUserDefaults(initDomain)
 	s.render(w, "users.html", map[string]any{
-		"Nav":   "users",
-		"CSRF":  csrfCookieValue(r),
-		"Users": users,
+		"Nav":     "users",
+		"CSRF":    csrfCookieValue(r),
+		"Users":   users,
+		"Domains": domains,
+		"Fields":  userCreateFieldsOf(rd),
 	})
+}
+
+// userCreateFields is the new-user form's pre-fillable section: the language, the
+// six service toggles, and the three quotas in MiB (the form field names match the
+// account-edit and quota forms so the same parsing applies).
+type userCreateFields struct {
+	Lang      string
+	POP3IMAP  bool
+	SMTP      bool
+	ChgPasswd bool
+	Web       bool
+	EAS       bool
+	DAV       bool
+	StorageMB uint32
+	ReceiveMB uint32
+	SendMB    uint32
+}
+
+// userCreateFieldsOf projects resolved create-defaults onto the form model,
+// converting the KiB quotas to MiB for display.
+func userCreateFieldsOf(rd directory.ResolvedUserDefaults) userCreateFields {
+	return userCreateFields{
+		Lang: rd.Lang, POP3IMAP: rd.POP3IMAP, SMTP: rd.SMTP, ChgPasswd: rd.ChgPasswd,
+		Web: rd.Web, EAS: rd.EAS, DAV: rd.DAV,
+		StorageMB: uint32(rd.StorageKB / 1024),
+		ReceiveMB: uint32(rd.ReceiveKB / 1024),
+		SendMB:    uint32(rd.SendKB / 1024),
+	}
+}
+
+// handleUICreateUserDefaults returns the new-user form's pre-fillable section for a
+// domain, so the domain selector can re-fill it when changed (htmx GET).
+func (s *Server) handleUICreateUserDefaults(w http.ResponseWriter, r *http.Request) {
+	if !s.uiRequireSystemPage(w, r) {
+		return
+	}
+	id, _ := strconv.ParseInt(r.URL.Query().Get("domain"), 10, 64)
+	rd, _ := s.dir.EffectiveUserDefaults(id)
+	s.render(w, "user-create-fields", userCreateFieldsOf(rd))
 }
 
 // handleUICreateUser creates a user from the management form and returns the
@@ -49,18 +98,53 @@ func (s *Server) handleUICreateUser(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.uiAuthorized(w, r); !ok {
 		return
 	}
-	email := r.PostFormValue("email")
+	local := strings.TrimSpace(r.PostFormValue("local"))
+	domainID, _ := strconv.ParseInt(r.PostFormValue("domain"), 10, 64)
 	var errMsg string
 	switch {
-	case email == "" || r.PostFormValue("password") == "":
-		errMsg = "An email and password are required."
+	case local == "" || r.PostFormValue("password") == "":
+		errMsg = "A username and password are required."
 	default:
-		if _, err := s.dir.CreateUser(email, r.PostFormValue("password"), s.paths.MaildirFor(email)); err != nil {
-			errMsg = "Could not create user: " + err.Error()
+		dd, found, derr := s.dir.GetDomain(domainID)
+		switch {
+		case derr != nil:
+			errMsg = "Server error."
+		case !found:
+			errMsg = "Select a valid domain."
+		default:
+			errMsg = s.createUserWithDefaults(r, local+"@"+dd.Name)
 		}
 	}
 	users, _ := s.dir.ListUsers()
 	s.render(w, "users-panel", map[string]any{"Users": users, "Error": errMsg})
+}
+
+// createUserWithDefaults creates the user, then applies the form's per-user
+// settings (language, the six service toggles, and the quotas) — the values the
+// create form carried, pre-filled from the domain's effective defaults and
+// possibly edited. It returns an error message, or "" on success. The quota is
+// applied only when a limit is set, so an unlimited account does not need its
+// store opened at creation.
+func (s *Server) createUserWithDefaults(r *http.Request, email string) string {
+	maildir := s.paths.MaildirFor(email)
+	if _, err := s.dir.CreateUser(email, r.PostFormValue("password"), maildir); err != nil {
+		return "Could not create user: " + err.Error()
+	}
+	cb := func(name string) bool { return r.PostFormValue(name) != "" }
+	if _, err := s.dir.UpdateUser(email, directory.UserUpdate{
+		Lang:     r.PostFormValue("lang"),
+		POP3IMAP: cb("pop3_imap"), SMTP: cb("smtp"), ChgPasswd: cb("chgpasswd"),
+		Web: cb("web"), EAS: cb("eas"), DAV: cb("dav"),
+	}); err != nil {
+		return "Created the user, but could not apply its settings: " + err.Error()
+	}
+	q := quotaFromForm(r)
+	if q.SendKB > 0 || q.ReceiveKB > 0 || q.StorageKB > 0 {
+		if err := s.store.SetQuota(maildir, q); err != nil {
+			return "Created the user, but could not set its quota: " + err.Error()
+		}
+	}
+	return ""
 }
 
 // handleUIUserDetail renders one user's detail/edit page (system administrators

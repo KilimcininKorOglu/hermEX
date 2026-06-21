@@ -60,15 +60,18 @@ func TestUIUsersPageRequiresSystem(t *testing.T) {
 	}
 }
 
-// TestUICreateUser proves the management form creates a user and returns the
-// refreshed panel fragment.
+// TestUICreateUser proves the management form creates a user from the local part
+// and the selected domain, and returns the refreshed panel fragment.
 func TestUICreateUser(t *testing.T) {
-	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		domainDetail: directory.DomainDetail{ID: 1, Name: "hermex.test"},
+	}
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
 	resp := htmxPOST(t, ts, "/admin/ui/users", session, csrf,
-		url.Values{"email": {"new@hermex.test"}, "password": {"pw"}})
+		url.Values{"local": {"new"}, "domain": {"1"}, "password": {"pw"}})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("create user status %d, want 200", resp.StatusCode)
@@ -82,6 +85,58 @@ func TestUICreateUser(t *testing.T) {
 	}
 }
 
+// TestUICreateUserAppliesDefaults proves the create form's per-user fields are
+// applied: the language and service toggles via UpdateUser, the quota via the
+// store. An unchecked toggle is applied as off.
+func TestUICreateUserAppliesDefaults(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		domainDetail: directory.DomainDetail{ID: 1, Name: "hermex.test"},
+	}
+	store := &fakeStore{}
+	ts := adminServerStore(t, d, store)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/users", session, csrf, url.Values{
+		"local": {"new"}, "domain": {"1"}, "password": {"pw"},
+		"lang": {"tr"}, "pop3_imap": {"on"}, "web": {"on"}, "storagemb": {"100"},
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("create user status %d, want 200", resp.StatusCode)
+	}
+	if d.createdUser != "new@hermex.test" {
+		t.Fatalf("created user %q, want new@hermex.test", d.createdUser)
+	}
+	if d.updateUser.Lang != "tr" || !d.updateUser.POP3IMAP || !d.updateUser.Web || d.updateUser.SMTP {
+		t.Errorf("applied settings = %+v, want lang tr / POP3IMAP+Web on / SMTP off", d.updateUser)
+	}
+	if store.setQuotaDir == "" || store.setQuotaVal.StorageKB != 100*1024 {
+		t.Errorf("quota = dir %q %+v, want 100 MiB (102400 KiB) storage", store.setQuotaDir, store.setQuotaVal)
+	}
+}
+
+// TestUICreateUserPrefill proves the domain selector's htmx endpoint returns the
+// pre-fill fields for a domain's effective defaults.
+func TestUICreateUserPrefill(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		effectiveUserDefaults: directory.ResolvedUserDefaults{Lang: "tr", Web: true, StorageKB: 100 * 1024},
+	}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+	resp := authedGET(t, ts, "/admin/ui/user-create-fields?domain=1", session)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("prefill status %d, want 200", resp.StatusCode)
+	}
+	s := string(body)
+	if !strings.Contains(s, `value="tr"`) || !strings.Contains(s, `name="web" checked`) || !strings.Contains(s, `value="100"`) {
+		t.Errorf("prefill partial missing the effective-default values:\n%s", s)
+	}
+}
+
 // TestUICreateUserNoCSRF proves the create form requires a CSRF token.
 func TestUICreateUserNoCSRF(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
@@ -89,7 +144,7 @@ func TestUICreateUserNoCSRF(t *testing.T) {
 	session, _ := loginCookies(t, ts)
 
 	req, _ := http.NewRequest("POST", ts.URL+"/admin/ui/users",
-		strings.NewReader("email=x@hermex.test&password=pw"))
+		strings.NewReader("local=x&domain=1&password=pw"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
 	resp, err := http.DefaultClient.Do(req)
@@ -112,7 +167,7 @@ func TestUICreateUserValidation(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/users", session, csrf, url.Values{"email": {"x@hermex.test"}})
+	resp := htmxPOST(t, ts, "/admin/ui/users", session, csrf, url.Values{"local": {"x"}, "domain": {"1"}})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("validation response status %d, want 200 (panel with error)", resp.StatusCode)
