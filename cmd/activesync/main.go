@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 
@@ -55,6 +56,8 @@ func main() {
 		log.Fatalf("hermex-activesync: open relay spool: %v", err)
 	}
 	srv.Spool = spool
+	// Record live-session telemetry for the admin mobile-devices monitor.
+	srv.Sessions = dir
 	addr := cfg.ActiveSyncAddr
 	if addr == "" {
 		addr = ":8080"
@@ -68,8 +71,28 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	go purgeSessionsLoop(ctx, dir, logger)
 	log.Printf("hermex-activesync listening on %s", addr)
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, spool.Close, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-activesync: %v", err)
+	}
+}
+
+// purgeSessionsLoop sweeps aged live-session telemetry rows once a minute until
+// the daemon shuts down, keeping the active_sessions table from growing without
+// bound. The read path already hides stale rows by age, so a missed sweep is
+// harmless — failures are logged, not fatal.
+func purgeSessionsLoop(ctx context.Context, dir *directory.SQLDirectory, logger *logging.Logger) {
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if _, err := dir.PurgeStaleSessions(time.Now().Unix()); err != nil {
+				logger.Info(logging.ActiveSync, "session.purge.fail", logging.Fields{"error": err.Error()})
+			}
+		}
 	}
 }

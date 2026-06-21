@@ -28,6 +28,7 @@ type Server struct {
 	Logger   *logging.Logger // central activity log; nil disables logging
 	Spool    *relay.Spool    // outbound relay queue; nil sends local-only
 	roots    *x509.CertPool  // S/MIME trust anchors for ValidateCert; nil = system roots
+	Sessions SessionRecorder // live-session telemetry sink; nil disables it
 }
 
 // NewServer builds an ActiveSync server backed by the directory for
@@ -93,11 +94,16 @@ type session struct {
 	mailbox  string
 	req      asRequest
 	protocol string
+
+	tel   directory.SessionRecord // live-session telemetry row for this request
+	telOn bool                    // whether telemetry is being recorded
 }
 
 // dispatch routes a parsed command to its handler. Command handlers are added
 // per increment; an unrecognized or not-yet-implemented command returns 501.
 func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session) {
+	s.beginSession(r, sess)
+	defer s.finishSession(sess)
 	s.Logger.Emit(logging.Event{
 		Level:      logging.LevelInfo,
 		Subsystem:  logging.ActiveSync,

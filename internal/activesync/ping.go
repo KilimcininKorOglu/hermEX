@@ -88,6 +88,8 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request, sess *sessio
 			return
 		}
 		time.Sleep(min(pingPoll, remaining))
+		// Keep the long-held Ping visible in the live-session monitor.
+		s.touchSession(sess)
 	}
 }
 
