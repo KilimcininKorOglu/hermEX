@@ -34,6 +34,7 @@ type Directory interface {
 	ListDomains() ([]directory.DomainInfo, error)
 	ListUsers() ([]directory.UserInfo, error)
 	ListUsersInDomain(domainID int64) ([]directory.UserInfo, error)
+	Maildirs() ([]string, error)
 	ListAliases() ([]directory.AliasInfo, error)
 	CreateDomain(domainname, homedir string) (int64, error)
 	GetDomain(id int64) (directory.DomainDetail, bool, error)
@@ -107,6 +108,7 @@ type Paths interface {
 	HomedirFor(domain string) string
 	MaildirFor(address string) string
 	RelaySpoolPath() string
+	AntispamModelPath() string
 }
 
 // LogReader queries the central log store for the log viewer. It is optional —

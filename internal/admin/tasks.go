@@ -51,6 +51,12 @@ func (s *Server) runTask(t directory.TaskInfo) (status, message string) {
 			return directory.TaskFailed, "Sync failed: " + err.Error()
 		}
 		return directory.TaskDone, msg
+	case "bayes-retrain":
+		msg, err := s.performBayesRetrain()
+		if err != nil {
+			return directory.TaskFailed, "Retrain failed: " + err.Error()
+		}
+		return directory.TaskDone, msg
 	default:
 		return directory.TaskFailed, "unknown task type: " + t.Type
 	}

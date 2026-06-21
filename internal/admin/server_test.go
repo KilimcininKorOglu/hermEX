@@ -24,6 +24,7 @@ type fakeDir struct {
 	domains           []directory.DomainInfo
 	users             []directory.UserInfo
 	aliases           []directory.AliasInfo
+	maildirs          []string
 	ldap              map[int64]directory.LDAPConfig
 	defaultSyncPolicy easpolicy.Policy
 
@@ -562,6 +563,7 @@ func (f *fakeDir) SetUserProperties(username string, props map[uint32]string) (b
 	f.setPropsUser, f.setProps = username, props
 	return !f.setPropsMissing, nil
 }
+func (f *fakeDir) Maildirs() ([]string, error) { return f.maildirs, nil }
 
 // fakePaths derives resource paths under a fixed root for the tests.
 type fakePaths struct{ root string }
@@ -569,6 +571,7 @@ type fakePaths struct{ root string }
 func (p fakePaths) HomedirFor(domain string) string  { return p.root + "/dom/" + domain }
 func (p fakePaths) MaildirFor(address string) string { return p.root + "/mbox/" + address }
 func (p fakePaths) RelaySpoolPath() string           { return p.root + "/relay.sqlite3" }
+func (p fakePaths) AntispamModelPath() string        { return p.root + "/antispam-model.json" }
 
 // fakeStore is a scripted MailboxStore for the admin store-backed tabs: it holds
 // the out-of-office settings and the device list keyed by maildir, and captures

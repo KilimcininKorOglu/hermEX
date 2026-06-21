@@ -140,3 +140,11 @@ func (c *Config) HomedirFor(domain string) string {
 func (c *Config) RelaySpoolPath() string {
 	return filepath.Join(c.DataDir, "relay.sqlite3")
 }
+
+// AntispamModelPath is where the Bayesian spam model lives under the data root:
+// the self-training task writes it and the MTA loads it at startup. The filename
+// must match antispam.ModelFileName (kept literal here to avoid a config→feature
+// dependency).
+func (c *Config) AntispamModelPath() string {
+	return filepath.Join(c.DataDir, "antispam-model.json")
+}

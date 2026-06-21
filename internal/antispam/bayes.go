@@ -113,6 +113,26 @@ func TrainFromDir(m *BayesModel, dir string, spam bool) (int, error) {
 	return n, nil
 }
 
+// SaveFile writes the model to path atomically: it writes a temporary file in the
+// same directory and renames it into place, so the MTA loading the model at
+// startup never reads a half-written file.
+func (m *BayesModel) SaveFile(path string) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".antispam-model-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName) // a no-op once the rename succeeds
+	if err := m.Save(tmp); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
+}
+
 // LoadModelFile reads a Bayes model from path. A missing file returns (nil, nil)
 // so the caller can run with the model dormant; any other error is returned.
 func LoadModelFile(path string) (*BayesModel, error) {

@@ -7,6 +7,34 @@ import (
 	"testing"
 )
 
+// TestSaveFileAtomicRoundTrip proves SaveFile persists and reloads the model and
+// leaves no temporary file behind.
+func TestSaveFileAtomicRoundTrip(t *testing.T) {
+	m := NewBayesModel()
+	m.Train("cheap pills buy", true)
+	m.Train("project meeting review", false)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "model.json")
+	if err := m.SaveFile(path); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadModelFile(path)
+	if err != nil || got == nil {
+		t.Fatalf("reload = (%v, %v), want a model", got, err)
+	}
+	if got.SpamMsgs != 1 || got.HamMsgs != 1 {
+		t.Errorf("counts after round trip = spam %d ham %d, want 1/1", got.SpamMsgs, got.HamMsgs)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Errorf("dir has %d entries, want only the model file (temp left behind?)", len(entries))
+	}
+}
+
 // TestTrainFromDir proves the corpus trainer reads every file, labels it, and
 // reduces it via MessageText so the trained vocabulary matches live scoring.
 func TestTrainFromDir(t *testing.T) {
