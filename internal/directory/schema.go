@@ -1,5 +1,7 @@
 package directory
 
+import "hermex/internal/migrate"
+
 // directoryDDL creates the account/domain directory (see the internal spec): the
 // columns the daemons read are preserved with their names and types, including
 // the password VARCHAR(136) holding a crypt(3) string. The one representation
@@ -316,6 +318,15 @@ var directoryDDL = []string{
 	`ALTER TABLE domains ADD COLUMN IF NOT EXISTS admin_name VARCHAR(32) NOT NULL DEFAULT ''`,
 	`ALTER TABLE domains ADD COLUMN IF NOT EXISTS tel VARCHAR(64) NOT NULL DEFAULT ''`,
 	`ALTER TABLE domains ADD COLUMN IF NOT EXISTS sync_policy TEXT`,
+}
+
+// directoryMigrations is the ordered schema history the migration runner applies.
+// v1 is the current full schema (directoryDDL): it is idempotent — CREATE TABLE
+// IF NOT EXISTS plus ADD COLUMN IF NOT EXISTS — so adopting an already-populated
+// database is a clean no-op that simply records v1. Every later schema change is
+// appended here as a new version and runs exactly once.
+var directoryMigrations = []migrate.Migration{
+	{Version: 1, Steps: directoryDDL},
 }
 
 // address_status packing: low nibble = user status, bits 4-5 = domain status.

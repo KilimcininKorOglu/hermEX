@@ -183,6 +183,12 @@ func TestSchemaUpgradeAddsDomainColumns(t *testing.T) {
 			t.Fatalf("drop column %s: %v", col, err)
 		}
 	}
+	// Also clear the migration bookkeeping so the runner re-applies v1 (the
+	// idempotent baseline) instead of seeing the database as already current —
+	// the realistic adoption path for a database that predates migrations.
+	if _, err := db.Exec("DELETE FROM schema_migrations"); err != nil {
+		t.Fatalf("reset migration bookkeeping: %v", err)
+	}
 
 	// The upgrade must re-add every column.
 	if err := d.EnsureSchema(); err != nil {
@@ -206,6 +212,44 @@ func TestSchemaUpgradeAddsDomainColumns(t *testing.T) {
 	}
 	if ok, err := d.SetDomainSyncPolicy("acme.test", easpolicy.Policy{"DevicePasswordEnabled": 1}); err != nil || !ok {
 		t.Fatalf("SetDomainSyncPolicy after upgrade = %v, %v", ok, err)
+	}
+}
+
+// TestSchemaBaselineAdoption proves adopting a pre-migration database — every
+// table already present with data, but no schema_migrations bookkeeping — is a
+// clean no-op: the baseline is recorded as v1 and existing data is untouched. It
+// is the safety proof that turning on the migration runner cannot disturb a
+// deployed directory.
+func TestSchemaBaselineAdoption(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	cleanTables(t, db)
+	root := t.TempDir()
+	id, err := d.CreateDomain("base.test", filepath.Join(root, "base.test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a database that predates migration bookkeeping: all tables and data
+	// present, but no record of which version it is at.
+	if _, err := db.Exec("DROP TABLE IF EXISTS schema_migrations"); err != nil {
+		t.Fatalf("drop bookkeeping: %v", err)
+	}
+
+	// Adoption must be a clean no-op that records the baseline.
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatalf("baseline adoption: %v", err)
+	}
+	var ver int
+	if err := db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&ver); err != nil || ver != 1 {
+		t.Fatalf("recorded version = %d (err %v), want 1", ver, err)
+	}
+	// The existing domain — and so all data — survived the adoption.
+	if dd, ok, err := d.GetDomain(id); err != nil || !ok || dd.Name != "base.test" {
+		t.Fatalf("domain lost across adoption: %+v, ok %v, err %v", dd, ok, err)
 	}
 }
 

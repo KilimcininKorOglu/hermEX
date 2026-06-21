@@ -1,6 +1,7 @@
 package directory
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/GehirnInc/crypt/md5_crypt"
 	"github.com/GehirnInc/crypt/sha512_crypt"
+
+	"hermex/internal/migrate"
 )
 
 // privilege_bits: the service privileges a user holds. The bit positions match
@@ -45,12 +48,13 @@ func NewSQL(db *sql.DB) *SQLDirectory {
 	return &SQLDirectory{db: db}
 }
 
-// EnsureSchema applies the directory DDL idempotently.
+// EnsureSchema brings the directory database to the latest schema version,
+// applying any pending migrations once and recording each in schema_migrations.
+// It is safe to call on every startup: an up-to-date database is left untouched,
+// and one recorded newer than this binary is refused rather than downgraded.
 func (d *SQLDirectory) EnsureSchema() error {
-	for _, stmt := range directoryDDL {
-		if _, err := d.db.Exec(stmt); err != nil {
-			return fmt.Errorf("directory: apply schema: %w", err)
-		}
+	if err := migrate.Run(context.Background(), &migrate.MySQLDriver{DB: d.db}, 0, directoryMigrations); err != nil {
+		return fmt.Errorf("directory: apply schema: %w", err)
 	}
 	return nil
 }
