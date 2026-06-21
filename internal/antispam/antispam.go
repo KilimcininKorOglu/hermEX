@@ -44,25 +44,32 @@ type Weights struct {
 	DKIMFail    int // no valid DKIM signature on the message
 	DMARCFail   int // DMARC published an enforcing policy and the message did not align
 	DNSBLHit    int // the client IP is listed on a DNS blocklist (added per listing zone)
+	BayesSpam   int // the Bayesian content model is confident the message is spam
 }
 
 // DefaultWeights is a conservative starting point; the admin can tune them later.
-var DefaultWeights = Weights{SPFFail: 5, SPFSoftFail: 2, DKIMFail: 3, DMARCFail: 6, DNSBLHit: 6}
+var DefaultWeights = Weights{SPFFail: 5, SPFSoftFail: 2, DKIMFail: 3, DMARCFail: 6, DNSBLHit: 6, BayesSpam: 4}
 
 // DefaultThreshold is the score at or above which a message is flagged spam. It
 // is deliberately above any single check so one failure alone never condemns a
 // message; the admin can tune it later.
 const DefaultThreshold = 8
 
+// bayesSpamProb is the spam probability at or above which the Bayesian model
+// contributes its weight. It is high so content alone never condemns a message on
+// a weak or barely-trained model.
+const bayesSpamProb = 0.95
+
 // Verdict is the aggregated result for one message.
 type Verdict struct {
-	Score   int
-	Spam    bool
-	SPF     AuthResult
-	DKIM    AuthResult
-	DMARC   AuthResult
-	DNSBL   []string // the blocklist zones that listed the client IP
-	Reasons []string
+	Score     int
+	Spam      bool
+	SPF       AuthResult
+	DKIM      AuthResult
+	DMARC     AuthResult
+	DNSBL     []string // the blocklist zones that listed the client IP
+	BayesProb float64  // the Bayesian model's spam probability (0..1); 0 when not run
+	Reasons   []string
 }
 
 // DKIMResult is one verified DKIM signature's claiming domain and validity.
@@ -76,20 +83,23 @@ type DKIMResult struct {
 type Scorer struct {
 	Weights     Weights
 	Threshold   int
-	Zones       []string // DNS blocklist zones to query the client IP against; empty disables DNSBL
+	Zones       []string    // DNS blocklist zones to query the client IP against; empty disables DNSBL
+	Model       *BayesModel // the Bayesian content model; nil leaves content scoring dormant
 	checkSPF    func(ip net.IP, helo, mailFrom string) AuthResult
 	checkDKIM   func(raw []byte) []DKIMResult
 	lookupDMARC func(domain string) (policy string, ok bool)
 	checkDNSBL  func(ip net.IP, zone string) bool
+	extractText func(raw []byte) string
 }
 
 // New returns a Scorer wired to the real SPF, DKIM, DMARC, and DNSBL checks,
 // flagging a message as spam once its score reaches threshold. DNSBL stays
-// dormant until Zones is set.
+// dormant until Zones is set, and Bayesian content scoring until Model is set.
 func New(w Weights, threshold int) *Scorer {
 	return &Scorer{
 		Weights: w, Threshold: threshold,
 		checkSPF: realSPF, checkDKIM: realDKIM, lookupDMARC: realDMARC, checkDNSBL: realDNSBL,
+		extractText: realBayesText,
 	}
 }
 
@@ -155,6 +165,16 @@ func (s *Scorer) Score(in Input) Verdict {
 				v.Score += s.Weights.DNSBLHit
 				v.Reasons = append(v.Reasons, "listed on DNSBL "+zone)
 			}
+		}
+	}
+
+	// Bayesian content score: only a confident spam probability contributes, so a
+	// weak or unbootstrapped model never condemns mail on content alone.
+	if s.Model != nil && s.extractText != nil && len(in.Raw) > 0 {
+		v.BayesProb = s.Model.Score(s.extractText(in.Raw))
+		if v.BayesProb >= bayesSpamProb {
+			v.Score += s.Weights.BayesSpam
+			v.Reasons = append(v.Reasons, "Bayesian: likely spam")
 		}
 	}
 

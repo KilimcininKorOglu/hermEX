@@ -9,6 +9,8 @@ import (
 	"blitiri.com.ar/go/spf"
 	"github.com/emersion/go-msgauth/dkim"
 	"github.com/emersion/go-msgauth/dmarc"
+
+	"hermex/internal/mime"
 )
 
 // realSPF evaluates SPF for the connecting client and maps the RFC 7208 result to
@@ -83,6 +85,35 @@ func isListed(addrs []net.IP) bool {
 		}
 	}
 	return false
+}
+
+// realBayesText extracts the text the Bayes model classifies: the subject plus
+// the decoded text/* body parts. It is best-effort — on a parse error it returns
+// whatever was gathered (possibly just the subject).
+func realBayesText(raw []byte) string {
+	var b strings.Builder
+	if env, err := mime.ParseEnvelope(raw); err == nil {
+		b.WriteString(env.Subject)
+		b.WriteByte(' ')
+	}
+	collectText(mime.ParseStructure(raw), &b)
+	return b.String()
+}
+
+// collectText appends the decoded text of every text/* part in the tree.
+func collectText(p *mime.Part, b *strings.Builder) {
+	if p == nil {
+		return
+	}
+	if p.Type == "text" {
+		if t, err := p.DecodedText(); err == nil {
+			b.WriteString(t)
+			b.WriteByte(' ')
+		}
+	}
+	for _, c := range p.Children {
+		collectText(c, b)
+	}
 }
 
 // dnsblQuery builds the DNSBL lookup name for an IP and zone: the IP's octets

@@ -2,8 +2,52 @@ package antispam
 
 import (
 	"bytes"
+	"path/filepath"
 	"testing"
 )
+
+// TestScoreBayesConfidentSpam proves a trained model wired into the Scorer adds
+// the Bayes weight and records the probability when content is confidently spam.
+func TestScoreBayesConfidentSpam(t *testing.T) {
+	m := NewBayesModel()
+	for range 8 {
+		m.Train("cheap pills viagra discount pharmacy buy now offer cialis", true)
+		m.Train("project meeting schedule notes review report attached agenda", false)
+	}
+	s := &Scorer{
+		Weights: DefaultWeights, Threshold: DefaultThreshold,
+		Model:       m,
+		extractText: func(raw []byte) string { return string(raw) },
+	}
+	v := s.Score(Input{Raw: []byte("cheap pills discount buy now viagra cialis offer")})
+	if v.BayesProb < bayesSpamProb {
+		t.Fatalf("BayesProb = %.3f, want >= %.2f", v.BayesProb, bayesSpamProb)
+	}
+	if v.Score != DefaultWeights.BayesSpam {
+		t.Errorf("score = %d, want %d (Bayes only)", v.Score, DefaultWeights.BayesSpam)
+	}
+}
+
+// TestScoreBayesDormantWithoutModel proves content scoring contributes nothing
+// when no model is set, even with text extraction wired.
+func TestScoreBayesDormantWithoutModel(t *testing.T) {
+	s := &Scorer{
+		Weights: DefaultWeights, Threshold: DefaultThreshold,
+		extractText: func([]byte) string { return "cheap pills buy now" },
+	}
+	v := s.Score(Input{Raw: []byte("cheap pills buy now")})
+	if v.BayesProb != 0 || v.Score != 0 {
+		t.Errorf("verdict = %+v, want no Bayes contribution", v)
+	}
+}
+
+// TestLoadModelFileMissing proves a missing model file is dormant, not an error.
+func TestLoadModelFileMissing(t *testing.T) {
+	m, err := LoadModelFile(filepath.Join(t.TempDir(), "nope.json"))
+	if err != nil || m != nil {
+		t.Errorf("missing model = (%v, %v), want (nil, nil)", m, err)
+	}
+}
 
 // TestBayesClassifies proves the model learns: after training on distinct spam
 // and ham vocabularies, held-out spam-like text scores spam and ham-like text

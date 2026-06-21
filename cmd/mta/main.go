@@ -12,6 +12,7 @@ import (
 	"net/mail"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -105,6 +106,13 @@ func main() {
 
 	scorer := antispam.New(antispam.DefaultWeights, antispam.DefaultThreshold)
 	scorer.Zones = antispam.ParseZones(os.Getenv("HERMEX_DNSBL_ZONES")) // comma-separated DNSBL zones; empty leaves DNSBL off
+	// The Bayesian model is loaded once at startup; a retrain takes effect on the
+	// next restart. A missing file leaves content scoring dormant.
+	if model, err := antispam.LoadModelFile(filepath.Join(cfg.DataDir, "antispam-model.json")); err != nil {
+		log.Printf("hermex-mta: anti-spam model: %v", err)
+	} else if model != nil {
+		scorer.Model = model
+	}
 	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer}, Hostname: cfg.Hostname, Logger: logger}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()

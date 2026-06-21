@@ -2,8 +2,11 @@ package antispam
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
+	"io/fs"
 	"math"
+	"os"
 	"strings"
 	"unicode"
 )
@@ -83,6 +86,20 @@ func LoadBayesModel(r io.Reader) (*BayesModel, error) {
 		m.HamTokens = map[string]int{}
 	}
 	return m, nil
+}
+
+// LoadModelFile reads a Bayes model from path. A missing file returns (nil, nil)
+// so the caller can run with the model dormant; any other error is returned.
+func LoadModelFile(path string) (*BayesModel, error) {
+	f, err := os.Open(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return LoadBayesModel(f)
 }
 
 // tokenize splits text into lowercased word tokens for the model: maximal runs of
