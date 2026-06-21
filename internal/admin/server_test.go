@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -19,6 +20,7 @@ type fakeDir struct {
 	authOK            bool
 	uid               int64
 	roles             []directory.AdminRole
+	perms             []directory.Permission
 	domains           []directory.DomainInfo
 	users             []directory.UserInfo
 	aliases           []directory.AliasInfo
@@ -111,6 +113,35 @@ func (f *fakeDir) Authenticate(_, _ string) (string, bool) {
 }
 func (f *fakeDir) UserID(_ string) (int64, bool, error)            { return f.uid, f.uid != 0, nil }
 func (f *fakeDir) AdminRoles(int64) ([]directory.AdminRole, error) { return f.roles, nil }
+
+// EffectivePermissions mirrors the real resolver's union bridge: any explicitly
+// scripted named-role permissions in f.perms, plus the equivalents of the tier
+// grants in f.roles. Tests script f.roles for the legacy path and f.perms to
+// exercise the read-only and capability permissions.
+func (f *fakeDir) EffectivePermissions(int64) ([]directory.Permission, error) {
+	seen := map[directory.Permission]bool{}
+	var out []directory.Permission
+	add := func(p directory.Permission) {
+		if !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	for _, p := range f.perms {
+		add(p)
+	}
+	for _, r := range f.roles {
+		switch r.Role {
+		case directory.AdminSystem:
+			add(directory.Permission{Name: directory.PermSystemAdmin})
+		case directory.AdminOrg:
+			add(directory.Permission{Name: directory.PermOrgAdmin, Params: strconv.FormatInt(r.ScopeID, 10)})
+		case directory.AdminDomain:
+			add(directory.Permission{Name: directory.PermDomainAdmin, Params: strconv.FormatInt(r.ScopeID, 10)})
+		}
+	}
+	return out, nil
+}
 func (f *fakeDir) GrantAdminRole(_ int64, role string, scopeID int64) error {
 	if f.createErr != nil {
 		return f.createErr

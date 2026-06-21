@@ -9,25 +9,21 @@ import (
 	"hermex/internal/directory"
 )
 
-// hasOrgScope reports whether a user may administer an organization: a system
-// admin may administer any, an org admin only the one its role is scoped to.
+// hasOrgScope reports whether a user may write to an organization, resolved
+// through the single permission path: a full system admin (SystemAdmin), an org
+// admin over all orgs (OrgAdmin "*"), or an org admin scoped to this org. A
+// read-only administrator is not granted write scope here — reads admit RO in
+// orgScope instead.
 func (s *Server) hasOrgScope(userID, orgID int64) bool {
-	roles, err := s.dir.AdminRoles(userID)
-	if err != nil {
-		return false
-	}
-	for _, role := range roles {
-		if role.Role == directory.AdminSystem {
-			return true
-		}
-		if role.Role == directory.AdminOrg && role.ScopeID == orgID {
-			return true
-		}
-	}
-	return false
+	perms := s.adminPerms(userID)
+	return hasPerm(perms, directory.PermSystemAdmin, "") ||
+		hasPerm(perms, directory.PermOrgAdmin, "*") ||
+		hasPerm(perms, directory.PermOrgAdmin, strconv.FormatInt(orgID, 10))
 }
 
-// orgScope parses the {orgID} path value and authorizes the caller for it. When
+// orgScope parses the {orgID} path value and authorizes the caller for it,
+// method-aware: a read (GET/HEAD) additionally admits a read-only system admin,
+// so RO can read an org's configuration; a write requires org write scope. When
 // ok is false a response has already been written.
 func (s *Server) orgScope(w http.ResponseWriter, r *http.Request) (orgID int64, ok bool) {
 	orgID, err := strconv.ParseInt(r.PathValue("orgID"), 10, 64)
@@ -35,11 +31,12 @@ func (s *Server) orgScope(w http.ResponseWriter, r *http.Request) (orgID int64, 
 		http.Error(w, "invalid organization id", http.StatusBadRequest)
 		return 0, false
 	}
-	if !s.hasOrgScope(claimsOf(r).UserID, orgID) {
-		http.Error(w, "forbidden: requires an administrator of this organization", http.StatusForbidden)
-		return 0, false
+	uid := claimsOf(r).UserID
+	if s.hasOrgScope(uid, orgID) || (isReadMethod(r.Method) && s.isSystemReadAdmin(uid)) {
+		return orgID, true
 	}
-	return orgID, true
+	http.Error(w, "forbidden: requires an administrator of this organization", http.StatusForbidden)
+	return 0, false
 }
 
 // orgIDParam parses the {orgID} path value, writing a 400 when it is not a

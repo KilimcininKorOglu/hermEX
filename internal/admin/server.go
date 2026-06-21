@@ -21,6 +21,7 @@ type Directory interface {
 	Authenticate(user, password string) (mailboxPath string, ok bool)
 	UserID(login string) (id int64, ok bool, err error)
 	AdminRoles(userID int64) ([]directory.AdminRole, error)
+	EffectivePermissions(userID int64) ([]directory.Permission, error)
 	GrantAdminRole(userID int64, role string, scopeID int64) error
 	RevokeAdminRole(userID int64, role string, scopeID int64) error
 	ListDomains() ([]directory.DomainInfo, error)
@@ -166,7 +167,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /admin/users/{email}/devices/action", s.protect(s.requireSystem(s.handleUserDeviceAction)))
 	mux.Handle("GET /admin/users/{email}/quota", s.protect(s.requireSystem(s.handleGetUserQuota)))
 	mux.Handle("PUT /admin/users/{email}/quota", s.protect(s.requireSystem(s.handleSetUserQuota)))
-	mux.Handle("POST /admin/users/{email}/password", s.protect(s.requireSystem(s.handleSetPassword)))
+	mux.Handle("POST /admin/users/{email}/password", s.protect(s.requireWriteOrReset(s.handleSetPassword)))
 	mux.Handle("GET /admin/users/{email}/roles", s.protect(s.requireSystem(s.handleListRoles)))
 	mux.Handle("POST /admin/users/{email}/roles", s.protect(s.requireSystem(s.handleGrantRole)))
 	mux.Handle("DELETE /admin/users/{email}/roles", s.protect(s.requireSystem(s.handleRevokeRole)))
@@ -272,9 +273,12 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 // authAdmin authenticates a login and returns the user id and admin roles when
-// the credentials are valid AND the user holds at least one admin role. ok is
-// false alike for wrong credentials, an unknown user, and a non-admin; err is
-// set only for an infrastructure failure.
+// the credentials are valid AND the user holds administrative authority. Whether
+// the user is an admin is decided through the single permission path (named roles
+// or a bridged tier grant), so an admin granted authority only by a named role
+// can sign in; the returned roles remain the legacy tier grants for the response.
+// ok is false alike for wrong credentials, an unknown user, and a non-admin; err
+// is set only for an infrastructure failure.
 func (s *Server) authAdmin(login, password string) (uid int64, roles []directory.AdminRole, ok bool, err error) {
 	if _, authed := s.dir.Authenticate(login, password); !authed {
 		return 0, nil, false, nil
@@ -286,12 +290,16 @@ func (s *Server) authAdmin(login, password string) (uid int64, roles []directory
 	if !found {
 		return 0, nil, false, nil
 	}
-	r, err := s.dir.AdminRoles(id)
+	perms, err := s.dir.EffectivePermissions(id)
 	if err != nil {
 		return 0, nil, false, err
 	}
-	if len(r) == 0 {
+	if len(perms) == 0 {
 		return 0, nil, false, nil
+	}
+	r, err := s.dir.AdminRoles(id)
+	if err != nil {
+		return 0, nil, false, err
 	}
 	return id, r, true, nil
 }

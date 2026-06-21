@@ -9,8 +9,9 @@ import (
 )
 
 // uiAuthorized authorizes a UI state-changing request: a valid session, a
-// matching CSRF header (the htmx double-submit), and the system admin role. On
-// failure it writes an error response and returns ok=false.
+// matching CSRF header (the htmx double-submit), and full system authority. A
+// read-only system administrator is refused here — they may view pages but not
+// change state. On failure it writes an error response and returns ok=false.
 func (s *Server) uiAuthorized(w http.ResponseWriter, r *http.Request) (claims, bool) {
 	cl, ok := s.uiClaims(r)
 	if !ok {
@@ -22,7 +23,7 @@ func (s *Server) uiAuthorized(w http.ResponseWriter, r *http.Request) (claims, b
 		return claims{}, false
 	}
 	if !s.isSystemAdmin(cl.UserID) {
-		http.Error(w, "forbidden: requires a system administrator", http.StatusForbidden)
+		http.Error(w, "forbidden: requires a full system administrator", http.StatusForbidden)
 		return claims{}, false
 	}
 	return cl, true

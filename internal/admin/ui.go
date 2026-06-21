@@ -20,8 +20,10 @@ func (s *Server) uiClaims(r *http.Request) (claims, bool) {
 	return cl, true
 }
 
-// uiRequireSystemPage gates a UI read page on a session and the system role: no
-// session redirects to login; a non-system admin gets 403. ok=false means a
+// uiRequireSystemPage gates a UI read page on a session and read authority: no
+// session redirects to login; a caller without system read access gets 403. A
+// read-only system administrator is admitted — pages only read — while write
+// actions on those pages are gated separately by uiAuthorized. ok=false means a
 // response was already written.
 func (s *Server) uiRequireSystemPage(w http.ResponseWriter, r *http.Request) bool {
 	cl, ok := s.uiClaims(r)
@@ -29,7 +31,7 @@ func (s *Server) uiRequireSystemPage(w http.ResponseWriter, r *http.Request) boo
 		http.Redirect(w, r, "/admin/ui/login", http.StatusSeeOther)
 		return false
 	}
-	if !s.isSystemAdmin(cl.UserID) {
+	if !s.isSystemReadAdmin(cl.UserID) {
 		http.Error(w, "forbidden: requires a system administrator", http.StatusForbidden)
 		return false
 	}

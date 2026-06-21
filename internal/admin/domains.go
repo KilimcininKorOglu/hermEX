@@ -13,26 +13,29 @@ func claimsOf(r *http.Request) claims {
 	return cl
 }
 
-// isSystemAdmin reports whether a user holds the unrestricted system admin role.
+// isSystemAdmin reports whether a user holds full (write) system authority,
+// resolved through the single permission path: a SystemAdmin permission, whether
+// granted by a named role or bridged from a direct system tier grant. A
+// read-only system administrator is NOT a full administrator.
 func (s *Server) isSystemAdmin(userID int64) bool {
-	roles, err := s.dir.AdminRoles(userID)
-	if err != nil {
-		return false
-	}
-	for _, role := range roles {
-		if role.Role == directory.AdminSystem {
-			return true
-		}
-	}
-	return false
+	return hasPerm(s.adminPerms(userID), directory.PermSystemAdmin, "")
 }
 
-// requireSystem wraps a handler so it runs only for a system administrator;
-// every other caller (including an org or domain admin) is refused.
+// requireSystem gates a handler on system authority, method-aware: a read
+// (GET/HEAD) admits a read-only system administrator, while a state-changing
+// method requires a full system administrator. This is the chokepoint that makes
+// SystemAdminRO read-everything-write-nothing — it cannot be forgotten per
+// handler.
 func (s *Server) requireSystem(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if !s.isSystemAdmin(claimsOf(r).UserID) {
-			http.Error(w, "forbidden: requires a system administrator", http.StatusForbidden)
+		uid := claimsOf(r).UserID
+		if isReadMethod(r.Method) {
+			if !s.isSystemReadAdmin(uid) {
+				http.Error(w, "forbidden: requires a system administrator", http.StatusForbidden)
+				return
+			}
+		} else if !s.isSystemAdmin(uid) {
+			http.Error(w, "forbidden: requires a full system administrator", http.StatusForbidden)
 			return
 		}
 		next(w, r)
