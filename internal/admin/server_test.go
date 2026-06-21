@@ -520,6 +520,7 @@ type fakePaths struct{ root string }
 
 func (p fakePaths) HomedirFor(domain string) string  { return p.root + "/dom/" + domain }
 func (p fakePaths) MaildirFor(address string) string { return p.root + "/mbox/" + address }
+func (p fakePaths) RelaySpoolPath() string           { return p.root + "/relay.sqlite3" }
 
 // fakeStore is a scripted MailboxStore for the admin store-backed tabs: it holds
 // the out-of-office settings and the device list keyed by maildir, and captures

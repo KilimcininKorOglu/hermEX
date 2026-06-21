@@ -98,6 +98,7 @@ type LDAPSyncer interface {
 type Paths interface {
 	HomedirFor(domain string) string
 	MaildirFor(address string) string
+	RelaySpoolPath() string
 }
 
 // LogReader queries the central log store for the log viewer. It is optional —
@@ -125,6 +126,7 @@ type Server struct {
 	syncer   LDAPSyncer
 	store    MailboxStore
 	pub      *publicfolder.Service
+	mailq    MailQueue
 	resolver dnsResolver
 }
 
@@ -135,7 +137,8 @@ type Server struct {
 func NewServer(dir Directory, paths Paths, secret []byte) *Server {
 	return &Server{
 		dir: dir, paths: paths, secret: secret,
-		store: mailboxStore{}, pub: publicfolder.New(paths), resolver: net.DefaultResolver,
+		store: mailboxStore{}, pub: publicfolder.New(paths),
+		mailq: relaySpool{path: paths.RelaySpoolPath()}, resolver: net.DefaultResolver,
 	}
 }
 
@@ -195,6 +198,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /admin/domains/{domainID}/createdefaults", s.protect(s.requireSystem(s.handleSetDomainDefaults)))
 	mux.Handle("GET /admin/defaults", s.protect(s.requireSystem(s.handleGetDefaults)))
 	mux.Handle("PUT /admin/defaults", s.protect(s.requireSystem(s.handleSetDefaults)))
+	mux.Handle("GET /admin/mailq", s.protect(s.requireSystem(s.handleGetMailq)))
+	mux.Handle("POST /admin/mailq/{id}/retry", s.protect(s.requireSystem(s.handleRetryMailq)))
+	mux.Handle("DELETE /admin/mailq/{id}", s.protect(s.requireSystem(s.handleDeleteMailq)))
 	mux.Handle("GET /admin/mobile-devices", s.protect(s.requireSystem(s.handleGetMobileDevices)))
 	mux.Handle("GET /admin/public-folders", s.protect(s.requireSystem(s.handleGetPublicFolders)))
 	mux.Handle("GET /admin/users/{email}/fetchmail", s.protect(s.requireUserScope(s.handleListUserFetchmail)))
@@ -267,6 +273,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /admin/ui/defaults", s.handleUISaveDefaults)
 	mux.HandleFunc("GET /admin/ui/mobile-devices", s.handleUIMobileDevices)
 	mux.HandleFunc("GET /admin/ui/mobile-devices/panel", s.handleUIMobileDevicesPanel)
+	mux.HandleFunc("GET /admin/ui/mailq", s.handleUIMailq)
+	mux.HandleFunc("GET /admin/ui/mailq/panel", s.handleUIMailqPanel)
+	mux.HandleFunc("POST /admin/ui/mailq/retry", s.handleUIMailqRetry)
+	mux.HandleFunc("POST /admin/ui/mailq/delete", s.handleUIMailqDelete)
 	mux.HandleFunc("GET /admin/ui/public-folders", s.handleUIPublicFolders)
 	mux.HandleFunc("GET /admin/ui/public-folders/panel", s.handleUIPublicFoldersPanel)
 	mux.HandleFunc("POST /admin/ui/public-folders/folder", s.handleUICreatePublicFolder)

@@ -29,6 +29,7 @@
 <a href="/admin/ui/defaults" class="{{if eq .Nav "defaults"}}active{{end}}">Defaults</a>
 <a href="/admin/ui/mobile-devices" class="{{if eq .Nav "mobiledevices"}}active{{end}}">Mobile devices</a>
 <a href="/admin/ui/public-folders" class="{{if eq .Nav "publicfolders"}}active{{end}}">Public folders</a>
+<a href="/admin/ui/mailq" class="{{if eq .Nav "mailq"}}active{{end}}">Mail queue</a>
 </nav>
 <form class="logout" method="post" action="/admin/ui/logout">
 <input type="hidden" name="_csrf" value="{{.CSRF}}">
