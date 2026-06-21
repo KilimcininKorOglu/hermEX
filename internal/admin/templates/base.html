@@ -26,6 +26,7 @@
 <a href="/admin/ui/logs" class="{{if eq .Nav "logs"}}active{{end}}">Logs</a>
 <a href="/admin/ui/ldap" class="{{if eq .Nav "ldap"}}active{{end}}">Directory Sync</a>
 <a href="/admin/ui/syncpolicy" class="{{if eq .Nav "syncpolicy"}}active{{end}}">Sync policy</a>
+<a href="/admin/ui/defaults" class="{{if eq .Nav "defaults"}}active{{end}}">Defaults</a>
 </nav>
 <form class="logout" method="post" action="/admin/ui/logout">
 <input type="hidden" name="_csrf" value="{{.CSRF}}">

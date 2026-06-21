@@ -1,0 +1,18 @@
+{{define "defaults.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>Create defaults</h1>
+<p class="hint">Default values pre-filled into the new-domain and new-user forms. They seed each form; an administrator can still change any field before creating.</p>
+<form class="defaults-form" hx-put="/admin/ui/defaults" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<h2>Domain create parameters</h2>
+<label>Max users <input type="number" name="maxUser" min="0" value="{{.MaxUser}}"> <small>(0 = unlimited)</small></label>
+<h2>User create parameters</h2>
+{{template "user-create-fields" .Fields}}
+<button type="submit">Save defaults</button>
+</form>
+<div id="user-status"></div>
+</main>
+</div>
+{{template "foot" .}}{{end}}
