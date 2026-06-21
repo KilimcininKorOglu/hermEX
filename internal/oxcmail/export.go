@@ -1,6 +1,7 @@
 package oxcmail
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/rand"
 	"encoding/base64"
@@ -10,6 +11,7 @@ import (
 	"mime/quotedprintable"
 	"net/mail"
 	"net/textproto"
+	"sort"
 	"strings"
 
 	"hermex/internal/mapi"
@@ -339,6 +341,51 @@ func writeMailHead(b *bytes.Buffer, msg *Message) {
 	}
 	if irt := propString(msg.Props, mapi.PrInReplyToID); irt != "" {
 		writeField(b, "In-Reply-To", irt)
+	}
+
+	writePreservedHeaders(b, msg)
+}
+
+// preservedHeaderPrefixes are the inbound header families Export re-emits verbatim
+// from the stored arrival headers, because the structured export reconstructs the
+// message from MAPI properties and does not otherwise reproduce them. X-Spam-*
+// carries the anti-spam verdict, which a client filters on.
+var preservedHeaderPrefixes = []string{"x-spam-"}
+
+// isPreservedHeader reports whether a header name belongs to a preserved family.
+func isPreservedHeader(name string) bool {
+	low := strings.ToLower(name)
+	for _, p := range preservedHeaderPrefixes {
+		if strings.HasPrefix(low, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// writePreservedHeaders re-emits preserved inbound headers (e.g. X-Spam-*) from
+// the stored arrival header block (PR_TRANSPORT_MESSAGE_HEADERS), which the
+// structured export above does not reconstruct. Outbound messages carry no stored
+// arrival headers, so nothing is emitted for them. Names are emitted in a stable
+// order so the output is reproducible.
+func writePreservedHeaders(b *bytes.Buffer, msg *Message) {
+	raw := propString(msg.Props, mapi.PrTransportMessageHeaders)
+	if raw == "" {
+		return
+	}
+	tp := textproto.NewReader(bufio.NewReader(strings.NewReader(raw + "\r\n\r\n")))
+	hdr, _ := tp.ReadMIMEHeader()
+	names := make([]string, 0, len(hdr))
+	for name := range hdr {
+		if isPreservedHeader(name) {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		for _, v := range hdr[name] {
+			writeField(b, name, v)
+		}
 	}
 }
 

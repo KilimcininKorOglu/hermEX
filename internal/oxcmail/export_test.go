@@ -25,6 +25,34 @@ var plainVector = []byte("From: Alice Example <alice@example.com>\r\n" +
 	"\r\n" +
 	"Hello,\r\nThis is the body.\r\n")
 
+// TestExportPreservesXSpamHeaders proves the anti-spam X-Spam headers survive the
+// MAPI round trip. The structured export reconstructs the message from properties,
+// so it must re-emit these (stored at import in the transport header block)
+// explicitly — otherwise client-side spam filtering on the delivered copy breaks.
+func TestExportPreservesXSpamHeaders(t *testing.T) {
+	raw := []byte("X-Spam-Flag: YES\r\n" +
+		"X-Spam-Score: 12\r\n" +
+		"X-Spam-Status: Yes, score=12\r\n" +
+		"From: bob@external.example\r\n" +
+		"Subject: cheap pills\r\n" +
+		"\r\n" +
+		"buy now\r\n")
+	msg, err := Import(raw, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err := Export(msg, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(wire)
+	for _, want := range []string{"X-Spam-Flag: YES", "X-Spam-Score: 12", "X-Spam-Status: Yes, score=12"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("%q not preserved through export:\n%s", want, out)
+		}
+	}
+}
+
 // TestExportWellFormed checks that Export produces a message a standard,
 // independent parser (net/mail) accepts, with the key headers decoding to the
 // expected values.

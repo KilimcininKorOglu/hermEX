@@ -179,8 +179,9 @@ func orgDomain(d string) string {
 }
 
 // Tag prepends advisory X-Spam headers to a raw RFC 5322 message reflecting the
-// verdict, so downstream clients and mailbox rules can act on it. The original is
-// not modified; a new slice is returned.
+// verdict, so a downstream client can filter on it. The original is not modified;
+// a new slice is returned. The headers survive the store because oxcmail preserves
+// the X-Spam family through its MIME↔MAPI round trip.
 func Tag(raw []byte, v Verdict) []byte {
 	status, flag := "No", "NO"
 	if v.Spam {
