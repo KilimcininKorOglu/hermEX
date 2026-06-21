@@ -169,6 +169,57 @@ func TestDNSBLQuery(t *testing.T) {
 	}
 }
 
+// saScoreRules is a tiny ruleset whose two rules together exceed saScoreThreshold
+// (3.0 + 2.5 = 5.5) so a message hitting both makes the SA signal fire.
+const saScoreRules = `
+body   WIN_PRIZE  /win a prize/i
+score  WIN_PRIZE  3.0
+header SUBJ_URGENT  Subject =~ /urgent/i
+score  SUBJ_URGENT  2.5
+`
+
+// TestScoreSARulesContributes proves that when the SpamAssassin rule subset's
+// summed score crosses the threshold it adds one bounded weight (not the raw SA
+// score) and records the score and the rules that fired.
+func TestScoreSARulesContributes(t *testing.T) {
+	s := &Scorer{Weights: DefaultWeights, Threshold: DefaultThreshold, SARules: ParseSARules(saScoreRules)}
+	raw := []byte("Subject: URGENT notice\r\n\r\nYou win a prize today!\r\n")
+
+	v := s.Score(Input{Raw: raw})
+	if v.SAScore < 5.49 || v.SAScore > 5.51 {
+		t.Errorf("SAScore = %v, want 5.5", v.SAScore)
+	}
+	if v.Score != DefaultWeights.SARulesHit {
+		t.Errorf("score = %d, want the single bounded SA weight %d (not the raw SA score)", v.Score, DefaultWeights.SARulesHit)
+	}
+	if len(v.SAHits) != 2 {
+		t.Errorf("SAHits = %v, want both rules", v.SAHits)
+	}
+}
+
+// TestScoreSARulesBelowThreshold proves a sub-threshold SA score records the score
+// and hits for transparency but contributes no weight.
+func TestScoreSARulesBelowThreshold(t *testing.T) {
+	s := &Scorer{Weights: DefaultWeights, Threshold: DefaultThreshold, SARules: ParseSARules(saScoreRules)}
+	raw := []byte("Subject: hello\r\n\r\nYou win a prize today!\r\n") // only WIN_PRIZE (3.0)
+
+	v := s.Score(Input{Raw: raw})
+	if v.SAScore != 3.0 {
+		t.Errorf("SAScore = %v, want 3.0", v.SAScore)
+	}
+	if v.Score != 0 {
+		t.Errorf("score = %d, want 0 (3.0 is below the SA threshold)", v.Score)
+	}
+}
+
+// TestScoreSARulesDormant proves no SA evaluation happens when no ruleset is set.
+func TestScoreSARulesDormant(t *testing.T) {
+	v := (&Scorer{Weights: DefaultWeights, Threshold: DefaultThreshold}).Score(Input{Raw: []byte("Subject: URGENT\r\n\r\nwin a prize")})
+	if v.SAScore != 0 || v.SAHits != nil {
+		t.Errorf("verdict = SAScore %v SAHits %v, want a dormant SA signal", v.SAScore, v.SAHits)
+	}
+}
+
 // TestDNSBLIsListed proves only a 127.0.0.0/8 answer counts as a listing: a
 // public A record (a hijacked or wildcard resolver) must not condemn the sender.
 func TestDNSBLIsListed(t *testing.T) {

@@ -1,7 +1,7 @@
 // Package antispam scores inbound mail for spam likelihood. It composes sender
-// authentication (SPF, DKIM, DMARC), DNS blocklists, and a Bayesian content model
-// into a single verdict. The MTA calls it inline at delivery and is fail-open: a
-// scoring error never blocks mail.
+// authentication (SPF, DKIM, DMARC), DNS blocklists, a Bayesian content model, and
+// a subset of the SpamAssassin rule language into a single verdict. The MTA calls
+// it inline at delivery and is fail-open: a scoring error never blocks mail.
 //
 // The library-backed checks live in checks.go and are injected into Scorer so the
 // scoring logic is unit-tested without live DNS.
@@ -45,10 +45,11 @@ type Weights struct {
 	DMARCFail   int // DMARC published an enforcing policy and the message did not align
 	DNSBLHit    int // the client IP is listed on a DNS blocklist (added per listing zone)
 	BayesSpam   int // the Bayesian content model is confident the message is spam
+	SARulesHit  int // the SpamAssassin rule subset accumulated enough score (one bounded signal)
 }
 
 // DefaultWeights is a conservative starting point; the admin can tune them later.
-var DefaultWeights = Weights{SPFFail: 5, SPFSoftFail: 2, DKIMFail: 3, DMARCFail: 6, DNSBLHit: 6, BayesSpam: 4}
+var DefaultWeights = Weights{SPFFail: 5, SPFSoftFail: 2, DKIMFail: 3, DMARCFail: 6, DNSBLHit: 6, BayesSpam: 4, SARulesHit: 4}
 
 // DefaultThreshold is the score at or above which a message is flagged spam. It
 // is deliberately above any single check so one failure alone never condemns a
@@ -60,6 +61,12 @@ const DefaultThreshold = 8
 // a weak or barely-trained model.
 const bayesSpamProb = 0.95
 
+// saScoreThreshold is the summed SpamAssassin-rule score at or above which the
+// rule subset contributes its weight. It matches SpamAssassin's own default
+// threshold; since this is only a subset of the full ruleset, requiring the full
+// 5.0 from fewer rules is deliberately conservative against false positives.
+const saScoreThreshold = 5.0
+
 // Verdict is the aggregated result for one message.
 type Verdict struct {
 	Score     int
@@ -69,6 +76,8 @@ type Verdict struct {
 	DMARC     AuthResult
 	DNSBL     []string // the blocklist zones that listed the client IP
 	BayesProb float64  // the Bayesian model's spam probability (0..1); 0 when not run
+	SAScore   float64  // the summed score of the SpamAssassin rules that fired; 0 when not run
+	SAHits    []string // the names of the SpamAssassin rules that fired
 	Reasons   []string
 }
 
@@ -85,6 +94,7 @@ type Scorer struct {
 	Threshold   int
 	Zones       []string    // DNS blocklist zones to query the client IP against; empty disables DNSBL
 	Model       *BayesModel // the Bayesian content model; nil leaves content scoring dormant
+	SARules     *SARuleSet  // the SpamAssassin rule subset; nil leaves rule scoring dormant
 	checkSPF    func(ip net.IP, helo, mailFrom string) AuthResult
 	checkDKIM   func(raw []byte) []DKIMResult
 	lookupDMARC func(domain string) (policy string, ok bool)
@@ -175,6 +185,18 @@ func (s *Scorer) Score(in Input) Verdict {
 		if v.BayesProb >= bayesSpamProb {
 			v.Score += s.Weights.BayesSpam
 			v.Reasons = append(v.Reasons, "Bayesian: likely spam")
+		}
+	}
+
+	// SpamAssassin rule subset: the summed score of the rules that fired is one
+	// bounded signal — it contributes a single weight once it crosses the SA
+	// threshold, however many rules matched, so the subset's score never dominates
+	// the verdict on its own.
+	if s.SARules != nil && len(in.Raw) > 0 {
+		v.SAScore, v.SAHits = s.SARules.Evaluate(in.Raw)
+		if v.SAScore >= saScoreThreshold {
+			v.Score += s.Weights.SARulesHit
+			v.Reasons = append(v.Reasons, fmt.Sprintf("SpamAssassin rules (score %.1f)", v.SAScore))
 		}
 	}
 
