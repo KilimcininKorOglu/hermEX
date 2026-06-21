@@ -112,6 +112,13 @@ func main() {
 		log.Printf("hermex-mta: anti-spam model load failed, using embedded floor: %v", err)
 	}
 	scorer.Model = model
+	// The SpamAssassin ruleset is seeded into data_dir on first run and loaded from
+	// there once at startup (an edit or refresh takes effect on the next restart).
+	rules, err := antispam.LoadRules(cfg.DataDir)
+	if err != nil {
+		log.Printf("hermex-mta: anti-spam ruleset load failed, using embedded baseline: %v", err)
+	}
+	scorer.SARules = rules
 	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer}, Hostname: cfg.Hostname, Logger: logger}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()

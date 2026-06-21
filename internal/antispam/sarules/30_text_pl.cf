@@ -1,0 +1,260 @@
+# SpamAssassin translations: Polish
+# Charset: ISO-8859-2
+#
+# Polish translation based on work started by <radek at alter dot pl>
+# rewrite for version 2.60: Jerzy Szczud³owski <jerzy at jedwab dot net dot pl >
+# (v0.2)
+#
+# Proszê nie modyfikowaæ tego pliku, gdy¿ wszelkie zmiany zostan± nadpisane
+# podczas nastêpnego uaktualnienia. Zamiast tego, proszê u¿ywaæ
+# @@LOCAL_RULES_DIR@@/local.cf. Szczegó³y w 'perldoc Mail::SpamAssassin::Conf'
+#
+# Ten program   jest  darmowy;  mo¿na  go rozprowadzaæ i/lub  modyfikowaæ  na
+# warunkach Licencji    Artystycznej lub Powszechnej Licencji Publicznej  GNU
+# publikowanej  przez Free  Software  Foundation;   zarówno   w wersji 1 lub,
+# którejkolwiek  pó¼niejszej. Szczegó³y w pliku "License",  znajduj±cym siê w
+# g³ównym katalogu ze ¼ród³ami SpamAssassina.
+#
+#
+# U¿ycie:
+# - ustaw w /etc/procmailrc (lub lokalnie w ~/.procmailrc) zmienn± LANG=pl_PL
+# - w konfiguracji SpamAssassina (globalnie local.cf, lokalnie user_prefs)
+#   dodaj opcjê: report_charset iso-8859-2
+#
+###########################################################################
+
+############## ........................................................................
+lang pl clear_report_template
+lang pl report ----------------- AUTOMATYCZNY raport antySPAMowy ----------------------
+lang pl report Oprogramowanie  do  wykrywania  spamu,  dzia³aj±ce  na  serwerze:
+lang pl report *** "_HOSTNAME_" ***,
+lang pl report zidentyfikowa³o  ten email  jako prawdopodobny  spam. Oryginalna  wiadomo¶æ
+lang pl report zosta³a do³±czona    do tej, aby mo¿na by³o j± przejrzeæ, zweryfikowaæ  lub
+lang pl report zablokowaæ na  przysz³o¶æ. Je¿eli masz jakie¶ w±tpliwo¶ci, to kieruj je pod
+lang pl report adres _CONTACTADDRESS_
+lang pl report
+lang pl report Przegl±d zawarto¶ci:  _PREVIEW_
+lang pl report
+lang pl report Szczegó³y analizy zawarto¶ci: (_HITS_ zaliczonych, _REQD_ wymaganych)
+lang pl report
+lang pl report "pkt  nazwa regu³y           krótki opis"
+lang pl report  ---- ---------------------- -------------------------------------------
+lang pl report _SUMMARY_
+############## ........................................................................
+
+###########################################################################
+# szablon raportu wiadomo¶ci niebezpieczne-do-wgl±du
+#
+##################### ......................................................................
+lang pl clear_unsafe_report_template
+lang pl unsafe_report Oryginalna wiadomo¶æ nie by³a w ca³o¶ci  tekstowa, w zwi±zku z tym otwarcie
+lang pl unsafe_report jej za  pomoc± niektórych  programów pocztowych   mo¿e  nie  byæ ca³kowicie
+lang pl unsafe_report bezpieczne; w  szczególno¶ci,   przesy³ka  mo¿e   zawieraæ  wirusa  lub kod
+lang pl unsafe_report informuj±cy spamera, ¿e twój adres pocztowy jest  prawid³owy    i mo¿na  na
+lang pl unsafe_report niego przysy³aæ wiêcej spamu.  Je¿eli  chcesz    j± przejrzeæ, bezpieczniej
+lang pl unsafe_report bêdzie zapisaæ j± najpierw na dysk, a nastêpnie otworzyæ edytorem tekstu.
+##################### ......................................................................
+
+
+# t³umaczenia regu³
+
+lang pl describe ACT_NOW_CAPS		Tekst 'ACTING NOW'
+lang pl describe BAD_CREDIT		Likwidacja problemów kredytowych
+lang pl describe BANG_GUAR		Dobitna gwarancja czego¶
+lang pl describe BANG_OPRAH		Tre¶æ: o Oprah z wykrzyknikiem!
+
+# 23_bayes.cf
+ifplugin Mail::SpamAssassin::Plugin::Bayes
+lang pl describe BAYES_00		Bayesowskie prawdopodobieñstwo spamu wynosi 0 do 1%
+lang pl describe BAYES_05		Bayesowskie prawdopodobieñstwo spamu wynosi 1 do 5%
+lang pl describe BAYES_20		Bayesowskie prawdopodobieñstwo spamu wynosi 5 do 20%
+lang pl describe BAYES_40		Bayesowskie prawdopodobieñstwo spamu wynosi 20 do 40%
+lang pl describe BAYES_50		Bayesowskie prawdopodobieñstwo spamu wynosi 40 do 60%
+lang pl describe BAYES_60		Bayesowskie prawdopodobieñstwo spamu wynosi 60 do 80%
+lang pl describe BAYES_80		Bayesowskie prawdopodobieñstwo spamu wynosi 80 do 95%
+lang pl describe BAYES_95		Bayesowskie prawdopodobieñstwo spamu wynosi 95 do 99%
+lang pl describe BAYES_99		Bayesowskie prawdopodobieñstwo spamu wynosi 99 do 100%
+lang pl describe BAYES_999              Bayesowskie prawdopodobieñstwo spamu wynosi 99.9 do 100%
+endif
+#
+lang pl describe BILLION_DOLLARS	Tre¶æ: o niesamowitej ilo¶ci pieniêdzy
+lang pl describe BLANK_LINES_80_90	Tre¶æ zawiera 80-90% pustych linii
+lang pl describe CHARSET_FARAWAY_HEADER	Obcojêzyczny zestaw znaków w nag³ówkach
+lang pl describe CHARSET_FARAWAY	List zawiera typ znaków oznaczaj±cy jêzyk obcy
+lang pl describe CONFIRMED_FORGED	Nag³ówki Received: s± sfa³szowane
+lang pl describe CUM_SHOT		Prawdopodobnie porno - 'Wytrysk nasienia'
+lang pl describe DATE_IN_FUTURE_03_06	Data: jest od 3 do 6 godzin po dacie z Received:
+lang pl describe DATE_IN_FUTURE_06_12	Data: jest od 6 do 12 godzin po dacie z Received:
+lang pl describe DATE_IN_FUTURE_12_24	Data: jest od 12 do 24 godzin po dacie z Received:
+lang pl describe DATE_IN_FUTURE_24_48	Data: jest od 24 do 48 godzin po dacie z Received:
+lang pl describe DATE_IN_FUTURE_48_96	Data: jest od 48 do 96 godzin po dacie z Received:
+lang pl describe DATE_IN_FUTURE_96_XX	Data: jest od 96 lub wiêcej godzin po dacie z Received:
+lang pl describe DATE_IN_PAST_03_06	Data: jest od 3 do 6 godzin przed dat± z Received:
+lang pl describe DATE_IN_PAST_06_12	Data: jest od 6 do 12 godzin przed dat± z Received:
+lang pl describe DATE_IN_PAST_12_24	Data: jest od 12 do 24 godzin przed dat± z Received:
+lang pl describe DATE_IN_PAST_24_48	Data: jest od 24 do 48 godzin przed dat± z Received:
+lang pl describe DATE_IN_PAST_96_XX	Data: jest od 96 lub wiêcej godzin przed dat± z Received:
+lang pl describe MISSING_DATE		Brakuje nag³ówka Data:
+lang pl describe DATE_SPAMWARE_Y2K	Nag³ówek Data: u¿ywa podejrzanego formatowania Y2k
+lang pl describe DEAR_FRIEND		'Drogi Przyjacielu' (ang.)
+lang pl describe DEAR_SOMETHING		Zawiera 'Drogi Kto¶tam' (ang.)
+lang pl describe EMAIL_ROT13 		Tre¶æ zawiera adres email zakodowany ROT13
+lang pl describe EXCUSE_24		Twierdzi, ¿e chcia³e¶ tê reklamê
+lang pl describe EXCUSE_4		Twierdzi, ¿e mo¿esz byæ usuniêty z listy
+lang pl describe EXCUSE_REMOVE		Pisze, jak mo¿na zostaæ usuniêtym z listy
+lang pl describe FIN_FREE 		Wolno¶æ finansowa
+lang pl describe FORGED_HOTMAIL_RCVD2	Od: hotmail.com, lecz bez 'Received:'
+lang pl describe FORGED_IMS_HTML	IMS nie potrafi wysy³aæ wiadomo¶ci ca³kowicie w HTML
+lang pl describe FORGED_IMS_TAGS	Programy pocztowe IMS nie potrafi± wysy³aæ HTMLa w tym formacie
+lang pl describe FORGED_MUA_EUDORA	Podrobiony mail udaj±cy przesy³kê z programu Eudora
+lang pl describe FORGED_MUA_IMS		Podrobiony mail udaj±cy przesy³kê z IMS
+lang pl describe FORGED_MUA_MOZILLA	Podrobiony mail udaj±cy przesy³kê z Mozilli
+lang pl describe FORGED_MUA_OIMO	Podrobiony mail udaj±cy przesy³kê z MS Outlook IMO
+lang pl describe FORGED_MUA_OUTLOOK	Podrobiony mail udaj±cy przesy³kê z MS Outlook
+lang pl describe FORGED_MUA_THEBAT_BOUN	Podrobiony mail udaj±cy przesy³kê z programu The Bat! (granica)
+lang pl describe FORGED_MUA_THEBAT_CS	Podrobiony mail udaj±cy przesy³kê z programu The Bat! (zestaw znaków)
+lang pl describe FORGED_OUTLOOK_HTML	Outlook nie potrafi wysy³aæ wiadomo¶ci ca³kowicie w HTML
+lang pl describe FORGED_OUTLOOK_TAGS	Outlook nie potrafi wysy³aæ wiadomo¶ci HTML w tym formacie
+lang pl describe FORGED_QUALCOMM_TAGS	Programy pocztowe QUALCOMM nie potrafi± wysy³aæ HTMLa w tym formacie
+lang pl describe FORGED_TELESP_RCVD	Zawiera podrobion± nazwê hosta pod IP DSLa z Brazylii
+lang pl describe FORGED_THEBAT_HTML	The Bat! nie potrafi wysy³aæ wiadomo¶ci ca³kowicie w HTML
+lang pl describe FORGED_YAHOO_RCVD	Od: yahoo.com nie zgadza siê z nag³ówkami Received:
+lang pl describe FORWARD_LOOKING	O¶wiadczenie rezygnuj±cego akcjonariusza
+lang pl describe FREE_PORN		Prawdopodobnie porno - darmowe porno
+lang pl describe FREE_QUOTE_INSTANT	Darmowe notowania (ekspresowe lub bez zobowi±zañ)
+lang pl describe FROM_ILLEGAL_CHARS	From: zawiera zbyt wiele niedozwolonych znaków
+lang pl describe FROM_NO_USER		Od: nie ma niczego przed znakiem @
+lang pl describe FROM_OFFERS		Od: adresu typu "@wspania³a-okazja"
+lang pl describe FROM_STARTS_WITH_NUMS	Od: zaczyna siê cyframi
+lang pl describe GAPPY_SUBJECT		Temat: zawiera D.z.i.u.r.a.w.y-T.e.k.s.t
+lang pl describe GTUBE			Ogólny test na Niepo¿±dane Przesy³ki Email
+lang pl describe GUARANTEED_100_PERCENT	100% gwarancji
+lang pl describe HEADER_COUNT_CTYPE	Znaleziono wielokrotne nag³ówki Content-Type
+lang pl describe HEAD_ILLEGAL_CHARS	Nag³ówek zawiera zbyt wiele niedozwolonych znaków
+lang pl describe HIDE_WIN_STATUS	U¿ywa Javascriptu by ukryæ URLe w przegl±darce
+lang pl describe HTML_CHARSET_FARAWAY	Obcy jêzyk u¿ywany w znacznikach HTML
+lang pl describe HTML_COMMENT_SAVED_URL	Wiadomo¶æ HTML jest stron± WWW
+lang pl describe HTML_EMBEDS		HTML z osadzonym obiektem typu wtyczka
+lang pl describe HTML_FONT_FACE_BAD	HTMLowy opis czcionki nie jest s³owem
+lang pl describe HTML_FONT_LOW_CONTRAST	kolor czcionki w HTML jest podobny do t³a
+lang pl describe HTML_FORMACTION_MAILTO	czê¶æ HTML zawiera formularz, który wysy³a pocztê
+lang pl describe HTML_IMAGE_ONLY_04	HTML: grafika i 200-400 bajtów s³ów
+lang pl describe HTML_IMAGE_ONLY_08	HTML: grafika i 600-800 bajtów s³ów
+lang pl describe HTML_IMAGE_ONLY_12	HTML: grafika i 1000-1200 bajtów s³ów
+lang pl describe HTML_IMAGE_RATIO_02	HTML posiada niski stosunek objêto¶ci tekstu do obrazu
+lang pl describe HTML_IMAGE_RATIO_04   HTML posiada niski stosunek objêto¶ci tekstu do obrazu
+lang pl describe HTML_IMAGE_RATIO_06   HTML posiada niski stosunek objêto¶ci tekstu do obrazu
+lang pl describe HTML_IMAGE_RATIO_08   HTML posiada niski stosunek objêto¶ci tekstu do obrazu
+lang pl describe HTML_MESSAGE		Wiadomo¶æ zawiera kod HTML
+lang pl describe HTML_MIME_NO_HTML_TAG	Wiadomo¶æ ca³kowicie w HTML, lecz bez odpowiedniego oznaczenia
+lang pl describe HTML_TAG_BALANCE_BODY	HTML posiada niepozamykane znaczniki w "body"
+lang pl describe HTML_TAG_BALANCE_HEAD	HTML posiada niepozamykane znaczniki w "head"
+lang pl describe HTTP_ESCAPED_HOST	U¿ywa % wewn±trz nazwy hosta w URL
+lang pl describe HTTP_EXCESSIVE_ESCAPES	Ca³kowicie zbêdne % wewn±trz URL
+lang pl describe IMPOTENCE		Lekarstwo na impotencjê
+lang pl describe INVALID_DATE		Nieprawid³owa data (RFC 2822)
+lang pl describe INVALID_DATE_TZ_ABSURD	Nieprawid³owa data (nieistniej±ca strefa czasowa)
+lang pl describe INVALID_MSGID		Zgodnie z RFC 2822, Message-Id jest nieprawid³owe
+lang pl describe IP_LINK_PLUS		CGI poprzedzone kropkowo-dziesiêtnym adresem IP
+lang pl describe JAPANESE_UCE_SUBJECT	Temat: zawiera japoñski znacznik UCE
+lang pl describe JOIN_MILLIONS		Do³±cz do Milionów Amerykan
+lang pl describe KOREAN_UCE_SUBJECT	Temat: zawiera koreañski znacznik UCE
+lang pl describe LIVE_PORN		Prawdopodobnie porno - Porno na ¿ywo
+lang pl describe LOW_PRICE		Najni¿sza cena
+lang pl describe MARKETING_PARTNERS	Twierdzi, ¿e jeste¶ zarejestrowany jako partner
+#lang pl describe MILLION_USD 		O milionach dolarów
+#lang pl describe MIME_BASE64_BLANKS	Dodatkowe puste linie kodowane w Base64
+lang pl describe MIME_BASE64_TEXT	Tekst wiadomo¶ci zakamuflowany przy u¿yciu kodowania Base64
+lang pl describe __MIME_BASE64		Zawiera za³±cznik kodowany w Base64
+lang pl describe MIME_BOUND_MANY_HEX	Na granicy MIME widaæ ¶lad narzêdzia spamerskiego
+lang pl describe MIME_CHARSET_FARAWAY	zestaw znaków MIME wskazuje na jêzyk obcy
+lang pl describe MIME_HEADER_CTYPE_ONLY	Znaleziono nag³ówek 'Content-Type' lecz bez nag³ówków MIME
+lang pl describe MIME_HTML_MOSTLY	Wiadomo¶æ wieloczê¶ciowa, g³ownie tekst/html MIME
+lang pl describe MIME_HTML_ONLY_MULTI	Wiadomo¶æ wieloczê¶ciowa posiada tylko czê¶ci tekstowe/html MIME
+lang pl describe MIME_HTML_ONLY		Wiadomo¶æ posiada tylko czê¶ci tekstowe/html MIME
+lang pl describe MIME_QP_LONG_LINE	Linia QP d³u¿sza ni¿ 76 znaków
+lang pl describe __MIME_QP		Zawiera za³±cznik kodowany w Quoted-Printable
+lang pl describe MISSING_HEADERS	Brakuje jednego z nag³ówków: Od, Dd lub Data
+lang pl describe MISSING_MIMEOLE	Wiadomo¶æ zawiera X-MSMail-Priority, lecz bez X-MimeOLE
+lang pl describe MONEY_BACK		Gwarancja zwrotu pieniêdzy
+lang pl describe MSGID_FROM_MTA_HEADER	Message-Id zosta³ dodany przez relay
+lang pl describe MSGID_OUTLOOK_INVALID	Sfa³szowany Message-Id (w formacie Outlook Express)
+lang pl describe MULTI_FORGED		Nag³ówki Received: wykazuj± wielokrotne fa³szowanie
+#lang pl describe NA_DOLLARS		O milionie Pó³nocno Amerykañskich dolarów
+lang pl describe NO_DNS_FOR_FROM	Domena w nag³ówku Do: nie posiada wpisu w DNS (MX lub A)
+lang pl describe NO_MEDICAL		Bez badañ medycznych
+lang pl describe NONEXISTENT_CHARSET	Nieznany zestaw znaków (jêzyk).
+lang pl describe NO_RDNS_DOTCOM_HELO	Odpowied¼ HELO hosta pokazuje wielkiego ISP, lecz brakuje rDNS
+lang pl describe NOT_ADVISOR		Niezarejestrowany doradca inwestycyjny
+lang pl describe NUMERIC_HTTP_ADDR	U¿ywa kropkowo-dziesiêtnego adresu IP w URL
+lang pl describe OBFUSCATING_COMMENT	Komentarze HTML zaciemniaj± tekst
+lang pl describe OBSCURED_EMAIL		Wiadomo¶æ zdaje siê zawieraæ zrotowany (rot13) adres
+lang pl describe ONE_TIME		Jednokrotna grabie¿
+lang pl describe ONLINE_PHARMACY	Apteka on-line
+lang pl describe PLING_QUERY		Temat zawiera wykrzyknik i pytajnik
+lang pl describe PREST_NON_ACCREDITED	'Presti¿owe nieakredytowane uniwersytety'
+lang pl describe RATWARE_EGROUPS	Znaleziono oznaczenie  przesy³ki masowej (eGroups)
+lang pl describe RATWARE_HASH_DASH	Zawiera zabezpieczenia przeciwko detekcji spamu w formacie Send-Safe
+lang pl describe RATWARE_OE_MALFORMED	Nag³ówek X-Mailer podaje z³± wersjê Outlook Express
+lang pl describe RCVD_AM_PM		Sfa³szowane nag³ówki Received (AM/PM)
+lang pl describe RCVD_FAKE_HELO_DOTCOM	Nag³ówek Received zawiera sfa³szowan± nazwê hosta HELO
+lang pl describe RCVD_IN_BL_SPAMCOP_NET	Odebrane od systemu klasy RELAY w/g: bl.spamcop.net
+lang pl describe RCVD_IN_MAPS_DUL	"open relay" wed³ug DUL, http://www.mail-abuse.org/dul/
+lang pl describe RCVD_IN_MAPS_NML	"open relay" wed³ug NML, http://www.mail-abuse.org/nml/
+lang pl describe RCVD_IN_MAPS_RBL	"open relay" wed³ug RBL, http://www.mail-abuse.org/rbl/
+lang pl describe RCVD_IN_MAPS_RSS	"open relay" wed³ug RSS, http://www.mail-abuse.org/rss/
+lang pl describe RCVD_IN_SBL		Otrzymano przez relay listowany w Spamhaus Block List
+lang pl describe REFINANCE_NOW		Refinansowanie domów
+lang pl describe REFINANCE_YOUR_HOME	Refinansowanie domów
+lang pl describe SORTED_RECIPS		Lista odbiorców posortowana wed³ug adresu
+lang pl describe STOCK_ALERT		Oferuje powiadomienie o kursach akcji
+lang pl describe STRONG_BUY		Mówi o mocnym zakupie
+lang pl describe SUBJ_ALL_CAPS		Temat zawiera same du¿e litery
+lang pl describe SUBJ_AS_SEEN		Temat: zawiera "Jak pokazywano"
+lang pl describe SUBJ_BUY		Temat: zaczyna siê od Kup/Kupowanie
+lang pl describe SUBJ_DOLLARS		Temat: zaczyna siê od kwoty dolarów
+lang pl describe SUBJ_ILLEGAL_CHARS	Temat: zawiera zbyt wiele niedozwolonych znaków
+#lang pl describe SUBJ_YOUR_DEBT		Temat: zawiera "Twoje rachunki" lub podobnie
+lang pl describe SUBJ_YOUR_FAMILY	Temat: zawiera "Twoja rodzina"
+lang pl describe SUSPICIOUS_RECIPS	Do: zawiera tê sam± domenê przynajmniej 10 razy.
+lang pl describe TO_MALFORMED		Do: zawiera uszkodzony adres
+lang pl describe TRACKER_ID		Zawiera numer identyfikacyjny
+lang pl describe UNCLAIMED_MONEY	(ludzie po prostu rozrzucaj± pieni±dze dooko³a)
+lang pl describe UPPERCASE_50_75	Tre¶æ jest w 50-75% wielkimi literami
+lang pl describe UPPERCASE_75_100	Tre¶æ jest w 75-100% wielkimi literami
+lang pl describe URG_BIZ		Pilna sprawa
+#lang pl describe US_DOLLARS_3		Wspomina miliony $ ($NN,NNN,NNN.NN)
+lang pl describe USER_IN_ALL_SPAM_TO	U¿ytkownik jest wymieniony w 'all_spam_to'
+lang pl describe USER_IN_BLOCKLIST	Od: zawiera adres z Twojej "czarnej listy"
+lang pl describe USER_IN_BLOCKLIST_TO	U¿ytkownik jest wymieniony w 'blocklist_to'
+lang pl describe USER_IN_DEF_WELCOMELIST	U¿ytkownik jest wymieniony w domy¶lnej welcome-list (bia³ej li¶cie)
+lang pl describe USER_IN_MORE_SPAM_TO	U¿ytkownik jest wymieniony w 'more_spam_to'
+lang pl describe USER_IN_WELCOMELIST	Od: zawiera adres z welcome-list (bia³ej listy)
+lang pl describe USER_IN_WELCOMELIST_TO	U¿ytkownik jest wymieniony w 'welcomelist_to'
+lang pl describe WEIRD_PORT		U¿ywa niestandardowego numeru portu dla HTTP
+lang pl describe WEIRD_QUOTING		Dziwne, powtarzaj±ce siê znaki podwójnego cytowania
+lang pl describe WITH_LC_SMTP		Linia 'Received' zawiera spamerski podpis (smtp)
+
+ifplugin Mail::SpamAssassin::Plugin::AntiVirus
+lang pl describe MIME_SUSPECT_NAME	Nazwa pliku MIME nie zgadza siê z zawarto¶ci±
+endif
+
+ifplugin Mail::SpamAssassin::Plugin::DCC
+lang pl describe DCC_CHECK		Na li¶cie DCC (http://www.dcc-servers.net/dcc/)
+endif
+
+ifplugin Mail::SpamAssassin::Plugin::Pyzor
+lang pl describe PYZOR_CHECK		Na li¶cie Pyzor (https://pyzor.readthedocs.io/en/latest/)
+endif
+
+ifplugin Mail::SpamAssassin::Plugin::TextCat
+lang pl describe BODY_8BITS		Tre¶æ zawiera 8 kolejnych 8mio bitowych znaków
+lang pl describe UNWANTED_LANGUAGE_BODY	Wiadomo¶æ napisana w niepo¿±danym jêzyku
+endif
+
+ifplugin Mail::SpamAssassin::Plugin::AccessDB
+lang pl describe ACCESSDB		Wiadomo¶æ zosta³aby przechwycona przez accessdb
+endif
+
+lang pl describe NORMAL_HTTP_TO_IP     U¿ywa kropkowo-dziesiêtnego adresu IP w URL
+
