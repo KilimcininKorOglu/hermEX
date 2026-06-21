@@ -3,7 +3,7 @@
 {{template "sidebar" .}}
 <main>
 <h1>Anti-spam</h1>
-<p class="hint">Inbound mail is scored at delivery (SPF, DKIM, DMARC, DNS blocklists, and a Bayesian content model); a message over the threshold is filed to the recipient's Junk folder.</p>
+<p class="hint">Inbound mail is scored at delivery (SPF, DKIM, DMARC, DNS blocklists, a Bayesian content model, and a SpamAssassin rule subset); a message over the threshold is filed to the recipient's Junk folder.</p>
 {{template "antispam-panel" .}}
 
 <h2>Scoring</h2>
@@ -17,8 +17,14 @@
 <tr><td>DMARC fail (enforced policy)</td><td>{{.Weights.DMARCFail}}</td></tr>
 <tr><td>DNSBL listing</td><td>{{.Weights.DNSBLHit}}</td></tr>
 <tr><td>Bayesian spam</td><td>{{.Weights.BayesSpam}}</td></tr>
+<tr><td>SpamAssassin rules</td><td>{{.Weights.SARulesHit}}</td></tr>
 </tbody>
 </table>
+
+<h2>SpamAssassin ruleset</h2>
+<p>Source: {{.SASource}}</p>
+<p>{{.SARules}} rules and {{.SAMetas}} meta rules in use; {{.SASkipped}} rules and {{.SADropped}} metas are dropped (network-, plugin-, and Bayes-backed rules and patterns the engine cannot compile — those checks are done natively).</p>
+<p class="hint">The rules contribute one combined signal: when their summed score reaches {{.SAThreshold}}, the verdict gains {{.SAWeight}} points. The ruleset is seeded into data_dir on first run; refresh it with the antispam-rules tool (changes take effect on the next MTA restart).</p>
 </main>
 </div>
 {{template "foot" .}}{{end}}

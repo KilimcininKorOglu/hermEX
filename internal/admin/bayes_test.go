@@ -32,6 +32,11 @@ func TestAntispamPageRenders(t *testing.T) {
 	if !strings.Contains(page, "Retrain from mailboxes") || !strings.Contains(page, "Bayesian spam") {
 		t.Errorf("antispam page missing expected content:\n%s", page)
 	}
+	// The SpamAssassin ruleset section renders, reporting the embedded baseline
+	// (the test's data_dir has no ruleset file, so it falls back to the baseline).
+	if !strings.Contains(page, "SpamAssassin ruleset") || !strings.Contains(page, "embedded baseline") {
+		t.Errorf("antispam page missing the SpamAssassin ruleset status:\n%s", page)
+	}
 }
 
 // TestRetrainEnqueues proves the retrain button queues a bayes-retrain task.

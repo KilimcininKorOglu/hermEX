@@ -148,3 +148,11 @@ func (c *Config) RelaySpoolPath() string {
 func (c *Config) AntispamModelPath() string {
 	return filepath.Join(c.DataDir, "antispam-model.json")
 }
+
+// AntispamRulesPath is where the SpamAssassin ruleset lives under the data root:
+// the MTA seeds it on first run and loads it at startup, and the refresh tool
+// updates it. The filename must match antispam.RulesFileName (kept literal here to
+// avoid a config→feature dependency).
+func (c *Config) AntispamRulesPath() string {
+	return filepath.Join(c.DataDir, "antispam-rules.cf")
+}

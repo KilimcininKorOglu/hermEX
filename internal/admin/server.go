@@ -109,6 +109,7 @@ type Paths interface {
 	MaildirFor(address string) string
 	RelaySpoolPath() string
 	AntispamModelPath() string
+	AntispamRulesPath() string
 }
 
 // LogReader queries the central log store for the log viewer. It is optional —

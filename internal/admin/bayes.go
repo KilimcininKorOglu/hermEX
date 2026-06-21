@@ -57,6 +57,22 @@ func (s *Server) antispamPageData(r *http.Request, notice string) map[string]any
 		data["SpamMsgs"] = m.SpamMsgs
 		data["HamMsgs"] = m.HamMsgs
 	}
+
+	// SpamAssassin ruleset: report the live data_dir ruleset if present, otherwise
+	// the embedded baseline that the MTA seeds on first run.
+	rs := antispam.EmbeddedRules()
+	saSource := "embedded baseline (seeded on first run)"
+	if live, err := antispam.LoadRulesFile(s.paths.AntispamRulesPath()); err == nil && live != nil {
+		rs, saSource = live, "data_dir/"+antispam.RulesFileName
+	}
+	rules, metas := rs.RuleCount()
+	data["SASource"] = saSource
+	data["SARules"] = rules
+	data["SAMetas"] = metas
+	data["SASkipped"] = rs.SkippedRules
+	data["SADropped"] = rs.DroppedMetas
+	data["SAWeight"] = antispam.DefaultWeights.SARulesHit
+	data["SAThreshold"] = antispam.SAScoreThreshold
 	return data
 }
 

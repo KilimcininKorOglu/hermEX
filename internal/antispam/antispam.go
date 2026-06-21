@@ -61,11 +61,11 @@ const DefaultThreshold = 8
 // a weak or barely-trained model.
 const bayesSpamProb = 0.95
 
-// saScoreThreshold is the summed SpamAssassin-rule score at or above which the
+// SAScoreThreshold is the summed SpamAssassin-rule score at or above which the
 // rule subset contributes its weight. It matches SpamAssassin's own default
 // threshold; since this is only a subset of the full ruleset, requiring the full
 // 5.0 from fewer rules is deliberately conservative against false positives.
-const saScoreThreshold = 5.0
+const SAScoreThreshold = 5.0
 
 // Verdict is the aggregated result for one message.
 type Verdict struct {
@@ -194,7 +194,7 @@ func (s *Scorer) Score(in Input) Verdict {
 	// the verdict on its own.
 	if s.SARules != nil && len(in.Raw) > 0 {
 		v.SAScore, v.SAHits = s.SARules.Evaluate(in.Raw)
-		if v.SAScore >= saScoreThreshold {
+		if v.SAScore >= SAScoreThreshold {
 			v.Score += s.Weights.SARulesHit
 			v.Reasons = append(v.Reasons, fmt.Sprintf("SpamAssassin rules (score %.1f)", v.SAScore))
 		}

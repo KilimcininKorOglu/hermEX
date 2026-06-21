@@ -572,6 +572,7 @@ func (p fakePaths) HomedirFor(domain string) string  { return p.root + "/dom/" +
 func (p fakePaths) MaildirFor(address string) string { return p.root + "/mbox/" + address }
 func (p fakePaths) RelaySpoolPath() string           { return p.root + "/relay.sqlite3" }
 func (p fakePaths) AntispamModelPath() string        { return p.root + "/antispam-model.json" }
+func (p fakePaths) AntispamRulesPath() string        { return p.root + "/antispam-rules.cf" }
 
 // fakeStore is a scripted MailboxStore for the admin store-backed tabs: it holds
 // the out-of-office settings and the device list keyed by maildir, and captures
