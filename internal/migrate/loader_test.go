@@ -2,6 +2,7 @@ package migrate
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -31,6 +32,24 @@ func TestLoadFSParsesAndOrders(t *testing.T) {
 	}
 	if len(migs[1].Steps) != 1 {
 		t.Fatalf("v2 steps = %d, want 1 (comment line dropped)", len(migs[1].Steps))
+	}
+}
+
+// TestLoadFSCommentSemicolon proves a semicolon inside a comment does not split a
+// statement: comments are stripped before the file is split on semicolons.
+func TestLoadFSCommentSemicolon(t *testing.T) {
+	fsys := fstest.MapFS{
+		"m/0001_x.sql": {Data: []byte("-- holds bytes; and more text\nCREATE TABLE a (id INTEGER PRIMARY KEY);")},
+	}
+	migs, err := LoadFS(fsys, "m")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(migs) != 1 || len(migs[0].Steps) != 1 {
+		t.Fatalf("got %d migrations with steps %v, want 1 migration with 1 step", len(migs), migs)
+	}
+	if !strings.HasPrefix(migs[0].Steps[0], "CREATE TABLE a") {
+		t.Fatalf("statement = %q, want the CREATE only (comment with semicolon dropped)", migs[0].Steps[0])
 	}
 }
 

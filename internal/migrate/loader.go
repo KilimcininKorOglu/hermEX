@@ -47,6 +47,17 @@ func LoadFS(fsys fs.FS, dir string) ([]Migration, error) {
 	return migs, nil
 }
 
+// MustLoadFS is LoadFS for embedded migration sets known at build time: it
+// panics on error, since a malformed or missing embedded file is a programmer
+// error that should fail at package initialization rather than at runtime.
+func MustLoadFS(fsys fs.FS, dir string) []Migration {
+	migs, err := LoadFS(fsys, dir)
+	if err != nil {
+		panic(err)
+	}
+	return migs
+}
+
 // parseVersion reads the leading run of digits in a migration filename as its
 // version, so 0025_baseline.sql is version 25.
 func parseVersion(name string) (int, error) {
@@ -61,21 +72,22 @@ func parseVersion(name string) (int, error) {
 	return strconv.Atoi(base[:i])
 }
 
-// splitStatements breaks a .sql file into individual statements on semicolons,
-// dropping blank lines and -- line comments so the documented schema files stay
-// readable without their comments reaching the database driver.
+// splitStatements breaks a .sql file into individual statements on semicolons.
+// Whole-line -- comments and blank lines are stripped first, so a semicolon
+// inside a comment never splits a statement; comments must therefore occupy their
+// own lines (the documented schema files do).
 func splitStatements(content string) []string {
-	var out []string
-	for chunk := range strings.SplitSeq(content, ";") {
-		var b strings.Builder
-		for line := range strings.SplitSeq(chunk, "\n") {
-			if t := strings.TrimSpace(line); t == "" || strings.HasPrefix(t, "--") {
-				continue
-			}
-			b.WriteString(line)
-			b.WriteByte('\n')
+	var sql strings.Builder
+	for line := range strings.SplitSeq(content, "\n") {
+		if t := strings.TrimSpace(line); t == "" || strings.HasPrefix(t, "--") {
+			continue
 		}
-		if stmt := strings.TrimSpace(b.String()); stmt != "" {
+		sql.WriteString(line)
+		sql.WriteByte('\n')
+	}
+	var out []string
+	for chunk := range strings.SplitSeq(sql.String(), ";") {
+		if stmt := strings.TrimSpace(chunk); stmt != "" {
 			out = append(out, stmt)
 		}
 	}
