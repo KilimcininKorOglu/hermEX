@@ -24,6 +24,11 @@ type Directory interface {
 	EffectivePermissions(userID int64) ([]directory.Permission, error)
 	GrantAdminRole(userID int64, role string, scopeID int64) error
 	RevokeAdminRole(userID int64, role string, scopeID int64) error
+	ListRoles() ([]directory.RoleInfo, error)
+	GetRole(id int64) (directory.RoleDetail, bool, error)
+	CreateRole(name, description string, perms []directory.Permission, userIDs []int64) (int64, error)
+	UpdateRole(id int64, name, description string, perms []directory.Permission, userIDs []int64) (bool, error)
+	DeleteRole(id int64) (bool, error)
 	ListDomains() ([]directory.DomainInfo, error)
 	ListUsers() ([]directory.UserInfo, error)
 	ListAliases() ([]directory.AliasInfo, error)
@@ -182,6 +187,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("DELETE /admin/orgs/{orgID}/domains/{domainID}", s.protect(s.requireSystem(s.handleUnassignOrgDomain)))
 	mux.Handle("GET /admin/orgs/{orgID}/ldap", s.protect(http.HandlerFunc(s.handleGetLDAP)))
 	mux.Handle("PUT /admin/orgs/{orgID}/ldap", s.protect(http.HandlerFunc(s.handlePutLDAP)))
+	mux.Handle("GET /admin/roles", s.protect(s.requireSystem(s.handleRolesList)))
+	mux.Handle("POST /admin/roles", s.protect(s.requireSystem(s.handleRoleCreate)))
+	mux.Handle("GET /admin/roles/permissions", s.protect(s.requireSystem(s.handleRolePermissions)))
+	mux.Handle("GET /admin/roles/{roleID}", s.protect(s.requireSystem(s.handleRoleGet)))
+	mux.Handle("PUT /admin/roles/{roleID}", s.protect(s.requireSystem(s.handleRoleUpdate)))
+	mux.Handle("DELETE /admin/roles/{roleID}", s.protect(s.requireSystem(s.handleRoleDelete)))
 
 	// Web UI (server-rendered HTML) and its assets.
 	mux.Handle("GET /admin/static/", staticHandler())

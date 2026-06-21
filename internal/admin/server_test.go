@@ -30,6 +30,8 @@ type fakeDir struct {
 	nextFMID          int64
 	orgs              map[int64]directory.OrgInfo
 	nextOrgID         int64
+	namedRoles        map[int64]directory.RoleDetail
+	nextRoleID        int64
 
 	// captured by AssignDomainToOrg; assignDomainMissing makes it report ok=false
 	assignDomainID, assignOrgID int64
@@ -141,6 +143,63 @@ func (f *fakeDir) EffectivePermissions(int64) ([]directory.Permission, error) {
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeDir) ListRoles() ([]directory.RoleInfo, error) {
+	out := make([]directory.RoleInfo, 0, len(f.namedRoles))
+	for _, r := range f.namedRoles {
+		out = append(out, r.RoleInfo)
+	}
+	return out, nil
+}
+
+func (f *fakeDir) GetRole(id int64) (directory.RoleDetail, bool, error) {
+	r, ok := f.namedRoles[id]
+	return r, ok, nil
+}
+
+func (f *fakeDir) CreateRole(name, description string, perms []directory.Permission, userIDs []int64) (int64, error) {
+	if f.createErr != nil {
+		return 0, f.createErr
+	}
+	if f.namedRoles == nil {
+		f.namedRoles = map[int64]directory.RoleDetail{}
+	}
+	f.nextRoleID++
+	f.namedRoles[f.nextRoleID] = roleDetail(f.nextRoleID, name, description, perms, userIDs)
+	return f.nextRoleID, nil
+}
+
+func (f *fakeDir) UpdateRole(id int64, name, description string, perms []directory.Permission, userIDs []int64) (bool, error) {
+	if f.createErr != nil {
+		return false, f.createErr
+	}
+	if _, ok := f.namedRoles[id]; !ok {
+		return false, nil
+	}
+	f.namedRoles[id] = roleDetail(id, name, description, perms, userIDs)
+	return true, nil
+}
+
+func (f *fakeDir) DeleteRole(id int64) (bool, error) {
+	if _, ok := f.namedRoles[id]; !ok {
+		return false, nil
+	}
+	delete(f.namedRoles, id)
+	return true, nil
+}
+
+// roleDetail assembles a RoleDetail for the fake, mirroring the real store's
+// derived counts.
+func roleDetail(id int64, name, description string, perms []directory.Permission, userIDs []int64) directory.RoleDetail {
+	return directory.RoleDetail{
+		RoleInfo: directory.RoleInfo{
+			ID: id, Name: name, Description: description,
+			PermCount: len(perms), UserCount: len(userIDs),
+		},
+		Permissions: perms,
+		UserIDs:     userIDs,
+	}
 }
 func (f *fakeDir) GrantAdminRole(_ int64, role string, scopeID int64) error {
 	if f.createErr != nil {

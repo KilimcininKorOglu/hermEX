@@ -31,8 +31,8 @@ const roleNameMaxLen = 64
 // SystemAdminRO, DomainPurge, ResetPasswd), "*" for "all", or the decimal id of
 // the one org (OrgAdmin) or domain (DomainAdmin, DomainAdminRO) it binds to.
 type Permission struct {
-	Name   string
-	Params string
+	Name   string `json:"name"`
+	Params string `json:"params"`
 }
 
 // RoleInfo is a named role's summary for listings: its identity plus the counts
