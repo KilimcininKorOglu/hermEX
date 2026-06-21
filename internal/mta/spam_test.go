@@ -7,6 +7,7 @@ import (
 
 	"hermex/internal/antispam"
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -82,6 +83,44 @@ func TestAuthenticatedSubmissionNotScored(t *testing.T) {
 	}
 	if rec.calls != 0 {
 		t.Errorf("authenticated submission was scored (calls=%d), want 0", rec.calls)
+	}
+}
+
+// TestSpamScoredLogsReasons proves the spam.scored log event carries the joined
+// verdict reasons, so an admin can debug a false positive from the log viewer.
+func TestSpamScoredLogsReasons(t *testing.T) {
+	mbox := filepath.Join(t.TempDir(), "alice")
+	accounts := directory.StaticAccounts{"alice@test": {MailboxPath: mbox}}
+	sink := &captureSink{}
+	rec := &recordingScorer{verdict: antispam.Verdict{Score: 7, Spam: false, Reasons: []string{"SPF fail", "Bayesian: likely spam"}}}
+	b := &Backend{Accounts: accounts, Scorer: rec, Logger: logging.New(sink)}
+
+	sess, err := b.NewSession("203.0.113.9:1234")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Mail("bob@external.example"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Rcpt("alice@test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Data(strings.NewReader("From: bob@external.example\r\nSubject: x\r\n\r\nbody")); err != nil {
+		t.Fatal(err)
+	}
+
+	var reasons any
+	found := false
+	for _, e := range sink.events {
+		if e.Name == "spam.scored" {
+			reasons, found = e.Fields["reasons"], true
+		}
+	}
+	if !found {
+		t.Fatal("no spam.scored event was logged")
+	}
+	if reasons != "SPF fail; Bayesian: likely spam" {
+		t.Errorf("logged reasons = %q, want the joined verdict reasons", reasons)
 	}
 }
 

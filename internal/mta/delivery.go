@@ -346,7 +346,10 @@ func (s *session) Data(r io.Reader) error {
 			folder = int64(mapi.PrivateFIDJunk)
 		}
 		if s.logger != nil {
-			s.logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "spam.scored", RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "score": v.Score, "spam": v.Spam}})
+			// Record why the message scored as it did (the reasons aggregate every
+			// signal that fired: SPF/DKIM/DMARC, DNSBL zones, Bayesian, SA rules), so
+			// an admin can debug a false positive from the log viewer.
+			s.logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "spam.scored", RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "score": v.Score, "spam": v.Spam, "reasons": strings.Join(v.Reasons, "; ")}})
 		}
 	}
 	for _, t := range s.targets {
