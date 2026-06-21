@@ -20,14 +20,6 @@ type FolderInfo struct {
 	Subscribed  bool
 }
 
-// ipmSubtree is the MAPI container holding a private store's user-visible
-// folders. The client-facing folder tree is exactly this subtree: its direct
-// children appear as top-level folders (ParentID nil) and deeper folders keep
-// their real parent links. The root container and its sibling system folders
-// (Views, Finder, Schedule, Spooler Queue, …) are MAPI-internal and never
-// enumerated.
-const ipmSubtree = int64(mapi.PrivateFIDIPMSubtree)
-
 // folderNode is an (id, parent) pair from a hierarchy walk.
 type folderNode struct {
 	id     int64
@@ -46,7 +38,7 @@ func (s *Store) CreateFolder(parent *int64, displayName string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	parentFID := ipmSubtree
+	parentFID := s.ipmSubtree()
 	if parent != nil {
 		parentFID = *parent
 	}
@@ -91,7 +83,7 @@ func (s *Store) CreateFolder(parent *int64, displayName string) (int64, error) {
 // ok=false when none matches. A nil parent searches the top level (the IPM
 // subtree's direct children). The name is matched against PR_DISPLAY_NAME.
 func (s *Store) FolderByName(parent *int64, name string) (id int64, ok bool, err error) {
-	parentFID := ipmSubtree
+	parentFID := s.ipmSubtree()
 	if parent != nil {
 		parentFID = *parent
 	}
@@ -131,7 +123,7 @@ func (s *Store) FolderByName(parent *int64, name string) (id int64, ok bool, err
 // deeper folders keep their real parent. The root container and its system
 // folders are not included.
 func (s *Store) ListFolders() ([]FolderInfo, error) {
-	nodes, err := s.descendants(ipmSubtree)
+	nodes, err := s.descendants(s.ipmSubtree())
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +142,7 @@ func (s *Store) ListFolders() ([]FolderInfo, error) {
 		}
 		dn, _ := stringProp(props, mapi.PrDisplayName)
 		fi := FolderInfo{ID: n.id, DisplayName: dn, Subscribed: sub}
-		if n.parent != ipmSubtree {
+		if n.parent != s.ipmSubtree() {
 			p := n.parent
 			fi.ParentID = &p
 		}
@@ -162,7 +154,7 @@ func (s *Store) ListFolders() ([]FolderInfo, error) {
 // RenameFolder moves a folder under newParent (nil for the top level) and sets
 // its display name. It reports ErrNotFound when the folder is missing.
 func (s *Store) RenameFolder(folderID int64, newParent *int64, newName string) error {
-	parentFID := ipmSubtree
+	parentFID := s.ipmSubtree()
 	if newParent != nil {
 		parentFID = *newParent
 		// Reparenting a folder into itself or one of its own descendants would
@@ -214,7 +206,7 @@ func (s *Store) SetFolderName(folderID int64, newName string) error {
 		return err
 	}
 	var parentArg *int64
-	if parentFID != ipmSubtree {
+	if parentFID != s.ipmSubtree() {
 		parentArg = &parentFID
 	}
 	if existing, ok, err := s.FolderByName(parentArg, newName); err != nil {

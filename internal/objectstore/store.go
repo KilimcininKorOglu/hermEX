@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"hermex/internal/logging"
+	"hermex/internal/mapi"
 
 	_ "modernc.org/sqlite"
 )
@@ -54,9 +55,35 @@ type Store struct {
 	// provisioned with the default folder hierarchy. Real mailboxes always
 	// are; low-level allocator/property tests open a bare store instead.
 	seedBuiltins bool
+	// kind distinguishes a private mailbox from a per-domain public-folder
+	// store. It selects which built-in hierarchy a fresh store is seeded with
+	// and which IPM subtree the folder API roots at.
+	kind storeKind
 	// logger receives store infrastructure failures (SQL/IO errors); nil
 	// disables logging. Stamped from defaultLogger at Open.
 	logger *logging.Logger
+}
+
+// storeKind distinguishes a private mailbox store from a per-domain public-folder
+// store. The two seed different built-in hierarchies and root their folder API at
+// different IPM subtree ids (PrivateFIDIPMSubtree 0x09 vs PublicFIDIPMSubtree
+// 0x02), so the store must remember which it is for every open, not just at seed.
+type storeKind int
+
+const (
+	storePrivate storeKind = iota // private mailbox (default)
+	storePublic                   // per-domain public-folder store
+)
+
+// ipmSubtree returns the folder id of this store's IPM subtree — the container
+// whose children are the user-visible folders. It differs by store kind, so the
+// folder API (CreateFolder/ListFolders/FolderByName) roots at the correct subtree
+// for a private mailbox or a public-folder store.
+func (s *Store) ipmSubtree() int64 {
+	if s.kind == storePublic {
+		return int64(mapi.PublicFIDIPMSubtree)
+	}
+	return int64(mapi.PrivateFIDIPMSubtree)
 }
 
 // Dir returns the mailbox directory this store is rooted at — its stable
@@ -97,13 +124,29 @@ func dsn(path string) string {
 // provisioned with the default folder hierarchy. It fails if either database
 // carries an unsupported schema version.
 func Open(dir string) (*Store, error) {
-	return open(dir, true)
+	return openKind(dir, true, storePrivate)
 }
 
-// open is the shared constructor. seedBuiltins selects whether a fresh object
-// store gets the default folder hierarchy; tests open a bare store to exercise
-// allocators and property tables on a controlled baseline.
+// OpenPublic opens the per-domain public-folder store rooted at dir, creating and
+// seeding it if absent. A fresh store is provisioned with the public-folder
+// hierarchy (Root Container / IPM_SUBTREE / NON_IPM_SUBTREE / EFORMS REGISTRY)
+// instead of a private mailbox's folders, and the store's folder API roots at the
+// public IPM subtree. dir is the domain's public-store directory (Config.HomedirFor).
+func OpenPublic(dir string) (*Store, error) {
+	return openKind(dir, true, storePublic)
+}
+
+// open is the shared constructor for a private-kind store. seedBuiltins selects
+// whether a fresh object store gets the default folder hierarchy; tests open a
+// bare store to exercise allocators and property tables on a controlled baseline.
 func open(dir string, seedBuiltins bool) (*Store, error) {
+	return openKind(dir, seedBuiltins, storePrivate)
+}
+
+// openKind is the underlying constructor. kind selects the private mailbox or the
+// public-folder hierarchy for a fresh store and is remembered for the store's
+// lifetime so the folder API roots at the correct IPM subtree.
+func openKind(dir string, seedBuiltins bool, kind storeKind) (*Store, error) {
 	for _, sub := range []string{"", "cid", "eml"} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o700); err != nil {
 			return nil, err
@@ -118,7 +161,7 @@ func open(dir string, seedBuiltins bool) (*Store, error) {
 		objdb.Close()
 		return nil, err
 	}
-	s := &Store{dir: dir, objdb: objdb, idxdb: idxdb, seedBuiltins: seedBuiltins, logger: defaultLogger.Load()}
+	s := &Store{dir: dir, objdb: objdb, idxdb: idxdb, seedBuiltins: seedBuiltins, kind: kind, logger: defaultLogger.Load()}
 	if err := s.ensureSchema(); err != nil {
 		s.Close()
 		return nil, err
@@ -167,6 +210,9 @@ func (s *Store) ensureObjectSchema() error {
 			return err
 		}
 		if s.seedBuiltins {
+			if s.kind == storePublic {
+				return s.seedPublicStore(guid)
+			}
 			return s.seedMailbox(guid)
 		}
 		return nil

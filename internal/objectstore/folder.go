@@ -56,6 +56,20 @@ var builtinFolders = []builtinFolder{
 	{mapi.PrivateFIDLocalFreebusy, mapi.PrivateFIDRoot, "Freebusy Data", "", false},
 }
 
+// builtinPublicFolders is the per-domain public-store hierarchy, kept faithful to
+// the reference public store (mkpublic): a Root Container holding IPM_SUBTREE —
+// where the administrator's user-visible public folders live — and a sibling
+// NON_IPM_SUBTREE holding the EFORMS REGISTRY. New public folders are created
+// under IPM_SUBTREE with ids from PublicFIDUnassignedStart upward. Note IPM_SUBTREE
+// keeps the literal name "IPM_SUBTREE" here, unlike a private mailbox where the
+// same structural node is the "Top of Information Store".
+var builtinPublicFolders = []builtinFolder{
+	{mapi.PublicFIDRoot, 0, "Root Container", "", false},
+	{mapi.PublicFIDIPMSubtree, mapi.PublicFIDRoot, "IPM_SUBTREE", "", false},
+	{mapi.PublicFIDNonIPMSubtree, mapi.PublicFIDRoot, "NON_IPM_SUBTREE", "", false},
+	{mapi.PublicFIDEFormsRegistry, mapi.PublicFIDNonIPMSubtree, "EFORMS REGISTRY", "", false},
+}
+
 // seedMailbox creates the default folder hierarchy, store-root properties,
 // receive-folder map, and default free/busy permissions for a fresh mailbox.
 // replica is the store's replica GUID, used to stamp each folder's change key
@@ -86,6 +100,31 @@ func (s *Store) seedMailbox(replica mapi.GUID) error {
 	}
 	if err := seedDefaultPermissions(tx); err != nil {
 		return err
+	}
+	return tx.Commit()
+}
+
+// seedPublicStore provisions a fresh per-domain public-folder store: the store-root
+// property bag and the public-folder hierarchy. Unlike a private mailbox it has no
+// receive table (public folders are posted to directly via the protocols, never
+// delivered by the MTA) and no default free/busy permissions — access is granted
+// per folder by the administrator, so the store starts locked down with no
+// org-wide grant (the seeded store-wide default permission is FrightsNone).
+func (s *Store) seedPublicStore(replica mapi.GUID) error {
+	tx, err := s.objdb.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	ntNow := mapi.UnixToNTTime(time.Now())
+	if err := seedStoreProps(tx, ntNow); err != nil {
+		return err
+	}
+	for _, f := range builtinPublicFolders {
+		if err := createGenericFolder(tx, replica, ntNow, f); err != nil {
+			return fmt.Errorf("objectstore: seed public folder %#x: %w", f.fid, err)
+		}
 	}
 	return tx.Commit()
 }
