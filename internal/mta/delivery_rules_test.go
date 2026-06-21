@@ -37,7 +37,7 @@ func TestDeliverAppliesInboxRules(t *testing.T) {
 	raw := []byte("From: billing@acme.com\r\nTo: alice@test\r\nSubject: your invoice is ready\r\n\r\nbody\r\n")
 	// nil accounts: this mailbox has out-of-office off, so the auto-reply pass
 	// returns before it would consult the directory.
-	if err := deliver(nil, "billing@acme.com", "alice@test", mbox, raw, time.Now()); err != nil {
+	if err := deliver(nil, "billing@acme.com", "alice@test", mbox, raw, time.Now(), int64(mapi.PrivateFIDInbox)); err != nil {
 		t.Fatalf("deliver: %v", err)
 	}
 
@@ -90,7 +90,7 @@ func TestDeliverSurvivesMalformedRule(t *testing.T) {
 	raw := []byte("From: x@y.test\r\nTo: alice@test\r\nSubject: hello\r\n\r\nbody\r\n")
 	// nil accounts: out-of-office is off here, so the auto-reply pass returns
 	// before it would consult the directory.
-	if err := deliver(nil, "x@y.test", "alice@test", mbox, raw, time.Now()); err != nil {
+	if err := deliver(nil, "x@y.test", "alice@test", mbox, raw, time.Now(), int64(mapi.PrivateFIDInbox)); err != nil {
 		t.Fatalf("deliver must not fail on a malformed rule, got: %v", err)
 	}
 

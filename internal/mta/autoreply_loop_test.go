@@ -62,7 +62,7 @@ func TestTwoMailboxOOFNoStorm(t *testing.T) {
 	}
 
 	orig := []byte("From: alice@hermex.test\r\nTo: bob@hermex.test\r\nSubject: hi\r\n\r\nhello\r\n")
-	if err := deliver(accounts, "alice@hermex.test", "bob@hermex.test", pathB, orig, when); err != nil {
+	if err := deliver(accounts, "alice@hermex.test", "bob@hermex.test", pathB, orig, when, int64(mapi.PrivateFIDInbox)); err != nil {
 		t.Fatalf("deliver: %v", err)
 	}
 
@@ -109,7 +109,7 @@ func TestDeliverNoAutoReplyWhenOff(t *testing.T) {
 	}
 
 	orig := []byte("From: alice@hermex.test\r\nTo: bob@hermex.test\r\nSubject: hi\r\n\r\nhello\r\n")
-	if err := deliver(accounts, "alice@hermex.test", "bob@hermex.test", pathB, orig, when); err != nil {
+	if err := deliver(accounts, "alice@hermex.test", "bob@hermex.test", pathB, orig, when, int64(mapi.PrivateFIDInbox)); err != nil {
 		t.Fatalf("deliver: %v", err)
 	}
 	if a := listInbox(t, pathA); len(a) != 0 {
@@ -139,7 +139,7 @@ func TestDeliverNoAutoReplyToAutomatedSender(t *testing.T) {
 	}
 
 	orig := []byte("From: alice@hermex.test\r\nTo: bob@hermex.test\r\nAuto-Submitted: auto-generated\r\nSubject: bounce\r\n\r\nbody\r\n")
-	if err := deliver(accounts, "alice@hermex.test", "bob@hermex.test", pathB, orig, when); err != nil {
+	if err := deliver(accounts, "alice@hermex.test", "bob@hermex.test", pathB, orig, when, int64(mapi.PrivateFIDInbox)); err != nil {
 		t.Fatalf("deliver: %v", err)
 	}
 	if a := listInbox(t, pathA); len(a) != 0 {

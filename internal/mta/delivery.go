@@ -329,22 +329,28 @@ func (s *session) Data(r io.Reader) error {
 		return err
 	}
 	received := time.Now()
-	// Inbound (unauthenticated) mail bound for a local mailbox is spam-scored and
-	// the tagged copy is what gets filed. Scoring is fail-open — it never blocks
-	// delivery — and authenticated submission (the user's own outbound) is never
-	// scanned. The relay copy below keeps the untagged original.
+	// Inbound (unauthenticated) mail bound for a local mailbox is spam-scored: the
+	// filed copy is tagged with advisory X-Spam headers (so a client can filter on
+	// them, preserved through the store by oxcmail), and a message over the threshold
+	// is filed to Junk instead of the inbox. Scoring is fail-open — it never blocks
+	// delivery — and the user's own authenticated submissions and the outbound relay
+	// copy are not scanned.
 	localRaw := raw
+	folder := int64(mapi.PrivateFIDInbox)
 	if s.scorer != nil && s.authUser == "" && len(s.targets) > 0 {
 		v := s.scorer.Score(antispam.Input{
 			Raw: raw, ClientIP: clientIP(s.remoteAddr), MailFrom: s.from, FromDomain: fromHeaderDomain(raw),
 		})
 		localRaw = antispam.Tag(raw, v)
+		if v.Spam {
+			folder = int64(mapi.PrivateFIDJunk)
+		}
 		if s.logger != nil {
 			s.logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "spam.scored", RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "score": v.Score, "spam": v.Spam}})
 		}
 	}
 	for _, t := range s.targets {
-		if err := deliver(s.accounts, s.from, t.addr, t.path, localRaw, received); err != nil {
+		if err := deliver(s.accounts, s.from, t.addr, t.path, localRaw, received, folder); err != nil {
 			s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "delivery.fail", User: t.addr, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}, Err: err.Error()})
 			return err
 		}
@@ -408,7 +414,7 @@ func Deliver(accounts directory.Accounts, from string, recipients []string, raw 
 			unresolved = append(unresolved, rcpt)
 			continue
 		}
-		if err := deliver(accounts, from, rcpt, path, raw, received); err != nil {
+		if err := deliver(accounts, from, rcpt, path, raw, received, int64(mapi.PrivateFIDInbox)); err != nil {
 			return unresolved, err
 		}
 	}
@@ -502,22 +508,26 @@ func applyForwards(accounts directory.Accounts, recipients []string) (locals, de
 // is a built-in folder provisioned when the mailbox is created, so it is
 // addressed directly by its fixed id. from is the envelope sender and rcptAddr
 // the address this mailbox was reached at; both feed the out-of-office pass.
-func deliver(accounts directory.Accounts, from, rcptAddr, path string, raw []byte, received time.Time) error {
+func deliver(accounts directory.Accounts, from, rcptAddr, path string, raw []byte, received time.Time, folder int64) error {
 	st, err := objectstore.Open(path)
 	if err != nil {
 		return err
 	}
 	defer st.Close()
 
-	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, received, 0)
+	info, err := st.AppendMessage(folder, raw, received, 0)
 	if err != nil {
 		return err
 	}
-	// The message is delivered the moment it is filed. Inbox rules and the
-	// out-of-office auto-reply then run as best-effort decoration on top of that
-	// successful delivery: any error or panic is logged and swallowed, never
-	// returned, so a misbehaving rule or a failed auto-reply cannot fail delivery
-	// and make the sender retry (which would duplicate the message).
+	// Spam filed to Junk is delivered silently: no inbox rules, no meeting
+	// auto-processing, and — crucially — no out-of-office auto-reply, so the server
+	// never backscatters to a spammer. Those passes run only for normal Inbox
+	// delivery, and there as best-effort decoration: any error or panic is logged
+	// and swallowed, never returned, so a misbehaving rule or a failed auto-reply
+	// cannot fail delivery and make the sender retry (which would duplicate it).
+	if folder != int64(mapi.PrivateFIDInbox) {
+		return nil
+	}
 	applyInboxRules(st, info)
 	// Automatic meeting-request processing runs before the out-of-office pass: when it
 	// answers a meeting request the mailbox must not also emit an OOF reply (the

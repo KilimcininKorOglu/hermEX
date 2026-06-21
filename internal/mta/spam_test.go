@@ -7,6 +7,8 @@ import (
 
 	"hermex/internal/antispam"
 	"hermex/internal/directory"
+	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
 )
 
 // recordingScorer captures the input it was asked to score and returns a fixed
@@ -80,5 +82,51 @@ func TestAuthenticatedSubmissionNotScored(t *testing.T) {
 	}
 	if rec.calls != 0 {
 		t.Errorf("authenticated submission was scored (calls=%d), want 0", rec.calls)
+	}
+}
+
+// TestSpamFiledToJunk proves a message the scorer flags as spam is filed to the
+// Junk folder (not the inbox) and carries the X-Spam tag through the store.
+func TestSpamFiledToJunk(t *testing.T) {
+	mbox := filepath.Join(t.TempDir(), "alice")
+	accounts := directory.StaticAccounts{"alice@test": {MailboxPath: mbox}}
+	b := &Backend{Accounts: accounts, Scorer: &recordingScorer{verdict: antispam.Verdict{Score: 99, Spam: true}}}
+
+	sess, err := b.NewSession("203.0.113.9:1234")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Mail("bob@external.example"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Rcpt("alice@test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Data(strings.NewReader("From: bob@external.example\r\nSubject: spam\r\n\r\nbuy now")); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := objectstore.Open(mbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	junk, err := st.ListMessages(int64(mapi.PrivateFIDJunk))
+	if err != nil {
+		t.Fatal(err)
+	}
+	inbox, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(junk) != 1 || len(inbox) != 0 {
+		t.Fatalf("junk=%d inbox=%d, want the spam in Junk only", len(junk), len(inbox))
+	}
+	raw, err := st.GetMessageRaw(int64(mapi.PrivateFIDJunk), junk[0].UID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "X-Spam-Flag: YES") {
+		t.Errorf("filed spam lost its X-Spam tag through the store round-trip:\n%s", raw)
 	}
 }
