@@ -420,6 +420,90 @@ func (d *SQLDirectory) CreateDomain(domainname, homedir string) (int64, error) {
 	return res.LastInsertId()
 }
 
+// DomainDetail is a domain's full administrative record for the detail/edit view.
+// Status is domain_status (0 = active, 1 = suspended); MaxUser caps the mailbox
+// count (0 = unlimited). The three user counts are derived from the domain's
+// users by their address_status nibble and maildir, matching the reference's
+// active/inactive/virtual split.
+type DomainDetail struct {
+	ID            int64
+	Name          string
+	OrgID         int64
+	Status        int
+	Homedir       string
+	MaxUser       int64
+	Title         string
+	Address       string
+	AdminName     string
+	Tel           string
+	ActiveUsers   int64
+	InactiveUsers int64
+	VirtualUsers  int64
+}
+
+// DomainUpdate carries the editable fields of a domain. Status is domain_status
+// (0 = active, 1 = suspended) and is enforced directly by every authority point;
+// the contact fields are descriptive; MaxUser is enforced at user creation.
+type DomainUpdate struct {
+	Status    int
+	MaxUser   int64
+	Title     string
+	Address   string
+	AdminName string
+	Tel       string
+}
+
+// GetDomain returns a domain's full record plus its active/inactive/virtual user
+// counts, or ok=false when no domain has the id. The counts are derived in the
+// same query from each user's address_status nibble and maildir: active = a
+// normal mailbox (nibble 0 with a maildir); virtual = a shared mailbox or a row
+// with no maildir (lists, contacts); inactive = anything else with a maildir
+// (suspended/deleted users).
+func (d *SQLDirectory) GetDomain(id int64) (DomainDetail, bool, error) {
+	var dd DomainDetail
+	err := d.db.QueryRow(`
+SELECT d.id, d.domainname, d.org_id, d.domain_status, d.homedir,
+       d.max_user, d.title, d.address, d.admin_name, d.tel,
+       COALESCE(SUM(CASE WHEN (u.address_status & 15) = 0 AND u.maildir <> '' THEN 1 ELSE 0 END), 0),
+       COALESCE(SUM(CASE WHEN (u.address_status & 15) NOT IN (0, 4) AND u.maildir <> '' THEN 1 ELSE 0 END), 0),
+       COALESCE(SUM(CASE WHEN (u.address_status & 15) = 4 OR u.maildir = '' THEN 1 ELSE 0 END), 0)
+  FROM domains d LEFT JOIN users u ON u.domain_id = d.id
+ WHERE d.id = ?
+ GROUP BY d.id`, id).Scan(
+		&dd.ID, &dd.Name, &dd.OrgID, &dd.Status, &dd.Homedir,
+		&dd.MaxUser, &dd.Title, &dd.Address, &dd.AdminName, &dd.Tel,
+		&dd.ActiveUsers, &dd.InactiveUsers, &dd.VirtualUsers)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DomainDetail{}, false, nil
+	}
+	if err != nil {
+		return DomainDetail{}, false, err
+	}
+	return dd, true, nil
+}
+
+// UpdateDomain writes a domain's editable fields, reporting whether the domain
+// existed. Setting Status to 1 suspends the domain — login (Authenticate),
+// delivery (IsLocalDomain), and the address-book queries all read domain_status
+// directly, so the change takes effect with no per-user update. Existence is
+// checked first (the UPDATE's affected-row count is 0 for an unchanged row, so it
+// cannot distinguish a missing domain from an idempotent write).
+func (d *SQLDirectory) UpdateDomain(id int64, u DomainUpdate) (bool, error) {
+	var exists int64
+	err := d.db.QueryRow(`SELECT id FROM domains WHERE id = ?`, id).Scan(&exists)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	_, err = d.db.Exec(
+		`UPDATE domains SET domain_status = ?, max_user = ?, title = ?, address = ?, admin_name = ?, tel = ?
+		  WHERE id = ?`,
+		u.Status, u.MaxUser, u.Title, u.Address, u.AdminName, u.Tel, id)
+	return err == nil, err
+}
+
 // CreateUser inserts a mailbox user (username is its e-mail address) with a
 // freshly crypt(3)-hashed password and the given maildir, creating the maildir
 // on disk. The user's domain must already exist.

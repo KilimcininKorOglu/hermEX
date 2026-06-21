@@ -23,6 +23,12 @@ var directoryDDL = []string{
 		UNIQUE KEY name (name)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
+	// domain_status gates the whole domain: 0 = active, 1 = suspended. It is read
+	// directly (the domains row / a JOIN) by every authority point — login
+	// (Authenticate), local-delivery (IsLocalDomain), and the address-book queries
+	// — so setting it suspends the domain everywhere with no per-user fan-out.
+	// max_user caps the domain's mailbox count (0 = unlimited), enforced at user
+	// creation. title/address/admin_name/tel are descriptive contact metadata.
 	`CREATE TABLE IF NOT EXISTS domains (
 		id            INT UNSIGNED NOT NULL AUTO_INCREMENT,
 		org_id        INT UNSIGNED NOT NULL DEFAULT 0,
@@ -30,6 +36,11 @@ var directoryDDL = []string{
 		homeserver    TINYINT UNSIGNED NOT NULL DEFAULT 0,
 		homedir       VARCHAR(255) NOT NULL DEFAULT '',
 		domain_status TINYINT NOT NULL DEFAULT 0,
+		max_user      INT UNSIGNED NOT NULL DEFAULT 0,
+		title         VARCHAR(128) NOT NULL DEFAULT '',
+		address       VARCHAR(128) NOT NULL DEFAULT '',
+		admin_name    VARCHAR(32) NOT NULL DEFAULT '',
+		tel           VARCHAR(64) NOT NULL DEFAULT '',
 		PRIMARY KEY (id),
 		UNIQUE KEY domainname (domainname)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
@@ -258,6 +269,16 @@ var directoryDDL = []string{
 		CONSTRAINT specifieds_list_fk FOREIGN KEY (list_id)
 			REFERENCES mlists (id) ON DELETE CASCADE ON UPDATE CASCADE
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+	// Additive column upgrades for databases created before these columns existed.
+	// CREATE TABLE above carries the canonical definition for a fresh database;
+	// these idempotent ALTERs (MariaDB ADD COLUMN IF NOT EXISTS) bring an existing
+	// domains table up to date without a migration framework. A no-op once applied.
+	`ALTER TABLE domains ADD COLUMN IF NOT EXISTS max_user INT UNSIGNED NOT NULL DEFAULT 0`,
+	`ALTER TABLE domains ADD COLUMN IF NOT EXISTS title VARCHAR(128) NOT NULL DEFAULT ''`,
+	`ALTER TABLE domains ADD COLUMN IF NOT EXISTS address VARCHAR(128) NOT NULL DEFAULT ''`,
+	`ALTER TABLE domains ADD COLUMN IF NOT EXISTS admin_name VARCHAR(32) NOT NULL DEFAULT ''`,
+	`ALTER TABLE domains ADD COLUMN IF NOT EXISTS tel VARCHAR(64) NOT NULL DEFAULT ''`,
 }
 
 // address_status packing: low nibble = user status, bits 4-5 = domain status.
