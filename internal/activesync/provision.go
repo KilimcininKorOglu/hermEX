@@ -3,6 +3,7 @@ package activesync
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"hermex/internal/easpolicy"
 	"hermex/internal/objectstore"
@@ -61,15 +62,28 @@ type defaultSyncPolicyProvider interface {
 	GetDefaultSyncPolicy() (easpolicy.Policy, error)
 }
 
-// devicePolicy resolves the policy a device must be served: the server-wide default
-// (when the directory provides one) with the mailbox's per-user override merged on top.
-// A missing layer simply contributes nothing, so an unconfigured server serves no
-// policy. Errors are swallowed to a less-restrictive policy rather than failing
-// provisioning, which would lock the device out of mail entirely.
+// domainSyncPolicyProvider is the optional directory capability for a domain's
+// device-policy override — the middle inheritance layer between the server default
+// and the per-user override. The concrete SQLDirectory satisfies it.
+type domainSyncPolicyProvider interface {
+	GetDomainSyncPolicy(domain string) (easpolicy.Policy, error)
+}
+
+// devicePolicy resolves the policy a device must be served by merging three layers
+// in order of increasing specificity: the server-wide default, the user's domain
+// override, and the mailbox's per-user override. A missing layer contributes
+// nothing, so an unconfigured server serves no policy. Errors are swallowed to a
+// less-restrictive policy rather than failing provisioning, which would lock the
+// device out of mail entirely.
 func (s *Server) devicePolicy(sess *session) easpolicy.Policy {
-	var def easpolicy.Policy
+	var def, dom easpolicy.Policy
 	if p, ok := s.accounts.(defaultSyncPolicyProvider); ok {
 		def, _ = p.GetDefaultSyncPolicy()
+	}
+	if p, ok := s.accounts.(domainSyncPolicyProvider); ok {
+		if at := strings.LastIndexByte(sess.user, '@'); at >= 0 {
+			dom, _ = p.GetDomainSyncPolicy(sess.user[at+1:])
+		}
 	}
 	var override easpolicy.Policy
 	if sess.mailbox != "" {
@@ -78,7 +92,7 @@ func (s *Server) devicePolicy(sess *session) easpolicy.Policy {
 			st.Close()
 		}
 	}
-	return easpolicy.Merge(def, override)
+	return easpolicy.Merge(easpolicy.Merge(def, dom), override)
 }
 
 // handleProvision answers the two-phase EAS provisioning handshake. Phase one

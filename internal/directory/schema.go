@@ -41,6 +41,7 @@ var directoryDDL = []string{
 		address       VARCHAR(128) NOT NULL DEFAULT '',
 		admin_name    VARCHAR(32) NOT NULL DEFAULT '',
 		tel           VARCHAR(64) NOT NULL DEFAULT '',
+		sync_policy   TEXT,
 		PRIMARY KEY (id),
 		UNIQUE KEY domainname (domainname)
 	) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
@@ -279,6 +280,7 @@ var directoryDDL = []string{
 	`ALTER TABLE domains ADD COLUMN IF NOT EXISTS address VARCHAR(128) NOT NULL DEFAULT ''`,
 	`ALTER TABLE domains ADD COLUMN IF NOT EXISTS admin_name VARCHAR(32) NOT NULL DEFAULT ''`,
 	`ALTER TABLE domains ADD COLUMN IF NOT EXISTS tel VARCHAR(64) NOT NULL DEFAULT ''`,
+	`ALTER TABLE domains ADD COLUMN IF NOT EXISTS sync_policy TEXT`,
 }
 
 // address_status packing: low nibble = user status, bits 4-5 = domain status.

@@ -3,6 +3,8 @@ package directory
 import (
 	"path/filepath"
 	"testing"
+
+	"hermex/internal/easpolicy"
 )
 
 // TestDomainDetailAndCounts proves GetDomain returns a domain's editable fields
@@ -150,6 +152,50 @@ func TestCreateUserMaxUser(t *testing.T) {
 	}
 	if _, err := d.CreateUser("u3@acme.test", "pw", filepath.Join(root, "u3")); err != nil {
 		t.Errorf("create after clearing the cap blocked: %v", err)
+	}
+}
+
+// TestDomainSyncPolicyRoundTrip proves a domain's device-policy override round-trips
+// by domain name, that an empty policy clears it, and that an unknown domain is
+// reported as not found.
+func TestDomainSyncPolicyRoundTrip(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	cleanTables(t, db)
+	root := t.TempDir()
+
+	if _, err := d.CreateDomain("acme.test", filepath.Join(root, "acme.test")); err != nil {
+		t.Fatal(err)
+	}
+
+	// No override yet.
+	if p, err := d.GetDomainSyncPolicy("acme.test"); err != nil || p != nil {
+		t.Fatalf("initial GetDomainSyncPolicy = %v, %v, want nil/nil", p, err)
+	}
+
+	// Set, read back.
+	if ok, err := d.SetDomainSyncPolicy("acme.test", easpolicy.Policy{"DevicePasswordEnabled": 1}); err != nil || !ok {
+		t.Fatalf("SetDomainSyncPolicy = %v, %v", ok, err)
+	}
+	got, err := d.GetDomainSyncPolicy("acme.test")
+	if err != nil || got["DevicePasswordEnabled"] != 1 {
+		t.Fatalf("GetDomainSyncPolicy = %v, %v, want the stored field", got, err)
+	}
+
+	// Clearing removes the override.
+	if ok, err := d.SetDomainSyncPolicy("acme.test", easpolicy.Policy{}); err != nil || !ok {
+		t.Fatalf("clear = %v, %v", ok, err)
+	}
+	if p, err := d.GetDomainSyncPolicy("acme.test"); err != nil || p != nil {
+		t.Errorf("after clear GetDomainSyncPolicy = %v, %v, want nil/nil", p, err)
+	}
+
+	// Unknown domain.
+	if ok, err := d.SetDomainSyncPolicy("ghost.test", easpolicy.Policy{"DevicePasswordEnabled": 1}); err != nil || ok {
+		t.Errorf("SetDomainSyncPolicy(unknown) = %v, %v, want false/nil", ok, err)
 	}
 }
 
