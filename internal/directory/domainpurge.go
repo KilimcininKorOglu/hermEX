@@ -78,6 +78,9 @@ func (d *SQLDirectory) PurgeDomain(domainID int64, deleteFiles bool) (bool, erro
 		PermDomainAdmin, PermDomainAdminRO, strconv.FormatInt(domainID, 10)); err != nil {
 		return false, err
 	}
+	if _, err := tx.Exec(`DELETE FROM create_defaults WHERE scope_id = ?`, domainID); err != nil {
+		return false, err
+	}
 	if _, err := tx.Exec(`DELETE FROM domains WHERE id = ?`, domainID); err != nil {
 		return false, err
 	}

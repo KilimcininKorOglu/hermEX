@@ -52,6 +52,26 @@
 <button type="submit">Save device policy</button>
 </form>
 
+<h2>User create defaults (override)</h2>
+<p class="hint">Overrides the system create-defaults for new users in this domain. Leave a field on "Inherit" to use the system value.</p>
+<form class="defaults-form" hx-put="/admin/ui/domains/{{.Domain.ID}}/createdefaults" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Language <input type="text" name="lang" value="{{.Override.Lang}}" placeholder="(inherit)"></label>
+{{with .Override}}
+<label>POP3/IMAP <select name="pop3_imap"><option value="">Inherit</option><option value="1"{{if eq .POP3IMAP "1"}} selected{{end}}>Yes</option><option value="0"{{if eq .POP3IMAP "0"}} selected{{end}}>No</option></select></label>
+<label>SMTP <select name="smtp"><option value="">Inherit</option><option value="1"{{if eq .SMTP "1"}} selected{{end}}>Yes</option><option value="0"{{if eq .SMTP "0"}} selected{{end}}>No</option></select></label>
+<label>Change password <select name="chgpasswd"><option value="">Inherit</option><option value="1"{{if eq .ChgPasswd "1"}} selected{{end}}>Yes</option><option value="0"{{if eq .ChgPasswd "0"}} selected{{end}}>No</option></select></label>
+<label>Web <select name="web"><option value="">Inherit</option><option value="1"{{if eq .Web "1"}} selected{{end}}>Yes</option><option value="0"{{if eq .Web "0"}} selected{{end}}>No</option></select></label>
+<label>EAS <select name="eas"><option value="">Inherit</option><option value="1"{{if eq .EAS "1"}} selected{{end}}>Yes</option><option value="0"{{if eq .EAS "0"}} selected{{end}}>No</option></select></label>
+<label>DAV <select name="dav"><option value="">Inherit</option><option value="1"{{if eq .DAV "1"}} selected{{end}}>Yes</option><option value="0"{{if eq .DAV "0"}} selected{{end}}>No</option></select></label>
+{{end}}
+<label>Storage quota (MiB) <input type="number" name="storagemb" min="0" value="{{.Override.StorageMB}}" placeholder="(inherit)"></label>
+<label>Receive quota (MiB) <input type="number" name="receivemb" min="0" value="{{.Override.ReceiveMB}}" placeholder="(inherit)"></label>
+<label>Send quota (MiB) <input type="number" name="sendmb" min="0" value="{{.Override.SendMB}}" placeholder="(inherit)"></label>
+<button type="submit">Save override</button>
+</form>
+<div id="user-status"></div>
+
 <h2>DNS health</h2>
 <p class="hint">Resolves this domain's live mail-related DNS records (read-only).</p>
 <button hx-get="/admin/ui/domains/{{.Domain.ID}}/dnscheck" hx-target="#dns-report" hx-swap="innerHTML">Check DNS</button>

@@ -45,6 +45,34 @@ func TestCreateDefaultsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestPurgeDomainClearsCreateDefaults proves a domain purge removes its per-domain
+// create-defaults override row.
+func TestPurgeDomainClearsCreateDefaults(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	cleanTables(t, db)
+
+	id, err := d.CreateDomain("acme.test", t.TempDir()+"/acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetCreateDefaults(id, CreateDefaults{User: UserCreateDefaults{Web: new(false)}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, _ := d.GetCreateDefaults(id); !ok {
+		t.Fatal("override not stored")
+	}
+	if ok, err := d.PurgeDomain(id, false); err != nil || !ok {
+		t.Fatalf("PurgeDomain = %v, %v", ok, err)
+	}
+	if _, ok, _ := d.GetCreateDefaults(id); ok {
+		t.Error("create-defaults override survived the domain purge")
+	}
+}
+
 // TestEffectiveUserDefaults proves the three-layer resolution: the built-in
 // baseline, the system layer over it, and the per-domain override on top, merged
 // field by field. It also proves clearing a domain override falls back to system.

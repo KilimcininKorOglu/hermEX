@@ -92,9 +92,11 @@ func (s *Server) handleUIDomainDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	orgs, _ := s.dir.ListOrgs()
 	policy, _ := s.dir.GetDomainSyncPolicy(dd.Name)
+	override, _, _ := s.dir.GetCreateDefaults(dd.ID)
 	s.render(w, "domain_detail.html", map[string]any{
 		"Nav": "domains", "CSRF": csrfCookieValue(r), "Domain": dd, "Orgs": orgs,
 		"PolicyFields": policyView(policy),
+		"Override":     userOverrideViewOf(override.User),
 	})
 }
 

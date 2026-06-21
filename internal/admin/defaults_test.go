@@ -35,6 +35,92 @@ func TestAdminDefaultsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestAdminDomainDefaultsRoundTrip proves the per-domain override stores and reads
+// back, and that an empty override clears the row (fall back to system).
+func TestAdminDomainDefaultsRoundTrip(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		domainDetail: directory.DomainDetail{ID: 3, Name: "acme.test"},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedReq(t, ts, "PUT", "/admin/domains/3/createdefaults", session, csrf, `{"lang":"tr","web":false}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("set domain defaults status %d, want 204", resp.StatusCode)
+	}
+	got := d.createDefaults[3].User
+	if got.Lang == nil || *got.Lang != "tr" || got.Web == nil || *got.Web {
+		t.Errorf("stored override = %+v, want lang tr / web false", got)
+	}
+
+	get := authedGET(t, ts, "/admin/domains/3/createdefaults", session)
+	body, _ := io.ReadAll(get.Body)
+	get.Body.Close()
+	if !strings.Contains(string(body), `"web":false`) || !strings.Contains(string(body), `"lang":"tr"`) {
+		t.Errorf("get override body = %s, want the stored values", body)
+	}
+
+	// An empty override clears the row.
+	clr := authedReq(t, ts, "PUT", "/admin/domains/3/createdefaults", session, csrf, `{}`)
+	clr.Body.Close()
+	if clr.StatusCode != http.StatusNoContent {
+		t.Fatalf("clear override status %d, want 204", clr.StatusCode)
+	}
+	if d.deletedCreateDefaultsScope != 3 {
+		t.Errorf("empty override deleted scope %d, want 3", d.deletedCreateDefaultsScope)
+	}
+}
+
+// TestUISaveDomainDefaults proves the detail-page override form stores the tri-state
+// override (a set toggle, the rest inherited).
+func TestUISaveDomainDefaults(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	resp := htmxPUT(t, ts, "/admin/ui/domains/3/createdefaults", session, csrf,
+		url.Values{"lang": {"tr"}, "web": {"0"}, "smtp": {""}})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save override status %d, want 200", resp.StatusCode)
+	}
+	got := d.createDefaults[3].User
+	if got.Lang == nil || *got.Lang != "tr" || got.Web == nil || *got.Web {
+		t.Errorf("override = %+v, want lang tr / web false", got)
+	}
+	if got.SMTP != nil {
+		t.Errorf("SMTP set to %v, want inherit (nil)", got.SMTP)
+	}
+	if !strings.Contains(string(body), `class="ok"`) {
+		t.Errorf("save response = %s, want a success acknowledgement", body)
+	}
+}
+
+// TestUIDomainDetailShowsOverride proves the override section pre-fills a stored
+// per-domain toggle.
+func TestUIDomainDetailShowsOverride(t *testing.T) {
+	webOff := false
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		domainDetail:   directory.DomainDetail{ID: 3, Name: "acme.test"},
+		createDefaults: map[int64]directory.CreateDefaults{3: {User: directory.UserCreateDefaults{Web: &webOff}}},
+	}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+	resp := authedGET(t, ts, "/admin/ui/domains/3", session)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("domain detail status %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "User create defaults") ||
+		!strings.Contains(string(body), `<option value="0" selected>No</option>`) {
+		t.Errorf("override section did not reflect web=No:\n%s", body)
+	}
+}
+
 // TestUIDefaultsPage proves the editor pre-fills the stored max-users default and
 // the effective user defaults.
 func TestUIDefaultsPage(t *testing.T) {
