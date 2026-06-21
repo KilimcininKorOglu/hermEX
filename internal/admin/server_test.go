@@ -491,6 +491,19 @@ func (f *fakeDir) SetSpecifieds(listname string, senders []string) (bool, error)
 	return !f.mlistMissing, nil
 }
 func (f *fakeDir) ListContacts() ([]directory.ContactInfo, error) { return f.contacts, nil }
+func (f *fakeDir) ListUsersInDomain(domainID int64) ([]directory.UserInfo, error) {
+	var out []directory.UserInfo
+	for _, u := range f.users {
+		if u.DomainID == domainID {
+			out = append(out, u)
+		}
+	}
+	return out, nil
+}
+func (f *fakeDir) ListContactsInDomain(int64) ([]directory.ContactInfo, error) {
+	return f.contacts, nil
+}
+func (f *fakeDir) ListMListsInDomain(int64) ([]directory.MListInfo, error) { return f.mlists, nil }
 func (f *fakeDir) CreateContact(email, displayName, domain string) (int64, error) {
 	if f.createErr != nil {
 		return 0, f.createErr

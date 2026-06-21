@@ -37,6 +37,33 @@
 <tbody><tr><td>{{.Domain.ActiveUsers}}</td><td>{{.Domain.InactiveUsers}}</td><td>{{.Domain.VirtualUsers}}</td></tr></tbody>
 </table>
 
+<h2>Users</h2>
+<table class="grid">
+<thead><tr><th>Username</th></tr></thead>
+<tbody>
+{{range .DomainUsers}}<tr><td>{{.Username}}</td></tr>
+{{else}}<tr><td class="empty">No users.</td></tr>{{end}}
+</tbody>
+</table>
+
+<h2>Contacts</h2>
+<table class="grid">
+<thead><tr><th>Address</th><th>Display name</th></tr></thead>
+<tbody>
+{{range .DomainContacts}}<tr><td>{{.Address}}</td><td>{{.DisplayName}}</td></tr>
+{{else}}<tr><td colspan="2" class="empty">No contacts.</td></tr>{{end}}
+</tbody>
+</table>
+
+<h2>Groups</h2>
+<table class="grid">
+<thead><tr><th>Address</th></tr></thead>
+<tbody>
+{{range .DomainGroups}}<tr><td>{{.Listname}}</td></tr>
+{{else}}<tr><td class="empty">No groups.</td></tr>{{end}}
+</tbody>
+</table>
+
 <h2>Device policy</h2>
 <p class="hint">Overrides the server default for this domain's devices; a per-user override is merged on top. Leave a field unset to inherit. Password rules apply only when DevicePasswordEnabled is Yes.</p>
 <form class="syncpolicy-form" hx-put="/admin/ui/domains/{{.Domain.ID}}/syncpolicy" hx-target="#user-status" hx-swap="outerHTML"

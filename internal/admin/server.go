@@ -33,6 +33,7 @@ type Directory interface {
 	DeleteRole(id int64) (bool, error)
 	ListDomains() ([]directory.DomainInfo, error)
 	ListUsers() ([]directory.UserInfo, error)
+	ListUsersInDomain(domainID int64) ([]directory.UserInfo, error)
 	ListAliases() ([]directory.AliasInfo, error)
 	CreateDomain(domainname, homedir string) (int64, error)
 	GetDomain(id int64) (directory.DomainDetail, bool, error)
@@ -53,6 +54,7 @@ type Directory interface {
 	SetUserProperties(username string, props map[uint32]string) (bool, error)
 	CreateAlias(aliasname, mainname string) error
 	ListMLists() ([]directory.MListInfo, error)
+	ListMListsInDomain(domainID int64) ([]directory.MListInfo, error)
 	CreateMList(listname string, listType, listPriv int) (int64, error)
 	DeleteMList(listname string) (bool, error)
 	ListMembers(listname string) ([]string, error)
@@ -60,6 +62,7 @@ type Directory interface {
 	ListSpecifieds(listname string) ([]string, error)
 	SetSpecifieds(listname string, senders []string) (bool, error)
 	ListContacts() ([]directory.ContactInfo, error)
+	ListContactsInDomain(domainID int64) ([]directory.ContactInfo, error)
 	CreateContact(email, displayName, domain string) (int64, error)
 	UpdateContact(email, displayName string) (bool, error)
 	DeleteContact(email string) (bool, error)
