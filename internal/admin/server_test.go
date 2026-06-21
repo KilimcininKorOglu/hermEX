@@ -755,6 +755,18 @@ func adminServerStore(t *testing.T, d Directory, store MailboxStore) *httptest.S
 	return ts
 }
 
+// adminServerDNS builds a server with a scripted DNS resolver for the health-check
+// tests.
+func adminServerDNS(t *testing.T, d Directory, resolver dnsResolver) *httptest.Server {
+	t.Helper()
+	srv := NewServer(d, fakePaths{root: t.TempDir()}, []byte("test-secret"))
+	srv.store = &fakeStore{}
+	srv.resolver = resolver
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	return ts
+}
+
 func login(t *testing.T, ts *httptest.Server) (*http.Response, string) {
 	t.Helper()
 	resp, err := http.Post(ts.URL+"/admin/login", "application/json",

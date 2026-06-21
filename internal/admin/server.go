@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"net"
 	"net/http"
 	"time"
 
@@ -111,12 +112,13 @@ type ctxKey struct{}
 
 // Server answers the admin API. Build one with NewServer.
 type Server struct {
-	dir    Directory
-	paths  Paths
-	secret []byte
-	logs   LogReader
-	syncer LDAPSyncer
-	store  MailboxStore
+	dir      Directory
+	paths    Paths
+	secret   []byte
+	logs     LogReader
+	syncer   LDAPSyncer
+	store    MailboxStore
+	resolver dnsResolver
 }
 
 // NewServer builds an admin server backed by the directory, deriving new
@@ -124,7 +126,7 @@ type Server struct {
 // mailbox store opens each user's object store on demand for the store-backed
 // tabs (out-of-office).
 func NewServer(dir Directory, paths Paths, secret []byte) *Server {
-	return &Server{dir: dir, paths: paths, secret: secret, store: mailboxStore{}}
+	return &Server{dir: dir, paths: paths, secret: secret, store: mailboxStore{}, resolver: net.DefaultResolver}
 }
 
 // SetLogReader attaches a log store reader, enabling the log viewer.
@@ -178,6 +180,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /admin/syncpolicy", s.protect(s.requireSystem(s.handleSetDefaultSyncPolicy)))
 	mux.Handle("GET /admin/domains/{domainID}/syncpolicy", s.protect(s.requireSystem(s.handleGetDomainSyncPolicy)))
 	mux.Handle("PUT /admin/domains/{domainID}/syncpolicy", s.protect(s.requireSystem(s.handleSetDomainSyncPolicy)))
+	mux.Handle("GET /admin/domains/{domainID}/dnscheck", s.protect(s.requireSystem(s.handleGetDomainDNS)))
 	mux.Handle("GET /admin/users/{email}/fetchmail", s.protect(s.requireUserScope(s.handleListUserFetchmail)))
 	mux.Handle("POST /admin/users/{email}/fetchmail", s.protect(s.requireUserScope(s.handleCreateUserFetchmail)))
 	mux.Handle("DELETE /admin/users/{email}/fetchmail/{id}", s.protect(s.requireUserScope(s.handleDeleteUserFetchmail)))
@@ -260,6 +263,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/ui/domains/{domainID}", s.handleUIDomainDetail)
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}", s.handleUISaveDomain)
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/syncpolicy", s.handleUISaveDomainSyncPolicy)
+	mux.HandleFunc("GET /admin/ui/domains/{domainID}/dnscheck", s.handleUIDomainDNS)
 	mux.HandleFunc("POST /admin/ui/domains/{domainID}/purge", s.handleUIPurgeDomain)
 	mux.HandleFunc("GET /admin/ui/aliases", s.handleUIAliases)
 	mux.HandleFunc("POST /admin/ui/aliases", s.handleUICreateAlias)

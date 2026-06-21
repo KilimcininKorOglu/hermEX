@@ -52,6 +52,11 @@
 <button type="submit">Save device policy</button>
 </form>
 
+<h2>DNS health</h2>
+<p class="hint">Resolves this domain's live mail-related DNS records (read-only).</p>
+<button hx-get="/admin/ui/domains/{{.Domain.ID}}/dnscheck" hx-target="#dns-report" hx-swap="innerHTML">Check DNS</button>
+<div id="dns-report"></div>
+
 <h2>Delete</h2>
 <form class="delete-form" hx-post="/admin/ui/domains/{{.Domain.ID}}/purge"
       hx-confirm="Purge {{.Domain.Name}}? This permanently removes the domain and every user, alias, and list in it."
@@ -63,3 +68,11 @@
 </main>
 </div>
 {{template "foot" .}}{{end}}
+
+{{define "dns-report"}}<table class="grid">
+<thead><tr><th>Record</th><th>Status</th><th>Detail</th></tr></thead>
+<tbody>
+{{range .Items}}<tr><td>{{.Label}}</td><td>{{if .OK}}<span class="ok">OK</span>{{else}}<span class="error">missing</span>{{end}}</td><td>{{.Detail}}</td></tr>
+{{end}}
+</tbody>
+</table>{{end}}
