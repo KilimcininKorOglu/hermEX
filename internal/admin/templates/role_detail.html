@@ -1,0 +1,51 @@
+{{define "role_detail.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>Role: {{.Role.Name}}</h1>
+<p><a href="/admin/ui/roles">&larr; Back to roles</a></p>
+{{template "role-editor" .}}
+
+<h2>Delete</h2>
+<form class="delete-form" hx-post="/admin/ui/roles/{{.Role.ID}}/delete" hx-confirm="Delete role {{.Role.Name}}? Users lose the permissions it grants."
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<button type="submit" class="danger">Delete role</button>
+</form>
+</main>
+</div>
+{{template "foot" .}}{{end}}
+
+{{define "role-editor"}}<div id="role-editor">
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if .Saved}}<p class="ok">Saved.</p>{{end}}
+<form hx-put="/admin/ui/roles/{{.Role.ID}}" hx-target="#role-editor" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Name <input type="text" name="name" value="{{.Role.Name}}" maxlength="64" required></label>
+<label>Description <input type="text" name="description" value="{{.Role.Description}}"></label>
+
+<h3>Capabilities</h3>
+{{range .Caps}}<label class="check"><input type="checkbox" name="cap" value="{{.Name}}"{{if .Checked}} checked{{end}}> {{.Label}}</label>
+{{end}}
+
+<h3>Organization administrator</h3>
+{{range .OrgAdmin}}<label class="check"><input type="checkbox" name="orgadmin" value="{{.ID}}"{{if .Checked}} checked{{end}}> {{.Label}}</label>
+{{end}}
+
+<h3>Domain administrator</h3>
+{{range .DomainAdmin}}<label class="check"><input type="checkbox" name="domainadmin" value="{{.ID}}"{{if .Checked}} checked{{end}}> {{.Label}}</label>
+{{end}}
+
+<h3>Domain administrator (read-only)</h3>
+{{range .DomainRO}}<label class="check"><input type="checkbox" name="domainadminro" value="{{.ID}}"{{if .Checked}} checked{{end}}> {{.Label}}</label>
+{{end}}
+
+<h3>Assigned users</h3>
+<select name="user" multiple size="6">
+{{range .Users}}<option value="{{.ID}}"{{if .Assigned}} selected{{end}}>{{.Label}}</option>
+{{else}}<option disabled>No users yet</option>
+{{end}}
+</select>
+
+<button type="submit">Save role</button>
+</form>
+</div>{{end}}
