@@ -17,6 +17,7 @@ import (
 	"hermex/internal/config"
 	"hermex/internal/dav"
 	"hermex/internal/directory"
+	"hermex/internal/health"
 	"hermex/internal/ldapauth"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
@@ -59,7 +60,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log.Printf("hermex-dav listening on %s", addr)
-	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, logClose, db.Close); err != nil {
+	comps := append([]lifecycle.Component{hs},
+		health.Components(cfg.HealthAddr, "dav", health.Check{Name: "directory", Probe: db.PingContext})...)
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-dav: %v", err)
 	}
 }

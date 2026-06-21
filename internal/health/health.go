@@ -9,6 +9,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"hermex/internal/lifecycle"
 )
 
 // Check is an optional readiness probe — typically a database ping — that reports
@@ -81,3 +83,15 @@ func (c *component) Start() error { return c.srv.ListenAndServe() }
 
 // Shutdown gracefully stops the health listener within ctx's deadline.
 func (c *component) Shutdown(ctx context.Context) error { return c.srv.Shutdown(ctx) }
+
+// Components is the daemon-main convenience: it returns the health component for
+// service on addr when addr is non-empty, or nil when health is disabled, so a
+// main can append it to its lifecycle components in one line. Uptime is measured
+// from this call, which a main makes at startup. checks are the daemon's
+// readiness probes (typically a directory database ping).
+func Components(addr, service string, checks ...Check) []lifecycle.Component {
+	if addr == "" {
+		return nil
+	}
+	return []lifecycle.Component{Component(addr, Handler(service, "", time.Now(), checks...))}
+}

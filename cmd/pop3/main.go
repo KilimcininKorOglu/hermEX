@@ -16,6 +16,7 @@ import (
 
 	"hermex/internal/config"
 	"hermex/internal/directory"
+	"hermex/internal/health"
 	"hermex/internal/ldapauth"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
@@ -78,7 +79,9 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{srv}, logClose, db.Close); err != nil {
+	comps := append([]lifecycle.Component{srv},
+		health.Components(cfg.HealthAddr, "pop3", health.Check{Name: "directory", Probe: db.PingContext})...)
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-pop3: %v", err)
 	}
 }

@@ -72,6 +72,18 @@ func TestHandlerDegraded(t *testing.T) {
 	}
 }
 
+// TestComponents proves the daemon-main helper is opt-in: an empty address
+// disables health (nil, so nothing is added to the daemon), a set address yields
+// exactly one component.
+func TestComponents(t *testing.T) {
+	if c := Components("", "imap"); c != nil {
+		t.Errorf("Components(\"\") = %v, want nil (disabled)", c)
+	}
+	if c := Components("127.0.0.1:0", "imap"); len(c) != 1 {
+		t.Errorf("Components(addr) = %d components, want 1", len(c))
+	}
+}
+
 // TestComponentServesAndStops proves the component actually serves /healthz on a
 // listener and then shuts down cleanly.
 func TestComponentServesAndStops(t *testing.T) {

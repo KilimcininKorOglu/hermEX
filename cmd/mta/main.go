@@ -19,6 +19,7 @@ import (
 
 	"hermex/internal/config"
 	"hermex/internal/directory"
+	"hermex/internal/health"
 	"hermex/internal/ldapauth"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
@@ -168,7 +169,9 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{srv, sendLater, relayLoop}, spool.Close, logClose, db.Close); err != nil {
+	comps := append([]lifecycle.Component{srv, sendLater, relayLoop},
+		health.Components(cfg.HealthAddr, "mta", health.Check{Name: "directory", Probe: db.PingContext})...)
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, spool.Close, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-mta: %v", err)
 	}
 }

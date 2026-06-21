@@ -23,6 +23,7 @@ import (
 
 	"hermex/internal/config"
 	"hermex/internal/gateway"
+	"hermex/internal/health"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/serve"
@@ -84,7 +85,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log.Printf("hermex-gateway listening on %s", addr)
-	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, logClose); err != nil {
+	comps := append([]lifecycle.Component{hs},
+		health.Components(env("HERMEX_HEALTH_ADDR", ""), "gateway")...)
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, logClose); err != nil {
 		log.Fatalf("hermex-gateway: %v", err)
 	}
 }

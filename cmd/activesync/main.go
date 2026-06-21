@@ -19,6 +19,7 @@ import (
 	"hermex/internal/activesync"
 	"hermex/internal/config"
 	"hermex/internal/directory"
+	"hermex/internal/health"
 	"hermex/internal/ldapauth"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
@@ -73,7 +74,9 @@ func main() {
 	defer stop()
 	go purgeSessionsLoop(ctx, dir, logger)
 	log.Printf("hermex-activesync listening on %s", addr)
-	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, spool.Close, logClose, db.Close); err != nil {
+	comps := append([]lifecycle.Component{hs},
+		health.Components(cfg.HealthAddr, "activesync", health.Check{Name: "directory", Probe: db.PingContext})...)
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, spool.Close, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-activesync: %v", err)
 	}
 }

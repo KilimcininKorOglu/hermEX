@@ -17,6 +17,7 @@ import (
 	"hermex/internal/config"
 	"hermex/internal/directory"
 	"hermex/internal/ews"
+	"hermex/internal/health"
 	"hermex/internal/ldapauth"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
@@ -70,7 +71,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log.Printf("hermex-ews listening on %s", addr)
-	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, spool.Close, logClose, db.Close); err != nil {
+	comps := append([]lifecycle.Component{hs},
+		health.Components(cfg.HealthAddr, "ews", health.Check{Name: "directory", Probe: db.PingContext})...)
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, spool.Close, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-ews: %v", err)
 	}
 }

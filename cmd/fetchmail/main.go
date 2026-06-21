@@ -19,6 +19,7 @@ import (
 	"hermex/internal/config"
 	"hermex/internal/directory"
 	"hermex/internal/fetchmail"
+	"hermex/internal/health"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/mta"
@@ -73,7 +74,9 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{worker}, logClose, db.Close); err != nil {
+	comps := append([]lifecycle.Component{worker},
+		health.Components(cfg.HealthAddr, "fetchmail", health.Check{Name: "directory", Probe: db.PingContext})...)
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-fetchmail: %v", err)
 	}
 }
