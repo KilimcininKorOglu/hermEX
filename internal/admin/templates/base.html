@@ -31,6 +31,7 @@
 <a href="/admin/ui/public-folders" class="{{if eq .Nav "publicfolders"}}active{{end}}">Public folders</a>
 <a href="/admin/ui/mailq" class="{{if eq .Nav "mailq"}}active{{end}}">Mail queue</a>
 <a href="/admin/ui/status" class="{{if eq .Nav "status"}}active{{end}}">Live status</a>
+<a href="/admin/ui/taskq" class="{{if eq .Nav "taskq"}}active{{end}}">Task queue</a>
 </nav>
 <form class="logout" method="post" action="/admin/ui/logout">
 <input type="hidden" name="_csrf" value="{{.CSRF}}">

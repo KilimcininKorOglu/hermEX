@@ -1,0 +1,29 @@
+{{define "taskq.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>Task queue</h1>
+<p class="hint">Long-running admin operations (such as a directory sync) run here in the background. The table refreshes automatically.</p>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<div id="taskq-panel" hx-get="/admin/ui/taskq/panel" hx-trigger="every 5s" hx-swap="innerHTML">{{template "taskq-panel" .}}</div>
+</main>
+</div>
+{{template "foot" .}}{{end}}
+
+{{define "taskq-panel"}}
+<table class="grid">
+<thead><tr><th>ID</th><th>Type</th><th>Status</th><th>By</th><th>Queued</th><th>Updated</th><th>Result</th></tr></thead>
+<tbody>
+{{range .Tasks}}<tr>
+<td>{{.ID}}</td>
+<td>{{.Type}}</td>
+<td>{{.Status}}</td>
+<td>{{.CreatedBy}}</td>
+<td>{{.Created}}</td>
+<td>{{.Updated}}</td>
+<td><small>{{.Message}}</small></td>
+</tr>
+{{else}}<tr><td colspan="7" class="empty">No tasks.</td></tr>{{end}}
+</tbody>
+</table>
+{{end}}
