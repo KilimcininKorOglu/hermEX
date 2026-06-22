@@ -73,8 +73,9 @@ func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostna
 	// RPC/HTTP (Outlook Anywhere) shares the directory and HTTP Basic auth; the
 	// EMSMDB store interface and the NSPI address-book interface are registered on
 	// its DCE/RPC dispatcher. NSPI reuses the same GAL-backed server the MAPI/HTTP
-	// endpoint drives; the adapter discards the transport session because the GAL
-	// is global to every authenticated caller.
+	// endpoint drives; the GAL is global to every authenticated caller, so the
+	// adapter passes only the transport session's identity through to central
+	// logging (the dispatch itself needs no per-session state).
 	ems := rpchttp.NewEMSMDB(accounts)
 	ems.Spool = spool // external recipients of RPC/HTTP submissions are relayed
 	disp := rpchttp.NewDispatcher()
@@ -82,8 +83,26 @@ func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostna
 	// The AsyncEMSMDB interface carries the EcDoAsyncWaitEx notification long-poll;
 	// it shares the EMSMDB sessions, resolving its async handle to one by the GUID.
 	disp.Register(rpchttp.AsyncEMSMDBUUID, rpchttp.AsyncEMSMDBVersion, rpchttp.NewAsyncEMSMDB(ems).Handle)
-	disp.Register(nspi.RPCInterfaceUUID, nspi.RPCInterfaceVersion, func(_ *rpchttp.Session, opnum uint16, stub []byte) ([]byte, uint32) {
-		return s.nsp.DispatchRPC(opnum, stub)
+	disp.Register(nspi.RPCInterfaceUUID, nspi.RPCInterfaceVersion, func(sess *rpchttp.Session, opnum uint16, stub []byte) ([]byte, uint32) {
+		out, fault := s.nsp.DispatchRPC(opnum, stub)
+		user, addr := "", ""
+		if sess != nil {
+			user, addr = sess.User, sess.RemoteAddr
+		}
+		// Mirror the MAPI/HTTP NSPI path (see nspi.go): a per-op "operation" event at
+		// debug, escalated to warn on an RPC fault. This fills the gap on the RPC/HTTP
+		// (Outlook Anywhere) transport, whose shared /rpc POST hides the NSPI op from
+		// the HTTP access log.
+		level := logging.LevelDebug
+		f := logging.Fields{"op": nspi.OperationName(opnum)}
+		if fault != 0 {
+			level, f["fault"] = logging.LevelWarn, fault
+		}
+		s.Logger.Emit(logging.Event{
+			Level: level, Subsystem: logging.NSPI, Name: "operation",
+			User: user, RemoteAddr: addr, Fields: f,
+		})
+		return out, fault
 	})
 	// The address-book referral interface points a client at this host as its
 	// directory server, so a desktop Outlook that queries it first finds the NSPI

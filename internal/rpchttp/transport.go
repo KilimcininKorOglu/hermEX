@@ -16,6 +16,7 @@ import (
 	"sync"
 
 	"hermex/internal/ndr"
+	"hermex/internal/serve"
 )
 
 // Authenticator authenticates an HTTP request (Basic), writing the challenge
@@ -98,7 +99,7 @@ func (s *Server) serveOut(w http.ResponseWriter, r *http.Request, user, mailbox 
 		return
 	}
 	key := vconnKey(ck[0], host, port)
-	vc := s.getOrCreate(key, user, mailbox)
+	vc := s.getOrCreate(key, user, mailbox, serve.ClientAddr(r))
 	vc.mu.Lock()
 	vc.windowSize = receiveWindowSize(cmds)
 	window := vc.windowSize
@@ -172,7 +173,7 @@ func (s *Server) serveIn(w http.ResponseWriter, r *http.Request, user, mailbox s
 		return
 	}
 	key := vconnKey(ck[0], host, port)
-	vc := s.getOrCreate(key, user, mailbox)
+	vc := s.getOrCreate(key, user, mailbox, serve.ClientAddr(r))
 
 	if vc.markReady("in") {
 		vc.mu.Lock()

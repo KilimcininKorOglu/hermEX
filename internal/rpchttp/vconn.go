@@ -14,8 +14,9 @@ import (
 // are processed sequentially by the single IN-channel goroutine, so this state
 // needs no locking.
 type Session struct {
-	User    string
-	Mailbox string
+	User       string
+	Mailbox    string
+	RemoteAddr string // originating client address, for activity logging
 
 	contexts   map[uint16]*registeredIface // context id -> bound interface
 	assocGroup uint32
@@ -92,8 +93,9 @@ func vconnKey(connCookie mapi.GUID, host, port string) string {
 }
 
 // getOrCreate returns the virtual connection for key, creating it (with a fresh
-// Session seeded from the authenticated identity) on first use.
-func (s *Server) getOrCreate(key, user, mailbox string) *vconn {
+// Session seeded from the authenticated identity and originating client address) on
+// first use.
+func (s *Server) getOrCreate(key, user, mailbox, remoteAddr string) *vconn {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if vc, ok := s.conns[key]; ok {
@@ -101,7 +103,7 @@ func (s *Server) getOrCreate(key, user, mailbox string) *vconn {
 	}
 	vc := &vconn{
 		key:    key,
-		sess:   &Session{User: user, Mailbox: mailbox},
+		sess:   &Session{User: user, Mailbox: mailbox, RemoteAddr: remoteAddr},
 		out:    make(chan []byte, 16),
 		closed: make(chan struct{}),
 	}
