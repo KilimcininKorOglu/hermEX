@@ -1,9 +1,12 @@
 package mta
 
 import (
+	"errors"
 	"net"
 	"testing"
 	"time"
+
+	"hermex/internal/smtp"
 )
 
 // TestRateLimiterAdmitsUntilBurstThenDefers proves an enabled limiter admits up to
@@ -78,6 +81,46 @@ func TestRateLimiterNilIPFailsOpen(t *testing.T) {
 	rl.SetEnabled(true)
 	if !rl.Allow(nil) {
 		t.Error("a nil IP must fail open (admit)")
+	}
+}
+
+// TestMailRateLimitDefersUnauthenticatedFlood proves the delivery hook defers an
+// unauthenticated sender once its network passes the burst, returning a TempError so
+// the SMTP server replies 451 (temporary) — the flood is slowed but a legitimate
+// server's retry eventually gets through.
+func TestMailRateLimitDefersUnauthenticatedFlood(t *testing.T) {
+	rl := NewRateLimiter()
+	rl.SetLimits(2, time.Minute)
+	rl.SetEnabled(true)
+
+	newUnauth := func() *session { return &session{remoteAddr: "203.0.113.9:2500", rateLimit: rl} }
+	for i := range 2 {
+		if err := newUnauth().Mail("spammer@ext.example"); err != nil {
+			t.Fatalf("message %d within the burst must be accepted, got %v", i+1, err)
+		}
+	}
+	err := newUnauth().Mail("spammer@ext.example")
+	if _, ok := errors.AsType[*smtp.TempError](err); !ok {
+		t.Fatalf("the message past the burst must defer with a TempError, got %v", err)
+	}
+}
+
+// TestMailRateLimitSkipsAuthenticated proves authenticated submission is never rate
+// limited, even from a network whose unauthenticated budget is already spent.
+func TestMailRateLimitSkipsAuthenticated(t *testing.T) {
+	rl := NewRateLimiter()
+	rl.SetLimits(1, time.Minute)
+	rl.SetEnabled(true)
+	accounts := resolveOnly{"alice@test": "/x"}
+
+	// Spend the network's unauthenticated budget (burst 1).
+	if err := (&session{accounts: accounts, remoteAddr: "203.0.113.9:2500", rateLimit: rl}).Mail("x@ext.example"); err != nil {
+		t.Fatalf("the first unauthenticated message is accepted, got %v", err)
+	}
+	// An authenticated submission from the same network is still accepted.
+	s := &session{accounts: accounts, authUser: "alice@test", remoteAddr: "203.0.113.9:2500", rateLimit: rl}
+	if err := s.Mail("alice@test"); err != nil {
+		t.Errorf("authenticated submission must never be rate limited, got %v", err)
 	}
 }
 
