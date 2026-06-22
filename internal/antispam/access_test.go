@@ -113,6 +113,58 @@ func TestAccessEmptyMailFromNotOverridden(t *testing.T) {
 	}
 }
 
+// TestVerdictAccessAction proves the verdict carries the operator action that
+// matched, not merely that one did: delivery reads the action to honor per-recipient
+// precedence — an operator block is absolute (a recipient's own allow cannot rescue
+// it) while an operator allow is narrowable by a recipient's own block.
+func TestVerdictAccessAction(t *testing.T) {
+	s := &Scorer{}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: 100})
+	s.SetAccess(NewAccessList(map[string]string{
+		"blocked@evil.example": AccessBlock,
+		"vip@partner.example":  AccessAllow,
+	}))
+	cases := []struct{ from, want string }{
+		{"blocked@evil.example", AccessBlock},
+		{"vip@partner.example", AccessAllow},
+		{"nobody@neutral.example", ""},
+	}
+	for _, c := range cases {
+		if v := s.Score(Input{Raw: []byte("x"), MailFrom: c.from}); v.AccessAction != c.want {
+			t.Errorf("AccessAction for %q = %q, want %q", c.from, v.AccessAction, c.want)
+		}
+	}
+}
+
+// TestVerdictDMARCReject proves the verdict flags a DMARC failure under an enforcing
+// policy (reject/quarantine) — the signal delivery uses so no per-recipient allow
+// rescues a spoof — while leaving it clear under a non-enforcing policy. This is why
+// DMARC == AuthFail alone is insufficient: a p=none failure is also AuthFail but must
+// not block a recipient's allow.
+func TestVerdictDMARCReject(t *testing.T) {
+	mk := func(policy string) *Scorer {
+		s := &Scorer{
+			checkSPF:    func(net.IP, string, string) AuthResult { return AuthFail },
+			checkDKIM:   func([]byte) []DKIMResult { return nil },
+			lookupDMARC: func(string) (string, bool) { return policy, true },
+		}
+		s.SetConfig(&Config{Weights: DefaultWeights, Threshold: 1})
+		return s
+	}
+	// Spoofer shape: envelope elsewhere, From-header claims partner.example, so DMARC
+	// does not align and the published policy decides whether it is a hard failure.
+	in := Input{
+		Raw: []byte("x"), ClientIP: net.IPv4(1, 2, 3, 4),
+		MailFrom: "attacker@evil.example", FromDomain: "partner.example",
+	}
+	if v := mk("reject").Score(in); v.DMARC != AuthFail || !v.DMARCReject {
+		t.Errorf("an enforcing reject policy must set DMARCReject, got %+v", v)
+	}
+	if v := mk("none").Score(in); v.DMARC != AuthFail || v.DMARCReject {
+		t.Errorf("a non-enforcing p=none failure must leave DMARCReject clear, got %+v", v)
+	}
+}
+
 // TestAccessMatchedFlag proves the verdict reports whether an operator rule decided
 // it: set for a blocklisted or allowlisted sender (so delivery treats Spam as
 // authoritative for every recipient), and clear for a purely score-driven verdict

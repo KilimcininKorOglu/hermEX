@@ -77,14 +77,24 @@ type Verdict struct {
 	// against a per-recipient threshold). It is false for a purely score-driven
 	// verdict.
 	AccessMatched bool
-	SPF           AuthResult
-	DKIM          AuthResult
-	DMARC         AuthResult
-	DNSBL         []string // the blocklist zones that listed the client IP
-	BayesProb     float64  // the Bayesian model's spam probability (0..1); 0 when not run
-	SAScore       float64  // the summed score of the SpamAssassin rules that fired; 0 when not run
-	SAHits        []string // the names of the SpamAssassin rules that fired
-	Reasons       []string
+	// AccessAction is the operator allow/block action that matched (AccessAllow,
+	// AccessBlock, or "" for none). Delivery needs the action itself, not just that
+	// one matched, to honor per-recipient precedence: an operator block is absolute
+	// (a recipient's own allow cannot rescue it) while an operator allow may be
+	// narrowed by a recipient's own block.
+	AccessAction string
+	SPF          AuthResult
+	DKIM         AuthResult
+	DMARC        AuthResult
+	// DMARCReject reports a DMARC failure under an enforcing policy (reject or
+	// quarantine) — the strongest spoofing signal. No allow rule, operator or
+	// per-recipient, may rescue such a message from the score-based verdict.
+	DMARCReject bool
+	DNSBL       []string // the blocklist zones that listed the client IP
+	BayesProb   float64  // the Bayesian model's spam probability (0..1); 0 when not run
+	SAScore     float64  // the summed score of the SpamAssassin rules that fired; 0 when not run
+	SAHits      []string // the names of the SpamAssassin rules that fired
+	Reasons     []string
 }
 
 // DKIMResult is one verified DKIM signature's claiming domain and validity.
@@ -225,6 +235,7 @@ func (s *Scorer) Score(in Input) Verdict {
 			}
 		}
 	}
+	v.DMARCReject = dmarcReject
 
 	// DNSBL: a client IP listed on a configured blocklist zone is a strong signal;
 	// each listing zone adds its weight.
@@ -270,6 +281,7 @@ func (s *Scorer) Score(in Input) Verdict {
 	if acc := s.access.Load(); acc != nil && in.MailFrom != "" {
 		action := acc.Action(in.MailFrom, in.FromDomain)
 		v.AccessMatched = action != ""
+		v.AccessAction = action
 		switch action {
 		case AccessBlock:
 			v.Spam = true
