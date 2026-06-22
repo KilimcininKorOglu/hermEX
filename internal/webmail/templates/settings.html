@@ -151,6 +151,42 @@
       </div>
       <button class="primary" type="submit">Add safe sender</button>
     </form>
+
+    {{if .AccessEnabled}}
+    <h2>Allow / block senders</h2>
+    <p class="muted">Allowed senders are rescued from the spam filter into your inbox &mdash; but a forged sender that fails authentication is never rescued. Blocked senders always go to your Junk folder. Each rule is an address or a domain.</p>
+    {{if .AccessRules}}
+    <ul class="signature-list">
+      {{range .AccessRules}}
+      <li>
+        <span>{{.Pattern}} &mdash; {{.Action}}</span>
+        <form method="post" action="/settings" class="inline">
+          <input type="hidden" name="action" value="delrule">
+          <input type="hidden" name="pattern" value="{{.Pattern}}">
+          <button type="submit">Delete</button>
+        </form>
+      </li>
+      {{end}}
+    </ul>
+    {{else}}
+    <p class="notice">No allow or block rules yet.</p>
+    {{end}}
+    <form method="post" action="/settings" class="catadd">
+      <input type="hidden" name="action" value="addrule">
+      <div class="field">
+        <label>Address or domain</label>
+        <input name="pattern" placeholder="e.g. boss@example.com or example.com" required>
+      </div>
+      <div class="field">
+        <label>Action</label>
+        <select name="ruleaction">
+          <option value="allow">Allow (rescue to inbox)</option>
+          <option value="block">Block (always Junk)</option>
+        </select>
+      </div>
+      <button class="primary" type="submit">Add rule</button>
+    </form>
+    {{end}}
   </div>
 </div>
 <script>

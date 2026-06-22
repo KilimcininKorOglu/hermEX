@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"hermex/internal/directory"
 	"hermex/internal/objectstore"
 )
 
@@ -31,6 +32,16 @@ type webmailSettings struct {
 	RequestReceiptDefault bool        `json:"requestReceiptDefault"` // pre-check "request read receipt" on a fresh compose
 	SafeSenders           []string    `json:"safeSenders"`           // addresses/domains allowed to load remote content in the reader
 	ConversationView      bool        `json:"conversationView"`      // group the message list into RFC 5256 conversation threads
+}
+
+// settingsView augments the stored webmail preferences with the user's
+// directory-backed allow/block rules for rendering. The embedded webmailSettings
+// promotes its fields, so the settings template's existing references resolve
+// unchanged.
+type settingsView struct {
+	webmailSettings
+	AccessEnabled bool                      // the rule store is wired, so show the allow/block section
+	AccessRules   []directory.RecipientRule // the user's personal allow/block rules
 }
 
 // category is one named, colored label in the mailbox's master category list.
@@ -163,7 +174,11 @@ func (s *Server) handleSettingsForm(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		cfg = defaultSettings()
 	}
-	s.render(w, "settings", cfg)
+	view := settingsView{webmailSettings: cfg, AccessEnabled: s.Rules != nil}
+	if s.Rules != nil {
+		view.AccessRules, _ = s.Rules.ListRecipientRules(sess.user) // best-effort; an error just shows no rules
+	}
+	s.render(w, "settings", view)
 }
 
 // handleSettingsSubmit applies one settings action — saving preferences, adding
@@ -172,6 +187,23 @@ func (s *Server) handleSettingsSubmit(w http.ResponseWriter, r *http.Request) {
 	sess, ok := s.sessionFrom(r)
 	if !ok {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	// Allow/block rules are directory-backed (the MTA reads them at delivery), not part
+	// of the objectstore-stored preferences, so they are applied here without opening
+	// the mailbox. Invalid input is ignored, matching the other add actions.
+	switch r.FormValue("action") {
+	case "addrule":
+		if s.Rules != nil {
+			_ = s.Rules.SetRecipientRule(sess.user, r.FormValue("pattern"), r.FormValue("ruleaction"))
+		}
+		http.Redirect(w, r, "/settings", http.StatusSeeOther)
+		return
+	case "delrule":
+		if s.Rules != nil {
+			_, _ = s.Rules.DeleteRecipientRule(sess.user, r.FormValue("pattern"))
+		}
+		http.Redirect(w, r, "/settings", http.StatusSeeOther)
 		return
 	}
 	st, err := objectstore.Open(sess.mailboxPath)

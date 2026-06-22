@@ -13,6 +13,15 @@ import (
 	"hermex/internal/relay"
 )
 
+// RecipientRuleStore manages a user's personal allow/block rules — the ones the MTA
+// applies per recipient at delivery. *directory.SQLDirectory satisfies it; it is an
+// interface so the webmail Server only sees the narrow surface it needs.
+type RecipientRuleStore interface {
+	ListRecipientRules(username string) ([]directory.RecipientRule, error)
+	SetRecipientRule(username, pattern, action string) error
+	DeleteRecipientRule(username, pattern string) (bool, error)
+}
+
 // Server is the webmail HTTP application. It authenticates against the directory
 // and opens each user's mailbox store directly (in-process) per request.
 // Accounts resolves recipient addresses for local delivery of composed mail.
@@ -28,6 +37,9 @@ type Server struct {
 	// DigestSecret verifies quarantine-digest release tokens (the MTA mints them with
 	// the same key). Empty disables the release endpoint — links 404.
 	DigestSecret []byte
+	// Rules manages the user's personal allow/block rules from the settings page; nil
+	// hides the section (the MTA still enforces any rules already stored).
+	Rules RecipientRuleStore
 }
 
 // smimeEvent logs an S/MIME crypto operation under the smime subsystem, tagged
