@@ -5,10 +5,28 @@ import (
 	"encoding/xml"
 	"io"
 	"net/http"
+	"sync/atomic"
 )
 
-// maxRequestBody caps a SOAP request body.
-const maxRequestBody = 8 << 20
+// defaultMaxRequestBody caps a SOAP request body; it is the fallback when no operator
+// limit has been set.
+const defaultMaxRequestBody = 8 << 20
+
+// reqBodyLimit holds the operator-set SOAP request-body cap (bytes; 0 = use the
+// default), set by SetMaxRequestBody and read live by readEnvelope, so the EWS daemon's
+// poll can apply an edit without a restart. The EWS service is a per-process singleton,
+// so a package-level value is the right scope (mirrors objectstore's default logger).
+var reqBodyLimit atomic.Int64
+
+// SetMaxRequestBody sets the maximum accepted SOAP request body in bytes (0 restores
+// the built-in default). It is safe to call concurrently with request handling, so an
+// operator's edit applies without a restart.
+func SetMaxRequestBody(n int64) {
+	if n < 0 {
+		n = 0
+	}
+	reqBodyLimit.Store(n)
+}
 
 // EWS XML namespaces (MS-OXWS). Clients are namespace-aware (they match on the
 // URI, not the prefix), so responses declare these as the relevant element's
@@ -38,7 +56,11 @@ type soapEnvelope struct {
 // (the local name of the first child of soap:Body) and the operation element's
 // raw XML for the handler to unmarshal.
 func readEnvelope(r *http.Request) (op string, inner []byte, err error) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBody))
+	limit := int64(defaultMaxRequestBody)
+	if v := reqBodyLimit.Load(); v > 0 {
+		limit = v
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, limit))
 	if err != nil {
 		return "", nil, err
 	}

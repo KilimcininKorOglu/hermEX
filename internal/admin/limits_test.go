@@ -27,6 +27,9 @@ func TestLimitsPageRenders(t *testing.T) {
 	if !strings.Contains(page, "Protocol size limits") || !strings.Contains(page, "IMAP maximum literal") || !strings.Contains(page, "value=\"50\"") {
 		t.Errorf("limits page missing expected content/default:\n%s", page)
 	}
+	if !strings.Contains(page, "EWS maximum SOAP request") || !strings.Contains(page, "value=\"8\"") {
+		t.Errorf("limits page missing the EWS limit/default:\n%s", page)
+	}
 }
 
 // TestSaveLimits proves the form converts the entered MB to bytes and persists it, the
@@ -36,14 +39,14 @@ func TestSaveLimits(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/limits", session, csrf, url.Values{"imap_literal_mb": {"10"}})
+	resp := htmxPOST(t, ts, "/admin/ui/limits", session, csrf, url.Values{"imap_literal_mb": {"10"}, "ews_request_mb": {"4"}})
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Size limits saved") {
 		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
 	}
-	if !d.sizeLimitsFound || d.sizeLimits.IMAPLiteralBytes != 10*1024*1024 {
-		t.Errorf("limit not persisted as bytes: found=%v %+v, want 10485760", d.sizeLimitsFound, d.sizeLimits)
+	if !d.sizeLimitsFound || d.sizeLimits.IMAPLiteralBytes != 10*1024*1024 || d.sizeLimits.EWSRequestBytes != 4*1024*1024 {
+		t.Errorf("limits not persisted as bytes: found=%v %+v, want 10485760 / 4194304", d.sizeLimitsFound, d.sizeLimits)
 	}
 }
 

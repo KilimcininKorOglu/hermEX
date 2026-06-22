@@ -98,6 +98,28 @@ func TestReadEnvelope(t *testing.T) {
 	}
 }
 
+// TestReadEnvelopeRespectsBodyLimit proves the request-body cap is read live from the
+// operator-set value, so an edit (applied by the EWS daemon's poll) decides what is
+// accepted: a body over the cap is truncated and fails to parse, and restoring the
+// default admits the same envelope, with no restart.
+func TestReadEnvelopeRespectsBodyLimit(t *testing.T) {
+	body := wrapRequest(`<GetFolder xmlns="` + nsMessages + `"><FolderShape/></GetFolder>`)
+
+	SetMaxRequestBody(16) // far smaller than the envelope
+	defer SetMaxRequestBody(0)
+	r := httptest.NewRequest(http.MethodPost, "/EWS/Exchange.asmx", strings.NewReader(body))
+	if _, _, err := readEnvelope(r); err == nil {
+		t.Error("envelope over the 16-byte cap parsed, want a truncation/parse error")
+	}
+
+	// Restoring the default (0) admits the same envelope.
+	SetMaxRequestBody(0)
+	r2 := httptest.NewRequest(http.MethodPost, "/EWS/Exchange.asmx", strings.NewReader(body))
+	if op, _, err := readEnvelope(r2); err != nil || op != "GetFolder" {
+		t.Errorf("envelope under the default cap = op %q err %v, want GetFolder / nil", op, err)
+	}
+}
+
 // TestFirstElementName confirms the first element local name is found and that
 // an empty fragment yields "".
 func TestFirstElementName(t *testing.T) {

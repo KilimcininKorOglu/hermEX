@@ -13,6 +13,7 @@
 {{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
 <form hx-post="/admin/ui/limits" hx-target="#limits-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <p>IMAP maximum literal (MB): <input type="number" name="imap_literal_mb" value="{{.IMAPLiteralMB}}" min="1"></p>
+<p>EWS maximum SOAP request (MB): <input type="number" name="ews_request_mb" value="{{.EWSRequestMB}}" min="1"></p>
 <button type="submit">Save limits</button>
 </form>
 </div>{{end}}

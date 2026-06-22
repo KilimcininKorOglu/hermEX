@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 
@@ -57,6 +58,10 @@ func main() {
 		log.Fatalf("hermex-ews: open relay spool: %v", err)
 	}
 	srv.Spool = spool
+	// EWS SOAP request-body cap: read at startup and re-read every minute so an admin's
+	// change applies without a restart; 0 keeps the built-in default.
+	applyEWSSizeLimit(dir)
+	go runEWSSizeMaintenance(dir)
 	addr := cfg.EWSAddr
 	if addr == "" {
 		addr = ":8080"
@@ -75,5 +80,30 @@ func main() {
 		health.Components(cfg.HealthAddr, "ews", health.Check{Name: "directory", Probe: db.PingContext})...)
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, spool.Close, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-ews: %v", err)
+	}
+}
+
+// applyEWSSizeLimit reads the stored EWS request-body cap and applies it. A missing row
+// or a read error leaves the cap unchanged, so a settings failure never shrinks it
+// unexpectedly.
+func applyEWSSizeLimit(dir *directory.SQLDirectory) {
+	s, found, err := dir.GetSizeLimits()
+	if err != nil {
+		log.Printf("hermex-ews: size limits read failed, leaving the request cap unchanged: %v", err)
+		return
+	}
+	if !found {
+		return
+	}
+	ews.SetMaxRequestBody(s.EWSRequestBytes)
+}
+
+// runEWSSizeMaintenance re-applies the EWS request-body cap every minute so an admin
+// change takes effect without a restart. It runs until the process exits.
+func runEWSSizeMaintenance(dir *directory.SQLDirectory) {
+	tick := time.NewTicker(time.Minute)
+	defer tick.Stop()
+	for range tick.C {
+		applyEWSSizeLimit(dir)
 	}
 }

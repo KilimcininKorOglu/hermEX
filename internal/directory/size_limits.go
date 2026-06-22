@@ -11,6 +11,7 @@ import (
 // field without a restart. It grows a field per protocol as each daemon is wired.
 type SizeLimits struct {
 	IMAPLiteralBytes int64
+	EWSRequestBytes  int64
 }
 
 // GetSizeLimits returns the stored size limits and whether a row has been saved. When
@@ -18,7 +19,8 @@ type SizeLimits struct {
 func (d *SQLDirectory) GetSizeLimits() (SizeLimits, bool, error) {
 	var s SizeLimits
 	err := d.db.QueryRow(
-		`SELECT imap_literal_bytes FROM size_limits WHERE id = 1`).Scan(&s.IMAPLiteralBytes)
+		`SELECT imap_literal_bytes, ews_request_bytes FROM size_limits WHERE id = 1`).
+		Scan(&s.IMAPLiteralBytes, &s.EWSRequestBytes)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SizeLimits{}, false, nil
 	}
@@ -32,9 +34,10 @@ func (d *SQLDirectory) GetSizeLimits() (SizeLimits, bool, error) {
 // daemon's poll observes the change and applies it without a restart.
 func (d *SQLDirectory) SetSizeLimits(s SizeLimits) error {
 	_, err := d.db.Exec(
-		`INSERT INTO size_limits (id, imap_literal_bytes, updated_at)
-		 VALUES (1, ?, ?)
-		 ON DUPLICATE KEY UPDATE imap_literal_bytes = VALUES(imap_literal_bytes), updated_at = VALUES(updated_at)`,
-		s.IMAPLiteralBytes, time.Now().UnixMilli())
+		`INSERT INTO size_limits (id, imap_literal_bytes, ews_request_bytes, updated_at)
+		 VALUES (1, ?, ?, ?)
+		 ON DUPLICATE KEY UPDATE imap_literal_bytes = VALUES(imap_literal_bytes),
+		   ews_request_bytes = VALUES(ews_request_bytes), updated_at = VALUES(updated_at)`,
+		s.IMAPLiteralBytes, s.EWSRequestBytes, time.Now().UnixMilli())
 	return err
 }

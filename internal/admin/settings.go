@@ -19,12 +19,7 @@ func (s *Server) handleUISettings(w http.ResponseWriter, r *http.Request) {
 func (s *Server) settingsPageData(r *http.Request, notice string) map[string]any {
 	data := s.antispamPageData(r, notice)
 	data["Nav"] = "settings"
-
-	imapMB := int64(defaultIMAPLiteralMB)
-	if sl, found, err := s.dir.GetSizeLimits(); err == nil && found {
-		imapMB = sl.IMAPLiteralBytes / (1024 * 1024)
-	}
-	data["IMAPLiteralMB"] = imapMB
+	s.fillSizeLimits(data)
 
 	retain := defaultSpamHistoryRetainDisplay
 	if st, found, err := s.dir.GetSpamHistorySettings(); err == nil && found {
