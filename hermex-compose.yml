@@ -244,8 +244,12 @@ services:
     ports:
       - "8149:8080"
     depends_on:
+      # The gateway only reads the directory for the optional TLS certificate store
+      # and serves the config-file certificate until it is reachable, so it waits for
+      # the db container to exist (DSN host resolves) but not for it to be healthy —
+      # the front door must not be held hostage to the cert store at boot.
       db:
-        condition: service_healthy
+        condition: service_started
       mapi:
         condition: service_started
       ews:
