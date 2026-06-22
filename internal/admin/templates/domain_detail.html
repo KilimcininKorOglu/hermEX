@@ -110,6 +110,10 @@
 </form>
 <div id="user-status"></div>
 
+<h2>DKIM signing</h2>
+<p class="hint">Signs outbound mail from this domain so it passes DKIM and DMARC at receivers. Generate a key, publish the DNS record it shows, then enable signing — enabling before the record is published would make your mail fail DKIM.</p>
+{{template "dkim-panel" .}}
+
 <h2>DNS health</h2>
 <p class="hint">Resolves this domain's live mail-related DNS records (read-only).</p>
 <button hx-get="/admin/ui/domains/{{.Domain.ID}}/dnscheck" hx-target="#dns-report" hx-swap="innerHTML">Check DNS</button>
@@ -126,6 +130,31 @@
 </main>
 </div>
 {{template "foot" .}}{{end}}
+
+{{define "dkim-panel"}}<div id="dkim-panel">
+{{if .DKIMNotice}}<p class="ok">{{.DKIMNotice}}</p>{{end}}
+{{if .DKIMHasKey}}
+<p>Status: <strong>{{if .DKIMEnabled}}enabled — outbound mail from this domain is signed{{else}}not signing — key generated, publish the record then enable{{end}}</strong> (selector {{.DKIMSelector}}).</p>
+<p>Publish this TXT record:</p>
+<p class="hint">Name: <code>{{.DKIMRecordName}}</code></p>
+<pre class="dns-record">{{.DKIMPublicTXT}}</pre>
+<form hx-put="/admin/ui/domains/{{.Domain.ID}}/dkim/enable" hx-target="#dkim-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<input type="hidden" name="enabled" value="{{if .DKIMEnabled}}0{{else}}1{{end}}">
+<button type="submit">{{if .DKIMEnabled}}Disable signing{{else}}Enable signing{{end}}</button>
+</form>
+<form hx-post="/admin/ui/domains/{{.Domain.ID}}/dkim/generate" hx-target="#dkim-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<button type="submit" hx-confirm="Regenerate this domain's DKIM key? Signing stops until you publish the new record and enable it again.">Regenerate key</button>
+</form>
+<form hx-post="/admin/ui/domains/{{.Domain.ID}}/dkim/delete" hx-target="#dkim-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<button type="submit" class="danger" hx-confirm="Delete this domain's DKIM key? Outbound mail stops being signed.">Delete key</button>
+</form>
+{{else}}
+<p>No DKIM key for this domain.</p>
+<form hx-post="/admin/ui/domains/{{.Domain.ID}}/dkim/generate" hx-target="#dkim-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<button type="submit">Generate key</button>
+</form>
+{{end}}
+</div>{{end}}
 
 {{define "dns-report"}}<table class="grid">
 <thead><tr><th>Record</th><th>Status</th><th>Detail</th></tr></thead>

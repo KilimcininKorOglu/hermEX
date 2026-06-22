@@ -107,6 +107,10 @@ type Directory interface {
 	SetOutboundSettings(directory.OutboundSettings) error
 	GetDigestSettings() (directory.DigestSettings, bool, error)
 	SetDigestSettings(directory.DigestSettings) error
+	SetDKIMKey(domain, selector string, privPEM []byte, publicTXT string) error
+	SetDKIMEnabled(domain string, enabled bool) error
+	GetDKIMKeyInfo(domain string) (directory.DKIMKeyInfo, bool, error)
+	DeleteDKIMKey(domain string) error
 	GetUserSpamThreshold(username string) (*int, error)
 	SetUserSpamThreshold(username string, threshold *int) error
 	GetDomainSpamThreshold(domain string) (*int, error)
@@ -353,6 +357,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/syncpolicy", s.handleUISaveDomainSyncPolicy)
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/spam-threshold", s.handleUIDomainSpamThreshold)
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/createdefaults", s.handleUISaveDomainDefaults)
+	mux.HandleFunc("POST /admin/ui/domains/{domainID}/dkim/generate", s.handleUIDKIMGenerate)
+	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/dkim/enable", s.handleUIDKIMEnable)
+	mux.HandleFunc("POST /admin/ui/domains/{domainID}/dkim/delete", s.handleUIDKIMDelete)
 	mux.HandleFunc("GET /admin/ui/domains/{domainID}/dnscheck", s.handleUIDomainDNS)
 	mux.HandleFunc("POST /admin/ui/domains/{domainID}/purge", s.handleUIPurgeDomain)
 	mux.HandleFunc("GET /admin/ui/aliases", s.handleUIAliases)

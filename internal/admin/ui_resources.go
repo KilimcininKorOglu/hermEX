@@ -97,7 +97,7 @@ func (s *Server) handleUIDomainDetail(w http.ResponseWriter, r *http.Request) {
 	contacts, _ := s.dir.ListContactsInDomain(id)
 	groups, _ := s.dir.ListMListsInDomain(id)
 	spamThreshold, _ := s.dir.GetDomainSpamThreshold(dd.Name)
-	s.render(w, "domain_detail.html", map[string]any{
+	data := map[string]any{
 		"Nav": "domains", "CSRF": csrfCookieValue(r), "Domain": dd, "Orgs": orgs,
 		"PolicyFields":   policyView(policy),
 		"Override":       userOverrideViewOf(override.User),
@@ -105,7 +105,11 @@ func (s *Server) handleUIDomainDetail(w http.ResponseWriter, r *http.Request) {
 		"DomainContacts": contacts,
 		"DomainGroups":   groups,
 		"SpamThreshold":  spamThreshold,
-	})
+	}
+	for k, v := range s.dkimData(dd.Name) {
+		data[k] = v
+	}
+	s.render(w, "domain_detail.html", data)
 }
 
 // handleUISaveDomain saves a domain's edited fields from the detail form and

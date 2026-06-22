@@ -36,6 +36,11 @@ type fakeDir struct {
 	outboundFound  bool
 	digest         directory.DigestSettings
 	digestFound    bool
+	dkimSelector   string
+	dkimPublicTXT  string
+	dkimPrivPEM    []byte
+	dkimEnabled    bool
+	dkimFound      bool
 
 	userSpamThreshold      *int
 	userSpamThresholdSet   bool
@@ -448,6 +453,21 @@ func (f *fakeDir) GetDigestSettings() (directory.DigestSettings, bool, error) {
 }
 func (f *fakeDir) SetDigestSettings(s directory.DigestSettings) error {
 	f.digest, f.digestFound = s, true
+	return nil
+}
+func (f *fakeDir) SetDKIMKey(domain, selector string, privPEM []byte, publicTXT string) error {
+	f.dkimSelector, f.dkimPrivPEM, f.dkimPublicTXT, f.dkimEnabled, f.dkimFound = selector, privPEM, publicTXT, false, true
+	return nil
+}
+func (f *fakeDir) SetDKIMEnabled(domain string, enabled bool) error {
+	f.dkimEnabled = enabled
+	return nil
+}
+func (f *fakeDir) GetDKIMKeyInfo(domain string) (directory.DKIMKeyInfo, bool, error) {
+	return directory.DKIMKeyInfo{Selector: f.dkimSelector, PublicTXT: f.dkimPublicTXT, Enabled: f.dkimEnabled}, f.dkimFound, nil
+}
+func (f *fakeDir) DeleteDKIMKey(domain string) error {
+	f.dkimFound = false
 	return nil
 }
 func (f *fakeDir) GetUserSpamThreshold(string) (*int, error)   { return f.userSpamThreshold, nil }
