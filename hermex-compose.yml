@@ -237,12 +237,28 @@ services:
       - HERMEX_BACKEND_ACTIVESYNC=https://activesync:8080
       - HERMEX_BACKEND_DAV=https://dav:8080
       - HERMEX_BACKEND_WEBMAIL=https://webmail:8080
+      # acme-mode dev wiring (ignored in the default manual mode): CertMagic writes
+      # its state to a dedicated writable dir, and trusts the local pebble test CA's
+      # self-signed ACME endpoint. Production leaves HERMEX_ACME_CA_ROOT unset.
+      - HERMEX_ACME_STORAGE=/data/acme
+      - HERMEX_ACME_CA_ROOT=/pebble/minica.pem
     volumes:
       - ./docker-data/config.json:/config/config.json:ro
       - ./docker-data/mailboxes/tls:/data/mailboxes/tls:ro
       - ./docker-data/spill/gateway:/data/logspill
+      - ./docker-data/gateway-acme:/data/acme
+      - ./docker-data/pebble:/pebble:ro
     ports:
       - "8149:8080"
+    networks:
+      # In acme mode pebble validates TLS-ALPN-01 by connecting to each managed name
+      # on the gateway, so the dev test domain resolves to this container.
+      default:
+        aliases:
+          - hermex.test
+          - mail.hermex.test
+          - autodiscover.hermex.test
+          - autoconfig.hermex.test
     depends_on:
       # The gateway only reads the directory for the optional TLS certificate store
       # and serves the config-file certificate until it is reachable, so it waits for
@@ -260,6 +276,22 @@ services:
         condition: service_started
       webmail:
         condition: service_started
+    restart: unless-stopped
+
+  # Pebble: a small ACME test CA (https://github.com/letsencrypt/pebble) for
+  # exercising acme mode offline — the real Let's Encrypt needs a public :443 and a
+  # real domain, which the dev env cannot provide. Internal-only (ACME on :14000,
+  # management on :15000); the gateway reaches it as pebble:14000 and validates
+  # TLS-ALPN-01 against itself on :8080 (tlsPort in the config). Not part of the mail
+  # path — only used when TLS mode is set to acme with the pebble directory URL.
+  pebble:
+    container_name: hermex-pebble
+    image: ghcr.io/letsencrypt/pebble:2.10.1
+    command: ["-config", "/test/config/pebble-config.json"]
+    environment:
+      - PEBBLE_VA_NOSLEEP=1
+    volumes:
+      - ./docker/pebble/pebble-config.json:/test/config/pebble-config.json:ro
     restart: unless-stopped
 
   # Fetch-worker: polls configured remote POP3/IMAP accounts and delivers their new

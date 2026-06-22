@@ -32,7 +32,6 @@ import (
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/serve"
-	"hermex/internal/tlscert"
 )
 
 // env returns the value of key when set, otherwise def.
@@ -92,15 +91,18 @@ func main() {
 	if err != nil {
 		log.Fatalf("hermex-gateway: open directory: %v", err)
 	}
-	provider, err := tlscert.New(cfg, directory.NewSQL(db), logger)
+	dir := directory.NewSQL(db)
+	tlsSrc, maintain, err := gatewayTLS(cfg, dir, logger)
 	if err != nil {
 		log.Fatalf("hermex-gateway: tls: %v", err)
 	}
-	if provider.TLSEnabled() {
-		go provider.RunMaintenance()
+	if tlsSrc.TLSEnabled() {
+		// The listening socket is bound by serve.New below, so the TLS-ALPN-01
+		// challenge in acme mode reaches it; run the obtain/poll in the background.
+		go maintain()
 	}
 
-	hs, err := serve.New(addr, h, provider, logger, logging.Gateway)
+	hs, err := serve.New(addr, h, tlsSrc, logger, logging.Gateway)
 	if err != nil {
 		log.Fatalf("hermex-gateway: %v", err)
 	}
