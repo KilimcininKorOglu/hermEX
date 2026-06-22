@@ -153,8 +153,15 @@ func main() {
 	})
 	go reloader.Run(context.Background(), time.Minute)
 	// Greylisting defers a first-contact triplet so a legitimate MTA retries. It
-	// starts disabled; an admin enables it (the toggle is hot-read below).
+	// starts disabled; the admin toggle is read at startup and hot-reloaded, and the
+	// triplet table is pruned periodically to stay bounded.
 	greylister := mta.NewGreylister(dir, scorer)
+	if on, err := dir.GetGreylistEnabled(); err != nil {
+		log.Printf("hermex-mta: greylist toggle read failed, leaving greylisting off: %v", err)
+	} else {
+		greylister.SetEnabled(on)
+	}
+	go runGreylistMaintenance(dir, greylister)
 	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir, Greylist: greylister}, Hostname: cfg.Hostname, Logger: logger}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()
@@ -291,6 +298,28 @@ func accessHash(rules []directory.SenderRule) uint64 {
 		h.Write([]byte{'\n'})
 	}
 	return h.Sum64()
+}
+
+// runGreylistMaintenance hot-reloads the greylist on/off toggle every minute and
+// prunes the expired triplets hourly, so an admin change applies without a restart
+// and the table stays bounded. It runs until the process exits.
+func runGreylistMaintenance(dir *directory.SQLDirectory, g *mta.Greylister) {
+	enableTick := time.NewTicker(time.Minute)
+	pruneTick := time.NewTicker(time.Hour)
+	defer enableTick.Stop()
+	defer pruneTick.Stop()
+	for {
+		select {
+		case <-enableTick.C:
+			if on, err := dir.GetGreylistEnabled(); err == nil {
+				g.SetEnabled(on)
+			}
+		case <-pruneTick.C:
+			if err := g.Prune(); err != nil {
+				log.Printf("hermex-mta: greylist prune failed: %v", err)
+			}
+		}
+	}
 }
 
 // sendLaterInterval is how often the worker scans every mailbox's Outbox for due

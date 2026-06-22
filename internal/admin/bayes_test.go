@@ -85,6 +85,24 @@ func TestSaveAntispamSettings(t *testing.T) {
 	}
 }
 
+// TestToggleGreylist proves the greylisting toggle persists the new state and
+// acknowledges it.
+func TestToggleGreylist(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/antispam/greylist", session, csrf, url.Values{"enabled": {"1"}})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "enabled") {
+		t.Fatalf("toggle = %d body=%q, want 200 acknowledging enable", resp.StatusCode, body)
+	}
+	if !d.greylistOn {
+		t.Error("greylisting should have been turned on")
+	}
+}
+
 // TestSaveAntispamSettingsRejectsBadThreshold proves a threshold below 1 (which
 // would flag every message as spam) is rejected and nothing is persisted.
 func TestSaveAntispamSettingsRejectsBadThreshold(t *testing.T) {

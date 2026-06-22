@@ -29,6 +29,7 @@ type fakeDir struct {
 	settings          directory.AntispamSettings
 	settingsFound     bool
 	senderRules       []directory.SenderRule
+	greylistOn        bool
 	ldap              map[int64]directory.LDAPConfig
 	defaultSyncPolicy easpolicy.Policy
 
@@ -415,6 +416,8 @@ func (f *fakeDir) DeleteSenderRule(pattern string) (bool, error) {
 	}
 	return false, nil
 }
+func (f *fakeDir) GetGreylistEnabled() (bool, error) { return f.greylistOn, nil }
+func (f *fakeDir) SetGreylistEnabled(on bool) error  { f.greylistOn = on; return nil }
 func (f *fakeDir) GetDefaultSyncPolicy() (easpolicy.Policy, error) {
 	return f.defaultSyncPolicy, nil
 }

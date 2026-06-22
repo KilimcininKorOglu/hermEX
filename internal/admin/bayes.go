@@ -83,7 +83,29 @@ func (s *Server) antispamPageData(r *http.Request, notice string) map[string]any
 	data["SADropped"] = rs.DroppedMetas
 	data["SAWeight"] = w.SARulesHit
 	data["SAThreshold"] = antispam.SAScoreThreshold
+
+	if on, err := s.dir.GetGreylistEnabled(); err == nil {
+		data["GreylistEnabled"] = on
+	}
 	return data
+}
+
+// handleUIToggleGreylist turns greylisting on or off. The MTA applies the change
+// within about a minute, no restart.
+func (s *Server) handleUIToggleGreylist(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	on := r.FormValue("enabled") == "1"
+	if err := s.dir.SetGreylistEnabled(on); err != nil {
+		s.render(w, "greylist-panel", s.antispamPageData(r, "Could not change greylisting: "+err.Error()))
+		return
+	}
+	verb := "disabled"
+	if on {
+		verb = "enabled"
+	}
+	s.render(w, "greylist-panel", s.antispamPageData(r, "Greylisting "+verb+" — the MTA applies it within about a minute."))
 }
 
 // weightsFromSettings maps a stored settings row to antispam.Weights for display.

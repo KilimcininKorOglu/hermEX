@@ -13,9 +13,21 @@
 <p>Source: {{.SASource}}</p>
 <p>{{.SARules}} rules and {{.SAMetas}} meta rules in use; {{.SASkipped}} rules and {{.SADropped}} metas are dropped (network-, plugin-, and Bayes-backed rules and patterns the engine cannot compile — those checks are done natively).</p>
 <p class="hint">The rules contribute one combined signal: when their summed score reaches {{.SAThreshold}}, the verdict gains {{.SAWeight}} points. The ruleset is seeded into data_dir on first run; refresh it with the antispam-rules tool — changes are applied automatically within about a minute, no restart.</p>
+
+<h2>Greylisting</h2>
+{{template "greylist-panel" .}}
 </main>
 </div>
 {{template "foot" .}}{{end}}
+
+{{define "greylist-panel"}}<div id="greylist-panel">
+{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+<p>Greylisting is <strong>{{if .GreylistEnabled}}on{{else}}off{{end}}</strong>. When on, the first message from an unknown sender (keyed by network, sender, and recipient) is deferred with a temporary failure so a legitimate server retries after a short delay; a spammer that does not retry never gets through. This delays first mail from new senders by a few minutes. Authenticated submission and allowlisted senders are never greylisted.</p>
+<form hx-post="/admin/ui/antispam/greylist" hx-target="#greylist-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<input type="hidden" name="enabled" value="{{if .GreylistEnabled}}0{{else}}1{{end}}">
+<button type="submit">{{if .GreylistEnabled}}Disable{{else}}Enable{{end}} greylisting</button>
+</form>
+</div>{{end}}
 
 {{define "antispam-panel"}}<div id="antispam-panel">
 {{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}

@@ -99,6 +99,8 @@ type Directory interface {
 	ListSenderRules() ([]directory.SenderRule, error)
 	SetSenderRule(pattern, action string) error
 	DeleteSenderRule(pattern string) (bool, error)
+	GetGreylistEnabled() (bool, error)
+	SetGreylistEnabled(on bool) error
 }
 
 // LDAPSyncer downsyncs an organization's directory accounts. It is optional —
@@ -304,6 +306,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/ui/antispam", s.handleUIAntispam)
 	mux.HandleFunc("POST /admin/ui/antispam/retrain", s.handleUIRetrainBayes)
 	mux.HandleFunc("POST /admin/ui/antispam/settings", s.handleUISaveAntispamSettings)
+	mux.HandleFunc("POST /admin/ui/antispam/greylist", s.handleUIToggleGreylist)
 	mux.HandleFunc("GET /admin/ui/spam-history", s.handleUISpamHistory)
 	mux.HandleFunc("GET /admin/ui/sender-access", s.handleUISenderAccess)
 	mux.HandleFunc("POST /admin/ui/sender-access", s.handleUISaveSenderRule)
