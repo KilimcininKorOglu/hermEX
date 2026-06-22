@@ -29,17 +29,25 @@ type SpamScorer interface {
 	Score(antispam.Input) antispam.Verdict
 }
 
+// HistoryRecorder persists one scored message's verdict for the admin Spam
+// History view. *directory.SQLDirectory satisfies it; it is an interface so the
+// MTA can be exercised without a database. Recording is fail-open.
+type HistoryRecorder interface {
+	RecordSpamVerdict(directory.SpamVerdict) error
+}
+
 // Backend is an smtp.Backend that delivers to per-recipient mailbox stores.
 type Backend struct {
 	Accounts directory.Accounts
 	Spool    *relay.Spool    // outbound relay queue; nil disables external relay
 	Logger   *logging.Logger // central activity log; nil disables logging
 	Scorer   SpamScorer      // inbound spam scorer; nil disables scoring
+	History  HistoryRecorder // spam verdict history; nil disables recording
 }
 
 // NewSession implements smtp.Backend.
 func (b *Backend) NewSession(remoteAddr string) (smtp.Session, error) {
-	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer}, nil
+	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History}, nil
 }
 
 type session struct {
@@ -48,6 +56,7 @@ type session struct {
 	logger       *logging.Logger
 	remoteAddr   string
 	scorer       SpamScorer
+	history      HistoryRecorder
 	from         string
 	targets      []target // local recipients, filed into mailboxes
 	relayTargets []string // external recipients, spooled for outbound relay
@@ -338,18 +347,31 @@ func (s *session) Data(r io.Reader) error {
 	localRaw := raw
 	folder := int64(mapi.PrivateFIDInbox)
 	if s.scorer != nil && s.authUser == "" && len(s.targets) > 0 {
+		ip := clientIP(s.remoteAddr)
 		v := s.scorer.Score(antispam.Input{
-			Raw: raw, ClientIP: clientIP(s.remoteAddr), MailFrom: s.from, FromDomain: fromHeaderDomain(raw),
+			Raw: raw, ClientIP: ip, MailFrom: s.from, FromDomain: fromHeaderDomain(raw),
 		})
 		localRaw = antispam.Tag(raw, v)
 		if v.Spam {
 			folder = int64(mapi.PrivateFIDJunk)
 		}
+		// The reasons aggregate every signal that fired (SPF/DKIM/DMARC, DNSBL zones,
+		// Bayesian, SA rules), so an admin can debug a false positive.
+		reasons := strings.Join(v.Reasons, "; ")
 		if s.logger != nil {
-			// Record why the message scored as it did (the reasons aggregate every
-			// signal that fired: SPF/DKIM/DMARC, DNSBL zones, Bayesian, SA rules), so
-			// an admin can debug a false positive from the log viewer.
-			s.logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "spam.scored", RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "score": v.Score, "spam": v.Spam, "reasons": strings.Join(v.Reasons, "; ")}})
+			s.logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "spam.scored", RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "score": v.Score, "spam": v.Spam, "reasons": reasons}})
+		}
+		// Persist the verdict for the admin Spam History view, fail-open: a history
+		// write must never fail the delivery.
+		if s.history != nil {
+			addr := ""
+			if ip != nil {
+				addr = ip.String()
+			}
+			rec := directory.SpamVerdict{Time: received.Unix(), MailFrom: s.from, RemoteAddr: addr, Score: v.Score, Spam: v.Spam, Reasons: reasons}
+			if err := s.history.RecordSpamVerdict(rec); err != nil && s.logger != nil {
+				s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "spam.history.fail", RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}, Err: err.Error()})
+			}
 		}
 	}
 	for _, t := range s.targets {

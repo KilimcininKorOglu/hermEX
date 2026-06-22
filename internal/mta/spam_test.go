@@ -1,6 +1,7 @@
 package mta
 
 import (
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +12,19 @@ import (
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
+
+// recordingHistory captures recorded verdicts; errHistory always fails, to prove
+// the recorder is fail-open.
+type recordingHistory struct{ records []directory.SpamVerdict }
+
+func (r *recordingHistory) RecordSpamVerdict(v directory.SpamVerdict) error {
+	r.records = append(r.records, v)
+	return nil
+}
+
+type errHistory struct{}
+
+func (errHistory) RecordSpamVerdict(directory.SpamVerdict) error { return errors.New("db down") }
 
 // recordingScorer captures the input it was asked to score and returns a fixed
 // verdict, so a test can assert what the MTA fed the scorer and how often.
@@ -121,6 +135,74 @@ func TestSpamScoredLogsReasons(t *testing.T) {
 	}
 	if reasons != "SPF fail; Bayesian: likely spam" {
 		t.Errorf("logged reasons = %q, want the joined verdict reasons", reasons)
+	}
+}
+
+// TestInboundSpamRecordedToHistory proves a scored inbound message's verdict is
+// recorded with the fields the admin Spam History view shows.
+func TestInboundSpamRecordedToHistory(t *testing.T) {
+	mbox := filepath.Join(t.TempDir(), "alice")
+	accounts := directory.StaticAccounts{"alice@test": {MailboxPath: mbox}}
+	hist := &recordingHistory{}
+	rec := &recordingScorer{verdict: antispam.Verdict{Score: 9, Spam: true, Reasons: []string{"SPF fail", "listed on DNSBL zen.example"}}}
+	b := &Backend{Accounts: accounts, Scorer: rec, History: hist}
+
+	sess, err := b.NewSession("203.0.113.9:1234")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Mail("bob@external.example"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Rcpt("alice@test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Data(strings.NewReader("From: bob@external.example\r\nSubject: x\r\n\r\nbody")); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(hist.records) != 1 {
+		t.Fatalf("history records = %d, want 1", len(hist.records))
+	}
+	r0 := hist.records[0]
+	if r0.MailFrom != "bob@external.example" || !r0.Spam || r0.Score != 9 ||
+		r0.Reasons != "SPF fail; listed on DNSBL zen.example" || r0.RemoteAddr != "203.0.113.9" {
+		t.Errorf("recorded verdict = %+v, want the scored values", r0)
+	}
+}
+
+// TestSpamHistoryFailOpen proves a history write error never fails the delivery:
+// the message is still delivered.
+func TestSpamHistoryFailOpen(t *testing.T) {
+	mbox := filepath.Join(t.TempDir(), "alice")
+	accounts := directory.StaticAccounts{"alice@test": {MailboxPath: mbox}}
+	b := &Backend{Accounts: accounts, Scorer: &recordingScorer{verdict: antispam.Verdict{Score: 1, Spam: false}}, History: errHistory{}}
+
+	sess, err := b.NewSession("203.0.113.9:1234")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Mail("bob@external.example"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Rcpt("alice@test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := sess.Data(strings.NewReader("From: bob@external.example\r\nSubject: x\r\n\r\nbody")); err != nil {
+		t.Fatalf("delivery failed when history recording erred (must be fail-open): %v", err)
+	}
+
+	st, err := objectstore.Open(mbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	inbox, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inbox) != 1 {
+		t.Errorf("inbox has %d messages, want the message delivered despite the history error", len(inbox))
 	}
 }
 

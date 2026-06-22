@@ -123,7 +123,7 @@ func main() {
 	// so a refresh or retrain takes effect without restarting the MTA — mail flow
 	// never pauses.
 	go antispam.NewReloader(scorer, cfg.DataDir, log.Printf).Run(context.Background(), time.Minute)
-	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer}, Hostname: cfg.Hostname, Logger: logger}
+	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir}, Hostname: cfg.Hostname, Logger: logger}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()
 		if err != nil {
