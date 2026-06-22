@@ -1,11 +1,43 @@
 package antispam
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+// TestReloadOnceHotSwapsSettings proves an edited settings version is applied to
+// the live Scorer on the tick: raising the threshold flips a message from spam to
+// ham, without a restart.
+func TestReloadOnceHotSwapsSettings(t *testing.T) {
+	s := &Scorer{checkSPF: func(net.IP, string, string) AuthResult { return AuthFail }}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: 1})
+	r := NewReloader(s, t.TempDir(), nil)
+
+	cfg := &Config{Weights: DefaultWeights, Threshold: 1}
+	ver := int64(100)
+	r.WatchSettings(func() (*Config, int64, bool) { return cfg, ver, true })
+
+	if names := r.reloadOnce(); len(names) != 0 {
+		t.Fatalf("reloadOnce with no settings change = %v, want none", names)
+	}
+	in := Input{Raw: []byte("x"), ClientIP: net.IPv4(1, 2, 3, 4), MailFrom: "a@x"}
+	if v := s.Score(in); !v.Spam {
+		t.Fatal("threshold 1 + SPF fail should be spam before the edit")
+	}
+
+	// An admin edit raises the threshold and bumps the version.
+	cfg = &Config{Weights: DefaultWeights, Threshold: 100}
+	ver = 200
+	if names := r.reloadOnce(); len(names) != 1 || names[0] != "settings" {
+		t.Fatalf("reloadOnce after edit = %v, want [settings]", names)
+	}
+	if v := s.Score(in); v.Spam {
+		t.Error("after the settings reload the same message should be ham")
+	}
+}
 
 // setMod stamps a file's modification time so the reloader's mtime comparison is
 // deterministic (filesystem timestamps are otherwise coarse).

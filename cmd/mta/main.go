@@ -104,8 +104,13 @@ func main() {
 	}
 
 	scorer := antispam.New(antispam.DefaultWeights, antispam.DefaultThreshold)
-	// comma-separated DNSBL zones; empty leaves DNSBL off
-	scorer.SetConfig(&antispam.Config{Weights: antispam.DefaultWeights, Threshold: antispam.DefaultThreshold, Zones: antispam.ParseZones(os.Getenv("HERMEX_DNSBL_ZONES"))})
+	// Settings (weights, threshold, DNSBL zones) live in the database, seeded from
+	// the built-in defaults on first run; the database is then the source of truth.
+	if settings, err := loadAntispamSettings(dir); err != nil {
+		log.Printf("hermex-mta: anti-spam settings load failed, using built-in defaults: %v", err)
+	} else {
+		scorer.SetConfig(antispamConfig(settings))
+	}
 	// The Bayesian model is loaded at startup — a data_dir model when present,
 	// otherwise the embedded floor — and hot-reloaded after a retrain (below).
 	model, err := antispam.LoadModel(cfg.DataDir)
@@ -120,10 +125,17 @@ func main() {
 		log.Printf("hermex-mta: anti-spam ruleset load failed, using embedded baseline: %v", err)
 	}
 	scorer.SetRules(rules)
-	// Hot-reload the ruleset and Bayesian model when their data_dir files change,
-	// so a refresh or retrain takes effect without restarting the MTA — mail flow
-	// never pauses.
-	go antispam.NewReloader(scorer, cfg.DataDir, log.Printf).Run(context.Background(), time.Minute)
+	// Hot-reload edited settings, a refreshed ruleset, and a retrained model so each
+	// takes effect without restarting the MTA — mail flow never pauses.
+	reloader := antispam.NewReloader(scorer, cfg.DataDir, log.Printf)
+	reloader.WatchSettings(func() (*antispam.Config, int64, bool) {
+		s, found, err := dir.GetAntispamSettings()
+		if err != nil || !found {
+			return nil, 0, false
+		}
+		return antispamConfig(s), s.UpdatedAt, true
+	})
+	go reloader.Run(context.Background(), time.Minute)
 	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir}, Hostname: cfg.Hostname, Logger: logger}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()
@@ -196,6 +208,42 @@ func main() {
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, spool.Close, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-mta: %v", err)
 	}
+}
+
+// antispamConfig maps stored anti-spam settings to the scorer's Config.
+func antispamConfig(s directory.AntispamSettings) *antispam.Config {
+	return &antispam.Config{
+		Weights: antispam.Weights{
+			SPFFail: s.SPFFail, SPFSoftFail: s.SPFSoftFail, DKIMFail: s.DKIMFail,
+			DMARCFail: s.DMARCFail, DNSBLHit: s.DNSBLHit, BayesSpam: s.BayesSpam, SARulesHit: s.SARulesHit,
+		},
+		Threshold: s.Threshold,
+		Zones:     antispam.ParseZones(s.Zones),
+	}
+}
+
+// loadAntispamSettings returns the stored settings, seeding the built-in defaults
+// (with the HERMEX_DNSBL_ZONES env value migrated in once) on first run so the
+// database becomes the single source of truth thereafter.
+func loadAntispamSettings(dir *directory.SQLDirectory) (directory.AntispamSettings, error) {
+	s, found, err := dir.GetAntispamSettings()
+	if err != nil {
+		return directory.AntispamSettings{}, err
+	}
+	if found {
+		return s, nil
+	}
+	w := antispam.DefaultWeights
+	seed := directory.AntispamSettings{
+		SPFFail: w.SPFFail, SPFSoftFail: w.SPFSoftFail, DKIMFail: w.DKIMFail, DMARCFail: w.DMARCFail,
+		DNSBLHit: w.DNSBLHit, BayesSpam: w.BayesSpam, SARulesHit: w.SARulesHit,
+		Threshold: antispam.DefaultThreshold, Zones: os.Getenv("HERMEX_DNSBL_ZONES"),
+	}
+	if err := dir.SetAntispamSettings(seed); err != nil {
+		return seed, err
+	}
+	s, _, err = dir.GetAntispamSettings() // re-read to pick up the stamped version
+	return s, err
 }
 
 // sendLaterInterval is how often the worker scans every mailbox's Outbox for due

@@ -21,6 +21,24 @@ type Reloader struct {
 	rulesMod  time.Time
 	modelMod  time.Time
 	log       func(format string, v ...any)
+
+	// settingsFn, when set via WatchSettings, returns the current editable Config
+	// and its monotonic version; the reloader applies it when the version advances.
+	settingsFn  func() (*Config, int64, bool)
+	settingsVer int64
+}
+
+// WatchSettings makes the reloader hot-apply edited settings on its tick: fn
+// returns the current Config and its version token, and the reloader calls
+// SetConfig when the version has advanced. It is kept out of the antispam package's
+// dependencies — the caller (which owns the settings store) supplies fn. The
+// current version is recorded now so already-loaded settings are not re-applied on
+// the first tick.
+func (r *Reloader) WatchSettings(fn func() (*Config, int64, bool)) {
+	r.settingsFn = fn
+	if _, ver, ok := fn(); ok {
+		r.settingsVer = ver
+	}
 }
 
 // NewReloader builds a Reloader for dataDir, recording the files' current
@@ -62,6 +80,13 @@ func (r *Reloader) Run(ctx context.Context, interval time.Duration) {
 // read/parse error is logged and the previous value is kept (fail-safe).
 func (r *Reloader) reloadOnce() []string {
 	var reloaded []string
+	if r.settingsFn != nil {
+		if cfg, ver, ok := r.settingsFn(); ok && ver > r.settingsVer {
+			r.scorer.SetConfig(cfg)
+			r.settingsVer = ver
+			reloaded = append(reloaded, "settings")
+		}
+	}
 	if mod, ok := fileModTime(r.rulesPath); ok && mod.After(r.rulesMod) {
 		switch rs, err := LoadRulesFile(r.rulesPath); {
 		case err != nil:
