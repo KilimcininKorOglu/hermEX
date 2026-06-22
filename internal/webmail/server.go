@@ -25,6 +25,9 @@ type Server struct {
 	Logger   *logging.Logger       // central activity log; nil disables logging
 	Spool    *relay.Spool          // outbound relay queue; nil sends local-only
 	Pub      *publicfolder.Service // per-domain public folders; nil disables them
+	// DigestSecret verifies quarantine-digest release tokens (the MTA mints them with
+	// the same key). Empty disables the release endpoint — links 404.
+	DigestSecret []byte
 }
 
 // smimeEvent logs an S/MIME crypto operation under the smime subsystem, tagged
@@ -59,6 +62,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /compose", s.handleComposeForm)
 	mux.HandleFunc("POST /compose", s.handleComposeSubmit)
 	mux.HandleFunc("GET /resolve", s.handleResolve)
+	// Quarantine digest release: unauthenticated — the signed token in the link is the
+	// sole credential. GET confirms (so link prefetch never releases), POST releases.
+	mux.HandleFunc("GET /quarantine/release", s.handleQuarantineReleaseForm)
+	mux.HandleFunc("POST /quarantine/release", s.handleQuarantineRelease)
 	mux.HandleFunc("GET /attachpick", s.handleAttachPick)
 	mux.HandleFunc("GET /import", s.handleImportForm)
 	mux.HandleFunc("POST /import", s.handleImportSubmit)
