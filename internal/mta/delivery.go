@@ -45,22 +45,33 @@ type SpamThresholdResolver interface {
 	SpamThresholdForMaildir(maildir string) (threshold int, ok bool, err error)
 }
 
+// RecipientAccessResolver returns a recipient mailbox's personal allow/block rules as
+// a pattern->action map, keyed by maildir. *directory.SQLDirectory satisfies it; it is
+// an interface so the MTA can be exercised without a database. Resolution is fail-open:
+// an error means no rules, so the message keeps its score-based verdict. The MTA feeds
+// the map to antispam.NewAccessList, so a personal rule matches a sender identically to
+// an operator rule.
+type RecipientAccessResolver interface {
+	RecipientRulesForMaildir(maildir string) (map[string]string, error)
+}
+
 // Backend is an smtp.Backend that delivers to per-recipient mailbox stores.
 type Backend struct {
-	Accounts   directory.Accounts
-	Spool      *relay.Spool          // outbound relay queue; nil disables external relay
-	Logger     *logging.Logger       // central activity log; nil disables logging
-	Scorer     SpamScorer            // inbound spam scorer; nil disables scoring
-	History    HistoryRecorder       // spam verdict history; nil disables recording
-	Greylist   *Greylister           // greylisting; nil (or disabled) accepts every first contact
-	RateLimit  *RateLimiter          // inbound per-IP rate limiting; nil (or disabled) admits every message
-	Thresholds SpamThresholdResolver // per-recipient spam-threshold overrides; nil files every recipient by the global threshold
-	Outbound   *OutboundLimiter      // outbound per-account abuse limiting; nil (or disabled) admits every recipient
+	Accounts        directory.Accounts
+	Spool           *relay.Spool            // outbound relay queue; nil disables external relay
+	Logger          *logging.Logger         // central activity log; nil disables logging
+	Scorer          SpamScorer              // inbound spam scorer; nil disables scoring
+	History         HistoryRecorder         // spam verdict history; nil disables recording
+	Greylist        *Greylister             // greylisting; nil (or disabled) accepts every first contact
+	RateLimit       *RateLimiter            // inbound per-IP rate limiting; nil (or disabled) admits every message
+	Thresholds      SpamThresholdResolver   // per-recipient spam-threshold overrides; nil files every recipient by the global threshold
+	RecipientAccess RecipientAccessResolver // per-recipient allow/block rules; nil applies no personal overrides
+	Outbound        *OutboundLimiter        // outbound per-account abuse limiting; nil (or disabled) admits every recipient
 }
 
 // NewSession implements smtp.Backend.
 func (b *Backend) NewSession(remoteAddr string) (smtp.Session, error) {
-	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History, greylist: b.Greylist, rateLimit: b.RateLimit, thresholds: b.Thresholds, outbound: b.Outbound}, nil
+	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History, greylist: b.Greylist, rateLimit: b.RateLimit, thresholds: b.Thresholds, recipAccess: b.RecipientAccess, outbound: b.Outbound}, nil
 }
 
 type session struct {
@@ -73,6 +84,7 @@ type session struct {
 	greylist     *Greylister
 	rateLimit    *RateLimiter
 	thresholds   SpamThresholdResolver
+	recipAccess  RecipientAccessResolver
 	outbound     *OutboundLimiter
 	from         string
 	targets      []target // local recipients, filed into mailboxes
@@ -383,11 +395,13 @@ func (s *session) Data(r io.Reader) error {
 	localRaw := raw
 	folder := int64(mapi.PrivateFIDInbox)
 	var v antispam.Verdict
+	var fromDom string
 	scored := s.scorer != nil && s.authUser == "" && len(s.targets) > 0
 	if scored {
 		ip := clientIP(s.remoteAddr)
+		fromDom = fromHeaderDomain(raw)
 		v = s.scorer.Score(antispam.Input{
-			Raw: raw, ClientIP: ip, MailFrom: s.from, FromDomain: fromHeaderDomain(raw),
+			Raw: raw, ClientIP: ip, MailFrom: s.from, FromDomain: fromDom,
 		})
 		localRaw = antispam.Tag(raw, v)
 		if v.Spam {
@@ -414,20 +428,48 @@ func (s *session) Data(r io.Reader) error {
 	}
 	for _, t := range s.targets {
 		tRaw, tFolder := localRaw, folder
-		// A recipient (or their domain) may override the global spam threshold. The
-		// score is intrinsic to the message, so re-decide only the Junk filing and the
-		// X-Spam flag against the override — never the score itself. An access-forced
-		// verdict (an operator allow/block rule) stays authoritative for every
-		// recipient and is never re-evaluated. Resolution is fail-open.
-		if scored && !v.AccessMatched && s.thresholds != nil {
-			if override, ok, err := s.thresholds.SpamThresholdForMaildir(t.path); err == nil && ok {
-				tv := v
-				tv.Spam = v.Score >= override
-				tFolder = int64(mapi.PrivateFIDInbox)
-				if tv.Spam {
-					tFolder = int64(mapi.PrivateFIDJunk)
+		// Per-recipient overrides re-decide only this recipient's Junk filing and the
+		// X-Spam flag — never the score, which is intrinsic to the message. Precedence,
+		// strongest first: an operator block is absolute; a recipient's own block
+		// narrows an operator allow (or blocks independently); an operator allow files
+		// to the inbox; a recipient's own allow rescues the message, but never a hard
+		// DMARC failure (a spoof a user cannot tell from the real sender); finally a
+		// per-recipient threshold re-evaluates a purely score-driven verdict. Every
+		// lookup is fail-open. An operator block makes a recipient's rules moot, so the
+		// lookup is skipped in that case.
+		if scored {
+			userAction := ""
+			if s.recipAccess != nil && v.AccessAction != antispam.AccessBlock {
+				if rules, err := s.recipAccess.RecipientRulesForMaildir(t.path); err == nil && len(rules) > 0 {
+					userAction = antispam.NewAccessList(rules).Action(s.from, fromDom)
 				}
+			}
+			switch {
+			case v.AccessAction == antispam.AccessBlock:
+				// Operator block — absolute; the message-level Junk filing stands.
+			case userAction == antispam.AccessBlock:
+				tv := v
+				tv.Spam = true
+				tFolder = int64(mapi.PrivateFIDJunk)
 				tRaw = antispam.Tag(raw, tv)
+			case v.AccessAction == antispam.AccessAllow:
+				// Operator allow — the message-level inbox filing stands (a hard DMARC
+				// failure already left it Junk inside the scorer).
+			case userAction == antispam.AccessAllow && !v.DMARCReject:
+				tv := v
+				tv.Spam = false
+				tFolder = int64(mapi.PrivateFIDInbox)
+				tRaw = antispam.Tag(raw, tv)
+			case s.thresholds != nil:
+				if override, ok, err := s.thresholds.SpamThresholdForMaildir(t.path); err == nil && ok {
+					tv := v
+					tv.Spam = v.Score >= override
+					tFolder = int64(mapi.PrivateFIDInbox)
+					if tv.Spam {
+						tFolder = int64(mapi.PrivateFIDJunk)
+					}
+					tRaw = antispam.Tag(raw, tv)
+				}
 			}
 		}
 		if err := deliver(s.accounts, s.from, t.addr, t.path, tRaw, received, tFolder); err != nil {

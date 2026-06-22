@@ -70,7 +70,7 @@ func TestPerRecipientThresholdDoesNotOverrideBlock(t *testing.T) {
 	accounts := directory.StaticAccounts{"alice@test": {MailboxPath: mbox}}
 	b := &Backend{
 		Accounts:   accounts,
-		Scorer:     &recordingScorer{verdict: antispam.Verdict{Score: 3, Spam: true, AccessMatched: true}},
+		Scorer:     &recordingScorer{verdict: antispam.Verdict{Score: 3, Spam: true, AccessMatched: true, AccessAction: antispam.AccessBlock}},
 		Thresholds: fixedThresholds{mbox: 1000},
 	}
 	deliverInbound(t, b, "spammer@evil.example", "alice@test")
