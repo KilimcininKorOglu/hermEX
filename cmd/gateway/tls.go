@@ -141,9 +141,11 @@ func acmeNames(dir *directory.SQLDirectory, hostname string) ([]string, error) {
 }
 
 // expandACMENames builds the certificate name set: the server's own hostname plus,
-// for each domain, the apex and the mail/autodiscover/autoconfig hosts a client is
-// steered to. Each must resolve to the gateway on :443 for the TLS-ALPN-01 challenge
-// to validate. The result is deduplicated and sorted so the obtain order is stable.
+// for each domain, the mail/autodiscover/autoconfig hosts the owner points at the
+// server (the prescribed CNAMEs). The apex is deliberately excluded — it is the
+// tenant's own website, not the mail front door, so it would not resolve here and
+// TLS-ALPN-01 would fail for it. Each included name must resolve to the gateway on
+// :443. The result is deduplicated and sorted so the obtain order is stable.
 func expandACMENames(domains []string, hostname string) []string {
 	set := map[string]bool{}
 	if hostname != "" {
@@ -153,7 +155,6 @@ func expandACMENames(domains []string, hostname string) []string {
 		if d == "" {
 			continue
 		}
-		set[d] = true
 		set["mail."+d] = true
 		set["autodiscover."+d] = true
 		set["autoconfig."+d] = true

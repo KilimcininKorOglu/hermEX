@@ -255,7 +255,6 @@ services:
       # on the gateway, so the dev test domain resolves to this container.
       default:
         aliases:
-          - hermex.test
           - mail.hermex.test
           - autodiscover.hermex.test
           - autoconfig.hermex.test

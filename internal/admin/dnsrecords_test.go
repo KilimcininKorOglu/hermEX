@@ -46,6 +46,11 @@ func TestPrescribeDomainDNS(t *testing.T) {
 	if r := by["DMARC"]; r.Type != "TXT" || r.Name != "_dmarc.tenant.com" || !strings.Contains(r.Value, "v=DMARC1") {
 		t.Errorf("DMARC = %+v, want a _dmarc TXT carrying v=DMARC1", r)
 	}
+	// The mail-host CNAME points IMAP/POP3/SMTP clients at the server and, in ACME
+	// mode, lets it obtain a certificate for mail.<domain>.
+	if r := by["Mail host"]; r.Type != "CNAME" || r.Name != "mail.tenant.com" || r.Value != host {
+		t.Errorf("Mail host = %+v, want a CNAME at mail.tenant.com to %s", r, host)
+	}
 	// Autodiscover/Autoconfig CNAMEs must point at the server host or clients can't
 	// find their settings.
 	for _, lbl := range []string{"Autodiscover", "Autoconfig"} {
