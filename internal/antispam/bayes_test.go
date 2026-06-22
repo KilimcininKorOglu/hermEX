@@ -79,9 +79,9 @@ func TestScoreBayesConfidentSpam(t *testing.T) {
 		m.Train("project meeting schedule notes review report attached agenda", false)
 	}
 	s := &Scorer{
-		Weights: DefaultWeights, Threshold: DefaultThreshold,
 		extractText: func(raw []byte) string { return string(raw) },
 	}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: DefaultThreshold})
 	s.SetModel(m)
 	v := s.Score(Input{Raw: []byte("cheap pills discount buy now viagra cialis offer")})
 	if v.BayesProb < bayesSpamProb {
@@ -96,9 +96,9 @@ func TestScoreBayesConfidentSpam(t *testing.T) {
 // when no model is set, even with text extraction wired.
 func TestScoreBayesDormantWithoutModel(t *testing.T) {
 	s := &Scorer{
-		Weights: DefaultWeights, Threshold: DefaultThreshold,
 		extractText: func([]byte) string { return "cheap pills buy now" },
 	}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: DefaultThreshold})
 	v := s.Score(Input{Raw: []byte("cheap pills buy now")})
 	if v.BayesProb != 0 || v.Score != 0 {
 		t.Errorf("verdict = %+v, want no Bayes contribution", v)

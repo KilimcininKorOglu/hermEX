@@ -22,12 +22,12 @@ func TestTag(t *testing.T) {
 // newTestScorer builds a Scorer with injected deterministic checks so the scoring
 // logic is exercised without live DNS.
 func newTestScorer(spfResult AuthResult, dkimValid bool) *Scorer {
-	return &Scorer{
-		Weights:   DefaultWeights,
-		Threshold: 5,
+	s := &Scorer{
 		checkSPF:  func(net.IP, string, string) AuthResult { return spfResult },
 		checkDKIM: func([]byte) []DKIMResult { return []DKIMResult{{Domain: "d", Valid: dkimValid}} },
 	}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: 5})
+	return s
 }
 
 // TestScoreCleanMail proves an SPF-pass, DKIM-valid message scores zero and is ham.
@@ -62,6 +62,23 @@ func TestScoreSoftFail(t *testing.T) {
 	}
 }
 
+// TestSetConfigHotSwap proves a settings swap takes effect on the next score:
+// raising the threshold above the message's score flips it from spam to ham,
+// without rebuilding the Scorer.
+func TestSetConfigHotSwap(t *testing.T) {
+	s := &Scorer{checkSPF: func(net.IP, string, string) AuthResult { return AuthFail }}
+	in := Input{Raw: []byte("x"), ClientIP: net.IPv4(1, 2, 3, 4), MailFrom: "a@x"}
+
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: 1}) // SPFFail (5) >= 1 -> spam
+	if v := s.Score(in); !v.Spam {
+		t.Fatalf("with threshold 1 an SPF fail should be spam: %+v", v)
+	}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: 100}) // 5 < 100 -> ham
+	if v := s.Score(in); v.Spam {
+		t.Errorf("after raising the threshold the same message should be ham: %+v", v)
+	}
+}
+
 // TestScoreSkipsChecksWithoutInputs proves missing inputs skip the checks (so the
 // real, DNS-hitting probes are never reached) and yield a clean, non-spam verdict.
 func TestScoreSkipsChecksWithoutInputs(t *testing.T) {
@@ -83,11 +100,11 @@ func TestNewWiresChecks(t *testing.T) {
 // policy adds the DMARC weight and is flagged spam.
 func TestScoreDMARCFailEnforced(t *testing.T) {
 	s := &Scorer{
-		Weights: DefaultWeights, Threshold: 5,
 		checkSPF:    func(net.IP, string, string) AuthResult { return AuthFail },
 		checkDKIM:   func([]byte) []DKIMResult { return nil },
 		lookupDMARC: func(string) (string, bool) { return "reject", true },
 	}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: 5})
 	v := s.Score(Input{Raw: []byte("x"), ClientIP: net.IPv4(1, 2, 3, 4), MailFrom: "a@evil.example", FromDomain: "bank.example"})
 	if v.DMARC != AuthFail {
 		t.Errorf("DMARC = %s, want fail", v.DMARC)
@@ -103,10 +120,10 @@ func TestScoreDMARCFailEnforced(t *testing.T) {
 // no SPF.
 func TestScoreDMARCAlignedPass(t *testing.T) {
 	s := &Scorer{
-		Weights: DefaultWeights, Threshold: 100,
 		checkDKIM:   func([]byte) []DKIMResult { return []DKIMResult{{Domain: "mail.bank.example", Valid: true}} },
 		lookupDMARC: func(string) (string, bool) { return "reject", true },
 	}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: 100})
 	v := s.Score(Input{Raw: []byte("x"), FromDomain: "bank.example"})
 	if v.DMARC != AuthPass {
 		t.Errorf("DMARC = %s, want pass (DKIM aligned by organizational domain)", v.DMARC)
@@ -117,10 +134,9 @@ func TestScoreDMARCAlignedPass(t *testing.T) {
 // DNSBL weight and is recorded.
 func TestScoreDNSBLHit(t *testing.T) {
 	s := &Scorer{
-		Weights: DefaultWeights, Threshold: DefaultThreshold,
-		Zones:      []string{"zen.example", "bl.example"},
 		checkDNSBL: func(ip net.IP, zone string) bool { return zone == "zen.example" },
 	}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: DefaultThreshold, Zones: []string{"zen.example", "bl.example"}})
 	v := s.Score(Input{ClientIP: net.IPv4(10, 0, 0, 1)})
 	if len(v.DNSBL) != 1 || v.DNSBL[0] != "zen.example" {
 		t.Fatalf("DNSBL = %v, want [zen.example]", v.DNSBL)
@@ -135,9 +151,9 @@ func TestScoreDNSBLHit(t *testing.T) {
 func TestScoreDNSBLDormantWithoutZones(t *testing.T) {
 	called := false
 	s := &Scorer{
-		Weights: DefaultWeights, Threshold: DefaultThreshold,
 		checkDNSBL: func(net.IP, string) bool { called = true; return true },
 	}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: DefaultThreshold})
 	v := s.Score(Input{ClientIP: net.IPv4(10, 0, 0, 1)})
 	if called {
 		t.Error("DNSBL was checked with no zones configured")
@@ -182,7 +198,8 @@ score  SUBJ_URGENT  2.5
 // summed score crosses the threshold it adds one bounded weight (not the raw SA
 // score) and records the score and the rules that fired.
 func TestScoreSARulesContributes(t *testing.T) {
-	s := &Scorer{Weights: DefaultWeights, Threshold: DefaultThreshold}
+	s := &Scorer{}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: DefaultThreshold})
 	s.SetRules(ParseSARules(saScoreRules))
 	raw := []byte("Subject: URGENT notice\r\n\r\nYou win a prize today!\r\n")
 
@@ -201,7 +218,8 @@ func TestScoreSARulesContributes(t *testing.T) {
 // TestScoreSARulesBelowThreshold proves a sub-threshold SA score records the score
 // and hits for transparency but contributes no weight.
 func TestScoreSARulesBelowThreshold(t *testing.T) {
-	s := &Scorer{Weights: DefaultWeights, Threshold: DefaultThreshold}
+	s := &Scorer{}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: DefaultThreshold})
 	s.SetRules(ParseSARules(saScoreRules))
 	raw := []byte("Subject: hello\r\n\r\nYou win a prize today!\r\n") // only WIN_PRIZE (3.0)
 
@@ -216,7 +234,9 @@ func TestScoreSARulesBelowThreshold(t *testing.T) {
 
 // TestScoreSARulesDormant proves no SA evaluation happens when no ruleset is set.
 func TestScoreSARulesDormant(t *testing.T) {
-	v := (&Scorer{Weights: DefaultWeights, Threshold: DefaultThreshold}).Score(Input{Raw: []byte("Subject: URGENT\r\n\r\nwin a prize")})
+	s := &Scorer{}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: DefaultThreshold})
+	v := s.Score(Input{Raw: []byte("Subject: URGENT\r\n\r\nwin a prize")})
 	if v.SAScore != 0 || v.SAHits != nil {
 		t.Errorf("verdict = SAScore %v SAHits %v, want a dormant SA signal", v.SAScore, v.SAHits)
 	}

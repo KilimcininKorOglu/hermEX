@@ -29,7 +29,8 @@ func TestReloadOnceHotSwapsRuleset(t *testing.T) {
 	}
 	setMod(t, path, old)
 
-	s := &Scorer{Weights: DefaultWeights, Threshold: DefaultThreshold}
+	s := &Scorer{}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: DefaultThreshold})
 	rs, _ := LoadRulesFile(path)
 	s.SetRules(rs)
 	r := NewReloader(s, dir, nil)
@@ -56,17 +57,19 @@ func TestReloadOnceHotSwapsRuleset(t *testing.T) {
 }
 
 // TestScoreSafeUnderConcurrentReload exercises Score concurrently with the
-// SetRules/SetModel hot-swaps the reloader performs. It is the teeth behind the
-// "hot-swap without a restart" claim: run under -race, a plain pointer field
-// would report a data race here; the atomic pointers must not.
+// SetConfig/SetRules/SetModel hot-swaps the reloader performs. It is the teeth
+// behind the "hot-swap without a restart" claim: run under -race, a plain pointer
+// field would report a data race here; the atomic pointers must not.
 func TestScoreSafeUnderConcurrentReload(t *testing.T) {
-	s := &Scorer{Weights: DefaultWeights, Threshold: DefaultThreshold, extractText: func(b []byte) string { return string(b) }}
+	s := &Scorer{extractText: func(b []byte) string { return string(b) }}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: DefaultThreshold})
 	s.SetRules(ParseSARules("body X /spammy/\nscore X 1.0\n"))
 	raw := []byte("Subject: x\r\n\r\nsome spammy text here")
 
 	done := make(chan struct{})
 	go func() {
-		for range 500 {
+		for i := range 500 {
+			s.SetConfig(&Config{Weights: DefaultWeights, Threshold: DefaultThreshold + i%3})
 			s.SetRules(ParseSARules("body Y /other/\nscore Y 2.0\n"))
 			s.SetModel(NewBayesModel())
 		}
@@ -92,7 +95,8 @@ func TestReloadOnceHotSwapsModel(t *testing.T) {
 	}
 	setMod(t, path, time.Now().Add(-time.Hour))
 
-	s := &Scorer{Weights: DefaultWeights, Threshold: DefaultThreshold, extractText: func(b []byte) string { return string(b) }}
+	s := &Scorer{extractText: func(b []byte) string { return string(b) }}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: DefaultThreshold})
 	m0, _ := LoadModelFile(path)
 	s.SetModel(m0)
 	r := NewReloader(s, dir, nil)

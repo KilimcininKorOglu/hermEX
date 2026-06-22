@@ -88,16 +88,24 @@ type DKIMResult struct {
 	Valid  bool
 }
 
-// Scorer computes verdicts. The check functions are injected (New wires the
-// production library-backed implementations); tests supply deterministic ones.
-type Scorer struct {
+// Config is the Scorer's hot-swappable tuning: the signal weights, the spam
+// threshold, and the DNS blocklist zones. It is swapped as one unit so Score
+// always observes a coherent snapshot (never new weights with an old threshold).
+type Config struct {
 	Weights   Weights
 	Threshold int
 	Zones     []string // DNS blocklist zones to query the client IP against; empty disables DNSBL
-	// model and saRules are held behind atomic pointers so the MTA can hot-swap a
-	// retrained model or a refreshed ruleset while Score runs concurrently, without
-	// a restart. A nil value leaves that signal dormant. Set them via SetModel and
-	// SetRules.
+}
+
+// Scorer computes verdicts. The check functions are injected (New wires the
+// production library-backed implementations); tests supply deterministic ones.
+type Scorer struct {
+	// cfg (weights, threshold, zones), model, and saRules are held behind atomic
+	// pointers so the MTA can hot-swap edited settings, a retrained model, or a
+	// refreshed ruleset while Score runs concurrently, without a restart. A nil
+	// model/saRules leaves that signal dormant. Set them via SetConfig, SetModel,
+	// and SetRules.
+	cfg         atomic.Pointer[Config]
 	model       atomic.Pointer[BayesModel]
 	saRules     atomic.Pointer[SARuleSet]
 	checkSPF    func(ip net.IP, helo, mailFrom string) AuthResult
@@ -106,6 +114,11 @@ type Scorer struct {
 	checkDNSBL  func(ip net.IP, zone string) bool
 	extractText func(raw []byte) string
 }
+
+// SetConfig installs (or replaces) the weights, threshold, and blocklist zones. It
+// is safe to call concurrently with Score, so edited settings apply without a
+// restart.
+func (s *Scorer) SetConfig(c *Config) { s.cfg.Store(c) }
 
 // SetModel installs (or replaces) the Bayesian content model. It is safe to call
 // concurrently with Score, so a retrained model can be hot-swapped in without a
@@ -119,14 +132,15 @@ func (s *Scorer) SetRules(rs *SARuleSet) { s.saRules.Store(rs) }
 
 // New returns a Scorer wired to the real SPF, DKIM, DMARC, and DNSBL checks,
 // flagging a message as spam once its score reaches threshold. DNSBL stays
-// dormant until Zones is set, Bayesian content scoring until SetModel is called,
-// and SpamAssassin rules until SetRules is called.
+// dormant until SetConfig supplies zones, Bayesian content scoring until SetModel
+// is called, and SpamAssassin rules until SetRules is called.
 func New(w Weights, threshold int) *Scorer {
-	return &Scorer{
-		Weights: w, Threshold: threshold,
+	s := &Scorer{
 		checkSPF: realSPF, checkDKIM: realDKIM, lookupDMARC: realDMARC, checkDNSBL: realDNSBL,
 		extractText: MessageText,
 	}
+	s.cfg.Store(&Config{Weights: w, Threshold: threshold})
+	return s
 }
 
 // Score runs the configured checks and aggregates a verdict. A check is skipped
@@ -134,15 +148,22 @@ func New(w Weights, threshold int) *Scorer {
 // the caller treats scoring as advisory and fail-open.
 func (s *Scorer) Score(in Input) Verdict {
 	v := Verdict{SPF: AuthNone, DKIM: AuthNone, DMARC: AuthNone}
+	// Load the tuning once so the whole verdict uses one coherent snapshot even if
+	// settings are hot-swapped mid-scoring. An unconfigured Scorer falls back to the
+	// defaults.
+	cfg := s.cfg.Load()
+	if cfg == nil {
+		cfg = &Config{Weights: DefaultWeights, Threshold: DefaultThreshold}
+	}
 
 	if s.checkSPF != nil && in.ClientIP != nil && in.MailFrom != "" {
 		v.SPF = s.checkSPF(in.ClientIP, in.HeloName, in.MailFrom)
 		switch v.SPF {
 		case AuthFail:
-			v.Score += s.Weights.SPFFail
+			v.Score += cfg.Weights.SPFFail
 			v.Reasons = append(v.Reasons, "SPF fail")
 		case AuthSoftFail:
-			v.Score += s.Weights.SPFSoftFail
+			v.Score += cfg.Weights.SPFSoftFail
 			v.Reasons = append(v.Reasons, "SPF softfail")
 		}
 	}
@@ -158,7 +179,7 @@ func (s *Scorer) Score(in Input) Verdict {
 			v.DKIM = AuthPass
 		} else {
 			v.DKIM = AuthFail
-			v.Score += s.Weights.DKIMFail
+			v.Score += cfg.Weights.DKIMFail
 			v.Reasons = append(v.Reasons, "no valid DKIM signature")
 		}
 	}
@@ -176,7 +197,7 @@ func (s *Scorer) Score(in Input) Verdict {
 		default:
 			v.DMARC = AuthFail
 			if policy == "reject" || policy == "quarantine" {
-				v.Score += s.Weights.DMARCFail
+				v.Score += cfg.Weights.DMARCFail
 				v.Reasons = append(v.Reasons, "DMARC fail (policy "+policy+")")
 			}
 		}
@@ -185,10 +206,10 @@ func (s *Scorer) Score(in Input) Verdict {
 	// DNSBL: a client IP listed on a configured blocklist zone is a strong signal;
 	// each listing zone adds its weight.
 	if s.checkDNSBL != nil && in.ClientIP != nil {
-		for _, zone := range s.Zones {
+		for _, zone := range cfg.Zones {
 			if s.checkDNSBL(in.ClientIP, zone) {
 				v.DNSBL = append(v.DNSBL, zone)
-				v.Score += s.Weights.DNSBLHit
+				v.Score += cfg.Weights.DNSBLHit
 				v.Reasons = append(v.Reasons, "listed on DNSBL "+zone)
 			}
 		}
@@ -199,7 +220,7 @@ func (s *Scorer) Score(in Input) Verdict {
 	if m := s.model.Load(); m != nil && s.extractText != nil && len(in.Raw) > 0 {
 		v.BayesProb = m.Score(s.extractText(in.Raw))
 		if v.BayesProb >= bayesSpamProb {
-			v.Score += s.Weights.BayesSpam
+			v.Score += cfg.Weights.BayesSpam
 			v.Reasons = append(v.Reasons, "Bayesian: likely spam")
 		}
 	}
@@ -211,12 +232,12 @@ func (s *Scorer) Score(in Input) Verdict {
 	if rs := s.saRules.Load(); rs != nil && len(in.Raw) > 0 {
 		v.SAScore, v.SAHits = rs.Evaluate(in.Raw)
 		if v.SAScore >= SAScoreThreshold {
-			v.Score += s.Weights.SARulesHit
+			v.Score += cfg.Weights.SARulesHit
 			v.Reasons = append(v.Reasons, fmt.Sprintf("SpamAssassin rules (score %.1f)", v.SAScore))
 		}
 	}
 
-	v.Spam = v.Score >= s.Threshold
+	v.Spam = v.Score >= cfg.Threshold
 	return v
 }
 

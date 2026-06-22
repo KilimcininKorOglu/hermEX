@@ -104,7 +104,8 @@ func main() {
 	}
 
 	scorer := antispam.New(antispam.DefaultWeights, antispam.DefaultThreshold)
-	scorer.Zones = antispam.ParseZones(os.Getenv("HERMEX_DNSBL_ZONES")) // comma-separated DNSBL zones; empty leaves DNSBL off
+	// comma-separated DNSBL zones; empty leaves DNSBL off
+	scorer.SetConfig(&antispam.Config{Weights: antispam.DefaultWeights, Threshold: antispam.DefaultThreshold, Zones: antispam.ParseZones(os.Getenv("HERMEX_DNSBL_ZONES"))})
 	// The Bayesian model is loaded at startup — a data_dir model when present,
 	// otherwise the embedded floor — and hot-reloaded after a retrain (below).
 	model, err := antispam.LoadModel(cfg.DataDir)
