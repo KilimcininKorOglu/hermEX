@@ -19,6 +19,9 @@
 
 <h2>Inbound rate limiting</h2>
 {{template "ratelimit-panel" .}}
+
+<h2>Outbound abuse</h2>
+{{template "outbound-panel" .}}
 </main>
 </div>
 {{template "foot" .}}{{end}}
@@ -29,6 +32,17 @@
 <form hx-post="/admin/ui/antispam/greylist" hx-target="#greylist-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <input type="hidden" name="enabled" value="{{if .GreylistEnabled}}0{{else}}1{{end}}">
 <button type="submit">{{if .GreylistEnabled}}Disable{{else}}Enable{{end}} greylisting</button>
+</form>
+</div>{{end}}
+
+{{define "outbound-panel"}}<div id="outbound-panel">
+{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+<p>Outbound abuse limiting is <strong>{{if .OutboundEnabled}}on{{else}}off{{end}}</strong>. When on, a local account that sends to more than the cap of external recipients within the window has the excess deferred with a temporary failure — a compromised account cannot blast spam unchecked — and an <code>outbound.abuse</code> event is logged once per window so you can disable the account. Authenticated submission only; inbound mail is never affected.</p>
+<form hx-post="/admin/ui/antispam/outbound" hx-target="#outbound-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label class="check"><input type="checkbox" name="enabled" value="1"{{if .OutboundEnabled}} checked{{end}}> Enable outbound limiting</label>
+<p>External recipients per window: <input type="number" name="cap" value="{{.OutboundCap}}" min="1"></p>
+<p>Window (seconds): <input type="number" name="window" value="{{.OutboundWindow}}" min="1"></p>
+<button type="submit">Save settings</button>
 </form>
 </div>{{end}}
 

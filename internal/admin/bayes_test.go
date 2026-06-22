@@ -162,6 +162,47 @@ func TestSaveRateLimitRejectsBadValues(t *testing.T) {
 	}
 }
 
+// TestSaveOutboundSettings proves the outbound-abuse form persists the toggle, cap,
+// and window and acknowledges the save.
+func TestSaveOutboundSettings(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	form := url.Values{"enabled": {"1"}, "cap": {"250"}, "window": {"1800"}}
+	resp := htmxPOST(t, ts, "/admin/ui/antispam/outbound", session, csrf, form)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save = %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "Outbound settings saved") {
+		t.Errorf("response missing acknowledgment:\n%s", body)
+	}
+	if !d.outboundFound || !d.outbound.Enabled || d.outbound.RecipientCap != 250 || d.outbound.WindowSeconds != 1800 {
+		t.Errorf("settings not persisted as entered: found=%v %+v", d.outboundFound, d.outbound)
+	}
+}
+
+// TestSaveOutboundRejectsBadValues proves a cap or window below 1 is rejected and
+// nothing is persisted.
+func TestSaveOutboundRejectsBadValues(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/antispam/outbound", session, csrf,
+		url.Values{"enabled": {"1"}, "cap": {"0"}, "window": {"3600"}})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), "at least 1") {
+		t.Errorf("expected a validation message:\n%s", body)
+	}
+	if d.outboundFound {
+		t.Error("invalid outbound settings must not be persisted")
+	}
+}
+
 // TestPerformBayesRetrain proves the retrain task reads each mailbox's Junk as
 // spam and inbox as ham, trains a model, and writes it to the MTA's model path.
 func TestPerformBayesRetrain(t *testing.T) {

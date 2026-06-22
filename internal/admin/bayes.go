@@ -96,6 +96,15 @@ func (s *Server) antispamPageData(r *http.Request, notice string) map[string]any
 		data["RateLimitBurst"] = rl.Burst
 		data["RateLimitWindow"] = rl.WindowSeconds
 	}
+
+	// Outbound abuse limiting: the stored settings, or the limiter's built-in
+	// defaults (disabled, 500 external recipients per 3600 s) when none has been saved.
+	data["OutboundEnabled"], data["OutboundCap"], data["OutboundWindow"] = false, 500, 3600
+	if ob, found, err := s.dir.GetOutboundSettings(); err == nil && found {
+		data["OutboundEnabled"] = ob.Enabled
+		data["OutboundCap"] = ob.RecipientCap
+		data["OutboundWindow"] = ob.WindowSeconds
+	}
 	return data
 }
 
@@ -140,6 +149,30 @@ func (s *Server) handleUISaveRateLimit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, "ratelimit-panel", s.antispamPageData(r, "Rate-limit settings saved — the MTA applies them within a minute, no restart."))
+}
+
+// handleUISaveOutbound persists the outbound-abuse settings (enable, external-recipient
+// cap, and window). The MTA applies the change within about a minute, no restart. A cap
+// or window below 1 is rejected.
+func (s *Server) handleUISaveOutbound(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	recipientCap, window := formInt(r, "cap"), formInt(r, "window")
+	if recipientCap < 1 || window < 1 {
+		s.render(w, "outbound-panel", s.antispamPageData(r, "Recipient cap and window must each be at least 1; settings not saved."))
+		return
+	}
+	st := directory.OutboundSettings{
+		Enabled:       r.FormValue("enabled") == "1",
+		RecipientCap:  recipientCap,
+		WindowSeconds: window,
+	}
+	if err := s.dir.SetOutboundSettings(st); err != nil {
+		s.render(w, "outbound-panel", s.antispamPageData(r, "Could not save outbound settings: "+err.Error()))
+		return
+	}
+	s.render(w, "outbound-panel", s.antispamPageData(r, "Outbound settings saved — the MTA applies them within a minute, no restart."))
 }
 
 // weightsFromSettings maps a stored settings row to antispam.Weights for display.

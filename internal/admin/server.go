@@ -103,6 +103,8 @@ type Directory interface {
 	SetGreylistEnabled(on bool) error
 	GetRateLimitSettings() (directory.RateLimitSettings, bool, error)
 	SetRateLimitSettings(directory.RateLimitSettings) error
+	GetOutboundSettings() (directory.OutboundSettings, bool, error)
+	SetOutboundSettings(directory.OutboundSettings) error
 	GetUserSpamThreshold(username string) (*int, error)
 	SetUserSpamThreshold(username string, threshold *int) error
 	GetDomainSpamThreshold(domain string) (*int, error)
@@ -318,6 +320,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/antispam/settings", s.handleUISaveAntispamSettings)
 	mux.HandleFunc("POST /admin/ui/antispam/greylist", s.handleUIToggleGreylist)
 	mux.HandleFunc("POST /admin/ui/antispam/ratelimit", s.handleUISaveRateLimit)
+	mux.HandleFunc("POST /admin/ui/antispam/outbound", s.handleUISaveOutbound)
 	mux.HandleFunc("GET /admin/ui/spam-history", s.handleUISpamHistory)
 	mux.HandleFunc("GET /admin/ui/sender-access", s.handleUISenderAccess)
 	mux.HandleFunc("POST /admin/ui/sender-access", s.handleUISaveSenderRule)
