@@ -54,12 +54,13 @@ func gatewayTLS(cfg *config.Config, dir *directory.SQLDirectory, logger *logging
 	return provider, provider.RunMaintenance, nil
 }
 
-// acmeMaintain obtains certificates for the current tenant allowlist, then keeps the
-// allowlist current: CertMagic renews managed certificates on its own, so this only
-// re-runs the obtain so a newly added tenant domain gets covered. It runs after the
-// gateway is serving, so the TLS-ALPN-01 challenge reaches the live listener.
+// acmeMaintain keeps the ACME certificates current and distributed. Each cycle it
+// obtains certificates for the active tenant allowlist (CertMagic also renews
+// managed certificates on its own, so this mainly covers a newly added domain) and
+// then mirrors what it has into the tls_certs store. It runs after the gateway is
+// serving so the TLS-ALPN-01 challenge reaches the live listener.
 func acmeMaintain(acme *tlscert.ACMEProvider, dir *directory.SQLDirectory, hostname string, logger *logging.Logger) {
-	manage := func() {
+	cycle := func() {
 		names, err := acmeNames(dir, hostname)
 		if err != nil {
 			if logger != nil {
@@ -70,12 +71,54 @@ func acmeMaintain(acme *tlscert.ACMEProvider, dir *directory.SQLDirectory, hostn
 		if err := acme.Manage(context.Background(), names); err != nil && logger != nil {
 			logger.Warn(logging.TLS, "acme.manage", logging.Fields{"detail": "obtaining certificates failed; will retry on the next poll", "error": err.Error()})
 		}
+		mirrorACMECerts(acme, dir, names, logger)
 	}
-	manage()
+	cycle()
 	tick := time.NewTicker(15 * time.Minute)
 	defer tick.Stop()
 	for range tick.C {
-		manage()
+		cycle()
+	}
+}
+
+// mirrorACMECerts copies each obtained certificate from CertMagic's storage into the
+// tls_certs store, so the mail daemons — which terminate TLS on their own ports and
+// only read that store — present the same Let's Encrypt certificate as the gateway.
+// It is a reconcile, not an event hook: it handles both a fresh obtain and a renewal
+// with one path, and writes a name only when its expiry differs from what the store
+// already holds, so an unchanged certificate does not churn the daemons' poll.
+func mirrorACMECerts(acme *tlscert.ACMEProvider, dir *directory.SQLDirectory, names []string, logger *logging.Logger) {
+	existing, err := dir.ListTLSCerts()
+	if err != nil {
+		if logger != nil {
+			logger.Warn(logging.TLS, "acme.mirror", logging.Fields{"detail": "could not read the certificate store", "error": err.Error()})
+		}
+		return
+	}
+	have := make(map[string]int64, len(existing))
+	for _, c := range existing {
+		have[c.Name] = c.NotAfter
+	}
+	for _, name := range names {
+		certPEM, keyPEM, notAfter, ok, err := acme.LoadObtainedCert(context.Background(), name)
+		if err != nil {
+			if logger != nil {
+				logger.Warn(logging.TLS, "acme.mirror", logging.Fields{"detail": "could not read an obtained certificate", "name": name, "error": err.Error()})
+			}
+			continue
+		}
+		if !ok || have[name] == notAfter {
+			continue
+		}
+		if err := dir.SetTLSCert(name, string(certPEM), string(keyPEM), notAfter); err != nil {
+			if logger != nil {
+				logger.Warn(logging.TLS, "acme.mirror", logging.Fields{"detail": "could not store a mirrored certificate", "name": name, "error": err.Error()})
+			}
+			continue
+		}
+		if logger != nil {
+			logger.Info(logging.TLS, "acme.mirror", logging.Fields{"detail": "mirrored an ACME certificate to the store", "name": name})
+		}
 	}
 }
 

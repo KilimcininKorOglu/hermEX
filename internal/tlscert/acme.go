@@ -4,7 +4,10 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 
 	"github.com/caddyserver/certmagic"
@@ -22,6 +25,7 @@ import (
 // covered, and the certificate exists before the first client connects.
 type ACMEProvider struct {
 	magic  *certmagic.Config
+	issuer *certmagic.ACMEIssuer // kept for its storage IssuerKey when mirroring certs
 	logger *logging.Logger
 }
 
@@ -57,9 +61,10 @@ func NewACME(storageDir string, settings directory.TLSSettings, caRootFile strin
 		}
 		acme.TrustedRoots = pool
 	}
-	magic.Issuers = []certmagic.Issuer{certmagic.NewACMEIssuer(magic, acme)}
+	issuer := certmagic.NewACMEIssuer(magic, acme)
+	magic.Issuers = []certmagic.Issuer{issuer}
 
-	return &ACMEProvider{magic: magic, logger: logger}, nil
+	return &ACMEProvider{magic: magic, issuer: issuer, logger: logger}, nil
 }
 
 // TLSEnabled always reports true: an ACME provider is constructed only when the
@@ -80,6 +85,39 @@ func (p *ACMEProvider) TLSConfig() (*tls.Config, error) {
 // tenant allowlist grows, so coverage tracks the domain set.
 func (p *ACMEProvider) Manage(ctx context.Context, names []string) error {
 	return p.magic.ManageSync(ctx, names)
+}
+
+// LoadObtainedCert reads the obtained certificate chain and private key for domain
+// straight from CertMagic's storage as PEM, with the leaf's expiry in Unix millis.
+// ok is false when the certificate has not been obtained yet, so the caller skips it
+// without treating it as an error. Returning the stored PEM verbatim is deliberate:
+// re-encoding a parsed private key would be brittle across key types, and the gateway
+// only needs to copy the bytes to the store the mail daemons read.
+func (p *ACMEProvider) LoadObtainedCert(ctx context.Context, domain string) (certPEM, keyPEM []byte, notAfter int64, ok bool, err error) {
+	issuerKey := p.issuer.IssuerKey()
+	certPEM, err = p.magic.Storage.Load(ctx, certmagic.StorageKeys.SiteCert(issuerKey, domain))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil, 0, false, nil
+	}
+	if err != nil {
+		return nil, nil, 0, false, err
+	}
+	keyPEM, err = p.magic.Storage.Load(ctx, certmagic.StorageKeys.SitePrivateKey(issuerKey, domain))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, nil, 0, false, nil
+	}
+	if err != nil {
+		return nil, nil, 0, false, err
+	}
+	block, _ := pem.Decode(certPEM)
+	if block == nil {
+		return nil, nil, 0, false, fmt.Errorf("tlscert: stored certificate for %q is not PEM", domain)
+	}
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		return nil, nil, 0, false, fmt.Errorf("tlscert: parse stored certificate for %q: %w", domain, err)
+	}
+	return certPEM, keyPEM, leaf.NotAfter.UnixMilli(), true, nil
 }
 
 // loadACMERoots reads a PEM bundle into a certificate pool for trusting a private
