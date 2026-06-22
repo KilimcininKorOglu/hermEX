@@ -235,6 +235,13 @@ services:
       - HERMEX_TLS_KEY=/config/tls/key.pem
       - HERMEX_LOG_MONGO_URI=mongodb://mongo:27017
       - HERMEX_LOG_SPILL_DIR=/data/logspill
+      # Backends serve HTTPS (end-to-end TLS); the gateway forwards over TLS and skips
+      # verification on the internal hop (self-signed certs).
+      - HERMEX_BACKEND_MAPI=https://mapi:8080
+      - HERMEX_BACKEND_EWS=https://ews:8080
+      - HERMEX_BACKEND_ACTIVESYNC=https://activesync:8080
+      - HERMEX_BACKEND_DAV=https://dav:8080
+      - HERMEX_BACKEND_WEBMAIL=https://webmail:8080
     volumes:
       - ./docker-data/tls:/config/tls:ro
       - ./docker-data/spill/gateway:/data/logspill

@@ -2,12 +2,14 @@
 // request to a backend daemon chosen by the longest matching path prefix, so a
 // client (Outlook, a browser, a phone) reaches autodiscover, EWS, MAPI/HTTP,
 // RPC/HTTP, ActiveSync, DAV and webmail through one host. TLS is terminated by
-// the caller (serve.ListenAndServe); the gateway forwards plaintext to the
-// backends on the internal network and passes the Authorization header through
-// for the backends to authenticate.
+// the caller (serve.ListenAndServe); the gateway forwards to the backends on the
+// internal network — plaintext, or HTTPS with verification skipped on that internal
+// hop when the backends present self-signed certificates — and passes the
+// Authorization header through for the backends to authenticate.
 package gateway
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"net/http/httputil"
@@ -35,6 +37,10 @@ func Handler(routes []Route) (http.Handler, error) {
 		proxy  *httputil.ReverseProxy
 	}
 	compiledRoutes := make([]compiled, 0, len(routes))
+	// Backends share one transport. When TLS is terminated end-to-end they present
+	// self-signed certificates on the internal network, so verification is skipped on
+	// the gateway→backend hop (the external hop to the client stays verified).
+	transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 	for _, r := range routes {
 		u, err := url.Parse(r.Target)
 		if err != nil {
@@ -43,7 +49,9 @@ func Handler(routes []Route) (http.Handler, error) {
 		if u.Scheme == "" || u.Host == "" {
 			return nil, fmt.Errorf("gateway: target %q must be an absolute URL", r.Target)
 		}
-		compiledRoutes = append(compiledRoutes, compiled{strings.ToLower(r.Prefix), httputil.NewSingleHostReverseProxy(u)})
+		proxy := httputil.NewSingleHostReverseProxy(u)
+		proxy.Transport = transport
+		compiledRoutes = append(compiledRoutes, compiled{strings.ToLower(r.Prefix), proxy})
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		path := strings.ToLower(req.URL.Path)
