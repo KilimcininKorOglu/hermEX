@@ -96,6 +96,7 @@ func (s *Server) handleUIDomainDetail(w http.ResponseWriter, r *http.Request) {
 	users, _ := s.dir.ListUsersInDomain(id)
 	contacts, _ := s.dir.ListContactsInDomain(id)
 	groups, _ := s.dir.ListMListsInDomain(id)
+	spamThreshold, _ := s.dir.GetDomainSpamThreshold(dd.Name)
 	s.render(w, "domain_detail.html", map[string]any{
 		"Nav": "domains", "CSRF": csrfCookieValue(r), "Domain": dd, "Orgs": orgs,
 		"PolicyFields":   policyView(policy),
@@ -103,6 +104,7 @@ func (s *Server) handleUIDomainDetail(w http.ResponseWriter, r *http.Request) {
 		"DomainUsers":    users,
 		"DomainContacts": contacts,
 		"DomainGroups":   groups,
+		"SpamThreshold":  spamThreshold,
 	})
 }
 

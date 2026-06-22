@@ -44,6 +44,14 @@
 <button type="submit">Save quota</button>
 </form>
 
+<h2>Spam threshold</h2>
+<p class="hint">Files inbound mail to this user's Junk folder at or above this score. Leave empty to inherit the domain or global threshold. An operator block/allow rule still wins.</p>
+<form class="spam-threshold-form" hx-put="/admin/ui/users/{{.User.Username}}/spam-threshold" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Threshold <input type="number" name="spam_threshold" value="{{if .SpamThreshold}}{{.SpamThreshold}}{{end}}" min="1" placeholder="inherit"></label>
+<button type="submit">Save threshold</button>
+</form>
+
 <h2>Address-book visibility</h2>
 <form class="hide-form" hx-put="/admin/ui/users/{{.User.Username}}/hide" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>

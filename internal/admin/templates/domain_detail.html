@@ -100,6 +100,14 @@
 <label>Send quota (MiB) <input type="number" name="sendmb" min="0" value="{{.Override.SendMB}}" placeholder="(inherit)"></label>
 <button type="submit">Save override</button>
 </form>
+
+<h2>Spam threshold</h2>
+<p class="hint">Files inbound mail to Junk at or above this score for this domain's mailboxes, unless a user sets their own. Leave empty to inherit the global threshold. An operator block/allow rule still wins.</p>
+<form class="spam-threshold-form" hx-put="/admin/ui/domains/{{.Domain.ID}}/spam-threshold" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Threshold <input type="number" name="spam_threshold" value="{{if .SpamThreshold}}{{.SpamThreshold}}{{end}}" min="1" placeholder="inherit"></label>
+<button type="submit">Save threshold</button>
+</form>
 <div id="user-status"></div>
 
 <h2>DNS health</h2>

@@ -103,6 +103,10 @@ type Directory interface {
 	SetGreylistEnabled(on bool) error
 	GetRateLimitSettings() (directory.RateLimitSettings, bool, error)
 	SetRateLimitSettings(directory.RateLimitSettings) error
+	GetUserSpamThreshold(username string) (*int, error)
+	SetUserSpamThreshold(username string, threshold *int) error
+	GetDomainSpamThreshold(domain string) (*int, error)
+	SetDomainSpamThreshold(domain string, threshold *int) error
 }
 
 // LDAPSyncer downsyncs an organization's directory accounts. It is optional —
@@ -291,6 +295,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /admin/ui/users/{email}/oof", s.handleUIUserOOF)
 	mux.HandleFunc("POST /admin/ui/users/{email}/devices/action", s.handleUIUserDevices)
 	mux.HandleFunc("PUT /admin/ui/users/{email}/quota", s.handleUIUserQuota)
+	mux.HandleFunc("PUT /admin/ui/users/{email}/spam-threshold", s.handleUIUserSpamThreshold)
 	mux.HandleFunc("PUT /admin/ui/users/{email}/hide", s.handleUIUserHide)
 	mux.HandleFunc("POST /admin/ui/users/{email}/roles/grant", s.handleUIUserGrantRole)
 	mux.HandleFunc("POST /admin/ui/users/{email}/roles/revoke", s.handleUIUserRevokeRole)
@@ -340,6 +345,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/ui/domains/{domainID}", s.handleUIDomainDetail)
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}", s.handleUISaveDomain)
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/syncpolicy", s.handleUISaveDomainSyncPolicy)
+	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/spam-threshold", s.handleUIDomainSpamThreshold)
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/createdefaults", s.handleUISaveDomainDefaults)
 	mux.HandleFunc("GET /admin/ui/domains/{domainID}/dnscheck", s.handleUIDomainDNS)
 	mux.HandleFunc("POST /admin/ui/domains/{domainID}/purge", s.handleUIPurgeDomain)

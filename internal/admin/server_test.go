@@ -17,23 +17,28 @@ import (
 
 // fakeDir is a scripted Directory for the admin server tests.
 type fakeDir struct {
-	authOK            bool
-	uid               int64
-	roles             []directory.AdminRole
-	perms             []directory.Permission
-	domains           []directory.DomainInfo
-	users             []directory.UserInfo
-	aliases           []directory.AliasInfo
-	maildirs          []string
-	verdicts          []directory.SpamVerdict
-	settings          directory.AntispamSettings
-	settingsFound     bool
-	senderRules       []directory.SenderRule
-	greylistOn        bool
-	rateLimit         directory.RateLimitSettings
-	rateLimitFound    bool
-	ldap              map[int64]directory.LDAPConfig
-	defaultSyncPolicy easpolicy.Policy
+	authOK         bool
+	uid            int64
+	roles          []directory.AdminRole
+	perms          []directory.Permission
+	domains        []directory.DomainInfo
+	users          []directory.UserInfo
+	aliases        []directory.AliasInfo
+	maildirs       []string
+	verdicts       []directory.SpamVerdict
+	settings       directory.AntispamSettings
+	settingsFound  bool
+	senderRules    []directory.SenderRule
+	greylistOn     bool
+	rateLimit      directory.RateLimitSettings
+	rateLimitFound bool
+
+	userSpamThreshold      *int
+	userSpamThresholdSet   bool
+	domainSpamThreshold    *int
+	domainSpamThresholdSet bool
+	ldap                   map[int64]directory.LDAPConfig
+	defaultSyncPolicy      easpolicy.Policy
 
 	// domain device-policy override: GetDomainSyncPolicy returns domainSyncPolicy;
 	// SetDomainSyncPolicy records it and the domain (domainSyncPolicyMissing => not found)
@@ -425,6 +430,16 @@ func (f *fakeDir) GetRateLimitSettings() (directory.RateLimitSettings, bool, err
 }
 func (f *fakeDir) SetRateLimitSettings(s directory.RateLimitSettings) error {
 	f.rateLimit, f.rateLimitFound = s, true
+	return nil
+}
+func (f *fakeDir) GetUserSpamThreshold(string) (*int, error)   { return f.userSpamThreshold, nil }
+func (f *fakeDir) GetDomainSpamThreshold(string) (*int, error) { return f.domainSpamThreshold, nil }
+func (f *fakeDir) SetUserSpamThreshold(_ string, th *int) error {
+	f.userSpamThreshold, f.userSpamThresholdSet = th, true
+	return nil
+}
+func (f *fakeDir) SetDomainSpamThreshold(_ string, th *int) error {
+	f.domainSpamThreshold, f.domainSpamThresholdSet = th, true
 	return nil
 }
 func (f *fakeDir) GetDefaultSyncPolicy() (easpolicy.Policy, error) {
