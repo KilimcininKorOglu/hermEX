@@ -11,6 +11,19 @@
 
 {{define "tls-certs-panel"}}<div id="tls-certs-panel">
 {{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+<h2>Certificate mode</h2>
+<p class="hint">Manual serves the operator-uploaded certificates below. ACME has the gateway obtain and renew Let's Encrypt certificates automatically for every active domain — its apex and the mail/autodiscover/autoconfig hosts — over the TLS-ALPN-01 challenge, so each name must resolve to the gateway on :443. A mode change takes effect when the gateway restarts; certificate contents still hot-reload without one.</p>
+<form hx-post="/admin/ui/tls/mode" hx-target="#tls-certs-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Mode<br>
+<select name="mode">
+<option value="manual" {{if ne .Mode "acme"}}selected{{end}}>Manual (uploaded certificates)</option>
+<option value="acme" {{if eq .Mode "acme"}}selected{{end}}>ACME (automatic Let's Encrypt)</option>
+</select></label>
+<label>ACME account email<br><input type="email" name="acme_email" value="{{.ACMEEmail}}" placeholder="ops@example.com"></label>
+<label>ACME directory URL — blank uses Let's Encrypt production<br><input type="text" name="acme_ca_url" value="{{.ACMECAURL}}" placeholder="https://acme-v02.api.letsencrypt.org/directory"></label>
+<label><input type="checkbox" name="acme_agreed" {{if .ACMEAgreed}}checked{{end}}> I agree to the CA's terms of service</label>
+<button type="submit">Save mode</button>
+</form>
 <h2>Stored certificates</h2>
 {{if .Certs}}
 <table class="grid">

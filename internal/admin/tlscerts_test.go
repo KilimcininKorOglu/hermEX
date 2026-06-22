@@ -119,3 +119,42 @@ func TestTLSCertUploadStoresAndDelete(t *testing.T) {
 		t.Errorf("delete left %d certs, want 0", len(d.tlsCerts))
 	}
 }
+
+// TestTLSSettingsModeSwitch proves the panel saves the certificate mode the gateway
+// reads at startup: acme mode requires an account email and ToS agreement (a save
+// missing either is rejected and writes nothing, so the gateway never reaches out to
+// a CA without consent), a complete acme save is stored, and manual mode is always
+// accepted.
+func TestTLSSettingsModeSwitch(t *testing.T) {
+	d := systemAdminDir()
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	// acme without agreeing to the terms is rejected and changes nothing.
+	bad := htmxPOST(t, ts, "/admin/ui/tls/mode", session, csrf, url.Values{"mode": {"acme"}, "acme_email": {"ops@example.com"}})
+	bb, _ := io.ReadAll(bad.Body)
+	bad.Body.Close()
+	if !strings.Contains(string(bb), "terms of service") {
+		t.Errorf("acme without agreement was not rejected; got: %s", bb)
+	}
+	if d.tlsSettings != nil {
+		t.Errorf("a rejected save still wrote settings: %+v", d.tlsSettings)
+	}
+
+	// A complete acme save is stored verbatim.
+	good := htmxPOST(t, ts, "/admin/ui/tls/mode", session, csrf, url.Values{
+		"mode": {"acme"}, "acme_email": {"ops@example.com"},
+		"acme_ca_url": {"https://pebble:14000/dir"}, "acme_agreed": {"on"},
+	})
+	good.Body.Close()
+	if d.tlsSettings == nil || d.tlsSettings.Mode != "acme" || d.tlsSettings.ACMEEmail != "ops@example.com" || !d.tlsSettings.ACMEAgreed {
+		t.Fatalf("acme save = %+v, want acme mode carrying the email and agreement", d.tlsSettings)
+	}
+
+	// Manual mode is always accepted (no ACME requirements).
+	man := htmxPOST(t, ts, "/admin/ui/tls/mode", session, csrf, url.Values{"mode": {"manual"}})
+	man.Body.Close()
+	if d.tlsSettings.Mode != "manual" {
+		t.Errorf("manual save mode = %q, want manual", d.tlsSettings.Mode)
+	}
+}

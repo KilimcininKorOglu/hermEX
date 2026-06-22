@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"hermex/internal/directory"
 )
 
 // validateTLSCert checks an uploaded certificate/key pair before it is stored: the
@@ -35,15 +37,56 @@ type tlsCertView struct {
 	Expires string
 }
 
-// tlsCertsPageData builds the TLS-certificates page model: the stored certificates
-// and a notice line.
+// tlsCertsPageData builds the TLS-certificates page model: the certificate mode and
+// ACME account settings, the stored certificates, and a notice line.
 func (s *Server) tlsCertsPageData(r *http.Request, notice string) map[string]any {
 	infos, _ := s.dir.ListTLSCerts()
 	views := make([]tlsCertView, len(infos))
 	for i, info := range infos {
 		views[i] = tlsCertView{Name: info.Name, Expires: time.UnixMilli(info.NotAfter).UTC().Format("2006-01-02")}
 	}
-	return map[string]any{"Nav": "tls", "CSRF": csrfCookieValue(r), "Certs": views, "Notice": notice}
+	settings, _, _ := s.dir.GetTLSSettings()
+	return map[string]any{
+		"Nav": "tls", "CSRF": csrfCookieValue(r), "Certs": views, "Notice": notice,
+		"Mode": settings.Mode, "ACMEEmail": settings.ACMEEmail,
+		"ACMECAURL": settings.ACMECAURL, "ACMEAgreed": settings.ACMEAgreed,
+	}
+}
+
+// handleUITLSSettings saves the certificate mode and ACME account settings. In acme
+// mode the gateway obtains and renews Let's Encrypt certificates automatically; in
+// manual mode it serves operator-uploaded certificates. Switching mode is structural,
+// so it applies when the gateway next starts (the certificate contents still
+// hot-reload without a restart).
+func (s *Server) handleUITLSSettings(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	mode := strings.ToLower(strings.TrimSpace(r.FormValue("mode")))
+	if mode != "acme" {
+		mode = "manual"
+	}
+	settings := directory.TLSSettings{
+		Mode:       mode,
+		ACMEEmail:  strings.TrimSpace(r.FormValue("acme_email")),
+		ACMECAURL:  strings.TrimSpace(r.FormValue("acme_ca_url")),
+		ACMEAgreed: r.FormValue("acme_agreed") == "on",
+	}
+	if mode == "acme" {
+		if settings.ACMEEmail == "" {
+			s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "ACME mode needs an account email address."))
+			return
+		}
+		if !settings.ACMEAgreed {
+			s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "ACME mode requires agreeing to the CA's terms of service."))
+			return
+		}
+	}
+	if err := s.dir.SetTLSSettings(settings); err != nil {
+		s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "Could not save the certificate mode: "+err.Error()))
+		return
+	}
+	s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "Saved. Restart the gateway for a mode change to take effect."))
 }
 
 // handleUITLSCerts renders the TLS-certificates page (system administrators only).
