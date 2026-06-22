@@ -111,7 +111,7 @@
 <div id="user-status"></div>
 
 <h2>DKIM signing</h2>
-<p class="hint">Signs outbound mail from this domain so it passes DKIM and DMARC at receivers. Generate a key, publish the DNS record it shows, then enable signing — enabling before the record is published would make your mail fail DKIM.</p>
+<p class="hint">Signs outbound mail from this domain so it passes DKIM and DMARC at receivers. Generate a key, publish the DNS record it shows, allow a few minutes for it to propagate, then enable signing — enabling before the record is published and visible would make your mail fail DKIM.</p>
 {{template "dkim-panel" .}}
 
 <h2>DNS health</h2>
