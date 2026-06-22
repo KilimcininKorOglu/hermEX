@@ -38,17 +38,18 @@ type HistoryRecorder interface {
 
 // Backend is an smtp.Backend that delivers to per-recipient mailbox stores.
 type Backend struct {
-	Accounts directory.Accounts
-	Spool    *relay.Spool    // outbound relay queue; nil disables external relay
-	Logger   *logging.Logger // central activity log; nil disables logging
-	Scorer   SpamScorer      // inbound spam scorer; nil disables scoring
-	History  HistoryRecorder // spam verdict history; nil disables recording
-	Greylist *Greylister     // greylisting; nil (or disabled) accepts every first contact
+	Accounts  directory.Accounts
+	Spool     *relay.Spool    // outbound relay queue; nil disables external relay
+	Logger    *logging.Logger // central activity log; nil disables logging
+	Scorer    SpamScorer      // inbound spam scorer; nil disables scoring
+	History   HistoryRecorder // spam verdict history; nil disables recording
+	Greylist  *Greylister     // greylisting; nil (or disabled) accepts every first contact
+	RateLimit *RateLimiter    // inbound per-IP rate limiting; nil (or disabled) admits every message
 }
 
 // NewSession implements smtp.Backend.
 func (b *Backend) NewSession(remoteAddr string) (smtp.Session, error) {
-	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History, greylist: b.Greylist}, nil
+	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History, greylist: b.Greylist, rateLimit: b.RateLimit}, nil
 }
 
 type session struct {
@@ -59,6 +60,7 @@ type session struct {
 	scorer       SpamScorer
 	history      HistoryRecorder
 	greylist     *Greylister
+	rateLimit    *RateLimiter
 	from         string
 	targets      []target // local recipients, filed into mailboxes
 	relayTargets []string // external recipients, spooled for outbound relay
@@ -111,6 +113,12 @@ func (s *session) Mail(from string) error {
 		if err := overSendQuota(s.accounts, from); err != nil {
 			return err
 		}
+	}
+	// Rate-limit unauthenticated intake: a client network that has exhausted its
+	// message budget for the window is deferred so a legitimate server retries later.
+	// Authenticated submission is never rate limited.
+	if s.authUser == "" && s.rateLimit != nil && !s.rateLimit.Allow(clientIP(s.remoteAddr)) {
+		return &smtp.TempError{Message: "4.7.1 too many messages, please retry later"}
 	}
 	s.from = from
 	return nil

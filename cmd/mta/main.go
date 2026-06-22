@@ -162,7 +162,11 @@ func main() {
 		greylister.SetEnabled(on)
 	}
 	go runGreylistMaintenance(dir, greylister)
-	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir, Greylist: greylister}, Hostname: cfg.Hostname, Logger: logger}
+	// Inbound rate limiting caps how many messages an unauthenticated client network
+	// may send per window. It starts disabled (no settings store wired yet); a later
+	// increment adds the admin toggle and tunables.
+	rateLimiter := mta.NewRateLimiter()
+	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir, Greylist: greylister, RateLimit: rateLimiter}, Hostname: cfg.Hostname, Logger: logger}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()
 		if err != nil {
