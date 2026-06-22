@@ -108,4 +108,30 @@ func TestAccessEmptyMailFromNotOverridden(t *testing.T) {
 	if v := s.Score(Input{Raw: []byte("x"), MailFrom: "", FromDomain: "example.com"}); v.Spam {
 		t.Errorf("empty MailFrom (a bounce) must not be overridden, got %+v", v)
 	}
+	if v := s.Score(Input{Raw: []byte("x"), MailFrom: "", FromDomain: "example.com"}); v.AccessMatched {
+		t.Errorf("empty MailFrom (a bounce) must not mark AccessMatched, got %+v", v)
+	}
+}
+
+// TestAccessMatchedFlag proves the verdict reports whether an operator rule decided
+// it: set for a blocklisted or allowlisted sender (so delivery treats Spam as
+// authoritative for every recipient), and clear for a purely score-driven verdict
+// (so delivery may re-evaluate it against a per-recipient threshold).
+func TestAccessMatchedFlag(t *testing.T) {
+	s := &Scorer{}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: 100})
+	s.SetAccess(NewAccessList(map[string]string{
+		"blocked@evil.example": AccessBlock,
+		"vip@partner.example":  AccessAllow,
+	}))
+
+	if v := s.Score(Input{Raw: []byte("x"), MailFrom: "blocked@evil.example"}); !v.AccessMatched {
+		t.Errorf("a blocklisted sender must mark AccessMatched, got %+v", v)
+	}
+	if v := s.Score(Input{Raw: []byte("x"), MailFrom: "vip@partner.example"}); !v.AccessMatched {
+		t.Errorf("an allowlisted sender must mark AccessMatched, got %+v", v)
+	}
+	if v := s.Score(Input{Raw: []byte("x"), MailFrom: "nobody@neutral.example"}); v.AccessMatched {
+		t.Errorf("a sender with no access rule must not mark AccessMatched, got %+v", v)
+	}
 }

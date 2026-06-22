@@ -70,16 +70,21 @@ const SAScoreThreshold = 5.0
 
 // Verdict is the aggregated result for one message.
 type Verdict struct {
-	Score     int
-	Spam      bool
-	SPF       AuthResult
-	DKIM      AuthResult
-	DMARC     AuthResult
-	DNSBL     []string // the blocklist zones that listed the client IP
-	BayesProb float64  // the Bayesian model's spam probability (0..1); 0 when not run
-	SAScore   float64  // the summed score of the SpamAssassin rules that fired; 0 when not run
-	SAHits    []string // the names of the SpamAssassin rules that fired
-	Reasons   []string
+	Score int
+	Spam  bool
+	// AccessMatched reports that an operator allow/block rule decided this verdict
+	// (so Spam is authoritative at the message level and must not be re-evaluated
+	// against a per-recipient threshold). It is false for a purely score-driven
+	// verdict.
+	AccessMatched bool
+	SPF           AuthResult
+	DKIM          AuthResult
+	DMARC         AuthResult
+	DNSBL         []string // the blocklist zones that listed the client IP
+	BayesProb     float64  // the Bayesian model's spam probability (0..1); 0 when not run
+	SAScore       float64  // the summed score of the SpamAssassin rules that fired; 0 when not run
+	SAHits        []string // the names of the SpamAssassin rules that fired
+	Reasons       []string
 }
 
 // DKIMResult is one verified DKIM signature's claiming domain and validity.
@@ -263,7 +268,9 @@ func (s *Scorer) Score(in Input) Verdict {
 	// cannot be abused to bypass authentication. An empty MailFrom (a bounce) is
 	// never matched.
 	if acc := s.access.Load(); acc != nil && in.MailFrom != "" {
-		switch acc.Action(in.MailFrom, in.FromDomain) {
+		action := acc.Action(in.MailFrom, in.FromDomain)
+		v.AccessMatched = action != ""
+		switch action {
 		case AccessBlock:
 			v.Spam = true
 			v.Reasons = append(v.Reasons, "blocklisted sender")
