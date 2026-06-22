@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 
@@ -46,6 +47,10 @@ func main() {
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
 
 	srv := dav.NewServer(dir, dir, cfg.Hostname)
+	// CalDAV/CardDAV PUT body caps: read at startup and re-read every minute so an
+	// admin's change applies without a restart; 0 keeps the built-in defaults.
+	applyDAVSizeLimits(dir, srv)
+	go runDAVSizeMaintenance(dir, srv)
 	addr := cfg.DAVAddr
 	if addr == "" {
 		addr = ":8080"
@@ -64,5 +69,31 @@ func main() {
 		health.Components(cfg.HealthAddr, "dav", health.Check{Name: "directory", Probe: db.PingContext})...)
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-dav: %v", err)
+	}
+}
+
+// applyDAVSizeLimits reads the stored CalDAV/CardDAV PUT body caps and applies them to
+// the server. A missing row or a read error leaves the caps unchanged, so a settings
+// failure never shrinks them unexpectedly.
+func applyDAVSizeLimits(dir *directory.SQLDirectory, srv *dav.Server) {
+	s, found, err := dir.GetSizeLimits()
+	if err != nil {
+		log.Printf("hermex-dav: size limits read failed, leaving the body caps unchanged: %v", err)
+		return
+	}
+	if !found {
+		return
+	}
+	srv.SetMaxICal(s.DAVICalBytes)
+	srv.SetMaxVCard(s.DAVVCardBytes)
+}
+
+// runDAVSizeMaintenance re-applies the DAV PUT body caps every minute so an admin
+// change takes effect without a restart. It runs until the process exits.
+func runDAVSizeMaintenance(dir *directory.SQLDirectory, srv *dav.Server) {
+	tick := time.NewTicker(time.Minute)
+	defer tick.Stop()
+	for range tick.C {
+		applyDAVSizeLimits(dir, srv)
 	}
 }

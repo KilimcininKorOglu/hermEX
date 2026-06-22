@@ -9,6 +9,7 @@ package dav
 import (
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	"hermex/internal/directory"
 )
@@ -18,12 +19,52 @@ type Server struct {
 	auth     directory.Authenticator
 	accounts directory.Accounts
 	hostname string
+	// maxICal and maxVCard cap the iCalendar and vCard PUT bodies in bytes (0 = the
+	// built-in defaults), held atomically so the DAV daemon's poll can apply an
+	// operator's edit while requests run, with no restart. Set them via SetMaxICal /
+	// SetMaxVCard; the PUT handlers read them live.
+	maxICal  atomic.Int64
+	maxVCard atomic.Int64
 }
 
 // NewServer builds a DAV server backed by the directory for authentication and
 // account resolution.
 func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostname string) *Server {
 	return &Server{auth: auth, accounts: accounts, hostname: hostname}
+}
+
+// SetMaxICal and SetMaxVCard set the iCalendar / vCard PUT body caps in bytes (0
+// restores the built-in default). They are safe to call concurrently with request
+// handling, so an operator's edit applies without a restart.
+func (s *Server) SetMaxICal(n int64) {
+	if n < 0 {
+		n = 0
+	}
+	s.maxICal.Store(n)
+}
+
+// SetMaxVCard sets the vCard PUT body cap in bytes (0 restores the built-in default).
+func (s *Server) SetMaxVCard(n int64) {
+	if n < 0 {
+		n = 0
+	}
+	s.maxVCard.Store(n)
+}
+
+// icalLimit and vcardLimit resolve the live PUT body caps: the operator-set value, or
+// the built-in default when none is set.
+func (s *Server) icalLimit() int64 {
+	if v := s.maxICal.Load(); v > 0 {
+		return v
+	}
+	return defaultMaxICal
+}
+
+func (s *Server) vcardLimit() int64 {
+	if v := s.maxVCard.Load(); v > 0 {
+		return v
+	}
+	return defaultMaxVCard
 }
 
 // Handler returns the HTTP handler for the DAV server. Every path is routed

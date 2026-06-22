@@ -33,6 +33,9 @@ func TestLimitsPageRenders(t *testing.T) {
 	if !strings.Contains(page, "ActiveSync maximum request") || !strings.Contains(page, "value=\"4\"") {
 		t.Errorf("limits page missing the ActiveSync limit/default:\n%s", page)
 	}
+	if !strings.Contains(page, "CalDAV maximum iCalendar") || !strings.Contains(page, "CardDAV maximum vCard") {
+		t.Errorf("limits page missing the DAV limits:\n%s", page)
+	}
 }
 
 // TestSaveLimits proves the form converts the entered MB to bytes and persists it, the
@@ -42,13 +45,17 @@ func TestSaveLimits(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	resp := htmxPOST(t, ts, "/admin/ui/limits", session, csrf, url.Values{"imap_literal_mb": {"10"}, "ews_request_mb": {"4"}, "activesync_request_mb": {"2"}})
+	resp := htmxPOST(t, ts, "/admin/ui/limits", session, csrf, url.Values{
+		"imap_literal_mb": {"10"}, "ews_request_mb": {"4"}, "activesync_request_mb": {"2"},
+		"dav_ical_mb": {"3"}, "dav_vcard_mb": {"5"},
+	})
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Size limits saved") {
 		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
 	}
-	if !d.sizeLimitsFound || d.sizeLimits.IMAPLiteralBytes != 10*1024*1024 || d.sizeLimits.EWSRequestBytes != 4*1024*1024 || d.sizeLimits.ActiveSyncRequestBytes != 2*1024*1024 {
+	if !d.sizeLimitsFound || d.sizeLimits.IMAPLiteralBytes != 10*1024*1024 || d.sizeLimits.EWSRequestBytes != 4*1024*1024 ||
+		d.sizeLimits.ActiveSyncRequestBytes != 2*1024*1024 || d.sizeLimits.DAVICalBytes != 3*1024*1024 || d.sizeLimits.DAVVCardBytes != 5*1024*1024 {
 		t.Errorf("limits not persisted as bytes: found=%v %+v", d.sizeLimitsFound, d.sizeLimits)
 	}
 }

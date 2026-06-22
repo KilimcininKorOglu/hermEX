@@ -13,6 +13,8 @@ type SizeLimits struct {
 	IMAPLiteralBytes       int64
 	EWSRequestBytes        int64
 	ActiveSyncRequestBytes int64
+	DAVICalBytes           int64
+	DAVVCardBytes          int64
 }
 
 // GetSizeLimits returns the stored size limits and whether a row has been saved. When
@@ -20,8 +22,9 @@ type SizeLimits struct {
 func (d *SQLDirectory) GetSizeLimits() (SizeLimits, bool, error) {
 	var s SizeLimits
 	err := d.db.QueryRow(
-		`SELECT imap_literal_bytes, ews_request_bytes, activesync_request_bytes FROM size_limits WHERE id = 1`).
-		Scan(&s.IMAPLiteralBytes, &s.EWSRequestBytes, &s.ActiveSyncRequestBytes)
+		`SELECT imap_literal_bytes, ews_request_bytes, activesync_request_bytes, dav_ical_bytes, dav_vcard_bytes
+		   FROM size_limits WHERE id = 1`).
+		Scan(&s.IMAPLiteralBytes, &s.EWSRequestBytes, &s.ActiveSyncRequestBytes, &s.DAVICalBytes, &s.DAVVCardBytes)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SizeLimits{}, false, nil
 	}
@@ -35,11 +38,14 @@ func (d *SQLDirectory) GetSizeLimits() (SizeLimits, bool, error) {
 // daemon's poll observes the change and applies it without a restart.
 func (d *SQLDirectory) SetSizeLimits(s SizeLimits) error {
 	_, err := d.db.Exec(
-		`INSERT INTO size_limits (id, imap_literal_bytes, ews_request_bytes, activesync_request_bytes, updated_at)
-		 VALUES (1, ?, ?, ?, ?)
+		`INSERT INTO size_limits
+		   (id, imap_literal_bytes, ews_request_bytes, activesync_request_bytes, dav_ical_bytes, dav_vcard_bytes, updated_at)
+		 VALUES (1, ?, ?, ?, ?, ?, ?)
 		 ON DUPLICATE KEY UPDATE imap_literal_bytes = VALUES(imap_literal_bytes),
 		   ews_request_bytes = VALUES(ews_request_bytes),
-		   activesync_request_bytes = VALUES(activesync_request_bytes), updated_at = VALUES(updated_at)`,
-		s.IMAPLiteralBytes, s.EWSRequestBytes, s.ActiveSyncRequestBytes, time.Now().UnixMilli())
+		   activesync_request_bytes = VALUES(activesync_request_bytes),
+		   dav_ical_bytes = VALUES(dav_ical_bytes), dav_vcard_bytes = VALUES(dav_vcard_bytes),
+		   updated_at = VALUES(updated_at)`,
+		s.IMAPLiteralBytes, s.EWSRequestBytes, s.ActiveSyncRequestBytes, s.DAVICalBytes, s.DAVVCardBytes, time.Now().UnixMilli())
 	return err
 }

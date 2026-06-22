@@ -25,7 +25,10 @@ func TestSizeLimitsRoundTrip(t *testing.T) {
 		t.Fatalf("Get on empty = found %v err %v, want not found", found, err)
 	}
 
-	want := SizeLimits{IMAPLiteralBytes: 10485760, EWSRequestBytes: 4194304, ActiveSyncRequestBytes: 2097152} // 10 / 4 / 2 MiB
+	want := SizeLimits{
+		IMAPLiteralBytes: 10485760, EWSRequestBytes: 4194304, ActiveSyncRequestBytes: 2097152,
+		DAVICalBytes: 1048576, DAVVCardBytes: 3145728,
+	}
 	if err := d.SetSizeLimits(want); err != nil {
 		t.Fatal(err)
 	}

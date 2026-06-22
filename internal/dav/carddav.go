@@ -10,8 +10,9 @@ import (
 	"hermex/internal/oxvcard"
 )
 
-// maxVCard caps a PUT body; a vCard, even with an embedded photo, is far smaller.
-const maxVCard = 4 << 20
+// defaultMaxVCard caps a PUT body; a vCard, even with an embedded photo, is far
+// smaller. It is the fallback when no operator limit is set.
+const defaultMaxVCard = 4 << 20
 
 // davResourceName stores the client-chosen object URL segment (e.g. "abc.vcf")
 // as a string property on the contact, so a URL resolves back to its stored
@@ -143,7 +144,7 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request, mailbox strin
 		}
 	}
 
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxVCard))
+	body, err := io.ReadAll(io.LimitReader(r.Body, s.vcardLimit()))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

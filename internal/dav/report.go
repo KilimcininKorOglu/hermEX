@@ -32,7 +32,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox st
 		http.Error(w, "not a collection", http.StatusBadRequest)
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxVCard))
+	body, err := io.ReadAll(io.LimitReader(r.Body, s.vcardLimit()))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
