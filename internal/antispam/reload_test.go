@@ -104,6 +104,7 @@ func TestScoreSafeUnderConcurrentReload(t *testing.T) {
 			s.SetConfig(&Config{Weights: DefaultWeights, Threshold: DefaultThreshold + i%3})
 			s.SetRules(ParseSARules("body Y /other/\nscore Y 2.0\n"))
 			s.SetModel(NewBayesModel())
+			s.SetAccess(NewAccessList(map[string]string{"x@evil.example": AccessBlock}))
 		}
 		close(done)
 	}()

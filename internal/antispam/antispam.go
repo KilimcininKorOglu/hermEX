@@ -108,6 +108,7 @@ type Scorer struct {
 	cfg         atomic.Pointer[Config]
 	model       atomic.Pointer[BayesModel]
 	saRules     atomic.Pointer[SARuleSet]
+	access      atomic.Pointer[AccessList]
 	checkSPF    func(ip net.IP, helo, mailFrom string) AuthResult
 	checkDKIM   func(raw []byte) []DKIMResult
 	lookupDMARC func(domain string) (policy string, ok bool)
@@ -129,6 +130,11 @@ func (s *Scorer) SetModel(m *BayesModel) { s.model.Store(m) }
 // concurrently with Score, so a refreshed ruleset applies without a restart; a
 // nil ruleset leaves rule scoring dormant.
 func (s *Scorer) SetRules(rs *SARuleSet) { s.saRules.Store(rs) }
+
+// SetAccess installs (or replaces) the operator allow/block rules. It is safe to
+// call concurrently with Score, so edited rules apply without a restart; a nil
+// list leaves the verdict unoverridden.
+func (s *Scorer) SetAccess(a *AccessList) { s.access.Store(a) }
 
 // New returns a Scorer wired to the real SPF, DKIM, DMARC, and DNSBL checks,
 // flagging a message as spam once its score reaches threshold. DNSBL stays
@@ -187,6 +193,9 @@ func (s *Scorer) Score(in Input) Verdict {
 	// DMARC: the message passes when an authenticated identifier (SPF or DKIM)
 	// aligns, under the relaxed organizational-domain rule, with the From domain.
 	// Otherwise the domain's published policy decides whether this is a failure.
+	// dmarcReject records a failure under an enforcing policy — the strongest
+	// spoofing signal — so an allowlist override cannot rescue a spoofed sender.
+	dmarcReject := false
 	if s.lookupDMARC != nil && in.FromDomain != "" {
 		policy, ok := s.lookupDMARC(in.FromDomain)
 		switch {
@@ -199,6 +208,7 @@ func (s *Scorer) Score(in Input) Verdict {
 			if policy == "reject" || policy == "quarantine" {
 				v.Score += cfg.Weights.DMARCFail
 				v.Reasons = append(v.Reasons, "DMARC fail (policy "+policy+")")
+				dmarcReject = true
 			}
 		}
 	}
@@ -238,6 +248,26 @@ func (s *Scorer) Score(in Input) Verdict {
 	}
 
 	v.Spam = v.Score >= cfg.Threshold
+
+	// Operator allow/block rules override the verdict last. A blocklisted sender is
+	// always spam; an allowlisted sender is rescued from score-based junking, but a
+	// hard DMARC failure (a spoofing signal) still wins so an allowlisted domain
+	// cannot be abused to bypass authentication. An empty MailFrom (a bounce) is
+	// never matched.
+	if acc := s.access.Load(); acc != nil && in.MailFrom != "" {
+		switch acc.Action(in.MailFrom, in.FromDomain) {
+		case AccessBlock:
+			v.Spam = true
+			v.Reasons = append(v.Reasons, "blocklisted sender")
+		case AccessAllow:
+			if dmarcReject {
+				v.Reasons = append(v.Reasons, "allowlisted sender (overridden by DMARC failure)")
+			} else {
+				v.Spam = false
+				v.Reasons = append(v.Reasons, "allowlisted sender")
+			}
+		}
+	}
 	return v
 }
 
