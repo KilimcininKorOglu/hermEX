@@ -20,7 +20,7 @@ import (
 // with no body (MS-ASCMD). The source-message linkage SmartReply/SmartForward
 // carry (CollectionId/ItemId, the answered/forwarded flag) is v2.
 func (s *Server) handleSendMail(w http.ResponseWriter, r *http.Request, sess *session) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBody))
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyLimit()))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return

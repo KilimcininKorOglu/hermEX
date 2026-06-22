@@ -25,7 +25,7 @@ func TestSizeLimitsRoundTrip(t *testing.T) {
 		t.Fatalf("Get on empty = found %v err %v, want not found", found, err)
 	}
 
-	want := SizeLimits{IMAPLiteralBytes: 10485760, EWSRequestBytes: 4194304} // 10 MiB / 4 MiB
+	want := SizeLimits{IMAPLiteralBytes: 10485760, EWSRequestBytes: 4194304, ActiveSyncRequestBytes: 2097152} // 10 / 4 / 2 MiB
 	if err := d.SetSizeLimits(want); err != nil {
 		t.Fatal(err)
 	}
@@ -41,17 +41,17 @@ func TestSizeLimitsRoundTrip(t *testing.T) {
 // TestSizeLimitsUpsert proves a second save replaces the single row.
 func TestSizeLimitsUpsert(t *testing.T) {
 	d := setupSizeLimits(t)
-	if err := d.SetSizeLimits(SizeLimits{IMAPLiteralBytes: 52428800, EWSRequestBytes: 8388608}); err != nil {
+	if err := d.SetSizeLimits(SizeLimits{IMAPLiteralBytes: 52428800, EWSRequestBytes: 8388608, ActiveSyncRequestBytes: 4194304}); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.SetSizeLimits(SizeLimits{IMAPLiteralBytes: 1048576, EWSRequestBytes: 2097152}); err != nil {
+	if err := d.SetSizeLimits(SizeLimits{IMAPLiteralBytes: 1048576, EWSRequestBytes: 2097152, ActiveSyncRequestBytes: 3145728}); err != nil {
 		t.Fatal(err)
 	}
 	got, found, err := d.GetSizeLimits()
 	if err != nil || !found {
 		t.Fatalf("Get after upsert = found %v err %v", found, err)
 	}
-	if got.IMAPLiteralBytes != 1048576 || got.EWSRequestBytes != 2097152 {
-		t.Errorf("after upsert = %+v, want 1048576 / 2097152", got)
+	if got.IMAPLiteralBytes != 1048576 || got.EWSRequestBytes != 2097152 || got.ActiveSyncRequestBytes != 3145728 {
+		t.Errorf("after upsert = %+v, want 1048576 / 2097152 / 3145728", got)
 	}
 }

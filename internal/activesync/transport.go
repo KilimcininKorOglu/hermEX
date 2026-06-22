@@ -7,16 +7,43 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"hermex/internal/wbxml"
 )
 
-// maxRequestBody caps a command's WBXML request body.
-const maxRequestBody = 4 << 20
+// defaultMaxRequestBody caps a command's WBXML request body; it is the fallback when no
+// operator limit has been set.
+const defaultMaxRequestBody = 4 << 20
+
+// reqBodyLimit holds the operator-set WBXML request-body cap (bytes; 0 = use the
+// default), set by SetMaxRequestBody and read live at each request, so the ActiveSync
+// daemon's poll can apply an edit without a restart. ActiveSync is a per-process
+// singleton, so a package-level value is the right scope.
+var reqBodyLimit atomic.Int64
+
+// SetMaxRequestBody sets the maximum accepted WBXML request body in bytes (0 restores
+// the built-in default). It is safe to call concurrently with request handling, so an
+// operator's edit applies without a restart.
+func SetMaxRequestBody(n int64) {
+	if n < 0 {
+		n = 0
+	}
+	reqBodyLimit.Store(n)
+}
+
+// maxBodyLimit resolves the live request-body cap: the operator-set value, or the
+// built-in default when none is set.
+func maxBodyLimit() int64 {
+	if v := reqBodyLimit.Load(); v > 0 {
+		return v
+	}
+	return defaultMaxRequestBody
+}
 
 // readWBXML reads and decodes the WBXML request body.
 func readWBXML(r *http.Request) (*wbxml.Node, error) {
-	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBody))
+	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyLimit()))
 	if err != nil {
 		return nil, err
 	}

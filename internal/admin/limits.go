@@ -10,8 +10,9 @@ import (
 // cap (50 MiB / 8 MiB), shown on the page until an operator saves one. The servers' own
 // constants are unexported.
 const (
-	defaultIMAPLiteralMB = 50
-	defaultEWSRequestMB  = 8
+	defaultIMAPLiteralMB       = 50
+	defaultEWSRequestMB        = 8
+	defaultActiveSyncRequestMB = 4
 )
 
 // handleUILimits renders the protocol size-limits page (system admins).
@@ -34,13 +35,15 @@ func (s *Server) limitsPageData(r *http.Request, notice string) map[string]any {
 // stored values or the built-in defaults. Shared by the Limits page and the unified
 // Settings page so both render the same limits-panel.
 func (s *Server) fillSizeLimits(data map[string]any) {
-	imapMB, ewsMB := int64(defaultIMAPLiteralMB), int64(defaultEWSRequestMB)
+	imapMB, ewsMB, easMB := int64(defaultIMAPLiteralMB), int64(defaultEWSRequestMB), int64(defaultActiveSyncRequestMB)
 	if sl, found, err := s.dir.GetSizeLimits(); err == nil && found {
 		imapMB = sl.IMAPLiteralBytes / (1024 * 1024)
 		ewsMB = sl.EWSRequestBytes / (1024 * 1024)
+		easMB = sl.ActiveSyncRequestBytes / (1024 * 1024)
 	}
 	data["IMAPLiteralMB"] = imapMB
 	data["EWSRequestMB"] = ewsMB
+	data["ActiveSyncRequestMB"] = easMB
 }
 
 // handleUISaveLimits persists the protocol size limits (entered in whole MB). Each
@@ -50,14 +53,15 @@ func (s *Server) handleUISaveLimits(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.uiAuthorized(w, r); !ok {
 		return
 	}
-	imapMB, ewsMB := formInt(r, "imap_literal_mb"), formInt(r, "ews_request_mb")
-	if imapMB < 1 || ewsMB < 1 {
+	imapMB, ewsMB, easMB := formInt(r, "imap_literal_mb"), formInt(r, "ews_request_mb"), formInt(r, "activesync_request_mb")
+	if imapMB < 1 || ewsMB < 1 || easMB < 1 {
 		s.render(w, "limits-panel", s.limitsPageData(r, "Each limit must be at least 1 MB; settings not saved."))
 		return
 	}
 	limits := directory.SizeLimits{
-		IMAPLiteralBytes: int64(imapMB) * 1024 * 1024,
-		EWSRequestBytes:  int64(ewsMB) * 1024 * 1024,
+		IMAPLiteralBytes:       int64(imapMB) * 1024 * 1024,
+		EWSRequestBytes:        int64(ewsMB) * 1024 * 1024,
+		ActiveSyncRequestBytes: int64(easMB) * 1024 * 1024,
 	}
 	if err := s.dir.SetSizeLimits(limits); err != nil {
 		s.render(w, "limits-panel", s.limitsPageData(r, "Could not save the size limits: "+err.Error()))
