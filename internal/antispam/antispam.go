@@ -136,6 +136,14 @@ func (s *Scorer) SetRules(rs *SARuleSet) { s.saRules.Store(rs) }
 // list leaves the verdict unoverridden.
 func (s *Scorer) SetAccess(a *AccessList) { s.access.Store(a) }
 
+// Allowlisted reports whether the sender is on the operator allow list, so a caller
+// (the greylister) can skip a redundant check for a trusted sender. It reads the
+// same hot-reloaded list Score consults.
+func (s *Scorer) Allowlisted(mailFrom, fromDomain string) bool {
+	acc := s.access.Load()
+	return acc != nil && acc.Action(mailFrom, fromDomain) == AccessAllow
+}
+
 // New returns a Scorer wired to the real SPF, DKIM, DMARC, and DNSBL checks,
 // flagging a message as spam once its score reaches threshold. DNSBL stays
 // dormant until SetConfig supplies zones, Bayesian content scoring until SetModel

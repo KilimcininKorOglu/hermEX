@@ -152,7 +152,10 @@ func main() {
 		return list, h, true
 	})
 	go reloader.Run(context.Background(), time.Minute)
-	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir}, Hostname: cfg.Hostname, Logger: logger}
+	// Greylisting defers a first-contact triplet so a legitimate MTA retries. It
+	// starts disabled; an admin enables it (the toggle is hot-read below).
+	greylister := mta.NewGreylister(dir, scorer)
+	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir, Greylist: greylister}, Hostname: cfg.Hostname, Logger: logger}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()
 		if err != nil {

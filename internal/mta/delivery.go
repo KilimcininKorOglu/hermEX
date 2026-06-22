@@ -43,11 +43,12 @@ type Backend struct {
 	Logger   *logging.Logger // central activity log; nil disables logging
 	Scorer   SpamScorer      // inbound spam scorer; nil disables scoring
 	History  HistoryRecorder // spam verdict history; nil disables recording
+	Greylist *Greylister     // greylisting; nil (or disabled) accepts every first contact
 }
 
 // NewSession implements smtp.Backend.
 func (b *Backend) NewSession(remoteAddr string) (smtp.Session, error) {
-	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History}, nil
+	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History, greylist: b.Greylist}, nil
 }
 
 type session struct {
@@ -57,6 +58,7 @@ type session struct {
 	remoteAddr   string
 	scorer       SpamScorer
 	history      HistoryRecorder
+	greylist     *Greylister
 	from         string
 	targets      []target // local recipients, filed into mailboxes
 	relayTargets []string // external recipients, spooled for outbound relay
@@ -217,6 +219,12 @@ func (s *session) routeRecipient(to string) error {
 	if path, ok := s.accounts.Resolve(to); ok {
 		if err := overReceiveQuota(path); err != nil {
 			return err
+		}
+		// Greylist a first-contact triplet from unauthenticated intake: defer with a
+		// temporary failure so a legitimate MTA retries. Authenticated submission,
+		// allowlisted senders, and bounces are exempt; a store error fails open.
+		if s.authUser == "" && s.greylist != nil && s.greylist.ShouldDefer(clientIP(s.remoteAddr), s.from, to) {
+			return &smtp.TempError{Message: "4.7.1 greylisted, please retry shortly"}
 		}
 		s.targets = append(s.targets, target{addr: to, path: path})
 		return nil
