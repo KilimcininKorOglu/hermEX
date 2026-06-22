@@ -34,6 +34,8 @@ type fakeDir struct {
 	rateLimitFound bool
 	outbound       directory.OutboundSettings
 	outboundFound  bool
+	digest         directory.DigestSettings
+	digestFound    bool
 
 	userSpamThreshold      *int
 	userSpamThresholdSet   bool
@@ -439,6 +441,13 @@ func (f *fakeDir) GetOutboundSettings() (directory.OutboundSettings, bool, error
 }
 func (f *fakeDir) SetOutboundSettings(s directory.OutboundSettings) error {
 	f.outbound, f.outboundFound = s, true
+	return nil
+}
+func (f *fakeDir) GetDigestSettings() (directory.DigestSettings, bool, error) {
+	return f.digest, f.digestFound, nil
+}
+func (f *fakeDir) SetDigestSettings(s directory.DigestSettings) error {
+	f.digest, f.digestFound = s, true
 	return nil
 }
 func (f *fakeDir) GetUserSpamThreshold(string) (*int, error)   { return f.userSpamThreshold, nil }

@@ -3,6 +3,7 @@ package admin
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -105,6 +106,15 @@ func (s *Server) antispamPageData(r *http.Request, notice string) map[string]any
 		data["OutboundCap"] = ob.RecipientCap
 		data["OutboundWindow"] = ob.WindowSeconds
 	}
+
+	// Quarantine digest: the stored settings, or the worker's built-in defaults
+	// (disabled, every 24 h, no base URL) when none has been saved.
+	data["DigestEnabled"], data["DigestInterval"], data["DigestBaseURL"] = false, 24, ""
+	if dg, found, err := s.dir.GetDigestSettings(); err == nil && found {
+		data["DigestEnabled"] = dg.Enabled
+		data["DigestInterval"] = dg.IntervalHours
+		data["DigestBaseURL"] = dg.BaseURL
+	}
 	return data
 }
 
@@ -173,6 +183,43 @@ func (s *Server) handleUISaveOutbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, "outbound-panel", s.antispamPageData(r, "Outbound settings saved — the MTA applies them within a minute, no restart."))
+}
+
+// handleUISaveDigest persists the quarantine-digest settings (enable, interval in
+// hours, and the externally-reachable base URL release links are built from). The MTA
+// applies the change on its next poll. An interval below 1, a base URL that is not an
+// http(s) address, or enabling with no base URL is rejected.
+func (s *Server) handleUISaveDigest(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	enabled := r.FormValue("enabled") == "1"
+	interval := formInt(r, "interval")
+	baseURL := strings.TrimSpace(r.FormValue("base_url"))
+	switch {
+	case interval < 1:
+		s.render(w, "digest-panel", s.antispamPageData(r, "The interval must be at least 1 hour; settings not saved."))
+		return
+	case baseURL != "" && !validBaseURL(baseURL):
+		s.render(w, "digest-panel", s.antispamPageData(r, "The base URL must be a full http(s) address; settings not saved."))
+		return
+	case enabled && baseURL == "":
+		s.render(w, "digest-panel", s.antispamPageData(r, "A base URL is required to enable the digest; settings not saved."))
+		return
+	}
+	st := directory.DigestSettings{Enabled: enabled, IntervalHours: interval, BaseURL: baseURL}
+	if err := s.dir.SetDigestSettings(st); err != nil {
+		s.render(w, "digest-panel", s.antispamPageData(r, "Could not save digest settings: "+err.Error()))
+		return
+	}
+	s.render(w, "digest-panel", s.antispamPageData(r, "Digest settings saved — the MTA applies them within a minute, no restart."))
+}
+
+// validBaseURL reports whether s is a full http(s) URL with a host, the form a release
+// link can be built from.
+func validBaseURL(s string) bool {
+	u, err := url.ParseRequestURI(s)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Host != ""
 }
 
 // weightsFromSettings maps a stored settings row to antispam.Weights for display.

@@ -22,6 +22,9 @@
 
 <h2>Outbound abuse</h2>
 {{template "outbound-panel" .}}
+
+<h2>Quarantine digest</h2>
+{{template "digest-panel" .}}
 </main>
 </div>
 {{template "foot" .}}{{end}}
@@ -32,6 +35,18 @@
 <form hx-post="/admin/ui/antispam/greylist" hx-target="#greylist-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <input type="hidden" name="enabled" value="{{if .GreylistEnabled}}0{{else}}1{{end}}">
 <button type="submit">{{if .GreylistEnabled}}Disable{{else}}Enable{{end}} greylisting</button>
+</form>
+</div>{{end}}
+
+{{define "digest-panel"}}<div id="digest-panel">
+{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+<p>The quarantine digest is <strong>{{if .DigestEnabled}}on{{else}}off{{end}}</strong>. When on, each user is emailed a periodic plain-text summary of newly quarantined (Junk) mail, every entry carrying a signed one-click link that releases that one message back to the inbox after a confirmation page. A per-mailbox watermark means only mail new since the last summary is included, and a mailbox with nothing new is skipped.</p>
+<p class="hint">This also requires a <code>digest_secret</code> in the server configuration, shared by the MTA and webmail; without it the release links do not work.</p>
+<form hx-post="/admin/ui/antispam/digest" hx-target="#digest-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label class="check"><input type="checkbox" name="enabled" value="1"{{if .DigestEnabled}} checked{{end}}> Enable the quarantine digest</label>
+<p>Interval (hours): <input type="number" name="interval" value="{{.DigestInterval}}" min="1"></p>
+<p>Release link base URL: <input type="url" name="base_url" value="{{.DigestBaseURL}}" size="40" placeholder="https://mail.example.com"></p>
+<button type="submit">Save settings</button>
 </form>
 </div>{{end}}
 

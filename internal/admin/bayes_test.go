@@ -203,6 +203,59 @@ func TestSaveOutboundRejectsBadValues(t *testing.T) {
 	}
 }
 
+// TestSaveDigestSettings proves the digest form persists the toggle, interval, and
+// base URL and acknowledges the save.
+func TestSaveDigestSettings(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	form := url.Values{"enabled": {"1"}, "interval": {"12"}, "base_url": {"https://mail.example.com"}}
+	resp := htmxPOST(t, ts, "/admin/ui/antispam/digest", session, csrf, form)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save = %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "Digest settings saved") {
+		t.Errorf("response missing acknowledgment:\n%s", body)
+	}
+	if !d.digestFound || !d.digest.Enabled || d.digest.IntervalHours != 12 || d.digest.BaseURL != "https://mail.example.com" {
+		t.Errorf("settings not persisted as entered: found=%v %+v", d.digestFound, d.digest)
+	}
+}
+
+// TestSaveDigestRejectsBadValues proves an interval below 1, a non-http base URL, and
+// enabling with no base URL are each rejected and nothing is persisted.
+func TestSaveDigestRejectsBadValues(t *testing.T) {
+	cases := []struct {
+		name string
+		form url.Values
+		want string
+	}{
+		{"interval", url.Values{"enabled": {"1"}, "interval": {"0"}, "base_url": {"https://m.test"}}, "at least 1 hour"},
+		{"bad url", url.Values{"enabled": {"1"}, "interval": {"24"}, "base_url": {"mail.example.com"}}, "http(s) address"},
+		{"enable no url", url.Values{"enabled": {"1"}, "interval": {"24"}, "base_url": {""}}, "base URL is required"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+			ts := adminServer(t, d)
+			session, csrf := loginCookies(t, ts)
+
+			resp := htmxPOST(t, ts, "/admin/ui/antispam/digest", session, csrf, tc.form)
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if !strings.Contains(string(body), tc.want) {
+				t.Errorf("expected %q in response:\n%s", tc.want, body)
+			}
+			if d.digestFound {
+				t.Error("invalid digest settings must not be persisted")
+			}
+		})
+	}
+}
+
 // TestPerformBayesRetrain proves the retrain task reads each mailbox's Junk as
 // spam and inbox as ham, trains a model, and writes it to the MTA's model path.
 func TestPerformBayesRetrain(t *testing.T) {
