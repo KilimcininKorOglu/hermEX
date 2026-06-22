@@ -87,6 +87,15 @@ func (s *Server) antispamPageData(r *http.Request, notice string) map[string]any
 	if on, err := s.dir.GetGreylistEnabled(); err == nil {
 		data["GreylistEnabled"] = on
 	}
+
+	// Inbound rate limiting: the stored settings, or the limiter's built-in defaults
+	// (disabled, 60 messages per 60 s) when none has been saved.
+	data["RateLimitEnabled"], data["RateLimitBurst"], data["RateLimitWindow"] = false, 60, 60
+	if rl, found, err := s.dir.GetRateLimitSettings(); err == nil && found {
+		data["RateLimitEnabled"] = rl.Enabled
+		data["RateLimitBurst"] = rl.Burst
+		data["RateLimitWindow"] = rl.WindowSeconds
+	}
 	return data
 }
 
@@ -106,6 +115,31 @@ func (s *Server) handleUIToggleGreylist(w http.ResponseWriter, r *http.Request) 
 		verb = "enabled"
 	}
 	s.render(w, "greylist-panel", s.antispamPageData(r, "Greylisting "+verb+" — the MTA applies it within about a minute."))
+}
+
+// handleUISaveRateLimit persists the inbound rate-limit settings (enable, burst, and
+// window). The MTA applies the change within about a minute, no restart. A burst or
+// window below 1 is rejected so the limiter is never configured to admit zero
+// messages or collapse its window.
+func (s *Server) handleUISaveRateLimit(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	burst, window := formInt(r, "burst"), formInt(r, "window")
+	if burst < 1 || window < 1 {
+		s.render(w, "ratelimit-panel", s.antispamPageData(r, "Burst and window must each be at least 1; settings not saved."))
+		return
+	}
+	st := directory.RateLimitSettings{
+		Enabled:       r.FormValue("enabled") == "1",
+		Burst:         burst,
+		WindowSeconds: window,
+	}
+	if err := s.dir.SetRateLimitSettings(st); err != nil {
+		s.render(w, "ratelimit-panel", s.antispamPageData(r, "Could not save rate-limit settings: "+err.Error()))
+		return
+	}
+	s.render(w, "ratelimit-panel", s.antispamPageData(r, "Rate-limit settings saved — the MTA applies them within a minute, no restart."))
 }
 
 // weightsFromSettings maps a stored settings row to antispam.Weights for display.

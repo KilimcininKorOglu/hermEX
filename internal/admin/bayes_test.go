@@ -121,6 +121,47 @@ func TestSaveAntispamSettingsRejectsBadThreshold(t *testing.T) {
 	}
 }
 
+// TestSaveRateLimitSettings proves the rate-limit form persists the toggle, burst,
+// and window and acknowledges the save.
+func TestSaveRateLimitSettings(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	form := url.Values{"enabled": {"1"}, "burst": {"120"}, "window": {"30"}}
+	resp := htmxPOST(t, ts, "/admin/ui/antispam/ratelimit", session, csrf, form)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save = %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "Rate-limit settings saved") {
+		t.Errorf("response missing acknowledgment:\n%s", body)
+	}
+	if !d.rateLimitFound || !d.rateLimit.Enabled || d.rateLimit.Burst != 120 || d.rateLimit.WindowSeconds != 30 {
+		t.Errorf("settings not persisted as entered: found=%v %+v", d.rateLimitFound, d.rateLimit)
+	}
+}
+
+// TestSaveRateLimitRejectsBadValues proves a burst or window below 1 (which would
+// admit no mail or collapse the window) is rejected and nothing is persisted.
+func TestSaveRateLimitRejectsBadValues(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/antispam/ratelimit", session, csrf,
+		url.Values{"enabled": {"1"}, "burst": {"0"}, "window": {"60"}})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), "at least 1") {
+		t.Errorf("expected a validation message:\n%s", body)
+	}
+	if d.rateLimitFound {
+		t.Error("invalid rate-limit settings must not be persisted")
+	}
+}
+
 // TestPerformBayesRetrain proves the retrain task reads each mailbox's Junk as
 // spam and inbox as ham, trains a model, and writes it to the MTA's model path.
 func TestPerformBayesRetrain(t *testing.T) {

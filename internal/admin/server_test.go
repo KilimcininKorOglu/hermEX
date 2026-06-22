@@ -30,6 +30,8 @@ type fakeDir struct {
 	settingsFound     bool
 	senderRules       []directory.SenderRule
 	greylistOn        bool
+	rateLimit         directory.RateLimitSettings
+	rateLimitFound    bool
 	ldap              map[int64]directory.LDAPConfig
 	defaultSyncPolicy easpolicy.Policy
 
@@ -418,6 +420,13 @@ func (f *fakeDir) DeleteSenderRule(pattern string) (bool, error) {
 }
 func (f *fakeDir) GetGreylistEnabled() (bool, error) { return f.greylistOn, nil }
 func (f *fakeDir) SetGreylistEnabled(on bool) error  { f.greylistOn = on; return nil }
+func (f *fakeDir) GetRateLimitSettings() (directory.RateLimitSettings, bool, error) {
+	return f.rateLimit, f.rateLimitFound, nil
+}
+func (f *fakeDir) SetRateLimitSettings(s directory.RateLimitSettings) error {
+	f.rateLimit, f.rateLimitFound = s, true
+	return nil
+}
 func (f *fakeDir) GetDefaultSyncPolicy() (easpolicy.Policy, error) {
 	return f.defaultSyncPolicy, nil
 }
