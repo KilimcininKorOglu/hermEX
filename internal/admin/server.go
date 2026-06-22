@@ -345,6 +345,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/spam-history/retention", s.handleUISaveSpamRetention)
 	mux.HandleFunc("GET /admin/ui/limits", s.handleUILimits)
 	mux.HandleFunc("POST /admin/ui/limits", s.handleUISaveLimits)
+	mux.HandleFunc("GET /admin/ui/settings", s.handleUISettings)
 	mux.HandleFunc("GET /admin/ui/sender-access", s.handleUISenderAccess)
 	mux.HandleFunc("POST /admin/ui/sender-access", s.handleUISaveSenderRule)
 	mux.HandleFunc("POST /admin/ui/sender-access/delete", s.handleUIDeleteSenderRule)

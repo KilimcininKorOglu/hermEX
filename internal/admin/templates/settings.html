@@ -1,0 +1,58 @@
+{{define "settings.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>Settings</h1>
+<p class="hint">Every operator-tunable setting in one place. Changes apply automatically within about a minute — no restart.</p>
+
+<div class="tabs">
+<input type="radio" name="settab" id="settab-antispam" checked>
+<input type="radio" name="settab" id="settab-delivery">
+<input type="radio" name="settab" id="settab-limits">
+<input type="radio" name="settab" id="settab-retention">
+<div class="tabbar">
+<label for="settab-antispam">Anti-spam</label>
+<label for="settab-delivery">Delivery</label>
+<label for="settab-limits">Limits</label>
+<label for="settab-retention">Retention</label>
+</div>
+
+<div class="tabpanel antispam">
+<h2>Scoring</h2>
+{{template "scoring-panel" .}}
+<h2>SpamAssassin ruleset</h2>
+<p>Source: {{.SASource}}</p>
+<p>{{.SARules}} rules and {{.SAMetas}} meta rules in use; {{.SASkipped}} rules and {{.SADropped}} metas are dropped (network-, plugin-, and Bayes-backed rules and patterns the engine cannot compile — those checks are done natively).</p>
+<p class="hint">The rules contribute one combined signal: when their summed score reaches {{.SAThreshold}}, the verdict gains {{.SAWeight}} points. The ruleset is seeded into data_dir on first run; refresh it with the antispam-rules tool — changes are applied automatically within about a minute, no restart.</p>
+{{template "antispam-panel" .}}
+<h2>Greylisting</h2>
+{{template "greylist-panel" .}}
+</div>
+
+<div class="tabpanel delivery">
+<h2>Inbound rate limiting</h2>
+{{template "ratelimit-panel" .}}
+<h2>Inbound message size</h2>
+{{template "message-size-panel" .}}
+<h2>Outbound abuse</h2>
+{{template "outbound-panel" .}}
+<h2>Outbound delivery retry</h2>
+{{template "relay-panel" .}}
+<h2>Quarantine digest</h2>
+{{template "digest-panel" .}}
+</div>
+
+<div class="tabpanel limits">
+<h2>Protocol size limits</h2>
+<p class="hint">The maximum request/body size each protocol accepts; a larger request is rejected. More protocol limits (EWS, ActiveSync, DAV) are added here as they are wired.</p>
+{{template "limits-panel" .}}
+</div>
+
+<div class="tabpanel retention">
+<h2>Spam history retention</h2>
+{{template "retention-panel" .}}
+</div>
+</div>
+</main>
+</div>
+{{template "foot" .}}{{end}}

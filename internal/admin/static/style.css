@@ -222,3 +222,36 @@ table.grid td.empty { color: var(--muted); text-align: center; }
 	border: 1px solid var(--accent);
 	color: var(--accent);
 }
+
+/* Settings page category tabs (CSS-only, radio-driven — no JS). The radios precede
+   the tab bar and the panels so the general-sibling combinator can reveal the
+   checked tab's panel. */
+.tabs > input[type="radio"] { position: absolute; opacity: 0; pointer-events: none; }
+.tabbar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.25rem;
+	border-bottom: 1px solid var(--border);
+	margin-bottom: 1.25rem;
+}
+.tabbar label {
+	padding: 0.55rem 1rem;
+	margin-bottom: -1px;
+	cursor: pointer;
+	color: var(--muted);
+	font-weight: 500;
+	border-bottom: 2px solid transparent;
+}
+.tabbar label:hover { color: var(--ink); }
+.tabs .tabpanel { display: none; }
+#settab-antispam:checked ~ .tabbar label[for="settab-antispam"],
+#settab-delivery:checked ~ .tabbar label[for="settab-delivery"],
+#settab-limits:checked ~ .tabbar label[for="settab-limits"],
+#settab-retention:checked ~ .tabbar label[for="settab-retention"] {
+	color: var(--accent);
+	border-bottom-color: var(--accent);
+}
+#settab-antispam:checked ~ .tabpanel.antispam,
+#settab-delivery:checked ~ .tabpanel.delivery,
+#settab-limits:checked ~ .tabpanel.limits,
+#settab-retention:checked ~ .tabpanel.retention { display: block; }
