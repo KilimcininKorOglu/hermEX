@@ -204,6 +204,10 @@
 </form>
 <div id="folder-perms"></div>
 
+<h2>Quarantine (Junk)</h2>
+<p class="hint">Review this user's Junk folder for false positives; release a wrongly-filed message to their inbox or delete it. Message bodies are not shown.</p>
+<div id="quarantine"><button type="button" hx-get="/admin/ui/users/{{.User.Username}}/quarantine" hx-target="#quarantine" hx-swap="innerHTML">Review quarantine</button></div>
+
 <h2>Admin roles</h2>
 {{template "user-roles" .}}
 
@@ -241,6 +245,25 @@
 <button type="submit">Grant</button>
 </form>
 {{end}}{{end}}
+
+{{define "quarantine"}}
+{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<table class="grid">
+<thead><tr><th>Date</th><th>From</th><th>Subject</th><th>Size</th><th></th></tr></thead>
+<tbody>
+{{range .Messages}}<tr>
+<td>{{.Date}}</td><td>{{.Sender}}</td><td>{{.Subject}}</td><td>{{.Size}}</td>
+<td>
+<form class="inline" hx-post="/admin/ui/users/{{$.Email}}/quarantine/release" hx-target="#quarantine" hx-swap="innerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
+<input type="hidden" name="uid" value="{{.UID}}"><button type="submit">Release</button></form>
+<form class="inline" hx-post="/admin/ui/users/{{$.Email}}/quarantine/delete" hx-target="#quarantine" hx-swap="innerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}' hx-confirm="Delete this message?">
+<input type="hidden" name="uid" value="{{.UID}}"><button type="submit" class="danger">Delete</button></form>
+</td></tr>
+{{else}}<tr><td colspan="5" class="empty">No quarantined messages.</td></tr>{{end}}
+</tbody>
+</table>
+{{end}}
 
 {{define "user-devices"}}<div id="user-devices">
 {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
