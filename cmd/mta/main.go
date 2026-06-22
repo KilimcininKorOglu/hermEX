@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"flag"
+	"hash/fnv"
 	"log"
 	"net"
 	"net/mail"
@@ -125,8 +126,16 @@ func main() {
 		log.Printf("hermex-mta: anti-spam ruleset load failed, using embedded baseline: %v", err)
 	}
 	scorer.SetRules(rules)
-	// Hot-reload edited settings, a refreshed ruleset, and a retrained model so each
-	// takes effect without restarting the MTA — mail flow never pauses.
+	// Operator allow/block rules override the verdict; loaded at startup and
+	// hot-reloaded on change.
+	if list, _, err := antispamAccess(dir); err != nil {
+		log.Printf("hermex-mta: sender access rules load failed, none applied: %v", err)
+	} else {
+		scorer.SetAccess(list)
+	}
+	// Hot-reload edited settings, sender access rules, a refreshed ruleset, and a
+	// retrained model so each takes effect without restarting the MTA — mail flow
+	// never pauses.
 	reloader := antispam.NewReloader(scorer, cfg.DataDir, log.Printf)
 	reloader.WatchSettings(func() (*antispam.Config, int64, bool) {
 		s, found, err := dir.GetAntispamSettings()
@@ -134,6 +143,13 @@ func main() {
 			return nil, 0, false
 		}
 		return antispamConfig(s), s.UpdatedAt, true
+	})
+	reloader.WatchAccess(func() (*antispam.AccessList, uint64, bool) {
+		list, h, err := antispamAccess(dir)
+		if err != nil {
+			return nil, 0, false
+		}
+		return list, h, true
 	})
 	go reloader.Run(context.Background(), time.Minute)
 	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir}, Hostname: cfg.Hostname, Logger: logger}
@@ -244,6 +260,34 @@ func loadAntispamSettings(dir *directory.SQLDirectory) (directory.AntispamSettin
 	}
 	s, _, err = dir.GetAntispamSettings() // re-read to pick up the stamped version
 	return s, err
+}
+
+// antispamAccess loads the sender allow/block rules into an antispam.AccessList and
+// returns a content hash of them, the version the reloader compares to detect a
+// change (a hash, not a counter, so a delete is caught too).
+func antispamAccess(dir *directory.SQLDirectory) (*antispam.AccessList, uint64, error) {
+	rules, err := dir.ListSenderRules()
+	if err != nil {
+		return nil, 0, err
+	}
+	m := make(map[string]string, len(rules))
+	for _, r := range rules {
+		m[r.Pattern] = r.Action
+	}
+	return antispam.NewAccessList(m), accessHash(rules), nil
+}
+
+// accessHash folds the rules (already returned in a deterministic order) into a
+// content hash so any add, edit, or delete changes the value.
+func accessHash(rules []directory.SenderRule) uint64 {
+	h := fnv.New64a()
+	for _, r := range rules {
+		h.Write([]byte(r.Pattern))
+		h.Write([]byte{0})
+		h.Write([]byte(r.Action))
+		h.Write([]byte{'\n'})
+	}
+	return h.Sum64()
 }
 
 // sendLaterInterval is how often the worker scans every mailbox's Outbox for due

@@ -26,6 +26,12 @@ type Reloader struct {
 	// and its monotonic version; the reloader applies it when the version advances.
 	settingsFn  func() (*Config, int64, bool)
 	settingsVer int64
+
+	// accessFn, when set via WatchAccess, returns the current allow/block list and a
+	// content hash; the reloader applies it when the hash changes (a hash, not a
+	// counter, so admin CRUD cannot forget to bump it and a delete is detected too).
+	accessFn  func() (*AccessList, uint64, bool)
+	accessVer uint64
 }
 
 // WatchSettings makes the reloader hot-apply edited settings on its tick: fn
@@ -38,6 +44,18 @@ func (r *Reloader) WatchSettings(fn func() (*Config, int64, bool)) {
 	r.settingsFn = fn
 	if _, ver, ok := fn(); ok {
 		r.settingsVer = ver
+	}
+}
+
+// WatchAccess makes the reloader hot-apply edited sender allow/block rules on its
+// tick: fn returns the current AccessList and a content hash, and the reloader
+// calls SetAccess when the hash changes. Like WatchSettings it is injected so the
+// antispam package keeps no database dependency, and it records the current hash
+// now so the already-loaded rules are not re-applied on the first tick.
+func (r *Reloader) WatchAccess(fn func() (*AccessList, uint64, bool)) {
+	r.accessFn = fn
+	if _, h, ok := fn(); ok {
+		r.accessVer = h
 	}
 }
 
@@ -85,6 +103,13 @@ func (r *Reloader) reloadOnce() []string {
 			r.scorer.SetConfig(cfg)
 			r.settingsVer = ver
 			reloaded = append(reloaded, "settings")
+		}
+	}
+	if r.accessFn != nil {
+		if list, h, ok := r.accessFn(); ok && h != r.accessVer {
+			r.scorer.SetAccess(list)
+			r.accessVer = h
+			reloaded = append(reloaded, "access rules")
 		}
 	}
 	if mod, ok := fileModTime(r.rulesPath); ok && mod.After(r.rulesMod) {
