@@ -177,6 +177,13 @@ func main() {
 	})
 	applyOutboundSettings(dir, outboundLimiter)
 	go runOutboundMaintenance(dir, outboundLimiter)
+	// Quarantine digest: deliver each user a periodic summary of newly quarantined
+	// mail with signed one-click release links. It needs a shared signing secret (the
+	// webmail release endpoint verifies the same key); without one the feature stays
+	// off regardless of the admin toggle.
+	if cfg.DigestSecret != "" {
+		go runDigest(dir, []byte(cfg.DigestSecret), cfg.Hostname, logger)
+	}
 	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir, Greylist: greylister, RateLimit: rateLimiter, Thresholds: dir, Outbound: outboundLimiter}, Hostname: cfg.Hostname, Logger: logger}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()
@@ -403,6 +410,39 @@ func runOutboundMaintenance(dir *directory.SQLDirectory, l *mta.OutboundLimiter)
 		case <-pruneTick.C:
 			l.Prune()
 		}
+	}
+}
+
+// runDigest delivers the quarantine digest on the configured cadence. It checks the
+// stored settings hourly and runs a pass when the digest is enabled and at least the
+// configured interval has elapsed since the last; the per-mailbox watermark keeps each
+// pass to mail that arrived since that mailbox's last summary. Release links are valid
+// for the interval plus a week's grace so a user has time to act before they expire.
+func runDigest(dir *directory.SQLDirectory, secret []byte, hostname string, logger *logging.Logger) {
+	const checkEvery = time.Hour
+	const grace = 7 * 24 * time.Hour
+	t := time.NewTicker(checkEvery)
+	defer t.Stop()
+	var lastRun time.Time
+	for range t.C {
+		s, found, err := dir.GetDigestSettings()
+		if err != nil || !found || !s.Enabled {
+			continue
+		}
+		interval := time.Duration(s.IntervalHours) * time.Hour
+		if interval <= 0 {
+			interval = 24 * time.Hour
+		}
+		if !lastRun.IsZero() && time.Since(lastRun) < interval {
+			continue
+		}
+		runner := &mta.DigestRunner{
+			Dir: dir, Secret: secret, BaseURL: s.BaseURL, Hostname: hostname,
+			TokenTTL: interval + grace, Now: time.Now, Logger: logger,
+		}
+		n := runner.Run()
+		lastRun = time.Now()
+		logger.Info(logging.MTA, "digest.run", logging.Fields{"sent": n})
 	}
 }
 
