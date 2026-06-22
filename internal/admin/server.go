@@ -96,6 +96,9 @@ type Directory interface {
 	RecentSpamVerdicts(limit int) ([]directory.SpamVerdict, error)
 	GetAntispamSettings() (directory.AntispamSettings, bool, error)
 	SetAntispamSettings(directory.AntispamSettings) error
+	ListSenderRules() ([]directory.SenderRule, error)
+	SetSenderRule(pattern, action string) error
+	DeleteSenderRule(pattern string) (bool, error)
 }
 
 // LDAPSyncer downsyncs an organization's directory accounts. It is optional —
@@ -302,6 +305,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/antispam/retrain", s.handleUIRetrainBayes)
 	mux.HandleFunc("POST /admin/ui/antispam/settings", s.handleUISaveAntispamSettings)
 	mux.HandleFunc("GET /admin/ui/spam-history", s.handleUISpamHistory)
+	mux.HandleFunc("GET /admin/ui/sender-access", s.handleUISenderAccess)
+	mux.HandleFunc("POST /admin/ui/sender-access", s.handleUISaveSenderRule)
+	mux.HandleFunc("POST /admin/ui/sender-access/delete", s.handleUIDeleteSenderRule)
 	mux.HandleFunc("GET /admin/ui/public-folders", s.handleUIPublicFolders)
 	mux.HandleFunc("GET /admin/ui/public-folders/panel", s.handleUIPublicFoldersPanel)
 	mux.HandleFunc("POST /admin/ui/public-folders/folder", s.handleUICreatePublicFolder)

@@ -1,0 +1,36 @@
+{{define "sender-access.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>Sender allow/block</h1>
+<p class="hint">Rules override spam scoring at delivery: an allowlisted sender skips score-based junking (a forged sender that hard-fails DMARC under an enforcing policy is still junked), a blocklisted sender is always filed to Junk. A pattern is an email address or a bare domain; an exact address beats a domain. Changes apply within about a minute, no restart.</p>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{template "sender-access-panel" .}}
+</main>
+</div>
+{{template "foot" .}}{{end}}
+
+{{define "sender-access-panel"}}<div id="sender-access-panel">
+{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+<table class="grid">
+<thead><tr><th>Pattern</th><th>Action</th><th></th></tr></thead>
+<tbody>
+{{range .Rules}}<tr>
+<td>{{.Pattern}}</td>
+<td>{{.Action}}</td>
+<td><form hx-post="/admin/ui/sender-access/delete" hx-target="#sender-access-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
+<input type="hidden" name="pattern" value="{{.Pattern}}">
+<button type="submit">Remove</button></form></td>
+</tr>
+{{else}}<tr><td colspan="3" class="empty">No rules.</td></tr>{{end}}
+</tbody>
+</table>
+<form hx-post="/admin/ui/sender-access" hx-target="#sender-access-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<input type="text" name="pattern" placeholder="user@example.com or example.com" size="40" required>
+<select name="action">
+<option value="allow">allow</option>
+<option value="block">block</option>
+</select>
+<button type="submit">Add rule</button>
+</form>
+</div>{{end}}

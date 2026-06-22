@@ -28,6 +28,7 @@ type fakeDir struct {
 	verdicts          []directory.SpamVerdict
 	settings          directory.AntispamSettings
 	settingsFound     bool
+	senderRules       []directory.SenderRule
 	ldap              map[int64]directory.LDAPConfig
 	defaultSyncPolicy easpolicy.Policy
 
@@ -393,6 +394,26 @@ func (f *fakeDir) GetAntispamSettings() (directory.AntispamSettings, bool, error
 func (f *fakeDir) SetAntispamSettings(s directory.AntispamSettings) error {
 	f.settings, f.settingsFound = s, true
 	return nil
+}
+func (f *fakeDir) ListSenderRules() ([]directory.SenderRule, error) { return f.senderRules, nil }
+func (f *fakeDir) SetSenderRule(pattern, action string) error {
+	for i := range f.senderRules {
+		if f.senderRules[i].Pattern == pattern {
+			f.senderRules[i].Action = action
+			return nil
+		}
+	}
+	f.senderRules = append(f.senderRules, directory.SenderRule{Pattern: pattern, Action: action})
+	return nil
+}
+func (f *fakeDir) DeleteSenderRule(pattern string) (bool, error) {
+	for i := range f.senderRules {
+		if f.senderRules[i].Pattern == pattern {
+			f.senderRules = append(f.senderRules[:i], f.senderRules[i+1:]...)
+			return true, nil
+		}
+	}
+	return false, nil
 }
 func (f *fakeDir) GetDefaultSyncPolicy() (easpolicy.Policy, error) {
 	return f.defaultSyncPolicy, nil
