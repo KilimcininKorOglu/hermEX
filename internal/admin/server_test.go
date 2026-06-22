@@ -26,6 +26,8 @@ type fakeDir struct {
 	aliases           []directory.AliasInfo
 	maildirs          []string
 	verdicts          []directory.SpamVerdict
+	settings          directory.AntispamSettings
+	settingsFound     bool
 	ldap              map[int64]directory.LDAPConfig
 	defaultSyncPolicy easpolicy.Policy
 
@@ -385,6 +387,13 @@ func (f *fakeDir) FinishTask(id int64, status, message string) error {
 	return nil
 }
 func (f *fakeDir) RecentSpamVerdicts(int) ([]directory.SpamVerdict, error) { return f.verdicts, nil }
+func (f *fakeDir) GetAntispamSettings() (directory.AntispamSettings, bool, error) {
+	return f.settings, f.settingsFound, nil
+}
+func (f *fakeDir) SetAntispamSettings(s directory.AntispamSettings) error {
+	f.settings, f.settingsFound = s, true
+	return nil
+}
 func (f *fakeDir) GetDefaultSyncPolicy() (easpolicy.Policy, error) {
 	return f.defaultSyncPolicy, nil
 }

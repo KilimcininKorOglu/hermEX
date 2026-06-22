@@ -59,6 +59,50 @@ func TestRetrainEnqueues(t *testing.T) {
 	}
 }
 
+// TestSaveAntispamSettings proves the settings form persists the edited weights,
+// threshold, and zones and acknowledges the save.
+func TestSaveAntispamSettings(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	form := url.Values{
+		"spf_fail": {"5"}, "spf_softfail": {"2"}, "dkim_fail": {"3"}, "dmarc_fail": {"6"},
+		"dnsbl_hit": {"6"}, "bayes_spam": {"4"}, "sa_rules_hit": {"4"},
+		"threshold": {"10"}, "zones": {"zen.example,bl.example"},
+	}
+	resp := htmxPOST(t, ts, "/admin/ui/antispam/settings", session, csrf, form)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save settings = %d, want 200", resp.StatusCode)
+	}
+	if !strings.Contains(string(body), "Settings saved") {
+		t.Errorf("save response missing acknowledgment:\n%s", body)
+	}
+	if !d.settingsFound || d.settings.Threshold != 10 || d.settings.DMARCFail != 6 || d.settings.Zones != "zen.example,bl.example" {
+		t.Errorf("settings not persisted as entered: found=%v %+v", d.settingsFound, d.settings)
+	}
+}
+
+// TestSaveAntispamSettingsRejectsBadThreshold proves a threshold below 1 (which
+// would flag every message as spam) is rejected and nothing is persisted.
+func TestSaveAntispamSettingsRejectsBadThreshold(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/antispam/settings", session, csrf, url.Values{"threshold": {"0"}})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), "at least 1") {
+		t.Errorf("expected a threshold validation message:\n%s", body)
+	}
+	if d.settingsFound {
+		t.Error("an invalid threshold must not be persisted")
+	}
+}
+
 // TestPerformBayesRetrain proves the retrain task reads each mailbox's Junk as
 // spam and inbox as ham, trains a model, and writes it to the MTA's model path.
 func TestPerformBayesRetrain(t *testing.T) {

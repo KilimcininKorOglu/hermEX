@@ -7,19 +7,7 @@
 {{template "antispam-panel" .}}
 
 <h2>Scoring</h2>
-<p>Spam threshold: {{.Threshold}}</p>
-<table class="grid">
-<thead><tr><th>Signal</th><th>Weight</th></tr></thead>
-<tbody>
-<tr><td>SPF fail</td><td>{{.Weights.SPFFail}}</td></tr>
-<tr><td>SPF softfail</td><td>{{.Weights.SPFSoftFail}}</td></tr>
-<tr><td>No valid DKIM signature</td><td>{{.Weights.DKIMFail}}</td></tr>
-<tr><td>DMARC fail (enforced policy)</td><td>{{.Weights.DMARCFail}}</td></tr>
-<tr><td>DNSBL listing</td><td>{{.Weights.DNSBLHit}}</td></tr>
-<tr><td>Bayesian spam</td><td>{{.Weights.BayesSpam}}</td></tr>
-<tr><td>SpamAssassin rules</td><td>{{.Weights.SARulesHit}}</td></tr>
-</tbody>
-</table>
+{{template "scoring-panel" .}}
 
 <h2>SpamAssassin ruleset</h2>
 <p>Source: {{.SASource}}</p>
@@ -42,4 +30,27 @@
 <button type="submit">Retrain from mailboxes</button>
 </form>
 <p class="hint">Retraining reads each mailbox's Junk folder as spam and inbox as ham; it runs in the background — watch the Task queue for the result.</p>
+</div>{{end}}
+
+{{define "scoring-panel"}}<div id="scoring-panel">
+{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+<form hx-post="/admin/ui/antispam/settings" hx-target="#scoring-panel" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<table class="grid">
+<thead><tr><th>Signal</th><th>Weight</th></tr></thead>
+<tbody>
+<tr><td>SPF fail</td><td><input type="number" name="spf_fail" value="{{.Weights.SPFFail}}" min="0"></td></tr>
+<tr><td>SPF softfail</td><td><input type="number" name="spf_softfail" value="{{.Weights.SPFSoftFail}}" min="0"></td></tr>
+<tr><td>No valid DKIM signature</td><td><input type="number" name="dkim_fail" value="{{.Weights.DKIMFail}}" min="0"></td></tr>
+<tr><td>DMARC fail (enforced policy)</td><td><input type="number" name="dmarc_fail" value="{{.Weights.DMARCFail}}" min="0"></td></tr>
+<tr><td>DNSBL listing</td><td><input type="number" name="dnsbl_hit" value="{{.Weights.DNSBLHit}}" min="0"></td></tr>
+<tr><td>Bayesian spam</td><td><input type="number" name="bayes_spam" value="{{.Weights.BayesSpam}}" min="0"></td></tr>
+<tr><td>SpamAssassin rules</td><td><input type="number" name="sa_rules_hit" value="{{.Weights.SARulesHit}}" min="0"></td></tr>
+</tbody>
+</table>
+<p>Spam threshold: <input type="number" name="threshold" value="{{.Threshold}}" min="1"></p>
+<p>DNS blocklist zones (comma-separated): <input type="text" name="zones" value="{{.Zones}}" size="60"></p>
+<button type="submit">Save settings</button>
+</form>
+<p class="hint">Edited settings apply to inbound scoring within about a minute, no restart.</p>
 </div>{{end}}

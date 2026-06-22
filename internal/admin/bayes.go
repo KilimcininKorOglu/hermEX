@@ -3,8 +3,11 @@ package admin
 import (
 	"fmt"
 	"net/http"
+	"strconv"
+	"strings"
 
 	"hermex/internal/antispam"
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -41,17 +44,24 @@ func (s *Server) performBayesRetrain() (string, error) {
 	return fmt.Sprintf("Retrained on %d spam + %d ham messages from %d mailboxes.", nspam, nham, nbox), nil
 }
 
-// antispamPageData builds the anti-spam page model: the built-in scoring defaults
-// and the status of the Bayesian model file (a trained model vs the embedded
-// floor).
+// antispamPageData builds the anti-spam page model: the editable scoring settings
+// (the stored row, or the built-in defaults when none has been saved), and the
+// status of the Bayesian model and the SpamAssassin ruleset.
 func (s *Server) antispamPageData(r *http.Request, notice string) map[string]any {
 	data := map[string]any{
-		"Nav":       "antispam",
-		"CSRF":      csrfCookieValue(r),
-		"Notice":    notice,
-		"Threshold": antispam.DefaultThreshold,
-		"Weights":   antispam.DefaultWeights,
+		"Nav":    "antispam",
+		"CSRF":   csrfCookieValue(r),
+		"Notice": notice,
 	}
+	w, threshold, zones := antispam.DefaultWeights, antispam.DefaultThreshold, ""
+	if st, found, err := s.dir.GetAntispamSettings(); err == nil && found {
+		w = weightsFromSettings(st)
+		threshold, zones = st.Threshold, st.Zones
+	}
+	data["Weights"] = w
+	data["Threshold"] = threshold
+	data["Zones"] = zones
+
 	if m, err := antispam.LoadModelFile(s.paths.AntispamModelPath()); err == nil && m != nil {
 		data["ModelTrained"] = true
 		data["SpamMsgs"] = m.SpamMsgs
@@ -71,9 +81,55 @@ func (s *Server) antispamPageData(r *http.Request, notice string) map[string]any
 	data["SAMetas"] = metas
 	data["SASkipped"] = rs.SkippedRules
 	data["SADropped"] = rs.DroppedMetas
-	data["SAWeight"] = antispam.DefaultWeights.SARulesHit
+	data["SAWeight"] = w.SARulesHit
 	data["SAThreshold"] = antispam.SAScoreThreshold
 	return data
+}
+
+// weightsFromSettings maps a stored settings row to antispam.Weights for display.
+func weightsFromSettings(st directory.AntispamSettings) antispam.Weights {
+	return antispam.Weights{
+		SPFFail: st.SPFFail, SPFSoftFail: st.SPFSoftFail, DKIMFail: st.DKIMFail, DMARCFail: st.DMARCFail,
+		DNSBLHit: st.DNSBLHit, BayesSpam: st.BayesSpam, SARulesHit: st.SARulesHit,
+	}
+}
+
+// handleUISaveAntispamSettings persists edited scoring settings. The MTA
+// hot-reloads them within about a minute, with no restart.
+func (s *Server) handleUISaveAntispamSettings(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	if threshold := formInt(r, "threshold"); threshold < 1 {
+		s.render(w, "scoring-panel", s.antispamPageData(r, "Threshold must be at least 1; settings not saved."))
+		return
+	}
+	st := directory.AntispamSettings{
+		SPFFail:     formInt(r, "spf_fail"),
+		SPFSoftFail: formInt(r, "spf_softfail"),
+		DKIMFail:    formInt(r, "dkim_fail"),
+		DMARCFail:   formInt(r, "dmarc_fail"),
+		DNSBLHit:    formInt(r, "dnsbl_hit"),
+		BayesSpam:   formInt(r, "bayes_spam"),
+		SARulesHit:  formInt(r, "sa_rules_hit"),
+		Threshold:   formInt(r, "threshold"),
+		Zones:       strings.TrimSpace(r.FormValue("zones")),
+	}
+	if err := s.dir.SetAntispamSettings(st); err != nil {
+		s.render(w, "scoring-panel", s.antispamPageData(r, "Could not save settings: "+err.Error()))
+		return
+	}
+	s.render(w, "scoring-panel", s.antispamPageData(r, "Settings saved — the MTA applies them within a minute, no restart."))
+}
+
+// formInt reads a non-negative integer form field, returning 0 when absent or
+// unparseable.
+func formInt(r *http.Request, name string) int {
+	n, err := strconv.Atoi(strings.TrimSpace(r.FormValue(name)))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
 }
 
 // handleUIAntispam renders the anti-spam page (system admins).
