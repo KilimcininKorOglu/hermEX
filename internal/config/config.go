@@ -98,6 +98,14 @@ func (c *Config) TLSEnabled() bool {
 	return c.TLSCert != "" && c.TLSKey != ""
 }
 
+// ServerHostname reports the server's public mail hostname (config Hostname). It
+// is the MX and autodiscover/autoconfig target that the admin DNS-records
+// prescription points a domain owner at; a method (not the bare field) so it can
+// be exposed through the admin Paths interface.
+func (c *Config) ServerHostname() string {
+	return c.Hostname
+}
+
 // MaildirFor derives a user's mailbox directory
 // (the internal spec §5.5): {root}/user/{domain}/{localpart}. Collision
 // suffixing (~N) is handled by the directory at provisioning time, not here.

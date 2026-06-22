@@ -114,6 +114,16 @@
 <p class="hint">Signs outbound mail from this domain so it passes DKIM and DMARC at receivers. Generate a key, publish the DNS record it shows, allow a few minutes for it to propagate, then enable signing — enabling before the record is published and visible would make your mail fail DKIM.</p>
 {{template "dkim-panel" .}}
 
+<h2>Required DNS records</h2>
+<p class="hint">Publish these records at the domain owner's DNS provider so mail routes to this server and passes SPF, DKIM, and DMARC. After publishing, allow time to propagate and use the DNS health check below to confirm.</p>
+<table class="grid">
+<thead><tr><th>Record</th><th>Name</th><th>Type</th><th>Value</th><th>Purpose</th></tr></thead>
+<tbody>
+{{range .DNSRecords}}<tr><td>{{.Label}}</td><td><code>{{.Name}}</code></td><td>{{.Type}}</td><td><code class="dns-record">{{.Value}}</code></td><td class="hint">{{.Note}}</td></tr>
+{{end}}
+</tbody>
+</table>
+
 <h2>DNS health</h2>
 <p class="hint">Resolves this domain's live mail-related DNS records (read-only).</p>
 <button hx-get="/admin/ui/domains/{{.Domain.ID}}/dnscheck" hx-target="#dns-report" hx-swap="innerHTML">Check DNS</button>

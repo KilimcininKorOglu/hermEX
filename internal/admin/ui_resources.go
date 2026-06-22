@@ -109,6 +109,11 @@ func (s *Server) handleUIDomainDetail(w http.ResponseWriter, r *http.Request) {
 	for k, v := range s.dkimData(dd.Name) {
 		data[k] = v
 	}
+	// Prescribe the DNS records the domain owner must publish, reusing the DKIM
+	// record already merged above (empty when no key exists yet).
+	dkimName, _ := data["DKIMRecordName"].(string)
+	dkimValue, _ := data["DKIMPublicTXT"].(string)
+	data["DNSRecords"] = prescribeDomainDNS(dd.Name, s.paths.ServerHostname(), dkimName, dkimValue)
 	s.render(w, "domain_detail.html", data)
 }
 

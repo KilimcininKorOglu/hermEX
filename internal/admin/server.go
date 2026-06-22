@@ -137,13 +137,16 @@ type LDAPSyncer interface {
 }
 
 // Paths derives a new domain's homedir and a new user's maildir from the
-// configured data root; *config.Config satisfies it.
+// configured data root, and reports the server's public mail hostname (the MX
+// and autodiscover/autoconfig target the DNS-records prescription points at);
+// *config.Config satisfies it.
 type Paths interface {
 	HomedirFor(domain string) string
 	MaildirFor(address string) string
 	RelaySpoolPath() string
 	AntispamModelPath() string
 	AntispamRulesPath() string
+	ServerHostname() string
 }
 
 // LogReader queries the central log store for the log viewer. It is optional —
