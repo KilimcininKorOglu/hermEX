@@ -45,10 +45,10 @@ func (m *MultiSink) Write(e Event) {
 //
 // database is the Mongo database holding the logs collection (defaults to
 // "hermex" when empty); spillDir, when set, is where failed batches are buffered
-// while Mongo is unreachable; retentionDays is the TTL window in days — zero or
-// negative keeps logs forever (no TTL index), which is the safe default for an
-// unset value rather than expiring everything immediately.
-func Build(mongoURI, database, spillDir string, retentionDays int) (*Logger, func() error) {
+// while Mongo is unreachable. Retention is no longer applied here: the admin daemon
+// prunes the log store to the operator-set window at runtime (see Reader.PruneOlderThan),
+// so Build creates no TTL index and the window can change without a restart.
+func Build(mongoURI, database, spillDir string) (*Logger, func() error) {
 	stderr := NewStderrSink(nil)
 	noop := func() error { return nil }
 	if mongoURI == "" {
@@ -68,11 +68,7 @@ func Build(mongoURI, database, spillDir string, retentionDays int) (*Logger, fun
 			spillPath = filepath.Join(spillDir, "logspill.jsonl")
 		}
 	}
-	var retention time.Duration
-	if retentionDays > 0 {
-		retention = time.Duration(retentionDays) * 24 * time.Hour
-	}
-	ms, err := NewMongoSink(mongoURI, database, spillPath, retention)
+	ms, err := NewMongoSink(mongoURI, database, spillPath)
 	if err != nil {
 		stderr.Write(Event{
 			Level:     LevelWarn,

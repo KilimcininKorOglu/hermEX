@@ -102,8 +102,9 @@ func TestMongoSinkWriteNeverBlocks(t *testing.T) {
 
 // TestMongoSinkIntegration drives a real MongoDB (the dev container's mongo): it
 // writes an event through NewMongoSink, reads it back, and confirms the stored
-// shape and that the TTL plus filter indexes were created. It skips without the
-// env, so the host quick-feedback run is unaffected.
+// shape and that the filter indexes were created — and that NO TTL index exists,
+// since retention is enforced by the admin's pruning, not a TTL. It skips without
+// the env, so the host quick-feedback run is unaffected.
 func TestMongoSinkIntegration(t *testing.T) {
 	uri := os.Getenv("HERMEX_TEST_MONGO_URI")
 	if uri == "" {
@@ -120,7 +121,7 @@ func TestMongoSinkIntegration(t *testing.T) {
 	raw.Database(db).Drop(bg) // clean slate
 	defer raw.Database(db).Drop(bg)
 
-	sink, err := NewMongoSink(uri, db, "", time.Hour)
+	sink, err := NewMongoSink(uri, db, "")
 	if err != nil {
 		t.Fatalf("NewMongoSink: %v", err)
 	}
@@ -154,25 +155,21 @@ func TestMongoSinkIntegration(t *testing.T) {
 	if err := cur.All(ctx, &idx); err != nil {
 		t.Fatal(err)
 	}
-	if len(idx) < 5 {
-		t.Errorf("got %d indexes, want >= 5 (ttl + 3 filter indexes + _id)", len(idx))
+	if len(idx) < 4 {
+		t.Errorf("got %d indexes, want >= 4 (3 filter indexes + _id, no TTL)", len(idx))
 	}
-	hasTTL := false
 	for _, m := range idx {
 		if _, ok := m["expireAfterSeconds"]; ok {
-			hasTTL = true
+			t.Errorf("a TTL index exists: %v — retention is prune-based, no TTL must be created", m)
 		}
-	}
-	if !hasTTL {
-		t.Error("no TTL index (expireAfterSeconds) was created")
 	}
 }
 
-// TestMongoSinkNoTTLWhenRetentionZero proves the keep-forever guard: a zero
-// retention must NOT create a TTL index. Without the guard ensureIndexes would
-// call SetExpireAfterSeconds(0), which MongoDB treats as "expire immediately" —
-// silently deleting every log within a minute and destroying the audit trail.
-func TestMongoSinkNoTTLWhenRetentionZero(t *testing.T) {
+// TestMongoSinkCreatesNoTTLIndex proves the sink never creates a TTL index:
+// retention is enforced by the admin daemon pruning the collection, not by Mongo
+// expiring documents. A stray TTL index here would silently delete logs on a stale
+// schedule and could override the operator's retention window, so there must be none.
+func TestMongoSinkCreatesNoTTLIndex(t *testing.T) {
 	uri := os.Getenv("HERMEX_TEST_MONGO_URI")
 	if uri == "" {
 		t.Skip("HERMEX_TEST_MONGO_URI not set (needs the dev container's mongo)")
@@ -188,7 +185,7 @@ func TestMongoSinkNoTTLWhenRetentionZero(t *testing.T) {
 	raw.Database(db).Drop(bg)
 	defer raw.Database(db).Drop(bg)
 
-	sink, err := NewMongoSink(uri, db, "", 0)
+	sink, err := NewMongoSink(uri, db, "")
 	if err != nil {
 		t.Fatalf("NewMongoSink: %v", err)
 	}
@@ -211,7 +208,7 @@ func TestMongoSinkNoTTLWhenRetentionZero(t *testing.T) {
 	}
 	for _, m := range idx {
 		if _, ok := m["expireAfterSeconds"]; ok {
-			t.Fatalf("a TTL index was created for retention 0: %v — logs would expire immediately", m)
+			t.Fatalf("a TTL index was created: %v — retention is prune-based, no TTL must exist", m)
 		}
 	}
 	if len(idx) < 4 {

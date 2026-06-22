@@ -111,6 +111,8 @@ type Directory interface {
 	SetMessageSizeSettings(directory.MessageSizeSettings) error
 	GetSizeLimits() (directory.SizeLimits, bool, error)
 	SetSizeLimits(directory.SizeLimits) error
+	GetLogRetentionDays() (int, bool, error)
+	SetLogRetentionDays(int) error
 	GetOutboundSettings() (directory.OutboundSettings, bool, error)
 	SetOutboundSettings(directory.OutboundSettings) error
 	GetRelaySettings() (directory.RelaySettings, bool, error)
@@ -343,6 +345,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/antispam/digest", s.handleUISaveDigest)
 	mux.HandleFunc("GET /admin/ui/spam-history", s.handleUISpamHistory)
 	mux.HandleFunc("POST /admin/ui/spam-history/retention", s.handleUISaveSpamRetention)
+	mux.HandleFunc("POST /admin/ui/log-retention", s.handleUISaveLogRetention)
 	mux.HandleFunc("GET /admin/ui/limits", s.handleUILimits)
 	mux.HandleFunc("POST /admin/ui/limits", s.handleUISaveLimits)
 	mux.HandleFunc("GET /admin/ui/settings", s.handleUISettings)

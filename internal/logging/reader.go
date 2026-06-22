@@ -65,6 +65,47 @@ func (r *Reader) Recent(ctx context.Context, subsystem string, limit int64) ([]L
 	return entries, cur.Err()
 }
 
+// PruneOlderThan deletes every stored log event whose timestamp is before cutoff and
+// returns how many were removed. This is how the admin enforces the operator's
+// retention window without a Mongo TTL index, so the window can be changed at runtime;
+// the caller is responsible for never pruning when retention is "keep forever".
+func (r *Reader) PruneOlderThan(ctx context.Context, cutoff time.Time) (int64, error) {
+	res, err := r.coll.DeleteMany(ctx, bson.M{"ts": bson.M{"$lt": cutoff}})
+	if err != nil {
+		return 0, err
+	}
+	return res.DeletedCount, nil
+}
+
+// DropLegacyTTLIndex removes any TTL index (one carrying expireAfterSeconds) from the
+// logs collection. Earlier builds created such an index from the static retention
+// config; retention is now enforced by PruneOlderThan, so a leftover TTL would silently
+// delete logs on its own stale schedule and override the operator's window. Dropping it
+// is idempotent — a collection with no TTL index is left unchanged.
+func (r *Reader) DropLegacyTTLIndex(ctx context.Context) error {
+	cur, err := r.coll.Indexes().List(ctx)
+	if err != nil {
+		return err
+	}
+	var idx []bson.M
+	if err := cur.All(ctx, &idx); err != nil {
+		return err
+	}
+	for _, m := range idx {
+		if _, ok := m["expireAfterSeconds"]; !ok {
+			continue
+		}
+		name, _ := m["name"].(string)
+		if name == "" {
+			continue
+		}
+		if err := r.coll.Indexes().DropOne(ctx, name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // Close disconnects from the log store.
 func (r *Reader) Close() error {
 	return r.client.Disconnect(context.Background())

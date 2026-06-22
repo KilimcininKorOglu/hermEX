@@ -27,7 +27,7 @@ func TestMultiSinkFansOut(t *testing.T) {
 // TestBuildStderrOnlyWhenNoMongo proves Build returns a working stderr logger when
 // no Mongo URI is configured.
 func TestBuildStderrOnlyWhenNoMongo(t *testing.T) {
-	log, closeFn := logging.Build("", "db", "", 30)
+	log, closeFn := logging.Build("", "db", "")
 	if log == nil {
 		t.Fatal("Build returned a nil logger")
 	}
@@ -42,7 +42,7 @@ func TestBuildStderrOnlyWhenNoMongo(t *testing.T) {
 // error. A valid-but-unreachable URI is different — that sink is created and
 // self-heals (see TestConnectFailureSpillsThenRecovers), so it does not fall back.
 func TestBuildFallsBackOnBadURI(t *testing.T) {
-	log, closeFn := logging.Build("http://invalid", "db", "", 30)
+	log, closeFn := logging.Build("http://invalid", "db", "")
 	if log == nil {
 		t.Fatal("Build returned a nil logger for a malformed Mongo URI")
 	}
@@ -70,7 +70,7 @@ func TestBuildIntegration(t *testing.T) {
 	raw.Database(db).Drop(bg)
 	defer raw.Database(db).Drop(bg)
 
-	log, closeFn := logging.Build(uri, db, t.TempDir(), 1)
+	log, closeFn := logging.Build(uri, db, t.TempDir())
 	log.Info(logging.System, "startup", logging.Fields{"daemon": "test"})
 	ctx, cancel := context.WithTimeout(bg, 5*time.Second)
 	defer cancel()

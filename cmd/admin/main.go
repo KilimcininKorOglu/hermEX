@@ -227,7 +227,7 @@ func main() {
 		}
 		ldapVerifier := ldapauth.New()
 		dir.SetLDAPVerifier(ldapVerifier) // an administrator may be LDAP-mastered
-		logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
+		logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 		srv := admin.NewServer(dir, cfg, []byte(cfg.AdminSecret))
 		srv.SetLDAPSyncer(ldapVerifier) // enables the Directory Sync trigger
 		var targets []admin.HealthTarget
@@ -236,13 +236,14 @@ func main() {
 		}
 		srv.SetHealthTargets(targets) // enables the Live status monitor
 		cleanups := []func() error{logClose}
+		var logReader *logging.Reader
 		if cfg.MongoURI != "" {
-			reader, err := logging.NewReader(cfg.MongoURI, cfg.LogDatabase)
+			logReader, err = logging.NewReader(cfg.MongoURI, cfg.LogDatabase)
 			if err != nil {
 				log.Fatalf("hermex-admin: log reader: %v", err)
 			}
-			srv.SetLogReader(reader) // enables the web UI log viewer
-			cleanups = append(cleanups, reader.Close)
+			srv.SetLogReader(logReader) // enables the web UI log viewer
+			cleanups = append(cleanups, logReader.Close)
 		}
 		hs, err := serve.New(addr, srv.Handler(), cfg, logger, logging.Admin)
 		if err != nil {
@@ -252,11 +253,69 @@ func main() {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 		go srv.RunTaskWorker(ctx, 5*time.Second) // drains the async admin task queue
+		if logReader != nil {
+			// Enforce the operator's log-retention window by pruning the store.
+			go runLogRetention(ctx, dir, logReader, cfg.LogRetentionDays)
+		}
 		log.Printf("hermex-admin serving the admin API on %s", addr)
 		if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, cleanups...); err != nil {
 			log.Fatalf("hermex-admin: %v", err)
 		}
 	default:
 		usage()
+	}
+}
+
+// runLogRetention enforces the operator's central-log retention window by pruning the
+// log store. Every minute it reads the configured window (in days) from the directory
+// and deletes events older than that; a window of zero or less means keep forever, so
+// nothing is pruned and the "delete everything" state is impossible. The directory row
+// is seeded once from seedDays (the config value) so an existing deployment keeps its
+// behaviour, after which the admin panel is the source of truth, applied without a
+// restart. Earlier builds expired logs with a Mongo TTL index; that index is dropped
+// once here so its stale window cannot override the operator's setting. It returns when
+// ctx is cancelled.
+func runLogRetention(ctx context.Context, dir *directory.SQLDirectory, reader *logging.Reader, seedDays int) {
+	dropCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	if err := reader.DropLegacyTTLIndex(dropCtx); err != nil {
+		log.Printf("hermex-admin: drop legacy log TTL index: %v", err)
+	}
+	cancel()
+
+	if _, found, err := dir.GetLogRetentionDays(); err == nil && !found {
+		if err := dir.SetLogRetentionDays(seedDays); err != nil {
+			log.Printf("hermex-admin: seed log retention: %v", err)
+		}
+	}
+
+	prune := func() {
+		days, _, err := dir.GetLogRetentionDays()
+		if err != nil {
+			log.Printf("hermex-admin: read log retention: %v", err)
+			return
+		}
+		if days <= 0 {
+			return // keep forever — never prune
+		}
+		cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+		pruneCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		if n, err := reader.PruneOlderThan(pruneCtx, cutoff); err != nil {
+			log.Printf("hermex-admin: prune logs: %v", err)
+		} else if n > 0 {
+			log.Printf("hermex-admin: pruned %d log events older than %d days", n, days)
+		}
+	}
+
+	prune() // apply immediately at startup
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			prune()
+		}
 	}
 }

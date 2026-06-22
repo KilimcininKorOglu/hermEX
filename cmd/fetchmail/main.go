@@ -46,7 +46,7 @@ func main() {
 		log.Fatalf("hermex-fetchmail: directory unreachable: %v", err)
 	}
 	dir := directory.NewSQL(db)
-	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
+	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 	objectstore.SetDefaultLogger(logger)
 
 	// Deliver a fetched message into the local mailbox through the normal local path.

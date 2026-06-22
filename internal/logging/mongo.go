@@ -66,7 +66,7 @@ type MongoSink struct {
 // on the first flush that finds the store up. This keeps a daemon serving even when
 // the log store is down at boot. spillPath is the local file batches are appended to
 // while the store is unreachable (empty disables the spill — events drop on failure).
-func NewMongoSink(uri, database, spillPath string, retention time.Duration) (*MongoSink, error) {
+func NewMongoSink(uri, database, spillPath string) (*MongoSink, error) {
 	client, err := mongo.Connect(options.Client().ApplyURI(uri))
 	if err != nil {
 		return nil, err
@@ -80,7 +80,7 @@ func NewMongoSink(uri, database, spillPath string, retention time.Duration) (*Mo
 		if err := client.Ping(ctx, nil); err != nil {
 			return nil, err
 		}
-		if err := ensureIndexes(ctx, coll, retention); err != nil {
+		if err := ensureIndexes(ctx, coll); err != nil {
 			return nil, err
 		}
 		return collInserter{coll: coll}, nil
@@ -235,21 +235,15 @@ func toDoc(e Event) mongoDoc {
 
 // ensureIndexes creates the compound indexes the admin panel filters on
 // (subsystem, user, level — each paired with a descending time for recent-first
-// scans) and, for a positive retention, a TTL index that ages out old documents.
-// A zero or negative retention means keep forever: it must NOT become
-// SetExpireAfterSeconds(0), which MongoDB would treat as "expire immediately" and
-// delete every log within a minute.
-func ensureIndexes(ctx context.Context, coll *mongo.Collection, retention time.Duration) error {
+// scans). It deliberately creates NO TTL index: retention is enforced dynamically by
+// the admin daemon, which prunes the collection to the operator-set window so the
+// window can change at runtime. A TTL index here would override that with its stale
+// startup value, so it is gone — see Reader.PruneOlderThan and DropLegacyTTLIndex.
+func ensureIndexes(ctx context.Context, coll *mongo.Collection) error {
 	models := []mongo.IndexModel{
 		{Keys: bson.D{{Key: "subsystem", Value: 1}, {Key: "ts", Value: -1}}},
 		{Keys: bson.D{{Key: "user", Value: 1}, {Key: "ts", Value: -1}}},
 		{Keys: bson.D{{Key: "level", Value: 1}, {Key: "ts", Value: -1}}},
-	}
-	if retention > 0 {
-		models = append(models, mongo.IndexModel{
-			Keys:    bson.D{{Key: "ts", Value: 1}},
-			Options: options.Index().SetExpireAfterSeconds(int32(retention / time.Second)),
-		})
 	}
 	_, err := coll.Indexes().CreateMany(ctx, models)
 	return err

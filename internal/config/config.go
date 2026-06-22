@@ -41,7 +41,7 @@ type Config struct {
 	// Centralized logging (MongoDB). Empty MongoURI keeps logging to stderr only.
 	MongoURI         string `json:"mongo_uri"`          // MongoDB URI for the central log store (empty = stderr only)
 	LogDatabase      string `json:"log_database"`       // Mongo database holding the logs collection (default "hermex")
-	LogRetentionDays int    `json:"log_retention_days"` // TTL window in days; 0 or negative keeps logs forever
+	LogRetentionDays int    `json:"log_retention_days"` // seeds the admin-managed log retention (days) on first run; 0 or negative keeps logs forever
 	LogSpillDir      string `json:"log_spill_dir"`      // local dir for log batches buffered while Mongo is unreachable
 
 	HealthTargets []HealthTarget `json:"health_targets"` // daemons the admin Live status page probes (each daemon's /healthz URL)

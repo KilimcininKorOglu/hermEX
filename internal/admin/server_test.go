@@ -40,6 +40,8 @@ type fakeDir struct {
 	messageSizeFound   bool
 	sizeLimits         directory.SizeLimits
 	sizeLimitsFound    bool
+	logRetention       int
+	logRetentionFound  bool
 	outbound           directory.OutboundSettings
 	outboundFound      bool
 	relay              directory.RelaySettings
@@ -477,6 +479,13 @@ func (f *fakeDir) GetSizeLimits() (directory.SizeLimits, bool, error) {
 }
 func (f *fakeDir) SetSizeLimits(s directory.SizeLimits) error {
 	f.sizeLimits, f.sizeLimitsFound = s, true
+	return nil
+}
+func (f *fakeDir) GetLogRetentionDays() (int, bool, error) {
+	return f.logRetention, f.logRetentionFound, nil
+}
+func (f *fakeDir) SetLogRetentionDays(days int) error {
+	f.logRetention, f.logRetentionFound = days, true
 	return nil
 }
 func (f *fakeDir) GetOutboundSettings() (directory.OutboundSettings, bool, error) {

@@ -51,8 +51,19 @@
 <div class="tabpanel retention">
 <h2>Spam history retention</h2>
 {{template "retention-panel" .}}
+<h2>Central log retention</h2>
+{{template "log-retention-panel" .}}
 </div>
 </div>
 </main>
 </div>
 {{template "foot" .}}{{end}}
+
+{{define "log-retention-panel"}}<div id="log-retention-panel">
+{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+<p>Central log events older than this many days are pruned by the admin daemon, so the log store never grows unbounded. Use <strong>0</strong> to keep logs forever (pruning disabled).</p>
+<form hx-post="/admin/ui/log-retention" hx-target="#log-retention-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<p>Days to keep (0 = forever): <input type="number" name="log_retention_days" value="{{.LogRetentionDays}}" min="0"></p>
+<button type="submit">Save log retention</button>
+</form>
+</div>{{end}}

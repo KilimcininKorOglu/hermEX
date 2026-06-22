@@ -70,7 +70,7 @@ func main() {
 	}
 	dir := directory.NewSQL(db)
 	dir.SetLDAPVerifier(ldapauth.New())
-	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir, cfg.LogRetentionDays)
+	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
 
 	// The outbound relay spool holds external recipients of authenticated

@@ -9,8 +9,8 @@
 // listen address; HERMEX_TLS_CERT/HERMEX_TLS_KEY enable TLS (absent => plaintext,
 // for terminating TLS at a separate proxy); HERMEX_BACKEND_* override the backend
 // base URLs, which default to the compose service names; HERMEX_LOG_MONGO_URI (with
-// HERMEX_LOG_DATABASE/HERMEX_LOG_SPILL_DIR/HERMEX_LOG_RETENTION_DAYS) enables the
-// central MongoDB log store, defaulting to stderr-only when unset.
+// HERMEX_LOG_DATABASE/HERMEX_LOG_SPILL_DIR) enables the central MongoDB log store,
+// defaulting to stderr-only when unset.
 package main
 
 import (
@@ -18,7 +18,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strconv"
 	"syscall"
 
 	"hermex/internal/config"
@@ -71,9 +70,9 @@ func main() {
 	addr := env("HERMEX_GATEWAY_ADDR", ":8080")
 
 	// The gateway loads no shared config, so its central-logging settings come from
-	// the environment like the rest of its configuration.
-	retentionDays, _ := strconv.Atoi(os.Getenv("HERMEX_LOG_RETENTION_DAYS"))
-	logger, logClose := logging.Build(os.Getenv("HERMEX_LOG_MONGO_URI"), os.Getenv("HERMEX_LOG_DATABASE"), os.Getenv("HERMEX_LOG_SPILL_DIR"), retentionDays)
+	// the environment like the rest of its configuration. Log retention is enforced
+	// by the admin daemon's pruning, not here, so no retention is passed.
+	logger, logClose := logging.Build(os.Getenv("HERMEX_LOG_MONGO_URI"), os.Getenv("HERMEX_LOG_DATABASE"), os.Getenv("HERMEX_LOG_SPILL_DIR"))
 
 	hs, err := serve.New(addr, h, cfg, logger, logging.Gateway)
 	if err != nil {
