@@ -23,6 +23,7 @@ import (
 	"hermex/internal/objectstore"
 	"hermex/internal/pop3"
 	"hermex/internal/serve"
+	"hermex/internal/tlscert"
 )
 
 func main() {
@@ -54,20 +55,25 @@ func main() {
 		log.Fatalf("hermex-pop3: listen %s: %v", addr, err)
 	}
 	srv := &pop3.Server{Auth: dir, Hostname: cfg.Hostname, Logger: logger}
-	if cfg.TLSEnabled() {
-		tc, err := cfg.TLSConfig()
-		if err != nil {
-			log.Fatalf("hermex-pop3: tls: %v", err)
-		}
+	// TLS certificates come from the provider: the config-file cert as a fallback,
+	// overridden by an admin-uploaded cert the provider polls for, so a renewal
+	// applies without a restart.
+	provider, err := tlscert.New(cfg, dir, logger)
+	if err != nil {
+		log.Fatalf("hermex-pop3: tls: %v", err)
+	}
+	if provider.TLSEnabled() {
+		tc, _ := provider.TLSConfig()
 		srv.TLSConfig = tc // enables STLS on the plaintext listener
+		go provider.RunMaintenance()
 	}
 	srv.AddListener(ln)
 	log.Printf("hermex-pop3 listening on %s", addr)
 
 	// Optional implicit-TLS listener (e.g. :995) served alongside the plaintext
 	// one; the stateless server handles both concurrently.
-	if cfg.TLSEnabled() && cfg.POP3SAddr != "" {
-		tln, err := serve.TLSListener(cfg.POP3SAddr, cfg)
+	if provider.TLSEnabled() && cfg.POP3SAddr != "" {
+		tln, err := serve.TLSListener(cfg.POP3SAddr, provider)
 		if err != nil {
 			log.Fatalf("hermex-pop3: implicit TLS on %s: %v", cfg.POP3SAddr, err)
 		}

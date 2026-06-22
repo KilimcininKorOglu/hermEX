@@ -11,9 +11,18 @@ import (
 	"net"
 	"net/http"
 
-	"hermex/internal/config"
 	"hermex/internal/logging"
 )
+
+// TLSSource supplies the TLS decision and configuration to a listener: whether to
+// terminate TLS at all, and the hardened tls.Config to do it with. *config.Config
+// satisfies it (a single static certificate); *tlscert.Provider also satisfies it
+// (a poll-refreshed, SNI-resolved certificate set), so a daemon gains live
+// certificate reload by passing the provider here in place of the config.
+type TLSSource interface {
+	TLSEnabled() bool
+	TLSConfig() (*tls.Config, error)
+}
 
 // Server is a bound HTTP server ready to start and shut down gracefully. It
 // satisfies lifecycle.Component (Start blocks serving; Shutdown drains in-flight
@@ -24,18 +33,18 @@ type Server struct {
 	ln      net.Listener
 }
 
-// New binds addr and returns a Server ready to Start, terminating TLS when cfg
+// New binds addr and returns a Server ready to Start, terminating TLS when tls
 // supplies a certificate and serving plaintext otherwise. Binding eagerly here
 // surfaces an address-in-use error before the daemon's run loop begins. Every
 // request is logged through logger under subsystem (method/path/status/duration/
 // client/user/request-id); a nil logger disables request logging.
-func New(addr string, h http.Handler, cfg *config.Config, logger *logging.Logger, subsystem logging.Subsystem) (*Server, error) {
+func New(addr string, h http.Handler, tlsSrc TLSSource, logger *logging.Logger, subsystem logging.Subsystem) (*Server, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
 	}
-	if cfg.TLSEnabled() {
-		tc, err := cfg.TLSConfig()
+	if tlsSrc.TLSEnabled() {
+		tc, err := tlsSrc.TLSConfig()
 		if err != nil {
 			ln.Close()
 			return nil, err
@@ -90,11 +99,11 @@ func (s *Server) Start() error { return s.httpSrv.Serve(s.ln) }
 func (s *Server) Shutdown(ctx context.Context) error { return s.httpSrv.Shutdown(ctx) }
 
 // TLSListener binds addr and returns a listener that terminates TLS with the
-// hardened config.TLSConfig — the implicit-TLS entry point for the mail daemons
-// (IMAPS/POP3S/SMTPS), whose protocol servers accept the returned net.Listener
-// directly. It errors if cfg has no certificate.
-func TLSListener(addr string, cfg *config.Config) (net.Listener, error) {
-	tc, err := cfg.TLSConfig()
+// hardened tls.Config from tlsSrc — the implicit-TLS entry point for the mail
+// daemons (IMAPS/POP3S/SMTPS), whose protocol servers accept the returned
+// net.Listener directly. It errors if tlsSrc has no certificate.
+func TLSListener(addr string, tlsSrc TLSSource) (net.Listener, error) {
+	tc, err := tlsSrc.TLSConfig()
 	if err != nil {
 		return nil, err
 	}

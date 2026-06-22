@@ -25,6 +25,7 @@ import (
 	"hermex/internal/objectstore"
 	"hermex/internal/publicfolder"
 	"hermex/internal/serve"
+	"hermex/internal/tlscert"
 )
 
 func main() {
@@ -60,20 +61,25 @@ func main() {
 	// change applies without a restart; 0 keeps the built-in default.
 	applyIMAPSizeLimit(dir, srv)
 	go runIMAPSizeMaintenance(dir, srv)
-	if cfg.TLSEnabled() {
-		tc, err := cfg.TLSConfig()
-		if err != nil {
-			log.Fatalf("hermex-imap: tls: %v", err)
-		}
+	// TLS certificates come from the provider: the config-file cert as a fallback,
+	// overridden by an admin-uploaded cert the provider polls for, so a renewal
+	// applies without a restart.
+	provider, err := tlscert.New(cfg, dir, logger)
+	if err != nil {
+		log.Fatalf("hermex-imap: tls: %v", err)
+	}
+	if provider.TLSEnabled() {
+		tc, _ := provider.TLSConfig()
 		srv.TLSConfig = tc // enables STARTTLS on the plaintext listener
+		go provider.RunMaintenance()
 	}
 	srv.AddListener(ln)
 	log.Printf("hermex-imap listening on %s", addr)
 
 	// Optional implicit-TLS listener (e.g. :993) served alongside the plaintext
 	// one; the stateless server handles both concurrently.
-	if cfg.TLSEnabled() && cfg.IMAPSAddr != "" {
-		tln, err := serve.TLSListener(cfg.IMAPSAddr, cfg)
+	if provider.TLSEnabled() && cfg.IMAPSAddr != "" {
+		tln, err := serve.TLSListener(cfg.IMAPSAddr, provider)
 		if err != nil {
 			log.Fatalf("hermex-imap: implicit TLS on %s: %v", cfg.IMAPSAddr, err)
 		}

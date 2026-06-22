@@ -34,6 +34,7 @@ import (
 	"hermex/internal/serve"
 	"hermex/internal/smtp"
 	"hermex/internal/spooler"
+	"hermex/internal/tlscert"
 )
 
 // senderOf returns the envelope sender for a released Outbox message: the
@@ -189,12 +190,17 @@ func main() {
 		go runDigest(dir, []byte(cfg.DigestSecret), cfg.Hostname, logger)
 	}
 	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir, Greylist: greylister, RateLimit: rateLimiter, Thresholds: dir, RecipientAccess: dir, Outbound: outboundLimiter}, Hostname: cfg.Hostname, Logger: logger}
-	if cfg.TLSEnabled() {
-		tc, err := cfg.TLSConfig()
-		if err != nil {
-			log.Fatalf("hermex-mta: tls: %v", err)
-		}
+	// TLS certificates come from the provider: the config-file cert as a fallback,
+	// overridden by an admin-uploaded cert the provider polls for, so a renewal
+	// applies without a restart.
+	provider, err := tlscert.New(cfg, dir, logger)
+	if err != nil {
+		log.Fatalf("hermex-mta: tls: %v", err)
+	}
+	if provider.TLSEnabled() {
+		tc, _ := provider.TLSConfig()
 		srv.TLSConfig = tc // enables STARTTLS on the plaintext listener
+		go provider.RunMaintenance()
 	}
 	// Inbound message size limit: the max bytes the SMTP server accepts and advertises
 	// (SMTP SIZE). Read at startup and re-read every minute so an admin's change applies
@@ -206,8 +212,8 @@ func main() {
 
 	// Optional implicit-TLS listener (e.g. :465) served alongside the plaintext
 	// one; the stateless server handles both concurrently.
-	if cfg.TLSEnabled() && cfg.SMTPSAddr != "" {
-		tln, err := serve.TLSListener(cfg.SMTPSAddr, cfg)
+	if provider.TLSEnabled() && cfg.SMTPSAddr != "" {
+		tln, err := serve.TLSListener(cfg.SMTPSAddr, provider)
 		if err != nil {
 			log.Fatalf("hermex-mta: implicit TLS on %s: %v", cfg.SMTPSAddr, err)
 		}
