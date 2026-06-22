@@ -93,6 +93,7 @@ type Directory interface {
 	GetTask(id int64) (directory.TaskInfo, bool, error)
 	ClaimNextTask() (directory.TaskInfo, bool, error)
 	FinishTask(id int64, status, message string) error
+	RecentSpamVerdicts(limit int) ([]directory.SpamVerdict, error)
 }
 
 // LDAPSyncer downsyncs an organization's directory accounts. It is optional —
@@ -297,6 +298,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/ui/taskq/panel", s.handleUITaskqPanel)
 	mux.HandleFunc("GET /admin/ui/antispam", s.handleUIAntispam)
 	mux.HandleFunc("POST /admin/ui/antispam/retrain", s.handleUIRetrainBayes)
+	mux.HandleFunc("GET /admin/ui/spam-history", s.handleUISpamHistory)
 	mux.HandleFunc("GET /admin/ui/public-folders", s.handleUIPublicFolders)
 	mux.HandleFunc("GET /admin/ui/public-folders/panel", s.handleUIPublicFoldersPanel)
 	mux.HandleFunc("POST /admin/ui/public-folders/folder", s.handleUICreatePublicFolder)

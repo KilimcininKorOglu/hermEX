@@ -1,0 +1,24 @@
+{{define "spam-history.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>Spam History</h1>
+<p class="hint">The most recent inbound messages scored at delivery. A message over the threshold (Spam = yes) was filed to the recipient's Junk folder. Reasons list the signals that fired.</p>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<table class="grid">
+<thead><tr><th>Time</th><th>From</th><th>Client IP</th><th>Score</th><th>Spam</th><th>Reasons</th></tr></thead>
+<tbody>
+{{range .Verdicts}}<tr>
+<td>{{.Time}}</td>
+<td>{{.MailFrom}}</td>
+<td>{{.RemoteAddr}}</td>
+<td>{{.Score}}</td>
+<td>{{if .Spam}}yes{{else}}no{{end}}</td>
+<td><small>{{.Reasons}}</small></td>
+</tr>
+{{else}}<tr><td colspan="6" class="empty">No scored messages yet.</td></tr>{{end}}
+</tbody>
+</table>
+</main>
+</div>
+{{template "foot" .}}{{end}}
