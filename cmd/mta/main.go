@@ -168,7 +168,14 @@ func main() {
 	rateLimiter := mta.NewRateLimiter()
 	applyRateLimitSettings(dir, rateLimiter)
 	go runRateLimitMaintenance(dir, rateLimiter)
-	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir, Greylist: greylister, RateLimit: rateLimiter, Thresholds: dir}, Hostname: cfg.Hostname, Logger: logger}
+	// Outbound abuse limiting caps how many external recipients a local account may
+	// send to per window — a compromised account that blasts spam is deferred and the
+	// admin is alerted. It starts disabled; the alert is a central-log event.
+	outboundLimiter := mta.NewOutboundLimiter()
+	outboundLimiter.SetAlerter(func(user string, count int) {
+		logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "outbound.abuse", User: user, Fields: logging.Fields{"recipients": count}})
+	})
+	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir, Greylist: greylister, RateLimit: rateLimiter, Thresholds: dir, Outbound: outboundLimiter}, Hostname: cfg.Hostname, Logger: logger}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()
 		if err != nil {

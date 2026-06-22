@@ -55,11 +55,12 @@ type Backend struct {
 	Greylist   *Greylister           // greylisting; nil (or disabled) accepts every first contact
 	RateLimit  *RateLimiter          // inbound per-IP rate limiting; nil (or disabled) admits every message
 	Thresholds SpamThresholdResolver // per-recipient spam-threshold overrides; nil files every recipient by the global threshold
+	Outbound   *OutboundLimiter      // outbound per-account abuse limiting; nil (or disabled) admits every recipient
 }
 
 // NewSession implements smtp.Backend.
 func (b *Backend) NewSession(remoteAddr string) (smtp.Session, error) {
-	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History, greylist: b.Greylist, rateLimit: b.RateLimit, thresholds: b.Thresholds}, nil
+	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History, greylist: b.Greylist, rateLimit: b.RateLimit, thresholds: b.Thresholds, outbound: b.Outbound}, nil
 }
 
 type session struct {
@@ -72,6 +73,7 @@ type session struct {
 	greylist     *Greylister
 	rateLimit    *RateLimiter
 	thresholds   SpamThresholdResolver
+	outbound     *OutboundLimiter
 	from         string
 	targets      []target // local recipients, filed into mailboxes
 	relayTargets []string // external recipients, spooled for outbound relay
@@ -260,6 +262,13 @@ func (s *session) routeRecipient(to string) error {
 	}
 	if s.spool == nil {
 		return fmt.Errorf("relay denied for <%s>", to)
+	}
+	// Outbound abuse limiting: a local account that has sent to too many external
+	// recipients in the window (a compromise signal) has the excess deferred so it
+	// cannot blast unchecked; the admin is alerted once per window. Only this
+	// authenticated-relay path is limited — inbound intake never reaches it.
+	if s.outbound != nil && !s.outbound.Allow(s.authUser) {
+		return &smtp.TempError{Message: "4.7.4 too many recipients in a short time, please retry later"}
 	}
 	s.relayTargets = append(s.relayTargets, to)
 	return nil
