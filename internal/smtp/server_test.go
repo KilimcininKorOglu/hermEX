@@ -2,6 +2,7 @@ package smtp
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -11,14 +12,50 @@ import (
 	"time"
 )
 
+// TestServerRcptTempErrorIsTemporary proves a backend TempError from Rcpt is
+// reported as a 451 temporary failure (the sender retries) — the wire behaviour
+// greylisting depends on.
+func TestServerRcptTempErrorIsTemporary(t *testing.T) {
+	sess := &fakeSession{rcptErr: &TempError{Message: "greylisted, retry later"}}
+	r, conn := dialServer(t, sess)
+	expect(t, r, 220)
+	fmt.Fprint(conn, "EHLO client.test\r\n")
+	expect(t, r, 250)
+	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	expect(t, r, 250)
+	fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+	expect(t, r, 451)
+}
+
+// TestServerRcptPermErrorIsPermanent proves an ordinary Rcpt error stays a 550
+// permanent rejection.
+func TestServerRcptPermErrorIsPermanent(t *testing.T) {
+	sess := &fakeSession{rcptErr: errors.New("no such mailbox")}
+	r, conn := dialServer(t, sess)
+	expect(t, r, 220)
+	fmt.Fprint(conn, "EHLO client.test\r\n")
+	expect(t, r, 250)
+	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	expect(t, r, 250)
+	fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+	expect(t, r, 550)
+}
+
 type fakeSession struct {
-	from  string
-	rcpts []string
-	data  []byte
+	from    string
+	rcpts   []string
+	data    []byte
+	rcptErr error // when set, Rcpt returns it (to exercise the error→reply mapping)
 }
 
 func (s *fakeSession) Mail(from string) error { s.from = from; return nil }
-func (s *fakeSession) Rcpt(to string) error   { s.rcpts = append(s.rcpts, to); return nil }
+func (s *fakeSession) Rcpt(to string) error {
+	if s.rcptErr != nil {
+		return s.rcptErr
+	}
+	s.rcpts = append(s.rcpts, to)
+	return nil
+}
 func (s *fakeSession) Data(r io.Reader) error {
 	b, err := io.ReadAll(r)
 	s.data = b

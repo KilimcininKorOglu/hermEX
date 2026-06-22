@@ -154,7 +154,7 @@ func (s *Server) handle(conn net.Conn) {
 				continue
 			}
 			if err := sess.Mail(addr); err != nil {
-				reply(w, 550, err.Error())
+				replySessionErr(w, err)
 				continue
 			}
 			hasFrom, rcptCount = true, 0
@@ -171,7 +171,7 @@ func (s *Server) handle(conn net.Conn) {
 				continue
 			}
 			if err := sess.Rcpt(addr); err != nil {
-				reply(w, 550, err.Error())
+				replySessionErr(w, err)
 				continue
 			}
 			rcptCount++
@@ -213,6 +213,23 @@ func (s *Server) handle(conn net.Conn) {
 }
 
 var errTooLarge = errors.New("message too large")
+
+// TempError is a Session error the server reports as a temporary failure (a 4xx),
+// so the sending MTA retries later, rather than a permanent rejection (a 5xx).
+// Greylisting returns it from Rcpt to defer a first-contact triplet.
+type TempError struct{ Message string }
+
+func (e *TempError) Error() string { return e.Message }
+
+// replySessionErr maps a Session error to its SMTP reply: a TempError becomes a 451
+// temporary failure (the sender retries), anything else a 550 permanent rejection.
+func replySessionErr(w *bufio.Writer, err error) {
+	if te, ok := errors.AsType[*TempError](err); ok {
+		reply(w, 451, te.Message)
+		return
+	}
+	reply(w, 550, err.Error())
+}
 
 // consumeData reads the dot-terminated message body and hands it to the
 // session, enforcing MaxSize when set. The body is always drained so the
