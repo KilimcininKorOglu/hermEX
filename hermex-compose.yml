@@ -219,40 +219,43 @@ services:
     restart: unless-stopped
 
   # Single-FQDN front door: reverse-proxies to the HTTP daemons by path prefix so
-  # one host serves autodiscover/EWS/MAPI/RPC/ActiveSync/DAV/webmail. Pure proxy
-  # (no DB/store), configured via env. Terminates TLS with the dev cert from
-  # scripts/gen-dev-cert.sh (docker-data/tls/, gitignored); the backends stay
-  # plaintext on the internal network.
+  # one host serves autodiscover/EWS/MAPI/RPC/ActiveSync/DAV/webmail. Reads the
+  # shared config.json (DSN, TLS cert, logging) like the other daemons; its DB
+  # connection serves only the TLS certificate store. Terminates TLS with the
+  # config's tls_cert (the same dev cert as the mail daemons) and forwards to the
+  # backends over TLS, skipping verification on the internal hop.
   gateway:
     container_name: hermex-gateway
     build:
       context: .
       dockerfile: docker/Dockerfile
-    command: ["/usr/local/bin/hermex-gateway"]
+    command: ["/usr/local/bin/hermex-gateway", "-config", "/config/config.json"]
     environment:
       - HERMEX_GATEWAY_ADDR=:8080
-      - HERMEX_TLS_CERT=/config/tls/cert.pem
-      - HERMEX_TLS_KEY=/config/tls/key.pem
-      - HERMEX_LOG_MONGO_URI=mongodb://mongo:27017
-      - HERMEX_LOG_SPILL_DIR=/data/logspill
-      # Backends serve HTTPS (end-to-end TLS); the gateway forwards over TLS and skips
-      # verification on the internal hop (self-signed certs).
       - HERMEX_BACKEND_MAPI=https://mapi:8080
       - HERMEX_BACKEND_EWS=https://ews:8080
       - HERMEX_BACKEND_ACTIVESYNC=https://activesync:8080
       - HERMEX_BACKEND_DAV=https://dav:8080
       - HERMEX_BACKEND_WEBMAIL=https://webmail:8080
     volumes:
-      - ./docker-data/tls:/config/tls:ro
+      - ./docker-data/config.json:/config/config.json:ro
+      - ./docker-data/mailboxes/tls:/data/mailboxes/tls:ro
       - ./docker-data/spill/gateway:/data/logspill
     ports:
       - "8149:8080"
     depends_on:
-      - mapi
-      - ews
-      - activesync
-      - dav
-      - webmail
+      db:
+        condition: service_healthy
+      mapi:
+        condition: service_started
+      ews:
+        condition: service_started
+      activesync:
+        condition: service_started
+      dav:
+        condition: service_started
+      webmail:
+        condition: service_started
     restart: unless-stopped
 
   # Fetch-worker: polls configured remote POP3/IMAP accounts and delivers their new
