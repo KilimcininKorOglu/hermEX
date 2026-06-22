@@ -15,6 +15,7 @@ import (
 
 	"hermex/internal/config"
 	"hermex/internal/directory"
+	"hermex/internal/dkimsign"
 	"hermex/internal/health"
 	"hermex/internal/ldapauth"
 	"hermex/internal/lifecycle"
@@ -59,6 +60,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("hermex-webmail: open relay spool: %v", err)
 	}
+	// DKIM-sign composed mail with the sending domain's enabled key as it is spooled —
+	// webmail opens its own spool, so it needs the signer as much as the MTA does.
+	spool.Signer = &dkimsign.Signer{Keys: dir, Logger: logger}
 	srv.Spool = spool
 	addr := cfg.WebmailAddr
 	if addr == "" {

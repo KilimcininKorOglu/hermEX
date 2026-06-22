@@ -21,6 +21,7 @@ import (
 	"hermex/internal/antispam"
 	"hermex/internal/config"
 	"hermex/internal/directory"
+	"hermex/internal/dkimsign"
 	"hermex/internal/health"
 	"hermex/internal/ldapauth"
 	"hermex/internal/lifecycle"
@@ -79,6 +80,8 @@ func main() {
 	if err != nil {
 		log.Fatalf("hermex-mta: open relay spool: %v", err)
 	}
+	// DKIM-sign outbound mail with the sending domain's enabled key as it is spooled.
+	spool.Signer = &dkimsign.Signer{Keys: dir, Logger: logger}
 
 	// Automatic meeting-request processing runs at delivery for mailboxes configured
 	// for it (resource rooms, auto-accepting users). Wired here, not in the mta

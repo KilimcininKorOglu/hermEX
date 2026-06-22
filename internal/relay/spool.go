@@ -38,6 +38,15 @@ var spoolMigrations = migrate.MustLoadFS(spoolMigrationFS, "migrations")
 // carries that address's own attempt count, next-eligible time, and last error.
 type Spool struct {
 	db *sql.DB
+	// Signer optionally DKIM-signs each message once as it is enqueued, before it fans
+	// out to recipients. nil leaves outbound mail unsigned.
+	Signer Signer
+}
+
+// Signer DKIM-signs an outbound message body. It must fail open — return the body
+// unchanged rather than error — so signing never blocks a delivery.
+type Signer interface {
+	Sign(body []byte) []byte
 }
 
 // Item is one due recipient delivery handed to the worker: the envelope sender,
@@ -110,6 +119,11 @@ func (s *Spool) ensureSchema() error {
 func (s *Spool) Enqueue(from string, recipients []string, body []byte, now time.Time) error {
 	if len(recipients) == 0 {
 		return nil
+	}
+	// DKIM-sign once here — the single point both submission paths converge on — so the
+	// signed form is what is stored and sent to every recipient.
+	if s.Signer != nil {
+		body = s.Signer.Sign(body)
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
