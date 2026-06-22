@@ -163,9 +163,11 @@ func main() {
 	}
 	go runGreylistMaintenance(dir, greylister)
 	// Inbound rate limiting caps how many messages an unauthenticated client network
-	// may send per window. It starts disabled (no settings store wired yet); a later
-	// increment adds the admin toggle and tunables.
+	// may send per window. It starts disabled; the stored settings are read at startup
+	// and hot-reloaded, and the window table is pruned periodically to stay bounded.
 	rateLimiter := mta.NewRateLimiter()
+	applyRateLimitSettings(dir, rateLimiter)
+	go runRateLimitMaintenance(dir, rateLimiter)
 	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir, Greylist: greylister, RateLimit: rateLimiter}, Hostname: cfg.Hostname, Logger: logger}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()
@@ -322,6 +324,41 @@ func runGreylistMaintenance(dir *directory.SQLDirectory, g *mta.Greylister) {
 			if err := g.Prune(); err != nil {
 				log.Printf("hermex-mta: greylist prune failed: %v", err)
 			}
+		}
+	}
+}
+
+// applyRateLimitSettings reads the stored rate-limit settings and applies them to the
+// limiter. A missing row or a read error leaves the limiter at its defaults, so a
+// settings failure never starts throttling unexpectedly; a transient read error keeps
+// the last applied setting rather than flipping the limiter off.
+func applyRateLimitSettings(dir *directory.SQLDirectory, rl *mta.RateLimiter) {
+	s, found, err := dir.GetRateLimitSettings()
+	if err != nil {
+		log.Printf("hermex-mta: rate-limit settings read failed, leaving rate limiting unchanged: %v", err)
+		return
+	}
+	if !found {
+		return
+	}
+	rl.SetLimits(s.Burst, time.Duration(s.WindowSeconds)*time.Second)
+	rl.SetEnabled(s.Enabled)
+}
+
+// runRateLimitMaintenance re-applies the rate-limit settings every minute so an admin
+// change takes effect without a restart, and prunes the limiter's window table hourly
+// to keep it bounded.
+func runRateLimitMaintenance(dir *directory.SQLDirectory, rl *mta.RateLimiter) {
+	applyTick := time.NewTicker(time.Minute)
+	pruneTick := time.NewTicker(time.Hour)
+	defer applyTick.Stop()
+	defer pruneTick.Stop()
+	for {
+		select {
+		case <-applyTick.C:
+			applyRateLimitSettings(dir, rl)
+		case <-pruneTick.C:
+			rl.Prune()
 		}
 	}
 }
