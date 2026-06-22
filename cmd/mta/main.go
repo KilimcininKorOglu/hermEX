@@ -168,7 +168,7 @@ func main() {
 	rateLimiter := mta.NewRateLimiter()
 	applyRateLimitSettings(dir, rateLimiter)
 	go runRateLimitMaintenance(dir, rateLimiter)
-	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir, Greylist: greylister, RateLimit: rateLimiter}, Hostname: cfg.Hostname, Logger: logger}
+	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir, Greylist: greylister, RateLimit: rateLimiter, Thresholds: dir}, Hostname: cfg.Hostname, Logger: logger}
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()
 		if err != nil {

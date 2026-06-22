@@ -36,20 +36,30 @@ type HistoryRecorder interface {
 	RecordSpamVerdict(directory.SpamVerdict) error
 }
 
+// SpamThresholdResolver resolves a recipient mailbox's spam-threshold override (the
+// user's, then their domain's), keyed by maildir. *directory.SQLDirectory satisfies
+// it; it is an interface so the MTA can be exercised without a database. Resolution
+// is fail-open: an error means no override, so the message keeps its global-threshold
+// verdict.
+type SpamThresholdResolver interface {
+	SpamThresholdForMaildir(maildir string) (threshold int, ok bool, err error)
+}
+
 // Backend is an smtp.Backend that delivers to per-recipient mailbox stores.
 type Backend struct {
-	Accounts  directory.Accounts
-	Spool     *relay.Spool    // outbound relay queue; nil disables external relay
-	Logger    *logging.Logger // central activity log; nil disables logging
-	Scorer    SpamScorer      // inbound spam scorer; nil disables scoring
-	History   HistoryRecorder // spam verdict history; nil disables recording
-	Greylist  *Greylister     // greylisting; nil (or disabled) accepts every first contact
-	RateLimit *RateLimiter    // inbound per-IP rate limiting; nil (or disabled) admits every message
+	Accounts   directory.Accounts
+	Spool      *relay.Spool          // outbound relay queue; nil disables external relay
+	Logger     *logging.Logger       // central activity log; nil disables logging
+	Scorer     SpamScorer            // inbound spam scorer; nil disables scoring
+	History    HistoryRecorder       // spam verdict history; nil disables recording
+	Greylist   *Greylister           // greylisting; nil (or disabled) accepts every first contact
+	RateLimit  *RateLimiter          // inbound per-IP rate limiting; nil (or disabled) admits every message
+	Thresholds SpamThresholdResolver // per-recipient spam-threshold overrides; nil files every recipient by the global threshold
 }
 
 // NewSession implements smtp.Backend.
 func (b *Backend) NewSession(remoteAddr string) (smtp.Session, error) {
-	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History, greylist: b.Greylist, rateLimit: b.RateLimit}, nil
+	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History, greylist: b.Greylist, rateLimit: b.RateLimit, thresholds: b.Thresholds}, nil
 }
 
 type session struct {
@@ -61,6 +71,7 @@ type session struct {
 	history      HistoryRecorder
 	greylist     *Greylister
 	rateLimit    *RateLimiter
+	thresholds   SpamThresholdResolver
 	from         string
 	targets      []target // local recipients, filed into mailboxes
 	relayTargets []string // external recipients, spooled for outbound relay
@@ -362,9 +373,11 @@ func (s *session) Data(r io.Reader) error {
 	// copy are not scanned.
 	localRaw := raw
 	folder := int64(mapi.PrivateFIDInbox)
-	if s.scorer != nil && s.authUser == "" && len(s.targets) > 0 {
+	var v antispam.Verdict
+	scored := s.scorer != nil && s.authUser == "" && len(s.targets) > 0
+	if scored {
 		ip := clientIP(s.remoteAddr)
-		v := s.scorer.Score(antispam.Input{
+		v = s.scorer.Score(antispam.Input{
 			Raw: raw, ClientIP: ip, MailFrom: s.from, FromDomain: fromHeaderDomain(raw),
 		})
 		localRaw = antispam.Tag(raw, v)
@@ -391,7 +404,24 @@ func (s *session) Data(r io.Reader) error {
 		}
 	}
 	for _, t := range s.targets {
-		if err := deliver(s.accounts, s.from, t.addr, t.path, localRaw, received, folder); err != nil {
+		tRaw, tFolder := localRaw, folder
+		// A recipient (or their domain) may override the global spam threshold. The
+		// score is intrinsic to the message, so re-decide only the Junk filing and the
+		// X-Spam flag against the override — never the score itself. An access-forced
+		// verdict (an operator allow/block rule) stays authoritative for every
+		// recipient and is never re-evaluated. Resolution is fail-open.
+		if scored && !v.AccessMatched && s.thresholds != nil {
+			if override, ok, err := s.thresholds.SpamThresholdForMaildir(t.path); err == nil && ok {
+				tv := v
+				tv.Spam = v.Score >= override
+				tFolder = int64(mapi.PrivateFIDInbox)
+				if tv.Spam {
+					tFolder = int64(mapi.PrivateFIDJunk)
+				}
+				tRaw = antispam.Tag(raw, tv)
+			}
+		}
+		if err := deliver(s.accounts, s.from, t.addr, t.path, tRaw, received, tFolder); err != nil {
 			s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "delivery.fail", User: t.addr, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}, Err: err.Error()})
 			return err
 		}
