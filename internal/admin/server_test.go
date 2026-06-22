@@ -17,30 +17,40 @@ import (
 
 // fakeDir is a scripted Directory for the admin server tests.
 type fakeDir struct {
-	authOK         bool
-	uid            int64
-	roles          []directory.AdminRole
-	perms          []directory.Permission
-	domains        []directory.DomainInfo
-	users          []directory.UserInfo
-	aliases        []directory.AliasInfo
-	maildirs       []string
-	verdicts       []directory.SpamVerdict
-	settings       directory.AntispamSettings
-	settingsFound  bool
-	senderRules    []directory.SenderRule
-	greylistOn     bool
-	rateLimit      directory.RateLimitSettings
-	rateLimitFound bool
-	outbound       directory.OutboundSettings
-	outboundFound  bool
-	digest         directory.DigestSettings
-	digestFound    bool
-	dkimSelector   string
-	dkimPublicTXT  string
-	dkimPrivPEM    []byte
-	dkimEnabled    bool
-	dkimFound      bool
+	authOK             bool
+	uid                int64
+	roles              []directory.AdminRole
+	perms              []directory.Permission
+	domains            []directory.DomainInfo
+	users              []directory.UserInfo
+	aliases            []directory.AliasInfo
+	maildirs           []string
+	verdicts           []directory.SpamVerdict
+	spamHistory        directory.SpamHistorySettings
+	spamHistoryFound   bool
+	settings           directory.AntispamSettings
+	settingsFound      bool
+	senderRules        []directory.SenderRule
+	greylistOn         bool
+	greylistTimings    directory.GreylistTimings
+	greylistTimingsSet bool
+	rateLimit          directory.RateLimitSettings
+	rateLimitFound     bool
+	messageSize        directory.MessageSizeSettings
+	messageSizeFound   bool
+	sizeLimits         directory.SizeLimits
+	sizeLimitsFound    bool
+	outbound           directory.OutboundSettings
+	outboundFound      bool
+	relay              directory.RelaySettings
+	relayFound         bool
+	digest             directory.DigestSettings
+	digestFound        bool
+	dkimSelector       string
+	dkimPublicTXT      string
+	dkimPrivPEM        []byte
+	dkimEnabled        bool
+	dkimFound          bool
 
 	userSpamThreshold      *int
 	userSpamThresholdSet   bool
@@ -405,6 +415,13 @@ func (f *fakeDir) FinishTask(id int64, status, message string) error {
 	return nil
 }
 func (f *fakeDir) RecentSpamVerdicts(int) ([]directory.SpamVerdict, error) { return f.verdicts, nil }
+func (f *fakeDir) GetSpamHistorySettings() (directory.SpamHistorySettings, bool, error) {
+	return f.spamHistory, f.spamHistoryFound, nil
+}
+func (f *fakeDir) SetSpamHistorySettings(s directory.SpamHistorySettings) error {
+	f.spamHistory, f.spamHistoryFound = s, true
+	return nil
+}
 func (f *fakeDir) GetAntispamSettings() (directory.AntispamSettings, bool, error) {
 	return f.settings, f.settingsFound, nil
 }
@@ -434,6 +451,13 @@ func (f *fakeDir) DeleteSenderRule(pattern string) (bool, error) {
 }
 func (f *fakeDir) GetGreylistEnabled() (bool, error) { return f.greylistOn, nil }
 func (f *fakeDir) SetGreylistEnabled(on bool) error  { f.greylistOn = on; return nil }
+func (f *fakeDir) GetGreylistTimings() (directory.GreylistTimings, bool, error) {
+	return f.greylistTimings, f.greylistTimingsSet, nil
+}
+func (f *fakeDir) SetGreylistTimings(t directory.GreylistTimings) error {
+	f.greylistTimings, f.greylistTimingsSet = t, true
+	return nil
+}
 func (f *fakeDir) GetRateLimitSettings() (directory.RateLimitSettings, bool, error) {
 	return f.rateLimit, f.rateLimitFound, nil
 }
@@ -441,8 +465,29 @@ func (f *fakeDir) SetRateLimitSettings(s directory.RateLimitSettings) error {
 	f.rateLimit, f.rateLimitFound = s, true
 	return nil
 }
+func (f *fakeDir) GetMessageSizeSettings() (directory.MessageSizeSettings, bool, error) {
+	return f.messageSize, f.messageSizeFound, nil
+}
+func (f *fakeDir) SetMessageSizeSettings(s directory.MessageSizeSettings) error {
+	f.messageSize, f.messageSizeFound = s, true
+	return nil
+}
+func (f *fakeDir) GetSizeLimits() (directory.SizeLimits, bool, error) {
+	return f.sizeLimits, f.sizeLimitsFound, nil
+}
+func (f *fakeDir) SetSizeLimits(s directory.SizeLimits) error {
+	f.sizeLimits, f.sizeLimitsFound = s, true
+	return nil
+}
 func (f *fakeDir) GetOutboundSettings() (directory.OutboundSettings, bool, error) {
 	return f.outbound, f.outboundFound, nil
+}
+func (f *fakeDir) GetRelaySettings() (directory.RelaySettings, bool, error) {
+	return f.relay, f.relayFound, nil
+}
+func (f *fakeDir) SetRelaySettings(s directory.RelaySettings) error {
+	f.relay, f.relayFound = s, true
+	return nil
 }
 func (f *fakeDir) SetOutboundSettings(s directory.OutboundSettings) error {
 	f.outbound, f.outboundFound = s, true

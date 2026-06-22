@@ -8,6 +8,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/GehirnInc/crypt/md5_crypt"
 	"github.com/GehirnInc/crypt/sha512_crypt"
@@ -40,12 +41,19 @@ const (
 type SQLDirectory struct {
 	db       *sql.DB
 	verifier LDAPVerifier // verifies LDAP-mastered (externid) logins; nil => denied
+	// spamRetain is the runtime spam-history retention bound RecordSpamVerdict
+	// enforces. It is held atomically so the MTA's poll can update an operator's
+	// edited value while inbound sessions record verdicts concurrently, with no
+	// restart. NewSQL seeds it with the built-in default.
+	spamRetain atomic.Int64
 }
 
 // NewSQL wraps an open database handle. A user's mailbox store is the object
 // store rooted at the maildir directory.
 func NewSQL(db *sql.DB) *SQLDirectory {
-	return &SQLDirectory{db: db}
+	d := &SQLDirectory{db: db}
+	d.spamRetain.Store(defaultSpamHistoryRetain)
+	return d
 }
 
 // EnsureSchema brings the directory database to the latest schema version,

@@ -9,6 +9,7 @@ import (
 	"net/smtp"
 	"net/textproto"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"hermex/internal/logging"
@@ -48,6 +49,27 @@ type Worker struct {
 	// mail exchanger mandatory and certificate-validated, and excludes any MX host
 	// the policy does not list.
 	Policy func(domain string) (*mtasts.Policy, error)
+
+	// backoffOverride (nanoseconds) and maxAttemptsOverride hold an operator's edited
+	// retry policy, set via SetRetryPolicy. They are read atomically by the single Run
+	// goroutine so the MTA's poll can apply a change while delivery runs, with no
+	// restart; 0 means "fall back to the Backoff/MaxAttempts fields, then the default".
+	backoffOverride     atomic.Int64
+	maxAttemptsOverride atomic.Int64
+}
+
+// SetRetryPolicy installs the operator's retry tuning: the base backoff before the
+// first retry (it still doubles per attempt and is capped at maxBackoff) and the
+// number of attempts before a recipient is abandoned. It is safe to call concurrently
+// with Run, so an edit applies without a restart. A non-positive value for either
+// leaves that one falling back to the configured field or the built-in default.
+func (w *Worker) SetRetryPolicy(backoff time.Duration, maxAttempts int) {
+	if backoff > 0 {
+		w.backoffOverride.Store(int64(backoff))
+	}
+	if maxAttempts > 0 {
+		w.maxAttemptsOverride.Store(int64(maxAttempts))
+	}
 }
 
 const (
@@ -131,6 +153,9 @@ func (w *Worker) giveUp(it Item, cause error) {
 }
 
 func (w *Worker) maxAttempts() int {
+	if n := w.maxAttemptsOverride.Load(); n > 0 {
+		return int(n)
+	}
 	if w.MaxAttempts > 0 {
 		return w.MaxAttempts
 	}
@@ -140,7 +165,10 @@ func (w *Worker) maxAttempts() int {
 // retryDelay is the wait before the next attempt: the base backoff doubled once
 // per attempt already made, capped so it cannot overflow or grow without bound.
 func (w *Worker) retryDelay(attempts int) time.Duration {
-	base := w.Backoff
+	base := time.Duration(w.backoffOverride.Load())
+	if base <= 0 {
+		base = w.Backoff
+	}
 	if base <= 0 {
 		base = defaultBackoff
 	}

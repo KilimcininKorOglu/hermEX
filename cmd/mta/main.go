@@ -159,11 +159,7 @@ func main() {
 	// starts disabled; the admin toggle is read at startup and hot-reloaded, and the
 	// triplet table is pruned periodically to stay bounded.
 	greylister := mta.NewGreylister(dir, scorer)
-	if on, err := dir.GetGreylistEnabled(); err != nil {
-		log.Printf("hermex-mta: greylist toggle read failed, leaving greylisting off: %v", err)
-	} else {
-		greylister.SetEnabled(on)
-	}
+	applyGreylistSettings(dir, greylister)
 	go runGreylistMaintenance(dir, greylister)
 	// Inbound rate limiting caps how many messages an unauthenticated client network
 	// may send per window. It starts disabled; the stored settings are read at startup
@@ -180,6 +176,11 @@ func main() {
 	})
 	applyOutboundSettings(dir, outboundLimiter)
 	go runOutboundMaintenance(dir, outboundLimiter)
+	// Spam-history retention: how many of the most recent scored verdicts the
+	// spam_history table keeps. It is read at startup and re-read every minute so an
+	// admin's change applies without a restart.
+	applySpamHistorySettings(dir)
+	go runSpamHistoryMaintenance(dir)
 	// Quarantine digest: deliver each user a periodic summary of newly quarantined
 	// mail with signed one-click release links. It needs a shared signing secret (the
 	// webmail release endpoint verifies the same key); without one the feature stays
@@ -195,6 +196,11 @@ func main() {
 		}
 		srv.TLSConfig = tc // enables STARTTLS on the plaintext listener
 	}
+	// Inbound message size limit: the max bytes the SMTP server accepts and advertises
+	// (SMTP SIZE). Read at startup and re-read every minute so an admin's change applies
+	// without a restart; 0 means no limit.
+	applyMessageSizeSettings(dir, srv)
+	go runMessageSizeMaintenance(dir, srv)
 	srv.AddListener(ln)
 	log.Printf("hermex-mta listening on %s", addr)
 
@@ -244,6 +250,10 @@ func main() {
 			}
 		},
 	}
+	// Outbound delivery retry policy (base backoff and max attempts): read at startup
+	// and re-read every minute so an admin's change applies without a restart.
+	applyRelaySettings(dir, relayWorker)
+	go runRelayMaintenance(dir, relayWorker)
 	rwCtx, rwCancel := context.WithCancel(context.Background())
 	relayLoop := lifecycle.Func{
 		StartFn:    func() error { relayWorker.Run(rwCtx, relayInterval); return nil },
@@ -268,8 +278,10 @@ func antispamConfig(s directory.AntispamSettings) *antispam.Config {
 			SPFFail: s.SPFFail, SPFSoftFail: s.SPFSoftFail, DKIMFail: s.DKIMFail,
 			DMARCFail: s.DMARCFail, DNSBLHit: s.DNSBLHit, BayesSpam: s.BayesSpam, SARulesHit: s.SARulesHit,
 		},
-		Threshold: s.Threshold,
-		Zones:     antispam.ParseZones(s.Zones),
+		Threshold:   s.Threshold,
+		Zones:       antispam.ParseZones(s.Zones),
+		BayesProb:   s.BayesProb,
+		SAThreshold: s.SAThreshold,
 	}
 }
 
@@ -289,6 +301,7 @@ func loadAntispamSettings(dir *directory.SQLDirectory) (directory.AntispamSettin
 		SPFFail: w.SPFFail, SPFSoftFail: w.SPFSoftFail, DKIMFail: w.DKIMFail, DMARCFail: w.DMARCFail,
 		DNSBLHit: w.DNSBLHit, BayesSpam: w.BayesSpam, SARulesHit: w.SARulesHit,
 		Threshold: antispam.DefaultThreshold, Zones: os.Getenv("HERMEX_DNSBL_ZONES"),
+		BayesProb: antispam.DefaultBayesProb, SAThreshold: antispam.DefaultSAThreshold,
 	}
 	if err := dir.SetAntispamSettings(seed); err != nil {
 		return seed, err
@@ -325,20 +338,35 @@ func accessHash(rules []directory.SenderRule) uint64 {
 	return h.Sum64()
 }
 
-// runGreylistMaintenance hot-reloads the greylist on/off toggle every minute and
+// applyGreylistSettings reads the stored greylist on/off toggle and timings and
+// applies both to the greylister. A read error leaves that part unchanged, so a
+// transient failure never flips greylisting or resets a timing; a missing timings row
+// keeps the greylister's built-in defaults.
+func applyGreylistSettings(dir *directory.SQLDirectory, g *mta.Greylister) {
+	if on, err := dir.GetGreylistEnabled(); err != nil {
+		log.Printf("hermex-mta: greylist toggle read failed, leaving it unchanged: %v", err)
+	} else {
+		g.SetEnabled(on)
+	}
+	if t, found, err := dir.GetGreylistTimings(); err != nil {
+		log.Printf("hermex-mta: greylist timings read failed, leaving them unchanged: %v", err)
+	} else if found {
+		g.SetTimings(t.MinDelay, t.UnconfirmedTTL, t.ConfirmedTTL)
+	}
+}
+
+// runGreylistMaintenance hot-reloads the greylist toggle and timings every minute and
 // prunes the expired triplets hourly, so an admin change applies without a restart
 // and the table stays bounded. It runs until the process exits.
 func runGreylistMaintenance(dir *directory.SQLDirectory, g *mta.Greylister) {
-	enableTick := time.NewTicker(time.Minute)
+	applyTick := time.NewTicker(time.Minute)
 	pruneTick := time.NewTicker(time.Hour)
-	defer enableTick.Stop()
+	defer applyTick.Stop()
 	defer pruneTick.Stop()
 	for {
 		select {
-		case <-enableTick.C:
-			if on, err := dir.GetGreylistEnabled(); err == nil {
-				g.SetEnabled(on)
-			}
+		case <-applyTick.C:
+			applyGreylistSettings(dir, g)
 		case <-pruneTick.C:
 			if err := g.Prune(); err != nil {
 				log.Printf("hermex-mta: greylist prune failed: %v", err)
@@ -413,6 +441,82 @@ func runOutboundMaintenance(dir *directory.SQLDirectory, l *mta.OutboundLimiter)
 		case <-pruneTick.C:
 			l.Prune()
 		}
+	}
+}
+
+// applySpamHistorySettings reads the stored spam-history retention and applies it to
+// the directory's runtime bound. A missing row or a read error leaves the bound
+// unchanged, so a settings failure never shrinks the history unexpectedly. Pruning
+// itself happens per-insert in RecordSpamVerdict, so this only re-reads the bound.
+func applySpamHistorySettings(dir *directory.SQLDirectory) {
+	s, found, err := dir.GetSpamHistorySettings()
+	if err != nil {
+		log.Printf("hermex-mta: spam-history retention read failed, leaving it unchanged: %v", err)
+		return
+	}
+	if !found {
+		return
+	}
+	dir.SetSpamHistoryRetain(int64(s.Retain))
+}
+
+// runSpamHistoryMaintenance re-applies the spam-history retention every minute so an
+// admin change takes effect without a restart. It runs until the process exits.
+func runSpamHistoryMaintenance(dir *directory.SQLDirectory) {
+	tick := time.NewTicker(time.Minute)
+	defer tick.Stop()
+	for range tick.C {
+		applySpamHistorySettings(dir)
+	}
+}
+
+// applyMessageSizeSettings reads the stored inbound message size limit and applies it
+// to the SMTP server. A missing row or a read error leaves the limit unchanged, so a
+// settings failure never starts rejecting mail unexpectedly.
+func applyMessageSizeSettings(dir *directory.SQLDirectory, srv *smtp.Server) {
+	s, found, err := dir.GetMessageSizeSettings()
+	if err != nil {
+		log.Printf("hermex-mta: message size settings read failed, leaving the limit unchanged: %v", err)
+		return
+	}
+	if !found {
+		return
+	}
+	srv.SetMaxSize(s.MaxInboundBytes)
+}
+
+// runMessageSizeMaintenance re-applies the inbound message size limit every minute so
+// an admin change takes effect without a restart. It runs until the process exits.
+func runMessageSizeMaintenance(dir *directory.SQLDirectory, srv *smtp.Server) {
+	tick := time.NewTicker(time.Minute)
+	defer tick.Stop()
+	for range tick.C {
+		applyMessageSizeSettings(dir, srv)
+	}
+}
+
+// applyRelaySettings reads the stored outbound retry policy and applies it to the relay
+// worker. A missing row or a read error leaves the policy unchanged, so a settings
+// failure never alters delivery behavior unexpectedly.
+func applyRelaySettings(dir *directory.SQLDirectory, w *relay.Worker) {
+	s, found, err := dir.GetRelaySettings()
+	if err != nil {
+		log.Printf("hermex-mta: relay settings read failed, leaving the retry policy unchanged: %v", err)
+		return
+	}
+	if !found {
+		return
+	}
+	w.SetRetryPolicy(time.Duration(s.BackoffSeconds)*time.Second, s.MaxAttempts)
+}
+
+// runRelayMaintenance re-applies the outbound retry policy every minute so an admin
+// change takes effect without a restart. It runs until the process exits.
+func runRelayMaintenance(dir *directory.SQLDirectory, w *relay.Worker) {
+	tick := time.NewTicker(time.Minute)
+	defer tick.Stop()
+	for range tick.C {
+		applyRelaySettings(dir, w)
 	}
 }
 

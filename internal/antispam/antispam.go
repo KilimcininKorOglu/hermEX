@@ -57,16 +57,16 @@ var DefaultWeights = Weights{SPFFail: 5, SPFSoftFail: 2, DKIMFail: 3, DMARCFail:
 // message; the admin can tune it later.
 const DefaultThreshold = 8
 
-// bayesSpamProb is the spam probability at or above which the Bayesian model
+// DefaultBayesProb is the spam probability at or above which the Bayesian model
 // contributes its weight. It is high so content alone never condemns a message on
 // a weak or barely-trained model.
-const bayesSpamProb = 0.95
+const DefaultBayesProb = 0.95
 
-// SAScoreThreshold is the summed SpamAssassin-rule score at or above which the
+// DefaultSAThreshold is the summed SpamAssassin-rule score at or above which the
 // rule subset contributes its weight. It matches SpamAssassin's own default
 // threshold; since this is only a subset of the full ruleset, requiring the full
 // 5.0 from fewer rules is deliberately conservative against false positives.
-const SAScoreThreshold = 5.0
+const DefaultSAThreshold = 5.0
 
 // Verdict is the aggregated result for one message.
 type Verdict struct {
@@ -104,12 +104,19 @@ type DKIMResult struct {
 }
 
 // Config is the Scorer's hot-swappable tuning: the signal weights, the spam
-// threshold, and the DNS blocklist zones. It is swapped as one unit so Score
-// always observes a coherent snapshot (never new weights with an old threshold).
+// threshold, the DNS blocklist zones, and the Bayes/SpamAssassin cutoffs. It is
+// swapped as one unit so Score always observes a coherent snapshot (never new
+// weights with an old threshold).
 type Config struct {
 	Weights   Weights
 	Threshold int
 	Zones     []string // DNS blocklist zones to query the client IP against; empty disables DNSBL
+	// BayesProb is the spam-probability cutoff at or above which the Bayes weight is
+	// applied; SAThreshold is the summed SpamAssassin-rule score at or above which the
+	// SA-rules weight is applied. A value <= 0 falls back to the built-in default
+	// (DefaultBayesProb / DefaultSAThreshold), so an unset or partial Config scores as before.
+	BayesProb   float64
+	SAThreshold float64
 }
 
 // Scorer computes verdicts. The check functions are injected (New wires the
@@ -184,6 +191,16 @@ func (s *Scorer) Score(in Input) Verdict {
 	if cfg == nil {
 		cfg = &Config{Weights: DefaultWeights, Threshold: DefaultThreshold}
 	}
+	// Resolve the Bayes/SpamAssassin cutoffs from the snapshot, falling back to the
+	// built-in defaults so an unset or partially-set Config scores as before.
+	bayesCutoff := cfg.BayesProb
+	if bayesCutoff <= 0 {
+		bayesCutoff = DefaultBayesProb
+	}
+	saCutoff := cfg.SAThreshold
+	if saCutoff <= 0 {
+		saCutoff = DefaultSAThreshold
+	}
 
 	if s.checkSPF != nil && in.ClientIP != nil && in.MailFrom != "" {
 		v.SPF = s.checkSPF(in.ClientIP, in.HeloName, in.MailFrom)
@@ -253,7 +270,7 @@ func (s *Scorer) Score(in Input) Verdict {
 	// weak or unbootstrapped model never condemns mail on content alone.
 	if m := s.model.Load(); m != nil && s.extractText != nil && len(in.Raw) > 0 {
 		v.BayesProb = m.Score(s.extractText(in.Raw))
-		if v.BayesProb >= bayesSpamProb {
+		if v.BayesProb >= bayesCutoff {
 			v.Score += cfg.Weights.BayesSpam
 			v.Reasons = append(v.Reasons, "Bayesian: likely spam")
 		}
@@ -265,7 +282,7 @@ func (s *Scorer) Score(in Input) Verdict {
 	// the verdict on its own.
 	if rs := s.saRules.Load(); rs != nil && len(in.Raw) > 0 {
 		v.SAScore, v.SAHits = rs.Evaluate(in.Raw)
-		if v.SAScore >= SAScoreThreshold {
+		if v.SAScore >= saCutoff {
 			v.Score += cfg.Weights.SARulesHit
 			v.Reasons = append(v.Reasons, fmt.Sprintf("SpamAssassin rules (score %.1f)", v.SAScore))
 		}

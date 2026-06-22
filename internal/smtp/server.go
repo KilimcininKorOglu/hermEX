@@ -14,6 +14,7 @@ import (
 	"net"
 	"net/textproto"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"hermex/internal/lifecycle"
@@ -41,11 +42,25 @@ type Session interface {
 type Server struct {
 	Backend   Backend
 	Hostname  string          // announced in the greeting and EHLO; defaults to "localhost"
-	MaxSize   int64           // advertised/enforced max message size in bytes; 0 means no limit
 	TLSConfig *tls.Config     // when non-nil, advertise (EHLO) and accept STARTTLS
 	Logger    *logging.Logger // central activity log; nil disables logging
 
+	// maxSize is the advertised/enforced max message size in bytes (0 = no limit),
+	// held atomically so the MTA's poll can apply an operator's edit while sessions
+	// run, with no restart. Set it via SetMaxSize.
+	maxSize atomic.Int64
+
 	conns lifecycle.ConnGroup
+}
+
+// SetMaxSize sets the advertised/enforced maximum message size in bytes (0 disables
+// the limit). It is safe to call concurrently with active sessions, so an operator's
+// edit applies without a restart.
+func (s *Server) SetMaxSize(n int64) {
+	if n < 0 {
+		n = 0
+	}
+	s.maxSize.Store(n)
 }
 
 // AddListener registers a listener (the plaintext and any implicit-TLS one) for
@@ -237,8 +252,8 @@ func replySessionErr(w *bufio.Writer, err error) {
 func (s *Server) consumeData(tp *textproto.Reader, sess Session, trace string) error {
 	dot := newDotReader(tp.R)
 	var body io.Reader = dot
-	if s.MaxSize > 0 {
-		body = &limitedReader{r: dot, remaining: s.MaxSize}
+	if max := s.maxSize.Load(); max > 0 {
+		body = &limitedReader{r: dot, remaining: max}
 	}
 	// Prepend the Received: trace header OUTSIDE the size limiter, so it is neither
 	// counted against the client's size budget nor truncated when the body is at
@@ -303,8 +318,8 @@ func (s *Server) greetEHLO(w *bufio.Writer, arg string, isTLS, authAvailable boo
 		"PIPELINING",
 		"8BITMIME",
 	}
-	if s.MaxSize > 0 {
-		lines = append(lines, fmt.Sprintf("SIZE %d", s.MaxSize))
+	if max := s.maxSize.Load(); max > 0 {
+		lines = append(lines, fmt.Sprintf("SIZE %d", max))
 	}
 	if s.TLSConfig != nil && !isTLS {
 		lines = append(lines, "STARTTLS")

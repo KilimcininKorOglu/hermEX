@@ -13,6 +13,34 @@ import (
 	hsmtp "hermex/internal/smtp"
 )
 
+// TestWorkerSetRetryPolicy proves the retry tuning is read from the runtime override,
+// so an operator's edit (applied by the MTA's poll) decides the backoff and attempt
+// limit without a restart, and beats any construction-time field.
+func TestWorkerSetRetryPolicy(t *testing.T) {
+	w := &Worker{}
+	if got := w.maxAttempts(); got != defaultMaxAttempts {
+		t.Errorf("default maxAttempts = %d, want %d", got, defaultMaxAttempts)
+	}
+	if got := w.retryDelay(0); got != defaultBackoff {
+		t.Errorf("default retryDelay(0) = %v, want %v", got, defaultBackoff)
+	}
+
+	w.SetRetryPolicy(2*time.Minute, 3)
+	if got := w.maxAttempts(); got != 3 {
+		t.Errorf("maxAttempts after SetRetryPolicy = %d, want 3", got)
+	}
+	if got := w.retryDelay(0); got != 2*time.Minute {
+		t.Errorf("retryDelay(0) after SetRetryPolicy = %v, want 2m", got)
+	}
+
+	// The runtime override must beat a construction-time field, so the poll path wins.
+	w2 := &Worker{Backoff: time.Hour, MaxAttempts: 99}
+	w2.SetRetryPolicy(30*time.Second, 5)
+	if w2.maxAttempts() != 5 || w2.retryDelay(0) != 30*time.Second {
+		t.Errorf("override did not beat the field: attempts=%d delay=%v", w2.maxAttempts(), w2.retryDelay(0))
+	}
+}
+
 // recordingBackend is an in-process SMTP sink: it accepts a message and records
 // its envelope and body, standing in for a remote mail exchanger so the relay
 // path can be exercised end to end without the network.

@@ -20,8 +20,14 @@
 <h2>Inbound rate limiting</h2>
 {{template "ratelimit-panel" .}}
 
+<h2>Inbound message size</h2>
+{{template "message-size-panel" .}}
+
 <h2>Outbound abuse</h2>
 {{template "outbound-panel" .}}
+
+<h2>Outbound delivery retry</h2>
+{{template "relay-panel" .}}
 
 <h2>Quarantine digest</h2>
 {{template "digest-panel" .}}
@@ -35,6 +41,13 @@
 <form hx-post="/admin/ui/antispam/greylist" hx-target="#greylist-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <input type="hidden" name="enabled" value="{{if .GreylistEnabled}}0{{else}}1{{end}}">
 <button type="submit">{{if .GreylistEnabled}}Disable{{else}}Enable{{end}} greylisting</button>
+</form>
+<h3>Timings</h3>
+<form hx-post="/admin/ui/antispam/greylist-timings" hx-target="#greylist-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<p>Minimum delay before a first-seen sender is accepted (seconds): <input type="number" name="min_delay" value="{{.GreylistMinDelay}}" min="1"></p>
+<p>Unconfirmed sender memory (seconds): <input type="number" name="unconfirmed_ttl" value="{{.GreylistUnconfirmedTTL}}" min="1"></p>
+<p>Confirmed sender memory (seconds): <input type="number" name="confirmed_ttl" value="{{.GreylistConfirmedTTL}}" min="1"></p>
+<button type="submit">Save timings</button>
 </form>
 </div>{{end}}
 
@@ -50,6 +63,16 @@
 </form>
 </div>{{end}}
 
+{{define "relay-panel"}}<div id="relay-panel">
+{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+<p>When delivery to a remote server fails transiently, the message is retried with an exponential backoff (the base delay below, doubling each attempt) until it succeeds or the attempt limit is reached, after which a non-delivery report is returned to the sender.</p>
+<form hx-post="/admin/ui/antispam/relay" hx-target="#relay-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<p>Base retry backoff (seconds): <input type="number" name="backoff" value="{{.RelayBackoff}}" min="1"></p>
+<p>Attempts before giving up: <input type="number" name="attempts" value="{{.RelayMaxAttempts}}" min="1"></p>
+<button type="submit">Save settings</button>
+</form>
+</div>{{end}}
+
 {{define "outbound-panel"}}<div id="outbound-panel">
 {{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
 <p>Outbound abuse limiting is <strong>{{if .OutboundEnabled}}on{{else}}off{{end}}</strong>. When on, a local account that sends to more than the cap of external recipients within the window has the excess deferred with a temporary failure — a compromised account cannot blast spam unchecked — and an <code>outbound.abuse</code> event is logged once per window so you can disable the account. Authenticated submission only; inbound mail is never affected.</p>
@@ -58,6 +81,15 @@
 <p>External recipients per window: <input type="number" name="cap" value="{{.OutboundCap}}" min="1"></p>
 <p>Window (seconds): <input type="number" name="window" value="{{.OutboundWindow}}" min="1"></p>
 <button type="submit">Save settings</button>
+</form>
+</div>{{end}}
+
+{{define "message-size-panel"}}<div id="message-size-panel">
+{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+<p>The maximum size of an inbound message the server accepts, advertised to senders as the SMTP SIZE extension. 0 means no limit; a larger message is rejected before it is queued.</p>
+<form hx-post="/admin/ui/antispam/message-size" hx-target="#message-size-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<p>Maximum message size (MB, 0 = no limit): <input type="number" name="max_mb" value="{{.MessageSizeMB}}" min="0"></p>
+<button type="submit">Save limit</button>
 </form>
 </div>{{end}}
 
@@ -104,6 +136,8 @@
 </tbody>
 </table>
 <p>Spam threshold: <input type="number" name="threshold" value="{{.Threshold}}" min="1"></p>
+<p>Bayes spam-probability cutoff (0–1): <input type="number" name="bayes_prob" value="{{.BayesProb}}" min="0" max="1" step="0.01"></p>
+<p>SpamAssassin score threshold: <input type="number" name="sa_threshold" value="{{.SAThreshold}}" min="0" step="0.1"></p>
 <p>DNS blocklist zones (comma-separated): <input type="text" name="zones" value="{{.Zones}}" size="60"></p>
 <button type="submit">Save settings</button>
 </form>

@@ -19,6 +19,18 @@
 {{else}}<tr><td colspan="6" class="empty">No scored messages yet.</td></tr>{{end}}
 </tbody>
 </table>
+
+<h2>Retention</h2>
+{{template "retention-panel" .}}
 </main>
 </div>
 {{template "foot" .}}{{end}}
+
+{{define "retention-panel"}}<div id="retention-panel">
+{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+<p>The newest <strong>{{.Retain}}</strong> scored verdicts are kept; older rows are pruned automatically as new mail is scored, so the history never grows unbounded.</p>
+<form hx-post="/admin/ui/spam-history/retention" hx-target="#retention-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<p>Verdicts to keep: <input type="number" name="retain" value="{{.Retain}}" min="1"></p>
+<button type="submit">Save retention</button>
+</form>
+</div>{{end}}

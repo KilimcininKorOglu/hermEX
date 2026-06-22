@@ -9,13 +9,15 @@ import (
 	"hermex/internal/directory"
 )
 
-// Greylist policy. A first contact is deferred; a retry is accepted only after
-// greylistMinDelay, and only while the triplet has not expired. Confirmed triplets
-// are remembered for greylistConfirmedTTL; unconfirmed deferrals expire sooner.
+// Greylist policy defaults. A first contact is deferred; a retry is accepted only
+// after the minimum delay, and only while the triplet has not expired. Confirmed
+// triplets are remembered for the confirmed TTL; unconfirmed deferrals expire sooner.
+// These seed a new Greylister's timings; an operator's edit replaces them at runtime
+// via SetTimings, with no restart.
 const (
-	greylistMinDelay       = 5 * time.Minute
-	greylistUnconfirmedTTL = 24 * time.Hour
-	greylistConfirmedTTL   = 36 * 24 * time.Hour
+	defaultGreylistMinDelay       = 5 * time.Minute
+	defaultGreylistUnconfirmedTTL = 24 * time.Hour
+	defaultGreylistConfirmedTTL   = 36 * 24 * time.Hour
 )
 
 // GreylistStore is the triplet persistence the greylister needs.
@@ -42,17 +44,45 @@ type Greylister struct {
 	store   GreylistStore
 	allow   allowChecker
 	enabled atomic.Bool
-	now     func() int64 // injectable clock for tests
+	// minDelay, unconfirmedTTL, and confirmedTTL are the greylist timings in seconds,
+	// held atomically so the MTA's poll can apply an operator's edit while delivery
+	// runs, with no restart. NewGreylister seeds them with the built-in defaults.
+	minDelay       atomic.Int64
+	unconfirmedTTL atomic.Int64
+	confirmedTTL   atomic.Int64
+	now            func() int64 // injectable clock for tests
 }
 
 // NewGreylister builds a greylister over a triplet store and an allowlist checker
-// (either may drive exemptions); it starts disabled.
+// (either may drive exemptions); it starts disabled, with the built-in default
+// timings.
 func NewGreylister(store GreylistStore, allow allowChecker) *Greylister {
-	return &Greylister{store: store, allow: allow, now: func() int64 { return time.Now().Unix() }}
+	g := &Greylister{store: store, allow: allow, now: func() int64 { return time.Now().Unix() }}
+	g.minDelay.Store(int64(defaultGreylistMinDelay.Seconds()))
+	g.unconfirmedTTL.Store(int64(defaultGreylistUnconfirmedTTL.Seconds()))
+	g.confirmedTTL.Store(int64(defaultGreylistConfirmedTTL.Seconds()))
+	return g
 }
 
 // SetEnabled turns greylisting on or off; safe to call concurrently with delivery.
 func (g *Greylister) SetEnabled(on bool) { g.enabled.Store(on) }
+
+// SetTimings installs the greylist timings, each in seconds: the minimum delay before
+// a first-seen triplet is accepted, and the TTLs for unconfirmed and confirmed
+// triplets. It is safe to call concurrently with delivery, so an operator's edit
+// applies without a restart. A non-positive value for any timing leaves that one
+// unchanged, so a misconfiguration cannot remove the delay or collapse a TTL.
+func (g *Greylister) SetTimings(minDelay, unconfirmedTTL, confirmedTTL int64) {
+	if minDelay > 0 {
+		g.minDelay.Store(minDelay)
+	}
+	if unconfirmedTTL > 0 {
+		g.unconfirmedTTL.Store(unconfirmedTTL)
+	}
+	if confirmedTTL > 0 {
+		g.confirmedTTL.Store(confirmedTTL)
+	}
+}
 
 // ShouldDefer reports whether to defer this recipient with a temporary failure so
 // the sender retries. It returns false (accept) whenever greylisting is off, the
@@ -84,7 +114,7 @@ func (g *Greylister) ShouldDefer(ip net.IP, sender, recipient string) bool {
 	case rec.Confirmed:
 		_ = g.store.GreylistUpsertSeen(ipKey, sender, recipient, now) // refresh TTL, best-effort
 		return false
-	case now-rec.FirstSeen >= int64(greylistMinDelay.Seconds()):
+	case now-rec.FirstSeen >= g.minDelay.Load():
 		if err := g.store.GreylistConfirm(ipKey, sender, recipient, now); err != nil {
 			return false
 		}
@@ -97,7 +127,7 @@ func (g *Greylister) ShouldDefer(ip net.IP, sender, recipient string) bool {
 // Prune removes expired triplets; the MTA calls it periodically to bound the table.
 func (g *Greylister) Prune() error {
 	now := g.now()
-	return g.store.PruneGreylist(now-int64(greylistUnconfirmedTTL.Seconds()), now-int64(greylistConfirmedTTL.Seconds()))
+	return g.store.PruneGreylist(now-g.unconfirmedTTL.Load(), now-g.confirmedTTL.Load())
 }
 
 // networkKey masks a client IP to its network — a /24 for IPv4, /64 for IPv6 — so a

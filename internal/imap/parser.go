@@ -7,11 +7,13 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync/atomic"
 )
 
-// maxLiteralSize caps a single IMAP literal so a hostile client cannot force an
-// unbounded allocation. It is generous enough for ordinary mail APPENDs.
-const maxLiteralSize = 50 << 20 // 50 MiB
+// defaultMaxLiteralSize caps a single IMAP literal so a hostile client cannot force an
+// unbounded allocation. It is generous enough for ordinary mail APPENDs, and is the
+// fallback when no operator limit has been set.
+const defaultMaxLiteralSize = 50 << 20 // 50 MiB
 
 // errProtocol marks a malformed command line (a client/syntax error), as
 // distinct from an I/O error on the connection.
@@ -82,6 +84,10 @@ func (c *tokenCursor) next() (token, bool) {
 type commandReader struct {
 	br *bufio.Reader
 	bw *bufio.Writer
+	// maxLiteral points at the server's live literal-size cap (bytes); nil or a
+	// non-positive value means use defaultMaxLiteralSize. Read live in readLiteral so
+	// an operator's edit applies to an existing connection on its next literal.
+	maxLiteral *atomic.Int64
 }
 
 // readCommand reads and lexes one command line into a flat token slice. The
@@ -240,7 +246,13 @@ func (r *commandReader) readLiteral() (string, error) {
 	if err != nil || n < 0 {
 		return "", fmt.Errorf("%w: bad literal length", errProtocol)
 	}
-	if n > maxLiteralSize {
+	limit := int64(defaultMaxLiteralSize)
+	if r.maxLiteral != nil {
+		if v := r.maxLiteral.Load(); v > 0 {
+			limit = v
+		}
+	}
+	if int64(n) > limit {
 		return "", fmt.Errorf("%w: literal of %d bytes exceeds limit", errProtocol, n)
 	}
 	if b, err := r.br.ReadByte(); err != nil {

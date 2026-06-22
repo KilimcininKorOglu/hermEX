@@ -75,9 +75,34 @@ func TestGreylistRetrySameNetworkDifferentIPPasses(t *testing.T) {
 	if !g.ShouldDefer(net.IPv4(203, 0, 113, 5), "s@ext.example", "u@local.example") {
 		t.Fatal("first contact should be deferred")
 	}
-	now += int64(greylistMinDelay.Seconds()) + 1
+	now += int64(defaultGreylistMinDelay.Seconds()) + 1
 	if g.ShouldDefer(net.IPv4(203, 0, 113, 99), "s@ext.example", "u@local.example") {
 		t.Error("a retry from the same /24 (different IP) after the delay must pass, not defer")
+	}
+}
+
+// TestGreylistSetTimings proves the accept delay is read from the runtime timings, so
+// an operator's edit (here a longer minimum delay) decides when a retry is accepted,
+// with no restart: a retry past the built-in default but short of the configured delay
+// still defers, and one past the configured delay passes.
+func TestGreylistSetTimings(t *testing.T) {
+	store := &memGreylist{m: map[string]directory.Greylisted{}}
+	g := NewGreylister(store, nil)
+	g.SetEnabled(true)
+	g.SetTimings(600, 0, 0) // 10-minute minimum delay; leave the TTLs unchanged
+	now := int64(1000)
+	g.now = func() int64 { return now }
+
+	if !g.ShouldDefer(net.IPv4(203, 0, 113, 5), "s@ext.example", "u@local.example") {
+		t.Fatal("first contact should be deferred")
+	}
+	now += int64(defaultGreylistMinDelay.Seconds()) + 1 // past the 5-minute default...
+	if !g.ShouldDefer(net.IPv4(203, 0, 113, 6), "s@ext.example", "u@local.example") {
+		t.Error("a retry short of the configured 10-minute delay must still defer")
+	}
+	now += 300 // ...now past the configured 10 minutes total
+	if g.ShouldDefer(net.IPv4(203, 0, 113, 7), "s@ext.example", "u@local.example") {
+		t.Error("a retry past the configured delay must pass, not defer")
 	}
 }
 
@@ -91,7 +116,7 @@ func TestGreylistRetryTooSoonDefers(t *testing.T) {
 	g.now = func() int64 { return now }
 
 	g.ShouldDefer(net.IPv4(10, 0, 0, 1), "s@ext", "u@local")
-	now += 60 // less than greylistMinDelay
+	now += 60 // less than the default min delay
 	if !g.ShouldDefer(net.IPv4(10, 0, 0, 2), "s@ext", "u@local") {
 		t.Error("a retry before the minimum delay must still be deferred")
 	}

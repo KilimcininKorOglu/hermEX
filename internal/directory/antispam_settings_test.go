@@ -26,7 +26,7 @@ func TestAntispamSettingsRoundTrip(t *testing.T) {
 		t.Fatalf("Get on empty = found %v err %v, want not found", found, err)
 	}
 
-	want := AntispamSettings{SPFFail: 5, SPFSoftFail: 2, DKIMFail: 3, DMARCFail: 6, DNSBLHit: 6, BayesSpam: 4, SARulesHit: 4, Threshold: 8, Zones: "zen.example,bl.example"}
+	want := AntispamSettings{SPFFail: 5, SPFSoftFail: 2, DKIMFail: 3, DMARCFail: 6, DNSBLHit: 6, BayesSpam: 4, SARulesHit: 4, Threshold: 8, Zones: "zen.example,bl.example", BayesProb: 0.9, SAThreshold: 4.5}
 	if err := d.SetAntispamSettings(want); err != nil {
 		t.Fatal(err)
 	}

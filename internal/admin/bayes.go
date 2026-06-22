@@ -55,13 +55,21 @@ func (s *Server) antispamPageData(r *http.Request, notice string) map[string]any
 		"Notice": notice,
 	}
 	w, threshold, zones := antispam.DefaultWeights, antispam.DefaultThreshold, ""
+	bayesProb, saThreshold := antispam.DefaultBayesProb, antispam.DefaultSAThreshold
 	if st, found, err := s.dir.GetAntispamSettings(); err == nil && found {
 		w = weightsFromSettings(st)
 		threshold, zones = st.Threshold, st.Zones
+		if st.BayesProb > 0 {
+			bayesProb = st.BayesProb
+		}
+		if st.SAThreshold > 0 {
+			saThreshold = st.SAThreshold
+		}
 	}
 	data["Weights"] = w
 	data["Threshold"] = threshold
 	data["Zones"] = zones
+	data["BayesProb"] = bayesProb
 
 	if m, err := antispam.LoadModelFile(s.paths.AntispamModelPath()); err == nil && m != nil {
 		data["ModelTrained"] = true
@@ -83,10 +91,18 @@ func (s *Server) antispamPageData(r *http.Request, notice string) map[string]any
 	data["SASkipped"] = rs.SkippedRules
 	data["SADropped"] = rs.DroppedMetas
 	data["SAWeight"] = w.SARulesHit
-	data["SAThreshold"] = antispam.SAScoreThreshold
+	data["SAThreshold"] = saThreshold
 
 	if on, err := s.dir.GetGreylistEnabled(); err == nil {
 		data["GreylistEnabled"] = on
+	}
+	// Greylist timings: the stored values, or the greylister's built-in defaults
+	// (300 s delay, 24 h and 36 d TTLs) when none has been saved.
+	data["GreylistMinDelay"], data["GreylistUnconfirmedTTL"], data["GreylistConfirmedTTL"] = int64(300), int64(86400), int64(3110400)
+	if t, found, err := s.dir.GetGreylistTimings(); err == nil && found {
+		data["GreylistMinDelay"] = t.MinDelay
+		data["GreylistUnconfirmedTTL"] = t.UnconfirmedTTL
+		data["GreylistConfirmedTTL"] = t.ConfirmedTTL
 	}
 
 	// Inbound rate limiting: the stored settings, or the limiter's built-in defaults
@@ -98,6 +114,12 @@ func (s *Server) antispamPageData(r *http.Request, notice string) map[string]any
 		data["RateLimitWindow"] = rl.WindowSeconds
 	}
 
+	// Inbound message size limit: shown in whole MB (0 = no limit); stored as bytes.
+	data["MessageSizeMB"] = int64(0)
+	if ms, found, err := s.dir.GetMessageSizeSettings(); err == nil && found {
+		data["MessageSizeMB"] = ms.MaxInboundBytes / (1024 * 1024)
+	}
+
 	// Outbound abuse limiting: the stored settings, or the limiter's built-in
 	// defaults (disabled, 500 external recipients per 3600 s) when none has been saved.
 	data["OutboundEnabled"], data["OutboundCap"], data["OutboundWindow"] = false, 500, 3600
@@ -105,6 +127,14 @@ func (s *Server) antispamPageData(r *http.Request, notice string) map[string]any
 		data["OutboundEnabled"] = ob.Enabled
 		data["OutboundCap"] = ob.RecipientCap
 		data["OutboundWindow"] = ob.WindowSeconds
+	}
+
+	// Outbound delivery retry policy: the stored values, or the relay worker's built-in
+	// defaults (300 s base backoff, 10 attempts) when none has been saved.
+	data["RelayBackoff"], data["RelayMaxAttempts"] = 300, 10
+	if rs, found, err := s.dir.GetRelaySettings(); err == nil && found {
+		data["RelayBackoff"] = rs.BackoffSeconds
+		data["RelayMaxAttempts"] = rs.MaxAttempts
 	}
 
 	// Quarantine digest: the stored settings, or the worker's built-in defaults
@@ -136,6 +166,27 @@ func (s *Server) handleUIToggleGreylist(w http.ResponseWriter, r *http.Request) 
 	s.render(w, "greylist-panel", s.antispamPageData(r, "Greylisting "+verb+" — the MTA applies it within about a minute."))
 }
 
+// handleUISaveGreylistTimings persists the greylist timings (the minimum delay before
+// a first-seen sender is accepted and the unconfirmed/confirmed sender memory, all in
+// seconds). The MTA applies them within about a minute, no restart. A value below 1
+// for any field is rejected so the delay is never removed nor a memory window collapsed.
+func (s *Server) handleUISaveGreylistTimings(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	minDelay, unconfirmedTTL, confirmedTTL := formInt(r, "min_delay"), formInt(r, "unconfirmed_ttl"), formInt(r, "confirmed_ttl")
+	if minDelay < 1 || unconfirmedTTL < 1 || confirmedTTL < 1 {
+		s.render(w, "greylist-panel", s.antispamPageData(r, "The greylist delay and memory windows must each be at least 1 second; timings not saved."))
+		return
+	}
+	t := directory.GreylistTimings{MinDelay: int64(minDelay), UnconfirmedTTL: int64(unconfirmedTTL), ConfirmedTTL: int64(confirmedTTL)}
+	if err := s.dir.SetGreylistTimings(t); err != nil {
+		s.render(w, "greylist-panel", s.antispamPageData(r, "Could not save the greylist timings: "+err.Error()))
+		return
+	}
+	s.render(w, "greylist-panel", s.antispamPageData(r, "Greylist timings saved — the MTA applies them within a minute, no restart."))
+}
+
 // handleUISaveRateLimit persists the inbound rate-limit settings (enable, burst, and
 // window). The MTA applies the change within about a minute, no restart. A burst or
 // window below 1 is rejected so the limiter is never configured to admit zero
@@ -161,6 +212,21 @@ func (s *Server) handleUISaveRateLimit(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "ratelimit-panel", s.antispamPageData(r, "Rate-limit settings saved — the MTA applies them within a minute, no restart."))
 }
 
+// handleUISaveMessageSize persists the inbound message size limit (entered in whole
+// MB; 0 disables the limit). The MTA applies the change within about a minute, no
+// restart, advertising it as the SMTP SIZE extension.
+func (s *Server) handleUISaveMessageSize(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	mb := formInt(r, "max_mb") // megabytes; 0 disables the limit, negatives clamp to 0
+	if err := s.dir.SetMessageSizeSettings(directory.MessageSizeSettings{MaxInboundBytes: int64(mb) * 1024 * 1024}); err != nil {
+		s.render(w, "message-size-panel", s.antispamPageData(r, "Could not save the message size limit: "+err.Error()))
+		return
+	}
+	s.render(w, "message-size-panel", s.antispamPageData(r, "Message size limit saved — the MTA applies it within a minute, no restart."))
+}
+
 // handleUISaveOutbound persists the outbound-abuse settings (enable, external-recipient
 // cap, and window). The MTA applies the change within about a minute, no restart. A cap
 // or window below 1 is rejected.
@@ -183,6 +249,25 @@ func (s *Server) handleUISaveOutbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, "outbound-panel", s.antispamPageData(r, "Outbound settings saved — the MTA applies them within a minute, no restart."))
+}
+
+// handleUISaveRelay persists the outbound delivery retry policy (base backoff in
+// seconds and the number of attempts before giving up). The MTA applies the change
+// within about a minute, no restart. A value below 1 for either is rejected.
+func (s *Server) handleUISaveRelay(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	backoff, attempts := formInt(r, "backoff"), formInt(r, "attempts")
+	if backoff < 1 || attempts < 1 {
+		s.render(w, "relay-panel", s.antispamPageData(r, "The backoff and attempts must each be at least 1; settings not saved."))
+		return
+	}
+	if err := s.dir.SetRelaySettings(directory.RelaySettings{BackoffSeconds: backoff, MaxAttempts: attempts}); err != nil {
+		s.render(w, "relay-panel", s.antispamPageData(r, "Could not save the relay settings: "+err.Error()))
+		return
+	}
+	s.render(w, "relay-panel", s.antispamPageData(r, "Relay settings saved — the MTA applies them within a minute, no restart."))
 }
 
 // handleUISaveDigest persists the quarantine-digest settings (enable, interval in
@@ -240,6 +325,15 @@ func (s *Server) handleUISaveAntispamSettings(w http.ResponseWriter, r *http.Req
 		s.render(w, "scoring-panel", s.antispamPageData(r, "Threshold must be at least 1; settings not saved."))
 		return
 	}
+	bayesProb, saThreshold := formFloat(r, "bayes_prob"), formFloat(r, "sa_threshold")
+	if bayesProb <= 0 || bayesProb > 1 {
+		s.render(w, "scoring-panel", s.antispamPageData(r, "The Bayes probability cutoff must be between 0 and 1; settings not saved."))
+		return
+	}
+	if saThreshold <= 0 {
+		s.render(w, "scoring-panel", s.antispamPageData(r, "The SpamAssassin score threshold must be greater than 0; settings not saved."))
+		return
+	}
 	st := directory.AntispamSettings{
 		SPFFail:     formInt(r, "spf_fail"),
 		SPFSoftFail: formInt(r, "spf_softfail"),
@@ -250,6 +344,8 @@ func (s *Server) handleUISaveAntispamSettings(w http.ResponseWriter, r *http.Req
 		SARulesHit:  formInt(r, "sa_rules_hit"),
 		Threshold:   formInt(r, "threshold"),
 		Zones:       strings.TrimSpace(r.FormValue("zones")),
+		BayesProb:   bayesProb,
+		SAThreshold: saThreshold,
 	}
 	if err := s.dir.SetAntispamSettings(st); err != nil {
 		s.render(w, "scoring-panel", s.antispamPageData(r, "Could not save settings: "+err.Error()))
@@ -266,6 +362,16 @@ func formInt(r *http.Request, name string) int {
 		return 0
 	}
 	return n
+}
+
+// formFloat reads a non-negative float form field, returning 0 when absent or
+// unparseable so the caller's range check rejects it.
+func formFloat(r *http.Request, name string) float64 {
+	f, err := strconv.ParseFloat(strings.TrimSpace(r.FormValue(name)), 64)
+	if err != nil || f < 0 {
+		return 0
+	}
+	return f
 }
 
 // handleUIAntispam renders the anti-spam page (system admins).

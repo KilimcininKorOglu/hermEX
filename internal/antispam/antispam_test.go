@@ -232,6 +232,49 @@ func TestScoreSARulesBelowThreshold(t *testing.T) {
 	}
 }
 
+// TestScoreSAThresholdHonored proves the SpamAssassin score threshold is read from the
+// hot-swappable Config, so an operator's edit (not the built-in default) decides when
+// the SA signal fires: a threshold above a hit suppresses a weight the default would
+// have added, and a lower one admits a weight the default would have missed.
+func TestScoreSAThresholdHonored(t *testing.T) {
+	s := &Scorer{}
+	s.SetRules(ParseSARules(saScoreRules))
+	over := []byte("Subject: URGENT notice\r\n\r\nYou win a prize today!\r\n") // SAScore 5.5
+	under := []byte("Subject: hello\r\n\r\nYou win a prize today!\r\n")        // SAScore 3.0
+
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: DefaultThreshold, SAThreshold: 6.0})
+	if v := s.Score(Input{Raw: over}); v.Score != 0 {
+		t.Errorf("score = %d, want 0 (SAScore 5.5 is below the configured 6.0 threshold)", v.Score)
+	}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: DefaultThreshold, SAThreshold: 2.0})
+	if v := s.Score(Input{Raw: under}); v.Score != DefaultWeights.SARulesHit {
+		t.Errorf("score = %d, want %d (SAScore 3.0 crosses the configured 2.0 threshold)", v.Score, DefaultWeights.SARulesHit)
+	}
+}
+
+// TestScoreBayesProbHonored proves the Bayes probability cutoff is read from the
+// hot-swappable Config: under the default a confident model adds the Bayes weight,
+// and a cutoff above any attainable probability suppresses the very same hit.
+func TestScoreBayesProbHonored(t *testing.T) {
+	m := NewBayesModel()
+	for range 8 {
+		m.Train("cheap pills viagra discount pharmacy buy now offer cialis", true)
+		m.Train("project meeting schedule notes review report attached agenda", false)
+	}
+	s := &Scorer{extractText: func(raw []byte) string { return string(raw) }}
+	s.SetModel(m)
+	raw := []byte("cheap pills discount buy now viagra cialis offer")
+
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: DefaultThreshold})
+	if v := s.Score(Input{Raw: raw}); v.Score != DefaultWeights.BayesSpam {
+		t.Fatalf("score = %d, want %d under the default cutoff", v.Score, DefaultWeights.BayesSpam)
+	}
+	s.SetConfig(&Config{Weights: DefaultWeights, Threshold: DefaultThreshold, BayesProb: 1.1})
+	if v := s.Score(Input{Raw: raw}); v.Score != 0 {
+		t.Errorf("score = %d, want 0 (no probability reaches the configured 1.1 cutoff)", v.Score)
+	}
+}
+
 // TestScoreSARulesDormant proves no SA evaluation happens when no ruleset is set.
 func TestScoreSARulesDormant(t *testing.T) {
 	s := &Scorer{}

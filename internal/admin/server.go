@@ -94,6 +94,8 @@ type Directory interface {
 	ClaimNextTask() (directory.TaskInfo, bool, error)
 	FinishTask(id int64, status, message string) error
 	RecentSpamVerdicts(limit int) ([]directory.SpamVerdict, error)
+	GetSpamHistorySettings() (directory.SpamHistorySettings, bool, error)
+	SetSpamHistorySettings(directory.SpamHistorySettings) error
 	GetAntispamSettings() (directory.AntispamSettings, bool, error)
 	SetAntispamSettings(directory.AntispamSettings) error
 	ListSenderRules() ([]directory.SenderRule, error)
@@ -101,10 +103,18 @@ type Directory interface {
 	DeleteSenderRule(pattern string) (bool, error)
 	GetGreylistEnabled() (bool, error)
 	SetGreylistEnabled(on bool) error
+	GetGreylistTimings() (directory.GreylistTimings, bool, error)
+	SetGreylistTimings(directory.GreylistTimings) error
 	GetRateLimitSettings() (directory.RateLimitSettings, bool, error)
 	SetRateLimitSettings(directory.RateLimitSettings) error
+	GetMessageSizeSettings() (directory.MessageSizeSettings, bool, error)
+	SetMessageSizeSettings(directory.MessageSizeSettings) error
+	GetSizeLimits() (directory.SizeLimits, bool, error)
+	SetSizeLimits(directory.SizeLimits) error
 	GetOutboundSettings() (directory.OutboundSettings, bool, error)
 	SetOutboundSettings(directory.OutboundSettings) error
+	GetRelaySettings() (directory.RelaySettings, bool, error)
+	SetRelaySettings(directory.RelaySettings) error
 	GetDigestSettings() (directory.DigestSettings, bool, error)
 	SetDigestSettings(directory.DigestSettings) error
 	SetDKIMKey(domain, selector string, privPEM []byte, publicTXT string) error
@@ -325,10 +335,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/antispam/retrain", s.handleUIRetrainBayes)
 	mux.HandleFunc("POST /admin/ui/antispam/settings", s.handleUISaveAntispamSettings)
 	mux.HandleFunc("POST /admin/ui/antispam/greylist", s.handleUIToggleGreylist)
+	mux.HandleFunc("POST /admin/ui/antispam/greylist-timings", s.handleUISaveGreylistTimings)
 	mux.HandleFunc("POST /admin/ui/antispam/ratelimit", s.handleUISaveRateLimit)
+	mux.HandleFunc("POST /admin/ui/antispam/message-size", s.handleUISaveMessageSize)
 	mux.HandleFunc("POST /admin/ui/antispam/outbound", s.handleUISaveOutbound)
+	mux.HandleFunc("POST /admin/ui/antispam/relay", s.handleUISaveRelay)
 	mux.HandleFunc("POST /admin/ui/antispam/digest", s.handleUISaveDigest)
 	mux.HandleFunc("GET /admin/ui/spam-history", s.handleUISpamHistory)
+	mux.HandleFunc("POST /admin/ui/spam-history/retention", s.handleUISaveSpamRetention)
+	mux.HandleFunc("GET /admin/ui/limits", s.handleUILimits)
+	mux.HandleFunc("POST /admin/ui/limits", s.handleUISaveLimits)
 	mux.HandleFunc("GET /admin/ui/sender-access", s.handleUISenderAccess)
 	mux.HandleFunc("POST /admin/ui/sender-access", s.handleUISaveSenderRule)
 	mux.HandleFunc("POST /admin/ui/sender-access/delete", s.handleUIDeleteSenderRule)

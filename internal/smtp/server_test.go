@@ -138,6 +138,45 @@ func TestServerTransaction(t *testing.T) {
 	}
 }
 
+// TestServerEnforcesMaxSize proves the size limit set via SetMaxSize is both
+// advertised (EHLO SIZE) and enforced (an over-limit message is rejected 552), the
+// hook the MTA's poll drives so an operator's edit applies without a restart.
+func TestServerEnforcesMaxSize(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &Server{Backend: &fakeBackend{sess: &fakeSession{}}, Hostname: "mail.test"}
+	srv.SetMaxSize(64) // 64 bytes
+	go srv.Serve(ln)
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		ln.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close(); ln.Close() })
+	r := textproto.NewReader(bufio.NewReader(conn))
+
+	expect(t, r, 220)
+	fmt.Fprint(conn, "EHLO client.test\r\n")
+	_, msg, err := r.ReadResponse(250)
+	if err != nil {
+		t.Fatalf("EHLO: %v", err)
+	}
+	if !strings.Contains(msg, "SIZE 64") {
+		t.Errorf("EHLO did not advertise the configured size limit: %q", msg)
+	}
+	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	expect(t, r, 250)
+	fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+	expect(t, r, 250)
+	fmt.Fprint(conn, "DATA\r\n")
+	expect(t, r, 354)
+	// A body well past 64 bytes is rejected with 552, not accepted.
+	fmt.Fprint(conn, "Subject: hi\r\n\r\n"+strings.Repeat("x", 500)+"\r\n.\r\n")
+	expect(t, r, 552)
+}
+
 // TestBuildReceived covers the reference Received form: the helo name plus the
 // reverse-DNS name and client IP in the from-clause, the SMTP/SMTPS "with" token
 // (SMTPS only over TLS — neither EHLO nor AUTH is recorded there), an empty helo or

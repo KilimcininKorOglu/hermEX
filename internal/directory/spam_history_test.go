@@ -72,9 +72,7 @@ func TestSpamHistoryReasonsTruncated(t *testing.T) {
 // roughly the newest cap rows survive after more inserts than the cap.
 func TestSpamHistoryRetention(t *testing.T) {
 	d := setupSpamHistory(t)
-	old := spamHistoryRetain
-	spamHistoryRetain = 3
-	defer func() { spamHistoryRetain = old }()
+	d.SetSpamHistoryRetain(3)
 
 	for i := range 6 {
 		if err := d.RecordSpamVerdict(SpamVerdict{Time: int64(i), MailFrom: fmt.Sprintf("s%d@x", i)}); err != nil {

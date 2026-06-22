@@ -13,11 +13,23 @@ type SpamVerdict struct {
 	Reasons    string
 }
 
-// spamHistoryRetain bounds the table: because AUTO_INCREMENT ids are monotonic,
-// pruning rows at or below (newest id - spamHistoryRetain) on each insert keeps
-// roughly the newest spamHistoryRetain rows, so the history never grows unbounded.
-// It is a var only so a test can lower it; treat it as a constant otherwise.
-var spamHistoryRetain int64 = 10000
+// defaultSpamHistoryRetain is the built-in retention bound used until an operator
+// sets one from the admin panel. Because AUTO_INCREMENT ids are monotonic, pruning
+// rows at or below (newest id - retain) on each insert keeps roughly the newest
+// retain rows, so the history never grows unbounded. NewSQL seeds the directory's
+// runtime bound with this value; SetSpamHistoryRetain replaces it.
+const defaultSpamHistoryRetain int64 = 10000
+
+// SetSpamHistoryRetain updates the runtime retention bound RecordSpamVerdict
+// enforces. The MTA's poll calls it so an operator's edit applies without a restart.
+// A value below 1 is ignored, so a misconfiguration can never prune the table to
+// nothing.
+func (d *SQLDirectory) SetSpamHistoryRetain(n int64) {
+	if n < 1 {
+		return
+	}
+	d.spamRetain.Store(n)
+}
 
 // RecordSpamVerdict appends one scored message's outcome and prunes the table to
 // the retention cap. The MTA calls it fail-open — a delivery must never fail
@@ -35,7 +47,7 @@ func (d *SQLDirectory) RecordSpamVerdict(v SpamVerdict) error {
 	}
 	if id, err := res.LastInsertId(); err == nil {
 		// Best-effort retention prune; a failure here must not fail the record.
-		_, _ = d.db.Exec(`DELETE FROM spam_history WHERE id <= ?`, id-spamHistoryRetain)
+		_, _ = d.db.Exec(`DELETE FROM spam_history WHERE id <= ?`, id-d.spamRetain.Load())
 	}
 	return nil
 }

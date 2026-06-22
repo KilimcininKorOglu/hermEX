@@ -70,6 +70,7 @@ func TestSaveAntispamSettings(t *testing.T) {
 		"spf_fail": {"5"}, "spf_softfail": {"2"}, "dkim_fail": {"3"}, "dmarc_fail": {"6"},
 		"dnsbl_hit": {"6"}, "bayes_spam": {"4"}, "sa_rules_hit": {"4"},
 		"threshold": {"10"}, "zones": {"zen.example,bl.example"},
+		"bayes_prob": {"0.9"}, "sa_threshold": {"4.5"},
 	}
 	resp := htmxPOST(t, ts, "/admin/ui/antispam/settings", session, csrf, form)
 	body, _ := io.ReadAll(resp.Body)
@@ -83,6 +84,46 @@ func TestSaveAntispamSettings(t *testing.T) {
 	if !d.settingsFound || d.settings.Threshold != 10 || d.settings.DMARCFail != 6 || d.settings.Zones != "zen.example,bl.example" {
 		t.Errorf("settings not persisted as entered: found=%v %+v", d.settingsFound, d.settings)
 	}
+	if d.settings.BayesProb != 0.9 || d.settings.SAThreshold != 4.5 {
+		t.Errorf("bayes/SA cutoffs not persisted: BayesProb=%v SAThreshold=%v, want 0.9 / 4.5", d.settings.BayesProb, d.settings.SAThreshold)
+	}
+}
+
+// TestSaveAntispamSettingsRejectsBadCutoffs proves a Bayes probability outside 0–1 or
+// a non-positive SpamAssassin threshold is rejected and nothing is persisted, so the
+// scorer can never be configured to flag every message or never fire those signals.
+func TestSaveAntispamSettingsRejectsBadCutoffs(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	base := url.Values{
+		"spf_fail": {"5"}, "spf_softfail": {"2"}, "dkim_fail": {"3"}, "dmarc_fail": {"6"},
+		"dnsbl_hit": {"6"}, "bayes_spam": {"4"}, "sa_rules_hit": {"4"},
+		"threshold": {"10"}, "zones": {""},
+	}
+	// Bayes probability above 1 is rejected.
+	bad := cloneValues(base)
+	bad.Set("bayes_prob", "1.5")
+	bad.Set("sa_threshold", "5")
+	resp := htmxPOST(t, ts, "/admin/ui/antispam/settings", session, csrf, bad)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), "between 0 and 1") {
+		t.Errorf("expected a Bayes-cutoff validation message:\n%s", body)
+	}
+	if d.settingsFound {
+		t.Error("an invalid Bayes cutoff must not be persisted")
+	}
+}
+
+// cloneValues copies a url.Values so a test can vary one field without mutating the base.
+func cloneValues(v url.Values) url.Values {
+	out := url.Values{}
+	for k, vs := range v {
+		out[k] = append([]string(nil), vs...)
+	}
+	return out
 }
 
 // TestToggleGreylist proves the greylisting toggle persists the new state and
@@ -100,6 +141,45 @@ func TestToggleGreylist(t *testing.T) {
 	}
 	if !d.greylistOn {
 		t.Error("greylisting should have been turned on")
+	}
+}
+
+// TestSaveGreylistTimings proves the timings form persists the delay and memory
+// windows and acknowledges the save, the values the MTA then polls to apply without a
+// restart.
+func TestSaveGreylistTimings(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	form := url.Values{"min_delay": {"600"}, "unconfirmed_ttl": {"7200"}, "confirmed_ttl": {"1000000"}}
+	resp := htmxPOST(t, ts, "/admin/ui/antispam/greylist-timings", session, csrf, form)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Greylist timings saved") {
+		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
+	}
+	if !d.greylistTimingsSet || d.greylistTimings.MinDelay != 600 || d.greylistTimings.UnconfirmedTTL != 7200 || d.greylistTimings.ConfirmedTTL != 1000000 {
+		t.Errorf("timings not persisted as entered: set=%v %+v", d.greylistTimingsSet, d.greylistTimings)
+	}
+}
+
+// TestSaveGreylistTimingsRejectsBadValues proves a delay or memory window below 1
+// (which would remove the delay or collapse a window) is rejected and nothing persists.
+func TestSaveGreylistTimingsRejectsBadValues(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/antispam/greylist-timings", session, csrf,
+		url.Values{"min_delay": {"0"}, "unconfirmed_ttl": {"7200"}, "confirmed_ttl": {"1000000"}})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), "at least 1 second") {
+		t.Errorf("expected a validation message:\n%s", body)
+	}
+	if d.greylistTimingsSet {
+		t.Error("invalid greylist timings must not be persisted")
 	}
 }
 
@@ -159,6 +239,75 @@ func TestSaveRateLimitRejectsBadValues(t *testing.T) {
 	}
 	if d.rateLimitFound {
 		t.Error("invalid rate-limit settings must not be persisted")
+	}
+}
+
+// TestSaveMessageSize proves the message-size form converts the entered MB to bytes
+// and persists it, the value the MTA then polls to advertise and enforce SMTP SIZE
+// without a restart.
+func TestSaveMessageSize(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/antispam/message-size", session, csrf, url.Values{"max_mb": {"25"}})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Message size limit saved") {
+		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
+	}
+	if !d.messageSizeFound || d.messageSize.MaxInboundBytes != 25*1024*1024 {
+		t.Errorf("limit not persisted as bytes: found=%v %+v, want 26214400", d.messageSizeFound, d.messageSize)
+	}
+}
+
+// TestSaveMessageSizeZeroDisables proves entering 0 persists a zero limit, the MTA's
+// signal to advertise no SIZE and accept any size.
+func TestSaveMessageSizeZeroDisables(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/antispam/message-size", session, csrf, url.Values{"max_mb": {"0"}})
+	resp.Body.Close()
+	if !d.messageSizeFound || d.messageSize.MaxInboundBytes != 0 {
+		t.Errorf("zero limit not persisted: found=%v %+v", d.messageSizeFound, d.messageSize)
+	}
+}
+
+// TestSaveRelaySettings proves the relay form persists the backoff and attempt limit
+// and acknowledges the save, the values the MTA then polls to apply without a restart.
+func TestSaveRelaySettings(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/antispam/relay", session, csrf, url.Values{"backoff": {"120"}, "attempts": {"5"}})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Relay settings saved") {
+		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
+	}
+	if !d.relayFound || d.relay.BackoffSeconds != 120 || d.relay.MaxAttempts != 5 {
+		t.Errorf("relay settings not persisted as entered: found=%v %+v", d.relayFound, d.relay)
+	}
+}
+
+// TestSaveRelaySettingsRejectsBadValues proves a backoff or attempt count below 1 is
+// rejected and nothing is persisted.
+func TestSaveRelaySettingsRejectsBadValues(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/antispam/relay", session, csrf, url.Values{"backoff": {"0"}, "attempts": {"5"}})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), "at least 1") {
+		t.Errorf("expected a validation message:\n%s", body)
+	}
+	if d.relayFound {
+		t.Error("invalid relay settings must not be persisted")
 	}
 }
 

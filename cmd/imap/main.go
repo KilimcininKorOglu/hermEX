@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 
@@ -55,6 +56,10 @@ func main() {
 		log.Fatalf("hermex-imap: listen %s: %v", addr, err)
 	}
 	srv := &imap.Server{Auth: dir, Hostname: cfg.Hostname, Logger: logger, Pub: publicfolder.New(cfg)}
+	// IMAP literal size cap: read at startup and re-read every minute so an admin's
+	// change applies without a restart; 0 keeps the built-in default.
+	applyIMAPSizeLimit(dir, srv)
+	go runIMAPSizeMaintenance(dir, srv)
 	if cfg.TLSEnabled() {
 		tc, err := cfg.TLSConfig()
 		if err != nil {
@@ -84,5 +89,30 @@ func main() {
 		health.Components(cfg.HealthAddr, "imap", health.Check{Name: "directory", Probe: db.PingContext})...)
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-imap: %v", err)
+	}
+}
+
+// applyIMAPSizeLimit reads the stored IMAP literal cap and applies it to the server. A
+// missing row or a read error leaves the cap unchanged, so a settings failure never
+// shrinks the limit unexpectedly.
+func applyIMAPSizeLimit(dir *directory.SQLDirectory, srv *imap.Server) {
+	s, found, err := dir.GetSizeLimits()
+	if err != nil {
+		log.Printf("hermex-imap: size limits read failed, leaving the literal cap unchanged: %v", err)
+		return
+	}
+	if !found {
+		return
+	}
+	srv.SetMaxLiteralSize(s.IMAPLiteralBytes)
+}
+
+// runIMAPSizeMaintenance re-applies the IMAP literal cap every minute so an admin
+// change takes effect without a restart. It runs until the process exits.
+func runIMAPSizeMaintenance(dir *directory.SQLDirectory, srv *imap.Server) {
+	tick := time.NewTicker(time.Minute)
+	defer tick.Stop()
+	for range tick.C {
+		applyIMAPSizeLimit(dir, srv)
 	}
 }

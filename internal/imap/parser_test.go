@@ -3,9 +3,42 @@ package imap
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
+
+// TestReadLiteralRespectsServerLimit proves the literal cap is read live from the
+// server's atomic, so an operator's edit (applied by the poll) decides what a literal
+// may be — a literal over the cap is rejected, and raising the cap admits it, with no
+// reconstruction.
+func TestReadLiteralRespectsServerLimit(t *testing.T) {
+	var limit atomic.Int64
+	limit.Store(8) // an 8-byte cap
+
+	var out bytes.Buffer
+	over := &commandReader{
+		br:         bufio.NewReader(strings.NewReader("a LOGIN {20}\r\n")),
+		bw:         bufio.NewWriter(&out),
+		maxLiteral: &limit,
+	}
+	if _, err := over.readCommand(); !errors.Is(err, errProtocol) {
+		t.Fatalf("20-byte literal under an 8-byte cap = %v, want a protocol error", err)
+	}
+
+	// Raising the cap (what the poll does) admits a literal the old cap would reject.
+	limit.Store(50 << 20)
+	var out2 bytes.Buffer
+	ok := &commandReader{
+		br:         bufio.NewReader(strings.NewReader("a LOGIN {2}\r\nhi\r\n")),
+		bw:         bufio.NewWriter(&out2),
+		maxLiteral: &limit,
+	}
+	if _, err := ok.readCommand(); err != nil {
+		t.Fatalf("2-byte literal under a raised cap = %v, want success", err)
+	}
+}
 
 // lex runs the command reader over input and returns the tokens plus whatever
 // the server wrote back (continuation requests).

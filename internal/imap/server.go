@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"strings"
+	"sync/atomic"
 
 	"hermex/internal/directory"
 	"hermex/internal/lifecycle"
@@ -39,7 +40,23 @@ type Server struct {
 	Logger    *logging.Logger       // central activity log; nil disables logging
 	Pub       *publicfolder.Service // per-domain public folders; nil disables them
 
+	// maxLiteral is the cap on a single IMAP literal in bytes (0 = the built-in
+	// defaultMaxLiteralSize), held atomically so the IMAP daemon's poll can apply an
+	// operator's edit while connections run, with no restart. Set it via
+	// SetMaxLiteralSize; readLiteral reads it live.
+	maxLiteral atomic.Int64
+
 	conns lifecycle.ConnGroup
+}
+
+// SetMaxLiteralSize sets the maximum accepted IMAP literal in bytes (0 restores the
+// built-in default). It is safe to call concurrently with active connections, so an
+// operator's edit applies without a restart.
+func (s *Server) SetMaxLiteralSize(n int64) {
+	if n < 0 {
+		n = 0
+	}
+	s.maxLiteral.Store(n)
 }
 
 // event emits a log event for this connection through the server's logger, tagged
@@ -80,7 +97,7 @@ func (s *Server) Shutdown(ctx context.Context) error { return s.conns.Shutdown(c
 
 func (s *Server) handle(nc net.Conn) {
 	c := &conn{srv: s, bw: bufio.NewWriter(nc), state: stateNotAuth, nc: nc}
-	c.rd = &commandReader{br: bufio.NewReader(nc), bw: c.bw}
+	c.rd = &commandReader{br: bufio.NewReader(nc), bw: c.bw, maxLiteral: &c.srv.maxLiteral}
 	if _, ok := nc.(*tls.Conn); ok {
 		c.isTLS = true
 	}
@@ -353,7 +370,7 @@ func (c *conn) cmdStartTLS(tag string) {
 	}
 	c.nc = tc
 	c.bw = bufio.NewWriter(tc)
-	c.rd = &commandReader{br: bufio.NewReader(tc), bw: c.bw}
+	c.rd = &commandReader{br: bufio.NewReader(tc), bw: c.bw, maxLiteral: &c.srv.maxLiteral}
 	c.isTLS = true
 	c.event(logging.LevelInfo, "starttls", nil)
 }

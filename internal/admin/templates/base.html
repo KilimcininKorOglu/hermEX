@@ -35,6 +35,7 @@
 <a href="/admin/ui/antispam" class="{{if eq .Nav "antispam"}}active{{end}}">Anti-spam</a>
 <a href="/admin/ui/spam-history" class="{{if eq .Nav "spamhistory"}}active{{end}}">Spam History</a>
 <a href="/admin/ui/sender-access" class="{{if eq .Nav "senderaccess"}}active{{end}}">Sender allow/block</a>
+<a href="/admin/ui/limits" class="{{if eq .Nav "limits"}}active{{end}}">Limits</a>
 </nav>
 <form class="logout" method="post" action="/admin/ui/logout">
 <input type="hidden" name="_csrf" value="{{.CSRF}}">

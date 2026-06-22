@@ -160,7 +160,7 @@ func TestReloadOnceHotSwapsModel(t *testing.T) {
 	s.SetModel(m0)
 	r := NewReloader(s, dir, nil)
 
-	if v := s.Score(Input{Raw: raw}); v.BayesProb >= bayesSpamProb {
+	if v := s.Score(Input{Raw: raw}); v.BayesProb >= DefaultBayesProb {
 		t.Fatalf("untrained model already confident: BayesProb = %v", v.BayesProb)
 	}
 
@@ -178,7 +178,7 @@ func TestReloadOnceHotSwapsModel(t *testing.T) {
 	if names := r.reloadOnce(); len(names) != 1 || names[0] != "model" {
 		t.Fatalf("reloadOnce after retrain = %v, want [model]", names)
 	}
-	if v := s.Score(Input{Raw: raw}); v.BayesProb < bayesSpamProb {
-		t.Errorf("retrained model not live: BayesProb = %v, want >= %v", v.BayesProb, bayesSpamProb)
+	if v := s.Score(Input{Raw: raw}); v.BayesProb < DefaultBayesProb {
+		t.Errorf("retrained model not live: BayesProb = %v, want >= %v", v.BayesProb, DefaultBayesProb)
 	}
 }
