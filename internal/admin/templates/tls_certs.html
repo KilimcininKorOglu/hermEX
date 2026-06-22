@@ -1,0 +1,38 @@
+{{define "tls_certs.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>TLS certificates</h1>
+<p class="hint">The certificate the gateway (front door) and the mail daemons present. An uploaded certificate overrides the config-file certificate and is picked up within about a minute — no restart. Leave the name blank for the default certificate, or set an SNI host name to serve a specific host. Private keys are stored but never shown again.</p>
+{{template "tls-certs-panel" .}}
+</main>
+</div>
+{{template "foot" .}}{{end}}
+
+{{define "tls-certs-panel"}}<div id="tls-certs-panel">
+{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+<h2>Stored certificates</h2>
+{{if .Certs}}
+<table class="grid">
+<thead><tr><th>Name (SNI)</th><th>Expires</th><th></th></tr></thead>
+<tbody>
+{{range .Certs}}<tr>
+<td>{{if .Name}}<code>{{.Name}}</code>{{else}}<em>default</em>{{end}}</td>
+<td>{{.Expires}}</td>
+<td><form hx-post="/admin/ui/tls/delete" hx-target="#tls-certs-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}' hx-confirm="Delete this certificate? Listeners fall back to the config-file certificate.">
+<input type="hidden" name="name" value="{{.Name}}">
+<button type="submit" class="danger">Delete</button>
+</form></td>
+</tr>{{end}}
+</tbody>
+</table>
+{{else}}<p>No uploaded certificates — the listeners serve the config-file certificate.</p>{{end}}
+
+<h2>Upload a certificate</h2>
+<form hx-post="/admin/ui/tls/upload" hx-target="#tls-certs-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>Name (SNI host, blank = default)<br><input type="text" name="name" placeholder="default"></label>
+<label>Certificate — PEM, full chain<br><textarea name="cert" rows="8" required placeholder="-----BEGIN CERTIFICATE-----"></textarea></label>
+<label>Private key — PEM<br><textarea name="key" rows="6" required placeholder="-----BEGIN PRIVATE KEY-----"></textarea></label>
+<button type="submit">Upload certificate</button>
+</form>
+</div>{{end}}

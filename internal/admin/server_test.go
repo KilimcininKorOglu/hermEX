@@ -54,6 +54,8 @@ type fakeDir struct {
 	dkimEnabled        bool
 	dkimFound          bool
 
+	tlsCerts []directory.TLSCertInfo
+
 	userSpamThreshold      *int
 	userSpamThresholdSet   bool
 	domainSpamThreshold    *int
@@ -522,6 +524,27 @@ func (f *fakeDir) GetDKIMKeyInfo(domain string) (directory.DKIMKeyInfo, bool, er
 }
 func (f *fakeDir) DeleteDKIMKey(domain string) error {
 	f.dkimFound = false
+	return nil
+}
+func (f *fakeDir) SetTLSCert(name, certPEM, keyPEM string, notAfter int64) error {
+	for i := range f.tlsCerts {
+		if f.tlsCerts[i].Name == name {
+			f.tlsCerts[i].NotAfter = notAfter
+			return nil
+		}
+	}
+	f.tlsCerts = append(f.tlsCerts, directory.TLSCertInfo{Name: name, NotAfter: notAfter})
+	return nil
+}
+func (f *fakeDir) ListTLSCerts() ([]directory.TLSCertInfo, error) { return f.tlsCerts, nil }
+func (f *fakeDir) DeleteTLSCert(name string) error {
+	out := f.tlsCerts[:0]
+	for _, c := range f.tlsCerts {
+		if c.Name != name {
+			out = append(out, c)
+		}
+	}
+	f.tlsCerts = out
 	return nil
 }
 func (f *fakeDir) GetUserSpamThreshold(string) (*int, error)   { return f.userSpamThreshold, nil }

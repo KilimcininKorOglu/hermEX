@@ -123,6 +123,9 @@ type Directory interface {
 	SetDKIMEnabled(domain string, enabled bool) error
 	GetDKIMKeyInfo(domain string) (directory.DKIMKeyInfo, bool, error)
 	DeleteDKIMKey(domain string) error
+	SetTLSCert(name, certPEM, keyPEM string, notAfter int64) error
+	ListTLSCerts() ([]directory.TLSCertInfo, error)
+	DeleteTLSCert(name string) error
 	GetUserSpamThreshold(username string) (*int, error)
 	SetUserSpamThreshold(username string, threshold *int) error
 	GetDomainSpamThreshold(domain string) (*int, error)
@@ -352,6 +355,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/ui/limits", s.handleUILimits)
 	mux.HandleFunc("POST /admin/ui/limits", s.handleUISaveLimits)
 	mux.HandleFunc("GET /admin/ui/settings", s.handleUISettings)
+	mux.HandleFunc("GET /admin/ui/tls", s.handleUITLSCerts)
+	mux.HandleFunc("POST /admin/ui/tls/upload", s.handleUITLSCertUpload)
+	mux.HandleFunc("POST /admin/ui/tls/delete", s.handleUITLSCertDelete)
 	mux.HandleFunc("GET /admin/ui/sender-access", s.handleUISenderAccess)
 	mux.HandleFunc("POST /admin/ui/sender-access", s.handleUISaveSenderRule)
 	mux.HandleFunc("POST /admin/ui/sender-access/delete", s.handleUIDeleteSenderRule)
