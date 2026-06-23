@@ -25,10 +25,6 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	s.emptyAuthed(w, r, "sessions")
 }
 
-func (s *Server) handleScheduled(w http.ResponseWriter, r *http.Request) {
-	s.emptyAuthed(w, r, "scheduled")
-}
-
 func (s *Server) handleSearchFolders(w http.ResponseWriter, r *http.Request) {
 	s.emptyAuthed(w, r, "search_folders")
 }
