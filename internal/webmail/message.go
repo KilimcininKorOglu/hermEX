@@ -35,6 +35,7 @@ type messageDetail struct {
 	Date          string
 	IsHTML        bool
 	Body          string
+	RemoteBlocked bool // HTML message whose remote content (images/fonts) the CSP blocked; the reader offers a one-time "Show images"
 	Attachments   []attachmentView
 	Folders       []folderView   // move/copy targets (mail folders except this one)
 	FlagColor     int32          // follow-up flag color 1-6 (0 none), shown in the reader header
@@ -137,7 +138,7 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 	// shows the real content with a trust banner rather than the opaque container.
 	displayRaw, smimeStatus, smimeOK := s.openSmime(sess, raw)
 
-	detail := buildMessageDetail(displayRaw, folder, uid, cfg.IncomingRender == "plain", cfg.SafeSenders)
+	detail := buildMessageDetail(displayRaw, folder, uid, cfg.IncomingRender == "plain", cfg.SafeSenders, r.URL.Query().Get("images") == "1")
 	detail.Smime = smimeStatus
 	detail.SmimeOK = smimeOK
 	detail.Mbox = mbox
@@ -290,7 +291,7 @@ func fromAddress(raw []byte) string {
 // reader never shows raw markup. safeSenders gates remote content in the HTML
 // body: unless the sender is allow-listed, a restrictive CSP meta is injected so
 // the reader loads no remote images (tracking pixels) or other subresources.
-func buildMessageDetail(raw []byte, folder string, uid uint32, preferPlain bool, safeSenders []string) messageDetail {
+func buildMessageDetail(raw []byte, folder string, uid uint32, preferPlain bool, safeSenders []string, allowImages bool) messageDetail {
 	root := mime.ParseStructure(raw)
 	d := messageDetail{UID: uid, Folder: folder, Subject: "(no subject)"}
 	var senderAddr string
@@ -349,7 +350,13 @@ func buildMessageDetail(raw []byte, folder string, uid uint32, preferPlain bool,
 	// srcdoc the meta is foster-parented into the document head and applies to the
 	// whole body, and a body's own CSP can only intersect (most-restrictive wins).
 	if d.IsHTML {
-		d.Body = remoteContentMeta(isSafeSender(safeSenders, senderAddr)) + d.Body
+		// allowImages is the per-view override (a "Show images" click); a safe
+		// sender is allowed remote content by standing policy. RemoteBlocked drives
+		// the reader's one-time "Show images" affordance, shown only when something
+		// was actually withheld.
+		allowRemote := allowImages || isSafeSender(safeSenders, senderAddr)
+		d.Body = remoteContentMeta(allowRemote) + d.Body
+		d.RemoteBlocked = !allowRemote
 	}
 	return d
 }

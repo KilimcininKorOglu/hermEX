@@ -178,7 +178,7 @@ func (s *Server) handlePublicMessage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	detail := buildMessageDetail(raw, name, uint32(uid), false, nil)
+	detail := buildMessageDetail(raw, name, uint32(uid), false, nil, false)
 	s.render(w, "public_message", publicMessagePage{User: sess.user, FID: fid, Detail: detail})
 }
 

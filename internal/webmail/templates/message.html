@@ -79,6 +79,7 @@
   </div>
   {{end}}
   {{if .Smime}}<p class="smime-banner {{if .SmimeOK}}ok{{else}}warn{{end}}">{{.Smime}}</p>{{end}}
+  {{if .RemoteBlocked}}<p class="remote-blocked">External images in this message were blocked to protect your privacy. <a href="/message?folder={{.Folder}}&uid={{.UID}}&images=1{{if .Mbox}}&mbox={{.Mbox}}{{end}}">Show images</a></p>{{end}}
   <div class="reader-body">
     {{if .IsHTML}}
     <iframe class="htmlbody" sandbox="" srcdoc="{{.Body}}"></iframe>

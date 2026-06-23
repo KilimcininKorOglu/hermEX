@@ -108,7 +108,7 @@ func (s *Server) handlePrint(w http.ResponseWriter, r *http.Request) {
 	}
 	// Print honors the same plain-text display preference as the reader, so the
 	// printout matches what the user sees on screen.
-	detail := buildMessageDetail(raw, folder, uid, cfg.IncomingRender == "plain", cfg.SafeSenders)
+	detail := buildMessageDetail(raw, folder, uid, cfg.IncomingRender == "plain", cfg.SafeSenders, false)
 	if m, err := st.MessageByUID(folderID, uid); err == nil {
 		detail.Importance = importanceLabel(st, m.ID)
 		detail.Sensitivity = sensitivityLabel(st, m.ID)

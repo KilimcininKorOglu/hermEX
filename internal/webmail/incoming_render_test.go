@@ -70,12 +70,12 @@ func TestHTMLToText(t *testing.T) {
 // by default but down-converted to tag-free text when plain is forced (the
 // advisor's "don't dump raw <div> tags" case).
 func TestForcePlainOnHTMLOnly(t *testing.T) {
-	html := buildMessageDetail([]byte(htmlOnlyMsg), "INBOX", 1, false, nil)
+	html := buildMessageDetail([]byte(htmlOnlyMsg), "INBOX", 1, false, nil, false)
 	if !html.IsHTML {
 		t.Fatalf("default render of an HTML message should be HTML, got plain: %q", html.Body)
 	}
 
-	plain := buildMessageDetail([]byte(htmlOnlyMsg), "INBOX", 1, true, nil)
+	plain := buildMessageDetail([]byte(htmlOnlyMsg), "INBOX", 1, true, nil, false)
 	if plain.IsHTML {
 		t.Fatalf("forced-plain render should not be HTML")
 	}
@@ -96,12 +96,12 @@ func TestForcePlainOnHTMLOnly(t *testing.T) {
 // message the plain part is chosen verbatim (no down-convert needed) when plain
 // is forced, and the HTML part is chosen by default.
 func TestForcePlainPrefersPlainAlternative(t *testing.T) {
-	def := buildMessageDetail([]byte(altMsg), "INBOX", 1, false, nil)
+	def := buildMessageDetail([]byte(altMsg), "INBOX", 1, false, nil, false)
 	if !def.IsHTML || !strings.Contains(def.Body, "HTML ALTERNATIVE BODY") {
 		t.Errorf("default should pick the HTML alternative, got isHTML=%v body=%q", def.IsHTML, def.Body)
 	}
 
-	plain := buildMessageDetail([]byte(altMsg), "INBOX", 1, true, nil)
+	plain := buildMessageDetail([]byte(altMsg), "INBOX", 1, true, nil, false)
 	if plain.IsHTML {
 		t.Errorf("forced-plain should pick the text alternative, got HTML")
 	}

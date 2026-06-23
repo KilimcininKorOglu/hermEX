@@ -51,7 +51,7 @@ func TestIsSafeSender(t *testing.T) {
 // is not allow-listed gets the restrictive CSP meta, which permits only data:
 // images (no remote subresources).
 func TestRemoteContentBlockedByDefault(t *testing.T) {
-	d := buildMessageDetail([]byte(remoteImgMsg), "INBOX", 1, false, nil)
+	d := buildMessageDetail([]byte(remoteImgMsg), "INBOX", 1, false, nil, false)
 	if !d.IsHTML {
 		t.Fatalf("expected an HTML body")
 	}
@@ -71,10 +71,31 @@ func TestRemoteContentBlockedByDefault(t *testing.T) {
 // also allows remote images.
 func TestRemoteContentAllowedForSafeSender(t *testing.T) {
 	for _, list := range [][]string{{"news@example.com"}, {"example.com"}} {
-		d := buildMessageDetail([]byte(remoteImgMsg), "INBOX", 1, false, list)
+		d := buildMessageDetail([]byte(remoteImgMsg), "INBOX", 1, false, list, false)
 		if !strings.Contains(d.Body, "img-src * data:") {
 			t.Errorf("safe sender %v did not get the remote-allowing CSP:\n%s", list, d.Body)
 		}
+	}
+}
+
+// TestShowImagesOverride verifies the per-view override: a non-safe-sender HTML
+// message reports RemoteBlocked and keeps the restrictive CSP, but the allowImages
+// flag (a "Show images" click) permits remote content and clears the flag.
+func TestShowImagesOverride(t *testing.T) {
+	blocked := buildMessageDetail([]byte(remoteImgMsg), "INBOX", 1, false, nil, false)
+	if !blocked.RemoteBlocked {
+		t.Errorf("a non-safe-sender HTML message should report RemoteBlocked")
+	}
+	if strings.Contains(blocked.Body, "img-src * data:") {
+		t.Errorf("the blocked render should keep the restrictive CSP:\n%s", blocked.Body)
+	}
+
+	shown := buildMessageDetail([]byte(remoteImgMsg), "INBOX", 1, false, nil, true)
+	if shown.RemoteBlocked {
+		t.Errorf("with allowImages set the message should not report RemoteBlocked")
+	}
+	if !strings.Contains(shown.Body, "img-src * data:") {
+		t.Errorf("the override should permit remote images:\n%s", shown.Body)
 	}
 }
 
@@ -82,7 +103,7 @@ func TestRemoteContentAllowedForSafeSender(t *testing.T) {
 // HTML body — never for a plain-text message nor a forced-plain down-convert
 // (those render in a <pre>, not the iframe, so a meta would be meaningless text).
 func TestRemoteContentMetaOnlyForHTML(t *testing.T) {
-	plain := buildMessageDetail([]byte(plainTextMsg), "INBOX", 1, false, nil)
+	plain := buildMessageDetail([]byte(plainTextMsg), "INBOX", 1, false, nil, false)
 	if plain.IsHTML {
 		t.Fatalf("plain message should not be HTML")
 	}
@@ -90,7 +111,7 @@ func TestRemoteContentMetaOnlyForHTML(t *testing.T) {
 		t.Errorf("CSP meta leaked into a plain-text body:\n%s", plain.Body)
 	}
 
-	forced := buildMessageDetail([]byte(remoteImgMsg), "INBOX", 1, true, nil)
+	forced := buildMessageDetail([]byte(remoteImgMsg), "INBOX", 1, true, nil, false)
 	if forced.IsHTML {
 		t.Fatalf("forced-plain render should not be HTML")
 	}
