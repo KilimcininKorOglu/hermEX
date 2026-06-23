@@ -129,6 +129,7 @@ type Directory interface {
 	GetTLSSettings() (directory.TLSSettings, bool, error)
 	SetTLSSettings(directory.TLSSettings) error
 	GetMTASTSSettings() (directory.MTASTSSettings, bool, error)
+	SetMTASTSSettings(directory.MTASTSSettings) error
 	GetUserSpamThreshold(username string) (*int, error)
 	SetUserSpamThreshold(username string, threshold *int) error
 	GetDomainSpamThreshold(domain string) (*int, error)
@@ -362,6 +363,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/tls/upload", s.handleUITLSCertUpload)
 	mux.HandleFunc("POST /admin/ui/tls/delete", s.handleUITLSCertDelete)
 	mux.HandleFunc("POST /admin/ui/tls/mode", s.handleUITLSSettings)
+	mux.HandleFunc("POST /admin/ui/mtasts", s.handleUIMTASTSSettings)
 	mux.HandleFunc("GET /admin/ui/sender-access", s.handleUISenderAccess)
 	mux.HandleFunc("POST /admin/ui/sender-access", s.handleUISaveSenderRule)
 	mux.HandleFunc("POST /admin/ui/sender-access/delete", s.handleUIDeleteSenderRule)

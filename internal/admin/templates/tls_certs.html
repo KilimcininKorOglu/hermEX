@@ -12,7 +12,7 @@
 {{define "tls-certs-panel"}}<div id="tls-certs-panel">
 {{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
 <h2>Certificate mode</h2>
-<p class="hint">Manual serves the operator-uploaded certificates below. ACME has the gateway obtain and renew Let's Encrypt certificates automatically for every active domain — its apex and the mail/autodiscover/autoconfig hosts — over the TLS-ALPN-01 challenge, so each name must resolve to the gateway on :443. A mode change takes effect when the gateway restarts; certificate contents still hot-reload without one.</p>
+<p class="hint">Manual serves the operator-uploaded certificates below. ACME has the gateway obtain and renew Let's Encrypt certificates automatically for every active domain's mail/autodiscover/autoconfig hosts (and the mta-sts host when publishing is on) over the TLS-ALPN-01 challenge, so each name must resolve to the gateway on :443. The apex is excluded — it is the domain owner's own website. A mode change takes effect when the gateway restarts; certificate contents still hot-reload without one.</p>
 <form hx-post="/admin/ui/tls/mode" hx-target="#tls-certs-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Mode<br>
 <select name="mode">
@@ -47,5 +47,19 @@
 <label>Certificate — PEM, full chain<br><textarea name="cert" rows="8" required placeholder="-----BEGIN CERTIFICATE-----"></textarea></label>
 <label>Private key — PEM<br><textarea name="key" rows="6" required placeholder="-----BEGIN PRIVATE KEY-----"></textarea></label>
 <button type="submit">Upload certificate</button>
+</form>
+
+<h2>MTA-STS policy publishing</h2>
+<p class="hint">Publish an MTA-STS policy (RFC 8461) so sending servers require validated TLS when delivering to this server. The gateway serves the policy at <code>mta-sts.&lt;domain&gt;</code>; each domain's detail page then shows the <code>mta-sts</code>, <code>_mta-sts</code> and TLSRPT records its owner must publish. Testing mode reports TLS failures but still delivers; enforce mode makes senders refuse mail to a non-validated MX, so a certificate problem under enforce loses inbound mail. A change applies on the senders' next fetch — no restart.</p>
+<form hx-post="/admin/ui/mtasts" hx-target="#tls-certs-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label><input type="checkbox" name="mtasts_enabled" {{if .MTASTSEnabled}}checked{{end}}> Publish an MTA-STS policy for hosted domains</label>
+<label>Mode<br>
+<select name="mtasts_mode">
+<option value="testing" {{if ne .MTASTSMode "enforce"}}selected{{end}}>Testing (report failures, still deliver)</option>
+<option value="enforce" {{if eq .MTASTSMode "enforce"}}selected{{end}}>Enforce (refuse non-validated TLS)</option>
+</select></label>
+<label>Max age — seconds a sender caches the policy<br><input type="number" name="mtasts_max_age" value="{{.MTASTSMaxAge}}" min="1"></label>
+<label><input type="checkbox" name="mtasts_enforce_confirm"> I understand enforce can lose inbound mail if the MX certificate is invalid</label>
+<button type="submit">Save MTA-STS</button>
 </form>
 </div>{{end}}

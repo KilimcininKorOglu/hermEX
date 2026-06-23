@@ -173,3 +173,55 @@ func TestTLSSettingsModeSwitch(t *testing.T) {
 		t.Errorf("manual save mode = %q, want manual", d.tlsSettings.Mode)
 	}
 }
+
+// TestMTASTSSettingsForm proves the panel saves MTA-STS publishing and that switching
+// to enforce is gated: enforce mode makes senders refuse mail to a non-validated MX,
+// so it must not flip on from a stray click — only an explicit confirmation enables
+// it. Testing mode and disabling carry no such gate.
+func TestMTASTSSettingsForm(t *testing.T) {
+	d := systemAdminDir()
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	// Enable in testing mode → saved, and the panel renders the MTA-STS form back.
+	on := htmxPOST(t, ts, "/admin/ui/mtasts", session, csrf, url.Values{
+		"mtasts_enabled": {"on"}, "mtasts_mode": {"testing"}, "mtasts_max_age": {"86400"},
+	})
+	ob, _ := io.ReadAll(on.Body)
+	on.Body.Close()
+	if d.mtastsSettings == nil || !d.mtastsSettings.Enabled || d.mtastsSettings.Mode != "testing" || d.mtastsSettings.MaxAge != 86400 {
+		t.Fatalf("testing save = %+v, want enabled testing 86400", d.mtastsSettings)
+	}
+	if !strings.Contains(string(ob), "MTA-STS policy publishing") {
+		t.Error("panel did not render the MTA-STS form after saving")
+	}
+
+	// Enforce WITHOUT the confirmation is rejected and does not flip the stored mode.
+	bad := htmxPOST(t, ts, "/admin/ui/mtasts", session, csrf, url.Values{
+		"mtasts_enabled": {"on"}, "mtasts_mode": {"enforce"}, "mtasts_max_age": {"86400"},
+	})
+	bb, _ := io.ReadAll(bad.Body)
+	bad.Body.Close()
+	if !strings.Contains(string(bb), "refuse mail") {
+		t.Errorf("enforce without confirmation not rejected; got: %s", bb)
+	}
+	if d.mtastsSettings.Mode == "enforce" {
+		t.Error("enforce was saved without the confirmation")
+	}
+
+	// Enforce WITH the confirmation is saved.
+	ok := htmxPOST(t, ts, "/admin/ui/mtasts", session, csrf, url.Values{
+		"mtasts_enabled": {"on"}, "mtasts_mode": {"enforce"}, "mtasts_max_age": {"604800"}, "mtasts_enforce_confirm": {"on"},
+	})
+	ok.Body.Close()
+	if d.mtastsSettings.Mode != "enforce" || d.mtastsSettings.MaxAge != 604800 {
+		t.Errorf("confirmed enforce save = %+v, want enforce 604800", d.mtastsSettings)
+	}
+
+	// Disabling carries no gate.
+	off := htmxPOST(t, ts, "/admin/ui/mtasts", session, csrf, url.Values{"mtasts_mode": {"testing"}})
+	off.Body.Close()
+	if d.mtastsSettings.Enabled {
+		t.Errorf("after disable = %+v, want disabled", d.mtastsSettings)
+	}
+}

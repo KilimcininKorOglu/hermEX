@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -46,10 +47,12 @@ func (s *Server) tlsCertsPageData(r *http.Request, notice string) map[string]any
 		views[i] = tlsCertView{Name: info.Name, Expires: time.UnixMilli(info.NotAfter).UTC().Format("2006-01-02")}
 	}
 	settings, _, _ := s.dir.GetTLSSettings()
+	sts, _, _ := s.dir.GetMTASTSSettings()
 	return map[string]any{
 		"Nav": "tls", "CSRF": csrfCookieValue(r), "Certs": views, "Notice": notice,
 		"Mode": settings.Mode, "ACMEEmail": settings.ACMEEmail,
 		"ACMECAURL": settings.ACMECAURL, "ACMEAgreed": settings.ACMEAgreed,
+		"MTASTSEnabled": sts.Enabled, "MTASTSMode": sts.Mode, "MTASTSMaxAge": sts.MaxAge,
 	}
 }
 
@@ -95,6 +98,36 @@ func (s *Server) handleUITLSSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "Saved. Restart the gateway for a mode change to take effect."))
+}
+
+// handleUIMTASTSSettings saves the MTA-STS publishing settings. When enabled, the
+// gateway serves this server's policy at mta-sts.<domain> and the domain-detail page
+// prescribes the records a domain owner publishes. Enforce mode is gated behind an
+// explicit confirmation: a sender refuses delivery to a non-validated MX, so a
+// certificate problem under enforce loses inbound mail — testing mode reports failures
+// but still delivers, the safe default.
+func (s *Server) handleUIMTASTSSettings(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	enabled := r.FormValue("mtasts_enabled") == "on"
+	mode := strings.ToLower(strings.TrimSpace(r.FormValue("mtasts_mode")))
+	if mode != "enforce" && mode != "none" {
+		mode = "testing"
+	}
+	maxAge, _ := strconv.Atoi(strings.TrimSpace(r.FormValue("mtasts_max_age")))
+	if maxAge <= 0 {
+		maxAge = directory.MTASTSDefaultMaxAge
+	}
+	if enabled && mode == "enforce" && r.FormValue("mtasts_enforce_confirm") != "on" {
+		s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "Enforce mode makes senders refuse mail when the MX certificate does not validate. Tick the confirmation box to enable it, or use testing mode first."))
+		return
+	}
+	if err := s.dir.SetMTASTSSettings(directory.MTASTSSettings{Enabled: enabled, Mode: mode, MaxAge: maxAge}); err != nil {
+		s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "Could not save the MTA-STS settings: "+err.Error()))
+		return
+	}
+	s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "Saved MTA-STS publishing. Publish each domain's prescribed mta-sts and _mta-sts records (see the domain page); senders adopt a change on their next fetch."))
 }
 
 // handleUITLSCerts renders the TLS-certificates page (system administrators only).

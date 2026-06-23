@@ -565,6 +565,10 @@ func (f *fakeDir) GetMTASTSSettings() (directory.MTASTSSettings, bool, error) {
 	}
 	return *f.mtastsSettings, true, nil
 }
+func (f *fakeDir) SetMTASTSSettings(s directory.MTASTSSettings) error {
+	f.mtastsSettings = &s
+	return nil
+}
 func (f *fakeDir) GetUserSpamThreshold(string) (*int, error)   { return f.userSpamThreshold, nil }
 func (f *fakeDir) GetDomainSpamThreshold(string) (*int, error) { return f.domainSpamThreshold, nil }
 func (f *fakeDir) SetUserSpamThreshold(_ string, th *int) error {
