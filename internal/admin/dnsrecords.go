@@ -61,6 +61,26 @@ func prescribeDomainDNS(domain, hostname, dkimName, dkimValue string, sts direct
 			Value: "0 0 443 " + hostname,
 			Note:  "SRV fallback for clients that look up autodiscovery by service record."},
 	)
+	// Client-autoconfiguration service records let IMAP/POP3/SMTP (RFC 6186) and
+	// CalDAV/CardDAV (RFC 6764) clients find the server by SRV lookup without manual
+	// host entry; the DAV TXT advertises the well-known path. These are optional
+	// conveniences (mail still flows without them), and the health check verifies the
+	// same records. Only the TLS variants are prescribed — clients should not connect
+	// in the clear — so the secure SRV names carry the standard implicit-TLS ports.
+	recs = append(recs,
+		prescribedRecord{Label: "IMAP SRV", Name: "_imaps._tcp." + domain, Type: "SRV", Value: "0 0 993 " + hostname,
+			Note: "Lets mail clients discover the IMAP server for this domain."},
+		prescribedRecord{Label: "POP3 SRV", Name: "_pop3s._tcp." + domain, Type: "SRV", Value: "0 0 995 " + hostname,
+			Note: "Lets mail clients discover the POP3 server for this domain."},
+		prescribedRecord{Label: "Submission SRV", Name: "_submission._tcp." + domain, Type: "SRV", Value: "0 0 587 " + hostname,
+			Note: "Lets mail clients discover the SMTP submission server for this domain."},
+		prescribedRecord{Label: "CalDAV SRV", Name: "_caldavs._tcp." + domain, Type: "SRV", Value: "0 0 443 " + hostname,
+			Note: "Lets CalDAV clients discover the calendar server for this domain."},
+		prescribedRecord{Label: "CardDAV SRV", Name: "_carddavs._tcp." + domain, Type: "SRV", Value: "0 0 443 " + hostname,
+			Note: "Lets CardDAV clients discover the contacts server for this domain."},
+		prescribedRecord{Label: "DAV TXT", Name: "_caldavs._tcp." + domain, Type: "TXT", Value: "path=/dav",
+			Note: "Advertises the DAV well-known path for autodiscovery; publish the same TXT at _carddavs._tcp." + domain + "."},
+	)
 	if sts.Enabled {
 		// The policy id is derived from the served policy bytes (mode + max_age + this
 		// MX), so the published _mta-sts id matches exactly what the gateway serves and

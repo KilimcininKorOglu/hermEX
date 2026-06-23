@@ -96,6 +96,51 @@ func checkDomainDNS(ctx context.Context, r dnsResolver, domain string) dnsReport
 		add("Autoconfig", false, "autoconfig."+domain+" does not resolve")
 	}
 
+	// Client-autoconfiguration service records: RFC 6186 (IMAP/POP3/submission) and
+	// RFC 6764 (CalDAV/CardDAV) let clients discover the server by SRV lookup, and
+	// the DAV TXT advertises its well-known path. prescribeDomainDNS publishes these,
+	// so the check verifies the same records it prescribes; they are optional
+	// conveniences, so a missing one is reported, not treated as a failure.
+	srvTarget := func(s *net.SRV) string {
+		return strings.TrimSuffix(s.Target, ".") + ":" + strconv.Itoa(int(s.Port))
+	}
+	srvPair := func(label, secure, plain string) {
+		var found []string
+		if _, srv, err := r.LookupSRV(ctx, secure, "tcp", domain); err == nil && len(srv) > 0 {
+			found = append(found, "_"+secure+"._tcp → "+srvTarget(srv[0]))
+		}
+		if _, srv, err := r.LookupSRV(ctx, plain, "tcp", domain); err == nil && len(srv) > 0 {
+			found = append(found, "_"+plain+"._tcp → "+srvTarget(srv[0]))
+		}
+		if len(found) > 0 {
+			add(label, true, strings.Join(found, ", "))
+		} else {
+			add(label, false, "no _"+secure+"/_"+plain+"._tcp SRV record")
+		}
+	}
+	srvPair("CalDAV SRV", "caldavs", "caldav")
+	srvPair("CardDAV SRV", "carddavs", "carddav")
+	srvPair("IMAP SRV", "imaps", "imap")
+	srvPair("POP3 SRV", "pop3s", "pop3")
+
+	if _, srv, err := r.LookupSRV(ctx, "submission", "tcp", domain); err == nil && len(srv) > 0 {
+		add("Submission SRV", true, "_submission._tcp → "+srvTarget(srv[0]))
+	} else {
+		add("Submission SRV", false, "no _submission._tcp SRV record")
+	}
+
+	var davTXT []string
+	for _, host := range []string{"_caldavs._tcp." + domain, "_carddavs._tcp." + domain} {
+		if recs, _ := r.LookupTXT(ctx, host); findTXT(recs, "path=") != "" {
+			davTXT = append(davTXT, host+" → "+findTXT(recs, "path="))
+		}
+	}
+	if len(davTXT) > 0 {
+		add("DAV TXT", true, strings.Join(davTXT, ", "))
+	} else {
+		add("DAV TXT", false, `no _caldavs/_carddavs._tcp TXT "path=/dav" record`)
+	}
+
 	return rep
 }
 

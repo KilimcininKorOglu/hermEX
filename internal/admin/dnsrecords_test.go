@@ -70,6 +70,23 @@ func TestPrescribeDomainDNS(t *testing.T) {
 	if r := by["Autodiscover SRV"]; r.Type != "SRV" || !strings.HasSuffix(r.Value, "443 "+host) {
 		t.Errorf("Autodiscover SRV = %+v, want '... 443 %s'", r, host)
 	}
+	// The client-autoconfiguration SRV records must advertise the secure ports at the
+	// server host so clients connect over TLS, not in the clear.
+	for _, c := range []struct{ label, suffix string }{
+		{"IMAP SRV", "993 " + host},
+		{"POP3 SRV", "995 " + host},
+		{"Submission SRV", "587 " + host},
+		{"CalDAV SRV", "443 " + host},
+		{"CardDAV SRV", "443 " + host},
+	} {
+		if r := by[c.label]; r.Type != "SRV" || !strings.HasSuffix(r.Value, c.suffix) {
+			t.Errorf("%s = %+v, want an SRV ending '%s'", c.label, r, c.suffix)
+		}
+	}
+	// The DAV TXT advertises the well-known DAV path.
+	if r := by["DAV TXT"]; r.Type != "TXT" || r.Value != "path=/dav" {
+		t.Errorf("DAV TXT = %+v, want a TXT valued path=/dav", r)
+	}
 }
 
 // TestPrescribeDomainDNSWithoutDKIMKey proves the prescription stays complete

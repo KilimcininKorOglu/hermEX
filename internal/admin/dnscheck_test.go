@@ -56,9 +56,15 @@ func acmeResolver() fakeResolver {
 			"acme.test":                   {"v=spf1 mx -all"},
 			"hermex._domainkey.acme.test": {"v=DKIM1; k=rsa; p=MIGfMA0test"},
 			"_dmarc.acme.test":            {"v=DMARC1; p=reject"},
+			"_caldavs._tcp.acme.test":     {"path=/dav"},
 		},
 		host: map[string][]string{"autodiscover.acme.test": {"1.2.3.4"}},
-		srv:  map[string][]*net.SRV{"_autodiscover._tcp.acme.test": {{Target: "mail.acme.test.", Port: 443}}},
+		srv: map[string][]*net.SRV{
+			"_autodiscover._tcp.acme.test": {{Target: "mail.acme.test.", Port: 443}},
+			"_imaps._tcp.acme.test":        {{Target: "mail.acme.test.", Port: 993}},
+			"_submission._tcp.acme.test":   {{Target: "mail.acme.test.", Port: 587}},
+			"_caldavs._tcp.acme.test":      {{Target: "mail.acme.test.", Port: 443}},
+		},
 	}
 }
 
@@ -88,6 +94,12 @@ func TestCheckDomainDNS(t *testing.T) {
 		"Autodiscover":     {true, "1.2.3.4"},
 		"Autodiscover SRV": {true, "mail.acme.test:443"},
 		"Autoconfig":       {false, "does not resolve"},
+		"IMAP SRV":         {true, "mail.acme.test:993"},
+		"Submission SRV":   {true, "mail.acme.test:587"},
+		"CalDAV SRV":       {true, "mail.acme.test:443"},
+		"DAV TXT":          {true, "path=/dav"},
+		"CardDAV SRV":      {false, "no _carddavs"},
+		"POP3 SRV":         {false, "no _pop3s"},
 	}
 	for label, w := range want {
 		it, ok := reportItem(rep, label)
