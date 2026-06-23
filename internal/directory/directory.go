@@ -264,12 +264,12 @@ func (a StaticAccounts) SearchGAL(query string, limit int) ([]GALEntry, error) {
 	seen := make(map[string]bool, len(addrs))
 	out := make([]GALEntry, 0, len(addrs))
 	for _, addr := range addrs {
-		if mbox := a[addr].MailboxPath; mbox == "" || seen[mbox] {
+		mbox := a[addr].MailboxPath
+		if mbox == "" || seen[mbox] {
 			continue
-		} else {
-			seen[mbox] = true
 		}
-		out = append(out, GALEntry{DisplayName: addr, Address: addr})
+		seen[mbox] = true
+		out = append(out, GALEntry{DisplayName: addr, Address: addr, StorePath: mbox})
 		if limit > 0 && len(out) >= limit {
 			break
 		}

@@ -184,8 +184,13 @@ const (
 	RRRecipient         Tag = 0x0A09
 	RRDisplayName       Tag = 0x0A0A
 	RREmailAddress      Tag = 0x0A0B
+	RROptions           Tag = 0x0A0F
 	RRTo                Tag = 0x0A10
 	RRRecipientCount    Tag = 0x0A12
+	RRPicture           Tag = 0x0A18 // since 14.1: a recipient's portrait
+	RRMaxSize           Tag = 0x0A19 // request: cap on portrait byte size
+	RRData              Tag = 0x0A1A // response: base64 portrait bytes
+	RRMaxPictures       Tag = 0x0A1B // request: cap on portraits returned
 )
 
 // ValidateCert (code page 0x0B) — S/MIME certificate validation.
