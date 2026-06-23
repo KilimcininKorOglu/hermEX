@@ -683,6 +683,17 @@ func (d *SQLDirectory) GetUser(username string) (UserDetail, bool, error) {
 	return u, true, nil
 }
 
+// IsLDAPUser implements LDAPIdentitySource: a user is LDAP/AD-backed when their
+// record carries an external id. Such an account authenticates against the external
+// directory, so its password must not be changed in the local store.
+func (d *SQLDirectory) IsLDAPUser(user string) (bool, error) {
+	u, ok, err := d.GetUser(user)
+	if err != nil || !ok {
+		return false, err
+	}
+	return u.LDAP, nil
+}
+
 // CanonicalLogin implements CanonicalResolver: it resolves an address to the
 // primary username a session authenticates as, case-folding the input via GetUser.
 // ok is false for an unknown user or an address that is only an alias/altname

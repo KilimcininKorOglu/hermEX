@@ -12,6 +12,24 @@ type passwordPage struct {
 	Error string
 }
 
+// passwordChangeAllowed reports whether the session user may change their password
+// here: the directory must permit it (the change-password privilege) AND the account
+// must be local, not LDAP/Active-Directory-backed. An external-directory account's
+// password lives there, so a local change would not take effect; such accounts are
+// refused (and an unreadable LDAP status fails closed). A directory that cannot
+// report LDAP status (no LDAPIdentitySource) is treated as all-local.
+func (s *Server) passwordChangeAllowed(user string) bool {
+	if privs, _ := s.auth.Privileges(user); !privs.ChgPasswd {
+		return false
+	}
+	if src, ok := s.auth.(directory.LDAPIdentitySource); ok {
+		if ldap, err := src.IsLDAPUser(user); err != nil || ldap {
+			return false
+		}
+	}
+	return true
+}
+
 // handlePasswordForm redirects the former standalone change-password page to its
 // tab on the unified settings page (the tab is shown only when the account may
 // change its password); the POST endpoint below still serves the form and keeps
@@ -30,7 +48,7 @@ func (s *Server) handlePasswordSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	if privs, _ := s.auth.Privileges(sess.user); !privs.ChgPasswd {
+	if !s.passwordChangeAllowed(sess.user) {
 		http.Error(w, "Changing your password is disabled for this account.", http.StatusForbidden)
 		return
 	}

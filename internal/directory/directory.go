@@ -67,6 +67,14 @@ type Identifier interface {
 	Identities(user string) ([]string, error)
 }
 
+// LDAPIdentitySource reports whether a user is backed by an external directory
+// (LDAP/Active Directory), whose password is managed there and must not be changed
+// locally. Optional: a directory that cannot tell may omit it, and a caller then
+// treats every account as local (offers the local password change).
+type LDAPIdentitySource interface {
+	IsLDAPUser(user string) (ldap bool, err error)
+}
+
 // CanonicalResolver maps an address to the canonical login a session authenticates
 // as — the exact name a folder permission must be stored under to match a grantee's
 // session (ResolvePermission compares the stored member name verbatim). Only the

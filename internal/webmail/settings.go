@@ -133,10 +133,10 @@ func (s *Server) buildSettingsPage(sess *session, st *objectstore.Store, active 
 	page.OOF = buildOOFPage(st)
 	page.Smime = s.buildSmimePage(st, sess)
 
-	// The Password tab is offered only when the account may change its password,
-	// matching the standalone handler's own gate.
-	privs, _ := s.auth.Privileges(sess.user)
-	page.ChgPasswd = privs.ChgPasswd
+	// The Password tab is offered only when the account may change its password
+	// here — has the privilege and is local, not LDAP/AD-backed — matching the
+	// submit handler's own gate.
+	page.ChgPasswd = s.passwordChangeAllowed(sess.user)
 	return page
 }
 

@@ -1,6 +1,7 @@
 package webmail
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -18,6 +19,7 @@ type pwDir struct {
 	privDir
 	setUser, setPass string
 	calls            int
+	ldap             bool // when true, accounts are LDAP/AD-backed
 }
 
 func (d *pwDir) SetPassword(user, newPassword string) (bool, error) {
@@ -25,6 +27,9 @@ func (d *pwDir) SetPassword(user, newPassword string) (bool, error) {
 	d.calls++
 	return true, nil
 }
+
+// IsLDAPUser implements directory.LDAPIdentitySource for the test.
+func (d *pwDir) IsLDAPUser(string) (bool, error) { return d.ldap, nil }
 
 func newPwServer(t *testing.T, privs directory.ServicePrivileges) (*httptest.Server, *pwDir, string) {
 	t.Helper()
@@ -96,6 +101,38 @@ func TestWebmailChangePasswordWrongCurrent(t *testing.T) {
 	}
 	if auth.calls != 0 {
 		t.Errorf("SetPassword called %d times despite a wrong current password, want 0", auth.calls)
+	}
+}
+
+// TestWebmailChangePasswordLDAPDenied proves an LDAP/AD-backed account cannot
+// change its password locally even with the privilege: the submit is refused (the
+// password lives in the external directory) and the directory is never written.
+func TestWebmailChangePasswordLDAPDenied(t *testing.T) {
+	ts, auth, token := newPwServer(t, directory.ServicePrivileges{ChgPasswd: true, Web: true})
+	auth.ldap = true
+
+	resp := postPassword(t, ts, token, url.Values{
+		"current": {"secret"}, "new": {"newpassword1"}, "confirm": {"newpassword1"},
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("LDAP-account password change got %d, want 403", resp.StatusCode)
+	}
+	if auth.calls != 0 {
+		t.Errorf("SetPassword called %d times for an LDAP account, want 0", auth.calls)
+	}
+
+	// The settings page must not offer the Password tab for an LDAP account.
+	req, _ := http.NewRequest("GET", ts.URL+"/settings", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+	r, err := (&http.Client{}).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(r.Body)
+	r.Body.Close()
+	if strings.Contains(string(body), `data-tab="password"`) {
+		t.Errorf("settings page offers the Password tab for an LDAP account")
 	}
 }
 
