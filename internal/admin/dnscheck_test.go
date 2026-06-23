@@ -58,7 +58,7 @@ func acmeResolver() fakeResolver {
 			"_dmarc.acme.test":            {"v=DMARC1; p=reject"},
 			"_caldavs._tcp.acme.test":     {"path=/dav"},
 		},
-		host: map[string][]string{"autodiscover.acme.test": {"1.2.3.4"}},
+		host: map[string][]string{"autodiscover.acme.test": {"1.2.3.4"}, "mail.acme.test": {"1.2.3.4"}},
 		srv: map[string][]*net.SRV{
 			"_autodiscover._tcp.acme.test": {{Target: "mail.acme.test.", Port: 443}},
 			"_imaps._tcp.acme.test":        {{Target: "mail.acme.test.", Port: 993}},
@@ -81,12 +81,13 @@ func reportItem(rep dnsReport, label string) (dnsCheckItem, bool) {
 // TestCheckDomainDNS proves the check reports each resolved record (with the
 // trailing dot stripped) and flags a missing one rather than erroring.
 func TestCheckDomainDNS(t *testing.T) {
-	rep := checkDomainDNS(context.Background(), acmeResolver(), "acme.test")
+	rep := checkDomainDNS(context.Background(), acmeResolver(), "acme.test", "mail.acme.test")
 
 	want := map[string]struct {
 		ok     bool
 		detail string
 	}{
+		"Reachability":     {true, "mail.acme.test"},
 		"MX":               {true, "mail.acme.test"},
 		"SPF":              {true, "v=spf1"},
 		"DKIM":             {true, "v=DKIM1"},
@@ -119,7 +120,7 @@ func TestCheckDomainDNS(t *testing.T) {
 // TestCheckDomainDNSAllMissing proves a domain with no records reports every item
 // as missing rather than failing.
 func TestCheckDomainDNSAllMissing(t *testing.T) {
-	rep := checkDomainDNS(context.Background(), fakeResolver{}, "ghost.test")
+	rep := checkDomainDNS(context.Background(), fakeResolver{}, "ghost.test", "mail.ghost.test")
 	if len(rep.Items) == 0 {
 		t.Fatal("empty report")
 	}

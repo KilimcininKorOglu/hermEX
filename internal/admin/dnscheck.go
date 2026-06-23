@@ -37,10 +37,21 @@ type dnsReport struct {
 // what was found. It is a read-only diagnostic over the supplied resolver — it
 // reports the live records rather than comparing against an expected target, so
 // every result reflects real DNS state.
-func checkDomainDNS(ctx context.Context, r dnsResolver, domain string) dnsReport {
+func checkDomainDNS(ctx context.Context, r dnsResolver, domain, hostname string) dnsReport {
 	rep := dnsReport{Domain: domain}
 	add := func(label string, ok bool, detail string) {
 		rep.Items = append(rep.Items, dnsCheckItem{Label: label, OK: ok, Detail: detail})
+	}
+
+	// Reachability: the server's mail host must resolve publicly, or none of the
+	// per-domain records below lead anywhere — every prescribed MX/CNAME/SRV target
+	// points at this host. hostname is the server's mail FQDN.
+	if hostname != "" {
+		if hosts, err := r.LookupHost(ctx, hostname); err == nil && len(hosts) > 0 {
+			add("Reachability", true, hostname+" → "+strings.Join(hosts, ", "))
+		} else {
+			add("Reachability", false, hostname+" does not resolve")
+		}
 	}
 
 	if mx, err := r.LookupMX(ctx, domain); err == nil && len(mx) > 0 {
@@ -184,7 +195,7 @@ func (s *Server) handleGetDomainDNS(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	writeJSON(w, checkDomainDNS(ctx, s.resolver, name))
+	writeJSON(w, checkDomainDNS(ctx, s.resolver, name, s.paths.ServerHostname()))
 }
 
 // handleUIDomainDNS runs the DNS health check and returns the report partial for
@@ -199,5 +210,5 @@ func (s *Server) handleUIDomainDNS(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	s.render(w, "dns-report", checkDomainDNS(ctx, s.resolver, name))
+	s.render(w, "dns-report", checkDomainDNS(ctx, s.resolver, name, s.paths.ServerHostname()))
 }
