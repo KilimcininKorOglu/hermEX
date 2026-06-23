@@ -135,7 +135,10 @@ export function MailboxProvider({ children, personalEmail }: { children: React.R
   }, [])
 
   const switchMailbox = useCallback((email: string, owner?: string) => {
-    if (owner && owner !== email) {
+    // A mailbox is shared when its owner is not the signed-in user. A pure shared
+    // mailbox has owner === email (both the shared address), so comparing the
+    // owner to the personal email — not to email — is what distinguishes it.
+    if (owner && owner !== personalEmail) {
       // This is a shared mailbox: route every subsequent mail call to the owner.
       api.setMailboxOwner(owner)
       setCurrentMailbox({
@@ -151,7 +154,7 @@ export function MailboxProvider({ children, personalEmail }: { children: React.R
         email
       })
     }
-  }, [])
+  }, [personalEmail])
 
   const switchToPersonal = useCallback(() => {
     api.setMailboxOwner(undefined)
