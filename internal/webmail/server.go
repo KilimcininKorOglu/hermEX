@@ -87,6 +87,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /quarantine/release", s.handleQuarantineReleaseForm)
 	mux.HandleFunc("POST /quarantine/release", s.handleQuarantineRelease)
 	mux.HandleFunc("GET /attachpick", s.handleAttachPick)
+	mux.HandleFunc("GET /sharing", s.handleFolderSharing)
 	mux.HandleFunc("GET /import", s.handleImportForm)
 	mux.HandleFunc("POST /import", s.handleImportSubmit)
 	mux.HandleFunc("GET /settings", s.handleSettingsForm)
