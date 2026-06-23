@@ -474,6 +474,12 @@ func RuleAny(conds ...mapi.Restriction) mapi.Restriction {
 	return mapi.Restriction{Type: mapi.ResOr, Value: append([]mapi.Restriction(nil), conds...)}
 }
 
+// RuleNot negates a condition (a ResNot node): the rule matches when the inner
+// condition does NOT match. Used to express a rule exception ("except when ...").
+func RuleNot(cond mapi.Restriction) mapi.Restriction {
+	return mapi.Restriction{Type: mapi.ResNot, Value: cond}
+}
+
 // contentContains builds a case-insensitive substring ResContent on tag.
 func contentContains(tag mapi.PropTag, text string) mapi.Restriction {
 	return mapi.Restriction{Type: mapi.ResContent, Value: mapi.ContentRestriction{

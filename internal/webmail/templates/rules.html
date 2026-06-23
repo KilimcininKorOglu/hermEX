@@ -128,6 +128,39 @@ rulesPage sub-data; forms post to /rules and return to /settings?tab=rules. */}}
         </span>
       </div>
       <div class="field">
+        <label>Except when</label>
+        <select name="condfieldx" id="condfieldx">
+          <option value="">(no exception)</option>
+          <option value="subject">Subject contains</option>
+          <option value="from">Sender contains</option>
+          <option value="body">Body contains</option>
+          <option value="importance">Importance is</option>
+          <option value="sensitivity">Sensitivity is</option>
+          <option value="size">Size at least (KB)</option>
+        </select>
+        <span class="cond-inputx" data-cond="subject from body">
+          <input name="condvaluex" placeholder="text to match">
+        </span>
+        <span class="cond-inputx" data-cond="importance">
+          <select name="condimportancex">
+            <option value="high">High</option>
+            <option value="normal">Normal</option>
+            <option value="low">Low</option>
+          </select>
+        </span>
+        <span class="cond-inputx" data-cond="sensitivity">
+          <select name="condsensitivityx">
+            <option value="normal">Normal</option>
+            <option value="personal">Personal</option>
+            <option value="private">Private</option>
+            <option value="confidential">Confidential</option>
+          </select>
+        </span>
+        <span class="cond-inputx" data-cond="size">
+          <input type="number" name="condsizex" min="0" placeholder="KB">
+        </span>
+      </div>
+      <div class="field">
         <label>Then</label>
         <select name="actiontype" id="actiontype">
           <option value="move">Move it to folder</option>
@@ -166,6 +199,7 @@ rulesPage sub-data; forms post to /rules and return to /settings?tab=rules. */}}
     }
     sync("condfield", "cond-input", "data-cond");
     sync("condfield2", "cond-input2", "data-cond");
+    sync("condfieldx", "cond-inputx", "data-cond");
     sync("actiontype", "action-input", "data-action");
   })();
   </script>

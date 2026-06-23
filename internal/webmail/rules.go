@@ -167,14 +167,20 @@ func buildCondition(r *http.Request) (mapi.Restriction, bool) {
 	if !ok {
 		return mapi.Restriction{}, false
 	}
-	second, ok2 := buildConditionN(r, "2")
-	if !ok2 {
-		return first, true
+	cond := first
+	if second, ok2 := buildConditionN(r, "2"); ok2 {
+		if r.FormValue("match") == "any" {
+			cond = objectstore.RuleAny(first, second)
+		} else {
+			cond = objectstore.RuleAll(first, second)
+		}
 	}
-	if r.FormValue("match") == "any" {
-		return objectstore.RuleAny(first, second), true
+	// An optional exception negates: the rule matches only when the exception does
+	// NOT, so the message must satisfy the condition AND not the exception.
+	if exc, okx := buildConditionN(r, "x"); okx {
+		cond = objectstore.RuleAll(cond, objectstore.RuleNot(exc))
 	}
-	return objectstore.RuleAll(first, second), true
+	return cond, true
 }
 
 // buildConditionN assembles one RESTRICTION from the add-rule form's condition
@@ -320,6 +326,12 @@ func describeCondition(r mapi.Restriction) string {
 			parts = append(parts, describeCondition(k))
 		}
 		return strings.Join(parts, " or ")
+	case mapi.ResNot:
+		inner, ok := r.Value.(mapi.Restriction)
+		if !ok {
+			return "(custom condition)"
+		}
+		return describeNegated(inner)
 	case mapi.ResContent:
 		c, ok := r.Value.(mapi.ContentRestriction)
 		if !ok {
@@ -352,6 +364,40 @@ func describeCondition(r mapi.Restriction) string {
 		}
 	}
 	return "(custom condition)"
+}
+
+// describeNegated renders the negation of a curated condition cleanly ("does not
+// contain" / "is not"), falling back to a wrapped form for anything else.
+func describeNegated(r mapi.Restriction) string {
+	switch r.Type {
+	case mapi.ResContent:
+		if c, ok := r.Value.(mapi.ContentRestriction); ok {
+			val, _ := c.PropVal.Value.(string)
+			switch c.PropTag {
+			case mapi.PrSubject:
+				return fmt.Sprintf("the subject does not contain %q", val)
+			case mapi.PrSenderSmtpAddress:
+				return fmt.Sprintf("the sender does not contain %q", val)
+			case mapi.PrBody:
+				return fmt.Sprintf("the body does not contain %q", val)
+			}
+		}
+	case mapi.ResProperty:
+		if pr, ok := r.Value.(mapi.PropertyRestriction); ok {
+			switch pr.PropTag {
+			case mapi.PrImportance:
+				n, _ := pr.PropVal.Value.(int32)
+				return "the importance is not " + importanceName(int(n))
+			case mapi.PrSensitivity:
+				n, _ := pr.PropVal.Value.(int32)
+				return "the sensitivity is not " + sensitivityName(int(n))
+			case mapi.PrMessageSize:
+				n, _ := pr.PropVal.Value.(int32)
+				return fmt.Sprintf("the size is below %d KB", n/1024)
+			}
+		}
+	}
+	return "not (" + describeCondition(r) + ")"
 }
 
 func describeActions(a mapi.RuleActions, folderNames map[int64]string) string {

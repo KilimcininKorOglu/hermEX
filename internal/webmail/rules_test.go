@@ -204,6 +204,26 @@ func TestRulesAddCompoundCondition(t *testing.T) {
 	}
 }
 
+// TestRulesAddException adds a rule with an exception and checks the summary
+// renders the negated condition ("does not contain").
+func TestRulesAddException(t *testing.T) {
+	path := emptyMailbox(t)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+	junk := strconv.FormatInt(int64(mapi.PrivateFIDJunk), 10)
+	postForm(t, c, ts.URL+"/rules", url.Values{
+		"action": {"add"}, "name": {"ExceptRule"},
+		"condfield": {"subject"}, "condvalue": {"invoice"},
+		"condfieldx": {"from"}, "condvaluex": {"acme"},
+		"actiontype": {"move"}, "actiontarget": {junk},
+	})
+	_, body := get(t, c, ts.URL+"/rules")
+	// "the sender does not contain" is produced only by a negated (exception) condition.
+	if !strings.Contains(body, "the sender does not contain") {
+		t.Errorf("rules page missing the exception summary:\n%s", body)
+	}
+}
+
 // TestRulesAddStopProcessing adds a rule with the stop-processing option and
 // checks the listing notes it, so the exit-level bit round-trips through the form.
 func TestRulesAddStopProcessing(t *testing.T) {

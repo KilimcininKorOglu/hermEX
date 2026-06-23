@@ -479,3 +479,41 @@ func TestCompoundRuleRoundTrips(t *testing.T) {
 	}
 	_ = both
 }
+
+// TestRuleExceptionRoundTrips de-risks the rule-exception form: a
+// RuleAll(subject, RuleNot(from)) condition must survive serialization (ext must
+// encode/decode the ResNot node) and match only a message whose subject matches
+// AND whose sender does NOT match the exception.
+func TestRuleExceptionRoundTrips(t *testing.T) {
+	s := openSeededStore(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	filed, err := s.CreateFolder(nil, "Filed")
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+
+	// Both have "invoice"; only the second is from the excepted sender.
+	deliverTo(t, s, inbox, ruleMsg("Invoice 1", "vendor@example.com", ""))
+	deliverTo(t, s, inbox, ruleMsg("Invoice 2", "billing@acme.com", ""))
+
+	if _, err := s.AddRule(Rule{
+		FolderID: inbox, Name: "file invoices except acme", State: mapi.RuleStateEnabled,
+		Condition: RuleAll(RuleSubjectContains("invoice"), RuleNot(RuleFromContains("acme.com"))),
+		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{RuleMoveAction(filed)}},
+	}); err != nil {
+		t.Fatalf("AddRule: %v", err)
+	}
+	if rules, _ := s.ListRules(inbox); len(rules) != 1 || rules[0].Condition.Type != mapi.ResAnd {
+		t.Fatalf("exception rule did not round-trip as a ResAnd condition")
+	}
+	if _, err := s.RunRules(inbox); err != nil {
+		t.Fatalf("RunRules: %v", err)
+	}
+	// Only the non-excepted invoice moved.
+	if msgs, _ := s.ListMessages(filed); len(msgs) != 1 {
+		t.Errorf("Filed has %d, want 1 (the acme invoice is excepted)", len(msgs))
+	}
+	if msgs, _ := s.ListMessages(inbox); len(msgs) != 1 {
+		t.Errorf("inbox has %d, want 1 (the excepted invoice stays)", len(msgs))
+	}
+}
