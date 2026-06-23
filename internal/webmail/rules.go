@@ -34,53 +34,38 @@ type ruleView struct {
 	Summary string
 }
 
-// handleRulesForm renders the inbox rules editor: the existing rules with their
-// summaries and enable/delete controls, an add-rule form, and a run-now button.
+// handleRulesForm redirects the former standalone rules page to its tab on the
+// unified settings page (the inbox-rules editor now lives there); the POST
+// endpoint below still serves the forms.
 func (s *Server) handleRulesForm(w http.ResponseWriter, r *http.Request) {
-	sess, ok := s.sessionFrom(r)
-	if !ok {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-	st, err := objectstore.Open(sess.mailboxPath)
-	if err != nil {
-		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
-		return
-	}
-	defer st.Close()
+	http.Redirect(w, r, "/settings?tab=rules", http.StatusSeeOther)
+}
 
+// buildRulesPage loads the inbox-rules section: the stored rules with summaries
+// and the folder list for a move action's target. Best-effort — a read failure
+// yields an empty section rather than failing the whole settings page.
+func (s *Server) buildRulesPage(st *objectstore.Store, sess *session) rulesPage {
+	page := rulesPage{User: sess.user}
 	folders, err := st.ListFolders()
 	if err != nil {
-		http.Error(w, "cannot read folders", http.StatusInternalServerError)
-		return
+		return page
 	}
-	fv := buildFolderViews(folders)
-	names := folderNamesByID(fv)
+	page.Folders = buildFolderViews(folders)
+	names := folderNamesByID(page.Folders)
 
 	rules, err := st.ListRules(rulesFolder)
 	if err != nil {
-		http.Error(w, "cannot read rules", http.StatusInternalServerError)
-		return
+		return page
 	}
-	rvs := make([]ruleView, 0, len(rules))
 	for _, ru := range rules {
-		rvs = append(rvs, ruleView{
+		page.Rules = append(page.Rules, ruleView{
 			ID:      ru.ID,
 			Name:    ru.Name,
 			Enabled: ru.Enabled(),
 			Summary: describeRule(ru, names),
 		})
 	}
-
-	page := rulesPage{User: sess.user, Rules: rvs, Folders: fv}
-	q := r.URL.Query()
-	page.Err = errNotice(q.Get("err"))
-	if q.Get("ran") == "1" {
-		page.Ran = true
-		page.Affected, _ = strconv.Atoi(q.Get("affected"))
-		page.Evaluated, _ = strconv.Atoi(q.Get("evaluated"))
-	}
-	s.render(w, "rules", page)
+	return page
 }
 
 // handleRulesSubmit applies one rules action — add, delete, enable/disable, or
@@ -102,12 +87,12 @@ func (s *Server) handleRulesSubmit(w http.ResponseWriter, r *http.Request) {
 	case "add":
 		cond, ok := buildCondition(r)
 		if !ok {
-			http.Redirect(w, r, "/rules?err=condition", http.StatusSeeOther)
+			http.Redirect(w, r, "/settings?tab=rules&err=condition", http.StatusSeeOther)
 			return
 		}
 		act, ok := buildAction(r)
 		if !ok {
-			http.Redirect(w, r, "/rules?err=action", http.StatusSeeOther)
+			http.Redirect(w, r, "/settings?tab=rules&err=action", http.StatusSeeOther)
 			return
 		}
 		if _, err := st.AddRule(objectstore.Rule{
@@ -117,7 +102,7 @@ func (s *Server) handleRulesSubmit(w http.ResponseWriter, r *http.Request) {
 			Condition: cond,
 			Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{act}},
 		}); err != nil {
-			http.Redirect(w, r, "/rules?err=save", http.StatusSeeOther)
+			http.Redirect(w, r, "/settings?tab=rules&err=save", http.StatusSeeOther)
 			return
 		}
 	case "delete":
@@ -131,13 +116,13 @@ func (s *Server) handleRulesSubmit(w http.ResponseWriter, r *http.Request) {
 	case "run":
 		res, err := st.RunRules(rulesFolder)
 		if err != nil {
-			http.Redirect(w, r, "/rules?err=run", http.StatusSeeOther)
+			http.Redirect(w, r, "/settings?tab=rules&err=run", http.StatusSeeOther)
 			return
 		}
-		http.Redirect(w, r, fmt.Sprintf("/rules?ran=1&affected=%d&evaluated=%d", res.Affected, res.Evaluated), http.StatusSeeOther)
+		http.Redirect(w, r, fmt.Sprintf("/settings?tab=rules&ran=1&affected=%d&evaluated=%d", res.Affected, res.Evaluated), http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, "/rules", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings?tab=rules", http.StatusSeeOther)
 }
 
 // buildCondition assembles a RESTRICTION from the add-rule form's condition

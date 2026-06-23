@@ -1,6 +1,6 @@
-{{define "oof"}}{{template "head" .}}
-<div class="reader">
-  <div class="reader-toolbar"><a href="/mail?folder=INBOX">&larr; Back to mailbox</a></div>
+{{/* tab-oof is the Out of office panel of the settings page. Rendered with the
+oofPage sub-data; the form posts to /oof and returns to /settings?tab=oof. */}}
+{{define "tab-oof"}}
   <div class="compose-card">
     <h2>Out of office</h2>
     <p class="muted">Automatically reply once to each person who emails you while this is on. Replies are not sent to mailing lists, bulk mail, or other automatic messages.</p>
@@ -39,5 +39,4 @@
       <button type="submit" class="primary">Save</button>
     </form>
   </div>
-</div>
-{{template "foot" .}}{{end}}
+{{end}}

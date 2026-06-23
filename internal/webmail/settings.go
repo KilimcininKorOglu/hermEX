@@ -3,6 +3,8 @@ package webmail
 import (
 	"encoding/json"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 
 	"hermex/internal/directory"
@@ -42,6 +44,78 @@ type settingsView struct {
 	webmailSettings
 	AccessEnabled bool                      // the rule store is wired, so show the allow/block section
 	AccessRules   []directory.RecipientRule // the user's personal allow/block rules
+}
+
+// settingsPage is the data for the unified settings page: every settings section
+// rendered as a tab on one page. ActiveTab selects which tab opens; ChgPasswd
+// gates the Password tab. Each section carries its existing per-section view data
+// so the tab partials render unchanged.
+type settingsPage struct {
+	ActiveTab string
+	ChgPasswd bool
+	General   settingsView
+	Rules     rulesPage
+	OOF       oofPage
+	Smime     smimePage
+	Password  passwordPage
+}
+
+// settingsTab normalizes a requested tab to a known one, defaulting to General
+// for an empty or unrecognized value.
+func settingsTab(raw string) string {
+	switch raw {
+	case "general", "rules", "oof", "smime", "password":
+		return raw
+	}
+	return "general"
+}
+
+// buildSettingsPage assembles the whole settings page from a mailbox store and
+// session. Each section loads independently and best-effort: a failure in one
+// degrades that section to its empty/default state rather than blanking the page.
+func (s *Server) buildSettingsPage(sess *session, st *objectstore.Store, active string) settingsPage {
+	page := settingsPage{ActiveTab: settingsTab(active)}
+
+	cfg, err := loadSettings(st)
+	if err != nil {
+		cfg = defaultSettings()
+	}
+	page.General = settingsView{webmailSettings: cfg, AccessEnabled: s.Rules != nil}
+	if s.Rules != nil {
+		page.General.AccessRules, _ = s.Rules.ListRecipientRules(sess.user) // best-effort; an error just shows no rules
+	}
+
+	page.Rules = s.buildRulesPage(st, sess)
+	page.OOF = buildOOFPage(st)
+	page.Smime = s.buildSmimePage(st, sess)
+
+	// The Password tab is offered only when the account may change its password,
+	// matching the standalone handler's own gate.
+	privs, _ := s.auth.Privileges(sess.user)
+	page.ChgPasswd = privs.ChgPasswd
+	return page
+}
+
+// applySettingsNotices expands the redirect flags a section posts back with into
+// its per-section notice fields, scoped to the active tab — so the right panel
+// shows its result and the codes (e.g. password "current") survive the 303.
+func applySettingsNotices(page *settingsPage, q url.Values) {
+	switch page.ActiveTab {
+	case "oof":
+		page.OOF.Saved = q.Get("saved") == "1"
+	case "password":
+		page.Password.Saved = q.Get("saved") == "1"
+		page.Password.Error = passwordError(q.Get("err"))
+	case "rules":
+		page.Rules.Err = errNotice(q.Get("err"))
+		if q.Get("ran") == "1" {
+			page.Rules.Ran = true
+			page.Rules.Affected, _ = strconv.Atoi(q.Get("affected"))
+			page.Rules.Evaluated, _ = strconv.Atoi(q.Get("evaluated"))
+		}
+	case "smime":
+		page.Smime.Notice = smimeNotice(q.Get("ok"))
+	}
 }
 
 // category is one named, colored label in the mailbox's master category list.
@@ -156,8 +230,9 @@ func saveSettings(st *objectstore.Store, s webmailSettings) error {
 	return st.SetWebmailSettings(string(b))
 }
 
-// handleSettingsForm renders the settings page: the default compose format and
-// the signature list, with assignments for new messages and replies/forwards.
+// handleSettingsForm renders the unified settings page — every section (general
+// preferences, inbox rules, out of office, certificates, password) as a tab on
+// one page, with the requested tab open and any post-redirect notice expanded.
 func (s *Server) handleSettingsForm(w http.ResponseWriter, r *http.Request) {
 	sess, ok := s.sessionFrom(r)
 	if !ok {
@@ -170,15 +245,10 @@ func (s *Server) handleSettingsForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	cfg, err := loadSettings(st)
-	if err != nil {
-		cfg = defaultSettings()
-	}
-	view := settingsView{webmailSettings: cfg, AccessEnabled: s.Rules != nil}
-	if s.Rules != nil {
-		view.AccessRules, _ = s.Rules.ListRecipientRules(sess.user) // best-effort; an error just shows no rules
-	}
-	s.render(w, "settings", view)
+	q := r.URL.Query()
+	page := s.buildSettingsPage(sess, st, q.Get("tab"))
+	applySettingsNotices(&page, q)
+	s.render(w, "settings", page)
 }
 
 // handleSettingsSubmit applies one settings action — saving preferences, adding
@@ -197,13 +267,13 @@ func (s *Server) handleSettingsSubmit(w http.ResponseWriter, r *http.Request) {
 		if s.Rules != nil {
 			_ = s.Rules.SetRecipientRule(sess.user, r.FormValue("pattern"), r.FormValue("ruleaction"))
 		}
-		http.Redirect(w, r, "/settings", http.StatusSeeOther)
+		http.Redirect(w, r, "/settings?tab=general", http.StatusSeeOther)
 		return
 	case "delrule":
 		if s.Rules != nil {
 			_, _ = s.Rules.DeleteRecipientRule(sess.user, r.FormValue("pattern"))
 		}
-		http.Redirect(w, r, "/settings", http.StatusSeeOther)
+		http.Redirect(w, r, "/settings?tab=general", http.StatusSeeOther)
 		return
 	}
 	st, err := objectstore.Open(sess.mailboxPath)
@@ -283,7 +353,7 @@ func (s *Server) handleSettingsSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot save settings", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/settings", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings?tab=general", http.StatusSeeOther)
 }
 
 // categoryExists reports whether a category name is already in the master list.

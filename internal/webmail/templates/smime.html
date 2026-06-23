@@ -1,6 +1,8 @@
-{{define "smime"}}{{template "head" .}}
-<div class="reader">
-  <div class="reader-toolbar"><a href="/mail?folder=INBOX">&larr; Back to mailbox</a></div>
+{{/* tab-smime is the S/MIME certificates panel of the settings page: the stored
+identity, its session unlock, and recipient certificates. Rendered with the
+smimePage sub-data; forms post to /smime and return to /settings?tab=smime (a
+validation error re-renders the whole settings page with this tab active). */}}
+{{define "tab-smime"}}
   <div class="compose-card">
     <h2>S/MIME certificates</h2>
     <p class="muted">Sign and encrypt mail with an S/MIME certificate. Upload your certificate and key as a password-protected PKCS#12 (.p12 / .pfx) file; the password is asked each session to unlock it and is never stored.</p>
@@ -86,5 +88,4 @@
       <button type="submit" class="primary">Add recipient</button>
     </form>
   </div>
-</div>
-{{template "foot" .}}{{end}}
+{{end}}

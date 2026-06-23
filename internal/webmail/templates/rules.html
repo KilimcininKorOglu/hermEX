@@ -1,6 +1,7 @@
-{{define "rules"}}{{template "head" .}}
-<div class="reader">
-  <div class="reader-toolbar"><a href="/mail?folder=INBOX">&larr; Back to mailbox</a></div>
+{{/* tab-rules is the Inbox rules panel of the settings page: the existing rules
+with enable/delete/run controls and the add-rule form. Rendered with the
+rulesPage sub-data; forms post to /rules and return to /settings?tab=rules. */}}
+{{define "tab-rules"}}
   <div class="compose-card">
     <h2>Inbox rules</h2>
     <p class="muted">Rules run on each message as it arrives in your inbox, in order, top to bottom. Use &ldquo;Apply rules now&rdquo; to run them over the messages already in your inbox.</p>
@@ -82,26 +83,25 @@
       <button class="primary" type="submit">Add rule</button>
     </form>
   </div>
-</div>
-<script>
-(function () {
-  // Show only the value input relevant to the chosen condition/action. Without
-  // JS every input stays visible and the form still posts correctly.
-  function sync(selectId, inputClass, dataAttr) {
-    var sel = document.getElementById(selectId);
-    if (!sel) { return; }
-    var inputs = document.querySelectorAll("." + inputClass);
-    function apply() {
-      inputs.forEach(function (el) {
-        var tokens = (el.getAttribute(dataAttr) || "").split(" ");
-        el.style.display = tokens.indexOf(sel.value) >= 0 ? "" : "none";
-      });
+  <script>
+  (function () {
+    // Show only the value input relevant to the chosen condition/action. Without
+    // JS every input stays visible and the form still posts correctly.
+    function sync(selectId, inputClass, dataAttr) {
+      var sel = document.getElementById(selectId);
+      if (!sel) { return; }
+      var inputs = document.querySelectorAll("." + inputClass);
+      function apply() {
+        inputs.forEach(function (el) {
+          var tokens = (el.getAttribute(dataAttr) || "").split(" ");
+          el.style.display = tokens.indexOf(sel.value) >= 0 ? "" : "none";
+        });
+      }
+      sel.addEventListener("change", apply);
+      apply();
     }
-    sel.addEventListener("change", apply);
-    apply();
-  }
-  sync("condfield", "cond-input", "data-cond");
-  sync("actiontype", "action-input", "data-action");
-})();
-</script>
-{{template "foot" .}}{{end}}
+    sync("condfield", "cond-input", "data-cond");
+    sync("actiontype", "action-input", "data-action");
+  })();
+  </script>
+{{end}}

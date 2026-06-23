@@ -1,6 +1,7 @@
 package webmail
 
 import (
+	"bytes"
 	"html/template"
 	"io/fs"
 	"net/http"
@@ -228,10 +229,16 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 	s.render(w, "mail", page)
 }
 
-// render executes a named template, reporting a 500 on failure.
+// render executes a named template, reporting a 500 on failure. It renders into a
+// buffer first so a template-execution error yields a clean 500 instead of a
+// half-written page followed by an error tail (the latter also logged a spurious
+// double WriteHeader); only a fully rendered page is flushed to the client.
 func (s *Server) render(w http.ResponseWriter, name string, data any) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tmpl.ExecuteTemplate(w, name, data); err != nil {
+	var buf bytes.Buffer
+	if err := s.tmpl.ExecuteTemplate(&buf, name, data); err != nil {
 		http.Error(w, "template error", http.StatusInternalServerError)
+		return
 	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(buf.Bytes())
 }

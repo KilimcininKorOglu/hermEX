@@ -12,22 +12,12 @@ type passwordPage struct {
 	Error string
 }
 
-// handlePasswordForm renders the change-password form, refusing the page to a
-// user whose password-change privilege the administrator has revoked.
+// handlePasswordForm redirects the former standalone change-password page to its
+// tab on the unified settings page (the tab is shown only when the account may
+// change its password); the POST endpoint below still serves the form and keeps
+// the privilege gate.
 func (s *Server) handlePasswordForm(w http.ResponseWriter, r *http.Request) {
-	sess, ok := s.sessionFrom(r)
-	if !ok {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-	if privs, _ := s.auth.Privileges(sess.user); !privs.ChgPasswd {
-		http.Error(w, "Changing your password is disabled for this account.", http.StatusForbidden)
-		return
-	}
-	s.render(w, "password", passwordPage{
-		Saved: r.URL.Query().Get("saved") == "1",
-		Error: passwordError(r.URL.Query().Get("err")),
-	})
+	http.Redirect(w, r, "/settings?tab=password", http.StatusSeeOther)
 }
 
 // handlePasswordSubmit verifies the current password and stores a new one, gated
@@ -55,21 +45,21 @@ func (s *Server) handlePasswordSubmit(w http.ResponseWriter, r *http.Request) {
 
 	switch {
 	case len(next) < 8:
-		http.Redirect(w, r, "/password?err=weak", http.StatusSeeOther)
+		http.Redirect(w, r, "/settings?tab=password&err=weak", http.StatusSeeOther)
 		return
 	case next != confirm:
-		http.Redirect(w, r, "/password?err=mismatch", http.StatusSeeOther)
+		http.Redirect(w, r, "/settings?tab=password&err=mismatch", http.StatusSeeOther)
 		return
 	}
 	if _, ok := s.auth.Authenticate(sess.user, current); !ok {
-		http.Redirect(w, r, "/password?err=current", http.StatusSeeOther)
+		http.Redirect(w, r, "/settings?tab=password&err=current", http.StatusSeeOther)
 		return
 	}
 	if ok, err := setter.SetPassword(sess.user, next); err != nil || !ok {
-		http.Redirect(w, r, "/password?err=save", http.StatusSeeOther)
+		http.Redirect(w, r, "/settings?tab=password&err=save", http.StatusSeeOther)
 		return
 	}
-	http.Redirect(w, r, "/password?saved=1", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings?tab=password&saved=1", http.StatusSeeOther)
 }
 
 // passwordError maps a redirect error code to a human-readable message.

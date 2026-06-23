@@ -213,6 +213,14 @@ table.messages tr.flagged td:first-child { box-shadow: inset 3px 0 0 #e0a800; }
 /* Reader */
 .reader { max-width: 900px; margin: 0 auto; padding: 20px; }
 .reader-toolbar { margin-bottom: 16px; }
+/* One settings page with in-page tabs: a row of tab buttons over the section
+   panels, only the active panel shown. The active tab joins the panel below it. */
+.settings-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+.settings-tab { padding: 8px 14px; color: var(--muted); background: none; border: 1px solid transparent; border-bottom: none; border-radius: 6px 6px 0 0; cursor: pointer; font: inherit; }
+.settings-tab:hover { color: var(--text); }
+.settings-tab.active { color: var(--text); font-weight: 600; background: var(--panel); border-color: var(--border); margin-bottom: -1px; }
+.settings-panel { display: none; }
+.settings-panel.active { display: block; }
 .reader-headers {
   background: var(--panel);
   border: 1px solid var(--border);

@@ -33,32 +33,28 @@ type recipientCertView struct {
 	Expires string
 }
 
+// handleSmimeForm redirects the former standalone S/MIME page to its tab on the
+// unified settings page; the POST endpoint below still serves the forms.
 func (s *Server) handleSmimeForm(w http.ResponseWriter, r *http.Request) {
-	sess, ok := s.sessionFrom(r)
-	if !ok {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-	st, err := objectstore.Open(sess.mailboxPath)
-	if err != nil {
-		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
-		return
-	}
-	defer st.Close()
-	page := s.buildSmimePage(st, sess)
-	switch r.URL.Query().Get("ok") {
+	http.Redirect(w, r, "/settings?tab=smime", http.StatusSeeOther)
+}
+
+// smimeNotice maps an S/MIME success code carried on the post-redirect to its
+// message, shown when the settings page reopens on the certificates tab.
+func smimeNotice(code string) string {
+	switch code {
 	case "uploaded":
-		page.Notice = "Certificate uploaded and unlocked for this session."
+		return "Certificate uploaded and unlocked for this session."
 	case "unlocked":
-		page.Notice = "Identity unlocked for this session."
+		return "Identity unlocked for this session."
 	case "removed":
-		page.Notice = "Certificate removed."
+		return "Certificate removed."
 	case "recipient":
-		page.Notice = "Recipient certificate saved."
+		return "Recipient certificate saved."
 	case "recipientremoved":
-		page.Notice = "Recipient certificate removed."
+		return "Recipient certificate removed."
 	}
-	s.render(w, "smime", page)
+	return ""
 }
 
 // buildSmimePage assembles the S/MIME page state from the store and session.
@@ -124,7 +120,7 @@ func (s *Server) handleSmimeSubmit(w http.ResponseWriter, r *http.Request) {
 		if token != nil {
 			s.sessions.unlockSmime(token.Value, key, cert)
 		}
-		http.Redirect(w, r, "/smime?ok=uploaded", http.StatusSeeOther)
+		http.Redirect(w, r, "/settings?tab=smime&ok=uploaded", http.StatusSeeOther)
 	case "unlock":
 		id, ok, err := st.GetSmimeIdentity()
 		if err != nil || !ok {
@@ -139,7 +135,7 @@ func (s *Server) handleSmimeSubmit(w http.ResponseWriter, r *http.Request) {
 		if token != nil {
 			s.sessions.unlockSmime(token.Value, key, cert)
 		}
-		http.Redirect(w, r, "/smime?ok=unlocked", http.StatusSeeOther)
+		http.Redirect(w, r, "/settings?tab=smime&ok=unlocked", http.StatusSeeOther)
 	case "remove":
 		if err := st.ClearSmimeIdentity(); err != nil {
 			s.smimeError(w, sess, "Could not remove the certificate: "+err.Error())
@@ -148,7 +144,7 @@ func (s *Server) handleSmimeSubmit(w http.ResponseWriter, r *http.Request) {
 		if token != nil {
 			s.sessions.lockSmime(token.Value)
 		}
-		http.Redirect(w, r, "/smime?ok=removed", http.StatusSeeOther)
+		http.Redirect(w, r, "/settings?tab=smime&ok=removed", http.StatusSeeOther)
 	case "addrecipient":
 		addr := r.FormValue("address")
 		cert := readFormFile(r, "cert")
@@ -161,19 +157,22 @@ func (s *Server) handleSmimeSubmit(w http.ResponseWriter, r *http.Request) {
 			s.smimeError(w, sess, "Could not save the recipient certificate: "+err.Error())
 			return
 		}
-		http.Redirect(w, r, "/smime?ok=recipient", http.StatusSeeOther)
+		http.Redirect(w, r, "/settings?tab=smime&ok=recipient", http.StatusSeeOther)
 	case "removerecipient":
 		if err := st.DeleteRecipientCert(r.FormValue("address")); err != nil {
 			s.smimeError(w, sess, "Could not remove the recipient certificate: "+err.Error())
 			return
 		}
-		http.Redirect(w, r, "/smime?ok=recipientremoved", http.StatusSeeOther)
+		http.Redirect(w, r, "/settings?tab=smime&ok=recipientremoved", http.StatusSeeOther)
 	default:
-		http.Redirect(w, r, "/smime", http.StatusSeeOther)
+		http.Redirect(w, r, "/settings?tab=smime", http.StatusSeeOther)
 	}
 }
 
-// smimeError re-renders the S/MIME page with an error message.
+// smimeError re-renders the whole settings page with the S/MIME tab active and an
+// error message, keeping the user on the unified page with the certificates
+// section showing the problem. The message is free text (it can include a store
+// error), so it cannot ride a 303 — this renders directly with a 400.
 func (s *Server) smimeError(w http.ResponseWriter, sess *session, msg string) {
 	st, err := objectstore.Open(sess.mailboxPath)
 	if err != nil {
@@ -181,10 +180,10 @@ func (s *Server) smimeError(w http.ResponseWriter, sess *session, msg string) {
 		return
 	}
 	defer st.Close()
-	page := s.buildSmimePage(st, sess)
-	page.Error = msg
+	page := s.buildSettingsPage(sess, st, "smime")
+	page.Smime.Error = msg
 	w.WriteHeader(http.StatusBadRequest)
-	s.render(w, "smime", page)
+	s.render(w, "settings", page)
 }
 
 // readFormFile returns the bytes of the first uploaded file for a multipart form

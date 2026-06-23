@@ -1,7 +1,42 @@
 {{define "settings"}}{{template "head" .}}
 {{template "editor-assets" .}}
-<div class="reader">
+<div class="reader reader-settings">
   <div class="reader-toolbar"><a href="/mail?folder=INBOX">&larr; Back to mailbox</a></div>
+  <nav class="settings-tabs">
+    <button type="button" class="settings-tab{{if eq .ActiveTab "general"}} active{{end}}" data-tab="general">General</button>
+    <button type="button" class="settings-tab{{if eq .ActiveTab "rules"}} active{{end}}" data-tab="rules">Inbox rules</button>
+    <button type="button" class="settings-tab{{if eq .ActiveTab "oof"}} active{{end}}" data-tab="oof">Out of office</button>
+    <button type="button" class="settings-tab{{if eq .ActiveTab "smime"}} active{{end}}" data-tab="smime">Certificates</button>
+    {{if .ChgPasswd}}<button type="button" class="settings-tab{{if eq .ActiveTab "password"}} active{{end}}" data-tab="password">Password</button>{{end}}
+  </nav>
+  <section class="settings-panel{{if eq .ActiveTab "general"}} active{{end}}" data-tab="general">{{template "tab-general" .General}}</section>
+  <section class="settings-panel{{if eq .ActiveTab "rules"}} active{{end}}" data-tab="rules">{{template "tab-rules" .Rules}}</section>
+  <section class="settings-panel{{if eq .ActiveTab "oof"}} active{{end}}" data-tab="oof">{{template "tab-oof" .OOF}}</section>
+  <section class="settings-panel{{if eq .ActiveTab "smime"}} active{{end}}" data-tab="smime">{{template "tab-smime" .Smime}}</section>
+  {{if .ChgPasswd}}<section class="settings-panel{{if eq .ActiveTab "password"}} active{{end}}" data-tab="password">{{template "tab-password" .Password}}</section>{{end}}
+</div>
+<script>
+// In-page settings tabs: one settings page, the sections shown one at a time.
+// The server renders the requested tab active, so the right panel is visible
+// before this runs; clicking a tab just swaps which panel shows (no navigation),
+// and keeps the URL in step so a reload or a form redirect lands on the same tab.
+(function () {
+  var tabs = document.querySelectorAll(".settings-tab");
+  var panels = document.querySelectorAll(".settings-panel");
+  function show(name) {
+    tabs.forEach(function (t) { t.classList.toggle("active", t.dataset.tab === name); });
+    panels.forEach(function (p) { p.classList.toggle("active", p.dataset.tab === name); });
+    if (window.history && history.replaceState) { history.replaceState(null, "", "/settings?tab=" + name); }
+  }
+  tabs.forEach(function (t) { t.addEventListener("click", function () { show(t.dataset.tab); }); });
+})();
+</script>
+{{template "foot" .}}{{end}}
+
+{{/* tab-general is the General preferences panel: compose format, list and
+reading-pane defaults, signatures (rich-text editor), categories, safe senders,
+and the allow/block rules. Rendered with the settingsView sub-data. */}}
+{{define "tab-general"}}
   <div class="compose-card">
     <h2>Settings</h2>
     <form method="post" action="/settings">
@@ -188,31 +223,30 @@
     </form>
     {{end}}
   </div>
-</div>
-<script>
-(function () {
-  if (typeof Quill === "undefined") { return; } // no editor: the plain textarea posts as-is
-  var form = document.getElementById("sigform");
-  var box = document.getElementById("sigeditorbox");
-  var plain = document.getElementById("sigbody");
-  var htmlField = document.getElementById("sigbodyhtml");
-  if (!form || !box || !plain || !htmlField) { return; }
+  <script>
+  (function () {
+    if (typeof Quill === "undefined") { return; } // no editor: the plain textarea posts as-is
+    var form = document.getElementById("sigform");
+    var box = document.getElementById("sigeditorbox");
+    var plain = document.getElementById("sigbody");
+    var htmlField = document.getElementById("sigbodyhtml");
+    if (!form || !box || !plain || !htmlField) { return; }
 
-  var quill = new Quill("#sigeditor", {
-    theme: "snow",
-    modules: { toolbar: [
-      ["bold", "italic", "underline"],
-      [{ color: [] }],
-      [{ list: "ordered" }, { list: "bullet" }],
-      ["link"], ["clean"]
-    ] }
-  });
-  box.style.display = "";
-  plain.style.display = "none";
+    var quill = new Quill("#sigeditor", {
+      theme: "snow",
+      modules: { toolbar: [
+        ["bold", "italic", "underline"],
+        [{ color: [] }],
+        [{ list: "ordered" }, { list: "bullet" }],
+        ["link"], ["clean"]
+      ] }
+    });
+    box.style.display = "";
+    plain.style.display = "none";
 
-  form.addEventListener("submit", function () {
-    htmlField.value = quill.getSemanticHTML();
-  });
-})();
-</script>
-{{template "foot" .}}{{end}}
+    form.addEventListener("submit", function () {
+      htmlField.value = quill.getSemanticHTML();
+    });
+  })();
+  </script>
+{{end}}

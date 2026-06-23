@@ -34,10 +34,6 @@
       <h2>{{.Current}} <span class="counts">{{.Total}} total, {{.Unread}} unread</span></h2>
       <a href="/compose" class="compose-btn">Compose</a>
       <a href="/import" class="import-btn">Import</a>
-      <a href="/rules" class="import-btn">Rules</a>
-      <a href="/oof" class="import-btn">Out of office</a>
-      <a href="/smime" class="import-btn">Certificates</a>
-      <a href="/password" class="import-btn">Change password</a>
       <a href="/settings" class="import-btn">Settings</a>
       {{if .PublicFolders}}<a href="/public-folders" class="import-btn">Public folders</a>{{end}}
       {{if eq .Filter "unread"}}

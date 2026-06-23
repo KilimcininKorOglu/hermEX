@@ -55,26 +55,21 @@ func parseOOFTime(v string) int64 {
 	return t.Unix()
 }
 
-// handleOOFForm renders the out-of-office settings form populated from the
-// mailbox's stored configuration.
+// handleOOFForm redirects the former standalone out-of-office page to its tab on
+// the unified settings page; the POST endpoint below still serves the form.
 func (s *Server) handleOOFForm(w http.ResponseWriter, r *http.Request) {
-	sess, ok := s.sessionFrom(r)
-	if !ok {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-	st, err := objectstore.Open(sess.mailboxPath)
-	if err != nil {
-		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
-		return
-	}
-	defer st.Close()
+	http.Redirect(w, r, "/settings?tab=oof", http.StatusSeeOther)
+}
+
+// buildOOFPage loads the out-of-office section from the mailbox configuration.
+// Best-effort — a read failure yields the empty (disabled) form rather than
+// failing the whole settings page.
+func buildOOFPage(st *objectstore.Store) oofPage {
 	cfg, err := st.GetOOFSettings()
 	if err != nil {
-		http.Error(w, "could not read out-of-office settings", http.StatusInternalServerError)
-		return
+		return oofPage{}
 	}
-	s.render(w, "oof", oofPage{
+	return oofPage{
 		Enabled:           cfg.Enabled,
 		InternalSubject:   cfg.InternalSubject,
 		InternalReply:     cfg.InternalReply,
@@ -84,8 +79,7 @@ func (s *Server) handleOOFForm(w http.ResponseWriter, r *http.Request) {
 		ExternalKnownOnly: cfg.ExternalAudience == objectstore.OOFExternalKnown,
 		Start:             formatOOFTime(cfg.Start),
 		End:               formatOOFTime(cfg.End),
-		Saved:             r.URL.Query().Get("saved") == "1",
-	})
+	}
 }
 
 // handleOOFSubmit stores the submitted out-of-office settings and redirects back
@@ -127,5 +121,5 @@ func (s *Server) handleOOFSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "could not save out-of-office settings", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/oof?saved=1", http.StatusSeeOther)
+	http.Redirect(w, r, "/settings?tab=oof&saved=1", http.StatusSeeOther)
 }
