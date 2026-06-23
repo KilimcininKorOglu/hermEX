@@ -39,7 +39,7 @@ func gatewayTLS(cfg *config.Config, dir *directory.SQLDirectory, logger *logging
 		if storage == "" {
 			storage = filepath.Join(cfg.DataDir, "acme")
 		}
-		acme, err := tlscert.NewACME(storage, settings, os.Getenv("HERMEX_ACME_CA_ROOT"), logger)
+		acme, err := tlscert.NewACME(cfg, storage, settings, os.Getenv("HERMEX_ACME_CA_ROOT"), logger)
 		if err != nil {
 			return nil, nil, err
 		}

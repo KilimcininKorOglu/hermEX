@@ -12,6 +12,7 @@ import (
 
 	"github.com/caddyserver/certmagic"
 
+	"hermex/internal/config"
 	"hermex/internal/directory"
 	"hermex/internal/logging"
 )
@@ -24,20 +25,27 @@ import (
 // only ever sees mail traffic — which never reaches this HTTPS listener — is still
 // covered, and the certificate exists before the first client connects.
 type ACMEProvider struct {
-	magic  *certmagic.Config
-	issuer *certmagic.ACMEIssuer // kept for its storage IssuerKey when mirroring certs
-	logger *logging.Logger
+	magic    *certmagic.Config
+	issuer   *certmagic.ACMEIssuer // kept for its storage IssuerKey when mirroring certs
+	fileCert *tls.Certificate      // config-file fallback served until ACME obtains a name; nil if none
+	logger   *logging.Logger
 }
 
-// NewACME builds an ACME-managed certificate source. storageDir holds CertMagic's
-// account, certificate and lock state (its built-in FileStorage, which provides the
-// correct cross-process locking). The CA directory, account email and ToS agreement
-// come from settings; an empty CA URL uses CertMagic's default (Let's Encrypt
+// NewACME builds an ACME-managed certificate source. cfg supplies the
+// configuration-file fallback certificate (when cfg.TLSEnabled()): until CertMagic
+// has obtained a name — or whenever the CA is unreachable or rate-limited — the
+// front door still serves that certificate rather than failing every handshake, the
+// same invariant the manual provider holds. storageDir holds CertMagic's account,
+// certificate and lock state (its built-in FileStorage, which provides the correct
+// cross-process locking). The CA directory, account email and ToS agreement come
+// from settings; an empty CA URL uses CertMagic's default (Let's Encrypt
 // production). caRootFile, when set, is a PEM bundle of additional roots trusted for
 // the ACME endpoint itself — needed only against a private/test CA (pebble) whose
 // API serves a self-signed certificate; production CAs use publicly trusted TLS and
-// leave it empty. logger may be nil.
-func NewACME(storageDir string, settings directory.TLSSettings, caRootFile string, logger *logging.Logger) (*ACMEProvider, error) {
+// leave it empty. An unreadable caRootFile is logged and ignored rather than fatal,
+// so a misconfigured roots path degrades ACME to the system trust store instead of
+// crash-looping the front door. logger may be nil.
+func NewACME(cfg *config.Config, storageDir string, settings directory.TLSSettings, caRootFile string, logger *logging.Logger) (*ACMEProvider, error) {
 	var magic *certmagic.Config
 	cache := certmagic.NewCache(certmagic.CacheOptions{
 		GetConfigForCert: func(certmagic.Certificate) (*certmagic.Config, error) {
@@ -57,14 +65,30 @@ func NewACME(storageDir string, settings directory.TLSSettings, caRootFile strin
 	if caRootFile != "" {
 		pool, err := loadACMERoots(caRootFile)
 		if err != nil {
-			return nil, err
+			// A bad roots path must not crash-loop the front door; fall back to the
+			// system trust store. ACME then fails against a private CA, but the
+			// config-file fallback keeps the gateway serving.
+			if logger != nil {
+				logger.Warn(logging.TLS, "acme.caroots", logging.Fields{"detail": "ACME CA roots unreadable; using the system trust store", "error": err.Error()})
+			}
+		} else {
+			acme.TrustedRoots = pool
 		}
-		acme.TrustedRoots = pool
 	}
 	issuer := certmagic.NewACMEIssuer(magic, acme)
 	magic.Issuers = []certmagic.Issuer{issuer}
 
-	return &ACMEProvider{magic: magic, issuer: issuer, logger: logger}, nil
+	p := &ACMEProvider{magic: magic, issuer: issuer, logger: logger}
+	if cfg != nil && cfg.TLSEnabled() {
+		tc, err := cfg.TLSConfig()
+		if err != nil {
+			return nil, err
+		}
+		if len(tc.Certificates) > 0 {
+			p.fileCert = &tc.Certificates[0]
+		}
+	}
+	return p, nil
 }
 
 // TLSEnabled always reports true: an ACME provider is constructed only when the
@@ -73,11 +97,30 @@ func (p *ACMEProvider) TLSEnabled() bool { return true }
 
 // TLSConfig returns a tls.Config whose GetCertificate resolves per handshake from
 // CertMagic's managed set and also answers the TLS-ALPN-01 challenge, with HTTP/2
-// advertised first for the gateway's HTTP traffic.
+// advertised first for the gateway's HTTP traffic. A handshake for a name CertMagic
+// has not obtained falls back to the config-file certificate (see getCertificate).
 func (p *ACMEProvider) TLSConfig() (*tls.Config, error) {
 	tc := p.magic.TLSConfig()
+	tc.GetCertificate = p.getCertificate
 	tc.NextProtos = append([]string{"h2", "http/1.1"}, tc.NextProtos...)
 	return tc, nil
+}
+
+// getCertificate resolves a handshake through CertMagic — which both serves managed
+// certificates and answers the TLS-ALPN-01 challenge — and, only when CertMagic has
+// nothing for the name (not yet obtained, CA unreachable, or rate-limited), falls
+// back to the config-file certificate so the front door stays up while ACME catches
+// up. The challenge path inside CertMagic always succeeds for a validation handshake,
+// so the fallback never shadows it.
+func (p *ACMEProvider) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error) {
+	cert, err := p.magic.GetCertificate(hello)
+	if err == nil {
+		return cert, nil
+	}
+	if p.fileCert != nil {
+		return p.fileCert, nil
+	}
+	return nil, err
 }
 
 // Manage obtains certificates for names that are missing and renews any that are
