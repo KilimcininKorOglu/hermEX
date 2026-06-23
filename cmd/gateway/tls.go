@@ -124,9 +124,17 @@ func mirrorACMECerts(acme *tlscert.ACMEProvider, dir *directory.SQLDirectory, na
 // acmeNames is the host-name allowlist the gateway obtains certificates for, read
 // from the directory. Only active domains are included — a suspended domain
 // (domain_status != 0) is not served, and obtaining a certificate for it would waste
-// the CA's per-account rate limit.
+// the CA's per-account rate limit. The MTA-STS policy host is added only when the
+// operator publishes MTA-STS (see expandACMENames).
 func acmeNames(dir *directory.SQLDirectory, hostname string) ([]string, error) {
 	domains, err := dir.ListDomains()
+	if err != nil {
+		return nil, err
+	}
+	// The mta-sts.<domain> host needs a certificate only when MTA-STS is published —
+	// otherwise the owner has not pointed it at the gateway, so a TLS-ALPN-01 order
+	// for it would fail and waste the CA rate limit.
+	sts, _, err := dir.GetMTASTSSettings()
 	if err != nil {
 		return nil, err
 	}
@@ -136,16 +144,17 @@ func acmeNames(dir *directory.SQLDirectory, hostname string) ([]string, error) {
 			active = append(active, d.Name)
 		}
 	}
-	return expandACMENames(active, hostname), nil
+	return expandACMENames(active, hostname, sts.Enabled), nil
 }
 
 // expandACMENames builds the certificate name set: the server's own hostname plus,
 // for each domain, the mail/autodiscover/autoconfig hosts the owner points at the
-// server (the prescribed CNAMEs). The apex is deliberately excluded — it is the
-// tenant's own website, not the mail front door, so it would not resolve here and
-// TLS-ALPN-01 would fail for it. Each included name must resolve to the gateway on
-// :443. The result is deduplicated and sorted so the obtain order is stable.
-func expandACMENames(domains []string, hostname string) []string {
+// server (the prescribed CNAMEs), and the mta-sts host when MTA-STS publishing is on.
+// The apex is deliberately excluded — it is the tenant's own website, not the mail
+// front door, so it would not resolve here and TLS-ALPN-01 would fail for it. Each
+// included name must resolve to the gateway on :443. The result is deduplicated and
+// sorted so the obtain order is stable.
+func expandACMENames(domains []string, hostname string, mtastsEnabled bool) []string {
 	set := map[string]bool{}
 	if hostname != "" {
 		set[hostname] = true
@@ -157,6 +166,9 @@ func expandACMENames(domains []string, hostname string) []string {
 		set["mail."+d] = true
 		set["autodiscover."+d] = true
 		set["autoconfig."+d] = true
+		if mtastsEnabled {
+			set["mta-sts."+d] = true
+		}
 	}
 	names := make([]string, 0, len(set))
 	for n := range set {
