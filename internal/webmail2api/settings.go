@@ -322,17 +322,32 @@ func (s *Server) handleGetMailboxes(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetSharedMailboxes(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.session(r); !ok {
+	c, ok := s.session(r)
+	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	shared := []string{}
+	// Only the shared mailboxes the caller may actually open are returned (store
+	// owner / folder grantee / delegate), each as the SPA's SharedMailbox object.
+	boxes := []map[string]any{}
 	if lister, ok := s.auth.(directory.SharedMailboxLister); ok {
-		if boxes, err := lister.SharedMailboxes(); err == nil {
-			for _, b := range boxes {
-				shared = append(shared, b.Address)
+		if list, err := lister.SharedMailboxes(); err == nil {
+			for _, b := range list {
+				st, err := objectstore.Open(b.StorePath)
+				if err != nil {
+					continue
+				}
+				if callerMayOpenShared(st, c.Email) {
+					boxes = append(boxes, map[string]any{
+						"owner":       b.Address,
+						"mailbox":     b.Address,
+						"displayName": b.Address,
+						"rights":      "read",
+					})
+				}
+				st.Close()
 			}
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"shared_mailboxes": shared, "mailboxes": shared})
+	writeJSON(w, http.StatusOK, map[string]any{"shared_mailboxes": boxes})
 }
