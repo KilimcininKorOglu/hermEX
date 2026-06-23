@@ -195,24 +195,29 @@ func TestSharedMailboxAccessGate(t *testing.T) {
 	}
 }
 
-// TestSharedMailboxWritesDenied proves every mutating endpoint rejects a shared-
-// scoped request outright (403), so a control left in a shared view — or a forged
-// request — can never misfire against the caller's own store before the write path
-// is authorized.
+// TestSharedMailboxWritesDenied proves shared-scoped writes are refused where the
+// caller lacks the right: a reviewer cannot drive an authorized write endpoint,
+// and an endpoint not yet taught about shared mailboxes rejects an mbox outright —
+// so a control left in a shared view or a forged request can never misfire against
+// the caller's own store.
 func TestSharedMailboxWritesDenied(t *testing.T) {
-	ts, _ := newSharedWebmail(t)
+	ts, env := newSharedWebmail(t)
 	c := authedClient(t, ts)
-	for _, u := range []string{
-		"/action?folder=Team&uid=1&op=delete&mbox=support@hermex.test",
-		"/bulk?mbox=support@hermex.test",
-		"/folder?mbox=support@hermex.test",
-		"/export?mbox=support@hermex.test",
-	} {
-		if code, _ := postForm(t, c, ts.URL+u, url.Values{}); code != 403 {
-			t.Errorf("POST %s = %d, want 403 (shared writes denied here)", u, code)
+	uid := strconv.FormatUint(uint64(env.teamUID), 10)
+
+	// A reviewer grant cannot drive the authorized write endpoints.
+	if code, _ := postForm(t, c, ts.URL+"/action?folder=Team&uid="+uid+"&op=delete&mbox=support@hermex.test", url.Values{}); code != 403 {
+		t.Errorf("reviewer /action delete = %d, want 403", code)
+	}
+	if code, _ := postForm(t, c, ts.URL+"/bulk?mbox=support@hermex.test", url.Values{"folder": {"Team"}, "uid": {uid}, "op": {"delete"}}); code != 403 {
+		t.Errorf("reviewer /bulk delete = %d, want 403", code)
+	}
+	// Endpoints not yet wired for shared mailboxes reject an mbox-scoped request.
+	for _, u := range []string{"/folder", "/import", "/compose"} {
+		if code, _ := postForm(t, c, ts.URL+u+"?mbox=support@hermex.test", url.Values{}); code != 403 {
+			t.Errorf("POST %s with mbox = %d, want 403", u, code)
 		}
 	}
-	// A not-yet-shared-aware read endpoint likewise refuses an mbox it cannot honor.
 	if code, _ := get(t, c, ts.URL+"/search?q=x&mbox=support@hermex.test"); code != 403 {
 		t.Errorf("GET /search with mbox = %d, want 403", code)
 	}
@@ -304,5 +309,75 @@ func TestSharedMailboxWritableRendersControls(t *testing.T) {
 
 	if _, body := get(t, c, ts.URL+"/mail?folder=Team&mbox=support@hermex.test"); strings.Contains(body, "op=delete") {
 		t.Errorf("read-only (reviewer) list rendered a delete control")
+	}
+}
+
+// TestSharedMailboxBulkOwner proves an owner may drive a bulk action: a bulk
+// delete re-files the selected message out of the owned Inbox.
+func TestSharedMailboxBulkOwner(t *testing.T) {
+	ts, env := newSharedWebmail(t)
+	c := authedClient(t, ts)
+	uid := strconv.FormatUint(uint64(env.ownedUID), 10)
+	if code, _ := postForm(t, c, ts.URL+"/bulk?mbox=owned@hermex.test", url.Values{
+		"folder": {"INBOX"}, "uid": {uid}, "op": {"delete"},
+	}); code != 200 {
+		t.Fatalf("owner bulk delete = %d, want 200", code)
+	}
+	ost, err := objectstore.Open(env.ownedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ost.Close()
+	if _, err := ost.MessageByUID(int64(mapi.PrivateFIDInbox), env.ownedUID); err == nil {
+		t.Errorf("bulk-deleted message is still in the owned Inbox")
+	}
+}
+
+// TestSharedMailboxBulkReviewerDenied proves a reviewer grant cannot drive a bulk
+// write: the batch is refused and the message is left in place.
+func TestSharedMailboxBulkReviewerDenied(t *testing.T) {
+	ts, env := newSharedWebmail(t)
+	c := authedClient(t, ts)
+	uid := strconv.FormatUint(uint64(env.teamUID), 10)
+	if code, _ := postForm(t, c, ts.URL+"/bulk?mbox=support@hermex.test", url.Values{
+		"folder": {"Team"}, "uid": {uid}, "op": {"delete"},
+	}); code != 403 {
+		t.Fatalf("reviewer bulk delete = %d, want 403", code)
+	}
+	sst, err := objectstore.Open(env.supportDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sst.Close()
+	if _, err := sst.MessageByUID(env.teamFID, env.teamUID); err != nil {
+		t.Errorf("a refused bulk delete still removed the reviewer's message")
+	}
+}
+
+// TestSharedMailboxExportShared proves bulk export from a shared folder is allowed
+// by the same read ACL as the reader: a reviewer may export the message they may
+// read.
+func TestSharedMailboxExportShared(t *testing.T) {
+	ts, env := newSharedWebmail(t)
+	c := authedClient(t, ts)
+	uid := strconv.FormatUint(uint64(env.teamUID), 10)
+	if code, _ := postForm(t, c, ts.URL+"/export?mbox=support@hermex.test", url.Values{
+		"folder": {"Team"}, "uid": {uid},
+	}); code != 200 {
+		t.Errorf("export from a readable shared folder = %d, want 200", code)
+	}
+}
+
+// TestSharedMailboxBulkbarRenders proves the bulk toolbar shows only where the
+// caller may write: present (posting to the shared store) in an owned folder.
+func TestSharedMailboxBulkbarRenders(t *testing.T) {
+	ts, _ := newSharedWebmail(t)
+	c := authedClient(t, ts)
+	code, body := get(t, c, ts.URL+"/mail?folder=INBOX&mbox=owned@hermex.test")
+	if code != 200 {
+		t.Fatalf("GET owned Inbox = %d", code)
+	}
+	if !strings.Contains(body, `id="bulkform"`) || !strings.Contains(body, "/bulk?mbox=owned") {
+		t.Errorf("owned (writable) list missing the bulk toolbar posting to the shared store")
 	}
 }

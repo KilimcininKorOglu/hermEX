@@ -26,15 +26,24 @@ func (s *Server) handleBulk(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not authenticated", http.StatusUnauthorized)
 		return
 	}
-	// Shared-mailbox writes are authorized in a later step; reject them here so a
-	// control left in a shared view cannot misfire against the caller's own store.
-	if denyShared(w, r) {
-		return
-	}
-	st, err := objectstore.Open(sess.mailboxPath)
-	if err != nil {
-		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
-		return
+	// Open the own mailbox, or a shared mailbox the caller selected (?mbox),
+	// validated and access-checked server-side.
+	mbox := mboxParam(r)
+	var st *objectstore.Store
+	var err error
+	if mbox == "" {
+		if st, err = objectstore.Open(sess.mailboxPath); err != nil {
+			http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		var addr string
+		var sok bool
+		if st, addr, sok = s.openSharedFor(sess, mbox); !sok {
+			http.NotFound(w, r)
+			return
+		}
+		mbox = addr
 	}
 	defer st.Close()
 	folders, err := st.ListFolders()
@@ -48,12 +57,18 @@ func (s *Server) handleBulk(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	uids := parseUIDs(r.Form["uid"])
 	op := r.FormValue("op")
+	// A shared-mailbox bulk write is authorized once per batch (all the selected
+	// messages share the source folder) against the caller's folder rights.
+	if mbox != "" && !sharedBulkAllowed(st, sess.user, op, folderID, folders, r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	uids := parseUIDs(r.Form["uid"])
 	for _, uid := range uids {
 		applyBulk(st, folders, folderID, uid, op, r)
 	}
-	http.Redirect(w, r, "/mail?folder="+url.QueryEscape(folder), http.StatusSeeOther)
+	http.Redirect(w, r, withMbox("/mail?folder="+url.QueryEscape(folder), mbox), http.StatusSeeOther)
 }
 
 // applyBulk performs a single bulk op on one message, best-effort: an error on
@@ -113,15 +128,24 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not authenticated", http.StatusUnauthorized)
 		return
 	}
-	// Shared-mailbox export is not wired here yet; reject an mbox-scoped request
-	// rather than silently exporting the caller's own mailbox.
-	if denyShared(w, r) {
-		return
-	}
-	st, err := objectstore.Open(sess.mailboxPath)
-	if err != nil {
-		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
-		return
+	// Open the own mailbox, or a shared mailbox the caller selected (?mbox). Export
+	// is a read, gated by the same FrightsReadAny as the folder's reader.
+	mbox := mboxParam(r)
+	var st *objectstore.Store
+	var err error
+	if mbox == "" {
+		if st, err = objectstore.Open(sess.mailboxPath); err != nil {
+			http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		var addr string
+		var sok bool
+		if st, addr, sok = s.openSharedFor(sess, mbox); !sok {
+			http.NotFound(w, r)
+			return
+		}
+		mbox = addr
 	}
 	defer st.Close()
 	folders, err := st.ListFolders()
@@ -131,6 +155,10 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	}
 	folderID, found := resolveFolder(folders, r.FormValue("folder"))
 	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	if mbox != "" && !hasFolderRight(st, sess.user, folderID, mapi.FrightsReadAny) {
 		http.NotFound(w, r)
 		return
 	}

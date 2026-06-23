@@ -269,6 +269,8 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 			page.Unread = res.Unread
 		}
 	}
+	page.ReadOnly = readOnly
+	page.MoveTargets = buildFolderViews(contentFolders)
 	// Carry the shared-mailbox selector onto every list row so the reader and action
 	// links stay in the shared context; a shared folder the caller cannot modify
 	// renders its rows read-only (per-row write controls hidden).

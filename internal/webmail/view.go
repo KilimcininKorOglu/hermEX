@@ -99,11 +99,19 @@ type mailPage struct {
 	// SharedMailboxes are the shared mailboxes the user may open, each with its
 	// visible folders, shown as a labeled sidebar section (empty when none).
 	SharedMailboxes []sharedMailboxGroup
+	// MoveTargets are the folders of the store whose messages are listed (the own
+	// mailbox, or the open shared mailbox), offered as the bulk move destinations.
+	// Kept distinct from Folders, which is always the own sidebar tree.
+	MoveTargets []folderView
 	// Mbox is the shared mailbox address when the open folder belongs to one, else
-	// empty. When set, the list renders read-only (write controls hidden) and every
-	// read link carries &mbox={{.Mbox}} so navigation stays in the shared store. The
-	// template escapes the value, so it is held raw (never pre-escaped) here.
+	// empty. When set, every read link carries &mbox={{.Mbox}} so navigation stays
+	// in the shared store. The template escapes the value, so it is held raw (never
+	// pre-escaped) here.
 	Mbox string
+	// ReadOnly hides the folder-level write controls (the bulk toolbar and the
+	// select-all checkbox) for a shared folder the caller may see but not modify;
+	// false for the own mailbox, so its list is unaffected.
+	ReadOnly bool
 }
 
 // threadView is one conversation thread rendered as a collapsible group: a

@@ -116,6 +116,13 @@ func withMbox(u, mbox string) string {
 	return u + "&mbox=" + url.QueryEscape(mbox)
 }
 
+// hasFolderRight reports whether user holds all of the need bits on folder fid
+// (the store owner clears any check, since ResolvePermission elevates them).
+func hasFolderRight(st *objectstore.Store, user string, fid int64, need uint32) bool {
+	rights, err := st.ResolvePermission(fid, user)
+	return err == nil && rights&need == need
+}
+
 // sharedActionAllowed authorizes a single-message action against the caller's
 // folder rights in a shared mailbox, following the MS-OXCPERM model: editing an
 // item (read state, follow-up flag, categories) needs EditAny; deleting or moving
@@ -125,10 +132,7 @@ func withMbox(u, mbox string) string {
 // "Owned" variants, since item authorship is not tracked here, so an unsure case
 // denies. An unknown op denies.
 func sharedActionAllowed(st *objectstore.Store, user, op string, src int64, folders []objectstore.FolderInfo, r *http.Request) bool {
-	can := func(fid int64, need uint32) bool {
-		rights, err := st.ResolvePermission(fid, user)
-		return err == nil && rights&need == need
-	}
+	can := func(fid int64, need uint32) bool { return hasFolderRight(st, user, fid, need) }
 	switch op {
 	case "toggleseen", "toggleflag", "flag", "flagcomplete", "flagnone", "categorize":
 		return can(src, mapi.FrightsEditAny)
@@ -158,6 +162,36 @@ func sharedActionAllowed(st *objectstore.Store, user, op string, src int64, fold
 		return can(dst, mapi.FrightsCreate)
 	case "unschedule":
 		return can(src, mapi.FrightsDeleteAny) && can(int64(mapi.PrivateFIDDraft), mapi.FrightsCreate)
+	}
+	return false
+}
+
+// sharedBulkAllowed authorizes a bulk (multi-select) op in a shared mailbox. Every
+// selected message sits in the same source folder, so one folder-rights check
+// gates the whole batch: marking read/unread, flagging, and categorizing need
+// EditAny; junk/delete/move need DeleteAny on the source plus Create on the
+// destination. An unknown op denies. A store owner clears every check.
+func sharedBulkAllowed(st *objectstore.Store, user, op string, src int64, folders []objectstore.FolderInfo, r *http.Request) bool {
+	can := func(fid int64, need uint32) bool { return hasFolderRight(st, user, fid, need) }
+	switch op {
+	case "read", "unread", "flag", "unflag", "categorize":
+		return can(src, mapi.FrightsEditAny)
+	case "junk":
+		if src == int64(mapi.PrivateFIDJunk) {
+			return true
+		}
+		return can(src, mapi.FrightsDeleteAny) && can(int64(mapi.PrivateFIDJunk), mapi.FrightsCreate)
+	case "delete":
+		if src == int64(mapi.PrivateFIDDeletedItems) {
+			return can(src, mapi.FrightsDeleteAny)
+		}
+		return can(src, mapi.FrightsDeleteAny) && can(int64(mapi.PrivateFIDDeletedItems), mapi.FrightsCreate)
+	case "move":
+		dst, ok := parseDst(r, folders)
+		if !ok || dst == src {
+			return true
+		}
+		return can(src, mapi.FrightsDeleteAny) && can(dst, mapi.FrightsCreate)
 	}
 	return false
 }

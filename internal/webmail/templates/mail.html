@@ -143,8 +143,8 @@
 <div class="empty">No messages in this folder.</div>
 {{end}}
 {{else if .Messages}}
-{{if not .Mbox}}
-<form id="bulkform" method="post" action="/bulk" class="bulkbar">
+{{if not .ReadOnly}}
+<form id="bulkform" method="post" action="/bulk{{if .Mbox}}?mbox={{.Mbox}}{{end}}" class="bulkbar">
   <input type="hidden" name="folder" value="{{.Current}}">
   <span class="bulkcount"><span id="bulkcount">0</span> selected</span>
   <button type="submit" name="op" value="read">Mark read</button>
@@ -153,20 +153,20 @@
   <button type="submit" name="op" value="unflag">Clear flag</button>
   <button type="submit" name="op" value="junk">Junk</button>
   <button type="submit" name="op" value="delete" class="danger" onclick="return confirm('Delete the selected messages?')">Delete</button>
-  {{if .Folders}}
-  <select name="dst" aria-label="Move to folder">{{range .Folders}}<option value="{{.ID}}">{{.Path}}</option>{{end}}</select>
+  {{if .MoveTargets}}
+  <select name="dst" aria-label="Move to folder">{{range .MoveTargets}}<option value="{{.ID}}">{{.Path}}</option>{{end}}</select>
   <button type="submit" name="op" value="move">Move</button>
   {{end}}
   {{if .Categories}}
   <select name="cat" aria-label="Category">{{range .Categories}}<option value="{{.Name}}">{{.Name}}</option>{{end}}</select>
   <button type="submit" name="op" value="categorize">Categorize</button>
   {{end}}
-  <button type="submit" formaction="/export" title="Download selected as a zip of .eml files">Export</button>
+  <button type="submit" formaction="/export{{if .Mbox}}?mbox={{.Mbox}}{{end}}" title="Download selected as a zip of .eml files">Export</button>
 </form>
 {{end}}
 <table class="messages density-{{.Density}}">
   <thead><tr>
-    <th class="selcol">{{if not .Mbox}}<input type="checkbox" id="selall" aria-label="Select all on page">{{end}}</th>
+    <th class="selcol">{{if not .ReadOnly}}<input type="checkbox" id="selall" aria-label="Select all on page">{{end}}</th>
     <th class="iconcol"></th>
     {{range .Columns}}<th class="sortcol{{if .Active}} active{{end}}"><a href="/mail?folder={{$.Current}}&sort={{.Key}}&dir={{.NextDir}}&filter={{$.Filter}}&density={{$.Density}}&preview={{$.PreviewPane}}&page=1{{if $.Mbox}}&mbox={{$.Mbox}}{{end}}">{{.Label}}{{if .Active}} {{.Arrow}}{{end}}</a></th>{{end}}
     <th></th>
@@ -187,7 +187,7 @@
 
 {{define "messagerow"}}
 <tr id="msg-{{.UID}}" class="{{if not .Seen}}unread{{end}}{{if .Flagged}} flagged{{end}}">
-  <td class="selcol">{{if not .Mbox}}<input type="checkbox" class="rowcheck" form="bulkform" name="uid" value="{{.UID}}" aria-label="Select">{{end}}</td>
+  <td class="selcol">{{if not .ReadOnly}}<input type="checkbox" class="rowcheck" form="bulkform" name="uid" value="{{.UID}}" aria-label="Select">{{end}}</td>
   <td class="icons">{{if not .Seen}}<span class="i-unread" title="Unread">&#9679;</span>{{end}}{{if .FlagComplete}}<span class="i-flagdone" title="Flag complete">&#10003;</span>{{else if .FlagColor}}<span class="i-flag flag-c{{.FlagColor}}" title="Flagged">&#9873;</span>{{end}}{{if .HasAttachment}}<span class="i-attach" title="Has attachment">&#128206;</span>{{end}}{{if .ImportanceHigh}}<span class="i-high" title="High importance">!</span>{{end}}{{if .ImportanceLow}}<span class="i-low" title="Low importance">&#8595;</span>{{end}}</td>
   <td class="from">{{.From}}</td>
   <td class="subject">{{if and .Draft (not .Mbox)}}<a href="/compose?action=editdraft&folder={{.Folder}}&uid={{.UID}}">{{.Subject}}</a>{{else}}<a class="subjlink" href="/message?folder={{.Folder}}&uid={{.UID}}{{if .Mbox}}&mbox={{.Mbox}}{{end}}">{{.Subject}}</a>{{end}}{{range .Categories}} <span class="cat-badge" style="background-color:{{.Color}}">{{.Name}}</span>{{end}}</td>
