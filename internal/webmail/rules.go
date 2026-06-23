@@ -228,6 +228,10 @@ func buildAction(r *http.Request) (mapi.ActionBlock, bool) {
 		if id, err := strconv.ParseInt(r.FormValue("actiontarget"), 10, 64); err == nil {
 			return objectstore.RuleCopyAction(id), true
 		}
+	case "forward":
+		if addr := strings.TrimSpace(r.FormValue("actionforward")); addr != "" {
+			return objectstore.RuleForwardAction(addr), true
+		}
 	}
 	return mapi.ActionBlock{}, false
 }
@@ -412,6 +416,8 @@ func describeActions(a mapi.RuleActions, folderNames map[int64]string) string {
 			parts = append(parts, "move it to "+moveTargetName(b, folderNames))
 		case mapi.OpCopy:
 			parts = append(parts, "copy it to "+moveTargetName(b, folderNames))
+		case mapi.OpForward:
+			parts = append(parts, "forward it to "+forwardTargets(b))
 		default:
 			parts = append(parts, "(custom action)")
 		}
@@ -420,6 +426,28 @@ func describeActions(a mapi.RuleActions, folderNames map[int64]string) string {
 		return "(no action)"
 	}
 	return strings.Join(parts, " and ")
+}
+
+// forwardTargets joins an OpForward action's destination addresses for a summary.
+func forwardTargets(b mapi.ActionBlock) string {
+	fd, ok := b.Data.(mapi.ForwardDelegateAction)
+	if !ok {
+		return "another address"
+	}
+	var addrs []string
+	for _, rb := range fd.Recipients {
+		for _, pv := range rb.PropVals {
+			if pv.Tag == mapi.PrSmtpAddress {
+				if s, ok := pv.Value.(string); ok && s != "" {
+					addrs = append(addrs, s)
+				}
+			}
+		}
+	}
+	if len(addrs) == 0 {
+		return "another address"
+	}
+	return strings.Join(addrs, ", ")
 }
 
 // moveTargetName resolves a move action's destination folder name for a summary.

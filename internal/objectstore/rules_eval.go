@@ -263,7 +263,10 @@ func (s *Store) RunRules(folderID int64) (RuleRunResult, error) {
 	}
 	for _, m := range msgs {
 		res.Evaluated++
-		acted, err := s.applyRulesToMessage(folderID, m, rules)
+		// "Apply rules now" deliberately discards forward requests: re-running rules
+		// over an existing folder must not re-send (mass-forward) old mail. Forwards
+		// fire only at delivery, through ApplyInboxRules.
+		acted, _, err := s.applyRulesToMessage(folderID, m, rules)
 		if err != nil {
 			return res, err
 		}
@@ -279,18 +282,20 @@ func (s *Store) RunRules(folderID int64) (RuleRunResult, error) {
 // delivery-time entry point. The message is already filed in the inbox before
 // this runs, so a caller on the delivery path must treat a returned error as
 // advisory (log and continue) rather than failing delivery — a rule must never
-// be able to make a sender retry. A mailbox with no inbox rules is a no-op.
-func (s *Store) ApplyInboxRules(m MessageInfo) error {
+// be able to make a sender retry. A mailbox with no inbox rules is a no-op. Any
+// forward actions are returned for the delivery path to enqueue (the store cannot
+// send mail); the caller applies the loop/abuse guards before sending.
+func (s *Store) ApplyInboxRules(m MessageInfo) ([]ForwardRequest, error) {
 	inbox := int64(mapi.PrivateFIDInbox)
 	rules, err := s.ListRules(inbox)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(rules) == 0 {
-		return nil
+		return nil, nil
 	}
-	_, err = s.applyRulesToMessage(inbox, m, rules)
-	return err
+	_, forwards, err := s.applyRulesToMessage(inbox, m, rules)
+	return forwards, err
 }
 
 // applyRulesToMessage runs a folder's pre-loaded rules against one message,
@@ -299,14 +304,15 @@ func (s *Store) ApplyInboxRules(m MessageInfo) error {
 // message's byte size is injected as PR_MESSAGE_SIZE so size conditions work
 // against a value the property bag does not itself store. It reports whether any
 // rule acted on the message.
-func (s *Store) applyRulesToMessage(folderID int64, m MessageInfo, rules []Rule) (bool, error) {
+func (s *Store) applyRulesToMessage(folderID int64, m MessageInfo, rules []Rule) (bool, []ForwardRequest, error) {
 	props, err := s.GetMessageProperties(m.ID)
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
 	props.Set(mapi.PrMessageSize, int32(m.Size))
 
 	acted := false
+	var forwards []ForwardRequest
 	for _, r := range rules {
 		if !r.Enabled() {
 			continue
@@ -314,34 +320,44 @@ func (s *Store) applyRulesToMessage(folderID int64, m MessageInfo, rules []Rule)
 		if !evalRestriction(r.Condition, props) {
 			continue
 		}
-		terminal, err := s.applyRuleActions(folderID, m.UID, r.Actions)
+		terminal, fwds, err := s.applyRuleActions(folderID, m.UID, r.Actions)
+		forwards = append(forwards, fwds...)
 		if err != nil {
-			return acted, err
+			return acted, forwards, err
 		}
 		acted = true
 		if terminal || r.State&mapi.RuleStateExitLevel != 0 {
-			return acted, nil
+			return acted, forwards, nil
 		}
 	}
-	return acted, nil
+	return acted, forwards, nil
 }
 
 // applyRuleActions applies a matched rule's action blocks to a message in
 // srcFolder. It returns terminal=true once an action moves or deletes the
 // message, since its uid in srcFolder is then no longer valid and no further
 // rule may run against it. Unsupported action types are skipped.
-func (s *Store) applyRuleActions(srcFolder int64, uid uint32, acts mapi.RuleActions) (bool, error) {
+func (s *Store) applyRuleActions(srcFolder int64, uid uint32, acts mapi.RuleActions) (bool, []ForwardRequest, error) {
+	var forwards []ForwardRequest
 	for _, b := range acts.Blocks {
 		switch b.Type {
 		case mapi.OpMarkAsRead:
 			cur, err := s.MessageFlags(srcFolder, uid)
 			if err != nil {
-				return false, err
+				return false, forwards, err
 			}
 			if cur&FlagSeen == 0 {
 				if err := s.SetMessageFlags(srcFolder, uid, cur|FlagSeen); err != nil {
-					return false, err
+					return false, forwards, err
 				}
+			}
+		case mapi.OpForward:
+			// Forward is non-terminal: the message stays in srcFolder. The send
+			// itself is the delivery path's job (the store cannot send mail); it
+			// sends the original received bytes, so the store collects only the
+			// addresses here.
+			if addrs := forwardAddresses(b.Data); len(addrs) > 0 {
+				forwards = append(forwards, ForwardRequest{To: addrs})
 			}
 		case mapi.OpCopy:
 			dst, ok := moveTargetFolder(b.Data)
@@ -349,7 +365,7 @@ func (s *Store) applyRuleActions(srcFolder int64, uid uint32, acts mapi.RuleActi
 				continue
 			}
 			if err := s.copyMessage(srcFolder, uid, dst); err != nil {
-				return false, err
+				return false, forwards, err
 			}
 			// Copy is non-terminal: the message stays in srcFolder, so later
 			// blocks and rules still apply to the original.
@@ -359,22 +375,22 @@ func (s *Store) applyRuleActions(srcFolder int64, uid uint32, acts mapi.RuleActi
 				continue
 			}
 			if err := s.moveMessage(srcFolder, uid, dst); err != nil {
-				return false, err
+				return false, forwards, err
 			}
-			return true, nil
+			return true, forwards, nil
 		case mapi.OpDelete:
 			trash := int64(mapi.PrivateFIDDeletedItems)
 			if srcFolder == trash {
 				if err := s.DeleteMessage(srcFolder, uid); err != nil {
-					return false, err
+					return false, forwards, err
 				}
 			} else if err := s.moveMessage(srcFolder, uid, trash); err != nil {
-				return false, err
+				return false, forwards, err
 			}
-			return true, nil
+			return true, forwards, nil
 		}
 	}
-	return false, nil
+	return false, forwards, nil
 }
 
 // moveTargetFolder extracts the destination folder id from a same-store
@@ -541,4 +557,44 @@ func RuleCopyAction(targetFolderID int64) mapi.ActionBlock {
 		SameStore: true,
 		FolderEID: mapi.SVREID{FolderID: mapi.EID(uint64(targetFolderID))},
 	}}
+}
+
+// ForwardRequest is a forward a matched rule asked for: the addresses to send to.
+// The store collects these — it cannot send mail itself — and returns them to the
+// delivery path, which sends the ORIGINAL received message (not the store's
+// re-exported copy, which drops headers) after its loop/abuse guards. RunRules
+// ("apply rules now") discards them on purpose.
+type ForwardRequest struct {
+	To []string
+}
+
+// RuleForwardAction forwards (redirects) a matching message to the given
+// addresses: an OpForward block whose recipients carry their SMTP addresses.
+func RuleForwardAction(addresses ...string) mapi.ActionBlock {
+	recips := make([]mapi.RecipientBlock, 0, len(addresses))
+	for _, a := range addresses {
+		recips = append(recips, mapi.RecipientBlock{PropVals: []mapi.TaggedPropVal{
+			{Tag: mapi.PrSmtpAddress, Value: a},
+		}})
+	}
+	return mapi.ActionBlock{Type: mapi.OpForward, Data: mapi.ForwardDelegateAction{Recipients: recips}}
+}
+
+// forwardAddresses extracts the SMTP addresses from an OpForward action's data.
+func forwardAddresses(data any) []string {
+	fd, ok := data.(mapi.ForwardDelegateAction)
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, rb := range fd.Recipients {
+		for _, pv := range rb.PropVals {
+			if pv.Tag == mapi.PrSmtpAddress {
+				if s, ok := pv.Value.(string); ok && s != "" {
+					out = append(out, s)
+				}
+			}
+		}
+	}
+	return out
 }

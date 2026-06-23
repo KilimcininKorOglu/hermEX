@@ -1,6 +1,7 @@
 package mta
 
 import (
+	"bytes"
 	"database/sql"
 	"path/filepath"
 	"testing"
@@ -11,6 +12,81 @@ import (
 
 	_ "modernc.org/sqlite"
 )
+
+// TestDeliverForwardsViaRuleWithGuards proves the delivery-time forward action
+// sends through the OnRuleForward hook for ordinary mail (with the loop-break
+// marker stamped), and that the guards suppress forwarding a bounce, an
+// auto-submitted message, and an already-forwarded one — so a rule cannot become
+// a backscatter or mail-loop source.
+func TestDeliverForwardsViaRuleWithGuards(t *testing.T) {
+	mbox := filepath.Join(t.TempDir(), "alice")
+	st, err := objectstore.Open(mbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.AddRule(objectstore.Rule{
+		FolderID: int64(mapi.PrivateFIDInbox), Name: "forward urgent", State: mapi.RuleStateEnabled,
+		Condition: objectstore.RuleSubjectContains("urgent"),
+		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{objectstore.RuleForwardAction("boss@example.com")}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	type capture struct {
+		owner string
+		to    []string
+		raw   []byte
+	}
+	var got []capture
+	prev := OnRuleForward
+	OnRuleForward = func(owner string, to []string, raw []byte) {
+		got = append(got, capture{owner, to, raw})
+	}
+	t.Cleanup(func() { OnRuleForward = prev })
+
+	deliverMsg := func(from, subject, extra string) {
+		raw := "From: " + from + "\r\nTo: alice@test\r\nSubject: " + subject + "\r\n"
+		if extra != "" {
+			raw += extra + "\r\n"
+		}
+		raw += "\r\nbody\r\n"
+		envFrom := from
+		if subject == "urgent bounce" {
+			envFrom = "" // a bounce: null envelope sender
+		}
+		if err := deliver(nil, envFrom, "alice@test", mbox, []byte(raw), time.Now(), int64(mapi.PrivateFIDInbox)); err != nil {
+			t.Fatalf("deliver(%q): %v", subject, err)
+		}
+	}
+
+	// 1. Ordinary matching mail forwards, with the marker stamped.
+	deliverMsg("sender@example.com", "urgent ping", "")
+	if len(got) != 1 {
+		t.Fatalf("ordinary message: got %d forwards, want 1", len(got))
+	}
+	if got[0].owner != "alice@test" || len(got[0].to) != 1 || got[0].to[0] != "boss@example.com" {
+		t.Errorf("forward owner/to = %q/%v, want alice@test/[boss@example.com]", got[0].owner, got[0].to)
+	}
+	if !bytes.Contains(got[0].raw, []byte(forwardMarkerHeader)) {
+		t.Errorf("forwarded copy missing the loop-break marker header")
+	}
+
+	// 2-4. Each guarded message must NOT forward.
+	for _, c := range []struct {
+		name, subject, extra string
+	}{
+		{"bounce", "urgent bounce", ""},
+		{"auto-submitted", "urgent auto", "Auto-Submitted: auto-generated"},
+		{"already-forwarded", "urgent loop", forwardMarkerHeader + ": someone@else"},
+	} {
+		got = nil
+		deliverMsg("sender@example.com", c.subject, c.extra)
+		if len(got) != 0 {
+			t.Errorf("%s message was forwarded (%d), want 0 (guard must suppress it)", c.name, len(got))
+		}
+	}
+}
 
 // TestDeliverAppliesInboxRules proves the delivery path runs inbox rules: a
 // move rule fires on a matching incoming message, so it is filed in the target

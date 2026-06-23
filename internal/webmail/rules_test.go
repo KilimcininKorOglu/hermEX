@@ -204,6 +204,23 @@ func TestRulesAddCompoundCondition(t *testing.T) {
 	}
 }
 
+// TestRulesAddForwardAction adds a forward rule and checks the summary names the
+// forward address (the delivery-time send itself is exercised by the mta tests).
+func TestRulesAddForwardAction(t *testing.T) {
+	path := emptyMailbox(t)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+	postForm(t, c, ts.URL+"/rules", url.Values{
+		"action": {"add"}, "name": {"ForwardRule"},
+		"condfield": {"subject"}, "condvalue": {"urgent"},
+		"actiontype": {"forward"}, "actionforward": {"boss@hermex.test"},
+	})
+	_, body := get(t, c, ts.URL+"/rules")
+	if !strings.Contains(body, "forward it to boss@hermex.test") {
+		t.Errorf("rules page missing the forward-action summary:\n%s", body)
+	}
+}
+
 // TestRulesAddException adds a rule with an exception and checks the summary
 // renders the negated condition ("does not contain").
 func TestRulesAddException(t *testing.T) {

@@ -365,7 +365,7 @@ func TestApplyInboxRulesMalformedBlobIsError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := s.ApplyInboxRules(m); err == nil {
+	if _, err := s.ApplyInboxRules(m); err == nil {
 		t.Errorf("ApplyInboxRules should surface a malformed rule blob as an error, got nil")
 	}
 	if _, err := s.MessageByUID(inbox, m.UID); err != nil {
@@ -515,5 +515,37 @@ func TestRuleExceptionRoundTrips(t *testing.T) {
 	}
 	if msgs, _ := s.ListMessages(inbox); len(msgs) != 1 {
 		t.Errorf("inbox has %d, want 1 (the excepted invoice stays)", len(msgs))
+	}
+}
+
+// TestRuleForwardActionReturnsRequest checks a forward rule surfaces a
+// ForwardRequest (the store cannot send mail) carrying the address and the
+// message bytes, leaves the original in place (forward is non-terminal), and so
+// also de-risks ext's OpForward serialization (the address must round-trip).
+func TestRuleForwardActionReturnsRequest(t *testing.T) {
+	s := openSeededStore(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	m := deliverTo(t, s, inbox, ruleMsg("Project ping", "lead@acme.com", ""))
+
+	if _, err := s.AddRule(Rule{
+		FolderID: inbox, Name: "forward projects", State: mapi.RuleStateEnabled,
+		Condition: RuleSubjectContains("project"),
+		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{RuleForwardAction("boss@hermex.test")}},
+	}); err != nil {
+		t.Fatalf("AddRule: %v", err)
+	}
+
+	forwards, err := s.ApplyInboxRules(m)
+	if err != nil {
+		t.Fatalf("ApplyInboxRules: %v", err)
+	}
+	if len(forwards) != 1 {
+		t.Fatalf("got %d forward requests, want 1", len(forwards))
+	}
+	if len(forwards[0].To) != 1 || forwards[0].To[0] != "boss@hermex.test" {
+		t.Errorf("forward To = %v, want [boss@hermex.test] (address must round-trip)", forwards[0].To)
+	}
+	if _, err := s.MessageByUID(inbox, m.UID); err != nil {
+		t.Errorf("forwarded message should remain in inbox (forward is non-terminal): %v", err)
 	}
 }

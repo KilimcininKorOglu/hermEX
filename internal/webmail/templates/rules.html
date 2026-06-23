@@ -165,6 +165,7 @@ rulesPage sub-data; forms post to /rules and return to /settings?tab=rules. */}}
         <select name="actiontype" id="actiontype">
           <option value="move">Move it to folder</option>
           <option value="copy">Copy it to folder</option>
+          <option value="forward">Forward it to address</option>
           <option value="markread">Mark it as read</option>
           <option value="delete">Delete it</option>
         </select>
@@ -172,6 +173,9 @@ rulesPage sub-data; forms post to /rules and return to /settings?tab=rules. */}}
           <select name="actiontarget">
             {{range .Folders}}<option value="{{.ID}}">{{.Path}}</option>{{end}}
           </select>
+        </span>
+        <span class="action-input" data-action="forward">
+          <input type="email" name="actionforward" placeholder="forward@example.com">
         </span>
       </div>
       <div class="field">

@@ -177,6 +177,21 @@ func main() {
 	})
 	applyOutboundSettings(dir, outboundLimiter)
 	go runOutboundMaintenance(dir, outboundLimiter)
+
+	// Wire delivery-time inbox-rule forwarding to the relay spool, gated by the
+	// outbound abuse limiter (the per-user cap). Wired here, not in the mta package,
+	// to keep the store free of any send dependency (like OnMeetingRequest). The
+	// envelope sender is the forwarding owner so bounces return to them and the relay
+	// DKIM path signs for their domain; the loop/backscatter guards already ran.
+	mta.OnRuleForward = func(owner string, to []string, raw []byte) {
+		if !outboundLimiter.Allow(owner) {
+			log.Printf("hermex-mta: rule forward for <%s> deferred by the outbound cap", owner)
+			return
+		}
+		if err := spool.Enqueue(owner, to, raw, time.Now()); err != nil {
+			log.Printf("hermex-mta: enqueue rule forward for <%s>: %v", owner, err)
+		}
+	}
 	// Spam-history retention: how many of the most recent scored verdicts the
 	// spam_history table keeps. It is read at startup and re-read every minute so an
 	// admin's change applies without a restart.

@@ -650,7 +650,7 @@ func deliver(accounts directory.Accounts, from, rcptAddr, path string, raw []byt
 	if folder != int64(mapi.PrivateFIDInbox) {
 		return nil
 	}
-	applyInboxRules(st, info)
+	applyInboxRules(st, info, rcptAddr, from, raw)
 	// Automatic meeting-request processing runs before the out-of-office pass: when it
 	// answers a meeting request the mailbox must not also emit an OOF reply (the
 	// organizer gets a meeting response, not an auto-reply).
@@ -684,16 +684,47 @@ func autoProcessMeeting(accounts directory.Accounts, st *objectstore.Store, reci
 	return OnMeetingRequest(st, accounts, recipient, m.ID)
 }
 
-// applyInboxRules runs the mailbox's inbox rules against a just-delivered
-// message, swallowing any error or panic. See deliver for why a rule must never
-// surface an error onto the delivery path.
-func applyInboxRules(st *objectstore.Store, m objectstore.MessageInfo) {
+// forwardMarkerHeader is stamped onto a message hermEX forwards via an inbox rule,
+// so a redelivery of the same message is recognised and not forwarded again.
+const forwardMarkerHeader = "X-HermEX-Forwarded"
+
+// OnRuleForward, when set, sends a forward a delivery-time inbox rule asked for:
+// the forwarding mailbox owner, the recipients, and the marker-stamped message
+// bytes. It is wired by cmd/mta to the relay spool and gated by the outbound abuse
+// limiter; the indirection keeps the store free of any mail-send dependency and
+// breaks the store→relay import direction (like OnMeetingRequest).
+var OnRuleForward func(owner string, to []string, raw []byte)
+
+// applyInboxRules runs the mailbox's inbox rules against a just-delivered message,
+// swallowing any error or panic (see deliver for why a rule must never surface an
+// error onto the delivery path), then enqueues any forward the rules asked for.
+// Forwarding is guarded against backscatter and loops by REUSING the auto-reply
+// suppression test (never forward a bounce, auto-submitted, bulk/list, role-mailbox,
+// or self message) plus a marker header to break forward-to-forward loops; the
+// per-user send cap lives in the wired hook.
+func applyInboxRules(st *objectstore.Store, m objectstore.MessageInfo, owner, envelopeFrom string, raw []byte) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("mta: inbox rule pass panicked for uid %d, skipped: %v", m.UID, r)
 		}
 	}()
-	if err := st.ApplyInboxRules(m); err != nil {
+	forwards, err := st.ApplyInboxRules(m)
+	if err != nil {
 		log.Printf("mta: inbox rule pass failed for uid %d, skipped: %v", m.UID, err)
+	}
+	if OnRuleForward == nil || len(forwards) == 0 {
+		return
+	}
+	// The guards inspect the ORIGINAL received message — not the store's re-exported
+	// copy, which drops Auto-Submitted and our marker — and the forward sends those
+	// same original bytes (a faithful redirect). Never forward a bounce,
+	// auto-submitted, bulk/list, role-mailbox, self, or already-forwarded message.
+	msg, perr := mail.ReadMessage(bytes.NewReader(raw))
+	if perr != nil || autoReplySuppressed(msg.Header, envelopeFrom, owner) || msg.Header.Get(forwardMarkerHeader) != "" {
+		return
+	}
+	marked := append([]byte(forwardMarkerHeader+": "+owner+"\r\n"), raw...)
+	for _, fwd := range forwards {
+		OnRuleForward(owner, fwd.To, marked)
 	}
 }
