@@ -195,7 +195,7 @@ func TestRuleCopyActionIsNonTerminal(t *testing.T) {
 		t.Fatalf("AddRule markread: %v", err)
 	}
 
-	if _, err := s.RunRules(inbox); err != nil {
+	if _, err := s.RunRules(inbox, 0); err != nil {
 		t.Fatalf("RunRules: %v", err)
 	}
 
@@ -244,7 +244,7 @@ func TestRuleExitLevelStopsProcessing(t *testing.T) {
 		t.Fatalf("AddRule 2: %v", err)
 	}
 
-	if _, err := s.RunRules(inbox); err != nil {
+	if _, err := s.RunRules(inbox, 0); err != nil {
 		t.Fatalf("RunRules: %v", err)
 	}
 
@@ -296,7 +296,7 @@ func TestRunRulesEndToEnd(t *testing.T) {
 		t.Fatalf("AddRule 2: %v", err)
 	}
 
-	res, err := s.RunRules(inbox)
+	res, err := s.RunRules(inbox, 0)
 	if err != nil {
 		t.Fatalf("RunRules: %v", err)
 	}
@@ -365,7 +365,7 @@ func TestApplyInboxRulesMalformedBlobIsError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := s.ApplyInboxRules(m); err == nil {
+	if _, err := s.ApplyInboxRules(m, 0); err == nil {
 		t.Errorf("ApplyInboxRules should surface a malformed rule blob as an error, got nil")
 	}
 	if _, err := s.MessageByUID(inbox, m.UID); err != nil {
@@ -388,7 +388,7 @@ func TestRunRulesSkipsDisabled(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	res, err := s.RunRules(inbox)
+	res, err := s.RunRules(inbox, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -467,7 +467,7 @@ func TestCompoundRuleRoundTrips(t *testing.T) {
 		t.Fatalf("stored condition did not round-trip as ResAnd: %+v", rules[0].Condition)
 	}
 
-	if _, err := s.RunRules(inbox); err != nil {
+	if _, err := s.RunRules(inbox, 0); err != nil {
 		t.Fatalf("RunRules: %v", err)
 	}
 	// Only the both-match message moved to Filed; the subject-only one stayed.
@@ -506,7 +506,7 @@ func TestRuleExceptionRoundTrips(t *testing.T) {
 	if rules, _ := s.ListRules(inbox); len(rules) != 1 || rules[0].Condition.Type != mapi.ResAnd {
 		t.Fatalf("exception rule did not round-trip as a ResAnd condition")
 	}
-	if _, err := s.RunRules(inbox); err != nil {
+	if _, err := s.RunRules(inbox, 0); err != nil {
 		t.Fatalf("RunRules: %v", err)
 	}
 	// Only the non-excepted invoice moved.
@@ -535,7 +535,7 @@ func TestRuleForwardActionReturnsRequest(t *testing.T) {
 		t.Fatalf("AddRule: %v", err)
 	}
 
-	forwards, err := s.ApplyInboxRules(m)
+	forwards, err := s.ApplyInboxRules(m, 0)
 	if err != nil {
 		t.Fatalf("ApplyInboxRules: %v", err)
 	}
@@ -569,7 +569,7 @@ func TestRuleTagActionSetsCategory(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("AddRule: %v", err)
 	}
-	if _, err := s.RunRules(inbox); err != nil {
+	if _, err := s.RunRules(inbox, 0); err != nil {
 		t.Fatalf("RunRules: %v", err)
 	}
 	cats, err := s.GetCategories(m.ID)
@@ -581,5 +581,49 @@ func TestRuleTagActionSetsCategory(t *testing.T) {
 	}
 	if _, err := s.MessageByUID(inbox, m.UID); err != nil {
 		t.Errorf("categorized message should remain in inbox (tag is non-terminal): %v", err)
+	}
+}
+
+// TestRuleOOFActiveCondition checks the out-of-office-conditional: a rule gated on
+// RuleOOFActive fires only while OOF is active. With OOF off the message stays; with
+// OOF on it is moved. This also de-risks the synthetic PrOOFState injection and the
+// ResExist evaluation.
+func TestRuleOOFActiveCondition(t *testing.T) {
+	s := openSeededStore(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	filed, err := s.CreateFolder(nil, "Filed")
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	if _, err := s.AddRule(Rule{
+		FolderID: inbox, Name: "file while away", State: mapi.RuleStateEnabled,
+		Condition: RuleAll(RuleSubjectContains("urgent"), RuleOOFActive()),
+		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{RuleMoveAction(filed)}},
+	}); err != nil {
+		t.Fatalf("AddRule: %v", err)
+	}
+
+	// OOF off: the rule must not fire — the message stays in the inbox.
+	m1 := deliverTo(t, s, inbox, ruleMsg("urgent 1", "x@y.com", ""))
+	if _, err := s.ApplyInboxRules(m1, 1000); err != nil {
+		t.Fatalf("ApplyInboxRules (off): %v", err)
+	}
+	if _, err := s.MessageByUID(inbox, m1.UID); err != nil {
+		t.Errorf("with OOF off the OOF-conditional rule should not move the message: %v", err)
+	}
+
+	// OOF on: the rule fires — the message is moved out of the inbox.
+	if err := s.SetOOFSettings(OOFSettings{Enabled: true}); err != nil {
+		t.Fatalf("SetOOFSettings: %v", err)
+	}
+	m2 := deliverTo(t, s, inbox, ruleMsg("urgent 2", "x@y.com", ""))
+	if _, err := s.ApplyInboxRules(m2, 1000); err != nil {
+		t.Fatalf("ApplyInboxRules (on): %v", err)
+	}
+	if _, err := s.MessageByUID(inbox, m2.UID); err == nil {
+		t.Errorf("with OOF on the rule should move the message out of the inbox")
+	}
+	if msgs, _ := s.ListMessages(filed); len(msgs) != 1 {
+		t.Errorf("Filed has %d, want 1 (moved while OOF active)", len(msgs))
 	}
 }

@@ -204,6 +204,23 @@ func TestRulesAddCompoundCondition(t *testing.T) {
 	}
 }
 
+// TestRulesAddOOFOnly adds a rule gated on out-of-office and checks the summary
+// renders the away condition.
+func TestRulesAddOOFOnly(t *testing.T) {
+	path := emptyMailbox(t)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+	postForm(t, c, ts.URL+"/rules", url.Values{
+		"action": {"add"}, "name": {"AwayRule"},
+		"condfield": {"subject"}, "condvalue": {"urgent"},
+		"oofonly": {"on"}, "actiontype": {"markread"},
+	})
+	_, body := get(t, c, ts.URL+"/rules")
+	if !strings.Contains(body, "you are out of office") {
+		t.Errorf("rules page missing the out-of-office condition summary:\n%s", body)
+	}
+}
+
 // TestRulesAddCategorizeAction adds a categorize rule and checks the summary
 // names the category (the store-side apply is exercised by the objectstore tests).
 func TestRulesAddCategorizeAction(t *testing.T) {

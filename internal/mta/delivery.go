@@ -650,7 +650,7 @@ func deliver(accounts directory.Accounts, from, rcptAddr, path string, raw []byt
 	if folder != int64(mapi.PrivateFIDInbox) {
 		return nil
 	}
-	applyInboxRules(st, info, rcptAddr, from, raw)
+	applyInboxRules(st, info, rcptAddr, from, raw, received)
 	// Automatic meeting-request processing runs before the out-of-office pass: when it
 	// answers a meeting request the mailbox must not also emit an OOF reply (the
 	// organizer gets a meeting response, not an auto-reply).
@@ -702,13 +702,13 @@ var OnRuleForward func(owner string, to []string, raw []byte)
 // suppression test (never forward a bounce, auto-submitted, bulk/list, role-mailbox,
 // or self message) plus a marker header to break forward-to-forward loops; the
 // per-user send cap lives in the wired hook.
-func applyInboxRules(st *objectstore.Store, m objectstore.MessageInfo, owner, envelopeFrom string, raw []byte) {
+func applyInboxRules(st *objectstore.Store, m objectstore.MessageInfo, owner, envelopeFrom string, raw []byte, received time.Time) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("mta: inbox rule pass panicked for uid %d, skipped: %v", m.UID, r)
 		}
 	}()
-	forwards, err := st.ApplyInboxRules(m)
+	forwards, err := st.ApplyInboxRules(m, received.Unix())
 	if err != nil {
 		log.Printf("mta: inbox rule pass failed for uid %d, skipped: %v", m.UID, err)
 	}

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
@@ -122,7 +123,7 @@ func (s *Server) handleRulesSubmit(w http.ResponseWriter, r *http.Request) {
 	case "movedown":
 		reorderRule(st, r.FormValue("id"), +1)
 	case "run":
-		res, err := st.RunRules(rulesFolder)
+		res, err := st.RunRules(rulesFolder, time.Now().Unix())
 		if err != nil {
 			http.Redirect(w, r, "/settings?tab=rules&err=run", http.StatusSeeOther)
 			return
@@ -179,6 +180,10 @@ func buildCondition(r *http.Request) (mapi.Restriction, bool) {
 	// NOT, so the message must satisfy the condition AND not the exception.
 	if exc, okx := buildConditionN(r, "x"); okx {
 		cond = objectstore.RuleAll(cond, objectstore.RuleNot(exc))
+	}
+	// "Only while I am out of office" gates the whole rule on the away state.
+	if r.FormValue("oofonly") == "on" {
+		cond = objectstore.RuleAll(cond, objectstore.RuleOOFActive())
 	}
 	return cond, true
 }
@@ -342,6 +347,10 @@ func describeCondition(r mapi.Restriction) string {
 			return "(custom condition)"
 		}
 		return describeNegated(inner)
+	case mapi.ResExist:
+		if e, ok := r.Value.(mapi.ExistRestriction); ok && e.PropTag == mapi.PrOOFState {
+			return "you are out of office"
+		}
 	case mapi.ResContent:
 		c, ok := r.Value.(mapi.ContentRestriction)
 		if !ok {

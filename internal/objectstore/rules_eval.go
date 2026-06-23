@@ -248,7 +248,7 @@ type RuleRunResult struct {
 // on-demand entry point (a user's "apply rules now"); incoming mail is processed
 // per-message as it is delivered. A move or delete is terminal for that message:
 // once it leaves the folder, no further rule is evaluated against it.
-func (s *Store) RunRules(folderID int64) (RuleRunResult, error) {
+func (s *Store) RunRules(folderID int64, nowUnix int64) (RuleRunResult, error) {
 	var res RuleRunResult
 	rules, err := s.ListRules(folderID)
 	if err != nil {
@@ -261,12 +261,13 @@ func (s *Store) RunRules(folderID int64) (RuleRunResult, error) {
 	if err != nil {
 		return res, err
 	}
+	oofActive := s.oofActive(nowUnix)
 	for _, m := range msgs {
 		res.Evaluated++
 		// "Apply rules now" deliberately discards forward requests: re-running rules
 		// over an existing folder must not re-send (mass-forward) old mail. Forwards
 		// fire only at delivery, through ApplyInboxRules.
-		acted, _, err := s.applyRulesToMessage(folderID, m, rules)
+		acted, _, err := s.applyRulesToMessage(folderID, m, rules, oofActive)
 		if err != nil {
 			return res, err
 		}
@@ -285,7 +286,7 @@ func (s *Store) RunRules(folderID int64) (RuleRunResult, error) {
 // be able to make a sender retry. A mailbox with no inbox rules is a no-op. Any
 // forward actions are returned for the delivery path to enqueue (the store cannot
 // send mail); the caller applies the loop/abuse guards before sending.
-func (s *Store) ApplyInboxRules(m MessageInfo) ([]ForwardRequest, error) {
+func (s *Store) ApplyInboxRules(m MessageInfo, nowUnix int64) ([]ForwardRequest, error) {
 	inbox := int64(mapi.PrivateFIDInbox)
 	rules, err := s.ListRules(inbox)
 	if err != nil {
@@ -294,8 +295,19 @@ func (s *Store) ApplyInboxRules(m MessageInfo) ([]ForwardRequest, error) {
 	if len(rules) == 0 {
 		return nil, nil
 	}
-	_, forwards, err := s.applyRulesToMessage(inbox, m, rules)
+	_, forwards, err := s.applyRulesToMessage(inbox, m, rules, s.oofActive(nowUnix))
 	return forwards, err
+}
+
+// oofActive reports whether the mailbox's out-of-office is active at nowUnix,
+// reading the stored OOF settings. It fails closed (not active) on a read error so
+// an OOF-conditional rule simply does not fire rather than firing erroneously.
+func (s *Store) oofActive(nowUnix int64) bool {
+	oof, err := s.GetOOFSettings()
+	if err != nil {
+		return false
+	}
+	return oof.OOFActive(nowUnix)
 }
 
 // applyRulesToMessage runs a folder's pre-loaded rules against one message,
@@ -304,12 +316,17 @@ func (s *Store) ApplyInboxRules(m MessageInfo) ([]ForwardRequest, error) {
 // message's byte size is injected as PR_MESSAGE_SIZE so size conditions work
 // against a value the property bag does not itself store. It reports whether any
 // rule acted on the message.
-func (s *Store) applyRulesToMessage(folderID int64, m MessageInfo, rules []Rule) (bool, []ForwardRequest, error) {
+func (s *Store) applyRulesToMessage(folderID int64, m MessageInfo, rules []Rule, oofActive bool) (bool, []ForwardRequest, error) {
 	props, err := s.GetMessageProperties(m.ID)
 	if err != nil {
 		return false, nil, err
 	}
 	props.Set(mapi.PrMessageSize, int32(m.Size))
+	// Inject the out-of-office marker exactly when OOF is active, so a RuleOOFActive
+	// (ResExist) condition gates its rule on the away state.
+	if oofActive {
+		props.Set(mapi.PrOOFState, true)
+	}
 
 	acted := false
 	var forwards []ForwardRequest
@@ -549,6 +566,15 @@ func RuleSizeAtLeast(bytes int) mapi.Restriction {
 		PropTag: mapi.PrMessageSize,
 		PropVal: mapi.TaggedPropVal{Tag: mapi.PrMessageSize, Value: int32(bytes)},
 	}}
+}
+
+// RuleOOFActive matches only while the mailbox's out-of-office is active. The
+// delivery/run path injects PrOOFState into the evaluated property bag exactly when
+// OOF is on (and within its window), so this existence test gates a rule on it.
+// PrOOFState is never a real message property, so the synthetic marker cannot
+// collide with one a message carries.
+func RuleOOFActive() mapi.Restriction {
+	return mapi.Restriction{Type: mapi.ResExist, Value: mapi.ExistRestriction{PropTag: mapi.PrOOFState}}
 }
 
 // RuleMarkReadAction marks a matching message as read.
