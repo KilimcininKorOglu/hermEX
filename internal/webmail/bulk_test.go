@@ -62,6 +62,29 @@ func TestBulkMarkReadUnread(t *testing.T) {
 	}
 }
 
+// TestMarkAllRead checks that POST /mark-all-read sets \Seen on every unread
+// message in the folder without a selection, and leaves an already-read one read.
+func TestMarkAllRead(t *testing.T) {
+	path := emptyMailbox(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	a := seedMsg(t, path, inbox, "a", "", "body", 100, 0)
+	b := seedMsg(t, path, inbox, "b", "", "body", 100, 0)
+	c := seedMsg(t, path, inbox, "c", "", "body", 100, objectstore.FlagSeen)
+	ts := newTestServer(t, path)
+	cl := authedClient(t, ts)
+
+	postForm(t, cl, ts.URL+"/mark-all-read", url.Values{"folder": {"INBOX"}})
+
+	for _, m := range []struct {
+		name string
+		uid  uint32
+	}{{"a", a}, {"b", b}, {"c", c}} {
+		if msgFlags(t, path, inbox, m.uid)&objectstore.FlagSeen == 0 {
+			t.Errorf("%s not marked read after mark-all-read", m.name)
+		}
+	}
+}
+
 // TestBulkDelete checks that bulk delete moves the selected messages from the
 // Inbox to Deleted Items (the same to-Trash semantics as the single-message op).
 func TestBulkDelete(t *testing.T) {

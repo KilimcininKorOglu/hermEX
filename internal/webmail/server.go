@@ -99,6 +99,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /smime", s.handleSmimeSubmit)
 	mux.HandleFunc("POST /action", s.handleAction)
 	mux.HandleFunc("POST /bulk", s.handleBulk)
+	mux.HandleFunc("POST /mark-all-read", s.handleMarkAllRead)
 	mux.HandleFunc("POST /export", s.handleExport)
 	mux.HandleFunc("POST /folder", s.handleFolder)
 	mux.HandleFunc("GET /public-folders", s.handlePublicFolders)

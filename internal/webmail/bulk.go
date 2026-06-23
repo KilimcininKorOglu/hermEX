@@ -71,6 +71,63 @@ func (s *Server) handleBulk(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, withMbox("/mail?folder="+url.QueryEscape(folder), mbox), http.StatusSeeOther)
 }
 
+// handleMarkAllRead marks every unread message in a folder as read in one action
+// (the reference's "Mark all as read"), without requiring a selection. It mirrors
+// handleBulk's mailbox resolution and shared-write authorization — marking read is
+// the "read" op, which needs FrightsEditAny on a shared folder — then sets the seen
+// flag on each unread message best-effort, skipping the ones already read.
+func (s *Server) handleMarkAllRead(w http.ResponseWriter, r *http.Request) {
+	sess, ok := s.sessionFrom(r)
+	if !ok {
+		http.Error(w, "not authenticated", http.StatusUnauthorized)
+		return
+	}
+	mbox := mboxParam(r)
+	var st *objectstore.Store
+	var err error
+	if mbox == "" {
+		if st, err = objectstore.Open(sess.mailboxPath); err != nil {
+			http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		var addr string
+		var sok bool
+		if st, addr, sok = s.openSharedFor(sess, mbox); !sok {
+			http.NotFound(w, r)
+			return
+		}
+		mbox = addr
+	}
+	defer st.Close()
+	folders, err := st.ListFolders()
+	if err != nil {
+		http.Error(w, "cannot read folders", http.StatusInternalServerError)
+		return
+	}
+	folder := r.FormValue("folder")
+	folderID, found := resolveFolder(folders, folder)
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	if mbox != "" && !sharedBulkAllowed(st, sess.user, "read", folderID, folders, r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	msgs, err := st.ListMessages(folderID)
+	if err != nil {
+		http.Error(w, "cannot read messages", http.StatusInternalServerError)
+		return
+	}
+	for _, m := range msgs {
+		if m.Flags&objectstore.FlagSeen == 0 {
+			st.SetMessageFlags(folderID, m.UID, m.Flags|objectstore.FlagSeen)
+		}
+	}
+	http.Redirect(w, r, withMbox("/mail?folder="+url.QueryEscape(folder), mbox), http.StatusSeeOther)
+}
+
 // applyBulk performs a single bulk op on one message, best-effort: an error on
 // one message does not abort the batch (the redirect reflects whatever applied).
 func applyBulk(st *objectstore.Store, folders []objectstore.FolderInfo, folderID int64, uid uint32, op string, r *http.Request) {
