@@ -30,10 +30,7 @@ func (s *Server) sessionViews() []sessionView {
 		if rec.EndedAt > 0 {
 			status = "Ended"
 		}
-		age := now - rec.LastUpdate
-		if age < 0 {
-			age = 0
-		}
+		age := max(now-rec.LastUpdate, 0)
 		out = append(out, sessionView{
 			User: rec.Username, IP: rec.IP, DeviceType: rec.DeviceType, DeviceID: rec.DeviceID,
 			Command: rec.Command, ASVersion: rec.ASVersion, Push: rec.Push, AgeSec: age, Status: status,

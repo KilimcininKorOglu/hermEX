@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"maps"
 	"net/http"
 	"strconv"
 
@@ -32,9 +33,7 @@ func (s *Server) dkimData(domain string) map[string]any {
 // dkimPanel re-renders the DKIM panel fragment for a domain with a notice.
 func (s *Server) dkimPanel(w http.ResponseWriter, r *http.Request, dd directory.DomainDetail, notice string) {
 	data := map[string]any{"Domain": dd, "CSRF": csrfCookieValue(r), "DKIMNotice": notice}
-	for k, v := range s.dkimData(dd.Name) {
-		data[k] = v
-	}
+	maps.Copy(data, s.dkimData(dd.Name))
 	s.render(w, "dkim-panel", data)
 }
 

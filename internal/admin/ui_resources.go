@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"maps"
 	"net/http"
 	"strconv"
 
@@ -106,9 +107,7 @@ func (s *Server) handleUIDomainDetail(w http.ResponseWriter, r *http.Request) {
 		"DomainGroups":   groups,
 		"SpamThreshold":  spamThreshold,
 	}
-	for k, v := range s.dkimData(dd.Name) {
-		data[k] = v
-	}
+	maps.Copy(data, s.dkimData(dd.Name))
 	// Prescribe the DNS records the domain owner must publish, reusing the DKIM
 	// record already merged above (empty when no key exists yet) and adding the
 	// MTA-STS/TLSRPT records when publishing is enabled.
