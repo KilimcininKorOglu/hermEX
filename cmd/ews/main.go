@@ -60,8 +60,8 @@ func main() {
 	srv.Spool = spool
 	// EWS SOAP request-body cap: read at startup and re-read every minute so an admin's
 	// change applies without a restart; 0 keeps the built-in default.
-	applyEWSSizeLimit(dir)
-	go runEWSSizeMaintenance(dir)
+	applyEWSSizeLimit(dir.GetSizeLimits, ews.SetMaxRequestBody)
+	go runEWSSizeMaintenance(dir.GetSizeLimits, ews.SetMaxRequestBody)
 	addr := cfg.EWSAddr
 	if addr == "" {
 		addr = ":8080"
@@ -86,8 +86,8 @@ func main() {
 // applyEWSSizeLimit reads the stored EWS request-body cap and applies it. A missing row
 // or a read error leaves the cap unchanged, so a settings failure never shrinks it
 // unexpectedly.
-func applyEWSSizeLimit(dir *directory.SQLDirectory) {
-	s, found, err := dir.GetSizeLimits()
+func applyEWSSizeLimit(read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
+	s, found, err := read()
 	if err != nil {
 		log.Printf("hermex-ews: size limits read failed, leaving the request cap unchanged: %v", err)
 		return
@@ -95,15 +95,15 @@ func applyEWSSizeLimit(dir *directory.SQLDirectory) {
 	if !found {
 		return
 	}
-	ews.SetMaxRequestBody(s.EWSRequestBytes)
+	setRequestBody(s.EWSRequestBytes)
 }
 
 // runEWSSizeMaintenance re-applies the EWS request-body cap every minute so an admin
 // change takes effect without a restart. It runs until the process exits.
-func runEWSSizeMaintenance(dir *directory.SQLDirectory) {
+func runEWSSizeMaintenance(read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for range tick.C {
-		applyEWSSizeLimit(dir)
+		applyEWSSizeLimit(read, setRequestBody)
 	}
 }

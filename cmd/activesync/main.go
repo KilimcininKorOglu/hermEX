@@ -61,8 +61,8 @@ func main() {
 	srv.Sessions = dir
 	// ActiveSync request-body cap: read at startup and re-read every minute so an
 	// admin's change applies without a restart; 0 keeps the built-in default.
-	applyActiveSyncSizeLimit(dir)
-	go runActiveSyncSizeMaintenance(dir)
+	applyActiveSyncSizeLimit(dir.GetSizeLimits, activesync.SetMaxRequestBody)
+	go runActiveSyncSizeMaintenance(dir.GetSizeLimits, activesync.SetMaxRequestBody)
 	addr := cfg.ActiveSyncAddr
 	if addr == "" {
 		addr = ":8080"
@@ -88,8 +88,8 @@ func main() {
 // applyActiveSyncSizeLimit reads the stored ActiveSync request-body cap and applies it.
 // A missing row or a read error leaves the cap unchanged, so a settings failure never
 // shrinks it unexpectedly.
-func applyActiveSyncSizeLimit(dir *directory.SQLDirectory) {
-	s, found, err := dir.GetSizeLimits()
+func applyActiveSyncSizeLimit(read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
+	s, found, err := read()
 	if err != nil {
 		log.Printf("hermex-activesync: size limits read failed, leaving the request cap unchanged: %v", err)
 		return
@@ -97,16 +97,16 @@ func applyActiveSyncSizeLimit(dir *directory.SQLDirectory) {
 	if !found {
 		return
 	}
-	activesync.SetMaxRequestBody(s.ActiveSyncRequestBytes)
+	setRequestBody(s.ActiveSyncRequestBytes)
 }
 
 // runActiveSyncSizeMaintenance re-applies the ActiveSync request-body cap every minute
 // so an admin change takes effect without a restart. It runs until the process exits.
-func runActiveSyncSizeMaintenance(dir *directory.SQLDirectory) {
+func runActiveSyncSizeMaintenance(read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for range tick.C {
-		applyActiveSyncSizeLimit(dir)
+		applyActiveSyncSizeLimit(read, setRequestBody)
 	}
 }
 
