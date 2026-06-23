@@ -38,6 +38,19 @@ type Config struct {
 	POP3SAddr      string   `json:"pop3s_addr"`      // POP3 implicit-TLS listen address (e.g. ":995"); empty disables
 	SMTPSAddr      string   `json:"smtps_addr"`      // SMTP implicit-TLS listen address (e.g. ":465"); empty disables
 
+	// Gateway front door. Only the gateway daemon reads these; every other daemon
+	// ignores them, so they stay optional in the one shared config. Each empty field
+	// falls back to a built-in default (see cmd/gateway resolveGateway): the listen
+	// address and the backend base URLs default to the compose service names.
+	GatewayAddr              string `json:"gateway_addr"`               // gateway listen address (default ":8080")
+	GatewayBackendMapi       string `json:"gateway_backend_mapi"`       // MAPI/RPC backend base URL (default "http://mapi:8080")
+	GatewayBackendEws        string `json:"gateway_backend_ews"`        // EWS/autodiscover backend base URL (default "http://ews:8080")
+	GatewayBackendActiveSync string `json:"gateway_backend_activesync"` // ActiveSync backend base URL (default "http://activesync:8080")
+	GatewayBackendDAV        string `json:"gateway_backend_dav"`        // CalDAV/CardDAV backend base URL (default "http://dav:8080")
+	GatewayBackendWebmail    string `json:"gateway_backend_webmail"`    // webmail backend base URL (default "http://webmail:8080")
+	ACMEStorage              string `json:"acme_storage"`               // CertMagic state dir in acme mode (default DataDir/acme)
+	ACMECARoot               string `json:"acme_ca_root"`               // PEM bundle trusting a private ACME CA (dev/pebble only; empty = system roots)
+
 	// Centralized logging (MongoDB). Empty MongoURI keeps logging to stderr only.
 	MongoURI         string `json:"mongo_uri"`          // MongoDB URI for the central log store (empty = stderr only)
 	LogDatabase      string `json:"log_database"`       // Mongo database holding the logs collection (default "hermex")

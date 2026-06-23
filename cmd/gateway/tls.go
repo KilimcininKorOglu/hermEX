@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"sort"
 	"time"
@@ -34,12 +33,12 @@ func gatewayTLS(cfg *config.Config, dir *directory.SQLDirectory, logger *logging
 	if settings.Mode == "acme" {
 		// CertMagic needs a writable directory for its account, certificate and lock
 		// state. It defaults under DataDir, but the gateway mounts the mailbox root
-		// read-only, so HERMEX_ACME_STORAGE points it at a dedicated writable mount.
-		storage := os.Getenv("HERMEX_ACME_STORAGE")
+		// read-only, so acme_storage points it at a dedicated writable mount.
+		storage := cfg.ACMEStorage
 		if storage == "" {
 			storage = filepath.Join(cfg.DataDir, "acme")
 		}
-		acme, err := tlscert.NewACME(cfg, storage, settings, os.Getenv("HERMEX_ACME_CA_ROOT"), logger)
+		acme, err := tlscert.NewACME(cfg, storage, settings, cfg.ACMECARoot, logger)
 		if err != nil {
 			return nil, nil, err
 		}

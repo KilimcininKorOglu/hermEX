@@ -220,28 +220,19 @@ services:
 
   # Single-FQDN front door: reverse-proxies to the HTTP daemons by path prefix so
   # one host serves autodiscover/EWS/MAPI/RPC/ActiveSync/DAV/webmail. Reads the
-  # shared config.json (DSN, TLS cert, logging) like the other daemons; its DB
-  # connection serves only the TLS certificate store. Terminates TLS with the
-  # config's tls_cert (the same dev cert as the mail daemons) and forwards to the
-  # backends over TLS, skipping verification on the internal hop.
+  # shared config.json for everything — DSN, TLS cert, logging, the listen address,
+  # the backend base URLs, and the acme storage/CA-root wiring (gateway_* and acme_*
+  # keys); its DB connection serves only the TLS certificate store. Terminates TLS
+  # with the config's tls_cert (the same dev cert as the mail daemons) and forwards
+  # to the backends over TLS, skipping verification on the internal hop. The dev
+  # config.json points the backends at https:// service names and the acme storage at
+  # the writable /data/acme mount; production leaves acme_ca_root empty.
   gateway:
     container_name: hermex-gateway
     build:
       context: .
       dockerfile: docker/Dockerfile
     command: ["/usr/local/bin/hermex-gateway", "-config", "/config/config.json"]
-    environment:
-      - HERMEX_GATEWAY_ADDR=:8080
-      - HERMEX_BACKEND_MAPI=https://mapi:8080
-      - HERMEX_BACKEND_EWS=https://ews:8080
-      - HERMEX_BACKEND_ACTIVESYNC=https://activesync:8080
-      - HERMEX_BACKEND_DAV=https://dav:8080
-      - HERMEX_BACKEND_WEBMAIL=https://webmail:8080
-      # acme-mode dev wiring (ignored in the default manual mode): CertMagic writes
-      # its state to a dedicated writable dir, and trusts the local pebble test CA's
-      # self-signed ACME endpoint. Production leaves HERMEX_ACME_CA_ROOT unset.
-      - HERMEX_ACME_STORAGE=/data/acme
-      - HERMEX_ACME_CA_ROOT=/pebble/minica.pem
     volumes:
       - ./docker-data/config.json:/config/config.json:ro
       - ./docker-data/mailboxes/tls:/data/mailboxes/tls:ro
