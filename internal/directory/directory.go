@@ -161,6 +161,10 @@ type GALEntry struct {
 	// a directory holds the raw bits and the NSPI layer applies them per surface.
 	// Zero means visible everywhere. The static directory never hides.
 	HiddenFrom uint32
+	// StorePath is the entry's object-store directory, used by the address book to
+	// serve the user's portrait (PR_EMS_AB_THUMBNAIL_PHOTO) from the mailbox. Empty
+	// for entries without a mailbox (e.g. distribution lists).
+	StorePath string
 }
 
 // GAL optionally searches the Global Address List — the directory's mailbox

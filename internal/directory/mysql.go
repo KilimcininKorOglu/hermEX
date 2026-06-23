@@ -331,7 +331,7 @@ func (d *SQLDirectory) SearchGAL(query string, limit int) ([]GALEntry, error) {
 	// per-surface filtering lives in the NSPI layer. The SQL only loads the raw
 	// mask; the address-book code applies the bit appropriate to each query.
 	const q = `
-SELECT u.username, u.display_type, dn.propval_str, hg.propval_str, hb.propval_str
+SELECT u.username, u.display_type, u.maildir, dn.propval_str, hg.propval_str, hb.propval_str
   FROM users u JOIN domains d ON u.domain_id = d.id
   LEFT JOIN user_properties dn ON dn.user_id = u.id AND dn.proptag = ? AND dn.order_id = 1
   LEFT JOIN user_properties hg ON hg.user_id = u.id AND hg.proptag = ? AND hg.order_id = 1
@@ -354,17 +354,21 @@ SELECT u.username, u.display_type, dn.propval_str, hg.propval_str, hb.propval_st
 	defer rows.Close()
 	var out []GALEntry
 	for rows.Next() {
-		var addr string
+		var addr, maildir string
 		var displayType int
 		var name, hideMask, hideBool sql.NullString
-		if err := rows.Scan(&addr, &displayType, &name, &hideMask, &hideBool); err != nil {
+		if err := rows.Scan(&addr, &displayType, &maildir, &name, &hideMask, &hideBool); err != nil {
 			return nil, err
 		}
 		display := addr
 		if name.Valid && name.String != "" {
 			display = name.String
 		}
-		out = append(out, GALEntry{DisplayName: display, Address: addr, DisplayType: displayType, HiddenFrom: hideMaskFromProps(hideMask, hideBool)})
+		var storePath string
+		if maildir != "" {
+			storePath = d.storePath(maildir)
+		}
+		out = append(out, GALEntry{DisplayName: display, Address: addr, DisplayType: displayType, HiddenFrom: hideMaskFromProps(hideMask, hideBool), StorePath: storePath})
 	}
 	return out, rows.Err()
 }

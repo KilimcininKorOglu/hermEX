@@ -102,12 +102,13 @@ var _ delegateWriter = (*directory.SQLDirectory)(nil)
 // dtDistlist); dispType is the raw recipient display type (rtUser/rtRoom/…) the
 // named address lists classify on.
 type galUser struct {
-	mid      uint32
-	display  string
-	smtp     string
-	hidden   uint32
-	dt       uint32
-	dispType int
+	mid       uint32
+	display   string
+	smtp      string
+	hidden    uint32
+	dt        uint32
+	dispType  int
+	storePath string // object-store dir, to serve the portrait; empty if no mailbox
 }
 
 // abDisplayType maps a directory object's display_type to the NSPI entry display
@@ -157,7 +158,7 @@ func (s *Server) snapshot() gal {
 	})
 	users := make([]galUser, len(entries))
 	for i, e := range entries {
-		users[i] = galUser{mid: midBase + uint32(i), display: e.DisplayName, smtp: e.Address, hidden: e.HiddenFrom, dt: abDisplayType(e.DisplayType), dispType: e.DisplayType}
+		users[i] = galUser{mid: midBase + uint32(i), display: e.DisplayName, smtp: e.Address, hidden: e.HiddenFrom, dt: abDisplayType(e.DisplayType), dispType: e.DisplayType, storePath: e.StorePath}
 	}
 	return gal{users: users}
 }

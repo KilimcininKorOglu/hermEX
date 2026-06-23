@@ -265,6 +265,10 @@ const (
 	PrEmsAbContainerID = PropTag(0xFFFD0003) // PtLong (PidTagAddressBookContainerId)
 	PrEmsAbIsMaster    = PropTag(0xFFFB000B) // PtBoolean (PidTagAddressBookIsMaster)
 	PrEmsAbMember      = PropTag(0x8009000D) // PtObject (PidTagAddressBookMember); a STAT container id selecting a list's members
+	// PrEmsAbThumbnailPhoto (PidTagThumbnailPhoto) is the address-book object's
+	// portrait as raw image bytes — what Outlook and OWA show for a GAL entry. The
+	// NSPI layer serves it from the mailbox's cross-protocol user-photo property.
+	PrEmsAbThumbnailPhoto = PropTag(0x8C9E0102) // PtBinary
 	// PrEmsAbPublicDelegates is a STAT container id selecting a mailbox's public
 	// delegates: GetMatches reads the delegate list of the entry at cur_rec, and
 	// ModLinkAtt edits the caller's own list (PidTagAddressBookPublicDelegates).

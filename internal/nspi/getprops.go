@@ -1,8 +1,11 @@
 package nspi
 
 import (
+	"slices"
+
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
 )
 
 // getPropsRequest is the decoded GetProps body ([MS-OXNSPI] 2.2.4 /
@@ -93,6 +96,13 @@ func (s *Server) getPropsCore(req getPropsRequest) getPropsResult {
 	if !req.hasTags {
 		return getPropsResult{result: ecSuccess, codePage: req.stat.codePage, row: bag}
 	}
+	// Serve the portrait lazily — only when explicitly requested, never folded into
+	// a table walk — by reading the mailbox's cross-protocol user-photo property.
+	if u.storePath != "" && slices.Contains(req.proptags, mapi.PrEmsAbThumbnailPhoto) {
+		if photo := userPhoto(u.storePath); photo != nil {
+			bag = append(bag, mapi.TaggedPropVal{Tag: mapi.PrEmsAbThumbnailPhoto, Value: photo})
+		}
+	}
 	row, hasErr := projectProps(bag, req.proptags)
 	result := ecSuccess
 	if hasErr {
@@ -120,6 +130,18 @@ func projectProps(bag mapi.PropertyValues, tags []mapi.PropTag) (row mapi.Proper
 // requested-but-absent property (its value is then the SCODE).
 func errorTag(tag mapi.PropTag) mapi.PropTag {
 	return mapi.PropTag(uint32(tag)&0xFFFF0000 | uint32(mapi.PtError))
+}
+
+// userPhoto reads a mailbox's portrait bytes from its object store, or nil when
+// none is set or the store cannot be opened.
+func userPhoto(storePath string) []byte {
+	st, err := objectstore.Open(storePath)
+	if err != nil {
+		return nil
+	}
+	defer st.Close()
+	photo, _ := st.UserPhoto()
+	return photo
 }
 
 // encodeGetProps frames a GetProps response: status + result + the echoed code
