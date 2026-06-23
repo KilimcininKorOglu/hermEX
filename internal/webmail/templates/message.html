@@ -68,6 +68,7 @@
   {{if .Attachments}}
   <div class="attachments">
     <strong>Attachments</strong>
+    <a class="download-all" href="/attachments?folder={{.Folder}}&amp;uid={{.UID}}{{if .Mbox}}&amp;mbox={{.Mbox}}{{end}}">Download all (zip)</a>
     <ul>
       {{range .Attachments}}
       <li><a href="/attachment?folder={{$.Folder}}&amp;uid={{$.UID}}&amp;part={{.Section}}{{if $.Mbox}}&amp;mbox={{$.Mbox}}{{end}}">{{.Filename}}</a>
