@@ -263,6 +263,42 @@ func TestEmptyTrashPermanent(t *testing.T) {
 	}
 }
 
+// favoriteFolders loads a mailbox's persisted favorite folder list.
+func favoriteFolders(t *testing.T, path string) []string {
+	t.Helper()
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	cfg, err := loadSettings(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cfg.FavoriteFolders
+}
+
+// TestFolderFavoriteToggle checks favoriting a folder pins it (persisted in
+// settings and shown in a sidebar Favorites section) and toggling again unpins it.
+func TestFolderFavoriteToggle(t *testing.T) {
+	path := emptyMailbox(t)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	folderPost(t, c, ts.URL, url.Values{"op": {"favorite"}, "folder": {"INBOX"}})
+	if favs := favoriteFolders(t, path); len(favs) != 1 || favs[0] != "INBOX" {
+		t.Fatalf("after favorite, favorites = %v, want [INBOX]", favs)
+	}
+	if _, body := get(t, c, ts.URL+"/mail?folder=INBOX"); !strings.Contains(body, `sidebar-heading">Favorites`) {
+		t.Errorf("sidebar did not render a Favorites section after favoriting:\n%s", body)
+	}
+
+	folderPost(t, c, ts.URL, url.Values{"op": {"favorite"}, "folder": {"INBOX"}})
+	if favs := favoriteFolders(t, path); len(favs) != 0 {
+		t.Errorf("after unfavorite, favorites = %v, want none", favs)
+	}
+}
+
 // TestFolderUnauthenticated checks /folder requires a session.
 func TestFolderUnauthenticated(t *testing.T) {
 	path := emptyMailbox(t)

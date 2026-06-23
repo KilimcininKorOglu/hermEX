@@ -204,6 +204,21 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 		cfg = defaultSettings()
 	}
 
+	// Mark and collect the user's favorite folders, shown pinned at the top of the
+	// sidebar. The main sidebar is always the own mailbox's, and favorites are
+	// personal, so they apply to it directly.
+	var favorites []folderView
+	fav := make(map[string]bool, len(cfg.FavoriteFolders))
+	for _, p := range cfg.FavoriteFolders {
+		fav[p] = true
+	}
+	for i := range folderViews {
+		if fav[folderViews[i].Path] {
+			folderViews[i].IsFavorite = true
+			favorites = append(favorites, folderViews[i])
+		}
+	}
+
 	// The message list reflects either the own mailbox or a shared mailbox the user
 	// selected (?mbox), validated and access-checked server-side. A shared folder is
 	// read-gated per FrightsReadAny so a delegate sees only what they may read.
@@ -236,6 +251,7 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 		User:            sess.user,
 		Current:         current,
 		Folders:         folderViews,
+		Favorites:       favorites,
 		Field:           "all",    // search-form defaults (scoped to the current folder)
 		Scope:           "folder", // until the user opens a cross-folder search
 		Sort:            params.Sort,

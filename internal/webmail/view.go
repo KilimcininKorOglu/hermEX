@@ -17,13 +17,14 @@ const (
 
 // folderView is one folder in the sidebar.
 type folderView struct {
-	ID     int64  // fixed folder id, used as the move/copy/CRUD target value
-	Name   string // leaf display name
-	Path   string // full hierarchical path, e.g. "Archive/2026"
-	Depth  int    // nesting level (0 = top-level), for sidebar indentation
-	IsUser bool   // user-created (id >= unassigned-start): rename/delete allowed
-	Total  int    // messages in the folder (sidebar badge; populated by the mail handler)
-	Unread int    // unread messages in the folder (sidebar badge)
+	ID         int64  // fixed folder id, used as the move/copy/CRUD target value
+	Name       string // leaf display name
+	Path       string // full hierarchical path, e.g. "Archive/2026"
+	Depth      int    // nesting level (0 = top-level), for sidebar indentation
+	IsUser     bool   // user-created (id >= unassigned-start): rename/delete allowed
+	Total      int    // messages in the folder (sidebar badge; populated by the mail handler)
+	Unread     int    // unread messages in the folder (sidebar badge)
+	IsFavorite bool   // the user pinned this folder as a favorite (own mailbox only)
 }
 
 // messageView is one row in the message list.
@@ -62,13 +63,14 @@ type categoryView struct {
 // shared search form rendered in the toolbar (empty/zero on the mail page; the
 // search page fills them in), so the form's defaults select correctly.
 type mailPage struct {
-	User     string
-	Current  string
-	Folders  []folderView
-	Messages []messageView
-	Query    string
-	Field    string
-	Scope    string
+	User      string
+	Current   string
+	Folders   []folderView
+	Favorites []folderView // the favorited subset of Folders, shown pinned at the top
+	Messages  []messageView
+	Query     string
+	Field     string
+	Scope     string
 	// Message-list state (#31). Sort/Dir/Filter are carried on every list link so
 	// pagination, sorting, and filtering compose; Page..NextPage drive the pager;
 	// Total/Unread are the current folder's counts shown in the toolbar.

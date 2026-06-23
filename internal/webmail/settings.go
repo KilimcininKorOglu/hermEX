@@ -67,6 +67,7 @@ type webmailSettings struct {
 	RequestReceiptDefault bool        `json:"requestReceiptDefault"` // pre-check "request read receipt" on a fresh compose
 	SafeSenders           []string    `json:"safeSenders"`           // addresses/domains allowed to load remote content in the reader
 	ConversationView      bool        `json:"conversationView"`      // group the message list into RFC 5256 conversation threads
+	FavoriteFolders       []string    `json:"favoriteFolders"`       // folder paths the user pinned as favorites in the sidebar
 }
 
 // settingsView augments the stored webmail preferences with the user's

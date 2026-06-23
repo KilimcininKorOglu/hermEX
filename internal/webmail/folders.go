@@ -2,6 +2,7 @@ package webmail
 
 import (
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -56,9 +57,40 @@ func (s *Server) handleFolder(w http.ResponseWriter, r *http.Request) {
 		s.deleteFolder(w, r, st, mbox)
 	case "empty":
 		s.emptyFolder(w, r, st, mbox)
+	case "favorite":
+		s.favoriteFolder(w, r, st, mbox)
 	default:
 		http.Error(w, "unknown folder action", http.StatusBadRequest)
 	}
+}
+
+// favoriteFolder toggles a folder in the user's personal favorites (stored in the
+// webmail settings), pinning or unpinning it at the top of the sidebar. Favorites
+// are own-mailbox only; the shared-mailbox path is rejected before reaching here.
+func (s *Server) favoriteFolder(w http.ResponseWriter, r *http.Request, st *objectstore.Store, mbox string) {
+	folder := r.FormValue("folder")
+	if folder == "" {
+		http.Error(w, "no folder", http.StatusBadRequest)
+		return
+	}
+	cfg, err := loadSettings(st)
+	if err != nil {
+		cfg = defaultSettings()
+	}
+	cfg.FavoriteFolders = toggleFavorite(cfg.FavoriteFolders, folder)
+	if err := saveSettings(st, cfg); err != nil {
+		http.Error(w, "cannot save favorites", http.StatusInternalServerError)
+		return
+	}
+	http.Redirect(w, r, mailboxRedirect(mbox), http.StatusSeeOther)
+}
+
+// toggleFavorite removes folder from the list if present, else appends it.
+func toggleFavorite(list []string, folder string) []string {
+	if i := slices.Index(list, folder); i >= 0 {
+		return slices.Delete(list, i, i+1)
+	}
+	return append(list, folder)
 }
 
 // emptyFolder removes every message from a folder: permanently from Deleted Items
