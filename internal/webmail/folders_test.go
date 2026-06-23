@@ -225,6 +225,44 @@ func TestFolderDeleteBuiltinRejected(t *testing.T) {
 	}
 }
 
+// TestEmptyFolderMovesToTrash checks that emptying a non-trash folder moves every
+// message to Deleted Items (recoverable), not permanent removal.
+func TestEmptyFolderMovesToTrash(t *testing.T) {
+	path := emptyMailbox(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	trash := int64(mapi.PrivateFIDDeletedItems)
+	seedMsg(t, path, inbox, "a", "", "body", 100, 0)
+	seedMsg(t, path, inbox, "b", "", "body", 100, 0)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	folderPost(t, c, ts.URL, url.Values{"op": {"empty"}, "folder": {"INBOX"}})
+
+	if n := len(folderMsgs(t, path, inbox)); n != 0 {
+		t.Errorf("Inbox has %d after empty, want 0", n)
+	}
+	if n := len(folderMsgs(t, path, trash)); n != 2 {
+		t.Errorf("Deleted Items has %d after emptying Inbox, want 2", n)
+	}
+}
+
+// TestEmptyTrashPermanent checks that emptying Deleted Items permanently removes
+// its messages — they do not loop back into Trash.
+func TestEmptyTrashPermanent(t *testing.T) {
+	path := emptyMailbox(t)
+	trash := int64(mapi.PrivateFIDDeletedItems)
+	seedMsg(t, path, trash, "x", "", "body", 100, 0)
+	seedMsg(t, path, trash, "y", "", "body", 100, 0)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	folderPost(t, c, ts.URL, url.Values{"op": {"empty"}, "folder": {"Deleted Items"}})
+
+	if n := len(folderMsgs(t, path, trash)); n != 0 {
+		t.Errorf("Deleted Items has %d after empty, want 0 (permanent)", n)
+	}
+}
+
 // TestFolderUnauthenticated checks /folder requires a session.
 func TestFolderUnauthenticated(t *testing.T) {
 	path := emptyMailbox(t)

@@ -54,9 +54,43 @@ func (s *Server) handleFolder(w http.ResponseWriter, r *http.Request) {
 		s.renameFolder(w, r, st, mbox)
 	case "delete":
 		s.deleteFolder(w, r, st, mbox)
+	case "empty":
+		s.emptyFolder(w, r, st, mbox)
 	default:
 		http.Error(w, "unknown folder action", http.StatusBadRequest)
 	}
+}
+
+// emptyFolder removes every message from a folder: permanently from Deleted Items
+// and Junk (where "empty" means discard), otherwise to Deleted Items (the same
+// to-Trash semantics as a single delete, so a misclick is recoverable). Built-in
+// folders are allowed here on purpose — emptying Trash/Junk is the point.
+func (s *Server) emptyFolder(w http.ResponseWriter, r *http.Request, st *objectstore.Store, mbox string) {
+	folders, err := st.ListFolders()
+	if err != nil {
+		http.Error(w, "cannot read folders", http.StatusInternalServerError)
+		return
+	}
+	folderID, found := resolveFolder(folders, r.FormValue("folder"))
+	if !found {
+		http.NotFound(w, r)
+		return
+	}
+	trash := int64(mapi.PrivateFIDDeletedItems)
+	permanent := folderID == trash || folderID == int64(mapi.PrivateFIDJunk)
+	msgs, err := st.ListMessages(folderID)
+	if err != nil {
+		http.Error(w, "cannot read messages", http.StatusInternalServerError)
+		return
+	}
+	for _, m := range msgs {
+		if permanent {
+			st.DeleteMessage(folderID, m.UID)
+		} else {
+			moveMessage(st, folderID, m.UID, trash)
+		}
+	}
+	http.Redirect(w, r, mailboxRedirect(mbox), http.StatusSeeOther)
 }
 
 // validFolderName trims and validates a folder name: non-empty and free of the

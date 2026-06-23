@@ -216,6 +216,16 @@ func sharedFolderAllowed(st *objectstore.Store, user, op string, r *http.Request
 			return true // a built-in id: the handler rejects it with its own 403
 		}
 		return hasFolderRight(st, user, id, mapi.FrightsOwner)
+	case "empty":
+		folders, err := st.ListFolders()
+		if err != nil {
+			return false
+		}
+		fid, found := resolveFolder(folders, r.FormValue("folder"))
+		if !found {
+			return false
+		}
+		return hasFolderRight(st, user, fid, mapi.FrightsDeleteAny)
 	}
 	return false
 }
