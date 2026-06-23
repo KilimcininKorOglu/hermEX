@@ -212,7 +212,7 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 		Categories:    cfg.Categories,
 		PreviewPane:   whitelist(orDefault(q.Get("preview"), cfg.PreviewPane), "none", "right", "bottom"),
 		Conversation:  params.Conversation,
-		PublicFolders: s.Pub != nil,
+		PublicFolders: s.listVisiblePublicFolders(sess),
 	}
 	if id, found := resolveFolder(folders, current); found {
 		if res, err := listFolderPage(st, id, current, params, cfg.Categories); err == nil {

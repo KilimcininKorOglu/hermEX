@@ -79,60 +79,57 @@ func (s *Server) publicTarget(sess *session, fid int64) (st *objectstore.Store, 
 	return st, name, true
 }
 
-// handlePublicFolders renders the public folders discovery page: the folders the
-// caller may see, plus the message list of the one addressed by ?fid. It opens
-// the caller's public store once for both the sidebar and the opened folder.
-func (s *Server) handlePublicFolders(w http.ResponseWriter, r *http.Request) {
-	sess, ok := s.sessionFrom(r)
-	if !ok {
-		http.Redirect(w, r, "/login", http.StatusSeeOther)
-		return
-	}
-	page := publicFoldersPage{User: sess.user}
+// listVisiblePublicFolders returns the public folders the caller may see (those
+// granting FrightsVisible) with live message counts — the data behind both the
+// mailbox sidebar's public-folders section and the public-folders browser.
+// Returns nil when public folders are unconfigured or the caller's domain has no
+// public store. The caller's domain is derived by the publicfolder service from
+// the authenticated user, never from the request.
+func (s *Server) listVisiblePublicFolders(sess *session) []publicFolderLink {
 	if s.Pub == nil {
-		s.render(w, "public_folders", page)
-		return
+		return nil
 	}
 	st, ok, err := s.Pub.OpenForCaller(sess.user)
-	if err != nil {
-		http.Error(w, "public folders unavailable", http.StatusInternalServerError)
-		return
-	}
-	if !ok { // the caller's domain has no public store
-		s.render(w, "public_folders", page)
-		return
+	if err != nil || !ok {
+		return nil
 	}
 	defer st.Close()
-
 	all, err := st.ListFolders()
 	if err != nil {
-		http.Error(w, "cannot read public folders", http.StatusInternalServerError)
-		return
+		return nil
 	}
-	readable := make(map[int64]bool)
+	var out []publicFolderLink
 	for _, f := range all {
 		rights, err := st.ResolvePermission(f.ID, sess.user)
 		if err != nil || rights&mapi.FrightsVisible == 0 {
 			continue
 		}
 		total, unread, _ := st.CountMessages(f.ID)
-		page.Folders = append(page.Folders, publicFolderLink{
+		out = append(out, publicFolderLink{
 			ID: f.ID, Name: f.DisplayName, Total: total, Unread: unread,
 			CanPost: rights&mapi.FrightsCreate != 0,
 		})
-		readable[f.ID] = rights&mapi.FrightsReadAny != 0
 	}
+	return out
+}
 
-	if fidStr := r.URL.Query().Get("fid"); fidStr != "" {
-		fid, err := strconv.ParseInt(fidStr, 10, 64)
-		if err == nil && readable[fid] {
-			name := ""
-			for _, f := range all {
-				if f.ID == fid {
-					name = f.DisplayName
-					break
-				}
-			}
+// handlePublicFolders renders the public folders browser: the folders the caller
+// may see, plus the message list of the one addressed by ?fid. The per-fid open
+// re-checks read access (via publicTarget) server-side, so a forged fid cannot
+// read a folder the caller may not.
+func (s *Server) handlePublicFolders(w http.ResponseWriter, r *http.Request) {
+	sess, ok := s.sessionFrom(r)
+	if !ok {
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+		return
+	}
+	page := publicFoldersPage{User: sess.user, Folders: s.listVisiblePublicFolders(sess)}
+
+	// An opened folder (?fid) re-checks read access server-side; a bad or
+	// unreadable fid simply shows the discovery list without an opened folder.
+	if fid, err := strconv.ParseInt(r.URL.Query().Get("fid"), 10, 64); err == nil {
+		if st, name, ok := s.publicTarget(sess, fid); ok {
+			defer st.Close()
 			params := listParams{Sort: "date", Dir: "desc", Filter: "all", Page: atoiDefault(r.URL.Query().Get("page"), 1)}
 			if res, err := listFolderPage(st, fid, name, params, nil); err == nil {
 				page.Current = name

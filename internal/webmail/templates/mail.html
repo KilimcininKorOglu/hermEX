@@ -27,6 +27,18 @@
       <input name="name" placeholder="New folder" aria-label="New folder name" required>
       <button type="submit">Create</button>
     </form>
+    {{if .PublicFolders}}
+    <div class="sidebar-section">
+      <div class="sidebar-heading">Public folders</div>
+      <nav>
+        {{range .PublicFolders}}
+        <div class="folder-item">
+          <a href="/public-folders?fid={{.ID}}">{{.Name}}{{if .Total}}<span class="fcount{{if .Unread}} has-unread{{end}}">{{if .Unread}}{{.Unread}}/{{end}}{{.Total}}</span>{{end}}</a>
+        </div>
+        {{end}}
+      </nav>
+    </div>
+    {{end}}
     <div class="account">{{.User}}<br><a href="/logout">Sign out</a></div>
   </aside>
   <main class="main">
@@ -35,7 +47,6 @@
       <a href="/compose" class="compose-btn">Compose</a>
       <a href="/import" class="import-btn">Import</a>
       <a href="/settings" class="import-btn">Settings</a>
-      {{if .PublicFolders}}<a href="/public-folders" class="import-btn">Public folders</a>{{end}}
       {{if eq .Filter "unread"}}
       <a class="filter-toggle active" href="/mail?folder={{.Current}}&sort={{.Sort}}&dir={{.Dir}}&filter=all&density={{.Density}}&preview={{.PreviewPane}}&page=1">Unread only</a>
       {{else}}

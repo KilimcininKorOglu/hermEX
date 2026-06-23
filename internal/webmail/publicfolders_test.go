@@ -92,9 +92,14 @@ func TestWebmailPublicFolders(t *testing.T) {
 
 	c := authedClient(t, ts)
 
-	// The mail toolbar links to the public folders browser.
-	if code, body := get(t, c, ts.URL+"/mail"); code != 200 || !strings.Contains(body, `href="/public-folders"`) {
-		t.Fatalf("GET /mail (%d): public folders link present? %v", code, strings.Contains(body, `href="/public-folders"`))
+	// The mail sidebar lists the visible public folders, each linking into the
+	// browser; a folder alice cannot see never appears there.
+	if code, body := get(t, c, ts.URL+"/mail"); code != 200 ||
+		!strings.Contains(body, "Announcements") ||
+		!strings.Contains(body, `href="/public-folders?fid=`+strconv.FormatInt(ann, 10)+`"`) {
+		t.Fatalf("GET /mail (%d): visible public folder in the sidebar? %v", code, strings.Contains(body, "Announcements"))
+	} else if strings.Contains(body, "Staff") {
+		t.Errorf("mail sidebar leaked Staff (alice has no grant)")
 	}
 
 	// Discovery lists the visible folder, hides the one alice cannot see, and never
