@@ -9,7 +9,18 @@
     <button type="button" class="settings-tab{{if eq .ActiveTab "smime"}} active{{end}}" data-tab="smime">Certificates</button>
     {{if .ChgPasswd}}<button type="button" class="settings-tab{{if eq .ActiveTab "password"}} active{{end}}" data-tab="password">Password</button>{{end}}
   </nav>
-  <section class="settings-panel{{if eq .ActiveTab "general"}} active{{end}}" data-tab="general">{{template "tab-general" .General}}</section>
+  <section class="settings-panel{{if eq .ActiveTab "general"}} active{{end}}" data-tab="general">
+    <div class="mailbox-usage">
+      <h2>Mailbox usage</h2>
+      {{if .Usage.Limited}}
+      <p>{{.Usage.Used}} of {{.Usage.Quota}} used ({{.Usage.Percent}}%)</p>
+      <progress max="100" value="{{.Usage.Percent}}"></progress>
+      {{else}}
+      <p>{{.Usage.Used}} used (no quota set)</p>
+      {{end}}
+    </div>
+    {{template "tab-general" .General}}
+  </section>
   <section class="settings-panel{{if eq .ActiveTab "rules"}} active{{end}}" data-tab="rules">{{template "tab-rules" .Rules}}</section>
   <section class="settings-panel{{if eq .ActiveTab "oof"}} active{{end}}" data-tab="oof">{{template "tab-oof" .OOF}}</section>
   <section class="settings-panel{{if eq .ActiveTab "smime"}} active{{end}}" data-tab="smime">{{template "tab-smime" .Smime}}</section>

@@ -2,6 +2,7 @@ package webmail
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -10,6 +11,38 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/objectstore"
 )
+
+// mailboxUsageOf computes a mailbox's storage usage and quota for the settings
+// widget, best-effort: an unreadable size yields the zero value, and a quota of 0
+// (unset) reads as unlimited.
+func mailboxUsageOf(st *objectstore.Store) mailboxUsage {
+	used, err := st.MailboxSize()
+	if err != nil {
+		return mailboxUsage{}
+	}
+	u := mailboxUsage{Used: formatBytes(used)}
+	if q, err := st.GetQuota(); err == nil && q.StorageKB > 0 {
+		quotaBytes := int64(q.StorageKB) * 1024
+		u.Limited = true
+		u.Quota = formatBytes(quotaBytes)
+		u.Percent = int(min(used*100/quotaBytes, 100))
+	}
+	return u
+}
+
+// formatBytes renders a byte count as a human-readable size (B, KB, MB, ...).
+func formatBytes(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for x := n / unit; x >= unit; x /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(n)/float64(div), "KMGT"[exp])
+}
 
 // settingsSchemaVersion is stamped into stored settings for cheap forward
 // compatibility.
@@ -54,10 +87,20 @@ type settingsPage struct {
 	ActiveTab string
 	ChgPasswd bool
 	General   settingsView
+	Usage     mailboxUsage
 	Rules     rulesPage
 	OOF       oofPage
 	Smime     smimePage
 	Password  passwordPage
+}
+
+// mailboxUsage is the storage a mailbox occupies, with its quota when one is set,
+// for the settings "Mailbox usage" widget.
+type mailboxUsage struct {
+	Used    string // human-readable used size, e.g. "12.3 MB"
+	Quota   string // human-readable quota; "" when unlimited
+	Percent int    // 0..100 of the quota; 0 when unlimited
+	Limited bool   // a storage quota is set
 }
 
 // settingsTab normalizes a requested tab to a known one, defaulting to General
@@ -84,6 +127,7 @@ func (s *Server) buildSettingsPage(sess *session, st *objectstore.Store, active 
 	if s.Rules != nil {
 		page.General.AccessRules, _ = s.Rules.ListRecipientRules(sess.user) // best-effort; an error just shows no rules
 	}
+	page.Usage = mailboxUsageOf(st)
 
 	page.Rules = s.buildRulesPage(st, sess)
 	page.OOF = buildOOFPage(st)
