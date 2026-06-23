@@ -13,6 +13,7 @@
       <input type="hidden" name="attachuid" value="{{.AttachUID}}">
       <input type="hidden" name="draftfolder" value="{{.DraftFolder}}">
       <input type="hidden" name="draftuid" value="{{.DraftUID}}">
+      {{if .AttachReminder}}<input type="hidden" name="confirmnoattach" value="1">{{end}}
       <div class="field">
         <label>From</label>
         <select name="from">

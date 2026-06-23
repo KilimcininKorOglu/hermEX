@@ -35,32 +35,51 @@ const (
 // composeView is the data the compose template renders, covering both a blank
 // compose and a reply/forward prefill.
 type composeView struct {
-	Title        string
-	From         string   // selected sender (defaults to the session user)
-	FromOptions  []string // identities the user may send as (own address + aliases)
-	To           string
-	Cc           string
-	Bcc          string
-	Subject      string
-	Body         string // plain-text body (also the text/plain alternative in HTML mode)
-	BodyHTML     string // HTML body, set by the editor when Format == "html"
-	Format       string // "", "plain", "html"
-	Importance   string // "", "high", "low"
-	Sensitivity  string // "", "personal", "private", "confidential"
-	ReadReceipt  bool
-	Sign         bool                // S/MIME sign on send (immediate send only)
-	Encrypt      bool                // S/MIME encrypt on send (immediate send only)
-	InReplyTo    string              // carried as a hidden field, written as In-Reply-To on send
-	References   string              // carried as a hidden field, written as References on send
-	Attachments  []composeAttachment // uploaded files (and, later, inline images) to attach on send
-	Folders      []folderView        // mailbox folders, for the attach-item message picker
-	AttachFolder string              // forward-as-attachment: source folder to embed at send
-	AttachUID    string              // forward-as-attachment: source uid to embed at send
-	DraftFolder  string              // draft being edited: source folder (carried so a re-save replaces it)
-	DraftUID     string              // draft being edited: source uid
-	Mbox         string              // compose-as: the shared mailbox to send from (sent copy filed there); empty for own
-	Error        string
-	Notice       string
+	Title          string
+	From           string   // selected sender (defaults to the session user)
+	FromOptions    []string // identities the user may send as (own address + aliases)
+	To             string
+	Cc             string
+	Bcc            string
+	Subject        string
+	Body           string // plain-text body (also the text/plain alternative in HTML mode)
+	BodyHTML       string // HTML body, set by the editor when Format == "html"
+	Format         string // "", "plain", "html"
+	Importance     string // "", "high", "low"
+	Sensitivity    string // "", "personal", "private", "confidential"
+	ReadReceipt    bool
+	Sign           bool                // S/MIME sign on send (immediate send only)
+	Encrypt        bool                // S/MIME encrypt on send (immediate send only)
+	InReplyTo      string              // carried as a hidden field, written as In-Reply-To on send
+	References     string              // carried as a hidden field, written as References on send
+	Attachments    []composeAttachment // uploaded files (and, later, inline images) to attach on send
+	Folders        []folderView        // mailbox folders, for the attach-item message picker
+	AttachFolder   string              // forward-as-attachment: source folder to embed at send
+	AttachUID      string              // forward-as-attachment: source uid to embed at send
+	DraftFolder    string              // draft being edited: source folder (carried so a re-save replaces it)
+	DraftUID       string              // draft being edited: source uid
+	Mbox           string              // compose-as: the shared mailbox to send from (sent copy filed there); empty for own
+	Error          string
+	Notice         string
+	AttachReminder bool // the body hints at an attachment but none is present; the form re-renders to confirm
+}
+
+// attachmentHints are words that suggest the writer meant to attach a file, so a
+// send with no attachment is worth a confirm. "attach" covers attached/attachment;
+// the Turkish forms are specific (not the bare "ek", which matches many words).
+var attachmentHints = []string{"attach", "ekli", "ekte", "iliştir"}
+
+// mentionsAttachment reports whether any field hints at an intended attachment.
+func mentionsAttachment(fields ...string) bool {
+	for _, f := range fields {
+		low := strings.ToLower(f)
+		for _, h := range attachmentHints {
+			if strings.Contains(low, h) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // identities returns the addresses user may send as. It fails closed: if the
@@ -394,6 +413,18 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		var inlineAtts []composeAttachment
 		v.BodyHTML, inlineAtts = inlineImages(v.BodyHTML)
 		v.Attachments = append(v.Attachments, inlineAtts...)
+	}
+
+	// Attachment reminder: a send whose text hints at an attachment but carries none
+	// re-renders the form with a warning, unless the user already confirmed. It runs
+	// only for an actual send (not savedraft, handled above), before any delivery.
+	if act := r.FormValue("action"); (act == "send" || act == "sendlater") &&
+		len(v.Attachments) == 0 && r.FormValue("confirmnoattach") != "1" &&
+		mentionsAttachment(v.Subject, v.Body, v.BodyHTML) {
+		v.AttachReminder = true
+		v.Error = "Your message mentions an attachment, but none is attached."
+		s.render(w, "compose", v)
+		return
 	}
 
 	// Scheduling a send files the compose in the Outbox with a deferred-send time

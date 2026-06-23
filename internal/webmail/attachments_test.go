@@ -118,7 +118,7 @@ func TestComposeUrlEncodedStillWorks(t *testing.T) {
 	if code, _ := postForm(t, c, ts.URL+"/compose", map[string][]string{
 		"action":  {"send"},
 		"to":      {"alice@hermex.test"},
-		"subject": {"no attachment"},
+		"subject": {"plain message"}, // avoid attachment-hint words, which would trigger the reminder
 		"body":    {"plain send"},
 	}); code != 200 {
 		t.Fatalf("url-encoded send = %d", code)
