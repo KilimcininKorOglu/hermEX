@@ -1,5 +1,10 @@
 package admin
 
+import (
+	"hermex/internal/directory"
+	"hermex/internal/mtasts"
+)
+
 // prescribedRecord is one DNS record a domain owner must publish for mail to
 // route and authenticate through this server. Unlike dnsCheckItem (dnscheck.go),
 // which reports what a domain *currently* resolves to, this prescribes the target
@@ -19,8 +24,12 @@ type prescribedRecord struct {
 // autodiscover/autoconfig host clients are pointed at. dkimName/dkimValue carry
 // the domain's generated DKIM record; both empty means no key exists yet, and the
 // DKIM row points the owner at the DKIM panel rather than dropping the
-// requirement, so the prescription stays complete.
-func prescribeDomainDNS(domain, hostname, dkimName, dkimValue string) []prescribedRecord {
+// requirement, so the prescription stays complete. When MTA-STS publishing is
+// enabled (sts.Enabled) the prescription also includes the policy host, the
+// _mta-sts presence record carrying the current policy id, and the TLSRPT reporting
+// record; these are omitted when publishing is off, since their host serves no
+// policy until then.
+func prescribeDomainDNS(domain, hostname, dkimName, dkimValue string, sts directory.MTASTSSettings) []prescribedRecord {
 	recs := []prescribedRecord{
 		{Label: "MX", Name: domain, Type: "MX", Value: "10 " + hostname,
 			Note: "Routes inbound mail for this domain to the server."},
@@ -38,7 +47,7 @@ func prescribeDomainDNS(domain, hostname, dkimName, dkimValue string) []prescrib
 			Value: "generate a DKIM key in the DKIM panel above, then publish the record it shows",
 			Note:  "Lets receivers verify the signature on this domain's outbound mail."})
 	}
-	return append(recs,
+	recs = append(recs,
 		prescribedRecord{Label: "DMARC", Name: "_dmarc." + domain, Type: "TXT",
 			Value: "v=DMARC1; p=quarantine; rua=mailto:postmaster@" + domain,
 			Note:  "Tells receivers how to handle mail that fails SPF and DKIM; tune the policy as you gain confidence."},
@@ -52,4 +61,20 @@ func prescribeDomainDNS(domain, hostname, dkimName, dkimValue string) []prescrib
 			Value: "0 0 443 " + hostname,
 			Note:  "SRV fallback for clients that look up autodiscovery by service record."},
 	)
+	if sts.Enabled {
+		// The policy id is derived from the served policy bytes (mode + max_age + this
+		// MX), so the published _mta-sts id matches exactly what the gateway serves and
+		// changes whenever the policy does.
+		id := mtasts.PolicyID(mtasts.Build(mtasts.Policy{Mode: mtasts.Mode(sts.Mode), MX: []string{hostname}, MaxAge: sts.MaxAge}))
+		recs = append(recs,
+			prescribedRecord{Label: "MTA-STS host", Name: "mta-sts." + domain, Type: "CNAME", Value: hostname,
+				Note: "Points mta-sts." + domain + " at the server, which publishes the MTA-STS policy over HTTPS; lets the server obtain a TLS certificate for this host automatically in ACME mode."},
+			prescribedRecord{Label: "MTA-STS", Name: "_mta-sts." + domain, Type: "TXT", Value: "v=STSv1; id=" + id,
+				Note: "Signals that this domain publishes an MTA-STS policy; senders re-fetch when the id changes, so republish this record after changing the policy mode or max age."},
+			prescribedRecord{Label: "TLS reporting", Name: "_smtp._tls." + domain, Type: "TXT",
+				Value: "v=TLSRPTv1; rua=mailto:postmaster@" + domain,
+				Note:  "Asks senders to report TLS problems delivering to this domain (RFC 8460); point rua at any mailbox you watch."},
+		)
+	}
+	return recs
 }

@@ -54,8 +54,9 @@ type fakeDir struct {
 	dkimEnabled        bool
 	dkimFound          bool
 
-	tlsCerts    []directory.TLSCertInfo
-	tlsSettings *directory.TLSSettings
+	tlsCerts       []directory.TLSCertInfo
+	tlsSettings    *directory.TLSSettings
+	mtastsSettings *directory.MTASTSSettings
 
 	userSpamThreshold      *int
 	userSpamThresholdSet   bool
@@ -557,6 +558,12 @@ func (f *fakeDir) GetTLSSettings() (directory.TLSSettings, bool, error) {
 func (f *fakeDir) SetTLSSettings(s directory.TLSSettings) error {
 	f.tlsSettings = &s
 	return nil
+}
+func (f *fakeDir) GetMTASTSSettings() (directory.MTASTSSettings, bool, error) {
+	if f.mtastsSettings == nil {
+		return directory.MTASTSSettings{Enabled: false, Mode: "testing", MaxAge: directory.MTASTSDefaultMaxAge}, false, nil
+	}
+	return *f.mtastsSettings, true, nil
 }
 func (f *fakeDir) GetUserSpamThreshold(string) (*int, error)   { return f.userSpamThreshold, nil }
 func (f *fakeDir) GetDomainSpamThreshold(string) (*int, error) { return f.domainSpamThreshold, nil }

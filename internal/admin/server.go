@@ -128,6 +128,7 @@ type Directory interface {
 	DeleteTLSCert(name string) error
 	GetTLSSettings() (directory.TLSSettings, bool, error)
 	SetTLSSettings(directory.TLSSettings) error
+	GetMTASTSSettings() (directory.MTASTSSettings, bool, error)
 	GetUserSpamThreshold(username string) (*int, error)
 	SetUserSpamThreshold(username string, threshold *int) error
 	GetDomainSpamThreshold(domain string) (*int, error)

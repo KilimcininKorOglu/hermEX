@@ -110,10 +110,12 @@ func (s *Server) handleUIDomainDetail(w http.ResponseWriter, r *http.Request) {
 		data[k] = v
 	}
 	// Prescribe the DNS records the domain owner must publish, reusing the DKIM
-	// record already merged above (empty when no key exists yet).
+	// record already merged above (empty when no key exists yet) and adding the
+	// MTA-STS/TLSRPT records when publishing is enabled.
 	dkimName, _ := data["DKIMRecordName"].(string)
 	dkimValue, _ := data["DKIMPublicTXT"].(string)
-	data["DNSRecords"] = prescribeDomainDNS(dd.Name, s.paths.ServerHostname(), dkimName, dkimValue)
+	sts, _, _ := s.dir.GetMTASTSSettings()
+	data["DNSRecords"] = prescribeDomainDNS(dd.Name, s.paths.ServerHostname(), dkimName, dkimValue, sts)
 	s.render(w, "domain_detail.html", data)
 }
 

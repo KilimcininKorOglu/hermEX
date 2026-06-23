@@ -25,8 +25,16 @@ func byLabel(recs []prescribedRecord) map[string]prescribedRecord {
 // so the test pins the host the records point at, not merely that a row exists.
 func TestPrescribeDomainDNS(t *testing.T) {
 	const host = "mail.hermex.test"
-	recs := prescribeDomainDNS("tenant.com", host, "hermex._domainkey.tenant.com", "v=DKIM1; k=rsa; p=ABC")
+	recs := prescribeDomainDNS("tenant.com", host, "hermex._domainkey.tenant.com", "v=DKIM1; k=rsa; p=ABC",
+		directory.MTASTSSettings{Enabled: false})
 	by := byLabel(recs)
+	// With MTA-STS publishing off, its records must be absent — their host serves no
+	// policy yet, so prescribing them would point senders at a 404.
+	for _, lbl := range []string{"MTA-STS host", "MTA-STS", "TLS reporting"} {
+		if _, ok := by[lbl]; ok {
+			t.Errorf("%q present with MTA-STS disabled", lbl)
+		}
+	}
 
 	// MX must carry a priority and point inbound mail at the server host.
 	if r := by["MX"]; r.Type != "MX" || r.Name != "tenant.com" || r.Value != "10 "+host {
@@ -69,7 +77,7 @@ func TestPrescribeDomainDNS(t *testing.T) {
 // knows it is needed) but, with no key, the row points at the DKIM panel instead
 // of a value — a placeholder must never read as a publishable record.
 func TestPrescribeDomainDNSWithoutDKIMKey(t *testing.T) {
-	recs := prescribeDomainDNS("tenant.com", "mail.hermex.test", "", "")
+	recs := prescribeDomainDNS("tenant.com", "mail.hermex.test", "", "", directory.MTASTSSettings{Enabled: false})
 	by := byLabel(recs)
 	dkim, ok := by["DKIM"]
 	if !ok {
@@ -80,6 +88,31 @@ func TestPrescribeDomainDNSWithoutDKIMKey(t *testing.T) {
 	}
 	if dkim.Name != "hermex._domainkey.tenant.com" {
 		t.Errorf("DKIM name = %q, want the selector record name", dkim.Name)
+	}
+}
+
+// TestPrescribeDomainDNSWithMTASTS proves that enabling publishing adds exactly the
+// records an MTA-STS deployment needs: the policy host CNAME (so mta-sts.<domain>
+// resolves to the server and gets a certificate), the _mta-sts presence record whose
+// id is a 32-char policy fingerprint, and the TLSRPT reporting record. The id must be
+// a real fingerprint, not a placeholder, or senders cannot detect a policy change.
+func TestPrescribeDomainDNSWithMTASTS(t *testing.T) {
+	recs := prescribeDomainDNS("tenant.com", "mail.hermex.test", "hermex._domainkey.tenant.com", "v=DKIM1; p=ABC",
+		directory.MTASTSSettings{Enabled: true, Mode: "testing", MaxAge: 86400})
+	by := byLabel(recs)
+
+	if r := by["MTA-STS host"]; r.Type != "CNAME" || r.Name != "mta-sts.tenant.com" || r.Value != "mail.hermex.test" {
+		t.Errorf("MTA-STS host = %+v, want a CNAME at mta-sts.tenant.com to the server", r)
+	}
+	r := by["MTA-STS"]
+	if r.Type != "TXT" || r.Name != "_mta-sts.tenant.com" || !strings.HasPrefix(r.Value, "v=STSv1; id=") {
+		t.Fatalf("MTA-STS = %+v, want a _mta-sts TXT carrying v=STSv1; id=", r)
+	}
+	if id := strings.TrimPrefix(r.Value, "v=STSv1; id="); len(id) != 32 {
+		t.Errorf("policy id = %q (len %d), want a 32-char fingerprint", id, len(id))
+	}
+	if r := by["TLS reporting"]; r.Type != "TXT" || r.Name != "_smtp._tls.tenant.com" || !strings.Contains(r.Value, "v=TLSRPTv1") {
+		t.Errorf("TLS reporting = %+v, want a _smtp._tls TXT carrying v=TLSRPTv1", r)
 	}
 }
 

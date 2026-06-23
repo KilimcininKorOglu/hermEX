@@ -6,6 +6,8 @@
 package mtasts
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
@@ -89,6 +91,17 @@ func Build(p Policy) string {
 	b.WriteString(strconv.Itoa(p.MaxAge))
 	b.WriteString("\r\n")
 	return b.String()
+}
+
+// PolicyID derives the identifier a domain publishes in its _mta-sts TXT record
+// (RFC 8461 §3.1) from the policy text. A sender re-fetches the policy when this id
+// changes, so it must change exactly when the served policy does — deriving it from
+// the policy bytes (rather than a timestamp) guarantees that, even when an input like
+// the server hostname changes without any settings write. It is the hex of the first
+// 16 bytes of the SHA-256 of the policy: 32 alphanumeric characters, the RFC maximum.
+func PolicyID(policyText string) string {
+	sum := sha256.Sum256([]byte(policyText))
+	return hex.EncodeToString(sum[:16])
 }
 
 // MatchesMX reports whether host is permitted by the policy's mx patterns. A

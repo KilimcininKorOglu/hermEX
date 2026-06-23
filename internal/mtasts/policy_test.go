@@ -64,6 +64,31 @@ func TestParsePolicy(t *testing.T) {
 	}
 }
 
+// TestPolicyID proves the published id is a 32-char alphanumeric string that is
+// stable for a given policy and changes when any field changes — the property a
+// sender relies on to detect a new policy. A timestamp-based id would miss a change
+// to an input (like the hostname) that does not touch the settings row, so it is
+// derived from the policy bytes.
+func TestPolicyID(t *testing.T) {
+	a := Build(Policy{Mode: ModeTesting, MX: []string{"mail.example.com"}, MaxAge: 86400})
+	id := PolicyID(a)
+	if len(id) != 32 {
+		t.Errorf("id = %q (len %d), want 32 chars", id, len(id))
+	}
+	for _, c := range id {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			t.Errorf("id %q has non-alphanumeric char %q", id, c)
+		}
+	}
+	if PolicyID(a) != id {
+		t.Error("PolicyID is not stable for the same policy")
+	}
+	// A changed field (mode here) must yield a different id, or senders never re-fetch.
+	if other := PolicyID(Build(Policy{Mode: ModeEnforce, MX: []string{"mail.example.com"}, MaxAge: 86400})); other == id {
+		t.Error("PolicyID did not change when the policy changed")
+	}
+}
+
 // TestMatchesMX proves the wildcard matches exactly one label, the match is
 // case-insensitive, and a trailing root dot is ignored.
 func TestMatchesMX(t *testing.T) {
