@@ -40,14 +40,6 @@ func (s *Server) handleSmimeCert(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{})
 }
 
-func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.session(r); !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"isInvite": false})
-}
-
 // emptyAuthed writes {key: []} for an authenticated caller (401 otherwise).
 func (s *Server) emptyAuthed(w http.ResponseWriter, r *http.Request, key string) {
 	if _, ok := s.session(r); !ok {
