@@ -19,26 +19,41 @@ func (s *Server) handleFolder(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not authenticated", http.StatusUnauthorized)
 		return
 	}
-	// Shared-mailbox folder management is authorized in a later step; reject an
-	// mbox-scoped request so a control left in a shared view cannot alter the
-	// caller's own folders.
-	if denyShared(w, r) {
-		return
-	}
-	st, err := objectstore.Open(sess.mailboxPath)
-	if err != nil {
-		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
-		return
+	// Open the own mailbox, or a shared mailbox the caller selected (?mbox),
+	// validated and access-checked server-side.
+	mbox := mboxParam(r)
+	var st *objectstore.Store
+	var err error
+	if mbox == "" {
+		if st, err = objectstore.Open(sess.mailboxPath); err != nil {
+			http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		var addr string
+		var sok bool
+		if st, addr, sok = s.openSharedFor(sess, mbox); !sok {
+			http.NotFound(w, r)
+			return
+		}
+		mbox = addr
 	}
 	defer st.Close()
 
-	switch r.FormValue("op") {
+	op := r.FormValue("op")
+	// Managing folders in a shared mailbox is authorized per the caller's folder
+	// rights; the own mailbox needs no check.
+	if mbox != "" && !sharedFolderAllowed(st, sess.user, op, r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	switch op {
 	case "create":
-		s.createFolder(w, r, st)
+		s.createFolder(w, r, st, mbox)
 	case "rename":
-		s.renameFolder(w, r, st)
+		s.renameFolder(w, r, st, mbox)
 	case "delete":
-		s.deleteFolder(w, r, st)
+		s.deleteFolder(w, r, st, mbox)
 	default:
 		http.Error(w, "unknown folder action", http.StatusBadRequest)
 	}
@@ -56,7 +71,7 @@ func validFolderName(raw string) (string, bool) {
 
 // createFolder creates a top-level user folder, refusing a blank/invalid name or
 // a duplicate of an existing top-level folder.
-func (s *Server) createFolder(w http.ResponseWriter, r *http.Request, st *objectstore.Store) {
+func (s *Server) createFolder(w http.ResponseWriter, r *http.Request, st *objectstore.Store, mbox string) {
 	name, ok := validFolderName(r.FormValue("name"))
 	if !ok {
 		http.Error(w, "invalid folder name", http.StatusBadRequest)
@@ -73,12 +88,12 @@ func (s *Server) createFolder(w http.ResponseWriter, r *http.Request, st *object
 		http.Error(w, "cannot create folder", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/mail", http.StatusSeeOther)
+	http.Redirect(w, r, mailboxRedirect(mbox), http.StatusSeeOther)
 }
 
 // renameFolder renames a user folder in place. The folder's CURRENT parent is
 // passed so the rename does not silently reparent a nested folder to the top.
-func (s *Server) renameFolder(w http.ResponseWriter, r *http.Request, st *objectstore.Store) {
+func (s *Server) renameFolder(w http.ResponseWriter, r *http.Request, st *objectstore.Store, mbox string) {
 	id, ok := userFolderID(r.FormValue("id"))
 	if !ok {
 		http.Error(w, "cannot rename a built-in folder", http.StatusForbidden)
@@ -103,12 +118,12 @@ func (s *Server) renameFolder(w http.ResponseWriter, r *http.Request, st *object
 		http.Error(w, "cannot rename folder", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/mail", http.StatusSeeOther)
+	http.Redirect(w, r, mailboxRedirect(mbox), http.StatusSeeOther)
 }
 
 // deleteFolder permanently deletes a user folder and everything under it (a
 // cascade — the only primitive the store offers; the UI confirms first).
-func (s *Server) deleteFolder(w http.ResponseWriter, r *http.Request, st *objectstore.Store) {
+func (s *Server) deleteFolder(w http.ResponseWriter, r *http.Request, st *objectstore.Store, mbox string) {
 	id, ok := userFolderID(r.FormValue("id"))
 	if !ok {
 		http.Error(w, "cannot delete a built-in folder", http.StatusForbidden)
@@ -118,7 +133,7 @@ func (s *Server) deleteFolder(w http.ResponseWriter, r *http.Request, st *object
 		http.Error(w, "cannot delete folder", http.StatusInternalServerError)
 		return
 	}
-	http.Redirect(w, r, "/mail", http.StatusSeeOther)
+	http.Redirect(w, r, mailboxRedirect(mbox), http.StatusSeeOther)
 }
 
 // userFolderID parses a folder id and reports it only when it is a user-created

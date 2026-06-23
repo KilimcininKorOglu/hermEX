@@ -14,9 +14,10 @@ import (
 // AddrQS is its URL-escaped form for link building (every shared-scoped link
 // carries ?mbox=AddrQS).
 type sharedMailboxGroup struct {
-	Addr    string
-	AddrQS  string
-	Folders []folderView
+	Addr      string
+	AddrQS    string
+	Folders   []folderView
+	CanManage bool // the caller may create/rename/delete folders here (folder-management rights)
 }
 
 // callerMayOpenShared reports whether user may open the shared store at all: they
@@ -166,6 +167,34 @@ func sharedActionAllowed(st *objectstore.Store, user, op string, src int64, fold
 	return false
 }
 
+// mailboxRedirect is the list URL for a store: the own mailbox, or the open shared
+// mailbox carrying its selector.
+func mailboxRedirect(mbox string) string {
+	if mbox == "" {
+		return "/mail"
+	}
+	return "/mail?mbox=" + url.QueryEscape(mbox)
+}
+
+// sharedFolderAllowed authorizes a folder-management op in a shared mailbox:
+// creating a top-level folder needs CreateSubfolder on the IPM subtree root;
+// renaming or deleting one needs Owner (full control) on that folder. A store
+// owner clears every check. A built-in target is left to the handler's own
+// refusal. An unknown op denies.
+func sharedFolderAllowed(st *objectstore.Store, user, op string, r *http.Request) bool {
+	switch op {
+	case "create":
+		return hasFolderRight(st, user, int64(mapi.PrivateFIDIPMSubtree), mapi.FrightsCreateSubfolder)
+	case "rename", "delete":
+		id, ok := userFolderID(r.FormValue("id"))
+		if !ok {
+			return true // a built-in id: the handler rejects it with its own 403
+		}
+		return hasFolderRight(st, user, id, mapi.FrightsOwner)
+	}
+	return false
+}
+
 // sharedBulkAllowed authorizes a bulk (multi-select) op in a shared mailbox. Every
 // selected message sits in the same source folder, so one folder-rights check
 // gates the whole batch: marking read/unread, flagging, and categorizing need
@@ -237,11 +266,14 @@ func (s *Server) listAccessibleSharedMailboxes(sess *session) []sharedMailboxGro
 			}
 			vis = append(vis, v)
 		}
+		canManage := hasFolderRight(st, sess.user, int64(mapi.PrivateFIDIPMSubtree), mapi.FrightsCreateSubfolder)
 		st.Close()
 		if len(vis) == 0 {
 			continue
 		}
-		out = append(out, sharedMailboxGroup{Addr: b.Address, AddrQS: url.QueryEscape(b.Address), Folders: vis})
+		out = append(out, sharedMailboxGroup{
+			Addr: b.Address, AddrQS: url.QueryEscape(b.Address), Folders: vis, CanManage: canManage,
+		})
 	}
 	return out
 }

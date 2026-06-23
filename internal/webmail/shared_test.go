@@ -381,3 +381,66 @@ func TestSharedMailboxBulkbarRenders(t *testing.T) {
 		t.Errorf("owned (writable) list missing the bulk toolbar posting to the shared store")
 	}
 }
+
+// TestSharedMailboxFolderCRUDOwner proves an owner may create, rename, and delete
+// folders in a shared mailbox, and that each change lands in the shared store.
+func TestSharedMailboxFolderCRUDOwner(t *testing.T) {
+	ts, env := newSharedWebmail(t)
+	c := authedClient(t, ts)
+	const mbox = "/folder?mbox=owned@hermex.test"
+
+	if code, _ := postForm(t, c, ts.URL+mbox, url.Values{"op": {"create"}, "name": {"Reports"}}); code != 200 {
+		t.Fatalf("owner create folder = %d, want 200", code)
+	}
+	ost, err := objectstore.Open(env.ownedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, exists, err := ost.FolderByName(nil, "Reports")
+	ost.Close()
+	if err != nil || !exists {
+		t.Fatalf("created folder missing: exists=%v err=%v", exists, err)
+	}
+
+	if code, _ := postForm(t, c, ts.URL+mbox, url.Values{"op": {"rename"}, "id": {strconv.FormatInt(id, 10)}, "name": {"Archive"}}); code != 200 {
+		t.Fatalf("owner rename folder = %d, want 200", code)
+	}
+	ost, _ = objectstore.Open(env.ownedDir)
+	if _, ok, _ := ost.FolderByName(nil, "Archive"); !ok {
+		t.Errorf("renamed folder Archive missing")
+	}
+	ost.Close()
+
+	if code, _ := postForm(t, c, ts.URL+mbox, url.Values{"op": {"delete"}, "id": {strconv.FormatInt(id, 10)}}); code != 200 {
+		t.Fatalf("owner delete folder = %d, want 200", code)
+	}
+	ost, _ = objectstore.Open(env.ownedDir)
+	defer ost.Close()
+	if _, ok, _ := ost.FolderByName(nil, "Archive"); ok {
+		t.Errorf("deleted folder still present in the shared store")
+	}
+}
+
+// TestSharedMailboxFolderReviewerDenied proves a reviewer (no folder-management
+// rights) cannot create a folder in a shared mailbox.
+func TestSharedMailboxFolderReviewerDenied(t *testing.T) {
+	ts, _ := newSharedWebmail(t)
+	c := authedClient(t, ts)
+	if code, _ := postForm(t, c, ts.URL+"/folder?mbox=support@hermex.test", url.Values{"op": {"create"}, "name": {"Sneaky"}}); code != 403 {
+		t.Errorf("reviewer create folder in a shared mailbox = %d, want 403", code)
+	}
+}
+
+// TestSharedMailboxFolderFormsRender proves the folder-management UI appears only
+// for a shared mailbox the caller may manage.
+func TestSharedMailboxFolderFormsRender(t *testing.T) {
+	ts, _ := newSharedWebmail(t)
+	c := authedClient(t, ts)
+	_, body := get(t, c, ts.URL+"/mail")
+	if !strings.Contains(body, `action="/folder?mbox=owned`) {
+		t.Errorf("owned (manageable) shared section missing the folder-management form")
+	}
+	if strings.Contains(body, `action="/folder?mbox=support`) {
+		t.Errorf("reviewer shared section rendered a folder-management form")
+	}
+}
