@@ -133,11 +133,13 @@ func acmeNames(dir *directory.SQLDirectory, hostname string) ([]string, error) {
 	}
 	// The mta-sts.<domain> host needs a certificate only when MTA-STS is published —
 	// otherwise the owner has not pointed it at the gateway, so a TLS-ALPN-01 order
-	// for it would fail and waste the CA rate limit.
-	sts, _, err := dir.GetMTASTSSettings()
-	if err != nil {
-		return nil, err
-	}
+	// for it would fail and waste the CA rate limit. A settings read failure (e.g. the
+	// mtasts_settings table not yet migrated on an upgraded DB) must NOT sink the whole
+	// allowlist: treat it as publishing-off and obtain the mail/autodiscover/autoconfig
+	// certs anyway, mirroring the admin side and the gatewayTLS degrade-to-manual
+	// pattern. The zero value is Enabled:false, so the mta-sts hosts are simply omitted
+	// until the read succeeds.
+	sts, _, _ := dir.GetMTASTSSettings()
 	active := make([]string, 0, len(domains))
 	for _, d := range domains {
 		if d.Status == 0 {
