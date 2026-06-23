@@ -80,6 +80,9 @@ func main() {
 		log.Fatalf("hermex-gateway: open directory: %v", err)
 	}
 	dir := directory.NewSQL(db)
+	// Serve this server's own MTA-STS policy for mta-sts.<domain> requests before
+	// proxying everything else; the front door is the HTTPS host the policy lives on.
+	h = withMTASTS(cfg, dir, h)
 	tlsSrc, maintain, err := gatewayTLS(cfg, dir, logger)
 	if err != nil {
 		log.Fatalf("hermex-gateway: tls: %v", err)
