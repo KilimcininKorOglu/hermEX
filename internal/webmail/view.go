@@ -112,6 +112,10 @@ type mailPage struct {
 	// select-all checkbox) for a shared folder the caller may see but not modify;
 	// false for the own mailbox, so its list is unaffected.
 	ReadOnly bool
+	// CanSendAs reports that the caller may compose as the open shared mailbox
+	// (owner or delegate), so the Compose button opens a send-as composer; false
+	// for the own mailbox and for a shared mailbox the caller cannot send as.
+	CanSendAs bool
 }
 
 // threadView is one conversation thread rendered as a collapsible group: a

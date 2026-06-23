@@ -270,6 +270,7 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	page.ReadOnly = readOnly
+	page.CanSendAs = mbox != "" && canSendAsShared(contentSt, sess.user)
 	page.MoveTargets = buildFolderViews(contentFolders)
 	// Carry the shared-mailbox selector onto every list row so the reader and action
 	// links stay in the shared context; a shared folder the caller cannot modify

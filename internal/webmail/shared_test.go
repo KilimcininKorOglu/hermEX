@@ -444,3 +444,76 @@ func TestSharedMailboxFolderFormsRender(t *testing.T) {
 		t.Errorf("reviewer shared section rendered a folder-management form")
 	}
 }
+
+// TestSharedMailboxComposeAsForm proves the compose-as form defaults its From to
+// the shared mailbox and posts back with the shared-mailbox selector.
+func TestSharedMailboxComposeAsForm(t *testing.T) {
+	ts, _ := newSharedWebmail(t)
+	c := authedClient(t, ts)
+	code, body := get(t, c, ts.URL+"/compose?mbox=owned@hermex.test")
+	if code != 200 {
+		t.Fatalf("compose-as form = %d, want 200", code)
+	}
+	if !strings.Contains(body, `value="owned@hermex.test" selected`) {
+		t.Errorf("compose-as form did not default From to the shared mailbox")
+	}
+	if !strings.Contains(body, `action="/compose?mbox=owned`) {
+		t.Errorf("compose-as form does not post back with the shared-mailbox selector")
+	}
+}
+
+// TestSharedMailboxComposeAsReviewerDenied proves a folder grant alone confers no
+// send-as right: a reviewer cannot open the compose-as form.
+func TestSharedMailboxComposeAsReviewerDenied(t *testing.T) {
+	ts, _ := newSharedWebmail(t)
+	c := authedClient(t, ts)
+	if code, _ := get(t, c, ts.URL+"/compose?mbox=support@hermex.test"); code != 403 {
+		t.Errorf("reviewer compose-as form = %d, want 403 (no send-as right)", code)
+	}
+}
+
+// TestSharedMailboxComposeAsSend proves an owner sends as the shared mailbox: the
+// message goes out with the shared From and its Sent copy is filed in the shared
+// mailbox's Sent Items, not the caller's own.
+func TestSharedMailboxComposeAsSend(t *testing.T) {
+	ts, env := newSharedWebmail(t)
+	c := authedClient(t, ts)
+	if code, _ := postForm(t, c, ts.URL+"/compose?mbox=owned@hermex.test", url.Values{
+		"from": {"owned@hermex.test"}, "to": {"alice@hermex.test"},
+		"subject": {"From the shared box"}, "body": {"hello"}, "format": {"plain"},
+	}); code != 200 {
+		t.Fatalf("compose-as send = %d, want 200", code)
+	}
+	ost, err := objectstore.Open(env.ownedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ost.Close()
+	msgs, err := ost.ListMessages(int64(mapi.PrivateFIDSentItems))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) == 0 {
+		t.Fatalf("no Sent copy was filed in the shared mailbox")
+	}
+	raw, err := ost.GetMessageRaw(int64(mapi.PrivateFIDSentItems), msgs[len(msgs)-1].UID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), "owned@hermex.test") {
+		t.Errorf("the Sent copy was not from the shared mailbox:\n%s", raw)
+	}
+}
+
+// TestSharedMailboxComposeButtonSendAs proves the Compose button opens a send-as
+// composer only where the caller may send as the open shared mailbox.
+func TestSharedMailboxComposeButtonSendAs(t *testing.T) {
+	ts, _ := newSharedWebmail(t)
+	c := authedClient(t, ts)
+	if _, body := get(t, c, ts.URL+"/mail?folder=INBOX&mbox=owned@hermex.test"); !strings.Contains(body, "/compose?mbox=owned") {
+		t.Errorf("owned mailbox view missing the compose-as button")
+	}
+	if _, body := get(t, c, ts.URL+"/mail?folder=Team&mbox=support@hermex.test"); strings.Contains(body, "/compose?mbox=support") {
+		t.Errorf("reviewer mailbox view offered a compose-as button")
+	}
+}

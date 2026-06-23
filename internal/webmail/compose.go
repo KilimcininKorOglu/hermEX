@@ -58,6 +58,7 @@ type composeView struct {
 	AttachUID    string              // forward-as-attachment: source uid to embed at send
 	DraftFolder  string              // draft being edited: source folder (carried so a re-save replaces it)
 	DraftUID     string              // draft being edited: source uid
+	Mbox         string              // compose-as: the shared mailbox to send from (sent copy filed there); empty for own
 	Error        string
 	Notice       string
 }
@@ -118,7 +119,26 @@ func (s *Server) handleComposeForm(w http.ResponseWriter, r *http.Request) {
 
 	action := r.URL.Query().Get("action")
 	if action == "" {
-		v := composeView{Title: "New message", From: sess.user, FromOptions: idents, Format: settings.ComposeFormat, Folders: folderVus, ReadReceipt: settings.RequestReceiptDefault}
+		// Compose-as: a New message from a shared mailbox the caller may send as
+		// (owner or delegate). The shared address joins the permitted identities so
+		// the From gate accepts it; a caller who cannot send as it is refused.
+		from, mbox := sess.user, ""
+		if sel := mboxParam(r); sel != "" {
+			sh, addr, ok := s.openSharedFor(sess, sel)
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			eligible := canSendAsShared(sh, sess.user)
+			sh.Close()
+			if !eligible {
+				http.Error(w, "you may not send as this mailbox", http.StatusForbidden)
+				return
+			}
+			mbox, from = addr, addr
+			idents = append(idents, addr)
+		}
+		v := composeView{Title: "New message", From: from, FromOptions: idents, Format: settings.ComposeFormat, Folders: folderVus, ReadReceipt: settings.RequestReceiptDefault, Mbox: mbox}
 		applySignature(&v, settings, action)
 		s.render(w, "compose", v)
 		return
@@ -241,12 +261,33 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	// Compose-as a shared mailbox (send-as) is authorized in a later step; reject
-	// an mbox-scoped submit so it cannot send or file a draft as the wrong store.
-	if denyShared(w, r) {
-		return
-	}
 	idents := s.identities(sess.user)
+	// Compose-as: a shared mailbox the caller may send as (owner or delegate). Its
+	// address joins the permitted identities so the From gate accepts it, and its
+	// Sent folder receives the saved copy; a caller who cannot send as it is refused.
+	mbox := mboxParam(r)
+	sentPath := sess.mailboxPath
+	if mbox != "" {
+		path, addr, ok := s.sharedPathFor(mbox)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		sh, oerr := objectstore.Open(path)
+		if oerr != nil {
+			http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
+			return
+		}
+		eligible := callerMayOpenShared(sh, sess.user) && canSendAsShared(sh, sess.user)
+		sh.Close()
+		if !eligible {
+			http.Error(w, "you may not send as this mailbox", http.StatusForbidden)
+			return
+		}
+		mbox = addr
+		idents = append(idents, addr)
+		sentPath = path
+	}
 	// A file-upload submit is multipart/form-data and must be parsed (with a body
 	// cap) before the form values are read; a url-encoded post (incl. autosave) is
 	// left untouched and carries no files.
@@ -279,6 +320,7 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		AttachUID:    r.FormValue("attachuid"),
 		DraftFolder:  r.FormValue("draftfolder"),
 		DraftUID:     r.FormValue("draftuid"),
+		Mbox:         mbox,
 	}
 	v.Attachments = readUploads(r)
 	// A reopened draft's existing attachments are not re-uploaded by the browser
@@ -379,7 +421,7 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		s.render(w, "compose", v)
 		return
 	}
-	if err := saveToSent(sess.mailboxPath, sentRaw); err != nil {
+	if err := saveToSent(sentPath, sentRaw); err != nil {
 		v.Error = "Saved no Sent copy: " + err.Error()
 		s.render(w, "compose", v)
 		return
@@ -403,7 +445,7 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	http.Redirect(w, r, "/mail?folder="+url.QueryEscape(sentName), http.StatusSeeOther)
+	http.Redirect(w, r, withMbox("/mail?folder="+url.QueryEscape(sentName), mbox), http.StatusSeeOther)
 }
 
 // saveDraft files the compose as a draft in the Drafts folder — replacing the

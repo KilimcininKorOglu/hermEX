@@ -52,30 +52,11 @@ func callerMayOpenShared(st *objectstore.Store, user string) bool {
 // caller owns the returned store and must Close it when ok. canon is the
 // directory's canonical address spelling, used for compose-as and link building.
 func (s *Server) openSharedFor(sess *session, addr string) (st *objectstore.Store, canon string, ok bool) {
-	if s.Shared == nil {
+	path, canon, ok := s.sharedPathFor(addr)
+	if !ok {
 		return nil, "", false
 	}
-	addr = strings.TrimSpace(addr)
-	if addr == "" {
-		return nil, "", false
-	}
-	boxes, err := s.Shared.SharedMailboxes()
-	if err != nil {
-		return nil, "", false
-	}
-	want := strings.ToLower(addr)
-	var path string
-	for _, b := range boxes {
-		if strings.ToLower(b.Address) == want {
-			path = b.StorePath
-			canon = b.Address
-			break
-		}
-	}
-	if path == "" {
-		return nil, "", false
-	}
-	st, err = objectstore.Open(path)
+	st, err := objectstore.Open(path)
 	if err != nil {
 		return nil, "", false
 	}
@@ -84,6 +65,50 @@ func (s *Server) openSharedFor(sess *session, addr string) (st *objectstore.Stor
 		return nil, "", false
 	}
 	return st, canon, true
+}
+
+// sharedPathFor resolves a shared-mailbox address to its server-derived store
+// path and canonical spelling, matched case-insensitively against the directory's
+// SharedMailboxes(). ok is false when shared mailboxes are unconfigured or addr is
+// not a shared mailbox. It performs no access check — callers that mutate must
+// still gate on callerMayOpenShared / canSendAsShared.
+func (s *Server) sharedPathFor(addr string) (path, canon string, ok bool) {
+	if s.Shared == nil {
+		return "", "", false
+	}
+	addr = strings.TrimSpace(addr)
+	if addr == "" {
+		return "", "", false
+	}
+	boxes, err := s.Shared.SharedMailboxes()
+	if err != nil {
+		return "", "", false
+	}
+	want := strings.ToLower(addr)
+	for _, b := range boxes {
+		if strings.ToLower(b.Address) == want {
+			return b.StorePath, b.Address, true
+		}
+	}
+	return "", "", false
+}
+
+// canSendAsShared reports whether user may send as the shared mailbox: they own it
+// (additional store owner) or are a designated delegate. A mere folder grant
+// (reviewer/editor) does not confer send-as — impersonating the mailbox is the
+// owner/delegate privilege. Matches are case-folded against the session address.
+func canSendAsShared(st *objectstore.Store, user string) bool {
+	if owner, err := st.IsStoreOwner(user); err == nil && owner {
+		return true
+	}
+	if dels, err := st.GetDelegates(); err == nil {
+		for _, d := range dels {
+			if strings.EqualFold(d, user) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // mboxParam returns the request's shared-mailbox selector (the mbox query

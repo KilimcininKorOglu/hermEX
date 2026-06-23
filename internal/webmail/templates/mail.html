@@ -76,7 +76,7 @@
   <main class="main">
     <div class="toolbar">
       <h2>{{.Current}}{{if .Mbox}} <span class="mbox-label">in {{.Mbox}}</span>{{end}} <span class="counts">{{.Total}} total, {{.Unread}} unread</span></h2>
-      <a href="/compose" class="compose-btn">Compose</a>
+      <a href="/compose{{if and .Mbox .CanSendAs}}?mbox={{.Mbox}}{{end}}" class="compose-btn">{{if and .Mbox .CanSendAs}}Compose as {{.Mbox}}{{else}}Compose{{end}}</a>
       <a href="/import" class="import-btn">Import</a>
       <a href="/settings" class="import-btn">Settings</a>
       {{if eq .Filter "unread"}}

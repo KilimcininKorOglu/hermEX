@@ -1,12 +1,12 @@
 {{define "compose"}}{{template "head" .}}
 {{template "editor-assets" .}}
 <div class="reader">
-  <div class="reader-toolbar"><a href="/mail?folder=INBOX">&larr; Back to mailbox</a></div>
+  <div class="reader-toolbar"><a href="/mail?folder=INBOX{{if .Mbox}}&mbox={{.Mbox}}{{end}}">&larr; Back to mailbox</a></div>
   <div class="compose-card">
-    <h2>{{if .Title}}{{.Title}}{{else}}New message{{end}}</h2>
+    <h2>{{if .Title}}{{.Title}}{{else}}New message{{end}}{{if .Mbox}} <span class="mbox-label">as {{.Mbox}}</span>{{end}}</h2>
     {{if .Error}}<p class="error">{{.Error}}</p>{{end}}
     {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
-    <form method="post" action="/compose" id="composeform" enctype="multipart/form-data">
+    <form method="post" action="/compose{{if .Mbox}}?mbox={{.Mbox}}{{end}}" id="composeform" enctype="multipart/form-data">
       <input type="hidden" name="inreplyto" value="{{.InReplyTo}}">
       <input type="hidden" name="references" value="{{.References}}">
       <input type="hidden" name="attachfolder" value="{{.AttachFolder}}">
