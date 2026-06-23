@@ -129,6 +129,58 @@ func TestAdminSetPasswordNotFound(t *testing.T) {
 	}
 }
 
+// TestAdminChangeOwnPassword proves a logged-in admin changes their OWN password
+// after re-authenticating with the current one. The target is taken from the
+// session (admin@hermex.test, the login()), never the request body, so a caller
+// can only ever change their own account; the test pins that the update landed on
+// the session login with the new value.
+func TestAdminChangeOwnPassword(t *testing.T) {
+	d := &fakeDir{authOK: true, password: "pw", uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedPUT(t, ts, "/admin/passwd", session, csrf, `{"old":"pw","new":"newsecret"}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("change own password status %d, want 204", resp.StatusCode)
+	}
+	if d.setPwUser != "admin@hermex.test" || d.setPwValue != "newsecret" {
+		t.Errorf("changed password for %q = %q, want admin@hermex.test = newsecret", d.setPwUser, d.setPwValue)
+	}
+}
+
+// TestAdminChangeOwnPasswordWrongCurrent proves a wrong current password is a 403
+// and never touches the stored password — the re-authentication is load-bearing,
+// not cosmetic.
+func TestAdminChangeOwnPasswordWrongCurrent(t *testing.T) {
+	d := &fakeDir{authOK: true, password: "pw", uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedPUT(t, ts, "/admin/passwd", session, csrf, `{"old":"wrong","new":"newsecret"}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("wrong current password status %d, want 403", resp.StatusCode)
+	}
+	if d.setPwValue != "" {
+		t.Errorf("password was changed to %q despite a wrong current password", d.setPwValue)
+	}
+}
+
+// TestAdminChangeOwnPasswordRequiresBoth proves an empty new password is a 400,
+// matching the reference's required old+new fields.
+func TestAdminChangeOwnPasswordRequiresBoth(t *testing.T) {
+	d := &fakeDir{authOK: true, password: "pw", uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedPUT(t, ts, "/admin/passwd", session, csrf, `{"old":"pw","new":""}`)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("empty new password status %d, want 400", resp.StatusCode)
+	}
+}
+
 // TestAdminGetUser proves a system admin reads a single user's detail record.
 func TestAdminGetUser(t *testing.T) {
 	d := &fakeDir{

@@ -18,6 +18,7 @@ import (
 // fakeDir is a scripted Directory for the admin server tests.
 type fakeDir struct {
 	authOK             bool
+	password           string // when set, Authenticate accepts only this password (else authOK alone governs)
 	uid                int64
 	roles              []directory.AdminRole
 	perms              []directory.Permission
@@ -172,8 +173,8 @@ type fakeDir struct {
 	deleteContactMissing bool
 }
 
-func (f *fakeDir) Authenticate(_, _ string) (string, bool) {
-	if f.authOK {
+func (f *fakeDir) Authenticate(_, password string) (string, bool) {
+	if f.authOK && (f.password == "" || password == f.password) {
 		return "/mbox", true
 	}
 	return "", false

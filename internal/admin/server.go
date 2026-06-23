@@ -273,6 +273,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /admin/users/{email}/quota", s.protect(s.requireUserScope(s.handleGetUserQuota)))
 	mux.Handle("PUT /admin/users/{email}/quota", s.protect(s.requireUserScope(s.handleSetUserQuota)))
 	mux.Handle("POST /admin/users/{email}/password", s.protect(s.requirePasswordScope(s.handleSetPassword)))
+	mux.Handle("PUT /admin/passwd", s.protect(http.HandlerFunc(s.handleChangeOwnPassword)))
 	mux.Handle("GET /admin/users/{email}/roles", s.protect(s.requireSystem(s.handleListRoles)))
 	mux.Handle("POST /admin/users/{email}/roles", s.protect(s.requireSystem(s.handleGrantRole)))
 	mux.Handle("DELETE /admin/users/{email}/roles", s.protect(s.requireSystem(s.handleRevokeRole)))

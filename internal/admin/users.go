@@ -101,6 +101,39 @@ func (s *Server) handleSetPassword(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// handleChangeOwnPassword lets the logged-in administrator change their OWN
+// password. Unlike handleSetPassword (an admin resetting another account, which
+// needs reset authority), this needs no special scope but re-authenticates with
+// the current password first. The account is taken from the session, never the
+// request, so a caller can only ever change their own password. It mirrors the
+// reference /passwd endpoint: old and new are both required, and a wrong current
+// password is a 403 rather than a silent reset.
+func (s *Server) handleChangeOwnPassword(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Old string `json:"old"`
+		New string `json:"new"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.New == "" || req.Old == "" {
+		http.Error(w, "the current and a new password are required", http.StatusBadRequest)
+		return
+	}
+	login := claimsOf(r).Login
+	if _, ok := s.dir.Authenticate(login, req.Old); !ok {
+		http.Error(w, "incorrect current password", http.StatusForbidden)
+		return
+	}
+	found, err := s.dir.SetPassword(login, req.New)
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.Error(w, "no such user", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // handleGetUser returns a single user's administrative record (system
 // administrators only). The user is named in the path.
 func (s *Server) handleGetUser(w http.ResponseWriter, r *http.Request) {
