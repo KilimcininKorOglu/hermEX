@@ -1,0 +1,9 @@
+{{define "headers"}}{{template "head" .}}
+<div class="reader">
+  <div class="reader-toolbar">
+    <a href="/message?folder={{.Folder}}&uid={{.UID}}{{if .Mbox}}&mbox={{.Mbox}}{{end}}">&larr; Back to message</a>
+  </div>
+  <h2>Internet headers{{if .Subject}}: {{.Subject}}{{end}}</h2>
+  <pre class="internet-headers">{{.Headers}}</pre>
+</div>
+{{template "foot" .}}{{end}}

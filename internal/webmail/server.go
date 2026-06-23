@@ -76,6 +76,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /message", s.handleMessage)
 	mux.HandleFunc("GET /print", s.handlePrint)
 	mux.HandleFunc("GET /eml", s.handleEML)
+	mux.HandleFunc("GET /headers", s.handleHeaders)
 	mux.HandleFunc("GET /attachment", s.handleAttachment)
 	mux.HandleFunc("GET /attachments", s.handleAttachmentsZip)
 	mux.HandleFunc("GET /compose", s.handleComposeForm)
