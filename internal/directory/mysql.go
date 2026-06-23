@@ -275,6 +275,37 @@ SELECT DISTINCT u.maildir
 	return out, rows.Err()
 }
 
+// SharedMailboxes implements SharedMailboxLister: the address and store path of
+// every shared mailbox — a mailbox user (DT_MAILUSER) in an active domain whose
+// address_status carries the shared bit. These have no interactive login, so
+// webmail lists the ones the signed-in user has been granted access to. The
+// username column is the mailbox's e-mail address.
+func (d *SQLDirectory) SharedMailboxes() ([]SharedMailbox, error) {
+	const q = `
+SELECT u.username, u.maildir
+  FROM users u JOIN domains d ON u.domain_id = d.id
+ WHERE u.maildir <> ''
+   AND u.display_type = ?
+   AND (u.address_status & ?) = ?
+   AND (u.address_status & ?) = 0
+   AND d.domain_status = 0
+ ORDER BY u.username`
+	rows, err := d.db.Query(q, dtMailuser, afUserMask, afUserSharedMbox, afDomainMask)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SharedMailbox
+	for rows.Next() {
+		var addr, maildir string
+		if err := rows.Scan(&addr, &maildir); err != nil {
+			return nil, err
+		}
+		out = append(out, SharedMailbox{Address: addr, StorePath: d.storePath(maildir)})
+	}
+	return out, rows.Err()
+}
+
 // SearchGAL implements GAL: a case-insensitive substring match over the
 // addresses of the address-book objects in an active domain — mailbox users with
 // a maildir (DT_MAILUSER) and distribution lists (DT_DISTLIST, which have no

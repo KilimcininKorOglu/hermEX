@@ -333,6 +333,59 @@ func TestSQLDirectoryMaildirs(t *testing.T) {
 	}
 }
 
+// TestSQLDirectorySharedMailboxes checks the shared-mailbox enumerator: only an
+// account carrying the shared status bit in an active domain is returned (with
+// its address and store path), a normal mailbox is excluded, and a shared
+// mailbox in a disabled domain is excluded by the domain join.
+func TestSQLDirectorySharedMailboxes(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	cleanTables(t, db)
+
+	root := t.TempDir()
+	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "domains", "hermex.test")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.CreateDomain("old.test", filepath.Join(root, "domains", "old.test")); err != nil {
+		t.Fatal(err)
+	}
+	aliceDir := filepath.Join(root, "users", "alice")
+	supportDir := filepath.Join(root, "users", "support")
+	archiveDir := filepath.Join(root, "users", "archive")
+	for addr, dir := range map[string]string{
+		"alice@hermex.test":   aliceDir,   // a normal mailbox: not shared
+		"support@hermex.test": supportDir, // a shared mailbox in an active domain
+		"archive@old.test":    archiveDir, // shared, but its domain is disabled
+	} {
+		if _, err := d.CreateUser(addr, "secret", dir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Flag the two shared mailboxes, then disable the old.test domain.
+	if _, err := db.Exec(`UPDATE users SET address_status = ? WHERE username IN (?, ?)`,
+		afUserSharedMbox, "support@hermex.test", "archive@old.test"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE domains SET domain_status = 1 WHERE domainname = ?`, "old.test"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := d.SharedMailboxes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []SharedMailbox{{Address: "support@hermex.test", StorePath: supportDir}}
+	if len(got) != len(want) {
+		t.Fatalf("SharedMailboxes = %v, want only the active-domain shared mailbox %v (normal user and disabled-domain shared excluded)", got, want)
+	}
+	if got[0] != want[0] {
+		t.Errorf("SharedMailboxes[0] = %+v, want %+v", got[0], want[0])
+	}
+}
+
 // TestSQLDirectorySearchGAL checks GAL recipient search over the SQL directory:
 // a case-insensitive substring match on the usernames of active mailbox users,
 // excluding a suspended account, ordered by address, with the result cap honored,

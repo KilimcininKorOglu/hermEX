@@ -31,6 +31,35 @@ func TestStaticAccountsMaildirs(t *testing.T) {
 	}
 }
 
+// TestStaticAccountsSharedMailboxes checks SharedMailboxLister over the static
+// account map: only accounts flagged Shared with a mailbox are returned, a
+// normal account is excluded, a shared account with no mailbox is skipped, and
+// the result is ordered by address so the sidebar listing is stable.
+func TestStaticAccountsSharedMailboxes(t *testing.T) {
+	a := StaticAccounts{
+		"alice@hermex.test":   {Password: "x", MailboxPath: "/m/alice"},                // not shared
+		"team@hermex.test":    {Password: "x", MailboxPath: "/m/team", Shared: true},    // shared
+		"support@hermex.test": {Password: "x", MailboxPath: "/m/support", Shared: true}, // shared
+		"nopath@hermex.test":  {Password: "x", MailboxPath: "", Shared: true},           // shared but no mailbox: skipped
+	}
+	got, err := a.SharedMailboxes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []SharedMailbox{
+		{Address: "support@hermex.test", StorePath: "/m/support"},
+		{Address: "team@hermex.test", StorePath: "/m/team"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("SharedMailboxes = %v, want %v (normal + no-mailbox accounts excluded)", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("SharedMailboxes[%d] = %+v, want %+v (ordered by address)", i, got[i], want[i])
+		}
+	}
+}
+
 // TestStaticAccountsIsLocalDomain checks the LocalDomains predicate over the
 // static account map: a domain that hosts an account is local, an outside domain
 // is not, and the match is case-insensitive. Relay routing depends on this to

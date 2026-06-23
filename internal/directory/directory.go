@@ -12,10 +12,12 @@ import (
 
 // Account is one mailbox account. Password is a placeholder plaintext secret
 // for the static/test account model; the directory-database slice will replace
-// it with a hashed credential.
+// it with a hashed credential. Shared marks a non-login shared mailbox (it has
+// no interactive owner; access is by permission grant).
 type Account struct {
 	Password    string
 	MailboxPath string
+	Shared      bool
 }
 
 // Accounts resolves a recipient email address to its mailbox store path. ok is
@@ -71,6 +73,21 @@ type Identifier interface {
 // cannot enumerate may omit it; the spooler then has nothing to scan.
 type MailboxLister interface {
 	Maildirs() ([]string, error)
+}
+
+// SharedMailbox is a shared mailbox: a mailbox-bearing account with no
+// interactive login, whose contents other users reach by permission grant.
+type SharedMailbox struct {
+	Address   string // the mailbox's e-mail address
+	StorePath string // its object-store directory
+}
+
+// SharedMailboxLister optionally enumerates the shared mailboxes the directory
+// knows. Webmail lists those the signed-in user may open (access is rechecked
+// per store), so a user can browse and act on a shared mailbox they have rights
+// to. Directories that cannot enumerate may omit it; webmail then shows none.
+type SharedMailboxLister interface {
+	SharedMailboxes() ([]SharedMailbox, error)
 }
 
 // LocalDomains optionally reports whether a domain is one this server is
@@ -182,6 +199,19 @@ func (a StaticAccounts) Maildirs() ([]string, error) {
 		seen[acc.MailboxPath] = true
 		out = append(out, acc.MailboxPath)
 	}
+	return out, nil
+}
+
+// SharedMailboxes implements SharedMailboxLister: the accounts flagged Shared,
+// by address and mailbox path, ordered by address for a stable listing.
+func (a StaticAccounts) SharedMailboxes() ([]SharedMailbox, error) {
+	out := make([]SharedMailbox, 0)
+	for addr, acc := range a {
+		if acc.Shared && acc.MailboxPath != "" {
+			out = append(out, SharedMailbox{Address: addr, StorePath: acc.MailboxPath})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Address < out[j].Address })
 	return out, nil
 }
 
