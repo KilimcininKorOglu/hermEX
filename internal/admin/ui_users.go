@@ -29,6 +29,54 @@ func (s *Server) uiAuthorized(w http.ResponseWriter, r *http.Request) (claims, b
 	return cl, true
 }
 
+// handleUIChangePassword renders the self-service change-password page for any
+// logged-in administrator — it needs no system-admin scope because it only ever
+// affects the caller's own account.
+func (s *Server) handleUIChangePassword(w http.ResponseWriter, r *http.Request) {
+	cl, ok := s.uiClaims(r)
+	if !ok {
+		http.Redirect(w, r, "/admin/ui/login", http.StatusSeeOther)
+		return
+	}
+	s.render(w, "change_password.html", map[string]any{
+		"Nav": "changepassword", "CSRF": csrfCookieValue(r), "Login": cl.Login,
+	})
+}
+
+// handleUIChangePasswordSubmit changes the logged-in admin's own password after
+// re-authenticating with the current one, then swaps in a result message. The
+// account is the session's, never the form's, so a caller can only ever change
+// their own password; a wrong current password reports an error rather than
+// touching the stored one.
+func (s *Server) handleUIChangePasswordSubmit(w http.ResponseWriter, r *http.Request) {
+	cl, ok := s.uiClaims(r)
+	if !ok {
+		http.Error(w, "session expired", http.StatusUnauthorized)
+		return
+	}
+	if !validCSRF(r) {
+		http.Error(w, "missing or invalid CSRF token", http.StatusForbidden)
+		return
+	}
+	result := func(okFlag bool, msg string) {
+		s.render(w, "change-password-result", map[string]any{"OK": okFlag, "Message": msg})
+	}
+	old, newpw := r.FormValue("old"), r.FormValue("new")
+	if old == "" || newpw == "" {
+		result(false, "The current and a new password are required.")
+		return
+	}
+	if _, authed := s.dir.Authenticate(cl.Login, old); !authed {
+		result(false, "Your current password is incorrect.")
+		return
+	}
+	if _, err := s.dir.SetPassword(cl.Login, newpw); err != nil {
+		result(false, "Could not change the password.")
+		return
+	}
+	result(true, "Your password has been changed.")
+}
+
 // handleUIUsers renders the users management page (system administrators only).
 func (s *Server) handleUIUsers(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {

@@ -300,6 +300,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/ui/login", s.handleUILoginPage)
 	mux.HandleFunc("POST /admin/ui/login", s.handleUILoginSubmit)
 	mux.HandleFunc("POST /admin/ui/logout", s.handleUILogout)
+	mux.HandleFunc("GET /admin/ui/change-password", s.handleUIChangePassword)
+	mux.HandleFunc("PUT /admin/ui/change-password", s.handleUIChangePasswordSubmit)
 	mux.HandleFunc("GET /admin/ui/users", s.handleUIUsers)
 	mux.HandleFunc("POST /admin/ui/users", s.handleUICreateUser)
 	mux.HandleFunc("GET /admin/ui/user-create-fields", s.handleUICreateUserDefaults)
