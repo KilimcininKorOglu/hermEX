@@ -67,6 +67,17 @@ type Identifier interface {
 	Identities(user string) ([]string, error)
 }
 
+// CanonicalResolver maps an address to the canonical login a session authenticates
+// as — the exact name a folder permission must be stored under to match a grantee's
+// session (ResolvePermission compares the stored member name verbatim). Only the
+// primary username resolves; an alias/altname does not, since no session logs in as
+// one, so a grant stored under it would never match. Optional: a directory that
+// cannot resolve may omit it, and a caller then treats self-service sharing as
+// unavailable rather than storing an unmatchable grant.
+type CanonicalResolver interface {
+	CanonicalLogin(address string) (login string, ok bool)
+}
+
 // MailboxLister enumerates the store paths of every mailbox the directory knows.
 // A background worker with no address to resolve — the send-later spooler, which
 // must scan each user's Outbox — uses it to find all stores. Directories that
@@ -164,6 +175,16 @@ func (a StaticAccounts) Resolve(address string) (string, bool) {
 		return "", false
 	}
 	return acc.MailboxPath, true
+}
+
+// CanonicalLogin implements CanonicalResolver: a known address's canonical login is
+// its lowercase form, since a static account is keyed by — and logs in as — that name.
+func (a StaticAccounts) CanonicalLogin(address string) (string, bool) {
+	login := strings.ToLower(strings.TrimSpace(address))
+	if _, ok := a[login]; !ok {
+		return "", false
+	}
+	return login, true
 }
 
 // Identities implements Identifier: a static account may send only as itself.

@@ -683,6 +683,20 @@ func (d *SQLDirectory) GetUser(username string) (UserDetail, bool, error) {
 	return u, true, nil
 }
 
+// CanonicalLogin implements CanonicalResolver: it resolves an address to the
+// primary username a session authenticates as, case-folding the input via GetUser.
+// ok is false for an unknown user or an address that is only an alias/altname
+// (GetUser matches the users table by primary username, so an alias does not
+// resolve) — exactly the inputs a folder grant must reject rather than store under
+// a name no session will match.
+func (d *SQLDirectory) CanonicalLogin(address string) (string, bool) {
+	u, ok, err := d.GetUser(address)
+	if err != nil || !ok {
+		return "", false
+	}
+	return u.Username, true
+}
+
 // privilegesFromBits decodes the privilege_bits column. POP3/IMAP, SMTP and
 // CHGPASSWD are plain bits; WEB/EAS/DAV follow the DETAIL1 opt-out convention, so
 // they read as granted unless DETAIL1 is set and the service's own bit is clear.
