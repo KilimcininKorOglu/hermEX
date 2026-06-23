@@ -142,6 +142,27 @@ services:
       # reconnects), so mail must start and serve even if the log store is absent.
     restart: unless-stopped
 
+  # webmail2: the React SPA + its /api/v1 JSON API. The built SPA (dist) is
+  # bind-mounted and served same-origin with the API. Distinct from the
+  # server-rendered webmail above; both run during the port.
+  webmail2:
+    container_name: hermex-webmail2
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    command: ["/usr/local/bin/hermex-webmail2", "-config", "/config/config.json"]
+    volumes:
+      - ./docker-data/mailboxes:/data/mailboxes
+      - ./docker-data/config.json:/config/config.json:ro
+      - ./internal/webmail2/dist:/webmail2-dist:ro
+      - ./docker-data/spill/webmail2:/data/logspill
+    ports:
+      - "8150:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
   dav:
     container_name: hermex-dav
     build:

@@ -24,6 +24,9 @@ type Config struct {
 	POP3Addr       string   `json:"pop3_addr"`       // POP3 listen address (default ":110")
 	IMAPAddr       string   `json:"imap_addr"`       // IMAP listen address (default ":143")
 	WebmailAddr    string   `json:"webmail_addr"`    // webmail HTTP listen address (default ":8080")
+	Webmail2Addr   string   `json:"webmail2_addr"`   // webmail2 (SPA) HTTP listen address (default ":8080")
+	Webmail2Secret string   `json:"webmail2_secret"` // signing key for webmail2 session cookies; required to serve webmail2
+	Webmail2Dist   string   `json:"webmail2_dist"`   // filesystem path to the built webmail2 SPA (dist) directory to serve
 	DAVAddr        string   `json:"dav_addr"`        // CalDAV/CardDAV HTTP listen address (default ":8080")
 	ActiveSyncAddr string   `json:"activesync_addr"` // ActiveSync HTTP listen address (default ":8080")
 	EWSAddr        string   `json:"ews_addr"`        // EWS (Exchange Web Services) HTTP listen address (default ":8080")
