@@ -17,6 +17,17 @@ import (
 	"hermex/internal/logging"
 )
 
+// pollInterval is how often RunMaintenance re-probes the certificate store. The
+// store is a database with no push channel, so each TLS daemon polls for a changed
+// certificate rather than being notified; this is the staleness/load tradeoff. The
+// probe is only a cheap version query (TLSCertVersion) — the full reload runs only
+// when it moves — so a short interval is inexpensive: at 15s an admin upload or a
+// mirrored renewal applies within seconds, not a minute. (ACME-obtained certificates
+// also depend on the gateway's separate ~15-min mirror cycle, which this does not
+// change — that governs when a renewal reaches the store, this governs how fast the
+// daemons pick it up once it lands.)
+const pollInterval = 15 * time.Second
+
 // CertStore is the certificate persistence the provider reads from;
 // *directory.SQLDirectory satisfies it.
 type CertStore interface {
@@ -131,11 +142,11 @@ func (p *Provider) Refresh() error {
 	return nil
 }
 
-// RunMaintenance polls the store every minute and refreshes the snapshot when it
-// changes, so an admin's upload or renewal applies without a restart. It runs
+// RunMaintenance polls the store every pollInterval and refreshes the snapshot when
+// it changes, so an admin's upload or renewal applies without a restart. It runs
 // until the process exits, mirroring the other settings-reload loops.
 func (p *Provider) RunMaintenance() {
-	tick := time.NewTicker(time.Minute)
+	tick := time.NewTicker(pollInterval)
 	defer tick.Stop()
 	for range tick.C {
 		if err := p.Refresh(); err != nil {
