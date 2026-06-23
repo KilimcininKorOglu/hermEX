@@ -91,6 +91,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/mailboxes", s.handleGetMailboxes)
 	mux.HandleFunc("GET /api/v1/mailboxes/shared", s.handleGetSharedMailboxes)
 	mux.HandleFunc("GET /api/v1/mailboxes/shared-as-owner", s.handleGetSharedMailboxes)
+	mux.HandleFunc("GET /api/v1/mailboxes/{owner}/{mailbox}/acl", s.handleGetACL)
+	mux.HandleFunc("POST /api/v1/mailboxes/{owner}/{mailbox}/acl", s.handleSetACL)
+	mux.HandleFunc("DELETE /api/v1/mailboxes/{owner}/{mailbox}/acl/{grantee}", s.handleDeleteACL)
 
 	// Vacation / out-of-office.
 	mux.HandleFunc("GET /api/v1/vacation", s.handleGetVacation)
