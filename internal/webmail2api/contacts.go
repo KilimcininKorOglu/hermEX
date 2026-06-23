@@ -78,7 +78,7 @@ func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		org := strings.SplitN(vcardField(vcf, "ORG"), ";", 2)[0]
+		org, _, _ := strings.Cut(vcardField(vcf, "ORG"), ";")
 		contacts = append(contacts, contactJSON{
 			ID:      strconv.FormatInt(o.ID, 10),
 			Name:    vcardField(vcf, "FN"),
