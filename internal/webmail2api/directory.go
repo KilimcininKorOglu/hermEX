@@ -16,12 +16,14 @@ func (s *Server) handleDirectory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query().Get("q")
-	limit := 20
-	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 100 {
+	limit := 100
+	if n, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil && n > 0 && n <= 500 {
 		limit = n
 	}
 	entries := []map[string]any{}
-	if gal, ok := s.auth.(directory.GAL); ok && q != "" {
+	// An empty query lists the whole directory (SearchGAL("") matches every
+	// address), so the contacts page can show the GAL — not only a live search.
+	if gal, ok := s.auth.(directory.GAL); ok {
 		if res, err := gal.SearchGAL(q, limit); err == nil {
 			for _, e := range res {
 				entries = append(entries, map[string]any{"name": e.DisplayName, "email": e.Address, "display_name": e.DisplayName})

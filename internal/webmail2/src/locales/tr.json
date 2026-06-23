@@ -685,6 +685,9 @@
   "contacts": {
     "searchPlaceholder": "Kişilerde ara...",
     "addContact": "Kişi Ekle",
+    "myContacts": "Kişilerim",
+    "globalAddressList": "Genel Adres Listesi",
+    "directoryBadge": "Dizin",
     "noContacts": "Kişi yok",
     "noSearchMatch": "Aramanızla eşleşen kişi yok.",
     "emptyHint": "Başlamak için ilk kişinizi ekleyin.",

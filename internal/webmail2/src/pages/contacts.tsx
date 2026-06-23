@@ -33,7 +33,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { toast } from "sonner"
-import api, { Contact as ApiContact } from "@/utils/api"
+import api, { Contact as ApiContact, DirectoryEntry } from "@/utils/api"
 import { useI18n } from "@/hooks/useI18n"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
@@ -54,6 +54,9 @@ interface Contact {
 export function ContactsPage() {
   const { t } = useI18n()
   const [contacts, setContacts] = useState<Contact[]>([])
+  // The Global Address List (every directory user) shown as its own group, the
+  // Exchange way — separate from the user's personal contacts.
+  const [galEntries, setGalEntries] = useState<DirectoryEntry[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [showAddDialog, setShowAddDialog] = useState(false)
   const [editingContact, setEditingContact] = useState<Contact | null>(null)
@@ -97,13 +100,22 @@ export function ContactsPage() {
     } finally {
       setLoading(false)
     }
+    // Load the Global Address List as a separate group (best-effort: a directory
+    // failure must not break the personal contacts view).
+    try {
+      const dir = await api.searchDirectory("")
+      setGalEntries(dir.entries ?? [])
+    } catch (err) {
+      console.error('Failed to load the global address list:', err)
+    }
   }
 
-  const filteredContacts = contacts.filter(
-    (c) =>
-      c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      c.email.toLowerCase().includes(searchQuery.toLowerCase())
-  )
+  const matchesSearch = (name: string, email: string) =>
+    name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    email.toLowerCase().includes(searchQuery.toLowerCase())
+
+  const filteredContacts = contacts.filter((c) => matchesSearch(c.name, c.email))
+  const filteredGal = galEntries.filter((e) => matchesSearch(e.name || "", e.email))
 
   const handleAdd = () => {
     setFormData({ name: "", email: "", phone: "", company: "", is_group: false, members: "" })
@@ -263,7 +275,7 @@ export function ContactsPage() {
         </Button>
       </div>
 
-      {filteredContacts.length === 0 ? (
+      {filteredContacts.length === 0 && filteredGal.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <div className="rounded-full bg-muted p-4">
             <User className="h-8 w-8 text-muted-foreground" />
@@ -274,7 +286,13 @@ export function ContactsPage() {
           </p>
         </div>
       ) : (
-        <div className="rounded-lg border bg-card">
+        <div className="space-y-6">
+          {filteredContacts.length > 0 && (
+            <div>
+              <h2 className="mb-2 px-1 text-sm font-semibold text-muted-foreground">
+                {t("contacts.myContacts")} ({filteredContacts.length})
+              </h2>
+              <div className="rounded-lg border bg-card">
           {filteredContacts.map((contact, index) => (
             <div key={contact.id}>
               {index > 0 && <Separator />}
@@ -341,6 +359,44 @@ export function ContactsPage() {
               </div>
             </div>
           ))}
+              </div>
+            </div>
+          )}
+          {filteredGal.length > 0 && (
+            <div>
+              <h2 className="mb-2 px-1 text-sm font-semibold text-muted-foreground">
+                {t("contacts.globalAddressList")} ({filteredGal.length})
+              </h2>
+              <div className="rounded-lg border bg-card">
+                {filteredGal.map((entry, index) => (
+                  <div key={entry.email}>
+                    {index > 0 && <Separator />}
+                    <div className="flex items-center gap-4 p-4 hover:bg-accent/50 transition-colors">
+                      <Avatar className="h-10 w-10">
+                        <AvatarFallback className="bg-gradient-to-br from-muted-foreground/70 to-muted-foreground text-background font-semibold">
+                          {getInitials(entry.name || entry.email)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium">{entry.name || entry.email}</span>
+                          <Badge variant="outline" className="text-[10px]">
+                            {t("contacts.directoryBadge")}
+                          </Badge>
+                        </div>
+                        <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                          <span className="flex items-center gap-1">
+                            <Mail className="h-3 w-3" />
+                            {entry.email}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

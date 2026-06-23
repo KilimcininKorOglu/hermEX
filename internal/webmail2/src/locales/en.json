@@ -685,6 +685,9 @@
   "contacts": {
     "searchPlaceholder": "Search contacts...",
     "addContact": "Add Contact",
+    "myContacts": "My Contacts",
+    "globalAddressList": "Global Address List",
+    "directoryBadge": "Directory",
     "noContacts": "No contacts",
     "noSearchMatch": "No contacts match your search.",
     "emptyHint": "Add your first contact to get started.",
