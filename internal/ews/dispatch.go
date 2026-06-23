@@ -48,6 +48,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleSendItem(w, inner, sess)
 	case "ResolveNames":
 		s.handleResolveNames(w, inner, sess)
+	case "GetUserPhoto":
+		s.handleGetUserPhoto(w, inner, sess)
 	case "UpdateItem":
 		s.handleUpdateItem(w, inner, sess)
 	case "DeleteItem":
