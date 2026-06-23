@@ -166,6 +166,7 @@ rulesPage sub-data; forms post to /rules and return to /settings?tab=rules. */}}
           <option value="move">Move it to folder</option>
           <option value="copy">Copy it to folder</option>
           <option value="forward">Forward it to address</option>
+          <option value="categorize">Categorize it as</option>
           <option value="markread">Mark it as read</option>
           <option value="delete">Delete it</option>
         </select>
@@ -176,6 +177,9 @@ rulesPage sub-data; forms post to /rules and return to /settings?tab=rules. */}}
         </span>
         <span class="action-input" data-action="forward">
           <input type="email" name="actionforward" placeholder="forward@example.com">
+        </span>
+        <span class="action-input" data-action="categorize">
+          <input name="actioncategory" placeholder="category name">
         </span>
       </div>
       <div class="field">

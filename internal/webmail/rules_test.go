@@ -204,6 +204,23 @@ func TestRulesAddCompoundCondition(t *testing.T) {
 	}
 }
 
+// TestRulesAddCategorizeAction adds a categorize rule and checks the summary
+// names the category (the store-side apply is exercised by the objectstore tests).
+func TestRulesAddCategorizeAction(t *testing.T) {
+	path := emptyMailbox(t)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+	postForm(t, c, ts.URL+"/rules", url.Values{
+		"action": {"add"}, "name": {"TagRule"},
+		"condfield": {"subject"}, "condvalue": {"invoice"},
+		"actiontype": {"categorize"}, "actioncategory": {"Finance"},
+	})
+	_, body := get(t, c, ts.URL+"/rules")
+	if !strings.Contains(body, "categorize as Finance") {
+		t.Errorf("rules page missing the categorize-action summary:\n%s", body)
+	}
+}
+
 // TestRulesAddForwardAction adds a forward rule and checks the summary names the
 // forward address (the delivery-time send itself is exercised by the mta tests).
 func TestRulesAddForwardAction(t *testing.T) {

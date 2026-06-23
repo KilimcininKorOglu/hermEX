@@ -90,7 +90,7 @@ func (s *Server) handleRulesSubmit(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/settings?tab=rules&err=condition", http.StatusSeeOther)
 			return
 		}
-		act, ok := buildAction(r)
+		act, ok := buildAction(st, r)
 		if !ok {
 			http.Redirect(w, r, "/settings?tab=rules&err=action", http.StatusSeeOther)
 			return
@@ -214,7 +214,7 @@ func buildConditionN(r *http.Request, suffix string) (mapi.Restriction, bool) {
 
 // buildAction assembles a single rule action from the add-rule form's action
 // fields, reporting ok=false on an unrecognized or incomplete action.
-func buildAction(r *http.Request) (mapi.ActionBlock, bool) {
+func buildAction(st *objectstore.Store, r *http.Request) (mapi.ActionBlock, bool) {
 	switch r.FormValue("actiontype") {
 	case "markread":
 		return objectstore.RuleMarkReadAction(), true
@@ -231,6 +231,12 @@ func buildAction(r *http.Request) (mapi.ActionBlock, bool) {
 	case "forward":
 		if addr := strings.TrimSpace(r.FormValue("actionforward")); addr != "" {
 			return objectstore.RuleForwardAction(addr), true
+		}
+	case "categorize":
+		if cat := strings.TrimSpace(r.FormValue("actioncategory")); cat != "" {
+			if tag, err := st.KeywordsPropTag(); err == nil {
+				return objectstore.RuleTagAction(tag, cat), true
+			}
 		}
 	}
 	return mapi.ActionBlock{}, false
@@ -418,6 +424,8 @@ func describeActions(a mapi.RuleActions, folderNames map[int64]string) string {
 			parts = append(parts, "copy it to "+moveTargetName(b, folderNames))
 		case mapi.OpForward:
 			parts = append(parts, "forward it to "+forwardTargets(b))
+		case mapi.OpTag:
+			parts = append(parts, "categorize as "+tagCategories(b))
 		default:
 			parts = append(parts, "(custom action)")
 		}
@@ -426,6 +434,18 @@ func describeActions(a mapi.RuleActions, folderNames map[int64]string) string {
 		return "(no action)"
 	}
 	return strings.Join(parts, " and ")
+}
+
+// tagCategories joins an OpTag action's category values for a summary.
+func tagCategories(b mapi.ActionBlock) string {
+	tv, ok := b.Data.(mapi.TaggedPropVal)
+	if !ok {
+		return "a category"
+	}
+	if cats, ok := tv.Value.([]string); ok && len(cats) > 0 {
+		return strings.Join(cats, ", ")
+	}
+	return "a category"
 }
 
 // forwardTargets joins an OpForward action's destination addresses for a summary.

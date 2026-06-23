@@ -549,3 +549,37 @@ func TestRuleForwardActionReturnsRequest(t *testing.T) {
 		t.Errorf("forwarded message should remain in inbox (forward is non-terminal): %v", err)
 	}
 }
+
+// TestRuleTagActionSetsCategory de-risks the categorize action: an OpTag rule
+// carrying the named Keywords property must survive serialization (ext encodes the
+// multi-value TaggedPropVal) and, when applied, set the category the categories UI
+// reads back via GetCategories. It is also non-terminal (message stays in inbox).
+func TestRuleTagActionSetsCategory(t *testing.T) {
+	s := openSeededStore(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	m := deliverTo(t, s, inbox, ruleMsg("urgent ping", "x@y.com", ""))
+	tag, err := s.KeywordsPropTag()
+	if err != nil {
+		t.Fatalf("KeywordsPropTag: %v", err)
+	}
+	if _, err := s.AddRule(Rule{
+		FolderID: inbox, Name: "tag urgent", State: mapi.RuleStateEnabled,
+		Condition: RuleSubjectContains("urgent"),
+		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{RuleTagAction(tag, "Important")}},
+	}); err != nil {
+		t.Fatalf("AddRule: %v", err)
+	}
+	if _, err := s.RunRules(inbox); err != nil {
+		t.Fatalf("RunRules: %v", err)
+	}
+	cats, err := s.GetCategories(m.ID)
+	if err != nil {
+		t.Fatalf("GetCategories: %v", err)
+	}
+	if len(cats) != 1 || cats[0] != "Important" {
+		t.Errorf("categories = %v, want [Important] (OpTag must round-trip and apply)", cats)
+	}
+	if _, err := s.MessageByUID(inbox, m.UID); err != nil {
+		t.Errorf("categorized message should remain in inbox (tag is non-terminal): %v", err)
+	}
+}

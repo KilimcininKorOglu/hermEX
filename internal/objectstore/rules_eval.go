@@ -351,6 +351,22 @@ func (s *Store) applyRuleActions(srcFolder int64, uid uint32, acts mapi.RuleActi
 					return false, forwards, err
 				}
 			}
+		case mapi.OpTag:
+			// Set the property the action carries (the editor uses it to categorize:
+			// the named Keywords property the categories UI reads). Non-terminal.
+			tv, ok := b.Data.(mapi.TaggedPropVal)
+			if !ok {
+				continue
+			}
+			mi, err := s.MessageByUID(srcFolder, uid)
+			if err != nil {
+				return false, forwards, err
+			}
+			var pv mapi.PropertyValues
+			pv.Set(tv.Tag, tv.Value)
+			if err := s.SetMessageProperties(mi.ID, pv); err != nil {
+				return false, forwards, err
+			}
 		case mapi.OpForward:
 			// Forward is non-terminal: the message stays in srcFolder. The send
 			// itself is the delivery path's job (the store cannot send mail); it
@@ -578,6 +594,21 @@ func RuleForwardAction(addresses ...string) mapi.ActionBlock {
 		}})
 	}
 	return mapi.ActionBlock{Type: mapi.OpForward, Data: mapi.ForwardDelegateAction{Recipients: recips}}
+}
+
+// RuleTagAction sets a property on a matching message (an OpTag block). The editor
+// uses it to categorize: tag is the named Keywords property, values the categories.
+func RuleTagAction(tag mapi.PropTag, values ...string) mapi.ActionBlock {
+	return mapi.ActionBlock{Type: mapi.OpTag, Data: mapi.TaggedPropVal{Tag: tag, Value: values}}
+}
+
+// KeywordsPropTag resolves (creating if needed) the named Keywords property tag —
+// the multi-value string property that holds a message's categories — so the rule
+// editor can build a categorize action whose OpTag sets the same property the
+// categories UI reads.
+func (s *Store) KeywordsPropTag() (mapi.PropTag, error) {
+	tag, _, err := s.namedProptag(mapi.NameKeywords, mapi.PtMvUnicode, true)
+	return tag, err
 }
 
 // forwardAddresses extracts the SMTP addresses from an OpForward action's data.
