@@ -1,8 +1,10 @@
 package webmail2api
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -80,6 +82,53 @@ func bestBody(root *mime.Part) string {
 	return plain
 }
 
+// cidRef matches an <img> whose src is a cid: URL, capturing the tag text up to
+// src= (1) and the bare Content-ID it references (2).
+var cidRef = regexp.MustCompile(`(?i)(<img\b[^>]*?\bsrc=)["']cid:([^"'>\s]+)["']`)
+
+// inlineCIDImages rewrites each cid: <img> src in the HTML body to the referenced
+// part decoded into a data: URI, returning the rewritten body and the set of
+// inlined Content-IDs (so they are dropped from the downloadable attachment list).
+// An unresolvable or undecodable cid: is left untouched.
+func inlineCIDImages(body string, root *mime.Part) (string, map[string]bool) {
+	leaves := map[string]*mime.Part{}
+	var walk func(p *mime.Part)
+	walk = func(p *mime.Part) {
+		if p == nil {
+			return
+		}
+		if len(p.Children) > 0 {
+			for _, ch := range p.Children {
+				walk(ch)
+			}
+			return
+		}
+		if id := strings.Trim(p.ID, "<>"); id != "" {
+			leaves[id] = p
+		}
+	}
+	walk(root)
+	if len(leaves) == 0 {
+		return body, nil
+	}
+	inlined := map[string]bool{}
+	out := cidRef.ReplaceAllStringFunc(body, func(match string) string {
+		sub := cidRef.FindStringSubmatch(match)
+		part, ok := leaves[sub[2]]
+		if !ok {
+			return match
+		}
+		content, err := part.DecodedContent()
+		if err != nil {
+			return match
+		}
+		inlined[sub[2]] = true
+		ct := part.Type + "/" + part.Subtype
+		return sub[1] + `"data:` + ct + ";base64," + base64.StdEncoding.EncodeToString(content) + `"`
+	})
+	return out, inlined
+}
+
 // attachmentJSON is the SPA's AttachmentInfo shape.
 type attachmentJSON struct {
 	Filename    string `json:"filename"`
@@ -90,7 +139,7 @@ type attachmentJSON struct {
 
 // collectAttachments walks the tree for non-inline attachment parts, assigning
 // each a sequential index in walk order.
-func collectAttachments(root *mime.Part) []attachmentJSON {
+func collectAttachments(root *mime.Part, inlined map[string]bool) []attachmentJSON {
 	var atts []attachmentJSON
 	idx := 0
 	var walk func(p *mime.Part)
@@ -101,6 +150,14 @@ func collectAttachments(root *mime.Part) []attachmentJSON {
 		name := p.DispParams["filename"]
 		if name == "" {
 			name = p.Params["name"]
+		}
+		// An image already inlined into the body is not a separate download.
+		cid := strings.Trim(p.ID, "<>")
+		if cid != "" && inlined[cid] {
+			for _, ch := range p.Children {
+				walk(ch)
+			}
+			return
 		}
 		if p.Type != "multipart" && (p.Disposition == "attachment" || name != "") {
 			atts = append(atts, attachmentJSON{
@@ -167,11 +224,12 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	root := mime.ParseStructure(raw)
+	body, inlined := inlineCIDImages(bestBody(root), root)
 	d := mailDetailJSON{
 		ID:      messageID(folder, uid),
 		Subject: "(no subject)",
 		Folder:  folder,
-		Body:    bestBody(root),
+		Body:    body,
 		Size:    len(raw),
 	}
 	if env, err := mime.ParseEnvelope(raw); err == nil {
@@ -191,7 +249,7 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 			d.Date = env.Date.Format(time.RFC3339)
 		}
 	}
-	d.Attachments = collectAttachments(root)
+	d.Attachments = collectAttachments(root, inlined)
 	d.HasAttachments = len(d.Attachments) > 0
 
 	// Reading marks the message \Seen, preserving its other flags.
