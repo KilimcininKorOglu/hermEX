@@ -20,10 +20,6 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	s.emptyAuthed(w, r, "sessions")
 }
 
-func (s *Server) handleSearchFolders(w http.ResponseWriter, r *http.Request) {
-	s.emptyAuthed(w, r, "search_folders")
-}
-
 func (s *Server) handleRooms(w http.ResponseWriter, r *http.Request) {
 	s.emptyAuthed(w, r, "rooms")
 }
