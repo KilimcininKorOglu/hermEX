@@ -1,0 +1,644 @@
+import { useState, useEffect } from "react"
+import { useParams, useNavigate } from "react-router-dom"
+import {
+  ArrowLeft,
+  Trash2,
+  Reply,
+  ReplyAll,
+  Forward,
+  Mail,
+  FolderInput,
+  Flag,
+  Tag,
+  X,
+  Plus,
+  CalendarCheck,
+  Check,
+  HelpCircle,
+  Paperclip,
+  Download,
+  Printer,
+  Undo2,
+  RotateCcw,
+} from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Badge } from "@/components/ui/badge"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Separator } from "@/components/ui/separator"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { toast } from "sonner"
+import { sanitizeHTML } from "@/utils/sanitize"
+import api from "@/utils/api"
+import type { MeetingInvite, AttachmentInfo } from "@/utils/api"
+import { formatAbsolute, withTz } from "@/utils/date"
+import { useAuth } from "@/contexts/AuthContext"
+import { useMailbox } from "@/contexts/MailboxContext"
+import { useI18n } from "@/hooks/useI18n"
+
+// formatFileSize renders a byte count as a human-readable size.
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+interface EmailDetail {
+  id: string
+  from: string
+  fromEmail: string
+  to: string[]
+  toNames: string[]
+  subject: string
+  date: string
+  content: string
+  flagged: boolean
+  labels: string[]
+  attachments: AttachmentInfo[]
+  folder: string
+}
+
+export function EmailDetailPage() {
+  const { id } = useParams()
+  const navigate = useNavigate()
+  const { t } = useI18n()
+  const { user } = useAuth()
+  // Keep the shared inbox state (sidebar badge, header notifications) in sync
+  // with read/flag/label/delete actions taken in the reading view.
+  const { patchInbox, removeFromInbox } = useMailbox()
+  const [email, setEmail] = useState<EmailDetail | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [newLabel, setNewLabel] = useState("")
+  const [labelEditing, setLabelEditing] = useState(false)
+  const [invite, setInvite] = useState<MeetingInvite | null>(null)
+  const [rsvpStatus, setRsvpStatus] = useState<string | null>(null)
+  const [rsvpBusy, setRsvpBusy] = useState(false)
+  // Category name → color, so labels render with their configured color.
+  const [categoryColors, setCategoryColors] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    let cancelled = false
+    api.getCategories()
+      .then((res) => {
+        if (cancelled) return
+        const map: Record<string, string> = {}
+        for (const c of res.categories ?? []) map[c.name.toLowerCase()] = c.color
+        setCategoryColors(map)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  // Load the message by id (the backend resolves it across all folders).
+  useEffect(() => {
+    const loadEmail = async () => {
+      if (!id) {
+        setLoading(false)
+        return
+      }
+      try {
+        setLoading(true)
+        const result = await api.getMessage(id)
+        if (result && result.id) {
+          // The API returns a bare sender address (result.from) and a resolved
+          // display name (result.fromName, "" when unknown); recipients come as
+          // bare addresses (result.to) with names in result.toNames (same index).
+          const fromEmail = result.from
+          const fromName = result.fromName || result.from
+          setEmail({
+            id: result.id,
+            from: fromName,
+            fromEmail,
+            to: result.to ?? [],
+            toNames: result.toNames ?? [],
+            subject: result.subject,
+            date: result.date,
+            content: result.body,
+            flagged: !!result.starred,
+            labels: result.labels ?? [],
+            attachments: result.attachments ?? [],
+            folder: result.folder ?? "",
+          })
+          // Mark the message read on open (server-side) if it was unread, so
+          // the unread count reflects reading — standard mail-client behavior.
+          // Fire-and-forget: a failure must not block reading the message.
+          if (!result.read) {
+            api.setFlag(result.id, "\\Seen", true).catch(() => undefined)
+            patchInbox([result.id], { read: true })
+          }
+          // Detect a meeting invite so we can offer RSVP actions. A failure
+          // here must not block reading the message.
+          try {
+            const inv = await api.getInvite(result.id)
+            setInvite(inv.isInvite ? inv : null)
+          } catch {
+            setInvite(null)
+          }
+        } else {
+          toast.error(t("emailDetail.notFound"))
+          navigate("/inbox")
+        }
+      } catch (err) {
+        console.error("Failed to load email:", err)
+        toast.error(t("emailDetail.failedToLoad"))
+        navigate("/inbox")
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadEmail()
+  }, [id, navigate, patchInbox, t])
+
+  const handleDelete = async () => {
+    if (!email) return
+    try {
+      await api.deleteMail(email.id)
+      removeFromInbox([email.id])
+      toast.success(t("emailDetail.movedToTrash"))
+      navigate("/inbox")
+    } catch {
+      toast.error(t("emailDetail.failedToDelete"))
+    }
+  }
+
+  const handleRecall = async () => {
+    if (!email) return
+    if (!window.confirm(t("emailDetail.recallConfirm"))) return
+    try {
+      const res = await api.recallMail(email.id)
+      if (res.total === 0) {
+        toast.info(t("emailDetail.recallNoRecipients"))
+      } else if (res.recalled === res.total) {
+        toast.success(t("emailDetail.recallAll", { count: String(res.recalled) }))
+      } else if (res.recalled === 0) {
+        toast.warning(t("emailDetail.recallNone"))
+      } else {
+        toast.warning(t("emailDetail.recallPartial", { recalled: String(res.recalled), total: String(res.total) }))
+      }
+    } catch {
+      toast.error(t("emailDetail.recallFailed"))
+    }
+  }
+
+  const handleRecover = async () => {
+    if (!email) return
+    try {
+      const res = await api.recoverMail(email.id)
+      toast.success(t("emailDetail.recovered", { folder: res.folder }))
+      navigate("/inbox")
+    } catch {
+      toast.error(t("emailDetail.recoverFailed"))
+    }
+  }
+
+  const handleReply = () => {
+    if (!email) return
+    const params = new URLSearchParams({
+      replyTo: email.fromEmail,
+      subject: email.subject.startsWith("Re: ") ? email.subject : `Re: ${email.subject}`,
+    })
+    navigate(`/compose?${params.toString()}`)
+  }
+
+  const handleReplyAll = () => {
+    if (!email) return
+    const self = user?.email?.toLowerCase()
+    // Other To recipients become Cc, excluding the original sender and ourselves.
+    const others = email.to
+      .map((t) => {
+        const m = t.match(/<([^>]+)>/)
+        return (m ? m[1] : t).trim()
+      })
+      .filter(
+        (e) =>
+          e &&
+          e.toLowerCase() !== self &&
+          e.toLowerCase() !== email.fromEmail.toLowerCase()
+      )
+    const params = new URLSearchParams({
+      replyTo: email.fromEmail,
+      subject: email.subject.startsWith("Re: ") ? email.subject : `Re: ${email.subject}`,
+    })
+    if (others.length > 0) params.set("cc", others.join(","))
+    navigate(`/compose?${params.toString()}`)
+  }
+
+  const handleForward = () => {
+    if (!email) return
+    const quoted = `\n\n---------- ${t("emailDetail.forwardedMessage")} ----------\n${t("common.from")}: ${email.from} <${email.fromEmail}>\n${t("common.date")}: ${email.date}\n${t("common.subject")}: ${email.subject}\n${t("common.to")}: ${email.to.join(", ")}\n\n${email.content}`
+    const params = new URLSearchParams({
+      subject: email.subject.startsWith("Fwd: ") ? email.subject : `Fwd: ${email.subject}`,
+      body: quoted,
+    })
+    navigate(`/compose?${params.toString()}`)
+  }
+
+  const handleMarkUnread = async () => {
+    if (!email) return
+    try {
+      await api.setFlag(email.id, "\\Seen", false)
+      patchInbox([email.id], { read: false })
+      toast.success(t("emailDetail.markedUnread"))
+      navigate("/inbox")
+    } catch {
+      toast.error(t("emailDetail.failedToMarkUnread"))
+    }
+  }
+
+  // handleToggleFollowUp flags/unflags the message for follow-up. This is the
+  // IMAP \Flagged flag — the same primitive Outlook/EWS exposes as a follow-up
+  // flag (and what the list view's star uses), surfaced here in the reading view.
+  const handleToggleFollowUp = async () => {
+    if (!email) return
+    const next = !email.flagged
+    setEmail({ ...email, flagged: next })
+    try {
+      await api.setFlag(email.id, "\\Flagged", next)
+      patchInbox([email.id], { starred: next })
+      toast.success(next ? t("emailDetail.flaggedForFollowUp") : t("emailDetail.followUpCleared"))
+    } catch {
+      setEmail({ ...email, flagged: !next })
+      toast.error(t("emailDetail.failedToUpdateFollowUp"))
+    }
+  }
+
+  // saveLabels persists the full label set and updates state on success.
+  const saveLabels = async (next: string[]) => {
+    if (!email) return
+    const prev = email.labels
+    setEmail({ ...email, labels: next })
+    try {
+      await api.setMailLabels(email.id, next)
+      patchInbox([email.id], { labels: next })
+    } catch {
+      setEmail({ ...email, labels: prev })
+      toast.error(t("emailDetail.failedToUpdateLabels"))
+    }
+  }
+
+  const handleAddLabel = () => {
+    if (!email) return
+    const value = newLabel.trim()
+    if (!value || email.labels.includes(value)) {
+      setNewLabel("")
+      return
+    }
+    setNewLabel("")
+    void saveLabels([...email.labels, value])
+  }
+
+  const handleRemoveLabel = (label: string) => {
+    if (!email) return
+    void saveLabels(email.labels.filter((l) => l !== label))
+  }
+
+  // handleRsvp responds to a meeting invite. Accept/tentative add the event to
+  // the user's calendar; decline removes it. (The send path is local-only, so
+  // the organizer is not emailed a reply.)
+  const handleRsvp = async (response: "accept" | "tentative" | "decline") => {
+    if (!email) return
+    setRsvpBusy(true)
+    try {
+      await api.rsvp(email.id, response)
+      setRsvpStatus(response)
+      const messages: Record<string, string> = {
+        accept: t("emailDetail.addedToCalendar"),
+        tentative: t("emailDetail.markedTentative"),
+        decline: t("emailDetail.removedFromCalendar"),
+      }
+      toast.success(messages[response])
+    } catch {
+      toast.error(t("emailDetail.failedToRsvp"))
+    } finally {
+      setRsvpBusy(false)
+    }
+  }
+
+  const handleDownloadAttachment = async (att: AttachmentInfo) => {
+    if (!email) return
+    try {
+      await api.downloadAttachment(email.id, att.index, att.filename)
+    } catch {
+      toast.error(t("emailDetail.failedToDownload"))
+    }
+  }
+
+  const handleExportEML = async () => {
+    if (!email) return
+    try {
+      const res = await fetch(`/api/v1/mail/export?id=${encodeURIComponent(email.id)}`, {
+        credentials: "include",
+      })
+      if (!res.ok) throw new Error()
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = (email.subject || "message") + ".eml"
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch {
+      toast.error(t("emailDetail.exportFailed"))
+    }
+  }
+
+  const handleMove = async (folder: string, label: string) => {
+    if (!email) return
+    try {
+      await api.moveMail(email.id, folder)
+      toast.success(t("emailDetail.movedTo", { folder: label }))
+      navigate("/inbox")
+    } catch {
+      toast.error(t("emailDetail.failedToMove"))
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {loading ? (
+        <div className="flex items-center justify-center py-16">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        </div>
+      ) : !email ? (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <h3 className="mt-4 text-lg font-semibold">{t("emailDetail.notFound")}</h3>
+          <p className="text-sm text-muted-foreground">{t("emailDetail.notFoundDescription")}</p>
+          <Button className="mt-4" onClick={() => navigate("/inbox")}>{t("emailDetail.backToInbox")}</Button>
+        </div>
+      ) : (
+        <>
+          {/* Toolbar */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="icon" onClick={() => navigate(-1)} title={t("common.back")}>
+                <ArrowLeft className="h-5 w-5" />
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleReply} title={t("common.reply")}>
+                <Reply className="h-4 w-4 mr-1" />
+                {t("common.reply")}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleReplyAll} title={t("common.replyAll")}>
+                <ReplyAll className="h-4 w-4 mr-1" />
+                {t("common.replyAll")}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={handleForward} title={t("common.forward")}>
+                <Forward className="h-4 w-4 mr-1" />
+                {t("common.forward")}
+              </Button>
+              {email.folder === "Sent" && (
+                <Button variant="ghost" size="sm" onClick={handleRecall} title={t("emailDetail.recall")}>
+                  <Undo2 className="h-4 w-4 mr-1" />
+                  {t("emailDetail.recall")}
+                </Button>
+              )}
+              {email.folder === "Recoverable Items" && (
+                <Button variant="ghost" size="sm" onClick={handleRecover} title={t("emailDetail.recover")}>
+                  <RotateCcw className="h-4 w-4 mr-1" />
+                  {t("emailDetail.recover")}
+                </Button>
+              )}
+            </div>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleToggleFollowUp}
+                title={email.flagged ? t("emailDetail.clearFollowUp") : t("emailDetail.flagFollowUp")}
+                aria-pressed={email.flagged}
+              >
+                <Flag className={email.flagged ? "h-5 w-5 fill-amber-500 text-amber-500" : "h-5 w-5"} />
+              </Button>
+              <Button variant="ghost" size="icon" onClick={handleMarkUnread} title={t("common.markUnread")}>
+                <Mail className="h-5 w-5" />
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" title={t("emailDetail.moveToFolder")}>
+                    <FolderInput className="h-5 w-5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handleMove("inbox", t("nav.inbox"))}>{t("nav.inbox")}</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleMove("archive", t("common.archive"))}>{t("common.archive")}</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleMove("spam", t("nav.spam"))}>{t("nav.spam")}</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleMove("trash", t("nav.trash"))}>{t("nav.trash")}</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleExportEML}
+                title={t("emailDetail.exportEML")}
+              >
+                <Download className="h-5 w-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => window.print()}
+                title={t("emailDetail.print")}
+              >
+                <Printer className="h-5 w-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-destructive"
+                onClick={handleDelete}
+                title={t("common.delete")}
+              >
+                <Trash2 className="h-5 w-5" />
+              </Button>
+            </div>
+          </div>
+
+          {/* Email Content */}
+          <div className="rounded-lg border bg-card">
+            {/* Header */}
+            <div className="p-6 pb-0">
+              <h1 className="text-2xl font-semibold leading-tight">{email.subject}</h1>
+
+              <div className="flex items-start gap-4 mt-6">
+                <Avatar className="h-12 w-12 ring-2 ring-primary/10">
+                  <AvatarFallback className="bg-gradient-to-br from-primary to-primary/80 text-primary-foreground font-semibold text-lg">
+                    {email.from.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                  </AvatarFallback>
+                </Avatar>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="font-semibold text-lg">{email.from}</span>
+                    <span className="text-sm text-muted-foreground">
+                      &lt;{email.fromEmail}&gt;
+                    </span>
+                  </div>
+
+                  <div className="mt-1 text-sm text-muted-foreground">
+                    <span className="font-medium text-foreground">{t("common.to")}:</span>{" "}
+                    {email.to
+                      .map((addr, i) => {
+                        const nm = email.toNames?.[i]
+                        return nm ? `${nm} <${addr}>` : addr
+                      })
+                      .join(", ")}
+                  </div>
+
+                  <div className="mt-1 text-sm text-muted-foreground">{formatAbsolute(email.date)}</div>
+
+                  {/* Category labels */}
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <Tag className="h-3.5 w-3.5 text-muted-foreground" />
+                    {email.labels.map((label) => {
+                      const color = categoryColors[label.toLowerCase()]
+                      return (
+                        <Badge
+                          key={label}
+                          variant="secondary"
+                          className="gap-1"
+                          style={color ? { backgroundColor: color, color: "#fff" } : undefined}
+                        >
+                          {label}
+                          <button
+                            onClick={() => handleRemoveLabel(label)}
+                            className={color ? "opacity-80 hover:opacity-100" : "text-muted-foreground hover:text-destructive"}
+                            aria-label={t("emailDetail.removeLabel", { label })}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </Badge>
+                      )
+                    })}
+                    {labelEditing ? (
+                      <Input
+                        autoFocus
+                        value={newLabel}
+                        onChange={(e) => setNewLabel(e.target.value)}
+                        onBlur={() => { handleAddLabel(); setLabelEditing(false) }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") { handleAddLabel(); setLabelEditing(false) }
+                          if (e.key === "Escape") { setNewLabel(""); setLabelEditing(false) }
+                        }}
+                        placeholder={t("emailDetail.labelPlaceholder")}
+                        className="h-6 w-28 text-xs"
+                      />
+                    ) : (
+                      <button
+                        onClick={() => setLabelEditing(true)}
+                        className="flex items-center gap-1 rounded border border-dashed px-1.5 py-0.5 text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        <Plus className="h-3 w-3" />
+                        {t("emailDetail.addLabel")}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Meeting invitation: RSVP actions */}
+            {invite && (
+              <div className="mx-6 mt-4 rounded-lg border border-primary/30 bg-primary/5 p-4">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <CalendarCheck className="h-4 w-4 text-primary" />
+                  {t("emailDetail.meetingInvitation")}
+                </div>
+                <div className="mt-2 space-y-1 text-sm">
+                  {invite.summary && <div className="font-medium">{invite.summary}</div>}
+                  {invite.start && (
+                    <div className="text-muted-foreground">
+                      {(() => {
+                        const d = new Date(invite.start)
+                        return isNaN(d.getTime()) ? invite.start : d.toLocaleString([], withTz())
+                      })()}
+                    </div>
+                  )}
+                  {invite.location && (
+                    <div className="text-muted-foreground">{invite.location}</div>
+                  )}
+                  {invite.organizer && (
+                    <div className="text-muted-foreground">{t("emailDetail.organizer", { name: invite.organizer })}</div>
+                  )}
+                </div>
+                <div className="mt-3 flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant={rsvpStatus === "accept" ? "default" : "outline"}
+                    onClick={() => handleRsvp("accept")}
+                    disabled={rsvpBusy}
+                  >
+                    <Check className="mr-1 h-4 w-4" />
+                    {t("emailDetail.accept")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={rsvpStatus === "tentative" ? "default" : "outline"}
+                    onClick={() => handleRsvp("tentative")}
+                    disabled={rsvpBusy}
+                  >
+                    <HelpCircle className="mr-1 h-4 w-4" />
+                    {t("emailDetail.tentative")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant={rsvpStatus === "decline" ? "default" : "outline"}
+                    onClick={() => handleRsvp("decline")}
+                    disabled={rsvpBusy}
+                  >
+                    <X className="mr-1 h-4 w-4" />
+                    {t("emailDetail.decline")}
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            <Separator className="my-6" />
+
+            {/* Body */}
+            <div className="px-6 pb-6">
+              <div
+                className="prose prose-neutral dark:prose-invert max-w-none prose-headings:font-semibold prose-p:leading-relaxed prose-ul:leading-relaxed whitespace-pre-wrap"
+                dangerouslySetInnerHTML={{ __html: sanitizeHTML(email.content) }}
+              />
+            </div>
+
+            {/* Attachments */}
+            {email.attachments.length > 0 && (
+              <div className="border-t px-6 py-4">
+                <div className="mb-2 flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+                  <Paperclip className="h-4 w-4" />
+                  {email.attachments.length > 1
+                    ? t("emailDetail.attachments", { count: String(email.attachments.length) })
+                    : t("emailDetail.attachment", { count: String(email.attachments.length) })}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {email.attachments.map((att) => (
+                    <button
+                      key={att.index}
+                      onClick={() => handleDownloadAttachment(att)}
+                      className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-left text-sm hover:bg-accent/50 transition-colors"
+                      title={t("emailDetail.downloadAttachment", { filename: att.filename })}
+                    >
+                      <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium">{att.filename}</span>
+                        <span className="block text-xs text-muted-foreground">{formatFileSize(att.size)}</span>
+                      </span>
+                      <Download className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
