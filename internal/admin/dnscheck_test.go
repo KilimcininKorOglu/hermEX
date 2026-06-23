@@ -51,8 +51,12 @@ func (f fakeResolver) LookupSRV(_ context.Context, service, proto, name string) 
 // over it exercises both the found and the missing paths.
 func acmeResolver() fakeResolver {
 	return fakeResolver{
-		mx:   map[string][]*net.MX{"acme.test": {{Host: "mail.acme.test.", Pref: 10}}},
-		txt:  map[string][]string{"acme.test": {"v=spf1 mx -all"}, "_dmarc.acme.test": {"v=DMARC1; p=reject"}},
+		mx: map[string][]*net.MX{"acme.test": {{Host: "mail.acme.test.", Pref: 10}}},
+		txt: map[string][]string{
+			"acme.test":                   {"v=spf1 mx -all"},
+			"hermex._domainkey.acme.test": {"v=DKIM1; k=rsa; p=MIGfMA0test"},
+			"_dmarc.acme.test":            {"v=DMARC1; p=reject"},
+		},
 		host: map[string][]string{"autodiscover.acme.test": {"1.2.3.4"}},
 		srv:  map[string][]*net.SRV{"_autodiscover._tcp.acme.test": {{Target: "mail.acme.test.", Port: 443}}},
 	}
@@ -79,6 +83,7 @@ func TestCheckDomainDNS(t *testing.T) {
 	}{
 		"MX":               {true, "mail.acme.test"},
 		"SPF":              {true, "v=spf1"},
+		"DKIM":             {true, "v=DKIM1"},
 		"DMARC":            {true, "v=DMARC1"},
 		"Autodiscover":     {true, "1.2.3.4"},
 		"Autodiscover SRV": {true, "mail.acme.test:443"},

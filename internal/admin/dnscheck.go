@@ -60,6 +60,17 @@ func checkDomainDNS(ctx context.Context, r dnsResolver, domain string) dnsReport
 		add("SPF", false, "no v=spf1 TXT record")
 	}
 
+	// DKIM completes the SPF/DKIM/DMARC auth triad: the signing key is published as
+	// a TXT record at the server's selector, which prescribeDomainDNS instructs the
+	// owner to create, so the health check verifies the same record it prescribes.
+	dkimName := dkimSelector + "._domainkey." + domain
+	dkimTXT, _ := r.LookupTXT(ctx, dkimName)
+	if dkim := findTXT(dkimTXT, "v=DKIM1"); dkim != "" {
+		add("DKIM", true, dkim)
+	} else {
+		add("DKIM", false, "no v=DKIM1 TXT record at "+dkimName)
+	}
+
 	dmarcTXT, _ := r.LookupTXT(ctx, "_dmarc."+domain)
 	if dmarc := findTXT(dmarcTXT, "v=DMARC1"); dmarc != "" {
 		add("DMARC", true, dmarc)
