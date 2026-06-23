@@ -81,10 +81,11 @@ rulesPage sub-data; forms post to /rules and return to /settings?tab=rules. */}}
         <label>Then</label>
         <select name="actiontype" id="actiontype">
           <option value="move">Move it to folder</option>
+          <option value="copy">Copy it to folder</option>
           <option value="markread">Mark it as read</option>
           <option value="delete">Delete it</option>
         </select>
-        <span class="action-input" data-action="move">
+        <span class="action-input" data-action="move copy">
           <select name="actiontarget">
             {{range .Folders}}<option value="{{.ID}}">{{.Path}}</option>{{end}}
           </select>

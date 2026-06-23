@@ -101,6 +101,27 @@ func TestRulesAddBodyAndSensitivity(t *testing.T) {
 	}
 }
 
+// TestRulesAddCopyAction adds a copy rule through the editor and checks it is
+// listed with the copy-action summary naming the target folder.
+func TestRulesAddCopyAction(t *testing.T) {
+	path := emptyMailbox(t)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+	junk := strconv.FormatInt(int64(mapi.PrivateFIDJunk), 10)
+	if code, _ := postForm(t, c, ts.URL+"/rules", url.Values{
+		"action": {"add"}, "name": {"CopyReports"},
+		"condfield": {"subject"}, "condvalue": {"report"},
+		"actiontype": {"copy"}, "actiontarget": {junk},
+	}); code != 200 && code != 303 {
+		t.Fatalf("add copy rule = %d", code)
+	}
+	_, body := get(t, c, ts.URL+"/rules")
+	// "copy it to Junk Email" is produced only by a stored copy rule's summary.
+	if !strings.Contains(body, "copy it to Junk Email") {
+		t.Errorf("rules page missing the copy-action summary:\n%s", body)
+	}
+}
+
 // TestRulesToggle disables and re-enables a rule, checking the listing reflects
 // the state each time.
 func TestRulesToggle(t *testing.T) {

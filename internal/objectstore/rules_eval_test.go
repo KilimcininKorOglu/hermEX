@@ -165,6 +165,58 @@ func ruleMsg(subject, from, extraHeader string) string {
 	return h + "Content-Type: text/plain; charset=utf-8\r\n\r\nbody\r\n"
 }
 
+// TestRuleCopyActionIsNonTerminal checks the copy action duplicates a matching
+// message to the target folder while leaving the original in place, and — being
+// non-terminal — does not stop a later rule from acting on the original.
+func TestRuleCopyActionIsNonTerminal(t *testing.T) {
+	s := openSeededStore(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	filed, err := s.CreateFolder(nil, "Filed")
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+
+	m := deliverTo(t, s, inbox, ruleMsg("Project update", "lead@acme.com", ""))
+
+	// rule 1: subject contains "project" -> copy to Filed (non-terminal)
+	if _, err := s.AddRule(Rule{
+		FolderID: inbox, Name: "copy projects", State: mapi.RuleStateEnabled,
+		Condition: RuleSubjectContains("project"),
+		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{RuleCopyAction(filed)}},
+	}); err != nil {
+		t.Fatalf("AddRule copy: %v", err)
+	}
+	// rule 2: subject contains "project" -> mark read (runs only if copy is non-terminal)
+	if _, err := s.AddRule(Rule{
+		FolderID: inbox, Name: "read projects", State: mapi.RuleStateEnabled,
+		Condition: RuleSubjectContains("project"),
+		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{RuleMarkReadAction()}},
+	}); err != nil {
+		t.Fatalf("AddRule markread: %v", err)
+	}
+
+	if _, err := s.RunRules(inbox); err != nil {
+		t.Fatalf("RunRules: %v", err)
+	}
+
+	// The original stays in the inbox (copy does not remove it)...
+	if inboxMsgs, err := s.ListMessages(inbox); err != nil {
+		t.Fatal(err)
+	} else if len(inboxMsgs) != 1 {
+		t.Fatalf("inbox has %d messages, want 1 (copy must keep the original)", len(inboxMsgs))
+	}
+	// ...the later rule still ran on it (copy was non-terminal)...
+	if fl, _ := s.MessageFlags(inbox, m.UID); fl&FlagSeen == 0 {
+		t.Errorf("original not marked read: copy was wrongly treated as terminal")
+	}
+	// ...and a duplicate landed in Filed.
+	if filedMsgs, err := s.ListMessages(filed); err != nil {
+		t.Fatal(err)
+	} else if len(filedMsgs) != 1 {
+		t.Errorf("Filed has %d messages, want 1 copy", len(filedMsgs))
+	}
+}
+
 // TestRunRulesEndToEnd is the discriminating test: it delivers real messages
 // through the real Import path, then runs rules and asserts on the actual store
 // state — a message moved to the target folder, another marked read, an

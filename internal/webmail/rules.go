@@ -165,6 +165,10 @@ func buildAction(r *http.Request) (mapi.ActionBlock, bool) {
 		if id, err := strconv.ParseInt(r.FormValue("actiontarget"), 10, 64); err == nil {
 			return objectstore.RuleMoveAction(id), true
 		}
+	case "copy":
+		if id, err := strconv.ParseInt(r.FormValue("actiontarget"), 10, 64); err == nil {
+			return objectstore.RuleCopyAction(id), true
+		}
 	}
 	return mapi.ActionBlock{}, false
 }
@@ -296,6 +300,8 @@ func describeActions(a mapi.RuleActions, folderNames map[int64]string) string {
 			parts = append(parts, "delete it")
 		case mapi.OpMove:
 			parts = append(parts, "move it to "+moveTargetName(b, folderNames))
+		case mapi.OpCopy:
+			parts = append(parts, "copy it to "+moveTargetName(b, folderNames))
 		default:
 			parts = append(parts, "(custom action)")
 		}

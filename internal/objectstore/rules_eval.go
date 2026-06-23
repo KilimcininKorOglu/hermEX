@@ -343,6 +343,16 @@ func (s *Store) applyRuleActions(srcFolder int64, uid uint32, acts mapi.RuleActi
 					return false, err
 				}
 			}
+		case mapi.OpCopy:
+			dst, ok := moveTargetFolder(b.Data)
+			if !ok {
+				continue
+			}
+			if err := s.copyMessage(srcFolder, uid, dst); err != nil {
+				return false, err
+			}
+			// Copy is non-terminal: the message stays in srcFolder, so later
+			// blocks and rules still apply to the original.
 		case mapi.OpMove:
 			dst, ok := moveTargetFolder(b.Data)
 			if !ok {
@@ -386,6 +396,23 @@ func moveTargetFolder(data any) (int64, bool) {
 // webmail action path performs.
 func (s *Store) moveMessage(src int64, uid uint32, dst int64) error {
 	_, err := s.MoveMessage(src, uid, dst)
+	return err
+}
+
+// copyMessage duplicates a message into dst (a fresh uid, the wire form
+// re-synthesized), preserving flags and internal date and leaving the source in
+// place. It is the non-terminal counterpart of moveMessage, used by an OpCopy rule
+// action.
+func (s *Store) copyMessage(src int64, uid uint32, dst int64) error {
+	m, err := s.MessageByUID(src, uid)
+	if err != nil {
+		return err
+	}
+	raw, err := s.GetMessageRaw(src, uid)
+	if err != nil {
+		return err
+	}
+	_, err = s.AppendMessage(dst, raw, m.InternalDate, m.Flags)
 	return err
 }
 
@@ -484,6 +511,15 @@ func RuleDeleteAction() mapi.ActionBlock { return mapi.ActionBlock{Type: mapi.Op
 // is carried in a same-store MoveCopyAction whose SVREID holds the folder id.
 func RuleMoveAction(targetFolderID int64) mapi.ActionBlock {
 	return mapi.ActionBlock{Type: mapi.OpMove, Data: mapi.MoveCopyAction{
+		SameStore: true,
+		FolderEID: mapi.SVREID{FolderID: mapi.EID(uint64(targetFolderID))},
+	}}
+}
+
+// RuleCopyAction copies a matching message to the target folder, leaving the
+// original in place. The destination is carried the same way as a move.
+func RuleCopyAction(targetFolderID int64) mapi.ActionBlock {
+	return mapi.ActionBlock{Type: mapi.OpCopy, Data: mapi.MoveCopyAction{
 		SameStore: true,
 		FolderEID: mapi.SVREID{FolderID: mapi.EID(uint64(targetFolderID))},
 	}}
