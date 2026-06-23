@@ -184,6 +184,15 @@ func (s *Server) handleComposeForm(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// A shared source must grant the caller read access on this specific folder —
+	// the same per-folder gate the reader applies. canSendAsShared is store-level
+	// (owner|delegate) and, for a delegate, implies no folder grant; without this a
+	// delegate could quote into the prefill a folder they may not read. A store
+	// owner is elevated by ResolvePermission and always passes.
+	if mbox != "" && !hasFolderRight(srcSt, sess.user, folderID, mapi.FrightsReadAny) {
+		http.NotFound(w, r)
+		return
+	}
 	raw, err := srcSt.GetMessageRaw(folderID, uint32(uid64))
 	if err != nil {
 		http.NotFound(w, r)
@@ -412,9 +421,18 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 	// mailbox, or the shared mailbox (sentPath) when forwarding a shared message as
 	// it. Reading from the own store on a shared forward would either drop the embed
 	// (the shared path is absent) or, on a colliding path+uid, leak the caller's own
-	// same-uid message — so the source store must match the send-as store.
+	// same-uid message — so the source store must match the send-as store. A shared
+	// embed is read-gated per folder (loadRawGated) so a send-as delegate cannot
+	// exfiltrate a folder they may not read; the own mailbox needs no such gate.
 	if v.AttachFolder != "" && v.AttachUID != "" {
-		if embed, err := s.loadRaw(sentPath, v.AttachFolder, v.AttachUID); err == nil {
+		var embed []byte
+		var lerr error
+		if mbox != "" {
+			embed, lerr = s.loadRawGated(sentPath, v.AttachFolder, v.AttachUID, sess.user)
+		} else {
+			embed, lerr = s.loadRaw(sentPath, v.AttachFolder, v.AttachUID)
+		}
+		if lerr == nil {
 			o.Embed = embed
 		}
 	}
@@ -663,6 +681,35 @@ func (s *Server) loadRaw(mailboxPath, folder, uidStr string) ([]byte, error) {
 	}
 	folderID, found := resolveFolder(folders, folder)
 	if !found {
+		return nil, objectstore.ErrNotFound
+	}
+	return st.GetMessageRaw(folderID, uint32(uid64))
+}
+
+// loadRawGated is loadRaw with a per-folder read gate: it returns the message only
+// when user holds FrightsReadAny on its folder. Used for the forward-as-attachment
+// embed when composing as a shared mailbox, so a send-as delegate (store-level
+// send-as, no folder grant) cannot exfiltrate the rfc822 source of a folder they
+// may not read. A store owner is elevated by ResolvePermission and always passes.
+func (s *Server) loadRawGated(mailboxPath, folder, uidStr, user string) ([]byte, error) {
+	uid64, err := strconv.ParseUint(uidStr, 10, 32)
+	if err != nil {
+		return nil, err
+	}
+	st, err := objectstore.Open(mailboxPath)
+	if err != nil {
+		return nil, err
+	}
+	defer st.Close()
+	folders, err := st.ListFolders()
+	if err != nil {
+		return nil, err
+	}
+	folderID, found := resolveFolder(folders, folder)
+	if !found {
+		return nil, objectstore.ErrNotFound
+	}
+	if !hasFolderRight(st, user, folderID, mapi.FrightsReadAny) {
 		return nil, objectstore.ErrNotFound
 	}
 	return st.GetMessageRaw(folderID, uint32(uid64))

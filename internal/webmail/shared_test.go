@@ -22,6 +22,8 @@ type sharedEnv struct {
 	teamUID    uint32 // the message seeded in the Team folder
 	ownedDir   string // a shared store alice owns (full read-write)
 	ownedUID   uint32 // a message seeded in the owned store's Inbox
+	deskDir    string // a shared store where alice is a delegate (send-as) but holds no folder grant
+	deskUID    uint32 // a message in a desk folder alice may NOT read (per-folder read gate)
 }
 
 // newSharedWebmail builds a webmail server for alice@hermex.test with two shared
@@ -86,11 +88,34 @@ func newSharedWebmail(t *testing.T) (*httptest.Server, sharedEnv) {
 	}
 	ost.Close()
 
+	// A fourth shared mailbox where alice is a DELEGATE (so she may send as it) but
+	// holds NO folder grant. Send-as is store-level (owner|delegate) and does not
+	// elevate a delegate's per-folder rights, so the per-folder read ACL must still
+	// gate what she may quote (reply prefill) or embed (forward-as-attachment).
+	deskDir := filepath.Join(root, "desk")
+	dst, err := objectstore.Open(deskDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := dst.SetDelegates([]string{"alice@hermex.test"}); err != nil {
+		t.Fatal(err)
+	}
+	deskSecret, err := dst.CreateFolder(nil, "Secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dinfo, err := dst.AppendMessage(deskSecret, []byte("Subject: DeskSecret\r\nMessage-ID: <ds@hermex.test>\r\n\r\ndesk secret body"), time.Unix(1700000000, 0), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst.Close()
+
 	auth := directory.StaticAccounts{
 		"alice@hermex.test":   {Password: "secret", MailboxPath: aliceDir},
 		"support@hermex.test": {Password: "x", MailboxPath: supportDir, Shared: true},
 		"secret@hermex.test":  {Password: "x", MailboxPath: secretDir, Shared: true},
 		"owned@hermex.test":   {Password: "x", MailboxPath: ownedDir, Shared: true},
+		"desk@hermex.test":    {Password: "x", MailboxPath: deskDir, Shared: true},
 	}
 	srv, err := NewServer(auth, auth, "mail.test")
 	if err != nil {
@@ -102,6 +127,7 @@ func newSharedWebmail(t *testing.T) (*httptest.Server, sharedEnv) {
 	return ts, sharedEnv{
 		supportDir: supportDir, teamFID: team, privFID: priv, teamUID: info.UID,
 		ownedDir: ownedDir, ownedUID: oinfo.UID,
+		deskDir: deskDir, deskUID: dinfo.UID,
 	}
 }
 
@@ -613,5 +639,58 @@ func TestSharedMailboxReplyAsSend(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "In-Reply-To: <orig-owned@hermex.test>") {
 		t.Errorf("the reply did not carry In-Reply-To linking it to the original:\n%s", raw)
+	}
+}
+
+// TestSharedMailboxReplyAsReadGate proves send-as does not bypass the per-folder
+// read ACL. A delegate sends as the mailbox at the store level but is not elevated
+// per folder (unlike an owner), so a folder they hold no grant on must stay
+// unreadable through the reply path too: the reply prefill is denied (no quoting)
+// and a forged forward-as-attachment submit withholds the embed (no exfiltration),
+// matching the reader's own per-folder gate.
+func TestSharedMailboxReplyAsReadGate(t *testing.T) {
+	ts, env := newSharedWebmail(t)
+	c := authedClient(t, ts)
+	uid := strconv.FormatUint(uint64(env.deskUID), 10)
+
+	// Precondition: the reader already denies the delegate this ungranted folder.
+	if code, _ := get(t, c, ts.URL+"/message?folder=Secret&uid="+uid+"&mbox=desk@hermex.test"); code != 404 {
+		t.Fatalf("delegate read of an ungranted folder = %d, want 404 (harness precondition)", code)
+	}
+	// The reply prefill must apply the same gate, or it would quote a body the
+	// delegate may not read.
+	if code, body := get(t, c, ts.URL+"/compose?action=reply&folder=Secret&uid="+uid+"&mbox=desk@hermex.test"); code != 404 {
+		t.Errorf("delegate reply-as of an ungranted folder = %d, want 404; body quoted? %v", code, strings.Contains(body, "desk secret body"))
+	}
+
+	// A forged forward-as-attachment submit naming the ungranted folder: send-as is
+	// authorized (delegate), so the message is sent and a Sent copy filed, but the
+	// embed must be withheld so the ungranted source never lands in the forward.
+	// (The post-send redirect lands on the shared Sent folder, which this grantless
+	// delegate also may not view — itself correct gating — so the followed status is
+	// incidental; the durable Sent copy below is what the assertion turns on.)
+	postForm(t, c, ts.URL+"/compose?mbox=desk@hermex.test", url.Values{
+		"from": {"desk@hermex.test"}, "to": {"alice@hermex.test"},
+		"subject": {"Fwd"}, "body": {"x"}, "format": {"plain"},
+		"attachfolder": {"Secret"}, "attachuid": {uid},
+	})
+	dst, err := objectstore.Open(env.deskDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dst.Close()
+	msgs, err := dst.ListMessages(int64(mapi.PrivateFIDSentItems))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) == 0 {
+		t.Fatalf("no Sent copy was filed for the delegate forward")
+	}
+	raw, err := dst.GetMessageRaw(int64(mapi.PrivateFIDSentItems), msgs[len(msgs)-1].UID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "desk secret body") {
+		t.Errorf("the forward-as-attachment embed leaked an ungranted folder's source:\n%s", raw)
 	}
 }
