@@ -75,6 +75,7 @@ func (s *Server) Handler() http.Handler {
 	// Settings, profile, preferences, signatures, templates, categories.
 	mux.HandleFunc("GET /api/v1/profile", s.handleGetProfile)
 	mux.HandleFunc("PUT /api/v1/profile", s.handlePutProfile)
+	mux.HandleFunc("POST /api/v1/account/password", s.handleChangePassword)
 	mux.HandleFunc("GET /api/v1/preferences", s.handleGetPreferences)
 	mux.HandleFunc("PUT /api/v1/preferences", s.handlePutPreferences)
 	mux.HandleFunc("GET /api/v1/categories", s.handleGetCategories)
