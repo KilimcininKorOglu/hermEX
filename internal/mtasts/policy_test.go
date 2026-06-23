@@ -2,6 +2,33 @@ package mtasts
 
 import "testing"
 
+// TestBuildPolicy proves Build emits the exact RFC 8461 §3.2 wire form a sender
+// fetches — version first, one mx line per pattern, CRLF-terminated — and that it
+// round-trips through Parse. The exact bytes are load-bearing: a sender validates
+// our published policy verbatim, so a missing field or a wrong line ending would
+// make every conformant sender reject it.
+func TestBuildPolicy(t *testing.T) {
+	p := Policy{Mode: ModeEnforce, MX: []string{"mail.example.com", "*.example.net"}, MaxAge: 604800}
+	got := Build(p)
+	want := "version: STSv1\r\nmode: enforce\r\nmx: mail.example.com\r\nmx: *.example.net\r\nmax_age: 604800\r\n"
+	if got != want {
+		t.Errorf("Build =\n%q\nwant\n%q", got, want)
+	}
+
+	back, err := Parse(got)
+	if err != nil {
+		t.Fatalf("Parse(Build(p)): %v", err)
+	}
+	if back.Mode != p.Mode || back.MaxAge != p.MaxAge || len(back.MX) != len(p.MX) {
+		t.Fatalf("round-trip = %+v, want %+v", back, p)
+	}
+	for i := range p.MX {
+		if back.MX[i] != p.MX[i] {
+			t.Errorf("round-trip MX[%d] = %q, want %q", i, back.MX[i], p.MX[i])
+		}
+	}
+}
+
 // TestParsePolicy proves a well-formed policy parses and every missing or invalid
 // required field is rejected, so the relay never enforces against a half-parsed
 // policy. A withdrawing policy (mode none) is allowed without mx.

@@ -70,6 +70,27 @@ func Parse(text string) (*Policy, error) {
 	return &p, nil
 }
 
+// Build serializes a policy to mta-sts.txt form (RFC 8461 §3.2): CRLF-separated
+// "key: value" lines, the version first, one mx line per pattern, then max_age. It
+// is the inverse of Parse — Parse(Build(p)) reproduces p — and is how the server
+// publishes its own policy at /.well-known/mta-sts.txt.
+func Build(p Policy) string {
+	var b strings.Builder
+	b.WriteString("version: STSv1\r\n")
+	b.WriteString("mode: ")
+	b.WriteString(string(p.Mode))
+	b.WriteString("\r\n")
+	for _, mx := range p.MX {
+		b.WriteString("mx: ")
+		b.WriteString(mx)
+		b.WriteString("\r\n")
+	}
+	b.WriteString("max_age: ")
+	b.WriteString(strconv.Itoa(p.MaxAge))
+	b.WriteString("\r\n")
+	return b.String()
+}
+
 // MatchesMX reports whether host is permitted by the policy's mx patterns. A
 // pattern "*.example.com" matches exactly one label in place of the star
 // (foo.example.com, not foo.bar.example.com or example.com); any other pattern
