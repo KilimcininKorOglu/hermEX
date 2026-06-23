@@ -115,6 +115,8 @@
     "conversations": "Konuşmalar"
   },
   "emailDetail": {
+    "imagesBlocked": "Gizliliğinizi korumak için uzak görseller engellendi.",
+    "showImages": "Görselleri göster",
     "notFound": "E-posta bulunamadı",
     "failedToLoad": "E-posta yüklenemedi",
     "movedToTrash": "E-posta çöp kutusuna taşındı",

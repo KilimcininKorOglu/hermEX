@@ -33,7 +33,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { toast } from "sonner"
-import { sanitizeHTML } from "@/utils/sanitize"
+import { sanitizeEmailBody } from "@/utils/sanitize"
 import api from "@/utils/api"
 import type { MeetingInvite, AttachmentInfo } from "@/utils/api"
 import { formatAbsolute, withTz } from "@/utils/date"
@@ -73,6 +73,9 @@ export function EmailDetailPage() {
   const { patchInbox, removeFromInbox } = useMailbox()
   const [email, setEmail] = useState<EmailDetail | null>(null)
   const [loading, setLoading] = useState(true)
+  // Remote images are blocked on open (tracking-pixel protection); the reader
+  // offers a one-time "show images" once the user chooses to load them.
+  const [showImages, setShowImages] = useState(false)
   const [newLabel, setNewLabel] = useState("")
   const [labelEditing, setLabelEditing] = useState(false)
   const [invite, setInvite] = useState<MeetingInvite | null>(null)
@@ -96,6 +99,7 @@ export function EmailDetailPage() {
 
   // Load the message by id (the backend resolves it across all folders).
   useEffect(() => {
+    setShowImages(false) // re-block remote images for each newly opened message
     const loadEmail = async () => {
       if (!id) {
         setLoading(false)
@@ -602,10 +606,25 @@ export function EmailDetailPage() {
 
             {/* Body */}
             <div className="px-6 pb-6">
-              <div
-                className="prose prose-neutral dark:prose-invert max-w-none prose-headings:font-semibold prose-p:leading-relaxed prose-ul:leading-relaxed whitespace-pre-wrap"
-                dangerouslySetInnerHTML={{ __html: sanitizeHTML(email.content) }}
-              />
+              {(() => {
+                const { html, blockedRemote } = sanitizeEmailBody(email.content, !showImages)
+                return (
+                  <>
+                    {blockedRemote && !showImages && (
+                      <div className="mb-4 flex items-center justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200">
+                        <span>{t("emailDetail.imagesBlocked")}</span>
+                        <Button variant="outline" size="sm" onClick={() => setShowImages(true)}>
+                          {t("emailDetail.showImages")}
+                        </Button>
+                      </div>
+                    )}
+                    <div
+                      className="prose prose-neutral dark:prose-invert max-w-none prose-headings:font-semibold prose-p:leading-relaxed prose-ul:leading-relaxed whitespace-pre-wrap"
+                      dangerouslySetInnerHTML={{ __html: html }}
+                    />
+                  </>
+                )
+              })()}
             </div>
 
             {/* Attachments */}

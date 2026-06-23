@@ -115,6 +115,8 @@
     "conversations": "Conversations"
   },
   "emailDetail": {
+    "imagesBlocked": "Remote images were blocked to protect your privacy.",
+    "showImages": "Show images",
     "notFound": "Email not found",
     "failedToLoad": "Failed to load email",
     "movedToTrash": "Email moved to trash",
