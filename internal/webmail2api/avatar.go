@@ -5,41 +5,12 @@ import (
 	"net/http"
 	"strings"
 
-	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
 
-// photoTag resolves the cross-protocol user-photo named property (the provider
-// "photo" property) to its store property tag, allocating an id when create is set.
-func photoTag(st *objectstore.Store, create bool) (mapi.PropTag, bool) {
-	ids, err := st.GetNamedPropIDs(create, []mapi.PropertyName{mapi.NameUserPhoto})
-	if err != nil || len(ids) == 0 || ids[0] == 0 {
-		return 0, false
-	}
-	return mapi.PropTag(uint32(ids[0])<<16 | uint32(mapi.PtBinary)), true
-}
-
-// readPhoto returns the mailbox's stored portrait bytes, or nil when none. These
-// are the same bytes the GAL serves to Outlook as PR_EMS_AB_THUMBNAIL_PHOTO.
-func readPhoto(st *objectstore.Store) []byte {
-	tag, ok := photoTag(st, false)
-	if !ok {
-		return nil
-	}
-	props, err := st.GetStoreProperties(tag)
-	if err != nil {
-		return nil
-	}
-	if v, ok := props.Get(tag); ok {
-		if b, ok := v.([]byte); ok && len(b) > 0 {
-			return b
-		}
-	}
-	return nil
-}
-
 // handleGetAvatar serves the caller's own portrait (others get 404, so the SPA
-// falls back to initials).
+// falls back to initials). The bytes are the cross-protocol photo every protocol
+// reads.
 func (s *Server) handleGetAvatar(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.session(r)
 	if !ok {
@@ -56,7 +27,7 @@ func (s *Server) handleGetAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	photo := readPhoto(st)
+	photo, _ := st.UserPhoto()
 	if photo == nil {
 		http.Error(w, "no avatar", http.StatusNotFound)
 		return
@@ -96,12 +67,7 @@ func (s *Server) handlePutAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	tag, ok := photoTag(st, true)
-	if !ok {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not allocate the photo property"})
-		return
-	}
-	if err := st.SetStoreProperties(mapi.PropertyValues{{Tag: tag, Value: data}}); err != nil {
+	if err := st.SetUserPhoto(data); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save the avatar"})
 		return
 	}
@@ -121,9 +87,7 @@ func (s *Server) handleDeleteAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	if tag, ok := photoTag(st, false); ok {
-		_ = st.SetStoreProperties(mapi.PropertyValues{{Tag: tag, Value: []byte(nil)}})
-	}
+	_ = st.SetUserPhoto(nil)
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

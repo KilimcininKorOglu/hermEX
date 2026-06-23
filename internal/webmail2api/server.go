@@ -251,7 +251,9 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	}
 	hasAvatar := false
 	if st, err := objectstore.Open(c.Mailbox); err == nil {
-		hasAvatar = readPhoto(st) != nil
+		if photo, _ := st.UserPhoto(); photo != nil {
+			hasAvatar = true
+		}
 		st.Close()
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
