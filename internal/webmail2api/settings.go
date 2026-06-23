@@ -313,12 +313,23 @@ func (s *Server) handlePutProfile(w http.ResponseWriter, r *http.Request) {
 // ---- Mailboxes ----
 
 func (s *Server) handleGetMailboxes(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.session(r)
+	st, _, ok := s.openStore(w, r)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"mailboxes": []string{c.Email}})
+	defer st.Close()
+	// The SPA lists these as the user's custom folders in the sidebar, so return
+	// only user-created folders (id at/above the unassigned start); the built-in
+	// folders are rendered from the SPA's own fixed navigation.
+	names := []string{}
+	if folders, err := st.ListFolders(); err == nil {
+		for _, f := range folders {
+			if f.ID >= int64(mapi.PrivateFIDUnassignedStart) {
+				names = append(names, f.DisplayName)
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"mailboxes": names})
 }
 
 func (s *Server) handleGetSharedMailboxes(w http.ResponseWriter, r *http.Request) {
