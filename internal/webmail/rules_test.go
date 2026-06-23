@@ -68,6 +68,39 @@ func TestRulesAddListDelete(t *testing.T) {
 	}
 }
 
+// TestRulesAddBodyAndSensitivity adds rules using the newer body-contains and
+// sensitivity-is conditions and checks each is stored and summarized, so the
+// editor's added vocabulary round-trips through save and listing.
+func TestRulesAddBodyAndSensitivity(t *testing.T) {
+	path := emptyMailbox(t)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+
+	if code, _ := postForm(t, c, ts.URL+"/rules", url.Values{
+		"action": {"add"}, "name": {"BodyRule"},
+		"condfield": {"body"}, "condvalue": {"wire transfer"},
+		"actiontype": {"markread"},
+	}); code != 200 && code != 303 {
+		t.Fatalf("add body rule = %d", code)
+	}
+	if code, _ := postForm(t, c, ts.URL+"/rules", url.Values{
+		"action": {"add"}, "name": {"PrivacyRule"},
+		"condfield": {"sensitivity"}, "condsensitivity": {"private"},
+		"actiontype": {"markread"},
+	}); code != 200 && code != 303 {
+		t.Fatalf("add sensitivity rule = %d", code)
+	}
+
+	_, body := get(t, c, ts.URL+"/rules")
+	// "the body contains" / "the sensitivity is private" are produced only by the
+	// rule summary, never by the form's option labels, so they are discriminating.
+	for _, want := range []string{"the body contains", "the sensitivity is private"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rules page missing %q:\n%s", want, body)
+		}
+	}
+}
+
 // TestRulesToggle disables and re-enables a rule, checking the listing reflects
 // the state each time.
 func TestRulesToggle(t *testing.T) {

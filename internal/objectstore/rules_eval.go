@@ -428,6 +428,13 @@ func RuleFromContains(text string) mapi.Restriction {
 	return contentContains(mapi.PrSenderSmtpAddress, text)
 }
 
+// RuleBodyContains matches messages whose body text contains text
+// (case-insensitive). PR_BODY is set by the MIME import, so the condition matches
+// against a property the delivered message actually carries.
+func RuleBodyContains(text string) mapi.Restriction {
+	return contentContains(mapi.PrBody, text)
+}
+
 // contentContains builds a case-insensitive substring ResContent on tag.
 func contentContains(tag mapi.PropTag, text string) mapi.Restriction {
 	return mapi.Restriction{Type: mapi.ResContent, Value: mapi.ContentRestriction{
@@ -444,6 +451,17 @@ func RuleImportanceIs(level int) mapi.Restriction {
 		Relop:   mapi.RelopEQ,
 		PropTag: mapi.PrImportance,
 		PropVal: mapi.TaggedPropVal{Tag: mapi.PrImportance, Value: int32(level)},
+	}}
+}
+
+// RuleSensitivityIs matches messages whose PR_SENSITIVITY equals level
+// (None/Personal/Private/Confidential). The MIME import sets PR_SENSITIVITY, so
+// the condition tests a property the delivered message carries.
+func RuleSensitivityIs(level int) mapi.Restriction {
+	return mapi.Restriction{Type: mapi.ResProperty, Value: mapi.PropertyRestriction{
+		Relop:   mapi.RelopEQ,
+		PropTag: mapi.PrSensitivity,
+		PropVal: mapi.TaggedPropVal{Tag: mapi.PrSensitivity, Value: int32(level)},
 	}}
 }
 

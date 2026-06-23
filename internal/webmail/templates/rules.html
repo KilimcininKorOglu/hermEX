@@ -50,10 +50,12 @@ rulesPage sub-data; forms post to /rules and return to /settings?tab=rules. */}}
         <select name="condfield" id="condfield">
           <option value="subject">Subject contains</option>
           <option value="from">Sender contains</option>
+          <option value="body">Body contains</option>
           <option value="importance">Importance is</option>
+          <option value="sensitivity">Sensitivity is</option>
           <option value="size">Size at least (KB)</option>
         </select>
-        <span class="cond-input" data-cond="subject from">
+        <span class="cond-input" data-cond="subject from body">
           <input name="condvalue" placeholder="text to match">
         </span>
         <span class="cond-input" data-cond="importance">
@@ -61,6 +63,14 @@ rulesPage sub-data; forms post to /rules and return to /settings?tab=rules. */}}
             <option value="high">High</option>
             <option value="normal">Normal</option>
             <option value="low">Low</option>
+          </select>
+        </span>
+        <span class="cond-input" data-cond="sensitivity">
+          <select name="condsensitivity">
+            <option value="normal">Normal</option>
+            <option value="personal">Personal</option>
+            <option value="private">Private</option>
+            <option value="confidential">Confidential</option>
           </select>
         </span>
         <span class="cond-input" data-cond="size">

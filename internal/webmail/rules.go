@@ -137,8 +137,14 @@ func buildCondition(r *http.Request) (mapi.Restriction, bool) {
 		if v := strings.TrimSpace(r.FormValue("condvalue")); v != "" {
 			return objectstore.RuleFromContains(v), true
 		}
+	case "body":
+		if v := strings.TrimSpace(r.FormValue("condvalue")); v != "" {
+			return objectstore.RuleBodyContains(v), true
+		}
 	case "importance":
 		return objectstore.RuleImportanceIs(importanceFromForm(r.FormValue("condimportance"))), true
+	case "sensitivity":
+		return objectstore.RuleSensitivityIs(sensitivityFromForm(r.FormValue("condsensitivity"))), true
 	case "size":
 		if kb, err := strconv.Atoi(strings.TrimSpace(r.FormValue("condsize"))); err == nil && kb >= 0 {
 			return objectstore.RuleSizeAtLeast(kb * 1024), true
@@ -172,6 +178,34 @@ func importanceFromForm(v string) int {
 		return mapi.ImportanceLow
 	default:
 		return mapi.ImportanceNormal
+	}
+}
+
+// sensitivityFromForm maps the sensitivity select value to a PR_SENSITIVITY level.
+func sensitivityFromForm(v string) int {
+	switch v {
+	case "personal":
+		return mapi.SensitivityPersonal
+	case "private":
+		return mapi.SensitivityPrivate
+	case "confidential":
+		return mapi.SensitivityConfidential
+	default:
+		return mapi.SensitivityNone
+	}
+}
+
+// sensitivityName labels a PR_SENSITIVITY level for a rule summary.
+func sensitivityName(level int) string {
+	switch level {
+	case mapi.SensitivityPersonal:
+		return "personal"
+	case mapi.SensitivityPrivate:
+		return "private"
+	case mapi.SensitivityConfidential:
+		return "confidential"
+	default:
+		return "normal"
 	}
 }
 
@@ -229,6 +263,8 @@ func describeCondition(r mapi.Restriction) string {
 			return fmt.Sprintf("the subject contains %q", val)
 		case mapi.PrSenderSmtpAddress:
 			return fmt.Sprintf("the sender contains %q", val)
+		case mapi.PrBody:
+			return fmt.Sprintf("the body contains %q", val)
 		}
 	case mapi.ResProperty:
 		pr, ok := r.Value.(mapi.PropertyRestriction)
@@ -239,6 +275,9 @@ func describeCondition(r mapi.Restriction) string {
 		case mapi.PrImportance:
 			n, _ := pr.PropVal.Value.(int32)
 			return "the importance is " + importanceName(int(n))
+		case mapi.PrSensitivity:
+			n, _ := pr.PropVal.Value.(int32)
+			return "the sensitivity is " + sensitivityName(int(n))
 		case mapi.PrMessageSize:
 			n, _ := pr.PropVal.Value.(int32)
 			return fmt.Sprintf("the size is at least %d KB", n/1024)

@@ -52,6 +52,32 @@ func TestEvalRestrictionLeaves(t *testing.T) {
 	}
 }
 
+// TestEvalBodyAndSensitivity checks the body-contains and sensitivity-is
+// conditions against a message that carries PR_BODY and PR_SENSITIVITY (both set
+// by the MIME import), so the editor's newer conditions match real delivered mail
+// rather than silently never firing.
+func TestEvalBodyAndSensitivity(t *testing.T) {
+	bag := mapi.PropertyValues{
+		{Tag: mapi.PrBody, Value: "Please review the attached contract before Friday."},
+		{Tag: mapi.PrSensitivity, Value: int32(mapi.SensitivityPrivate)},
+	}
+	cases := []struct {
+		name string
+		r    mapi.Restriction
+		want bool
+	}{
+		{"body contains (case-insensitive)", RuleBodyContains("CONTRACT"), true},
+		{"body contains miss", RuleBodyContains("invoice"), false},
+		{"sensitivity is private", RuleSensitivityIs(mapi.SensitivityPrivate), true},
+		{"sensitivity is confidential", RuleSensitivityIs(mapi.SensitivityConfidential), false},
+	}
+	for _, c := range cases {
+		if got := evalRestriction(c.r, bag); got != c.want {
+			t.Errorf("%s: evalRestriction = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 // TestEvalRestrictionTree checks the boolean combinators compose the leaves
 // correctly, including De Morgan-style cases and an empty AND/OR.
 func TestEvalRestrictionTree(t *testing.T) {
