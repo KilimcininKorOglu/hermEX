@@ -140,11 +140,11 @@ type mailDetailJSON struct {
 
 // handleMailMessage returns a single message's full detail and marks it read.
 func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.session(r)
+	mb, ok := s.openMailbox(w, r)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
+	defer mb.st.Close()
 	folder, uid, ok := parseMessageID(r.URL.Query().Get("id"))
 	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
@@ -155,12 +155,11 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown folder"})
 		return
 	}
-	st, err := objectstore.Open(c.Mailbox)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
+	if !mb.readAllowed(fid) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
-	defer st.Close()
+	st := mb.st
 	raw, err := st.GetMessageRaw(fid, uid)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
@@ -199,7 +198,7 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 	if flags, err := st.MessageFlags(fid, uid); err == nil {
 		d.Read = flags&objectstore.FlagSeen != 0
 		d.Starred = flags&objectstore.FlagFlagged != 0
-		if flags&objectstore.FlagSeen == 0 {
+		if flags&objectstore.FlagSeen == 0 && !mb.shared {
 			_ = st.SetMessageFlags(fid, uid, flags|objectstore.FlagSeen)
 			d.Read = true
 		}

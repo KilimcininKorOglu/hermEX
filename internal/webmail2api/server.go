@@ -283,24 +283,22 @@ func folderFID(slug string) (int64, bool) {
 }
 
 func (s *Server) handleMailFolder(w http.ResponseWriter, r *http.Request) {
-	c, ok := s.session(r)
+	mb, ok := s.openMailbox(w, r)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
+	defer mb.st.Close()
 	folder := r.PathValue("folder")
 	fid, ok := folderFID(folder)
 	if !ok {
 		writeJSON(w, http.StatusOK, map[string]any{"emails": []mailJSON{}})
 		return
 	}
-	st, err := objectstore.Open(c.Mailbox)
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
+	if !mb.readAllowed(fid) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
-	defer st.Close()
-	msgs, err := st.ListMessages(fid)
+	msgs, err := mb.st.ListMessages(fid)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list failed"})
 		return
