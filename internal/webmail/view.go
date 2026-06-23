@@ -19,6 +19,7 @@ type folderView struct {
 	ID     int64  // fixed folder id, used as the move/copy/CRUD target value
 	Name   string // leaf display name
 	Path   string // full hierarchical path, e.g. "Archive/2026"
+	Depth  int    // nesting level (0 = top-level), for sidebar indentation
 	IsUser bool   // user-created (id >= unassigned-start): rename/delete allowed
 	Total  int    // messages in the folder (sidebar badge; populated by the mail handler)
 	Unread int    // unread messages in the folder (sidebar badge)
@@ -108,35 +109,57 @@ type threadView struct {
 	Messages  []messageView // members, oldest-first
 }
 
-// buildFolderViews computes each folder's hierarchical path from the parent
-// links, ordered as returned by the store.
+// buildFolderViews computes each folder's hierarchical path and nesting depth
+// from the parent links, emitted in tree order: each folder is immediately
+// followed by its descendants, with siblings kept in the store's own order. This
+// lets the sidebar indent children under their parent (Depth) instead of listing
+// every folder flat, while preserving the well-known folders' canonical order
+// (Inbox first, etc.) rather than re-sorting alphabetically.
 func buildFolderViews(folders []objectstore.FolderInfo) []folderView {
 	byID := make(map[int64]objectstore.FolderInfo, len(folders))
 	for _, f := range folders {
 		byID[f.ID] = f
 	}
-	var pathOf func(f objectstore.FolderInfo) string
-	pathOf = func(f objectstore.FolderInfo) string {
+	// children[parentID] holds a parent's folders in store order; a folder is a
+	// root when it has no parent, or an orphan whose parent is absent from this set
+	// (surfaced as a root so it is never dropped).
+	children := make(map[int64][]objectstore.FolderInfo)
+	var roots []objectstore.FolderInfo
+	for _, f := range folders {
 		if f.ParentID == nil {
-			if strings.EqualFold(f.DisplayName, inboxName) {
-				return inboxName
-			}
-			return f.DisplayName
+			roots = append(roots, f)
+			continue
 		}
-		parent, ok := byID[*f.ParentID]
-		if !ok {
-			return f.DisplayName
+		if _, ok := byID[*f.ParentID]; ok {
+			children[*f.ParentID] = append(children[*f.ParentID], f)
+		} else {
+			roots = append(roots, f)
 		}
-		return pathOf(parent) + hierarchySep + f.DisplayName
 	}
 	views := make([]folderView, 0, len(folders))
-	for _, f := range folders {
+	var walk func(f objectstore.FolderInfo, parentPath string, depth int)
+	walk = func(f objectstore.FolderInfo, parentPath string, depth int) {
+		name := f.DisplayName
+		if depth == 0 && strings.EqualFold(name, inboxName) {
+			name = inboxName
+		}
+		path := name
+		if parentPath != "" {
+			path = parentPath + hierarchySep + f.DisplayName
+		}
 		views = append(views, folderView{
 			ID:     f.ID,
 			Name:   f.DisplayName,
-			Path:   pathOf(f),
+			Path:   path,
+			Depth:  depth,
 			IsUser: f.ID >= int64(mapi.PrivateFIDUnassignedStart),
 		})
+		for _, c := range children[f.ID] {
+			walk(c, path, depth+1)
+		}
+	}
+	for _, r := range roots {
+		walk(r, "", 0)
 	}
 	return views
 }
@@ -167,10 +190,9 @@ func moveTargets(folders []objectstore.FolderInfo, currentID int64) []folderView
 // resolveFolder finds a folder id by its hierarchical path (INBOX is
 // case-insensitive), reporting ok=false when no such folder exists.
 func resolveFolder(folders []objectstore.FolderInfo, path string) (int64, bool) {
-	views := buildFolderViews(folders)
-	for i, v := range views {
+	for _, v := range buildFolderViews(folders) {
 		if v.Path == path || (strings.EqualFold(path, inboxName) && strings.EqualFold(v.Path, inboxName)) {
-			return folders[i].ID, true
+			return v.ID, true
 		}
 	}
 	return 0, false

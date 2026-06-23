@@ -4,7 +4,7 @@
     <div class="brand">hermEX</div>
     <nav>
       {{range .Folders}}
-      <div class="folder-item{{if eq .Path $.Current}} active{{end}}">
+      <div class="folder-item{{if eq .Path $.Current}} active{{end}}" style="--depth:{{.Depth}}">
         <a href="/mail?folder={{.Path}}">{{.Name}}{{if .Total}}<span class="fcount{{if .Unread}} has-unread{{end}}">{{if .Unread}}{{.Unread}}/{{end}}{{.Total}}</span>{{end}}</a>
         {{if .IsUser}}
         <form method="post" action="/folder" class="folder-rename">
