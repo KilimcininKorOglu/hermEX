@@ -148,7 +148,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/filters/{id}", s.handleDeleteFilter)
 	mux.HandleFunc("GET /api/v1/smime/certificate", s.handleSmimeCert)
 	mux.HandleFunc("GET /api/v1/branding", s.handleBranding)
-	mux.HandleFunc("GET /api/v1/avatar", s.handleAvatar)
+	mux.HandleFunc("GET /api/v1/avatar", s.handleGetAvatar)
+	mux.HandleFunc("PUT /api/v1/profile/avatar", s.handlePutAvatar)
+	mux.HandleFunc("DELETE /api/v1/profile/avatar", s.handleDeleteAvatar)
 	mux.HandleFunc("GET /api/v1/events", s.handleEvents)
 
 	// Everything else under the API is not implemented yet: return a benign empty
@@ -247,11 +249,16 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
 		return
 	}
+	hasAvatar := false
+	if st, err := objectstore.Open(c.Mailbox); err == nil {
+		hasAvatar = readPhoto(st) != nil
+		st.Close()
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"authenticated": true,
 		"email":         c.Email,
 		"isAdmin":       false,
-		"has_avatar":    false,
+		"has_avatar":    hasAvatar,
 		"onboarded":     true,
 	})
 }

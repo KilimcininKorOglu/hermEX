@@ -25,6 +25,13 @@ var (
 	// namespaces it is NOT a member of the {...-C000-...-46} family — it is a
 	// distinct literal GUID, so its Data2/Data3/Data4 differ.
 	PsetidMeeting = GUID{Data1: 0x6ED8DA90, Data2: 0x450B, Data3: 0x101B, Data4: [8]byte{0x98, 0xDA, 0x00, 0xAA, 0x00, 0x3F, 0x13, 0x05}}
+	// PsetidProvider {1DE937E2-85C6-40A1-BD9D-A6E2B7B787B1} is the provider's
+	// private namespace for store-level extension properties. The "photo" name
+	// under it holds the mailbox owner's portrait as raw image bytes — the single
+	// source the GAL (NSPI), EWS, and webmail all read, so the picture is
+	// consistent across every protocol and is what Outlook shows as
+	// PR_EMS_AB_THUMBNAIL_PHOTO.
+	PsetidProvider = GUID{Data1: 0x1DE937E2, Data2: 0x85C6, Data3: 0x40A1, Data4: [8]byte{0xBD, 0x9D, 0xA6, 0xE2, 0xB7, 0xB7, 0x87, 0xB1}}
 )
 
 var (
@@ -95,4 +102,9 @@ var (
 	// the v1 stand-in for the binary global object id — the stable identity that
 	// matches a meeting response back to its appointment.
 	NameICalUID = PropertyName{Kind: MnidString, GUID: PsPublicStrings, Name: "ICalUID"} // PtUnicode
+
+	// NameUserPhoto (PsetidProvider/"photo", PtBinary) holds the mailbox owner's
+	// portrait as raw image bytes — the cross-protocol source the GAL/NSPI, EWS,
+	// and webmail all read, served to Outlook as PR_EMS_AB_THUMBNAIL_PHOTO.
+	NameUserPhoto = PropertyName{Kind: MnidString, GUID: PsetidProvider, Name: "photo"}
 )
