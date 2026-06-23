@@ -299,6 +299,18 @@ func TestFolderFavoriteToggle(t *testing.T) {
 	}
 }
 
+// TestSidebarFolderSize checks the sidebar shows a folder's message count and
+// total size as a tooltip on the folder link.
+func TestSidebarFolderSize(t *testing.T) {
+	path := emptyMailbox(t)
+	seedMsg(t, path, int64(mapi.PrivateFIDInbox), "hello", "", "some body content", 100, 0)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+	if _, body := get(t, c, ts.URL+"/mail?folder=INBOX"); !strings.Contains(body, `title="1 message(s),`) {
+		t.Errorf("sidebar folder link missing the count/size tooltip:\n%s", body)
+	}
+}
+
 // TestFolderUnauthenticated checks /folder requires a session.
 func TestFolderUnauthenticated(t *testing.T) {
 	path := emptyMailbox(t)

@@ -77,6 +77,15 @@ func (s *Store) CountMessages(folderID int64) (total, unread int, err error) {
 	return total, unread, err
 }
 
+// FolderSize returns the total byte size of the messages in a folder — the sum of
+// their RFC 822 sizes — for the sidebar's per-folder size display.
+func (s *Store) FolderSize(folderID int64) (int64, error) {
+	var size int64
+	err := s.idxdb.QueryRow(
+		`SELECT COALESCE(SUM(size), 0) FROM messages WHERE folder_id=?`, folderID).Scan(&size)
+	return size, err
+}
+
 // MessageByUID returns one message's metadata by folder and IMAP UID, reporting
 // ErrNotFound when it does not exist.
 func (s *Store) MessageByUID(folderID int64, uid uint32) (MessageInfo, error) {

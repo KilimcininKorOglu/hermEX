@@ -196,6 +196,9 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 			folderViews[i].Total = total
 			folderViews[i].Unread = unread
 		}
+		if size, err := ownSt.FolderSize(folderViews[i].ID); err == nil {
+			folderViews[i].Size = formatBytes(size)
+		}
 	}
 
 	// Saved preferences supply the list defaults; a URL parameter overrides them.

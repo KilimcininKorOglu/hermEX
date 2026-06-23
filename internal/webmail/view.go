@@ -25,6 +25,7 @@ type folderView struct {
 	Total      int    // messages in the folder (sidebar badge; populated by the mail handler)
 	Unread     int    // unread messages in the folder (sidebar badge)
 	IsFavorite bool   // the user pinned this folder as a favorite (own mailbox only)
+	Size       string // human-readable total size of the folder's messages (sidebar tooltip)
 }
 
 // messageView is one row in the message list.
