@@ -37,7 +37,7 @@ func TestStaticAccountsMaildirs(t *testing.T) {
 // the result is ordered by address so the sidebar listing is stable.
 func TestStaticAccountsSharedMailboxes(t *testing.T) {
 	a := StaticAccounts{
-		"alice@hermex.test":   {Password: "x", MailboxPath: "/m/alice"},                // not shared
+		"alice@hermex.test":   {Password: "x", MailboxPath: "/m/alice"},                 // not shared
 		"team@hermex.test":    {Password: "x", MailboxPath: "/m/team", Shared: true},    // shared
 		"support@hermex.test": {Password: "x", MailboxPath: "/m/support", Shared: true}, // shared
 		"nopath@hermex.test":  {Password: "x", MailboxPath: "", Shared: true},           // shared but no mailbox: skipped
