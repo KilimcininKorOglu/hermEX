@@ -78,6 +78,7 @@
       <h2>{{.Current}}{{if .Mbox}} <span class="mbox-label">in {{.Mbox}}</span>{{end}} <span class="counts">{{.Total}} total, {{.Unread}} unread</span></h2>
       <a href="/compose{{if and .Mbox .CanSendAs}}?mbox={{.Mbox}}{{end}}" class="compose-btn">{{if and .Mbox .CanSendAs}}Compose as {{.Mbox}}{{else}}Compose{{end}}</a>
       <a href="/import" class="import-btn">Import</a>
+      <a href="/addressbook" class="import-btn">Address book</a>
       <a href="/settings" class="import-btn">Settings</a>
       {{if not .ReadOnly}}<form method="post" action="/mark-all-read{{if .Mbox}}?mbox={{.Mbox}}{{end}}" class="markall-form"><input type="hidden" name="folder" value="{{.Current}}"><button type="submit" class="import-btn">Mark all read</button></form>{{end}}
       {{if and (not .ReadOnly) .Total}}<form method="post" action="/folder{{if .Mbox}}?mbox={{.Mbox}}{{end}}" class="empty-form" onsubmit="return confirm('Empty {{.Current}}? Messages move to Deleted Items, or are permanently removed from Deleted Items and Junk.');"><input type="hidden" name="op" value="empty"><input type="hidden" name="folder" value="{{.Current}}"><button type="submit" class="import-btn">Empty folder</button></form>{{end}}
