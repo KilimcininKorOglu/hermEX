@@ -122,6 +122,57 @@ func TestRulesAddCopyAction(t *testing.T) {
 	}
 }
 
+// ruleIDByName returns the inbox rule with the given name, failing if none.
+func ruleIDByName(t *testing.T, path, name string) int64 {
+	t.Helper()
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	rules, err := st.ListRules(int64(mapi.PrivateFIDInbox))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rules {
+		if r.Name == name {
+			return r.ID
+		}
+	}
+	t.Fatalf("no rule named %s", name)
+	return 0
+}
+
+// TestRulesReorder adds two rules, moves the second up, and checks the listing
+// order flips — the move-up/down controls change which rule evaluates first.
+func TestRulesReorder(t *testing.T) {
+	path := emptyMailbox(t)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+	junk := strconv.FormatInt(int64(mapi.PrivateFIDJunk), 10)
+
+	// Add "AlphaRule" then "BetaRule"; Alpha gets the lower sequence (lists first).
+	for _, name := range []string{"AlphaRule", "BetaRule"} {
+		postForm(t, c, ts.URL+"/rules", url.Values{
+			"action": {"add"}, "name": {name},
+			"condfield": {"subject"}, "condvalue": {"x"},
+			"actiontype": {"move"}, "actiontarget": {junk},
+		})
+	}
+	_, before := get(t, c, ts.URL+"/rules")
+	if strings.Index(before, "AlphaRule") > strings.Index(before, "BetaRule") {
+		t.Fatalf("expected AlphaRule listed before BetaRule initially:\n%s", before)
+	}
+
+	postForm(t, c, ts.URL+"/rules", url.Values{
+		"action": {"moveup"}, "id": {strconv.FormatInt(ruleIDByName(t, path, "BetaRule"), 10)},
+	})
+	_, after := get(t, c, ts.URL+"/rules")
+	if strings.Index(after, "BetaRule") > strings.Index(after, "AlphaRule") {
+		t.Errorf("after move-up BetaRule should list before AlphaRule:\n%s", after)
+	}
+}
+
 // TestRulesAddStopProcessing adds a rule with the stop-processing option and
 // checks the listing notes it, so the exit-level bit round-trips through the form.
 func TestRulesAddStopProcessing(t *testing.T) {

@@ -16,6 +16,16 @@ rulesPage sub-data; forms post to /rules and return to /settings?tab=rules. */}}
         <span>{{if .Name}}<strong>{{.Name}}</strong> &mdash; {{end}}{{.Summary}}{{if not .Enabled}} <em class="muted">(disabled)</em>{{end}}</span>
         <span class="rule-actions">
           <form method="post" action="/rules" class="inline">
+            <input type="hidden" name="action" value="moveup">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <button type="submit" title="Move up (higher priority)">&uarr;</button>
+          </form>
+          <form method="post" action="/rules" class="inline">
+            <input type="hidden" name="action" value="movedown">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <button type="submit" title="Move down (lower priority)">&darr;</button>
+          </form>
+          <form method="post" action="/rules" class="inline">
             <input type="hidden" name="action" value="toggle">
             <input type="hidden" name="id" value="{{.ID}}">
             <input type="hidden" name="enabled" value="{{if .Enabled}}0{{else}}1{{end}}">

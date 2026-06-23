@@ -343,3 +343,43 @@ func firstRuleName(rules []Rule) string {
 	}
 	return rules[0].Name
 }
+
+// TestSetRuleSequence reorders two rules by swapping their sequences and reports
+// ErrNotFound for an unknown rule.
+func TestSetRuleSequence(t *testing.T) {
+	s := openSeededStore(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	mk := func(name string) int64 {
+		id, err := s.AddRule(Rule{
+			FolderID: inbox, Name: name, State: mapi.RuleStateEnabled,
+			Condition: RuleSubjectContains(name),
+			Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{RuleMarkReadAction()}},
+		})
+		if err != nil {
+			t.Fatalf("AddRule %s: %v", name, err)
+		}
+		return id
+	}
+	a := mk("a")
+	b := mk("b")
+
+	rules, err := s.ListRules(inbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rules[0].ID != a {
+		t.Fatalf("rule a should be first, got %d", rules[0].ID)
+	}
+	if err := s.SetRuleSequence(a, rules[1].Sequence); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetRuleSequence(b, rules[0].Sequence); err != nil {
+		t.Fatal(err)
+	}
+	if rules, _ = s.ListRules(inbox); rules[0].ID != b {
+		t.Errorf("after swap rule b should be first, got %d", rules[0].ID)
+	}
+	if err := s.SetRuleSequence(999999, 1); !errors.Is(err, ErrNotFound) {
+		t.Errorf("SetRuleSequence on unknown id = %v, want ErrNotFound", err)
+	}
+}

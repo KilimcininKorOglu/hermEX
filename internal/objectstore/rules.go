@@ -156,6 +156,24 @@ func (s *Store) SetRuleEnabled(ruleID int64, enabled bool) error {
 	return tx.Commit()
 }
 
+// SetRuleSequence updates a rule's evaluation sequence, reporting ErrNotFound
+// when no such rule exists. Lower sequences evaluate first; the editor swaps two
+// rules' sequences to reorder them (raising or lowering a rule's priority).
+func (s *Store) SetRuleSequence(ruleID int64, sequence int32) error {
+	res, err := s.objdb.Exec(`UPDATE rules SET sequence=? WHERE rule_id=?`, sequence, ruleID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // DeleteRule removes a rule by id, reporting ErrNotFound when no such rule
 // exists.
 func (s *Store) DeleteRule(ruleID int64) error {

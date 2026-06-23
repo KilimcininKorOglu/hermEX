@@ -117,6 +117,10 @@ func (s *Server) handleRulesSubmit(w http.ResponseWriter, r *http.Request) {
 		if id, err := strconv.ParseInt(r.FormValue("id"), 10, 64); err == nil {
 			st.SetRuleEnabled(id, r.FormValue("enabled") == "1")
 		}
+	case "moveup":
+		reorderRule(st, r.FormValue("id"), -1)
+	case "movedown":
+		reorderRule(st, r.FormValue("id"), +1)
 	case "run":
 		res, err := st.RunRules(rulesFolder)
 		if err != nil {
@@ -127,6 +131,32 @@ func (s *Server) handleRulesSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, "/settings?tab=rules", http.StatusSeeOther)
+}
+
+// reorderRule swaps a rule's evaluation sequence with its neighbour in the given
+// direction (-1 = earlier/higher priority, +1 = later), a no-op at the ends or
+// when the id is unknown. Best-effort: a store error leaves the order unchanged.
+func reorderRule(st *objectstore.Store, idStr string, dir int) {
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		return
+	}
+	rules, err := st.ListRules(rulesFolder)
+	if err != nil {
+		return
+	}
+	for i, ru := range rules {
+		if ru.ID != id {
+			continue
+		}
+		j := i + dir
+		if j < 0 || j >= len(rules) {
+			return
+		}
+		st.SetRuleSequence(rules[i].ID, rules[j].Sequence)
+		st.SetRuleSequence(rules[j].ID, rules[i].Sequence)
+		return
+	}
 }
 
 // buildCondition assembles a RESTRICTION from the add-rule form's condition
