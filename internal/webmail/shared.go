@@ -107,6 +107,61 @@ func denyShared(w http.ResponseWriter, r *http.Request) bool {
 	return false
 }
 
+// withMbox appends the shared-mailbox selector to a webmail URL that already has a
+// query string, leaving an own-mailbox URL (empty mbox) untouched.
+func withMbox(u, mbox string) string {
+	if mbox == "" {
+		return u
+	}
+	return u + "&mbox=" + url.QueryEscape(mbox)
+}
+
+// sharedActionAllowed authorizes a single-message action against the caller's
+// folder rights in a shared mailbox, following the MS-OXCPERM model: editing an
+// item (read state, follow-up flag, categories) needs EditAny; deleting or moving
+// one needs DeleteAny on the source plus Create on the destination well-known
+// folder. A store owner clears every check (ResolvePermission elevates them to
+// full rights). The conservative "Any" rights are required rather than the
+// "Owned" variants, since item authorship is not tracked here, so an unsure case
+// denies. An unknown op denies.
+func sharedActionAllowed(st *objectstore.Store, user, op string, src int64, folders []objectstore.FolderInfo, r *http.Request) bool {
+	can := func(fid int64, need uint32) bool {
+		rights, err := st.ResolvePermission(fid, user)
+		return err == nil && rights&need == need
+	}
+	switch op {
+	case "toggleseen", "toggleflag", "flag", "flagcomplete", "flagnone", "categorize":
+		return can(src, mapi.FrightsEditAny)
+	case "delete":
+		if src == int64(mapi.PrivateFIDDeletedItems) {
+			return can(src, mapi.FrightsDeleteAny) // permanent delete from Deleted Items
+		}
+		return can(src, mapi.FrightsDeleteAny) && can(int64(mapi.PrivateFIDDeletedItems), mapi.FrightsCreate)
+	case "junk":
+		if src == int64(mapi.PrivateFIDJunk) {
+			return true // already there: a no-op
+		}
+		return can(src, mapi.FrightsDeleteAny) && can(int64(mapi.PrivateFIDJunk), mapi.FrightsCreate)
+	case "restore":
+		return can(src, mapi.FrightsDeleteAny) && can(int64(mapi.PrivateFIDInbox), mapi.FrightsCreate)
+	case "move":
+		dst, ok := parseDst(r, folders)
+		if !ok || dst == src {
+			return true // the handler no-ops or rejects with 400; no rights needed to reach that
+		}
+		return can(src, mapi.FrightsDeleteAny) && can(dst, mapi.FrightsCreate)
+	case "copy":
+		dst, ok := parseDst(r, folders)
+		if !ok || dst == src {
+			return true
+		}
+		return can(dst, mapi.FrightsCreate)
+	case "unschedule":
+		return can(src, mapi.FrightsDeleteAny) && can(int64(mapi.PrivateFIDDraft), mapi.FrightsCreate)
+	}
+	return false
+}
+
 // listAccessibleSharedMailboxes returns the shared mailboxes the signed-in user
 // may open, each with the folders they may see (FrightsVisible) and live counts —
 // the data behind the mailbox sidebar's shared-mailboxes section. Returns nil when

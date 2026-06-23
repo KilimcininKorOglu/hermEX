@@ -29,7 +29,8 @@ type folderView struct {
 type messageView struct {
 	UID       uint32
 	Folder    string // the containing folder path, for action links
-	Mbox      string // shared mailbox address when the row is in one (read-only): read links carry &mbox, write controls hide; empty for the own mailbox
+	Mbox      string // shared mailbox address when the row is in one: read/action links carry &mbox; empty for the own mailbox
+	ReadOnly  bool   // hide write controls (a shared folder the caller may see but not modify); false for the own mailbox
 	From      string
 	Subject   string
 	Date      string

@@ -244,14 +244,19 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 		SharedMailboxes: s.listAccessibleSharedMailboxes(sess),
 		Mbox:            mbox,
 	}
+	// A shared folder is read-only unless the caller holds edit/delete rights on it;
+	// the own mailbox is always writable.
+	readOnly := mbox != ""
 	if id, found := resolveFolder(contentFolders, current); found {
 		// A shared folder must grant the caller read access; the own mailbox needs no
 		// per-folder check (the user owns it).
 		if mbox != "" {
-			if rights, err := contentSt.ResolvePermission(id, sess.user); err != nil || rights&mapi.FrightsReadAny == 0 {
+			rights, err := contentSt.ResolvePermission(id, sess.user)
+			if err != nil || rights&mapi.FrightsReadAny == 0 {
 				http.NotFound(w, r)
 				return
 			}
+			readOnly = rights&(mapi.FrightsEditAny|mapi.FrightsDeleteAny) == 0
 		}
 		if res, err := listFolderPage(contentSt, id, current, params, cfg.Categories); err == nil {
 			page.Messages = res.Messages
@@ -264,15 +269,18 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 			page.Unread = res.Unread
 		}
 	}
-	// Carry the shared-mailbox selector onto every list row so the reader links
-	// stay in the shared context (and per-row write controls hide).
+	// Carry the shared-mailbox selector onto every list row so the reader and action
+	// links stay in the shared context; a shared folder the caller cannot modify
+	// renders its rows read-only (per-row write controls hidden).
 	if mbox != "" {
 		for i := range page.Messages {
 			page.Messages[i].Mbox = mbox
+			page.Messages[i].ReadOnly = readOnly
 		}
 		for i := range page.Threads {
 			for j := range page.Threads[i].Messages {
 				page.Threads[i].Messages[j].Mbox = mbox
+				page.Threads[i].Messages[j].ReadOnly = readOnly
 			}
 		}
 	}

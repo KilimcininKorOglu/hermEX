@@ -15,8 +15,10 @@
     <a href="/compose?action=editasnew&folder={{.Folder}}&uid={{.UID}}">Edit as New</a>
     <a href="/print?folder={{.Folder}}&uid={{.UID}}" target="_blank" rel="noopener" title="Print this message">Print</a>
     <a href="/eml?folder={{.Folder}}&uid={{.UID}}" title="Download as .eml">Save as .eml</a>
+    {{end}}
+    {{if not .ReadOnly}}
     {{if .Folders}}
-    <form class="moveform" hx-post="/action" hx-swap="none">
+    <form class="moveform" hx-post="/action{{if .Mbox}}?mbox={{.Mbox}}{{end}}" hx-swap="none">
       <input type="hidden" name="folder" value="{{.Folder}}">
       <input type="hidden" name="uid" value="{{.UID}}">
       <select name="dst" aria-label="Target folder">
@@ -29,14 +31,14 @@
     <details class="flagmenu reader-flag">
       <summary title="Follow-up flag">&#9873; Flag</summary>
       <form class="flagmenu-pop" method="post">
-        <button class="flag-c6" type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=6" title="Red">&#9873;</button>
-        <button class="flag-c5" type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=5" title="Blue">&#9873;</button>
-        <button class="flag-c4" type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=4" title="Yellow">&#9873;</button>
-        <button class="flag-c3" type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=3" title="Green">&#9873;</button>
-        <button class="flag-c2" type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=2" title="Orange">&#9873;</button>
-        <button class="flag-c1" type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=1" title="Purple">&#9873;</button>
-        <button type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flagcomplete" title="Mark complete">&#10003;</button>
-        <button type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flagnone" title="Clear flag">&#10007;</button>
+        <button class="flag-c6" type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=6{{if .Mbox}}&mbox={{.Mbox}}{{end}}" title="Red">&#9873;</button>
+        <button class="flag-c5" type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=5{{if .Mbox}}&mbox={{.Mbox}}{{end}}" title="Blue">&#9873;</button>
+        <button class="flag-c4" type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=4{{if .Mbox}}&mbox={{.Mbox}}{{end}}" title="Yellow">&#9873;</button>
+        <button class="flag-c3" type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=3{{if .Mbox}}&mbox={{.Mbox}}{{end}}" title="Green">&#9873;</button>
+        <button class="flag-c2" type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=2{{if .Mbox}}&mbox={{.Mbox}}{{end}}" title="Orange">&#9873;</button>
+        <button class="flag-c1" type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flag&color=1{{if .Mbox}}&mbox={{.Mbox}}{{end}}" title="Purple">&#9873;</button>
+        <button type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flagcomplete{{if .Mbox}}&mbox={{.Mbox}}{{end}}" title="Mark complete">&#10003;</button>
+        <button type="submit" formaction="/action?folder={{.Folder}}&uid={{.UID}}&op=flagnone{{if .Mbox}}&mbox={{.Mbox}}{{end}}" title="Clear flag">&#10007;</button>
         <input type="datetime-local" name="due" aria-label="Follow-up due date">
       </form>
     </details>
@@ -45,7 +47,7 @@
       <summary title="Categories">Categorize</summary>
       <form class="flagmenu-pop catlist" method="post">
         {{range .AllCategories}}
-        <button type="submit" formaction="/action?folder={{$.Folder}}&uid={{$.UID}}&op=categorize&cat={{.Name}}" style="border-left:5px solid {{.Color}}">{{.Name}}</button>
+        <button type="submit" formaction="/action?folder={{$.Folder}}&uid={{$.UID}}&op=categorize&cat={{.Name}}{{if $.Mbox}}&mbox={{$.Mbox}}{{end}}" style="border-left:5px solid {{.Color}}">{{.Name}}</button>
         {{end}}
       </form>
     </details>

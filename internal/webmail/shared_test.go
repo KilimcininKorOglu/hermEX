@@ -16,10 +16,12 @@ import (
 
 // sharedEnv carries the fixtures a shared-mailbox test asserts against.
 type sharedEnv struct {
-	supportDir string // the shared store alice may open
-	teamFID    int64  // a folder alice may see and read
+	supportDir string // a shared store alice may read (reviewer on Team)
+	teamFID    int64  // a folder alice may see and read but not modify
 	privFID    int64  // a folder alice has no grant on
 	teamUID    uint32 // the message seeded in the Team folder
+	ownedDir   string // a shared store alice owns (full read-write)
+	ownedUID   uint32 // a message seeded in the owned store's Inbox
 }
 
 // newSharedWebmail builds a webmail server for alice@hermex.test with two shared
@@ -69,10 +71,26 @@ func newSharedWebmail(t *testing.T) (*httptest.Server, sharedEnv) {
 		st.Close()
 	}
 
+	// A third shared mailbox alice OWNS (additional store owner): full read-write.
+	ownedDir := filepath.Join(root, "owned")
+	ost, err := objectstore.Open(ownedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ost.SetStoreOwners([]string{"alice@hermex.test"}); err != nil {
+		t.Fatal(err)
+	}
+	oinfo, err := ost.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("Subject: OwnedHi\r\n\r\nowned body here"), time.Unix(1700000000, 0), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ost.Close()
+
 	auth := directory.StaticAccounts{
 		"alice@hermex.test":   {Password: "secret", MailboxPath: aliceDir},
 		"support@hermex.test": {Password: "x", MailboxPath: supportDir, Shared: true},
 		"secret@hermex.test":  {Password: "x", MailboxPath: secretDir, Shared: true},
+		"owned@hermex.test":   {Password: "x", MailboxPath: ownedDir, Shared: true},
 	}
 	srv, err := NewServer(auth, auth, "mail.test")
 	if err != nil {
@@ -81,7 +99,10 @@ func newSharedWebmail(t *testing.T) (*httptest.Server, sharedEnv) {
 	srv.Shared = auth
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	return ts, sharedEnv{supportDir: supportDir, teamFID: team, privFID: priv, teamUID: info.UID}
+	return ts, sharedEnv{
+		supportDir: supportDir, teamFID: team, privFID: priv, teamUID: info.UID,
+		ownedDir: ownedDir, ownedUID: oinfo.UID,
+	}
 }
 
 // TestSharedMailboxSidebar proves the mailbox sidebar lists a shared mailbox the
@@ -194,5 +215,94 @@ func TestSharedMailboxWritesDenied(t *testing.T) {
 	// A not-yet-shared-aware read endpoint likewise refuses an mbox it cannot honor.
 	if code, _ := get(t, c, ts.URL+"/search?q=x&mbox=support@hermex.test"); code != 403 {
 		t.Errorf("GET /search with mbox = %d, want 403", code)
+	}
+}
+
+// TestSharedMailboxOwnerActions proves a user who owns a shared mailbox may act
+// on its messages: a flag is applied and a delete re-files the message out of the
+// Inbox.
+func TestSharedMailboxOwnerActions(t *testing.T) {
+	ts, env := newSharedWebmail(t)
+	c := authedClient(t, ts)
+	uid := strconv.FormatUint(uint64(env.ownedUID), 10)
+
+	// Flag the message: the action is authorized (owner) and the flag persists.
+	if code, _ := postForm(t, c, ts.URL+"/action?folder=INBOX&uid="+uid+"&op=flag&color=6&mbox=owned@hermex.test", url.Values{}); code != 200 {
+		t.Fatalf("owner flag = %d, want 200", code)
+	}
+	ost, err := objectstore.Open(env.ownedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := ost.MessageByUID(int64(mapi.PrivateFIDInbox), env.ownedUID)
+	if err != nil {
+		ost.Close()
+		t.Fatalf("owned message gone before delete: %v", err)
+	}
+	if f, err := ost.GetFollowupFlag(m.ID); err != nil || f.Color != 6 {
+		ost.Close()
+		t.Fatalf("owner flag not applied: color=%d err=%v", f.Color, err)
+	}
+	ost.Close()
+
+	// Delete the message: it leaves the Inbox (re-filed to Deleted Items).
+	if code, _ := postForm(t, c, ts.URL+"/action?folder=INBOX&uid="+uid+"&op=delete&mbox=owned@hermex.test", url.Values{}); code != 200 {
+		t.Fatalf("owner delete = %d, want 200", code)
+	}
+	ost, err = objectstore.Open(env.ownedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ost.Close()
+	if _, err := ost.MessageByUID(int64(mapi.PrivateFIDInbox), env.ownedUID); err == nil {
+		t.Errorf("deleted message is still in the owned Inbox")
+	}
+}
+
+// TestSharedMailboxReviewerCannotWrite proves a read-only (reviewer) grant cannot
+// drive a write: a flag or delete on such a folder is refused and the message is
+// left untouched.
+func TestSharedMailboxReviewerCannotWrite(t *testing.T) {
+	ts, env := newSharedWebmail(t)
+	c := authedClient(t, ts)
+	uid := strconv.FormatUint(uint64(env.teamUID), 10)
+
+	for _, op := range []string{"flag&color=6", "delete"} {
+		if code, _ := postForm(t, c, ts.URL+"/action?folder=Team&uid="+uid+"&op="+op+"&mbox=support@hermex.test", url.Values{}); code != 403 {
+			t.Errorf("reviewer op=%s = %d, want 403", op, code)
+		}
+	}
+	// The refused flag must not have touched the message.
+	sst, err := objectstore.Open(env.supportDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sst.Close()
+	m, err := sst.MessageByUID(env.teamFID, env.teamUID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f, err := sst.GetFollowupFlag(m.ID); err == nil && f.Color != 0 {
+		t.Errorf("a refused write still flagged the reviewer's message (color=%d)", f.Color)
+	}
+}
+
+// TestSharedMailboxWritableRendersControls proves the view shows per-message write
+// controls only where the caller may write: present in an owned shared folder,
+// absent in a read-only (reviewer) one.
+func TestSharedMailboxWritableRendersControls(t *testing.T) {
+	ts, _ := newSharedWebmail(t)
+	c := authedClient(t, ts)
+
+	code, body := get(t, c, ts.URL+"/mail?folder=INBOX&mbox=owned@hermex.test")
+	if code != 200 || !strings.Contains(body, "OwnedHi") {
+		t.Fatalf("open owned Inbox (%d): message listed? %v", code, strings.Contains(body, "OwnedHi"))
+	}
+	if !strings.Contains(body, "op=delete") || !strings.Contains(body, "mbox=owned") {
+		t.Errorf("owned (writable) list missing per-message action controls carrying mbox")
+	}
+
+	if _, body := get(t, c, ts.URL+"/mail?folder=Team&mbox=support@hermex.test"); strings.Contains(body, "op=delete") {
+		t.Errorf("read-only (reviewer) list rendered a delete control")
 	}
 }

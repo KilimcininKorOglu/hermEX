@@ -48,9 +48,13 @@ type messageDetail struct {
 	Smime         string         // S/MIME status banner text ("" when not an S/MIME message) (#41)
 	SmimeOK       bool           // true when verified/decrypted (positive banner), false for a warning
 	// Mbox is the shared mailbox address when the message belongs to one, else
-	// empty. When set the reader is read-only (reply/move/delete/print controls
-	// hidden) and the attachment links carry &mbox={{.Mbox}} (template-escaped).
+	// empty. When set the attachment and action links carry &mbox={{.Mbox}}
+	// (template-escaped). Reply/forward/print/eml stay own-mailbox only.
 	Mbox string
+	// ReadOnly hides the in-mailbox write controls (flag/move/categorize) — true
+	// for a shared message the caller may read but not modify; false for the own
+	// mailbox, so its reader is unaffected.
+	ReadOnly bool
 }
 
 func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
@@ -105,12 +109,16 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	// A shared folder must grant the caller read access.
+	// A shared folder must grant the caller read access; whether they may also write
+	// (edit/delete) decides if the reader shows its in-mailbox action controls.
+	readOnly := mbox != ""
 	if mbox != "" {
-		if rights, err := st.ResolvePermission(folderID, sess.user); err != nil || rights&mapi.FrightsReadAny == 0 {
+		rights, err := st.ResolvePermission(folderID, sess.user)
+		if err != nil || rights&mapi.FrightsReadAny == 0 {
 			http.NotFound(w, r)
 			return
 		}
+		readOnly = rights&(mapi.FrightsEditAny|mapi.FrightsDeleteAny) == 0
 	}
 	raw, err := st.GetMessageRaw(folderID, uid)
 	if err != nil {
@@ -126,9 +134,10 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 	detail.Smime = smimeStatus
 	detail.SmimeOK = smimeOK
 	detail.Mbox = mbox
-	// Move targets and the other reader write controls are own-mailbox only; a
-	// shared message is read-only here (the write path is authorized separately).
-	if mbox == "" {
+	detail.ReadOnly = readOnly
+	// Move targets are offered only where the caller may write: the own mailbox, or
+	// a shared folder they hold edit/delete rights on.
+	if !readOnly {
 		detail.Folders = moveTargets(folders, folderID)
 	}
 

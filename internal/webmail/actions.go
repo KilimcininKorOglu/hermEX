@@ -19,11 +19,6 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not authenticated", http.StatusUnauthorized)
 		return
 	}
-	// Shared-mailbox writes are authorized in a later step; reject them here so a
-	// control left in a shared view cannot misfire against the caller's own store.
-	if denyShared(w, r) {
-		return
-	}
 	folder := r.FormValue("folder")
 	uid64, err := strconv.ParseUint(r.FormValue("uid"), 10, 32)
 	if err != nil {
@@ -33,10 +28,23 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 	uid := uint32(uid64)
 	op := r.FormValue("op")
 
-	st, err := objectstore.Open(sess.mailboxPath)
-	if err != nil {
-		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
-		return
+	// Open the own mailbox, or a shared mailbox the caller selected (?mbox),
+	// validated and access-checked server-side.
+	mbox := mboxParam(r)
+	var st *objectstore.Store
+	if mbox == "" {
+		if st, err = objectstore.Open(sess.mailboxPath); err != nil {
+			http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		var addr string
+		var sok bool
+		if st, addr, sok = s.openSharedFor(sess, mbox); !sok {
+			http.NotFound(w, r)
+			return
+		}
+		mbox = addr
 	}
 	defer st.Close()
 
@@ -50,12 +58,18 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// A write into a shared mailbox is authorized per the caller's folder rights;
+	// the own mailbox needs no check (the user owns it).
+	if mbox != "" && !sharedActionAllowed(st, sess.user, op, folderID, folders, r) {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
 
 	switch op {
 	case "toggleseen":
-		s.toggleFlag(w, st, folderID, folder, uid, objectstore.FlagSeen)
+		s.toggleFlag(w, st, folderID, folder, mbox, uid, objectstore.FlagSeen)
 	case "toggleflag":
-		s.toggleFlag(w, st, folderID, folder, uid, objectstore.FlagFlagged)
+		s.toggleFlag(w, st, folderID, folder, mbox, uid, objectstore.FlagFlagged)
 	case "flag":
 		color := int32(atoiDefault(r.FormValue("color"), int(objectstore.FlagColorRed)))
 		if color < 1 || color > 6 {
@@ -67,19 +81,19 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 				f.DueBy = t
 			}
 		}
-		s.setFollowup(w, r, st, folderID, folder, uid, f)
+		s.setFollowup(w, r, st, folderID, folder, mbox, uid, f)
 	case "flagcomplete":
-		s.setFollowup(w, r, st, folderID, folder, uid, objectstore.FollowupFlag{Status: objectstore.FlagStatusComplete})
+		s.setFollowup(w, r, st, folderID, folder, mbox, uid, objectstore.FollowupFlag{Status: objectstore.FlagStatusComplete})
 	case "flagnone":
-		s.setFollowup(w, r, st, folderID, folder, uid, objectstore.FollowupFlag{})
+		s.setFollowup(w, r, st, folderID, folder, mbox, uid, objectstore.FollowupFlag{})
 	case "categorize":
-		s.categorize(w, r, st, folderID, folder, uid, r.FormValue("cat"))
+		s.categorize(w, r, st, folderID, folder, mbox, uid, r.FormValue("cat"))
 	case "delete":
 		s.deleteMessage(w, st, folderID, uid)
 	case "unschedule":
 		s.unscheduleSend(w, st, folderID, uid)
 	case "move":
-		s.moveTo(w, r, st, folders, folderID, folder, uid)
+		s.moveTo(w, r, st, folders, folderID, folder, mbox, uid)
 	case "copy":
 		s.copyTo(w, r, st, folders, folderID, uid)
 	case "junk":
@@ -140,7 +154,7 @@ func parseDst(r *http.Request, folders []objectstore.FolderInfo) (int64, bool) {
 // moveTo moves a message to the folder named by the "dst" form value (a folder
 // id). A move onto the same folder is a no-op. On success it asks htmx to
 // navigate back to the source folder, since the message has left the open reader.
-func (s *Server) moveTo(w http.ResponseWriter, r *http.Request, st *objectstore.Store, folders []objectstore.FolderInfo, src int64, folder string, uid uint32) {
+func (s *Server) moveTo(w http.ResponseWriter, r *http.Request, st *objectstore.Store, folders []objectstore.FolderInfo, src int64, folder, mbox string, uid uint32) {
 	dst, ok := parseDst(r, folders)
 	if !ok {
 		http.Error(w, "invalid destination folder", http.StatusBadRequest)
@@ -154,7 +168,7 @@ func (s *Server) moveTo(w http.ResponseWriter, r *http.Request, st *objectstore.
 		http.Error(w, "cannot move message", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("HX-Redirect", "/mail?folder="+url.QueryEscape(folder))
+	w.Header().Set("HX-Redirect", withMbox("/mail?folder="+url.QueryEscape(folder), mbox))
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -235,7 +249,7 @@ func (s *Server) unscheduleSend(w http.ResponseWriter, st *objectstore.Store, fo
 // and re-renders the row. SetFollowupFlag also syncs the IMAP \Flagged bit, and
 // the row is re-enriched so the colored flag (and the other per-row-read icons)
 // render correctly on the htmx swap.
-func (s *Server) setFollowup(w http.ResponseWriter, r *http.Request, st *objectstore.Store, folderID int64, folder string, uid uint32, f objectstore.FollowupFlag) {
+func (s *Server) setFollowup(w http.ResponseWriter, r *http.Request, st *objectstore.Store, folderID int64, folder, mbox string, uid uint32, f objectstore.FollowupFlag) {
 	m, err := st.MessageByUID(folderID, uid)
 	if err != nil {
 		http.NotFound(w, nil)
@@ -248,7 +262,7 @@ func (s *Server) setFollowup(w http.ResponseWriter, r *http.Request, st *objects
 	// The reader's flag control posts a plain form (no htmx): reload the message
 	// so its header reflects the new flag. The list posts via htmx and swaps the row.
 	if r.Header.Get("HX-Request") == "" {
-		http.Redirect(w, r, "/message?folder="+url.QueryEscape(folder)+"&uid="+strconv.FormatUint(uint64(uid), 10), http.StatusSeeOther)
+		http.Redirect(w, r, withMbox("/message?folder="+url.QueryEscape(folder)+"&uid="+strconv.FormatUint(uint64(uid), 10), mbox), http.StatusSeeOther)
 		return
 	}
 	m, err = st.MessageByUID(folderID, uid) // re-read so \Flagged reflects the new state
@@ -258,6 +272,7 @@ func (s *Server) setFollowup(w http.ResponseWriter, r *http.Request, st *objects
 	}
 	v := messageViewFrom(folderID, folder, m)
 	enrichIcons(st, m.ID, mailboxCategories(st), &v)
+	v.Mbox = mbox // keep the swapped row's controls in the shared context
 	s.render(w, "messagerow", v)
 }
 
@@ -265,7 +280,7 @@ func (s *Server) setFollowup(w http.ResponseWriter, r *http.Request, st *objects
 // re-renders. Like the flag actions it branches on HX-Request: the list posts via
 // htmx and gets the row partial; the reader posts a plain form and is redirected
 // back to the message.
-func (s *Server) categorize(w http.ResponseWriter, r *http.Request, st *objectstore.Store, folderID int64, folder string, uid uint32, name string) {
+func (s *Server) categorize(w http.ResponseWriter, r *http.Request, st *objectstore.Store, folderID int64, folder, mbox string, uid uint32, name string) {
 	if name == "" {
 		http.Error(w, "no category", http.StatusBadRequest)
 		return
@@ -297,11 +312,12 @@ func (s *Server) categorize(w http.ResponseWriter, r *http.Request, st *objectst
 		return
 	}
 	if r.Header.Get("HX-Request") == "" {
-		http.Redirect(w, r, "/message?folder="+url.QueryEscape(folder)+"&uid="+strconv.FormatUint(uint64(uid), 10), http.StatusSeeOther)
+		http.Redirect(w, r, withMbox("/message?folder="+url.QueryEscape(folder)+"&uid="+strconv.FormatUint(uint64(uid), 10), mbox), http.StatusSeeOther)
 		return
 	}
 	v := messageViewFrom(folderID, folder, m)
 	enrichIcons(st, m.ID, mailboxCategories(st), &v)
+	v.Mbox = mbox // keep the swapped row's controls in the shared context
 	s.render(w, "messagerow", v)
 }
 
@@ -310,7 +326,7 @@ func (s *Server) categorize(w http.ResponseWriter, r *http.Request, st *objectst
 // marker) the same way the list pipeline enriches each visible page row; without
 // this the single-row htmx swap would drop those icons until a full reload, since
 // they come from a per-message object read rather than the index row.
-func (s *Server) toggleFlag(w http.ResponseWriter, st *objectstore.Store, folderID int64, folder string, uid uint32, bit int64) {
+func (s *Server) toggleFlag(w http.ResponseWriter, st *objectstore.Store, folderID int64, folder, mbox string, uid uint32, bit int64) {
 	cur, err := st.MessageFlags(folderID, uid)
 	if err != nil {
 		http.NotFound(w, nil)
@@ -327,6 +343,7 @@ func (s *Server) toggleFlag(w http.ResponseWriter, st *objectstore.Store, folder
 	}
 	v := messageViewFrom(folderID, folder, m)
 	enrichIcons(st, m.ID, mailboxCategories(st), &v)
+	v.Mbox = mbox // keep the swapped row's controls in the shared context
 	s.render(w, "messagerow", v)
 }
 
