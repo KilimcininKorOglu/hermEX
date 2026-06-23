@@ -7,12 +7,14 @@
   <div class="reader-toolbar">
     {{if not .Preview}}<a href="/mail?folder={{.Folder}}{{if .Mbox}}&mbox={{.Mbox}}{{end}}">&larr; Back to {{.Folder}}</a>{{end}}
     <a href="/message?folder={{.Folder}}&uid={{.UID}}{{if .Mbox}}&mbox={{.Mbox}}{{end}}" target="_blank" rel="noopener" title="Open in a new window">Pop out</a>
+    {{if or (not .Mbox) .CanSendAs}}
+    <a href="/compose?action=reply&folder={{.Folder}}&uid={{.UID}}{{if .Mbox}}&mbox={{.Mbox}}{{end}}">Reply</a>
+    <a href="/compose?action=replyall&folder={{.Folder}}&uid={{.UID}}{{if .Mbox}}&mbox={{.Mbox}}{{end}}" data-key="replyall">Reply All</a>
+    <a href="/compose?action=forward&folder={{.Folder}}&uid={{.UID}}{{if .Mbox}}&mbox={{.Mbox}}{{end}}">Forward</a>
+    <a href="/compose?action=forwardasattach&folder={{.Folder}}&uid={{.UID}}{{if .Mbox}}&mbox={{.Mbox}}{{end}}">Forward as attachment</a>
+    <a href="/compose?action=editasnew&folder={{.Folder}}&uid={{.UID}}{{if .Mbox}}&mbox={{.Mbox}}{{end}}">Edit as New</a>
+    {{end}}
     {{if not .Mbox}}
-    <a href="/compose?action=reply&folder={{.Folder}}&uid={{.UID}}">Reply</a>
-    <a href="/compose?action=replyall&folder={{.Folder}}&uid={{.UID}}" data-key="replyall">Reply All</a>
-    <a href="/compose?action=forward&folder={{.Folder}}&uid={{.UID}}">Forward</a>
-    <a href="/compose?action=forwardasattach&folder={{.Folder}}&uid={{.UID}}">Forward as attachment</a>
-    <a href="/compose?action=editasnew&folder={{.Folder}}&uid={{.UID}}">Edit as New</a>
     <a href="/print?folder={{.Folder}}&uid={{.UID}}" target="_blank" rel="noopener" title="Print this message">Print</a>
     <a href="/eml?folder={{.Folder}}&uid={{.UID}}" title="Download as .eml">Save as .eml</a>
     {{end}}

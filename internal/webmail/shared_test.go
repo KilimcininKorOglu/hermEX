@@ -80,7 +80,7 @@ func newSharedWebmail(t *testing.T) (*httptest.Server, sharedEnv) {
 	if err := ost.SetStoreOwners([]string{"alice@hermex.test"}); err != nil {
 		t.Fatal(err)
 	}
-	oinfo, err := ost.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("Subject: OwnedHi\r\n\r\nowned body here"), time.Unix(1700000000, 0), 0)
+	oinfo, err := ost.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("Subject: OwnedHi\r\nMessage-ID: <orig-owned@hermex.test>\r\nFrom: someone@external.test\r\n\r\nowned body here"), time.Unix(1700000000, 0), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -515,5 +515,103 @@ func TestSharedMailboxComposeButtonSendAs(t *testing.T) {
 	}
 	if _, body := get(t, c, ts.URL+"/mail?folder=Team&mbox=support@hermex.test"); strings.Contains(body, "/compose?mbox=support") {
 		t.Errorf("reviewer mailbox view offered a compose-as button")
+	}
+}
+
+// TestSharedMailboxReplyControlSendAs proves the reader offers the reply/forward
+// controls only where the caller may send as the shared mailbox: present (carrying
+// the mbox) for an owned message, absent for a reviewer's read-only message.
+func TestSharedMailboxReplyControlSendAs(t *testing.T) {
+	ts, env := newSharedWebmail(t)
+	c := authedClient(t, ts)
+
+	ownedUID := strconv.FormatUint(uint64(env.ownedUID), 10)
+	_, body := get(t, c, ts.URL+"/message?folder=INBOX&uid="+ownedUID+"&mbox=owned@hermex.test")
+	if !strings.Contains(body, "action=reply") || !strings.Contains(body, "mbox=owned") {
+		t.Errorf("owned reader missing the send-as reply control carrying mbox")
+	}
+
+	teamUID := strconv.FormatUint(uint64(env.teamUID), 10)
+	if _, body := get(t, c, ts.URL+"/message?folder=Team&uid="+teamUID+"&mbox=support@hermex.test"); strings.Contains(body, "action=reply") {
+		t.Errorf("reviewer reader offered a reply control (no send-as right)")
+	}
+}
+
+// TestSharedMailboxReplyAsReviewerDenied proves a folder grant alone confers no
+// send-as right on the reply prefill: a reviewer cannot open a reply-as composer.
+func TestSharedMailboxReplyAsReviewerDenied(t *testing.T) {
+	ts, env := newSharedWebmail(t)
+	c := authedClient(t, ts)
+	uid := strconv.FormatUint(uint64(env.teamUID), 10)
+	if code, _ := get(t, c, ts.URL+"/compose?action=reply&folder=Team&uid="+uid+"&mbox=support@hermex.test"); code != 403 {
+		t.Errorf("reviewer reply-as prefill = %d, want 403 (no send-as right)", code)
+	}
+}
+
+// TestSharedMailboxReplyAsSend proves the core shared-mailbox workflow: an owner
+// replies to a shared message as the mailbox. The prefill reads the shared source
+// (From defaults to the shared address, In-Reply-To carries the original
+// Message-ID), and the sent reply goes out as the shared address with its Sent
+// copy filed in the shared mailbox's Sent Items, linked to the original.
+func TestSharedMailboxReplyAsSend(t *testing.T) {
+	ts, env := newSharedWebmail(t)
+	c := authedClient(t, ts)
+	uid := strconv.FormatUint(uint64(env.ownedUID), 10)
+
+	// The reply prefill reads the shared source: From is the shared mailbox, the
+	// form posts back with the selector, and In-Reply-To carries the original id.
+	code, body := get(t, c, ts.URL+"/compose?action=reply&folder=INBOX&uid="+uid+"&mbox=owned@hermex.test")
+	if code != 200 {
+		t.Fatalf("owner reply-as prefill = %d, want 200", code)
+	}
+	if !strings.Contains(body, `value="owned@hermex.test" selected`) {
+		t.Errorf("reply-as prefill did not default From to the shared mailbox")
+	}
+	if !strings.Contains(body, `action="/compose?mbox=owned`) {
+		t.Errorf("reply-as prefill does not post back with the shared-mailbox selector")
+	}
+	if !strings.Contains(body, `name="inreplyto" value="&lt;orig-owned@hermex.test&gt;"`) {
+		t.Errorf("reply-as prefill did not carry the original Message-ID as In-Reply-To")
+	}
+
+	// Send the reply as the shared mailbox.
+	if code, _ := postForm(t, c, ts.URL+"/compose?mbox=owned@hermex.test", url.Values{
+		"from": {"owned@hermex.test"}, "to": {"alice@hermex.test"},
+		"subject": {"Re: OwnedHi"}, "body": {"replying"}, "format": {"plain"},
+		"inreplyto": {"<orig-owned@hermex.test>"},
+	}); code != 200 {
+		t.Fatalf("reply-as send = %d, want 200", code)
+	}
+
+	// The Sent copy lands in the SHARED mailbox's Sent, from the shared address and
+	// linked to the original — not in alice's own Sent.
+	ost, err := objectstore.Open(env.ownedDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ost.Close()
+	msgs, err := ost.ListMessages(int64(mapi.PrivateFIDSentItems))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) == 0 {
+		t.Fatalf("no Sent copy was filed in the shared mailbox")
+	}
+	raw, err := ost.GetMessageRaw(int64(mapi.PrivateFIDSentItems), msgs[len(msgs)-1].UID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromIsShared := false
+	for line := range strings.SplitSeq(string(raw), "\r\n") {
+		if strings.HasPrefix(line, "From:") && strings.Contains(line, "owned@hermex.test") {
+			fromIsShared = true
+			break
+		}
+	}
+	if !fromIsShared {
+		t.Errorf("the reply was not sent from the shared mailbox:\n%s", raw)
+	}
+	if !strings.Contains(string(raw), "In-Reply-To: <orig-owned@hermex.test>") {
+		t.Errorf("the reply did not carry In-Reply-To linking it to the original:\n%s", raw)
 	}
 }

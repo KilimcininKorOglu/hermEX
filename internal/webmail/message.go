@@ -49,12 +49,19 @@ type messageDetail struct {
 	SmimeOK       bool           // true when verified/decrypted (positive banner), false for a warning
 	// Mbox is the shared mailbox address when the message belongs to one, else
 	// empty. When set the attachment and action links carry &mbox={{.Mbox}}
-	// (template-escaped). Reply/forward/print/eml stay own-mailbox only.
+	// (template-escaped). Reply/forward honor send-as (gated by CanSendAs);
+	// print/eml stay own-mailbox only.
 	Mbox string
 	// ReadOnly hides the in-mailbox write controls (flag/move/categorize) — true
 	// for a shared message the caller may read but not modify; false for the own
 	// mailbox, so its reader is unaffected.
 	ReadOnly bool
+	// CanSendAs reports that the caller may reply to/forward this message as the
+	// shared mailbox it belongs to (owner or delegate), so the reader offers the
+	// compose controls wired to send from the shared address; false for the own
+	// mailbox (where the controls show unconditionally) and for a shared message
+	// the caller may read but not send as.
+	CanSendAs bool
 }
 
 func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
@@ -135,6 +142,11 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 	detail.SmimeOK = smimeOK
 	detail.Mbox = mbox
 	detail.ReadOnly = readOnly
+	// A shared message the caller may send as (owner or delegate) offers the
+	// reply/forward controls, wired to compose from the shared address; a reviewer
+	// who can only read sees no compose controls. The own mailbox shows them
+	// unconditionally, so CanSendAs stays false there.
+	detail.CanSendAs = mbox != "" && canSendAsShared(st, sess.user)
 	// Move targets are offered only where the caller may write: the own mailbox, or
 	// a shared folder they hold edit/delete rights on.
 	if !readOnly {

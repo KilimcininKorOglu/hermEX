@@ -150,24 +150,50 @@ func (s *Server) handleComposeForm(w http.ResponseWriter, r *http.Request) {
 		s.render(w, "compose", composeView{Title: "New message", From: sess.user, FromOptions: idents, Format: settings.ComposeFormat, Folders: folderVus})
 		return
 	}
-	if ferr != nil {
+	// The source message is read from the caller's own mailbox, or — when replying
+	// to/forwarding a shared message they may send as (?mbox) — from that shared
+	// store, so the prefill quotes the shared content and the reply goes out as the
+	// shared address. editdraft stays own-scoped (drafts live in the own store), so
+	// a forged editdraft+mbox degrades to the own Drafts rather than the shared one.
+	// A caller who cannot send as the mailbox is refused.
+	srcSt, srcFolders, srcFerr := st, folders, ferr
+	from, mbox := sess.user, ""
+	if sel := mboxParam(r); sel != "" && action != "editdraft" {
+		sh, addr, ok := s.openSharedFor(sess, sel)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		if !canSendAsShared(sh, sess.user) {
+			sh.Close()
+			http.Error(w, "you may not send as this mailbox", http.StatusForbidden)
+			return
+		}
+		defer sh.Close()
+		shFolders, shErr := sh.ListFolders()
+		srcSt, srcFolders, srcFerr = sh, shFolders, shErr
+		from, mbox = addr, addr
+		idents = append(idents, addr)
+	}
+	if srcFerr != nil {
 		http.Error(w, "cannot read folders", http.StatusInternalServerError)
 		return
 	}
-	folderID, found := resolveFolder(folders, folder)
+	folderID, found := resolveFolder(srcFolders, folder)
 	if !found {
 		http.NotFound(w, r)
 		return
 	}
-	raw, err := st.GetMessageRaw(folderID, uint32(uid64))
+	raw, err := srcSt.GetMessageRaw(folderID, uint32(uid64))
 	if err != nil {
 		http.NotFound(w, r)
 		return
 	}
-	v := buildComposeFromSource(action, folder, uint32(uid64), raw, sess.user)
-	v.From = sess.user
+	v := buildComposeFromSource(action, folder, uint32(uid64), raw, from)
+	v.From = from
 	v.FromOptions = idents
 	v.Folders = folderVus
+	v.Mbox = mbox
 	// A reopened draft carries its own format (editdraft sets it from the draft's
 	// shape); for new/reply/forward Format is empty, so fall back to the user's
 	// default. The draft's own format must win, or an HTML draft reopened by a
@@ -382,8 +408,13 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 	// this resolution is send-only by design: a scheduled forward-as-attachment does
 	// not carry the embed — a pre-existing limitation of the forward-as-attachment
 	// path, not introduced here.
+	// The embed is read from the store the compose-as operation targets: the own
+	// mailbox, or the shared mailbox (sentPath) when forwarding a shared message as
+	// it. Reading from the own store on a shared forward would either drop the embed
+	// (the shared path is absent) or, on a colliding path+uid, leak the caller's own
+	// same-uid message — so the source store must match the send-as store.
 	if v.AttachFolder != "" && v.AttachUID != "" {
-		if embed, err := s.loadRaw(sess.mailboxPath, v.AttachFolder, v.AttachUID); err == nil {
+		if embed, err := s.loadRaw(sentPath, v.AttachFolder, v.AttachUID); err == nil {
 			o.Embed = embed
 		}
 	}
