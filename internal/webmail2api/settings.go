@@ -279,13 +279,16 @@ func (s *Server) handleGetProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prof := map[string]any{"email": c.Email, "onboarded": true}
-	// Display name lives in the directory's user properties (PR_DISPLAY_NAME).
+	// The display name, title, department, and phone live in the directory's user
+	// properties (keyed by full proptag) — the same fields the GAL and Outlook show.
 	if dir, ok := s.auth.(interface {
 		GetUserProperties(string) (map[uint32]string, error)
 	}); ok {
 		if props, err := dir.GetUserProperties(c.Email); err == nil {
-			if dn := props[uint32(mapi.PrDisplayName>>16)]; dn != "" {
-				prof["display_name"] = dn
+			for key, tag := range profileProps() {
+				if v := props[uint32(tag)]; v != "" {
+					prof[key] = v
+				}
 			}
 		}
 	}
@@ -299,15 +302,57 @@ func (s *Server) handleGetProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, prof)
 }
 
+// profileProps maps the SPA's editable profile fields to their directory MAPI
+// proptags — the cross-protocol properties the GAL and Outlook also read.
+func profileProps() map[string]mapi.PropTag {
+	return map[string]mapi.PropTag{
+		"display_name": mapi.PrDisplayName,
+		"title":        mapi.PrTitle,
+		"department":   mapi.PrDepartmentName,
+		"phone":        mapi.PrBusinessTelephoneNumber,
+	}
+}
+
 func (s *Server) handlePutProfile(w http.ResponseWriter, r *http.Request) {
-	// Profile edits beyond the directory-managed identity are not persisted yet;
-	// echo the submitted profile so the SPA's onboarding/save flow completes.
-	var prof map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&prof); err != nil {
+	c, ok := s.session(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	// Updates are often partial (e.g. timezone only), so persist only the directory
+	// fields actually present — an absent field is left untouched, never cleared.
+	var prof struct {
+		DisplayName *string `json:"display_name"`
+		Title       *string `json:"title"`
+		Department  *string `json:"department"`
+		Phone       *string `json:"phone"`
+	}
+	if err := decodeJSON(r, &prof); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	writeJSON(w, http.StatusOK, prof)
+	props := map[uint32]string{}
+	if prof.DisplayName != nil {
+		props[uint32(mapi.PrDisplayName)] = *prof.DisplayName
+	}
+	if prof.Title != nil {
+		props[uint32(mapi.PrTitle)] = *prof.Title
+	}
+	if prof.Department != nil {
+		props[uint32(mapi.PrDepartmentName)] = *prof.Department
+	}
+	if prof.Phone != nil {
+		props[uint32(mapi.PrBusinessTelephoneNumber)] = *prof.Phone
+	}
+	if len(props) > 0 {
+		if setter, ok := s.auth.(interface {
+			SetUserProperties(string, map[uint32]string) (bool, error)
+		}); ok {
+			_, _ = setter.SetUserProperties(c.Email, props)
+		}
+	}
+	// Return the re-read profile so the SPA reflects the persisted directory state.
+	s.handleGetProfile(w, r)
 }
 
 // ---- Mailboxes ----
