@@ -173,6 +173,37 @@ func TestRulesReorder(t *testing.T) {
 	}
 }
 
+// TestRulesAddCompoundCondition adds a rule whose two conditions are combined by
+// AND and another by OR, checking each round-trips to the expected summary.
+func TestRulesAddCompoundCondition(t *testing.T) {
+	path := emptyMailbox(t)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+	junk := strconv.FormatInt(int64(mapi.PrivateFIDJunk), 10)
+
+	postForm(t, c, ts.URL+"/rules", url.Values{
+		"action": {"add"}, "name": {"AndRule"},
+		"condfield": {"subject"}, "condvalue": {"invoice"},
+		"condfield2": {"from"}, "condvalue2": {"acme"}, "match": {"all"},
+		"actiontype": {"move"}, "actiontarget": {junk},
+	})
+	postForm(t, c, ts.URL+"/rules", url.Values{
+		"action": {"add"}, "name": {"OrRule"},
+		"condfield": {"subject"}, "condvalue": {"urgent"},
+		"condfield2": {"body"}, "condvalue2": {"asap"}, "match": {"any"},
+		"actiontype": {"markread"},
+	})
+
+	_, body := get(t, c, ts.URL+"/rules")
+	// "and the sender contains" appears only for the AND rule, "or the body
+	// contains" only for the OR rule, so both are discriminating.
+	for _, want := range []string{"and the sender contains", "or the body contains"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("rules page missing %q:\n%s", want, body)
+		}
+	}
+}
+
 // TestRulesAddStopProcessing adds a rule with the stop-processing option and
 // checks the listing notes it, so the exit-level bit round-trips through the form.
 func TestRulesAddStopProcessing(t *testing.T) {

@@ -462,6 +462,18 @@ func RuleBodyContains(text string) mapi.Restriction {
 	return contentContains(mapi.PrBody, text)
 }
 
+// RuleAll combines sub-conditions so the rule matches only when EVERY one matches
+// (a ResAnd node).
+func RuleAll(conds ...mapi.Restriction) mapi.Restriction {
+	return mapi.Restriction{Type: mapi.ResAnd, Value: append([]mapi.Restriction(nil), conds...)}
+}
+
+// RuleAny combines sub-conditions so the rule matches when ANY one matches (a
+// ResOr node).
+func RuleAny(conds ...mapi.Restriction) mapi.Restriction {
+	return mapi.Restriction{Type: mapi.ResOr, Value: append([]mapi.Restriction(nil), conds...)}
+}
+
 // contentContains builds a case-insensitive substring ResContent on tag.
 func contentContains(tag mapi.PropTag, text string) mapi.Restriction {
 	return mapi.Restriction{Type: mapi.ResContent, Value: mapi.ContentRestriction{

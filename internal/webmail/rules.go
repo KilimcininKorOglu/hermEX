@@ -159,28 +159,47 @@ func reorderRule(st *objectstore.Store, idStr string, dir int) {
 	}
 }
 
-// buildCondition assembles a RESTRICTION from the add-rule form's condition
-// fields, reporting ok=false when the chosen field has no usable value.
+// buildCondition assembles the rule's condition from the add-rule form: the first
+// condition (required) and an optional second one, combined with AND or OR per the
+// "match" selector. ok=false when the first condition has no usable value.
 func buildCondition(r *http.Request) (mapi.Restriction, bool) {
-	switch r.FormValue("condfield") {
+	first, ok := buildConditionN(r, "")
+	if !ok {
+		return mapi.Restriction{}, false
+	}
+	second, ok2 := buildConditionN(r, "2")
+	if !ok2 {
+		return first, true
+	}
+	if r.FormValue("match") == "any" {
+		return objectstore.RuleAny(first, second), true
+	}
+	return objectstore.RuleAll(first, second), true
+}
+
+// buildConditionN assembles one RESTRICTION from the add-rule form's condition
+// fields carrying the given suffix ("" for the first condition, "2" for the
+// second), reporting ok=false when the chosen field has no usable value.
+func buildConditionN(r *http.Request, suffix string) (mapi.Restriction, bool) {
+	switch r.FormValue("condfield" + suffix) {
 	case "subject":
-		if v := strings.TrimSpace(r.FormValue("condvalue")); v != "" {
+		if v := strings.TrimSpace(r.FormValue("condvalue" + suffix)); v != "" {
 			return objectstore.RuleSubjectContains(v), true
 		}
 	case "from":
-		if v := strings.TrimSpace(r.FormValue("condvalue")); v != "" {
+		if v := strings.TrimSpace(r.FormValue("condvalue" + suffix)); v != "" {
 			return objectstore.RuleFromContains(v), true
 		}
 	case "body":
-		if v := strings.TrimSpace(r.FormValue("condvalue")); v != "" {
+		if v := strings.TrimSpace(r.FormValue("condvalue" + suffix)); v != "" {
 			return objectstore.RuleBodyContains(v), true
 		}
 	case "importance":
-		return objectstore.RuleImportanceIs(importanceFromForm(r.FormValue("condimportance"))), true
+		return objectstore.RuleImportanceIs(importanceFromForm(r.FormValue("condimportance" + suffix))), true
 	case "sensitivity":
-		return objectstore.RuleSensitivityIs(sensitivityFromForm(r.FormValue("condsensitivity"))), true
+		return objectstore.RuleSensitivityIs(sensitivityFromForm(r.FormValue("condsensitivity" + suffix))), true
 	case "size":
-		if kb, err := strconv.Atoi(strings.TrimSpace(r.FormValue("condsize"))); err == nil && kb >= 0 {
+		if kb, err := strconv.Atoi(strings.TrimSpace(r.FormValue("condsize" + suffix))); err == nil && kb >= 0 {
 			return objectstore.RuleSizeAtLeast(kb * 1024), true
 		}
 	}
@@ -294,6 +313,13 @@ func describeCondition(r mapi.Restriction) string {
 			parts = append(parts, describeCondition(k))
 		}
 		return strings.Join(parts, " and ")
+	case mapi.ResOr:
+		kids, _ := r.Value.([]mapi.Restriction)
+		parts := make([]string, 0, len(kids))
+		for _, k := range kids {
+			parts = append(parts, describeCondition(k))
+		}
+		return strings.Join(parts, " or ")
 	case mapi.ResContent:
 		c, ok := r.Value.(mapi.ContentRestriction)
 		if !ok {

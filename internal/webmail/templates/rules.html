@@ -88,6 +88,46 @@ rulesPage sub-data; forms post to /rules and return to /settings?tab=rules. */}}
         </span>
       </div>
       <div class="field">
+        <label>Combine conditions by matching</label>
+        <select name="match">
+          <option value="all">all of the conditions</option>
+          <option value="any">any of the conditions</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Optional second condition</label>
+        <select name="condfield2" id="condfield2">
+          <option value="">(none)</option>
+          <option value="subject">Subject contains</option>
+          <option value="from">Sender contains</option>
+          <option value="body">Body contains</option>
+          <option value="importance">Importance is</option>
+          <option value="sensitivity">Sensitivity is</option>
+          <option value="size">Size at least (KB)</option>
+        </select>
+        <span class="cond-input2" data-cond="subject from body">
+          <input name="condvalue2" placeholder="text to match">
+        </span>
+        <span class="cond-input2" data-cond="importance">
+          <select name="condimportance2">
+            <option value="high">High</option>
+            <option value="normal">Normal</option>
+            <option value="low">Low</option>
+          </select>
+        </span>
+        <span class="cond-input2" data-cond="sensitivity">
+          <select name="condsensitivity2">
+            <option value="normal">Normal</option>
+            <option value="personal">Personal</option>
+            <option value="private">Private</option>
+            <option value="confidential">Confidential</option>
+          </select>
+        </span>
+        <span class="cond-input2" data-cond="size">
+          <input type="number" name="condsize2" min="0" placeholder="KB">
+        </span>
+      </div>
+      <div class="field">
         <label>Then</label>
         <select name="actiontype" id="actiontype">
           <option value="move">Move it to folder</option>
@@ -125,6 +165,7 @@ rulesPage sub-data; forms post to /rules and return to /settings?tab=rules. */}}
       apply();
     }
     sync("condfield", "cond-input", "data-cond");
+    sync("condfield2", "cond-input2", "data-cond");
     sync("actiontype", "action-input", "data-action");
   })();
   </script>

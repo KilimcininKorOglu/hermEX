@@ -434,3 +434,48 @@ func TestRuleMoveActionRoundTrip(t *testing.T) {
 		t.Errorf("decoded move target = %d, want %d", got, target)
 	}
 }
+
+// TestCompoundRuleRoundTrips is the de-risking test for multi-condition rules: a
+// RuleAll(subject, from) condition must survive AddRule's serialization and
+// ListRules' deserialization (ext must encode/decode the ResAnd node), then match
+// only a message satisfying BOTH leaves.
+func TestCompoundRuleRoundTrips(t *testing.T) {
+	s := openSeededStore(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	filed, err := s.CreateFolder(nil, "Filed")
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+
+	both := deliverTo(t, s, inbox, ruleMsg("Quarterly Invoice", "billing@acme.com", ""))
+	subjOnly := deliverTo(t, s, inbox, ruleMsg("Quarterly Invoice", "other@example.com", ""))
+
+	if _, err := s.AddRule(Rule{
+		FolderID: inbox, Name: "both", State: mapi.RuleStateEnabled,
+		Condition: RuleAll(RuleSubjectContains("invoice"), RuleFromContains("acme.com")),
+		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{RuleMoveAction(filed)}},
+	}); err != nil {
+		t.Fatalf("AddRule: %v", err)
+	}
+
+	// The stored rule's condition is the ResAnd node after a serialization round-trip.
+	rules, err := s.ListRules(inbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rules) != 1 || rules[0].Condition.Type != mapi.ResAnd {
+		t.Fatalf("stored condition did not round-trip as ResAnd: %+v", rules[0].Condition)
+	}
+
+	if _, err := s.RunRules(inbox); err != nil {
+		t.Fatalf("RunRules: %v", err)
+	}
+	// Only the both-match message moved to Filed; the subject-only one stayed.
+	if msgs, _ := s.ListMessages(filed); len(msgs) != 1 {
+		t.Errorf("Filed has %d, want 1 (only the AND-match moves)", len(msgs))
+	}
+	if _, err := s.MessageByUID(inbox, subjOnly.UID); err != nil {
+		t.Errorf("subject-only message should remain in inbox: %v", err)
+	}
+	_ = both
+}
