@@ -35,6 +35,7 @@
         {{range .Levels}}<option value="{{.}}">{{.}}</option>{{end}}
       </select>
     </label>
+    <label><input type="checkbox" name="recursive"> Apply to all subfolders</label>
     <button type="submit">Grant access</button>
   </form>
   {{end}}

@@ -129,6 +129,43 @@ func TestFolderSharingGrantRevoke(t *testing.T) {
 	}
 }
 
+// TestFolderSharingGrantRecursive checks the "apply to all subfolders" option: a
+// plain grant stays on the parent, while a recursive grant copies to the subfolder.
+func TestFolderSharingGrantRecursive(t *testing.T) {
+	path := emptyMailbox(t)
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pid, err := st.CreateFolder(nil, "Project")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cid, err := st.CreateFolder(&pid, "Sub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	ts, cl := sharingServer(t, path)
+
+	// Non-recursive: the grant must not reach the subfolder.
+	postForm(t, cl, ts.URL+"/sharing", url.Values{
+		"op": {"grant"}, "folder": {"Project"}, "member": {"bob@hermex.test"}, "level": {"Reviewer"},
+	})
+	if _, ok := folderPerms(t, path, cid)["bob@hermex.test"]; ok {
+		t.Fatalf("a non-recursive grant must not reach the subfolder")
+	}
+
+	// Recursive: the grant copies to the subfolder.
+	postForm(t, cl, ts.URL+"/sharing", url.Values{
+		"op": {"grant"}, "folder": {"Project"}, "member": {"bob@hermex.test"}, "level": {"Editor"}, "recursive": {"on"},
+	})
+	if got := folderPerms(t, path, cid)["bob@hermex.test"]; got != mapi.RightsEditor {
+		t.Errorf("recursive grant did not reach the subfolder: %#x, want Editor", got)
+	}
+}
+
 // TestFolderSharingGrantRejectsUnknown checks that granting to an address no
 // mailbox matches is rejected with a message and stores NO permission row, so a
 // typo cannot leave an inert grant under an unmatchable name.

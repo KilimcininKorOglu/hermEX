@@ -119,7 +119,7 @@ func (s *Server) handleFolderSharingSubmit(w http.ResponseWriter, r *http.Reques
 	errMsg := ""
 	switch r.FormValue("op") {
 	case "grant":
-		errMsg = s.grantShare(st, folderID, sess.user, r.FormValue("member"), r.FormValue("level"))
+		errMsg = s.grantShare(st, folders, folderID, sess.user, r.FormValue("member"), r.FormValue("level"), r.FormValue("recursive") == "on")
 	case "revoke":
 		// Revoke a named member only; the special default/anonymous rows (id <= 0)
 		// are not offered for removal here.
@@ -139,7 +139,10 @@ func (s *Server) handleFolderSharingSubmit(w http.ResponseWriter, r *http.Reques
 // resolved to its canonical login before storing, because ResolvePermission
 // compares the stored member name verbatim against a session login; an address
 // that resolves to no login is rejected rather than stored as an inert grant.
-func (s *Server) grantShare(st *objectstore.Store, folderID int64, owner, member, level string) string {
+// When recursive, the same grant is copied to every subfolder (the reference's
+// "apply permissions recursively"); a subfolder that fails to take the grant is
+// skipped rather than failing the whole operation.
+func (s *Server) grantShare(st *objectstore.Store, folders []objectstore.FolderInfo, folderID int64, owner, member, level string, recursive bool) string {
 	rights, ok := shareLevelRights(level)
 	if !ok {
 		return "Choose a permission level."
@@ -158,12 +161,36 @@ func (s *Server) grantShare(st *objectstore.Store, folderID int64, owner, member
 	if strings.EqualFold(login, strings.TrimSpace(owner)) {
 		return "You already own this folder."
 	}
-	if err := st.ModifyPermissions(folderID, false, []objectstore.PermissionChange{
-		{Op: objectstore.PermAdd, Username: login, Rights: rights},
-	}); err != nil {
+	change := []objectstore.PermissionChange{{Op: objectstore.PermAdd, Username: login, Rights: rights}}
+	if err := st.ModifyPermissions(folderID, false, change); err != nil {
 		return "Could not grant access."
 	}
+	if recursive {
+		for _, sub := range folderDescendants(folders, folderID) {
+			st.ModifyPermissions(sub, false, change)
+		}
+	}
 	return ""
+}
+
+// folderDescendants returns the ids of every folder nested under root (children,
+// grandchildren, and so on), not including root itself.
+func folderDescendants(folders []objectstore.FolderInfo, root int64) []int64 {
+	children := map[int64][]int64{}
+	for _, f := range folders {
+		if f.ParentID != nil {
+			children[*f.ParentID] = append(children[*f.ParentID], f.ID)
+		}
+	}
+	var out []int64
+	queue := append([]int64(nil), children[root]...)
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		out = append(out, id)
+		queue = append(queue, children[id]...)
+	}
+	return out
 }
 
 // renderSharing draws the sharing page for one folder (or just the picker when no
