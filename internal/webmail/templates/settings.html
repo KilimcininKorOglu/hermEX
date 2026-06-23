@@ -10,6 +10,11 @@
     {{if .ChgPasswd}}<button type="button" class="settings-tab{{if eq .ActiveTab "password"}} active{{end}}" data-tab="password">Password</button>{{end}}
   </nav>
   <section class="settings-panel{{if eq .ActiveTab "general"}} active{{end}}" data-tab="general">
+    <div class="account-info">
+      <h2>Account</h2>
+      <p>Signed in as <strong>{{.Account.Email}}</strong></p>
+      {{if .Account.OtherIdentities}}<p>You can also send as: {{range $i, $a := .Account.OtherIdentities}}{{if $i}}, {{end}}{{$a}}{{end}}</p>{{end}}
+    </div>
     <div class="mailbox-usage">
       <h2>Mailbox usage</h2>
       {{if .Usage.Limited}}

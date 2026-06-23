@@ -87,11 +87,19 @@ type settingsPage struct {
 	ActiveTab string
 	ChgPasswd bool
 	General   settingsView
+	Account   accountInfo
 	Usage     mailboxUsage
 	Rules     rulesPage
 	OOF       oofPage
 	Smime     smimePage
 	Password  passwordPage
+}
+
+// accountInfo is the signed-in account's identity for the settings "Account"
+// widget: the login and any other addresses it may send as.
+type accountInfo struct {
+	Email           string
+	OtherIdentities []string // send-as addresses other than the primary login
 }
 
 // mailboxUsage is the storage a mailbox occupies, with its quota when one is set,
@@ -127,6 +135,13 @@ func (s *Server) buildSettingsPage(sess *session, st *objectstore.Store, active 
 	if s.Rules != nil {
 		page.General.AccessRules, _ = s.Rules.ListRecipientRules(sess.user) // best-effort; an error just shows no rules
 	}
+	acct := accountInfo{Email: sess.user}
+	for _, id := range s.identities(sess.user) {
+		if !strings.EqualFold(id, sess.user) {
+			acct.OtherIdentities = append(acct.OtherIdentities, id)
+		}
+	}
+	page.Account = acct
 	page.Usage = mailboxUsageOf(st)
 
 	page.Rules = s.buildRulesPage(st, sess)
