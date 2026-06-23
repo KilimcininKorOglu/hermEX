@@ -217,7 +217,7 @@ func (s *Server) handleComposeForm(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	v := buildComposeFromSource(action, folder, uint32(uid64), raw, from)
+	v := buildComposeFromSource(action, folder, uint32(uid64), raw, from, !settings.OmitOriginalOnReply)
 	v.From = from
 	v.FromOptions = idents
 	v.Folders = folderVus

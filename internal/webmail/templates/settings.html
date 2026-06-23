@@ -67,6 +67,10 @@ and the allow/block rules. Rendered with the settingsView sub-data. */}}
         <label class="check"><input type="checkbox" name="requestreceipt" value="1"{{if .RequestReceiptDefault}} checked{{end}}> Always request a read receipt when sending</label>
       </div>
       <div class="field">
+        <label>Replies</label>
+        <label class="check"><input type="checkbox" name="omitoriginalonreply" value="1"{{if .OmitOriginalOnReply}} checked{{end}}> Do not quote the original message when replying</label>
+      </div>
+      <div class="field">
         <label>Incoming mail display</label>
         <label class="check"><input type="radio" name="incomingrender" value="html"{{if eq .IncomingRender "html"}} checked{{end}}> Show original HTML</label>
         <label class="check"><input type="radio" name="incomingrender" value="plain"{{if eq .IncomingRender "plain"}} checked{{end}}> Plain text only</label>

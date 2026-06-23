@@ -16,7 +16,7 @@ import (
 // reply-all recipients. The behavior (Re:/Fwd: prefixing, quoted body,
 // In-Reply-To/References linkage, reply-all = original To+Cc minus self) is
 // grounded in the internal spec §4.
-func buildComposeFromSource(action, folder string, uid uint32, raw []byte, self string) composeView {
+func buildComposeFromSource(action, folder string, uid uint32, raw []byte, self string, includeOriginal bool) composeView {
 	env, err := mime.ParseEnvelope(raw)
 	if err != nil {
 		return composeView{Title: "New message"}
@@ -25,11 +25,17 @@ func buildComposeFromSource(action, folder string, uid uint32, raw []byte, self 
 
 	switch action {
 	case "reply", "replyall":
+		// The user may choose not to quote the original on a reply; the linkage
+		// (In-Reply-To/References) and recipients are kept regardless.
+		body := ""
+		if includeOriginal {
+			body = quoteForReply(env, text)
+		}
 		v := composeView{
 			Title:      "Reply",
 			To:         formatAddrs(env.ReplyTo),
 			Subject:    ensureSubjectPrefix("Re:", env.Subject),
-			Body:       quoteForReply(env, text),
+			Body:       body,
 			InReplyTo:  env.MessageID,
 			References: buildReferences(raw, env.MessageID),
 		}

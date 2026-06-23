@@ -68,6 +68,7 @@ type webmailSettings struct {
 	SafeSenders           []string    `json:"safeSenders"`           // addresses/domains allowed to load remote content in the reader
 	ConversationView      bool        `json:"conversationView"`      // group the message list into RFC 5256 conversation threads
 	FavoriteFolders       []string    `json:"favoriteFolders"`       // folder paths the user pinned as favorites in the sidebar
+	OmitOriginalOnReply   bool        `json:"omitOriginalOnReply"`   // do not quote the original message when replying
 }
 
 // settingsView augments the stored webmail preferences with the user's
@@ -400,6 +401,7 @@ func (s *Server) handleSettingsSubmit(w http.ResponseWriter, r *http.Request) {
 		// submit therefore clears the preference.
 		cfg.RequestReceiptDefault = r.FormValue("requestreceipt") != ""
 		cfg.ConversationView = r.FormValue("conversationview") != ""
+		cfg.OmitOriginalOnReply = r.FormValue("omitoriginalonreply") != ""
 		// The default sort order is posted as one "key dir" value (e.g. "date desc").
 		if parts := strings.Fields(r.FormValue("defaultsort")); len(parts) == 2 {
 			cfg.DefaultSort = whitelist(parts[0], "date", "from", "subject", "size", "flag", "read")
