@@ -1,6 +1,7 @@
 package webmail2api
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -11,13 +12,21 @@ import (
 	"hermex/internal/oxvcard"
 )
 
-// contactJSON is the SPA's Contact shape.
+// contactJSON is the SPA's Contact shape. A contact group (is_group) is a named
+// list of member addresses, the Outlook personal distribution list.
 type contactJSON struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Email   string `json:"email"`
-	Phone   string `json:"phone,omitempty"`
-	Company string `json:"company,omitempty"`
+	ID      string   `json:"id"`
+	Name    string   `json:"name"`
+	Email   string   `json:"email"`
+	Phone   string   `json:"phone,omitempty"`
+	Company string   `json:"company,omitempty"`
+	IsGroup bool     `json:"is_group,omitempty"`
+	Members []string `json:"members,omitempty"`
+}
+
+// distListBody is the JSON payload stored in a contact group's message body.
+type distListBody struct {
+	Members []string `json:"members"`
 }
 
 // buildVCard renders a minimal vCard 4.0 for the proven oxvcard import path.
@@ -72,6 +81,19 @@ func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 	for _, o := range objs {
 		msg, err := st.OpenMessage(o.ID)
 		if err != nil {
+			continue
+		}
+		// A contact group is an IPM.DistList: its members live as JSON in the body,
+		// with the group name in PR_SUBJECT.
+		if propString(msg, mapi.PrMessageClass) == "IPM.DistList" {
+			var body distListBody
+			_ = json.Unmarshal([]byte(propString(msg, mapi.PrBody)), &body)
+			contacts = append(contacts, contactJSON{
+				ID:      strconv.FormatInt(o.ID, 10),
+				Name:    propString(msg, mapi.PrSubject),
+				IsGroup: true,
+				Members: body.Members,
+			})
 			continue
 		}
 		vcf, err := oxvcard.Export(msg, opt)
@@ -155,6 +177,11 @@ func (s *Server) handleDeleteContact(w http.ResponseWriter, r *http.Request) {
 // storeContact imports the contact as a vCard (the proven CardDAV path) and
 // creates it in the Contacts folder, returning the new object id.
 func storeContact(st *objectstore.Store, c contactJSON) (int64, error) {
+	// A contact group has no vCard contact shape; store it as an IPM.DistList with
+	// the members as a JSON body (the shape handleGetContacts reads back).
+	if c.IsGroup {
+		return storeJSONItem(st, mapi.PrivateFIDContacts, "IPM.DistList", c.Name, distListBody{Members: c.Members})
+	}
 	msg, err := oxvcard.Import(buildVCard(c), oxvcard.Options{Resolver: st.GetNamedPropIDs})
 	if err != nil {
 		return 0, err
