@@ -81,6 +81,14 @@ func (s *Server) handleUITLSSettings(w http.ResponseWriter, r *http.Request) {
 			s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "ACME mode requires agreeing to the CA's terms of service."))
 			return
 		}
+		// A blank CA URL silently defaults to Let's Encrypt production, so a
+		// misconfigured switch would burn the real rate limit across every tenant
+		// name. Require an explicit directory URL so the choice of production vs.
+		// staging is deliberate.
+		if settings.ACMECAURL == "" {
+			s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "ACME mode needs an explicit CA directory URL. Leaving it blank would default to Let's Encrypt production and risk its rate limit on a misconfiguration; paste the production or staging directory URL."))
+			return
+		}
 	}
 	if err := s.dir.SetTLSSettings(settings); err != nil {
 		s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "Could not save the certificate mode: "+err.Error()))

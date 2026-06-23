@@ -121,10 +121,11 @@ func TestTLSCertUploadStoresAndDelete(t *testing.T) {
 }
 
 // TestTLSSettingsModeSwitch proves the panel saves the certificate mode the gateway
-// reads at startup: acme mode requires an account email and ToS agreement (a save
-// missing either is rejected and writes nothing, so the gateway never reaches out to
-// a CA without consent), a complete acme save is stored, and manual mode is always
-// accepted.
+// reads at startup: acme mode requires an account email, ToS agreement and an explicit
+// CA directory URL (a save missing any of them is rejected and writes nothing, so the
+// gateway never reaches out to a CA without consent and never defaults to Let's
+// Encrypt production by an empty-URL slip), a complete acme save is stored, and manual
+// mode is always accepted.
 func TestTLSSettingsModeSwitch(t *testing.T) {
 	d := systemAdminDir()
 	ts := adminServer(t, d)
@@ -139,6 +140,20 @@ func TestTLSSettingsModeSwitch(t *testing.T) {
 	}
 	if d.tlsSettings != nil {
 		t.Errorf("a rejected save still wrote settings: %+v", d.tlsSettings)
+	}
+
+	// acme with consent but a blank CA URL is rejected: a blank URL would silently
+	// mean Let's Encrypt production, so the operator must name the directory.
+	noURL := htmxPOST(t, ts, "/admin/ui/tls/mode", session, csrf, url.Values{
+		"mode": {"acme"}, "acme_email": {"ops@example.com"}, "acme_agreed": {"on"},
+	})
+	nb, _ := io.ReadAll(noURL.Body)
+	noURL.Body.Close()
+	if !strings.Contains(string(nb), "CA directory URL") {
+		t.Errorf("acme with a blank CA URL was not rejected; got: %s", nb)
+	}
+	if d.tlsSettings != nil {
+		t.Errorf("a blank-URL acme save still wrote settings: %+v", d.tlsSettings)
 	}
 
 	// A complete acme save is stored verbatim.
