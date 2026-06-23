@@ -115,6 +115,8 @@ table.messages tr.selected { background: #dbe7fb; }
 table.messages tr.selected td.subject { font-weight: 600; }
 .toolbar h2 { margin: 0; font-size: 16px; }
 .toolbar h2 .counts { font-size: 12px; font-weight: 400; color: var(--muted); margin-left: 8px; }
+.toolbar h2 .mbox-label { font-size: 12px; font-weight: 400; font-style: italic; color: var(--muted); margin-left: 6px; }
+.sidebar-heading.mbox-heading { text-transform: none; overflow-wrap: anywhere; }
 .filter-toggle { font-size: 13px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 5px; color: var(--text); white-space: nowrap; }
 .filter-toggle.active { background: var(--accent, #2563eb); border-color: var(--accent, #2563eb); color: #fff; }
 

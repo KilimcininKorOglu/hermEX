@@ -26,6 +26,11 @@ func (s *Server) handleBulk(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not authenticated", http.StatusUnauthorized)
 		return
 	}
+	// Shared-mailbox writes are authorized in a later step; reject them here so a
+	// control left in a shared view cannot misfire against the caller's own store.
+	if denyShared(w, r) {
+		return
+	}
 	st, err := objectstore.Open(sess.mailboxPath)
 	if err != nil {
 		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
@@ -108,6 +113,11 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not authenticated", http.StatusUnauthorized)
 		return
 	}
+	// Shared-mailbox export is not wired here yet; reject an mbox-scoped request
+	// rather than silently exporting the caller's own mailbox.
+	if denyShared(w, r) {
+		return
+	}
 	st, err := objectstore.Open(sess.mailboxPath)
 	if err != nil {
 		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
@@ -156,6 +166,11 @@ func (s *Server) handleEML(w http.ResponseWriter, r *http.Request) {
 	sess, ok := s.sessionFrom(r)
 	if !ok {
 		http.Error(w, "not authenticated", http.StatusUnauthorized)
+		return
+	}
+	// Shared-mailbox .eml download is not wired here yet; reject an mbox-scoped
+	// request rather than silently serving from the caller's own mailbox.
+	if denyShared(w, r) {
 		return
 	}
 	folder := r.URL.Query().Get("folder")

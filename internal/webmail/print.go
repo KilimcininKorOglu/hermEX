@@ -68,6 +68,11 @@ func (s *Server) handlePrint(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
+	// Shared-mailbox print is not wired here yet; reject an mbox-scoped request
+	// rather than silently printing from the caller's own mailbox.
+	if denyShared(w, r) {
+		return
+	}
 	folder := r.URL.Query().Get("folder")
 	uid64, err := strconv.ParseUint(r.URL.Query().Get("uid"), 10, 32)
 	if err != nil {

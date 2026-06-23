@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"hermex/internal/mapi"
 	"hermex/internal/mime"
 	"hermex/internal/objectstore"
 )
@@ -28,10 +29,21 @@ func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	st, err := objectstore.Open(sess.mailboxPath)
-	if err != nil {
-		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
-		return
+	// Open the own mailbox, or a shared mailbox the caller selected (?mbox),
+	// validated and access-checked server-side.
+	mbox := mboxParam(r)
+	var st *objectstore.Store
+	if mbox == "" {
+		if st, err = objectstore.Open(sess.mailboxPath); err != nil {
+			http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		var sok bool
+		if st, _, sok = s.openSharedFor(sess, mbox); !sok {
+			http.NotFound(w, r)
+			return
+		}
 	}
 	defer st.Close()
 
@@ -44,6 +56,13 @@ func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request) {
 	if !found {
 		http.NotFound(w, r)
 		return
+	}
+	// A shared folder's attachment is gated by the same read ACL as its reader.
+	if mbox != "" {
+		if rights, err := st.ResolvePermission(folderID, sess.user); err != nil || rights&mapi.FrightsReadAny == 0 {
+			http.NotFound(w, r)
+			return
+		}
 	}
 	raw, err := st.GetMessageRaw(folderID, uint32(uid64))
 	if err != nil {

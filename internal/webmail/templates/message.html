@@ -5,13 +5,14 @@
 {{define "readercontent"}}
 <div class="reader{{if .Preview}} reader-preview{{end}}">
   <div class="reader-toolbar">
-    {{if not .Preview}}<a href="/mail?folder={{.Folder}}">&larr; Back to {{.Folder}}</a>{{end}}
+    {{if not .Preview}}<a href="/mail?folder={{.Folder}}{{if .Mbox}}&mbox={{.Mbox}}{{end}}">&larr; Back to {{.Folder}}</a>{{end}}
+    <a href="/message?folder={{.Folder}}&uid={{.UID}}{{if .Mbox}}&mbox={{.Mbox}}{{end}}" target="_blank" rel="noopener" title="Open in a new window">Pop out</a>
+    {{if not .Mbox}}
     <a href="/compose?action=reply&folder={{.Folder}}&uid={{.UID}}">Reply</a>
     <a href="/compose?action=replyall&folder={{.Folder}}&uid={{.UID}}" data-key="replyall">Reply All</a>
     <a href="/compose?action=forward&folder={{.Folder}}&uid={{.UID}}">Forward</a>
     <a href="/compose?action=forwardasattach&folder={{.Folder}}&uid={{.UID}}">Forward as attachment</a>
     <a href="/compose?action=editasnew&folder={{.Folder}}&uid={{.UID}}">Edit as New</a>
-    <a href="/message?folder={{.Folder}}&uid={{.UID}}" target="_blank" rel="noopener" title="Open in a new window">Pop out</a>
     <a href="/print?folder={{.Folder}}&uid={{.UID}}" target="_blank" rel="noopener" title="Print this message">Print</a>
     <a href="/eml?folder={{.Folder}}&uid={{.UID}}" title="Download as .eml">Save as .eml</a>
     {{if .Folders}}
@@ -49,6 +50,7 @@
       </form>
     </details>
     {{end}}
+    {{end}}
   </div>
   <div class="reader-headers">
     <h2>{{.Subject}}</h2>
@@ -64,7 +66,7 @@
     <strong>Attachments</strong>
     <ul>
       {{range .Attachments}}
-      <li><a href="/attachment?folder={{$.Folder}}&amp;uid={{$.UID}}&amp;part={{.Section}}">{{.Filename}}</a>
+      <li><a href="/attachment?folder={{$.Folder}}&amp;uid={{$.UID}}&amp;part={{.Section}}{{if $.Mbox}}&amp;mbox={{$.Mbox}}{{end}}">{{.Filename}}</a>
         <span class="muted">{{.ContentType}}, {{.Size}} bytes</span></li>
       {{end}}
     </ul>

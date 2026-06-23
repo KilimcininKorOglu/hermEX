@@ -41,6 +41,11 @@ func (s *Server) handleImportSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
+	// Importing into a shared mailbox is not wired here yet; reject an mbox-scoped
+	// request rather than importing into the caller's own mailbox.
+	if denyShared(w, r) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxImportBytes)
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		s.importError(w, sess.mailboxPath, http.StatusBadRequest, "The upload was too large or malformed.")

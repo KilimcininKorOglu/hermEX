@@ -241,6 +241,11 @@ func (s *Server) handleComposeSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
+	// Compose-as a shared mailbox (send-as) is authorized in a later step; reject
+	// an mbox-scoped submit so it cannot send or file a draft as the wrong store.
+	if denyShared(w, r) {
+		return
+	}
 	idents := s.identities(sess.user)
 	// A file-upload submit is multipart/form-data and must be parsed (with a body
 	// cap) before the form values are read; a url-encoded post (incl. autosave) is

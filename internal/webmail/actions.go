@@ -19,6 +19,11 @@ func (s *Server) handleAction(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not authenticated", http.StatusUnauthorized)
 		return
 	}
+	// Shared-mailbox writes are authorized in a later step; reject them here so a
+	// control left in a shared view cannot misfire against the caller's own store.
+	if denyShared(w, r) {
+		return
+	}
 	folder := r.FormValue("folder")
 	uid64, err := strconv.ParseUint(r.FormValue("uid"), 10, 32)
 	if err != nil {

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"hermex/internal/logging"
+	"hermex/internal/mapi"
 	"hermex/internal/mime"
 	"hermex/internal/objectstore"
 	"hermex/internal/smime"
@@ -46,6 +47,10 @@ type messageDetail struct {
 	Sensitivity   string         // "Personal" | "Private" | "Confidential" for the print header, "" when Normal (#34)
 	Smime         string         // S/MIME status banner text ("" when not an S/MIME message) (#41)
 	SmimeOK       bool           // true when verified/decrypted (positive banner), false for a warning
+	// Mbox is the shared mailbox address when the message belongs to one, else
+	// empty. When set the reader is read-only (reply/move/delete/print controls
+	// hidden) and the attachment links carry &mbox={{.Mbox}} (template-escaped).
+	Mbox string
 }
 
 func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
@@ -63,10 +68,23 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 	uid := uint32(uid64)
 	preview := r.URL.Query().Get("mode") == "preview"
 
-	st, err := objectstore.Open(sess.mailboxPath)
-	if err != nil {
-		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
-		return
+	// Open the own mailbox, or a shared mailbox the caller selected (?mbox),
+	// validated and access-checked server-side. A shared message is shown read-only.
+	mbox := mboxParam(r)
+	var st *objectstore.Store
+	if mbox == "" {
+		if st, err = objectstore.Open(sess.mailboxPath); err != nil {
+			http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		var addr string
+		var ok bool
+		if st, addr, ok = s.openSharedFor(sess, mbox); !ok {
+			http.NotFound(w, r)
+			return
+		}
+		mbox = addr
 	}
 	defer st.Close()
 
@@ -87,6 +105,13 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// A shared folder must grant the caller read access.
+	if mbox != "" {
+		if rights, err := st.ResolvePermission(folderID, sess.user); err != nil || rights&mapi.FrightsReadAny == 0 {
+			http.NotFound(w, r)
+			return
+		}
+	}
 	raw, err := st.GetMessageRaw(folderID, uid)
 	if err != nil {
 		http.NotFound(w, r)
@@ -100,14 +125,20 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 	detail := buildMessageDetail(displayRaw, folder, uid, cfg.IncomingRender == "plain", cfg.SafeSenders)
 	detail.Smime = smimeStatus
 	detail.SmimeOK = smimeOK
-	detail.Folders = moveTargets(folders, folderID)
+	detail.Mbox = mbox
+	// Move targets and the other reader write controls are own-mailbox only; a
+	// shared message is read-only here (the write path is authorized separately).
+	if mbox == "" {
+		detail.Folders = moveTargets(folders, folderID)
+	}
 
 	// Reading a message marks it \Seen (read-modify-write to preserve the rest);
-	// the \Flagged bit also feeds the follow-up flag fallback below.
+	// the \Flagged bit also feeds the follow-up flag fallback below. A shared
+	// message is not marked read here — that is a write into the shared store.
 	flagged := false
 	if cur, err := st.MessageFlags(folderID, uid); err == nil {
 		flagged = cur&objectstore.FlagFlagged != 0
-		if cur&objectstore.FlagSeen == 0 {
+		if mbox == "" && cur&objectstore.FlagSeen == 0 {
 			st.SetMessageFlags(folderID, uid, cur|objectstore.FlagSeen)
 		}
 	}

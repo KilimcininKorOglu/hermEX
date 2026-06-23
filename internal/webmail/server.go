@@ -9,6 +9,7 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/logging"
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/publicfolder"
 	"hermex/internal/relay"
@@ -41,6 +42,10 @@ type Server struct {
 	// Rules manages the user's personal allow/block rules from the settings page; nil
 	// hides the section (the MTA still enforces any rules already stored).
 	Rules RecipientRuleStore
+	// Shared enumerates the shared mailboxes the directory knows; nil hides the
+	// sidebar's shared-mailboxes section. Access to each is rechecked per store, so
+	// listing the directory's set never by itself grants entry.
+	Shared directory.SharedMailboxLister
 }
 
 // smimeEvent logs an S/MIME crypto operation under the smime subsystem, tagged
@@ -159,14 +164,16 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
-	st, err := objectstore.Open(sess.mailboxPath)
+	// The sidebar folder tree, badges, and preferences always reflect the user's
+	// OWN mailbox, even while a shared mailbox's messages fill the list.
+	ownSt, err := objectstore.Open(sess.mailboxPath)
 	if err != nil {
 		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)
 		return
 	}
-	defer st.Close()
+	defer ownSt.Close()
 
-	folders, err := st.ListFolders()
+	ownFolders, err := ownSt.ListFolders()
 	if err != nil {
 		http.Error(w, "cannot read folders", http.StatusInternalServerError)
 		return
@@ -177,19 +184,40 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Sidebar badges: each folder's total and unread message counts.
-	folderViews := buildFolderViews(folders)
+	folderViews := buildFolderViews(ownFolders)
 	for i := range folderViews {
-		if total, unread, err := st.CountMessages(folderViews[i].ID); err == nil {
+		if total, unread, err := ownSt.CountMessages(folderViews[i].ID); err == nil {
 			folderViews[i].Total = total
 			folderViews[i].Unread = unread
 		}
 	}
 
 	// Saved preferences supply the list defaults; a URL parameter overrides them.
-	cfg, err := loadSettings(st)
+	cfg, err := loadSettings(ownSt)
 	if err != nil {
 		cfg = defaultSettings()
 	}
+
+	// The message list reflects either the own mailbox or a shared mailbox the user
+	// selected (?mbox), validated and access-checked server-side. A shared folder is
+	// read-gated per FrightsReadAny so a delegate sees only what they may read.
+	contentSt, contentFolders := ownSt, ownFolders
+	var mbox string
+	if sel := mboxParam(r); sel != "" {
+		sh, addr, ok := s.openSharedFor(sess, sel)
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		defer sh.Close()
+		contentSt = sh
+		if contentFolders, err = sh.ListFolders(); err != nil {
+			http.Error(w, "cannot read folders", http.StatusInternalServerError)
+			return
+		}
+		mbox = addr
+	}
+
 	q := r.URL.Query()
 	params := listParams{
 		Sort:         whitelist(orDefault(q.Get("sort"), cfg.DefaultSort), "date", "from", "subject", "size", "flag", "read"),
@@ -199,23 +227,33 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 		Conversation: cfg.ConversationView,
 	}
 	page := mailPage{
-		User:          sess.user,
-		Current:       current,
-		Folders:       folderViews,
-		Field:         "all",    // search-form defaults (scoped to the current folder)
-		Scope:         "folder", // until the user opens a cross-folder search
-		Sort:          params.Sort,
-		Dir:           params.Dir,
-		Filter:        params.Filter,
-		Density:       whitelist(orDefault(q.Get("density"), cfg.Density), "compact", "extended"),
-		Columns:       listColumns(params.Sort, params.Dir),
-		Categories:    cfg.Categories,
-		PreviewPane:   whitelist(orDefault(q.Get("preview"), cfg.PreviewPane), "none", "right", "bottom"),
-		Conversation:  params.Conversation,
-		PublicFolders: s.listVisiblePublicFolders(sess),
+		User:            sess.user,
+		Current:         current,
+		Folders:         folderViews,
+		Field:           "all",    // search-form defaults (scoped to the current folder)
+		Scope:           "folder", // until the user opens a cross-folder search
+		Sort:            params.Sort,
+		Dir:             params.Dir,
+		Filter:          params.Filter,
+		Density:         whitelist(orDefault(q.Get("density"), cfg.Density), "compact", "extended"),
+		Columns:         listColumns(params.Sort, params.Dir),
+		Categories:      cfg.Categories,
+		PreviewPane:     whitelist(orDefault(q.Get("preview"), cfg.PreviewPane), "none", "right", "bottom"),
+		Conversation:    params.Conversation,
+		PublicFolders:   s.listVisiblePublicFolders(sess),
+		SharedMailboxes: s.listAccessibleSharedMailboxes(sess),
+		Mbox:            mbox,
 	}
-	if id, found := resolveFolder(folders, current); found {
-		if res, err := listFolderPage(st, id, current, params, cfg.Categories); err == nil {
+	if id, found := resolveFolder(contentFolders, current); found {
+		// A shared folder must grant the caller read access; the own mailbox needs no
+		// per-folder check (the user owns it).
+		if mbox != "" {
+			if rights, err := contentSt.ResolvePermission(id, sess.user); err != nil || rights&mapi.FrightsReadAny == 0 {
+				http.NotFound(w, r)
+				return
+			}
+		}
+		if res, err := listFolderPage(contentSt, id, current, params, cfg.Categories); err == nil {
 			page.Messages = res.Messages
 			page.Threads = res.Threads
 			page.Page = res.Page
@@ -224,6 +262,18 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 			page.NextPage = res.NextPage
 			page.Total = res.Total
 			page.Unread = res.Unread
+		}
+	}
+	// Carry the shared-mailbox selector onto every list row so the reader links
+	// stay in the shared context (and per-row write controls hide).
+	if mbox != "" {
+		for i := range page.Messages {
+			page.Messages[i].Mbox = mbox
+		}
+		for i := range page.Threads {
+			for j := range page.Threads[i].Messages {
+				page.Threads[i].Messages[j].Mbox = mbox
+			}
 		}
 	}
 	s.render(w, "mail", page)

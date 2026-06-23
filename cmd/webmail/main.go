@@ -55,6 +55,7 @@ func main() {
 	srv.Pub = publicfolder.New(cfg)             // per-domain public folders rooted at HomedirFor
 	srv.DigestSecret = []byte(cfg.DigestSecret) // verifies quarantine-digest release links (empty disables them)
 	srv.Rules = dir                             // lets users manage their personal allow/block rules on the settings page
+	srv.Shared = dir                            // lists shared mailboxes in the sidebar; access is rechecked per store
 	// Enqueue external recipients of composed mail into the shared relay spool the
 	// MTA drains; without it webmail would deliver local-only.
 	spool, err := relay.Open(cfg.RelaySpoolPath())

@@ -35,6 +35,11 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 		return
 	}
+	// Shared-mailbox search is not wired here yet; reject an mbox-scoped request
+	// rather than silently searching the caller's own mailbox.
+	if denyShared(w, r) {
+		return
+	}
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	field := whitelist(r.URL.Query().Get("field"), "all", "subject")
 	scope := whitelist(r.URL.Query().Get("scope"), "folder", "all")

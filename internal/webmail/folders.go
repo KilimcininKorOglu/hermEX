@@ -19,6 +19,12 @@ func (s *Server) handleFolder(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not authenticated", http.StatusUnauthorized)
 		return
 	}
+	// Shared-mailbox folder management is authorized in a later step; reject an
+	// mbox-scoped request so a control left in a shared view cannot alter the
+	// caller's own folders.
+	if denyShared(w, r) {
+		return
+	}
 	st, err := objectstore.Open(sess.mailboxPath)
 	if err != nil {
 		http.Error(w, "mailbox unavailable", http.StatusInternalServerError)

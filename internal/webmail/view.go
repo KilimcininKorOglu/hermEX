@@ -29,6 +29,7 @@ type folderView struct {
 type messageView struct {
 	UID       uint32
 	Folder    string // the containing folder path, for action links
+	Mbox      string // shared mailbox address when the row is in one (read-only): read links carry &mbox, write controls hide; empty for the own mailbox
 	From      string
 	Subject   string
 	Date      string
@@ -94,6 +95,14 @@ type mailPage struct {
 	// PublicFolders are the public folders the user may see, shown as a labeled
 	// sidebar section (empty when none are visible or public folders are off).
 	PublicFolders []publicFolderLink
+	// SharedMailboxes are the shared mailboxes the user may open, each with its
+	// visible folders, shown as a labeled sidebar section (empty when none).
+	SharedMailboxes []sharedMailboxGroup
+	// Mbox is the shared mailbox address when the open folder belongs to one, else
+	// empty. When set, the list renders read-only (write controls hidden) and every
+	// read link carries &mbox={{.Mbox}} so navigation stays in the shared store. The
+	// template escapes the value, so it is held raw (never pre-escaped) here.
+	Mbox string
 }
 
 // threadView is one conversation thread rendered as a collapsible group: a
