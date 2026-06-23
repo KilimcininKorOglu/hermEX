@@ -189,38 +189,16 @@ func (s *Server) handleMail(w http.ResponseWriter, r *http.Request) {
 		current = inboxName
 	}
 
-	// Sidebar badges: each folder's total and unread message counts.
-	folderViews := buildFolderViews(ownFolders)
-	for i := range folderViews {
-		if total, unread, err := ownSt.CountMessages(folderViews[i].ID); err == nil {
-			folderViews[i].Total = total
-			folderViews[i].Unread = unread
-		}
-		if size, err := ownSt.FolderSize(folderViews[i].ID); err == nil {
-			folderViews[i].Size = formatBytes(size)
-		}
-	}
-
 	// Saved preferences supply the list defaults; a URL parameter overrides them.
 	cfg, err := loadSettings(ownSt)
 	if err != nil {
 		cfg = defaultSettings()
 	}
 
-	// Mark and collect the user's favorite folders, shown pinned at the top of the
-	// sidebar. The main sidebar is always the own mailbox's, and favorites are
-	// personal, so they apply to it directly.
-	var favorites []folderView
-	fav := make(map[string]bool, len(cfg.FavoriteFolders))
-	for _, p := range cfg.FavoriteFolders {
-		fav[p] = true
-	}
-	for i := range folderViews {
-		if fav[folderViews[i].Path] {
-			folderViews[i].IsFavorite = true
-			favorites = append(favorites, folderViews[i])
-		}
-	}
+	// Sidebar: the own folder tree with per-folder badges, and the favorited subset
+	// pinned at the top. The main sidebar is always the own mailbox's, and favorites
+	// are personal, so they apply to it directly.
+	folderViews, favorites := buildSidebarFolders(ownSt, ownFolders, cfg.FavoriteFolders)
 
 	// The message list reflects either the own mailbox or a shared mailbox the user
 	// selected (?mbox), validated and access-checked server-side. A shared folder is

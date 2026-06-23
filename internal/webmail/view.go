@@ -28,6 +28,32 @@ type folderView struct {
 	Size       string // human-readable total size of the folder's messages (sidebar tooltip)
 }
 
+// buildSidebarFolders builds the sidebar folder tree — each folder with its
+// message counts and total size — plus the favorited subset pinned at the top,
+// from a store's folder list and the user's favorite paths. Shared by the mailbox
+// view and the standalone reader so both render the same navigation.
+func buildSidebarFolders(st *objectstore.Store, folders []objectstore.FolderInfo, favPaths []string) (views, favorites []folderView) {
+	views = buildFolderViews(folders)
+	fav := make(map[string]bool, len(favPaths))
+	for _, p := range favPaths {
+		fav[p] = true
+	}
+	for i := range views {
+		if total, unread, err := st.CountMessages(views[i].ID); err == nil {
+			views[i].Total = total
+			views[i].Unread = unread
+		}
+		if size, err := st.FolderSize(views[i].ID); err == nil {
+			views[i].Size = formatBytes(size)
+		}
+		if fav[views[i].Path] {
+			views[i].IsFavorite = true
+			favorites = append(favorites, views[i])
+		}
+	}
+	return views, favorites
+}
+
 // messageView is one row in the message list.
 type messageView struct {
 	UID       uint32

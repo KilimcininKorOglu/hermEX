@@ -1,93 +1,6 @@
 {{define "mail"}}{{template "head" .}}
 <div class="app">
-  <aside class="sidebar">
-    <div class="brand">hermEX</div>
-    <nav>
-      {{if .Favorites}}
-      <div class="sidebar-section favorites">
-        <div class="sidebar-heading">Favorites</div>
-        {{range .Favorites}}
-        <div class="folder-item{{if eq .Path $.Current}} active{{end}}">
-          <a href="/mail?folder={{.Path}}">&#9733; {{.Name}}{{if .Total}}<span class="fcount{{if .Unread}} has-unread{{end}}">{{if .Unread}}{{.Unread}}/{{end}}{{.Total}}</span>{{end}}</a>
-        </div>
-        {{end}}
-      </div>
-      {{end}}
-      {{range .Folders}}
-      <div class="folder-item{{if eq .Path $.Current}} active{{end}}" style="--depth:{{.Depth}}">
-        <a href="/mail?folder={{.Path}}"{{if .Size}} title="{{.Total}} message(s), {{.Size}}"{{end}}>{{.Name}}{{if .Total}}<span class="fcount{{if .Unread}} has-unread{{end}}">{{if .Unread}}{{.Unread}}/{{end}}{{.Total}}</span>{{end}}</a>
-        <form method="post" action="/folder" class="folder-fav">
-          <input type="hidden" name="op" value="favorite">
-          <input type="hidden" name="folder" value="{{.Path}}">
-          <button type="submit" title="{{if .IsFavorite}}Remove from{{else}}Add to{{end}} favorites">{{if .IsFavorite}}&#9733;{{else}}&#9734;{{end}}</button>
-        </form>
-        {{if .IsUser}}
-        <form method="post" action="/folder" class="folder-rename">
-          <input type="hidden" name="op" value="rename">
-          <input type="hidden" name="id" value="{{.ID}}">
-          <input name="name" value="{{.Name}}" aria-label="Rename folder">
-          <button type="submit">Rename</button>
-        </form>
-        <form method="post" action="/folder" class="folder-delete" onsubmit="return confirm('Permanently delete this folder and all its messages? This cannot be undone.')">
-          <input type="hidden" name="op" value="delete">
-          <input type="hidden" name="id" value="{{.ID}}">
-          <button type="submit" class="danger">Delete</button>
-        </form>
-        {{end}}
-      </div>
-      {{end}}
-    </nav>
-    <form method="post" action="/folder" class="folder-new">
-      <input type="hidden" name="op" value="create">
-      <input name="name" placeholder="New folder" aria-label="New folder name" required>
-      <button type="submit">Create</button>
-    </form>
-    {{if .PublicFolders}}
-    <div class="sidebar-section">
-      <div class="sidebar-heading">Public folders</div>
-      <nav>
-        {{range .PublicFolders}}
-        <div class="folder-item">
-          <a href="/public-folders?fid={{.ID}}">{{.Name}}{{if .Total}}<span class="fcount{{if .Unread}} has-unread{{end}}">{{if .Unread}}{{.Unread}}/{{end}}{{.Total}}</span>{{end}}</a>
-        </div>
-        {{end}}
-      </nav>
-    </div>
-    {{end}}
-    {{range $grp := .SharedMailboxes}}
-    <div class="sidebar-section">
-      <div class="sidebar-heading mbox-heading">{{$grp.Addr}}</div>
-      <nav>
-        {{range $grp.Folders}}
-        <div class="folder-item{{if and (eq .Path $.Current) (eq $grp.Addr $.Mbox)}} active{{end}}" style="--depth:{{.Depth}}">
-          <a href="/mail?folder={{.Path}}&mbox={{$grp.Addr}}">{{.Name}}{{if .Total}}<span class="fcount{{if .Unread}} has-unread{{end}}">{{if .Unread}}{{.Unread}}/{{end}}{{.Total}}</span>{{end}}</a>
-          {{if and $grp.CanManage .IsUser}}
-          <form method="post" action="/folder?mbox={{$grp.Addr}}" class="folder-rename">
-            <input type="hidden" name="op" value="rename">
-            <input type="hidden" name="id" value="{{.ID}}">
-            <input name="name" value="{{.Name}}" aria-label="Rename folder">
-            <button type="submit">Rename</button>
-          </form>
-          <form method="post" action="/folder?mbox={{$grp.Addr}}" class="folder-delete" onsubmit="return confirm('Permanently delete this folder and all its messages? This cannot be undone.')">
-            <input type="hidden" name="op" value="delete">
-            <input type="hidden" name="id" value="{{.ID}}">
-            <button type="submit" class="danger">Delete</button>
-          </form>
-          {{end}}
-        </div>
-        {{end}}
-      </nav>
-      {{if $grp.CanManage}}
-      <form method="post" action="/folder?mbox={{$grp.Addr}}" class="folder-new">
-        <input type="hidden" name="op" value="create">
-        <input name="name" placeholder="New folder" aria-label="New folder name" required>
-        <button type="submit">Create</button>
-      </form>
-      {{end}}
-    </div>
-    {{end}}
-    <div class="account">{{.User}}<br><a href="/logout">Sign out</a></div>
-  </aside>
+  {{template "sidebar" .}}
   <main class="main">
     <div class="toolbar">
       <h2>{{.Current}}{{if .Mbox}} <span class="mbox-label">in {{.Mbox}}</span>{{end}} <span class="counts">{{.Total}} total, {{.Unread}} unread</span></h2>
@@ -253,4 +166,95 @@
     {{end}}
   </td>
 </tr>
+{{end}}
+
+{{define "sidebar"}}
+  <aside class="sidebar">
+    <div class="brand">hermEX</div>
+    <nav>
+      {{if .Favorites}}
+      <div class="sidebar-section favorites">
+        <div class="sidebar-heading">Favorites</div>
+        {{range .Favorites}}
+        <div class="folder-item{{if eq .Path $.Current}} active{{end}}">
+          <a href="/mail?folder={{.Path}}">&#9733; {{.Name}}{{if .Total}}<span class="fcount{{if .Unread}} has-unread{{end}}">{{if .Unread}}{{.Unread}}/{{end}}{{.Total}}</span>{{end}}</a>
+        </div>
+        {{end}}
+      </div>
+      {{end}}
+      {{range .Folders}}
+      <div class="folder-item{{if eq .Path $.Current}} active{{end}}" style="--depth:{{.Depth}}">
+        <a href="/mail?folder={{.Path}}"{{if .Size}} title="{{.Total}} message(s), {{.Size}}"{{end}}>{{.Name}}{{if .Total}}<span class="fcount{{if .Unread}} has-unread{{end}}">{{if .Unread}}{{.Unread}}/{{end}}{{.Total}}</span>{{end}}</a>
+        <form method="post" action="/folder" class="folder-fav">
+          <input type="hidden" name="op" value="favorite">
+          <input type="hidden" name="folder" value="{{.Path}}">
+          <button type="submit" class="{{if .IsFavorite}}on{{end}}" title="{{if .IsFavorite}}Remove from{{else}}Add to{{end}} favorites">{{if .IsFavorite}}&#9733;{{else}}&#9734;{{end}}</button>
+        </form>
+        {{if .IsUser}}
+        <form method="post" action="/folder" class="folder-rename">
+          <input type="hidden" name="op" value="rename">
+          <input type="hidden" name="id" value="{{.ID}}">
+          <input name="name" value="{{.Name}}" aria-label="Rename folder">
+          <button type="submit">Rename</button>
+        </form>
+        <form method="post" action="/folder" class="folder-delete" onsubmit="return confirm('Permanently delete this folder and all its messages? This cannot be undone.')">
+          <input type="hidden" name="op" value="delete">
+          <input type="hidden" name="id" value="{{.ID}}">
+          <button type="submit" class="danger">Delete</button>
+        </form>
+        {{end}}
+      </div>
+      {{end}}
+    </nav>
+    <form method="post" action="/folder" class="folder-new">
+      <input type="hidden" name="op" value="create">
+      <input name="name" placeholder="New folder" aria-label="New folder name" required>
+      <button type="submit">Create</button>
+    </form>
+    {{if .PublicFolders}}
+    <div class="sidebar-section">
+      <div class="sidebar-heading">Public folders</div>
+      <nav>
+        {{range .PublicFolders}}
+        <div class="folder-item">
+          <a href="/public-folders?fid={{.ID}}">{{.Name}}{{if .Total}}<span class="fcount{{if .Unread}} has-unread{{end}}">{{if .Unread}}{{.Unread}}/{{end}}{{.Total}}</span>{{end}}</a>
+        </div>
+        {{end}}
+      </nav>
+    </div>
+    {{end}}
+    {{range $grp := .SharedMailboxes}}
+    <div class="sidebar-section">
+      <div class="sidebar-heading mbox-heading">{{$grp.Addr}}</div>
+      <nav>
+        {{range $grp.Folders}}
+        <div class="folder-item{{if and (eq .Path $.Current) (eq $grp.Addr $.Mbox)}} active{{end}}" style="--depth:{{.Depth}}">
+          <a href="/mail?folder={{.Path}}&mbox={{$grp.Addr}}">{{.Name}}{{if .Total}}<span class="fcount{{if .Unread}} has-unread{{end}}">{{if .Unread}}{{.Unread}}/{{end}}{{.Total}}</span>{{end}}</a>
+          {{if and $grp.CanManage .IsUser}}
+          <form method="post" action="/folder?mbox={{$grp.Addr}}" class="folder-rename">
+            <input type="hidden" name="op" value="rename">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <input name="name" value="{{.Name}}" aria-label="Rename folder">
+            <button type="submit">Rename</button>
+          </form>
+          <form method="post" action="/folder?mbox={{$grp.Addr}}" class="folder-delete" onsubmit="return confirm('Permanently delete this folder and all its messages? This cannot be undone.')">
+            <input type="hidden" name="op" value="delete">
+            <input type="hidden" name="id" value="{{.ID}}">
+            <button type="submit" class="danger">Delete</button>
+          </form>
+          {{end}}
+        </div>
+        {{end}}
+      </nav>
+      {{if $grp.CanManage}}
+      <form method="post" action="/folder?mbox={{$grp.Addr}}" class="folder-new">
+        <input type="hidden" name="op" value="create">
+        <input name="name" placeholder="New folder" aria-label="New folder name" required>
+        <button type="submit">Create</button>
+      </form>
+      {{end}}
+    </div>
+    {{end}}
+    <div class="account">{{.User}}<br><a href="/logout">Sign out</a></div>
+  </aside>
 {{end}}

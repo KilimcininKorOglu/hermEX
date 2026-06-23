@@ -37,17 +37,27 @@ type messageDetail struct {
 	Body          string
 	RemoteBlocked bool // HTML message whose remote content (images/fonts) the CSP blocked; the reader offers a one-time "Show images"
 	Attachments   []attachmentView
-	Folders       []folderView   // move/copy targets (mail folders except this one)
-	FlagColor     int32          // follow-up flag color 1-6 (0 none), shown in the reader header
-	FlagComplete  bool           // follow-up flag marked complete
-	FlagDue       string         // formatted follow-up due date, empty when none
-	Categories    []categoryView // categories assigned to this message, with colors
-	AllCategories []category     // the mailbox's master category list, for the assign control
-	Preview       bool           // rendered inside the reading pane (partial, no page chrome) (#34)
-	Importance    string         // "High" | "Low" label for the print header, "" when Normal/absent (#34)
-	Sensitivity   string         // "Personal" | "Private" | "Confidential" for the print header, "" when Normal (#34)
-	Smime         string         // S/MIME status banner text ("" when not an S/MIME message) (#41)
-	SmimeOK       bool           // true when verified/decrypted (positive banner), false for a warning
+	MoveTargets   []folderView // move/copy targets (mail folders except this one)
+	// Sidebar shell fields (the reader reuses the mailbox sidebar partial): the own
+	// folder tree with badges, the favorited subset, the signed-in user, and the
+	// open message's folder (active highlight). PublicFolders/SharedMailboxes are
+	// carried for partial compatibility and left empty in the reader.
+	Folders         []folderView
+	Favorites       []folderView
+	PublicFolders   []publicFolderLink
+	SharedMailboxes []sharedMailboxGroup
+	User            string
+	Current         string
+	FlagColor       int32          // follow-up flag color 1-6 (0 none), shown in the reader header
+	FlagComplete    bool           // follow-up flag marked complete
+	FlagDue         string         // formatted follow-up due date, empty when none
+	Categories      []categoryView // categories assigned to this message, with colors
+	AllCategories   []category     // the mailbox's master category list, for the assign control
+	Preview         bool           // rendered inside the reading pane (partial, no page chrome) (#34)
+	Importance      string         // "High" | "Low" label for the print header, "" when Normal/absent (#34)
+	Sensitivity     string         // "Personal" | "Private" | "Confidential" for the print header, "" when Normal (#34)
+	Smime           string         // S/MIME status banner text ("" when not an S/MIME message) (#41)
+	SmimeOK         bool           // true when verified/decrypted (positive banner), false for a warning
 	// Mbox is the shared mailbox address when the message belongs to one, else
 	// empty. When set the attachment and action links carry &mbox={{.Mbox}}
 	// (template-escaped). Reply/forward honor send-as (gated by CanSendAs);
@@ -151,7 +161,23 @@ func (s *Server) handleMessage(w http.ResponseWriter, r *http.Request) {
 	// Move targets are offered only where the caller may write: the own mailbox, or
 	// a shared folder they hold edit/delete rights on.
 	if !readOnly {
-		detail.Folders = moveTargets(folders, folderID)
+		detail.MoveTargets = moveTargets(folders, folderID)
+	}
+
+	// Sidebar shell: the reader reuses the mailbox sidebar, which always shows the
+	// user's own folder tree and favorites (even when the open message lives in a
+	// shared mailbox), so the own store and settings are read here regardless of mbox.
+	detail.User = sess.user
+	detail.Current = folder
+	if ownSt, err := objectstore.Open(sess.mailboxPath); err == nil {
+		ownCfg, cerr := loadSettings(ownSt)
+		if cerr != nil {
+			ownCfg = defaultSettings()
+		}
+		if ownFolders, ferr := ownSt.ListFolders(); ferr == nil {
+			detail.Folders, detail.Favorites = buildSidebarFolders(ownSt, ownFolders, ownCfg.FavoriteFolders)
+		}
+		ownSt.Close()
 	}
 
 	// Reading a message marks it \Seen (read-modify-write to preserve the rest);

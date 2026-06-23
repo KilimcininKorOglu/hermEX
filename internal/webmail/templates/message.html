@@ -1,4 +1,11 @@
-{{define "message"}}{{template "head" .}}{{template "readercontent" .}}{{template "foot" .}}{{end}}
+{{define "message"}}{{template "head" .}}
+<div class="app">
+  {{template "sidebar" .}}
+  <main class="main">
+    <div class="listpane-full">{{template "readercontent" .}}</div>
+  </main>
+</div>
+{{template "foot" .}}{{end}}
 
 {{define "messagepreview"}}{{template "readercontent" .}}{{end}}
 
@@ -20,12 +27,12 @@
     {{end}}
     <a href="/headers?folder={{.Folder}}&uid={{.UID}}{{if .Mbox}}&mbox={{.Mbox}}{{end}}" target="_blank" rel="noopener" title="View internet headers">Headers</a>
     {{if not .ReadOnly}}
-    {{if .Folders}}
+    {{if .MoveTargets}}
     <form class="moveform" hx-post="/action{{if .Mbox}}?mbox={{.Mbox}}{{end}}" hx-swap="none">
       <input type="hidden" name="folder" value="{{.Folder}}">
       <input type="hidden" name="uid" value="{{.UID}}">
       <select name="dst" aria-label="Target folder">
-        {{range .Folders}}<option value="{{.ID}}">{{.Path}}</option>{{end}}
+        {{range .MoveTargets}}<option value="{{.ID}}">{{.Path}}</option>{{end}}
       </select>
       <button type="submit" name="op" value="move">Move</button>
       <button type="submit" name="op" value="copy">Copy</button>

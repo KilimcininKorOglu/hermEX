@@ -1,21 +1,33 @@
 :root {
-  --bg: #f4f5f7;
+  --bg: #eef1f6;
   --panel: #ffffff;
-  --border: #d9dce1;
-  --accent: #2a5db0;
-  --text: #1f2329;
-  --muted: #6b7280;
-  --unread: #eef3fb;
+  --border: #e3e6ec;
+  --border-strong: #d2d7e0;
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --accent-soft: #e8f0fe;
+  --text: #1b2230;
+  --muted: #697283;
+  --unread: #eef4ff;
+  --hover: #f3f5f9;
+  --danger: #d11a2a;
+  --radius: 10px;
+  --radius-sm: 7px;
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .05);
+  --shadow-md: 0 4px 14px rgba(16, 24, 40, .10);
 }
 
 * { box-sizing: border-box; }
 
 body {
   margin: 0;
-  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   color: var(--text);
   background: var(--bg);
   font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 a { color: var(--accent); text-decoration: none; }
@@ -31,9 +43,10 @@ a:hover { text-decoration: underline; }
 .login-card {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 32px;
-  width: 320px;
+  width: 340px;
+  box-shadow: var(--shadow-md);
 }
 .login-card h1 { margin: 0 0 4px; font-size: 20px; }
 .login-card p { margin: 0 0 20px; color: var(--muted); }
@@ -45,6 +58,16 @@ a:hover { text-decoration: underline; }
   border: 1px solid var(--border);
   border-radius: 6px;
   font-size: 14px;
+}
+/* Checkbox/radio options inside a .field are inline pills, not full-width inputs:
+   the broad ".field input { width:100% }" / ".field label { display:block }" rules
+   above are meant for the text fields, so undo them for choice controls. */
+.field label.check {
+  display: inline-flex; align-items: center; gap: 7px;
+  margin: 0 16px 8px 0; color: var(--text); font-weight: 400; cursor: pointer;
+}
+.field input[type=radio], .field input[type=checkbox] {
+  width: auto; padding: 0; margin: 0; flex: none;
 }
 button.primary {
   width: 100%;
@@ -64,25 +87,56 @@ button.primary:hover { background: #234e96; }
 .sidebar {
   background: var(--panel);
   border-right: 1px solid var(--border);
-  padding: 16px 0;
+  padding: 14px 10px;
   overflow-y: auto;
 }
-.brand { font-weight: 600; padding: 0 16px 12px; font-size: 16px; }
+.brand { font-weight: 700; padding: 2px 10px 14px; font-size: 17px; letter-spacing: -0.02em; color: var(--accent); }
+.folder-item { position: relative; }
 .sidebar nav a {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 8px;
-  padding: 8px 16px;
+  padding: 7px 28px 7px 12px;
   /* Nested folders indent by their depth (set as --depth on .folder-item, which
      the link inherits), so the hierarchy reads as a tree rather than a flat list. */
-  padding-left: calc(16px + var(--depth, 0) * 14px);
+  padding-left: calc(12px + var(--depth, 0) * 14px);
   color: var(--text);
+  border-radius: var(--radius-sm);
 }
-.sidebar nav a.active { background: var(--unread); font-weight: 600; }
-.fcount { font-size: 11px; color: var(--muted); font-weight: 400; }
-.fcount.has-unread { color: var(--text); font-weight: 600; }
-.sidebar .account { padding: 12px 16px; color: var(--muted); border-top: 1px solid var(--border); margin-top: 12px; }
+.sidebar nav a:hover { background: var(--hover); text-decoration: none; }
+.sidebar nav a.active, .folder-item.active > a { background: var(--accent-soft); font-weight: 600; color: var(--accent); }
+.fcount { font-size: 11px; color: var(--muted); font-weight: 500; }
+.fcount.has-unread { color: var(--accent); font-weight: 700; }
+
+/* Favorite star: an absolute, hover-revealed affordance on the right of each
+   folder row; a favorited folder keeps its filled star always lit. */
+.folder-fav { position: absolute; top: 50%; right: 4px; transform: translateY(-50%); margin: 0; }
+.folder-fav button {
+  border: 0; background: none; cursor: pointer; color: var(--muted);
+  font-size: 15px; line-height: 1; padding: 2px 5px;
+  opacity: 0; transition: opacity .12s ease, color .12s ease;
+}
+.folder-item:hover .folder-fav button { opacity: .55; }
+.folder-fav button:hover { opacity: 1; color: var(--accent); }
+.folder-fav button.on { opacity: 1; color: #f4b400; }
+
+/* User-folder rename/delete: hidden until the row is hovered, so the tree stays
+   uncluttered. */
+.folder-rename, .folder-delete { display: none; }
+.folder-item:hover .folder-rename, .folder-item:hover .folder-delete,
+.folder-item:focus-within .folder-rename, .folder-item:focus-within .folder-delete {
+  display: flex; gap: 4px; margin: 4px 0 0 12px;
+}
+.folder-rename input { flex: 1; min-width: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 4px 7px; font-size: 13px; }
+.folder-rename button, .folder-delete button, .folder-new button {
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--panel); color: var(--text); font-size: 12px; padding: 4px 9px; cursor: pointer;
+}
+.folder-rename button:hover, .folder-delete button:hover, .folder-new button:hover { background: var(--hover); }
+.folder-new { display: flex; gap: 6px; padding: 10px 6px 4px; }
+.folder-new input { flex: 1; min-width: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 6px 8px; font-size: 13px; }
+.sidebar .account { padding: 12px 12px 4px; color: var(--muted); border-top: 1px solid var(--border); margin-top: 12px; }
 /* A labeled sidebar group below the user's own folders (public folders, shared
    mailboxes), each listing its folders with the same row styling. */
 .sidebar-section { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 8px; }
@@ -93,10 +147,29 @@ button.primary:hover { background: #234e96; }
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 14px;
   flex: 0 0 auto;
-  padding: 12px 20px;
+  padding: 10px 20px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  z-index: 2;
+}
+.toolbar a { padding: 6px 2px; white-space: nowrap; }
+/* Toolbar buttons (mark-all-read, empty-folder, preview toggles, filters) read as
+   a consistent quiet button set; the Compose link stays the prominent primary. */
+.toolbar > button, .toolbar form button, .toolbar .preview-toggle button, .toolbar select {
+  white-space: nowrap; border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--panel); color: var(--text); padding: 7px 11px; font-size: 13px; cursor: pointer;
+}
+.toolbar > button:hover, .toolbar form button:hover, .toolbar .preview-toggle button:hover { background: var(--hover); }
+.toolbar .preview-toggle button.active, .toolbar form button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.compose-btn { white-space: nowrap; }
+.searchbar, .toolbar form.search { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.toolbar input[type=search], .toolbar input[type=text], .toolbar form.search input {
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 7px 10px; font-size: 13px;
 }
 .preview-toggle { display: inline-flex; gap: 4px; }
 
@@ -149,14 +222,19 @@ table.messages thead th { text-align: left; padding: 8px 14px; border-bottom: 2p
 table.messages thead th a { color: var(--muted); }
 table.messages thead th.active a { color: var(--text); font-weight: 600; }
 table.messages td {
-  padding: 10px 14px;
+  padding: 11px 14px;
   border-bottom: 1px solid var(--border);
-  vertical-align: top;
+  vertical-align: middle;
 }
-table.messages.density-compact td { padding: 5px 14px; }
-table.messages.density-extended td { padding: 14px; }
+table.messages.density-compact td { padding: 6px 14px; }
+table.messages.density-extended td { padding: 15px 14px; }
+table.messages tbody tr { transition: background .1s ease; }
+table.messages tbody tr:hover { background: var(--hover); }
 table.messages tr.unread { background: var(--unread); }
+table.messages tr.unread:hover { background: #e4edff; }
 table.messages tr.unread td.subject { font-weight: 600; }
+table.messages tr.unread td.from { font-weight: 600; }
+table.messages td.subject a { color: var(--text); }
 th.iconcol, td.icons { width: 64px; white-space: nowrap; }
 td.icons { color: var(--muted); }
 td.icons span { margin-right: 3px; }
@@ -180,17 +258,25 @@ td.from { width: 220px; color: var(--text); }
 td.date { width: 150px; color: var(--muted); white-space: nowrap; }
 td.actions { width: 190px; white-space: nowrap; text-align: right; }
 td.actions button {
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  padding: 4px 8px;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 4px 9px;
   margin-left: 4px;
   cursor: pointer;
   color: var(--text);
   font-size: 12px;
+  /* The per-row actions stay hidden until the row is hovered or focused, so the
+     list reads as content rather than a wall of buttons (Gmail/Outlook pattern). */
+  opacity: 0;
+  transition: opacity .12s ease, background .12s ease;
 }
-td.actions button:hover { background: var(--bg); }
-td.actions button.danger { color: #b00020; border-color: #e3b6bd; }
+td.actions button:hover { background: var(--hover); border-color: var(--accent); color: var(--accent); }
+td.actions button.danger { color: var(--danger); border-color: #e7b8bd; }
+td.actions button.danger:hover { background: #fdeced; border-color: var(--danger); }
+tr:hover td.actions button, tr:focus-within td.actions button,
+tr:hover td.actions .flagmenu summary, tr:focus-within td.actions .flagmenu summary { opacity: 1; }
+td.actions .flagmenu summary { opacity: 0; transition: opacity .12s ease; }
 .flagmenu { display: inline-block; position: relative; margin-left: 4px; }
 .flagmenu summary { list-style: none; cursor: pointer; border: 1px solid var(--border); border-radius: 5px; padding: 4px 8px; color: #e0a800; font-size: 12px; }
 .flagmenu summary::-webkit-details-marker { display: none; }
@@ -327,6 +413,86 @@ table.messages.conversation td.selcol, table.messages.conversation th.selcol { d
 .checknames-status { margin-left: 10px; font-size: 13px; }
 .checknames-status.ok { color: #1a7f37; }
 .checknames-status.error { color: #b00020; }
+
+/* ---------- Visual polish layer ---------- */
+/* Soft depth on the content cards so panels lift off the page background. */
+.compose-card, .reader-headers, .reader-body, .attachments { box-shadow: var(--shadow-sm); border-radius: var(--radius); }
+.reader { max-width: 940px; }
+
+/* Compose action bar + buttons: a clear primary, quiet secondaries. */
+.compose-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 18px; }
+.compose-actions button {
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--panel);
+  color: var(--text); padding: 9px 16px; font-size: 14px; cursor: pointer;
+}
+.compose-actions button:hover { background: var(--hover); }
+.compose-actions button.primary { width: auto; background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.compose-actions button.primary:hover { background: var(--accent-hover); }
+.compose-actions .sendlater { display: inline-flex; gap: 6px; margin-left: auto; align-items: center; }
+.compose-actions .sendlater input { border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 7px 8px; font-size: 13px; }
+
+/* Generic form controls inside cards line up with the refreshed inputs. */
+.compose-card input[type=text], .compose-card input:not([type]), .compose-card select,
+.compose-card input[type=datetime-local], .settings-panel input[type=text],
+.settings-panel input:not([type]), .settings-panel select {
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 14px;
+}
+.compose-card .field { margin-bottom: 14px; }
+.compose-card .field > label:first-child { display: block; margin-bottom: 5px; color: var(--muted); font-weight: 500; }
+
+/* Buttons that were relying on browser defaults across the app pages. */
+.btn, .toolbar > a.compose-btn { font-weight: 600; }
+
+/* Bulk toolbar refresh: a quiet utility bar. */
+.bulkbar { gap: 8px; }
+.bulkbar button, .bulkbar select { border-radius: var(--radius-sm); padding: 6px 10px; }
+
+/* Data tables on the sharing / address book surfaces. */
+table.data-table, table.sharing-table, table.addressbook-table {
+  width: 100%; border-collapse: collapse; background: var(--panel);
+  border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
+  margin: 10px 0 18px; box-shadow: var(--shadow-sm);
+}
+table.data-table th, table.sharing-table th, table.addressbook-table th,
+table.data-table td, table.sharing-table td, table.addressbook-table td {
+  text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--border); font-size: 14px;
+}
+table.data-table th, table.sharing-table th, table.addressbook-table th {
+  color: var(--muted); font-weight: 600; background: var(--hover);
+}
+table.data-table tr:last-child td, table.sharing-table tr:last-child td, table.addressbook-table tr:last-child td { border-bottom: 0; }
+table.data-table tbody tr:hover, table.sharing-table tbody tr:hover, table.addressbook-table tbody tr:hover { background: var(--hover); }
+
+/* Account + mailbox-usage info cards on the settings general tab. */
+.account-info, .mailbox-usage {
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 16px 18px; margin: 0 0 16px; box-shadow: var(--shadow-sm);
+}
+.account-info h2, .mailbox-usage h2 { margin: 0 0 8px; font-size: 15px; }
+.account-info p, .mailbox-usage p { margin: 4px 0; color: var(--muted); }
+.account-info strong { color: var(--text); }
+.mailbox-usage progress {
+  width: 100%; height: 10px; margin-top: 6px; border: 0; border-radius: 6px;
+  background: var(--border); overflow: hidden; -webkit-appearance: none; appearance: none;
+}
+.mailbox-usage progress::-webkit-progress-bar { background: var(--border); border-radius: 6px; }
+.mailbox-usage progress::-webkit-progress-value { background: var(--accent); border-radius: 6px; }
+.mailbox-usage progress::-moz-progress-bar { background: var(--accent); border-radius: 6px; }
+
+/* Sharing + address book page controls. */
+.sharing-pick, .addressbook-search { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 0 16px; }
+.sharing-pick select, .sharing-pick input, .addressbook-search input,
+.share-grant select, .share-grant input {
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm); padding: 8px 10px; font-size: 14px;
+}
+.sharing-pick button, .addressbook-search button, .share-grant button, .share-revoke button {
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--panel);
+  color: var(--text); padding: 8px 12px; font-size: 13px; cursor: pointer;
+}
+.sharing-pick button:hover, .addressbook-search button:hover, .share-grant button:hover { background: var(--hover); }
+.share-grant { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0; padding: 14px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+.share-revoke button { color: var(--danger); border-color: #e7b8bd; }
+.share-error { margin: 0 0 12px; padding: 8px 12px; border-radius: var(--radius-sm); background: #fbeaea; color: var(--danger); border: 1px solid #e6b3ba; font-size: 13px; }
 
 /* S/MIME certificate settings page (#41). */
 .compose-card h3 { margin: 22px 0 8px; font-size: 15px; }
