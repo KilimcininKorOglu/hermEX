@@ -1,6 +1,7 @@
 package webmail
 
 import (
+	"slices"
 	"strings"
 
 	"hermex/internal/mapi"
@@ -228,8 +229,8 @@ func buildMessageViews(st *objectstore.Store, folderID int64, folder string) ([]
 		return nil, err
 	}
 	views := make([]messageView, 0, len(msgs))
-	for i := len(msgs) - 1; i >= 0; i-- { // newest first
-		views = append(views, messageViewFrom(folderID, folder, msgs[i]))
+	for _, m := range slices.Backward(msgs) { // newest first
+		views = append(views, messageViewFrom(folderID, folder, m))
 	}
 	return views, nil
 }
