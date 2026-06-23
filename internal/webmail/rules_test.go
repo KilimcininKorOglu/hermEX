@@ -122,6 +122,25 @@ func TestRulesAddCopyAction(t *testing.T) {
 	}
 }
 
+// TestRulesAddStopProcessing adds a rule with the stop-processing option and
+// checks the listing notes it, so the exit-level bit round-trips through the form.
+func TestRulesAddStopProcessing(t *testing.T) {
+	path := emptyMailbox(t)
+	ts := newTestServer(t, path)
+	c := authedClient(t, ts)
+	if code, _ := postForm(t, c, ts.URL+"/rules", url.Values{
+		"action": {"add"}, "name": {"StopRule"},
+		"condfield": {"subject"}, "condvalue": {"urgent"},
+		"actiontype": {"markread"}, "stop": {"on"},
+	}); code != 200 && code != 303 {
+		t.Fatalf("add stop rule = %d", code)
+	}
+	_, body := get(t, c, ts.URL+"/rules")
+	if !strings.Contains(body, "stop processing more rules") {
+		t.Errorf("rules page missing the stop-processing note:\n%s", body)
+	}
+}
+
 // TestRulesToggle disables and re-enables a rule, checking the listing reflects
 // the state each time.
 func TestRulesToggle(t *testing.T) {

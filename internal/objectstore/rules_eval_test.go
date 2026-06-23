@@ -217,6 +217,48 @@ func TestRuleCopyActionIsNonTerminal(t *testing.T) {
 	}
 }
 
+// TestRuleExitLevelStopsProcessing checks that a rule carrying the exit-level
+// (stop-processing) state prevents a later matching rule from running: rule 1
+// marks read and stops, so rule 2's move never fires.
+func TestRuleExitLevelStopsProcessing(t *testing.T) {
+	s := openSeededStore(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	filed, err := s.CreateFolder(nil, "Filed")
+	if err != nil {
+		t.Fatalf("CreateFolder: %v", err)
+	}
+	m := deliverTo(t, s, inbox, ruleMsg("urgent ping", "x@y.com", ""))
+
+	if _, err := s.AddRule(Rule{
+		FolderID: inbox, Name: "stop", State: mapi.RuleStateEnabled | mapi.RuleStateExitLevel,
+		Condition: RuleSubjectContains("urgent"),
+		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{RuleMarkReadAction()}},
+	}); err != nil {
+		t.Fatalf("AddRule 1: %v", err)
+	}
+	if _, err := s.AddRule(Rule{
+		FolderID: inbox, Name: "move", State: mapi.RuleStateEnabled,
+		Condition: RuleSubjectContains("urgent"),
+		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{RuleMoveAction(filed)}},
+	}); err != nil {
+		t.Fatalf("AddRule 2: %v", err)
+	}
+
+	if _, err := s.RunRules(inbox); err != nil {
+		t.Fatalf("RunRules: %v", err)
+	}
+
+	if fl, _ := s.MessageFlags(inbox, m.UID); fl&FlagSeen == 0 {
+		t.Errorf("the stop rule did not mark the message read")
+	}
+	if msgs, _ := s.ListMessages(inbox); len(msgs) != 1 {
+		t.Errorf("inbox has %d, want 1 (the later move must not run after a stop rule)", len(msgs))
+	}
+	if msgs, _ := s.ListMessages(filed); len(msgs) != 0 {
+		t.Errorf("Filed has %d, want 0 (no rule should run after exit-level)", len(msgs))
+	}
+}
+
 // TestRunRulesEndToEnd is the discriminating test: it delivers real messages
 // through the real Import path, then runs rules and asserts on the actual store
 // state — a message moved to the target folder, another marked read, an

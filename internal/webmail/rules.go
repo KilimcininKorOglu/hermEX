@@ -95,10 +95,14 @@ func (s *Server) handleRulesSubmit(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/settings?tab=rules&err=action", http.StatusSeeOther)
 			return
 		}
+		state := uint32(mapi.RuleStateEnabled)
+		if r.FormValue("stop") == "on" {
+			state |= mapi.RuleStateExitLevel
+		}
 		if _, err := st.AddRule(objectstore.Rule{
 			FolderID:  rulesFolder,
 			Name:      strings.TrimSpace(r.FormValue("name")),
-			State:     mapi.RuleStateEnabled,
+			State:     state,
 			Condition: cond,
 			Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{act}},
 		}); err != nil {
@@ -244,7 +248,11 @@ func folderNamesByID(fv []folderView) map[int64]string {
 // falls back to a neutral placeholder for anything else (e.g. a rule authored by
 // another client), so an unrecognized rule still lists without misdescribing it.
 func describeRule(ru objectstore.Rule, folderNames map[int64]string) string {
-	return fmt.Sprintf("If %s, %s.", describeCondition(ru.Condition), describeActions(ru.Actions, folderNames))
+	s := fmt.Sprintf("If %s, %s.", describeCondition(ru.Condition), describeActions(ru.Actions, folderNames))
+	if ru.State&mapi.RuleStateExitLevel != 0 {
+		s += " Then stop processing more rules."
+	}
+	return s
 }
 
 func describeCondition(r mapi.Restriction) string {
