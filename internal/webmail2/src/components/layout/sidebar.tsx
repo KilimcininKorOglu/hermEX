@@ -30,6 +30,7 @@ import {
   BookmarkPlus,
   Share2,
   Eraser,
+  StarOff,
 } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -268,6 +269,8 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
   const [spamCount, setSpamCount] = useState(0)
   // Real custom mailboxes (beyond the standard ones shown in the main nav).
   const [customFolders, setCustomFolders] = useState<string[]>([])
+  // Pinned favourite folders, shown in a section at the top of the folder list.
+  const [favorites, setFavorites] = useState<string[]>([])
 
   // Load shared mailboxes on mount
   useEffect(() => {
@@ -320,6 +323,16 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
     }
   }, [])
 
+  // loadFavorites refreshes the pinned favourite folders (re-run after a toggle).
+  const loadFavorites = useCallback(async () => {
+    try {
+      const res = await api.getFavorites()
+      setFavorites(res.favorites ?? [])
+    } catch {
+      setFavorites([])
+    }
+  }, [])
+
   // Load the spam count and custom folders on mount (inbox unread is provided
   // by the shared MailboxContext).
   useEffect(() => {
@@ -333,12 +346,13 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
       }
       await loadCustomFolders()
       await loadSavedSearches()
+      await loadFavorites()
     }
     loadCounts()
     return () => {
       cancelled = true
     }
-  }, [loadCustomFolders, loadSavedSearches])
+  }, [loadCustomFolders, loadSavedSearches, loadFavorites])
 
   const openCreateFolder = () => {
     setFolderDialogMode("create")
@@ -409,6 +423,16 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
       toast.error(err instanceof Error ? err.message : t("sidebar.folderEmptyFailed"))
     } finally {
       setFolderBusy(false)
+    }
+  }
+
+  // handleToggleFavorite pins or unpins a folder; the server returns the new list.
+  const handleToggleFavorite = async (name: string) => {
+    try {
+      const res = await api.toggleFavorite(name)
+      setFavorites(res.favorites ?? [])
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("sidebar.favoriteFailed"))
     }
   }
 
@@ -653,6 +677,32 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
 
         <Separator className="my-3" />
 
+        {isExpanded && favorites.length > 0 && (
+          <div className="mb-2">
+            <p className="px-3 pb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {t("nav.favorites")}
+            </p>
+            {favorites.map((name) => {
+              const path = `/folder/${encodeURIComponent(name)}`
+              return (
+                <NavLink
+                  key={"fav-" + path}
+                  to={path}
+                  className={({ isActive }) =>
+                    cn(
+                      "group mx-1 flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all",
+                      isActive ? "bg-primary/10 text-primary" : "text-foreground hover:bg-accent"
+                    )
+                  }
+                >
+                  <Star className="h-5 w-5 shrink-0 fill-amber-400 text-amber-400" />
+                  <span className="flex-1 truncate">{name}</span>
+                </NavLink>
+              )
+            })}
+          </div>
+        )}
+
         {isExpanded && (
           <div className="flex items-center justify-between px-3 pb-2">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
@@ -717,6 +767,19 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
                   </button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handleToggleFavorite(name)}>
+                    {favorites.includes(name) ? (
+                      <>
+                        <StarOff className="mr-2 h-4 w-4" />
+                        {t("sidebar.removeFavorite")}
+                      </>
+                    ) : (
+                      <>
+                        <Star className="mr-2 h-4 w-4" />
+                        {t("sidebar.addFavorite")}
+                      </>
+                    )}
+                  </DropdownMenuItem>
                   <DropdownMenuItem onClick={() => openRenameFolder(name)}>
                     <Pencil className="mr-2 h-4 w-4" />
                     {t("sidebar.rename")}

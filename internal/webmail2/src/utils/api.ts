@@ -788,6 +788,15 @@ class API {
     return this.post<{ emptied?: number }>(`/folders/${encodeURIComponent(name)}/empty`, {})
   }
 
+  // Favourite (pinned) folders, persisted in webmail settings.
+  async getFavorites(): Promise<{ favorites?: string[] }> {
+    return this.get<{ favorites?: string[] }>('/favorites')
+  }
+
+  async toggleFavorite(name: string): Promise<{ favorites?: string[] }> {
+    return this.post<{ favorites?: string[] }>('/favorites/toggle', { name })
+  }
+
   // Saved searches (persistent MAPI-style search folders).
   async listSearchFolders(): Promise<{ search_folders?: SearchFolder[] }> {
     return this.get<{ search_folders?: SearchFolder[] }>('/search-folders')

@@ -19,6 +19,7 @@
     "settings": "Settings",
     "compose": "Compose",
     "folders": "Folders",
+    "favorites": "Favorites",
     "personal": "Personal",
     "newFolder": "New folder",
     "savedSearches": "Saved searches"
@@ -952,6 +953,9 @@
     "empty": "Empty folder",
     "folderEmptied": "Folder emptied",
     "folderEmptyFailed": "Failed to empty folder",
+    "addFavorite": "Add to favorites",
+    "removeFavorite": "Remove from favorites",
+    "favoriteFailed": "Failed to update favorites",
     "newSavedSearchTitle": "New Saved Search",
     "editSavedSearchTitle": "Edit Saved Search",
     "savedSearchDescription": "Save criteria as a virtual folder that fills with matching messages.",

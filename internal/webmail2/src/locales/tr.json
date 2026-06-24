@@ -19,6 +19,7 @@
     "settings": "Ayarlar",
     "compose": "Oluştur",
     "folders": "Klasörler",
+    "favorites": "Favoriler",
     "personal": "Kişisel",
     "newFolder": "Yeni klasör",
     "savedSearches": "Kayıtlı aramalar"
@@ -952,6 +953,9 @@
     "empty": "Klasörü boşalt",
     "folderEmptied": "Klasör boşaltıldı",
     "folderEmptyFailed": "Klasör boşaltılamadı",
+    "addFavorite": "Favorilere ekle",
+    "removeFavorite": "Favorilerden çıkar",
+    "favoriteFailed": "Favoriler güncellenemedi",
     "newSavedSearchTitle": "Yeni Kayıtlı Arama",
     "editSavedSearchTitle": "Kayıtlı Aramayı Düzenle",
     "savedSearchDescription": "Kriterleri, eşleşen iletilerle dolan sanal bir klasör olarak kaydedin.",
