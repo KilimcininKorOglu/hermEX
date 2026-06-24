@@ -160,6 +160,63 @@ func (s *Store) ListSoftDeleted(folderID int64) ([]SoftDeletedMessage, error) {
 	return out, nil
 }
 
+// SoftDeletedItem pairs a soft-deleted message (as an index-shaped MessageInfo) with
+// the folder it was deleted from. It backs the EWS recoverableitemsdeletions view, a
+// mailbox-wide Recoverable Items aggregate that the per-folder listings do not express.
+type SoftDeletedItem struct {
+	FolderID int64
+	Info     MessageInfo
+}
+
+// ListAllSoftDeleted returns every soft-deleted message across the whole mailbox, each
+// paired with its original parent folder. It backs the EWS recoverableitemsdeletions
+// distinguished folder (a mailbox-wide dumpster, unlike the per-folder ListSoftDeleted).
+// Each message is opened to project the subject, sender, and date the item summary needs.
+func (s *Store) ListAllSoftDeleted() ([]SoftDeletedItem, error) {
+	rows, err := s.objdb.Query(
+		`SELECT message_id, parent_fid, message_size, read_state FROM messages WHERE is_deleted=1 ORDER BY message_id`)
+	if err != nil {
+		return nil, err
+	}
+	type rawRow struct {
+		id, parent, size int64
+		read             int
+	}
+	var raw []rawRow
+	for rows.Next() {
+		var r rawRow
+		if err := rows.Scan(&r.id, &r.parent, &r.size, &r.read); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		raw = append(raw, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	out := make([]SoftDeletedItem, 0, len(raw))
+	for _, r := range raw {
+		msg, err := s.OpenMessage(r.id)
+		if err != nil {
+			return nil, err
+		}
+		info := MessageInfo{
+			ID:           r.id,
+			Size:         r.size,
+			Subject:      projectSubject(msg.Props),
+			Sender:       projectSender(msg.Props),
+			InternalDate: deliveryTime(msg.Props),
+		}
+		if r.read != 0 {
+			info.Flags |= FlagSeen
+		}
+		out = append(out, SoftDeletedItem{FolderID: r.parent, Info: info})
+	}
+	return out, nil
+}
+
 // ListSoftDeletedInfo returns a folder's soft-deleted messages as index-shaped
 // MessageInfo rows. It backs the MAPI/ROP SHOW_SOFT_DELETES contents table: the
 // rows no longer live in the IMAP index, so they are read straight from the object

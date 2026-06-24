@@ -102,7 +102,9 @@ func (s *Server) handleFindItem(w http.ResponseWriter, inner []byte, sess *sessi
 
 	var msgs []findItemResponseMessage
 	for _, tgt := range resolveTargets(req.ParentFolderIDs) {
-		if !tgt.ok {
+		// A recoverable (Recoverable Items dumpster) target is intentionally ok=false so
+		// every other handler still reports ErrorFolderNotFound; FindItem serves it.
+		if !tgt.ok && !tgt.recoverable {
 			msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: tgt.code})
 			continue
 		}
@@ -112,6 +114,38 @@ func (s *Server) handleFindItem(w http.ResponseWriter, inner []byte, sess *sessi
 			msgs = append(msgs, findItemResponseMessage{
 				ResponseClass: "Success", ResponseCode: "NoError",
 				RootFolder: &findItemRoot{IncludesLastItemInRange: true},
+			})
+			continue
+		}
+		if tgt.recoverable {
+			// The Recoverable Items dumpster aggregates soft-deleted items mailbox-wide,
+			// so it is served only for the caller's own mailbox (no per-folder ACL applies
+			// to an aggregate). Each item keeps its original parent folder in its id.
+			st, _, isOwn, code := cache.open(sess, tgt.mailbox)
+			if code != "" {
+				msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: code})
+				continue
+			}
+			if !isOwn {
+				msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorAccessDenied"})
+				continue
+			}
+			items, err := st.ListAllSoftDeleted()
+			if err != nil {
+				msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
+				continue
+			}
+			elems := make([]oxews.Message, 0, len(items))
+			for _, it := range items {
+				elems = append(elems, itemSummary(st, it.FolderID, it.Info, ""))
+			}
+			msgs = append(msgs, findItemResponseMessage{
+				ResponseClass: "Success", ResponseCode: "NoError",
+				RootFolder: &findItemRoot{
+					TotalItemsInView:        len(elems),
+					IncludesLastItemInRange: true,
+					Items:                   itemsWrap{Messages: elems},
+				},
 			})
 			continue
 		}

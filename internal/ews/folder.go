@@ -490,11 +490,12 @@ const publicMailboxToken = "\x00public-folders"
 const codePublicAbsent = "\x00public-absent"
 
 type folderTarget struct {
-	fid     int64
-	ok      bool
-	code    string // when ok is false, the per-folder error code to report
-	mailbox string // target mailbox SMTP from the ref's Mailbox child; "" = the caller's own
-	public  bool   // the publicfoldersroot distinguished id: enumerate the domain public store
+	fid         int64
+	ok          bool
+	code        string // when ok is false, the per-folder error code to report
+	mailbox     string // target mailbox SMTP from the ref's Mailbox child; "" = the caller's own
+	public      bool   // the publicfoldersroot distinguished id: enumerate the domain public store
+	recoverable bool   // the recoverableitemsdeletions distinguished id: the mailbox-wide soft-deleted dumpster
 }
 
 // filterVisible keeps only the folders the caller may see — those on which their
@@ -535,6 +536,15 @@ func resolveTargets(refs folderRefs) []folderTarget {
 			// The public folders root is not a folder in the caller's mailbox: it is
 			// the caller's domain public store IPM subtree, enumerated per-child by ACL.
 			out = append(out, folderTarget{fid: int64(mapi.PublicFIDIPMSubtree), ok: true, mailbox: publicMailboxToken, public: true})
+		} else if strings.EqualFold(d.ID, "recoverableitemsdeletions") {
+			// The Recoverable Items dumpster is a mailbox-wide aggregate of soft-deleted
+			// items, not a real folder, so it carries no fid. It stays ok=false (every
+			// handler but FindItem still reports ErrorFolderNotFound, their prior behavior);
+			// FindItem checks the recoverable flag before the ok check and serves the
+			// aggregate. The reference does not back this name; hermEX adds it as a
+			// modern-Exchange extension so a native client's Recover Deleted Items has a
+			// surface.
+			out = append(out, folderTarget{code: "ErrorFolderNotFound", recoverable: true, mailbox: refMailbox(d.Mailbox)})
 		} else if fid, ok := distinguishedFolders[strings.ToLower(d.ID)]; ok {
 			out = append(out, folderTarget{fid: fid, ok: true, mailbox: refMailbox(d.Mailbox)})
 		} else {
