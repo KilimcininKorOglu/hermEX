@@ -9,6 +9,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/publicfolder"
 	"hermex/internal/relay"
 )
 
@@ -32,6 +33,10 @@ type Server struct {
 	secret   []byte
 	dist     http.Handler // serves the built SPA with index.html fallback (nil if unset)
 	secure   bool         // mark the session cookie Secure (served behind HTTPS)
+
+	// Pub serves per-domain public folders; nil disables the feature (the
+	// endpoints then return an empty set). Set by the cmd after NewServer.
+	Pub *publicfolder.Service
 }
 
 // NewServer builds the API server. accounts and spool back outbound mail
@@ -146,6 +151,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/search-folders/{id}", s.handlePutSearchFolder)
 	mux.HandleFunc("DELETE /api/v1/search-folders/{id}", s.handleDeleteSearchFolder)
 	mux.HandleFunc("GET /api/v1/search-folders/{id}/results", s.handleSearchFolderResults)
+
+	// Public folders (per-domain, read-only browser).
+	mux.HandleFunc("GET /api/v1/public-folders", s.handleGetPublicFolders)
+	mux.HandleFunc("GET /api/v1/public-folders/{fid}/messages", s.handlePublicFolderMessages)
+	mux.HandleFunc("GET /api/v1/public-message", s.handlePublicMessage)
 	mux.HandleFunc("GET /api/v1/filters", s.handleGetFilters)
 	mux.HandleFunc("POST /api/v1/filters", s.handlePostFilter)
 	mux.HandleFunc("POST /api/v1/filters/reorder", s.handleReorderFilters)

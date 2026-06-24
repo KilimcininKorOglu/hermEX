@@ -223,6 +223,24 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	d := buildMailDetail(raw, folder, uid)
+
+	// Reading marks the message \Seen, preserving its other flags.
+	if flags, err := st.MessageFlags(fid, uid); err == nil {
+		d.Read = flags&objectstore.FlagSeen != 0
+		d.Starred = flags&objectstore.FlagFlagged != 0
+		if flags&objectstore.FlagSeen == 0 && !mb.shared {
+			_ = st.SetMessageFlags(fid, uid, flags|objectstore.FlagSeen)
+			d.Read = true
+		}
+	}
+	writeJSON(w, http.StatusOK, d)
+}
+
+// buildMailDetail builds a message's full detail JSON from its raw bytes: the
+// richest body with inline cid: images resolved, the envelope fields, and the
+// attachment list. It does NOT touch flags — the caller owns \Seen.
+func buildMailDetail(raw []byte, folder string, uid uint32) mailDetailJSON {
 	root := mime.ParseStructure(raw)
 	body, inlined := inlineCIDImages(bestBody(root), root)
 	d := mailDetailJSON{
@@ -251,17 +269,7 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	d.Attachments = collectAttachments(root, inlined)
 	d.HasAttachments = len(d.Attachments) > 0
-
-	// Reading marks the message \Seen, preserving its other flags.
-	if flags, err := st.MessageFlags(fid, uid); err == nil {
-		d.Read = flags&objectstore.FlagSeen != 0
-		d.Starred = flags&objectstore.FlagFlagged != 0
-		if flags&objectstore.FlagSeen == 0 && !mb.shared {
-			_ = st.SetMessageFlags(fid, uid, flags|objectstore.FlagSeen)
-			d.Read = true
-		}
-	}
-	writeJSON(w, http.StatusOK, d)
+	return d
 }
 
 // locate resolves a message id to its store, folder id, and uid for a mutating
