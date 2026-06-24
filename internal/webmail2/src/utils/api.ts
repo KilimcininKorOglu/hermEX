@@ -31,6 +31,15 @@ export interface Mail {
   importance?: string // "low" | "normal" | "high"
 }
 
+/** PublicFolder is one organization public folder the caller may read. */
+export interface PublicFolder {
+  id: number
+  name: string
+  total: number
+  unread: number
+  can_post: boolean
+}
+
 export interface MailAttachment {
   filename: string
   contentType: string
@@ -719,8 +728,18 @@ class API {
   // getPublicFolders returns the organization public folders in the caller's
   // domain that the caller may read, plus the owner key to pass to getMail.
   // Empty when the feature is disabled.
-  async getPublicFolders(): Promise<{ owner?: string; folders?: string[] }> {
-    return this.get<{ owner?: string; folders?: string[] }>('/public-folders')
+  async getPublicFolders(): Promise<{ owner?: string; folders?: PublicFolder[] }> {
+    return this.get<{ owner?: string; folders?: PublicFolder[] }>('/public-folders')
+  }
+
+  // getPublicFolderMessages lists one public folder's messages by folder id.
+  async getPublicFolderMessages(fid: number): Promise<{ emails?: Mail[]; total?: number }> {
+    return this.get<{ emails?: Mail[]; total?: number }>(`/public-folders/${fid}/messages`)
+  }
+
+  // getPublicMessage reads one public-folder message (read-only; never marks seen).
+  async getPublicMessage(fid: number, uid: string): Promise<Mail> {
+    return this.get<Mail>(`/public-message?fid=${fid}&uid=${encodeURIComponent(uid)}`)
   }
 
   // searchDirectory resolves names/addresses from the organization directory

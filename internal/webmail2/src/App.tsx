@@ -15,6 +15,7 @@ import { ContactsPage } from "@/pages/contacts"
 import { CalendarPage } from "@/pages/calendar"
 import { TasksPage } from "@/pages/tasks"
 import { NotesPage } from "@/pages/notes"
+import { PublicFoldersPage } from "@/pages/public-folders"
 import { SettingsPage } from "@/pages/settings"
 import { SearchPage } from "@/pages/search"
 import { SavedSearchPage } from "@/pages/saved-search"
@@ -105,6 +106,7 @@ function AppContent() {
           <Route path="scheduled" element={<ScheduledPage />} />
           <Route path="trash" element={<TrashPage />} />
           <Route path="shared" element={<SharedPage />} />
+          <Route path="public-folders" element={<PublicFoldersPage />} />
           <Route path="contacts" element={<ContactsPage />} />
           <Route path="calendar" element={<CalendarPage />} />
           <Route path="tasks" element={<TasksPage />} />
