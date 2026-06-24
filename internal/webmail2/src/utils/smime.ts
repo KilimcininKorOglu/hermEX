@@ -168,7 +168,104 @@ export function lock(): void {
 }
 
 /** requireUnlocked returns the in-memory key/cert or throws. */
-export function requireUnlocked(): { key: forge.pki.rsa.PrivateKey; certPem: string } {
+export function requireUnlocked(): { key: forge.pki.rsa.PrivateKey; cert: forge.pki.Certificate } {
   if (!unlockedKey || !unlockedCertPem) throw new Error("unlock your S/MIME certificate first")
-  return { key: unlockedKey, certPem: unlockedCertPem }
+  return { key: unlockedKey, cert: forge.pki.certificateFromPem(unlockedCertPem) }
+}
+
+/** crlf canonicalizes line endings to CRLF, as S/MIME signing requires. */
+function crlf(s: string): string {
+  return s.replace(/\r\n/g, "\n").replace(/\n/g, "\r\n")
+}
+
+/**
+ * splitIdentity divides a built RFC 5322 message into the identity headers that
+ * stay on the outer message (From/To/Subject/Date/…) and the inner MIME entity
+ * (Content-* headers + body) that S/MIME signs or encrypts. Mirrors the server's
+ * splitForSmime so signatures interoperate. MIME-Version is dropped from both.
+ */
+function splitIdentity(raw: string): { identity: string; inner: string } {
+  const sep = raw.indexOf("\r\n\r\n") >= 0 ? "\r\n\r\n" : "\n\n"
+  const cut = raw.indexOf(sep)
+  if (cut < 0) return { identity: raw, inner: "" }
+  const headerBlock = raw.slice(0, cut)
+  const body = raw.slice(cut + sep.length)
+  const lines = headerBlock.split(/\r\n|\n/)
+  const idLines: string[] = []
+  const contentLines: string[] = []
+  let cur: "id" | "content" | null = null
+  for (const line of lines) {
+    if (/^[ \t]/.test(line) && cur) {
+      ;(cur === "content" ? contentLines : idLines).push(line)
+      continue
+    }
+    const name = line.slice(0, line.indexOf(":")).toLowerCase().trim()
+    if (name === "mime-version") {
+      cur = null
+      continue
+    }
+    if (name.startsWith("content-")) {
+      cur = "content"
+      contentLines.push(line)
+    } else {
+      cur = "id"
+      idLines.push(line)
+    }
+  }
+  const identity = idLines.length ? idLines.join("\r\n") + "\r\n" : ""
+  const inner = (contentLines.length ? contentLines.join("\r\n") + "\r\n" : "") + "\r\n" + body
+  return { identity, inner }
+}
+
+/** randomBoundary returns a unique MIME multipart boundary. */
+function randomBoundary(): string {
+  const a = new Uint8Array(16)
+  crypto.getRandomValues(a)
+  return "hermex-smime-" + Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("")
+}
+
+/** chunk76 wraps a base64 string at 76 columns (RFC 2045). */
+function chunk76(b64: string): string {
+  return (b64.match(/.{1,76}/g) || []).join("\r\n")
+}
+
+/**
+ * signMime signs a built message with the unlocked identity, producing an S/MIME
+ * multipart/signed message. The identity headers are re-attached around the
+ * signed entity so the delivered message keeps its From/To/Subject. Throws if the
+ * identity is locked.
+ */
+export function signMime(raw: string): string {
+  const { key, cert } = requireUnlocked()
+  const { identity, inner } = splitIdentity(crlf(raw))
+  const innerCanon = crlf(inner)
+
+  const p7 = forge.pkcs7.createSignedData()
+  p7.content = forge.util.createBuffer(innerCanon, "raw")
+  p7.addCertificate(cert)
+  // Sign the content directly, WITHOUT authenticated attributes: forge's
+  // signedAttrs DER does not re-encode identically under the server's verifier
+  // (smallstep/pkcs7), which breaks verification, whereas a content-direct
+  // signature verifies under both openssl and the server. signedAttrs are
+  // optional in RFC 5652/5751, so this stays standards-compliant.
+  p7.addSigner({ key, certificate: cert, digestAlgorithm: forge.pki.oids.sha256 })
+  p7.sign({ detached: true })
+  const der = forge.asn1.toDer(p7.toAsn1()).getBytes()
+  const sigB64 = chunk76(forge.util.encode64(der))
+
+  const b = randomBoundary()
+  return (
+    identity +
+    "MIME-Version: 1.0\r\n" +
+    `Content-Type: multipart/signed; protocol="application/pkcs7-signature"; micalg="sha-256"; boundary="${b}"\r\n\r\n` +
+    "This is an S/MIME signed message\r\n\r\n" +
+    `--${b}\r\n` +
+    innerCanon +
+    `\r\n--${b}\r\n` +
+    `Content-Type: application/pkcs7-signature; name="smime.p7s"\r\n` +
+    "Content-Transfer-Encoding: base64\r\n" +
+    `Content-Disposition: attachment; filename="smime.p7s"\r\n\r\n` +
+    sigB64 +
+    `\r\n--${b}--\r\n`
+  )
 }

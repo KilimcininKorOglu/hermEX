@@ -16,6 +16,15 @@ import (
 // browser. The server only keeps the user's PUBLIC certificate, so it can be
 // published to the directory/GAL for others to encrypt to.
 
+// certEmail returns a certificate's email address (its SAN, else its common
+// name), used to label the verified signer.
+func certEmail(cert *x509.Certificate) string {
+	if len(cert.EmailAddresses) > 0 {
+		return cert.EmailAddresses[0]
+	}
+	return cert.Subject.CommonName
+}
+
 // certInfo projects an x509 certificate into the SPA's SMIMECertInfo shape.
 func certInfo(cert *x509.Certificate) map[string]any {
 	fp := sha256.Sum256(cert.Raw)

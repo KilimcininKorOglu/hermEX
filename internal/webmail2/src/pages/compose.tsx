@@ -38,6 +38,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import api, { SenderIdentity, DiagnosticEntry, Contact as ContactType, MailAttachment, SignatureEntry, TemplateEntry } from "@/utils/api"
+import * as smimeStore from "@/utils/smime"
 import { useAuth } from "@/contexts/AuthContext"
 import { useMailbox } from "@/contexts/MailboxContext"
 import { useI18n } from "@/hooks/useI18n"
@@ -580,6 +581,14 @@ export function ComposePage() {
       sendAtISO = iso
     }
 
+    // S/MIME (browser-held key) is applied client-side, so the message must be
+    // built, signed/encrypted here, and sent raw. Guard the unsupported combos.
+    if (signMessage || encryptMessage) {
+      if (encryptMessage) { toast.error(t("compose.smimeEncryptSoon")); return }
+      if (sendAtISO) { toast.error(t("compose.smimeNoSchedule")); return }
+      if (!smimeStore.isUnlocked()) { toast.error(t("compose.smimeLocked")); return }
+    }
+
     setSending(true)
     toast.success(sendAtISO ? t("compose.schedulingEmail") : t("compose.sendingEmail"))
 
@@ -601,7 +610,7 @@ export function ComposePage() {
       ).filter((x): x is MailAttachment => x !== null)
       // When richTextMode is on, grab HTML from the rich text editor; otherwise use plain body.
       const htmlBody = richTextMode && richTextRef.current ? richTextRef.current.getHTML() : body
-      await api.sendMail({
+      const sendPayload = {
         to: to.map(r => r.email),
         cc: cc.map(r => r.email),
         bcc: bcc.map(r => r.email),
@@ -610,12 +619,18 @@ export function ComposePage() {
         from: senderEmail, // Pass sender identity to API
         attachments: encoded.length > 0 ? encoded : undefined,
         requestReadReceipt: requestReadReceipt || undefined,
-        signMessage: signMessage || undefined,
-        encryptMessage: encryptMessage || undefined,
         importance: importance !== "normal" ? importance : undefined,
         sendAt: sendAtISO,
         is_html: richTextMode,
-      })
+      }
+      if (signMessage) {
+        // Build the MIME server-side, sign it in the browser, then relay it raw.
+        const { raw } = await api.buildMail(sendPayload)
+        const signed = smimeStore.signMime(atob(raw))
+        await api.sendRawMail(btoa(signed), sendPayload.to, sendPayload.cc, sendPayload.bcc)
+      } else {
+        await api.sendMail(sendPayload)
+      }
 
       if (sendAtISO) {
         toast.success(t("compose.emailScheduled"))

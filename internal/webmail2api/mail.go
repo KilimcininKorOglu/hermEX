@@ -196,6 +196,8 @@ type mailDetailJSON struct {
 	Attachments    []attachmentJSON `json:"attachments,omitempty"`
 	SmimeSigned    bool             `json:"smimeSigned,omitempty"`
 	SmimeEncrypted bool             `json:"smimeEncrypted,omitempty"`
+	SmimeVerified  bool             `json:"smimeVerified,omitempty"`
+	SmimeSignedBy  string           `json:"smimeSignedBy,omitempty"`
 }
 
 // handleMailMessage returns a single message's full detail and marks it read.
@@ -227,11 +229,17 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	d := buildMailDetail(raw, folder, uid)
-	// S/MIME detection only. Verify and decrypt happen client-side with the
-	// browser-held key (the server never holds it), so just flag the type; the
-	// SPA fetches the raw message and verifies/decrypts/renders it.
+	// S/MIME: the server VERIFIES signatures (no private key needed — only the
+	// message's embedded certificate) and flags encryption. Decryption needs the
+	// browser-held key, so encrypted bodies are decrypted client-side.
 	d.SmimeSigned = smime.IsSigned(raw)
 	d.SmimeEncrypted = smime.IsEncrypted(raw)
+	if d.SmimeSigned && !d.SmimeEncrypted {
+		if signer, _, err := smime.Verify(raw); err == nil {
+			d.SmimeVerified = true
+			d.SmimeSignedBy = certEmail(signer)
+		}
+	}
 
 	// Reading marks the message \Seen, preserving its other flags.
 	if flags, err := st.MessageFlags(fid, uid); err == nil {
