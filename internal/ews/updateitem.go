@@ -111,8 +111,9 @@ type deleteItemResponse struct {
 	Messages []itemResponseMessage `xml:"ResponseMessages>DeleteItemResponseMessage"`
 }
 
-// handleDeleteItem answers DeleteItem: HardDelete removes the message; every
-// other delete type (MoveToDeletedItems, SoftDelete) moves it to Deleted Items.
+// handleDeleteItem answers DeleteItem: HardDelete and SoftDelete send the message
+// to the Recoverable Items dumpster (soft delete, recoverable until retention);
+// MoveToDeletedItems moves it to Deleted Items.
 func (s *Server) handleDeleteItem(w http.ResponseWriter, inner []byte, sess *session) {
 	var req deleteItemRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
@@ -136,9 +137,10 @@ func (s *Server) handleDeleteItem(w http.ResponseWriter, inner []byte, sess *ses
 			continue
 		}
 		var derr error
-		if req.DeleteType == "HardDelete" {
-			derr = st.DeleteMessage(id.FolderID, id.UID)
-		} else {
+		switch req.DeleteType {
+		case "HardDelete", "SoftDelete":
+			derr = st.SoftDeleteMessage(id.FolderID, id.UID)
+		default: // MoveToDeletedItems
 			_, derr = moveMessage(st, id.FolderID, id.UID, int64(mapi.PrivateFIDDeletedItems))
 		}
 		if derr != nil {

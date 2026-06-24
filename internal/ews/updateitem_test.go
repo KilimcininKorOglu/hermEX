@@ -38,7 +38,8 @@ func TestUpdateItemMarkRead(t *testing.T) {
 	}
 }
 
-// TestDeleteItemHard confirms HardDelete removes the message.
+// TestDeleteItemHard confirms HardDelete sends the message to the Recoverable
+// Items dumpster: it leaves the inbox but stays recoverable, not purged.
 func TestDeleteItemHard(t *testing.T) {
 	ts, dir := seededWithMessage(t, plainMessage)
 	_, fi := soapPost(t, ts, findItemReq("inbox"), true)
@@ -50,9 +51,12 @@ func TestDeleteItemHard(t *testing.T) {
 		t.Fatalf("DeleteItem not success: %s", out)
 	}
 	st, msgs := inboxUIDs(t, dir)
-	st.Close()
+	defer st.Close()
 	if len(msgs) != 0 {
 		t.Errorf("inbox = %d, want 0 after hard delete", len(msgs))
+	}
+	if dump, _ := st.ListSoftDeleted(int64(mapi.PrivateFIDInbox)); len(dump) != 1 {
+		t.Errorf("dumpster = %d, want 1 after EWS HardDelete (recoverable)", len(dump))
 	}
 }
 
