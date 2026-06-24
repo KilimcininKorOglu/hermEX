@@ -43,6 +43,8 @@ type fakeDir struct {
 	sizeLimitsFound    bool
 	logRetention       int
 	logRetentionFound  bool
+	recoverable        directory.RecoverableSettings
+	recoverableFound   bool
 	outbound           directory.OutboundSettings
 	outboundFound      bool
 	relay              directory.RelaySettings
@@ -491,6 +493,13 @@ func (f *fakeDir) GetLogRetentionDays() (int, bool, error) {
 }
 func (f *fakeDir) SetLogRetentionDays(days int) error {
 	f.logRetention, f.logRetentionFound = days, true
+	return nil
+}
+func (f *fakeDir) GetRecoverableSettings() (directory.RecoverableSettings, bool, error) {
+	return f.recoverable, f.recoverableFound, nil
+}
+func (f *fakeDir) SetRecoverableSettings(s directory.RecoverableSettings) error {
+	f.recoverable, f.recoverableFound = s, true
 	return nil
 }
 func (f *fakeDir) GetOutboundSettings() (directory.OutboundSettings, bool, error) {

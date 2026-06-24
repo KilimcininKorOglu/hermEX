@@ -53,6 +53,8 @@
 {{template "retention-panel" .}}
 <h2>Central log retention</h2>
 {{template "log-retention-panel" .}}
+<h2>Recoverable Items retention</h2>
+{{template "recoverable-retention-panel" .}}
 </div>
 </div>
 </main>
@@ -65,5 +67,14 @@
 <form hx-post="/admin/ui/log-retention" hx-target="#log-retention-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <p>Days to keep (0 = forever): <input type="number" name="log_retention_days" value="{{.LogRetentionDays}}" min="0"></p>
 <button type="submit">Save log retention</button>
+</form>
+</div>{{end}}
+
+{{define "recoverable-retention-panel"}}<div id="recoverable-retention-panel">
+{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+<p>Soft-deleted mail (the Recoverable Items dumpster) older than this many days is permanently purged by the admin sweep, so deleted items stay recoverable for a bounded window. Use <strong>0</strong> to keep recoverable items forever (auto-purge disabled).</p>
+<form hx-post="/admin/ui/recoverable-retention" hx-target="#recoverable-retention-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<p>Days to keep (0 = forever): <input type="number" name="recoverable_retention_days" value="{{.RecoverableRetentionDays}}" min="0"></p>
+<button type="submit">Save recoverable retention</button>
 </form>
 </div>{{end}}

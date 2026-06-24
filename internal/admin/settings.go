@@ -21,6 +21,7 @@ func (s *Server) settingsPageData(r *http.Request, notice string) map[string]any
 	data["Nav"] = "settings"
 	s.fillSizeLimits(data)
 	s.fillLogRetention(data)
+	s.fillRecoverableRetention(data)
 
 	retain := defaultSpamHistoryRetainDisplay
 	if st, found, err := s.dir.GetSpamHistorySettings(); err == nil && found {
