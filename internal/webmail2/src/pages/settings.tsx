@@ -297,9 +297,9 @@ export function SettingsPage() {
       setSmimeImportOpen(false)
       setSmimeFile(null)
       setSmimePassword("")
-      toast.success(t("settings.smimeCertSaved"))
+      toast.success(t("settings.privacy.smimeCertSaved"))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("settings.smimeCertSaveFailed"))
+      toast.error(err instanceof Error ? err.message : t("settings.privacy.smimeCertSaveFailed"))
     } finally {
       setSmimeSaving(false)
     }
@@ -313,9 +313,9 @@ export function SettingsPage() {
       setSmimeUnlocked(true)
       setSmimeUnlockOpen(false)
       setSmimeUnlockPassword("")
-      toast.success(t("settings.smimeUnlocked"))
+      toast.success(t("settings.privacy.smimeUnlocked"))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("settings.smimeUnlockFailed"))
+      toast.error(err instanceof Error ? err.message : t("settings.privacy.smimeUnlockFailed"))
     } finally {
       setSmimeSaving(false)
     }
@@ -330,9 +330,9 @@ export function SettingsPage() {
       setSmimeMode(null)
       setSmimeUnlocked(false)
       setSmimeDeleteOpen(false)
-      toast.success(t("settings.smimeCertDeleted"))
+      toast.success(t("settings.privacy.smimeCertDeleted"))
     } catch {
-      toast.error(t("settings.smimeCertDeleteFailed"))
+      toast.error(t("settings.privacy.smimeCertDeleteFailed"))
     } finally {
       setSmimeDeleting(false)
     }
@@ -1438,17 +1438,17 @@ export function SettingsPage() {
               ) : smimeCert ? (
                 <p className="text-xs text-muted-foreground mt-1 truncate">
                   {smimeCert.subject} · {smimeMode === "server"
-                    ? t("settings.smimeServerBadge")
-                    : (smimeUnlocked ? t("settings.smimeUnlockedBadge") : t("settings.smimeLockedBadge"))}
+                    ? t("settings.privacy.smimeServerBadge")
+                    : (smimeUnlocked ? t("settings.privacy.smimeUnlockedBadge") : t("settings.privacy.smimeLockedBadge"))}
                 </p>
               ) : (
-                <p className="text-xs text-muted-foreground mt-1">{t("settings.smimeCertNone")}</p>
+                <p className="text-xs text-muted-foreground mt-1">{t("settings.privacy.smimeCertNone")}</p>
               )}
             </div>
             <div className="flex items-center gap-2 ml-4">
               {smimeCert && smimeMode === "browser" && !smimeUnlocked && (
                 <Button variant="outline" size="sm" onClick={() => setSmimeUnlockOpen(true)}>
-                  {t("settings.smimeUnlock")}
+                  {t("settings.privacy.smimeUnlock")}
                 </Button>
               )}
               {smimeCert && (
@@ -1615,7 +1615,7 @@ export function SettingsPage() {
               {smimeCert ? t("settings.privacy.smimeCertView") : t("settings.privacy.smimeCertUpload")}
             </DialogTitle>
             <DialogDescription>
-              {t("settings.smimeImportDesc")}
+              {t("settings.privacy.smimeImportDesc")}
             </DialogDescription>
           </DialogHeader>
 
@@ -1640,28 +1640,28 @@ export function SettingsPage() {
 
           <div className="space-y-3">
             <div className="space-y-1">
-              <Label>{t("settings.smimeStorageLabel")}</Label>
+              <Label>{t("settings.privacy.smimeStorageLabel")}</Label>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
                   onClick={() => setSmimeImportMode("browser")}
                   className={`rounded-md border p-2 text-left text-xs ${smimeImportMode === "browser" ? "border-primary bg-primary/5" : "border-input"}`}
                 >
-                  <div className="font-medium">{t("settings.smimeStoreBrowser")}</div>
-                  <div className="text-muted-foreground">{t("settings.smimeStoreBrowserHint")}</div>
+                  <div className="font-medium">{t("settings.privacy.smimeStoreBrowser")}</div>
+                  <div className="text-muted-foreground">{t("settings.privacy.smimeStoreBrowserHint")}</div>
                 </button>
                 <button
                   type="button"
                   onClick={() => setSmimeImportMode("server")}
                   className={`rounded-md border p-2 text-left text-xs ${smimeImportMode === "server" ? "border-primary bg-primary/5" : "border-input"}`}
                 >
-                  <div className="font-medium">{t("settings.smimeStoreServer")}</div>
-                  <div className="text-muted-foreground">{t("settings.smimeStoreServerHint")}</div>
+                  <div className="font-medium">{t("settings.privacy.smimeStoreServer")}</div>
+                  <div className="text-muted-foreground">{t("settings.privacy.smimeStoreServerHint")}</div>
                 </button>
               </div>
             </div>
             <div className="space-y-1">
-              <Label htmlFor="smime-p12">{t("settings.smimeP12File")}</Label>
+              <Label htmlFor="smime-p12">{t("settings.privacy.smimeP12File")}</Label>
               <Input
                 id="smime-p12"
                 type="file"
@@ -1670,16 +1670,16 @@ export function SettingsPage() {
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="smime-p12-pass">{t("settings.smimeP12Password")}</Label>
+              <Label htmlFor="smime-p12-pass">{t("settings.privacy.smimeP12Password")}</Label>
               <Input
                 id="smime-p12-pass"
                 type="password"
                 value={smimePassword}
                 onChange={(e) => setSmimePassword(e.target.value)}
-                placeholder={t("settings.smimeP12PasswordPlaceholder")}
+                placeholder={t("settings.privacy.smimeP12PasswordPlaceholder")}
               />
             </div>
-            <p className="text-xs text-muted-foreground">{t("settings.smimeImportHint")}</p>
+            <p className="text-xs text-muted-foreground">{t("settings.privacy.smimeImportHint")}</p>
           </div>
 
           <DialogFooter>
@@ -1701,11 +1701,11 @@ export function SettingsPage() {
       <Dialog open={smimeUnlockOpen} onOpenChange={setSmimeUnlockOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>{t("settings.smimeUnlock")}</DialogTitle>
-            <DialogDescription>{t("settings.smimeUnlockDesc")}</DialogDescription>
+            <DialogTitle>{t("settings.privacy.smimeUnlock")}</DialogTitle>
+            <DialogDescription>{t("settings.privacy.smimeUnlockDesc")}</DialogDescription>
           </DialogHeader>
           <div className="space-y-1">
-            <Label htmlFor="smime-unlock-pass">{t("settings.smimeP12Password")}</Label>
+            <Label htmlFor="smime-unlock-pass">{t("settings.privacy.smimeP12Password")}</Label>
             <Input
               id="smime-unlock-pass"
               type="password"
@@ -1719,7 +1719,7 @@ export function SettingsPage() {
               {t("common.cancel")}
             </Button>
             <Button onClick={handleSmimeUnlock} disabled={smimeSaving || !smimeUnlockPassword}>
-              {t("settings.smimeUnlock")}
+              {t("settings.privacy.smimeUnlock")}
             </Button>
           </DialogFooter>
         </DialogContent>
