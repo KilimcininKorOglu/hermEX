@@ -252,6 +252,28 @@ func (s *Store) PurgeSoftDeleted(messageID int64) error {
 	return s.DeleteObject(messageID)
 }
 
+// PurgeSoftDeletedInFolder is the folder-scoped purge: it permanently removes a
+// soft-deleted message only when it is in the named folder's dumpster, so a caller
+// authorized on one folder cannot purge another folder's item. It reports
+// ErrNotFound otherwise.
+func (s *Store) PurgeSoftDeletedInFolder(folderID, messageID int64) error {
+	var parent int64
+	var isDeleted int
+	err := s.objdb.QueryRow(
+		`SELECT parent_fid, is_deleted FROM messages WHERE message_id=?`,
+		messageID).Scan(&parent, &isDeleted)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if parent != folderID || isDeleted != 1 {
+		return ErrNotFound
+	}
+	return s.DeleteObject(messageID)
+}
+
 // PurgeSoftDeletedOlderThan is the retention sweep: it permanently removes every
 // soft-deleted message whose PR_DELETED_ON is older than cutoff, mailbox-wide, and
 // reports how many it purged. An item without a PR_DELETED_ON stamp is kept (it is

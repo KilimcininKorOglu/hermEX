@@ -97,3 +97,13 @@ func (mb *mailboxCtx) readAllowed(fid int64) bool {
 	rights, err := mb.st.ResolvePermission(fid, mb.user)
 	return err == nil && rights&mapi.FrightsReadAny != 0
 }
+
+// writeAllowed gates a mutation on a shared folder via FrightsDeleteAny (a store
+// owner is elevated by ResolvePermission). The own mailbox is always allowed.
+func (mb *mailboxCtx) writeAllowed(fid int64) bool {
+	if !mb.shared {
+		return true
+	}
+	rights, err := mb.st.ResolvePermission(fid, mb.user)
+	return err == nil && rights&mapi.FrightsDeleteAny != 0
+}
