@@ -35,9 +35,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Textarea } from "@/components/ui/textarea"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
-import api, { SenderIdentity, DiagnosticEntry, Contact as ContactType, MailAttachment, SignatureEntry, TemplateEntry } from "@/utils/api"
+import api, { SenderIdentity, DiagnosticEntry, Contact as ContactType, MailAttachment, SignatureEntry, TemplateEntry, Mail as MailMessage } from "@/utils/api"
 import * as smimeStore from "@/utils/smime"
 import { useAuth } from "@/contexts/AuthContext"
 import { useMailbox } from "@/contexts/MailboxContext"
@@ -156,6 +163,12 @@ export function ComposePage() {
   const [subject, setSubject] = useState("")
   const [body, setBody] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
+  // Attach an existing stored message: browse a folder and embed the picked
+  // message as a message/rfc822 attachment (the old webmail's attach-message).
+  const [msgPickerOpen, setMsgPickerOpen] = useState(false)
+  const [msgPickerFolder, setMsgPickerFolder] = useState("inbox")
+  const [msgPickerList, setMsgPickerList] = useState<MailMessage[]>([])
+  const [msgPickerLoading, setMsgPickerLoading] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   // Free-text recipient inputs (typed email addresses, not just picked contacts)
   const [recipientInput, setRecipientInput] = useState<{ to: string; cc: string; bcc: string }>({ to: "", cc: "", bcc: "" })
@@ -457,6 +470,36 @@ export function ComposePage() {
 
   const removeAttachment = (id: string) => {
     setAttachments(attachments.filter((a) => a.id !== id))
+  }
+
+  // openMsgPicker loads a folder's messages into the attach-existing-message dialog.
+  const openMsgPicker = async (folder: string) => {
+    setMsgPickerFolder(folder)
+    setMsgPickerOpen(true)
+    setMsgPickerLoading(true)
+    try {
+      const res = await api.getMail(folder)
+      setMsgPickerList(res.emails ?? [])
+    } catch {
+      setMsgPickerList([])
+    } finally {
+      setMsgPickerLoading(false)
+    }
+  }
+
+  // attachExistingMessage fetches the picked message's raw .eml and embeds it as a
+  // message/rfc822 attachment, reusing the file attachment path on send.
+  const attachExistingMessage = async (msg: MailMessage) => {
+    try {
+      const eml = await api.getMessageRaw(msg.id)
+      const base = (msg.subject?.trim() || "message").replace(/[^\w.\- ]+/g, "_").slice(0, 60)
+      const file = new File([eml], `${base}.eml`, { type: "message/rfc822" })
+      setAttachments((prev) => [...prev, { id: crypto.randomUUID(), name: file.name, size: file.size, file }])
+      setMsgPickerOpen(false)
+      toast.success(t("compose.messageAttached"))
+    } catch {
+      toast.error(t("compose.messageAttachFailed"))
+    }
   }
 
   // applyFormat wraps the current selection with markdown-style markers (the
@@ -1322,6 +1365,60 @@ export function ComposePage() {
             className="hidden"
             onChange={handleAttach}
           />
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={() => openMsgPicker(msgPickerFolder)}
+            title={t("compose.attachMessage")}
+          >
+            <Mail className="h-5 w-5" />
+          </Button>
+          <Dialog open={msgPickerOpen} onOpenChange={setMsgPickerOpen}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>{t("compose.attachMessageTitle")}</DialogTitle>
+                <DialogDescription>{t("compose.attachMessageDesc")}</DialogDescription>
+              </DialogHeader>
+              <div className="flex gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={msgPickerFolder === "inbox" ? "secondary" : "outline"}
+                  onClick={() => openMsgPicker("inbox")}
+                >
+                  {t("nav.inbox")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={msgPickerFolder === "sent" ? "secondary" : "outline"}
+                  onClick={() => openMsgPicker("sent")}
+                >
+                  {t("nav.sent")}
+                </Button>
+              </div>
+              <div className="max-h-80 overflow-y-auto">
+                {msgPickerLoading ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">{t("common.loading")}</p>
+                ) : msgPickerList.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">{t("common.noResults")}</p>
+                ) : (
+                  msgPickerList.map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => attachExistingMessage(m)}
+                      className="flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-2 text-left hover:bg-accent"
+                    >
+                      <span className="w-full truncate text-sm font-medium">{m.subject || t("compose.noSubject")}</span>
+                      <span className="w-full truncate text-xs text-muted-foreground">{m.fromName || m.from}</span>
+                    </button>
+                  ))
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
           <Button
             type="button"
             variant={requestReadReceipt ? "secondary" : "outline"}
