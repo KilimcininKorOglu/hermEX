@@ -18,6 +18,7 @@ import {
   Paperclip,
   Download,
   Printer,
+  Code,
   Undo2,
   RotateCcw,
 } from "lucide-react"
@@ -450,6 +451,14 @@ export function EmailDetailPage() {
                 title={t("emailDetail.print")}
               >
                 <Printer className="h-5 w-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => window.open(`/api/v1/mail/source?id=${encodeURIComponent(email.id)}`, "_blank")}
+                title={t("emailDetail.viewSource")}
+              >
+                <Code className="h-5 w-5" />
               </Button>
               <Button
                 variant="ghost"

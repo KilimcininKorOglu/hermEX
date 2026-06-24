@@ -138,6 +138,7 @@
     "failedToDownload": "Failed to download attachment",
     "exportEML": "Export as EML",
     "print": "Print",
+    "viewSource": "View source",
     "exportFailed": "Failed to export message",
     "movedTo": "Moved to {{folder}}",
     "failedToMove": "Failed to move message",

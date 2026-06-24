@@ -83,6 +83,24 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(raw)
 }
 
+// handleSource serves a message's raw RFC822 source as inline text/plain, for the
+// "view source / show original" action (own mailbox only, like the other locate-
+// based readers).
+func (s *Server) handleSource(w http.ResponseWriter, r *http.Request) {
+	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"))
+	if !ok {
+		return
+	}
+	defer st.Close()
+	raw, err := st.GetMessageRaw(fid, uid)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write(raw)
+}
+
 // handleRecover restores a message from Deleted Items back to the Inbox.
 func (s *Server) handleRecover(w http.ResponseWriter, r *http.Request) {
 	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"))
