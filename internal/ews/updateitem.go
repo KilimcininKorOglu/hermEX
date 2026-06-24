@@ -2,6 +2,7 @@ package ews
 
 import (
 	"encoding/xml"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -261,7 +262,13 @@ func (s *Server) moveOrCopy(w http.ResponseWriter, inner []byte, sess *session, 
 		}
 		var info objectstore.MessageInfo
 		if remove {
-			info, err = moveMessage(destSt, id.FolderID, id.UID, toFID)
+			// A soft-deleted source item (recovered from the Recoverable Items dumpster) has
+			// no live uid, so MoveItem on it is a recovery into the chosen target folder; a
+			// live item falls through to a normal move.
+			info, err = destSt.RecoverMessageTo(id.MessageID, toFID)
+			if errors.Is(err, objectstore.ErrNotFound) {
+				info, err = moveMessage(destSt, id.FolderID, id.UID, toFID)
+			}
 		} else {
 			info, err = copyMessage(destSt, id.FolderID, id.UID, toFID)
 		}

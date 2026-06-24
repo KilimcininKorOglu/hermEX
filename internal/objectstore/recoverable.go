@@ -261,6 +261,35 @@ func (s *Store) RecoverMessage(folderID, messageID int64) (MessageInfo, error) {
 		return MessageInfo{}, ErrNotFound
 	}
 
+	return s.restoreMessageRow(messageID, folderID, readSt)
+}
+
+// RecoverMessageTo restores a soft-deleted message into a chosen target folder: it is
+// the EWS MoveItem-out-of-dumpster path, where the client names the destination (unlike
+// RecoverMessage, which restores to the original parent). It reports ErrNotFound when the
+// message is not soft-deleted, so a live message is never moved through this path.
+func (s *Store) RecoverMessageTo(messageID, targetFID int64) (MessageInfo, error) {
+	var isDeleted, readSt int
+	err := s.objdb.QueryRow(
+		`SELECT is_deleted, read_state FROM messages WHERE message_id=?`,
+		messageID).Scan(&isDeleted, &readSt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return MessageInfo{}, ErrNotFound
+	}
+	if err != nil {
+		return MessageInfo{}, err
+	}
+	if isDeleted != 1 {
+		return MessageInfo{}, ErrNotFound
+	}
+	return s.restoreMessageRow(messageID, targetFID, readSt)
+}
+
+// restoreMessageRow clears a message's soft-delete flag, (re)parents it to destFID,
+// allocates a fresh change number, and rebuilds the served eml and IMAP/POP3 index row
+// (a new UID) under destFID. It is the shared core of RecoverMessage (restore in place)
+// and RecoverMessageTo (restore into a chosen folder); each verifies eligibility first.
+func (s *Store) restoreMessageRow(messageID, destFID int64, readSt int) (MessageInfo, error) {
 	tx, err := s.objdb.Begin()
 	if err != nil {
 		return MessageInfo{}, err
@@ -271,8 +300,8 @@ func (s *Store) RecoverMessage(folderID, messageID int64) (MessageInfo, error) {
 		return MessageInfo{}, err
 	}
 	if _, err := tx.Exec(
-		`UPDATE messages SET is_deleted=0, change_number=? WHERE message_id=?`,
-		int64(cn), messageID); err != nil {
+		`UPDATE messages SET is_deleted=0, parent_fid=?, change_number=? WHERE message_id=?`,
+		destFID, int64(cn), messageID); err != nil {
 		return MessageInfo{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -298,7 +327,7 @@ func (s *Store) RecoverMessage(folderID, messageID int64) (MessageInfo, error) {
 		flags |= FlagSeen
 	}
 	received := deliveryTime(msg.Props)
-	uid, err := s.indexMessage(folderID, messageID, mid, msg, int64(len(eml)), received, flags)
+	uid, err := s.indexMessage(destFID, messageID, mid, msg, int64(len(eml)), received, flags)
 	if err != nil {
 		return MessageInfo{}, err
 	}
