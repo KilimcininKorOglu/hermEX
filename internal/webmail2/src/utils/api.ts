@@ -1174,6 +1174,15 @@ class API {
     return this.get<{ cert: string } | null>(`/smime/recipient?address=${encodeURIComponent(address)}`)
   }
 
+  /** Fetches a message's raw RFC822 bytes (used to decrypt S/MIME client-side). */
+  async getMessageRaw(id: string): Promise<string> {
+    const headers: Record<string, string> = {}
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`
+    const res = await fetch(`${API_URL}/mail/source?id=${encodeURIComponent(id)}`, { headers, credentials: 'include' })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    return res.text()
+  }
+
   async deleteSMIMECertificate(): Promise<{ status: string }> {
     return this.delete<{ status: string }>('/smime/certificate')
   }

@@ -38,6 +38,7 @@ import { toast } from "sonner"
 import { sanitizeEmailBody } from "@/utils/sanitize"
 import api from "@/utils/api"
 import type { MeetingInvite, AttachmentInfo } from "@/utils/api"
+import * as smimeStore from "@/utils/smime"
 import { formatAbsolute, withTz } from "@/utils/date"
 import { useAuth } from "@/contexts/AuthContext"
 import { useMailbox } from "@/contexts/MailboxContext"
@@ -120,6 +121,23 @@ export function EmailDetailPage() {
           // bare addresses (result.to) with names in result.toNames (same index).
           const fromEmail = result.from
           const fromName = result.fromName || result.from
+          // S/MIME encrypted: decrypt client-side with the browser-held key.
+          let content = result.body
+          if (result.smimeEncrypted) {
+            if (smimeStore.isUnlocked()) {
+              try {
+                const inner = smimeStore.decryptMime(await api.getMessageRaw(result.id))
+                const extracted = smimeStore.extractMimeBody(inner)
+                content = extracted.html
+                  ? extracted.body
+                  : extracted.body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+              } catch {
+                content = `<p>${t("emailDetail.smimeDecryptFailed")}</p>`
+              }
+            } else {
+              content = `<p>${t("emailDetail.smimeLockedBody")}</p>`
+            }
+          }
           setEmail({
             id: result.id,
             from: fromName,
@@ -128,7 +146,7 @@ export function EmailDetailPage() {
             toNames: result.toNames ?? [],
             subject: result.subject,
             date: result.date,
-            content: result.body,
+            content,
             flagged: !!result.starred,
             labels: result.labels ?? [],
             attachments: result.attachments ?? [],

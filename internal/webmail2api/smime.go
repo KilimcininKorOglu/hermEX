@@ -6,10 +6,45 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"net/http"
+	"strings"
 	"time"
 
 	"hermex/internal/objectstore"
 )
+
+// handleRecipientCert returns a recipient's published S/MIME public certificate
+// (PEM) so the SPA can encrypt to them. The certificate is public, so any
+// authenticated user may fetch it; the result is null when the recipient (a local
+// user) has published none or is not local.
+func (s *Server) handleRecipientCert(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.session(r); !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	address := strings.TrimSpace(r.URL.Query().Get("address"))
+	if address == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "address is required"})
+		return
+	}
+	maildir, ok := s.accounts.Resolve(address)
+	if !ok {
+		writeJSON(w, http.StatusOK, nil)
+		return
+	}
+	st, err := objectstore.Open(maildir)
+	if err != nil {
+		writeJSON(w, http.StatusOK, nil)
+		return
+	}
+	defer st.Close()
+	id, ok, err := st.GetSmimeIdentity()
+	if err != nil || !ok || len(id.Cert) == 0 {
+		writeJSON(w, http.StatusOK, nil)
+		return
+	}
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: id.Cert})
+	writeJSON(w, http.StatusOK, map[string]string{"cert": string(pemBytes)})
+}
 
 // In the client-side S/MIME model the private key never reaches the server: it is
 // imported, stored, and used (sign/encrypt/verify/decrypt) entirely in the

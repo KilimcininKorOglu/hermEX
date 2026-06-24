@@ -584,9 +584,8 @@ export function ComposePage() {
     // S/MIME (browser-held key) is applied client-side, so the message must be
     // built, signed/encrypted here, and sent raw. Guard the unsupported combos.
     if (signMessage || encryptMessage) {
-      if (encryptMessage) { toast.error(t("compose.smimeEncryptSoon")); return }
       if (sendAtISO) { toast.error(t("compose.smimeNoSchedule")); return }
-      if (!smimeStore.isUnlocked()) { toast.error(t("compose.smimeLocked")); return }
+      if (signMessage && !smimeStore.isUnlocked()) { toast.error(t("compose.smimeLocked")); return }
     }
 
     setSending(true)
@@ -623,11 +622,27 @@ export function ComposePage() {
         sendAt: sendAtISO,
         is_html: richTextMode,
       }
-      if (signMessage) {
-        // Build the MIME server-side, sign it in the browser, then relay it raw.
+      if (signMessage || encryptMessage) {
+        // Build the MIME server-side, then sign and/or encrypt it in the browser
+        // (sign-then-encrypt), and relay the raw result. The key never leaves here.
         const { raw } = await api.buildMail(sendPayload)
-        const signed = smimeStore.signMime(atob(raw))
-        await api.sendRawMail(btoa(signed), sendPayload.to, sendPayload.cc, sendPayload.bcc)
+        let mime = atob(raw)
+        if (signMessage) mime = smimeStore.signMime(mime)
+        if (encryptMessage) {
+          const recips = [...sendPayload.to, ...sendPayload.cc, ...sendPayload.bcc, senderEmail]
+          const certs: string[] = []
+          const seen = new Set<string>()
+          for (const addr of recips) {
+            const a = addr.trim().toLowerCase()
+            if (!a || seen.has(a)) continue
+            seen.add(a)
+            const rc = await api.getRecipientCertificate(addr)
+            if (!rc?.cert) throw new Error(t("compose.smimeNoRecipientCert", { addr }))
+            certs.push(rc.cert)
+          }
+          mime = smimeStore.encryptMime(mime, certs)
+        }
+        await api.sendRawMail(btoa(mime), sendPayload.to, sendPayload.cc, sendPayload.bcc)
       } else {
         await api.sendMail(sendPayload)
       }
@@ -641,7 +656,8 @@ export function ComposePage() {
       }
     } catch (err) {
       console.error('Failed to send email:', err)
-      toast.error(sendAtISO ? t("compose.scheduleFailed") : t("compose.sendFailed"))
+      const fallback = sendAtISO ? t("compose.scheduleFailed") : t("compose.sendFailed")
+      toast.error(err instanceof Error && err.message ? err.message : fallback)
       setSending(false)
     }
   }
