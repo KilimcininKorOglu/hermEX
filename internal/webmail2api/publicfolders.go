@@ -30,6 +30,10 @@ func (s *Server) handleGetPublicFolders(w http.ResponseWriter, r *http.Request) 
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
+	// Per-user read state lives in the caller's OWN store; the shared public flag
+	// is org-wide and intentionally never set on read, so the unread badge is
+	// computed against this user's read set, not the shared flag.
+	readSet := s.publicReadSet(c.Mailbox, publicOwner(c.Email))
 	folders := []publicFolderJSON{}
 	if s.Pub != nil {
 		if st, ok, err := s.Pub.OpenForCaller(c.Email); err == nil && ok {
@@ -41,7 +45,15 @@ func (s *Server) handleGetPublicFolders(w http.ResponseWriter, r *http.Request) 
 					if err != nil || rights&mapi.FrightsVisible == 0 {
 						continue
 					}
-					total, unread, _ := st.CountMessages(f.ID)
+					total, unread := 0, 0
+					if msgs, err := st.ListMessages(f.ID); err == nil {
+						total = len(msgs)
+						for _, m := range msgs {
+							if !readSet[m.ID] {
+								unread++
+							}
+						}
+					}
 					folders = append(folders, publicFolderJSON{
 						ID: f.ID, Name: f.DisplayName, Total: total, Unread: unread,
 						CanPost: rights&mapi.FrightsCreate != 0,
@@ -73,13 +85,16 @@ func (s *Server) handlePublicFolderMessages(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	defer st.Close()
+	// Read state is per-user (from the caller's own store). It replaces the shared
+	// public flag rather than OR-ing with it; that flag is never set on read.
+	readSet := s.publicReadSet(c.Mailbox, publicOwner(c.Email))
 	out := []mailJSON{}
 	if msgs, err := st.ListMessages(fid); err == nil {
 		for _, m := range msgs {
 			out = append(out, mailJSON{
 				ID: strconv.FormatUint(uint64(m.UID), 10), From: m.Sender, FromName: m.Sender,
 				Subject: m.Subject, Date: m.InternalDate.Format(time.RFC3339),
-				Read: m.Flags&objectstore.FlagSeen != 0, Starred: m.Flags&objectstore.FlagFlagged != 0,
+				Read: readSet[m.ID], Starred: m.Flags&objectstore.FlagFlagged != 0,
 				Folder: "public", Size: int(m.Size),
 			})
 		}
@@ -116,6 +131,12 @@ func (s *Server) handlePublicMessage(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
+	}
+	// Reading marks the message read for THIS user only, recorded in the caller's
+	// own store and never written back to the shared public store (its flags are
+	// org-wide). Best-effort: a tracking failure must not fail the read itself.
+	if info, err := st.MessageByUID(fid, uint32(uid64)); err == nil {
+		s.markPublicRead(c.Mailbox, publicOwner(c.Email), info.ID)
 	}
 	writeJSON(w, http.StatusOK, buildMailDetail(raw, "public", uint32(uid64)))
 }
@@ -154,6 +175,36 @@ func (s *Server) publicTarget(email string, fid int64) (*objectstore.Store, stri
 		return nil, "", false
 	}
 	return st, name, true
+}
+
+// publicReadSet returns the caller's per-user read set for the given public
+// owner, read from the caller's OWN store (mailbox). It is best-effort: any
+// failure to open the store or read the table yields an empty set (everything
+// unread), never an error to the client, so public-folder browsing degrades
+// gracefully when per-user read state is unavailable.
+func (s *Server) publicReadSet(mailbox, owner string) map[int64]bool {
+	own, err := objectstore.Open(mailbox)
+	if err != nil {
+		return map[int64]bool{}
+	}
+	defer own.Close()
+	set, err := own.PublicReadSet(owner)
+	if err != nil {
+		return map[int64]bool{}
+	}
+	return set
+}
+
+// markPublicRead records, in the caller's OWN store (mailbox), that the user has
+// read a public message. Best-effort by design: public-folder reading must
+// succeed even when the per-user read state cannot be written.
+func (s *Server) markPublicRead(mailbox, owner string, messageID int64) {
+	own, err := objectstore.Open(mailbox)
+	if err != nil {
+		return
+	}
+	defer own.Close()
+	_ = own.MarkPublicMessageRead(owner, messageID)
 }
 
 // publicOwner returns the caller's domain — the key the SPA shows beside the

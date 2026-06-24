@@ -27,6 +27,20 @@ func tableNames(t *testing.T, db *sql.DB) []string {
 	return names
 }
 
+// objectTargetVersion is the highest object-store schema version this binary
+// supports: the baseline carried forward by every forward migration. A fresh
+// store is migrated up to it on open, so it is the version a freshly created
+// store records and the threshold above which a store is refused as too new.
+func objectTargetVersion() int {
+	target := objectSchemaVersion
+	for _, m := range objectMigrations {
+		if m.Version > target {
+			target = m.Version
+		}
+	}
+	return target
+}
+
 func TestOpenCreatesSchema(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "alice")
 	s, err := Open(dir)
@@ -39,8 +53,9 @@ func TestOpenCreatesSchema(t *testing.T) {
 		"allocated_eids", "attachment_properties", "attachments", "autoreply_ts",
 		"configurations", "folder_properties", "folders", "message_changes",
 		"message_properties", "messages", "msgtime_index", "named_properties",
-		"permissions", "receive_table", "recipients", "recipients_properties",
-		"replguidmap", "rules", "search_result", "search_scopes", "store_properties",
+		"permissions", "public_read_state", "receive_table", "recipients",
+		"recipients_properties", "replguidmap", "rules", "search_result",
+		"search_scopes", "store_properties",
 	}
 	slices.Sort(wantObjects)
 	if got := tableNames(t, s.objdb); !slices.Equal(got, wantObjects) {
@@ -57,8 +72,8 @@ func TestOpenCreatesSchema(t *testing.T) {
 	if err := s.objdb.QueryRow(`SELECT config_value FROM configurations WHERE config_id=?`, cfgSchemaVersion).Scan(&v); err != nil {
 		t.Fatal(err)
 	}
-	if v != objectSchemaVersion {
-		t.Errorf("object schema version = %d, want %d", v, objectSchemaVersion)
+	if want := objectTargetVersion(); v != want {
+		t.Errorf("object schema version = %d, want %d", v, want)
 	}
 }
 
@@ -86,10 +101,11 @@ func TestOpenRefusesNewerSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Close()
-	setObjectVersion(t, dir, objectSchemaVersion+1)
+	target := objectTargetVersion()
+	setObjectVersion(t, dir, target+1)
 	if s, err := Open(dir); err == nil {
 		s.Close()
-		t.Fatalf("opened a store at version %d (binary supports %d); want refusal", objectSchemaVersion+1, objectSchemaVersion)
+		t.Fatalf("opened a store at version %d (binary supports %d); want refusal", target+1, target)
 	}
 }
 
@@ -122,7 +138,7 @@ func TestReopenIsIdempotent(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer s2.Close()
-	if got := tableNames(t, s2.objdb); len(got) != 21 {
-		t.Errorf("object store has %d tables after reopen, want 21", len(got))
+	if got := tableNames(t, s2.objdb); len(got) != 22 {
+		t.Errorf("object store has %d tables after reopen, want 22", len(got))
 	}
 }
