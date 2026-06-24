@@ -583,9 +583,12 @@ export function ComposePage() {
 
     // S/MIME (browser-held key) is applied client-side, so the message must be
     // built, signed/encrypted here, and sent raw. Guard the unsupported combos.
+    // Browser-mode S/MIME (a key in this browser) signs/encrypts here and sends
+    // raw; otherwise the server holds the key and does it on /mail/send.
+    const useBrowserSmime = (signMessage || encryptMessage) && (await smimeStore.hasIdentity())
     if (signMessage || encryptMessage) {
       if (sendAtISO) { toast.error(t("compose.smimeNoSchedule")); return }
-      if (signMessage && !smimeStore.isUnlocked()) { toast.error(t("compose.smimeLocked")); return }
+      if (useBrowserSmime && signMessage && !smimeStore.isUnlocked()) { toast.error(t("compose.smimeLocked")); return }
     }
 
     setSending(true)
@@ -622,7 +625,7 @@ export function ComposePage() {
         sendAt: sendAtISO,
         is_html: richTextMode,
       }
-      if (signMessage || encryptMessage) {
+      if (useBrowserSmime) {
         // Build the MIME server-side, then sign and/or encrypt it in the browser
         // (sign-then-encrypt), and relay the raw result. The key never leaves here.
         const { raw } = await api.buildMail(sendPayload)
@@ -643,6 +646,9 @@ export function ComposePage() {
           mime = smimeStore.encryptMime(mime, certs)
         }
         await api.sendRawMail(btoa(mime), sendPayload.to, sendPayload.cc, sendPayload.bcc)
+      } else if (signMessage || encryptMessage) {
+        // Server-mode: the server holds the key and signs/encrypts on delivery.
+        await api.sendMail({ ...sendPayload, signMessage, encryptMessage })
       } else {
         await api.sendMail(sendPayload)
       }

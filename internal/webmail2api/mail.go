@@ -229,12 +229,22 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	d := buildMailDetail(raw, folder, uid)
-	// S/MIME: the server VERIFIES signatures (no private key needed — only the
-	// message's embedded certificate) and flags encryption. Decryption needs the
-	// browser-held key, so encrypted bodies are decrypted client-side.
+	// S/MIME: signature verification needs no private key (only the message's
+	// embedded certificate), so the server always verifies signed mail. Decryption
+	// needs the key: a SERVER-mode reader's key is here (decrypt server-side); a
+	// browser-mode reader decrypts client-side, so the server only flags it.
 	d.SmimeSigned = smime.IsSigned(raw)
 	d.SmimeEncrypted = smime.IsEncrypted(raw)
-	if d.SmimeSigned && !d.SmimeEncrypted {
+	switch {
+	case d.SmimeEncrypted && isServerMode(st):
+		content, sm := s.smimeOpen(st, raw)
+		inner := mime.ParseStructure(content)
+		body, inlined := inlineCIDImages(bestBody(inner), inner)
+		d.Body = body
+		d.Attachments = collectAttachments(inner, inlined)
+		d.HasAttachments = len(d.Attachments) > 0
+		d.SmimeVerified, d.SmimeSignedBy = sm.Verified, sm.SignedBy
+	case d.SmimeSigned && !d.SmimeEncrypted:
 		if signer, _, err := smime.Verify(raw); err == nil {
 			d.SmimeVerified = true
 			d.SmimeSignedBy = certEmail(signer)

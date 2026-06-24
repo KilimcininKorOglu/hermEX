@@ -234,12 +234,15 @@ export function SettingsPage() {
     }
   }
 
-  // S/MIME identity lives in THIS browser (IndexedDB, via utils/smime); the server
-  // only holds the published public certificate. The private key never leaves.
+  // S/MIME identity: "browser" mode keeps the key in THIS browser (IndexedDB) and
+  // the server holds only the public cert; "server" mode keeps the key on the
+  // server (encrypted at rest) so it signs/decrypts and works across devices.
   const [smimeCert, setSmimeCert] = useState<CertInfo | null>(null)
+  const [smimeMode, setSmimeMode] = useState<"browser" | "server" | null>(null)
   const [smimeUnlocked, setSmimeUnlocked] = useState(false)
   const [smimeLoading, setSmimeLoading] = useState(true)
   const [smimeImportOpen, setSmimeImportOpen] = useState(false)
+  const [smimeImportMode, setSmimeImportMode] = useState<"browser" | "server">("browser")
   const [smimeFile, setSmimeFile] = useState<File | null>(null)
   const [smimePassword, setSmimePassword] = useState("")
   const [smimeSaving, setSmimeSaving] = useState(false)
@@ -251,10 +254,20 @@ export function SettingsPage() {
   const loadSmimeCert = useCallback(async () => {
     setSmimeLoading(true)
     try {
-      setSmimeCert(await smimeStore.storedCertInfo())
-      setSmimeUnlocked(smimeStore.isUnlocked())
+      const local = await smimeStore.storedCertInfo()
+      if (local) {
+        setSmimeCert(local); setSmimeMode("browser"); setSmimeUnlocked(smimeStore.isUnlocked())
+      } else {
+        const res = await api.getSMIMECertificate()
+        if (!("hasKeys" in res) && res.mode === "server") {
+          setSmimeCert({ subject: res.subject, issuer: res.issuer, notBefore: res.notBefore, notAfter: res.notAfter, serialNumber: res.serialNumber, fingerprint: res.fingerprint })
+          setSmimeMode("server"); setSmimeUnlocked(true)
+        } else {
+          setSmimeCert(null); setSmimeMode(null)
+        }
+      }
     } catch {
-      setSmimeCert(null)
+      setSmimeCert(null); setSmimeMode(null)
     } finally {
       setSmimeLoading(false)
     }
@@ -267,11 +280,20 @@ export function SettingsPage() {
     setSmimeSaving(true)
     try {
       const bytes = await smimeFile.arrayBuffer()
-      const { info, certPem } = await smimeStore.importP12(bytes, smimePassword)
-      // Publish only the PUBLIC certificate so others can encrypt to us.
-      await api.uploadSMIMECertificate(certPem)
-      setSmimeCert(info)
-      setSmimeUnlocked(true)
+      if (smimeImportMode === "server") {
+        // Server mode: send the .p12 + its password; the server stores the key.
+        const arr = new Uint8Array(bytes)
+        let bin = ""
+        for (let i = 0; i < arr.length; i++) bin += String.fromCharCode(arr[i])
+        const info = await api.uploadServerSMIME(btoa(bin), smimePassword)
+        setSmimeCert({ subject: info.subject, issuer: info.issuer, notBefore: info.notBefore, notAfter: info.notAfter, serialNumber: info.serialNumber, fingerprint: info.fingerprint })
+        setSmimeMode("server"); setSmimeUnlocked(true)
+      } else {
+        // Browser mode: store the key in IndexedDB, publish only the public cert.
+        const { info, certPem } = await smimeStore.importP12(bytes, smimePassword)
+        await api.uploadSMIMECertificate(certPem)
+        setSmimeCert(info); setSmimeMode("browser"); setSmimeUnlocked(true)
+      }
       setSmimeImportOpen(false)
       setSmimeFile(null)
       setSmimePassword("")
@@ -305,6 +327,7 @@ export function SettingsPage() {
       await smimeStore.removeIdentity()
       await api.deleteSMIMECertificate().catch(() => {})
       setSmimeCert(null)
+      setSmimeMode(null)
       setSmimeUnlocked(false)
       setSmimeDeleteOpen(false)
       toast.success(t("settings.smimeCertDeleted"))
@@ -1414,14 +1437,16 @@ export function SettingsPage() {
                 <p className="text-xs text-muted-foreground mt-1">{t("common.loading")}</p>
               ) : smimeCert ? (
                 <p className="text-xs text-muted-foreground mt-1 truncate">
-                  {smimeCert.subject} · {smimeUnlocked ? t("settings.smimeUnlockedBadge") : t("settings.smimeLockedBadge")}
+                  {smimeCert.subject} · {smimeMode === "server"
+                    ? t("settings.smimeServerBadge")
+                    : (smimeUnlocked ? t("settings.smimeUnlockedBadge") : t("settings.smimeLockedBadge"))}
                 </p>
               ) : (
                 <p className="text-xs text-muted-foreground mt-1">{t("settings.smimeCertNone")}</p>
               )}
             </div>
             <div className="flex items-center gap-2 ml-4">
-              {smimeCert && !smimeUnlocked && (
+              {smimeCert && smimeMode === "browser" && !smimeUnlocked && (
                 <Button variant="outline" size="sm" onClick={() => setSmimeUnlockOpen(true)}>
                   {t("settings.smimeUnlock")}
                 </Button>
@@ -1614,6 +1639,27 @@ export function SettingsPage() {
           )}
 
           <div className="space-y-3">
+            <div className="space-y-1">
+              <Label>{t("settings.smimeStorageLabel")}</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSmimeImportMode("browser")}
+                  className={`rounded-md border p-2 text-left text-xs ${smimeImportMode === "browser" ? "border-primary bg-primary/5" : "border-input"}`}
+                >
+                  <div className="font-medium">{t("settings.smimeStoreBrowser")}</div>
+                  <div className="text-muted-foreground">{t("settings.smimeStoreBrowserHint")}</div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSmimeImportMode("server")}
+                  className={`rounded-md border p-2 text-left text-xs ${smimeImportMode === "server" ? "border-primary bg-primary/5" : "border-input"}`}
+                >
+                  <div className="font-medium">{t("settings.smimeStoreServer")}</div>
+                  <div className="text-muted-foreground">{t("settings.smimeStoreServerHint")}</div>
+                </button>
+              </div>
+            </div>
             <div className="space-y-1">
               <Label htmlFor="smime-p12">{t("settings.smimeP12File")}</Label>
               <Input

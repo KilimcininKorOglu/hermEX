@@ -486,7 +486,13 @@
       "smimeUnlocked": "S/MIME bu oturum için açıldı",
       "smimeUnlockFailed": "Yanlış parola veya okunamayan kimlik",
       "smimeUnlockedBadge": "açık",
-      "smimeLockedBadge": "kilitli"
+      "smimeLockedBadge": "kilitli",
+      "smimeServerBadge": "sunucuda",
+      "smimeStorageLabel": "Private key'in nerede saklansın",
+      "smimeStoreBrowser": "Bu tarayıcı",
+      "smimeStoreBrowserHint": "Key bu tarayıcıdan çıkmaz; yalnızca burada çalışır.",
+      "smimeStoreServer": "Sunucu",
+      "smimeStoreServerHint": "Sunucuda şifreli, her cihazda çalışır."
     },
     "shortcuts": {
       "title": "Klavye Kısayolları",

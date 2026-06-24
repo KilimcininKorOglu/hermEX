@@ -121,9 +121,10 @@ export function EmailDetailPage() {
           // bare addresses (result.to) with names in result.toNames (same index).
           const fromEmail = result.from
           const fromName = result.fromName || result.from
-          // S/MIME encrypted: decrypt client-side with the browser-held key.
+          // S/MIME encrypted: a browser-mode reader (key in this browser) decrypts
+          // client-side; a server-mode reader's message was already decrypted server-side.
           let content = result.body
-          if (result.smimeEncrypted) {
+          if (result.smimeEncrypted && (await smimeStore.hasIdentity())) {
             if (smimeStore.isUnlocked()) {
               try {
                 const inner = smimeStore.decryptMime(await api.getMessageRaw(result.id))

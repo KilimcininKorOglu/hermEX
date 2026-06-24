@@ -13,6 +13,10 @@ import (
 // unlocks per session and never persists. Both live as JSON on a single store
 // property, mirroring how webmail settings are stored — no bespoke table.
 type SmimeIdentity struct {
+	// Mode is "server" (the encrypted P12 below holds the key, the server signs
+	// and decrypts) or "browser" (only Cert is set; the private key lives in the
+	// user's browser and the server never holds it).
+	Mode string
 	P12  []byte
 	Cert []byte
 }
@@ -20,13 +24,14 @@ type SmimeIdentity struct {
 // identityBlob is the JSON shape persisted in PrSmimeIdentity; json encodes
 // []byte fields as base64.
 type identityBlob struct {
+	Mode string `json:"mode,omitempty"`
 	P12  []byte `json:"p12"`
 	Cert []byte `json:"cert"`
 }
 
 // SetSmimeIdentity stores the user's S/MIME identity, replacing any previous one.
 func (s *Store) SetSmimeIdentity(id SmimeIdentity) error {
-	blob, err := json.Marshal(identityBlob{P12: id.P12, Cert: id.Cert})
+	blob, err := json.Marshal(identityBlob{Mode: id.Mode, P12: id.P12, Cert: id.Cert})
 	if err != nil {
 		return err
 	}
@@ -52,7 +57,15 @@ func (s *Store) GetSmimeIdentity() (id SmimeIdentity, ok bool, err error) {
 	if err := json.Unmarshal([]byte(str), &b); err != nil {
 		return SmimeIdentity{}, false, err
 	}
-	return SmimeIdentity{P12: b.P12, Cert: b.Cert}, true, nil
+	mode := b.Mode
+	if mode == "" { // infer for records written before Mode existed
+		if len(b.P12) > 0 {
+			mode = "server"
+		} else {
+			mode = "browser"
+		}
+	}
+	return SmimeIdentity{Mode: mode, P12: b.P12, Cert: b.Cert}, true, nil
 }
 
 // ClearSmimeIdentity removes the stored S/MIME identity.

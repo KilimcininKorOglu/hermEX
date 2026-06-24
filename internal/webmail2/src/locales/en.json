@@ -486,7 +486,13 @@
       "smimeUnlocked": "S/MIME unlocked for this session",
       "smimeUnlockFailed": "Wrong password or unreadable identity",
       "smimeUnlockedBadge": "unlocked",
-      "smimeLockedBadge": "locked"
+      "smimeLockedBadge": "locked",
+      "smimeServerBadge": "on the server",
+      "smimeStorageLabel": "Where to store your private key",
+      "smimeStoreBrowser": "This browser",
+      "smimeStoreBrowserHint": "Key never leaves this browser; works only here.",
+      "smimeStoreServer": "The server",
+      "smimeStoreServerHint": "Encrypted at rest; works on every device."
     },
     "shortcuts": {
       "title": "Keyboard Shortcuts",

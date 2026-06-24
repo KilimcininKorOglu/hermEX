@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"math/big"
@@ -16,7 +18,59 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/objectstore"
+	"hermex/internal/smime"
+
+	pkcs12 "software.sslmate.com/src/go-pkcs12"
 )
+
+// TestSmimeServerMode proves a .p12 uploaded in server mode is stored encrypted at
+// rest, unlocks server-side, and signs — the server-held-key path.
+func TestSmimeServerMode(t *testing.T) {
+	dir := t.TempDir()
+	if st, err := objectstore.Open(dir); err != nil {
+		t.Fatalf("open: %v", err)
+	} else {
+		st.Close()
+	}
+	_, certPEM, keyPEM := makeTestIdentity(t)
+	pair, err := tls.X509KeyPair([]byte(certPEM), []byte(keyPEM))
+	if err != nil {
+		t.Fatalf("pair: %v", err)
+	}
+	cert, _ := x509.ParseCertificate(pair.Certificate[0])
+	p12, err := pkcs12.Modern.Encode(pair.PrivateKey, cert, nil, "userpass")
+	if err != nil {
+		t.Fatalf("encode p12: %v", err)
+	}
+	secret := []byte("smime-test-secret")
+	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.test", secret, "", false)
+
+	rec := smimePost(t, srv, secret, dir, map[string]string{
+		"mode": "server", "p12": base64.StdEncoding.EncodeToString(p12), "passphrase": "userpass",
+	})
+	if rec.Code != 200 {
+		t.Fatalf("server upload = %d: %s", rec.Code, rec.Body.String())
+	}
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer st.Close()
+	id, ok, _ := st.GetSmimeIdentity()
+	if !ok || id.Mode != "server" || len(id.P12) == 0 {
+		t.Fatalf("not stored as server mode: ok=%v mode=%q p12=%d", ok, id.Mode, len(id.P12))
+	}
+	if _, _, ok := unlockSmimeIdentity(st, secret); !ok {
+		t.Fatal("server identity did not unlock")
+	}
+	out, err := srv.applySmime(dir, []byte("From: a@b.test\r\nSubject: hi\r\n\r\nbody\r\n"), nil, true, false)
+	if err != nil {
+		t.Fatalf("server-mode sign: %v", err)
+	}
+	if !smime.IsSigned(out) {
+		t.Error("server-mode output is not signed")
+	}
+}
 
 // makeTestIdentity builds a throwaway self-signed identity, returning the cert in
 // DER plus the cert and private key in PEM.

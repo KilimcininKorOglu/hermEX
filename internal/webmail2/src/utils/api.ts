@@ -212,7 +212,8 @@ export interface SMIMECertInfo {
   notAfter: string
   serialNumber: string
   fingerprint: string
-  hasPrivateKey: boolean
+  hasPrivateKey?: boolean
+  mode?: string // "browser" | "server"
 }
 
 export interface DirectoryEntry {
@@ -1154,9 +1155,14 @@ class API {
     return this.get<{ hasKeys: false } | SMIMECertInfo>('/smime/certificate')
   }
 
-  /** Publishes the user's PUBLIC certificate (PEM). The private key stays in the browser. */
+  /** Browser mode: publishes the user's PUBLIC certificate (PEM). The key stays in the browser. */
   async uploadSMIMECertificate(cert: string): Promise<SMIMECertInfo> {
-    return this.post<SMIMECertInfo>('/smime/certificate', { cert })
+    return this.post<SMIMECertInfo>('/smime/certificate', { mode: 'browser', cert })
+  }
+
+  /** Server mode: uploads the .p12 (base64) and its password; the server stores the key at rest. */
+  async uploadServerSMIME(p12: string, passphrase: string): Promise<SMIMECertInfo> {
+    return this.post<SMIMECertInfo>('/smime/certificate', { mode: 'server', p12, passphrase })
   }
 
   /** Builds the outgoing MIME server-side and returns it unsent (base64) for client-side S/MIME. */
