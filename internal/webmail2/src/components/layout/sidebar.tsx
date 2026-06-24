@@ -546,7 +546,7 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
     <TooltipProvider>
     <aside
       className={cn(
-        "fixed left-0 top-0 z-40 h-screen border-r bg-card transition-all duration-300 ease-in-out",
+        "fixed left-0 top-0 z-40 flex h-screen flex-col border-r bg-card transition-all duration-300 ease-in-out",
         isExpanded ? "w-64" : "w-16",
         // Hidden off-canvas on small screens unless toggled open; always shown on lg+.
         mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
@@ -555,7 +555,7 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
       onMouseLeave={() => setHovered(false)}
     >
       {/* Logo Area */}
-      <div className="flex h-16 items-center justify-between border-b px-4">
+      <div className="flex h-16 shrink-0 items-center justify-between border-b px-4">
         <div className={cn("flex items-center gap-3", !isExpanded && "justify-center w-full")}>
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-primary/80 shadow-lg shadow-primary/25">
             <svg
@@ -585,7 +585,7 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
       </div>
 
       {/* Compose Button */}
-      <div className="p-3">
+      <div className="shrink-0 p-3">
         <Button
           className={cn(
             "w-full bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary shadow-lg shadow-primary/25 transition-all",
@@ -600,7 +600,7 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
       </div>
 
       {/* Main Navigation */}
-      <nav className="flex-1 space-y-1 px-2 py-2 overflow-y-auto" onClick={() => onMobileClose?.()}>
+      <nav className="flex-1 min-h-0 space-y-1 px-2 py-2 overflow-y-auto" onClick={() => onMobileClose?.()}>
         {mainNav.map((item) => (
           <NavItemComponent key={item.path} item={item} isExpanded={isExpanded} />
         ))}
@@ -1039,7 +1039,7 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
       </Dialog>
 
       {/* Bottom Actions */}
-      <div className="border-t p-2">
+      <div className="shrink-0 border-t p-2">
         <NavLink
           to="/settings"
           className={({ isActive }) =>
