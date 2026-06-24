@@ -121,15 +121,16 @@ func (c *conn) cmdExpunge(tag string) {
 	c.ok(tag, "EXPUNGE completed")
 }
 
-// doExpunge deletes every \Deleted message from the store and rebuilds the
-// snapshot. When emit is true it sends an untagged EXPUNGE per removed message,
-// numbered against the shrinking mailbox (RFC 3501 §7.4.1).
+// doExpunge soft-deletes every \Deleted message into the Recoverable Items
+// dumpster and rebuilds the snapshot. The messages leave the mailbox but stay
+// recoverable until retention. When emit is true it sends an untagged EXPUNGE per
+// removed message, numbered against the shrinking mailbox (RFC 3501 §7.4.1).
 func (c *conn) doExpunge(emit bool) {
 	var survivors []objectstore.MessageInfo
 	seq := uint32(1)
 	for _, m := range c.sel.msgs {
 		if m.Flags&objectstore.FlagDeleted != 0 {
-			if err := c.curStore().DeleteMessage(c.sel.id, m.UID); err == nil && emit {
+			if err := c.curStore().SoftDeleteMessage(c.sel.id, m.UID); err == nil && emit {
 				c.untagged("%d EXPUNGE", seq) // removed; the next message takes this slot
 			}
 			continue
