@@ -186,3 +186,43 @@ func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
 	// list. Return an empty thread set so the page renders.
 	writeJSON(w, http.StatusOK, map[string]any{"threads": []any{}})
 }
+
+// handleMarkAllRead marks every unread message in a folder \Seen, in the caller's
+// own or a shared mailbox (?owner), and reports how many it changed.
+func (s *Server) handleMarkAllRead(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Folder string `json:"folder"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	mb, ok := s.openMailbox(w, r)
+	if !ok {
+		return
+	}
+	defer mb.st.Close()
+	fid, ok := folderFID(req.Folder)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown folder"})
+		return
+	}
+	if !mb.readAllowed(fid) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	msgs, err := mb.st.ListMessages(fid)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot read folder"})
+		return
+	}
+	marked := 0
+	for _, m := range msgs {
+		if m.Flags&objectstore.FlagSeen == 0 {
+			if err := mb.st.SetMessageFlags(fid, m.UID, m.Flags|objectstore.FlagSeen); err == nil {
+				marked++
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"marked": marked})
+}

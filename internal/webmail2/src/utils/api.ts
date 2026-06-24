@@ -850,6 +850,11 @@ class API {
     await this.post(`/mail/move${ownerQuery(owner ?? this.mailboxOwner, '?')}`, { id, to })
   }
 
+  // markAllRead marks every unread message in a folder as read in one call.
+  async markAllRead(folder: string, owner?: string): Promise<{ marked?: number }> {
+    return this.post<{ marked?: number }>(`/mail/mark-all-read${ownerQuery(owner ?? this.mailboxOwner, '?')}`, { folder })
+  }
+
   // Filters
   async getFilters(): Promise<{ filters?: Filter[] }> {
     return this.get<{ filters?: Filter[] }>('/filters')

@@ -6,6 +6,7 @@ import {
   Archive,
   Trash2,
   MailOpen,
+  CheckCheck,
   Paperclip,
   RefreshCw,
   ChevronLeft,
@@ -251,6 +252,17 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
     }
   }
 
+  const handleMarkAllRead = async () => {
+    try {
+      const { marked } = await api.markAllRead(folder)
+      refreshInbox()
+      toast.success(t("inbox.allMarkedAsRead", { count: String(marked ?? 0) }))
+    } catch (err) {
+      console.error("Failed to mark all as read:", err)
+      toast.error(t("inbox.failedToMarkAsRead"))
+    }
+  }
+
   const filteredEmails = emails
     .filter((email) => {
       if (activeFilter === "unread") return !email.read
@@ -418,9 +430,14 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
               </Button>
             </div>
           ) : (
-            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleRefresh}>
-              <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleMarkAllRead} title={t("inbox.markAllRead")}>
+                <CheckCheck className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleRefresh}>
+                <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+              </Button>
+            </div>
           )}
 
           {unreadCount > 0 && activeFilter === "all" && (

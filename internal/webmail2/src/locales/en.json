@@ -97,6 +97,8 @@
     "failedToDelete": "Failed to delete messages",
     "messageMarkedAsRead": "{{count}} message marked as read",
     "messagesMarkedAsRead": "{{count}} messages marked as read",
+    "markAllRead": "Mark all as read",
+    "allMarkedAsRead": "{{count}} messages marked as read",
     "addStar": "Add star",
     "removeStar": "Remove star",
     "selectedCount": "{{count}} selected",

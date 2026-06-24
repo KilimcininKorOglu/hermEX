@@ -97,6 +97,8 @@
     "failedToDelete": "Mesajlar silinemedi",
     "messageMarkedAsRead": "{{count}} mesaj okundu olarak işaretlendi",
     "messagesMarkedAsRead": "{{count}} mesaj okundu olarak işaretlendi",
+    "markAllRead": "Tümünü okundu işaretle",
+    "allMarkedAsRead": "{{count}} mesaj okundu olarak işaretlendi",
     "addStar": "Yıldız ekle",
     "removeStar": "Yıldızı kaldır",
     "selectedCount": "{{count}} seçildi",
