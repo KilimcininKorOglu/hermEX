@@ -32,14 +32,6 @@ func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
 	s.emptyAuthed(w, r, "errors")
 }
 
-func (s *Server) handleSmimeCert(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.session(r); !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{})
-}
-
 // emptyAuthed writes {key: []} for an authenticated caller (401 otherwise).
 func (s *Server) emptyAuthed(w http.ResponseWriter, r *http.Request, key string) {
 	if _, ok := s.session(r); !ok {
