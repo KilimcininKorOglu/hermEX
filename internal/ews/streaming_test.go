@@ -36,7 +36,9 @@ func streamPost(t *testing.T, ts *httptest.Server, ids []string, timeoutMin int)
 	t.Helper()
 	var b strings.Builder
 	for _, id := range ids {
-		b.WriteString(`<t:SubscriptionId>` + id + `</t:SubscriptionId>`)
+		b.WriteString(`<t:SubscriptionId>`)
+		b.WriteString(id)
+		b.WriteString(`</t:SubscriptionId>`)
 	}
 	inner := `<GetStreamingEvents xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
 		`<SubscriptionIds>` + b.String() + `</SubscriptionIds>` +

@@ -107,7 +107,9 @@ func getServerTimeZonesReq(ids ...string) string {
 		var b strings.Builder
 		b.WriteString(`<Ids xmlns:t="` + nsTypes + `">`)
 		for _, id := range ids {
-			b.WriteString(`<t:Id>` + id + `</t:Id>`)
+			b.WriteString(`<t:Id>`)
+			b.WriteString(id)
+			b.WriteString(`</t:Id>`)
 		}
 		b.WriteString(`</Ids>`)
 		inner = b.String()

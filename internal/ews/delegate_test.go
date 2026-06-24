@@ -546,17 +546,15 @@ func crossMailboxFindItem(distinguishedID, mailbox string) string {
 
 // firstItemID extracts the first ItemId Id attribute value from a SOAP response.
 func firstItemID(out string) string {
-	const marker = `ItemId Id="`
-	i := strings.Index(out, marker)
-	if i < 0 {
+	_, rest, ok := strings.Cut(out, `ItemId Id="`)
+	if !ok {
 		return ""
 	}
-	rest := out[i+len(marker):]
-	j := strings.IndexByte(rest, '"')
-	if j < 0 {
+	val, _, ok := strings.Cut(rest, `"`)
+	if !ok {
 		return ""
 	}
-	return rest[:j]
+	return val
 }
 
 // seedInboxMessage appends one message with the given subject to a mailbox's inbox,
@@ -791,17 +789,15 @@ func crossMailboxFindFolder(distinguishedID, mailbox string) string {
 // firstFolderID extracts the first FolderId Id attribute value (the folder's own id,
 // emitted before its ParentFolderId) from a SOAP response.
 func firstFolderID(out string) string {
-	const marker = `<FolderId Id="`
-	i := strings.Index(out, marker)
-	if i < 0 {
+	_, rest, ok := strings.Cut(out, `<FolderId Id="`)
+	if !ok {
 		return ""
 	}
-	rest := out[i+len(marker):]
-	j := strings.IndexByte(rest, '"')
-	if j < 0 {
+	val, _, ok := strings.Cut(rest, `"`)
+	if !ok {
 		return ""
 	}
-	return rest[:j]
+	return val
 }
 
 // TestFindFolderCrossMailboxWithGrant confirms a caller granted visibility on another
@@ -1011,17 +1007,15 @@ func TestMeetingResponseCrossMailboxDenied(t *testing.T) {
 
 // firstSyncState extracts the SyncState token from a SyncFolderItems response.
 func firstSyncState(out string) string {
-	const open = "<SyncState>"
-	i := strings.Index(out, open)
-	if i < 0 {
+	_, rest, ok := strings.Cut(out, "<SyncState>")
+	if !ok {
 		return ""
 	}
-	rest := out[i+len(open):]
-	j := strings.Index(rest, "</SyncState>")
-	if j < 0 {
+	val, _, ok := strings.Cut(rest, "</SyncState>")
+	if !ok {
 		return ""
 	}
-	return rest[:j]
+	return val
 }
 
 func crossMailboxSyncItems(mailbox string) string {

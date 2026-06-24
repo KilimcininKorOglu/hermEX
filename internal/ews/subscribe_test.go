@@ -38,7 +38,9 @@ func subscribeInner(allFolders bool, distinguished string, eventTypes ...string)
 	}
 	var ets strings.Builder
 	for _, e := range eventTypes {
-		ets.WriteString(`<t:EventType>` + e + `</t:EventType>`)
+		ets.WriteString(`<t:EventType>`)
+		ets.WriteString(e)
+		ets.WriteString(`</t:EventType>`)
 	}
 	return `<Subscribe xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `">` +
 		`<t:PullSubscriptionRequest` + attr + `>` + folders +
