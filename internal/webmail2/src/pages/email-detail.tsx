@@ -124,6 +124,12 @@ export function EmailDetailPage() {
           // S/MIME encrypted: a browser-mode reader (key in this browser) decrypts
           // client-side; a server-mode reader's message was already decrypted server-side.
           let content = result.body
+          // S/MIME signal: the server fills these for cleartext-signed mail, but for
+          // a browser-mode encrypted message it never sees the decrypted signed inner,
+          // so the client overrides them after decrypting and verifying locally.
+          let smimeSigned = result.smimeSigned
+          let smimeVerified = result.smimeVerified
+          let smimeSignedBy = result.smimeSignedBy
           if (result.smimeEncrypted && (await smimeStore.hasIdentity())) {
             if (smimeStore.isUnlocked()) {
               try {
@@ -132,6 +138,14 @@ export function EmailDetailPage() {
                 content = extracted.html
                   ? extracted.body
                   : extracted.body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+                // Verify the inner signature in the browser — posting the decrypted
+                // signed content to the server would leak the plaintext.
+                const verdict = smimeStore.verifyMime(inner)
+                if (verdict) {
+                  smimeSigned = true
+                  smimeVerified = verdict.verified
+                  smimeSignedBy = verdict.signedBy
+                }
               } catch {
                 content = `<p>${t("emailDetail.smimeDecryptFailed")}</p>`
               }
@@ -152,10 +166,10 @@ export function EmailDetailPage() {
             labels: result.labels ?? [],
             attachments: result.attachments ?? [],
             folder: result.folder ?? "",
-            smimeSigned: result.smimeSigned,
+            smimeSigned,
             smimeEncrypted: result.smimeEncrypted,
-            smimeVerified: result.smimeVerified,
-            smimeSignedBy: result.smimeSignedBy,
+            smimeVerified,
+            smimeSignedBy,
           })
           // Mark the message read on open (server-side) if it was unread, so
           // the unread count reflects reading — standard mail-client behavior.

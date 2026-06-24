@@ -207,9 +207,11 @@ function parseEntity(mime: string): { headers: Record<string, string>; body: str
  */
 export function extractMimeBody(mime: string): { html: boolean; body: string } {
   const { headers, body } = parseEntity(mime)
-  const ct = (headers["content-type"] || "text/plain").toLowerCase()
+  const ctRaw = headers["content-type"] || "text/plain"
+  const ct = ctRaw.toLowerCase()
   if (ct.startsWith("multipart/")) {
-    const m = ct.match(/boundary="?([^";]+)"?/)
+    // boundaries are case-sensitive (RFC 2046): match against the original header.
+    const m = ctRaw.match(/boundary="?([^";]+)"?/i)
     if (m) {
       const parts = body.split("--" + m[1]).slice(1, -1)
       let fallback: { html: boolean; body: string } | null = null
@@ -275,6 +277,72 @@ export function decryptMime(raw: string): string {
   if (!recipient) throw new Error("this message is not encrypted to your certificate")
   p7.decrypt(recipient, key)
   return p7.content.getBytes()
+}
+
+/** signerEmail pulls the best email identifier out of a signer certificate. */
+function signerEmail(cert: forge.pki.Certificate): string {
+  const ext = cert.getExtension("subjectAltName") as
+    | { altNames?: { type: number; value: string }[] }
+    | undefined
+  const san = ext?.altNames?.find((n) => n.type === 1) // rfc822Name
+  if (san?.value) return san.value
+  const e =
+    cert.subject.getField("E") ||
+    cert.subject.getField({ type: "1.2.840.113549.1.9.1" })
+  if (e?.value) return e.value
+  const cn = cert.subject.getField("CN")
+  return cn?.value ?? ""
+}
+
+/**
+ * verifyMime checks the signature on a decrypted multipart/signed entity entirely
+ * in the browser. For browser-mode encrypted-then-signed mail the server never sees
+ * the decrypted content — posting it for verification would leak the plaintext — so
+ * the check must run client-side. Our sign path omits signedAttrs, so the signature
+ * is a plain RSA(SHA-256(content)): extract the signer certificate and signature
+ * from the detached SignedData, hash the exact signed bytes (the content part
+ * between the first two boundaries, as signMime emitted them), and RSA-verify.
+ * Returns null when the entity is not a multipart/signed structure.
+ */
+export function verifyMime(mime: string): { verified: boolean; signedBy: string } | null {
+  const { headers, body } = parseEntity(mime)
+  const ctRaw = headers["content-type"] || ""
+  if (!ctRaw.toLowerCase().startsWith("multipart/signed")) return null
+  // MIME boundaries are case-sensitive (RFC 2046) — read it from the original
+  // header, never a lower-cased copy, or an external client's mixed-case boundary
+  // silently fails extraction and the signature reads as invalid.
+  const m = ctRaw.match(/boundary="?([^";]+)"?/i)
+  if (!m) return null
+  const dashB = "--" + m[1]
+  const startMarker = dashB + "\r\n"
+  const i1 = body.indexOf(startMarker)
+  if (i1 < 0) return null
+  const contentStart = i1 + startMarker.length
+  const i2 = body.indexOf("\r\n" + dashB, contentStart)
+  if (i2 < 0) return null
+  // the exact bytes that were signed: the content part, no trailing CRLF (that
+  // CRLF belongs to the boundary delimiter, not the content).
+  const signedContent = body.slice(contentStart, i2)
+  const sigStart = i2 + ("\r\n" + dashB + "\r\n").length
+  const i3 = body.indexOf("\r\n" + dashB, sigStart)
+  const sigPart = body.slice(sigStart, i3 < 0 ? undefined : i3)
+  const { headers: sh, body: sb } = parseEntity(sigPart)
+  const sigDer = decodeCTE(sb, sh["content-transfer-encoding"] || "base64")
+  try {
+    const p7 = forge.pkcs7.messageFromAsn1(forge.asn1.fromDer(sigDer)) as unknown as {
+      certificates: forge.pki.Certificate[]
+      rawCapture: { signature: string }
+    }
+    const cert = p7.certificates[0]
+    const sig = p7.rawCapture.signature
+    if (!cert || !sig) return { verified: false, signedBy: "" }
+    const md = forge.md.sha256.create()
+    md.update(signedContent)
+    const verified = (cert.publicKey as forge.pki.rsa.PublicKey).verify(md.digest().bytes(), sig)
+    return { verified, signedBy: verified ? signerEmail(cert) : "" }
+  } catch {
+    return { verified: false, signedBy: "" }
+  }
 }
 
 /** crlf canonicalizes line endings to CRLF, as S/MIME signing requires. */
