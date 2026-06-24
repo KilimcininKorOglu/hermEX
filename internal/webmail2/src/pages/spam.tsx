@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom"
 import {
   AlertCircle,
   Trash2,
+  Eraser,
   MoreHorizontal,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -108,6 +109,19 @@ export function SpamPage() {
     }
   }
 
+  // handleEmptySpam permanently discards every message in the Junk folder in one
+  // server-side call (not a loop over the loaded page).
+  const handleEmptySpam = async () => {
+    try {
+      await api.emptyFolder("spam")
+      toast.success(t("spam.emptied"))
+      setSelected(new Set())
+      await loadSpam()
+    } catch {
+      toast.error(t("spam.emptyFailed"))
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -126,6 +140,15 @@ export function SpamPage() {
           >
             <Trash2 className="h-4 w-4 mr-1" />
             {t("common.delete")}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleEmptySpam}
+            disabled={emails.length === 0 || loading}
+          >
+            <Eraser className="h-4 w-4 mr-1" />
+            {t("spam.empty")}
           </Button>
         </div>
       </div>

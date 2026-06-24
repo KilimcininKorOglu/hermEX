@@ -781,6 +781,13 @@ class API {
     await this.delete(`/folders/${encodeURIComponent(name)}`)
   }
 
+  // emptyFolder removes every message from a folder: permanently from Trash/Spam,
+  // otherwise the messages move to Trash. name is a built-in slug (trash/spam) or
+  // a custom folder's display name.
+  async emptyFolder(name: string): Promise<{ emptied?: number }> {
+    return this.post<{ emptied?: number }>(`/folders/${encodeURIComponent(name)}/empty`, {})
+  }
+
   // Saved searches (persistent MAPI-style search folders).
   async listSearchFolders(): Promise<{ search_folders?: SearchFolder[] }> {
     return this.get<{ search_folders?: SearchFolder[] }>('/search-folders')

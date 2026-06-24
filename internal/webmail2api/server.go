@@ -129,6 +129,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/folders", s.handleCreateFolder)
 	mux.HandleFunc("PUT /api/v1/folders/{current}", s.handleRenameFolder)
 	mux.HandleFunc("DELETE /api/v1/folders/{name}", s.handleDeleteFolder)
+	mux.HandleFunc("POST /api/v1/folders/{name}/empty", s.handleEmptyFolder)
 
 	// Contacts.
 	mux.HandleFunc("GET /api/v1/contacts", s.handleGetContacts)

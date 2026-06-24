@@ -29,6 +29,7 @@ import {
   Bookmark,
   BookmarkPlus,
   Share2,
+  Eraser,
 } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
@@ -395,6 +396,22 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
     }
   }
 
+  // handleEmptyFolder discards a custom folder's contents to Trash (server-side, in
+  // one call), then refreshes the folder list so its unread badge updates.
+  const handleEmptyFolder = async (name: string) => {
+    if (folderBusy) return
+    setFolderBusy(true)
+    try {
+      await api.emptyFolder(name)
+      toast.success(t("sidebar.folderEmptied"))
+      await loadCustomFolders()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("sidebar.folderEmptyFailed"))
+    } finally {
+      setFolderBusy(false)
+    }
+  }
+
   const openCreateSavedSearch = () => {
     setSfDialogMode("create")
     setSfEditId(null)
@@ -712,6 +729,10 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
                   >
                     <Share2 className="mr-2 h-4 w-4" />
                     {t("share.dialogTitle")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleEmptyFolder(name)}>
+                    <Eraser className="mr-2 h-4 w-4" />
+                    {t("sidebar.empty")}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     className="text-destructive"

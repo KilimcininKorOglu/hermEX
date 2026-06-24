@@ -871,7 +871,10 @@
     "emptyDescription": "Spam klasörünüz boş. Tüm spam mesajları burada görünür.",
     "deletedOne": "{{count}} mesaj kalıcı olarak silindi",
     "deletedMany": "{{count}} mesaj kalıcı olarak silindi",
-    "deleteFailed": "Mesajlar silinemedi"
+    "deleteFailed": "Mesajlar silinemedi",
+    "empty": "Spam'i boşalt",
+    "emptied": "Spam boşaltıldı",
+    "emptyFailed": "Spam boşaltılamadı"
   },
   "folder": {
     "title": "Klasör",
@@ -946,6 +949,9 @@
     "folderSaveFailed": "Klasör kaydedilemedi",
     "folderDeleted": "Klasör silindi",
     "folderDeleteFailed": "Klasör silinemedi",
+    "empty": "Klasörü boşalt",
+    "folderEmptied": "Klasör boşaltıldı",
+    "folderEmptyFailed": "Klasör boşaltılamadı",
     "newSavedSearchTitle": "Yeni Kayıtlı Arama",
     "editSavedSearchTitle": "Kayıtlı Aramayı Düzenle",
     "savedSearchDescription": "Kriterleri, eşleşen iletilerle dolan sanal bir klasör olarak kaydedin.",

@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"hermex/internal/directory"
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
 
@@ -100,6 +101,43 @@ func (s *Server) handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// handleEmptyFolder removes every message from a folder: permanently from Deleted
+// Items and Junk (where "empty" means discard), otherwise the messages move to
+// Deleted Items — the old webmail's empty-folder behaviour. It resolves a built-in
+// slug (trash/spam/...) or a custom folder by display name.
+func (s *Server) handleEmptyFolder(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	st, _, ok := s.openStore(w, r)
+	if !ok {
+		return
+	}
+	defer st.Close()
+	fid, ok := folderFID(name)
+	if !ok {
+		id, found := folderByName(st, name)
+		if !found {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "folder not found"})
+			return
+		}
+		fid = id
+	}
+	trash := int64(mapi.PrivateFIDDeletedItems)
+	permanent := fid == trash || fid == int64(mapi.PrivateFIDJunk)
+	msgs, err := st.ListMessages(fid)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot read messages"})
+		return
+	}
+	for _, m := range msgs {
+		if permanent {
+			_ = st.DeleteMessage(fid, m.UID)
+		} else {
+			_, _ = st.MoveMessage(fid, m.UID, trash)
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"emptied": len(msgs)})
 }
 
 // folderByName resolves a user folder by its display name (case-sensitive).

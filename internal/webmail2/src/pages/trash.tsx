@@ -110,13 +110,12 @@ export function TrashPage() {
 
   const handleEmptyTrash = async () => {
     try {
-      // Delete all trash emails one by one
-      for (const email of emails) {
-        await api.delete(`/mail/delete?id=${email.id}`)
-      }
+      // Empty the whole folder server-side in one call (permanent for Trash),
+      // not a client-side loop over only the loaded page.
+      await api.emptyFolder("trash")
       toast.success(t("trash.emptied"))
       setEmails([])
-    } catch (err) {
+    } catch {
       toast.error(t("trash.emptyFailed"))
     }
   }

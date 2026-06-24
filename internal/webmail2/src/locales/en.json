@@ -871,7 +871,10 @@
     "emptyDescription": "Your spam folder is empty. All spam messages appear here.",
     "deletedOne": "{{count}} message permanently deleted",
     "deletedMany": "{{count}} messages permanently deleted",
-    "deleteFailed": "Failed to delete messages"
+    "deleteFailed": "Failed to delete messages",
+    "empty": "Empty spam",
+    "emptied": "Spam emptied",
+    "emptyFailed": "Failed to empty spam"
   },
   "folder": {
     "title": "Folder",
@@ -946,6 +949,9 @@
     "folderSaveFailed": "Failed to save folder",
     "folderDeleted": "Folder deleted",
     "folderDeleteFailed": "Failed to delete folder",
+    "empty": "Empty folder",
+    "folderEmptied": "Folder emptied",
+    "folderEmptyFailed": "Failed to empty folder",
     "newSavedSearchTitle": "New Saved Search",
     "editSavedSearchTitle": "Edit Saved Search",
     "savedSearchDescription": "Save criteria as a virtual folder that fills with matching messages.",
