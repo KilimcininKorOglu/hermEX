@@ -407,3 +407,34 @@ func (s *Server) handleGetSharedMailboxes(w http.ResponseWriter, r *http.Request
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"shared_mailboxes": boxes})
 }
+
+// handleGetSharedAsOwner lists the shared mailboxes the caller OWNS (is a store
+// owner of) — the "share-out" view, the counterpart to /mailboxes/shared, which
+// lists mailboxes shared TO the caller. It returns bare addresses under the
+// shared_as_owner key, the shape the SPA reads. This path previously reused
+// handleGetSharedMailboxes and so returned the wrong key with the shared-to-me
+// data. Store paths are server-derived from the directory (never the request),
+// so a forged caller cannot probe an arbitrary store.
+func (s *Server) handleGetSharedAsOwner(w http.ResponseWriter, r *http.Request) {
+	c, ok := s.session(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	owned := []string{}
+	if lister, ok := s.auth.(directory.SharedMailboxLister); ok {
+		if list, err := lister.SharedMailboxes(); err == nil {
+			for _, b := range list {
+				st, err := objectstore.Open(b.StorePath)
+				if err != nil {
+					continue
+				}
+				if owner, err := st.IsStoreOwner(c.Email); err == nil && owner {
+					owned = append(owned, b.Address)
+				}
+				st.Close()
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"shared_as_owner": owned})
+}
