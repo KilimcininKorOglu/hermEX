@@ -105,7 +105,7 @@ func (s *Server) handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
 
 // handleEmptyFolder removes every message from a folder: permanently from Deleted
 // Items and Junk (where "empty" means discard), otherwise the messages move to
-// Deleted Items — the old webmail's empty-folder behaviour. It resolves a built-in
+// Deleted Items. This is the old webmail's empty-folder behaviour. It resolves a
 // slug (trash/spam/...) or a custom folder by display name.
 func (s *Server) handleEmptyFolder(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")

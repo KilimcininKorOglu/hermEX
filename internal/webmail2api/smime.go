@@ -107,7 +107,7 @@ func (s *Server) handleGetSmimeCert(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleUploadSmimeCert publishes the caller's S/MIME PUBLIC certificate (PEM or
-// DER). The matching private key stays in the browser and is never sent — a
+// DER). The matching private key stays in the browser and is never sent; a
 // request carrying a private key is rejected.
 func (s *Server) handleUploadSmimeCert(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.session(r)
@@ -206,7 +206,7 @@ func parseCertDER(data []byte) ([]byte, error) {
 	if block, _ := pem.Decode(data); block != nil {
 		return block.Bytes, nil
 	}
-	// Already DER (or invalid — ParseCertificate by the caller decides).
+	// Already DER (or invalid; ParseCertificate by the caller decides).
 	if _, err := x509.ParseCertificate(data); err != nil {
 		return nil, err
 	}

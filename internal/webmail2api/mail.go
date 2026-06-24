@@ -383,7 +383,7 @@ func (s *Server) handleMailFlag(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleMailFollowup sets a message's follow-up flag: a coloured flag with an
-// optional due date, marking it complete, or clearing it — the richer follow-up
+// optional due date, marking it complete, or clearing it: the richer follow-up
 // the old webmail exposed and the plain \Flagged star cannot. It mirrors the old
 // actions.go flag/flagcomplete/flagnone ops; SetFollowupFlag also syncs \Flagged.
 func (s *Server) handleMailFollowup(w http.ResponseWriter, r *http.Request) {

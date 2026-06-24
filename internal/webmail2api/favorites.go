@@ -35,7 +35,7 @@ func (s *Server) handleGetFavorites(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleToggleFavorite pins or unpins a folder in the user's sidebar favourites —
+// handleToggleFavorite pins or unpins a folder in the user's sidebar favourites,
 // the old webmail's favorite toggle, persisted in the webmail settings blob.
 func (s *Server) handleToggleFavorite(w http.ResponseWriter, r *http.Request) {
 	var in struct {

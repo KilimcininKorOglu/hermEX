@@ -14,7 +14,7 @@ import (
 )
 
 // TestMailFollowupSetsRichFlag proves POST /mail/followup ports the old webmail's
-// rich follow-up flag — a coloured flag with a due date, mark-complete, and clear —
+// rich follow-up flag: a coloured flag with a due date, mark-complete, and clear,
 // rather than the plain \Flagged star webmail2 had before.
 func TestMailFollowupSetsRichFlag(t *testing.T) {
 	dir := t.TempDir()

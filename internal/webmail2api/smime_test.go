@@ -24,7 +24,7 @@ import (
 )
 
 // TestSmimeServerMode proves a .p12 uploaded in server mode is stored encrypted at
-// rest, unlocks server-side, and signs — the server-held-key path.
+// rest, unlocks server-side, and signs: the server-held-key path.
 func TestSmimeServerMode(t *testing.T) {
 	dir := t.TempDir()
 	if st, err := objectstore.Open(dir); err != nil {
@@ -127,7 +127,7 @@ func smimeReq(t *testing.T, srv *Server, secret []byte, method, dir string) *htt
 }
 
 // TestSmimePublishViewDelete proves a public certificate publishes, reads back,
-// and clears — the only server-side role in the client-side S/MIME model.
+// and clears: the only server-side role in the client-side S/MIME model.
 func TestSmimePublishViewDelete(t *testing.T) {
 	dir := t.TempDir()
 	if st, err := objectstore.Open(dir); err != nil {
@@ -157,7 +157,7 @@ func TestSmimePublishViewDelete(t *testing.T) {
 }
 
 // TestSmimeRejectPrivateKey proves the server refuses a request carrying a private
-// key — the key must stay in the browser.
+// key; the key must stay in the browser.
 func TestSmimeRejectPrivateKey(t *testing.T) {
 	_, certPEM, keyPEM := makeTestIdentity(t)
 	secret := []byte("smime-test-secret")

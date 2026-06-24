@@ -163,7 +163,7 @@ export function EmailDetailPage() {
                 content = extracted.html
                   ? extracted.body
                   : extracted.body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-                // Verify the inner signature in the browser — posting the decrypted
+                // Verify the inner signature in the browser; posting the decrypted
                 // signed content to the server would leak the plaintext.
                 const verdict = smimeStore.verifyMime(inner)
                 if (verdict) {
@@ -325,8 +325,8 @@ export function EmailDetailPage() {
     }
   }
 
-  // handleFollowup sets the message's follow-up flag — a coloured flag with an
-  // optional due date, mark-complete, or clear — porting the old webmail's rich
+  // handleFollowup sets the message's follow-up flag: a coloured flag with an
+  // optional due date, mark-complete, or clear. It ports the old webmail's rich
   // follow-up beyond the plain \Flagged star (the API call also syncs \Flagged).
   const handleFollowup = async (action: "flag" | "complete" | "clear", color?: number, due?: string) => {
     if (!email) return

@@ -1,8 +1,8 @@
 /**
  * Client-side S/MIME identity store.
  *
- * The private key never reaches the server. A PKCS#12 (.p12) identity — already
- * encrypted under its own password — is stored verbatim in IndexedDB, so it is
+ * The private key never reaches the server. A PKCS#12 (.p12) identity, already
+ * encrypted under its own password, is stored verbatim in IndexedDB, so it is
  * encrypted at rest (an XSS at rest cannot use it without the password). Each
  * session the user unlocks it: forge opens the .p12 in memory and the key is held
  * only there. All sign/encrypt/verify/decrypt happen in the browser with forge.
@@ -30,7 +30,7 @@ export interface CertInfo {
   fingerprint: string
 }
 
-// In-memory unlocked state — cleared on refresh/lock; never persisted decrypted.
+// In-memory unlocked state, cleared on refresh/lock; never persisted decrypted.
 let unlockedKey: forge.pki.rsa.PrivateKey | null = null
 let unlockedCertPem: string | null = null
 
@@ -203,7 +203,7 @@ function parseEntity(mime: string): { headers: Record<string, string>; body: str
 /**
  * extractMimeBody pulls a displayable body out of a decrypted MIME entity,
  * preferring text/html over text/plain. Handles single parts and nested
- * multipart/alternative — enough for typical mail.
+ * multipart/alternative, enough for typical mail.
  */
 export function extractMimeBody(mime: string): { html: boolean; body: string } {
   const { headers, body } = parseEntity(mime)
@@ -297,7 +297,7 @@ function signerEmail(cert: forge.pki.Certificate): string {
 /**
  * verifyMime checks the signature on a decrypted multipart/signed entity entirely
  * in the browser. For browser-mode encrypted-then-signed mail the server never sees
- * the decrypted content — posting it for verification would leak the plaintext — so
+ * the decrypted content. Posting it for verification would leak the plaintext, so
  * the check must run client-side. Our sign path omits signedAttrs, so the signature
  * is a plain RSA(SHA-256(content)): extract the signer certificate and signature
  * from the detached SignedData, hash the exact signed bytes (the content part
@@ -308,7 +308,7 @@ export function verifyMime(mime: string): { verified: boolean; signedBy: string 
   const { headers, body } = parseEntity(mime)
   const ctRaw = headers["content-type"] || ""
   if (!ctRaw.toLowerCase().startsWith("multipart/signed")) return null
-  // MIME boundaries are case-sensitive (RFC 2046) — read it from the original
+  // MIME boundaries are case-sensitive (RFC 2046), so read it from the original
   // header, never a lower-cased copy, or an external client's mixed-case boundary
   // silently fails extraction and the signature reads as invalid.
   const m = ctRaw.match(/boundary="?([^";]+)"?/i)

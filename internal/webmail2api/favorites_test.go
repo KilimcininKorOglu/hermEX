@@ -13,7 +13,7 @@ import (
 )
 
 // TestFavoritesTogglePersists proves the favourite-folder toggle pins and unpins a
-// folder in the user's webmail settings and survives a re-read — the old webmail's
+// folder in the user's webmail settings and survives a re-read, matching the old
 // favourites, persisted in the settings blob.
 func TestFavoritesTogglePersists(t *testing.T) {
 	dir := t.TempDir()

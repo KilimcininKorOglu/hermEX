@@ -104,7 +104,7 @@ func (s *Server) getPropsCore(req getPropsRequest) getPropsResult {
 		}
 	}
 	// Serve the published S/MIME certificate lazily too, so Outlook can encrypt to
-	// a GAL recipient — a multi-value binary carrying the one published cert DER.
+	// a GAL recipient. The value is a multi-value binary carrying the one cert DER.
 	if u.storePath != "" && slices.Contains(req.proptags, mapi.PrEmsAbX509Cert) {
 		if cert := userX509Cert(u.storePath); cert != nil {
 			bag = append(bag, mapi.TaggedPropVal{Tag: mapi.PrEmsAbX509Cert, Value: [][]byte{cert}})

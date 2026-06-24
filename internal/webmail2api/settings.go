@@ -409,7 +409,7 @@ func (s *Server) handleGetSharedMailboxes(w http.ResponseWriter, r *http.Request
 }
 
 // handleGetSharedAsOwner lists the shared mailboxes the caller OWNS (is a store
-// owner of) — the "share-out" view, the counterpart to /mailboxes/shared, which
+// owner of): the "share-out" view, the counterpart to /mailboxes/shared, which
 // lists mailboxes shared TO the caller. It returns bare addresses under the
 // shared_as_owner key, the shape the SPA reads. This path previously reused
 // handleGetSharedMailboxes and so returned the wrong key with the shared-to-me
