@@ -24,6 +24,7 @@ import {
 import { WelcomeBanner } from "@/components/welcome-banner"
 import { useI18n } from "@/hooks/useI18n"
 import { formatAbsolute } from "@/utils/date"
+import { getCookie, setCookie } from "@/utils/cookies"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -103,7 +104,9 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
   useEffect(() => {
     setPage(0)
   }, [folder, activeFilter])
-  const [showWelcome, setShowWelcome] = useState(true)
+  // The welcome banner stays dismissed across visits: its closed state lives in a
+  // client-readable cookie (the web UI uses cookies, not localStorage).
+  const [showWelcome, setShowWelcome] = useState(() => getCookie("hermex-welcome-dismissed") !== "1")
 
   // Derive the displayed list from the shared inbox state. The starred view is
   // the same inbox dataset filtered to flagged messages.
@@ -418,7 +421,7 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
   return (
     <div className="space-y-4">
       {showWelcome && folder === "inbox" && (
-        <WelcomeBanner onDismiss={() => setShowWelcome(false)} />
+        <WelcomeBanner onDismiss={() => { setCookie("hermex-welcome-dismissed", "1"); setShowWelcome(false) }} />
       )}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
