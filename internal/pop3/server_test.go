@@ -149,4 +149,8 @@ func TestPOP3RetrieveAndDelete(t *testing.T) {
 	if len(msgs) != 1 || msgs[0].UID != 2 {
 		t.Errorf("after QUIT, messages = %+v, want only UID 2", msgs)
 	}
+	// The POP3-deleted message went to the Recoverable Items dumpster, not purged.
+	if dump, _ := st2.ListSoftDeleted(inbox); len(dump) != 1 {
+		t.Errorf("dumpster has %d items after POP3 DELE+QUIT, want 1 (recoverable)", len(dump))
+	}
 }

@@ -284,11 +284,13 @@ func (mb *mailbox) dele(w *bufio.Writer, arg string) {
 	ok(w, fmt.Sprintf("message %d deleted", n))
 }
 
-// commit applies the session's deletions to the store (the POP3 UPDATE state).
+// commit applies the session's deletions to the store on QUIT (the POP3 UPDATE
+// state). Each deletion soft-deletes into the Recoverable Items dumpster rather
+// than purging, so a POP3-deleted message stays recoverable until retention.
 func (mb *mailbox) commit() {
 	for i, del := range mb.deleted {
 		if del {
-			mb.st.DeleteMessage(mb.folder, mb.msgs[i].UID)
+			mb.st.SoftDeleteMessage(mb.folder, mb.msgs[i].UID)
 		}
 	}
 }
