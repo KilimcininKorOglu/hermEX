@@ -232,6 +232,13 @@ func pushPropValHeaderNDR(p *ndr.Push, tag mapi.PropTag, value any) error {
 		}
 		p.Uint32(uint32(len(v))) // cb
 		p.UniquePtr(true)        // bytes follow in the content pass
+	case mapi.PtMvBinary:
+		v, ok := value.([][]byte)
+		if !ok {
+			return fmt.Errorf("%w: PtMvBinary value is %T", ndr.ErrFormat, value)
+		}
+		p.Uint32(uint32(len(v))) // count of entries
+		p.UniquePtr(true)        // the array follows in the content pass
 	default:
 		return fmt.Errorf("%w: NDR cannot encode property type %#04x", ndr.ErrFormat, uint16(tag.Type()))
 	}
@@ -263,6 +270,19 @@ func pushPropValContentNDR(p *ndr.Push, tag mapi.PropTag, value any) error {
 		v, _ := value.([]byte)
 		p.Uint32(uint32(len(v))) // conformant max_count
 		p.Raw(v)
+	case mapi.PtMvBinary:
+		// BINARY_ARRAY: max_count, then every entry's header (cb + referent),
+		// then every entry's content (conformant max_count + raw bytes).
+		v, _ := value.([][]byte)
+		p.Uint32(uint32(len(v))) // max_count = count
+		for _, b := range v {
+			p.Uint32(uint32(len(b))) // cb
+			p.UniquePtr(true)
+		}
+		for _, b := range v {
+			p.Uint32(uint32(len(b))) // conformant max_count
+			p.Raw(b)
+		}
 	}
 	return nil
 }

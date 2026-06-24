@@ -269,6 +269,11 @@ const (
 	// portrait as raw image bytes — what Outlook and OWA show for a GAL entry. The
 	// NSPI layer serves it from the mailbox's cross-protocol user-photo property.
 	PrEmsAbThumbnailPhoto = PropTag(0x8C9E0102) // PtBinary
+	// PrEmsAbX509Cert (PidTagAddressBookX509Certificate) is the GAL entry's S/MIME
+	// public certificate(s), a multi-value binary of raw cert DER. Outlook reads it
+	// to encrypt to a recipient; the NSPI layer serves it from the mailbox's
+	// published S/MIME certificate.
+	PrEmsAbX509Cert = PropTag(0x8C6A1102) // PtMvBinary
 	// PrEmsAbPublicDelegates is a STAT container id selecting a mailbox's public
 	// delegates: GetMatches reads the delegate list of the entry at cur_rec, and
 	// ModLinkAtt edits the caller's own list (PidTagAddressBookPublicDelegates).

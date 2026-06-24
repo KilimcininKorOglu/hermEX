@@ -103,6 +103,13 @@ func (s *Server) getPropsCore(req getPropsRequest) getPropsResult {
 			bag = append(bag, mapi.TaggedPropVal{Tag: mapi.PrEmsAbThumbnailPhoto, Value: photo})
 		}
 	}
+	// Serve the published S/MIME certificate lazily too, so Outlook can encrypt to
+	// a GAL recipient — a multi-value binary carrying the one published cert DER.
+	if u.storePath != "" && slices.Contains(req.proptags, mapi.PrEmsAbX509Cert) {
+		if cert := userX509Cert(u.storePath); cert != nil {
+			bag = append(bag, mapi.TaggedPropVal{Tag: mapi.PrEmsAbX509Cert, Value: [][]byte{cert}})
+		}
+	}
 	row, hasErr := projectProps(bag, req.proptags)
 	result := ecSuccess
 	if hasErr {
@@ -142,6 +149,21 @@ func userPhoto(storePath string) []byte {
 	defer st.Close()
 	photo, _ := st.UserPhoto()
 	return photo
+}
+
+// userX509Cert returns the mailbox's published S/MIME public certificate (raw
+// DER), or nil when none is published.
+func userX509Cert(storePath string) []byte {
+	st, err := objectstore.Open(storePath)
+	if err != nil {
+		return nil
+	}
+	defer st.Close()
+	id, ok, err := st.GetSmimeIdentity()
+	if err != nil || !ok || len(id.Cert) == 0 {
+		return nil
+	}
+	return id.Cert
 }
 
 // encodeGetProps frames a GetProps response: status + result + the echoed code
