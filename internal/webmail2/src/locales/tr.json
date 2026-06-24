@@ -859,6 +859,9 @@
   "trash": {
     "selectedCount": "{{count}} seçildi",
     "empty": "Boşalt",
+    "recoverDeleted": "Silinen öğeleri kurtar",
+    "recoverDeletedDesc": "Çöp'ten silinen mesajlar burada tutulur; geri yüklenebilir veya kalıcı olarak kaldırılabilir.",
+    "recoverEmpty": "Kurtarılabilir öğe yok.",
     "restored": "Mesaj geri yüklendi",
     "restoreFailed": "Mesaj geri yüklenemedi",
     "deletedPermanently": "Mesaj kalıcı olarak silindi",

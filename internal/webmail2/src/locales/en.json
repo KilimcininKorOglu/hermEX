@@ -859,6 +859,9 @@
   "trash": {
     "selectedCount": "{{count}} selected",
     "empty": "Empty",
+    "recoverDeleted": "Recover deleted items",
+    "recoverDeletedDesc": "Messages deleted from Trash are kept here and can be restored or removed for good.",
+    "recoverEmpty": "No recoverable items.",
     "restored": "Message restored",
     "restoreFailed": "Failed to restore message",
     "deletedPermanently": "Message permanently deleted",

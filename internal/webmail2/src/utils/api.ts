@@ -42,6 +42,16 @@ export interface Mail {
   followupDue?: string // follow-up due date (RFC3339), empty when unset
 }
 
+/** RecoverableItem is one message in a folder's Recoverable Items dumpster. */
+export interface RecoverableItem {
+  id: string
+  subject: string
+  from: string
+  date: string
+  deletedOn: string
+  size: number
+}
+
 /** PublicFolder is one organization public folder the caller may read. */
 export interface PublicFolder {
   id: number
@@ -895,6 +905,24 @@ class API {
   // The target may be a built-in slug or a custom folder's display name.
   async copyMail(id: string, to: string, owner?: string): Promise<void> {
     await this.post(`/mail/copy${ownerQuery(owner ?? this.mailboxOwner, '?')}`, { id, to })
+  }
+
+  // listRecoverable returns a folder's Recoverable Items dumpster: messages
+  // soft-deleted from it that are still recoverable.
+  async listRecoverable(folder: string, owner?: string): Promise<{ folder: string; items: RecoverableItem[] }> {
+    return this.get<{ folder: string; items: RecoverableItem[] }>(
+      `/mail/recoverable?folder=${encodeURIComponent(folder)}${ownerQuery(owner ?? this.mailboxOwner, '&')}`,
+    )
+  }
+
+  // recoverFromDumpster restores a soft-deleted message back into its folder.
+  async recoverFromDumpster(folder: string, id: string, owner?: string): Promise<void> {
+    await this.post(`/mail/recoverable/recover${ownerQuery(owner ?? this.mailboxOwner, '?')}`, { folder, id })
+  }
+
+  // purgeFromDumpster permanently removes a soft-deleted message from the dumpster.
+  async purgeFromDumpster(folder: string, id: string, owner?: string): Promise<void> {
+    await this.post(`/mail/recoverable/purge${ownerQuery(owner ?? this.mailboxOwner, '?')}`, { folder, id })
   }
 
   // exportSelected downloads the given messages as one messages.zip of .eml files

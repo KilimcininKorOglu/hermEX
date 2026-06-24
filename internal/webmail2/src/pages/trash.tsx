@@ -7,6 +7,7 @@ import {
   ChevronRight,
   RotateCcw,
   Eraser,
+  ArchiveRestore,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/hooks/useI18n"
@@ -15,8 +16,15 @@ import { useMailEvents } from "@/utils/mailEvents"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog"
 import { toast } from "sonner"
-import api from "../utils/api"
+import api, { type RecoverableItem } from "../utils/api"
 import { useBulkSelection } from "@/hooks/useBulkSelection"
 import { BulkActionBar, type BulkAction } from "@/components/bulk-action-bar"
 
@@ -35,6 +43,45 @@ export function TrashPage() {
   const [emails, setEmails] = useState<TrashEmail[]>([])
   const sel = useBulkSelection()
   const [loading, setLoading] = useState(true)
+  const [recoverOpen, setRecoverOpen] = useState(false)
+  const [recoverItems, setRecoverItems] = useState<RecoverableItem[]>([])
+  const [recoverLoading, setRecoverLoading] = useState(false)
+
+  // openRecover loads the Trash dumpster (messages deleted from Trash, still
+  // recoverable) into the dialog; restore brings one back, purge removes it.
+  const openRecover = async () => {
+    setRecoverOpen(true)
+    setRecoverLoading(true)
+    try {
+      const data = await api.listRecoverable("trash")
+      setRecoverItems(data.items ?? [])
+    } catch {
+      setRecoverItems([])
+    } finally {
+      setRecoverLoading(false)
+    }
+  }
+
+  const handleRecoverItem = async (id: string) => {
+    try {
+      await api.recoverFromDumpster("trash", id)
+      setRecoverItems((prev) => prev.filter((it) => it.id !== id))
+      await loadTrash(true)
+      toast.success(t("trash.restored"))
+    } catch {
+      toast.error(t("trash.restoreFailed"))
+    }
+  }
+
+  const handlePurgeItem = async (id: string) => {
+    try {
+      await api.purgeFromDumpster("trash", id)
+      setRecoverItems((prev) => prev.filter((it) => it.id !== id))
+      toast.success(t("trash.deletedPermanently"))
+    } catch {
+      toast.error(t("trash.deleteFailed"))
+    }
+  }
 
   const loadTrash = async (silent = false) => {
     if (!silent) setLoading(true)
@@ -150,6 +197,10 @@ export function TrashPage() {
           <BulkActionBar ids={sel.ids} actions={bulkActions} onClear={sel.clear} />
         </div>
         <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={openRecover}>
+            <ArchiveRestore className="h-4 w-4 mr-1" />
+            {t("trash.recoverDeleted")}
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -260,6 +311,56 @@ export function TrashPage() {
           </Button>
         </div>
       </div>
+
+      <Dialog open={recoverOpen} onOpenChange={setRecoverOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{t("trash.recoverDeleted")}</DialogTitle>
+            <DialogDescription>{t("trash.recoverDeletedDesc")}</DialogDescription>
+          </DialogHeader>
+          {recoverLoading ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              {t("common.loading")}
+            </div>
+          ) : recoverItems.length === 0 ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              {t("trash.recoverEmpty")}
+            </div>
+          ) : (
+            <div className="max-h-80 divide-y overflow-y-auto">
+              {recoverItems.map((it) => (
+                <div key={it.id} className="flex items-center gap-2 py-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">{it.subject}</div>
+                    <div className="truncate text-xs text-muted-foreground">{it.from}</div>
+                  </div>
+                  <span className="whitespace-nowrap text-xs text-muted-foreground">
+                    {formatAbsolute(it.deletedOn)}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => handleRecoverItem(it.id)}
+                    title={t("trash.restore")}
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-destructive"
+                    onClick={() => handlePurgeItem(it.id)}
+                    title={t("trash.deletePermanently")}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
