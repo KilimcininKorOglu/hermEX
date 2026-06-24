@@ -175,13 +175,19 @@ func (s *Session) ropOpenFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	return true
 }
 
+// tableFlagSoftDeletes is the RopGetContentsTable TableFlags bit ([MS-OXCFOLD]
+// 2.2.1.14.1) that asks for the Recoverable Items dumpster (soft-deleted items)
+// instead of live mail. The server ANDs the raw wire byte with it directly.
+const tableFlagSoftDeletes uint8 = 0x20
+
 // ropGetContentsTable handles RopGetContentsTable ([MS-OXCFOLD] 2.2.1.14): it
 // snapshots the folder's messages into a new table object and returns the row
-// count. The columns are chosen later via RopSetColumns; rows are read by
-// RopQueryRows.
+// count. With the SHOW_SOFT_DELETES TableFlags bit set it snapshots the folder's
+// soft-deleted (Recoverable Items) messages instead. The columns are chosen later
+// via RopSetColumns; rows are read by RopQueryRows.
 func (s *Session) ropGetContentsTable(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	ohindex, e1 := p.Uint8() // OutputHandleIndex
-	_, e2 := p.Uint8()       // TableFlags
+	ohindex, e1 := p.Uint8()    // OutputHandleIndex
+	tableFlags, e2 := p.Uint8() // TableFlags
 	if e1 != nil || e2 != nil {
 		return false
 	}
@@ -198,7 +204,15 @@ func (s *Session) ropGetContentsTable(p *ext.Pull, out *ext.Push, handles []uint
 		writeErr(out, ropGetContentsTable, ohindex, ecAccessDenied)
 		return true
 	}
-	msgs, err := folder.store.ListMessages(folder.folderID)
+	var (
+		msgs []objectstore.MessageInfo
+		err  error
+	)
+	if tableFlags&tableFlagSoftDeletes != 0 {
+		msgs, err = folder.store.ListSoftDeletedInfo(folder.folderID)
+	} else {
+		msgs, err = folder.store.ListMessages(folder.folderID)
+	}
 	if err != nil {
 		writeErr(out, ropGetContentsTable, ohindex, ecError)
 		return true

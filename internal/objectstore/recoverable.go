@@ -160,6 +160,29 @@ func (s *Store) ListSoftDeleted(folderID int64) ([]SoftDeletedMessage, error) {
 	return out, nil
 }
 
+// ListSoftDeletedInfo returns a folder's soft-deleted messages as index-shaped
+// MessageInfo rows. It backs the MAPI/ROP SHOW_SOFT_DELETES contents table: the
+// rows no longer live in the IMAP index, so they are read straight from the object
+// store, and only the message ID is needed (the table materializes each row's
+// properties from the object store by that ID).
+func (s *Store) ListSoftDeletedInfo(folderID int64) ([]MessageInfo, error) {
+	rows, err := s.objdb.Query(
+		`SELECT message_id, message_size FROM messages WHERE parent_fid=? AND is_deleted=1 ORDER BY message_id`, folderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MessageInfo
+	for rows.Next() {
+		var m MessageInfo
+		if err := rows.Scan(&m.ID, &m.Size); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 // RecoverMessage restores a soft-deleted message from the dumpster back into its
 // folder: it clears is_deleted with a fresh change number (so ICS clients re-add
 // it) and rebuilds the IMAP/POP3 index row from the surviving object. The recovered
