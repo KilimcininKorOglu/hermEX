@@ -86,6 +86,12 @@
     "copy": "Kopyala",
     "language": "Dil"
   },
+  "bulk": {
+    "selectedCount": "{{count}} seçili",
+    "exportZip": "Zip olarak dışa aktar",
+    "exportCapped": "İlk {{count}} mesaj dışa aktarılıyor",
+    "clearSelection": "Seçimi temizle"
+  },
   "inbox": {
     "failedToUpdateStar": "Yıldız güncellenemedi",
     "failedToMarkAsRead": "Okundu olarak işaretlenemedi",
@@ -852,6 +858,7 @@
   },
   "trash": {
     "selectedCount": "{{count}} seçildi",
+    "empty": "Boşalt",
     "restored": "Mesaj geri yüklendi",
     "restoreFailed": "Mesaj geri yüklenemedi",
     "deletedPermanently": "Mesaj kalıcı olarak silindi",

@@ -86,6 +86,12 @@
     "copy": "Copy",
     "language": "Language"
   },
+  "bulk": {
+    "selectedCount": "{{count}} selected",
+    "exportZip": "Export as zip",
+    "exportCapped": "Exporting the first {{count}} messages",
+    "clearSelection": "Clear selection"
+  },
   "inbox": {
     "failedToUpdateStar": "Failed to update star",
     "failedToMarkAsRead": "Failed to mark as read",
@@ -852,6 +858,7 @@
   },
   "trash": {
     "selectedCount": "{{count}} selected",
+    "empty": "Empty",
     "restored": "Message restored",
     "restoreFailed": "Failed to restore message",
     "deletedPermanently": "Message permanently deleted",

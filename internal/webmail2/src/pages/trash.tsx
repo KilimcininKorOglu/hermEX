@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   RotateCcw,
+  Eraser,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useI18n } from "@/hooks/useI18n"
@@ -14,9 +15,10 @@ import { useMailEvents } from "@/utils/mailEvents"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Separator } from "@/components/ui/separator"
 import { toast } from "sonner"
 import api from "../utils/api"
+import { useBulkSelection } from "@/hooks/useBulkSelection"
+import { BulkActionBar, type BulkAction } from "@/components/bulk-action-bar"
 
 interface TrashEmail {
   id: string
@@ -31,7 +33,7 @@ export function TrashPage() {
   const navigate = useNavigate()
   const { t } = useI18n()
   const [emails, setEmails] = useState<TrashEmail[]>([])
-  const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set())
+  const sel = useBulkSelection()
   const [loading, setLoading] = useState(true)
 
   const loadTrash = async (silent = false) => {
@@ -67,23 +69,40 @@ export function TrashPage() {
     loadTrash(true).catch(() => undefined)
   })
 
-  const toggleSelectAll = () => {
-    if (selectedEmails.size === emails.length) {
-      setSelectedEmails(new Set())
-    } else {
-      setSelectedEmails(new Set(emails.map((e) => e.id)))
+  const allIds = emails.map((e) => e.id)
+
+  // handleBulkRestore moves every selected message back to the Inbox; handleBulkDelete
+  // discards them permanently. Both prune the local list and clear the selection.
+  const handleBulkRestore = async () => {
+    const ids = sel.ids
+    try {
+      await Promise.all(ids.map((id) => api.moveMail(id, "inbox")))
+      const idSet = new Set(ids)
+      setEmails((prev) => prev.filter((e) => !idSet.has(e.id)))
+      sel.clear()
+      toast.success(t("trash.restored"))
+    } catch {
+      toast.error(t("trash.restoreFailed"))
     }
   }
 
-  const toggleSelect = (id: string) => {
-    const newSelected = new Set(selectedEmails)
-    if (newSelected.has(id)) {
-      newSelected.delete(id)
-    } else {
-      newSelected.add(id)
+  const handleBulkDelete = async () => {
+    const ids = sel.ids
+    try {
+      await Promise.all(ids.map((id) => api.delete(`/mail/delete?id=${encodeURIComponent(id)}`)))
+      const idSet = new Set(ids)
+      setEmails((prev) => prev.filter((e) => !idSet.has(e.id)))
+      sel.clear()
+      toast.success(t("trash.deletedPermanently"))
+    } catch {
+      toast.error(t("trash.deleteFailed"))
     }
-    setSelectedEmails(newSelected)
   }
+
+  const bulkActions: BulkAction[] = [
+    { key: "restore", label: t("trash.restore"), icon: RotateCcw, onClick: handleBulkRestore },
+    { key: "delete", label: t("trash.deletePermanently"), icon: Trash2, onClick: handleBulkDelete, destructive: true },
+  ]
 
   const handleRestore = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -125,32 +144,31 @@ export function TrashPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <Checkbox
-            checked={selectedEmails.size === emails.length && emails.length > 0}
-            onCheckedChange={toggleSelectAll}
+            checked={sel.allSelected(allIds)}
+            onCheckedChange={() => sel.toggleAll(allIds)}
           />
-          {selectedEmails.size > 0 ? (
-            <>
-              <span className="text-sm text-muted-foreground">
-                {t("trash.selectedCount", { count: String(selectedEmails.size) })}
-              </span>
-              <Separator orientation="vertical" className="h-4" />
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleEmptyTrash}>
-                <RotateCcw className="h-4 w-4" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive">
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </>
-          ) : null}
+          <BulkActionBar ids={sel.ids} actions={bulkActions} onClear={sel.clear} />
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          onClick={() => setLoading(true)}
-        >
-          <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleEmptyTrash}
+            disabled={emails.length === 0 || loading}
+          >
+            <Eraser className="h-4 w-4 mr-1" />
+            {t("trash.empty")}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8"
+            onClick={() => loadTrash()}
+            aria-label={t("common.refresh")}
+          >
+            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+          </Button>
+        </div>
       </div>
 
       <div className="rounded-lg border bg-card">
@@ -185,8 +203,8 @@ export function TrashPage() {
                 onClick={() => navigate(`/email/${email.id}`)}
               >
                 <Checkbox
-                  checked={selectedEmails.has(email.id)}
-                  onCheckedChange={() => toggleSelect(email.id)}
+                  checked={sel.isSelected(email.id)}
+                  onCheckedChange={() => sel.toggle(email.id)}
                   onClick={(e) => e.stopPropagation()}
                 />
                 <div className="flex-1 min-w-0">

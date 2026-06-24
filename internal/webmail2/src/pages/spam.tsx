@@ -23,6 +23,8 @@ import {
 import { toast } from "sonner"
 import api from "@/utils/api"
 import type { Mail } from "@/utils/api"
+import { useBulkSelection } from "@/hooks/useBulkSelection"
+import { BulkActionBar, type BulkAction } from "@/components/bulk-action-bar"
 
 interface SpamEmail {
   id: string
@@ -48,7 +50,7 @@ export function SpamPage() {
   const { t } = useI18n()
   const [loading, setLoading] = useState(true)
   const [emails, setEmails] = useState<SpamEmail[]>([])
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const sel = useBulkSelection()
 
   const loadSpam = useCallback(async (silent = false) => {
     if (!silent) setLoading(true)
@@ -83,18 +85,8 @@ export function SpamPage() {
     loadSpam(true).catch(() => undefined)
   })
 
-  const toggleSelect = (id: string) => {
-    const newSelected = new Set(selected)
-    if (newSelected.has(id)) {
-      newSelected.delete(id)
-    } else {
-      newSelected.add(id)
-    }
-    setSelected(newSelected)
-  }
-
-  const handleDelete = async () => {
-    const ids = Array.from(selected)
+  const deleteIds = async (ids: string[]) => {
+    if (ids.length === 0) return
     try {
       await Promise.all(ids.map((id) => api.deleteMail(id)))
       toast.success(
@@ -102,12 +94,14 @@ export function SpamPage() {
           ? t("spam.deletedOne", { count: String(ids.length) })
           : t("spam.deletedMany", { count: String(ids.length) })
       )
-      setSelected(new Set())
+      sel.clear()
       await loadSpam()
     } catch {
       toast.error(t("spam.deleteFailed"))
     }
   }
+
+  const handleDelete = () => deleteIds(sel.ids)
 
   // handleEmptySpam permanently discards every message in the Junk folder in one
   // server-side call (not a loop over the loaded page).
@@ -115,12 +109,16 @@ export function SpamPage() {
     try {
       await api.emptyFolder("spam")
       toast.success(t("spam.emptied"))
-      setSelected(new Set())
+      sel.clear()
       await loadSpam()
     } catch {
       toast.error(t("spam.emptyFailed"))
     }
   }
+
+  const bulkActions: BulkAction[] = [
+    { key: "delete", label: t("common.delete"), icon: Trash2, onClick: handleDelete, destructive: true },
+  ]
 
   return (
     <div className="space-y-4">
@@ -131,16 +129,7 @@ export function SpamPage() {
           <Badge variant="destructive">{emails.length}</Badge>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-destructive"
-            onClick={handleDelete}
-            disabled={selected.size === 0 || loading}
-          >
-            <Trash2 className="h-4 w-4 mr-1" />
-            {t("common.delete")}
-          </Button>
+          <BulkActionBar ids={sel.ids} actions={bulkActions} onClear={sel.clear} />
           <Button
             variant="outline"
             size="sm"
@@ -194,8 +183,9 @@ export function SpamPage() {
             >
               <Checkbox
                 className="mt-1"
-                checked={selected.has(email.id)}
-                onCheckedChange={() => toggleSelect(email.id)}
+                checked={sel.isSelected(email.id)}
+                onClick={(e) => e.stopPropagation()}
+                onCheckedChange={() => sel.toggle(email.id)}
               />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
@@ -224,7 +214,13 @@ export function SpamPage() {
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={handleDelete} className="text-destructive">
+                  <DropdownMenuItem
+                    className="text-destructive"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      deleteIds([email.id])
+                    }}
+                  >
                     <Trash2 className="h-4 w-4 mr-2" />
                     {t("common.delete")}
                   </DropdownMenuItem>

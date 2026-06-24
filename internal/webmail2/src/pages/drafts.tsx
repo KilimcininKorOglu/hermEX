@@ -15,10 +15,11 @@ import { useMailEvents } from "@/utils/mailEvents"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Separator } from "@/components/ui/separator"
 import { toast } from "sonner"
 import api from "@/utils/api"
 import type { Mail } from "@/utils/api"
+import { useBulkSelection } from "@/hooks/useBulkSelection"
+import { BulkActionBar, type BulkAction } from "@/components/bulk-action-bar"
 
 interface Draft {
   id: string
@@ -32,7 +33,7 @@ export function DraftsPage() {
   const { t } = useI18n()
   const navigate = useNavigate()
   const [drafts, setDrafts] = useState<Draft[]>([])
-  const [selectedDrafts, setSelectedDrafts] = useState<Set<string>>(new Set())
+  const sel = useBulkSelection()
   const [loading, setLoading] = useState(true)
 
   const loadDrafts = useCallback(async (silent = false) => {
@@ -63,35 +64,23 @@ export function DraftsPage() {
     loadDrafts(true).catch(() => undefined)
   })
 
-  const toggleSelectAll = () => {
-    if (selectedDrafts.size === drafts.length) {
-      setSelectedDrafts(new Set())
-    } else {
-      setSelectedDrafts(new Set(drafts.map((e) => e.id)))
-    }
-  }
-
-  const toggleSelect = (id: string) => {
-    const newSelected = new Set(selectedDrafts)
-    if (newSelected.has(id)) {
-      newSelected.delete(id)
-    } else {
-      newSelected.add(id)
-    }
-    setSelectedDrafts(newSelected)
-  }
+  const allIds = drafts.map((e) => e.id)
 
   const handleDelete = async () => {
-    const ids = Array.from(selectedDrafts)
+    const ids = sel.ids
     try {
       await Promise.all(ids.map((id) => api.deleteMail(id)))
       toast.success(t(ids.length !== 1 ? "drafts.draftsDeleted" : "drafts.draftDeleted", { count: String(ids.length) }))
-      setSelectedDrafts(new Set())
+      sel.clear()
       await loadDrafts()
     } catch {
       toast.error(t("drafts.deleteFailed"))
     }
   }
+
+  const bulkActions: BulkAction[] = [
+    { key: "delete", label: t("common.delete"), icon: Trash2, onClick: handleDelete, destructive: true },
+  ]
 
   const handleEdit = (id: string) => {
     navigate(`/compose?draft=${id}`)
@@ -102,25 +91,10 @@ export function DraftsPage() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <Checkbox
-            checked={selectedDrafts.size === drafts.length && drafts.length > 0}
-            onCheckedChange={toggleSelectAll}
+            checked={sel.allSelected(allIds)}
+            onCheckedChange={() => sel.toggleAll(allIds)}
           />
-          {selectedDrafts.size > 0 ? (
-            <>
-              <span className="text-sm text-muted-foreground">
-                {t("drafts.selectedCount", { count: String(selectedDrafts.size) })}
-              </span>
-              <Separator orientation="vertical" className="h-4" />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-destructive"
-                onClick={handleDelete}
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </>
-          ) : null}
+          <BulkActionBar ids={sel.ids} actions={bulkActions} onClear={sel.clear} />
         </div>
         <Button
           variant="ghost"
@@ -164,8 +138,8 @@ export function DraftsPage() {
                 onClick={() => handleEdit(draft.id)}
               >
                 <Checkbox
-                  checked={selectedDrafts.has(draft.id)}
-                  onCheckedChange={() => toggleSelect(draft.id)}
+                  checked={sel.isSelected(draft.id)}
+                  onCheckedChange={() => sel.toggle(draft.id)}
                   onClick={(e: MouseEvent) => e.stopPropagation()}
                 />
                 <FileText className="h-4 w-4 text-muted-foreground" />

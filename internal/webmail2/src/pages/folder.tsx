@@ -23,6 +23,8 @@ import {
 import { toast } from "sonner"
 import api from "@/utils/api"
 import type { Mail } from "@/utils/api"
+import { useBulkSelection } from "@/hooks/useBulkSelection"
+import { BulkActionBar, type BulkAction } from "@/components/bulk-action-bar"
 
 interface FolderEmail {
   id: string
@@ -52,7 +54,7 @@ export function FolderPage() {
   const [loading, setLoading] = useState(true)
   const [unavailable, setUnavailable] = useState(false)
   const [emails, setEmails] = useState<FolderEmail[]>([])
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const sel = useBulkSelection()
 
   // The folder name comes straight from the route; it maps to a real mailbox.
   const pageTitle = type ? type.charAt(0).toUpperCase() + type.slice(1) : t("folder.title")
@@ -95,27 +97,21 @@ export function FolderPage() {
     loadFolder(true).catch(() => undefined)
   })
 
-  const toggleSelect = (id: string) => {
-    const newSelected = new Set(selected)
-    if (newSelected.has(id)) {
-      newSelected.delete(id)
-    } else {
-      newSelected.add(id)
-    }
-    setSelected(newSelected)
-  }
-
   const handleDelete = async () => {
-    const ids = Array.from(selected)
+    const ids = sel.ids
     try {
       await Promise.all(ids.map((id) => api.deleteMail(id)))
       toast.success(t(ids.length !== 1 ? "folder.messagesDeletedCount" : "folder.messageDeletedCount", { count: String(ids.length) }))
-      setSelected(new Set())
+      sel.clear()
       await loadFolder()
     } catch {
       toast.error(t("folder.deleteFailed"))
     }
   }
+
+  const bulkActions: BulkAction[] = [
+    { key: "delete", label: t("common.remove"), icon: Trash2, onClick: handleDelete, destructive: true },
+  ]
 
   return (
     <div className="space-y-4">
@@ -125,18 +121,7 @@ export function FolderPage() {
           <h1 className="text-xl font-semibold">{pageTitle}</h1>
           <Badge variant="secondary">{emails.length}</Badge>
         </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="text-destructive"
-            onClick={handleDelete}
-            disabled={selected.size === 0 || loading}
-          >
-            <Trash2 className="h-4 w-4 mr-1" />
-            {t("common.remove")}
-          </Button>
-        </div>
+        <BulkActionBar ids={sel.ids} actions={bulkActions} onClear={sel.clear} />
       </div>
 
       {loading ? (
@@ -184,8 +169,9 @@ export function FolderPage() {
             >
               <Checkbox
                 className="mt-1"
-                checked={selected.has(email.id)}
-                onCheckedChange={() => toggleSelect(email.id)}
+                checked={sel.isSelected(email.id)}
+                onClick={(e) => e.stopPropagation()}
+                onCheckedChange={() => sel.toggle(email.id)}
               />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">

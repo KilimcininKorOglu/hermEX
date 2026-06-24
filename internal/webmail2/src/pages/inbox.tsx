@@ -41,6 +41,8 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { toast } from "sonner"
 import api from "@/utils/api"
 import type { Mail } from "@/utils/api"
+import { useBulkSelection } from "@/hooks/useBulkSelection"
+import { BulkActionBar, type BulkAction } from "@/components/bulk-action-bar"
 
 interface Email {
   id: string
@@ -86,7 +88,7 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
   // Inbox data comes from the shared MailboxContext so the sidebar unread
   // badge and header notifications stay in sync with actions taken here.
   const { inboxEmails, inboxLoading, refreshInbox, patchInbox, removeFromInbox } = useMailbox()
-  const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set())
+  const sel = useBulkSelection()
   const [activeFilter, setActiveFilter] = useState("all")
   const loading = inboxLoading
   const [viewMode, setViewMode] = useState<ViewMode>("list")
@@ -161,23 +163,7 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
     })
   }
 
-  const toggleSelectAll = () => {
-    if (selectedEmails.size === emails.length) {
-      setSelectedEmails(new Set())
-    } else {
-      setSelectedEmails(new Set(emails.map((e) => e.id)))
-    }
-  }
-
-  const toggleSelect = (id: string) => {
-    const newSelected = new Set(selectedEmails)
-    if (newSelected.has(id)) {
-      newSelected.delete(id)
-    } else {
-      newSelected.add(id)
-    }
-    setSelectedEmails(newSelected)
-  }
+  const allIds = emails.map((e) => e.id)
 
   const toggleStar = async (id: string, e: React.MouseEvent) => {
     e.stopPropagation()
@@ -214,7 +200,7 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
     try {
       await Promise.all(ids.map((id) => api.moveMail(id, "archive")))
       removeFromInbox(ids)
-      setSelectedEmails(new Set())
+      sel.clear()
       toast.success(t(ids.length !== 1 ? "inbox.messagesArchived" : "inbox.messageArchived", { count: String(ids.length) }))
     } catch (err) {
       console.error("Failed to archive messages:", err)
@@ -222,14 +208,14 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
     }
   }
 
-  const handleArchive = () => archiveEmails([...selectedEmails])
+  const handleArchive = () => archiveEmails(sel.ids)
 
   const deleteEmails = async (ids: string[]) => {
     if (ids.length === 0) return
     try {
       await Promise.all(ids.map((id) => api.deleteMail(id)))
       removeFromInbox(ids)
-      setSelectedEmails(new Set())
+      sel.clear()
       toast.success(t(ids.length !== 1 ? "inbox.messagesMovedToTrash" : "inbox.messageMovedToTrash", { count: String(ids.length) }))
     } catch (err) {
       console.error("Failed to delete messages:", err)
@@ -237,21 +223,27 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
     }
   }
 
-  const handleDelete = () => deleteEmails([...selectedEmails])
+  const handleDelete = () => deleteEmails(sel.ids)
 
   const handleMarkRead = async () => {
-    const ids = [...selectedEmails]
+    const ids = sel.ids
     if (ids.length === 0) return
     try {
       await Promise.all(ids.map((id) => api.setFlag(id, "\\Seen", true)))
       patchInbox(ids, { read: true })
-      setSelectedEmails(new Set())
+      sel.clear()
       toast.success(t(ids.length !== 1 ? "inbox.messagesMarkedAsRead" : "inbox.messageMarkedAsRead", { count: String(ids.length) }))
     } catch (err) {
       console.error("Failed to mark messages as read:", err)
       toast.error(t("inbox.failedToMarkAsRead"))
     }
   }
+
+  const bulkActions: BulkAction[] = [
+    { key: "archive", label: t("common.archive"), icon: Archive, onClick: handleArchive },
+    { key: "markRead", label: t("common.markRead"), icon: MailOpen, onClick: handleMarkRead },
+    { key: "delete", label: t("common.delete"), icon: Trash2, onClick: handleDelete, destructive: true },
+  ]
 
   const handleMarkAllRead = async () => {
     try {
@@ -315,13 +307,13 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
         "group flex cursor-pointer items-center gap-3 transition-all duration-200",
         viewMode === "list" ? "p-4 hover:bg-accent/50" : "p-2 hover:bg-accent/50",
         !email.read && viewMode === "list" && "bg-accent/5",
-        selectedEmails.has(email.id) && "bg-primary/5"
+        sel.isSelected(email.id) && "bg-primary/5"
       )}
       onClick={() => navigate(`/email/${email.id}`)}
     >
       <Checkbox
-        checked={selectedEmails.has(email.id)}
-        onCheckedChange={() => toggleSelect(email.id)}
+        checked={sel.isSelected(email.id)}
+        onCheckedChange={() => sel.toggle(email.id)}
         onClick={(e) => e.stopPropagation()}
       />
 
@@ -431,26 +423,12 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <Checkbox
-            checked={selectedEmails.size === emails.length && emails.length > 0}
-            onCheckedChange={toggleSelectAll}
+            checked={sel.allSelected(allIds)}
+            onCheckedChange={() => sel.toggleAll(allIds)}
           />
 
-          {selectedEmails.size > 0 ? (
-            <div className="flex items-center gap-2 animate-in fade-in slide-in-from-left-2">
-              <span className="text-sm text-muted-foreground">
-                {t("inbox.selectedCount", { count: String(selectedEmails.size) })}
-              </span>
-              <Separator orientation="vertical" className="h-4" />
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleArchive} title={t("common.archive")}>
-                <Archive className="h-4 w-4" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={handleDelete} title={t("common.delete")}>
-                <Trash2 className="h-4 w-4" />
-              </Button>
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleMarkRead} title={t("common.markRead")}>
-                <MailOpen className="h-4 w-4" />
-              </Button>
-            </div>
+          {sel.count > 0 ? (
+            <BulkActionBar ids={sel.ids} actions={bulkActions} onClear={sel.clear} />
           ) : (
             <div className="flex items-center gap-1">
               <input

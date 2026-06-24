@@ -1,5 +1,9 @@
 const API_URL = window.location.origin + '/api/v1'
 
+// maxBulkExport mirrors the server cap on a single bulk EML export; the UI warns
+// when a selection exceeds it rather than letting the overflow drop silently.
+export const maxBulkExport = 200
+
 // ownerQuery builds the optional `owner=` query fragment used to target a shared
 // mailbox. `sep` is "?" when the URL has no query yet, otherwise "&". Returns ""
 // when no owner is given (personal mailbox), so the same call serves both.
@@ -891,6 +895,21 @@ class API {
   // The target may be a built-in slug or a custom folder's display name.
   async copyMail(id: string, to: string, owner?: string): Promise<void> {
     await this.post(`/mail/copy${ownerQuery(owner ?? this.mailboxOwner, '?')}`, { id, to })
+  }
+
+  // exportSelected downloads the given messages as one messages.zip of .eml files
+  // via a same-origin anchor (the session cookie authenticates; the server names
+  // and streams the file). ids are "<folder>:<uid>" message ids; the server caps
+  // the count, so the caller should warn when the selection exceeds the cap.
+  exportSelected(ids: string[], owner?: string): void {
+    if (ids.length === 0) return
+    const params = ids.map((id) => `id=${encodeURIComponent(id)}`).join('&')
+    const a = document.createElement('a')
+    a.href = `${API_URL}/mail/export-zip?${params}${ownerQuery(owner ?? this.mailboxOwner, '&')}`
+    a.download = 'messages.zip'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
   }
 
   // markAllRead marks every unread message in a folder as read in one call.

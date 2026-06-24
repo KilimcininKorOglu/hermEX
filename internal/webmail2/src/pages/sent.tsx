@@ -16,6 +16,8 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
 import api from "@/utils/api"
 import type { Mail } from "@/utils/api"
+import { useBulkSelection } from "@/hooks/useBulkSelection"
+import { BulkActionBar } from "@/components/bulk-action-bar"
 
 interface Email {
   id: string
@@ -42,7 +44,7 @@ export function SentPage() {
   const { t } = useI18n()
   const navigate = useNavigate()
   const [emails, setEmails] = useState<Email[]>([])
-  const [selectedEmails, setSelectedEmails] = useState<Set<string>>(new Set())
+  const sel = useBulkSelection()
   const [loading, setLoading] = useState(true)
 
   const loadSent = useCallback(async (silent = false) => {
@@ -80,37 +82,17 @@ export function SentPage() {
     loadSent(true).catch(() => undefined)
   })
 
-  const toggleSelectAll = () => {
-    if (selectedEmails.size === emails.length) {
-      setSelectedEmails(new Set())
-    } else {
-      setSelectedEmails(new Set(emails.map((e) => e.id)))
-    }
-  }
-
-  const toggleSelect = (id: string) => {
-    const newSelected = new Set(selectedEmails)
-    if (newSelected.has(id)) {
-      newSelected.delete(id)
-    } else {
-      newSelected.add(id)
-    }
-    setSelectedEmails(newSelected)
-  }
+  const allIds = emails.map((e) => e.id)
 
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-2">
           <Checkbox
-            checked={selectedEmails.size === emails.length && emails.length > 0}
-            onCheckedChange={toggleSelectAll}
+            checked={sel.allSelected(allIds)}
+            onCheckedChange={() => sel.toggleAll(allIds)}
           />
-          {selectedEmails.size > 0 && (
-            <span className="text-sm text-muted-foreground">
-              {t("sent.selectedCount", { count: String(selectedEmails.size) })}
-            </span>
-          )}
+          <BulkActionBar ids={sel.ids} onClear={sel.clear} />
         </div>
         <Button
           variant="ghost"
@@ -156,8 +138,8 @@ export function SentPage() {
                 onClick={() => navigate(`/email/${email.id}`)}
               >
                 <Checkbox
-                  checked={selectedEmails.has(email.id)}
-                  onCheckedChange={() => toggleSelect(email.id)}
+                  checked={sel.isSelected(email.id)}
+                  onCheckedChange={() => sel.toggle(email.id)}
                   onClick={(e) => e.stopPropagation()}
                 />
                 <div className="flex-1 min-w-0">
