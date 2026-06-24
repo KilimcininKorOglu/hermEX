@@ -72,7 +72,7 @@ func readLogonResponseFlags(t *testing.T, resp []byte) (ec uint32, flags uint8) 
 		return ec, 0
 	}
 	mustU8(t, p, "LogonFlags")
-	for i := 0; i < 13; i++ {
+	for range 13 {
 		mustU64(t, p, "FolderId")
 	}
 	return ec, mustU8(t, p, "ResponseFlags")
