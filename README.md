@@ -1,6 +1,6 @@
 # hermEX Mail Server
 
-hermEX is a fully modular native Microsoft Exchange Server replacement written
+hermEX is a modular native Microsoft Exchange Server replacement written
 entirely in Go. It implements IMAP, POP3, SMTP/LMTP, CalDAV, CardDAV, ActiveSync, EWS,
 MAPI/HTTP with ROP, and NSPI (global address list). Server, webmail UI, admin CLI,
 and all sync interfaces are Go.
