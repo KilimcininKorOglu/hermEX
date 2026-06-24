@@ -62,7 +62,8 @@ func main() {
 	// The session cookie is marked Secure when the front door terminates TLS, which
 	// the shared config signals via a configured certificate.
 	api := webmail2api.NewServer(dir, dir, spool, cfg.Hostname, []byte(cfg.Webmail2Secret), cfg.Webmail2Dist, cfg.TLSCert != "")
-	api.Pub = publicfolder.New(cfg) // per-domain public folders, rooted at the config's HomedirFor
+	api.Pub = publicfolder.New(cfg)             // per-domain public folders, rooted at the config's HomedirFor
+	api.DigestSecret = []byte(cfg.DigestSecret) // verifies quarantine-digest release links (empty disables them)
 
 	addr := cfg.Webmail2Addr
 	if addr == "" {

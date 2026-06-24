@@ -37,6 +37,10 @@ type Server struct {
 	// Pub serves per-domain public folders; nil disables the feature (the
 	// endpoints then return an empty set). Set by the cmd after NewServer.
 	Pub *publicfolder.Service
+
+	// DigestSecret verifies quarantine-digest release tokens (the MTA mints them
+	// with the same secret); empty disables the release page. Set after NewServer.
+	DigestSecret []byte
 }
 
 // NewServer builds the API server. accounts and spool back outbound mail
@@ -73,6 +77,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/mail/source", s.handleSource)
 	mux.HandleFunc("GET /api/v1/mail/attachments-zip", s.handleAttachmentsZip)
 	mux.HandleFunc("POST /api/v1/mail/import", s.handleImport)
+
+	// Quarantine-digest release link (unauthenticated; the signed token is the
+	// credential). GET confirms, POST releases — defeating email link prefetch.
+	mux.HandleFunc("GET /quarantine/release", s.handleQuarantineForm)
+	mux.HandleFunc("POST /quarantine/release", s.handleQuarantineRelease)
 	mux.HandleFunc("GET /api/v1/mail/diagnostics", s.handleDiagnostics)
 	mux.HandleFunc("GET /api/v1/mail/invite", s.handleInvite)
 	mux.HandleFunc("POST /api/v1/mail/rsvp", s.handleRSVP)
