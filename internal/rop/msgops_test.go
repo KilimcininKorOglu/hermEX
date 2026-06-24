@@ -161,6 +161,10 @@ func TestDeleteMessages(t *testing.T) {
 	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), id2); f == -1 {
 		t.Errorf("untargeted message was also deleted")
 	}
+	// The deleted message went to the dumpster, recoverable, not purged.
+	if dump, _ := sess.get(folderH).store.ListSoftDeleted(int64(mapi.PrivateFIDInbox)); len(dump) != 1 {
+		t.Errorf("dumpster = %d, want 1 (deleted message recoverable)", len(dump))
+	}
 }
 
 // TestMoveCopyMessages moves a message Inbox->Junk (preserving its read flag and

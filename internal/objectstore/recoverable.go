@@ -32,17 +32,43 @@ type SoftDeletedMessage struct {
 // such message exists in the folder.
 func (s *Store) SoftDeleteMessage(folderID int64, uid uint32) error {
 	var messageID int64
-	var mid string
 	err := s.idxdb.QueryRow(
-		`SELECT message_id, mid_string FROM messages WHERE folder_id=? AND uid=?`,
-		folderID, int64(uid)).Scan(&messageID, &mid)
+		`SELECT message_id FROM messages WHERE folder_id=? AND uid=?`,
+		folderID, int64(uid)).Scan(&messageID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
 	if err != nil {
 		return err
 	}
+	return s.softDeleteRow(messageID)
+}
 
+// SoftDeleteObject soft-deletes a message addressed by its object id (the form the
+// ROP layer uses, where a message is named by EID rather than IMAP uid), routing it
+// to the Recoverable Items dumpster. It is idempotent: a message already in the
+// dumpster is left as is. It reports ErrNotFound when no such object exists.
+func (s *Store) SoftDeleteObject(messageID int64) error {
+	var isDeleted int
+	err := s.objdb.QueryRow(`SELECT is_deleted FROM messages WHERE message_id=?`, messageID).Scan(&isDeleted)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if isDeleted == 1 {
+		return nil
+	}
+	return s.softDeleteRow(messageID)
+}
+
+// softDeleteRow flags an already-resolved message into the dumpster: is_deleted=1
+// with a fresh change number, a PR_DELETED_ON stamp, and its IMAP index row dropped
+// so it leaves every live view. The object row, its properties, and the cached eml
+// survive for recovery. Shared by the uid-addressed SoftDeleteMessage and the
+// id-addressed SoftDeleteObject.
+func (s *Store) softDeleteRow(messageID int64) error {
 	// Flip the flag and bump the change number atomically; allocateCN is a
 	// read-then-write counter, so it must share the update's transaction.
 	tx, err := s.objdb.Begin()
@@ -55,8 +81,8 @@ func (s *Store) SoftDeleteMessage(folderID int64, uid uint32) error {
 		return err
 	}
 	if _, err := tx.Exec(
-		`UPDATE messages SET is_deleted=1, change_number=? WHERE message_id=? AND parent_fid=?`,
-		int64(cn), messageID, folderID); err != nil {
+		`UPDATE messages SET is_deleted=1, change_number=? WHERE message_id=?`,
+		int64(cn), messageID); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {

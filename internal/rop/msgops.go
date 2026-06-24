@@ -90,8 +90,9 @@ func (s *Session) ropSetMessageReadFlag(p *ext.Pull, out *ext.Push, handles []ui
 }
 
 // ropDeleteMessages handles RopDeleteMessages ([MS-OXCFOLD] 2.2.1.11 /
-// [MS-OXCROPS] 2.2.4.11): it deletes each listed message from the folder at the
-// input handle. v1 is synchronous (WantAsynchronous is accepted and ignored) and
+// [MS-OXCROPS] 2.2.4.11): it soft-deletes each listed message from the folder at
+// the input handle into the Recoverable Items dumpster (recoverable until
+// retention). v1 is synchronous (WantAsynchronous is accepted and ignored) and
 // reports PartialCompletion when any id could not be deleted.
 func (s *Session) ropDeleteMessages(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	_, e1 := p.Uint8()              // WantAsynchronous (v1 is always synchronous)
@@ -111,7 +112,7 @@ func (s *Session) ropDeleteMessages(p *ext.Pull, out *ext.Push, handles []uint32
 	}
 	var partial uint8
 	for _, eid := range ids {
-		if err := folder.store.DeleteObject(int64(mapi.EID(eid).GCValue())); err != nil {
+		if err := folder.store.SoftDeleteObject(int64(mapi.EID(eid).GCValue())); err != nil {
 			partial = 1
 		}
 	}

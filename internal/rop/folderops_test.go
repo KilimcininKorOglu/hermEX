@@ -83,9 +83,13 @@ func TestEmptyFolderDeletesMessages(t *testing.T) {
 	if len(after) != 0 {
 		t.Errorf("%d messages remain after EmptyFolder", len(after))
 	}
+	// The emptied messages went to the dumpster, recoverable, not purged.
+	if dump, _ := store.ListSoftDeleted(mapi.PrivateFIDInbox); len(dump) != 2 {
+		t.Errorf("dumpster = %d, want 2 after EmptyFolder (recoverable)", len(dump))
+	}
 }
 
-func TestHardDeleteMessagesRemovesCorrect(t *testing.T) {
+func TestHardDeleteMessagesToDumpster(t *testing.T) {
 	dir := t.TempDir()
 	midA := seedInboxMessage(t, dir, "A")
 	msgB := seedInboxMessage(t, dir, "B")
@@ -116,11 +120,13 @@ func TestHardDeleteMessagesRemovesCorrect(t *testing.T) {
 	if ec := readEC(t, resp, ropHardDeleteMessages); ec != ecSuccess {
 		t.Fatalf("HardDeleteMessages ec = %#x", ec)
 	}
-	if _, err := store.OpenMessage(midA); err == nil {
-		t.Error("midA not deleted")
+	// A and B leave the live inbox but go to the dumpster (recoverable); C stays.
+	live, _ := store.ListMessages(mapi.PrivateFIDInbox)
+	if len(live) != 1 {
+		t.Errorf("live inbox = %d messages, want 1 (only C)", len(live))
 	}
-	if _, err := store.OpenMessage(msgB); err == nil {
-		t.Error("msgB not deleted")
+	if dump, _ := store.ListSoftDeleted(mapi.PrivateFIDInbox); len(dump) != 2 {
+		t.Errorf("dumpster = %d, want 2 (A and B recoverable)", len(dump))
 	}
 	if _, err := store.OpenMessage(midC); err != nil {
 		t.Error("midC was deleted unexpectedly")

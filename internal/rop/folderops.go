@@ -228,9 +228,10 @@ func (s *Session) ropCopyFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	return true
 }
 
-// ropEmptyFolder handles RopEmptyFolder ([MS-OXCFOLD] 2.2.1.5): it deletes all
-// messages (and optionally FAI/associated items) from the folder. v1 always
-// synchronous, does not yet honour wantDeleteAssociated.
+// ropEmptyFolder handles RopEmptyFolder ([MS-OXCFOLD] 2.2.1.5): it soft-deletes all
+// messages (and optionally FAI/associated items) from the folder into the
+// Recoverable Items dumpster (recoverable until retention). v1 always synchronous,
+// does not yet honour wantDeleteAssociated.
 func (s *Session) ropEmptyFolder(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	_ /* wantAsync */, e1 := p.Uint8()
 	_ /* wantDeleteAssociated */, e2 := p.Uint8()
@@ -252,7 +253,7 @@ func (s *Session) ropEmptyFolder(p *ext.Pull, out *ext.Push, handles []uint32, h
 		return true
 	}
 	for _, m := range msgs {
-		if err := folder.store.DeleteObject(m.ID); err != nil {
+		if err := folder.store.SoftDeleteObject(m.ID); err != nil {
 			writeErr(out, ropEmptyFolder, hindex, ecError)
 			return true
 		}
@@ -264,8 +265,10 @@ func (s *Session) ropEmptyFolder(p *ext.Pull, out *ext.Push, handles []uint32, h
 	return true
 }
 
-// ropHardDeleteMessages handles RopHardDeleteMessages ([MS-OXCSTOR] 2.2.1.1): it
-// permanently deletes messages from the store without moving them to DeletedItems.
+// ropHardDeleteMessages handles RopHardDeleteMessages ([MS-OXCSTOR] 2.2.1.1).
+// Under the Recoverable Items model every delete stays recoverable, so it routes
+// the messages to the dumpster (soft delete) rather than purging them; a true purge
+// happens only via retention or an explicit dumpster purge.
 func (s *Session) ropHardDeleteMessages(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	_ /* wantAsync */, e1 := p.Uint8()
 	_ /* notifyNonRead */, e2 := p.Uint8()
@@ -291,7 +294,7 @@ func (s *Session) ropHardDeleteMessages(p *ext.Pull, out *ext.Push, handles []ui
 			uint64(mids[i+4])<<32 | uint64(mids[i+5])<<40 |
 			uint64(mids[i+6])<<48 | uint64(mids[i+7])<<56
 		mid := int64(mapi.EID(eid).GCValue())
-		if err := folder.store.DeleteObject(mid); err != nil {
+		if err := folder.store.SoftDeleteObject(mid); err != nil {
 			writeErr(out, ropHardDeleteMessages, hindex, ecError)
 			return true
 		}
