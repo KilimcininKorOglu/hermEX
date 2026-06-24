@@ -153,3 +153,14 @@ func folderByName(st *objectstore.Store, name string) (int64, bool) {
 	}
 	return 0, false
 }
+
+// resolveFolder maps a folder identifier from the SPA to a private folder id:
+// first the well-known slugs (inbox/sent/drafts/trash/spam), then a custom folder
+// by its display name. This lets custom folders round-trip through the
+// list/open/action paths the same way built-in folders do.
+func resolveFolder(st *objectstore.Store, folder string) (int64, bool) {
+	if fid, ok := folderFID(folder); ok {
+		return fid, true
+	}
+	return folderByName(st, folder)
+}

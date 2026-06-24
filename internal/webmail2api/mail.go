@@ -215,7 +215,7 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	fid, ok := folderFID(folder)
+	fid, ok := resolveFolder(mb.st, folder)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown folder"})
 		return
@@ -326,14 +326,17 @@ func (s *Server) locate(w http.ResponseWriter, r *http.Request, id string) (*obj
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return nil, 0, 0, false
 	}
-	fid, ok := folderFID(folder)
-	if !ok {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown folder"})
-		return nil, 0, 0, false
-	}
 	st, err := objectstore.Open(c.Mailbox)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
+		return nil, 0, 0, false
+	}
+	// The folder may be a well-known slug or a custom folder's display name; the
+	// store has to be open before a custom folder can be resolved by name.
+	fid, ok := resolveFolder(st, folder)
+	if !ok {
+		st.Close()
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown folder"})
 		return nil, 0, 0, false
 	}
 	return st, fid, uid, true

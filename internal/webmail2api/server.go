@@ -343,7 +343,7 @@ func (s *Server) handleMailFolder(w http.ResponseWriter, r *http.Request) {
 	}
 	defer mb.st.Close()
 	folder := r.PathValue("folder")
-	fid, ok := folderFID(folder)
+	fid, ok := resolveFolder(mb.st, folder)
 	if !ok {
 		writeJSON(w, http.StatusOK, map[string]any{"emails": []mailJSON{}})
 		return
