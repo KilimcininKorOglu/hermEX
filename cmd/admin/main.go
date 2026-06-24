@@ -257,6 +257,8 @@ func main() {
 			// Enforce the operator's log-retention window by pruning the store.
 			go runLogRetention(ctx, dir, logReader, cfg.LogRetentionDays)
 		}
+		// Enforce the operator's Recoverable Items retention window across mailboxes.
+		go runRecoverableRetention(ctx, dir)
 		log.Printf("hermex-admin serving the admin API on %s", addr)
 		if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, cleanups...); err != nil {
 			log.Fatalf("hermex-admin: %v", err)
@@ -316,6 +318,32 @@ func runLogRetention(ctx context.Context, dir *directory.SQLDirectory, reader *l
 			return
 		case <-t.C:
 			prune()
+		}
+	}
+}
+
+// runRecoverableRetention enforces the operator's Recoverable Items retention window
+// by sweeping every mailbox's dumpster every minute, permanently purging soft-deleted
+// items older than the window (default 14 days; 0 or less disables auto-purge). The
+// window is read each run, so an admin-panel change applies without a restart. It
+// returns when ctx is cancelled.
+func runRecoverableRetention(ctx context.Context, dir *directory.SQLDirectory) {
+	sweep := func() {
+		if n, err := dir.SweepRecoverableItems(time.Now()); err != nil {
+			log.Printf("hermex-admin: sweep recoverable items: %v", err)
+		} else if n > 0 {
+			log.Printf("hermex-admin: purged %d expired recoverable items", n)
+		}
+	}
+	sweep() // apply immediately at startup
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			sweep()
 		}
 	}
 }
