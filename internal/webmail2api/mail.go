@@ -193,6 +193,10 @@ type mailDetailJSON struct {
 	HasAttachments bool             `json:"hasAttachments"`
 	Size           int              `json:"size"`
 	Attachments    []attachmentJSON `json:"attachments,omitempty"`
+	SmimeSigned    bool             `json:"smimeSigned,omitempty"`
+	SmimeEncrypted bool             `json:"smimeEncrypted,omitempty"`
+	SmimeVerified  bool             `json:"smimeVerified,omitempty"`
+	SmimeSignedBy  string           `json:"smimeSignedBy,omitempty"`
 }
 
 // handleMailMessage returns a single message's full detail and marks it read.
@@ -223,7 +227,19 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// S/MIME: decrypt/verify the message. The envelope stays from the outer
+	// message; an encrypted message's body comes from the decrypted content.
+	content, sm := s.smimeOpen(st, raw)
 	d := buildMailDetail(raw, folder, uid)
+	if sm.Encrypted {
+		inner := mime.ParseStructure(content)
+		body, inlined := inlineCIDImages(bestBody(inner), inner)
+		d.Body = body
+		d.Attachments = collectAttachments(inner, inlined)
+		d.HasAttachments = len(d.Attachments) > 0
+	}
+	d.SmimeSigned, d.SmimeEncrypted = sm.Signed, sm.Encrypted
+	d.SmimeVerified, d.SmimeSignedBy = sm.Verified, sm.SignedBy
 
 	// Reading marks the message \Seen, preserving its other flags.
 	if flags, err := st.MessageFlags(fid, uid); err == nil {

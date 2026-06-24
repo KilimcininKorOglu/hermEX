@@ -2,9 +2,8 @@ package webmail2api
 
 import (
 	"bytes"
-	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
@@ -24,7 +23,7 @@ import (
 // DER plus the cert and private key in PEM (what the SPA uploads).
 func makeTestIdentity(t *testing.T) (certDER []byte, certPEM, keyPEM string) {
 	t.Helper()
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("gen key: %v", err)
 	}
@@ -152,6 +151,50 @@ func TestApplySmimeNoIdentity(t *testing.T) {
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.test", []byte("s"), "", false)
 	if _, err := srv.applySmime(t.TempDir(), []byte("x"), nil, true, false); err == nil {
 		t.Error("signing without an identity should error")
+	}
+}
+
+// TestSmimeReadRoundTrip proves the full chain: a signed+encrypted message is
+// decrypted and verified on read, recovering the body and the signer.
+func TestSmimeReadRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	_, certPEM, keyPEM := makeTestIdentity(t)
+	secret := []byte("smime-test-secret")
+	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.test", secret, "", false)
+	if rec := smimePost(t, srv, secret, dir, map[string]string{"cert": certPEM, "key": keyPEM}); rec.Code != 200 {
+		t.Fatalf("upload: %d", rec.Code)
+	}
+	// Store alice's own cert as a recipient cert so she can encrypt to herself.
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	id, _, _ := st.GetSmimeIdentity()
+	if err := st.PutRecipientCert("alice@hermex.test", id.Cert); err != nil {
+		t.Fatalf("put recipient cert: %v", err)
+	}
+	st.Close()
+
+	msg := []byte("From: bob@x.test\r\nTo: alice@hermex.test\r\nSubject: secret\r\n\r\ntop secret body\r\n")
+	out, err := srv.applySmime(dir, msg, []string{"alice@hermex.test"}, true, true)
+	if err != nil {
+		t.Fatalf("sign+encrypt: %v", err)
+	}
+
+	st2, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer st2.Close()
+	content, status := srv.smimeOpen(st2, out)
+	if !status.Encrypted {
+		t.Error("not detected as encrypted")
+	}
+	if !status.Signed || !status.Verified {
+		t.Error("not verified-signed")
+	}
+	if !bytes.Contains(content, []byte("top secret body")) {
+		t.Errorf("decrypted body not recovered: %s", content)
 	}
 }
 

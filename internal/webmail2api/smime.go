@@ -1,6 +1,7 @@
 package webmail2api
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -11,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"hermex/internal/objectstore"
@@ -19,16 +21,63 @@ import (
 	pkcs12 "software.sslmate.com/src/go-pkcs12"
 )
 
-// applySmime signs and/or encrypts a built message before sending. Signing uses
-// the caller's stored identity; encrypting requires a stored certificate for
-// every recipient. Sign-then-encrypt is applied (the standard order).
+// smimeStatus describes a received message's S/MIME state for the reader banner.
+type smimeStatus struct {
+	Signed    bool
+	Encrypted bool
+	Verified  bool
+	SignedBy  string
+}
+
+// certEmail returns a certificate's email address (its SAN, or its common name
+// when that looks like an address), used for the signer label and for harvesting.
+func certEmail(cert *x509.Certificate) string {
+	if len(cert.EmailAddresses) > 0 {
+		return cert.EmailAddresses[0]
+	}
+	return cert.Subject.CommonName
+}
+
+// smimeOpen inspects a received message: it decrypts with the caller's key when
+// encrypted, verifies the signature when signed (harvesting the sender's cert so
+// replies can be encrypted to them), and returns the inner content plus the
+// status. A non-S/MIME message passes through unchanged.
+func (s *Server) smimeOpen(st *objectstore.Store, raw []byte) ([]byte, smimeStatus) {
+	var status smimeStatus
+	content := raw
+	if smime.IsEncrypted(content) {
+		status.Encrypted = true
+		if key, cert, ok := unlockSmimeIdentity(st, s.secret); ok {
+			if dec, err := smime.Decrypt(content, cert, key); err == nil {
+				content = dec
+			}
+		}
+	}
+	if smime.IsSigned(content) {
+		status.Signed = true
+		if signer, _, err := smime.Verify(content); err == nil {
+			status.Verified = true
+			status.SignedBy = certEmail(signer)
+			if addr := certEmail(signer); strings.Contains(addr, "@") {
+				_ = st.PutRecipientCert(addr, signer.Raw)
+			}
+		}
+	}
+	return content, status
+}
+
+// applySmime signs and/or encrypts a built message before sending. The outer
+// identity headers (From/To/Subject) are split off and re-attached around the
+// S/MIME entity, so the delivered message still carries them. Signing uses the
+// caller's stored identity; encrypting requires a stored certificate for every
+// recipient. Sign-then-encrypt is applied (the standard order).
 func (s *Server) applySmime(mailbox string, raw []byte, recipients []string, sign, encrypt bool) ([]byte, error) {
 	st, err := objectstore.Open(mailbox)
 	if err != nil {
 		return nil, errors.New("mailbox unavailable")
 	}
 	defer st.Close()
-	inner := raw
+	identity, inner := splitForSmime(raw)
 	if sign {
 		key, cert, ok := unlockSmimeIdentity(st, s.secret)
 		if !ok {
@@ -38,28 +87,83 @@ func (s *Server) applySmime(mailbox string, raw []byte, recipients []string, sig
 		if err != nil {
 			return nil, fmt.Errorf("could not sign the message: %w", err)
 		}
-		inner = signed
-	}
-	if encrypt {
-		certs := make([]*x509.Certificate, 0, len(recipients))
-		for _, addr := range recipients {
-			der, ok, _ := st.GetRecipientCert(addr)
-			if !ok {
-				return nil, fmt.Errorf("no S/MIME certificate stored for %s, so the message cannot be encrypted", addr)
-			}
-			cert, err := x509.ParseCertificate(der)
-			if err != nil {
-				return nil, fmt.Errorf("the stored certificate for %s is invalid", addr)
-			}
-			certs = append(certs, cert)
+		if !encrypt {
+			return append(identity, signed...), nil
 		}
-		enc, err := smime.Encrypt(inner, certs)
+		inner = signed // sign-then-encrypt: the signed entity becomes the enveloped content
+	}
+	certs := make([]*x509.Certificate, 0, len(recipients)+1)
+	for _, addr := range recipients {
+		der, ok, _ := st.GetRecipientCert(strings.ToLower(strings.TrimSpace(addr)))
+		if !ok {
+			return nil, fmt.Errorf("no S/MIME certificate stored for %s, so the message cannot be encrypted", addr)
+		}
+		cert, err := x509.ParseCertificate(der)
 		if err != nil {
-			return nil, fmt.Errorf("could not encrypt the message: %w", err)
+			return nil, fmt.Errorf("the stored certificate for %s is invalid", addr)
 		}
-		inner = enc
+		certs = append(certs, cert)
 	}
-	return inner, nil
+	// Encrypt to the sender's own certificate too, so the Sent copy stays readable.
+	if _, ownCert, ok := unlockSmimeIdentity(st, s.secret); ok {
+		certs = append(certs, ownCert)
+	}
+	env, err := smime.Encrypt(inner, certs)
+	if err != nil {
+		return nil, fmt.Errorf("could not encrypt the message: %w", err)
+	}
+	return append(identity, env...), nil
+}
+
+// splitForSmime divides an RFC 5322 message into its identity headers (From, To,
+// Subject, Date — everything that stays on the outer message) and the inner MIME
+// entity (the Content-* headers and the body) that S/MIME signs or encrypts.
+// MIME-Version is dropped from both: the S/MIME wrapper emits its own.
+func splitForSmime(raw []byte) (identityHeaders, innerEntity []byte) {
+	hdr, body, found := bytes.Cut(raw, []byte("\r\n\r\n"))
+	if !found {
+		return raw, nil
+	}
+	var ident, content bytes.Buffer
+	for _, line := range splitHeaderLines(hdr) {
+		name := strings.ToLower(headerName(line))
+		switch {
+		case name == "mime-version":
+		case strings.HasPrefix(name, "content-"):
+			content.Write(line)
+			content.WriteString("\r\n")
+		default:
+			ident.Write(line)
+			ident.WriteString("\r\n")
+		}
+	}
+	content.WriteString("\r\n")
+	content.Write(body)
+	return ident.Bytes(), content.Bytes()
+}
+
+// splitHeaderLines splits a CRLF header block into logical headers, keeping each
+// folded continuation joined to its header line.
+func splitHeaderLines(hdr []byte) [][]byte {
+	lines := strings.Split(string(hdr), "\r\n")
+	var out [][]byte
+	for _, l := range lines {
+		if l != "" && (l[0] == ' ' || l[0] == '\t') && len(out) > 0 {
+			out[len(out)-1] = append(out[len(out)-1], append([]byte("\r\n"), l...)...)
+			continue
+		}
+		out = append(out, []byte(l))
+	}
+	return out
+}
+
+// headerName returns the field name of a header line (the text before the colon).
+func headerName(line []byte) string {
+	name, _, found := bytes.Cut(line, []byte{':'})
+	if !found {
+		return ""
+	}
+	return string(bytes.TrimSpace(name))
 }
 
 // certInfo projects an x509 certificate into the SPA's SMIMECertInfo shape.

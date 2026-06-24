@@ -29,6 +29,10 @@ export interface Mail {
   labels?: string[]
   attachments?: AttachmentInfo[]
   importance?: string // "low" | "normal" | "high"
+  smimeSigned?: boolean // message carries an S/MIME signature
+  smimeEncrypted?: boolean // message was S/MIME encrypted (decrypted for display)
+  smimeVerified?: boolean // the signature verified successfully
+  smimeSignedBy?: string // the signer's address
 }
 
 /** PublicFolder is one organization public folder the caller may read. */

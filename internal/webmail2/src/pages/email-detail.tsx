@@ -19,6 +19,7 @@ import {
   Download,
   Printer,
   Code,
+  ShieldCheck,
   Undo2,
   RotateCcw,
 } from "lucide-react"
@@ -62,6 +63,10 @@ interface EmailDetail {
   labels: string[]
   attachments: AttachmentInfo[]
   folder: string
+  smimeSigned?: boolean
+  smimeEncrypted?: boolean
+  smimeVerified?: boolean
+  smimeSignedBy?: string
 }
 
 export function EmailDetailPage() {
@@ -128,6 +133,10 @@ export function EmailDetailPage() {
             labels: result.labels ?? [],
             attachments: result.attachments ?? [],
             folder: result.folder ?? "",
+            smimeSigned: result.smimeSigned,
+            smimeEncrypted: result.smimeEncrypted,
+            smimeVerified: result.smimeVerified,
+            smimeSignedBy: result.smimeSignedBy,
           })
           // Mark the message read on open (server-side) if it was unread, so
           // the unread count reflects reading — standard mail-client behavior.
@@ -627,6 +636,26 @@ export function EmailDetailPage() {
 
             {/* Body */}
             <div className="px-6 pb-6">
+              {(email.smimeSigned || email.smimeEncrypted) && (
+                <div
+                  className={
+                    "mb-4 flex items-center gap-2 rounded-md border px-3 py-2 text-sm " +
+                    (email.smimeSigned && !email.smimeVerified
+                      ? "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200"
+                      : "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950 dark:text-emerald-200")
+                  }
+                >
+                  <ShieldCheck className="h-4 w-4 shrink-0" />
+                  <span>
+                    {email.smimeEncrypted && t("emailDetail.smimeEncrypted")}
+                    {email.smimeEncrypted && email.smimeSigned && " · "}
+                    {email.smimeSigned &&
+                      (email.smimeVerified
+                        ? t("emailDetail.smimeSignedVerified", { signer: email.smimeSignedBy || "" })
+                        : t("emailDetail.smimeSignedUnverified", { signer: email.smimeSignedBy || "" }))}
+                  </span>
+                </div>
+              )}
               {(() => {
                 const { html, blockedRemote } = sanitizeEmailBody(email.content, !showImages)
                 return (
