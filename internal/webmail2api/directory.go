@@ -124,15 +124,19 @@ func (s *Server) handleEmptyFolder(w http.ResponseWriter, r *http.Request) {
 		fid = id
 	}
 	trash := int64(mapi.PrivateFIDDeletedItems)
-	permanent := fid == trash || fid == int64(mapi.PrivateFIDJunk)
+	// Emptying Trash or Junk sends each message to the Recoverable Items dumpster
+	// (soft delete, recoverable until retention purges it), mirroring Exchange's
+	// "empty Deleted Items" which still lands in the dumpster; emptying any other
+	// folder moves its messages to Trash.
+	toDumpster := fid == trash || fid == int64(mapi.PrivateFIDJunk)
 	msgs, err := st.ListMessages(fid)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot read messages"})
 		return
 	}
 	for _, m := range msgs {
-		if permanent {
-			_ = st.DeleteMessage(fid, m.UID)
+		if toDumpster {
+			_ = st.SoftDeleteMessage(fid, m.UID)
 		} else {
 			_, _ = st.MoveMessage(fid, m.UID, trash)
 		}

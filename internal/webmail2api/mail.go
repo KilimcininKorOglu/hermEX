@@ -509,8 +509,9 @@ func (s *Server) handleMailCopy(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// handleMailDelete removes a message: from Trash it is deleted outright, from any
-// other folder it is moved to Deleted Items (recoverable).
+// handleMailDelete removes a message: from Trash it goes to the Recoverable Items
+// dumpster (soft delete, recoverable until retention purges it), from any other
+// folder it is moved to Deleted Items.
 func (s *Server) handleMailDelete(w http.ResponseWriter, r *http.Request) {
 	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"))
 	if !ok {
@@ -519,7 +520,7 @@ func (s *Server) handleMailDelete(w http.ResponseWriter, r *http.Request) {
 	defer st.Close()
 	var err error
 	if fid == mapi.PrivateFIDDeletedItems {
-		err = st.DeleteMessage(fid, uid)
+		err = st.SoftDeleteMessage(fid, uid)
 	} else {
 		_, err = st.MoveMessage(fid, uid, mapi.PrivateFIDDeletedItems)
 	}

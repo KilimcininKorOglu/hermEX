@@ -11,10 +11,11 @@ import (
 	"hermex/internal/objectstore"
 )
 
-// TestEmptyFolderMovesToTrashAndPurgesJunk proves POST /folders/{name}/empty ports
-// the old webmail behaviour: emptying an ordinary folder moves its messages to
-// Deleted Items, while emptying Junk (or Trash) discards them permanently.
-func TestEmptyFolderMovesToTrashAndPurgesJunk(t *testing.T) {
+// TestEmptyFolderMovesToTrashAndDumpstersJunk proves POST /folders/{name}/empty
+// moves an ordinary folder's messages to Deleted Items, while emptying Junk (or
+// Trash) sends them to the Recoverable Items dumpster (soft delete) rather than
+// purging them outright, so they stay recoverable until retention.
+func TestEmptyFolderMovesToTrashAndDumpstersJunk(t *testing.T) {
 	dir := t.TempDir()
 	st, err := objectstore.Open(dir)
 	if err != nil {
@@ -63,6 +64,10 @@ func TestEmptyFolderMovesToTrashAndPurgesJunk(t *testing.T) {
 		t.Errorf("trash has %d messages, want 2", len(msgs))
 	}
 	if msgs, _ := st2.ListMessages(int64(mapi.PrivateFIDJunk)); len(msgs) != 0 {
-		t.Errorf("junk has %d messages, want 0 (purged)", len(msgs))
+		t.Errorf("junk has %d live messages, want 0 (emptied)", len(msgs))
+	}
+	// The emptied Junk message is in the dumpster, not purged: recoverable.
+	if dump, _ := st2.ListSoftDeleted(int64(mapi.PrivateFIDJunk)); len(dump) != 1 {
+		t.Errorf("junk dumpster has %d items, want 1 (soft-deleted, recoverable)", len(dump))
 	}
 }
