@@ -1,6 +1,7 @@
 package webmail2api
 
 import (
+	"archive/zip"
 	"net/http"
 	"strconv"
 	"strings"
@@ -99,6 +100,52 @@ func (s *Server) handleSource(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write(raw)
+}
+
+// handleAttachmentsZip streams every attachment of a message as a single .zip
+// (the same walk order handleAttachment indexes). Own mailbox only.
+func (s *Server) handleAttachmentsZip(w http.ResponseWriter, r *http.Request) {
+	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"))
+	if !ok {
+		return
+	}
+	defer st.Close()
+	raw, err := st.GetMessageRaw(fid, uid)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"attachments.zip\"")
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+	idx := 0
+	var walk func(p *mime.Part)
+	walk = func(p *mime.Part) {
+		if p == nil {
+			return
+		}
+		name := p.DispParams["filename"]
+		if name == "" {
+			name = p.Params["name"]
+		}
+		if p.Type != "multipart" && (p.Disposition == "attachment" || name != "") {
+			if body, err := p.DecodedContent(); err == nil {
+				fn := p.Filename()
+				if fn == "" {
+					fn = "attachment-" + strconv.Itoa(idx)
+				}
+				idx++
+				if fw, err := zw.Create(fn); err == nil {
+					_, _ = fw.Write(body)
+				}
+			}
+		}
+		for _, ch := range p.Children {
+			walk(ch)
+		}
+	}
+	walk(mime.ParseStructure(raw))
 }
 
 // handleRecover restores a message from Deleted Items back to the Inbox.

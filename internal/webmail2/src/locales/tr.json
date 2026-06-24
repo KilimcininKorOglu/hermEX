@@ -138,6 +138,7 @@
     "failedToDownload": "Ek indirilemedi",
     "exportEML": "EML olarak dışa aktar",
     "print": "Yazdır",
+    "downloadAll": "Tümünü indir",
     "viewSource": "Kaynağı görüntüle",
     "exportFailed": "İleti dışa aktarılamadı",
     "movedTo": "{{folder}} klasörüne taşındı",

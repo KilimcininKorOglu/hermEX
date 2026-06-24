@@ -333,6 +333,18 @@ export function EmailDetailPage() {
     }
   }
 
+  // handleDownloadAll fetches every attachment as one .zip. A same-origin anchor
+  // carries the session cookie, and the server names the file.
+  const handleDownloadAll = () => {
+    if (!email) return
+    const a = document.createElement("a")
+    a.href = `/api/v1/mail/attachments-zip?id=${encodeURIComponent(email.id)}`
+    a.download = "attachments.zip"
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  }
+
   const handleExportEML = async () => {
     if (!email) return
     try {
@@ -639,11 +651,23 @@ export function EmailDetailPage() {
             {/* Attachments */}
             {email.attachments.length > 0 && (
               <div className="border-t px-6 py-4">
-                <div className="mb-2 flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
-                  <Paperclip className="h-4 w-4" />
-                  {email.attachments.length > 1
-                    ? t("emailDetail.attachments", { count: String(email.attachments.length) })
-                    : t("emailDetail.attachment", { count: String(email.attachments.length) })}
+                <div className="mb-2 flex items-center justify-between text-sm font-medium text-muted-foreground">
+                  <div className="flex items-center gap-1.5">
+                    <Paperclip className="h-4 w-4" />
+                    {email.attachments.length > 1
+                      ? t("emailDetail.attachments", { count: String(email.attachments.length) })
+                      : t("emailDetail.attachment", { count: String(email.attachments.length) })}
+                  </div>
+                  {email.attachments.length > 1 && (
+                    <button
+                      onClick={handleDownloadAll}
+                      className="flex items-center gap-1 text-xs hover:text-foreground transition-colors"
+                      title={t("emailDetail.downloadAll")}
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      {t("emailDetail.downloadAll")}
+                    </button>
+                  )}
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {email.attachments.map((att) => (
