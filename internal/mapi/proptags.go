@@ -171,6 +171,7 @@ const (
 	PrClientSubmitTime    = PropTag(0x00390040) // PtSysTime
 	PrMessageDeliveryTime = PropTag(0x0E060040) // PtSysTime
 	PrDeferredSendTime    = PropTag(0x3FEF0040) // PtSysTime (PidTagDeferredSendTime, MS-OXOMSG) — absolute time to release a deferred send
+	PrDeletedOn           = PropTag(0x668F0040) // PtSysTime (PidTagDeletedOn): when a message was soft-deleted into the Recoverable Items dumpster; drives retention
 	PrStartDate           = PropTag(0x00600040) // PtSysTime (PidTagStartDate) — appointment start, mirrors PidLidAppointmentStartWhole
 	PrEndDate             = PropTag(0x00610040) // PtSysTime (PidTagEndDate) — appointment end, mirrors PidLidAppointmentEndWhole
 	PrMessageFlags        = PropTag(0x0E070003) // PtLong
