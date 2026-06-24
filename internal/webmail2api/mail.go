@@ -12,6 +12,7 @@ import (
 	"hermex/internal/mapi"
 	"hermex/internal/mime"
 	"hermex/internal/objectstore"
+	"hermex/internal/smime"
 )
 
 // messageID encodes a folder slug and uid as the opaque id the SPA round-trips
@@ -195,8 +196,6 @@ type mailDetailJSON struct {
 	Attachments    []attachmentJSON `json:"attachments,omitempty"`
 	SmimeSigned    bool             `json:"smimeSigned,omitempty"`
 	SmimeEncrypted bool             `json:"smimeEncrypted,omitempty"`
-	SmimeVerified  bool             `json:"smimeVerified,omitempty"`
-	SmimeSignedBy  string           `json:"smimeSignedBy,omitempty"`
 }
 
 // handleMailMessage returns a single message's full detail and marks it read.
@@ -227,19 +226,12 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// S/MIME: decrypt/verify the message. The envelope stays from the outer
-	// message; an encrypted message's body comes from the decrypted content.
-	content, sm := s.smimeOpen(st, raw)
 	d := buildMailDetail(raw, folder, uid)
-	if sm.Encrypted {
-		inner := mime.ParseStructure(content)
-		body, inlined := inlineCIDImages(bestBody(inner), inner)
-		d.Body = body
-		d.Attachments = collectAttachments(inner, inlined)
-		d.HasAttachments = len(d.Attachments) > 0
-	}
-	d.SmimeSigned, d.SmimeEncrypted = sm.Signed, sm.Encrypted
-	d.SmimeVerified, d.SmimeSignedBy = sm.Verified, sm.SignedBy
+	// S/MIME detection only. Verify and decrypt happen client-side with the
+	// browser-held key (the server never holds it), so just flag the type; the
+	// SPA fetches the raw message and verifies/decrypts/renders it.
+	d.SmimeSigned = smime.IsSigned(raw)
+	d.SmimeEncrypted = smime.IsEncrypted(raw)
 
 	// Reading marks the message \Seen, preserving its other flags.
 	if flags, err := st.MessageFlags(fid, uid); err == nil {

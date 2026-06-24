@@ -36,8 +36,6 @@ type sendRequest struct {
 	Importance         string           `json:"importance"`
 	Attachments        []mailAttachment `json:"attachments"`
 	SendAt             string           `json:"sendAt"`
-	SignMessage        bool             `json:"signMessage"`    // S/MIME sign
-	EncryptMessage     bool             `json:"encryptMessage"` // S/MIME encrypt
 }
 
 // decodeAttachment decodes an attachment body, accepting raw base64 or a data URL.
@@ -62,18 +60,7 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	recipients := make([]string, 0, len(req.To)+len(req.Cc)+len(req.Bcc))
-	for _, group := range [][]string{req.To, req.Cc, req.Bcc} {
-		for _, a := range group {
-			if a = strings.TrimSpace(a); a != "" {
-				if parsed, err := mail.ParseAddress(a); err == nil {
-					recipients = append(recipients, parsed.Address)
-				} else {
-					recipients = append(recipients, a)
-				}
-			}
-		}
-	}
+	recipients := collectRecipients(req.To, req.Cc, req.Bcc)
 	if len(recipients) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "at least one recipient is required"})
 		return
@@ -83,17 +70,6 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not build the message"})
 		return
-	}
-
-	// S/MIME sign and/or encrypt the built message before it is filed or sent, so
-	// the Sent copy matches what recipients receive.
-	if req.SignMessage || req.EncryptMessage {
-		signed, err := s.applySmime(c.Mailbox, raw, recipients, req.SignMessage, req.EncryptMessage)
-		if err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
-			return
-		}
-		raw = signed
 	}
 
 	// Scheduled (send-later): file the built message in the Outbox with a deferred
@@ -119,6 +95,87 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// File a Sent copy (best-effort; a delivered message is not lost if this fails).
+	if st, err := objectstore.Open(c.Mailbox); err == nil {
+		_, _ = st.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), objectstore.FlagSeen)
+		st.Close()
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// collectRecipients flattens To/Cc/Bcc into a deduplicated-by-position address
+// list, parsing each entry as a mail address but keeping bare strings as-is.
+func collectRecipients(groups ...[]string) []string {
+	out := make([]string, 0)
+	for _, group := range groups {
+		for _, a := range group {
+			if a = strings.TrimSpace(a); a == "" {
+				continue
+			}
+			if parsed, err := mail.ParseAddress(a); err == nil {
+				out = append(out, parsed.Address)
+			} else {
+				out = append(out, a)
+			}
+		}
+	}
+	return out
+}
+
+// handleMailBuild builds the outgoing MIME from the compose fields and returns it
+// unsent (base64), so the SPA can S/MIME sign and/or encrypt it client-side before
+// posting it back to /mail/send-raw. The private key never reaches the server.
+func (s *Server) handleMailBuild(w http.ResponseWriter, r *http.Request) {
+	c, ok := s.session(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	var req sendRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	raw, err := s.buildOutgoing(c.Email, req)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not build the message"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"raw": base64.StdEncoding.EncodeToString(raw)})
+}
+
+// handleMailSendRaw relays a client-built (S/MIME signed and/or encrypted) raw
+// message. The SPA supplies the recipients separately because an encrypted body
+// cannot be parsed for them. A Sent copy of the exact bytes is filed.
+func (s *Server) handleMailSendRaw(w http.ResponseWriter, r *http.Request) {
+	c, ok := s.session(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	var req struct {
+		Raw string   `json:"raw"`
+		To  []string `json:"to"`
+		Cc  []string `json:"cc"`
+		Bcc []string `json:"bcc"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(req.Raw))
+	if err != nil || len(raw) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid raw message"})
+		return
+	}
+	recipients := collectRecipients(req.To, req.Cc, req.Bcc)
+	if len(recipients) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "at least one recipient is required"})
+		return
+	}
+	if _, err := mta.DeliverAndRelay(s.accounts, s.spool, c.Email, recipients, raw, time.Now()); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delivery failed: " + err.Error()})
+		return
+	}
 	if st, err := objectstore.Open(c.Mailbox); err == nil {
 		_, _ = st.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), objectstore.FlagSeen)
 		st.Close()
