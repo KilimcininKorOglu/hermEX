@@ -90,6 +90,81 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(raw)
 }
 
+// maxBulkExport caps a bulk EML export so one request cannot stream an unbounded zip.
+const maxBulkExport = 200
+
+// handleExportBulk streams the selected messages as a zip of .eml files (the bulk
+// RFC822 export). Messages are addressed by the same "<folder>:<uid>" ids the list
+// view hands out and may span folders; each is gated by the folder's read
+// permission and the count is capped at maxBulkExport. A streaming zip commits a
+// 200 on the first byte, so every hard failure is reported before the zip starts
+// and a per-message problem is skipped rather than surfaced.
+func (s *Server) handleExportBulk(w http.ResponseWriter, r *http.Request) {
+	mb, ok := s.openMailbox(w, r)
+	if !ok {
+		return
+	}
+	defer mb.st.Close()
+	ids := r.URL.Query()["id"]
+	if len(ids) == 0 {
+		http.Error(w, "no messages selected", http.StatusBadRequest)
+		return
+	}
+	if len(ids) > maxBulkExport {
+		ids = ids[:maxBulkExport]
+	}
+	// Resolve each folder slug (and its read verdict) once: a 200-message export
+	// must not run 200 ListFolders queries.
+	type folderGate struct {
+		fid int64
+		ok  bool
+	}
+	gates := map[string]folderGate{}
+	resolve := func(folder string) (int64, bool) {
+		if g, seen := gates[folder]; seen {
+			return g.fid, g.ok
+		}
+		fid, ok := resolveFolder(mb.st, folder)
+		if ok {
+			ok = mb.readAllowed(fid)
+		}
+		gates[folder] = folderGate{fid, ok}
+		return fid, ok
+	}
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"messages.zip\"")
+	zw := zip.NewWriter(w)
+	defer zw.Close()
+	used := map[string]bool{}
+	for _, id := range ids {
+		folder, uid, ok := parseMessageID(id)
+		if !ok {
+			continue
+		}
+		fid, ok := resolve(folder)
+		if !ok {
+			continue
+		}
+		raw, err := mb.st.GetMessageRaw(fid, uid)
+		if err != nil {
+			continue
+		}
+		// The same uid in two different folders would collide; disambiguate the
+		// zip entry name so neither message is silently overwritten.
+		name := "message-" + strconv.FormatUint(uint64(uid), 10) + ".eml"
+		for n := 2; used[name]; n++ {
+			name = "message-" + strconv.FormatUint(uint64(uid), 10) + "-" + strconv.Itoa(n) + ".eml"
+		}
+		used[name] = true
+		f, err := zw.Create(name)
+		if err != nil {
+			return
+		}
+		_, _ = f.Write(raw)
+	}
+}
+
 // handleSource serves a message's raw RFC822 source as inline text/plain, for the
 // "view source / show original" action (own mailbox only, like the other locate-
 // based readers).
