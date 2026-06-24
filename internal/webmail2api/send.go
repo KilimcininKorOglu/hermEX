@@ -36,6 +36,8 @@ type sendRequest struct {
 	Importance         string           `json:"importance"`
 	Attachments        []mailAttachment `json:"attachments"`
 	SendAt             string           `json:"sendAt"`
+	SignMessage        bool             `json:"signMessage"`    // S/MIME sign
+	EncryptMessage     bool             `json:"encryptMessage"` // S/MIME encrypt
 }
 
 // decodeAttachment decodes an attachment body, accepting raw base64 or a data URL.
@@ -81,6 +83,17 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not build the message"})
 		return
+	}
+
+	// S/MIME sign and/or encrypt the built message before it is filed or sent, so
+	// the Sent copy matches what recipients receive.
+	if req.SignMessage || req.EncryptMessage {
+		signed, err := s.applySmime(c.Mailbox, raw, recipients, req.SignMessage, req.EncryptMessage)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+		raw = signed
 	}
 
 	// Scheduled (send-later): file the built message in the Outbox with a deferred

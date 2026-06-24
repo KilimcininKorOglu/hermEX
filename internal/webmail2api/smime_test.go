@@ -1,12 +1,14 @@
 package webmail2api
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -15,11 +17,12 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/objectstore"
+	"hermex/internal/smime"
 )
 
-// makeTestCert builds a throwaway self-signed certificate (DER) for the S/MIME
-// view test.
-func makeTestCert(t *testing.T) []byte {
+// makeTestIdentity builds a throwaway self-signed identity, returning the cert in
+// DER plus the cert and private key in PEM (what the SPA uploads).
+func makeTestIdentity(t *testing.T) (certDER []byte, certPEM, keyPEM string) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -35,16 +38,35 @@ func makeTestCert(t *testing.T) []byte {
 	if err != nil {
 		t.Fatalf("create cert: %v", err)
 	}
-	return der
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatalf("marshal key: %v", err)
+	}
+	cp := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	kp := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+	return der, string(cp), string(kp)
 }
 
-// smimeRequest issues an authenticated request whose session points at dir.
-func smimeRequest(t *testing.T, srv *Server, secret []byte, method, dir string) *httptest.ResponseRecorder {
+// smimePost issues an authenticated POST whose session points at dir.
+func smimePost(t *testing.T, srv *Server, secret []byte, dir string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	token, err := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
 	if err != nil {
 		t.Fatalf("mint: %v", err)
 	}
+	raw, _ := json.Marshal(body)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/smime/certificate", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	return rec
+}
+
+// smimeGet/smimeDelete issue authenticated read/delete requests.
+func smimeReq(t *testing.T, srv *Server, secret []byte, method, dir string) *httptest.ResponseRecorder {
+	t.Helper()
+	token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
 	req := httptest.NewRequest(method, "/api/v1/smime/certificate", nil)
 	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
 	rec := httptest.NewRecorder()
@@ -52,54 +74,94 @@ func smimeRequest(t *testing.T, srv *Server, secret []byte, method, dir string) 
 	return rec
 }
 
-// TestSmimeCertViewDelete proves the model-independent half: a stored identity's
-// details are read back, and delete removes it.
-func TestSmimeCertViewDelete(t *testing.T) {
+// TestSmimeUploadRoundTrip proves an uploaded PEM cert+key is stored encrypted at
+// rest and unlocks to a usable signing identity.
+func TestSmimeUploadRoundTrip(t *testing.T) {
 	dir := t.TempDir()
-	st, err := objectstore.Open(dir)
-	if err != nil {
+	if st, err := objectstore.Open(dir); err != nil {
 		t.Fatalf("open: %v", err)
+	} else {
+		st.Close()
 	}
-	if err := st.SetSmimeIdentity(objectstore.SmimeIdentity{Cert: makeTestCert(t), P12: []byte("encrypted-p12")}); err != nil {
-		t.Fatalf("set identity: %v", err)
-	}
-	st.Close()
-
+	_, certPEM, keyPEM := makeTestIdentity(t)
 	secret := []byte("smime-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.test", secret, "", false)
 
-	rec := smimeRequest(t, srv, secret, http.MethodGet, dir)
-	var info map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &info); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if info["subject"] == nil || info["hasPrivateKey"] != true {
-		t.Fatalf("view = %v, want subject + hasPrivateKey", info)
+	if rec := smimePost(t, srv, secret, dir, map[string]string{"cert": certPEM, "key": keyPEM}); rec.Code != 200 {
+		t.Fatalf("upload = %d: %s", rec.Code, rec.Body.String())
 	}
 
-	if rec := smimeRequest(t, srv, secret, http.MethodDelete, dir); rec.Code != 200 {
-		t.Fatalf("delete = %d", rec.Code)
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer st.Close()
+	key, cert, ok := unlockSmimeIdentity(st, secret)
+	if !ok {
+		t.Fatal("stored identity did not unlock")
+	}
+	signed, err := smime.Sign([]byte("hello"), cert, key)
+	if err != nil {
+		t.Fatalf("sign with stored key: %v", err)
+	}
+	signer, content, err := smime.Verify(signed)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if string(content) != "hello" || signer.Subject.CommonName != "alice@hermex.test" {
+		t.Errorf("round-trip = %q by %q", content, signer.Subject.CommonName)
 	}
 
-	rec = smimeRequest(t, srv, secret, http.MethodGet, dir)
-	var after map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &after)
-	if after["hasKeys"] != false {
-		t.Errorf("after delete = %v, want hasKeys:false", after)
+	// View reflects the stored identity, delete clears it.
+	if rec := smimeReq(t, srv, secret, http.MethodGet, dir); rec.Code != 200 {
+		t.Errorf("view = %d", rec.Code)
+	}
+	if rec := smimeReq(t, srv, secret, http.MethodDelete, dir); rec.Code != 200 {
+		t.Errorf("delete = %d", rec.Code)
+	}
+	if _, _, ok := unlockSmimeIdentity(st, secret); ok {
+		t.Error("identity still present after delete")
 	}
 }
 
-// TestSmimeUploadPending proves the upload reports a clear pending state rather
-// than silently storing the key under an unchosen at-rest model.
-func TestSmimeUploadPending(t *testing.T) {
+// TestApplySmimeSign proves the send path signs a built message with the stored
+// identity, producing a verifiable S/MIME message.
+func TestApplySmimeSign(t *testing.T) {
+	dir := t.TempDir()
+	_, certPEM, keyPEM := makeTestIdentity(t)
 	secret := []byte("smime-test-secret")
 	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.test", secret, "", false)
-	token, _ := mintToken(secret, sessionClaims{Email: "a@b.test", Mailbox: t.TempDir(), Exp: time.Now().Add(time.Hour).Unix()})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/smime/certificate", nil)
-	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, req)
-	if rec.Code != http.StatusNotImplemented {
-		t.Errorf("upload = %d, want 501 (pending)", rec.Code)
+	if rec := smimePost(t, srv, secret, dir, map[string]string{"cert": certPEM, "key": keyPEM}); rec.Code != 200 {
+		t.Fatalf("upload: %d", rec.Code)
+	}
+	out, err := srv.applySmime(dir, []byte("From: a@b.test\r\nSubject: hi\r\n\r\nbody\r\n"), []string{"x@y.test"}, true, false)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	if !smime.IsSigned(out) {
+		t.Fatal("send output is not signed")
+	}
+	if _, _, err := smime.Verify(out); err != nil {
+		t.Errorf("signed output does not verify: %v", err)
+	}
+}
+
+// TestApplySmimeNoIdentity proves signing without an uploaded identity errors
+// rather than sending an unsigned message silently.
+func TestApplySmimeNoIdentity(t *testing.T) {
+	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.test", []byte("s"), "", false)
+	if _, err := srv.applySmime(t.TempDir(), []byte("x"), nil, true, false); err == nil {
+		t.Error("signing without an identity should error")
+	}
+}
+
+// TestSmimeUploadMismatch proves a cert and key that do not pair are rejected.
+func TestSmimeUploadMismatch(t *testing.T) {
+	_, certPEM, _ := makeTestIdentity(t)
+	_, _, otherKeyPEM := makeTestIdentity(t)
+	secret := []byte("smime-test-secret")
+	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.test", secret, "", false)
+	if rec := smimePost(t, srv, secret, t.TempDir(), map[string]string{"cert": certPEM, "key": otherKeyPEM}); rec.Code != http.StatusBadRequest {
+		t.Errorf("mismatched pair = %d, want 400", rec.Code)
 	}
 }
