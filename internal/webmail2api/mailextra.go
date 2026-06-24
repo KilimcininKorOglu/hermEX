@@ -2,14 +2,20 @@ package webmail2api
 
 import (
 	"archive/zip"
+	"encoding/base64"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"hermex/internal/mapi"
 	"hermex/internal/mime"
 	"hermex/internal/objectstore"
 )
+
+// maxImportBytes caps an imported .eml request body (base64 inflates ~33%, so
+// this allows roughly a 30 MiB message).
+const maxImportBytes = 40 << 20
 
 // handleAttachment streams the Nth attachment of a message (the same walk order
 // collectAttachments assigns).
@@ -239,6 +245,50 @@ func searchFolders() map[string]int64 {
 		"trash":  mapi.PrivateFIDDeletedItems,
 		"spam":   mapi.PrivateFIDJunk,
 	}
+}
+
+// handleImport stores an uploaded .eml (base64) into a folder of the caller's
+// OWN mailbox (default Inbox), the same way AppendMessage imports delivered mail.
+// Importing into a shared mailbox is not supported (mirrors webmail).
+func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxImportBytes)
+	var req struct {
+		File   string `json:"file"` // base64-encoded .eml
+		Folder string `json:"folder"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "upload too large or malformed"})
+		return
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(req.File))
+	if err != nil || len(raw) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "choose a valid .eml file"})
+		return
+	}
+	mb, ok := s.openMailbox(w, r)
+	if !ok {
+		return
+	}
+	defer mb.st.Close()
+	if mb.shared {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "import into a shared mailbox is not supported"})
+		return
+	}
+	folder := req.Folder
+	if folder == "" {
+		folder = "inbox"
+	}
+	fid, ok := folderFID(folder)
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown folder"})
+		return
+	}
+	info, err := mb.st.AppendMessage(fid, raw, time.Now(), 0)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not import message"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"uid": info.UID, "folder": folder})
 }
 
 // handleThreads returns the inbox grouped into simple subject threads.

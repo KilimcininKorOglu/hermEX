@@ -855,6 +855,12 @@ class API {
     return this.post<{ marked?: number }>(`/mail/mark-all-read${ownerQuery(owner ?? this.mailboxOwner, '?')}`, { folder })
   }
 
+  // importEml stores a base64-encoded .eml into a folder of the caller's own
+  // mailbox (default Inbox).
+  async importEml(file: string, folder = 'inbox'): Promise<{ uid?: number; folder?: string }> {
+    return this.post<{ uid?: number; folder?: string }>('/mail/import', { file, folder })
+  }
+
   // Filters
   async getFilters(): Promise<{ filters?: Filter[] }> {
     return this.get<{ filters?: Filter[] }>('/filters')

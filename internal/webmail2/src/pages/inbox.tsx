@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import { useMailbox } from "@/contexts/MailboxContext"
 import {
@@ -7,6 +7,7 @@ import {
   Trash2,
   MailOpen,
   CheckCheck,
+  Upload,
   Paperclip,
   RefreshCw,
   ChevronLeft,
@@ -263,6 +264,27 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
     }
   }
 
+  const importInputRef = useRef<HTMLInputElement>(null)
+  const onImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    e.target.value = ""
+    if (!file) return
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(reader.result as string)
+        reader.onerror = () => reject(reader.error)
+        reader.readAsDataURL(file)
+      })
+      const base64 = dataUrl.split(",")[1] ?? ""
+      await api.importEml(base64, folder === "starred" ? "inbox" : folder)
+      refreshInbox()
+      toast.success(t("inbox.imported"))
+    } catch {
+      toast.error(t("inbox.importFailed"))
+    }
+  }
+
   const filteredEmails = emails
     .filter((email) => {
       if (activeFilter === "unread") return !email.read
@@ -431,8 +453,18 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
             </div>
           ) : (
             <div className="flex items-center gap-1">
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".eml,message/rfc822"
+                className="hidden"
+                onChange={onImportFile}
+              />
               <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleMarkAllRead} title={t("inbox.markAllRead")}>
                 <CheckCheck className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => importInputRef.current?.click()} title={t("inbox.import")}>
+                <Upload className="h-4 w-4" />
               </Button>
               <Button variant="ghost" size="icon" className="h-8 w-8" onClick={handleRefresh}>
                 <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
