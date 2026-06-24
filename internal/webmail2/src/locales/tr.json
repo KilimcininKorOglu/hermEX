@@ -144,7 +144,7 @@
     "downloadAll": "Tümünü indir",
     "viewSource": "Kaynağı görüntüle",
     "smimeEncrypted": "Şifreli",
-    "smimeSignedVerified": "{{signer}} tarafından imzalandı (doğrulandı)",
+    "smimeSignedVerified": "{{signer}} tarafından imzalandı",
     "smimeSignedUnverified": "{{signer}} tarafından imzalandı (imza doğrulanamadı)",
     "exportFailed": "İleti dışa aktarılamadı",
     "movedTo": "{{folder}} klasörüne taşındı",

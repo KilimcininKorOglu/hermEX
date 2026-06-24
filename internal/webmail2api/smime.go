@@ -39,9 +39,13 @@ func certEmail(cert *x509.Certificate) string {
 }
 
 // smimeOpen inspects a received message: it decrypts with the caller's key when
-// encrypted, verifies the signature when signed (harvesting the sender's cert so
-// replies can be encrypted to them), and returns the inner content plus the
-// status. A non-S/MIME message passes through unchanged.
+// encrypted, verifies the signature when signed, and returns the inner content
+// plus the status. A non-S/MIME message passes through unchanged.
+//
+// Verified means only that the signature matches the certificate embedded in the
+// message — it is NOT a chain/identity check, so the cert is not trusted or
+// stored for later encryption (that would be trust-on-first-use, letting a
+// self-signed cert claiming an address poison the encryption path).
 func (s *Server) smimeOpen(st *objectstore.Store, raw []byte) ([]byte, smimeStatus) {
 	var status smimeStatus
 	content := raw
@@ -58,9 +62,6 @@ func (s *Server) smimeOpen(st *objectstore.Store, raw []byte) ([]byte, smimeStat
 		if signer, _, err := smime.Verify(content); err == nil {
 			status.Verified = true
 			status.SignedBy = certEmail(signer)
-			if addr := certEmail(signer); strings.Contains(addr, "@") {
-				_ = st.PutRecipientCert(addr, signer.Raw)
-			}
 		}
 	}
 	return content, status

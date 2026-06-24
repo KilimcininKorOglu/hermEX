@@ -144,7 +144,7 @@
     "downloadAll": "Download all",
     "viewSource": "View source",
     "smimeEncrypted": "Encrypted",
-    "smimeSignedVerified": "Signed by {{signer}} (verified)",
+    "smimeSignedVerified": "Signed by {{signer}}",
     "smimeSignedUnverified": "Signed by {{signer}} (signature not verified)",
     "exportFailed": "Failed to export message",
     "movedTo": "Moved to {{folder}}",
