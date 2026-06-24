@@ -469,7 +469,18 @@
       "smimeCertDeleteConfirm": "S/MIME sertifikasını kaldır? Bu işlem, bu hesap için imzalama ve şifrelemeyi devre dışı bırakacaktır.",
       "smimeCertInvalidCert": "Geçersiz sertifika PEM bloğu",
       "smimeCertInvalidKey": "Geçersiz özel anahtar PEM bloğu",
-      "smimeCertNone": "Yapılandırılmış S/MIME sertifikası yok"
+      "smimeCertNone": "Yapılandırılmış S/MIME sertifikası yok",
+      "smimeImportDesc": "Bir PKCS#12 (.p12) kimliği içe aktar. Private key bu tarayıcıda kalır ve sunucuya hiç gönderilmez; yalnızca public sertifikan yayınlanır.",
+      "smimeImportHint": "Private key'in bu tarayıcıda şifreli saklanır. İmzalamak veya çözmek için her oturum bu parolayla açarsın.",
+      "smimeP12File": ".p12 / .pfx dosyası",
+      "smimeP12Password": "Parola",
+      "smimeP12PasswordPlaceholder": ".p12 dosyasını koruyan parola",
+      "smimeUnlock": "Kilidi aç",
+      "smimeUnlockDesc": "Bu oturum için imzalama ve çözmeyi açmak üzere .p12 parolanı gir.",
+      "smimeUnlocked": "S/MIME bu oturum için açıldı",
+      "smimeUnlockFailed": "Yanlış parola veya okunamayan kimlik",
+      "smimeUnlockedBadge": "açık",
+      "smimeLockedBadge": "kilitli"
     },
     "shortcuts": {
       "title": "Klavye Kısayolları",

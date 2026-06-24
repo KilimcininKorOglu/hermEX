@@ -469,7 +469,18 @@
       "smimeCertDeleteConfirm": "Remove S/MIME certificate? This will disable signing and encryption for this account.",
       "smimeCertInvalidCert": "Invalid certificate PEM block",
       "smimeCertInvalidKey": "Invalid private key PEM block",
-      "smimeCertNone": "No S/MIME certificate configured"
+      "smimeCertNone": "No S/MIME certificate configured",
+      "smimeImportDesc": "Import a PKCS#12 (.p12) identity. The private key stays in this browser and is never sent to the server; only your public certificate is published.",
+      "smimeImportHint": "Your private key is stored encrypted in this browser. You will unlock it with this password each session to sign or decrypt.",
+      "smimeP12File": ".p12 / .pfx file",
+      "smimeP12Password": "Password",
+      "smimeP12PasswordPlaceholder": "The password that protects the .p12 file",
+      "smimeUnlock": "Unlock",
+      "smimeUnlockDesc": "Enter your .p12 password to unlock signing and decryption for this session.",
+      "smimeUnlocked": "S/MIME unlocked for this session",
+      "smimeUnlockFailed": "Wrong password or unreadable identity",
+      "smimeUnlockedBadge": "unlocked",
+      "smimeLockedBadge": "locked"
     },
     "shortcuts": {
       "title": "Keyboard Shortcuts",

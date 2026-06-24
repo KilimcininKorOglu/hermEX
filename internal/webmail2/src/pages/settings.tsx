@@ -22,6 +22,8 @@ import {
 import { toast } from "sonner"
 import api from "@/utils/api"
 import type { VacationAutoReply, ClientSession, Delegation, Category, SignatureEntry, TemplateEntry } from "@/utils/api"
+import * as smimeStore from "@/utils/smime"
+import type { CertInfo } from "@/utils/smime"
 import { detectTimeZone, listTimeZones } from "@/utils/timezone"
 import { enablePushNotifications, disablePushNotifications, pushSupported } from "@/utils/push"
 import { RichTextEditor } from "@/components/RichTextEditor"
@@ -232,28 +234,25 @@ export function SettingsPage() {
     }
   }
 
-  // S/MIME certificate state (backed by /api/v1/smime/certificate)
-  const [smimeCert, setSmimeCert] = useState<{
-    subject: string; issuer: string; notBefore: string; notAfter: string;
-    serialNumber: string; fingerprint: string; hasPrivateKey: boolean
-  } | null>(null)
+  // S/MIME identity lives in THIS browser (IndexedDB, via utils/smime); the server
+  // only holds the published public certificate. The private key never leaves.
+  const [smimeCert, setSmimeCert] = useState<CertInfo | null>(null)
+  const [smimeUnlocked, setSmimeUnlocked] = useState(false)
   const [smimeLoading, setSmimeLoading] = useState(true)
-  const [smimeUploadOpen, setSmimeUploadOpen] = useState(false)
-  const [smimeCertInput, setSmimeCertInput] = useState("")
-  const [smimeKeyInput, setSmimeKeyInput] = useState("")
+  const [smimeImportOpen, setSmimeImportOpen] = useState(false)
+  const [smimeFile, setSmimeFile] = useState<File | null>(null)
+  const [smimePassword, setSmimePassword] = useState("")
   const [smimeSaving, setSmimeSaving] = useState(false)
+  const [smimeUnlockOpen, setSmimeUnlockOpen] = useState(false)
+  const [smimeUnlockPassword, setSmimeUnlockPassword] = useState("")
   const [smimeDeleteOpen, setSmimeDeleteOpen] = useState(false)
   const [smimeDeleting, setSmimeDeleting] = useState(false)
 
   const loadSmimeCert = useCallback(async () => {
     setSmimeLoading(true)
     try {
-      const res = await api.getSMIMECertificate()
-      if ("hasKeys" in res) {
-        setSmimeCert(null)
-      } else {
-        setSmimeCert(res)
-      }
+      setSmimeCert(await smimeStore.storedCertInfo())
+      setSmimeUnlocked(smimeStore.isUnlocked())
     } catch {
       setSmimeCert(null)
     } finally {
@@ -263,15 +262,19 @@ export function SettingsPage() {
 
   useEffect(() => { loadSmimeCert() }, [loadSmimeCert])
 
-  const handleSmimeUpload = async () => {
-    if (!smimeCertInput.trim() || !smimeKeyInput.trim()) return
+  const handleSmimeImport = async () => {
+    if (!smimeFile || !smimePassword) return
     setSmimeSaving(true)
     try {
-      const saved = await api.uploadSMIMECertificate(smimeCertInput, smimeKeyInput)
-      setSmimeCert(saved)
-      setSmimeUploadOpen(false)
-      setSmimeCertInput("")
-      setSmimeKeyInput("")
+      const bytes = await smimeFile.arrayBuffer()
+      const { info, certPem } = await smimeStore.importP12(bytes, smimePassword)
+      // Publish only the PUBLIC certificate so others can encrypt to us.
+      await api.uploadSMIMECertificate(certPem)
+      setSmimeCert(info)
+      setSmimeUnlocked(true)
+      setSmimeImportOpen(false)
+      setSmimeFile(null)
+      setSmimePassword("")
       toast.success(t("settings.smimeCertSaved"))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("settings.smimeCertSaveFailed"))
@@ -280,11 +283,29 @@ export function SettingsPage() {
     }
   }
 
+  const handleSmimeUnlock = async () => {
+    if (!smimeUnlockPassword) return
+    setSmimeSaving(true)
+    try {
+      await smimeStore.unlock(smimeUnlockPassword)
+      setSmimeUnlocked(true)
+      setSmimeUnlockOpen(false)
+      setSmimeUnlockPassword("")
+      toast.success(t("settings.smimeUnlocked"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("settings.smimeUnlockFailed"))
+    } finally {
+      setSmimeSaving(false)
+    }
+  }
+
   const handleSmimeDelete = async () => {
     setSmimeDeleting(true)
     try {
-      await api.deleteSMIMECertificate()
+      await smimeStore.removeIdentity()
+      await api.deleteSMIMECertificate().catch(() => {})
       setSmimeCert(null)
+      setSmimeUnlocked(false)
       setSmimeDeleteOpen(false)
       toast.success(t("settings.smimeCertDeleted"))
     } catch {
@@ -1392,25 +1413,28 @@ export function SettingsPage() {
               {smimeLoading ? (
                 <p className="text-xs text-muted-foreground mt-1">{t("common.loading")}</p>
               ) : smimeCert ? (
-                <p className="text-xs text-muted-foreground mt-1 truncate">{smimeCert.subject}</p>
+                <p className="text-xs text-muted-foreground mt-1 truncate">
+                  {smimeCert.subject} · {smimeUnlocked ? t("settings.smimeUnlockedBadge") : t("settings.smimeLockedBadge")}
+                </p>
               ) : (
                 <p className="text-xs text-muted-foreground mt-1">{t("settings.smimeCertNone")}</p>
               )}
             </div>
             <div className="flex items-center gap-2 ml-4">
+              {smimeCert && !smimeUnlocked && (
+                <Button variant="outline" size="sm" onClick={() => setSmimeUnlockOpen(true)}>
+                  {t("settings.smimeUnlock")}
+                </Button>
+              )}
               {smimeCert && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setSmimeDeleteOpen(true)}
-                >
+                <Button variant="outline" size="sm" onClick={() => setSmimeDeleteOpen(true)}>
                   {t("settings.privacy.smimeCertDelete")}
                 </Button>
               )}
               <Button
                 variant={smimeCert ? "outline" : "default"}
                 size="sm"
-                onClick={() => setSmimeUploadOpen(true)}
+                onClick={() => setSmimeImportOpen(true)}
               >
                 {smimeCert ? t("settings.privacy.smimeCertView") : t("settings.privacy.smimeCertAdd")}
               </Button>
@@ -1559,14 +1583,14 @@ export function SettingsPage() {
       </Dialog>
 
       {/* S/MIME Upload / View Dialog */}
-      <Dialog open={smimeUploadOpen} onOpenChange={setSmimeUploadOpen}>
+      <Dialog open={smimeImportOpen} onOpenChange={setSmimeImportOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>
               {smimeCert ? t("settings.privacy.smimeCertView") : t("settings.privacy.smimeCertUpload")}
             </DialogTitle>
             <DialogDescription>
-              {t("settings.privacy.smimeCertUploadDesc")}
+              {t("settings.smimeImportDesc")}
             </DialogDescription>
           </DialogHeader>
 
@@ -1585,47 +1609,71 @@ export function SettingsPage() {
                 <span className="font-mono text-xs break-all">{smimeCert.serialNumber}</span>
                 <span className="text-muted-foreground font-medium">{t("settings.privacy.smimeCertFingerprint")}:</span>
                 <span className="font-mono text-xs break-all">{smimeCert.fingerprint}</span>
-                <span className="text-muted-foreground font-medium">{t("settings.privacy.smimeCertHasKey")}:</span>
-                <span>{smimeCert.hasPrivateKey ? t("settings.privacy.smimeCertYes") : t("settings.privacy.smimeCertNo")}</span>
               </div>
             </div>
           )}
 
           <div className="space-y-3">
             <div className="space-y-1">
-              <Label htmlFor="smime-cert">{t("settings.privacy.smimeCertPlaceholder").split("...")[0]}</Label>
-              <Textarea
-                id="smime-cert"
-                value={smimeCertInput}
-                onChange={(e) => setSmimeCertInput(e.target.value)}
-                placeholder={t("settings.privacy.smimeCertPlaceholder")}
-                rows={5}
-                className="font-mono text-xs"
+              <Label htmlFor="smime-p12">{t("settings.smimeP12File")}</Label>
+              <Input
+                id="smime-p12"
+                type="file"
+                accept=".p12,.pfx"
+                onChange={(e) => setSmimeFile(e.target.files?.[0] ?? null)}
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="smime-key">{t("settings.privacy.smimeCertKeyPlaceholder").split("...")[0]}</Label>
-              <Textarea
-                id="smime-key"
-                value={smimeKeyInput}
-                onChange={(e) => setSmimeKeyInput(e.target.value)}
-                placeholder={t("settings.privacy.smimeCertKeyPlaceholder")}
-                rows={5}
-                className="font-mono text-xs"
+              <Label htmlFor="smime-p12-pass">{t("settings.smimeP12Password")}</Label>
+              <Input
+                id="smime-p12-pass"
+                type="password"
+                value={smimePassword}
+                onChange={(e) => setSmimePassword(e.target.value)}
+                placeholder={t("settings.smimeP12PasswordPlaceholder")}
               />
             </div>
+            <p className="text-xs text-muted-foreground">{t("settings.smimeImportHint")}</p>
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => {
-              setSmimeUploadOpen(false)
-              setSmimeCertInput("")
-              setSmimeKeyInput("")
+              setSmimeImportOpen(false)
+              setSmimeFile(null)
+              setSmimePassword("")
             }} disabled={smimeSaving}>
               {t("common.cancel")}
             </Button>
-            <Button onClick={handleSmimeUpload} disabled={smimeSaving || !smimeCertInput.trim() || !smimeKeyInput.trim()}>
+            <Button onClick={handleSmimeImport} disabled={smimeSaving || !smimeFile || !smimePassword}>
               {smimeSaving ? t("common.saving") : t("settings.privacy.smimeCertAdd")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* S/MIME Unlock (per session) */}
+      <Dialog open={smimeUnlockOpen} onOpenChange={setSmimeUnlockOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("settings.smimeUnlock")}</DialogTitle>
+            <DialogDescription>{t("settings.smimeUnlockDesc")}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1">
+            <Label htmlFor="smime-unlock-pass">{t("settings.smimeP12Password")}</Label>
+            <Input
+              id="smime-unlock-pass"
+              type="password"
+              value={smimeUnlockPassword}
+              onChange={(e) => setSmimeUnlockPassword(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSmimeUnlock() }}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setSmimeUnlockOpen(false); setSmimeUnlockPassword("") }} disabled={smimeSaving}>
+              {t("common.cancel")}
+            </Button>
+            <Button onClick={handleSmimeUnlock} disabled={smimeSaving || !smimeUnlockPassword}>
+              {t("settings.smimeUnlock")}
             </Button>
           </DialogFooter>
         </DialogContent>

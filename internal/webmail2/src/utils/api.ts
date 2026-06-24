@@ -1154,8 +1154,24 @@ class API {
     return this.get<{ hasKeys: false } | SMIMECertInfo>('/smime/certificate')
   }
 
-  async uploadSMIMECertificate(cert: string, key: string): Promise<SMIMECertInfo> {
-    return this.post<SMIMECertInfo>('/smime/certificate', { cert, key })
+  /** Publishes the user's PUBLIC certificate (PEM). The private key stays in the browser. */
+  async uploadSMIMECertificate(cert: string): Promise<SMIMECertInfo> {
+    return this.post<SMIMECertInfo>('/smime/certificate', { cert })
+  }
+
+  /** Builds the outgoing MIME server-side and returns it unsent (base64) for client-side S/MIME. */
+  async buildMail(mail: SendMailRequest): Promise<{ raw: string }> {
+    return this.post<{ raw: string }>('/mail/build', mail)
+  }
+
+  /** Relays a client-built (signed/encrypted) raw message; recipients are supplied separately. */
+  async sendRawMail(raw: string, to: string[], cc: string[], bcc: string[]): Promise<void> {
+    await this.post('/mail/send-raw', { raw, to, cc, bcc })
+  }
+
+  /** Fetches a recipient's published S/MIME public certificate (PEM) for encryption, or null. */
+  async getRecipientCertificate(address: string): Promise<{ cert: string } | null> {
+    return this.get<{ cert: string } | null>(`/smime/recipient?address=${encodeURIComponent(address)}`)
   }
 
   async deleteSMIMECertificate(): Promise<{ status: string }> {
