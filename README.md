@@ -1,24 +1,17 @@
 # hermEX Mail Server
 
-hermEX is a fully original, modular native Microsoft Exchange Server replacement written
+hermEX is a fully modular native Microsoft Exchange Server replacement written
 entirely in Go. It implements IMAP, POP3, SMTP/LMTP, CalDAV, CardDAV, ActiveSync, EWS,
 MAPI/HTTP with ROP, and NSPI (global address list). Server, webmail UI, admin CLI,
 and all sync interfaces are Go.
 
+## Why?
+
+Why not?
+
 ## Status
 
-Active development. The mail vertical (SMTP in, IMAP/POP3 out, Go webmail) is functionally
-complete and verified against Thunderbird. CalDAV/CardDAV, ActiveSync, and the Exchange-native
-protocols (EWS, MAPI/HTTP + ROP, NSPI) are wired and partially implemented.
-
-## Design
-
-- External client protocols are reproduced to the wire; internal architecture, IPC, and the
-  on-disk store schema are original.
-- The logical MAPI model (property tags, named properties, object semantics, ICS state, and the
-  property value encoding inside ROP/NSPI/EWS responses) is preserved because the external
-  protocols dictate it.
-- Correctness is verified against real clients (Thunderbird, Outlook, mobile).
+Active development.
 
 ## Development
 
@@ -77,3 +70,7 @@ docker compose -f hermex-compose.yml build webmail && docker compose -f hermex-c
 ## License
 
 To be determined.
+
+## Acknowledgements
+
+hermEX is a Go rewrite of the [gromox](https://gromox.com/) project.
