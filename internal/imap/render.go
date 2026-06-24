@@ -134,18 +134,30 @@ func renderBodyStructure(p *mime.Part, extended bool) string {
 
 	var sb strings.Builder
 	sb.WriteByte('(')
-	sb.WriteString(typeStr(p.Type) + " " + typeStr(p.Subtype) + " ")
-	sb.WriteString(renderParamList(p.Params) + " ")
-	sb.WriteString(nstring(p.ID) + " " + nstring(p.Description) + " ")
-	sb.WriteString(typeStr(p.Encoding) + " ")
+	sb.WriteString(typeStr(p.Type))
+	sb.WriteByte(' ')
+	sb.WriteString(typeStr(p.Subtype))
+	sb.WriteByte(' ')
+	sb.WriteString(renderParamList(p.Params))
+	sb.WriteByte(' ')
+	sb.WriteString(nstring(p.ID))
+	sb.WriteByte(' ')
+	sb.WriteString(nstring(p.Description))
+	sb.WriteByte(' ')
+	sb.WriteString(typeStr(p.Encoding))
+	sb.WriteByte(' ')
 	sb.WriteString(strconv.Itoa(p.Size))
 	switch {
 	case p.Type == "message" && p.Subtype == "rfc822":
-		sb.WriteString(" " + renderEnvelope(p.MsgEnvelope))
-		sb.WriteString(" " + renderBodyStructure(p.MsgBody, extended))
-		sb.WriteString(" " + strconv.Itoa(p.Lines))
+		sb.WriteByte(' ')
+		sb.WriteString(renderEnvelope(p.MsgEnvelope))
+		sb.WriteByte(' ')
+		sb.WriteString(renderBodyStructure(p.MsgBody, extended))
+		sb.WriteByte(' ')
+		sb.WriteString(strconv.Itoa(p.Lines))
 	case p.Type == "text":
-		sb.WriteString(" " + strconv.Itoa(p.Lines))
+		sb.WriteByte(' ')
+		sb.WriteString(strconv.Itoa(p.Lines))
 	}
 	if extended {
 		sb.WriteString(" NIL ") // body-fld-md5

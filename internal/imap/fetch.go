@@ -397,7 +397,9 @@ func sectionString(s mime.Section) string {
 		}
 		sb.WriteString(s.Specifier)
 		if len(s.Fields) > 0 {
-			sb.WriteString(" (" + strings.Join(s.Fields, " ") + ")")
+			sb.WriteString(" (")
+			sb.WriteString(strings.Join(s.Fields, " "))
+			sb.WriteByte(')')
 		}
 	}
 	return sb.String()
