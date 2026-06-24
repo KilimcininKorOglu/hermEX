@@ -920,6 +920,12 @@ class API {
     await this.post('/filters/reorder', { filterIds })
   }
 
+  // runFilters applies the inbox filters to the mail already in the inbox now
+  // (the "run now" sweep), returning how many messages were examined and acted on.
+  async runFilters(): Promise<{ affected: number; evaluated: number }> {
+    return this.post<{ affected: number; evaluated: number }>('/filters/run', {})
+  }
+
   // exportRules downloads the user's filters as an Outlook .rwz file and triggers
   // a browser save. Returns the X-Rwz-Skipped summary header (or null) so the
   // caller can warn about rules/elements that could not be represented.

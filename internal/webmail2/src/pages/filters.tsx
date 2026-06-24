@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react"
-import { Filter as FilterIcon, Plus, Pencil, Trash2, X, ArrowUp, ArrowDown, Download, Upload } from "lucide-react"
+import { Filter as FilterIcon, Plus, Pencil, Trash2, X, ArrowUp, ArrowDown, Download, Upload, Play } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -98,6 +98,7 @@ export function FiltersPage() {
   const [saving, setSaving] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Filter | null>(null)
   const [transferring, setTransferring] = useState(false)
+  const [running, setRunning] = useState(false)
   const importInputRef = useRef<HTMLInputElement>(null)
 
   const loadFilters = useCallback(async () => {
@@ -129,6 +130,20 @@ export function FiltersPage() {
       toast.error(t("filters.toast.exportFailed"))
     } finally {
       setTransferring(false)
+    }
+  }, [t])
+
+  // handleRunNow applies the saved filters to the inbox's existing mail and
+  // reports how many messages a rule acted on (the old webmail's "run now").
+  const handleRunNow = useCallback(async () => {
+    setRunning(true)
+    try {
+      const res = await api.runFilters()
+      toast.success(t("filters.toast.ran", { affected: String(res.affected), evaluated: String(res.evaluated) }))
+    } catch {
+      toast.error(t("filters.toast.runFailed"))
+    } finally {
+      setRunning(false)
     }
   }, [t])
 
@@ -343,6 +358,15 @@ export function FiltersPage() {
           >
             <Download className="h-4 w-4 mr-1" />
             {t("filters.export")}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleRunNow}
+            disabled={running || filters.length === 0}
+            title={t("filters.runNowHint")}
+          >
+            <Play className="h-4 w-4 mr-1" />
+            {t("filters.runNow")}
           </Button>
           <Button onClick={openCreate}>
             <Plus className="h-4 w-4 mr-1" />

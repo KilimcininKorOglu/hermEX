@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
@@ -142,6 +143,26 @@ func (s *Server) handleReorderFilters(w http.ResponseWriter, r *http.Request) {
 		rebuildInboxRules(st, ordered)
 		return map[string]bool{"ok": true}, true
 	})
+}
+
+// handleRunFilters applies the Inbox's filter rules to the messages already in
+// the Inbox on demand (the old webmail's "run now"), reporting how many messages
+// were examined and how many a rule acted on. Incoming mail is filtered at
+// delivery; this is the manual sweep over mail that arrived before the rule
+// existed. It runs the stored rules as-is and never rebuilds them, so rules set
+// by other clients are left untouched.
+func (s *Server) handleRunFilters(w http.ResponseWriter, r *http.Request) {
+	st, _, ok := s.openStore(w, r)
+	if !ok {
+		return
+	}
+	defer st.Close()
+	res, err := st.RunRules(mapi.PrivateFIDInbox, time.Now().Unix())
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not run filters"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"affected": res.Affected, "evaluated": res.Evaluated})
 }
 
 // rebuildInboxRules replaces the inbox's stored rules with the evaluatable subset

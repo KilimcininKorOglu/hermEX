@@ -644,6 +644,8 @@
     "newFilter": "Yeni Filtre",
     "import": "İçe Aktar",
     "export": "Dışa Aktar",
+    "runNow": "Şimdi çalıştır",
+    "runNowHint": "Bu filtreleri gelen kutunuzdaki mevcut mesajlara uygula",
     "importHint": "Outlook .rwz dosyasından kuralları içe aktar (Outlook 2016+; en iyi çaba)",
     "exportHint": "Filtreleri Outlook .rwz dosyası olarak dışa aktar (Outlook 2016+; en iyi çaba)",
     "editTitle": "Filtreyi Düzenle",
@@ -719,7 +721,9 @@
       "exportFailed": "Kurallar dışa aktarılamadı",
       "imported": "{{imported}} kural içe aktarıldı",
       "importPartial": "{{imported}} kural içe aktarıldı; {{skipped}} öğe atlandı",
-      "importFailed": "Kurallar içe aktarılamadı"
+      "importFailed": "Kurallar içe aktarılamadı",
+      "ran": "Filtreler çalıştırıldı: {{evaluated}} mesajın {{affected}} tanesi etkilendi",
+      "runFailed": "Filtreler çalıştırılamadı"
     },
     "validation": {
       "nameRequired": "Filtre adı zorunludur",

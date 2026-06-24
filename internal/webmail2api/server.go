@@ -178,6 +178,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/filters", s.handleGetFilters)
 	mux.HandleFunc("POST /api/v1/filters", s.handlePostFilter)
 	mux.HandleFunc("POST /api/v1/filters/reorder", s.handleReorderFilters)
+	mux.HandleFunc("POST /api/v1/filters/run", s.handleRunFilters)
 	mux.HandleFunc("PUT /api/v1/filters/{id}", s.handlePutFilter)
 	mux.HandleFunc("DELETE /api/v1/filters/{id}", s.handleDeleteFilter)
 	mux.HandleFunc("GET /api/v1/smime/certificate", s.handleGetSmimeCert)

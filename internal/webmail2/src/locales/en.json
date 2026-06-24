@@ -644,6 +644,8 @@
     "newFilter": "New Filter",
     "import": "Import",
     "export": "Export",
+    "runNow": "Run now",
+    "runNowHint": "Apply these filters to the messages already in your inbox",
     "importHint": "Import rules from an Outlook .rwz file (Outlook 2016+; best-effort)",
     "exportHint": "Export filters as an Outlook .rwz file (Outlook 2016+; best-effort)",
     "editTitle": "Edit Filter",
@@ -719,7 +721,9 @@
       "exportFailed": "Failed to export rules",
       "imported": "Imported {{imported}} rule(s)",
       "importPartial": "Imported {{imported}} rule(s); {{skipped}} item(s) were skipped",
-      "importFailed": "Failed to import rules"
+      "importFailed": "Failed to import rules",
+      "ran": "Filters run: {{affected}} of {{evaluated}} message(s) affected",
+      "runFailed": "Failed to run filters"
     },
     "validation": {
       "nameRequired": "Filter name is required",
