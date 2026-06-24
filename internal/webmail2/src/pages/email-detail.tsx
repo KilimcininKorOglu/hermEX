@@ -22,6 +22,7 @@ import {
   ShieldCheck,
   Undo2,
   RotateCcw,
+  Copy,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -62,6 +63,11 @@ const FOLLOWUP_COLORS = [
   { value: 5, key: "followUpColorBlue", fill: "fill-blue-500 text-blue-500" },
   { value: 6, key: "followUpColorRed", fill: "fill-red-500 text-red-500" },
 ] as const
+
+// STANDARD_FOLDERS are the built-in mailbox names already offered as fixed copy
+// targets below, so getMailboxes() entries matching these are dropped from the
+// custom-folder list.
+const STANDARD_FOLDERS = new Set(["inbox", "sent", "drafts", "trash", "junk", "scheduled"])
 
 // toDatetimeLocal converts an RFC3339 instant to the "YYYY-MM-DDTHH:mm" value a
 // native datetime-local input expects, in the browser's local zone.
@@ -115,6 +121,8 @@ export function EmailDetailPage() {
   const [rsvpBusy, setRsvpBusy] = useState(false)
   // Category name → color, so labels render with their configured color.
   const [categoryColors, setCategoryColors] = useState<Record<string, string>>({})
+  // Custom folders offered as copy-to targets, alongside the fixed built-ins.
+  const [copyFolders, setCopyFolders] = useState<string[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -124,6 +132,12 @@ export function EmailDetailPage() {
         const map: Record<string, string> = {}
         for (const c of res.categories ?? []) map[c.name.toLowerCase()] = c.color
         setCategoryColors(map)
+      })
+      .catch(() => {})
+    api.getMailboxes()
+      .then((res) => {
+        if (cancelled) return
+        setCopyFolders((res.mailboxes ?? []).filter((m) => !STANDARD_FOLDERS.has(m.toLowerCase())))
       })
       .catch(() => {})
     return () => { cancelled = true }
@@ -458,6 +472,18 @@ export function EmailDetailPage() {
     }
   }
 
+  // handleCopy copies the open message into another folder, leaving the original
+  // in place so the reader stays valid (no navigation, unlike move).
+  const handleCopy = async (folder: string, label: string) => {
+    if (!email) return
+    try {
+      await api.copyMail(email.id, folder)
+      toast.success(t("emailDetail.copiedTo", { folder: label }))
+    } catch {
+      toast.error(t("emailDetail.copyFailed"))
+    }
+  }
+
   return (
     <div className="space-y-4">
       {loading ? (
@@ -576,6 +602,23 @@ export function EmailDetailPage() {
                   <DropdownMenuItem onClick={() => handleMove("archive", t("common.archive"))}>{t("common.archive")}</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleMove("spam", t("nav.spam"))}>{t("nav.spam")}</DropdownMenuItem>
                   <DropdownMenuItem onClick={() => handleMove("trash", t("nav.trash"))}>{t("nav.trash")}</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" title={t("emailDetail.copyToFolder")}>
+                    <Copy className="h-5 w-5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handleCopy("inbox", t("nav.inbox"))}>{t("nav.inbox")}</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleCopy("archive", t("common.archive"))}>{t("common.archive")}</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleCopy("spam", t("nav.spam"))}>{t("nav.spam")}</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleCopy("trash", t("nav.trash"))}>{t("nav.trash")}</DropdownMenuItem>
+                  {copyFolders.length > 0 && <DropdownMenuSeparator />}
+                  {copyFolders.map((f) => (
+                    <DropdownMenuItem key={f} onClick={() => handleCopy(f, f)}>{f}</DropdownMenuItem>
+                  ))}
                 </DropdownMenuContent>
               </DropdownMenu>
               <Button

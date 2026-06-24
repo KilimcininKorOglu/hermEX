@@ -887,6 +887,12 @@ class API {
     await this.post(`/mail/move${ownerQuery(owner ?? this.mailboxOwner, '?')}`, { id, to })
   }
 
+  // copyMail copies a message into another folder, leaving the original in place.
+  // The target may be a built-in slug or a custom folder's display name.
+  async copyMail(id: string, to: string, owner?: string): Promise<void> {
+    await this.post(`/mail/copy${ownerQuery(owner ?? this.mailboxOwner, '?')}`, { id, to })
+  }
+
   // markAllRead marks every unread message in a folder as read in one call.
   async markAllRead(folder: string, owner?: string): Promise<{ marked?: number }> {
     return this.post<{ marked?: number }>(`/mail/mark-all-read${ownerQuery(owner ?? this.mailboxOwner, '?')}`, { folder })

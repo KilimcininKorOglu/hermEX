@@ -465,6 +465,50 @@ func (s *Server) handleMailMove(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// handleMailCopy copies a message into another folder, leaving the original in
+// place (the old webmail's copy-to-folder). The copy preserves the message's
+// flags and internal date. The target may be a built-in slug or a custom folder
+// name; copying onto the source folder is a no-op.
+func (s *Server) handleMailCopy(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+		To string `json:"to"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	st, fid, uid, ok := s.locate(w, r, req.ID)
+	if !ok {
+		return
+	}
+	defer st.Close()
+	dst, ok := resolveFolder(st, req.To)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown target folder"})
+		return
+	}
+	if dst == fid {
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+		return
+	}
+	m, err := st.MessageByUID(fid, uid)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "copy failed"})
+		return
+	}
+	raw, err := st.GetMessageRaw(fid, uid)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "copy failed"})
+		return
+	}
+	if _, err := st.AppendMessage(dst, raw, m.InternalDate, m.Flags); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "copy failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
 // handleMailDelete removes a message: from Trash it is deleted outright, from any
 // other folder it is moved to Deleted Items (recoverable).
 func (s *Server) handleMailDelete(w http.ResponseWriter, r *http.Request) {
