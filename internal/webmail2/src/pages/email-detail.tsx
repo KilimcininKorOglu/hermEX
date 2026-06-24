@@ -32,6 +32,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { toast } from "sonner"
@@ -51,6 +52,27 @@ function formatFileSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+// FOLLOWUP_COLORS mirrors objectstore's six follow-up flag colours (purple..red,
+// values 1..6), each with the i18n name key and the Tailwind fill for the flag.
+const FOLLOWUP_COLORS = [
+  { value: 1, key: "followUpColorPurple", fill: "fill-purple-500 text-purple-500" },
+  { value: 2, key: "followUpColorOrange", fill: "fill-orange-500 text-orange-500" },
+  { value: 3, key: "followUpColorGreen", fill: "fill-green-500 text-green-500" },
+  { value: 4, key: "followUpColorYellow", fill: "fill-yellow-500 text-yellow-500" },
+  { value: 5, key: "followUpColorBlue", fill: "fill-blue-500 text-blue-500" },
+  { value: 6, key: "followUpColorRed", fill: "fill-red-500 text-red-500" },
+] as const
+
+// toDatetimeLocal converts an RFC3339 instant to the "YYYY-MM-DDTHH:mm" value a
+// native datetime-local input expects, in the browser's local zone.
+function toDatetimeLocal(iso?: string): string {
+  if (!iso) return ""
+  const d = new Date(iso)
+  if (isNaN(d.getTime())) return ""
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 interface EmailDetail {
   id: string
   from: string
@@ -61,6 +83,9 @@ interface EmailDetail {
   date: string
   content: string
   flagged: boolean
+  followupStatus?: number
+  followupColor?: number
+  followupDue?: string
   labels: string[]
   attachments: AttachmentInfo[]
   folder: string
@@ -163,6 +188,9 @@ export function EmailDetailPage() {
             date: result.date,
             content,
             flagged: !!result.starred,
+            followupStatus: result.followupStatus,
+            followupColor: result.followupColor,
+            followupDue: result.followupDue,
             labels: result.labels ?? [],
             attachments: result.attachments ?? [],
             folder: result.folder ?? "",
@@ -297,19 +325,30 @@ export function EmailDetailPage() {
     }
   }
 
-  // handleToggleFollowUp flags/unflags the message for follow-up. This is the
-  // IMAP \Flagged flag — the same primitive Outlook/EWS exposes as a follow-up
-  // flag (and what the list view's star uses), surfaced here in the reading view.
-  const handleToggleFollowUp = async () => {
+  // handleFollowup sets the message's follow-up flag — a coloured flag with an
+  // optional due date, mark-complete, or clear — porting the old webmail's rich
+  // follow-up beyond the plain \Flagged star (the API call also syncs \Flagged).
+  const handleFollowup = async (action: "flag" | "complete" | "clear", color?: number, due?: string) => {
     if (!email) return
-    const next = !email.flagged
-    setEmail({ ...email, flagged: next })
     try {
-      await api.setFlag(email.id, "\\Flagged", next)
-      patchInbox([email.id], { starred: next })
-      toast.success(next ? t("emailDetail.flaggedForFollowUp") : t("emailDetail.followUpCleared"))
+      await api.setFollowup(email.id, action, color, due)
+      const status = action === "flag" ? 2 : action === "complete" ? 1 : 0
+      setEmail({
+        ...email,
+        flagged: action === "flag",
+        followupStatus: status,
+        followupColor: action === "flag" ? color ?? email.followupColor : email.followupColor,
+        followupDue: action === "flag" ? due ?? email.followupDue : "",
+      })
+      patchInbox([email.id], { starred: action === "flag" })
+      toast.success(
+        action === "complete"
+          ? t("emailDetail.followUpCompleted")
+          : action === "clear"
+            ? t("emailDetail.followUpCleared")
+            : t("emailDetail.flaggedForFollowUp"),
+      )
     } catch {
-      setEmail({ ...email, flagged: !next })
       toast.error(t("emailDetail.failedToUpdateFollowUp"))
     }
   }
@@ -465,15 +504,64 @@ export function EmailDetailPage() {
               )}
             </div>
             <div className="flex items-center gap-1">
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={handleToggleFollowUp}
-                title={email.flagged ? t("emailDetail.clearFollowUp") : t("emailDetail.flagFollowUp")}
-                aria-pressed={email.flagged}
-              >
-                <Flag className={email.flagged ? "h-5 w-5 fill-amber-500 text-amber-500" : "h-5 w-5"} />
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    title={t("emailDetail.followUp")}
+                    aria-pressed={email.followupStatus === 2}
+                  >
+                    <Flag
+                      className={`h-5 w-5 ${
+                        email.followupStatus === 2
+                          ? FOLLOWUP_COLORS.find((c) => c.value === email.followupColor)?.fill ??
+                            "fill-red-500 text-red-500"
+                          : ""
+                      }`}
+                    />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-60">
+                  <div className="flex gap-1 px-2 py-1.5">
+                    {FOLLOWUP_COLORS.map((c) => (
+                      <button
+                        key={c.value}
+                        type="button"
+                        title={t(`emailDetail.${c.key}`)}
+                        onClick={() => handleFollowup("flag", c.value)}
+                        className={`flex h-7 w-7 items-center justify-center rounded hover:bg-accent ${
+                          email.followupStatus === 2 && email.followupColor === c.value ? "ring-2 ring-ring" : ""
+                        }`}
+                      >
+                        <Flag className={`h-4 w-4 ${c.fill}`} />
+                      </button>
+                    ))}
+                  </div>
+                  <DropdownMenuSeparator />
+                  <div className="px-2 py-1.5">
+                    <label className="text-xs text-muted-foreground">{t("emailDetail.followUpDue")}</label>
+                    <Input
+                      type="datetime-local"
+                      className="mt-1 h-8"
+                      defaultValue={toDatetimeLocal(email.followupDue)}
+                      onChange={(e) =>
+                        e.target.value &&
+                        handleFollowup("flag", email.followupColor || 6, new Date(e.target.value).toISOString())
+                      }
+                    />
+                  </div>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => handleFollowup("complete")}>
+                    <Check className="mr-2 h-4 w-4" />
+                    {t("emailDetail.markComplete")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleFollowup("clear")}>
+                    <X className="mr-2 h-4 w-4" />
+                    {t("emailDetail.clearFollowUp")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button variant="ghost" size="icon" onClick={handleMarkUnread} title={t("common.markUnread")}>
                 <Mail className="h-5 w-5" />
               </Button>

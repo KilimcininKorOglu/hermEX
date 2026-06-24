@@ -33,6 +33,9 @@ export interface Mail {
   smimeEncrypted?: boolean // message was S/MIME encrypted (decrypted for display)
   smimeVerified?: boolean // the signature verified successfully
   smimeSignedBy?: string // the signer's address
+  followupStatus?: number // follow-up flag: 0 none, 1 complete, 2 flagged
+  followupColor?: number // follow-up flag colour: 1..6 (purple..red)
+  followupDue?: string // follow-up due date (RFC3339), empty when unset
 }
 
 /** PublicFolder is one organization public folder the caller may read. */
@@ -847,6 +850,19 @@ class API {
   // mailbox (it rides the query string, which the handler reads for access).
   async setFlag(id: string, flag: '\\Seen' | '\\Flagged', value: boolean, owner?: string): Promise<void> {
     await this.post(`/mail/flag${ownerQuery(owner ?? this.mailboxOwner, '?')}`, { id, flag, value })
+  }
+
+  // setFollowup sets a message's follow-up flag: a coloured flag with an optional
+  // due date ('flag'), marking it complete ('complete'), or clearing it ('clear').
+  // The richer follow-up the old webmail exposed beyond the plain \Flagged star.
+  async setFollowup(
+    id: string,
+    action: 'flag' | 'complete' | 'clear',
+    color?: number,
+    due?: string,
+    owner?: string,
+  ): Promise<void> {
+    await this.post(`/mail/followup${ownerQuery(owner ?? this.mailboxOwner, '?')}`, { id, action, color, due })
   }
 
   // moveMail moves a message to another folder (e.g. "inbox" to restore from

@@ -198,6 +198,9 @@ type mailDetailJSON struct {
 	SmimeEncrypted bool             `json:"smimeEncrypted,omitempty"`
 	SmimeVerified  bool             `json:"smimeVerified,omitempty"`
 	SmimeSignedBy  string           `json:"smimeSignedBy,omitempty"`
+	FollowupStatus int32            `json:"followupStatus,omitempty"` // 0 none, 1 complete, 2 flagged
+	FollowupColor  int32            `json:"followupColor,omitempty"`  // 1..6 (purple..red)
+	FollowupDue    string           `json:"followupDue,omitempty"`    // RFC3339, empty when unset
 }
 
 // handleMailMessage returns a single message's full detail and marks it read.
@@ -258,6 +261,17 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 		if flags&objectstore.FlagSeen == 0 && !mb.shared {
 			_ = st.SetMessageFlags(fid, uid, flags|objectstore.FlagSeen)
 			d.Read = true
+		}
+	}
+	// Surface the rich follow-up flag (colour + due date + complete) so the reading
+	// view can show more than the plain \Flagged star.
+	if m, err := st.MessageByUID(fid, uid); err == nil {
+		if f, err := st.GetFollowupFlag(m.ID); err == nil {
+			d.FollowupStatus = f.Status
+			d.FollowupColor = f.Color
+			if !f.DueBy.IsZero() {
+				d.FollowupDue = f.DueBy.Format(time.RFC3339)
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, d)
@@ -363,6 +377,59 @@ func (s *Server) handleMailFlag(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := st.SetMessageFlags(fid, uid, cur); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "flag failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// handleMailFollowup sets a message's follow-up flag: a coloured flag with an
+// optional due date, marking it complete, or clearing it — the richer follow-up
+// the old webmail exposed and the plain \Flagged star cannot. It mirrors the old
+// actions.go flag/flagcomplete/flagnone ops; SetFollowupFlag also syncs \Flagged.
+func (s *Server) handleMailFollowup(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID     string `json:"id"`
+		Action string `json:"action"` // "flag" | "complete" | "clear"
+		Color  int32  `json:"color"`  // 1..6 (purple..red), only for "flag"
+		Due    string `json:"due"`    // RFC3339, optional, only for "flag"
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	st, fid, uid, ok := s.locate(w, r, req.ID)
+	if !ok {
+		return
+	}
+	defer st.Close()
+	m, err := st.MessageByUID(fid, uid)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	var f objectstore.FollowupFlag
+	switch req.Action {
+	case "flag":
+		color := req.Color
+		if color < objectstore.FlagColorPurple || color > objectstore.FlagColorRed {
+			color = objectstore.FlagColorRed
+		}
+		f = objectstore.FollowupFlag{Status: objectstore.FlagStatusFlagged, Color: color, Request: "Follow up"}
+		if req.Due != "" {
+			if t, err := time.Parse(time.RFC3339, req.Due); err == nil {
+				f.DueBy = t
+			}
+		}
+	case "complete":
+		f = objectstore.FollowupFlag{Status: objectstore.FlagStatusComplete}
+	case "clear":
+		f = objectstore.FollowupFlag{}
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown action"})
+		return
+	}
+	if err := st.SetFollowupFlag(m.ID, f); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot set flag"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
