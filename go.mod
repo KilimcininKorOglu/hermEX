@@ -5,6 +5,7 @@ go 1.26.2
 require (
 	blitiri.com.ar/go/spf v1.5.1
 	github.com/GehirnInc/crypt v0.0.0-20230320061759-8cc1b52080c5
+	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/caddyserver/certmagic v0.25.4
 	github.com/emersion/go-msgauth v0.7.0
 	github.com/go-ldap/ldap/v3 v3.4.13
@@ -23,6 +24,7 @@ require (
 	github.com/caddyserver/zerossl v0.1.5 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/go-asn1-ber/asn1-ber v1.5.8-0.20250403174932-29230038a667 // indirect
+	github.com/golang-jwt/jwt/v5 v5.2.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/libdns/libdns v1.1.1 // indirect

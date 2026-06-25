@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 
@@ -81,6 +82,8 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// Web push: poll push subscribers' inboxes and notify their devices of new mail.
+	api.StartPushPoller(ctx, 15*time.Second)
 	log.Printf("hermex-webmail2 listening on %s", addr)
 	comps := append([]lifecycle.Component{hs},
 		health.Components(cfg.HealthAddr, "webmail2", health.Check{Name: "directory", Probe: db.PingContext})...)

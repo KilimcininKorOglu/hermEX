@@ -66,7 +66,7 @@ func openTestDB(t *testing.T) *sql.DB {
 
 func cleanTables(t *testing.T, db *sql.DB) {
 	t.Helper()
-	for _, tbl := range []string{"altnames", "aliases", "forwards", "fetchmail_seen", "fetchmail", "admin_roles", "user_roles", "role_permissions", "roles", "associations", "specifieds", "mlists", "users", "domains", "orgs", "ldap_config", "sync_policy", "create_defaults", "active_sessions", "webmail_sessions"} {
+	for _, tbl := range []string{"altnames", "aliases", "forwards", "fetchmail_seen", "fetchmail", "admin_roles", "user_roles", "role_permissions", "roles", "associations", "specifieds", "mlists", "users", "domains", "orgs", "ldap_config", "sync_policy", "create_defaults", "active_sessions", "webmail_sessions", "push_subscriptions"} {
 		if _, err := db.Exec("DELETE FROM " + tbl); err != nil {
 			t.Fatalf("clean %s: %v", tbl, err)
 		}
