@@ -79,6 +79,20 @@ function fileToBase64(file: File): Promise<string> {
   })
 }
 
+// attachmentHints are words that suggest the writer meant to attach a file, so a
+// send with no attachment is worth a confirm. "attach" covers attached/attachment;
+// the Turkish forms are specific (not the bare "ek", which matches many words).
+// Mirrors the server-rendered webmail.
+const attachmentHints = ["attach", "ekli", "ekte", "iliştir"]
+
+// mentionsAttachment reports whether any field hints at an intended attachment.
+function mentionsAttachment(...fields: string[]): boolean {
+  return fields.some((f) => {
+    const low = f.toLowerCase()
+    return attachmentHints.some((h) => low.includes(h))
+  })
+}
+
 export function ComposePage() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
@@ -161,6 +175,7 @@ export function ComposePage() {
   const [encryptMessage, setEncryptMessage] = useState(false)
   const [importance, setImportance] = useState<"low" | "normal" | "high">("normal")
   const [sensitivity, setSensitivity] = useState<"normal" | "personal" | "private" | "confidential">("normal")
+  const [attachReminderOpen, setAttachReminderOpen] = useState(false)
   const [subject, setSubject] = useState("")
   const [body, setBody] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -589,7 +604,7 @@ export function ComposePage() {
     ? t("compose.noSendPermission", { email: selectedSender.email })
     : null
   
-  const handleSend = async () => {
+  const handleSend = async (skipAttachReminder = false) => {
     if (to.length === 0) {
       toast.error(t("compose.selectRecipient"))
       return
@@ -633,6 +648,16 @@ export function ComposePage() {
     if (signMessage || encryptMessage) {
       if (sendAtISO) { toast.error(t("compose.smimeNoSchedule")); return }
       if (useBrowserSmime && signMessage && !smimeStore.isUnlocked()) { toast.error(t("compose.smimeLocked")); return }
+    }
+
+    // Missing-attachment reminder: if the message text hints at an attachment but
+    // none is attached, confirm before sending (client-side, mirrors old webmail).
+    if (!skipAttachReminder && attachments.length === 0) {
+      const bodyText = richTextMode && richTextRef.current ? richTextRef.current.getHTML() : body
+      if (mentionsAttachment(subject, bodyText)) {
+        setAttachReminderOpen(true)
+        return
+      }
     }
 
     setSending(true)
@@ -859,7 +884,7 @@ export function ComposePage() {
           )}
           <Button
             className="gap-2"
-            onClick={handleSend}
+            onClick={() => void handleSend()}
             disabled={sending || to.length === 0}
           >
             <Send className="h-4 w-4" />
@@ -1418,6 +1443,22 @@ export function ComposePage() {
                     </button>
                   ))
                 )}
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog open={attachReminderOpen} onOpenChange={setAttachReminderOpen}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>{t("compose.attachReminderTitle")}</DialogTitle>
+                <DialogDescription>{t("compose.attachReminderDesc")}</DialogDescription>
+              </DialogHeader>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setAttachReminderOpen(false)}>
+                  {t("compose.attachReminderCancel")}
+                </Button>
+                <Button onClick={() => { setAttachReminderOpen(false); void handleSend(true) }}>
+                  {t("compose.attachReminderSend")}
+                </Button>
               </div>
             </DialogContent>
           </Dialog>
