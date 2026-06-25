@@ -696,8 +696,21 @@ class API {
 
   // Mail. An optional `owner` targets a shared mailbox the caller has access to,
   // so the same endpoints serve both the personal and shared mailbox views.
-  async getMail(folder: string, owner?: string): Promise<{ emails?: Mail[] }> {
-    return this.get<{ emails?: Mail[] }>(`/mail/${folder}${ownerQuery(owner ?? this.mailboxOwner, '?')}`)
+  async getMail(
+    folder: string,
+    owner?: string,
+    opts?: { page?: number; pageSize?: number; sort?: string; dir?: string; filter?: string }
+  ): Promise<{ emails?: Mail[]; total?: number; unread?: number }> {
+    const params = new URLSearchParams()
+    const o = owner ?? this.mailboxOwner
+    if (o) params.set('owner', o)
+    if (opts?.page != null) params.set('page', String(opts.page))
+    if (opts?.pageSize != null) params.set('pageSize', String(opts.pageSize))
+    if (opts?.sort) params.set('sort', opts.sort)
+    if (opts?.dir) params.set('dir', opts.dir)
+    if (opts?.filter) params.set('filter', opts.filter)
+    const qs = params.toString()
+    return this.get<{ emails?: Mail[]; total?: number; unread?: number }>(`/mail/${folder}${qs ? '?' + qs : ''}`)
   }
 
   // getMessage fetches a single message by id (resolved across all folders).

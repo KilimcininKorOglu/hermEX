@@ -62,6 +62,24 @@ interface Email {
   importance?: string
 }
 
+// toEmail projects an API Mail row onto the inbox row model.
+function toEmail(mail: Mail): Email {
+  return {
+    id: mail.id,
+    from: mail.fromName || mail.from,
+    fromEmail: mail.from,
+    subject: mail.subject,
+    preview: mail.preview,
+    date: mail.date,
+    read: mail.read,
+    starred: mail.starred,
+    hasAttachments: mail.hasAttachments,
+    folder: mail.folder.toLowerCase(),
+    labels: mail.labels ?? [],
+    importance: mail.importance,
+  }
+}
+
 interface ThreadGroup {
   key: string
   subject: string
@@ -90,7 +108,7 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
   const { t } = useI18n()
   // Inbox data comes from the shared MailboxContext so the sidebar unread
   // badge and header notifications stay in sync with actions taken here.
-  const { inboxEmails, inboxLoading, refreshInbox, patchInbox, removeFromInbox } = useMailbox()
+  const { inboxEmails, inboxUnread, inboxTotal, inboxPageSize, inboxLoading, setInboxQuery, refreshInbox, patchInbox, removeFromInbox } = useMailbox()
   const sel = useBulkSelection()
   const [activeFilter, setActiveFilter] = useState("all")
   const loading = inboxLoading
@@ -119,47 +137,48 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
   const [sortBy, setSortBy] = useState<SortOption>("date")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
   const [page, setPage] = useState(0)
-  const PAGE_SIZE = 25
 
   // Reset to the first page when the folder or filter changes.
   useEffect(() => {
     setPage(0)
   }, [folder, activeFilter])
+
+  // Push the folder/filter/sort/page selection to the shared inbox query, which
+  // refetches the matching server page. "starred" is a filter, not a real folder.
+  useEffect(() => {
+    setInboxQuery({
+      filter: folder === "starred" ? "starred" : activeFilter,
+      sort: sortBy,
+      dir: sortDir,
+      page,
+    })
+  }, [folder, activeFilter, sortBy, sortDir, page, setInboxQuery])
   // The welcome banner stays dismissed across visits: its closed state lives in a
   // client-readable cookie (the web UI uses cookies, not localStorage).
   const [showWelcome, setShowWelcome] = useState(() => getCookie("hermex-welcome-dismissed") !== "1")
 
   // Derive the displayed list from the shared inbox state. The starred view is
   // the same inbox dataset filtered to flagged messages.
-  const emails: Email[] = useMemo(() => {
-    const mapped = inboxEmails.map((mail: Mail) => {
-      // The API returns a bare address (mail.from) plus a resolved display name
-      // (mail.fromName, "" when unknown); show the name and fall back to address.
-      const fromEmail = mail.from
-      const fromName = mail.fromName || mail.from
-      return {
-        id: mail.id,
-        from: fromName,
-        fromEmail: fromEmail,
-        subject: mail.subject,
-        preview: mail.preview,
-        date: mail.date,
-        read: mail.read,
-        starred: mail.starred,
-        hasAttachments: mail.hasAttachments,
-        folder: mail.folder.toLowerCase(),
-        labels: mail.labels ?? [],
-        importance: mail.importance,
-      }
-    })
-    return folder === "starred" ? mapped.filter((e) => e.starred) : mapped
-  }, [inboxEmails, folder])
+  // inboxEmails is already the server page for the current folder/filter/sort.
+  const emails: Email[] = useMemo(() => inboxEmails.map(toEmail), [inboxEmails])
 
-  // Thread groups derived from the flat email list — grouped by normalized subject.
+  // Conversations group the WHOLE inbox; the list view is server-paged, so the
+  // current page alone is not enough. Fetch the full folder when this view opens.
+  const [convEmails, setConvEmails] = useState<Email[]>([])
+  useEffect(() => {
+    if (viewType !== "conversations") return
+    let cancelled = false
+    api.getMail("inbox")
+      .then((res) => { if (!cancelled) setConvEmails((res.emails ?? []).map(toEmail)) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [viewType])
+
+  // Thread groups derived from the full inbox, grouped by normalized subject.
   const threadGroups: ThreadGroup[] = useMemo(() => {
     if (viewType !== "conversations") return []
     const map = new Map<string, Email[]>()
-    for (const m of emails) {
+    for (const m of convEmails) {
       const key = (normalizeSubject(m.subject) || "(no subject)").toLowerCase()
       const arr = map.get(key) ?? []
       arr.push(m)
@@ -176,7 +195,7 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
     // Multi-message conversations first.
     groups.sort((a, b) => b.messages.length - a.messages.length)
     return groups
-  }, [emails, viewType])
+  }, [convEmails, viewType])
 
   const toggleThread = (key: string) => {
     setExpandedThreads((prev) => {
@@ -301,29 +320,12 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
     }
   }
 
-  const filteredEmails = emails
-    .filter((email) => {
-      if (activeFilter === "unread") return !email.read
-      if (activeFilter === "starred") return email.starred
-      return true
-    })
-    .sort((a, b) => {
-      const ts = (d: string) => {
-        const t = Date.parse(d)
-        return isNaN(t) ? 0 : t
-      }
-      let cmp = 0
-      if (sortBy === "date") cmp = ts(a.date) - ts(b.date)
-      else if (sortBy === "from") cmp = a.from.localeCompare(b.from)
-      else if (sortBy === "subject") cmp = a.subject.localeCompare(b.subject)
-      return sortDir === "asc" ? cmp : -cmp
-    })
-
-  const unreadCount = emails.filter((e) => !e.read).length
-
-  const totalPages = Math.max(1, Math.ceil(filteredEmails.length / PAGE_SIZE))
+  // The server already filtered, sorted, and paged this set, so emails IS the
+  // current page; the pager and badge use the whole-folder counts from context.
+  const unreadCount = inboxUnread
+  const totalPages = Math.max(1, Math.ceil(inboxTotal / inboxPageSize))
   const currentPage = Math.min(page, totalPages - 1)
-  const pageEmails = filteredEmails.slice(currentPage * PAGE_SIZE, currentPage * PAGE_SIZE + PAGE_SIZE)
+  const pageEmails = emails
 
   const EmailRow = ({ email }: { email: Email }) => (
     <div
@@ -579,7 +581,7 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
               </div>
             ))}
           </div>
-        ) : filteredEmails.length === 0 ? (
+        ) : inboxTotal === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <div className="rounded-full bg-muted p-4">
               <Filter className="h-8 w-8 text-muted-foreground" />
@@ -662,7 +664,7 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
 
       <div className="flex items-center justify-between">
         <span className="text-sm text-muted-foreground">
-          {t(filteredEmails.length !== 1 ? "inbox.messagesCount" : "inbox.messageCount", { count: String(filteredEmails.length) })}
+          {t(inboxTotal !== 1 ? "inbox.messagesCount" : "inbox.messageCount", { count: String(inboxTotal) })}
           {totalPages > 1 && ` · ${t("inbox.pageOf", { current: String(currentPage + 1), total: String(totalPages) })}`}
         </span>
         <div className="flex items-center gap-2">
