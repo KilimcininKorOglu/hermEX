@@ -94,7 +94,15 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
   const sel = useBulkSelection()
   const [activeFilter, setActiveFilter] = useState("all")
   const loading = inboxLoading
-  const [viewMode, setViewMode] = useState<ViewMode>("list")
+  // Row density (list = comfortable, compact = dense). The toolbar toggle persists
+  // the choice in a cookie so it survives a reload (the old density preference).
+  const [viewMode, setViewModeState] = useState<ViewMode>(() =>
+    getCookie("hermex-view-mode") === "compact" ? "compact" : "list"
+  )
+  const setViewMode = (m: ViewMode) => {
+    setViewModeState(m)
+    setCookie("hermex-view-mode", m)
+  }
   // Preview pane: "none" opens a message on its own page; "right" reads it inline
   // beside the list. The choice persists in a cookie (client UI preference).
   const [previewPane, setPreviewPane] = useState<"none" | "right">(() =>
