@@ -442,17 +442,7 @@ func (s *Server) handleMailFolder(w http.ResponseWriter, r *http.Request) {
 	emails := make([]mailJSON, 0, len(msgs))
 	unread := 0
 	for _, m := range msgs {
-		row := mailJSON{
-			ID:       messageID(folder, m.UID),
-			From:     m.Sender,
-			FromName: m.Sender,
-			Subject:  m.Subject,
-			Date:     m.InternalDate.Format(time.RFC3339),
-			Read:     m.Flags&objectstore.FlagSeen != 0,
-			Starred:  m.Flags&objectstore.FlagFlagged != 0,
-			Folder:   folder,
-			Size:     int(m.Size),
-		}
+		row := mailRow(folder, m)
 		if !row.Read {
 			unread++
 		}
@@ -483,6 +473,21 @@ func (s *Server) handleMailFolder(w http.ResponseWriter, r *http.Request) {
 		"total":  total,
 		"unread": unread,
 	})
+}
+
+// mailRow projects a stored message onto the SPA's mail row shape.
+func mailRow(folder string, m objectstore.MessageInfo) mailJSON {
+	return mailJSON{
+		ID:       messageID(folder, m.UID),
+		From:     m.Sender,
+		FromName: m.Sender,
+		Subject:  m.Subject,
+		Date:     m.InternalDate.Format(time.RFC3339),
+		Read:     m.Flags&objectstore.FlagSeen != 0,
+		Starred:  m.Flags&objectstore.FlagFlagged != 0,
+		Folder:   folder,
+		Size:     int(m.Size),
+	}
 }
 
 // atoiOr parses s as an int, returning def on any parse error.

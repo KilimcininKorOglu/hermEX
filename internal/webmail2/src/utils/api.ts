@@ -446,12 +446,12 @@ export interface ThreadsResponse {
 }
 
 export interface Thread {
-  id: string
+  key: string
   subject: string
-  emails: Mail[]
+  messages: Mail[]
   participants: string[]
   lastDate: string
-  unread: boolean
+  unread: number
 }
 
 // Shared mailbox and sender identity types
@@ -1098,9 +1098,10 @@ class API {
     return this.get<SearchResponse>(`/search?q=${encodeURIComponent(query)}`)
   }
 
-  // Threads
-  async getThreads(): Promise<ThreadsResponse> {
-    return this.get<ThreadsResponse>('/threads')
+  // Threads. The inbox is grouped into conversations server-side; an optional
+  // owner targets a shared mailbox the caller has access to.
+  async getThreads(owner?: string): Promise<ThreadsResponse> {
+    return this.get<ThreadsResponse>(`/threads${ownerQuery(owner ?? this.mailboxOwner, '?')}`)
   }
 
   async getThread(id: string): Promise<{ thread?: Thread }> {

@@ -7,26 +7,12 @@ import { Badge } from "@/components/ui/badge"
 import { useI18n } from "@/hooks/useI18n"
 import { formatAbsolute } from "@/utils/date"
 import api from "@/utils/api"
-import type { Mail } from "@/utils/api"
-
-interface ThreadGroup {
-  key: string
-  subject: string
-  messages: Mail[]
-  participants: string[]
-  lastDate: string
-  unread: number
-}
-
-// normalizeSubject strips repeated Re:/Fwd: prefixes so replies group together.
-function normalizeSubject(subject: string): string {
-  return subject.replace(/^(\s*(re|fwd|fw)\s*:\s*)+/i, "").trim()
-}
+import type { Thread } from "@/utils/api"
 
 export function ThreadsPage() {
   const navigate = useNavigate()
   const { t } = useI18n()
-  const [threads, setThreads] = useState<ThreadGroup[]>([])
+  const [threads, setThreads] = useState<Thread[]>([])
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState<string | null>(null)
 
@@ -35,27 +21,9 @@ export function ThreadsPage() {
     const load = async () => {
       setLoading(true)
       try {
-        const res = await api.getMail("inbox")
-        if (cancelled) return
-        const mails = res.emails ?? []
-        const map = new Map<string, Mail[]>()
-        for (const m of mails) {
-          const key = (normalizeSubject(m.subject) || "(no subject)").toLowerCase()
-          const arr = map.get(key) ?? []
-          arr.push(m)
-          map.set(key, arr)
-        }
-        const groups: ThreadGroup[] = Array.from(map.values()).map((msgs) => ({
-          key: (normalizeSubject(msgs[0].subject) || "(no subject)").toLowerCase(),
-          subject: normalizeSubject(msgs[0].subject),
-          messages: msgs,
-          participants: Array.from(new Set(msgs.map((m) => m.from))),
-          lastDate: msgs[msgs.length - 1]?.date ?? "",
-          unread: msgs.filter((m) => !m.read).length,
-        }))
-        // Multi-message conversations first.
-        groups.sort((a, b) => b.messages.length - a.messages.length)
-        setThreads(groups)
+        // The inbox is grouped into conversations server-side.
+        const res = await api.getThreads()
+        if (!cancelled) setThreads(res.threads ?? [])
       } catch (err) {
         console.error("Failed to load threads:", err)
         if (!cancelled) setThreads([])

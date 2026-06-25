@@ -4,6 +4,8 @@ import (
 	"archive/zip"
 	"encoding/base64"
 	"net/http"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -367,14 +369,98 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleThreads returns the inbox grouped into simple subject threads.
+// threadJSON is one conversation: its messages plus the derived header fields the
+// SPA renders (participants, last activity, unread count). Messages carry full
+// rows so the conversation view needs no extra fetch.
+type threadJSON struct {
+	Key          string     `json:"key"`
+	Subject      string     `json:"subject"`
+	Messages     []mailJSON `json:"messages"`
+	Participants []string   `json:"participants"`
+	LastDate     string     `json:"lastDate"`
+	Unread       int        `json:"unread"`
+}
+
+// reThreadPrefix strips one or more leading Re:/Fwd:/Fw: prefixes; it mirrors the
+// SPA's normalizeSubject regex so the grouping is identical on both sides.
+var reThreadPrefix = regexp.MustCompile(`(?i)^(\s*(re|fwd|fw)\s*:\s*)+`)
+
+// normalizeThreadSubject removes reply/forward prefixes so a reply groups with its
+// original.
+func normalizeThreadSubject(subject string) string {
+	return strings.TrimSpace(reThreadPrefix.ReplaceAllString(subject, ""))
+}
+
+// groupThreads buckets messages by normalized subject (newest activity last within
+// a bucket, since msgs arrives oldest-first), then orders buckets with the longest
+// conversations first, the same grouping the SPA used to do client-side.
+func groupThreads(folder string, msgs []objectstore.MessageInfo) []threadJSON {
+	order := make([]string, 0)
+	buckets := make(map[string][]mailJSON)
+	for _, m := range msgs {
+		key := strings.ToLower(normalizeThreadSubject(m.Subject))
+		if key == "" {
+			key = "(no subject)"
+		}
+		if _, seen := buckets[key]; !seen {
+			order = append(order, key)
+		}
+		buckets[key] = append(buckets[key], mailRow(folder, m))
+	}
+	threads := make([]threadJSON, 0, len(order))
+	for _, key := range order {
+		rows := buckets[key]
+		seen := make(map[string]bool, len(rows))
+		participants := make([]string, 0, len(rows))
+		unread := 0
+		for _, row := range rows {
+			if !seen[row.From] {
+				seen[row.From] = true
+				participants = append(participants, row.From)
+			}
+			if !row.Read {
+				unread++
+			}
+		}
+		threads = append(threads, threadJSON{
+			Key:          key,
+			Subject:      normalizeThreadSubject(rows[0].Subject),
+			Messages:     rows,
+			Participants: participants,
+			LastDate:     rows[len(rows)-1].Date,
+			Unread:       unread,
+		})
+	}
+	sort.SliceStable(threads, func(i, j int) bool {
+		return len(threads[i].Messages) > len(threads[j].Messages)
+	})
+	return threads
+}
+
+// handleThreads groups the inbox into conversations server-side (?owner targets a
+// shared mailbox), so both the conversations view and the threads page render from
+// one grouped response instead of regrouping the flat list in the browser.
 func (s *Server) handleThreads(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.session(r); !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	mb, ok := s.openMailbox(w, r)
+	if !ok {
 		return
 	}
-	// Threading is not yet implemented server-side; the SPA falls back to the flat
-	// list. Return an empty thread set so the page renders.
-	writeJSON(w, http.StatusOK, map[string]any{"threads": []any{}})
+	defer mb.st.Close()
+	fid, ok := resolveFolder(mb.st, "inbox")
+	if !ok {
+		writeJSON(w, http.StatusOK, map[string]any{"threads": []threadJSON{}})
+		return
+	}
+	if !mb.readAllowed(fid) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return
+	}
+	msgs, err := mb.st.ListMessages(fid)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list failed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"threads": groupThreads("inbox", msgs)})
 }
 
 // handleMarkAllRead marks every unread message in a folder \Seen, in the caller's

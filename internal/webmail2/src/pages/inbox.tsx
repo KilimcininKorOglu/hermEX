@@ -89,11 +89,6 @@ interface ThreadGroup {
   unread: number
 }
 
-// normalizeSubject strips repeated Re:/Fwd: prefixes so replies group together.
-function normalizeSubject(subject: string): string {
-  return subject.replace(/^(\s*(re|fwd|fw)\s*:\s*)+/i, "").trim()
-}
-
 type ViewMode = "list" | "compact"
 type ViewType = "list" | "conversations"
 type SortOption = "date" | "from" | "subject"
@@ -162,40 +157,27 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
   // inboxEmails is already the server page for the current folder/filter/sort.
   const emails: Email[] = useMemo(() => inboxEmails.map(toEmail), [inboxEmails])
 
-  // Conversations group the WHOLE inbox; the list view is server-paged, so the
-  // current page alone is not enough. Fetch the full folder when this view opens.
-  const [convEmails, setConvEmails] = useState<Email[]>([])
+  // Conversations are grouped server-side; the list view is server-paged so the
+  // current page alone is not enough. Fetch the grouped inbox when the view opens.
+  const [threadGroups, setThreadGroups] = useState<ThreadGroup[]>([])
   useEffect(() => {
     if (viewType !== "conversations") return
     let cancelled = false
-    api.getMail("inbox")
-      .then((res) => { if (!cancelled) setConvEmails((res.emails ?? []).map(toEmail)) })
+    api.getThreads()
+      .then((res) => {
+        if (cancelled) return
+        setThreadGroups((res.threads ?? []).map((th) => ({
+          key: th.key,
+          subject: th.subject,
+          messages: th.messages.map(toEmail),
+          participants: th.participants,
+          lastDate: th.lastDate,
+          unread: th.unread,
+        })))
+      })
       .catch(() => {})
     return () => { cancelled = true }
   }, [viewType])
-
-  // Thread groups derived from the full inbox, grouped by normalized subject.
-  const threadGroups: ThreadGroup[] = useMemo(() => {
-    if (viewType !== "conversations") return []
-    const map = new Map<string, Email[]>()
-    for (const m of convEmails) {
-      const key = (normalizeSubject(m.subject) || "(no subject)").toLowerCase()
-      const arr = map.get(key) ?? []
-      arr.push(m)
-      map.set(key, arr)
-    }
-    const groups: ThreadGroup[] = Array.from(map.values()).map((msgs) => ({
-      key: (normalizeSubject(msgs[0].subject) || "(no subject)").toLowerCase(),
-      subject: normalizeSubject(msgs[0].subject),
-      messages: msgs,
-      participants: Array.from(new Set(msgs.map((m) => m.from))),
-      lastDate: msgs[msgs.length - 1]?.date ?? "",
-      unread: msgs.filter((m) => !m.read).length,
-    }))
-    // Multi-message conversations first.
-    groups.sort((a, b) => b.messages.length - a.messages.length)
-    return groups
-  }, [convEmails, viewType])
 
   const toggleThread = (key: string) => {
     setExpandedThreads((prev) => {
