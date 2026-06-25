@@ -215,6 +215,13 @@ func TestMListOwner(t *testing.T) {
 	if gal, err := d.SearchGAL("crew", 20); err != nil || len(gal) != 1 || gal[0].Owner != "alice@hermex.test" {
 		t.Fatalf("SearchGAL owner = %+v, %v; want crew owned by alice", gal, err)
 	}
+	// The webmail group-management surface lists the lists a user owns.
+	if owned, err := d.ListMListsOwnedBy("alice@hermex.test"); err != nil || len(owned) != 1 || owned[0].Listname != "crew@hermex.test" {
+		t.Fatalf("ListMListsOwnedBy(alice) = %+v, %v; want [crew]", owned, err)
+	}
+	if owned, _ := d.ListMListsOwnedBy("bob@hermex.test"); len(owned) != 0 {
+		t.Errorf("ListMListsOwnedBy(bob) = %+v, want none", owned)
+	}
 	if _, err := d.SetMListOwner("crew@hermex.test", ""); err != nil {
 		t.Fatal(err)
 	}

@@ -287,6 +287,30 @@ func (d *SQLDirectory) ListMListsInDomain(domainID int64) ([]MListInfo, error) {
 	return out, rows.Err()
 }
 
+// ListMListsOwnedBy returns the distribution lists a user owns (by the managedBy
+// owner address), ordered by address, for the webmail group-management surface.
+func (d *SQLDirectory) ListMListsOwnedBy(owner string) ([]MListInfo, error) {
+	owner = strings.ToLower(strings.TrimSpace(owner))
+	if owner == "" {
+		return nil, nil
+	}
+	rows, err := d.db.Query(
+		`SELECT id, listname, list_type, list_privilege, COALESCE(owner, '') FROM mlists WHERE owner = ? ORDER BY listname`, owner)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MListInfo
+	for rows.Next() {
+		var m MListInfo
+		if err := rows.Scan(&m.ID, &m.Listname, &m.ListType, &m.ListPriv, &m.Owner); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
 // SetMListOwner sets or clears a distribution list's owner (the Exchange managedBy
 // attribute): the address of the user who manages it. An empty owner clears it. It
 // reports whether the list existed.
