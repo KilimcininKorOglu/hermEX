@@ -47,6 +47,9 @@ func main() {
 		log.Fatalf("hermex-webmail2: directory unreachable: %v", err)
 	}
 	dir := directory.NewSQL(db)
+	if err := dir.EnsureSchema(); err != nil {
+		log.Fatalf("hermex-webmail2: schema: %v", err)
+	}
 	dir.SetLDAPVerifier(ldapauth.New())
 	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log

@@ -46,6 +46,9 @@ func main() {
 		log.Fatalf("hermex-fetchmail: directory unreachable: %v", err)
 	}
 	dir := directory.NewSQL(db)
+	if err := dir.EnsureSchema(); err != nil {
+		log.Fatalf("hermex-fetchmail: schema: %v", err)
+	}
 	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 	objectstore.SetDefaultLogger(logger)
 
