@@ -277,6 +277,11 @@
     "importanceLow": "Düşük",
     "importanceNormal": "Normal",
     "importanceHigh": "Yüksek",
+    "messageSensitivity": "Gizlilik",
+    "sensitivityNormal": "Normal",
+    "sensitivityPersonal": "Kişisel",
+    "sensitivityPrivate": "Özel",
+    "sensitivityConfidential": "Gizli",
     "toSend": "ile gönder"
   },
   "share": {

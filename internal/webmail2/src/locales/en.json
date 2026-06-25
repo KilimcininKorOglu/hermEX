@@ -277,6 +277,11 @@
     "importanceLow": "Low",
     "importanceNormal": "Normal",
     "importanceHigh": "High",
+    "messageSensitivity": "Sensitivity",
+    "sensitivityNormal": "Normal",
+    "sensitivityPersonal": "Personal",
+    "sensitivityPrivate": "Private",
+    "sensitivityConfidential": "Confidential",
     "toSend": "to send"
   },
   "share": {

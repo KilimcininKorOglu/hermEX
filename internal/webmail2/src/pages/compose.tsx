@@ -160,6 +160,7 @@ export function ComposePage() {
   const [signMessage, setSignMessage] = useState(false)
   const [encryptMessage, setEncryptMessage] = useState(false)
   const [importance, setImportance] = useState<"low" | "normal" | "high">("normal")
+  const [sensitivity, setSensitivity] = useState<"normal" | "personal" | "private" | "confidential">("normal")
   const [subject, setSubject] = useState("")
   const [body, setBody] = useState("")
   const [attachments, setAttachments] = useState<Attachment[]>([])
@@ -665,6 +666,7 @@ export function ComposePage() {
         attachments: encoded.length > 0 ? encoded : undefined,
         requestReadReceipt: requestReadReceipt || undefined,
         importance: importance !== "normal" ? importance : undefined,
+        sensitivity: sensitivity !== "normal" ? sensitivity : undefined,
         sendAt: sendAtISO,
         is_html: richTextMode,
       }
@@ -1474,6 +1476,40 @@ export function ComposePage() {
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setImportance("high")}>
                 <span className="mr-2 font-medium">{t("compose.importanceHigh")}</span>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant={sensitivity !== "normal" ? "secondary" : "outline"}
+                size="sm"
+                title={t("compose.messageSensitivity")}
+              >
+                <Shield className={sensitivity === "normal" ? "mr-1.5 h-4 w-4 opacity-40" : "mr-1.5 h-4 w-4"} />
+                {sensitivity === "personal"
+                  ? t("compose.sensitivityPersonal")
+                  : sensitivity === "private"
+                    ? t("compose.sensitivityPrivate")
+                    : sensitivity === "confidential"
+                      ? t("compose.sensitivityConfidential")
+                      : t("compose.sensitivityNormal")}
+                <ChevronDown className="ml-1 h-3 w-3 opacity-50" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setSensitivity("normal")}>
+                <span className="mr-2 text-muted-foreground">{t("compose.sensitivityNormal")}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSensitivity("personal")}>
+                <span className="mr-2 text-muted-foreground">{t("compose.sensitivityPersonal")}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSensitivity("private")}>
+                <span className="mr-2 text-muted-foreground">{t("compose.sensitivityPrivate")}</span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setSensitivity("confidential")}>
+                <span className="mr-2 font-medium">{t("compose.sensitivityConfidential")}</span>
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

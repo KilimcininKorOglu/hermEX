@@ -33,6 +33,7 @@ export interface Mail {
   labels?: string[]
   attachments?: AttachmentInfo[]
   importance?: string // "low" | "normal" | "high"
+  sensitivity?: string // "personal" | "private" | "confidential"
   smimeSigned?: boolean // message carries an S/MIME signature
   smimeEncrypted?: boolean // message was S/MIME encrypted (decrypted for display)
   smimeVerified?: boolean // the signature verified successfully
@@ -98,6 +99,7 @@ export interface SendMailRequest {
   signMessage?: boolean // S/MIME sign the message
   encryptMessage?: boolean // S/MIME encrypt the message
   importance?: string // "low" | "normal" | "high"
+  sensitivity?: string // "personal" | "private" | "confidential"
   // sendAt, when a future absolute RFC3339 instant, defers delivery: the server
   // releases the message at that time instead of sending now.
   sendAt?: string

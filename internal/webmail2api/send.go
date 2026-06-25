@@ -34,6 +34,7 @@ type sendRequest struct {
 	IsHTML             bool             `json:"is_html"`
 	RequestReadReceipt bool             `json:"requestReadReceipt"`
 	Importance         string           `json:"importance"`
+	Sensitivity        string           `json:"sensitivity"` // "personal"|"private"|"confidential" → PR_SENSITIVITY
 	Attachments        []mailAttachment `json:"attachments"`
 	SendAt             string           `json:"sendAt"`
 	SignMessage        bool             `json:"signMessage"`    // server-mode S/MIME sign
@@ -255,6 +256,16 @@ func (s *Server) buildOutgoing(from string, req sendRequest) ([]byte, error) {
 		props.Set(mapi.PrImportance, int32(mapi.ImportanceHigh))
 	case "low":
 		props.Set(mapi.PrImportance, int32(mapi.ImportanceLow))
+	}
+	// Sensitivity mirrors importance: only a non-normal value sets the property,
+	// which oxcmail.Export then emits as the RFC 2156 Sensitivity header.
+	switch req.Sensitivity {
+	case "personal":
+		props.Set(mapi.PrSensitivity, int32(mapi.SensitivityPersonal))
+	case "private":
+		props.Set(mapi.PrSensitivity, int32(mapi.SensitivityPrivate))
+	case "confidential":
+		props.Set(mapi.PrSensitivity, int32(mapi.SensitivityConfidential))
 	}
 	if req.RequestReadReceipt {
 		props.Set(mapi.PrReadReceiptRequested, true)
