@@ -188,6 +188,7 @@ export function ComposePage() {
   const [searchQuery, setSearchQuery] = useState("")
   // Free-text recipient inputs (typed email addresses, not just picked contacts)
   const [recipientInput, setRecipientInput] = useState<{ to: string; cc: string; bcc: string }>({ to: "", cc: "", bcc: "" })
+  const [checkingNames, setCheckingNames] = useState(false)
   // Which recipient field is being typed in, so GAL suggestions show inline
   // under that field (typing the main field — not just the "+" picker — surfaces
   // directory matches).
@@ -454,6 +455,91 @@ export function ComposePage() {
       return
     }
     addRecipient({ id: `typed-${field}-${email}`, name: email, email }, field)
+  }
+
+  // resolveRecipients looks up each recipient that still shows a bare address (no
+  // display name) in the directory, attaching the resolved name when found. It
+  // returns the updated list and how many addresses did not resolve.
+  const resolveRecipients = async (
+    list: Recipient[]
+  ): Promise<{ resolved: Recipient[]; unresolved: number }> => {
+    let unresolved = 0
+    const resolved = await Promise.all(
+      list.map(async (r) => {
+        if (r.name && r.name !== r.email) return r
+        try {
+          const res = await api.searchDirectory(r.email)
+          const match = (res.entries ?? []).find(
+            (e) => e.email.toLowerCase() === r.email.toLowerCase()
+          )
+          if (match && match.name && match.name !== match.email) {
+            return { ...r, name: match.name }
+          }
+        } catch {
+          // A lookup failure leaves the address as typed.
+        }
+        unresolved++
+        return r
+      })
+    )
+    return { resolved, unresolved }
+  }
+
+  // checkNames is the explicit "resolve all" action: it commits any half-typed
+  // address, then resolves every recipient against the directory in one pass and
+  // reports how many addresses could not be matched (e.g. external or mistyped).
+  const checkNames = async () => {
+    setCheckingNames(true)
+    try {
+      const pending = (field: "to" | "cc" | "bcc"): Recipient[] => {
+        const email = recipientInput[field].trim().replace(/[,;]+$/, "").trim()
+        if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+          return [{ id: `typed-${field}-${email}`, name: email, email }]
+        }
+        return []
+      }
+      // Dedupe a field's recipients by address so a committed pending entry that
+      // already exists is not added twice.
+      const dedupe = (list: Recipient[]): Recipient[] => {
+        const seen = new Set<string>()
+        return list.filter((r) => {
+          const key = r.email.toLowerCase()
+          if (seen.has(key)) return false
+          seen.add(key)
+          return true
+        })
+      }
+      const toList = dedupe([...to, ...pending("to")])
+      const ccList = dedupe([...cc, ...pending("cc")])
+      const bccList = dedupe([...bcc, ...pending("bcc")])
+      setRecipientInput({ to: "", cc: "", bcc: "" })
+
+      const [rt, rc, rb] = await Promise.all([
+        resolveRecipients(toList),
+        resolveRecipients(ccList),
+        resolveRecipients(bccList),
+      ])
+      setTo(rt.resolved)
+      setCc(rc.resolved)
+      setBcc(rb.resolved)
+
+      const total = toList.length + ccList.length + bccList.length
+      const unresolved = rt.unresolved + rc.unresolved + rb.unresolved
+      if (total === 0) {
+        toast.error(t("compose.noRecipientsToCheck"))
+      } else if (unresolved === 0) {
+        toast.success(t("compose.allNamesResolved"))
+      } else {
+        toast.success(
+          t("compose.namesChecked", {
+            resolved: String(total - unresolved),
+            unresolved: String(unresolved),
+          })
+        )
+      }
+    } finally {
+      setCheckingNames(false)
+    }
   }
 
   const removeRecipient = (id: string, field: "to" | "cc" | "bcc") => {
@@ -997,6 +1083,16 @@ export function ComposePage() {
             onClick={() => setShowBcc(!showBcc)}
           >
             {t("common.bcc")}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs h-7"
+            onClick={() => void checkNames()}
+            disabled={checkingNames}
+            title={t("compose.checkNamesHint")}
+          >
+            {t("compose.checkNames")}
           </Button>
         </div>
 
