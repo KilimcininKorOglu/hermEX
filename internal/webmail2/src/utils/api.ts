@@ -582,8 +582,8 @@ class API {
   // me returns the caller's session status for rehydration. /auth/me is a soft
   // check that answers 200 either way: authenticated=false when no valid session
   // exists (so the login screen never logs a 401), otherwise the identity.
-  async me(): Promise<{ authenticated: boolean; email?: string; isAdmin?: boolean; has_avatar?: boolean; onboarded?: boolean; timezone?: string; locale?: string; theme?: string }> {
-    return this.get<{ authenticated: boolean; email?: string; isAdmin?: boolean; has_avatar?: boolean; onboarded?: boolean; timezone?: string; locale?: string; theme?: string }>('/auth/me')
+  async me(): Promise<{ authenticated: boolean; email?: string; isAdmin?: boolean; has_avatar?: boolean; onboarded?: boolean; timezone?: string; locale?: string; theme?: string; must_change_password?: boolean }> {
+    return this.get<{ authenticated: boolean; email?: string; isAdmin?: boolean; has_avatar?: boolean; onboarded?: boolean; timezone?: string; locale?: string; theme?: string; must_change_password?: boolean }>('/auth/me')
   }
 
   // changePassword updates the authenticated user's own password.

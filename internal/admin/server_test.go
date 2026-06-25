@@ -321,6 +321,9 @@ func (f *fakeDir) SetPassword(username, password string) (bool, error) {
 	f.setPwUser, f.setPwValue = username, password
 	return !f.setPwMissing, nil
 }
+func (f *fakeDir) RequirePasswordChange(_ string, _ bool) (bool, error) {
+	return true, nil
+}
 func (f *fakeDir) ListAliases() ([]directory.AliasInfo, error) { return f.aliases, nil }
 func (f *fakeDir) CreateAlias(aliasname, mainname string) error {
 	if f.createErr != nil {

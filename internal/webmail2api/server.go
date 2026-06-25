@@ -302,15 +302,22 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	}
 	// Timezone + locale come from the directory so the SPA restores the chosen
 	// zone on reload instead of clearing it; empty means follow-the-device.
-	timezone, locale := s.userLocale(c.Email)
+	// must_change_password gates the SPA into a forced password-change screen.
+	timezone, locale, mustChange := "", "", false
+	if rd, ok := s.auth.(userLocaleReader); ok {
+		if u, found, err := rd.GetUser(c.Email); err == nil && found {
+			timezone, locale, mustChange = u.Timezone, u.Lang, u.MustChangePassword
+		}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"authenticated": true,
-		"email":         c.Email,
-		"isAdmin":       false,
-		"has_avatar":    hasAvatar,
-		"onboarded":     onboarded,
-		"timezone":      timezone,
-		"locale":        locale,
+		"authenticated":        true,
+		"email":                c.Email,
+		"isAdmin":              false,
+		"has_avatar":           hasAvatar,
+		"onboarded":            onboarded,
+		"timezone":             timezone,
+		"locale":               locale,
+		"must_change_password": mustChange,
 	})
 }
 

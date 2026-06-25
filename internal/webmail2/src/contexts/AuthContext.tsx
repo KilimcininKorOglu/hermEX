@@ -14,6 +14,9 @@ interface AuthUser extends UserPrefs {
   email: string
   hasAvatar?: boolean
   isAdmin?: boolean
+  // mustChangePassword is set by an admin password reset; the SPA forces the user
+  // through a password-change screen until they clear it by changing it.
+  mustChangePassword?: boolean
 }
 
 interface AuthContextType {
@@ -28,6 +31,9 @@ interface AuthContextType {
   // a settings change) and re-applies the display timezone immediately so dates
   // re-render in the chosen zone without a reload.
   updatePrefs: (prefs: UserPrefs) => void
+  // refresh re-reads /auth/me (used after a forced password change clears the
+  // must-change flag server-side).
+  refresh: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
@@ -58,10 +64,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       timezone: me.timezone,
       locale: me.locale,
       theme: me.theme,
+      mustChangePassword: me.must_change_password,
     })
     setIsAuthenticated(true)
     setDisplayTimeZone(me.timezone || '')
   }, [])
+
+  // refresh re-reads /auth/me and re-applies the identity. Used after a forced
+  // password change so the must-change gate clears without a full reload.
+  const refresh = useCallback(async () => {
+    try {
+      const me = await api.me()
+      if (me?.authenticated && me.email) {
+        applyMe(me)
+      }
+    } catch {
+      // Leave the current state untouched on a transient failure.
+    }
+  }, [applyMe])
 
   // On mount, ask the server who we are. The JWT lives in an HttpOnly cookie the
   // client cannot read, so this is the only way to restore the session after a
@@ -158,6 +178,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     login,
     logout,
     updatePrefs,
+    refresh,
   }
 
   return (

@@ -212,6 +212,11 @@ func TestAdminServerIntegration(t *testing.T) {
 	if _, ok := dir.Authenticate("intern@hermex.test", "pw2"); ok {
 		t.Error("the old password still authenticates after a reset")
 	}
+	// An admin reset must flag the account so the user is forced to change the
+	// temporary password on next login.
+	if u, ok, _ := dir.GetUser("intern@hermex.test"); !ok || !u.MustChangePassword {
+		t.Error("an admin password reset must set must_change_password")
+	}
 
 	// 9. Grant then revoke an admin role through the API against the real
 	// admin_roles table, and confirm an unknown role tier is rejected.

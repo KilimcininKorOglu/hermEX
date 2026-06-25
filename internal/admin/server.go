@@ -42,6 +42,7 @@ type Directory interface {
 	PurgeDomain(domainID int64, deleteFiles bool) (bool, error)
 	CreateUser(username, password, maildir string) (int64, error)
 	SetPassword(username, password string) (bool, error)
+	RequirePasswordChange(username string, required bool) (bool, error)
 	GetUser(username string) (directory.UserDetail, bool, error)
 	UpdateUser(username string, u directory.UserUpdate) (bool, error)
 	DeleteUser(username string, deleteFiles bool) (bool, error)

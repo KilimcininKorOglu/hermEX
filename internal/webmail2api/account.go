@@ -45,6 +45,13 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not change your password"})
 		return
 	}
+	// Changing your own password satisfies (and clears) any admin-forced change
+	// requirement set by a password reset.
+	if clr, ok := s.auth.(interface {
+		RequirePasswordChange(string, bool) (bool, error)
+	}); ok {
+		_, _ = clr.RequirePasswordChange(c.Email, false)
+	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 

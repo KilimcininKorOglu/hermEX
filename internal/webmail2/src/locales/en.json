@@ -1086,5 +1086,16 @@
     "continue": "Continue",
     "skip": "Skip",
     "saveFailed": "Failed to save your preferences"
+  },
+  "forcePassword": {
+    "title": "Set a new password",
+    "subtitle": "Your password was reset by an administrator. Choose a new one to continue.",
+    "current": "Current password",
+    "new": "New password",
+    "confirm": "Confirm new password",
+    "submit": "Update password",
+    "tooShort": "The new password must be at least 8 characters",
+    "mismatch": "The passwords do not match",
+    "failed": "Could not change your password. Check your current password and try again."
   }
 }

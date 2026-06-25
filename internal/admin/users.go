@@ -98,6 +98,11 @@ func (s *Server) handleSetPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no such user", http.StatusNotFound)
 		return
 	}
+	// An admin-set password is temporary: force the user to change it on next login.
+	if _, err := s.dir.RequirePasswordChange(r.PathValue("email"), true); err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

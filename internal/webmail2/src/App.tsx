@@ -24,6 +24,7 @@ import { FolderPage } from "@/pages/folder"
 import { FiltersPage } from "@/pages/filters"
 import { ThreadsPage } from "@/pages/threads"
 import { OnboardingPage } from "@/pages/onboarding"
+import { ForcePasswordChangePage } from "@/pages/force-password"
 import { ShortcutsDialog } from "@/components/shortcuts-dialog"
 import { Toaster } from "@/components/ui/sonner"
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts"
@@ -69,6 +70,27 @@ function OnboardingGate() {
   return <OnboardingPage />
 }
 
+// RequirePasswordCurrent sends a user whose password an admin reset (must change)
+// to the forced change screen before any other route. It takes priority over
+// onboarding so a temporary admin-set password is replaced first.
+function RequirePasswordCurrent({ children }: { children: React.ReactNode }) {
+  const { user } = useAuth()
+  if (user && user.mustChangePassword) {
+    return <Navigate to="/force-password" replace />
+  }
+  return children
+}
+
+// ForcePasswordGate renders the forced password-change screen, bouncing a user
+// who does not need to change their password back to the inbox.
+function ForcePasswordGate() {
+  const { user } = useAuth()
+  if (user && !user.mustChangePassword) {
+    return <Navigate to="/inbox" replace />
+  }
+  return <ForcePasswordChangePage />
+}
+
 function AppContent() {
   const { user } = useAuth()
   useKeyboardShortcuts()
@@ -78,10 +100,20 @@ function AppContent() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route
+          path="/force-password"
+          element={
+            <ProtectedRoute>
+              <ForcePasswordGate />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/onboarding"
           element={
             <ProtectedRoute>
-              <OnboardingGate />
+              <RequirePasswordCurrent>
+                <OnboardingGate />
+              </RequirePasswordCurrent>
             </ProtectedRoute>
           }
         />
@@ -89,11 +121,13 @@ function AppContent() {
           path="/"
           element={
             <ProtectedRoute>
-              <RequireOnboarded>
-                <MailboxProvider personalEmail={user?.email || ""}>
-                  <Layout />
-                </MailboxProvider>
-              </RequireOnboarded>
+              <RequirePasswordCurrent>
+                <RequireOnboarded>
+                  <MailboxProvider personalEmail={user?.email || ""}>
+                    <Layout />
+                  </MailboxProvider>
+                </RequireOnboarded>
+              </RequirePasswordCurrent>
             </ProtectedRoute>
           }
         >

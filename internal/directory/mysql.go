@@ -652,6 +652,24 @@ func (d *SQLDirectory) SetUserLocale(username, timezone, lang string) (bool, err
 	return n > 0, err
 }
 
+// RequirePasswordChange sets or clears the must-change-password flag. An admin
+// reset sets it (required=true) to force a change on next login; the user clears
+// it (required=false) by changing their own password. Reports whether a matching
+// row was updated.
+func (d *SQLDirectory) RequirePasswordChange(username string, required bool) (bool, error) {
+	v := 0
+	if required {
+		v = 1
+	}
+	res, err := d.db.Exec(`UPDATE users SET must_change_password = ? WHERE username = ?`,
+		v, strings.ToLower(strings.TrimSpace(username)))
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
 // UserDetail is a user's full administrative record for the detail/edit view.
 // Status is the user-status nibble of address_status (the domain-status bits,
 // 0x30, are kept separate); LDAP is true when the account is LDAP-mastered.
@@ -672,6 +690,9 @@ type UserDetail struct {
 	EAS         bool
 	DAV         bool
 	LDAP        bool
+	// MustChangePassword is set by an admin password reset; the user must change
+	// their password on next login until they clear it by changing it themselves.
+	MustChangePassword bool
 }
 
 // GetUser returns one user's administrative record, ok=false when no user has
@@ -682,10 +703,11 @@ func (d *SQLDirectory) GetUser(username string) (UserDetail, bool, error) {
 	var addrStatus int
 	var priv uint32
 	var externid []byte
+	var mustChange int
 	err := d.db.QueryRow(
-		`SELECT id, username, domain_id, address_status, lang, timezone, privilege_bits, display_type, homeserver, maildir, externid
+		`SELECT id, username, domain_id, address_status, lang, timezone, privilege_bits, display_type, homeserver, maildir, externid, must_change_password
 		   FROM users WHERE username = ?`, username).
-		Scan(&u.ID, &u.Username, &u.DomainID, &addrStatus, &u.Lang, &u.Timezone, &priv, &u.DisplayType, &u.Homeserver, &u.Maildir, &externid)
+		Scan(&u.ID, &u.Username, &u.DomainID, &addrStatus, &u.Lang, &u.Timezone, &priv, &u.DisplayType, &u.Homeserver, &u.Maildir, &externid, &mustChange)
 	if errors.Is(err, sql.ErrNoRows) {
 		return UserDetail{}, false, nil
 	}
@@ -697,6 +719,7 @@ func (d *SQLDirectory) GetUser(username string) (UserDetail, bool, error) {
 	u.POP3IMAP, u.SMTP, u.ChgPasswd = sp.POP3IMAP, sp.SMTP, sp.ChgPasswd
 	u.Web, u.EAS, u.DAV = sp.Web, sp.EAS, sp.DAV
 	u.LDAP = externid != nil
+	u.MustChangePassword = mustChange != 0
 	return u, true, nil
 }
 

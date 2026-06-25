@@ -1086,5 +1086,16 @@
     "continue": "Devam et",
     "skip": "Atla",
     "saveFailed": "Tercihleriniz kaydedilemedi"
+  },
+  "forcePassword": {
+    "title": "Yeni bir şifre belirleyin",
+    "subtitle": "Şifreniz bir yönetici tarafından sıfırlandı. Devam etmek için yeni bir şifre seçin.",
+    "current": "Mevcut şifre",
+    "new": "Yeni şifre",
+    "confirm": "Yeni şifreyi onaylayın",
+    "submit": "Şifreyi güncelle",
+    "tooShort": "Yeni şifre en az 8 karakter olmalı",
+    "mismatch": "Şifreler eşleşmiyor",
+    "failed": "Şifreniz değiştirilemedi. Mevcut şifrenizi kontrol edip tekrar deneyin."
   }
 }
