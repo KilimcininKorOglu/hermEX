@@ -3,6 +3,7 @@ package admin
 import (
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -30,12 +31,29 @@ func TestLiveStatusProbe(t *testing.T) {
 		_, _ = w.Write([]byte(`{"service":"imap","version":"t","uptime_seconds":42,"ok":true}`))
 	}))
 	defer healthy.Close()
-	down := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
-	down.Close() // closed: connections are refused, so the probe reads Down
+	// down holds its listener open for the whole test so the port can never be
+	// reused by another test server. Such reuse used to turn the intended refusal
+	// into a stray reply (Degraded), making this test flaky. Every accepted
+	// connection is dropped without an HTTP response, so the probe's client.Do
+	// fails and the daemon is classified Down deterministically.
+	downLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer downLn.Close()
+	go func() {
+		for {
+			c, aerr := downLn.Accept()
+			if aerr != nil {
+				return
+			}
+			_ = c.Close()
+		}
+	}()
 
 	targets := []HealthTarget{
 		{Name: "imap", URL: healthy.URL + "/healthz"},
-		{Name: "mta", URL: down.URL + "/healthz"},
+		{Name: "mta", URL: "http://" + downLn.Addr().String() + "/healthz"},
 	}
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
 	ts := statusServer(t, d, targets)
