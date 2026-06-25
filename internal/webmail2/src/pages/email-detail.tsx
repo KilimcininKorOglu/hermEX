@@ -101,8 +101,11 @@ interface EmailDetail {
   smimeSignedBy?: string
 }
 
-export function EmailDetailPage() {
-  const { id } = useParams()
+// EmailDetailPage renders a single message. It reads the id from the route, or
+// from an `id` prop when embedded in the inbox preview pane (no navigation).
+export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedded?: boolean } = {}) {
+  const params = useParams()
+  const id = propId ?? params.id
   const navigate = useNavigate()
   const { t } = useI18n()
   const { user } = useAuth()
@@ -504,9 +507,11 @@ export function EmailDetailPage() {
           {/* Toolbar */}
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1">
-              <Button variant="ghost" size="icon" onClick={() => navigate(-1)} title={t("common.back")}>
-                <ArrowLeft className="h-5 w-5" />
-              </Button>
+              {!embedded && (
+                <Button variant="ghost" size="icon" onClick={() => navigate(-1)} title={t("common.back")}>
+                  <ArrowLeft className="h-5 w-5" />
+                </Button>
+              )}
               <Button variant="ghost" size="sm" onClick={handleReply} title={t("common.reply")}>
                 <Reply className="h-4 w-4 mr-1" />
                 {t("common.reply")}

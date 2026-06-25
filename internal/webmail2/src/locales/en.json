@@ -106,6 +106,8 @@
     "messagesMarkedAsRead": "{{count}} messages marked as read",
     "markAllRead": "Mark all as read",
     "allMarkedAsRead": "{{count}} messages marked as read",
+    "previewPane": "Toggle reading pane",
+    "selectMessage": "Select a message to read it here",
     "import": "Import .eml",
     "imported": "Message imported",
     "importFailed": "Failed to import the message",

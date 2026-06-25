@@ -106,6 +106,8 @@
     "messagesMarkedAsRead": "{{count}} mesaj okundu olarak işaretlendi",
     "markAllRead": "Tümünü okundu işaretle",
     "allMarkedAsRead": "{{count}} mesaj okundu olarak işaretlendi",
+    "previewPane": "Okuma bölmesini aç/kapat",
+    "selectMessage": "Okumak için bir mesaj seçin",
     "import": ".eml içe aktar",
     "imported": "Mesaj içe aktarıldı",
     "importFailed": "Mesaj içe aktarılamadı",

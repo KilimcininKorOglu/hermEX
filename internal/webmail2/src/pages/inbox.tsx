@@ -20,8 +20,10 @@ import {
   LayoutGrid,
   ArrowUpDown,
   MessagesSquare,
+  PanelRight,
 } from "lucide-react"
 import { WelcomeBanner } from "@/components/welcome-banner"
+import { EmailDetailPage } from "@/pages/email-detail"
 import { useI18n } from "@/hooks/useI18n"
 import { formatAbsolute } from "@/utils/date"
 import { getCookie, setCookie } from "@/utils/cookies"
@@ -93,6 +95,17 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
   const [activeFilter, setActiveFilter] = useState("all")
   const loading = inboxLoading
   const [viewMode, setViewMode] = useState<ViewMode>("list")
+  // Preview pane: "none" opens a message on its own page; "right" reads it inline
+  // beside the list. The choice persists in a cookie (client UI preference).
+  const [previewPane, setPreviewPane] = useState<"none" | "right">(() =>
+    getCookie("hermex-preview-pane") === "right" ? "right" : "none"
+  )
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const setPreview = (p: "none" | "right") => {
+    setPreviewPane(p)
+    setCookie("hermex-preview-pane", p)
+    if (p === "none") setSelectedId(null)
+  }
   const [viewType, setViewType] = useState<ViewType>("list")
   const [expandedThreads, setExpandedThreads] = useState<Set<string>>(new Set())
   const [sortBy, setSortBy] = useState<SortOption>("date")
@@ -310,9 +323,13 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
         "group flex cursor-pointer items-center gap-3 transition-all duration-200",
         viewMode === "list" ? "p-4 hover:bg-accent/50" : "p-2 hover:bg-accent/50",
         !email.read && viewMode === "list" && "bg-accent/5",
-        sel.isSelected(email.id) && "bg-primary/5"
+        sel.isSelected(email.id) && "bg-primary/5",
+        previewPane === "right" && selectedId === email.id && "bg-primary/10"
       )}
-      onClick={() => navigate(`/email/${email.id}`)}
+      onClick={() => {
+        if (previewPane === "right") setSelectedId(email.id)
+        else navigate(`/email/${email.id}`)
+      }}
     >
       <Checkbox
         checked={sel.isSelected(email.id)}
@@ -522,9 +539,21 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
           >
             <MessagesSquare className="h-4 w-4" />
           </Button>
+
+          <Button
+            variant={previewPane === "right" ? "secondary" : "ghost"}
+            size="icon"
+            className="h-8 w-8"
+            title={t("inbox.previewPane")}
+            onClick={() => setPreview(previewPane === "right" ? "none" : "right")}
+          >
+            <PanelRight className="h-4 w-4" />
+          </Button>
         </div>
       </div>
 
+      <div className={cn(previewPane === "right" && "flex items-start gap-4")}>
+        <div className={cn("space-y-4", previewPane === "right" ? "w-2/5 min-w-0" : "flex-1")}>
       <div className={cn(
         "rounded-lg border bg-card",
         viewMode === "compact" && "divide-y"
@@ -646,6 +675,17 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
             <ChevronRight className="h-4 w-4" />
           </Button>
         </div>
+      </div>
+        </div>
+        {previewPane === "right" && (
+          <div className="min-w-0 flex-1 rounded-lg border bg-card overflow-auto max-h-[calc(100vh-9rem)]">
+            {selectedId ? (
+              <EmailDetailPage id={selectedId} embedded />
+            ) : (
+              <div className="p-12 text-center text-sm text-muted-foreground">{t("inbox.selectMessage")}</div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
