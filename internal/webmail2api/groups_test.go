@@ -15,10 +15,11 @@ import (
 // "crew@hermex.test" and nothing else (the directory's own methods are covered in
 // internal/directory).
 type groupStoreAuth struct {
-	owned   map[string][]directory.MListInfo // owner email -> their lists
-	members []string
-	setUser string
-	setMems []string
+	owned         map[string][]directory.MListInfo // owner email -> their lists
+	members       []string
+	setUser       string
+	setMems       []string
+	masteredLists map[string]bool // lists the LDAP sync owns; manual edits refused
 }
 
 func (a *groupStoreAuth) Authenticate(string, string) (string, bool) { return "/tmp", true }
@@ -27,6 +28,9 @@ func (a *groupStoreAuth) ListMListsOwnedBy(owner string) ([]directory.MListInfo,
 }
 func (a *groupStoreAuth) ListMembers(string) ([]string, error) { return a.members, nil }
 func (a *groupStoreAuth) SetMembers(listname string, members []string) (bool, error) {
+	if a.masteredLists[listname] {
+		return false, directory.ErrLDAPMastered
+	}
 	a.setUser, a.setMems = listname, members
 	return true, nil
 }
@@ -87,5 +91,43 @@ func TestGroupsAPI(t *testing.T) {
 	// IDOR guard on write: cannot set members of a non-owned group.
 	if rec := do(http.MethodPut, "/api/v1/groups/members", `{"address":"other@hermex.test","members":["z@hermex.test"]}`); rec.Code != http.StatusForbidden {
 		t.Errorf("put members of non-owned group = %d, want 403", rec.Code)
+	}
+}
+
+// TestGroupsLDAPMastered proves an AD-synced (LDAP-mastered) group is flagged so the
+// SPA can present it read-only, and that editing its members is refused (403) because
+// the directory sync owns it.
+func TestGroupsLDAPMastered(t *testing.T) {
+	auth := &groupStoreAuth{
+		owned: map[string][]directory.MListInfo{"alice@hermex.test": {
+			{Listname: "ad-grp@hermex.test", LDAPMastered: true},
+		}},
+		masteredLists: map[string]bool{"ad-grp@hermex.test": true},
+	}
+	secret := []byte("groups-mastered-secret")
+	srv := NewServer(auth, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
+	do := func(method, target, body string) *httptest.ResponseRecorder {
+		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: t.TempDir(), Exp: time.Now().Add(time.Hour).Unix()})
+		var req *http.Request
+		if body == "" {
+			req = httptest.NewRequest(method, target, nil)
+		} else {
+			req = httptest.NewRequest(method, target, strings.NewReader(body))
+		}
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+
+	rec := do(http.MethodGet, "/api/v1/groups", "")
+	var groups []map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &groups)
+	if len(groups) != 1 || groups[0]["ldapMastered"] != true {
+		t.Fatalf("get groups = %+v, want ad-grp flagged ldapMastered", groups)
+	}
+
+	if rec := do(http.MethodPut, "/api/v1/groups/members", `{"address":"ad-grp@hermex.test","members":["z@hermex.test"]}`); rec.Code != http.StatusForbidden {
+		t.Errorf("put members of mastered group = %d, want 403", rec.Code)
 	}
 }

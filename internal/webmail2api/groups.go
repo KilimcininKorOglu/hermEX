@@ -1,6 +1,7 @@
 package webmail2api
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -55,7 +56,7 @@ func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]map[string]any, 0, len(owned))
 	for _, l := range owned {
-		out = append(out, map[string]any{"address": l.Listname})
+		out = append(out, map[string]any{"address": l.Listname, "ldapMastered": l.LDAPMastered})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -112,6 +113,10 @@ func (s *Server) handleGroupSetMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := gd.SetMembers(req.Address, req.Members); err != nil {
+		if errors.Is(err, directory.ErrLDAPMastered) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "this group is managed by directory sync and cannot be edited here"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save members"})
 		return
 	}
