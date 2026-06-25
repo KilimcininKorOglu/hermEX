@@ -20,16 +20,13 @@ export function LoginPage() {
   const { login, isAuthenticated } = useAuth()
   const { t } = useI18n()
 
-  // Resolve per-tenant branding from the domain the user is typing, so the
-  // login screen reflects the tenant before authentication.
-  const domain = email.includes('@') ? (email.split('@')[1] ?? '').trim().toLowerCase() : ''
+  // Resolve per-tenant branding from the address-bar hostname, so the login screen
+  // reflects the tenant immediately, before the user types anything. The server maps
+  // the accessed hostname to a registered domain.
+  const host = window.location.hostname.toLowerCase()
   useEffect(() => {
-    if (!domain) {
-      setBranding(null)
-      return
-    }
     let cancelled = false
-    fetch(`${window.location.origin}/api/v1/branding?domain=${encodeURIComponent(domain)}`)
+    fetch(`${window.location.origin}/api/v1/branding?domain=${encodeURIComponent(host)}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((b: Branding | null) => {
         // Apply branding when the tenant set ANY customization, not just an
@@ -42,7 +39,7 @@ export function LoginPage() {
     return () => {
       cancelled = true
     }
-  }, [domain])
+  }, [host])
 
   const appName = branding?.app_name || 'hermEX'
   useEffect(() => {

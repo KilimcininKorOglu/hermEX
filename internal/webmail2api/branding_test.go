@@ -22,8 +22,9 @@ func (b brandingAuth) GetDomainBranding(domain string) (directory.DomainBranding
 }
 
 // TestHandleBrandingPerDomain proves the unauthenticated branding endpoint serves a
-// domain's own login branding when set and the global default for an unknown domain,
-// so each tenant brands its own login screen.
+// domain's own login branding when set, resolves an accessed subdomain host to its
+// parent domain's branding, and serves the global default for an unknown host, so
+// each tenant brands its own login screen by the address-bar hostname.
 func TestHandleBrandingPerDomain(t *testing.T) {
 	auth := brandingAuth{
 		StaticAccounts: directory.StaticAccounts{},
@@ -45,7 +46,11 @@ func TestHandleBrandingPerDomain(t *testing.T) {
 	if b := get("acme.test"); b["app_name"] != "Acme Mail" || b["primary_color"] != "#ff0000" {
 		t.Errorf("acme branding = %v, want Acme Mail / #ff0000", b)
 	}
+	// An accessed hostname like mail.acme.test resolves to the acme.test domain.
+	if b := get("mail.acme.test"); b["app_name"] != "Acme Mail" {
+		t.Errorf("subdomain host app_name = %v, want Acme Mail (resolved to acme.test)", b["app_name"])
+	}
 	if b := get("other.test"); b["app_name"] != "hermEX" {
-		t.Errorf("unknown-domain app_name = %v, want the hermEX default", b["app_name"])
+		t.Errorf("unknown-host app_name = %v, want the hermEX default", b["app_name"])
 	}
 }
