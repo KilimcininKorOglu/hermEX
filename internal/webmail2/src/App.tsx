@@ -22,6 +22,7 @@ import { SavedSearchPage } from "@/pages/saved-search"
 import { SpamPage } from "@/pages/spam"
 import { FolderPage } from "@/pages/folder"
 import { FiltersPage } from "@/pages/filters"
+import { GroupsPage } from "@/pages/groups"
 import { ThreadsPage } from "@/pages/threads"
 import { OnboardingPage } from "@/pages/onboarding"
 import { ForcePasswordChangePage } from "@/pages/force-password"
@@ -146,6 +147,7 @@ function AppContent() {
           <Route path="tasks" element={<TasksPage />} />
           <Route path="notes" element={<NotesPage />} />
           <Route path="filters" element={<FiltersPage />} />
+          <Route path="groups" element={<GroupsPage />} />
           <Route path="threads" element={<ThreadsPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="search" element={<SearchPage />} />

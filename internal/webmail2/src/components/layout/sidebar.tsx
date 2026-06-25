@@ -94,6 +94,7 @@ const mainNavItems: NavItem[] = [
   { icon: ListTodo, label: "nav.tasks", path: "/tasks" },
   { icon: StickyNote, label: "nav.notes", path: "/notes" },
   { icon: Filter, label: "nav.filters", path: "/filters" },
+  { icon: Users, label: "nav.groups", path: "/groups" },
 ]
 
 // Standard mailboxes already shown in the main nav (or as Spam below); excluded

@@ -813,6 +813,21 @@ class API {
     return this.get<{ mailboxes?: string[] }>('/mailboxes')
   }
 
+  // getGroups lists the distribution lists the caller owns (the managedBy owner).
+  async getGroups(): Promise<{ address: string }[]> {
+    return this.get<{ address: string }[]>('/groups')
+  }
+
+  // getGroupMembers returns the members of a group the caller owns.
+  async getGroupMembers(address: string): Promise<{ address: string; members?: string[] }> {
+    return this.get<{ address: string; members?: string[] }>('/groups/members?address=' + encodeURIComponent(address))
+  }
+
+  // setGroupMembers replaces an owned group's members.
+  async setGroupMembers(address: string, members: string[]): Promise<{ ok?: boolean }> {
+    return this.put<{ ok?: boolean }>('/groups/members', { address, members })
+  }
+
   // getPublicFolders returns the organization public folders in the caller's
   // domain that the caller may read, plus the owner key to pass to getMail.
   // Empty when the feature is disabled.

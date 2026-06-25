@@ -16,6 +16,7 @@
     "tasks": "Tasks",
     "notes": "Notes",
     "filters": "Filters",
+    "groups": "Groups",
     "settings": "Settings",
     "compose": "Compose",
     "folders": "Folders",
@@ -23,6 +24,19 @@
     "personal": "Personal",
     "newFolder": "New folder",
     "savedSearches": "Saved searches"
+  },
+  "groups": {
+    "title": "My groups",
+    "description": "Distribution lists you own. Edit the membership, one address per line.",
+    "empty": "You do not own any distribution lists.",
+    "importCsv": "Import CSV",
+    "save": "Save",
+    "placeholder": "one address per line",
+    "loadError": "Could not load your groups",
+    "membersError": "Could not load members",
+    "saved": "Members saved",
+    "saveError": "Could not save members",
+    "imported": "Imported {{count}} address(es)"
   },
   "common": {
     "search": "Search",

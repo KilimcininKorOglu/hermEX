@@ -16,6 +16,7 @@
     "tasks": "Görevler",
     "notes": "Notlar",
     "filters": "Filtreler",
+    "groups": "Gruplar",
     "settings": "Ayarlar",
     "compose": "Oluştur",
     "folders": "Klasörler",
@@ -23,6 +24,19 @@
     "personal": "Kişisel",
     "newFolder": "Yeni klasör",
     "savedSearches": "Kayıtlı aramalar"
+  },
+  "groups": {
+    "title": "Gruplarım",
+    "description": "Sahibi olduğunuz dağıtım listeleri. Üyeliği düzenleyin, her satıra bir adres.",
+    "empty": "Sahibi olduğunuz bir dağıtım listesi yok.",
+    "importCsv": "CSV içe aktar",
+    "save": "Kaydet",
+    "placeholder": "her satıra bir adres",
+    "loadError": "Gruplarınız yüklenemedi",
+    "membersError": "Üyeler yüklenemedi",
+    "saved": "Üyeler kaydedildi",
+    "saveError": "Üyeler kaydedilemedi",
+    "imported": "{{count}} adres içe aktarıldı"
   },
   "common": {
     "search": "Ara",
