@@ -451,6 +451,14 @@
       "exists": "That category already exists",
       "saveFailed": "Failed to save categories"
     },
+    "safeSenders": {
+      "title": "Safe senders",
+      "description": "Messages from these addresses or domains load remote images automatically",
+      "empty": "No safe senders yet.",
+      "placeholder": "address@example.com or example.com",
+      "removeAria": "Remove {{sender}}",
+      "saveFailed": "Failed to save safe senders"
+    },
     "delegates": {
       "title": "Delegates",
       "description": "Let other people access your mailbox and send on your behalf",

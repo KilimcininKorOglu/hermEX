@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
-import { Moon, Sun, Bell, Shield, Palette, Keyboard, Mail, Globe, Lock, Plane, Monitor, UserCog, Trash2, Plus, Tag, X, Camera, HardDrive, FileKey, FileText } from "lucide-react"
+import { Moon, Sun, Bell, Shield, ShieldCheck, Palette, Keyboard, Mail, Globe, Lock, Plane, Monitor, UserCog, Trash2, Plus, Tag, X, Camera, HardDrive, FileKey, FileText } from "lucide-react"
 import { useTheme } from "@/components/theme-provider"
 import { useAuth } from "@/contexts/AuthContext"
 import { useI18n } from "@/hooks/useI18n"
@@ -621,6 +621,47 @@ export function SettingsPage() {
   }
 
   const removeCategory = (name: string) => void saveCategories(categories.filter((c) => c.name !== name))
+
+  // Safe senders: addresses/domains whose messages load remote images automatically.
+  const [safeSenders, setSafeSenders] = useState<string[]>([])
+  const [safeInput, setSafeInput] = useState("")
+  const [safeBusy, setSafeBusy] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    api.getSafeSenders()
+      .then((res) => { if (!cancelled) setSafeSenders(res.safeSenders ?? []) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  const saveSafeSenders = async (next: string[]) => {
+    const prev = safeSenders
+    setSafeSenders(next)
+    setSafeBusy(true)
+    try {
+      const res = await api.setSafeSenders(next)
+      setSafeSenders(res.safeSenders ?? next)
+    } catch {
+      setSafeSenders(prev)
+      toast.error(t("settings.safeSenders.saveFailed"))
+    } finally {
+      setSafeBusy(false)
+    }
+  }
+
+  const addSafeSender = () => {
+    const addr = safeInput.trim().toLowerCase()
+    if (!addr) return
+    if (safeSenders.includes(addr)) {
+      setSafeInput("")
+      return
+    }
+    setSafeInput("")
+    void saveSafeSenders([...safeSenders, addr])
+  }
+
+  const removeSafeSender = (addr: string) => void saveSafeSenders(safeSenders.filter((s) => s !== addr))
 
   // Delegates: people the user grants access to their own mailbox.
   const [delegations, setDelegations] = useState<Delegation[]>([])
@@ -1321,6 +1362,49 @@ export function SettingsPage() {
               placeholder={t("settings.categories.namePlaceholder")}
             />
             <Button onClick={addCategory} disabled={catBusy || !catName.trim()}>
+              <Plus className="mr-1 h-4 w-4" />
+              {t("common.add")}
+            </Button>
+          </div>
+        </div>
+      </SettingSection>
+
+      {/* Safe senders */}
+      <SettingSection
+        icon={ShieldCheck}
+        title={t("settings.safeSenders.title")}
+        description={t("settings.safeSenders.description")}
+      >
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {safeSenders.length === 0 ? (
+              <p className="text-sm text-muted-foreground">{t("settings.safeSenders.empty")}</p>
+            ) : (
+              safeSenders.map((addr) => (
+                <span
+                  key={addr}
+                  className="inline-flex items-center gap-1 rounded-full border bg-muted px-2.5 py-0.5 text-xs font-medium"
+                >
+                  {addr}
+                  <button
+                    onClick={() => removeSafeSender(addr)}
+                    aria-label={t("settings.safeSenders.removeAria", { sender: addr })}
+                    className="opacity-60 hover:opacity-100"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </span>
+              ))
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Input
+              value={safeInput}
+              onChange={(e) => setSafeInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") addSafeSender() }}
+              placeholder={t("settings.safeSenders.placeholder")}
+            />
+            <Button onClick={addSafeSender} disabled={safeBusy || !safeInput.trim()}>
               <Plus className="mr-1 h-4 w-4" />
               {t("common.add")}
             </Button>

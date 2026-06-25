@@ -108,6 +108,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/preferences", s.handlePutPreferences)
 	mux.HandleFunc("GET /api/v1/categories", s.handleGetCategories)
 	mux.HandleFunc("PUT /api/v1/categories", s.handlePutCategories)
+	mux.HandleFunc("GET /api/v1/safe-senders", s.handleGetSafeSenders)
+	mux.HandleFunc("PUT /api/v1/safe-senders", s.handlePutSafeSenders)
 	mux.HandleFunc("GET /api/v1/signatures", s.handleGetSignatures)
 	mux.HandleFunc("POST /api/v1/signatures", s.handlePostSignature)
 	mux.HandleFunc("DELETE /api/v1/signatures", s.handleDeleteSignature)

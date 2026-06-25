@@ -193,6 +193,7 @@ type mailDetailJSON struct {
 	Folder         string           `json:"folder"`
 	HasAttachments bool             `json:"hasAttachments"`
 	Size           int              `json:"size"`
+	SenderTrusted  bool             `json:"senderTrusted,omitempty"` // sender is safe-listed → auto-load remote images
 	Attachments    []attachmentJSON `json:"attachments,omitempty"`
 	SmimeSigned    bool             `json:"smimeSigned,omitempty"`
 	SmimeEncrypted bool             `json:"smimeEncrypted,omitempty"`
@@ -263,6 +264,10 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 			d.Read = true
 		}
 	}
+	// A safe-listed sender's remote images load automatically in the reader. The
+	// match is computed server-side (against the shared allowlist) so the
+	// security-relevant decision stays in tested Go, not client code.
+	d.SenderTrusted = isSafeSender(safeSenders(st), d.From)
 	// Surface the rich follow-up flag (colour + due date + complete) so the reading
 	// view can show more than the plain \Flagged star.
 	if m, err := st.MessageByUID(fid, uid); err == nil {

@@ -30,6 +30,7 @@ export interface Mail {
   folder: string
   hasAttachments: boolean
   size: number
+  senderTrusted?: boolean // sender is on the safe-sender allowlist → load remote images automatically
   labels?: string[]
   attachments?: AttachmentInfo[]
   importance?: string // "low" | "normal" | "high"
@@ -742,6 +743,17 @@ class API {
   // setCategories replaces the user's master category list.
   async setCategories(categories: Category[]): Promise<{ categories?: Category[] }> {
     return this.put<{ categories?: Category[] }>('/categories', { categories })
+  }
+
+  // getSafeSenders returns the remote-content allowlist (addresses/domains whose
+  // messages load remote images automatically).
+  async getSafeSenders(): Promise<{ safeSenders?: string[] }> {
+    return this.get<{ safeSenders?: string[] }>('/safe-senders')
+  }
+
+  // setSafeSenders replaces the safe-sender allowlist (the server normalizes it).
+  async setSafeSenders(safeSenders: string[]): Promise<{ safeSenders?: string[] }> {
+    return this.put<{ safeSenders?: string[] }>('/safe-senders', { safeSenders })
   }
 
   // getMailboxes returns the user's mailbox names.

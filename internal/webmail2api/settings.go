@@ -3,6 +3,7 @@ package webmail2api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
@@ -115,6 +116,86 @@ func (s *Server) handlePutCategories(w http.ResponseWriter, r *http.Request) {
 		raw, _ := json.Marshal(body.Categories)
 		m["categories"] = raw
 		return map[string]any{"categories": body.Categories}, true
+	})
+}
+
+// ---- Safe senders (remote-content allowlist, shared with internal/webmail under
+// the same "safeSenders" blob key so both clients honor one list) ----
+
+// safeSenders reads the shared safe-sender allowlist from the settings blob.
+func safeSenders(st *objectstore.Store) []string {
+	list := []string{}
+	if raw, ok := sharedSettings(st)["safeSenders"]; ok {
+		_ = json.Unmarshal(raw, &list)
+	}
+	return list
+}
+
+// normalizeSafeSenders lowercases, trims, and de-duplicates a safe-sender list,
+// dropping empties, matching the server-rendered webmail so both clients store
+// the list the same way.
+func normalizeSafeSenders(in []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, e := range in {
+		e = strings.ToLower(strings.TrimSpace(e))
+		if e == "" || seen[e] {
+			continue
+		}
+		seen[e] = true
+		out = append(out, e)
+	}
+	return out
+}
+
+// isSafeSender reports whether a parsed sender address is covered by the
+// allowlist: an exact address match, or a domain entry (bare or "@domain")
+// matching the sender's domain. Case-insensitive on the address only; no
+// subdomain widening. Mirrors internal/webmail's matching.
+func isSafeSender(list []string, addr string) bool {
+	addr = strings.ToLower(strings.TrimSpace(addr))
+	if addr == "" {
+		return false
+	}
+	domain := ""
+	if i := strings.LastIndex(addr, "@"); i >= 0 {
+		domain = addr[i+1:]
+	}
+	for _, e := range list {
+		e = strings.ToLower(strings.TrimSpace(e))
+		if e == "" {
+			continue
+		}
+		if e == addr || (domain != "" && (e == domain || e == "@"+domain)) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *Server) handleGetSafeSenders(w http.ResponseWriter, r *http.Request) {
+	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
+		list := []string{}
+		if raw, ok := m["safeSenders"]; ok {
+			_ = json.Unmarshal(raw, &list)
+		}
+		return map[string]any{"safeSenders": list}, false
+	})
+}
+
+func (s *Server) handlePutSafeSenders(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		SafeSenders []string `json:"safeSenders"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	list := normalizeSafeSenders(body.SafeSenders)
+	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
+		raw, _ := json.Marshal(list)
+		m["safeSenders"] = raw
+		return map[string]any{"safeSenders": list}, true
 	})
 }
 

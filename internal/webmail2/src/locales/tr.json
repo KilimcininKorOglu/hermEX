@@ -451,6 +451,14 @@
       "exists": "Bu kategori zaten mevcut",
       "saveFailed": "Kategoriler kaydedilemedi"
     },
+    "safeSenders": {
+      "title": "Güvenli göndericiler",
+      "description": "Bu adres veya alan adlarından gelen mesajlar uzak görselleri otomatik yükler",
+      "empty": "Henüz güvenli gönderici yok.",
+      "placeholder": "adres@ornek.com veya ornek.com",
+      "removeAria": "{{sender}} kaldır",
+      "saveFailed": "Güvenli göndericiler kaydedilemedi"
+    },
     "delegates": {
       "title": "Temsilciler",
       "description": "Diğer kişilerin posta kutunuza erişmesine ve sizin adınıza göndermesine izin verin",
