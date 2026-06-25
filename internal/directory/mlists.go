@@ -42,6 +42,10 @@ type MListInfo struct {
 	Listname string
 	ListType int
 	ListPriv int
+	// Owner is the address of the list's owner (the Exchange managedBy attribute),
+	// empty when none. The owner may manage the list's membership from webmail and
+	// the address book exposes its EntryID to Outlook as PR_EMS_AB_OWNER.
+	Owner string
 }
 
 // addrDomain returns the domain part of an address, or "" when there is no '@'.
@@ -247,7 +251,7 @@ func (d *SQLDirectory) DeleteMList(listname string) (bool, error) {
 // API.
 func (d *SQLDirectory) ListMLists() ([]MListInfo, error) {
 	rows, err := d.db.Query(
-		`SELECT id, listname, list_type, list_privilege FROM mlists ORDER BY listname`)
+		`SELECT id, listname, list_type, list_privilege, COALESCE(owner, '') FROM mlists ORDER BY listname`)
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +259,7 @@ func (d *SQLDirectory) ListMLists() ([]MListInfo, error) {
 	var out []MListInfo
 	for rows.Next() {
 		var m MListInfo
-		if err := rows.Scan(&m.ID, &m.Listname, &m.ListType, &m.ListPriv); err != nil {
+		if err := rows.Scan(&m.ID, &m.Listname, &m.ListType, &m.ListPriv, &m.Owner); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -267,7 +271,7 @@ func (d *SQLDirectory) ListMLists() ([]MListInfo, error) {
 // for the per-domain admin views.
 func (d *SQLDirectory) ListMListsInDomain(domainID int64) ([]MListInfo, error) {
 	rows, err := d.db.Query(
-		`SELECT id, listname, list_type, list_privilege FROM mlists WHERE domain_id = ? ORDER BY listname`, domainID)
+		`SELECT id, listname, list_type, list_privilege, COALESCE(owner, '') FROM mlists WHERE domain_id = ? ORDER BY listname`, domainID)
 	if err != nil {
 		return nil, err
 	}
@@ -275,12 +279,29 @@ func (d *SQLDirectory) ListMListsInDomain(domainID int64) ([]MListInfo, error) {
 	var out []MListInfo
 	for rows.Next() {
 		var m MListInfo
-		if err := rows.Scan(&m.ID, &m.Listname, &m.ListType, &m.ListPriv); err != nil {
+		if err := rows.Scan(&m.ID, &m.Listname, &m.ListType, &m.ListPriv, &m.Owner); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
 	}
 	return out, rows.Err()
+}
+
+// SetMListOwner sets or clears a distribution list's owner (the Exchange managedBy
+// attribute): the address of the user who manages it. An empty owner clears it. It
+// reports whether the list existed.
+func (d *SQLDirectory) SetMListOwner(listname, owner string) (bool, error) {
+	id, ok, err := d.mlistID(listname)
+	if err != nil || !ok {
+		return false, err
+	}
+	owner = strings.ToLower(strings.TrimSpace(owner))
+	var val any
+	if owner != "" {
+		val = owner
+	}
+	_, err = d.db.Exec(`UPDATE mlists SET owner = ? WHERE id = ?`, val, id)
+	return err == nil, err
 }
 
 // SetMembers replaces a normal-type list's explicit members with the given set

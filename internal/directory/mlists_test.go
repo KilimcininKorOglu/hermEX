@@ -196,3 +196,28 @@ func TestMListCRUD(t *testing.T) {
 		t.Errorf("expand of deleted list res = %d, want MListNone", res)
 	}
 }
+
+// TestMListOwner proves a distribution list's owner (the Exchange managedBy
+// attribute) is stored, surfaced in the list summary, cleared by an empty value, and
+// reported not-found for an unknown list.
+func TestMListOwner(t *testing.T) {
+	d := mlistTestDir(t)
+	mkList(t, d, "crew@hermex.test", mlistTypeNormal, mlistPrivAll)
+
+	if found, err := d.SetMListOwner("crew@hermex.test", "alice@hermex.test"); err != nil || !found {
+		t.Fatalf("SetMListOwner = (%v, %v), want (true, nil)", found, err)
+	}
+	lists, err := d.ListMLists()
+	if err != nil || len(lists) != 1 || lists[0].Owner != "alice@hermex.test" {
+		t.Fatalf("ListMLists = %+v, %v; want crew owned by alice", lists, err)
+	}
+	if _, err := d.SetMListOwner("crew@hermex.test", ""); err != nil {
+		t.Fatal(err)
+	}
+	if lists, _ = d.ListMLists(); len(lists) != 1 || lists[0].Owner != "" {
+		t.Errorf("after clear, owner = %q, want empty", lists[0].Owner)
+	}
+	if found, _ := d.SetMListOwner("ghost@hermex.test", "alice@hermex.test"); found {
+		t.Error("SetMListOwner on an unknown list should report not found")
+	}
+}
