@@ -183,7 +183,8 @@ func main() {
 		for _, u := range users {
 			// A directory entry whose mail domain is not provisioned locally is
 			// skipped (logged) rather than aborting the whole sync.
-			isNew, err := dir.UpsertLDAPUser(u.Username, u.ExternID, cfg.MaildirFor(u.Username))
+			maildir := cfg.MaildirFor(u.Username)
+			isNew, err := dir.UpsertLDAPUser(u.Username, u.ExternID, maildir)
 			if err != nil {
 				log.Printf("hermex-admin: skip %s: %v", u.Username, err)
 				continue
@@ -192,6 +193,25 @@ func main() {
 				created++
 			} else {
 				updated++
+			}
+			// Profile string fields land in the directory; the portrait lands in the
+			// mailbox store (after the upsert, so the maildir exists). Either failing
+			// is logged, not fatal: the account itself is already synced.
+			if len(u.Fields) > 0 {
+				if _, err := dir.ApplyLDAPProfile(u.Username, u.Fields); err != nil {
+					log.Printf("hermex-admin: %s profile: %v", u.Username, err)
+				}
+			}
+			if len(u.Photo) > 0 && maildir != "" {
+				st, err := objectstore.Open(maildir)
+				if err != nil {
+					log.Printf("hermex-admin: %s photo: %v", u.Username, err)
+				} else {
+					if err := st.SetUserPhoto(u.Photo); err != nil {
+						log.Printf("hermex-admin: %s photo: %v", u.Username, err)
+					}
+					st.Close()
+				}
 			}
 		}
 		fmt.Printf("ldap-sync org %d: %d created, %d updated (of %d directory entries)\n",

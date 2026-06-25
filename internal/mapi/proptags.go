@@ -364,6 +364,7 @@ const (
 	PrTitle             = PropTag(0x3A17001F) // PtUnicode (PidTagTitle, job title)
 	PrCompanyName       = PropTag(0x3A16001F) // PtUnicode (PidTagCompanyName)
 	PrDepartmentName    = PropTag(0x3A18001F) // PtUnicode (PidTagDepartmentName)
+	PrOfficeLocation    = PropTag(0x3A19001F) // PtUnicode (PidTagOfficeLocation)
 	PrProfession        = PropTag(0x3A46001F) // PtUnicode (PidTagProfession)
 	PrBirthday          = PropTag(0x3A420040) // PtSysTime (PidTagBirthday)
 	PrBusinessHomePage  = PropTag(0x3A51001F) // PtUnicode (PidTagBusinessHomePage)

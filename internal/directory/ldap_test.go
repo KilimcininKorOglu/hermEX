@@ -2,6 +2,7 @@ package directory
 
 import (
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -141,6 +142,10 @@ func TestLDAPConfigRoundTrip(t *testing.T) {
 		BindPassword: "s3cret",
 		BaseDN:       "ou=people,dc=hermex,dc=test",
 		UsernameAttr: "userPrincipalName",
+		SyncFields: map[string]LDAPSyncField{
+			"displayName": {Enabled: true},
+			"title":       {Enabled: true, Attr: "jobTitle"},
+		},
 	}
 	if err := d.SetLDAPConfig(7, want); err != nil {
 		t.Fatal(err)
@@ -149,7 +154,7 @@ func TestLDAPConfigRoundTrip(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("GetLDAPConfig after set: ok %v, err %v", ok, err)
 	}
-	if got != want {
+	if !reflect.DeepEqual(got, want) {
 		t.Errorf("round-trip mismatch:\n got %+v\nwant %+v", got, want)
 	}
 
@@ -160,7 +165,27 @@ func TestLDAPConfigRoundTrip(t *testing.T) {
 	if err := d.SetLDAPConfig(7, want); err != nil {
 		t.Fatal(err)
 	}
-	if got, _, _ := d.GetLDAPConfig(7); got != want {
+	if got, _, _ := d.GetLDAPConfig(7); !reflect.DeepEqual(got, want) {
 		t.Errorf("replace mismatch:\n got %+v\nwant %+v", got, want)
+	}
+}
+
+// TestEnabledProfileSync resolves the enabled profile fields to their LDAP
+// attributes: a disabled field is dropped, an enabled field with no override uses
+// the standard attribute, and an explicit override wins.
+func TestEnabledProfileSync(t *testing.T) {
+	cfg := LDAPConfig{SyncFields: map[string]LDAPSyncField{
+		"displayName": {Enabled: true},                   // standard attribute
+		"title":       {Enabled: true, Attr: "jobTitle"}, // override
+		"department":  {Enabled: false, Attr: "ou"},      // disabled, dropped
+		"photo":       {Enabled: true},                   // standard thumbnailPhoto
+	}}
+	want := map[string]string{
+		"displayName": "displayName",
+		"title":       "jobTitle",
+		"photo":       "thumbnailPhoto",
+	}
+	if got := cfg.EnabledProfileSync(); !reflect.DeepEqual(got, want) {
+		t.Errorf("EnabledProfileSync = %v, want %v", got, want)
 	}
 }

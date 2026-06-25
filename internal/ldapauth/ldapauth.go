@@ -106,6 +106,9 @@ func loginAttr(cfg directory.LDAPConfig) string {
 type SyncedUser struct {
 	Username string
 	ExternID []byte
+	DN       string            // the entry's distinguished name, for group membership
+	Fields   map[string]string // enabled profile string fields, key (not attr) -> value
+	Photo    []byte            // the enabled binary portrait, nil when not synced/empty
 }
 
 // Sync lists the directory's accounts for downsync into the local directory: it
@@ -120,10 +123,14 @@ func (v *Verifier) Sync(cfg directory.LDAPConfig) ([]SyncedUser, error) {
 	defer c.Close()
 
 	attr := loginAttr(cfg)
+	profile := cfg.EnabledProfileSync() // field key -> LDAP attribute
+	want := []string{attr, "objectGUID", "entryUUID"}
+	for _, a := range profile {
+		want = append(want, a)
+	}
 	res, err := c.Search(ldap.NewSearchRequest(
 		cfg.BaseDN, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
-		fmt.Sprintf("(%s=*)", attr),
-		[]string{attr, "objectGUID", "entryUUID"}, nil))
+		fmt.Sprintf("(%s=*)", attr), want, nil))
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +147,22 @@ func (v *Verifier) Sync(cfg directory.LDAPConfig) ([]SyncedUser, error) {
 		if len(id) == 0 {
 			continue
 		}
-		out = append(out, SyncedUser{Username: login, ExternID: id})
+		su := SyncedUser{Username: login, ExternID: id, DN: e.DN}
+		for key, a := range profile {
+			if key == directory.LDAPPhotoFieldKey {
+				if raw := e.GetRawAttributeValue(a); len(raw) > 0 {
+					su.Photo = raw
+				}
+				continue
+			}
+			if val := e.GetAttributeValue(a); val != "" {
+				if su.Fields == nil {
+					su.Fields = make(map[string]string)
+				}
+				su.Fields[key] = val
+			}
+		}
+		out = append(out, su)
 	}
 	return out, nil
 }

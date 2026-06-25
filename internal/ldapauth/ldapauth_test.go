@@ -144,3 +144,44 @@ func TestSync(t *testing.T) {
 		t.Errorf("synced user = %+v, want alice@hermex.test with the objectGUID", users[0])
 	}
 }
+
+// TestSyncProfile proves an enabled profile field set is read off each entry: a
+// default-attribute field, an overridden one, and the binary photo, with the entry
+// DN carried for later group-membership resolution.
+func TestSyncProfile(t *testing.T) {
+	guid := []byte{0x09}
+	photo := []byte{0xFF, 0xD8, 0xFF} // JPEG magic bytes
+	e := dirEntry("uid=alice,dc=hermex,dc=test", "alice@hermex.test", guid)
+	e.Attributes = append(e.Attributes,
+		&ldap.EntryAttribute{Name: "displayName", Values: []string{"Alice Adams"}},
+		&ldap.EntryAttribute{Name: "jobTitle", Values: []string{"Engineer"}},
+		&ldap.EntryAttribute{Name: "thumbnailPhoto", ByteValues: [][]byte{photo}},
+	)
+	fc := &fakeConn{searchRes: &ldap.SearchResult{Entries: []*ldap.Entry{e}}}
+	pcfg := directory.LDAPConfig{
+		BaseDN:       "dc=hermex,dc=test",
+		UsernameAttr: "mail",
+		SyncFields: map[string]directory.LDAPSyncField{
+			"displayName": {Enabled: true},
+			"title":       {Enabled: true, Attr: "jobTitle"},
+			"photo":       {Enabled: true},
+		},
+	}
+	users, err := verifierWith(fc).Sync(pcfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(users) != 1 {
+		t.Fatalf("Sync returned %d users, want 1", len(users))
+	}
+	u := users[0]
+	if u.DN != "uid=alice,dc=hermex,dc=test" {
+		t.Errorf("DN = %q, want the entry DN", u.DN)
+	}
+	if u.Fields["displayName"] != "Alice Adams" || u.Fields["title"] != "Engineer" {
+		t.Errorf("Fields = %v, want displayName=Alice Adams, title=Engineer", u.Fields)
+	}
+	if !bytes.Equal(u.Photo, photo) {
+		t.Errorf("Photo = %v, want the thumbnailPhoto bytes", u.Photo)
+	}
+}
