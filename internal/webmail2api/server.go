@@ -86,6 +86,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/mail/labels", s.handleLabels)
 	mux.HandleFunc("POST /api/v1/mail/mark-all-read", s.handleMarkAllRead)
 	mux.HandleFunc("GET /api/v1/mail/source", s.handleSource)
+	mux.HandleFunc("GET /api/v1/mail/headers", s.handleHeaders)
 	mux.HandleFunc("GET /api/v1/mail/attachments-zip", s.handleAttachmentsZip)
 	mux.HandleFunc("POST /api/v1/mail/import", s.handleImport)
 

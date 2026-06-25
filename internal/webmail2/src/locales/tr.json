@@ -164,6 +164,7 @@
     "print": "Yazdır",
     "downloadAll": "Tümünü indir",
     "viewSource": "Kaynağı görüntüle",
+    "viewHeaders": "İnternet başlıklarını görüntüle",
     "smimeEncrypted": "Şifreli",
     "smimeDecryptFailed": "Bu şifreli mesaj sertifikanla çözülemedi.",
     "smimeLockedBody": "Bu mesaj şifreli. Ayarlar'dan S/MIME sertifikanın kilidini aç, sonra okumak için yeniden aç.",

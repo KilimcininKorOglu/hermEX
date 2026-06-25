@@ -2,6 +2,7 @@ package webmail2api
 
 import (
 	"archive/zip"
+	"bytes"
 	"encoding/base64"
 	"net/http"
 	"regexp"
@@ -183,6 +184,38 @@ func (s *Server) handleSource(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	_, _ = w.Write(raw)
+}
+
+// handleHeaders serves only a message's internet (RFC822) header block (the bytes
+// up to the first blank line) as inline text/plain, for a "view internet headers"
+// action distinct from the full source (own mailbox only, like handleSource).
+func (s *Server) handleHeaders(w http.ResponseWriter, r *http.Request) {
+	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"))
+	if !ok {
+		return
+	}
+	defer st.Close()
+	raw, err := st.GetMessageRaw(fid, uid)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	_, _ = w.Write(headerBlock(raw))
+}
+
+// headerBlock returns the RFC822 header section of raw: everything up to and
+// including the CRLF (or LF) that ends the last header line, stopping at the blank
+// line that separates headers from the body. A message with no blank line is all
+// headers.
+func headerBlock(raw []byte) []byte {
+	if i := bytes.Index(raw, []byte("\r\n\r\n")); i >= 0 {
+		return raw[:i+2]
+	}
+	if i := bytes.Index(raw, []byte("\n\n")); i >= 0 {
+		return raw[:i+1]
+	}
+	return raw
 }
 
 // handleAttachmentsZip streams every attachment of a message as a single .zip

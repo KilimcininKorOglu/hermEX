@@ -164,6 +164,7 @@
     "print": "Print",
     "downloadAll": "Download all",
     "viewSource": "View source",
+    "viewHeaders": "View internet headers",
     "smimeEncrypted": "Encrypted",
     "smimeDecryptFailed": "This encrypted message could not be decrypted with your certificate.",
     "smimeLockedBody": "This message is encrypted. Unlock your S/MIME certificate in Settings, then reopen it to read.",

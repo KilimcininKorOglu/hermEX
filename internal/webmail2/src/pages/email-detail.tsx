@@ -20,6 +20,7 @@ import {
   Download,
   Printer,
   Code,
+  FileText,
   ShieldCheck,
   Undo2,
   RotateCcw,
@@ -667,6 +668,14 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                 title={t("emailDetail.viewSource")}
               >
                 <Code className="h-5 w-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => window.open(`/api/v1/mail/headers?id=${encodeURIComponent(email.id)}`, "_blank")}
+                title={t("emailDetail.viewHeaders")}
+              >
+                <FileText className="h-5 w-5" />
               </Button>
               <Button
                 variant="ghost"
