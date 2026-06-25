@@ -237,6 +237,10 @@ func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			e := icalToEvent(ics, o.ID)
+			// The SPA addresses an event by its message id (delete and update parse
+			// it back to a store id); the iCalendar UID is the meeting identity, not
+			// a store handle, so the message id - not icalToEvent's UID - is surfaced.
+			e.UID = strconv.FormatInt(o.ID, 10)
 			e.CalendarID = cal.ID
 			events = append(events, e)
 		}
