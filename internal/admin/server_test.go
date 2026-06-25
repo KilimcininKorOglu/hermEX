@@ -401,6 +401,10 @@ func (f *fakeDir) UpsertLDAPUser(username string, _ []byte, _ string) (bool, err
 	f.upsertedUsers = append(f.upsertedUsers, username)
 	return f.upsertNew, nil
 }
+func (f *fakeDir) ApplyLDAPProfile(_ string, _ map[string]string) (bool, error) { return true, nil }
+func (f *fakeDir) UpsertLDAPGroup(_ string, _ []byte, _ string, _ []string) (bool, error) {
+	return false, nil
+}
 func (f *fakeDir) CreateTask(taskType, params, createdBy string) (int64, error) {
 	id := int64(len(f.tasks) + 1)
 	f.tasks = append(f.tasks, directory.TaskInfo{

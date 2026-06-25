@@ -12,7 +12,6 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -22,6 +21,7 @@ import (
 	"hermex/internal/config"
 	"hermex/internal/directory"
 	"hermex/internal/ldapauth"
+	"hermex/internal/ldapsync"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/objectstore"
@@ -176,96 +176,12 @@ func main() {
 		if !ok {
 			log.Fatalf("hermex-admin: organization %d has no LDAP configuration", orgID)
 		}
-		users, err := ldapauth.New().Sync(lcfg)
+		summary, err := ldapsync.Run(lcfg, ldapauth.New(), dir, cfg.MaildirFor,
+			func(f string, a ...any) { log.Printf("hermex-admin: "+f, a...) })
 		if err != nil {
 			log.Fatalf("hermex-admin: ldap sync: %v", err)
 		}
-		var created, updated int
-		dnToEmail := make(map[string]string, len(users)) // entry DN -> login, for group resolution
-		for _, u := range users {
-			// A directory entry whose mail domain is not provisioned locally is
-			// skipped (logged) rather than aborting the whole sync.
-			maildir := cfg.MaildirFor(u.Username)
-			isNew, err := dir.UpsertLDAPUser(u.Username, u.ExternID, maildir)
-			if err != nil {
-				log.Printf("hermex-admin: skip %s: %v", u.Username, err)
-				continue
-			}
-			if isNew {
-				created++
-			} else {
-				updated++
-			}
-			if u.DN != "" {
-				dnToEmail[strings.ToLower(u.DN)] = u.Username
-			}
-			// Profile string fields land in the directory; the portrait lands in the
-			// mailbox store (after the upsert, so the maildir exists). Either failing
-			// is logged, not fatal: the account itself is already synced.
-			if len(u.Fields) > 0 {
-				if _, err := dir.ApplyLDAPProfile(u.Username, u.Fields); err != nil {
-					log.Printf("hermex-admin: %s profile: %v", u.Username, err)
-				}
-			}
-			if len(u.Photo) > 0 && maildir != "" {
-				st, err := objectstore.Open(maildir)
-				if err != nil {
-					log.Printf("hermex-admin: %s photo: %v", u.Username, err)
-				} else {
-					if err := st.SetUserPhoto(u.Photo); err != nil {
-						log.Printf("hermex-admin: %s photo: %v", u.Username, err)
-					}
-					st.Close()
-				}
-			}
-		}
-		fmt.Printf("ldap-sync org %d: %d created, %d updated (of %d directory entries)\n",
-			orgID, created, updated, len(users))
-		// Group downsync into LDAP-mastered distribution lists, when enabled. A
-		// member or owner DN that is not a synced user is skipped (logged), and a
-		// mastered list no longer present in the directory is pruned.
-		if lcfg.SyncGroups {
-			groups, err := ldapauth.New().SyncGroups(lcfg)
-			if err != nil {
-				log.Fatalf("hermex-admin: ldap group sync: %v", err)
-			}
-			synced := make(map[string]bool, len(groups))
-			var gc, gu int
-			for _, g := range groups {
-				owner := dnToEmail[strings.ToLower(g.OwnerDN)] // "" if none/unresolved
-				members := make([]string, 0, len(g.MemberDNs))
-				for _, mdn := range g.MemberDNs {
-					if email := dnToEmail[strings.ToLower(mdn)]; email != "" {
-						members = append(members, email)
-					} else {
-						log.Printf("hermex-admin: group %s: member %q is not a synced user, skipped", g.Mail, mdn)
-					}
-				}
-				isNew, err := dir.UpsertLDAPGroup(g.Mail, []byte(strings.ToLower(g.Mail)), owner, members)
-				if err != nil {
-					log.Printf("hermex-admin: skip group %s: %v", g.Mail, err)
-					continue
-				}
-				synced[strings.ToLower(g.Mail)] = true
-				if isNew {
-					gc++
-				} else {
-					gu++
-				}
-			}
-			var pruned int
-			if lists, err := dir.ListMLists(); err == nil {
-				for _, l := range lists {
-					if l.LDAPMastered && !synced[strings.ToLower(l.Listname)] {
-						if _, err := dir.DeleteMList(l.Listname); err == nil {
-							pruned++
-						}
-					}
-				}
-			}
-			fmt.Printf("ldap-sync org %d groups: %d created, %d updated, %d pruned (of %d groups)\n",
-				orgID, gc, gu, pruned, len(groups))
-		}
+		fmt.Printf("ldap-sync org %d: %s\n", orgID, summary)
 	case "grant-admin":
 		if len(args) < 3 || len(args) > 4 {
 			usage()

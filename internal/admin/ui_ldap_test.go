@@ -14,12 +14,16 @@ import (
 
 // fakeSyncer is a scripted LDAPSyncer for the Directory Sync tests.
 type fakeSyncer struct {
-	users []ldapauth.SyncedUser
-	err   error
+	users  []ldapauth.SyncedUser
+	groups []ldapauth.SyncedGroup
+	err    error
 }
 
 func (f *fakeSyncer) Sync(directory.LDAPConfig) ([]ldapauth.SyncedUser, error) {
 	return f.users, f.err
+}
+func (f *fakeSyncer) SyncGroups(directory.LDAPConfig) ([]ldapauth.SyncedGroup, error) {
+	return f.groups, nil
 }
 
 func adminServerWithSyncer(t *testing.T, d Directory, syncer LDAPSyncer) *httptest.Server {

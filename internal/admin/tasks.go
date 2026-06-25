@@ -3,11 +3,11 @@ package admin
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log"
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/ldapsync"
 )
 
 // performLDAPSync runs the directory downsync for the default org and returns a
@@ -22,23 +22,8 @@ func (s *Server) performLDAPSync() (string, error) {
 	if err != nil || !ok {
 		return "", errors.New("no directory is configured")
 	}
-	users, err := s.syncer.Sync(cfg)
-	if err != nil {
-		return "", err
-	}
-	var created, updated int
-	for _, u := range users {
-		isNew, err := s.dir.UpsertLDAPUser(u.Username, u.ExternID, s.paths.MaildirFor(u.Username))
-		if err != nil {
-			continue
-		}
-		if isNew {
-			created++
-		} else {
-			updated++
-		}
-	}
-	return fmt.Sprintf("Synced %d directory entries: %d created, %d updated.", len(users), created, updated), nil
+	return ldapsync.Run(cfg, s.syncer, s.dir, s.paths.MaildirFor,
+		func(f string, a ...any) { log.Printf("ldapsync: "+f, a...) })
 }
 
 // runTask executes one claimed task by type, returning its terminal status and a

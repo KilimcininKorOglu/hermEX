@@ -80,6 +80,8 @@ type Directory interface {
 	GetLDAPConfig(orgID int64) (directory.LDAPConfig, bool, error)
 	SetLDAPConfig(orgID int64, cfg directory.LDAPConfig) error
 	UpsertLDAPUser(username string, externid []byte, maildir string) (created bool, err error)
+	ApplyLDAPProfile(username string, values map[string]string) (bool, error)
+	UpsertLDAPGroup(listname string, externid []byte, owner string, members []string) (created bool, err error)
 	GetDefaultSyncPolicy() (easpolicy.Policy, error)
 	SetDefaultSyncPolicy(p easpolicy.Policy) error
 	GetDomainSyncPolicy(domain string) (easpolicy.Policy, error)
@@ -149,6 +151,7 @@ type Directory interface {
 // concrete *ldapauth.Verifier satisfies it.
 type LDAPSyncer interface {
 	Sync(cfg directory.LDAPConfig) ([]ldapauth.SyncedUser, error)
+	SyncGroups(cfg directory.LDAPConfig) ([]ldapauth.SyncedGroup, error)
 }
 
 // Paths derives a new domain's homedir and a new user's maildir from the
