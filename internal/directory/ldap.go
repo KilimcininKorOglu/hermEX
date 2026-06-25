@@ -37,6 +37,12 @@ type LDAPConfig struct {
 	// pulled from LDAP and the attribute each reads from (keyed by the field keys in
 	// LDAPProfileFields). Empty means only the account's existence and login sync.
 	SyncFields map[string]LDAPSyncField
+	// SyncGroups enables syncing LDAP/AD groups into distribution lists. GroupBaseDN
+	// narrows the group search (empty = BaseDN); GroupFilter is an extra LDAP filter
+	// ANDed with the mail-bearing-group match (empty = none).
+	SyncGroups  bool
+	GroupBaseDN string
+	GroupFilter string
 }
 
 // LDAPSyncField is one profile attribute's per-org downsync setting: whether it is
@@ -47,11 +53,13 @@ type LDAPSyncField struct {
 	Enabled bool   `json:"enabled"`
 }
 
-// ldapSyncConfig is the JSON document persisted in ldap_config.sync_config. The
-// group-to-list settings are added by the group-sync step; absent keys decode to
-// their zero value, so older rows stay valid.
+// ldapSyncConfig is the JSON document persisted in ldap_config.sync_config; absent
+// keys decode to their zero value, so older rows stay valid.
 type ldapSyncConfig struct {
-	Fields map[string]LDAPSyncField `json:"fields,omitempty"`
+	Fields      map[string]LDAPSyncField `json:"fields,omitempty"`
+	SyncGroups  bool                     `json:"syncGroups,omitempty"`
+	GroupBaseDN string                   `json:"groupBaseDN,omitempty"`
+	GroupFilter string                   `json:"groupFilter,omitempty"`
 }
 
 // ldapProfileField is one syncable AD/LDAP profile attribute and where its value
@@ -155,6 +163,9 @@ func (d *SQLDirectory) GetLDAPConfig(orgID int64) (cfg LDAPConfig, ok bool, err 
 			return LDAPConfig{}, false, fmt.Errorf("directory: malformed ldap sync_config: %w", err)
 		}
 		cfg.SyncFields = sc.Fields
+		cfg.SyncGroups = sc.SyncGroups
+		cfg.GroupBaseDN = sc.GroupBaseDN
+		cfg.GroupFilter = sc.GroupFilter
 	}
 	return cfg, true, nil
 }
@@ -209,8 +220,9 @@ func (d *SQLDirectory) SetLDAPConfig(orgID int64, cfg LDAPConfig) error {
 		startTLS = 1
 	}
 	var syncJSON any
-	if len(cfg.SyncFields) > 0 {
-		b, err := json.Marshal(ldapSyncConfig{Fields: cfg.SyncFields})
+	sc := ldapSyncConfig{Fields: cfg.SyncFields, SyncGroups: cfg.SyncGroups, GroupBaseDN: cfg.GroupBaseDN, GroupFilter: cfg.GroupFilter}
+	if len(sc.Fields) > 0 || sc.SyncGroups || sc.GroupBaseDN != "" || sc.GroupFilter != "" {
+		b, err := json.Marshal(sc)
 		if err != nil {
 			return err
 		}

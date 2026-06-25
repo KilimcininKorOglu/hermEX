@@ -146,6 +146,9 @@ func TestLDAPConfigRoundTrip(t *testing.T) {
 			"displayName": {Enabled: true},
 			"title":       {Enabled: true, Attr: "jobTitle"},
 		},
+		SyncGroups:  true,
+		GroupBaseDN: "ou=groups,dc=hermex,dc=test",
+		GroupFilter: "(&(objectClass=group)(mail=*))",
 	}
 	if err := d.SetLDAPConfig(7, want); err != nil {
 		t.Fatal(err)

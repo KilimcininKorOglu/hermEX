@@ -185,3 +185,29 @@ func TestSyncProfile(t *testing.T) {
 		t.Errorf("Photo = %v, want the thumbnailPhoto bytes", u.Photo)
 	}
 }
+
+// TestSyncGroups proves group sync returns each mail-bearing group's address, owner
+// DN, and member DNs, and is a no-op (no connection) when disabled.
+func TestSyncGroups(t *testing.T) {
+	g := &ldap.Entry{DN: "cn=eng,dc=hermex,dc=test", Attributes: []*ldap.EntryAttribute{
+		{Name: "mail", Values: []string{"eng@hermex.test"}},
+		{Name: "managedBy", Values: []string{"uid=alice,dc=hermex,dc=test"}},
+		{Name: "member", Values: []string{"uid=bob,dc=hermex,dc=test", "uid=carol,dc=hermex,dc=test"}},
+	}}
+	fc := &fakeConn{searchRes: &ldap.SearchResult{Entries: []*ldap.Entry{g}}}
+	cfg := directory.LDAPConfig{BaseDN: "dc=hermex,dc=test", UsernameAttr: "mail", SyncGroups: true}
+	groups, err := verifierWith(fc).SyncGroups(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 {
+		t.Fatalf("SyncGroups returned %d, want 1", len(groups))
+	}
+	if groups[0].Mail != "eng@hermex.test" || groups[0].OwnerDN != "uid=alice,dc=hermex,dc=test" || len(groups[0].MemberDNs) != 2 {
+		t.Errorf("group = %+v, want eng with owner alice and 2 members", groups[0])
+	}
+
+	if got, _ := verifierWith(fc).SyncGroups(directory.LDAPConfig{}); got != nil {
+		t.Errorf("SyncGroups disabled = %v, want nil (no-op)", got)
+	}
+}

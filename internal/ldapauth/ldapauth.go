@@ -9,6 +9,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/go-ldap/ldap/v3"
 
@@ -163,6 +164,59 @@ func (v *Verifier) Sync(cfg directory.LDAPConfig) ([]SyncedUser, error) {
 			}
 		}
 		out = append(out, su)
+	}
+	return out, nil
+}
+
+// SyncedGroup is one mail-bearing group discovered in the directory: its address,
+// the owner's DN (managedBy), and its members' DNs. The owner and member DNs are
+// resolved to local addresses by the caller.
+type SyncedGroup struct {
+	Mail      string
+	OwnerDN   string
+	MemberDNs []string
+}
+
+// SyncGroups lists the directory's groups for downsync into local distribution
+// lists: it searches under the group base (or the login base) with the configured
+// filter (default: mail-bearing AD groups) and returns each group's address, owner
+// DN, and member DNs. The owner and member DNs are resolved by the caller. Returns
+// nil when group sync is disabled.
+func (v *Verifier) SyncGroups(cfg directory.LDAPConfig) ([]SyncedGroup, error) {
+	if !cfg.SyncGroups {
+		return nil, nil
+	}
+	c, err := v.connect(cfg)
+	if err != nil {
+		return nil, err
+	}
+	defer c.Close()
+
+	base := cfg.GroupBaseDN
+	if base == "" {
+		base = cfg.BaseDN
+	}
+	filter := strings.TrimSpace(cfg.GroupFilter)
+	if filter == "" {
+		filter = "(&(objectClass=group)(mail=*))"
+	}
+	res, err := c.Search(ldap.NewSearchRequest(
+		base, ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
+		filter, []string{"mail", "managedBy", "member"}, nil))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SyncedGroup, 0, len(res.Entries))
+	for _, e := range res.Entries {
+		mail := e.GetAttributeValue("mail")
+		if mail == "" {
+			continue // a group with no address cannot become a distribution list
+		}
+		out = append(out, SyncedGroup{
+			Mail:      mail,
+			OwnerDN:   e.GetAttributeValue("managedBy"),
+			MemberDNs: e.GetAttributeValues("member"),
+		})
 	}
 	return out, nil
 }
