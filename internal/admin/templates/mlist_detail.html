@@ -6,6 +6,14 @@
 <p><a href="/admin/ui/mlists">&larr; Back to mailing lists</a></p>
 <p>Type: {{.List.TypeLabel}} &middot; Who may post: {{.List.PrivLabel}}</p>
 
+<h2>Owner</h2>
+<form class="owner-form" hx-put="/admin/ui/mlists/{{.List.Listname}}/owner" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<p>The list owner (managedBy). Leave empty for none; Outlook shows this as the group owner.</p>
+<input type="email" name="owner" value="{{.Owner}}" placeholder="owner@example.com">
+<button type="submit">Save owner</button>
+</form>
+
 <h2>Members</h2>
 <form class="members-form" hx-put="/admin/ui/mlists/{{.List.Listname}}/members" hx-target="#user-status" hx-swap="outerHTML"
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>

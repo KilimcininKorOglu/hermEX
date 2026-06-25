@@ -56,6 +56,27 @@ func TestUIMListMembers(t *testing.T) {
 	}
 }
 
+// TestUIMListOwner proves setting a list's owner from the management form reaches the
+// directory (the Exchange managedBy attribute).
+func TestUIMListOwner(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		mlists: []directory.MListInfo{{Listname: "team@hermex.test"}},
+	}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPUT(t, ts, "/admin/ui/mlists/team@hermex.test/owner", session, csrf,
+		url.Values{"owner": {"alice@hermex.test"}})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("set owner status %d, want 200", resp.StatusCode)
+	}
+	if d.setOwnerUser != "team@hermex.test" || d.setOwner != "alice@hermex.test" {
+		t.Errorf("set owner for %q = %q, want team@hermex.test alice@hermex.test", d.setOwnerUser, d.setOwner)
+	}
+}
+
 // TestUIDeleteMList proves deletion reaches the directory and redirects htmx back
 // to the lists page.
 func TestUIDeleteMList(t *testing.T) {

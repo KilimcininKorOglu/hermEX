@@ -121,6 +121,7 @@ func (s *Server) handleUIMListDetail(w http.ResponseWriter, r *http.Request) {
 		"List":       mlistViewOf(*info),
 		"Members":    strings.Join(members, "\n"),
 		"Specifieds": strings.Join(specifieds, "\n"),
+		"Owner":      info.Owner,
 	})
 }
 
@@ -142,6 +143,16 @@ func (s *Server) handleUIMListSpecifieds(w http.ResponseWriter, r *http.Request)
 	}
 	found, err := s.dir.SetSpecifieds(r.PathValue("addr"), strings.Fields(r.PostFormValue("specifieds")))
 	s.render(w, "user-status", mlistStatus(found, err, "permitted senders"))
+}
+
+// handleUIMListOwner sets or clears a list's owner (the Exchange managedBy
+// attribute) from the form and returns the refreshed status panel.
+func (s *Server) handleUIMListOwner(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	found, err := s.dir.SetMListOwner(r.PathValue("addr"), r.PostFormValue("owner"))
+	s.render(w, "user-status", mlistStatus(found, err, "owner"))
 }
 
 // handleUIDeleteMList deletes a distribution list and redirects htmx back to the

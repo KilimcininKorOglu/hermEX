@@ -168,6 +168,8 @@ type fakeDir struct {
 	mlistSpecifieds    []string
 	setSpecifiedsUser  string
 	setSpecifieds      []string
+	setOwnerUser       string
+	setOwner           string
 	mlistMissing       bool
 
 	contacts             []directory.ContactInfo
@@ -747,6 +749,13 @@ func (f *fakeDir) SetSpecifieds(listname string, senders []string) (bool, error)
 		return false, f.createErr
 	}
 	f.setSpecifiedsUser, f.setSpecifieds = listname, senders
+	return !f.mlistMissing, nil
+}
+func (f *fakeDir) SetMListOwner(listname, owner string) (bool, error) {
+	if f.createErr != nil {
+		return false, f.createErr
+	}
+	f.setOwnerUser, f.setOwner = listname, owner
 	return !f.mlistMissing, nil
 }
 func (f *fakeDir) ListContacts() ([]directory.ContactInfo, error) { return f.contacts, nil }
