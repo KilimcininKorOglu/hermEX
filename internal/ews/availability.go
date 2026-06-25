@@ -75,10 +75,13 @@ type freeBusyView struct {
 }
 
 type calendarEventArray struct {
-	Events []calendarEvent `xml:"CalendarEvent"`
+	Events []CalendarEvent `xml:"CalendarEvent"`
 }
 
-type calendarEvent struct {
+// CalendarEvent is one busy block in a free/busy view; StartTime and EndTime are
+// RFC3339 UTC. Exported so webmail2 can reuse CalendarFreeBusy without duplicating
+// the calendar read.
+type CalendarEvent struct {
 	StartTime string                `xml:"StartTime"`
 	EndTime   string                `xml:"EndTime"`
 	BusyType  string                `xml:"BusyType"`
@@ -186,7 +189,7 @@ func (s *Server) freeBusyForTarget(sess *session, email string, windowStart, win
 		detailed = perm&freeBusyDetailPerms != 0
 	}
 
-	events, err := calendarFreeBusy(st, windowStart, windowEnd, detailed)
+	events, err := CalendarFreeBusy(st, windowStart, windowEnd, detailed)
 	if err != nil {
 		return errorFreeBusy("ErrorFreeBusyGenerationFailed")
 	}
@@ -206,12 +209,12 @@ func (s *Server) freeBusyForTarget(sess *session, email string, windowStart, win
 	}
 }
 
-// calendarFreeBusy enumerates the target's calendar for appointments overlapping
+// CalendarFreeBusy enumerates the target's calendar for appointments overlapping
 // the window. A recurring series master is skipped: its stored start/end describe
 // only the first instance, so emitting it would place a misleading single block at
 // the series origin — recurrence expansion is a documented v1 gap. Detail fields
 // are attached only when the caller is entitled to the detailed view.
-func calendarFreeBusy(st *objectstore.Store, windowStart, windowEnd time.Time, detailed bool) ([]calendarEvent, error) {
+func CalendarFreeBusy(st *objectstore.Store, windowStart, windowEnd time.Time, detailed bool) ([]CalendarEvent, error) {
 	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{
 		mapi.NameAppointmentStartWhole,
 		mapi.NameAppointmentEndWhole,
@@ -242,7 +245,7 @@ func calendarFreeBusy(st *objectstore.Store, windowStart, windowEnd time.Time, d
 	if err != nil {
 		return nil, err
 	}
-	var events []calendarEvent
+	var events []CalendarEvent
 	for _, obj := range objs {
 		pv, err := st.GetMessageProperties(obj.ID, startTag, endTag, busyTag, recurTag, locTag, reminderTag, mapi.PrSubject)
 		if err != nil {
@@ -261,7 +264,7 @@ func calendarFreeBusy(st *objectstore.Store, windowStart, windowEnd time.Time, d
 		if !start.Before(windowEnd) || !end.After(windowStart) {
 			continue
 		}
-		ev := calendarEvent{
+		ev := CalendarEvent{
 			StartTime: start.UTC().Format(time.RFC3339),
 			EndTime:   end.UTC().Format(time.RFC3339),
 			BusyType:  busyTypeName(longVal(pv, busyTag)),
