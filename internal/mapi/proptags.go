@@ -272,6 +272,10 @@ const (
 	// seating capacity, what Outlook shows when booking a room or equipment. The NSPI
 	// layer serves it as a PtLong from the directory's per-room capacity.
 	PrEmsAbRoomCapacity = PropTag(0x08070003) // PtLong
+	// PrEmsAbOwner (PidTagAddressBookOwner) is the EntryID of a distribution list's
+	// owner (the managedBy attribute), what Outlook shows as the group's owner. The
+	// NSPI layer serves the owner's permanent address-book EntryID.
+	PrEmsAbOwner = PropTag(0x800C0102) // PtBinary
 	// PrEmsAbThumbnailPhoto (PidTagThumbnailPhoto) is the address-book object's
 	// portrait as raw image bytes — what Outlook and OWA show for a GAL entry. The
 	// NSPI layer serves it from the mailbox's cross-protocol user-photo property.

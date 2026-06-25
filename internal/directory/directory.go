@@ -158,8 +158,12 @@ type GALEntry struct {
 	// layer renders the right address-book object type and EntryID flavor from it.
 	DisplayType int
 	// Capacity is a resource mailbox's seating capacity (rooms/equipment), 0 when
-	// unset or not applicable. Only ListRooms populates it; GAL search leaves it 0.
+	// unset or not applicable. ListRooms and the GAL search both populate it.
 	Capacity int
+	// Owner is a distribution list's owner address (the managedBy attribute), empty
+	// for non-lists or an ownerless list. The GAL search populates it; the NSPI layer
+	// serves the owner's EntryID as PR_EMS_AB_OWNER.
+	Owner string
 	// HiddenFrom is the address-book hide mask (the PtLong form of PR_ATTR_HIDDEN):
 	// a directory holds the raw bits and the NSPI layer applies them per surface.
 	// Zero means visible everywhere. The static directory never hides.

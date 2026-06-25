@@ -109,6 +109,7 @@ type galUser struct {
 	dt        uint32
 	dispType  int
 	capacity  int    // resource-mailbox seating capacity (rooms/equipment), 0 if unset
+	owner     string // a distribution list's owner address (managedBy), empty if none
 	storePath string // object-store dir, to serve the portrait; empty if no mailbox
 }
 
@@ -159,7 +160,7 @@ func (s *Server) snapshot() gal {
 	})
 	users := make([]galUser, len(entries))
 	for i, e := range entries {
-		users[i] = galUser{mid: midBase + uint32(i), display: e.DisplayName, smtp: e.Address, hidden: e.HiddenFrom, dt: abDisplayType(e.DisplayType), dispType: e.DisplayType, capacity: e.Capacity, storePath: e.StorePath}
+		users[i] = galUser{mid: midBase + uint32(i), display: e.DisplayName, smtp: e.Address, hidden: e.HiddenFrom, dt: abDisplayType(e.DisplayType), dispType: e.DisplayType, capacity: e.Capacity, owner: e.Owner, storePath: e.StorePath}
 	}
 	return gal{users: users}
 }
@@ -441,6 +442,11 @@ func galUserProps(u galUser) mapi.PropertyValues {
 	// shows it when booking; PR_EMS_AB_ROOM_CAPACITY is a PtLong.
 	if u.capacity > 0 {
 		props = append(props, mapi.TaggedPropVal{Tag: mapi.PrEmsAbRoomCapacity, Value: int32(u.capacity)})
+	}
+	// A distribution list advertises its owner's EntryID as PR_EMS_AB_OWNER (the
+	// managedBy attribute), what Outlook shows as the group owner.
+	if u.dt == dtDistlist && u.owner != "" {
+		props = append(props, mapi.TaggedPropVal{Tag: mapi.PrEmsAbOwner, Value: permanentEntryID(dtMailuser, userDN(u.owner))})
 	}
 	return props
 }

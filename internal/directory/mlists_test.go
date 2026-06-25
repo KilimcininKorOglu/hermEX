@@ -211,6 +211,10 @@ func TestMListOwner(t *testing.T) {
 	if err != nil || len(lists) != 1 || lists[0].Owner != "alice@hermex.test" {
 		t.Fatalf("ListMLists = %+v, %v; want crew owned by alice", lists, err)
 	}
+	// The GAL search that feeds the NSPI address book carries the owner too.
+	if gal, err := d.SearchGAL("crew", 20); err != nil || len(gal) != 1 || gal[0].Owner != "alice@hermex.test" {
+		t.Fatalf("SearchGAL owner = %+v, %v; want crew owned by alice", gal, err)
+	}
 	if _, err := d.SetMListOwner("crew@hermex.test", ""); err != nil {
 		t.Fatal(err)
 	}
