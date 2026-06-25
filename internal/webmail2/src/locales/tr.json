@@ -459,6 +459,17 @@
       "removeAria": "{{sender}} kaldır",
       "saveFailed": "Güvenli göndericiler kaydedilemedi"
     },
+    "recipientRules": {
+      "title": "İzin ve engelleme listesi",
+      "description": "Bir göndericiyi her zaman gelen kutusunda tut ya da her zaman Önemsiz'e gönder",
+      "empty": "Henüz izin veya engelleme kuralı yok.",
+      "placeholder": "adres@ornek.com veya ornek.com",
+      "allow": "İzin ver",
+      "block": "Engelle",
+      "actionAria": "Kural eylemi",
+      "removeAria": "{{pattern}} kuralını kaldır",
+      "saveFailed": "Kural kaydedilemedi"
+    },
     "delegates": {
       "title": "Temsilciler",
       "description": "Diğer kişilerin posta kutunuza erişmesine ve sizin adınıza göndermesine izin verin",

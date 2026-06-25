@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/dialog"
 import { toast } from "sonner"
 import api from "@/utils/api"
-import type { VacationAutoReply, ClientSession, Delegation, Category, SignatureEntry, TemplateEntry } from "@/utils/api"
+import type { VacationAutoReply, ClientSession, Delegation, Category, RecipientRule, SignatureEntry, TemplateEntry } from "@/utils/api"
 import * as smimeStore from "@/utils/smime"
 import type { CertInfo } from "@/utils/smime"
 import { detectTimeZone, listTimeZones } from "@/utils/timezone"
@@ -662,6 +662,47 @@ export function SettingsPage() {
   }
 
   const removeSafeSender = (addr: string) => void saveSafeSenders(safeSenders.filter((s) => s !== addr))
+
+  // Recipient rules: personal allow/block rules the MTA applies at delivery.
+  const [recipientRules, setRecipientRules] = useState<RecipientRule[]>([])
+  const [ruleInput, setRuleInput] = useState("")
+  const [ruleAction, setRuleAction] = useState<"allow" | "block">("allow")
+  const [ruleBusy, setRuleBusy] = useState(false)
+
+  useEffect(() => {
+    let cancelled = false
+    api.getRecipientRules()
+      .then((res) => { if (!cancelled) setRecipientRules(res.rules ?? []) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [])
+
+  const addRecipientRule = async () => {
+    const pattern = ruleInput.trim().toLowerCase()
+    if (!pattern) return
+    setRuleBusy(true)
+    try {
+      await api.setRecipientRule(pattern, ruleAction)
+      const res = await api.getRecipientRules()
+      setRecipientRules(res.rules ?? [])
+      setRuleInput("")
+    } catch {
+      toast.error(t("settings.recipientRules.saveFailed"))
+    } finally {
+      setRuleBusy(false)
+    }
+  }
+
+  const removeRecipientRule = async (pattern: string) => {
+    const prev = recipientRules
+    setRecipientRules(recipientRules.filter((r) => r.pattern !== pattern))
+    try {
+      await api.deleteRecipientRule(pattern)
+    } catch {
+      setRecipientRules(prev)
+      toast.error(t("settings.recipientRules.saveFailed"))
+    }
+  }
 
   // Delegates: people the user grants access to their own mailbox.
   const [delegations, setDelegations] = useState<Delegation[]>([])
@@ -1405,6 +1446,67 @@ export function SettingsPage() {
               placeholder={t("settings.safeSenders.placeholder")}
             />
             <Button onClick={addSafeSender} disabled={safeBusy || !safeInput.trim()}>
+              <Plus className="mr-1 h-4 w-4" />
+              {t("common.add")}
+            </Button>
+          </div>
+        </div>
+      </SettingSection>
+
+      {/* Recipient rules */}
+      <SettingSection
+        icon={Mail}
+        title={t("settings.recipientRules.title")}
+        description={t("settings.recipientRules.description")}
+      >
+        <div className="space-y-3">
+          {recipientRules.length === 0 ? (
+            <p className="text-sm text-muted-foreground">{t("settings.recipientRules.empty")}</p>
+          ) : (
+            <div className="space-y-2">
+              {recipientRules.map((r) => (
+                <div key={r.pattern} className="flex items-center justify-between rounded-lg border p-2 pl-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span
+                      className={
+                        "rounded-full px-2 py-0.5 text-xs font-medium " +
+                        (r.action === "block"
+                          ? "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
+                          : "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300")
+                      }
+                    >
+                      {r.action === "block" ? t("settings.recipientRules.block") : t("settings.recipientRules.allow")}
+                    </span>
+                    <span className="truncate text-sm">{r.pattern}</span>
+                  </div>
+                  <button
+                    onClick={() => void removeRecipientRule(r.pattern)}
+                    aria-label={t("settings.recipientRules.removeAria", { pattern: r.pattern })}
+                    className="opacity-60 hover:opacity-100"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <select
+              value={ruleAction}
+              onChange={(e) => setRuleAction(e.target.value as "allow" | "block")}
+              className="h-9 rounded-md border bg-background px-2 text-sm"
+              aria-label={t("settings.recipientRules.actionAria")}
+            >
+              <option value="allow">{t("settings.recipientRules.allow")}</option>
+              <option value="block">{t("settings.recipientRules.block")}</option>
+            </select>
+            <Input
+              value={ruleInput}
+              onChange={(e) => setRuleInput(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void addRecipientRule() }}
+              placeholder={t("settings.recipientRules.placeholder")}
+            />
+            <Button onClick={() => void addRecipientRule()} disabled={ruleBusy || !ruleInput.trim()}>
               <Plus className="mr-1 h-4 w-4" />
               {t("common.add")}
             </Button>

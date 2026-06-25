@@ -459,6 +459,17 @@
       "removeAria": "Remove {{sender}}",
       "saveFailed": "Failed to save safe senders"
     },
+    "recipientRules": {
+      "title": "Allow and block list",
+      "description": "Always keep a sender in your inbox, or always send them to Junk",
+      "empty": "No allow or block rules yet.",
+      "placeholder": "address@example.com or example.com",
+      "allow": "Allow",
+      "block": "Block",
+      "actionAria": "Rule action",
+      "removeAria": "Remove rule for {{pattern}}",
+      "saveFailed": "Failed to save the rule"
+    },
     "delegates": {
       "title": "Delegates",
       "description": "Let other people access your mailbox and send on your behalf",

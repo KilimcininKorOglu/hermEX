@@ -281,6 +281,12 @@ export interface Category {
   color: string
 }
 
+/** RecipientRule is one personal allow/block rule the MTA applies at delivery. */
+export interface RecipientRule {
+  pattern: string
+  action: 'allow' | 'block'
+}
+
 export interface MeetingInvite {
   isInvite: boolean
   uid?: string
@@ -754,6 +760,22 @@ class API {
   // setSafeSenders replaces the safe-sender allowlist (the server normalizes it).
   async setSafeSenders(safeSenders: string[]): Promise<{ safeSenders?: string[] }> {
     return this.put<{ safeSenders?: string[] }>('/safe-senders', { safeSenders })
+  }
+
+  // getRecipientRules returns the user's personal allow/block rules; the MTA reads
+  // them at delivery (allow rescues to the inbox, block always files to Junk).
+  async getRecipientRules(): Promise<{ rules?: RecipientRule[] }> {
+    return this.get<{ rules?: RecipientRule[] }>('/recipient-rules')
+  }
+
+  // setRecipientRule upserts one allow/block rule for a pattern.
+  async setRecipientRule(pattern: string, action: 'allow' | 'block'): Promise<{ ok?: boolean }> {
+    return this.post<{ ok?: boolean }>('/recipient-rules', { pattern, action })
+  }
+
+  // deleteRecipientRule removes a rule by pattern.
+  async deleteRecipientRule(pattern: string): Promise<void> {
+    await this.delete('/recipient-rules?pattern=' + encodeURIComponent(pattern))
   }
 
   // getMailboxes returns the user's mailbox names.
