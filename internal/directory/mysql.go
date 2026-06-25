@@ -83,6 +83,7 @@ type loginRow struct {
 	domainStatus int
 	externid     []byte // non-nil => the account is mastered in an LDAP directory
 	orgID        int64  // the account's organization (selects its LDAP config)
+	mustChange   bool   // true => an admin reset requires a forced password change
 }
 
 // resolve runs the three-key resolution: the input must match
@@ -90,16 +91,16 @@ type loginRow struct {
 // rows (no such address) and more than one (ambiguous) are both a non-match.
 func (d *SQLDirectory) resolve(addr string) (loginRow, bool, error) {
 	const q = `
-SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, d.org_id
+SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, d.org_id, u.must_change_password
   FROM users u JOIN domains d ON u.domain_id = d.id
  WHERE u.username = ?
 UNION
-SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, d.org_id
+SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, d.org_id, u.must_change_password
   FROM users u JOIN domains d ON u.domain_id = d.id
   JOIN altnames a ON a.user_id = u.id
  WHERE a.altname = ?
 UNION
-SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, d.org_id
+SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, d.org_id, u.must_change_password
   FROM users u JOIN domains d ON u.domain_id = d.id
   JOIN aliases al ON al.mainname = u.username
  WHERE al.aliasname = ?
@@ -112,9 +113,11 @@ SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status,
 	var out []loginRow
 	for rows.Next() {
 		var r loginRow
-		if err := rows.Scan(&r.password, &r.maildir, &r.addrStatus, &r.displayType, &r.domainStatus, &r.externid, &r.orgID); err != nil {
+		var mustChange int
+		if err := rows.Scan(&r.password, &r.maildir, &r.addrStatus, &r.displayType, &r.domainStatus, &r.externid, &r.orgID, &mustChange); err != nil {
 			return loginRow{}, false, err
 		}
+		r.mustChange = mustChange != 0
 		out = append(out, r)
 	}
 	if err := rows.Err(); err != nil {
@@ -126,26 +129,50 @@ SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status,
 	return out[0], true, nil
 }
 
-// Authenticate verifies a login and returns the user's mailbox store path:
-// resolve to exactly one row, require an active
-// MAILUSER account in an active domain, then verify the crypt(3) password.
-func (d *SQLDirectory) Authenticate(user, password string) (string, bool) {
+// authenticateRow verifies a login the way Authenticate does — resolve to exactly
+// one row, require an active MAILUSER account in an active domain, then verify the
+// crypt(3) password — and reports whether the account is flagged for a forced
+// password change. ok is false for bad credentials or an ineligible account.
+func (d *SQLDirectory) authenticateRow(user, password string) (path string, mustChange, ok bool) {
 	login := strings.ToLower(strings.TrimSpace(user))
-	row, ok, err := d.resolve(login)
-	if err != nil || !ok {
-		return "", false
+	row, found, err := d.resolve(login)
+	if err != nil || !found {
+		return "", false, false
 	}
 	if row.displayType != dtMailuser {
-		return "", false
+		return "", false, false
 	}
 	// Only AF_USER_NORMAL in an active domain may log in.
 	if row.addrStatus&afUserMask != afUserNormal || row.addrStatus&afDomainMask != 0 || row.domainStatus != 0 {
-		return "", false
+		return "", false, false
 	}
 	if row.maildir == "" || !d.verifyPassword(row, login, password) {
+		return "", false, false
+	}
+	return d.storePath(row.maildir), row.mustChange, true
+}
+
+// Authenticate verifies a login for normal service access and returns the user's
+// mailbox store path. An account an admin reset flagged for a forced password
+// change is denied here, so a temporary password cannot be used on any client
+// protocol (IMAP/POP3/SMTP submission/EWS/ActiveSync/MAPI/DAV). The webmail2
+// remediation flow uses AuthenticateAllowingPasswordChange to let the user reach
+// the forced-change screen and clear the flag.
+func (d *SQLDirectory) Authenticate(user, password string) (string, bool) {
+	path, mustChange, ok := d.authenticateRow(user, password)
+	if !ok || mustChange {
 		return "", false
 	}
-	return d.storePath(row.maildir), true
+	return path, true
+}
+
+// AuthenticateAllowingPasswordChange verifies a login the same way as Authenticate
+// but admits an account that must change its password, so the webmail2 login and
+// current-password check can authenticate the user into the forced-change screen.
+// Only that remediation channel uses it; every other protocol uses Authenticate.
+func (d *SQLDirectory) AuthenticateAllowingPasswordChange(user, password string) (string, bool) {
+	path, _, ok := d.authenticateRow(user, password)
+	return path, ok
 }
 
 // verifyPassword checks a login's password the way its account is mastered: an

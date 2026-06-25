@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"hermex/internal/directory"
@@ -202,7 +203,60 @@ func (s *Server) Handler() http.Handler {
 	if s.dist != nil {
 		mux.Handle("/", s.dist)
 	}
-	return mux
+	return s.gateForcedPasswordChange(mux)
+}
+
+// forcedChangeAllowed reports whether a path stays reachable while the session user
+// must change their password: the auth probes and the change endpoint itself, so
+// the user can log in, read their state, change the password, and log out.
+func forcedChangeAllowed(path string) bool {
+	switch path {
+	case "/api/v1/auth/login", "/api/v1/auth/logout", "/api/v1/auth/me", "/api/v1/account/password":
+		return true
+	}
+	return false
+}
+
+// mustChangePassword reports whether the session user is flagged for a forced
+// password change. A directory that cannot report it (no GetUser capability) never
+// gates, so the API degrades open rather than locking every caller out.
+func (s *Server) mustChangePassword(email string) bool {
+	rd, ok := s.auth.(userLocaleReader)
+	if !ok {
+		return false
+	}
+	u, found, err := rd.GetUser(email)
+	return err == nil && found && u.MustChangePassword
+}
+
+// gateForcedPasswordChange refuses every API call except the remediation allowlist
+// while the session user must change their password. Without it the SPA's redirect
+// to the forced-change screen would be cosmetic: a flagged session could call the
+// data API directly with its cookie and bypass the change. Unauthenticated and
+// non-API requests pass through untouched (the handlers enforce their own auth).
+func (s *Server) gateForcedPasswordChange(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/") && !forcedChangeAllowed(r.URL.Path) {
+			if c, ok := s.session(r); ok && s.mustChangePassword(c.Email) {
+				writeJSON(w, http.StatusForbidden, map[string]string{"error": "password change required"})
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// authenticateForChange verifies credentials for the webmail2 remediation flow
+// (login + current-password check), admitting an account that must change its
+// password so it can reach the forced-change screen. It falls back to the strict
+// Authenticate when the directory does not expose the lenient capability.
+func (s *Server) authenticateForChange(user, password string) (string, bool) {
+	if a, ok := s.auth.(interface {
+		AuthenticateAllowingPasswordChange(user, password string) (string, bool)
+	}); ok {
+		return a.AuthenticateAllowingPasswordChange(user, password)
+	}
+	return s.auth.Authenticate(user, password)
 }
 
 // decodeJSON decodes the request body into v.
@@ -249,7 +303,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	mbox, ok := s.auth.Authenticate(req.Email, req.Password)
+	// Login admits an account that must change its password so it can reach the
+	// forced-change screen; the per-request gate then confines it to the
+	// remediation allowlist until the change clears the flag.
+	mbox, ok := s.authenticateForChange(req.Email, req.Password)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return

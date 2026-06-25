@@ -206,8 +206,16 @@ func TestAdminServerIntegration(t *testing.T) {
 	if pwReset.StatusCode != http.StatusNoContent {
 		t.Fatalf("password reset status %d, want 204", pwReset.StatusCode)
 	}
-	if _, ok := dir.Authenticate("intern@hermex.test", "pw3"); !ok {
-		t.Error("the API-reset password does not authenticate")
+	// The reset stored the new hash and flagged the account for a forced change.
+	// The strict Authenticate now denies a flagged account, so verify the stored
+	// hash via the lenient path and assert the strict path refuses it even with the
+	// correct password — that refusal is what locks the temporary password out of
+	// every client protocol until the user changes it.
+	if _, ok := dir.AuthenticateAllowingPasswordChange("intern@hermex.test", "pw3"); !ok {
+		t.Error("the API-reset password does not authenticate via the lenient path")
+	}
+	if _, ok := dir.Authenticate("intern@hermex.test", "pw3"); ok {
+		t.Error("a must-change account must be denied by the strict Authenticate path")
 	}
 	if _, ok := dir.Authenticate("intern@hermex.test", "pw2"); ok {
 		t.Error("the old password still authenticates after a reset")

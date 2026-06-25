@@ -37,7 +37,10 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the new password must be at least 8 characters"})
 		return
 	}
-	if _, ok := s.auth.Authenticate(c.Email, req.CurrentPassword); !ok {
+	// Verify the current password with the lenient path: a must-change account is
+	// the very caller this flow exists for, so the strict Authenticate (which
+	// denies it) must not block proving the temporary password.
+	if _, ok := s.authenticateForChange(c.Email, req.CurrentPassword); !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "your current password is incorrect"})
 		return
 	}
