@@ -98,6 +98,7 @@ func (s *Server) handleUIDomainDetail(w http.ResponseWriter, r *http.Request) {
 	contacts, _ := s.dir.ListContactsInDomain(id)
 	groups, _ := s.dir.ListMListsInDomain(id)
 	spamThreshold, _ := s.dir.GetDomainSpamThreshold(dd.Name)
+	branding, _, _ := s.dir.GetDomainBranding(dd.Name)
 	data := map[string]any{
 		"Nav": "domains", "CSRF": csrfCookieValue(r), "Domain": dd, "Orgs": orgs,
 		"PolicyFields":   policyView(policy),
@@ -106,6 +107,7 @@ func (s *Server) handleUIDomainDetail(w http.ResponseWriter, r *http.Request) {
 		"DomainContacts": contacts,
 		"DomainGroups":   groups,
 		"SpamThreshold":  spamThreshold,
+		"Branding":       branding,
 	}
 	maps.Copy(data, s.dkimData(dd.Name))
 	// Prescribe the DNS records the domain owner must publish, reusing the DKIM

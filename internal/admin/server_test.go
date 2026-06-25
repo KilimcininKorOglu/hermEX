@@ -70,6 +70,8 @@ type fakeDir struct {
 	userSpamThresholdSet   bool
 	domainSpamThreshold    *int
 	domainSpamThresholdSet bool
+	branding               directory.DomainBranding
+	brandingSet            bool
 	ldap                   map[int64]directory.LDAPConfig
 	defaultSyncPolicy      easpolicy.Policy
 
@@ -595,6 +597,13 @@ func (f *fakeDir) SetUserSpamThreshold(_ string, th *int) error {
 }
 func (f *fakeDir) SetDomainSpamThreshold(_ string, th *int) error {
 	f.domainSpamThreshold, f.domainSpamThresholdSet = th, true
+	return nil
+}
+func (f *fakeDir) GetDomainBranding(string) (directory.DomainBranding, bool, error) {
+	return f.branding, !f.branding.Empty(), nil
+}
+func (f *fakeDir) SetDomainBranding(_ string, b directory.DomainBranding) error {
+	f.branding, f.brandingSet = b, true
 	return nil
 }
 func (f *fakeDir) GetDefaultSyncPolicy() (easpolicy.Policy, error) {

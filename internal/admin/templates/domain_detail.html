@@ -110,6 +110,18 @@
 </form>
 <div id="user-status"></div>
 
+<h2>Login branding</h2>
+<p class="hint">What the login screen shows for users signing in under this domain: its own name, logo, accent colour, tagline and footer. Leave all fields blank to inherit the global default.</p>
+<form class="branding-form" hx-put="/admin/ui/domains/{{.Domain.ID}}/branding" hx-target="#user-status" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label>App name <input type="text" name="app_name" value="{{.Branding.AppName}}" placeholder="hermEX"></label>
+<label>Logo URL <input type="url" name="logo_url" value="{{.Branding.LogoURL}}" placeholder="https://example.com/logo.png"></label>
+<label>Primary color <input type="text" name="primary_color" value="{{.Branding.PrimaryColor}}" placeholder="#4f46e5"></label>
+<label>Tagline <input type="text" name="tagline" value="{{.Branding.Tagline}}" placeholder="Secure self-hosted email"></label>
+<label>Footer text <input type="text" name="footer_text" value="{{.Branding.FooterText}}"></label>
+<button type="submit">Save branding</button>
+</form>
+
 <h2>DKIM signing</h2>
 <p class="hint">Signs outbound mail from this domain so it passes DKIM and DMARC at receivers. Generate a key, publish the DNS record it shows, allow a few minutes for it to propagate, then enable signing — enabling before the record is published and visible would make your mail fail DKIM.</p>
 {{template "dkim-panel" .}}

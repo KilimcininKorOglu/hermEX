@@ -139,6 +139,8 @@ type Directory interface {
 	SetUserSpamThreshold(username string, threshold *int) error
 	GetDomainSpamThreshold(domain string) (*int, error)
 	SetDomainSpamThreshold(domain string, threshold *int) error
+	GetDomainBranding(domain string) (directory.DomainBranding, bool, error)
+	SetDomainBranding(domain string, b directory.DomainBranding) error
 }
 
 // LDAPSyncer downsyncs an organization's directory accounts. It is optional —
@@ -400,6 +402,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}", s.handleUISaveDomain)
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/syncpolicy", s.handleUISaveDomainSyncPolicy)
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/spam-threshold", s.handleUIDomainSpamThreshold)
+	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/branding", s.handleUISaveDomainBranding)
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/createdefaults", s.handleUISaveDomainDefaults)
 	mux.HandleFunc("POST /admin/ui/domains/{domainID}/dkim/generate", s.handleUIDKIMGenerate)
 	mux.HandleFunc("PUT /admin/ui/domains/{domainID}/dkim/enable", s.handleUIDKIMEnable)
