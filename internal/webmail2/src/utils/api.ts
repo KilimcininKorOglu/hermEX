@@ -121,6 +121,7 @@ export interface ScheduledMailItem {
 
 export interface CalendarEvent {
   uid: string
+  calendarId?: string // which calendar the event belongs to ("calendar" = default)
   summary: string
   description?: string
   location?: string

@@ -104,7 +104,8 @@ func (s *Server) handleRSVP(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a meeting invite"})
 		return
 	}
-	if _, err := storeEvent(st, icalToEvent(ics, 0)); err != nil {
+	// An accepted invite lands in the default calendar.
+	if _, err := storeEvent(st, icalToEvent(ics, 0), calendarFolderID("")); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not add to calendar"})
 		return
 	}

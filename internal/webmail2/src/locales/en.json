@@ -673,6 +673,7 @@
     "deleteEvent": "Delete Event",
     "deleteConfirm": "Delete \"{{name}}\"? This cannot be undone.",
     "calendars": "Calendars",
+    "calendar": "Calendar",
     "addCalendar": "Add calendar",
     "newCalendar": "New Calendar",
     "editCalendar": "Edit Calendar",

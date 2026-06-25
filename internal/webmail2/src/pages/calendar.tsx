@@ -70,9 +70,10 @@ interface EventForm {
   description: string
   attendees: string
   recurrence: string // "" | DAILY | WEEKLY | MONTHLY | YEARLY
+  calendarId: string // target calendar ("calendar" = default)
 }
 
-const emptyForm: EventForm = { summary: "", start: "", end: "", allDay: false, location: "", description: "", attendees: "", recurrence: "" }
+const emptyForm: EventForm = { summary: "", start: "", end: "", allDay: false, location: "", description: "", attendees: "", recurrence: "", calendarId: "calendar" }
 
 // recurrenceToForm maps a stored RRULE value to the form's frequency selector.
 function recurrenceToForm(rrule?: string): string {
@@ -249,6 +250,7 @@ export function CalendarPage() {
       description: ev.description ?? "",
       attendees: (ev.attendees ?? []).join(", "),
       recurrence: recurrenceToForm(ev.recurrence),
+      calendarId: ev.calendarId ?? "calendar",
     })
     setDialogOpen(true)
   }
@@ -275,6 +277,7 @@ export function CalendarPage() {
       description: form.description || undefined,
       attendees: attendees.length > 0 ? attendees : undefined,
       recurrence: form.recurrence ? `FREQ=${form.recurrence}` : undefined,
+      calendarId: form.calendarId || "calendar",
       // Anchor timed events to the user's zone so recurrences keep their wall
       // time across DST (stored as DTSTART;TZID + VTIMEZONE). All-day events stay
       // floating dates.
@@ -384,9 +387,22 @@ export function CalendarPage() {
     }
   }
 
+  // Only show events from calendars the user has toggled visible (all by
+  // default); when calendar metadata is unavailable, show everything.
+  const shownEvents =
+    calendars.length === 0
+      ? events
+      : events.filter((ev) => visibleCalendarIds.has(ev.calendarId ?? "calendar"))
+
+  // Per-calendar color for an event, to tint it in the views; only when more than
+  // one calendar exists (a single calendar needs no color distinction).
+  const calColorById = new Map(calendars.map((c) => [c.id, c.color]))
+  const eventColor = (ev: CalendarEvent): string | undefined =>
+    calendars.length > 1 ? (calColorById.get(ev.calendarId ?? "calendar") ?? "#3b82f6") : undefined
+
   // Group sorted events by day for the agenda view.
   const groups: { day: string; items: CalendarEvent[] }[] = []
-  for (const ev of events) {
+  for (const ev of shownEvents) {
     const key = dayKey(ev.start)
     const last = groups[groups.length - 1]
     if (last && last.day === key) last.items.push(ev)
@@ -395,7 +411,7 @@ export function CalendarPage() {
 
   // Bucket events by local day key for the month grid.
   const eventsByDay = new Map<string, CalendarEvent[]>()
-  for (const ev of events) {
+  for (const ev of shownEvents) {
     const key = eventDayKey(ev)
     if (!key) continue
     const bucket = eventsByDay.get(key)
@@ -597,6 +613,7 @@ export function CalendarPage() {
                         <button
                           key={ev.uid}
                           className="block w-full truncate rounded bg-primary/10 px-1 py-0.5 text-left text-xs text-foreground hover:bg-primary/20"
+                          style={eventColor(ev) ? { borderLeft: `3px solid ${eventColor(ev)}` } : undefined}
                           onClick={(e) => { e.stopPropagation(); openEdit(ev) }}
                           title={ev.summary}
                         >
@@ -638,6 +655,9 @@ export function CalendarPage() {
               <div className="rounded-lg border bg-card divide-y">
                 {group.items.map((ev) => (
                   <div key={ev.uid} className="flex items-start gap-4 p-4 hover:bg-accent/50 transition-colors">
+                    {eventColor(ev) && (
+                      <div className="w-1 self-stretch rounded-full" style={{ backgroundColor: eventColor(ev) }} aria-hidden />
+                    )}
                     <div className="flex w-24 shrink-0 items-center gap-1 text-sm text-muted-foreground">
                       <Clock className="h-3.5 w-3.5" />
                       {timeLabel(t, ev)}
@@ -702,6 +722,26 @@ export function CalendarPage() {
                 placeholder={t("calendar.titlePlaceholder")}
               />
             </div>
+            {calendars.length > 1 && (
+              <div className="space-y-2">
+                <Label htmlFor="ev-calendar">{t("calendar.calendar")}</Label>
+                <Select
+                  value={form.calendarId}
+                  onValueChange={(value) => setForm({ ...form, calendarId: value })}
+                >
+                  <SelectTrigger id="ev-calendar">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {calendars.map((cal) => (
+                      <SelectItem key={cal.id} value={cal.id}>
+                        {cal.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="flex items-center justify-between">
               <Label htmlFor="ev-allday">{t("calendar.allDay")}</Label>
               <Switch

@@ -12,15 +12,117 @@ import (
 	"hermex/internal/oxcical"
 )
 
-// eventJSON is the SPA's CalendarEvent shape (subset honored).
+// eventJSON is the SPA's CalendarEvent shape (subset honored). CalendarID names
+// the calendar (objectstore appointment folder) the event lives in; an empty or
+// "calendar" value is the built-in default calendar.
 type eventJSON struct {
 	UID         string `json:"uid"`
+	CalendarID  string `json:"calendarId,omitempty"`
 	Summary     string `json:"summary"`
 	Description string `json:"description,omitempty"`
 	Location    string `json:"location,omitempty"`
 	Start       string `json:"start"`
 	End         string `json:"end,omitempty"`
 	AllDay      bool   `json:"allDay,omitempty"`
+}
+
+// calendarJSON is the SPA's Calendar shape. ID is the stable "calendar" for the
+// built-in calendar, otherwise the appointment folder's numeric id as a string.
+type calendarJSON struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Color     string `json:"color,omitempty"`
+	IsDefault bool   `json:"isDefault,omitempty"`
+}
+
+// webmailNamespace is hermEX webmail's private named-property GUID namespace.
+var webmailNamespace = mapi.GUID{Data1: 0x7B3E9A10, Data2: 0x2C4D, Data3: 0x4F6A, Data4: [8]byte{0x9B, 0x1E, 0x8D, 0x2C, 0x5A, 0x7F, 0x0E, 0x31}}
+
+// nameCalendarColor is the named property that holds a calendar's display color.
+var nameCalendarColor = mapi.PropertyName{Kind: mapi.MnidString, GUID: webmailNamespace, Name: "CalendarColor"}
+
+// calendarColorTag resolves the per-calendar color named property to a PtUnicode
+// tag for this store, allocating its id when create is set (idempotent).
+func calendarColorTag(st *objectstore.Store, create bool) (mapi.PropTag, error) {
+	ids, err := st.GetNamedPropIDs(create, []mapi.PropertyName{nameCalendarColor})
+	if err != nil || len(ids) == 0 || ids[0] == 0 {
+		return 0, err
+	}
+	return mapi.PropTag(uint32(ids[0])<<16 | uint32(mapi.PtUnicode)), nil
+}
+
+// propStr reads a string property value from a property bag.
+func propStr(pv mapi.PropertyValues, tag mapi.PropTag) string {
+	if v, ok := pv.Get(tag); ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// calendarFolderID maps a SPA calendar id to its objectstore folder id. The
+// default calendar keeps the stable id "calendar" -> PrivateFIDCalendar; any
+// other calendar is a folder whose numeric id is its calendar id. An unparseable
+// id falls back to the default rather than failing the request.
+func calendarFolderID(calendarID string) int64 {
+	if calendarID == "" || calendarID == "calendar" {
+		return mapi.PrivateFIDCalendar
+	}
+	if id, err := strconv.ParseInt(calendarID, 10, 64); err == nil {
+		return id
+	}
+	return mapi.PrivateFIDCalendar
+}
+
+// colorOf reads a folder's stored calendar color, or "" when none is set.
+func colorOf(st *objectstore.Store, folderID int64, colorTag mapi.PropTag) string {
+	if colorTag == 0 {
+		return ""
+	}
+	props, err := st.GetFolderProperties(folderID, colorTag)
+	if err != nil {
+		return ""
+	}
+	return propStr(props, colorTag)
+}
+
+// listCalendars enumerates the mailbox's calendars: the built-in Calendar (the
+// stable id "calendar", always the default) plus every folder whose container
+// class is IPF.Appointment. Color comes from webmail's per-calendar named prop.
+func listCalendars(st *objectstore.Store) []calendarJSON {
+	colorTag, _ := calendarColorTag(st, true)
+	defName := "Calendar"
+	if props, err := st.GetFolderProperties(mapi.PrivateFIDCalendar, mapi.PrDisplayName); err == nil {
+		if n := propStr(props, mapi.PrDisplayName); n != "" {
+			defName = n
+		}
+	}
+	out := []calendarJSON{{
+		ID:        "calendar",
+		Name:      defName,
+		Color:     colorOf(st, mapi.PrivateFIDCalendar, colorTag),
+		IsDefault: true,
+	}}
+	folders, err := st.ListFolders()
+	if err != nil {
+		return out
+	}
+	for _, f := range folders {
+		if f.ID == mapi.PrivateFIDCalendar {
+			continue // the default, already added
+		}
+		props, err := st.GetFolderProperties(f.ID, mapi.PrContainerClass)
+		if err != nil || !strings.EqualFold(propStr(props, mapi.PrContainerClass), mapi.ContainerClassAppointment) {
+			continue
+		}
+		out = append(out, calendarJSON{
+			ID:    strconv.FormatInt(f.ID, 10),
+			Name:  f.DisplayName,
+			Color: colorOf(st, f.ID, colorTag),
+		})
+	}
+	return out
 }
 
 // toICalTime converts an RFC3339 (or YYYY-MM-DD all-day) value to iCal form.
@@ -110,29 +212,34 @@ func icalToEvent(ics []byte, id int64) eventJSON {
 	return e
 }
 
+// handleGetEvents returns every event across all of the mailbox's calendars, each
+// tagged with its calendarId so the SPA can filter and color per calendar.
 func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 	st, _, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
 	defer st.Close()
-	objs, err := st.ListFolderObjects(mapi.PrivateFIDCalendar)
-	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"events": []eventJSON{}})
-		return
-	}
 	opt := oxcical.Options{Resolver: st.GetNamedPropIDs}
-	events := make([]eventJSON, 0, len(objs))
-	for _, o := range objs {
-		msg, err := st.OpenMessage(o.ID)
+	events := make([]eventJSON, 0)
+	for _, cal := range listCalendars(st) {
+		objs, err := st.ListFolderObjects(calendarFolderID(cal.ID))
 		if err != nil {
 			continue
 		}
-		ics, err := oxcical.Export(msg, opt)
-		if err != nil {
-			continue
+		for _, o := range objs {
+			msg, err := st.OpenMessage(o.ID)
+			if err != nil {
+				continue
+			}
+			ics, err := oxcical.Export(msg, opt)
+			if err != nil {
+				continue
+			}
+			e := icalToEvent(ics, o.ID)
+			e.CalendarID = cal.ID
+			events = append(events, e)
 		}
-		events = append(events, icalToEvent(ics, o.ID))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": events})
 }
@@ -148,7 +255,7 @@ func (s *Server) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	uid, err := storeEvent(st, in)
+	uid, err := storeEvent(st, in, calendarFolderID(in.CalendarID))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save event"})
 		return
@@ -168,10 +275,12 @@ func (s *Server) handleUpdateEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
+	// Delete by message id (folder-agnostic) then re-create in the target calendar,
+	// so editing an event - including moving it to another calendar - just works.
 	if old, err := strconv.ParseInt(r.PathValue("uid"), 10, 64); err == nil {
 		_ = st.DeleteObject(old)
 	}
-	uid, err := storeEvent(st, in)
+	uid, err := storeEvent(st, in, calendarFolderID(in.CalendarID))
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save event"})
 		return
@@ -198,18 +307,105 @@ func (s *Server) handleDeleteEvent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// handleGetCalendars returns the single default calendar.
+// handleGetCalendars lists the mailbox's calendars.
 func (s *Server) handleGetCalendars(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.session(r); !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+	st, _, ok := s.openStore(w, r)
+	if !ok {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"calendars": []map[string]any{
-		{"id": "calendar", "name": "Calendar", "color": "#2563eb", "primary": true},
-	}})
+	defer st.Close()
+	writeJSON(w, http.StatusOK, map[string]any{"calendars": listCalendars(st)})
 }
 
-func storeEvent(st *objectstore.Store, e eventJSON) (string, error) {
+// handleCreateCalendar creates a new calendar as an appointment folder.
+func (s *Server) handleCreateCalendar(w http.ResponseWriter, r *http.Request) {
+	var in calendarJSON
+	if err := decodeJSON(r, &in); err != nil || strings.TrimSpace(in.Name) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	st, _, ok := s.openStore(w, r)
+	if !ok {
+		return
+	}
+	defer st.Close()
+	fid, err := st.CreateFolder(nil, in.Name)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not create calendar"})
+		return
+	}
+	// CreateFolder seeds IPF.Note; overwrite the container class so the folder is a
+	// real calendar, and store the chosen color.
+	props := mapi.PropertyValues{{Tag: mapi.PrContainerClass, Value: mapi.ContainerClassAppointment}}
+	if colorTag, _ := calendarColorTag(st, true); colorTag != 0 && in.Color != "" {
+		props = append(props, mapi.TaggedPropVal{Tag: colorTag, Value: in.Color})
+	}
+	if err := st.SetFolderProperties(fid, props); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not configure calendar"})
+		return
+	}
+	writeJSON(w, http.StatusOK, calendarJSON{ID: strconv.FormatInt(fid, 10), Name: in.Name, Color: in.Color})
+}
+
+// handleUpdateCalendar renames and recolors a calendar (PATCH; fields are optional).
+func (s *Server) handleUpdateCalendar(w http.ResponseWriter, r *http.Request) {
+	var in calendarJSON
+	if err := decodeJSON(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	st, _, ok := s.openStore(w, r)
+	if !ok {
+		return
+	}
+	defer st.Close()
+	id := r.PathValue("id")
+	fid := calendarFolderID(id)
+	if strings.TrimSpace(in.Name) != "" {
+		if err := st.SetFolderName(fid, in.Name); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not rename calendar"})
+			return
+		}
+	}
+	if in.Color != "" {
+		if colorTag, _ := calendarColorTag(st, true); colorTag != 0 {
+			if err := st.SetFolderProperties(fid, mapi.PropertyValues{{Tag: colorTag, Value: in.Color}}); err != nil {
+				writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not recolor calendar"})
+				return
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, calendarJSON{ID: id, Name: in.Name, Color: in.Color, IsDefault: id == "calendar"})
+}
+
+// handleDeleteCalendar deletes a calendar and its events. The built-in default
+// calendar cannot be deleted.
+func (s *Server) handleDeleteCalendar(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	st, _, ok := s.openStore(w, r)
+	if !ok {
+		return
+	}
+	defer st.Close()
+	fid := calendarFolderID(id)
+	if fid == mapi.PrivateFIDCalendar {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "cannot delete the default calendar"})
+		return
+	}
+	// Delete the calendar's events first so DeleteFolder leaves no orphaned messages.
+	if objs, err := st.ListFolderObjects(fid); err == nil {
+		for _, o := range objs {
+			_ = st.DeleteObject(o.ID)
+		}
+	}
+	if err := st.DeleteFolder(fid); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not delete calendar"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func storeEvent(st *objectstore.Store, e eventJSON, folderID int64) (string, error) {
 	if e.UID == "" {
 		e.UID = randomHex() + "@hermex"
 	}
@@ -217,7 +413,7 @@ func storeEvent(st *objectstore.Store, e eventJSON) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	id, err := st.CreateMessage(mapi.PrivateFIDCalendar, msg)
+	id, err := st.CreateMessage(folderID, msg)
 	if err != nil {
 		return "", err
 	}

@@ -159,6 +159,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/calendar/events/{uid}", s.handleUpdateEvent)
 	mux.HandleFunc("DELETE /api/v1/calendar/events/{uid}", s.handleDeleteEvent)
 	mux.HandleFunc("GET /api/v1/calendar/calendars", s.handleGetCalendars)
+	mux.HandleFunc("POST /api/v1/calendar/calendars", s.handleCreateCalendar)
+	mux.HandleFunc("PATCH /api/v1/calendar/calendars/{id}", s.handleUpdateCalendar)
+	mux.HandleFunc("DELETE /api/v1/calendar/calendars/{id}", s.handleDeleteCalendar)
 	mux.HandleFunc("GET /api/v1/calendar/freebusy", s.handleFreeBusy)
 	mux.HandleFunc("GET /api/v1/rooms", s.handleRooms)
 

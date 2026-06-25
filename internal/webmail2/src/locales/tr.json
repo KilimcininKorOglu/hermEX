@@ -673,6 +673,7 @@
     "deleteEvent": "Etkinliği Sil",
     "deleteConfirm": "\"{{name}}\" silinsin mi? Bu geri alınamaz.",
     "calendars": "Takvimler",
+    "calendar": "Takvim",
     "addCalendar": "Takvim ekle",
     "newCalendar": "Yeni Takvim",
     "editCalendar": "Takvimi Düzenle",
