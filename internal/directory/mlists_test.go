@@ -1,6 +1,7 @@
 package directory
 
 import (
+	"errors"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -230,5 +231,42 @@ func TestMListOwner(t *testing.T) {
 	}
 	if found, _ := d.SetMListOwner("ghost@hermex.test", "alice@hermex.test"); found {
 		t.Error("SetMListOwner on an unknown list should report not found")
+	}
+}
+
+// TestUpsertLDAPGroup proves the group-sync authority path creates an LDAP-mastered
+// list with an owner and exact membership, that a second run mirrors the membership
+// (removing a dropped member), and that manual owner/membership edits on a mastered
+// list are refused (so the next sync cannot silently overwrite them).
+func TestUpsertLDAPGroup(t *testing.T) {
+	d := mlistTestDir(t)
+	ext := []byte{0x01, 0x02, 0x03}
+	if _, err := d.UpsertLDAPGroup("eng@hermex.test", ext, "alice@hermex.test",
+		[]string{"bob@hermex.test", "carol@hermex.test"}); err != nil {
+		t.Fatal(err)
+	}
+	lists, _ := d.ListMLists()
+	if len(lists) != 1 || !lists[0].LDAPMastered || lists[0].Owner != "alice@hermex.test" {
+		t.Fatalf("after upsert: %+v, want one mastered list owned by alice", lists)
+	}
+	if members, _ := d.ListMembers("eng@hermex.test"); len(members) != 2 {
+		t.Errorf("members = %v, want 2 (bob, carol)", members)
+	}
+
+	// Manual edits are refused on a mastered list.
+	if _, err := d.SetMembers("eng@hermex.test", []string{"x@hermex.test"}); !errors.Is(err, ErrLDAPMastered) {
+		t.Errorf("SetMembers on mastered list err = %v, want ErrLDAPMastered", err)
+	}
+	if _, err := d.SetMListOwner("eng@hermex.test", "bob@hermex.test"); !errors.Is(err, ErrLDAPMastered) {
+		t.Errorf("SetMListOwner on mastered list err = %v, want ErrLDAPMastered", err)
+	}
+
+	// A second sync mirrors membership exactly (carol dropped).
+	if _, err := d.UpsertLDAPGroup("eng@hermex.test", ext, "alice@hermex.test",
+		[]string{"bob@hermex.test"}); err != nil {
+		t.Fatal(err)
+	}
+	if members, _ := d.ListMembers("eng@hermex.test"); len(members) != 1 || members[0] != "bob@hermex.test" {
+		t.Errorf("after re-sync members = %v, want [bob]", members)
 	}
 }

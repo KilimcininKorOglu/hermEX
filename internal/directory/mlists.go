@@ -46,6 +46,9 @@ type MListInfo struct {
 	// empty when none. The owner may manage the list's membership from webmail and
 	// the address book exposes its EntryID to Outlook as PR_EMS_AB_OWNER.
 	Owner string
+	// LDAPMastered is true when the list is owned by the LDAP/AD group sync (a
+	// non-NULL externid); manual owner and membership edits are refused for it.
+	LDAPMastered bool
 }
 
 // addrDomain returns the domain part of an address, or "" when there is no '@'.
@@ -251,7 +254,7 @@ func (d *SQLDirectory) DeleteMList(listname string) (bool, error) {
 // API.
 func (d *SQLDirectory) ListMLists() ([]MListInfo, error) {
 	rows, err := d.db.Query(
-		`SELECT id, listname, list_type, list_privilege, COALESCE(owner, '') FROM mlists ORDER BY listname`)
+		`SELECT id, listname, list_type, list_privilege, COALESCE(owner, ''), (externid IS NOT NULL) FROM mlists ORDER BY listname`)
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +262,7 @@ func (d *SQLDirectory) ListMLists() ([]MListInfo, error) {
 	var out []MListInfo
 	for rows.Next() {
 		var m MListInfo
-		if err := rows.Scan(&m.ID, &m.Listname, &m.ListType, &m.ListPriv, &m.Owner); err != nil {
+		if err := rows.Scan(&m.ID, &m.Listname, &m.ListType, &m.ListPriv, &m.Owner, &m.LDAPMastered); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -271,7 +274,7 @@ func (d *SQLDirectory) ListMLists() ([]MListInfo, error) {
 // for the per-domain admin views.
 func (d *SQLDirectory) ListMListsInDomain(domainID int64) ([]MListInfo, error) {
 	rows, err := d.db.Query(
-		`SELECT id, listname, list_type, list_privilege, COALESCE(owner, '') FROM mlists WHERE domain_id = ? ORDER BY listname`, domainID)
+		`SELECT id, listname, list_type, list_privilege, COALESCE(owner, ''), (externid IS NOT NULL) FROM mlists WHERE domain_id = ? ORDER BY listname`, domainID)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +282,7 @@ func (d *SQLDirectory) ListMListsInDomain(domainID int64) ([]MListInfo, error) {
 	var out []MListInfo
 	for rows.Next() {
 		var m MListInfo
-		if err := rows.Scan(&m.ID, &m.Listname, &m.ListType, &m.ListPriv, &m.Owner); err != nil {
+		if err := rows.Scan(&m.ID, &m.Listname, &m.ListType, &m.ListPriv, &m.Owner, &m.LDAPMastered); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -295,7 +298,7 @@ func (d *SQLDirectory) ListMListsOwnedBy(owner string) ([]MListInfo, error) {
 		return nil, nil
 	}
 	rows, err := d.db.Query(
-		`SELECT id, listname, list_type, list_privilege, COALESCE(owner, '') FROM mlists WHERE owner = ? ORDER BY listname`, owner)
+		`SELECT id, listname, list_type, list_privilege, COALESCE(owner, ''), (externid IS NOT NULL) FROM mlists WHERE owner = ? ORDER BY listname`, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -303,7 +306,7 @@ func (d *SQLDirectory) ListMListsOwnedBy(owner string) ([]MListInfo, error) {
 	var out []MListInfo
 	for rows.Next() {
 		var m MListInfo
-		if err := rows.Scan(&m.ID, &m.Listname, &m.ListType, &m.ListPriv, &m.Owner); err != nil {
+		if err := rows.Scan(&m.ID, &m.Listname, &m.ListType, &m.ListPriv, &m.Owner, &m.LDAPMastered); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -315,7 +318,7 @@ func (d *SQLDirectory) ListMListsOwnedBy(owner string) ([]MListInfo, error) {
 // attribute): the address of the user who manages it. An empty owner clears it. It
 // reports whether the list existed.
 func (d *SQLDirectory) SetMListOwner(listname, owner string) (bool, error) {
-	id, ok, err := d.mlistID(listname)
+	id, ok, err := d.editableMlistID(listname)
 	if err != nil || !ok {
 		return false, err
 	}
@@ -328,27 +331,62 @@ func (d *SQLDirectory) SetMListOwner(listname, owner string) (bool, error) {
 	return err == nil, err
 }
 
-// SetMembers replaces a normal-type list's explicit members with the given set
-// (lowercased, trimmed, de-duplicated, blanks dropped), in one transaction,
-// reporting whether the list existed.
-func (d *SQLDirectory) SetMembers(listname string, members []string) (bool, error) {
+// UpsertLDAPGroup creates or updates a distribution list mastered by the LDAP/AD
+// group sync: it ensures the list (and its backing user row) exist, marks it
+// LDAP-mastered with the group's stable id, sets the owner (the managedBy address,
+// empty for none), and mirrors the membership exactly (members not in the set are
+// removed). It is the sole writer of a mastered list; the manual edit paths refuse
+// one. The list's mail domain must already exist; it reports whether the list was
+// newly created.
+func (d *SQLDirectory) UpsertLDAPGroup(listname string, externid []byte, owner string, members []string) (created bool, err error) {
+	listname = strings.ToLower(strings.TrimSpace(listname))
 	id, ok, err := d.mlistID(listname)
-	if err != nil || !ok {
+	if err != nil {
 		return false, err
 	}
-	clean := cleanAddrs(members)
+	if !ok {
+		if _, err := d.CreateMList(listname, mlistTypeNormal, mlistPrivAll); err != nil {
+			return false, err
+		}
+		if id, ok, err = d.mlistID(listname); err != nil || !ok {
+			return false, err
+		}
+		created = true
+	}
+	owner = strings.ToLower(strings.TrimSpace(owner))
+	var ownerVal any
+	if owner != "" {
+		ownerVal = owner
+	}
 	tx, err := d.db.Begin()
 	if err != nil {
 		return false, err
 	}
 	defer tx.Rollback()
-	if _, err := tx.Exec(`DELETE FROM associations WHERE list_id = ?`, id); err != nil {
+	if _, err := tx.Exec(`UPDATE mlists SET externid = ?, owner = ? WHERE id = ?`, externid, ownerVal, id); err != nil {
 		return false, err
 	}
-	for _, m := range clean {
-		if _, err := tx.Exec(`INSERT INTO associations (list_id, username) VALUES (?, ?)`, id, m); err != nil {
-			return false, err
-		}
+	if err := replaceAssociations(tx, id, members); err != nil {
+		return false, err
+	}
+	return created, tx.Commit()
+}
+
+// SetMembers replaces a normal-type list's explicit members with the given set
+// (lowercased, trimmed, de-duplicated, blanks dropped), in one transaction,
+// reporting whether the list existed.
+func (d *SQLDirectory) SetMembers(listname string, members []string) (bool, error) {
+	id, ok, err := d.editableMlistID(listname)
+	if err != nil || !ok {
+		return false, err
+	}
+	tx, err := d.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+	if err := replaceAssociations(tx, id, members); err != nil {
+		return false, err
 	}
 	return true, tx.Commit()
 }
@@ -398,6 +436,45 @@ func (d *SQLDirectory) mlistID(listname string) (int64, bool, error) {
 		return 0, false, nil
 	}
 	return id, err == nil, err
+}
+
+// ErrLDAPMastered is returned when a manual owner or membership edit targets a list
+// mastered by the LDAP/AD group sync; the sync owns it, so the edit is refused
+// rather than silently overwritten on the next sync run.
+var ErrLDAPMastered = errors.New("directory: list is mastered by LDAP sync")
+
+// editableMlistID resolves a list's id for a manual owner/membership edit, refusing
+// one mastered by LDAP (a non-NULL externid): ok=false for a missing list, and
+// ErrLDAPMastered for a mastered one.
+func (d *SQLDirectory) editableMlistID(listname string) (int64, bool, error) {
+	var id int64
+	var ext []byte
+	err := d.db.QueryRow(`SELECT id, externid FROM mlists WHERE listname = ?`,
+		strings.ToLower(strings.TrimSpace(listname))).Scan(&id, &ext)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	if len(ext) > 0 {
+		return id, false, ErrLDAPMastered
+	}
+	return id, true, nil
+}
+
+// replaceAssociations replaces a list's explicit members within a transaction
+// (lowercased, trimmed, de-duplicated, blanks dropped).
+func replaceAssociations(tx *sql.Tx, listID int64, members []string) error {
+	if _, err := tx.Exec(`DELETE FROM associations WHERE list_id = ?`, listID); err != nil {
+		return err
+	}
+	for _, m := range cleanAddrs(members) {
+		if _, err := tx.Exec(`INSERT INTO associations (list_id, username) VALUES (?, ?)`, listID, m); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // listJoinByName returns the usernames in a list's membership table (associations
