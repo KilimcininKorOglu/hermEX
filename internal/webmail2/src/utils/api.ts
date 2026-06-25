@@ -814,8 +814,8 @@ class API {
   }
 
   // getGroups lists the distribution lists the caller owns (the managedBy owner).
-  async getGroups(): Promise<{ address: string }[]> {
-    return this.get<{ address: string }[]>('/groups')
+  async getGroups(): Promise<{ address: string; ldapMastered?: boolean }[]> {
+    return this.get<{ address: string; ldapMastered?: boolean }[]>('/groups')
   }
 
   // getGroupMembers returns the members of a group the caller owns.

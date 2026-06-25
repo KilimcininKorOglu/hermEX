@@ -36,7 +36,8 @@
     "membersError": "Could not load members",
     "saved": "Members saved",
     "saveError": "Could not save members",
-    "imported": "Imported {{count}} address(es)"
+    "imported": "Imported {{count}} address(es)",
+    "managedBySync": "This group is synced from the directory and cannot be edited here."
   },
   "common": {
     "search": "Search",

@@ -13,7 +13,7 @@ import api from "@/utils/api"
  */
 export function GroupsPage() {
   const { t } = useI18n()
-  const [groups, setGroups] = useState<{ address: string }[]>([])
+  const [groups, setGroups] = useState<{ address: string; ldapMastered?: boolean }[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<string>("")
   const [members, setMembers] = useState<string>("")
@@ -112,34 +112,46 @@ export function GroupsPage() {
             ))}
           </ul>
 
-          {selected && (
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="font-medium text-sm">{selected}</span>
-                <div className="flex gap-2">
-                  <input
-                    ref={fileRef}
-                    type="file"
-                    accept=".csv,text/csv,text/plain"
-                    className="hidden"
-                    onChange={importCsv}
+          {selected &&
+            (() => {
+              // An AD-synced (LDAP-mastered) group is read-only here: the directory
+              // sync owns its membership and would overwrite a local edit.
+              const mastered = groups.find((g) => g.address === selected)?.ldapMastered ?? false
+              return (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-medium text-sm">{selected}</span>
+                    {!mastered && (
+                      <div className="flex gap-2">
+                        <input
+                          ref={fileRef}
+                          type="file"
+                          accept=".csv,text/csv,text/plain"
+                          className="hidden"
+                          onChange={importCsv}
+                        />
+                        <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
+                          <Upload className="h-4 w-4 mr-1" /> {t("groups.importCsv")}
+                        </Button>
+                        <Button size="sm" onClick={save} disabled={saving}>
+                          <Save className="h-4 w-4 mr-1" /> {t("groups.save")}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                  {mastered && (
+                    <p className="text-xs text-muted-foreground">{t("groups.managedBySync")}</p>
+                  )}
+                  <textarea
+                    className="w-full h-72 rounded border bg-background p-3 font-mono text-sm disabled:opacity-60"
+                    value={members}
+                    onChange={(e) => setMembers(e.target.value)}
+                    placeholder={t("groups.placeholder")}
+                    readOnly={mastered}
                   />
-                  <Button variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
-                    <Upload className="h-4 w-4 mr-1" /> {t("groups.importCsv")}
-                  </Button>
-                  <Button size="sm" onClick={save} disabled={saving}>
-                    <Save className="h-4 w-4 mr-1" /> {t("groups.save")}
-                  </Button>
                 </div>
-              </div>
-              <textarea
-                className="w-full h-72 rounded border bg-background p-3 font-mono text-sm"
-                value={members}
-                onChange={(e) => setMembers(e.target.value)}
-                placeholder={t("groups.placeholder")}
-              />
-            </div>
-          )}
+              )
+            })()}
         </div>
       )}
     </div>

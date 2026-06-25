@@ -36,7 +36,8 @@
     "membersError": "Üyeler yüklenemedi",
     "saved": "Üyeler kaydedildi",
     "saveError": "Üyeler kaydedilemedi",
-    "imported": "{{count}} adres içe aktarıldı"
+    "imported": "{{count}} adres içe aktarıldı",
+    "managedBySync": "Bu grup dizinden senkronize ediliyor ve burada düzenlenemez."
   },
   "common": {
     "search": "Ara",
