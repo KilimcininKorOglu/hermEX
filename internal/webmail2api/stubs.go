@@ -15,16 +15,3 @@ func (s *Server) handleBranding(w http.ResponseWriter, r *http.Request) {
 		"footer_text":   "hermEX",
 	})
 }
-
-func (s *Server) handleDiagnostics(w http.ResponseWriter, r *http.Request) {
-	s.emptyAuthed(w, r, "errors")
-}
-
-// emptyAuthed writes {key: []} for an authenticated caller (401 otherwise).
-func (s *Server) emptyAuthed(w http.ResponseWriter, r *http.Request, key string) {
-	if _, ok := s.session(r); !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{key: []any{}})
-}
