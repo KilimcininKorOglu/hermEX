@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
-import { CalendarDays, Plus, MapPin, Clock, Edit, Trash2, MoreHorizontal, Users, Repeat, List, LayoutGrid, ChevronLeft, ChevronRight, Settings2, Share2 } from "lucide-react"
+import { CalendarDays, Plus, MapPin, Clock, Edit, Trash2, MoreHorizontal, Users, Repeat, List, LayoutGrid, ChevronLeft, ChevronRight, Settings2, Share2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -423,6 +423,16 @@ export function CalendarPage() {
   const todayKey = dateKey(new Date())
   const monthLabel = cursor.toLocaleDateString(undefined, { month: "long", year: "numeric" })
 
+  // The attendee string holds both people and booked rooms; split them so the
+  // event form shows rooms as their own chips instead of mixing resource
+  // mailboxes into the people picker. The saved value keeps including rooms.
+  const roomEmailSet = new Set(rooms.map((r) => r.email.toLowerCase()))
+  const formAttendeeList = parseAttendees(form.attendees)
+  const peopleAttendees = formAttendeeList.filter((e) => !roomEmailSet.has(e.toLowerCase()))
+  const selectedRooms = rooms.filter((r) =>
+    formAttendeeList.some((e) => e.toLowerCase() === r.email.toLowerCase()),
+  )
+
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
@@ -810,8 +820,10 @@ export function CalendarPage() {
             <div className="space-y-2">
               <Label>{t("calendar.attendees")}</Label>
               <AttendeePicker
-                value={parseAttendees(form.attendees)}
-                onChange={(emails) => setForm({ ...form, attendees: emails.join(", ") })}
+                value={peopleAttendees}
+                onChange={(emails) =>
+                  setForm({ ...form, attendees: [...emails, ...selectedRooms.map((r) => r.email)].join(", ") })
+                }
                 window={
                   form.start && !form.allDay
                     ? {
@@ -857,6 +869,34 @@ export function CalendarPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                {selectedRooms.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedRooms.map((room) => (
+                      <span
+                        key={room.email}
+                        className="inline-flex items-center gap-1 rounded-md bg-secondary px-2 py-0.5 text-xs"
+                      >
+                        {room.name}
+                        {room.capacity ? ` ${t("calendar.roomSeats", { count: String(room.capacity) })}` : ""}
+                        <button
+                          type="button"
+                          className="text-muted-foreground hover:text-foreground"
+                          aria-label={`${t("common.remove")} ${room.name}`}
+                          onClick={() =>
+                            setForm((prev) => ({
+                              ...prev,
+                              attendees: parseAttendees(prev.attendees)
+                                .filter((e) => e.toLowerCase() !== room.email.toLowerCase())
+                                .join(", "),
+                            }))
+                          }
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
                 <p className="text-xs text-muted-foreground">
                   {t("calendar.roomHint")}
                 </p>
