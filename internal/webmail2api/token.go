@@ -4,6 +4,7 @@ package webmail2api
 
 import (
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -14,11 +15,23 @@ import (
 
 // sessionClaims is the authenticated identity carried in the webmail2 session
 // cookie: the user's login and the resolved mailbox path, with an expiry. The
-// cookie is HttpOnly, so the value is never read by the browser.
+// cookie is HttpOnly, so the value is never read by the browser. Jti keys the
+// server-side session record (for listing and revocation); it is omitted from
+// older tokens minted before sessions existed.
 type sessionClaims struct {
 	Email   string `json:"email"`
 	Mailbox string `json:"mbox"`
+	Jti     string `json:"jti,omitempty"`
 	Exp     int64  `json:"exp"`
+}
+
+// newJTI returns a random session id for a freshly minted token.
+func newJTI() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b[:]), nil
 }
 
 // mintToken signs the claims with HMAC-SHA256 and returns "payload.sig", both

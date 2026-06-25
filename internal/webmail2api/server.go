@@ -174,6 +174,7 @@ func (s *Server) Handler() http.Handler {
 
 	// Account-level reads (empty/default until backed).
 	mux.HandleFunc("GET /api/v1/sessions", s.handleSessions)
+	mux.HandleFunc("DELETE /api/v1/sessions/{id}", s.handleSessionRevoke)
 	mux.HandleFunc("GET /api/v1/delegations", s.handleGetDelegations)
 	mux.HandleFunc("POST /api/v1/delegations", s.handlePostDelegation)
 	mux.HandleFunc("DELETE /api/v1/delegations/{id}", s.handleDeleteDelegation)
@@ -299,6 +300,9 @@ func (s *Server) session(r *http.Request) (sessionClaims, bool) {
 	if err != nil {
 		return sessionClaims{}, false
 	}
+	if !s.sessionActive(c) {
+		return sessionClaims{}, false
+	}
 	return c, true
 }
 
@@ -319,11 +323,22 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return
 	}
-	exp := time.Now().Add(sessionTTL)
-	tok, err := mintToken(s.secret, sessionClaims{Email: req.Email, Mailbox: mbox, Exp: exp.Unix()})
+	now := time.Now()
+	exp := now.Add(sessionTTL)
+	jti, err := newJTI()
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
+	}
+	tok, err := mintToken(s.secret, sessionClaims{Email: req.Email, Mailbox: mbox, Jti: jti, Exp: exp.Unix()})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	// Record the session so the user can list and revoke it; best-effort, so a store
+	// error is logged but never fails the login (the token still authenticates).
+	if err := s.recordLoginSession(r, req.Email, jti, now, exp); err != nil {
+		log.Printf("webmail2: record login session failed: %v", err)
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
@@ -338,6 +353,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	// Revoke the server-side session so the cleared token cannot be replayed.
+	if c, ok := s.session(r); ok {
+		s.revokeCurrentSession(c)
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
 		Value:    "",

@@ -16,10 +16,6 @@ func (s *Server) handleBranding(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
-	s.emptyAuthed(w, r, "sessions")
-}
-
 func (s *Server) handleRooms(w http.ResponseWriter, r *http.Request) {
 	s.emptyAuthed(w, r, "rooms")
 }
