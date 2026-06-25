@@ -94,3 +94,29 @@ func TestCreateRoom(t *testing.T) {
 		t.Errorf("room password = %q, want empty (a resource cannot sign in)", pw)
 	}
 }
+
+// TestSearchGALRoomCapacity proves the GAL enumeration that feeds the NSPI address
+// book carries a room's seating capacity, so the address book can advertise
+// PR_EMS_AB_ROOM_CAPACITY to Outlook.
+func TestSearchGALRoomCapacity(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	cleanTables(t, db)
+	root := t.TempDir()
+	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "dom")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.CreateRoom("conf-a@hermex.test", "Conference A", filepath.Join(root, "conf"), 8, false); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := d.SearchGAL("conf-a", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Address != "conf-a@hermex.test" || entries[0].Capacity != 8 {
+		t.Errorf("SearchGAL room = %+v, want conf-a@hermex.test with Capacity 8", entries)
+	}
+}

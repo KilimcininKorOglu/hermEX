@@ -268,6 +268,10 @@ const (
 	PrEmsAbContainerID = PropTag(0xFFFD0003) // PtLong (PidTagAddressBookContainerId)
 	PrEmsAbIsMaster    = PropTag(0xFFFB000B) // PtBoolean (PidTagAddressBookIsMaster)
 	PrEmsAbMember      = PropTag(0x8009000D) // PtObject (PidTagAddressBookMember); a STAT container id selecting a list's members
+	// PrEmsAbRoomCapacity (PidTagAddressBookRoomCapacity) is a resource mailbox's
+	// seating capacity, what Outlook shows when booking a room or equipment. The NSPI
+	// layer serves it as a PtLong from the directory's per-room capacity.
+	PrEmsAbRoomCapacity = PropTag(0x08070003) // PtLong
 	// PrEmsAbThumbnailPhoto (PidTagThumbnailPhoto) is the address-book object's
 	// portrait as raw image bytes — what Outlook and OWA show for a GAL entry. The
 	// NSPI layer serves it from the mailbox's cross-protocol user-photo property.

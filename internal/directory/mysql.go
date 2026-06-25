@@ -358,11 +358,12 @@ func (d *SQLDirectory) SearchGAL(query string, limit int) ([]GALEntry, error) {
 	// per-surface filtering lives in the NSPI layer. The SQL only loads the raw
 	// mask; the address-book code applies the bit appropriate to each query.
 	const q = `
-SELECT u.username, u.display_type, u.maildir, dn.propval_str, hg.propval_str, hb.propval_str
+SELECT u.username, u.display_type, u.maildir, dn.propval_str, hg.propval_str, hb.propval_str, cap.propval_str
   FROM users u JOIN domains d ON u.domain_id = d.id
   LEFT JOIN user_properties dn ON dn.user_id = u.id AND dn.proptag = ? AND dn.order_id = 1
   LEFT JOIN user_properties hg ON hg.user_id = u.id AND hg.proptag = ? AND hg.order_id = 1
   LEFT JOIN user_properties hb ON hb.user_id = u.id AND hb.proptag = ? AND hb.order_id = 1
+  LEFT JOIN user_properties cap ON cap.user_id = u.id AND cap.proptag = ? AND cap.order_id = 1
  WHERE u.display_type IN (?, ?, ?, ?, ?)
    AND (u.maildir <> '' OR u.display_type IN (?, ?))
    AND (u.address_status & ?) = ?
@@ -371,7 +372,7 @@ SELECT u.username, u.display_type, u.maildir, dn.propval_str, hg.propval_str, hb
    AND u.username LIKE ? ESCAPE '\\'
  ORDER BY u.username
  LIMIT ?`
-	rows, err := d.db.Query(q, prDisplayName, prAttrHiddenMask, prAttrHiddenBool,
+	rows, err := d.db.Query(q, prDisplayName, prAttrHiddenMask, prAttrHiddenBool, prRoomCapacity,
 		dtMailuser, dtDistlist, dtContact, dtRoom, dtEquipment, // display_type IN
 		dtDistlist, dtContact, // maildir-exempt types (no mailbox)
 		afUserMask, afUserNormal, afDomainMask, "%"+esc+"%", limit)
@@ -383,8 +384,8 @@ SELECT u.username, u.display_type, u.maildir, dn.propval_str, hg.propval_str, hb
 	for rows.Next() {
 		var addr, maildir string
 		var displayType int
-		var name, hideMask, hideBool sql.NullString
-		if err := rows.Scan(&addr, &displayType, &maildir, &name, &hideMask, &hideBool); err != nil {
+		var name, hideMask, hideBool, capStr sql.NullString
+		if err := rows.Scan(&addr, &displayType, &maildir, &name, &hideMask, &hideBool, &capStr); err != nil {
 			return nil, err
 		}
 		display := addr
@@ -395,7 +396,11 @@ SELECT u.username, u.display_type, u.maildir, dn.propval_str, hg.propval_str, hb
 		if maildir != "" {
 			storePath = d.storePath(maildir)
 		}
-		out = append(out, GALEntry{DisplayName: display, Address: addr, DisplayType: displayType, HiddenFrom: hideMaskFromProps(hideMask, hideBool), StorePath: storePath})
+		capacity := 0
+		if capStr.Valid {
+			capacity, _ = strconv.Atoi(capStr.String)
+		}
+		out = append(out, GALEntry{DisplayName: display, Address: addr, DisplayType: displayType, HiddenFrom: hideMaskFromProps(hideMask, hideBool), StorePath: storePath, Capacity: capacity})
 	}
 	return out, rows.Err()
 }
