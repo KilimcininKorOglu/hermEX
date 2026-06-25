@@ -19,8 +19,9 @@ type roomLister interface {
 }
 
 type roomJSON struct {
-	Email string `json:"email"`
-	Name  string `json:"name"`
+	Email    string `json:"email"`
+	Name     string `json:"name"`
+	Capacity int    `json:"capacity,omitempty"`
 }
 
 // handleRooms lists the organization's bookable rooms for the room picker.
@@ -41,7 +42,7 @@ func (s *Server) handleRooms(w http.ResponseWriter, r *http.Request) {
 	}
 	rooms := make([]roomJSON, 0, len(entries))
 	for _, e := range entries {
-		rooms = append(rooms, roomJSON{Email: e.Address, Name: e.DisplayName})
+		rooms = append(rooms, roomJSON{Email: e.Address, Name: e.DisplayName, Capacity: e.Capacity})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"rooms": rooms})
 }

@@ -1,0 +1,33 @@
+{{define "rooms.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>Rooms &amp; Equipment</h1>
+<p class="hint">Resource mailboxes the calendar room picker offers. A resource cannot sign in; booking it reserves its calendar.</p>
+<form class="create-form" hx-post="/admin/ui/rooms" hx-target="#rooms-panel" hx-swap="outerHTML"
+      hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<input type="email" name="email" placeholder="boardroom@hermex.test" required>
+<input type="text" name="displayname" placeholder="Display name">
+<input type="number" name="capacity" placeholder="Seats" min="0">
+<select name="kind">
+<option value="room">Room</option>
+<option value="equipment">Equipment</option>
+</select>
+<button type="submit">Add resource</button>
+</form>
+{{template "rooms-panel" .}}
+</main>
+</div>
+{{template "foot" .}}{{end}}
+
+{{define "rooms-panel"}}<div id="rooms-panel">
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<table class="grid">
+<thead><tr><th>Name</th><th>Address</th><th>Type</th><th>Capacity</th><th></th></tr></thead>
+<tbody>
+{{range .Rooms}}<tr><td>{{.DisplayName}}</td><td>{{.Address}}</td><td>{{if eq .DisplayType 8}}Equipment{{else}}Room{{end}}</td><td>{{if .Capacity}}{{.Capacity}}{{end}}</td><td><form class="delete-form" hx-post="/admin/ui/rooms/{{.Address}}/delete" hx-target="#rooms-panel" hx-swap="outerHTML" hx-confirm="Delete {{.Address}}? This cannot be undone." hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'><button type="submit" class="danger">Delete</button></form></td></tr>
+{{else}}<tr><td colspan="5" class="empty">No rooms yet.</td></tr>
+{{end}}
+</tbody>
+</table>
+</div>{{end}}

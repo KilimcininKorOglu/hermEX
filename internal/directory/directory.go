@@ -157,6 +157,9 @@ type GALEntry struct {
 	// (DT_MAILUSER, the zero value) or a distribution list (DT_DISTLIST). The NSPI
 	// layer renders the right address-book object type and EntryID flavor from it.
 	DisplayType int
+	// Capacity is a resource mailbox's seating capacity (rooms/equipment), 0 when
+	// unset or not applicable. Only ListRooms populates it; GAL search leaves it 0.
+	Capacity int
 	// HiddenFrom is the address-book hide mask (the PtLong form of PR_ATTR_HIDDEN):
 	// a directory holds the raw bits and the NSPI layer applies them per surface.
 	// Zero means visible everywhere. The static directory never hides.

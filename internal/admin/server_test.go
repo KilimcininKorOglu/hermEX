@@ -24,6 +24,11 @@ type fakeDir struct {
 	perms              []directory.Permission
 	domains            []directory.DomainInfo
 	users              []directory.UserInfo
+	rooms              []directory.GALEntry
+	createdRoom        string
+	createdRoomName    string
+	createdRoomCap     int
+	createdRoomEquip   bool
 	aliases            []directory.AliasInfo
 	maildirs           []string
 	verdicts           []directory.SpamVerdict
@@ -763,6 +768,14 @@ func (f *fakeDir) UpdateContact(email, displayName string) (bool, error) {
 func (f *fakeDir) DeleteContact(email string) (bool, error) {
 	f.deletedContact = email
 	return !f.deleteContactMissing, nil
+}
+func (f *fakeDir) ListRooms() ([]directory.GALEntry, error) { return f.rooms, nil }
+func (f *fakeDir) CreateRoom(email, displayName, maildir string, capacity int, equipment bool) (int64, error) {
+	if f.createErr != nil {
+		return 0, f.createErr
+	}
+	f.createdRoom, f.createdRoomName, f.createdRoomCap, f.createdRoomEquip = email, displayName, capacity, equipment
+	return 1, nil
 }
 func (f *fakeDir) GetUserProperties(string) (map[uint32]string, error) { return f.userProps, nil }
 func (f *fakeDir) SetUserProperties(username string, props map[uint32]string) (bool, error) {
