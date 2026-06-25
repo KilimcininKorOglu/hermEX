@@ -137,6 +137,8 @@
     "movedToTrash": "E-posta çöp kutusuna taşındı",
     "failedToDelete": "E-posta silinemedi",
     "forwardedMessage": "İletilen ileti",
+    "popOut": "Yeni sekmede aç",
+    "replyQuoteHeader": "{{date}} tarihinde {{sender}} şunu yazdı:",
     "markedUnread": "Okunmadı olarak işaretlendi",
     "failedToMarkUnread": "Okunmadı olarak işaretlenemedi",
     "flaggedForFollowUp": "Takip için işaretlendi",
@@ -385,6 +387,8 @@
       "richTextDescription": "Biçimlendirmeli zengin metin düzenleyiciyi kullanın",
       "autoCorrect": "Otomatik düzeltme",
       "autoCorrectDescription": "Yazımı otomatik olarak düzeltin",
+      "omitOriginal": "Yanıtta alıntılama",
+      "omitOriginalDescription": "Yanıtlarken orijinal iletiyi dahil etme",
       "spellCheck": "Yazım denetimi",
       "spellCheckDescription": "Yazarken yazımı denetleyin"
     },

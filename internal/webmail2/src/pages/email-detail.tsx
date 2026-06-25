@@ -6,6 +6,7 @@ import {
   Reply,
   ReplyAll,
   Forward,
+  ExternalLink,
   Mail,
   FolderInput,
   Flag,
@@ -117,6 +118,8 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
   // Remote images are blocked on open (tracking-pixel protection); the reader
   // offers a one-time "show images" once the user chooses to load them.
   const [showImages, setShowImages] = useState(false)
+  // When set (a saved preference), a reply does not quote the original message.
+  const [omitOriginal, setOmitOriginal] = useState(false)
   const [newLabel, setNewLabel] = useState("")
   const [labelEditing, setLabelEditing] = useState(false)
   const [invite, setInvite] = useState<MeetingInvite | null>(null)
@@ -142,6 +145,9 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
         if (cancelled) return
         setCopyFolders((res.mailboxes ?? []).filter((m) => !STANDARD_FOLDERS.has(m.toLowerCase())))
       })
+      .catch(() => {})
+    api.getPreferences()
+      .then((res) => { if (!cancelled) setOmitOriginal(res.preferences?.omitOriginalOnReply === true) })
       .catch(() => {})
     return () => { cancelled = true }
   }, [])
@@ -297,6 +303,9 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
       replyTo: email.fromEmail,
       subject: email.subject.startsWith("Re: ") ? email.subject : `Re: ${email.subject}`,
     })
+    if (!omitOriginal) {
+      params.set("body", `\n\n${t("emailDetail.replyQuoteHeader", { sender: email.from, date: email.date })}\n${email.content}`)
+    }
     navigate(`/compose?${params.toString()}`)
   }
 
@@ -320,6 +329,9 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
       subject: email.subject.startsWith("Re: ") ? email.subject : `Re: ${email.subject}`,
     })
     if (others.length > 0) params.set("cc", others.join(","))
+    if (!omitOriginal) {
+      params.set("body", `\n\n${t("emailDetail.replyQuoteHeader", { sender: email.from, date: email.date })}\n${email.content}`)
+    }
     navigate(`/compose?${params.toString()}`)
   }
 
@@ -523,6 +535,9 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
               <Button variant="ghost" size="sm" onClick={handleForward} title={t("common.forward")}>
                 <Forward className="h-4 w-4 mr-1" />
                 {t("common.forward")}
+              </Button>
+              <Button variant="ghost" size="icon" onClick={() => window.open(`/email/${id}`, "_blank", "noopener")} title={t("emailDetail.popOut")}>
+                <ExternalLink className="h-4 w-4" />
               </Button>
               {email.folder === "Sent" && (
                 <Button variant="ghost" size="sm" onClick={handleRecall} title={t("emailDetail.recall")}>

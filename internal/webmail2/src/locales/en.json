@@ -137,6 +137,8 @@
     "movedToTrash": "Email moved to trash",
     "failedToDelete": "Failed to delete email",
     "forwardedMessage": "Forwarded message",
+    "popOut": "Open in a new tab",
+    "replyQuoteHeader": "On {{date}}, {{sender}} wrote:",
     "markedUnread": "Marked as unread",
     "failedToMarkUnread": "Failed to mark as unread",
     "flaggedForFollowUp": "Flagged for follow-up",
@@ -385,6 +387,8 @@
       "richTextDescription": "Use rich text editor with formatting",
       "autoCorrect": "Auto-correct",
       "autoCorrectDescription": "Automatically correct spelling",
+      "omitOriginal": "Do not quote on reply",
+      "omitOriginalDescription": "Leave out the original message when you reply",
       "spellCheck": "Spell check",
       "spellCheckDescription": "Check spelling while typing"
     },

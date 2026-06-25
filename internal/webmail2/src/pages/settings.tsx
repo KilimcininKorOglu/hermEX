@@ -378,6 +378,7 @@ export function SettingsPage() {
     // Composition
     richTextMode: true,
     autoCorrect: true,
+    omitOriginalOnReply: false,
     spellCheck: true,
   })
 
@@ -1074,6 +1075,13 @@ export function SettingsPage() {
             description={t("settings.composition.autoCorrectDescription")}
             checked={settings.autoCorrect}
             onChange={() => handleToggle("autoCorrect")}
+          />
+          <Separator />
+          <SettingRow
+            title={t("settings.composition.omitOriginal")}
+            description={t("settings.composition.omitOriginalDescription")}
+            checked={settings.omitOriginalOnReply}
+            onChange={() => handleToggle("omitOriginalOnReply")}
           />
           <Separator />
           <SettingRow
