@@ -283,20 +283,21 @@ func (s *Store) RunRules(folderID int64, nowUnix int64) (RuleRunResult, error) {
 // delivery-time entry point. The message is already filed in the inbox before
 // this runs, so a caller on the delivery path must treat a returned error as
 // advisory (log and continue) rather than failing delivery — a rule must never
-// be able to make a sender retry. A mailbox with no inbox rules is a no-op. Any
-// forward actions are returned for the delivery path to enqueue (the store cannot
-// send mail); the caller applies the loop/abuse guards before sending.
-func (s *Store) ApplyInboxRules(m MessageInfo, nowUnix int64) ([]ForwardRequest, error) {
+// be able to make a sender retry. A mailbox with no inbox rules is a no-op. The
+// outbound actions (forwards, reject bounces, vacation auto-replies) are returned
+// for the delivery path to enqueue (the store cannot send mail), and the caller
+// applies the loop/abuse guards before sending.
+func (s *Store) ApplyInboxRules(m MessageInfo, nowUnix int64) (InboxRuleActions, error) {
 	inbox := int64(mapi.PrivateFIDInbox)
 	rules, err := s.ListRules(inbox)
 	if err != nil {
-		return nil, err
+		return InboxRuleActions{}, err
 	}
 	if len(rules) == 0 {
-		return nil, nil
+		return InboxRuleActions{}, nil
 	}
-	_, forwards, err := s.applyRulesToMessage(inbox, m, rules, s.oofActive(nowUnix))
-	return forwards, err
+	_, acts, err := s.applyRulesToMessage(inbox, m, rules, s.oofActive(nowUnix))
+	return acts, err
 }
 
 // oofActive reports whether the mailbox's out-of-office is active at nowUnix,
@@ -316,10 +317,10 @@ func (s *Store) oofActive(nowUnix int64) bool {
 // message's byte size is injected as PR_MESSAGE_SIZE so size conditions work
 // against a value the property bag does not itself store. It reports whether any
 // rule acted on the message.
-func (s *Store) applyRulesToMessage(folderID int64, m MessageInfo, rules []Rule, oofActive bool) (bool, []ForwardRequest, error) {
+func (s *Store) applyRulesToMessage(folderID int64, m MessageInfo, rules []Rule, oofActive bool) (bool, InboxRuleActions, error) {
 	props, err := s.GetMessageProperties(m.ID)
 	if err != nil {
-		return false, nil, err
+		return false, InboxRuleActions{}, err
 	}
 	props.Set(mapi.PrMessageSize, int32(m.Size))
 	// Inject the out-of-office marker exactly when OOF is active, so a RuleOOFActive
@@ -329,7 +330,7 @@ func (s *Store) applyRulesToMessage(folderID int64, m MessageInfo, rules []Rule,
 	}
 
 	acted := false
-	var forwards []ForwardRequest
+	var eff InboxRuleActions
 	for _, r := range rules {
 		if !r.Enabled() {
 			continue
@@ -337,52 +338,53 @@ func (s *Store) applyRulesToMessage(folderID int64, m MessageInfo, rules []Rule,
 		if !evalRestriction(r.Condition, props) {
 			continue
 		}
-		terminal, fwds, err := s.applyRuleActions(folderID, m.UID, r.Actions)
-		forwards = append(forwards, fwds...)
+		terminal, sub, err := s.applyRuleActions(folderID, m.UID, r.Actions)
+		eff.merge(sub)
 		if err != nil {
-			return acted, forwards, err
+			return acted, eff, err
 		}
 		acted = true
 		if terminal || r.State&mapi.RuleStateExitLevel != 0 {
-			return acted, forwards, nil
+			return acted, eff, nil
 		}
 	}
-	return acted, forwards, nil
+	return acted, eff, nil
 }
 
 // applyRuleActions applies a matched rule's action blocks to a message in
 // srcFolder. It returns terminal=true once an action moves or deletes the
 // message, since its uid in srcFolder is then no longer valid and no further
 // rule may run against it. Unsupported action types are skipped.
-func (s *Store) applyRuleActions(srcFolder int64, uid uint32, acts mapi.RuleActions) (bool, []ForwardRequest, error) {
-	var forwards []ForwardRequest
+func (s *Store) applyRuleActions(srcFolder int64, uid uint32, acts mapi.RuleActions) (bool, InboxRuleActions, error) {
+	var eff InboxRuleActions
 	for _, b := range acts.Blocks {
 		switch b.Type {
 		case mapi.OpMarkAsRead:
 			cur, err := s.MessageFlags(srcFolder, uid)
 			if err != nil {
-				return false, forwards, err
+				return false, eff, err
 			}
 			if cur&FlagSeen == 0 {
 				if err := s.SetMessageFlags(srcFolder, uid, cur|FlagSeen); err != nil {
-					return false, forwards, err
+					return false, eff, err
 				}
 			}
 		case mapi.OpTag:
-			// Set the property the action carries (the editor uses it to categorize:
-			// the named Keywords property the categories UI reads). Non-terminal.
+			// Set the property the action carries. The editor uses it to categorize
+			// (the named Keywords property), mark important (PR_IMPORTANCE), or flag
+			// (PR_FLAG_STATUS). Non-terminal.
 			tv, ok := b.Data.(mapi.TaggedPropVal)
 			if !ok {
 				continue
 			}
 			mi, err := s.MessageByUID(srcFolder, uid)
 			if err != nil {
-				return false, forwards, err
+				return false, eff, err
 			}
 			var pv mapi.PropertyValues
 			pv.Set(tv.Tag, tv.Value)
 			if err := s.SetMessageProperties(mi.ID, pv); err != nil {
-				return false, forwards, err
+				return false, eff, err
 			}
 		case mapi.OpForward:
 			// Forward is non-terminal: the message stays in srcFolder. The send
@@ -390,7 +392,23 @@ func (s *Store) applyRuleActions(srcFolder int64, uid uint32, acts mapi.RuleActi
 			// sends the original received bytes, so the store collects only the
 			// addresses here.
 			if addrs := forwardAddresses(b.Data); len(addrs) > 0 {
-				forwards = append(forwards, ForwardRequest{To: addrs})
+				eff.Forwards = append(eff.Forwards, ForwardRequest{To: addrs})
+			}
+		case mapi.OpDeferAction:
+			// hermEX rides reject/vacation in the opaque deferred-action slot: a
+			// 1-byte kind tag + the reject reason or vacation body. The store only
+			// collects the request (it cannot send mail); the delivery path sends the
+			// bounce/auto-reply under its guards. Non-terminal.
+			payload, ok := b.Data.([]byte)
+			if !ok || len(payload) == 0 {
+				continue
+			}
+			text := string(payload[1:])
+			switch payload[0] {
+			case deferKindReject:
+				eff.Bounces = append(eff.Bounces, BounceRequest{Reason: text})
+			case deferKindVacation:
+				eff.AutoReplies = append(eff.AutoReplies, AutoReplyRequest{Message: text})
 			}
 		case mapi.OpCopy:
 			dst, ok := moveTargetFolder(b.Data)
@@ -398,7 +416,7 @@ func (s *Store) applyRuleActions(srcFolder int64, uid uint32, acts mapi.RuleActi
 				continue
 			}
 			if err := s.copyMessage(srcFolder, uid, dst); err != nil {
-				return false, forwards, err
+				return false, eff, err
 			}
 			// Copy is non-terminal: the message stays in srcFolder, so later
 			// blocks and rules still apply to the original.
@@ -408,22 +426,22 @@ func (s *Store) applyRuleActions(srcFolder int64, uid uint32, acts mapi.RuleActi
 				continue
 			}
 			if err := s.moveMessage(srcFolder, uid, dst); err != nil {
-				return false, forwards, err
+				return false, eff, err
 			}
-			return true, forwards, nil
+			return true, eff, nil
 		case mapi.OpDelete:
 			trash := int64(mapi.PrivateFIDDeletedItems)
 			if srcFolder == trash {
 				if err := s.DeleteMessage(srcFolder, uid); err != nil {
-					return false, forwards, err
+					return false, eff, err
 				}
 			} else if err := s.moveMessage(srcFolder, uid, trash); err != nil {
-				return false, forwards, err
+				return false, eff, err
 			}
-			return true, forwards, nil
+			return true, eff, nil
 		}
 	}
-	return false, forwards, nil
+	return false, eff, nil
 }
 
 // moveTargetFolder extracts the destination folder id from a same-store
@@ -509,6 +527,34 @@ func RuleFromContains(text string) mapi.Restriction {
 // against a property the delivered message actually carries.
 func RuleBodyContains(text string) mapi.Restriction {
 	return contentContains(mapi.PrBody, text)
+}
+
+// RuleToContains matches messages whose To list contains text (case-insensitive),
+// tested against PR_DISPLAY_TO the MIME import sets from the To header.
+func RuleToContains(text string) mapi.Restriction {
+	return contentContains(mapi.PrDisplayTo, text)
+}
+
+// RuleCcContains matches messages whose Cc list contains text (case-insensitive),
+// tested against PR_DISPLAY_CC the MIME import sets from the Cc header.
+func RuleCcContains(text string) mapi.Restriction {
+	return contentContains(mapi.PrDisplayCc, text)
+}
+
+// RuleHeaderContains matches messages whose raw transport headers contain text
+// (case-insensitive). PR_TRANSPORT_MESSAGE_HEADERS carries the delivered headers,
+// so a rule can match any header line.
+func RuleHeaderContains(text string) mapi.Restriction {
+	return contentContains(mapi.PrTransportMessageHeaders, text)
+}
+
+// RuleFlagged matches messages flagged for follow-up (PR_FLAG_STATUS == 2).
+func RuleFlagged() mapi.Restriction {
+	return mapi.Restriction{Type: mapi.ResProperty, Value: mapi.PropertyRestriction{
+		Relop:   mapi.RelopEQ,
+		PropTag: mapi.PrFlagStatus,
+		PropVal: mapi.TaggedPropVal{Tag: mapi.PrFlagStatus, Value: int32(2)},
+	}}
 }
 
 // RuleAll combines sub-conditions so the rule matches only when EVERY one matches
@@ -610,6 +656,39 @@ type ForwardRequest struct {
 	To []string
 }
 
+// BounceRequest is a reject a matched rule asked for: the delivery path returns a
+// bounce (DSN) carrying Reason to the message's sender. The store collects it (it
+// cannot send mail) and the delivery path applies the same backscatter guards a
+// bounce needs before sending.
+type BounceRequest struct {
+	Reason string
+}
+
+// AutoReplyRequest is a vacation/auto-reply a matched rule asked for: the delivery
+// path sends a single reply carrying Message to the sender, under the same
+// suppression guards (never reply to a bounce/list/auto-submitted message).
+type AutoReplyRequest struct {
+	Message string
+}
+
+// InboxRuleActions bundles the outbound actions matched rules asked the delivery
+// path to perform. The store cannot send mail, so it collects these and returns
+// them; RunRules ("apply rules now") discards them so re-running rules never
+// re-sends old mail, while the delivery path enqueues them after its loop/abuse
+// guards.
+type InboxRuleActions struct {
+	Forwards    []ForwardRequest
+	Bounces     []BounceRequest
+	AutoReplies []AutoReplyRequest
+}
+
+// merge appends another rule's collected actions onto this set.
+func (a *InboxRuleActions) merge(o InboxRuleActions) {
+	a.Forwards = append(a.Forwards, o.Forwards...)
+	a.Bounces = append(a.Bounces, o.Bounces...)
+	a.AutoReplies = append(a.AutoReplies, o.AutoReplies...)
+}
+
 // RuleForwardAction forwards (redirects) a matching message to the given
 // addresses: an OpForward block whose recipients carry their SMTP addresses.
 func RuleForwardAction(addresses ...string) mapi.ActionBlock {
@@ -620,6 +699,34 @@ func RuleForwardAction(addresses ...string) mapi.ActionBlock {
 		}})
 	}
 	return mapi.ActionBlock{Type: mapi.OpForward, Data: mapi.ForwardDelegateAction{Recipients: recips}}
+}
+
+// deferKind tags a deferred-action payload so the executor can tell a reject from a
+// vacation. The MS rule wire format gives OpBounce only a uint32 code and OpOOFReply
+// only a stored-template reference (neither carries free text), so hermEX rides the
+// reject reason / vacation body in OpDeferAction's opaque bytes (the one free-text
+// action slot), prefixed by a 1-byte kind tag.
+const (
+	deferKindReject   byte = 'R'
+	deferKindVacation byte = 'V'
+)
+
+// RuleRejectAction rejects a message: the delivery path returns a bounce (DSN)
+// carrying reason to the sender. See deferKind for why this is an OpDeferAction.
+func RuleRejectAction(reason string) mapi.ActionBlock {
+	return mapi.ActionBlock{Type: mapi.OpDeferAction, Data: append([]byte{deferKindReject}, reason...)}
+}
+
+// RuleVacationAction auto-replies to the sender with message, under the delivery
+// path's suppression guards. See deferKind for why this is an OpDeferAction.
+func RuleVacationAction(message string) mapi.ActionBlock {
+	return mapi.ActionBlock{Type: mapi.OpDeferAction, Data: append([]byte{deferKindVacation}, message...)}
+}
+
+// RuleSetPropAction sets one typed property on a matching message (an OpTag block):
+// e.g. PR_IMPORTANCE for "mark important" or PR_FLAG_STATUS for "flag".
+func RuleSetPropAction(tag mapi.PropTag, value any) mapi.ActionBlock {
+	return mapi.ActionBlock{Type: mapi.OpTag, Data: mapi.TaggedPropVal{Tag: tag, Value: value}}
 }
 
 // RuleTagAction sets a property on a matching message (an OpTag block). The editor

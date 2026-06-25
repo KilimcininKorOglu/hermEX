@@ -195,6 +195,18 @@ func main() {
 			log.Printf("hermex-mta: enqueue rule forward for <%s>: %v", owner, err)
 		}
 	}
+	// Reject bounces and vacation auto-replies a delivery-time inbox rule generated:
+	// enqueued from the owning mailbox (DKIM domain) under the same outbound cap. The
+	// store built the bytes and applied the backscatter/loop guards.
+	mta.OnRuleSend = func(owner string, to []string, raw []byte) {
+		if !outboundLimiter.Allow(owner) {
+			log.Printf("hermex-mta: rule send for <%s> deferred by the outbound cap", owner)
+			return
+		}
+		if err := spool.Enqueue(owner, to, raw, time.Now()); err != nil {
+			log.Printf("hermex-mta: enqueue rule send for <%s>: %v", owner, err)
+		}
+	}
 	// Spam-history retention: how many of the most recent scored verdicts the
 	// spam_history table keeps. It is read at startup and re-read every minute so an
 	// admin's change applies without a restart.

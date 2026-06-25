@@ -314,12 +314,26 @@ export interface Filter {
   enabled: boolean
   matchAll: boolean
   conditions: FilterCondition[]
+  // exceptions narrow the rule: it does NOT fire if any exception matches.
+  exceptions?: FilterCondition[]
   actions: FilterAction[]
   priority: number
 }
 
 // FilterField mirrors semcore.RuleConditionKind.
-export type FilterField = 'from' | 'to' | 'subject' | 'body' | 'header' | 'size' | 'flag' | 'address'
+export type FilterField =
+  | 'from'
+  | 'to'
+  | 'cc'
+  | 'subject'
+  | 'body'
+  | 'header'
+  | 'size'
+  | 'flag'
+  | 'address'
+  | 'importance'
+  | 'sensitivity'
+  | 'oof'
 
 // FilterOperator mirrors semcore.RuleMatchType.
 export type FilterOperator = 'contains' | 'equals' | 'startsWith' | 'endsWith' | 'matches'
@@ -346,6 +360,7 @@ export type FilterActionType =
   | 'addHeader'
   | 'deleteHeader'
   | 'flag'
+  | 'categorize'
   | 'stop'
   | 'vacation'
 
@@ -366,6 +381,7 @@ export interface FilterInput {
   enabled?: boolean
   matchAll: boolean
   conditions: FilterCondition[]
+  exceptions?: FilterCondition[]
   actions: FilterAction[]
 }
 

@@ -535,10 +535,11 @@ func TestRuleForwardActionReturnsRequest(t *testing.T) {
 		t.Fatalf("AddRule: %v", err)
 	}
 
-	forwards, err := s.ApplyInboxRules(m, 0)
+	acts, err := s.ApplyInboxRules(m, 0)
 	if err != nil {
 		t.Fatalf("ApplyInboxRules: %v", err)
 	}
+	forwards := acts.Forwards
 	if len(forwards) != 1 {
 		t.Fatalf("got %d forward requests, want 1", len(forwards))
 	}
@@ -547,6 +548,46 @@ func TestRuleForwardActionReturnsRequest(t *testing.T) {
 	}
 	if _, err := s.MessageByUID(inbox, m.UID); err != nil {
 		t.Errorf("forwarded message should remain in inbox (forward is non-terminal): %v", err)
+	}
+}
+
+// TestRuleNewConditionsAndOutboundActions proves the conditions and outbound
+// actions added for full rule support actually FIRE end to end: a "to" condition
+// matches PR_DISPLAY_TO (set by the import from the To header), a "header"
+// condition matches PR_TRANSPORT_MESSAGE_HEADERS, a reject action surfaces a
+// BounceRequest carrying its reason, and a vacation action surfaces an
+// AutoReplyRequest carrying its body. A condition whose backing property is not
+// populated would silently never match, so this guards against that.
+func TestRuleNewConditionsAndOutboundActions(t *testing.T) {
+	s := openSeededStore(t)
+	inbox := int64(mapi.PrivateFIDInbox)
+	// ruleMsg sets To: bob@hermex.test; the extra header drives the header condition.
+	m := deliverTo(t, s, inbox, ruleMsg("Status", "lead@acme.com", "X-Team: platform"))
+
+	if _, err := s.AddRule(Rule{
+		FolderID: inbox, Name: "reject mail to bob", State: mapi.RuleStateEnabled,
+		Condition: RuleToContains("bob@hermex.test"),
+		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{RuleRejectAction("not accepted")}},
+	}); err != nil {
+		t.Fatalf("AddRule reject: %v", err)
+	}
+	if _, err := s.AddRule(Rule{
+		FolderID: inbox, Name: "vacation on team header", State: mapi.RuleStateEnabled,
+		Condition: RuleHeaderContains("X-Team"),
+		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{RuleVacationAction("I am away")}},
+	}); err != nil {
+		t.Fatalf("AddRule vacation: %v", err)
+	}
+
+	acts, err := s.ApplyInboxRules(m, 0)
+	if err != nil {
+		t.Fatalf("ApplyInboxRules: %v", err)
+	}
+	if len(acts.Bounces) != 1 || acts.Bounces[0].Reason != "not accepted" {
+		t.Errorf("bounces = %+v, want one reason %q (to condition + reject must fire)", acts.Bounces, "not accepted")
+	}
+	if len(acts.AutoReplies) != 1 || acts.AutoReplies[0].Message != "I am away" {
+		t.Errorf("autoReplies = %+v, want one %q (header condition + vacation must fire)", acts.AutoReplies, "I am away")
 	}
 }
 

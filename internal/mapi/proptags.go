@@ -134,6 +134,8 @@ const (
 	PrRTFCompressed            = PropTag(0x10090102) // PtBinary
 	PrTransportMessageHeaders  = PropTag(0x007D001F) // PtUnicode
 	PrTransportMessageHeadersA = PropTag(0x007D001E) // PtString8
+	PrDisplayTo                = PropTag(0x0E04001F) // PtUnicode (PidTagDisplayTo)
+	PrDisplayCc                = PropTag(0x0E03001F) // PtUnicode (PidTagDisplayCc)
 	PrAttachDataBin            = PropTag(0x37010102) // PtBinary (PidTagAttachDataBinary)
 	PrAttachDataObj            = PropTag(0x3701000D) // PtObject
 	// PrSmimeOriginal is the provider-defined message property (0x6774) holding

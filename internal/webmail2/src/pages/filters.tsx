@@ -31,13 +31,40 @@ type TFunc = (key: string, params?: Record<string, string>) => string
 const conditionFields = (t: TFunc): { value: FilterCondition["field"]; label: string }[] => [
   { value: "from", label: t("common.from") },
   { value: "to", label: t("common.to") },
+  { value: "cc", label: t("filters.field.cc") },
   { value: "subject", label: t("common.subject") },
   { value: "body", label: t("filters.field.body") },
   { value: "header", label: t("filters.field.header") },
   { value: "size", label: t("filters.field.size") },
   { value: "flag", label: t("filters.field.flag") },
   { value: "address", label: t("filters.field.address") },
+  { value: "importance", label: t("filters.field.importance") },
+  { value: "sensitivity", label: t("filters.field.sensitivity") },
+  { value: "oof", label: t("filters.field.oof") },
 ]
+
+// Condition fields that take no value: a flag/out-of-office test, or an importance/
+// sensitivity level chosen from a fixed list rather than typed.
+const VALUELESS_FIELDS = new Set<FilterCondition["field"]>(["flag", "oof"])
+const LEVEL_FIELDS = new Set<FilterCondition["field"]>(["importance", "sensitivity"])
+
+// The fixed level options offered for importance and sensitivity conditions.
+const levelOptions = (
+  t: TFunc,
+  field: FilterCondition["field"]
+): { value: string; label: string }[] =>
+  field === "importance"
+    ? [
+        { value: "high", label: t("filters.importance.high") },
+        { value: "normal", label: t("filters.importance.normal") },
+        { value: "low", label: t("filters.importance.low") },
+      ]
+    : [
+        { value: "normal", label: t("filters.sensitivity.normal") },
+        { value: "personal", label: t("filters.sensitivity.personal") },
+        { value: "private", label: t("filters.sensitivity.private") },
+        { value: "confidential", label: t("filters.sensitivity.confidential") },
+      ]
 
 const conditionOperators = (t: TFunc): { value: FilterCondition["operator"]; label: string }[] => [
   { value: "contains", label: t("filters.operator.contains") },
@@ -62,6 +89,7 @@ const actionTypes = (t: TFunc): { value: FilterAction["type"]; label: string }[]
   { value: "reject", label: t("filters.action.reject") },
   { value: "addHeader", label: t("filters.action.addHeader") },
   { value: "deleteHeader", label: t("filters.action.deleteHeader") },
+  { value: "categorize", label: t("filters.action.categorize") },
   { value: "delete", label: t("filters.action.delete") },
   { value: "stop", label: t("filters.action.stop") },
   { value: "vacation", label: t("filters.action.vacation") },
@@ -84,8 +112,101 @@ function emptyDraft(): FilterInput {
     enabled: true,
     matchAll: true,
     conditions: [emptyCondition()],
+    exceptions: [],
     actions: [emptyAction()],
   }
+}
+
+// ConditionRows renders the editable field/operator/value rows shared by a rule's
+// conditions and its exceptions. Importance/sensitivity pick a level from a list,
+// flag/out-of-office take no value, and the operator only applies to text fields.
+function ConditionRows({
+  conditions,
+  onUpdate,
+  onRemove,
+  allowEmpty,
+  t,
+}: {
+  conditions: FilterCondition[]
+  onUpdate: (index: number, patch: Partial<FilterCondition>) => void
+  onRemove: (index: number) => void
+  allowEmpty: boolean
+  t: TFunc
+}) {
+  return (
+    <>
+      {conditions.map((cond, i) => {
+        const isLevel = LEVEL_FIELDS.has(cond.field)
+        const isValueless = VALUELESS_FIELDS.has(cond.field)
+        const isText = !isLevel && !isValueless
+        return (
+          <div key={i} className="flex flex-wrap items-center gap-2">
+            <Select value={cond.field} onValueChange={(v) => onUpdate(i, { field: v as FilterCondition["field"] })}>
+              <SelectTrigger className="w-[120px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {conditionFields(t).map((f) => (
+                  <SelectItem key={f.value} value={f.value}>
+                    {f.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {isText && (
+              <Select value={cond.operator} onValueChange={(v) => onUpdate(i, { operator: v as FilterCondition["operator"] })}>
+                <SelectTrigger className="w-[130px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {conditionOperators(t).map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            {cond.field === "header" && (
+              <Input
+                className="w-[140px]"
+                placeholder={t("filters.headerNamePlaceholder")}
+                value={cond.headerName ?? ""}
+                onChange={(e) => onUpdate(i, { headerName: e.target.value })}
+              />
+            )}
+            {isLevel && (
+              <Select value={cond.value || "normal"} onValueChange={(v) => onUpdate(i, { value: v })}>
+                <SelectTrigger className="min-w-[140px] flex-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {levelOptions(t, cond.field).map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+            {isText && (
+              <Input
+                className="min-w-[140px] flex-1"
+                placeholder={t("filters.valuePlaceholder")}
+                value={cond.value}
+                onChange={(e) => onUpdate(i, { value: e.target.value })}
+              />
+            )}
+            {(allowEmpty || conditions.length > 1) && (
+              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onRemove(i)}>
+                <X className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        )
+      })}
+    </>
+  )
 }
 
 export function FiltersPage() {
@@ -202,6 +323,7 @@ export function FiltersPage() {
       enabled: filter.enabled,
       matchAll: filter.matchAll,
       conditions: filter.conditions.length ? filter.conditions : [emptyCondition()],
+      exceptions: filter.exceptions ?? [],
       actions: filter.actions.length ? filter.actions : [emptyAction()],
     })
     setDialogOpen(true)
@@ -214,6 +336,21 @@ export function FiltersPage() {
     }))
   }
 
+  const removeCondition = (index: number) => {
+    setDraft((d) => ({ ...d, conditions: d.conditions.filter((_, i) => i !== index) }))
+  }
+
+  const updateException = (index: number, patch: Partial<FilterCondition>) => {
+    setDraft((d) => ({
+      ...d,
+      exceptions: (d.exceptions ?? []).map((c, i) => (i === index ? { ...c, ...patch } : c)),
+    }))
+  }
+
+  const removeException = (index: number) => {
+    setDraft((d) => ({ ...d, exceptions: (d.exceptions ?? []).filter((_, i) => i !== index) }))
+  }
+
   const updateAction = (index: number, patch: Partial<FilterAction>) => {
     setDraft((d) => ({
       ...d,
@@ -224,8 +361,12 @@ export function FiltersPage() {
   const validate = (): string | null => {
     if (!draft.name.trim()) return t("filters.validation.nameRequired")
     if (draft.conditions.length === 0) return t("filters.validation.conditionRequired")
-    for (const c of draft.conditions) {
-      if (!c.value.trim()) return t("filters.validation.conditionValue")
+    // Exceptions are optional, but any present row must be as complete as a condition.
+    for (const c of [...draft.conditions, ...(draft.exceptions ?? [])]) {
+      // flag/out-of-office take no value; importance/sensitivity default to a level.
+      if (!VALUELESS_FIELDS.has(c.field) && !LEVEL_FIELDS.has(c.field) && !c.value.trim()) {
+        return t("filters.validation.conditionValue")
+      }
       if (c.field === "header" && !c.headerName?.trim()) {
         return t("filters.validation.headerName")
       }
@@ -272,6 +413,7 @@ export function FiltersPage() {
           name: draft.name,
           matchAll: draft.matchAll,
           conditions: draft.conditions,
+          exceptions: draft.exceptions,
           actions: draft.actions,
         })
         toast.success(t("filters.toast.created"))
@@ -523,73 +665,41 @@ export function FiltersPage() {
                   {t("common.add")}
                 </Button>
               </div>
-              {draft.conditions.map((cond, i) => (
-                <div key={i} className="flex flex-wrap items-center gap-2">
-                  <Select
-                    value={cond.field}
-                    onValueChange={(v) =>
-                      updateCondition(i, { field: v as FilterCondition["field"] })
-                    }
-                  >
-                    <SelectTrigger className="w-[120px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {conditionFields(t).map((f) => (
-                        <SelectItem key={f.value} value={f.value}>
-                          {f.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Select
-                    value={cond.operator}
-                    onValueChange={(v) =>
-                      updateCondition(i, { operator: v as FilterCondition["operator"] })
-                    }
-                  >
-                    <SelectTrigger className="w-[130px]">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {conditionOperators(t).map((o) => (
-                        <SelectItem key={o.value} value={o.value}>
-                          {o.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {cond.field === "header" && (
-                    <Input
-                      className="w-[140px]"
-                      placeholder={t("filters.headerNamePlaceholder")}
-                      value={cond.headerName ?? ""}
-                      onChange={(e) => updateCondition(i, { headerName: e.target.value })}
-                    />
-                  )}
-                  <Input
-                    className="min-w-[140px] flex-1"
-                    placeholder={t("filters.valuePlaceholder")}
-                    value={cond.value}
-                    onChange={(e) => updateCondition(i, { value: e.target.value })}
-                  />
-                  {draft.conditions.length > 1 && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8"
-                      onClick={() =>
-                        setDraft({
-                          ...draft,
-                          conditions: draft.conditions.filter((_, idx) => idx !== i),
-                        })
-                      }
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              ))}
+              <ConditionRows
+                conditions={draft.conditions}
+                onUpdate={updateCondition}
+                onRemove={removeCondition}
+                allowEmpty={false}
+                t={t}
+              />
+            </div>
+
+            {/* Exceptions: the rule does NOT fire if any exception matches (optional) */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label>{t("filters.exceptions")}</Label>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setDraft({ ...draft, exceptions: [...(draft.exceptions ?? []), emptyCondition()] })
+                  }
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  {t("common.add")}
+                </Button>
+              </div>
+              {(draft.exceptions ?? []).length === 0 ? (
+                <p className="text-xs text-muted-foreground">{t("filters.noExceptions")}</p>
+              ) : (
+                <ConditionRows
+                  conditions={draft.exceptions ?? []}
+                  onUpdate={updateException}
+                  onRemove={removeException}
+                  allowEmpty={true}
+                  t={t}
+                />
+              )}
             </div>
 
             {/* Actions */}
@@ -656,6 +766,14 @@ export function FiltersPage() {
                       placeholder={t("filters.autoReplyPlaceholder")}
                       value={action.message ?? ""}
                       onChange={(e) => updateAction(i, { message: e.target.value })}
+                    />
+                  )}
+                  {action.type === "categorize" && (
+                    <Input
+                      className="min-w-[140px] flex-1"
+                      placeholder={t("filters.categoriesPlaceholder")}
+                      value={action.target ?? ""}
+                      onChange={(e) => updateAction(i, { target: e.target.value })}
                     />
                   )}
                   {(action.type === "addHeader" || action.type === "deleteHeader") && (

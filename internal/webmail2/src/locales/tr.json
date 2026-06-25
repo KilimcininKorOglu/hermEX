@@ -722,12 +722,30 @@
     "actionSingular": "işlem",
     "actionPlural": "işlem",
     "field": {
+      "cc": "Cc",
       "body": "Gövde",
       "header": "Başlık",
       "size": "Boyut",
       "flag": "İşaret",
-      "address": "Adres"
+      "address": "Adres",
+      "importance": "Önem",
+      "sensitivity": "Gizlilik",
+      "oof": "Ofis dışı açık"
     },
+    "importance": {
+      "high": "Yüksek",
+      "normal": "Normal",
+      "low": "Düşük"
+    },
+    "sensitivity": {
+      "normal": "Normal",
+      "personal": "Kişisel",
+      "private": "Özel",
+      "confidential": "Gizli"
+    },
+    "exceptions": "İstisnalar",
+    "noExceptions": "İstisna yok. Kural, koşulları eşleştiğinde her zaman uygulanır.",
+    "categoriesPlaceholder": "Kategoriler (virgülle ayrılmış)",
     "operator": {
       "contains": "içerir",
       "equals": "eşittir",
@@ -747,6 +765,7 @@
       "reject": "Mesajla reddet",
       "addHeader": "Başlık ekle",
       "deleteHeader": "Başlık sil",
+      "categorize": "Kategorize et",
       "delete": "Mesajı sil",
       "stop": "İşlemeyi durdur",
       "vacation": "Otomatik yanıt"

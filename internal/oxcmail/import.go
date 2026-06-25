@@ -101,8 +101,17 @@ func enumMailHead(hdr textproto.MIMEHeader, msg *Message) {
 	if v := hdr.Get("Sender"); v != "" {
 		parseAddress(v, senderTags, &msg.Props)
 	}
+	// PR_DISPLAY_TO/CC carry the recipient lists as message-level strings (the raw
+	// header, names and addresses), so a rule's "to"/"cc" condition can match them:
+	// restrictions evaluate the message property bag, not the recipient sub-objects.
+	if to := strings.Join(hdr.Values("To"), ", "); to != "" {
+		msg.Props.Set(mapi.PrDisplayTo, to)
+	}
 	for _, v := range hdr.Values("To") {
 		parseAddresses(v, mapi.RecipTo, msg)
+	}
+	if cc := strings.Join(hdr.Values("Cc"), ", "); cc != "" {
+		msg.Props.Set(mapi.PrDisplayCc, cc)
 	}
 	for _, v := range hdr.Values("Cc") {
 		parseAddresses(v, mapi.RecipCc, msg)

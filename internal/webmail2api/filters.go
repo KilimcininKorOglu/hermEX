@@ -32,6 +32,7 @@ type filterJSON struct {
 	Enabled    bool               `json:"enabled"`
 	MatchAll   bool               `json:"matchAll"`
 	Conditions []filterCondJSON   `json:"conditions"`
+	Exceptions []filterCondJSON   `json:"exceptions,omitempty"`
 	Actions    []filterActionJSON `json:"actions"`
 	Priority   int                `json:"priority"`
 }
@@ -204,31 +205,114 @@ func rebuildInboxRules(st *objectstore.Store, filters []filterJSON) {
 
 // filterCondition maps a filter's supported conditions to a MAPI restriction.
 func filterCondition(f filterJSON) (mapi.Restriction, bool) {
-	var conds []mapi.Restriction
-	for _, c := range f.Conditions {
-		switch c.Field {
-		case "subject":
-			conds = append(conds, objectstore.RuleSubjectContains(c.Value))
-		case "from", "address":
-			conds = append(conds, objectstore.RuleFromContains(c.Value))
-		case "body":
-			conds = append(conds, objectstore.RuleBodyContains(c.Value))
-		case "size":
-			if n, err := strconv.Atoi(strings.TrimSpace(c.Value)); err == nil {
-				conds = append(conds, objectstore.RuleSizeAtLeast(n))
-			}
-		}
+	conds := compileConds(f.Conditions)
+	exc := compileConds(f.Exceptions)
+	if len(conds) == 0 && len(exc) == 0 {
+		return mapi.Restriction{}, false
 	}
+	var parts []mapi.Restriction
 	switch len(conds) {
 	case 0:
-		return mapi.Restriction{}, false
+		// Exceptions only: the rule applies to everything except the exceptions.
 	case 1:
-		return conds[0], true
+		parts = append(parts, conds[0])
 	default:
 		if f.MatchAll {
-			return objectstore.RuleAll(conds...), true
+			parts = append(parts, objectstore.RuleAll(conds...))
+		} else {
+			parts = append(parts, objectstore.RuleAny(conds...))
 		}
-		return objectstore.RuleAny(conds...), true
+	}
+	if len(exc) > 0 {
+		// "Except when": the rule does NOT fire if ANY exception matches.
+		ex := exc[0]
+		if len(exc) > 1 {
+			ex = objectstore.RuleAny(exc...)
+		}
+		parts = append(parts, objectstore.RuleNot(ex))
+	}
+	if len(parts) == 1 {
+		return parts[0], true
+	}
+	return objectstore.RuleAll(parts...), true
+}
+
+// compileConds maps each supported condition to a MAPI restriction, dropping
+// unsupported ones.
+func compileConds(cs []filterCondJSON) []mapi.Restriction {
+	var out []mapi.Restriction
+	for _, c := range cs {
+		if r, ok := compileCond(c); ok {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// compileCond maps one filter condition to a MAPI restriction. The substring
+// matcher is used for text fields (mirroring the prior behavior); importance,
+// sensitivity, flag, and out-of-office are equality/existence tests.
+func compileCond(c filterCondJSON) (mapi.Restriction, bool) {
+	switch c.Field {
+	case "subject":
+		return objectstore.RuleSubjectContains(c.Value), true
+	case "from", "address":
+		return objectstore.RuleFromContains(c.Value), true
+	case "to":
+		return objectstore.RuleToContains(c.Value), true
+	case "cc":
+		return objectstore.RuleCcContains(c.Value), true
+	case "body":
+		return objectstore.RuleBodyContains(c.Value), true
+	case "header":
+		// PR_TRANSPORT_MESSAGE_HEADERS holds the raw headers, so a value substring
+		// (or the header name when no value is given) matches any header line.
+		v := c.Value
+		if v == "" {
+			v = c.HeaderName
+		}
+		return objectstore.RuleHeaderContains(v), true
+	case "flag":
+		return objectstore.RuleFlagged(), true
+	case "importance":
+		return objectstore.RuleImportanceIs(importanceLevel(c.Value)), true
+	case "sensitivity":
+		return objectstore.RuleSensitivityIs(sensitivityLevel(c.Value)), true
+	case "oof":
+		return objectstore.RuleOOFActive(), true
+	case "size":
+		if n, err := strconv.Atoi(strings.TrimSpace(c.Value)); err == nil {
+			return objectstore.RuleSizeAtLeast(n), true
+		}
+	}
+	return mapi.Restriction{}, false
+}
+
+// importanceLevel maps a filter's importance value (high/normal/low or 0-2) to a
+// PR_IMPORTANCE level, defaulting to normal.
+func importanceLevel(v string) int {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "high", "2":
+		return int(mapi.ImportanceHigh)
+	case "low", "0":
+		return int(mapi.ImportanceLow)
+	default:
+		return int(mapi.ImportanceNormal)
+	}
+}
+
+// sensitivityLevel maps a filter's sensitivity value (normal/personal/private/
+// confidential or 0-3) to a PR_SENSITIVITY level, defaulting to none/normal.
+func sensitivityLevel(v string) int {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "personal", "1":
+		return int(mapi.SensitivityPersonal)
+	case "private", "2":
+		return int(mapi.SensitivityPrivate)
+	case "confidential", "3":
+		return int(mapi.SensitivityConfidential)
+	default:
+		return int(mapi.SensitivityNone)
 	}
 }
 
@@ -249,17 +333,56 @@ func filterActions(st *objectstore.Store, f filterJSON) (blocks []mapi.ActionBlo
 			blocks = append(blocks, objectstore.RuleDeleteAction())
 		case "markRead":
 			blocks = append(blocks, objectstore.RuleMarkReadAction())
-		case "forward", "redirect":
+		case "forward", "redirect", "forwardAsAttachment":
+			// All three redirect the same bytes to the target; "as attachment" is a
+			// presentation flavor the store-level forward does not distinguish.
 			if a.ForwardTo != "" {
 				blocks = append(blocks, objectstore.RuleForwardAction(a.ForwardTo))
 			} else if a.Target != "" {
 				blocks = append(blocks, objectstore.RuleForwardAction(a.Target))
+			}
+		case "markImportant":
+			blocks = append(blocks, objectstore.RuleSetPropAction(mapi.PrImportance, int32(mapi.ImportanceHigh)))
+		case "flag":
+			blocks = append(blocks, objectstore.RuleSetPropAction(mapi.PrFlagStatus, int32(2)))
+		case "categorize":
+			if tag, err := st.KeywordsPropTag(); err == nil {
+				if cats := splitCategories(a.Target); len(cats) > 0 {
+					blocks = append(blocks, objectstore.RuleTagAction(tag, cats...))
+				}
+			}
+		case "reject":
+			blocks = append(blocks, objectstore.RuleRejectAction(rejectReason(a)))
+		case "vacation":
+			if msg := strings.TrimSpace(a.Message); msg != "" {
+				blocks = append(blocks, objectstore.RuleVacationAction(msg))
 			}
 		case "stop":
 			stop = true
 		}
 	}
 	return blocks, stop, len(blocks) > 0 || stop
+}
+
+// splitCategories splits a comma-separated category target into trimmed,
+// non-empty category names.
+func splitCategories(target string) []string {
+	var out []string
+	for p := range strings.SplitSeq(target, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// rejectReason is the text a reject bounce returns to the sender, falling back to a
+// generic refusal when the rule supplies none.
+func rejectReason(a filterActionJSON) string {
+	if r := strings.TrimSpace(a.Message); r != "" {
+		return r
+	}
+	return "Message refused by a recipient rule"
 }
 
 // resolveFilterFolder resolves a filter target (a folder slug or display name) to

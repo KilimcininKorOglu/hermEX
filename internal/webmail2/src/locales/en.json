@@ -722,12 +722,30 @@
     "actionSingular": "action",
     "actionPlural": "actions",
     "field": {
+      "cc": "Cc",
       "body": "Body",
       "header": "Header",
       "size": "Size",
       "flag": "Flag",
-      "address": "Address"
+      "address": "Address",
+      "importance": "Importance",
+      "sensitivity": "Sensitivity",
+      "oof": "Out of office is on"
     },
+    "importance": {
+      "high": "High",
+      "normal": "Normal",
+      "low": "Low"
+    },
+    "sensitivity": {
+      "normal": "Normal",
+      "personal": "Personal",
+      "private": "Private",
+      "confidential": "Confidential"
+    },
+    "exceptions": "Exceptions",
+    "noExceptions": "No exceptions. The rule applies whenever its conditions match.",
+    "categoriesPlaceholder": "Categories (comma-separated)",
     "operator": {
       "contains": "contains",
       "equals": "equals",
@@ -747,6 +765,7 @@
       "reject": "Reject with message",
       "addHeader": "Add header",
       "deleteHeader": "Delete header",
+      "categorize": "Categorize",
       "delete": "Delete message",
       "stop": "Stop processing",
       "vacation": "Vacation reply"

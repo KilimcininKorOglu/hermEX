@@ -708,23 +708,56 @@ func applyInboxRules(st *objectstore.Store, m objectstore.MessageInfo, owner, en
 			log.Printf("mta: inbox rule pass panicked for uid %d, skipped: %v", m.UID, r)
 		}
 	}()
-	forwards, err := st.ApplyInboxRules(m, received.Unix())
+	acts, err := st.ApplyInboxRules(m, received.Unix())
 	if err != nil {
 		log.Printf("mta: inbox rule pass failed for uid %d, skipped: %v", m.UID, err)
 	}
-	if OnRuleForward == nil || len(forwards) == 0 {
-		return
-	}
 	// The guards inspect the ORIGINAL received message — not the store's re-exported
-	// copy, which drops Auto-Submitted and our marker — and the forward sends those
-	// same original bytes (a faithful redirect). Never forward a bounce,
-	// auto-submitted, bulk/list, role-mailbox, self, or already-forwarded message.
+	// copy, which drops Auto-Submitted and our marker. Never forward, reject, or
+	// auto-reply to a bounce, auto-submitted, bulk/list, role-mailbox, or self
+	// message (backscatter and loops).
 	msg, perr := mail.ReadMessage(bytes.NewReader(raw))
-	if perr != nil || autoReplySuppressed(msg.Header, envelopeFrom, owner) || msg.Header.Get(forwardMarkerHeader) != "" {
+	suppressed := perr != nil || autoReplySuppressed(msg.Header, envelopeFrom, owner)
+
+	// Forward sends the original bytes (a faithful redirect); the marker breaks
+	// forward-to-forward loops on a redelivery of the same message.
+	if OnRuleForward != nil && len(acts.Forwards) > 0 && !suppressed && msg.Header.Get(forwardMarkerHeader) == "" {
+		marked := append([]byte(forwardMarkerHeader+": "+owner+"\r\n"), raw...)
+		for _, fwd := range acts.Forwards {
+			OnRuleForward(owner, fwd.To, marked)
+		}
+	}
+
+	// Reject bounces and vacation auto-replies are sent back to the sender, so they
+	// need a real return address and the same backscatter guard. OnRuleSend enqueues
+	// them from the owner's mailbox under the outbound abuse cap.
+	if OnRuleSend == nil || suppressed || envelopeFrom == "" {
 		return
 	}
-	marked := append([]byte(forwardMarkerHeader+": "+owner+"\r\n"), raw...)
-	for _, fwd := range forwards {
-		OnRuleForward(owner, fwd.To, marked)
+	for _, b := range acts.Bounces {
+		OnRuleSend(owner, []string{envelopeFrom}, Bounce(domainPart(owner), envelopeFrom, owner, b.Reason, received))
 	}
+	for _, ar := range acts.AutoReplies {
+		reply := buildAutoReply(owner, envelopeFrom, ruleVacationSubject, ar.Message, msg.Header.Get("Message-ID"), received)
+		OnRuleSend(owner, []string{envelopeFrom}, reply)
+	}
+}
+
+// ruleVacationSubject is the Subject of a vacation auto-reply a delivery-time inbox
+// rule sends.
+const ruleVacationSubject = "Automatic reply"
+
+// OnRuleSend, when set, enqueues an outbound message a delivery-time inbox rule
+// generated (a reject bounce or a vacation auto-reply): the owning mailbox (for the
+// outbound abuse cap and DKIM domain), the recipients, and the message bytes. It is
+// wired by cmd/mta to the relay spool, like OnRuleForward, so the store stays free
+// of any mail-send dependency.
+var OnRuleSend func(owner string, to []string, raw []byte)
+
+// domainPart returns the domain of an address, or the whole string if it has no "@".
+func domainPart(addr string) string {
+	if i := strings.LastIndex(addr, "@"); i >= 0 {
+		return addr[i+1:]
+	}
+	return addr
 }
