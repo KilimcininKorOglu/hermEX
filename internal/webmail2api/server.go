@@ -292,19 +292,25 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
 		return
 	}
-	hasAvatar := false
+	hasAvatar, onboarded := false, false
 	if st, err := objectstore.Open(c.Mailbox); err == nil {
 		if photo, _ := st.UserPhoto(); photo != nil {
 			hasAvatar = true
 		}
+		onboarded = onboardedFlag(st)
 		st.Close()
 	}
+	// Timezone + locale come from the directory so the SPA restores the chosen
+	// zone on reload instead of clearing it; empty means follow-the-device.
+	timezone, locale := s.userLocale(c.Email)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"authenticated": true,
 		"email":         c.Email,
 		"isAdmin":       false,
 		"has_avatar":    hasAvatar,
-		"onboarded":     true,
+		"onboarded":     onboarded,
+		"timezone":      timezone,
+		"locale":        locale,
 	})
 }
 

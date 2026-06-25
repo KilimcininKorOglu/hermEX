@@ -639,6 +639,19 @@ func (d *SQLDirectory) SetPassword(username, password string) (bool, error) {
 	return n > 0, err
 }
 
+// SetUserLocale persists a user's IANA timezone and language locale, the
+// webmail-editable subset of their directory record, leaving every other column
+// untouched. It reports whether a matching row was updated.
+func (d *SQLDirectory) SetUserLocale(username, timezone, lang string) (bool, error) {
+	res, err := d.db.Exec(`UPDATE users SET timezone = ?, lang = ? WHERE username = ?`,
+		timezone, lang, strings.ToLower(strings.TrimSpace(username)))
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
 // UserDetail is a user's full administrative record for the detail/edit view.
 // Status is the user-status nibble of address_status (the domain-status bits,
 // 0x30, are kept separate); LDAP is true when the account is LDAP-mastered.

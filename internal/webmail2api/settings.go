@@ -272,13 +272,52 @@ func (s *Server) handleDeleteTemplate(w http.ResponseWriter, r *http.Request) {
 
 // ---- Profile ----
 
+// userLocaleReader / userLocaleWriter are the narrow directory capabilities
+// webmail2 uses to read and persist the caller's OWN timezone + language locale
+// (the users.timezone / users.lang columns). SQLDirectory satisfies both; when a
+// capability is absent the locale degrades to empty (follow-the-device) instead
+// of failing.
+type userLocaleReader interface {
+	GetUser(string) (directory.UserDetail, bool, error)
+}
+
+type userLocaleWriter interface {
+	SetUserLocale(username, timezone, lang string) (bool, error)
+}
+
+// userLocale returns the caller's persisted timezone + language locale from the
+// directory, both empty when the capability or the user is unavailable.
+func (s *Server) userLocale(email string) (timezone, locale string) {
+	if rd, ok := s.auth.(userLocaleReader); ok {
+		if u, found, err := rd.GetUser(email); err == nil && found {
+			return u.Timezone, u.Lang
+		}
+	}
+	return "", ""
+}
+
+// onboardedFlag reports whether the caller has completed first-run onboarding.
+// The flag lives in the shared webmail settings blob; an absent flag means a
+// fresh account that has not onboarded yet, so the onboarding gate still fires.
+func onboardedFlag(st *objectstore.Store) bool {
+	m := sharedSettings(st)
+	if raw, ok := m["onboarded"]; ok {
+		var b bool
+		if json.Unmarshal(raw, &b) == nil {
+			return b
+		}
+	}
+	return false
+}
+
 func (s *Server) handleGetProfile(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.session(r)
 	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
-	prof := map[string]any{"email": c.Email, "onboarded": true}
+	tz, locale := s.userLocale(c.Email)
+	prof := map[string]any{"email": c.Email, "timezone": tz, "locale": locale}
 	// The display name, title, department, and phone live in the directory's user
 	// properties (keyed by full proptag) — the same fields the GAL and Outlook show.
 	if dir, ok := s.auth.(interface {
@@ -292,11 +331,13 @@ func (s *Server) handleGetProfile(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	// Storage usage from the store; quota limits are best-effort (0 = unlimited).
+	// Storage usage + onboarding flag from the store; quota limits are best-effort
+	// (0 = unlimited), and onboarded defaults false for a fresh account.
 	if st, err := objectstore.Open(c.Mailbox); err == nil {
 		if used, err := st.MailboxSize(); err == nil {
 			prof["quota_used"] = used
 		}
+		prof["onboarded"] = onboardedFlag(st)
 		st.Close()
 	}
 	writeJSON(w, http.StatusOK, prof)
@@ -326,6 +367,11 @@ func (s *Server) handlePutProfile(w http.ResponseWriter, r *http.Request) {
 		Title       *string `json:"title"`
 		Department  *string `json:"department"`
 		Phone       *string `json:"phone"`
+		Timezone    *string `json:"timezone"`
+		Locale      *string `json:"locale"`
+		Onboarded   *bool   `json:"onboarded"`
+		// theme is presentation-only and client-persisted (cookie); the server
+		// intentionally does not store it, so it is not decoded here.
 	}
 	if err := decodeJSON(r, &prof); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
@@ -349,6 +395,33 @@ func (s *Server) handlePutProfile(w http.ResponseWriter, r *http.Request) {
 			SetUserProperties(string, map[uint32]string) (bool, error)
 		}); ok {
 			_, _ = setter.SetUserProperties(c.Email, props)
+		}
+	}
+	// Timezone + locale persist to the directory (users.timezone / users.lang) so
+	// they survive a reload and are available cross-protocol. Read-merge-write the
+	// pair: an absent field keeps its current value rather than clearing it.
+	if prof.Timezone != nil || prof.Locale != nil {
+		tz, locale := s.userLocale(c.Email)
+		if prof.Timezone != nil {
+			tz = *prof.Timezone
+		}
+		if prof.Locale != nil {
+			locale = *prof.Locale
+		}
+		if wr, ok := s.auth.(userLocaleWriter); ok {
+			_, _ = wr.SetUserLocale(c.Email, tz, locale)
+		}
+	}
+	// The onboarded flag lives in the shared webmail settings blob (per-mailbox
+	// store), set true when the user finishes the first-run onboarding step.
+	if prof.Onboarded != nil {
+		if st, err := objectstore.Open(c.Mailbox); err == nil {
+			m := sharedSettings(st)
+			if b, err := json.Marshal(*prof.Onboarded); err == nil {
+				m["onboarded"] = b
+				_ = saveSharedSettings(st, m)
+			}
+			st.Close()
 		}
 	}
 	// Return the re-read profile so the SPA reflects the persisted directory state.
