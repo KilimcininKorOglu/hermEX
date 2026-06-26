@@ -176,11 +176,15 @@ func (c *conn) cmdExpunge(tag string) {
 // removed message, numbered against the shrinking mailbox (RFC 3501 §7.4.1).
 func (c *conn) doExpunge(emit bool) {
 	var survivors []objectstore.MessageInfo
+	var vanished []uint32
 	seq := uint32(1)
 	for _, m := range c.sel.msgs {
 		if m.Flags&objectstore.FlagDeleted != 0 {
-			if err := c.curStore().SoftDeleteMessage(c.sel.id, m.UID); err == nil && emit {
-				c.untagged("%d EXPUNGE", seq) // removed; the next message takes this slot
+			if err := c.curStore().SoftDeleteMessage(c.sel.id, m.UID); err == nil {
+				vanished = append(vanished, m.UID)
+				if emit && !c.qresync {
+					c.untagged("%d EXPUNGE", seq) // removed; the next message takes this slot
+				}
 			}
 			continue
 		}
@@ -188,6 +192,11 @@ func (c *conn) doExpunge(emit bool) {
 		seq++
 	}
 	c.sel.msgs = survivors
+	// QRESYNC (RFC 7162): one VANISHED line carries the expunged UIDs in place of the
+	// per-message EXPUNGE responses.
+	if emit && c.qresync && len(vanished) > 0 {
+		c.untagged("VANISHED %s", esearchSet(vanished))
+	}
 	c.flush()
 }
 
@@ -214,11 +223,15 @@ func (c *conn) cmdUIDExpunge(tag string, args []token) {
 	}
 	max := c.sel.maxUID()
 	var survivors []objectstore.MessageInfo
+	var vanished []uint32
 	seq := uint32(1)
 	for _, m := range c.sel.msgs {
 		if m.Flags&objectstore.FlagDeleted != 0 && set.contains(m.UID, max) {
 			if err := c.curStore().SoftDeleteMessage(c.sel.id, m.UID); err == nil {
-				c.untagged("%d EXPUNGE", seq)
+				vanished = append(vanished, m.UID)
+				if !c.qresync {
+					c.untagged("%d EXPUNGE", seq)
+				}
 			}
 			continue
 		}
@@ -226,6 +239,9 @@ func (c *conn) cmdUIDExpunge(tag string, args []token) {
 		seq++
 	}
 	c.sel.msgs = survivors
+	if c.qresync && len(vanished) > 0 {
+		c.untagged("VANISHED %s", esearchSet(vanished))
+	}
 	c.flush()
 	c.ok(tag, "UID EXPUNGE completed")
 }

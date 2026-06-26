@@ -99,11 +99,9 @@ func (s *Store) softDeleteRow(messageID int64) error {
 		return err
 	}
 
-	// Drop the index row last; the object row and eml stay for recovery.
-	if _, err := s.idxdb.Exec(`DELETE FROM messages WHERE message_id=?`, messageID); err != nil {
-		return err
-	}
-	if _, err := s.idxdb.Exec(`DELETE FROM mapping WHERE message_id=?`, messageID); err != nil {
+	// Record the removal for QRESYNC and drop the index row last; the object row and
+	// eml stay for recovery.
+	if err := s.recordVanishedAndDrop(messageID); err != nil {
 		return err
 	}
 	// A soft delete leaves every live view (the index row is gone), so consumers

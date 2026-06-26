@@ -443,6 +443,56 @@ func TestIMAPCondstore(t *testing.T) {
 	}
 }
 
+// TestIMAPQResync covers QRESYNC (RFC 7162): EXPUNGE is reported as VANISHED once
+// enabled, and a fresh SELECT (QRESYNC ...) reports the UIDs gone since the client's
+// modseq as VANISHED (EARLIER).
+func TestIMAPQResync(t *testing.T) {
+	c, _ := startServer(t)
+	c.mustOK("a1", "LOGIN alice secret")
+
+	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "QRESYNC") {
+		t.Errorf("CAPABILITY missing QRESYNC: %s", caps)
+	}
+
+	// Baseline: learn the mailbox UIDVALIDITY and HIGHESTMODSEQ before any expunge.
+	sel := strings.Join(c.mustOK("a2", "SELECT INBOX (CONDSTORE)"), "\n")
+	uidv := parseNumAfter(t, sel, "UIDVALIDITY ")
+	base := parseNumAfter(t, sel, "HIGHESTMODSEQ ")
+
+	// With QRESYNC on, an expunge is reported as VANISHED, not per-message EXPUNGE.
+	c.mustOK("a3", "ENABLE QRESYNC")
+	c.mustOK("a4", `STORE 1 +FLAGS (\Deleted)`)
+	exp := strings.Join(c.mustOK("a5", "EXPUNGE"), " ")
+	if !strings.Contains(exp, "VANISHED 1") || strings.Contains(exp, "1 EXPUNGE") {
+		t.Errorf("QRESYNC EXPUNGE = %q, want \"VANISHED 1\" and no per-message EXPUNGE", exp)
+	}
+
+	// A fresh SELECT (QRESYNC ...) with the pre-expunge modseq names the gone UID.
+	rsel := strings.Join(c.mustOK("a6", fmt.Sprintf("SELECT INBOX (QRESYNC (%d %d))", uidv, base)), "\n")
+	if !strings.Contains(rsel, "VANISHED (EARLIER) 1") {
+		t.Errorf("SELECT (QRESYNC) = %q, want \"VANISHED (EARLIER) 1\"", rsel)
+	}
+}
+
+// parseNumAfter extracts the run of digits immediately following prefix.
+func parseNumAfter(t *testing.T, s, prefix string) uint64 {
+	t.Helper()
+	i := strings.Index(s, prefix)
+	if i < 0 {
+		t.Fatalf("no %q in %q", prefix, s)
+	}
+	rest := s[i+len(prefix):]
+	j := 0
+	for j < len(rest) && rest[j] >= '0' && rest[j] <= '9' {
+		j++
+	}
+	n, err := strconv.ParseUint(rest[:j], 10, 64)
+	if err != nil {
+		t.Fatalf("bad number after %q in %q: %v", prefix, s, err)
+	}
+	return n
+}
+
 // parseModseq extracts the n from the first "MODSEQ (n)" in an IMAP response.
 func parseModseq(t *testing.T, s string) uint64 {
 	t.Helper()

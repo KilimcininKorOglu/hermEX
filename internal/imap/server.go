@@ -25,7 +25,7 @@ import (
 // the lexer accepts non-synchronizing literals; AUTH=PLAIN because the server
 // implements the SASL PLAIN mechanism; IDLE (RFC 2177) because the server pushes
 // real-time mailbox updates while a client idles.
-const capabilities = "IMAP4rev1 LITERAL+ NAMESPACE AUTH=PLAIN AUTH=LOGIN IDLE CHILDREN ID UNSELECT UIDPLUS MOVE SPECIAL-USE QUOTA ESEARCH MULTIAPPEND SORT THREAD=ORDEREDSUBJECT THREAD=REFERENCES BINARY ENABLE CONDSTORE"
+const capabilities = "IMAP4rev1 LITERAL+ NAMESPACE AUTH=PLAIN AUTH=LOGIN IDLE CHILDREN ID UNSELECT UIDPLUS MOVE SPECIAL-USE QUOTA ESEARCH MULTIAPPEND SORT THREAD=ORDEREDSUBJECT THREAD=REFERENCES BINARY ENABLE CONDSTORE QRESYNC"
 
 // idlePollCadence is the fallback poll interval during IDLE when the push relay is
 // absent or a wake is missed — the degradation floor that keeps IDLE emitting
@@ -164,6 +164,13 @@ type conn struct {
 	compressed bool          // COMPRESS DEFLATE is active on the link
 	fw         *flate.Writer // DEFLATE writer wrapping nc when compressed; nil otherwise
 	condstore  bool          // CONDSTORE/QRESYNC enabled: FETCH/STORE carry MODSEQ
+	qresync    bool          // QRESYNC enabled: EXPUNGE is reported as VANISHED
+
+	// qr* hold a pending SELECT (QRESYNC ...) request, consumed by emitSelected to
+	// emit VANISHED (EARLIER) and the changed-message FETCH before the tagged OK.
+	qrActive      bool
+	qrUIDValidity uint32
+	qrModSeq      uint64
 }
 
 // caps returns the CAPABILITY list for this connection's current state. STARTTLS
@@ -530,6 +537,10 @@ func (c *conn) cmdSelect(tag string, args []token, examine bool) {
 	// mode for this and every later command (RFC 7162).
 	if selectEnablesCondstore(args) {
 		c.condstore = true
+	}
+	if uv, ms, ok := parseQResync(args); ok {
+		c.qresync = true
+		c.qrActive, c.qrUIDValidity, c.qrModSeq = true, uv, ms
 	}
 	if sub, isPub := isPublicName(name); isPub {
 		c.selectPublic(tag, name, sub, examine)

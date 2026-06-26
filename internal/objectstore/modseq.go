@@ -1,6 +1,9 @@
 package objectstore
 
-import "database/sql"
+import (
+	"database/sql"
+	"errors"
+)
 
 // CONDSTORE/QRESYNC (RFC 7162) modification sequences. modseq is an IMAP-local
 // monotonic counter held in the index (one sequence space per folder); it is
@@ -37,6 +40,63 @@ func (s *Store) MessageModSeqs(folderID int64) (map[uint32]uint64, error) {
 			return nil, err
 		}
 		out[uint32(uid)] = uint64(ms)
+	}
+	return out, rows.Err()
+}
+
+// recordVanishedAndDrop records a message's removal in the QRESYNC ledger (with a
+// fresh modseq) and drops its IMAP index rows, in one transaction. A message that
+// is not in the IMAP index (a non-mail object) is simply a no-op. CONDSTORE
+// HIGHESTMODSEQ also advances here, so an expunge is a tracked change.
+func (s *Store) recordVanishedAndDrop(messageID int64) error {
+	tx, err := s.idxdb.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var fid, uid int64
+	err = tx.QueryRow(`SELECT folder_id, uid FROM messages WHERE message_id=?`, messageID).Scan(&fid, &uid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return tx.Commit() // not indexed; nothing to record or drop
+	}
+	if err != nil {
+		return err
+	}
+	ms, err := nextModSeq(tx, fid)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO vanished (folder_id, uid, modseq) VALUES (?, ?, ?)
+		 ON CONFLICT(folder_id, uid) DO UPDATE SET modseq=excluded.modseq`,
+		fid, uid, ms); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM messages WHERE message_id=?`, messageID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`DELETE FROM mapping WHERE message_id=?`, messageID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// VanishedSince returns the UIDs expunged from a folder with a vanish-modseq greater
+// than sinceModSeq, in UID order (QRESYNC VANISHED EARLIER, RFC 7162).
+func (s *Store) VanishedSince(folderID int64, sinceModSeq uint64) ([]uint32, error) {
+	rows, err := s.idxdb.Query(
+		`SELECT uid FROM vanished WHERE folder_id=? AND modseq>? ORDER BY uid`, folderID, int64(sinceModSeq))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []uint32
+	for rows.Next() {
+		var uid int64
+		if err := rows.Scan(&uid); err != nil {
+			return nil, err
+		}
+		out = append(out, uint32(uid))
 	}
 	return out, rows.Err()
 }

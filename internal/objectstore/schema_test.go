@@ -62,7 +62,7 @@ func TestOpenCreatesSchema(t *testing.T) {
 		t.Errorf("object store tables:\n got  %v\n want %v", got, wantObjects)
 	}
 
-	wantIndex := []string{"folders", "mapping", "messages"}
+	wantIndex := []string{"folders", "mapping", "messages", "vanished"}
 	if got := tableNames(t, s.idxdb); !slices.Equal(got, wantIndex) {
 		t.Errorf("index tables:\n got  %v\n want %v", got, wantIndex)
 	}

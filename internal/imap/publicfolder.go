@@ -212,6 +212,12 @@ func (c *conn) emitSelected(tag string, sel *selectedMailbox, examine bool) {
 	if c.condstore {
 		c.untagged("OK [HIGHESTMODSEQ %d] modseq", c.highestModSeq())
 	}
+	// QRESYNC SELECT (RFC 7162): emit VANISHED (EARLIER) and the changed-message
+	// FETCH before the tagged OK, then clear the pending request.
+	if c.qrActive {
+		c.emitQResync(sel)
+		c.qrActive = false
+	}
 	verb := "SELECT"
 	if examine {
 		verb = "EXAMINE"

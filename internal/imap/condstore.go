@@ -20,9 +20,13 @@ func (c *conn) cmdEnable(tag string, args []token) {
 	var enabled []string
 	for _, a := range args {
 		switch strings.ToUpper(a.val) {
-		case "CONDSTORE", "QRESYNC":
+		case "CONDSTORE":
 			c.condstore = true
-			enabled = append(enabled, strings.ToUpper(a.val))
+			enabled = append(enabled, "CONDSTORE")
+		case "QRESYNC":
+			c.condstore = true
+			c.qresync = true
+			enabled = append(enabled, "QRESYNC")
 		}
 	}
 	if len(enabled) > 0 {
@@ -53,6 +57,45 @@ func selectEnablesCondstore(args []token) bool {
 		}
 	}
 	return false
+}
+
+// parseQResync extracts a SELECT (QRESYNC (uidvalidity modseq ...)) parameter
+// (RFC 7162), returning the client's last-known UIDVALIDITY and modseq. Any
+// known-uid / seq-match data that follows is accepted and ignored — the server
+// resolves VANISHED and changes from the modseq alone.
+func parseQResync(args []token) (uidvalidity uint32, modseq uint64, present bool) {
+	for i, t := range args {
+		if t.kind == tAtom && strings.EqualFold(t.val, "QRESYNC") {
+			if i+3 < len(args) && args[i+1].kind == tLParen {
+				uv, e1 := strconv.ParseUint(args[i+2].val, 10, 32)
+				ms, e2 := strconv.ParseUint(args[i+3].val, 10, 64)
+				if e1 == nil && e2 == nil {
+					return uint32(uv), ms, true
+				}
+			}
+		}
+	}
+	return 0, 0, false
+}
+
+// emitQResync emits the QRESYNC SELECT payload (RFC 7162): VANISHED (EARLIER) for
+// UIDs expunged since the client's modseq, then a FETCH for each surviving message
+// changed since then. It is a no-op when the client's UIDVALIDITY no longer matches
+// (the client must then do a full resync).
+func (c *conn) emitQResync(sel *selectedMailbox) {
+	if c.qrUIDValidity != sel.uidValidity {
+		return
+	}
+	if vanished, _ := c.curStore().VanishedSince(sel.id, c.qrModSeq); len(vanished) > 0 {
+		c.untagged("VANISHED (EARLIER) %s", esearchSet(vanished))
+	}
+	modseqs := c.modseqMap()
+	for i := range sel.msgs {
+		if modseqs[sel.msgs[i].UID] > c.qrModSeq {
+			c.untagged("%d FETCH (UID %d FLAGS (%s) MODSEQ (%d))",
+				uint32(i+1), sel.msgs[i].UID, formatFlags(sel.msgs[i].Flags, false), modseqs[sel.msgs[i].UID])
+		}
+	}
 }
 
 // splitFetchModifiers strips a trailing (CHANGEDSINCE n [VANISHED]) modifier group
