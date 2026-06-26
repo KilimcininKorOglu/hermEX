@@ -494,3 +494,65 @@ func TestCalCopyMove(t *testing.T) {
 		t.Errorf("MOVE destination missing: status %d, want 200", resp.StatusCode)
 	}
 }
+
+// TestScheduleDiscovery confirms the principal advertises the CalDAV scheduling
+// discovery properties (RFC 6638 §2.2/§2.4.1): the calendar user address set and the
+// scheduling Inbox/Outbox URLs a client needs to drive auto-scheduling.
+func TestScheduleDiscovery(t *testing.T) {
+	ts := davServerCal(t)
+	resp, body := do(t, ts, "PROPFIND", "/dav/principals/"+testUser+"/", "0", true)
+	if resp.StatusCode != http.StatusMultiStatus {
+		t.Fatalf("status %d, want 207\n%s", resp.StatusCode, body)
+	}
+	for _, want := range []string{
+		"calendar-user-address-set", "mailto:" + testUser,
+		"schedule-inbox-URL", "schedule-outbox-URL",
+		"/dav/calendars/" + testUser + "/inbox/",
+		"/dav/calendars/" + testUser + "/outbox/",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("principal response missing %q\n%s", want, body)
+		}
+	}
+}
+
+// TestSchedulingCollections confirms the scheduling Inbox and Outbox report their
+// own resourcetypes (RFC 6638 §2.1/§2.2) and are listed in the calendar home set.
+func TestSchedulingCollections(t *testing.T) {
+	ts := davServerCal(t)
+
+	_, in := do(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/inbox/", "0", true)
+	if !strings.Contains(in, "schedule-inbox") || strings.Contains(in, "<C:calendar/>") {
+		t.Errorf("inbox PROPFIND lacks schedule-inbox resourcetype\n%s", in)
+	}
+	_, out := do(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/outbox/", "0", true)
+	if !strings.Contains(out, "schedule-outbox") {
+		t.Errorf("outbox PROPFIND lacks schedule-outbox resourcetype\n%s", out)
+	}
+
+	_, home := doFull(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/", "", map[string]string{"Depth": "1"})
+	for _, want := range []string{"/inbox/", "/outbox/", "schedule-inbox", "schedule-outbox"} {
+		if !strings.Contains(home, want) {
+			t.Errorf("calendar home set missing %q\n%s", want, home)
+		}
+	}
+}
+
+// TestScheduleNameReserved confirms the reserved Inbox/Outbox segments cannot be
+// created as user calendars and are never resolved as one (RFC 6638 §2.1/§2.2).
+func TestScheduleNameReserved(t *testing.T) {
+	ts := davServerCal(t)
+	for _, name := range []string{"inbox", "outbox"} {
+		path := "/dav/calendars/" + testUser + "/" + name + "/"
+		// The reserved segment is a scheduling collection, so MKCALENDAR over it is
+		// not allowed (405) — the client cannot create a user calendar that shadows it.
+		if resp, _ := doFull(t, ts, "MKCALENDAR", path, "", nil); resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("MKCALENDAR %s: status %d, want 405", name, resp.StatusCode)
+		}
+	}
+	// A PUT addressing the reserved name as if it were a user calendar must not land
+	// the object (the segment is a scheduling collection, not a calendar).
+	if resp, _ := doFull(t, ts, "PUT", "/dav/calendars/"+testUser+"/inbox/x.ics", timedEventICS, nil); resp.StatusCode == http.StatusCreated {
+		t.Errorf("PUT into the scheduling Inbox as a calendar succeeded (status %d); want rejection", resp.StatusCode)
+	}
+}

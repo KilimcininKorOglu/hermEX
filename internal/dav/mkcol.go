@@ -37,6 +37,9 @@ func (s *Server) makeCollection(w http.ResponseWriter, r *http.Request, mailbox 
 		http.Error(w, "MKCALENDAR is only valid under the calendar home set", http.StatusForbidden)
 		return
 	}
+	// A scheduling Inbox/Outbox path classifies as its own kind, not kindCalendar, so
+	// the kind check below also rejects MKCALENDAR/MKCOL on the reserved names
+	// (RFC 6638 §2.1/§2.2): a client cannot create a user calendar that shadows them.
 	if coll == "" || (isCal && kind != kindCalendar) || (isCard && kind != kindAddressbook) || (!isCal && !isCard) {
 		http.Error(w, "not a collection path", http.StatusForbidden)
 		return

@@ -51,6 +51,11 @@ type msProp struct {
 	CalendarData       string         `xml:"urn:ietf:params:xml:ns:caldav calendar-data,omitempty"`
 	SupportedCalComp   *supportedComp `xml:"urn:ietf:params:xml:ns:caldav supported-calendar-component-set,omitempty"`
 	SupportedReportSet *struct{}      `xml:"DAV: supported-report-set,omitempty"`
+	// CalDAV scheduling discovery (RFC 6638 §2): the principal's calendar user
+	// addresses and the URLs of its scheduling Inbox and Outbox.
+	CalendarUserAddressSet *hrefSet `xml:"urn:ietf:params:xml:ns:caldav calendar-user-address-set,omitempty"`
+	ScheduleInboxURL       *href    `xml:"urn:ietf:params:xml:ns:caldav schedule-inbox-URL,omitempty"`
+	ScheduleOutboxURL      *href    `xml:"urn:ietf:params:xml:ns:caldav schedule-outbox-URL,omitempty"`
 	// Extra carries stored dead properties (PROPPATCH round-trip) as verbatim XML
 	// elements, emitted inside <prop> after the fixed fields.
 	Extra []byte `xml:",innerxml"`
@@ -68,18 +73,25 @@ type calComp struct {
 }
 
 // resourceType is the DAV:resourcetype value; set members mark a collection,
-// an address book, a calendar, or a principal.
+// an address book, a calendar, a principal, or a scheduling Inbox/Outbox.
 type resourceType struct {
-	Collection  *struct{} `xml:"DAV: collection,omitempty"`
-	AddressBook *struct{} `xml:"urn:ietf:params:xml:ns:carddav addressbook,omitempty"`
-	Calendar    *struct{} `xml:"urn:ietf:params:xml:ns:caldav calendar,omitempty"`
-	Principal   *struct{} `xml:"DAV: principal,omitempty"`
+	Collection     *struct{} `xml:"DAV: collection,omitempty"`
+	AddressBook    *struct{} `xml:"urn:ietf:params:xml:ns:carddav addressbook,omitempty"`
+	Calendar       *struct{} `xml:"urn:ietf:params:xml:ns:caldav calendar,omitempty"`
+	Principal      *struct{} `xml:"DAV: principal,omitempty"`
+	ScheduleInbox  *struct{} `xml:"urn:ietf:params:xml:ns:caldav schedule-inbox,omitempty"`
+	ScheduleOutbox *struct{} `xml:"urn:ietf:params:xml:ns:caldav schedule-outbox,omitempty"`
 }
 
 // href wraps a DAV:href child (used by current-user-principal,
 // addressbook-home-set, etc.).
 type href struct {
 	Href string `xml:"DAV: href"`
+}
+
+// hrefSet wraps several DAV:href children under one property (calendar-user-address-set).
+type hrefSet struct {
+	Hrefs []string `xml:"DAV: href"`
 }
 
 const (
@@ -99,6 +111,16 @@ func collectionResourceType() *resourceType {
 // calendarResourceType marks a calendar collection.
 func calendarResourceType() *resourceType {
 	return &resourceType{Collection: empty, Calendar: empty}
+}
+
+// scheduleInboxResourceType marks the CalDAV scheduling Inbox (RFC 6638 §2.1).
+func scheduleInboxResourceType() *resourceType {
+	return &resourceType{Collection: empty, ScheduleInbox: empty}
+}
+
+// scheduleOutboxResourceType marks the CalDAV scheduling Outbox (RFC 6638 §2.2).
+func scheduleOutboxResourceType() *resourceType {
+	return &resourceType{Collection: empty, ScheduleOutbox: empty}
 }
 
 // eventComponentSet is the supported-calendar-component-set hermEX advertises: a

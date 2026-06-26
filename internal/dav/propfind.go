@@ -73,6 +73,15 @@ func (s *Server) handlePropfind(w http.ResponseWriter, r *http.Request, user, ma
 			return
 		}
 		responses = rs
+	case kindScheduleInbox:
+		rs, err := s.scheduleInboxResponses(mailbox, pathUser, depth)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		responses = rs
+	case kindScheduleOutbox:
+		responses = []msResponse{scheduleOutboxResponse(pathUser)}
 	default:
 		http.Error(w, "not found", http.StatusNotFound)
 		return
@@ -93,19 +102,24 @@ func principalLink(path, user string) msResponse {
 	}
 }
 
-// principalResponse describes the user principal: its URL and the
-// addressbook-home-set that leads to the address books.
+// principalResponse describes the user principal: its URL, the home sets that lead
+// to the address books and calendars, and the CalDAV scheduling discovery
+// properties (calendar-user-address-set + the scheduling Inbox/Outbox URLs, RFC
+// 6638 §2.2/§2.4.1) a client needs to drive auto-scheduling.
 func principalResponse(user string) msResponse {
 	return msResponse{
 		Href: principalPath(user),
 		Propstat: []msPropstat{{
 			Prop: msProp{
-				ResourceType:       &resourceType{Principal: empty},
-				DisplayName:        user,
-				PrincipalURL:       &href{Href: principalPath(user)},
-				AddressbookHomeSet: &href{Href: homeSetPath(user)},
-				CalendarHomeSet:    &href{Href: calHomeSetPath(user)},
-				CurrentUserPrOne:   &href{Href: principalPath(user)},
+				ResourceType:           &resourceType{Principal: empty},
+				DisplayName:            user,
+				PrincipalURL:           &href{Href: principalPath(user)},
+				AddressbookHomeSet:     &href{Href: homeSetPath(user)},
+				CalendarHomeSet:        &href{Href: calHomeSetPath(user)},
+				CurrentUserPrOne:       &href{Href: principalPath(user)},
+				CalendarUserAddressSet: &hrefSet{Hrefs: []string{"mailto:" + user, principalPath(user)}},
+				ScheduleInboxURL:       &href{Href: scheduleInboxPath(user)},
+				ScheduleOutboxURL:      &href{Href: scheduleOutboxPath(user)},
 			},
 			Status: statusOK,
 		}},
@@ -342,7 +356,105 @@ func (s *Server) allCalendarCollections(mailbox, user string) ([]msResponse, err
 		}
 		out = append(out, cr)
 	}
+	// The scheduling Inbox and Outbox live within the calendar home collection
+	// (RFC 6638 §2.1.1); list them alongside the calendars so a client browsing the
+	// home set discovers them.
+	in, err := scheduleInboxCollectionResponse(st, user)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, in, scheduleOutboxResponse(user))
 	return out, nil
+}
+
+// scheduleInboxCollectionResponse builds the collection-level PROPFIND response for
+// the scheduling Inbox (no members). The backing folder is created lazily on first
+// delivery, so an Inbox that has received nothing reports an empty collection.
+func scheduleInboxCollectionResponse(st *objectstore.Store, user string) (msResponse, error) {
+	fid, ok, err := scheduleInboxFID(st, false)
+	if err != nil {
+		return msResponse{}, err
+	}
+	var max uint64
+	if ok {
+		if max, err = st.FolderObjectsSyncMax(fid); err != nil {
+			return msResponse{}, err
+		}
+	}
+	return msResponse{
+		Href: scheduleInboxPath(user),
+		Propstat: []msPropstat{{
+			Prop: msProp{
+				ResourceType:     scheduleInboxResourceType(),
+				DisplayName:      "Inbox",
+				GetCTag:          ctag(max),
+				SyncToken:        syncToken(max),
+				SupportedCalComp: eventComponentSet(),
+			},
+			Status: statusOK,
+		}},
+	}, nil
+}
+
+// scheduleInboxResponses returns the scheduling Inbox collection response, followed
+// (when depth != "0") by one response per delivered scheduling message.
+func (s *Server) scheduleInboxResponses(mailbox, user, depth string) ([]msResponse, error) {
+	st, err := objectstore.Open(mailbox)
+	if err != nil {
+		return nil, err
+	}
+	defer st.Close()
+
+	cr, err := scheduleInboxCollectionResponse(st, user)
+	if err != nil {
+		return nil, err
+	}
+	responses := []msResponse{cr}
+	if depth == "0" {
+		return responses, nil
+	}
+
+	fid, ok, err := scheduleInboxFID(st, false)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return responses, nil
+	}
+	objs, err := st.ListFolderObjects(fid)
+	if err != nil {
+		return nil, err
+	}
+	for _, o := range objs {
+		responses = append(responses, msResponse{
+			Href: scheduleInboxPath(user) + objectName(st, o.ID, ".ics"),
+			Propstat: []msPropstat{{
+				Prop: msProp{
+					GetETag:        etag(o.ChangeNumber),
+					GetContentType: "text/calendar; charset=utf-8",
+				},
+				Status: statusOK,
+			}},
+		})
+	}
+	return responses, nil
+}
+
+// scheduleOutboxResponse builds the collection-level PROPFIND response for the
+// scheduling Outbox. The Outbox stores nothing (it is POST-only, RFC 6638 §2.2), so
+// it is a purely synthetic collection.
+func scheduleOutboxResponse(user string) msResponse {
+	return msResponse{
+		Href: scheduleOutboxPath(user),
+		Propstat: []msPropstat{{
+			Prop: msProp{
+				ResourceType:     scheduleOutboxResourceType(),
+				DisplayName:      "Outbox",
+				SupportedCalComp: eventComponentSet(),
+			},
+			Status: statusOK,
+		}},
+	}
 }
 
 // writeMultistatus serializes and writes a 207 Multistatus response.

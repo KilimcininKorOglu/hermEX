@@ -96,6 +96,18 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	// the CalDAV handlers, everything else by the CardDAV handlers.
 	kind, _, _, _ := classify(r.URL.Path)
 	calObject := kind == kindCalObject
+	// The scheduling Inbox/Outbox answer discovery (PROPFIND) only in this increment;
+	// Outbox POST and Inbox object access are wired in later scheduling increments. A
+	// mutating or object method here returns 405 rather than misrouting to the CardDAV
+	// handlers, which key off the Contacts folder.
+	switch kind {
+	case kindScheduleInbox, kindScheduleOutbox, kindScheduleInboxObject:
+		if r.Method != "PROPFIND" && r.Method != "OPTIONS" {
+			w.Header().Set("Allow", "OPTIONS, PROPFIND")
+			http.Error(w, "method not allowed on scheduling collection", http.StatusMethodNotAllowed)
+			return
+		}
+	}
 	switch r.Method {
 	case "OPTIONS":
 		s.handleOptions(w, r)
@@ -173,15 +185,18 @@ func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
 type resourceKind int
 
 const (
-	kindUnknown     resourceKind = iota
-	kindRoot                     // /dav/ or /
-	kindPrincipal                // /dav/principals/{user}/
-	kindHomeSet                  // /dav/addressbooks/{user}/
-	kindAddressbook              // /dav/addressbooks/{user}/contacts/
-	kindObject                   // /dav/addressbooks/{user}/contacts/{name}
-	kindCalHomeSet               // /dav/calendars/{user}/
-	kindCalendar                 // /dav/calendars/{user}/calendar/
-	kindCalObject                // /dav/calendars/{user}/calendar/{name}
+	kindUnknown             resourceKind = iota
+	kindRoot                             // /dav/ or /
+	kindPrincipal                        // /dav/principals/{user}/
+	kindHomeSet                          // /dav/addressbooks/{user}/
+	kindAddressbook                      // /dav/addressbooks/{user}/contacts/
+	kindObject                           // /dav/addressbooks/{user}/contacts/{name}
+	kindCalHomeSet                       // /dav/calendars/{user}/
+	kindCalendar                         // /dav/calendars/{user}/calendar/
+	kindCalObject                        // /dav/calendars/{user}/calendar/{name}
+	kindScheduleInbox                    // /dav/calendars/{user}/inbox/
+	kindScheduleInboxObject              // /dav/calendars/{user}/inbox/{name}
+	kindScheduleOutbox                   // /dav/calendars/{user}/outbox/
 )
 
 // addressbookName is the single address book each mailbox exposes (its Contacts
@@ -191,6 +206,21 @@ const (
 	addressbookName = "contacts"
 	calendarName    = "calendar"
 )
+
+// scheduleInboxName and scheduleOutboxName are the reserved URL segments of the
+// CalDAV scheduling Inbox and Outbox (RFC 6638 §2.1/§2.2). They live in the
+// calendar URL space but are not user calendars: a request never resolves them as
+// a calendar, and MKCALENDAR/MKCOL may not create a calendar of either name.
+const (
+	scheduleInboxName  = "inbox"
+	scheduleOutboxName = "outbox"
+)
+
+// isReservedScheduleName reports whether a calendar collection segment is reserved
+// for a scheduling collection rather than addressable as a user calendar.
+func isReservedScheduleName(name string) bool {
+	return name == scheduleInboxName || name == scheduleOutboxName
+}
 
 // classify parses a request path into a resource kind plus, for a collection, its
 // name segment and, for an object, its resource name. Any collection name is
@@ -226,8 +256,21 @@ func classify(p string) (kind resourceKind, user, collection, object string) {
 		case 3:
 			return kindCalHomeSet, parts[2], "", ""
 		case 4:
+			switch parts[3] {
+			case scheduleInboxName:
+				return kindScheduleInbox, parts[2], parts[3], ""
+			case scheduleOutboxName:
+				return kindScheduleOutbox, parts[2], parts[3], ""
+			}
 			return kindCalendar, parts[2], parts[3], ""
 		case 5:
+			switch parts[3] {
+			case scheduleInboxName:
+				return kindScheduleInboxObject, parts[2], parts[3], parts[4]
+			case scheduleOutboxName:
+				// The Outbox holds no addressable members (POST-only).
+				return kindUnknown, "", "", ""
+			}
 			return kindCalObject, parts[2], parts[3], parts[4]
 		}
 	}
@@ -275,4 +318,14 @@ func calendarPathColl(user, coll string) string {
 // calObjectPathColl builds an object href inside a named calendar collection.
 func calObjectPathColl(user, coll, name string) string {
 	return calendarPathColl(user, coll) + name
+}
+
+// scheduleInboxPath and scheduleOutboxPath build the hrefs of the user's CalDAV
+// scheduling Inbox and Outbox collections (RFC 6638 §2.1/§2.2).
+func scheduleInboxPath(user string) string {
+	return "/dav/calendars/" + user + "/" + scheduleInboxName + "/"
+}
+
+func scheduleOutboxPath(user string) string {
+	return "/dav/calendars/" + user + "/" + scheduleOutboxName + "/"
 }
