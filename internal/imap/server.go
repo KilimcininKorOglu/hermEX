@@ -23,7 +23,7 @@ import (
 // the lexer accepts non-synchronizing literals; AUTH=PLAIN because the server
 // implements the SASL PLAIN mechanism; IDLE (RFC 2177) because the server pushes
 // real-time mailbox updates while a client idles.
-const capabilities = "IMAP4rev1 LITERAL+ NAMESPACE AUTH=PLAIN IDLE"
+const capabilities = "IMAP4rev1 LITERAL+ NAMESPACE AUTH=PLAIN IDLE CHILDREN ID UNSELECT"
 
 // idlePollCadence is the fallback poll interval during IDLE when the push relay is
 // absent or a wake is missed — the degradation floor that keeps IDLE emitting
@@ -171,6 +171,14 @@ func (c *conn) caps() string {
 	return capabilities
 }
 
+// cmdID handles ID (RFC 2971): the server identifies itself. Any client parameter
+// list is accepted and ignored (it was already lexed off the wire); ID is valid in
+// every state.
+func (c *conn) cmdID(tag string) {
+	c.untagged(`ID ("name" "hermEX")`)
+	c.ok(tag, "ID completed")
+}
+
 // dispatch routes one lexed command to its handler.
 func (c *conn) dispatch(toks []token) {
 	if len(toks) == 0 {
@@ -196,6 +204,8 @@ func (c *conn) dispatch(toks []token) {
 	case "CAPABILITY":
 		c.untagged("CAPABILITY %s", c.caps())
 		c.ok(tag, "CAPABILITY completed")
+	case "ID":
+		c.cmdID(tag)
 	case "STARTTLS":
 		c.cmdStartTLS(tag)
 	case "NOOP":
@@ -254,6 +264,8 @@ func (c *conn) dispatch(toks []token) {
 		c.cmdExpunge(tag)
 	case "CLOSE":
 		c.cmdClose(tag)
+	case "UNSELECT":
+		c.cmdUnselect(tag)
 	case "UID":
 		c.cmdUID(tag, args)
 	default:

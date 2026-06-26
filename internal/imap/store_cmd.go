@@ -158,6 +158,19 @@ func (c *conn) cmdClose(tag string) {
 	c.ok(tag, "CLOSE completed")
 }
 
+// cmdUnselect handles UNSELECT (RFC 3691): it returns to the authenticated state
+// WITHOUT expunging \Deleted messages, unlike CLOSE.
+func (c *conn) cmdUnselect(tag string) {
+	if c.state != stateSelected {
+		c.no(tag, "no mailbox selected")
+		return
+	}
+	c.sel = nil
+	c.selPublic = false
+	c.state = stateAuth
+	c.ok(tag, "UNSELECT completed")
+}
+
 // cmdCopy handles COPY and (byUID) UID COPY: it copies the addressed messages
 // into another mailbox, preserving their flags and internal dates.
 func (c *conn) cmdCopy(tag string, args []token, byUID bool) {
