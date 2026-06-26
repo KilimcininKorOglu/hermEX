@@ -19,6 +19,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
+	"hermex/internal/notify"
 	"hermex/internal/nspi"
 	"hermex/internal/relay"
 	"hermex/internal/rpchttp"
@@ -36,9 +37,11 @@ type Server struct {
 	nsp           *nspi.Server
 	nspiSessions  *nspiSessionStore
 	rpc           *rpchttp.Server
-	notifyWait    time.Duration   // how long a NotificationWait long-poll holds before reporting "no events"
-	notifyCadence time.Duration   // how often that long-poll re-checks the shared store
-	Logger        *logging.Logger // central activity log; nil disables logging
+	async         *rpchttp.AsyncEMSMDB // the EcDoAsyncWaitEx long-poll stub; SetNotify wires its wake source
+	notifyWait    time.Duration        // how long a NotificationWait long-poll holds before reporting "no events"
+	notifyCadence time.Duration        // how often that long-poll re-checks the shared store
+	waker         notify.Registrar     // push wake source; nil keeps the long-poll on its cadence only
+	Logger        *logging.Logger      // central activity log; nil disables logging
 }
 
 // mapiEvent logs a MAPI/HTTP operation tagged with the client address (and, when
@@ -82,7 +85,9 @@ func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostna
 	disp.Register(rpchttp.EMSMDBUUID, rpchttp.EMSMDBVersion, ems.Handle)
 	// The AsyncEMSMDB interface carries the EcDoAsyncWaitEx notification long-poll;
 	// it shares the EMSMDB sessions, resolving its async handle to one by the GUID.
-	disp.Register(rpchttp.AsyncEMSMDBUUID, rpchttp.AsyncEMSMDBVersion, rpchttp.NewAsyncEMSMDB(ems).Handle)
+	// Held on the server so SetNotify can wire its push wake source.
+	s.async = rpchttp.NewAsyncEMSMDB(ems)
+	disp.Register(rpchttp.AsyncEMSMDBUUID, rpchttp.AsyncEMSMDBVersion, s.async.Handle)
 	disp.Register(nspi.RPCInterfaceUUID, nspi.RPCInterfaceVersion, func(sess *rpchttp.Session, opnum uint16, stub []byte) ([]byte, uint32) {
 		out, fault := s.nsp.DispatchRPC(opnum, stub)
 		user, addr := "", ""
@@ -110,6 +115,19 @@ func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostna
 	disp.Register(rpchttp.RFRUUID, rpchttp.RFRVersion, rpchttp.NewRFR(hostname).Handle)
 	s.rpc = rpchttp.NewServer(rpchttp.Config{Auth: s.basicAuth, Dispatch: disp.Dispatch})
 	return s
+}
+
+// SetNotify wires the push wake source into both notification long-polls (MAPI/HTTP
+// NotificationWait and RPC/HTTP EcDoAsyncWaitEx), so a mailbox change wakes a parked
+// client the instant it lands instead of on the next cadence poll. A nil consumer
+// (push disabled) leaves both on their cadence — the degradation floor. The daemon
+// calls this once at startup, before serving.
+func (s *Server) SetNotify(c *notify.Consumer) {
+	if c == nil {
+		return
+	}
+	s.waker = c
+	s.async.SetWaker(c)
 }
 
 // Handler returns the HTTP handler. One handler routes the two MAPI/HTTP paths;

@@ -198,6 +198,14 @@ func NewSession(mailbox string, accounts directory.Accounts, owner string, opts 
 	return s
 }
 
+// MailboxDir reports the session's mailbox directory — the key the push relay
+// stamps on a change event for this mailbox, so a notification long-poll registers
+// it to be woken the instant the mailbox changes. For an owner logon this is the
+// opened logon store's directory (logon.go opens the store at s.mailbox); a delegate
+// session, which opens another's store, registers its own mailbox here and falls
+// back to the poll cadence for the delegated store.
+func (s *Session) MailboxDir() string { return s.mailbox }
+
 // alloc registers an object under a fresh handle and returns the handle. Handles
 // start at 1 so that 0 and the 0xFFFFFFFF null-handle sentinel are never minted.
 func (s *Session) alloc(o *object) uint32 {

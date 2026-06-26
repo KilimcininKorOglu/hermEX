@@ -5,6 +5,7 @@ import (
 
 	"hermex/internal/mapi"
 	"hermex/internal/ndr"
+	"hermex/internal/notify"
 )
 
 // AsyncEMSMDB interface identity ([MS-OXCRPC] 1.10): the notification long-poll
@@ -51,14 +52,20 @@ const (
 // the GUID the handle carries.
 type AsyncEMSMDB struct {
 	ems          *EMSMDB
-	waitInterval time.Duration // how long a parked wait holds before a timeout reply
-	cadence      time.Duration // how often the parked wait polls the shared store
+	waitInterval time.Duration    // how long a parked wait holds before a timeout reply
+	cadence      time.Duration    // how often the parked wait polls the shared store
+	waker        notify.Registrar // push wake source; nil keeps the parked wait on its cadence only
 }
 
 // NewAsyncEMSMDB returns an AsyncEMSMDB stub over the given EMSMDB stub's sessions.
 func NewAsyncEMSMDB(ems *EMSMDB) *AsyncEMSMDB {
 	return &AsyncEMSMDB{ems: ems, waitInterval: asyncWaitInterval, cadence: asyncPollCadence}
 }
+
+// SetWaker wires the push wake source so a parked EcDoAsyncWaitEx wakes the instant
+// the session's mailbox changes rather than on the next cadence poll. A nil waker
+// leaves the parked wait on its cadence (the degradation floor).
+func (a *AsyncEMSMDB) SetWaker(w notify.Registrar) { a.waker = w }
 
 // Handle is the IfaceHandler the dispatcher calls for an AsyncEMSMDB request.
 func (a *AsyncEMSMDB) Handle(sess *Session, opnum uint16, stub []byte) ([]byte, uint32) {
@@ -147,6 +154,15 @@ func (a *AsyncEMSMDB) parkAndReply(s *emsmdbSession, vc *vconn, callID uint32, c
 	defer s.waiting.Store(false)
 	deadline := time.Now().Add(a.waitInterval)
 	flagsOut := uint32(0)
+	// Register the session's mailbox for a push wake before the first poll, so a
+	// change that lands during the wait wakes it at once. A nil waker (push disabled)
+	// or a session with no opened store leaves wake nil, falling back to the cadence.
+	var wake <-chan struct{}
+	if a.waker != nil && s.rop != nil {
+		ch, cancel := a.waker.Register(s.rop.MailboxDir())
+		defer cancel()
+		wake = ch
+	}
 	for {
 		if s.rop != nil && s.rop.PollForChange() {
 			flagsOut = flagNotificationPending
@@ -159,6 +175,8 @@ func (a *AsyncEMSMDB) parkAndReply(s *emsmdbSession, vc *vconn, callID uint32, c
 		select {
 		case <-vc.closed:
 			return // the connection tore down; abandon the parked reply
+		case <-wake:
+			// a push wake — loop and PollForChange observes the change
 		case <-time.After(min(a.cadence, remaining)):
 		}
 	}

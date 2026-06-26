@@ -29,6 +29,7 @@ import (
 	"hermex/internal/meeting"
 	"hermex/internal/mta"
 	"hermex/internal/mtasts"
+	"hermex/internal/notify"
 	"hermex/internal/objectstore"
 	"hermex/internal/relay"
 	"hermex/internal/serve"
@@ -76,6 +77,11 @@ func main() {
 	dir.SetLDAPVerifier(ldapauth.New())
 	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
+
+	// Push notifications: publish every delivery's mailbox write to the relay so a
+	// recipient's parked notification long-poll (in another daemon) wakes the instant
+	// the mail lands. A no-op when notify_url is empty.
+	notify.EnableProducer(cfg.NotifyURL, cfg.NotifySecret, logger)
 
 	// Antivirus: install the package-level scanner from clamd_addr (a no-op when
 	// unset), so delivery scans inbound intake and authenticated submission.

@@ -13,6 +13,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -22,6 +23,15 @@ import (
 	"hermex/internal/notifyd"
 	"hermex/internal/objectstore"
 )
+
+// Registrar is the wake-registration surface a long-poll consumer depends on:
+// register a mailbox directory, receive a channel woken each time that mailbox
+// changes, and a cancel to drop the registration. *Consumer implements it; a daemon
+// passes its Consumer here and a test passes a fake, so a notification loop never
+// hard-depends on a live relay.
+type Registrar interface {
+	Register(mailboxDir string) (<-chan struct{}, func())
+}
 
 const (
 	publishQueue   = 1024                   // producer-side buffer; a full queue drops (the poll cadence is the floor)
@@ -264,6 +274,9 @@ func (c *Consumer) stream(first bool) (connected bool) {
 		}
 		return false
 	}
+	if c.logger != nil {
+		c.logger.Info(logging.Notify, "consumer.connected", logging.Fields{"notify": c.endpoint})
+	}
 	// On a reconnect, fire a catch-up wake before reading: events that landed while
 	// the stream was down were missed, but each waiter's diff catches up. The first
 	// connect has no such gap (the long-polls' own cadence covers startup).
@@ -281,6 +294,9 @@ func (c *Consumer) stream(first bool) (connected bool) {
 		if err := json.Unmarshal([]byte(data), &ev); err != nil {
 			continue
 		}
+		if c.logger != nil {
+			c.logger.Debug(logging.Notify, "consumer.event", logging.Fields{"mailbox": ev.Mailbox, "op": ev.Op})
+		}
 		c.wake(ev.Mailbox)
 	}
 	// The scan ended (the stream dropped); the reason is informational only — the
@@ -289,4 +305,39 @@ func (c *Consumer) stream(first bool) (connected bool) {
 		c.logger.Debug(logging.Notify, "consumer.stream.end", logging.Fields{"err": err.Error()})
 	}
 	return true
+}
+
+// --- Daemon wiring helpers ---
+
+// EnableProducer installs the objectstore change publisher from the notify config,
+// so every committed mailbox mutation in this daemon best-effort wakes the relay's
+// consumers. It is a no-op when notifyURL is empty (push disabled), leaving the
+// objectstore hook nil — byte-identical to the pre-push behaviour. The startup log
+// line doubles as the per-daemon confirmation that the new binary deployed.
+func EnableProducer(notifyURL, secret string, logger *logging.Logger) {
+	pub := NewPublisher(notifyURL, secret)
+	if pub == nil {
+		return
+	}
+	objectstore.SetChangePublisher(pub.Publish)
+	if logger != nil {
+		logger.Info(logging.Notify, "producer.enabled", logging.Fields{"notify": notifyURL})
+	}
+	log.Printf("push producer enabled via notify at %s", notifyURL)
+}
+
+// EnableConsumer starts the relay consumer from the notify config and returns it
+// (nil when notifyURL is empty, which the caller treats as push disabled — its
+// long-polls then fall back to polling). The startup log line is the per-daemon
+// confirmation the consumer side deployed.
+func EnableConsumer(notifyURL, secret string, logger *logging.Logger) *Consumer {
+	c := NewConsumer(notifyURL, secret, logger)
+	if c == nil {
+		return nil
+	}
+	if logger != nil {
+		logger.Info(logging.Notify, "consumer.enabled", logging.Fields{"notify": notifyURL})
+	}
+	log.Printf("push consumer enabled via notify at %s", notifyURL)
+	return c
 }

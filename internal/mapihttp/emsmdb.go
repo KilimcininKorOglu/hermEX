@@ -167,15 +167,17 @@ func (s *Server) emsDisconnect(w http.ResponseWriter, r *http.Request) {
 	writeNormal(w, r, "Disconnect", out.b)
 }
 
-// emsNotificationWait is the notification long-poll. hermEX has no central daemon to
-// push from, so it polls the session's subscriptions against the shared store (the
-// same model as the IMAP poll and ActiveSync Ping loops) and reports
+// emsNotificationWait is the notification long-poll. It registers the session's
+// mailbox with the central push relay (when configured) and also polls the
+// session's subscriptions against the shared store, reporting
 // FLAG_NOTIFICATION_PENDING the moment a subscribed change appears, or a clear flag
-// once the hold elapses. The reply is only a wake signal — the matching RopNotify
-// bytes follow on the client's next Execute drain. Only folder- and message-scoped
-// subscriptions wake it; a whole-store subscription is accepted at registration but
-// not yet polled (D.Inc 2b), so a client that registers only whole-store will not be
-// woken here.
+// once the hold elapses. The push wake makes the poll fire the instant a change
+// lands rather than on the cadence; with the relay absent it degrades to the
+// cadence-only poll (the same model as the IMAP poll and ActiveSync Ping loops). The
+// reply is only a wake signal — the matching RopNotify bytes follow on the client's
+// next Execute drain. Only folder- and message-scoped subscriptions wake it; a
+// whole-store subscription is accepted at registration but not yet polled (D.Inc 2b),
+// so a client that registers only whole-store will not be woken here.
 func (s *Server) emsNotificationWait(w http.ResponseWriter, r *http.Request) {
 	sid, err := r.Cookie("sid")
 	if err != nil {
@@ -207,6 +209,15 @@ func (s *Server) emsNotificationWait(w http.ResponseWriter, r *http.Request) {
 // immediately if the client drops the connection.
 func (s *Server) waitForNotification(reqCtx context.Context, sess *rop.Session) bool {
 	deadline := time.Now().Add(s.notifyWait)
+	// Register the session's mailbox for a push wake before the first poll, so a
+	// change landing during the wait wakes it at once. A nil waker (push disabled)
+	// leaves wake nil, and the loop runs on its cadence exactly as before.
+	var wake <-chan struct{}
+	if s.waker != nil {
+		ch, cancel := s.waker.Register(sess.MailboxDir())
+		defer cancel()
+		wake = ch
+	}
 	for {
 		if sess.PollForChange() {
 			return true
@@ -218,6 +229,8 @@ func (s *Server) waitForNotification(reqCtx context.Context, sess *rop.Session) 
 		select {
 		case <-reqCtx.Done():
 			return false
+		case <-wake:
+			// a push wake — loop and PollForChange observes the change
 		case <-time.After(min(s.notifyCadence, remaining)):
 		}
 	}

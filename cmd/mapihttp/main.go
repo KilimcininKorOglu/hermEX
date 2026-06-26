@@ -23,6 +23,7 @@ import (
 	"hermex/internal/logging"
 	"hermex/internal/mapihttp"
 	"hermex/internal/mta"
+	"hermex/internal/notify"
 	"hermex/internal/objectstore"
 	"hermex/internal/relay"
 	"hermex/internal/serve"
@@ -63,6 +64,15 @@ func main() {
 	}
 	srv := mapihttp.NewServer(dir, dir, cfg.Hostname, spool)
 	srv.Logger = logger
+
+	// Push notifications: publish this daemon's own mailbox writes to the relay, and
+	// subscribe so a parked NotificationWait/EcDoAsyncWaitEx wakes the instant a
+	// change lands instead of on its cadence. Both are no-ops when notify_url is
+	// empty, leaving the long-polls on their poll cadence.
+	notify.EnableProducer(cfg.NotifyURL, cfg.NotifySecret, logger)
+	notifyConsumer := notify.EnableConsumer(cfg.NotifyURL, cfg.NotifySecret, logger)
+	srv.SetNotify(notifyConsumer)
+
 	addr := cfg.MapiAddr
 	if addr == "" {
 		addr = ":8080"
