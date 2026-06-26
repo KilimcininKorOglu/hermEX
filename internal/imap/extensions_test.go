@@ -493,6 +493,59 @@ func parseNumAfter(t *testing.T, s, prefix string) uint64 {
 	return n
 }
 
+// TestIMAPACL covers ACL (RFC 4314): MYRIGHTS, granting and adjusting a member's
+// rights via SETACL, reading them with GETACL, and revoking with DELETEACL.
+func TestIMAPACL(t *testing.T) {
+	c, _ := startServer(t)
+	c.mustOK("a1", "LOGIN alice secret")
+
+	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "ACL") {
+		t.Errorf("CAPABILITY missing ACL: %s", caps)
+	}
+
+	// The owner holds the administer right on their own mailbox.
+	if myr := strings.Join(c.mustOK("a2", "MYRIGHTS INBOX"), " "); !strings.Contains(myr, "MYRIGHTS") || !strings.Contains(myr, "a") {
+		t.Errorf("MYRIGHTS = %q, want the owner to hold administer (a)", myr)
+	}
+
+	// Grant bob read; GETACL reads it back.
+	c.mustOK("a3", "SETACL INBOX bob lr")
+	if got := aclRightsOf(strings.Join(c.mustOK("a4", "GETACL INBOX"), " "), "bob"); !strings.Contains(got, "r") || !strings.Contains(got, "l") {
+		t.Errorf("bob rights after grant = %q, want at least lr", got)
+	}
+
+	// +w adds the write right without dropping the existing ones.
+	c.mustOK("a5", "SETACL INBOX bob +w")
+	if got := aclRightsOf(strings.Join(c.mustOK("a6", "GETACL INBOX"), " "), "bob"); !strings.Contains(got, "w") || !strings.Contains(got, "r") {
+		t.Errorf("bob rights after +w = %q, want w added to r", got)
+	}
+
+	if lr := strings.Join(c.mustOK("a7", "LISTRIGHTS INBOX bob"), " "); !strings.Contains(lr, "LISTRIGHTS") {
+		t.Errorf("LISTRIGHTS = %q, want a LISTRIGHTS response", lr)
+	}
+
+	// Revoke bob entirely.
+	c.mustOK("a8", "DELETEACL INBOX bob")
+	if acl := strings.Join(c.mustOK("a9", "GETACL INBOX"), " "); strings.Contains(acl, `"bob"`) {
+		t.Errorf("GETACL after DELETEACL = %q, want bob removed", acl)
+	}
+}
+
+// aclRightsOf returns the rights token following the quoted identifier in an ACL
+// response, or "".
+func aclRightsOf(acl, id string) string {
+	marker := `"` + id + `" `
+	i := strings.Index(acl, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := acl[i+len(marker):]
+	if j := strings.IndexByte(rest, ' '); j >= 0 {
+		return rest[:j]
+	}
+	return rest
+}
+
 // parseModseq extracts the n from the first "MODSEQ (n)" in an IMAP response.
 func parseModseq(t *testing.T, s string) uint64 {
 	t.Helper()
