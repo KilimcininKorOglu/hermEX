@@ -2,7 +2,9 @@ package activesync
 
 import (
 	"fmt"
+	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -264,5 +266,107 @@ func TestSyncInvalidKey(t *testing.T) {
 	}
 	if coll.ChildText(wbxml.ASSyncKey) != "0" {
 		t.Errorf("sync key = %q, want 0 (re-prime)", coll.ChildText(wbxml.ASSyncKey))
+	}
+}
+
+// seedInboxHTML appends one multipart/alternative message carrying both a plain and
+// an HTML body, so a BodyPreference Type 2 request has an HTML part to return.
+func seedInboxHTML(t *testing.T, dir string) {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	raw := "From: s@hermex.test\r\nTo: alice@hermex.test\r\nSubject: HTML msg\r\nMIME-Version: 1.0\r\n" +
+		"Content-Type: multipart/alternative; boundary=b\r\n\r\n" +
+		"--b\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nplain part\r\n" +
+		"--b\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<p>html part</p>\r\n--b--\r\n"
+	when := time.Date(2026, 6, 15, 9, 0, 0, 0, time.UTC)
+	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), when, 0); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// syncReqBodyPref builds a Sync request carrying one BodyPreference (a Type and an
+// optional TruncationSize) in the collection Options.
+func syncReqBodyPref(key, typ, truncation string) *wbxml.Node {
+	bp := []*wbxml.Node{wbxml.Str(wbxml.ABType, typ)}
+	if truncation != "" {
+		bp = append(bp, wbxml.Str(wbxml.ABTruncationSize, truncation))
+	}
+	return wbxml.Elem(wbxml.ASSync, wbxml.Elem(wbxml.ASCollections,
+		wbxml.Elem(wbxml.ASCollection,
+			wbxml.Str(wbxml.ASSyncKey, key),
+			wbxml.Str(wbxml.ASCollectionID, inboxID()),
+			wbxml.Elem(wbxml.ASOptions, wbxml.Elem(wbxml.ABBodyPreference, bp...)))))
+}
+
+// syncedBody primes the Inbox with the given BodyPreference and returns the first
+// Add's AirSyncBase Body node.
+func syncedBody(t *testing.T, ts *httptest.Server, typ, truncation string) *wbxml.Node {
+	t.Helper()
+	postCommand(t, ts, "Sync", syncReqBodyPref("0", typ, truncation))
+	_, root := postCommand(t, ts, "Sync", syncReqBodyPref("1", typ, truncation))
+	cmds := respColl(t, root).Child(wbxml.ASCommands)
+	if cmds == nil || len(cmds.Children) == 0 {
+		t.Fatal("Sync returned no Add to read the body from")
+	}
+	return cmds.Children[0].Child(wbxml.ASData).Child(wbxml.ABBody)
+}
+
+// TestSyncBodyPreferencePlain confirms a Type 1 BodyPreference serves the plain-text
+// body, not the full MIME (MS-ASAIRS §2.2.2.22).
+func TestSyncBodyPreferencePlain(t *testing.T) {
+	ts, dir := seededServer(t)
+	seedInbox(t, dir, 1)
+	body := syncedBody(t, ts, "1", "")
+	if body.ChildText(wbxml.ABType) != "1" {
+		t.Fatalf("body type = %q, want 1 (plain)", body.ChildText(wbxml.ABType))
+	}
+	if got := string(body.Child(wbxml.ABData).Opaque); !strings.Contains(got, "Body 1") || strings.Contains(got, "Subject:") {
+		t.Errorf("plain body = %q, want the text body without MIME headers", got)
+	}
+}
+
+// TestSyncBodyPreferenceHTML confirms a Type 2 BodyPreference serves the HTML body
+// when one exists.
+func TestSyncBodyPreferenceHTML(t *testing.T) {
+	ts, dir := seededServer(t)
+	seedInboxHTML(t, dir)
+	body := syncedBody(t, ts, "2", "")
+	if body.ChildText(wbxml.ABType) != "2" {
+		t.Fatalf("body type = %q, want 2 (HTML)", body.ChildText(wbxml.ABType))
+	}
+	if got := string(body.Child(wbxml.ABData).Opaque); !strings.Contains(got, "html part") {
+		t.Errorf("HTML body = %q, want the HTML part", got)
+	}
+}
+
+// TestSyncBodyPreferenceHTMLFallback confirms a Type 2 request on a plain-only
+// message downgrades to Type 1 rather than returning an empty HTML body.
+func TestSyncBodyPreferenceHTMLFallback(t *testing.T) {
+	ts, dir := seededServer(t)
+	seedInbox(t, dir, 1)
+	body := syncedBody(t, ts, "2", "")
+	if body.ChildText(wbxml.ABType) != "1" {
+		t.Errorf("plain-only message body type = %q, want 1 (downgraded from HTML)", body.ChildText(wbxml.ABType))
+	}
+}
+
+// TestSyncBodyPreferenceTruncation confirms TruncationSize caps the body and marks
+// it Truncated, while EstimatedDataSize still reports the full length.
+func TestSyncBodyPreferenceTruncation(t *testing.T) {
+	ts, dir := seededServer(t)
+	seedInbox(t, dir, 1)
+	body := syncedBody(t, ts, "1", "2")
+	if body.ChildText(wbxml.ABTruncated) != "1" {
+		t.Errorf("Truncated = %q, want 1", body.ChildText(wbxml.ABTruncated))
+	}
+	if n := len(body.Child(wbxml.ABData).Opaque); n != 2 {
+		t.Errorf("truncated body length = %d, want 2", n)
+	}
+	if sz := body.ChildText(wbxml.ABEstimatedDataSize); sz == "2" || sz == "" {
+		t.Errorf("EstimatedDataSize = %q, want the full (untruncated) length", sz)
 	}
 }

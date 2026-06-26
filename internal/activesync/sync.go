@@ -9,6 +9,7 @@ import (
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcmail"
 	"hermex/internal/wbxml"
 )
 
@@ -346,6 +347,8 @@ func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node) (*wb
 	// diff below does not echo the client's own change back to it.
 	applyClientCommands(st, folderID, cstate, c)
 
+	pref := parseBodyPref(c)
+
 	live, err := st.ListMessages(folderID)
 	if err != nil {
 		return nil, err
@@ -367,7 +370,7 @@ func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node) (*wb
 				return nil, err
 			}
 			cmds = append(cmds, wbxml.Elem(wbxml.ASAdd,
-				wbxml.Str(wbxml.ASServerID, ch.sid), emailAppData(raw, ch.m, collID, ch.sid)))
+				wbxml.Str(wbxml.ASServerID, ch.sid), emailAppData(raw, ch.m, collID, ch.sid, pref)))
 			cstate.Items[ch.sid] = ch.m.Flags
 		case changeChange:
 			cmds = append(cmds, wbxml.Elem(wbxml.ASChange,
@@ -453,28 +456,119 @@ func applyClientCommands(st *objectstore.Store, folderID int64, cstate *collecti
 	}
 }
 
+// bodyPref is the body representation a Sync request asked for: the chosen
+// AirSyncBase body Type (0 = no preference → full MIME) and the truncation size
+// the device set for it (0 = untruncated).
+type bodyPref struct {
+	typ        int
+	truncation int
+}
+
+// EAS AirSyncBase body types (MS-ASAIRS §2.2.2.22.4).
+const (
+	bodyTypePlain = 1
+	bodyTypeHTML  = 2
+	bodyTypeMIME  = 4
+)
+
+// parseBodyPref reads a Sync collection's Options/BodyPreference list and selects
+// the body type to serve. A device may offer several types; the best match is HTML,
+// then MIME, then plain (matching the reference: HTML and plain cost less bandwidth
+// than a full MIME message). Only unsupported types (e.g. RTF) or no Options leaves
+// typ 0, so the server serves the full MIME as before.
+func parseBodyPref(c *wbxml.Node) bodyPref {
+	opts := c.Child(wbxml.ASOptions)
+	if opts == nil {
+		return bodyPref{}
+	}
+	trunc := map[int]int{}
+	for _, ch := range opts.Children {
+		if ch.Tag != wbxml.ABBodyPreference {
+			continue
+		}
+		if t, err := strconv.Atoi(ch.ChildText(wbxml.ABType)); err == nil {
+			n, _ := strconv.Atoi(ch.ChildText(wbxml.ABTruncationSize))
+			trunc[t] = n
+		}
+	}
+	for _, t := range []int{bodyTypeHTML, bodyTypeMIME, bodyTypePlain} {
+		if n, ok := trunc[t]; ok {
+			return bodyPref{typ: t, truncation: n}
+		}
+	}
+	return bodyPref{}
+}
+
 // emailAppData builds the ApplicationData for an Email-class item: the listing
-// properties from the index, the full message as a MIME body, and — when the
-// message carries attachments — an AirSyncBase Attachments listing whose
-// FileReferences the device fetches through ItemOperations. v1 serves the body
-// as MIME (Type 4); honoring fine-grained body preferences is later work.
-func emailAppData(raw []byte, m objectstore.MessageInfo, collID, serverID string) *wbxml.Node {
+// properties from the index, the message body in the requested representation, and —
+// when the message carries attachments — an AirSyncBase Attachments listing whose
+// FileReferences the device fetches through ItemOperations.
+func emailAppData(raw []byte, m objectstore.MessageInfo, collID, serverID string, pref bodyPref) *wbxml.Node {
 	data := wbxml.Elem(wbxml.ASData,
 		wbxml.Str(wbxml.EMSubject, m.Subject),
 		wbxml.Str(wbxml.EMFrom, m.Sender),
 		wbxml.Str(wbxml.EMDateReceived, m.InternalDate.UTC().Format("2006-01-02T15:04:05.000Z")),
 		wbxml.Str(wbxml.EMMessageClass, "IPM.Note"),
 		wbxml.Str(wbxml.EMRead, readFlag(m.Flags)),
-		wbxml.Elem(wbxml.ABBody,
-			wbxml.Str(wbxml.ABType, "4"),
-			wbxml.Str(wbxml.ABEstimatedDataSize, strconv.Itoa(len(raw))),
-			wbxml.Opaque(wbxml.ABData, raw),
-		),
+		emailBody(raw, pref),
 	)
 	if atts := attachmentsNode(collID, serverID, messageAttachments(raw)); atts != nil {
 		data.Children = append(data.Children, atts)
 	}
 	return data
+}
+
+// emailBody renders the AirSyncBase Body in the device's requested representation
+// (MS-ASAIRS §2.2.2.22). Type 0/4 serve the full MIME message; types 1 and 2 extract
+// the plain-text or HTML body through the proven MIME→MAPI converter, applying the
+// truncation size and marking the body Truncated. An unavailable representation (no
+// HTML part, or a conversion failure) falls back to the full MIME.
+func emailBody(raw []byte, pref bodyPref) *wbxml.Node {
+	mime := func() *wbxml.Node {
+		return wbxml.Elem(wbxml.ABBody,
+			wbxml.Str(wbxml.ABType, strconv.Itoa(bodyTypeMIME)),
+			wbxml.Str(wbxml.ABEstimatedDataSize, strconv.Itoa(len(raw))),
+			wbxml.Opaque(wbxml.ABData, raw))
+	}
+	if pref.typ == 0 || pref.typ == bodyTypeMIME {
+		return mime()
+	}
+	msg, err := oxcmail.Import(raw, oxcmail.Options{})
+	if err != nil {
+		return mime()
+	}
+	var content []byte
+	if pref.typ == bodyTypeHTML {
+		if v, ok := msg.Props.Get(mapi.PrHTML); ok {
+			if b, ok := v.([]byte); ok {
+				content = b
+			}
+		}
+	}
+	if len(content) == 0 { // plain requested, or no HTML part
+		if v, ok := msg.Props.Get(mapi.PrBody); ok {
+			if s, ok := v.(string); ok {
+				content = []byte(s)
+			}
+		}
+		if pref.typ == bodyTypeHTML {
+			pref.typ = bodyTypePlain // downgraded: no HTML available
+		}
+	}
+	if content == nil {
+		return mime()
+	}
+	full := len(content)
+	fields := []*wbxml.Node{
+		wbxml.Str(wbxml.ABType, strconv.Itoa(pref.typ)),
+		wbxml.Str(wbxml.ABEstimatedDataSize, strconv.Itoa(full)),
+	}
+	if pref.truncation > 0 && full > pref.truncation {
+		content = content[:pref.truncation]
+		fields = append(fields, wbxml.Str(wbxml.ABTruncated, "1"))
+	}
+	fields = append(fields, wbxml.Opaque(wbxml.ABData, content))
+	return wbxml.Elem(wbxml.ABBody, fields...)
 }
 
 // readAppData builds the minimal ApplicationData for a flag change: just the
