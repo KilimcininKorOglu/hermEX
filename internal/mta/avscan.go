@@ -96,6 +96,7 @@ func SetScanner(scanner *antivirus.Scanner, dir avDirectory, quarPath func(int64
 // process-local.
 func EnableScanning(clamdAddr string, dir avDirectory, quarPath func(int64) string, hostname string, logger *logging.Logger) {
 	if clamdAddr == "" {
+		log.Print("antivirus off: no clamd_addr configured")
 		return
 	}
 	scanner, err := antivirus.New(clamdAddr)
@@ -104,6 +105,7 @@ func EnableScanning(clamdAddr string, dir avDirectory, quarPath func(int64) stri
 		return
 	}
 	SetScanner(scanner, dir, quarPath, hostname, logger)
+	log.Printf("antivirus enabled (clamd %s)", clamdAddr)
 }
 
 // ScanFetched scans a message pulled into a local mailbox by fetchmail. It reports
@@ -136,6 +138,7 @@ func scanMessage(accounts directory.Accounts, mode avMode, from string, recipien
 	}
 
 	res, err := av.scanner.Scan(raw)
+	log.Printf("DEBUG av.scan clean=%v virus=%q err=%v rawlen=%d hasEICAR=%v", res.Clean, res.VirusName, err, len(raw), bytes.Contains(raw, []byte("EICAR-STANDARD")))
 	if err != nil {
 		av.emit(logging.LevelError, "av.scanner.unavailable", from, logging.Fields{"err": err.Error()})
 		if mode == avInboundSMTP {
