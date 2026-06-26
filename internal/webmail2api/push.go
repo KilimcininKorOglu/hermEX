@@ -193,6 +193,15 @@ func (s *Server) sendPush(sub directory.PushSubscription, payload []byte) {
 // the mail already present when they subscribe is not announced - only a later
 // increase pushes. A total only rises on a new message (a read or flag leaves it
 // unchanged, a delete lowers it), so this does not misfire on routine activity.
+//
+// This poller is deliberately NOT wired to the central push relay (unlike the
+// MAPI/HTTP, EAS, and EWS long-polls). It is a single global loop that re-scans
+// every subscriber per tick, so waking it on a change would re-scan all subscribers
+// for each event - O(events x subscribers), strictly worse than its fixed-interval
+// scan. Web push is not latency-critical the way a held protocol long-poll is. If
+// low-latency web push is later wanted, the targeted approach is to invert the
+// email->path resolution into a path->subscriber map and, on a path-matched wake,
+// re-check only that one subscriber - not to wake this whole-fleet scan.
 func (s *Server) StartPushPoller(ctx context.Context, interval time.Duration) {
 	store, ok := s.auth.(pushStore)
 	if !ok {

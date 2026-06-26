@@ -23,6 +23,7 @@ import (
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/mta"
+	"hermex/internal/notify"
 	"hermex/internal/objectstore"
 	"hermex/internal/publicfolder"
 	"hermex/internal/relay"
@@ -56,8 +57,14 @@ func main() {
 	// unset), so authenticated submissions are scanned before relay.
 	mta.EnableScanning(cfg.ClamdAddr, dir, cfg.QuarantinePath, cfg.Hostname, logger)
 
+	// Push notifications: publish this daemon's own mailbox writes, and subscribe so
+	// a held GetStreamingEvents emits a continuation the instant a watched mailbox
+	// changes instead of on its interval. No-ops when notify_url is empty.
+	notify.EnableProducer(cfg.NotifyURL, cfg.NotifySecret, logger)
+
 	srv := ews.NewServer(dir, dir, cfg.Hostname)
 	srv.Logger = logger
+	srv.SetNotify(notify.EnableConsumer(cfg.NotifyURL, cfg.NotifySecret, logger))
 	srv.Pub = publicfolder.New(cfg) // per-domain public folders rooted at HomedirFor
 	// Enqueue external recipients of sent items into the shared relay spool the
 	// MTA drains; without it EWS would send local-only.

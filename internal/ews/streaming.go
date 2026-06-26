@@ -117,6 +117,15 @@ func (s *Server) handleGetStreamingEvents(w http.ResponseWriter, r *http.Request
 	deadline := time.Now().Add(window)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	// Register a push wake for each watched mailbox so a change emits a continuation
+	// at once instead of on the interval. A nil waker (push disabled) leaves wake nil
+	// and the loop runs on its ticker exactly as before.
+	var wake <-chan struct{}
+	if s.waker != nil {
+		ch, cancel := s.streamWakes(valid)
+		defer cancel()
+		wake = ch
+	}
 	ctx := r.Context()
 	for {
 		if !writeStreamChunk(w, rc, s.streamNotifications(valid), false) {
@@ -129,7 +138,50 @@ func (s *Server) handleGetStreamingEvents(w http.ResponseWriter, r *http.Request
 		select {
 		case <-ctx.Done():
 			return // client disconnected: no Closed chunk
+		case <-wake:
+			// a push wake — loop and streamNotifications emits the change
 		case <-ticker.C:
+		}
+	}
+}
+
+// streamWakes registers a push wake for each distinct mailbox among the given
+// subscriptions and merges them into one channel, so any watched mailbox changing
+// wakes the streaming loop. The returned cancel stops the forwarders and drops the
+// registrations; the caller defers it.
+func (s *Server) streamWakes(ids []string) (<-chan struct{}, func()) {
+	merged := make(chan struct{}, 1)
+	done := make(chan struct{})
+	seen := make(map[string]bool)
+	var cancels []func()
+	for _, id := range ids {
+		s.subMu.Lock()
+		sub := s.subs[id]
+		s.subMu.Unlock()
+		if sub == nil || seen[sub.mailbox] {
+			continue
+		}
+		seen[sub.mailbox] = true
+		ch, cancel := s.waker.Register(sub.mailbox)
+		cancels = append(cancels, cancel)
+		go func(ch <-chan struct{}) {
+			for {
+				select {
+				case <-done:
+					return
+				case <-ch:
+					select {
+					case merged <- struct{}{}:
+					default:
+					}
+				}
+			}
+		}(ch)
+	}
+	return merged, func() {
+		close(done)
+		for _, c := range cancels {
+			c()
 		}
 	}
 }

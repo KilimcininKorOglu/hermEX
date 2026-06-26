@@ -15,6 +15,7 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/logging"
+	"hermex/internal/notify"
 	"hermex/internal/publicfolder"
 	"hermex/internal/relay"
 )
@@ -42,6 +43,19 @@ type Server struct {
 	// the request's ConnectionTimeout. Tests set them small to drive the loop fast.
 	streamInterval time.Duration
 	streamWindow   time.Duration
+
+	waker notify.Registrar // push wake source; nil keeps streaming on its interval only
+}
+
+// SetNotify wires the push wake source so a held GetStreamingEvents emits a
+// continuation the instant a watched mailbox changes rather than on its interval. A
+// nil consumer (push disabled) leaves streaming on its interval — the degradation
+// floor. The daemon calls this once at startup, before serving.
+func (s *Server) SetNotify(c *notify.Consumer) {
+	if c == nil {
+		return
+	}
+	s.waker = c
 }
 
 // NewServer builds an EWS server backed by the directory for authentication and
