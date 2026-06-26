@@ -22,6 +22,7 @@ import (
 	"hermex/internal/ldapauth"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
+	"hermex/internal/mta"
 	"hermex/internal/objectstore"
 	"hermex/internal/publicfolder"
 	"hermex/internal/relay"
@@ -50,6 +51,10 @@ func main() {
 	dir.SetLDAPVerifier(ldapauth.New())
 	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
+
+	// Antivirus: install the package-level scanner from clamd_addr (a no-op when
+	// unset), so authenticated submissions are scanned before relay.
+	mta.EnableScanning(cfg.ClamdAddr, dir, cfg.QuarantinePath, cfg.Hostname, logger)
 
 	srv := ews.NewServer(dir, dir, cfg.Hostname)
 	srv.Logger = logger

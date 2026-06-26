@@ -74,6 +74,12 @@ func releaseMessage(st *objectstore.Store, deliver DeliverFunc, outbox int64, m 
 	// Deliver with the Bcc header removed; the unresolved list is ignored (no
 	// external relay yet, the same as the interactive compose path).
 	if _, err := deliver(recipients, stripBcc(raw), now); err != nil {
+		// A terminal delivery error (the message was quarantined for a virus) drops
+		// the scheduled copy without filing Sent, rather than retrying it forever.
+		var term interface{ TerminalDelivery() bool }
+		if errors.As(err, &term) && term.TerminalDelivery() {
+			return st.DeleteMessage(outbox, m.UID)
+		}
 		return err
 	}
 	// Delivered: keep the with-Bcc copy in Sent for the record, then clear the

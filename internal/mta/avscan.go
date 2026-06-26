@@ -2,6 +2,7 @@ package mta
 
 import (
 	"bytes"
+	"log"
 	"mime"
 	"net/mail"
 	"os"
@@ -13,6 +14,19 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/logging"
 )
+
+// virusBlocked is the error a submission returns when its message was quarantined.
+// It is terminal (TerminalDelivery) so the send-later sweep drops the scheduled
+// Outbox copy rather than retrying, which would re-quarantine it forever.
+type virusBlocked struct{}
+
+func (virusBlocked) Error() string         { return "message quarantined: a virus was detected" }
+func (virusBlocked) TerminalDelivery() bool { return true }
+
+// ErrVirusBlocked is returned by DeliverAndRelay when a message matched a virus
+// signature and was quarantined instead of sent. Submission callers surface it to
+// the sender and skip filing a Sent copy.
+var ErrVirusBlocked error = virusBlocked{}
 
 // avMaxScan caps the bytes streamed to clamd; it matches clamd's default
 // StreamMaxLength, so a larger message is passed unscanned rather than tripping
@@ -74,6 +88,30 @@ func SetScanner(scanner *antivirus.Scanner, dir avDirectory, quarPath func(int64
 		return
 	}
 	avCtx.Store(&avConfig{scanner: scanner, dir: dir, quarPath: quarPath, hostname: hostname, logger: logger, maxScan: avMaxScan})
+}
+
+// EnableScanning installs the package-level scanner from a daemon's clamd address,
+// or leaves scanning off when it is empty or unparseable. Every daemon that
+// delivers or submits mail calls this once at startup, since the scanner is
+// process-local.
+func EnableScanning(clamdAddr string, dir avDirectory, quarPath func(int64) string, hostname string, logger *logging.Logger) {
+	if clamdAddr == "" {
+		return
+	}
+	scanner, err := antivirus.New(clamdAddr)
+	if err != nil {
+		log.Printf("antivirus disabled, bad clamd_addr %q: %v", clamdAddr, err)
+		return
+	}
+	SetScanner(scanner, dir, quarPath, hostname, logger)
+}
+
+// ScanFetched scans a message pulled into a local mailbox by fetchmail. It reports
+// true when the message matched a virus and was quarantined, so the caller must
+// not deliver it; an unreachable clamd fails open (returns false). It exposes the
+// fetchmail leg of scanMessage to cmd/fetchmail.
+func ScanFetched(accounts directory.Accounts, mailbox string, raw []byte, when time.Time) bool {
+	return scanMessage(accounts, avFetchmail, "", []string{mailbox}, raw, when) == avHandled
 }
 
 // scanMessage scans raw at a delivery point and reports what the caller should do.

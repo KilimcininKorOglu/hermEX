@@ -2,6 +2,7 @@ package mta
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -143,5 +144,34 @@ func TestScanMessage(t *testing.T) {
 	SetScanner(nil, nil, nil, "", nil)
 	if d := scanMessage(accounts, avInboundSMTP, "e@x", []string{"v@acme.test"}, raw, when); d != avProceed {
 		t.Fatalf("no scanner: got %d, want avProceed", d)
+	}
+}
+
+// TestDeliverAndRelayBlocksVirus proves an outbound virus is quarantined and the
+// submission returns the terminal ErrVirusBlocked (so callers skip the Sent copy
+// and the send-later sweep drops the scheduled message instead of looping).
+func TestDeliverAndRelayBlocksVirus(t *testing.T) {
+	found := fakeClamd(t, "stream: Win.Test.EICAR FOUND\x00")
+	tmp := t.TempDir()
+	quarPath := func(id int64) string { return filepath.Join(tmp, fmt.Sprintf("%d.eml", id)) }
+	sc, err := antivirus.New(found)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fd := &fakeAVDir{outbound: true, domainID: 3, known: true}
+	SetScanner(sc, fd, quarPath, "mail.test", nil)
+	t.Cleanup(func() { SetScanner(nil, nil, nil, "", nil) })
+
+	raw := []byte("From: u@acme.test\r\nSubject: x\r\n\r\nbody")
+	_, err = DeliverAndRelay(directory.StaticAccounts{}, nil, "u@acme.test", []string{"ext@far.test"}, raw, time.Unix(1000, 0))
+	if !errors.Is(err, ErrVirusBlocked) {
+		t.Fatalf("err = %v, want ErrVirusBlocked", err)
+	}
+	if len(fd.quarantined) != 1 || fd.quarantined[0].Direction != "outbound" {
+		t.Fatalf("quarantine = %+v", fd.quarantined)
+	}
+	var term interface{ TerminalDelivery() bool }
+	if !errors.As(err, &term) || !term.TerminalDelivery() {
+		t.Error("ErrVirusBlocked should be a terminal delivery error")
 	}
 }

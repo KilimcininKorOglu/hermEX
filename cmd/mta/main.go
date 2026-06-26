@@ -19,7 +19,6 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 
 	"hermex/internal/antispam"
-	"hermex/internal/antivirus"
 	"hermex/internal/config"
 	"hermex/internal/directory"
 	"hermex/internal/dkimsign"
@@ -78,16 +77,9 @@ func main() {
 	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
 
-	// Antivirus: with a clamd configured, install the package-level scanner the
-	// delivery path consults. A bad address disables scanning rather than failing
-	// startup, so mail still serves.
-	if cfg.ClamdAddr != "" {
-		if scanner, err := antivirus.New(cfg.ClamdAddr); err != nil {
-			log.Printf("hermex-mta: antivirus disabled, bad clamd_addr %q: %v", cfg.ClamdAddr, err)
-		} else {
-			mta.SetScanner(scanner, dir, cfg.QuarantinePath, cfg.Hostname, logger)
-		}
-	}
+	// Antivirus: install the package-level scanner from clamd_addr (a no-op when
+	// unset), so delivery scans inbound intake and authenticated submission.
+	mta.EnableScanning(cfg.ClamdAddr, dir, cfg.QuarantinePath, cfg.Hostname, logger)
 
 	// The outbound relay spool holds external recipients of authenticated
 	// submissions until the relay worker delivers them. A single spool serves all

@@ -52,11 +52,20 @@ func main() {
 	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 	objectstore.SetDefaultLogger(logger)
 
+	// Antivirus: install the package-level scanner from clamd_addr (a no-op when
+	// unset), so fetched mail is scanned before it reaches a mailbox.
+	mta.EnableScanning(cfg.ClamdAddr, dir, cfg.QuarantinePath, cfg.Hostname, logger)
+
 	// Deliver a fetched message into the local mailbox through the normal local path.
 	// The envelope sender is the null return-path so a fetched message never triggers a
 	// local out-of-office reply: the source server already handled the original arrival,
 	// and a bulk (fetch-all) pull must not flood the original senders.
 	deliver := func(mailbox string, raw []byte, when time.Time) error {
+		// A virus hit is quarantined and the mailbox owner plus admins notified; treat
+		// it as delivered so it is cleared from the source server. clamd down fails open.
+		if mta.ScanFetched(dir, mailbox, raw, when) {
+			return nil
+		}
 		unresolved, err := mta.Deliver(dir, "", []string{mailbox}, raw, when)
 		if err != nil {
 			return err

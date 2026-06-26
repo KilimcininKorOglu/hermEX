@@ -566,6 +566,13 @@ func Deliver(accounts directory.Accounts, from string, recipients []string, raw 
 // The returned unresolved holds only the genuinely undeliverable — a user-unknown
 // in a local domain, or (when spool is nil) every external address.
 func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from string, recipients []string, raw []byte, received time.Time) (unresolved []string, err error) {
+	// Antivirus on the authenticated submission path (webmail, EWS, ROP, ActiveSync,
+	// SMTP MSA via the send-later worker, and the local->local leg). A hit is
+	// quarantined and the sender plus admins notified, and the send is blocked so no
+	// Sent copy of the virus is filed; an unreachable clamd fails open.
+	if scanMessage(accounts, avSubmission, from, recipients, raw, received) == avHandled {
+		return nil, ErrVirusBlocked
+	}
 	if err := overSendQuota(accounts, from); err != nil {
 		return recipients, err
 	}
