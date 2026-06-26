@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
 	"hermex/internal/wbxml"
 )
 
@@ -82,5 +84,73 @@ func TestItemOperationsFetchMalformed(t *testing.T) {
 	f := root.Child(wbxml.IOResponse).Child(wbxml.IOFetch)
 	if f.ChildText(wbxml.IOStatus) != "155" {
 		t.Errorf("malformed Fetch Status = %q, want 155", f.ChildText(wbxml.IOStatus))
+	}
+}
+
+// TestItemOperationsEmptyFolder confirms EmptyFolderContents removes every message
+// in a folder and echoes its collection id.
+func TestItemOperationsEmptyFolder(t *testing.T) {
+	ts, dir := seededServer(t)
+	seedInbox(t, dir, 3)
+
+	req := wbxml.Elem(wbxml.IOItemOperations,
+		wbxml.Elem(wbxml.IOEmptyFolderContents,
+			wbxml.Str(wbxml.ASCollectionID, inboxID())))
+	_, root := postCommand(t, ts, "ItemOperations", req)
+	efc := root.Child(wbxml.IOResponse).Child(wbxml.IOEmptyFolderContents)
+	if efc == nil || efc.ChildText(wbxml.IOStatus) != "1" {
+		t.Fatalf("EmptyFolderContents Status not 1: %+v", efc)
+	}
+	if efc.ChildText(wbxml.ASCollectionID) != inboxID() {
+		t.Errorf("echoed CollectionId %q, want %q", efc.ChildText(wbxml.ASCollectionID), inboxID())
+	}
+
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox)); err != nil || len(msgs) != 0 {
+		t.Errorf("inbox has %d messages after EmptyFolderContents (err %v), want 0", len(msgs), err)
+	}
+}
+
+// TestItemOperationsEmptyFolderDeleteSubs confirms the DeleteSubFolders option also
+// removes the folder's subfolders.
+func TestItemOperationsEmptyFolderDeleteSubs(t *testing.T) {
+	ts, dir := seededServer(t)
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent := int64(mapi.PrivateFIDInbox)
+	subID, err := st.CreateFolder(&parent, "Sub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	req := wbxml.Elem(wbxml.IOItemOperations,
+		wbxml.Elem(wbxml.IOEmptyFolderContents,
+			wbxml.Str(wbxml.ASCollectionID, inboxID()),
+			wbxml.Elem(wbxml.IOOptions, wbxml.Elem(wbxml.IODeleteSubFolders))))
+	_, root := postCommand(t, ts, "ItemOperations", req)
+	if root.Child(wbxml.IOResponse).Child(wbxml.IOEmptyFolderContents).ChildText(wbxml.IOStatus) != "1" {
+		t.Fatal("EmptyFolderContents with DeleteSubFolders did not succeed")
+	}
+
+	st, err = objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	folders, err := st.ListFolders()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range folders {
+		if f.ID == subID {
+			t.Error("subfolder survived EmptyFolderContents with DeleteSubFolders")
+		}
 	}
 }

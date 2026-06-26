@@ -387,11 +387,14 @@ const (
 
 // ItemOperations (code page 0x14, ActiveSync 12.0+).
 const (
-	IOItemOperations Tag = 0x1405
-	IOFetch          Tag = 0x1406
-	IOStore          Tag = 0x1407
-	IOProperties     Tag = 0x140B
-	IOData           Tag = 0x140C
-	IOStatus         Tag = 0x140D
-	IOResponse       Tag = 0x140E
+	IOItemOperations      Tag = 0x1405
+	IOFetch               Tag = 0x1406
+	IOStore               Tag = 0x1407
+	IOOptions             Tag = 0x1408
+	IOProperties          Tag = 0x140B
+	IOData                Tag = 0x140C
+	IOStatus              Tag = 0x140D
+	IOResponse            Tag = 0x140E
+	IOEmptyFolderContents Tag = 0x1412
+	IODeleteSubFolders    Tag = 0x1413
 )
