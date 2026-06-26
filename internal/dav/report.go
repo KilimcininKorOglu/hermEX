@@ -31,10 +31,6 @@ type reportReq struct {
 // (RFC 6578). Each returns 207 Multistatus with the requested vCards.
 func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox string) {
 	_, user, coll, _ := classify(r.URL.Path)
-	if user == "" {
-		http.Error(w, "not a collection", http.StatusBadRequest)
-		return
-	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, s.vcardLimit()))
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -46,6 +42,21 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox st
 		return
 	}
 
+	// Principal-search reports query the directory, not a mailbox store, so they are
+	// answered before any collection is resolved (RFC 3744 §9.3/§9.5).
+	switch req.XMLName.Local {
+	case "principal-property-search":
+		s.reportPrincipalSearch(w, body)
+		return
+	case "principal-search-property-set":
+		reportPrincipalSearchPropSet(w)
+		return
+	}
+
+	if user == "" {
+		http.Error(w, "not a collection", http.StatusBadRequest)
+		return
+	}
 	st, err := objectstore.Open(mailbox)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)

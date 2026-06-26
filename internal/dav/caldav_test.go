@@ -804,6 +804,39 @@ func TestQuotaProps(t *testing.T) {
 	}
 }
 
+// TestPrincipalPropertySearch confirms a principal-property-search REPORT matches
+// the directory's users and returns each as an addressable principal (RFC 3744 §9.4).
+func TestPrincipalPropertySearch(t *testing.T) {
+	ts := davServerCal(t)
+	body := `<D:principal-property-search xmlns:D="DAV:">` +
+		`<D:property-search><D:prop><D:displayname/></D:prop><D:match>alice</D:match></D:property-search>` +
+		`<D:prop><D:displayname/></D:prop></D:principal-property-search>`
+	resp, out := doFull(t, ts, "REPORT", "/dav/principals/", body, map[string]string{"Depth": "0"})
+	if resp.StatusCode != http.StatusMultiStatus {
+		t.Fatalf("status %d, want 207\n%s", resp.StatusCode, out)
+	}
+	for _, want := range []string{"/dav/principals/" + testUser + "/", "mailto:" + testUser, "calendar-user-address-set"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("principal search missing %q\n%s", want, out)
+		}
+	}
+}
+
+// TestPrincipalSearchPropertySet confirms the server advertises the properties a
+// client may search principals on (RFC 3744 §9.5).
+func TestPrincipalSearchPropertySet(t *testing.T) {
+	ts := davServerCal(t)
+	resp, out := doFull(t, ts, "REPORT", "/dav/principals/", `<D:principal-search-property-set xmlns:D="DAV:"/>`, map[string]string{"Depth": "0"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200\n%s", resp.StatusCode, out)
+	}
+	for _, want := range []string{"principal-search-property-set", "principal-search-property", "displayname", "Display Name"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("principal-search-property-set missing %q\n%s", want, out)
+		}
+	}
+}
+
 // TestCurrentUserPrivilegeSet confirms a collection PROPFIND reports the owner and
 // the privileges the user holds, so a client can tell the calendar is writable
 // (RFC 3744 §5.4).
