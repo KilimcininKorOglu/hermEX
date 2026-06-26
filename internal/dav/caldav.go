@@ -160,7 +160,9 @@ func (s *Server) handleCalDelete(w http.ResponseWriter, r *http.Request, mailbox
 		http.Error(w, "etag mismatch", http.StatusPreconditionFailed)
 		return
 	}
-	if err := st.DeleteObject(obj.ID); err != nil {
+	// Route to the Recoverable Items dumpster (not a hard purge): the object leaves
+	// the live view but its bumped change number is a sync-collection tombstone.
+	if err := st.SoftDeleteObject(obj.ID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}

@@ -58,6 +58,49 @@ func (s *Store) FolderMaxChangeNumber(folderID int64) (uint64, error) {
 	return uint64(max.Int64), nil
 }
 
+// FolderObjectsSyncMax returns the highest change number among a folder's
+// non-associated objects INCLUDING soft-deleted ones. A soft delete bumps the
+// change number on the dumpster row, so this value (unlike FolderMaxChangeNumber)
+// advances on a deletion. It is the CTag and sync-token basis once deletions are
+// reported: a sync-token built from it never re-reports a tombstone, and a CTag
+// built from it changes when a member is removed.
+func (s *Store) FolderObjectsSyncMax(folderID int64) (uint64, error) {
+	var max sql.NullInt64
+	if err := s.objdb.QueryRow(
+		`SELECT MAX(change_number) FROM messages
+		 WHERE parent_fid=? AND is_associated=0`, folderID).Scan(&max); err != nil {
+		return 0, err
+	}
+	if !max.Valid {
+		return 0, nil
+	}
+	return uint64(max.Int64), nil
+}
+
+// DeletedObjectsSince returns a folder's soft-deleted non-associated objects whose
+// deletion advanced the change number past sinceCN — the CalDAV/CardDAV
+// sync-collection tombstones (RFC 6578). Each is reported to the client as a 404
+// member so it removes the object locally.
+func (s *Store) DeletedObjectsSince(folderID int64, sinceCN uint64) ([]FolderObject, error) {
+	rows, err := s.objdb.Query(
+		`SELECT message_id, change_number FROM messages
+		 WHERE parent_fid=? AND is_deleted=1 AND is_associated=0 AND change_number>?
+		 ORDER BY message_id`, folderID, int64(sinceCN))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FolderObject
+	for rows.Next() {
+		var id, cn int64
+		if err := rows.Scan(&id, &cn); err != nil {
+			return nil, err
+		}
+		out = append(out, FolderObject{ID: id, ChangeNumber: uint64(cn)})
+	}
+	return out, rows.Err()
+}
+
 // FolderMessageChangeNumbers returns each live, non-associated message's objectstore
 // id mapped to its latest modification counter — the per-message snapshot a
 // notification poll diffs against. Against a prior snapshot: a new id is a create, a

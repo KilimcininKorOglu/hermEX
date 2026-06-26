@@ -127,7 +127,7 @@ func (s *Server) addressbookResponses(mailbox, user, depth string) ([]msResponse
 	}
 	defer st.Close()
 
-	max, err := st.FolderMaxChangeNumber(mapi.PrivateFIDContacts)
+	max, err := st.FolderObjectsSyncMax(mapi.PrivateFIDContacts)
 	if err != nil {
 		return nil, err
 	}
@@ -190,7 +190,7 @@ func (s *Server) calendarResponses(mailbox, user, depth string) ([]msResponse, e
 	}
 	defer st.Close()
 
-	max, err := st.FolderMaxChangeNumber(mapi.PrivateFIDCalendar)
+	max, err := st.FolderObjectsSyncMax(mapi.PrivateFIDCalendar)
 	if err != nil {
 		return nil, err
 	}

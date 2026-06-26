@@ -111,11 +111,6 @@ func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store,
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	max, err := st.FolderMaxChangeNumber(mapi.PrivateFIDContacts)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 	ms := &multistatus{}
 	for _, o := range objs {
 		if sync && o.ChangeNumber <= sinceToken {
@@ -134,7 +129,23 @@ func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store,
 		ms.Responses = append(ms.Responses, addressDataResponse(href, o.ChangeNumber, data))
 	}
 	if sync {
-		ms.SyncToken = syncToken(max)
+		// Tombstones: report each contact removed since the client's token as a 404
+		// member so it deletes the vCard locally (RFC 6578).
+		deleted, err := st.DeletedObjectsSince(mapi.PrivateFIDContacts, sinceToken)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		for _, d := range deleted {
+			href := objectPath(user, objectName(st, d.ID, ".vcf"))
+			ms.Responses = append(ms.Responses, msResponse{Href: href, Status: statusNotFound})
+		}
+		syncMax, err := st.FolderObjectsSyncMax(mapi.PrivateFIDContacts)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		ms.SyncToken = syncToken(syncMax)
 	}
 	writeMultistatus(w, ms)
 }
@@ -200,11 +211,6 @@ func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Sto
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	max, err := st.FolderMaxChangeNumber(mapi.PrivateFIDCalendar)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 	ms := &multistatus{}
 	for _, o := range objs {
 		if sync && o.ChangeNumber <= sinceToken {
@@ -223,7 +229,23 @@ func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Sto
 		ms.Responses = append(ms.Responses, calendarDataResponse(href, o.ChangeNumber, data))
 	}
 	if sync {
-		ms.SyncToken = syncToken(max)
+		// Tombstones: report each event removed since the client's token as a 404
+		// member so it deletes the .ics locally (RFC 6578).
+		deleted, err := st.DeletedObjectsSince(mapi.PrivateFIDCalendar, sinceToken)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		for _, d := range deleted {
+			href := calObjectPath(user, objectName(st, d.ID, ".ics"))
+			ms.Responses = append(ms.Responses, msResponse{Href: href, Status: statusNotFound})
+		}
+		syncMax, err := st.FolderObjectsSyncMax(mapi.PrivateFIDCalendar)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		ms.SyncToken = syncToken(syncMax)
 	}
 	writeMultistatus(w, ms)
 }

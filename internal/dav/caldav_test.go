@@ -305,3 +305,38 @@ func TestCalReportSync(t *testing.T) {
 		t.Errorf("incremental sync re-sent an unchanged member\n%s", out)
 	}
 }
+
+// TestCalReportSyncDelete checks deletion reporting: after a member is deleted, a
+// sync with the prior token returns it as a 404 tombstone, and the advanced token
+// does not re-report it (RFC 6578).
+func TestCalReportSyncDelete(t *testing.T) {
+	ts := davServerCal(t)
+	doFull(t, ts, "PUT", calURL("plan.ics"), timedEventICS, nil)
+
+	initial := `<d:sync-collection xmlns:d="DAV:"><d:sync-token/><d:sync-level>1</d:sync-level><d:prop><d:getetag/></d:prop></d:sync-collection>`
+	_, out := doFull(t, ts, "REPORT", calURL(""), initial, nil)
+	token := syncTokenRE.FindString(out)
+	if token == "" {
+		t.Fatalf("initial sync returned no sync-token\n%s", out)
+	}
+
+	if resp, _ := doFull(t, ts, "DELETE", calURL("plan.ics"), "", nil); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("DELETE status %d, want 204", resp.StatusCode)
+	}
+
+	follow := `<d:sync-collection xmlns:d="DAV:"><d:sync-token>` + token + `</d:sync-token><d:sync-level>1</d:sync-level><d:prop><d:getetag/></d:prop></d:sync-collection>`
+	resp, out := doFull(t, ts, "REPORT", calURL(""), follow, nil)
+	if resp.StatusCode != http.StatusMultiStatus {
+		t.Fatalf("sync status %d, want 207\n%s", resp.StatusCode, out)
+	}
+	if !strings.Contains(out, "plan.ics") || !strings.Contains(out, "404") {
+		t.Errorf("sync after delete missing the 404 tombstone for plan.ics\n%s", out)
+	}
+	token2 := syncTokenRE.FindString(out)
+
+	again := `<d:sync-collection xmlns:d="DAV:"><d:sync-token>` + token2 + `</d:sync-token><d:sync-level>1</d:sync-level><d:prop><d:getetag/></d:prop></d:sync-collection>`
+	_, out = doFull(t, ts, "REPORT", calURL(""), again, nil)
+	if strings.Contains(out, "plan.ics") {
+		t.Errorf("tombstone re-reported on the next sync (token did not advance past the delete)\n%s", out)
+	}
+}
