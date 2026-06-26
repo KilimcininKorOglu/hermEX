@@ -120,6 +120,8 @@ func principalResponse(user string) msResponse {
 				CalendarUserAddressSet: &hrefSet{Hrefs: []string{"mailto:" + user, principalPath(user)}},
 				ScheduleInboxURL:       &href{Href: scheduleInboxPath(user)},
 				ScheduleOutboxURL:      &href{Href: scheduleOutboxPath(user)},
+				Owner:                  &href{Href: principalPath(user)},
+				CurrentUserPrivSet:     ownerPrivilegeSet(),
 			},
 			Status: statusOK,
 		}},
@@ -152,10 +154,12 @@ func cardCollectionResponse(st *objectstore.Store, user, coll, displayName strin
 		return msResponse{}, err
 	}
 	prop := msProp{
-		ResourceType: collectionResourceType(),
-		DisplayName:  displayName,
-		GetCTag:      ctag(max),
-		SyncToken:    syncToken(max),
+		ResourceType:       collectionResourceType(),
+		DisplayName:        displayName,
+		GetCTag:            ctag(max),
+		SyncToken:          syncToken(max),
+		Owner:              &href{Href: principalPath(user)},
+		CurrentUserPrivSet: ownerPrivilegeSet(),
 	}
 	applyDeadProps(&prop, dead)
 	return msResponse{
@@ -268,11 +272,13 @@ func calCollectionResponse(st *objectstore.Store, user, coll, displayName string
 		return msResponse{}, err
 	}
 	prop := msProp{
-		ResourceType:     calendarResourceType(),
-		DisplayName:      displayName,
-		GetCTag:          ctag(max),
-		SyncToken:        syncToken(max),
-		SupportedCalComp: eventComponentSet(),
+		ResourceType:       calendarResourceType(),
+		DisplayName:        displayName,
+		GetCTag:            ctag(max),
+		SyncToken:          syncToken(max),
+		SupportedCalComp:   eventComponentSet(),
+		Owner:              &href{Href: principalPath(user)},
+		CurrentUserPrivSet: ownerPrivilegeSet(),
 	}
 	applyDeadProps(&prop, dead)
 	return msResponse{
@@ -385,11 +391,13 @@ func scheduleInboxCollectionResponse(st *objectstore.Store, user string) (msResp
 		Href: scheduleInboxPath(user),
 		Propstat: []msPropstat{{
 			Prop: msProp{
-				ResourceType:     scheduleInboxResourceType(),
-				DisplayName:      "Inbox",
-				GetCTag:          ctag(max),
-				SyncToken:        syncToken(max),
-				SupportedCalComp: eventComponentSet(),
+				ResourceType:       scheduleInboxResourceType(),
+				DisplayName:        "Inbox",
+				GetCTag:            ctag(max),
+				SyncToken:          syncToken(max),
+				SupportedCalComp:   eventComponentSet(),
+				Owner:              &href{Href: principalPath(user)},
+				CurrentUserPrivSet: ownerPrivilegeSet(),
 			},
 			Status: statusOK,
 		}},
@@ -448,9 +456,11 @@ func scheduleOutboxResponse(user string) msResponse {
 		Href: scheduleOutboxPath(user),
 		Propstat: []msPropstat{{
 			Prop: msProp{
-				ResourceType:     scheduleOutboxResourceType(),
-				DisplayName:      "Outbox",
-				SupportedCalComp: eventComponentSet(),
+				ResourceType:       scheduleOutboxResourceType(),
+				DisplayName:        "Outbox",
+				SupportedCalComp:   eventComponentSet(),
+				Owner:              &href{Href: principalPath(user)},
+				CurrentUserPrivSet: ownerPrivilegeSet(),
 			},
 			Status: statusOK,
 		}},

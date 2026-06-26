@@ -47,6 +47,8 @@ var protectedProps = map[string]bool{
 	nsDAV + " sync-token":                          true,
 	nsDAV + " current-user-principal":              true,
 	nsDAV + " principal-URL":                       true,
+	nsDAV + " current-user-privilege-set":          true,
+	nsDAV + " owner":                               true,
 	nsCS + " getctag":                              true,
 	nsCalDAV + " supported-calendar-component-set": true,
 }

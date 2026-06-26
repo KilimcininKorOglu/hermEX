@@ -56,6 +56,11 @@ type msProp struct {
 	CalendarUserAddressSet *hrefSet `xml:"urn:ietf:params:xml:ns:caldav calendar-user-address-set,omitempty"`
 	ScheduleInboxURL       *href    `xml:"urn:ietf:params:xml:ns:caldav schedule-inbox-URL,omitempty"`
 	ScheduleOutboxURL      *href    `xml:"urn:ietf:params:xml:ns:caldav schedule-outbox-URL,omitempty"`
+	// WebDAV ACL (RFC 3744): the owner principal and the privileges the current user
+	// holds on the resource — the property a client reads to decide read-only vs
+	// read-write.
+	Owner              *href         `xml:"DAV: owner,omitempty"`
+	CurrentUserPrivSet *privilegeSet `xml:"DAV: current-user-privilege-set,omitempty"`
 	// Extra carries stored dead properties (PROPPATCH round-trip) as verbatim XML
 	// elements, emitted inside <prop> after the fixed fields.
 	Extra []byte `xml:",innerxml"`
@@ -108,6 +113,43 @@ type scheduleRespItem struct {
 // hrefSet wraps several DAV:href children under one property (calendar-user-address-set).
 type hrefSet struct {
 	Hrefs []string `xml:"DAV: href"`
+}
+
+// privilegeSet is a DAV:current-user-privilege-set value (RFC 3744 §5.4): a flat
+// list of the privileges the authenticated user holds on the resource.
+type privilegeSet struct {
+	Privileges []privilege `xml:"DAV: privilege"`
+}
+
+// privilege wraps a single granted privilege element inside a <D:privilege>.
+type privilege struct {
+	Read                        *struct{} `xml:"DAV: read,omitempty"`
+	Write                       *struct{} `xml:"DAV: write,omitempty"`
+	WriteProperties             *struct{} `xml:"DAV: write-properties,omitempty"`
+	WriteContent                *struct{} `xml:"DAV: write-content,omitempty"`
+	Bind                        *struct{} `xml:"DAV: bind,omitempty"`
+	Unbind                      *struct{} `xml:"DAV: unbind,omitempty"`
+	ReadACL                     *struct{} `xml:"DAV: read-acl,omitempty"`
+	ReadCurrentUserPrivilegeSet *struct{} `xml:"DAV: read-current-user-privilege-set,omitempty"`
+	ReadFreeBusy                *struct{} `xml:"urn:ietf:params:xml:ns:caldav read-free-busy,omitempty"`
+}
+
+// ownerPrivilegeSet is the full privilege set the mailbox owner holds on their own
+// collections. hermEX mailboxes are single-owner, so the authenticated user always
+// has every privilege on their own resources (RFC 3744 §5.4; CALDAV:read-free-busy
+// from RFC 4791 §6.1 is aggregated under DAV:read).
+func ownerPrivilegeSet() *privilegeSet {
+	return &privilegeSet{Privileges: []privilege{
+		{Read: empty},
+		{ReadACL: empty},
+		{ReadCurrentUserPrivilegeSet: empty},
+		{ReadFreeBusy: empty},
+		{Write: empty},
+		{WriteProperties: empty},
+		{WriteContent: empty},
+		{Bind: empty},
+		{Unbind: empty},
+	}}
 }
 
 const (

@@ -769,3 +769,19 @@ func TestScheduleNameReserved(t *testing.T) {
 		t.Errorf("PUT into the scheduling Inbox as a calendar succeeded (status %d); want rejection", resp.StatusCode)
 	}
 }
+
+// TestCurrentUserPrivilegeSet confirms a collection PROPFIND reports the owner and
+// the privileges the user holds, so a client can tell the calendar is writable
+// (RFC 3744 §5.4).
+func TestCurrentUserPrivilegeSet(t *testing.T) {
+	ts := davServerCal(t)
+	_, body := do(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/calendar/", "0", true)
+	for _, want := range []string{
+		"current-user-privilege-set", "write-content", "read-acl", "read-free-busy",
+		"owner", "/dav/principals/" + testUser + "/",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("calendar PROPFIND missing %q\n%s", want, body)
+		}
+	}
+}
