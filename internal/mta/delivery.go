@@ -565,7 +565,18 @@ func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from strin
 	// to bounce — never a silent drop.
 	leaves, dests := applyForwards(accounts, leaves)
 	leaves = append(leaves, dests...)
-	unresolved, err = Deliver(accounts, from, leaves, raw, received)
+	// Per-tenant outgoing display name: rewrite the From display name separately for
+	// the local-delivery copy (the sender domain's internal template) and the relayed
+	// copy (its external template), when the sender's domain customizes it. An empty
+	// name for a direction leaves that copy's From untouched.
+	localRaw, relayRaw := raw, raw
+	if r, ok := accounts.(senderNameResolver); ok {
+		if in, ex, e := r.OutgoingDisplayNames(from); e == nil {
+			localRaw = RewriteFromDisplayName(raw, in)
+			relayRaw = RewriteFromDisplayName(raw, ex)
+		}
+	}
+	unresolved, err = Deliver(accounts, from, leaves, localRaw, received)
 	if err != nil {
 		return append(unresolved, refused...), err
 	}
@@ -579,7 +590,7 @@ func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from strin
 			}
 		}
 		if len(external) > 0 {
-			if e := spool.Enqueue(from, external, raw, received); e != nil {
+			if e := spool.Enqueue(from, external, relayRaw, received); e != nil {
 				return append(stuck, refused...), e
 			}
 		}

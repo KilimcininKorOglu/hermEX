@@ -65,3 +65,42 @@ func TestDomainNameTemplatesRoundtrip(t *testing.T) {
 		t.Errorf("templates = (%q, %q), want the internal and external forms", in, ex)
 	}
 }
+
+// TestOutgoingDisplayNames proves the sender's domain templates and profile combine
+// into the internal and external From display names, and that a domain with no
+// templates yields empty strings (no customization, no profile read needed).
+func TestOutgoingDisplayNames(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	cleanTables(t, db)
+	root := t.TempDir()
+	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "dom")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.CreateUser("ali@hermex.test", "pw", filepath.Join(root, "u")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.SetUserProperties("ali@hermex.test", map[uint32]string{
+		0x3001001F: "Ali Veli", 0x3A16001F: "Acme", 0x3A17001F: "Sales",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if in, ex, err := d.OutgoingDisplayNames("ali@hermex.test"); err != nil || in != "" || ex != "" {
+		t.Fatalf("no templates = (%q,%q,%v), want empty", in, ex, err)
+	}
+	if err := d.SetDomainNameTemplates("hermex.test", "{name} ({title})", "{name} ({company} - {title})"); err != nil {
+		t.Fatal(err)
+	}
+	in, ex, err := d.OutgoingDisplayNames("ali@hermex.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if in != "Ali Veli (Sales)" || ex != "Ali Veli (Acme - Sales)" {
+		t.Errorf("names = (%q, %q), want internal %q and external %q",
+			in, ex, "Ali Veli (Sales)", "Ali Veli (Acme - Sales)")
+	}
+}

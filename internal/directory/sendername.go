@@ -66,3 +66,35 @@ func (d *SQLDirectory) SetDomainNameTemplates(domain, internal, external string)
 		strings.TrimSpace(internal), strings.TrimSpace(external), domain)
 	return err
 }
+
+// outgoingNameProptags maps each template placeholder to the directory proptag whose
+// value fills it (standard MAPI person properties, kept numeric to match the
+// directory's other property code).
+var outgoingNameProptags = map[string]uint32{
+	"name":       0x3001001F, // PR_DISPLAY_NAME
+	"company":    0x3A16001F, // PR_COMPANY_NAME
+	"title":      0x3A17001F, // PR_TITLE
+	"department": 0x3A18001F, // PR_DEPARTMENT_NAME
+	"office":     0x3A19001F, // PR_OFFICE_LOCATION
+}
+
+// OutgoingDisplayNames returns the From display names a sender's outgoing mail should
+// carry to internal and external recipients, formatted from the sender's domain
+// templates and profile. An empty string for a direction means "leave the From name
+// untouched" (no template for that direction, or the template rendered empty). A
+// sender whose domain has no templates yields two empty strings with no profile read.
+func (d *SQLDirectory) OutgoingDisplayNames(from string) (internal, external string, err error) {
+	intTpl, extTpl, err := d.GetDomainNameTemplates(addrDomain(from))
+	if err != nil || (intTpl == "" && extTpl == "") {
+		return "", "", err
+	}
+	props, err := d.GetUserProperties(from)
+	if err != nil {
+		return "", "", err
+	}
+	vals := make(map[string]string, len(outgoingNameProptags))
+	for key, tag := range outgoingNameProptags {
+		vals[key] = props[tag]
+	}
+	return FormatSenderName(intTpl, vals), FormatSenderName(extTpl, vals), nil
+}

@@ -6,6 +6,13 @@ import (
 	"strings"
 )
 
+// senderNameResolver is the optional directory capability to resolve a sender's
+// per-tenant outgoing display names. *directory.SQLDirectory satisfies it; a
+// directory that does not leaves the From display name untouched.
+type senderNameResolver interface {
+	OutgoingDisplayNames(from string) (internal, external string, err error)
+}
+
 // RewriteFromDisplayName replaces the display name of raw's From header with name,
 // preserving the address and leaving every other header (including Sender) and the
 // body byte-identical. raw with no From, an unparseable From, or an empty name is
