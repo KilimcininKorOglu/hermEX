@@ -837,6 +837,25 @@ func TestPrincipalSearchPropertySet(t *testing.T) {
 	}
 }
 
+// TestExpandProperty confirms an expand-property REPORT inlines a referenced
+// resource's sub-properties, saving the client a round trip (RFC 3253 §3.8).
+func TestExpandProperty(t *testing.T) {
+	ts := davServerCal(t)
+	body := `<D:expand-property xmlns:D="DAV:">` +
+		`<D:property name="calendar-home-set" namespace="urn:ietf:params:xml:ns:caldav">` +
+		`<D:property name="displayname"/><D:property name="resourcetype"/></D:property>` +
+		`<D:property name="displayname"/></D:expand-property>`
+	resp, out := doFull(t, ts, "REPORT", "/dav/principals/"+testUser+"/", body, map[string]string{"Depth": "0"})
+	if resp.StatusCode != http.StatusMultiStatus {
+		t.Fatalf("status %d, want 207\n%s", resp.StatusCode, out)
+	}
+	for _, want := range []string{"calendar-home-set", "/dav/calendars/" + testUser + "/", "Calendars", testUser} {
+		if !strings.Contains(out, want) {
+			t.Errorf("expand-property missing %q\n%s", want, out)
+		}
+	}
+}
+
 // TestCurrentUserPrivilegeSet confirms a collection PROPFIND reports the owner and
 // the privileges the user holds, so a client can tell the calendar is writable
 // (RFC 3744 §5.4).

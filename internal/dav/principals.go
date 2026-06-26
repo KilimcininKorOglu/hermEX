@@ -106,3 +106,115 @@ func reportPrincipalSearchPropSet(w http.ResponseWriter) {
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(append([]byte(xml.Header), body...))
 }
+
+// expandProperty is a DAV:expand-property body (RFC 3253 §3.8): a tree of property
+// elements where a property holding hrefs may request sub-properties to be expanded
+// from the referenced resources in one round trip.
+type expandProperty struct {
+	XMLName xml.Name     `xml:"DAV: expand-property"`
+	Props   []expandProp `xml:"DAV: property"`
+}
+
+type expandProp struct {
+	Name  string       `xml:"name,attr"`
+	Props []expandProp `xml:"DAV: property"`
+}
+
+// reportExpandProperty answers DAV:expand-property for a principal: each requested
+// href-valued property (the home sets, principal URL, calendar user address) is
+// returned with the requested sub-properties of the resource it points at expanded
+// inline (RFC 3253 §3.8), saving the client a second round trip.
+func (s *Server) reportExpandProperty(w http.ResponseWriter, r *http.Request, user string, body []byte) {
+	var req expandProperty
+	if err := xml.Unmarshal(body, &req); err != nil {
+		http.Error(w, "invalid expand-property: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	_, pathUser, _, _ := classify(r.URL.Path)
+	if pathUser == "" {
+		pathUser = user
+	}
+	var inner strings.Builder
+	for _, p := range req.Props {
+		inner.WriteString(expandPrincipalProp(pathUser, p))
+	}
+	resp := msResponse{
+		Href:     r.URL.Path,
+		Propstat: []msPropstat{{Prop: msProp{Extra: []byte(inner.String())}, Status: statusOK}},
+	}
+	writeMultistatus(w, &multistatus{Responses: []msResponse{resp}})
+}
+
+// expandPrincipalProp renders one requested property of a principal. A simple
+// property carries its value; an href-valued one carries its hrefs, each expanded
+// into a nested response when sub-properties were requested.
+func expandPrincipalProp(user string, p expandProp) string {
+	switch p.Name {
+	case "displayname":
+		return "<displayname xmlns=\"DAV:\">" + xmlEscape(user) + "</displayname>"
+	case "principal-URL", "current-user-principal", "owner":
+		return expandHrefProp(nsDAV, p.Name, []string{principalPath(user)}, p.Props)
+	case "calendar-home-set":
+		return expandHrefProp(nsCalDAV, p.Name, []string{calHomeSetPath(user)}, p.Props)
+	case "addressbook-home-set":
+		return expandHrefProp(nsCard, p.Name, []string{homeSetPath(user)}, p.Props)
+	case "calendar-user-address-set":
+		return expandHrefProp(nsCalDAV, p.Name, []string{"mailto:" + user, principalPath(user)}, p.Props)
+	}
+	return ""
+}
+
+// expandHrefProp renders an href-valued property element. With no requested
+// sub-properties it lists the bare hrefs; otherwise each href that names a known
+// resource is expanded into a nested DAV:response carrying the sub-properties.
+func expandHrefProp(ns, name string, hrefs []string, sub []expandProp) string {
+	var b strings.Builder
+	b.WriteString("<" + name + " xmlns=\"" + ns + "\">")
+	for _, h := range hrefs {
+		if len(sub) == 0 {
+			b.WriteString("<href xmlns=\"DAV:\">" + xmlEscape(h) + "</href>")
+			continue
+		}
+		b.WriteString("<response xmlns=\"DAV:\"><href>" + xmlEscape(h) + "</href><propstat><prop>")
+		for _, sp := range sub {
+			b.WriteString(referencedSubProp(h, sp.Name))
+		}
+		b.WriteString("</prop><status>HTTP/1.1 200 OK</status></propstat></response>")
+	}
+	b.WriteString("</" + name + ">")
+	return b.String()
+}
+
+// referencedSubProp renders one sub-property of a referenced resource. Only the
+// stable shape of hermEX's well-known principal targets (the home sets, the
+// principal itself) is known, so displayname and resourcetype are answered.
+func referencedSubProp(href, name string) string {
+	switch name {
+	case "displayname":
+		return "<displayname>" + xmlEscape(referencedDisplayName(href)) + "</displayname>"
+	case "resourcetype":
+		if strings.HasPrefix(href, "/dav/principals/") {
+			return "<resourcetype><principal/></resourcetype>"
+		}
+		return "<resourcetype><collection/></resourcetype>"
+	}
+	return ""
+}
+
+// referencedDisplayName is the display name hermEX gives a well-known principal
+// target.
+func referencedDisplayName(href string) string {
+	switch {
+	case strings.HasPrefix(href, "/dav/calendars/"):
+		return "Calendars"
+	case strings.HasPrefix(href, "/dav/addressbooks/"):
+		return "Address Books"
+	default:
+		return href
+	}
+}
+
+// xmlEscape escapes the XML element-text significant characters.
+func xmlEscape(s string) string {
+	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
+}

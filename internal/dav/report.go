@@ -51,6 +51,9 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox st
 	case "principal-search-property-set":
 		reportPrincipalSearchPropSet(w)
 		return
+	case "expand-property":
+		s.reportExpandProperty(w, r, user, body)
+		return
 	}
 
 	if user == "" {
