@@ -26,7 +26,7 @@ func resolveGateway(cfg *config.Config) gatewaySettings {
 		backendEws:        orDefault(cfg.GatewayBackendEws, "http://ews:8080"),
 		backendActiveSync: orDefault(cfg.GatewayBackendActiveSync, "http://activesync:8080"),
 		backendDav:        orDefault(cfg.GatewayBackendDAV, "http://dav:8080"),
-		backendWebmail:    orDefault(cfg.GatewayBackendWebmail, "http://webmail:8080"),
+		backendWebmail:    orDefault(cfg.GatewayBackendWebmail, "http://webmail2:8080"),
 	}
 }
 

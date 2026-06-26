@@ -19,7 +19,7 @@ func TestResolveGatewayDefaults(t *testing.T) {
 		backendEws:        "http://ews:8080",
 		backendActiveSync: "http://activesync:8080",
 		backendDav:        "http://dav:8080",
-		backendWebmail:    "http://webmail:8080",
+		backendWebmail:    "http://webmail2:8080",
 	}
 	if gw != want {
 		t.Errorf("resolveGateway(empty) = %+v, want %+v", gw, want)

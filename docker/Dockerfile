@@ -8,7 +8,6 @@ COPY . .
 RUN go build -trimpath -o /out/hermex-mta ./cmd/mta \
  && go build -trimpath -o /out/hermex-pop3 ./cmd/pop3 \
  && go build -trimpath -o /out/hermex-imap ./cmd/imap \
- && go build -trimpath -o /out/hermex-webmail ./cmd/webmail \
  && go build -trimpath -o /out/hermex-webmail2 ./cmd/webmail2 \
  && go build -trimpath -o /out/hermex-dav ./cmd/dav \
  && go build -trimpath -o /out/hermex-admin ./cmd/admin \
