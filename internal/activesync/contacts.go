@@ -98,6 +98,13 @@ func contactAppData(st *objectstore.Store, objectID int64) (*wbxml.Node, error) 
 			tags = append(tags, namedTag[i])
 		}
 	}
+	// Categories are the shared message keywords (a multivalue named property), the
+	// same store CATEGORIES vCard import/export uses.
+	var keywordsTag mapi.PropTag
+	if kid, err := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameKeywords}); err == nil && kid[0] != 0 {
+		keywordsTag = mapi.MakeTag(kid[0], mapi.PtMvUnicode)
+		tags = append(tags, keywordsTag)
+	}
 	pv, err := st.GetMessageProperties(objectID, tags...)
 	if err != nil {
 		return nil, err
@@ -129,6 +136,17 @@ func contactAppData(st *objectstore.Store, objectID int64) (*wbxml.Node, error) 
 				nodes = append(nodes, wbxml.Str(wbxml.CChild, k))
 			}
 			data.Children = append(data.Children, wbxml.Elem(wbxml.CChildren, nodes...))
+		}
+	}
+	if keywordsTag != 0 {
+		if v, ok := pv.Get(keywordsTag); ok {
+			if cats, ok := v.([]string); ok && len(cats) > 0 {
+				var nodes []*wbxml.Node
+				for _, c := range cats {
+					nodes = append(nodes, wbxml.Str(wbxml.CCategory, c))
+				}
+				data.Children = append(data.Children, wbxml.Elem(wbxml.CCategories, nodes...))
+			}
 		}
 	}
 	return data, nil
@@ -202,6 +220,19 @@ func parseContactItem(st *objectstore.Store, data *wbxml.Node) (mapi.PropertyVal
 		}
 		if len(names) > 0 {
 			props = append(props, mapi.TaggedPropVal{Tag: mapi.PrChildrensNames, Value: names})
+		}
+	}
+	if cats := data.Child(wbxml.CCategories); cats != nil {
+		var vals []string
+		for _, c := range cats.Children {
+			if c.Tag == wbxml.CCategory && c.Text != "" {
+				vals = append(vals, c.Text)
+			}
+		}
+		if len(vals) > 0 {
+			if kid, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameKeywords}); err == nil && kid[0] != 0 {
+				props = append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(kid[0], mapi.PtMvUnicode), Value: vals})
+			}
 		}
 	}
 	return props, nil

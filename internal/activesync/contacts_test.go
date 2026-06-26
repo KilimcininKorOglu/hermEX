@@ -247,3 +247,60 @@ func TestContactsCrossProtocolEASToCardDAV(t *testing.T) {
 		t.Errorf("EAS-added contact's surname missing from exported vCard:\n%s", s)
 	}
 }
+
+// TestContactCategories proves the multivalue Categories field round-trips: stored
+// keywords export to <Categories><Category>, and a device's Categories decode back to
+// the shared keywords property.
+func TestContactCategories(t *testing.T) {
+	_, dir := seededServer(t)
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	kid, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameKeywords})
+	if err != nil {
+		t.Fatal(err)
+	}
+	props := mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Contact"},
+		{Tag: mapi.PrGivenName, Value: "Kit"},
+		{Tag: mapi.MakeTag(kid[0], mapi.PtMvUnicode), Value: []string{"Work", "VIP"}},
+	}
+	id, err := st.CreateMessage(int64(mapi.PrivateFIDContacts), &oxcmail.Message{Props: props})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := contactAppData(st, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cats := data.Child(wbxml.CCategories)
+	if cats == nil || len(cats.Children) != 2 {
+		t.Fatalf("Categories not emitted as two Category elements: %+v", cats)
+	}
+	if cats.Children[0].Text != "Work" || cats.Children[1].Text != "VIP" {
+		t.Errorf("Category values = %q,%q want Work,VIP", cats.Children[0].Text, cats.Children[1].Text)
+	}
+
+	// Decode the reverse direction.
+	easData := wbxml.Elem(wbxml.ASData,
+		wbxml.Str(wbxml.CFirstName, "Dana"),
+		wbxml.Elem(wbxml.CCategories, wbxml.Str(wbxml.CCategory, "Family"), wbxml.Str(wbxml.CCategory, "Lead")))
+	parsed, err := parseContactItem(st, easData)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyTag := mapi.MakeTag(kid[0], mapi.PtMvUnicode)
+	var got []string
+	for _, p := range parsed {
+		if p.Tag == keyTag {
+			got, _ = p.Value.([]string)
+		}
+	}
+	if len(got) != 2 || got[0] != "Family" || got[1] != "Lead" {
+		t.Errorf("decoded keywords = %v, want [Family Lead]", got)
+	}
+}
