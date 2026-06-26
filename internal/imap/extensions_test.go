@@ -112,3 +112,35 @@ func TestIMAPUIDPlus(t *testing.T) {
 		t.Errorf("UID 2 (\\Deleted but outside the set) should survive UID EXPUNGE 1: %q", got)
 	}
 }
+
+// TestIMAPMove covers MOVE (RFC 6851): the message leaves the source (COPYUID +
+// EXPUNGE) and lands in the destination.
+func TestIMAPMove(t *testing.T) {
+	c, _ := startServer(t)
+	c.mustOK("a1", "LOGIN alice secret")
+	c.mustOK("a2", "SELECT INBOX") // UIDs 1, 2
+	c.mustOK("a3", "CREATE Archive")
+
+	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "MOVE") {
+		t.Errorf("CAPABILITY missing MOVE: %s", caps)
+	}
+
+	un, status := c.do("a4", "MOVE 1 Archive")
+	if status != "OK" {
+		t.Fatalf("MOVE status = %s, want OK", status)
+	}
+	joined := strings.Join(un, " ")
+	if !strings.Contains(joined, "[COPYUID ") {
+		t.Errorf("MOVE missing the [COPYUID ...] untagged OK: %v", un)
+	}
+	if !strings.Contains(joined, "EXPUNGE") {
+		t.Errorf("MOVE missing the untagged EXPUNGE: %v", un)
+	}
+
+	if got := strings.Join(c.mustOK("a5", "SELECT INBOX"), " "); !strings.Contains(got, "1 EXISTS") {
+		t.Errorf("after MOVE, INBOX = %q, want 1 EXISTS (source lost the message)", got)
+	}
+	if got := strings.Join(c.mustOK("a6", "SELECT Archive"), " "); !strings.Contains(got, "1 EXISTS") {
+		t.Errorf("after MOVE, Archive = %q, want 1 EXISTS (destination gained it)", got)
+	}
+}

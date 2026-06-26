@@ -284,6 +284,99 @@ func (c *conn) cmdCopy(tag string, args []token, byUID bool) {
 	c.ok(tag, verb+" completed")
 }
 
+// cmdMove handles MOVE and (byUID) UID MOVE (RFC 6851): it copies the addressed
+// messages into another mailbox and removes them from the source. It reuses the
+// COPY path (so a cross-store move to/from a public folder works) plus the
+// soft-delete dumpster. Per RFC 6851 the UID mapping is reported in an untagged OK
+// [COPYUID ...] before an untagged EXPUNGE for each removed source message.
+func (c *conn) cmdMove(tag string, args []token, byUID bool) {
+	if c.state != stateSelected {
+		c.no(tag, "no mailbox selected")
+		return
+	}
+	if c.readOnly {
+		c.no(tag, "mailbox is read-only")
+		return
+	}
+	if len(args) < 2 {
+		c.bad(tag, "MOVE requires a sequence set and a mailbox")
+		return
+	}
+	setText, _ := args[0].str()
+	set, err := parseSeqSet(setText)
+	if err != nil {
+		c.bad(tag, "invalid sequence set")
+		return
+	}
+	dest, _ := args[1].str()
+	destStore, destFID, ok, errText := c.resolveAppendDest(dest)
+	if !ok {
+		c.no(tag, errText)
+		return
+	}
+
+	verb := "MOVE"
+	if byUID {
+		verb = "UID MOVE"
+	}
+	max := c.sel.maxSeq()
+	if byUID {
+		max = c.sel.maxUID()
+	}
+	src := c.curStore()
+
+	// First pass: copy each matching message to the destination.
+	var srcUIDs, dstUIDs []uint32
+	moved := make(map[uint32]bool)
+	for i := range c.sel.msgs {
+		key := uint32(i + 1)
+		if byUID {
+			key = c.sel.msgs[i].UID
+		}
+		if !set.contains(key, max) {
+			continue
+		}
+		raw, err := src.GetMessageRaw(c.sel.id, c.sel.msgs[i].UID)
+		if err != nil {
+			c.no(tag, "move failed")
+			return
+		}
+		info, err := destStore.AppendMessage(destFID, raw, c.sel.msgs[i].InternalDate, c.sel.msgs[i].Flags)
+		if err != nil {
+			c.no(tag, "move failed")
+			return
+		}
+		srcUIDs = append(srcUIDs, c.sel.msgs[i].UID)
+		dstUIDs = append(dstUIDs, info.UID)
+		moved[c.sel.msgs[i].UID] = true
+	}
+	if len(srcUIDs) == 0 {
+		c.ok(tag, verb+" completed")
+		return
+	}
+
+	uidv, _ := destStore.UIDValidity(destFID)
+	c.untagged("OK [COPYUID %d %s %s]", uidv, uidList(srcUIDs), uidList(dstUIDs))
+
+	// Second pass: soft-delete each moved source message, emitting EXPUNGE against
+	// the shrinking mailbox.
+	var survivors []objectstore.MessageInfo
+	seq := uint32(1)
+	for _, m := range c.sel.msgs {
+		if moved[m.UID] {
+			if err := src.SoftDeleteMessage(c.sel.id, m.UID); err == nil {
+				c.untagged("%d EXPUNGE", seq)
+			}
+			continue
+		}
+		survivors = append(survivors, m)
+		seq++
+	}
+	c.sel.msgs = survivors
+	c.flush()
+	c.ok(tag, verb+" completed")
+}
+
 // cmdAppend handles APPEND: it stores a supplied message into a mailbox with
 // optional flags and internal date.
 func (c *conn) cmdAppend(tag string, args []token) {
