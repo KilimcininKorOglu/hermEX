@@ -2,12 +2,14 @@ package activesync
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcmail"
+	"hermex/internal/oxvcard"
 	"hermex/internal/wbxml"
 )
 
@@ -174,4 +176,74 @@ func TestFolderSyncAdvertisesContacts(t *testing.T) {
 		}
 	}
 	t.Error("FolderSync did not advertise the Contacts collection")
+}
+
+// TestContactsCrossProtocolCardDAVToEAS proves the single-data invariant in the
+// CardDAV->EAS direction: a contact created from a vCard (oxvcard.Import) and stored
+// is read back over EAS with its fields intact, through the one shared object.
+func TestContactsCrossProtocolCardDAVToEAS(t *testing.T) {
+	_, dir := seededServer(t)
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	vcard := "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Ada Lovelace\r\nN:Lovelace;Ada;;;\r\n" +
+		"EMAIL:ada@analytical.test\r\nORG:Analytical Engine\r\nEND:VCARD\r\n"
+	msg, err := oxvcard.Import([]byte(vcard), oxvcard.Options{Resolver: st.GetNamedPropIDs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.CreateMessage(int64(mapi.PrivateFIDContacts), msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data, err := contactAppData(st, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := data.ChildText(wbxml.CFirstName); got != "Ada" {
+		t.Errorf("CardDAV-created contact FirstName over EAS = %q, want Ada", got)
+	}
+	if got := data.ChildText(wbxml.CLastName); got != "Lovelace" {
+		t.Errorf("LastName = %q, want Lovelace", got)
+	}
+	if got := data.ChildText(wbxml.CEmail1Address); got != "ada@analytical.test" {
+		t.Errorf("Email1 over EAS = %q, want ada@analytical.test", got)
+	}
+}
+
+// TestContactsCrossProtocolEASToCardDAV proves the EAS->CardDAV direction: a contact
+// the device adds over EAS (parseContactItem) exports to a vCard carrying the same
+// name and email, with the email well-formed (the address-type triple).
+func TestContactsCrossProtocolEASToCardDAV(t *testing.T) {
+	_, dir := seededServer(t)
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	easData := wbxml.Elem(wbxml.ASData,
+		wbxml.Str(wbxml.CFirstName, "Grace"),
+		wbxml.Str(wbxml.CLastName, "Hopper"),
+		wbxml.Str(wbxml.CEmail1Address, "grace@navy.test"))
+	props, err := parseContactItem(st, easData)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	vcard, err := oxvcard.Export(&oxcmail.Message{Props: props}, oxvcard.Options{Resolver: st.GetNamedPropIDs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(vcard)
+	if !strings.Contains(s, "grace@navy.test") {
+		t.Errorf("EAS-added contact's email missing from exported vCard:\n%s", s)
+	}
+	if !strings.Contains(s, "Hopper") {
+		t.Errorf("EAS-added contact's surname missing from exported vCard:\n%s", s)
+	}
 }

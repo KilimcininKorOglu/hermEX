@@ -159,6 +159,30 @@ func parseContactItem(st *objectstore.Store, data *wbxml.Node) (mapi.PropertyVal
 			props = append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(ids[i], mapi.PtUnicode), Value: s})
 		}
 	}
+	// Each email carries a display name and an SMTP address type alongside its
+	// address, matching the shape vCard import writes, so a contact created here is
+	// identical in the store to one created over CardDAV and stays recognizable to
+	// MAPI/EWS clients reading the same object.
+	emailDT, err := st.GetNamedPropIDs(true, []mapi.PropertyName{
+		mapi.NameEmail1DisplayName, mapi.NameEmail1AddressType,
+		mapi.NameEmail2DisplayName, mapi.NameEmail2AddressType,
+		mapi.NameEmail3DisplayName, mapi.NameEmail3AddressType,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for slot, tag := range []wbxml.Tag{wbxml.CEmail1Address, wbxml.CEmail2Address, wbxml.CEmail3Address} {
+		addr := data.ChildText(tag)
+		if addr == "" {
+			continue
+		}
+		if id := emailDT[slot*2]; id != 0 {
+			props = append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(id, mapi.PtUnicode), Value: addr})
+		}
+		if id := emailDT[slot*2+1]; id != 0 {
+			props = append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(id, mapi.PtUnicode), Value: "SMTP"})
+		}
+	}
 	if b := data.ChildText(wbxml.CBirthday); b != "" {
 		if t, err := time.Parse(easContactDate, b); err == nil {
 			props = append(props, mapi.TaggedPropVal{Tag: mapi.PrBirthday, Value: mapi.UnixToNTTime(t)})
