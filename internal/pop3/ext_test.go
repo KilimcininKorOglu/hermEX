@@ -88,7 +88,7 @@ func TestPOP3CapaAdvertisesExtensions(t *testing.T) {
 	send("CAPA")
 	wantOK()
 	caps := strings.Join(readLines(), " ")
-	for _, want := range []string{"TOP", "USER", "UIDL", "PIPELINING", "RESP-CODES", "LOGIN-DELAY 0", "EXPIRE NEVER", "UTF8", "LANG", "IMPLEMENTATION hermEX"} {
+	for _, want := range []string{"TOP", "USER", "UIDL", "SASL PLAIN LOGIN", "PIPELINING", "RESP-CODES", "LOGIN-DELAY 0", "EXPIRE NEVER", "UTF8", "LANG", "IMPLEMENTATION hermEX"} {
 		if !strings.Contains(caps, want) {
 			t.Errorf("CAPA missing %q; got: %s", want, caps)
 		}

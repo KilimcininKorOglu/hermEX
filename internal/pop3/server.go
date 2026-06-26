@@ -1,7 +1,8 @@
 // Package pop3 implements an RFC 1939 POP3 retrieval server backed by the mailbox
-// store, with the CAPA extension mechanism (RFC 2449), STLS (RFC 2595), and UTF8 +
-// LANG (RFC 6856). It authenticates with USER/PASS through a directory.Authenticator
-// and serves a login-time snapshot of the INBOX.
+// store, with the CAPA extension mechanism (RFC 2449), STLS (RFC 2595), SASL AUTH
+// PLAIN/LOGIN (RFC 5034), and UTF8 + LANG (RFC 6856). It authenticates with
+// USER/PASS or AUTH through a directory.Authenticator and serves a login-time
+// snapshot of the INBOX.
 package pop3
 
 import (
@@ -9,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"fmt"
 	"net"
 	"net/textproto"
@@ -106,28 +108,19 @@ func (s *Server) handle(conn net.Conn) {
 				user = arg
 				ok(w, "")
 			case "PASS":
-				path, authed := s.Auth.Authenticate(user, arg)
-				if user == "" || !authed {
-					event(logging.LevelWarn, "auth.fail", nil) // attempted login still in user
+				if m, okAuth := s.finishAuth(w, conn, user, arg); okAuth {
+					mb = m
+				} else {
 					user = ""
-					errLine(w, "[AUTH] authentication failed")
-					continue
 				}
-				if privs, _ := s.Auth.Privileges(user); !privs.POP3IMAP {
-					event(logging.LevelWarn, "auth.denied", logging.Fields{"service": "pop3imap"})
-					user = ""
-					errLine(w, "[AUTH] POP3/IMAP access is disabled for this account")
-					continue
+			case "AUTH":
+				// SASL (RFC 5034): PLAIN and LOGIN, both password mechanisms that
+				// reuse the same Authenticate + privilege gate as USER/PASS.
+				authUser, m, okAuth := s.authSASL(w, tp, conn, arg)
+				if okAuth {
+					user = authUser
+					mb = m
 				}
-				m, err := openMailbox(path)
-				if err != nil {
-					s.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.POP3, Name: "auth.fail", User: user, RemoteAddr: conn.RemoteAddr().String(), Err: err.Error()})
-					errLine(w, "[SYS/TEMP] mailbox unavailable")
-					continue
-				}
-				mb = m
-				event(logging.LevelInfo, "auth.ok", nil)
-				ok(w, fmt.Sprintf("%d messages", mb.count()))
 			case "UTF8":
 				// RFC 6856: enter UTF-8 mode (valid only in AUTHORIZATION). hermEX
 				// serves the stored message bytes verbatim and never downgrades, so
@@ -388,6 +381,134 @@ func writeDotStuffed(w *bufio.Writer, data []byte) {
 	w.WriteString(".\r\n")
 }
 
+// finishAuth validates credentials, enforces the POP3/IMAP privilege gate, and on
+// success opens the maildrop. It writes the POP3 reply (+OK on success, -ERR with
+// the right RFC 3206 response code on failure) and returns the opened mailbox for
+// the caller to install. It is the single chokepoint for USER/PASS and every SASL
+// mechanism, so the privilege gate can never be bypassed.
+func (s *Server) finishAuth(w *bufio.Writer, conn net.Conn, user, pass string) (*mailbox, bool) {
+	emit := func(level logging.Level, name string, f logging.Fields) {
+		s.Logger.Emit(logging.Event{Level: level, Subsystem: logging.POP3, Name: name, User: user, RemoteAddr: conn.RemoteAddr().String(), Fields: f})
+	}
+	path, authed := s.Auth.Authenticate(user, pass)
+	if user == "" || !authed {
+		emit(logging.LevelWarn, "auth.fail", nil)
+		errLine(w, "[AUTH] authentication failed")
+		return nil, false
+	}
+	if privs, _ := s.Auth.Privileges(user); !privs.POP3IMAP {
+		emit(logging.LevelWarn, "auth.denied", logging.Fields{"service": "pop3imap"})
+		errLine(w, "[AUTH] POP3/IMAP access is disabled for this account")
+		return nil, false
+	}
+	m, err := openMailbox(path)
+	if err != nil {
+		s.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.POP3, Name: "auth.fail", User: user, RemoteAddr: conn.RemoteAddr().String(), Err: err.Error()})
+		errLine(w, "[SYS/TEMP] mailbox unavailable")
+		return nil, false
+	}
+	emit(logging.LevelInfo, "auth.ok", nil)
+	ok(w, fmt.Sprintf("%d messages", m.count()))
+	return m, true
+}
+
+// authSASL runs the RFC 5034 AUTH exchange. With no mechanism it lists the
+// supported ones; PLAIN and LOGIN are password mechanisms funnelled through
+// finishAuth (CRAM/DIGEST-MD5 are impossible against crypt_sha512 storage). It
+// returns the authenticated user and opened mailbox on success.
+func (s *Server) authSASL(w *bufio.Writer, tp *textproto.Reader, conn net.Conn, arg string) (string, *mailbox, bool) {
+	mech, initial, _ := strings.Cut(strings.TrimSpace(arg), " ")
+	switch strings.ToUpper(mech) {
+	case "":
+		w.WriteString("+OK\r\n")
+		w.WriteString("PLAIN\r\n")
+		w.WriteString("LOGIN\r\n")
+		w.WriteString(".\r\n")
+		w.Flush()
+		return "", nil, false
+	case "PLAIN":
+		return s.authPlain(w, tp, conn, initial)
+	case "LOGIN":
+		return s.authLogin(w, tp, conn, initial)
+	default:
+		errLine(w, "[AUTH] unsupported authentication mechanism")
+		return "", nil, false
+	}
+}
+
+// authPlain handles AUTH PLAIN (RFC 4616): a single base64 token decoding to
+// authzid NUL authcid NUL passwd, inline or after a continuation.
+func (s *Server) authPlain(w *bufio.Writer, tp *textproto.Reader, conn net.Conn, initial string) (string, *mailbox, bool) {
+	resp, cont := saslResponse(w, tp, initial, "")
+	if !cont {
+		errLine(w, "[AUTH] authentication cancelled")
+		return "", nil, false
+	}
+	raw, err := base64.StdEncoding.DecodeString(resp)
+	if err != nil {
+		errLine(w, "[AUTH] invalid base64")
+		return "", nil, false
+	}
+	parts := strings.Split(string(raw), "\x00")
+	if len(parts) != 3 {
+		errLine(w, "[AUTH] malformed PLAIN response")
+		return "", nil, false
+	}
+	m, okAuth := s.finishAuth(w, conn, parts[1], parts[2])
+	return parts[1], m, okAuth
+}
+
+// authLogin handles AUTH LOGIN: the server prompts (base64) for the username then
+// the password; the username may arrive inline with the AUTH command.
+func (s *Server) authLogin(w *bufio.Writer, tp *textproto.Reader, conn net.Conn, initial string) (string, *mailbox, bool) {
+	u, cont := saslResponse(w, tp, initial, "VXNlcm5hbWU6") // base64("Username:")
+	if !cont {
+		errLine(w, "[AUTH] authentication cancelled")
+		return "", nil, false
+	}
+	userBytes, err := base64.StdEncoding.DecodeString(u)
+	if err != nil {
+		errLine(w, "[AUTH] invalid base64")
+		return "", nil, false
+	}
+	p, cont := saslResponse(w, tp, "", "UGFzc3dvcmQ6") // base64("Password:")
+	if !cont {
+		errLine(w, "[AUTH] authentication cancelled")
+		return "", nil, false
+	}
+	passBytes, err := base64.StdEncoding.DecodeString(p)
+	if err != nil {
+		errLine(w, "[AUTH] invalid base64")
+		return "", nil, false
+	}
+	user := string(userBytes)
+	m, okAuth := s.finishAuth(w, conn, user, string(passBytes))
+	return user, m, okAuth
+}
+
+// saslResponse returns the client's SASL token: the inline value when present (a
+// lone "=" is a zero-length initial response, RFC 5034), otherwise a "+ <challenge>"
+// continuation is sent and the base64 line read. A lone "*" aborts the exchange.
+func saslResponse(w *bufio.Writer, tp *textproto.Reader, inline, challenge string) (string, bool) {
+	resp := inline
+	switch resp {
+	case "=":
+		return "", true
+	case "":
+		fmt.Fprintf(w, "+ %s\r\n", challenge)
+		w.Flush()
+		line, err := tp.ReadLine()
+		if err != nil {
+			return "", false
+		}
+		resp = line
+	}
+	if resp == "*" {
+		return "", false
+	}
+	return resp, true
+}
+
 // writeCapa emits the RFC 2449 CAPA list. It advertises every optional command and
 // extension hermEX supports: TOP (RFC 1939), UIDL, RESP-CODES + LOGIN-DELAY + EXPIRE
 // + PIPELINING + IMPLEMENTATION (RFC 2449), UTF8 + LANG (RFC 6856), and STLS (RFC
@@ -397,6 +518,7 @@ func (s *Server) writeCapa(w *bufio.Writer, isTLS bool) {
 	w.WriteString("TOP\r\n")
 	w.WriteString("USER\r\n")
 	w.WriteString("UIDL\r\n")
+	w.WriteString("SASL PLAIN LOGIN\r\n")
 	w.WriteString("PIPELINING\r\n")
 	w.WriteString("RESP-CODES\r\n")
 	w.WriteString("LOGIN-DELAY 0\r\n")
