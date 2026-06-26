@@ -2,6 +2,7 @@ package imap
 
 import (
 	"bufio"
+	"compress/flate"
 	"context"
 	"crypto/tls"
 	"encoding/base64"
@@ -24,7 +25,7 @@ import (
 // the lexer accepts non-synchronizing literals; AUTH=PLAIN because the server
 // implements the SASL PLAIN mechanism; IDLE (RFC 2177) because the server pushes
 // real-time mailbox updates while a client idles.
-const capabilities = "IMAP4rev1 LITERAL+ NAMESPACE AUTH=PLAIN AUTH=LOGIN IDLE CHILDREN ID UNSELECT UIDPLUS MOVE SPECIAL-USE QUOTA ESEARCH MULTIAPPEND SORT THREAD=ORDEREDSUBJECT THREAD=REFERENCES"
+const capabilities = "IMAP4rev1 LITERAL+ NAMESPACE AUTH=PLAIN AUTH=LOGIN IDLE CHILDREN ID UNSELECT UIDPLUS MOVE SPECIAL-USE QUOTA ESEARCH MULTIAPPEND SORT THREAD=ORDEREDSUBJECT THREAD=REFERENCES BINARY"
 
 // idlePollCadence is the fallback poll interval during IDLE when the push relay is
 // absent or a wake is missed — the degradation floor that keeps IDLE emitting
@@ -156,20 +157,27 @@ type conn struct {
 	user      string
 	st        *objectstore.Store
 	pubStore  *objectstore.Store // caller's own-domain public store, opened lazily; nil until first public access
-	sel       *selectedMailbox
-	selPublic bool // the current selection lives in pubStore, not st
-	readOnly  bool
-	isTLS     bool
+	sel        *selectedMailbox
+	selPublic  bool // the current selection lives in pubStore, not st
+	readOnly   bool
+	isTLS      bool
+	compressed bool           // COMPRESS DEFLATE is active on the link
+	fw         *flate.Writer  // DEFLATE writer wrapping nc when compressed; nil otherwise
 }
 
 // caps returns the CAPABILITY list for this connection's current state. STARTTLS
 // is advertised only when the server has a TLS config and the link is not
 // already encrypted (RFC 3501 §6.2.1).
 func (c *conn) caps() string {
+	caps := capabilities
 	if c.srv.TLSConfig != nil && !c.isTLS {
-		return capabilities + " STARTTLS"
+		caps += " STARTTLS"
 	}
-	return capabilities
+	// COMPRESS=DEFLATE is advertised only until it is turned on (RFC 4978).
+	if !c.compressed {
+		caps += " COMPRESS=DEFLATE"
+	}
+	return caps
 }
 
 // cmdID handles ID (RFC 2971): the server identifies itself. Any client parameter
@@ -178,6 +186,35 @@ func (c *conn) caps() string {
 func (c *conn) cmdID(tag string) {
 	c.untagged(`ID ("name" "hermEX")`)
 	c.ok(tag, "ID completed")
+}
+
+// cmdCompress handles COMPRESS DEFLATE (RFC 4978): after a tagged OK (sent
+// uncompressed), both directions of the link are wrapped in raw DEFLATE. The
+// reader wraps the existing buffered reader so bytes already read past the
+// command survive; the writer compresses into the current connection (the TLS
+// conn after STARTTLS, so compression never bypasses encryption).
+func (c *conn) cmdCompress(tag string, args []token) {
+	if len(args) < 1 || !args[0].isAtom("DEFLATE") {
+		c.bad(tag, "unsupported compression mechanism")
+		return
+	}
+	if c.compressed {
+		c.no(tag, "[COMPRESSIONACTIVE] compression already active")
+		return
+	}
+	c.ok(tag, "DEFLATE active")
+	c.flush() // the OK must reach the client before the stream turns compressed
+
+	fw, err := flate.NewWriter(c.nc, flate.DefaultCompression)
+	if err != nil {
+		c.state = stateLogout // unreachable for a valid level; fail the session loudly
+		return
+	}
+	c.fw = fw
+	c.bw = bufio.NewWriter(fw)
+	fr := flate.NewReader(c.rd.br)
+	c.rd = &commandReader{br: bufio.NewReader(fr), bw: c.bw, maxLiteral: &c.srv.maxLiteral}
+	c.compressed = true
 }
 
 // dispatch routes one lexed command to its handler.
@@ -207,6 +244,8 @@ func (c *conn) dispatch(toks []token) {
 		c.ok(tag, "CAPABILITY completed")
 	case "ID":
 		c.cmdID(tag)
+	case "COMPRESS":
+		c.cmdCompress(tag, args)
 	case "STARTTLS":
 		c.cmdStartTLS(tag)
 	case "NOOP":
@@ -978,4 +1017,11 @@ func (c *conn) ok(tag, text string)  { c.respond(tag, "OK", "%s", text) }
 func (c *conn) no(tag, text string)  { c.respond(tag, "NO", "%s", text) }
 func (c *conn) bad(tag, text string) { c.respond(tag, "BAD", "%s", text) }
 
-func (c *conn) flush() { c.bw.Flush() }
+func (c *conn) flush() {
+	c.bw.Flush()
+	if c.fw != nil {
+		// The bufio writer drained into the DEFLATE writer; push its compressed
+		// output through to the connection so the client sees this response now.
+		c.fw.Flush()
+	}
+}

@@ -1,6 +1,8 @@
 package imap
 
 import (
+	"bufio"
+	"compress/flate"
 	"encoding/base64"
 	"fmt"
 	"strings"
@@ -330,5 +332,72 @@ func TestIMAPThread(t *testing.T) {
 	}
 	if un := strings.Join(c.mustOK("a7", "THREAD ORDEREDSUBJECT UTF-8 ALL"), " "); !strings.Contains(un, "(1 2)") {
 		t.Errorf("THREAD ORDEREDSUBJECT = %q, want \"(1 2)\" (same base subject)", un)
+	}
+}
+
+// TestIMAPBinary covers BINARY (RFC 3516): FETCH BINARY[] returns the body decoded
+// from its Content-Transfer-Encoding, and BINARY.SIZE[] reports the decoded length.
+func TestIMAPBinary(t *testing.T) {
+	c, _ := startServer(t)
+	c.mustOK("a1", "LOGIN alice secret")
+	c.mustOK("a2", "CREATE Bin")
+
+	// base64("hello world") in the body; the decoded content is "hello world".
+	msg := "Content-Type: text/plain\r\nContent-Transfer-Encoding: base64\r\n\r\naGVsbG8gd29ybGQ="
+	if s := c.appendMsg("a3", "Bin", msg); s != "OK" {
+		t.Fatalf("append = %s", s)
+	}
+	c.mustOK("a4", "SELECT Bin")
+
+	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "BINARY") {
+		t.Errorf("CAPABILITY missing BINARY: %s", caps)
+	}
+
+	if un := strings.Join(c.mustOK("a5", "FETCH 1 BINARY[]"), " "); !strings.Contains(un, "hello world") {
+		t.Errorf("BINARY[] = %q, want the decoded \"hello world\"", un)
+	}
+	if un := strings.Join(c.mustOK("a6", "FETCH 1 BINARY.SIZE[]"), " "); !strings.Contains(un, "BINARY.SIZE[] 11") {
+		t.Errorf("BINARY.SIZE[] = %q, want \"BINARY.SIZE[] 11\" (len of \"hello world\")", un)
+	}
+}
+
+// TestIMAPCompress covers COMPRESS DEFLATE (RFC 4978): after activation, commands
+// round-trip over the compressed link and COMPRESS=DEFLATE is no longer advertised.
+func TestIMAPCompress(t *testing.T) {
+	c, _ := startServer(t)
+	c.mustOK("a1", "LOGIN alice secret")
+
+	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "COMPRESS=DEFLATE") {
+		t.Errorf("CAPABILITY missing COMPRESS=DEFLATE: %s", caps)
+	}
+
+	// Activate compression; the tagged OK arrives uncompressed.
+	fmt.Fprintf(c.conn, "a2 COMPRESS DEFLATE\r\n")
+	if _, status := c.collect("a2"); status != "OK" {
+		t.Fatalf("COMPRESS status = %s, want OK", status)
+	}
+
+	// Both directions are DEFLATE now; wrap the client I/O to match.
+	fw, err := flate.NewWriter(c.conn, flate.DefaultCompression)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.br = bufio.NewReader(flate.NewReader(c.br))
+
+	// A command over the compressed link must round-trip.
+	fmt.Fprintf(fw, "a3 CAPABILITY\r\n")
+	if err := fw.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	un, status := c.collect("a3")
+	if status != "OK" {
+		t.Fatalf("compressed CAPABILITY status = %s, want OK", status)
+	}
+	joined := strings.Join(un, " ")
+	if !strings.Contains(joined, "IMAP4rev1") {
+		t.Errorf("compressed CAPABILITY = %q, want IMAP4rev1", joined)
+	}
+	if strings.Contains(joined, "COMPRESS=DEFLATE") {
+		t.Errorf("COMPRESS=DEFLATE still advertised after activation: %q", joined)
 	}
 }

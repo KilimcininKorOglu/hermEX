@@ -1,6 +1,7 @@
 package imap
 
 import (
+	"bytes"
 	"fmt"
 	"strconv"
 	"strings"
@@ -159,6 +160,22 @@ func (c *conn) writeFetch(seq uint32, idx int, items []fetchItem) {
 			if !it.peek {
 				setSeen = true
 			}
+		case "BINARY":
+			data, ok := extractBinary(need(), it.section.Path)
+			if !ok {
+				data = []byte{}
+			}
+			data = applyPartial(data, it.partial)
+			fields = append(fields, it.name+" "+binaryLiteral(data))
+			if !it.peek {
+				setSeen = true
+			}
+		case "BINARY.SIZE":
+			sz := 0
+			if data, ok := extractBinary(need(), it.section.Path); ok {
+				sz = len(data)
+			}
+			fields = append(fields, fmt.Sprintf("%s %d", it.name, sz))
 		}
 	}
 
@@ -184,6 +201,29 @@ func hasFlagsField(fields []string) bool {
 		}
 	}
 	return false
+}
+
+// extractBinary returns a body part decoded from its Content-Transfer-Encoding
+// (RFC 3516 BINARY). An empty path addresses the whole message body.
+func extractBinary(msg *mime.Part, path []int) ([]byte, bool) {
+	part, ok := msg.PartAt(path)
+	if !ok {
+		return nil, false
+	}
+	data, err := part.DecodedContent()
+	if err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
+// binaryLiteral renders decoded data as a FETCH literal, using the literal8
+// syntax (~{n}) when the data contains a NUL octet (RFC 3516 / RFC 3501 literal8).
+func binaryLiteral(data []byte) string {
+	if bytes.IndexByte(data, 0) >= 0 {
+		return fmt.Sprintf("~{%d}\r\n%s", len(data), data)
+	}
+	return fmt.Sprintf("{%d}\r\n%s", len(data), data)
 }
 
 // applyPartial trims data to the requested <start.count> octet window.
@@ -279,8 +319,55 @@ func parseOneItem(cur *tokenCursor) ([]fetchItem, error) {
 			return []fetchItem{{kind: "BODY"}}, nil // BODY without section = BODYSTRUCTURE
 		}
 		return parseBodySection(cur, upper == "BODY.PEEK")
+	case "BINARY", "BINARY.PEEK":
+		if next, ok := cur.peek(); !ok || next.kind != tLBracket {
+			return nil, errProtocol // BINARY requires a section
+		}
+		return parseBinarySection(cur, upper == "BINARY.PEEK", false)
+	case "BINARY.SIZE":
+		if next, ok := cur.peek(); !ok || next.kind != tLBracket {
+			return nil, errProtocol
+		}
+		return parseBinarySection(cur, true, true) // SIZE is metadata; never sets \Seen
 	}
 	return nil, fmt.Errorf("%w: unknown FETCH item %q", errProtocol, name)
+}
+
+// parseBinarySection parses BINARY[part]/BINARY.PEEK[part]/BINARY.SIZE[part]
+// (RFC 3516). Only a numeric part path is valid — BINARY does not take the
+// HEADER/TEXT/MIME specifiers that BODY does.
+func parseBinarySection(cur *tokenCursor, peek, sizeOnly bool) ([]fetchItem, error) {
+	cur.next() // consume '['
+	sec, err := parseSectionSpec(cur)
+	if err != nil {
+		return nil, err
+	}
+	if sec.Specifier != "" {
+		return nil, fmt.Errorf("%w: BINARY section must be a part number", errProtocol)
+	}
+	t, ok := cur.next()
+	if !ok || t.kind != tRBracket {
+		return nil, fmt.Errorf("%w: unterminated binary section", errProtocol)
+	}
+	label := "BINARY"
+	kind := "BINARY"
+	if sizeOnly {
+		label, kind = "BINARY.SIZE", "BINARY.SIZE"
+	}
+	item := fetchItem{kind: kind, peek: peek, section: sec}
+	if !sizeOnly {
+		if p, ok := cur.peek(); ok && p.kind == tAtom && strings.HasPrefix(p.val, "<") {
+			cur.next()
+			if item.partial, err = parsePartial(p.val); err != nil {
+				return nil, err
+			}
+		}
+	}
+	item.name = label + "[" + sectionString(sec) + "]"
+	if item.partial != nil {
+		item.name += fmt.Sprintf("<%d>", item.partial[0])
+	}
+	return []fetchItem{item}, nil
 }
 
 // parseBodySection parses BODY[...]<partial> starting at the '['.
