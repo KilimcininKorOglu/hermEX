@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcical"
 	"hermex/internal/oxvcard"
@@ -31,7 +30,7 @@ type reportReq struct {
 // collection: addressbook-multiget, addressbook-query, and sync-collection
 // (RFC 6578). Each returns 207 Multistatus with the requested vCards.
 func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox string) {
-	kind, user, _ := classify(r.URL.Path)
+	_, user, coll, _ := classify(r.URL.Path)
 	if user == "" {
 		http.Error(w, "not a collection", http.StatusBadRequest)
 		return
@@ -54,22 +53,42 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox st
 	}
 	defer st.Close()
 
+	// Resolve the target collection from the URL: a calendar path addresses a
+	// calendar folder, an address-book path a contacts folder. The named collection
+	// ("calendar"/"contacts" or a user-created one) is the folder all members live in.
+	isCal := strings.HasPrefix(r.URL.Path, "/dav/calendars/")
+	var fid int64
+	var ok bool
+	if isCal {
+		fid, ok, err = calCollectionFID(st, coll)
+	} else {
+		fid, ok, err = cardCollectionFID(st, coll)
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "no such collection", http.StatusNotFound)
+		return
+	}
+
 	switch req.XMLName.Local {
 	case "addressbook-multiget":
-		s.reportMultiget(w, st, req.Hrefs)
+		s.reportMultiget(w, st, fid, req.Hrefs)
 	case "addressbook-query":
-		s.reportQueryOrSync(w, st, user, 0, false, req.Filter)
+		s.reportQueryOrSync(w, st, user, coll, fid, 0, false, req.Filter)
 	case "calendar-multiget":
-		s.reportCalMultiget(w, st, req.Hrefs)
+		s.reportCalMultiget(w, st, fid, req.Hrefs)
 	case "calendar-query":
-		s.reportCalQueryOrSync(w, st, user, 0, false, req.Filter)
+		s.reportCalQueryOrSync(w, st, user, coll, fid, 0, false, req.Filter)
 	case "free-busy-query":
-		s.handleFreeBusy(w, st, req.TimeRange)
+		s.handleFreeBusy(w, st, fid, req.TimeRange)
 	case "sync-collection":
-		if kind == kindCalendar {
-			s.reportCalQueryOrSync(w, st, user, parseSyncToken(req.SyncToken), true, nil)
+		if isCal {
+			s.reportCalQueryOrSync(w, st, user, coll, fid, parseSyncToken(req.SyncToken), true, nil)
 		} else {
-			s.reportQueryOrSync(w, st, user, parseSyncToken(req.SyncToken), true, nil)
+			s.reportQueryOrSync(w, st, user, coll, fid, parseSyncToken(req.SyncToken), true, nil)
 		}
 	default:
 		http.Error(w, "unsupported report", http.StatusForbidden)
@@ -78,11 +97,11 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox st
 
 // reportMultiget returns address-data for each requested href, with a 404 status
 // for any href that no longer resolves.
-func (s *Server) reportMultiget(w http.ResponseWriter, st *objectstore.Store, hrefs []string) {
+func (s *Server) reportMultiget(w http.ResponseWriter, st *objectstore.Store, fid int64, hrefs []string) {
 	ms := &multistatus{}
 	for _, h := range hrefs {
 		name := path.Base(strings.TrimRight(h, "/"))
-		obj, found, err := findObjectByName(st, mapi.PrivateFIDContacts, ".vcf", name)
+		obj, found, err := findObjectByName(st, fid, ".vcf", name)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -107,8 +126,8 @@ func (s *Server) reportMultiget(w http.ResponseWriter, st *objectstore.Store, hr
 // filtering is not yet applied: every member is returned (a documented v1
 // simplification). Deletions are not reported incrementally — the store
 // hard-deletes without a tombstone — so a client reconciles removals on its own.
-func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store, user string, sinceToken uint64, sync bool, filt *filter) {
-	objs, err := st.ListFolderObjects(mapi.PrivateFIDContacts)
+func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store, user, coll string, fid int64, sinceToken uint64, sync bool, filt *filter) {
+	objs, err := st.ListFolderObjects(fid)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -127,22 +146,22 @@ func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store,
 		if !vcardMatches(filt, data) {
 			continue
 		}
-		href := objectPath(user, objectName(st, o.ID, ".vcf"))
+		href := objectPathColl(user, coll, objectName(st, o.ID, ".vcf"))
 		ms.Responses = append(ms.Responses, addressDataResponse(href, o.ChangeNumber, data))
 	}
 	if sync {
 		// Tombstones: report each contact removed since the client's token as a 404
 		// member so it deletes the vCard locally (RFC 6578).
-		deleted, err := st.DeletedObjectsSince(mapi.PrivateFIDContacts, sinceToken)
+		deleted, err := st.DeletedObjectsSince(fid, sinceToken)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		for _, d := range deleted {
-			href := objectPath(user, objectName(st, d.ID, ".vcf"))
+			href := objectPathColl(user, coll, objectName(st, d.ID, ".vcf"))
 			ms.Responses = append(ms.Responses, msResponse{Href: href, Status: statusNotFound})
 		}
-		syncMax, err := st.FolderObjectsSyncMax(mapi.PrivateFIDContacts)
+		syncMax, err := st.FolderObjectsSyncMax(fid)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -155,14 +174,14 @@ func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store,
 // handleFreeBusy answers a CALDAV:free-busy-query (RFC 4791 §7.10): it aggregates
 // the busy (non-transparent) VEVENTs overlapping the requested range into a
 // VFREEBUSY component, returned as text/calendar.
-func (s *Server) handleFreeBusy(w http.ResponseWriter, st *objectstore.Store, tr *timeRange) {
+func (s *Server) handleFreeBusy(w http.ResponseWriter, st *objectstore.Store, fid int64, tr *timeRange) {
 	var rangeStart, rangeEnd time.Time
 	var okS, okE bool
 	if tr != nil {
 		rangeStart, okS = parseFilterTime(tr.Start)
 		rangeEnd, okE = parseFilterTime(tr.End)
 	}
-	objs, err := st.ListFolderObjects(mapi.PrivateFIDCalendar)
+	objs, err := st.ListFolderObjects(fid)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -247,11 +266,11 @@ func addressDataResponse(href string, cn uint64, data string) msResponse {
 
 // reportCalMultiget returns calendar-data for each requested href, mirroring
 // reportMultiget for the Calendar folder.
-func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store, hrefs []string) {
+func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store, fid int64, hrefs []string) {
 	ms := &multistatus{}
 	for _, h := range hrefs {
 		name := path.Base(strings.TrimRight(h, "/"))
-		obj, found, err := findObjectByName(st, mapi.PrivateFIDCalendar, ".ics", name)
+		obj, found, err := findObjectByName(st, fid, ".ics", name)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -276,8 +295,8 @@ func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store,
 // contacts because a calendar grows unbounded over time and the client re-pulls
 // it each query). Deletions are not reported incrementally — the store
 // hard-deletes without a tombstone.
-func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Store, user string, sinceToken uint64, sync bool, filt *filter) {
-	objs, err := st.ListFolderObjects(mapi.PrivateFIDCalendar)
+func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Store, user, coll string, fid int64, sinceToken uint64, sync bool, filt *filter) {
+	objs, err := st.ListFolderObjects(fid)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -296,22 +315,22 @@ func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Sto
 		if !calendarMatches(filt, data) {
 			continue
 		}
-		href := calObjectPath(user, objectName(st, o.ID, ".ics"))
+		href := calObjectPathColl(user, coll, objectName(st, o.ID, ".ics"))
 		ms.Responses = append(ms.Responses, calendarDataResponse(href, o.ChangeNumber, data))
 	}
 	if sync {
 		// Tombstones: report each event removed since the client's token as a 404
 		// member so it deletes the .ics locally (RFC 6578).
-		deleted, err := st.DeletedObjectsSince(mapi.PrivateFIDCalendar, sinceToken)
+		deleted, err := st.DeletedObjectsSince(fid, sinceToken)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		for _, d := range deleted {
-			href := calObjectPath(user, objectName(st, d.ID, ".ics"))
+			href := calObjectPathColl(user, coll, objectName(st, d.ID, ".ics"))
 			ms.Responses = append(ms.Responses, msResponse{Href: href, Status: statusNotFound})
 		}
-		syncMax, err := st.FolderObjectsSyncMax(mapi.PrivateFIDCalendar)
+		syncMax, err := st.FolderObjectsSyncMax(fid)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

@@ -15,7 +15,7 @@ import (
 // set is not filtered: a useful standard set is returned for each resource (a
 // documented v1 simplification; clients ignore properties they did not ask for).
 func (s *Server) handlePropfind(w http.ResponseWriter, r *http.Request, user, mailbox string) {
-	kind, pathUser, _ := classify(r.URL.Path)
+	kind, pathUser, coll, _ := classify(r.URL.Path)
 	if pathUser == "" {
 		pathUser = user
 	}
@@ -30,38 +30,46 @@ func (s *Server) handlePropfind(w http.ResponseWriter, r *http.Request, user, ma
 	case kindHomeSet:
 		responses = []msResponse{homeSetResponse(pathUser)}
 		if depth != "0" {
-			rs, err := s.addressbookResponses(mailbox, pathUser, depth)
+			// At the home set, Depth 1 lists the address books it contains (the
+			// well-known Contacts plus any user-created ones), not their members.
+			rs, err := s.allAddressbookCollections(mailbox, pathUser)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			// At the home set, Depth 1 lists the address books it contains, not
-			// their members.
-			responses = append(responses, rs[0])
+			responses = append(responses, rs...)
 		}
 	case kindAddressbook:
-		rs, err := s.addressbookResponses(mailbox, pathUser, depth)
+		rs, err := s.addressbookResponses(mailbox, pathUser, coll, depth)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if rs == nil {
+			http.Error(w, "no such address book", http.StatusNotFound)
 			return
 		}
 		responses = rs
 	case kindCalHomeSet:
 		responses = []msResponse{calHomeSetResponse(pathUser)}
 		if depth != "0" {
-			rs, err := s.calendarResponses(mailbox, pathUser, depth)
+			// At the home set, Depth 1 lists the calendars it contains (the
+			// well-known Calendar plus any user-created ones), not their members.
+			rs, err := s.allCalendarCollections(mailbox, pathUser)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			// At the home set, Depth 1 lists the calendars it contains, not their
-			// members.
-			responses = append(responses, rs[0])
+			responses = append(responses, rs...)
 		}
 	case kindCalendar:
-		rs, err := s.calendarResponses(mailbox, pathUser, depth)
+		rs, err := s.calendarResponses(mailbox, pathUser, coll, depth)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if rs == nil {
+			http.Error(w, "no such calendar", http.StatusNotFound)
 			return
 		}
 		responses = rs
@@ -118,43 +126,65 @@ func homeSetResponse(user string) msResponse {
 	}
 }
 
-// addressbookResponses returns the Contacts address-book collection response,
-// followed (when depth != "0") by one response per member vCard.
-func (s *Server) addressbookResponses(mailbox, user, depth string) ([]msResponse, error) {
+// cardCollectionResponse builds the collection-level PROPFIND response for one
+// address book (no members).
+func cardCollectionResponse(st *objectstore.Store, user, coll, displayName string, fid int64) (msResponse, error) {
+	max, err := st.FolderObjectsSyncMax(fid)
+	if err != nil {
+		return msResponse{}, err
+	}
+	return msResponse{
+		Href: addressbookPathColl(user, coll),
+		Propstat: []msPropstat{{
+			Prop: msProp{
+				ResourceType: collectionResourceType(),
+				DisplayName:  displayName,
+				GetCTag:      ctag(max),
+				SyncToken:    syncToken(max),
+			},
+			Status: statusOK,
+		}},
+	}, nil
+}
+
+// addressbookResponses returns one address book's collection response, followed
+// (when depth != "0") by one response per member vCard. It resolves the named
+// collection (the reserved "contacts" or a user-created one); a nil slice means no
+// such collection exists.
+func (s *Server) addressbookResponses(mailbox, user, coll, depth string) ([]msResponse, error) {
 	st, err := objectstore.Open(mailbox)
 	if err != nil {
 		return nil, err
 	}
 	defer st.Close()
 
-	max, err := st.FolderObjectsSyncMax(mapi.PrivateFIDContacts)
+	fid, ok, err := cardCollectionFID(st, coll)
 	if err != nil {
 		return nil, err
 	}
-	coll := msResponse{
-		Href: addressbookPath(user),
-		Propstat: []msPropstat{{
-			Prop: msProp{
-				ResourceType: collectionResourceType(),
-				DisplayName:  "Contacts",
-				GetCTag:      ctag(max),
-				SyncToken:    syncToken(max),
-			},
-			Status: statusOK,
-		}},
+	if !ok {
+		return nil, nil
 	}
-	responses := []msResponse{coll}
+	displayName := "Contacts"
+	if coll != "" && coll != addressbookName {
+		displayName = coll
+	}
+	cr, err := cardCollectionResponse(st, user, coll, displayName, fid)
+	if err != nil {
+		return nil, err
+	}
+	responses := []msResponse{cr}
 	if depth == "0" {
 		return responses, nil
 	}
 
-	objs, err := st.ListFolderObjects(mapi.PrivateFIDContacts)
+	objs, err := st.ListFolderObjects(fid)
 	if err != nil {
 		return nil, err
 	}
 	for _, o := range objs {
 		responses = append(responses, msResponse{
-			Href: objectPath(user, objectName(st, o.ID, ".vcf")),
+			Href: objectPathColl(user, coll, objectName(st, o.ID, ".vcf")),
 			Propstat: []msPropstat{{
 				Prop: msProp{
 					GetETag:        etag(o.ChangeNumber),
@@ -165,6 +195,34 @@ func (s *Server) addressbookResponses(mailbox, user, depth string) ([]msResponse
 		})
 	}
 	return responses, nil
+}
+
+// allAddressbookCollections lists every address book in the home set: the
+// well-known Contacts plus each user-created child collection.
+func (s *Server) allAddressbookCollections(mailbox, user string) ([]msResponse, error) {
+	st, err := objectstore.Open(mailbox)
+	if err != nil {
+		return nil, err
+	}
+	defer st.Close()
+
+	wk, err := cardCollectionResponse(st, user, addressbookName, "Contacts", int64(mapi.PrivateFIDContacts))
+	if err != nil {
+		return nil, err
+	}
+	out := []msResponse{wk}
+	subs, err := childCollections(st, int64(mapi.PrivateFIDContacts))
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range subs {
+		cr, err := cardCollectionResponse(st, user, f.DisplayName, f.DisplayName, f.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, cr)
+	}
+	return out, nil
 }
 
 // calHomeSetResponse describes the calendar-home-set collection.
@@ -181,44 +239,66 @@ func calHomeSetResponse(user string) msResponse {
 	}
 }
 
-// calendarResponses returns the Calendar collection response, followed (when
-// depth != "0") by one response per member .ics object.
-func (s *Server) calendarResponses(mailbox, user, depth string) ([]msResponse, error) {
-	st, err := objectstore.Open(mailbox)
+// calCollectionResponse builds the collection-level PROPFIND response for one
+// calendar (no members).
+func calCollectionResponse(st *objectstore.Store, user, coll, displayName string, fid int64) (msResponse, error) {
+	max, err := st.FolderObjectsSyncMax(fid)
 	if err != nil {
-		return nil, err
+		return msResponse{}, err
 	}
-	defer st.Close()
-
-	max, err := st.FolderObjectsSyncMax(mapi.PrivateFIDCalendar)
-	if err != nil {
-		return nil, err
-	}
-	coll := msResponse{
-		Href: calendarPath(user),
+	return msResponse{
+		Href: calendarPathColl(user, coll),
 		Propstat: []msPropstat{{
 			Prop: msProp{
 				ResourceType:     calendarResourceType(),
-				DisplayName:      "Calendar",
+				DisplayName:      displayName,
 				GetCTag:          ctag(max),
 				SyncToken:        syncToken(max),
 				SupportedCalComp: eventComponentSet(),
 			},
 			Status: statusOK,
 		}},
+	}, nil
+}
+
+// calendarResponses returns one calendar's collection response, followed (when
+// depth != "0") by one response per member .ics object. It resolves the named
+// collection (the reserved "calendar" or a user-created one); a nil slice means no
+// such collection exists.
+func (s *Server) calendarResponses(mailbox, user, coll, depth string) ([]msResponse, error) {
+	st, err := objectstore.Open(mailbox)
+	if err != nil {
+		return nil, err
 	}
-	responses := []msResponse{coll}
+	defer st.Close()
+
+	fid, ok, err := calCollectionFID(st, coll)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	displayName := "Calendar"
+	if coll != "" && coll != calendarName {
+		displayName = coll
+	}
+	cr, err := calCollectionResponse(st, user, coll, displayName, fid)
+	if err != nil {
+		return nil, err
+	}
+	responses := []msResponse{cr}
 	if depth == "0" {
 		return responses, nil
 	}
 
-	objs, err := st.ListFolderObjects(mapi.PrivateFIDCalendar)
+	objs, err := st.ListFolderObjects(fid)
 	if err != nil {
 		return nil, err
 	}
 	for _, o := range objs {
 		responses = append(responses, msResponse{
-			Href: calObjectPath(user, objectName(st, o.ID, ".ics")),
+			Href: calObjectPathColl(user, coll, objectName(st, o.ID, ".ics")),
 			Propstat: []msPropstat{{
 				Prop: msProp{
 					GetETag:        etag(o.ChangeNumber),
@@ -229,6 +309,34 @@ func (s *Server) calendarResponses(mailbox, user, depth string) ([]msResponse, e
 		})
 	}
 	return responses, nil
+}
+
+// allCalendarCollections lists every calendar in the home set: the well-known
+// Calendar plus each user-created child collection.
+func (s *Server) allCalendarCollections(mailbox, user string) ([]msResponse, error) {
+	st, err := objectstore.Open(mailbox)
+	if err != nil {
+		return nil, err
+	}
+	defer st.Close()
+
+	wk, err := calCollectionResponse(st, user, calendarName, "Calendar", int64(mapi.PrivateFIDCalendar))
+	if err != nil {
+		return nil, err
+	}
+	out := []msResponse{wk}
+	subs, err := childCollections(st, int64(mapi.PrivateFIDCalendar))
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range subs {
+		cr, err := calCollectionResponse(st, user, f.DisplayName, f.DisplayName, f.ID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, cr)
+	}
+	return out, nil
 }
 
 // writeMultistatus serializes and writes a 207 Multistatus response.

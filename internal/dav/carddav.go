@@ -72,7 +72,7 @@ func findObjectByName(st *objectstore.Store, folderID int64, ext, name string) (
 // handleGet serves a contact as a vCard. HEAD returns the same headers with no
 // body.
 func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, mailbox string) {
-	kind, _, name := classify(r.URL.Path)
+	kind, _, coll, name := classify(r.URL.Path)
 	if kind != kindObject {
 		http.Error(w, "not a contact resource", http.StatusMethodNotAllowed)
 		return
@@ -84,7 +84,16 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, mailbox strin
 	}
 	defer st.Close()
 
-	obj, found, err := findObjectByName(st, mapi.PrivateFIDContacts, ".vcf", name)
+	fid, ok, err := cardCollectionFID(st, coll)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "no such address book", http.StatusNotFound)
+		return
+	}
+	obj, found, err := findObjectByName(st, fid, ".vcf", name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -116,7 +125,7 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, mailbox strin
 // If-None-Match: * (create-only) and If-Match (replace-guard), responding 201 on
 // create and 204 on replace with the new ETag.
 func (s *Server) handlePut(w http.ResponseWriter, r *http.Request, mailbox string) {
-	kind, _, name := classify(r.URL.Path)
+	kind, _, coll, name := classify(r.URL.Path)
 	if kind != kindObject {
 		http.Error(w, "not a contact resource", http.StatusMethodNotAllowed)
 		return
@@ -128,7 +137,16 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request, mailbox strin
 	}
 	defer st.Close()
 
-	existing, found, err := findObjectByName(st, mapi.PrivateFIDContacts, ".vcf", name)
+	fid, ok, err := cardCollectionFID(st, coll)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "no such address book", http.StatusNotFound)
+		return
+	}
+	existing, found, err := findObjectByName(st, fid, ".vcf", name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -169,12 +187,12 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request, mailbox strin
 			return
 		}
 	}
-	if _, err := st.CreateMessage(mapi.PrivateFIDContacts, msg); err != nil {
+	if _, err := st.CreateMessage(fid, msg); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	created, _, err := findObjectByName(st, mapi.PrivateFIDContacts, ".vcf", name)
+	created, _, err := findObjectByName(st, fid, ".vcf", name)
 	if err == nil && created.ChangeNumber != 0 {
 		w.Header().Set("ETag", etag(created.ChangeNumber))
 	}
@@ -187,7 +205,7 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request, mailbox strin
 
 // handleDelete removes a contact, honoring If-Match.
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request, mailbox string) {
-	kind, _, name := classify(r.URL.Path)
+	kind, _, coll, name := classify(r.URL.Path)
 	if kind != kindObject {
 		http.Error(w, "not a contact resource", http.StatusMethodNotAllowed)
 		return
@@ -199,7 +217,16 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request, mailbox st
 	}
 	defer st.Close()
 
-	obj, found, err := findObjectByName(st, mapi.PrivateFIDContacts, ".vcf", name)
+	fid, ok, err := cardCollectionFID(st, coll)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "no such address book", http.StatusNotFound)
+		return
+	}
+	obj, found, err := findObjectByName(st, fid, ".vcf", name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

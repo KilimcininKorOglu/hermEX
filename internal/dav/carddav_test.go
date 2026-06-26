@@ -128,3 +128,29 @@ func TestDelete(t *testing.T) {
 		t.Errorf("GET after delete: status %d, want 404", resp.StatusCode)
 	}
 }
+
+// TestMkColAddressbook confirms extended MKCOL creates a usable second address book
+// and that its objects are isolated from the default Contacts collection (RFC 5689).
+func TestMkColAddressbook(t *testing.T) {
+	ts := davServer(t)
+	team := "/dav/addressbooks/" + testUser + "/team/"
+	mkcol := `<d:mkcol xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">` +
+		`<d:set><d:prop><d:resourcetype><d:collection/><card:addressbook/></d:resourcetype></d:prop></d:set></d:mkcol>`
+
+	resp, _ := doFull(t, ts, "MKCOL", team, mkcol, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("MKCOL status %d, want 201", resp.StatusCode)
+	}
+	resp, _ = doFull(t, ts, "PUT", team+"ada.vcf", adaVCard, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("PUT into new address book: status %d, want 201", resp.StatusCode)
+	}
+	resp, body := doFull(t, ts, "GET", team+"ada.vcf", "", nil)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Ada Lovelace") {
+		t.Errorf("GET from new address book: status %d\n%s", resp.StatusCode, body)
+	}
+	// The contact must not leak into the well-known Contacts collection.
+	if resp, _ := doFull(t, ts, "GET", contactURL("ada.vcf"), "", nil); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("contact leaked into the default address book: status %d, want 404", resp.StatusCode)
+	}
+}

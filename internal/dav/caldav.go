@@ -4,7 +4,6 @@ import (
 	"io"
 	"net/http"
 
-	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcical"
 )
@@ -21,7 +20,7 @@ func icalOptions(st *objectstore.Store) oxcical.Options {
 // handleCalGet serves a calendar object as an iCalendar text. HEAD returns the
 // same headers with no body. It mirrors handleGet for the Calendar folder.
 func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox string) {
-	kind, _, name := classify(r.URL.Path)
+	kind, _, coll, name := classify(r.URL.Path)
 	if kind != kindCalObject {
 		http.Error(w, "not a calendar resource", http.StatusMethodNotAllowed)
 		return
@@ -33,7 +32,16 @@ func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox st
 	}
 	defer st.Close()
 
-	obj, found, err := findObjectByName(st, mapi.PrivateFIDCalendar, ".ics", name)
+	fid, ok, err := calCollectionFID(st, coll)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "no such calendar", http.StatusNotFound)
+		return
+	}
+	obj, found, err := findObjectByName(st, fid, ".ics", name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -65,7 +73,7 @@ func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox st
 // honors If-None-Match: * (create-only) and If-Match (replace-guard), responding
 // 201 on create and 204 on replace with the new ETag. Mirrors handlePut.
 func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, mailbox string) {
-	kind, _, name := classify(r.URL.Path)
+	kind, _, coll, name := classify(r.URL.Path)
 	if kind != kindCalObject {
 		http.Error(w, "not a calendar resource", http.StatusMethodNotAllowed)
 		return
@@ -77,7 +85,16 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, mailbox st
 	}
 	defer st.Close()
 
-	existing, found, err := findObjectByName(st, mapi.PrivateFIDCalendar, ".ics", name)
+	fid, ok, err := calCollectionFID(st, coll)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "no such calendar", http.StatusNotFound)
+		return
+	}
+	existing, found, err := findObjectByName(st, fid, ".ics", name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -117,12 +134,12 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, mailbox st
 			return
 		}
 	}
-	if _, err := st.CreateMessage(mapi.PrivateFIDCalendar, msg); err != nil {
+	if _, err := st.CreateMessage(fid, msg); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	created, _, err := findObjectByName(st, mapi.PrivateFIDCalendar, ".ics", name)
+	created, _, err := findObjectByName(st, fid, ".ics", name)
 	if err == nil && created.ChangeNumber != 0 {
 		w.Header().Set("ETag", etag(created.ChangeNumber))
 	}
@@ -135,7 +152,7 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, mailbox st
 
 // handleCalDelete removes a calendar object, honoring If-Match. Mirrors handleDelete.
 func (s *Server) handleCalDelete(w http.ResponseWriter, r *http.Request, mailbox string) {
-	kind, _, name := classify(r.URL.Path)
+	kind, _, coll, name := classify(r.URL.Path)
 	if kind != kindCalObject {
 		http.Error(w, "not a calendar resource", http.StatusMethodNotAllowed)
 		return
@@ -147,7 +164,16 @@ func (s *Server) handleCalDelete(w http.ResponseWriter, r *http.Request, mailbox
 	}
 	defer st.Close()
 
-	obj, found, err := findObjectByName(st, mapi.PrivateFIDCalendar, ".ics", name)
+	fid, ok, err := calCollectionFID(st, coll)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !ok {
+		http.Error(w, "no such calendar", http.StatusNotFound)
+		return
+	}
+	obj, found, err := findObjectByName(st, fid, ".ics", name)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

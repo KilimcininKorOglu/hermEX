@@ -370,3 +370,38 @@ func TestCalFreeBusy(t *testing.T) {
 		t.Errorf("free-busy included the out-of-range December event\n%s", out)
 	}
 }
+
+// TestMkCalendarCollection confirms MKCALENDAR creates a usable second calendar,
+// rejects re-creation, isolates its objects from the default calendar, and that the
+// home set then lists both (RFC 4791 §5.3.1).
+func TestMkCalendarCollection(t *testing.T) {
+	ts := davServerCal(t)
+	work := "/dav/calendars/" + testUser + "/work/"
+
+	resp, _ := doFull(t, ts, "MKCALENDAR", work, "", nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("MKCALENDAR status %d, want 201", resp.StatusCode)
+	}
+	resp, _ = doFull(t, ts, "MKCALENDAR", work, "", nil)
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("MKCALENDAR on existing collection: status %d, want 405", resp.StatusCode)
+	}
+
+	resp, _ = doFull(t, ts, "PUT", work+"ev.ics", timedEventICS, nil)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("PUT into new calendar: status %d, want 201", resp.StatusCode)
+	}
+	resp, body := doFull(t, ts, "GET", work+"ev.ics", "", nil)
+	if resp.StatusCode != http.StatusOK || !strings.Contains(body, "Planning") {
+		t.Errorf("GET from new calendar: status %d\n%s", resp.StatusCode, body)
+	}
+	// The object must not leak into the well-known calendar.
+	if resp, _ := doFull(t, ts, "GET", calURL("ev.ics"), "", nil); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("event leaked into the default calendar: status %d, want 404", resp.StatusCode)
+	}
+
+	_, body = doFull(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/", "", map[string]string{"Depth": "1"})
+	if !strings.Contains(body, "/calendar/") || !strings.Contains(body, "/work/") {
+		t.Errorf("calendar home set did not list both collections\n%s", body)
+	}
+}

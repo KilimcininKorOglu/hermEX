@@ -94,7 +94,7 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	}
 	// Object methods dispatch by collection: a calendar .ics object is served by
 	// the CalDAV handlers, everything else by the CardDAV handlers.
-	kind, _, _ := classify(r.URL.Path)
+	kind, _, _, _ := classify(r.URL.Path)
 	calObject := kind == kindCalObject
 	switch r.Method {
 	case "OPTIONS":
@@ -121,6 +121,10 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		} else {
 			s.handleDelete(w, r, mailbox)
 		}
+	case "MKCALENDAR":
+		s.handleMkCalendar(w, r, mailbox)
+	case "MKCOL":
+		s.handleMkCol(w, r, mailbox)
 	default:
 		w.Header().Set("Allow", allowMethods)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -128,7 +132,7 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 }
 
 // allowMethods lists the DAV methods the server implements.
-const allowMethods = "OPTIONS, PROPFIND, REPORT, GET, HEAD, PUT, DELETE"
+const allowMethods = "OPTIONS, PROPFIND, REPORT, GET, HEAD, PUT, DELETE, MKCALENDAR, MKCOL"
 
 // basicAuth validates HTTP Basic credentials against the directory and returns
 // the user and mailbox path. On failure it writes a 401 challenge and returns
@@ -153,7 +157,7 @@ func (s *Server) basicAuth(w http.ResponseWriter, r *http.Request) (user, mailbo
 // 6352 §6.1) and calendar-access signals CalDAV (RFC 4791 §5.1); levels 1 and 3
 // cover core WebDAV and PROPFIND/REPORT.
 func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("DAV", "1, 3, addressbook, calendar-access")
+	w.Header().Set("DAV", "1, 3, addressbook, calendar-access, extended-mkcol")
 	w.Header().Set("Allow", allowMethods)
 	w.Header().Set("Content-Length", "0")
 	w.WriteHeader(http.StatusOK)
@@ -182,52 +186,46 @@ const (
 	calendarName    = "calendar"
 )
 
-// classify parses a request path into a resource kind plus, for an object, its
-// resource name. It does not consult the store.
-func classify(p string) (kind resourceKind, user, object string) {
+// classify parses a request path into a resource kind plus, for a collection, its
+// name segment and, for an object, its resource name. Any collection name is
+// accepted (the well-known "calendar"/"contacts" plus user-created subfolders); the
+// handler resolves the name to a folder. It does not consult the store.
+func classify(p string) (kind resourceKind, user, collection, object string) {
 	switch p {
 	case "", "/", "/dav", "/dav/":
-		return kindRoot, "", ""
+		return kindRoot, "", "", ""
 	}
 	trimmed := strings.Trim(p, "/")
 	parts := strings.Split(trimmed, "/")
 	// parts[0] == "dav"
 	if len(parts) < 2 || parts[0] != "dav" {
-		return kindUnknown, "", ""
+		return kindUnknown, "", "", ""
 	}
 	switch parts[1] {
 	case "principals":
 		if len(parts) >= 3 {
-			return kindPrincipal, parts[2], ""
+			return kindPrincipal, parts[2], "", ""
 		}
 	case "addressbooks":
 		switch len(parts) {
 		case 3:
-			return kindHomeSet, parts[2], ""
+			return kindHomeSet, parts[2], "", ""
 		case 4:
-			if parts[3] == addressbookName {
-				return kindAddressbook, parts[2], ""
-			}
+			return kindAddressbook, parts[2], parts[3], ""
 		case 5:
-			if parts[3] == addressbookName {
-				return kindObject, parts[2], parts[4]
-			}
+			return kindObject, parts[2], parts[3], parts[4]
 		}
 	case "calendars":
 		switch len(parts) {
 		case 3:
-			return kindCalHomeSet, parts[2], ""
+			return kindCalHomeSet, parts[2], "", ""
 		case 4:
-			if parts[3] == calendarName {
-				return kindCalendar, parts[2], ""
-			}
+			return kindCalendar, parts[2], parts[3], ""
 		case 5:
-			if parts[3] == calendarName {
-				return kindCalObject, parts[2], parts[4]
-			}
+			return kindCalObject, parts[2], parts[3], parts[4]
 		}
 	}
-	return kindUnknown, "", ""
+	return kindUnknown, "", "", ""
 }
 
 // URL builders for the fixed DAV layout.
@@ -238,8 +236,37 @@ func addressbookPath(user string) string {
 }
 func objectPath(user, name string) string { return addressbookPath(user) + name }
 
+// addressbookPathColl builds the href of a named address-book collection (the
+// reserved "contacts" or a user-created one); an empty name means the reserved one.
+func addressbookPathColl(user, coll string) string {
+	if coll == "" {
+		coll = addressbookName
+	}
+	return "/dav/addressbooks/" + user + "/" + coll + "/"
+}
+
+// objectPathColl builds an object href inside a named address-book collection, so
+// REPORT/PROPFIND responses echo the same collection segment the client requested.
+func objectPathColl(user, coll, name string) string {
+	return addressbookPathColl(user, coll) + name
+}
+
 func calHomeSetPath(user string) string { return "/dav/calendars/" + user + "/" }
 func calendarPath(user string) string {
 	return "/dav/calendars/" + user + "/" + calendarName + "/"
 }
 func calObjectPath(user, name string) string { return calendarPath(user) + name }
+
+// calendarPathColl builds the href of a named calendar collection; an empty name
+// means the reserved "calendar".
+func calendarPathColl(user, coll string) string {
+	if coll == "" {
+		coll = calendarName
+	}
+	return "/dav/calendars/" + user + "/" + coll + "/"
+}
+
+// calObjectPathColl builds an object href inside a named calendar collection.
+func calObjectPathColl(user, coll, name string) string {
+	return calendarPathColl(user, coll) + name
+}
