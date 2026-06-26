@@ -61,6 +61,11 @@ type msProp struct {
 	// read-write.
 	Owner              *href         `xml:"DAV: owner,omitempty"`
 	CurrentUserPrivSet *privilegeSet `xml:"DAV: current-user-privilege-set,omitempty"`
+	// WebDAV quota (RFC 4331): the mailbox's used bytes and, when a storage limit is
+	// set, the bytes still available. Both are omitted when unknown; available is also
+	// omitted for an unlimited mailbox.
+	QuotaUsed      string `xml:"DAV: quota-used-bytes,omitempty"`
+	QuotaAvailable string `xml:"DAV: quota-available-bytes,omitempty"`
 	// Extra carries stored dead properties (PROPPATCH round-trip) as verbatim XML
 	// elements, emitted inside <prop> after the fixed fields.
 	Extra []byte `xml:",innerxml"`

@@ -161,6 +161,7 @@ func cardCollectionResponse(st *objectstore.Store, user, coll, displayName strin
 		Owner:              &href{Href: principalPath(user)},
 		CurrentUserPrivSet: ownerPrivilegeSet(),
 	}
+	prop.QuotaUsed, prop.QuotaAvailable = mailboxQuota(st)
 	applyDeadProps(&prop, dead)
 	return msResponse{
 		Href:     addressbookPathColl(user, coll),
@@ -280,6 +281,7 @@ func calCollectionResponse(st *objectstore.Store, user, coll, displayName string
 		Owner:              &href{Href: principalPath(user)},
 		CurrentUserPrivSet: ownerPrivilegeSet(),
 	}
+	prop.QuotaUsed, prop.QuotaAvailable = mailboxQuota(st)
 	applyDeadProps(&prop, dead)
 	return msResponse{
 		Href:     calendarPathColl(user, coll),
@@ -488,3 +490,19 @@ func ctag(max uint64) string { return strconv.FormatUint(max, 10) }
 // syncToken is an opaque RFC 6578 sync token carrying the collection's change
 // high-water mark.
 func syncToken(max uint64) string { return "hermex:sync:" + strconv.FormatUint(max, 10) }
+
+// mailboxQuota reports the mailbox's used bytes and, when a storage limit is set,
+// the bytes still available (RFC 4331). Both are empty (and so omitted) when the
+// figures cannot be read; available is also empty for an unlimited mailbox. The
+// figure is mailbox-wide, reported the same on every collection.
+func mailboxQuota(st *objectstore.Store) (used, available string) {
+	n, err := st.MailboxSize()
+	if err != nil {
+		return "", ""
+	}
+	used = strconv.FormatInt(n, 10)
+	if q, err := st.GetQuota(); err == nil && q.StorageKB > 0 {
+		available = strconv.FormatInt(max(int64(q.StorageKB)*1024-n, 0), 10)
+	}
+	return used, available
+}

@@ -770,6 +770,40 @@ func TestScheduleNameReserved(t *testing.T) {
 	}
 }
 
+// TestQuotaProps confirms a collection PROPFIND reports quota-used-bytes always and
+// quota-available-bytes only when a storage limit is set (RFC 4331).
+func TestQuotaProps(t *testing.T) {
+	// A mailbox with a storage limit reports both used and available.
+	dir := filepath.Join(t.TempDir(), "mbox")
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetQuota(objectstore.QuotaLimits{StorageKB: 1024}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
+	ts := httptest.NewServer(NewServer(accs, accs, "hermex.test").Handler())
+	t.Cleanup(ts.Close)
+	_, body := do(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/calendar/", "0", true)
+	for _, want := range []string{"quota-used-bytes", "quota-available-bytes"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("limited mailbox PROPFIND missing %q\n%s", want, body)
+		}
+	}
+
+	// An unlimited mailbox reports used but omits available.
+	ts2 := davServerCal(t)
+	_, body2 := do(t, ts2, "PROPFIND", "/dav/calendars/"+testUser+"/calendar/", "0", true)
+	if !strings.Contains(body2, "quota-used-bytes") {
+		t.Errorf("unlimited mailbox missing quota-used-bytes\n%s", body2)
+	}
+	if strings.Contains(body2, "quota-available-bytes") {
+		t.Errorf("unlimited mailbox should omit quota-available-bytes\n%s", body2)
+	}
+}
+
 // TestCurrentUserPrivilegeSet confirms a collection PROPFIND reports the owner and
 // the privileges the user holds, so a client can tell the calendar is writable
 // (RFC 3744 §5.4).
