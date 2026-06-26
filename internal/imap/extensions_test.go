@@ -144,3 +144,21 @@ func TestIMAPMove(t *testing.T) {
 		t.Errorf("after MOVE, Archive = %q, want 1 EXISTS (destination gained it)", got)
 	}
 }
+
+// TestIMAPSpecialUse covers SPECIAL-USE (RFC 6154): LIST tags the well-known
+// folders with \Sent/\Drafts/\Trash/\Junk so clients auto-discover them.
+func TestIMAPSpecialUse(t *testing.T) {
+	c, _ := startServer(t)
+	c.mustOK("a1", "LOGIN alice secret")
+
+	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "SPECIAL-USE") {
+		t.Errorf("CAPABILITY missing SPECIAL-USE: %s", caps)
+	}
+
+	joined := strings.Join(c.mustOK("a2", `LIST "" "*"`), "\n")
+	for _, want := range []string{`\Sent`, `\Drafts`, `\Trash`, `\Junk`} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("LIST missing the SPECIAL-USE attribute %q in:\n%s", want, joined)
+		}
+	}
+}

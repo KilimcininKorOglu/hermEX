@@ -14,6 +14,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
+	"hermex/internal/mapi"
 	"hermex/internal/notify"
 	"hermex/internal/objectstore"
 	"hermex/internal/publicfolder"
@@ -23,7 +24,7 @@ import (
 // the lexer accepts non-synchronizing literals; AUTH=PLAIN because the server
 // implements the SASL PLAIN mechanism; IDLE (RFC 2177) because the server pushes
 // real-time mailbox updates while a client idles.
-const capabilities = "IMAP4rev1 LITERAL+ NAMESPACE AUTH=PLAIN IDLE CHILDREN ID UNSELECT UIDPLUS MOVE"
+const capabilities = "IMAP4rev1 LITERAL+ NAMESPACE AUTH=PLAIN IDLE CHILDREN ID UNSELECT UIDPLUS MOVE SPECIAL-USE"
 
 // idlePollCadence is the fallback poll interval during IDLE when the push relay is
 // absent or a wake is missed — the degradation floor that keeps IDLE emitting
@@ -493,10 +494,31 @@ func (c *conn) cmdList(tag string, args []token, lsub bool) {
 		if n.hasChildren {
 			attr = `\HasChildren`
 		}
+		if su := specialUse(n.info.ID); su != "" {
+			attr += " " + su
+		}
 		c.untagged(`%s (%s) "%s" %s`, verb, attr, hierarchySep, quoteString(n.path))
 	}
 	c.listPublicFolders(verb, full)
 	c.ok(tag, verb+" completed")
+}
+
+// specialUse returns the RFC 6154 SPECIAL-USE attribute for a well-known folder,
+// or "" for an ordinary one. The well-known folders are addressed by their fixed
+// PrivateFID, so the mapping is a constant lookup that lets clients auto-discover
+// Sent/Drafts/Junk/Trash without name guessing.
+func specialUse(folderID int64) string {
+	switch folderID {
+	case int64(mapi.PrivateFIDSentItems):
+		return `\Sent`
+	case int64(mapi.PrivateFIDDeletedItems):
+		return `\Trash`
+	case int64(mapi.PrivateFIDDraft):
+		return `\Drafts`
+	case int64(mapi.PrivateFIDJunk):
+		return `\Junk`
+	}
+	return ""
 }
 
 // --- status ---
