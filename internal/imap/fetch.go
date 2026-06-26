@@ -35,13 +35,29 @@ func (c *conn) cmdFetch(tag string, args []token, byUID bool) {
 		c.bad(tag, "invalid sequence set")
 		return
 	}
-	items, err := parseFetchItems(args[1:])
+	itemArgs, changedSince, ok := splitFetchModifiers(args[1:])
+	if !ok {
+		c.bad(tag, "invalid FETCH modifier")
+		return
+	}
+	items, err := parseFetchItems(itemArgs)
 	if err != nil {
 		c.bad(tag, "invalid FETCH items")
 		return
 	}
 	if byUID && !hasKind(items, "UID") {
 		items = append(items, fetchItem{kind: "UID"}) // UID FETCH always returns UID
+	}
+	// CHANGEDSINCE (RFC 7162) enables CONDSTORE and forces MODSEQ into the response.
+	if changedSince > 0 {
+		c.condstore = true
+		if !hasKind(items, "MODSEQ") {
+			items = append(items, fetchItem{kind: "MODSEQ"})
+		}
+	}
+	var modseqs map[uint32]uint64
+	if changedSince > 0 || hasKind(items, "MODSEQ") {
+		modseqs = c.modseqMap()
 	}
 
 	max := c.sel.maxSeq()
@@ -57,7 +73,10 @@ func (c *conn) cmdFetch(tag string, args []token, byUID bool) {
 		if !set.contains(key, max) {
 			continue
 		}
-		c.writeFetch(seq, i, items)
+		if changedSince > 0 && modseqs[c.sel.msgs[i].UID] <= changedSince {
+			continue // unchanged since the client's modseq
+		}
+		c.writeFetch(seq, i, items, modseqs)
 	}
 	verb := "FETCH"
 	if byUID {
@@ -112,7 +131,7 @@ func hasKind(items []fetchItem, kind string) bool {
 // writeFetch renders and writes one message's FETCH response. It loads and
 // parses the message only when an item actually needs the body or structure,
 // and applies the \Seen side effect of a non-peek body fetch.
-func (c *conn) writeFetch(seq uint32, idx int, items []fetchItem) {
+func (c *conn) writeFetch(seq uint32, idx int, items []fetchItem, modseqs map[uint32]uint64) {
 	msg := c.sel.msgs[idx]
 	var raw []byte
 	var rawLoaded bool
@@ -137,6 +156,8 @@ func (c *conn) writeFetch(seq uint32, idx int, items []fetchItem) {
 		switch it.kind {
 		case "UID":
 			fields = append(fields, fmt.Sprintf("UID %d", msg.UID))
+		case "MODSEQ":
+			fields = append(fields, fmt.Sprintf("MODSEQ (%d)", modseqs[msg.UID]))
 		case "FLAGS":
 			fields = append(fields, fmt.Sprintf(`FLAGS (%s)`, formatFlags(msg.Flags, false)))
 		case "INTERNALDATE":
@@ -303,7 +324,7 @@ func parseOneItem(cur *tokenCursor) ([]fetchItem, error) {
 	upper := strings.ToUpper(name)
 
 	switch upper {
-	case "FLAGS", "INTERNALDATE", "RFC822.SIZE", "ENVELOPE", "BODYSTRUCTURE", "UID":
+	case "FLAGS", "INTERNALDATE", "RFC822.SIZE", "ENVELOPE", "BODYSTRUCTURE", "UID", "MODSEQ":
 		return []fetchItem{{kind: upper}}, nil
 	case "RFC822":
 		return []fetchItem{{kind: "SECTION", name: "RFC822", section: mime.Section{}}}, nil

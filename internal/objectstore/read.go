@@ -160,9 +160,28 @@ func (s *Store) SetMessageFlags(folderID int64, uid uint32, flags int64) error {
 	if _, err := s.setObjReadState(messageID, bit(FlagSeen)); err != nil {
 		return err
 	}
-	if _, err := s.idxdb.Exec(
+	// Rewrite the IMAP flag mask and advance the message's CONDSTORE modseq in one
+	// transaction: a flag change is a modification a CONDSTORE client must see,
+	// including for the flags (\Flagged/\Answered/\Deleted) the object store's
+	// change number does not track.
+	tx, err := s.idxdb.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.Exec(
 		`UPDATE messages SET read=?, replied=?, flagged=?, deleted=?, unsent=? WHERE message_id=?`,
 		bit(FlagSeen), bit(FlagAnswered), bit(FlagFlagged), bit(FlagDeleted), bit(FlagDraft), messageID); err != nil {
+		return err
+	}
+	modseq, err := nextModSeq(tx, folderID)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE messages SET modseq=? WHERE message_id=?`, modseq, messageID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
 		return err
 	}
 	s.publishChange("flags", 0, "")

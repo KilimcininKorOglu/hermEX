@@ -22,8 +22,8 @@ func (c *conn) cmdStore(tag string, args []token, byUID bool) {
 		c.no(tag, "mailbox is read-only")
 		return
 	}
-	if len(args) < 3 {
-		c.bad(tag, "STORE requires a sequence set, item, and flags")
+	if len(args) < 2 {
+		c.bad(tag, "STORE requires a sequence set and flags")
 		return
 	}
 	setText, _ := args[0].str()
@@ -32,18 +32,38 @@ func (c *conn) cmdStore(tag string, args []token, byUID bool) {
 		c.bad(tag, "invalid sequence set")
 		return
 	}
-	itemText, _ := args[1].str()
+	// An optional (UNCHANGEDSINCE n) modifier (RFC 7162) precedes the item.
+	rest, unchangedSince, condUsed, ok := parseUnchangedSince(args[1:])
+	if !ok {
+		c.bad(tag, "invalid STORE modifier")
+		return
+	}
+	if condUsed {
+		c.condstore = true
+	}
+	if len(rest) < 2 {
+		c.bad(tag, "STORE requires an item and flags")
+		return
+	}
+	itemText, _ := rest[0].str()
 	mode, silent, ok := parseStoreItem(itemText)
 	if !ok {
 		c.bad(tag, "invalid STORE item")
 		return
 	}
-	names := flagValue(args[2:])
+	names := flagValue(rest[1:])
+
+	var preModseqs map[uint32]uint64
+	if condUsed {
+		preModseqs = c.modseqMap() // pre-store: the UNCHANGEDSINCE comparison basis
+	}
 
 	max := c.sel.maxSeq()
 	if byUID {
 		max = c.sel.maxUID()
 	}
+	var modified []uint32 // rejected by UNCHANGEDSINCE (their modseq moved on)
+	var reported []int    // message indices to report back via FETCH
 	for i := range c.sel.msgs {
 		seq := uint32(i + 1)
 		key := seq
@@ -53,6 +73,10 @@ func (c *conn) cmdStore(tag string, args []token, byUID bool) {
 		if !set.contains(key, max) {
 			continue
 		}
+		if condUsed && preModseqs[c.sel.msgs[i].UID] > unchangedSince {
+			modified = append(modified, c.sel.msgs[i].UID)
+			continue // changed since the client's modseq; do not touch it
+		}
 		newFlags := applyFlagNames(c.sel.msgs[i].Flags, mode, names)
 		if newFlags != c.sel.msgs[i].Flags {
 			if err := c.curStore().SetMessageFlags(c.sel.id, c.sel.msgs[i].UID, newFlags); err != nil {
@@ -60,19 +84,44 @@ func (c *conn) cmdStore(tag string, args []token, byUID bool) {
 			}
 			c.sel.msgs[i].Flags = newFlags
 		}
-		if !silent {
-			if byUID {
-				c.untagged("%d FETCH (FLAGS (%s) UID %d)", seq, formatFlags(newFlags, false), c.sel.msgs[i].UID)
-			} else {
-				c.untagged("%d FETCH (FLAGS (%s))", seq, formatFlags(newFlags, false))
-			}
+		// .SILENT suppresses the FETCH, except a conditional STORE still reports the
+		// new MODSEQ so the client can track it (RFC 7162).
+		if !silent || condUsed {
+			reported = append(reported, i)
 		}
 	}
+
+	// The new modseq is read fresh after the modifications, never the pre-store map.
+	var postModseqs map[uint32]uint64
+	if c.condstore {
+		postModseqs = c.modseqMap()
+	}
+	for _, i := range reported {
+		c.untagged("%d FETCH (%s)", uint32(i+1), storeFetchFields(c.sel.msgs[i], byUID, c.condstore, postModseqs))
+	}
+
 	verb := "STORE"
 	if byUID {
 		verb = "UID STORE"
 	}
+	if len(modified) > 0 {
+		c.ok(tag, fmt.Sprintf("[MODIFIED %s] %s completed", uidList(modified), verb))
+		return
+	}
 	c.ok(tag, verb+" completed")
+}
+
+// storeFetchFields builds the FETCH data for a STORE reply: FLAGS, the UID for a
+// UID STORE, and MODSEQ once CONDSTORE is enabled.
+func storeFetchFields(m objectstore.MessageInfo, byUID, condstore bool, modseqs map[uint32]uint64) string {
+	parts := []string{fmt.Sprintf("FLAGS (%s)", formatFlags(m.Flags, false))}
+	if byUID {
+		parts = append(parts, fmt.Sprintf("UID %d", m.UID))
+	}
+	if condstore {
+		parts = append(parts, fmt.Sprintf("MODSEQ (%d)", modseqs[m.UID]))
+	}
+	return strings.Join(parts, " ")
 }
 
 // parseStoreItem decodes a STORE item like "+FLAGS.SILENT" into a fold mode

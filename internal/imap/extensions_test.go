@@ -5,6 +5,7 @@ import (
 	"compress/flate"
 	"encoding/base64"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -400,4 +401,63 @@ func TestIMAPCompress(t *testing.T) {
 	if strings.Contains(joined, "COMPRESS=DEFLATE") {
 		t.Errorf("COMPRESS=DEFLATE still advertised after activation: %q", joined)
 	}
+}
+
+// TestIMAPCondstore covers CONDSTORE (RFC 7162): HIGHESTMODSEQ in SELECT, MODSEQ in
+// FETCH, the UNCHANGEDSINCE conditional STORE with a [MODIFIED] rejection, ENABLE,
+// and HIGHESTMODSEQ in STATUS.
+func TestIMAPCondstore(t *testing.T) {
+	c, _ := startServer(t)
+	c.mustOK("a1", "LOGIN alice secret")
+
+	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "CONDSTORE") || !strings.Contains(caps, "ENABLE") {
+		t.Errorf("CAPABILITY missing CONDSTORE/ENABLE: %s", caps)
+	}
+
+	if sel := strings.Join(c.mustOK("a2", "SELECT INBOX (CONDSTORE)"), " "); !strings.Contains(sel, "HIGHESTMODSEQ") {
+		t.Errorf("SELECT (CONDSTORE) missing HIGHESTMODSEQ: %s", sel)
+	}
+
+	// FETCH MODSEQ yields the message's modseq.
+	m0 := parseModseq(t, strings.Join(c.mustOK("a3", "FETCH 1 (MODSEQ)"), " "))
+
+	// A real flag change advances the modseq past m0.
+	c.mustOK("a4", `STORE 1 +FLAGS (\Flagged)`)
+
+	// A conditional STORE gated on the now-stale m0 is rejected and named in
+	// [MODIFIED], and it must not have applied \Answered.
+	line := c.taggedLine("a5", fmt.Sprintf(`STORE 1 (UNCHANGEDSINCE %d) +FLAGS (\Answered)`, m0))
+	if !strings.Contains(line, "MODIFIED 1") {
+		t.Errorf("stale conditional STORE = %q, want a [MODIFIED 1] response code", line)
+	}
+	if flags := strings.Join(c.mustOK("a6", "FETCH 1 (FLAGS)"), " "); strings.Contains(flags, `\Answered`) {
+		t.Errorf("rejected conditional STORE applied \\Answered anyway: %q", flags)
+	}
+
+	if en := strings.Join(c.mustOK("a7", "ENABLE CONDSTORE"), " "); !strings.Contains(en, "ENABLED CONDSTORE") {
+		t.Errorf("ENABLE CONDSTORE = %q, want ENABLED CONDSTORE", en)
+	}
+
+	if st := strings.Join(c.mustOK("a8", "STATUS INBOX (HIGHESTMODSEQ)"), " "); !strings.Contains(st, "HIGHESTMODSEQ") {
+		t.Errorf("STATUS = %q, want HIGHESTMODSEQ", st)
+	}
+}
+
+// parseModseq extracts the n from the first "MODSEQ (n)" in an IMAP response.
+func parseModseq(t *testing.T, s string) uint64 {
+	t.Helper()
+	i := strings.Index(s, "MODSEQ (")
+	if i < 0 {
+		t.Fatalf("no MODSEQ in %q", s)
+	}
+	rest := s[i+len("MODSEQ ("):]
+	j := strings.IndexByte(rest, ')')
+	if j < 0 {
+		t.Fatalf("unterminated MODSEQ in %q", s)
+	}
+	n, err := strconv.ParseUint(rest[:j], 10, 64)
+	if err != nil {
+		t.Fatalf("bad MODSEQ %q: %v", rest[:j], err)
+	}
+	return n
 }

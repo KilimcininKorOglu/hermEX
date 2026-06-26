@@ -185,7 +185,8 @@ func (c *conn) statusPublic(tag, name, sub string, items []string) {
 	}
 	uidv, _ := st.UIDValidity(f.ID)
 	uidn, _ := st.UIDNext(f.ID)
-	c.untagged("STATUS %s (%s)", quoteString(name), statusParts(items, msgs, uidv, uidn))
+	hms, _ := st.FolderHighestModSeq(f.ID)
+	c.untagged("STATUS %s (%s)", quoteString(name), statusParts(items, msgs, uidv, uidn, hms))
 	c.ok(tag, "STATUS completed")
 }
 
@@ -205,6 +206,11 @@ func (c *conn) emitSelected(tag string, sel *selectedMailbox, examine bool) {
 	c.untagged("OK [UIDNEXT %d] next uid", sel.uidNext)
 	if u := sel.firstUnseen(); u != 0 {
 		c.untagged("OK [UNSEEN %d] first unseen", u)
+	}
+	// CONDSTORE (RFC 7162): report the mailbox HIGHESTMODSEQ once the session has
+	// enabled CONDSTORE, so the client has a sync baseline.
+	if c.condstore {
+		c.untagged("OK [HIGHESTMODSEQ %d] modseq", c.highestModSeq())
 	}
 	verb := "SELECT"
 	if examine {

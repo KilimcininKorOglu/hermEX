@@ -50,6 +50,11 @@ func (s *Store) indexMessage(folderID, messageID int64, mid string, msg *oxcmail
 		return 0, err
 	}
 
+	// A new message takes a fresh modseq from the folder's CONDSTORE counter.
+	modseq, err := nextModSeq(tx, folderID)
+	if err != nil {
+		return 0, err
+	}
 	bit := func(f int64) int {
 		if flags&f != 0 {
 			return 1
@@ -60,12 +65,12 @@ func (s *Store) indexMessage(folderID, messageID int64, mid string, msg *oxcmail
 		`INSERT INTO messages
 		   (message_id, folder_id, mid_string, idx, mod_time, uid,
 		    unsent, recent, read, flagged, replied, forwarded, deleted,
-		    subject, sender, rcpt, size, received)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+		    subject, sender, rcpt, size, received, modseq)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
 		messageID, folderID, mid, idx, time.Now().Unix(), uid,
 		bit(FlagDraft), bit(FlagSeen), bit(FlagFlagged), bit(FlagAnswered), bit(FlagDeleted),
 		projectSubject(msg.Props), projectSender(msg.Props), projectRcpt(msg.Recipients),
-		wireSize, received.Unix()); err != nil {
+		wireSize, received.Unix(), modseq); err != nil {
 		return 0, err
 	}
 	if _, err := tx.Exec(

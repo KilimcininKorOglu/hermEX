@@ -25,7 +25,7 @@ import (
 // the lexer accepts non-synchronizing literals; AUTH=PLAIN because the server
 // implements the SASL PLAIN mechanism; IDLE (RFC 2177) because the server pushes
 // real-time mailbox updates while a client idles.
-const capabilities = "IMAP4rev1 LITERAL+ NAMESPACE AUTH=PLAIN AUTH=LOGIN IDLE CHILDREN ID UNSELECT UIDPLUS MOVE SPECIAL-USE QUOTA ESEARCH MULTIAPPEND SORT THREAD=ORDEREDSUBJECT THREAD=REFERENCES BINARY"
+const capabilities = "IMAP4rev1 LITERAL+ NAMESPACE AUTH=PLAIN AUTH=LOGIN IDLE CHILDREN ID UNSELECT UIDPLUS MOVE SPECIAL-USE QUOTA ESEARCH MULTIAPPEND SORT THREAD=ORDEREDSUBJECT THREAD=REFERENCES BINARY ENABLE CONDSTORE"
 
 // idlePollCadence is the fallback poll interval during IDLE when the push relay is
 // absent or a wake is missed — the degradation floor that keeps IDLE emitting
@@ -161,8 +161,9 @@ type conn struct {
 	selPublic  bool // the current selection lives in pubStore, not st
 	readOnly   bool
 	isTLS      bool
-	compressed bool           // COMPRESS DEFLATE is active on the link
-	fw         *flate.Writer  // DEFLATE writer wrapping nc when compressed; nil otherwise
+	compressed bool          // COMPRESS DEFLATE is active on the link
+	fw         *flate.Writer // DEFLATE writer wrapping nc when compressed; nil otherwise
+	condstore  bool          // CONDSTORE/QRESYNC enabled: FETCH/STORE carry MODSEQ
 }
 
 // caps returns the CAPABILITY list for this connection's current state. STARTTLS
@@ -246,6 +247,8 @@ func (c *conn) dispatch(toks []token) {
 		c.cmdID(tag)
 	case "COMPRESS":
 		c.cmdCompress(tag, args)
+	case "ENABLE":
+		c.cmdEnable(tag, args)
 	case "STARTTLS":
 		c.cmdStartTLS(tag)
 	case "NOOP":
@@ -523,6 +526,11 @@ func (c *conn) cmdSelect(tag string, args []token, examine bool) {
 		c.bad(tag, "SELECT requires a mailbox name")
 		return
 	}
+	// A (CONDSTORE) / (QRESYNC ...) parameter switches the session into CONDSTORE
+	// mode for this and every later command (RFC 7162).
+	if selectEnablesCondstore(args) {
+		c.condstore = true
+	}
 	if sub, isPub := isPublicName(name); isPub {
 		c.selectPublic(tag, name, sub, examine)
 		return
@@ -653,12 +661,13 @@ func (c *conn) cmdStatus(tag string, args []token) {
 	}
 	uidv, _ := c.st.UIDValidity(node.info.ID)
 	uidn, _ := c.st.UIDNext(node.info.ID)
-	c.untagged("STATUS %s (%s)", quoteString(node.path), statusParts(items, msgs, uidv, uidn))
+	hms, _ := c.st.FolderHighestModSeq(node.info.ID)
+	c.untagged("STATUS %s (%s)", quoteString(node.path), statusParts(items, msgs, uidv, uidn, hms))
 	c.ok(tag, "STATUS completed")
 }
 
 // statusParts builds the parenthesized STATUS item list for the requested items.
-func statusParts(items []string, msgs []objectstore.MessageInfo, uidv, uidn uint32) string {
+func statusParts(items []string, msgs []objectstore.MessageInfo, uidv, uidn uint32, highmodseq uint64) string {
 	unseen := 0
 	for i := range msgs {
 		if msgs[i].Flags&objectstore.FlagSeen == 0 {
@@ -678,6 +687,8 @@ func statusParts(items []string, msgs []objectstore.MessageInfo, uidv, uidn uint
 			parts = append(parts, fmt.Sprintf("UIDVALIDITY %d", uidv))
 		case "UNSEEN":
 			parts = append(parts, fmt.Sprintf("UNSEEN %d", unseen))
+		case "HIGHESTMODSEQ":
+			parts = append(parts, fmt.Sprintf("HIGHESTMODSEQ %d", highmodseq))
 		}
 	}
 	return strings.Join(parts, " ")
