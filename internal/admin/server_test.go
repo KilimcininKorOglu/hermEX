@@ -36,6 +36,9 @@ type fakeDir struct {
 	spamHistoryFound   bool
 	settings           directory.AntispamSettings
 	settingsFound      bool
+	avInbound          bool
+	avOutbound         bool
+	quarantine         []directory.QuarantineRecord
 	senderRules        []directory.SenderRule
 	greylistOn         bool
 	greylistTimings    directory.GreylistTimings
@@ -497,6 +500,14 @@ func (f *fakeDir) GetMessageSizeSettings() (directory.MessageSizeSettings, bool,
 func (f *fakeDir) SetMessageSizeSettings(s directory.MessageSizeSettings) error {
 	f.messageSize, f.messageSizeFound = s, true
 	return nil
+}
+func (f *fakeDir) GetDomainAVScan(string) (bool, bool, error) { return f.avInbound, f.avOutbound, nil }
+func (f *fakeDir) SetDomainAVScan(_ string, inbound, outbound bool) error {
+	f.avInbound, f.avOutbound = inbound, outbound
+	return nil
+}
+func (f *fakeDir) ListQuarantine([]int64, bool, int) ([]directory.QuarantineRecord, error) {
+	return f.quarantine, nil
 }
 func (f *fakeDir) GetSizeLimits() (directory.SizeLimits, bool, error) {
 	return f.sizeLimits, f.sizeLimitsFound, nil

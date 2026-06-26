@@ -1,0 +1,26 @@
+{{define "avquarantine.html"}}{{template "head" .}}
+<div class="layout">
+{{template "sidebar" .}}
+<main>
+<h1>Quarantine</h1>
+<p class="hint">Messages held because antivirus matched a signature. They were not delivered; the recipient and the domain and organization administrators were notified. A system administrator sees every held message, a domain administrator only their domains'.</p>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<table class="grid">
+<thead><tr><th>Held</th><th>Direction</th><th>From</th><th>Recipients</th><th>Subject</th><th>Signature</th><th>Status</th></tr></thead>
+<tbody>
+{{range .Items}}<tr>
+<td>{{.When}}</td>
+<td>{{.Direction}}</td>
+<td>{{.From}}</td>
+<td>{{.Recipients}}</td>
+<td>{{.Subject}}</td>
+<td>{{.Virus}}</td>
+<td>{{.Status}}</td>
+</tr>
+{{else}}<tr><td colspan="7" class="empty">No messages are held in quarantine.</td></tr>
+{{end}}
+</tbody>
+</table>
+</main>
+</div>
+{{template "foot" .}}{{end}}
