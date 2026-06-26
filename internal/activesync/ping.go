@@ -77,6 +77,15 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request, sess *sessio
 	}
 
 	deadline := time.Now().Add(heartbeat)
+	// Register the mailbox for a push wake before the first poll, so a change landing
+	// during the heartbeat wakes Ping at once. A nil waker (push disabled) leaves wake
+	// nil, and the loop runs on its cadence exactly as before.
+	var wake <-chan struct{}
+	if s.waker != nil {
+		ch, cancel := s.waker.Register(sess.mailbox)
+		defer cancel()
+		wake = ch
+	}
 	for {
 		if changed := s.pingCheck(sess.mailbox, dev, folderIDs); len(changed) > 0 {
 			writeWBXML(w, pingResponse(pingStatusChanges, changed))
@@ -87,7 +96,13 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request, sess *sessio
 			writeWBXML(w, pingResponse(pingStatusExpired, nil))
 			return
 		}
-		time.Sleep(min(pingPoll, remaining))
+		select {
+		case <-r.Context().Done():
+			return // device disconnected; nothing to write
+		case <-wake:
+			// a push wake — loop and pingCheck observes the change
+		case <-time.After(min(pingPoll, remaining)):
+		}
 		// Keep the long-held Ping visible in the live-session monitor.
 		s.touchSession(sess)
 	}

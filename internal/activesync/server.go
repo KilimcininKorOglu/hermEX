@@ -15,6 +15,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/easpolicy"
 	"hermex/internal/logging"
+	"hermex/internal/notify"
 	"hermex/internal/objectstore"
 	"hermex/internal/relay"
 	"hermex/internal/serve"
@@ -25,10 +26,22 @@ type Server struct {
 	auth     directory.Authenticator
 	accounts directory.Accounts
 	hostname string
-	Logger   *logging.Logger // central activity log; nil disables logging
-	Spool    *relay.Spool    // outbound relay queue; nil sends local-only
-	roots    *x509.CertPool  // S/MIME trust anchors for ValidateCert; nil = system roots
-	Sessions SessionRecorder // live-session telemetry sink; nil disables it
+	Logger   *logging.Logger  // central activity log; nil disables logging
+	Spool    *relay.Spool     // outbound relay queue; nil sends local-only
+	roots    *x509.CertPool   // S/MIME trust anchors for ValidateCert; nil = system roots
+	Sessions SessionRecorder  // live-session telemetry sink; nil disables it
+	waker    notify.Registrar // push wake source; nil keeps Ping on its poll cadence only
+}
+
+// SetNotify wires the push wake source so a held Ping wakes the instant the
+// mailbox changes rather than on its next cadence poll. A nil consumer (push
+// disabled) leaves Ping on its cadence — the degradation floor. The daemon calls
+// this once at startup, before serving.
+func (s *Server) SetNotify(c *notify.Consumer) {
+	if c == nil {
+		return
+	}
+	s.waker = c
 }
 
 // NewServer builds an ActiveSync server backed by the directory for
