@@ -20,6 +20,11 @@ var (
 	// (appointment) named properties: start/end, location, busy status, subtype,
 	// and sequence.
 	PsetidAppointment = GUID{Data1: 0x00062002, Data4: [8]byte{0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}}
+	// PsetidTask {00062003-0000-0000-C000-000000000046} holds the task named
+	// properties: status, percent complete, and the start/due/completed dates. One
+	// canonical model so a task is identical across webmail, ActiveSync, and a MAPI
+	// client (Outlook).
+	PsetidTask = GUID{Data1: 0x00062003, Data4: [8]byte{0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}}
 	// PsetidMeeting {6ED8DA90-450B-101B-98DA-00AA003F1305} holds meeting-object
 	// named properties such as the global object id (UID). Unlike the other
 	// namespaces it is NOT a member of the {...-C000-...-46} family — it is a
@@ -92,6 +97,22 @@ var (
 	// Reminder named properties (PSETID_Common) — VALARM maps here.
 	NameReminderDelta = PropertyName{Kind: MnidID, GUID: PsetidCommon, LID: 0x8501} // PtLong, minutes before start
 	NameReminderSet   = PropertyName{Kind: MnidID, GUID: PsetidCommon, LID: 0x8503} // PtBoolean
+	NameReminderTime  = PropertyName{Kind: MnidID, GUID: PsetidCommon, LID: 0x8502} // PtSysTime, when the reminder fires
+
+	// Common start/end (PSETID_Common) — a task's UTC start and due instants map
+	// here alongside the task-specific start/due, so a MAPI client and ActiveSync
+	// read the same times.
+	NameCommonStart = PropertyName{Kind: MnidID, GUID: PsetidCommon, LID: 0x8516} // PtSysTime
+	NameCommonEnd   = PropertyName{Kind: MnidID, GUID: PsetidCommon, LID: 0x8517} // PtSysTime
+
+	// Task named properties (PSETID_Task, MS-OXOTASK). The status/percent and the
+	// start/due/completed dates that make a task first-class to every protocol.
+	NameTaskStatus        = PropertyName{Kind: MnidID, GUID: PsetidTask, LID: 0x8101} // PtLong (0 not started .. 2 complete)
+	NamePercentComplete   = PropertyName{Kind: MnidID, GUID: PsetidTask, LID: 0x8102} // PtDouble (0.0 .. 1.0)
+	NameTaskStartDate     = PropertyName{Kind: MnidID, GUID: PsetidTask, LID: 0x8104} // PtSysTime
+	NameTaskDueDate       = PropertyName{Kind: MnidID, GUID: PsetidTask, LID: 0x8105} // PtSysTime
+	NameTaskDateCompleted = PropertyName{Kind: MnidID, GUID: PsetidTask, LID: 0x810F} // PtSysTime
+	NameTaskComplete      = PropertyName{Kind: MnidID, GUID: PsetidTask, LID: 0x811C} // PtBoolean
 
 	// Meeting named properties (PSETID_Meeting). The global object id carries the
 	// iCalendar UID; v1 keeps the UID as a string property instead (the wrapped
