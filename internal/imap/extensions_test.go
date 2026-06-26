@@ -1,6 +1,7 @@
 package imap
 
 import (
+	"encoding/base64"
 	"fmt"
 	"strings"
 	"testing"
@@ -161,4 +162,30 @@ func TestIMAPSpecialUse(t *testing.T) {
 			t.Errorf("LIST missing the SPECIAL-USE attribute %q in:\n%s", want, joined)
 		}
 	}
+}
+
+// TestIMAPAuthLogin covers the AUTHENTICATE LOGIN SASL mechanism: the base64
+// username/password challenge exchange, and AUTH=LOGIN in the capability list.
+func TestIMAPAuthLogin(t *testing.T) {
+	c, _ := startServer(t)
+	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "AUTH=LOGIN") {
+		t.Errorf("CAPABILITY missing AUTH=LOGIN: %s", caps)
+	}
+
+	enc := func(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
+	fmt.Fprintf(c.conn, "a1 AUTHENTICATE LOGIN\r\n")
+	if l := c.line(); l != "+ "+enc("Username:") {
+		t.Fatalf("username challenge = %q, want %q", l, "+ "+enc("Username:"))
+	}
+	fmt.Fprintf(c.conn, "%s\r\n", enc("alice"))
+	if l := c.line(); l != "+ "+enc("Password:") {
+		t.Fatalf("password challenge = %q, want %q", l, "+ "+enc("Password:"))
+	}
+	fmt.Fprintf(c.conn, "%s\r\n", enc("secret"))
+	if _, status := c.collect("a1"); status != "OK" {
+		t.Fatalf("AUTHENTICATE LOGIN status = %s, want OK", status)
+	}
+
+	// Authenticated: a TRANSACTION command now works.
+	c.mustOK("a2", "SELECT INBOX")
 }

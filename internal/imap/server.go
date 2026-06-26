@@ -24,7 +24,7 @@ import (
 // the lexer accepts non-synchronizing literals; AUTH=PLAIN because the server
 // implements the SASL PLAIN mechanism; IDLE (RFC 2177) because the server pushes
 // real-time mailbox updates while a client idles.
-const capabilities = "IMAP4rev1 LITERAL+ NAMESPACE AUTH=PLAIN IDLE CHILDREN ID UNSELECT UIDPLUS MOVE SPECIAL-USE"
+const capabilities = "IMAP4rev1 LITERAL+ NAMESPACE AUTH=PLAIN AUTH=LOGIN IDLE CHILDREN ID UNSELECT UIDPLUS MOVE SPECIAL-USE"
 
 // idlePollCadence is the fallback poll interval during IDLE when the push relay is
 // absent or a wake is missed — the degradation floor that keeps IDLE emitting
@@ -297,25 +297,30 @@ func (c *conn) cmdAuthenticate(tag string, args []token) {
 		c.no(tag, "already authenticated")
 		return
 	}
-	if len(args) < 1 || !args[0].isAtom("PLAIN") {
+	mech, _ := arg0(args)
+	switch strings.ToUpper(mech) {
+	case "PLAIN":
+		c.authPlain(tag, args)
+	case "LOGIN":
+		c.authLogin(tag, args)
+	default:
 		c.no(tag, "unsupported authentication mechanism")
-		return
 	}
+}
+
+// authPlain handles AUTHENTICATE PLAIN (RFC 4616): a base64 authzid NUL authcid
+// NUL passwd token, supplied inline as a SASL-IR or after a "+ " continuation.
+func (c *conn) authPlain(tag string, args []token) {
 	var resp string
 	if len(args) >= 2 {
-		resp, _ = args[1].str() // initial response
+		resp, _ = args[1].str() // initial response (SASL-IR)
 	} else {
-		c.bw.WriteString("+ \r\n")
-		c.flush()
-		line, err := c.rd.readLine()
-		if err != nil {
-			return
-		}
-		if line == "*" {
+		r, ok := c.saslChallenge("")
+		if !ok {
 			c.bad(tag, "authentication cancelled")
 			return
 		}
-		resp = line
+		resp = r
 	}
 	user, pass, ok := decodeSASLPlain(resp)
 	if !ok {
@@ -323,6 +328,50 @@ func (c *conn) cmdAuthenticate(tag string, args []token) {
 		return
 	}
 	c.finishAuth(tag, user, pass)
+}
+
+// authLogin handles AUTHENTICATE LOGIN: the server prompts (base64) for the
+// username then the password; the username may arrive inline as the SASL-IR.
+func (c *conn) authLogin(tag string, args []token) {
+	var u string
+	if len(args) >= 2 {
+		u, _ = args[1].str()
+	} else {
+		r, ok := c.saslChallenge("VXNlcm5hbWU6") // base64("Username:")
+		if !ok {
+			c.bad(tag, "authentication cancelled")
+			return
+		}
+		u = r
+	}
+	userBytes, err := base64.StdEncoding.DecodeString(u)
+	if err != nil {
+		c.bad(tag, "invalid base64")
+		return
+	}
+	p, ok := c.saslChallenge("UGFzc3dvcmQ6") // base64("Password:")
+	if !ok {
+		c.bad(tag, "authentication cancelled")
+		return
+	}
+	passBytes, err := base64.StdEncoding.DecodeString(p)
+	if err != nil {
+		c.bad(tag, "invalid base64")
+		return
+	}
+	c.finishAuth(tag, string(userBytes), string(passBytes))
+}
+
+// saslChallenge sends a "+ <challenge>" continuation and reads the client's base64
+// response line. A lone "*" cancels the exchange (ok=false).
+func (c *conn) saslChallenge(challenge string) (string, bool) {
+	fmt.Fprintf(c.bw, "+ %s\r\n", challenge)
+	c.flush()
+	line, err := c.rd.readLine()
+	if err != nil || line == "*" {
+		return "", false
+	}
+	return line, true
 }
 
 // decodeSASLPlain decodes a SASL PLAIN response: base64 of
