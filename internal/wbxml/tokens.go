@@ -22,6 +22,7 @@ const (
 	PageGetItemEstimate = 0x06
 	PageFolderHierarchy = 0x07
 	PageMeetingResponse = 0x08
+	PageTasks           = 0x09
 	PageResolveRecips   = 0x0A
 	PageValidateCert    = 0x0B
 	PagePing            = 0x0D
@@ -125,6 +126,43 @@ const (
 	CPicture              Tag = 0x013C
 	CAlias                Tag = 0x013D
 	CWeightedRank         Tag = 0x013E
+)
+
+// Tasks (code page 0x09, MS-ASTASK). The full field set; the recurrence sub-fields
+// (Recurrence..DeadOccur, OrdinalDate..FirstDayOfWeek) are defined so the codec
+// round-trips them, but their mapping is deferred. The 2.5 inline Body tokens are
+// carried under AirSyncBase in 12.0+.
+const (
+	TKCategories       Tag = 0x0908
+	TKCategory         Tag = 0x0909
+	TKComplete         Tag = 0x090A
+	TKDateCompleted    Tag = 0x090B
+	TKDueDate          Tag = 0x090C
+	TKUtcDueDate       Tag = 0x090D
+	TKImportance       Tag = 0x090E
+	TKRecurrence       Tag = 0x090F
+	TKRecurType        Tag = 0x0910
+	TKRecurStart       Tag = 0x0911
+	TKRecurUntil       Tag = 0x0912
+	TKRecurOccurrences Tag = 0x0913
+	TKRecurInterval    Tag = 0x0914
+	TKRecurDayOfMonth  Tag = 0x0915
+	TKRecurDayOfWeek   Tag = 0x0916
+	TKRecurWeekOfMonth Tag = 0x0917
+	TKRecurMonthOfYear Tag = 0x0918
+	TKRecurRegenerate  Tag = 0x0919
+	TKRecurDeadOccur   Tag = 0x091A
+	TKReminderSet      Tag = 0x091B
+	TKReminderTime     Tag = 0x091C
+	TKSensitivity      Tag = 0x091D
+	TKStartDate        Tag = 0x091E
+	TKUtcStartDate     Tag = 0x091F
+	TKSubject          Tag = 0x0920
+	TKOrdinalDate      Tag = 0x0922
+	TKSubOrdinalDate   Tag = 0x0923
+	TKCalendarType     Tag = 0x0924
+	TKIsLeapMonth      Tag = 0x0925
+	TKFirstDayOfWeek   Tag = 0x0926
 )
 
 // Email (code page 0x02). The pre-12.0 Attachment/Body tokens are omitted; 12.0+

@@ -322,24 +322,36 @@ func contactStr(pv mapi.PropertyValues, tag mapi.PropTag) string {
 }
 
 // isObjectFolder reports whether a folder's items live in the object store and are
-// versioned by change number (calendar, contacts) rather than the IMAP index.
+// versioned by change number (calendar, contacts, tasks) rather than the IMAP index.
 func isObjectFolder(folderID int64) bool {
-	return folderID == int64(mapi.PrivateFIDCalendar) || folderID == int64(mapi.PrivateFIDContacts)
+	switch folderID {
+	case int64(mapi.PrivateFIDCalendar), int64(mapi.PrivateFIDContacts), int64(mapi.PrivateFIDTasks):
+		return true
+	}
+	return false
 }
 
 // objectAppData returns the data-class renderer for an object folder's items.
 func objectAppData(folderID int64) func(*objectstore.Store, int64) (*wbxml.Node, error) {
-	if folderID == int64(mapi.PrivateFIDContacts) {
+	switch folderID {
+	case int64(mapi.PrivateFIDContacts):
 		return contactAppData
+	case int64(mapi.PrivateFIDTasks):
+		return taskAppData
+	default:
+		return calendarAppData
 	}
-	return calendarAppData
 }
 
 // applyObjectClientCommands dispatches a device's commands to the right object
 // folder's apply path.
 func applyObjectClientCommands(st *objectstore.Store, folderID int64, cstate *collectionState, c *wbxml.Node) []*wbxml.Node {
-	if folderID == int64(mapi.PrivateFIDContacts) {
+	switch folderID {
+	case int64(mapi.PrivateFIDContacts):
 		return applyContactClientCommands(st, cstate, c)
+	case int64(mapi.PrivateFIDTasks):
+		return applyTaskClientCommands(st, cstate, c)
+	default:
+		return applyCalendarClientCommands(st, cstate, c)
 	}
-	return applyCalendarClientCommands(st, cstate, c)
 }

@@ -25,6 +25,7 @@ const (
 	folderTypeDeleted    = 4
 	folderTypeSent       = 5
 	folderTypeOutbox     = 6
+	folderTypeTask       = 7
 	folderTypeCalendar   = 8
 	folderTypeContact    = 9
 	folderTypeUserMail   = 12
@@ -80,8 +81,8 @@ func (s *Server) handleFolderSync(w http.ResponseWriter, r *http.Request, sess *
 }
 
 // syncFolders lists the folders to expose to the device: the mail folders plus the
-// well-known Calendar and Contacts collections (the non-mail folders Sync can serve).
-// Other non-mail collections (tasks/notes) are skipped until Sync handles them.
+// well-known Calendar, Contacts, and Tasks collections (the non-mail folders Sync can
+// serve). Notes are skipped until Sync handles them.
 func syncFolders(st *objectstore.Store) ([]easFolder, error) {
 	list, err := st.ListFolders()
 	if err != nil {
@@ -121,6 +122,8 @@ func easFolderType(st *objectstore.Store, fid int64) (int, bool, error) {
 		return folderTypeCalendar, true, nil
 	case mapi.PrivateFIDContacts:
 		return folderTypeContact, true, nil
+	case mapi.PrivateFIDTasks:
+		return folderTypeTask, true, nil
 	}
 	props, err := st.GetFolderProperties(fid, mapi.PrContainerClass)
 	if err != nil {
