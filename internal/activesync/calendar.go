@@ -347,13 +347,14 @@ func boolStr(b bool) string {
 	return "0"
 }
 
-// calendarChanges diffs the calendar folder's stored appointments against the
-// device snapshot — keyed by object id -> change number, since calendar items
-// carry no IMAP flags — and builds the Add/Change/Delete commands, capped at the
-// window. A new id is an Add, a bumped change number a Change, a vanished id a
+// objectChanges diffs an object folder's stored items (calendar appointments or
+// contacts) against the device snapshot — keyed by object id -> change number, since
+// these items carry no IMAP flags — and builds the Add/Change/Delete commands, capped
+// at the window. A new id is an Add, a bumped change number a Change, a vanished id a
 // Delete; the snapshot records the change number of every item it sends, so a
-// capped-out item is re-detected on the next sync.
-func calendarChanges(st *objectstore.Store, folderID int64, cstate *collectionState, window int) ([]*wbxml.Node, bool, error) {
+// capped-out item is re-detected on the next sync. appData renders one item's
+// ApplicationData for the folder's data class.
+func objectChanges(st *objectstore.Store, folderID int64, cstate *collectionState, window int, appData func(*objectstore.Store, int64) (*wbxml.Node, error)) ([]*wbxml.Node, bool, error) {
 	objs, err := st.ListFolderObjects(folderID)
 	if err != nil {
 		return nil, false, err
@@ -397,12 +398,12 @@ func calendarChanges(st *objectstore.Store, folderID int64, cstate *collectionSt
 	for _, ch := range pending {
 		switch ch.kind {
 		case changeAdd, changeChange:
-			data, err := calendarAppData(st, ch.id)
+			data, err := appData(st, ch.id)
 			if err != nil {
 				return nil, false, err
 			}
 			if data == nil {
-				continue // not an appointment; nothing to stream
+				continue // not a renderable item of this data class; nothing to stream
 			}
 			tag := wbxml.ASAdd
 			if ch.kind == changeChange {

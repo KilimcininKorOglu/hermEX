@@ -15,6 +15,7 @@ func (t Tag) Token() byte { return byte(t) }
 // ActiveSync code pages (MS-ASWBXML). The page byte follows a SWITCH_PAGE.
 const (
 	PageAirSync         = 0x00
+	PageContacts        = 0x01
 	PageEmail           = 0x02
 	PageCalendar        = 0x04
 	PageMove            = 0x05
@@ -64,6 +65,66 @@ const (
 	ASConversationMode Tag = 0x0027
 	ASMaxItems         Tag = 0x0028
 	ASHeartbeatInt     Tag = 0x0029
+)
+
+// Contacts (code page 0x01, MS-ASCONTACTS). The full field set; the 2.5 inline
+// Body/BodySize/BodyTruncated/Rtf tokens are carried under AirSyncBase in 12.0+, so
+// only the contact data fields are defined here.
+const (
+	CAnniversary          Tag = 0x0105
+	CAssistantName        Tag = 0x0106
+	CAssistantPhoneNumber Tag = 0x0107
+	CBirthday             Tag = 0x0108
+	CBusiness2PhoneNumber Tag = 0x010C
+	CBusinessCity         Tag = 0x010D
+	CBusinessCountry      Tag = 0x010E
+	CBusinessPostalCode   Tag = 0x010F
+	CBusinessState        Tag = 0x0110
+	CBusinessStreet       Tag = 0x0111
+	CBusinessFaxNumber    Tag = 0x0112
+	CBusinessPhoneNumber  Tag = 0x0113
+	CCarPhoneNumber       Tag = 0x0114
+	CCategories           Tag = 0x0115
+	CCategory             Tag = 0x0116
+	CChildren             Tag = 0x0117
+	CChild                Tag = 0x0118
+	CCompanyName          Tag = 0x0119
+	CDepartment           Tag = 0x011A
+	CEmail1Address        Tag = 0x011B
+	CEmail2Address        Tag = 0x011C
+	CEmail3Address        Tag = 0x011D
+	CFileAs               Tag = 0x011E
+	CFirstName            Tag = 0x011F
+	CHome2PhoneNumber     Tag = 0x0120
+	CHomeCity             Tag = 0x0121
+	CHomeCountry          Tag = 0x0122
+	CHomePostalCode       Tag = 0x0123
+	CHomeState            Tag = 0x0124
+	CHomeStreet           Tag = 0x0125
+	CHomeFaxNumber        Tag = 0x0126
+	CHomePhoneNumber      Tag = 0x0127
+	CJobTitle             Tag = 0x0128
+	CLastName             Tag = 0x0129
+	CMiddleName           Tag = 0x012A
+	CMobilePhoneNumber    Tag = 0x012B
+	COfficeLocation       Tag = 0x012C
+	COtherCity            Tag = 0x012D
+	COtherCountry         Tag = 0x012E
+	COtherPostalCode      Tag = 0x012F
+	COtherState           Tag = 0x0130
+	COtherStreet          Tag = 0x0131
+	CPagerNumber          Tag = 0x0132
+	CRadioPhoneNumber     Tag = 0x0133
+	CSpouse               Tag = 0x0134
+	CSuffix               Tag = 0x0135
+	CTitle                Tag = 0x0136
+	CWebPage              Tag = 0x0137
+	CYomiCompanyName      Tag = 0x0138
+	CYomiFirstName        Tag = 0x0139
+	CYomiLastName         Tag = 0x013A
+	CPicture              Tag = 0x013C
+	CAlias                Tag = 0x013D
+	CWeightedRank         Tag = 0x013E
 )
 
 // Email (code page 0x02). The pre-12.0 Attachment/Body tokens are omitted; 12.0+

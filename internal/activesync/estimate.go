@@ -4,7 +4,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/wbxml"
 )
@@ -63,15 +62,16 @@ func (s *Server) handleGetItemEstimate(w http.ResponseWriter, r *http.Request, s
 			responses = append(responses, estimateResponse(collID, estimateStatusNotPrimed, 0))
 			continue
 		}
-		// The calendar collection is versioned by object change number, not the IMAP
-		// index, so its estimate must read the same object list Sync does.
-		if folderID == int64(mapi.PrivateFIDCalendar) {
+		// Object collections (calendar, contacts) are versioned by object change
+		// number, not the IMAP index, so their estimate must read the same object list
+		// Sync does.
+		if isObjectFolder(folderID) {
 			objs, err := st.ListFolderObjects(folderID)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			responses = append(responses, estimateResponse(collID, estimateStatusOK, calendarChangeCount(cstate.Items, objs)))
+			responses = append(responses, estimateResponse(collID, estimateStatusOK, objectChangeCount(cstate.Items, objs)))
 			continue
 		}
 		live, err := st.ListMessages(folderID)

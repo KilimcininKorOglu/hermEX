@@ -188,12 +188,12 @@ func collectionHasChanges(st *objectstore.Store, dev *deviceState, c *wbxml.Node
 	if clientKey != cstate.SyncKey {
 		return false // stale key: let the normal path return Status 3
 	}
-	if folderID == int64(mapi.PrivateFIDCalendar) {
+	if isObjectFolder(folderID) {
 		objs, err := st.ListFolderObjects(folderID)
 		if err != nil {
 			return false
 		}
-		return calendarObjsDiffer(cstate.Items, objs)
+		return objectsDiffer(cstate.Items, objs)
 	}
 	live, err := st.ListMessages(folderID)
 	if err != nil {
@@ -202,10 +202,10 @@ func collectionHasChanges(st *objectstore.Store, dev *deviceState, c *wbxml.Node
 	return len(diffSnapshot(cstate.Items, live)) > 0
 }
 
-// calendarObjsDiffer reports whether a calendar folder's objects differ from the
-// device snapshot (an add, a change-number bump, or a delete) — the read-only
-// counterpart of calendarChanges' diff.
-func calendarObjsDiffer(snap map[string]int64, objs []objectstore.FolderObject) bool {
+// objectsDiffer reports whether an object folder's items differ from the device
+// snapshot (an add, a change-number bump, or a delete) — the read-only counterpart
+// of objectChanges' diff.
+func objectsDiffer(snap map[string]int64, objs []objectstore.FolderObject) bool {
 	live := make(map[string]bool, len(objs))
 	for _, o := range objs {
 		sid := strconv.FormatInt(o.ID, 10)
@@ -222,10 +222,10 @@ func calendarObjsDiffer(snap map[string]int64, objs []objectstore.FolderObject) 
 	return false
 }
 
-// calendarChangeCount counts how many of a calendar folder's objects differ from
-// the device snapshot — adds, change-number bumps, and deletes — the
-// GetItemEstimate counterpart of calendarChanges' diff.
-func calendarChangeCount(snap map[string]int64, objs []objectstore.FolderObject) int {
+// objectChangeCount counts how many of an object folder's items differ from the
+// device snapshot — adds, change-number bumps, and deletes — the GetItemEstimate
+// counterpart of objectChanges' diff.
+func objectChangeCount(snap map[string]int64, objs []objectstore.FolderObject) int {
 	count := 0
 	live := make(map[string]bool, len(objs))
 	for _, o := range objs {
@@ -328,14 +328,14 @@ func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node) (*wb
 		cstate.Items = map[string]int64{}
 	}
 
-	// Calendar collections take a separate path: their items are read from the
-	// object store (never the IMAP index) and versioned by change number, not IMAP
-	// flags. The device's Change/Delete edits are applied first (folded into the
-	// snapshot so they are not echoed back), then server-side changes are streamed.
-	// Client-side adds (server-id mapping) and recurrence edits are later increments.
-	if folderID == int64(mapi.PrivateFIDCalendar) {
-		responses := applyCalendarClientCommands(st, cstate, c)
-		cmds, more, err := calendarChanges(st, folderID, cstate, window)
+	// Object collections (calendar, contacts) take a separate path: their items are
+	// read from the object store (never the IMAP index) and versioned by change
+	// number, not IMAP flags. The device's Add/Change/Delete edits are applied first
+	// (folded into the snapshot so they are not echoed back), then server-side changes
+	// are streamed through the folder's data-class renderer.
+	if isObjectFolder(folderID) {
+		responses := applyObjectClientCommands(st, folderID, cstate, c)
+		cmds, more, err := objectChanges(st, folderID, cstate, window, objectAppData(folderID))
 		if err != nil {
 			return nil, err
 		}

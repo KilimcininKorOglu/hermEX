@@ -382,6 +382,14 @@ const (
 	PrBusinessFaxNumber        = PropTag(0x3A24001F) // PtUnicode
 	PrHomeFaxNumber            = PropTag(0x3A25001F) // PtUnicode
 	PrHome2TelephoneNumber     = PropTag(0x3A2F001F) // PtUnicode
+	PrRadioTelephoneNumber     = PropTag(0x3A1D001F) // PtUnicode (PidTagRadioTelephoneNumber)
+	PrAssistantTelephoneNumber = PropTag(0x3A2E001F) // PtUnicode (PidTagAssistantTelephoneNumber)
+
+	// Personal/professional contact details.
+	PrAssistant          = PropTag(0x3A30001F) // PtUnicode (PidTagAssistant)
+	PrSpouseName         = PropTag(0x3A48001F) // PtUnicode (PidTagSpouseName)
+	PrWeddingAnniversary = PropTag(0x3A410040) // PtSysTime (PidTagWeddingAnniversary)
+	PrChildrensNames     = PropTag(0x3A58101F) // PtMultipleUnicode (PidTagChildrensNames)
 
 	// Home postal address.
 	PrHomeAddressStreet          = PropTag(0x3A5D001F) // PtUnicode
