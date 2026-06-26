@@ -45,6 +45,19 @@ type Server struct {
 	streamWindow   time.Duration
 
 	waker notify.Registrar // push wake source; nil keeps streaming on its interval only
+
+	// Push-subscription (MS-OXWSNTIF) outbound callback delivery. pushHTTP is the
+	// SSRF-guarded client built once on first use; pushAllowInternal disables the
+	// IP-range block for an internal/dev deployment whose callbacks are not public.
+	pushOnce          sync.Once
+	pushHTTP          *http.Client
+	pushAllowInternal bool
+}
+
+// ensurePushClient builds the SSRF-guarded push callback client once, reading
+// pushAllowInternal at that point.
+func (s *Server) ensurePushClient() {
+	s.pushOnce.Do(func() { s.pushHTTP = pushClient(s.pushAllowInternal) })
 }
 
 // SetNotify wires the push wake source so a held GetStreamingEvents emits a

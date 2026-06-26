@@ -30,6 +30,15 @@ type ewsSubscription struct {
 	created    time.Time
 	timeout    time.Duration              // from the SubscriptionId
 	snap       map[int64]map[int64]uint64 // folderID → (messageID → change number)
+
+	// Push-subscription fields (MS-OXWSNTIF PushSubscriptionRequest). A push sub
+	// has no client poll: a background worker POSTs SendNotification to callbackURL
+	// on a change (or every statusFreq as a heartbeat). done is closed when the
+	// subscription is dropped, stopping the worker.
+	push        bool
+	callbackURL string
+	statusFreq  time.Duration
+	done        chan struct{}
 }
 
 // eventWants records which producible event types a subscription wants. The poll
@@ -56,11 +65,9 @@ const (
 // --- request types ---
 
 type subscribeRequest struct {
-	Pull      *subscriptionReq `xml:"PullSubscriptionRequest"`
-	Streaming *subscriptionReq `xml:"StreamingSubscriptionRequest"`
-	// PushSubscriptionRequest is intentionally not parsed: hermEX serves no
-	// outbound push callback, so a push Subscribe falls through to the
-	// unsupported-type fault below.
+	Pull      *subscriptionReq     `xml:"PullSubscriptionRequest"`
+	Streaming *subscriptionReq     `xml:"StreamingSubscriptionRequest"`
+	Push      *pushSubscriptionReq `xml:"PushSubscriptionRequest"`
 }
 
 type subscriptionReq struct {
@@ -70,6 +77,19 @@ type subscriptionReq struct {
 		Types []string `xml:"EventType"`
 	} `xml:"EventTypes"`
 	Timeout int `xml:"Timeout"` // pull only, minutes
+}
+
+// pushSubscriptionReq is a PushSubscriptionRequest (MS-OXWSNTIF): the common
+// subscription fields plus the client callback URL the server POSTs to and the
+// heartbeat frequency (minutes).
+type pushSubscriptionReq struct {
+	SubscribeToAllFolders bool       `xml:"SubscribeToAllFolders,attr"`
+	FolderIDs             folderRefs `xml:"FolderIds"`
+	EventTypes            struct {
+		Types []string `xml:"EventType"`
+	} `xml:"EventTypes"`
+	StatusFrequency int    `xml:"StatusFrequency"` // minutes; heartbeat / fallback poll interval
+	URL             string `xml:"URL"`             // client callback web service location
 }
 
 type unsubscribeRequest struct {
@@ -140,6 +160,10 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, inner []byte, sess *sess
 	var req subscribeRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
 		writeSOAPFault(w, "ErrorInvalidRequest", "Subscribe: "+err.Error())
+		return
+	}
+	if req.Push != nil {
+		s.handlePushSubscribe(w, req.Push, sess)
 		return
 	}
 	sub, streaming := req.Pull, false
@@ -254,7 +278,9 @@ func (s *Server) registerSubscription(sess *session, streaming, allFolders bool,
 }
 
 // removeSubscription drops a subscription, reporting false when it is absent or
-// owned by another user (both surface as ErrorSubscriptionNotFound).
+// owned by another user (both surface as ErrorSubscriptionNotFound). A push
+// subscription's done channel is closed so its worker stops; closing happens once,
+// under the lock, only when the entry is actually removed.
 func (s *Server) removeSubscription(id, user string) bool {
 	s.subMu.Lock()
 	defer s.subMu.Unlock()
@@ -263,6 +289,9 @@ func (s *Server) removeSubscription(id, user string) bool {
 		return false
 	}
 	delete(s.subs, id)
+	if sub.done != nil {
+		close(sub.done)
+	}
 	return true
 }
 
