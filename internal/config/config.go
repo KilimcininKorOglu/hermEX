@@ -186,3 +186,11 @@ func (c *Config) AntispamModelPath() string {
 func (c *Config) AntispamRulesPath() string {
 	return filepath.Join(c.DataDir, "antispam-rules.cf")
 }
+
+// QuarantinePath is where the antivirus scanner stores a held message's raw
+// bytes: {DataDir}/quarantine/{id}.eml. The directory records only the metadata
+// the admin panel lists; the MTA writes the eml here and the panel reads it back
+// by id, so both derive the path through this one helper.
+func (c *Config) QuarantinePath(id int64) string {
+	return filepath.Join(c.DataDir, "quarantine", fmt.Sprintf("%d.eml", id))
+}
