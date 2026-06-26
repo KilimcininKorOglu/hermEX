@@ -389,40 +389,50 @@ func (c *conn) cmdAppend(tag string, args []token) {
 		return
 	}
 	mailbox, _ := args[0].str()
-	rest := args[1:]
-
-	flags, rest := appendFlags(rest)
-	date, rest := appendDate(rest)
-	if len(rest) < 1 {
-		c.bad(tag, "APPEND requires a message literal")
-		return
-	}
-	msg, ok := rest[0].str()
-	if !ok {
-		c.bad(tag, "APPEND message must be a literal")
-		return
-	}
-
 	destStore, destFID, ok, errText := c.resolveAppendDest(mailbox)
 	if !ok {
 		c.no(tag, errText)
 		return
 	}
-	info, err := destStore.AppendMessage(destFID, []byte(msg), date, flags)
-	if err != nil {
-		c.no(tag, "APPEND failed")
+
+	// MULTIAPPEND (RFC 3502): one APPEND may carry several (flags? date? message)
+	// groups. Append each; if any fails, roll back the ones already stored so the
+	// command is atomic.
+	rest := args[1:]
+	var uids []uint32
+	for len(rest) > 0 {
+		flags, r2 := appendFlags(rest)
+		date, r3 := appendDate(r2)
+		if len(r3) < 1 || !r3[0].literal {
+			c.bad(tag, "APPEND requires a message literal")
+			return
+		}
+		info, err := destStore.AppendMessage(destFID, []byte(r3[0].val), date, flags)
+		if err != nil {
+			for _, u := range uids {
+				destStore.SoftDeleteMessage(destFID, u)
+			}
+			c.no(tag, "APPEND failed")
+			return
+		}
+		uids = append(uids, info.UID)
+		rest = r3[1:]
+	}
+	if len(uids) == 0 {
+		c.bad(tag, "APPEND requires a message literal")
 		return
 	}
+
 	// Surface the new count only when the destination IS the selected folder. Folder
 	// ids are not unique across the own and public stores, so the selection's store
 	// and id must both match — comparing ids alone would falsely fire across stores.
 	if c.state == stateSelected && c.curStore() == destStore && c.sel.id == destFID {
 		c.poll()
 	}
-	// UIDPLUS (RFC 4315): report the assigned UID so the client need not search for
-	// the message it just uploaded.
+	// UIDPLUS (RFC 4315): report the assigned UID(s) so the client need not search
+	// for the messages it just uploaded.
 	uidv, _ := destStore.UIDValidity(destFID)
-	c.ok(tag, fmt.Sprintf("[APPENDUID %d %d] APPEND completed", uidv, info.UID))
+	c.ok(tag, fmt.Sprintf("[APPENDUID %d %s] APPEND completed", uidv, uidList(uids)))
 }
 
 // appendFlags consumes an optional leading parenthesized flag list, returning

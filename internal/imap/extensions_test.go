@@ -228,3 +228,60 @@ func TestIMAPQuota(t *testing.T) {
 		t.Errorf("SETQUOTA = %s, want NO (not permitted for a client)", status)
 	}
 }
+
+// TestIMAPESearch covers ESEARCH (RFC 4731): SEARCH RETURN (...) yields an ESEARCH
+// response with only the requested result options.
+func TestIMAPESearch(t *testing.T) {
+	c, _ := startServer(t)
+	c.mustOK("a1", "LOGIN alice secret")
+	c.mustOK("a2", "SELECT INBOX") // two messages, seq 1 and 2
+
+	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "ESEARCH") {
+		t.Errorf("CAPABILITY missing ESEARCH: %s", caps)
+	}
+
+	un, status := c.do("a3", "SEARCH RETURN (MIN MAX COUNT ALL) ALL")
+	if status != "OK" {
+		t.Fatalf("ESEARCH status = %s, want OK", status)
+	}
+	joined := strings.Join(un, " ")
+	if !strings.Contains(joined, "ESEARCH") {
+		t.Fatalf("want an ESEARCH response, got %v", un)
+	}
+	for _, want := range []string{"COUNT 2", "MIN 1", "MAX 2", "ALL 1:2"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("ESEARCH missing %q in %q", want, joined)
+		}
+	}
+}
+
+// TestIMAPMultiAppend covers MULTIAPPEND (RFC 3502): one APPEND carrying two
+// message literals stores both and reports a uid-set in APPENDUID.
+func TestIMAPMultiAppend(t *testing.T) {
+	c, _ := startServer(t)
+	c.mustOK("a1", "LOGIN alice secret")
+	c.mustOK("a2", "SELECT INBOX") // two messages already
+
+	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "MULTIAPPEND") {
+		t.Errorf("CAPABILITY missing MULTIAPPEND: %s", caps)
+	}
+
+	m1, m2 := "Subject: m1\r\n\r\nb1", "Subject: m2\r\n\r\nb2"
+	fmt.Fprintf(c.conn, "a3 APPEND INBOX {%d}\r\n", len(m1))
+	if l := c.line(); !strings.HasPrefix(l, "+") {
+		t.Fatalf("first continuation = %q, want +", l)
+	}
+	fmt.Fprintf(c.conn, "%s {%d}\r\n", m1, len(m2))
+	if l := c.line(); !strings.HasPrefix(l, "+") {
+		t.Fatalf("second continuation = %q, want +", l)
+	}
+	fmt.Fprintf(c.conn, "%s\r\n", m2)
+	if a3 := c.collectTagged("a3"); !strings.Contains(a3, "[APPENDUID ") {
+		t.Errorf("MULTIAPPEND = %q, want an [APPENDUID ...] response code", a3)
+	}
+
+	// Both messages landed: the two originals plus the two appended.
+	if got := strings.Join(c.mustOK("a4", "SELECT INBOX"), " "); !strings.Contains(got, "4 EXISTS") {
+		t.Errorf("after MULTIAPPEND, INBOX = %q, want 4 EXISTS", got)
+	}
+}

@@ -3,6 +3,7 @@ package imap
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"net/mail"
 	"net/textproto"
 	"strconv"
@@ -62,6 +63,8 @@ func (c *conn) cmdSearch(tag string, args []token, byUID bool) {
 		return
 	}
 	cur := &tokenCursor{toks: args}
+	// An optional RETURN (...) clause (RFC 4731 ESEARCH) precedes any CHARSET.
+	returnOpts, hasReturn := parseReturnOpts(cur)
 	// An optional CHARSET specifier precedes the keys; we accept and ignore it.
 	if t, ok := cur.peek(); ok && t.isAtom("CHARSET") {
 		cur.next()
@@ -83,7 +86,9 @@ func (c *conn) cmdSearch(tag string, args []token, byUID bool) {
 			}
 		}
 	}
-	if len(results) == 0 {
+	if hasReturn {
+		c.writeESearch(tag, byUID, returnOpts, results)
+	} else if len(results) == 0 {
 		c.untagged("SEARCH")
 	} else {
 		c.untagged("SEARCH %s", ids(results))
@@ -93,6 +98,84 @@ func (c *conn) cmdSearch(tag string, args []token, byUID bool) {
 		verb = "UID SEARCH"
 	}
 	c.ok(tag, verb+" completed")
+}
+
+// parseReturnOpts consumes an RFC 4731 "RETURN (opt ...)" clause if present,
+// returning the uppercased option names. An empty list defaults to ALL.
+func parseReturnOpts(cur *tokenCursor) (opts []string, present bool) {
+	t, ok := cur.peek()
+	if !ok || !t.isAtom("RETURN") {
+		return nil, false
+	}
+	cur.next() // RETURN
+	open, ok := cur.next()
+	if !ok || open.kind != tLParen {
+		return nil, true // malformed; treated as ESEARCH with default options
+	}
+	for {
+		t, ok := cur.next()
+		if !ok || t.kind == tRParen {
+			break
+		}
+		opts = append(opts, strings.ToUpper(t.val))
+	}
+	if len(opts) == 0 {
+		opts = []string{"ALL"}
+	}
+	return opts, true
+}
+
+// writeESearch emits the RFC 4731 ESEARCH response, including only the requested
+// result options. MIN/MAX/ALL are omitted when there are no matches; COUNT is
+// always reportable.
+func (c *conn) writeESearch(tag string, byUID bool, opts []string, results []uint32) {
+	want := func(o string) bool {
+		for _, x := range opts {
+			if x == o {
+				return true
+			}
+		}
+		return false
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "ESEARCH (TAG %s)", quoteString(tag))
+	if byUID {
+		sb.WriteString(" UID")
+	}
+	if want("COUNT") {
+		fmt.Fprintf(&sb, " COUNT %d", len(results))
+	}
+	if len(results) > 0 {
+		if want("MIN") {
+			fmt.Fprintf(&sb, " MIN %d", results[0])
+		}
+		if want("MAX") {
+			fmt.Fprintf(&sb, " MAX %d", results[len(results)-1])
+		}
+		if want("ALL") {
+			fmt.Fprintf(&sb, " ALL %s", esearchSet(results))
+		}
+	}
+	c.untagged("%s", sb.String())
+}
+
+// esearchSet compresses an ascending id list into an IMAP sequence-set, collapsing
+// consecutive runs into ranges (e.g. 2,4:7,9).
+func esearchSet(ns []uint32) string {
+	var parts []string
+	for i := 0; i < len(ns); {
+		j := i
+		for j+1 < len(ns) && ns[j+1] == ns[j]+1 {
+			j++
+		}
+		if i == j {
+			parts = append(parts, fmt.Sprintf("%d", ns[i]))
+		} else {
+			parts = append(parts, fmt.Sprintf("%d:%d", ns[i], ns[j]))
+		}
+		i = j + 1
+	}
+	return strings.Join(parts, ",")
 }
 
 // parseSearchKeys parses a sequence of search keys joined by implicit AND, up to
