@@ -1,10 +1,12 @@
-// Package pop3 implements a minimal RFC 1939 POP3 retrieval server backed by
-// the mailbox store. It authenticates with USER/PASS through a
-// directory.Authenticator and serves a login-time snapshot of the INBOX.
+// Package pop3 implements an RFC 1939 POP3 retrieval server backed by the mailbox
+// store, with the CAPA extension mechanism (RFC 2449), STLS (RFC 2595), and UTF8 +
+// LANG (RFC 6856). It authenticates with USER/PASS through a directory.Authenticator
+// and serves a login-time snapshot of the INBOX.
 package pop3
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -87,6 +89,17 @@ func (s *Server) handle(conn net.Conn) {
 		// (PASS's argument is the password).
 		event(logging.LevelDebug, "command", logging.Fields{"cmd": cmd})
 
+		// CAPA (RFC 2449) and LANG (RFC 6856) are valid in both the AUTHORIZATION
+		// and TRANSACTION states, so handle them before the state split.
+		switch cmd {
+		case "CAPA":
+			s.writeCapa(w, isTLS)
+			continue
+		case "LANG":
+			writeLang(w, arg)
+			continue
+		}
+
 		if mb == nil { // AUTHORIZATION state
 			switch cmd {
 			case "USER":
@@ -97,26 +110,30 @@ func (s *Server) handle(conn net.Conn) {
 				if user == "" || !authed {
 					event(logging.LevelWarn, "auth.fail", nil) // attempted login still in user
 					user = ""
-					errLine(w, "authentication failed")
+					errLine(w, "[AUTH] authentication failed")
 					continue
 				}
 				if privs, _ := s.Auth.Privileges(user); !privs.POP3IMAP {
 					event(logging.LevelWarn, "auth.denied", logging.Fields{"service": "pop3imap"})
 					user = ""
-					errLine(w, "POP3/IMAP access is disabled for this account")
+					errLine(w, "[AUTH] POP3/IMAP access is disabled for this account")
 					continue
 				}
 				m, err := openMailbox(path)
 				if err != nil {
 					s.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.POP3, Name: "auth.fail", User: user, RemoteAddr: conn.RemoteAddr().String(), Err: err.Error()})
-					errLine(w, "mailbox unavailable")
+					errLine(w, "[SYS/TEMP] mailbox unavailable")
 					continue
 				}
 				mb = m
 				event(logging.LevelInfo, "auth.ok", nil)
 				ok(w, fmt.Sprintf("%d messages", mb.count()))
-			case "CAPA":
-				s.writeCapa(w, isTLS)
+			case "UTF8":
+				// RFC 6856: enter UTF-8 mode (valid only in AUTHORIZATION). hermEX
+				// serves the stored message bytes verbatim and never downgrades, so
+				// this is an acknowledgment with no behavior change.
+				ok(w, "UTF-8 mode enabled")
+				event(logging.LevelInfo, "utf8", nil)
 			case "STLS":
 				if s.TLSConfig == nil || isTLS {
 					errLine(w, "STLS not available")
@@ -154,6 +171,8 @@ func (s *Server) handle(conn net.Conn) {
 			mb.list(w, arg, false)
 		case "UIDL":
 			mb.list(w, arg, true)
+		case "TOP":
+			mb.top(w, arg)
 		case "RETR":
 			mb.retr(w, arg)
 		case "DELE":
@@ -266,12 +285,69 @@ func (mb *mailbox) retr(w *bufio.Writer, arg string) {
 	}
 	raw, err := mb.st.GetMessageRaw(mb.folder, mb.msgs[n-1].UID)
 	if err != nil {
-		errLine(w, "retrieval failed")
+		errLine(w, "[SYS/TEMP] retrieval failed")
 		return
 	}
 	fmt.Fprintf(w, "+OK %d octets\r\n", len(raw))
 	writeDotStuffed(w, raw)
 	w.Flush()
+}
+
+// top implements RFC 1939 TOP: it writes a message's full headers plus the first
+// n lines of its body (n >= 0), dot-stuffed and terminated like RETR. It does not
+// mark the message and is valid only in the TRANSACTION state.
+func (mb *mailbox) top(w *bufio.Writer, arg string) {
+	fields := strings.Fields(arg)
+	if len(fields) != 2 {
+		errLine(w, "TOP requires a message number and a line count")
+		return
+	}
+	n, valid := mb.index(fields[0])
+	if !valid {
+		errLine(w, "no such message")
+		return
+	}
+	lines, err := strconv.Atoi(fields[1])
+	if err != nil || lines < 0 {
+		errLine(w, "invalid line count")
+		return
+	}
+	raw, err := mb.st.GetMessageRaw(mb.folder, mb.msgs[n-1].UID)
+	if err != nil {
+		errLine(w, "[SYS/TEMP] retrieval failed")
+		return
+	}
+	ok(w, "")
+	writeDotStuffed(w, topBytes(raw, lines))
+	w.Flush()
+}
+
+// topBytes returns a message's header block (up to and including the blank line
+// that separates headers from body) plus the first n lines of the body. A message
+// with no header/body separator is returned whole as headers.
+func topBytes(data []byte, n int) []byte {
+	sep := []byte("\r\n\r\n")
+	idx := bytes.Index(data, sep)
+	if idx < 0 {
+		return data // no body separator: all headers
+	}
+	head := data[:idx+len(sep)]
+	body := data[idx+len(sep):]
+	out := make([]byte, 0, len(head)+len(body))
+	out = append(out, head...)
+	count, start := 0, 0
+	for i := 0; i < len(body) && count < n; i++ {
+		if body[i] == '\n' {
+			out = append(out, body[start:i+1]...)
+			start = i + 1
+			count++
+		}
+	}
+	// A trailing partial line (no final newline) counts toward the line budget.
+	if count < n && start < len(body) {
+		out = append(out, body[start:]...)
+	}
+	return out
 }
 
 func (mb *mailbox) dele(w *bufio.Writer, arg string) {
@@ -312,16 +388,48 @@ func writeDotStuffed(w *bufio.Writer, data []byte) {
 	w.WriteString(".\r\n")
 }
 
-// writeCapa emits the RFC 2449 CAPA list, advertising STLS (RFC 2595) only when
-// a TLS config is present and the link is not already encrypted.
+// writeCapa emits the RFC 2449 CAPA list. It advertises every optional command and
+// extension hermEX supports: TOP (RFC 1939), UIDL, RESP-CODES + LOGIN-DELAY + EXPIRE
+// + PIPELINING + IMPLEMENTATION (RFC 2449), UTF8 + LANG (RFC 6856), and STLS (RFC
+// 2595) only when a TLS config is present and the link is not already encrypted.
 func (s *Server) writeCapa(w *bufio.Writer, isTLS bool) {
-	w.WriteString("+OK capabilities follow\r\n")
+	w.WriteString("+OK Capability list follows\r\n")
+	w.WriteString("TOP\r\n")
 	w.WriteString("USER\r\n")
+	w.WriteString("UIDL\r\n")
+	w.WriteString("PIPELINING\r\n")
+	w.WriteString("RESP-CODES\r\n")
+	w.WriteString("LOGIN-DELAY 0\r\n")
+	w.WriteString("EXPIRE NEVER\r\n")
+	w.WriteString("UTF8\r\n")
+	w.WriteString("LANG\r\n")
 	if s.TLSConfig != nil && !isTLS {
 		w.WriteString("STLS\r\n")
 	}
+	w.WriteString("IMPLEMENTATION hermEX\r\n")
 	w.WriteString(".\r\n")
 	w.Flush()
+}
+
+// writeLang answers the RFC 6856 LANG command. With no argument it lists the
+// supported languages; with a basic language range matching "en" (or "*" for the
+// default) it selects English. hermEX only emits English response text, so any
+// other range is refused.
+func writeLang(w *bufio.Writer, arg string) {
+	arg = strings.TrimSpace(arg)
+	if arg == "" {
+		w.WriteString("+OK Language listing follows:\r\n")
+		w.WriteString("en English\r\n")
+		w.WriteString(".\r\n")
+		w.Flush()
+		return
+	}
+	low := strings.ToLower(arg)
+	if arg == "*" || low == "en" || strings.HasPrefix(low, "en-") {
+		ok(w, "en Responses will be in English")
+		return
+	}
+	errLine(w, "invalid language, only en is available")
 }
 
 func ok(w *bufio.Writer, msg string) {
