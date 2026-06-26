@@ -22,6 +22,7 @@ import (
 	"hermex/internal/ldapauth"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
+	"hermex/internal/notify"
 	"hermex/internal/objectstore"
 	"hermex/internal/publicfolder"
 	"hermex/internal/serve"
@@ -59,7 +60,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("hermex-imap: listen %s: %v", addr, err)
 	}
+	// Push notifications: publish this daemon's own mailbox writes, and subscribe so
+	// an IDLE-ing client wakes the instant its mailbox changes instead of on the IDLE
+	// poll cadence. No-ops when notify_url is empty.
+	notify.EnableProducer(cfg.NotifyURL, cfg.NotifySecret, logger)
+
 	srv := &imap.Server{Auth: dir, Hostname: cfg.Hostname, Logger: logger, Pub: publicfolder.New(cfg)}
+	srv.SetNotify(notify.EnableConsumer(cfg.NotifyURL, cfg.NotifySecret, logger))
 	// IMAP literal size cap: read at startup and re-read every minute so an admin's
 	// change applies without a restart; 0 keeps the built-in default.
 	applyIMAPSizeLimit(dir.GetSizeLimits, srv.SetMaxLiteralSize)

@@ -9,18 +9,26 @@ import (
 	"net"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"hermex/internal/directory"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
+	"hermex/internal/notify"
 	"hermex/internal/objectstore"
 	"hermex/internal/publicfolder"
 )
 
 // capabilities is the untagged CAPABILITY list. LITERAL+ is advertised because
 // the lexer accepts non-synchronizing literals; AUTH=PLAIN because the server
-// implements the SASL PLAIN mechanism.
-const capabilities = "IMAP4rev1 LITERAL+ NAMESPACE AUTH=PLAIN"
+// implements the SASL PLAIN mechanism; IDLE (RFC 2177) because the server pushes
+// real-time mailbox updates while a client idles.
+const capabilities = "IMAP4rev1 LITERAL+ NAMESPACE AUTH=PLAIN IDLE"
+
+// idlePollCadence is the fallback poll interval during IDLE when the push relay is
+// absent or a wake is missed — the degradation floor that keeps IDLE emitting
+// updates on time even with no push.
+const idlePollCadence = 30 * time.Second
 
 // connState is the IMAP connection state (RFC 3501 §3).
 type connState int
@@ -46,7 +54,20 @@ type Server struct {
 	// SetMaxLiteralSize; readLiteral reads it live.
 	maxLiteral atomic.Int64
 
+	waker notify.Registrar // push wake source for IDLE; nil keeps IDLE on its poll cadence only
+
 	conns lifecycle.ConnGroup
+}
+
+// SetNotify wires the push wake source so an IDLE-ing client receives untagged
+// updates the instant its mailbox changes rather than on the IDLE poll cadence. A
+// nil consumer (push disabled) leaves IDLE on its cadence — the degradation floor.
+// The daemon calls this once at startup, before serving.
+func (s *Server) SetNotify(c *notify.Consumer) {
+	if c == nil {
+		return
+	}
+	s.waker = c
 }
 
 // SetMaxLiteralSize sets the maximum accepted IMAP literal in bytes (0 restores the
@@ -180,6 +201,8 @@ func (c *conn) dispatch(toks []token) {
 	case "NOOP":
 		c.poll()
 		c.ok(tag, "NOOP completed")
+	case "IDLE":
+		c.cmdIdle(tag)
 	case "LOGOUT":
 		c.untagged("BYE hermEX IMAP logging out")
 		c.state = stateLogout
@@ -744,6 +767,61 @@ func (c *conn) poll() {
 		c.untagged("0 RECENT")
 	}
 	c.sel = fresh
+}
+
+// cmdIdle implements IMAP IDLE (RFC 2177): it acknowledges with a continuation,
+// then pushes untagged mailbox updates (EXISTS/EXPUNGE/RECENT, via poll) to the
+// client until the client ends the command with DONE. A push wake surfaces a change
+// at once; a fallback cadence covers a missing relay. The client MUST NOT send
+// anything but DONE while idling (RFC 2177), so a single goroutine does the one
+// blocking read for the terminating line — a raw line read off the same buffered
+// reader, which writes nothing, so it cannot race the main loop's untagged writes.
+// No SetReadDeadline is used: a deadline firing mid-line would leave the reader in
+// an unresumable partial state, and the command loop must keep reading on it after
+// IDLE ends.
+func (c *conn) cmdIdle(tag string) {
+	if c.state != stateSelected || c.sel == nil {
+		c.bad(tag, "IDLE requires a selected mailbox")
+		return
+	}
+	// Continuation request: tell the client we are idling (RFC 2177 §3).
+	c.bw.WriteString("+ idling\r\n")
+	c.flush()
+
+	// Register a push wake for the selected mailbox before idling. A nil waker (push
+	// disabled) leaves wake nil, and IDLE runs on its cadence only.
+	var wake <-chan struct{}
+	if c.srv.waker != nil {
+		ch, cancel := c.srv.waker.Register(c.curStore().Dir())
+		defer cancel()
+		wake = ch
+	}
+
+	// One goroutine blocks on the terminating line; the client sends only DONE while
+	// idling, so any line (or a read error/EOF on disconnect) ends the command.
+	done := make(chan struct{})
+	go func() {
+		_, _ = c.rd.br.ReadString('\n')
+		close(done)
+	}()
+
+	for {
+		select {
+		case <-done:
+			// DONE (or the client dropped): flush any pending untagged, then the tagged
+			// response. The command loop resumes reading on the same reader.
+			c.poll()
+			c.flush()
+			c.ok(tag, "IDLE terminated")
+			return
+		case <-wake:
+			c.poll()
+			c.flush()
+		case <-time.After(idlePollCadence):
+			c.poll()
+			c.flush()
+		}
+	}
 }
 
 // --- argument helpers ---
