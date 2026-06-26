@@ -90,6 +90,10 @@ func (c *conn) cmdUID(tag string, args []token) {
 		c.cmdUIDExpunge(tag, args[1:])
 	case "MOVE":
 		c.cmdMove(tag, args[1:], true)
+	case "SORT":
+		c.cmdSort(tag, args[1:], true)
+	case "THREAD":
+		c.cmdThread(tag, args[1:], true)
 	default:
 		c.bad(tag, "UID "+sub+" not supported")
 	}

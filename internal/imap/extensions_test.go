@@ -285,3 +285,50 @@ func TestIMAPMultiAppend(t *testing.T) {
 		t.Errorf("after MULTIAPPEND, INBOX = %q, want 4 EXISTS", got)
 	}
 }
+
+// TestIMAPSort covers SORT (RFC 5256): ordering by subject, and REVERSE.
+func TestIMAPSort(t *testing.T) {
+	c, _ := startServer(t)
+	c.mustOK("a1", "LOGIN alice secret")
+	c.mustOK("a2", "SELECT INBOX") // seq 1 = "one", seq 2 = "two"
+
+	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "SORT") {
+		t.Errorf("CAPABILITY missing SORT: %s", caps)
+	}
+
+	if un := strings.Join(c.mustOK("a3", "SORT (SUBJECT) UTF-8 ALL"), " "); !strings.Contains(un, "SORT 1 2") {
+		t.Errorf("SORT (SUBJECT) = %q, want \"SORT 1 2\" (one < two)", un)
+	}
+	if un := strings.Join(c.mustOK("a4", "SORT (REVERSE SUBJECT) UTF-8 ALL"), " "); !strings.Contains(un, "SORT 2 1") {
+		t.Errorf("SORT (REVERSE SUBJECT) = %q, want \"SORT 2 1\"", un)
+	}
+}
+
+// TestIMAPThread covers THREAD (RFC 5256): a reply nests under its parent for both
+// the REFERENCES and ORDEREDSUBJECT algorithms.
+func TestIMAPThread(t *testing.T) {
+	c, _ := startServer(t)
+	c.mustOK("a1", "LOGIN alice secret")
+	c.mustOK("a2", "CREATE Thr")
+
+	m1 := "Message-ID: <a@x>\r\nSubject: Hello\r\nDate: Mon, 01 Jan 2024 10:00:00 +0000\r\n\r\nbody1"
+	m2 := "Message-ID: <b@x>\r\nIn-Reply-To: <a@x>\r\nReferences: <a@x>\r\nSubject: Re: Hello\r\nDate: Mon, 01 Jan 2024 11:00:00 +0000\r\n\r\nbody2"
+	if s := c.appendMsg("a3", "Thr", m1); s != "OK" {
+		t.Fatalf("append m1 = %s", s)
+	}
+	if s := c.appendMsg("a4", "Thr", m2); s != "OK" {
+		t.Fatalf("append m2 = %s", s)
+	}
+	c.mustOK("a5", "SELECT Thr") // seq 1 = m1, seq 2 = m2 (a reply to m1)
+
+	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "THREAD=REFERENCES") {
+		t.Errorf("CAPABILITY missing THREAD=REFERENCES: %s", caps)
+	}
+
+	if un := strings.Join(c.mustOK("a6", "THREAD REFERENCES UTF-8 ALL"), " "); !strings.Contains(un, "THREAD (1 2)") {
+		t.Errorf("THREAD REFERENCES = %q, want \"THREAD (1 2)\" (2 replies to 1)", un)
+	}
+	if un := strings.Join(c.mustOK("a7", "THREAD ORDEREDSUBJECT UTF-8 ALL"), " "); !strings.Contains(un, "(1 2)") {
+		t.Errorf("THREAD ORDEREDSUBJECT = %q, want \"(1 2)\" (same base subject)", un)
+	}
+}

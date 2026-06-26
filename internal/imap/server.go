@@ -24,7 +24,7 @@ import (
 // the lexer accepts non-synchronizing literals; AUTH=PLAIN because the server
 // implements the SASL PLAIN mechanism; IDLE (RFC 2177) because the server pushes
 // real-time mailbox updates while a client idles.
-const capabilities = "IMAP4rev1 LITERAL+ NAMESPACE AUTH=PLAIN AUTH=LOGIN IDLE CHILDREN ID UNSELECT UIDPLUS MOVE SPECIAL-USE QUOTA ESEARCH MULTIAPPEND"
+const capabilities = "IMAP4rev1 LITERAL+ NAMESPACE AUTH=PLAIN AUTH=LOGIN IDLE CHILDREN ID UNSELECT UIDPLUS MOVE SPECIAL-USE QUOTA ESEARCH MULTIAPPEND SORT THREAD=ORDEREDSUBJECT THREAD=REFERENCES"
 
 // idlePollCadence is the fallback poll interval during IDLE when the push relay is
 // absent or a wake is missed — the degradation floor that keeps IDLE emitting
@@ -263,6 +263,10 @@ func (c *conn) dispatch(toks []token) {
 		c.cmdStore(tag, args, false)
 	case "SEARCH":
 		c.cmdSearch(tag, args, false)
+	case "SORT":
+		c.cmdSort(tag, args, false)
+	case "THREAD":
+		c.cmdThread(tag, args, false)
 	case "COPY":
 		c.cmdCopy(tag, args, false)
 	case "MOVE":
