@@ -51,6 +51,40 @@ func TestReportQuery(t *testing.T) {
 	}
 }
 
+// TestReportQueryFilter confirms addressbook-query applies the <filter>: an FN
+// prop-filter text-match and an EMAIL ends-with match each select only the right
+// contact (RFC 6352 §10.5).
+func TestReportQueryFilter(t *testing.T) {
+	ts := davServer(t)
+	doFull(t, ts, "PUT", contactURL("ada.vcf"), adaVCard, nil) // FN:Ada Lovelace, EMAIL:ada@analytical.test
+	bob := "BEGIN:VCARD\r\nVERSION:4.0\r\nFN:Bob Smith\r\nEMAIL:bob@example.test\r\nUID:bob-1\r\nEND:VCARD\r\n"
+	doFull(t, ts, "PUT", contactURL("bob.vcf"), bob, nil)
+
+	fnFilter := `<card:addressbook-query xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
+  <d:prop><d:getetag/><card:address-data/></d:prop>
+  <card:filter><card:prop-filter name="FN"><card:text-match>Lovelace</card:text-match></card:prop-filter></card:filter>
+</card:addressbook-query>`
+	resp, out := doFull(t, ts, "REPORT", contactURL(""), fnFilter, map[string]string{"Depth": "1"})
+	if resp.StatusCode != http.StatusMultiStatus {
+		t.Fatalf("status %d, want 207\n%s", resp.StatusCode, out)
+	}
+	if !strings.Contains(out, "Ada Lovelace") || strings.Contains(out, "Bob Smith") {
+		t.Errorf("FN filter returned the wrong set (want Ada only)\n%s", out)
+	}
+	if n := strings.Count(out, "BEGIN:VCARD"); n != 1 {
+		t.Errorf("FN filter returned %d cards, want 1\n%s", n, out)
+	}
+
+	emailFilter := `<card:addressbook-query xmlns:d="DAV:" xmlns:card="urn:ietf:params:xml:ns:carddav">
+  <d:prop><card:address-data/></d:prop>
+  <card:filter><card:prop-filter name="EMAIL"><card:text-match match-type="ends-with">@example.test</card:text-match></card:prop-filter></card:filter>
+</card:addressbook-query>`
+	_, out = doFull(t, ts, "REPORT", contactURL(""), emailFilter, map[string]string{"Depth": "1"})
+	if !strings.Contains(out, "Bob Smith") || strings.Contains(out, "Ada Lovelace") {
+		t.Errorf("EMAIL ends-with filter returned the wrong set (want Bob only)\n%s", out)
+	}
+}
+
 // TestReportSyncCollection checks incremental sync: an initial sync returns all
 // members and a token; after a new PUT, a sync with that token returns only the
 // new member.

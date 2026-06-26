@@ -55,7 +55,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox st
 	case "addressbook-multiget":
 		s.reportMultiget(w, st, req.Hrefs)
 	case "addressbook-query":
-		s.reportQueryOrSync(w, st, user, 0, false)
+		s.reportQueryOrSync(w, st, user, 0, false, req.Filter)
 	case "calendar-multiget":
 		s.reportCalMultiget(w, st, req.Hrefs)
 	case "calendar-query":
@@ -67,7 +67,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox st
 		if kind == kindCalendar {
 			s.reportCalQueryOrSync(w, st, user, parseSyncToken(req.SyncToken), true, nil)
 		} else {
-			s.reportQueryOrSync(w, st, user, parseSyncToken(req.SyncToken), true)
+			s.reportQueryOrSync(w, st, user, parseSyncToken(req.SyncToken), true, nil)
 		}
 	default:
 		http.Error(w, "unsupported report", http.StatusForbidden)
@@ -105,7 +105,7 @@ func (s *Server) reportMultiget(w http.ResponseWriter, st *objectstore.Store, hr
 // filtering is not yet applied: every member is returned (a documented v1
 // simplification). Deletions are not reported incrementally — the store
 // hard-deletes without a tombstone — so a client reconciles removals on its own.
-func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store, user string, sinceToken uint64, sync bool) {
+func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store, user string, sinceToken uint64, sync bool, filt *filter) {
 	objs, err := st.ListFolderObjects(mapi.PrivateFIDContacts)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -125,6 +125,10 @@ func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store,
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		// addressbook-query: skip vCards that do not satisfy the filter (RFC 6352 §10.5).
+		if !vcardMatches(filt, data) {
+			continue
 		}
 		href := objectPath(user, objectName(st, o.ID, ".vcf"))
 		ms.Responses = append(ms.Responses, addressDataResponse(href, o.ChangeNumber, data))

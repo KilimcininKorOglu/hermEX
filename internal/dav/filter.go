@@ -30,10 +30,10 @@ type compFilter struct {
 
 type propFilter struct {
 	Name         string        `xml:"name,attr"`
-	Test         string        `xml:"test,attr"` // CardDAV: anyof (default) | allof
+	Test         string        `xml:"test,attr"` // CardDAV: anyof (default) | allof, over text-matches
 	IsNotDefined *struct{}     `xml:"is-not-defined"`
 	TimeRange    *timeRange    `xml:"time-range"`
-	TextMatch    *textMatch    `xml:"text-match"`
+	TextMatches  []textMatch   `xml:"text-match"` // CalDAV: 0..1; CardDAV: 0..n
 	ParamFilters []paramFilter `xml:"param-filter"`
 }
 
@@ -227,24 +227,100 @@ func compSatisfies(cf compFilter, c *icalNode) bool {
 	return true
 }
 
-// matchPropCal evaluates a prop-filter against a component's properties.
+// matchPropCal evaluates a prop-filter against a component's properties: at least
+// one occurrence must satisfy the (mutually exclusive) time-range or text-match and
+// the param-filters.
 func matchPropCal(pf propFilter, c *icalNode) bool {
 	props := c.propsByName(pf.Name)
 	if pf.IsNotDefined != nil {
 		return len(props) == 0
 	}
 	for _, p := range props {
-		if pf.TextMatch != nil && !textMatches(pf.TextMatch, unescapeText(p.value)) {
+		if pf.TimeRange != nil && !propTimeInRange(pf.TimeRange, p) {
 			continue
 		}
-		ok := true
-		for _, paf := range pf.ParamFilters {
-			if !matchParam(paf, p) {
-				ok = false
-				break
+		if propOccurrenceMatches(pf, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// propOccurrenceMatches evaluates a prop-filter's text-matches (combined by its
+// test mode) and param-filters against one property occurrence.
+func propOccurrenceMatches(pf propFilter, p icalProp) bool {
+	if len(pf.TextMatches) > 0 {
+		allof := strings.EqualFold(pf.Test, "allof")
+		matchedAny := false
+		for i := range pf.TextMatches {
+			m := textMatches(&pf.TextMatches[i], unescapeText(p.value))
+			if allof && !m {
+				return false
+			}
+			if m {
+				matchedAny = true
 			}
 		}
-		if ok {
+		if !allof && !matchedAny {
+			return false
+		}
+	}
+	for _, paf := range pf.ParamFilters {
+		if !matchParam(paf, p) {
+			return false
+		}
+	}
+	return true
+}
+
+// propTimeInRange reports whether a date-valued property falls within a time-range.
+func propTimeInRange(tr *timeRange, p icalProp) bool {
+	t, _, ok := propTime(p)
+	if !ok {
+		return false
+	}
+	if rs, okS := parseFilterTime(tr.Start); okS && t.Before(rs) {
+		return false
+	}
+	if re, okE := parseFilterTime(tr.End); okE && !t.Before(re) {
+		return false
+	}
+	return true
+}
+
+// --- addressbook-query evaluation (RFC 6352 §10.5) ---
+
+// vcardMatches reports whether a vCard resource satisfies an addressbook-query
+// filter. The top-level test combines the prop-filters (anyof by default).
+func vcardMatches(f *filter, vcard string) bool {
+	if f == nil || len(f.PropFilters) == 0 {
+		return true
+	}
+	card := parseICalNode(vcard)
+	if card == nil {
+		return false
+	}
+	allof := strings.EqualFold(f.Test, "allof")
+	for _, pf := range f.PropFilters {
+		m := matchPropCard(pf, card)
+		if allof && !m {
+			return false
+		}
+		if !allof && m {
+			return true
+		}
+	}
+	return allof
+}
+
+// matchPropCard evaluates one addressbook-query prop-filter against a vCard.
+func matchPropCard(pf propFilter, card *icalNode) bool {
+	props := card.propsByName(pf.Name)
+	if pf.IsNotDefined != nil {
+		return len(props) == 0
+	}
+	for _, p := range props {
+		if propOccurrenceMatches(pf, p) {
 			return true
 		}
 	}
