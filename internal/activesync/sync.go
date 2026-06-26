@@ -1,9 +1,11 @@
 package activesync
 
 import (
+	"context"
 	"net/http"
 	"sort"
 	"strconv"
+	"time"
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
@@ -18,12 +20,44 @@ const (
 )
 
 // Sync collection status codes (MS-ASCMD): 1 success, 3 invalid sync key
-// (forces a re-prime), 4 malformed request.
+// (forces a re-prime), 4 malformed request, 14 invalid wait/heartbeat value.
 const (
-	syncStatusOK         = 1
-	syncStatusInvalidKey = 3
-	syncStatusBadRequest = 4
+	syncStatusOK           = 1
+	syncStatusInvalidKey   = 3
+	syncStatusBadRequest   = 4
+	syncStatusWaitInterval = 14
 )
+
+// syncHoldCadence is the fallback poll interval during a hanging Sync when the push
+// relay is absent or a wake is missed — the degradation floor matching the
+// reference's 30s heartbeat poll.
+const syncHoldCadence = 30 * time.Second
+
+// Sync HeartbeatInterval bounds (MS-ASCMD): a value outside [60, 3540] seconds is
+// Status 14. These are tighter than Ping's bounds (its minimum is 1s), so the Sync
+// path validates separately.
+const (
+	syncMinHeartbeat = 60 * time.Second
+	syncMaxHeartbeat = 3540 * time.Second
+)
+
+// parseSyncHeartbeat parses a Sync HeartbeatInterval (seconds). ok is false when the
+// value is unparseable or outside [60, 3540]; bound is then the nearest acceptable
+// value for the Status-14 Limit element.
+func parseSyncHeartbeat(s string) (d, bound time.Duration, ok bool) {
+	n, err := strconv.Atoi(s)
+	if err != nil || n <= 0 {
+		return 0, syncMinHeartbeat, false
+	}
+	d = time.Duration(n) * time.Second
+	if d < syncMinHeartbeat {
+		return 0, syncMinHeartbeat, false
+	}
+	if d > syncMaxHeartbeat {
+		return 0, syncMaxHeartbeat, false
+	}
+	return d, 0, true
+}
 
 // handleSync answers the Sync command: per collection it applies the client's
 // changes, then streams the server's own changes computed by diffing the live
@@ -40,6 +74,20 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, sess *sessio
 		return
 	}
 
+	// A hanging Sync carries a HeartbeatInterval (seconds): the client asks the
+	// server to hold the response until a change lands. An out-of-range value is
+	// Status 14 with the nearest acceptable bound in a Limit element.
+	hbText := root.ChildText(wbxml.ASHeartbeatInt)
+	var heartbeat time.Duration
+	if hbText != "" {
+		hb, bound, ok := parseSyncHeartbeat(hbText)
+		if !ok {
+			writeWBXML(w, syncWaitLimit(bound))
+			return
+		}
+		heartbeat = hb
+	}
+
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -53,6 +101,21 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, sess *sessio
 		return
 	}
 	dev := state.device(sess.req.deviceID)
+
+	// Hanging Sync: when a heartbeat is requested, the request carries no client
+	// commands, and there are no server changes yet, hold until a change lands
+	// (push wake, or the fallback cadence) or the heartbeat expires. On expiry with
+	// nothing new the reply is an empty body with Connection: close (MS-ASCMD); the
+	// client re-issues and the sync key does not advance.
+	if heartbeat > 0 && !syncHasCommands(collections) && !syncHasChanges(st, dev, collections) {
+		if !s.holdForSync(r.Context(), sess.mailbox, dev, collections, heartbeat) {
+			w.Header().Set("Connection", "close")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		// Woken with changes: fall through to the normal collect, which the open
+		// store observes via a fresh read.
+	}
 
 	var out []*wbxml.Node
 	for _, c := range collections.Children {
@@ -71,6 +134,134 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, sess *sessio
 		return
 	}
 	writeWBXML(w, wbxml.Elem(wbxml.ASSync, wbxml.Elem(wbxml.ASCollections, out...)))
+}
+
+// syncWaitLimit builds the Status-14 reply for an out-of-range HeartbeatInterval,
+// naming the nearest acceptable bound (in seconds) in a Limit element so the device
+// retries with an in-range value.
+func syncWaitLimit(bound time.Duration) *wbxml.Node {
+	return wbxml.Elem(wbxml.ASSync,
+		wbxml.Str(wbxml.ASStatus, strconv.Itoa(syncStatusWaitInterval)),
+		wbxml.Str(wbxml.ASLimit, strconv.Itoa(int(bound/time.Second))),
+	)
+}
+
+// syncHasCommands reports whether any collection carries client commands. A hanging
+// Sync only holds for a pure "tell me when something changes" request; a request
+// that also sends commands is processed one-shot.
+func syncHasCommands(collections *wbxml.Node) bool {
+	for _, c := range collections.Children {
+		if c.Tag == wbxml.ASCollection && c.Child(wbxml.ASCommands) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// syncHasChanges reports whether any watched collection has server changes the
+// device has not yet synced. It is a pure read — it never advances a snapshot — so
+// it is safe to call repeatedly during a hold.
+func syncHasChanges(st *objectstore.Store, dev *deviceState, collections *wbxml.Node) bool {
+	for _, c := range collections.Children {
+		if c.Tag == wbxml.ASCollection && collectionHasChanges(st, dev, c) {
+			return true
+		}
+	}
+	return false
+}
+
+// collectionHasChanges diffs one collection's live state against the device's
+// snapshot without mutating it. A priming (key 0), unparseable, or stale-key
+// collection is not a hold candidate (the normal collect handles those).
+func collectionHasChanges(st *objectstore.Store, dev *deviceState, c *wbxml.Node) bool {
+	collID := c.ChildText(wbxml.ASCollectionID)
+	clientKey := c.ChildText(wbxml.ASSyncKey)
+	if clientKey == "0" || clientKey == "" {
+		return false
+	}
+	folderID, err := strconv.ParseInt(collID, 10, 64)
+	if err != nil {
+		return false
+	}
+	cstate := dev.collection(collID)
+	if clientKey != cstate.SyncKey {
+		return false // stale key: let the normal path return Status 3
+	}
+	if folderID == int64(mapi.PrivateFIDCalendar) {
+		objs, err := st.ListFolderObjects(folderID)
+		if err != nil {
+			return false
+		}
+		return calendarObjsDiffer(cstate.Items, objs)
+	}
+	live, err := st.ListMessages(folderID)
+	if err != nil {
+		return false
+	}
+	return len(diffSnapshot(cstate.Items, live)) > 0
+}
+
+// calendarObjsDiffer reports whether a calendar folder's objects differ from the
+// device snapshot (an add, a change-number bump, or a delete) — the read-only
+// counterpart of calendarChanges' diff.
+func calendarObjsDiffer(snap map[string]int64, objs []objectstore.FolderObject) bool {
+	live := make(map[string]bool, len(objs))
+	for _, o := range objs {
+		sid := strconv.FormatInt(o.ID, 10)
+		live[sid] = true
+		if prev, ok := snap[sid]; !ok || prev != int64(o.ChangeNumber) {
+			return true
+		}
+	}
+	for sid := range snap {
+		if !live[sid] {
+			return true
+		}
+	}
+	return false
+}
+
+// holdForSync blocks a hanging Sync until a watched collection changes (a push wake,
+// or the fallback cadence catching it) or the heartbeat expires. It returns true
+// when changes were found (the caller collects and responds) and false on expiry or
+// client disconnect (the caller replies empty). Each change check opens a fresh
+// store so a delivery committed by another daemon is observed.
+func (s *Server) holdForSync(ctx context.Context, mailbox string, dev *deviceState, collections *wbxml.Node, heartbeat time.Duration) bool {
+	var wake <-chan struct{}
+	if s.waker != nil {
+		ch, cancel := s.waker.Register(mailbox)
+		defer cancel()
+		wake = ch
+	}
+	deadline := time.Now().Add(heartbeat)
+	for {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return false
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-wake:
+			if s.syncCheck(mailbox, dev, collections) {
+				return true
+			}
+		case <-time.After(min(syncHoldCadence, remaining)):
+			if s.syncCheck(mailbox, dev, collections) {
+				return true
+			}
+		}
+	}
+}
+
+// syncCheck opens a fresh store and reports whether any watched collection changed.
+func (s *Server) syncCheck(mailbox string, dev *deviceState, collections *wbxml.Node) bool {
+	st, err := objectstore.Open(mailbox)
+	if err != nil {
+		return false
+	}
+	defer st.Close()
+	return syncHasChanges(st, dev, collections)
 }
 
 // pendingChange is one server-to-client change awaiting windowing.

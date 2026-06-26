@@ -60,6 +60,7 @@ const (
 	ASSoftDelete       Tag = 0x0021
 	ASMIMESupport      Tag = 0x0022
 	ASMIMETruncation   Tag = 0x0023
+	ASLimit            Tag = 0x0025 // Sync hanging-Sync Status 14 limit (Since 12.1)
 	ASConversationMode Tag = 0x0027
 	ASMaxItems         Tag = 0x0028
 	ASHeartbeatInt     Tag = 0x0029
