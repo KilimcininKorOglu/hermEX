@@ -125,6 +125,8 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.handleMkCalendar(w, r, mailbox)
 	case "MKCOL":
 		s.handleMkCol(w, r, mailbox)
+	case "PROPPATCH":
+		s.handleProppatch(w, r, mailbox)
 	default:
 		w.Header().Set("Allow", allowMethods)
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -132,7 +134,7 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 }
 
 // allowMethods lists the DAV methods the server implements.
-const allowMethods = "OPTIONS, PROPFIND, REPORT, GET, HEAD, PUT, DELETE, MKCALENDAR, MKCOL"
+const allowMethods = "OPTIONS, PROPFIND, PROPPATCH, REPORT, GET, HEAD, PUT, DELETE, MKCALENDAR, MKCOL"
 
 // basicAuth validates HTTP Basic credentials against the directory and returns
 // the user and mailbox path. On failure it writes a 401 challenge and returns

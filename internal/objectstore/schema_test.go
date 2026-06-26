@@ -51,11 +51,11 @@ func TestOpenCreatesSchema(t *testing.T) {
 
 	wantObjects := []string{
 		"allocated_eids", "attachment_properties", "attachments", "autoreply_ts",
-		"configurations", "folder_properties", "folders", "message_changes",
-		"message_properties", "messages", "msgtime_index", "named_properties",
-		"permissions", "public_read_state", "receive_table", "recipients",
-		"recipients_properties", "replguidmap", "rules", "search_result",
-		"search_scopes", "store_properties",
+		"configurations", "dav_dead_props", "folder_properties", "folders",
+		"message_changes", "message_properties", "messages", "msgtime_index",
+		"named_properties", "permissions", "public_read_state", "receive_table",
+		"recipients", "recipients_properties", "replguidmap", "rules",
+		"search_result", "search_scopes", "store_properties",
 	}
 	slices.Sort(wantObjects)
 	if got := tableNames(t, s.objdb); !slices.Equal(got, wantObjects) {
@@ -138,7 +138,7 @@ func TestReopenIsIdempotent(t *testing.T) {
 		t.Fatalf("reopen: %v", err)
 	}
 	defer s2.Close()
-	if got := tableNames(t, s2.objdb); len(got) != 22 {
-		t.Errorf("object store has %d tables after reopen, want 22", len(got))
+	if got := tableNames(t, s2.objdb); len(got) != 23 {
+		t.Errorf("object store has %d tables after reopen, want 23", len(got))
 	}
 }

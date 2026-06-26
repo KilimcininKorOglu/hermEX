@@ -133,17 +133,20 @@ func cardCollectionResponse(st *objectstore.Store, user, coll, displayName strin
 	if err != nil {
 		return msResponse{}, err
 	}
+	dead, err := st.ListDeadProps(fid)
+	if err != nil {
+		return msResponse{}, err
+	}
+	prop := msProp{
+		ResourceType: collectionResourceType(),
+		DisplayName:  displayName,
+		GetCTag:      ctag(max),
+		SyncToken:    syncToken(max),
+	}
+	applyDeadProps(&prop, dead)
 	return msResponse{
-		Href: addressbookPathColl(user, coll),
-		Propstat: []msPropstat{{
-			Prop: msProp{
-				ResourceType: collectionResourceType(),
-				DisplayName:  displayName,
-				GetCTag:      ctag(max),
-				SyncToken:    syncToken(max),
-			},
-			Status: statusOK,
-		}},
+		Href:     addressbookPathColl(user, coll),
+		Propstat: []msPropstat{{Prop: prop, Status: statusOK}},
 	}, nil
 }
 
@@ -246,18 +249,21 @@ func calCollectionResponse(st *objectstore.Store, user, coll, displayName string
 	if err != nil {
 		return msResponse{}, err
 	}
+	dead, err := st.ListDeadProps(fid)
+	if err != nil {
+		return msResponse{}, err
+	}
+	prop := msProp{
+		ResourceType:     calendarResourceType(),
+		DisplayName:      displayName,
+		GetCTag:          ctag(max),
+		SyncToken:        syncToken(max),
+		SupportedCalComp: eventComponentSet(),
+	}
+	applyDeadProps(&prop, dead)
 	return msResponse{
-		Href: calendarPathColl(user, coll),
-		Propstat: []msPropstat{{
-			Prop: msProp{
-				ResourceType:     calendarResourceType(),
-				DisplayName:      displayName,
-				GetCTag:          ctag(max),
-				SyncToken:        syncToken(max),
-				SupportedCalComp: eventComponentSet(),
-			},
-			Status: statusOK,
-		}},
+		Href:     calendarPathColl(user, coll),
+		Propstat: []msPropstat{{Prop: prop, Status: statusOK}},
 	}, nil
 }
 

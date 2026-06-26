@@ -51,6 +51,9 @@ type msProp struct {
 	CalendarData       string         `xml:"urn:ietf:params:xml:ns:caldav calendar-data,omitempty"`
 	SupportedCalComp   *supportedComp `xml:"urn:ietf:params:xml:ns:caldav supported-calendar-component-set,omitempty"`
 	SupportedReportSet *struct{}      `xml:"DAV: supported-report-set,omitempty"`
+	// Extra carries stored dead properties (PROPPATCH round-trip) as verbatim XML
+	// elements, emitted inside <prop> after the fixed fields.
+	Extra []byte `xml:",innerxml"`
 }
 
 // supportedComp is the CalDAV supported-calendar-component-set value: the list of
@@ -80,8 +83,10 @@ type href struct {
 }
 
 const (
-	statusOK       = "HTTP/1.1 200 OK"
-	statusNotFound = "HTTP/1.1 404 Not Found"
+	statusOK               = "HTTP/1.1 200 OK"
+	statusNotFound         = "HTTP/1.1 404 Not Found"
+	statusForbidden        = "HTTP/1.1 403 Forbidden"
+	statusFailedDependency = "HTTP/1.1 424 Failed Dependency"
 )
 
 var empty = &struct{}{}
