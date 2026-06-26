@@ -234,6 +234,46 @@ func TestCalReportQuery(t *testing.T) {
 	}
 }
 
+// TestCalReportQueryFilter confirms calendar-query applies the <filter>: a
+// time-range selects only the overlapping event, and a UID prop-filter text-match
+// selects only the matching one (RFC 4791 §9.7).
+func TestCalReportQueryFilter(t *testing.T) {
+	ts := davServerCal(t)
+	doFull(t, ts, "PUT", calURL("june.ics"), timedEventICS, nil) // UID:cal-1, DTSTART June 15
+	dec := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\nBEGIN:VEVENT\r\n" +
+		"UID:cal-9\r\nSUMMARY:Yearend\r\nDTSTART:20261215T140000Z\r\nDTEND:20261215T150000Z\r\n" +
+		"END:VEVENT\r\nEND:VCALENDAR\r\n"
+	doFull(t, ts, "PUT", calURL("dec.ics"), dec, nil)
+
+	timeRange := `<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:prop><d:getetag/><c:calendar-data/></d:prop>
+  <c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT">
+    <c:time-range start="20260601T000000Z" end="20260701T000000Z"/>
+  </c:comp-filter></c:comp-filter></c:filter>
+</c:calendar-query>`
+	resp, out := doFull(t, ts, "REPORT", calURL(""), timeRange, map[string]string{"Depth": "1"})
+	if resp.StatusCode != http.StatusMultiStatus {
+		t.Fatalf("status %d, want 207\n%s", resp.StatusCode, out)
+	}
+	if !strings.Contains(out, "SUMMARY:Planning") || strings.Contains(out, "SUMMARY:Yearend") {
+		t.Errorf("time-range filter returned the wrong set (want June only)\n%s", out)
+	}
+	if n := strings.Count(out, "BEGIN:VEVENT"); n != 1 {
+		t.Errorf("time-range filter returned %d events, want 1\n%s", n, out)
+	}
+
+	uidFilter := `<c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <d:prop><c:calendar-data/></d:prop>
+  <c:filter><c:comp-filter name="VCALENDAR"><c:comp-filter name="VEVENT">
+    <c:prop-filter name="UID"><c:text-match>cal-9</c:text-match></c:prop-filter>
+  </c:comp-filter></c:comp-filter></c:filter>
+</c:calendar-query>`
+	_, out = doFull(t, ts, "REPORT", calURL(""), uidFilter, map[string]string{"Depth": "1"})
+	if !strings.Contains(out, "SUMMARY:Yearend") || strings.Contains(out, "SUMMARY:Planning") {
+		t.Errorf("UID prop-filter returned the wrong set (want cal-9 only)\n%s", out)
+	}
+}
+
 // TestCalReportSync checks incremental sync: an initial sync returns the member
 // and a token; after a new PUT, a sync with that token returns only the new one.
 func TestCalReportSync(t *testing.T) {

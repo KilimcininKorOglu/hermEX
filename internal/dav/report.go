@@ -21,6 +21,7 @@ type reportReq struct {
 	XMLName   xml.Name
 	Hrefs     []string `xml:"href"`
 	SyncToken string   `xml:"sync-token"`
+	Filter    *filter  `xml:"filter"`
 }
 
 // handleReport dispatches a CardDAV REPORT (RFC 6352 §8) on the addressbook
@@ -58,13 +59,13 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox st
 	case "calendar-multiget":
 		s.reportCalMultiget(w, st, req.Hrefs)
 	case "calendar-query":
-		s.reportCalQueryOrSync(w, st, user, 0, false)
+		s.reportCalQueryOrSync(w, st, user, 0, false, req.Filter)
 	case "free-busy-query":
 		// Free/busy aggregation is not implemented in v1; return an empty result.
 		writeMultistatus(w, &multistatus{})
 	case "sync-collection":
 		if kind == kindCalendar {
-			s.reportCalQueryOrSync(w, st, user, parseSyncToken(req.SyncToken), true)
+			s.reportCalQueryOrSync(w, st, user, parseSyncToken(req.SyncToken), true, nil)
 		} else {
 			s.reportQueryOrSync(w, st, user, parseSyncToken(req.SyncToken), true)
 		}
@@ -189,7 +190,7 @@ func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store,
 // contacts because a calendar grows unbounded over time and the client re-pulls
 // it each query). Deletions are not reported incrementally — the store
 // hard-deletes without a tombstone.
-func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Store, user string, sinceToken uint64, sync bool) {
+func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Store, user string, sinceToken uint64, sync bool, filt *filter) {
 	objs, err := st.ListFolderObjects(mapi.PrivateFIDCalendar)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -209,6 +210,10 @@ func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Sto
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
+		}
+		// calendar-query: skip objects that do not satisfy the filter (RFC 4791 §9.7).
+		if !calendarMatches(filt, data) {
+			continue
 		}
 		href := calObjectPath(user, objectName(st, o.ID, ".ics"))
 		ms.Responses = append(ms.Responses, calendarDataResponse(href, o.ChangeNumber, data))
