@@ -15,6 +15,7 @@ RUN go build -trimpath -o /out/hermex-mta ./cmd/mta \
  && go build -trimpath -o /out/hermex-ews ./cmd/ews \
  && go build -trimpath -o /out/hermex-mapi ./cmd/mapihttp \
  && go build -trimpath -o /out/hermex-gateway ./cmd/gateway \
+ && go build -trimpath -o /out/hermex-notify ./cmd/notify \
  && go build -trimpath -o /out/hermex-fetchmail ./cmd/fetchmail
 
 # Minimal runtime image. NOTE: this image runs as root so the daemons can bind

@@ -65,6 +65,15 @@ type Config struct {
 	// unreachable daemon temp-fails inbound but fails open on authenticated submission).
 	ClamdAddr string `json:"clamd_addr"` // clamd INSTREAM socket (e.g. "tcp://clamav:3310" or "unix:///run/clamav/clamd.sock"); empty = no AV scanning
 
+	// Push notifications (central notify daemon). The notify daemon relays mailbox-change
+	// wake signals so a long-poll consumer reacts the instant a write lands instead of on
+	// its next poll tick. The mail path never hard-depends on it: an empty NotifyURL (or an
+	// unreachable daemon) leaves every consumer on its existing poll cadence — push is a
+	// best-effort accelerator, never a delivery requirement.
+	NotifyAddr   string `json:"notify_addr"`   // the notify daemon's own listen address (default ":8080"); only the notify daemon reads it
+	NotifyURL    string `json:"notify_url"`    // base URL producers/consumers reach the notify daemon at (e.g. "http://notify:8080"); empty = push disabled, poll-only
+	NotifySecret string `json:"notify_secret"` // shared bearer secret authenticating publish/subscribe; empty disables the auth check (dev only)
+
 	HealthTargets []HealthTarget `json:"health_targets"` // daemons the admin Live status page probes (each daemon's /healthz URL)
 }
 

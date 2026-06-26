@@ -73,6 +73,7 @@ const (
 	TLS        Subsystem = "tls"
 	Webmail    Subsystem = "webmail"
 	Gateway    Subsystem = "gateway"
+	Notify     Subsystem = "notify"
 	Admin      Subsystem = "admin"
 	Store      Subsystem = "store"
 	Directory  Subsystem = "directory"
