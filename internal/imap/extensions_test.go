@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"hermex/internal/objectstore"
 )
 
 // collectTagged reads responses until the tagged completion for tag and returns
@@ -188,4 +190,41 @@ func TestIMAPAuthLogin(t *testing.T) {
 
 	// Authenticated: a TRANSACTION command now works.
 	c.mustOK("a2", "SELECT INBOX")
+}
+
+// TestIMAPQuota covers QUOTA (RFC 2087): GETQUOTAROOT/GETQUOTA report the mailbox
+// STORAGE quota read from the store, and SETQUOTA is refused for a regular client.
+func TestIMAPQuota(t *testing.T) {
+	c, path := startServer(t)
+	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "QUOTA") {
+		t.Errorf("CAPABILITY missing QUOTA: %s", caps)
+	}
+
+	// Set a storage quota directly in the store before login.
+	st, err := objectstore.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetQuota(objectstore.QuotaLimits{StorageKB: 500000}); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	c.mustOK("a1", "LOGIN alice secret")
+
+	joined := strings.Join(c.mustOK("a2", "GETQUOTAROOT INBOX"), "\n")
+	if !strings.Contains(joined, "QUOTAROOT") || !strings.Contains(joined, "INBOX") {
+		t.Errorf("GETQUOTAROOT missing the QUOTAROOT line: %s", joined)
+	}
+	if !strings.Contains(joined, "STORAGE") || !strings.Contains(joined, "500000") {
+		t.Errorf("GETQUOTAROOT missing STORAGE quota 500000: %s", joined)
+	}
+
+	if got := strings.Join(c.mustOK("a3", `GETQUOTA ""`), " "); !strings.Contains(got, "STORAGE") {
+		t.Errorf("GETQUOTA missing STORAGE: %q", got)
+	}
+
+	if _, status := c.do("a4", `SETQUOTA "" (STORAGE 999999)`); status != "NO" {
+		t.Errorf("SETQUOTA = %s, want NO (not permitted for a client)", status)
+	}
 }
