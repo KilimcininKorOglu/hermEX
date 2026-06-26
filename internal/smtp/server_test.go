@@ -41,11 +41,43 @@ func TestServerRcptPermErrorIsPermanent(t *testing.T) {
 	expect(t, r, 550)
 }
 
+// TestServerDataTempErrorIsTemporary proves a backend TempError from Data is
+// reported as a 451 (the sender retries) and an ordinary Data error stays a 554
+// permanent rejection. The 451 is the wire behaviour the antivirus
+// scanner-unavailable path depends on.
+func TestServerDataTempErrorIsTemporary(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		code int
+	}{
+		{"temp", &TempError{Message: "scanner unavailable, retry later"}, 451},
+		{"perm", errors.New("delivery failed"), 554},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sess := &fakeSession{dataErr: tc.err}
+			r, conn := dialServer(t, sess)
+			expect(t, r, 220)
+			fmt.Fprint(conn, "EHLO client.test\r\n")
+			expect(t, r, 250)
+			fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+			expect(t, r, 250)
+			fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+			expect(t, r, 250)
+			fmt.Fprint(conn, "DATA\r\n")
+			expect(t, r, 354)
+			fmt.Fprint(conn, "Subject: hi\r\n\r\nbody\r\n.\r\n")
+			expect(t, r, tc.code)
+		})
+	}
+}
+
 type fakeSession struct {
 	from    string
 	rcpts   []string
 	data    []byte
 	rcptErr error // when set, Rcpt returns it (to exercise the error→reply mapping)
+	dataErr error // when set, Data returns it (to exercise the DATA error→reply mapping)
 }
 
 func (s *fakeSession) Mail(from string) error { s.from = from; return nil }
@@ -59,7 +91,10 @@ func (s *fakeSession) Rcpt(to string) error {
 func (s *fakeSession) Data(r io.Reader) error {
 	b, err := io.ReadAll(r)
 	s.data = b
-	return err
+	if err != nil {
+		return err
+	}
+	return s.dataErr
 }
 func (s *fakeSession) Reset()        { s.from = ""; s.rcpts = nil }
 func (s *fakeSession) Logout() error { return nil }

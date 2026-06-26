@@ -386,6 +386,20 @@ func (s *session) Data(r io.Reader) error {
 		return err
 	}
 	received := time.Now()
+	// Antivirus runs before spam scoring or filing: a virus hit is quarantined (not
+	// delivered) and the affected parties notified. An unreachable clamd temp-fails
+	// unauthenticated inbound (the sender retries) and fails open on an authenticated
+	// submission. With no scanner configured this is a no-op.
+	avM := avSubmission
+	if s.authUser == "" {
+		avM = avInboundSMTP
+	}
+	switch scanMessage(s.accounts, avM, s.from, avRecipients(s.targets, s.relayTargets), raw, received) {
+	case avTempFail:
+		return &smtp.TempError{Message: "4.7.1 virus scanner temporarily unavailable, retry later"}
+	case avHandled:
+		return nil // quarantined: 250 to the sender, nothing filed or relayed
+	}
 	// Inbound (unauthenticated) mail bound for a local mailbox is spam-scored: the
 	// filed copy is tagged with advisory X-Spam headers (so a client can filter on
 	// them, preserved through the store by oxcmail), and a message over the threshold

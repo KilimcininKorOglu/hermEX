@@ -26,3 +26,17 @@ func (d *SQLDirectory) SetDomainAVScan(domain string, inbound, outbound bool) er
 		inbound, outbound, strings.ToLower(strings.TrimSpace(domain)))
 	return err
 }
+
+// DomainID resolves a domain name to its numeric id (ok=false when unknown). The
+// antivirus scoping keys quarantine rows on this id.
+func (d *SQLDirectory) DomainID(domain string) (id int64, ok bool, err error) {
+	err = d.db.QueryRow(`SELECT id FROM domains WHERE domainname = ?`,
+		strings.ToLower(strings.TrimSpace(domain))).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return id, true, nil
+}

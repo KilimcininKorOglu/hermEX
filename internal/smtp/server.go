@@ -202,7 +202,11 @@ func (s *Server) handle(conn net.Conn) {
 			trace := buildReceived(helo, remote, rdns, s.hostname(), isTLS, time.Now())
 			if err := s.consumeData(tp, sess, trace); err != nil {
 				event(logging.LevelWarn, "message.reject", logging.Fields{"recipients": rcptCount, "reason": err.Error()})
-				if errors.Is(err, errTooLarge) {
+				if te, ok := errors.AsType[*TempError](err); ok {
+					// A Data handler can defer (e.g. the virus scanner is unreachable);
+					// a 451 has the sender retry rather than bounce the message.
+					reply(w, 451, te.Message)
+				} else if errors.Is(err, errTooLarge) {
 					reply(w, 552, "message exceeds size limit")
 				} else {
 					reply(w, 554, "transaction failed: "+err.Error())
