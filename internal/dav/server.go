@@ -96,17 +96,36 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	// the CalDAV handlers, everything else by the CardDAV handlers.
 	kind, _, _, _ := classify(r.URL.Path)
 	calObject := kind == kindCalObject
-	// The scheduling Inbox/Outbox answer discovery (PROPFIND) only in this increment;
-	// Outbox POST and Inbox object access are wired in later scheduling increments. A
-	// mutating or object method here returns 405 rather than misrouting to the CardDAV
+	// The scheduling Inbox/Outbox are routed on their own: the Outbox answers POST
+	// (free-busy / iTIP, RFC 6638 §5) plus discovery, the Inbox answers discovery.
+	// They are dispatched here rather than through the method switch below so an
+	// object or mutating method returns 405 instead of misrouting to the CardDAV
 	// handlers, which key off the Contacts folder.
 	switch kind {
-	case kindScheduleInbox, kindScheduleOutbox, kindScheduleInboxObject:
-		if r.Method != "PROPFIND" && r.Method != "OPTIONS" {
-			w.Header().Set("Allow", "OPTIONS, PROPFIND")
-			http.Error(w, "method not allowed on scheduling collection", http.StatusMethodNotAllowed)
-			return
+	case kindScheduleOutbox:
+		switch r.Method {
+		case "OPTIONS":
+			s.handleOptions(w, r)
+		case "PROPFIND":
+			s.handlePropfind(w, r, user, mailbox)
+		case http.MethodPost:
+			s.handleOutboxPost(w, r, user)
+		default:
+			w.Header().Set("Allow", "OPTIONS, PROPFIND, POST")
+			http.Error(w, "method not allowed on the scheduling Outbox", http.StatusMethodNotAllowed)
 		}
+		return
+	case kindScheduleInbox, kindScheduleInboxObject:
+		switch r.Method {
+		case "OPTIONS":
+			s.handleOptions(w, r)
+		case "PROPFIND":
+			s.handlePropfind(w, r, user, mailbox)
+		default:
+			w.Header().Set("Allow", "OPTIONS, PROPFIND")
+			http.Error(w, "method not allowed on the scheduling Inbox", http.StatusMethodNotAllowed)
+		}
+		return
 	}
 	switch r.Method {
 	case "OPTIONS":

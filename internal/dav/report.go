@@ -181,45 +181,10 @@ func (s *Server) handleFreeBusy(w http.ResponseWriter, st *objectstore.Store, fi
 		rangeStart, okS = parseFilterTime(tr.Start)
 		rangeEnd, okE = parseFilterTime(tr.End)
 	}
-	objs, err := st.ListFolderObjects(fid)
+	periods, err := busyPeriods(st, fid, rangeStart, rangeEnd, okS, okE)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
-	}
-	var periods []string
-	for _, o := range objs {
-		data, err := calendarData(st, o.ID)
-		if err != nil {
-			continue
-		}
-		root := parseICalNode(data)
-		if root == nil {
-			continue
-		}
-		for _, ev := range root.kids {
-			if !strings.EqualFold(ev.name, "VEVENT") {
-				continue
-			}
-			// A transparent event does not block time (RFC 4791 §7.10).
-			if tp := ev.propsByName("TRANSP"); len(tp) > 0 && strings.EqualFold(strings.TrimSpace(tp[0].value), "TRANSPARENT") {
-				continue
-			}
-			start, end, ok := eventSpan(ev)
-			if !ok {
-				continue
-			}
-			if (okE && !start.Before(rangeEnd)) || (okS && !end.After(rangeStart)) {
-				continue // outside the requested range
-			}
-			cs, ce := start, end
-			if okS && cs.Before(rangeStart) {
-				cs = rangeStart
-			}
-			if okE && ce.After(rangeEnd) {
-				ce = rangeEnd
-			}
-			periods = append(periods, formatICalUTCZ(cs)+"/"+formatICalUTCZ(ce))
-		}
 	}
 
 	var b strings.Builder

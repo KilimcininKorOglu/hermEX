@@ -89,6 +89,22 @@ type href struct {
 	Href string `xml:"DAV: href"`
 }
 
+// scheduleResponse is the body returned by a scheduling Outbox POST (RFC 6638
+// §10.1): one response per recipient.
+type scheduleResponse struct {
+	XMLName   xml.Name           `xml:"urn:ietf:params:xml:ns:caldav schedule-response"`
+	Responses []scheduleRespItem `xml:"urn:ietf:params:xml:ns:caldav response"`
+}
+
+// scheduleRespItem is one recipient's result within a schedule-response (RFC 6638
+// §10.2): the recipient address, an iTIP request-status, and, on success, the
+// returned calendar data (e.g. a free-busy reply).
+type scheduleRespItem struct {
+	Recipient     href   `xml:"urn:ietf:params:xml:ns:caldav recipient"`
+	RequestStatus string `xml:"urn:ietf:params:xml:ns:caldav request-status"`
+	CalendarData  string `xml:"urn:ietf:params:xml:ns:caldav calendar-data,omitempty"`
+}
+
 // hrefSet wraps several DAV:href children under one property (calendar-user-address-set).
 type hrefSet struct {
 	Hrefs []string `xml:"DAV: href"`

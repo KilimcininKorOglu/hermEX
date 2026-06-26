@@ -10,6 +10,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcical"
 	"hermex/internal/oxcmail"
 )
 
@@ -492,6 +493,85 @@ func TestCalCopyMove(t *testing.T) {
 	}
 	if resp, _ := doFull(t, ts, "GET", work+"moved.ics", "", nil); resp.StatusCode != http.StatusOK {
 		t.Errorf("MOVE destination missing: status %d, want 200", resp.StatusCode)
+	}
+}
+
+// seedTimedCalendar imports a timed iCalendar event into a mailbox's Calendar
+// through the same converter a PUT uses, so the busy span round-trips.
+func seedTimedCalendar(t *testing.T, dir, ics string) {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	msg, err := oxcical.Import([]byte(ics), icalOptions(st))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.CreateMessage(mapi.PrivateFIDCalendar, msg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// freeBusyRequest is an iTIP free-busy request body for an Outbox POST.
+func freeBusyRequest(organizer, attendee string) string {
+	return "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\nMETHOD:REQUEST\r\n" +
+		"BEGIN:VFREEBUSY\r\nUID:fb-1\r\nDTSTART:20260601T000000Z\r\nDTEND:20260701T000000Z\r\n" +
+		"ORGANIZER:mailto:" + organizer + "\r\nATTENDEE:mailto:" + attendee + "\r\n" +
+		"END:VFREEBUSY\r\nEND:VCALENDAR\r\n"
+}
+
+// TestOutboxFreeBusy confirms a scheduling Outbox POST returns each local
+// attendee's busy periods in a schedule-response (RFC 6638 §5).
+func TestOutboxFreeBusy(t *testing.T) {
+	const bob = "bob@hermex.test"
+	bobDir := filepath.Join(t.TempDir(), "bob")
+	seedTimedCalendar(t, bobDir, timedEventICS) // bob busy June 15 14:00-15:00Z
+	accs := directory.StaticAccounts{
+		testUser: {Password: testPass, MailboxPath: filepath.Join(t.TempDir(), "alice")},
+		bob:      {Password: testPass, MailboxPath: bobDir},
+	}
+	ts := httptest.NewServer(NewServer(accs, accs, "hermex.test").Handler())
+	t.Cleanup(ts.Close)
+
+	resp, out := doFull(t, ts, "POST", "/dav/calendars/"+testUser+"/outbox/", freeBusyRequest(testUser, bob), nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Outbox POST status %d, want 200\n%s", resp.StatusCode, out)
+	}
+	for _, want := range []string{
+		"schedule-response", bob, "2.0;Success",
+		"BEGIN:VFREEBUSY", "FREEBUSY;FBTYPE=BUSY:20260615T140000Z/20260615T150000Z",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("schedule-response missing %q\n%s", want, out)
+		}
+	}
+}
+
+// TestOutboxValidOrganizer confirms the Outbox rejects a POST whose ORGANIZER is
+// not a calendar address of the Outbox owner (RFC 6638 §5.2.6, valid-organizer).
+func TestOutboxValidOrganizer(t *testing.T) {
+	ts := davServerCal(t)
+	resp, out := doFull(t, ts, "POST", "/dav/calendars/"+testUser+"/outbox/", freeBusyRequest("eve@evil.test", testUser), nil)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("Outbox POST with foreign ORGANIZER: status %d, want 403\n%s", resp.StatusCode, out)
+	}
+	if !strings.Contains(out, "valid-organizer") {
+		t.Errorf("403 body lacks the valid-organizer precondition\n%s", out)
+	}
+}
+
+// TestOutboxRemoteRecipient confirms a non-local attendee is reported as an invalid
+// calendar user rather than queried remotely (no iSchedule).
+func TestOutboxRemoteRecipient(t *testing.T) {
+	ts := davServerCal(t)
+	resp, out := doFull(t, ts, "POST", "/dav/calendars/"+testUser+"/outbox/", freeBusyRequest(testUser, "remote@elsewhere.example"), nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Outbox POST status %d, want 200\n%s", resp.StatusCode, out)
+	}
+	if !strings.Contains(out, "3.7;Invalid calendar user") {
+		t.Errorf("schedule-response did not mark the remote recipient invalid\n%s", out)
 	}
 }
 
