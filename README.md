@@ -116,16 +116,15 @@ not in the default compose; run it manually. It listens on `:8081` and requires
 
 ## Layout
 
-| Path            | Purpose                                                                                                                                        |
-|-----------------|------------------------------------------------------------------------------------------------------------------------------------------------|
-| `cmd/`          | Service executables (mta, imap, pop3, webmail2, dav, activesync, ews, mapihttp, gateway, admin, fetchmail, antispam-bootstrap, antispam-rules) |
-| `internal/`     | Shared libraries: MAPI core, mailbox store, format conversion, protocol servers, mail flow, directory                                          |
-| `docker/`       | Dev and service container images                                                                                                               |
-| `contract-map/` | Reference-behavior docs with `file:line` citations, written before implementing each component                                                 |
+| Path        | Purpose                                                                                                                                        |
+|-------------|------------------------------------------------------------------------------------------------------------------------------------------------|
+| `cmd/`      | Service executables (mta, imap, pop3, webmail2, dav, activesync, ews, mapihttp, gateway, admin, fetchmail, antispam-bootstrap, antispam-rules) |
+| `internal/` | Shared libraries: MAPI core, mailbox store, format conversion, protocol servers, mail flow, directory                                          |
+| `docker/`   | Dev and service container images                                                                                                               |
 
 ## License
 
-Licensed under the MIT License.
+Licensed under the MIT License. See the [LICENSE](LICENSE) file.
 
 ## Acknowledgements
 
