@@ -1,9 +1,29 @@
 package imap
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
+
+// collectTagged reads responses until the tagged completion for tag and returns
+// that full line (so a test can inspect a [RESPONSE-CODE] in it).
+func (c *testClient) collectTagged(tag string) string {
+	c.t.Helper()
+	for {
+		l := c.line()
+		if strings.HasPrefix(l, tag+" ") {
+			return l
+		}
+	}
+}
+
+// taggedLine sends a command and returns its full tagged completion line.
+func (c *testClient) taggedLine(tag, cmd string) string {
+	c.t.Helper()
+	fmt.Fprintf(c.conn, "%s %s\r\n", tag, cmd)
+	return c.collectTagged(tag)
+}
 
 // TestIMAPIDUnselectCapability covers the cheap RFC additions: the CHILDREN/ID/
 // UNSELECT capabilities, ID returning the server name in any state, and UNSELECT
@@ -41,5 +61,54 @@ func TestIMAPIDUnselectCapability(t *testing.T) {
 	reselect := strings.Join(c.mustOK("a8", "SELECT INBOX"), " ")
 	if !strings.Contains(reselect, "2 EXISTS") {
 		t.Errorf("after UNSELECT, SELECT = %q, want 2 EXISTS (no expunge)", reselect)
+	}
+}
+
+// TestIMAPUIDPlus covers UIDPLUS (RFC 4315): APPENDUID on APPEND, COPYUID on COPY,
+// and selective UID EXPUNGE.
+func TestIMAPUIDPlus(t *testing.T) {
+	c, _ := startServer(t)
+	c.mustOK("a1", "LOGIN alice secret")
+	c.mustOK("a2", "SELECT INBOX") // two messages, UIDs 1 and 2
+
+	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "UIDPLUS") {
+		t.Errorf("CAPABILITY missing UIDPLUS: %s", caps)
+	}
+
+	// APPEND replies with an [APPENDUID uidvalidity uid] response code.
+	msg := "Subject: appended\r\n\r\nbody"
+	fmt.Fprintf(c.conn, "a3 APPEND INBOX {%d}\r\n", len(msg))
+	if cont := c.line(); !strings.HasPrefix(cont, "+") {
+		t.Fatalf("APPEND continuation = %q, want +", cont)
+	}
+	fmt.Fprintf(c.conn, "%s\r\n", msg)
+	if a3 := c.collectTagged("a3"); !strings.Contains(a3, "[APPENDUID ") {
+		t.Errorf("APPEND = %q, want an [APPENDUID ...] response code", a3)
+	}
+
+	// COPY into a new folder replies with a [COPYUID uidvalidity src dst] code.
+	c.mustOK("a4", "CREATE Archive")
+	if a5 := c.taggedLine("a5", "COPY 1 Archive"); !strings.Contains(a5, "[COPYUID ") {
+		t.Errorf("COPY = %q, want a [COPYUID ...] response code", a5)
+	}
+
+	// UID EXPUNGE removes only the targeted \Deleted UID; the other \Deleted
+	// message (UID 2, outside the set) survives.
+	c.mustOK("a6", `STORE 1:2 +FLAGS (\Deleted)`)
+	un, status := c.do("a7", "UID EXPUNGE 1")
+	if status != "OK" {
+		t.Fatalf("UID EXPUNGE status = %s, want OK", status)
+	}
+	exp := 0
+	for _, l := range un {
+		if strings.HasSuffix(l, "EXPUNGE") {
+			exp++
+		}
+	}
+	if exp != 1 {
+		t.Errorf("UID EXPUNGE 1 emitted %d EXPUNGE lines, want exactly 1: %v", exp, un)
+	}
+	if got := strings.Join(c.mustOK("a8", "UID FETCH 2 (UID)"), " "); !strings.Contains(got, "UID 2") {
+		t.Errorf("UID 2 (\\Deleted but outside the set) should survive UID EXPUNGE 1: %q", got)
 	}
 }

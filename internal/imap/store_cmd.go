@@ -142,6 +142,54 @@ func (c *conn) doExpunge(emit bool) {
 	c.flush()
 }
 
+// cmdUIDExpunge handles UID EXPUNGE (RFC 4315): it expunges only the \Deleted
+// messages whose UID is in the set, leaving other \Deleted messages in place.
+func (c *conn) cmdUIDExpunge(tag string, args []token) {
+	if c.state != stateSelected {
+		c.no(tag, "no mailbox selected")
+		return
+	}
+	if c.readOnly {
+		c.no(tag, "mailbox is read-only")
+		return
+	}
+	if len(args) < 1 {
+		c.bad(tag, "UID EXPUNGE requires a sequence set")
+		return
+	}
+	setText, _ := args[0].str()
+	set, err := parseSeqSet(setText)
+	if err != nil {
+		c.bad(tag, "invalid sequence set")
+		return
+	}
+	max := c.sel.maxUID()
+	var survivors []objectstore.MessageInfo
+	seq := uint32(1)
+	for _, m := range c.sel.msgs {
+		if m.Flags&objectstore.FlagDeleted != 0 && set.contains(m.UID, max) {
+			if err := c.curStore().SoftDeleteMessage(c.sel.id, m.UID); err == nil {
+				c.untagged("%d EXPUNGE", seq)
+			}
+			continue
+		}
+		survivors = append(survivors, m)
+		seq++
+	}
+	c.sel.msgs = survivors
+	c.flush()
+	c.ok(tag, "UID EXPUNGE completed")
+}
+
+// uidList renders a comma-separated UID set for an APPENDUID/COPYUID response code.
+func uidList(ns []uint32) string {
+	parts := make([]string, len(ns))
+	for i, n := range ns {
+		parts[i] = fmt.Sprintf("%d", n)
+	}
+	return strings.Join(parts, ",")
+}
+
 // cmdClose handles CLOSE: it silently expunges \Deleted messages and returns to
 // the authenticated (no mailbox selected) state.
 func (c *conn) cmdClose(tag string) {
@@ -200,6 +248,7 @@ func (c *conn) cmdCopy(tag string, args []token, byUID bool) {
 		max = c.sel.maxUID()
 	}
 	src := c.curStore()
+	var srcUIDs, dstUIDs []uint32
 	for i := range c.sel.msgs {
 		key := uint32(i + 1)
 		if byUID {
@@ -213,14 +262,24 @@ func (c *conn) cmdCopy(tag string, args []token, byUID bool) {
 			c.no(tag, "copy failed")
 			return
 		}
-		if _, err := destStore.AppendMessage(destFID, raw, c.sel.msgs[i].InternalDate, c.sel.msgs[i].Flags); err != nil {
+		info, err := destStore.AppendMessage(destFID, raw, c.sel.msgs[i].InternalDate, c.sel.msgs[i].Flags)
+		if err != nil {
 			c.no(tag, "copy failed")
 			return
 		}
+		srcUIDs = append(srcUIDs, c.sel.msgs[i].UID)
+		dstUIDs = append(dstUIDs, info.UID)
 	}
 	verb := "COPY"
 	if byUID {
 		verb = "UID COPY"
+	}
+	// UIDPLUS (RFC 4315): report the source→destination UID mapping so the client
+	// need not re-sync the destination to learn the new UIDs.
+	if len(srcUIDs) > 0 {
+		uidv, _ := destStore.UIDValidity(destFID)
+		c.ok(tag, fmt.Sprintf("[COPYUID %d %s %s] %s completed", uidv, uidList(srcUIDs), uidList(dstUIDs), verb))
+		return
 	}
 	c.ok(tag, verb+" completed")
 }
@@ -256,7 +315,8 @@ func (c *conn) cmdAppend(tag string, args []token) {
 		c.no(tag, errText)
 		return
 	}
-	if _, err := destStore.AppendMessage(destFID, []byte(msg), date, flags); err != nil {
+	info, err := destStore.AppendMessage(destFID, []byte(msg), date, flags)
+	if err != nil {
 		c.no(tag, "APPEND failed")
 		return
 	}
@@ -266,7 +326,10 @@ func (c *conn) cmdAppend(tag string, args []token) {
 	if c.state == stateSelected && c.curStore() == destStore && c.sel.id == destFID {
 		c.poll()
 	}
-	c.ok(tag, "APPEND completed")
+	// UIDPLUS (RFC 4315): report the assigned UID so the client need not search for
+	// the message it just uploaded.
+	uidv, _ := destStore.UIDValidity(destFID)
+	c.ok(tag, fmt.Sprintf("[APPENDUID %d %d] APPEND completed", uidv, info.UID))
 }
 
 // appendFlags consumes an optional leading parenthesized flag list, returning

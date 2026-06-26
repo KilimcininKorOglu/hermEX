@@ -86,6 +86,8 @@ func (c *conn) cmdUID(tag string, args []token) {
 		c.cmdSearch(tag, args[1:], true)
 	case "COPY":
 		c.cmdCopy(tag, args[1:], true)
+	case "EXPUNGE":
+		c.cmdUIDExpunge(tag, args[1:])
 	default:
 		c.bad(tag, "UID "+sub+" not supported")
 	}
