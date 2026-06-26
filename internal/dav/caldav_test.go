@@ -456,3 +456,41 @@ func TestCalProppatch(t *testing.T) {
 		t.Errorf("removed dead property is still present\n%s", out)
 	}
 }
+
+// TestCalCopyMove confirms COPY duplicates an event into another calendar (keeping
+// the source), honours Overwrite:F and the same-resource rule, and MOVE relocates
+// the event and removes the source (RFC 4918 §9.8/§9.9).
+func TestCalCopyMove(t *testing.T) {
+	ts := davServerCal(t)
+	work := "/dav/calendars/" + testUser + "/work/"
+	doFull(t, ts, "MKCALENDAR", work, "", nil)
+	doFull(t, ts, "PUT", calURL("ev.ics"), timedEventICS, nil)
+
+	resp, _ := doFull(t, ts, "COPY", calURL("ev.ics"), "", map[string]string{"Destination": work + "copy.ics"})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("COPY status %d, want 201", resp.StatusCode)
+	}
+	if resp, _ := doFull(t, ts, "GET", calURL("ev.ics"), "", nil); resp.StatusCode != http.StatusOK {
+		t.Errorf("COPY removed the source: status %d, want 200", resp.StatusCode)
+	}
+	if resp, body := doFull(t, ts, "GET", work+"copy.ics", "", nil); resp.StatusCode != http.StatusOK || !strings.Contains(body, "Planning") {
+		t.Errorf("COPY destination missing or wrong: status %d\n%s", resp.StatusCode, body)
+	}
+
+	if resp, _ := doFull(t, ts, "COPY", calURL("ev.ics"), "", map[string]string{"Destination": work + "copy.ics", "Overwrite": "F"}); resp.StatusCode != http.StatusPreconditionFailed {
+		t.Errorf("COPY Overwrite:F onto existing: status %d, want 412", resp.StatusCode)
+	}
+	if resp, _ := doFull(t, ts, "COPY", calURL("ev.ics"), "", map[string]string{"Destination": calURL("ev.ics")}); resp.StatusCode != http.StatusForbidden {
+		t.Errorf("COPY to the same resource: status %d, want 403", resp.StatusCode)
+	}
+
+	if resp, _ := doFull(t, ts, "MOVE", calURL("ev.ics"), "", map[string]string{"Destination": work + "moved.ics"}); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("MOVE status %d, want 201", resp.StatusCode)
+	}
+	if resp, _ := doFull(t, ts, "GET", calURL("ev.ics"), "", nil); resp.StatusCode != http.StatusNotFound {
+		t.Errorf("MOVE did not remove the source: status %d, want 404", resp.StatusCode)
+	}
+	if resp, _ := doFull(t, ts, "GET", work+"moved.ics", "", nil); resp.StatusCode != http.StatusOK {
+		t.Errorf("MOVE destination missing: status %d, want 200", resp.StatusCode)
+	}
+}
