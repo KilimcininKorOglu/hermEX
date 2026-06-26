@@ -3,9 +3,41 @@ package nspi
 import (
 	"testing"
 
+	"hermex/internal/directory"
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
 )
+
+// profileGAL is a GAL source that also serves user properties, exercising the lazy
+// profile-field path in GetProps (StaticAccounts alone has no GetUserProperties).
+type profileGAL struct {
+	directory.StaticAccounts
+	props map[string]map[uint32]string
+}
+
+func (p profileGAL) GetUserProperties(username string) (map[uint32]string, error) {
+	return p.props[username], nil
+}
+
+// TestGetPropsProfileFields proves the GAL serves a user's directory profile fields
+// (title, department) so they appear in Outlook's detail view.
+func TestGetPropsProfileFields(t *testing.T) {
+	gal := profileGAL{
+		StaticAccounts: directory.StaticAccounts{"alice@hermex.test": {Password: "x", MailboxPath: "/mb/a"}},
+		props: map[string]map[uint32]string{
+			"alice@hermex.test": {uint32(mapi.PrTitle): "Engineer", uint32(mapi.PrDepartmentName): "R&D"},
+		},
+	}
+	s := NewServer(gal, testGUID)
+	_, row := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midBase, codePage: 1252},
+		[]mapi.PropTag{mapi.PrTitle, mapi.PrDepartmentName})))
+	if v, _ := row.Get(mapi.PrTitle); v != "Engineer" {
+		t.Errorf("PrTitle = %v, want Engineer", v)
+	}
+	if v, _ := row.Get(mapi.PrDepartmentName); v != "R&D" {
+		t.Errorf("PrDepartmentName = %v, want R&D", v)
+	}
+}
 
 // buildGetProps frames a GetProps request: flags + a STAT (carrying cur_rec and
 // the code page) + an optional explicit column set + an empty auxiliary buffer.

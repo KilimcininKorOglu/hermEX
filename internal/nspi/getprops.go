@@ -110,12 +110,47 @@ func (s *Server) getPropsCore(req getPropsRequest) getPropsResult {
 			bag = append(bag, mapi.TaggedPropVal{Tag: mapi.PrEmsAbX509Cert, Value: [][]byte{cert}})
 		}
 	}
+	// Serve the directory profile fields (title, department, phones, etc.) lazily
+	// from the user's properties when any is requested, so Outlook's GAL detail shows
+	// them. The optional reader is absent for the static directory.
+	if pr, ok := s.gal.(userPropertyReader); ok && anyTagRequested(req.proptags, galProfileProptags) {
+		if props, err := pr.GetUserProperties(u.smtp); err == nil {
+			for _, tag := range galProfileProptags {
+				if v := props[uint32(tag)]; v != "" && slices.Contains(req.proptags, tag) {
+					bag = append(bag, mapi.TaggedPropVal{Tag: tag, Value: v})
+				}
+			}
+		}
+	}
 	row, hasErr := projectProps(bag, req.proptags)
 	result := ecSuccess
 	if hasErr {
 		result = ecWarnWithErrors
 	}
 	return getPropsResult{result: result, codePage: req.stat.codePage, row: row}
+}
+
+// userPropertyReader is the optional gal-source capability to read a user's MAPI
+// properties; SQLDirectory satisfies it, the static directory does not.
+type userPropertyReader interface {
+	GetUserProperties(username string) (map[uint32]string, error)
+}
+
+// galProfileProptags are the person properties served in the GAL from a user's
+// directory profile (PtUnicode strings), so Outlook's detail view shows them.
+var galProfileProptags = []mapi.PropTag{
+	mapi.PrTitle, mapi.PrDepartmentName, mapi.PrCompanyName, mapi.PrOfficeLocation,
+	mapi.PrGivenName, mapi.PrSurname, mapi.PrBusinessTelephoneNumber, mapi.PrMobileTelephoneNumber,
+}
+
+// anyTagRequested reports whether any of want appears in requested.
+func anyTagRequested(requested, want []mapi.PropTag) bool {
+	for _, t := range want {
+		if slices.Contains(requested, t) {
+			return true
+		}
+	}
+	return false
 }
 
 // projectProps builds a GetProps row: each requested tag maps to the entry's
