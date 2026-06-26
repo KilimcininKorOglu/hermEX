@@ -77,7 +77,7 @@ up:
 down:
 	$(COMPOSE) down
 
-## rebuild: rebuild and restart a single service, e.g. make rebuild SVC=webmail
+## rebuild: rebuild and restart a single service, e.g. make rebuild SVC=webmail2
 rebuild:
 	@test -n "$(SVC)" || { echo "set SVC=<service>"; exit 2; }
 	$(COMPOSE) build $(SVC) && $(COMPOSE) up -d --no-deps $(SVC)
