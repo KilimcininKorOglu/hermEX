@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"hermex/internal/mapi"
+	"hermex/internal/mta"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcmail"
 )
 
 // CalDAV scheduling (RFC 6638). The scheduling Outbox accepts a POST carrying an
@@ -19,7 +21,9 @@ import (
 // does not perform server-to-server (iSchedule) lookups, so a non-local attendee is
 // reported as an invalid calendar user rather than queried remotely.
 
-// handleOutboxPost answers a POST to the scheduling Outbox (RFC 6638 §5).
+// handleOutboxPost answers a POST to the scheduling Outbox (RFC 6638 §5): a
+// VFREEBUSY request is answered with each attendee's busy periods, while an event
+// component (VEVENT) carrying an iTIP METHOD is delivered to its recipients.
 func (s *Server) handleOutboxPost(w http.ResponseWriter, r *http.Request, user string) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, s.icalLimit()))
 	if err != nil {
@@ -31,21 +35,22 @@ func (s *Server) handleOutboxPost(w http.ResponseWriter, r *http.Request, user s
 		schedulePreconditionFail(w, "valid-scheduling-message", http.StatusBadRequest)
 		return
 	}
-
-	// This increment handles free-busy requests; event scheduling via the Outbox is
-	// delivered in a later increment.
-	var vfb *icalNode
 	for _, c := range root.kids {
-		if strings.EqualFold(c.name, "VFREEBUSY") {
-			vfb = c
-			break
+		switch strings.ToUpper(c.name) {
+		case "VFREEBUSY":
+			s.outboxFreeBusy(w, user, c)
+			return
+		case "VEVENT", "VTODO":
+			s.outboxDeliver(w, user, root, c, string(body))
+			return
 		}
 	}
-	if vfb == nil {
-		http.Error(w, "only free-busy requests are supported on the scheduling Outbox", http.StatusNotImplemented)
-		return
-	}
+	http.Error(w, "unsupported scheduling message", http.StatusNotImplemented)
+}
 
+// outboxFreeBusy answers a free-busy request: for each ATTENDEE that resolves to a
+// local mailbox it returns that user's busy periods (RFC 6638 §5).
+func (s *Server) outboxFreeBusy(w http.ResponseWriter, user string, vfb *icalNode) {
 	// valid-organizer (RFC 6638 §5.2.6): the ORGANIZER must be a calendar user
 	// address of the Outbox owner.
 	if !addrMatchesOwner(user, firstPropValue(vfb, "ORGANIZER")) {
@@ -78,6 +83,138 @@ func (s *Server) handleOutboxPost(w http.ResponseWriter, r *http.Request, user s
 		})
 	}
 	writeScheduleResponse(w, resp)
+}
+
+// outboxDeliver delivers an iTIP scheduling message (REQUEST/CANCEL from the
+// organizer, REPLY from an attendee) to its recipients through the shared mail
+// submission path, then reports per-recipient status (RFC 6638 §5.2). The message
+// is wrapped as iMIP via oxcmail.Export — the one proven outgoing-mail path — and
+// handed to mta.DeliverAndRelay, which files it in each local recipient's mailbox
+// and relays external ones when a spool is configured.
+func (s *Server) outboxDeliver(w http.ResponseWriter, user string, root, comp *icalNode, body string) {
+	method := strings.ToUpper(firstPropValue(root, "METHOD"))
+	organizer := firstPropValue(comp, "ORGANIZER")
+	attendees := allPropValues(comp, "ATTENDEE")
+
+	// An attendee-originated method (a reply) is addressed to the organizer; an
+	// organizer-originated one (a request/cancel) to the attendees.
+	var recipients []string
+	switch method {
+	case "REPLY", "REFRESH", "COUNTER":
+		// The Outbox owner must be one of the attendees on whose behalf the reply is
+		// sent, and the organizer is the sole recipient.
+		if !ownerAmong(user, attendees) || organizer == "" {
+			schedulePreconditionFail(w, "valid-organizer", http.StatusForbidden)
+			return
+		}
+		recipients = []string{organizer}
+	default:
+		// valid-organizer (RFC 6638 §5.2.6): the ORGANIZER must be the Outbox owner.
+		if !addrMatchesOwner(user, organizer) {
+			schedulePreconditionFail(w, "valid-organizer", http.StatusForbidden)
+			return
+		}
+		recipients = attendees
+	}
+	if len(recipients) == 0 || method == "" {
+		schedulePreconditionFail(w, "valid-scheduling-message", http.StatusBadRequest)
+		return
+	}
+
+	raw, err := buildITIP(user, recipients, scheduleSubject(method, firstPropValue(comp, "SUMMARY")), body, method)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	unresolved, err := mta.DeliverAndRelay(s.accounts, s.spool, user, stripMailtoAll(recipients), raw, time.Now())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	bad := make(map[string]bool, len(unresolved))
+	for _, u := range unresolved {
+		bad[strings.ToLower(u)] = true
+	}
+
+	resp := &scheduleResponse{}
+	for _, rcpt := range recipients {
+		if bad[strings.ToLower(stripMailto(rcpt))] {
+			resp.Responses = append(resp.Responses, invalidRecipient(rcpt))
+			continue
+		}
+		resp.Responses = append(resp.Responses, scheduleRespItem{
+			Recipient:     href{Href: rcpt},
+			RequestStatus: "2.0;Success",
+		})
+	}
+	writeScheduleResponse(w, resp)
+}
+
+// buildITIP wraps an iTIP scheduling message as an iMIP email (RFC 6047) addressed
+// from the originator to the recipients, carrying the iCalendar as a text/calendar
+// part with its METHOD. The MIME is produced by oxcmail.Export, never hand-rolled.
+func buildITIP(originator string, recipients []string, subject, body, method string) ([]byte, error) {
+	msg := &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrSubject, Value: subject},
+		{Tag: mapi.PrSenderSmtpAddress, Value: originator},
+		{Tag: mapi.PrSenderEmailAddress, Value: originator},
+		{Tag: mapi.PrSenderAddrType, Value: "SMTP"},
+	}}
+	for _, rcpt := range recipients {
+		msg.Recipients = append(msg.Recipients, mapi.PropertyValues{
+			{Tag: mapi.PrRecipientType, Value: int32(mapi.RecipTo)},
+			{Tag: mapi.PrSmtpAddress, Value: stripMailto(rcpt)},
+		})
+	}
+	oxcmail.EnsureMessageID(&msg.Props)
+	return oxcmail.Export(msg, oxcmail.Options{CalendarBody: []byte(body), CalendarMethod: method})
+}
+
+// allPropValues returns the values of every property of the given name in a
+// component (e.g. the full ATTENDEE list).
+func allPropValues(n *icalNode, name string) []string {
+	var out []string
+	for _, p := range n.propsByName(name) {
+		out = append(out, strings.TrimSpace(p.value))
+	}
+	return out
+}
+
+// ownerAmong reports whether the Outbox owner is one of the listed calendar
+// addresses.
+func ownerAmong(user string, addrs []string) bool {
+	for _, a := range addrs {
+		if addrMatchesOwner(user, a) {
+			return true
+		}
+	}
+	return false
+}
+
+// stripMailtoAll strips the mailto: scheme from each address for directory
+// resolution and relay routing.
+func stripMailtoAll(addrs []string) []string {
+	out := make([]string, len(addrs))
+	for i, a := range addrs {
+		out[i] = stripMailto(a)
+	}
+	return out
+}
+
+// scheduleSubject builds a human-readable iMIP subject from the iTIP method and the
+// event summary.
+func scheduleSubject(method, summary string) string {
+	if summary == "" {
+		summary = "Meeting"
+	}
+	switch method {
+	case "CANCEL":
+		return "Canceled: " + summary
+	case "REPLY":
+		return "Response: " + summary
+	default:
+		return summary
+	}
 }
 
 // invalidRecipient marks a recipient that does not resolve to a local mailbox; a

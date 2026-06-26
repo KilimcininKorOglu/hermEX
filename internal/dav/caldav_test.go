@@ -575,6 +575,139 @@ func TestOutboxRemoteRecipient(t *testing.T) {
 	}
 }
 
+// davServerWithPeer starts a DAV server whose directory knows the test user (the
+// Outbox owner) plus a local peer "bob"; it returns the server and bob's mailbox
+// directory so a test can inspect what was delivered to him. No relay spool is wired,
+// so delivery is local-only.
+func davServerWithPeer(t *testing.T) (*httptest.Server, string) {
+	t.Helper()
+	bobDir := filepath.Join(t.TempDir(), "bob")
+	st, err := objectstore.Open(bobDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	accs := directory.StaticAccounts{
+		testUser:          {Password: testPass, MailboxPath: filepath.Join(t.TempDir(), "alice")},
+		"bob@hermex.test": {Password: testPass, MailboxPath: bobDir},
+	}
+	ts := httptest.NewServer(NewServer(accs, accs, "hermex.test").Handler())
+	t.Cleanup(ts.Close)
+	return ts, bobDir
+}
+
+// inboxMessage reports the count, message class, and subject of the first message in
+// a mailbox's Inbox, so a delivery test can confirm what landed there.
+func inboxMessage(t *testing.T, dir string) (count int, class, subject string) {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDInbox))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objs) == 0 {
+		return 0, "", ""
+	}
+	msg, err := st.OpenMessage(objs[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range msg.Props {
+		switch p.Tag {
+		case mapi.PrMessageClass:
+			class, _ = p.Value.(string)
+		case mapi.PrSubject:
+			subject, _ = p.Value.(string)
+		}
+	}
+	return len(objs), class, subject
+}
+
+func meetingRequestICS(organizer, attendee string) string {
+	return "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\nMETHOD:REQUEST\r\n" +
+		"BEGIN:VEVENT\r\nUID:mtg-1\r\nSUMMARY:Planning\r\nDTSTART:20260615T140000Z\r\nDTEND:20260615T150000Z\r\n" +
+		"ORGANIZER:mailto:" + organizer + "\r\nATTENDEE:mailto:" + attendee + "\r\n" +
+		"END:VEVENT\r\nEND:VCALENDAR\r\n"
+}
+
+// TestOutboxDeliverRequest confirms an organizer's Outbox POST of a METHOD:REQUEST
+// is delivered to a local attendee's mailbox as a meeting request and reported as
+// successfully scheduled (RFC 6638 §5.2).
+func TestOutboxDeliverRequest(t *testing.T) {
+	ts, bobDir := davServerWithPeer(t)
+	resp, out := doFull(t, ts, "POST", "/dav/calendars/"+testUser+"/outbox/", meetingRequestICS(testUser, "bob@hermex.test"), nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("Outbox POST status %d, want 200\n%s", resp.StatusCode, out)
+	}
+	if !strings.Contains(out, "bob@hermex.test") || !strings.Contains(out, "2.0;Success") {
+		t.Errorf("schedule-response did not report bob scheduled\n%s", out)
+	}
+	n, class, subject := inboxMessage(t, bobDir)
+	if n != 1 {
+		t.Fatalf("bob's inbox has %d messages, want 1", n)
+	}
+	if !strings.Contains(class, "Schedule.Meeting.Request") {
+		t.Errorf("delivered message class %q, want a meeting request", class)
+	}
+	if subject != "Planning" {
+		t.Errorf("delivered subject %q, want Planning", subject)
+	}
+}
+
+// TestOutboxDeliverValidOrganizer confirms a request whose ORGANIZER is not the
+// Outbox owner is rejected (RFC 6638 §5.2.6, valid-organizer).
+func TestOutboxDeliverValidOrganizer(t *testing.T) {
+	ts := davServerCal(t)
+	resp, out := doFull(t, ts, "POST", "/dav/calendars/"+testUser+"/outbox/", meetingRequestICS("eve@evil.test", testUser), nil)
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status %d, want 403\n%s", resp.StatusCode, out)
+	}
+	if !strings.Contains(out, "valid-organizer") {
+		t.Errorf("403 body lacks the valid-organizer precondition\n%s", out)
+	}
+}
+
+// TestOutboxDeliverRemote confirms a non-local attendee is reported undeliverable
+// when no relay spool is wired (delivery is local-only).
+func TestOutboxDeliverRemote(t *testing.T) {
+	ts := davServerCal(t)
+	resp, out := doFull(t, ts, "POST", "/dav/calendars/"+testUser+"/outbox/", meetingRequestICS(testUser, "remote@elsewhere.example"), nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200\n%s", resp.StatusCode, out)
+	}
+	if !strings.Contains(out, "3.7;Invalid calendar user") {
+		t.Errorf("schedule-response did not mark the remote recipient undeliverable\n%s", out)
+	}
+}
+
+// TestOutboxDeliverReply confirms an attendee's Outbox POST of a METHOD:REPLY is
+// delivered to the organizer as a meeting response.
+func TestOutboxDeliverReply(t *testing.T) {
+	ts, bobDir := davServerWithPeer(t)
+	reply := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\nMETHOD:REPLY\r\n" +
+		"BEGIN:VEVENT\r\nUID:mtg-1\r\nSUMMARY:Planning\r\nDTSTART:20260615T140000Z\r\nDTEND:20260615T150000Z\r\n" +
+		"ORGANIZER:mailto:bob@hermex.test\r\nATTENDEE;PARTSTAT=ACCEPTED:mailto:" + testUser + "\r\n" +
+		"END:VEVENT\r\nEND:VCALENDAR\r\n"
+	resp, out := doFull(t, ts, "POST", "/dav/calendars/"+testUser+"/outbox/", reply, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200\n%s", resp.StatusCode, out)
+	}
+	if !strings.Contains(out, "bob@hermex.test") || !strings.Contains(out, "2.0;Success") {
+		t.Errorf("schedule-response did not report the reply delivered\n%s", out)
+	}
+	n, class, _ := inboxMessage(t, bobDir)
+	if n != 1 {
+		t.Fatalf("organizer's inbox has %d messages, want 1", n)
+	}
+	if !strings.Contains(class, "Schedule.Meeting.Resp") {
+		t.Errorf("delivered message class %q, want a meeting response", class)
+	}
+}
+
 // TestScheduleDiscovery confirms the principal advertises the CalDAV scheduling
 // discovery properties (RFC 6638 §2.2/§2.4.1): the calendar user address set and the
 // scheduling Inbox/Outbox URLs a client needs to drive auto-scheduling.

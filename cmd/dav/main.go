@@ -18,11 +18,13 @@ import (
 	"hermex/internal/config"
 	"hermex/internal/dav"
 	"hermex/internal/directory"
+	"hermex/internal/dkimsign"
 	"hermex/internal/health"
 	"hermex/internal/ldapauth"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/objectstore"
+	"hermex/internal/relay"
 	"hermex/internal/serve"
 )
 
@@ -50,6 +52,15 @@ func main() {
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
 
 	srv := dav.NewServer(dir, dir, cfg.Hostname)
+	// Scheduling-Outbox iTIP messages with external recipients are enqueued into the
+	// shared relay spool the MTA drains, DKIM-signed with the sending domain's key as
+	// they are spooled (RFC 6638 §5).
+	spool, err := relay.Open(cfg.RelaySpoolPath())
+	if err != nil {
+		log.Fatalf("hermex-dav: open relay spool: %v", err)
+	}
+	spool.Signer = &dkimsign.Signer{Keys: dir, Logger: logger}
+	srv.SetSpool(spool)
 	// CalDAV/CardDAV PUT body caps: read at startup and re-read every minute so an
 	// admin's change applies without a restart; 0 keeps the built-in defaults.
 	applyDAVSizeLimits(dir.GetSizeLimits, srv.SetMaxICal, srv.SetMaxVCard)
@@ -70,7 +81,7 @@ func main() {
 	log.Printf("hermex-dav listening on %s", addr)
 	comps := append([]lifecycle.Component{hs},
 		health.Components(cfg.HealthAddr, "dav", health.Check{Name: "directory", Probe: db.PingContext})...)
-	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, logClose, db.Close); err != nil {
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, spool.Close, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-dav: %v", err)
 	}
 }

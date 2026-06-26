@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 
 	"hermex/internal/directory"
+	"hermex/internal/relay"
 )
 
 // Server answers DAV requests for the authenticated user's mailbox.
@@ -19,6 +20,11 @@ type Server struct {
 	auth     directory.Authenticator
 	accounts directory.Accounts
 	hostname string
+	// spool is the outbound relay queue scheduling-Outbox iTIP messages are handed to
+	// for external recipients (RFC 6638 §5). It is nil by default — then delivery is
+	// local-only and a remote recipient is reported as undeliverable — and set by the
+	// daemon via SetSpool when a relay queue is available.
+	spool *relay.Spool
 	// maxICal and maxVCard cap the iCalendar and vCard PUT bodies in bytes (0 = the
 	// built-in defaults), held atomically so the DAV daemon's poll can apply an
 	// operator's edit while requests run, with no restart. Set them via SetMaxICal /
@@ -32,6 +38,11 @@ type Server struct {
 func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostname string) *Server {
 	return &Server{auth: auth, accounts: accounts, hostname: hostname}
 }
+
+// SetSpool wires the outbound relay queue used to deliver scheduling-Outbox iTIP
+// messages to external recipients. With no spool (the default) delivery is
+// local-only. It is set once at startup before requests are served.
+func (s *Server) SetSpool(spool *relay.Spool) { s.spool = spool }
 
 // SetMaxICal and SetMaxVCard set the iCalendar / vCard PUT body caps in bytes (0
 // restores the built-in default). They are safe to call concurrently with request
