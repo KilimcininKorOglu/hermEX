@@ -76,6 +76,7 @@ func (s *Store) CreateFolder(parent *int64, displayName string) (int64, error) {
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
+	s.publishChange("folder", cn, "")
 	return int64(fid), nil
 }
 
@@ -250,6 +251,7 @@ func (s *Store) DeleteFolder(folderID int64) error {
 			return err
 		}
 	}
+	s.publishChange("folder", 0, "")
 	return nil
 }
 

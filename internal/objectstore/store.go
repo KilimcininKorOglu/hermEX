@@ -51,6 +51,51 @@ func SetDefaultLogger(l *logging.Logger) {
 	defaultLogger.Store(l)
 }
 
+// ChangeEvent describes one committed mailbox mutation, published to the central
+// notify relay so a long-poll consumer (MAPI/HTTP NotificationWait, EAS Ping, EWS
+// streaming, IMAP IDLE) wakes and runs its own authoritative diff the instant the
+// change lands instead of on its next poll tick. CN/Op/Mid are enrichment — the
+// consumer's diff is what observes the change — so they need only be best-effort
+// accurate; a delete that bumps no change number still wakes the consumer, whose
+// diff sees the vanished row regardless.
+type ChangeEvent struct {
+	MailboxDir string // the mutated store's directory (Dir()) — the key a consumer matches against the mailbox it is polling
+	Op         string // the mutation kind: create | modify | flags | delete | folder
+	CN         uint64 // the change number stamped on the write; 0 when the write bumps none (a delete, or an index-only change)
+	Mid        string // the mid_string of a deleted/created message, when cheaply in scope; empty otherwise
+}
+
+// changePublisher is the central push hook a daemon installs at startup so a
+// committed mailbox mutation wakes the long-poll consumers in real time. It mirrors
+// defaultLogger: a package-level atomic so Open's many write paths need no threaded
+// publisher, set once before serving and read-only after. A nil hook (the test and
+// library baseline) is byte-identical to the pre-push behaviour — publishing is a
+// best-effort accelerator the mail path never depends on, so an absent or failing
+// relay simply leaves consumers on their existing poll cadence.
+var changePublisher atomic.Pointer[func(ChangeEvent)]
+
+// SetChangePublisher installs the push hook that open stores call after a committed
+// mutation. A daemon calls it once at startup; passing nil disables push (the
+// poll-only baseline). Stores already open observe the change on their next call.
+func SetChangePublisher(fn func(ChangeEvent)) {
+	if fn == nil {
+		changePublisher.Store(nil)
+		return
+	}
+	changePublisher.Store(&fn)
+}
+
+// publishChange best-effort-notifies the central relay that this mailbox changed,
+// so a consumer's long-poll wakes and re-runs its authoritative diff. It MUST be
+// called only AFTER the mutating transaction commits: a pre-commit wake would let
+// the consumer diff before the row is visible and miss the change until its next
+// poll. A nil hook is a no-op, identical to the pre-push behaviour.
+func (s *Store) publishChange(op string, cn uint64, mid string) {
+	if p := changePublisher.Load(); p != nil {
+		(*p)(ChangeEvent{MailboxDir: s.dir, Op: op, CN: cn, Mid: mid})
+	}
+}
+
 // Store is a handle to one mailbox: the MAPI object store (objdb), the IMAP/POP3
 // index (idxdb), and the cid/ and eml/ content directories under a mailbox
 // directory.

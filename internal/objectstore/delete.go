@@ -39,6 +39,9 @@ func (s *Store) DeleteMessage(folderID int64, uid uint32) error {
 	}
 	// The cached eml is orphaned once the index row is gone; best-effort cleanup.
 	_ = os.Remove(s.emlPath(mid))
+	// A hard delete bumps no change number, so the event carries the mid; the
+	// consumer's diff observes the vanished row regardless.
+	s.publishChange("delete", 0, mid)
 	return nil
 }
 
@@ -68,5 +71,6 @@ func (s *Store) DeleteObject(messageID int64) error {
 		return err
 	}
 	_ = os.Remove(s.emlPath(mid))
+	s.publishChange("delete", 0, mid)
 	return nil
 }

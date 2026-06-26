@@ -102,6 +102,10 @@ func (s *Store) CreateMessage(folderID int64, msg *oxcmail.Message) (int64, erro
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
+	// Wake long-poll consumers that diff the object store (MAPI/EWS). A message
+	// reaches the IMAP index only via AppendMessage, which re-publishes after it
+	// indexes, so an IMAP consumer is woken once the row it can see exists.
+	s.publishChange("create", cn, mid)
 	return id, nil
 }
 

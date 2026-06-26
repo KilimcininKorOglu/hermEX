@@ -119,6 +119,11 @@ func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time
 	if err != nil {
 		return MessageInfo{}, err
 	}
+	// Re-publish now the IMAP index row exists. CreateMessage already published a
+	// "create" for the object store (which MAPI/EWS diff), but the message is not
+	// visible to IMAP/EAS until indexed here, so a consumer woken by that earlier
+	// event would not yet see it. This second wake fires once the index is in place.
+	s.publishChange("create", 0, mid)
 	return MessageInfo{
 		ID:           eid,
 		UID:          uint32(uid),

@@ -106,6 +106,9 @@ func (s *Store) softDeleteRow(messageID int64) error {
 	if _, err := s.idxdb.Exec(`DELETE FROM mapping WHERE message_id=?`, messageID); err != nil {
 		return err
 	}
+	// A soft delete leaves every live view (the index row is gone), so consumers
+	// observe it as a removal; the change number was bumped above.
+	s.publishChange("delete", 0, midString(uint64(messageID)))
 	return nil
 }
 

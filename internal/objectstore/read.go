@@ -165,6 +165,7 @@ func (s *Store) SetMessageFlags(folderID int64, uid uint32, flags int64) error {
 		bit(FlagSeen), bit(FlagAnswered), bit(FlagFlagged), bit(FlagDeleted), bit(FlagDraft), messageID); err != nil {
 		return err
 	}
+	s.publishChange("flags", 0, "")
 	return nil
 }
 
@@ -194,6 +195,7 @@ func (s *Store) SetMessageReadState(messageID int64, read bool) error {
 	if _, err := s.idxdb.Exec(`UPDATE messages SET read=? WHERE message_id=?`, b, messageID); err != nil {
 		return err
 	}
+	s.publishChange("flags", 0, "")
 	return nil
 }
 

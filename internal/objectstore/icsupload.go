@@ -345,6 +345,11 @@ func (um *UploadMessage) Commit() (uint64, error) {
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
+	op := "modify"
+	if um.isNew {
+		op = "create"
+	}
+	um.store.publishChange(op, cn, midString(um.mid))
 	return um.mid, nil
 }
 
@@ -478,6 +483,9 @@ func (s *Store) ImportReadStateChanges(folderID int64, changes []ReadStateChange
 			return nil, err
 		}
 	}
+	if len(mirror) > 0 {
+		s.publishChange("flags", 0, "")
+	}
 	return readCNs, nil
 }
 
@@ -581,6 +589,7 @@ func (s *Store) ImportHierarchyChange(rootFID int64, hichyvals, propvals mapi.Pr
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
+	s.publishChange("folder", cn, "")
 	return fid, nil
 }
 

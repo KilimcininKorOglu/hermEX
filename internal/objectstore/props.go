@@ -104,7 +104,11 @@ func (s *Store) ModifyMessageProperties(messageID int64, props mapi.PropertyValu
 	if _, err := tx.Exec(`UPDATE messages SET change_number=? WHERE message_id=?`, int64(cn), messageID); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	s.publishChange("modify", cn, "")
+	return nil
 }
 
 // SetRecipientProperties upserts properties on a recipient.
