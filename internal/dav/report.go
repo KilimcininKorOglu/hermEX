@@ -2,11 +2,13 @@ package dav
 
 import (
 	"encoding/xml"
+	"fmt"
 	"io"
 	"net/http"
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
@@ -19,9 +21,10 @@ import (
 // sync-token drives sync-collection.
 type reportReq struct {
 	XMLName   xml.Name
-	Hrefs     []string `xml:"href"`
-	SyncToken string   `xml:"sync-token"`
-	Filter    *filter  `xml:"filter"`
+	Hrefs     []string   `xml:"href"`
+	SyncToken string     `xml:"sync-token"`
+	Filter    *filter    `xml:"filter"`
+	TimeRange *timeRange `xml:"time-range"` // free-busy-query's direct time-range child
 }
 
 // handleReport dispatches a CardDAV REPORT (RFC 6352 §8) on the addressbook
@@ -61,8 +64,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox st
 	case "calendar-query":
 		s.reportCalQueryOrSync(w, st, user, 0, false, req.Filter)
 	case "free-busy-query":
-		// Free/busy aggregation is not implemented in v1; return an empty result.
-		writeMultistatus(w, &multistatus{})
+		s.handleFreeBusy(w, st, req.TimeRange)
 	case "sync-collection":
 		if kind == kindCalendar {
 			s.reportCalQueryOrSync(w, st, user, parseSyncToken(req.SyncToken), true, nil)
@@ -148,6 +150,75 @@ func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store,
 		ms.SyncToken = syncToken(syncMax)
 	}
 	writeMultistatus(w, ms)
+}
+
+// handleFreeBusy answers a CALDAV:free-busy-query (RFC 4791 §7.10): it aggregates
+// the busy (non-transparent) VEVENTs overlapping the requested range into a
+// VFREEBUSY component, returned as text/calendar.
+func (s *Server) handleFreeBusy(w http.ResponseWriter, st *objectstore.Store, tr *timeRange) {
+	var rangeStart, rangeEnd time.Time
+	var okS, okE bool
+	if tr != nil {
+		rangeStart, okS = parseFilterTime(tr.Start)
+		rangeEnd, okE = parseFilterTime(tr.End)
+	}
+	objs, err := st.ListFolderObjects(mapi.PrivateFIDCalendar)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	var periods []string
+	for _, o := range objs {
+		data, err := calendarData(st, o.ID)
+		if err != nil {
+			continue
+		}
+		root := parseICalNode(data)
+		if root == nil {
+			continue
+		}
+		for _, ev := range root.kids {
+			if !strings.EqualFold(ev.name, "VEVENT") {
+				continue
+			}
+			// A transparent event does not block time (RFC 4791 §7.10).
+			if tp := ev.propsByName("TRANSP"); len(tp) > 0 && strings.EqualFold(strings.TrimSpace(tp[0].value), "TRANSPARENT") {
+				continue
+			}
+			start, end, ok := eventSpan(ev)
+			if !ok {
+				continue
+			}
+			if (okE && !start.Before(rangeEnd)) || (okS && !end.After(rangeStart)) {
+				continue // outside the requested range
+			}
+			cs, ce := start, end
+			if okS && cs.Before(rangeStart) {
+				cs = rangeStart
+			}
+			if okE && ce.After(rangeEnd) {
+				ce = rangeEnd
+			}
+			periods = append(periods, formatICalUTCZ(cs)+"/"+formatICalUTCZ(ce))
+		}
+	}
+
+	var b strings.Builder
+	b.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//CalDAV//EN\r\nBEGIN:VFREEBUSY\r\n")
+	if okS {
+		fmt.Fprintf(&b, "DTSTART:%s\r\n", formatICalUTCZ(rangeStart))
+	}
+	if okE {
+		fmt.Fprintf(&b, "DTEND:%s\r\n", formatICalUTCZ(rangeEnd))
+	}
+	fmt.Fprintf(&b, "DTSTAMP:%s\r\n", formatICalUTCZ(time.Now()))
+	for _, p := range periods {
+		fmt.Fprintf(&b, "FREEBUSY;FBTYPE=BUSY:%s\r\n", p)
+	}
+	b.WriteString("END:VFREEBUSY\r\nEND:VCALENDAR\r\n")
+	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(b.String()))
 }
 
 // addressData exports a stored contact to its vCard text.

@@ -373,24 +373,21 @@ func textMatches(tm *textMatch, value string) bool {
 
 // --- time-range (RFC 4791 §9.9) ---
 
-// timeRangeMatchesComp reports whether a component's effective [start,end) overlaps
-// the filter range. The component's span is DTSTART plus DTEND or DURATION (an
-// all-day DTSTART with neither spans one day; a timed DTSTART with neither is a
-// zero-length instant).
-func timeRangeMatchesComp(tr *timeRange, c *icalNode) bool {
-	rangeStart, okS := parseFilterTime(tr.Start)
-	rangeEnd, okE := parseFilterTime(tr.End)
-	dtstart := c.propsByName("DTSTART")
-	if len(dtstart) == 0 {
-		return false
+// eventSpan returns a component's effective [start,end): DTSTART plus DTEND or
+// DURATION (an all-day DTSTART with neither spans one day; a timed DTSTART with
+// neither is a zero-length instant). ok is false without a parseable DTSTART.
+func eventSpan(c *icalNode) (start, end time.Time, ok bool) {
+	ds := c.propsByName("DTSTART")
+	if len(ds) == 0 {
+		return time.Time{}, time.Time{}, false
 	}
-	start, allDay, ok := propTime(dtstart[0])
+	start, allDay, ok := propTime(ds[0])
 	if !ok {
-		return false
+		return time.Time{}, time.Time{}, false
 	}
-	end := start
-	if dt := c.propsByName("DTEND"); len(dt) > 0 {
-		if e, _, ok := propTime(dt[0]); ok {
+	end = start
+	if de := c.propsByName("DTEND"); len(de) > 0 {
+		if e, _, ok := propTime(de[0]); ok {
 			end = e
 		}
 	} else if du := c.propsByName("DURATION"); len(du) > 0 {
@@ -400,16 +397,27 @@ func timeRangeMatchesComp(tr *timeRange, c *icalNode) bool {
 	} else if allDay {
 		end = start.Add(24 * time.Hour)
 	}
-	// Overlap: start < rangeEnd AND end > rangeStart, with an open-ended range when
-	// a bound was omitted or unparseable.
-	if okS && !end.After(rangeStart) {
+	return start, end, true
+}
+
+// timeRangeMatchesComp reports whether a component's span overlaps the filter range.
+// An omitted or unparseable bound leaves that side open.
+func timeRangeMatchesComp(tr *timeRange, c *icalNode) bool {
+	start, end, ok := eventSpan(c)
+	if !ok {
 		return false
 	}
-	if okE && !start.Before(rangeEnd) {
+	if rangeStart, okS := parseFilterTime(tr.Start); okS && !end.After(rangeStart) {
+		return false
+	}
+	if rangeEnd, okE := parseFilterTime(tr.End); okE && !start.Before(rangeEnd) {
 		return false
 	}
 	return true
 }
+
+// formatICalUTCZ renders a UTC instant as an iCalendar DATE-TIME with a Z suffix.
+func formatICalUTCZ(t time.Time) string { return t.UTC().Format("20060102T150405Z") }
 
 // parseFilterTime parses a time-range bound: an iCalendar UTC DATE-TIME (RFC 4791
 // requires the Z form).

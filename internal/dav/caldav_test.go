@@ -340,3 +340,33 @@ func TestCalReportSyncDelete(t *testing.T) {
 		t.Errorf("tombstone re-reported on the next sync (token did not advance past the delete)\n%s", out)
 	}
 }
+
+// TestCalFreeBusy confirms free-busy-query aggregates the in-range busy events into
+// a VFREEBUSY component and excludes out-of-range ones (RFC 4791 §7.10).
+func TestCalFreeBusy(t *testing.T) {
+	ts := davServerCal(t)
+	doFull(t, ts, "PUT", calURL("june.ics"), timedEventICS, nil) // June 15 14:00-15:00Z
+	dec := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\nBEGIN:VEVENT\r\n" +
+		"UID:cal-9\r\nSUMMARY:Yearend\r\nDTSTART:20261215T140000Z\r\nDTEND:20261215T150000Z\r\n" +
+		"END:VEVENT\r\nEND:VCALENDAR\r\n"
+	doFull(t, ts, "PUT", calURL("dec.ics"), dec, nil)
+
+	body := `<c:free-busy-query xmlns:c="urn:ietf:params:xml:ns:caldav">
+  <c:time-range start="20260601T000000Z" end="20260701T000000Z"/>
+</c:free-busy-query>`
+	resp, out := doFull(t, ts, "REPORT", calURL(""), body, map[string]string{"Depth": "1"})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("free-busy status %d, want 200\n%s", resp.StatusCode, out)
+	}
+	if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/calendar") {
+		t.Errorf("free-busy content-type %q, want text/calendar", ct)
+	}
+	for _, want := range []string{"BEGIN:VFREEBUSY", "FREEBUSY;FBTYPE=BUSY:20260615T140000Z/20260615T150000Z", "END:VFREEBUSY"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("free-busy missing %q\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "20261215") {
+		t.Errorf("free-busy included the out-of-range December event\n%s", out)
+	}
+}
