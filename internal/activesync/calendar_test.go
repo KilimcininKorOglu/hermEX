@@ -318,3 +318,63 @@ func TestCalendarAppDataNoAppointment(t *testing.T) {
 		t.Errorf("expected nil application data when no appointment props exist, got %#v", data)
 	}
 }
+
+// TestFolderSyncAdvertisesCalendar confirms FolderSync now exposes the well-known
+// Calendar collection (EAS type 8), so a device can reach the calendar Sync path
+// that was previously unreachable.
+func TestFolderSyncAdvertisesCalendar(t *testing.T) {
+	ts, _ := seededServer(t)
+	_, root := postCommand(t, ts, "FolderSync", wbxml.Elem(wbxml.FHFolderSync, wbxml.Str(wbxml.FHSyncKey, "0")))
+	changes := root.Child(wbxml.FHChanges)
+	if changes == nil {
+		t.Fatal("no Changes element")
+	}
+	calID := strconv.FormatInt(int64(mapi.PrivateFIDCalendar), 10)
+	var found bool
+	for _, c := range changes.Children {
+		if c.Tag == wbxml.FHAdd && c.ChildText(wbxml.FHServerID) == calID {
+			found = true
+			if typ := c.ChildText(wbxml.FHType); typ != "8" {
+				t.Errorf("calendar folder type = %q, want 8", typ)
+			}
+		}
+	}
+	if !found {
+		t.Error("FolderSync did not advertise the Calendar collection")
+	}
+}
+
+// TestGetItemEstimateCalendar confirms the calendar estimate counts object-store
+// changes (the IMAP index holds no appointments, so the mail path would report 0).
+func TestGetItemEstimateCalendar(t *testing.T) {
+	ts, dir := seededServer(t)
+	seedAppointment(t, dir, "Standup",
+		time.Date(2026, 6, 19, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 6, 19, 9, 30, 0, 0, time.UTC))
+	calID := strconv.FormatInt(int64(mapi.PrivateFIDCalendar), 10)
+	calSync := func(key string) *wbxml.Node {
+		return wbxml.Elem(wbxml.ASSync, wbxml.Elem(wbxml.ASCollections,
+			wbxml.Elem(wbxml.ASCollection,
+				wbxml.Str(wbxml.ASSyncKey, key),
+				wbxml.Str(wbxml.ASCollectionID, calID))))
+	}
+	postCommand(t, ts, "Sync", calSync("0"))
+	postCommand(t, ts, "Sync", calSync("1")) // snapshot now holds the appointment, key 2
+	seedAppointment(t, dir, "Review",
+		time.Date(2026, 6, 20, 9, 0, 0, 0, time.UTC),
+		time.Date(2026, 6, 20, 9, 30, 0, 0, time.UTC))
+
+	estReq := wbxml.Elem(wbxml.GIEGetItemEstimate,
+		wbxml.Elem(wbxml.GIECollections,
+			wbxml.Elem(wbxml.GIECollection,
+				wbxml.Str(wbxml.ASSyncKey, "2"),
+				wbxml.Str(wbxml.ASCollectionID, calID))))
+	_, root := postCommand(t, ts, "GetItemEstimate", estReq)
+	resp := root.Child(wbxml.GIEResponse)
+	if resp.ChildText(wbxml.GIEStatus) != "1" {
+		t.Fatalf("status = %q, want 1", resp.ChildText(wbxml.GIEStatus))
+	}
+	if est := resp.Child(wbxml.GIECollection).ChildText(wbxml.GIEEstimate); est != "1" {
+		t.Errorf("calendar estimate = %q, want 1", est)
+	}
+}

@@ -221,6 +221,27 @@ func calendarObjsDiffer(snap map[string]int64, objs []objectstore.FolderObject) 
 	return false
 }
 
+// calendarChangeCount counts how many of a calendar folder's objects differ from
+// the device snapshot — adds, change-number bumps, and deletes — the
+// GetItemEstimate counterpart of calendarChanges' diff.
+func calendarChangeCount(snap map[string]int64, objs []objectstore.FolderObject) int {
+	count := 0
+	live := make(map[string]bool, len(objs))
+	for _, o := range objs {
+		sid := strconv.FormatInt(o.ID, 10)
+		live[sid] = true
+		if prev, ok := snap[sid]; !ok || prev != int64(o.ChangeNumber) {
+			count++
+		}
+	}
+	for sid := range snap {
+		if !live[sid] {
+			count++
+		}
+	}
+	return count
+}
+
 // holdForSync blocks a hanging Sync until a watched collection changes (a push wake,
 // or the fallback cadence catching it) or the heartbeat expires. It returns true
 // when changes were found (the caller collects and responds) and false on expiry or
