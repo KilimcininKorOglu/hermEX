@@ -72,6 +72,7 @@ type fakeDir struct {
 	domainSpamThresholdSet bool
 	branding               directory.DomainBranding
 	brandingSet            bool
+	senderInt, senderExt   string
 	ldap                   map[int64]directory.LDAPConfig
 	defaultSyncPolicy      easpolicy.Policy
 
@@ -610,6 +611,13 @@ func (f *fakeDir) GetDomainBranding(string) (directory.DomainBranding, bool, err
 }
 func (f *fakeDir) SetDomainBranding(_ string, b directory.DomainBranding) error {
 	f.branding, f.brandingSet = b, true
+	return nil
+}
+func (f *fakeDir) GetDomainNameTemplates(string) (string, string, error) {
+	return f.senderInt, f.senderExt, nil
+}
+func (f *fakeDir) SetDomainNameTemplates(_, internal, external string) error {
+	f.senderInt, f.senderExt = internal, external
 	return nil
 }
 func (f *fakeDir) GetDefaultSyncPolicy() (easpolicy.Policy, error) {
