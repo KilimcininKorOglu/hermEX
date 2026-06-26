@@ -89,6 +89,40 @@ func TestUISaveLDAP(t *testing.T) {
 	}
 }
 
+// TestUISaveLDAPSyncSettings proves the form persists the profile-field selection
+// (enabled + attribute override) and the group-sync settings, so a panel-configured
+// operator's choices reach the sync.
+func TestUISaveLDAPSyncSettings(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/ldap", session, csrf, url.Values{
+		"uri": {"ldap://x:389"}, "bind_dn": {"cn=svc"}, "base_dn": {"ou=p"}, "username_attr": {"mail"},
+		"field_displayName_enabled": {"on"},
+		"field_title_enabled":       {"on"},
+		"field_title_attr":          {"jobTitle"},
+		"syncgroups":                {"on"},
+		"group_base_dn":             {"ou=groups,dc=x"},
+		"group_filter":              {"(objectClass=group)"},
+	})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save status %d, want 200", resp.StatusCode)
+	}
+	got := d.ldap[0]
+	if !got.SyncFields["displayName"].Enabled {
+		t.Error("displayName should be enabled")
+	}
+	if f := got.SyncFields["title"]; !f.Enabled || f.Attr != "jobTitle" {
+		t.Errorf("title field = %+v, want enabled with attr jobTitle", f)
+	}
+	if !got.SyncGroups || got.GroupBaseDN != "ou=groups,dc=x" || got.GroupFilter != "(objectClass=group)" {
+		t.Errorf("group settings = syncGroups=%v base=%q filter=%q, want the form values",
+			got.SyncGroups, got.GroupBaseDN, got.GroupFilter)
+	}
+}
+
 // TestUISaveLDAPPreservesPassword proves an empty bind password keeps the stored
 // secret rather than blanking it.
 func TestUISaveLDAPPreservesPassword(t *testing.T) {

@@ -30,6 +30,26 @@
 <label>Username attribute
 <input type="text" name="username_attr" value="{{.Config.UsernameAttr}}" placeholder="mail">
 </label>
+<fieldset class="ldap-fields">
+<legend>Profile fields to sync</legend>
+<p>Enable a field and optionally override the LDAP attribute it reads from.</p>
+{{range .Fields}}
+<div class="ldap-field">
+<label class="check"><input type="checkbox" name="field_{{.Key}}_enabled" {{if .Enabled}}checked{{end}}> {{.Key}}</label>
+<input type="text" name="field_{{.Key}}_attr" value="{{.Attr}}" placeholder="{{.DefaultAttr}}">
+</div>
+{{end}}
+</fieldset>
+<fieldset class="ldap-groups">
+<legend>Group sync</legend>
+<label class="check"><input type="checkbox" name="syncgroups" {{if .Config.SyncGroups}}checked{{end}}> Sync groups into distribution lists</label>
+<label>Group search base (optional)
+<input type="text" name="group_base_dn" value="{{.Config.GroupBaseDN}}" placeholder="ou=groups,dc=example,dc=com">
+</label>
+<label>Group filter (optional)
+<input type="text" name="group_filter" value="{{.Config.GroupFilter}}" placeholder="(&amp;(objectClass=group)(mail=*))">
+</label>
+</fieldset>
 <button type="submit">Save configuration</button>
 </form>
 <form class="sync-form" hx-post="/admin/ui/ldap/sync" hx-target="#ldap-panel" hx-swap="outerHTML"

@@ -3,6 +3,7 @@ package admin
 import (
 	"fmt"
 	"net/http"
+	"strings"
 
 	"hermex/internal/directory"
 )
@@ -13,6 +14,14 @@ import (
 // API.
 const defaultOrgID = 0
 
+// ldapFieldView is one profile field's row in the Directory Sync form: its key, the
+// standard attribute (shown as the input placeholder), and the org's enabled state
+// and attribute override.
+type ldapFieldView struct {
+	Key, DefaultAttr, Attr string
+	Enabled                bool
+}
+
 // ldapPanelData builds the Directory Sync panel data: the stored config with its
 // bind password stripped (never sent to the browser) plus a flag noting whether
 // one is set, and an optional saved/sync/error message.
@@ -20,12 +29,18 @@ func (s *Server) ldapPanelData(r *http.Request, saved bool, syncResult, errMsg s
 	cfg, ok, _ := s.dir.GetLDAPConfig(defaultOrgID)
 	bindSet := ok && cfg.BindPassword != ""
 	cfg.BindPassword = "" // never echo the secret back to the browser
+	fields := make([]ldapFieldView, 0)
+	for _, f := range directory.LDAPProfileFields() {
+		s := cfg.SyncFields[f.Key]
+		fields = append(fields, ldapFieldView{Key: f.Key, DefaultAttr: f.DefaultAttr, Attr: s.Attr, Enabled: s.Enabled})
+	}
 	data := map[string]any{
 		"Nav":             "ldap",
 		"CSRF":            csrfCookieValue(r),
 		"Config":          cfg,
 		"BindPasswordSet": bindSet,
 		"Saved":           saved,
+		"Fields":          fields,
 	}
 	if syncResult != "" {
 		data["SyncResult"] = syncResult
@@ -62,6 +77,18 @@ func (s *Server) handleUISaveLDAP(w http.ResponseWriter, r *http.Request) {
 	if cfg.BindPassword == "" {
 		cfg.BindPassword = existing.BindPassword
 	}
+	syncFields := make(map[string]directory.LDAPSyncField)
+	for _, f := range directory.LDAPProfileFields() {
+		enabled := r.PostFormValue("field_"+f.Key+"_enabled") != ""
+		attr := strings.TrimSpace(r.PostFormValue("field_" + f.Key + "_attr"))
+		if enabled || attr != "" {
+			syncFields[f.Key] = directory.LDAPSyncField{Enabled: enabled, Attr: attr}
+		}
+	}
+	cfg.SyncFields = syncFields
+	cfg.SyncGroups = r.PostFormValue("syncgroups") != ""
+	cfg.GroupBaseDN = r.PostFormValue("group_base_dn")
+	cfg.GroupFilter = r.PostFormValue("group_filter")
 	if err := s.dir.SetLDAPConfig(defaultOrgID, cfg); err != nil {
 		s.render(w, "ldap-panel", s.ldapPanelData(r, false, "", "Could not save the configuration: "+err.Error()))
 		return
