@@ -60,6 +60,11 @@ type Config struct {
 	LogRetentionDays int    `json:"log_retention_days"` // seeds the admin-managed log retention (days) on first run; 0 or negative keeps logs forever
 	LogSpillDir      string `json:"log_spill_dir"`      // local dir for log batches buffered while Mongo is unreachable
 
+	// Antivirus (ClamAV clamd). Empty ClamdAddr disables AV scanning entirely; the
+	// mail path never hard-depends on it (per-domain toggles gate scanning, and an
+	// unreachable daemon temp-fails inbound but fails open on authenticated submission).
+	ClamdAddr string `json:"clamd_addr"` // clamd INSTREAM socket (e.g. "tcp://clamav:3310" or "unix:///run/clamav/clamd.sock"); empty = no AV scanning
+
 	HealthTargets []HealthTarget `json:"health_targets"` // daemons the admin Live status page probes (each daemon's /healthz URL)
 }
 

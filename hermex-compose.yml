@@ -40,6 +40,26 @@ services:
       retries: 20
     restart: unless-stopped
 
+  # Antivirus engine (ClamAV clamd + freshclam). Internal-only, like mongo: the
+  # mail daemons reach it as clamav:3310 on the compose network with no host port.
+  # Nothing depends_on it; the mail path fails open / temp-fails when it is down,
+  # so a slow first freshclam download never blocks the stack from coming up.
+  clamav:
+    container_name: hermex-clamav
+    image: clamav/clamav:1.4
+    # The official ClamAV image publishes linux/amd64 only; pin the platform so it
+    # runs natively on amd64 hosts and under emulation on an arm64 dev machine.
+    platform: linux/amd64
+    volumes:
+      - ./docker-data/clamav:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
+    restart: unless-stopped
+
   dev:
     container_name: hermex-dev
     build:
