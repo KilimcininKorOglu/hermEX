@@ -514,6 +514,14 @@ const (
 	IODeleteSubFolders    Tag = 0x1413
 )
 
+// Email2 codepage (0x16), MS-ASEMAIL/MS-ASWBXML (Since 14.0): the conversation
+// grouping a thread-aware client renders. ConversationId groups a thread;
+// ConversationIndex orders within it.
+const (
+	EM2ConversationId    Tag = 0x1609
+	EM2ConversationIndex Tag = 0x160A
+)
+
 // Find command codepage (0x19), MS-ASCMD/MS-ASWBXML (Since 16.1): the unified
 // mailbox/GAL search a 16.x client issues. The result carries the matched item's
 // class, server id, and folder id from the AirSync codepage, plus the Find

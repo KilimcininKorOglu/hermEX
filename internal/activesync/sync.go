@@ -512,6 +512,13 @@ func emailAppData(raw []byte, m objectstore.MessageInfo, collID, serverID string
 		wbxml.Str(wbxml.EMRead, readFlag(m.Flags)),
 		emailBody(raw, pref),
 	)
+	// ConversationId/ConversationIndex (MS-ASEMAIL, Since 14.0) group the thread; the
+	// id hashes the thread root so every reply shares it, the index carries it with the
+	// delivery time for ordering.
+	convID := conversationID(raw)
+	data.Children = append(data.Children,
+		wbxml.Opaque(wbxml.EM2ConversationId, convID),
+		wbxml.Opaque(wbxml.EM2ConversationIndex, conversationIndex(convID, m.InternalDate)))
 	if atts := attachmentsNode(collID, serverID, messageAttachments(raw)); atts != nil {
 		data.Children = append(data.Children, atts)
 	}
