@@ -118,6 +118,19 @@ func Export(msg *oxcmail.Message, opt Options) ([]byte, error) {
 		if v := mailtoParams(p, mapi.PrSenderSmtpAddress, mapi.PrSenderName, partstat); v != "" {
 			b.add("ATTENDEE" + v)
 		}
+	} else if len(msg.Recipients) > 0 {
+		// A meeting appointment re-emits its ORGANIZER and the full ATTENDEE list from
+		// the stored recipients, so the invitee set round-trips for CalDAV clients and
+		// stays visible to every protocol (single-data). A plain appointment has no
+		// recipients and emits neither.
+		if v := mailtoParams(p, mapi.PrSentRepresentingSmtpAddress, mapi.PrSentRepresentingName, ""); v != "" {
+			b.add("ORGANIZER" + v)
+		}
+		for i := range msg.Recipients {
+			if v := mailtoParams(&msg.Recipients[i], mapi.PrSmtpAddress, mapi.PrDisplayName, ""); v != "" {
+				b.add("ATTENDEE" + v)
+			}
+		}
 	}
 
 	b.add("END:VEVENT")

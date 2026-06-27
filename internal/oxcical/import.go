@@ -48,11 +48,18 @@ func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 	class := meetingClass(cal, vev)
 	p.Set(mapi.PrMessageClass, class)
 
-	// A scheduling message names its organizer; preserve it as the representing
-	// identity so a response can address its REPLY back to them. A plain
-	// appointment is left untouched.
-	if class != "IPM.Appointment" {
+	// A meeting's ORGANIZER becomes the representing identity (so a response can
+	// address its REPLY back) and its ATTENDEE list becomes the recipient bags, so the
+	// invitee set round-trips through the MAPI store for every protocol (single-data)
+	// and lets implicit scheduling diff who is invited. A plain appointment with
+	// neither is left untouched; a response's ATTENDEE is the responder (carried via
+	// the sender identity), not an invitee, so it is not stored as a recipient.
+	atts := vev.propLines("ATTENDEE")
+	if class != "IPM.Appointment" || len(atts) > 0 {
 		setOrganizer(p, vev.prop("ORGANIZER"))
+	}
+	if !strings.HasPrefix(class, "IPM.Schedule.Meeting.Resp") {
+		importAttendees(msg, atts)
 	}
 
 	uid := strings.TrimSpace(vev.propText("UID"))
@@ -149,10 +156,7 @@ func setOrganizer(p *mapi.PropertyValues, l *iline) {
 	if l == nil {
 		return
 	}
-	addr := strings.TrimSpace(l.value)
-	if i := strings.IndexByte(addr, ':'); i >= 0 && strings.EqualFold(addr[:i], "mailto") {
-		addr = addr[i+1:]
-	}
+	addr := mailtoAddr(l.value)
 	if addr == "" {
 		return
 	}
@@ -161,6 +165,40 @@ func setOrganizer(p *mapi.PropertyValues, l *iline) {
 	p.Set(mapi.PrSentRepresentingAddrType, "SMTP")
 	if cn := l.param("CN"); cn != "" {
 		p.Set(mapi.PrSentRepresentingName, cn)
+	}
+}
+
+// mailtoAddr strips a leading "mailto:" scheme (any case) from a calendar user
+// address, leaving the bare SMTP address.
+func mailtoAddr(v string) string {
+	addr := strings.TrimSpace(v)
+	if i := strings.IndexByte(addr, ':'); i >= 0 && strings.EqualFold(addr[:i], "mailto") {
+		addr = addr[i+1:]
+	}
+	return addr
+}
+
+// importAttendees appends each ATTENDEE line as a primary (To) recipient bag (its
+// SMTP address, address type, and optional CN as the display name), so a meeting's
+// invitee set persists as MAPI recipients (MS-OXOCAL §2.2.4.10), visible to every
+// protocol and to implicit scheduling. The organizer is recorded separately as the
+// representing identity.
+func importAttendees(msg *oxcmail.Message, atts []iline) {
+	for _, l := range atts {
+		addr := mailtoAddr(l.value)
+		if addr == "" {
+			continue
+		}
+		rcpt := mapi.PropertyValues{
+			{Tag: mapi.PrRecipientType, Value: int32(mapi.RecipTo)},
+			{Tag: mapi.PrAddrType, Value: "SMTP"},
+			{Tag: mapi.PrEmailAddress, Value: addr},
+			{Tag: mapi.PrSmtpAddress, Value: addr},
+		}
+		if cn := l.param("CN"); cn != "" {
+			rcpt = append(rcpt, mapi.TaggedPropVal{Tag: mapi.PrDisplayName, Value: cn})
+		}
+		msg.Recipients = append(msg.Recipients, rcpt)
 	}
 }
 

@@ -150,6 +150,19 @@ func (c *icomp) propText(name string) string {
 	return ""
 }
 
+// propLines returns every content line with the given name (case-insensitive), in
+// document order, used for repeatable properties such as ATTENDEE.
+func (c *icomp) propLines(name string) []iline {
+	up := strings.ToUpper(name)
+	var out []iline
+	for i := range c.props {
+		if c.props[i].name == up {
+			out = append(out, c.props[i])
+		}
+	}
+	return out
+}
+
 // sub returns the first nested component with the given name, or nil.
 func (c *icomp) sub(name string) *icomp {
 	up := strings.ToUpper(name)

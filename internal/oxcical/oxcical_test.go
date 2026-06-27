@@ -288,6 +288,70 @@ func TestExportPlainAppointmentNoItip(t *testing.T) {
 	}
 }
 
+// TestAttendeeRoundTrip confirms a meeting's ORGANIZER and ATTENDEE list survive the
+// MAPI round-trip: import stores the attendees as recipients and the organizer as the
+// representing identity, and export re-emits them, so the invitee set stays visible to
+// every protocol and lets implicit scheduling diff who is invited (single-data).
+func TestAttendeeRoundTrip(t *testing.T) {
+	r := newResolver()
+	const ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n" +
+		"BEGIN:VEVENT\r\nUID:m-1\r\nSUMMARY:Sprint\r\nDTSTART:20260701T140000Z\r\nDTEND:20260701T150000Z\r\n" +
+		"ORGANIZER:mailto:alice@hermex.test\r\n" +
+		`ATTENDEE;CN="Bob":mailto:bob@hermex.test` + "\r\n" +
+		"ATTENDEE:mailto:carol@hermex.test\r\n" +
+		"END:VEVENT\r\nEND:VCALENDAR\r\n"
+
+	msg, err := Import([]byte(ics), r.opt())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := str(msg, mapi.PrSentRepresentingSmtpAddress); got != "alice@hermex.test" {
+		t.Errorf("organizer smtp = %q, want alice@hermex.test", got)
+	}
+	if len(msg.Recipients) != 2 {
+		t.Fatalf("imported %d recipients, want 2", len(msg.Recipients))
+	}
+	addrs := map[string]bool{}
+	for _, rcpt := range msg.Recipients {
+		addrs[recipSmtp(rcpt)] = true
+	}
+	for _, want := range []string{"bob@hermex.test", "carol@hermex.test"} {
+		if !addrs[want] {
+			t.Errorf("attendee %q not imported as a recipient; got %v", want, addrs)
+		}
+	}
+
+	out, err := Export(msg, r.opt())
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(out)
+	for _, want := range []string{
+		"ORGANIZER:mailto:alice@hermex.test",
+		"mailto:bob@hermex.test",
+		"mailto:carol@hermex.test",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("export missing %q\n%s", want, s)
+		}
+	}
+	if n := strings.Count(s, "ATTENDEE"); n != 2 {
+		t.Errorf("export has %d ATTENDEE lines, want 2\n%s", n, s)
+	}
+}
+
+// recipSmtp returns a recipient bag's SMTP address.
+func recipSmtp(rcpt mapi.PropertyValues) string {
+	for _, pv := range rcpt {
+		if pv.Tag == mapi.PrSmtpAddress {
+			if s, ok := pv.Value.(string); ok {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
 // TestRoundTripTimed exports an imported event and re-parses it, confirming the
 // core fields survive synthesis.
 func TestRoundTripTimed(t *testing.T) {
