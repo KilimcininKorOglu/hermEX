@@ -457,11 +457,13 @@ func applyClientCommands(st *objectstore.Store, folderID int64, cstate *collecti
 }
 
 // bodyPref is the body representation a Sync request asked for: the chosen
-// AirSyncBase body Type (0 = no preference → full MIME) and the truncation size
-// the device set for it (0 = untruncated).
+// AirSyncBase body Type (0 = no preference → full MIME), the truncation size the
+// device set for it (0 = untruncated), and the device's MIMESupport level (the
+// gate that decides whether an S/MIME message may be served as verbatim MIME).
 type bodyPref struct {
-	typ        int
-	truncation int
+	typ         int
+	truncation  int
+	mimeSupport int
 }
 
 // EAS AirSyncBase body types (MS-ASAIRS §2.2.2.22.4).
@@ -481,22 +483,27 @@ func parseBodyPref(c *wbxml.Node) bodyPref {
 	if opts == nil {
 		return bodyPref{}
 	}
+	var pref bodyPref
 	trunc := map[int]int{}
 	for _, ch := range opts.Children {
-		if ch.Tag != wbxml.ABBodyPreference {
-			continue
-		}
-		if t, err := strconv.Atoi(ch.ChildText(wbxml.ABType)); err == nil {
-			n, _ := strconv.Atoi(ch.ChildText(wbxml.ABTruncationSize))
-			trunc[t] = n
+		switch ch.Tag {
+		case wbxml.ABBodyPreference:
+			if t, err := strconv.Atoi(ch.ChildText(wbxml.ABType)); err == nil {
+				n, _ := strconv.Atoi(ch.ChildText(wbxml.ABTruncationSize))
+				trunc[t] = n
+			}
+		case wbxml.ASMIMESupport:
+			pref.mimeSupport, _ = strconv.Atoi(ch.Text)
 		}
 	}
 	for _, t := range []int{bodyTypeHTML, bodyTypeMIME, bodyTypePlain} {
 		if n, ok := trunc[t]; ok {
-			return bodyPref{typ: t, truncation: n}
+			pref.typ = t
+			pref.truncation = n
+			break
 		}
 	}
-	return bodyPref{}
+	return pref
 }
 
 // emailAppData builds the ApplicationData for an Email-class item: the listing
@@ -504,13 +511,21 @@ func parseBodyPref(c *wbxml.Node) bodyPref {
 // when the message carries attachments — an AirSyncBase Attachments listing whose
 // FileReferences the device fetches through ItemOperations.
 func emailAppData(raw []byte, m objectstore.MessageInfo, collID, serverID string, pref bodyPref) *wbxml.Node {
+	// A signed or encrypted message keeps the generic IPM.Note class in the store;
+	// recover its S/MIME class here so the device hands it to its crypto handler.
+	class := messageClassFor(raw)
+	// The cryptographic envelope survives only if the device receives the verbatim
+	// MIME, but a client must have advertised it accepts a MIME body (MIMESupport
+	// >= 1, MS-ASCMD 2.2.3.100) before one is forced on it. A client that did not
+	// still learns the class and receives the best-effort extracted body.
+	forceMIME := class != messageClassNote && pref.mimeSupport >= mimeSupportSMIME
 	data := wbxml.Elem(wbxml.ASData,
 		wbxml.Str(wbxml.EMSubject, m.Subject),
 		wbxml.Str(wbxml.EMFrom, m.Sender),
 		wbxml.Str(wbxml.EMDateReceived, m.InternalDate.UTC().Format("2006-01-02T15:04:05.000Z")),
-		wbxml.Str(wbxml.EMMessageClass, "IPM.Note"),
+		wbxml.Str(wbxml.EMMessageClass, class),
 		wbxml.Str(wbxml.EMRead, readFlag(m.Flags)),
-		emailBody(raw, pref),
+		emailBody(raw, pref, forceMIME),
 	)
 	// ConversationId/ConversationIndex (MS-ASEMAIL, Since 14.0) group the thread; the
 	// id hashes the thread root so every reply shares it, the index carries it with the
@@ -519,8 +534,13 @@ func emailAppData(raw []byte, m objectstore.MessageInfo, collID, serverID string
 	data.Children = append(data.Children,
 		wbxml.Opaque(wbxml.EM2ConversationId, convID),
 		wbxml.Opaque(wbxml.EM2ConversationIndex, conversationIndex(convID, m.InternalDate)))
-	if atts := attachmentsNode(collID, serverID, messageAttachments(raw)); atts != nil {
-		data.Children = append(data.Children, atts)
+	// A forced full-MIME body already carries every part; the device parses them
+	// from the MIME itself. Listing them again would surface the S/MIME signature
+	// part as a bogus attachment, so the Attachments listing is omitted for it.
+	if !forceMIME {
+		if atts := attachmentsNode(collID, serverID, messageAttachments(raw)); atts != nil {
+			data.Children = append(data.Children, atts)
+		}
 	}
 	return data
 }
@@ -529,15 +549,17 @@ func emailAppData(raw []byte, m objectstore.MessageInfo, collID, serverID string
 // (MS-ASAIRS §2.2.2.22). Type 0/4 serve the full MIME message; types 1 and 2 extract
 // the plain-text or HTML body through the proven MIME→MAPI converter, applying the
 // truncation size and marking the body Truncated. An unavailable representation (no
-// HTML part, or a conversion failure) falls back to the full MIME.
-func emailBody(raw []byte, pref bodyPref) *wbxml.Node {
+// HTML part, or a conversion failure) falls back to the full MIME. forceMIME serves
+// the verbatim MIME regardless of the requested type, so an S/MIME message's
+// cryptographic envelope is never destroyed by body extraction.
+func emailBody(raw []byte, pref bodyPref, forceMIME bool) *wbxml.Node {
 	mime := func() *wbxml.Node {
 		return wbxml.Elem(wbxml.ABBody,
 			wbxml.Str(wbxml.ABType, strconv.Itoa(bodyTypeMIME)),
 			wbxml.Str(wbxml.ABEstimatedDataSize, strconv.Itoa(len(raw))),
 			wbxml.Opaque(wbxml.ABData, raw))
 	}
-	if pref.typ == 0 || pref.typ == bodyTypeMIME {
+	if forceMIME || pref.typ == 0 || pref.typ == bodyTypeMIME {
 		return mime()
 	}
 	msg, err := oxcmail.Import(raw, oxcmail.Options{})
