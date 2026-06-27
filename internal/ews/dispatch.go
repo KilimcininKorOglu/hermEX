@@ -99,6 +99,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleEmptyFolder(w, inner, sess)
 	case "MarkAllItemsAsRead":
 		s.handleMarkAllItemsAsRead(w, inner, sess)
+	case "DeleteAttachment":
+		s.handleDeleteAttachment(w, inner, sess)
 	case "Subscribe":
 		s.handleSubscribe(w, inner, sess)
 	case "Unsubscribe":
