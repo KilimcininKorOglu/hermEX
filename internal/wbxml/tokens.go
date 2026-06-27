@@ -285,8 +285,9 @@ const (
 	FHCount        Tag = 0x0717
 )
 
-// ResolveRecipients (code page 0x0A). v1 carries the GAL-resolution subset; the
-// certificate, availability, and picture tokens are not yet served.
+// ResolveRecipients (code page 0x0A). v1 carries the GAL-resolution and portrait
+// subsets; the certificate tokens are not yet served. Token numbers follow
+// [MS-ASWBXML] code page 0x0A exactly.
 const (
 	RRResolveRecipients Tag = 0x0A05
 	RRResponse          Tag = 0x0A06
@@ -298,10 +299,10 @@ const (
 	RROptions           Tag = 0x0A0F
 	RRTo                Tag = 0x0A10
 	RRRecipientCount    Tag = 0x0A12
-	RRPicture           Tag = 0x0A18 // since 14.1: a recipient's portrait
-	RRMaxSize           Tag = 0x0A19 // request: cap on portrait byte size
-	RRData              Tag = 0x0A1A // response: base64 portrait bytes
-	RRMaxPictures       Tag = 0x0A1B // request: cap on portraits returned
+	RRPicture           Tag = 0x0A1A // since 14.1: a recipient's portrait
+	RRMaxSize           Tag = 0x0A1B // request: cap on portrait byte size
+	RRData              Tag = 0x0A1C // response: base64 portrait bytes
+	RRMaxPictures       Tag = 0x0A1D // request: cap on portraits returned
 )
 
 // ValidateCert (code page 0x0B) — S/MIME certificate validation.

@@ -96,6 +96,34 @@ func TestOpaqueVector(t *testing.T) {
 	}
 }
 
+// TestResolveRecipientsPictureVector pins the ResolveRecipients portrait tokens
+// against hand-authored bytes ([MS-ASWBXML] code page 0x0A): Picture is 0x1A and
+// Data is 0x1C. A round-trip test cannot catch a wrong constant here, since it
+// encodes and decodes through the same symbol; this byte-exact oracle guards the
+// wire numbers a real device decodes against.
+func TestResolveRecipientsPictureVector(t *testing.T) {
+	want := append(append([]byte{}, header...),
+		0x00, 0x0A, // SWITCH_PAGE 0x0A (ResolveRecipients)
+		0x5A,             // Picture (0x1A) | content
+		0x5C,             // Data (0x1C) | content
+		0x03, 0x78, 0x00, // STR_I "x"
+		0x01, // END Data
+		0x01, // END Picture
+	)
+	tree := Elem(RRPicture, Str(RRData, "x"))
+
+	if got := Marshal(tree); !bytes.Equal(got, want) {
+		t.Errorf("Marshal = % x\nwant     % x", got, want)
+	}
+	got, err := Unmarshal(want)
+	if err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if !reflect.DeepEqual(got, tree) {
+		t.Errorf("Unmarshal = %#v\nwant      %#v", got, tree)
+	}
+}
+
 // TestMBUint pins the multi-byte integer encoding at the documented boundaries
 // (0, single-byte max, the two-byte case, and a three-byte value).
 func TestMBUint(t *testing.T) {
