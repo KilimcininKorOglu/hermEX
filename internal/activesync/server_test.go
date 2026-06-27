@@ -44,18 +44,46 @@ func do(t *testing.T, ts *httptest.Server, method, path, body string, auth bool)
 	return resp, string(out)
 }
 
-// TestOptions confirms OPTIONS advertises protocol 14.1 and the command set.
+// TestOptions confirms OPTIONS advertises the supported protocol versions (14.x and
+// 16.x), the highest in MS-Server-ActiveSync, and the command set.
 func TestOptions(t *testing.T) {
 	ts := testServer(t)
 	resp, _ := do(t, ts, "OPTIONS", "/Microsoft-Server-ActiveSync", "", true)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d, want 200", resp.StatusCode)
 	}
-	if v := resp.Header.Get("MS-ASProtocolVersions"); !strings.Contains(v, "14.1") {
-		t.Errorf("MS-ASProtocolVersions = %q, want 14.1", v)
+	v := resp.Header.Get("MS-ASProtocolVersions")
+	for _, want := range []string{"14.0", "14.1", "16.0", "16.1"} {
+		if !strings.Contains(v, want) {
+			t.Errorf("MS-ASProtocolVersions = %q, missing %s", v, want)
+		}
+	}
+	if got := resp.Header.Get("MS-Server-ActiveSync"); got != "16.1" {
+		t.Errorf("MS-Server-ActiveSync = %q, want 16.1 (highest)", got)
 	}
 	if c := resp.Header.Get("MS-ASProtocolCommands"); !strings.Contains(c, "FolderSync") || !strings.Contains(c, "Sync") {
 		t.Errorf("MS-ASProtocolCommands = %q lacks the core commands", c)
+	}
+}
+
+// TestProtocolNegotiation confirms a client's advertised version is honored and an
+// unadvertised one falls back to the conservative floor.
+func TestProtocolNegotiation(t *testing.T) {
+	for _, tc := range []struct{ sent, want string }{
+		{"16.1", "16.1"},
+		{"16.0", "16.0"},
+		{"14.1", "14.1"},
+		{"", "14.1"},     // no header -> floor
+		{"2.5", "14.1"},  // unadvertised -> floor
+		{"99.9", "14.1"}, // unknown -> floor
+	} {
+		r := httptest.NewRequest("POST", "/Microsoft-Server-ActiveSync", nil)
+		if tc.sent != "" {
+			r.Header.Set("MS-ASProtocolVersion", tc.sent)
+		}
+		if got := protocolVersion(r); got != tc.want {
+			t.Errorf("protocolVersion(%q) = %q, want %q", tc.sent, got, tc.want)
+		}
 	}
 }
 

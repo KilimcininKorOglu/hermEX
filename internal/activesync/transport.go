@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -56,8 +57,18 @@ func writeWBXML(w http.ResponseWriter, root *wbxml.Node) {
 	_, _ = w.Write(wbxml.Marshal(root))
 }
 
-// defaultProtocol is the single EAS protocol version v1 implements and
-// advertises. Clients negotiate down to it via the MS-ASProtocolVersion header.
+// supportedProtocols is the set of EAS protocol versions advertised and served,
+// lowest to highest. Modern clients (iOS, Outlook mobile) negotiate 16.1 and may
+// refuse to connect unless it is advertised; the 14.x pair keeps older clients
+// working. Versions below 14.0 are omitted: their schema predates AirSyncBase, which
+// every body-carrying response here relies on.
+var supportedProtocols = []string{"14.0", "14.1", "16.0", "16.1"}
+
+// highestProtocol is the newest version supported, reported in MS-Server-ActiveSync.
+const highestProtocol = "16.1"
+
+// defaultProtocol is the version assumed when a request carries no
+// MS-ASProtocolVersion header (the conservative floor).
 const defaultProtocol = "14.1"
 
 // asRequest holds the command parameters carried in the request line, from
@@ -93,10 +104,12 @@ var commandNames = map[byte]string{
 	22: "ValidateCert",
 }
 
-// protocolVersion reports the negotiated protocol version from the request
-// header, falling back to the single version v1 supports.
+// protocolVersion reports the negotiated protocol version from the request header.
+// A version the client chose from the advertised set is honored; an absent or
+// unadvertised version falls back to the conservative floor.
 func protocolVersion(r *http.Request) string {
-	if v := r.Header.Get("MS-ASProtocolVersion"); v != "" {
+	v := r.Header.Get("MS-ASProtocolVersion")
+	if v != "" && slices.Contains(supportedProtocols, v) {
 		return v
 	}
 	return defaultProtocol
@@ -228,8 +241,8 @@ var supportedCommands = []string{
 // handleOptions answers an EAS OPTIONS request with the capability headers: the
 // supported protocol versions and the advertised command set (MS-ASHTTP §3.1).
 func (s *Server) handleOptions(w http.ResponseWriter) {
-	w.Header().Set("MS-Server-ActiveSync", defaultProtocol)
-	w.Header().Set("MS-ASProtocolVersions", defaultProtocol)
+	w.Header().Set("MS-Server-ActiveSync", highestProtocol)
+	w.Header().Set("MS-ASProtocolVersions", strings.Join(supportedProtocols, ","))
 	w.Header().Set("MS-ASProtocolCommands", strings.Join(supportedCommands, ","))
 	w.Header().Set("Content-Length", "0")
 	w.WriteHeader(http.StatusOK)
