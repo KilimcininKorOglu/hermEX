@@ -47,17 +47,48 @@ func (e *expandElem) window() (start, end time.Time, ok bool) {
 	return s, en, oks && oke
 }
 
-// calDataReq is the CALDAV:calendar-data element of a REPORT, carrying the recurrence
-// and free-busy shaping directives (RFC 4791 §9.6). Per the grammar, expand and
+// calDataReq is the CALDAV:calendar-data element of a REPORT, carrying the partial-
+// retrieval and recurrence/free-busy shaping directives (RFC 4791 §9.6): a comp/prop
+// selection plus the time-range directives. Per the grammar, expand and
 // limit-recurrence-set are mutually exclusive and limit-freebusy-set may co-occur.
 type calDataReq struct {
+	Comp       *compSel    `xml:"comp"`
 	Expand     *expandElem `xml:"expand"`
 	LimitRecur *expandElem `xml:"limit-recurrence-set"`
 	LimitFB    *expandElem `xml:"limit-freebusy-set"`
 }
 
+// compSel is a CALDAV:comp partial-retrieval selection (RFC 4791 §9.6.1), recursive via
+// its nested comp children. AllProp/AllComp are presence flags for <allprop>/<allcomp>.
+type compSel struct {
+	Name    string    `xml:"name,attr"`
+	AllProp *struct{} `xml:"allprop"`
+	AllComp *struct{} `xml:"allcomp"`
+	Props   []propSel `xml:"prop"`
+	Comps   []compSel `xml:"comp"`
+}
+
+// propSel is a CALDAV:prop selection: a property name, with novalue="yes" requesting the
+// name and parameters but no value (RFC 4791 §9.6.4).
+type propSel struct {
+	Name    string `xml:"name,attr"`
+	NoValue string `xml:"novalue,attr"`
+}
+
+// toSelect maps the parsed XML selection to the neutral oxcical form.
+func (c *compSel) toSelect() oxcical.CompSelect {
+	s := oxcical.CompSelect{Name: c.Name, AllProp: c.AllProp != nil, AllComp: c.AllComp != nil}
+	for _, p := range c.Props {
+		s.Props = append(s.Props, oxcical.PropSelect{Name: p.Name, NoValue: strings.EqualFold(p.NoValue, "yes")})
+	}
+	for i := range c.Comps {
+		s.Comps = append(s.Comps, c.Comps[i].toSelect())
+	}
+	return s
+}
+
 // bound applies the calendar-data directives to one member's iCalendar: expand XOR
-// limit-recurrence-set, then limit-freebusy-set on the result.
+// limit-recurrence-set, then the comp/prop projection, then limit-freebusy-set.
 func (c *calDataReq) bound(data string) string {
 	if c == nil {
 		return data
@@ -68,6 +99,11 @@ func (c *calDataReq) bound(data string) string {
 		}
 	} else if s, e, ok := c.LimitRecur.window(); ok {
 		if out, ok := oxcical.LimitRecurrenceSet([]byte(data), s, e); ok {
+			data = string(out)
+		}
+	}
+	if c.Comp != nil {
+		if out, ok := oxcical.SelectCalendarData([]byte(data), c.Comp.toSelect()); ok {
 			data = string(out)
 		}
 	}
