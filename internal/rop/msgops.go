@@ -94,6 +94,92 @@ func (s *Session) ropSetMessageReadFlag(p *ext.Pull, out *ext.Push, handles []ui
 // the input handle into the Recoverable Items dumpster (recoverable until
 // retention). v1 is synchronous (WantAsynchronous is accepted and ignored) and
 // reports PartialCompletion when any id could not be deleted.
+// ropSetReadFlags handles RopSetReadFlags ([MS-OXCMSG] 2.2.3.11 / [MS-OXCROPS]
+// 2.2.6.10): the bulk counterpart of RopSetMessageReadFlag. Over a folder handle it
+// applies one ReadFlags action to a list of message ids, or to every message in the
+// folder when the list is empty ([MS-OXCMSG] 2.2.3.11.1). The flag byte is decoded
+// exactly as the single-message ROP (rfClearReadFlag marks unread, otherwise read;
+// rfSuppressReceipt suppresses the read receipt; rfGenerateReceiptOnly sends one
+// without a state change). PartialCompletion reports whether any message failed.
+func (s *Session) ropSetReadFlags(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	_, e1 := p.Uint8()              // WantAsynchronous (v1 is always synchronous)
+	flags, e2 := p.Uint8()          // ReadFlags
+	ids, e3 := p.Uint64ArrayShort() // MessageIds (EID_ARRAY); empty => every message in the folder
+	if e1 != nil || e2 != nil || e3 != nil {
+		return false
+	}
+	folder := s.get(handleAt(handles, hindex))
+	if folder == nil || folder.kind != kindFolder || folder.store == nil {
+		writeErr(out, ropSetReadFlags, hindex, ecError)
+		return true
+	}
+	// Changing read state modifies the messages: a delegate needs EditAny on the
+	// folder, matching the single-message RopSetMessageReadFlag gate.
+	if s.denyWrite(out, ropSetReadFlags, hindex, folder.store, folder.folderID, mapi.FrightsEditAny) {
+		return true
+	}
+
+	// Decode the flag byte once; it applies uniformly to every target message (the
+	// same exact-value dispatch as the single ROP, reserved bits masked off).
+	var read, change, receipt bool
+	switch flags &^ rfReserved {
+	case rfDefault:
+		read, change, receipt = true, true, true
+	case rfSuppressReceipt:
+		read, change = true, true // marked read, receipt suppressed
+	case rfClearReadFlag, rfClearReadFlag | rfSuppressReceipt:
+		change = true // mark unread; no receipt
+	case rfGenerateReceiptOnly:
+		receipt = true // receipt only, no state change
+	}
+
+	// An empty request list means every message in the folder; an explicit list maps
+	// each EID to its store object id (the global-counter value).
+	targets := make([]int64, 0, len(ids))
+	if len(ids) == 0 {
+		msgs, err := folder.store.ListMessages(folder.folderID)
+		if err != nil {
+			writeErr(out, ropSetReadFlags, hindex, ecError)
+			return true
+		}
+		for _, m := range msgs {
+			targets = append(targets, m.ID)
+		}
+	} else {
+		for _, eid := range ids {
+			targets = append(targets, int64(mapi.EID(eid).GCValue()))
+		}
+	}
+
+	var partial uint8
+	for _, mid := range targets {
+		if change {
+			// A read receipt is owed only on the unread->read transition, so read the
+			// prior state before writing.
+			var wasRead bool
+			if receipt {
+				if w, err := folder.store.GetMessageReadState(mid); err == nil {
+					wasRead = w
+				}
+			}
+			if err := folder.store.SetMessageReadState(mid, read); err != nil {
+				partial = 1
+				continue
+			}
+			if receipt && read && !wasRead {
+				s.maybeReadReceipt(folder.store, mid)
+			}
+		} else if receipt {
+			s.maybeReadReceipt(folder.store, mid)
+		}
+	}
+	out.Uint8(ropSetReadFlags)
+	out.Uint8(hindex)
+	out.Uint32(ecSuccess)
+	out.Uint8(partial) // PartialCompletion
+	return true
+}
+
 func (s *Session) ropDeleteMessages(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	_, e1 := p.Uint8()              // WantAsynchronous (v1 is always synchronous)
 	_, e2 := p.Uint8()              // NotifyNonRead (notifications out of scope)

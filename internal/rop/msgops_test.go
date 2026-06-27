@@ -35,6 +35,19 @@ func buildDeleteMessages(inIdx uint8, eids ...uint64) []byte {
 	return b.Bytes()
 }
 
+// buildSetReadFlags builds a RopSetReadFlags request over a folder handle: the
+// ReadFlags byte and the message-id list (empty => every message in the folder).
+func buildSetReadFlags(inIdx, readFlags uint8, eids ...uint64) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropSetReadFlags)
+	b.Uint8(0)         // LogonId
+	b.Uint8(inIdx)     // folder handle
+	b.Uint8(0)         // WantAsynchronous
+	b.Uint8(readFlags) // ReadFlags
+	_ = b.Uint64ArrayShort(eids)
+	return b.Bytes()
+}
+
 // buildMoveCopyMessages builds a RopMoveCopyMessages request. srcIdx is the
 // common-header source folder handle; dstIdx is the body destination handle.
 func buildMoveCopyMessages(srcIdx, dstIdx, wantCopy uint8, eids ...uint64) []byte {
@@ -164,6 +177,56 @@ func TestDeleteMessages(t *testing.T) {
 	// The deleted message went to the dumpster, recoverable, not purged.
 	if dump, _ := sess.get(folderH).store.ListSoftDeleted(int64(mapi.PrivateFIDInbox)); len(dump) != 1 {
 		t.Errorf("dumpster = %d, want 1 (deleted message recoverable)", len(dump))
+	}
+}
+
+// TestSetReadFlags marks messages read in bulk over a folder handle: an explicit
+// two-id list flips both to read, then an empty list (meaning every message in the
+// folder) with rfClearReadFlag flips them back to unread. This proves both the
+// explicit-list and the empty-means-all paths and both flag directions.
+func TestSetReadFlags(t *testing.T) {
+	dir := t.TempDir()
+	id1 := seedInboxMessage(t, dir, "BULK1")
+	id2 := seedInboxMessage(t, dir, "BULK2")
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	folderH := h[1]
+
+	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), id1); f&objectstore.FlagSeen != 0 {
+		t.Fatalf("seeded message id1 already read (flags=%#x), want unread", f)
+	}
+
+	// Mark both read via an explicit id list (rfDefault).
+	sr, _ := sess.Dispatch(buildSetReadFlags(0, rfDefault,
+		uint64(mapi.MakeEIDEx(1, uint64(id1))), uint64(mapi.MakeEIDEx(1, uint64(id2)))), []uint32{folderH})
+	p := ext.NewPull(sr, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropSetReadFlags {
+		t.Fatalf("SetReadFlags RopId = %#x", id)
+	}
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("SetReadFlags(read) ReturnValue = %#x", ec)
+	}
+	if pc := mustU8(t, p, "partialCompletion"); pc != 0 {
+		t.Errorf("PartialCompletion = %d, want 0", pc)
+	}
+	for _, id := range []int64{id1, id2} {
+		if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), id); f&objectstore.FlagSeen == 0 {
+			t.Errorf("message %d not marked read (flags=%#x)", id, f)
+		}
+	}
+
+	// Mark all unread via an EMPTY id list (every message in the folder), rfClearReadFlag.
+	sess.Dispatch(buildSetReadFlags(0, rfClearReadFlag), []uint32{folderH})
+	for _, id := range []int64{id1, id2} {
+		if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), id); f&objectstore.FlagSeen != 0 {
+			t.Errorf("message %d still read after empty-list clear (flags=%#x)", id, f)
+		}
 	}
 }
 

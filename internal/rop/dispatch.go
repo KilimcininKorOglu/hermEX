@@ -20,6 +20,7 @@ const (
 	ropSetMessageStatus            uint8 = 0x20
 	ropSubmitMessage               uint8 = 0x32
 	ropSetMessageReadFlag          uint8 = 0x11
+	ropSetReadFlags                uint8 = 0x66
 	ropDeleteMessages              uint8 = 0x1E
 	ropMoveCopyMessages            uint8 = 0x33
 	ropSetColumns                  uint8 = 0x12
@@ -222,6 +223,10 @@ loop:
 			}
 		case ropSetMessageReadFlag:
 			if !s.ropSetMessageReadFlag(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSetReadFlags:
+			if !s.ropSetReadFlags(p, out, handles, hindex) {
 				break loop
 			}
 		case ropDeleteMessages:
