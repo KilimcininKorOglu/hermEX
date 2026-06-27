@@ -199,6 +199,12 @@ func todoComponentSet() *supportedComp {
 	return &supportedComp{Comps: []calComp{{Name: "VTODO"}}}
 }
 
+// journalComponentSet is the supported-calendar-component-set for the Journal
+// collection: it holds VJOURNALs.
+func journalComponentSet() *supportedComp {
+	return &supportedComp{Comps: []calComp{{Name: "VJOURNAL"}}}
+}
+
 // supportedReportSet is the DAV:supported-report-set value: the REPORTs a resource
 // accepts, so a client discovers them (RFC 3253 §3.1.5) instead of probing blind.
 type supportedReportSet struct {

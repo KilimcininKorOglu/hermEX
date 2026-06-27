@@ -61,7 +61,8 @@ func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox st
 		return
 	}
 	var ics []byte
-	if fid == int64(mapi.PrivateFIDTasks) {
+	switch {
+	case fid == int64(mapi.PrivateFIDTasks):
 		// The Tasks collection serves VTODO from the shared task model.
 		tk, terr := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
 		if terr != nil {
@@ -69,15 +70,20 @@ func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox st
 			return
 		}
 		ics = oxcical.ExportVTODO(tk, name, time.Time{})
-	} else if ics, err = oxcical.Export(msg, icalOptions(st)); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	case fid == int64(mapi.PrivateFIDJournal):
+		// The Journal collection serves VJOURNAL from the verbatim stored source.
+		ics = oxcical.ExportVJournal(msg, name)
+	default:
+		if ics, err = oxcical.Export(msg, icalOptions(st)); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
 	w.Header().Set("ETag", etag(obj.ChangeNumber))
 	// A scheduling object (one carrying an ORGANIZER, stored with recipients) also
 	// reports its CALDAV:schedule-tag (RFC 6638 8.2); a plain appointment does not.
-	if fid != int64(mapi.PrivateFIDTasks) && msgIsScheduling(msg) {
+	if eventsCollection(fid) && msgIsScheduling(msg) {
 		w.Header().Set("Schedule-Tag", scheduleTag(obj.ChangeNumber))
 	}
 	if r.Method == http.MethodHead {
@@ -142,7 +148,8 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 		return
 	}
 	var msg *oxcmail.Message
-	if fid == int64(mapi.PrivateFIDTasks) {
+	switch {
+	case fid == int64(mapi.PrivateFIDTasks):
 		task, _, ok := oxcical.ParseVTODO(body)
 		if !ok {
 			http.Error(w, "invalid VTODO", http.StatusBadRequest)
@@ -154,9 +161,16 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 			return
 		}
 		msg = &oxcmail.Message{Props: props}
-	} else if msg, err = oxcical.Import(body, icalOptions(st)); err != nil {
-		http.Error(w, "invalid iCalendar: "+err.Error(), http.StatusBadRequest)
-		return
+	case fid == int64(mapi.PrivateFIDJournal):
+		if msg, err = oxcical.ImportVJournal(body, icalOptions(st)); err != nil {
+			http.Error(w, "invalid VJOURNAL: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	default:
+		if msg, err = oxcical.Import(body, icalOptions(st)); err != nil {
+			http.Error(w, "invalid iCalendar: "+err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 	tag, _, err := resourceNameTag(st, true)
 	if err != nil {
@@ -167,9 +181,10 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 
 	// Capture the prior iCalendar before replacing it so implicit scheduling can diff
 	// old against new to decide which attendees to (re-)invite or cancel (RFC 6638
-	// §3). Tasks (VTODO) never schedule, so the diff is skipped for them.
+	// §3). The Tasks (VTODO) and Journal (VJOURNAL) folders never schedule, so the diff
+	// is skipped for them.
 	var oldBody string
-	if found && fid != int64(mapi.PrivateFIDTasks) {
+	if found && eventsCollection(fid) {
 		if ob, oerr := calendarData(st, existing.ID); oerr == nil {
 			oldBody = ob
 		}
@@ -192,7 +207,7 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 		w.Header().Set("ETag", etag(created.ChangeNumber))
 		// A scheduling object's PUT response also carries the new schedule-tag, which
 		// changes on every direct PUT (RFC 6638 3.2.10 rule 3 / 8.2).
-		if fid != int64(mapi.PrivateFIDTasks) && isSchedulingBody(string(body)) {
+		if eventsCollection(fid) && isSchedulingBody(string(body)) {
 			w.Header().Set("Schedule-Tag", scheduleTag(created.ChangeNumber))
 		}
 	}
@@ -203,7 +218,7 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 	// cannot read as a spurious change and re-invite everyone. Events-only and
 	// best-effort: the calendar write has committed, so a delivery failure is logged,
 	// never surfaced as a PUT error.
-	if fid != int64(mapi.PrivateFIDTasks) && cerr == nil {
+	if eventsCollection(fid) && cerr == nil {
 		if newBody, nerr := calendarData(st, created.ID); nerr == nil {
 			s.scheduleOnChange(user, oldBody, newBody, false)
 		}
@@ -260,9 +275,9 @@ func (s *Server) handleCalDelete(w http.ResponseWriter, r *http.Request, user, m
 	}
 	// Capture the iCalendar before deleting so implicit scheduling can cancel the
 	// meeting for its attendees (organizer delete) or decline it (attendee delete),
-	// per RFC 6638 §3. Events only; Tasks (VTODO) never schedule.
+	// per RFC 6638 §3. Events only; the Tasks and Journal PIM folders never schedule.
 	var oldBody string
-	if fid != int64(mapi.PrivateFIDTasks) {
+	if eventsCollection(fid) {
 		if ob, oerr := calendarData(st, obj.ID); oerr == nil {
 			oldBody = ob
 		}
@@ -275,7 +290,7 @@ func (s *Server) handleCalDelete(w http.ResponseWriter, r *http.Request, user, m
 	}
 	// Best-effort iTIP cancel/decline; a delivery failure never fails the delete. An
 	// attendee delete with Schedule-Reply:F sends no reply (RFC 6638 8.1).
-	if fid != int64(mapi.PrivateFIDTasks) {
+	if eventsCollection(fid) {
 		s.scheduleOnChange(user, oldBody, "", scheduleReplyF(r))
 	}
 	w.WriteHeader(http.StatusNoContent)

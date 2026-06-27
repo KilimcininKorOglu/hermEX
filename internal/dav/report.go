@@ -447,21 +447,30 @@ func calendarData(st *objectstore.Store, id int64) (string, error) {
 	return string(ics), nil
 }
 
-// calendarObjectData exports a stored object to its iCalendar text, as a VTODO for the
-// Tasks folder (uid is the resource name) and a VEVENT for a calendar.
+// calendarObjectData exports a stored object to its iCalendar text: a VTODO for the
+// Tasks folder, a VJOURNAL for the Journal folder (uid is the resource name in both),
+// and a VEVENT for any calendar.
 func calendarObjectData(st *objectstore.Store, fid, id int64, uid string) (string, error) {
-	if fid != int64(mapi.PrivateFIDTasks) {
+	switch fid {
+	case int64(mapi.PrivateFIDTasks):
+		msg, err := st.OpenMessage(id)
+		if err != nil {
+			return "", err
+		}
+		tk, err := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
+		if err != nil {
+			return "", err
+		}
+		return string(oxcical.ExportVTODO(tk, uid, time.Time{})), nil
+	case int64(mapi.PrivateFIDJournal):
+		msg, err := st.OpenMessage(id)
+		if err != nil {
+			return "", err
+		}
+		return string(oxcical.ExportVJournal(msg, uid)), nil
+	default:
 		return calendarData(st, id)
 	}
-	msg, err := st.OpenMessage(id)
-	if err != nil {
-		return "", err
-	}
-	tk, err := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
-	if err != nil {
-		return "", err
-	}
-	return string(oxcical.ExportVTODO(tk, uid, time.Time{})), nil
 }
 
 // calendarDataResponse builds a 200 response carrying a member's ETag and iCalendar.

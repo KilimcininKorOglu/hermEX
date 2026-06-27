@@ -17,16 +17,26 @@ func calCollectionFID(st *objectstore.Store, name string) (int64, bool, error) {
 	if isReservedScheduleName(name) {
 		return 0, false, nil
 	}
-	// The Tasks collection lives in the calendar URL space (served as VTODO) but is a
-	// distinct well-known folder, not a child of the Calendar.
+	// The Tasks and Journal collections live in the calendar URL space (served as VTODO
+	// and VJOURNAL) but are distinct well-known folders, not children of the Calendar.
 	if name == tasksName {
 		return int64(mapi.PrivateFIDTasks), true, nil
+	}
+	if name == journalName {
+		return int64(mapi.PrivateFIDJournal), true, nil
 	}
 	return collectionFID(st, int64(mapi.PrivateFIDCalendar), calendarName, name)
 }
 
 func cardCollectionFID(st *objectstore.Store, name string) (int64, bool, error) {
 	return collectionFID(st, int64(mapi.PrivateFIDContacts), addressbookName, name)
+}
+
+// eventsCollection reports whether fid is a calendar that holds schedulable VEVENTs, as
+// opposed to the Tasks (VTODO) and Journal (VJOURNAL) PIM folders, which never schedule.
+// The implicit-scheduling and schedule-tag paths are gated on it.
+func eventsCollection(fid int64) bool {
+	return fid != int64(mapi.PrivateFIDTasks) && fid != int64(mapi.PrivateFIDJournal)
 }
 
 // collectionFID maps a collection URL segment to its folder id: the reserved default

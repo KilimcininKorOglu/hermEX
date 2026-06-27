@@ -249,6 +249,9 @@ const (
 	// tasksName is the reserved URL segment of the Tasks calendar collection, served
 	// as VTODO components (RFC 4791) so a CalDAV tasks client shares the one task store.
 	tasksName = "tasks"
+	// journalName is the reserved URL segment of the Journal calendar collection, served
+	// as VJOURNAL components (RFC 5545 §3.6.3) backed by the IPM.Activity Journal folder.
+	journalName = "journal"
 )
 
 // scheduleInboxName and scheduleOutboxName are the reserved URL segments of the

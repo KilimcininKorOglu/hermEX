@@ -266,10 +266,14 @@ func calHomeSetResponse(user string) msResponse {
 // calCollectionResponse builds the collection-level PROPFIND response for one
 // calendar (no members).
 // componentSetFor reports the supported-calendar-component-set for a collection: the
-// Tasks folder holds VTODOs, every other calendar holds VEVENTs.
+// Tasks folder holds VTODOs, the Journal folder holds VJOURNALs, every other calendar
+// holds VEVENTs.
 func componentSetFor(fid int64) *supportedComp {
-	if fid == int64(mapi.PrivateFIDTasks) {
+	switch fid {
+	case int64(mapi.PrivateFIDTasks):
 		return todoComponentSet()
+	case int64(mapi.PrivateFIDJournal):
+		return journalComponentSet()
 	}
 	return eventComponentSet()
 }
@@ -372,6 +376,13 @@ func (s *Server) allCalendarCollections(mailbox, user string) ([]msResponse, err
 		return nil, err
 	}
 	out = append(out, tasks)
+	// The Journal folder is advertised as its own calendar collection (VJOURNAL) too, so
+	// a CalDAV journal client discovers it in the home set.
+	journal, err := calCollectionResponse(st, user, journalName, "Journal", int64(mapi.PrivateFIDJournal))
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, journal)
 	subs, err := childCollections(st, int64(mapi.PrivateFIDCalendar))
 	if err != nil {
 		return nil, err
