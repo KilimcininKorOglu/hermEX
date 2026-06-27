@@ -53,6 +53,74 @@ func TestCreateFolderSuccess(t *testing.T) {
 	}
 }
 
+// TestHardDeleteMessagesAndSubfolders clears a folder's messages AND removes its
+// subfolders in one ROP: the inbox holds a message and a subfolder, and after the
+// ROP both are gone (the message recoverable in the dumpster, the subfolder dropped
+// with its subtree), with PartialCompletion=0. This is the behavior that
+// distinguishes it from RopEmptyFolder, which leaves subfolders intact.
+func TestHardDeleteMessagesAndSubfolders(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxMessage(t, dir, "TOPMSG")
+	inboxFID := int64(mapi.PrivateFIDInbox)
+	store, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subID, err := store.CreateFolder(&inboxFID, "SubToNuke")
+	if err != nil {
+		store.Close()
+		t.Fatalf("store.CreateFolder: %v", err)
+	}
+	store.Close()
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))), []uint32{logonH, 0xFFFFFFFF})
+	inboxH := h[1]
+	st := sess.get(inboxH).store
+
+	// Precondition: the inbox has a message and the subfolder.
+	if msgs, _ := st.ListMessages(inboxFID); len(msgs) == 0 {
+		t.Fatal("expected a message in Inbox")
+	}
+	if kids, _ := childFolders(st, inboxFID); len(kids) == 0 {
+		t.Fatal("expected a subfolder under Inbox")
+	}
+
+	body := ext.NewPush(ext.FlagUTF16)
+	body.Uint8(0) // WantAsynchronous
+	body.Uint8(0) // WantDeleteAssociated
+	resp, _ := sess.Dispatch(toROPRequest(ropHardDelMsgsAndSubfolders, 0, body.Bytes()), []uint32{inboxH})
+	p := ext.NewPull(resp, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropHardDelMsgsAndSubfolders {
+		t.Fatalf("HardDeleteMessagesAndSubfolders RopId = %#x", id)
+	}
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("HardDeleteMessagesAndSubfolders ReturnValue = %#x", ec)
+	}
+	if pc := mustU8(t, p, "partialCompletion"); pc != 0 {
+		t.Errorf("PartialCompletion = %d, want 0", pc)
+	}
+
+	// The folder's messages are cleared (to the dumpster).
+	if after, _ := st.ListMessages(inboxFID); len(after) != 0 {
+		t.Errorf("%d messages remain after HardDeleteMessagesAndSubfolders", len(after))
+	}
+	if dump, _ := st.ListSoftDeleted(inboxFID); len(dump) != 1 {
+		t.Errorf("dumpster = %d, want 1 (cleared message recoverable)", len(dump))
+	}
+	// The subfolder is removed.
+	kids, _ := childFolders(st, inboxFID)
+	for _, k := range kids {
+		if k.ID == subID {
+			t.Errorf("subfolder %d was not deleted", subID)
+		}
+	}
+}
+
 func TestEmptyFolderDeletesMessages(t *testing.T) {
 	dir := t.TempDir()
 	seedInboxMessage(t, dir, "M1")

@@ -55,6 +55,7 @@ const (
 	ropCopyFolder                  uint8 = 0x36
 	ropEmptyFolder                 uint8 = 0x58
 	ropHardDeleteMessages          uint8 = 0x91
+	ropHardDelMsgsAndSubfolders    uint8 = 0x92
 	ropSetSearchCriteria           uint8 = 0x30
 	ropGetSearchCriteria           uint8 = 0x31
 	ropDeleteProperties            uint8 = 0x0B
@@ -259,6 +260,10 @@ loop:
 			}
 		case ropHardDeleteMessages:
 			if !s.ropHardDeleteMessages(p, out, handles, hindex) {
+				break loop
+			}
+		case ropHardDelMsgsAndSubfolders:
+			if !s.ropHardDeleteMessagesAndSubfolders(p, out, handles, hindex) {
 				break loop
 			}
 		case ropSetSearchCriteria:

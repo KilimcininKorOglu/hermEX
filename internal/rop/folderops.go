@@ -228,6 +228,58 @@ func (s *Session) ropCopyFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	return true
 }
 
+// ropHardDeleteMessagesAndSubfolders handles RopHardDeleteMessagesAndSubfolders
+// ([MS-OXCFOLD] 2.2.1.10 / [MS-OXCROPS] 2.2.4.10). Its request wire and response are
+// identical to RopEmptyFolder (WantAsynchronous, WantDeleteAssociated -> a
+// PartialCompletion), but besides clearing the folder's messages it ALSO removes the
+// folder's subfolders, each with its whole subtree. v1 routes message removal through
+// the dumpster (the same soft-delete the existing hard-delete ROPs use, since an
+// Exchange hard delete still lands in Recoverable Items); a failure to remove any
+// message or subfolder sets PartialCompletion.
+func (s *Session) ropHardDeleteMessagesAndSubfolders(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	_ /* wantAsync */, e1 := p.Uint8()
+	_ /* wantDeleteAssociated */, e2 := p.Uint8()
+	if e1 != nil || e2 != nil {
+		return false
+	}
+	folder := s.get(handleAt(handles, hindex))
+	if folder == nil || folder.kind != kindFolder || folder.store == nil {
+		writeErr(out, ropHardDelMsgsAndSubfolders, hindex, ecError)
+		return true
+	}
+	// Clearing a folder and dropping its subfolders deletes items: it requires
+	// DeleteAny on the folder, like RopEmptyFolder.
+	if s.denyWrite(out, ropHardDelMsgsAndSubfolders, hindex, folder.store, folder.folderID, mapi.FrightsDeleteAny) {
+		return true
+	}
+	var partial uint8
+	msgs, err := folder.store.ListMessages(folder.folderID)
+	if err != nil {
+		writeErr(out, ropHardDelMsgsAndSubfolders, hindex, ecError)
+		return true
+	}
+	for _, m := range msgs {
+		if err := folder.store.SoftDeleteObject(m.ID); err != nil {
+			partial = 1
+		}
+	}
+	children, err := childFolders(folder.store, folder.folderID)
+	if err != nil {
+		writeErr(out, ropHardDelMsgsAndSubfolders, hindex, ecError)
+		return true
+	}
+	for _, c := range children {
+		if err := folder.store.DeleteFolder(c.ID); err != nil {
+			partial = 1
+		}
+	}
+	out.Uint8(ropHardDelMsgsAndSubfolders)
+	out.Uint8(hindex)
+	out.Uint32(ecSuccess)
+	out.Uint8(partial) // PartialCompletion
+	return true
+}
+
 // ropEmptyFolder handles RopEmptyFolder ([MS-OXCFOLD] 2.2.1.5): it soft-deletes all
 // messages (and optionally FAI/associated items) from the folder into the
 // Recoverable Items dumpster (recoverable until retention). v1 always synchronous,
