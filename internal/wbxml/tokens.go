@@ -513,3 +513,25 @@ const (
 	IOEmptyFolderContents Tag = 0x1412
 	IODeleteSubFolders    Tag = 0x1413
 )
+
+// Find command codepage (0x19), MS-ASCMD/MS-ASWBXML (Since 16.1): the unified
+// mailbox/GAL search a 16.x client issues. The result carries the matched item's
+// class, server id, and folder id from the AirSync codepage, plus the Find
+// Properties holding the email render.
+const (
+	FNDFind                   Tag = 0x1905
+	FNDSearchId               Tag = 0x1906
+	FNDExecuteSearch          Tag = 0x1907
+	FNDMailboxSearchCriterion Tag = 0x1908
+	FNDQuery                  Tag = 0x1909
+	FNDStatus                 Tag = 0x190A
+	FNDFreeText               Tag = 0x190B
+	FNDOptions                Tag = 0x190C
+	FNDRange                  Tag = 0x190D
+	FNDDeepTraversal          Tag = 0x190E
+	FNDResponse               Tag = 0x1911
+	FNDResult                 Tag = 0x1912
+	FNDProperties             Tag = 0x1913
+	FNDTotal                  Tag = 0x1916
+	FNDGalSearchCriterion     Tag = 0x1919
+)

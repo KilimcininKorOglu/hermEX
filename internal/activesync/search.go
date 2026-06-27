@@ -95,30 +95,7 @@ func (s *Server) handleMailboxSearch(w http.ResponseWriter, store *wbxml.Node, s
 	}
 	defer st.Close()
 
-	folders := mailboxSearchFolders()
-	if fid, perr := strconv.ParseInt(folderFilter, 10, 64); perr == nil {
-		folders = []int64{fid}
-	}
-
-	type hit struct {
-		fid int64
-		m   objectstore.MessageInfo
-	}
-	var hits []hit
-	for _, fid := range folders {
-		msgs, err := st.ListMessages(fid)
-		if err != nil {
-			continue
-		}
-		for _, m := range msgs {
-			if messageMatches(st, fid, m, freetext) {
-				hits = append(hits, hit{fid, m})
-			}
-		}
-	}
-	sort.SliceStable(hits, func(i, j int) bool {
-		return hits[i].m.InternalDate.After(hits[j].m.InternalDate)
-	})
+	hits := mailboxSearchHits(st, freetext, folderFilter)
 
 	total := len(hits)
 	lo = min(max(lo, 0), total)
@@ -143,6 +120,40 @@ func (s *Server) handleMailboxSearch(w http.ResponseWriter, store *wbxml.Node, s
 		rangeHi = lo + len(page) - 1
 	}
 	writeWBXML(w, mailboxSearchReply(srStoreOK, results, lo, rangeHi, total))
+}
+
+// searchHit is one Mailbox-search match: the folder it lives in and its index row.
+type searchHit struct {
+	fid int64
+	m   objectstore.MessageInfo
+}
+
+// mailboxSearchHits scans the caller's mail folders for messages matching the
+// (already lowercased) freetext and returns them sorted newest-first. A non-empty
+// folderFilter (a numeric CollectionId) narrows the scan to that one folder; the
+// caller slices the requested Range out of the returned set, so the sort makes the
+// stateless paging deterministic. Shared by the Search and Find commands.
+func mailboxSearchHits(st *objectstore.Store, freetext, folderFilter string) []searchHit {
+	folders := mailboxSearchFolders()
+	if fid, err := strconv.ParseInt(folderFilter, 10, 64); err == nil {
+		folders = []int64{fid}
+	}
+	var hits []searchHit
+	for _, fid := range folders {
+		msgs, err := st.ListMessages(fid)
+		if err != nil {
+			continue
+		}
+		for _, m := range msgs {
+			if messageMatches(st, fid, m, freetext) {
+				hits = append(hits, searchHit{fid, m})
+			}
+		}
+	}
+	sort.SliceStable(hits, func(i, j int) bool {
+		return hits[i].m.InternalDate.After(hits[j].m.InternalDate)
+	})
+	return hits
 }
 
 // mailboxSearchFolders is the well-known mail folder set a Store=Mailbox search

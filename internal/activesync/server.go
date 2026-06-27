@@ -195,6 +195,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleResolveRecipients(w, r, sess)
 	case "Search":
 		s.handleSearch(w, r, sess)
+	case "Find":
+		s.handleFind(w, r, sess)
 	case "ValidateCert":
 		s.handleValidateCert(w, r, sess)
 	default:
