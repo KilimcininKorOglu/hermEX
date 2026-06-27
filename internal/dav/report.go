@@ -352,13 +352,16 @@ func calendarObjectData(st *objectstore.Store, fid, id int64, uid string) (strin
 }
 
 // calendarDataResponse builds a 200 response carrying a member's ETag and iCalendar.
+// A scheduling object (one carrying an ORGANIZER) also reports its CALDAV:schedule-tag
+// (RFC 6638 3.2.10); a plain appointment or a VTODO does not.
 func calendarDataResponse(href string, cn uint64, data string) msResponse {
+	prop := msProp{GetETag: etag(cn), CalendarData: data}
+	if isSchedulingBody(data) {
+		prop.ScheduleTag = scheduleTag(cn)
+	}
 	return msResponse{
-		Href: href,
-		Propstat: []msPropstat{{
-			Prop:   msProp{GetETag: etag(cn), CalendarData: data},
-			Status: statusOK,
-		}},
+		Href:     href,
+		Propstat: []msPropstat{{Prop: prop, Status: statusOK}},
 	}
 }
 

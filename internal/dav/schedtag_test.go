@@ -31,6 +31,34 @@ func putCal(t *testing.T, ts *httptest.Server, name, body, ifSchedule string) *h
 	return resp
 }
 
+// TestScheduleTagInReport confirms a calendar-multiget REPORT exposes the
+// CALDAV:schedule-tag property for a scheduling object but not for a plain
+// appointment (RFC 6638 3.2.10).
+func TestScheduleTagInReport(t *testing.T) {
+	ts := davServerCal(t)
+	base := "/dav/calendars/" + testUser + "/calendar/"
+	putCal(t, ts, "rm.ics", schedEvent("rm", testUser, "Meet", "20260701T140000Z", 0, "bob@hermex.test"), "")
+	plain := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:rp\r\nSUMMARY:Solo\r\nDTSTART:20260701T140000Z\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	putCal(t, ts, "rp.ics", plain, "")
+
+	report := `<C:calendar-multiget xmlns:D="DAV:" xmlns:C="urn:ietf:params:xml:ns:caldav">` +
+		`<D:prop><D:getetag/><C:schedule-tag/><C:calendar-data/></D:prop>` +
+		`<D:href>` + base + `rm.ics</D:href><D:href>` + base + `rp.ics</D:href></C:calendar-multiget>`
+	resp, body := doFull(t, ts, "REPORT", base, report, nil)
+	if resp.StatusCode != http.StatusMultiStatus {
+		t.Fatalf("REPORT status %d, want 207\n%s", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, "rm.ics") || !strings.Contains(body, "rp.ics") {
+		t.Fatalf("REPORT did not return both members\n%s", body)
+	}
+	if !strings.Contains(body, "schedule-tag") {
+		t.Errorf("REPORT did not expose schedule-tag for the meeting\n%s", body)
+	}
+	if n := strings.Count(body, "<schedule-tag"); n != 1 {
+		t.Errorf("expected exactly one schedule-tag element (the meeting), got %d\n%s", n, body)
+	}
+}
+
 // TestScheduleTagHeaders covers RFC 6638 8.2/8.3: a scheduling object reports a
 // Schedule-Tag (a plain appointment does not), the tag changes on every PUT (3.2.10
 // rule 3), and If-Schedule-Tag-Match gates the PUT.

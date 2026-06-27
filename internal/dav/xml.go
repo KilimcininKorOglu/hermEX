@@ -49,6 +49,7 @@ type msProp struct {
 	AddressData        string              `xml:"urn:ietf:params:xml:ns:carddav address-data,omitempty"`
 	CalendarHomeSet    *href               `xml:"urn:ietf:params:xml:ns:caldav calendar-home-set,omitempty"`
 	CalendarData       string              `xml:"urn:ietf:params:xml:ns:caldav calendar-data,omitempty"`
+	ScheduleTag        string              `xml:"urn:ietf:params:xml:ns:caldav schedule-tag,omitempty"`
 	SupportedCalComp   *supportedComp      `xml:"urn:ietf:params:xml:ns:caldav supported-calendar-component-set,omitempty"`
 	SupportedReportSet *supportedReportSet `xml:"DAV: supported-report-set,omitempty"`
 	// CalDAV scheduling discovery (RFC 6638 §2): the principal's calendar user
