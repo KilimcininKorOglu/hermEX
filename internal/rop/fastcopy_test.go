@@ -118,3 +118,45 @@ func TestFastTransferSourceCopyToRejectsFolder(t *testing.T) {
 		t.Fatalf("folder source ReturnValue = %#x, want ecError", ec)
 	}
 }
+
+// buildFastCopyProps frames a RopFastTransferSourceCopyProperties request: the source
+// at inIdx, the download handle at outIdx, then Level / CopyFlags / SendOptions and
+// the included property tags.
+func buildFastCopyProps(inIdx, outIdx uint8, included []mapi.PropTag) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropFastTransferSourceCopyProperties)
+	b.Uint8(0) // LogonId
+	b.Uint8(inIdx)
+	b.Uint8(outIdx)
+	b.Uint8(0) // Level
+	b.Uint8(0) // CopyFlags
+	b.Uint8(0) // SendOptions
+	_ = b.PropTags(included)
+	return b.Bytes()
+}
+
+// TestFastTransferSourceCopyProperties opens a property-only download on a stored
+// message and drains it, asserting the propList carries no sub-object markers.
+func TestFastTransferSourceCopyProperties(t *testing.T) {
+	sess, logonH, msgH := copyToSession(t)
+	defer sess.Close()
+
+	handles := []uint32{logonH, msgH, 0xFFFFFFFF}
+	sr, h := sess.Dispatch(buildFastCopyProps(1, 2, []mapi.PropTag{mapi.PrSubject}), handles)
+	p := ext.NewPull(sr, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropFastTransferSourceCopyProperties {
+		t.Fatalf("CopyProperties RopId = %#x", id)
+	}
+	mustU8(t, p, "ohindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("CopyProperties ReturnValue = %#x", ec)
+	}
+
+	items := drainSyncDownload(t, sess, h, 2)
+	if n := ropMarkerCount(items, ics.MarkerStartRecip); n != 0 {
+		t.Errorf("CopyProperties carried %d StartRecip markers, want 0 (propList has no sub-objects)", n)
+	}
+	if n := ropMarkerCount(items, ics.MarkerNewAttach); n != 0 {
+		t.Errorf("CopyProperties carried %d NewAttach markers, want 0", n)
+	}
+}

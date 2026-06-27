@@ -108,3 +108,58 @@ func TestCopyToMessageExclusion(t *testing.T) {
 		t.Errorf("PrSubject = %v (ok=%v), want \"exclusion\"", v, ok)
 	}
 }
+
+// TestCopyPropertiesMessageRoundTrip renders a stored message's listed properties as
+// a generic-copy propList (no recipients or attachments) and asserts only the listed
+// properties survive the round trip and no sub-objects are carried.
+func TestCopyPropertiesMessageRoundTrip(t *testing.T) {
+	s := openSeededStore(t)
+	fld := int64(mapi.PrivateFIDContacts)
+	mid, err := s.CreateMessage(fld, richMsg("copyprops"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	src, err := s.NewCopyPropertiesMessageSource(mid, []mapi.PropTag{mapi.PrSubject, mapi.PrMessageClass})
+	if err != nil {
+		t.Fatalf("NewCopyPropertiesMessageSource: %v", err)
+	}
+	body := drainCopy(t, src)
+
+	dst := openSeededStore(t)
+	id := reconstructMessage(t, dst, int64(mapi.PrivateFIDInbox), body)
+	got, err := dst.OpenMessage(int64(id))
+	if err != nil {
+		t.Fatalf("open reconstructed: %v", err)
+	}
+	if v, ok := got.Props.Get(mapi.PrSubject); !ok || v != "copyprops" {
+		t.Errorf("PrSubject = %v (ok=%v), want \"copyprops\"", v, ok)
+	}
+	if _, ok := got.Props.Get(mapi.PrBody); ok {
+		t.Errorf("PrBody survived a CopyProperties that did not list it")
+	}
+	if len(got.Recipients) != 0 {
+		t.Errorf("CopyProperties carried %d recipients, want 0 (propList has no sub-objects)", len(got.Recipients))
+	}
+	if len(got.Attachments) != 0 {
+		t.Errorf("CopyProperties carried %d attachments, want 0", len(got.Attachments))
+	}
+}
+
+// TestCopyPropertiesEmptyIncludeCopiesNothing checks the empty inclusive set selects
+// no properties rather than falling through to the keep-all (exclusion) default.
+func TestCopyPropertiesEmptyIncludeCopiesNothing(t *testing.T) {
+	s := openSeededStore(t)
+	fld := int64(mapi.PrivateFIDContacts)
+	mid, err := s.CreateMessage(fld, richMsg("empty"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	src, err := s.NewCopyPropertiesMessageSource(mid, nil)
+	if err != nil {
+		t.Fatalf("NewCopyPropertiesMessageSource: %v", err)
+	}
+	if body := drainCopy(t, src); len(body) != 0 {
+		t.Errorf("empty CopyProperties produced %d bytes, want 0", len(body))
+	}
+}
