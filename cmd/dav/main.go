@@ -23,6 +23,7 @@ import (
 	"hermex/internal/ldapauth"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
+	"hermex/internal/notify"
 	"hermex/internal/objectstore"
 	"hermex/internal/relay"
 	"hermex/internal/serve"
@@ -62,6 +63,10 @@ func main() {
 	}
 	spool.Signer = &dkimsign.Signer{Keys: dir, Logger: logger}
 	srv.SetSpool(spool)
+	// Wire the push subscription transport to the central wake bus so a change in any
+	// daemon wakes a subscribed DAV client sub-second (calendarserver-push). A nil
+	// consumer (no notify_url) degrades the push long-poll to its cadence floor.
+	srv.SetNotify(notify.EnableConsumer(cfg.NotifyURL, cfg.NotifySecret, logger))
 	// CalDAV/CardDAV PUT body caps: read at startup and re-read every minute so an
 	// admin's change applies without a restart; 0 keeps the built-in defaults.
 	applyDAVSizeLimits(dir.GetSizeLimits, srv.SetMaxICal, srv.SetMaxVCard)

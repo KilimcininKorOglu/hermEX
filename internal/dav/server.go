@@ -13,6 +13,7 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/logging"
+	"hermex/internal/notify"
 	"hermex/internal/objectstore"
 	"hermex/internal/relay"
 )
@@ -31,6 +32,11 @@ type Server struct {
 	// local-only and a remote recipient is reported as undeliverable — and set by the
 	// daemon via SetSpool when a relay queue is available.
 	spool *relay.Spool
+	// notifier is the wake-bus consumer a push long-poll registers on so a change in any
+	// daemon wakes a subscribed DAV client without polling (calendarserver-push, #118).
+	// nil disables push: the long-poll then just waits out its cadence (the poll floor).
+	// Set by the daemon via SetNotify.
+	notifier *notify.Consumer
 	// maxICal and maxVCard cap the iCalendar and vCard PUT bodies in bytes (0 = the
 	// built-in defaults), held atomically so the DAV daemon's poll can apply an
 	// operator's edit while requests run, with no restart. Set them via SetMaxICal /
@@ -107,6 +113,13 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	}
 	user, mailbox, ok := s.basicAuth(w, r)
 	if !ok {
+		return
+	}
+	// The push subscription transport (calendarserver-push, #118): a long-poll on the
+	// caller's own mailbox, held until a wake-bus change or the cadence. Routed here so
+	// it bypasses the collection dispatch below.
+	if r.URL.Path == "/dav/push" || strings.HasPrefix(r.URL.Path, "/dav/push/") {
+		s.handlePushPoll(w, r, mailbox)
 		return
 	}
 	// Object methods dispatch by collection: a calendar .ics object is served by
