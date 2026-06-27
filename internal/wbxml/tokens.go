@@ -285,9 +285,9 @@ const (
 	FHCount        Tag = 0x0717
 )
 
-// ResolveRecipients (code page 0x0A). v1 carries the GAL-resolution and portrait
-// subsets; the certificate tokens are not yet served. Token numbers follow
-// [MS-ASWBXML] code page 0x0A exactly.
+// ResolveRecipients (code page 0x0A). v1 carries the GAL-resolution, availability,
+// and portrait subsets; the certificate tokens are not yet served. Token numbers
+// follow [MS-ASWBXML] code page 0x0A exactly.
 const (
 	RRResolveRecipients Tag = 0x0A05
 	RRResponse          Tag = 0x0A06
@@ -299,6 +299,10 @@ const (
 	RROptions           Tag = 0x0A0F
 	RRTo                Tag = 0x0A10
 	RRRecipientCount    Tag = 0x0A12
+	RRAvailability      Tag = 0x0A16 // since 14.0: free/busy request and response
+	RRStartTime         Tag = 0x0A17 // request: free/busy window start
+	RREndTime           Tag = 0x0A18 // request: free/busy window end
+	RRMergedFreeBusy    Tag = 0x0A19 // response: 30-minute free/busy digit string
 	RRPicture           Tag = 0x0A1A // since 14.1: a recipient's portrait
 	RRMaxSize           Tag = 0x0A1B // request: cap on portrait byte size
 	RRData              Tag = 0x0A1C // response: base64 portrait bytes

@@ -37,9 +37,10 @@ type pictureOpts struct {
 
 // handleResolveRecipients answers ResolveRecipients ([MS-ASCMD] 2.2.2.14): each
 // To string is resolved against the directory GAL, and the reply carries one
-// Response per query listing its matches (display name + address, and the
-// portrait when Options>Picture asked for it).
-func (s *Server) handleResolveRecipients(w http.ResponseWriter, r *http.Request, _ *session) {
+// Response per query listing its matches (display name + address, the free/busy
+// data when Options>Availability asked for it, and the portrait when
+// Options>Picture did).
+func (s *Server) handleResolveRecipients(w http.ResponseWriter, r *http.Request, sess *session) {
 	root, err := readWBXML(r)
 	if err != nil {
 		http.Error(w, "invalid WBXML: "+err.Error(), http.StatusBadRequest)
@@ -47,12 +48,14 @@ func (s *Server) handleResolveRecipients(w http.ResponseWriter, r *http.Request,
 	}
 	var tos []string
 	var opt pictureOpts
+	var win availabilityWindow
 	for _, c := range root.Children {
 		switch c.Tag {
 		case wbxml.RRTo:
 			tos = append(tos, c.Text)
 		case wbxml.RROptions:
 			opt = parsePictureOpts(c)
+			win = parseAvailability(c)
 		}
 	}
 	if len(tos) == 0 {
@@ -65,7 +68,7 @@ func (s *Server) handleResolveRecipients(w http.ResponseWriter, r *http.Request,
 	children := []*wbxml.Node{wbxml.Str(wbxml.RRStatus, strconv.Itoa(rrStatusOK))}
 	pictures := 0
 	for _, to := range tos {
-		children = append(children, resolveOneRecipient(gal, to, opt, &pictures))
+		children = append(children, resolveOneRecipient(gal, to, opt, win, sess, &pictures))
 	}
 	writeWBXML(w, wbxml.Elem(wbxml.RRResolveRecipients, children...))
 }
@@ -92,10 +95,10 @@ func parsePictureOpts(options *wbxml.Node) pictureOpts {
 }
 
 // resolveOneRecipient builds one Response: the echoed query, its resolution
-// status, the match count, and a Recipient for each GAL match (with its portrait
-// when requested). A query that matches nothing is an unresolved Response with a
-// zero count, not an error.
-func resolveOneRecipient(gal directory.GAL, to string, opt pictureOpts, pictures *int) *wbxml.Node {
+// status, the match count, and a Recipient for each GAL match (with its free/busy
+// and portrait when requested). A query that matches nothing is an unresolved
+// Response with a zero count, not an error.
+func resolveOneRecipient(gal directory.GAL, to string, opt pictureOpts, win availabilityWindow, sess *session, pictures *int) *wbxml.Node {
 	resp := []*wbxml.Node{wbxml.Str(wbxml.RRTo, to)}
 
 	var entries []directory.GALEntry
@@ -116,6 +119,9 @@ func resolveOneRecipient(gal directory.GAL, to string, opt pictureOpts, pictures
 			wbxml.Str(wbxml.RRType, "1"), // 1 = a Global Address List entry
 			wbxml.Str(wbxml.RRDisplayName, e.DisplayName),
 			wbxml.Str(wbxml.RREmailAddress, e.Address),
+		}
+		if win.ok {
+			rc = append(rc, availabilityNode(e, win, sess))
 		}
 		if opt.want {
 			rc = append(rc, pictureNode(e, opt, pictures))
