@@ -101,6 +101,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleMarkAllItemsAsRead(w, inner, sess)
 	case "DeleteAttachment":
 		s.handleDeleteAttachment(w, inner, sess)
+	case "MarkAsJunk":
+		s.handleMarkAsJunk(w, inner, sess)
 	case "Subscribe":
 		s.handleSubscribe(w, inner, sess)
 	case "Unsubscribe":
