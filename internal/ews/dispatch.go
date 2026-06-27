@@ -95,6 +95,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleGetMailTips(w, inner, sess)
 	case "ExpandDL":
 		s.handleExpandDL(w, inner, sess)
+	case "EmptyFolder":
+		s.handleEmptyFolder(w, inner, sess)
 	case "Subscribe":
 		s.handleSubscribe(w, inner, sess)
 	case "Unsubscribe":
