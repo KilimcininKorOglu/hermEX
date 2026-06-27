@@ -868,10 +868,7 @@ func (s *Session) ropSeekRowFractional(p *ext.Pull, out *ext.Push, handles []uin
 		return true
 	}
 	ts := table.table
-	pos := int(uint64(numerator) * uint64(ts.total()) / uint64(denominator))
-	if pos > ts.total() {
-		pos = ts.total()
-	}
+	pos := min(int(uint64(numerator)*uint64(ts.total())/uint64(denominator)), ts.total())
 	ts.cursor = pos
 	out.Uint8(ropSeekRowFractional)
 	out.Uint8(hindex)
