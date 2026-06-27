@@ -44,8 +44,12 @@ type itipMsg struct {
 // 6638 the calendar store (not the HTTP status) is the source of truth for
 // scheduling state. Local recipients are filed into their mailbox (rendered as a
 // meeting by the MAPI-family clients); external recipients relay when a spool is set.
-func (s *Server) scheduleOnChange(owner, oldBody, newBody string) {
+// suppressReply drops the attendee REPLY (RFC 6638 8.1, Schedule-Reply:F on delete).
+func (s *Server) scheduleOnChange(owner, oldBody, newBody string, suppressReply bool) {
 	for _, m := range schedulingMessages(owner, oldBody, newBody) {
+		if suppressReply && m.method == "REPLY" {
+			continue
+		}
 		raw, err := buildITIP(owner, m.recipients, scheduleSubject(m.method, m.summary), m.body, m.method)
 		if err != nil {
 			s.Logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.DAV, Name: "schedule.build.error", User: owner,

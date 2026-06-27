@@ -3,6 +3,7 @@ package dav
 import (
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"hermex/internal/mapi"
@@ -74,6 +75,11 @@ func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox st
 	}
 	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
 	w.Header().Set("ETag", etag(obj.ChangeNumber))
+	// A scheduling object (one carrying an ORGANIZER, stored with recipients) also
+	// reports its CALDAV:schedule-tag (RFC 6638 8.2); a plain appointment does not.
+	if fid != int64(mapi.PrivateFIDTasks) && msgIsScheduling(msg) {
+		w.Header().Set("Schedule-Tag", scheduleTag(obj.ChangeNumber))
+	}
 	if r.Method == http.MethodHead {
 		w.WriteHeader(http.StatusOK)
 		return
@@ -115,7 +121,15 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 		http.Error(w, "already exists", http.StatusPreconditionFailed)
 		return
 	}
-	if im := r.Header.Get("If-Match"); im != "" {
+	// If-Schedule-Tag-Match is the scheduling-aware precondition (RFC 6638 8.3); when
+	// present it supersedes If-Match so an inconsequential server scheduling change does
+	// not block the PUT.
+	if ism := r.Header.Get("If-Schedule-Tag-Match"); ism != "" {
+		if !found || ism != scheduleTag(existing.ChangeNumber) {
+			http.Error(w, "schedule-tag mismatch", http.StatusPreconditionFailed)
+			return
+		}
+	} else if im := r.Header.Get("If-Match"); im != "" {
 		if !found || im != etag(existing.ChangeNumber) {
 			http.Error(w, "etag mismatch", http.StatusPreconditionFailed)
 			return
@@ -176,6 +190,11 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 	created, _, cerr := findObjectByName(st, fid, ".ics", name)
 	if cerr == nil && created.ChangeNumber != 0 {
 		w.Header().Set("ETag", etag(created.ChangeNumber))
+		// A scheduling object's PUT response also carries the new schedule-tag, which
+		// changes on every direct PUT (RFC 6638 3.2.10 rule 3 / 8.2).
+		if fid != int64(mapi.PrivateFIDTasks) && isSchedulingBody(string(body)) {
+			w.Header().Set("Schedule-Tag", scheduleTag(created.ChangeNumber))
+		}
 	}
 
 	// Implicit scheduling (RFC 6638 §3): auto-deliver the iTIP this change implies.
@@ -186,7 +205,7 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 	// never surfaced as a PUT error.
 	if fid != int64(mapi.PrivateFIDTasks) && cerr == nil {
 		if newBody, nerr := calendarData(st, created.ID); nerr == nil {
-			s.scheduleOnChange(user, oldBody, newBody)
+			s.scheduleOnChange(user, oldBody, newBody, false)
 		}
 	}
 
@@ -229,7 +248,13 @@ func (s *Server) handleCalDelete(w http.ResponseWriter, r *http.Request, user, m
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	if im := r.Header.Get("If-Match"); im != "" && im != etag(obj.ChangeNumber) {
+	// If-Schedule-Tag-Match supersedes If-Match (RFC 6638 8.3).
+	if ism := r.Header.Get("If-Schedule-Tag-Match"); ism != "" {
+		if ism != scheduleTag(obj.ChangeNumber) {
+			http.Error(w, "schedule-tag mismatch", http.StatusPreconditionFailed)
+			return
+		}
+	} else if im := r.Header.Get("If-Match"); im != "" && im != etag(obj.ChangeNumber) {
 		http.Error(w, "etag mismatch", http.StatusPreconditionFailed)
 		return
 	}
@@ -248,9 +273,32 @@ func (s *Server) handleCalDelete(w http.ResponseWriter, r *http.Request, user, m
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	// Best-effort iTIP cancel/decline; a delivery failure never fails the delete.
+	// Best-effort iTIP cancel/decline; a delivery failure never fails the delete. An
+	// attendee delete with Schedule-Reply:F sends no reply (RFC 6638 8.1).
 	if fid != int64(mapi.PrivateFIDTasks) {
-		s.scheduleOnChange(user, oldBody, "")
+		s.scheduleOnChange(user, oldBody, "", scheduleReplyF(r))
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// scheduleReplyF reports whether a request asks to suppress the scheduling reply via
+// the Schedule-Reply: F header (RFC 6638 8.1); absent or T means send the reply.
+func scheduleReplyF(r *http.Request) bool {
+	return strings.EqualFold(strings.TrimSpace(r.Header.Get("Schedule-Reply")), "F")
+}
+
+// isSchedulingBody reports whether an iCalendar body is a scheduling object resource:
+// a VEVENT carrying an ORGANIZER (RFC 6638 3.1).
+func isSchedulingBody(body string) bool {
+	return nodeOrganizer(firstVEvent(body)) != ""
+}
+
+// msgIsScheduling reports whether a stored calendar message is a scheduling object:
+// it has attendees (recipients) or an organizer (sent-representing) identity.
+func msgIsScheduling(msg *oxcmail.Message) bool {
+	if len(msg.Recipients) > 0 {
+		return true
+	}
+	_, ok := msg.Props.Get(mapi.PrSentRepresentingSmtpAddress)
+	return ok
 }

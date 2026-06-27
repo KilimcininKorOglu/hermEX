@@ -496,6 +496,12 @@ func writeMultistatus(w http.ResponseWriter, ms *multistatus) {
 // etag is a quoted entity tag derived from an object's change number.
 func etag(cn uint64) string { return `"` + strconv.FormatUint(cn, 10) + `"` }
 
+// scheduleTag derives a CALDAV:schedule-tag from an object's change number (RFC 6638
+// 3.2.10). Its format is distinct from etag so a client treats the two independently.
+// It changes on every direct PUT/COPY/MOVE (rule 3); hermEX has no server-side
+// partstat-only update path (rule 2), so today it tracks the ETag in lockstep.
+func scheduleTag(cn uint64) string { return `"ST` + strconv.FormatUint(cn, 10) + `"` }
+
 // ctag is a collection tag: the highest member change number, opaque to clients.
 func ctag(max uint64) string { return strconv.FormatUint(max, 10) }
 
