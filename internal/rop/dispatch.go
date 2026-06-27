@@ -516,6 +516,22 @@ loop:
 			if !s.ropSyncImportMessageMove(p, out, handles, hindex) {
 				break loop
 			}
+		case ropGetPerUserLongTermIds:
+			if !s.ropGetPerUserLongTermIds(p, out, handles, hindex) {
+				break loop
+			}
+		case ropGetPerUserGuid:
+			if !s.ropGetPerUserGuid(p, out, handles, hindex) {
+				break loop
+			}
+		case ropReadPerUserInformation:
+			if !s.ropReadPerUserInformation(p, out, handles, hindex) {
+				break loop
+			}
+		case ropWritePerUserInformation:
+			if !s.ropWritePerUserInformation(p, out, handles, hindex) {
+				break loop
+			}
 		case ropFastTransferSourceCopyMessages:
 			if !s.ropFastTransferSourceCopyMessages(p, out, handles, hindex) {
 				break loop
