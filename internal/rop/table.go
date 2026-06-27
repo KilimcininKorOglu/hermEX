@@ -815,6 +815,148 @@ func (s *Session) ropFindRow(p *ext.Pull, out *ext.Push, handles []uint32, hinde
 	return true
 }
 
+// ropGetStatus handles RopGetStatus ([MS-OXCTABL] 2.2.2.9): it reports the table's
+// asynchronous-operation status. hermEX builds every table synchronously, so the
+// table is always fully populated: the status is TBLSTAT_COMPLETE.
+func (s *Session) ropGetStatus(_ *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	table := s.get(handleAt(handles, hindex))
+	if table == nil || table.kind != kindTable {
+		writeErr(out, ropGetStatus, hindex, ecNotSupported)
+		return true
+	}
+	out.Uint8(ropGetStatus)
+	out.Uint8(hindex)
+	out.Uint32(ecSuccess)
+	out.Uint8(tableStatusComplete)
+	return true
+}
+
+// ropQueryPosition handles RopQueryPosition ([MS-OXCTABL] 2.2.2.5): it returns the
+// cursor's current row index (Numerator) and the table's row count (Denominator).
+func (s *Session) ropQueryPosition(_ *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	table := s.get(handleAt(handles, hindex))
+	if table == nil || table.kind != kindTable {
+		writeErr(out, ropQueryPosition, hindex, ecNotSupported)
+		return true
+	}
+	ts := table.table
+	out.Uint8(ropQueryPosition)
+	out.Uint8(hindex)
+	out.Uint32(ecSuccess)
+	out.Uint32(uint32(ts.cursor))  // Numerator
+	out.Uint32(uint32(ts.total())) // Denominator
+	return true
+}
+
+// ropSeekRowFractional handles RopSeekRowFractional ([MS-OXCTABL] 2.2.2.17): it moves
+// the cursor to the fractional position Numerator/Denominator of the table, computed
+// as Numerator*total/Denominator. A zero Denominator is an invalid bookmark. The
+// response carries no body beyond the return value.
+func (s *Session) ropSeekRowFractional(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	numerator, e1 := p.Uint32()
+	denominator, e2 := p.Uint32()
+	if e1 != nil || e2 != nil {
+		return false
+	}
+	table := s.get(handleAt(handles, hindex))
+	if table == nil || table.kind != kindTable {
+		writeErr(out, ropSeekRowFractional, hindex, ecNotSupported)
+		return true
+	}
+	if denominator == 0 {
+		writeErr(out, ropSeekRowFractional, hindex, ecInvalidBookmark)
+		return true
+	}
+	ts := table.table
+	pos := int(uint64(numerator) * uint64(ts.total()) / uint64(denominator))
+	if pos > ts.total() {
+		pos = ts.total()
+	}
+	ts.cursor = pos
+	out.Uint8(ropSeekRowFractional)
+	out.Uint8(hindex)
+	out.Uint32(ecSuccess)
+	return true
+}
+
+// ropQueryColumnsAll handles RopQueryColumnsAll ([MS-OXCTABL] 2.2.2.3): it returns
+// the property tags the table can produce. hermEX projects columns on demand with no
+// fixed schema, so the answer is the currently configured display column set (empty
+// before the first RopSetColumns).
+func (s *Session) ropQueryColumnsAll(_ *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	table := s.get(handleAt(handles, hindex))
+	if table == nil || table.kind != kindTable {
+		writeErr(out, ropQueryColumnsAll, hindex, ecNotSupported)
+		return true
+	}
+	out.Uint8(ropQueryColumnsAll)
+	out.Uint8(hindex)
+	out.Uint32(ecSuccess)
+	_ = out.PropTags(table.table.columns) // PropertyTags (PROPTAG_ARRAY); nil => count 0
+	return true
+}
+
+// ropAbort handles RopAbort ([MS-OXCTABL] 2.2.2.8): it would stop an in-progress
+// asynchronous table build. hermEX builds tables synchronously, so there is never an
+// operation to abort: the ROP fails with ecUnableToAbort, as Exchange does once the
+// build has completed.
+func (s *Session) ropAbort(_ *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	table := s.get(handleAt(handles, hindex))
+	if table == nil || table.kind != kindTable {
+		writeErr(out, ropAbort, hindex, ecNotSupported)
+		return true
+	}
+	writeErr(out, ropAbort, hindex, ecUnableToAbort)
+	return true
+}
+
+// ropGetCollapseState handles RopGetCollapseState ([MS-OXCTABL] 2.2.2.18): it snapshots
+// the expanded/collapsed state of a categorized table's headings. hermEX serves only
+// flat (uncategorized) tables, which have no headings, so the ROP is not supported.
+// The request body (row id + instance) is consumed so the ROP can sit anywhere in a
+// batch, matching RopSetCollapseState's not-supported answer.
+func (s *Session) ropGetCollapseState(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	_, e1 := p.Uint64() // RowId
+	_, e2 := p.Uint32() // RowInstanceNumber
+	if e1 != nil || e2 != nil {
+		return false
+	}
+	table := s.get(handleAt(handles, hindex))
+	if table == nil || table.kind != kindTable {
+		writeErr(out, ropGetCollapseState, hindex, ecError)
+		return true
+	}
+	writeErr(out, ropGetCollapseState, hindex, ecNotSupported)
+	return true
+}
+
+// ropFreeBookmark handles RopFreeBookmark ([MS-OXCTABL] 2.2.2.16): it releases a
+// bookmark created by RopCreateBookmark. The bookmark blob is hermEX's own opaque
+// 2-byte index (the form RopCreateBookmark emits); freeing an unknown or already-freed
+// bookmark is a no-op, so the ROP always succeeds once the handle is a table.
+func (s *Session) ropFreeBookmark(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	bk, e1 := p.BinShort() // Bookmark
+	if e1 != nil {
+		return false
+	}
+	table := s.get(handleAt(handles, hindex))
+	if table == nil || table.kind != kindTable {
+		writeErr(out, ropFreeBookmark, hindex, ecError)
+		return true
+	}
+	ts := table.table
+	if len(bk) >= 2 {
+		idx := (uint16(bk[0]) << 8) | uint16(bk[1])
+		if ts.bookmarks != nil {
+			delete(ts.bookmarks, idx)
+		}
+	}
+	out.Uint8(ropFreeBookmark)
+	out.Uint8(hindex)
+	out.Uint32(ecSuccess)
+	return true
+}
+
 // ropResetTable handles RopResetTable ([MS-OXCTABL] 2.2.2.14): it returns the table
 // to its initial state — clearing the column set, sort order, restriction, and
 // cursor — so the client starts a fresh SetColumns / Sort / Restrict cycle.

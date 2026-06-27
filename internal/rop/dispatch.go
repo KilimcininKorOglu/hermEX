@@ -34,6 +34,13 @@ const (
 	ropExpandRow                   uint8 = 0x59
 	ropCollapseRow                 uint8 = 0x5A
 	ropSetCollapseState            uint8 = 0x6C
+	ropGetCollapseState            uint8 = 0x6B
+	ropGetStatus                   uint8 = 0x16
+	ropQueryPosition               uint8 = 0x17
+	ropSeekRowFractional           uint8 = 0x1A
+	ropQueryColumnsAll             uint8 = 0x37
+	ropAbort                       uint8 = 0x38
+	ropFreeBookmark                uint8 = 0x89
 	ropResetTable                  uint8 = 0x81
 	ropGetAttachmentTable          uint8 = 0x21
 	ropOpenAttachment              uint8 = 0x22
@@ -84,16 +91,18 @@ const (
 
 // MAPI return codes ([MS-OXCDATA] 2.4.1) carried in a ROP response ReturnValue.
 const (
-	ecSuccess        uint32 = 0x00000000
-	ecError          uint32 = 0x80004005 // generic failure / unimplemented ROP
-	ecNotFound       uint32 = 0x8004010F // MAPI_E_NOT_FOUND (no such folder/object)
-	ecNotSupported   uint32 = 0x80040102 // MAPI_E_NO_SUPPORT (unsupported request)
-	ecAccessDenied   uint32 = 0x80070005 // MAPI_E_NO_ACCESS (e.g. setting the in-conflict status bit)
-	ecInvalidParam   uint32 = 0x80070057 // MAPI_E_INVALID_PARAMETER (e.g. a bad stream-seek origin)
-	ecDstNullObject  uint32 = 0x00000503 // a copy's destination handle resolves to no object
-	ecDeclineCopy    uint32 = 0x80040306 // MAPI_E_DECLINE_COPY (copy between mismatched object types)
-	ecFolderCycle    uint32 = 0x8004060B // MAPI_E_FOLDER_CYCLE (folder copied into its own subtree)
-	ecNotImplemented uint32 = 0x80040FFF // ecNotImplemented (RopGetStoreState, as Exchange 2010+)
+	ecSuccess         uint32 = 0x00000000
+	ecError           uint32 = 0x80004005 // generic failure / unimplemented ROP
+	ecNotFound        uint32 = 0x8004010F // MAPI_E_NOT_FOUND (no such folder/object)
+	ecNotSupported    uint32 = 0x80040102 // MAPI_E_NO_SUPPORT (unsupported request)
+	ecAccessDenied    uint32 = 0x80070005 // MAPI_E_NO_ACCESS (e.g. setting the in-conflict status bit)
+	ecInvalidParam    uint32 = 0x80070057 // MAPI_E_INVALID_PARAMETER (e.g. a bad stream-seek origin)
+	ecDstNullObject   uint32 = 0x00000503 // a copy's destination handle resolves to no object
+	ecDeclineCopy     uint32 = 0x80040306 // MAPI_E_DECLINE_COPY (copy between mismatched object types)
+	ecFolderCycle     uint32 = 0x8004060B // MAPI_E_FOLDER_CYCLE (folder copied into its own subtree)
+	ecNotImplemented  uint32 = 0x80040FFF // ecNotImplemented (RopGetStoreState, as Exchange 2010+)
+	ecUnableToAbort   uint32 = 0x80040114 // MAPI_E_UNABLE_TO_ABORT (RopAbort: nothing async to abort)
+	ecInvalidBookmark uint32 = 0x80040405 // MAPI_E_INVALID_BOOKMARK (RopSeekRowFractional: zero denominator)
 )
 
 // Dispatch parses the request ROP list and returns the response ROP bytes plus
@@ -356,6 +365,34 @@ loop:
 			}
 		case ropSeekRow:
 			if !s.ropSeekRow(p, out, handles, hindex) {
+				break loop
+			}
+		case ropGetStatus:
+			if !s.ropGetStatus(p, out, handles, hindex) {
+				break loop
+			}
+		case ropQueryPosition:
+			if !s.ropQueryPosition(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSeekRowFractional:
+			if !s.ropSeekRowFractional(p, out, handles, hindex) {
+				break loop
+			}
+		case ropQueryColumnsAll:
+			if !s.ropQueryColumnsAll(p, out, handles, hindex) {
+				break loop
+			}
+		case ropAbort:
+			if !s.ropAbort(p, out, handles, hindex) {
+				break loop
+			}
+		case ropGetCollapseState:
+			if !s.ropGetCollapseState(p, out, handles, hindex) {
+				break loop
+			}
+		case ropFreeBookmark:
+			if !s.ropFreeBookmark(p, out, handles, hindex) {
 				break loop
 			}
 		case ropSeekRowBookmark:

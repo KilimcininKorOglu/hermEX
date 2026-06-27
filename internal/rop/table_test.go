@@ -263,6 +263,136 @@ func buildSortTable(inIdx uint8, catCount, expanded uint16, keys []sortOrderEntr
 	return b.Bytes()
 }
 
+// TestTableStatusOps exercises the status/position/columns/abort/bookmark family
+// over a 3-row contents table: GetStatus reports complete, QueryColumnsAll echoes the
+// display column set, QueryPosition tracks the cursor, SeekRowFractional moves it to a
+// fraction of the total, Abort fails (nothing async to abort), GetCollapseState is
+// unsupported on a flat table, and FreeBookmark genuinely drops the bookmark (a
+// later SeekRowBookmark on the freed blob reports ecNotFound).
+func TestTableStatusOps(t *testing.T) {
+	dir := t.TempDir()
+	seedInboxMessage(t, dir, "One")
+	seedInboxMessage(t, dir, "Two")
+	seedInboxMessage(t, dir, "Three")
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	tableH := openInboxContentsTable(t, sess)
+	cols := []mapi.PropTag{mapi.PrSubject}
+	mustDispatchOK(t, sess, buildSetColumns(0, cols), []uint32{tableH}, ropSetColumns)
+
+	// GetStatus: a synchronously-built table is always complete.
+	gs, _ := sess.Dispatch(toROPRequest(ropGetStatus, 0, nil), []uint32{tableH})
+	p := ext.NewPull(gs, ext.FlagUTF16)
+	mustU8(t, p, "GS.RopId")
+	mustU8(t, p, "GS.hindex")
+	if ec := mustU32(t, p, "GS.ec"); ec != ecSuccess {
+		t.Fatalf("GetStatus ec = %#x", ec)
+	}
+	if st := mustU8(t, p, "GS.status"); st != tableStatusComplete {
+		t.Errorf("GetStatus status = %#x, want %#x", st, tableStatusComplete)
+	}
+
+	// QueryColumnsAll: the display column set (PR_SUBJECT).
+	qc, _ := sess.Dispatch(toROPRequest(ropQueryColumnsAll, 0, nil), []uint32{tableH})
+	p = ext.NewPull(qc, ext.FlagUTF16)
+	mustU8(t, p, "QC.RopId")
+	mustU8(t, p, "QC.hindex")
+	if ec := mustU32(t, p, "QC.ec"); ec != ecSuccess {
+		t.Fatalf("QueryColumnsAll ec = %#x", ec)
+	}
+	gotCols, err := p.PropTags()
+	if err != nil {
+		t.Fatalf("QueryColumnsAll PropTags: %v", err)
+	}
+	if len(gotCols) != 1 || gotCols[0] != mapi.PrSubject {
+		t.Errorf("QueryColumnsAll columns = %v, want [PrSubject]", gotCols)
+	}
+
+	// QueryPosition: cursor at the start, denominator = row count.
+	assertPosition := func(label string, wantNum, wantDen uint32) {
+		t.Helper()
+		qp, _ := sess.Dispatch(toROPRequest(ropQueryPosition, 0, nil), []uint32{tableH})
+		pp := ext.NewPull(qp, ext.FlagUTF16)
+		mustU8(t, pp, "QP.RopId")
+		mustU8(t, pp, "QP.hindex")
+		if ec := mustU32(t, pp, "QP.ec"); ec != ecSuccess {
+			t.Fatalf("%s QueryPosition ec = %#x", label, ec)
+		}
+		if num := mustU32(t, pp, "QP.num"); num != wantNum {
+			t.Errorf("%s Numerator = %d, want %d", label, num, wantNum)
+		}
+		if den := mustU32(t, pp, "QP.den"); den != wantDen {
+			t.Errorf("%s Denominator = %d, want %d", label, den, wantDen)
+		}
+	}
+	assertPosition("initial", 0, 3)
+
+	// SeekRowFractional 1/2 of 3 rows lands the cursor on row 1.
+	srf := ext.NewPush(ext.FlagUTF16)
+	srf.Uint32(1) // Numerator
+	srf.Uint32(2) // Denominator
+	sr, _ := sess.Dispatch(toROPRequest(ropSeekRowFractional, 0, srf.Bytes()), []uint32{tableH})
+	if ec := readEC(t, sr, ropSeekRowFractional); ec != ecSuccess {
+		t.Fatalf("SeekRowFractional ec = %#x", ec)
+	}
+	assertPosition("after-seek", 1, 3)
+
+	// A zero denominator is an invalid bookmark.
+	srf0 := ext.NewPush(ext.FlagUTF16)
+	srf0.Uint32(1)
+	srf0.Uint32(0)
+	sr0, _ := sess.Dispatch(toROPRequest(ropSeekRowFractional, 0, srf0.Bytes()), []uint32{tableH})
+	if ec := readEC(t, sr0, ropSeekRowFractional); ec != ecInvalidBookmark {
+		t.Errorf("SeekRowFractional(den=0) ec = %#x, want ecInvalidBookmark", ec)
+	}
+
+	// Abort: there is no asynchronous build to abort.
+	ab, _ := sess.Dispatch(toROPRequest(ropAbort, 0, nil), []uint32{tableH})
+	if ec := readEC(t, ab, ropAbort); ec != ecUnableToAbort {
+		t.Errorf("Abort ec = %#x, want ecUnableToAbort", ec)
+	}
+
+	// GetCollapseState: unsupported on a flat (uncategorized) table.
+	gcs := ext.NewPush(ext.FlagUTF16)
+	gcs.Uint64(0) // RowId
+	gcs.Uint32(0) // RowInstanceNumber
+	gc, _ := sess.Dispatch(toROPRequest(ropGetCollapseState, 0, gcs.Bytes()), []uint32{tableH})
+	if ec := readEC(t, gc, ropGetCollapseState); ec != ecNotSupported {
+		t.Errorf("GetCollapseState ec = %#x, want ecNotSupported", ec)
+	}
+
+	// FreeBookmark must actually drop the bookmark: create one at the current cursor,
+	// free it, then a SeekRowBookmark on the freed blob reports ecNotFound.
+	cb, _ := sess.Dispatch(toROPRequest(ropCreateBookmark, 0, nil), []uint32{tableH})
+	pcb := ext.NewPull(cb, ext.FlagUTF16)
+	mustU8(t, pcb, "CB.RopId")
+	mustU8(t, pcb, "CB.hindex")
+	if ec := mustU32(t, pcb, "CB.ec"); ec != ecSuccess {
+		t.Fatalf("CreateBookmark ec = %#x", ec)
+	}
+	bookmark, err := pcb.BinShort()
+	if err != nil {
+		t.Fatalf("CreateBookmark bookmark: %v", err)
+	}
+
+	fb := ext.NewPush(ext.FlagUTF16)
+	_ = fb.BinShort(bookmark)
+	free, _ := sess.Dispatch(toROPRequest(ropFreeBookmark, 0, fb.Bytes()), []uint32{tableH})
+	if ec := readEC(t, free, ropFreeBookmark); ec != ecSuccess {
+		t.Fatalf("FreeBookmark ec = %#x", ec)
+	}
+
+	srb := ext.NewPush(ext.FlagUTF16)
+	_ = srb.BinShort(bookmark)
+	srb.Uint32(0) // Offset
+	srb.Uint8(0)  // WantRowMovedCount
+	seek, _ := sess.Dispatch(toROPRequest(ropSeekRowBookmark, 0, srb.Bytes()), []uint32{tableH})
+	if ec := readEC(t, seek, ropSeekRowBookmark); ec != ecNotFound {
+		t.Errorf("SeekRowBookmark on freed bookmark ec = %#x, want ecNotFound", ec)
+	}
+}
+
 // openInboxContentsTable walks Logon -> OpenFolder(Inbox) -> GetContentsTable and
 // returns the contents-table handle.
 func openInboxContentsTable(t *testing.T, sess *Session) uint32 {
