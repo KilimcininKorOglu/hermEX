@@ -66,6 +66,8 @@ const (
 	ropGetReceiveFolder            uint8 = 0x27
 	ropGetReceiveFolderTable       uint8 = 0x68
 	ropGetStoreState               uint8 = 0x7B
+	ropLongTermIdFromId            uint8 = 0x43
+	ropIdFromLongTermId            uint8 = 0x44
 	ropRegisterNotification        uint8 = 0x29
 	ropNotify                      uint8 = 0x2A
 	ropPending                     uint8 = 0x6E
@@ -172,6 +174,14 @@ loop:
 			}
 		case ropGetReceiveFolder:
 			if !s.ropGetReceiveFolder(p, out, handles, hindex) {
+				break loop
+			}
+		case ropLongTermIdFromId:
+			if !s.ropLongTermIdFromId(p, out, handles, hindex) {
+				break loop
+			}
+		case ropIdFromLongTermId:
+			if !s.ropIdFromLongTermId(p, out, handles, hindex) {
 				break loop
 			}
 		case ropSetReceiveFolder:
