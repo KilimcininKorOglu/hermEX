@@ -10,6 +10,7 @@ import (
 	"hermex/internal/mime"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxews"
+	"hermex/internal/oxtask"
 )
 
 // --- request types ---
@@ -66,10 +67,12 @@ type getAttachmentResponseMessage struct {
 	Attachments   *attachmentsWrap `xml:"Attachments,omitempty"`
 }
 
-// itemsWrap holds an <Items> list; each child is an oxews.Message carrying its
-// own types-namespace element name.
+// itemsWrap holds an <Items> list; each child carries its own types-namespace
+// element name, so a folder of tasks serializes as <t:Task> and a folder of mail as
+// <t:Message>.
 type itemsWrap struct {
 	Messages []oxews.Message
+	Tasks    []oxews.Task
 }
 
 type findItemRoot struct {
@@ -180,6 +183,24 @@ func (s *Server) handleFindItem(w http.ResponseWriter, inner []byte, sess *sessi
 		if !isOwn {
 			idMailbox = tgt.mailbox
 		}
+		if tgt.fid == int64(mapi.PrivateFIDTasks) {
+			// Tasks live in the object store (versioned by change number), not the IMAP
+			// index, so they are listed as folder objects rather than messages.
+			objs, _ := st.ListFolderObjects(tgt.fid)
+			tasks := make([]oxews.Task, 0, len(objs))
+			for _, o := range objs {
+				tasks = append(tasks, taskSummary(st, tgt.fid, o.ID, idMailbox))
+			}
+			msgs = append(msgs, findItemResponseMessage{
+				ResponseClass: "Success", ResponseCode: "NoError",
+				RootFolder: &findItemRoot{
+					TotalItemsInView:        len(tasks),
+					IncludesLastItemInRange: true,
+					Items:                   itemsWrap{Tasks: tasks},
+				},
+			})
+			continue
+		}
 		elems := make([]oxews.Message, 0, len(items))
 		for _, info := range items {
 			elems = append(elems, itemSummary(st, tgt.fid, info, idMailbox))
@@ -243,6 +264,21 @@ func (s *Server) handleGetItem(w http.ResponseWriter, inner []byte, sess *sessio
 		}
 		info, _ := st.MessageByUID(id.FolderID, id.UID)
 		hasAttach, _ := st.HasAttachments(id.MessageID)
+		// A task is rendered as <t:Task> from its shared properties, not the mail
+		// MIME path (a task has no RFC822 form).
+		if itemClass(msg.Props) == oxtask.MessageClass {
+			tk, _ := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
+			elem := oxews.BuildTask(tk, oxews.ItemMeta{
+				ItemID:         ref.ID,
+				ChangeKey:      oxews.ChangeKey(uint64(id.MessageID)),
+				HasAttachments: hasAttach,
+			})
+			msgs = append(msgs, itemResponseMessage{
+				ResponseClass: "Success", ResponseCode: "NoError",
+				Items: &itemsWrap{Tasks: []oxews.Task{elem}},
+			})
+			continue
+		}
 		body, bodyType := "", "Text"
 		if raw, err := st.GetMessageRaw(id.FolderID, id.UID); err == nil {
 			body, bodyType = bodyFromRaw(raw)
@@ -388,6 +424,31 @@ func itemSummary(st *objectstore.Store, folderID int64, info objectstore.Message
 		IsRead:         info.Flags&objectstore.FlagSeen != 0,
 		HasAttachments: hasAttach,
 	})
+}
+
+// itemClass returns a stored message's class.
+func itemClass(props mapi.PropertyValues) string {
+	if v, ok := props.Get(mapi.PrMessageClass); ok {
+		if s, ok := v.(string); ok {
+			return s
+		}
+	}
+	return ""
+}
+
+// taskSummary builds a <t:Task> for FindItem on the Tasks folder from a stored
+// object. The folder is small, so reading each task's shared properties for a
+// complete summary is acceptable.
+func taskSummary(st *objectstore.Store, folderID, objectID int64, mailbox string) oxews.Task {
+	meta := oxews.ItemMeta{
+		ItemID:    oxews.EncodeItemID(oxews.ItemID{FolderID: folderID, MessageID: objectID, Mailbox: mailbox}),
+		ChangeKey: oxews.ChangeKey(uint64(objectID)),
+	}
+	if msg, err := st.OpenMessage(objectID); err == nil {
+		tk, _ := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
+		return oxews.BuildTask(tk, meta)
+	}
+	return oxews.Task{ItemID: oxews.ItemIDElem{ID: meta.ItemID, ChangeKey: meta.ChangeKey}}
 }
 
 // splitAddress splits a formatted originator ("Name <addr>") into name + email.
