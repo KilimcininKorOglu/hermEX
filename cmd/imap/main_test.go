@@ -17,7 +17,9 @@ func TestApplyIMAPSizeLimit(t *testing.T) {
 	// A clean read applies the stored cap verbatim.
 	got := sentinel
 	applyIMAPSizeLimit(
-		func() (directory.SizeLimits, bool, error) { return directory.SizeLimits{IMAPLiteralBytes: 4096}, true, nil },
+		func() (directory.SizeLimits, bool, error) {
+			return directory.SizeLimits{IMAPLiteralBytes: 4096}, true, nil
+		},
 		func(n int64) { got = n })
 	if got != 4096 {
 		t.Errorf("applied cap = %d, want 4096", got)
@@ -26,7 +28,9 @@ func TestApplyIMAPSizeLimit(t *testing.T) {
 	// A read error must NOT call the setter — the running cap stays as it is.
 	got = sentinel
 	applyIMAPSizeLimit(
-		func() (directory.SizeLimits, bool, error) { return directory.SizeLimits{}, false, errors.New("db down") },
+		func() (directory.SizeLimits, bool, error) {
+			return directory.SizeLimits{}, false, errors.New("db down")
+		},
 		func(n int64) { got = n })
 	if got != sentinel {
 		t.Errorf("setter called on read error (got %d); the cap must be left unchanged", got)

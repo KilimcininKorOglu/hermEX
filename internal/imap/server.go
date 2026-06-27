@@ -149,14 +149,14 @@ func (s *Server) handle(nc net.Conn) {
 
 // conn is one IMAP client connection.
 type conn struct {
-	srv       *Server
-	nc        net.Conn // underlying connection, swapped for the TLS conn on STARTTLS
-	rd        *commandReader
-	bw        *bufio.Writer
-	state     connState
-	user      string
-	st        *objectstore.Store
-	pubStore  *objectstore.Store // caller's own-domain public store, opened lazily; nil until first public access
+	srv        *Server
+	nc         net.Conn // underlying connection, swapped for the TLS conn on STARTTLS
+	rd         *commandReader
+	bw         *bufio.Writer
+	state      connState
+	user       string
+	st         *objectstore.Store
+	pubStore   *objectstore.Store // caller's own-domain public store, opened lazily; nil until first public access
 	sel        *selectedMailbox
 	selPublic  bool // the current selection lives in pubStore, not st
 	readOnly   bool

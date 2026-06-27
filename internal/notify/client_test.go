@@ -144,7 +144,7 @@ func TestConsumerReconnectFiresAll(t *testing.T) {
 	wakeCh, cancel := c.Register("/m")
 	defer cancel()
 
-	<-st.connect                       // connection #1 (no catch-up wake on first connect)
+	<-st.connect // connection #1 (no catch-up wake on first connect)
 	assertNoWake(t, wakeCh, 100*time.Millisecond)
 
 	st.drop <- struct{}{} // drop the connection

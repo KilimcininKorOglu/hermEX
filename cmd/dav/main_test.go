@@ -25,7 +25,9 @@ func TestApplyDAVSizeLimits(t *testing.T) {
 
 	ical, vcard = sentinel, sentinel
 	applyDAVSizeLimits(
-		func() (directory.SizeLimits, bool, error) { return directory.SizeLimits{}, false, errors.New("db down") },
+		func() (directory.SizeLimits, bool, error) {
+			return directory.SizeLimits{}, false, errors.New("db down")
+		},
 		func(n int64) { ical = n }, func(n int64) { vcard = n })
 	if ical != sentinel || vcard != sentinel {
 		t.Errorf("setters called on read error (ical %d, vcard %d); the caps must be left unchanged", ical, vcard)

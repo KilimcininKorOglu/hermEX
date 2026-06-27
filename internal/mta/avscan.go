@@ -20,7 +20,7 @@ import (
 // Outbox copy rather than retrying, which would re-quarantine it forever.
 type virusBlocked struct{}
 
-func (virusBlocked) Error() string         { return "message quarantined: a virus was detected" }
+func (virusBlocked) Error() string          { return "message quarantined: a virus was detected" }
 func (virusBlocked) TerminalDelivery() bool { return true }
 
 // ErrVirusBlocked is returned by DeliverAndRelay when a message matched a virus

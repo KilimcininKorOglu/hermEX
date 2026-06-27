@@ -64,8 +64,8 @@ type fakeAVDir struct {
 	quarantined       []directory.QuarantineEntry
 }
 
-func (f *fakeAVDir) GetDomainAVScan(string) (bool, bool, error)  { return f.inbound, f.outbound, nil }
-func (f *fakeAVDir) DomainID(string) (int64, bool, error)        { return f.domainID, f.known, nil }
+func (f *fakeAVDir) GetDomainAVScan(string) (bool, bool, error)   { return f.inbound, f.outbound, nil }
+func (f *fakeAVDir) DomainID(string) (int64, bool, error)         { return f.domainID, f.known, nil }
 func (f *fakeAVDir) DomainOrgAdminEmails(int64) ([]string, error) { return nil, nil }
 func (f *fakeAVDir) QuarantineMessage(e directory.QuarantineEntry) (int64, error) {
 	f.quarantined = append(f.quarantined, e)

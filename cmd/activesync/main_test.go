@@ -25,7 +25,9 @@ func TestApplyActiveSyncSizeLimit(t *testing.T) {
 
 	got = sentinel
 	applyActiveSyncSizeLimit(
-		func() (directory.SizeLimits, bool, error) { return directory.SizeLimits{}, false, errors.New("db down") },
+		func() (directory.SizeLimits, bool, error) {
+			return directory.SizeLimits{}, false, errors.New("db down")
+		},
 		func(n int64) { got = n })
 	if got != sentinel {
 		t.Errorf("setter called on read error (got %d); the cap must be left unchanged", got)

@@ -28,8 +28,8 @@ type sendNotificationResponseMessage struct {
 // pushNotification is the SendNotification Notification: the subscription id, a
 // MoreEvents flag (always false — hermEX drains every poll), and the events.
 type pushNotification struct {
-	SubscriptionID string      `xml:"http://schemas.microsoft.com/exchange/services/2006/types SubscriptionId"`
-	MoreEvents     bool        `xml:"http://schemas.microsoft.com/exchange/services/2006/types MoreEvents"`
+	SubscriptionID string `xml:"http://schemas.microsoft.com/exchange/services/2006/types SubscriptionId"`
+	MoreEvents     bool   `xml:"http://schemas.microsoft.com/exchange/services/2006/types MoreEvents"`
 	Events         []notifEvent
 }
 

@@ -15,7 +15,9 @@ func TestApplyEWSSizeLimit(t *testing.T) {
 
 	got := sentinel
 	applyEWSSizeLimit(
-		func() (directory.SizeLimits, bool, error) { return directory.SizeLimits{EWSRequestBytes: 8192}, true, nil },
+		func() (directory.SizeLimits, bool, error) {
+			return directory.SizeLimits{EWSRequestBytes: 8192}, true, nil
+		},
 		func(n int64) { got = n })
 	if got != 8192 {
 		t.Errorf("applied cap = %d, want 8192", got)
@@ -23,7 +25,9 @@ func TestApplyEWSSizeLimit(t *testing.T) {
 
 	got = sentinel
 	applyEWSSizeLimit(
-		func() (directory.SizeLimits, bool, error) { return directory.SizeLimits{}, false, errors.New("db down") },
+		func() (directory.SizeLimits, bool, error) {
+			return directory.SizeLimits{}, false, errors.New("db down")
+		},
 		func(n int64) { got = n })
 	if got != sentinel {
 		t.Errorf("setter called on read error (got %d); the cap must be left unchanged", got)
