@@ -122,6 +122,13 @@ const (
 	// an unset field inherits the default. Per-mailbox (a store property) like the
 	// other per-user settings.
 	PrSyncPolicy = PropTag(0x677D001F) // PtUnicode
+	// PrUserConfigurations is the provider-defined store-root property (0x677E)
+	// holding the mailbox's EWS user-configuration objects as a JSON array. Each
+	// record carries the resolving folder id, the configuration name, and its
+	// typed dictionary entries plus opaque XML/binary blobs, so a config written
+	// by one EWS client round-trips byte-identically to the next. Per-mailbox (a
+	// store property) like the other per-user settings.
+	PrUserConfigurations = PropTag(0x677E001F) // PtUnicode
 )
 
 // Large message/attachment content property tags. These hold bodies and

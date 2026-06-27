@@ -109,6 +109,14 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleGetConversationItems(w, inner, sess)
 	case "ApplyConversationAction":
 		s.handleApplyConversationAction(w, inner, sess)
+	case "GetUserConfiguration":
+		s.handleGetUserConfiguration(w, inner, sess)
+	case "CreateUserConfiguration":
+		s.handleCreateUserConfiguration(w, inner, sess)
+	case "UpdateUserConfiguration":
+		s.handleUpdateUserConfiguration(w, inner, sess)
+	case "DeleteUserConfiguration":
+		s.handleDeleteUserConfiguration(w, inner, sess)
 	case "Subscribe":
 		s.handleSubscribe(w, inner, sess)
 	case "Unsubscribe":
