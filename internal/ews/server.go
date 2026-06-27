@@ -103,6 +103,8 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		s.serveEWS(w, r)
 	case "/autodiscover/autodiscover.xml":
 		s.serveAutodiscover(w, r)
+	case "/autodiscover/autodiscover.svc":
+		s.serveAutodiscoverSOAP(w, r)
 	default:
 		http.NotFound(w, r)
 	}
