@@ -2,7 +2,10 @@ package activesync
 
 import (
 	"testing"
+	"time"
 
+	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
 	"hermex/internal/wbxml"
 )
 
@@ -110,17 +113,118 @@ func TestSearchGALNoMatch(t *testing.T) {
 	}
 }
 
-// TestSearchUnsupportedStore proves a Mailbox search (unsupported in v1) reports a
-// request-invalid store status rather than a false empty success.
+// TestSearchUnsupportedStore proves a DocumentLibrary search (hermEX has no
+// document store) reports a request-invalid store status rather than a false empty
+// success.
 func TestSearchUnsupportedStore(t *testing.T) {
 	ts, _ := seededServer(t)
 
-	_, root := postCommand(t, ts, "Search", searchReq("Mailbox", "anything"))
+	_, root := postCommand(t, ts, "Search", searchReq("DocumentLibrary", "anything"))
 	if s := root.ChildText(wbxml.SRStatus); s != "1" {
 		t.Fatalf("overall Status = %q, want 1", s)
 	}
 	store := searchStore(t, root)
 	if s := store.ChildText(wbxml.SRStatus); s != "2" {
 		t.Errorf("unsupported-store Status = %q, want 2 (request invalid)", s)
+	}
+}
+
+// mailboxSearchReq builds a Store=Mailbox Search with the freetext nested in
+// Query>And, the shape a device sends.
+func mailboxSearchReq(freetext string) *wbxml.Node {
+	return wbxml.Elem(wbxml.SRSearch,
+		wbxml.Elem(wbxml.SRStore,
+			wbxml.Str(wbxml.SRName, "Mailbox"),
+			wbxml.Elem(wbxml.SRQuery,
+				wbxml.Elem(wbxml.SRAnd,
+					wbxml.Str(wbxml.SRFreeText, freetext)))))
+}
+
+// seedSearchMessage appends one message with the given subject and body to the
+// mailbox's Inbox, for a Mailbox-search match.
+func seedSearchMessage(t *testing.T, dir, subject, body string) {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	raw := "From: sender@hermex.test\r\nTo: alice@hermex.test\r\nSubject: " + subject +
+		"\r\nDate: Mon, 15 Jun 2026 09:00:00 +0000\r\nMessage-ID: <s1@hermex.test>\r\n\r\n" + body + "\r\n"
+	when := time.Date(2026, 6, 15, 9, 0, 0, 0, time.UTC)
+	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte(raw), when, 0); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestSearchMailbox proves a Store=Mailbox search matches a message on its subject
+// and returns a Result carrying the email's Class, a LongId, the CollectionId, and
+// the listing Properties the device renders.
+func TestSearchMailbox(t *testing.T) {
+	ts, dir := seededServer(t)
+	seedSearchMessage(t, dir, "Quarterly revenue report", "the body text")
+
+	_, root := postCommand(t, ts, "Search", mailboxSearchReq("quarterly"))
+	if s := root.ChildText(wbxml.SRStatus); s != "1" {
+		t.Fatalf("overall Status = %q, want 1", s)
+	}
+	store := searchStore(t, root)
+	if s := store.ChildText(wbxml.SRStatus); s != "1" {
+		t.Errorf("store Status = %q, want 1", s)
+	}
+	if total := store.ChildText(wbxml.SRTotal); total != "1" {
+		t.Errorf("Total = %q, want 1", total)
+	}
+	result := store.Child(wbxml.SRResult)
+	if result == nil {
+		t.Fatal("mailbox search carried no Result")
+	}
+	if c := result.ChildText(wbxml.ASClass); c != "Email" {
+		t.Errorf("Result Class = %q, want Email", c)
+	}
+	if result.ChildText(wbxml.SRLongId) == "" {
+		t.Error("Result carried no LongId")
+	}
+	if cid := result.ChildText(wbxml.ASCollectionID); cid != inboxID() {
+		t.Errorf("Result CollectionId = %q, want %q", cid, inboxID())
+	}
+	props := result.Child(wbxml.SRProperties)
+	if props == nil {
+		t.Fatal("Result carried no Properties")
+	}
+	if subj := props.ChildText(wbxml.EMSubject); subj != "Quarterly revenue report" {
+		t.Errorf("Result Subject = %q, want the seeded subject", subj)
+	}
+}
+
+// TestSearchMailboxBody proves a Store=Mailbox search matches on the message body
+// when the subject and sender do not, the second pass the webmail search also runs.
+func TestSearchMailboxBody(t *testing.T) {
+	ts, dir := seededServer(t)
+	seedSearchMessage(t, dir, "Lunch plans", "let us discuss the pelican migration")
+
+	_, root := postCommand(t, ts, "Search", mailboxSearchReq("pelican"))
+	store := searchStore(t, root)
+	if total := store.ChildText(wbxml.SRTotal); total != "1" {
+		t.Errorf("Total = %q, want 1 (matched on body)", total)
+	}
+}
+
+// TestSearchMailboxNoMatch proves a Store=Mailbox search that matches nothing
+// reports a successful store with no Result and no Total.
+func TestSearchMailboxNoMatch(t *testing.T) {
+	ts, dir := seededServer(t)
+	seedSearchMessage(t, dir, "Quarterly revenue report", "the body text")
+
+	_, root := postCommand(t, ts, "Search", mailboxSearchReq("no-such-term-xyz"))
+	store := searchStore(t, root)
+	if s := store.ChildText(wbxml.SRStatus); s != "1" {
+		t.Errorf("store Status = %q, want 1 (an empty search still succeeds)", s)
+	}
+	if store.Child(wbxml.SRResult) != nil {
+		t.Error("an empty mailbox search must carry no Result")
+	}
+	if store.ChildText(wbxml.SRTotal) != "" {
+		t.Error("an empty mailbox search must carry no Total")
 	}
 }

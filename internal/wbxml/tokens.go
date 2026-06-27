@@ -393,19 +393,24 @@ const (
 )
 
 // Search (code page 0x0F). v1 serves the GAL-store subset; the mailbox-query
-// operators (And/Or/FreeText/GreaterThan/…) are not modeled.
+// operators (Or/GreaterThan/LessThan/…) are not modeled; And/FreeText carry the
+// mailbox query, LongId identifies a mailbox hit, DeepTraversal widens the scan.
 const (
-	SRSearch     Tag = 0x0F05
-	SRStore      Tag = 0x0F07
-	SRName       Tag = 0x0F08
-	SRQuery      Tag = 0x0F09
-	SROptions    Tag = 0x0F0A
-	SRRange      Tag = 0x0F0B
-	SRStatus     Tag = 0x0F0C
-	SRResponse   Tag = 0x0F0D
-	SRResult     Tag = 0x0F0E
-	SRProperties Tag = 0x0F0F
-	SRTotal      Tag = 0x0F10
+	SRSearch        Tag = 0x0F05
+	SRStore         Tag = 0x0F07
+	SRName          Tag = 0x0F08
+	SRQuery         Tag = 0x0F09
+	SROptions       Tag = 0x0F0A
+	SRRange         Tag = 0x0F0B
+	SRStatus        Tag = 0x0F0C
+	SRResponse      Tag = 0x0F0D
+	SRResult        Tag = 0x0F0E
+	SRProperties    Tag = 0x0F0F
+	SRTotal         Tag = 0x0F10
+	SRAnd           Tag = 0x0F13
+	SRFreeText      Tag = 0x0F15
+	SRDeepTraversal Tag = 0x0F17
+	SRLongId        Tag = 0x0F18
 )
 
 // GAL (code page 0x10) — the address-book properties a Search result carries.
