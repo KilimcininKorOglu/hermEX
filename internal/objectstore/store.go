@@ -33,6 +33,10 @@ var ErrFolderCycle = errors.New("objectstore: folder copied into its own subtree
 // live sibling that already holds the target name.
 var ErrFolderExists = errors.New("objectstore: a folder with that name already exists")
 
+// ErrObjectDeleted is reported when an ICS move-import names a source message the
+// store no longer holds. Callers map it to SYNC_E_OBJECT_DELETED.
+var ErrObjectDeleted = errors.New("objectstore: object deleted")
+
 // defaultLogger is the central activity log stamped onto every Store opened
 // after a daemon installs it. Logging is a cross-cutting concern: every mailbox
 // store in a process belongs to one daemon and shares its log, so a package-level

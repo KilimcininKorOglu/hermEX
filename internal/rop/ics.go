@@ -1,6 +1,8 @@
 package rop
 
 import (
+	"errors"
+
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
@@ -9,20 +11,21 @@ import (
 // ICS / FastTransfer ROP opcodes ([MS-OXCROPS] 2.2.3). v1 wires the download path
 // plus the pure-ROP upload collector imports (hierarchy / deletes / read-state).
 const (
-	ropFastTransferDestConfigure     uint8 = 0x53
-	ropFastTransferDestPutBuffer     uint8 = 0x54
-	ropFastTransferSourceGetBuffer   uint8 = 0x4E
-	ropSynchronizationConfigure      uint8 = 0x70
-	ropSyncImportMessageChange       uint8 = 0x72
-	ropSyncImportHierarchyChange     uint8 = 0x73
-	ropSyncImportDeletes             uint8 = 0x74
-	ropSyncUploadStateStreamBegin    uint8 = 0x75
-	ropSyncUploadStateStreamContinue uint8 = 0x76
-	ropSyncUploadStateStreamEnd      uint8 = 0x77
-	ropSyncOpenCollector             uint8 = 0x7E
-	ropGetLocalReplicaIds            uint8 = 0x7F
-	ropSyncImportReadStateChanges    uint8 = 0x80
-	ropSyncGetTransferState          uint8 = 0x82
+	ropFastTransferDestConfigure        uint8 = 0x53
+	ropFastTransferDestPutBuffer        uint8 = 0x54
+	ropFastTransferSourceGetBuffer      uint8 = 0x4E
+	ropSynchronizationConfigure         uint8 = 0x70
+	ropSyncImportMessageChange          uint8 = 0x72
+	ropSyncImportHierarchyChange        uint8 = 0x73
+	ropSyncImportDeletes                uint8 = 0x74
+	ropSyncUploadStateStreamBegin       uint8 = 0x75
+	ropSyncUploadStateStreamContinue    uint8 = 0x76
+	ropSyncUploadStateStreamEnd         uint8 = 0x77
+	ropSyncOpenCollector                uint8 = 0x7E
+	ropGetLocalReplicaIds               uint8 = 0x7F
+	ropSyncImportReadStateChanges       uint8 = 0x80
+	ropSyncGetTransferState             uint8 = 0x82
+	ropSynchronizationImportMessageMove uint8 = 0x78
 )
 
 // fastCopyTo is the FastTransfer destination source-operation for a message-content
@@ -355,6 +358,46 @@ func (s *Session) ropSyncImportReadStateChanges(p *ext.Pull, out *ext.Push, hand
 		return true
 	}
 	writeStatusHead(out, ropSyncImportReadStateChanges, hindex)
+	return true
+}
+
+// ropSyncImportMessageMove handles RopSynchronizationImportMessageMove ([MS-OXCFXICS]
+// 2.2.3.2.4.5): the client relocates a message into the contents-upload collector's
+// folder under an id it has already assigned in its own replica. The request carries
+// five 32-bit-length-prefixed binaries (source folder, source message, predecessor
+// change list, destination message, and change number), of which hermEX uses the
+// three id XIDs (home-replica 22-byte source keys). The predecessor change list and
+// change number are accepted but not compared: hermEX does no PCL conflict detection
+// anywhere (its import path is last-writer-wins), so a move always succeeds rather
+// than ever returning SYNC_W_CLIENT_CHANGE_NEWER. A source the store no longer holds
+// maps to SYNC_E_OBJECT_DELETED. The response message id is zero, because the
+// client's destination id is authoritative.
+func (s *Session) ropSyncImportMessageMove(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	srcFolderKey, e1 := p.BinEx()
+	srcMsgKey, e2 := p.BinEx()
+	_, e3 := p.BinEx() // PredecessorChangeList, accepted but not compared (last-writer-wins)
+	dstMsgKey, e4 := p.BinEx()
+	_, e5 := p.BinEx() // ChangeNumber, the server allocates its own
+	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil {
+		return false
+	}
+	o := s.get(handleAt(handles, hindex))
+	if o == nil || o.upload == nil {
+		writeErr(out, ropSynchronizationImportMessageMove, hindex, ecError)
+		return true
+	}
+	if err := o.upload.ImportMessageMove(srcFolderKey, srcMsgKey, dstMsgKey); err != nil {
+		if errors.Is(err, objectstore.ErrObjectDeleted) {
+			writeErr(out, ropSynchronizationImportMessageMove, hindex, ecSyncObjectDel)
+			return true
+		}
+		writeErr(out, ropSynchronizationImportMessageMove, hindex, ecError)
+		return true
+	}
+	out.Uint8(ropSynchronizationImportMessageMove)
+	out.Uint8(hindex)
+	out.Uint32(ecSuccess)
+	out.Uint64(0) // MessageId; the client's destination id is authoritative
 	return true
 }
 

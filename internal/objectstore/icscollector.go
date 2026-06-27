@@ -185,6 +185,48 @@ func (c *UploadCollector) ImportDeletes(sourceKeys [][]byte) ([]uint64, error) {
 	return c.store.ImportDeletes(c.folderID, sourceKeys)
 }
 
+// ImportMessageMove relocates a message named by its home-replica source folder and
+// message XIDs into this contents collector's folder under the client-supplied
+// destination XID ([MS-OXCFXICS] 3.3.5.9). It is a contents-only operation. As with
+// the message-change import, the moved id is not hand-folded into the collector
+// state: the client drives the synchronization state through its uploaded state
+// streams, and the next download diff reports the moved message from the store. A
+// source the store no longer holds surfaces ErrObjectDeleted for the caller to map
+// to SYNC_E_OBJECT_DELETED; a cross-store (foreign-replica) XID is unsupported.
+func (c *UploadCollector) ImportMessageMove(srcFolderKey, srcMsgKey, dstMsgKey []byte) error {
+	if c.syncType != SyncTypeContents {
+		return fmt.Errorf("objectstore: message move requires a contents collector")
+	}
+	c.started = true
+	home, err := c.store.replicaGUID()
+	if err != nil {
+		return err
+	}
+	srcFID, foreign, err := parseSourceKeyMID(srcFolderKey, home)
+	if err != nil {
+		return err
+	}
+	if foreign {
+		return fmt.Errorf("objectstore: cross-store move source folder unsupported")
+	}
+	srcMID, foreign, err := parseSourceKeyMID(srcMsgKey, home)
+	if err != nil {
+		return err
+	}
+	if foreign {
+		return fmt.Errorf("objectstore: cross-store move source message unsupported")
+	}
+	dstMID, foreign, err := parseSourceKeyMID(dstMsgKey, home)
+	if err != nil {
+		return err
+	}
+	if foreign {
+		return fmt.Errorf("objectstore: cross-store move destination message unsupported")
+	}
+	_, err = c.store.MoveMessageImport(int64(srcFID), int64(srcMID), c.folderID, int64(dstMID))
+	return err
+}
+
 // GetTransferState renders the collected synchronization state as a FastTransfer
 // stream the client reads back to adopt as its next checkpoint: INCRSYNCSTATEBEGIN,
 // one property per populated idset, INCRSYNCSTATEEND ([MS-OXCFXICS] 3.2.5.5). It

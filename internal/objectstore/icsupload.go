@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"hermex/internal/ics"
@@ -399,6 +400,79 @@ func (s *Store) ImportDeletes(folderID int64, sourceKeys [][]byte) ([]uint64, er
 		deleted = append(deleted, mid)
 	}
 	return deleted, nil
+}
+
+// MoveMessageImport relocates a message from srcFolderID into destFolderID, renaming
+// its id to dstMID and assigning a fresh change number. It is the store side of
+// RopSynchronizationImportMessageMove ([MS-OXCFXICS] 3.3.5.9), where the client has
+// already chosen the destination id in its own replica. Every message child table
+// (properties, recipients, attachments, change rows, time index) renames the id for
+// free through ON UPDATE CASCADE; only the time index's parent column is repointed
+// explicitly, because it keys on (folder_id, message_id) and does not follow the
+// message's parent. A retried move that re-sends a destination id already committed
+// replaces it. A source the store no longer holds in srcFolderID yields
+// ErrObjectDeleted. It returns whether the moved message was associated (FAI).
+func (s *Store) MoveMessageImport(srcFolderID, srcMID, destFolderID, dstMID int64) (bool, error) {
+	var assoc int
+	err := s.objdb.QueryRow(
+		`SELECT is_associated FROM messages WHERE message_id=? AND parent_fid=? AND is_deleted=0`,
+		srcMID, srcFolderID).Scan(&assoc)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrObjectDeleted
+	}
+	if err != nil {
+		return false, err
+	}
+
+	tx, err := s.objdb.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	cn, err := allocateCN(tx)
+	if err != nil {
+		return false, err
+	}
+	if dstMID != srcMID {
+		if _, err := tx.Exec(`DELETE FROM messages WHERE message_id=?`, dstMID); err != nil {
+			return false, err
+		}
+	}
+	if _, err := tx.Exec(
+		`UPDATE messages SET message_id=?, parent_fid=?, change_number=?, mid_string=? WHERE message_id=?`,
+		dstMID, destFolderID, int64(cn), midString(uint64(dstMID)), srcMID); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(
+		`UPDATE msgtime_index SET folder_id=? WHERE message_id=? AND folder_id=?`,
+		destFolderID, dstMID, srcFolderID); err != nil {
+		return false, err
+	}
+	if err := advanceFolderEID(tx, destFolderID, uint64(dstMID)); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+
+	// The object store renamed and reparented the message; the IMAP index is a
+	// separate database with no cross-store cascade, so a source that was mail
+	// (indexed by AppendMessage) keeps a row pointing at the now-gone source id.
+	// Drop those rows so an IMAP view does not show a ghost in the source folder,
+	// and orphan its cached eml, exactly as DeleteObject does. The destination is
+	// not re-indexed: the ICS upload path indexes only mail, as ImportMessageChange.
+	srcMidString := midString(uint64(srcMID))
+	if _, err := s.idxdb.Exec(`DELETE FROM messages WHERE message_id=?`, srcMID); err != nil {
+		return assoc != 0, err
+	}
+	if _, err := s.idxdb.Exec(`DELETE FROM mapping WHERE message_id=?`, srcMID); err != nil {
+		return assoc != 0, err
+	}
+	_ = os.Remove(s.emlPath(srcMidString))
+
+	s.publishChange("create", cn, midString(uint64(dstMID)))
+	return assoc != 0, nil
 }
 
 // ReadStateChange is one entry of a RopSynchronizationImportReadStateChanges

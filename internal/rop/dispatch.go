@@ -103,6 +103,7 @@ const (
 	ecNotImplemented  uint32 = 0x80040FFF // ecNotImplemented (RopGetStoreState, as Exchange 2010+)
 	ecUnableToAbort   uint32 = 0x80040114 // MAPI_E_UNABLE_TO_ABORT (RopAbort: nothing async to abort)
 	ecInvalidBookmark uint32 = 0x80040405 // MAPI_E_INVALID_BOOKMARK (RopSeekRowFractional: zero denominator)
+	ecSyncObjectDel   uint32 = 0x80040800 // SYNC_E_OBJECT_DELETED (ICS move source no longer exists)
 )
 
 // Dispatch parses the request ROP list and returns the response ROP bytes plus
@@ -509,6 +510,10 @@ loop:
 			}
 		case ropSetLocalReplicaMidsetDeleted:
 			if !s.ropSetLocalReplicaMidsetDeleted(p, out, handles, hindex) {
+				break loop
+			}
+		case ropSynchronizationImportMessageMove:
+			if !s.ropSyncImportMessageMove(p, out, handles, hindex) {
 				break loop
 			}
 		case ropFastTransferSourceCopyMessages:
