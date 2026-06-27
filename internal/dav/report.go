@@ -25,19 +25,19 @@ type reportReq struct {
 	Hrefs     []string    `xml:"href"`
 	SyncToken string      `xml:"sync-token"`
 	Filter    *filter     `xml:"filter"`
-	TimeRange *timeRange  `xml:"time-range"`                 // free-busy-query's direct time-range child
-	Expand    *expandElem `xml:"prop>calendar-data>expand"` // CALDAV:expand (RFC 4791 §9.6.5)
+	TimeRange *timeRange  `xml:"time-range"`         // free-busy-query's direct time-range child
+	CalData   *calDataReq `xml:"prop>calendar-data"` // the requested calendar-data shaping
 }
 
-// expandElem is the CALDAV:expand element of a calendar-data request: when present,
-// recurring components are returned as expanded instances within [start, end).
+// expandElem is a time-range directive (start inclusive, end non-inclusive) carried by
+// CALDAV:expand, :limit-recurrence-set, and :limit-freebusy-set.
 type expandElem struct {
 	Start string `xml:"start,attr"`
 	End   string `xml:"end,attr"`
 }
 
-// window parses the expand element's bounds; ok is false when either is missing or
-// malformed, in which case the caller serves unexpanded data.
+// window parses a directive's bounds; ok is false when either is missing or malformed,
+// in which case the directive is skipped and the data served unshaped.
 func (e *expandElem) window() (start, end time.Time, ok bool) {
 	if e == nil {
 		return time.Time{}, time.Time{}, false
@@ -45,6 +45,38 @@ func (e *expandElem) window() (start, end time.Time, ok bool) {
 	s, oks := parseFilterTime(e.Start)
 	en, oke := parseFilterTime(e.End)
 	return s, en, oks && oke
+}
+
+// calDataReq is the CALDAV:calendar-data element of a REPORT, carrying the recurrence
+// and free-busy shaping directives (RFC 4791 §9.6). Per the grammar, expand and
+// limit-recurrence-set are mutually exclusive and limit-freebusy-set may co-occur.
+type calDataReq struct {
+	Expand     *expandElem `xml:"expand"`
+	LimitRecur *expandElem `xml:"limit-recurrence-set"`
+	LimitFB    *expandElem `xml:"limit-freebusy-set"`
+}
+
+// bound applies the calendar-data directives to one member's iCalendar: expand XOR
+// limit-recurrence-set, then limit-freebusy-set on the result.
+func (c *calDataReq) bound(data string) string {
+	if c == nil {
+		return data
+	}
+	if s, e, ok := c.Expand.window(); ok {
+		if out, ok := oxcical.ExpandRecurrence([]byte(data), s, e); ok {
+			data = string(out)
+		}
+	} else if s, e, ok := c.LimitRecur.window(); ok {
+		if out, ok := oxcical.LimitRecurrenceSet([]byte(data), s, e); ok {
+			data = string(out)
+		}
+	}
+	if s, e, ok := c.LimitFB.window(); ok {
+		if out, ok := oxcical.LimitFreeBusySet([]byte(data), s, e); ok {
+			data = string(out)
+		}
+	}
+	return data
 }
 
 // handleReport dispatches a CardDAV REPORT (RFC 6352 §8) on the addressbook
@@ -114,9 +146,9 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox st
 	case "addressbook-query":
 		s.reportQueryOrSync(w, st, user, coll, fid, 0, false, req.Filter)
 	case "calendar-multiget":
-		s.reportCalMultiget(w, st, fid, req.Hrefs, req.Expand)
+		s.reportCalMultiget(w, st, fid, req.Hrefs, req.CalData)
 	case "calendar-query":
-		s.reportCalQueryOrSync(w, st, user, coll, fid, 0, false, req.Filter, req.Expand)
+		s.reportCalQueryOrSync(w, st, user, coll, fid, 0, false, req.Filter, req.CalData)
 	case "free-busy-query":
 		s.handleFreeBusy(w, st, fid, req.TimeRange)
 	case "sync-collection":
@@ -265,8 +297,7 @@ func addressDataResponse(href string, cn uint64, data string) msResponse {
 
 // reportCalMultiget returns calendar-data for each requested href, mirroring
 // reportMultiget for the Calendar folder.
-func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store, fid int64, hrefs []string, expand *expandElem) {
-	exStart, exEnd, doExpand := expand.window()
+func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store, fid int64, hrefs []string, cd *calDataReq) {
 	ms := &multistatus{}
 	for _, h := range hrefs {
 		name := path.Base(strings.TrimRight(h, "/"))
@@ -284,12 +315,7 @@ func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store,
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if doExpand {
-			if ex, ok := oxcical.ExpandRecurrence([]byte(data), exStart, exEnd); ok {
-				data = string(ex)
-			}
-		}
-		ms.Responses = append(ms.Responses, calendarDataResponse(h, obj.ChangeNumber, data))
+		ms.Responses = append(ms.Responses, calendarDataResponse(h, obj.ChangeNumber, cd.bound(data)))
 	}
 	writeMultistatus(w, ms)
 }
@@ -298,11 +324,10 @@ func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store,
 // mirroring reportQueryOrSync. A calendar-query applies the request's
 // comp-filter/prop-filter/time-range against each member (RFC 4791 §9.7); for
 // sync-collection, members removed since the client's token are reported as 404
-// tombstones (RFC 6578). When the request carries CALDAV:expand, a recurring
-// member's calendar-data is returned as expanded instances over the expand window
-// (RFC 4791 §9.6.5); the filter still matches against the master span.
-func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Store, user, coll string, fid int64, sinceToken uint64, sync bool, filt *filter, expand *expandElem) {
-	exStart, exEnd, doExpand := expand.window()
+// tombstones (RFC 6578). The request's calendar-data directives (expand /
+// limit-recurrence-set / limit-freebusy-set, RFC 4791 §9.6) shape each member's
+// returned data; the filter still matches against the master span.
+func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Store, user, coll string, fid int64, sinceToken uint64, sync bool, filt *filter, cd *calDataReq) {
 	objs, err := st.ListFolderObjects(fid)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -323,13 +348,8 @@ func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Sto
 		if !calendarMatches(filt, data) {
 			continue
 		}
-		if doExpand {
-			if ex, ok := oxcical.ExpandRecurrence([]byte(data), exStart, exEnd); ok {
-				data = string(ex)
-			}
-		}
 		href := calObjectPathColl(user, coll, name)
-		ms.Responses = append(ms.Responses, calendarDataResponse(href, o.ChangeNumber, data))
+		ms.Responses = append(ms.Responses, calendarDataResponse(href, o.ChangeNumber, cd.bound(data)))
 	}
 	if sync {
 		// Tombstones: report each event removed since the client's token as a 404
