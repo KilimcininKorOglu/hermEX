@@ -80,8 +80,8 @@ type LDAPIdentitySource interface {
 }
 
 // CanonicalResolver maps an address to the canonical login a session authenticates
-// as — the exact name a folder permission must be stored under to match a grantee's
-// session (ResolvePermission compares the stored member name verbatim). Only the
+// as (the exact name a folder permission must be stored under to match a grantee's
+// session, since ResolvePermission compares the stored member name verbatim). Only the
 // primary username resolves; an alias/altname does not, since no session logs in as
 // one, so a grant stored under it would never match. Optional: a directory that
 // cannot resolve may omit it, and a caller then treats self-service sharing as
@@ -91,8 +91,8 @@ type CanonicalResolver interface {
 }
 
 // MailboxLister enumerates the store paths of every mailbox the directory knows.
-// A background worker with no address to resolve — the send-later spooler, which
-// must scan each user's Outbox — uses it to find all stores. Directories that
+// A background worker with no address to resolve (the send-later spooler, which
+// must scan each user's Outbox) uses it to find all stores. Directories that
 // cannot enumerate may omit it; the spooler then has nothing to scan.
 type MailboxLister interface {
 	Maildirs() ([]string, error)
@@ -116,7 +116,7 @@ type SharedMailboxLister interface {
 // LocalDomains optionally reports whether a domain is one this server is
 // authoritative for. Outbound relay routing consults it after a recipient fails
 // to resolve to a mailbox: an unresolved address in a local domain is a genuine
-// "user unknown" — never relayed, since relaying it would loop straight back —
+// "user unknown" (never relayed, since relaying it would loop straight back),
 // while an address in a non-local domain is a remote recipient eligible for
 // relay. Directories that cannot enumerate domains may omit it; outbound relay
 // is then disabled, since no domain can be confirmed remote.
@@ -178,8 +178,8 @@ type GALEntry struct {
 	StorePath string
 }
 
-// GAL optionally searches the Global Address List — the directory's mailbox
-// users — for entries whose address matches a typed query, backing webmail
+// GAL optionally searches the Global Address List (the directory's mailbox
+// users) for entries whose address matches a typed query, backing webmail
 // recipient autocomplete and "check names" resolution. Directories that cannot
 // enumerate users may omit it; webmail then offers no suggestions.
 type GAL interface {
@@ -216,7 +216,7 @@ func (a StaticAccounts) Resolve(address string) (string, bool) {
 }
 
 // CanonicalLogin implements CanonicalResolver: a known address's canonical login is
-// its lowercase form, since a static account is keyed by — and logs in as — that name.
+// its lowercase form, since a static account is keyed by (and logs in as) that name.
 func (a StaticAccounts) CanonicalLogin(address string) (string, bool) {
 	login := strings.ToLower(strings.TrimSpace(address))
 	if _, ok := a[login]; !ok {
