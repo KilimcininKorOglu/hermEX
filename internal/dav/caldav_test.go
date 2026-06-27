@@ -906,3 +906,28 @@ func TestCalDAVTasksVTODO(t *testing.T) {
 		t.Errorf("tasks collection missing VTODO component set: %s", home)
 	}
 }
+
+// TestSupportedReportSet confirms PROPFIND advertises the REPORTs each resource
+// supports (RFC 3253 §3.1.5) so a client discovers them instead of probing blind.
+func TestSupportedReportSet(t *testing.T) {
+	ts := davServerCal(t)
+
+	_, cal := do(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/calendar/", "0", true)
+	for _, want := range []string{"supported-report-set", "calendar-query", "calendar-multiget", "free-busy-query", "sync-collection"} {
+		if !strings.Contains(cal, want) {
+			t.Errorf("calendar PROPFIND missing %q: %s", want, cal)
+		}
+	}
+
+	_, card := do(t, ts, "PROPFIND", "/dav/addressbooks/"+testUser+"/contacts/", "0", true)
+	for _, want := range []string{"addressbook-query", "addressbook-multiget"} {
+		if !strings.Contains(card, want) {
+			t.Errorf("addressbook PROPFIND missing %q: %s", want, card)
+		}
+	}
+
+	_, pr := do(t, ts, "PROPFIND", "/dav/principals/"+testUser+"/", "0", true)
+	if !strings.Contains(pr, "principal-property-search") {
+		t.Errorf("principal PROPFIND missing principal-property-search: %s", pr)
+	}
+}

@@ -122,6 +122,7 @@ func principalResponse(user string) msResponse {
 				ScheduleOutboxURL:      &href{Href: scheduleOutboxPath(user)},
 				Owner:                  &href{Href: principalPath(user)},
 				CurrentUserPrivSet:     ownerPrivilegeSet(),
+				SupportedReportSet:     principalReportSet(),
 			},
 			Status: statusOK,
 		}},
@@ -160,6 +161,7 @@ func cardCollectionResponse(st *objectstore.Store, user, coll, displayName strin
 		SyncToken:          syncToken(max),
 		Owner:              &href{Href: principalPath(user)},
 		CurrentUserPrivSet: ownerPrivilegeSet(),
+		SupportedReportSet: addressbookReportSet(),
 	}
 	prop.QuotaUsed, prop.QuotaAvailable = mailboxQuota(st)
 	applyDeadProps(&prop, dead)
@@ -287,6 +289,7 @@ func calCollectionResponse(st *objectstore.Store, user, coll, displayName string
 		GetCTag:            ctag(max),
 		SyncToken:          syncToken(max),
 		SupportedCalComp:   componentSetFor(fid),
+		SupportedReportSet: calendarReportSet(),
 		Owner:              &href{Href: principalPath(user)},
 		CurrentUserPrivSet: ownerPrivilegeSet(),
 	}
@@ -414,6 +417,7 @@ func scheduleInboxCollectionResponse(st *objectstore.Store, user string) (msResp
 				GetCTag:            ctag(max),
 				SyncToken:          syncToken(max),
 				SupportedCalComp:   eventComponentSet(),
+				SupportedReportSet: calendarReportSet(),
 				Owner:              &href{Href: principalPath(user)},
 				CurrentUserPrivSet: ownerPrivilegeSet(),
 			},
@@ -477,6 +481,7 @@ func scheduleOutboxResponse(user string) msResponse {
 				ResourceType:       scheduleOutboxResourceType(),
 				DisplayName:        "Outbox",
 				SupportedCalComp:   eventComponentSet(),
+				SupportedReportSet: calendarReportSet(),
 				Owner:              &href{Href: principalPath(user)},
 				CurrentUserPrivSet: ownerPrivilegeSet(),
 			},

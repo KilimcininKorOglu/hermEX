@@ -138,10 +138,9 @@ func (s *Server) reportMultiget(w http.ResponseWriter, st *objectstore.Store, fi
 
 // reportQueryOrSync returns address-data for the collection's members. For
 // sync-collection only members whose change number exceeds the client's token
-// are returned, and the response carries a fresh sync-token. addressbook-query
-// filtering is not yet applied: every member is returned (a documented v1
-// simplification). Deletions are not reported incrementally — the store
-// hard-deletes without a tombstone — so a client reconciles removals on its own.
+// are returned, the response carries a fresh sync-token, and members removed
+// since the token are reported as 404 tombstones (RFC 6578). An addressbook-query
+// applies the request's prop-filter/text-match against each member (RFC 6352 §8.6).
 func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store, user, coll string, fid int64, sinceToken uint64, sync bool, filt *filter) {
 	objs, err := st.ListFolderObjects(fid)
 	if err != nil {
@@ -271,11 +270,11 @@ func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store,
 }
 
 // reportCalQueryOrSync returns calendar-data for the Calendar folder's members,
-// mirroring reportQueryOrSync. calendar-query filtering is not applied: every
-// member is returned (a documented v1 simplification, and a heavier one than for
-// contacts because a calendar grows unbounded over time and the client re-pulls
-// it each query). Deletions are not reported incrementally — the store
-// hard-deletes without a tombstone.
+// mirroring reportQueryOrSync. A calendar-query applies the request's
+// comp-filter/prop-filter/time-range against each member (RFC 4791 §9.7); for
+// sync-collection, members removed since the client's token are reported as 404
+// tombstones (RFC 6578). Recurrence is not expanded: a time-range matches the
+// master component's own span, and <expand> is not honored.
 func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Store, user, coll string, fid int64, sinceToken uint64, sync bool, filt *filter) {
 	objs, err := st.ListFolderObjects(fid)
 	if err != nil {

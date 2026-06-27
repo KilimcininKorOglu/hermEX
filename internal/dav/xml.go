@@ -37,20 +37,20 @@ type msPropstat struct {
 // msProp is the property set carried for a resource. Empty fields are omitted so
 // one struct serves principals, collections, and objects.
 type msProp struct {
-	ResourceType       *resourceType  `xml:"DAV: resourcetype,omitempty"`
-	DisplayName        string         `xml:"DAV: displayname,omitempty"`
-	GetETag            string         `xml:"DAV: getetag,omitempty"`
-	GetContentType     string         `xml:"DAV: getcontenttype,omitempty"`
-	GetCTag            string         `xml:"http://calendarserver.org/ns/ getctag,omitempty"`
-	SyncToken          string         `xml:"DAV: sync-token,omitempty"`
-	CurrentUserPrOne   *href          `xml:"DAV: current-user-principal,omitempty"`
-	PrincipalURL       *href          `xml:"DAV: principal-URL,omitempty"`
-	AddressbookHomeSet *href          `xml:"urn:ietf:params:xml:ns:carddav addressbook-home-set,omitempty"`
-	AddressData        string         `xml:"urn:ietf:params:xml:ns:carddav address-data,omitempty"`
-	CalendarHomeSet    *href          `xml:"urn:ietf:params:xml:ns:caldav calendar-home-set,omitempty"`
-	CalendarData       string         `xml:"urn:ietf:params:xml:ns:caldav calendar-data,omitempty"`
-	SupportedCalComp   *supportedComp `xml:"urn:ietf:params:xml:ns:caldav supported-calendar-component-set,omitempty"`
-	SupportedReportSet *struct{}      `xml:"DAV: supported-report-set,omitempty"`
+	ResourceType       *resourceType       `xml:"DAV: resourcetype,omitempty"`
+	DisplayName        string              `xml:"DAV: displayname,omitempty"`
+	GetETag            string              `xml:"DAV: getetag,omitempty"`
+	GetContentType     string              `xml:"DAV: getcontenttype,omitempty"`
+	GetCTag            string              `xml:"http://calendarserver.org/ns/ getctag,omitempty"`
+	SyncToken          string              `xml:"DAV: sync-token,omitempty"`
+	CurrentUserPrOne   *href               `xml:"DAV: current-user-principal,omitempty"`
+	PrincipalURL       *href               `xml:"DAV: principal-URL,omitempty"`
+	AddressbookHomeSet *href               `xml:"urn:ietf:params:xml:ns:carddav addressbook-home-set,omitempty"`
+	AddressData        string              `xml:"urn:ietf:params:xml:ns:carddav address-data,omitempty"`
+	CalendarHomeSet    *href               `xml:"urn:ietf:params:xml:ns:caldav calendar-home-set,omitempty"`
+	CalendarData       string              `xml:"urn:ietf:params:xml:ns:caldav calendar-data,omitempty"`
+	SupportedCalComp   *supportedComp      `xml:"urn:ietf:params:xml:ns:caldav supported-calendar-component-set,omitempty"`
+	SupportedReportSet *supportedReportSet `xml:"DAV: supported-report-set,omitempty"`
 	// CalDAV scheduling discovery (RFC 6638 §2): the principal's calendar user
 	// addresses and the URLs of its scheduling Inbox and Outbox.
 	CalendarUserAddressSet *hrefSet `xml:"urn:ietf:params:xml:ns:caldav calendar-user-address-set,omitempty"`
@@ -196,6 +196,61 @@ func eventComponentSet() *supportedComp {
 // it holds VTODOs.
 func todoComponentSet() *supportedComp {
 	return &supportedComp{Comps: []calComp{{Name: "VTODO"}}}
+}
+
+// supportedReportSet is the DAV:supported-report-set value: the REPORTs a resource
+// accepts, so a client discovers them (RFC 3253 §3.1.5) instead of probing blind.
+type supportedReportSet struct {
+	Reports []supportedReport `xml:"DAV: supported-report"`
+}
+
+// supportedReport wraps one report name in <D:supported-report><D:report>….
+type supportedReport struct {
+	Report reportName `xml:"DAV: report"`
+}
+
+// reportName names one report element inside <D:report>. Exactly one field is set
+// per entry; the rest stay nil and are omitted.
+type reportName struct {
+	CalendarQuery          *struct{} `xml:"urn:ietf:params:xml:ns:caldav calendar-query,omitempty"`
+	CalendarMultiget       *struct{} `xml:"urn:ietf:params:xml:ns:caldav calendar-multiget,omitempty"`
+	FreeBusyQuery          *struct{} `xml:"urn:ietf:params:xml:ns:caldav free-busy-query,omitempty"`
+	AddressbookQuery       *struct{} `xml:"urn:ietf:params:xml:ns:carddav addressbook-query,omitempty"`
+	AddressbookMultiget    *struct{} `xml:"urn:ietf:params:xml:ns:carddav addressbook-multiget,omitempty"`
+	SyncCollection         *struct{} `xml:"DAV: sync-collection,omitempty"`
+	ExpandProperty         *struct{} `xml:"DAV: expand-property,omitempty"`
+	PrincipalPropSearch    *struct{} `xml:"DAV: principal-property-search,omitempty"`
+	PrincipalSearchPropSet *struct{} `xml:"DAV: principal-search-property-set,omitempty"`
+}
+
+// calendarReportSet lists the REPORTs a calendar collection supports.
+func calendarReportSet() *supportedReportSet {
+	return &supportedReportSet{Reports: []supportedReport{
+		{Report: reportName{CalendarQuery: &struct{}{}}},
+		{Report: reportName{CalendarMultiget: &struct{}{}}},
+		{Report: reportName{FreeBusyQuery: &struct{}{}}},
+		{Report: reportName{SyncCollection: &struct{}{}}},
+		{Report: reportName{ExpandProperty: &struct{}{}}},
+	}}
+}
+
+// addressbookReportSet lists the REPORTs an address book collection supports.
+func addressbookReportSet() *supportedReportSet {
+	return &supportedReportSet{Reports: []supportedReport{
+		{Report: reportName{AddressbookQuery: &struct{}{}}},
+		{Report: reportName{AddressbookMultiget: &struct{}{}}},
+		{Report: reportName{SyncCollection: &struct{}{}}},
+		{Report: reportName{ExpandProperty: &struct{}{}}},
+	}}
+}
+
+// principalReportSet lists the REPORTs a principal resource supports.
+func principalReportSet() *supportedReportSet {
+	return &supportedReportSet{Reports: []supportedReport{
+		{Report: reportName{PrincipalPropSearch: &struct{}{}}},
+		{Report: reportName{PrincipalSearchPropSet: &struct{}{}}},
+		{Report: reportName{ExpandProperty: &struct{}{}}},
+	}}
 }
 
 // marshalMultistatus renders a multistatus with the XML declaration prefix.
