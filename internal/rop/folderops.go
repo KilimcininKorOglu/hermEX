@@ -280,10 +280,13 @@ func (s *Session) ropHardDeleteMessagesAndSubfolders(p *ext.Pull, out *ext.Push,
 	return true
 }
 
-// ropEmptyFolder handles RopEmptyFolder ([MS-OXCFOLD] 2.2.1.5): it soft-deletes all
-// messages (and optionally FAI/associated items) from the folder into the
-// Recoverable Items dumpster (recoverable until retention). v1 always synchronous,
-// does not yet honour wantDeleteAssociated.
+// ropEmptyFolder handles RopEmptyFolder ([MS-OXCFOLD] 2.2.1.5): it clears the folder's
+// whole contents. Per the spec the operation spans both messages AND subfolders
+// (DEL_MESSAGES | DEL_FOLDERS), so besides routing the folder's messages into the
+// Recoverable Items dumpster (soft delete, recoverable until retention) it also removes
+// every subfolder with its subtree. A failure to remove any single message or subfolder
+// sets PartialCompletion rather than failing the whole ROP. v1 always synchronous, does
+// not yet honour wantDeleteAssociated.
 func (s *Session) ropEmptyFolder(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	_ /* wantAsync */, e1 := p.Uint8()
 	_ /* wantDeleteAssociated */, e2 := p.Uint8()
@@ -299,6 +302,7 @@ func (s *Session) ropEmptyFolder(p *ext.Pull, out *ext.Push, handles []uint32, h
 	if s.denyWrite(out, ropEmptyFolder, hindex, folder.store, folder.folderID, mapi.FrightsDeleteAny) {
 		return true
 	}
+	var partial uint8
 	msgs, err := folder.store.ListMessages(folder.folderID)
 	if err != nil {
 		writeErr(out, ropEmptyFolder, hindex, ecError)
@@ -306,14 +310,24 @@ func (s *Session) ropEmptyFolder(p *ext.Pull, out *ext.Push, handles []uint32, h
 	}
 	for _, m := range msgs {
 		if err := folder.store.SoftDeleteObject(m.ID); err != nil {
-			writeErr(out, ropEmptyFolder, hindex, ecError)
-			return true
+			partial = 1
+		}
+	}
+	// EmptyFolder also drops the folder's subfolders, each with its whole subtree.
+	children, err := childFolders(folder.store, folder.folderID)
+	if err != nil {
+		writeErr(out, ropEmptyFolder, hindex, ecError)
+		return true
+	}
+	for _, c := range children {
+		if err := folder.store.DeleteFolder(c.ID); err != nil {
+			partial = 1
 		}
 	}
 	out.Uint8(ropEmptyFolder)
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
-	out.Uint8(0) // PartialCompletion
+	out.Uint8(partial) // PartialCompletion
 	return true
 }
 
