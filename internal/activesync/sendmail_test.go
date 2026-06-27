@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"testing"
+	"time"
 
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
@@ -163,5 +165,161 @@ func TestRecipientsOf(t *testing.T) {
 		if !want[a] {
 			t.Errorf("unexpected recipient %q", a)
 		}
+	}
+}
+
+// seedSource appends one message to a mailbox's Inbox with the given flags and
+// returns its UID and object id, so a reply/forward test can reference it as the
+// source and read its markers back.
+func seedSource(t *testing.T, dir string, flags int64) (uid uint32, id int64) {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	raw := []byte("From: bob@hermex.test\r\nTo: alice@hermex.test\r\nSubject: Original\r\n" +
+		"Message-ID: <orig@hermex.test>\r\n\r\nhi alice\r\n")
+	info, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), raw, time.Now(), flags)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return info.UID, info.ID
+}
+
+// sourceVerb reads the PidTagLastVerbExecuted value back from a source message.
+func sourceVerb(t *testing.T, dir string, id int64) (int32, bool) {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	props, err := st.GetMessageProperties(id, mapi.PrLastVerbExecuted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, ok := props.Get(mapi.PrLastVerbExecuted)
+	if !ok {
+		return 0, false
+	}
+	n, _ := v.(int32)
+	return n, true
+}
+
+// TestSmartReplyMarksSource proves a SmartReply stamps the reply verb
+// (NOTEIVERB_REPLYTOSENDER) and the \Answered flag onto the source message named
+// by the WBXML Source, while preserving the source's existing \Seen flag (the
+// flag mask is rewritten whole, so a merge bug would clear it).
+func TestSmartReplyMarksSource(t *testing.T) {
+	ts, aliceDir, _ := sendServer(t)
+	srcUID, srcID := seedSource(t, aliceDir, objectstore.FlagSeen)
+	inboxFID := strconv.FormatInt(int64(mapi.PrivateFIDInbox), 10)
+
+	sm := wbxml.Elem(wbxml.CMSmartReply,
+		wbxml.Elem(wbxml.CMSource,
+			wbxml.Str(wbxml.CMFolderID, inboxFID),
+			wbxml.Str(wbxml.CMItemID, strconv.FormatUint(uint64(srcUID), 10))),
+		wbxml.Opaque(wbxml.CMMIME, []byte(sampleMIME)))
+	resp, out := postRaw(t, ts, "SmartReply", wbxml.Marshal(sm))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200: %s", resp.StatusCode, out)
+	}
+
+	st, err := objectstore.Open(aliceDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flags, err := st.MessageFlags(int64(mapi.PrivateFIDInbox), srcUID)
+	st.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flags&objectstore.FlagAnswered == 0 {
+		t.Error("source not marked \\Answered after SmartReply")
+	}
+	if flags&objectstore.FlagSeen == 0 {
+		t.Error("source's \\Seen flag was cleared (flag mask not merged)")
+	}
+	if v, ok := sourceVerb(t, aliceDir, srcID); !ok || v != mapi.NoteVerbReplyToSender {
+		t.Errorf("source PidTagLastVerbExecuted = %d (present=%v), want %d", v, ok, mapi.NoteVerbReplyToSender)
+	}
+}
+
+// TestSmartForwardMarksSource proves a SmartForward stamps the forward verb
+// (NOTEIVERB_FORWARD) on the source and, since there is no IMAP forwarded flag,
+// leaves \Answered unset.
+func TestSmartForwardMarksSource(t *testing.T) {
+	ts, aliceDir, _ := sendServer(t)
+	srcUID, srcID := seedSource(t, aliceDir, objectstore.FlagSeen)
+	inboxFID := strconv.FormatInt(int64(mapi.PrivateFIDInbox), 10)
+
+	sm := wbxml.Elem(wbxml.CMSmartForward,
+		wbxml.Elem(wbxml.CMSource,
+			wbxml.Str(wbxml.CMFolderID, inboxFID),
+			wbxml.Str(wbxml.CMItemID, strconv.FormatUint(uint64(srcUID), 10))),
+		wbxml.Opaque(wbxml.CMMIME, []byte(sampleMIME)))
+	resp, out := postRaw(t, ts, "SmartForward", wbxml.Marshal(sm))
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200: %s", resp.StatusCode, out)
+	}
+
+	if v, ok := sourceVerb(t, aliceDir, srcID); !ok || v != mapi.NoteVerbForward {
+		t.Errorf("source PidTagLastVerbExecuted = %d (present=%v), want %d", v, ok, mapi.NoteVerbForward)
+	}
+	st, err := objectstore.Open(aliceDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flags, err := st.MessageFlags(int64(mapi.PrivateFIDInbox), srcUID)
+	st.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flags&objectstore.FlagAnswered != 0 {
+		t.Error("SmartForward set \\Answered; a forward must not mark the source replied")
+	}
+}
+
+// TestSmartReplyURLQuerySource proves the source can also come from the URL query
+// (ItemId/CollectionId), the only carrier when the body is legacy raw MIME with no
+// WBXML envelope to hold a Source element.
+func TestSmartReplyURLQuerySource(t *testing.T) {
+	ts, aliceDir, _ := sendServer(t)
+	srcUID, srcID := seedSource(t, aliceDir, objectstore.FlagSeen)
+	inboxFID := strconv.FormatInt(int64(mapi.PrivateFIDInbox), 10)
+
+	url := ts.URL + "/Microsoft-Server-ActiveSync?Cmd=SmartReply&User=" + testUser +
+		"&DeviceId=dev1&DeviceType=iPhone&ItemId=" + strconv.FormatUint(uint64(srcUID), 10) +
+		"&CollectionId=" + inboxFID
+	req, err := http.NewRequest("POST", url, bytes.NewReader([]byte(sampleMIME)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.SetBasicAuth(testUser, testPass)
+	req.Header.Set("Content-Type", "application/vnd.ms-sync.wbxml")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d, want 200", resp.StatusCode)
+	}
+
+	st, err := objectstore.Open(aliceDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	flags, err := st.MessageFlags(int64(mapi.PrivateFIDInbox), srcUID)
+	st.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flags&objectstore.FlagAnswered == 0 {
+		t.Error("URL-query source not marked \\Answered")
+	}
+	if v, ok := sourceVerb(t, aliceDir, srcID); !ok || v != mapi.NoteVerbReplyToSender {
+		t.Errorf("source verb = %d (present=%v), want %d", v, ok, mapi.NoteVerbReplyToSender)
 	}
 }

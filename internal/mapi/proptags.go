@@ -181,13 +181,27 @@ const (
 	PrFlagStatus          = PropTag(0x10900003) // PtLong (PidTagFlagStatus, MS-OXOFLAG) — 0 none / 1 complete / 2 flagged
 	PrFollowupIcon        = PropTag(0x10950003) // PtLong (PidTagFollowupIcon) — flag color: 0 clear / 1 purple / 2 orange / 3 green / 4 yellow / 5 blue / 6 red
 	PrFlagCompleteTime    = PropTag(0x10910040) // PtSysTime (PidTagFlagCompleteTime) — when the flag was marked complete
-	PrInternetMessageID   = PropTag(0x1035001F) // PtUnicode
-	PrInReplyToID         = PropTag(0x1042001F) // PtUnicode
-	PrInternetReferences  = PropTag(0x1039001F) // PtUnicode
-	PrConversationTopic   = PropTag(0x0070001F) // PtUnicode
-	PrConversationIndex   = PropTag(0x00710102) // PtBinary
-	PrInternetCodepage    = PropTag(0x3FDE0003) // PtLong (PidTagInternetCodepage)
-	PrPriority            = PropTag(0x00260003) // PtLong
+	// Reply/forward verb tracking (MS-OXOMSG 2.2.1.14-15): the last reply or
+	// forward action performed on a message and when, which a client renders as
+	// the replied/forwarded icon. SmartReply and SmartForward stamp these onto the
+	// source message so the icon survives across devices.
+	PrLastVerbExecuted      = PropTag(0x10810003) // PtLong (PidTagLastVerbExecuted, a NOTEIVERB value)
+	PrLastVerbExecutionTime = PropTag(0x10820040) // PtSysTime (PidTagLastVerbExecutionTime)
+	PrInternetMessageID     = PropTag(0x1035001F) // PtUnicode
+	PrInReplyToID           = PropTag(0x1042001F) // PtUnicode
+	PrInternetReferences    = PropTag(0x1039001F) // PtUnicode
+	PrConversationTopic     = PropTag(0x0070001F) // PtUnicode
+	PrConversationIndex     = PropTag(0x00710102) // PtBinary
+	PrInternetCodepage      = PropTag(0x3FDE0003) // PtLong (PidTagInternetCodepage)
+	PrPriority              = PropTag(0x00260003) // PtLong
+)
+
+// NOTEIVERB values for PrLastVerbExecuted (MS-OXOMSG 2.2.1.14): the reply and
+// forward verbs a client maps to the replied/forwarded icon.
+const (
+	NoteVerbReplyToSender int32 = 102
+	NoteVerbReplyToAll    int32 = 103
+	NoteVerbForward       int32 = 104
 )
 
 // Message importance/sensitivity/flags values (MS-OXCMSG).

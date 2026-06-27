@@ -482,6 +482,7 @@ const (
 	CMSource          Tag = 0x150B
 	CMFolderID        Tag = 0x150C
 	CMItemID          Tag = 0x150D
+	CMLongId          Tag = 0x150E
 	CMMIME            Tag = 0x1510
 	CMClientID        Tag = 0x1511
 	CMStatus          Tag = 0x1512
