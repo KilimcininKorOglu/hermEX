@@ -61,8 +61,19 @@ func TestOptions(t *testing.T) {
 	if got := resp.Header.Get("MS-Server-ActiveSync"); got != "16.1" {
 		t.Errorf("MS-Server-ActiveSync = %q, want 16.1 (highest)", got)
 	}
-	if c := resp.Header.Get("MS-ASProtocolCommands"); !strings.Contains(c, "FolderSync") || !strings.Contains(c, "Sync") {
-		t.Errorf("MS-ASProtocolCommands = %q lacks the core commands", c)
+	// The advertised command set must stay in step with the dispatch switch: a
+	// dispatched command omitted here is one the client never uses. Find (the 16.1
+	// search) and MeetingResponse (calendar accept/decline) are dispatched, so a
+	// server claiming 16.1 must advertise them.
+	cmds := resp.Header.Get("MS-ASProtocolCommands")
+	for _, want := range []string{
+		"Provision", "FolderSync", "Sync", "MeetingResponse", "SendMail",
+		"SmartForward", "SmartReply", "Ping", "Settings", "ItemOperations",
+		"MoveItems", "ResolveRecipients", "Search", "Find", "ValidateCert",
+	} {
+		if !strings.Contains(cmds, want) {
+			t.Errorf("MS-ASProtocolCommands = %q, missing %s", cmds, want)
+		}
 	}
 }
 

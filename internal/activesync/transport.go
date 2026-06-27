@@ -234,8 +234,8 @@ func (p *packed) lenPrefixed() ([]byte, bool) {
 var supportedCommands = []string{
 	"Provision", "FolderSync", "FolderCreate", "FolderDelete", "FolderUpdate",
 	"Sync", "GetItemEstimate", "Ping", "SendMail", "SmartForward", "SmartReply",
-	"Settings", "ItemOperations", "MoveItems", "ResolveRecipients", "Search",
-	"ValidateCert",
+	"MeetingResponse", "Settings", "ItemOperations", "MoveItems", "ResolveRecipients",
+	"Search", "Find", "ValidateCert",
 }
 
 // handleOptions answers an EAS OPTIONS request with the capability headers: the
