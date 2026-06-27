@@ -22,10 +22,29 @@ import (
 // sync-token drives sync-collection.
 type reportReq struct {
 	XMLName   xml.Name
-	Hrefs     []string   `xml:"href"`
-	SyncToken string     `xml:"sync-token"`
-	Filter    *filter    `xml:"filter"`
-	TimeRange *timeRange `xml:"time-range"` // free-busy-query's direct time-range child
+	Hrefs     []string    `xml:"href"`
+	SyncToken string      `xml:"sync-token"`
+	Filter    *filter     `xml:"filter"`
+	TimeRange *timeRange  `xml:"time-range"`                 // free-busy-query's direct time-range child
+	Expand    *expandElem `xml:"prop>calendar-data>expand"` // CALDAV:expand (RFC 4791 §9.6.5)
+}
+
+// expandElem is the CALDAV:expand element of a calendar-data request: when present,
+// recurring components are returned as expanded instances within [start, end).
+type expandElem struct {
+	Start string `xml:"start,attr"`
+	End   string `xml:"end,attr"`
+}
+
+// window parses the expand element's bounds; ok is false when either is missing or
+// malformed, in which case the caller serves unexpanded data.
+func (e *expandElem) window() (start, end time.Time, ok bool) {
+	if e == nil {
+		return time.Time{}, time.Time{}, false
+	}
+	s, oks := parseFilterTime(e.Start)
+	en, oke := parseFilterTime(e.End)
+	return s, en, oks && oke
 }
 
 // handleReport dispatches a CardDAV REPORT (RFC 6352 §8) on the addressbook
@@ -95,14 +114,14 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox st
 	case "addressbook-query":
 		s.reportQueryOrSync(w, st, user, coll, fid, 0, false, req.Filter)
 	case "calendar-multiget":
-		s.reportCalMultiget(w, st, fid, req.Hrefs)
+		s.reportCalMultiget(w, st, fid, req.Hrefs, req.Expand)
 	case "calendar-query":
-		s.reportCalQueryOrSync(w, st, user, coll, fid, 0, false, req.Filter)
+		s.reportCalQueryOrSync(w, st, user, coll, fid, 0, false, req.Filter, req.Expand)
 	case "free-busy-query":
 		s.handleFreeBusy(w, st, fid, req.TimeRange)
 	case "sync-collection":
 		if isCal {
-			s.reportCalQueryOrSync(w, st, user, coll, fid, parseSyncToken(req.SyncToken), true, nil)
+			s.reportCalQueryOrSync(w, st, user, coll, fid, parseSyncToken(req.SyncToken), true, nil, nil)
 		} else {
 			s.reportQueryOrSync(w, st, user, coll, fid, parseSyncToken(req.SyncToken), true, nil)
 		}
@@ -246,7 +265,8 @@ func addressDataResponse(href string, cn uint64, data string) msResponse {
 
 // reportCalMultiget returns calendar-data for each requested href, mirroring
 // reportMultiget for the Calendar folder.
-func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store, fid int64, hrefs []string) {
+func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store, fid int64, hrefs []string, expand *expandElem) {
+	exStart, exEnd, doExpand := expand.window()
 	ms := &multistatus{}
 	for _, h := range hrefs {
 		name := path.Base(strings.TrimRight(h, "/"))
@@ -264,6 +284,11 @@ func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store,
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		if doExpand {
+			if ex, ok := oxcical.ExpandRecurrence([]byte(data), exStart, exEnd); ok {
+				data = string(ex)
+			}
+		}
 		ms.Responses = append(ms.Responses, calendarDataResponse(h, obj.ChangeNumber, data))
 	}
 	writeMultistatus(w, ms)
@@ -273,9 +298,11 @@ func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store,
 // mirroring reportQueryOrSync. A calendar-query applies the request's
 // comp-filter/prop-filter/time-range against each member (RFC 4791 §9.7); for
 // sync-collection, members removed since the client's token are reported as 404
-// tombstones (RFC 6578). Recurrence is not expanded: a time-range matches the
-// master component's own span, and <expand> is not honored.
-func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Store, user, coll string, fid int64, sinceToken uint64, sync bool, filt *filter) {
+// tombstones (RFC 6578). When the request carries CALDAV:expand, a recurring
+// member's calendar-data is returned as expanded instances over the expand window
+// (RFC 4791 §9.6.5); the filter still matches against the master span.
+func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Store, user, coll string, fid int64, sinceToken uint64, sync bool, filt *filter, expand *expandElem) {
+	exStart, exEnd, doExpand := expand.window()
 	objs, err := st.ListFolderObjects(fid)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -295,6 +322,11 @@ func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Sto
 		// calendar-query: skip objects that do not satisfy the filter (RFC 4791 §9.7).
 		if !calendarMatches(filt, data) {
 			continue
+		}
+		if doExpand {
+			if ex, ok := oxcical.ExpandRecurrence([]byte(data), exStart, exEnd); ok {
+				data = string(ex)
+			}
 		}
 		href := calObjectPathColl(user, coll, name)
 		ms.Responses = append(ms.Responses, calendarDataResponse(href, o.ChangeNumber, data))
