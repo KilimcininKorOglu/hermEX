@@ -13,6 +13,7 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/logging"
+	"hermex/internal/objectstore"
 	"hermex/internal/relay"
 )
 
@@ -110,7 +111,17 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	}
 	// Object methods dispatch by collection: a calendar .ics object is served by
 	// the CalDAV handlers, everything else by the CardDAV handlers.
-	kind, _, _, _ := classify(r.URL.Path)
+	kind, pathUser, _, _ := classify(r.URL.Path)
+	// The URL principal segment is authoritative: a request for another local user's
+	// principal is served from THAT owner's mailbox, but only when the caller is one of
+	// the owner's delegates (collection sharing, #117). A non-delegate is forbidden, so
+	// the principal segment can never reach a mailbox the caller was not granted.
+	target, authorized := s.resolveTarget(user, mailbox, pathUser)
+	if !authorized {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+	mailbox = target
 	calObject := kind == kindCalObject
 	// The scheduling Inbox/Outbox are routed on their own: the Outbox answers POST
 	// (free-busy / iTIP, RFC 6638 §5) plus discovery, the Inbox answers discovery.
@@ -208,6 +219,38 @@ func (s *Server) basicAuth(w http.ResponseWriter, r *http.Request) (user, mailbo
 	w.Header().Set("WWW-Authenticate", `Basic realm="hermEX"`)
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
 	return "", "", false
+}
+
+// resolveTarget maps the URL's principal segment to the mailbox a request operates on.
+// For the caller's own principal (or the bare DAV root) it is the caller's own mailbox.
+// For another local principal it is that owner's mailbox, but only when the caller is
+// one of the owner's delegates: the per-mailbox delegate list (objectstore PrAbDelegates)
+// is the sharing grant, so a non-delegate is denied and the principal segment can never
+// reach a mailbox the caller was not granted (collection sharing, #117). authorized is
+// false when the caller is not permitted to act for the named principal.
+func (s *Server) resolveTarget(authUser, authMailbox, pathUser string) (mailbox string, authorized bool) {
+	if pathUser == "" || strings.EqualFold(pathUser, authUser) {
+		return authMailbox, true
+	}
+	ownerMaildir, found := s.accounts.Resolve(pathUser)
+	if !found {
+		return "", false
+	}
+	st, err := objectstore.Open(ownerMaildir)
+	if err != nil {
+		return "", false
+	}
+	defer st.Close()
+	delegates, err := st.GetDelegates()
+	if err != nil {
+		return "", false
+	}
+	for _, d := range delegates {
+		if strings.EqualFold(d, authUser) {
+			return ownerMaildir, true
+		}
+	}
+	return "", false
 }
 
 // handleOptions advertises DAV capabilities. addressbook signals CardDAV (RFC
