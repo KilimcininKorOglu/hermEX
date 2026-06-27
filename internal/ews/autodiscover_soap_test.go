@@ -163,6 +163,102 @@ func TestAutodiscoverSOAPOmitsUnknownSetting(t *testing.T) {
 	}
 }
 
+// adDomainReplyEnvelope parses the SOAP envelope wrapping a
+// GetDomainSettingsResponseMessage, fully namespace-qualified.
+type adDomainReplyEnvelope struct {
+	XMLName xml.Name `xml:"http://schemas.xmlsoap.org/soap/envelope/ Envelope"`
+	Body    struct {
+		Reply domainSettingsReply `xml:"http://schemas.microsoft.com/exchange/2010/Autodiscover GetDomainSettingsResponseMessage"`
+	} `xml:"http://schemas.xmlsoap.org/soap/envelope/ Body"`
+}
+
+// domainSettingsReply is a fully namespace-qualified parse of a
+// GetDomainSettingsResponseMessage.
+type domainSettingsReply struct {
+	Response struct {
+		ErrorCode       string `xml:"http://schemas.microsoft.com/exchange/2010/Autodiscover ErrorCode"`
+		DomainResponses struct {
+			DomainResponse []struct {
+				ErrorCode      string `xml:"http://schemas.microsoft.com/exchange/2010/Autodiscover ErrorCode"`
+				DomainSettings struct {
+					DomainSetting []struct {
+						Name  string `xml:"http://schemas.microsoft.com/exchange/2010/Autodiscover Name"`
+						Value string `xml:"http://schemas.microsoft.com/exchange/2010/Autodiscover Value"`
+					} `xml:"http://schemas.microsoft.com/exchange/2010/Autodiscover DomainSetting"`
+				} `xml:"http://schemas.microsoft.com/exchange/2010/Autodiscover DomainSettings"`
+			} `xml:"http://schemas.microsoft.com/exchange/2010/Autodiscover DomainResponse"`
+		} `xml:"http://schemas.microsoft.com/exchange/2010/Autodiscover DomainResponses"`
+	} `xml:"http://schemas.microsoft.com/exchange/2010/Autodiscover Response"`
+}
+
+// settingValue returns the value of the named domain setting in the first
+// DomainResponse, or "" when absent.
+func (r domainSettingsReply) settingValue(name string) string {
+	if len(r.Response.DomainResponses.DomainResponse) == 0 {
+		return ""
+	}
+	for _, s := range r.Response.DomainResponses.DomainResponse[0].DomainSettings.DomainSetting {
+		if s.Name == name {
+			return s.Value
+		}
+	}
+	return ""
+}
+
+// domainSettingsEnvelope wraps a GetDomainSettings request naming a domain and the
+// settings to return.
+func domainSettingsEnvelope(domain string, settings ...string) string {
+	var b strings.Builder
+	b.WriteString(`<?xml version="1.0" encoding="utf-8"?>`)
+	b.WriteString(`<soap:Envelope xmlns:a="`)
+	b.WriteString(nsAutodiscover)
+	b.WriteString(`" xmlns:soap="`)
+	b.WriteString(nsSOAP)
+	b.WriteString(`"><soap:Body><a:GetDomainSettingsRequestMessage><a:Request>`)
+	b.WriteString(`<a:Domains><a:Domain>`)
+	b.WriteString(domain)
+	b.WriteString(`</a:Domain></a:Domains><a:RequestedSettings>`)
+	for _, s := range settings {
+		b.WriteString(`<a:Setting>`)
+		b.WriteString(s)
+		b.WriteString(`</a:Setting>`)
+	}
+	b.WriteString(`</a:RequestedSettings></a:Request></a:GetDomainSettingsRequestMessage></soap:Body></soap:Envelope>`)
+	return b.String()
+}
+
+// TestAutodiscoverSOAPGetDomainSettings proves the SOAP Autodiscover endpoint serves
+// the domain-level EWS URL, carried in the DomainStringSetting form the wire format
+// uses for domain settings (distinct from the user form).
+func TestAutodiscoverSOAPGetDomainSettings(t *testing.T) {
+	ts := newTestServer(t)
+	resp, out := adSoapPost(t, ts, domainSettingsEnvelope("hermex.test", "ExternalEwsUrl"), true)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", resp.StatusCode, out)
+	}
+
+	var env adDomainReplyEnvelope
+	if err := xml.Unmarshal([]byte(out), &env); err != nil {
+		t.Fatalf("parse response: %v\n%s", err, out)
+	}
+	reply := env.Body.Reply
+	if len(reply.Response.DomainResponses.DomainResponse) != 1 {
+		t.Fatalf("want exactly one DomainResponse, got %d: %s", len(reply.Response.DomainResponses.DomainResponse), out)
+	}
+	if reply.Response.DomainResponses.DomainResponse[0].ErrorCode != "NoError" {
+		t.Errorf("DomainResponse ErrorCode = %q, want NoError", reply.Response.DomainResponses.DomainResponse[0].ErrorCode)
+	}
+	wantURL := "https://mail.hermex.test/EWS/Exchange.asmx"
+	if got := reply.settingValue("ExternalEwsUrl"); got != wantURL {
+		t.Errorf("ExternalEwsUrl = %q, want %q", got, wantURL)
+	}
+	// The domain setting must carry the DomainStringSetting type discriminator, not
+	// the user-side StringSetting.
+	if !strings.Contains(out, `i:type="DomainStringSetting"`) {
+		t.Errorf("domain setting missing the DomainStringSetting type: %s", out)
+	}
+}
+
 // TestAutodiscoverSOAPRequiresAuth proves the SOAP Autodiscover endpoint challenges
 // an unauthenticated request, so settings are not disclosed without credentials.
 func TestAutodiscoverSOAPRequiresAuth(t *testing.T) {

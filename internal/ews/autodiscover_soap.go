@@ -27,7 +27,8 @@ const (
 type adSoapRequest struct {
 	XMLName xml.Name `xml:"Envelope"`
 	Body    struct {
-		UserReq *adUserSettingsRequest `xml:"GetUserSettingsRequestMessage"`
+		UserReq   *adUserSettingsRequest   `xml:"GetUserSettingsRequestMessage"`
+		DomainReq *adDomainSettingsRequest `xml:"GetDomainSettingsRequestMessage"`
 	} `xml:"Body"`
 }
 
@@ -40,6 +41,19 @@ type adUserSettingsRequest struct {
 				Mailbox string `xml:"Mailbox"`
 			} `xml:"User"`
 		} `xml:"Users"`
+		RequestedSettings struct {
+			Setting []string `xml:"Setting"`
+		} `xml:"RequestedSettings"`
+	} `xml:"Request"`
+}
+
+// adDomainSettingsRequest is the GetDomainSettingsRequestMessage body: the domains
+// to describe and the per-domain settings the client wants returned.
+type adDomainSettingsRequest struct {
+	Request struct {
+		Domains struct {
+			Domain []string `xml:"Domain"`
+		} `xml:"Domains"`
 		RequestedSettings struct {
 			Setting []string `xml:"Setting"`
 		} `xml:"RequestedSettings"`
@@ -81,6 +95,8 @@ func (s *Server) serveAutodiscoverSOAP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case req.Body.UserReq != nil:
 		s.writeUserSettings(w, host, user, req.Body.UserReq)
+	case req.Body.DomainReq != nil:
+		s.writeDomainSettings(w, host, req.Body.DomainReq)
 	default:
 		http.Error(w, "unsupported Autodiscover request", http.StatusBadRequest)
 	}
@@ -108,13 +124,43 @@ func (s *Server) writeUserSettings(w http.ResponseWriter, host, user string, req
 			"<UserSettings>")
 		for _, name := range req.Request.RequestedSettings.Setting {
 			if v, ok := userSettingValue(name, ewsURL, user); ok {
-				writeADSetting(w, "UserSetting", name, v)
+				writeADSetting(w, "UserSetting", "StringSetting", name, v)
 			}
 		}
 		_, _ = io.WriteString(w, "</UserSettings></UserResponse>")
 	}
 	_, _ = io.WriteString(w, "</UserResponses>")
 	_, _ = io.WriteString(w, adResponseClose("GetUserSettingsResponseMessage"))
+}
+
+// writeDomainSettings emits the GetDomainSettingsResponseMessage. One DomainResponse
+// is returned per requested Domain (one when the request named none); each carries
+// the requested domain settings hermEX can answer, omitting any it has no value for.
+// Domain settings carry the DomainStringSetting type, distinct from the user form.
+func (s *Server) writeDomainSettings(w http.ResponseWriter, host string, req *adDomainSettingsRequest) {
+	ewsURL := "https://" + host + "/EWS/Exchange.asmx"
+	n := len(req.Request.Domains.Domain)
+	if n == 0 {
+		n = 1
+	}
+	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
+	_, _ = io.WriteString(w, adResponseOpen("GetDomainSettingsResponseMessage", "GetDomainSettingsResponse"))
+	_, _ = io.WriteString(w, "<DomainResponses>")
+	for i := 0; i < n; i++ {
+		_, _ = io.WriteString(w, "<DomainResponse>"+
+			"<ErrorCode>NoError</ErrorCode>"+
+			"<ErrorMessage>No error.</ErrorMessage>"+
+			"<DomainSettingErrors/>"+
+			"<DomainSettings>")
+		for _, name := range req.Request.RequestedSettings.Setting {
+			if v, ok := domainSettingValue(name, ewsURL); ok {
+				writeADSetting(w, "DomainSetting", "DomainStringSetting", name, v)
+			}
+		}
+		_, _ = io.WriteString(w, "</DomainSettings></DomainResponse>")
+	}
+	_, _ = io.WriteString(w, "</DomainResponses>")
+	_, _ = io.WriteString(w, adResponseClose("GetDomainSettingsResponseMessage"))
 }
 
 // userSettingValue maps a requested setting name to the value hermEX serves for it,
@@ -154,11 +200,24 @@ func adResponseClose(msgElem string) string {
 	return `</Response></` + msgElem + `></s:Body></s:Envelope>`
 }
 
+// domainSettingValue maps a requested domain setting name to the value hermEX
+// serves for it, or ok=false when hermEX has no value (the setting is then omitted).
+// The EWS URLs are host-global, so a domain query answers them the same as a user
+// query does.
+func domainSettingValue(name, ewsURL string) (string, bool) {
+	switch name {
+	case "ExternalEwsUrl", "InternalEwsUrl":
+		return ewsURL, true
+	}
+	return "", false
+}
+
 // writeADSetting writes one setting element (UserSetting or DomainSetting) in the
-// StringSetting form the wire format uses. The name is a fixed vocabulary string;
-// the value (which may carry an address or URL) is XML-escaped.
-func writeADSetting(w io.Writer, elem, name, value string) {
-	_, _ = io.WriteString(w, "<"+elem+` i:type="StringSetting"><Name>`+name+"</Name><Value>")
+// StringSetting form the wire format uses, carrying the given xsi:type (StringSetting
+// for user settings, DomainStringSetting for domain settings). The name is a fixed
+// vocabulary string; the value (which may carry an address or URL) is XML-escaped.
+func writeADSetting(w io.Writer, elem, xsiType, name, value string) {
+	_, _ = io.WriteString(w, "<"+elem+` i:type="`+xsiType+`"><Name>`+name+"</Name><Value>")
 	xmlEscape(w, value)
 	_, _ = io.WriteString(w, "</Value></"+elem+">")
 }
