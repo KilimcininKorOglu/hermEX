@@ -33,6 +33,7 @@ const (
 	PageSettings        = 0x12
 	PageItemOperations  = 0x14
 	PageComposeMail     = 0x15
+	PageNotes           = 0x17
 )
 
 // AirSync (code page 0x00).
@@ -163,6 +164,16 @@ const (
 	TKCalendarType     Tag = 0x0924
 	TKIsLeapMonth      Tag = 0x0925
 	TKFirstDayOfWeek   Tag = 0x0926
+)
+
+// Notes (code page 0x17, MS-ASNOTE, since 14.0). The note body is carried under
+// AirSyncBase.
+const (
+	NTSubject      Tag = 0x1705
+	NTMessageClass Tag = 0x1706
+	NTLastModified Tag = 0x1707
+	NTCategories   Tag = 0x1708
+	NTCategory     Tag = 0x1709
 )
 
 // Email (code page 0x02). The pre-12.0 Attachment/Body tokens are omitted; 12.0+

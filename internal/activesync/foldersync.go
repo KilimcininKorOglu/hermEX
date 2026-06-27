@@ -28,6 +28,7 @@ const (
 	folderTypeTask       = 7
 	folderTypeCalendar   = 8
 	folderTypeContact    = 9
+	folderTypeNote       = 10
 	folderTypeUserMail   = 12
 	folderSyncInvalidKey = 9
 )
@@ -81,8 +82,8 @@ func (s *Server) handleFolderSync(w http.ResponseWriter, r *http.Request, sess *
 }
 
 // syncFolders lists the folders to expose to the device: the mail folders plus the
-// well-known Calendar, Contacts, and Tasks collections (the non-mail folders Sync can
-// serve). Notes are skipped until Sync handles them.
+// well-known Calendar, Contacts, Tasks, and Notes collections (every non-mail folder
+// Sync serves).
 func syncFolders(st *objectstore.Store) ([]easFolder, error) {
 	list, err := st.ListFolders()
 	if err != nil {
@@ -103,9 +104,10 @@ func syncFolders(st *objectstore.Store) ([]easFolder, error) {
 }
 
 // easFolderType maps a store folder to its EAS type, reporting ok=false for a
-// folder Sync cannot serve. The standard mail folders and the well-known Calendar and
-// Contacts collections are mapped by their fixed ids; any other folder is included as
-// a generic mail folder only when its container class is a note (mail) folder.
+// folder Sync cannot serve. The standard mail folders and the well-known Calendar,
+// Contacts, Tasks, and Notes collections are mapped by their fixed ids; any other
+// folder is included as a generic mail folder only when its container class is a note
+// (mail) folder.
 func easFolderType(st *objectstore.Store, fid int64) (int, bool, error) {
 	switch fid {
 	case mapi.PrivateFIDInbox:
@@ -124,6 +126,8 @@ func easFolderType(st *objectstore.Store, fid int64) (int, bool, error) {
 		return folderTypeContact, true, nil
 	case mapi.PrivateFIDTasks:
 		return folderTypeTask, true, nil
+	case mapi.PrivateFIDNotes:
+		return folderTypeNote, true, nil
 	}
 	props, err := st.GetFolderProperties(fid, mapi.PrContainerClass)
 	if err != nil {

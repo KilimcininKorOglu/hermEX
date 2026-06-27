@@ -325,7 +325,8 @@ func contactStr(pv mapi.PropertyValues, tag mapi.PropTag) string {
 // versioned by change number (calendar, contacts, tasks) rather than the IMAP index.
 func isObjectFolder(folderID int64) bool {
 	switch folderID {
-	case int64(mapi.PrivateFIDCalendar), int64(mapi.PrivateFIDContacts), int64(mapi.PrivateFIDTasks):
+	case int64(mapi.PrivateFIDCalendar), int64(mapi.PrivateFIDContacts),
+		int64(mapi.PrivateFIDTasks), int64(mapi.PrivateFIDNotes):
 		return true
 	}
 	return false
@@ -338,6 +339,8 @@ func objectAppData(folderID int64) func(*objectstore.Store, int64) (*wbxml.Node,
 		return contactAppData
 	case int64(mapi.PrivateFIDTasks):
 		return taskAppData
+	case int64(mapi.PrivateFIDNotes):
+		return noteAppData
 	default:
 		return calendarAppData
 	}
@@ -351,6 +354,8 @@ func applyObjectClientCommands(st *objectstore.Store, folderID int64, cstate *co
 		return applyContactClientCommands(st, cstate, c)
 	case int64(mapi.PrivateFIDTasks):
 		return applyTaskClientCommands(st, cstate, c)
+	case int64(mapi.PrivateFIDNotes):
+		return applyNoteClientCommands(st, cstate, c)
 	default:
 		return applyCalendarClientCommands(st, cstate, c)
 	}
