@@ -91,6 +91,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleGetUserOofSettings(w, inner, sess)
 	case "SetUserOofSettingsRequest":
 		s.handleSetUserOofSettings(w, inner, sess)
+	case "GetMailTips":
+		s.handleGetMailTips(w, inner, sess)
 	case "Subscribe":
 		s.handleSubscribe(w, inner, sess)
 	case "Unsubscribe":
