@@ -52,6 +52,7 @@ func main() {
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
 
 	srv := dav.NewServer(dir, dir, cfg.Hostname)
+	srv.Logger = logger // implicit-scheduling delivery failures route to the central log
 	// Scheduling-Outbox iTIP messages with external recipients are enqueued into the
 	// shared relay spool the MTA drains, DKIM-signed with the sending domain's key as
 	// they are spooled (RFC 6638 §5).

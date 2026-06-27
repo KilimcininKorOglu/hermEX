@@ -84,7 +84,7 @@ func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox st
 // handleCalPut creates or replaces a calendar object from an iCalendar body. It
 // honors If-None-Match: * (create-only) and If-Match (replace-guard), responding
 // 201 on create and 204 on replace with the new ETag. Mirrors handlePut.
-func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, mailbox string) {
+func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mailbox string) {
 	kind, _, coll, name := classify(r.URL.Path)
 	if kind != kindCalObject {
 		http.Error(w, "not a calendar resource", http.StatusMethodNotAllowed)
@@ -151,6 +151,16 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, mailbox st
 	}
 	msg.Props.Set(tag, name)
 
+	// Capture the prior iCalendar before replacing it so implicit scheduling can diff
+	// old against new to decide which attendees to (re-)invite or cancel (RFC 6638
+	// §3). Tasks (VTODO) never schedule, so the diff is skipped for them.
+	var oldBody string
+	if found && fid != int64(mapi.PrivateFIDTasks) {
+		if ob, oerr := calendarData(st, existing.ID); oerr == nil {
+			oldBody = ob
+		}
+	}
+
 	// Replace is delete-then-create: the object store has no in-place updater.
 	if found {
 		if err := st.DeleteObject(existing.ID); err != nil {
@@ -163,10 +173,23 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, mailbox st
 		return
 	}
 
-	created, _, err := findObjectByName(st, fid, ".ics", name)
-	if err == nil && created.ChangeNumber != 0 {
+	created, _, cerr := findObjectByName(st, fid, ".ics", name)
+	if cerr == nil && created.ChangeNumber != 0 {
 		w.Header().Set("ETag", etag(created.ChangeNumber))
 	}
+
+	// Implicit scheduling (RFC 6638 §3): auto-deliver the iTIP this change implies.
+	// The diff is between the re-exported old and new forms, both normalized through
+	// the store, so a synthesized field (e.g. an absent DTEND filled from DTSTART)
+	// cannot read as a spurious change and re-invite everyone. Events-only and
+	// best-effort: the calendar write has committed, so a delivery failure is logged,
+	// never surfaced as a PUT error.
+	if fid != int64(mapi.PrivateFIDTasks) && cerr == nil {
+		if newBody, nerr := calendarData(st, created.ID); nerr == nil {
+			s.scheduleOnChange(user, oldBody, newBody)
+		}
+	}
+
 	if found {
 		w.WriteHeader(http.StatusNoContent)
 	} else {
@@ -175,7 +198,7 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, mailbox st
 }
 
 // handleCalDelete removes a calendar object, honoring If-Match. Mirrors handleDelete.
-func (s *Server) handleCalDelete(w http.ResponseWriter, r *http.Request, mailbox string) {
+func (s *Server) handleCalDelete(w http.ResponseWriter, r *http.Request, user, mailbox string) {
 	kind, _, coll, name := classify(r.URL.Path)
 	if kind != kindCalObject {
 		http.Error(w, "not a calendar resource", http.StatusMethodNotAllowed)
@@ -210,11 +233,24 @@ func (s *Server) handleCalDelete(w http.ResponseWriter, r *http.Request, mailbox
 		http.Error(w, "etag mismatch", http.StatusPreconditionFailed)
 		return
 	}
+	// Capture the iCalendar before deleting so implicit scheduling can cancel the
+	// meeting for its attendees (organizer delete) or decline it (attendee delete),
+	// per RFC 6638 §3. Events only; Tasks (VTODO) never schedule.
+	var oldBody string
+	if fid != int64(mapi.PrivateFIDTasks) {
+		if ob, oerr := calendarData(st, obj.ID); oerr == nil {
+			oldBody = ob
+		}
+	}
 	// Route to the Recoverable Items dumpster (not a hard purge): the object leaves
 	// the live view but its bumped change number is a sync-collection tombstone.
 	if err := st.SoftDeleteObject(obj.ID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+	// Best-effort iTIP cancel/decline; a delivery failure never fails the delete.
+	if fid != int64(mapi.PrivateFIDTasks) {
+		s.scheduleOnChange(user, oldBody, "")
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

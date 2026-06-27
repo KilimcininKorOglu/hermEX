@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/relay"
 )
 
@@ -20,6 +21,10 @@ type Server struct {
 	auth     directory.Authenticator
 	accounts directory.Accounts
 	hostname string
+	// Logger is the central activity log; nil disables logging. It is set by the
+	// daemon after construction. Implicit-scheduling delivery failures (RFC 6638) are
+	// best-effort and surface here rather than failing the calendar write.
+	Logger *logging.Logger
 	// spool is the outbound relay queue scheduling-Outbox iTIP messages are handed to
 	// for external recipients (RFC 6638 §5). It is nil by default — then delivery is
 	// local-only and a remote recipient is reported as undeliverable — and set by the
@@ -153,13 +158,13 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		}
 	case http.MethodPut:
 		if calObject {
-			s.handleCalPut(w, r, mailbox)
+			s.handleCalPut(w, r, user, mailbox)
 		} else {
 			s.handlePut(w, r, mailbox)
 		}
 	case http.MethodDelete:
 		if calObject {
-			s.handleCalDelete(w, r, mailbox)
+			s.handleCalDelete(w, r, user, mailbox)
 		} else {
 			s.handleDelete(w, r, mailbox)
 		}
@@ -202,10 +207,12 @@ func (s *Server) basicAuth(w http.ResponseWriter, r *http.Request) (user, mailbo
 }
 
 // handleOptions advertises DAV capabilities. addressbook signals CardDAV (RFC
-// 6352 §6.1) and calendar-access signals CalDAV (RFC 4791 §5.1); levels 1 and 3
-// cover core WebDAV and PROPFIND/REPORT.
-func (s *Server) handleOptions(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("DAV", "1, 3, addressbook, calendar-access, extended-mkcol")
+// 6352 §6.1), calendar-access signals CalDAV (RFC 4791 §5.1), and
+// calendar-auto-schedule signals server-side implicit scheduling (RFC 6638 §2.1.1)
+// so a client PUTs an event and lets the server deliver the iTIP rather than POSTing
+// it to the Outbox itself; levels 1 and 3 cover core WebDAV and PROPFIND/REPORT.
+func (s *Server) handleOptions(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("DAV", "1, 3, addressbook, calendar-access, calendar-auto-schedule, extended-mkcol")
 	w.Header().Set("Allow", allowMethods)
 	w.Header().Set("Content-Length", "0")
 	w.WriteHeader(http.StatusOK)
