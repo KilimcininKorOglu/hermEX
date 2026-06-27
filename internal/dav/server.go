@@ -132,13 +132,17 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	case kindScheduleInbox, kindScheduleInboxObject:
-		switch r.Method {
-		case "OPTIONS":
+		switch {
+		case r.Method == "OPTIONS":
 			s.handleOptions(w, r)
-		case "PROPFIND":
+		case r.Method == "PROPFIND":
 			s.handlePropfind(w, r, user, mailbox)
+		case (r.Method == http.MethodGet || r.Method == http.MethodHead) && kind == kindScheduleInboxObject:
+			s.handleScheduleInboxGet(w, r, mailbox)
+		case r.Method == http.MethodDelete && kind == kindScheduleInboxObject:
+			s.handleScheduleInboxDelete(w, r, mailbox)
 		default:
-			w.Header().Set("Allow", "OPTIONS, PROPFIND")
+			w.Header().Set("Allow", "OPTIONS, PROPFIND, GET, DELETE")
 			http.Error(w, "method not allowed on the scheduling Inbox", http.StatusMethodNotAllowed)
 		}
 		return

@@ -56,26 +56,3 @@ func childCollections(st *objectstore.Store, root int64) ([]objectstore.FolderIn
 	}
 	return out, nil
 }
-
-// scheduleInboxFID resolves the per-mailbox scheduling Inbox folder — a reserved
-// child of the Calendar root, addressed only through the scheduling-inbox kind and
-// hidden from calendar enumeration. It is created on first use (create=true);
-// otherwise ok is false when it does not yet exist.
-func scheduleInboxFID(st *objectstore.Store, create bool) (int64, bool, error) {
-	root := int64(mapi.PrivateFIDCalendar)
-	fid, ok, err := st.FolderByName(&root, scheduleInboxName)
-	if err != nil || ok {
-		return fid, ok, err
-	}
-	if !create {
-		return 0, false, nil
-	}
-	fid, err = st.CreateFolder(&root, scheduleInboxName)
-	if err != nil {
-		return 0, false, err
-	}
-	if err := st.SetFolderProperties(fid, mapi.PropertyValues{{Tag: mapi.PrContainerClass, Value: mapi.ContainerClassAppointment}}); err != nil {
-		return 0, false, err
-	}
-	return fid, true, nil
-}

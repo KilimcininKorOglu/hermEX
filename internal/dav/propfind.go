@@ -398,15 +398,13 @@ func (s *Server) allCalendarCollections(mailbox, user string) ([]msResponse, err
 // the scheduling Inbox (no members). The backing folder is created lazily on first
 // delivery, so an Inbox that has received nothing reports an empty collection.
 func scheduleInboxCollectionResponse(st *objectstore.Store, user string) (msResponse, error) {
-	fid, ok, err := scheduleInboxFID(st, false)
+	// The scheduling Inbox is a view over the meeting-request mail in the Inbox, so its
+	// ctag tracks that folder's change high-water mark. Any inbox write moves it, which
+	// over-signals (a client re-reads and finds nothing new) but never goes stale on a
+	// delivered invite.
+	max, err := st.FolderObjectsSyncMax(int64(mapi.PrivateFIDInbox))
 	if err != nil {
 		return msResponse{}, err
-	}
-	var max uint64
-	if ok {
-		if max, err = st.FolderObjectsSyncMax(fid); err != nil {
-			return msResponse{}, err
-		}
 	}
 	return msResponse{
 		Href: scheduleInboxPath(user),
@@ -444,23 +442,16 @@ func (s *Server) scheduleInboxResponses(mailbox, user, depth string) ([]msRespon
 		return responses, nil
 	}
 
-	fid, ok, err := scheduleInboxFID(st, false)
+	items, err := scheduleInboxItems(st)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
-		return responses, nil
-	}
-	objs, err := st.ListFolderObjects(fid)
-	if err != nil {
-		return nil, err
-	}
-	for _, o := range objs {
+	for _, it := range items {
 		responses = append(responses, msResponse{
-			Href: scheduleInboxPath(user) + objectName(st, o.ID, ".ics"),
+			Href: scheduleInboxPath(user) + it.name(),
 			Propstat: []msPropstat{{
 				Prop: msProp{
-					GetETag:        etag(o.ChangeNumber),
+					GetETag:        etag(it.changeNumber),
 					GetContentType: "text/calendar; charset=utf-8",
 				},
 				Status: statusOK,
