@@ -10,6 +10,7 @@ import (
 // download stream (a CopyContext) on a source object; the client then drains it
 // through RopFastTransferSourceGetBuffer.
 const (
+	ropFastTransferSourceCopyMessages   uint8 = 0x4B
 	ropFastTransferSourceCopyTo         uint8 = 0x4D
 	ropFastTransferSourceCopyProperties uint8 = 0x69
 )
@@ -60,6 +61,52 @@ func (s *Session) openCopySource(out *ext.Push, ropID uint8, handles []uint32, h
 	h := s.alloc(&object{kind: kindSync, store: src.store, fastSrc: col})
 	setHandle(handles, ohindex, h)
 	out.Uint8(ropID)
+	out.Uint8(ohindex)
+	out.Uint32(ecSuccess)
+	return true
+}
+
+// ropFastTransferSourceCopyMessages handles RopFastTransferSourceCopyMessages
+// ([MS-OXCFXICS] 2.2.3.1.1.3 / 2.2.4.1.3): it opens a generic-copy download of the
+// listed messages of a source folder as a messageList — each message framed by a
+// StartMessage (or StartFAIMsg) / EndMessage pair around its messageContent. The
+// CopyFlags Move/SendEntryId bits are parsed but not honored (the stream is a plain
+// content copy, as Exchange 2010+ ignores Move here); SendOptions selects no codec
+// variant (the stream is always UTF-16).
+func (s *Session) ropFastTransferSourceCopyMessages(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	ohindex, e1 := p.Uint8()
+	eids, e2 := p.EIDs()
+	_, e3 := p.Uint8() // CopyFlags — Move/SendEntryId not honored (plain content copy)
+	_, e4 := p.Uint8() // SendOptions — the stream codec is always UTF-16
+	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
+		return false
+	}
+
+	src := s.get(handleAt(handles, hindex))
+	if src == nil || src.kind != kindFolder || src.store == nil {
+		writeErr(out, ropFastTransferSourceCopyMessages, ohindex, ecError)
+		return true
+	}
+	if ok, err := s.authorize(src.store, src.folderID, mapi.FrightsReadAny); err != nil {
+		writeErr(out, ropFastTransferSourceCopyMessages, ohindex, ecError)
+		return true
+	} else if !ok {
+		writeErr(out, ropFastTransferSourceCopyMessages, ohindex, ecAccessDenied)
+		return true
+	}
+
+	mids := make([]int64, len(eids))
+	for i, eid := range eids {
+		mids[i] = int64(eid.GCValue())
+	}
+	col, err := src.store.NewCopyMessagesSource(src.folderID, mids, nil)
+	if err != nil {
+		writeErr(out, ropFastTransferSourceCopyMessages, ohindex, ecError)
+		return true
+	}
+	h := s.alloc(&object{kind: kindSync, store: src.store, fastSrc: col})
+	setHandle(handles, ohindex, h)
+	out.Uint8(ropFastTransferSourceCopyMessages)
 	out.Uint8(ohindex)
 	out.Uint32(ecSuccess)
 	return true

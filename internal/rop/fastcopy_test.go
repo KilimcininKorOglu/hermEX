@@ -119,6 +119,113 @@ func TestFastTransferSourceCopyToRejectsFolder(t *testing.T) {
 	}
 }
 
+// buildFastCopyMessages frames a RopFastTransferSourceCopyMessages request: the
+// source folder at inIdx, the download handle at outIdx, the message-id array, then
+// CopyFlags / SendOptions.
+func buildFastCopyMessages(inIdx, outIdx uint8, mids []int64) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropFastTransferSourceCopyMessages)
+	b.Uint8(0) // LogonId
+	b.Uint8(inIdx)
+	b.Uint8(outIdx)
+	eids := make([]mapi.EID, len(mids))
+	for i, mid := range mids {
+		eids[i] = mapi.MakeEIDEx(1, uint64(mid))
+	}
+	_ = b.EIDs(eids)
+	b.Uint8(0) // CopyFlags
+	b.Uint8(0) // SendOptions
+	return b.Bytes()
+}
+
+// copyMessagesSession seeds two messages (one normal, one associated) in the inbox,
+// returns their ids and a session with the inbox folder opened at handle slot 1.
+func copyMessagesSession(t *testing.T) (sess *Session, logonH, folderH uint32, mids []int64) {
+	t.Helper()
+	dir := t.TempDir()
+	accounts := directory.StaticAccounts{"user@hermex.test": {MailboxPath: dir}}
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	normal := &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Note"},
+		{Tag: mapi.PrSubject, Value: "normal"},
+	}}
+	mid1, err := st.CreateMessage(int64(mapi.PrivateFIDInbox), normal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fai := &oxcmail.Message{Props: mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Note"},
+		{Tag: mapi.PrSubject, Value: "fai"},
+		{Tag: mapi.PrAssociated, Value: true},
+	}}
+	mid2, err := st.CreateMessage(int64(mapi.PrivateFIDInbox), fai)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	sess = NewSession(dir, accounts, "user@hermex.test")
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH = h[0]
+	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	folderH = h[1]
+	return sess, logonH, folderH, []int64{mid1, mid2}
+}
+
+// TestFastTransferSourceCopyMessages opens a messageList download over a folder's
+// messages and drains it, asserting the per-message framing: a StartMessage for the
+// normal message, a StartFAIMsg for the associated one, two EndMessage markers, and
+// no ICS synchronization framing.
+func TestFastTransferSourceCopyMessages(t *testing.T) {
+	sess, logonH, folderH, mids := copyMessagesSession(t)
+	defer sess.Close()
+
+	handles := []uint32{logonH, folderH, 0xFFFFFFFF}
+	sr, h := sess.Dispatch(buildFastCopyMessages(1, 2, mids), handles)
+	p := ext.NewPull(sr, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropFastTransferSourceCopyMessages {
+		t.Fatalf("CopyMessages RopId = %#x", id)
+	}
+	mustU8(t, p, "ohindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("CopyMessages ReturnValue = %#x", ec)
+	}
+
+	items := drainSyncDownload(t, sess, h, 2)
+	if n := ropMarkerCount(items, ics.MarkerStartMessage); n != 1 {
+		t.Errorf("StartMessage count = %d, want 1", n)
+	}
+	if n := ropMarkerCount(items, ics.MarkerStartFAIMsg); n != 1 {
+		t.Errorf("StartFAIMsg count = %d, want 1", n)
+	}
+	if n := ropMarkerCount(items, ics.MarkerEndMessage); n != 2 {
+		t.Errorf("EndMessage count = %d, want 2", n)
+	}
+	if n := ropMarkerCount(items, ics.MarkerIncrSyncChg); n != 0 {
+		t.Errorf("messageList carried %d INCRSYNCCHG markers, want 0 (no sync framing)", n)
+	}
+}
+
+// TestFastTransferSourceCopyMessagesRejectsMessage asserts a message handle (rather
+// than a folder) as the source is refused: CopyMessages streams a folder's contents.
+func TestFastTransferSourceCopyMessagesRejectsMessage(t *testing.T) {
+	sess, logonH, msgH := copyToSession(t)
+	defer sess.Close()
+
+	handles := []uint32{logonH, msgH, 0xFFFFFFFF}
+	sr, _ := sess.Dispatch(buildFastCopyMessages(1, 2, []int64{1}), handles)
+	p := ext.NewPull(sr, ext.FlagUTF16)
+	mustU8(t, p, "RopId")
+	mustU8(t, p, "ohindex")
+	if ec := mustU32(t, p, "ec"); ec != ecError {
+		t.Fatalf("message source ReturnValue = %#x, want ecError", ec)
+	}
+}
+
 // buildFastCopyProps frames a RopFastTransferSourceCopyProperties request: the source
 // at inIdx, the download handle at outIdx, then Level / CopyFlags / SendOptions and
 // the included property tags.

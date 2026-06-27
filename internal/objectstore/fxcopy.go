@@ -1,6 +1,8 @@
 package objectstore
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"hermex/internal/ics"
@@ -140,6 +142,55 @@ func (s *Store) NewCopyPropertiesMessageSource(messageID int64, include []mapi.P
 		}
 	}
 	return &CopyContext{producer: pr}, nil
+}
+
+// NewCopyMessagesSource renders the listed messages of a folder as a generic-copy
+// messageList ([MS-OXCFXICS] 2.2.4.1.3): each message framed by a StartMessage (or
+// StartFAIMsg for an associated message) marker, its messageContent, and an
+// EndMessage marker. The message ids are supplied by the client (the CopyMessages
+// request carries them); each must be a live message of folderID. exclude is the
+// property-tag exclusion set applied to every message; an empty set copies all.
+func (s *Store) NewCopyMessagesSource(folderID int64, messageIDs []int64, exclude []mapi.PropTag) (*CopyContext, error) {
+	pr := &ics.Producer{}
+	proptags := propTagSet(exclude)
+	for _, mid := range messageIDs {
+		fai, err := s.messageIsAssociated(folderID, mid)
+		if err != nil {
+			return nil, err
+		}
+		msg, err := s.OpenMessage(mid)
+		if err != nil {
+			return nil, err
+		}
+		if fai {
+			pr.WriteMarker(ics.MarkerStartFAIMsg)
+		} else {
+			pr.WriteMarker(ics.MarkerStartMessage)
+		}
+		if err := writeCopyMessageContent(pr, s, msg, proptags, false); err != nil {
+			return nil, err
+		}
+		pr.WriteMarker(ics.MarkerEndMessage)
+	}
+	return &CopyContext{producer: pr}, nil
+}
+
+// messageIsAssociated reports whether a live message of folderID is an associated
+// (FAI) message, selecting the StartFAIMsg vs StartMessage marker for the
+// messageList. A message id that is not a live row of folderID is ErrNotFound — a
+// CopyMessages source emits only messages of its own folder.
+func (s *Store) messageIsAssociated(folderID, messageID int64) (bool, error) {
+	var assoc int
+	err := s.objdb.QueryRow(
+		`SELECT is_associated FROM messages WHERE message_id=? AND parent_fid=? AND is_deleted=0`,
+		messageID, folderID).Scan(&assoc)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, ErrNotFound
+	}
+	if err != nil {
+		return false, err
+	}
+	return assoc != 0, nil
 }
 
 // writeCopyMessageContent emits a generic-copy messageContent: the filtered property

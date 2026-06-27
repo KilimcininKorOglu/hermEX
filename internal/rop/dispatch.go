@@ -507,6 +507,10 @@ loop:
 			if !s.ropGetLocalReplicaIds(p, out, handles, hindex) {
 				break loop
 			}
+		case ropFastTransferSourceCopyMessages:
+			if !s.ropFastTransferSourceCopyMessages(p, out, handles, hindex) {
+				break loop
+			}
 		case ropFastTransferSourceCopyTo:
 			if !s.ropFastTransferSourceCopyTo(p, out, handles, hindex) {
 				break loop

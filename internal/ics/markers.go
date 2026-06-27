@@ -88,6 +88,7 @@ const (
 	MarkerNewAttach          = markerNewAttach
 	MarkerEndAttach          = markerEndAttach
 	MarkerStartMessage       = markerStartMessage
+	MarkerStartFAIMsg        = markerStartFAIMsg
 	MarkerEndMessage         = markerEndMessage
 	MarkerStartEmbed         = markerStartEmbed
 	MarkerEndEmbed           = markerEndEmbed
