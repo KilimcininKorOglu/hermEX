@@ -514,54 +514,27 @@ func (dc *DownloadContext) writeState() error {
 
 // filter applies the SyncConfigure property filter: an inclusion list under
 // SYNC_ONLY_SPECIFIED_PROPS (keep only listed tags), otherwise an exclusion list
-// (drop listed tags). An empty list keeps everything.
+// (drop listed tags). An empty list keeps everything. The encoding is shared with
+// the generic-copy source (fxFilter).
 func (dc *DownloadContext) filter(props mapi.PropertyValues) mapi.PropertyValues {
-	if len(dc.proptags) == 0 {
-		return props
-	}
-	include := dc.syncFlags&SyncOnlySpecifiedProps != 0
-	out := make(mapi.PropertyValues, 0, len(props))
-	for _, p := range props {
-		_, listed := dc.proptags[p.Tag]
-		if listed == include {
-			out = append(out, p)
-		}
-	}
-	return out
+	return fxFilter(props, dc.proptags, dc.syncFlags&SyncOnlySpecifiedProps != 0)
 }
 
 // writeProps converts a stored property bag to stream properties (resolving
 // named-property ids to their GUID/kind/name) and writes them through the
 // producer.
 func (dc *DownloadContext) writeProps(props mapi.PropertyValues) error {
-	for _, p := range props {
-		sp, err := dc.toStreamProp(p)
-		if err != nil {
-			return err
-		}
-		if err := dc.writeProp(sp); err != nil {
-			return err
-		}
-	}
-	return nil
+	return fxWriteProps(dc.producer, dc.store, props)
 }
 
 // writePropsFX writes already-built stream properties (the serialized state
 // meta-tags) through the producer.
 func (dc *DownloadContext) writePropsFX(props []ics.StreamProp) error {
-	for _, p := range props {
-		if err := dc.writeProp(p); err != nil {
-			return err
-		}
-	}
-	return nil
+	return fxWritePropsBuilt(dc.producer, props)
 }
 
 func (dc *DownloadContext) writeProp(sp ics.StreamProp) error {
-	if err := dc.producer.WriteProp(sp); err != nil {
-		return fmt.Errorf("objectstore: write %s to sync stream: %w", sp.Tag, err)
-	}
-	return nil
+	return fxWriteProp(dc.producer, sp)
 }
 
 // toStreamProp maps a stored property to a stream property, resolving a
@@ -569,18 +542,7 @@ func (dc *DownloadContext) writeProp(sp ics.StreamProp) error {
 // so the receiver can remap it. A named id with no mapping is an error rather
 // than a silent drop.
 func (dc *DownloadContext) toStreamProp(p mapi.TaggedPropVal) (ics.StreamProp, error) {
-	sp := ics.StreamProp{Tag: p.Tag, Value: p.Value}
-	if propid := uint16(uint32(p.Tag) >> 16); uint64(propid) >= namedPropBase {
-		name, ok, err := dc.store.NamedPropName(propid)
-		if err != nil {
-			return sp, err
-		}
-		if !ok {
-			return sp, fmt.Errorf("objectstore: unresolved named property id %#x", propid)
-		}
-		sp.Name = &name
-	}
-	return sp, nil
+	return fxToStreamProp(dc.store, p)
 }
 
 // looseIDSetBytes serializes a replica-id-keyed (home) id set of bare GC values,

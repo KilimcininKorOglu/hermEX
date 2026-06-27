@@ -1,0 +1,120 @@
+package rop
+
+import (
+	"testing"
+
+	"hermex/internal/directory"
+	"hermex/internal/ext"
+	"hermex/internal/ics"
+	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
+	"hermex/internal/oxcmail"
+)
+
+// buildFastCopyTo frames a RopFastTransferSourceCopyTo request: the source object at
+// inIdx, the new download handle at outIdx, then Level / CopyFlags / SendOptions and
+// the excluded property tags.
+func buildFastCopyTo(inIdx, outIdx uint8, level uint8, copyFlags uint32, excluded []mapi.PropTag) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropFastTransferSourceCopyTo)
+	b.Uint8(0) // LogonId
+	b.Uint8(inIdx)
+	b.Uint8(outIdx)
+	b.Uint8(level)
+	b.Uint32(copyFlags)
+	b.Uint8(0) // SendOptions
+	_ = b.PropTags(excluded)
+	return b.Bytes()
+}
+
+// copyToSession seeds one rich message (a recipient and an attachment) in the inbox
+// and returns a session with that message opened at handle slot 1.
+func copyToSession(t *testing.T) (sess *Session, logonH, msgH uint32) {
+	t.Helper()
+	dir := t.TempDir()
+	accounts := directory.StaticAccounts{"user@hermex.test": {MailboxPath: dir}}
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	msg := &oxcmail.Message{
+		Props: mapi.PropertyValues{
+			{Tag: mapi.PrMessageClass, Value: "IPM.Note"},
+			{Tag: mapi.PrSubject, Value: "copyto"},
+			{Tag: mapi.PrBody, Value: "body of copyto"},
+		},
+		Recipients: []mapi.PropertyValues{{
+			{Tag: mapi.PrRecipientType, Value: int32(mapi.RecipTo)},
+			{Tag: mapi.PrDisplayName, Value: "Alice"},
+			{Tag: mapi.PrEmailAddress, Value: "alice@example.com"},
+		}},
+		Attachments: []oxcmail.Attachment{{Props: mapi.PropertyValues{
+			{Tag: mapi.PrAttachMethod, Value: int32(mapi.AttachByValue)},
+			{Tag: mapi.PrAttachLongFilename, Value: "a.txt"},
+			{Tag: mapi.PrAttachDataBin, Value: []byte("payload bytes")},
+		}}},
+	}
+	mid, err := st.CreateMessage(int64(mapi.PrivateFIDInbox), msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	msgEID := uint64(mapi.MakeEIDEx(1, uint64(mid)))
+	sess = NewSession(dir, accounts, "user@hermex.test")
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH = h[0]
+	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, msgEID), []uint32{logonH, 0xFFFFFFFF})
+	msgH = h[1]
+	return
+}
+
+// TestFastTransferSourceCopyTo opens a generic-copy download on a stored message and
+// drains it, asserting the messageContent carries the recipient and attachment
+// sub-object markers and none of the ICS synchronization framing (no INCRSYNCCHG).
+func TestFastTransferSourceCopyTo(t *testing.T) {
+	sess, logonH, msgH := copyToSession(t)
+	defer sess.Close()
+
+	handles := []uint32{logonH, msgH, 0xFFFFFFFF}
+	sr, h := sess.Dispatch(buildFastCopyTo(1, 2, 0, 0, nil), handles)
+	p := ext.NewPull(sr, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropFastTransferSourceCopyTo {
+		t.Fatalf("CopyTo RopId = %#x", id)
+	}
+	mustU8(t, p, "ohindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("CopyTo ReturnValue = %#x", ec)
+	}
+
+	items := drainSyncDownload(t, sess, h, 2)
+	if n := ropMarkerCount(items, ics.MarkerStartRecip); n != 1 {
+		t.Errorf("StartRecip count = %d, want 1", n)
+	}
+	if n := ropMarkerCount(items, ics.MarkerNewAttach); n != 1 {
+		t.Errorf("NewAttach count = %d, want 1", n)
+	}
+	if n := ropMarkerCount(items, ics.MarkerIncrSyncChg); n != 0 {
+		t.Errorf("generic copy carried %d INCRSYNCCHG markers, want 0 (no sync framing)", n)
+	}
+}
+
+// TestFastTransferSourceCopyToRejectsFolder asserts a non-message source (a folder
+// handle) is refused in v1 rather than silently mishandled.
+func TestFastTransferSourceCopyToRejectsFolder(t *testing.T) {
+	sess, logonH, _ := copyToSession(t)
+	defer sess.Close()
+
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	_, h := sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	folderH := h[1]
+	handles := []uint32{logonH, folderH, 0xFFFFFFFF}
+	sr, _ := sess.Dispatch(buildFastCopyTo(1, 2, 0, 0, nil), handles)
+	p := ext.NewPull(sr, ext.FlagUTF16)
+	mustU8(t, p, "RopId")
+	mustU8(t, p, "ohindex")
+	if ec := mustU32(t, p, "ec"); ec != ecError {
+		t.Fatalf("folder source ReturnValue = %#x, want ecError", ec)
+	}
+}
