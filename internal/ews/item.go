@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/mail"
 	"strings"
+	"time"
 
 	"hermex/internal/mapi"
 	"hermex/internal/mime"
@@ -71,8 +72,9 @@ type getAttachmentResponseMessage struct {
 // element name, so a folder of tasks serializes as <t:Task> and a folder of mail as
 // <t:Message>.
 type itemsWrap struct {
-	Messages []oxews.Message
-	Tasks    []oxews.Task
+	Messages  []oxews.Message
+	Tasks     []oxews.Task
+	BaseItems []oxews.Item
 }
 
 type findItemRoot struct {
@@ -201,6 +203,22 @@ func (s *Server) handleFindItem(w http.ResponseWriter, inner []byte, sess *sessi
 			})
 			continue
 		}
+		if tgt.fid == int64(mapi.PrivateFIDNotes) {
+			objs, _ := st.ListFolderObjects(tgt.fid)
+			notes := make([]oxews.Item, 0, len(objs))
+			for _, o := range objs {
+				notes = append(notes, noteSummary(st, tgt.fid, o.ID, idMailbox))
+			}
+			msgs = append(msgs, findItemResponseMessage{
+				ResponseClass: "Success", ResponseCode: "NoError",
+				RootFolder: &findItemRoot{
+					TotalItemsInView:        len(notes),
+					IncludesLastItemInRange: true,
+					Items:                   itemsWrap{BaseItems: notes},
+				},
+			})
+			continue
+		}
 		elems := make([]oxews.Message, 0, len(items))
 		for _, info := range items {
 			elems = append(elems, itemSummary(st, tgt.fid, info, idMailbox))
@@ -276,6 +294,16 @@ func (s *Server) handleGetItem(w http.ResponseWriter, inner []byte, sess *sessio
 			msgs = append(msgs, itemResponseMessage{
 				ResponseClass: "Success", ResponseCode: "NoError",
 				Items: &itemsWrap{Tasks: []oxews.Task{elem}},
+			})
+			continue
+		}
+		// A sticky note is rendered as a base <t:Item> (EWS has no Note type) from its
+		// shared properties.
+		if itemClass(msg.Props) == oxews.NoteClass {
+			elem := buildNoteItem(st, msg.Props, ref.ID, oxews.ChangeKey(uint64(id.MessageID)))
+			msgs = append(msgs, itemResponseMessage{
+				ResponseClass: "Success", ResponseCode: "NoError",
+				Items: &itemsWrap{BaseItems: []oxews.Item{elem}},
 			})
 			continue
 		}
@@ -449,6 +477,65 @@ func taskSummary(st *objectstore.Store, folderID, objectID int64, mailbox string
 		return oxews.BuildTask(tk, meta)
 	}
 	return oxews.Task{ItemID: oxews.ItemIDElem{ID: meta.ItemID, ChangeKey: meta.ChangeKey}}
+}
+
+// buildNoteItem renders a stored sticky note as an EWS base <t:Item>.
+func buildNoteItem(st *objectstore.Store, props mapi.PropertyValues, itemID, changeKey string) oxews.Item {
+	return oxews.BuildNote(
+		oxews.ItemMeta{ItemID: itemID, ChangeKey: changeKey},
+		strProp(props, mapi.PrSubject),
+		strProp(props, mapi.PrBody),
+		noteKeywords(st, props),
+		ntTime(props, mapi.PrLastModificationTime),
+	)
+}
+
+// noteSummary builds a <t:Item> for FindItem on the Notes folder from a stored object.
+func noteSummary(st *objectstore.Store, folderID, objectID int64, mailbox string) oxews.Item {
+	itemID := oxews.EncodeItemID(oxews.ItemID{FolderID: folderID, MessageID: objectID, Mailbox: mailbox})
+	changeKey := oxews.ChangeKey(uint64(objectID))
+	if msg, err := st.OpenMessage(objectID); err == nil {
+		return buildNoteItem(st, msg.Props, itemID, changeKey)
+	}
+	return oxews.Item{ItemID: oxews.ItemIDElem{ID: itemID, ChangeKey: changeKey}, ItemClass: oxews.NoteClass}
+}
+
+// strProp reads a string (or []byte text) property as a string.
+func strProp(props mapi.PropertyValues, tag mapi.PropTag) string {
+	if v, ok := props.Get(tag); ok {
+		switch s := v.(type) {
+		case string:
+			return s
+		case []byte:
+			return string(s)
+		}
+	}
+	return ""
+}
+
+// ntTime reads a PtSysTime property as a UTC time, or the zero time when absent.
+func ntTime(props mapi.PropertyValues, tag mapi.PropTag) time.Time {
+	if v, ok := props.Get(tag); ok {
+		if nt, ok := v.(uint64); ok {
+			return mapi.NTTimeToUnix(nt).UTC()
+		}
+	}
+	return time.Time{}
+}
+
+// noteKeywords reads a message's category keywords (the shared multivalue named
+// property).
+func noteKeywords(st *objectstore.Store, props mapi.PropertyValues) []string {
+	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameKeywords})
+	if err != nil || ids[0] == 0 {
+		return nil
+	}
+	if v, ok := props.Get(mapi.MakeTag(ids[0], mapi.PtMvUnicode)); ok {
+		if cats, ok := v.([]string); ok {
+			return cats
+		}
+	}
+	return nil
 }
 
 // splitAddress splits a formatted originator ("Name <addr>") into name + email.
