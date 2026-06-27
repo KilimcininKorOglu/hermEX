@@ -98,8 +98,8 @@ func TestReloadCachedInformation(t *testing.T) {
 	if subj := readTypedString(t, p); subj != "RELOADME" {
 		t.Errorf("reloaded normalized subject = %q, want RELOADME", subj)
 	}
-	if rc := mustU16(t, p, "RecipientCount"); rc != 0 {
-		t.Errorf("RecipientCount = %d, want 0", rc)
+	if rc := mustU16(t, p, "RecipientCount"); rc != 1 {
+		t.Errorf("RecipientCount = %d, want 1 (the To recipient)", rc)
 	}
 	cols, err := p.PropTags()
 	if err != nil {
@@ -108,8 +108,18 @@ func TestReloadCachedInformation(t *testing.T) {
 	if len(cols) != 0 {
 		t.Errorf("RecipientColumns = %d tags, want 0", len(cols))
 	}
-	if rows := mustU8(t, p, "RowCount"); rows != 0 {
-		t.Errorf("RowCount = %d, want 0", rows)
+	if rows := mustU8(t, p, "RowCount"); rows != 1 {
+		t.Errorf("RowCount = %d, want 1", rows)
+	}
+	mustU8(t, p, "recipientType")
+	mustU16(t, p, "codePageId")
+	mustU16(t, p, "reserved")
+	rbag, ok := pullRecipientRow(p, cols)
+	if !ok {
+		t.Fatal("recipient row decode failed")
+	}
+	if got := stringProp(rbag, mapi.PrEmailAddress); got != "alice@hermex.test" {
+		t.Errorf("recipient email = %q, want alice@hermex.test", got)
 	}
 }
 

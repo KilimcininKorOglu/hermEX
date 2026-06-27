@@ -31,6 +31,11 @@ func (s *Session) ropReloadCachedInformation(p *ext.Pull, out *ext.Push, handles
 		writeErr(out, ropReloadCachedInfo, hindex, ecError)
 		return true
 	}
+	recipients, err := messageRecipientBags(msg)
+	if err != nil {
+		writeErr(out, ropReloadCachedInfo, hindex, ecError)
+		return true
+	}
 
 	out.Uint8(ropReloadCachedInfo)
 	out.Uint8(hindex)
@@ -38,9 +43,7 @@ func (s *Session) ropReloadCachedInformation(p *ext.Pull, out *ext.Push, handles
 	out.Uint8(0) // HasNamedProperties (v1 advertises none)
 	pushTypedString(out, stringProp(props, mapi.PrSubjectPrefix))
 	pushTypedString(out, stringProp(props, mapi.PrNormalizedSubject))
-	out.Uint16(0)         // RecipientCount (v1: inline recipient table deferred)
-	_ = out.PropTags(nil) // RecipientColumns (empty proptag array)
-	out.Uint8(0)          // RowCount
+	writeRecipientTable(out, recipients)
 	return true
 }
 

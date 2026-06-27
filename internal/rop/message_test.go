@@ -107,14 +107,27 @@ func TestOpenMessageAndGetProps(t *testing.T) {
 	if got := pullTypedString(t, p); got != "READMSG" {
 		t.Errorf("NormalizedSubject = %q, want \"READMSG\"", got)
 	}
-	if rc := mustU16(t, p, "recipientCount"); rc != 0 {
-		t.Errorf("RecipientCount = %d, want 0 (inline recipient table deferred)", rc)
+	if rc := mustU16(t, p, "recipientCount"); rc != 1 {
+		t.Errorf("RecipientCount = %d, want 1 (the To recipient)", rc)
 	}
-	if _, err := p.PropTags(); err != nil { // RecipientColumns (empty)
+	rcols, err := p.PropTags() // RecipientColumns (empty)
+	if err != nil {
 		t.Fatalf("RecipientColumns: %v", err)
 	}
-	if rows := mustU8(t, p, "rowCount"); rows != 0 {
-		t.Errorf("recipient RowCount = %d, want 0", rows)
+	if rows := mustU8(t, p, "rowCount"); rows != 1 {
+		t.Errorf("recipient RowCount = %d, want 1", rows)
+	}
+	if rt := mustU8(t, p, "recipientType"); rt != uint8(mapi.RecipTo) {
+		t.Errorf("RecipientType = %d, want %d (To)", rt, mapi.RecipTo)
+	}
+	mustU16(t, p, "codePageId")
+	mustU16(t, p, "reserved")
+	rbag, ok := pullRecipientRow(p, rcols)
+	if !ok {
+		t.Fatal("recipient row decode failed")
+	}
+	if got := stringProp(rbag, mapi.PrEmailAddress); got != "alice@hermex.test" {
+		t.Errorf("recipient email = %q, want alice@hermex.test", got)
 	}
 	msgH := h[1]
 	if obj := sess.get(msgH); obj == nil || obj.kind != kindMessage || obj.messageID != msgID {

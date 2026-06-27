@@ -90,9 +90,7 @@ func (s *Session) ropOpenMessage(p *ext.Pull, out *ext.Push, handles []uint32, h
 	out.Uint8(0) // HasNamedProperties (v1 advertises none)
 	pushTypedString(out, stringProp(msg.Props, mapi.PrSubjectPrefix))
 	pushTypedString(out, stringProp(msg.Props, mapi.PrNormalizedSubject))
-	out.Uint16(0)         // RecipientCount (v1: inline recipient table deferred)
-	_ = out.PropTags(nil) // RecipientColumns (empty proptag array)
-	out.Uint8(0)          // RowCount
+	writeRecipientTable(out, msg.Recipients)
 	return true
 }
 
