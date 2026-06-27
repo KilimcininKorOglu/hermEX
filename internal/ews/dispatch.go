@@ -103,6 +103,12 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleDeleteAttachment(w, inner, sess)
 	case "MarkAsJunk":
 		s.handleMarkAsJunk(w, inner, sess)
+	case "FindConversation":
+		s.handleFindConversation(w, inner, sess)
+	case "GetConversationItems":
+		s.handleGetConversationItems(w, inner, sess)
+	case "ApplyConversationAction":
+		s.handleApplyConversationAction(w, inner, sess)
 	case "Subscribe":
 		s.handleSubscribe(w, inner, sess)
 	case "Unsubscribe":
