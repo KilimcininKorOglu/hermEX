@@ -94,3 +94,65 @@ func TestSharedCalendarDelegateAccess(t *testing.T) {
 		t.Errorf("shared write must land in the owner store, not the delegate's: status %d, want 404", code)
 	}
 }
+
+// authBody performs an authenticated request and returns the response body.
+func authBody(t *testing.T, ts *httptest.Server, method, path, user, depth string) string {
+	t.Helper()
+	req, err := http.NewRequest(method, ts.URL+path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.SetBasicAuth(user, testPass)
+	if depth != "" {
+		req.Header.Set("Depth", depth)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	return string(b)
+}
+
+// TestSharedMailboxInHomeSet confirms a shared mailbox the caller is delegated into
+// appears in the caller's calendar home-set under the owner's principal href, and is
+// absent for a non-delegate (#117 verify: a sharee sees the shared collection).
+func TestSharedMailboxInHomeSet(t *testing.T) {
+	teamDir := filepath.Join(t.TempDir(), "team")
+	bobDir := filepath.Join(t.TempDir(), "bob")
+	carolDir := filepath.Join(t.TempDir(), "carol")
+	for _, d := range []string{teamDir, bobDir, carolDir} {
+		st, err := objectstore.Open(d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Close()
+	}
+	tst, err := objectstore.Open(teamDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tst.SetDelegates([]string{"bob@hermex.test"}); err != nil {
+		t.Fatal(err)
+	}
+	tst.Close()
+
+	accs := directory.StaticAccounts{
+		"team@hermex.test":  {Password: testPass, MailboxPath: teamDir, Shared: true},
+		"bob@hermex.test":   {Password: testPass, MailboxPath: bobDir},
+		"carol@hermex.test": {Password: testPass, MailboxPath: carolDir},
+	}
+	ts := httptest.NewServer(NewServer(accs, accs, "hermex.test").Handler())
+	t.Cleanup(ts.Close)
+
+	bobHome := authBody(t, ts, "PROPFIND", "/dav/calendars/bob@hermex.test/", "bob@hermex.test", "1")
+	if !strings.Contains(bobHome, "/dav/calendars/team@hermex.test/calendar/") {
+		t.Errorf("delegate's calendar home-set lacks the shared team calendar\n%s", bobHome)
+	}
+
+	carolHome := authBody(t, ts, "PROPFIND", "/dav/calendars/carol@hermex.test/", "carol@hermex.test", "1")
+	if strings.Contains(carolHome, "team@hermex.test/calendar") {
+		t.Errorf("non-delegate's home-set must not show the shared calendar\n%s", carolHome)
+	}
+}

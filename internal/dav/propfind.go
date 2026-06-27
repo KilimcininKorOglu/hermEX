@@ -246,6 +246,13 @@ func (s *Server) allAddressbookCollections(mailbox, user string) ([]msResponse, 
 		}
 		out = append(out, cr)
 	}
+	// Collection sharing (#117): each shared mailbox the caller is a delegate of also
+	// appears in the caller's address-book home set, under the owner's principal href.
+	shared, err := s.sharedAddressBooks(user)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, shared...)
 	return out, nil
 }
 
@@ -394,6 +401,15 @@ func (s *Server) allCalendarCollections(mailbox, user string) ([]msResponse, err
 		}
 		out = append(out, cr)
 	}
+	// Collection sharing (#117): each shared mailbox the caller is a delegate of also
+	// appears in the caller's calendar home set, under the owner's principal href, so a
+	// client discovers it without configuring the owner's URL by hand. Access is gated
+	// at the routing layer (resolveTarget).
+	shared, err := s.sharedCalendars(user)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, shared...)
 	// The scheduling Inbox and Outbox live within the calendar home collection
 	// (RFC 6638 §2.1.1); list them alongside the calendars so a client browsing the
 	// home set discovers them.
