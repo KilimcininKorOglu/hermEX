@@ -86,6 +86,11 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		// MS-OXWSAVAIL names the request element GetUserAvailabilityRequest (the
 		// "Request" suffix is unlike the other operations' bare names).
 		s.handleGetUserAvailability(w, inner, sess)
+	case "GetUserOofSettingsRequest":
+		// MS-OXWSOOF likewise names its request elements with a "Request" suffix.
+		s.handleGetUserOofSettings(w, inner, sess)
+	case "SetUserOofSettingsRequest":
+		s.handleSetUserOofSettings(w, inner, sess)
 	case "Subscribe":
 		s.handleSubscribe(w, inner, sess)
 	case "Unsubscribe":
