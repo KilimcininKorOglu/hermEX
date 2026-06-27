@@ -90,39 +90,44 @@ func TestConvertIdUnsupportedDestination(t *testing.T) {
 	}
 }
 
-// TestConvertIdUnsupportedSource proves a source in a format hermEX does not read
-// (here EntryId) is refused with ErrorUnsupportedTypeForConversion.
-func TestConvertIdUnsupportedSource(t *testing.T) {
+// TestConvertIdSameFormatNonEws proves a same-format conversion echoes the id for
+// any format, not only EwsId (a same-format request is a passthrough).
+func TestConvertIdSameFormatNonEws(t *testing.T) {
 	ts, _ := seededEWS(t)
 
-	_, body := soapPost(t, ts, wrapRequest(convertIDBody("EwsId", "EntryId", "0102deadbeef", "user@hermex.test")), true)
+	_, body := soapPost(t, ts, wrapRequest(convertIDBody("EntryId", "EntryId", "0102deadbeef", "user@hermex.test")), true)
 	p := mustParseConvertID(t, body)
-	if len(p.Msgs) != 1 || p.Msgs[0].Code != "ErrorUnsupportedTypeForConversion" {
-		t.Fatalf("unsupported source: want ErrorUnsupportedTypeForConversion, got %s", body)
+	if len(p.Msgs) != 1 || p.Msgs[0].Class != "Success" || p.Msgs[0].Alt.ID != "0102deadbeef" {
+		t.Fatalf("same-format EntryId echo failed: %s", body)
 	}
 }
 
-// TestConvertIdMalformed proves a source that claims to be an EwsId but does not
-// decode is ErrorInvalidIdMalformed.
-func TestConvertIdMalformed(t *testing.T) {
+// TestConvertIdCrossFormat proves converting from one format to a different one is
+// refused with ErrorUnsupportedTypeForConversion, never a fabricated id.
+func TestConvertIdCrossFormat(t *testing.T) {
 	ts, _ := seededEWS(t)
+	id := oxews.EncodeItemID(oxews.ItemID{FolderID: 0x0d, MessageID: 1, UID: 1})
 
-	_, body := soapPost(t, ts, wrapRequest(convertIDBody("EwsId", "EwsId", "!!!not-a-token!!!", "user@hermex.test")), true)
+	_, body := soapPost(t, ts, wrapRequest(convertIDBody("EntryId", "EwsId", id, "user@hermex.test")), true)
 	p := mustParseConvertID(t, body)
-	if len(p.Msgs) != 1 || p.Msgs[0].Code != "ErrorInvalidIdMalformed" {
-		t.Fatalf("malformed id: want ErrorInvalidIdMalformed, got %s", body)
+	if len(p.Msgs) != 1 || p.Msgs[0].Class != "Error" || p.Msgs[0].Code != "ErrorUnsupportedTypeForConversion" {
+		t.Fatalf("cross-format: want Error/ErrorUnsupportedTypeForConversion, got %s", body)
+	}
+	if p.Msgs[0].Alt.ID != "" {
+		t.Errorf("an unsupported conversion must not return an id, got %q", p.Msgs[0].Alt.ID)
 	}
 }
 
 // TestConvertIdMultiple proves a request with several source ids returns one
-// response message per source, in order.
+// response message per source, in order: a same-format echo and a cross-format
+// refusal.
 func TestConvertIdMultiple(t *testing.T) {
 	ts, _ := seededEWS(t)
 	good := oxews.EncodeItemID(oxews.ItemID{FolderID: 0x0d, MessageID: 5, UID: 2})
 	body := `<ConvertId xmlns="` + nsMessages + `" xmlns:t="` + nsTypes + `" DestinationFormat="EwsId">` +
 		`<SourceIds>` +
 		`<t:AlternateId Format="EwsId" Id="` + good + `" Mailbox="a@hermex.test"/>` +
-		`<t:AlternateId Format="EwsId" Id="garbage" Mailbox="b@hermex.test"/>` +
+		`<t:AlternateId Format="OwaId" Id="someowaid" Mailbox="b@hermex.test"/>` +
 		`</SourceIds></ConvertId>`
 	_, resp := soapPost(t, ts, wrapRequest(body), true)
 	p := mustParseConvertID(t, resp)
@@ -130,9 +135,9 @@ func TestConvertIdMultiple(t *testing.T) {
 		t.Fatalf("got %d response messages, want 2\n%s", len(p.Msgs), resp)
 	}
 	if p.Msgs[0].Code != "NoError" {
-		t.Errorf("first (valid) id code = %q, want NoError", p.Msgs[0].Code)
+		t.Errorf("first (same-format) id code = %q, want NoError", p.Msgs[0].Code)
 	}
-	if p.Msgs[1].Code != "ErrorInvalidIdMalformed" {
-		t.Errorf("second (garbage) id code = %q, want ErrorInvalidIdMalformed", p.Msgs[1].Code)
+	if p.Msgs[1].Code != "ErrorUnsupportedTypeForConversion" {
+		t.Errorf("second (cross-format) id code = %q, want ErrorUnsupportedTypeForConversion", p.Msgs[1].Code)
 	}
 }

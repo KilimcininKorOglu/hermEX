@@ -3,27 +3,22 @@ package ews
 import (
 	"encoding/xml"
 	"net/http"
-
-	"hermex/internal/oxews"
 )
 
 // ConvertId (MS-OXWSCDATA) translates item and folder identifiers between the id
 // formats Exchange has used across versions: EwsLegacyId, EwsId, EntryId,
 // HexEntryId, StoreId, and OwaId.
 //
-// hermEX only ever mints its own EwsId tokens (oxews.EncodeItemID/EncodeFolderID),
-// so the only conversion it can serve honestly is the EwsId-to-EwsId identity: the
-// source token is validated by decoding it and echoed back unchanged. A source in
-// any other format, or a destination in any other format, is a conversion hermEX
-// cannot produce without fabricating a foreign binary id, so it is refused with
-// ErrorUnsupportedTypeForConversion rather than returning a fake id. A source that
-// claims to be an EwsId but does not decode is ErrorInvalidIdMalformed.
+// A same-format conversion is a passthrough: the source id is echoed back
+// unchanged. A cross-format conversion would require re-encoding the id into a
+// different id scheme; hermEX's EwsId tokens are its own opaque coordinates, not
+// the binary entry ids the other formats encode, so it cannot produce them and
+// refuses the conversion with ErrorUnsupportedTypeForConversion rather than
+// returning a fabricated id.
 //
 // The operation is a pure id transform: it never opens a mailbox store, so there
 // is no cross-mailbox access surface to gate. The opaque token already carries its
 // own mailbox; echoing it grants no access it did not already encode.
-
-const ewsIdFormat = "EwsId"
 
 type alternateID struct {
 	Format    string `xml:"Format,attr"`
@@ -72,32 +67,16 @@ func (s *Server) handleConvertId(w http.ResponseWriter, inner []byte, sess *sess
 }
 
 // convertOneID converts a single source id, returning the per-id response message.
+// A same-format request echoes the id; a cross-format request is unsupported.
 func convertOneID(src alternateID, dest string) convertIDMessage {
-	if src.Format != ewsIdFormat || dest != ewsIdFormat {
-		// hermEX produces and reads only EwsId tokens; any other source or
-		// destination format is a conversion it cannot serve.
-		return convertIDError("ErrorUnsupportedTypeForConversion")
+	if src.Format == dest {
+		return convertIDMessage{
+			ResponseClass: "Success",
+			ResponseCode:  "NoError",
+			AlternateID:   &alternateIDOut{Format: dest, ID: src.ID, Mailbox: src.Mailbox},
+		}
 	}
-	if !validEwsID(src.ID) {
-		return convertIDError("ErrorInvalidIdMalformed")
-	}
-	return convertIDMessage{
-		ResponseClass: "Success",
-		ResponseCode:  "NoError",
-		AlternateID:   &alternateIDOut{Format: ewsIdFormat, ID: src.ID, Mailbox: src.Mailbox},
-	}
-}
-
-// validEwsID reports whether id decodes as one of hermEX's EwsId tokens (an item
-// id or a folder id).
-func validEwsID(id string) bool {
-	if _, err := oxews.DecodeItemID(id); err == nil {
-		return true
-	}
-	if _, _, err := oxews.DecodeFolderID(id); err == nil {
-		return true
-	}
-	return false
+	return convertIDError("ErrorUnsupportedTypeForConversion")
 }
 
 func convertIDError(code string) convertIDMessage {
