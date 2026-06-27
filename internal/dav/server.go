@@ -324,10 +324,6 @@ func classify(p string) (kind resourceKind, user, collection, object string) {
 // URL builders for the fixed DAV layout.
 func principalPath(user string) string { return "/dav/principals/" + user + "/" }
 func homeSetPath(user string) string   { return "/dav/addressbooks/" + user + "/" }
-func addressbookPath(user string) string {
-	return "/dav/addressbooks/" + user + "/" + addressbookName + "/"
-}
-func objectPath(user, name string) string { return addressbookPath(user) + name }
 
 // addressbookPathColl builds the href of a named address-book collection (the
 // reserved "contacts" or a user-created one); an empty name means the reserved one.
@@ -345,10 +341,6 @@ func objectPathColl(user, coll, name string) string {
 }
 
 func calHomeSetPath(user string) string { return "/dav/calendars/" + user + "/" }
-func calendarPath(user string) string {
-	return "/dav/calendars/" + user + "/" + calendarName + "/"
-}
-func calObjectPath(user, name string) string { return calendarPath(user) + name }
 
 // calendarPathColl builds the href of a named calendar collection; an empty name
 // means the reserved "calendar".
