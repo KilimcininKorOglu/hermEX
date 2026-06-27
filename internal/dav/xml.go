@@ -42,6 +42,8 @@ type msProp struct {
 	GetETag            string              `xml:"DAV: getetag,omitempty"`
 	GetContentType     string              `xml:"DAV: getcontenttype,omitempty"`
 	GetCTag            string              `xml:"http://calendarserver.org/ns/ getctag,omitempty"`
+	PushKey            string              `xml:"http://calendarserver.org/ns/ pushkey,omitempty"`
+	PushTransports     *pushTransports     `xml:"http://calendarserver.org/ns/ push-transports,omitempty"`
 	SyncToken          string              `xml:"DAV: sync-token,omitempty"`
 	CurrentUserPrOne   *href               `xml:"DAV: current-user-principal,omitempty"`
 	PrincipalURL       *href               `xml:"DAV: principal-URL,omitempty"`
@@ -203,6 +205,33 @@ func todoComponentSet() *supportedComp {
 // collection: it holds VJOURNALs.
 func journalComponentSet() *supportedComp {
 	return &supportedComp{Comps: []calComp{{Name: "VJOURNAL"}}}
+}
+
+// pushTransports is the calendarserver-push CS:push-transports advertisement (#118):
+// the transports a client may subscribe over to receive change notifications.
+type pushTransports struct {
+	Transports []pushTransport `xml:"http://calendarserver.org/ns/ transport"`
+}
+
+// pushTransport is one CS:transport: its type and the URL a client long-polls to
+// subscribe.
+type pushTransport struct {
+	Type            string           `xml:"type,attr"`
+	SubscriptionURL *subscriptionURL `xml:"http://calendarserver.org/ns/ subscription-url,omitempty"`
+}
+
+// subscriptionURL wraps the DAV:href a client subscribes against.
+type subscriptionURL struct {
+	Href string `xml:"DAV: href"`
+}
+
+// pushTransportSet advertises the long-poll subscription transport hermEX serves on
+// /dav/push, backed by the central wake bus (#118).
+func pushTransportSet() *pushTransports {
+	return &pushTransports{Transports: []pushTransport{{
+		Type:            "LongPoll",
+		SubscriptionURL: &subscriptionURL{Href: "/dav/push"},
+	}}}
 }
 
 // supportedReportSet is the DAV:supported-report-set value: the REPORTs a resource

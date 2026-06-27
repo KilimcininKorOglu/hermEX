@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,19 @@ import (
 	"hermex/internal/notifyd"
 	"hermex/internal/objectstore"
 )
+
+// TestPushTransportAdvertised confirms a calendar collection PROPFIND advertises the
+// calendarserver-push transport pointing at the /dav/push long-poll, with a pushkey, so
+// a client discovers how to subscribe (#118).
+func TestPushTransportAdvertised(t *testing.T) {
+	ts := davServerCal(t)
+	_, body := doFull(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/calendar/", "", map[string]string{"Depth": "0"})
+	for _, want := range []string{"push-transports", "pushkey", "/dav/push"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("calendar PROPFIND lacks %q (calendarserver-push advertising)\n%s", want, body)
+		}
+	}
+}
 
 // TestPushPollWakesOnChange confirms a DAV push long-poll, registered on the central
 // wake bus, returns sub-second when a change is published for its mailbox -- the #118
