@@ -22,11 +22,36 @@ import (
 // sync-token drives sync-collection.
 type reportReq struct {
 	XMLName   xml.Name
-	Hrefs     []string    `xml:"href"`
-	SyncToken string      `xml:"sync-token"`
-	Filter    *filter     `xml:"filter"`
-	TimeRange *timeRange  `xml:"time-range"`         // free-busy-query's direct time-range child
-	CalData   *calDataReq `xml:"prop>calendar-data"` // the requested calendar-data shaping
+	Hrefs     []string     `xml:"href"`
+	SyncToken string       `xml:"sync-token"`
+	Filter    *filter      `xml:"filter"`
+	TimeRange *timeRange   `xml:"time-range"`         // free-busy-query's direct time-range child
+	CalData   *calDataReq  `xml:"prop>calendar-data"` // the requested calendar-data shaping
+	AddrData  *addrDataReq `xml:"prop>address-data"`  // the requested address-data shaping
+}
+
+// addrDataReq is the CARDDAV:address-data element of a REPORT, selecting which vCard
+// properties to return (RFC 6352 §10.4). An empty selection (no allprop, no prop)
+// returns the full vCard.
+type addrDataReq struct {
+	AllProp *struct{} `xml:"allprop"`
+	Props   []propSel `xml:"prop"`
+}
+
+// bound projects a member's vCard to the selected properties; an empty selection
+// returns it unchanged (the full card).
+func (a *addrDataReq) bound(data string) string {
+	if a == nil || (a.AllProp == nil && len(a.Props) == 0) {
+		return data
+	}
+	var ps []oxvcard.PropSelect
+	for _, p := range a.Props {
+		ps = append(ps, oxvcard.PropSelect{Name: p.Name, NoValue: strings.EqualFold(p.NoValue, "yes")})
+	}
+	if out, ok := oxvcard.SelectAddressData([]byte(data), ps, a.AllProp != nil); ok {
+		data = string(out)
+	}
+	return data
 }
 
 // expandElem is a time-range directive (start inclusive, end non-inclusive) carried by
@@ -178,9 +203,9 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox st
 
 	switch req.XMLName.Local {
 	case "addressbook-multiget":
-		s.reportMultiget(w, st, fid, req.Hrefs)
+		s.reportMultiget(w, st, fid, req.Hrefs, req.AddrData)
 	case "addressbook-query":
-		s.reportQueryOrSync(w, st, user, coll, fid, 0, false, req.Filter)
+		s.reportQueryOrSync(w, st, user, coll, fid, 0, false, req.Filter, req.AddrData)
 	case "calendar-multiget":
 		s.reportCalMultiget(w, st, fid, req.Hrefs, req.CalData)
 	case "calendar-query":
@@ -191,7 +216,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox st
 		if isCal {
 			s.reportCalQueryOrSync(w, st, user, coll, fid, parseSyncToken(req.SyncToken), true, nil, nil)
 		} else {
-			s.reportQueryOrSync(w, st, user, coll, fid, parseSyncToken(req.SyncToken), true, nil)
+			s.reportQueryOrSync(w, st, user, coll, fid, parseSyncToken(req.SyncToken), true, nil, nil)
 		}
 	default:
 		http.Error(w, "unsupported report", http.StatusForbidden)
@@ -200,7 +225,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox st
 
 // reportMultiget returns address-data for each requested href, with a 404 status
 // for any href that no longer resolves.
-func (s *Server) reportMultiget(w http.ResponseWriter, st *objectstore.Store, fid int64, hrefs []string) {
+func (s *Server) reportMultiget(w http.ResponseWriter, st *objectstore.Store, fid int64, hrefs []string, ad *addrDataReq) {
 	ms := &multistatus{}
 	for _, h := range hrefs {
 		name := path.Base(strings.TrimRight(h, "/"))
@@ -218,7 +243,7 @@ func (s *Server) reportMultiget(w http.ResponseWriter, st *objectstore.Store, fi
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		ms.Responses = append(ms.Responses, addressDataResponse(h, obj.ChangeNumber, data))
+		ms.Responses = append(ms.Responses, addressDataResponse(h, obj.ChangeNumber, ad.bound(data)))
 	}
 	writeMultistatus(w, ms)
 }
@@ -228,7 +253,7 @@ func (s *Server) reportMultiget(w http.ResponseWriter, st *objectstore.Store, fi
 // are returned, the response carries a fresh sync-token, and members removed
 // since the token are reported as 404 tombstones (RFC 6578). An addressbook-query
 // applies the request's prop-filter/text-match against each member (RFC 6352 §8.6).
-func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store, user, coll string, fid int64, sinceToken uint64, sync bool, filt *filter) {
+func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store, user, coll string, fid int64, sinceToken uint64, sync bool, filt *filter, ad *addrDataReq) {
 	objs, err := st.ListFolderObjects(fid)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -249,7 +274,7 @@ func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store,
 			continue
 		}
 		href := objectPathColl(user, coll, objectName(st, o.ID, ".vcf"))
-		ms.Responses = append(ms.Responses, addressDataResponse(href, o.ChangeNumber, data))
+		ms.Responses = append(ms.Responses, addressDataResponse(href, o.ChangeNumber, ad.bound(data)))
 	}
 	if sync {
 		// Tombstones: report each contact removed since the client's token as a 404
