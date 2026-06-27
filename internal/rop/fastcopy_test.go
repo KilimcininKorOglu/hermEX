@@ -160,3 +160,31 @@ func TestFastTransferSourceCopyProperties(t *testing.T) {
 		t.Errorf("CopyProperties carried %d NewAttach markers, want 0", n)
 	}
 }
+
+// buildProgress frames a RopProgress request: the polled object at inIdx and the
+// WantCancel flag.
+func buildProgress(inIdx, wantCancel uint8) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropProgress)
+	b.Uint8(0) // LogonId
+	b.Uint8(inIdx)
+	b.Uint8(wantCancel)
+	return b.Bytes()
+}
+
+// TestProgressNotSupported asserts RopProgress is answered ecNotSupported: hermEX
+// runs every ROP synchronously, so there is never an asynchronous operation to poll.
+func TestProgressNotSupported(t *testing.T) {
+	sess, logonH, _ := copyToSession(t)
+	defer sess.Close()
+
+	sr, _ := sess.Dispatch(buildProgress(0, 0), []uint32{logonH})
+	p := ext.NewPull(sr, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropProgress {
+		t.Fatalf("Progress RopId = %#x", id)
+	}
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecNotSupported {
+		t.Fatalf("Progress ReturnValue = %#x, want ecNotSupported", ec)
+	}
+}

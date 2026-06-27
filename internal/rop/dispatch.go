@@ -515,6 +515,10 @@ loop:
 			if !s.ropFastTransferSourceCopyProperties(p, out, handles, hindex) {
 				break loop
 			}
+		case ropProgress:
+			if !s.ropProgress(p, out, handles, hindex) {
+				break loop
+			}
 		default:
 			writeErr(out, ropID, hindex, ecError)
 			break loop

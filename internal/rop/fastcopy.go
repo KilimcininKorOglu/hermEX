@@ -14,6 +14,22 @@ const (
 	ropFastTransferSourceCopyProperties uint8 = 0x69
 )
 
+// ropProgress is the asynchronous-operation status poll ([MS-OXCROPS] 2.2.8.13).
+const ropProgress uint8 = 0x50
+
+// ropProgress handles RopProgress ([MS-OXCPRPT] 2.2.2.13): a client polls the status
+// of an asynchronous server operation previously started with WantAsynchronous.
+// hermEX runs every ROP synchronously and never returns a RopProgress handle for the
+// client to poll, so there is no asynchronous operation to report on; the request is
+// answered ecNotSupported.
+func (s *Session) ropProgress(p *ext.Pull, out *ext.Push, _ []uint32, hindex uint8) bool {
+	if _, err := p.Uint8(); err != nil { // WantCancel
+		return false
+	}
+	writeErr(out, ropProgress, hindex, ecNotSupported)
+	return true
+}
+
 // openCopySource resolves a stored-message source, gates it as a read, builds the
 // copy stream through the caller's constructor, and installs the resulting download
 // handle in the output slot. It centralizes the source validation, permission gate,
