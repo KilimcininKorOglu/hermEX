@@ -17,6 +17,11 @@ func calCollectionFID(st *objectstore.Store, name string) (int64, bool, error) {
 	if isReservedScheduleName(name) {
 		return 0, false, nil
 	}
+	// The Tasks collection lives in the calendar URL space (served as VTODO) but is a
+	// distinct well-known folder, not a child of the Calendar.
+	if name == tasksName {
+		return int64(mapi.PrivateFIDTasks), true, nil
+	}
 	return collectionFID(st, int64(mapi.PrivateFIDCalendar), calendarName, name)
 }
 

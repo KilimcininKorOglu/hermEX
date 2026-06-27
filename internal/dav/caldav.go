@@ -3,9 +3,13 @@ package dav
 import (
 	"io"
 	"net/http"
+	"time"
 
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcical"
+	"hermex/internal/oxcmail"
+	"hermex/internal/oxtask"
 )
 
 // defaultMaxICal caps a calendar PUT body; an event, even a recurring one preserved
@@ -55,8 +59,16 @@ func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox st
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	ics, err := oxcical.Export(msg, icalOptions(st))
-	if err != nil {
+	var ics []byte
+	if fid == int64(mapi.PrivateFIDTasks) {
+		// The Tasks collection serves VTODO from the shared task model.
+		tk, terr := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
+		if terr != nil {
+			http.Error(w, terr.Error(), http.StatusInternalServerError)
+			return
+		}
+		ics = oxcical.ExportVTODO(tk, name, time.Time{})
+	} else if ics, err = oxcical.Export(msg, icalOptions(st)); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -115,8 +127,20 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, mailbox st
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	msg, err := oxcical.Import(body, icalOptions(st))
-	if err != nil {
+	var msg *oxcmail.Message
+	if fid == int64(mapi.PrivateFIDTasks) {
+		task, _, ok := oxcical.ParseVTODO(body)
+		if !ok {
+			http.Error(w, "invalid VTODO", http.StatusBadRequest)
+			return
+		}
+		props, perr := oxtask.ToProps(task, st.GetNamedPropIDs)
+		if perr != nil {
+			http.Error(w, perr.Error(), http.StatusInternalServerError)
+			return
+		}
+		msg = &oxcmail.Message{Props: props}
+	} else if msg, err = oxcical.Import(body, icalOptions(st)); err != nil {
 		http.Error(w, "invalid iCalendar: "+err.Error(), http.StatusBadRequest)
 		return
 	}

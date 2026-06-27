@@ -186,10 +186,16 @@ func scheduleOutboxResourceType() *resourceType {
 	return &resourceType{Collection: empty, ScheduleOutbox: empty}
 }
 
-// eventComponentSet is the supported-calendar-component-set hermEX advertises: a
-// calendar holds VEVENTs (v1 does not expose VTODO).
+// eventComponentSet is the supported-calendar-component-set for a calendar
+// collection: it holds VEVENTs.
 func eventComponentSet() *supportedComp {
 	return &supportedComp{Comps: []calComp{{Name: "VEVENT"}}}
+}
+
+// todoComponentSet is the supported-calendar-component-set for the Tasks collection:
+// it holds VTODOs.
+func todoComponentSet() *supportedComp {
+	return &supportedComp{Comps: []calComp{{Name: "VTODO"}}}
 }
 
 // marshalMultistatus renders a multistatus with the XML declaration prefix.

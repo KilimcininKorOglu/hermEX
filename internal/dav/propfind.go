@@ -263,6 +263,15 @@ func calHomeSetResponse(user string) msResponse {
 
 // calCollectionResponse builds the collection-level PROPFIND response for one
 // calendar (no members).
+// componentSetFor reports the supported-calendar-component-set for a collection: the
+// Tasks folder holds VTODOs, every other calendar holds VEVENTs.
+func componentSetFor(fid int64) *supportedComp {
+	if fid == int64(mapi.PrivateFIDTasks) {
+		return todoComponentSet()
+	}
+	return eventComponentSet()
+}
+
 func calCollectionResponse(st *objectstore.Store, user, coll, displayName string, fid int64) (msResponse, error) {
 	max, err := st.FolderObjectsSyncMax(fid)
 	if err != nil {
@@ -277,7 +286,7 @@ func calCollectionResponse(st *objectstore.Store, user, coll, displayName string
 		DisplayName:        displayName,
 		GetCTag:            ctag(max),
 		SyncToken:          syncToken(max),
-		SupportedCalComp:   eventComponentSet(),
+		SupportedCalComp:   componentSetFor(fid),
 		Owner:              &href{Href: principalPath(user)},
 		CurrentUserPrivSet: ownerPrivilegeSet(),
 	}
@@ -353,6 +362,13 @@ func (s *Server) allCalendarCollections(mailbox, user string) ([]msResponse, err
 		return nil, err
 	}
 	out := []msResponse{wk}
+	// The Tasks folder is advertised as its own calendar collection (VTODO) alongside
+	// the event calendar, so a CalDAV tasks client discovers it in the home set.
+	tasks, err := calCollectionResponse(st, user, tasksName, "Tasks", int64(mapi.PrivateFIDTasks))
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, tasks)
 	subs, err := childCollections(st, int64(mapi.PrivateFIDCalendar))
 	if err != nil {
 		return nil, err

@@ -871,3 +871,38 @@ func TestCurrentUserPrivilegeSet(t *testing.T) {
 		}
 	}
 }
+
+// TestCalDAVTasksVTODO confirms the Tasks folder is exposed as a CalDAV collection
+// serving VTODO: a PUT stores a task, a GET returns it as VTODO, and the home set
+// advertises the collection with a VTODO component set.
+func TestCalDAVTasksVTODO(t *testing.T) {
+	ts := davServerCal(t)
+	taskURL := "/dav/calendars/" + testUser + "/tasks/t1.ics"
+	vtodo := "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//test//EN\r\n" +
+		"BEGIN:VTODO\r\nUID:t1\r\nDTSTAMP:20260620T100000Z\r\nSUMMARY:Buy milk\r\n" +
+		"DUE:20260701T170000Z\r\nSTATUS:NEEDS-ACTION\r\nEND:VTODO\r\nEND:VCALENDAR\r\n"
+
+	resp, body := doFull(t, ts, "PUT", taskURL, vtodo, map[string]string{"Content-Type": "text/calendar"})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("PUT VTODO status = %d: %s", resp.StatusCode, body)
+	}
+
+	resp, body = do(t, ts, "GET", taskURL, "", true)
+	if resp.StatusCode != 200 {
+		t.Fatalf("GET status = %d: %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, "BEGIN:VTODO") || !strings.Contains(body, "SUMMARY:Buy milk") {
+		t.Errorf("GET did not return the VTODO: %s", body)
+	}
+	if !strings.Contains(body, "DUE:20260701T170000Z") {
+		t.Errorf("VTODO missing DUE: %s", body)
+	}
+
+	_, home := do(t, ts, "PROPFIND", "/dav/calendars/"+testUser+"/", "1", true)
+	if !strings.Contains(home, "/dav/calendars/"+testUser+"/tasks/") {
+		t.Errorf("home set missing tasks collection: %s", home)
+	}
+	if !strings.Contains(home, "VTODO") {
+		t.Errorf("tasks collection missing VTODO component set: %s", home)
+	}
+}

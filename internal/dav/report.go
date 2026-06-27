@@ -10,8 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcical"
+	"hermex/internal/oxtask"
 	"hermex/internal/oxvcard"
 )
 
@@ -258,7 +260,7 @@ func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store,
 			ms.Responses = append(ms.Responses, msResponse{Href: h, Status: statusNotFound})
 			continue
 		}
-		data, err := calendarData(st, obj.ID)
+		data, err := calendarObjectData(st, fid, obj.ID, name)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -285,7 +287,8 @@ func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Sto
 		if sync && o.ChangeNumber <= sinceToken {
 			continue
 		}
-		data, err := calendarData(st, o.ID)
+		name := objectName(st, o.ID, ".ics")
+		data, err := calendarObjectData(st, fid, o.ID, name)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -294,7 +297,7 @@ func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Sto
 		if !calendarMatches(filt, data) {
 			continue
 		}
-		href := calObjectPathColl(user, coll, objectName(st, o.ID, ".ics"))
+		href := calObjectPathColl(user, coll, name)
 		ms.Responses = append(ms.Responses, calendarDataResponse(href, o.ChangeNumber, data))
 	}
 	if sync {
@@ -330,6 +333,23 @@ func calendarData(st *objectstore.Store, id int64) (string, error) {
 		return "", err
 	}
 	return string(ics), nil
+}
+
+// calendarObjectData exports a stored object to its iCalendar text, as a VTODO for the
+// Tasks folder (uid is the resource name) and a VEVENT for a calendar.
+func calendarObjectData(st *objectstore.Store, fid, id int64, uid string) (string, error) {
+	if fid != int64(mapi.PrivateFIDTasks) {
+		return calendarData(st, id)
+	}
+	msg, err := st.OpenMessage(id)
+	if err != nil {
+		return "", err
+	}
+	tk, err := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
+	if err != nil {
+		return "", err
+	}
+	return string(oxcical.ExportVTODO(tk, uid, time.Time{})), nil
 }
 
 // calendarDataResponse builds a 200 response carrying a member's ETag and iCalendar.

@@ -235,6 +235,9 @@ const (
 const (
 	addressbookName = "contacts"
 	calendarName    = "calendar"
+	// tasksName is the reserved URL segment of the Tasks calendar collection, served
+	// as VTODO components (RFC 4791) so a CalDAV tasks client shares the one task store.
+	tasksName = "tasks"
 )
 
 // scheduleInboxName and scheduleOutboxName are the reserved URL segments of the
