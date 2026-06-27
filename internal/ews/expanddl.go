@@ -69,7 +69,7 @@ type dlMember struct {
 // handleExpandDL answers ExpandDL: it resolves the named public distribution list
 // to its direct members and returns them. An address that is not a distribution
 // list, or a directory that cannot expand, yields ErrorNameResolutionNoResults.
-func (s *Server) handleExpandDL(w http.ResponseWriter, inner []byte, sess *session) {
+func (s *Server) handleExpandDL(w http.ResponseWriter, inner []byte, _ *session) {
 	var req expandDLRequest
 	_ = xml.Unmarshal(inner, &req)
 	addr := strings.TrimSpace(req.Mailbox.EmailAddress)

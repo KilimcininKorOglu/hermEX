@@ -78,7 +78,7 @@ type mailTipReplyBody struct {
 // handleGetMailTips answers GetMailTips: one response message per requested
 // recipient, carrying the out-of-office tip when that recipient is a local mailbox
 // with an active auto-reply.
-func (s *Server) handleGetMailTips(w http.ResponseWriter, inner []byte, sess *session) {
+func (s *Server) handleGetMailTips(w http.ResponseWriter, inner []byte, _ *session) {
 	var req getMailTipsRequest
 	_ = xml.Unmarshal(inner, &req)
 

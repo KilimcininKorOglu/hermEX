@@ -53,7 +53,7 @@ type alternateIDOut struct {
 
 // handleConvertId answers ConvertId, converting each source id to the requested
 // destination format (only the EwsId-to-EwsId identity is supported).
-func (s *Server) handleConvertId(w http.ResponseWriter, inner []byte, sess *session) {
+func (s *Server) handleConvertId(w http.ResponseWriter, inner []byte, _ *session) {
 	var req convertIDRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
 		writeSOAPFault(w, "ErrorInvalidRequest", "ConvertId: "+err.Error())
