@@ -12,18 +12,24 @@ import (
 // operation returns a SOAP Fault (the request never reaches a per-operation
 // response message).
 func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session) {
-	op, inner, err := readEnvelope(r)
+	op, inner, imp, err := readEnvelope(r)
 	if err != nil {
 		writeSOAPFault(w, "ErrorInvalidRequest", "could not parse SOAP envelope: "+err.Error())
+		return
+	}
+	// An ExchangeImpersonation header is gated and applied before the operation: on
+	// success it swaps the session to the target, on failure it has already written
+	// a SOAP Fault and the operation never runs.
+	if !s.applyImpersonation(w, sess, imp) {
 		return
 	}
 	s.Logger.Emit(logging.Event{
 		Level:      logging.LevelInfo,
 		Subsystem:  logging.EWS,
 		Name:       "operation",
-		User:       sess.user,
+		User:       sess.realUser,
 		RemoteAddr: serve.ClientAddr(r),
-		Fields:     logging.Fields{"op": op},
+		Fields:     operationFields(op, sess),
 	})
 	switch op {
 	case "GetFolder":

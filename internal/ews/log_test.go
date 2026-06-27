@@ -41,7 +41,9 @@ func TestEWSLogsOperation(t *testing.T) {
 	srv := &Server{Logger: logging.New(sink)}
 	r := httptest.NewRequest("POST", "/EWS/Exchange.asmx", strings.NewReader(wrapRequest("<FooBar/>")))
 	r.Header.Set("X-Forwarded-For", "203.0.113.9")
-	srv.dispatch(httptest.NewRecorder(), r, &session{user: "alice@test"})
+	// realUser is the authenticated principal serveEWS always sets; the operation
+	// log records it (so impersonation cannot hide who made the request).
+	srv.dispatch(httptest.NewRecorder(), r, &session{user: "alice@test", realUser: "alice@test"})
 
 	e, ok := sink.find("operation")
 	if !ok {

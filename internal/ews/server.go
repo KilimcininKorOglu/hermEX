@@ -126,13 +126,23 @@ func (s *Server) serveEWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	s.dispatch(w, r, &session{user: user, mailbox: mailbox})
+	s.dispatch(w, r, &session{user: user, mailbox: mailbox, realUser: user})
 }
 
 // session carries the per-request context handed to an operation handler.
 type session struct {
+	// user and mailbox are the EFFECTIVE identity an operation runs as. Without
+	// impersonation they are the authenticated principal; an accepted
+	// ExchangeImpersonation header swaps them to the impersonated target so every
+	// handler operates on the target's store.
 	user    string
 	mailbox string
+	// realUser is the authenticated principal, never changed by impersonation, so
+	// the audit log records who actually made the request even when user/mailbox
+	// have been swapped to a target. impersonating names that target (empty when
+	// the request is not impersonated).
+	realUser      string
+	impersonating string
 }
 
 // basicAuth validates HTTP Basic credentials against the directory and returns

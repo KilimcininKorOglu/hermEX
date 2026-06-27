@@ -86,7 +86,7 @@ func TestOptions(t *testing.T) {
 func TestReadEnvelope(t *testing.T) {
 	body := wrapRequest(`<GetFolder xmlns="` + nsMessages + `"><FolderShape/></GetFolder>`)
 	r := httptest.NewRequest(http.MethodPost, "/EWS/Exchange.asmx", strings.NewReader(body))
-	op, inner, err := readEnvelope(r)
+	op, inner, _, err := readEnvelope(r)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,14 +108,14 @@ func TestReadEnvelopeRespectsBodyLimit(t *testing.T) {
 	SetMaxRequestBody(16) // far smaller than the envelope
 	defer SetMaxRequestBody(0)
 	r := httptest.NewRequest(http.MethodPost, "/EWS/Exchange.asmx", strings.NewReader(body))
-	if _, _, err := readEnvelope(r); err == nil {
+	if _, _, _, err := readEnvelope(r); err == nil {
 		t.Error("envelope over the 16-byte cap parsed, want a truncation/parse error")
 	}
 
 	// Restoring the default (0) admits the same envelope.
 	SetMaxRequestBody(0)
 	r2 := httptest.NewRequest(http.MethodPost, "/EWS/Exchange.asmx", strings.NewReader(body))
-	if op, _, err := readEnvelope(r2); err != nil || op != "GetFolder" {
+	if op, _, _, err := readEnvelope(r2); err != nil || op != "GetFolder" {
 		t.Errorf("envelope under the default cap = op %q err %v, want GetFolder / nil", op, err)
 	}
 }

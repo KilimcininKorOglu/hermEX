@@ -42,33 +42,80 @@ const (
 // no MAPI/ROP, so it is the honest floor for a mail-only EWS server.
 const serverVersion = "Exchange2010_SP2"
 
-// soapEnvelope decodes just enough of a request envelope: the requested server
-// version from the header and the raw operation element from the body. The
-// operation is left as innerxml so each handler unmarshals its own request type.
+// soapEnvelope decodes just enough of a request envelope: the SOAP header (for an
+// optional ExchangeImpersonation directive) and the raw operation element from the
+// body. The operation is left as innerxml so each handler unmarshals its own
+// request type.
 type soapEnvelope struct {
-	XMLName xml.Name `xml:"http://schemas.xmlsoap.org/soap/envelope/ Envelope"`
+	XMLName xml.Name   `xml:"http://schemas.xmlsoap.org/soap/envelope/ Envelope"`
+	Header  soapHeader `xml:"http://schemas.xmlsoap.org/soap/envelope/ Header"`
 	Body    struct {
 		Inner []byte `xml:",innerxml"`
 	} `xml:"http://schemas.xmlsoap.org/soap/envelope/ Body"`
 }
 
+// soapHeader holds the request SOAP header fields hermEX reads. Only
+// ExchangeImpersonation is consulted; its ConnectingSID names the user to
+// impersonate. The inner element tags are matched by local name (Go's xml matches
+// across namespaces on input), so the types-namespace prefix the client uses does
+// not have to be reproduced here.
+type soapHeader struct {
+	Impersonation *struct {
+		ConnectingSID connectingSID `xml:"ConnectingSID"`
+	} `xml:"ExchangeImpersonation"`
+}
+
+// connectingSID is the ConnectingSID choice ([MS-OXWSCDATA] 2.2.4.14): the
+// account to impersonate, named by exactly one of these forms. hermEX resolves
+// the address forms against the directory; a bare SID has no directory to resolve
+// against and is reported unsupported.
+type connectingSID struct {
+	PrincipalName      string `xml:"PrincipalName"`
+	PrimarySmtpAddress string `xml:"PrimarySmtpAddress"`
+	SmtpAddress        string `xml:"SmtpAddress"`
+	SID                string `xml:"SID"`
+}
+
+// target reduces a ConnectingSID to the address to impersonate, or flags a
+// SID-only header as unsupported. It returns nil when no usable identity is
+// present (an empty ConnectingSID is treated as no impersonation).
+func (h soapHeader) target() *impersonationTarget {
+	if h.Impersonation == nil {
+		return nil
+	}
+	c := h.Impersonation.ConnectingSID
+	switch {
+	case c.PrimarySmtpAddress != "":
+		return &impersonationTarget{addr: c.PrimarySmtpAddress}
+	case c.SmtpAddress != "":
+		return &impersonationTarget{addr: c.SmtpAddress}
+	case c.PrincipalName != "":
+		return &impersonationTarget{addr: c.PrincipalName}
+	case c.SID != "":
+		return &impersonationTarget{isSID: true}
+	default:
+		return nil
+	}
+}
+
 // readEnvelope reads and parses the SOAP request, returning the operation name
-// (the local name of the first child of soap:Body) and the operation element's
-// raw XML for the handler to unmarshal.
-func readEnvelope(r *http.Request) (op string, inner []byte, err error) {
+// (the local name of the first child of soap:Body), the operation element's raw
+// XML for the handler to unmarshal, and the ExchangeImpersonation target (nil when
+// the header is absent).
+func readEnvelope(r *http.Request) (op string, inner []byte, imp *impersonationTarget, err error) {
 	limit := int64(defaultMaxRequestBody)
 	if v := reqBodyLimit.Load(); v > 0 {
 		limit = v
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, limit))
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 	var env soapEnvelope
 	if err := xml.Unmarshal(body, &env); err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
-	return firstElementName(env.Body.Inner), env.Body.Inner, nil
+	return firstElementName(env.Body.Inner), env.Body.Inner, env.Header.target(), nil
 }
 
 // firstElementName returns the local name of the first XML element in a fragment,
