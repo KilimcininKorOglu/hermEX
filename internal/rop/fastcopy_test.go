@@ -226,6 +226,72 @@ func TestFastTransferSourceCopyMessagesRejectsMessage(t *testing.T) {
 	}
 }
 
+// buildFastCopyFolder frames a RopFastTransferSourceCopyFolder request: the source
+// folder at inIdx, the download handle at outIdx, then CopyFlags / SendOptions.
+func buildFastCopyFolder(inIdx, outIdx, copyFlags uint8) []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(ropFastTransferSourceCopyFolder)
+	b.Uint8(0) // LogonId
+	b.Uint8(inIdx)
+	b.Uint8(outIdx)
+	b.Uint8(copyFlags)
+	b.Uint8(0) // SendOptions
+	return b.Bytes()
+}
+
+// TestFastTransferSourceCopyFolder opens a topFolder download over a folder holding
+// a normal and an associated message and drains it, asserting the topFolder framing:
+// one STARTTOPFLD, a matching ENDFOLDER, a StartMessage for the normal message, a
+// StartFAIMsg for the associated one, and no ICS synchronization framing.
+func TestFastTransferSourceCopyFolder(t *testing.T) {
+	sess, logonH, folderH, _ := copyMessagesSession(t)
+	defer sess.Close()
+
+	handles := []uint32{logonH, folderH, 0xFFFFFFFF}
+	sr, h := sess.Dispatch(buildFastCopyFolder(1, 2, fastCopyFolderFlagCopySubfolder), handles)
+	p := ext.NewPull(sr, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropFastTransferSourceCopyFolder {
+		t.Fatalf("CopyFolder RopId = %#x", id)
+	}
+	mustU8(t, p, "ohindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("CopyFolder ReturnValue = %#x", ec)
+	}
+
+	items := drainSyncDownload(t, sess, h, 2)
+	if n := ropMarkerCount(items, ics.MarkerStartTopFld); n != 1 {
+		t.Errorf("StartTopFld count = %d, want 1", n)
+	}
+	if n := ropMarkerCount(items, ics.MarkerEndFolder); n != 1 {
+		t.Errorf("EndFolder count = %d, want 1", n)
+	}
+	if n := ropMarkerCount(items, ics.MarkerStartMessage); n != 1 {
+		t.Errorf("StartMessage count = %d, want 1 (the normal message)", n)
+	}
+	if n := ropMarkerCount(items, ics.MarkerStartFAIMsg); n != 1 {
+		t.Errorf("StartFAIMsg count = %d, want 1 (the associated message)", n)
+	}
+	if n := ropMarkerCount(items, ics.MarkerIncrSyncChg); n != 0 {
+		t.Errorf("topFolder carried %d INCRSYNCCHG markers, want 0 (no sync framing)", n)
+	}
+}
+
+// TestFastTransferSourceCopyFolderRejectsMessage asserts a message handle as the
+// source is refused: CopyFolder streams a folder subtree.
+func TestFastTransferSourceCopyFolderRejectsMessage(t *testing.T) {
+	sess, logonH, msgH := copyToSession(t)
+	defer sess.Close()
+
+	handles := []uint32{logonH, msgH, 0xFFFFFFFF}
+	sr, _ := sess.Dispatch(buildFastCopyFolder(1, 2, 0), handles)
+	p := ext.NewPull(sr, ext.FlagUTF16)
+	mustU8(t, p, "RopId")
+	mustU8(t, p, "ohindex")
+	if ec := mustU32(t, p, "ec"); ec != ecError {
+		t.Fatalf("message source ReturnValue = %#x, want ecError", ec)
+	}
+}
+
 // buildFastCopyProps frames a RopFastTransferSourceCopyProperties request: the source
 // at inIdx, the download handle at outIdx, then Level / CopyFlags / SendOptions and
 // the included property tags.

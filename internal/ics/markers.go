@@ -87,6 +87,9 @@ const (
 	MarkerEndToRecip         = markerEndToRecip
 	MarkerNewAttach          = markerNewAttach
 	MarkerEndAttach          = markerEndAttach
+	MarkerStartTopFld        = markerStartTopFld
+	MarkerStartSubFld        = markerStartSubFld
+	MarkerEndFolder          = markerEndFolder
 	MarkerStartMessage       = markerStartMessage
 	MarkerStartFAIMsg        = markerStartFAIMsg
 	MarkerEndMessage         = markerEndMessage

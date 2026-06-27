@@ -193,6 +193,112 @@ func (s *Store) messageIsAssociated(folderID, messageID int64) (bool, error) {
 	return assoc != 0, nil
 }
 
+// NewCopyFolderSource renders a folder and (optionally) its subtree as a
+// generic-copy topFolder ([MS-OXCFXICS] 2.2.4.1.4, the make_topfolder path):
+// STARTTOPFLD, the folder's foldercontent, ENDFOLDER. subfolders selects whether
+// the descendant folders are included (the CopyFolder Move/CopySubfolders flags).
+//
+// The topFolder path uses the no-del-props foldercontent variant: the message and
+// subfolder collections follow the folder property list directly, with no
+// MetaTagFXDelProp / PR_CONTAINER_HIERARCHY collection delimiters — each message's
+// StartMessage/StartFAIMsg marker already carries its associated flag, so the FAI
+// and normal lists need no separating tag.
+func (s *Store) NewCopyFolderSource(folderID int64, subfolders bool) (*CopyContext, error) {
+	pr := &ics.Producer{}
+	pr.WriteMarker(ics.MarkerStartTopFld)
+	if err := s.writeFolderContentNoDelProps(pr, folderID, subfolders); err != nil {
+		return nil, err
+	}
+	pr.WriteMarker(ics.MarkerEndFolder)
+	return &CopyContext{producer: pr}, nil
+}
+
+// writeFolderContentNoDelProps emits a no-del-props folderContent: the folder's
+// property bag, its associated (FAI) message list, its normal message list, then —
+// when subfolders is set — each direct subfolder wrapped in STARTSUBFLD/ENDFOLDER,
+// recursing. It mirrors the reference record_foldercontentnodelprops.
+func (s *Store) writeFolderContentNoDelProps(pr *ics.Producer, folderID int64, subfolders bool) error {
+	props, err := s.GetFolderProperties(folderID)
+	if err != nil {
+		return err
+	}
+	if err := fxWriteProps(pr, s, props); err != nil {
+		return err
+	}
+	if err := s.writeFolderMessageList(pr, folderID, true); err != nil {
+		return err
+	}
+	if err := s.writeFolderMessageList(pr, folderID, false); err != nil {
+		return err
+	}
+	if !subfolders {
+		return nil
+	}
+	subs, err := s.childFolderIDs(folderID)
+	if err != nil {
+		return err
+	}
+	for _, sub := range subs {
+		pr.WriteMarker(ics.MarkerStartSubFld)
+		if err := s.writeFolderContentNoDelProps(pr, sub, true); err != nil {
+			return err
+		}
+		pr.WriteMarker(ics.MarkerEndFolder)
+	}
+	return nil
+}
+
+// writeFolderMessageList emits the messageList of a folder's associated or normal
+// messages: each framed StartFAIMsg (associated) or StartMessage (normal) +
+// messageContent + EndMessage. A folder copy carries every property (no exclusion).
+func (s *Store) writeFolderMessageList(pr *ics.Producer, folderID int64, associated bool) error {
+	mids, err := s.folderMessageIDs(folderID, associated)
+	if err != nil {
+		return err
+	}
+	marker := ics.MarkerStartMessage
+	if associated {
+		marker = ics.MarkerStartFAIMsg
+	}
+	for _, mid := range mids {
+		msg, err := s.OpenMessage(mid)
+		if err != nil {
+			return err
+		}
+		pr.WriteMarker(marker)
+		if err := writeCopyMessageContent(pr, s, msg, nil, false); err != nil {
+			return err
+		}
+		pr.WriteMarker(ics.MarkerEndMessage)
+	}
+	return nil
+}
+
+// folderMessageIDs returns the ids of a folder's live messages of the requested
+// associated class (FAI when associated, normal otherwise), ordered by id.
+func (s *Store) folderMessageIDs(folderID int64, associated bool) ([]int64, error) {
+	assoc := 0
+	if associated {
+		assoc = 1
+	}
+	rows, err := s.objdb.Query(
+		`SELECT message_id FROM messages WHERE parent_fid=? AND is_deleted=0 AND is_associated=? ORDER BY message_id`,
+		folderID, assoc)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // writeCopyMessageContent emits a generic-copy messageContent: the filtered property
 // list, then the recipient list, then the attachment list. Each sub-object list is
 // prefixed by a MetaTagFXDelProp for its collection so the destination starts from

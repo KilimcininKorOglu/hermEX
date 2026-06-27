@@ -11,8 +11,16 @@ import (
 // through RopFastTransferSourceGetBuffer.
 const (
 	ropFastTransferSourceCopyMessages   uint8 = 0x4B
+	ropFastTransferSourceCopyFolder     uint8 = 0x4C
 	ropFastTransferSourceCopyTo         uint8 = 0x4D
 	ropFastTransferSourceCopyProperties uint8 = 0x69
+)
+
+// CopyFolder CopyFlags bits ([MS-OXCFXICS] 2.2.3.1.1.4): either selects the
+// descendant subfolders into the topFolder stream.
+const (
+	fastCopyFolderFlagMove          uint8 = 0x01
+	fastCopyFolderFlagCopySubfolder uint8 = 0x10
 )
 
 // ropProgress is the asynchronous-operation status poll ([MS-OXCROPS] 2.2.8.13).
@@ -107,6 +115,47 @@ func (s *Session) ropFastTransferSourceCopyMessages(p *ext.Pull, out *ext.Push, 
 	h := s.alloc(&object{kind: kindSync, store: src.store, fastSrc: col})
 	setHandle(handles, ohindex, h)
 	out.Uint8(ropFastTransferSourceCopyMessages)
+	out.Uint8(ohindex)
+	out.Uint32(ecSuccess)
+	return true
+}
+
+// ropFastTransferSourceCopyFolder handles RopFastTransferSourceCopyFolder
+// ([MS-OXCFXICS] 2.2.3.1.1.4 / 2.2.4.1.4): it opens a generic-copy download of a
+// source folder as a topFolder — STARTTOPFLD, the folder's foldercontent (its
+// property list, FAI then normal message lists, then each subfolder recursively),
+// ENDFOLDER. The Move / CopySubfolders CopyFlags bits select whether the descendant
+// folders are streamed; Move is otherwise not honored (the download is read-only).
+func (s *Session) ropFastTransferSourceCopyFolder(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	ohindex, e1 := p.Uint8()
+	copyFlags, e2 := p.Uint8()
+	_, e3 := p.Uint8() // SendOptions — the stream codec is always UTF-16
+	if e1 != nil || e2 != nil || e3 != nil {
+		return false
+	}
+
+	src := s.get(handleAt(handles, hindex))
+	if src == nil || src.kind != kindFolder || src.store == nil {
+		writeErr(out, ropFastTransferSourceCopyFolder, ohindex, ecError)
+		return true
+	}
+	if ok, err := s.authorize(src.store, src.folderID, mapi.FrightsReadAny); err != nil {
+		writeErr(out, ropFastTransferSourceCopyFolder, ohindex, ecError)
+		return true
+	} else if !ok {
+		writeErr(out, ropFastTransferSourceCopyFolder, ohindex, ecAccessDenied)
+		return true
+	}
+
+	subfolders := copyFlags&(fastCopyFolderFlagMove|fastCopyFolderFlagCopySubfolder) != 0
+	col, err := src.store.NewCopyFolderSource(src.folderID, subfolders)
+	if err != nil {
+		writeErr(out, ropFastTransferSourceCopyFolder, ohindex, ecError)
+		return true
+	}
+	h := s.alloc(&object{kind: kindSync, store: src.store, fastSrc: col})
+	setHandle(handles, ohindex, h)
+	out.Uint8(ropFastTransferSourceCopyFolder)
 	out.Uint8(ohindex)
 	out.Uint32(ecSuccess)
 	return true

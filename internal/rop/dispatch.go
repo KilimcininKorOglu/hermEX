@@ -511,6 +511,10 @@ loop:
 			if !s.ropFastTransferSourceCopyMessages(p, out, handles, hindex) {
 				break loop
 			}
+		case ropFastTransferSourceCopyFolder:
+			if !s.ropFastTransferSourceCopyFolder(p, out, handles, hindex) {
+				break loop
+			}
 		case ropFastTransferSourceCopyTo:
 			if !s.ropFastTransferSourceCopyTo(p, out, handles, hindex) {
 				break loop

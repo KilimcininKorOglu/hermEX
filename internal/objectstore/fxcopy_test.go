@@ -253,6 +253,151 @@ func TestCopyMessagesRejectsForeignMessage(t *testing.T) {
 	}
 }
 
+// firstMessageBody returns the items strictly between the first StartMessage (or
+// StartFAIMsg) and its matching EndMessage — the bare messageContent of the first
+// message in a folderContent/messageList stream.
+func firstMessageBody(t *testing.T, items []ics.Item) []ics.Item {
+	t.Helper()
+	start := -1
+	for i, it := range items {
+		if it.IsMarker && (it.Marker == ics.MarkerStartMessage || it.Marker == ics.MarkerStartFAIMsg) {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		t.Fatal("no StartMessage/StartFAIMsg marker found")
+	}
+	for i := start + 1; i < len(items); i++ {
+		if items[i].IsMarker && items[i].Marker == ics.MarkerEndMessage {
+			return items[start+1 : i]
+		}
+	}
+	t.Fatal("no EndMessage marker after the first StartMessage")
+	return nil
+}
+
+// reserializeMessageContent re-encodes a parsed messageContent (markers + props)
+// back to wire bytes, the inverse of parseCopyItems for one message body. It lets a
+// folderContent test feed a contained messageContent through the upload path.
+func reserializeMessageContent(t *testing.T, items []ics.Item) []byte {
+	t.Helper()
+	pr := &ics.Producer{}
+	for _, it := range items {
+		if it.IsMarker {
+			pr.WriteMarker(it.Marker)
+			continue
+		}
+		if err := pr.WriteProp(*it.Prop); err != nil {
+			t.Fatalf("WriteProp: %v", err)
+		}
+	}
+	var out []byte
+	for {
+		chunk, done := pr.ReadBuffer(1 << 16)
+		out = append(out, chunk...)
+		if done {
+			return out
+		}
+	}
+}
+
+// TestCopyFolderTopFolder renders a folder (one message) with a subfolder (one
+// message) as a generic-copy topFolder and asserts the no-del-props grammar: one
+// STARTTOPFLD wrapping the folder content, one STARTSUBFLD for the subfolder, an
+// ENDFOLDER closing each, and a framed message in each folder. It then reconstructs
+// the first contained messageContent through the upload path. The folder framing is
+// pinned to the [MS-OXCFXICS] make_topfolder grammar; an independent oracle remains
+// Outlook-PENDING (producer and parser are both hermex code).
+func TestCopyFolderTopFolder(t *testing.T) {
+	s := openSeededStore(t)
+	parent, err := s.CreateFolder(nil, "CopyFolderParent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pmid, err := s.CreateMessage(parent, richMsg("parent message"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := s.CreateFolder(&parent, "CopyFolderSub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateMessage(sub, richMsg("sub message")); err != nil {
+		t.Fatal(err)
+	}
+
+	src, err := s.NewCopyFolderSource(parent, true)
+	if err != nil {
+		t.Fatalf("NewCopyFolderSource: %v", err)
+	}
+	items := parseCopyItems(t, drainCopy(t, src))
+
+	if n := countMarkers(items, ics.MarkerStartTopFld); n != 1 {
+		t.Errorf("StartTopFld count = %d, want 1", n)
+	}
+	if n := countMarkers(items, ics.MarkerStartSubFld); n != 1 {
+		t.Errorf("StartSubFld count = %d, want 1 (one subfolder)", n)
+	}
+	if n := countMarkers(items, ics.MarkerEndFolder); n != 2 {
+		t.Errorf("EndFolder count = %d, want 2 (topfolder + subfolder)", n)
+	}
+	if n := countMarkers(items, ics.MarkerStartMessage); n != 2 {
+		t.Errorf("StartMessage count = %d, want 2 (one per folder)", n)
+	}
+	if n := countMarkers(items, ics.MarkerEndMessage); n != 2 {
+		t.Errorf("EndMessage count = %d, want 2", n)
+	}
+
+	want, err := s.OpenMessage(pmid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := reserializeMessageContent(t, firstMessageBody(t, items))
+	dst := openSeededStore(t)
+	id := reconstructMessage(t, dst, int64(mapi.PrivateFIDInbox), content)
+	got, err := dst.OpenMessage(int64(id))
+	if err != nil {
+		t.Fatalf("open reconstructed: %v", err)
+	}
+	assertMessageEqual(t, "CopyFolder", want, got)
+}
+
+// TestCopyFolderNoSubfolders checks the subfolders=false path (CopyFolder without
+// the Move/CopySubfolders flag) omits the descendant folders entirely.
+func TestCopyFolderNoSubfolders(t *testing.T) {
+	s := openSeededStore(t)
+	parent, err := s.CreateFolder(nil, "FlatParent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateMessage(parent, richMsg("flat message")); err != nil {
+		t.Fatal(err)
+	}
+	sub, err := s.CreateFolder(&parent, "Ignored")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateMessage(sub, richMsg("ignored message")); err != nil {
+		t.Fatal(err)
+	}
+
+	src, err := s.NewCopyFolderSource(parent, false)
+	if err != nil {
+		t.Fatalf("NewCopyFolderSource: %v", err)
+	}
+	items := parseCopyItems(t, drainCopy(t, src))
+	if n := countMarkers(items, ics.MarkerStartSubFld); n != 0 {
+		t.Errorf("StartSubFld count = %d, want 0 (subfolders excluded)", n)
+	}
+	if n := countMarkers(items, ics.MarkerStartMessage); n != 1 {
+		t.Errorf("StartMessage count = %d, want 1 (only the parent's message)", n)
+	}
+	if n := countMarkers(items, ics.MarkerEndFolder); n != 1 {
+		t.Errorf("EndFolder count = %d, want 1 (topfolder only)", n)
+	}
+}
+
 // TestCopyPropertiesEmptyIncludeCopiesNothing checks the empty inclusive set selects
 // no properties rather than falling through to the keep-all (exclusion) default.
 func TestCopyPropertiesEmptyIncludeCopiesNothing(t *testing.T) {
