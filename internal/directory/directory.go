@@ -18,6 +18,10 @@ type Account struct {
 	Password    string
 	MailboxPath string
 	Shared      bool
+	// Room marks a bookable room resource mailbox, surfaced by ListRooms for the
+	// EWS room finder. The static directory has no separate resource table, so the
+	// flag is the room marker; a real deployment uses the SQL directory instead.
+	Room bool
 }
 
 // Accounts resolves a recipient email address to its mailbox store path. ok is
@@ -182,6 +186,21 @@ type GAL interface {
 	SearchGAL(query string, limit int) ([]GALEntry, error)
 }
 
+// DisplayTypeRoom is the PR_DISPLAY_TYPE_EX value (DT_ROOM) that marks a bookable
+// room resource mailbox, the GALEntry.DisplayType a RoomLister surfaces for a
+// room. It mirrors the internal dtRoom schema constant for callers outside this
+// package (the EWS room operations filter on it).
+const DisplayTypeRoom = dtRoom
+
+// RoomLister optionally enumerates the organization's bookable room resource
+// mailboxes (and equipment), each as a GALEntry carrying its address, display
+// name, DisplayType, and seating capacity. It backs the EWS GetRoomLists/GetRooms
+// room-finder operations and the webmail room picker. Directories that cannot
+// enumerate resources may omit it; the room finder then returns nothing.
+type RoomLister interface {
+	ListRooms() ([]GALEntry, error)
+}
+
 // StaticAccounts is a fixed map of lowercase address/username to Account. It
 // implements both Accounts and Authenticator and suits tests and small
 // deployments.
@@ -285,6 +304,25 @@ func (a StaticAccounts) SearchGAL(query string, limit int) ([]GALEntry, error) {
 }
 
 // Authenticate implements Authenticator using a constant-time password compare.
+// ListRooms implements RoomLister. It returns the accounts flagged Room, each as
+// a GALEntry addressed by its map key with the room display type, sorted by
+// address for a stable order. The static directory holds no capacity, so it is
+// reported as zero.
+func (a StaticAccounts) ListRooms() ([]GALEntry, error) {
+	addrs := make([]string, 0, len(a))
+	for addr, acc := range a {
+		if acc.Room {
+			addrs = append(addrs, addr)
+		}
+	}
+	sort.Strings(addrs)
+	out := make([]GALEntry, 0, len(addrs))
+	for _, addr := range addrs {
+		out = append(out, GALEntry{DisplayName: addr, Address: addr, DisplayType: DisplayTypeRoom})
+	}
+	return out, nil
+}
+
 func (a StaticAccounts) Authenticate(user, password string) (string, bool) {
 	acc, ok := a[strings.ToLower(user)]
 	if !ok {

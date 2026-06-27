@@ -123,6 +123,10 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleFindPeople(w, inner, sess)
 	case "GetPersona":
 		s.handleGetPersona(w, inner, sess)
+	case "GetRoomLists":
+		s.handleGetRoomLists(w, inner, sess)
+	case "GetRooms":
+		s.handleGetRooms(w, inner, sess)
 	case "Subscribe":
 		s.handleSubscribe(w, inner, sess)
 	case "Unsubscribe":
