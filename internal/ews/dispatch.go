@@ -119,6 +119,10 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		s.handleDeleteUserConfiguration(w, inner, sess)
 	case "ConvertId":
 		s.handleConvertId(w, inner, sess)
+	case "FindPeople":
+		s.handleFindPeople(w, inner, sess)
+	case "GetPersona":
+		s.handleGetPersona(w, inner, sess)
 	case "Subscribe":
 		s.handleSubscribe(w, inner, sess)
 	case "Unsubscribe":
