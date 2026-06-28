@@ -290,6 +290,10 @@ func main() {
 		// resolver, authenticate outbound TLS against MX hosts' TLSA records.
 		// Empty leaves DANE off, so delivery stays on opportunistic TLS + MTA-STS.
 		DANE: daneResolver(cfg.DaneResolver),
+		// TLS-RPT (RFC 8460): record each outbound TLS session outcome so the spool
+		// can build the recipient domain's daily aggregate report. The spool is the
+		// store, so it doubles as the reporter.
+		TLSReporter: spool,
 		// When the worker abandons an external recipient, return a non-delivery
 		// report to the (local, authenticated) sender through the local delivery
 		// path, so a failed send is reported rather than lost silently.

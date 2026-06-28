@@ -18,6 +18,7 @@ import (
 	"hermex/internal/dane"
 	"hermex/internal/logging"
 	"hermex/internal/mtasts"
+	"hermex/internal/tlsrpt"
 )
 
 // Router resolves a recipient domain to the mail exchangers to try, in priority
@@ -29,6 +30,16 @@ type Router func(domain string) ([]string, error)
 // Dialer opens a connection to a mail exchanger host (the default implies port
 // 25). Injected so tests can redirect every host to a local listener.
 type Dialer func(host string) (net.Conn, error)
+
+// TLSReporter records one outbound TLS session outcome for the daily TLS-RPT
+// report (RFC 8460). resultType is "" for a successful session, otherwise a
+// tlsrpt result-type constant. now stamps the report day; policyDomain is the
+// recipient domain, policyType the policy in effect (tlsa/sts/no-policy-found),
+// and mxHost the mail exchanger. An error is returned for the caller to log; it
+// must not affect delivery.
+type TLSReporter interface {
+	RecordTLS(now time.Time, policyDomain, policyType, mxHost, resultType string) error
+}
 
 // Worker drains the spool: it claims due recipients, delivers each over SMTP to
 // its domain's mail exchanger, and settles the attempt, Sent on success, Retry
@@ -60,6 +71,12 @@ type Worker struct {
 	// publishes usable secure TLSA records, TLS becomes mandatory and the server
 	// certificate is authenticated against them.
 	DANE *dane.Resolver
+
+	// TLSReporter, when set, records each outbound TLS session outcome for the
+	// daily TLS-RPT aggregate report (RFC 8460). nil disables reporting, which is
+	// byte-identical to the prior delivery path. Recording is best-effort: a store
+	// error is logged, never propagated, so it cannot fail a delivery.
+	TLSReporter TLSReporter
 
 	// backoffOverride (nanoseconds) and maxAttemptsOverride hold an operator's edited
 	// retry policy, set via SetRetryPolicy. They are read atomically by the single Run
@@ -287,6 +304,16 @@ func (w *Worker) send(host string, it Item, requireTLS bool) error {
 	// refused rather than used in the clear. Otherwise STARTTLS is opportunistic
 	// (RFC 7435): encrypt when advertised, accepting any certificate, since the
 	// alternative is cleartext and encryption without authentication is still better.
+	//
+	// policyType labels each recorded TLS-RPT session (RFC 8460) by the policy that
+	// governed the attempt: DANE TLSA, MTA-STS enforce, or neither.
+	policyType := tlsrpt.PolicyTypeNoPolicy
+	switch {
+	case len(daneRecs) > 0:
+		policyType = tlsrpt.PolicyTypeTLSA
+	case requireTLS:
+		policyType = tlsrpt.PolicyTypeSTS
+	}
 	if ok, _ := c.Extension("STARTTLS"); ok {
 		cfg := &tls.Config{ServerName: host, InsecureSkipVerify: !requireTLS}
 		if len(daneRecs) > 0 {
@@ -302,11 +329,15 @@ func (w *Worker) send(host string, it Item, requireTLS bool) error {
 			}
 		}
 		if err := c.StartTLS(cfg); err != nil {
+			w.recordTLS(it, host, policyType, tlsrpt.Classify(err))
 			return err
 		}
+		w.recordTLS(it, host, policyType, "")
 	} else if requireTLS {
+		w.recordTLS(it, host, tlsrpt.PolicyTypeSTS, tlsrpt.ResultStartTLSNotSupported)
 		return fmt.Errorf("mtasts: %s requires STARTTLS but %s does not offer it", domainPart(it.Recipient), host)
 	} else if len(daneRecs) > 0 {
+		w.recordTLS(it, host, tlsrpt.PolicyTypeTLSA, tlsrpt.ResultStartTLSNotSupported)
 		return fmt.Errorf("dane: %s publishes TLSA records but %s does not offer STARTTLS", domainPart(it.Recipient), host)
 	}
 	if err := c.Mail(it.From); err != nil {
@@ -326,6 +357,19 @@ func (w *Worker) send(host string, it Item, requireTLS bool) error {
 		return err
 	}
 	return c.Quit()
+}
+
+// recordTLS reports one TLS session outcome to the TLS-RPT store (RFC 8460),
+// keyed on the recipient's domain and the mail exchanger. It is a no-op when no
+// reporter is configured, and a store error is logged rather than propagated so
+// reporting never blocks a delivery.
+func (w *Worker) recordTLS(it Item, host, policyType, resultType string) {
+	if w.TLSReporter == nil {
+		return
+	}
+	if err := w.TLSReporter.RecordTLS(time.Now(), domainPart(it.Recipient), policyType, host, resultType); err != nil {
+		w.log(logging.LevelWarn, "tlsrpt.record", it, err)
+	}
 }
 
 // heloName is the name announced in EHLO. The operator's configured HeloName (the
