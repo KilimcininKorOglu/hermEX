@@ -254,6 +254,21 @@ func TestServerEnforcesMaxSize(t *testing.T) {
 	expect(t, r, 552)
 }
 
+// TestServerCommandLineLimit proves RFC 5321 §4.5.3.1.4: a command line past
+// 512 octets is rejected with 500 rather than buffered without bound, and the
+// connection stays framed so the next command parses normally.
+func TestServerCommandLineLimit(t *testing.T) {
+	r, conn := dialServer(t, &fakeSession{})
+	expect(t, r, 220)
+
+	// A command line far past the 512-octet limit is refused.
+	fmt.Fprint(conn, "EHLO "+strings.Repeat("a", 600)+"\r\n")
+	expect(t, r, 500)
+	// The reader drained the overlong line, so a normal command still works.
+	fmt.Fprint(conn, "EHLO client.test\r\n")
+	expect(t, r, 250)
+}
+
 // TestServerSizeDeclaration proves RFC 1870 early rejection: a MAIL FROM whose
 // declared SIZE exceeds the advertised maximum is refused with 552 before any
 // RCPT or DATA, while a declaration under the limit (or none) opens the

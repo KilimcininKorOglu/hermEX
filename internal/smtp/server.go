@@ -125,7 +125,11 @@ func (s *Server) handle(conn net.Conn) {
 	// discards all prior session state (RFC 3207).
 	var helo string
 	for {
-		line, err := tp.ReadLine()
+		line, err := readCommandLine(tp.R)
+		if errors.Is(err, errLineTooLong) {
+			reply(w, 500, "5.5.2 line too long")
+			continue
+		}
 		if err != nil {
 			return
 		}
@@ -373,6 +377,49 @@ func (s *Server) greetEHLO(w *bufio.Writer, arg string, isTLS, authAvailable boo
 		fmt.Fprintf(w, "250%s%s\r\n", sep, l)
 	}
 	w.Flush()
+}
+
+// maxCommandLine is the RFC 5321 §4.5.3.1.4 limit on a command line including the
+// trailing CRLF. Commands are tiny, so anything approaching this is malformed or a
+// memory-exhaustion probe; the reader caps the read rather than buffering without
+// bound. The DATA body's per-line limit (§4.5.3.1.6) is deliberately not enforced
+// as a hard reject: major senders routinely exceed 1000 octets and total-size
+// abuse is already bounded by SIZE, so a strict line cap would only break interop.
+const maxCommandLine = 512
+
+// errLineTooLong is returned by readCommandLine when a command line exceeds
+// maxCommandLine; the caller answers 500 and stays in protocol sync.
+var errLineTooLong = errors.New("smtp: command line too long")
+
+// readCommandLine reads one CRLF-terminated command line from r, enforcing
+// maxCommandLine. It returns the line without the trailing CRLF. When the limit
+// is exceeded it drains the rest of the line and returns errLineTooLong, so the
+// connection stays framed for the next command.
+func readCommandLine(r *bufio.Reader) (string, error) {
+	buf := make([]byte, 0, 128)
+	for {
+		b, err := r.ReadByte()
+		if err != nil {
+			return "", err
+		}
+		if b == '\n' {
+			if n := len(buf); n > 0 && buf[n-1] == '\r' {
+				buf = buf[:n-1]
+			}
+			return string(buf), nil
+		}
+		if len(buf) >= maxCommandLine {
+			// Over the limit: discard the remainder of this line so the next
+			// read starts at a command boundary, then report it.
+			for b != '\n' {
+				if b, err = r.ReadByte(); err != nil {
+					return "", err
+				}
+			}
+			return "", errLineTooLong
+		}
+		buf = append(buf, b)
+	}
 }
 
 // reply writes a single-line SMTP response and flushes it.
