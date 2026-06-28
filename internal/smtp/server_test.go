@@ -254,6 +254,62 @@ func TestServerEnforcesMaxSize(t *testing.T) {
 	expect(t, r, 552)
 }
 
+// TestServerEnhancedStatusCodes proves RFC 2034: EHLO advertises
+// ENHANCEDSTATUSCODES and replies lead with an RFC 3463 status code. A bare
+// reply gets the class default (a 250 carries 2.0.0, a 503 carries a 5.x.x),
+// while a reply that already embeds a specific code keeps it; the 220 banner and
+// the 354 DATA intermediate stay bare.
+func TestServerEnhancedStatusCodes(t *testing.T) {
+	r, conn := dialServer(t, &fakeSession{})
+	// The banner stays bare so its first token is the domain.
+	_, banner, err := r.ReadResponse(220)
+	if err != nil {
+		t.Fatalf("banner: %v", err)
+	}
+	if startsWithEnhanced(banner) {
+		t.Errorf("220 banner carries an enhanced code, want bare: %q", banner)
+	}
+
+	fmt.Fprint(conn, "EHLO client.test\r\n")
+	_, ehlo, err := r.ReadResponse(250)
+	if err != nil {
+		t.Fatalf("EHLO: %v", err)
+	}
+	if !strings.Contains(ehlo, "ENHANCEDSTATUSCODES") {
+		t.Errorf("EHLO did not advertise ENHANCEDSTATUSCODES: %q", ehlo)
+	}
+
+	// A bare 250 gains the class default 2.0.0.
+	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	_, mailMsg, err := r.ReadResponse(250)
+	if err != nil {
+		t.Fatalf("MAIL: %v", err)
+	}
+	if !strings.HasPrefix(mailMsg, "2.0.0 ") {
+		t.Errorf("MAIL reply missing the 2.0.0 enhanced code: %q", mailMsg)
+	}
+
+	// A bare error reply carries the 5.0.0 class default.
+	fmt.Fprint(conn, "DATA\r\n")
+	_, dataMsg, err := r.ReadResponse(503)
+	if err != nil {
+		t.Fatalf("DATA: %v", err)
+	}
+	if !startsWithEnhanced(dataMsg) || dataMsg[0] != '5' {
+		t.Errorf("503 reply missing a 5.x.x enhanced code: %q", dataMsg)
+	}
+
+	// A reply that already embeds a specific code is not double-prefixed.
+	fmt.Fprint(conn, "VRFY bob@test\r\n")
+	_, vrfyMsg, err := r.ReadResponse(252)
+	if err != nil {
+		t.Fatalf("VRFY: %v", err)
+	}
+	if !strings.HasPrefix(vrfyMsg, "2.1.5 ") {
+		t.Errorf("VRFY reply lost or doubled its specific code: %q", vrfyMsg)
+	}
+}
+
 // TestServerCommandLineLimit proves RFC 5321 §4.5.3.1.4: a command line past
 // 512 octets is rejected with 500 rather than buffered without bound, and the
 // connection stays framed so the next command parses normally.

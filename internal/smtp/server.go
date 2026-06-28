@@ -359,6 +359,7 @@ func (s *Server) greetEHLO(w *bufio.Writer, arg string, isTLS, authAvailable boo
 		fmt.Sprintf("%s Hello %s", s.hostname(), strings.TrimSpace(arg)),
 		"PIPELINING",
 		"8BITMIME",
+		"ENHANCEDSTATUSCODES",
 	}
 	if max := s.maxSize.Load(); max > 0 {
 		lines = append(lines, fmt.Sprintf("SIZE %d", max))
@@ -422,10 +423,58 @@ func readCommandLine(r *bufio.Reader) (string, error) {
 	}
 }
 
-// reply writes a single-line SMTP response and flushes it.
+// reply writes a single-line SMTP response and flushes it. The server advertises
+// ENHANCEDSTATUSCODES (RFC 2034), so every 2xx/4xx/5xx reply must lead with an
+// RFC 3463 status code; a bare message gets the class default (2.0.0/4.0.0/5.0.0)
+// while a message that already carries a specific code (e.g. "5.7.1") is left as
+// is. The connection/STARTTLS 220 banner and the 354 intermediate stay bare:
+// 3xx has no enhanced class and a code in the banner would shadow the domain.
 func reply(w *bufio.Writer, code int, msg string) {
+	if enh := defaultEnhanced(code); enh != "" && !startsWithEnhanced(msg) {
+		msg = enh + " " + msg
+	}
 	fmt.Fprintf(w, "%d %s\r\n", code, msg)
 	w.Flush()
+}
+
+// defaultEnhanced returns the class-default RFC 3463 status code for an SMTP
+// reply code, or "" when none applies (3xx has no class, and the 220 banner is
+// kept bare so its first token stays the domain).
+func defaultEnhanced(code int) string {
+	if code == 220 {
+		return ""
+	}
+	switch code / 100 {
+	case 2:
+		return "2.0.0"
+	case 4:
+		return "4.0.0"
+	case 5:
+		return "5.0.0"
+	}
+	return ""
+}
+
+// startsWithEnhanced reports whether msg already begins with an RFC 3463 status
+// code token (class.subject.detail with class 2, 4, or 5), so reply does not
+// prepend a second one.
+func startsWithEnhanced(msg string) bool {
+	tok, _, _ := strings.Cut(msg, " ")
+	parts := strings.Split(tok, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	for _, p := range parts {
+		if p == "" {
+			return false
+		}
+		for _, c := range p {
+			if c < '0' || c > '9' {
+				return false
+			}
+		}
+	}
+	return parts[0] == "2" || parts[0] == "4" || parts[0] == "5"
 }
 
 // extractPath pulls the <addr> out of a "FROM:<addr>" / "TO:<addr>" argument,
