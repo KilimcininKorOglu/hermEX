@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/smtp"
 	"net/textproto"
+	"os"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -256,7 +257,7 @@ func (w *Worker) send(host string, it Item, requireTLS bool) error {
 	}
 	defer c.Close()
 
-	if err := c.Hello(w.heloName()); err != nil {
+	if err := c.Hello(w.heloName(conn.LocalAddr())); err != nil {
 		return err
 	}
 	// MTA-STS enforce (RFC 8461): the certificate is validated against host (which
@@ -290,11 +291,38 @@ func (w *Worker) send(host string, it Item, requireTLS bool) error {
 	return c.Quit()
 }
 
-func (w *Worker) heloName() string {
+// heloName is the name announced in EHLO. The operator's configured HeloName (the
+// MTA's FQDN) is preferred. When unset, it falls back to the OS host name, then to
+// an address literal of the connection's local address (RFC 5321 §4.1.4: a host
+// with no name announces an address literal). Bare "localhost" is a last resort
+// only: it is a local alias an SMTP transaction must not carry (RFC 5321 §2.3.5)
+// and receiving MTAs routinely reject it, so a real identity is used whenever one
+// is available.
+func (w *Worker) heloName(local net.Addr) string {
 	if w.HeloName != "" {
 		return w.HeloName
 	}
+	if h, err := os.Hostname(); err == nil && h != "" && h != "localhost" {
+		return h
+	}
+	if lit := addressLiteral(local); lit != "" {
+		return lit
+	}
 	return "localhost"
+}
+
+// addressLiteral renders a connection's local address as an SMTP address literal
+// ("[192.0.2.1]" or "[IPv6:2001:db8::1]", RFC 5321 §4.1.3), or "" when no IP can
+// be taken from it (a nil or non-TCP address).
+func addressLiteral(addr net.Addr) string {
+	ta, ok := addr.(*net.TCPAddr)
+	if !ok || ta.IP == nil {
+		return ""
+	}
+	if ta.IP.To4() != nil {
+		return "[" + ta.IP.String() + "]"
+	}
+	return "[IPv6:" + ta.IP.String() + "]"
 }
 
 func (w *Worker) log(level logging.Level, name string, it Item, err error) {

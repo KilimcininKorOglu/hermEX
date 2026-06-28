@@ -57,6 +57,47 @@ func TestOrderMXPreferenceAndShuffle(t *testing.T) {
 	}
 }
 
+// TestAddressLiteral proves the RFC 5321 §4.1.3 address-literal rendering: IPv4 is
+// bracketed bare, IPv6 carries the "IPv6:" tag, and a nil or non-TCP address yields
+// "" so heloName falls through rather than announce a malformed literal.
+func TestAddressLiteral(t *testing.T) {
+	cases := []struct {
+		name string
+		addr net.Addr
+		want string
+	}{
+		{"ipv4", &net.TCPAddr{IP: net.ParseIP("192.0.2.7"), Port: 25}, "[192.0.2.7]"},
+		{"ipv6", &net.TCPAddr{IP: net.ParseIP("2001:db8::1"), Port: 25}, "[IPv6:2001:db8::1]"},
+		{"nil", nil, ""},
+		{"non-tcp", &net.UDPAddr{IP: net.ParseIP("192.0.2.7")}, ""},
+		{"no-ip", &net.TCPAddr{Port: 25}, ""},
+	}
+	for _, c := range cases {
+		if got := addressLiteral(c.addr); got != c.want {
+			t.Errorf("%s: addressLiteral = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// TestHeloNameFallback proves the configured FQDN is announced verbatim and, when
+// unset, the fallback never degrades to the forbidden bare "localhost" alias while
+// any real identity (OS host name, else the connection's address literal) exists.
+func TestHeloNameFallback(t *testing.T) {
+	configured := &Worker{HeloName: "mx.example.com"}
+	if got := configured.heloName(nil); got != "mx.example.com" {
+		t.Errorf("configured heloName = %q, want mx.example.com", got)
+	}
+
+	// With no configured name, a real connection address is available, so the
+	// result is a usable identity, never the bare "localhost" local alias.
+	unset := &Worker{}
+	local := &net.TCPAddr{IP: net.ParseIP("192.0.2.7"), Port: 33333}
+	got := unset.heloName(local)
+	if got == "localhost" || got == "" {
+		t.Errorf("unset heloName = %q, want a non-localhost identity (OS host or address literal)", got)
+	}
+}
+
 // TestWorkerSetRetryPolicy proves the retry tuning is read from the runtime override,
 // so an operator's edit (applied by the MTA's poll) decides the backoff and attempt
 // limit without a restart, and beats any construction-time field.
