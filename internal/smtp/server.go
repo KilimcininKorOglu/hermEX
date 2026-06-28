@@ -114,6 +114,11 @@ func (s *Server) handle(conn net.Conn) {
 	_, canAuth := sess.(Authenticator)
 	var hasFrom bool
 	var rcptCount int
+	// greeted records that the client has sent HELO/EHLO. RFC 5321 §4.1.4: a
+	// session carrying mail transactions MUST first be initialized by EHLO, so
+	// MAIL before a greeting is a 503. Non-mail commands (VRFY/EXPN/HELP) are
+	// accepted without it. STARTTLS clears it (the client re-issues EHLO).
+	var greeted bool
 	// Trace context for the Received: header stamped at DATA time: the HELO/EHLO
 	// argument names the connecting client. It is cleared by STARTTLS, which
 	// discards all prior session state (RFC 3207).
@@ -127,12 +132,12 @@ func (s *Server) handle(conn net.Conn) {
 		event(logging.LevelDebug, "command", logging.Fields{"cmd": strings.ToUpper(cmd)})
 		switch strings.ToUpper(cmd) {
 		case "HELO":
-			hasFrom, rcptCount = false, 0
+			hasFrom, rcptCount, greeted = false, 0, true
 			helo = arg
 			sess.Reset()
 			reply(w, 250, s.hostname())
 		case "EHLO":
-			hasFrom, rcptCount = false, 0
+			hasFrom, rcptCount, greeted = false, 0, true
 			helo = arg
 			sess.Reset()
 			s.greetEHLO(w, arg, isTLS, canAuth && isTLS)
@@ -159,10 +164,14 @@ func (s *Server) handle(conn net.Conn) {
 			// RFC 3207: discard all state negotiated before TLS; the client
 			// re-issues EHLO over the secured link.
 			sess.Reset()
-			hasFrom, rcptCount = false, 0
+			hasFrom, rcptCount, greeted = false, 0, false
 			helo = ""
 			event(logging.LevelInfo, "starttls", nil)
 		case "MAIL":
+			if !greeted {
+				reply(w, 503, "5.5.1 send HELO/EHLO first")
+				continue
+			}
 			addr, ok := extractPath(arg, "FROM:")
 			if !ok {
 				reply(w, 501, "syntax: MAIL FROM:<address>")

@@ -176,6 +176,27 @@ func TestServerTransaction(t *testing.T) {
 // TestServerEnforcesMaxSize proves the size limit set via SetMaxSize is both
 // advertised (EHLO SIZE) and enforced (an over-limit message is rejected 552), the
 // hook the MTA's poll drives so an operator's edit applies without a restart.
+// TestServerMailRequiresGreeting proves RFC 5321 §4.1.4: a mail transaction
+// must be initialized by EHLO/HELO, so MAIL before any greeting is a 503, while
+// a non-mail command (VRFY) is still accepted without the greeting. After EHLO
+// the same MAIL succeeds.
+func TestServerMailRequiresGreeting(t *testing.T) {
+	r, conn := dialServer(t, &fakeSession{})
+	expect(t, r, 220)
+
+	// MAIL with no prior greeting is a bad sequence.
+	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	expect(t, r, 503)
+	// A non-mail command needs no greeting (§4.1.4).
+	fmt.Fprint(conn, "VRFY bob@test\r\n")
+	expect(t, r, 252)
+	// After EHLO the transaction opens normally.
+	fmt.Fprint(conn, "EHLO client.test\r\n")
+	expect(t, r, 250)
+	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	expect(t, r, 250)
+}
+
 // TestServerServiceCommands proves the RFC 5321 service commands return their
 // proper codes instead of the 500 of an unrecognized command: VRFY answers the
 // privacy-preserving 252 (never confirming an address, §7.3), EXPN is disabled
