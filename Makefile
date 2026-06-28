@@ -53,9 +53,11 @@ vet:
 fmt:
 	$(COMPOSE) exec -T dev gofmt -w internal cmd
 
-## fmt-check: list files needing gofmt (dev container); empty output means clean
+## fmt-check: fail when any file needs gofmt (dev container). gofmt -l only lists
+## and always exits 0, so the gate must check the output is empty itself.
 fmt-check:
-	$(COMPOSE) exec -T dev gofmt -l internal cmd
+	@out="$$($(COMPOSE) exec -T dev gofmt -l internal cmd)"; \
+	if [ -n "$$out" ]; then echo "gofmt needed on:"; echo "$$out"; exit 1; fi
 
 ## gate: fmt-check + vet + full test — the pre-commit gate
 gate: fmt-check vet test
