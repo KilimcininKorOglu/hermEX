@@ -113,10 +113,10 @@ func TestMatchDANETA(t *testing.T) {
 func TestMatchUnusableRecords(t *testing.T) {
 	leaf, _ := issue(t, "mx.example.com", "mx.example.com", false, nil, nil)
 	unusable := []Record{
-		{Usage: 0, Selector: selectorCert, MatchingType: matchSHA256, Data: sha256d(leaf.Raw)},        // PKIX-TA
-		{Usage: 1, Selector: selectorCert, MatchingType: matchSHA256, Data: sha256d(leaf.Raw)},        // PKIX-EE
-		{Usage: usageDANEEE, Selector: selectorCert, MatchingType: 0, Data: leaf.Raw},                 // Full(0) matching type
-		{Usage: usageDANEEE, Selector: 2, MatchingType: matchSHA256, Data: sha256d(leaf.Raw)},         // unknown selector
+		{Usage: 0, Selector: selectorCert, MatchingType: matchSHA256, Data: sha256d(leaf.Raw)}, // PKIX-TA
+		{Usage: 1, Selector: selectorCert, MatchingType: matchSHA256, Data: sha256d(leaf.Raw)}, // PKIX-EE
+		{Usage: usageDANEEE, Selector: selectorCert, MatchingType: 0, Data: leaf.Raw},          // Full(0) matching type
+		{Usage: usageDANEEE, Selector: 2, MatchingType: matchSHA256, Data: sha256d(leaf.Raw)},  // unknown selector
 	}
 	if err := Match(unusable, []*x509.Certificate{leaf}, "mx.example.com"); err == nil {
 		t.Error("a record set of only unusable associations must not authenticate")
@@ -132,9 +132,9 @@ func TestRecordUsable(t *testing.T) {
 	}{
 		{Record{Usage: usageDANEEE, Selector: selectorCert, MatchingType: matchSHA256}, true},
 		{Record{Usage: usageDANETA, Selector: selectorSPKI, MatchingType: matchSHA512}, true},
-		{Record{Usage: 0, Selector: selectorCert, MatchingType: matchSHA256}, false},  // PKIX usage
-		{Record{Usage: usageDANEEE, Selector: 2, MatchingType: matchSHA256}, false},   // bad selector
-		{Record{Usage: usageDANEEE, Selector: selectorCert, MatchingType: 0}, false},  // Full match type
+		{Record{Usage: 0, Selector: selectorCert, MatchingType: matchSHA256}, false}, // PKIX usage
+		{Record{Usage: usageDANEEE, Selector: 2, MatchingType: matchSHA256}, false},  // bad selector
+		{Record{Usage: usageDANEEE, Selector: selectorCert, MatchingType: 0}, false}, // Full match type
 	}
 	for _, c := range cases {
 		if got := c.rec.usable(); got != c.want {
