@@ -28,6 +28,7 @@ import (
 	"hermex/internal/logging"
 	"hermex/internal/meeting"
 	"hermex/internal/mta"
+	"hermex/internal/dane"
 	"hermex/internal/mtasts"
 	"hermex/internal/notify"
 	"hermex/internal/objectstore"
@@ -285,6 +286,10 @@ func main() {
 		// enforce mode gets validated TLS to a policy-listed MX or no delivery. This
 		// only changes behavior for domains that opt in by publishing a policy.
 		Policy: (&mtasts.Resolver{}).Lookup,
+		// DANE/TLSA (RFC 7672): when an operator configures a DNSSEC-validating
+		// resolver, authenticate outbound TLS against MX hosts' TLSA records.
+		// Empty leaves DANE off, so delivery stays on opportunistic TLS + MTA-STS.
+		DANE: daneResolver(cfg.DaneResolver),
 		// When the worker abandons an external recipient, return a non-delivery
 		// report to the (local, authenticated) sender through the local delivery
 		// path, so a failed send is reported rather than lost silently.
@@ -545,6 +550,16 @@ func runMessageSizeMaintenance(dir *directory.SQLDirectory, srv *smtp.Server) {
 	for range tick.C {
 		applyMessageSizeSettings(dir, srv)
 	}
+}
+
+// daneResolver builds the relay worker's DANE resolver from the configured
+// validating-resolver address. An empty address returns nil, leaving DANE off so
+// outbound delivery stays on opportunistic TLS plus any MTA-STS policy.
+func daneResolver(addr string) *dane.Resolver {
+	if addr == "" {
+		return nil
+	}
+	return &dane.Resolver{Addr: addr}
 }
 
 // applyRelaySettings reads the stored outbound retry policy and applies it to the relay

@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"hermex/internal/dane"
 	"hermex/internal/logging"
 	"hermex/internal/mtasts"
 )
@@ -52,6 +53,13 @@ type Worker struct {
 	// mail exchanger mandatory and certificate-validated, and excludes any MX host
 	// the policy does not list.
 	Policy func(domain string) (*mtasts.Policy, error)
+
+	// DANE, when set, authenticates outbound TLS against a mail exchanger's
+	// DNSSEC-validated TLSA records (RFC 7672). nil disables DANE, leaving
+	// delivery on opportunistic STARTTLS (plus any MTA-STS policy). When a host
+	// publishes usable secure TLSA records, TLS becomes mandatory and the server
+	// certificate is authenticated against them.
+	DANE *dane.Resolver
 
 	// backoffOverride (nanoseconds) and maxAttemptsOverride hold an operator's edited
 	// retry policy, set via SetRetryPolicy. They are read atomically by the single Run
@@ -260,17 +268,46 @@ func (w *Worker) send(host string, it Item, requireTLS bool) error {
 	if err := c.Hello(w.heloName(conn.LocalAddr())); err != nil {
 		return err
 	}
+	// DANE (RFC 7672): when a DNSSEC-validating resolver is configured and this
+	// mail exchanger publishes usable secure TLSA records, TLS is mandatory and
+	// the certificate is authenticated against those records. A TLSA lookup error
+	// (e.g. a bogus/SERVFAIL response) fails the host rather than downgrading.
+	var daneRecs []dane.Record
+	if w.DANE != nil {
+		recs, applicable, err := w.DANE.LookupTLSA(host, 25)
+		if err != nil {
+			return err
+		}
+		if applicable {
+			daneRecs = recs
+		}
+	}
 	// MTA-STS enforce (RFC 8461): the certificate is validated against host (which
 	// already matched the policy), and a server that does not offer STARTTLS is
 	// refused rather than used in the clear. Otherwise STARTTLS is opportunistic
 	// (RFC 7435): encrypt when advertised, accepting any certificate, since the
 	// alternative is cleartext and encryption without authentication is still better.
 	if ok, _ := c.Extension("STARTTLS"); ok {
-		if err := c.StartTLS(&tls.Config{ServerName: host, InsecureSkipVerify: !requireTLS}); err != nil {
+		cfg := &tls.Config{ServerName: host, InsecureSkipVerify: !requireTLS}
+		if len(daneRecs) > 0 {
+			// Authenticate against the TLSA records instead of the PKIX trust
+			// store: skip the default verification and match the presented chain
+			// in VerifyConnection (RFC 7672 §3).
+			cfg = &tls.Config{
+				ServerName:         host,
+				InsecureSkipVerify: true,
+				VerifyConnection: func(cs tls.ConnectionState) error {
+					return dane.Match(daneRecs, cs.PeerCertificates, host)
+				},
+			}
+		}
+		if err := c.StartTLS(cfg); err != nil {
 			return err
 		}
 	} else if requireTLS {
 		return fmt.Errorf("mtasts: %s requires STARTTLS but %s does not offer it", domainPart(it.Recipient), host)
+	} else if len(daneRecs) > 0 {
+		return fmt.Errorf("dane: %s publishes TLSA records but %s does not offer STARTTLS", domainPart(it.Recipient), host)
 	}
 	if err := c.Mail(it.From); err != nil {
 		return err

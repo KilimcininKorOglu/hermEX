@@ -11,6 +11,7 @@ require (
 	github.com/go-ldap/ldap/v3 v3.4.13
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/klauspost/compress v1.18.4
+	github.com/miekg/dns v1.1.72
 	github.com/smallstep/pkcs7 v0.2.1
 	go.mongodb.org/mongo-driver/v2 v2.7.0
 	golang.org/x/net v0.53.0
@@ -30,7 +31,6 @@ require (
 	github.com/libdns/libdns v1.1.1 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mholt/acmez/v3 v3.1.6 // indirect
-	github.com/miekg/dns v1.1.72 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/xdg-go/pbkdf2 v1.0.0 // indirect

@@ -40,6 +40,7 @@ type Config struct {
 	IMAPSAddr      string   `json:"imaps_addr"`      // IMAP implicit-TLS listen address (e.g. ":993"); empty disables
 	POP3SAddr      string   `json:"pop3s_addr"`      // POP3 implicit-TLS listen address (e.g. ":995"); empty disables
 	SMTPSAddr      string   `json:"smtps_addr"`      // SMTP implicit-TLS listen address (e.g. ":465"); empty disables
+	DaneResolver   string   `json:"dane_resolver"`   // address of a DNSSEC-validating resolver for outbound DANE/TLSA (RFC 7672); bare host gets :53, empty disables DANE (opportunistic TLS only)
 
 	// Gateway front door. Only the gateway daemon reads these; every other daemon
 	// ignores them, so they stay optional in the one shared config. Each empty field
