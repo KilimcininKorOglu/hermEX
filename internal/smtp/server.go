@@ -225,6 +225,20 @@ func (s *Server) handle(conn net.Conn) {
 		case "QUIT":
 			reply(w, 221, s.hostname()+" closing connection")
 			return
+		case "VRFY":
+			// RFC 5321 §3.5.1/§7.3: never confirm or deny a specific address
+			// (that is user enumeration). Return the privacy-preserving 252,
+			// which promises only to accept and attempt delivery; a 250 or 550
+			// would leak whether the mailbox exists.
+			reply(w, 252, "2.1.5 Cannot VRFY user, but will accept message and attempt delivery")
+		case "EXPN":
+			// RFC 5321 §3.5.2/§7.3: mailing-list expansion is disabled (an
+			// address-harvesting vector); 502 marks it recognized but not
+			// implemented (§4.2.4), not the 500 of an unknown command.
+			reply(w, 502, "5.5.1 EXPN not available")
+		case "HELP":
+			// RFC 5321 §4.1.1.8: a 214 help reply, recognized rather than 500.
+			reply(w, 214, "2.0.0 hermEX ESMTP; supported: HELO EHLO MAIL RCPT DATA RSET NOOP QUIT (RFC 5321)")
 		default:
 			reply(w, 500, "command not recognized")
 		}

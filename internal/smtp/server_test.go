@@ -176,6 +176,27 @@ func TestServerTransaction(t *testing.T) {
 // TestServerEnforcesMaxSize proves the size limit set via SetMaxSize is both
 // advertised (EHLO SIZE) and enforced (an over-limit message is rejected 552), the
 // hook the MTA's poll drives so an operator's edit applies without a restart.
+// TestServerServiceCommands proves the RFC 5321 service commands return their
+// proper codes instead of the 500 of an unrecognized command: VRFY answers the
+// privacy-preserving 252 (never confirming an address, §7.3), EXPN is disabled
+// with 502 (recognized-but-unimplemented, §4.2.4), and HELP gives a 214.
+func TestServerServiceCommands(t *testing.T) {
+	r, conn := dialServer(t, &fakeSession{})
+	expect(t, r, 220)
+	fmt.Fprint(conn, "EHLO client.test\r\n")
+	expect(t, r, 250)
+
+	fmt.Fprint(conn, "VRFY bob@test\r\n")
+	expect(t, r, 252)
+	fmt.Fprint(conn, "EXPN staff@test\r\n")
+	expect(t, r, 502)
+	fmt.Fprint(conn, "HELP\r\n")
+	expect(t, r, 214)
+	// A genuinely unknown verb still falls through to 500.
+	fmt.Fprint(conn, "FROBNICATE\r\n")
+	expect(t, r, 500)
+}
+
 func TestServerEnforcesMaxSize(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
