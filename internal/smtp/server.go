@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/textproto"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -176,6 +177,16 @@ func (s *Server) handle(conn net.Conn) {
 			if !ok {
 				reply(w, 501, "syntax: MAIL FROM:<address>")
 				continue
+			}
+			// RFC 1870: when the client declares SIZE and it exceeds the
+			// advertised maximum, refuse the whole transaction now with 552
+			// rather than accepting MAIL/RCPT and streaming the body only to
+			// reject it after the bytes have crossed the wire.
+			if max := s.maxSize.Load(); max > 0 {
+				if sz, ok := declaredSize(esmtpParams(arg)); ok && sz > max {
+					reply(w, 552, "5.3.4 message size exceeds limit")
+					continue
+				}
 			}
 			if err := sess.Mail(addr); err != nil {
 				replySessionErr(w, err)
@@ -384,6 +395,41 @@ func extractPath(arg, prefix string) (string, bool) {
 		return "", false
 	}
 	return rest[1:closeIdx], true
+}
+
+// esmtpParams parses the space-separated ESMTP parameters that follow the
+// <reverse-path>/<forward-path> in a MAIL FROM / RCPT TO argument, e.g.
+// "SIZE=1234 BODY=8BITMIME SMTPUTF8". Keys are upper-cased; a bare keyword maps
+// to an empty value. It returns nil when there are no trailing parameters.
+func esmtpParams(arg string) map[string]string {
+	_, after, found := strings.Cut(arg, ">")
+	if !found {
+		return nil
+	}
+	fields := strings.Fields(after)
+	if len(fields) == 0 {
+		return nil
+	}
+	params := make(map[string]string, len(fields))
+	for _, f := range fields {
+		k, v, _ := strings.Cut(f, "=")
+		params[strings.ToUpper(k)] = v
+	}
+	return params
+}
+
+// declaredSize returns the SIZE= value (RFC 1870) from a MAIL FROM parameter set,
+// and whether it was present and well-formed.
+func declaredSize(params map[string]string) (int64, bool) {
+	v, ok := params["SIZE"]
+	if !ok {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(v, 10, 64)
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
 }
 
 // errTooLarge surfaces through this reader when the message exceeds MaxSize.

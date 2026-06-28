@@ -254,6 +254,42 @@ func TestServerEnforcesMaxSize(t *testing.T) {
 	expect(t, r, 552)
 }
 
+// TestServerSizeDeclaration proves RFC 1870 early rejection: a MAIL FROM whose
+// declared SIZE exceeds the advertised maximum is refused with 552 before any
+// RCPT or DATA, while a declaration under the limit (or none) opens the
+// transaction normally.
+func TestServerSizeDeclaration(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &Server{Backend: &fakeBackend{sess: &fakeSession{}}, Hostname: "mail.test"}
+	srv.SetMaxSize(1000)
+	go srv.Serve(ln)
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		ln.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close(); ln.Close() })
+	r := textproto.NewReader(bufio.NewReader(conn))
+
+	expect(t, r, 220)
+	fmt.Fprint(conn, "EHLO client.test\r\n")
+	expect(t, r, 250)
+	// Over the 1000-byte limit: rejected at MAIL, no transaction opened.
+	fmt.Fprint(conn, "MAIL FROM:<alice@test> SIZE=5000\r\n")
+	expect(t, r, 552)
+	// Under the limit: accepted.
+	fmt.Fprint(conn, "MAIL FROM:<alice@test> SIZE=200\r\n")
+	expect(t, r, 250)
+	fmt.Fprint(conn, "RSET\r\n")
+	expect(t, r, 250)
+	// No SIZE parameter at all: unaffected.
+	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	expect(t, r, 250)
+}
+
 // TestBuildReceived covers the reference Received form: the helo name plus the
 // reverse-DNS name and client IP in the from-clause, the SMTP/SMTPS "with" token
 // (SMTPS only over TLS — neither EHLO nor AUTH is recorded there), an empty helo or
