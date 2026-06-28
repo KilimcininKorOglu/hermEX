@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,49 @@ import (
 	"hermex/internal/mtasts"
 	hsmtp "hermex/internal/smtp"
 )
+
+// TestOrderMXPreferenceAndShuffle proves orderMX honors the two RFC 5321 §5.1
+// rules at once: hosts are emitted in ascending preference (a lower-preference
+// host always precedes every higher-preference one), and hosts that share a
+// preference are randomized (the section's MUST, to spread load). The ordering
+// invariant is asserted on every run; randomization is proven by observing more
+// than one arrangement of an equal-preference group across many runs, so deleting
+// the shuffle (leaving a fixed order) fails the test. Null-MX "." hosts are dropped.
+func TestOrderMXPreferenceAndShuffle(t *testing.T) {
+	mxs := []*net.MX{
+		{Host: "p20-b.example.", Pref: 20},
+		{Host: "p10-a.example.", Pref: 10},
+		{Host: "p10-b.example.", Pref: 10},
+		{Host: "p10-c.example.", Pref: 10},
+		{Host: ".", Pref: 10}, // null MX, must be dropped
+		{Host: "p20-a.example.", Pref: 20},
+	}
+	const pref10Count, pref20Count = 3, 2
+
+	seen := map[string]struct{}{}
+	for range 200 {
+		got := orderMX(mxs)
+		if len(got) != pref10Count+pref20Count {
+			t.Fatalf("orderMX returned %d hosts %v, want %d (null MX not dropped?)", len(got), got, pref10Count+pref20Count)
+		}
+		// The first pref10Count entries must be exactly the preference-10 group and
+		// the rest the preference-20 group: a lower preference never sorts after a
+		// higher one, regardless of the intra-group shuffle.
+		for i, h := range got {
+			wantPrefix := "p10-"
+			if i >= pref10Count {
+				wantPrefix = "p20-"
+			}
+			if !strings.HasPrefix(h, wantPrefix) {
+				t.Fatalf("position %d = %q, want a %s host (preference ordering broken): %v", i, h, wantPrefix, got)
+			}
+		}
+		seen[strings.Join(got, ",")] = struct{}{}
+	}
+	if len(seen) < 2 {
+		t.Errorf("equal-preference hosts never reordered across 200 runs (%d arrangement); RFC 5321 §5.1 randomization missing", len(seen))
+	}
+}
 
 // TestWorkerSetRetryPolicy proves the retry tuning is read from the runtime override,
 // so an operator's edit (applied by the MTA's poll) decides the backoff and attempt

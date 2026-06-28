@@ -5,9 +5,11 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net"
 	"net/smtp"
 	"net/textproto"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -321,12 +323,7 @@ func dialPort25(host string) (net.Conn, error) {
 func LookupMX(domain string) ([]string, error) {
 	mxs, err := net.LookupMX(domain)
 	if err == nil && len(mxs) > 0 {
-		hosts := make([]string, 0, len(mxs))
-		for _, mx := range mxs {
-			if h := strings.TrimSuffix(mx.Host, "."); h != "" {
-				hosts = append(hosts, h) // a lone "." is a null MX (RFC 7505)
-			}
-		}
+		hosts := orderMX(mxs)
 		if len(hosts) == 0 {
 			return nil, fmt.Errorf("%s does not accept mail (null MX)", domain)
 		}
@@ -336,6 +333,32 @@ func LookupMX(domain string) ([]string, error) {
 		return nil, fmt.Errorf("no mail exchanger for %s", domain)
 	}
 	return []string{domain}, nil
+}
+
+// orderMX flattens MX records into delivery order: ascending preference (RFC 5321
+// §5.1, where lower preference numbers are more preferred), with hosts that share a
+// preference shuffled so load spreads across an organization's equal mail
+// exchangers (the section's MUST). A lone "." host is a null MX (RFC 7505) and is
+// dropped, so an all-null set yields an empty list the caller reports as an error.
+func orderMX(mxs []*net.MX) []string {
+	sorted := append([]*net.MX(nil), mxs...)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Pref < sorted[j].Pref })
+	hosts := make([]string, 0, len(sorted))
+	for i := 0; i < len(sorted); {
+		j := i
+		for j < len(sorted) && sorted[j].Pref == sorted[i].Pref {
+			j++
+		}
+		group := sorted[i:j]
+		rand.Shuffle(len(group), func(a, b int) { group[a], group[b] = group[b], group[a] })
+		for _, mx := range group {
+			if h := strings.TrimSuffix(mx.Host, "."); h != "" {
+				hosts = append(hosts, h)
+			}
+		}
+		i = j
+	}
+	return hosts
 }
 
 // domainPart returns the lowercase domain of an address, or "" when it has none.
