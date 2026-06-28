@@ -167,10 +167,10 @@ func TestRcptGreylistDefersUnauthenticated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sess.Mail("bob@ext.example"); err != nil {
+	if err := sess.Mail("bob@ext.example", smtp.MailParams{}); err != nil {
 		t.Fatal(err)
 	}
-	err = sess.Rcpt("alice@test")
+	err = sess.Rcpt("alice@test", smtp.RcptParams{})
 	var te *smtp.TempError
 	if !errors.As(err, &te) {
 		t.Fatalf("first contact should defer with a TempError, got %v", err)
@@ -193,7 +193,7 @@ func TestRcptGreylistSkipsAuthenticated(t *testing.T) {
 	// separate concern); the greylist gate keys only on s.authUser being set.
 	cs := sess.(*session)
 	cs.authUser, cs.from = "submitter@test", "bob@ext.example"
-	if err := cs.Rcpt("alice@test"); err != nil {
+	if err := cs.Rcpt("alice@test", smtp.RcptParams{}); err != nil {
 		t.Fatalf("authenticated submission must not be greylisted: %v", err)
 	}
 }

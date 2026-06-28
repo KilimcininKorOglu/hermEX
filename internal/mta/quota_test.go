@@ -9,6 +9,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/smtp"
 )
 
 // TestRcptReceiveQuota proves an over-quota mailbox is refused at RCPT — a
@@ -44,19 +45,19 @@ func TestRcptReceiveQuota(t *testing.T) {
 
 	// A receive quota above the current usage: accepted.
 	setQuota(uint32(size/1024) + 100)
-	if err := (&session{accounts: accounts}).Rcpt("bob@local"); err != nil {
+	if err := (&session{accounts: accounts}).Rcpt("bob@local", smtp.RcptParams{}); err != nil {
 		t.Errorf("under-quota Rcpt refused: %v", err)
 	}
 
 	// A receive quota below the current usage: refused permanently.
 	setQuota(1)
-	if err := (&session{accounts: accounts}).Rcpt("bob@local"); err == nil {
+	if err := (&session{accounts: accounts}).Rcpt("bob@local", smtp.RcptParams{}); err == nil {
 		t.Error("over-quota Rcpt accepted, want a permanent refusal")
 	}
 
 	// No quota (0 = unlimited): accepted regardless of usage.
 	setQuota(0)
-	if err := (&session{accounts: accounts}).Rcpt("bob@local"); err != nil {
+	if err := (&session{accounts: accounts}).Rcpt("bob@local", smtp.RcptParams{}); err != nil {
 		t.Errorf("unlimited Rcpt refused: %v", err)
 	}
 }
@@ -98,19 +99,19 @@ func TestMailSendQuota(t *testing.T) {
 	accounts := directory.StaticAccounts{"bob@local": {MailboxPath: dir}}
 
 	setSendQuota(t, dir, 1) // 1 KiB, far below usage
-	if err := (&session{accounts: accounts, authUser: "bob@local"}).Mail("bob@local"); err == nil {
+	if err := (&session{accounts: accounts, authUser: "bob@local"}).Mail("bob@local", smtp.MailParams{}); err == nil {
 		t.Error("over-send-quota MAIL FROM accepted, want a refusal")
 	}
 
 	setSendQuota(t, dir, 1<<20) // 1 GiB, above usage
-	if err := (&session{accounts: accounts, authUser: "bob@local"}).Mail("bob@local"); err != nil {
+	if err := (&session{accounts: accounts, authUser: "bob@local"}).Mail("bob@local", smtp.MailParams{}); err != nil {
 		t.Errorf("under-send-quota MAIL FROM refused: %v", err)
 	}
 
 	// Unauthenticated intake is never blocked by send quota — the local user is
 	// not the one sending.
 	setSendQuota(t, dir, 1)
-	if err := (&session{accounts: accounts}).Mail("bob@local"); err != nil {
+	if err := (&session{accounts: accounts}).Mail("bob@local", smtp.MailParams{}); err != nil {
 		t.Errorf("unauthenticated MAIL FROM refused: %v", err)
 	}
 }

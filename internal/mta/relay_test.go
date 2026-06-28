@@ -10,6 +10,7 @@ import (
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/relay"
+	"hermex/internal/smtp"
 )
 
 // TestSubmissionRelayRouting proves the local/external split of an authenticated
@@ -28,22 +29,22 @@ func TestSubmissionRelayRouting(t *testing.T) {
 
 	// Authenticated submission.
 	s := &session{accounts: accounts, spool: sp, authUser: "alice@local"}
-	if err := s.Mail("alice@local"); err != nil {
+	if err := s.Mail("alice@local", smtp.MailParams{}); err != nil {
 		t.Fatalf("mail: %v", err)
 	}
-	if err := s.Rcpt("alice@local"); err != nil {
+	if err := s.Rcpt("alice@local", smtp.RcptParams{}); err != nil {
 		t.Fatalf("rcpt local: %v", err)
 	}
-	if err := s.Rcpt("bob@remote"); err != nil {
+	if err := s.Rcpt("bob@remote", smtp.RcptParams{}); err != nil {
 		t.Fatalf("rcpt external: %v", err)
 	}
-	if err := s.Rcpt("ghost@local"); err == nil {
+	if err := s.Rcpt("ghost@local", smtp.RcptParams{}); err == nil {
 		t.Error("an unknown user in a local domain must be refused, never relayed")
 	}
 	if len(s.targets) != 1 || s.targets[0].addr != "alice@local" {
 		t.Fatalf("local targets = %v, want [alice@local]", s.targets)
 	}
-	if len(s.relayTargets) != 1 || s.relayTargets[0] != "bob@remote" {
+	if len(s.relayTargets) != 1 || s.relayTargets[0].Addr != "bob@remote" {
 		t.Fatalf("relay targets = %v, want [bob@remote]", s.relayTargets)
 	}
 
@@ -80,7 +81,7 @@ func TestSubmissionRelayRouting(t *testing.T) {
 
 	// An unauthenticated session may not relay to an external recipient.
 	u := &session{accounts: accounts, spool: sp}
-	if err := u.Rcpt("bob@remote"); err == nil {
+	if err := u.Rcpt("bob@remote", smtp.RcptParams{}); err == nil {
 		t.Error("unauthenticated relay to an external recipient must be refused")
 	}
 }

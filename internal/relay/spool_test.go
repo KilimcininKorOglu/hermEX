@@ -51,8 +51,10 @@ func TestSpoolBaselineAdoption(t *testing.T) {
 		t.Fatalf("open existing spool: %v", err)
 	}
 	defer s.Close()
-	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 1 {
-		t.Fatalf("user_version after adoption = %d (err %v), want 1", v, err)
+	// Adoption records v1, then the pending DSN migration carries it to v2; the
+	// ALTERs must apply cleanly to a baseline-adopted spool.
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 2 {
+		t.Fatalf("user_version after adoption = %d (err %v), want 2", v, err)
 	}
 	var n int
 	if err := s.db.QueryRow("SELECT COUNT(*) FROM messages").Scan(&n); err != nil || n != 1 {
@@ -251,5 +253,42 @@ func TestSpoolDurableAcrossReopen(t *testing.T) {
 	}
 	if len(due) != 1 || due[0].Recipient != "x@remote" {
 		t.Fatalf("after reopen, claim = %v, want the persisted x@remote", due)
+	}
+}
+
+// TestSpoolDSNNotifyRoundTrip proves a recipient's RFC 3461 NOTIFY survives the
+// EnqueueDSN to Claim round trip (the value the give-up path reads to decide
+// whether a bounce is wanted), and that the plain Enqueue path leaves it empty
+// (the "send failure DSN" default). A silent loss here would let a NEVER
+// recipient receive backscatter, so the assertion is on the exact value.
+func TestSpoolDSNNotifyRoundTrip(t *testing.T) {
+	s := openSpool(t)
+	t0 := time.Unix(3_000_000, 0)
+	body := []byte("Subject: hi\r\n\r\nbody\r\n")
+
+	// One DSN-carrying recipient (NOTIFY=NEVER, with ORCPT) and, via plain
+	// Enqueue, one with no DSN preference.
+	if err := s.EnqueueDSN("a@local", "HDRS", "envid-1",
+		[]DSNRecipient{{Addr: "never@remote", Notify: "NEVER", ORCPT: "rfc822;never@remote"}},
+		body, t0); err != nil {
+		t.Fatalf("enqueue-dsn: %v", err)
+	}
+	if err := s.Enqueue("a@local", []string{"plain@remote"}, body, t0); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+
+	due, err := s.Claim(t0, 10)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	got := map[string]string{}
+	for _, it := range due {
+		got[it.Recipient] = it.Notify
+	}
+	if v, ok := got["never@remote"]; !ok || v != "NEVER" {
+		t.Errorf("claimed NOTIFY for never@remote = %q (present %v), want \"NEVER\"", v, ok)
+	}
+	if v, ok := got["plain@remote"]; !ok || v != "" {
+		t.Errorf("claimed NOTIFY for plain@remote = %q (present %v), want empty", v, ok)
 	}
 }

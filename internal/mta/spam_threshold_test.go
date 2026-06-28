@@ -9,6 +9,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/smtp"
 )
 
 // fixedThresholds is a per-maildir spam-threshold override map; a maildir absent from
@@ -28,11 +29,11 @@ func deliverInbound(t *testing.T, b *Backend, from string, rcpts ...string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sess.Mail(from); err != nil {
+	if err := sess.Mail(from, smtp.MailParams{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, r := range rcpts {
-		if err := sess.Rcpt(r); err != nil {
+		if err := sess.Rcpt(r, smtp.RcptParams{}); err != nil {
 			t.Fatal(err)
 		}
 	}

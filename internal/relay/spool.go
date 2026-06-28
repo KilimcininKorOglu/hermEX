@@ -58,6 +58,20 @@ type Item struct {
 	Recipient   string
 	Body        []byte
 	Attempts    int
+	// Notify is the recipient's RFC 3461 NOTIFY value as received on RCPT TO
+	// (e.g. "NEVER" or "SUCCESS,FAILURE"), empty when the sender supplied none.
+	// The give-up path consults it to decide whether a failure DSN is wanted.
+	Notify string
+}
+
+// DSNRecipient is one external recipient together with its RFC 3461 per-recipient
+// DSN parameters: the address, the NOTIFY condition value, and the ORCPT
+// original-recipient value. Notify and ORCPT are empty when the sender supplied
+// none.
+type DSNRecipient struct {
+	Addr   string
+	Notify string
+	ORCPT  string
 }
 
 // QueueEntry is one queued recipient delivery as shown in the administrative
@@ -117,6 +131,19 @@ func (s *Spool) ensureSchema() error {
 // may then answer 250: the message has become the server's responsibility. An
 // empty recipient list is a no-op.
 func (s *Spool) Enqueue(from string, recipients []string, body []byte, now time.Time) error {
+	rcpts := make([]DSNRecipient, len(recipients))
+	for i, r := range recipients {
+		rcpts[i] = DSNRecipient{Addr: r}
+	}
+	return s.EnqueueDSN(from, "", "", rcpts, body, now)
+}
+
+// EnqueueDSN is Enqueue with RFC 3461 DSN parameters: the message-level RET and
+// ENVID, and each recipient's NOTIFY and ORCPT. They are stored alongside the
+// delivery so the worker's give-up path can honor NOTIFY (suppress an unwanted
+// bounce) and a future failure report can echo ENVID/ORCPT/RET. Empty strings
+// mean the sender supplied no preference, which preserves the pre-DSN behavior.
+func (s *Spool) EnqueueDSN(from, ret, envid string, recipients []DSNRecipient, body []byte, now time.Time) error {
 	if len(recipients) == 0 {
 		return nil
 	}
@@ -130,8 +157,8 @@ func (s *Spool) Enqueue(from string, recipients []string, body []byte, now time.
 		return err
 	}
 	defer tx.Rollback()
-	res, err := tx.Exec(`INSERT INTO messages (envelope_from, body, enqueued_at) VALUES (?, ?, ?)`,
-		from, body, now.Unix())
+	res, err := tx.Exec(`INSERT INTO messages (envelope_from, body, enqueued_at, ret, envid) VALUES (?, ?, ?, ?, ?)`,
+		from, body, now.Unix(), ret, envid)
 	if err != nil {
 		return err
 	}
@@ -141,8 +168,8 @@ func (s *Spool) Enqueue(from string, recipients []string, body []byte, now time.
 	}
 	for _, rcpt := range recipients {
 		if _, err := tx.Exec(
-			`INSERT INTO recipients (message_id, recipient, next_attempt) VALUES (?, ?, ?)`,
-			mid, rcpt, now.Unix()); err != nil {
+			`INSERT INTO recipients (message_id, recipient, next_attempt, notify, orcpt) VALUES (?, ?, ?, ?, ?)`,
+			mid, rcpt.Addr, now.Unix(), rcpt.Notify, rcpt.ORCPT); err != nil {
 			return err
 		}
 	}
@@ -154,7 +181,7 @@ func (s *Spool) Enqueue(from string, recipients []string, body []byte, now time.
 // fairly.
 func (s *Spool) Claim(now time.Time, limit int) ([]Item, error) {
 	rows, err := s.db.Query(`
-SELECT r.id, m.envelope_from, r.recipient, m.body, r.attempts
+SELECT r.id, m.envelope_from, r.recipient, m.body, r.attempts, r.notify
   FROM recipients r JOIN messages m ON m.id = r.message_id
  WHERE r.next_attempt <= ?
  ORDER BY r.next_attempt, r.id
@@ -166,7 +193,7 @@ SELECT r.id, m.envelope_from, r.recipient, m.body, r.attempts
 	var items []Item
 	for rows.Next() {
 		var it Item
-		if err := rows.Scan(&it.RecipientID, &it.From, &it.Recipient, &it.Body, &it.Attempts); err != nil {
+		if err := rows.Scan(&it.RecipientID, &it.From, &it.Recipient, &it.Body, &it.Attempts, &it.Notify); err != nil {
 			return nil, err
 		}
 		items = append(items, it)

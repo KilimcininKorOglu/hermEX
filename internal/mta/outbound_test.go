@@ -125,11 +125,11 @@ func TestRcptOutboundDefersAuthenticatedBlast(t *testing.T) {
 	ob.SetEnabled(true)
 
 	for i := range 2 {
-		if err := outboundSession(t, ob, "alice@local").Rcpt("v" + strconv.Itoa(i) + "@remote"); err != nil {
+		if err := outboundSession(t, ob, "alice@local").Rcpt("v"+strconv.Itoa(i)+"@remote", smtp.RcptParams{}); err != nil {
 			t.Fatalf("external recipient %d within the cap must be accepted, got %v", i+1, err)
 		}
 	}
-	err := outboundSession(t, ob, "alice@local").Rcpt("v9@remote")
+	err := outboundSession(t, ob, "alice@local").Rcpt("v9@remote", smtp.RcptParams{})
 	if _, ok := errors.AsType[*smtp.TempError](err); !ok {
 		t.Fatalf("the external recipient past the cap must defer with a TempError, got %v", err)
 	}
@@ -144,7 +144,7 @@ func TestRcptOutboundSkipsUnauthenticated(t *testing.T) {
 	ob.SetLimits(1, time.Hour)
 	ob.SetEnabled(true)
 
-	err := outboundSession(t, ob, "").Rcpt("v@remote") // authUser == ""
+	err := outboundSession(t, ob, "").Rcpt("v@remote", smtp.RcptParams{}) // authUser == ""
 	if err == nil {
 		t.Fatal("unauthenticated relay must be refused")
 	}

@@ -9,6 +9,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/logging"
 	"hermex/internal/objectstore"
+	"hermex/internal/smtp"
 )
 
 // captureSink records every event for assertion.
@@ -40,10 +41,10 @@ func TestDeliveryLogsRecipient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sess.Mail("sender@example.com"); err != nil {
+	if err := sess.Mail("sender@example.com", smtp.MailParams{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := sess.Rcpt("alice@test"); err != nil {
+	if err := sess.Rcpt("alice@test", smtp.RcptParams{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := sess.Data(strings.NewReader("Subject: hi\r\n\r\nbody\r\n")); err != nil {

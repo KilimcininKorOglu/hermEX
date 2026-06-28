@@ -95,11 +95,11 @@ func TestMailRateLimitDefersUnauthenticatedFlood(t *testing.T) {
 
 	newUnauth := func() *session { return &session{remoteAddr: "203.0.113.9:2500", rateLimit: rl} }
 	for i := range 2 {
-		if err := newUnauth().Mail("spammer@ext.example"); err != nil {
+		if err := newUnauth().Mail("spammer@ext.example", smtp.MailParams{}); err != nil {
 			t.Fatalf("message %d within the burst must be accepted, got %v", i+1, err)
 		}
 	}
-	err := newUnauth().Mail("spammer@ext.example")
+	err := newUnauth().Mail("spammer@ext.example", smtp.MailParams{})
 	if _, ok := errors.AsType[*smtp.TempError](err); !ok {
 		t.Fatalf("the message past the burst must defer with a TempError, got %v", err)
 	}
@@ -114,12 +114,12 @@ func TestMailRateLimitSkipsAuthenticated(t *testing.T) {
 	accounts := resolveOnly{"alice@test": "/x"}
 
 	// Spend the network's unauthenticated budget (burst 1).
-	if err := (&session{accounts: accounts, remoteAddr: "203.0.113.9:2500", rateLimit: rl}).Mail("x@ext.example"); err != nil {
+	if err := (&session{accounts: accounts, remoteAddr: "203.0.113.9:2500", rateLimit: rl}).Mail("x@ext.example", smtp.MailParams{}); err != nil {
 		t.Fatalf("the first unauthenticated message is accepted, got %v", err)
 	}
 	// An authenticated submission from the same network is still accepted.
 	s := &session{accounts: accounts, authUser: "alice@test", remoteAddr: "203.0.113.9:2500", rateLimit: rl}
-	if err := s.Mail("alice@test"); err != nil {
+	if err := s.Mail("alice@test", smtp.MailParams{}); err != nil {
 		t.Errorf("authenticated submission must never be rate limited, got %v", err)
 	}
 }

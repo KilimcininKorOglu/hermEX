@@ -289,6 +289,12 @@ func main() {
 		// report to the (local, authenticated) sender through the local delivery
 		// path, so a failed send is reported rather than lost silently.
 		OnGiveUp: func(it relay.Item, cause error) {
+			// RFC 3461: honor the recipient's NOTIFY. NEVER (or any value not
+			// requesting FAILURE) means the sender wants no failure notice, so
+			// suppress the bounce rather than emit backscatter.
+			if !mta.NotifyFailureWanted(it.Notify) {
+				return
+			}
 			report := mta.Bounce(cfg.Hostname, it.From, it.Recipient, cause.Error(), time.Now())
 			unresolved, err := mta.Deliver(dir, "", []string{it.From}, report, time.Now())
 			if err != nil || len(unresolved) > 0 {

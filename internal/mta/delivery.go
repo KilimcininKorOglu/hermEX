@@ -87,10 +87,12 @@ type session struct {
 	recipAccess  RecipientAccessResolver
 	outbound     *OutboundLimiter
 	from         string
-	targets      []target // local recipients, filed into mailboxes
-	relayTargets []string // external recipients, spooled for outbound relay
-	authUser     string   // set on a successful AUTH; empty for unauthenticated intake
-	authMailbox  string   // the authenticated user's mailbox store path
+	targets      []target             // local recipients, filed into mailboxes
+	relayTargets []relay.DSNRecipient // external recipients (with DSN params), spooled for outbound relay
+	ret          string               // RFC 3461 RET (FULL/HDRS) from MAIL FROM; "" when absent
+	envid        string               // RFC 3461 ENVID from MAIL FROM; "" when absent
+	authUser     string               // set on a successful AUTH; empty for unauthenticated intake
+	authMailbox  string               // the authenticated user's mailbox store path
 }
 
 // Auth implements smtp.Authenticator: it validates submission credentials against
@@ -130,7 +132,7 @@ type target struct {
 // user owns, so an authenticated account cannot forge mail from another. Inbound
 // intake (no AUTH) keeps an unrestricted sender — a remote MTA legitimately
 // relays mail from any origin.
-func (s *session) Mail(from string) error {
+func (s *session) Mail(from string, params smtp.MailParams) error {
 	if s.authUser != "" && !s.authorizedSender(from) {
 		return fmt.Errorf("5.7.1 <%s> is not an address you may send as", from)
 	}
@@ -146,6 +148,10 @@ func (s *session) Mail(from string) error {
 		return &smtp.TempError{Message: "4.7.1 too many messages, please retry later"}
 	}
 	s.from = from
+	// RFC 3461: RET and ENVID are envelope-wide, carried to the relay spool so a
+	// later non-delivery report can shape and correlate itself. They are validated
+	// at the protocol layer; here they are recorded verbatim.
+	s.ret, s.envid = params.RET, params.ENVID
 	return nil
 }
 
@@ -222,7 +228,7 @@ func (s *session) identities() []string {
 // user may relay (no open relay), and only to a domain this server is not
 // authoritative for — an unresolved address in a local domain is a genuine
 // user-unknown that must never be relayed (it would loop straight back).
-func (s *session) Rcpt(to string) error {
+func (s *session) Rcpt(to string, params smtp.RcptParams) error {
 	// A distribution-list recipient expands to its members. The posting-privilege
 	// gate refuses here (a 550 — no message accepted, no backscatter, exactly like
 	// the receive-quota gate); members are then routed leniently, since a stale
@@ -236,19 +242,22 @@ func (s *session) Rcpt(to string) error {
 			if res != directory.MListOK {
 				return fmt.Errorf("5.7.1 posting to list <%s> is not permitted", to)
 			}
+			// Expanded members inherit the list recipient's NOTIFY (so NOTIFY=NEVER
+			// on a list post suppresses every member's bounce) but not its ORCPT,
+			// which named the list address, not the member.
 			for _, m := range leaves {
-				s.routeListMember(m)
+				s.routeListMember(m, params.Notify)
 			}
 			return nil
 		}
 	}
-	return s.routeRecipient(to)
+	return s.routeRecipient(to, params.Notify, params.ORCPT)
 }
 
 // routeRecipient files a single ordinary recipient: a local mailbox becomes a
 // delivery target; an unresolved address is refused unless this is an
 // authenticated submission relaying to an external domain.
-func (s *session) routeRecipient(to string) error {
+func (s *session) routeRecipient(to, notify, orcpt string) error {
 	if path, ok := s.accounts.Resolve(to); ok {
 		if err := overReceiveQuota(path); err != nil {
 			return err
@@ -282,7 +291,7 @@ func (s *session) routeRecipient(to string) error {
 	if s.outbound != nil && !s.outbound.Allow(s.authUser) {
 		return &smtp.TempError{Message: "4.7.4 too many recipients in a short time, please retry later"}
 	}
-	s.relayTargets = append(s.relayTargets, to)
+	s.relayTargets = append(s.relayTargets, relay.DSNRecipient{Addr: to, Notify: notify, ORCPT: orcpt})
 	return nil
 }
 
@@ -290,7 +299,7 @@ func (s *session) routeRecipient(to string) error {
 // becomes a delivery target (skipped when over its receive quota), an external
 // member is relayed when a spool is available. A member that resolves to nothing
 // is dropped — a list must not bounce because one member went stale.
-func (s *session) routeListMember(m string) {
+func (s *session) routeListMember(m, notify string) {
 	if path, ok := s.accounts.Resolve(m); ok {
 		if overReceiveQuota(path) == nil {
 			s.targets = append(s.targets, target{addr: m, path: path})
@@ -299,7 +308,7 @@ func (s *session) routeListMember(m string) {
 	}
 	if s.spool != nil {
 		if ext, err := isExternalDomain(s.accounts, m); err == nil && ext {
-			s.relayTargets = append(s.relayTargets, m)
+			s.relayTargets = append(s.relayTargets, relay.DSNRecipient{Addr: m, Notify: notify})
 		}
 	}
 }
@@ -394,7 +403,7 @@ func (s *session) Data(r io.Reader) error {
 	if s.authUser == "" {
 		avM = avInboundSMTP
 	}
-	switch scanMessage(s.accounts, avM, s.from, avRecipients(s.targets, s.relayTargets), raw, received) {
+	switch scanMessage(s.accounts, avM, s.from, avRecipients(s.targets, relayAddrs(s.relayTargets)), raw, received) {
 	case avTempFail:
 		return &smtp.TempError{Message: "4.7.1 virus scanner temporarily unavailable, retry later"}
 	case avHandled:
@@ -496,7 +505,7 @@ func (s *session) Data(r io.Reader) error {
 	// commits, the worker owns their delivery (and retry), so returning success
 	// here lets the server answer 250 — the message is no longer at risk of loss.
 	if len(s.relayTargets) > 0 {
-		if err := s.spool.Enqueue(s.from, s.relayTargets, raw, received); err != nil {
+		if err := s.spool.EnqueueDSN(s.from, s.ret, s.envid, s.relayTargets, raw, received); err != nil {
 			s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "relay.fail", User: s.authUser, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "recipients": len(s.relayTargets)}, Err: err.Error()})
 			return err
 		}
@@ -505,8 +514,24 @@ func (s *session) Data(r io.Reader) error {
 	return nil
 }
 
-func (s *session) Reset()        { s.from = ""; s.targets = nil; s.relayTargets = nil }
+func (s *session) Reset() {
+	s.from = ""
+	s.targets = nil
+	s.relayTargets = nil
+	s.ret = ""
+	s.envid = ""
+}
 func (s *session) Logout() error { return nil }
+
+// relayAddrs projects the external recipients' addresses for the antivirus
+// recipient list, which takes plain addresses without their DSN parameters.
+func relayAddrs(rs []relay.DSNRecipient) []string {
+	addrs := make([]string, len(rs))
+	for i, r := range rs {
+		addrs[i] = r.Addr
+	}
+	return addrs
+}
 
 // clientIP extracts the IP from a "host:port" remote address (nil if unparseable),
 // for SPF and DNS blocklist checks.

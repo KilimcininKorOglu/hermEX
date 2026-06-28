@@ -156,8 +156,11 @@ type recordingSession struct {
 	cur recordedMsg
 }
 
-func (s *recordingSession) Mail(from string) error { s.cur.from = from; return nil }
-func (s *recordingSession) Rcpt(to string) error {
+func (s *recordingSession) Mail(from string, _ hsmtp.MailParams) error {
+	s.cur.from = from
+	return nil
+}
+func (s *recordingSession) Rcpt(to string, _ hsmtp.RcptParams) error {
 	if s.b.rcptErr != nil {
 		return s.b.rcptErr
 	}

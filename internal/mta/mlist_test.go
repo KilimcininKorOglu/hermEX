@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/smtp"
 )
 
 // fakeExpander is a configurable MListExpander: each entry maps a list address to
@@ -129,7 +130,7 @@ func TestRcptRoutesListMembers(t *testing.T) {
 
 	t.Run("members become targets", func(t *testing.T) {
 		s := &session{accounts: accounts, from: "x@out.test"}
-		if err := s.Rcpt("team@local"); err != nil {
+		if err := s.Rcpt("team@local", smtp.RcptParams{}); err != nil {
 			t.Fatalf("Rcpt(list) = %v, want nil", err)
 		}
 		if len(s.targets) != 2 {
@@ -139,7 +140,7 @@ func TestRcptRoutesListMembers(t *testing.T) {
 
 	t.Run("posting refusal is a 550", func(t *testing.T) {
 		s := &session{accounts: accounts, from: "x@out.test"}
-		if err := s.Rcpt("closed@local"); err == nil {
+		if err := s.Rcpt("closed@local", smtp.RcptParams{}); err == nil {
 			t.Error("Rcpt to a posting-denied list should be refused")
 		}
 		if len(s.targets) != 0 {
@@ -149,7 +150,7 @@ func TestRcptRoutesListMembers(t *testing.T) {
 
 	t.Run("a stale member is dropped, not fatal", func(t *testing.T) {
 		s := &session{accounts: accounts, from: "x@out.test"}
-		if err := s.Rcpt("stale@local"); err != nil {
+		if err := s.Rcpt("stale@local", smtp.RcptParams{}); err != nil {
 			t.Fatalf("Rcpt with a stale member = %v, want nil", err)
 		}
 		if len(s.targets) != 1 {

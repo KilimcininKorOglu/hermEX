@@ -73,15 +73,21 @@ func TestServerDataTempErrorIsTemporary(t *testing.T) {
 }
 
 type fakeSession struct {
-	from    string
-	rcpts   []string
-	data    []byte
-	rcptErr error // when set, Rcpt returns it (to exercise the error→reply mapping)
-	dataErr error // when set, Data returns it (to exercise the DATA error→reply mapping)
+	from     string
+	rcpts    []string
+	data     []byte
+	lastMail MailParams // the parameters of the most recent Mail call
+	lastRcpt RcptParams // the parameters of the most recent Rcpt call
+	rcptErr  error      // when set, Rcpt returns it (to exercise the error→reply mapping)
+	dataErr  error      // when set, Data returns it (to exercise the DATA error→reply mapping)
 }
 
-func (s *fakeSession) Mail(from string) error { s.from = from; return nil }
-func (s *fakeSession) Rcpt(to string) error {
+func (s *fakeSession) Mail(from string, params MailParams) error {
+	s.from, s.lastMail = from, params
+	return nil
+}
+func (s *fakeSession) Rcpt(to string, params RcptParams) error {
+	s.lastRcpt = params
 	if s.rcptErr != nil {
 		return s.rcptErr
 	}
@@ -644,4 +650,121 @@ func TestServerSequencingAndSyntax(t *testing.T) {
 	expect(t, r, 500)
 	fmt.Fprint(conn, "QUIT\r\n")
 	expect(t, r, 221)
+}
+
+func TestDSNMailParams(t *testing.T) {
+	cases := []struct {
+		arg   string
+		ret   string
+		envid string
+		ok    bool
+	}{
+		{"<a@b>", "", "", true},                                 // no DSN params
+		{"<a@b> RET=FULL", "FULL", "", true},                    // RET upper-cased through
+		{"<a@b> RET=hdrs", "HDRS", "", true},                    // case-insensitive
+		{"<a@b> ENVID=abc123", "", "abc123", true},              // simple xtext
+		{"<a@b> RET=FULL ENVID=id+2Bx", "FULL", "id+2Bx", true}, // both, +2B is a valid hexchar
+		{"<a@b> RET=PARTIAL", "", "", false},                    // invalid RET keyword
+		{"<a@b> RET=FULL RET=HDRS", "", "", false},              // duplicate RET
+		{"<a@b> ENVID=a ENVID=b", "", "", false},                // duplicate ENVID
+		{"<a@b> ENVID=bad=value", "", "", false},                // '=' is not a valid xchar
+		{"<a@b> ENVID=trunc+2", "", "", false},                  // truncated hexchar
+	}
+	for _, c := range cases {
+		p, ok := dsnMailParams(c.arg)
+		if ok != c.ok || p.RET != c.ret || p.ENVID != c.envid {
+			t.Errorf("dsnMailParams(%q) = (%+v,%v), want (RET=%q ENVID=%q,%v)", c.arg, p, ok, c.ret, c.envid, c.ok)
+		}
+	}
+}
+
+func TestDSNRcptParams(t *testing.T) {
+	cases := []struct {
+		arg    string
+		notify string
+		orcpt  string
+		ok     bool
+	}{
+		{"<a@b>", "", "", true},                                       // none
+		{"<a@b> NOTIFY=NEVER", "NEVER", "", true},                     // NEVER alone
+		{"<a@b> NOTIFY=SUCCESS,FAILURE", "SUCCESS,FAILURE", "", true}, // combinable list
+		{"<a@b> ORCPT=rfc822;bob@x", "", "rfc822;bob@x", true},        // addr-type;xtext
+		{"<a@b> NOTIFY=DELAY ORCPT=rfc822;c@x", "DELAY", "rfc822;c@x", true},
+		{"<a@b> NOTIFY=NEVER,SUCCESS", "", "", false},        // NEVER must be alone
+		{"<a@b> NOTIFY=MAYBE", "", "", false},                // unknown keyword
+		{"<a@b> NOTIFY=", "", "", false},                     // empty value invalid
+		{"<a@b> NOTIFY=SUCCESS NOTIFY=DELAY", "", "", false}, // duplicate
+		{"<a@b> ORCPT=bob@x", "", "", false},                 // missing addr-type ';'
+		{"<a@b> ORCPT=rfc822;bad=val", "", "", false},        // '=' breaks the xtext
+	}
+	for _, c := range cases {
+		p, ok := dsnRcptParams(c.arg)
+		if ok != c.ok || p.Notify != c.notify || p.ORCPT != c.orcpt {
+			t.Errorf("dsnRcptParams(%q) = (%+v,%v), want (Notify=%q ORCPT=%q,%v)", c.arg, p, ok, c.notify, c.orcpt, c.ok)
+		}
+	}
+}
+
+func TestValidXtext(t *testing.T) {
+	cases := []struct {
+		s  string
+		ok bool
+	}{
+		{"", true},       // empty is valid xtext
+		{"abc", true},    // bare xchars
+		{"a+2Bb", true},  // a literal '+' encoded as +2B
+		{"a=b", false},   // '=' is excluded from xchar
+		{"a+b", false},   // '+' not followed by two hex digits
+		{"a+2", false},   // truncated hexchar
+		{"a+2zb", false}, // 'z' is not a hex digit
+		{"a+2bb", false}, // lower-case hex is rejected (upper-case only)
+		{"a b", false},   // space is below the printable range
+	}
+	for _, c := range cases {
+		if got := validXtext(c.s); got != c.ok {
+			t.Errorf("validXtext(%q) = %v, want %v", c.s, got, c.ok)
+		}
+	}
+}
+
+// TestServerDSN proves RFC 3461 on the wire: EHLO advertises DSN, a MAIL/RCPT
+// carrying valid RET/ENVID/NOTIFY/ORCPT is accepted with those parameters
+// delivered to the session, and a malformed DSN parameter is refused with 501
+// without opening the transaction.
+func TestServerDSN(t *testing.T) {
+	sess := &fakeSession{}
+	r, conn := dialServer(t, sess)
+	expect(t, r, 220)
+
+	fmt.Fprint(conn, "EHLO client.test\r\n")
+	_, ehlo, err := r.ReadResponse(250)
+	if err != nil {
+		t.Fatalf("EHLO: %v", err)
+	}
+	if !strings.Contains(ehlo, "DSN") {
+		t.Errorf("EHLO did not advertise DSN: %q", ehlo)
+	}
+
+	// Valid RET/ENVID on MAIL reach the session.
+	fmt.Fprint(conn, "MAIL FROM:<alice@test> RET=HDRS ENVID=id01\r\n")
+	expect(t, r, 250)
+	if sess.lastMail.RET != "HDRS" || sess.lastMail.ENVID != "id01" {
+		t.Errorf("session MailParams = %+v, want RET=HDRS ENVID=id01", sess.lastMail)
+	}
+	// Valid NOTIFY/ORCPT on RCPT reach the session.
+	fmt.Fprint(conn, "RCPT TO:<bob@test> NOTIFY=NEVER ORCPT=rfc822;bob@test\r\n")
+	expect(t, r, 250)
+	if sess.lastRcpt.Notify != "NEVER" || sess.lastRcpt.ORCPT != "rfc822;bob@test" {
+		t.Errorf("session RcptParams = %+v, want NOTIFY=NEVER ORCPT=rfc822;bob@test", sess.lastRcpt)
+	}
+
+	// A malformed DSN parameter is a 501 before the transaction opens.
+	fmt.Fprint(conn, "RSET\r\n")
+	expect(t, r, 250)
+	fmt.Fprint(conn, "MAIL FROM:<alice@test> RET=PARTIAL\r\n")
+	expect(t, r, 501)
+	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	expect(t, r, 250)
+	fmt.Fprint(conn, "RCPT TO:<bob@test> NOTIFY=NEVER,SUCCESS\r\n")
+	expect(t, r, 501)
 }

@@ -11,6 +11,7 @@ import (
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/smtp"
 )
 
 // recordingHistory captures recorded verdicts; errHistory always fails, to prove
@@ -52,10 +53,10 @@ func TestInboundSpamScoring(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sess.Mail("bob@external.example"); err != nil {
+	if err := sess.Mail("bob@external.example", smtp.MailParams{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := sess.Rcpt("alice@test"); err != nil {
+	if err := sess.Rcpt("alice@test", smtp.RcptParams{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := sess.Data(strings.NewReader("From: Bob <bob@external.example>\r\nSubject: hi\r\n\r\nbody")); err != nil {
@@ -113,10 +114,10 @@ func TestSpamScoredLogsReasons(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sess.Mail("bob@external.example"); err != nil {
+	if err := sess.Mail("bob@external.example", smtp.MailParams{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := sess.Rcpt("alice@test"); err != nil {
+	if err := sess.Rcpt("alice@test", smtp.RcptParams{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := sess.Data(strings.NewReader("From: bob@external.example\r\nSubject: x\r\n\r\nbody")); err != nil {
@@ -151,10 +152,10 @@ func TestInboundSpamRecordedToHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sess.Mail("bob@external.example"); err != nil {
+	if err := sess.Mail("bob@external.example", smtp.MailParams{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := sess.Rcpt("alice@test"); err != nil {
+	if err := sess.Rcpt("alice@test", smtp.RcptParams{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := sess.Data(strings.NewReader("From: bob@external.example\r\nSubject: x\r\n\r\nbody")); err != nil {
@@ -182,10 +183,10 @@ func TestSpamHistoryFailOpen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sess.Mail("bob@external.example"); err != nil {
+	if err := sess.Mail("bob@external.example", smtp.MailParams{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := sess.Rcpt("alice@test"); err != nil {
+	if err := sess.Rcpt("alice@test", smtp.RcptParams{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := sess.Data(strings.NewReader("From: bob@external.example\r\nSubject: x\r\n\r\nbody")); err != nil {
@@ -217,10 +218,10 @@ func TestSpamFiledToJunk(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sess.Mail("bob@external.example"); err != nil {
+	if err := sess.Mail("bob@external.example", smtp.MailParams{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := sess.Rcpt("alice@test"); err != nil {
+	if err := sess.Rcpt("alice@test", smtp.RcptParams{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := sess.Data(strings.NewReader("From: bob@external.example\r\nSubject: spam\r\n\r\nbuy now")); err != nil {

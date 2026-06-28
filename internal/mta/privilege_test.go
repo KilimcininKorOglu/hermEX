@@ -7,6 +7,7 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/objectstore"
+	"hermex/internal/smtp"
 )
 
 // privDir wraps a static directory but reports a fixed privilege set, so a test
@@ -47,7 +48,7 @@ func TestSMTPSubmissionPrivilege(t *testing.T) {
 
 	// Inbound intake (no AUTH) for the same user is unaffected — a revoked SMTP
 	// submission privilege must never stop a mailbox from receiving mail.
-	if err := (&session{accounts: auth}).Rcpt("bob@local"); err != nil {
+	if err := (&session{accounts: auth}).Rcpt("bob@local", smtp.RcptParams{}); err != nil {
 		t.Errorf("inbound Rcpt for an SMTP-disabled user refused: %v", err)
 	}
 }

@@ -28,13 +28,32 @@ type Backend interface {
 	NewSession(remoteAddr string) (Session, error)
 }
 
+// MailParams carries the validated ESMTP MAIL FROM parameters the backend acts
+// on. RET and ENVID are the RFC 3461 DSN parameters (RET is "FULL" or "HDRS"
+// upper-cased, or empty; ENVID is the sender's envelope identifier as received,
+// still xtext-encoded). Empty means the sender supplied none.
+type MailParams struct {
+	RET   string
+	ENVID string
+}
+
+// RcptParams carries the validated ESMTP RCPT TO parameters the backend acts on.
+// Notify and ORCPT are the RFC 3461 per-recipient DSN parameters (Notify as
+// received, e.g. "NEVER" or "SUCCESS,FAILURE"; ORCPT as the "addr-type;xtext"
+// original-recipient value). Empty means the sender supplied none.
+type RcptParams struct {
+	Notify string
+	ORCPT  string
+}
+
 // Session carries one connection's state through its mail transactions. Mail
 // begins a transaction, Rcpt adds a recipient, Data consumes the message body,
 // Reset abandons the current transaction, and Logout is called once as the
-// connection closes.
+// connection closes. Mail and Rcpt receive the validated ESMTP parameters for
+// that command.
 type Session interface {
-	Mail(from string) error
-	Rcpt(to string) error
+	Mail(from string, params MailParams) error
+	Rcpt(to string, params RcptParams) error
 	Data(r io.Reader) error
 	Reset()
 	Logout() error
@@ -221,7 +240,15 @@ func (s *Server) handle(conn net.Conn) {
 				reply(w, 501, "5.5.2 syntax error in MT-PRIORITY parameter")
 				continue
 			}
-			if err := sess.Mail(addr); err != nil {
+			// RFC 3461 §5.1(a): a malformed or duplicated RET/ENVID MUST be
+			// refused with 501; a valid one never changes the reply this MAIL
+			// would otherwise get.
+			mailDSN, ok := dsnMailParams(arg)
+			if !ok {
+				reply(w, 501, "5.5.4 syntax error in DSN parameter")
+				continue
+			}
+			if err := sess.Mail(addr, mailDSN); err != nil {
 				replySessionErr(w, err)
 				continue
 			}
@@ -242,7 +269,15 @@ func (s *Server) handle(conn net.Conn) {
 				reply(w, 501, "syntax: RCPT TO:<address>")
 				continue
 			}
-			if err := sess.Rcpt(addr); err != nil {
+			// RFC 3461 §5.1(b): a malformed or duplicated NOTIFY/ORCPT MUST be
+			// refused with 501; a valid one never changes the reply this RCPT
+			// would otherwise get.
+			rcptDSN, ok := dsnRcptParams(arg)
+			if !ok {
+				reply(w, 501, "5.5.4 syntax error in DSN parameter")
+				continue
+			}
+			if err := sess.Rcpt(addr, rcptDSN); err != nil {
 				replySessionErr(w, err)
 				continue
 			}
@@ -500,6 +535,7 @@ func (s *Server) greetEHLO(w *bufio.Writer, arg string, isTLS, authAvailable boo
 		"CHUNKING",
 		"BINARYMIME",
 		"MT-PRIORITY",
+		"DSN",
 	}
 	if max := s.maxSize.Load(); max > 0 {
 		lines = append(lines, fmt.Sprintf("SIZE %d", max))
@@ -698,6 +734,151 @@ func mtPriorityValid(arg string) (present, ok bool) {
 		return true, false
 	}
 	return true, true
+}
+
+// dsnMailParams parses and validates the RFC 3461 RET and ENVID parameters of a
+// MAIL FROM argument. ok is false when a value is malformed or either parameter
+// appears more than once, which §5.1(a) requires the caller to refuse with 501.
+// An absent parameter yields an empty field and ok=true.
+func dsnMailParams(arg string) (p MailParams, ok bool) {
+	_, after, found := strings.Cut(arg, ">")
+	if !found {
+		return MailParams{}, true
+	}
+	var retN, envidN int
+	for f := range strings.FieldsSeq(after) {
+		k, v, _ := strings.Cut(f, "=")
+		switch strings.ToUpper(k) {
+		case "RET":
+			retN++
+			up := strings.ToUpper(v)
+			if up != "FULL" && up != "HDRS" {
+				return MailParams{}, false
+			}
+			p.RET = up
+		case "ENVID":
+			envidN++
+			if len(v) > 100 || !validXtext(v) {
+				return MailParams{}, false
+			}
+			p.ENVID = v
+		}
+	}
+	if retN > 1 || envidN > 1 {
+		return MailParams{}, false
+	}
+	return p, true
+}
+
+// dsnRcptParams parses and validates the RFC 3461 NOTIFY and ORCPT parameters of a
+// RCPT TO argument. ok is false when a value is malformed or either parameter
+// appears more than once, which §5.1(b) requires the caller to refuse with 501.
+// An absent parameter yields an empty field and ok=true.
+func dsnRcptParams(arg string) (p RcptParams, ok bool) {
+	_, after, found := strings.Cut(arg, ">")
+	if !found {
+		return RcptParams{}, true
+	}
+	var notifyN, orcptN int
+	for f := range strings.FieldsSeq(after) {
+		k, v, _ := strings.Cut(f, "=")
+		switch strings.ToUpper(k) {
+		case "NOTIFY":
+			notifyN++
+			if !validNotify(v) {
+				return RcptParams{}, false
+			}
+			p.Notify = v
+		case "ORCPT":
+			orcptN++
+			if len(v) > 500 || !validORCPT(v) {
+				return RcptParams{}, false
+			}
+			p.ORCPT = v
+		}
+	}
+	if notifyN > 1 || orcptN > 1 {
+		return RcptParams{}, false
+	}
+	return p, true
+}
+
+// validNotify reports whether v is a valid RFC 3461 NOTIFY value: either "NEVER"
+// by itself, or a comma-separated list of one or more of SUCCESS, FAILURE, and
+// DELAY. NEVER MUST NOT be combined with any other keyword, and an empty value is
+// invalid. Matching is case-insensitive.
+func validNotify(v string) bool {
+	if v == "" {
+		return false
+	}
+	if strings.EqualFold(v, "NEVER") {
+		return true
+	}
+	for elem := range strings.SplitSeq(v, ",") {
+		switch strings.ToUpper(elem) {
+		case "SUCCESS", "FAILURE", "DELAY":
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// validORCPT reports whether v is a valid RFC 3461 ORCPT value of the form
+// "addr-type;xtext", where addr-type is a non-empty RFC 822 atom and the
+// remainder is xtext-encoded.
+func validORCPT(v string) bool {
+	atype, xt, found := strings.Cut(v, ";")
+	if !found || !isAtom(atype) {
+		return false
+	}
+	return validXtext(xt)
+}
+
+// validXtext reports whether s conforms to the RFC 3461 §4 xtext grammar: each
+// unit is either a printable US-ASCII character in [33,126] other than "+" and
+// "=", or a "+" followed by two upper-case hexadecimal digits.
+func validXtext(s string) bool {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case c == '+':
+			if i+2 >= len(s) || !isHexUpper(s[i+1]) || !isHexUpper(s[i+2]) {
+				return false
+			}
+			i += 2
+		case c >= '!' && c <= '~' && c != '=':
+			// a bare xchar
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// isHexUpper reports whether c is a digit or an upper-case hexadecimal letter
+// (A-F), the only forms RFC 3461 §4 permits after a "+" in xtext.
+func isHexUpper(c byte) bool {
+	return (c >= '0' && c <= '9') || (c >= 'A' && c <= 'F')
+}
+
+// isAtom reports whether s is a non-empty RFC 822 atom: one or more characters,
+// none of them a space, a control, or an RFC 822 "special".
+func isAtom(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c <= ' ' || c >= 0x7f {
+			return false
+		}
+		switch c {
+		case '(', ')', '<', '>', '@', ',', ';', ':', '\\', '"', '/', '[', ']', '?', '=':
+			return false
+		}
+	}
+	return true
 }
 
 // errTooLarge surfaces through this reader when the message exceeds MaxSize.
