@@ -212,6 +212,15 @@ func (s *Server) handle(conn net.Conn) {
 					continue
 				}
 			}
+			// RFC 6710 §4.1: a present-but-invalid MT-PRIORITY (malformed, out of
+			// the -9..9 range, or duplicated) MUST be refused. The value itself is
+			// otherwise unused: this MTA applies the default priority policy (all
+			// messages at priority 0), which also satisfies the rule that an
+			// untrusted sender MUST NOT upgrade a message's priority.
+			if present, ok := mtPriorityValid(arg); present && !ok {
+				reply(w, 501, "5.5.2 syntax error in MT-PRIORITY parameter")
+				continue
+			}
 			if err := sess.Mail(addr); err != nil {
 				replySessionErr(w, err)
 				continue
@@ -490,6 +499,7 @@ func (s *Server) greetEHLO(w *bufio.Writer, arg string, isTLS, authAvailable boo
 		"SMTPUTF8",
 		"CHUNKING",
 		"BINARYMIME",
+		"MT-PRIORITY",
 	}
 	if max := s.maxSize.Load(); max > 0 {
 		lines = append(lines, fmt.Sprintf("SIZE %d", max))
@@ -656,6 +666,38 @@ func declaredSize(params map[string]string) (int64, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+// mtPriorityValid inspects the MT-PRIORITY parameter (RFC 6710) in a MAIL FROM
+// argument. present reports whether any MT-PRIORITY parameter appears; ok reports
+// whether it is well-formed: a single occurrence whose value is a decimal integer
+// in [-9, 9]. A duplicate, a non-integer, or an out-of-range value is present but
+// not ok, which §4.1 requires the caller to refuse with 501.
+func mtPriorityValid(arg string) (present, ok bool) {
+	_, after, found := strings.Cut(arg, ">")
+	if !found {
+		return false, true
+	}
+	count := 0
+	var raw string
+	for f := range strings.FieldsSeq(after) {
+		k, v, _ := strings.Cut(f, "=")
+		if strings.EqualFold(k, "MT-PRIORITY") {
+			count++
+			raw = v
+		}
+	}
+	if count == 0 {
+		return false, true
+	}
+	if count > 1 {
+		return true, false
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < -9 || n > 9 {
+		return true, false
+	}
+	return true, true
 }
 
 // errTooLarge surfaces through this reader when the message exceeds MaxSize.

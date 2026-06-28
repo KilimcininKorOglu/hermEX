@@ -564,6 +564,62 @@ func TestServerBDATSizeLimit(t *testing.T) {
 	expect(t, r, 250)
 }
 
+// TestMTPriorityValid covers RFC 6710 §4.1 MT-PRIORITY validation: a single value
+// in [-9,9] is well-formed; absence is not an error; a value outside the range, a
+// non-integer, an empty value, and a duplicate parameter are present-but-invalid.
+func TestMTPriorityValid(t *testing.T) {
+	cases := []struct {
+		arg         string
+		present, ok bool
+	}{
+		{"<a@b>", false, true},
+		{"<a@b> MT-PRIORITY=0", true, true},
+		{"<a@b> MT-PRIORITY=9", true, true},
+		{"<a@b> MT-PRIORITY=-9", true, true},
+		{"<a@b> SIZE=10 MT-PRIORITY=4 BODY=8BITMIME", true, true},
+		{"<a@b> MT-PRIORITY=10", true, false},
+		{"<a@b> MT-PRIORITY=-10", true, false},
+		{"<a@b> MT-PRIORITY=high", true, false},
+		{"<a@b> MT-PRIORITY=", true, false},
+		{"<a@b> MT-PRIORITY=1 MT-PRIORITY=2", true, false},
+	}
+	for _, c := range cases {
+		present, ok := mtPriorityValid(c.arg)
+		if present != c.present || ok != c.ok {
+			t.Errorf("mtPriorityValid(%q) = (%v,%v), want (%v,%v)", c.arg, present, ok, c.present, c.ok)
+		}
+	}
+}
+
+// TestServerMTPriority proves RFC 6710 on the wire: EHLO advertises MT-PRIORITY, a
+// MAIL FROM with an in-range priority is accepted, and a malformed or out-of-range
+// MT-PRIORITY is refused with 501 before the transaction opens.
+func TestServerMTPriority(t *testing.T) {
+	r, conn := dialServer(t, &fakeSession{})
+	expect(t, r, 220)
+
+	fmt.Fprint(conn, "EHLO client.test\r\n")
+	_, ehlo, err := r.ReadResponse(250)
+	if err != nil {
+		t.Fatalf("EHLO: %v", err)
+	}
+	if !strings.Contains(ehlo, "MT-PRIORITY") {
+		t.Errorf("EHLO did not advertise MT-PRIORITY: %q", ehlo)
+	}
+
+	// An in-range priority is accepted.
+	fmt.Fprint(conn, "MAIL FROM:<alice@test> MT-PRIORITY=4\r\n")
+	expect(t, r, 250)
+	fmt.Fprint(conn, "RSET\r\n")
+	expect(t, r, 250)
+	// Out of range is a 501 parameter syntax error.
+	fmt.Fprint(conn, "MAIL FROM:<alice@test> MT-PRIORITY=42\r\n")
+	expect(t, r, 501)
+	// Non-integer is likewise refused.
+	fmt.Fprint(conn, "MAIL FROM:<alice@test> MT-PRIORITY=urgent\r\n")
+	expect(t, r, 501)
+}
+
 func TestServerSequencingAndSyntax(t *testing.T) {
 	sess := &fakeSession{}
 	r, conn := dialServer(t, sess)
