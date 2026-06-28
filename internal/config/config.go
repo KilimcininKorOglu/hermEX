@@ -1,5 +1,5 @@
 // Package config loads hermEX daemon configuration. Accounts are NOT configured
-// here — they live in the directory database (see internal/directory); config
+// here, they live in the directory database (see internal/directory); config
 // holds only infrastructure settings (the directory DSN, listen addresses, the
 // mailbox data root, and the announced hostname).
 package config
@@ -33,7 +33,7 @@ type Config struct {
 	MapiAddr       string   `json:"mapi_addr"`       // MAPI/HTTP (native Outlook) HTTP listen address (default ":8080")
 	AdminAddr      string   `json:"admin_addr"`      // admin API HTTP listen address (default ":8081")
 	AdminSecret    string   `json:"admin_secret"`    // signing key for admin session tokens; required to serve the admin API
-	DigestSecret   string   `json:"digest_secret"`   // signing key for quarantine-digest release links; the MTA mints and webmail verifies — both daemons must share it, empty disables release links
+	DigestSecret   string   `json:"digest_secret"`   // signing key for quarantine-digest release links; the MTA mints and webmail verifies, both daemons must share it, empty disables release links
 	HealthAddr     string   `json:"health_addr"`     // per-daemon /healthz listen address (e.g. ":8090"); empty disables the health endpoint
 	TLSCert        string   `json:"tls_cert"`        // PEM certificate (chain) for implicit-TLS/HTTPS listeners
 	TLSKey         string   `json:"tls_key"`         // PEM private key paired with tls_cert
@@ -69,7 +69,7 @@ type Config struct {
 	// Push notifications (central notify daemon). The notify daemon relays mailbox-change
 	// wake signals so a long-poll consumer reacts the instant a write lands instead of on
 	// its next poll tick. The mail path never hard-depends on it: an empty NotifyURL (or an
-	// unreachable daemon) leaves every consumer on its existing poll cadence — push is a
+	// unreachable daemon) leaves every consumer on its existing poll cadence, push is a
 	// best-effort accelerator, never a delivery requirement.
 	NotifyAddr   string `json:"notify_addr"`   // the notify daemon's own listen address (default ":8080"); only the notify daemon reads it
 	NotifyURL    string `json:"notify_url"`    // base URL producers/consumers reach the notify daemon at (e.g. "http://notify:8080"); empty = push disabled, poll-only
@@ -144,7 +144,7 @@ func (c *Config) ServerHostname() string {
 // The root is chosen from the maildir-placement pool: with no data_partitions
 // configured the pool is just DataDir, so the path is unchanged; with a pool
 // the root is the listed partition selected by a stable FNV-1a hash of the
-// address. The choice is a placement decision made once at provisioning — reads
+// address. The choice is a placement decision made once at provisioning, reads
 // use the full path stored in users.maildir, so a chosen partition is recorded
 // in that path and never re-derived for an existing mailbox.
 func (c *Config) MaildirFor(address string) string {
@@ -167,7 +167,7 @@ func (c *Config) maildirRoot(address string) string {
 
 // HomedirFor derives a domain's public-store directory: {DataDir}/domain/{domain}.
 // The domain dir stays under DataDir (the control root) and is not spread across
-// the maildir pool — under private-mailbox-only operation it holds no store.
+// the maildir pool, under private-mailbox-only operation it holds no store.
 func (c *Config) HomedirFor(domain string) string {
 	return filepath.Join(c.DataDir, "domain", strings.ToLower(domain))
 }
@@ -175,7 +175,7 @@ func (c *Config) HomedirFor(domain string) string {
 // RelaySpoolPath is the single outbound relay spool shared by every daemon:
 // {DataDir}/relay.sqlite3. Each user-facing protocol enqueues external mail
 // here and the MTA's relay worker drains it, so all daemons MUST derive the path
-// through this one helper — a divergent path would split the queue and strand
+// through this one helper, a divergent path would split the queue and strand
 // mail in a spool nothing drains.
 func (c *Config) RelaySpoolPath() string {
 	return filepath.Join(c.DataDir, "relay.sqlite3")

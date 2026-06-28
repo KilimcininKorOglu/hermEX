@@ -31,7 +31,7 @@ type Router func(domain string) ([]string, error)
 type Dialer func(host string) (net.Conn, error)
 
 // Worker drains the spool: it claims due recipients, delivers each over SMTP to
-// its domain's mail exchanger, and settles the attempt — Sent on success, Retry
+// its domain's mail exchanger, and settles the attempt, Sent on success, Retry
 // after a transient failure, or give up (settle and bounce) on a permanent
 // rejection or once attempts are exhausted.
 type Worker struct {
@@ -219,7 +219,7 @@ func (w *Worker) deliver(it Item) error {
 		return fmt.Errorf("no mail exchanger for %s", domain)
 	}
 	// Look up the domain's MTA-STS policy once. A lookup failure does not block
-	// mail — it falls back to opportunistic TLS (the pre-MTA-STS behaviour); the
+	// mail, it falls back to opportunistic TLS (the pre-MTA-STS behaviour); the
 	// resolver's cache is what carries a published policy through a transient
 	// policy-host outage, so this fallback only fires before a policy is ever seen.
 	var pol *mtasts.Policy
@@ -382,8 +382,8 @@ func dialPort25(host string) (net.Conn, error) {
 	return net.DialTimeout("tcp", net.JoinHostPort(host, "25"), dialTimeout)
 }
 
-// LookupMX is the default Router: the domain's MX hosts in priority order, or —
-// when the domain publishes no usable MX — the domain itself as an implicit mail
+// LookupMX is the default Router: the domain's MX hosts in priority order, or,
+// when the domain publishes no usable MX, the domain itself as an implicit mail
 // exchanger (RFC 5321 §5.1), provided it has an address record.
 func LookupMX(domain string) ([]string, error) {
 	mxs, err := net.LookupMX(domain)

@@ -20,6 +20,7 @@ import (
 
 	"hermex/internal/antispam"
 	"hermex/internal/config"
+	"hermex/internal/dane"
 	"hermex/internal/directory"
 	"hermex/internal/dkimsign"
 	"hermex/internal/health"
@@ -28,7 +29,6 @@ import (
 	"hermex/internal/logging"
 	"hermex/internal/meeting"
 	"hermex/internal/mta"
-	"hermex/internal/dane"
 	"hermex/internal/mtasts"
 	"hermex/internal/notify"
 	"hermex/internal/objectstore"
