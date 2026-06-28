@@ -423,6 +423,147 @@ func TestBuildReceived(t *testing.T) {
 	}
 }
 
+// TestParseBDAT covers the "BDAT <chunk-size> [LAST]" grammar (RFC 3030): a bare
+// size, a size with LAST (case-insensitive), and the malformed forms (missing,
+// negative, or non-numeric size, an unknown trailing token, too many tokens) that
+// must be refused so a chunk is never misframed off the wire.
+func TestParseBDAT(t *testing.T) {
+	cases := []struct {
+		arg      string
+		size     int64
+		last, ok bool
+	}{
+		{"5", 5, false, true},
+		{"0 LAST", 0, true, true},
+		{"1024 last", 1024, true, true},
+		{"", 0, false, false},
+		{"-1", 0, false, false},
+		{"abc", 0, false, false},
+		{"5 NOTLAST", 0, false, false},
+		{"5 LAST EXTRA", 0, false, false},
+	}
+	for _, c := range cases {
+		size, last, ok := parseBDAT(c.arg)
+		if size != c.size || last != c.last || ok != c.ok {
+			t.Errorf("parseBDAT(%q) = (%d,%v,%v), want (%d,%v,%v)", c.arg, size, last, ok, c.size, c.last, c.ok)
+		}
+	}
+}
+
+// TestServerBDATChunking proves RFC 3030 CHUNKING end to end: EHLO advertises
+// CHUNKING and BINARYMIME, a BODY=BINARYMIME transaction streams its body as two
+// BDAT chunks (the non-final one acknowledged 250 with the message still open, the
+// LAST one delivering), and the assembled body reaches the backend intact behind
+// the Received: trace header. The chunk octets follow the BDAT line with no
+// dot-stuffing and no terminator, so a literal leading dot survives unchanged.
+func TestServerBDATChunking(t *testing.T) {
+	sess := &fakeSession{}
+	r, conn := dialServer(t, sess)
+	expect(t, r, 220)
+
+	fmt.Fprint(conn, "EHLO client.test\r\n")
+	_, ehlo, err := r.ReadResponse(250)
+	if err != nil {
+		t.Fatalf("EHLO: %v", err)
+	}
+	if !strings.Contains(ehlo, "CHUNKING") || !strings.Contains(ehlo, "BINARYMIME") {
+		t.Errorf("EHLO did not advertise CHUNKING/BINARYMIME: %q", ehlo)
+	}
+
+	fmt.Fprint(conn, "MAIL FROM:<alice@test> BODY=BINARYMIME\r\n")
+	expect(t, r, 250)
+	fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+	expect(t, r, 250)
+
+	// First chunk (6 octets, not last): acknowledged, the message stays open. The
+	// leading "." is data here, not a terminator, and must be preserved verbatim.
+	fmt.Fprint(conn, "BDAT 6\r\n.Hello")
+	expect(t, r, 250)
+	// Final chunk (7 octets): delivers the assembled body.
+	fmt.Fprint(conn, "BDAT 7 LAST\r\n, World")
+	expect(t, r, 250)
+
+	got := string(sess.data)
+	if !strings.HasPrefix(got, "Received: from client.test (") {
+		t.Errorf("BDAT body missing the Received: trace header: %q", got)
+	}
+	if !strings.HasSuffix(got, ".Hello, World") {
+		t.Errorf("assembled BDAT body = %q, want it to end with %q", got, ".Hello, World")
+	}
+	if sess.from != "alice@test" || len(sess.rcpts) != 1 || sess.rcpts[0] != "bob@test" {
+		t.Errorf("envelope not captured: from=%q rcpts=%v", sess.from, sess.rcpts)
+	}
+}
+
+// TestServerBDATSequencing proves the RFC 3030 mixing rules, both 503 sequence
+// errors: DATA after a BDAT in the same transaction is refused, and a
+// BODY=BINARYMIME transaction refuses DATA outright (its body must arrive via BDAT).
+func TestServerBDATSequencing(t *testing.T) {
+	t.Run("data after bdat", func(t *testing.T) {
+		r, conn := dialServer(t, &fakeSession{})
+		expect(t, r, 220)
+		fmt.Fprint(conn, "EHLO client.test\r\n")
+		expect(t, r, 250)
+		fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+		expect(t, r, 250)
+		fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+		expect(t, r, 250)
+		fmt.Fprint(conn, "BDAT 5\r\nHello")
+		expect(t, r, 250)
+		fmt.Fprint(conn, "DATA\r\n")
+		expect(t, r, 503)
+	})
+	t.Run("binarymime refuses data", func(t *testing.T) {
+		r, conn := dialServer(t, &fakeSession{})
+		expect(t, r, 220)
+		fmt.Fprint(conn, "EHLO client.test\r\n")
+		expect(t, r, 250)
+		fmt.Fprint(conn, "MAIL FROM:<alice@test> BODY=BINARYMIME\r\n")
+		expect(t, r, 250)
+		fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+		expect(t, r, 250)
+		fmt.Fprint(conn, "DATA\r\n")
+		expect(t, r, 503)
+	})
+}
+
+// TestServerBDATSizeLimit proves an over-limit BDAT chunk is rejected 552 without
+// buffering the whole declared size, and the connection stays framed: the chunk's
+// octets are drained off the wire, so a following RSET is read as a command and a
+// fresh transaction opens normally.
+func TestServerBDATSizeLimit(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &Server{Backend: &fakeBackend{sess: &fakeSession{}}, Hostname: "mail.test"}
+	srv.SetMaxSize(64)
+	go srv.Serve(ln)
+	conn, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		ln.Close()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close(); ln.Close() })
+	r := textproto.NewReader(bufio.NewReader(conn))
+
+	expect(t, r, 220)
+	fmt.Fprint(conn, "EHLO client.test\r\n")
+	expect(t, r, 250)
+	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	expect(t, r, 250)
+	fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+	expect(t, r, 250)
+	// A 100-octet chunk past the 64-byte limit is refused with 552.
+	fmt.Fprint(conn, "BDAT 100\r\n"+strings.Repeat("x", 100))
+	expect(t, r, 552)
+	// The chunk was drained, so the stream is still at a command boundary.
+	fmt.Fprint(conn, "RSET\r\n")
+	expect(t, r, 250)
+	fmt.Fprint(conn, "MAIL FROM:<carol@test>\r\n")
+	expect(t, r, 250)
+}
+
 func TestServerSequencingAndSyntax(t *testing.T) {
 	sess := &fakeSession{}
 	r, conn := dialServer(t, sess)

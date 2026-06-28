@@ -6,6 +6,7 @@ package smtp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -124,6 +125,21 @@ func (s *Server) handle(conn net.Conn) {
 	// argument names the connecting client. It is cleared by STARTTLS, which
 	// discards all prior session state (RFC 3207).
 	var helo string
+	// BDAT/CHUNKING transaction state (RFC 3030). binaryMIME records a
+	// BODY=BINARYMIME MAIL parameter, which mandates BDAT (not DATA) for the body.
+	// bdatBuf accumulates the BDAT chunks of the current transaction (nil until the
+	// first chunk); bdatErr marks a chunk that failed (size exceeded), so further
+	// chunks are drained and dropped until RSET clears the transaction.
+	var binaryMIME bool
+	var bdatBuf *bytes.Buffer
+	var bdatErr bool
+	// resetTxn clears all envelope and body state at a transaction boundary (a new
+	// MAIL, RSET, a completed DATA/BDAT, or a re-greeting), leaving the greeting
+	// (greeted/helo) untouched.
+	resetTxn := func() {
+		hasFrom, rcptCount, binaryMIME = false, 0, false
+		bdatBuf, bdatErr = nil, false
+	}
 	for {
 		line, err := readCommandLine(tp.R)
 		if errors.Is(err, errLineTooLong) {
@@ -137,12 +153,14 @@ func (s *Server) handle(conn net.Conn) {
 		event(logging.LevelDebug, "command", logging.Fields{"cmd": strings.ToUpper(cmd)})
 		switch strings.ToUpper(cmd) {
 		case "HELO":
-			hasFrom, rcptCount, greeted = false, 0, true
+			resetTxn()
+			greeted = true
 			helo = arg
 			sess.Reset()
 			reply(w, 250, s.hostname())
 		case "EHLO":
-			hasFrom, rcptCount, greeted = false, 0, true
+			resetTxn()
+			greeted = true
 			helo = arg
 			sess.Reset()
 			s.greetEHLO(w, arg, isTLS, canAuth && isTLS)
@@ -169,7 +187,8 @@ func (s *Server) handle(conn net.Conn) {
 			// RFC 3207: discard all state negotiated before TLS; the client
 			// re-issues EHLO over the secured link.
 			sess.Reset()
-			hasFrom, rcptCount, greeted = false, 0, false
+			resetTxn()
+			greeted = false
 			helo = ""
 			event(logging.LevelInfo, "starttls", nil)
 		case "MAIL":
@@ -182,12 +201,13 @@ func (s *Server) handle(conn net.Conn) {
 				reply(w, 501, "syntax: MAIL FROM:<address>")
 				continue
 			}
+			params := esmtpParams(arg)
 			// RFC 1870: when the client declares SIZE and it exceeds the
 			// advertised maximum, refuse the whole transaction now with 552
 			// rather than accepting MAIL/RCPT and streaming the body only to
 			// reject it after the bytes have crossed the wire.
 			if max := s.maxSize.Load(); max > 0 {
-				if sz, ok := declaredSize(esmtpParams(arg)); ok && sz > max {
+				if sz, ok := declaredSize(params); ok && sz > max {
 					reply(w, 552, "5.3.4 message size exceeds limit")
 					continue
 				}
@@ -196,7 +216,11 @@ func (s *Server) handle(conn net.Conn) {
 				replySessionErr(w, err)
 				continue
 			}
-			hasFrom, rcptCount = true, 0
+			resetTxn()
+			hasFrom = true
+			// RFC 3030: BODY=BINARYMIME commits the sender to delivering the body
+			// over BDAT; a later DATA in this transaction is then a sequence error.
+			binaryMIME = strings.EqualFold(params["BODY"], "BINARYMIME")
 			event(logging.LevelInfo, "mail.from", logging.Fields{"from": addr})
 			reply(w, 250, "OK")
 		case "RCPT":
@@ -217,6 +241,16 @@ func (s *Server) handle(conn net.Conn) {
 			event(logging.LevelInfo, "rcpt.to", logging.Fields{"to": addr})
 			reply(w, 250, "OK")
 		case "DATA":
+			// RFC 3030: DATA and BDAT cannot mix in one transaction, and a
+			// BINARYMIME body must arrive via BDAT; both are 503 sequence errors.
+			if bdatBuf != nil {
+				reply(w, 503, "5.5.1 DATA not allowed after BDAT; send RSET")
+				continue
+			}
+			if binaryMIME {
+				reply(w, 503, "5.5.1 BINARYMIME requires BDAT, not DATA")
+				continue
+			}
 			if rcptCount == 0 {
 				reply(w, 503, "need RCPT before DATA")
 				continue
@@ -226,23 +260,81 @@ func (s *Server) handle(conn net.Conn) {
 			trace := buildReceived(helo, remote, rdns, s.hostname(), isTLS, time.Now())
 			if err := s.consumeData(tp, sess, trace); err != nil {
 				event(logging.LevelWarn, "message.reject", logging.Fields{"recipients": rcptCount, "reason": err.Error()})
-				if te, ok := errors.AsType[*TempError](err); ok {
-					// A Data handler can defer (e.g. the virus scanner is unreachable);
-					// a 451 has the sender retry rather than bounce the message.
-					reply(w, 451, te.Message)
-				} else if errors.Is(err, errTooLarge) {
-					reply(w, 552, "message exceeds size limit")
-				} else {
-					reply(w, 554, "transaction failed: "+err.Error())
-				}
+				replyDataErr(w, err)
 			} else {
 				event(logging.LevelInfo, "message.accept", logging.Fields{"recipients": rcptCount})
 				reply(w, 250, "OK")
 			}
-			hasFrom, rcptCount = false, 0
+			resetTxn()
+		case "BDAT":
+			// RFC 3030 CHUNKING: "BDAT <chunk-size> [LAST]". The chunk's octets
+			// follow the command line's CRLF directly, with no dot-stuffing and no
+			// "." terminator; the receiver reads exactly chunk-size octets.
+			size, last, ok := parseBDAT(arg)
+			if !ok {
+				// Without a valid octet count the chunk cannot be framed, so the
+				// stream position is unknown; refuse rather than guess.
+				reply(w, 501, "5.5.4 syntax: BDAT <chunk-size> [LAST]")
+				continue
+			}
+			// The chunk is always read off the wire before any reply (RFC 3030: a
+			// failure "MUST accept and discard the associated message data before
+			// sending the appropriate 5XX or 4XX code"), or the next command read
+			// would parse message bytes. It is buffered only when the transaction
+			// can accept it, and accumulation is capped at the size limit so an
+			// oversized declared chunk cannot exhaust memory (OWASP A05).
+			max := s.maxSize.Load()
+			viable := greeted && rcptCount > 0 && !bdatErr
+			if viable {
+				if bdatBuf == nil {
+					bdatBuf = new(bytes.Buffer)
+				}
+				toBuf := size
+				if max > 0 {
+					if room := max + 1 - int64(bdatBuf.Len()); room < toBuf {
+						if room < 0 {
+							room = 0
+						}
+						toBuf = room
+					}
+				}
+				if _, err := io.CopyN(bdatBuf, tp.R, toBuf); err != nil {
+					return // truncated chunk; the stream is no longer framed
+				}
+				if _, err := io.CopyN(io.Discard, tp.R, size-toBuf); err != nil {
+					return
+				}
+			} else if _, err := io.CopyN(io.Discard, tp.R, size); err != nil {
+				return
+			}
+			switch {
+			case !greeted:
+				reply(w, 503, "5.5.1 send HELO/EHLO first")
+			case rcptCount == 0:
+				reply(w, 503, "5.5.1 need MAIL and RCPT before BDAT")
+			case bdatErr:
+				reply(w, 503, "5.5.0 BDAT transaction failed; send RSET")
+			case max > 0 && int64(bdatBuf.Len()) > max:
+				bdatErr = true // poison the transaction; later chunks drain until RSET
+				reply(w, 552, "5.3.4 message size exceeds limit")
+			case !last:
+				reply(w, 250, fmt.Sprintf("2.0.0 %d octets received", size))
+			default:
+				rdns := lookupRDNS(remote)
+				trace := buildReceived(helo, remote, rdns, s.hostname(), isTLS, time.Now())
+				body := io.MultiReader(strings.NewReader(trace), bytes.NewReader(bdatBuf.Bytes()))
+				if err := sess.Data(body); err != nil {
+					event(logging.LevelWarn, "message.reject", logging.Fields{"recipients": rcptCount, "reason": err.Error()})
+					replyDataErr(w, err)
+				} else {
+					event(logging.LevelInfo, "message.accept", logging.Fields{"recipients": rcptCount})
+					reply(w, 250, "OK")
+				}
+				resetTxn()
+			}
 		case "RSET":
 			sess.Reset()
-			hasFrom, rcptCount = false, 0
+			resetTxn()
 			reply(w, 250, "OK")
 		case "NOOP":
 			reply(w, 250, "OK")
@@ -262,7 +354,7 @@ func (s *Server) handle(conn net.Conn) {
 			reply(w, 502, "5.5.1 EXPN not available")
 		case "HELP":
 			// RFC 5321 §4.1.1.8: a 214 help reply, recognized rather than 500.
-			reply(w, 214, "2.0.0 hermEX ESMTP; supported: HELO EHLO MAIL RCPT DATA RSET NOOP QUIT (RFC 5321)")
+			reply(w, 214, "2.0.0 hermEX ESMTP; supported: HELO EHLO MAIL RCPT DATA BDAT RSET NOOP QUIT (RFC 5321)")
 		default:
 			reply(w, 500, "command not recognized")
 		}
@@ -286,6 +378,41 @@ func replySessionErr(w *bufio.Writer, err error) {
 		return
 	}
 	reply(w, 550, err.Error())
+}
+
+// replyDataErr maps a Session.Data error to the SMTP reply shared by the DATA and
+// BDAT body paths: a TempError defers (451 so the sender retries), an over-size
+// body is 552, and any other failure is a 554 permanent transaction failure.
+func replyDataErr(w *bufio.Writer, err error) {
+	if te, ok := errors.AsType[*TempError](err); ok {
+		reply(w, 451, te.Message)
+	} else if errors.Is(err, errTooLarge) {
+		reply(w, 552, "message exceeds size limit")
+	} else {
+		reply(w, 554, "transaction failed: "+err.Error())
+	}
+}
+
+// parseBDAT parses a "BDAT <chunk-size> [LAST]" argument into the decimal octet
+// count of the chunk that follows and whether this is the final chunk. ok is false
+// when the count is missing, malformed, or a trailing token other than LAST is
+// present, so the caller refuses rather than misframe the chunk.
+func parseBDAT(arg string) (size int64, last, ok bool) {
+	fields := strings.Fields(arg)
+	if len(fields) == 0 || len(fields) > 2 {
+		return 0, false, false
+	}
+	n, err := strconv.ParseInt(fields[0], 10, 64)
+	if err != nil || n < 0 {
+		return 0, false, false
+	}
+	if len(fields) == 2 {
+		if !strings.EqualFold(fields[1], "LAST") {
+			return 0, false, false
+		}
+		last = true
+	}
+	return n, last, true
 }
 
 // consumeData reads the dot-terminated message body and hands it to the
@@ -361,6 +488,8 @@ func (s *Server) greetEHLO(w *bufio.Writer, arg string, isTLS, authAvailable boo
 		"8BITMIME",
 		"ENHANCEDSTATUSCODES",
 		"SMTPUTF8",
+		"CHUNKING",
+		"BINARYMIME",
 	}
 	if max := s.maxSize.Load(); max > 0 {
 		lines = append(lines, fmt.Sprintf("SIZE %d", max))
