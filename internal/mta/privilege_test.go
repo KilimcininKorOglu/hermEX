@@ -26,7 +26,7 @@ func (d privDir) Privileges(user string) (directory.ServicePrivileges, bool) {
 
 // TestSMTPSubmissionPrivilege proves the SMTP service privilege gates
 // authenticated submission only: a user with the privilege off cannot AUTH (so
-// cannot submit), while inbound delivery to that same user is unaffected — the
+// cannot submit), while inbound delivery to that same user is unaffected, the
 // gate must never block a mailbox from receiving mail.
 func TestSMTPSubmissionPrivilege(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "bob")
@@ -46,7 +46,7 @@ func TestSMTPSubmissionPrivilege(t *testing.T) {
 		t.Error("AUTH succeeded for a user without the SMTP privilege, want failure")
 	}
 
-	// Inbound intake (no AUTH) for the same user is unaffected — a revoked SMTP
+	// Inbound intake (no AUTH) for the same user is unaffected, a revoked SMTP
 	// submission privilege must never stop a mailbox from receiving mail.
 	if err := (&session{accounts: auth}).Rcpt("bob@local", smtp.RcptParams{}); err != nil {
 		t.Errorf("inbound Rcpt for an SMTP-disabled user refused: %v", err)

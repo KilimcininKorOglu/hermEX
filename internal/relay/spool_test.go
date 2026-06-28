@@ -18,8 +18,8 @@ func openSpool(t *testing.T) *Spool {
 	return s
 }
 
-// TestSpoolBaselineAdoption proves an existing, unversioned spool — tables present
-// and user_version 0, as written before the spool was versioned — is adopted as
+// TestSpoolBaselineAdoption proves an existing, unversioned spool, tables present
+// and user_version 0, as written before the spool was versioned, is adopted as
 // v1 on open without disturbing its queued data.
 func TestSpoolBaselineAdoption(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "relay.sqlite3")
@@ -58,7 +58,7 @@ func TestSpoolBaselineAdoption(t *testing.T) {
 	}
 	var n int
 	if err := s.db.QueryRow("SELECT COUNT(*) FROM messages").Scan(&n); err != nil || n != 1 {
-		t.Fatalf("messages after adoption = %d (err %v), want 1 — adoption must not disturb data", n, err)
+		t.Fatalf("messages after adoption = %d (err %v), want 1, adoption must not disturb data", n, err)
 	}
 }
 
@@ -184,7 +184,7 @@ func TestSpoolPerRecipientLifecycle(t *testing.T) {
 		byRcpt[it.Recipient] = it
 	}
 
-	// Settle x as sent. y must remain claimable with the body intact — the shared
+	// Settle x as sent. y must remain claimable with the body intact, the shared
 	// message row may not be dropped while a recipient still references it.
 	if err := s.Sent(byRcpt["x@remote"].RecipientID); err != nil {
 		t.Fatalf("sent x: %v", err)

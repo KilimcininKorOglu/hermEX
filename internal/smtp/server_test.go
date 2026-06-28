@@ -13,7 +13,7 @@ import (
 )
 
 // TestServerRcptTempErrorIsTemporary proves a backend TempError from Rcpt is
-// reported as a 451 temporary failure (the sender retries) — the wire behaviour
+// reported as a 451 temporary failure (the sender retries), the wire behaviour
 // greylisting depends on.
 func TestServerRcptTempErrorIsTemporary(t *testing.T) {
 	sess := &fakeSession{rcptErr: &TempError{Message: "greylisted, retry later"}}
@@ -394,7 +394,7 @@ func TestServerSizeDeclaration(t *testing.T) {
 
 // TestBuildReceived covers the reference Received form: the helo name plus the
 // reverse-DNS name and client IP in the from-clause, the SMTP/SMTPS "with" token
-// (SMTPS only over TLS — neither EHLO nor AUTH is recorded there), an empty helo or
+// (SMTPS only over TLS, neither EHLO nor AUTH is recorded there), an empty helo or
 // rDNS degrading to "unknown", and an IPv6 client address carrying the "IPv6:" tag.
 func TestBuildReceived(t *testing.T) {
 	when := time.Date(2026, 6, 19, 22, 9, 21, 0, time.FixedZone("", 3*3600))

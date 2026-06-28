@@ -11,7 +11,7 @@ import (
 
 // TestRateLimiterAdmitsUntilBurstThenDefers proves an enabled limiter admits up to
 // the burst within a window and defers the rest, and that the next window admits
-// again — so a legitimate sender that retries after the window eventually succeeds
+// again, so a legitimate sender that retries after the window eventually succeeds
 // (the defer is temporary, not a permanent rejection).
 func TestRateLimiterAdmitsUntilBurstThenDefers(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
@@ -50,7 +50,7 @@ func TestRateLimiterDisabledAdmitsEverything(t *testing.T) {
 }
 
 // TestRateLimiterKeysByNetwork proves two addresses in the same /24 share one counter
-// — a spammer rotating addresses within a pool cannot multiply its budget — while a
+// , a spammer rotating addresses within a pool cannot multiply its budget, while a
 // different /24 keeps its own budget.
 func TestRateLimiterKeysByNetwork(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
@@ -66,7 +66,7 @@ func TestRateLimiterKeysByNetwork(t *testing.T) {
 		t.Fatal("the 2nd message from the same /24 must be admitted (still within burst)")
 	}
 	if rl.Allow(net.ParseIP("203.0.113.250")) {
-		t.Error("the 3rd message from the same /24 must be deferred — the pool shares one budget")
+		t.Error("the 3rd message from the same /24 must be deferred, the pool shares one budget")
 	}
 	if !rl.Allow(net.ParseIP("203.0.114.1")) {
 		t.Error("a different /24 must have its own budget")
@@ -74,7 +74,7 @@ func TestRateLimiterKeysByNetwork(t *testing.T) {
 }
 
 // TestRateLimiterNilIPFailsOpen proves an unkeyable client is admitted rather than
-// blocked — the limiter never loses mail on its own inability to key the sender.
+// blocked, the limiter never loses mail on its own inability to key the sender.
 func TestRateLimiterNilIPFailsOpen(t *testing.T) {
 	rl := NewRateLimiter()
 	rl.SetLimits(1, time.Minute)
@@ -86,7 +86,7 @@ func TestRateLimiterNilIPFailsOpen(t *testing.T) {
 
 // TestMailRateLimitDefersUnauthenticatedFlood proves the delivery hook defers an
 // unauthenticated sender once its network passes the burst, returning a TempError so
-// the SMTP server replies 451 (temporary) — the flood is slowed but a legitimate
+// the SMTP server replies 451 (temporary), the flood is slowed but a legitimate
 // server's retry eventually gets through.
 func TestMailRateLimitDefersUnauthenticatedFlood(t *testing.T) {
 	rl := NewRateLimiter()

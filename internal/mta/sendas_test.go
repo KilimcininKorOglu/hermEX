@@ -32,7 +32,7 @@ func (r resolveOnly) Resolve(addr string) (string, bool) {
 }
 
 // TestSubmissionSendAsAuthorization proves an authenticated submission may only
-// use an envelope sender it owns — its own login or an enumerated alias — so an
+// use an envelope sender it owns, its own login or an enumerated alias, so an
 // authenticated account cannot spoof another sender. The match is
 // case-insensitive and the null sender is refused.
 func TestSubmissionSendAsAuthorization(t *testing.T) {
@@ -66,7 +66,7 @@ func TestSubmissionSendAsAuthorization(t *testing.T) {
 }
 
 // TestUnauthenticatedMailUnrestricted proves inbound intake (no AUTH) accepts any
-// envelope sender — send-as authorization applies only to authenticated
+// envelope sender, send-as authorization applies only to authenticated
 // submission, never to a relaying remote MTA.
 func TestUnauthenticatedMailUnrestricted(t *testing.T) {
 	s := &session{accounts: directory.StaticAccounts{}}
@@ -124,7 +124,7 @@ func TestSendAsGrantAuthorizes(t *testing.T) {
 }
 
 // TestSendAsGrantMatchesGranteeAlias proves the grant is honored when it names any of
-// the grantee's identities — a grant to an alias authorizes the owner of that alias.
+// the grantee's identities, a grant to an alias authorizes the owner of that alias.
 func TestSendAsGrantMatchesGranteeAlias(t *testing.T) {
 	pathA := filepath.Join(t.TempDir(), "alice")
 	st, err := objectstore.Open(pathA)
@@ -149,7 +149,7 @@ func TestSendAsGrantMatchesGranteeAlias(t *testing.T) {
 }
 
 // TestSendAsFailsClosedOnUnopenableStore proves the grant denies when the target
-// mailbox resolves but its store cannot be opened — the fail-closed security branch.
+// mailbox resolves but its store cannot be opened, the fail-closed security branch.
 // A regular file where the mailbox directory should be makes Open's MkdirAll fail, so
 // the test exercises the Open-fails path, not merely the empty-list path.
 func TestSendAsFailsClosedOnUnopenableStore(t *testing.T) {

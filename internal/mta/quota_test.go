@@ -12,9 +12,9 @@ import (
 	"hermex/internal/smtp"
 )
 
-// TestRcptReceiveQuota proves an over-quota mailbox is refused at RCPT — a
+// TestRcptReceiveQuota proves an over-quota mailbox is refused at RCPT, a
 // permanent rejection before the message is accepted, so there is no bounce
-// backscatter — while an under-quota mailbox, and an unlimited (0) one, are
+// backscatter, while an under-quota mailbox, and an unlimited (0) one, are
 // accepted.
 func TestRcptReceiveQuota(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "mbox")
@@ -108,7 +108,7 @@ func TestMailSendQuota(t *testing.T) {
 		t.Errorf("under-send-quota MAIL FROM refused: %v", err)
 	}
 
-	// Unauthenticated intake is never blocked by send quota — the local user is
+	// Unauthenticated intake is never blocked by send quota, the local user is
 	// not the one sending.
 	setSendQuota(t, dir, 1)
 	if err := (&session{accounts: accounts}).Mail("bob@local", smtp.MailParams{}); err != nil {
@@ -117,8 +117,8 @@ func TestMailSendQuota(t *testing.T) {
 }
 
 // TestDeliverAndRelaySendQuota proves an over-send-quota sender cannot submit
-// through the shared user-send path — the chokepoint for EWS, MAPI, EAS, and
-// webmail — while an automated Deliver (no relay) is not gated by send quota.
+// through the shared user-send path, the chokepoint for EWS, MAPI, EAS, and
+// webmail, while an automated Deliver (no relay) is not gated by send quota.
 func TestDeliverAndRelaySendQuota(t *testing.T) {
 	dir := fillMailbox(t)
 	accounts := directory.StaticAccounts{"bob@local": {MailboxPath: dir}}

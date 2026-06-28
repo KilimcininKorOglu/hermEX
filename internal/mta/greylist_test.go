@@ -63,7 +63,7 @@ func TestNetworkKey(t *testing.T) {
 
 // TestGreylistRetrySameNetworkDifferentIPPasses is the discriminating test: a first
 // contact defers, and a retry after the delay from a DIFFERENT IP in the same /24
-// passes — proving the triplet keys on the network, not the exact IP (the classic
+// passes, proving the triplet keys on the network, not the exact IP (the classic
 // greylisting failure with large senders).
 func TestGreylistRetrySameNetworkDifferentIPPasses(t *testing.T) {
 	store := &memGreylist{m: map[string]directory.Greylisted{}}
@@ -123,7 +123,7 @@ func TestGreylistRetryTooSoonDefers(t *testing.T) {
 }
 
 // TestGreylistFailOpenOnStoreError proves a store error accepts the mail rather than
-// deferring it — greylisting never loses mail on its own failure.
+// deferring it, greylisting never loses mail on its own failure.
 func TestGreylistFailOpenOnStoreError(t *testing.T) {
 	g := NewGreylister(&memGreylist{getErr: errors.New("db down")}, nil)
 	g.SetEnabled(true)

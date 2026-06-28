@@ -86,8 +86,8 @@ func TestSubmissionRelayRouting(t *testing.T) {
 	}
 }
 
-// TestDeliverAndRelayRoutesExternal proves the shared user-composed send path —
-// used by webmail compose and the send-later release — relays a foreign-domain
+// TestDeliverAndRelayRoutesExternal proves the shared user-composed send path,
+// used by webmail compose and the send-later release, relays a foreign-domain
 // recipient through the spool while still filing local ones and reporting a
 // genuine local-domain user-unknown. With a nil spool it does not relay.
 func TestDeliverAndRelayRoutesExternal(t *testing.T) {

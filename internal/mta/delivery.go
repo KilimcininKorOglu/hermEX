@@ -130,7 +130,7 @@ type target struct {
 // Mail records the envelope sender. On an authenticated submission it first
 // enforces send-as authorization: the sender must be an address the logged-in
 // user owns, so an authenticated account cannot forge mail from another. Inbound
-// intake (no AUTH) keeps an unrestricted sender — a remote MTA legitimately
+// intake (no AUTH) keeps an unrestricted sender, a remote MTA legitimately
 // relays mail from any origin.
 func (s *session) Mail(from string, params smtp.MailParams) error {
 	if s.authUser != "" && !s.authorizedSender(from) {
@@ -226,11 +226,11 @@ func (s *session) identities() []string {
 // filed there. A recipient that does not resolve is refused unless this is an
 // authenticated submission relaying to an external domain: only an authenticated
 // user may relay (no open relay), and only to a domain this server is not
-// authoritative for — an unresolved address in a local domain is a genuine
+// authoritative for, an unresolved address in a local domain is a genuine
 // user-unknown that must never be relayed (it would loop straight back).
 func (s *session) Rcpt(to string, params smtp.RcptParams) error {
 	// A distribution-list recipient expands to its members. The posting-privilege
-	// gate refuses here (a 550 — no message accepted, no backscatter, exactly like
+	// gate refuses here (a 550, no message accepted, no backscatter, exactly like
 	// the receive-quota gate); members are then routed leniently, since a stale
 	// member must never fail delivery to the rest of the list.
 	if exp, ok := s.accounts.(MListExpander); ok {
@@ -287,7 +287,7 @@ func (s *session) routeRecipient(to, notify, orcpt string) error {
 	// Outbound abuse limiting: a local account that has sent to too many external
 	// recipients in the window (a compromise signal) has the excess deferred so it
 	// cannot blast unchecked; the admin is alerted once per window. Only this
-	// authenticated-relay path is limited — inbound intake never reaches it.
+	// authenticated-relay path is limited, inbound intake never reaches it.
 	if s.outbound != nil && !s.outbound.Allow(s.authUser) {
 		return &smtp.TempError{Message: "4.7.4 too many recipients in a short time, please retry later"}
 	}
@@ -298,7 +298,7 @@ func (s *session) routeRecipient(to, notify, orcpt string) error {
 // routeListMember files one expanded distribution-list member: a local mailbox
 // becomes a delivery target (skipped when over its receive quota), an external
 // member is relayed when a spool is available. A member that resolves to nothing
-// is dropped — a list must not bounce because one member went stale.
+// is dropped, a list must not bounce because one member went stale.
 func (s *session) routeListMember(m, notify string) {
 	if path, ok := s.accounts.Resolve(m); ok {
 		if overReceiveQuota(path) == nil {
@@ -316,7 +316,7 @@ func (s *session) routeListMember(m, notify string) {
 // overReceiveQuota refuses a local recipient whose mailbox already sits at or
 // above its receive quota, so an over-quota mailbox is rejected permanently at
 // RCPT (no message accepted, no bounce backscatter). A store open or read error
-// does NOT block delivery — quota is a soft administrative limit, never a reason
+// does NOT block delivery, quota is a soft administrative limit, never a reason
 // to lose mail on an infrastructure hiccup. The limit is in KiB and 0 means
 // unlimited; the comparison is done in 64-bit since limit*1024 overflows uint32.
 func overReceiveQuota(path string) error {
@@ -341,7 +341,7 @@ func overReceiveQuota(path string) error {
 
 // overSendQuota refuses an outbound submission when the sender's own mailbox is
 // at or above its send quota. The sender is resolved to a local mailbox; an
-// address with no local mailbox (or a store error) is not blocked — send quota
+// address with no local mailbox (or a store error) is not blocked, send quota
 // governs only local senders, and an infra hiccup must never strand a user's
 // mail. The limit is in KiB, 0 means unlimited, and the comparison is 64-bit.
 func overSendQuota(accounts directory.Accounts, sender string) error {
@@ -412,8 +412,8 @@ func (s *session) Data(r io.Reader) error {
 	// Inbound (unauthenticated) mail bound for a local mailbox is spam-scored: the
 	// filed copy is tagged with advisory X-Spam headers (so a client can filter on
 	// them, preserved through the store by oxcmail), and a message over the threshold
-	// is filed to Junk instead of the inbox. Scoring is fail-open — it never blocks
-	// delivery — and the user's own authenticated submissions and the outbound relay
+	// is filed to Junk instead of the inbox. Scoring is fail-open, it never blocks
+	// delivery, and the user's own authenticated submissions and the outbound relay
 	// copy are not scanned.
 	localRaw := raw
 	folder := int64(mapi.PrivateFIDInbox)
@@ -452,7 +452,7 @@ func (s *session) Data(r io.Reader) error {
 	for _, t := range s.targets {
 		tRaw, tFolder := localRaw, folder
 		// Per-recipient overrides re-decide only this recipient's Junk filing and the
-		// X-Spam flag — never the score, which is intrinsic to the message. Precedence,
+		// X-Spam flag, never the score, which is intrinsic to the message. Precedence,
 		// strongest first: an operator block is absolute; a recipient's own block
 		// narrows an operator allow (or blocks independently); an operator allow files
 		// to the inbox; a recipient's own allow rescues the message, but never a hard
@@ -469,14 +469,14 @@ func (s *session) Data(r io.Reader) error {
 			}
 			switch {
 			case v.AccessAction == antispam.AccessBlock:
-				// Operator block — absolute; the message-level Junk filing stands.
+				// Operator block, absolute; the message-level Junk filing stands.
 			case userAction == antispam.AccessBlock:
 				tv := v
 				tv.Spam = true
 				tFolder = int64(mapi.PrivateFIDJunk)
 				tRaw = antispam.Tag(raw, tv)
 			case v.AccessAction == antispam.AccessAllow:
-				// Operator allow — the message-level inbox filing stands (a hard DMARC
+				// Operator allow, the message-level inbox filing stands (a hard DMARC
 				// failure already left it Junk inside the scorer).
 			case userAction == antispam.AccessAllow && !v.DMARCReject:
 				tv := v
@@ -503,7 +503,7 @@ func (s *session) Data(r io.Reader) error {
 	}
 	// External recipients are handed to the durable relay spool. Once Enqueue
 	// commits, the worker owns their delivery (and retry), so returning success
-	// here lets the server answer 250 — the message is no longer at risk of loss.
+	// here lets the server answer 250, the message is no longer at risk of loss.
 	if len(s.relayTargets) > 0 {
 		if err := s.spool.EnqueueDSN(s.from, s.ret, s.envid, s.relayTargets, raw, received); err != nil {
 			s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "relay.fail", User: s.authUser, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "recipients": len(s.relayTargets)}, Err: err.Error()})
@@ -588,7 +588,7 @@ func Deliver(accounts directory.Accounts, from string, recipients []string, raw 
 // unresolved. from is the relay envelope sender. Only authorized, user-composed
 // send paths pass a non-nil spool; with a nil spool it is exactly Deliver.
 //
-// The returned unresolved holds only the genuinely undeliverable — a user-unknown
+// The returned unresolved holds only the genuinely undeliverable, a user-unknown
 // in a local domain, or (when spool is nil) every external address.
 func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from string, recipients []string, raw []byte, received time.Time) (unresolved []string, err error) {
 	// Antivirus on the authenticated submission path (webmail, EWS, ROP, ActiveSync,
@@ -608,7 +608,7 @@ func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from strin
 	// Redirect also drops the local copy. Destinations join the delivery set and flow
 	// through the same local-then-relay path below, so a destination in a foreign
 	// domain is relayed and an undeliverable one surfaces as unresolved for the caller
-	// to bounce — never a silent drop.
+	// to bounce, never a silent drop.
 	leaves, dests := applyForwards(accounts, leaves)
 	leaves = append(leaves, dests...)
 	// Per-tenant outgoing display name: rewrite the From display name separately for
@@ -647,7 +647,7 @@ func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from strin
 
 // applyForwards consults each resolved recipient's mail-forward directive and splits
 // the set into the addresses delivered to their own mailbox (every recipient without
-// a forward, and every CC recipient — which keeps its local copy) and the forward
+// a forward, and every CC recipient, which keeps its local copy) and the forward
 // destinations to route. A Redirect recipient is dropped from the local set so only
 // the destination receives it. Destinations are de-duplicated and a self-forward
 // (destination equal to the recipient) is ignored. A directory without a Forwarder
@@ -657,7 +657,7 @@ func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from strin
 // path, so a forwarded copy is never itself re-forwarded (one hop) and an
 // undeliverable destination becomes unresolved rather than vanishing. The copy keeps
 // the original envelope sender: a copy relayed to a foreign domain may therefore fail
-// SPF/DMARC and bounce to the original sender — sender rewriting (SRS) is a later
+// SPF/DMARC and bounce to the original sender, sender rewriting (SRS) is a later
 // refinement, deliberately omitted in v1.
 func applyForwards(accounts directory.Accounts, recipients []string) (locals, dests []string) {
 	fwder, ok := accounts.(directory.Forwarder)
@@ -699,7 +699,7 @@ func deliver(accounts directory.Accounts, from, rcptAddr, path string, raw []byt
 		return err
 	}
 	// Spam filed to Junk is delivered silently: no inbox rules, no meeting
-	// auto-processing, and — crucially — no out-of-office auto-reply, so the server
+	// auto-processing, and, crucially, no out-of-office auto-reply, so the server
 	// never backscatters to a spammer. Those passes run only for normal Inbox
 	// delivery, and there as best-effort decoration: any error or panic is logged
 	// and swallowed, never returned, so a misbehaving rule or a failed auto-reply
@@ -769,7 +769,7 @@ func applyInboxRules(st *objectstore.Store, m objectstore.MessageInfo, owner, en
 	if err != nil {
 		log.Printf("mta: inbox rule pass failed for uid %d, skipped: %v", m.UID, err)
 	}
-	// The guards inspect the ORIGINAL received message — not the store's re-exported
+	// The guards inspect the ORIGINAL received message, not the store's re-exported
 	// copy, which drops Auto-Submitted and our marker. Never forward, reject, or
 	// auto-reply to a bounce, auto-submitted, bulk/list, role-mailbox, or self
 	// message (backscatter and loops).

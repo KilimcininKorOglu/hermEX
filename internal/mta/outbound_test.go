@@ -47,7 +47,7 @@ func TestOutboundLimiterDisabledAdmitsEverything(t *testing.T) {
 	}
 }
 
-// TestOutboundLimiterKeysByAccount proves each account has its own budget — one
+// TestOutboundLimiterKeysByAccount proves each account has its own budget, one
 // account's blast does not throttle another.
 func TestOutboundLimiterKeysByAccount(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
@@ -68,7 +68,7 @@ func TestOutboundLimiterKeysByAccount(t *testing.T) {
 }
 
 // TestOutboundLimiterEmptyUserFailsOpen proves an empty account (no authenticated
-// user) is admitted — the limiter never engages outside authenticated submission.
+// user) is admitted, the limiter never engages outside authenticated submission.
 func TestOutboundLimiterEmptyUserFailsOpen(t *testing.T) {
 	l := NewOutboundLimiter()
 	l.SetLimits(1, time.Hour)
@@ -79,8 +79,8 @@ func TestOutboundLimiterEmptyUserFailsOpen(t *testing.T) {
 }
 
 // TestOutboundLimiterAlertsOncePerWindow proves the over-cap alert fires exactly once
-// per account per window — so a blast that trips the cap hundreds of times does not
-// flood the log — and can fire again in a fresh window.
+// per account per window, so a blast that trips the cap hundreds of times does not
+// flood the log, and can fire again in a fresh window.
 func TestOutboundLimiterAlertsOncePerWindow(t *testing.T) {
 	now := time.Unix(1_000_000, 0)
 	var alerts []string
@@ -136,8 +136,8 @@ func TestRcptOutboundDefersAuthenticatedBlast(t *testing.T) {
 }
 
 // TestRcptOutboundSkipsUnauthenticated is the inverted-guard test: an unauthenticated
-// session is never outbound-limited. It cannot relay externally at all — the address
-// is refused as relay-denied (a plain error), never an outbound rate-limit TempError —
+// session is never outbound-limited. It cannot relay externally at all, the address
+// is refused as relay-denied (a plain error), never an outbound rate-limit TempError,
 // so the limiter, which targets authenticated submission, never engages for inbound.
 func TestRcptOutboundSkipsUnauthenticated(t *testing.T) {
 	ob := NewOutboundLimiter()

@@ -101,7 +101,7 @@ func main() {
 	// for it (resource rooms, auto-accepting users). Wired here, not in the mta
 	// package, to break the meeting→mta import cycle. The organizer notification is
 	// kept local-only (a nil spool): an internal organizer is notified, while an
-	// external organizer is not — auto-relaying machine-generated replies to arbitrary
+	// external organizer is not, auto-relaying machine-generated replies to arbitrary
 	// external addresses is a backscatter vector, gated separately like the
 	// out-of-office reply.
 	mta.OnMeetingRequest = func(st *objectstore.Store, accounts directory.Accounts, recipient string, msgID int64) bool {
@@ -129,8 +129,8 @@ func main() {
 	} else {
 		scorer.SetConfig(antispamConfig(settings))
 	}
-	// The Bayesian model is loaded at startup — a data_dir model when present,
-	// otherwise the embedded floor — and hot-reloaded after a retrain (below).
+	// The Bayesian model is loaded at startup, a data_dir model when present,
+	// otherwise the embedded floor, and hot-reloaded after a retrain (below).
 	model, err := antispam.LoadModel(cfg.DataDir)
 	if err != nil {
 		log.Printf("hermex-mta: anti-spam model load failed, using embedded floor: %v", err)
@@ -151,7 +151,7 @@ func main() {
 		scorer.SetAccess(list)
 	}
 	// Hot-reload edited settings, sender access rules, a refreshed ruleset, and a
-	// retrained model so each takes effect without restarting the MTA — mail flow
+	// retrained model so each takes effect without restarting the MTA, mail flow
 	// never pauses.
 	reloader := antispam.NewReloader(scorer, cfg.DataDir, log.Printf)
 	reloader.WatchSettings(func() (*antispam.Config, int64, bool) {
@@ -182,7 +182,7 @@ func main() {
 	applyRateLimitSettings(dir, rateLimiter)
 	go runRateLimitMaintenance(dir, rateLimiter)
 	// Outbound abuse limiting caps how many external recipients a local account may
-	// send to per window — a compromised account that blasts spam is deferred and the
+	// send to per window, a compromised account that blasts spam is deferred and the
 	// admin is alerted. It starts disabled; the alert is a central-log event.
 	outboundLimiter := mta.NewOutboundLimiter()
 	outboundLimiter.SetAlerter(func(user string, count int) {

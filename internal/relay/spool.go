@@ -6,7 +6,7 @@
 // failures and bouncing permanent ones.
 //
 // The spool is the crash-survivable boundary. Once Enqueue returns, the message
-// is the server's responsibility, so submission may answer 250 — an MTA must
+// is the server's responsibility, so submission may answer 250, an MTA must
 // never accept a message and then silently drop it. State is per-recipient: one
 // submission to several external recipients yields one row each, so a partial
 // failure retries only the recipients that have not yet succeeded and never
@@ -43,8 +43,8 @@ type Spool struct {
 	Signer Signer
 }
 
-// Signer DKIM-signs an outbound message body. It must fail open — return the body
-// unchanged rather than error — so signing never blocks a delivery.
+// Signer DKIM-signs an outbound message body. It must fail open, return the body
+// unchanged rather than error, so signing never blocks a delivery.
 type Signer interface {
 	Sign(body []byte) []byte
 }
@@ -147,7 +147,7 @@ func (s *Spool) EnqueueDSN(from, ret, envid string, recipients []DSNRecipient, b
 	if len(recipients) == 0 {
 		return nil
 	}
-	// DKIM-sign once here — the single point both submission paths converge on — so the
+	// DKIM-sign once here, the single point both submission paths converge on, so the
 	// signed form is what is stored and sent to every recipient.
 	if s.Signer != nil {
 		body = s.Signer.Sign(body)
@@ -202,7 +202,7 @@ SELECT r.id, m.envelope_from, r.recipient, m.body, r.attempts, r.notify
 }
 
 // Sent removes a delivered recipient. When it was the message's last remaining
-// recipient, the message row — and its body — is removed too.
+// recipient, the message row, and its body, is removed too.
 func (s *Spool) Sent(recipientID int64) error { return s.settle(recipientID) }
 
 // Fail removes a permanently undeliverable recipient. Like Sent it drops the
@@ -258,7 +258,7 @@ func (s *Spool) RetryNow(recipientID int64, when time.Time) error {
 }
 
 // Delete removes a queued recipient at an administrator's request, dropping the
-// message body once no recipient remains — without emitting a bounce (unlike
+// message body once no recipient remains, without emitting a bounce (unlike
 // Fail, the worker's permanent-failure path). A recipient already gone is a no-op.
 func (s *Spool) Delete(recipientID int64) error { return s.settle(recipientID) }
 

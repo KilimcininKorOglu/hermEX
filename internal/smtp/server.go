@@ -130,7 +130,7 @@ func (s *Server) handle(conn net.Conn) {
 	reply(w, 220, s.hostname()+" ESMTP hermEX")
 	event(logging.LevelInfo, "conn.accept", logging.Fields{"tls": isTLS})
 
-	// A session that can validate credentials enables AUTH — but only over TLS,
+	// A session that can validate credentials enables AUTH, but only over TLS,
 	// so the EHLO advertisement is also gated on the link being secured.
 	_, canAuth := sess.(Authenticator)
 	var hasFrom bool

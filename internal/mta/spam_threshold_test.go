@@ -113,7 +113,7 @@ func TestPerRecipientLowThresholdJunksCleanScore(t *testing.T) {
 }
 
 // TestPerRecipientThresholdFilesEachRecipientIndependently is the core of the
-// feature: one message, scored once, is filed differently for two recipients — the
+// feature: one message, scored once, is filed differently for two recipients, the
 // one with a low override gets it in Junk, the one inheriting the global threshold
 // gets it in the inbox.
 func TestPerRecipientThresholdFilesEachRecipientIndependently(t *testing.T) {
