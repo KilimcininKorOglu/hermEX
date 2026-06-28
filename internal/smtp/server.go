@@ -360,6 +360,7 @@ func (s *Server) greetEHLO(w *bufio.Writer, arg string, isTLS, authAvailable boo
 		"PIPELINING",
 		"8BITMIME",
 		"ENHANCEDSTATUSCODES",
+		"SMTPUTF8",
 	}
 	if max := s.maxSize.Load(); max > 0 {
 		lines = append(lines, fmt.Sprintf("SIZE %d", max))

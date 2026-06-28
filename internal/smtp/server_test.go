@@ -254,6 +254,31 @@ func TestServerEnforcesMaxSize(t *testing.T) {
 	expect(t, r, 552)
 }
 
+// TestServerSMTPUTF8 proves RFC 6531: EHLO advertises SMTPUTF8 and a MAIL FROM
+// carrying the SMTPUTF8 keyword with a UTF-8 envelope address is accepted, with
+// the non-ASCII local/domain bytes reaching the backend intact.
+func TestServerSMTPUTF8(t *testing.T) {
+	sess := &fakeSession{}
+	r, conn := dialServer(t, sess)
+	expect(t, r, 220)
+
+	fmt.Fprint(conn, "EHLO client.test\r\n")
+	_, ehlo, err := r.ReadResponse(250)
+	if err != nil {
+		t.Fatalf("EHLO: %v", err)
+	}
+	if !strings.Contains(ehlo, "SMTPUTF8") {
+		t.Errorf("EHLO did not advertise SMTPUTF8: %q", ehlo)
+	}
+
+	const utf8From = "bücher@例え.test"
+	fmt.Fprint(conn, "MAIL FROM:<"+utf8From+"> SMTPUTF8\r\n")
+	expect(t, r, 250)
+	if sess.from != utf8From {
+		t.Errorf("UTF-8 sender mangled: from = %q, want %q", sess.from, utf8From)
+	}
+}
+
 // TestServerEnhancedStatusCodes proves RFC 2034: EHLO advertises
 // ENHANCEDSTATUSCODES and replies lead with an RFC 3463 status code. A bare
 // reply gets the class default (a 250 carries 2.0.0, a 503 carries a 5.x.x),
