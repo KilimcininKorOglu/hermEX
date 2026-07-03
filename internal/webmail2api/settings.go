@@ -91,17 +91,23 @@ func (s *Server) handlePutPreferences(w http.ResponseWriter, r *http.Request) {
 
 // calendarSettingsJSON is the persisted calendar display settings. FirstDayOfWeek
 // is the week-start day (0=Sun..6=Sat); Resolution is the time-grid slot minutes
-// (5/10/15/30/60). Zero values normalize to the Exchange defaults (Monday, 30min)
-// so a fresh account lands on a sane grid.
+// (5/10/15/30/60); WorkDayStart/End are the working-hours bounds (hour 0-23);
+// ShowNonWorkingHours controls whether the time grid renders hours outside the
+// working window or hides them. Zero values normalize to the Exchange defaults
+// (Monday, 30min, 09:00-18:00, show all hours) so a fresh account lands on a sane grid.
 type calendarSettingsJSON struct {
-	FirstDayOfWeek int `json:"firstDayOfWeek"`
-	Resolution      int `json:"resolution"`
+	FirstDayOfWeek       int  `json:"firstDayOfWeek"`
+	Resolution           int  `json:"resolution"`
+	WorkDayStart         int  `json:"workDayStart"`
+	WorkDayEnd           int  `json:"workDayEnd"`
+	ShowNonWorkingHours  bool `json:"showNonWorkingHours"`
 }
 
 // readCalendarSettings loads the calendar display settings from the shared blob,
-// defaulting to Monday-first and 30-minute resolution when none are stored yet.
+// defaulting to Monday-first, 30-minute resolution, and 09:00-18:00 working hours
+// (showing all hours) when none are stored yet.
 func readCalendarSettings(m map[string]json.RawMessage) calendarSettingsJSON {
-	cs := calendarSettingsJSON{FirstDayOfWeek: 1, Resolution: 30}
+	cs := calendarSettingsJSON{FirstDayOfWeek: 1, Resolution: 30, WorkDayStart: 9, WorkDayEnd: 18, ShowNonWorkingHours: true}
 	if raw, ok := m["webmail2CalendarSettings"]; ok {
 		_ = json.Unmarshal(raw, &cs)
 	}
@@ -110,6 +116,12 @@ func readCalendarSettings(m map[string]json.RawMessage) calendarSettingsJSON {
 	}
 	if !validResolution(cs.Resolution) {
 		cs.Resolution = 30
+	}
+	if cs.WorkDayStart < 0 || cs.WorkDayStart > 23 {
+		cs.WorkDayStart = 9
+	}
+	if cs.WorkDayEnd < 0 || cs.WorkDayEnd > 23 {
+		cs.WorkDayEnd = 18
 	}
 	return cs
 }
@@ -125,7 +137,7 @@ func validResolution(n int) bool {
 
 // handleGetCalendarSettings returns the user's calendar display settings so the
 // SPA can render the month/week grids starting on the configured week-start day
-// and at the configured time-slot resolution.
+// and at the configured time-slot resolution, shading or hiding non-working hours.
 func (s *Server) handleGetCalendarSettings(w http.ResponseWriter, r *http.Request) {
 	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
 		return readCalendarSettings(m), false
@@ -133,8 +145,7 @@ func (s *Server) handleGetCalendarSettings(w http.ResponseWriter, r *http.Reques
 }
 
 // handlePutCalendarSettings persists the user's calendar display settings in the
-// shared webmail settings blob, clamping week-start to a valid weekday and
-// resolution to a supported slot.
+// shared webmail settings blob, clamping each field to its valid range.
 func (s *Server) handlePutCalendarSettings(w http.ResponseWriter, r *http.Request) {
 	var in calendarSettingsJSON
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -146,6 +157,12 @@ func (s *Server) handlePutCalendarSettings(w http.ResponseWriter, r *http.Reques
 	}
 	if !validResolution(in.Resolution) {
 		in.Resolution = 30
+	}
+	if in.WorkDayStart < 0 || in.WorkDayStart > 23 {
+		in.WorkDayStart = 9
+	}
+	if in.WorkDayEnd < 0 || in.WorkDayEnd > 23 {
+		in.WorkDayEnd = 18
 	}
 	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
 		raw, _ := json.Marshal(in)

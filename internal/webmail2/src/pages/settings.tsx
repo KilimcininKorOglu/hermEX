@@ -137,6 +137,11 @@ export function SettingsPage() {
   // Calendar time-grid resolution (5/10/15/30/60 min), DB-backed alongside the
   // week-start day; sets the slot-line density in the day/week/work-week views.
   const [resolution, setResolution] = useState(30)
+  // Working-hours window + non-working-hours visibility, DB-backed; the time grid
+  // shades or hides hours outside this window. Defaults 09:00-18:00, show all.
+  const [workDayStart, setWorkDayStart] = useState(9)
+  const [workDayEnd, setWorkDayEnd] = useState(18)
+  const [showNonWorkingHours, setShowNonWorkingHours] = useState(true)
 
   useEffect(() => {
     api.getProfile()
@@ -160,6 +165,9 @@ export function SettingsPage() {
       .then((s) => {
         setFirstDayOfWeek(s.firstDayOfWeek ?? 1)
         setResolution(s.resolution ?? 30)
+        setWorkDayStart(s.workDayStart ?? 9)
+        setWorkDayEnd(s.workDayEnd ?? 18)
+        setShowNonWorkingHours(s.showNonWorkingHours ?? true)
       })
       .catch(() => undefined)
   }, [])
@@ -175,10 +183,15 @@ export function SettingsPage() {
     }
   }
 
+  // saveCalSettings persists the full calendar settings object so a change to one
+  // field never drops the others on the server (the PUT replaces the blob key).
+  const saveCalSettings = (next: { firstDayOfWeek: number; resolution: number; workDayStart: number; workDayEnd: number; showNonWorkingHours: boolean }) =>
+    api.setCalendarSettings(next)
+
   const handleFirstDayChange = async (d: number) => {
     setFirstDayOfWeek(d)
     try {
-      await api.setCalendarSettings({ firstDayOfWeek: d, resolution })
+      await saveCalSettings({ firstDayOfWeek: d, resolution, workDayStart, workDayEnd, showNonWorkingHours })
       toast.success(t("settings.appearance.firstDaySaved"))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("settings.appearance.firstDaySaveFailed"))
@@ -188,10 +201,40 @@ export function SettingsPage() {
   const handleResolutionChange = async (r: number) => {
     setResolution(r)
     try {
-      await api.setCalendarSettings({ firstDayOfWeek, resolution: r })
+      await saveCalSettings({ firstDayOfWeek, resolution: r, workDayStart, workDayEnd, showNonWorkingHours })
       toast.success(t("settings.appearance.resolutionSaved"))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("settings.appearance.resolutionSaveFailed"))
+    }
+  }
+
+  const handleWorkDayStartChange = async (h: number) => {
+    setWorkDayStart(h)
+    try {
+      await saveCalSettings({ firstDayOfWeek, resolution, workDayStart: h, workDayEnd, showNonWorkingHours })
+      toast.success(t("settings.appearance.workHoursSaved"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("settings.appearance.workHoursSaveFailed"))
+    }
+  }
+
+  const handleWorkDayEndChange = async (h: number) => {
+    setWorkDayEnd(h)
+    try {
+      await saveCalSettings({ firstDayOfWeek, resolution, workDayStart, workDayEnd: h, showNonWorkingHours })
+      toast.success(t("settings.appearance.workHoursSaved"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("settings.appearance.workHoursSaveFailed"))
+    }
+  }
+
+  const handleShowNonWorkingChange = async (show: boolean) => {
+    setShowNonWorkingHours(show)
+    try {
+      await saveCalSettings({ firstDayOfWeek, resolution, workDayStart, workDayEnd, showNonWorkingHours: show })
+      toast.success(t("settings.appearance.workHoursSaved"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("settings.appearance.workHoursSaveFailed"))
     }
   }
 
@@ -1083,6 +1126,45 @@ export function SettingsPage() {
               ))}
             </select>
           </div>
+          <Separator />
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">{t("settings.appearance.workDayStart")}</p>
+              <p className="text-sm text-muted-foreground">{t("settings.appearance.workHoursDescription")}</p>
+            </div>
+            <select
+              value={String(workDayStart)}
+              onChange={(e) => void handleWorkDayStartChange(Number(e.target.value))}
+              className="max-w-[16rem] rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              {Array.from({ length: 24 }, (_, h) => h).map((h) => (
+                <option key={h} value={String(h)}>{String(h).padStart(2, "0")}:00</option>
+              ))}
+            </select>
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">{t("settings.appearance.workDayEnd")}</p>
+              <p className="text-sm text-muted-foreground">{t("settings.appearance.workHoursDescription")}</p>
+            </div>
+            <select
+              value={String(workDayEnd)}
+              onChange={(e) => void handleWorkDayEndChange(Number(e.target.value))}
+              className="max-w-[16rem] rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              {Array.from({ length: 24 }, (_, h) => h).map((h) => (
+                <option key={h} value={String(h)}>{String(h).padStart(2, "0")}:00</option>
+              ))}
+            </select>
+          </div>
+          <Separator />
+          <SettingRow
+            title={t("settings.appearance.showNonWorkingHours")}
+            description={t("settings.appearance.workHoursDescription")}
+            checked={showNonWorkingHours}
+            onChange={() => void handleShowNonWorkingChange(!showNonWorkingHours)}
+          />
         </div>
       </SettingSection>
 

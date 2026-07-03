@@ -393,7 +393,13 @@
       "resolution": "Time slot resolution",
       "resolutionDescription": "The grid slot size in the day and week views",
       "resolutionSaved": "Calendar resolution saved",
-      "resolutionSaveFailed": "Could not save calendar resolution"
+      "resolutionSaveFailed": "Could not save calendar resolution",
+      "workDayStart": "Work day starts",
+      "workDayEnd": "Work day ends",
+      "showNonWorkingHours": "Show non-working hours",
+      "workHoursDescription": "The working-hours window the calendar shades as active",
+      "workHoursSaved": "Working hours saved",
+      "workHoursSaveFailed": "Could not save working hours"
     },
     "notifications": {
       "title": "Notifications",

@@ -393,7 +393,13 @@
       "resolution": "Zaman aralığı çözünürlüğü",
       "resolutionDescription": "Gün ve hafta görünümlerindeki ızgara aralığı boyutu",
       "resolutionSaved": "Takvim çözünürlüğü kaydedildi",
-      "resolutionSaveFailed": "Takvim çözünürlüğü kaydedilemedi"
+      "resolutionSaveFailed": "Takvim çözünürlüğü kaydedilemedi",
+      "workDayStart": "İş günü başlangıcı",
+      "workDayEnd": "İş günü bitişi",
+      "showNonWorkingHours": "Çalışma dışı saatleri göster",
+      "workHoursDescription": "Takvimin etkin olarak gölgellediği çalışma saatleri penceresi",
+      "workHoursSaved": "Çalışma saatleri kaydedildi",
+      "workHoursSaveFailed": "Çalışma saatleri kaydedilemedi"
     },
     "notifications": {
       "title": "Bildirimler",

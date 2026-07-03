@@ -1275,15 +1275,16 @@ class API {
   }
 
   // Calendar display settings (per-user, persisted in the shared webmail settings
-  // blob, not client-side: the week-start day and time-grid resolution must survive
-  // a reload and apply cross-protocol). firstDayOfWeek is 0=Sun..6=Sat (default 1);
-  // resolution is the time-slot minutes 5/10/15/30/60 (default 30).
-  async getCalendarSettings(): Promise<{ firstDayOfWeek: number; resolution: number }> {
-    return this.get<{ firstDayOfWeek: number; resolution: number }>('/calendar/settings')
+  // blob, not client-side: the week-start day, time-grid resolution, and working-
+  // hours window must survive a reload and apply cross-protocol). firstDayOfWeek
+  // is 0=Sun..6=Sat (default 1); resolution is 5/10/15/30/60 min (default 30);
+  // workDayStart/End are hours 0-23 (default 9-18); showNonWorkingHours defaults true.
+  async getCalendarSettings(): Promise<{ firstDayOfWeek: number; resolution: number; workDayStart: number; workDayEnd: number; showNonWorkingHours: boolean }> {
+    return this.get<{ firstDayOfWeek: number; resolution: number; workDayStart: number; workDayEnd: number; showNonWorkingHours: boolean }>('/calendar/settings')
   }
 
-  async setCalendarSettings(s: { firstDayOfWeek: number; resolution: number }): Promise<{ firstDayOfWeek: number; resolution: number }> {
-    return this.put<{ firstDayOfWeek: number; resolution: number }>('/calendar/settings', s)
+  async setCalendarSettings(s: { firstDayOfWeek: number; resolution: number; workDayStart: number; workDayEnd: number; showNonWorkingHours: boolean }): Promise<{ firstDayOfWeek: number; resolution: number; workDayStart: number; workDayEnd: number; showNonWorkingHours: boolean }> {
+    return this.put<{ firstDayOfWeek: number; resolution: number; workDayStart: number; workDayEnd: number; showNonWorkingHours: boolean }>('/calendar/settings', s)
   }
 
   // getRooms lists the organization's bookable rooms for the room picker.

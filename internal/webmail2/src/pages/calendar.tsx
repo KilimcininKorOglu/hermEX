@@ -223,34 +223,41 @@ function moveCursor(cursor: Date, view: "list" | "day" | "week" | "workweek" | "
 
 export function CalendarPage() {
   const { t } = useI18n()
-  // firstDayOfWeek is the user's calendar-week start (0=Sun..6=Sat), persisted in
-  // the shared webmail settings blob (DB-backed, per-user) so the month grid and
-  // week/work-week views agree with the user's locale across devices and reloads.
-  // Defaults to Monday (1), the Exchange default, until the settings load.
+  // CalSettings holds the DB-backed calendar display settings (week-start day,
+  // time-grid resolution, working-hours window, non-working-hours visibility),
+  // persisted in the shared webmail settings blob so they survive a reload and
+  // apply cross-device. Defaults are the Exchange values until the settings load.
   const [firstDayOfWeek, setFirstDayOfWeek] = useState<number>(1)
-  // resolution is the time-grid slot minutes (5/10/15/30/60), DB-backed alongside
-  // firstDayOfWeek; it sets the slot-line density in the day/week/work-week views.
   const [resolution, setResolution] = useState<number>(30)
+  const [workDayStart, setWorkDayStart] = useState<number>(9)
+  const [workDayEnd, setWorkDayEnd] = useState<number>(18)
+  const [showNonWorkingHours, setShowNonWorkingHours] = useState<boolean>(true)
+  // saveCalSettings persists the full settings object; the in-session state is
+  // updated optimistically by the individual setters, then this fires the PUT.
+  const saveCalSettings = (next: { firstDayOfWeek: number; resolution: number; workDayStart: number; workDayEnd: number; showNonWorkingHours: boolean }) => {
+    api.setCalendarSettings(next).catch(() => {
+      /* best-effort: the grid keeps the chosen values in-session */
+    })
+  }
   const setFirstDay = (d: number) => {
     setFirstDayOfWeek(d)
-    api.setCalendarSettings({ firstDayOfWeek: d, resolution }).catch(() => {
-      /* best-effort: the grid keeps the chosen day in-session */
-    })
+    saveCalSettings({ firstDayOfWeek: d, resolution, workDayStart, workDayEnd, showNonWorkingHours })
   }
   const setResolutionAndSave = (r: number) => {
     setResolution(r)
-    api.setCalendarSettings({ firstDayOfWeek, resolution: r }).catch(() => {
-      /* best-effort */
-    })
+    saveCalSettings({ firstDayOfWeek, resolution: r, workDayStart, workDayEnd, showNonWorkingHours })
   }
   useEffect(() => {
     api.getCalendarSettings()
       .then((res) => {
         setFirstDayOfWeek(res.firstDayOfWeek ?? 1)
         setResolution(res.resolution ?? 30)
+        setWorkDayStart(res.workDayStart ?? 9)
+        setWorkDayEnd(res.workDayEnd ?? 18)
+        setShowNonWorkingHours(res.showNonWorkingHours ?? true)
       })
       .catch(() => {
-        /* keep the Monday/30min defaults when settings are unavailable */
+        /* keep the defaults when settings are unavailable */
       })
   }, [])
   // weekdayLabels rotated to start on firstDayOfWeek, so the month-grid header
@@ -795,6 +802,9 @@ export function CalendarPage() {
           weekdayLabels={weekdayLabels}
           firstDayOfWeek={firstDayOfWeek}
           resolution={resolution}
+          workDayStart={workDayStart}
+          workDayEnd={workDayEnd}
+          showNonWorkingHours={showNonWorkingHours}
           events={shownEvents}
           eventColor={eventColor}
           todayKey={todayKey}
@@ -1291,6 +1301,9 @@ function DayTimeGrid(props: {
   weekdayLabels: string[]
   firstDayOfWeek: number
   resolution: number
+  workDayStart: number
+  workDayEnd: number
+  showNonWorkingHours: boolean
   events: CalendarEvent[]
   eventColor: (ev: CalendarEvent) => string | undefined
   todayKey: string
@@ -1298,7 +1311,24 @@ function DayTimeGrid(props: {
   onCreateOn: (day: Date) => void
 }) {
   const { t } = useI18n()
-  const hours = Array.from({ length: 24 }, (_, i) => i)
+  // hoursToRender is the set of hour rows the grid shows. When non-working hours
+  // are hidden, only the working window (workDayStart..workDayEnd) renders, so the
+  // grid focuses on the user's business hours; events outside it still render via
+  // their absolute offsets but are clipped to the visible window.
+  const hours = Array.from({ length: 24 }, (_, i) => i).filter(
+    (h) => props.showNonWorkingHours || (h >= props.workDayStart && h <= props.workDayEnd),
+  )
+  const gridHeight = props.showNonWorkingHours ? 24 * 60 : (props.workDayEnd - props.workDayStart + 1) * 60
+  // offset is the vertical shift applied when non-working hours are hidden: the
+  // grid's top becomes workDayStart:00, so every absolute minute offset is reduced
+  // by workDayStart*60 to land in the visible window.
+  const offset = props.showNonWorkingHours ? 0 : props.workDayStart * 60
+  // nonWorkingRanges are the hour spans shaded as non-working when the full day is
+  // shown: before workDayStart and after workDayEnd.
+  const nonWorkingRanges = [
+    { start: 0, end: props.workDayStart },
+    { start: props.workDayEnd + 1, end: 24 },
+  ].filter((r) => r.end > r.start)
   const colTemplate = `56px repeat(${props.days.length}, minmax(0, 1fr))`
   // slotLines are the minute offsets within each hour at which a finer grid line
   // is drawn (e.g. 30 for a 30-min resolution, 15/30/45 for 15-min). The top-of-hour
@@ -1361,9 +1391,9 @@ function DayTimeGrid(props: {
             at the 70vh scroll cap. */}
         <div className="max-h-[70vh] overflow-y-auto" data-print="content">
           <div className="grid" style={{ gridTemplateColumns: colTemplate }}>
-            <div className="relative" style={{ height: 24 * 60 }}>
+            <div className="relative" style={{ height: gridHeight }}>
               {hours.map((h) => (
-                <div key={h} className="absolute right-1 text-[10px] text-muted-foreground" style={{ top: h * 60 - 6 }}>
+                <div key={h} className="absolute right-1 text-[10px] text-muted-foreground" style={{ top: h * 60 - offset - 6 }}>
                   {String(h).padStart(2, "0")}:00
                 </div>
               ))}
@@ -1375,12 +1405,20 @@ function DayTimeGrid(props: {
               return (
                 <div
                   key={key}
-                  className={`relative border-l ${isToday ? "bg-primary/5" : ""}`}
-                  style={{ height: 24 * 60 }}
+                  className={`relative overflow-hidden border-l ${isToday ? "bg-primary/5" : ""}`}
+                  style={{ height: gridHeight }}
                   onClick={() => props.onCreateOn(day)}
                 >
+                  {/* Shade non-working hours when the grid shows the full day. */}
+                  {props.showNonWorkingHours && nonWorkingRanges.map((r, i) => (
+                    <div
+                      key={`nw-${i}`}
+                      className="absolute left-0 right-0 bg-muted/30"
+                      style={{ top: r.start * 60 - offset, height: (r.end - r.start) * 60 }}
+                    />
+                  ))}
                   {hours.map((h) => (
-                    <div key={h} className="absolute left-0 right-0 border-t border-border/40" style={{ top: h * 60 }} />
+                    <div key={h} className="absolute left-0 right-0 border-t border-border/40" style={{ top: h * 60 - offset }} />
                   ))}
                   {/* Resolution slot lines (finer than the hour boundary). */}
                   {hours.flatMap((h) =>
@@ -1388,18 +1426,19 @@ function DayTimeGrid(props: {
                       <div
                         key={`${h}-${m}`}
                         className="absolute left-0 right-0 border-t border-dashed border-border/20"
-                        style={{ top: h * 60 + m }}
+                        style={{ top: h * 60 + m - offset }}
                       />
                     )),
                   )}
                   {timed.map((ev) => {
-                    const top = eventTopMinutes(ev, day) * PX_PER_MINUTE
+                    const top = eventTopMinutes(ev, day) * PX_PER_MINUTE - offset
                     const height = eventHeightMinutes(ev, day) * PX_PER_MINUTE
+                    if (top + height <= 0 || top >= gridHeight) return null // event in a hidden hour
                     return (
                       <button
                         key={ev.uid}
                         className="absolute left-0.5 right-0.5 overflow-hidden rounded bg-primary/20 px-1 py-0.5 text-left text-[11px] hover:bg-primary/30"
-                        style={{ top, height, borderLeft: `3px solid ${props.eventColor(ev) ?? "hsl(var(--primary))"}` }}
+                        style={{ top: Math.max(0, top), height, borderLeft: `3px solid ${props.eventColor(ev) ?? "hsl(var(--primary))"}` }}
                         onClick={(e) => { e.stopPropagation(); props.onOpenEvent(ev) }}
                         title={`${ev.summary} ${timeLabel(t, ev)}`}
                       >
