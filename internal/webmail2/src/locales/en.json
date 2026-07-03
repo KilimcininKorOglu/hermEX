@@ -702,7 +702,14 @@
     "deleteCalendar": "Delete Calendar",
     "deleteCalendarConfirm": "Delete calendar \"{{name}}\"? Events in this calendar will also be deleted.",
     "calendarDeleted": "Calendar deleted",
-    "calendarDeleteFailed": "Failed to delete calendar"
+    "calendarDeleteFailed": "Failed to delete calendar",
+    "day": "Day",
+    "week": "Week",
+    "workweek": "Work week",
+    "previousDay": "Previous day",
+    "nextDay": "Next day",
+    "previousWeek": "Previous week",
+    "nextWeek": "Next week"
   },
   "filters": {
     "description": "Sort and act on incoming mail automatically",

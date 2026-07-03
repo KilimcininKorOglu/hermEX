@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
-import { CalendarDays, Plus, MapPin, Clock, Edit, Trash2, MoreHorizontal, Users, Repeat, List, LayoutGrid, ChevronLeft, ChevronRight, Settings2, Share2, X } from "lucide-react"
+import { CalendarDays, Plus, MapPin, Clock, Edit, Trash2, MoreHorizontal, Users, Repeat, ChevronLeft, ChevronRight, Settings2, Share2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -138,6 +138,87 @@ function monthMatrix(cursor: Date): Date[] {
   return days
 }
 
+// weekDays returns the consecutive days that fill a time-grid view anchored to
+// the Monday of the week containing cursor. count is the number of day columns
+// (1 for day, 5 for work week Mon-Fri, 7 for full week Mon-Sun), the standard
+// "days in columns" calendar layout with time on the vertical axis.
+function weekDays(cursor: Date, count: number): Date[] {
+  const d = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate())
+  const offset = (d.getDay() + 6) % 7 // Monday = 0
+  const monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() - offset)
+  const days: Date[] = []
+  for (let i = 0; i < count; i++) {
+    days.push(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i))
+  }
+  return days
+}
+
+// PX_PER_MINUTE positions timed events in the time grid (60 px per hour). The
+// grid renders one row per hour over 24 hours, so an event's vertical offset is
+// its minutes-since-local-midnight times this factor.
+const PX_PER_MINUTE = 1
+
+// timedEventForDay returns the timed events that fall on the given local day,
+// positioned within the day column. An event spanning midnight is clamped to the
+// day boundary (it renders in the start day only), so the height is the overlap
+// of the event with the day, never negative. All-day events are excluded; they
+// render in the all-day header row.
+function timedEventsForDay(events: CalendarEvent[], day: Date): CalendarEvent[] {
+  const key = dateKey(day)
+  return events.filter((ev) => !ev.allDay && eventDayKey(ev) === key)
+}
+
+// allDayEventsForDay returns the all-day events that fall on the given local day.
+function allDayEventsForDay(events: CalendarEvent[], day: Date): CalendarEvent[] {
+  const key = dateKey(day)
+  return events.filter((ev) => ev.allDay && eventDayKey(ev) === key)
+}
+
+// eventTopMinutes returns the minutes offset from the day's local midnight at
+// which the event's box should start, clamped to >= 0 (a past-midnight start
+// renders at the top of the column).
+function eventTopMinutes(ev: CalendarEvent, day: Date): number {
+  const start = new Date(ev.start)
+  const dayStart = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 0, 0)
+  return Math.max(0, Math.round((start.getTime() - dayStart.getTime()) / 60000))
+}
+
+// eventHeightMinutes returns the event's height in minutes, clamped so the box
+// never overflows the day and is never shorter than 15 minutes (a readable sliver
+// for short meetings). The end defaults to one hour after start when absent.
+function eventHeightMinutes(ev: CalendarEvent, day: Date): number {
+  const start = new Date(ev.start)
+  const end = ev.end ? new Date(ev.end) : new Date(start.getTime() + 60 * 60 * 1000)
+  const dayEnd = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 23, 59, 59, 999)
+  const s = Math.max(start.getTime(), new Date(day.getFullYear(), day.getMonth(), day.getDate()).getTime())
+  const e = Math.min(end.getTime(), dayEnd.getTime())
+  return Math.max(15, Math.round((e - s) / 60000))
+}
+
+// rangeLabel renders the human label for a day/week/work-week range so the
+// header shows the spanned days, not just the anchor month.
+function rangeLabel(days: Date[]): string {
+  const first = days[0]
+  const last = days[days.length - 1]
+  if (days.length === 1) {
+    return first.toLocaleDateString(undefined, withTz({ weekday: "long", year: "numeric", month: "long", day: "numeric" }))
+  }
+  const sameMonth = first.getMonth() === last.getMonth() && first.getFullYear() === last.getFullYear()
+  const dayNum = (d: Date) => d.getDate()
+  if (sameMonth) {
+    return `${first.toLocaleDateString(undefined, withTz({ month: "long" }))} ${dayNum(first)} – ${dayNum(last)}, ${first.getFullYear()}`
+  }
+  return `${first.toLocaleDateString(undefined, withTz({ month: "short", day: "numeric" }))} – ${last.toLocaleDateString(undefined, withTz({ month: "short", day: "numeric" }))}, ${last.getFullYear()}`
+}
+
+// moveCursor advances the cursor by one step for the active view: a day for the
+// day view, a week for the work-week/week views, a month for the month view.
+function moveCursor(cursor: Date, view: "list" | "day" | "week" | "workweek" | "month", sign: number): Date {
+  if (view === "month") return new Date(cursor.getFullYear(), cursor.getMonth() + sign, 1)
+  const days = view === "day" ? 1 : 7
+  return new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + sign * days)
+}
+
 export function CalendarPage() {
   const { t } = useI18n()
   const weekdayLabels = [
@@ -158,8 +239,9 @@ export function CalendarPage() {
   const [deleteTarget, setDeleteTarget] = useState<CalendarEvent | null>(null)
   const [rooms, setRooms] = useState<Room[]>([])
 
-  // View toggle: agenda list vs. month grid. cursor is the displayed month.
-  const [view, setView] = useState<"list" | "month">("list")
+  // View toggle: agenda list, day/week/work-week time grid, or month grid. cursor
+  // is the displayed month (month view) or the anchor day (day/week/work-week).
+  const [view, setView] = useState<"list" | "day" | "week" | "workweek" | "month">("list")
   const [cursor, setCursor] = useState(() => new Date())
 
   // Availability (free/busy) lookup.
@@ -441,26 +523,18 @@ export function CalendarPage() {
           <h1 className="text-2xl font-bold">{t("nav.calendar")}</h1>
         </div>
         <div className="flex items-center gap-2">
-          <div className="flex rounded-md border">
-            <Button
-              variant={view === "list" ? "secondary" : "ghost"}
-              size="sm"
-              className="rounded-r-none"
-              onClick={() => setView("list")}
-            >
-              <List className="mr-2 h-4 w-4" />
-              {t("calendar.list")}
-            </Button>
-            <Button
-              variant={view === "month" ? "secondary" : "ghost"}
-              size="sm"
-              className="rounded-l-none"
-              onClick={() => setView("month")}
-            >
-              <LayoutGrid className="mr-2 h-4 w-4" />
-              {t("calendar.month")}
-            </Button>
-          </div>
+          <Select value={view} onValueChange={(v) => setView(v as typeof view)}>
+            <SelectTrigger className="w-36">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="day">{t("calendar.day")}</SelectItem>
+              <SelectItem value="workweek">{t("calendar.workweek")}</SelectItem>
+              <SelectItem value="week">{t("calendar.week")}</SelectItem>
+              <SelectItem value="month">{t("calendar.month")}</SelectItem>
+              <SelectItem value="list">{t("calendar.list")}</SelectItem>
+            </SelectContent>
+          </Select>
           <Button variant="outline" onClick={() => { setFbResults(null); setFbOpen(true) }}>
             <Users className="mr-2 h-4 w-4" />
             {t("calendar.availability")}
@@ -645,6 +719,23 @@ export function CalendarPage() {
             </div>
           </div>
         </div>
+      ) : view === "day" || view === "week" || view === "workweek" ? (
+        <DayTimeGrid
+          days={view === "day" ? weekDays(cursor, 1) : view === "workweek" ? weekDays(cursor, 5) : weekDays(cursor, 7)}
+          label={rangeLabel(view === "day" ? weekDays(cursor, 1) : view === "workweek" ? weekDays(cursor, 5) : weekDays(cursor, 7))}
+          prevLabel={t(view === "day" ? "calendar.previousDay" : "calendar.previousWeek")}
+          nextLabel={t(view === "day" ? "calendar.nextDay" : "calendar.nextWeek")}
+          todayLabel={t("common.today")}
+          onPrev={() => setCursor((c) => moveCursor(c, view, -1))}
+          onNext={() => setCursor((c) => moveCursor(c, view, +1))}
+          onToday={() => setCursor(new Date())}
+          weekdayLabels={weekdayLabels}
+          events={shownEvents}
+          eventColor={eventColor}
+          todayKey={todayKey}
+          onOpenEvent={openEdit}
+          onCreateOn={openCreateOn}
+        />
       ) : events.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <div className="rounded-full bg-muted p-4">
@@ -1091,6 +1182,134 @@ export function CalendarPage() {
           isOwner={true}
         />
       )}
+    </div>
+  )
+}
+
+// DayTimeGrid renders the day/work-week/week time grid: one column per day with
+// an hour gutter, an all-day header row, and timed events positioned by their
+// start/end minutes. The layout is days-in-columns with time on the vertical
+// axis. The body scrolls over 24 hours; clicking empty space in a day column
+// opens the create dialog on that day.
+function DayTimeGrid(props: {
+  days: Date[]
+  label: string
+  prevLabel: string
+  nextLabel: string
+  todayLabel: string
+  onPrev: () => void
+  onNext: () => void
+  onToday: () => void
+  weekdayLabels: string[]
+  events: CalendarEvent[]
+  eventColor: (ev: CalendarEvent) => string | undefined
+  todayKey: string
+  onOpenEvent: (ev: CalendarEvent) => void
+  onCreateOn: (day: Date) => void
+}) {
+  const { t } = useI18n()
+  const hours = Array.from({ length: 24 }, (_, i) => i)
+  const colTemplate = `56px repeat(${props.days.length}, minmax(0, 1fr))`
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">{props.label}</h2>
+        <div className="flex items-center gap-1">
+          <Button variant="outline" size="sm" onClick={props.onToday}>{props.todayLabel}</Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={props.prevLabel} onClick={props.onPrev}>
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={props.nextLabel} onClick={props.onNext}>
+            <ChevronRight className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
+      <div className="overflow-hidden rounded-lg border bg-card">
+        {/* Day header row: a corner gutter plus one header per day. */}
+        <div className="grid border-b bg-muted/30" style={{ gridTemplateColumns: colTemplate }}>
+          <div className="py-2" />
+          {props.days.map((day) => {
+            const key = dateKey(day)
+            const isToday = key === props.todayKey
+            return (
+              <div key={key} className={`border-l py-2 text-center ${isToday ? "text-primary font-semibold" : ""}`}>
+                <div className="text-xs text-muted-foreground">{props.weekdayLabels[(day.getDay() + 6) % 7]}</div>
+                <div className="text-sm">{day.getDate()}</div>
+              </div>
+            )
+          })}
+        </div>
+        {/* All-day events row. */}
+        <div className="grid border-b" style={{ gridTemplateColumns: colTemplate }}>
+          <div className="py-1 text-center text-[10px] text-muted-foreground">{t("calendar.allDay")}</div>
+          {props.days.map((day) => {
+            const key = dateKey(day)
+            const allDay = allDayEventsForDay(props.events, day)
+            return (
+              <div key={key} className="min-h-7 border-l px-1 py-0.5">
+                {allDay.map((ev) => (
+                  <button
+                    key={ev.uid}
+                    onClick={() => props.onOpenEvent(ev)}
+                    className="block w-full truncate rounded bg-primary/15 px-1 py-0.5 text-left text-xs"
+                    style={props.eventColor(ev) ? { borderLeft: `3px solid ${props.eventColor(ev)}` } : undefined}
+                    title={ev.summary}
+                  >
+                    {ev.summary}
+                  </button>
+                ))}
+              </div>
+            )
+          })}
+        </div>
+        {/* Time grid body: hour gutter + day columns, scrollable over 24 hours. */}
+        <div className="max-h-[70vh] overflow-y-auto">
+          <div className="grid" style={{ gridTemplateColumns: colTemplate }}>
+            <div className="relative" style={{ height: 24 * 60 }}>
+              {hours.map((h) => (
+                <div key={h} className="absolute right-1 text-[10px] text-muted-foreground" style={{ top: h * 60 - 6 }}>
+                  {String(h).padStart(2, "0")}:00
+                </div>
+              ))}
+            </div>
+            {props.days.map((day) => {
+              const key = dateKey(day)
+              const isToday = key === props.todayKey
+              const timed = timedEventsForDay(props.events, day)
+              return (
+                <div
+                  key={key}
+                  className={`relative border-l ${isToday ? "bg-primary/5" : ""}`}
+                  style={{ height: 24 * 60 }}
+                  onClick={() => props.onCreateOn(day)}
+                >
+                  {hours.map((h) => (
+                    <div key={h} className="absolute left-0 right-0 border-t border-border/40" style={{ top: h * 60 }} />
+                  ))}
+                  {timed.map((ev) => {
+                    const top = eventTopMinutes(ev, day) * PX_PER_MINUTE
+                    const height = eventHeightMinutes(ev, day) * PX_PER_MINUTE
+                    return (
+                      <button
+                        key={ev.uid}
+                        className="absolute left-0.5 right-0.5 overflow-hidden rounded bg-primary/20 px-1 py-0.5 text-left text-[11px] hover:bg-primary/30"
+                        style={{ top, height, borderLeft: `3px solid ${props.eventColor(ev) ?? "hsl(var(--primary))"}` }}
+                        onClick={(e) => { e.stopPropagation(); props.onOpenEvent(ev) }}
+                        title={`${ev.summary} ${timeLabel(t, ev)}`}
+                      >
+                        <div className="truncate font-medium">{ev.summary}</div>
+                        <div className="truncate text-muted-foreground">
+                          {new Date(ev.start).toLocaleTimeString(undefined, withTz({ hour: "2-digit", minute: "2-digit" }))}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

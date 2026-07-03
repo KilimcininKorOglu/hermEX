@@ -702,7 +702,14 @@
     "deleteCalendar": "Takvimi Sil",
     "deleteCalendarConfirm": "\"{{name}}\" takvimi silinsin mi? Bu takvimdeki etkinlikler de silinecektir.",
     "calendarDeleted": "Takvim silindi",
-    "calendarDeleteFailed": "Takvim silinemedi"
+    "calendarDeleteFailed": "Takvim silinemedi",
+    "day": "Gün",
+    "week": "Hafta",
+    "workweek": "İş haftası",
+    "previousDay": "Önceki gün",
+    "nextDay": "Sonraki gün",
+    "previousWeek": "Önceki hafta",
+    "nextWeek": "Sonraki hafta"
   },
   "filters": {
     "description": "Gelen postaları otomatik olarak sırala ve işle",
