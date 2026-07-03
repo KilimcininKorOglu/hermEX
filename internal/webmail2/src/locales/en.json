@@ -739,7 +739,9 @@
     "sensitivity": "Sensitivity",
     "sensitivityNormal": "Normal",
     "sensitivityPrivate": "Private",
-    "sensitivityConfidential": "Confidential"
+    "sensitivityConfidential": "Confidential",
+    "categories": "Categories",
+    "categoriesEmpty": "None defined, add categories in Settings"
   },
   "filters": {
     "description": "Sort and act on incoming mail automatically",
@@ -1187,10 +1189,10 @@
     "unknown": "Availability unknown"
   },
   "onboarding": {
-    "title": "Welcome — let's set you up",
+    "title": "Welcome, let's set you up",
     "subtitle": "Choose how hermEX shows times and looks. You can change these anytime in Settings.",
     "timezone": "Timezone",
-    "timezoneHint": "Detected from your device — pick another zone if you prefer.",
+    "timezoneHint": "Detected from your device, pick another zone if you prefer.",
     "theme": "Theme",
     "themeLight": "Light",
     "themeDark": "Dark",

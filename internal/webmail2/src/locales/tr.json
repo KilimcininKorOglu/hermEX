@@ -739,7 +739,9 @@
     "sensitivity": "Hassasiyet",
     "sensitivityNormal": "Normal",
     "sensitivityPrivate": "Özel",
-    "sensitivityConfidential": "Gizli"
+    "sensitivityConfidential": "Gizli",
+    "categories": "Kategoriler",
+    "categoriesEmpty": "Tanımsız, Ayarlar'dan kategori ekleyin"
   },
   "filters": {
     "description": "Gelen postaları otomatik olarak sırala ve işle",
@@ -1187,10 +1189,10 @@
     "unknown": "Uygunluk bilinmiyor"
   },
   "onboarding": {
-    "title": "Hoş geldiniz — kurulumu yapalım",
+    "title": "Hoş geldiniz, kurulumu yapalım",
     "subtitle": "hermEX'in saatleri nasıl göstereceğini ve görünümünü seçin. Bunları istediğiniz zaman Ayarlar'dan değiştirebilirsiniz.",
     "timezone": "Saat dilimi",
-    "timezoneHint": "Cihazınızdan algılandı — isterseniz başka bir dilim seçin.",
+    "timezoneHint": "Cihazınızdan algılandı, isterseniz başka bir dilim seçin.",
     "theme": "Tema",
     "themeLight": "Açık",
     "themeDark": "Koyu",

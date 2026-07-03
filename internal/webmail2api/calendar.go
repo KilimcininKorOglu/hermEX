@@ -30,9 +30,10 @@ type eventJSON struct {
 	Start           string `json:"start"`
 	End             string `json:"end,omitempty"`
 	AllDay          bool   `json:"allDay,omitempty"`
-	ReminderMinutes *int   `json:"reminderMinutes,omitempty"`
-	BusyStatus      *int   `json:"busyStatus,omitempty"`
-	Sensitivity     *int   `json:"sensitivity,omitempty"` // PR_SENSITIVITY: 0=normal, 2=private, 3=confidential (round-trips via iCal CLASS)
+	ReminderMinutes *int     `json:"reminderMinutes,omitempty"`
+	BusyStatus      *int     `json:"busyStatus,omitempty"`
+	Sensitivity     *int     `json:"sensitivity,omitempty"` // PR_SENSITIVITY: 0=normal, 2=private, 3=confidential (round-trips via iCal CLASS)
+	Categories      []string `json:"categories,omitempty"`  // PidNameKeywords, the shared category list (store GetCategories/SetCategories)
 }
 
 // calendarJSON is the SPA's Calendar shape. ID is the stable "calendar" for the
@@ -347,6 +348,10 @@ func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+			// Categories are the shared PidNameKeywords list, read directly.
+			if cats, err := st.GetCategories(o.ID); err == nil && len(cats) > 0 {
+				e.Categories = cats
+			}
 			events = append(events, e)
 		}
 	}
@@ -535,6 +540,12 @@ func storeEvent(st *objectstore.Store, e eventJSON, folderID int64) (string, err
 			props.Set(tag, int32(*e.BusyStatus))
 			_ = st.SetMessageProperties(id, props)
 		}
+	}
+	// Categories ride the shared PidNameKeywords named prop (the same list every
+	// protocol reads), set directly rather than through the iCal CATEGORIES path
+	// oxcical's VEVENT does not parse.
+	if len(e.Categories) > 0 {
+		_ = st.SetCategories(id, e.Categories)
 	}
 	return strconv.FormatInt(id, 10), nil
 }

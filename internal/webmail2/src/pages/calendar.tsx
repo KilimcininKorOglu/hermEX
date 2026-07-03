@@ -74,9 +74,10 @@ interface EventForm {
   reminder: string // "" = none, else a minute offset ("15", "30", "60", ...)
   busyStatus: string // "" = default (busy), else "0".."3" (free/tentative/busy/oof)
   sensitivity: string // "" = normal, else "2" (private) or "3" (confidential)
+  categories: string[] // selected category names
 }
 
-const emptyForm: EventForm = { summary: "", start: "", end: "", allDay: false, location: "", description: "", attendees: "", recurrence: "", calendarId: "calendar", reminder: "", busyStatus: "", sensitivity: "" }
+const emptyForm: EventForm = { summary: "", start: "", end: "", allDay: false, location: "", description: "", attendees: "", recurrence: "", calendarId: "calendar", reminder: "", busyStatus: "", sensitivity: "", categories: [] }
 
 // recurrenceToForm maps a stored RRULE value to the form's frequency selector.
 function recurrenceToForm(rrule?: string): string {
@@ -285,6 +286,9 @@ export function CalendarPage() {
   const [busy, setBusy] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<CalendarEvent | null>(null)
   const [rooms, setRooms] = useState<Room[]>([])
+  // allCategories is the user's master category list (name + color), loaded once
+  // so the event form can offer the same palette the mail/settings pages use.
+  const [allCategories, setAllCategories] = useState<{ name: string; color?: string }[]>([])
 
   // View toggle: agenda list, day/week/work-week time grid, or month grid. cursor
   // is the displayed month (month view) or the anchor day (day/week/work-week).
@@ -351,6 +355,9 @@ export function CalendarPage() {
     api.getRooms()
       .then((res) => setRooms(res.rooms ?? []))
       .catch(() => setRooms([]))
+    api.getCategories()
+      .then((res) => setAllCategories(res.categories ?? []))
+      .catch(() => setAllCategories([]))
   }, [])
 
   const openCreate = () => {
@@ -383,6 +390,7 @@ export function CalendarPage() {
       reminder: ev.reminderMinutes ? String(ev.reminderMinutes) : "",
       busyStatus: ev.busyStatus != null ? String(ev.busyStatus) : "",
       sensitivity: ev.sensitivity != null && ev.sensitivity > 0 ? String(ev.sensitivity) : "",
+      categories: ev.categories ?? [],
     })
     setDialogOpen(true)
   }
@@ -413,6 +421,7 @@ export function CalendarPage() {
       reminderMinutes: form.reminder ? Number(form.reminder) : undefined,
       busyStatus: form.busyStatus ? Number(form.busyStatus) : undefined,
       sensitivity: form.sensitivity ? Number(form.sensitivity) : undefined,
+      categories: form.categories.length > 0 ? form.categories : undefined,
       // Anchor timed events to the user's zone so recurrences keep their wall
       // time across DST (stored as DTSTART;TZID + VTIMEZONE). All-day events stay
       // floating dates.
@@ -1006,6 +1015,38 @@ export function CalendarPage() {
                 </SelectContent>
               </Select>
             </div>
+            {allCategories.length > 0 && (
+              <div className="space-y-2">
+                <Label>{t("calendar.categories")}</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {allCategories.map((cat) => {
+                    const on = form.categories.includes(cat.name)
+                    return (
+                      <button
+                        key={cat.name}
+                        type="button"
+                        className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${on ? "opacity-100" : "opacity-50"}`}
+                        style={{
+                          borderColor: cat.color ?? "#3b82f6",
+                          color: cat.color ?? "#3b82f6",
+                          backgroundColor: on ? `${cat.color ?? "#3b82f6"}15` : "transparent",
+                        }}
+                        onClick={() =>
+                          setForm((prev) => ({
+                            ...prev,
+                            categories: on
+                              ? prev.categories.filter((c) => c !== cat.name)
+                              : [...prev.categories, cat.name],
+                          }))
+                        }
+                      >
+                        {cat.name}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="ev-start">{t("calendar.start")}</Label>

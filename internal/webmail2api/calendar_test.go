@@ -362,3 +362,49 @@ func TestCalendarEventSensitivityRoundTrip(t *testing.T) {
 		t.Fatalf("normal event has sensitivity = %v, want nil", listed.Events[0].Sensitivity)
 	}
 }
+
+// TestCalendarEventCategoriesRoundTrip proves the category list (PidNameKeywords,
+// the shared cross-protocol list) round-trips through the direct store accessor.
+// A silent loss here would drop the event's categories after a reload.
+func TestCalendarEventCategoriesRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	st.Close()
+
+	secret := []byte("calendar-categories-test-secret")
+	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
+	do := func(method, target, body string) *httptest.ResponseRecorder {
+		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+		var req *http.Request
+		if body == "" {
+			req = httptest.NewRequest(method, target, nil)
+		} else {
+			req = httptest.NewRequest(method, target, strings.NewReader(body))
+		}
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+
+	if rec := do(http.MethodPost, "/api/v1/calendar/events", `{"summary":"Meeting","start":"2026-08-02T09:00:00Z","categories":["Work","Urgent"]}`); rec.Code != http.StatusOK {
+		t.Fatalf("create: status %d", rec.Code)
+	}
+	rec := do(http.MethodGet, "/api/v1/calendar/events", "")
+	var listed struct {
+		Events []eventJSON `json:"events"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(listed.Events) != 1 {
+		t.Fatalf("got %d events, want 1", len(listed.Events))
+	}
+	got := listed.Events[0].Categories
+	if len(got) != 2 || got[0] != "Work" || got[1] != "Urgent" {
+		t.Fatalf("categories = %v, want [Work Urgent]", got)
+	}
+}
