@@ -713,7 +713,8 @@
     "reminder": "Hatırlatma",
     "reminderNone": "Yok",
     "reminderMinutes": "{n} dakika önce",
-    "print": "Yazdır"
+    "print": "Yazdır",
+    "firstDayOfWeek": "Haftanın ilk günü"
   },
   "filters": {
     "description": "Gelen postaları otomatik olarak sırala ve işle",

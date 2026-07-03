@@ -125,13 +125,14 @@ function eventDayKey(ev: CalendarEvent): string {
   return isNaN(d.getTime()) ? "" : dateKey(d)
 }
 
-// monthMatrix returns the 42 days (6 weeks, Monday-first) that fill the grid for
-// the month containing cursor, including trailing days from adjacent months.
-function monthMatrix(cursor: Date): Date[] {
+// monthMatrix returns the 42 days (6 weeks) that fill the grid for the month
+// containing cursor, including trailing days from adjacent months. The week
+// starts on firstDayOfWeek (0=Sun..6=Sat), matching the user's locale setting.
+function monthMatrix(cursor: Date, firstDayOfWeek: number): Date[] {
   const year = cursor.getFullYear()
   const month = cursor.getMonth()
   const first = new Date(year, month, 1)
-  const offset = (first.getDay() + 6) % 7 // Monday = 0
+  const offset = (first.getDay() - firstDayOfWeek + 7) % 7
   const days: Date[] = []
   for (let i = 0; i < 42; i++) {
     days.push(new Date(year, month, 1 - offset + i))
@@ -140,16 +141,16 @@ function monthMatrix(cursor: Date): Date[] {
 }
 
 // weekDays returns the consecutive days that fill a time-grid view anchored to
-// the Monday of the week containing cursor. count is the number of day columns
-// (1 for day, 5 for work week Mon-Fri, 7 for full week Mon-Sun), the standard
+// the firstDayOfWeek of the week containing cursor. count is the number of day
+// columns (1 for day, 5 for work week, 7 for full week), the standard
 // "days in columns" calendar layout with time on the vertical axis.
-function weekDays(cursor: Date, count: number): Date[] {
+function weekDays(cursor: Date, count: number, firstDayOfWeek: number): Date[] {
   const d = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate())
-  const offset = (d.getDay() + 6) % 7 // Monday = 0
-  const monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() - offset)
+  const offset = (d.getDay() - firstDayOfWeek + 7) % 7
+  const start = new Date(d.getFullYear(), d.getMonth(), d.getDate() - offset)
   const days: Date[] = []
   for (let i = 0; i < count; i++) {
-    days.push(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i))
+    days.push(new Date(start.getFullYear(), start.getMonth(), start.getDate() + i))
   }
   return days
 }
@@ -222,14 +223,31 @@ function moveCursor(cursor: Date, view: "list" | "day" | "week" | "workweek" | "
 
 export function CalendarPage() {
   const { t } = useI18n()
-  const weekdayLabels = [
+  // firstDayOfWeek is the user's calendar-week start (0=Sun..6=Sat), persisted in
+  // localStorage so the month grid and week/work-week views agree with the user's
+  // locale. Defaults to Monday (1), the Exchange default.
+  const [firstDayOfWeek, setFirstDayOfWeek] = useState<number>(() => {
+    const v = Number(localStorage.getItem("cal:firstDay"))
+    return v >= 0 && v <= 6 ? v : 1
+  })
+  const setFirstDay = (d: number) => {
+    setFirstDayOfWeek(d)
+    localStorage.setItem("cal:firstDay", String(d))
+  }
+  // weekdayLabels rotated to start on firstDayOfWeek, so the month-grid header
+  // and the time-grid day header columns align with monthMatrix/weekDays.
+  const dayNamesSundayFirst = [
+    t("calendar.weekdays.sun"),
     t("calendar.weekdays.mon"),
     t("calendar.weekdays.tue"),
     t("calendar.weekdays.wed"),
     t("calendar.weekdays.thu"),
     t("calendar.weekdays.fri"),
     t("calendar.weekdays.sat"),
-    t("calendar.weekdays.sun"),
+  ]
+  const weekdayLabels = [
+    ...dayNamesSundayFirst.slice(firstDayOfWeek),
+    ...dayNamesSundayFirst.slice(0, firstDayOfWeek),
   ]
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [loading, setLoading] = useState(true)
@@ -504,7 +522,7 @@ export function CalendarPage() {
     else eventsByDay.set(key, [ev])
   }
 
-  const monthDays = monthMatrix(cursor)
+  const monthDays = monthMatrix(cursor, firstDayOfWeek)
   const todayKey = dateKey(new Date())
   const monthLabel = cursor.toLocaleDateString(undefined, { month: "long", year: "numeric" })
 
@@ -536,6 +554,16 @@ export function CalendarPage() {
               <SelectItem value="week">{t("calendar.week")}</SelectItem>
               <SelectItem value="month">{t("calendar.month")}</SelectItem>
               <SelectItem value="list">{t("calendar.list")}</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={String(firstDayOfWeek)} onValueChange={(v) => setFirstDay(Number(v))}>
+            <SelectTrigger className="w-28" aria-label={t("calendar.firstDayOfWeek")} title={t("calendar.firstDayOfWeek")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {dayNamesSundayFirst.map((label, idx) => (
+                <SelectItem key={idx} value={String(idx)}>{label}</SelectItem>
+              ))}
             </SelectContent>
           </Select>
           <Button variant="outline" onClick={() => { setFbResults(null); setFbOpen(true) }}>
@@ -727,8 +755,8 @@ export function CalendarPage() {
         </div>
       ) : view === "day" || view === "week" || view === "workweek" ? (
         <DayTimeGrid
-          days={view === "day" ? weekDays(cursor, 1) : view === "workweek" ? weekDays(cursor, 5) : weekDays(cursor, 7)}
-          label={rangeLabel(view === "day" ? weekDays(cursor, 1) : view === "workweek" ? weekDays(cursor, 5) : weekDays(cursor, 7))}
+          days={view === "day" ? weekDays(cursor, 1, firstDayOfWeek) : view === "workweek" ? weekDays(cursor, 5, firstDayOfWeek) : weekDays(cursor, 7, firstDayOfWeek)}
+          label={rangeLabel(view === "day" ? weekDays(cursor, 1, firstDayOfWeek) : view === "workweek" ? weekDays(cursor, 5, firstDayOfWeek) : weekDays(cursor, 7, firstDayOfWeek))}
           prevLabel={t(view === "day" ? "calendar.previousDay" : "calendar.previousWeek")}
           nextLabel={t(view === "day" ? "calendar.nextDay" : "calendar.nextWeek")}
           todayLabel={t("common.today")}
@@ -736,6 +764,7 @@ export function CalendarPage() {
           onNext={() => setCursor((c) => moveCursor(c, view, +1))}
           onToday={() => setCursor(new Date())}
           weekdayLabels={weekdayLabels}
+          firstDayOfWeek={firstDayOfWeek}
           events={shownEvents}
           eventColor={eventColor}
           todayKey={todayKey}
@@ -1230,6 +1259,7 @@ function DayTimeGrid(props: {
   onNext: () => void
   onToday: () => void
   weekdayLabels: string[]
+  firstDayOfWeek: number
   events: CalendarEvent[]
   eventColor: (ev: CalendarEvent) => string | undefined
   todayKey: string
@@ -1262,7 +1292,7 @@ function DayTimeGrid(props: {
             const isToday = key === props.todayKey
             return (
               <div key={key} className={`border-l py-2 text-center ${isToday ? "text-primary font-semibold" : ""}`}>
-                <div className="text-xs text-muted-foreground">{props.weekdayLabels[(day.getDay() + 6) % 7]}</div>
+                <div className="text-xs text-muted-foreground">{props.weekdayLabels[(day.getDay() - props.firstDayOfWeek + 7) % 7]}</div>
                 <div className="text-sm">{day.getDate()}</div>
               </div>
             )

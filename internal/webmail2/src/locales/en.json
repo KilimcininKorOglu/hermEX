@@ -713,7 +713,8 @@
     "reminder": "Reminder",
     "reminderNone": "None",
     "reminderMinutes": "{n} minutes before",
-    "print": "Print"
+    "print": "Print",
+    "firstDayOfWeek": "First day of week"
   },
   "filters": {
     "description": "Sort and act on incoming mail automatically",
