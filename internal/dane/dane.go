@@ -44,6 +44,13 @@ const (
 	matchSHA512 = 2
 )
 
+// ErrBogus marks a TLSA lookup the security-aware resolver answered with
+// SERVFAIL, the signal for a bogus (DNSSEC-invalid) RRset. It is returned
+// wrapped so a caller can tell a security failure (which defers delivery and is
+// reportable as a TLS-RPT dnssec-invalid result) apart from a transient lookup
+// error (which only defers).
+var ErrBogus = errors.New("dane: bogus DNSSEC (SERVFAIL)")
+
 // Record is one usable TLSA record: the certificate-association data plus the
 // usage/selector/matching-type that say how to compare it to the server's chain.
 type Record struct {
@@ -105,7 +112,7 @@ func (r *Resolver) LookupTLSA(host string, port int) ([]Record, bool, error) {
 	switch resp.Rcode {
 	case dns.RcodeSuccess, dns.RcodeNameError: // NOERROR or NXDOMAIN
 	case dns.RcodeServerFailure:
-		return nil, false, fmt.Errorf("dane: SERVFAIL (bogus DNSSEC) resolving %s", name)
+		return nil, false, fmt.Errorf("%w resolving %s", ErrBogus, name)
 	default:
 		return nil, false, fmt.Errorf("dane: TLSA query for %s returned rcode %d", name, resp.Rcode)
 	}

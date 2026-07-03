@@ -8,9 +8,13 @@ import (
 	"crypto/sha512"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"errors"
 	"math/big"
+	"net"
 	"testing"
 	"time"
+
+	"github.com/miekg/dns"
 )
 
 // issue makes a certificate (self-signed when parent is nil, else signed by
@@ -160,5 +164,34 @@ func TestResolverAddr(t *testing.T) {
 	}
 	if got := (&Resolver{Addr: "10.0.0.1:5353"}).addr(); got != "10.0.0.1:5353" {
 		t.Errorf("host:port addr = %q, want 10.0.0.1:5353", got)
+	}
+}
+
+// servfailResolver starts a UDP DNS stub that answers every query with SERVFAIL,
+// the response a validating resolver gives for a bogus (DNSSEC-invalid) RRset,
+// and returns a Resolver pointed at it.
+func servfailResolver(t *testing.T) *Resolver {
+	t.Helper()
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &dns.Server{PacketConn: pc, Handler: dns.HandlerFunc(func(w dns.ResponseWriter, r *dns.Msg) {
+		m := new(dns.Msg)
+		m.SetRcode(r, dns.RcodeServerFailure)
+		_ = w.WriteMsg(m)
+	})}
+	go srv.ActivateAndServe()
+	t.Cleanup(func() { _ = srv.Shutdown() })
+	return &Resolver{Addr: pc.LocalAddr().String()}
+}
+
+// TestLookupTLSABogus proves a SERVFAIL answer surfaces as ErrBogus, the typed
+// signal a caller relies on to defer delivery and report a TLS-RPT
+// dnssec-invalid result rather than silently downgrade to cleartext.
+func TestLookupTLSABogus(t *testing.T) {
+	_, _, err := servfailResolver(t).LookupTLSA("mx.example", 25)
+	if !errors.Is(err, ErrBogus) {
+		t.Fatalf("LookupTLSA on SERVFAIL = %v, want it to wrap ErrBogus", err)
 	}
 }

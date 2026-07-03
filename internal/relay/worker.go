@@ -293,6 +293,12 @@ func (w *Worker) send(host string, it Item, requireTLS bool) error {
 	if w.DANE != nil {
 		recs, applicable, err := w.DANE.LookupTLSA(host, 25)
 		if err != nil {
+			// A bogus (DNSSEC-invalid) TLSA answer is a reportable TLS-RPT failure
+			// (RFC 8460 dnssec-invalid); a transient lookup error is not (RFC 8460
+			// 4.3.4) and only defers delivery.
+			if errors.Is(err, dane.ErrBogus) {
+				w.recordTLS(it, host, tlsrpt.PolicyTypeTLSA, tlsrpt.ResultDNSSECInvalid)
+			}
 			return err
 		}
 		if applicable {

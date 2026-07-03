@@ -6,6 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/miekg/dns"
+
+	"hermex/internal/dane"
 	"hermex/internal/mtasts"
 	hsmtp "hermex/internal/smtp"
 	"hermex/internal/tlsrpt"
@@ -260,5 +263,63 @@ func TestWorkerOpportunisticPlaintextNotRecorded(t *testing.T) {
 	}
 	if rep != nil {
 		t.Errorf("plaintext delivery recorded a TLS session: %+v", rep)
+	}
+}
+
+// servfailDNS starts a UDP DNS stub answering every query with SERVFAIL (the
+// response a validating resolver gives for a bogus, DNSSEC-invalid RRset) and
+// returns its address, so a dane.Resolver pointed at it reports ErrBogus.
+func servfailDNS(t *testing.T) string {
+	t.Helper()
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &dns.Server{PacketConn: pc, Handler: dns.HandlerFunc(func(w dns.ResponseWriter, r *dns.Msg) {
+		m := new(dns.Msg)
+		m.SetRcode(r, dns.RcodeServerFailure)
+		_ = w.WriteMsg(m)
+	})}
+	go srv.ActivateAndServe()
+	t.Cleanup(func() { _ = srv.Shutdown() })
+	return pc.LocalAddr().String()
+}
+
+// TestWorkerRecordsDNSSECInvalid proves a bogus (DNSSEC-invalid) TLSA lookup for
+// the destination records a dnssec-invalid failure under the tlsa policy type and
+// defers delivery, so a DANE security failure surfaces in the daily TLS-RPT
+// report rather than passing silently. A transient lookup error, by contrast, is
+// not reportable (RFC 8460 4.3.4); only the bogus signal is recorded.
+func TestWorkerRecordsDNSSECInvalid(t *testing.T) {
+	_, addr := startSink(t) // plain sink: delivery fails at the TLSA lookup, before STARTTLS
+	sp := openSpool(t)
+	now := time.Now()
+	if err := sp.Enqueue("a@local", []string{"bob@remote"}, []byte("hi\r\n"), now); err != nil {
+		t.Fatal(err)
+	}
+	w := &Worker{
+		Spool:       sp,
+		Router:      func(string) ([]string, error) { return []string{"sink"}, nil },
+		Dialer:      func(string) (net.Conn, error) { return net.Dial("tcp", addr) },
+		DANE:        &dane.Resolver{Addr: servfailDNS(t)},
+		TLSReporter: sp,
+	}
+	if _, err := w.ProcessDue(now); err != nil {
+		t.Fatalf("process: %v", err)
+	}
+	rep, err := sp.TLSReport(now, "remote", "org", "c", "id")
+	if err != nil {
+		t.Fatalf("TLSReport: %v", err)
+	}
+	if rep == nil || len(rep.Policies) != 1 {
+		t.Fatalf("report = %+v, want one policy", rep)
+	}
+	p := rep.Policies[0]
+	if p.Policy.PolicyType != tlsrpt.PolicyTypeTLSA {
+		t.Errorf("policy-type = %q, want tlsa", p.Policy.PolicyType)
+	}
+	if p.Summary.TotalFailure != 1 || len(p.FailureDetails) != 1 ||
+		p.FailureDetails[0].ResultType != tlsrpt.ResultDNSSECInvalid {
+		t.Errorf("expected one dnssec-invalid failure, got %+v", p)
 	}
 }
