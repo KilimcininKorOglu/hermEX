@@ -712,7 +712,8 @@
     "nextWeek": "Sonraki hafta",
     "reminder": "Hatırlatma",
     "reminderNone": "Yok",
-    "reminderMinutes": "{n} dakika önce"
+    "reminderMinutes": "{n} dakika önce",
+    "print": "Yazdır"
   },
   "filters": {
     "description": "Gelen postaları otomatik olarak sırala ve işle",

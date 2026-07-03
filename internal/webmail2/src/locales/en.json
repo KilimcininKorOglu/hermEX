@@ -712,7 +712,8 @@
     "nextWeek": "Next week",
     "reminder": "Reminder",
     "reminderNone": "None",
-    "reminderMinutes": "{n} minutes before"
+    "reminderMinutes": "{n} minutes before",
+    "print": "Print"
   },
   "filters": {
     "description": "Sort and act on incoming mail automatically",

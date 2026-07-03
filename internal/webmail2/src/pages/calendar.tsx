@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
-import { CalendarDays, Plus, MapPin, Clock, Edit, Trash2, MoreHorizontal, Users, Repeat, Bell, ChevronLeft, ChevronRight, Settings2, Share2, X } from "lucide-react"
+import { CalendarDays, Plus, MapPin, Clock, Edit, Trash2, MoreHorizontal, Users, Repeat, Bell, Printer, ChevronLeft, ChevronRight, Settings2, Share2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -520,7 +520,7 @@ export function CalendarPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between" data-print="hide">
         <div className="flex items-center gap-2">
           <CalendarDays className="h-6 w-6 text-primary" />
           <h1 className="text-2xl font-bold">{t("nav.calendar")}</h1>
@@ -542,6 +542,9 @@ export function CalendarPage() {
             <Users className="mr-2 h-4 w-4" />
             {t("calendar.availability")}
           </Button>
+          <Button variant="outline" onClick={() => window.print()} title={t("calendar.print")}>
+            <Printer className="h-4 w-4" />
+          </Button>
           <Button onClick={openCreate}>
             <Plus className="mr-2 h-4 w-4" />
             {t("calendar.newEvent")}
@@ -551,7 +554,7 @@ export function CalendarPage() {
 
       {/* Calendar overlay sidebar: list of calendars with visibility toggles */}
       {calendars.length > 0 && (
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap" data-print="hide">
           <span className="text-sm text-muted-foreground">{t("calendar.calendars")}:</span>
           {calendars.map((cal) => {
             const visible = visibleCalendarIds.has(cal.id)
@@ -646,7 +649,7 @@ export function CalendarPage() {
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">{monthLabel}</h2>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-1" data-print="hide">
               <Button variant="outline" size="sm" onClick={() => setCursor(new Date())}>
                 {t("common.today")}
               </Button>
@@ -1240,7 +1243,7 @@ function DayTimeGrid(props: {
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">{props.label}</h2>
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1" data-print="hide">
           <Button variant="outline" size="sm" onClick={props.onToday}>{props.todayLabel}</Button>
           <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={props.prevLabel} onClick={props.onPrev}>
             <ChevronLeft className="h-4 w-4" />
@@ -1288,8 +1291,10 @@ function DayTimeGrid(props: {
             )
           })}
         </div>
-        {/* Time grid body: hour gutter + day columns, scrollable over 24 hours. */}
-        <div className="max-h-[70vh] overflow-y-auto">
+        {/* Time grid body: hour gutter + day columns, scrollable over 24 hours.
+            data-print="content" lets the grid expand in print instead of clipping
+            at the 70vh scroll cap. */}
+        <div className="max-h-[70vh] overflow-y-auto" data-print="content">
           <div className="grid" style={{ gridTemplateColumns: colTemplate }}>
             <div className="relative" style={{ height: 24 * 60 }}>
               {hours.map((h) => (
