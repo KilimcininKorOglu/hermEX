@@ -385,7 +385,11 @@
       "timezoneDescription": "Tüm tarih ve saatleri bu dilimde göster",
       "timezoneAuto": "Otomatik ({{zone}})",
       "timezoneSaved": "Saat dilimi güncellendi",
-      "timezoneSaveFailed": "Saat dilimi güncellenemedi"
+      "timezoneSaveFailed": "Saat dilimi güncellenemedi",
+      "firstDayOfWeek": "Haftanın ilk günü",
+      "firstDayOfWeekDescription": "Takvim haftasının başladığı gün",
+      "firstDaySaved": "Takvim hafta başlangıcı kaydedildi",
+      "firstDaySaveFailed": "Takvim hafta başlangıcı kaydedilemedi"
     },
     "notifications": {
       "title": "Bildirimler",

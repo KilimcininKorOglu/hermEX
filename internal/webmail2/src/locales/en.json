@@ -385,7 +385,11 @@
       "timezoneDescription": "Show all dates and times in this zone",
       "timezoneAuto": "Automatic ({{zone}})",
       "timezoneSaved": "Timezone updated",
-      "timezoneSaveFailed": "Failed to update timezone"
+      "timezoneSaveFailed": "Failed to update timezone",
+      "firstDayOfWeek": "First day of week",
+      "firstDayOfWeekDescription": "The day the calendar week starts on",
+      "firstDaySaved": "Calendar week start saved",
+      "firstDaySaveFailed": "Could not save calendar week start"
     },
     "notifications": {
       "title": "Notifications",

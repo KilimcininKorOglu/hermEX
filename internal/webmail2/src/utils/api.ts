@@ -1274,6 +1274,17 @@ class API {
     await this.delete(`/calendar/calendars/${encodeURIComponent(id)}`)
   }
 
+  // Calendar display settings (per-user, persisted in the shared webmail settings
+  // blob, not client-side: the week-start day must survive a reload and apply cross-
+  // protocol). firstDayOfWeek is 0=Sun..6=Sat, defaulting to Monday (1).
+  async getCalendarSettings(): Promise<{ firstDayOfWeek: number }> {
+    return this.get<{ firstDayOfWeek: number }>('/calendar/settings')
+  }
+
+  async setCalendarSettings(s: { firstDayOfWeek: number }): Promise<{ firstDayOfWeek: number }> {
+    return this.put<{ firstDayOfWeek: number }>('/calendar/settings', s)
+  }
+
   // getRooms lists the organization's bookable rooms for the room picker.
   async getRooms(): Promise<{ rooms?: Room[] }> {
     return this.get<{ rooms?: Room[] }>('/rooms')

@@ -224,16 +224,23 @@ function moveCursor(cursor: Date, view: "list" | "day" | "week" | "workweek" | "
 export function CalendarPage() {
   const { t } = useI18n()
   // firstDayOfWeek is the user's calendar-week start (0=Sun..6=Sat), persisted in
-  // localStorage so the month grid and week/work-week views agree with the user's
-  // locale. Defaults to Monday (1), the Exchange default.
-  const [firstDayOfWeek, setFirstDayOfWeek] = useState<number>(() => {
-    const v = Number(localStorage.getItem("cal:firstDay"))
-    return v >= 0 && v <= 6 ? v : 1
-  })
+  // the shared webmail settings blob (DB-backed, per-user) so the month grid and
+  // week/work-week views agree with the user's locale across devices and reloads.
+  // Defaults to Monday (1), the Exchange default, until the settings load.
+  const [firstDayOfWeek, setFirstDayOfWeek] = useState<number>(1)
   const setFirstDay = (d: number) => {
     setFirstDayOfWeek(d)
-    localStorage.setItem("cal:firstDay", String(d))
+    api.setCalendarSettings({ firstDayOfWeek: d }).catch(() => {
+      /* best-effort: the grid keeps the chosen day in-session */
+    })
   }
+  useEffect(() => {
+    api.getCalendarSettings()
+      .then((res) => setFirstDayOfWeek(res.firstDayOfWeek ?? 1))
+      .catch(() => {
+        /* keep the Monday default when settings are unavailable */
+      })
+  }, [])
   // weekdayLabels rotated to start on firstDayOfWeek, so the month-grid header
   // and the time-grid day header columns align with monthMatrix/weekDays.
   const dayNamesSundayFirst = [

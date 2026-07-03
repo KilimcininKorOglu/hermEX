@@ -130,6 +130,11 @@ export function SettingsPage() {
   const timeZones = useMemo(listTimeZones, [])
   const [timezone, setTimezone] = useState("")
 
+  // Calendar week-start day (0=Sun..6=Sat), persisted in the shared webmail
+  // settings blob (DB-backed, per-user) so the calendar grids agree across
+  // devices. Defaults to Monday (1) until the settings load.
+  const [firstDayOfWeek, setFirstDayOfWeek] = useState(1)
+
   useEffect(() => {
     api.getProfile()
       .then((p) => {
@@ -148,6 +153,9 @@ export function SettingsPage() {
         setTimezone(p.timezone ?? "")
       })
       .catch(() => undefined)
+    api.getCalendarSettings()
+      .then((s) => setFirstDayOfWeek(s.firstDayOfWeek ?? 1))
+      .catch(() => undefined)
   }, [])
 
   const handleTimezoneChange = async (tz: string) => {
@@ -158,6 +166,16 @@ export function SettingsPage() {
       toast.success(t("settings.appearance.timezoneSaved"))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("settings.appearance.timezoneSaveFailed"))
+    }
+  }
+
+  const handleFirstDayChange = async (d: number) => {
+    setFirstDayOfWeek(d)
+    try {
+      await api.setCalendarSettings({ firstDayOfWeek: d })
+      toast.success(t("settings.appearance.firstDaySaved"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("settings.appearance.firstDaySaveFailed"))
     }
   }
 
@@ -1006,6 +1024,30 @@ export function SettingsPage() {
                 <option key={z} value={z}>
                   {z}
                 </option>
+              ))}
+            </select>
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">{t("settings.appearance.firstDayOfWeek")}</p>
+              <p className="text-sm text-muted-foreground">{t("settings.appearance.firstDayOfWeekDescription")}</p>
+            </div>
+            <select
+              value={String(firstDayOfWeek)}
+              onChange={(e) => void handleFirstDayChange(Number(e.target.value))}
+              className="max-w-[16rem] rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              {[
+                t("calendar.weekdays.sun"),
+                t("calendar.weekdays.mon"),
+                t("calendar.weekdays.tue"),
+                t("calendar.weekdays.wed"),
+                t("calendar.weekdays.thu"),
+                t("calendar.weekdays.fri"),
+                t("calendar.weekdays.sat"),
+              ].map((label, idx) => (
+                <option key={idx} value={String(idx)}>{label}</option>
               ))}
             </select>
           </div>

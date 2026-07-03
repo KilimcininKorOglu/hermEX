@@ -87,6 +87,54 @@ func (s *Server) handlePutPreferences(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ---- Calendar settings (per-user, shared webmail settings blob) ----
+
+// calendarSettingsJSON is the persisted calendar display settings. FirstDayOfWeek
+// is the week-start day (0=Sun..6=Sat); a zero value is normalized to the Exchange
+// default Monday (1) on read so a fresh account lands on a sane grid.
+type calendarSettingsJSON struct {
+	FirstDayOfWeek int `json:"firstDayOfWeek"`
+}
+
+// readCalendarSettings loads the calendar display settings from the shared blob,
+// defaulting to Monday-first when none are stored yet.
+func readCalendarSettings(m map[string]json.RawMessage) calendarSettingsJSON {
+	cs := calendarSettingsJSON{FirstDayOfWeek: 1}
+	if raw, ok := m["webmail2CalendarSettings"]; ok {
+		_ = json.Unmarshal(raw, &cs)
+	}
+	if cs.FirstDayOfWeek < 0 || cs.FirstDayOfWeek > 6 {
+		cs.FirstDayOfWeek = 1
+	}
+	return cs
+}
+
+// handleGetCalendarSettings returns the user's calendar display settings so the
+// SPA can render the month/week grids starting on the configured week-start day.
+func (s *Server) handleGetCalendarSettings(w http.ResponseWriter, r *http.Request) {
+	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
+		return readCalendarSettings(m), false
+	})
+}
+
+// handlePutCalendarSettings persists the user's calendar display settings in the
+// shared webmail settings blob, clamping week-start to a valid weekday.
+func (s *Server) handlePutCalendarSettings(w http.ResponseWriter, r *http.Request) {
+	var in calendarSettingsJSON
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	if in.FirstDayOfWeek < 0 || in.FirstDayOfWeek > 6 {
+		in.FirstDayOfWeek = 1
+	}
+	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
+		raw, _ := json.Marshal(in)
+		m["webmail2CalendarSettings"] = raw
+		return in, true
+	})
+}
+
 // ---- Categories (shared shape {name,color}) ----
 
 type categoryJSON struct {

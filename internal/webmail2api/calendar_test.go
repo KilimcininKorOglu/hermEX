@@ -162,3 +162,73 @@ func TestCalendarEventReminderRoundTrip(t *testing.T) {
 		t.Fatalf("reminderMinutes = %d after update without reminder, want nil", *after.Events[0].ReminderMinutes)
 	}
 }
+
+// TestCalendarSettingsRoundTrip proves the week-start setting persists in the
+// shared webmail settings blob (DB-backed, per-user), not a client-side shortcut:
+// a PUT then a fresh GET (the SPA's reload path) must return the stored weekday.
+// A silent loss here would regress to a client-only store that does not survive a
+// reload or apply cross-device, the shortcut the user rejected.
+func TestCalendarSettingsRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	st.Close()
+
+	secret := []byte("calendar-settings-test-secret")
+	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
+	do := func(method, target, body string) *httptest.ResponseRecorder {
+		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+		var req *http.Request
+		if body == "" {
+			req = httptest.NewRequest(method, target, nil)
+		} else {
+			req = httptest.NewRequest(method, target, strings.NewReader(body))
+		}
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+
+	// A fresh account defaults to Monday (1) before any setting is stored.
+	rec := do(http.MethodGet, "/api/v1/calendar/settings", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get default: status %d", rec.Code)
+	}
+	var got calendarSettingsJSON
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode default: %v", err)
+	}
+	if got.FirstDayOfWeek != 1 {
+		t.Fatalf("default firstDayOfWeek = %d, want 1 (Monday)", got.FirstDayOfWeek)
+	}
+
+	// Persist Sunday (0) and read it back the way the SPA does after a reload.
+	if rec := do(http.MethodPut, "/api/v1/calendar/settings", `{"firstDayOfWeek":0}`); rec.Code != http.StatusOK {
+		t.Fatalf("put: status %d", rec.Code)
+	}
+	rec = do(http.MethodGet, "/api/v1/calendar/settings", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get after put: status %d", rec.Code)
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode after put: %v", err)
+	}
+	if got.FirstDayOfWeek != 0 {
+		t.Fatalf("firstDayOfWeek after put = %d, want 0 (Sunday, persisted in the settings blob)", got.FirstDayOfWeek)
+	}
+
+	// An out-of-range value is clamped to the Monday default, never stored as-is.
+	if rec := do(http.MethodPut, "/api/v1/calendar/settings", `{"firstDayOfWeek":9}`); rec.Code != http.StatusOK {
+		t.Fatalf("put invalid: status %d", rec.Code)
+	}
+	rec = do(http.MethodGet, "/api/v1/calendar/settings", "")
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode after invalid: %v", err)
+	}
+	if got.FirstDayOfWeek != 1 {
+		t.Fatalf("firstDayOfWeek after invalid = %d, want 1 (clamped to Monday)", got.FirstDayOfWeek)
+	}
+}
