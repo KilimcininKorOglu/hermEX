@@ -709,7 +709,10 @@
     "previousDay": "Previous day",
     "nextDay": "Next day",
     "previousWeek": "Previous week",
-    "nextWeek": "Next week"
+    "nextWeek": "Next week",
+    "reminder": "Reminder",
+    "reminderNone": "None",
+    "reminderMinutes": "{n} minutes before"
   },
   "filters": {
     "description": "Sort and act on incoming mail automatically",

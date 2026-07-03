@@ -14,16 +14,19 @@ import (
 
 // eventJSON is the SPA's CalendarEvent shape (subset honored). CalendarID names
 // the calendar (objectstore appointment folder) the event lives in; an empty or
-// "calendar" value is the built-in default calendar.
+// "calendar" value is the built-in default calendar. ReminderMinutes is the
+// reminder lead time in minutes (a nil/zero value means no reminder); it round-
+// trips through oxcical's VALARM (NameReminderSet/NameReminderDelta named props).
 type eventJSON struct {
-	UID         string `json:"uid"`
-	CalendarID  string `json:"calendarId,omitempty"`
-	Summary     string `json:"summary"`
-	Description string `json:"description,omitempty"`
-	Location    string `json:"location,omitempty"`
-	Start       string `json:"start"`
-	End         string `json:"end,omitempty"`
-	AllDay      bool   `json:"allDay,omitempty"`
+	UID            string `json:"uid"`
+	CalendarID     string `json:"calendarId,omitempty"`
+	Summary        string `json:"summary"`
+	Description    string `json:"description,omitempty"`
+	Location       string `json:"location,omitempty"`
+	Start          string `json:"start"`
+	End            string `json:"end,omitempty"`
+	AllDay         bool   `json:"allDay,omitempty"`
+	ReminderMinutes *int  `json:"reminderMinutes,omitempty"`
 }
 
 // calendarJSON is the SPA's Calendar shape. ID is the stable "calendar" for the
@@ -170,6 +173,11 @@ func buildICal(e eventJSON) []byte {
 	if e.Location != "" {
 		fmt.Fprintf(&b, "LOCATION:%s\r\n", e.Location)
 	}
+	if e.ReminderMinutes != nil && *e.ReminderMinutes > 0 {
+		b.WriteString("BEGIN:VALARM\r\nACTION:DISPLAY\r\n")
+		fmt.Fprintf(&b, "TRIGGER:-PT%dM\r\n", *e.ReminderMinutes)
+		b.WriteString("END:VALARM\r\n")
+	}
 	b.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
 	return []byte(b.String())
 }
@@ -209,7 +217,43 @@ func icalToEvent(ics []byte, id int64) eventJSON {
 	if v, _ := icalProp(ics, "DTEND"); v != "" {
 		e.End, _ = fromICalTime(v)
 	}
+	if v, _ := icalProp(ics, "TRIGGER"); v != "" {
+		// A VALARM trigger is an iCal duration like "-PT15M"; the lead time in
+		// minutes is its absolute value (oxcical emits "-PT<n>M").
+		if mins, ok := icalDurationMinutes(v); ok && mins > 0 {
+			e.ReminderMinutes = &mins
+		}
+	}
 	return e
+}
+
+// icalDurationMinutes parses a simple iCal duration of the form (-)PT<n>M and
+// returns its absolute minutes. It is the inverse of buildICal's VALARM TRIGGER,
+// kept here so icalToEvent can recover the reminder lead time without pulling in
+// the full oxcical duration parser.
+func icalDurationMinutes(v string) (int, bool) {
+	v = strings.TrimSpace(v)
+	neg := false
+	if strings.HasPrefix(v, "-") {
+		neg = true
+		v = v[1:]
+	} else if strings.HasPrefix(v, "+") {
+		v = v[1:]
+	}
+	if !strings.HasPrefix(v, "PT") {
+		return 0, false
+	}
+	rest := v[2:]
+	// Only the minutes form ("-PT<n>M") is produced here; reject anything else.
+	if !strings.HasSuffix(rest, "M") {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSuffix(rest, "M"))
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	_ = neg
+	return n, true
 }
 
 // handleGetEvents returns every event across all of the mailbox's calendars, each

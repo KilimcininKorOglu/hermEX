@@ -71,9 +71,10 @@ interface EventForm {
   attendees: string
   recurrence: string // "" | DAILY | WEEKLY | MONTHLY | YEARLY
   calendarId: string // target calendar ("calendar" = default)
+  reminder: string // "" = none, else a minute offset ("15", "30", "60", ...)
 }
 
-const emptyForm: EventForm = { summary: "", start: "", end: "", allDay: false, location: "", description: "", attendees: "", recurrence: "", calendarId: "calendar" }
+const emptyForm: EventForm = { summary: "", start: "", end: "", allDay: false, location: "", description: "", attendees: "", recurrence: "", calendarId: "calendar", reminder: "" }
 
 // recurrenceToForm maps a stored RRULE value to the form's frequency selector.
 function recurrenceToForm(rrule?: string): string {
@@ -333,6 +334,7 @@ export function CalendarPage() {
       attendees: (ev.attendees ?? []).join(", "),
       recurrence: recurrenceToForm(ev.recurrence),
       calendarId: ev.calendarId ?? "calendar",
+      reminder: ev.reminderMinutes ? String(ev.reminderMinutes) : "",
     })
     setDialogOpen(true)
   }
@@ -360,6 +362,7 @@ export function CalendarPage() {
       attendees: attendees.length > 0 ? attendees : undefined,
       recurrence: form.recurrence ? `FREQ=${form.recurrence}` : undefined,
       calendarId: form.calendarId || "calendar",
+      reminderMinutes: form.reminder ? Number(form.reminder) : undefined,
       // Anchor timed events to the user's zone so recurrences keep their wall
       // time across DST (stored as DTSTART;TZID + VTIMEZONE). All-day events stay
       // floating dates.
@@ -866,6 +869,23 @@ export function CalendarPage() {
                   <SelectItem value="WEEKLY">{recurrenceLabel(t, "WEEKLY")}</SelectItem>
                   <SelectItem value="MONTHLY">{recurrenceLabel(t, "MONTHLY")}</SelectItem>
                   <SelectItem value="YEARLY">{recurrenceLabel(t, "YEARLY")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ev-reminder">{t("calendar.reminder")}</Label>
+              <Select
+                value={form.reminder}
+                onValueChange={(value) => setForm({ ...form, reminder: value === "none" ? "" : value })}
+              >
+                <SelectTrigger id="ev-reminder">
+                  <SelectValue placeholder={t("calendar.reminderNone")} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">{t("calendar.reminderNone")}</SelectItem>
+                  {[5, 10, 15, 30, 60, 120, 1440].map((m) => (
+                    <SelectItem key={m} value={String(m)}>{t("calendar.reminderMinutes", { n: String(m) })}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

@@ -709,7 +709,10 @@
     "previousDay": "Önceki gün",
     "nextDay": "Sonraki gün",
     "previousWeek": "Önceki hafta",
-    "nextWeek": "Sonraki hafta"
+    "nextWeek": "Sonraki hafta",
+    "reminder": "Hatırlatma",
+    "reminderNone": "Yok",
+    "reminderMinutes": "{n} dakika önce"
   },
   "filters": {
     "description": "Gelen postaları otomatik olarak sırala ve işle",
