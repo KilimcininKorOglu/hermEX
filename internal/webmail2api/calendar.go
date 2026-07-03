@@ -32,6 +32,7 @@ type eventJSON struct {
 	AllDay          bool   `json:"allDay,omitempty"`
 	ReminderMinutes *int   `json:"reminderMinutes,omitempty"`
 	BusyStatus      *int   `json:"busyStatus,omitempty"`
+	Sensitivity     *int   `json:"sensitivity,omitempty"` // PR_SENSITIVITY: 0=normal, 2=private, 3=confidential (round-trips via iCal CLASS)
 }
 
 // calendarJSON is the SPA's Calendar shape. ID is the stable "calendar" for the
@@ -203,6 +204,16 @@ func buildICal(e eventJSON) []byte {
 		fmt.Fprintf(&b, "TRIGGER:-PT%dM\r\n", *e.ReminderMinutes)
 		b.WriteString("END:VALARM\r\n")
 	}
+	// Sensitivity maps to iCalendar CLASS (PRIVATE for private/personal, CONFIDENTIAL
+	// for confidential); oxcical's import maps CLASS back to PR_SENSITIVITY.
+	if e.Sensitivity != nil {
+		switch *e.Sensitivity {
+		case 1, 2:
+			b.WriteString("CLASS:PRIVATE\r\n")
+		case 3:
+			b.WriteString("CLASS:CONFIDENTIAL\r\n")
+		}
+	}
 	b.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
 	return []byte(b.String())
 }
@@ -247,6 +258,18 @@ func icalToEvent(ics []byte, id int64) eventJSON {
 		// minutes is its absolute value (oxcical emits "-PT<n>M").
 		if mins, ok := icalDurationMinutes(v); ok && mins > 0 {
 			e.ReminderMinutes = &mins
+		}
+	}
+	if c, _ := icalProp(ics, "CLASS"); c != "" {
+		// CLASS maps back to PR_SENSITIVITY (PRIVATE⇒private, CONFIDENTIAL⇒confidential);
+		// PUBLIC/absent stays the default normal, so no Sensitivity is set.
+		switch strings.ToUpper(strings.TrimSpace(c)) {
+		case "PRIVATE":
+			s := 2
+			e.Sensitivity = &s
+		case "CONFIDENTIAL":
+			s := 3
+			e.Sensitivity = &s
 		}
 	}
 	return e

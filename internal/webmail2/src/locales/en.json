@@ -735,7 +735,11 @@
     "busyFree": "Free",
     "busyTentative": "Tentative",
     "busyBusy": "Busy",
-    "busyOof": "Out of Office"
+    "busyOof": "Out of Office",
+    "sensitivity": "Sensitivity",
+    "sensitivityNormal": "Normal",
+    "sensitivityPrivate": "Private",
+    "sensitivityConfidential": "Confidential"
   },
   "filters": {
     "description": "Sort and act on incoming mail automatically",

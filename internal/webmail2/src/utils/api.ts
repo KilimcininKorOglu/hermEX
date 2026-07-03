@@ -134,6 +134,7 @@ export interface CalendarEvent {
   timezone?: string // IANA zone anchoring civil start/end (recurrence DST safety)
   reminderMinutes?: number // reminder lead time in minutes (VALARM); absent/0 = none
   busyStatus?: number // PidLidBusyStatus: 0=free, 1=tentative, 2=busy, 3=oof
+  sensitivity?: number // PR_SENSITIVITY: 0=normal, 2=private, 3=confidential
 }
 
 export type CalendarEventInput = Omit<CalendarEvent, "uid"> & { uid?: string }

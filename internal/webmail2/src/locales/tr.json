@@ -735,7 +735,11 @@
     "busyFree": "Serbest",
     "busyTentative": "Tentatif",
     "busyBusy": "Meşgul",
-    "busyOof": "Ofis dışında"
+    "busyOof": "Ofis dışında",
+    "sensitivity": "Hassasiyet",
+    "sensitivityNormal": "Normal",
+    "sensitivityPrivate": "Özel",
+    "sensitivityConfidential": "Gizli"
   },
   "filters": {
     "description": "Gelen postaları otomatik olarak sırala ve işle",

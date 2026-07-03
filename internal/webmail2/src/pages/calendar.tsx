@@ -73,9 +73,10 @@ interface EventForm {
   calendarId: string // target calendar ("calendar" = default)
   reminder: string // "" = none, else a minute offset ("15", "30", "60", ...)
   busyStatus: string // "" = default (busy), else "0".."3" (free/tentative/busy/oof)
+  sensitivity: string // "" = normal, else "2" (private) or "3" (confidential)
 }
 
-const emptyForm: EventForm = { summary: "", start: "", end: "", allDay: false, location: "", description: "", attendees: "", recurrence: "", calendarId: "calendar", reminder: "", busyStatus: "" }
+const emptyForm: EventForm = { summary: "", start: "", end: "", allDay: false, location: "", description: "", attendees: "", recurrence: "", calendarId: "calendar", reminder: "", busyStatus: "", sensitivity: "" }
 
 // recurrenceToForm maps a stored RRULE value to the form's frequency selector.
 function recurrenceToForm(rrule?: string): string {
@@ -381,6 +382,7 @@ export function CalendarPage() {
       calendarId: ev.calendarId ?? "calendar",
       reminder: ev.reminderMinutes ? String(ev.reminderMinutes) : "",
       busyStatus: ev.busyStatus != null ? String(ev.busyStatus) : "",
+      sensitivity: ev.sensitivity != null && ev.sensitivity > 0 ? String(ev.sensitivity) : "",
     })
     setDialogOpen(true)
   }
@@ -410,6 +412,7 @@ export function CalendarPage() {
       calendarId: form.calendarId || "calendar",
       reminderMinutes: form.reminder ? Number(form.reminder) : undefined,
       busyStatus: form.busyStatus ? Number(form.busyStatus) : undefined,
+      sensitivity: form.sensitivity ? Number(form.sensitivity) : undefined,
       // Anchor timed events to the user's zone so recurrences keep their wall
       // time across DST (stored as DTSTART;TZID + VTIMEZONE). All-day events stay
       // floating dates.
@@ -984,6 +987,22 @@ export function CalendarPage() {
                   <SelectItem value="1">{t("calendar.busyTentative")}</SelectItem>
                   <SelectItem value="2">{t("calendar.busyBusy")}</SelectItem>
                   <SelectItem value="3">{t("calendar.busyOof")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ev-sens">{t("calendar.sensitivity")}</Label>
+              <Select
+                value={form.sensitivity || "0"}
+                onValueChange={(value) => setForm({ ...form, sensitivity: value === "0" ? "" : value })}
+              >
+                <SelectTrigger id="ev-sens">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">{t("calendar.sensitivityNormal")}</SelectItem>
+                  <SelectItem value="2">{t("calendar.sensitivityPrivate")}</SelectItem>
+                  <SelectItem value="3">{t("calendar.sensitivityConfidential")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>

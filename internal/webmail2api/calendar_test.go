@@ -293,3 +293,72 @@ func TestCalendarEventBusyStatusRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// TestCalendarEventSensitivityRoundTrip proves the sensitivity (normal/private/
+// confidential) round-trips through the iCal CLASS property. Private and
+// confidential must survive a reload; normal stays unset (absent) so the form
+// shows the default.
+func TestCalendarEventSensitivityRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	st.Close()
+
+	secret := []byte("calendar-sensitivity-test-secret")
+	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
+	do := func(method, target, body string) *httptest.ResponseRecorder {
+		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+		var req *http.Request
+		if body == "" {
+			req = httptest.NewRequest(method, target, nil)
+		} else {
+			req = httptest.NewRequest(method, target, strings.NewReader(body))
+		}
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+
+	for _, want := range []int{2, 3} {
+		if rec := do(http.MethodPost, "/api/v1/calendar/events", `{"summary":"Meeting","start":"2026-08-02T09:00:00Z","sensitivity":`+strconv.Itoa(want)+`}`); rec.Code != http.StatusOK {
+			t.Fatalf("create sensitivity=%d: status %d", want, rec.Code)
+		}
+		rec := do(http.MethodGet, "/api/v1/calendar/events", "")
+		var listed struct {
+			Events []eventJSON `json:"events"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(listed.Events) != 1 {
+			t.Fatalf("got %d events, want 1", len(listed.Events))
+		}
+		got := listed.Events[0].Sensitivity
+		if got == nil {
+			t.Fatalf("sensitivity=%d: listed event has no sensitivity (CLASS round-trip lost it)", want)
+		}
+		if *got != want {
+			t.Fatalf("sensitivity = %d, want %d", *got, want)
+		}
+		uid := listed.Events[0].UID
+		if rec := do(http.MethodDelete, "/api/v1/calendar/events/"+uid, ""); rec.Code != http.StatusOK {
+			t.Fatalf("delete: status %d", rec.Code)
+		}
+	}
+
+	// A normal (sensitivity unset) event must not surface a sensitivity after reload.
+	if rec := do(http.MethodPost, "/api/v1/calendar/events", `{"summary":"Open","start":"2026-08-02T09:00:00Z"}`); rec.Code != http.StatusOK {
+		t.Fatalf("create normal: status %d", rec.Code)
+	}
+	rec := do(http.MethodGet, "/api/v1/calendar/events", "")
+	var listed struct {
+		Events []eventJSON `json:"events"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &listed)
+	if len(listed.Events) != 1 || listed.Events[0].Sensitivity != nil {
+		t.Fatalf("normal event has sensitivity = %v, want nil", listed.Events[0].Sensitivity)
+	}
+}
