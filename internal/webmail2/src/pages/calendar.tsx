@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
-import { CalendarDays, Plus, MapPin, Clock, Edit, Trash2, MoreHorizontal, Users, Repeat, ChevronLeft, ChevronRight, Settings2, Share2, X } from "lucide-react"
+import { CalendarDays, Plus, MapPin, Clock, Edit, Trash2, MoreHorizontal, Users, Repeat, Bell, ChevronLeft, ChevronRight, Settings2, Share2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -778,6 +778,12 @@ export function CalendarPage() {
                         <p className="flex items-center gap-1 text-sm text-muted-foreground">
                           <Repeat className="h-3.5 w-3.5" />
                           {recurrenceLabel(t, recurrenceToForm(ev.recurrence))}
+                        </p>
+                      )}
+                      {ev.reminderMinutes && ev.reminderMinutes > 0 && (
+                        <p className="flex items-center gap-1 text-sm text-muted-foreground">
+                          <Bell className="h-3.5 w-3.5" />
+                          {t("calendar.reminderMinutes", { n: String(ev.reminderMinutes) })}
                         </p>
                       )}
                       {ev.description && (
