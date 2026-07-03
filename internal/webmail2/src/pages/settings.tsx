@@ -134,6 +134,9 @@ export function SettingsPage() {
   // settings blob (DB-backed, per-user) so the calendar grids agree across
   // devices. Defaults to Monday (1) until the settings load.
   const [firstDayOfWeek, setFirstDayOfWeek] = useState(1)
+  // Calendar time-grid resolution (5/10/15/30/60 min), DB-backed alongside the
+  // week-start day; sets the slot-line density in the day/week/work-week views.
+  const [resolution, setResolution] = useState(30)
 
   useEffect(() => {
     api.getProfile()
@@ -154,7 +157,10 @@ export function SettingsPage() {
       })
       .catch(() => undefined)
     api.getCalendarSettings()
-      .then((s) => setFirstDayOfWeek(s.firstDayOfWeek ?? 1))
+      .then((s) => {
+        setFirstDayOfWeek(s.firstDayOfWeek ?? 1)
+        setResolution(s.resolution ?? 30)
+      })
       .catch(() => undefined)
   }, [])
 
@@ -172,10 +178,20 @@ export function SettingsPage() {
   const handleFirstDayChange = async (d: number) => {
     setFirstDayOfWeek(d)
     try {
-      await api.setCalendarSettings({ firstDayOfWeek: d })
+      await api.setCalendarSettings({ firstDayOfWeek: d, resolution })
       toast.success(t("settings.appearance.firstDaySaved"))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("settings.appearance.firstDaySaveFailed"))
+    }
+  }
+
+  const handleResolutionChange = async (r: number) => {
+    setResolution(r)
+    try {
+      await api.setCalendarSettings({ firstDayOfWeek, resolution: r })
+      toast.success(t("settings.appearance.resolutionSaved"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("settings.appearance.resolutionSaveFailed"))
     }
   }
 
@@ -1048,6 +1064,22 @@ export function SettingsPage() {
                 t("calendar.weekdays.sat"),
               ].map((label, idx) => (
                 <option key={idx} value={String(idx)}>{label}</option>
+              ))}
+            </select>
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">{t("settings.appearance.resolution")}</p>
+              <p className="text-sm text-muted-foreground">{t("settings.appearance.resolutionDescription")}</p>
+            </div>
+            <select
+              value={String(resolution)}
+              onChange={(e) => void handleResolutionChange(Number(e.target.value))}
+              className="max-w-[16rem] rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              {[5, 10, 15, 30, 60].map((m) => (
+                <option key={m} value={String(m)}>{t("calendar.resolutionMinutes", { n: String(m) })}</option>
               ))}
             </select>
           </div>

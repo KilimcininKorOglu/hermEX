@@ -1275,14 +1275,15 @@ class API {
   }
 
   // Calendar display settings (per-user, persisted in the shared webmail settings
-  // blob, not client-side: the week-start day must survive a reload and apply cross-
-  // protocol). firstDayOfWeek is 0=Sun..6=Sat, defaulting to Monday (1).
-  async getCalendarSettings(): Promise<{ firstDayOfWeek: number }> {
-    return this.get<{ firstDayOfWeek: number }>('/calendar/settings')
+  // blob, not client-side: the week-start day and time-grid resolution must survive
+  // a reload and apply cross-protocol). firstDayOfWeek is 0=Sun..6=Sat (default 1);
+  // resolution is the time-slot minutes 5/10/15/30/60 (default 30).
+  async getCalendarSettings(): Promise<{ firstDayOfWeek: number; resolution: number }> {
+    return this.get<{ firstDayOfWeek: number; resolution: number }>('/calendar/settings')
   }
 
-  async setCalendarSettings(s: { firstDayOfWeek: number }): Promise<{ firstDayOfWeek: number }> {
-    return this.put<{ firstDayOfWeek: number }>('/calendar/settings', s)
+  async setCalendarSettings(s: { firstDayOfWeek: number; resolution: number }): Promise<{ firstDayOfWeek: number; resolution: number }> {
+    return this.put<{ firstDayOfWeek: number; resolution: number }>('/calendar/settings', s)
   }
 
   // getRooms lists the organization's bookable rooms for the room picker.

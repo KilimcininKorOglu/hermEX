@@ -228,17 +228,29 @@ export function CalendarPage() {
   // week/work-week views agree with the user's locale across devices and reloads.
   // Defaults to Monday (1), the Exchange default, until the settings load.
   const [firstDayOfWeek, setFirstDayOfWeek] = useState<number>(1)
+  // resolution is the time-grid slot minutes (5/10/15/30/60), DB-backed alongside
+  // firstDayOfWeek; it sets the slot-line density in the day/week/work-week views.
+  const [resolution, setResolution] = useState<number>(30)
   const setFirstDay = (d: number) => {
     setFirstDayOfWeek(d)
-    api.setCalendarSettings({ firstDayOfWeek: d }).catch(() => {
+    api.setCalendarSettings({ firstDayOfWeek: d, resolution }).catch(() => {
       /* best-effort: the grid keeps the chosen day in-session */
+    })
+  }
+  const setResolutionAndSave = (r: number) => {
+    setResolution(r)
+    api.setCalendarSettings({ firstDayOfWeek, resolution: r }).catch(() => {
+      /* best-effort */
     })
   }
   useEffect(() => {
     api.getCalendarSettings()
-      .then((res) => setFirstDayOfWeek(res.firstDayOfWeek ?? 1))
+      .then((res) => {
+        setFirstDayOfWeek(res.firstDayOfWeek ?? 1)
+        setResolution(res.resolution ?? 30)
+      })
       .catch(() => {
-        /* keep the Monday default when settings are unavailable */
+        /* keep the Monday/30min defaults when settings are unavailable */
       })
   }, [])
   // weekdayLabels rotated to start on firstDayOfWeek, so the month-grid header
@@ -573,6 +585,16 @@ export function CalendarPage() {
               ))}
             </SelectContent>
           </Select>
+          <Select value={String(resolution)} onValueChange={(v) => setResolutionAndSave(Number(v))}>
+            <SelectTrigger className="w-24" aria-label={t("calendar.resolution")} title={t("calendar.resolution")}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {[5, 10, 15, 30, 60].map((m) => (
+                <SelectItem key={m} value={String(m)}>{t("calendar.resolutionMinutes", { n: String(m) })}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button variant="outline" onClick={() => { setFbResults(null); setFbOpen(true) }}>
             <Users className="mr-2 h-4 w-4" />
             {t("calendar.availability")}
@@ -772,6 +794,7 @@ export function CalendarPage() {
           onToday={() => setCursor(new Date())}
           weekdayLabels={weekdayLabels}
           firstDayOfWeek={firstDayOfWeek}
+          resolution={resolution}
           events={shownEvents}
           eventColor={eventColor}
           todayKey={todayKey}
@@ -1267,6 +1290,7 @@ function DayTimeGrid(props: {
   onToday: () => void
   weekdayLabels: string[]
   firstDayOfWeek: number
+  resolution: number
   events: CalendarEvent[]
   eventColor: (ev: CalendarEvent) => string | undefined
   todayKey: string
@@ -1276,6 +1300,10 @@ function DayTimeGrid(props: {
   const { t } = useI18n()
   const hours = Array.from({ length: 24 }, (_, i) => i)
   const colTemplate = `56px repeat(${props.days.length}, minmax(0, 1fr))`
+  // slotLines are the minute offsets within each hour at which a finer grid line
+  // is drawn (e.g. 30 for a 30-min resolution, 15/30/45 for 15-min). The top-of-hour
+  // line is drawn separately as the hour boundary.
+  const slotLines = props.resolution < 60 ? Array.from({ length: 60 / props.resolution - 1 }, (_, i) => (i + 1) * props.resolution) : []
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -1354,6 +1382,16 @@ function DayTimeGrid(props: {
                   {hours.map((h) => (
                     <div key={h} className="absolute left-0 right-0 border-t border-border/40" style={{ top: h * 60 }} />
                   ))}
+                  {/* Resolution slot lines (finer than the hour boundary). */}
+                  {hours.flatMap((h) =>
+                    slotLines.map((m) => (
+                      <div
+                        key={`${h}-${m}`}
+                        className="absolute left-0 right-0 border-t border-dashed border-border/20"
+                        style={{ top: h * 60 + m }}
+                      />
+                    )),
+                  )}
                   {timed.map((ev) => {
                     const top = eventTopMinutes(ev, day) * PX_PER_MINUTE
                     const height = eventHeightMinutes(ev, day) * PX_PER_MINUTE

@@ -389,7 +389,11 @@
       "firstDayOfWeek": "Haftanın ilk günü",
       "firstDayOfWeekDescription": "Takvim haftasının başladığı gün",
       "firstDaySaved": "Takvim hafta başlangıcı kaydedildi",
-      "firstDaySaveFailed": "Takvim hafta başlangıcı kaydedilemedi"
+      "firstDaySaveFailed": "Takvim hafta başlangıcı kaydedilemedi",
+      "resolution": "Zaman aralığı çözünürlüğü",
+      "resolutionDescription": "Gün ve hafta görünümlerindeki ızgara aralığı boyutu",
+      "resolutionSaved": "Takvim çözünürlüğü kaydedildi",
+      "resolutionSaveFailed": "Takvim çözünürlüğü kaydedilemedi"
     },
     "notifications": {
       "title": "Bildirimler",
@@ -718,7 +722,9 @@
     "reminderNone": "Yok",
     "reminderMinutes": "{n} dakika önce",
     "print": "Yazdır",
-    "firstDayOfWeek": "Haftanın ilk günü"
+    "firstDayOfWeek": "Haftanın ilk günü",
+    "resolution": "Zaman aralığı",
+    "resolutionMinutes": "{n} dk"
   },
   "filters": {
     "description": "Gelen postaları otomatik olarak sırala ve işle",

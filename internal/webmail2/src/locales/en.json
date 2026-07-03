@@ -389,7 +389,11 @@
       "firstDayOfWeek": "First day of week",
       "firstDayOfWeekDescription": "The day the calendar week starts on",
       "firstDaySaved": "Calendar week start saved",
-      "firstDaySaveFailed": "Could not save calendar week start"
+      "firstDaySaveFailed": "Could not save calendar week start",
+      "resolution": "Time slot resolution",
+      "resolutionDescription": "The grid slot size in the day and week views",
+      "resolutionSaved": "Calendar resolution saved",
+      "resolutionSaveFailed": "Could not save calendar resolution"
     },
     "notifications": {
       "title": "Notifications",
@@ -718,7 +722,9 @@
     "reminderNone": "None",
     "reminderMinutes": "{n} minutes before",
     "print": "Print",
-    "firstDayOfWeek": "First day of week"
+    "firstDayOfWeek": "First day of week",
+    "resolution": "Time slot",
+    "resolutionMinutes": "{n} min"
   },
   "filters": {
     "description": "Sort and act on incoming mail automatically",
