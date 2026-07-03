@@ -72,9 +72,10 @@ interface EventForm {
   recurrence: string // "" | DAILY | WEEKLY | MONTHLY | YEARLY
   calendarId: string // target calendar ("calendar" = default)
   reminder: string // "" = none, else a minute offset ("15", "30", "60", ...)
+  busyStatus: string // "" = default (busy), else "0".."3" (free/tentative/busy/oof)
 }
 
-const emptyForm: EventForm = { summary: "", start: "", end: "", allDay: false, location: "", description: "", attendees: "", recurrence: "", calendarId: "calendar", reminder: "" }
+const emptyForm: EventForm = { summary: "", start: "", end: "", allDay: false, location: "", description: "", attendees: "", recurrence: "", calendarId: "calendar", reminder: "", busyStatus: "" }
 
 // recurrenceToForm maps a stored RRULE value to the form's frequency selector.
 function recurrenceToForm(rrule?: string): string {
@@ -379,6 +380,7 @@ export function CalendarPage() {
       recurrence: recurrenceToForm(ev.recurrence),
       calendarId: ev.calendarId ?? "calendar",
       reminder: ev.reminderMinutes ? String(ev.reminderMinutes) : "",
+      busyStatus: ev.busyStatus != null ? String(ev.busyStatus) : "",
     })
     setDialogOpen(true)
   }
@@ -407,6 +409,7 @@ export function CalendarPage() {
       recurrence: form.recurrence ? `FREQ=${form.recurrence}` : undefined,
       calendarId: form.calendarId || "calendar",
       reminderMinutes: form.reminder ? Number(form.reminder) : undefined,
+      busyStatus: form.busyStatus ? Number(form.busyStatus) : undefined,
       // Anchor timed events to the user's zone so recurrences keep their wall
       // time across DST (stored as DTSTART;TZID + VTIMEZONE). All-day events stay
       // floating dates.
@@ -964,6 +967,23 @@ export function CalendarPage() {
                   {[5, 10, 15, 30, 60, 120, 1440].map((m) => (
                     <SelectItem key={m} value={String(m)}>{t("calendar.reminderMinutes", { n: String(m) })}</SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="ev-busy">{t("calendar.busyStatus")}</Label>
+              <Select
+                value={form.busyStatus || "2"}
+                onValueChange={(value) => setForm({ ...form, busyStatus: value })}
+              >
+                <SelectTrigger id="ev-busy">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="0">{t("calendar.busyFree")}</SelectItem>
+                  <SelectItem value="1">{t("calendar.busyTentative")}</SelectItem>
+                  <SelectItem value="2">{t("calendar.busyBusy")}</SelectItem>
+                  <SelectItem value="3">{t("calendar.busyOof")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>

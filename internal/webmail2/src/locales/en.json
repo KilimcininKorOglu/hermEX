@@ -730,7 +730,12 @@
     "print": "Print",
     "firstDayOfWeek": "First day of week",
     "resolution": "Time slot",
-    "resolutionMinutes": "{n} min"
+    "resolutionMinutes": "{n} min",
+    "busyStatus": "Show as",
+    "busyFree": "Free",
+    "busyTentative": "Tentative",
+    "busyBusy": "Busy",
+    "busyOof": "Out of Office"
   },
   "filters": {
     "description": "Sort and act on incoming mail automatically",

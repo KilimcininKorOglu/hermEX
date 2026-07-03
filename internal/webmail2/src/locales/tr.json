@@ -730,7 +730,12 @@
     "print": "Yazdır",
     "firstDayOfWeek": "Haftanın ilk günü",
     "resolution": "Zaman aralığı",
-    "resolutionMinutes": "{n} dk"
+    "resolutionMinutes": "{n} dk",
+    "busyStatus": "Göster",
+    "busyFree": "Serbest",
+    "busyTentative": "Tentatif",
+    "busyBusy": "Meşgul",
+    "busyOof": "Ofis dışında"
   },
   "filters": {
     "description": "Gelen postaları otomatik olarak sırala ve işle",

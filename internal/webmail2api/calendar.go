@@ -17,16 +17,21 @@ import (
 // "calendar" value is the built-in default calendar. ReminderMinutes is the
 // reminder lead time in minutes (a nil/zero value means no reminder); it round-
 // trips through oxcical's VALARM (NameReminderSet/NameReminderDelta named props).
+// BusyStatus is PidLidBusyStatus (0=free, 1=tentative, 2=busy, 3=oof); it is set
+// and read directly as a named prop because the iCal TRANSP/STATUS path oxcical
+// uses cannot express all four values (oof has no iCal mapping), so the SPA's
+// choice is authoritative, not the iCal-derived default.
 type eventJSON struct {
-	UID            string `json:"uid"`
-	CalendarID     string `json:"calendarId,omitempty"`
-	Summary        string `json:"summary"`
-	Description    string `json:"description,omitempty"`
-	Location       string `json:"location,omitempty"`
-	Start          string `json:"start"`
-	End            string `json:"end,omitempty"`
-	AllDay         bool   `json:"allDay,omitempty"`
-	ReminderMinutes *int  `json:"reminderMinutes,omitempty"`
+	UID             string `json:"uid"`
+	CalendarID      string `json:"calendarId,omitempty"`
+	Summary         string `json:"summary"`
+	Description     string `json:"description,omitempty"`
+	Location        string `json:"location,omitempty"`
+	Start           string `json:"start"`
+	End             string `json:"end,omitempty"`
+	AllDay          bool   `json:"allDay,omitempty"`
+	ReminderMinutes *int   `json:"reminderMinutes,omitempty"`
+	BusyStatus      *int   `json:"busyStatus,omitempty"`
 }
 
 // calendarJSON is the SPA's Calendar shape. ID is the stable "calendar" for the
@@ -62,6 +67,26 @@ func propStr(pv mapi.PropertyValues, tag mapi.PropTag) string {
 		}
 	}
 	return ""
+}
+
+// propInt32 reads an int32 property value from a property bag.
+func propInt32(pv mapi.PropertyValues, tag mapi.PropTag) (int32, bool) {
+	if v, ok := pv.Get(tag); ok {
+		if n, ok := v.(int32); ok {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+// busyStatusTag resolves PidLidBusyStatus (NameBusyStatus) to a PtLong tag for
+// this store, allocating its id when create is set (idempotent).
+func busyStatusTag(st *objectstore.Store, create bool) (mapi.PropTag, error) {
+	ids, err := st.GetNamedPropIDs(create, []mapi.PropertyName{mapi.NameBusyStatus})
+	if err != nil || len(ids) == 0 || ids[0] == 0 {
+		return 0, err
+	}
+	return mapi.PropTag(uint32(ids[0])<<16 | uint32(mapi.PtLong)), nil
 }
 
 // calendarFolderID maps a SPA calendar id to its objectstore folder id. The
@@ -266,6 +291,9 @@ func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 	defer st.Close()
 	opt := oxcical.Options{Resolver: st.GetNamedPropIDs}
 	events := make([]eventJSON, 0)
+	// busyTag resolves PidLidBusyStatus once; an absent tag (fresh store) means the
+	// busy status is read from the iCal-derived default and stays nil.
+	busyTag, _ := busyStatusTag(st, false)
 	for _, cal := range listCalendars(st) {
 		objs, err := st.ListFolderObjects(calendarFolderID(cal.ID))
 		if err != nil {
@@ -286,6 +314,16 @@ func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 			// a store handle, so the message id - not icalToEvent's UID - is surfaced.
 			e.UID = strconv.FormatInt(o.ID, 10)
 			e.CalendarID = cal.ID
+			// BusyStatus is read directly from the named prop so all four values
+			// (incl. oof) survive the reload; the exported iCal loses tentative/oof.
+			if busyTag != 0 {
+				if pv, err := st.GetMessageProperties(o.ID, busyTag); err == nil {
+					if bs, ok := propInt32(pv, busyTag); ok {
+						n := int(bs)
+						e.BusyStatus = &n
+					}
+				}
+			}
 			events = append(events, e)
 		}
 	}
@@ -464,6 +502,16 @@ func storeEvent(st *objectstore.Store, e eventJSON, folderID int64) (string, err
 	id, err := st.CreateMessage(folderID, msg)
 	if err != nil {
 		return "", err
+	}
+	// BusyStatus is set directly as a named prop because the iCal TRANSP/STATUS
+	// path oxcical imports from cannot express all four values (oof has no iCal
+	// mapping); the SPA's choice is authoritative, so override the import default.
+	if e.BusyStatus != nil {
+		if tag, err := busyStatusTag(st, true); err == nil && tag != 0 {
+			var props mapi.PropertyValues
+			props.Set(tag, int32(*e.BusyStatus))
+			_ = st.SetMessageProperties(id, props)
+		}
 	}
 	return strconv.FormatInt(id, 10), nil
 }

@@ -232,3 +232,64 @@ func TestCalendarSettingsRoundTrip(t *testing.T) {
 		t.Fatalf("firstDayOfWeek after invalid = %d, want 1 (clamped to Monday)", got.FirstDayOfWeek)
 	}
 }
+
+// TestCalendarEventBusyStatusRoundTrip proves the busy-status (free/tentative/busy/
+// oof) round-trips through the direct named-prop path, including oof which the iCal
+// TRANSP/STATUS path oxcical uses cannot express. A silent loss here would make the
+// form's "Show as" select drop oof back to busy after a reload.
+func TestCalendarEventBusyStatusRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	st.Close()
+
+	secret := []byte("calendar-busy-test-secret")
+	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
+	do := func(method, target, body string) *httptest.ResponseRecorder {
+		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+		var req *http.Request
+		if body == "" {
+			req = httptest.NewRequest(method, target, nil)
+		} else {
+			req = httptest.NewRequest(method, target, strings.NewReader(body))
+		}
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+
+	for _, want := range []int{0, 1, 2, 3} {
+		// Create an event with this busy status, then reload and assert it survived.
+		if rec := do(http.MethodPost, "/api/v1/calendar/events", `{"summary":"Meeting","start":"2026-08-02T09:00:00Z","busyStatus":` + strconv.Itoa(want) + `}`); rec.Code != http.StatusOK {
+			t.Fatalf("create busyStatus=%d: status %d", want, rec.Code)
+		}
+		rec := do(http.MethodGet, "/api/v1/calendar/events", "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list: status %d", rec.Code)
+		}
+		var listed struct {
+			Events []eventJSON `json:"events"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if len(listed.Events) != 1 {
+			t.Fatalf("got %d events, want 1", len(listed.Events))
+		}
+		got := listed.Events[0].BusyStatus
+		if got == nil {
+			t.Fatalf("busyStatus=%d: listed event has no busyStatus (round-trip lost it)", want)
+		}
+		if *got != want {
+			t.Fatalf("busyStatus = %d, want %d (oof would be lost via the iCal path)", *got, want)
+		}
+		// Clear it for the next iteration so only one event is present.
+		uid := listed.Events[0].UID
+		if rec := do(http.MethodDelete, "/api/v1/calendar/events/"+uid, ""); rec.Code != http.StatusOK {
+			t.Fatalf("delete: status %d", rec.Code)
+		}
+	}
+}
