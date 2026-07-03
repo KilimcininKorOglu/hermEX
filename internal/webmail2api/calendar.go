@@ -3,11 +3,13 @@ package webmail2api
 import (
 	"fmt"
 	"net/http"
+	"net/mail"
 	"strconv"
 	"strings"
 	"time"
 
 	"hermex/internal/mapi"
+	"hermex/internal/mta"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcical"
 )
@@ -32,8 +34,10 @@ type eventJSON struct {
 	AllDay          bool   `json:"allDay,omitempty"`
 	ReminderMinutes *int     `json:"reminderMinutes,omitempty"`
 	BusyStatus      *int     `json:"busyStatus,omitempty"`
-	Sensitivity     *int     `json:"sensitivity,omitempty"` // PR_SENSITIVITY: 0=normal, 2=private, 3=confidential (round-trips via iCal CLASS)
-	Categories      []string `json:"categories,omitempty"`  // PidNameKeywords, the shared category list (store GetCategories/SetCategories)
+	Sensitivity     *int     `json:"sensitivity,omitempty"`  // PR_SENSITIVITY: 0=normal, 2=private, 3=confidential (round-trips via iCal CLASS)
+	Categories      []string `json:"categories,omitempty"`   // PidNameKeywords, the shared category list (store GetCategories/SetCategories)
+	Attendees       []string `json:"attendees,omitempty"`    // smtp addresses; emitted as ATTENDEE so oxcical stores them as recipients
+	SendInvite      bool     `json:"sendInvite,omitempty"`   // when true on create, email a METHOD:REQUEST iTIP invite to the attendees
 }
 
 // calendarJSON is the SPA's Calendar shape. ID is the stable "calendar" for the
@@ -193,6 +197,9 @@ func buildICal(e eventJSON) []byte {
 	fmt.Fprintf(&b, "DTSTART%s\r\n", toICalTime(e.Start, e.AllDay))
 	if e.End != "" {
 		fmt.Fprintf(&b, "DTEND%s\r\n", toICalTime(e.End, e.AllDay))
+	}
+	for _, a := range e.Attendees {
+		fmt.Fprintf(&b, "ATTENDEE;CN=%s;ROLE=REQ-PARTICIPANT:mailto:%s\r\n", a, a)
 	}
 	if e.Description != "" {
 		fmt.Fprintf(&b, "DESCRIPTION:%s\r\n", e.Description)
@@ -375,6 +382,24 @@ func (s *Server) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.UID = uid
+	// An organizer who sends an invite emails a METHOD:REQUEST iTIP message to the
+	// attendees; the recipients' clients (and hermEX's own RSVP path) offer
+	// accept/tentative/decline. Best-effort: a delivery failure still leaves the
+	// event saved, and the in.UID carries the meeting identity.
+	if in.SendInvite && len(in.Attendees) > 0 {
+		c, ok := s.session(r)
+		organizer := ""
+		if ok {
+			organizer = c.Email
+		}
+		in.UID = uidOrGenerated(in.UID)
+		if raw, recipients, berr := buildMeetingRequest(organizer, in); berr == nil && organizer != "" {
+			if _, derr := mta.DeliverAndRelay(s.accounts, s.spool, organizer, recipients, raw, time.Now()); derr == nil {
+				// File a Sent copy so the organizer sees the outgoing invite.
+				_, _ = st.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), objectstore.FlagSeen)
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, in)
 }
 
@@ -517,6 +542,97 @@ func (s *Server) handleDeleteCalendar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// buildMeetingRequest renders a METHOD:REQUEST iTIP invite wrapped in an RFC 5322
+// MIME message addressed to the attendees. The body is a plain-text summary plus
+// the full iCalendar as a text/calendar;method=REQUEST part, the shape an invitee
+// client parses to offer accept/tentative/decline (the RSVP path hermEX already
+// serves). The organizer is the authenticated sender. It returns the raw MIME and
+// the deduplicated attendee address list (the recipients).
+func buildMeetingRequest(organizer string, e eventJSON) ([]byte, []string, error) {
+	// Recipients: dedup the attendee addresses, parsed to bare smtp.
+	recipients := make([]string, 0, len(e.Attendees))
+	seen := map[string]bool{}
+	for _, a := range e.Attendees {
+		addr := strings.TrimSpace(a)
+		if parsed, err := mail.ParseAddress(addr); err == nil {
+			addr = parsed.Address
+		}
+		addr = strings.ToLower(addr)
+		if addr == "" || seen[addr] || addr == strings.ToLower(organizer) {
+			continue
+		}
+		seen[addr] = true
+		recipients = append(recipients, addr)
+	}
+	if len(recipients) == 0 {
+		return nil, nil, fmt.Errorf("no attendees")
+	}
+	// The iCalendar: METHOD:REQUEST at the VCALENDAR level, ORGANIZER set, and an
+	// ATTENDEE per recipient (RSVP=TRUE so the invitee client offers a response).
+	var cal strings.Builder
+	cal.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//webmail2//EN\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\n")
+	fmt.Fprintf(&cal, "UID:%s\r\n", uidOrGenerated(e.UID))
+	fmt.Fprintf(&cal, "SUMMARY:%s\r\n", e.Summary)
+	fmt.Fprintf(&cal, "DTSTART%s\r\n", toICalTime(e.Start, e.AllDay))
+	if e.End != "" {
+		fmt.Fprintf(&cal, "DTEND%s\r\n", toICalTime(e.End, e.AllDay))
+	}
+	if e.Location != "" {
+		fmt.Fprintf(&cal, "LOCATION:%s\r\n", e.Location)
+	}
+	fmt.Fprintf(&cal, "ORGANIZER;CN=%s:mailto:%s\r\n", organizer, organizer)
+	for _, a := range recipients {
+		fmt.Fprintf(&cal, "ATTENDEE;CN=%s;ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:%s\r\n", a, a)
+	}
+	cal.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
+
+	// A plain-text body the invitee reads if their client does not render the
+	// calendar part.
+	parts := []string{
+		e.Summary,
+		"",
+		"When: " + e.Start,
+	}
+	if e.End != "" {
+		parts[len(parts)-1] = "When: " + e.Start + " - " + e.End
+	}
+	if e.Location != "" {
+		parts = append(parts, "Where: "+e.Location)
+	}
+	if e.Description != "" {
+		parts = append(parts, "", e.Description)
+	}
+	textBody := strings.Join(parts, "\r\n")
+
+	boundary := "hermex-invite-" + randomHex()
+	var b strings.Builder
+	fmt.Fprintf(&b, "From: %s\r\n", organizer)
+	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(recipients, ", "))
+	fmt.Fprintf(&b, "Subject: %s\r\n", e.Summary)
+	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))
+	fmt.Fprintf(&b, "Message-ID: <%s@hermex>\r\n", randomHex())
+	b.WriteString("MIME-Version: 1.0\r\n")
+	fmt.Fprintf(&b, "Content-Type: multipart/mixed; boundary=%q\r\n\r\n", boundary)
+	fmt.Fprintf(&b, "--%s\r\n", boundary)
+	b.WriteString("Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
+	b.WriteString(textBody)
+	b.WriteString("\r\n")
+	fmt.Fprintf(&b, "--%s\r\n", boundary)
+	b.WriteString("Content-Type: text/calendar; method=REQUEST; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
+	b.WriteString(cal.String())
+	fmt.Fprintf(&b, "\r\n--%s--\r\n", boundary)
+	return []byte(b.String()), recipients, nil
+}
+
+// uidOrGenerated returns the event's UID, minting one when empty so an invite
+// always carries a stable meeting identity.
+func uidOrGenerated(uid string) string {
+	if uid != "" {
+		return uid
+	}
+	return randomHex() + "@hermex"
 }
 
 func storeEvent(st *objectstore.Store, e eventJSON, folderID int64) (string, error) {

@@ -741,7 +741,9 @@
     "sensitivityPrivate": "Private",
     "sensitivityConfidential": "Confidential",
     "categories": "Categories",
-    "categoriesEmpty": "None defined, add categories in Settings"
+    "categoriesEmpty": "None defined, add categories in Settings",
+    "sendInvite": "Send invite to attendees",
+    "sendInviteHint": "Email a meeting request to the attendees; recipients can accept, decline, or mark tentative."
   },
   "filters": {
     "description": "Sort and act on incoming mail automatically",

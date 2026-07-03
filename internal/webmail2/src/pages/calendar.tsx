@@ -75,9 +75,10 @@ interface EventForm {
   busyStatus: string // "" = default (busy), else "0".."3" (free/tentative/busy/oof)
   sensitivity: string // "" = normal, else "2" (private) or "3" (confidential)
   categories: string[] // selected category names
+  sendInvite: boolean // email a METHOD:REQUEST invite to attendees on create
 }
 
-const emptyForm: EventForm = { summary: "", start: "", end: "", allDay: false, location: "", description: "", attendees: "", recurrence: "", calendarId: "calendar", reminder: "", busyStatus: "", sensitivity: "", categories: [] }
+const emptyForm: EventForm = { summary: "", start: "", end: "", allDay: false, location: "", description: "", attendees: "", recurrence: "", calendarId: "calendar", reminder: "", busyStatus: "", sensitivity: "", categories: [], sendInvite: false }
 
 // recurrenceToForm maps a stored RRULE value to the form's frequency selector.
 function recurrenceToForm(rrule?: string): string {
@@ -391,6 +392,7 @@ export function CalendarPage() {
       busyStatus: ev.busyStatus != null ? String(ev.busyStatus) : "",
       sensitivity: ev.sensitivity != null && ev.sensitivity > 0 ? String(ev.sensitivity) : "",
       categories: ev.categories ?? [],
+      sendInvite: false,
     })
     setDialogOpen(true)
   }
@@ -422,6 +424,7 @@ export function CalendarPage() {
       busyStatus: form.busyStatus ? Number(form.busyStatus) : undefined,
       sensitivity: form.sensitivity ? Number(form.sensitivity) : undefined,
       categories: form.categories.length > 0 ? form.categories : undefined,
+      sendInvite: form.sendInvite || undefined,
       // Anchor timed events to the user's zone so recurrences keep their wall
       // time across DST (stored as DTSTART;TZID + VTIMEZONE). All-day events stay
       // floating dates.
@@ -1107,6 +1110,20 @@ export function CalendarPage() {
               <p className="text-xs text-muted-foreground">
                 {t("calendar.attendeesHint")}
               </p>
+              {/* Send a METHOD:REQUEST meeting invite to the attendees on create. */}
+              <div className="flex items-center justify-between pt-1">
+                <Label htmlFor="ev-invite" className="text-sm font-normal cursor-pointer">
+                  {t("calendar.sendInvite")}
+                </Label>
+                <Switch
+                  id="ev-invite"
+                  checked={form.sendInvite}
+                  onCheckedChange={(checked) => setForm({ ...form, sendInvite: checked })}
+                />
+              </div>
+              {form.sendInvite && (
+                <p className="text-xs text-muted-foreground">{t("calendar.sendInviteHint")}</p>
+              )}
             </div>
             {rooms.length > 0 && (
               <div className="space-y-2">
