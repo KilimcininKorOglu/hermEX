@@ -79,6 +79,7 @@ interface NavItem {
 
 // label holds an i18n key (nav.*) resolved at render time via t().
 const mainNavItems: NavItem[] = [
+  { icon: CalendarDays, label: "nav.today", path: "/today" },
   { icon: Inbox, label: "nav.inbox", path: "/inbox", shortcut: "gi" },
   { icon: MessagesSquare, label: "nav.conversations", path: "/threads" },
   { icon: Search, label: "nav.search", path: "/search", shortcut: "/" },

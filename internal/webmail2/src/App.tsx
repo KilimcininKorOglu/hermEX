@@ -13,6 +13,7 @@ import { SharedPage } from "@/pages/shared"
 import { TrashPage } from "@/pages/trash"
 import { ContactsPage } from "@/pages/contacts"
 import { CalendarPage } from "@/pages/calendar"
+import { TodayPage } from "@/pages/today"
 import { TasksPage } from "@/pages/tasks"
 import { NotesPage } from "@/pages/notes"
 import { PublicFoldersPage } from "@/pages/public-folders"
@@ -133,6 +134,7 @@ function AppContent() {
           }
         >
           <Route index element={<Navigate to="/inbox" replace />} />
+          <Route path="today" element={<TodayPage />} />
           <Route path="compose" element={<ComposePage />} />
           <Route path="inbox" element={<InboxPage folder="inbox" />} />
           <Route path="starred" element={<InboxPage folder="starred" />} />

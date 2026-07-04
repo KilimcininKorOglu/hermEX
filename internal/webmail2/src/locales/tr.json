@@ -1223,5 +1223,16 @@
     "dismiss": "Kapat",
     "open": "Takvimi aç",
     "minutes": "dk"
+  },
+  "today": {
+    "appointments": "Bugünkü randevular",
+    "noAppointments": "Bugün randevu yok",
+    "quickAppointment": "Hızlı randevu",
+    "openCalendar": "Takvimi aç",
+    "openInbox": "Gelen kutusunu aç",
+    "openTasks": "Görevleri aç",
+    "unreadMail": "{count} okunmamış",
+    "noUnread": "Gelen kutusu güncel",
+    "noTasks": "Açık görev yok"
   }
 }

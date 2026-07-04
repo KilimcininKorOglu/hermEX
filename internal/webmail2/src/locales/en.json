@@ -1223,5 +1223,16 @@
     "dismiss": "Dismiss",
     "open": "Open calendar",
     "minutes": "min"
+  },
+  "today": {
+    "appointments": "Today's appointments",
+    "noAppointments": "No appointments today",
+    "quickAppointment": "Quick appointment",
+    "openCalendar": "Open calendar",
+    "openInbox": "Open inbox",
+    "openTasks": "Open tasks",
+    "unreadMail": "{count} unread",
+    "noUnread": "Inbox is up to date",
+    "noTasks": "No open tasks"
   }
 }
