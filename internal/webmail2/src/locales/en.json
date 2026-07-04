@@ -743,7 +743,8 @@
     "categories": "Categories",
     "categoriesEmpty": "None defined, add categories in Settings",
     "sendInvite": "Send invite to attendees",
-    "sendInviteHint": "Email a meeting request to the attendees; recipients can accept, decline, or mark tentative."
+    "sendInviteHint": "Email a meeting request to the attendees; recipients can accept, decline, or mark tentative.",
+    "jumpToDate": "Jump to date"
   },
   "filters": {
     "description": "Sort and act on incoming mail automatically",

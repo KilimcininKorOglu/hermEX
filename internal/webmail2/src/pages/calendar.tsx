@@ -624,6 +624,17 @@ export function CalendarPage() {
             <Users className="mr-2 h-4 w-4" />
             {t("calendar.availability")}
           </Button>
+          <input
+            type="date"
+            aria-label={t("calendar.jumpToDate")}
+            title={t("calendar.jumpToDate")}
+            value={dateKey(cursor)}
+            onChange={(e) => {
+              const d = new Date(e.target.value)
+              if (!isNaN(d.getTime())) setCursor(d)
+            }}
+            className="rounded-md border bg-background px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+          />
           <Button variant="outline" onClick={() => window.print()} title={t("calendar.print")}>
             <Printer className="h-4 w-4" />
           </Button>
@@ -775,7 +786,7 @@ export function CalendarPage() {
                   >
                     <div className="flex justify-end">
                       <span
-                        className={`flex h-6 w-6 items-center justify-center rounded-full text-xs ${isToday ? "bg-primary font-semibold text-primary-foreground" : ""}`}
+                        className={`flex h-6 w-6 items-center justify-center rounded-full text-xs ${isToday ? "bg-primary font-semibold text-primary-foreground" : dayEvents.length > 0 ? "font-semibold" : ""}`}
                       >
                         {day.getDate()}
                       </span>
