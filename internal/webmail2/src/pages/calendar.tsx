@@ -1433,6 +1433,19 @@ export function CalendarPage() {
                   className="font-mono"
                 />
               </div>
+              {/* Color scheme palette: quick-pick swatches for the calendar color. */}
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {["#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6", "#8b5cf6", "#ec4899", "#64748b"].map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    aria-label={c}
+                    onClick={() => setCalForm({ ...calForm, color: c })}
+                    className={`h-6 w-6 rounded-full border-2 transition-transform hover:scale-110 ${calForm.color.toLowerCase() === c ? "border-foreground" : "border-transparent"}`}
+                    style={{ backgroundColor: c }}
+                  />
+                ))}
+              </div>
             </div>
           </div>
           <DialogFooter>
