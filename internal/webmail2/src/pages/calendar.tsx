@@ -283,6 +283,9 @@ export function CalendarPage() {
   const [loading, setLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingUID, setEditingUID] = useState<string | null>(null)
+  // editingTracking holds the per-attendee response status of the event being
+  // edited, shown read-only as the organizer's TrackingTab. Null when not editing.
+  const [editingTracking, setEditingTracking] = useState<{ email: string; response: number }[] | null>(null)
   const [form, setForm] = useState<EventForm>(emptyForm)
   const [busy, setBusy] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<CalendarEvent | null>(null)
@@ -367,6 +370,7 @@ export function CalendarPage() {
 
   const openCreate = () => {
     setEditingUID(null)
+    setEditingTracking(null)
     setForm(emptyForm)
     setDialogOpen(true)
   }
@@ -378,12 +382,14 @@ export function CalendarPage() {
     const s = start ?? new Date(day.getFullYear(), day.getMonth(), day.getDate(), 9, 0)
     const e = end ?? new Date(s.getFullYear(), s.getMonth(), s.getDate(), s.getHours() + 1, s.getMinutes())
     setEditingUID(null)
+    setEditingTracking(null)
     setForm({ ...emptyForm, start: rfc3339ToLocalInput(s.toISOString()), end: rfc3339ToLocalInput(e.toISOString()) })
     setDialogOpen(true)
   }
 
   const openEdit = (ev: CalendarEvent) => {
     setEditingUID(ev.uid)
+    setEditingTracking(ev.tracking ?? null)
     setForm({
       summary: ev.summary,
       start: ev.allDay ? ev.start.slice(0, 10) : rfc3339ToLocalInput(ev.start),
@@ -1125,6 +1131,27 @@ export function CalendarPage() {
                     )
                   })}
                 </div>
+              </div>
+            )}
+            {editingUID && editingTracking && editingTracking.length > 0 && (
+              <div className="space-y-2">
+                <Label>{t("calendar.tracking")}</Label>
+                <ul className="rounded-md border divide-y text-sm">
+                  {editingTracking.map((tr) => (
+                    <li key={tr.email} className="flex items-center justify-between px-3 py-1.5">
+                      <span className="truncate">{tr.email}</span>
+                      <span className="shrink-0 text-muted-foreground">
+                        {tr.response === 3
+                          ? t("calendar.respAccepted")
+                          : tr.response === 2
+                            ? t("calendar.respTentative")
+                            : tr.response === 4
+                              ? t("calendar.respDeclined")
+                              : t("calendar.respNone")}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

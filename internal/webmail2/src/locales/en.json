@@ -750,7 +750,12 @@
     "sendInvite": "Send invite to attendees",
     "sendInviteHint": "Email a meeting request to the attendees; recipients can accept, decline, or mark tentative.",
     "jumpToDate": "Jump to date",
-    "sideBySide": "Side by side"
+    "sideBySide": "Side by side",
+    "tracking": "Responses",
+    "respNone": "No response",
+    "respTentative": "Tentative",
+    "respAccepted": "Accepted",
+    "respDeclined": "Declined"
   },
   "filters": {
     "description": "Sort and act on incoming mail automatically",

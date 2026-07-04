@@ -136,6 +136,7 @@ export interface CalendarEvent {
   busyStatus?: number // PidLidBusyStatus: 0=free, 1=tentative, 2=busy, 3=oof
   sensitivity?: number // PR_SENSITIVITY: 0=normal, 2=private, 3=confidential
   categories?: string[] // PidNameKeywords, the shared category list
+  tracking?: { email: string; response: number }[] // per-attendee PidLidResponseStatus: 0=none, 2=tentative, 3=accepted, 4=declined
 }
 
 export type CalendarEventInput = Omit<CalendarEvent, "uid"> & { uid?: string }

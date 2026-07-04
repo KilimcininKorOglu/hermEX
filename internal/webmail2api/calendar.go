@@ -38,6 +38,14 @@ type eventJSON struct {
 	Categories      []string `json:"categories,omitempty"`   // PidNameKeywords, the shared category list (store GetCategories/SetCategories)
 	Attendees       []string `json:"attendees,omitempty"`    // smtp addresses; emitted as ATTENDEE so oxcical stores them as recipients
 	SendInvite      bool     `json:"sendInvite,omitempty"`   // when true on create, email a METHOD:REQUEST iTIP invite to the attendees
+	Tracking        []attendeeStatusJSON `json:"tracking,omitempty"` // per-attendee response status (the organizer's TrackingTab), read from the recipients' PidLidResponseStatus
+}
+
+// attendeeStatusJSON is one attendee's response status for the organizer's
+// TrackingTab: 0=none, 2=tentative, 3=accepted, 4=declined (PidLidResponseStatus).
+type attendeeStatusJSON struct {
+	Email    string `json:"email"`
+	Response int    `json:"response"`
 }
 
 // calendarJSON is the SPA's Calendar shape. ID is the stable "calendar" for the
@@ -89,6 +97,17 @@ func propInt32(pv mapi.PropertyValues, tag mapi.PropTag) (int32, bool) {
 // this store, allocating its id when create is set (idempotent).
 func busyStatusTag(st *objectstore.Store, create bool) (mapi.PropTag, error) {
 	ids, err := st.GetNamedPropIDs(create, []mapi.PropertyName{mapi.NameBusyStatus})
+	if err != nil || len(ids) == 0 || ids[0] == 0 {
+		return 0, err
+	}
+	return mapi.PropTag(uint32(ids[0])<<16 | uint32(mapi.PtLong)), nil
+}
+
+// responseStatusTag resolves PidLidResponseStatus (NameResponseStatus) to a PtLong
+// tag for this store, allocating its id when create is set (idempotent). It is the
+// per-recipient prop the organizer's TrackingTab reads.
+func responseStatusTag(st *objectstore.Store, create bool) (mapi.PropTag, error) {
+	ids, err := st.GetNamedPropIDs(create, []mapi.PropertyName{mapi.NameResponseStatus})
 	if err != nil || len(ids) == 0 || ids[0] == 0 {
 		return 0, err
 	}
@@ -325,6 +344,9 @@ func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 	// busyTag resolves PidLidBusyStatus once; an absent tag (fresh store) means the
 	// busy status is read from the iCal-derived default and stays nil.
 	busyTag, _ := busyStatusTag(st, false)
+	// respTag resolves PidLidResponseStatus once; the organizer's TrackingTab reads
+	// each attendee's response from its recipient row.
+	respTag, _ := responseStatusTag(st, false)
 	for _, cal := range listCalendars(st) {
 		objs, err := st.ListFolderObjects(calendarFolderID(cal.ID))
 		if err != nil {
@@ -358,6 +380,24 @@ func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 			// Categories are the shared PidNameKeywords list, read directly.
 			if cats, err := st.GetCategories(o.ID); err == nil && len(cats) > 0 {
 				e.Categories = cats
+			}
+			// Tracking: each recipient's PidLidResponseStatus, the organizer's
+			// view of who accepted/tentative/declined (populated by inbound REPLY).
+			if respTag != 0 {
+				if recips, err := st.ListRecipients(o.ID); err == nil {
+					for _, r := range recips {
+						if r.SmtpAddress == "" {
+							continue
+						}
+						resp := 0
+						if pv, err := st.GetRecipientProperties(r.ID, respTag); err == nil {
+							if v, ok := propInt32(pv, respTag); ok {
+								resp = int(v)
+							}
+						}
+						e.Tracking = append(e.Tracking, attendeeStatusJSON{Email: r.SmtpAddress, Response: resp})
+					}
+				}
 			}
 			events = append(events, e)
 		}
