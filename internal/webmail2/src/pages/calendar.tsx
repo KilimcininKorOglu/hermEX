@@ -474,6 +474,32 @@ export function CalendarPage() {
     }
   }
 
+  // moveEvent commits a drag-move/resize: PUT the event with the new start/end
+  // (preserving its other fields) and reload. Best-effort: a failure toasts.
+  const moveEvent = async (ev: CalendarEvent, start: Date, end: Date) => {
+    try {
+      await api.updateCalendarEvent(ev.uid, {
+        summary: ev.summary,
+        start: start.toISOString(),
+        end: end.toISOString(),
+        allDay: ev.allDay,
+        calendarId: ev.calendarId ?? "calendar",
+        location: ev.location,
+        description: ev.description,
+        attendees: ev.attendees,
+        recurrence: ev.recurrence,
+        reminderMinutes: ev.reminderMinutes,
+        busyStatus: ev.busyStatus,
+        sensitivity: ev.sensitivity,
+        categories: ev.categories,
+      })
+      await load()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("calendar.saveFailed"))
+      await load()
+    }
+  }
+
   const submitCalDialog = async () => {
     if (!calForm.name.trim()) {
       toast.error(t("calendar.calendarNameRequired"))
@@ -861,6 +887,7 @@ export function CalendarPage() {
             todayKey={todayKey}
             onOpenEvent={openEdit}
             onCreateOn={openCreateOn}
+            onMoveEvent={moveEvent}
           />
         )
         if (sideBySide && sideBySideCals.length >= 2) {
@@ -1456,12 +1483,17 @@ function DayTimeGrid(props: {
   todayKey: string
   onOpenEvent: (ev: CalendarEvent) => void
   onCreateOn: (day: Date, start?: Date, end?: Date) => void
+  onMoveEvent: (ev: CalendarEvent, start: Date, end: Date) => void
 }) {
   const { t } = useI18n()
   // drag is the in-progress click-drag time selection (a click-drag in a day
   // column selects a time range and opens the create dialog on that window).
   // startMin/endMin are absolute minutes since local midnight; dayIdx the column.
   const [drag, setDrag] = useState<{ dayIdx: number; startMin: number; endMin: number } | null>(null)
+  // eventDrag moves or resizes an existing event: mode "move" shifts start+end
+  // together (duration preserved); mode "resize" drags the end. startMin/endMin
+  // are the tentative absolute minutes since midnight on the event's day.
+  const [eventDrag, setEventDrag] = useState<{ dayIdx: number; ev: CalendarEvent; mode: "move" | "resize"; startMin: number; endMin: number; durationMin: number } | null>(null)
   // columnRefs maps each day column to its DOM node so a mousemove can compute the
   // time from the cursor's Y offset within the active column.
   const columnRefs = useRef<(HTMLDivElement | null)[]>([])
@@ -1513,6 +1545,38 @@ function DayTimeGrid(props: {
       window.removeEventListener("mouseup", onUp)
     }
   }, [drag, props.days, props.resolution])
+  // eventDrag: a global mousemove updates the tentative start/end (move preserves
+  // the duration, resize drags only the end); mouseup commits via onMoveEvent.
+  useEffect(() => {
+    if (!eventDrag) return
+    const onMove = (e: MouseEvent) => {
+      setEventDrag((d) => {
+        if (!d) return d
+        const m = snapMin(minFromY(d.dayIdx, e.clientY))
+        if (d.mode === "move") {
+          return { ...d, startMin: m, endMin: m + d.durationMin }
+        }
+        return { ...d, endMin: Math.max(m, d.startMin + props.resolution) }
+      })
+    }
+    const onUp = () => {
+      setEventDrag((d) => {
+        if (d) {
+          const day = props.days[d.dayIdx]
+          const start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), Math.floor(d.startMin / 60), d.startMin % 60)
+          const end = new Date(day.getFullYear(), day.getMonth(), day.getDate(), Math.floor(d.endMin / 60), d.endMin % 60)
+          props.onMoveEvent(d.ev, start, end)
+        }
+        return null
+      })
+    }
+    window.addEventListener("mousemove", onMove)
+    window.addEventListener("mouseup", onUp)
+    return () => {
+      window.removeEventListener("mousemove", onMove)
+      window.removeEventListener("mouseup", onUp)
+    }
+  }, [eventDrag, props.days, props.resolution])
   // hoursToRender is the set of hour rows the grid shows. When non-working hours
   // are hidden, only the working window (workDayStart..workDayEnd) renders, so the
   // grid focuses on the user's business hours; events outside it still render via
@@ -1649,22 +1713,57 @@ function DayTimeGrid(props: {
                     />
                   )}
                   {timed.map((ev) => {
-                    const top = eventTopMinutes(ev, day) * PX_PER_MINUTE - offset
-                    const height = eventHeightMinutes(ev, day) * PX_PER_MINUTE
+                    // When this event is being dragged, render at the tentative
+                    // position; otherwise at its stored start/end.
+                    const active = eventDrag && eventDrag.ev.uid === ev.uid
+                    const startMin = active ? eventDrag!.startMin : eventTopMinutes(ev, day)
+                    const endMin = active ? eventDrag!.endMin : startMin + eventHeightMinutes(ev, day)
+                    const top = startMin * PX_PER_MINUTE - offset
+                    const height = Math.max(15, (endMin - startMin) * PX_PER_MINUTE)
                     if (top + height <= 0 || top >= gridHeight) return null // event in a hidden hour
                     return (
-                      <button
+                      <div
                         key={ev.uid}
-                        className="absolute left-0.5 right-0.5 overflow-hidden rounded bg-primary/20 px-1 py-0.5 text-left text-[11px] hover:bg-primary/30"
+                        role="button"
+                        tabIndex={0}
+                        className={`absolute left-0.5 right-0.5 cursor-move overflow-hidden rounded bg-primary/20 px-1 py-0.5 text-left text-[11px] hover:bg-primary/30 ${active ? "ring-2 ring-primary" : ""}`}
                         style={{ top: Math.max(0, top), height, borderLeft: `3px solid ${props.eventColor(ev) ?? "hsl(var(--primary))"}` }}
-                        onClick={(e) => { e.stopPropagation(); props.onOpenEvent(ev) }}
+                        // A click (mousedown+up without a move) opens the editor;
+                        // a drag moves the event. stopPropagation keeps the day
+                        // column's select-drag from firing under the event box.
+                        onMouseDown={(e) => {
+                          e.stopPropagation()
+                          const origStart = eventTopMinutes(ev, day)
+                          const origEnd = origStart + eventHeightMinutes(ev, day)
+                          setEventDrag({ dayIdx, ev, mode: "move", startMin: origStart, endMin: origEnd, durationMin: origEnd - origStart })
+                          // Record the down position so the click handler can tell
+                          // a no-move click from a drag.
+                          ;(e.currentTarget as HTMLElement).dataset.downX = String(e.clientX)
+                          ;(e.currentTarget as HTMLElement).dataset.downY = String(e.clientY)
+                        }}
+                        onClick={(e) => {
+                          const el = e.currentTarget
+                          const dx = Math.abs(e.clientX - Number(el.dataset.downX ?? e.clientX))
+                          const dy = Math.abs(e.clientY - Number(el.dataset.downY ?? e.clientY))
+                          if (dx < 4 && dy < 4) props.onOpenEvent(ev) // a click, not a drag
+                        }}
                         title={`${ev.summary} ${timeLabel(t, ev)}`}
                       >
                         <div className="truncate font-medium">{ev.summary}</div>
                         <div className="truncate text-muted-foreground">
                           {new Date(ev.start).toLocaleTimeString(undefined, withTz({ hour: "2-digit", minute: "2-digit" }))}
                         </div>
-                      </button>
+                        {/* Resize handle: drag the bottom edge to change the end. */}
+                        <div
+                          className="absolute bottom-0 left-0 right-0 h-1.5 cursor-ns-resize bg-primary/40"
+                          onMouseDown={(e) => {
+                            e.stopPropagation()
+                            const origStart = eventTopMinutes(ev, day)
+                            const origEnd = origStart + eventHeightMinutes(ev, day)
+                            setEventDrag({ dayIdx, ev, mode: "resize", startMin: origStart, endMin: origEnd, durationMin: origEnd - origStart })
+                          }}
+                        />
+                      </div>
                     )
                   })}
                 </div>
