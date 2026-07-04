@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { CalendarDays, Plus, MapPin, Clock, Edit, Trash2, MoreHorizontal, Users, Repeat, Bell, Printer, ChevronLeft, ChevronRight, Settings2, Share2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -371,12 +371,14 @@ export function CalendarPage() {
     setDialogOpen(true)
   }
 
-  // openCreateOn opens the new-event dialog with the start prefilled to 09:00
-  // on the clicked grid day.
-  const openCreateOn = (day: Date) => {
-    const start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 9, 0)
+  // openCreateOn opens the new-event dialog prefilled for the clicked grid day.
+  // When start/end are supplied (a drag-select time range), the dialog opens with
+  // that exact window; otherwise it defaults to 09:00 for an hour.
+  const openCreateOn = (day: Date, start?: Date, end?: Date) => {
+    const s = start ?? new Date(day.getFullYear(), day.getMonth(), day.getDate(), 9, 0)
+    const e = end ?? new Date(s.getFullYear(), s.getMonth(), s.getDate(), s.getHours() + 1, s.getMinutes())
     setEditingUID(null)
-    setForm({ ...emptyForm, start: rfc3339ToLocalInput(start.toISOString()) })
+    setForm({ ...emptyForm, start: rfc3339ToLocalInput(s.toISOString()), end: rfc3339ToLocalInput(e.toISOString()) })
     setDialogOpen(true)
   }
 
@@ -1453,9 +1455,64 @@ function DayTimeGrid(props: {
   eventColor: (ev: CalendarEvent) => string | undefined
   todayKey: string
   onOpenEvent: (ev: CalendarEvent) => void
-  onCreateOn: (day: Date) => void
+  onCreateOn: (day: Date, start?: Date, end?: Date) => void
 }) {
   const { t } = useI18n()
+  // drag is the in-progress click-drag time selection (a click-drag in a day
+  // column selects a time range and opens the create dialog on that window).
+  // startMin/endMin are absolute minutes since local midnight; dayIdx the column.
+  const [drag, setDrag] = useState<{ dayIdx: number; startMin: number; endMin: number } | null>(null)
+  // columnRefs maps each day column to its DOM node so a mousemove can compute the
+  // time from the cursor's Y offset within the active column.
+  const columnRefs = useRef<(HTMLDivElement | null)[]>([])
+  // snapMin clamps a minute offset to the configured time-grid resolution.
+  const snapMin = (min: number) => {
+    const snapped = Math.round(min / props.resolution) * props.resolution
+    return Math.max(0, Math.min(24 * 60, snapped))
+  }
+  // minFromY returns the absolute minutes since local midnight for a client Y in
+  // the day column at dayIdx, accounting for the non-working-hours offset.
+  const minFromY = (dayIdx: number, clientY: number) => {
+    const el = columnRefs.current[dayIdx]
+    if (!el) return 0
+    const rect = el.getBoundingClientRect()
+    const y = clientY - rect.top
+    const off = props.showNonWorkingHours ? 0 : props.workDayStart * 60
+    return snapMin((y / PX_PER_MINUTE) + off)
+  }
+  // A drag ends on mouseup anywhere: a no-move click opens the create dialog at
+  // the default 09:00; a drag selects the window and opens it prefilled.
+  useEffect(() => {
+    if (!drag) return
+    const onMove = (e: MouseEvent) => {
+      setDrag((d) => (d ? { ...d, endMin: minFromY(d.dayIdx, e.clientY) } : d))
+    }
+    const onUp = () => {
+      setDrag((d) => {
+        if (d) {
+          const lo = Math.min(d.startMin, d.endMin)
+          const hi = Math.max(d.startMin, d.endMin)
+          const day = props.days[d.dayIdx]
+          const start = new Date(day.getFullYear(), day.getMonth(), day.getDate(), Math.floor(lo / 60), lo % 60)
+          const end = new Date(day.getFullYear(), day.getMonth(), day.getDate(), Math.floor(hi / 60), hi % 60)
+          // A click (lo == hi) opens the default 09:00 dialog; a drag opens the
+          // selected window, but only when it spans at least one slot.
+          if (hi - lo >= props.resolution) {
+            props.onCreateOn(day, start, end)
+          } else {
+            props.onCreateOn(day)
+          }
+        }
+        return null
+      })
+    }
+    window.addEventListener("mousemove", onMove)
+    window.addEventListener("mouseup", onUp)
+    return () => {
+      window.removeEventListener("mousemove", onMove)
+      window.removeEventListener("mouseup", onUp)
+    }
+  }, [drag, props.days, props.resolution])
   // hoursToRender is the set of hour rows the grid shows. When non-working hours
   // are hidden, only the working window (workDayStart..workDayEnd) renders, so the
   // grid focuses on the user's business hours; events outside it still render via
@@ -1543,16 +1600,22 @@ function DayTimeGrid(props: {
                 </div>
               ))}
             </div>
-            {props.days.map((day) => {
+            {props.days.map((day, dayIdx) => {
               const key = dateKey(day)
               const isToday = key === props.todayKey
               const timed = timedEventsForDay(props.events, day)
               return (
                 <div
                   key={key}
+                  ref={(el) => { columnRefs.current[dayIdx] = el }}
                   className={`relative overflow-hidden border-l ${isToday ? "bg-primary/5" : ""}`}
                   style={{ height: gridHeight }}
-                  onClick={() => props.onCreateOn(day)}
+                  onMouseDown={(e) => {
+                    // Start a drag-select at the snapped time under the cursor.
+                    e.preventDefault()
+                    const m = minFromY(dayIdx, e.clientY)
+                    setDrag({ dayIdx, startMin: m, endMin: m })
+                  }}
                 >
                   {/* Shade non-working hours when the grid shows the full day. */}
                   {props.showNonWorkingHours && nonWorkingRanges.map((r, i) => (
@@ -1574,6 +1637,16 @@ function DayTimeGrid(props: {
                         style={{ top: h * 60 + m - offset }}
                       />
                     )),
+                  )}
+                  {/* Drag-select time range: a highlighted band from start to end. */}
+                  {drag && drag.dayIdx === dayIdx && (
+                    <div
+                      className="absolute left-0.5 right-0.5 rounded bg-primary/30 border border-primary/50 pointer-events-none"
+                      style={{
+                        top: Math.min(drag.startMin, drag.endMin) * PX_PER_MINUTE - offset,
+                        height: Math.abs(drag.endMin - drag.startMin) * PX_PER_MINUTE,
+                      }}
+                    />
                   )}
                   {timed.map((ev) => {
                     const top = eventTopMinutes(ev, day) * PX_PER_MINUTE - offset
