@@ -9,6 +9,7 @@ package meeting
 import (
 	"errors"
 	"slices"
+	"strings"
 	"time"
 
 	"hermex/internal/directory"
@@ -295,6 +296,32 @@ func findCalendarByUID(st *objectstore.Store, uidTag mapi.PropTag, uid string) (
 		}
 	}
 	return 0, false
+}
+
+// ApplyReply processes an incoming iTIP REPLY on the organizer's side: it locates
+// the organizer's calendar event by the REPLY's iCalendar UID, finds the attendee
+// (recipient) by SMTP address, and updates that recipient's PidLidResponseStatus
+// to the response the attendee sent (accepted/tentative/declined). This is the
+// data the organizer's TrackingTab reads. It is a no-op (returns nil) when the
+// event or the attendee is not found, so a stray REPLY never fails delivery.
+func ApplyReply(st *objectstore.Store, tags Tags, uid, attendeeEmail string, response int32) error {
+	eventID, ok := findCalendarByUID(st, tags.UID, uid)
+	if !ok {
+		return nil
+	}
+	recipients, err := st.ListRecipients(eventID)
+	if err != nil {
+		return err
+	}
+	target := strings.ToLower(strings.TrimSpace(attendeeEmail))
+	for _, r := range recipients {
+		if strings.ToLower(strings.TrimSpace(r.SmtpAddress)) == target && target != "" {
+			var props mapi.PropertyValues
+			props.Set(tags.Resp, response)
+			return st.SetRecipientProperties(r.ID, props)
+		}
+	}
+	return nil
 }
 
 // propStr reads a string-valued property, or "".

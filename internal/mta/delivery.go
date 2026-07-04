@@ -714,6 +714,10 @@ func deliver(accounts directory.Accounts, from, rcptAddr, path string, raw []byt
 	if !autoProcessMeeting(accounts, st, rcptAddr, info) {
 		maybeAutoReply(accounts, st, rcptAddr, from, raw, received)
 	}
+	// An inbound iTIP REPLY (an attendee's response) updates the organizer's
+	// calendar event so the TrackingTab reflects it; best-effort, never fails
+	// delivery, and runs after the OOF pass so a REPLY never triggers an auto-reply.
+	autoProcessReply(st, info)
 	return nil
 }
 
@@ -723,6 +727,12 @@ func deliver(accounts directory.Accounts, from, rcptAddr, path string, raw []byt
 // indirection breaks the meeting→mta import cycle (meeting routes the organizer
 // notification back through this package).
 var OnMeetingRequest func(st *objectstore.Store, accounts directory.Accounts, recipient string, messageID int64) bool
+
+// OnMeetingReply, when set, processes an inbound iTIP REPLY on the organizer's
+// side: it updates the matching attendee's response status on the organizer's
+// calendar event so the TrackingTab reflects responses. Wired by cmd/mta to the
+// meeting package; the indirection breaks the meeting→mta import cycle.
+var OnMeetingReply func(st *objectstore.Store, messageID int64) bool
 
 // autoProcessMeeting runs the registered meeting-request processor (if any) on a
 // just-delivered message, swallowing any panic exactly like the other delivery-time
@@ -739,6 +749,20 @@ func autoProcessMeeting(accounts directory.Accounts, st *objectstore.Store, reci
 		return false
 	}
 	return OnMeetingRequest(st, accounts, recipient, m.ID)
+}
+
+// autoProcessReply runs the registered inbound-REPLY processor (if any) on a
+// just-delivered message, panic-swallowed like the request pass: a misbehaving
+// processor must never fail delivery. It reports whether a REPLY was handled.
+func autoProcessReply(st *objectstore.Store, m objectstore.MessageInfo) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("mta: meeting-reply process panicked for uid %d, skipped: %v", m.UID, r)
+		}
+	}()
+	if OnMeetingReply != nil {
+		OnMeetingReply(st, m.ID)
+	}
 }
 
 // forwardMarkerHeader is stamped onto a message hermEX forwards via an inbox rule,

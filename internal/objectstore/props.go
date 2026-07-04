@@ -122,6 +122,38 @@ func (s *Store) GetRecipientProperties(recipientID int64, tags ...mapi.PropTag) 
 	return s.getObjectProps("recipients_properties", "recipient_id", recipientID, tags)
 }
 
+// Recipient is one message recipient: its row id and SMTP address, the fields a
+// scheduling reply needs to match an attendee to its response status.
+type Recipient struct {
+	ID          int64
+	SmtpAddress string
+}
+
+// ListRecipients returns a message's recipients in row order with their SMTP
+// addresses, so a caller can locate the attendee (by address) to update its
+// per-recipient response status (e.g. an incoming iTIP REPLY).
+func (s *Store) ListRecipients(messageID int64) ([]Recipient, error) {
+	rids, err := s.objChildIDs(`SELECT recipient_id FROM recipients WHERE message_id=? ORDER BY recipient_id`, messageID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Recipient, 0, len(rids))
+	for _, rid := range rids {
+		pv, err := s.GetRecipientProperties(rid, mapi.PrSmtpAddress)
+		if err != nil {
+			return nil, err
+		}
+		addr := ""
+		if v, ok := pv.Get(mapi.PrSmtpAddress); ok {
+			if a, ok := v.(string); ok {
+				addr = a
+			}
+		}
+		out = append(out, Recipient{ID: rid, SmtpAddress: addr})
+	}
+	return out, nil
+}
+
 // SetAttachmentProperties upserts properties on an attachment and, when deletes are
 // given, removes those property tags in the same transaction (the attachment
 // counterpart of ModifyMessageProperties). An attachment carries no change number
