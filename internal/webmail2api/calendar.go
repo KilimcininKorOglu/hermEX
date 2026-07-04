@@ -381,14 +381,16 @@ func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 			if cats, err := st.GetCategories(o.ID); err == nil && len(cats) > 0 {
 				e.Categories = cats
 			}
-			// Tracking: each recipient's PidLidResponseStatus, the organizer's
-			// view of who accepted/tentative/declined (populated by inbound REPLY).
-			if respTag != 0 {
-				if recips, err := st.ListRecipients(o.ID); err == nil {
-					for _, r := range recips {
-						if r.SmtpAddress == "" {
-							continue
-						}
+			// Attendees + Tracking: each recipient's SMTP address is the attendee
+			// list (oxcical stores ATTENDEE as recipients), and its PidLidResponseStatus
+			// is the organizer's tracking view (populated by inbound REPLY).
+			if recips, err := st.ListRecipients(o.ID); err == nil {
+				for _, r := range recips {
+					if r.SmtpAddress == "" {
+						continue
+					}
+					e.Attendees = append(e.Attendees, r.SmtpAddress)
+					if respTag != 0 {
 						resp := 0
 						if pv, err := st.GetRecipientProperties(r.ID, respTag); err == nil {
 							if v, ok := propInt32(pv, respTag); ok {
@@ -465,6 +467,18 @@ func (s *Server) handleUpdateEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	in.UID = uid
+	// An organizer editing a meeting can resend the METHOD:REQUEST so invitees see
+	// the new time/details (SendInvite on update). Best-effort like the create path.
+	if in.SendInvite && len(in.Attendees) > 0 {
+		if c, ok := s.session(r); ok {
+			in.UID = uidOrGenerated(in.UID)
+			if raw, recipients, berr := buildMeetingRequest(c.Email, in); berr == nil {
+				if _, derr := mta.DeliverAndRelay(s.accounts, s.spool, c.Email, recipients, raw, time.Now()); derr == nil {
+					_, _ = st.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), objectstore.FlagSeen)
+				}
+			}
+		}
+	}
 	writeJSON(w, http.StatusOK, in)
 }
 
@@ -479,6 +493,30 @@ func (s *Server) handleDeleteEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
+	// If the event had attendees (the organizer is cancelling a meeting), email a
+	// METHOD:CANCEL iTIP notice before the delete so the recipients' clients drop
+	// it. Best-effort: a delivery failure still lets the organizer delete their
+	// own copy.
+	if c, ok := s.session(r); ok {
+		if recips, err := st.ListRecipients(id); err == nil {
+			var addrs []string
+			for _, rc := range recips {
+				if rc.SmtpAddress != "" {
+					addrs = append(addrs, rc.SmtpAddress)
+				}
+			}
+			if len(addrs) > 0 {
+				summary := ""
+				if pv, err := st.GetMessageProperties(id, mapi.PrSubject); err == nil {
+					summary = propStr(pv, mapi.PrSubject)
+				}
+				if raw, rec, berr := buildCancellationRequest(c.Email, eventJSON{UID: strconv.FormatInt(id, 10), Summary: summary, Attendees: addrs}); berr == nil {
+					_, _ = mta.DeliverAndRelay(s.accounts, s.spool, c.Email, rec, raw, time.Now())
+					_, _ = st.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), objectstore.FlagSeen)
+				}
+			}
+		}
+	}
 	if err := st.DeleteObject(id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not delete event"})
 		return
@@ -661,6 +699,61 @@ func buildMeetingRequest(organizer string, e eventJSON) ([]byte, []string, error
 	b.WriteString("\r\n")
 	fmt.Fprintf(&b, "--%s\r\n", boundary)
 	b.WriteString("Content-Type: text/calendar; method=REQUEST; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
+	b.WriteString(cal.String())
+	fmt.Fprintf(&b, "\r\n--%s--\r\n", boundary)
+	return []byte(b.String()), recipients, nil
+}
+
+// buildCancellationRequest renders a METHOD:CANCEL iTIP message (RFC 5546 §3.7):
+// the organizer cancels a meeting, telling each attendee it is off. The iCalendar
+// carries the original UID with STATUS:CANCELLED; the MIME body is a plain-text
+// notice plus the text/calendar;method=CANCEL part. Returns the raw message and
+// the deduplicated attendee address list.
+func buildCancellationRequest(organizer string, e eventJSON) ([]byte, []string, error) {
+	recipients := make([]string, 0, len(e.Attendees))
+	seen := map[string]bool{}
+	for _, a := range e.Attendees {
+		addr := strings.TrimSpace(a)
+		if parsed, err := mail.ParseAddress(addr); err == nil {
+			addr = parsed.Address
+		}
+		addr = strings.ToLower(addr)
+		if addr == "" || seen[addr] || addr == strings.ToLower(organizer) {
+			continue
+		}
+		seen[addr] = true
+		recipients = append(recipients, addr)
+	}
+	if len(recipients) == 0 {
+		return nil, nil, fmt.Errorf("no attendees")
+	}
+	var cal strings.Builder
+	cal.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//webmail2//EN\r\nMETHOD:CANCEL\r\nBEGIN:VEVENT\r\n")
+	fmt.Fprintf(&cal, "UID:%s\r\n", uidOrGenerated(e.UID))
+	fmt.Fprintf(&cal, "SUMMARY:%s\r\n", e.Summary)
+	fmt.Fprintf(&cal, "DTSTART%s\r\n", toICalTime(e.Start, e.AllDay))
+	fmt.Fprintf(&cal, "STATUS:CANCELLED\r\n")
+	fmt.Fprintf(&cal, "ORGANIZER;CN=%s:mailto:%s\r\n", organizer, organizer)
+	for _, a := range recipients {
+		fmt.Fprintf(&cal, "ATTENDEE;CN=%s:mailto:%s\r\n", a, a)
+	}
+	cal.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
+	textBody := fmt.Sprintf("Cancelled: %s", e.Summary)
+	boundary := "hermex-cancel-" + randomHex()
+	var b strings.Builder
+	fmt.Fprintf(&b, "From: %s\r\n", organizer)
+	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(recipients, ", "))
+	fmt.Fprintf(&b, "Subject: Cancelled: %s\r\n", e.Summary)
+	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))
+	fmt.Fprintf(&b, "Message-ID: <%s@hermex>\r\n", randomHex())
+	b.WriteString("MIME-Version: 1.0\r\n")
+	fmt.Fprintf(&b, "Content-Type: multipart/mixed; boundary=%q\r\n\r\n", boundary)
+	fmt.Fprintf(&b, "--%s\r\n", boundary)
+	b.WriteString("Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
+	b.WriteString(textBody)
+	b.WriteString("\r\n")
+	fmt.Fprintf(&b, "--%s\r\n", boundary)
+	b.WriteString("Content-Type: text/calendar; method=CANCEL; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
 	b.WriteString(cal.String())
 	fmt.Fprintf(&b, "\r\n--%s--\r\n", boundary)
 	return []byte(b.String()), recipients, nil
