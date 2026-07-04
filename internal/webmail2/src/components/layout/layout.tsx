@@ -2,6 +2,7 @@ import { useState } from "react"
 import { Outlet } from "react-router-dom"
 import { Sidebar } from "./sidebar"
 import { Header } from "./header"
+import { ReminderOverlay } from "@/components/reminder-overlay"
 import { cn } from "@/lib/utils"
 
 export function Layout() {
@@ -40,6 +41,10 @@ export function Layout() {
           <Outlet />
         </div>
       </main>
+
+      {/* Calendar reminder engine: fires a snooze/dismiss popup app-wide when a
+          reminder is due, regardless of the page the user is on. */}
+      <ReminderOverlay />
     </div>
   )
 }

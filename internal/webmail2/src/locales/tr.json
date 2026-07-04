@@ -1213,5 +1213,13 @@
     "tooShort": "Yeni şifre en az 8 karakter olmalı",
     "mismatch": "Şifreler eşleşmiyor",
     "failed": "Şifreniz değiştirilemedi. Mevcut şifrenizi kontrol edip tekrar deneyin."
+  },
+  "reminder": {
+    "title": "Hatırlatma",
+    "description": "Aşağıdaki randevuların zamanı geldi",
+    "snooze": "Ertele",
+    "dismiss": "Kapat",
+    "open": "Takvimi aç",
+    "minutes": "dk"
   }
 }

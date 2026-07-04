@@ -1213,5 +1213,13 @@
     "tooShort": "The new password must be at least 8 characters",
     "mismatch": "The passwords do not match",
     "failed": "Could not change your password. Check your current password and try again."
+  },
+  "reminder": {
+    "title": "Reminder",
+    "description": "The following appointments are due",
+    "snooze": "Snooze",
+    "dismiss": "Dismiss",
+    "open": "Open calendar",
+    "minutes": "min"
   }
 }
