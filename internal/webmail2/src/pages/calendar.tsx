@@ -318,6 +318,10 @@ export function CalendarPage() {
   const [calBusy, setCalBusy] = useState(false)
   const [deleteCalTarget, setDeleteCalTarget] = useState<Calendar | null>(null)
   const [shareDialogOpen, setShareDialogOpen] = useState(false)
+  // sideBySide renders each visible calendar in its own day/week grid (columns)
+  // instead of overlaying them in one shared grid; only meaningful with 2+ visible
+  // calendars, so the toggle is hidden otherwise.
+  const [sideBySide, setSideBySide] = useState(false)
   const [shareDialogCal, setShareDialogCal] = useState<Calendar | null>(null)
 
   const loadCalendars = useCallback(async () => {
@@ -624,6 +628,16 @@ export function CalendarPage() {
             <Users className="mr-2 h-4 w-4" />
             {t("calendar.availability")}
           </Button>
+          {calendars.filter((c) => visibleCalendarIds.has(c.id)).length >= 2 && (view === "day" || view === "week" || view === "workweek") && (
+            <Button
+              variant={sideBySide ? "secondary" : "outline"}
+              onClick={() => setSideBySide((s) => !s)}
+              title={t("calendar.sideBySide")}
+              aria-pressed={sideBySide}
+            >
+              {t("calendar.sideBySide")}
+            </Button>
+          )}
           <input
             type="date"
             aria-label={t("calendar.jumpToDate")}
@@ -818,29 +832,52 @@ export function CalendarPage() {
             </div>
           </div>
         </div>
-      ) : view === "day" || view === "week" || view === "workweek" ? (
-        <DayTimeGrid
-          days={view === "day" ? weekDays(cursor, 1, firstDayOfWeek) : view === "workweek" ? weekDays(cursor, 5, firstDayOfWeek) : weekDays(cursor, 7, firstDayOfWeek)}
-          label={rangeLabel(view === "day" ? weekDays(cursor, 1, firstDayOfWeek) : view === "workweek" ? weekDays(cursor, 5, firstDayOfWeek) : weekDays(cursor, 7, firstDayOfWeek))}
-          prevLabel={t(view === "day" ? "calendar.previousDay" : "calendar.previousWeek")}
-          nextLabel={t(view === "day" ? "calendar.nextDay" : "calendar.nextWeek")}
-          todayLabel={t("common.today")}
-          onPrev={() => setCursor((c) => moveCursor(c, view, -1))}
-          onNext={() => setCursor((c) => moveCursor(c, view, +1))}
-          onToday={() => setCursor(new Date())}
-          weekdayLabels={weekdayLabels}
-          firstDayOfWeek={firstDayOfWeek}
-          resolution={resolution}
-          workDayStart={workDayStart}
-          workDayEnd={workDayEnd}
-          showNonWorkingHours={showNonWorkingHours}
-          events={shownEvents}
-          eventColor={eventColor}
-          todayKey={todayKey}
-          onOpenEvent={openEdit}
-          onCreateOn={openCreateOn}
-        />
-      ) : events.length === 0 ? (
+      ) : view === "day" || view === "week" || view === "workweek" ? (() => {
+        const days = view === "day" ? weekDays(cursor, 1, firstDayOfWeek) : view === "workweek" ? weekDays(cursor, 5, firstDayOfWeek) : weekDays(cursor, 7, firstDayOfWeek)
+        // In side-by-side mode (2+ visible calendars), render one grid per visible
+        // calendar, each filtered to its own events; otherwise overlay all visible
+        // calendars in a single shared grid.
+        const sideBySideCals = calendars.filter((c) => visibleCalendarIds.has(c.id))
+        const grid = (evs: CalendarEvent[], label: string) => (
+          <DayTimeGrid
+            days={days}
+            label={label}
+            prevLabel={t(view === "day" ? "calendar.previousDay" : "calendar.previousWeek")}
+            nextLabel={t(view === "day" ? "calendar.nextDay" : "calendar.nextWeek")}
+            todayLabel={t("common.today")}
+            onPrev={() => setCursor((c) => moveCursor(c, view, -1))}
+            onNext={() => setCursor((c) => moveCursor(c, view, +1))}
+            onToday={() => setCursor(new Date())}
+            weekdayLabels={weekdayLabels}
+            firstDayOfWeek={firstDayOfWeek}
+            resolution={resolution}
+            workDayStart={workDayStart}
+            workDayEnd={workDayEnd}
+            showNonWorkingHours={showNonWorkingHours}
+            events={evs}
+            eventColor={eventColor}
+            todayKey={todayKey}
+            onOpenEvent={openEdit}
+            onCreateOn={openCreateOn}
+          />
+        )
+        if (sideBySide && sideBySideCals.length >= 2) {
+          return (
+            <div className="flex gap-4 overflow-x-auto pb-2">
+              {sideBySideCals.map((cal) => (
+                <div key={cal.id} className="min-w-[20rem] flex-1">
+                  {grid(
+                    shownEvents.filter((ev) => (ev.calendarId ?? "calendar") === cal.id),
+                    `${rangeLabel(days)} - ${cal.name}`,
+                  )}
+                </div>
+              ))}
+            </div>
+          )
+        }
+        return grid(shownEvents, rangeLabel(days))
+      })()
+       : events.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <div className="rounded-full bg-muted p-4">
             <CalendarDays className="h-8 w-8 text-muted-foreground" />

@@ -744,7 +744,8 @@
     "categoriesEmpty": "Tanımsız, Ayarlar'dan kategori ekleyin",
     "sendInvite": "Katılımcılara davet gönder",
     "sendInviteHint": "Katılımcılara toplantı isteği e-posta gönder; alıcılar kabul, reddet veya tentatif işaretleyebilir.",
-    "jumpToDate": "Tarihe git"
+    "jumpToDate": "Tarihe git",
+    "sideBySide": "Yan yana"
   },
   "filters": {
     "description": "Gelen postaları otomatik olarak sırala ve işle",
