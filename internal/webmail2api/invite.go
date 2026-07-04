@@ -1,10 +1,16 @@
 package webmail2api
 
 import (
+	"fmt"
 	"net/http"
+	"net/mail"
 	"strings"
+	"time"
 
+	"hermex/internal/mapi"
 	"hermex/internal/mime"
+	"hermex/internal/mta"
+	"hermex/internal/objectstore"
 )
 
 // findCalendarPart returns the decoded iCalendar (text/calendar or an .ics
@@ -110,4 +116,103 @@ func (s *Server) handleRSVP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": req.Response + "ed"})
+}
+
+// buildCounterRequest renders a METHOD:COUNTER iTIP message (RFC 5546 §3.6): an
+// invitee proposes a new time to the organizer. The iCalendar carries the
+// original meeting UID and the proposed start/end; the MIME body is a plain-text
+// note plus the text/calendar;method=COUNTER part. It is addressed to the
+// organizer only and returns the raw message.
+func buildCounterRequest(proposer, organizer string, e eventJSON) ([]byte, error) {
+	addr := strings.TrimSpace(organizer)
+	if parsed, err := mail.ParseAddress(addr); err == nil {
+		addr = parsed.Address
+	}
+	if addr == "" {
+		return nil, fmt.Errorf("no organizer address")
+	}
+	var cal strings.Builder
+	cal.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//webmail2//EN\r\nMETHOD:COUNTER\r\nBEGIN:VEVENT\r\n")
+	fmt.Fprintf(&cal, "UID:%s\r\n", uidOrGenerated(e.UID))
+	fmt.Fprintf(&cal, "SUMMARY:%s\r\n", e.Summary)
+	fmt.Fprintf(&cal, "DTSTART%s\r\n", toICalTime(e.Start, e.AllDay))
+	if e.End != "" {
+		fmt.Fprintf(&cal, "DTEND%s\r\n", toICalTime(e.End, e.AllDay))
+	}
+	fmt.Fprintf(&cal, "ORGANIZER;CN=%s:mailto:%s\r\n", organizer, organizer)
+	fmt.Fprintf(&cal, "ATTENDEE;CN=%s;ROLE=REQ-PARTICIPANT:mailto:%s\r\n", proposer, proposer)
+	cal.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
+
+	textBody := fmt.Sprintf("%s proposed a new time for: %s\r\nProposed: %s", proposer, e.Summary, e.Start)
+	boundary := "hermex-counter-" + randomHex()
+	var b strings.Builder
+	fmt.Fprintf(&b, "From: %s\r\n", proposer)
+	fmt.Fprintf(&b, "To: %s\r\n", addr)
+	fmt.Fprintf(&b, "Subject: Proposed new time: %s\r\n", e.Summary)
+	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))
+	fmt.Fprintf(&b, "Message-ID: <%s@hermex>\r\n", randomHex())
+	b.WriteString("MIME-Version: 1.0\r\n")
+	fmt.Fprintf(&b, "Content-Type: multipart/mixed; boundary=%q\r\n\r\n", boundary)
+	fmt.Fprintf(&b, "--%s\r\n", boundary)
+	b.WriteString("Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
+	b.WriteString(textBody)
+	b.WriteString("\r\n")
+	fmt.Fprintf(&b, "--%s\r\n", boundary)
+	b.WriteString("Content-Type: text/calendar; method=COUNTER; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
+	b.WriteString(cal.String())
+	fmt.Fprintf(&b, "\r\n--%s--\r\n", boundary)
+	return []byte(b.String()), nil
+}
+
+// handleProposeTime lets an invitee propose a new time for a meeting: it reads
+// the invite message for the original meeting identity + organizer, then emails a
+// METHOD:COUNTER iTIP to the organizer with the proposed start/end. The proposal
+// does not mutate the invitee's calendar (the organizer must accept the counter).
+func (s *Server) handleProposeTime(w http.ResponseWriter, r *http.Request) {
+	c, ok := s.session(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	var req struct {
+		ID    string `json:"id"`
+		Start string `json:"start"`
+		End   string `json:"end"`
+	}
+	if err := decodeJSON(r, &req); err != nil || req.ID == "" || req.Start == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	st, fid, uid, ok := s.locate(w, r, req.ID)
+	if !ok {
+		return
+	}
+	defer st.Close()
+	raw, err := st.GetMessageRaw(fid, uid)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	ics := findCalendarPart(mime.ParseStructure(raw))
+	if ics == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a meeting invite"})
+		return
+	}
+	e := icalToEvent(ics, 0)
+	e.Start = req.Start
+	e.End = req.End
+	organizer, _ := icalProp(ics, "ORGANIZER")
+	org := organizerAddress(organizer)
+	msg, berr := buildCounterRequest(c.Email, org, e)
+	if berr != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": berr.Error()})
+		return
+	}
+	if _, err := mta.DeliverAndRelay(s.accounts, s.spool, c.Email, []string{org}, msg, time.Now()); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delivery failed: " + err.Error()})
+		return
+	}
+	// File a Sent copy so the invitee sees the outgoing counter-proposal.
+	_, _ = st.AppendMessage(int64(mapi.PrivateFIDSentItems), msg, time.Now(), objectstore.FlagSeen)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "proposed"})
 }

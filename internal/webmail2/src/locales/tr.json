@@ -216,7 +216,12 @@
     "recallFailed": "Mesaj geri çekilemedi",
     "recover": "Geri yükle",
     "recovered": "{{folder}} klasörüne geri yüklendi",
-    "recoverFailed": "Mesaj geri yüklenemedi"
+    "recoverFailed": "Mesaj geri yüklenemedi",
+    "proposeNewTime": "Yeni zaman öner",
+    "proposeNewTimeHint": "Düzenleyiciye yeni bir zaman öner; bir karşı-teklif alırlar.",
+    "sendProposal": "Öneriyi gönder",
+    "proposedTime": "Karşı-teklif düzenleyiciye gönderildi",
+    "failedToPropose": "Karşı-teklif gönderilemedi"
   },
   "compose": {
     "invalidEmail": "Geçerli bir e-posta adresi girin",

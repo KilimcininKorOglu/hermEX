@@ -28,9 +28,18 @@ import {
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -126,6 +135,12 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
   const [invite, setInvite] = useState<MeetingInvite | null>(null)
   const [rsvpStatus, setRsvpStatus] = useState<string | null>(null)
   const [rsvpBusy, setRsvpBusy] = useState(false)
+  // Propose-new-time: a dialog where the invitee picks a proposed start/end and
+  // emails a METHOD:COUNTER iTIP to the organizer.
+  const [proposeOpen, setProposeOpen] = useState(false)
+  const [proposeStart, setProposeStart] = useState("")
+  const [proposeEnd, setProposeEnd] = useState("")
+  const [proposeBusy, setProposeBusy] = useState(false)
   // Category name → color, so labels render with their configured color.
   const [categoryColors, setCategoryColors] = useState<Record<string, string>>({})
   // Custom folders offered as copy-to targets, alongside the fixed built-ins.
@@ -435,6 +450,35 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
       toast.error(t("emailDetail.failedToRsvp"))
     } finally {
       setRsvpBusy(false)
+    }
+  }
+
+  // openPropose prefills the propose-new-time dialog with the invite's window.
+  const openPropose = () => {
+    if (!invite) return
+    const s = invite.start ? new Date(invite.start) : new Date()
+    const e = invite.end ? new Date(invite.end) : new Date(s.getTime() + 60 * 60 * 1000)
+    const pad = (n: number) => String(n).padStart(2, "0")
+    const toInput = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+    setProposeStart(toInput(s))
+    setProposeEnd(toInput(e))
+    setProposeOpen(true)
+  }
+
+  // handleProposeTime emails the counter-proposal to the organizer.
+  const handleProposeTime = async () => {
+    if (!email || !proposeStart) return
+    setProposeBusy(true)
+    try {
+      const start = new Date(proposeStart).toISOString()
+      const end = proposeEnd ? new Date(proposeEnd).toISOString() : new Date(new Date(proposeStart).getTime() + 60 * 60 * 1000).toISOString()
+      await api.proposeTime(email.id, start, end)
+      toast.success(t("emailDetail.proposedTime"))
+      setProposeOpen(false)
+    } catch {
+      toast.error(t("emailDetail.failedToPropose"))
+    } finally {
+      setProposeBusy(false)
     }
   }
 
@@ -824,9 +868,45 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                     <X className="mr-1 h-4 w-4" />
                     {t("emailDetail.decline")}
                   </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={openPropose}
+                    disabled={rsvpBusy}
+                  >
+                    {t("emailDetail.proposeNewTime")}
+                  </Button>
                 </div>
               </div>
             )}
+
+            {/* Propose new time dialog */}
+            <Dialog open={proposeOpen} onOpenChange={setProposeOpen}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>{t("emailDetail.proposeNewTime")}</DialogTitle>
+                  <DialogDescription>{t("emailDetail.proposeNewTimeHint")}</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3 py-2">
+                  <div className="space-y-1">
+                    <Label htmlFor="pt-start">{t("calendar.start")}</Label>
+                    <Input id="pt-start" type="datetime-local" value={proposeStart} onChange={(e) => setProposeStart(e.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label htmlFor="pt-end">{t("calendar.end")}</Label>
+                    <Input id="pt-end" type="datetime-local" value={proposeEnd} onChange={(e) => setProposeEnd(e.target.value)} />
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setProposeOpen(false)} disabled={proposeBusy}>
+                    {t("common.cancel")}
+                  </Button>
+                  <Button onClick={handleProposeTime} disabled={proposeBusy || !proposeStart}>
+                    {t("emailDetail.sendProposal")}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
 
             <Separator className="my-6" />
 

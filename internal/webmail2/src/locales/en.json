@@ -216,7 +216,12 @@
     "recallFailed": "Failed to recall the message",
     "recover": "Restore",
     "recovered": "Restored to {{folder}}",
-    "recoverFailed": "Failed to restore the message"
+    "recoverFailed": "Failed to restore the message",
+    "proposeNewTime": "Propose new time",
+    "proposeNewTimeHint": "Suggest a new time to the organizer; they receive a counter-proposal.",
+    "sendProposal": "Send proposal",
+    "proposedTime": "Counter-proposal sent to the organizer",
+    "failedToPropose": "Could not send the counter-proposal"
   },
   "compose": {
     "invalidEmail": "Enter a valid email address",

@@ -775,6 +775,12 @@ class API {
     return this.post<{ status: string }>('/mail/rsvp', { id, response })
   }
 
+  // proposeTime emails a METHOD:COUNTER iTIP to the organizer proposing a new
+  // start/end for the meeting the invite message carries.
+  async proposeTime(id: string, start: string, end: string): Promise<{ status: string }> {
+    return this.post<{ status: string }>('/mail/propose-time', { id, start, end })
+  }
+
   // getCategories returns the user's master category list (name + color).
   async getCategories(): Promise<{ categories?: Category[] }> {
     return this.get<{ categories?: Category[] }>('/categories')
