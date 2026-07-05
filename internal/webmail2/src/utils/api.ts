@@ -1293,6 +1293,12 @@ class API {
     return `${API_URL}/contacts/${encodeURIComponent(id)}/photo`
   }
 
+  // contactVCardUrl is the per-contact vCard download (text/vcard). Backend sets
+  // Content-Disposition attachment, so pointing an <a download> at it saves the .vcf.
+  contactVCardUrl(id: string): string {
+    return `${API_URL}/contacts/${encodeURIComponent(id)}/vcard`
+  }
+
   async uploadContactPhoto(id: string, file: File): Promise<void> {
     const form = new FormData()
     form.append('file', file)

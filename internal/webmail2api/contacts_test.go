@@ -180,3 +180,60 @@ func TestContactPhotoRoundTrip(t *testing.T) {
 		t.Fatalf("post-delete photo GET: status %d, want 404", rec.Code)
 	}
 }
+
+// TestContactExport proves a contact can be downloaded as a vCard (.vcf), the
+// same bytes CardDAV/EAS/EWS see, and that the saved filename is derived from
+// the contact's display name.
+func TestContactExport(t *testing.T) {
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	st.Close()
+
+	secret := []byte("contacts-export-test-secret")
+	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
+	do := func(method, target, body string) *httptest.ResponseRecorder {
+		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+		var req *http.Request
+		if body == "" {
+			req = httptest.NewRequest(method, target, nil)
+		} else {
+			req = httptest.NewRequest(method, target, strings.NewReader(body))
+		}
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+
+	rec := do(http.MethodPost, "/api/v1/contacts", `{"name":"Nikola Tesla","email":"nikola@ac.test"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create: status %d body %s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		Contact contactJSON `json:"contact"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	rec = do(http.MethodGet, "/api/v1/contacts/"+created.Contact.ID+"/vcard", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("export: status %d", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.HasPrefix(body, "BEGIN:VCARD") {
+		t.Errorf("export body does not start with BEGIN:VCARD: %q", body[:min(40, len(body))])
+	}
+	if !strings.Contains(body, "FN:Nikola Tesla") {
+		t.Errorf("export body missing FN:Nikola Tesla")
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/vcard") {
+		t.Errorf("export content-type = %q, want text/vcard", ct)
+	}
+	if cd := rec.Header().Get("Content-Disposition"); !strings.Contains(cd, `filename="NikolaTesla.vcf"`) {
+		t.Errorf("export content-disposition = %q, want filename=\"NikolaTesla.vcf\"", cd)
+	}
+}

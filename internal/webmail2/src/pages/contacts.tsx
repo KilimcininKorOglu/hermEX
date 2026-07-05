@@ -370,6 +370,16 @@ export function ContactsPage() {
     }
   }
 
+  // handleExport saves a contact as a .vcf download. The backend sets the
+  // attachment filename, so a hidden <a download> click triggers the save.
+  const handleExport = (contact: Contact) => {
+    const a = document.createElement("a")
+    a.href = api.contactVCardUrl(contact.id)
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  }
+
   const handleExportVCard = async () => {
     try {
       const res = await fetch("/api/v1/contacts/export", { credentials: "include" })
@@ -534,6 +544,12 @@ export function ContactsPage() {
                       <Edit className="h-4 w-4 mr-2" />
                       {t("common.edit")}
                     </DropdownMenuItem>
+                    {!contact.is_group && (
+                      <DropdownMenuItem onClick={() => handleExport(contact)}>
+                        <Download className="h-4 w-4 mr-2" />
+                        {t("contacts.exportVCard")}
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem
                       className="text-destructive"
                       onClick={() => setDeleteTarget(contact)}

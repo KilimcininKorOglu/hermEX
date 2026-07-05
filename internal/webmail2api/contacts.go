@@ -643,3 +643,47 @@ func (s *Server) handleDeleteContactPhoto(w http.ResponseWriter, r *http.Request
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
+
+// handleExportContact streams a contact as a vCard 4.0 download (.vcf). It uses
+// oxvcard's Export (the canonical CardDAV path), so the file a user saves here
+// is byte-identical to what CardDAV, EAS, and EWS see.
+func (s *Server) handleExportContact(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	st, _, ok := s.openStore(w, r)
+	if !ok {
+		return
+	}
+	defer st.Close()
+	msg, err := st.OpenMessage(id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such contact"})
+		return
+	}
+	vcf, err := oxvcard.Export(msg, oxvcard.Options{Resolver: st.GetNamedPropIDs})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not export"})
+		return
+	}
+	// Filename: the contact's display name, sanitized to a safe filename.
+	name := propString(msg, mapi.PrDisplayName)
+	if name == "" {
+		name = propString(msg, mapi.PrSubject)
+	}
+	var fb strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			fb.WriteRune(r)
+		}
+	}
+	filename := fb.String()
+	if filename == "" {
+		filename = "contact"
+	}
+	w.Header().Set("Content-Type", "text/vcard; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`.vcf"`)
+	_, _ = w.Write(vcf)
+}
