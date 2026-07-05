@@ -13,6 +13,8 @@ import {
   User,
   Download,
   Users,
+  LayoutGrid,
+  List as ListIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -75,6 +77,8 @@ export function ContactsPage() {
   // expandedGroups holds the ids of contact groups whose member list is shown
   // inline (expanddistlist: a distribution list expanded to its member addresses).
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
+  // contactView toggles between a row list and a card grid (ContactCardView).
+  const [contactView, setContactView] = useState<"list" | "grid">("list")
   const [editingContact, setEditingContact] = useState<Contact | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null)
   const [, setLoading] = useState(true)
@@ -321,9 +325,34 @@ export function ContactsPage() {
         <div className="space-y-6">
           {filteredContacts.length > 0 && (
             <div>
-              <h2 className="mb-2 px-1 text-sm font-semibold text-muted-foreground">
-                {t("contacts.myContacts")} ({filteredContacts.length})
-              </h2>
+              <div className="mb-2 flex items-center justify-between px-1">
+                <h2 className="text-sm font-semibold text-muted-foreground">
+                  {t("contacts.myContacts")} ({filteredContacts.length})
+                </h2>
+                <div className="flex rounded-md border">
+                  <Button variant={contactView === "list" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-r-none" onClick={() => setContactView("list")} aria-label={t("contacts.listView")}><ListIcon className="h-4 w-4" /></Button>
+                  <Button variant={contactView === "grid" ? "secondary" : "ghost"} size="icon" className="h-7 w-7 rounded-l-none" onClick={() => setContactView("grid")} aria-label={t("contacts.gridView")}><LayoutGrid className="h-4 w-4" /></Button>
+                </div>
+              </div>
+              {contactView === "grid" ? (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {filteredContacts.map((contact) => (
+                    <button
+                      key={contact.id}
+                      onClick={() => handleEdit(contact)}
+                      className="flex flex-col items-center gap-2 rounded-lg border bg-card p-4 text-center hover:bg-accent/50 transition-colors"
+                    >
+                      <Avatar className="h-12 w-12">
+                        <AvatarFallback className="bg-gradient-to-br from-primary to-primary/80 text-primary-foreground font-semibold">
+                          {contact.is_group ? <Users className="h-5 w-5" /> : getInitials(contact.name)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="font-medium truncate w-full">{contact.name}</span>
+                      <span className="text-xs text-muted-foreground truncate w-full">{contact.is_group ? `${(contact.members || []).length} ${t("contacts.membersCount")}` : contact.email}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
               <div className="rounded-lg border bg-card">
           {filteredContacts.map((contact, index) => (
             <div key={contact.id}>
@@ -421,6 +450,7 @@ export function ContactsPage() {
             </div>
           ))}
               </div>
+              )}
             </div>
           )}
           {filteredGal.length > 0 && (

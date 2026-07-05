@@ -928,7 +928,9 @@
     "homePostal": "Postal code",
     "homeCountry": "Country",
     "expand": "Expand",
-    "collapse": "Collapse"
+    "collapse": "Collapse",
+    "listView": "List view",
+    "gridView": "Grid view"
   },
   "tasks": {
     "quickAddPlaceholder": "Add a task and press Enter",

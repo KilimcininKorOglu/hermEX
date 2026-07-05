@@ -928,7 +928,9 @@
     "homePostal": "Posta kodu",
     "homeCountry": "Ülke",
     "expand": "Genişlet",
-    "collapse": "Daralt"
+    "collapse": "Daralt",
+    "listView": "Liste görünümü",
+    "gridView": "Izgara görünümü"
   },
   "tasks": {
     "quickAddPlaceholder": "Bir görev ekleyin ve Enter'a basın",
