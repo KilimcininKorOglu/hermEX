@@ -37,6 +37,7 @@ type eventJSON struct {
 	Sensitivity     *int     `json:"sensitivity,omitempty"`  // PR_SENSITIVITY: 0=normal, 2=private, 3=confidential (round-trips via iCal CLASS)
 	Categories      []string `json:"categories,omitempty"`   // PidNameKeywords, the shared category list (store GetCategories/SetCategories)
 	Attendees       []string `json:"attendees,omitempty"`    // smtp addresses; emitted as ATTENDEE so oxcical stores them as recipients
+	OptionalAttendees []string `json:"optionalAttendees,omitempty"` // optional attendees (ROLE=OPT-PARTICIPANT); required default for Attendees
 	SendInvite      bool     `json:"sendInvite,omitempty"`   // when true on create, email a METHOD:REQUEST iTIP invite to the attendees
 	Tracking        []attendeeStatusJSON `json:"tracking,omitempty"` // per-attendee response status (the organizer's TrackingTab), read from the recipients' PidLidResponseStatus
 }
@@ -219,6 +220,9 @@ func buildICal(e eventJSON) []byte {
 	}
 	for _, a := range e.Attendees {
 		fmt.Fprintf(&b, "ATTENDEE;CN=%s;ROLE=REQ-PARTICIPANT:mailto:%s\r\n", a, a)
+	}
+	for _, a := range e.OptionalAttendees {
+		fmt.Fprintf(&b, "ATTENDEE;CN=%s;ROLE=OPT-PARTICIPANT:mailto:%s\r\n", a, a)
 	}
 	if e.Description != "" {
 		fmt.Fprintf(&b, "DESCRIPTION:%s\r\n", e.Description)
@@ -629,21 +633,30 @@ func (s *Server) handleDeleteCalendar(w http.ResponseWriter, r *http.Request) {
 // serves). The organizer is the authenticated sender. It returns the raw MIME and
 // the deduplicated attendee address list (the recipients).
 func buildMeetingRequest(organizer string, e eventJSON) ([]byte, []string, error) {
-	// Recipients: dedup the attendee addresses, parsed to bare smtp.
-	recipients := make([]string, 0, len(e.Attendees))
+	// Recipients: dedup the attendee addresses (required + optional), parsed to
+	// bare smtp; optionalSet marks the OPT-PARTICIPANT roles.
+	recipients := make([]string, 0, len(e.Attendees)+len(e.OptionalAttendees))
+	optionalSet := map[string]bool{}
 	seen := map[string]bool{}
-	for _, a := range e.Attendees {
-		addr := strings.TrimSpace(a)
-		if parsed, err := mail.ParseAddress(addr); err == nil {
-			addr = parsed.Address
+	add := func(list []string, optional bool) {
+		for _, a := range list {
+			addr := strings.TrimSpace(a)
+			if parsed, err := mail.ParseAddress(addr); err == nil {
+				addr = parsed.Address
+			}
+			addr = strings.ToLower(addr)
+			if addr == "" || seen[addr] || addr == strings.ToLower(organizer) {
+				continue
+			}
+			seen[addr] = true
+			if optional {
+				optionalSet[addr] = true
+			}
+			recipients = append(recipients, addr)
 		}
-		addr = strings.ToLower(addr)
-		if addr == "" || seen[addr] || addr == strings.ToLower(organizer) {
-			continue
-		}
-		seen[addr] = true
-		recipients = append(recipients, addr)
 	}
+	add(e.Attendees, false)
+	add(e.OptionalAttendees, true)
 	if len(recipients) == 0 {
 		return nil, nil, fmt.Errorf("no attendees")
 	}
@@ -662,7 +675,11 @@ func buildMeetingRequest(organizer string, e eventJSON) ([]byte, []string, error
 	}
 	fmt.Fprintf(&cal, "ORGANIZER;CN=%s:mailto:%s\r\n", organizer, organizer)
 	for _, a := range recipients {
-		fmt.Fprintf(&cal, "ATTENDEE;CN=%s;ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:%s\r\n", a, a)
+		role := "REQ-PARTICIPANT"
+		if optionalSet[a] {
+			role = "OPT-PARTICIPANT"
+		}
+		fmt.Fprintf(&cal, "ATTENDEE;CN=%s;ROLE=%s;RSVP=TRUE:mailto:%s\r\n", a, role, a)
 	}
 	cal.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
 

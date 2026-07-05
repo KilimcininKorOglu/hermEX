@@ -130,6 +130,7 @@ export interface CalendarEvent {
   allDay?: boolean
   organizer?: string
   attendees?: string[]
+  optionalAttendees?: string[] // OPT-PARTICIPANT attendees (required/optional distinction)
   recurrence?: string // raw RRULE value, e.g. "FREQ=WEEKLY"
   timezone?: string // IANA zone anchoring civil start/end (recurrence DST safety)
   reminderMinutes?: number // reminder lead time in minutes (VALARM); absent/0 = none

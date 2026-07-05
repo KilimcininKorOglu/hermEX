@@ -755,7 +755,8 @@
     "respNone": "No response",
     "respTentative": "Tentative",
     "respAccepted": "Accepted",
-    "respDeclined": "Declined"
+    "respDeclined": "Declined",
+    "optionalAttendees": "Optional attendees"
   },
   "filters": {
     "description": "Sort and act on incoming mail automatically",

@@ -69,6 +69,7 @@ interface EventForm {
   location: string
   description: string
   attendees: string
+  optionalAttendees: string // comma/space-separated optional attendee addresses (OPT-PARTICIPANT)
   recurrence: string // "" | DAILY | WEEKLY | MONTHLY | YEARLY
   calendarId: string // target calendar ("calendar" = default)
   reminder: string // "" = none, else a minute offset ("15", "30", "60", ...)
@@ -78,7 +79,7 @@ interface EventForm {
   sendInvite: boolean // email a METHOD:REQUEST invite to attendees on create
 }
 
-const emptyForm: EventForm = { summary: "", start: "", end: "", allDay: false, location: "", description: "", attendees: "", recurrence: "", calendarId: "calendar", reminder: "", busyStatus: "", sensitivity: "", categories: [], sendInvite: false }
+const emptyForm: EventForm = { summary: "", start: "", end: "", allDay: false, location: "", description: "", attendees: "", optionalAttendees: "", recurrence: "", calendarId: "calendar", reminder: "", busyStatus: "", sensitivity: "", categories: [], sendInvite: false }
 
 // recurrenceToForm maps a stored RRULE value to the form's frequency selector.
 function recurrenceToForm(rrule?: string): string {
@@ -398,6 +399,7 @@ export function CalendarPage() {
       location: ev.location ?? "",
       description: ev.description ?? "",
       attendees: (ev.attendees ?? []).join(", "),
+      optionalAttendees: (ev.optionalAttendees ?? []).join(", "),
       recurrence: recurrenceToForm(ev.recurrence),
       calendarId: ev.calendarId ?? "calendar",
       reminder: ev.reminderMinutes ? String(ev.reminderMinutes) : "",
@@ -422,6 +424,10 @@ export function CalendarPage() {
       .split(/[\s,;]+/)
       .map((a) => a.trim())
       .filter(Boolean)
+    const optionalAttendees = form.optionalAttendees
+      .split(/[\s,;]+/)
+      .map((a) => a.trim())
+      .filter(Boolean)
     const payload = {
       summary: form.summary.trim(),
       start: form.allDay ? form.start : localInputToRFC3339(form.start),
@@ -430,6 +436,7 @@ export function CalendarPage() {
       location: form.location || undefined,
       description: form.description || undefined,
       attendees: attendees.length > 0 ? attendees : undefined,
+      optionalAttendees: optionalAttendees.length > 0 ? optionalAttendees : undefined,
       recurrence: form.recurrence ? `FREQ=${form.recurrence}` : undefined,
       calendarId: form.calendarId || "calendar",
       reminderMinutes: form.reminder ? Number(form.reminder) : undefined,
@@ -1214,6 +1221,23 @@ export function CalendarPage() {
               <p className="text-xs text-muted-foreground">
                 {t("calendar.attendeesHint")}
               </p>
+              {/* Optional attendees (OPT-PARTICIPANT): a separate picker so the
+                  organizer can distinguish required from optional invitees. */}
+              <Label className="pt-1 text-xs text-muted-foreground">{t("calendar.optionalAttendees")}</Label>
+              <AttendeePicker
+                value={parseAttendees(form.optionalAttendees)}
+                onChange={(emails) => setForm({ ...form, optionalAttendees: emails.join(", ") })}
+                window={
+                  form.start && !form.allDay
+                    ? {
+                        start: localInputToRFC3339(form.start),
+                        end: form.end
+                          ? localInputToRFC3339(form.end)
+                          : new Date(new Date(form.start).getTime() + 60 * 60 * 1000).toISOString(),
+                      }
+                    : undefined
+                }
+              />
               {/* Send a METHOD:REQUEST meeting invite to the attendees on create. */}
               <div className="flex items-center justify-between pt-1">
                 <Label htmlFor="ev-invite" className="text-sm font-normal cursor-pointer">

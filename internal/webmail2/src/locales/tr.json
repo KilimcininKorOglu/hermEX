@@ -755,7 +755,8 @@
     "respNone": "Yanıt yok",
     "respTentative": "Tentatif",
     "respAccepted": "Kabul",
-    "respDeclined": "Reddedildi"
+    "respDeclined": "Reddedildi",
+    "optionalAttendees": "İsteğe bağlı katılımcılar"
   },
   "filters": {
     "description": "Gelen postaları otomatik olarak sırala ve işle",
