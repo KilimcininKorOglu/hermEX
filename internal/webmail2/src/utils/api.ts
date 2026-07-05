@@ -524,6 +524,7 @@ export interface Contact {
   fileAs?: string // PidLidFileAs (PSETID_Address named prop)
   profession?: string // PrProfession (vCard ROLE)
   spouse?: string // PrSpouseName
+  categories?: string[] // PidNameKeywords, the shared category list
   homeStreet?: string
   homeCity?: string
   homeState?: string

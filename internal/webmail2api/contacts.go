@@ -53,6 +53,7 @@ type contactJSON struct {
 	Assistant   string   `json:"assistant,omitempty"`   // PrAssistant
 	Manager     string   `json:"manager,omitempty"`     // PrManagerName
 	Office      string   `json:"office,omitempty"`      // PrOfficeLocation
+	Categories  []string `json:"categories,omitempty"`  // PidNameKeywords, shared category list
 	IsGroup     bool     `json:"is_group,omitempty"`
 	Members     []string `json:"members,omitempty"`
 }
@@ -291,6 +292,9 @@ func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 			Anniversary: anniversaryOf(msg),
 			Billing:     billingOf(st, msg),
 		})
+		if cats, err := st.GetCategories(o.ID); err == nil && len(cats) > 0 {
+			contacts[len(contacts)-1].Categories = cats
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"contacts": contacts, "total": len(contacts)})
 }
@@ -376,6 +380,9 @@ func storeContact(st *objectstore.Store, c contactJSON) (int64, error) {
 	// oxvcard's vCard path does not carry anniversary/assistant/manager/office, so
 	// set them directly as MAPI props after the import (the organizer's rich fields).
 	setRichContactProps(st, id, c)
+	// Categories ride the shared PidNameKeywords named prop (the same list every
+	// protocol reads). Empty list clears any prior categories on a replace.
+	_ = st.SetCategories(id, c.Categories)
 	return id, nil
 }
 

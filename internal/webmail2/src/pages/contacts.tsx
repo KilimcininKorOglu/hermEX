@@ -62,6 +62,7 @@ interface Contact {
   fileAs?: string
   profession?: string
   spouse?: string
+  categories?: string[]
   homeStreet?: string
   homeCity?: string
   homeState?: string
@@ -102,6 +103,9 @@ export function ContactsPage() {
   const [photoVersion, setPhotoVersion] = useState(0)
   const [photoError, setPhotoError] = useState(false)
   const [photoBusy, setPhotoBusy] = useState(false)
+  // allCategories is the user's master category list (name + color), loaded once
+  // so contacts can tag onto the same PidNameKeywords list the calendar uses.
+  const [allCategories, setAllCategories] = useState<{ name: string; color?: string }[]>([])
   const [, setLoading] = useState(true)
   const [formData, setFormData] = useState({
     name: "",
@@ -121,6 +125,7 @@ export function ContactsPage() {
     fileAs: "",
     profession: "",
     spouse: "",
+    categories: [] as string[],
     homeStreet: "",
     homeCity: "",
     homeState: "",
@@ -143,6 +148,9 @@ export function ContactsPage() {
   // Load contacts from API on mount
   useEffect(() => {
     loadContacts()
+    api.getCategories()
+      .then((res) => setAllCategories(res.categories ?? []))
+      .catch(() => setAllCategories([]))
   }, [])
 
   const loadContacts = async () => {
@@ -187,7 +195,7 @@ export function ContactsPage() {
   const filteredGal = galEntries.filter((e) => matchesSearch(e.name || "", e.email))
 
   const handleAdd = () => {
-    setFormData({ name: "", email: "", email2: "", email3: "", phone: "", company: "", jobTitle: "", department: "", mobilePhone: "", homePhone: "", birthday: "", anniversary: "", billing: "", nickname: "", fileAs: "", profession: "", spouse: "", homeStreet: "", homeCity: "", homeState: "", homePostal: "", homeCountry: "", workStreet: "", workCity: "", workState: "", workPostal: "", workCountry: "", imAddress: "", webPage: "", assistant: "", manager: "", office: "", is_group: false, members: "" })
+    setFormData({ name: "", email: "", email2: "", email3: "", phone: "", company: "", jobTitle: "", department: "", mobilePhone: "", homePhone: "", birthday: "", anniversary: "", billing: "", nickname: "", fileAs: "", profession: "", spouse: "", categories: [], homeStreet: "", homeCity: "", homeState: "", homePostal: "", homeCountry: "", workStreet: "", workCity: "", workState: "", workPostal: "", workCountry: "", imAddress: "", webPage: "", assistant: "", manager: "", office: "", is_group: false, members: "" })
     setEditingContact(null)
     setPhotoError(false)
     setShowAddDialog(true)
@@ -212,6 +220,7 @@ export function ContactsPage() {
       fileAs: contact.fileAs || "",
       profession: contact.profession || "",
       spouse: contact.spouse || "",
+      categories: contact.categories || [],
       homeStreet: contact.homeStreet || "",
       homeCity: contact.homeCity || "",
       homeState: contact.homeState || "",
@@ -792,6 +801,39 @@ export function ContactsPage() {
                     <label className="text-sm font-medium">{t("contacts.spouse")}</label>
                     <Input className="mt-1" value={formData.spouse} onChange={(e) => setFormData({ ...formData, spouse: e.target.value })} />
                   </div>
+                  {allCategories.length > 0 && !formData.is_group && (
+                    <div className="col-span-2 space-y-2">
+                      <label className="text-sm font-medium">{t("contacts.categories")}</label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {allCategories.map((cat) => {
+                          const on = formData.categories.includes(cat.name)
+                          return (
+                            <button
+                              key={cat.name}
+                              type="button"
+                              className="rounded-full border px-2.5 py-0.5 text-xs transition-colors"
+                              style={{
+                                borderColor: cat.color ?? "#3b82f6",
+                                color: cat.color ?? "#3b82f6",
+                                backgroundColor: on ? `${cat.color ?? "#3b82f6"}15` : "transparent",
+                                opacity: on ? 1 : 0.5,
+                              }}
+                              onClick={() =>
+                                setFormData((prev) => ({
+                                  ...prev,
+                                  categories: on
+                                    ? prev.categories.filter((c) => c !== cat.name)
+                                    : [...prev.categories, cat.name],
+                                }))
+                              }
+                            >
+                              {cat.name}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
                   <div>
                     <label className="text-sm font-medium">{t("contacts.imAddress")}</label>
                     <Input className="mt-1" value={formData.imAddress} onChange={(e) => setFormData({ ...formData, imAddress: e.target.value })} />

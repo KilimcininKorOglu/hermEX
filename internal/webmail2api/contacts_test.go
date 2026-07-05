@@ -42,7 +42,7 @@ func TestContactRichFieldsRoundTrip(t *testing.T) {
 		return rec
 	}
 
-	body := `{"name":"Ada Lovelace","email":"ada@analytical.test","email2":"ada@home.test","email3":"ada@academy.test","phone":"+1 555 0100","mobilePhone":"+1 555 0101","homePhone":"+1 555 0102","company":"Analytical Engine","jobTitle":"Mathematician","department":"Science","birthday":"1815-12-10","nickname":"Ada","fileAs":"Lovelace, Ada","profession":"Mathematician","spouse":"Charles","billing":"Project X-1815","homeStreet":"221B Baker St","homeCity":"London","homeState":"","homePostal":"NW1","homeCountry":"UK","imAddress":"ada@im.test","webPage":"https://example.test/ada"}`
+	body := `{"name":"Ada Lovelace","email":"ada@analytical.test","email2":"ada@home.test","email3":"ada@academy.test","phone":"+1 555 0100","mobilePhone":"+1 555 0101","homePhone":"+1 555 0102","company":"Analytical Engine","jobTitle":"Mathematician","department":"Science","birthday":"1815-12-10","nickname":"Ada","fileAs":"Lovelace, Ada","profession":"Mathematician","spouse":"Charles","billing":"Project X-1815","categories":["VIP","Pioneers"],"homeStreet":"221B Baker St","homeCity":"London","homeState":"","homePostal":"NW1","homeCountry":"UK","imAddress":"ada@im.test","webPage":"https://example.test/ada"}`
 	if rec := do(http.MethodPost, "/api/v1/contacts", body); rec.Code != http.StatusOK {
 		t.Fatalf("create: status %d body %s", rec.Code, rec.Body.String())
 	}
@@ -84,6 +84,10 @@ func TestContactRichFieldsRoundTrip(t *testing.T) {
 		if checks[k] != w {
 			t.Errorf("%s = %q, want %q", k, checks[k], w)
 		}
+	}
+	// Categories ride the shared PidNameKeywords multi-value named prop.
+	if len(c.Categories) != 2 || c.Categories[0] != "VIP" || c.Categories[1] != "Pioneers" {
+		t.Errorf("categories = %v, want [VIP Pioneers]", c.Categories)
 	}
 }
 

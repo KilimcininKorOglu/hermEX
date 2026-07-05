@@ -951,7 +951,8 @@
     "nickname": "Nickname",
     "fileAs": "File as",
     "profession": "Profession",
-    "spouse": "Spouse/Partner"
+    "spouse": "Spouse/Partner",
+    "categories": "Categories"
   },
   "tasks": {
     "quickAddPlaceholder": "Add a task and press Enter",

@@ -951,7 +951,8 @@
     "nickname": "Takma ad",
     "fileAs": "Dosyalama adı",
     "profession": "Meslek",
-    "spouse": "Eş/Partner"
+    "spouse": "Eş/Partner",
+    "categories": "Kategoriler"
   },
   "tasks": {
     "quickAddPlaceholder": "Bir görev ekleyin ve Enter'a basın",
