@@ -914,7 +914,19 @@
     "membersCount": "üye",
     "nameRequired": "İsim gereklidir",
     "emailRequired": "E-posta gereklidir",
-    "membersRequired": "En az bir üye gereklidir"
+    "membersRequired": "En az bir üye gereklidir",
+    "jobTitle": "Ünvan",
+    "department": "Departman",
+    "mobilePhone": "Cep telefonu",
+    "homePhone": "Ev telefonu",
+    "birthday": "Doğum günü",
+    "imAddress": "IM adresi",
+    "webPage": "Web sayfası",
+    "homeStreet": "Sokak",
+    "homeCity": "Şehir",
+    "homeState": "Eyalet",
+    "homePostal": "Posta kodu",
+    "homeCountry": "Ülke"
   },
   "tasks": {
     "quickAddPlaceholder": "Bir görev ekleyin ve Enter'a basın",

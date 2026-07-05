@@ -46,6 +46,18 @@ interface Contact {
   email: string
   phone?: string
   company?: string
+  jobTitle?: string
+  department?: string
+  mobilePhone?: string
+  homePhone?: string
+  birthday?: string
+  homeStreet?: string
+  homeCity?: string
+  homeState?: string
+  homePostal?: string
+  homeCountry?: string
+  imAddress?: string
+  webPage?: string
   labels: string[]
   is_group?: boolean
   members?: string[]
@@ -67,6 +79,18 @@ export function ContactsPage() {
     email: "",
     phone: "",
     company: "",
+    jobTitle: "",
+    department: "",
+    mobilePhone: "",
+    homePhone: "",
+    birthday: "",
+    homeStreet: "",
+    homeCity: "",
+    homeState: "",
+    homePostal: "",
+    homeCountry: "",
+    imAddress: "",
+    webPage: "",
     is_group: false,
     members: "",
   })
@@ -118,7 +142,7 @@ export function ContactsPage() {
   const filteredGal = galEntries.filter((e) => matchesSearch(e.name || "", e.email))
 
   const handleAdd = () => {
-    setFormData({ name: "", email: "", phone: "", company: "", is_group: false, members: "" })
+    setFormData({ name: "", email: "", phone: "", company: "", jobTitle: "", department: "", mobilePhone: "", homePhone: "", birthday: "", homeStreet: "", homeCity: "", homeState: "", homePostal: "", homeCountry: "", imAddress: "", webPage: "", is_group: false, members: "" })
     setEditingContact(null)
     setShowAddDialog(true)
   }
@@ -129,6 +153,18 @@ export function ContactsPage() {
       email: contact.email || "",
       phone: contact.phone || "",
       company: contact.company || "",
+      jobTitle: contact.jobTitle || "",
+      department: contact.department || "",
+      mobilePhone: contact.mobilePhone || "",
+      homePhone: contact.homePhone || "",
+      birthday: contact.birthday || "",
+      homeStreet: contact.homeStreet || "",
+      homeCity: contact.homeCity || "",
+      homeState: contact.homeState || "",
+      homePostal: contact.homePostal || "",
+      homeCountry: contact.homeCountry || "",
+      imAddress: contact.imAddress || "",
+      webPage: contact.webPage || "",
       is_group: contact.is_group || false,
       members: (contact.members || []).join(", "),
     })
@@ -165,11 +201,7 @@ export function ContactsPage() {
       if (editingContact) {
         // Update existing contact
         const result = await api.updateContact(editingContact.id, {
-          name: formData.name,
-          email: formData.email,
-          phone: formData.phone,
-          company: formData.company,
-          is_group: formData.is_group,
+          ...formData,
           members,
         })
         if (result.contact) {
@@ -183,11 +215,7 @@ export function ContactsPage() {
       } else {
         // Create new contact
         const result = await api.createContact({
-          name: formData.name,
-          email: formData.email,
-          phone: formData.phone,
-          company: formData.company,
-          is_group: formData.is_group,
+          ...formData,
           members,
         })
         if (result.contact) {
@@ -495,6 +523,58 @@ export function ContactsPage() {
                     value={formData.company}
                     onChange={(e) => setFormData({ ...formData, company: e.target.value })}
                   />
+                </div>
+                {/* Rich contact fields: job title, department, more phones, birthday,
+                    home address, IM, web page. They round-trip through vCard. */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.jobTitle")}</label>
+                    <Input className="mt-1" value={formData.jobTitle} onChange={(e) => setFormData({ ...formData, jobTitle: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.department")}</label>
+                    <Input className="mt-1" value={formData.department} onChange={(e) => setFormData({ ...formData, department: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.mobilePhone")}</label>
+                    <Input className="mt-1" value={formData.mobilePhone} onChange={(e) => setFormData({ ...formData, mobilePhone: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.homePhone")}</label>
+                    <Input className="mt-1" value={formData.homePhone} onChange={(e) => setFormData({ ...formData, homePhone: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.birthday")}</label>
+                    <Input className="mt-1" type="date" value={formData.birthday} onChange={(e) => setFormData({ ...formData, birthday: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.imAddress")}</label>
+                    <Input className="mt-1" value={formData.imAddress} onChange={(e) => setFormData({ ...formData, imAddress: e.target.value })} />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-sm font-medium">{t("contacts.webPage")}</label>
+                    <Input className="mt-1" value={formData.webPage} onChange={(e) => setFormData({ ...formData, webPage: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.homeStreet")}</label>
+                    <Input className="mt-1" value={formData.homeStreet} onChange={(e) => setFormData({ ...formData, homeStreet: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.homeCity")}</label>
+                    <Input className="mt-1" value={formData.homeCity} onChange={(e) => setFormData({ ...formData, homeCity: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.homeState")}</label>
+                    <Input className="mt-1" value={formData.homeState} onChange={(e) => setFormData({ ...formData, homeState: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.homePostal")}</label>
+                    <Input className="mt-1" value={formData.homePostal} onChange={(e) => setFormData({ ...formData, homePostal: e.target.value })} />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-sm font-medium">{t("contacts.homeCountry")}</label>
+                    <Input className="mt-1" value={formData.homeCountry} onChange={(e) => setFormData({ ...formData, homeCountry: e.target.value })} />
+                  </div>
                 </div>
               </>
             )}

@@ -511,6 +511,18 @@ export interface Contact {
   email: string
   phone?: string
   company?: string
+  jobTitle?: string
+  department?: string
+  mobilePhone?: string
+  homePhone?: string
+  birthday?: string // YYYY-MM-DD
+  homeStreet?: string
+  homeCity?: string
+  homeState?: string
+  homePostal?: string
+  homeCountry?: string
+  imAddress?: string
+  webPage?: string
   labels?: string[]
   display_as?: string
   is_group?: boolean

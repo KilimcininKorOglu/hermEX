@@ -914,7 +914,19 @@
     "membersCount": "members",
     "nameRequired": "Name is required",
     "emailRequired": "Email is required",
-    "membersRequired": "At least one member is required"
+    "membersRequired": "At least one member is required",
+    "jobTitle": "Job title",
+    "department": "Department",
+    "mobilePhone": "Mobile phone",
+    "homePhone": "Home phone",
+    "birthday": "Birthday",
+    "imAddress": "IM address",
+    "webPage": "Web page",
+    "homeStreet": "Street",
+    "homeCity": "City",
+    "homeState": "State",
+    "homePostal": "Postal code",
+    "homeCountry": "Country"
   },
   "tasks": {
     "quickAddPlaceholder": "Add a task and press Enter",
