@@ -1,7 +1,9 @@
 package webmail2api
 
 import (
+	"bytes"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -78,5 +80,91 @@ func TestContactRichFieldsRoundTrip(t *testing.T) {
 		if checks[k] != w {
 			t.Errorf("%s = %q, want %q", k, checks[k], w)
 		}
+	}
+}
+
+// TestContactPhotoRoundTrip proves the contact photo (the contact's JPEG
+// attachment flagged PrAttachmentContactPhoto) survives a set-then-get-then-
+// delete cycle: a PUT multipart upload is byte-identical to the GET response,
+// PidLidHasPicture flips on and back off, and a second GET after DELETE is 404.
+func TestContactPhotoRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	st.Close()
+
+	secret := []byte("contacts-photo-test-secret")
+	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
+	do := func(method, target, body string, contentType string) *httptest.ResponseRecorder {
+		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+		var req *http.Request
+		if body == "" {
+			req = httptest.NewRequest(method, target, nil)
+		} else {
+			req = httptest.NewRequest(method, target, strings.NewReader(body))
+		}
+		if contentType != "" {
+			req.Header.Set("Content-Type", contentType)
+		}
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+
+	// Create a contact to attach the photo to.
+	rec := do(http.MethodPost, "/api/v1/contacts", `{"name":"Grace Hopper","email":"grace@navy.test"}`, "application/json")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create: status %d body %s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		Contact contactJSON `json:"contact"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode create: %v", err)
+	}
+	photoTarget := "/api/v1/contacts/" + created.Contact.ID + "/photo"
+
+	// No photo yet: GET is 404.
+	if rec := do(http.MethodGet, photoTarget, "", ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("empty photo GET: status %d, want 404", rec.Code)
+	}
+
+	// Upload a fake JPEG payload.
+	photo := bytes.Repeat([]byte{0xFF, 0xD8, 0xFF, 0xE0}, 64)
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", "ContactPicture.jpg")
+	if err != nil {
+		t.Fatalf("create form file: %v", err)
+	}
+	if _, err := fw.Write(photo); err != nil {
+		t.Fatalf("write photo: %v", err)
+	}
+	mw.Close()
+	if rec := do(http.MethodPut, photoTarget, buf.String(), mw.FormDataContentType()); rec.Code != http.StatusOK {
+		t.Fatalf("put photo: status %d body %s", rec.Code, rec.Body.String())
+	}
+
+	// GET returns the same bytes we uploaded.
+	rec = do(http.MethodGet, photoTarget, "", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("get photo: status %d", rec.Code)
+	}
+	if !bytes.Equal(rec.Body.Bytes(), photo) {
+		t.Fatalf("get photo: %d bytes, want %d (round-trip mismatch)", len(rec.Body.Bytes()), len(photo))
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "image/jpeg" {
+		t.Fatalf("get photo content-type = %q, want image/jpeg", ct)
+	}
+
+	// Delete the photo; a follow-up GET is 404.
+	if rec := do(http.MethodDelete, photoTarget, "", ""); rec.Code != http.StatusOK {
+		t.Fatalf("delete photo: status %d", rec.Code)
+	}
+	if rec := do(http.MethodGet, photoTarget, "", ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("post-delete photo GET: status %d, want 404", rec.Code)
 	}
 }

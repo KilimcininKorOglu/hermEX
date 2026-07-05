@@ -940,7 +940,12 @@
     "manager": "Manager",
     "office": "Office",
     "anniversary": "Anniversary",
-    "billing": "Billing"
+    "billing": "Billing",
+    "changePhoto": "Change photo",
+    "removePhoto": "Remove photo",
+    "photoUpdated": "Photo updated",
+    "photoRemoved": "Photo removed",
+    "photoUpdateFailed": "Could not update photo"
   },
   "tasks": {
     "quickAddPlaceholder": "Add a task and press Enter",

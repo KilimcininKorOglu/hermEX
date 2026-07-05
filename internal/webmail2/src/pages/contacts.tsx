@@ -91,6 +91,11 @@ export function ContactsPage() {
   const [contactView, setContactView] = useState<"list" | "grid">("list")
   const [editingContact, setEditingContact] = useState<Contact | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null)
+  // photoVersion cache-busts the contact's photo avatar after an upload or
+  // delete so the <img> reloads without a page refresh.
+  const [photoVersion, setPhotoVersion] = useState(0)
+  const [photoError, setPhotoError] = useState(false)
+  const [photoBusy, setPhotoBusy] = useState(false)
   const [, setLoading] = useState(true)
   const [formData, setFormData] = useState({
     name: "",
@@ -172,6 +177,7 @@ export function ContactsPage() {
   const handleAdd = () => {
     setFormData({ name: "", email: "", phone: "", company: "", jobTitle: "", department: "", mobilePhone: "", homePhone: "", birthday: "", anniversary: "", billing: "", homeStreet: "", homeCity: "", homeState: "", homePostal: "", homeCountry: "", workStreet: "", workCity: "", workState: "", workPostal: "", workCountry: "", imAddress: "", webPage: "", assistant: "", manager: "", office: "", is_group: false, members: "" })
     setEditingContact(null)
+    setPhotoError(false)
     setShowAddDialog(true)
   }
 
@@ -207,7 +213,41 @@ export function ContactsPage() {
       members: (contact.members || []).join(", "),
     })
     setEditingContact(contact)
+    setPhotoError(false)
+    setPhotoVersion((v) => v + 1)
     setShowAddDialog(true)
+  }
+
+  // handlePhotoUpload replaces the contact's photo with the chosen file, then
+  // cache-busts the avatar so the new image renders immediately.
+  const handlePhotoUpload = async (file: File) => {
+    if (!editingContact) return
+    setPhotoBusy(true)
+    try {
+      await api.uploadContactPhoto(editingContact.id, file)
+      setPhotoError(false)
+      setPhotoVersion((v) => v + 1)
+      toast.success(t("contacts.photoUpdated"))
+    } catch {
+      toast.error(t("contacts.photoUpdateFailed"))
+    } finally {
+      setPhotoBusy(false)
+    }
+  }
+
+  const handlePhotoDelete = async () => {
+    if (!editingContact) return
+    setPhotoBusy(true)
+    try {
+      await api.deleteContactPhoto(editingContact.id)
+      setPhotoError(true)
+      setPhotoVersion((v) => v + 1)
+      toast.success(t("contacts.photoRemoved"))
+    } catch {
+      toast.error(t("contacts.photoUpdateFailed"))
+    } finally {
+      setPhotoBusy(false)
+    }
   }
 
   const handleSave = async () => {
@@ -548,6 +588,50 @@ export function ContactsPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
+            {/* Contact photo (edit only; a new contact has no id yet). Avatar
+                loads the photo URL with a cache-busting version so an upload or
+                delete re-renders without a page refresh. */}
+            {editingContact && !formData.is_group && (
+              <div className="flex items-center gap-4">
+                <Avatar className="h-16 w-16">
+                  {!photoError ? (
+                    <img
+                      src={api.contactPhotoUrl(editingContact.id) + "?v=" + photoVersion}
+                      alt={formData.name}
+                      className="h-full w-full rounded-full object-cover"
+                      onError={() => setPhotoError(true)}
+                    />
+                  ) : null}
+                  <AvatarFallback>{formData.name?.charAt(0)?.toUpperCase() || "?"}</AvatarFallback>
+                </Avatar>
+                <div className="flex flex-col gap-1">
+                  <label className="inline-flex cursor-pointer text-sm text-primary hover:underline">
+                    <span>{t("contacts.changePhoto")}</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      disabled={photoBusy}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0]
+                        if (f) handlePhotoUpload(f)
+                        e.target.value = ""
+                      }}
+                    />
+                  </label>
+                  {!photoError && (
+                    <button
+                      type="button"
+                      className="text-left text-sm text-destructive hover:underline disabled:opacity-50"
+                      disabled={photoBusy}
+                      onClick={handlePhotoDelete}
+                    >
+                      {t("contacts.removePhoto")}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
             <div>
               <label className="text-sm font-medium">{t("common.name")}</label>
               <Input

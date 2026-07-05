@@ -3,6 +3,7 @@ package webmail2api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -19,35 +20,35 @@ import (
 // fields (title, department, phones, birthday, home address, IM, web page) round-
 // trip through oxvcard's vCard import/export, the same path every protocol reads.
 type contactJSON struct {
-	ID            string   `json:"id"`
-	Name          string   `json:"name"`
-	Email         string   `json:"email"`
-	Phone         string   `json:"phone,omitempty"`         // business telephone
-	Company       string   `json:"company,omitempty"`
-	JobTitle      string   `json:"jobTitle,omitempty"`
-	Department    string   `json:"department,omitempty"`
-	MobilePhone   string   `json:"mobilePhone,omitempty"`
-	HomePhone     string   `json:"homePhone,omitempty"`
-	Birthday      string   `json:"birthday,omitempty"`      // YYYY-MM-DD
-	HomeStreet    string   `json:"homeStreet,omitempty"`
-	HomeCity      string   `json:"homeCity,omitempty"`
-	HomeState     string   `json:"homeState,omitempty"`
-	HomePostal    string   `json:"homePostal,omitempty"`
-	HomeCountry   string   `json:"homeCountry,omitempty"`
-	WorkStreet    string   `json:"workStreet,omitempty"`
-	WorkCity      string   `json:"workCity,omitempty"`
-	WorkState     string   `json:"workState,omitempty"`
-	WorkPostal    string   `json:"workPostal,omitempty"`
-	WorkCountry   string   `json:"workCountry,omitempty"`
-	IMAddress     string   `json:"imAddress,omitempty"`
-	WebPage       string   `json:"webPage,omitempty"`
-	Anniversary   string   `json:"anniversary,omitempty"`   // YYYY-MM-DD (PrWeddingAnniversary, direct prop)
-	Billing       string   `json:"billing,omitempty"`       // PidLidBilling (PSETID_Common named prop)
-	Assistant     string   `json:"assistant,omitempty"`     // PrAssistant
-	Manager       string   `json:"manager,omitempty"`       // PrManagerName
-	Office        string   `json:"office,omitempty"`        // PrOfficeLocation
-	IsGroup       bool     `json:"is_group,omitempty"`
-	Members       []string `json:"members,omitempty"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Email       string   `json:"email"`
+	Phone       string   `json:"phone,omitempty"` // business telephone
+	Company     string   `json:"company,omitempty"`
+	JobTitle    string   `json:"jobTitle,omitempty"`
+	Department  string   `json:"department,omitempty"`
+	MobilePhone string   `json:"mobilePhone,omitempty"`
+	HomePhone   string   `json:"homePhone,omitempty"`
+	Birthday    string   `json:"birthday,omitempty"` // YYYY-MM-DD
+	HomeStreet  string   `json:"homeStreet,omitempty"`
+	HomeCity    string   `json:"homeCity,omitempty"`
+	HomeState   string   `json:"homeState,omitempty"`
+	HomePostal  string   `json:"homePostal,omitempty"`
+	HomeCountry string   `json:"homeCountry,omitempty"`
+	WorkStreet  string   `json:"workStreet,omitempty"`
+	WorkCity    string   `json:"workCity,omitempty"`
+	WorkState   string   `json:"workState,omitempty"`
+	WorkPostal  string   `json:"workPostal,omitempty"`
+	WorkCountry string   `json:"workCountry,omitempty"`
+	IMAddress   string   `json:"imAddress,omitempty"`
+	WebPage     string   `json:"webPage,omitempty"`
+	Anniversary string   `json:"anniversary,omitempty"` // YYYY-MM-DD (PrWeddingAnniversary, direct prop)
+	Billing     string   `json:"billing,omitempty"`     // PidLidBilling (PSETID_Common named prop)
+	Assistant   string   `json:"assistant,omitempty"`   // PrAssistant
+	Manager     string   `json:"manager,omitempty"`     // PrManagerName
+	Office      string   `json:"office,omitempty"`      // PrOfficeLocation
+	IsGroup     bool     `json:"is_group,omitempty"`
+	Members     []string `json:"members,omitempty"`
 }
 
 // distListBody is the JSON payload stored in a contact group's message body.
@@ -379,4 +380,147 @@ func billingOf(st *objectstore.Store, msg *oxcmail.Message) string {
 		return ""
 	}
 	return propString(msg, tag)
+}
+
+// hasPictureTag resolves PidLidHasPicture (NameHasPicture, PSETID_Address) to a
+// PtBoolean tag for this store, allocating its id when create is set.
+func hasPictureTag(st *objectstore.Store, create bool) (mapi.PropTag, error) {
+	ids, err := st.GetNamedPropIDs(create, []mapi.PropertyName{mapi.NameHasPicture})
+	if err != nil || len(ids) == 0 || ids[0] == 0 {
+		return 0, err
+	}
+	return mapi.PropTag(uint32(ids[0])<<16 | uint32(mapi.PtBoolean)), nil
+}
+
+// contactPhotoAttachment scans a contact's attachments for the one carrying
+// PrAttachmentContactPhoto (the contact's photo) and returns its attach number
+// and image bytes. ok is false when the contact has no photo.
+func contactPhotoAttachment(msg *oxcmail.Message) (attachNum int32, data []byte, ok bool) {
+	for _, att := range msg.Attachments {
+		if v, has := att.Props.Get(mapi.PrAttachmentContactPhoto); has {
+			if b, isBool := v.(bool); isBool && b {
+				if d, isBytes := att.Props.Get(mapi.PrAttachDataBin); isBytes {
+					if raw, isRaw := d.([]byte); isRaw {
+						if n, has := att.Props.Get(mapi.PrAttachNum); has {
+							if num, isInt := n.(int32); isInt {
+								return num, raw, true
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return 0, nil, false
+}
+
+// handleGetContactPhoto streams the contact's photo attachment bytes. JPEG is
+// the canonical format; the content type defaults to image/jpeg.
+func (s *Server) handleGetContactPhoto(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	st, _, ok := s.openStore(w, r)
+	if !ok {
+		return
+	}
+	defer st.Close()
+	msg, err := st.OpenMessage(id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such contact"})
+		return
+	}
+	_, data, has := contactPhotoAttachment(msg)
+	if !has {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no photo"})
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(data)
+}
+
+// handleSetContactPhoto replaces the contact's photo. A prior photo (if any) is
+// deleted first so only one photo attachment exists. The photo is stored as a
+// by-value JPEG attachment flagged PrAttachmentContactPhoto, and the contact's
+// PidLidHasPicture is set true so Outlook and the GAL see it.
+func (s *Server) handleSetContactPhoto(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected multipart file upload"})
+		return
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing file field"})
+		return
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not read upload"})
+		return
+	}
+	st, _, ok := s.openStore(w, r)
+	if !ok {
+		return
+	}
+	defer st.Close()
+	// Drop an existing photo first so the contact has at most one photo.
+	if msg, err := st.OpenMessage(id); err == nil {
+		if num, _, has := contactPhotoAttachment(msg); has {
+			_ = st.DeleteAttachment(id, uint32(num))
+		}
+	}
+	props := mapi.PropertyValues{
+		{Tag: mapi.PrAttachDataBin, Value: data},
+		{Tag: mapi.PrAttachFilename, Value: "ContactPicture.jpg"},
+		{Tag: mapi.PrAttachLongFilename, Value: "ContactPicture.jpg"},
+		{Tag: mapi.PrAttachExtension, Value: ".jpg"},
+		{Tag: mapi.PrDisplayName, Value: "ContactPicture.jpg"},
+		{Tag: mapi.PrRenderingPosition, Value: int32(-1)},
+		{Tag: mapi.PrAttachmentContactPhoto, Value: true},
+	}
+	if _, _, err := st.CreateAttachment(id, props); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not attach photo"})
+		return
+	}
+	// Mark the contact as having a picture (PidLidHasPicture).
+	if tag, err := hasPictureTag(st, true); err == nil && tag != 0 {
+		_ = st.SetMessageProperties(id, mapi.PropertyValues{{Tag: tag, Value: true}})
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// handleDeleteContactPhoto removes the contact's photo attachment and clears
+// PidLidHasPicture.
+func (s *Server) handleDeleteContactPhoto(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	st, _, ok := s.openStore(w, r)
+	if !ok {
+		return
+	}
+	defer st.Close()
+	msg, err := st.OpenMessage(id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such contact"})
+		return
+	}
+	if num, _, has := contactPhotoAttachment(msg); has {
+		_ = st.DeleteAttachment(id, uint32(num))
+	}
+	if tag, err := hasPictureTag(st, true); err == nil && tag != 0 {
+		_ = st.ModifyMessageProperties(id, mapi.PropertyValues{}, tag)
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

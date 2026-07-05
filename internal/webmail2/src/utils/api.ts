@@ -1273,6 +1273,32 @@ class API {
     await this.delete(`/contacts/${id}`)
   }
 
+  // Contact photo: GET streams JPEG bytes (img src friendly, cookie-auth); PUT
+  // uploads a multipart file; DELETE removes it. The raw fetch is deliberate:
+  // the JSON request wrapper sets Content-Type: application/json, but a
+  // multipart body must let the browser set its own boundary.
+  contactPhotoUrl(id: string): string {
+    return `${API_URL}/contacts/${encodeURIComponent(id)}/photo`
+  }
+
+  async uploadContactPhoto(id: string, file: File): Promise<void> {
+    const form = new FormData()
+    form.append('file', file)
+    const headers: Record<string, string> = {}
+    if (this.token) headers['Authorization'] = `Bearer ${this.token}`
+    const res = await fetch(this.contactPhotoUrl(id), {
+      method: 'PUT',
+      headers,
+      body: form,
+      credentials: 'include',
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  }
+
+  async deleteContactPhoto(id: string): Promise<void> {
+    await this.delete(`/contacts/${id}/photo`)
+  }
+
   // Calendar (CalDAV-backed)
   async getCalendarEvents(): Promise<{ events?: CalendarEvent[] }> {
     return this.get<{ events?: CalendarEvent[] }>('/calendar/events')

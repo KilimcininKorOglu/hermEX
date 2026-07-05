@@ -940,7 +940,12 @@
     "manager": "Yönetici",
     "office": "Ofis",
     "anniversary": "Yıldönümü",
-    "billing": "Faturalama"
+    "billing": "Faturalama",
+    "changePhoto": "Fotoğrafı değiştir",
+    "removePhoto": "Fotoğrafı kaldır",
+    "photoUpdated": "Fotoğraf güncellendi",
+    "photoRemoved": "Fotoğraf kaldırıldı",
+    "photoUpdateFailed": "Fotoğraf güncellenemedi"
   },
   "tasks": {
     "quickAddPlaceholder": "Bir görev ekleyin ve Enter'a basın",

@@ -350,6 +350,10 @@ const (
 	PrAttachFlags        = PropTag(0x37140003) // PtLong
 	PrRenderingPosition  = PropTag(0x370B0003) // PtLong
 	PrAttachNum          = PropTag(0x0E210003) // PtLong (store-assigned)
+	// PrAttachmentContactPhoto (PidTagAttachmentContactPhoto, 0x7FFF PT_BOOLEAN)
+	// marks an attachment as the contact's photo (ContactPicture.jpg). Outlook
+	// and the GAL read the photo from the attachment carrying this flag.
+	PrAttachmentContactPhoto = PropTag(0x7FFF000B) // PtBoolean
 )
 
 // Attachment method (PR_ATTACH_METHOD) and flag (PR_ATTACH_FLAGS) values.
