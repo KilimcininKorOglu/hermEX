@@ -945,7 +945,13 @@
     "removePhoto": "Fotoğrafı kaldır",
     "photoUpdated": "Fotoğraf güncellendi",
     "photoRemoved": "Fotoğraf kaldırıldı",
-    "photoUpdateFailed": "Fotoğraf güncellenemedi"
+    "photoUpdateFailed": "Fotoğraf güncellenemedi",
+    "email2": "E-posta 2",
+    "email3": "E-posta 3",
+    "nickname": "Takma ad",
+    "fileAs": "Dosyalama adı",
+    "profession": "Meslek",
+    "spouse": "Eş/Partner"
   },
   "tasks": {
     "quickAddPlaceholder": "Bir görev ekleyin ve Enter'a basın",

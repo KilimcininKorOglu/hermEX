@@ -945,7 +945,13 @@
     "removePhoto": "Remove photo",
     "photoUpdated": "Photo updated",
     "photoRemoved": "Photo removed",
-    "photoUpdateFailed": "Could not update photo"
+    "photoUpdateFailed": "Could not update photo",
+    "email2": "Email 2",
+    "email3": "Email 3",
+    "nickname": "Nickname",
+    "fileAs": "File as",
+    "profession": "Profession",
+    "spouse": "Spouse/Partner"
   },
   "tasks": {
     "quickAddPlaceholder": "Add a task and press Enter",

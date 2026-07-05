@@ -23,13 +23,19 @@ type contactJSON struct {
 	ID          string   `json:"id"`
 	Name        string   `json:"name"`
 	Email       string   `json:"email"`
-	Phone       string   `json:"phone,omitempty"` // business telephone
+	Email2      string   `json:"email2,omitempty"` // PidLidEmail2EmailAddress (vCard 2nd EMAIL)
+	Email3      string   `json:"email3,omitempty"` // PidLidEmail3EmailAddress (vCard 3rd EMAIL)
+	Phone       string   `json:"phone,omitempty"`  // business telephone
 	Company     string   `json:"company,omitempty"`
 	JobTitle    string   `json:"jobTitle,omitempty"`
 	Department  string   `json:"department,omitempty"`
 	MobilePhone string   `json:"mobilePhone,omitempty"`
 	HomePhone   string   `json:"homePhone,omitempty"`
-	Birthday    string   `json:"birthday,omitempty"` // YYYY-MM-DD
+	Birthday    string   `json:"birthday,omitempty"`   // YYYY-MM-DD
+	Nickname    string   `json:"nickname,omitempty"`   // PrNickname (vCard NICKNAME)
+	FileAs      string   `json:"fileAs,omitempty"`     // PidLidFileAs (PSETID_Address named prop)
+	Profession  string   `json:"profession,omitempty"` // PrProfession
+	Spouse      string   `json:"spouse,omitempty"`     // PrSpouseName
 	HomeStreet  string   `json:"homeStreet,omitempty"`
 	HomeCity    string   `json:"homeCity,omitempty"`
 	HomeState   string   `json:"homeState,omitempty"`
@@ -66,6 +72,15 @@ func buildVCard(c contactJSON) []byte {
 	if c.Email != "" {
 		fmt.Fprintf(&b, "EMAIL:%s\r\n", c.Email)
 	}
+	if c.Email2 != "" {
+		fmt.Fprintf(&b, "EMAIL:%s\r\n", c.Email2)
+	}
+	if c.Email3 != "" {
+		fmt.Fprintf(&b, "EMAIL:%s\r\n", c.Email3)
+	}
+	if c.Nickname != "" {
+		fmt.Fprintf(&b, "NICKNAME:%s\r\n", c.Nickname)
+	}
 	if c.Phone != "" {
 		fmt.Fprintf(&b, "TEL;TYPE=work:%s\r\n", c.Phone)
 	}
@@ -75,14 +90,17 @@ func buildVCard(c contactJSON) []byte {
 	if c.HomePhone != "" {
 		fmt.Fprintf(&b, "TEL;TYPE=HOME:%s\r\n", c.HomePhone)
 	}
-	if c.Company != "" {
-		fmt.Fprintf(&b, "ORG:%s\r\n", c.Company)
+	if c.Company != "" || c.Department != "" {
+		// ORG is semicolon-delimited: company ; department. oxvcard maps ORG's
+		// second component to PrDepartmentName, distinct from ROLE (Profession).
+		fmt.Fprintf(&b, "ORG:%s;%s\r\n", c.Company, c.Department)
 	}
 	if c.JobTitle != "" {
 		fmt.Fprintf(&b, "TITLE:%s\r\n", c.JobTitle)
 	}
-	if c.Department != "" {
-		fmt.Fprintf(&b, "ROLE:%s\r\n", c.Department)
+	if c.Profession != "" {
+		// vCard ROLE maps to PrProfession (not department) in oxvcard.
+		fmt.Fprintf(&b, "ROLE:%s\r\n", c.Profession)
 	}
 	if c.Birthday != "" {
 		// vCard BDAY is YYYY-MM-DD; oxvcard's parseBirthday accepts it.
@@ -121,6 +139,26 @@ func vcardField(vcf []byte, name string) string {
 		}
 	}
 	return ""
+}
+
+// vcardAll extracts every value of a vCard property, in file order, ignoring
+// parameters. Used for the multi-valued EMAIL lines that map to Email1/2/3.
+func vcardAll(vcf []byte, name string) []string {
+	var out []string
+	for line := range strings.SplitSeq(string(vcf), "\n") {
+		line = strings.TrimRight(line, "\r")
+		key, val, found := strings.Cut(line, ":")
+		if !found {
+			continue
+		}
+		if semi := strings.IndexByte(key, ';'); semi >= 0 {
+			key = key[:semi]
+		}
+		if strings.EqualFold(key, name) {
+			out = append(out, val)
+		}
+	}
+	return out
 }
 
 // vcardTypedField extracts a property value whose TYPE parameter matches typeParam
@@ -193,7 +231,14 @@ func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		org, _, _ := strings.Cut(vcardField(vcf, "ORG"), ";")
+		// ORG is "company;department"; ROLE is Profession (not department).
+		orgFields := strings.Split(vcardField(vcf, "ORG"), ";")
+		orgAt := func(i int) string {
+			if i < len(orgFields) {
+				return orgFields[i]
+			}
+			return ""
+		}
 		// Home and work addresses are separate ADR lines (TYPE=HOME/WORK), each
 		// semicolon-delimited: pobox ; ext ; street ; city ; state ; postal ; country
 		homeAdr := strings.Split(vcardTypedField(vcf, "ADR", "HOME"), ";")
@@ -204,17 +249,30 @@ func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 			}
 			return ""
 		}
+		emails := vcardAll(vcf, "EMAIL")
+		emailAt := func(i int) string {
+			if i < len(emails) {
+				return emails[i]
+			}
+			return ""
+		}
 		contacts = append(contacts, contactJSON{
 			ID:          strconv.FormatInt(o.ID, 10),
 			Name:        vcardField(vcf, "FN"),
-			Email:       vcardField(vcf, "EMAIL"),
+			Email:       emailAt(0),
+			Email2:      emailAt(1),
+			Email3:      emailAt(2),
 			Phone:       vcardTypedField(vcf, "TEL", "WORK"), // business telephone
 			MobilePhone: vcardTypedField(vcf, "TEL", "CELL"),
 			HomePhone:   vcardTypedField(vcf, "TEL", "HOME"),
-			Company:     org,
+			Company:     orgAt(0),
 			JobTitle:    vcardField(vcf, "TITLE"),
-			Department:  vcardField(vcf, "ROLE"),
+			Department:  orgAt(1),
 			Birthday:    vcardField(vcf, "BDAY"),
+			Nickname:    vcardField(vcf, "NICKNAME"),
+			FileAs:      fileAsOf(st, msg),
+			Profession:  vcardField(vcf, "ROLE"),
+			Spouse:      propString(msg, mapi.PrSpouseName),
 			HomeStreet:  adr(homeAdr, 2),
 			HomeCity:    adr(homeAdr, 3),
 			HomeState:   adr(homeAdr, 4),
@@ -357,6 +415,17 @@ func setRichContactProps(st *objectstore.Store, id int64, c contactJSON) {
 			props.Set(tag, c.Billing)
 		}
 	}
+	if c.FileAs != "" {
+		if tag, err := fileAsTag(st, true); err == nil && tag != 0 {
+			props.Set(tag, c.FileAs)
+		}
+	}
+	if c.Profession != "" {
+		props.Set(mapi.PrProfession, c.Profession)
+	}
+	if c.Spouse != "" {
+		props.Set(mapi.PrSpouseName, c.Spouse)
+	}
 	if len(props) > 0 {
 		_ = st.SetMessageProperties(id, props)
 	}
@@ -376,6 +445,25 @@ func billingTag(st *objectstore.Store, create bool) (mapi.PropTag, error) {
 // resolved read-only (no allocation); an unresolved named prop yields "".
 func billingOf(st *objectstore.Store, msg *oxcmail.Message) string {
 	tag, err := billingTag(st, false)
+	if err != nil || tag == 0 {
+		return ""
+	}
+	return propString(msg, tag)
+}
+
+// fileAsTag resolves PidLidFileAs (NameFileAs, PSETID_Address) to a PtUnicode tag
+// for this store, allocating its id when create is set.
+func fileAsTag(st *objectstore.Store, create bool) (mapi.PropTag, error) {
+	ids, err := st.GetNamedPropIDs(create, []mapi.PropertyName{mapi.NameFileAs})
+	if err != nil || len(ids) == 0 || ids[0] == 0 {
+		return 0, err
+	}
+	return mapi.PropTag(uint32(ids[0])<<16 | uint32(mapi.PtUnicode)), nil
+}
+
+// fileAsOf reads PidLidFileAs from the contact's stored properties.
+func fileAsOf(st *objectstore.Store, msg *oxcmail.Message) string {
+	tag, err := fileAsTag(st, false)
 	if err != nil || tag == 0 {
 		return ""
 	}

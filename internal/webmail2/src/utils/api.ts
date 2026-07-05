@@ -252,6 +252,8 @@ export interface DirectoryEntry {
 // UserProfile is the caller's own editable directory profile.
 export interface UserProfile {
   email?: string
+  email2?: string
+  email3?: string
   display_name?: string
   title?: string
   department?: string
@@ -518,6 +520,10 @@ export interface Contact {
   birthday?: string // YYYY-MM-DD
   anniversary?: string // YYYY-MM-DD (PrWeddingAnniversary)
   billing?: string // PidLidBilling (PSETID_Common named prop)
+  nickname?: string // PrNickname (vCard NICKNAME)
+  fileAs?: string // PidLidFileAs (PSETID_Address named prop)
+  profession?: string // PrProfession (vCard ROLE)
+  spouse?: string // PrSpouseName
   homeStreet?: string
   homeCity?: string
   homeState?: string

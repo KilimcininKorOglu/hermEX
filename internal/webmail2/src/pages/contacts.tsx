@@ -47,6 +47,8 @@ interface Contact {
   id: string
   name: string
   email: string
+  email2?: string
+  email3?: string
   phone?: string
   company?: string
   jobTitle?: string
@@ -56,6 +58,10 @@ interface Contact {
   birthday?: string
   anniversary?: string
   billing?: string
+  nickname?: string
+  fileAs?: string
+  profession?: string
+  spouse?: string
   homeStreet?: string
   homeCity?: string
   homeState?: string
@@ -100,6 +106,8 @@ export function ContactsPage() {
   const [formData, setFormData] = useState({
     name: "",
     email: "",
+    email2: "",
+    email3: "",
     phone: "",
     company: "",
     jobTitle: "",
@@ -109,6 +117,10 @@ export function ContactsPage() {
     birthday: "",
     anniversary: "",
     billing: "",
+    nickname: "",
+    fileAs: "",
+    profession: "",
+    spouse: "",
     homeStreet: "",
     homeCity: "",
     homeState: "",
@@ -175,7 +187,7 @@ export function ContactsPage() {
   const filteredGal = galEntries.filter((e) => matchesSearch(e.name || "", e.email))
 
   const handleAdd = () => {
-    setFormData({ name: "", email: "", phone: "", company: "", jobTitle: "", department: "", mobilePhone: "", homePhone: "", birthday: "", anniversary: "", billing: "", homeStreet: "", homeCity: "", homeState: "", homePostal: "", homeCountry: "", workStreet: "", workCity: "", workState: "", workPostal: "", workCountry: "", imAddress: "", webPage: "", assistant: "", manager: "", office: "", is_group: false, members: "" })
+    setFormData({ name: "", email: "", email2: "", email3: "", phone: "", company: "", jobTitle: "", department: "", mobilePhone: "", homePhone: "", birthday: "", anniversary: "", billing: "", nickname: "", fileAs: "", profession: "", spouse: "", homeStreet: "", homeCity: "", homeState: "", homePostal: "", homeCountry: "", workStreet: "", workCity: "", workState: "", workPostal: "", workCountry: "", imAddress: "", webPage: "", assistant: "", manager: "", office: "", is_group: false, members: "" })
     setEditingContact(null)
     setPhotoError(false)
     setShowAddDialog(true)
@@ -185,6 +197,8 @@ export function ContactsPage() {
     setFormData({
       name: contact.name,
       email: contact.email || "",
+      email2: contact.email2 || "",
+      email3: contact.email3 || "",
       phone: contact.phone || "",
       company: contact.company || "",
       jobTitle: contact.jobTitle || "",
@@ -194,6 +208,10 @@ export function ContactsPage() {
       birthday: contact.birthday || "",
       anniversary: contact.anniversary || "",
       billing: contact.billing || "",
+      nickname: contact.nickname || "",
+      fileAs: contact.fileAs || "",
+      profession: contact.profession || "",
+      spouse: contact.spouse || "",
       homeStreet: contact.homeStreet || "",
       homeCity: contact.homeCity || "",
       homeState: contact.homeState || "",
@@ -298,13 +316,9 @@ export function ContactsPage() {
         })
         if (result.contact) {
           const newContact: Contact = {
+            ...formData,
             id: result.contact.id,
-            name: formData.name,
-            email: formData.email,
-            phone: formData.phone,
-            company: formData.company,
             labels: [],
-            is_group: formData.is_group,
             members: members || [],
           }
           setContacts([...contacts, newContact])
@@ -684,6 +698,24 @@ export function ContactsPage() {
                   />
                 </div>
                 <div>
+                  <label className="text-sm font-medium">{t("contacts.email2")}</label>
+                  <Input
+                    className="mt-1"
+                    type="email"
+                    value={formData.email2}
+                    onChange={(e) => setFormData({ ...formData, email2: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">{t("contacts.email3")}</label>
+                  <Input
+                    className="mt-1"
+                    type="email"
+                    value={formData.email3}
+                    onChange={(e) => setFormData({ ...formData, email3: e.target.value })}
+                  />
+                </div>
+                <div>
                   <label className="text-sm font-medium">{t("contacts.phoneOptional")}</label>
                   <Input
                     className="mt-1"
@@ -743,6 +775,22 @@ export function ContactsPage() {
                   <div>
                     <label className="text-sm font-medium">{t("contacts.billing")}</label>
                     <Input className="mt-1" value={formData.billing} onChange={(e) => setFormData({ ...formData, billing: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.nickname")}</label>
+                    <Input className="mt-1" value={formData.nickname} onChange={(e) => setFormData({ ...formData, nickname: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.fileAs")}</label>
+                    <Input className="mt-1" value={formData.fileAs} onChange={(e) => setFormData({ ...formData, fileAs: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.profession")}</label>
+                    <Input className="mt-1" value={formData.profession} onChange={(e) => setFormData({ ...formData, profession: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.spouse")}</label>
+                    <Input className="mt-1" value={formData.spouse} onChange={(e) => setFormData({ ...formData, spouse: e.target.value })} />
                   </div>
                   <div>
                     <label className="text-sm font-medium">{t("contacts.imAddress")}</label>
