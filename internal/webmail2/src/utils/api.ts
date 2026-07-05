@@ -517,6 +517,7 @@ export interface Contact {
   homePhone?: string
   birthday?: string // YYYY-MM-DD
   anniversary?: string // YYYY-MM-DD (PrWeddingAnniversary)
+  billing?: string // PidLidBilling (PSETID_Common named prop)
   homeStreet?: string
   homeCity?: string
   homeState?: string

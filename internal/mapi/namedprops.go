@@ -46,6 +46,9 @@ var (
 	// NameReminderSignalTime (PidLidReminderSignalTime, PSETID_Common/0x8560,
 	// PtSysTime) carries a flag's due / reminder time.
 	NameReminderSignalTime = PropertyName{Kind: MnidID, GUID: PsetidCommon, LID: 0x8560}
+	// NameBilling (PidLidBilling, PSETID_Common/0x8535, PtUnicode) carries the
+	// billing information associated with an item, a free-form Outlook field.
+	NameBilling = PropertyName{Kind: MnidID, GUID: PsetidCommon, LID: 0x8535}
 	// NameKeywords (PidNameKeywords, PS_PUBLIC_STRINGS/"Keywords", PtMvUnicode) is
 	// a message's category list.
 	NameKeywords = PropertyName{Kind: MnidString, GUID: PsPublicStrings, Name: "Keywords"}

@@ -42,6 +42,7 @@ type contactJSON struct {
 	IMAddress     string   `json:"imAddress,omitempty"`
 	WebPage       string   `json:"webPage,omitempty"`
 	Anniversary   string   `json:"anniversary,omitempty"`   // YYYY-MM-DD (PrWeddingAnniversary, direct prop)
+	Billing       string   `json:"billing,omitempty"`       // PidLidBilling (PSETID_Common named prop)
 	Assistant     string   `json:"assistant,omitempty"`     // PrAssistant
 	Manager       string   `json:"manager,omitempty"`       // PrManagerName
 	Office        string   `json:"office,omitempty"`        // PrOfficeLocation
@@ -229,6 +230,7 @@ func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 			Manager:     propString(msg, mapi.PrManagerName),
 			Office:      propString(msg, mapi.PrOfficeLocation),
 			Anniversary: anniversaryOf(msg),
+			Billing:     billingOf(st, msg),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"contacts": contacts, "total": len(contacts)})
@@ -331,7 +333,8 @@ func anniversaryOf(msg *oxcmail.Message) string {
 
 // setRichContactProps stamps the contact's assistant/manager/office/anniversary
 // onto the stored message, the fields oxvcard's vCard import does not map. Empty
-// values are skipped. Anniversary is a PtSysTime (UnixToNTTime uint64).
+// values are skipped. Anniversary is a PtSysTime (UnixToNTTime uint64). Billing is
+// a PSETID_Common named prop (PidLidBilling), resolved per-store.
 func setRichContactProps(st *objectstore.Store, id int64, c contactJSON) {
 	var props mapi.PropertyValues
 	if c.Assistant != "" {
@@ -348,7 +351,32 @@ func setRichContactProps(st *objectstore.Store, id int64, c contactJSON) {
 			props.Set(mapi.PrWeddingAnniversary, mapi.UnixToNTTime(t))
 		}
 	}
+	if c.Billing != "" {
+		if tag, err := billingTag(st, true); err == nil && tag != 0 {
+			props.Set(tag, c.Billing)
+		}
+	}
 	if len(props) > 0 {
 		_ = st.SetMessageProperties(id, props)
 	}
+}
+
+// billingTag resolves PidLidBilling (NameBilling, PSETID_Common) to a PtUnicode
+// tag for this store, allocating its id when create is set (idempotent).
+func billingTag(st *objectstore.Store, create bool) (mapi.PropTag, error) {
+	ids, err := st.GetNamedPropIDs(create, []mapi.PropertyName{mapi.NameBilling})
+	if err != nil || len(ids) == 0 || ids[0] == 0 {
+		return 0, err
+	}
+	return mapi.PropTag(uint32(ids[0])<<16 | uint32(mapi.PtUnicode)), nil
+}
+
+// billingOf reads PidLidBilling from the contact's stored properties. The tag is
+// resolved read-only (no allocation); an unresolved named prop yields "".
+func billingOf(st *objectstore.Store, msg *oxcmail.Message) string {
+	tag, err := billingTag(st, false)
+	if err != nil || tag == 0 {
+		return ""
+	}
+	return propString(msg, tag)
 }

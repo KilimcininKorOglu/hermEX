@@ -939,7 +939,8 @@
     "assistant": "Assistant",
     "manager": "Manager",
     "office": "Office",
-    "anniversary": "Anniversary"
+    "anniversary": "Anniversary",
+    "billing": "Billing"
   },
   "tasks": {
     "quickAddPlaceholder": "Add a task and press Enter",

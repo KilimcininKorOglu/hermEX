@@ -939,7 +939,8 @@
     "assistant": "Asistan",
     "manager": "Yönetici",
     "office": "Ofis",
-    "anniversary": "Yıldönümü"
+    "anniversary": "Yıldönümü",
+    "billing": "Faturalama"
   },
   "tasks": {
     "quickAddPlaceholder": "Bir görev ekleyin ve Enter'a basın",
