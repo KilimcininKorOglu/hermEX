@@ -13,15 +13,29 @@ import (
 )
 
 // contactJSON is the SPA's Contact shape. A contact group (is_group) is a named
-// list of member addresses, the Outlook personal distribution list.
+// list of member addresses, the Outlook personal distribution list. The rich
+// fields (title, department, phones, birthday, home address, IM, web page) round-
+// trip through oxvcard's vCard import/export, the same path every protocol reads.
 type contactJSON struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	Email   string   `json:"email"`
-	Phone   string   `json:"phone,omitempty"`
-	Company string   `json:"company,omitempty"`
-	IsGroup bool     `json:"is_group,omitempty"`
-	Members []string `json:"members,omitempty"`
+	ID            string   `json:"id"`
+	Name          string   `json:"name"`
+	Email         string   `json:"email"`
+	Phone         string   `json:"phone,omitempty"`         // business telephone
+	Company       string   `json:"company,omitempty"`
+	JobTitle      string   `json:"jobTitle,omitempty"`
+	Department    string   `json:"department,omitempty"`
+	MobilePhone   string   `json:"mobilePhone,omitempty"`
+	HomePhone     string   `json:"homePhone,omitempty"`
+	Birthday      string   `json:"birthday,omitempty"`      // YYYY-MM-DD
+	HomeStreet    string   `json:"homeStreet,omitempty"`
+	HomeCity      string   `json:"homeCity,omitempty"`
+	HomeState     string   `json:"homeState,omitempty"`
+	HomePostal    string   `json:"homePostal,omitempty"`
+	HomeCountry   string   `json:"homeCountry,omitempty"`
+	IMAddress     string   `json:"imAddress,omitempty"`
+	WebPage       string   `json:"webPage,omitempty"`
+	IsGroup       bool     `json:"is_group,omitempty"`
+	Members       []string `json:"members,omitempty"`
 }
 
 // distListBody is the JSON payload stored in a contact group's message body.
@@ -29,7 +43,9 @@ type distListBody struct {
 	Members []string `json:"members"`
 }
 
-// buildVCard renders a minimal vCard 4.0 for the proven oxvcard import path.
+// buildVCard renders a vCard 4.0 for the proven oxvcard import path. The rich
+// fields map to vCard properties oxvcard parses into MAPI (TEL/ADR/BDAY/TITLE/
+// ROLE/NOTE/URL), so they survive cross-protocol.
 func buildVCard(c contactJSON) []byte {
 	var b strings.Builder
 	b.WriteString("BEGIN:VCARD\r\nVERSION:4.0\r\n")
@@ -38,10 +54,36 @@ func buildVCard(c contactJSON) []byte {
 		fmt.Fprintf(&b, "EMAIL:%s\r\n", c.Email)
 	}
 	if c.Phone != "" {
-		fmt.Fprintf(&b, "TEL:%s\r\n", c.Phone)
+		fmt.Fprintf(&b, "TEL;TYPE=work:%s\r\n", c.Phone)
+	}
+	if c.MobilePhone != "" {
+		fmt.Fprintf(&b, "TEL;TYPE=CELL:%s\r\n", c.MobilePhone)
+	}
+	if c.HomePhone != "" {
+		fmt.Fprintf(&b, "TEL;TYPE=HOME:%s\r\n", c.HomePhone)
 	}
 	if c.Company != "" {
 		fmt.Fprintf(&b, "ORG:%s\r\n", c.Company)
+	}
+	if c.JobTitle != "" {
+		fmt.Fprintf(&b, "TITLE:%s\r\n", c.JobTitle)
+	}
+	if c.Department != "" {
+		fmt.Fprintf(&b, "ROLE:%s\r\n", c.Department)
+	}
+	if c.Birthday != "" {
+		// vCard BDAY is YYYY-MM-DD; oxvcard's parseBirthday accepts it.
+		fmt.Fprintf(&b, "BDAY:%s\r\n", c.Birthday)
+	}
+	if c.HomeStreet != "" || c.HomeCity != "" || c.HomeState != "" || c.HomePostal != "" || c.HomeCountry != "" {
+		// ADR is semicolon-delimited: pobox ; ext ; street ; city ; state ; postal ; country
+		fmt.Fprintf(&b, "ADR;TYPE=HOME:;;%s;%s;%s;%s;%s\r\n", c.HomeStreet, c.HomeCity, c.HomeState, c.HomePostal, c.HomeCountry)
+	}
+	if c.IMAddress != "" {
+		fmt.Fprintf(&b, "IMPP:%s\r\n", c.IMAddress)
+	}
+	if c.WebPage != "" {
+		fmt.Fprintf(&b, "URL:%s\r\n", c.WebPage)
 	}
 	b.WriteString("END:VCARD\r\n")
 	return []byte(b.String())
@@ -63,6 +105,41 @@ func vcardField(vcf []byte, name string) string {
 		}
 	}
 	return ""
+}
+
+// vcardTypedField extracts a property value whose TYPE parameter matches typeParam
+// (e.g. "CELL" for TEL;TYPE=CELL). An empty typeParam matches the bare property
+// with no TYPE, so the business TEL (no params) is distinct from the mobile/home
+// ones oxvcard emits with TYPE.
+func vcardTypedField(vcf []byte, name, typeParam string) string {
+	want := strings.ToUpper(typeParam)
+	bare := ""
+	for line := range strings.SplitSeq(string(vcf), "\n") {
+		line = strings.TrimRight(line, "\r")
+		key, val, found := strings.Cut(line, ":")
+		if !found {
+			continue
+		}
+		semi := strings.IndexByte(key, ';')
+		params := ""
+		if semi >= 0 {
+			params = key[semi:]
+			key = key[:semi]
+		}
+		if !strings.EqualFold(key, name) {
+			continue
+		}
+		if want == "" && !strings.Contains(strings.ToUpper(params), "TYPE=") {
+			return val
+		}
+		if want != "" && strings.Contains(strings.ToUpper(params), "TYPE="+want) {
+			return val
+		}
+		if bare == "" {
+			bare = val
+		}
+	}
+	return bare
 }
 
 func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
@@ -101,12 +178,31 @@ func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		org, _, _ := strings.Cut(vcardField(vcf, "ORG"), ";")
+		// The home address is one ADR line, semicolon-delimited:
+		// pobox ; ext ; street ; city ; state ; postal ; country
+		adrFields := strings.Split(vcardField(vcf, "ADR"), ";")
+		street, city, state, postal, country := "", "", "", "", ""
+		if len(adrFields) >= 7 {
+			street, city, state, postal, country = adrFields[2], adrFields[3], adrFields[4], adrFields[5], adrFields[6]
+		}
 		contacts = append(contacts, contactJSON{
-			ID:      strconv.FormatInt(o.ID, 10),
-			Name:    vcardField(vcf, "FN"),
-			Email:   vcardField(vcf, "EMAIL"),
-			Phone:   vcardField(vcf, "TEL"),
-			Company: org,
+			ID:          strconv.FormatInt(o.ID, 10),
+			Name:        vcardField(vcf, "FN"),
+			Email:       vcardField(vcf, "EMAIL"),
+			Phone:       vcardTypedField(vcf, "TEL", "WORK"), // business telephone
+			MobilePhone: vcardTypedField(vcf, "TEL", "CELL"),
+			HomePhone:   vcardTypedField(vcf, "TEL", "HOME"),
+			Company:     org,
+			JobTitle:    vcardField(vcf, "TITLE"),
+			Department:  vcardField(vcf, "ROLE"),
+			Birthday:    vcardField(vcf, "BDAY"),
+			HomeStreet:  street,
+			HomeCity:    city,
+			HomeState:   state,
+			HomePostal:  postal,
+			HomeCountry: country,
+			IMAddress:   vcardField(vcf, "IMPP"),
+			WebPage:     vcardField(vcf, "URL"),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"contacts": contacts, "total": len(contacts)})
