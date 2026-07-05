@@ -510,6 +510,11 @@ export interface DiagnosticEntry {
 export interface Contact {
   id: string
   name: string
+  prefix?: string // PrDisplayNamePrefix (Dr./Mr./...)
+  firstName?: string // PrGivenName
+  middleName?: string // PrMiddleName
+  lastName?: string // PrSurname
+  suffix?: string // PrGeneration (Jr./Sr./...)
   email: string
   phone?: string
   company?: string

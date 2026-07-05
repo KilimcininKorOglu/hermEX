@@ -952,7 +952,12 @@
     "fileAs": "File as",
     "profession": "Profession",
     "spouse": "Spouse/Partner",
-    "categories": "Categories"
+    "categories": "Categories",
+    "prefix": "Prefix",
+    "firstName": "First name",
+    "middleName": "Middle name",
+    "lastName": "Last name",
+    "suffix": "Suffix"
   },
   "tasks": {
     "quickAddPlaceholder": "Add a task and press Enter",

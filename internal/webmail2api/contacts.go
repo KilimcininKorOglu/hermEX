@@ -21,7 +21,12 @@ import (
 // trip through oxvcard's vCard import/export, the same path every protocol reads.
 type contactJSON struct {
 	ID          string   `json:"id"`
-	Name        string   `json:"name"`
+	Name        string   `json:"name"`                 // FN (formatted name)
+	Prefix      string   `json:"prefix,omitempty"`     // PrDisplayNamePrefix (N component 3: Dr./Mr./...)
+	FirstName   string   `json:"firstName,omitempty"`  // PrGivenName (N component 1)
+	MiddleName  string   `json:"middleName,omitempty"` // PrMiddleName (N component 2)
+	LastName    string   `json:"lastName,omitempty"`   // PrSurname (N component 0)
+	Suffix      string   `json:"suffix,omitempty"`     // PrGeneration (N component 4: Jr./Sr./...)
 	Email       string   `json:"email"`
 	Email2      string   `json:"email2,omitempty"` // PidLidEmail2EmailAddress (vCard 2nd EMAIL)
 	Email3      string   `json:"email3,omitempty"` // PidLidEmail3EmailAddress (vCard 3rd EMAIL)
@@ -70,6 +75,12 @@ func buildVCard(c contactJSON) []byte {
 	var b strings.Builder
 	b.WriteString("BEGIN:VCARD\r\nVERSION:4.0\r\n")
 	fmt.Fprintf(&b, "FN:%s\r\n", c.Name)
+	// N is the structured name: Family ; Given ; Middle ; Prefix ; Suffix.
+	// oxvcard imports N's five components to PrSurname/GivenName/MiddleName/
+	// DisplayNamePrefix/Generation respectively.
+	if c.LastName != "" || c.FirstName != "" || c.MiddleName != "" || c.Prefix != "" || c.Suffix != "" {
+		fmt.Fprintf(&b, "N:%s;%s;%s;%s;%s\r\n", c.LastName, c.FirstName, c.MiddleName, c.Prefix, c.Suffix)
+	}
 	if c.Email != "" {
 		fmt.Fprintf(&b, "EMAIL:%s\r\n", c.Email)
 	}
@@ -240,6 +251,14 @@ func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 			}
 			return ""
 		}
+		// N is the structured name: Family ; Given ; Middle ; Prefix ; Suffix.
+		nameFields := strings.Split(vcardField(vcf, "N"), ";")
+		nameAt := func(i int) string {
+			if i < len(nameFields) {
+				return nameFields[i]
+			}
+			return ""
+		}
 		// Home and work addresses are separate ADR lines (TYPE=HOME/WORK), each
 		// semicolon-delimited: pobox ; ext ; street ; city ; state ; postal ; country
 		homeAdr := strings.Split(vcardTypedField(vcf, "ADR", "HOME"), ";")
@@ -260,6 +279,11 @@ func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 		contacts = append(contacts, contactJSON{
 			ID:          strconv.FormatInt(o.ID, 10),
 			Name:        vcardField(vcf, "FN"),
+			LastName:    nameAt(0),
+			FirstName:   nameAt(1),
+			MiddleName:  nameAt(2),
+			Prefix:      nameAt(3),
+			Suffix:      nameAt(4),
 			Email:       emailAt(0),
 			Email2:      emailAt(1),
 			Email3:      emailAt(2),

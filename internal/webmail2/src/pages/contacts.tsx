@@ -46,6 +46,11 @@ import { Label } from "@/components/ui/label"
 interface Contact {
   id: string
   name: string
+  prefix?: string
+  firstName?: string
+  middleName?: string
+  lastName?: string
+  suffix?: string
   email: string
   email2?: string
   email3?: string
@@ -109,6 +114,11 @@ export function ContactsPage() {
   const [, setLoading] = useState(true)
   const [formData, setFormData] = useState({
     name: "",
+    prefix: "",
+    firstName: "",
+    middleName: "",
+    lastName: "",
+    suffix: "",
     email: "",
     email2: "",
     email3: "",
@@ -195,7 +205,7 @@ export function ContactsPage() {
   const filteredGal = galEntries.filter((e) => matchesSearch(e.name || "", e.email))
 
   const handleAdd = () => {
-    setFormData({ name: "", email: "", email2: "", email3: "", phone: "", company: "", jobTitle: "", department: "", mobilePhone: "", homePhone: "", birthday: "", anniversary: "", billing: "", nickname: "", fileAs: "", profession: "", spouse: "", categories: [], homeStreet: "", homeCity: "", homeState: "", homePostal: "", homeCountry: "", workStreet: "", workCity: "", workState: "", workPostal: "", workCountry: "", imAddress: "", webPage: "", assistant: "", manager: "", office: "", is_group: false, members: "" })
+    setFormData({ name: "", prefix: "", firstName: "", middleName: "", lastName: "", suffix: "", email: "", email2: "", email3: "", phone: "", company: "", jobTitle: "", department: "", mobilePhone: "", homePhone: "", birthday: "", anniversary: "", billing: "", nickname: "", fileAs: "", profession: "", spouse: "", categories: [], homeStreet: "", homeCity: "", homeState: "", homePostal: "", homeCountry: "", workStreet: "", workCity: "", workState: "", workPostal: "", workCountry: "", imAddress: "", webPage: "", assistant: "", manager: "", office: "", is_group: false, members: "" })
     setEditingContact(null)
     setPhotoError(false)
     setShowAddDialog(true)
@@ -204,6 +214,11 @@ export function ContactsPage() {
   const handleEdit = (contact: Contact) => {
     setFormData({
       name: contact.name,
+      prefix: contact.prefix || "",
+      firstName: contact.firstName || "",
+      middleName: contact.middleName || "",
+      lastName: contact.lastName || "",
+      suffix: contact.suffix || "",
       email: contact.email || "",
       email2: contact.email2 || "",
       email3: contact.email3 || "",
@@ -655,7 +670,7 @@ export function ContactsPage() {
                 </div>
               </div>
             )}
-            <div>
+            <div className="col-span-2">
               <label className="text-sm font-medium">{t("common.name")}</label>
               <Input
                 className="mt-1"
@@ -664,6 +679,30 @@ export function ContactsPage() {
                 onChange={(e) => setFormData({ ...formData, name: e.target.value })}
               />
             </div>
+            {!formData.is_group && (
+              <>
+                <div>
+                  <label className="text-sm font-medium">{t("contacts.prefix")}</label>
+                  <Input className="mt-1" placeholder="Dr." value={formData.prefix} onChange={(e) => setFormData({ ...formData, prefix: e.target.value })} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">{t("contacts.firstName")}</label>
+                  <Input className="mt-1" value={formData.firstName} onChange={(e) => setFormData({ ...formData, firstName: e.target.value })} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">{t("contacts.middleName")}</label>
+                  <Input className="mt-1" value={formData.middleName} onChange={(e) => setFormData({ ...formData, middleName: e.target.value })} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">{t("contacts.lastName")}</label>
+                  <Input className="mt-1" value={formData.lastName} onChange={(e) => setFormData({ ...formData, lastName: e.target.value })} />
+                </div>
+                <div>
+                  <label className="text-sm font-medium">{t("contacts.suffix")}</label>
+                  <Input className="mt-1" placeholder="Jr." value={formData.suffix} onChange={(e) => setFormData({ ...formData, suffix: e.target.value })} />
+                </div>
+              </>
+            )}
 
             {/* Distribution list toggle */}
             <div className="flex items-center gap-3">

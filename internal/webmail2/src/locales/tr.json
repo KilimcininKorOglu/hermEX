@@ -952,7 +952,12 @@
     "fileAs": "Dosyalama adı",
     "profession": "Meslek",
     "spouse": "Eş/Partner",
-    "categories": "Kategoriler"
+    "categories": "Kategoriler",
+    "prefix": "Ön ek",
+    "firstName": "Ad",
+    "middleName": "İkinci ad",
+    "lastName": "Soyad",
+    "suffix": "Son ek"
   },
   "tasks": {
     "quickAddPlaceholder": "Bir görev ekleyin ve Enter'a basın",
