@@ -8,6 +8,7 @@ import {
   Trash2,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   MoreHorizontal,
   User,
   Download,
@@ -71,6 +72,9 @@ export function ContactsPage() {
   const [galEntries, setGalEntries] = useState<DirectoryEntry[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [showAddDialog, setShowAddDialog] = useState(false)
+  // expandedGroups holds the ids of contact groups whose member list is shown
+  // inline (expanddistlist: a distribution list expanded to its member addresses).
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set())
   const [editingContact, setEditingContact] = useState<Contact | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Contact | null>(null)
   const [, setLoading] = useState(true)
@@ -330,6 +334,24 @@ export function ContactsPage() {
                     {contact.is_group ? <Users className="h-4 w-4" /> : getInitials(contact.name)}
                   </AvatarFallback>
                 </Avatar>
+                {/* A contact group can be expanded to list its members (expanddistlist). */}
+                {contact.is_group && (contact.members || []).length > 0 && (
+                  <button
+                    type="button"
+                    aria-label={expandedGroups.has(contact.id) ? t("contacts.collapse") : t("contacts.expand")}
+                    onClick={() =>
+                      setExpandedGroups((prev) => {
+                        const next = new Set(prev)
+                        if (next.has(contact.id)) next.delete(contact.id)
+                        else next.add(contact.id)
+                        return next
+                      })
+                    }
+                    className="shrink-0 rounded p-1 text-muted-foreground hover:bg-accent"
+                  >
+                    {expandedGroups.has(contact.id) ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                  </button>
+                )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="font-medium">{contact.name}</span>
@@ -385,6 +407,17 @@ export function ContactsPage() {
                   </DropdownMenuContent>
                 </DropdownMenu>
               </div>
+              {/* Expanded distribution list: the group's member addresses. */}
+              {contact.is_group && expandedGroups.has(contact.id) && (
+                <ul className="border-t bg-muted/20 px-4 py-2 text-sm text-muted-foreground">
+                  {(contact.members || []).map((m) => (
+                    <li key={m} className="flex items-center gap-1 py-0.5">
+                      <Mail className="h-3 w-3" />
+                      {m}
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           ))}
               </div>

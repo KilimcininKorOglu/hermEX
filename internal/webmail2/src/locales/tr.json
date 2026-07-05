@@ -926,7 +926,9 @@
     "homeCity": "Şehir",
     "homeState": "Eyalet",
     "homePostal": "Posta kodu",
-    "homeCountry": "Ülke"
+    "homeCountry": "Ülke",
+    "expand": "Genişlet",
+    "collapse": "Daralt"
   },
   "tasks": {
     "quickAddPlaceholder": "Bir görev ekleyin ve Enter'a basın",

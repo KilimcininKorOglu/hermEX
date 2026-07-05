@@ -926,7 +926,9 @@
     "homeCity": "City",
     "homeState": "State",
     "homePostal": "Postal code",
-    "homeCountry": "Country"
+    "homeCountry": "Country",
+    "expand": "Expand",
+    "collapse": "Collapse"
   },
   "tasks": {
     "quickAddPlaceholder": "Add a task and press Enter",
