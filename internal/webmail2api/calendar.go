@@ -24,22 +24,22 @@ import (
 // uses cannot express all four values (oof has no iCal mapping), so the SPA's
 // choice is authoritative, not the iCal-derived default.
 type eventJSON struct {
-	UID             string `json:"uid"`
-	CalendarID      string `json:"calendarId,omitempty"`
-	Summary         string `json:"summary"`
-	Description     string `json:"description,omitempty"`
-	Location        string `json:"location,omitempty"`
-	Start           string `json:"start"`
-	End             string `json:"end,omitempty"`
-	AllDay          bool   `json:"allDay,omitempty"`
-	ReminderMinutes *int     `json:"reminderMinutes,omitempty"`
-	BusyStatus      *int     `json:"busyStatus,omitempty"`
-	Sensitivity     *int     `json:"sensitivity,omitempty"`  // PR_SENSITIVITY: 0=normal, 2=private, 3=confidential (round-trips via iCal CLASS)
-	Categories      []string `json:"categories,omitempty"`   // PidNameKeywords, the shared category list (store GetCategories/SetCategories)
-	Attendees       []string `json:"attendees,omitempty"`    // smtp addresses; emitted as ATTENDEE so oxcical stores them as recipients
-	OptionalAttendees []string `json:"optionalAttendees,omitempty"` // optional attendees (ROLE=OPT-PARTICIPANT); required default for Attendees
-	SendInvite      bool     `json:"sendInvite,omitempty"`   // when true on create, email a METHOD:REQUEST iTIP invite to the attendees
-	Tracking        []attendeeStatusJSON `json:"tracking,omitempty"` // per-attendee response status (the organizer's TrackingTab), read from the recipients' PidLidResponseStatus
+	UID               string               `json:"uid"`
+	CalendarID        string               `json:"calendarId,omitempty"`
+	Summary           string               `json:"summary"`
+	Description       string               `json:"description,omitempty"`
+	Location          string               `json:"location,omitempty"`
+	Start             string               `json:"start"`
+	End               string               `json:"end,omitempty"`
+	AllDay            bool                 `json:"allDay,omitempty"`
+	ReminderMinutes   *int                 `json:"reminderMinutes,omitempty"`
+	BusyStatus        *int                 `json:"busyStatus,omitempty"`
+	Sensitivity       *int                 `json:"sensitivity,omitempty"`       // PR_SENSITIVITY: 0=normal, 2=private, 3=confidential (round-trips via iCal CLASS)
+	Categories        []string             `json:"categories,omitempty"`        // PidNameKeywords, the shared category list (store GetCategories/SetCategories)
+	Attendees         []string             `json:"attendees,omitempty"`         // smtp addresses; emitted as ATTENDEE so oxcical stores them as recipients
+	OptionalAttendees []string             `json:"optionalAttendees,omitempty"` // optional attendees (ROLE=OPT-PARTICIPANT); required default for Attendees
+	SendInvite        bool                 `json:"sendInvite,omitempty"`        // when true on create, email a METHOD:REQUEST iTIP invite to the attendees
+	Tracking          []attendeeStatusJSON `json:"tracking,omitempty"`          // per-attendee response status (the organizer's TrackingTab), read from the recipients' PidLidResponseStatus
 }
 
 // attendeeStatusJSON is one attendee's response status for the organizer's

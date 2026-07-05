@@ -263,7 +263,7 @@ func TestCalendarEventBusyStatusRoundTrip(t *testing.T) {
 
 	for _, want := range []int{0, 1, 2, 3} {
 		// Create an event with this busy status, then reload and assert it survived.
-		if rec := do(http.MethodPost, "/api/v1/calendar/events", `{"summary":"Meeting","start":"2026-08-02T09:00:00Z","busyStatus":` + strconv.Itoa(want) + `}`); rec.Code != http.StatusOK {
+		if rec := do(http.MethodPost, "/api/v1/calendar/events", `{"summary":"Meeting","start":"2026-08-02T09:00:00Z","busyStatus":`+strconv.Itoa(want)+`}`); rec.Code != http.StatusOK {
 			t.Fatalf("create busyStatus=%d: status %d", want, rec.Code)
 		}
 		rec := do(http.MethodGet, "/api/v1/calendar/events", "")

@@ -96,11 +96,11 @@ func (s *Server) handlePutPreferences(w http.ResponseWriter, r *http.Request) {
 // working window or hides them. Zero values normalize to the Exchange defaults
 // (Monday, 30min, 09:00-18:00, show all hours) so a fresh account lands on a sane grid.
 type calendarSettingsJSON struct {
-	FirstDayOfWeek       int  `json:"firstDayOfWeek"`
-	Resolution           int  `json:"resolution"`
-	WorkDayStart         int  `json:"workDayStart"`
-	WorkDayEnd           int  `json:"workDayEnd"`
-	ShowNonWorkingHours  bool `json:"showNonWorkingHours"`
+	FirstDayOfWeek      int  `json:"firstDayOfWeek"`
+	Resolution          int  `json:"resolution"`
+	WorkDayStart        int  `json:"workDayStart"`
+	WorkDayEnd          int  `json:"workDayEnd"`
+	ShowNonWorkingHours bool `json:"showNonWorkingHours"`
 }
 
 // readCalendarSettings loads the calendar display settings from the shared blob,
