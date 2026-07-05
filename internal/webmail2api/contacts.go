@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcmail"
 	"hermex/internal/oxvcard"
 )
 
@@ -226,6 +228,7 @@ func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 			Assistant:   propString(msg, mapi.PrAssistant),
 			Manager:     propString(msg, mapi.PrManagerName),
 			Office:      propString(msg, mapi.PrOfficeLocation),
+			Anniversary: anniversaryOf(msg),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"contacts": contacts, "total": len(contacts)})
@@ -315,9 +318,20 @@ func storeContact(st *objectstore.Store, c contactJSON) (int64, error) {
 	return id, nil
 }
 
-// setRichContactProps stamps the contact's assistant/manager/office onto the
-// stored message, the string fields oxvcard's vCard import does not map. Empty
-// values are skipped. Anniversary (a PtSysTime) is left to a future step.
+// anniversaryOf reads PrWeddingAnniversary (a PtSysTime, uint64 NT time) and
+// formats it as YYYY-MM-DD, or "" when unset.
+func anniversaryOf(msg *oxcmail.Message) string {
+	if v, ok := msg.Props.Get(mapi.PrWeddingAnniversary); ok {
+		if n, ok := v.(uint64); ok && n != 0 {
+			return mapi.NTTimeToUnix(n).Format("2006-01-02")
+		}
+	}
+	return ""
+}
+
+// setRichContactProps stamps the contact's assistant/manager/office/anniversary
+// onto the stored message, the fields oxvcard's vCard import does not map. Empty
+// values are skipped. Anniversary is a PtSysTime (UnixToNTTime uint64).
 func setRichContactProps(st *objectstore.Store, id int64, c contactJSON) {
 	var props mapi.PropertyValues
 	if c.Assistant != "" {
@@ -328,6 +342,11 @@ func setRichContactProps(st *objectstore.Store, id int64, c contactJSON) {
 	}
 	if c.Office != "" {
 		props.Set(mapi.PrOfficeLocation, c.Office)
+	}
+	if c.Anniversary != "" {
+		if t, err := time.Parse("2006-01-02", c.Anniversary); err == nil {
+			props.Set(mapi.PrWeddingAnniversary, mapi.UnixToNTTime(t))
+		}
 	}
 	if len(props) > 0 {
 		_ = st.SetMessageProperties(id, props)

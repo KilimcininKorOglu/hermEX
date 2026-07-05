@@ -54,6 +54,7 @@ interface Contact {
   mobilePhone?: string
   homePhone?: string
   birthday?: string
+  anniversary?: string
   homeStreet?: string
   homeCity?: string
   homeState?: string
@@ -100,6 +101,7 @@ export function ContactsPage() {
     mobilePhone: "",
     homePhone: "",
     birthday: "",
+    anniversary: "",
     homeStreet: "",
     homeCity: "",
     homeState: "",
@@ -166,7 +168,7 @@ export function ContactsPage() {
   const filteredGal = galEntries.filter((e) => matchesSearch(e.name || "", e.email))
 
   const handleAdd = () => {
-    setFormData({ name: "", email: "", phone: "", company: "", jobTitle: "", department: "", mobilePhone: "", homePhone: "", birthday: "", homeStreet: "", homeCity: "", homeState: "", homePostal: "", homeCountry: "", workStreet: "", workCity: "", workState: "", workPostal: "", workCountry: "", imAddress: "", webPage: "", assistant: "", manager: "", office: "", is_group: false, members: "" })
+    setFormData({ name: "", email: "", phone: "", company: "", jobTitle: "", department: "", mobilePhone: "", homePhone: "", birthday: "", anniversary: "", homeStreet: "", homeCity: "", homeState: "", homePostal: "", homeCountry: "", workStreet: "", workCity: "", workState: "", workPostal: "", workCountry: "", imAddress: "", webPage: "", assistant: "", manager: "", office: "", is_group: false, members: "" })
     setEditingContact(null)
     setShowAddDialog(true)
   }
@@ -182,6 +184,7 @@ export function ContactsPage() {
       mobilePhone: contact.mobilePhone || "",
       homePhone: contact.homePhone || "",
       birthday: contact.birthday || "",
+      anniversary: contact.anniversary || "",
       homeStreet: contact.homeStreet || "",
       homeCity: contact.homeCity || "",
       homeState: contact.homeState || "",
@@ -645,6 +648,10 @@ export function ContactsPage() {
                   <div>
                     <label className="text-sm font-medium">{t("contacts.birthday")}</label>
                     <Input className="mt-1" type="date" value={formData.birthday} onChange={(e) => setFormData({ ...formData, birthday: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.anniversary")}</label>
+                    <Input className="mt-1" type="date" value={formData.anniversary} onChange={(e) => setFormData({ ...formData, anniversary: e.target.value })} />
                   </div>
                   <div>
                     <label className="text-sm font-medium">{t("contacts.imAddress")}</label>

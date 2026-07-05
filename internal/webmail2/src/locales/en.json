@@ -938,7 +938,8 @@
     "workCountry": "Work country",
     "assistant": "Assistant",
     "manager": "Manager",
-    "office": "Office"
+    "office": "Office",
+    "anniversary": "Anniversary"
   },
   "tasks": {
     "quickAddPlaceholder": "Add a task and press Enter",

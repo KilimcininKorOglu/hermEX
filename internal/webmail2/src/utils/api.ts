@@ -516,6 +516,7 @@ export interface Contact {
   mobilePhone?: string
   homePhone?: string
   birthday?: string // YYYY-MM-DD
+  anniversary?: string // YYYY-MM-DD (PrWeddingAnniversary)
   homeStreet?: string
   homeCity?: string
   homeState?: string
