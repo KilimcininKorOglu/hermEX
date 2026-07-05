@@ -528,6 +528,9 @@ export interface Contact {
   workCountry?: string
   imAddress?: string
   webPage?: string
+  assistant?: string
+  manager?: string
+  office?: string
   labels?: string[]
   display_as?: string
   is_group?: boolean

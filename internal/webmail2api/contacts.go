@@ -39,6 +39,10 @@ type contactJSON struct {
 	WorkCountry   string   `json:"workCountry,omitempty"`
 	IMAddress     string   `json:"imAddress,omitempty"`
 	WebPage       string   `json:"webPage,omitempty"`
+	Anniversary   string   `json:"anniversary,omitempty"`   // YYYY-MM-DD (PrWeddingAnniversary, direct prop)
+	Assistant     string   `json:"assistant,omitempty"`     // PrAssistant
+	Manager       string   `json:"manager,omitempty"`       // PrManagerName
+	Office        string   `json:"office,omitempty"`        // PrOfficeLocation
 	IsGroup       bool     `json:"is_group,omitempty"`
 	Members       []string `json:"members,omitempty"`
 }
@@ -219,6 +223,9 @@ func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 			WorkCountry: adr(workAdr, 6),
 			IMAddress:   vcardField(vcf, "IMPP"),
 			WebPage:     vcardField(vcf, "URL"),
+			Assistant:   propString(msg, mapi.PrAssistant),
+			Manager:     propString(msg, mapi.PrManagerName),
+			Office:      propString(msg, mapi.PrOfficeLocation),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"contacts": contacts, "total": len(contacts)})
@@ -298,5 +305,31 @@ func storeContact(st *objectstore.Store, c contactJSON) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	return st.CreateMessage(mapi.PrivateFIDContacts, msg)
+	id, err := st.CreateMessage(mapi.PrivateFIDContacts, msg)
+	if err != nil {
+		return 0, err
+	}
+	// oxvcard's vCard path does not carry anniversary/assistant/manager/office, so
+	// set them directly as MAPI props after the import (the organizer's rich fields).
+	setRichContactProps(st, id, c)
+	return id, nil
+}
+
+// setRichContactProps stamps the contact's assistant/manager/office onto the
+// stored message, the string fields oxvcard's vCard import does not map. Empty
+// values are skipped. Anniversary (a PtSysTime) is left to a future step.
+func setRichContactProps(st *objectstore.Store, id int64, c contactJSON) {
+	var props mapi.PropertyValues
+	if c.Assistant != "" {
+		props.Set(mapi.PrAssistant, c.Assistant)
+	}
+	if c.Manager != "" {
+		props.Set(mapi.PrManagerName, c.Manager)
+	}
+	if c.Office != "" {
+		props.Set(mapi.PrOfficeLocation, c.Office)
+	}
+	if len(props) > 0 {
+		_ = st.SetMessageProperties(id, props)
+	}
 }

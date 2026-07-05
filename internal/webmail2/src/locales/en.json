@@ -935,7 +935,10 @@
     "workCity": "Work city",
     "workState": "Work state",
     "workPostal": "Work postal code",
-    "workCountry": "Work country"
+    "workCountry": "Work country",
+    "assistant": "Assistant",
+    "manager": "Manager",
+    "office": "Office"
   },
   "tasks": {
     "quickAddPlaceholder": "Add a task and press Enter",

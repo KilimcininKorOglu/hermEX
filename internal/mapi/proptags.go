@@ -408,6 +408,7 @@ const (
 
 	// Personal/professional contact details.
 	PrAssistant          = PropTag(0x3A30001F) // PtUnicode (PidTagAssistant)
+	PrManagerName        = PropTag(0x3A0C001F) // PtUnicode (PidTagManagerName)
 	PrSpouseName         = PropTag(0x3A48001F) // PtUnicode (PidTagSpouseName)
 	PrWeddingAnniversary = PropTag(0x3A410040) // PtSysTime (PidTagWeddingAnniversary)
 	PrChildrensNames     = PropTag(0x3A58101F) // PtMultipleUnicode (PidTagChildrensNames)

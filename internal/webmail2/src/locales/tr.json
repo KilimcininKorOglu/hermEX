@@ -935,7 +935,10 @@
     "workCity": "İş şehir",
     "workState": "İş eyalet",
     "workPostal": "İş posta kodu",
-    "workCountry": "İş ülke"
+    "workCountry": "İş ülke",
+    "assistant": "Asistan",
+    "manager": "Yönetici",
+    "office": "Ofis"
   },
   "tasks": {
     "quickAddPlaceholder": "Bir görev ekleyin ve Enter'a basın",
