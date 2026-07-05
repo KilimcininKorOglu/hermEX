@@ -59,6 +59,11 @@ interface Contact {
   homeState?: string
   homePostal?: string
   homeCountry?: string
+  workStreet?: string
+  workCity?: string
+  workState?: string
+  workPostal?: string
+  workCountry?: string
   imAddress?: string
   webPage?: string
   labels: string[]
@@ -97,6 +102,11 @@ export function ContactsPage() {
     homeState: "",
     homePostal: "",
     homeCountry: "",
+    workStreet: "",
+    workCity: "",
+    workState: "",
+    workPostal: "",
+    workCountry: "",
     imAddress: "",
     webPage: "",
     is_group: false,
@@ -150,7 +160,7 @@ export function ContactsPage() {
   const filteredGal = galEntries.filter((e) => matchesSearch(e.name || "", e.email))
 
   const handleAdd = () => {
-    setFormData({ name: "", email: "", phone: "", company: "", jobTitle: "", department: "", mobilePhone: "", homePhone: "", birthday: "", homeStreet: "", homeCity: "", homeState: "", homePostal: "", homeCountry: "", imAddress: "", webPage: "", is_group: false, members: "" })
+    setFormData({ name: "", email: "", phone: "", company: "", jobTitle: "", department: "", mobilePhone: "", homePhone: "", birthday: "", homeStreet: "", homeCity: "", homeState: "", homePostal: "", homeCountry: "", workStreet: "", workCity: "", workState: "", workPostal: "", workCountry: "", imAddress: "", webPage: "", is_group: false, members: "" })
     setEditingContact(null)
     setShowAddDialog(true)
   }
@@ -171,6 +181,11 @@ export function ContactsPage() {
       homeState: contact.homeState || "",
       homePostal: contact.homePostal || "",
       homeCountry: contact.homeCountry || "",
+      workStreet: contact.workStreet || "",
+      workCity: contact.workCity || "",
+      workState: contact.workState || "",
+      workPostal: contact.workPostal || "",
+      workCountry: contact.workCountry || "",
       imAddress: contact.imAddress || "",
       webPage: contact.webPage || "",
       is_group: contact.is_group || false,
@@ -637,6 +652,27 @@ export function ContactsPage() {
                   <div className="col-span-2">
                     <label className="text-sm font-medium">{t("contacts.homeCountry")}</label>
                     <Input className="mt-1" value={formData.homeCountry} onChange={(e) => setFormData({ ...formData, homeCountry: e.target.value })} />
+                  </div>
+                  {/* Work address (ADR;TYPE=work). */}
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.workStreet")}</label>
+                    <Input className="mt-1" value={formData.workStreet} onChange={(e) => setFormData({ ...formData, workStreet: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.workCity")}</label>
+                    <Input className="mt-1" value={formData.workCity} onChange={(e) => setFormData({ ...formData, workCity: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.workState")}</label>
+                    <Input className="mt-1" value={formData.workState} onChange={(e) => setFormData({ ...formData, workState: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.workPostal")}</label>
+                    <Input className="mt-1" value={formData.workPostal} onChange={(e) => setFormData({ ...formData, workPostal: e.target.value })} />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-sm font-medium">{t("contacts.workCountry")}</label>
+                    <Input className="mt-1" value={formData.workCountry} onChange={(e) => setFormData({ ...formData, workCountry: e.target.value })} />
                   </div>
                 </div>
               </>

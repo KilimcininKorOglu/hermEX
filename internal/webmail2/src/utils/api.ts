@@ -521,6 +521,11 @@ export interface Contact {
   homeState?: string
   homePostal?: string
   homeCountry?: string
+  workStreet?: string
+  workCity?: string
+  workState?: string
+  workPostal?: string
+  workCountry?: string
   imAddress?: string
   webPage?: string
   labels?: string[]

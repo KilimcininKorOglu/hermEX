@@ -930,7 +930,12 @@
     "expand": "Genişlet",
     "collapse": "Daralt",
     "listView": "Liste görünümü",
-    "gridView": "Izgara görünümü"
+    "gridView": "Izgara görünümü",
+    "workStreet": "İş sokak",
+    "workCity": "İş şehir",
+    "workState": "İş eyalet",
+    "workPostal": "İş posta kodu",
+    "workCountry": "İş ülke"
   },
   "tasks": {
     "quickAddPlaceholder": "Bir görev ekleyin ve Enter'a basın",

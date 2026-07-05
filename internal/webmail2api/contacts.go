@@ -32,6 +32,11 @@ type contactJSON struct {
 	HomeState     string   `json:"homeState,omitempty"`
 	HomePostal    string   `json:"homePostal,omitempty"`
 	HomeCountry   string   `json:"homeCountry,omitempty"`
+	WorkStreet    string   `json:"workStreet,omitempty"`
+	WorkCity      string   `json:"workCity,omitempty"`
+	WorkState     string   `json:"workState,omitempty"`
+	WorkPostal    string   `json:"workPostal,omitempty"`
+	WorkCountry   string   `json:"workCountry,omitempty"`
 	IMAddress     string   `json:"imAddress,omitempty"`
 	WebPage       string   `json:"webPage,omitempty"`
 	IsGroup       bool     `json:"is_group,omitempty"`
@@ -78,6 +83,9 @@ func buildVCard(c contactJSON) []byte {
 	if c.HomeStreet != "" || c.HomeCity != "" || c.HomeState != "" || c.HomePostal != "" || c.HomeCountry != "" {
 		// ADR is semicolon-delimited: pobox ; ext ; street ; city ; state ; postal ; country
 		fmt.Fprintf(&b, "ADR;TYPE=HOME:;;%s;%s;%s;%s;%s\r\n", c.HomeStreet, c.HomeCity, c.HomeState, c.HomePostal, c.HomeCountry)
+	}
+	if c.WorkStreet != "" || c.WorkCity != "" || c.WorkState != "" || c.WorkPostal != "" || c.WorkCountry != "" {
+		fmt.Fprintf(&b, "ADR;TYPE=WORK:;;%s;%s;%s;%s;%s\r\n", c.WorkStreet, c.WorkCity, c.WorkState, c.WorkPostal, c.WorkCountry)
 	}
 	if c.IMAddress != "" {
 		fmt.Fprintf(&b, "IMPP:%s\r\n", c.IMAddress)
@@ -178,12 +186,15 @@ func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		org, _, _ := strings.Cut(vcardField(vcf, "ORG"), ";")
-		// The home address is one ADR line, semicolon-delimited:
-		// pobox ; ext ; street ; city ; state ; postal ; country
-		adrFields := strings.Split(vcardField(vcf, "ADR"), ";")
-		street, city, state, postal, country := "", "", "", "", ""
-		if len(adrFields) >= 7 {
-			street, city, state, postal, country = adrFields[2], adrFields[3], adrFields[4], adrFields[5], adrFields[6]
+		// Home and work addresses are separate ADR lines (TYPE=HOME/WORK), each
+		// semicolon-delimited: pobox ; ext ; street ; city ; state ; postal ; country
+		homeAdr := strings.Split(vcardTypedField(vcf, "ADR", "HOME"), ";")
+		workAdr := strings.Split(vcardTypedField(vcf, "ADR", "WORK"), ";")
+		adr := func(fields []string, i int) string {
+			if i < len(fields) {
+				return fields[i]
+			}
+			return ""
 		}
 		contacts = append(contacts, contactJSON{
 			ID:          strconv.FormatInt(o.ID, 10),
@@ -196,11 +207,16 @@ func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 			JobTitle:    vcardField(vcf, "TITLE"),
 			Department:  vcardField(vcf, "ROLE"),
 			Birthday:    vcardField(vcf, "BDAY"),
-			HomeStreet:  street,
-			HomeCity:    city,
-			HomeState:   state,
-			HomePostal:  postal,
-			HomeCountry: country,
+			HomeStreet:  adr(homeAdr, 2),
+			HomeCity:    adr(homeAdr, 3),
+			HomeState:   adr(homeAdr, 4),
+			HomePostal:  adr(homeAdr, 5),
+			HomeCountry: adr(homeAdr, 6),
+			WorkStreet:  adr(workAdr, 2),
+			WorkCity:    adr(workAdr, 3),
+			WorkState:   adr(workAdr, 4),
+			WorkPostal:  adr(workAdr, 5),
+			WorkCountry: adr(workAdr, 6),
 			IMAddress:   vcardField(vcf, "IMPP"),
 			WebPage:     vcardField(vcf, "URL"),
 		})

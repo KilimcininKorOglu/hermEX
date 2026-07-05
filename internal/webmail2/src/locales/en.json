@@ -930,7 +930,12 @@
     "expand": "Expand",
     "collapse": "Collapse",
     "listView": "List view",
-    "gridView": "Grid view"
+    "gridView": "Grid view",
+    "workStreet": "Work street",
+    "workCity": "Work city",
+    "workState": "Work state",
+    "workPostal": "Work postal code",
+    "workCountry": "Work country"
   },
   "tasks": {
     "quickAddPlaceholder": "Add a task and press Enter",
