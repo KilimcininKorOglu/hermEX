@@ -988,7 +988,8 @@
     "priorityLow": "Low",
     "priorityNormal": "Normal",
     "priorityHigh": "High",
-    "reminder": "Reminder"
+    "reminder": "Reminder",
+    "categories": "Categories"
   },
   "notes": {
     "newNote": "New note",

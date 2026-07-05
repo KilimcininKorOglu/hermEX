@@ -988,7 +988,8 @@
     "priorityLow": "Düşük",
     "priorityNormal": "Normal",
     "priorityHigh": "Yüksek",
-    "reminder": "Hatırlatma"
+    "reminder": "Hatırlatma",
+    "categories": "Kategoriler"
   },
   "notes": {
     "newNote": "Yeni not",

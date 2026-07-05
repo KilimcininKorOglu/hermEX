@@ -39,6 +39,7 @@ const emptyForm: TaskForm = { summary: "", start: "", due: "", priority: 1, remi
 export function TasksPage() {
   const { t } = useI18n()
   const [tasks, setTasks] = useState<Task[]>([])
+  const [allCategories, setAllCategories] = useState<{ name: string; color?: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [quickAdd, setQuickAdd] = useState("")
   const [busy, setBusy] = useState(false)
@@ -64,6 +65,9 @@ export function TasksPage() {
 
   useEffect(() => {
     load()
+    api.getCategories()
+      .then((res) => setAllCategories(res.categories ?? []))
+      .catch(() => setAllCategories([]))
   }, [load])
 
   const handleQuickAdd = async () => {
@@ -287,6 +291,39 @@ export function TasksPage() {
                 {t("tasks.reminder")}
               </label>
             </div>
+            {allCategories.length > 0 && (
+              <div className="space-y-2">
+                <Label>{t("tasks.categories")}</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {allCategories.map((cat) => {
+                    const on = form.categories.includes(cat.name)
+                    return (
+                      <button
+                        key={cat.name}
+                        type="button"
+                        className="rounded-full border px-2.5 py-0.5 text-xs transition-colors"
+                        style={{
+                          borderColor: cat.color ?? "#3b82f6",
+                          color: cat.color ?? "#3b82f6",
+                          backgroundColor: on ? `${cat.color ?? "#3b82f6"}15` : "transparent",
+                          opacity: on ? 1 : 0.5,
+                        }}
+                        onClick={() =>
+                          setForm((prev) => ({
+                            ...prev,
+                            categories: on
+                              ? prev.categories.filter((c) => c !== cat.name)
+                              : [...prev.categories, cat.name],
+                          }))
+                        }
+                      >
+                        {cat.name}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="task-desc">{t("tasks.description")}</Label>
               <Textarea
