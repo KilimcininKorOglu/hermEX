@@ -26,11 +26,15 @@ function dueLabel(due?: string): string {
 
 interface TaskForm {
   summary: string
+  start: string
   due: string
+  priority: number
+  reminder: boolean
+  categories: string[]
   description: string
 }
 
-const emptyForm: TaskForm = { summary: "", due: "", description: "" }
+const emptyForm: TaskForm = { summary: "", start: "", due: "", priority: 1, reminder: false, categories: [], description: "" }
 
 export function TasksPage() {
   const { t } = useI18n()
@@ -82,7 +86,11 @@ export function TasksPage() {
     setTasks((prev) => prev.map((t) => (t.uid === task.uid ? { ...t, completed: !t.completed } : t)))
     const payload: TaskInput = {
       summary: task.summary,
+      start: task.start,
       due: task.due,
+      priority: task.priority,
+      reminder: task.reminder,
+      categories: task.categories,
       description: task.description,
       completed: !task.completed,
     }
@@ -97,7 +105,15 @@ export function TasksPage() {
 
   const openEdit = (task: Task) => {
     setEditing(task)
-    setForm({ summary: task.summary, due: task.due ?? "", description: task.description ?? "" })
+    setForm({
+      summary: task.summary,
+      start: task.start ?? "",
+      due: task.due ?? "",
+      priority: task.priority ?? 1,
+      reminder: task.reminder ?? false,
+      categories: task.categories ?? [],
+      description: task.description ?? "",
+    })
   }
 
   const submitEdit = async () => {
@@ -110,7 +126,11 @@ export function TasksPage() {
     try {
       await api.updateTask(editing.uid, {
         summary: form.summary.trim(),
+        start: form.start || undefined,
         due: form.due || undefined,
+        priority: form.priority,
+        reminder: form.reminder,
+        categories: form.categories.length > 0 ? form.categories : undefined,
         description: form.description || undefined,
         completed: editing.completed,
       })
@@ -234,6 +254,38 @@ export function TasksPage() {
                 value={form.due.length >= 10 ? form.due.slice(0, 10) : form.due}
                 onChange={(e) => setForm({ ...form, due: e.target.value })}
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="task-start">{t("tasks.startDate")}</Label>
+              <Input
+                id="task-start"
+                type="date"
+                value={form.start.length >= 10 ? form.start.slice(0, 10) : form.start}
+                onChange={(e) => setForm({ ...form, start: e.target.value })}
+              />
+            </div>
+            <div className="flex items-center gap-6">
+              <div className="space-y-2">
+                <Label htmlFor="task-priority">{t("tasks.priority")}</Label>
+                <select
+                  id="task-priority"
+                  className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+                  value={form.priority}
+                  onChange={(e) => setForm({ ...form, priority: Number(e.target.value) })}
+                >
+                  <option value={0}>{t("tasks.priorityLow")}</option>
+                  <option value={1}>{t("tasks.priorityNormal")}</option>
+                  <option value={2}>{t("tasks.priorityHigh")}</option>
+                </select>
+              </div>
+              <label className="flex items-center gap-2 text-sm font-medium pt-6">
+                <input
+                  type="checkbox"
+                  checked={form.reminder}
+                  onChange={(e) => setForm({ ...form, reminder: e.target.checked })}
+                />
+                {t("tasks.reminder")}
+              </label>
             </div>
             <div className="space-y-2">
               <Label htmlFor="task-desc">{t("tasks.description")}</Label>

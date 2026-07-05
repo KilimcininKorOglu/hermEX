@@ -16,11 +16,15 @@ import (
 // canonical oxtask named properties (the one model ActiveSync, EWS, and a MAPI
 // client share); a note maps to PR_SUBJECT (title) and PR_BODY (body).
 type taskJSON struct {
-	UID         string `json:"uid"`
-	Summary     string `json:"summary"`
-	Description string `json:"description,omitempty"`
-	Due         string `json:"due,omitempty"`
-	Completed   bool   `json:"completed"`
+	UID         string   `json:"uid"`
+	Summary     string   `json:"summary"`
+	Description string   `json:"description,omitempty"`
+	Start       string   `json:"start,omitempty"` // YYYY-MM-DD (task start date)
+	Due         string   `json:"due,omitempty"`
+	Priority    int      `json:"priority,omitempty"` // 0=low, 1=normal, 2=high (PR_IMPORTANCE)
+	Reminder    bool     `json:"reminder,omitempty"` // PidLidReminderSet
+	Categories  []string `json:"categories,omitempty"`
+	Completed   bool     `json:"completed"`
 }
 
 type noteJSON struct {
@@ -55,18 +59,36 @@ func jsonToTask(in taskJSON) oxtask.Task {
 	t.Subject = in.Summary
 	t.Body = in.Description
 	t.Complete = in.Completed
+	t.Importance = in.Priority
+	t.ReminderSet = in.Reminder
+	t.Categories = in.Categories
 	if in.Due != "" {
 		if due, ok := parseDue(in.Due); ok {
 			t.Due = due
+		}
+	}
+	if in.Start != "" {
+		if start, ok := parseDue(in.Start); ok {
+			t.Start = start
 		}
 	}
 	return t
 }
 
 func taskToJSON(t oxtask.Task) taskJSON {
-	j := taskJSON{Summary: t.Subject, Description: t.Body, Completed: t.Complete}
+	j := taskJSON{
+		Summary:     t.Subject,
+		Description: t.Body,
+		Completed:   t.Complete,
+		Priority:    t.Importance,
+		Reminder:    t.ReminderSet,
+		Categories:  t.Categories,
+	}
 	if !t.Due.IsZero() {
 		j.Due = formatDue(t.Due)
+	}
+	if !t.Start.IsZero() {
+		j.Start = formatDue(t.Start)
 	}
 	return j
 }
@@ -172,12 +194,19 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 	}
 	defer st.Close()
 	// Merge the SPA's fields onto the stored task so fields it does not surface
-	// (reminder, importance, categories) set by another protocol are not lost.
+	// (status, percent complete) set by another protocol are not lost.
 	merged := jsonToTask(in)
 	if old, err := strconv.ParseInt(r.PathValue("uid"), 10, 64); err == nil {
 		if msg, err := st.OpenMessage(old); err == nil {
 			if prev, err := oxtask.FromProps(msg.Props, st.GetNamedPropIDs); err == nil {
-				prev.Subject, prev.Body, prev.Complete, prev.Due = merged.Subject, merged.Body, merged.Complete, merged.Due
+				prev.Subject = merged.Subject
+				prev.Body = merged.Body
+				prev.Complete = merged.Complete
+				prev.Due = merged.Due
+				prev.Start = merged.Start
+				prev.Importance = merged.Importance
+				prev.ReminderSet = merged.ReminderSet
+				prev.Categories = merged.Categories
 				merged = prev
 			}
 		}

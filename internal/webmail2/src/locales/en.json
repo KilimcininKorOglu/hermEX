@@ -982,7 +982,13 @@
     "addFailed": "Failed to add task",
     "updateFailed": "Failed to update task",
     "saveFailed": "Failed to save task",
-    "deleteFailed": "Failed to delete task"
+    "deleteFailed": "Failed to delete task",
+    "startDate": "Start date",
+    "priority": "Priority",
+    "priorityLow": "Low",
+    "priorityNormal": "Normal",
+    "priorityHigh": "High",
+    "reminder": "Reminder"
   },
   "notes": {
     "newNote": "New note",

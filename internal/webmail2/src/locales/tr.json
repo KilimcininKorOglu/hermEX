@@ -982,7 +982,13 @@
     "addFailed": "Görev eklenemedi",
     "updateFailed": "Görev güncellenemedi",
     "saveFailed": "Görev kaydedilemedi",
-    "deleteFailed": "Görev silinemedi"
+    "deleteFailed": "Görev silinemedi",
+    "startDate": "Başlangıç tarihi",
+    "priority": "Öncelik",
+    "priorityLow": "Düşük",
+    "priorityNormal": "Normal",
+    "priorityHigh": "Yüksek",
+    "reminder": "Hatırlatma"
   },
   "notes": {
     "newNote": "Yeni not",
