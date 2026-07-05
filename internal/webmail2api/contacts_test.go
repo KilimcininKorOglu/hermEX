@@ -242,3 +242,54 @@ func TestContactExport(t *testing.T) {
 		t.Errorf("export content-disposition = %q, want filename=\"NikolaTesla.vcf\"", cd)
 	}
 }
+
+// TestContactExportDistributionList proves a contact group (IPM.DistList)
+// exports as a multi-vCard document: one minimal vCard per member address.
+func TestContactExportDistributionList(t *testing.T) {
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	st.Close()
+
+	secret := []byte("contacts-dl-export-test-secret")
+	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
+	do := func(method, target, body string) *httptest.ResponseRecorder {
+		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+		var req *http.Request
+		if body == "" {
+			req = httptest.NewRequest(method, target, nil)
+		} else {
+			req = httptest.NewRequest(method, target, strings.NewReader(body))
+		}
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+
+	rec := do(http.MethodPost, "/api/v1/contacts", `{"name":"Engineering","is_group":true,"members":["eng-a@hermex.test","eng-b@hermex.test"]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create: status %d body %s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		Contact contactJSON `json:"contact"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	rec = do(http.MethodGet, "/api/v1/contacts/"+created.Contact.ID+"/vcard", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("export: status %d", rec.Code)
+	}
+	body := rec.Body.String()
+	// One BEGIN:VCARD per member.
+	if got := strings.Count(body, "BEGIN:VCARD"); got != 2 {
+		t.Errorf("export has %d vCards, want 2", got)
+	}
+	if !strings.Contains(body, "EMAIL:eng-a@hermex.test") || !strings.Contains(body, "EMAIL:eng-b@hermex.test") {
+		t.Errorf("export body missing a member EMAIL: %s", body)
+	}
+}

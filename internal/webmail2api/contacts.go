@@ -682,12 +682,27 @@ func (s *Server) handleExportContact(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such contact"})
 		return
 	}
-	vcf, err := oxvcard.Export(msg, oxvcard.Options{Resolver: st.GetNamedPropIDs})
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not export"})
-		return
+	// A distribution list exports as a multi-vCard document: one minimal vCard per
+	// member (FN + EMAIL), the shape Outlook saves for a personal DL.
+	var vcf []byte
+	if propString(msg, mapi.PrMessageClass) == "IPM.DistList" {
+		var body distListBody
+		_ = json.Unmarshal([]byte(propString(msg, mapi.PrBody)), &body)
+		var vb strings.Builder
+		for _, m := range body.Members {
+			vb.WriteString("BEGIN:VCARD\r\nVERSION:4.0\r\n")
+			fmt.Fprintf(&vb, "FN:%s\r\nEMAIL:%s\r\n", m, m)
+			vb.WriteString("END:VCARD\r\n")
+		}
+		vcf = []byte(vb.String())
+	} else {
+		vcf, err = oxvcard.Export(msg, oxvcard.Options{Resolver: st.GetNamedPropIDs})
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not export"})
+			return
+		}
 	}
-	// Filename: the contact's display name, sanitized to a safe filename.
+	// Filename: the contact's (or list's) name, sanitized to a safe filename.
 	name := propString(msg, mapi.PrDisplayName)
 	if name == "" {
 		name = propString(msg, mapi.PrSubject)

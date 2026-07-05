@@ -562,12 +562,10 @@ export function ContactsPage() {
                       <Edit className="h-4 w-4 mr-2" />
                       {t("common.edit")}
                     </DropdownMenuItem>
-                    {!contact.is_group && (
-                      <DropdownMenuItem onClick={() => handleExport(contact)}>
-                        <Download className="h-4 w-4 mr-2" />
-                        {t("contacts.exportVCard")}
-                      </DropdownMenuItem>
-                    )}
+                    <DropdownMenuItem onClick={() => handleExport(contact)}>
+                      <Download className="h-4 w-4 mr-2" />
+                      {t("contacts.exportVCard")}
+                    </DropdownMenuItem>
                     <DropdownMenuItem
                       className="text-destructive"
                       onClick={() => setDeleteTarget(contact)}
