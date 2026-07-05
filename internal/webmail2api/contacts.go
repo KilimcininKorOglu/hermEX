@@ -36,11 +36,12 @@ type contactJSON struct {
 	Department  string   `json:"department,omitempty"`
 	MobilePhone string   `json:"mobilePhone,omitempty"`
 	HomePhone   string   `json:"homePhone,omitempty"`
-	Birthday    string   `json:"birthday,omitempty"`   // YYYY-MM-DD
-	Nickname    string   `json:"nickname,omitempty"`   // PrNickname (vCard NICKNAME)
-	FileAs      string   `json:"fileAs,omitempty"`     // PidLidFileAs (PSETID_Address named prop)
-	Profession  string   `json:"profession,omitempty"` // PrProfession
-	Spouse      string   `json:"spouse,omitempty"`     // PrSpouseName
+	BusinessFax string   `json:"businessFax,omitempty"` // PrBusinessFaxNumber (vCard TEL;TYPE=fax,work)
+	Birthday    string   `json:"birthday,omitempty"`    // YYYY-MM-DD
+	Nickname    string   `json:"nickname,omitempty"`    // PrNickname (vCard NICKNAME)
+	FileAs      string   `json:"fileAs,omitempty"`      // PidLidFileAs (PSETID_Address named prop)
+	Profession  string   `json:"profession,omitempty"`  // PrProfession
+	Spouse      string   `json:"spouse,omitempty"`      // PrSpouseName
 	HomeStreet  string   `json:"homeStreet,omitempty"`
 	HomeCity    string   `json:"homeCity,omitempty"`
 	HomeState   string   `json:"homeState,omitempty"`
@@ -101,6 +102,9 @@ func buildVCard(c contactJSON) []byte {
 	}
 	if c.HomePhone != "" {
 		fmt.Fprintf(&b, "TEL;TYPE=HOME:%s\r\n", c.HomePhone)
+	}
+	if c.BusinessFax != "" {
+		fmt.Fprintf(&b, "TEL;TYPE=fax,work:%s\r\n", c.BusinessFax)
 	}
 	if c.Company != "" || c.Department != "" {
 		// ORG is semicolon-delimited: company ; department. oxvcard maps ORG's
@@ -290,6 +294,7 @@ func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 			Phone:       vcardTypedField(vcf, "TEL", "WORK"), // business telephone
 			MobilePhone: vcardTypedField(vcf, "TEL", "CELL"),
 			HomePhone:   vcardTypedField(vcf, "TEL", "HOME"),
+			BusinessFax: vcardTypedField(vcf, "TEL", "FAX"),
 			Company:     orgAt(0),
 			JobTitle:    vcardField(vcf, "TITLE"),
 			Department:  orgAt(1),

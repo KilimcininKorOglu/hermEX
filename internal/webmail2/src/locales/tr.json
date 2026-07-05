@@ -957,7 +957,8 @@
     "firstName": "Ad",
     "middleName": "İkinci ad",
     "lastName": "Soyad",
-    "suffix": "Son ek"
+    "suffix": "Son ek",
+    "businessFax": "İş faksı"
   },
   "tasks": {
     "quickAddPlaceholder": "Bir görev ekleyin ve Enter'a basın",

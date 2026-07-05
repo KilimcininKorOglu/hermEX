@@ -60,6 +60,7 @@ interface Contact {
   department?: string
   mobilePhone?: string
   homePhone?: string
+  businessFax?: string
   birthday?: string
   anniversary?: string
   billing?: string
@@ -128,6 +129,7 @@ export function ContactsPage() {
     department: "",
     mobilePhone: "",
     homePhone: "",
+    businessFax: "",
     birthday: "",
     anniversary: "",
     billing: "",
@@ -205,7 +207,7 @@ export function ContactsPage() {
   const filteredGal = galEntries.filter((e) => matchesSearch(e.name || "", e.email))
 
   const handleAdd = () => {
-    setFormData({ name: "", prefix: "", firstName: "", middleName: "", lastName: "", suffix: "", email: "", email2: "", email3: "", phone: "", company: "", jobTitle: "", department: "", mobilePhone: "", homePhone: "", birthday: "", anniversary: "", billing: "", nickname: "", fileAs: "", profession: "", spouse: "", categories: [], homeStreet: "", homeCity: "", homeState: "", homePostal: "", homeCountry: "", workStreet: "", workCity: "", workState: "", workPostal: "", workCountry: "", imAddress: "", webPage: "", assistant: "", manager: "", office: "", is_group: false, members: "" })
+    setFormData({ name: "", prefix: "", firstName: "", middleName: "", lastName: "", suffix: "", email: "", email2: "", email3: "", phone: "", company: "", jobTitle: "", department: "", mobilePhone: "", homePhone: "", businessFax: "", birthday: "", anniversary: "", billing: "", nickname: "", fileAs: "", profession: "", spouse: "", categories: [], homeStreet: "", homeCity: "", homeState: "", homePostal: "", homeCountry: "", workStreet: "", workCity: "", workState: "", workPostal: "", workCountry: "", imAddress: "", webPage: "", assistant: "", manager: "", office: "", is_group: false, members: "" })
     setEditingContact(null)
     setPhotoError(false)
     setShowAddDialog(true)
@@ -228,6 +230,7 @@ export function ContactsPage() {
       department: contact.department || "",
       mobilePhone: contact.mobilePhone || "",
       homePhone: contact.homePhone || "",
+      businessFax: contact.businessFax || "",
       birthday: contact.birthday || "",
       anniversary: contact.anniversary || "",
       billing: contact.billing || "",
@@ -827,6 +830,10 @@ export function ContactsPage() {
                   <div>
                     <label className="text-sm font-medium">{t("contacts.homePhone")}</label>
                     <Input className="mt-1" value={formData.homePhone} onChange={(e) => setFormData({ ...formData, homePhone: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.businessFax")}</label>
+                    <Input className="mt-1" value={formData.businessFax} onChange={(e) => setFormData({ ...formData, businessFax: e.target.value })} />
                   </div>
                   <div>
                     <label className="text-sm font-medium">{t("contacts.birthday")}</label>
