@@ -541,6 +541,11 @@ export interface Contact {
   workState?: string
   workPostal?: string
   workCountry?: string
+  otherStreet?: string
+  otherCity?: string
+  otherState?: string
+  otherPostal?: string
+  otherCountry?: string
   imAddress?: string
   webPage?: string
   assistant?: string

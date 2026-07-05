@@ -958,7 +958,12 @@
     "middleName": "Middle name",
     "lastName": "Last name",
     "suffix": "Suffix",
-    "businessFax": "Business fax"
+    "businessFax": "Business fax",
+    "otherStreet": "Other street",
+    "otherCity": "Other city",
+    "otherState": "Other state",
+    "otherPostal": "Other postal",
+    "otherCountry": "Other country"
   },
   "tasks": {
     "quickAddPlaceholder": "Add a task and press Enter",

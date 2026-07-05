@@ -42,7 +42,7 @@ func TestContactRichFieldsRoundTrip(t *testing.T) {
 		return rec
 	}
 
-	body := `{"name":"Ada Lovelace","prefix":"Dr.","firstName":"Ada","middleName":"Augusta","lastName":"Lovelace","suffix":"Jr.","email":"ada@analytical.test","email2":"ada@home.test","email3":"ada@academy.test","phone":"+1 555 0100","mobilePhone":"+1 555 0101","homePhone":"+1 555 0102","businessFax":"+1 555 0199","company":"Analytical Engine","jobTitle":"Mathematician","department":"Science","birthday":"1815-12-10","nickname":"Ada","fileAs":"Lovelace, Ada","profession":"Mathematician","spouse":"Charles","billing":"Project X-1815","categories":["VIP","Pioneers"],"homeStreet":"221B Baker St","homeCity":"London","homeState":"","homePostal":"NW1","homeCountry":"UK","imAddress":"ada@im.test","webPage":"https://example.test/ada"}`
+	body := `{"name":"Ada Lovelace","prefix":"Dr.","firstName":"Ada","middleName":"Augusta","lastName":"Lovelace","suffix":"Jr.","email":"ada@analytical.test","email2":"ada@home.test","email3":"ada@academy.test","phone":"+1 555 0100","mobilePhone":"+1 555 0101","homePhone":"+1 555 0102","businessFax":"+1 555 0199","company":"Analytical Engine","jobTitle":"Mathematician","department":"Science","birthday":"1815-12-10","nickname":"Ada","fileAs":"Lovelace, Ada","profession":"Mathematician","spouse":"Charles","billing":"Project X-1815","categories":["VIP","Pioneers"],"homeStreet":"221B Baker St","homeCity":"London","homeState":"","homePostal":"NW1","homeCountry":"UK","otherStreet":"10 Downing","otherCity":"Westminster","otherState":"Lon","otherPostal":"SW1","otherCountry":"GB","imAddress":"ada@im.test","webPage":"https://example.test/ada"}`
 	if rec := do(http.MethodPost, "/api/v1/contacts", body); rec.Code != http.StatusOK {
 		t.Fatalf("create: status %d body %s", rec.Code, rec.Body.String())
 	}
@@ -71,7 +71,9 @@ func TestContactRichFieldsRoundTrip(t *testing.T) {
 		"birthday": c.Birthday, "billing": c.Billing, "nickname": c.Nickname,
 		"fileAs": c.FileAs, "profession": c.Profession, "spouse": c.Spouse,
 		"homeStreet": c.HomeStreet, "homeCity": c.HomeCity, "homePostal": c.HomePostal,
-		"homeCountry": c.HomeCountry, "imAddress": c.IMAddress, "webPage": c.WebPage,
+		"homeCountry": c.HomeCountry, "otherStreet": c.OtherStreet, "otherCity": c.OtherCity,
+		"otherPostal": c.OtherPostal, "otherCountry": c.OtherCountry,
+		"imAddress": c.IMAddress, "webPage": c.WebPage,
 	}
 	want := map[string]string{
 		"name": "Ada Lovelace", "prefix": "Dr.", "firstName": "Ada",
@@ -83,8 +85,9 @@ func TestContactRichFieldsRoundTrip(t *testing.T) {
 		"department": "Science", "birthday": "1815-12-10", "billing": "Project X-1815",
 		"nickname": "Ada", "fileAs": "Lovelace, Ada", "profession": "Mathematician",
 		"spouse": "Charles", "homeStreet": "221B Baker St", "homeCity": "London",
-		"homePostal": "NW1", "homeCountry": "UK", "imAddress": "ada@im.test",
-		"webPage": "https://example.test/ada",
+		"homePostal": "NW1", "homeCountry": "UK", "otherStreet": "10 Downing",
+		"otherCity": "Westminster", "otherPostal": "SW1", "otherCountry": "GB",
+		"imAddress": "ada@im.test", "webPage": "https://example.test/ada",
 	}
 	for k, w := range want {
 		if checks[k] != w {

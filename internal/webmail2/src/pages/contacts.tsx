@@ -79,6 +79,11 @@ interface Contact {
   workState?: string
   workPostal?: string
   workCountry?: string
+  otherStreet?: string
+  otherCity?: string
+  otherState?: string
+  otherPostal?: string
+  otherCountry?: string
   imAddress?: string
   webPage?: string
   assistant?: string
@@ -148,6 +153,11 @@ export function ContactsPage() {
     workState: "",
     workPostal: "",
     workCountry: "",
+    otherStreet: "",
+    otherCity: "",
+    otherState: "",
+    otherPostal: "",
+    otherCountry: "",
     imAddress: "",
     webPage: "",
     assistant: "",
@@ -207,7 +217,7 @@ export function ContactsPage() {
   const filteredGal = galEntries.filter((e) => matchesSearch(e.name || "", e.email))
 
   const handleAdd = () => {
-    setFormData({ name: "", prefix: "", firstName: "", middleName: "", lastName: "", suffix: "", email: "", email2: "", email3: "", phone: "", company: "", jobTitle: "", department: "", mobilePhone: "", homePhone: "", businessFax: "", birthday: "", anniversary: "", billing: "", nickname: "", fileAs: "", profession: "", spouse: "", categories: [], homeStreet: "", homeCity: "", homeState: "", homePostal: "", homeCountry: "", workStreet: "", workCity: "", workState: "", workPostal: "", workCountry: "", imAddress: "", webPage: "", assistant: "", manager: "", office: "", is_group: false, members: "" })
+    setFormData({ name: "", prefix: "", firstName: "", middleName: "", lastName: "", suffix: "", email: "", email2: "", email3: "", phone: "", company: "", jobTitle: "", department: "", mobilePhone: "", homePhone: "", businessFax: "", birthday: "", anniversary: "", billing: "", nickname: "", fileAs: "", profession: "", spouse: "", categories: [], homeStreet: "", homeCity: "", homeState: "", homePostal: "", homeCountry: "", workStreet: "", workCity: "", workState: "", workPostal: "", workCountry: "", otherStreet: "", otherCity: "", otherState: "", otherPostal: "", otherCountry: "", imAddress: "", webPage: "", assistant: "", manager: "", office: "", is_group: false, members: "" })
     setEditingContact(null)
     setPhotoError(false)
     setShowAddDialog(true)
@@ -249,6 +259,11 @@ export function ContactsPage() {
       workState: contact.workState || "",
       workPostal: contact.workPostal || "",
       workCountry: contact.workCountry || "",
+      otherStreet: contact.otherStreet || "",
+      otherCity: contact.otherCity || "",
+      otherState: contact.otherState || "",
+      otherPostal: contact.otherPostal || "",
+      otherCountry: contact.otherCountry || "",
       imAddress: contact.imAddress || "",
       webPage: contact.webPage || "",
       assistant: contact.assistant || "",
@@ -944,6 +959,26 @@ export function ContactsPage() {
                   <div className="col-span-2">
                     <label className="text-sm font-medium">{t("contacts.workCountry")}</label>
                     <Input className="mt-1" value={formData.workCountry} onChange={(e) => setFormData({ ...formData, workCountry: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.otherStreet")}</label>
+                    <Input className="mt-1" value={formData.otherStreet} onChange={(e) => setFormData({ ...formData, otherStreet: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.otherCity")}</label>
+                    <Input className="mt-1" value={formData.otherCity} onChange={(e) => setFormData({ ...formData, otherCity: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.otherState")}</label>
+                    <Input className="mt-1" value={formData.otherState} onChange={(e) => setFormData({ ...formData, otherState: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium">{t("contacts.otherPostal")}</label>
+                    <Input className="mt-1" value={formData.otherPostal} onChange={(e) => setFormData({ ...formData, otherPostal: e.target.value })} />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="text-sm font-medium">{t("contacts.otherCountry")}</label>
+                    <Input className="mt-1" value={formData.otherCountry} onChange={(e) => setFormData({ ...formData, otherCountry: e.target.value })} />
                   </div>
                 </div>
               </>

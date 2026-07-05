@@ -20,48 +20,53 @@ import (
 // fields (title, department, phones, birthday, home address, IM, web page) round-
 // trip through oxvcard's vCard import/export, the same path every protocol reads.
 type contactJSON struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`                 // FN (formatted name)
-	Prefix      string   `json:"prefix,omitempty"`     // PrDisplayNamePrefix (N component 3: Dr./Mr./...)
-	FirstName   string   `json:"firstName,omitempty"`  // PrGivenName (N component 1)
-	MiddleName  string   `json:"middleName,omitempty"` // PrMiddleName (N component 2)
-	LastName    string   `json:"lastName,omitempty"`   // PrSurname (N component 0)
-	Suffix      string   `json:"suffix,omitempty"`     // PrGeneration (N component 4: Jr./Sr./...)
-	Email       string   `json:"email"`
-	Email2      string   `json:"email2,omitempty"` // PidLidEmail2EmailAddress (vCard 2nd EMAIL)
-	Email3      string   `json:"email3,omitempty"` // PidLidEmail3EmailAddress (vCard 3rd EMAIL)
-	Phone       string   `json:"phone,omitempty"`  // business telephone
-	Company     string   `json:"company,omitempty"`
-	JobTitle    string   `json:"jobTitle,omitempty"`
-	Department  string   `json:"department,omitempty"`
-	MobilePhone string   `json:"mobilePhone,omitempty"`
-	HomePhone   string   `json:"homePhone,omitempty"`
-	BusinessFax string   `json:"businessFax,omitempty"` // PrBusinessFaxNumber (vCard TEL;TYPE=fax,work)
-	Birthday    string   `json:"birthday,omitempty"`    // YYYY-MM-DD
-	Nickname    string   `json:"nickname,omitempty"`    // PrNickname (vCard NICKNAME)
-	FileAs      string   `json:"fileAs,omitempty"`      // PidLidFileAs (PSETID_Address named prop)
-	Profession  string   `json:"profession,omitempty"`  // PrProfession
-	Spouse      string   `json:"spouse,omitempty"`      // PrSpouseName
-	HomeStreet  string   `json:"homeStreet,omitempty"`
-	HomeCity    string   `json:"homeCity,omitempty"`
-	HomeState   string   `json:"homeState,omitempty"`
-	HomePostal  string   `json:"homePostal,omitempty"`
-	HomeCountry string   `json:"homeCountry,omitempty"`
-	WorkStreet  string   `json:"workStreet,omitempty"`
-	WorkCity    string   `json:"workCity,omitempty"`
-	WorkState   string   `json:"workState,omitempty"`
-	WorkPostal  string   `json:"workPostal,omitempty"`
-	WorkCountry string   `json:"workCountry,omitempty"`
-	IMAddress   string   `json:"imAddress,omitempty"`
-	WebPage     string   `json:"webPage,omitempty"`
-	Anniversary string   `json:"anniversary,omitempty"` // YYYY-MM-DD (PrWeddingAnniversary, direct prop)
-	Billing     string   `json:"billing,omitempty"`     // PidLidBilling (PSETID_Common named prop)
-	Assistant   string   `json:"assistant,omitempty"`   // PrAssistant
-	Manager     string   `json:"manager,omitempty"`     // PrManagerName
-	Office      string   `json:"office,omitempty"`      // PrOfficeLocation
-	Categories  []string `json:"categories,omitempty"`  // PidNameKeywords, shared category list
-	IsGroup     bool     `json:"is_group,omitempty"`
-	Members     []string `json:"members,omitempty"`
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`                 // FN (formatted name)
+	Prefix       string   `json:"prefix,omitempty"`     // PrDisplayNamePrefix (N component 3: Dr./Mr./...)
+	FirstName    string   `json:"firstName,omitempty"`  // PrGivenName (N component 1)
+	MiddleName   string   `json:"middleName,omitempty"` // PrMiddleName (N component 2)
+	LastName     string   `json:"lastName,omitempty"`   // PrSurname (N component 0)
+	Suffix       string   `json:"suffix,omitempty"`     // PrGeneration (N component 4: Jr./Sr./...)
+	Email        string   `json:"email"`
+	Email2       string   `json:"email2,omitempty"` // PidLidEmail2EmailAddress (vCard 2nd EMAIL)
+	Email3       string   `json:"email3,omitempty"` // PidLidEmail3EmailAddress (vCard 3rd EMAIL)
+	Phone        string   `json:"phone,omitempty"`  // business telephone
+	Company      string   `json:"company,omitempty"`
+	JobTitle     string   `json:"jobTitle,omitempty"`
+	Department   string   `json:"department,omitempty"`
+	MobilePhone  string   `json:"mobilePhone,omitempty"`
+	HomePhone    string   `json:"homePhone,omitempty"`
+	BusinessFax  string   `json:"businessFax,omitempty"` // PrBusinessFaxNumber (vCard TEL;TYPE=fax,work)
+	Birthday     string   `json:"birthday,omitempty"`    // YYYY-MM-DD
+	Nickname     string   `json:"nickname,omitempty"`    // PrNickname (vCard NICKNAME)
+	FileAs       string   `json:"fileAs,omitempty"`      // PidLidFileAs (PSETID_Address named prop)
+	Profession   string   `json:"profession,omitempty"`  // PrProfession
+	Spouse       string   `json:"spouse,omitempty"`      // PrSpouseName
+	HomeStreet   string   `json:"homeStreet,omitempty"`
+	HomeCity     string   `json:"homeCity,omitempty"`
+	HomeState    string   `json:"homeState,omitempty"`
+	HomePostal   string   `json:"homePostal,omitempty"`
+	HomeCountry  string   `json:"homeCountry,omitempty"`
+	WorkStreet   string   `json:"workStreet,omitempty"`
+	WorkCity     string   `json:"workCity,omitempty"`
+	WorkState    string   `json:"workState,omitempty"`
+	WorkPostal   string   `json:"workPostal,omitempty"`
+	WorkCountry  string   `json:"workCountry,omitempty"`
+	OtherStreet  string   `json:"otherStreet,omitempty"`
+	OtherCity    string   `json:"otherCity,omitempty"`
+	OtherState   string   `json:"otherState,omitempty"`
+	OtherPostal  string   `json:"otherPostal,omitempty"`
+	OtherCountry string   `json:"otherCountry,omitempty"`
+	IMAddress    string   `json:"imAddress,omitempty"`
+	WebPage      string   `json:"webPage,omitempty"`
+	Anniversary  string   `json:"anniversary,omitempty"` // YYYY-MM-DD (PrWeddingAnniversary, direct prop)
+	Billing      string   `json:"billing,omitempty"`     // PidLidBilling (PSETID_Common named prop)
+	Assistant    string   `json:"assistant,omitempty"`   // PrAssistant
+	Manager      string   `json:"manager,omitempty"`     // PrManagerName
+	Office       string   `json:"office,omitempty"`      // PrOfficeLocation
+	Categories   []string `json:"categories,omitempty"`  // PidNameKeywords, shared category list
+	IsGroup      bool     `json:"is_group,omitempty"`
+	Members      []string `json:"members,omitempty"`
 }
 
 // distListBody is the JSON payload stored in a contact group's message body.
@@ -128,6 +133,9 @@ func buildVCard(c contactJSON) []byte {
 	}
 	if c.WorkStreet != "" || c.WorkCity != "" || c.WorkState != "" || c.WorkPostal != "" || c.WorkCountry != "" {
 		fmt.Fprintf(&b, "ADR;TYPE=WORK:;;%s;%s;%s;%s;%s\r\n", c.WorkStreet, c.WorkCity, c.WorkState, c.WorkPostal, c.WorkCountry)
+	}
+	if c.OtherStreet != "" || c.OtherCity != "" || c.OtherState != "" || c.OtherPostal != "" || c.OtherCountry != "" {
+		fmt.Fprintf(&b, "ADR;TYPE=OTHER:;;%s;%s;%s;%s;%s\r\n", c.OtherStreet, c.OtherCity, c.OtherState, c.OtherPostal, c.OtherCountry)
 	}
 	if c.IMAddress != "" {
 		fmt.Fprintf(&b, "IMPP:%s\r\n", c.IMAddress)
@@ -267,6 +275,7 @@ func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 		// semicolon-delimited: pobox ; ext ; street ; city ; state ; postal ; country
 		homeAdr := strings.Split(vcardTypedField(vcf, "ADR", "HOME"), ";")
 		workAdr := strings.Split(vcardTypedField(vcf, "ADR", "WORK"), ";")
+		otherAdr := strings.Split(vcardTypedField(vcf, "ADR", "OTHER"), ";")
 		adr := func(fields []string, i int) string {
 			if i < len(fields) {
 				return fields[i]
@@ -281,45 +290,50 @@ func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 			return ""
 		}
 		contacts = append(contacts, contactJSON{
-			ID:          strconv.FormatInt(o.ID, 10),
-			Name:        vcardField(vcf, "FN"),
-			LastName:    nameAt(0),
-			FirstName:   nameAt(1),
-			MiddleName:  nameAt(2),
-			Prefix:      nameAt(3),
-			Suffix:      nameAt(4),
-			Email:       emailAt(0),
-			Email2:      emailAt(1),
-			Email3:      emailAt(2),
-			Phone:       vcardTypedField(vcf, "TEL", "WORK"), // business telephone
-			MobilePhone: vcardTypedField(vcf, "TEL", "CELL"),
-			HomePhone:   vcardTypedField(vcf, "TEL", "HOME"),
-			BusinessFax: vcardTypedField(vcf, "TEL", "FAX"),
-			Company:     orgAt(0),
-			JobTitle:    vcardField(vcf, "TITLE"),
-			Department:  orgAt(1),
-			Birthday:    vcardField(vcf, "BDAY"),
-			Nickname:    vcardField(vcf, "NICKNAME"),
-			FileAs:      fileAsOf(st, msg),
-			Profession:  vcardField(vcf, "ROLE"),
-			Spouse:      propString(msg, mapi.PrSpouseName),
-			HomeStreet:  adr(homeAdr, 2),
-			HomeCity:    adr(homeAdr, 3),
-			HomeState:   adr(homeAdr, 4),
-			HomePostal:  adr(homeAdr, 5),
-			HomeCountry: adr(homeAdr, 6),
-			WorkStreet:  adr(workAdr, 2),
-			WorkCity:    adr(workAdr, 3),
-			WorkState:   adr(workAdr, 4),
-			WorkPostal:  adr(workAdr, 5),
-			WorkCountry: adr(workAdr, 6),
-			IMAddress:   vcardField(vcf, "IMPP"),
-			WebPage:     vcardField(vcf, "URL"),
-			Assistant:   propString(msg, mapi.PrAssistant),
-			Manager:     propString(msg, mapi.PrManagerName),
-			Office:      propString(msg, mapi.PrOfficeLocation),
-			Anniversary: anniversaryOf(msg),
-			Billing:     billingOf(st, msg),
+			ID:           strconv.FormatInt(o.ID, 10),
+			Name:         vcardField(vcf, "FN"),
+			LastName:     nameAt(0),
+			FirstName:    nameAt(1),
+			MiddleName:   nameAt(2),
+			Prefix:       nameAt(3),
+			Suffix:       nameAt(4),
+			Email:        emailAt(0),
+			Email2:       emailAt(1),
+			Email3:       emailAt(2),
+			Phone:        vcardTypedField(vcf, "TEL", "WORK"), // business telephone
+			MobilePhone:  vcardTypedField(vcf, "TEL", "CELL"),
+			HomePhone:    vcardTypedField(vcf, "TEL", "HOME"),
+			BusinessFax:  vcardTypedField(vcf, "TEL", "FAX"),
+			Company:      orgAt(0),
+			JobTitle:     vcardField(vcf, "TITLE"),
+			Department:   orgAt(1),
+			Birthday:     vcardField(vcf, "BDAY"),
+			Nickname:     vcardField(vcf, "NICKNAME"),
+			FileAs:       fileAsOf(st, msg),
+			Profession:   vcardField(vcf, "ROLE"),
+			Spouse:       propString(msg, mapi.PrSpouseName),
+			HomeStreet:   adr(homeAdr, 2),
+			HomeCity:     adr(homeAdr, 3),
+			HomeState:    adr(homeAdr, 4),
+			HomePostal:   adr(homeAdr, 5),
+			HomeCountry:  adr(homeAdr, 6),
+			WorkStreet:   adr(workAdr, 2),
+			WorkCity:     adr(workAdr, 3),
+			WorkState:    adr(workAdr, 4),
+			WorkPostal:   adr(workAdr, 5),
+			WorkCountry:  adr(workAdr, 6),
+			OtherStreet:  adr(otherAdr, 2),
+			OtherCity:    adr(otherAdr, 3),
+			OtherState:   adr(otherAdr, 4),
+			OtherPostal:  adr(otherAdr, 5),
+			OtherCountry: adr(otherAdr, 6),
+			IMAddress:    vcardField(vcf, "IMPP"),
+			WebPage:      vcardField(vcf, "URL"),
+			Assistant:    propString(msg, mapi.PrAssistant),
+			Manager:      propString(msg, mapi.PrManagerName),
+			Office:       propString(msg, mapi.PrOfficeLocation),
+			Anniversary:  anniversaryOf(msg),
+			Billing:      billingOf(st, msg),
 		})
 		if cats, err := st.GetCategories(o.ID); err == nil && len(cats) > 0 {
 			contacts[len(contacts)-1].Categories = cats

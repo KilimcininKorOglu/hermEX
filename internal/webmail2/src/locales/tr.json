@@ -958,7 +958,12 @@
     "middleName": "İkinci ad",
     "lastName": "Soyad",
     "suffix": "Son ek",
-    "businessFax": "İş faksı"
+    "businessFax": "İş faksı",
+    "otherStreet": "Diğer sokak",
+    "otherCity": "Diğer şehir",
+    "otherState": "Diğer eyalet",
+    "otherPostal": "Diğer posta kodu",
+    "otherCountry": "Diğer ülke"
   },
   "tasks": {
     "quickAddPlaceholder": "Bir görev ekleyin ve Enter'a basın",
