@@ -996,7 +996,8 @@
     "statusComplete": "Tamamlandı",
     "statusWaiting": "Bekliyor",
     "statusDeferred": "Ertelendi",
-    "percent": "% tamamlandı"
+    "percent": "% tamamlandı",
+    "hideCompleted": "Tamamlananları gizle"
   },
   "notes": {
     "newNote": "Yeni not",

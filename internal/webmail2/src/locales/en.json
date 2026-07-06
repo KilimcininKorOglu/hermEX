@@ -996,7 +996,8 @@
     "statusComplete": "Complete",
     "statusWaiting": "Waiting",
     "statusDeferred": "Deferred",
-    "percent": "% complete"
+    "percent": "% complete",
+    "hideCompleted": "Hide completed"
   },
   "notes": {
     "newNote": "New note",

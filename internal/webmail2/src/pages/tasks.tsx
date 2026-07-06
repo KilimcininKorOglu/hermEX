@@ -48,6 +48,9 @@ export function TasksPage() {
   const [editing, setEditing] = useState<Task | null>(null)
   const [form, setForm] = useState<TaskForm>(emptyForm)
   const [deleteTarget, setDeleteTarget] = useState<Task | null>(null)
+  // hideCompleted is the to-do filter: when on, finished tasks drop out of the
+  // list so the active work stays on screen (Outlook's To-Do view).
+  const [hideCompleted, setHideCompleted] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -191,11 +194,19 @@ export function TasksPage() {
           <Plus className="mr-2 h-4 w-4" />
           {t("common.add")}
         </Button>
+        <label className="ml-auto flex items-center gap-2 text-sm text-muted-foreground cursor-pointer">
+          <input
+            type="checkbox"
+            checked={hideCompleted}
+            onChange={(e) => setHideCompleted(e.target.checked)}
+          />
+          {t("tasks.hideCompleted")}
+        </label>
       </div>
 
       {loading ? (
         <p className="text-sm text-muted-foreground py-8 text-center">{t("common.loading")}</p>
-      ) : tasks.length === 0 ? (
+      ) : (tasks.length === 0 || (hideCompleted && tasks.every((t) => t.completed))) ? (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <div className="rounded-full bg-muted p-4">
             <ListTodo className="h-8 w-8 text-muted-foreground" />
@@ -205,7 +216,7 @@ export function TasksPage() {
         </div>
       ) : (
         <div className="rounded-lg border bg-card divide-y">
-          {tasks.map((task) => (
+          {tasks.filter((task) => !hideCompleted || !task.completed).map((task) => (
             <div key={task.uid} className="flex items-start gap-3 p-3 hover:bg-accent/50 transition-colors">
               <Checkbox
                 checked={task.completed}
