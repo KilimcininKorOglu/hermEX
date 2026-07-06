@@ -157,6 +157,32 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
   // inboxEmails is already the server page for the current folder/filter/sort.
   const emails: Email[] = useMemo(() => inboxEmails.map(toEmail), [inboxEmails])
 
+  // j/k list navigation: j → next email, k → previous, Enter → open. Ignored while
+  // typing in an input/textarea so ordinary text entry never hijacks the keys.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (emails.length === 0) return
+      const idx = selectedId ? emails.findIndex((em) => em.id === selectedId) : -1
+      if (e.key === "j" || e.key === "ArrowDown") {
+        e.preventDefault()
+        const next = idx < 0 ? 0 : Math.min(idx + 1, emails.length - 1)
+        setSelectedId(emails[next].id)
+      } else if (e.key === "k" || e.key === "ArrowUp") {
+        e.preventDefault()
+        const prev = idx < 0 ? 0 : Math.max(idx - 1, 0)
+        setSelectedId(emails[prev].id)
+      } else if (e.key === "Enter" && selectedId) {
+        e.preventDefault()
+        navigate(`/email/${selectedId}`)
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [emails, selectedId, navigate])
+
   // Conversations are grouped server-side; the list view is server-paged so the
   // current page alone is not enough. Fetch the grouped inbox when the view opens.
   const [threadGroups, setThreadGroups] = useState<ThreadGroup[]>([])
