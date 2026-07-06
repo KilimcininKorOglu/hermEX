@@ -15,6 +15,7 @@ import {
   Users,
   LayoutGrid,
   List as ListIcon,
+  MapPin,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -566,6 +567,18 @@ export function ContactsPage() {
                       <Download className="h-4 w-4 mr-2" />
                       {t("contacts.exportVCard")}
                     </DropdownMenuItem>
+                    {!contact.is_group && (contact.homeStreet || contact.workStreet) && (
+                      <DropdownMenuItem
+                        onClick={() => {
+                          const a = [contact.workStreet, contact.workCity, contact.workCountry].filter(Boolean).join(", ") ||
+                            [contact.homeStreet, contact.homeCity, contact.homeCountry].filter(Boolean).join(", ")
+                          window.open(`https://www.openstreetmap.org/search?query=${encodeURIComponent(a)}`, "_blank")
+                        }}
+                      >
+                        <MapPin className="h-4 w-4 mr-2" />
+                        {t("contacts.showOnMap")}
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem
                       className="text-destructive"
                       onClick={() => setDeleteTarget(contact)}

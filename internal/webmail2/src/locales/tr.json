@@ -992,7 +992,8 @@
     "otherCity": "Diğer şehir",
     "otherState": "Diğer eyalet",
     "otherPostal": "Diğer posta kodu",
-    "otherCountry": "Diğer ülke"
+    "otherCountry": "Diğer ülke",
+    "showOnMap": "Haritada göster"
   },
   "tasks": {
     "quickAddPlaceholder": "Bir görev ekleyin ve Enter'a basın",

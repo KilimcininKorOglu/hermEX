@@ -992,7 +992,8 @@
     "otherCity": "Other city",
     "otherState": "Other state",
     "otherPostal": "Other postal",
-    "otherCountry": "Other country"
+    "otherCountry": "Other country",
+    "showOnMap": "Show on map"
   },
   "tasks": {
     "quickAddPlaceholder": "Add a task and press Enter",
