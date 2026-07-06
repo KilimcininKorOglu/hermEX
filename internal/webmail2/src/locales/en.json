@@ -227,7 +227,8 @@
     "inlineReplyTo": "Reply to {{who}}",
     "replyPlaceholder": "Type your reply…",
     "replySent": "Reply sent",
-    "replyFailed": "Reply failed"
+    "replyFailed": "Reply failed",
+    "itemData": "Item data"
   },
   "compose": {
     "invalidEmail": "Enter a valid email address",

@@ -25,6 +25,7 @@ import {
   Undo2,
   RotateCcw,
   Copy,
+  Braces,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -140,6 +141,8 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
   const [replyOpen, setReplyOpen] = useState(false)
   const [replyBody, setReplyBody] = useState("")
   const [replyBusy, setReplyBusy] = useState(false)
+  // Item data: a dev-only raw property dump (the JSON the API returned).
+  const [itemDataOpen, setItemDataOpen] = useState(false)
   // Propose-new-time: a dialog where the invitee picks a proposed start/end and
   // emails a METHOD:COUNTER iTIP to the organizer.
   const [proposeOpen, setProposeOpen] = useState(false)
@@ -739,6 +742,14 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
               <Button
                 variant="ghost"
                 size="icon"
+                onClick={() => setItemDataOpen((v) => !v)}
+                title={t("emailDetail.itemData")}
+              >
+                <Braces className="h-5 w-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
                 onClick={() => window.print()}
                 title={t("emailDetail.print")}
               >
@@ -1079,6 +1090,15 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                     {replyBusy ? t("common.sending") : t("common.send")}
                   </Button>
                 </div>
+              </div>
+            )}
+            {itemDataOpen && (
+              <div className="mt-4 rounded-lg border bg-muted/30 p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-xs font-medium uppercase text-muted-foreground">{t("emailDetail.itemData")}</span>
+                  <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => setItemDataOpen(false)}>×</button>
+                </div>
+                <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">{JSON.stringify(email, null, 2)}</pre>
               </div>
             )}
           </div>
