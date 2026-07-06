@@ -1315,6 +1315,11 @@
     "openTasks": "Görevleri aç",
     "unreadMail": "{count} okunmamış",
     "noUnread": "Gelen kutusu güncel",
-    "noTasks": "Açık görev yok"
+    "noTasks": "Açık görev yok",
+    "quickNote": "Hızlı not",
+    "quickNotePlaceholder": "Bir not yaz…",
+    "openNotes": "Notları aç",
+    "quickContact": "Hızlı kişi",
+    "openContacts": "Kişileri aç"
   }
 }

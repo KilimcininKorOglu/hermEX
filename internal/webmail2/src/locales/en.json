@@ -1315,6 +1315,11 @@
     "openTasks": "Open tasks",
     "unreadMail": "{count} unread",
     "noUnread": "Inbox is up to date",
-    "noTasks": "No open tasks"
+    "noTasks": "No open tasks",
+    "quickNote": "Quick note",
+    "quickNotePlaceholder": "Jot a note…",
+    "openNotes": "Open notes",
+    "quickContact": "Quick contact",
+    "openContacts": "Open contacts"
   }
 }

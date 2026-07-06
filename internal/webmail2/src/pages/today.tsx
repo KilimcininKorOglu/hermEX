@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { CalendarDays, Mail, ListTodo, Plus, Clock } from "lucide-react"
+import { CalendarDays, Mail, ListTodo, Plus, Clock, StickyNote, Users } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import api, { type CalendarEvent, type Task } from "@/utils/api"
+import api, { type CalendarEvent, type Task, type Contact } from "@/utils/api"
 import { useMailbox } from "@/contexts/MailboxContext"
 import { useI18n } from "@/hooks/useI18n"
 import { withTz } from "@/utils/date"
@@ -36,10 +36,16 @@ export function TodayPage() {
   const [quickSummary, setQuickSummary] = useState("")
   const [quickTime, setQuickTime] = useState("09:00")
   const [quickBusy, setQuickBusy] = useState(false)
+  // QuickNoteWidget + QuickContactWidget quick-create state.
+  const [quickNote, setQuickNote] = useState("")
+  const [quickContactName, setQuickContactName] = useState("")
+  const [quickContactEmail, setQuickContactEmail] = useState("")
+  const [recentContacts, setRecentContacts] = useState<Contact[]>([])
 
   useEffect(() => {
     api.getCalendarEvents().then((res) => setEvents(res.events ?? [])).catch(() => setEvents([]))
     api.getTasks().then((res) => setTasks(res.tasks ?? [])).catch(() => setTasks([]))
+    api.getContacts().then((res) => setRecentContacts((res.contacts ?? []).slice(0, 5))).catch(() => setRecentContacts([]))
   }, [])
 
   const todayKey = dateKey(new Date())
@@ -65,6 +71,31 @@ export function TodayPage() {
       /* best-effort */
     } finally {
       setQuickBusy(false)
+    }
+  }
+
+  // QuickNoteWidget: capture a one-line note without leaving the dashboard.
+  const quickAddNote = async () => {
+    const body = quickNote.trim()
+    if (!body) return
+    try {
+      await api.createNote({ title: body, body: "" })
+      setQuickNote("")
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  // QuickContactWidget: add a name + email contact in two fields.
+  const quickAddContact = async () => {
+    const name = quickContactName.trim()
+    if (!name) return
+    try {
+      await api.createContact({ name, email: quickContactEmail.trim(), is_group: false })
+      setQuickContactName("")
+      setQuickContactEmail("")
+    } catch {
+      /* best-effort */
     }
   }
 
@@ -178,6 +209,80 @@ export function TodayPage() {
                       {new Date(tk.due).toLocaleDateString()}
                     </span>
                   )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        {/* QuickNoteWidget: capture a note in one line. */}
+        <section className="rounded-lg border bg-card p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="flex items-center gap-2 font-medium">
+              <StickyNote className="h-4 w-4" /> {t("today.quickNote")}
+            </h2>
+            <Button variant="ghost" size="sm" onClick={() => navigate("/notes")}>
+              {t("today.openNotes")}
+            </Button>
+          </div>
+          <form
+            className="mt-3 flex gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void quickAddNote()
+            }}
+          >
+            <Input
+              value={quickNote}
+              onChange={(e) => setQuickNote(e.target.value)}
+              placeholder={t("today.quickNotePlaceholder")}
+            />
+            <Button type="submit" size="sm" disabled={!quickNote.trim()}>
+              <Plus className="mr-1 h-4 w-4" />
+              {t("common.add")}
+            </Button>
+          </form>
+        </section>
+
+        {/* QuickContactWidget: add a contact + recent contacts. */}
+        <section className="rounded-lg border bg-card p-4">
+          <div className="flex items-center justify-between">
+            <h2 className="flex items-center gap-2 font-medium">
+              <Users className="h-4 w-4" /> {t("today.quickContact")}
+            </h2>
+            <Button variant="ghost" size="sm" onClick={() => navigate("/contacts")}>
+              {t("today.openContacts")}
+            </Button>
+          </div>
+          <form
+            className="mt-3 grid gap-2 sm:grid-cols-[1fr_1fr_auto]"
+            onSubmit={(e) => {
+              e.preventDefault()
+              void quickAddContact()
+            }}
+          >
+            <Input
+              value={quickContactName}
+              onChange={(e) => setQuickContactName(e.target.value)}
+              placeholder={t("common.name")}
+            />
+            <Input
+              value={quickContactEmail}
+              onChange={(e) => setQuickContactEmail(e.target.value)}
+              placeholder={t("common.email")}
+            />
+            <Button type="submit" size="sm" disabled={!quickContactName.trim()}>
+              <Plus className="mr-1 h-4 w-4" />
+              {t("common.add")}
+            </Button>
+          </form>
+          {recentContacts.length > 0 && (
+            <ul className="mt-3 space-y-1.5">
+              {recentContacts.map((c) => (
+                <li key={c.id} className="flex items-center gap-2 text-sm">
+                  <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  <span className="truncate">{c.name}</span>
+                  {c.email && <span className="ml-auto shrink-0 text-xs text-muted-foreground truncate">{c.email}</span>}
                 </li>
               ))}
             </ul>
