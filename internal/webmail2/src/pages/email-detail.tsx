@@ -325,6 +325,19 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
     navigate(`/compose?${params.toString()}`)
   }
 
+  // r/a reply shortcuts: r → reply, a → reply-all. Ignored while typing.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.key === "r") { e.preventDefault(); handleReply() }
+      else if (e.key === "a") { e.preventDefault(); handleReplyAll() }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  })
+
   const handleReplyAll = () => {
     if (!email) return
     const self = user?.email?.toLowerCase()
