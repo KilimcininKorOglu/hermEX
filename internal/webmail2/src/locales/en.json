@@ -1024,7 +1024,8 @@
     "noteUpdated": "Note updated",
     "saveFailed": "Failed to save note",
     "noteDeleted": "Note deleted",
-    "deleteFailed": "Failed to delete note"
+    "deleteFailed": "Failed to delete note",
+    "color": "Color"
   },
   "sent": {
     "selectedCount": "{{count}} selected",

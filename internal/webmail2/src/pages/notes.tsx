@@ -19,9 +19,25 @@ import { useI18n } from "@/hooks/useI18n"
 interface NoteForm {
   title: string
   body: string
+  color: number // PidLidNoteColor: 0 blue, 1 green, 2 pink, 3 yellow, 4 white
 }
 
-const emptyForm: NoteForm = { title: "", body: "" }
+const emptyForm: NoteForm = { title: "", body: "", color: 3 }
+
+// NOTE_COLORS maps a PidLidNoteColor value to the soft background it renders as.
+// 0 blue, 1 green, 2 pink, 3 yellow (default), 4 white.
+const NOTE_COLORS: { value: number; bg: string }[] = [
+  { value: 0, bg: "#bcd4f5" }, // blue
+  { value: 1, bg: "#cdeba6" }, // green
+  { value: 2, bg: "#f6c6e0" }, // pink
+  { value: 3, bg: "#fff19a" }, // yellow
+  { value: 4, bg: "#ffffff" }, // white
+]
+
+// noteBg returns the soft background for a color value (yellow default).
+function noteBg(color: number | undefined): string {
+  return (NOTE_COLORS.find((c) => c.value === color) ?? NOTE_COLORS[3]).bg
+}
 
 export function NotesPage() {
   const { t } = useI18n()
@@ -56,7 +72,7 @@ export function NotesPage() {
 
   const openEdit = (note: Note) => {
     setEditing(note)
-    setForm({ title: note.title ?? "", body: note.body ?? "" })
+    setForm({ title: note.title ?? "", body: note.body ?? "", color: note.color ?? 3 })
   }
 
   const submitCreate = async () => {
@@ -66,7 +82,7 @@ export function NotesPage() {
     }
     setBusy(true)
     try {
-      await api.createNote({ title: form.title.trim(), body: form.body })
+      await api.createNote({ title: form.title.trim(), body: form.body, color: form.color })
       toast.success(t("notes.noteCreated"))
       setCreating(false)
       await load()
@@ -85,7 +101,7 @@ export function NotesPage() {
     }
     setBusy(true)
     try {
-      await api.updateNote(editing.id, { title: form.title.trim(), body: form.body })
+      await api.updateNote(editing.id, { title: form.title.trim(), body: form.body, color: form.color })
       toast.success(t("notes.noteUpdated"))
       setEditing(null)
       await load()
@@ -139,7 +155,8 @@ export function NotesPage() {
           {notes.map((note) => (
             <div
               key={note.id}
-              className="group flex flex-col rounded-lg border bg-card p-4 hover:bg-accent/50 transition-colors"
+              className="group flex flex-col rounded-lg border p-4 transition-colors"
+              style={{ backgroundColor: noteBg(note.color) }}
             >
               <div className="flex items-start justify-between gap-2">
                 <p className="font-medium break-words">{note.title || t("notes.untitled")}</p>
@@ -191,6 +208,21 @@ export function NotesPage() {
                 placeholder={t("notes.bodyPlaceholder")}
               />
             </div>
+            <div className="space-y-2">
+              <Label>{t("notes.color")}</Label>
+              <div className="flex gap-2">
+                {NOTE_COLORS.map((c) => (
+                  <button
+                    key={c.value}
+                    type="button"
+                    aria-label={t("notes.color")}
+                    className={`h-7 w-7 rounded-full border-2 transition-transform ${form.color === c.value ? "scale-110 ring-2 ring-primary ring-offset-1" : "border-border"}`}
+                    style={{ backgroundColor: c.bg }}
+                    onClick={() => setForm({ ...form, color: c.value })}
+                  />
+                ))}
+              </div>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreating(false)} disabled={busy}>
@@ -227,6 +259,21 @@ export function NotesPage() {
                 onChange={(e) => setForm({ ...form, body: e.target.value })}
                 rows={6}
               />
+            </div>
+            <div className="space-y-2">
+              <Label>{t("notes.color")}</Label>
+              <div className="flex gap-2">
+                {NOTE_COLORS.map((c) => (
+                  <button
+                    key={c.value}
+                    type="button"
+                    aria-label={t("notes.color")}
+                    className={`h-7 w-7 rounded-full border-2 transition-transform ${form.color === c.value ? "scale-110 ring-2 ring-primary ring-offset-1" : "border-border"}`}
+                    style={{ backgroundColor: c.bg }}
+                    onClick={() => setForm({ ...form, color: c.value })}
+                  />
+                ))}
+              </div>
             </div>
           </div>
           <DialogFooter>

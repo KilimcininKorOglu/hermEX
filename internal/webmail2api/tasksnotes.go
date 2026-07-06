@@ -33,6 +33,7 @@ type noteJSON struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
 	Body  string `json:"body"`
+	Color int    `json:"color,omitempty"` // PidLidNoteColor: 0 blue, 1 green, 2 pink, 3 yellow, 4 white
 }
 
 // propString returns a message property as a string (props may hold string or
@@ -160,6 +161,31 @@ func (s *Server) storeTask(st *objectstore.Store, t oxtask.Task) (int64, error) 
 	return st.CreateMessage(mapi.PrivateFIDTasks, &oxcmail.Message{Props: props})
 }
 
+// noteColorTag resolves PidLidNoteColor (NameNoteColor, PSETID_Note) to a PtLong
+// tag for this store, allocating its id when create is set.
+func noteColorTag(st *objectstore.Store, create bool) (mapi.PropTag, error) {
+	ids, err := st.GetNamedPropIDs(create, []mapi.PropertyName{mapi.NameNoteColor})
+	if err != nil || len(ids) == 0 || ids[0] == 0 {
+		return 0, err
+	}
+	return mapi.PropTag(uint32(ids[0])<<16 | uint32(mapi.PtLong)), nil
+}
+
+// noteColorOf reads PidLidNoteColor from the stored note; an unset named prop
+// yields 3 (yellow, the Outlook default).
+func noteColorOf(st *objectstore.Store, msg *oxcmail.Message) int {
+	tag, err := noteColorTag(st, false)
+	if err != nil || tag == 0 {
+		return 3
+	}
+	if v, ok := msg.Props.Get(tag); ok {
+		if n, ok := v.(int32); ok {
+			return int(n)
+		}
+	}
+	return 3
+}
+
 // ---- Tasks ----
 
 func (s *Server) handleGetTasks(w http.ResponseWriter, r *http.Request) {
@@ -267,6 +293,7 @@ func (s *Server) handleGetNotes(w http.ResponseWriter, r *http.Request) {
 			ID:    strconv.FormatInt(o.ID, 10),
 			Title: propString(msg, mapi.PrSubject),
 			Body:  propString(msg, mapi.PrBody),
+			Color: noteColorOf(st, msg),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"notes": notes})
@@ -287,12 +314,22 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 	props.Set(mapi.PrMessageClass, "IPM.StickyNote")
 	props.Set(mapi.PrSubject, in.Title)
 	props.Set(mapi.PrBody, in.Body)
+	// Color 0 means unset; an absent PidLidNoteColor reads back as yellow (3),
+	// the Outlook default. A non-zero color is stamped explicitly.
+	if in.Color != 0 {
+		if tag, err := noteColorTag(st, true); err == nil && tag != 0 {
+			props.Set(tag, int32(in.Color))
+		}
+	}
 	id, err := st.CreateMessage(mapi.PrivateFIDNotes, &oxcmail.Message{Props: props})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save note"})
 		return
 	}
 	in.ID = strconv.FormatInt(id, 10)
+	if in.Color == 0 {
+		in.Color = 3
+	}
 	writeJSON(w, http.StatusOK, in)
 }
 
@@ -314,6 +351,11 @@ func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 	props.Set(mapi.PrMessageClass, "IPM.StickyNote")
 	props.Set(mapi.PrSubject, in.Title)
 	props.Set(mapi.PrBody, in.Body)
+	if in.Color != 0 {
+		if tag, err := noteColorTag(st, true); err == nil && tag != 0 {
+			props.Set(tag, int32(in.Color))
+		}
+	}
 	id, err := st.CreateMessage(mapi.PrivateFIDNotes, &oxcmail.Message{Props: props})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save note"})

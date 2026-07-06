@@ -1024,7 +1024,8 @@
     "noteUpdated": "Not güncellendi",
     "saveFailed": "Not kaydedilemedi",
     "noteDeleted": "Not silindi",
-    "deleteFailed": "Not silinemedi"
+    "deleteFailed": "Not silinemedi",
+    "color": "Renk"
   },
   "sent": {
     "selectedCount": "{{count}} seçili",

@@ -188,11 +188,12 @@ export interface Note {
   id: string
   title: string
   body: string
+  color?: number // PidLidNoteColor: 0 blue, 1 green, 2 pink, 3 yellow, 4 white
   created?: string
   updated?: string
 }
 
-export type NoteInput = { title: string; body: string }
+export type NoteInput = { title: string; body: string; color?: number }
 
 export interface Delegation {
   id: string

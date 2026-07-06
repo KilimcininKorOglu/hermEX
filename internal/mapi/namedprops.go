@@ -25,6 +25,9 @@ var (
 	// canonical model so a task is identical across webmail, ActiveSync, and a MAPI
 	// client (Outlook).
 	PsetidTask = GUID{Data1: 0x00062003, Data4: [8]byte{0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}}
+	// PsetidNote {0006200E-0000-0000-C000-000000000046} holds the sticky-note
+	// named properties, notably PidLidNoteColor (the note's background color).
+	PsetidNote = GUID{Data1: 0x0006200E, Data4: [8]byte{0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}}
 	// PsetidMeeting {6ED8DA90-450B-101B-98DA-00AA003F1305} holds meeting-object
 	// named properties such as the global object id (UID). Unlike the other
 	// namespaces it is NOT a member of the {...-C000-...-46} family — it is a
@@ -52,6 +55,10 @@ var (
 	// NameKeywords (PidNameKeywords, PS_PUBLIC_STRINGS/"Keywords", PtMvUnicode) is
 	// a message's category list.
 	NameKeywords = PropertyName{Kind: MnidString, GUID: PsPublicStrings, Name: "Keywords"}
+	// NameNoteColor (PidLidNoteColor, PSETID_Note/0x8B00, PtLong) is a sticky
+	// note's background color: 0 blue, 1 green, 2 pink, 3 yellow (default),
+	// 4 white.
+	NameNoteColor = PropertyName{Kind: MnidID, GUID: PsetidNote, LID: 0x8B00}
 
 	// Contact email slots (PidLidEmail{1,2,3}*, PSETID_Address, PtUnicode). Each
 	// slot carries an SMTP address, a display name, and an address type.
