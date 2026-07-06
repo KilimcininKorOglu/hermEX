@@ -93,6 +93,7 @@ export function Header({ onMenuToggle, sidebarCollapsed }: HeaderProps) {
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               type="search"
+              aria-label="search"
               placeholder={t("header.searchPlaceholder")}
               className="pl-10 bg-muted/50 border-0 focus:bg-background focus:ring-2 focus:ring-primary/20"
               value={searchQuery}

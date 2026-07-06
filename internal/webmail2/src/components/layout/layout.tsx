@@ -1,5 +1,5 @@
-import { useState } from "react"
-import { Outlet } from "react-router-dom"
+import { useState, useEffect } from "react"
+import { Outlet, useNavigate } from "react-router-dom"
 import { Sidebar } from "./sidebar"
 import { Header } from "./header"
 import { ReminderOverlay } from "@/components/reminder-overlay"
@@ -8,6 +8,29 @@ import { cn } from "@/lib/utils"
 export function Layout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const navigate = useNavigate()
+
+  // Global keyboard shortcuts (ignored while typing in an input/textarea/contenteditable
+  // so they never swallow ordinary typing):
+  //   c → compose, / → focus the header search, g t → Today, g i → Inbox, g c → Calendar.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null
+      const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)
+      if (typing) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.key === "c") {
+        e.preventDefault()
+        navigate("/compose")
+      } else if (e.key === "/") {
+        e.preventDefault()
+        const s = document.querySelector<HTMLInputElement>('[aria-label="search"]')
+        s?.focus()
+      }
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [navigate])
 
   return (
     <div className="min-h-screen bg-background">
