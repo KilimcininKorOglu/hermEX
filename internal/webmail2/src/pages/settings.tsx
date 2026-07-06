@@ -225,6 +225,38 @@ export function SettingsPage() {
     api.setAppearanceSettings(next).catch(() => undefined)
   }
 
+  // handleResetSettings drops every webmail2-owned settings key, then reloads the
+  // appearance/calendar defaults so the UI snaps back without a page reload.
+  const [resetting, setResetting] = useState(false)
+  const handleResetSettings = async () => {
+    setResetting(true)
+    try {
+      await api.resetSettings()
+      const [a, c] = await Promise.all([api.getAppearanceSettings(), api.getCalendarSettings()])
+      setAppearance({
+        theme: a.theme ?? "system",
+        language: a.language ?? "system",
+        dateFormat: a.dateFormat ?? "iso",
+        timeFormat: a.timeFormat ?? "24",
+        nameDisplay: a.nameDisplay ?? "firstlast",
+        showUnreadCounter: a.showUnreadCounter,
+        unreadBorder: a.unreadBorder,
+        hideWidgetPanel: a.hideWidgetPanel,
+      })
+      setFirstDayOfWeek(c.firstDayOfWeek ?? 1)
+      setResolution(c.resolution ?? 30)
+      setWorkDayStart(c.workDayStart ?? 9)
+      setWorkDayEnd(c.workDayEnd ?? 18)
+      setShowNonWorkingHours(c.showNonWorkingHours ?? true)
+      setTheme((a.theme ?? "system") as "light" | "dark" | "system")
+      toast.success(t("settings.reset.settingsReset"))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("settings.reset.resetFailed"))
+    } finally {
+      setResetting(false)
+    }
+  }
+
   const handleFirstDayChange = async (d: number) => {
     setFirstDayOfWeek(d)
     try {
@@ -2234,9 +2266,20 @@ export function SettingsPage() {
         </DialogContent>
       </Dialog>
 
-      <div className="text-center text-sm text-muted-foreground pb-8">
-        <p>hermEX Webmail</p>
-        <p className="mt-1">{t("settings.footer.tagline")}</p>
+      <div className="text-center text-sm text-muted-foreground pb-8 space-y-2">
+        <p>hermEX Webmail v1.0.0</p>
+        <p>{t("settings.footer.tagline")}</p>
+        <Button
+          variant="outline"
+          size="sm"
+          className="mt-2"
+          disabled={resetting}
+          onClick={() => {
+            if (window.confirm(t("settings.reset.confirm"))) void handleResetSettings()
+          }}
+        >
+          {resetting ? t("common.loading") : t("settings.reset.resetSettings")}
+        </Button>
       </div>
     </div>
   )

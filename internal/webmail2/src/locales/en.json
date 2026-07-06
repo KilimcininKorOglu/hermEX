@@ -663,6 +663,12 @@
     },
     "footer": {
       "tagline": "Built with care for your privacy"
+    },
+    "reset": {
+      "confirm": "Reset all webmail settings to defaults?",
+      "resetSettings": "Reset settings",
+      "settingsReset": "Settings reset",
+      "resetFailed": "Reset failed"
     }
   },
   "calendar": {

@@ -1401,6 +1401,12 @@ class API {
     return this.put<AppearanceSettings>('/settings/appearance', s)
   }
 
+  // resetSettings drops every webmail2-owned settings key (appearance, calendar,
+  // preferences); the next GET repopulates from defaults.
+  async resetSettings(): Promise<void> {
+    await this.post<{ ok: boolean }>('/settings/reset', {})
+  }
+
   // getRooms lists the organization's bookable rooms for the room picker.
   async getRooms(): Promise<{ rooms?: Room[] }> {
     return this.get<{ rooms?: Room[] }>('/rooms')

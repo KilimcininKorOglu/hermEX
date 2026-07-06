@@ -183,6 +183,20 @@ func mustJSON(v any) json.RawMessage {
 	return b
 }
 
+// handleResetSettings drops every webmail2-owned settings key (appearance,
+// calendar, preferences) from the shared blob, leaving keys the server-rendered
+// webmail owns untouched. The next GET repopulates from defaults.
+func (s *Server) handleResetSettings(w http.ResponseWriter, r *http.Request) {
+	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
+		for k := range m {
+			if strings.HasPrefix(k, "webmail2") {
+				delete(m, k)
+			}
+		}
+		return map[string]bool{"ok": true}, true
+	})
+}
+
 // calendarSettingsJSON is the persisted calendar display settings. FirstDayOfWeek
 // is the week-start day (0=Sun..6=Sat); Resolution is the time-grid slot minutes
 // (5/10/15/30/60); WorkDayStart/End are the working-hours bounds (hour 0-23);
