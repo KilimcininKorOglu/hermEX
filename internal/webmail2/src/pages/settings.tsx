@@ -157,6 +157,7 @@ export function SettingsPage() {
     unreadBorder: false,
     hideWidgetPanel: false,
     startupFolder: "",
+    autoCc: "",
   })
 
   useEffect(() => {
@@ -196,6 +197,7 @@ export function SettingsPage() {
         unreadBorder: a.unreadBorder,
         hideWidgetPanel: a.hideWidgetPanel,
         startupFolder: a.startupFolder ?? "",
+        autoCc: a.autoCc ?? "",
       }))
       .catch(() => undefined)
       .catch(() => undefined)
@@ -245,6 +247,7 @@ export function SettingsPage() {
         unreadBorder: a.unreadBorder,
         hideWidgetPanel: a.hideWidgetPanel,
         startupFolder: a.startupFolder ?? "",
+        autoCc: a.autoCc ?? "",
       })
       setFirstDayOfWeek(c.firstDayOfWeek ?? 1)
       setResolution(c.resolution ?? 30)
@@ -1277,6 +1280,19 @@ export function SettingsPage() {
               <option value="contacts">{t("nav.contacts")}</option>
               <option value="tasks">{t("nav.tasks")}</option>
             </select>
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">{t("settings.appearance.autoCc")}</p>
+              <p className="text-sm text-muted-foreground">{t("settings.appearance.autoCcDescription")}</p>
+            </div>
+            <Input
+              value={appearance.autoCc}
+              onChange={(e) => saveAppearance({ ...appearance, autoCc: e.target.value })}
+              placeholder="cc@example.test, boss@example.test"
+              className="max-w-[16rem]"
+            />
           </div>
           <Separator />
           <div className="flex items-center justify-between gap-4">

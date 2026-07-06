@@ -429,7 +429,9 @@
       "hideWidgetPanelDescription": "Hide the Today dashboard widgets.",
       "startupFolder": "Startup folder",
       "startupFolderDescription": "The folder shown on login.",
-      "startupInbox": "Inbox"
+      "startupInbox": "Inbox",
+      "autoCc": "Auto Cc",
+      "autoCcDescription": "Addresses added to Cc on every send (comma-separated)."
     },
     "notifications": {
       "title": "Notifications",

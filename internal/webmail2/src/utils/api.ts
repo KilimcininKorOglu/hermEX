@@ -208,6 +208,7 @@ export interface AppearanceSettings {
   unreadBorder: boolean
   hideWidgetPanel: boolean
   startupFolder: string
+  autoCc: string
 }
 
 export interface Delegation {

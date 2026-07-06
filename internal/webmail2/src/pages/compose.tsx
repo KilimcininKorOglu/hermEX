@@ -256,6 +256,25 @@ export function ComposePage() {
     }
   }, [searchParams, contacts])
 
+  // Auto-Cc: prepend the configured addresses (settings.appearance.autoCc) to
+  // the Cc list once on mount, so every outgoing mail copies them without the
+  // user re-adding them. Runs once; a reply-all's explicit Cc is not dropped.
+  useEffect(() => {
+    api.getAppearanceSettings()
+      .then((s) => {
+        const extra = (s.autoCc ?? "").split(",").map((a) => a.trim()).filter(Boolean)
+        if (extra.length === 0) return
+        setCc((prev) => {
+          const have = new Set(prev.map((r) => r.email.toLowerCase()))
+          const merged = [...prev]
+          for (const a of extra) if (!have.has(a.toLowerCase())) merged.push({ id: `autoCc-${a}`, name: a, email: a })
+          return merged
+        })
+        setShowCc(true)
+      })
+      .catch(() => undefined)
+  }, [])
+
   // Prefill subject/body from query params (used by reply and forward).
   useEffect(() => {
     const subjectParam = searchParams.get("subject")

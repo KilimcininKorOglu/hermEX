@@ -429,7 +429,9 @@
       "hideWidgetPanelDescription": "Bugün paneli widget'larını gizle.",
       "startupFolder": "Açılış klasörü",
       "startupFolderDescription": "Girişte gösterilen klasör.",
-      "startupInbox": "Gelen kutusu"
+      "startupInbox": "Gelen kutusu",
+      "autoCc": "Otomatik Cc",
+      "autoCcDescription": "Her gönderimde Cc'ye eklenen adresler (virgülle ayrılmış)."
     },
     "notifications": {
       "title": "Bildirimler",
