@@ -431,7 +431,14 @@
       "startupFolderDescription": "Girişte gösterilen klasör.",
       "startupInbox": "Gelen kutusu",
       "autoCc": "Otomatik Cc",
-      "autoCcDescription": "Her gönderimde Cc'ye eklenen adresler (virgülle ayrılmış)."
+      "autoCcDescription": "Her gönderimde Cc'ye eklenen adresler (virgülle ayrılmış).",
+      "workDays": "Çalışma günleri",
+      "workDaysDescription": "Takvimde çalışma günü olarak gösterilen günler.",
+      "defaultDuration": "Varsayılan randevu süresi",
+      "defaultDurationDescription": "Yeni randevulara uygulanan süre.",
+      "defaultReminder": "Varsayılan hatırlatma",
+      "defaultReminderDescription": "Başlangıçtan önceki dakika (0 = yok).",
+      "noReminder": "Hatırlatma yok"
     },
     "notifications": {
       "title": "Bildirimler",

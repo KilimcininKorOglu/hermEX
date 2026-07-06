@@ -196,6 +196,18 @@ export interface Note {
 
 export type NoteInput = { title: string; body: string; color?: number }
 
+// CalendarSettings is the DB-backed calendar display + defaults (per-user).
+export interface CalendarSettings {
+  firstDayOfWeek: number
+  resolution: number
+  workDayStart: number
+  workDayEnd: number
+  showNonWorkingHours: boolean
+  workDays: number[] // 0=Sun..6=Sat
+  defaultDuration: number // minutes
+  defaultReminder: number // minutes (0 = none)
+}
+
 // AppearanceSettings is the DB-backed display settings (theme, language,
 // date/time format, name order, unread/widget-panel toggles).
 export interface AppearanceSettings {
@@ -1385,12 +1397,12 @@ class API {
   // hours window must survive a reload and apply cross-protocol). firstDayOfWeek
   // is 0=Sun..6=Sat (default 1); resolution is 5/10/15/30/60 min (default 30);
   // workDayStart/End are hours 0-23 (default 9-18); showNonWorkingHours defaults true.
-  async getCalendarSettings(): Promise<{ firstDayOfWeek: number; resolution: number; workDayStart: number; workDayEnd: number; showNonWorkingHours: boolean }> {
-    return this.get<{ firstDayOfWeek: number; resolution: number; workDayStart: number; workDayEnd: number; showNonWorkingHours: boolean }>('/calendar/settings')
+  async getCalendarSettings(): Promise<CalendarSettings> {
+    return this.get<CalendarSettings>('/calendar/settings')
   }
 
-  async setCalendarSettings(s: { firstDayOfWeek: number; resolution: number; workDayStart: number; workDayEnd: number; showNonWorkingHours: boolean }): Promise<{ firstDayOfWeek: number; resolution: number; workDayStart: number; workDayEnd: number; showNonWorkingHours: boolean }> {
-    return this.put<{ firstDayOfWeek: number; resolution: number; workDayStart: number; workDayEnd: number; showNonWorkingHours: boolean }>('/calendar/settings', s)
+  async setCalendarSettings(s: CalendarSettings): Promise<CalendarSettings> {
+    return this.put<CalendarSettings>('/calendar/settings', s)
   }
 
   // Appearance settings (theme/language/date+time format/name display/unread

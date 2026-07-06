@@ -431,7 +431,14 @@
       "startupFolderDescription": "The folder shown on login.",
       "startupInbox": "Inbox",
       "autoCc": "Auto Cc",
-      "autoCcDescription": "Addresses added to Cc on every send (comma-separated)."
+      "autoCcDescription": "Addresses added to Cc on every send (comma-separated).",
+      "workDays": "Working days",
+      "workDaysDescription": "Days shown as working in the calendar.",
+      "defaultDuration": "Default appointment length",
+      "defaultDurationDescription": "Length applied to new appointments.",
+      "defaultReminder": "Default reminder",
+      "defaultReminderDescription": "Minutes before start (0 = none).",
+      "noReminder": "No reminder"
     },
     "notifications": {
       "title": "Notifications",

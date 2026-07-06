@@ -20,7 +20,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { toast } from "sonner"
-import api from "@/utils/api"
+import api, { type CalendarSettings } from "@/utils/api"
 import type { VacationAutoReply, ClientSession, Delegation, Category, RecipientRule, SignatureEntry, TemplateEntry } from "@/utils/api"
 import * as smimeStore from "@/utils/smime"
 import type { CertInfo } from "@/utils/smime"
@@ -142,6 +142,9 @@ export function SettingsPage() {
   const [workDayStart, setWorkDayStart] = useState(9)
   const [workDayEnd, setWorkDayEnd] = useState(18)
   const [showNonWorkingHours, setShowNonWorkingHours] = useState(true)
+  const [workDays, setWorkDays] = useState<number[]>([1, 2, 3, 4, 5])
+  const [defaultDuration, setDefaultDuration] = useState(30)
+  const [defaultReminder, setDefaultReminder] = useState(15)
 
   // Display/appearance settings (theme, language, date/time format, name display,
   // unread/widget-panel toggles), DB-backed via PrWebmailSettings so they survive
@@ -185,6 +188,9 @@ export function SettingsPage() {
         setWorkDayStart(s.workDayStart ?? 9)
         setWorkDayEnd(s.workDayEnd ?? 18)
         setShowNonWorkingHours(s.showNonWorkingHours ?? true)
+        setWorkDays(s.workDays ?? [1, 2, 3, 4, 5])
+        setDefaultDuration(s.defaultDuration ?? 30)
+        setDefaultReminder(s.defaultReminder ?? 15)
       })
     api.getAppearanceSettings()
       .then((a) => setAppearance({
@@ -216,8 +222,14 @@ export function SettingsPage() {
 
   // saveCalSettings persists the full calendar settings object so a change to one
   // field never drops the others on the server (the PUT replaces the blob key).
-  const saveCalSettings = (next: { firstDayOfWeek: number; resolution: number; workDayStart: number; workDayEnd: number; showNonWorkingHours: boolean }) =>
-    api.setCalendarSettings(next)
+  // saveCalSettings merges a partial onto the full calendar state so a one-field
+  // change (e.g. firstDayOfWeek) carries the others (resolution, workDays,
+  // defaultDuration, defaultReminder) instead of dropping them.
+  const saveCalSettings = (next: Partial<CalendarSettings>) =>
+    api.setCalendarSettings({
+      firstDayOfWeek, resolution, workDayStart, workDayEnd, showNonWorkingHours,
+      workDays, defaultDuration, defaultReminder, ...next,
+    })
 
   // saveAppearance persists the full appearance settings object (DB-backed). The
   // theme is also pushed through useTheme so it applies immediately and the
@@ -254,6 +266,9 @@ export function SettingsPage() {
       setWorkDayStart(c.workDayStart ?? 9)
       setWorkDayEnd(c.workDayEnd ?? 18)
       setShowNonWorkingHours(c.showNonWorkingHours ?? true)
+      setWorkDays(c.workDays ?? [1, 2, 3, 4, 5])
+      setDefaultDuration(c.defaultDuration ?? 30)
+      setDefaultReminder(c.defaultReminder ?? 15)
       setTheme((a.theme ?? "system") as "light" | "dark" | "system")
       toast.success(t("settings.reset.settingsReset"))
     } catch (err) {
@@ -1373,6 +1388,66 @@ export function SettingsPage() {
             checked={showNonWorkingHours}
             onChange={() => void handleShowNonWorkingChange(!showNonWorkingHours)}
           />
+          <Separator />
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">{t("settings.appearance.workDays")}</p>
+              <p className="text-sm text-muted-foreground">{t("settings.appearance.workDaysDescription")}</p>
+            </div>
+            <div className="flex gap-1">
+              {[t("calendar.weekdays.sun"), t("calendar.weekdays.mon"), t("calendar.weekdays.tue"), t("calendar.weekdays.wed"), t("calendar.weekdays.thu"), t("calendar.weekdays.fri"), t("calendar.weekdays.sat")].map((label, idx) => {
+                const on = workDays.includes(idx)
+                return (
+                  <button
+                    key={idx}
+                    type="button"
+                    title={label}
+                    className={`h-8 w-8 rounded text-xs ${on ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground"}`}
+                    onClick={() => {
+                      const next = on ? workDays.filter((d) => d !== idx) : [...workDays, idx]
+                      setWorkDays(next)
+                      void saveCalSettings({ workDays: next })
+                    }}
+                  >
+                    {label.charAt(0)}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">{t("settings.appearance.defaultDuration")}</p>
+              <p className="text-sm text-muted-foreground">{t("settings.appearance.defaultDurationDescription")}</p>
+            </div>
+            <select
+              value={String(defaultDuration)}
+              onChange={(e) => { const v = Number(e.target.value); setDefaultDuration(v); void saveCalSettings({ defaultDuration: v }) }}
+              className="max-w-[16rem] rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              {[15, 30, 45, 60, 90].map((m) => (
+                <option key={m} value={String(m)}>{t("calendar.resolutionMinutes", { n: String(m) })}</option>
+              ))}
+            </select>
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">{t("settings.appearance.defaultReminder")}</p>
+              <p className="text-sm text-muted-foreground">{t("settings.appearance.defaultReminderDescription")}</p>
+            </div>
+            <select
+              value={String(defaultReminder)}
+              onChange={(e) => { const v = Number(e.target.value); setDefaultReminder(v); void saveCalSettings({ defaultReminder: v }) }}
+              className="max-w-[16rem] rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="0">{t("settings.appearance.noReminder")}</option>
+              {[5, 10, 15, 30, 60].map((m) => (
+                <option key={m} value={String(m)}>{t("calendar.resolutionMinutes", { n: String(m) })}</option>
+              ))}
+            </select>
+          </div>
         </div>
       </SettingSection>
 

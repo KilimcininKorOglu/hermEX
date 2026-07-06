@@ -208,23 +208,35 @@ func (s *Server) handleResetSettings(w http.ResponseWriter, r *http.Request) {
 // working window or hides them. Zero values normalize to the Exchange defaults
 // (Monday, 30min, 09:00-18:00, show all hours) so a fresh account lands on a sane grid.
 type calendarSettingsJSON struct {
-	FirstDayOfWeek      int  `json:"firstDayOfWeek"`
-	Resolution          int  `json:"resolution"`
-	WorkDayStart        int  `json:"workDayStart"`
-	WorkDayEnd          int  `json:"workDayEnd"`
-	ShowNonWorkingHours bool `json:"showNonWorkingHours"`
+	FirstDayOfWeek      int   `json:"firstDayOfWeek"`
+	Resolution          int   `json:"resolution"`
+	WorkDayStart        int   `json:"workDayStart"`
+	WorkDayEnd          int   `json:"workDayEnd"`
+	ShowNonWorkingHours bool  `json:"showNonWorkingHours"`
+	WorkDays            []int `json:"workDays"`        // 0=Sun..6=Sat that are working days (default Mon-Fri [1,2,3,4,5])
+	DefaultDuration     int   `json:"defaultDuration"` // default appointment length in minutes (default 30)
+	DefaultReminder     int   `json:"defaultReminder"` // default reminder minutes before start (default 15; 0 = none)
 }
 
 // readCalendarSettings loads the calendar display settings from the shared blob,
 // defaulting to Monday-first, 30-minute resolution, and 09:00-18:00 working hours
 // (showing all hours) when none are stored yet.
 func readCalendarSettings(m map[string]json.RawMessage) calendarSettingsJSON {
-	cs := calendarSettingsJSON{FirstDayOfWeek: 1, Resolution: 30, WorkDayStart: 9, WorkDayEnd: 18, ShowNonWorkingHours: true}
+	cs := calendarSettingsJSON{FirstDayOfWeek: 1, Resolution: 30, WorkDayStart: 9, WorkDayEnd: 18, ShowNonWorkingHours: true, WorkDays: []int{1, 2, 3, 4, 5}, DefaultDuration: 30, DefaultReminder: 15}
 	if raw, ok := m["webmail2CalendarSettings"]; ok {
 		_ = json.Unmarshal(raw, &cs)
 	}
 	if cs.FirstDayOfWeek < 0 || cs.FirstDayOfWeek > 6 {
 		cs.FirstDayOfWeek = 1
+	}
+	if len(cs.WorkDays) == 0 {
+		cs.WorkDays = []int{1, 2, 3, 4, 5}
+	}
+	if cs.DefaultDuration <= 0 {
+		cs.DefaultDuration = 30
+	}
+	if cs.DefaultReminder < 0 {
+		cs.DefaultReminder = 15
 	}
 	if !validResolution(cs.Resolution) {
 		cs.Resolution = 30
@@ -275,6 +287,15 @@ func (s *Server) handlePutCalendarSettings(w http.ResponseWriter, r *http.Reques
 	}
 	if in.WorkDayEnd < 0 || in.WorkDayEnd > 23 {
 		in.WorkDayEnd = 18
+	}
+	if len(in.WorkDays) == 0 {
+		in.WorkDays = []int{1, 2, 3, 4, 5}
+	}
+	if in.DefaultDuration <= 0 {
+		in.DefaultDuration = 30
+	}
+	if in.DefaultReminder < 0 {
+		in.DefaultReminder = 15
 	}
 	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
 		raw, _ := json.Marshal(in)

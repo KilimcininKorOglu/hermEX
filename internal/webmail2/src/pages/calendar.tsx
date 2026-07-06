@@ -30,7 +30,7 @@ import { toast } from "sonner"
 import { AttendeePicker } from "@/components/attendee-picker"
 import { withTz, getDisplayTimeZone } from "@/utils/date"
 import { detectTimeZone } from "@/utils/timezone"
-import api, { type Calendar, type CalendarEvent, type UserFreeBusy, type Room } from "@/utils/api"
+import api, { type Calendar, type CalendarEvent, type UserFreeBusy, type Room, type CalendarSettings } from "@/utils/api"
 import { useI18n } from "@/hooks/useI18n"
 import { useAuth } from "@/contexts/AuthContext"
 import { ShareFolderDialog } from "@/components/share-folder-dialog"
@@ -239,8 +239,14 @@ export function CalendarPage() {
   const [showNonWorkingHours, setShowNonWorkingHours] = useState<boolean>(true)
   // saveCalSettings persists the full settings object; the in-session state is
   // updated optimistically by the individual setters, then this fires the PUT.
-  const saveCalSettings = (next: { firstDayOfWeek: number; resolution: number; workDayStart: number; workDayEnd: number; showNonWorkingHours: boolean }) => {
-    api.setCalendarSettings(next).catch(() => {
+  // The workDays/defaultDuration/defaultReminder fields are managed in settings
+  // and carried here as defaults so a grid-only change never drops them.
+  const saveCalSettings = (next: Partial<CalendarSettings>) => {
+    api.setCalendarSettings({
+      firstDayOfWeek, resolution, workDayStart, workDayEnd, showNonWorkingHours,
+      workDays: [1, 2, 3, 4, 5], defaultDuration: 30, defaultReminder: 15,
+      ...next,
+    }).catch(() => {
       /* best-effort: the grid keeps the chosen values in-session */
     })
   }
