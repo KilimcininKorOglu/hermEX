@@ -851,6 +851,33 @@ export function ComposePage() {
     }
   }
 
+  // autoSaveDraft is a silent (no navigate, no toast) version of handleSaveDraft,
+  // fired every 60s while composing so a browser crash never loses work. It only
+  // fires when there is something to save and never on the first empty render.
+  const autoSaveDraft = async () => {
+    if (!(subject || body || to.length > 0 || cc.length > 0 || bcc.length > 0)) return
+    try {
+      const senderEmail = selectedSender?.email || user?.email || ''
+      const res = await api.saveDraft({
+        id: draftId ?? undefined,
+        to: to.map((r) => r.email),
+        cc: cc.map((r) => r.email),
+        bcc: bcc.map((r) => r.email),
+        subject,
+        body,
+        from: senderEmail,
+      })
+      if (res?.id) setDraftId(res.id)
+    } catch {
+      /* best-effort: a failed autosave must not interrupt composing */
+    }
+  }
+
+  useEffect(() => {
+    const id = window.setInterval(autoSaveDraft, 60000)
+    return () => window.clearInterval(id)
+  })
+
   const handleDiscard = () => {
     if (subject || body || to.length > 0) {
       if (confirm(t("compose.discardConfirm"))) {
