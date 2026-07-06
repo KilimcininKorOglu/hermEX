@@ -174,6 +174,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/calendar/freebusy", s.handleFreeBusy)
 	mux.HandleFunc("GET /api/v1/calendar/settings", s.handleGetCalendarSettings)
 	mux.HandleFunc("PUT /api/v1/calendar/settings", s.handlePutCalendarSettings)
+	mux.HandleFunc("GET /api/v1/settings/appearance", s.handleGetAppearanceSettings)
+	mux.HandleFunc("PUT /api/v1/settings/appearance", s.handlePutAppearanceSettings)
 	mux.HandleFunc("GET /api/v1/rooms", s.handleRooms)
 	mux.HandleFunc("GET /api/v1/push/vapid-public-key", s.handlePushVapidKey)
 	mux.HandleFunc("POST /api/v1/push/subscribe", s.handlePushSubscribe)

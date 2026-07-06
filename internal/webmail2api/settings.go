@@ -89,6 +89,100 @@ func (s *Server) handlePutPreferences(w http.ResponseWriter, r *http.Request) {
 
 // ---- Calendar settings (per-user, shared webmail settings blob) ----
 
+// appearanceSettingsJSON is the persisted display/appearance settings: theme,
+// language, date/time format, name display order, and the unread/widget-panel
+// toggles. Zero values normalize to the Exchange defaults (system theme,
+// browser language, ISO dates, 24h, first-then-last name).
+type appearanceSettingsJSON struct {
+	Theme             string `json:"theme"`       // "light" | "dark" | "system"
+	Language          string `json:"language"`    // "en" | "tr" | "system"
+	DateFormat        string `json:"dateFormat"`  // "iso" | "dmy" | "mdy"
+	TimeFormat        string `json:"timeFormat"`  // "12" | "24"
+	NameDisplay       string `json:"nameDisplay"` // "firstlast" | "lastfirst"
+	ShowUnreadCounter bool   `json:"showUnreadCounter"`
+	UnreadBorder      bool   `json:"unreadBorder"`
+	HideWidgetPanel   bool   `json:"hideWidgetPanel"`
+}
+
+// readAppearanceSettings loads the display settings from the shared blob,
+// defaulting to system theme, browser language, ISO date, 24h time, and a
+// first-then-last name order when none are stored.
+func readAppearanceSettings(m map[string]json.RawMessage) appearanceSettingsJSON {
+	a := appearanceSettingsJSON{Theme: "system", Language: "system", DateFormat: "iso", TimeFormat: "24", NameDisplay: "firstlast"}
+	if raw, ok := m["webmail2AppearanceSettings"]; ok {
+		_ = json.Unmarshal(raw, &a)
+	}
+	switch a.Theme {
+	case "light", "dark", "system":
+	default:
+		a.Theme = "system"
+	}
+	switch a.Language {
+	case "en", "tr", "system":
+	default:
+		a.Language = "system"
+	}
+	switch a.DateFormat {
+	case "iso", "dmy", "mdy":
+	default:
+		a.DateFormat = "iso"
+	}
+	switch a.TimeFormat {
+	case "12", "24":
+	default:
+		a.TimeFormat = "24"
+	}
+	switch a.NameDisplay {
+	case "firstlast", "lastfirst":
+	default:
+		a.NameDisplay = "firstlast"
+	}
+	return a
+}
+
+// handleGetAppearanceSettings returns the user's display/appearance settings.
+func (s *Server) handleGetAppearanceSettings(w http.ResponseWriter, r *http.Request) {
+	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
+		return readAppearanceSettings(m), false
+	})
+}
+
+// handlePutAppearanceSettings persists the display/appearance settings, clamping
+// each enum to its valid value.
+func (s *Server) handlePutAppearanceSettings(w http.ResponseWriter, r *http.Request) {
+	var in appearanceSettingsJSON
+	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
+		// Carry the stored defaults, then overlay the input and re-clamp each enum
+		// so a bad value still stores a valid one.
+		a := readAppearanceSettings(m)
+		a.Theme = in.Theme
+		a.Language = in.Language
+		a.DateFormat = in.DateFormat
+		a.TimeFormat = in.TimeFormat
+		a.NameDisplay = in.NameDisplay
+		a.ShowUnreadCounter = in.ShowUnreadCounter
+		a.UnreadBorder = in.UnreadBorder
+		a.HideWidgetPanel = in.HideWidgetPanel
+		clamped := readAppearanceSettings(map[string]json.RawMessage{"webmail2AppearanceSettings": mustJSON(a)})
+		raw, _ := json.Marshal(clamped)
+		m["webmail2AppearanceSettings"] = raw
+		return clamped, true
+	})
+}
+
+// mustJSON marshals v, returning nil on error (the input is a controlled struct).
+func mustJSON(v any) json.RawMessage {
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil
+	}
+	return b
+}
+
 // calendarSettingsJSON is the persisted calendar display settings. FirstDayOfWeek
 // is the week-start day (0=Sun..6=Sat); Resolution is the time-grid slot minutes
 // (5/10/15/30/60); WorkDayStart/End are the working-hours bounds (hour 0-23);

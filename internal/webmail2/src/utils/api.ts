@@ -196,6 +196,19 @@ export interface Note {
 
 export type NoteInput = { title: string; body: string; color?: number }
 
+// AppearanceSettings is the DB-backed display settings (theme, language,
+// date/time format, name order, unread/widget-panel toggles).
+export interface AppearanceSettings {
+  theme: string // "light" | "dark" | "system"
+  language: string // "en" | "tr" | "system"
+  dateFormat: string // "iso" | "dmy" | "mdy"
+  timeFormat: string // "12" | "24"
+  nameDisplay: string // "firstlast" | "lastfirst"
+  showUnreadCounter: boolean
+  unreadBorder: boolean
+  hideWidgetPanel: boolean
+}
+
 export interface Delegation {
   id: string
   owner: string
@@ -1376,6 +1389,16 @@ class API {
 
   async setCalendarSettings(s: { firstDayOfWeek: number; resolution: number; workDayStart: number; workDayEnd: number; showNonWorkingHours: boolean }): Promise<{ firstDayOfWeek: number; resolution: number; workDayStart: number; workDayEnd: number; showNonWorkingHours: boolean }> {
     return this.put<{ firstDayOfWeek: number; resolution: number; workDayStart: number; workDayEnd: number; showNonWorkingHours: boolean }>('/calendar/settings', s)
+  }
+
+  // Appearance settings (theme/language/date+time format/name display/unread
+  // toggles), DB-backed via PrWebmailSettings (no localStorage).
+  async getAppearanceSettings(): Promise<AppearanceSettings> {
+    return this.get<AppearanceSettings>('/settings/appearance')
+  }
+
+  async setAppearanceSettings(s: AppearanceSettings): Promise<AppearanceSettings> {
+    return this.put<AppearanceSettings>('/settings/appearance', s)
   }
 
   // getRooms lists the organization's bookable rooms for the room picker.

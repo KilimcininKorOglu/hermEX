@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react"
 import { getCookie, setCookie } from "@/utils/cookies"
+import api from "@/utils/api"
 
 type Theme = "dark" | "light" | "system"
 
@@ -29,6 +30,9 @@ export function ThemeProvider({
   storageKey = "webmail-theme",
   ...props
 }: ThemeProviderProps) {
+  // The cookie is a fast cache so the first render lands on the right theme
+  // without a flash; the DB (PrWebmailSettings) is the source of truth and is
+  // synced on mount and on every setTheme.
   const [theme, setTheme] = useState<Theme>(
     () => (getCookie(storageKey) as Theme) || defaultTheme
   )
@@ -51,11 +55,31 @@ export function ThemeProvider({
     setResolvedTheme(resolved)
   }, [theme])
 
+  // On mount, load the persisted theme from the DB so a fresh login on a new
+  // browser picks up the saved preference (the cookie cache may be absent).
+  useEffect(() => {
+    api.getAppearanceSettings()
+      .then((s) => {
+        if (s.theme === "light" || s.theme === "dark" || s.theme === "system") {
+          setTheme(s.theme as Theme)
+        }
+      })
+      .catch(() => {
+        /* best-effort: fall back to the cookie/default */
+      })
+  }, [])
+
   const value = {
     theme,
-    setTheme: (theme: Theme) => {
-      setCookie(storageKey, theme)
-      setTheme(theme)
+    setTheme: (next: Theme) => {
+      setCookie(storageKey, next)
+      setTheme(next)
+      // Persist to the DB (best-effort) so the preference survives a new browser.
+      api.getAppearanceSettings()
+        .then((s) => api.setAppearanceSettings({ ...s, theme: next }))
+        .catch(() => {
+          /* best-effort */
+        })
     },
     resolvedTheme,
   }
