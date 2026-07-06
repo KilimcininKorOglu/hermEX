@@ -26,19 +26,20 @@ type mailAttachment struct {
 
 // sendRequest is the subset of the SPA's SendMailRequest the send handler honors.
 type sendRequest struct {
-	To                 []string         `json:"to"`
-	Cc                 []string         `json:"cc"`
-	Bcc                []string         `json:"bcc"`
-	Subject            string           `json:"subject"`
-	Body               string           `json:"body"`
-	IsHTML             bool             `json:"is_html"`
-	RequestReadReceipt bool             `json:"requestReadReceipt"`
-	Importance         string           `json:"importance"`
-	Sensitivity        string           `json:"sensitivity"` // "personal"|"private"|"confidential" → PR_SENSITIVITY
-	Attachments        []mailAttachment `json:"attachments"`
-	SendAt             string           `json:"sendAt"`
-	SignMessage        bool             `json:"signMessage"`    // server-mode S/MIME sign
-	EncryptMessage     bool             `json:"encryptMessage"` // server-mode S/MIME encrypt
+	To                     []string         `json:"to"`
+	Cc                     []string         `json:"cc"`
+	Bcc                    []string         `json:"bcc"`
+	Subject                string           `json:"subject"`
+	Body                   string           `json:"body"`
+	IsHTML                 bool             `json:"is_html"`
+	RequestReadReceipt     bool             `json:"requestReadReceipt"`
+	RequestDeliveryReceipt bool             `json:"requestDeliveryReceipt"` // PR_ORIGINATOR_DELIVERY_REPORT_REQUESTED
+	Importance             string           `json:"importance"`
+	Sensitivity            string           `json:"sensitivity"` // "personal"|"private"|"confidential" → PR_SENSITIVITY
+	Attachments            []mailAttachment `json:"attachments"`
+	SendAt                 string           `json:"sendAt"`
+	SignMessage            bool             `json:"signMessage"`    // server-mode S/MIME sign
+	EncryptMessage         bool             `json:"encryptMessage"` // server-mode S/MIME encrypt
 }
 
 // decodeAttachment decodes an attachment body, accepting raw base64 or a data URL.
@@ -269,6 +270,9 @@ func (s *Server) buildOutgoing(from string, req sendRequest) ([]byte, error) {
 	}
 	if req.RequestReadReceipt {
 		props.Set(mapi.PrReadReceiptRequested, true)
+	}
+	if req.RequestDeliveryReceipt {
+		props.Set(mapi.PrOriginatorDeliveryReportRequested, true)
 	}
 	// The SPA sends a single body; is_html marks it HTML. Export needs the plain
 	// part too (the text/plain alternative), derived by stripping tags.

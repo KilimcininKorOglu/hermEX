@@ -318,7 +318,9 @@
     "sensitivityPersonal": "Personal",
     "sensitivityPrivate": "Private",
     "sensitivityConfidential": "Confidential",
-    "toSend": "to send"
+    "toSend": "to send",
+    "requestDeliveryReceipt": "Request delivery receipt",
+    "deliveryReceipt": "Delivery receipt"
   },
   "share": {
     "dialogTitle": "Share folder",

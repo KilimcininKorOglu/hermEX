@@ -318,7 +318,9 @@
     "sensitivityPersonal": "Kişisel",
     "sensitivityPrivate": "Özel",
     "sensitivityConfidential": "Gizli",
-    "toSend": "ile gönder"
+    "toSend": "ile gönder",
+    "requestDeliveryReceipt": "Teslimat makbuzu iste",
+    "deliveryReceipt": "Teslimat makbuzu"
   },
   "share": {
     "dialogTitle": "Klasörü paylaş",

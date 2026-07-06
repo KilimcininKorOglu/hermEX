@@ -253,14 +253,17 @@ const (
 // export. The entryid is not synthesized (the mail path reads only name and
 // address), matching the deferral applied to sender and recipient identities.
 const (
-	PrReadReceiptRequested            = PropTag(0x0029000B) // PtBoolean
-	PrNonReceiptNotificationRequested = PropTag(0x0C06000B) // PtBoolean
-	PrReadReceiptName                 = PropTag(0x402B001F) // PtUnicode
-	PrReadReceiptAddrType             = PropTag(0x4029001F) // PtUnicode
-	PrReadReceiptEmailAddress         = PropTag(0x402A001F) // PtUnicode
-	PrReadReceiptSmtpAddress          = PropTag(0x5D05001F) // PtUnicode
-	PrReadReceiptSearchKey            = PropTag(0x00530102) // PtBinary
-	PrReadReceiptEntryID              = PropTag(0x00460102) // PtBinary
+	PrReadReceiptRequested = PropTag(0x0029000B) // PtBoolean
+	// PrOriginatorDeliveryReportRequested (PidTagOriginatorDeliveryReportRequested,
+	// 0x0023 PtBoolean) requests a delivery report per recipient on delivery.
+	PrOriginatorDeliveryReportRequested = PropTag(0x0023000B) // PtBoolean
+	PrNonReceiptNotificationRequested   = PropTag(0x0C06000B) // PtBoolean
+	PrReadReceiptName                   = PropTag(0x402B001F) // PtUnicode
+	PrReadReceiptAddrType               = PropTag(0x4029001F) // PtUnicode
+	PrReadReceiptEmailAddress           = PropTag(0x402A001F) // PtUnicode
+	PrReadReceiptSmtpAddress            = PropTag(0x5D05001F) // PtUnicode
+	PrReadReceiptSearchKey              = PropTag(0x00530102) // PtBinary
+	PrReadReceiptEntryID                = PropTag(0x00460102) // PtBinary
 )
 
 // Recipient property tags (one bag per recipient in the recipient table).

@@ -97,6 +97,7 @@ export interface SendMailRequest {
   from?: string // Sender identity for send-as or send-on-behalf
   attachments?: MailAttachment[]
   requestReadReceipt?: boolean // ask the recipient's client for a read receipt
+  requestDeliveryReceipt?: boolean // ask the transport for a delivery report
   signMessage?: boolean // S/MIME sign the message
   encryptMessage?: boolean // S/MIME encrypt the message
   importance?: string // "low" | "normal" | "high"

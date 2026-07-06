@@ -171,6 +171,7 @@ export function ComposePage() {
   }, [])
 
   const [requestReadReceipt, setRequestReadReceipt] = useState(false)
+  const [requestDeliveryReceipt, setRequestDeliveryReceipt] = useState(false)
   const [signMessage, setSignMessage] = useState(false)
   const [encryptMessage, setEncryptMessage] = useState(false)
   const [importance, setImportance] = useState<"low" | "normal" | "high">("normal")
@@ -776,6 +777,7 @@ export function ComposePage() {
         from: senderEmail, // Pass sender identity to API
         attachments: encoded.length > 0 ? encoded : undefined,
         requestReadReceipt: requestReadReceipt || undefined,
+        requestDeliveryReceipt: requestDeliveryReceipt || undefined,
         importance: importance !== "normal" ? importance : undefined,
         sensitivity: sensitivity !== "normal" ? sensitivity : undefined,
         sendAt: sendAtISO,
@@ -1568,6 +1570,17 @@ export function ComposePage() {
           >
             <Check className={requestReadReceipt ? "mr-1.5 h-4 w-4" : "mr-1.5 h-4 w-4 opacity-40"} />
             {t("compose.readReceipt")}
+          </Button>
+          <Button
+            type="button"
+            variant={requestDeliveryReceipt ? "secondary" : "outline"}
+            size="sm"
+            onClick={() => setRequestDeliveryReceipt((v) => !v)}
+            title={t("compose.requestDeliveryReceipt")}
+            aria-pressed={requestDeliveryReceipt}
+          >
+            <Check className={requestDeliveryReceipt ? "mr-1.5 h-4 w-4" : "mr-1.5 h-4 w-4 opacity-40"} />
+            {t("compose.deliveryReceipt")}
           </Button>
           <Button
             type="button"
