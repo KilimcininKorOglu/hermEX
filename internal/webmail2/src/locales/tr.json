@@ -989,7 +989,14 @@
     "priorityNormal": "Normal",
     "priorityHigh": "Yüksek",
     "reminder": "Hatırlatma",
-    "categories": "Kategoriler"
+    "categories": "Kategoriler",
+    "status": "Durum",
+    "statusNotStarted": "Başlanmadı",
+    "statusInProgress": "Devam ediyor",
+    "statusComplete": "Tamamlandı",
+    "statusWaiting": "Bekliyor",
+    "statusDeferred": "Ertelendi",
+    "percent": "% tamamlandı"
   },
   "notes": {
     "newNote": "Yeni not",

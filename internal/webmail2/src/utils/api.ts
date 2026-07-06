@@ -174,6 +174,8 @@ export interface Task {
   description?: string
   start?: string // YYYY-MM-DD (task start date)
   due?: string // RFC3339 or YYYY-MM-DD
+  status?: number // 0 not started, 1 in progress, 2 complete, 3 waiting, 4 deferred
+  percent?: number // 0..100
   priority?: number // 0=low, 1=normal, 2=high (PR_IMPORTANCE)
   reminder?: boolean // PidLidReminderSet
   categories?: string[]

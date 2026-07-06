@@ -21,6 +21,8 @@ type taskJSON struct {
 	Description string   `json:"description,omitempty"`
 	Start       string   `json:"start,omitempty"` // YYYY-MM-DD (task start date)
 	Due         string   `json:"due,omitempty"`
+	Status      int      `json:"status"`             // 0 not started, 1 in progress, 2 complete, 3 waiting, 4 deferred
+	Percent     int      `json:"percent"`            // 0..100 (% complete)
 	Priority    int      `json:"priority,omitempty"` // 0=low, 1=normal, 2=high (PR_IMPORTANCE)
 	Reminder    bool     `json:"reminder,omitempty"` // PidLidReminderSet
 	Categories  []string `json:"categories,omitempty"`
@@ -58,10 +60,21 @@ func jsonToTask(in taskJSON) oxtask.Task {
 	t := oxtask.New()
 	t.Subject = in.Summary
 	t.Body = in.Description
-	t.Complete = in.Completed
 	t.Importance = in.Priority
 	t.ReminderSet = in.Reminder
 	t.Categories = in.Categories
+	// Status takes precedence when >=0 (0 is a valid value: not started). When
+	// set, Complete derives from it (status 2 = complete); otherwise the legacy
+	// Completed boolean drives status/percent in ToProps.
+	if in.Status >= 0 {
+		t.Status = in.Status
+		t.Complete = in.Status == 2
+	} else {
+		t.Complete = in.Completed
+	}
+	if in.Percent > 0 {
+		t.PercentComplete = float64(in.Percent) / 100.0
+	}
 	if in.Due != "" {
 		if due, ok := parseDue(in.Due); ok {
 			t.Due = due
@@ -79,10 +92,18 @@ func taskToJSON(t oxtask.Task) taskJSON {
 	j := taskJSON{
 		Summary:     t.Subject,
 		Description: t.Body,
-		Completed:   t.Complete,
 		Priority:    t.Importance,
 		Reminder:    t.ReminderSet,
 		Categories:  t.Categories,
+	}
+	if t.Status >= 0 {
+		j.Status = t.Status
+		j.Completed = t.Status == 2
+	} else {
+		j.Completed = t.Complete
+	}
+	if t.PercentComplete >= 0 {
+		j.Percent = int(t.PercentComplete*100 + 0.5)
 	}
 	if !t.Due.IsZero() {
 		j.Due = formatDue(t.Due)
@@ -207,6 +228,8 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 				prev.Importance = merged.Importance
 				prev.ReminderSet = merged.ReminderSet
 				prev.Categories = merged.Categories
+				prev.Status = merged.Status
+				prev.PercentComplete = merged.PercentComplete
 				merged = prev
 			}
 		}

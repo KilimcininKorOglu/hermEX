@@ -17,19 +17,24 @@ const MessageClass = "IPM.Task"
 type Resolver func(create bool, names []mapi.PropertyName) ([]uint16, error)
 
 // Task is the logical task. Zero-value times mean unset; Importance and Sensitivity
-// are -1 when unset (PR_IMPORTANCE / PR_SENSITIVITY are 0..2 otherwise).
+// are -1 when unset (PR_IMPORTANCE / PR_SENSITIVITY are 0..2 otherwise). Status is
+// -1 when unset (0=not started, 1=in progress, 2=complete, 3=waiting, 4=deferred);
+// PercentComplete is -1 when unset (0.0..1.0 otherwise). When Status/Percent are
+// unset, ToProps derives them from Complete for backward compatibility.
 type Task struct {
-	Subject       string
-	Body          string
-	Start         time.Time
-	Due           time.Time
-	Complete      bool
-	DateCompleted time.Time
-	ReminderSet   bool
-	ReminderTime  time.Time
-	Importance    int
-	Sensitivity   int
-	Categories    []string
+	Subject         string
+	Body            string
+	Start           time.Time
+	Due             time.Time
+	Complete        bool
+	DateCompleted   time.Time
+	Status          int // -1 unset, else 0..4 (PidLidTaskStatus)
+	PercentComplete float64
+	ReminderSet     bool
+	ReminderTime    time.Time
+	Importance      int
+	Sensitivity     int
+	Categories      []string
 }
 
 // taskNames lists the named properties a task resolves, in a fixed order indexed by
@@ -62,8 +67,11 @@ const (
 	idxKeywords
 )
 
-// New returns a Task with the unset sentinels (Importance/Sensitivity = -1).
-func New() Task { return Task{Importance: -1, Sensitivity: -1} }
+// New returns a Task with the unset sentinels (Importance/Sensitivity/Status = -1,
+// PercentComplete = -1).
+func New() Task {
+	return Task{Importance: -1, Sensitivity: -1, Status: -1, PercentComplete: -1}
+}
 
 // ToProps renders a task to MAPI properties, allocating the named-property ids.
 func ToProps(t Task, resolve Resolver) (mapi.PropertyValues, error) {
@@ -97,15 +105,21 @@ func ToProps(t Task, resolve Resolver) (mapi.PropertyValues, error) {
 	setTime(idxCommonEnd, t.Due)
 	setBool(idxComplete, t.Complete)
 	if ids[idxStatus] != 0 {
+		// Status takes precedence when set; otherwise derive from Complete.
 		status := int32(0)
-		if t.Complete {
+		if t.Status >= 0 {
+			status = int32(t.Status)
+		} else if t.Complete {
 			status = 2 // olComplete
 		}
 		p.Set(mapi.MakeTag(ids[idxStatus], mapi.PtLong), status)
 	}
 	if ids[idxPercent] != 0 {
+		// Percent takes precedence when set; otherwise derive from Complete.
 		pct := 0.0
-		if t.Complete {
+		if t.PercentComplete >= 0 {
+			pct = t.PercentComplete
+		} else if t.Complete {
 			pct = 1.0
 		}
 		p.Set(mapi.MakeTag(ids[idxPercent], mapi.PtDouble), pct)
@@ -151,6 +165,14 @@ func FromProps(props mapi.PropertyValues, resolve Resolver) (Task, error) {
 	t.DateCompleted = timeProp(props, named(idxDateCompleted, mapi.PtSysTime))
 	t.ReminderSet = boolProp(props, named(idxReminderSet, mapi.PtBoolean))
 	t.ReminderTime = timeProp(props, named(idxReminderTime, mapi.PtSysTime))
+	if v, ok := longProp(props, named(idxStatus, mapi.PtLong)); ok {
+		t.Status = v
+	}
+	if v, ok := props.Get(named(idxPercent, mapi.PtDouble)); ok {
+		if pct, ok := v.(float64); ok {
+			t.PercentComplete = pct
+		}
+	}
 	if v, ok := props.Get(named(idxKeywords, mapi.PtMvUnicode)); ok {
 		if cats, ok := v.([]string); ok {
 			t.Categories = cats

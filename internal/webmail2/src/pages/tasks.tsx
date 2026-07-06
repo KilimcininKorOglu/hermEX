@@ -28,13 +28,15 @@ interface TaskForm {
   summary: string
   start: string
   due: string
+  status: number
+  percent: number
   priority: number
   reminder: boolean
   categories: string[]
   description: string
 }
 
-const emptyForm: TaskForm = { summary: "", start: "", due: "", priority: 1, reminder: false, categories: [], description: "" }
+const emptyForm: TaskForm = { summary: "", start: "", due: "", status: 0, percent: 0, priority: 1, reminder: false, categories: [], description: "" }
 
 export function TasksPage() {
   const { t } = useI18n()
@@ -92,6 +94,8 @@ export function TasksPage() {
       summary: task.summary,
       start: task.start,
       due: task.due,
+      status: task.status,
+      percent: task.percent,
       priority: task.priority,
       reminder: task.reminder,
       categories: task.categories,
@@ -113,6 +117,8 @@ export function TasksPage() {
       summary: task.summary,
       start: task.start ?? "",
       due: task.due ?? "",
+      status: task.status ?? 0,
+      percent: task.percent ?? 0,
       priority: task.priority ?? 1,
       reminder: task.reminder ?? false,
       categories: task.categories ?? [],
@@ -132,6 +138,8 @@ export function TasksPage() {
         summary: form.summary.trim(),
         start: form.start || undefined,
         due: form.due || undefined,
+        status: form.status,
+        percent: form.percent,
         priority: form.priority,
         reminder: form.reminder,
         categories: form.categories.length > 0 ? form.categories : undefined,
@@ -290,6 +298,38 @@ export function TasksPage() {
                 />
                 {t("tasks.reminder")}
               </label>
+            </div>
+            <div className="flex items-center gap-6">
+              <div className="space-y-2">
+                <Label htmlFor="task-status">{t("tasks.status")}</Label>
+                <select
+                  id="task-status"
+                  className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+                  value={form.status}
+                  onChange={(e) => {
+                    const s = Number(e.target.value)
+                    setForm((prev) => ({ ...prev, status: s, percent: s === 2 ? 100 : prev.percent === 100 ? prev.percent : prev.percent }))
+                  }}
+                >
+                  <option value={0}>{t("tasks.statusNotStarted")}</option>
+                  <option value={1}>{t("tasks.statusInProgress")}</option>
+                  <option value={2}>{t("tasks.statusComplete")}</option>
+                  <option value={3}>{t("tasks.statusWaiting")}</option>
+                  <option value={4}>{t("tasks.statusDeferred")}</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="task-percent">{t("tasks.percent")}</Label>
+                <Input
+                  id="task-percent"
+                  type="number"
+                  min={0}
+                  max={100}
+                  className="w-24"
+                  value={form.percent}
+                  onChange={(e) => setForm({ ...form, percent: Math.max(0, Math.min(100, Number(e.target.value) || 0)) })}
+                />
+              </div>
             </div>
             {allCategories.length > 0 && (
               <div className="space-y-2">

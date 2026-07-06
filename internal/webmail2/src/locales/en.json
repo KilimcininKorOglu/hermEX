@@ -989,7 +989,14 @@
     "priorityNormal": "Normal",
     "priorityHigh": "High",
     "reminder": "Reminder",
-    "categories": "Categories"
+    "categories": "Categories",
+    "status": "Status",
+    "statusNotStarted": "Not started",
+    "statusInProgress": "In progress",
+    "statusComplete": "Complete",
+    "statusWaiting": "Waiting",
+    "statusDeferred": "Deferred",
+    "percent": "% complete"
   },
   "notes": {
     "newNote": "New note",
