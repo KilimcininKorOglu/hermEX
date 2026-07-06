@@ -60,7 +60,7 @@ function formatStorageBytes(n: number): string {
 export function SettingsPage() {
   const { theme, setTheme, resolvedTheme } = useTheme()
   const { user, updatePrefs } = useAuth()
-  const { t } = useI18n()
+  const { t, changeLocale } = useI18n()
 
   // Profile photo (self-service avatar). avatarVersion cache-busts the <img>
   // after an upload/removal so the new photo shows immediately.
@@ -143,6 +143,21 @@ export function SettingsPage() {
   const [workDayEnd, setWorkDayEnd] = useState(18)
   const [showNonWorkingHours, setShowNonWorkingHours] = useState(true)
 
+  // Display/appearance settings (theme, language, date/time format, name display,
+  // unread/widget-panel toggles), DB-backed via PrWebmailSettings so they survive
+  // a new browser (no localStorage). The theme is applied through useTheme; the
+  // language through useI18n.changeLocale.
+  const [appearance, setAppearance] = useState({
+    theme: "system",
+    language: "system",
+    dateFormat: "iso",
+    timeFormat: "24",
+    nameDisplay: "firstlast",
+    showUnreadCounter: false,
+    unreadBorder: false,
+    hideWidgetPanel: false,
+  })
+
   useEffect(() => {
     api.getProfile()
       .then((p) => {
@@ -169,6 +184,18 @@ export function SettingsPage() {
         setWorkDayEnd(s.workDayEnd ?? 18)
         setShowNonWorkingHours(s.showNonWorkingHours ?? true)
       })
+    api.getAppearanceSettings()
+      .then((a) => setAppearance({
+        theme: a.theme ?? "system",
+        language: a.language ?? "system",
+        dateFormat: a.dateFormat ?? "iso",
+        timeFormat: a.timeFormat ?? "24",
+        nameDisplay: a.nameDisplay ?? "firstlast",
+        showUnreadCounter: a.showUnreadCounter,
+        unreadBorder: a.unreadBorder,
+        hideWidgetPanel: a.hideWidgetPanel,
+      }))
+      .catch(() => undefined)
       .catch(() => undefined)
   }, [])
 
@@ -187,6 +214,16 @@ export function SettingsPage() {
   // field never drops the others on the server (the PUT replaces the blob key).
   const saveCalSettings = (next: { firstDayOfWeek: number; resolution: number; workDayStart: number; workDayEnd: number; showNonWorkingHours: boolean }) =>
     api.setCalendarSettings(next)
+
+  // saveAppearance persists the full appearance settings object (DB-backed). The
+  // theme is also pushed through useTheme so it applies immediately and the
+  // language through changeLocale so the UI re-translates.
+  const saveAppearance = (next: typeof appearance) => {
+    setAppearance(next)
+    if (next.theme !== theme) setTheme(next.theme as "light" | "dark" | "system")
+    if (next.language !== "system") changeLocale(next.language)
+    api.setAppearanceSettings(next).catch(() => undefined)
+  }
 
   const handleFirstDayChange = async (d: number) => {
     setFirstDayOfWeek(d)
@@ -1085,6 +1122,108 @@ export function SettingsPage() {
                 </option>
               ))}
             </select>
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">{t("settings.appearance.theme")}</p>
+              <p className="text-sm text-muted-foreground">{t("settings.appearance.themeDescription")}</p>
+            </div>
+            <select
+              value={appearance.theme}
+              onChange={(e) => saveAppearance({ ...appearance, theme: e.target.value })}
+              className="max-w-[16rem] rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="system">{t("settings.appearance.themeSystem")}</option>
+              <option value="light">{t("settings.appearance.themeLight")}</option>
+              <option value="dark">{t("settings.appearance.themeDark")}</option>
+            </select>
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">{t("settings.appearance.language")}</p>
+              <p className="text-sm text-muted-foreground">{t("settings.appearance.languageDescription")}</p>
+            </div>
+            <select
+              value={appearance.language}
+              onChange={(e) => saveAppearance({ ...appearance, language: e.target.value })}
+              className="max-w-[16rem] rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="system">{t("settings.appearance.languageSystem")}</option>
+              <option value="en">English</option>
+              <option value="tr">Türkçe</option>
+            </select>
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">{t("settings.appearance.dateFormat")}</p>
+              <p className="text-sm text-muted-foreground">{t("settings.appearance.dateFormatDescription")}</p>
+            </div>
+            <select
+              value={appearance.dateFormat}
+              onChange={(e) => saveAppearance({ ...appearance, dateFormat: e.target.value })}
+              className="max-w-[16rem] rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="iso">YYYY-MM-DD</option>
+              <option value="dmy">DD/MM/YYYY</option>
+              <option value="mdy">MM/DD/YYYY</option>
+            </select>
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">{t("settings.appearance.timeFormat")}</p>
+              <p className="text-sm text-muted-foreground">{t("settings.appearance.timeFormatDescription")}</p>
+            </div>
+            <select
+              value={appearance.timeFormat}
+              onChange={(e) => saveAppearance({ ...appearance, timeFormat: e.target.value })}
+              className="max-w-[16rem] rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="24">24h</option>
+              <option value="12">12h</option>
+            </select>
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">{t("settings.appearance.nameDisplay")}</p>
+              <p className="text-sm text-muted-foreground">{t("settings.appearance.nameDisplayDescription")}</p>
+            </div>
+            <select
+              value={appearance.nameDisplay}
+              onChange={(e) => saveAppearance({ ...appearance, nameDisplay: e.target.value })}
+              className="max-w-[16rem] rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="firstlast">{t("settings.appearance.nameFirstLast")}</option>
+              <option value="lastfirst">{t("settings.appearance.nameLastFirst")}</option>
+            </select>
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">{t("settings.appearance.unreadBorder")}</p>
+              <p className="text-sm text-muted-foreground">{t("settings.appearance.unreadBorderDescription")}</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={appearance.unreadBorder}
+              onChange={(e) => saveAppearance({ ...appearance, unreadBorder: e.target.checked })}
+            />
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">{t("settings.appearance.hideWidgetPanel")}</p>
+              <p className="text-sm text-muted-foreground">{t("settings.appearance.hideWidgetPanelDescription")}</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={appearance.hideWidgetPanel}
+              onChange={(e) => saveAppearance({ ...appearance, hideWidgetPanel: e.target.checked })}
+            />
           </div>
           <Separator />
           <div className="flex items-center justify-between gap-4">
