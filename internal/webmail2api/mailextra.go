@@ -305,18 +305,21 @@ func (s *Server) handleLabels(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
-// handleSearch scans the mail folders for messages matching the query, on
-// subject/sender (and body when present).
+// handleSearch scans the mail folders for messages matching the query. The query
+// is KQL-style: field:value filters (from/to/subject/body/category/has/is) plus
+// general terms matched against subject/sender/body. Bare tokens preserve the
+// legacy plain-text behaviour.
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	st, _, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
 	defer st.Close()
-	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	raw := strings.TrimSpace(r.URL.Query().Get("q"))
+	kql := parseKQL(raw)
 	results := []mailJSON{}
-	if q == "" {
-		writeJSON(w, http.StatusOK, map[string]any{"emails": results, "total": 0, "query": q})
+	if raw == "" {
+		writeJSON(w, http.StatusOK, map[string]any{"emails": results, "total": 0, "query": raw})
 		return
 	}
 	for slug, fid := range searchFolders() {
@@ -325,13 +328,56 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		for _, m := range msgs {
-			hay := strings.ToLower(m.Subject + " " + m.Sender)
-			if !strings.Contains(hay, q) {
-				if raw, err := st.GetMessageRaw(fid, m.UID); err == nil {
-					if root := mime.ParseStructure(raw); !strings.Contains(strings.ToLower(bestBody(root)), q) {
-						continue
+			sender := strings.ToLower(m.Sender)
+			subject := strings.ToLower(m.Subject)
+			// Field filters take precedence; each must hold for a match.
+			if !containsAny(sender, kql.From) {
+				continue
+			}
+			if !containsAny(subject, kql.Subject) {
+				continue
+			}
+			if kql.Read != nil {
+				isRead := m.Flags&objectstore.FlagSeen != 0
+				if isRead != *kql.Read {
+					continue
+				}
+			}
+			// General terms and body/to filters need the raw MIME. Fetch once and
+			// reuse for all of them.
+			needRaw := len(kql.General) > 0 || len(kql.Body) > 0 || len(kql.To) > 0 || kql.HasAtt != nil
+			var body, recipients string
+			hasAtt := false
+			if needRaw {
+				rawMsg, err := st.GetMessageRaw(fid, m.UID)
+				if err != nil {
+					continue
+				}
+				root := mime.ParseStructure(rawMsg)
+				body = strings.ToLower(bestBody(root))
+				recipients = strings.ToLower(recipientsOf(root))
+				hasAtt = mimeHasAttachment(root)
+			}
+			if len(kql.To) > 0 && !containsAny(recipients, kql.To) {
+				continue
+			}
+			if len(kql.Body) > 0 && !containsAny(body, kql.Body) {
+				continue
+			}
+			if kql.HasAtt != nil && hasAtt != *kql.HasAtt {
+				continue
+			}
+			// General terms match against subject/sender/body together.
+			if len(kql.General) > 0 {
+				hay := subject + " " + sender + " " + body
+				matched := false
+				for _, term := range kql.General {
+					if strings.Contains(hay, term) {
+						matched = true
+						break
 					}
-				} else {
+				}
+				if !matched {
 					continue
 				}
 			}
@@ -343,7 +389,38 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"emails": results, "total": len(results), "query": q})
+	writeJSON(w, http.StatusOK, map[string]any{"emails": results, "total": len(results), "query": raw})
+}
+
+// recipientsOf collects To/Cc/Bcc display strings from a MIME tree so the KQL
+// "to:" filter can match addressees (the index's sender-only row misses them).
+func recipientsOf(root *mime.Part) string {
+	var b strings.Builder
+	hdr := root.Header()
+	for _, h := range []string{"To", "Cc", "Bcc"} {
+		if v := hdr.Get(h); v != "" {
+			b.WriteString(v)
+			b.WriteByte(' ')
+		}
+	}
+	return b.String()
+}
+
+// mimeHasAttachment reports whether a MIME tree contains a part with
+// Content-Disposition: attachment.
+func mimeHasAttachment(p *mime.Part) bool {
+	if p == nil {
+		return false
+	}
+	if p.Disposition == "attachment" {
+		return true
+	}
+	for _, c := range p.Children {
+		if mimeHasAttachment(c) {
+			return true
+		}
+	}
+	return false
 }
 
 // searchFolders is the set of mail folders the search scans.
