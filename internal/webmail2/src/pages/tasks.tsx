@@ -1,10 +1,16 @@
 import { useState, useEffect, useCallback } from "react"
-import { ListTodo, Plus, Trash2, Edit, CalendarClock } from "lucide-react"
+import { ListTodo, Plus, Trash2, Edit, CalendarClock, Flag } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import {
   Dialog,
   DialogContent,
@@ -107,6 +113,29 @@ export function TasksPage() {
     }
     try {
       await api.updateTask(task.uid, payload)
+      await load()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("tasks.updateFailed"))
+      await load()
+    }
+  }
+
+  // flagDue sets a task's due date to a quick target (today/tomorrow/this week's
+  // Friday/next Monday) or clears it ("no date"), the TaskFlagsMenu quick-set.
+  const flagDue = async (task: Task, when: string) => {
+    try {
+      await api.updateTask(task.uid, {
+        summary: task.summary,
+        start: task.start,
+        due: when || undefined,
+        status: task.status,
+        percent: task.percent,
+        priority: task.priority,
+        reminder: task.reminder,
+        categories: task.categories,
+        description: task.description,
+        completed: task.completed,
+      })
       await load()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("tasks.updateFailed"))
@@ -237,6 +266,22 @@ export function TasksPage() {
                   <p className="text-sm text-muted-foreground truncate">{task.description}</p>
                 )}
               </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" title={t("tasks.flag")}>
+                    <Flag className={task.due ? "h-4 w-4 text-primary" : "h-4 w-4"} />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => flagDue(task, ymd(new Date()))}>{t("tasks.flagToday")}</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => flagDue(task, ymd(addDays(new Date(), 1)))}>{t("tasks.flagTomorrow")}</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => flagDue(task, ymd(thisFriday()))}>{t("tasks.flagThisWeek")}</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => flagDue(task, ymd(nextMonday()))}>{t("tasks.flagNextWeek")}</DropdownMenuItem>
+                  {task.due && (
+                    <DropdownMenuItem className="text-destructive" onClick={() => flagDue(task, "")}>{t("tasks.flagNoDate")}</DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
               <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(task)}>
                 <Edit className="h-4 w-4" />
               </Button>
@@ -417,4 +462,33 @@ export function TasksPage() {
       </Dialog>
     </div>
   )
+}
+
+// ymd renders a Date as YYYY-MM-DD (the task due shape the backend parses).
+function ymd(d: Date): string {
+  const m = String(d.getMonth() + 1).padStart(2, "0")
+  const day = String(d.getDate()).padStart(2, "0")
+  return `${d.getFullYear()}-${m}-${day}`
+}
+
+// addDays returns a Date n days after d.
+function addDays(d: Date, n: number): Date {
+  return new Date(d.getTime() + n * 86400000)
+}
+
+// thisFriday returns the Friday of the current week (today if it is Friday, the
+// coming Friday otherwise).
+function thisFriday(): Date {
+  const d = new Date()
+  const day = d.getDay() // 0 Sun .. 6 Sat
+  const delta = (5 - day + 7) % 7
+  return addDays(d, delta)
+}
+
+// nextMonday returns the next Monday strictly after today.
+function nextMonday(): Date {
+  const d = new Date()
+  const day = d.getDay()
+  const delta = day === 1 ? 1 : (8 - day) % 7
+  return addDays(d, delta === 0 ? 7 : delta)
 }

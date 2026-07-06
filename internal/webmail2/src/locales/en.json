@@ -997,7 +997,13 @@
     "statusWaiting": "Waiting",
     "statusDeferred": "Deferred",
     "percent": "% complete",
-    "hideCompleted": "Hide completed"
+    "hideCompleted": "Hide completed",
+    "flag": "Flag",
+    "flagToday": "Today",
+    "flagTomorrow": "Tomorrow",
+    "flagThisWeek": "This week",
+    "flagNextWeek": "Next week",
+    "flagNoDate": "No date"
   },
   "notes": {
     "newNote": "New note",

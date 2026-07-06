@@ -997,7 +997,13 @@
     "statusWaiting": "Bekliyor",
     "statusDeferred": "Ertelendi",
     "percent": "% tamamlandı",
-    "hideCompleted": "Tamamlananları gizle"
+    "hideCompleted": "Tamamlananları gizle",
+    "flag": "İşaretle",
+    "flagToday": "Bugün",
+    "flagTomorrow": "Yarın",
+    "flagThisWeek": "Bu hafta",
+    "flagNextWeek": "Gelecek hafta",
+    "flagNoDate": "Tarihsiz"
   },
   "notes": {
     "newNote": "Yeni not",
