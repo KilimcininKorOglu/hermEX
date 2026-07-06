@@ -156,6 +156,7 @@ export function SettingsPage() {
     showUnreadCounter: false,
     unreadBorder: false,
     hideWidgetPanel: false,
+    startupFolder: "",
   })
 
   useEffect(() => {
@@ -194,6 +195,7 @@ export function SettingsPage() {
         showUnreadCounter: a.showUnreadCounter,
         unreadBorder: a.unreadBorder,
         hideWidgetPanel: a.hideWidgetPanel,
+        startupFolder: a.startupFolder ?? "",
       }))
       .catch(() => undefined)
       .catch(() => undefined)
@@ -242,6 +244,7 @@ export function SettingsPage() {
         showUnreadCounter: a.showUnreadCounter,
         unreadBorder: a.unreadBorder,
         hideWidgetPanel: a.hideWidgetPanel,
+        startupFolder: a.startupFolder ?? "",
       })
       setFirstDayOfWeek(c.firstDayOfWeek ?? 1)
       setResolution(c.resolution ?? 30)
@@ -1256,6 +1259,24 @@ export function SettingsPage() {
               checked={appearance.hideWidgetPanel}
               onChange={(e) => saveAppearance({ ...appearance, hideWidgetPanel: e.target.checked })}
             />
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">{t("settings.appearance.startupFolder")}</p>
+              <p className="text-sm text-muted-foreground">{t("settings.appearance.startupFolderDescription")}</p>
+            </div>
+            <select
+              value={appearance.startupFolder}
+              onChange={(e) => saveAppearance({ ...appearance, startupFolder: e.target.value })}
+              className="max-w-[16rem] rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="">{t("settings.appearance.startupInbox")}</option>
+              <option value="today">{t("nav.today")}</option>
+              <option value="calendar">{t("nav.calendar")}</option>
+              <option value="contacts">{t("nav.contacts")}</option>
+              <option value="tasks">{t("nav.tasks")}</option>
+            </select>
           </div>
           <Separator />
           <div className="flex items-center justify-between gap-4">

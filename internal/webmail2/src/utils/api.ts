@@ -207,6 +207,7 @@ export interface AppearanceSettings {
   showUnreadCounter: boolean
   unreadBorder: boolean
   hideWidgetPanel: boolean
+  startupFolder: string
 }
 
 export interface Delegation {

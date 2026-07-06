@@ -102,6 +102,7 @@ type appearanceSettingsJSON struct {
 	ShowUnreadCounter bool   `json:"showUnreadCounter"`
 	UnreadBorder      bool   `json:"unreadBorder"`
 	HideWidgetPanel   bool   `json:"hideWidgetPanel"`
+	StartupFolder     string `json:"startupFolder"` // "" or a known folder slug like "inbox"/"today"/"calendar"
 }
 
 // readAppearanceSettings loads the display settings from the shared blob,
@@ -167,6 +168,7 @@ func (s *Server) handlePutAppearanceSettings(w http.ResponseWriter, r *http.Requ
 		a.ShowUnreadCounter = in.ShowUnreadCounter
 		a.UnreadBorder = in.UnreadBorder
 		a.HideWidgetPanel = in.HideWidgetPanel
+		a.StartupFolder = in.StartupFolder
 		clamped := readAppearanceSettings(map[string]json.RawMessage{"webmail2AppearanceSettings": mustJSON(a)})
 		raw, _ := json.Marshal(clamped)
 		m["webmail2AppearanceSettings"] = raw

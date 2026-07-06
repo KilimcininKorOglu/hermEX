@@ -1,4 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom"
+import { useState, useEffect } from "react"
+import api from "@/utils/api"
 import { ThemeProvider } from "@/components/theme-provider"
 import { AuthProvider, useAuth } from "@/contexts/AuthContext"
 import { MailboxProvider } from "@/contexts/MailboxContext"
@@ -31,6 +33,20 @@ import { ShortcutsDialog } from "@/components/shortcuts-dialog"
 import { Toaster } from "@/components/ui/sonner"
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts"
 import { LoginPage } from "@/pages/login"
+
+// StartupRedirect sends the user to their configured startup folder on login,
+// falling back to /inbox. Loads the appearance settings (DB-backed) once; until
+// they resolve, stay on a blank route so the redirect never flashes /inbox first.
+function StartupRedirect() {
+  const [target, setTarget] = useState<string | null>(null)
+  useEffect(() => {
+    api.getAppearanceSettings()
+      .then((s) => setTarget(s.startupFolder && s.startupFolder !== "inbox" ? `/${s.startupFolder}` : "/inbox"))
+      .catch(() => setTarget("/inbox"))
+  }, [])
+  if (!target) return null
+  return <Navigate to={target} replace />
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading } = useAuth()
@@ -133,7 +149,7 @@ function AppContent() {
             </ProtectedRoute>
           }
         >
-          <Route index element={<Navigate to="/inbox" replace />} />
+          <Route index element={<StartupRedirect />} />
           <Route path="today" element={<TodayPage />} />
           <Route path="compose" element={<ComposePage />} />
           <Route path="inbox" element={<InboxPage folder="inbox" />} />

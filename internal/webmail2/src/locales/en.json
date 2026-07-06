@@ -426,7 +426,10 @@
       "unreadBorder": "Unread border",
       "unreadBorderDescription": "Color the border of unread messages.",
       "hideWidgetPanel": "Hide widget panel",
-      "hideWidgetPanelDescription": "Hide the Today dashboard widgets."
+      "hideWidgetPanelDescription": "Hide the Today dashboard widgets.",
+      "startupFolder": "Startup folder",
+      "startupFolderDescription": "The folder shown on login.",
+      "startupInbox": "Inbox"
     },
     "notifications": {
       "title": "Notifications",
