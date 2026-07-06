@@ -1003,21 +1003,34 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                   )}
                 </div>
                 <div className="flex flex-wrap gap-2">
-                  {email.attachments.map((att) => (
-                    <button
-                      key={att.index}
-                      onClick={() => handleDownloadAttachment(att)}
-                      className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-left text-sm hover:bg-accent/50 transition-colors"
-                      title={t("emailDetail.downloadAttachment", { filename: att.filename })}
-                    >
-                      <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0">
-                        <span className="block truncate font-medium">{att.filename}</span>
-                        <span className="block text-xs text-muted-foreground">{formatFileSize(att.size)}</span>
-                      </span>
-                      <Download className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    </button>
-                  ))}
+                  {email.attachments.map((att) => {
+                    const isImage = att.contentType?.startsWith("image/")
+                    const src = `/api/v1/mail/attachment?id=${encodeURIComponent(email.id)}&index=${att.index}`
+                    return (
+                      <div key={att.index} className="flex flex-col gap-1">
+                        <button
+                          onClick={() => handleDownloadAttachment(att)}
+                          className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-left text-sm hover:bg-accent/50 transition-colors"
+                          title={t("emailDetail.downloadAttachment", { filename: att.filename })}
+                        >
+                          <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0">
+                            <span className="block truncate font-medium">{att.filename}</span>
+                            <span className="block text-xs text-muted-foreground">{formatFileSize(att.size)}</span>
+                          </span>
+                          <Download className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        </button>
+                        {isImage && (
+                          <img
+                            src={src}
+                            alt={att.filename}
+                            className="max-h-48 w-auto rounded border"
+                            loading="lazy"
+                          />
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             )}
