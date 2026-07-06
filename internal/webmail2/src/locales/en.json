@@ -430,7 +430,7 @@
     },
     "notifications": {
       "title": "Notifications",
-      "description": "Configure how you receive alerts for new messages",
+      "description": "Show a desktop notification when new mail arrives.",
       "email": "Email notifications",
       "emailDescription": "Receive notifications for new emails",
       "browser": "Browser notifications",
@@ -438,7 +438,8 @@
       "sound": "Sound notifications",
       "soundDescription": "Play a sound for new messages",
       "desktop": "Desktop notifications",
-      "desktopDescription": "Show desktop notifications when app is in background"
+      "desktopDescription": "Show desktop notifications when app is in background",
+      "enable": "Enable desktop notifications"
     },
     "composition": {
       "title": "Email Composition",

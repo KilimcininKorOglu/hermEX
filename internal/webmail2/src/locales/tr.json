@@ -430,7 +430,7 @@
     },
     "notifications": {
       "title": "Bildirimler",
-      "description": "Yeni mesajlar için uyarıları nasıl alacağınızı yapılandırın",
+      "description": "Yeni mail geldiğinde masaüstü bildirimi göster.",
       "email": "E-posta bildirimleri",
       "emailDescription": "Yeni e-postalar için bildirim alın",
       "browser": "Tarayıcı bildirimleri",
@@ -438,7 +438,8 @@
       "sound": "Ses bildirimleri",
       "soundDescription": "Yeni mesajlar için ses çalın",
       "desktop": "Masaüstü bildirimleri",
-      "desktopDescription": "Uygulama arka plandayken masaüstü bildirimleri göster"
+      "desktopDescription": "Uygulama arka plandayken masaüstü bildirimleri göster",
+      "enable": "Masaüstü bildirimlerini aç"
     },
     "composition": {
       "title": "E-posta Yazımı",

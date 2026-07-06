@@ -2280,6 +2280,20 @@ export function SettingsPage() {
         >
           {resetting ? t("common.loading") : t("settings.reset.resetSettings")}
         </Button>
+        <div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-2"
+            onClick={() => {
+              if (typeof Notification === "undefined") return
+              Notification.requestPermission().catch(() => undefined)
+            }}
+          >
+            {t("settings.notifications.enable")}
+          </Button>
+          <p className="mt-1 text-xs">{t("settings.notifications.description")}</p>
+        </div>
       </div>
     </div>
   )

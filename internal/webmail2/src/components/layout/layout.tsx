@@ -1,14 +1,32 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Outlet, useNavigate } from "react-router-dom"
 import { Sidebar } from "./sidebar"
 import { Header } from "./header"
 import { ReminderOverlay } from "@/components/reminder-overlay"
+import { useMailbox } from "@/contexts/MailboxContext"
 import { cn } from "@/lib/utils"
 
 export function Layout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const navigate = useNavigate()
+  const { inboxUnread } = useMailbox()
+  // Desktop notifications: when the inbox unread count rises, fire a browser
+  // Notification (permission gated). The ref holds the previous count so a
+  // refresh that lands on the same unread total does not spam a notice.
+  const prevUnread = useRef(inboxUnread)
+  useEffect(() => {
+    if (inboxUnread > prevUnread.current) {
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        try {
+          new Notification("hermEX Webmail", { body: `${inboxUnread} unread message${inboxUnread === 1 ? "" : "s"}` })
+        } catch {
+          /* best-effort */
+        }
+      }
+    }
+    prevUnread.current = inboxUnread
+  }, [inboxUnread])
 
   // Global keyboard shortcuts (ignored while typing in an input/textarea/contenteditable
   // so they never swallow ordinary typing):
