@@ -223,7 +223,11 @@
     "proposedTime": "Karşı-teklif düzenleyiciye gönderildi",
     "failedToPropose": "Karşı-teklif gönderilemedi",
     "copyEmail": "E-posta adresini kopyala",
-    "emailCopied": "E-posta adresi kopyalandı"
+    "emailCopied": "E-posta adresi kopyalandı",
+    "inlineReplyTo": "{{who}} kişisine yanıtla",
+    "replyPlaceholder": "Yanıtınızı yazın…",
+    "replySent": "Yanıt gönderildi",
+    "replyFailed": "Yanıt gönderilemedi"
   },
   "compose": {
     "invalidEmail": "Geçerli bir e-posta adresi girin",

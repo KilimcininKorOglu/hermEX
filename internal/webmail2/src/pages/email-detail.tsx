@@ -29,6 +29,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Separator } from "@/components/ui/separator"
@@ -135,6 +136,10 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
   const [invite, setInvite] = useState<MeetingInvite | null>(null)
   const [rsvpStatus, setRsvpStatus] = useState<string | null>(null)
   const [rsvpBusy, setRsvpBusy] = useState(false)
+  // Inline reply: a quick reply box under the message (no compose round-trip).
+  const [replyOpen, setReplyOpen] = useState(false)
+  const [replyBody, setReplyBody] = useState("")
+  const [replyBusy, setReplyBusy] = useState(false)
   // Propose-new-time: a dialog where the invitee picks a proposed start/end and
   // emails a METHOD:COUNTER iTIP to the organizer.
   const [proposeOpen, setProposeOpen] = useState(false)
@@ -323,6 +328,27 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
       params.set("body", `\n\n${t("emailDetail.replyQuoteHeader", { sender: email.from, date: email.date })}\n${email.content}`)
     }
     navigate(`/compose?${params.toString()}`)
+  }
+
+  // handleInlineReply sends a quick reply from the inline box (no compose round-trip).
+  const handleInlineReply = async () => {
+    if (!email || !replyBody.trim()) return
+    setReplyBusy(true)
+    try {
+      await api.sendMail({
+        to: [email.fromEmail],
+        subject: email.subject.startsWith("Re: ") ? email.subject : `Re: ${email.subject}`,
+        body: replyBody,
+        is_html: false,
+      })
+      toast.success(t("emailDetail.replySent"))
+      setReplyBody("")
+      setReplyOpen(false)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("emailDetail.replyFailed"))
+    } finally {
+      setReplyBusy(false)
+    }
   }
 
   // r/a reply shortcuts: r → reply, a → reply-all. Ignored while typing.
@@ -582,7 +608,7 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                   <ArrowLeft className="h-5 w-5" />
                 </Button>
               )}
-              <Button variant="ghost" size="sm" onClick={handleReply} title={t("common.reply")}>
+              <Button variant="ghost" size="sm" onClick={() => setReplyOpen((v) => !v)} title={t("common.reply")}>
                 <Reply className="h-4 w-4 mr-1" />
                 {t("common.reply")}
               </Button>
@@ -1031,6 +1057,27 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                       </div>
                     )
                   })}
+                </div>
+              </div>
+            )}
+            {replyOpen && (
+              <div className="mt-4 rounded-lg border bg-card p-3">
+                <div className="mb-2 flex items-center justify-between">
+                  <span className="text-sm text-muted-foreground">{t("emailDetail.inlineReplyTo", { who: email.fromEmail })}</span>
+                  <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => setReplyOpen(false)}>×</button>
+                </div>
+                <Textarea
+                  value={replyBody}
+                  onChange={(e) => setReplyBody(e.target.value)}
+                  rows={4}
+                  placeholder={t("emailDetail.replyPlaceholder")}
+                  className="mb-2"
+                />
+                <div className="flex justify-end gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setReplyOpen(false)} disabled={replyBusy}>{t("common.cancel")}</Button>
+                  <Button size="sm" onClick={handleInlineReply} disabled={replyBusy || !replyBody.trim()}>
+                    {replyBusy ? t("common.sending") : t("common.send")}
+                  </Button>
                 </div>
               </div>
             )}

@@ -223,7 +223,11 @@
     "proposedTime": "Counter-proposal sent to the organizer",
     "failedToPropose": "Could not send the counter-proposal",
     "copyEmail": "Copy email address",
-    "emailCopied": "Email copied"
+    "emailCopied": "Email copied",
+    "inlineReplyTo": "Reply to {{who}}",
+    "replyPlaceholder": "Type your reply…",
+    "replySent": "Reply sent",
+    "replyFailed": "Reply failed"
   },
   "compose": {
     "invalidEmail": "Enter a valid email address",
