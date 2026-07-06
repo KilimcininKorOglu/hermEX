@@ -726,7 +726,19 @@ export function Sidebar({ collapsed, onToggle, mobileOpen = false, onMobileClose
         )}
 
         {folders.map((item) => (
-          <NavItemComponent key={item.path} item={item} isExpanded={isExpanded} />
+          <div
+            key={item.path}
+            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move" }}
+            onDrop={(e) => {
+              e.preventDefault()
+              const id = e.dataTransfer.getData("text/x-hermex-mail")
+              if (!id) return
+              const slug = item.path.replace(/^\//, "")
+              api.moveMail(id, slug).then(() => window.dispatchEvent(new Event("hermex:mail-changed"))).catch(() => undefined)
+            }}
+          >
+            <NavItemComponent item={item} isExpanded={isExpanded} />
+          </div>
         ))}
 
         {customFolders.map((name) => {

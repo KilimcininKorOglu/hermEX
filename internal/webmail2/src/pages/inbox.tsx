@@ -148,6 +148,15 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
       page,
     })
   }, [folder, activeFilter, sortBy, sortDir, page, setInboxQuery])
+
+  // A mail moved from elsewhere (e.g. drag-drop onto a sidebar folder) fires the
+  // "hermex:mail-changed" event; refresh the current folder so it disappears.
+  useEffect(() => {
+    const onChanged = () => refreshInbox()
+    window.addEventListener("hermex:mail-changed", onChanged)
+    return () => window.removeEventListener("hermex:mail-changed", onChanged)
+  }, [refreshInbox])
+
   // The welcome banner stays dismissed across visits: its closed state lives in a
   // client-readable cookie (the web UI uses cookies, not localStorage).
   const [showWelcome, setShowWelcome] = useState(() => getCookie("hermex-welcome-dismissed") !== "1")
@@ -337,6 +346,11 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
 
   const EmailRow = ({ email }: { email: Email }) => (
     <div
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/x-hermex-mail", email.id)
+        e.dataTransfer.effectAllowed = "move"
+      }}
       className={cn(
         "group flex cursor-pointer items-center gap-3 transition-all duration-200",
         viewMode === "list" ? "p-4 hover:bg-accent/50" : "p-2 hover:bg-accent/50",
