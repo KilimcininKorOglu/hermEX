@@ -752,6 +752,21 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                     <span className="text-sm text-muted-foreground">
                       &lt;{email.fromEmail}&gt;
                     </span>
+                    <button
+                      type="button"
+                      className="text-muted-foreground hover:text-foreground transition-colors"
+                      title={t("emailDetail.copyEmail")}
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(email.fromEmail)
+                          toast.success(t("emailDetail.emailCopied"))
+                        } catch {
+                          toast.error(t("emailDetail.copyFailed"))
+                        }
+                      }}
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </button>
                   </div>
 
                   <div className="mt-1 text-sm text-muted-foreground">

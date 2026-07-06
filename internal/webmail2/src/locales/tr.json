@@ -195,7 +195,7 @@
     "moveToFolder": "Klasöre taşı",
     "copyToFolder": "Klasöre kopyala",
     "copiedTo": "{{folder}} klasörüne kopyalandı",
-    "copyFailed": "İleti kopyalanamadı",
+    "copyFailed": "Kopyalama başarısız",
     "removeLabel": "{{label}} etiketini kaldır",
     "labelPlaceholder": "Etiket",
     "addLabel": "Etiket ekle",
@@ -221,7 +221,9 @@
     "proposeNewTimeHint": "Düzenleyiciye yeni bir zaman öner; bir karşı-teklif alırlar.",
     "sendProposal": "Öneriyi gönder",
     "proposedTime": "Karşı-teklif düzenleyiciye gönderildi",
-    "failedToPropose": "Karşı-teklif gönderilemedi"
+    "failedToPropose": "Karşı-teklif gönderilemedi",
+    "copyEmail": "E-posta adresini kopyala",
+    "emailCopied": "E-posta adresi kopyalandı"
   },
   "compose": {
     "invalidEmail": "Geçerli bir e-posta adresi girin",
