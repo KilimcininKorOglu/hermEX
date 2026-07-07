@@ -55,6 +55,14 @@ func ParseRecurrence(ical []byte) (start, end time.Time, rec Recurrence, ok bool
 	return st.UTC(), en.UTC(), r, true
 }
 
+// ParseRRule parses an RRULE value (the text after "RRULE:") into a Recurrence. A
+// value with no FREQ is rejected. Exported so a non-calendar PIM object that stores
+// its recurrence as RRULE text (a task) can reach the same neutral recurrence shape
+// a wire protocol consumes, without re-implementing the parser.
+func ParseRRule(value string) (Recurrence, bool) {
+	return parseRRule(value)
+}
+
 // parseRRule parses an RRULE value (the text after "RRULE:") into a Recurrence. A
 // value with no FREQ is rejected.
 func parseRRule(value string) (Recurrence, bool) {
