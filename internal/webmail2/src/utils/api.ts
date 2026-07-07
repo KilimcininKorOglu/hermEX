@@ -180,6 +180,7 @@ export interface Task {
   priority?: number // 0=low, 1=normal, 2=high (PR_IMPORTANCE)
   reminder?: boolean // PidLidReminderSet
   categories?: string[]
+  recurrence?: string // RRULE (FREQ=DAILY/WEEKLY/MONTHLY/YEARLY;INTERVAL=N;COUNT=K)
   completed: boolean
 }
 

@@ -35,22 +35,24 @@ type Task struct {
 	Importance      int
 	Sensitivity     int
 	Categories      []string
+	RecurrenceRule  string // RRULE string (webmail-only recurrence; see mapi.NameTaskRecurrenceRule)
 }
 
 // taskNames lists the named properties a task resolves, in a fixed order indexed by
 // the idx* constants below.
 var taskNames = []mapi.PropertyName{
-	mapi.NameTaskStatus,        // PtLong
-	mapi.NamePercentComplete,   // PtDouble
-	mapi.NameTaskStartDate,     // PtSysTime
-	mapi.NameTaskDueDate,       // PtSysTime
-	mapi.NameTaskDateCompleted, // PtSysTime
-	mapi.NameTaskComplete,      // PtBoolean
-	mapi.NameCommonStart,       // PtSysTime
-	mapi.NameCommonEnd,         // PtSysTime
-	mapi.NameReminderTime,      // PtSysTime
-	mapi.NameReminderSet,       // PtBoolean
-	mapi.NameKeywords,          // PtMvUnicode
+	mapi.NameTaskStatus,         // PtLong
+	mapi.NamePercentComplete,    // PtDouble
+	mapi.NameTaskStartDate,      // PtSysTime
+	mapi.NameTaskDueDate,        // PtSysTime
+	mapi.NameTaskDateCompleted,  // PtSysTime
+	mapi.NameTaskComplete,       // PtBoolean
+	mapi.NameCommonStart,        // PtSysTime
+	mapi.NameCommonEnd,          // PtSysTime
+	mapi.NameReminderTime,       // PtSysTime
+	mapi.NameReminderSet,        // PtBoolean
+	mapi.NameKeywords,           // PtMvUnicode
+	mapi.NameTaskRecurrenceRule, // PtUnicode (RRULE string; webmail-only, see mapi.NameTaskRecurrenceRule)
 }
 
 const (
@@ -65,6 +67,7 @@ const (
 	idxReminderTime
 	idxReminderSet
 	idxKeywords
+	idxRecurrenceRule
 )
 
 // New returns a Task with the unset sentinels (Importance/Sensitivity/Status = -1,
@@ -134,6 +137,9 @@ func ToProps(t Task, resolve Resolver) (mapi.PropertyValues, error) {
 	if len(t.Categories) > 0 && ids[idxKeywords] != 0 {
 		p.Set(mapi.MakeTag(ids[idxKeywords], mapi.PtMvUnicode), t.Categories)
 	}
+	if t.RecurrenceRule != "" && ids[idxRecurrenceRule] != 0 {
+		p.Set(mapi.MakeTag(ids[idxRecurrenceRule], mapi.PtUnicode), t.RecurrenceRule)
+	}
 	return p, nil
 }
 
@@ -176,6 +182,11 @@ func FromProps(props mapi.PropertyValues, resolve Resolver) (Task, error) {
 	if v, ok := props.Get(named(idxKeywords, mapi.PtMvUnicode)); ok {
 		if cats, ok := v.([]string); ok {
 			t.Categories = cats
+		}
+	}
+	if v, ok := props.Get(named(idxRecurrenceRule, mapi.PtUnicode)); ok {
+		if s, ok := v.(string); ok {
+			t.RecurrenceRule = s
 		}
 	}
 	return t, nil

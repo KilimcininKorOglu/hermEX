@@ -26,6 +26,7 @@ type taskJSON struct {
 	Priority    int      `json:"priority,omitempty"` // 0=low, 1=normal, 2=high (PR_IMPORTANCE)
 	Reminder    bool     `json:"reminder,omitempty"` // PidLidReminderSet
 	Categories  []string `json:"categories,omitempty"`
+	Recurrence  string   `json:"recurrence,omitempty"` // RRULE string (FREQ=DAILY/WEEKLY/MONTHLY/YEARLY;...)
 	Completed   bool     `json:"completed"`
 }
 
@@ -64,6 +65,7 @@ func jsonToTask(in taskJSON) oxtask.Task {
 	t.Importance = in.Priority
 	t.ReminderSet = in.Reminder
 	t.Categories = in.Categories
+	t.RecurrenceRule = in.Recurrence
 	// Status takes precedence when >=0 (0 is a valid value: not started). When
 	// set, Complete derives from it (status 2 = complete); otherwise the legacy
 	// Completed boolean drives status/percent in ToProps.
@@ -96,6 +98,7 @@ func taskToJSON(t oxtask.Task) taskJSON {
 		Priority:    t.Importance,
 		Reminder:    t.ReminderSet,
 		Categories:  t.Categories,
+		Recurrence:  t.RecurrenceRule,
 	}
 	if t.Status >= 0 {
 		j.Status = t.Status
@@ -256,6 +259,7 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 				prev.Categories = merged.Categories
 				prev.Status = merged.Status
 				prev.PercentComplete = merged.PercentComplete
+				prev.RecurrenceRule = merged.RecurrenceRule
 				merged = prev
 			}
 		}

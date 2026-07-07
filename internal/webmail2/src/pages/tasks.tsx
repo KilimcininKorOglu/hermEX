@@ -39,10 +39,11 @@ interface TaskForm {
   priority: number
   reminder: boolean
   categories: string[]
+  recurrence: string
   description: string
 }
 
-const emptyForm: TaskForm = { summary: "", start: "", due: "", status: 0, percent: 0, priority: 1, reminder: false, categories: [], description: "" }
+const emptyForm: TaskForm = { summary: "", start: "", due: "", status: 0, percent: 0, priority: 1, reminder: false, categories: [], recurrence: "", description: "" }
 
 export function TasksPage() {
   const { t } = useI18n()
@@ -108,6 +109,7 @@ export function TasksPage() {
       priority: task.priority,
       reminder: task.reminder,
       categories: task.categories,
+      recurrence: task.recurrence,
       description: task.description,
       completed: !task.completed,
     }
@@ -154,6 +156,7 @@ export function TasksPage() {
       priority: task.priority ?? 1,
       reminder: task.reminder ?? false,
       categories: task.categories ?? [],
+      recurrence: task.recurrence ?? "",
       description: task.description ?? "",
     })
   }
@@ -175,6 +178,7 @@ export function TasksPage() {
         priority: form.priority,
         reminder: form.reminder,
         categories: form.categories.length > 0 ? form.categories : undefined,
+        recurrence: form.recurrence || undefined,
         description: form.description || undefined,
         completed: editing.completed,
       })
@@ -429,6 +433,21 @@ export function TasksPage() {
                 rows={3}
                 placeholder={t("common.optional")}
               />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="task-recurrence">{t("tasks.recurrence")}</Label>
+              <select
+                id="task-recurrence"
+                className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+                value={form.recurrence}
+                onChange={(e) => setForm({ ...form, recurrence: e.target.value })}
+              >
+                <option value="">{t("tasks.recurrenceNone")}</option>
+                <option value="FREQ=DAILY;INTERVAL=1">{t("tasks.recurrenceDaily")}</option>
+                <option value="FREQ=WEEKLY;INTERVAL=1">{t("tasks.recurrenceWeekly")}</option>
+                <option value="FREQ=MONTHLY;INTERVAL=1">{t("tasks.recurrenceMonthly")}</option>
+                <option value="FREQ=YEARLY;INTERVAL=1">{t("tasks.recurrenceYearly")}</option>
+              </select>
             </div>
           </div>
           <DialogFooter>

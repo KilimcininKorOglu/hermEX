@@ -40,7 +40,7 @@ func TestTaskRichFieldsRoundTrip(t *testing.T) {
 		return rec
 	}
 
-	body := `{"summary":"Ship report","description":"Q3 numbers","start":"2026-07-01","due":"2026-07-15","status":1,"percent":40,"priority":2,"reminder":true,"categories":["Urgent","Finance"]}`
+	body := `{"summary":"Ship report","description":"Q3 numbers","start":"2026-07-01","due":"2026-07-15","status":1,"percent":40,"priority":2,"reminder":true,"categories":["Urgent","Finance"],"recurrence":"FREQ=WEEKLY;INTERVAL=2;COUNT=5"}`
 	if rec := do(http.MethodPost, "/api/v1/tasks", body); rec.Code != http.StatusOK {
 		t.Fatalf("create: status %d body %s", rec.Code, rec.Body.String())
 	}
@@ -62,11 +62,12 @@ func TestTaskRichFieldsRoundTrip(t *testing.T) {
 	checks := map[string]string{
 		"summary": c.Summary, "description": c.Description, "start": c.Start,
 		"due": c.Due, "priority": itoa(c.Priority), "status": itoa(c.Status),
-		"percent": itoa(c.Percent),
+		"percent": itoa(c.Percent), "recurrence": c.Recurrence,
 	}
 	want := map[string]string{
 		"summary": "Ship report", "description": "Q3 numbers", "start": "2026-07-01",
 		"due": "2026-07-15", "priority": "2", "status": "1", "percent": "40",
+		"recurrence": "FREQ=WEEKLY;INTERVAL=2;COUNT=5",
 	}
 	for k, w := range want {
 		if checks[k] != w {

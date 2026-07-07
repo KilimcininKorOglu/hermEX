@@ -1055,7 +1055,13 @@
     "flagTomorrow": "Tomorrow",
     "flagThisWeek": "This week",
     "flagNextWeek": "Next week",
-    "flagNoDate": "No date"
+    "flagNoDate": "No date",
+    "recurrence": "Recurrence",
+    "recurrenceNone": "None",
+    "recurrenceDaily": "Daily",
+    "recurrenceWeekly": "Weekly",
+    "recurrenceMonthly": "Monthly",
+    "recurrenceYearly": "Yearly"
   },
   "notes": {
     "newNote": "New note",

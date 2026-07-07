@@ -59,6 +59,14 @@ var (
 	// note's background color: 0 blue, 1 green, 2 pink, 3 yellow (default),
 	// 4 white.
 	NameNoteColor = PropertyName{Kind: MnidID, GUID: PsetidNote, LID: 0x8B00}
+	// NameTaskRecurrenceRule holds a task's recurrence as an RRULE string
+	// (FREQ=DAILY/WEEKLY/MONTHLY/YEARLY;INTERVAL=N;COUNT=K or UNTIL=date). This is
+	// the webmail's own recurrence carrier under PS_PUBLIC_STRINGS, NOT the
+	// MS-OXOCAL PidLidTaskRecurrence binary blob (0x8416) Outlook writes: serializing
+	// that RecurrencePattern struct is a separate contract-map-grounded sub-project.
+	// A recurring task saved here recurs within webmail but does not surface as a
+	// recurrence in Outlook.
+	NameTaskRecurrenceRule = PropertyName{Kind: MnidString, GUID: PsPublicStrings, Name: "TaskRecurrenceRule"}
 
 	// Contact email slots (PidLidEmail{1,2,3}*, PSETID_Address, PtUnicode). Each
 	// slot carries an SMTP address, a display name, and an address type.

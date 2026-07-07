@@ -1055,7 +1055,13 @@
     "flagTomorrow": "Yarın",
     "flagThisWeek": "Bu hafta",
     "flagNextWeek": "Gelecek hafta",
-    "flagNoDate": "Tarihsiz"
+    "flagNoDate": "Tarihsiz",
+    "recurrence": "Yineleme",
+    "recurrenceNone": "Yok",
+    "recurrenceDaily": "Günlük",
+    "recurrenceWeekly": "Haftalık",
+    "recurrenceMonthly": "Aylık",
+    "recurrenceYearly": "Yıllık"
   },
   "notes": {
     "newNote": "Yeni not",
