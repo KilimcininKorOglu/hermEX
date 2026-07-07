@@ -35,24 +35,34 @@ type Task struct {
 	Importance      int
 	Sensitivity     int
 	Categories      []string
-	RecurrenceRule  string // RRULE string (webmail-only recurrence; see mapi.NameTaskRecurrenceRule)
+	RecurrenceRule  string    // RRULE string (webmail-only recurrence; see mapi.NameTaskRecurrenceRule)
+	Owner           string    // PidLidTaskOwner (current keeper), "" when unassigned
+	Assigner        string    // PidLidTaskAssigner (last assigner), "" on the assigner's own copy
+	AcceptanceState int       // PidLidTaskAcceptanceState: -1 unset, 0 not assigned, 1 unknown, 2 accepted, 3 rejected
+	FCreator        bool      // PidLidTaskFCreator: this copy belongs to the original creator
+	LastUpdate      time.Time // PidLidTaskLastUpdate (assignment-related change time)
 }
 
 // taskNames lists the named properties a task resolves, in a fixed order indexed by
 // the idx* constants below.
 var taskNames = []mapi.PropertyName{
-	mapi.NameTaskStatus,         // PtLong
-	mapi.NamePercentComplete,    // PtDouble
-	mapi.NameTaskStartDate,      // PtSysTime
-	mapi.NameTaskDueDate,        // PtSysTime
-	mapi.NameTaskDateCompleted,  // PtSysTime
-	mapi.NameTaskComplete,       // PtBoolean
-	mapi.NameCommonStart,        // PtSysTime
-	mapi.NameCommonEnd,          // PtSysTime
-	mapi.NameReminderTime,       // PtSysTime
-	mapi.NameReminderSet,        // PtBoolean
-	mapi.NameKeywords,           // PtMvUnicode
-	mapi.NameTaskRecurrenceRule, // PtUnicode (RRULE string; webmail-only, see mapi.NameTaskRecurrenceRule)
+	mapi.NameTaskStatus,          // PtLong
+	mapi.NamePercentComplete,     // PtDouble
+	mapi.NameTaskStartDate,       // PtSysTime
+	mapi.NameTaskDueDate,         // PtSysTime
+	mapi.NameTaskDateCompleted,   // PtSysTime
+	mapi.NameTaskComplete,        // PtBoolean
+	mapi.NameCommonStart,         // PtSysTime
+	mapi.NameCommonEnd,           // PtSysTime
+	mapi.NameReminderTime,        // PtSysTime
+	mapi.NameReminderSet,         // PtBoolean
+	mapi.NameKeywords,            // PtMvUnicode
+	mapi.NameTaskRecurrenceRule,  // PtUnicode (RRULE string; webmail-only, see mapi.NameTaskRecurrenceRule)
+	mapi.NameTaskOwner,           // PtUnicode
+	mapi.NameTaskAssigner,        // PtUnicode
+	mapi.NameTaskAcceptanceState, // PtLong
+	mapi.NameTaskFCreator,        // PtBoolean
+	mapi.NameTaskLastUpdate,      // PtSysTime
 }
 
 const (
@@ -68,12 +78,17 @@ const (
 	idxReminderSet
 	idxKeywords
 	idxRecurrenceRule
+	idxOwner
+	idxAssigner
+	idxAcceptanceState
+	idxFCreator
+	idxLastUpdate
 )
 
 // New returns a Task with the unset sentinels (Importance/Sensitivity/Status = -1,
-// PercentComplete = -1).
+// PercentComplete = -1, AcceptanceState = -1).
 func New() Task {
-	return Task{Importance: -1, Sensitivity: -1, Status: -1, PercentComplete: -1}
+	return Task{Importance: -1, Sensitivity: -1, Status: -1, PercentComplete: -1, AcceptanceState: -1}
 }
 
 // ToProps renders a task to MAPI properties, allocating the named-property ids.
@@ -140,6 +155,27 @@ func ToProps(t Task, resolve Resolver) (mapi.PropertyValues, error) {
 	if t.RecurrenceRule != "" && ids[idxRecurrenceRule] != 0 {
 		p.Set(mapi.MakeTag(ids[idxRecurrenceRule], mapi.PtUnicode), t.RecurrenceRule)
 	}
+	if t.Owner != "" && ids[idxOwner] != 0 {
+		p.Set(mapi.MakeTag(ids[idxOwner], mapi.PtUnicode), t.Owner)
+	}
+	if t.Assigner != "" && ids[idxAssigner] != 0 {
+		p.Set(mapi.MakeTag(ids[idxAssigner], mapi.PtUnicode), t.Assigner)
+	}
+	if ids[idxAcceptanceState] != 0 {
+		// AcceptanceState takes precedence when set; otherwise 0 (not assigned) is
+		// the default Outlook writes for an unassigned task.
+		state := int32(0)
+		if t.AcceptanceState >= 0 {
+			state = int32(t.AcceptanceState)
+		}
+		p.Set(mapi.MakeTag(ids[idxAcceptanceState], mapi.PtLong), state)
+	}
+	if ids[idxFCreator] != 0 {
+		p.Set(mapi.MakeTag(ids[idxFCreator], mapi.PtBoolean), t.FCreator)
+	}
+	if ids[idxLastUpdate] != 0 && !t.LastUpdate.IsZero() {
+		p.Set(mapi.MakeTag(ids[idxLastUpdate], mapi.PtSysTime), mapi.UnixToNTTime(t.LastUpdate))
+	}
 	return p, nil
 }
 
@@ -189,6 +225,13 @@ func FromProps(props mapi.PropertyValues, resolve Resolver) (Task, error) {
 			t.RecurrenceRule = s
 		}
 	}
+	t.Owner = strProp(props, named(idxOwner, mapi.PtUnicode))
+	t.Assigner = strProp(props, named(idxAssigner, mapi.PtUnicode))
+	if v, ok := longProp(props, named(idxAcceptanceState, mapi.PtLong)); ok {
+		t.AcceptanceState = v
+	}
+	t.FCreator = boolProp(props, named(idxFCreator, mapi.PtBoolean))
+	t.LastUpdate = timeProp(props, named(idxLastUpdate, mapi.PtSysTime))
 	return t, nil
 }
 

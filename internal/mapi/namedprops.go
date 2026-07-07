@@ -132,6 +132,17 @@ var (
 	NameTaskDateCompleted = PropertyName{Kind: MnidID, GUID: PsetidTask, LID: 0x810F} // PtSysTime
 	NameTaskComplete      = PropertyName{Kind: MnidID, GUID: PsetidTask, LID: 0x811C} // PtBoolean
 
+	// Task-assignment named properties (PSETID_Task, MS-OXOTASK). The owner is the
+	// current keeper of the task; the assigner/assigners track who handed it off;
+	// the acceptance state records whether the assignee took it (contract-map/34).
+	NameTaskOwner           = PropertyName{Kind: MnidID, GUID: PsetidTask, LID: 0x811F} // PtUnicode
+	NameTaskAssigner        = PropertyName{Kind: MnidID, GUID: PsetidTask, LID: 0x8121} // PtUnicode
+	NameTaskAssigners       = PropertyName{Kind: MnidID, GUID: PsetidTask, LID: 0x8120} // PtBinary (stack of prior assigners)
+	NameTaskAcceptanceState = PropertyName{Kind: MnidID, GUID: PsetidTask, LID: 0x812A} // PtLong (0 not assigned/1 unknown/2 accepted/3 rejected)
+	NameTaskHistory         = PropertyName{Kind: MnidID, GUID: PsetidTask, LID: 0x811A} // PtLong (last change type)
+	NameTaskLastUpdate      = PropertyName{Kind: MnidID, GUID: PsetidTask, LID: 0x8115} // PtSysTime
+	NameTaskFCreator        = PropertyName{Kind: MnidID, GUID: PsetidTask, LID: 0x8116} // PtBoolean
+
 	// Meeting named properties (PSETID_Meeting). The global object id carries the
 	// iCalendar UID; v1 keeps the UID as a string property instead (the wrapped
 	// binary encoding is deferred), so this is reserved for that later work.

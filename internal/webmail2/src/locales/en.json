@@ -1061,7 +1061,10 @@
     "recurrenceDaily": "Daily",
     "recurrenceWeekly": "Weekly",
     "recurrenceMonthly": "Monthly",
-    "recurrenceYearly": "Yearly"
+    "recurrenceYearly": "Yearly",
+    "assignTo": "Assign to",
+    "assignToPlaceholder": "Owner name (e.g. bob@hermex.test)",
+    "acceptState": "Acceptance: {{state}}"
   },
   "notes": {
     "newNote": "New note",

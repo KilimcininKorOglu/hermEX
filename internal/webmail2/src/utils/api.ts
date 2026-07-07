@@ -181,6 +181,9 @@ export interface Task {
   reminder?: boolean // PidLidReminderSet
   categories?: string[]
   recurrence?: string // RRULE (FREQ=DAILY/WEEKLY/MONTHLY/YEARLY;INTERVAL=N;COUNT=K)
+  owner?: string // PidLidTaskOwner (current keeper), "" when unassigned
+  assigner?: string // PidLidTaskAssigner (last assigner)
+  acceptState?: number // PidLidTaskAcceptanceState: 0 not assigned/1 unknown/2 accepted/3 rejected
   completed: boolean
 }
 

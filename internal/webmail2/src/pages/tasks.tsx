@@ -40,10 +40,11 @@ interface TaskForm {
   reminder: boolean
   categories: string[]
   recurrence: string
+  owner: string
   description: string
 }
 
-const emptyForm: TaskForm = { summary: "", start: "", due: "", status: 0, percent: 0, priority: 1, reminder: false, categories: [], recurrence: "", description: "" }
+const emptyForm: TaskForm = { summary: "", start: "", due: "", status: 0, percent: 0, priority: 1, reminder: false, categories: [], recurrence: "", owner: "", description: "" }
 
 export function TasksPage() {
   const { t } = useI18n()
@@ -111,6 +112,7 @@ export function TasksPage() {
       categories: task.categories,
       recurrence: task.recurrence,
       description: task.description,
+      owner: task.owner,
       completed: !task.completed,
     }
     try {
@@ -136,6 +138,7 @@ export function TasksPage() {
         reminder: task.reminder,
         categories: task.categories,
         description: task.description,
+        owner: task.owner,
         completed: task.completed,
       })
       await load()
@@ -157,6 +160,7 @@ export function TasksPage() {
       reminder: task.reminder ?? false,
       categories: task.categories ?? [],
       recurrence: task.recurrence ?? "",
+      owner: task.owner ?? "",
       description: task.description ?? "",
     })
   }
@@ -180,6 +184,7 @@ export function TasksPage() {
         categories: form.categories.length > 0 ? form.categories : undefined,
         recurrence: form.recurrence || undefined,
         description: form.description || undefined,
+        owner: form.owner || undefined,
         completed: editing.completed,
       })
       toast.success(t("tasks.taskUpdated"))
@@ -448,6 +453,20 @@ export function TasksPage() {
                 <option value="FREQ=MONTHLY;INTERVAL=1">{t("tasks.recurrenceMonthly")}</option>
                 <option value="FREQ=YEARLY;INTERVAL=1">{t("tasks.recurrenceYearly")}</option>
               </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="task-owner">{t("tasks.assignTo")}</Label>
+              <Input
+                id="task-owner"
+                value={form.owner}
+                onChange={(e) => setForm({ ...form, owner: e.target.value })}
+                placeholder={t("tasks.assignToPlaceholder")}
+              />
+              {editing?.owner && editing?.acceptState !== undefined && editing.acceptState > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {t("tasks.acceptState", { state: String(editing.acceptState) })}
+                </p>
+              )}
             </div>
           </div>
           <DialogFooter>

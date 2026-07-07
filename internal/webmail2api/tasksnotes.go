@@ -26,7 +26,10 @@ type taskJSON struct {
 	Priority    int      `json:"priority,omitempty"` // 0=low, 1=normal, 2=high (PR_IMPORTANCE)
 	Reminder    bool     `json:"reminder,omitempty"` // PidLidReminderSet
 	Categories  []string `json:"categories,omitempty"`
-	Recurrence  string   `json:"recurrence,omitempty"` // RRULE string (FREQ=DAILY/WEEKLY/MONTHLY/YEARLY;...)
+	Recurrence  string   `json:"recurrence,omitempty"`  // RRULE string (FREQ=DAILY/WEEKLY/MONTHLY/YEARLY;...)
+	Owner       string   `json:"owner,omitempty"`       // PidLidTaskOwner (current keeper)
+	Assigner    string   `json:"assigner,omitempty"`    // PidLidTaskAssigner (last assigner)
+	AcceptState int      `json:"acceptState,omitempty"` // PidLidTaskAcceptanceState: 0 not assigned/1 unknown/2 accepted/3 rejected
 	Completed   bool     `json:"completed"`
 }
 
@@ -66,6 +69,11 @@ func jsonToTask(in taskJSON) oxtask.Task {
 	t.ReminderSet = in.Reminder
 	t.Categories = in.Categories
 	t.RecurrenceRule = in.Recurrence
+	t.Owner = in.Owner
+	t.Assigner = in.Assigner
+	if in.AcceptState > 0 {
+		t.AcceptanceState = in.AcceptState
+	}
 	// Status takes precedence when >=0 (0 is a valid value: not started). When
 	// set, Complete derives from it (status 2 = complete); otherwise the legacy
 	// Completed boolean drives status/percent in ToProps.
@@ -99,6 +107,9 @@ func taskToJSON(t oxtask.Task) taskJSON {
 		Reminder:    t.ReminderSet,
 		Categories:  t.Categories,
 		Recurrence:  t.RecurrenceRule,
+		Owner:       t.Owner,
+		Assigner:    t.Assigner,
+		AcceptState: t.AcceptanceState,
 	}
 	if t.Status >= 0 {
 		j.Status = t.Status
@@ -260,6 +271,9 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 				prev.Status = merged.Status
 				prev.PercentComplete = merged.PercentComplete
 				prev.RecurrenceRule = merged.RecurrenceRule
+				prev.Owner = merged.Owner
+				prev.Assigner = merged.Assigner
+				prev.AcceptanceState = merged.AcceptanceState
 				merged = prev
 			}
 		}
@@ -270,8 +284,9 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save task"})
 		return
 	}
-	in.UID = strconv.FormatInt(id, 10)
-	writeJSON(w, http.StatusOK, in)
+	out := taskToJSON(merged)
+	out.UID = strconv.FormatInt(id, 10)
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {

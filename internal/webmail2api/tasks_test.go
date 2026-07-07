@@ -82,6 +82,82 @@ func TestTaskRichFieldsRoundTrip(t *testing.T) {
 	}
 }
 
+// TestTaskAssignmentRoundTrip proves the assignment spine (Owner, Assigner,
+// AcceptanceState) survives a create-then-reload through the oxtask named-property
+// model, so a task assigned in webmail reaches EAS/EWS/MAPI with the same owner and
+// acceptance state instead of a webmail-only field.
+func TestTaskAssignmentRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	st.Close()
+
+	secret := []byte("tasks-assign-test-secret")
+	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
+	do := func(method, target, body string) *httptest.ResponseRecorder {
+		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+		var req *http.Request
+		if body == "" {
+			req = httptest.NewRequest(method, target, nil)
+		} else {
+			req = httptest.NewRequest(method, target, strings.NewReader(body))
+		}
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+
+	// Alice assigns her task to bob; acceptance starts unknown (1).
+	body := `{"summary":"Review PR","owner":"bob@hermex.test","assigner":"alice@hermex.test","acceptState":1,"completed":false}`
+	if rec := do(http.MethodPost, "/api/v1/tasks", body); rec.Code != http.StatusOK {
+		t.Fatalf("create: status %d body %s", rec.Code, rec.Body.String())
+	}
+
+	rec := do(http.MethodGet, "/api/v1/tasks", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list: status %d", rec.Code)
+	}
+	var listed struct {
+		Tasks []taskJSON `json:"tasks"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(listed.Tasks) != 1 {
+		t.Fatalf("got %d tasks, want 1", len(listed.Tasks))
+	}
+	c := listed.Tasks[0]
+	if c.Owner != "bob@hermex.test" {
+		t.Errorf("Owner = %q, want bob@hermex.test", c.Owner)
+	}
+	if c.Assigner != "alice@hermex.test" {
+		t.Errorf("Assigner = %q, want alice@hermex.test", c.Assigner)
+	}
+	if c.AcceptState != 1 {
+		t.Errorf("AcceptState = %d, want 1 (unknown)", c.AcceptState)
+	}
+
+	// Bob accepts the task: the owner stays bob, acceptance becomes 2.
+	update := `{"summary":"Review PR","owner":"bob@hermex.test","assigner":"alice@hermex.test","acceptState":2,"completed":false}`
+	upd := do(http.MethodPut, "/api/v1/tasks/"+c.UID, update)
+	if upd.Code != http.StatusOK {
+		t.Fatalf("update: status %d body %s", upd.Code, upd.Body.String())
+	}
+	var after taskJSON
+	if err := json.Unmarshal(upd.Body.Bytes(), &after); err != nil {
+		t.Fatalf("decode update: %v", err)
+	}
+	if after.AcceptState != 2 {
+		t.Errorf("after AcceptState = %d, want 2 (accepted)", after.AcceptState)
+	}
+	if after.Owner != "bob@hermex.test" {
+		t.Errorf("after Owner = %q, want bob@hermex.test", after.Owner)
+	}
+}
+
 func itoa(n int) string {
 	if n == 0 {
 		return "0"
