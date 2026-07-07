@@ -1064,11 +1064,7 @@
     "recurrenceYearly": "Yearly",
     "assignTo": "Assign to",
     "assignToPlaceholder": "Owner name (e.g. bob@hermex.test)",
-    "acceptState": "Acceptance: {{state}}",
-    "assignSend": "Assign & Send",
-    "assigneeRequired": "Enter an assignee to send the task request",
-    "assigned": "Task assigned and request sent",
-    "assignFailed": "Failed to assign the task"
+    "acceptState": "Acceptance: {{state}}"
   },
   "notes": {
     "newNote": "New note",
