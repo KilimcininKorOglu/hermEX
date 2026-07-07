@@ -1042,6 +1042,7 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                 <div className="flex flex-wrap gap-2">
                   {email.attachments.map((att) => {
                     const isImage = att.contentType?.startsWith("image/")
+                    const isPdf = att.contentType === "application/pdf"
                     const src = `/api/v1/mail/attachment?id=${encodeURIComponent(email.id)}&index=${att.index}`
                     return (
                       <div key={att.index} className="flex flex-col gap-1">
@@ -1064,6 +1065,18 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                             className="max-h-48 w-auto rounded border"
                             loading="lazy"
                           />
+                        )}
+                        {isPdf && (
+                          <object
+                            data={src}
+                            type="application/pdf"
+                            className="h-96 w-full rounded border"
+                            aria-label={att.filename}
+                          >
+                            <a href={src} className="text-sm text-primary underline" download={att.filename}>
+                              {att.filename}
+                            </a>
+                          </object>
                         )}
                       </div>
                     )
