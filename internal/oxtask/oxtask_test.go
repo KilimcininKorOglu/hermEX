@@ -1,10 +1,12 @@
 package oxtask
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"hermex/internal/mapi"
+	"hermex/internal/recurrence"
 )
 
 // fakeResolver allocates a stable id per distinct named property, mirroring a store's
@@ -124,5 +126,43 @@ func TestTaskRecurrenceBlob(t *testing.T) {
 	// ReaderVersion 0x3004 at the head proves this is the MS-OXOCAL RecurrencePattern.
 	if got := uint16(b[0]) | uint16(b[1])<<8; got != 0x3004 {
 		t.Errorf("blob ReaderVersion = %#x, want 0x3004", got)
+	}
+}
+
+// TestTaskRecurrenceBlobDecode proves a task authored by a MAPI client (which writes
+// only the PidLidTaskRecurrence blob, no RRULE text) is read back with the recurrence
+// restored, so the EAS/webmail paths see the same series Outlook wrote.
+func TestTaskRecurrenceBlobDecode(t *testing.T) {
+	r := newFakeResolver()
+	start := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+	blob, err := recurrence.FromRRule("FREQ=WEEKLY;INTERVAL=1;COUNT=5;BYDAY=MO", start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A MAPI client writes the blob and no RRULE text. Build the props through
+	// ToProps so the named ids are allocated, then drop the RRULE text to simulate
+	// a MAPI-only author.
+	full, err := ToProps(Task{
+		Subject:        "Outlook recurring task",
+		Start:          start,
+		RecurrenceRule: "FREQ=WEEKLY;INTERVAL=1;COUNT=5;BYDAY=MO",
+	}, r.resolve)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rruleTag := mapi.MakeTag(r.ids[mapi.NameTaskRecurrenceRule], mapi.PtUnicode)
+	blobTag := mapi.MakeTag(r.ids[mapi.NameTaskRecurrence], mapi.PtBinary)
+	full.Set(blobTag, blob) // force the blob a MAPI client writes
+	full.Set(rruleTag, "")  // MAPI client writes no RRULE text
+
+	out, err := FromProps(full, r.resolve)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.RecurrenceRule == "" {
+		t.Fatal("FromProps did not decode the PidLidTaskRecurrence blob to an RRULE")
+	}
+	if got := out.RecurrenceRule; !strings.Contains(got, "FREQ=WEEKLY") || !strings.Contains(got, "COUNT=5") || !strings.Contains(got, "BYDAY=MO") {
+		t.Errorf("decoded RRULE = %q, want FREQ=WEEKLY;...;COUNT=5;BYDAY=MO", got)
 	}
 }

@@ -160,6 +160,199 @@ func parseRRuleUntil(val string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
+// ToRRule renders the MS-OXOCAL RecurrencePattern binary back to the RRULE string a
+// PIM object stores, so a recurrence authored in Outlook (or any MAPI client) that
+// arrives as the binary blob reaches the RRULE-based EAS/webmail paths. It covers the
+// four base frequencies and the three end ranges the encoder emits; an unsupported
+// shape yields ok=false so the caller keeps whatever RRULE it already had.
+func ToRRule(blob []byte) (string, bool) {
+	p, err := UnmarshalBinary(blob)
+	if err != nil {
+		return "", false
+	}
+	return p.toRRule()
+}
+
+// UnmarshalBinary parses the MS-OXOCAL RecurrencePattern fixed fields. It stops at
+// the end of the fixed block (before the TimeZone and exception blocks, which v1
+// does not model); the parsed fields are enough to reconstruct the RRULE.
+func UnmarshalBinary(b []byte) (Pattern, error) {
+	if len(b) < 40 {
+		return Pattern{}, errors.New("recurrence: blob too short for RecurrencePattern")
+	}
+	p := Pattern{}
+	p.RecurFrequency = binary.LittleEndian.Uint16(b[4:6])
+	p.PatternType = binary.LittleEndian.Uint16(b[6:8])
+	p.FirstDateTime = binary.LittleEndian.Uint32(b[10:14])
+	p.Period = binary.LittleEndian.Uint32(b[14:18])
+	off := 22 // past Reader/Writer/Freq/Type/CalType(2) + FirstDateTime(4) + Period(4) + SlidingFlag(4)
+	switch p.PatternType {
+	case PatternDay:
+		off += 4 // unused PatternTypeSpecific
+	case PatternWeek:
+		p.DayOfWeek = binary.LittleEndian.Uint32(b[off : off+4])
+		off += 4
+	case PatternMonth:
+		p.DayOfMonth = binary.LittleEndian.Uint32(b[off : off+4])
+		off += 4
+	case PatternMonthNth:
+		if len(b) < off+8 {
+			return Pattern{}, errors.New("recurrence: truncated MonthNth")
+		}
+		p.DayOfWeek = binary.LittleEndian.Uint32(b[off : off+4])
+		p.WeekOfMonth = binary.LittleEndian.Uint32(b[off+4 : off+8])
+		off += 8
+	default:
+		return Pattern{}, fmt.Errorf("recurrence: unknown PatternType %#x", p.PatternType)
+	}
+	if len(b) < off+20 {
+		return Pattern{}, errors.New("recurrence: truncated end block")
+	}
+	p.EndType = binary.LittleEndian.Uint32(b[off : off+4])
+	p.OccurrenceCount = binary.LittleEndian.Uint32(b[off+4 : off+8])
+	p.FirstDOW = binary.LittleEndian.Uint32(b[off+8 : off+12])
+	deletedCount := binary.LittleEndian.Uint32(b[off+12 : off+16])
+	off += 16
+	off += int(deletedCount) * 4 // DeletedInstanceDates (skipped; v1 does not model exceptions)
+	if len(b) < off+4 {
+		return Pattern{}, errors.New("recurrence: truncated ModifiedInstanceCount")
+	}
+	modifiedCount := binary.LittleEndian.Uint32(b[off : off+4])
+	off += 4 + int(modifiedCount)*4 // ModifiedInstanceDates (skipped)
+	if len(b) < off+8 {
+		return Pattern{}, errors.New("recurrence: truncated StartDate/EndDate")
+	}
+	p.StartDate = binary.LittleEndian.Uint32(b[off : off+4])
+	p.EndDate = binary.LittleEndian.Uint32(b[off+4 : off+8])
+	return p, nil
+}
+
+// toRRule maps the parsed Pattern back to an RRULE string.
+func (p Pattern) toRRule() (string, bool) {
+	var r rrule
+	switch p.RecurFrequency {
+	case FreqDaily:
+		r.Freq = "DAILY"
+		if p.Period%1440 == 0 {
+			r.Interval = int(p.Period / 1440)
+		}
+	case FreqWeekly:
+		r.Freq = "WEEKLY"
+		r.Interval = int(p.Period)
+		r.Weekdays = bitmaskWeekdays(p.DayOfWeek)
+	case FreqMonthly:
+		r.Freq = "MONTHLY"
+		r.Interval = int(p.Period)
+		if p.PatternType == PatternMonthNth {
+			r.Weekdays = bitmaskWeekdays(p.DayOfWeek)
+			r.SetPos = setPosFromWeek(p.WeekOfMonth)
+		} else {
+			r.MonthDay = int(p.DayOfMonth)
+		}
+	case FreqYearly:
+		r.Freq = "YEARLY"
+		r.Interval = int(p.Period / 12)
+		if p.PatternType == PatternMonthNth {
+			r.Weekdays = bitmaskWeekdays(p.DayOfWeek)
+			r.SetPos = setPosFromWeek(p.WeekOfMonth)
+		} else {
+			r.MonthDay = int(p.DayOfMonth)
+		}
+	default:
+		return "", false
+	}
+	if r.Interval <= 0 {
+		r.Interval = 1
+	}
+	switch p.EndType {
+	case EndAfterDate, EndNeverAlt:
+		if p.EndDate != 0 && p.EndDate != noEndDate {
+			r.Until = timeFromMinutes(p.EndDate)
+		}
+	case EndAfterN:
+		r.Count = int(p.OccurrenceCount)
+	case EndNever:
+		// open-ended
+	default:
+		return "", false
+	}
+	return rruleString(r), true
+}
+
+// rruleString renders the local rrule to its RRULE text form.
+func rruleString(r rrule) string {
+	var b strings.Builder
+	b.WriteString("FREQ=")
+	b.WriteString(r.Freq)
+	b.WriteString(";INTERVAL=")
+	b.WriteString(strconv.Itoa(r.Interval))
+	if r.Count > 0 {
+		b.WriteString(";COUNT=")
+		b.WriteString(strconv.Itoa(r.Count))
+	}
+	if !r.Until.IsZero() {
+		b.WriteString(";UNTIL=")
+		b.WriteString(r.Until.UTC().Format("20060102T150405Z"))
+	}
+	if len(r.Weekdays) > 0 {
+		b.WriteString(";BYDAY=")
+		for i, d := range r.Weekdays {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			b.WriteString(d)
+		}
+		if r.SetPos != 0 {
+			b.WriteString(";BYSETPOS=")
+			b.WriteString(strconv.Itoa(r.SetPos))
+		}
+	}
+	if r.MonthDay != 0 {
+		b.WriteString(";BYMONTHDAY=")
+		b.WriteString(strconv.Itoa(r.MonthDay))
+	}
+	return b.String()
+}
+
+// bitmaskWeekdays expands a DayOfWeek bitmask (Sunday 1 .. Saturday 64) to BYDAY tokens.
+func bitmaskWeekdays(mask uint32) []string {
+	bits := []struct {
+		mask uint32
+		tok  string
+	}{
+		{1, "SU"}, {2, "MO"}, {4, "TU"}, {8, "WE"}, {16, "TH"}, {32, "FR"}, {64, "SA"},
+	}
+	var out []string
+	for _, b := range bits {
+		if mask&b.mask != 0 {
+			out = append(out, b.tok)
+		}
+	}
+	return out
+}
+
+// setPosFromWeek maps the MS-OXOCAL WeekOfMonth (1..5, 5 = last) to a BYDAY ordinal;
+// 0 means unset.
+func setPosFromWeek(week uint32) int {
+	switch week {
+	case 1, 2, 3, 4:
+		return int(week)
+	case 5:
+		return -1
+	}
+	return 0
+}
+
+// timeFromMinutes returns the UTC instant at the given minutes since 1601-01-01.
+// It splits the offset into days (via AddDate) and a sub-day remainder so the
+// nanosecond Duration does not overflow int64 for a centuries-distant date.
+func timeFromMinutes(min uint32) time.Time {
+	total := int64(min)
+	days := total / (24 * 60)
+	rem := total % (24 * 60)
+	return epoch1601.AddDate(0, 0, int(days)).Add(time.Duration(rem) * time.Minute)
+}
+
 // FromRRule renders the RRULE a PIM object stores to the RecurrencePattern binary
 // layout, anchored at seriesStart (the master's DTSTART). It covers the four base
 // frequencies with end-by-date (UNTIL), end-after-N (COUNT), and never-end ranges;
@@ -223,7 +416,11 @@ func patternFromRecurrence(r rrule, start time.Time) (Pattern, error) {
 			p.WeekOfMonth = weekOfMonthFromSetPos(r.SetPos)
 		} else {
 			p.PatternType = PatternMonth
-			p.DayOfMonth = uint32(start.Day())
+			if r.MonthDay != 0 {
+				p.DayOfMonth = uint32(r.MonthDay)
+			} else {
+				p.DayOfMonth = uint32(start.Day())
+			}
 		}
 		p.Period = uint32(max(r.Interval, 1)) * 12 // months per interval
 		p.FirstDateTime = monthlyFirstDateTime(start, p.Period)
@@ -285,12 +482,19 @@ func (p Pattern) MarshalBinary() []byte {
 	return b
 }
 
-// minutesSince1601 returns the minutes from the FILETIME epoch to t (UTC).
+// minutesSince1601 returns the minutes from the FILETIME epoch to t (UTC). It counts
+// whole years' days via YearDay (no Date math that would overflow an int64 Duration
+// across the ~4 centuries from 1601) then adds the year-day and sub-day minutes.
 func minutesSince1601(t time.Time) uint32 {
 	if t.Before(epoch1601) {
 		return 0
 	}
-	return uint32(t.Sub(epoch1601) / time.Minute)
+	days := 0
+	for y := 1601; y < t.Year(); y++ {
+		days += time.Date(y, 12, 31, 0, 0, 0, 0, time.UTC).YearDay()
+	}
+	days += t.YearDay() - 1
+	return uint32(days)*24*60 + uint32(t.Hour())*60 + uint32(t.Minute())
 }
 
 // weeklyFirstDateTime computes the minutes from 1601 to the first day of the week

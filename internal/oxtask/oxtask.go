@@ -242,6 +242,18 @@ func FromProps(props mapi.PropertyValues, resolve Resolver) (Task, error) {
 			t.RecurrenceRule = s
 		}
 	}
+	// When no RRULE text is stored (a MAPI client authored the task and wrote only the
+	// MS-OXOCAL blob), decode the blob back to the RRULE so the EAS/webmail paths read
+	// the same recurrence a MAPI client wrote.
+	if t.RecurrenceRule == "" {
+		if v, ok := props.Get(named(idxTaskRecurrence, mapi.PtBinary)); ok {
+			if blob, ok := v.([]byte); ok {
+				if rrule, ok := recurrence.ToRRule(blob); ok {
+					t.RecurrenceRule = rrule
+				}
+			}
+		}
+	}
 	t.Owner = strProp(props, named(idxOwner, mapi.PtUnicode))
 	t.Assigner = strProp(props, named(idxAssigner, mapi.PtUnicode))
 	if v, ok := longProp(props, named(idxAcceptanceState, mapi.PtLong)); ok {

@@ -2,6 +2,7 @@ package recurrence
 
 import (
 	"encoding/binary"
+	"strings"
 	"testing"
 	"time"
 )
@@ -117,4 +118,65 @@ func TestFromRRuleInvalid(t *testing.T) {
 	if _, err := FromRRule("FREQ=BOGUS", time.Now()); err == nil {
 		t.Error("unknown FREQ should error")
 	}
+}
+
+// TestBlobRoundTrip proves a recurrence Outlook wrote as the MS-OXOCAL binary blob
+// decodes back to the same RRULE shape (FREQ, INTERVAL, BYDAY, end range) so the
+// EAS/webmail paths read a MAPI-authored series instead of dropping it.
+func TestBlobRoundTrip(t *testing.T) {
+	start := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC) // Monday
+	cases := []struct {
+		name  string
+		rrule string
+	}{
+		{"daily-never", "FREQ=DAILY;INTERVAL=3"},
+		{"weekly-count", "FREQ=WEEKLY;INTERVAL=1;COUNT=5;BYDAY=MO,WE,FR"},
+		{"weekly-until", "FREQ=WEEKLY;INTERVAL=2;UNTIL=20261231T235900Z;BYDAY=MO"},
+		{"monthly-day", "FREQ=MONTHLY;INTERVAL=1;BYMONTHDAY=15"},
+		{"monthly-nth", "FREQ=MONTHLY;INTERVAL=1;BYDAY=MO;BYSETPOS=1"},
+		{"yearly", "FREQ=YEARLY;INTERVAL=1;BYMONTHDAY=1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			blob, err := FromRRule(tc.rrule, start)
+			if err != nil {
+				t.Fatalf("encode: %v", err)
+			}
+			got, ok := ToRRule(blob)
+			if !ok {
+				t.Fatalf("decode failed for %q", tc.rrule)
+			}
+			if !rruleEqual(got, tc.rrule) {
+				t.Errorf("round-trip = %q, want %q", got, tc.rrule)
+			}
+		})
+	}
+}
+
+// rruleEqual compares two RRULEs by their sorted semicolon parts, so a difference in
+// clause order (the encoder's choice) does not fail an otherwise-equal rule.
+func rruleEqual(a, b string) bool {
+	pa := splitParts(a)
+	pb := splitParts(b)
+	if len(pa) != len(pb) {
+		return false
+	}
+	for k := range pa {
+		if pa[k] != pb[k] {
+			return false
+		}
+	}
+	return true
+}
+
+func splitParts(s string) map[string]string {
+	out := map[string]string{}
+	for part := range strings.SplitSeq(s, ";") {
+		k, v, ok := strings.Cut(part, "=")
+		if !ok {
+			continue
+		}
+		out[strings.ToUpper(k)] = v
+	}
+	return out
 }
