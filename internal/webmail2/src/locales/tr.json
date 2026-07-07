@@ -325,7 +325,12 @@
     "sensitivityConfidential": "Gizli",
     "toSend": "ile gönder",
     "requestDeliveryReceipt": "Teslimat makbuzu iste",
-    "deliveryReceipt": "Teslimat makbuzu"
+    "deliveryReceipt": "Teslimat makbuzu",
+    "attachContact": "Kişi ekle",
+    "attachContactTitle": "Kişi ekle",
+    "attachContactDesc": "Kişiyi .vcf eki olarak ekle.",
+    "contactAttached": "Kişi eklendi",
+    "noContacts": "Kişi yok"
   },
   "share": {
     "dialogTitle": "Klasörü paylaş",

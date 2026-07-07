@@ -23,6 +23,7 @@ import {
   Shield,
   Key,
   Gauge,
+  Contact as ContactIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -186,6 +187,9 @@ export function ComposePage() {
   const [msgPickerFolder, setMsgPickerFolder] = useState("inbox")
   const [msgPickerList, setMsgPickerList] = useState<MailMessage[]>([])
   const [msgPickerLoading, setMsgPickerLoading] = useState(false)
+  // Contact picker for "attach item" (embed a contact as a .vcf attachment).
+  const [contactPickerOpen, setContactPickerOpen] = useState(false)
+  const [contactPickerList, setContactPickerList] = useState<ContactType[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   // Free-text recipient inputs (typed email addresses, not just picked contacts)
   const [recipientInput, setRecipientInput] = useState<{ to: string; cc: string; bcc: string }>({ to: "", cc: "", bcc: "" })
@@ -621,6 +625,22 @@ export function ComposePage() {
       toast.success(t("compose.messageAttached"))
     } catch {
       toast.error(t("compose.messageAttachFailed"))
+    }
+  }
+
+  // attachContact fetches the picked contact's vCard and embeds it as a text/vcard
+  // attachment, the same file-attachment path on send.
+  const attachContact = async (contactId: string, name: string) => {
+    try {
+      const res = await fetch(api.contactVCardUrl(contactId), { credentials: "include" })
+      const vcf = await res.text()
+      const base = (name.trim() || "contact").replace(/[^\w.\- ]+/g, "_").slice(0, 60)
+      const file = new File([vcf], `${base}.vcf`, { type: "text/vcard" })
+      setAttachments((prev) => [...prev, { id: crypto.randomUUID(), name: file.name, size: file.size, file }])
+      setContactPickerOpen(false)
+      toast.success(t("compose.contactAttached"))
+    } catch {
+      toast.error(t("compose.attachFailed"))
     }
   }
 
@@ -1545,6 +1565,18 @@ export function ComposePage() {
           >
             <Mail className="h-5 w-5" />
           </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={() => {
+              setContactPickerOpen(true)
+              api.getContacts().then((res) => setContactPickerList(res.contacts ?? [])).catch(() => undefined)
+            }}
+            title={t("compose.attachContact")}
+          >
+            <ContactIcon className="h-5 w-5" />
+          </Button>
           <Dialog open={msgPickerOpen} onOpenChange={setMsgPickerOpen}>
             <DialogContent className="max-w-lg">
               <DialogHeader>
@@ -1586,6 +1618,35 @@ export function ComposePage() {
                       <span className="w-full truncate text-xs text-muted-foreground">{m.fromName || m.from}</span>
                     </button>
                   ))
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog open={contactPickerOpen} onOpenChange={setContactPickerOpen}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>{t("compose.attachContactTitle")}</DialogTitle>
+                <DialogDescription>{t("compose.attachContactDesc")}</DialogDescription>
+              </DialogHeader>
+              <div className="max-h-72 overflow-auto">
+                {contactPickerList.length === 0 ? (
+                  <p className="py-4 text-center text-sm text-muted-foreground">{t("compose.noContacts")}</p>
+                ) : (
+                  <ul className="divide-y">
+                    {contactPickerList.map((c) => (
+                      <li key={c.id}>
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-2 px-2 py-2 text-left text-sm hover:bg-accent/50"
+                          onClick={() => void attachContact(c.id, c.name)}
+                        >
+                          <ContactIcon className="h-4 w-4 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1 truncate">{c.name}</span>
+                          {c.email && <span className="shrink-0 text-xs text-muted-foreground truncate">{c.email}</span>}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
                 )}
               </div>
             </DialogContent>

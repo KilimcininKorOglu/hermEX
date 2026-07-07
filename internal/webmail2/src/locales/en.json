@@ -325,7 +325,12 @@
     "sensitivityConfidential": "Confidential",
     "toSend": "to send",
     "requestDeliveryReceipt": "Request delivery receipt",
-    "deliveryReceipt": "Delivery receipt"
+    "deliveryReceipt": "Delivery receipt",
+    "attachContact": "Attach contact",
+    "attachContactTitle": "Attach a contact",
+    "attachContactDesc": "Embed a contact as a .vcf attachment.",
+    "contactAttached": "Contact attached",
+    "noContacts": "No contacts"
   },
   "share": {
     "dialogTitle": "Share folder",
