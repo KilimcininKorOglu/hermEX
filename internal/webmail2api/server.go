@@ -95,7 +95,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/mail/import", s.handleImport)
 
 	// Quarantine-digest release link (unauthenticated; the signed token is the
-	// credential). GET confirms, POST releases — defeating email link prefetch.
+	// credential). GET confirms, POST releases, defeating email link prefetch.
 	mux.HandleFunc("GET /quarantine/release", s.handleQuarantineForm)
 	mux.HandleFunc("POST /quarantine/release", s.handleQuarantineRelease)
 	mux.HandleFunc("GET /api/v1/mail/diagnostics", s.handleDiagnostics)
@@ -190,6 +190,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/tasks/{uid}", s.handleUpdateTask)
 	mux.HandleFunc("DELETE /api/v1/tasks/{uid}", s.handleDeleteTask)
 	mux.HandleFunc("GET /api/v1/reminders", s.handleGetReminders)
+	mux.HandleFunc("GET /api/v1/today", s.handleGetToday)
 	mux.HandleFunc("POST /api/v1/reminders/{id}/dismiss", s.handleDismissReminder)
 	mux.HandleFunc("POST /api/v1/reminders/{id}/snooze", s.handleSnoozeReminder)
 	mux.HandleFunc("GET /api/v1/notes", s.handleGetNotes)
