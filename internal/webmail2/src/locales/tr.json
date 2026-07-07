@@ -1078,6 +1078,8 @@
     "untitled": "Adsız not",
     "noNotes": "Not yok",
     "emptyDescription": "Başlamak için bir not oluşturun.",
+    "gridView": "Izgara görünümü",
+    "iconView": "İkon görünümü",
     "deleteConfirm": "\"{{title}}\" silinsin mi? Bu işlem geri alınamaz.",
     "titleOrBodyRequired": "Başlık veya içerik gereklidir",
     "noteCreated": "Not oluşturuldu",

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react"
-import { StickyNote, Plus, Trash2, Edit } from "lucide-react"
+import { StickyNote, Plus, Trash2, Edit, LayoutGrid, StickyNote as NoteIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -48,6 +48,9 @@ export function NotesPage() {
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState<NoteForm>(emptyForm)
   const [deleteTarget, setDeleteTarget] = useState<Note | null>(null)
+  // viewMode toggles the grid list view and the icon view (NoteIconView): the icon
+  // view packs the notes as small sticky-note tiles with a 2-line preview.
+  const [viewMode, setViewMode] = useState<"grid" | "icon">("grid")
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -134,10 +137,20 @@ export function NotesPage() {
           <StickyNote className="h-6 w-6 text-primary" />
           <h1 className="text-2xl font-bold">{t("nav.notes")}</h1>
         </div>
-        <Button onClick={openCreate}>
-          <Plus className="mr-2 h-4 w-4" />
-          {t("notes.newNote")}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="icon" onClick={() => setViewMode("grid")} title={t("notes.gridView")}
+            className={viewMode === "grid" ? "border-primary" : ""}>
+            <LayoutGrid className="h-4 w-4" />
+          </Button>
+          <Button variant="outline" size="icon" onClick={() => setViewMode("icon")} title={t("notes.iconView")}
+            className={viewMode === "icon" ? "border-primary" : ""}>
+            <NoteIcon className="h-4 w-4" />
+          </Button>
+          <Button onClick={openCreate}>
+            <Plus className="mr-2 h-4 w-4" />
+            {t("notes.newNote")}
+          </Button>
+        </div>
       </div>
 
       {loading ? (
@@ -151,31 +164,39 @@ export function NotesPage() {
           <p className="text-muted-foreground mt-1">{t("notes.emptyDescription")}</p>
         </div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className={viewMode === "grid" ? "grid gap-3 sm:grid-cols-2" : "grid gap-3 grid-cols-2 sm:grid-cols-3 md:grid-cols-4"}>
           {notes.map((note) => (
             <div
               key={note.id}
-              className="group flex flex-col rounded-lg border p-4 transition-colors"
+              className={viewMode === "grid"
+                ? "group flex flex-col rounded-lg border p-4 transition-colors"
+                : "group flex flex-col rounded-sm border p-3 transition-colors aspect-[4/5]"}
               style={{ backgroundColor: noteBg(note.color) }}
             >
-              <div className="flex items-start justify-between gap-2">
-                <p className="font-medium break-words">{note.title || t("notes.untitled")}</p>
+              <div className="flex items-start justify-between gap-1">
+                <p className={viewMode === "grid" ? "font-medium break-words" : "text-sm font-medium break-words line-clamp-2"}>
+                  {note.title || t("notes.untitled")}
+                </p>
                 <div className="flex shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(note)}>
-                    <Edit className="h-4 w-4" />
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(note)}>
+                    <Edit className="h-3.5 w-3.5" />
                   </Button>
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8 text-destructive"
+                    className="h-7 w-7 text-destructive"
                     onClick={() => setDeleteTarget(note)}
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               </div>
               {note.body && (
-                <p className="mt-2 whitespace-pre-wrap text-sm text-muted-foreground line-clamp-6">{note.body}</p>
+                <p className={viewMode === "grid"
+                  ? "mt-2 whitespace-pre-wrap text-sm text-muted-foreground line-clamp-6"
+                  : "mt-1 whitespace-pre-wrap text-xs text-muted-foreground line-clamp-3"}>
+                  {note.body}
+                </p>
               )}
             </div>
           ))}

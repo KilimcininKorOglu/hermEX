@@ -1078,6 +1078,8 @@
     "untitled": "Untitled note",
     "noNotes": "No notes",
     "emptyDescription": "Create a note to get started.",
+    "gridView": "Grid view",
+    "iconView": "Icon view",
     "deleteConfirm": "Delete \"{{title}}\"? This cannot be undone.",
     "titleOrBodyRequired": "Title or body is required",
     "noteCreated": "Note created",
