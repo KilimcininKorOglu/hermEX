@@ -1458,6 +1458,10 @@ class API {
     await this.delete(`/tasks/${encodeURIComponent(uid)}`)
   }
 
+  async assignTask(uid: string, assignee: string): Promise<{ owner?: string; assigner?: string; acceptState?: number }> {
+    return this.post(`/tasks/${encodeURIComponent(uid)}/assign`, { assignee })
+  }
+
   // Notes (Outlook IPM.StickyNote, shared with EWS/IMAP/JMAP via the Notes folder)
   async getNotes(): Promise<{ notes?: Note[] }> {
     return this.get<{ notes?: Note[] }>('/notes')

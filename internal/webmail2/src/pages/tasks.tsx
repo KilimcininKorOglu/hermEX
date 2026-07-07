@@ -197,6 +197,29 @@ export function TasksPage() {
     }
   }
 
+  // assignTask sends an IPM.TaskRequest to the owner named in the form and stamps the
+  // assignment spine (Owner/Assigner/AcceptanceState), then reloads the list so the
+  // task shows its owner and pending acceptance.
+  const assignTask = async () => {
+    if (!editing) return
+    const assignee = form.owner.trim()
+    if (!assignee) {
+      toast.error(t("tasks.assigneeRequired"))
+      return
+    }
+    setBusy(true)
+    try {
+      await api.assignTask(editing.uid, assignee)
+      toast.success(t("tasks.assigned"))
+      setEditing(null)
+      await load()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("tasks.assignFailed"))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const confirmDelete = async () => {
     if (!deleteTarget || busy) return
     setBusy(true)
@@ -469,13 +492,18 @@ export function TasksPage() {
               )}
             </div>
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditing(null)} disabled={busy}>
-              {t("common.cancel")}
+          <DialogFooter className="flex items-center justify-between gap-2 sm:justify-between">
+            <Button variant="outline" onClick={assignTask} disabled={busy || !form.owner.trim()}>
+              {t("tasks.assignSend")}
             </Button>
-            <Button onClick={submitEdit} disabled={busy}>
-              {t("common.save")}
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setEditing(null)} disabled={busy}>
+                {t("common.cancel")}
+              </Button>
+              <Button onClick={submitEdit} disabled={busy}>
+                {t("common.save")}
+              </Button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

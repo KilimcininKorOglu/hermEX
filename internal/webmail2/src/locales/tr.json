@@ -1064,7 +1064,11 @@
     "recurrenceYearly": "Yıllık",
     "assignTo": "Atanan",
     "assignToPlaceholder": "Sahip adı (ör. bob@hermex.test)",
-    "acceptState": "Kabul durumu: {{state}}"
+    "acceptState": "Kabul durumu: {{state}}",
+    "assignSend": "Ata ve Gönder",
+    "assigneeRequired": "Görev isteği göndermek için bir atanan girin",
+    "assigned": "Görev atandı ve istek gönderildi",
+    "assignFailed": "Görev atanamadı"
   },
   "notes": {
     "newNote": "Yeni not",
