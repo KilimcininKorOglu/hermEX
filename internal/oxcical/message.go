@@ -27,7 +27,7 @@ type namedField struct {
 var nameICalUID = mapi.NameICalUID
 
 // appointmentNamed is the fixed set of calendar named properties oxcical maps,
-// resolved as a batch through the resolver. Order is irrelevant — results are
+// resolved as a batch through the resolver. Order is irrelevant, results are
 // keyed by PropertyName.
 var appointmentNamed = []namedField{
 	{mapi.NameAppointmentLocation, mapi.PtUnicode},
@@ -38,6 +38,7 @@ var appointmentNamed = []namedField{
 	{mapi.NameAppointmentSequence, mapi.PtLong},
 	{mapi.NameReminderSet, mapi.PtBoolean},
 	{mapi.NameReminderDelta, mapi.PtLong},
+	{mapi.NameAppointmentRecur, mapi.PtBinary},
 }
 
 // namedTags resolves appointmentNamed to full store proptags. With create the

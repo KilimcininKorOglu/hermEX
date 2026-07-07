@@ -8,6 +8,7 @@ import (
 
 	"hermex/internal/mapi"
 	"hermex/internal/oxcmail"
+	"hermex/internal/recurrence"
 )
 
 var errNoEvent = errors.New("oxcical: no VEVENT in calendar")
@@ -22,8 +23,9 @@ const (
 // Import parses an iCalendar object into an IPM.Appointment message. A
 // non-recurring event is synthesized into MAPI properties; a recurring event
 // (carrying RRULE or RECURRENCE-ID) is preserved verbatim in PrIcalOriginal and
-// gets only the minimal listing properties, because v1 does not synthesize the
-// binary recurrence pattern. Named properties are resolved through opt.Resolver.
+// gets only the minimal listing properties plus, for a series master, the
+// MS-OXOCAL AppointmentRecurrencePattern blob Outlook reads in
+// PidLidAppointmentRecur. Named properties are resolved through opt.Resolver.
 func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 	cal, err := parseICal(raw)
 	if err != nil {
@@ -71,12 +73,24 @@ func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 	}
 	setIf(p, mapi.PrSubject, vev.propText("SUMMARY"))
 
-	// Recurring events round-trip verbatim; store only what listing needs.
+	// Recurring events round-trip verbatim; store only what listing needs. A series
+	// master (carrying RRULE) also gets the MS-OXOCAL AppointmentRecurrencePattern
+	// blob Outlook reads in PidLidAppointmentRecur; an override (RECURRENCE-ID only)
+	// is an exception instance and carries no series pattern.
 	if vev.prop("RRULE") != nil || vev.prop("RECURRENCE-ID") != nil {
 		p.Set(mapi.PrIcalOriginal, append([]byte(nil), raw...))
+		var start time.Time
 		if l := vev.prop("DTSTART"); l != nil {
 			if t, _, ok := parseICalTime(l); ok {
+				start = t
 				setNamedTime(p, named, mapi.NameAppointmentStartWhole, t)
+			}
+		}
+		if rrule := vev.prop("RRULE"); rrule != nil && !start.IsZero() {
+			if blob, err := recurrence.FromRRule(rrule.value, start); err == nil {
+				if tag, ok := named[mapi.NameAppointmentRecur]; ok {
+					p.Set(tag, blob)
+				}
 			}
 		}
 		return msg, nil
@@ -120,7 +134,7 @@ func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 // meetingClass derives the MAPI message class from the iCalendar METHOD (RFC 5546
 // iTIP). REQUEST and CANCEL are scheduling messages an attendee acts on; a REPLY
 // names the attendee's response in its class suffix (PARTSTAT). PUBLISH, an absent
-// METHOD, or an unrecognized one is a plain appointment — the prior default.
+// METHOD, or an unrecognized one is a plain appointment, the prior default.
 func meetingClass(cal, vev *icomp) string {
 	switch strings.ToUpper(strings.TrimSpace(cal.propText("METHOD"))) {
 	case "REQUEST":
@@ -150,7 +164,7 @@ func replyPartStat(vev *icomp) string {
 }
 
 // setOrganizer records an iCalendar ORGANIZER line as the sent-representing
-// identity — its mailto address and optional CN — so a meeting response can
+// identity, its mailto address and optional CN, so a meeting response can
 // address the organizer. A nil or address-less line is ignored.
 func setOrganizer(p *mapi.PropertyValues, l *iline) {
 	if l == nil {

@@ -134,7 +134,7 @@ func TestImportTimed(t *testing.T) {
 // TestImportMethodMessageClass confirms the iTIP METHOD selects the scheduling
 // message class: a REQUEST is a meeting-request an attendee responds to, CANCEL a
 // cancellation, REPLY the attendee's response (by PARTSTAT), and a method-less or
-// PUBLISH object a plain appointment — the prior default. The class is what lets a
+// PUBLISH object a plain appointment, the prior default. The class is what lets a
 // responder tell an invitation apart from an appointment already on the calendar.
 func TestImportMethodMessageClass(t *testing.T) {
 	cases := []struct {
@@ -198,7 +198,7 @@ func TestImportOrganizer(t *testing.T) {
 
 // TestExportReplyIdentity confirms a meeting-response message exports an iTIP REPLY:
 // a METHOD:REPLY, the organizer being answered, and the responder as the sole
-// attendee carrying the response in PARTSTAT — the inverse of the import mapping.
+// attendee carrying the response in PARTSTAT, the inverse of the import mapping.
 func TestExportReplyIdentity(t *testing.T) {
 	r := newResolver()
 	r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID}) // allocate named ids, as a writer would
@@ -403,7 +403,7 @@ func TestTimezoneToUTC(t *testing.T) {
 	}
 	want := mapi.UnixToNTTime(time.Date(2026, 6, 12, 9, 0, 0, 0, time.UTC))
 	if got, ok := r.timeVal(msg, mapi.NameAppointmentStartWhole); !ok || got != want {
-		t.Fatalf("TZID start %d (ok=%v), want %d (09:00Z) — is time/tzdata linked?", got, ok, want)
+		t.Fatalf("TZID start %d (ok=%v), want %d (09:00Z), is time/tzdata linked?", got, ok, want)
 	}
 	out, err := Export(msg, r.opt())
 	if err != nil {
@@ -436,7 +436,8 @@ func TestAllDay(t *testing.T) {
 }
 
 // TestRecurringVerbatim confirms a recurring event is preserved byte-for-byte and
-// re-served unchanged, not synthesized (v1 cannot build the binary pattern).
+// re-served unchanged, and that it carries the MS-OXOCAL AppointmentRecurrencePattern
+// blob Outlook reads in PidLidAppointmentRecur (the v1 wire-compatible recurrence).
 func TestRecurringVerbatim(t *testing.T) {
 	const recICS = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nUID:r-1\r\nSUMMARY:Weekly\r\n" +
 		"DTSTART:20260612T090000Z\r\nRRULE:FREQ=WEEKLY;BYDAY=FR\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
@@ -454,6 +455,23 @@ func TestRecurringVerbatim(t *testing.T) {
 	}
 	if got := str(msg, mapi.PrSubject); got != "Weekly" {
 		t.Errorf("minimal subject %q, want Weekly", got)
+	}
+	// The series master emits the MS-OXOCAL RecurrencePattern blob a MAPI client
+	// (Outlook) reads for the weekly Friday series.
+	recurTag := r.tag(mapi.NameAppointmentRecur, mapi.PtBinary)
+	blob, ok := msg.Props.Get(recurTag)
+	if !ok {
+		t.Fatal("recurring event did not set PidLidAppointmentRecur blob")
+	}
+	b, _ := blob.([]byte)
+	if len(b) < 8 {
+		t.Fatalf("RecurrencePattern blob too short: %d bytes", len(b))
+	}
+	if got := uint16(b[0]) | uint16(b[1])<<8; got != 0x3004 {
+		t.Errorf("blob ReaderVersion = %#x, want 0x3004", got)
+	}
+	if got := uint16(b[4]) | uint16(b[5])<<8; got != 0x200B {
+		t.Errorf("RecurFrequency = %#x, want 0x200B (weekly)", got)
 	}
 	out, err := Export(msg, r.opt())
 	if err != nil {
