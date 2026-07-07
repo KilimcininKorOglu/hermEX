@@ -292,4 +292,39 @@ func TestContactExportDistributionList(t *testing.T) {
 	if !strings.Contains(body, "EMAIL:eng-a@hermex.test") || !strings.Contains(body, "EMAIL:eng-b@hermex.test") {
 		t.Errorf("export body missing a member EMAIL: %s", body)
 	}
+
+	// Expand the distribution list into its member addresses, the compose
+	// recipient-picker path: a non-group id must be rejected, the group id returns
+	// the two members in order.
+	rec = do(http.MethodGet, "/api/v1/contacts/"+created.Contact.ID+"/expand", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expand: status %d body %s", rec.Code, rec.Body.String())
+	}
+	var exp struct {
+		Name    string   `json:"name"`
+		Members []string `json:"members"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &exp); err != nil {
+		t.Fatalf("decode expand: %v", err)
+	}
+	if exp.Name != "Engineering" {
+		t.Errorf("expand name = %q, want Engineering", exp.Name)
+	}
+	if len(exp.Members) != 2 || exp.Members[0] != "eng-a@hermex.test" || exp.Members[1] != "eng-b@hermex.test" {
+		t.Errorf("expand members = %v, want [eng-a@hermex.test eng-b@hermex.test]", exp.Members)
+	}
+
+	// A regular contact is not expandable.
+	rec = do(http.MethodPost, "/api/v1/contacts", `{"name":"Solo","email":"solo@hermex.test"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create contact: %d %s", rec.Code, rec.Body.String())
+	}
+	var solo struct {
+		Contact contactJSON `json:"contact"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &solo)
+	rec = do(http.MethodGet, "/api/v1/contacts/"+solo.Contact.ID+"/expand", "")
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("expand a regular contact = %d, want 400", rec.Code)
+	}
 }

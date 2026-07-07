@@ -404,6 +404,39 @@ func (s *Server) handleDeleteContact(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// handleExpandDistList expands a personal distribution list (IPM.DistList contact)
+// into its member addresses, the expanddistlist surface the compose recipient picker
+// and the reference contactlist module expose. A non-group id returns 400 so the
+// caller does not silently treat a regular contact as a one-member list.
+func (s *Server) handleExpandDistList(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	st, _, ok := s.openStore(w, r)
+	if !ok {
+		return
+	}
+	defer st.Close()
+	msg, err := st.OpenMessage(id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	if propString(msg, mapi.PrMessageClass) != "IPM.DistList" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a distribution list"})
+		return
+	}
+	var body distListBody
+	_ = json.Unmarshal([]byte(propString(msg, mapi.PrBody)), &body)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"id":      strconv.FormatInt(id, 10),
+		"name":    propString(msg, mapi.PrSubject),
+		"members": body.Members,
+	})
+}
+
 // storeContact imports the contact as a vCard (the proven CardDAV path) and
 // creates it in the Contacts folder, returning the new object id.
 func storeContact(st *objectstore.Store, c contactJSON) (int64, error) {

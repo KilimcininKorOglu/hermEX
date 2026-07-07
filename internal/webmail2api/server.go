@@ -161,6 +161,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/v1/contacts/{id}/photo", s.handleSetContactPhoto)
 	mux.HandleFunc("DELETE /api/v1/contacts/{id}/photo", s.handleDeleteContactPhoto)
 	mux.HandleFunc("GET /api/v1/contacts/{id}/vcard", s.handleExportContact)
+	mux.HandleFunc("GET /api/v1/contacts/{id}/expand", s.handleExpandDistList)
 
 	// Calendar.
 	mux.HandleFunc("GET /api/v1/calendar/events", s.handleGetEvents)
