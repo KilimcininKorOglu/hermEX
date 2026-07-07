@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"hermex/internal/mapi"
+	"hermex/internal/recurrence"
 )
 
 // MessageClass is the store message class for a task object.
@@ -63,6 +64,7 @@ var taskNames = []mapi.PropertyName{
 	mapi.NameTaskAcceptanceState, // PtLong
 	mapi.NameTaskFCreator,        // PtBoolean
 	mapi.NameTaskLastUpdate,      // PtSysTime
+	mapi.NameTaskRecurrence,      // PtBinary (MS-OXOCAL RecurrencePattern blob)
 }
 
 const (
@@ -83,6 +85,7 @@ const (
 	idxAcceptanceState
 	idxFCreator
 	idxLastUpdate
+	idxTaskRecurrence
 )
 
 // New returns a Task with the unset sentinels (Importance/Sensitivity/Status = -1,
@@ -154,6 +157,20 @@ func ToProps(t Task, resolve Resolver) (mapi.PropertyValues, error) {
 	}
 	if t.RecurrenceRule != "" && ids[idxRecurrenceRule] != 0 {
 		p.Set(mapi.MakeTag(ids[idxRecurrenceRule], mapi.PtUnicode), t.RecurrenceRule)
+	}
+	// The MS-OXOCAL RecurrencePattern blob Outlook reads for a recurring task. The
+	// series anchor is the task start (fall back to due/now so a due-only recurring
+	// task still emits a valid blob); a blob is emitted only when the anchor is set.
+	if t.RecurrenceRule != "" && ids[idxTaskRecurrence] != 0 {
+		anchor := t.Start
+		if anchor.IsZero() {
+			anchor = t.Due
+		}
+		if !anchor.IsZero() {
+			if blob, err := recurrence.FromRRule(t.RecurrenceRule, anchor); err == nil {
+				p.Set(mapi.MakeTag(ids[idxTaskRecurrence], mapi.PtBinary), blob)
+			}
+		}
 	}
 	if t.Owner != "" && ids[idxOwner] != 0 {
 		p.Set(mapi.MakeTag(ids[idxOwner], mapi.PtUnicode), t.Owner)

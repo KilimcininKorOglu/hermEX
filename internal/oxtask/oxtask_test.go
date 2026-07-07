@@ -91,3 +91,38 @@ func TestTaskMessageClass(t *testing.T) {
 		t.Errorf("message class = %v, want %s", v, MessageClass)
 	}
 }
+
+// TestTaskRecurrenceBlob proves a recurring task emits the MS-OXOCAL
+// PidLidTaskRecurrence binary blob (0x8416) Outlook reads, alongside the RRULE text
+// the EAS/webmail paths consume, so the recurrence is wire-compatible for a MAPI
+// client instead of a webmail-only field.
+func TestTaskRecurrenceBlob(t *testing.T) {
+	r := newFakeResolver()
+	start := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+	in := Task{
+		Subject:        "Weekly status",
+		Start:          start,
+		RecurrenceRule: "FREQ=WEEKLY;INTERVAL=1;COUNT=5;BYDAY=MO",
+	}
+	props, err := ToProps(in, r.resolve)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rruleTag := mapi.MakeTag(r.ids[mapi.NameTaskRecurrenceRule], mapi.PtUnicode)
+	blobTag := mapi.MakeTag(r.ids[mapi.NameTaskRecurrence], mapi.PtBinary)
+	if v, ok := props.Get(rruleTag); !ok || v != in.RecurrenceRule {
+		t.Errorf("RRULE text = %v ok=%v, want %q preserved", v, ok, in.RecurrenceRule)
+	}
+	blob, ok := props.Get(blobTag)
+	if !ok {
+		t.Fatal("PidLidTaskRecurrence blob not set for a recurring task")
+	}
+	b, ok := blob.([]byte)
+	if !ok || len(b) < 8 {
+		t.Fatalf("blob = %T len=%d, want a []byte header", blob, len(b))
+	}
+	// ReaderVersion 0x3004 at the head proves this is the MS-OXOCAL RecurrencePattern.
+	if got := uint16(b[0]) | uint16(b[1])<<8; got != 0x3004 {
+		t.Errorf("blob ReaderVersion = %#x, want 0x3004", got)
+	}
+}

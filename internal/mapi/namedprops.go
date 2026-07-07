@@ -30,12 +30,12 @@ var (
 	PsetidNote = GUID{Data1: 0x0006200E, Data4: [8]byte{0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46}}
 	// PsetidMeeting {6ED8DA90-450B-101B-98DA-00AA003F1305} holds meeting-object
 	// named properties such as the global object id (UID). Unlike the other
-	// namespaces it is NOT a member of the {...-C000-...-46} family — it is a
+	// namespaces it is NOT a member of the {...-C000-...-46} family, it is a
 	// distinct literal GUID, so its Data2/Data3/Data4 differ.
 	PsetidMeeting = GUID{Data1: 0x6ED8DA90, Data2: 0x450B, Data3: 0x101B, Data4: [8]byte{0x98, 0xDA, 0x00, 0xAA, 0x00, 0x3F, 0x13, 0x05}}
 	// PsetidProvider {1DE937E2-85C6-40A1-BD9D-A6E2B7B787B1} is the provider's
 	// private namespace for store-level extension properties. The "photo" name
-	// under it holds the mailbox owner's portrait as raw image bytes — the single
+	// under it holds the mailbox owner's portrait as raw image bytes, the single
 	// source the GAL (NSPI), EWS, and webmail all read, so the picture is
 	// consistent across every protocol and is what Outlook shows as
 	// PR_EMS_AB_THUMBNAIL_PHOTO.
@@ -60,12 +60,10 @@ var (
 	// 4 white.
 	NameNoteColor = PropertyName{Kind: MnidID, GUID: PsetidNote, LID: 0x8B00}
 	// NameTaskRecurrenceRule holds a task's recurrence as an RRULE string
-	// (FREQ=DAILY/WEEKLY/MONTHLY/YEARLY;INTERVAL=N;COUNT=K or UNTIL=date). This is
-	// the webmail's own recurrence carrier under PS_PUBLIC_STRINGS, NOT the
-	// MS-OXOCAL PidLidTaskRecurrence binary blob (0x8416) Outlook writes: serializing
-	// that RecurrencePattern struct is a separate contract-map-grounded sub-project.
-	// A recurring task saved here recurs within webmail but does not surface as a
-	// recurrence in Outlook.
+	// (FREQ=DAILY/WEEKLY/MONTHLY/YEARLY;INTERVAL=N;COUNT=K or UNTIL=date), the
+	// model-layer shape oxtask and the EAS/webmail paths consume. The wire blob a
+	// MAPI client (Outlook) reads is NameTaskRecurrence (0x8416), rendered from this
+	// RRULE by internal/recurrence (contract-map/35).
 	NameTaskRecurrenceRule = PropertyName{Kind: MnidString, GUID: PsPublicStrings, Name: "TaskRecurrenceRule"}
 
 	// Contact email slots (PidLidEmail{1,2,3}*, PSETID_Address, PtUnicode). Each
@@ -104,6 +102,11 @@ var (
 	NameAppointmentEndWhole   = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x820E} // PtSysTime, UTC
 	NameAppointmentSubType    = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8215} // PtBoolean, all-day
 	NameRecurring             = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8223} // PtBoolean, recurring series master
+	// NameAppointmentRecur (PidLidAppointmentRecur, PSETID_Appointment/0x8216, PtBinary)
+	// carries the MS-OXOCAL AppointmentRecurrencePattern blob Outlook reads for a
+	// recurring calendar series (contract-map/35). The RRULE text in NameIcalUID's
+	// companion PrIcalOriginal is the model-layer shape; this is the wire blob.
+	NameAppointmentRecur = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8216}
 
 	// Meeting-workflow named properties (PSETID_Appointment). An attendee's
 	// response to a meeting request stamps these on both the request and the
@@ -112,12 +115,12 @@ var (
 	NameResponseStatus        = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8218} // PtLong, respTentative/Accepted/Declined
 	NameAppointmentReplyTime  = PropertyName{Kind: MnidID, GUID: PsetidAppointment, LID: 0x8220} // PtSysTime, when the attendee responded
 
-	// Reminder named properties (PSETID_Common) — VALARM maps here.
+	// Reminder named properties (PSETID_Common), VALARM maps here.
 	NameReminderDelta = PropertyName{Kind: MnidID, GUID: PsetidCommon, LID: 0x8501} // PtLong, minutes before start
 	NameReminderSet   = PropertyName{Kind: MnidID, GUID: PsetidCommon, LID: 0x8503} // PtBoolean
 	NameReminderTime  = PropertyName{Kind: MnidID, GUID: PsetidCommon, LID: 0x8502} // PtSysTime, when the reminder fires
 
-	// Common start/end (PSETID_Common) — a task's UTC start and due instants map
+	// Common start/end (PSETID_Common), a task's UTC start and due instants map
 	// here alongside the task-specific start/due, so a MAPI client and ActiveSync
 	// read the same times.
 	NameCommonStart = PropertyName{Kind: MnidID, GUID: PsetidCommon, LID: 0x8516} // PtSysTime
@@ -142,6 +145,11 @@ var (
 	NameTaskHistory         = PropertyName{Kind: MnidID, GUID: PsetidTask, LID: 0x811A} // PtLong (last change type)
 	NameTaskLastUpdate      = PropertyName{Kind: MnidID, GUID: PsetidTask, LID: 0x8115} // PtSysTime
 	NameTaskFCreator        = PropertyName{Kind: MnidID, GUID: PsetidTask, LID: 0x8116} // PtBoolean
+	// NameTaskRecurrence (PidLidTaskRecurrence, PSETID_Task/0x8416, PtBinary) carries
+	// the MS-OXOCAL RecurrencePattern blob Outlook reads for a recurring task
+	// (contract-map/35). The RRULE string the store also holds (NameTaskRecurrenceRule)
+	// is the model-layer shape; this is the wire blob for a MAPI client.
+	NameTaskRecurrence = PropertyName{Kind: MnidID, GUID: PsetidTask, LID: 0x8416}
 
 	// Meeting named properties (PSETID_Meeting). The global object id carries the
 	// iCalendar UID; v1 keeps the UID as a string property instead (the wrapped
@@ -149,12 +157,12 @@ var (
 	NameGlobalObjectId = PropertyName{Kind: MnidID, GUID: PsetidMeeting, LID: 0x0003} // PtBinary
 
 	// NameICalUID preserves the iCalendar UID as a named string (PS_PUBLIC_STRINGS),
-	// the v1 stand-in for the binary global object id — the stable identity that
+	// the v1 stand-in for the binary global object id, the stable identity that
 	// matches a meeting response back to its appointment.
 	NameICalUID = PropertyName{Kind: MnidString, GUID: PsPublicStrings, Name: "ICalUID"} // PtUnicode
 
 	// NameUserPhoto (PsetidProvider/"photo", PtBinary) holds the mailbox owner's
-	// portrait as raw image bytes — the cross-protocol source the GAL/NSPI, EWS,
+	// portrait as raw image bytes, the cross-protocol source the GAL/NSPI, EWS,
 	// and webmail all read, served to Outlook as PR_EMS_AB_THUMBNAIL_PHOTO.
 	NameUserPhoto = PropertyName{Kind: MnidString, GUID: PsetidProvider, Name: "photo"}
 )
