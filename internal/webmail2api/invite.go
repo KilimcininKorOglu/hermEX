@@ -79,6 +79,71 @@ func (s *Server) handleInvite(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleExportICS streams a message's embedded meeting invite as an .ics file.
+// The calendar part carries the original iTIP METHOD, VEVENT, and any VTIMEZONE,
+// so it is served verbatim rather than round-tripped through oxcical (which would
+// drop the METHOD and other iTIP-only fields). Messages without a calendar part
+// are not invites and return 404.
+func (s *Server) handleExportICS(w http.ResponseWriter, r *http.Request) {
+	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"))
+	if !ok {
+		return
+	}
+	defer st.Close()
+	raw, err := st.GetMessageRaw(fid, uid)
+	if err != nil {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	ics := findCalendarPart(mime.ParseStructure(raw))
+	if ics == nil {
+		http.Error(w, "no calendar invite in message", http.StatusNotFound)
+		return
+	}
+	name := icsFilename(ics)
+	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
+	w.Header().Set("Content-Disposition", "attachment; filename=\""+name+"\"")
+	_, _ = w.Write(ics)
+}
+
+// icsFilename derives a safe download name from the invite's SUMMARY (falling
+// back to its UID, then a constant), always ending in ".ics".
+func icsFilename(ics []byte) string {
+	base, _ := icalProp(ics, "SUMMARY")
+	if strings.TrimSpace(base) == "" {
+		base, _ = icalProp(ics, "UID")
+	}
+	base = sanitizeICSName(base)
+	if base == "" {
+		base = "invite"
+	}
+	return base + ".ics"
+}
+
+// sanitizeICSName keeps a filename safe for a Content-Disposition header: it
+// drops path separators, quotes, and control characters, collapses whitespace to
+// underscores, and bounds the length.
+func sanitizeICSName(s string) string {
+	s = strings.TrimSpace(s)
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r < 0x20 || r == 0x7f:
+			// skip control characters
+		case r == '/' || r == '\\' || r == '"' || r == ':':
+			// skip path and quoting characters
+		case r == ' ' || r == '\t':
+			b.WriteByte('_')
+		default:
+			b.WriteRune(r)
+		}
+		if b.Len() >= 80 {
+			break
+		}
+	}
+	return strings.Trim(b.String(), "_.")
+}
+
 // handleRSVP responds to a meeting invite: accept and tentative add the event to
 // the calendar; decline only acknowledges. (Mailing the iTIP reply back to the
 // organizer is a follow-up.)

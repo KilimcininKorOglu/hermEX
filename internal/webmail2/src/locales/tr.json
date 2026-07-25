@@ -177,6 +177,7 @@
     "failedToRsvp": "Davete yanıt verilemedi",
     "failedToDownload": "Ek indirilemedi",
     "exportEML": "EML olarak dışa aktar",
+    "exportICS": "ICS olarak dışa aktar",
     "print": "Yazdır",
     "downloadAll": "Tümünü indir",
     "viewSource": "Kaynağı görüntüle",

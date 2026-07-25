@@ -18,6 +18,7 @@ import {
   HelpCircle,
   Paperclip,
   Download,
+  CalendarArrowDown,
   Printer,
   Code,
   FileText,
@@ -626,6 +627,31 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
     }
   }
 
+  // handleExportICS downloads the message's embedded meeting invite as an .ics
+  // file (reference mail "Export as" ICS). Only offered when the message is an
+  // invite; the backend serves the calendar part verbatim to keep the iTIP
+  // METHOD intact.
+  const handleExportICS = async () => {
+    if (!email) return
+    try {
+      const res = await fetch(`/api/v1/mail/export-ics?id=${encodeURIComponent(email.id)}`, {
+        credentials: "include",
+      })
+      if (!res.ok) throw new Error()
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = (invite?.summary || email.subject || "invite") + ".ics"
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch {
+      toast.error(t("emailDetail.exportFailed"))
+    }
+  }
+
   const handleMove = async (folder: string, label: string) => {
     if (!email) return
     try {
@@ -799,6 +825,16 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
               >
                 <Download className="h-5 w-5" />
               </Button>
+              {invite && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={handleExportICS}
+                  title={t("emailDetail.exportICS")}
+                >
+                  <CalendarArrowDown className="h-5 w-5" />
+                </Button>
+              )}
               {showItemData && (
                 <Button
                   variant="ghost"

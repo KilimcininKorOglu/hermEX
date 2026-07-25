@@ -177,6 +177,7 @@
     "failedToRsvp": "Failed to respond to the invitation",
     "failedToDownload": "Failed to download attachment",
     "exportEML": "Export as EML",
+    "exportICS": "Export as ICS",
     "print": "Print",
     "downloadAll": "Download all",
     "viewSource": "View source",
