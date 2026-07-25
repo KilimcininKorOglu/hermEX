@@ -105,13 +105,14 @@ type appearanceSettingsJSON struct {
 	StartupFolder     string `json:"startupFolder"` // "" or a known folder slug like "inbox"/"today"/"calendar"
 	AutoCc            string `json:"autoCc"`        // comma-separated addresses auto-added to Cc on every send
 	ShortcutMode      string `json:"shortcutMode"`  // "off" | "basic" | "extended" keyboard-shortcut level
+	IconSet           string `json:"iconSet"`       // "breeze" | "classic" icon style
 }
 
 // readAppearanceSettings loads the display settings from the shared blob,
 // defaulting to system theme, browser language, ISO date, 24h time, and a
 // first-then-last name order when none are stored.
 func readAppearanceSettings(m map[string]json.RawMessage) appearanceSettingsJSON {
-	a := appearanceSettingsJSON{Theme: "system", Language: "system", DateFormat: "iso", TimeFormat: "24", NameDisplay: "firstlast", ShortcutMode: "extended"}
+	a := appearanceSettingsJSON{Theme: "system", Language: "system", DateFormat: "iso", TimeFormat: "24", NameDisplay: "firstlast", ShortcutMode: "extended", IconSet: "breeze"}
 	if raw, ok := m["webmail2AppearanceSettings"]; ok {
 		_ = json.Unmarshal(raw, &a)
 	}
@@ -144,6 +145,11 @@ func readAppearanceSettings(m map[string]json.RawMessage) appearanceSettingsJSON
 	case "off", "basic", "extended":
 	default:
 		a.ShortcutMode = "extended"
+	}
+	switch a.IconSet {
+	case "breeze", "classic":
+	default:
+		a.IconSet = "breeze"
 	}
 	return a
 }
@@ -178,6 +184,7 @@ func (s *Server) handlePutAppearanceSettings(w http.ResponseWriter, r *http.Requ
 		a.StartupFolder = in.StartupFolder
 		a.AutoCc = in.AutoCc
 		a.ShortcutMode = in.ShortcutMode
+		a.IconSet = in.IconSet
 		clamped := readAppearanceSettings(map[string]json.RawMessage{"webmail2AppearanceSettings": mustJSON(a)})
 		raw, _ := json.Marshal(clamped)
 		m["webmail2AppearanceSettings"] = raw

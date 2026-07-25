@@ -54,10 +54,13 @@ func TestAppearanceSettingsRoundTrip(t *testing.T) {
 	if def.ShortcutMode != "extended" {
 		t.Errorf("default shortcutMode = %q, want extended", def.ShortcutMode)
 	}
+	if def.IconSet != "breeze" {
+		t.Errorf("default iconSet = %q, want breeze", def.IconSet)
+	}
 
-	// Put dark theme + Turkish + DMY dates + 12h, plus the unread border toggle
-	// and a basic shortcut mode.
-	body := `{"theme":"dark","language":"tr","dateFormat":"dmy","timeFormat":"12","nameDisplay":"lastfirst","showUnreadCounter":true,"unreadBorder":true,"hideWidgetPanel":false,"shortcutMode":"basic"}`
+	// Put dark theme + Turkish + DMY dates + 12h, plus the unread border toggle,
+	// a basic shortcut mode, and the classic icon set.
+	body := `{"theme":"dark","language":"tr","dateFormat":"dmy","timeFormat":"12","nameDisplay":"lastfirst","showUnreadCounter":true,"unreadBorder":true,"hideWidgetPanel":false,"shortcutMode":"basic","iconSet":"classic"}`
 	if rec := do(http.MethodPut, "/api/v1/settings/appearance", body); rec.Code != http.StatusOK {
 		t.Fatalf("put: status %d body %s", rec.Code, rec.Body.String())
 	}
@@ -76,16 +79,19 @@ func TestAppearanceSettingsRoundTrip(t *testing.T) {
 	if got.ShortcutMode != "basic" {
 		t.Errorf("got shortcutMode = %q, want basic", got.ShortcutMode)
 	}
+	if got.IconSet != "classic" {
+		t.Errorf("got iconSet = %q, want classic", got.IconSet)
+	}
 
 	// A bad enum clamps: theme "neon" → system, dateFormat "us" → iso,
-	// shortcutMode "vim" → extended.
-	if rec := do(http.MethodPut, "/api/v1/settings/appearance", `{"theme":"neon","dateFormat":"us","shortcutMode":"vim"}`); rec.Code != http.StatusOK {
+	// shortcutMode "vim" → extended, iconSet "flat" → breeze.
+	if rec := do(http.MethodPut, "/api/v1/settings/appearance", `{"theme":"neon","dateFormat":"us","shortcutMode":"vim","iconSet":"flat"}`); rec.Code != http.StatusOK {
 		t.Fatalf("clamp put: status %d", rec.Code)
 	}
 	rec = do(http.MethodGet, "/api/v1/settings/appearance", "")
 	var clamped appearanceSettingsJSON
 	_ = json.Unmarshal(rec.Body.Bytes(), &clamped)
-	if clamped.Theme != "system" || clamped.DateFormat != "iso" || clamped.ShortcutMode != "extended" {
-		t.Errorf("clamped = %+v, want system/iso/extended", clamped)
+	if clamped.Theme != "system" || clamped.DateFormat != "iso" || clamped.ShortcutMode != "extended" || clamped.IconSet != "breeze" {
+		t.Errorf("clamped = %+v, want system/iso/extended/breeze", clamped)
 	}
 }

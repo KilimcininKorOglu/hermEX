@@ -238,6 +238,7 @@ export interface AppearanceSettings {
   startupFolder: string
   autoCc: string
   shortcutMode: string // "off" | "basic" | "extended" keyboard-shortcut level
+  iconSet: string // "breeze" | "classic" icon style
 }
 
 export interface Delegation {

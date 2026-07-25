@@ -4,13 +4,43 @@ import { Sidebar } from "./sidebar"
 import { Header } from "./header"
 import { ReminderOverlay } from "@/components/reminder-overlay"
 import { useMailbox } from "@/contexts/MailboxContext"
+import api from "@/utils/api"
 import { cn } from "@/lib/utils"
+
+// baseTitle is the app title without any unread-count prefix; the title-counter
+// effect restores it whenever the counter is off or the inbox is all read.
+const baseTitle = "hermEX Webmail"
 
 export function Layout() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const [showUnreadCounter, setShowUnreadCounter] = useState(false)
   const navigate = useNavigate()
   const { inboxUnread } = useMailbox()
+
+  // The unread-counter-in-title preference lives in the DB-backed appearance
+  // settings; fetch it once and re-read when the settings page saves a change
+  // (it dispatches "appearance-changed"), so the title reacts without a reload.
+  useEffect(() => {
+    const load = () => {
+      api.getAppearanceSettings()
+        .then((s) => setShowUnreadCounter(!!s.showUnreadCounter))
+        .catch(() => undefined)
+    }
+    load()
+    document.addEventListener("appearance-changed", load)
+    return () => document.removeEventListener("appearance-changed", load)
+  }, [])
+
+  // Reflect the inbox unread count in the browser tab/title when the preference
+  // is on (mirrors the reference "Show unread mail counter in application title").
+  useEffect(() => {
+    if (showUnreadCounter && inboxUnread > 0) {
+      document.title = `(${inboxUnread}) ${baseTitle}`
+    } else {
+      document.title = baseTitle
+    }
+  }, [showUnreadCounter, inboxUnread])
   // Desktop notifications: when the inbox unread count rises, fire a browser
   // Notification (permission gated). The ref holds the previous count so a
   // refresh that lands on the same unread total does not spam a notice.

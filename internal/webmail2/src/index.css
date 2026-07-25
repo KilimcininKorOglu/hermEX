@@ -182,3 +182,13 @@
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(215.4 16.3% 46.9% / 0.4);
 }
+
+/* Icon set: the SPA draws every glyph from lucide (a single stroke-based
+   library) rather than shipping two icon fonts, so the Breeze/Classic choice
+   is realised as a stroke weight. Breeze keeps lucide's thin default; Classic
+   thickens the stroke for a heavier, more traditional look. A CSS stroke-width
+   overrides lucide's inline stroke-width attribute. The data attribute is set
+   on <html> from the DB-backed appearance setting. */
+:root[data-iconset="classic"] svg.lucide {
+  stroke-width: 2.75px;
+}

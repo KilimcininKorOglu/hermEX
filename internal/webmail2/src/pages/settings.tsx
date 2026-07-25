@@ -26,6 +26,7 @@ import * as smimeStore from "@/utils/smime"
 import type { CertInfo } from "@/utils/smime"
 import { detectTimeZone, listTimeZones } from "@/utils/timezone"
 import { setShortcutMode, type ShortcutMode } from "@/utils/shortcutMode"
+import { applyIconSet } from "@/utils/iconSet"
 import { enablePushNotifications, disablePushNotifications, pushSupported } from "@/utils/push"
 import { RichTextEditor } from "@/components/RichTextEditor"
 
@@ -163,6 +164,7 @@ export function SettingsPage() {
     startupFolder: "",
     autoCc: "",
     shortcutMode: "extended",
+    iconSet: "breeze",
   })
 
   useEffect(() => {
@@ -207,6 +209,7 @@ export function SettingsPage() {
         startupFolder: a.startupFolder ?? "",
         autoCc: a.autoCc ?? "",
         shortcutMode: a.shortcutMode ?? "extended",
+        iconSet: a.iconSet ?? "breeze",
       }))
       .catch(() => undefined)
       .catch(() => undefined)
@@ -243,6 +246,10 @@ export function SettingsPage() {
     if (next.language !== "system") changeLocale(next.language)
     // Mirror the shortcut mode to its cookie so the key hooks pick it up live.
     setShortcutMode(next.shortcutMode as ShortcutMode)
+    // Apply the icon set to the document root immediately for a live preview.
+    applyIconSet(next.iconSet)
+    // Let app-wide consumers (e.g. the title unread counter) re-read the settings.
+    document.dispatchEvent(new CustomEvent("appearance-changed"))
     api.setAppearanceSettings(next).catch(() => undefined)
   }
 
@@ -266,8 +273,10 @@ export function SettingsPage() {
         startupFolder: a.startupFolder ?? "",
         autoCc: a.autoCc ?? "",
         shortcutMode: a.shortcutMode ?? "extended",
+        iconSet: a.iconSet ?? "breeze",
       })
       setShortcutMode((a.shortcutMode ?? "extended") as ShortcutMode)
+      applyIconSet(a.iconSet ?? "breeze")
       setFirstDayOfWeek(c.firstDayOfWeek ?? 1)
       setResolution(c.resolution ?? 30)
       setWorkDayStart(c.workDayStart ?? 9)
@@ -1260,6 +1269,33 @@ export function SettingsPage() {
               <option value="firstlast">{t("settings.appearance.nameFirstLast")}</option>
               <option value="lastfirst">{t("settings.appearance.nameLastFirst")}</option>
             </select>
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">{t("settings.appearance.iconSet")}</p>
+              <p className="text-sm text-muted-foreground">{t("settings.appearance.iconSetDescription")}</p>
+            </div>
+            <select
+              value={appearance.iconSet}
+              onChange={(e) => saveAppearance({ ...appearance, iconSet: e.target.value })}
+              className="max-w-[16rem] rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="breeze">{t("settings.appearance.iconSetBreeze")}</option>
+              <option value="classic">{t("settings.appearance.iconSetClassic")}</option>
+            </select>
+          </div>
+          <Separator />
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">{t("settings.appearance.showUnreadCounter")}</p>
+              <p className="text-sm text-muted-foreground">{t("settings.appearance.showUnreadCounterDescription")}</p>
+            </div>
+            <input
+              type="checkbox"
+              checked={appearance.showUnreadCounter}
+              onChange={(e) => saveAppearance({ ...appearance, showUnreadCounter: e.target.checked })}
+            />
           </div>
           <Separator />
           <div className="flex items-center justify-between gap-4">

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from "react"
 import { getCookie, setCookie } from "@/utils/cookies"
 import { setShortcutMode, type ShortcutMode } from "@/utils/shortcutMode"
+import { applyIconSet } from "@/utils/iconSet"
 import api from "@/utils/api"
 
 type Theme = "dark" | "light" | "system"
@@ -67,6 +68,9 @@ export function ThemeProvider({
         // Mirror the DB-backed shortcut mode to its cookie so the key hooks read
         // the right level on a fresh browser (this provider mounts app-wide).
         if (s.shortcutMode) setShortcutMode(s.shortcutMode as ShortcutMode)
+        // Apply the DB-backed icon set to <html> so glyphs render in the chosen
+        // weight from first paint (this provider mounts app-wide).
+        if (s.iconSet) applyIconSet(s.iconSet)
       })
       .catch(() => {
         /* best-effort: fall back to the cookie/default */
