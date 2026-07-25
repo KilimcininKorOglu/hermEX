@@ -241,7 +241,24 @@ func (s *Server) Handler() http.Handler {
 	if s.dist != nil {
 		mux.Handle("/", s.dist)
 	}
-	return s.gateForcedPasswordChange(mux)
+	return securityHeaders(s.gateForcedPasswordChange(mux))
+}
+
+// securityHeaders stamps clickjacking and MIME-sniffing defences on every
+// response. X-Frame-Options: DENY and the frame-ancestors CSP both forbid
+// embedding the webmail (SPA or any endpoint) in an attacker's iframe — belt and
+// braces, since older browsers honour only the former and modern ones only the
+// latter. X-Content-Type-Options: nosniff stops a browser from second-guessing a
+// declared Content-Type, which matters most for attachment downloads served from
+// this same origin.
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Content-Security-Policy", "frame-ancestors 'none'")
+		h.Set("X-Content-Type-Options", "nosniff")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // forcedChangeAllowed reports whether a path stays reachable while the session user
