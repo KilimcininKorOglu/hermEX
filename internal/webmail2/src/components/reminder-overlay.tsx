@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { Bell, Clock } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -16,93 +16,66 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import api, { type CalendarEvent } from "@/utils/api"
+import api, { type Reminder } from "@/utils/api"
 import { useI18n } from "@/hooks/useI18n"
 
-// DueReminder is a calendar event whose reminder has fired: the reminder lead
-// time has elapsed (start - reminderMinutes <= now) but the event has not ended
-// long ago (start + 1h, after which a popup is noise).
-type DueReminder = CalendarEvent
-
-// reminderDueAt returns the instant the reminder should fire (start minus the
-// lead time), or undefined when the event carries no reminder.
-function reminderDueAt(ev: CalendarEvent): number | undefined {
-  if (!ev.reminderMinutes || ev.reminderMinutes <= 0) return undefined
-  const start = new Date(ev.start).getTime()
-  if (isNaN(start)) return undefined
-  return start - ev.reminderMinutes * 60 * 1000
-}
-
-// ReminderOverlay is the calendar reminder engine (the ReminderStore + popup): it
-// polls the calendar, fires a snooze/dismiss dialog the instant a reminder is due,
-// and keeps dismissed/snoozed state in memory for the session. It is mounted once
-// in the Layout so reminders surface on every page, not only the calendar.
+// ReminderOverlay is the reminder popup (the reference ReminderStore + ReminderDialog):
+// it polls the server's due-reminder list, and snoozes/dismisses each reminder
+// server-side (persistent PidLidReminderSet/Time mutations) rather than in session
+// memory. It is mounted once in the Layout so reminders surface on every page.
 export function ReminderOverlay() {
   const { t } = useI18n()
   const navigate = useNavigate()
-  // dismissed holds event uids the user dismissed this session; snoozed holds a
-  // uid -> instant-to-recheck map (the reminder re-fires after the snooze window).
-  const [dismissed] = useState<Set<string>>(new Set())
-  const [snoozed, setSnoozed] = useState<Record<string, number>>({})
-  const [due, setDue] = useState<DueReminder[]>([])
+  const [due, setDue] = useState<Reminder[]>([])
   const [open, setOpen] = useState(false)
-  const [snoozeChoice, setSnoozeChoice] = useState("300") // seconds, default 5 min
+  const [snoozeChoice, setSnoozeChoice] = useState("5") // minutes, default 5 min
+
+  // refresh reloads the server's due-reminder list. The server already filters to
+  // fired-and-not-dismissed reminders (dismiss clears the flag, snooze advances the
+  // time), so the client keeps no session state. Best-effort: a failed poll retries.
+  const refresh = useCallback(async () => {
+    try {
+      const res = await api.getReminders()
+      const list = res.reminders ?? []
+      setDue(list)
+      setOpen(list.length > 0)
+    } catch {
+      /* best-effort: a failed reminder poll silently retries next tick */
+    }
+  }, [])
 
   useEffect(() => {
-    let cancelled = false
-    // check loads the calendar, finds newly-due reminders not yet dismissed or
-    // snoozed-past-now, and surfaces them. It runs immediately and every minute.
-    const check = async () => {
-      const now = Date.now()
-      try {
-        const res = await api.getCalendarEvents()
-        const events = (res.events ?? []).filter((ev) => {
-          const dueAt = reminderDueAt(ev)
-          if (dueAt === undefined) return false
-          const start = new Date(ev.start).getTime()
-          if (isNaN(start)) return false
-          if (dueAt > now) return false // not yet time to remind
-          if (now - start > 60 * 60 * 1000) return false // event started >1h ago
-          if (dismissed.has(ev.uid)) return false
-          const snoozeUntil = snoozed[ev.uid]
-          if (snoozeUntil !== undefined && snoozeUntil > now) return false
-          return true
-        })
-        if (cancelled) return
-        if (events.length > 0) {
-          setDue(events)
-          setOpen(true)
-        }
-      } catch {
-        /* best-effort: a failed calendar poll silently retries next tick */
-      }
-    }
-    void check()
-    const id = setInterval(check, 60 * 1000)
-    return () => {
-      cancelled = true
-      clearInterval(id)
-    }
-  }, [dismissed, snoozed])
+    void refresh()
+    const id = setInterval(() => void refresh(), 60 * 1000)
+    return () => clearInterval(id)
+  }, [refresh])
 
-  const snooze = () => {
-    const secs = Number(snoozeChoice) || 300
-    const until = Date.now() + secs * 1000
-    setSnoozed((prev) => {
-      const next = { ...prev }
-      for (const ev of due) next[ev.uid] = until
-      return next
-    })
-    setOpen(false)
+  // snoozeAll postpones every shown reminder by the chosen minutes, then reloads so
+  // they drop off the list until the snooze window elapses.
+  const snoozeAll = async () => {
+    const minutes = Number(snoozeChoice) || 5
+    await Promise.all(due.map((rem) => api.snoozeReminder(rem.id, minutes).catch(() => undefined)))
+    await refresh()
   }
 
-  const dismiss = () => {
-    for (const ev of due) dismissed.add(ev.uid)
+  // dismissOne / dismissAll clear reminders server-side so they never fire again.
+  const dismissOne = async (id: string) => {
+    await api.dismissReminder(id).catch(() => undefined)
+    await refresh()
+  }
+  const dismissAll = async () => {
+    await Promise.all(due.map((rem) => api.dismissReminder(rem.id).catch(() => undefined)))
+    await refresh()
+  }
+
+  // openItem navigates to the calendar or task list depending on the reminder type.
+  const openItem = (rem: Reminder) => {
     setOpen(false)
+    navigate(rem.type === "task" ? "/tasks" : "/calendar")
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) dismiss() }}>
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -112,16 +85,25 @@ export function ReminderOverlay() {
           <DialogDescription>{t("reminder.description")}</DialogDescription>
         </DialogHeader>
         <ul className="space-y-2 py-2">
-          {due.map((ev) => (
-            <li key={ev.uid} className="rounded-lg border p-3">
-              <p className="font-medium">{ev.summary}</p>
-              <p className="flex items-center gap-1 text-sm text-muted-foreground">
-                <Clock className="h-3.5 w-3.5" />
-                {new Date(ev.start).toLocaleString()}
-              </p>
-              {ev.location && (
-                <p className="text-sm text-muted-foreground">{ev.location}</p>
-              )}
+          {due.map((rem) => (
+            <li key={rem.id} className="flex items-start justify-between gap-2 rounded-lg border p-3">
+              <div className="min-w-0">
+                <p className="truncate font-medium">{rem.subject}</p>
+                {rem.start && (
+                  <p className="flex items-center gap-1 text-sm text-muted-foreground">
+                    <Clock className="h-3.5 w-3.5" />
+                    {new Date(rem.start).toLocaleString()}
+                  </p>
+                )}
+              </div>
+              <div className="flex shrink-0 gap-1">
+                <Button variant="ghost" size="sm" onClick={() => openItem(rem)}>
+                  {t("reminder.open")}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => void dismissOne(rem.id)}>
+                  {t("reminder.dismiss")}
+                </Button>
+              </div>
             </li>
           ))}
         </ul>
@@ -131,21 +113,18 @@ export function ReminderOverlay() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="300">5 {t("reminder.minutes")}</SelectItem>
-              <SelectItem value="600">10 {t("reminder.minutes")}</SelectItem>
-              <SelectItem value="900">15 {t("reminder.minutes")}</SelectItem>
-              <SelectItem value="1800">30 {t("reminder.minutes")}</SelectItem>
-              <SelectItem value="3600">60 {t("reminder.minutes")}</SelectItem>
+              <SelectItem value="5">5 {t("reminder.minutes")}</SelectItem>
+              <SelectItem value="10">10 {t("reminder.minutes")}</SelectItem>
+              <SelectItem value="15">15 {t("reminder.minutes")}</SelectItem>
+              <SelectItem value="30">30 {t("reminder.minutes")}</SelectItem>
+              <SelectItem value="60">60 {t("reminder.minutes")}</SelectItem>
             </SelectContent>
           </Select>
-          <Button variant="outline" onClick={snooze}>
+          <Button variant="outline" onClick={() => void snoozeAll()}>
             {t("reminder.snooze")}
           </Button>
-          <Button variant="outline" onClick={() => { setOpen(false); navigate("/calendar") }}>
-            {t("reminder.open")}
-          </Button>
-          <Button onClick={dismiss} className="ml-auto">
-            {t("reminder.dismiss")}
+          <Button onClick={() => void dismissAll()} className="ml-auto">
+            {t("reminder.dismissAll")}
           </Button>
         </div>
       </DialogContent>

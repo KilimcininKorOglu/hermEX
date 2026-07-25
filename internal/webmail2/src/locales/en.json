@@ -1366,10 +1366,11 @@
   },
   "reminder": {
     "title": "Reminder",
-    "description": "The following appointments are due",
+    "description": "The following items are due",
     "snooze": "Snooze",
     "dismiss": "Dismiss",
-    "open": "Open calendar",
+    "dismissAll": "Dismiss all",
+    "open": "Open",
     "minutes": "min"
   },
   "today": {

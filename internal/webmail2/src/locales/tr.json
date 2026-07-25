@@ -1366,10 +1366,11 @@
   },
   "reminder": {
     "title": "Hatırlatma",
-    "description": "Aşağıdaki randevuların zamanı geldi",
+    "description": "Aşağıdaki öğelerin zamanı geldi",
     "snooze": "Ertele",
     "dismiss": "Kapat",
-    "open": "Takvimi aç",
+    "dismissAll": "Tümünü kapat",
+    "open": "Aç",
     "minutes": "dk"
   },
   "today": {

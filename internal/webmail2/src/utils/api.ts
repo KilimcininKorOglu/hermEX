@@ -145,6 +145,16 @@ export interface CalendarEvent {
 
 export type CalendarEventInput = Omit<CalendarEvent, "uid"> & { uid?: string }
 
+// Reminder is one due reminder the server computed (appointment or task); the
+// popup lists these and snoozes/dismisses them by id.
+export interface Reminder {
+  id: string
+  subject: string
+  type: "appointment" | "task" // which editor to open
+  dueTime: string // RFC3339, when the reminder fired
+  start?: string // the appointment/task start
+}
+
 export interface Calendar {
   id: string
   name: string
@@ -1367,6 +1377,24 @@ class API {
   // Calendar (CalDAV-backed)
   async getCalendarEvents(): Promise<{ events?: CalendarEvent[] }> {
     return this.get<{ events?: CalendarEvent[] }>('/calendar/events')
+  }
+
+  // getReminders lists the due reminders (appointments + tasks) the server has
+  // computed from PidLidReminderSet/Time; the popup renders these directly.
+  async getReminders(): Promise<{ reminders?: Reminder[] }> {
+    return this.get<{ reminders?: Reminder[] }>('/reminders')
+  }
+
+  // dismissReminder clears a reminder server-side (PidLidReminderSet=false) so it
+  // never fires again — persistent, unlike the old session-only dismissal.
+  async dismissReminder(id: string): Promise<void> {
+    await this.post(`/reminders/${encodeURIComponent(id)}/dismiss`, {})
+  }
+
+  // snoozeReminder postpones a reminder by minutes server-side (advances
+  // PidLidReminderTime) so it re-fires after the snooze window across sessions.
+  async snoozeReminder(id: string, minutes: number): Promise<void> {
+    await this.post(`/reminders/${encodeURIComponent(id)}/snooze`, { minutes })
   }
 
   async createCalendarEvent(event: CalendarEventInput): Promise<CalendarEvent> {
