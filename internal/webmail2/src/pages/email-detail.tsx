@@ -98,6 +98,8 @@ interface EmailDetail {
   fromEmail: string
   to: string[]
   toNames: string[]
+  cc?: string[]
+  ccNames?: string[]
   subject: string
   date: string
   content: string
@@ -234,6 +236,8 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
             fromEmail,
             to: result.to ?? [],
             toNames: result.toNames ?? [],
+            cc: result.cc ?? [],
+            ccNames: result.ccNames ?? [],
             subject: result.subject,
             date: result.date,
             content,
@@ -307,6 +311,25 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
       }
     } catch {
       toast.error(t("emailDetail.recallFailed"))
+    }
+  }
+
+  // copyAddr copies a single address to the clipboard; copyAddrs copies a
+  // comma-joined list. Both surface success/failure via a toast.
+  const copyAddr = async (addr: string) => {
+    try {
+      await navigator.clipboard.writeText(addr)
+      toast.success(t("emailDetail.emailCopied"))
+    } catch {
+      toast.error(t("emailDetail.copyFailed"))
+    }
+  }
+  const copyAddrs = async (addrs: string[]) => {
+    try {
+      await navigator.clipboard.writeText(addrs.join(", "))
+      toast.success(t("emailDetail.recipientsCopied"))
+    } catch {
+      toast.error(t("emailDetail.copyFailed"))
     }
   }
 
@@ -806,28 +829,49 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                       type="button"
                       className="text-muted-foreground hover:text-foreground transition-colors"
                       title={t("emailDetail.copyEmail")}
-                      onClick={async () => {
-                        try {
-                          await navigator.clipboard.writeText(email.fromEmail)
-                          toast.success(t("emailDetail.emailCopied"))
-                        } catch {
-                          toast.error(t("emailDetail.copyFailed"))
-                        }
-                      }}
+                      onClick={() => copyAddr(email.fromEmail)}
                     >
                       <Copy className="h-3.5 w-3.5" />
                     </button>
                   </div>
 
-                  <div className="mt-1 text-sm text-muted-foreground">
-                    <span className="font-medium text-foreground">{t("common.to")}:</span>{" "}
-                    {email.to
-                      .map((addr, i) => {
-                        const nm = email.toNames?.[i]
-                        return nm ? `${nm} <${addr}>` : addr
-                      })
-                      .join(", ")}
-                  </div>
+                  {([
+                    { label: t("common.to"), addrs: email.to, names: email.toNames },
+                    { label: t("emailDetail.cc"), addrs: email.cc ?? [], names: email.ccNames },
+                  ] as const)
+                    .filter((row) => row.addrs.length > 0)
+                    .map((row) => (
+                      <div key={row.label} className="mt-1 text-sm text-muted-foreground">
+                        <span className="font-medium text-foreground">{row.label}:</span>{" "}
+                        {row.addrs.map((addr, i) => {
+                          const nm = row.names?.[i]
+                          return (
+                            <span key={addr + i} className="inline-flex items-center gap-1">
+                              {i > 0 && ", "}
+                              <span>{nm ? `${nm} <${addr}>` : addr}</span>
+                              <button
+                                type="button"
+                                className="text-muted-foreground hover:text-foreground transition-colors align-middle"
+                                title={t("emailDetail.copyEmail")}
+                                onClick={() => copyAddr(addr)}
+                              >
+                                <Copy className="h-3 w-3" />
+                              </button>
+                            </span>
+                          )
+                        })}
+                        {row.addrs.length > 1 && (
+                          <button
+                            type="button"
+                            className="ml-1 text-muted-foreground hover:text-foreground transition-colors align-middle"
+                            title={t("emailDetail.copyAllRecipients")}
+                            onClick={() => copyAddrs(row.addrs)}
+                          >
+                            <Copy className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
 
                   <div className="mt-1 text-sm text-muted-foreground">{formatAbsolute(email.date)}</div>
 

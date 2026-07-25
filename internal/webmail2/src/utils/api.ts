@@ -21,6 +21,8 @@ export interface Mail {
   fromName: string // sender display name ("" when unknown)
   to: string[] // bare recipient addresses
   toNames?: string[] // display name per recipient (same index, "" when unknown)
+  cc?: string[] // bare Cc addresses
+  ccNames?: string[] // display name per Cc recipient (same index, "" when unknown)
   subject: string
   body: string
   preview: string
