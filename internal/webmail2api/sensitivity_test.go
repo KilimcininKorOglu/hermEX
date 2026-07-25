@@ -22,7 +22,7 @@ func TestBuildOutgoingSensitivity(t *testing.T) {
 		{"confidential", "Company-Confidential"},
 	}
 	for _, tc := range cases {
-		raw, err := srv.buildOutgoing("alice@hermex.test", sendRequest{
+		raw, err := srv.buildOutgoing("alice@hermex.test", "alice@hermex.test", sendRequest{
 			To:          []string{"bob@hermex.test"},
 			Subject:     "hi",
 			Body:        "body",

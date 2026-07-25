@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
@@ -40,6 +41,7 @@ type sendRequest struct {
 	SendAt                 string           `json:"sendAt"`
 	SignMessage            bool             `json:"signMessage"`    // server-mode S/MIME sign
 	EncryptMessage         bool             `json:"encryptMessage"` // server-mode S/MIME encrypt
+	From                   string           `json:"from"`           // chosen sender identity (send-as / on-behalf); empty = self
 }
 
 // decodeAttachment decodes an attachment body, accepting raw base64 or a data URL.
@@ -70,7 +72,16 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	raw, err := s.buildOutgoing(c.Email, req)
+	// Authorize the chosen From identity (fail-closed). The envelope sender stays
+	// the authenticated caller so bounces return to them and the relay's own
+	// send-as gate always passes; only the header From/Sender reflect the identity.
+	representing, sender, ok := s.resolveSender(c.Email, req.From)
+	if !ok {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "you may not send as this address"})
+		return
+	}
+
+	raw, err := s.buildOutgoing(representing, sender, req)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not build the message"})
 		return
@@ -150,7 +161,12 @@ func (s *Server) handleMailBuild(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	raw, err := s.buildOutgoing(c.Email, req)
+	representing, sender, ok := s.resolveSender(c.Email, req.From)
+	if !ok {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "you may not send as this address"})
+		return
+	}
+	raw, err := s.buildOutgoing(representing, sender, req)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not build the message"})
 		return
@@ -218,7 +234,7 @@ func (s *Server) handleMailDraft(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	raw, err := s.buildOutgoing(c.Email, sendRequest{To: req.To, Cc: req.Cc, Bcc: req.Bcc, Subject: req.Subject, Body: req.Body})
+	raw, err := s.buildOutgoing(c.Email, c.Email, sendRequest{To: req.To, Cc: req.Cc, Bcc: req.Bcc, Subject: req.Subject, Body: req.Body})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not build the draft"})
 		return
@@ -241,14 +257,89 @@ func (s *Server) handleMailDraft(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"id": messageID("drafts", info.UID)})
 }
 
+// resolveSender authorizes the caller's chosen From identity and returns the
+// address to represent plus the real authenticated sender. It mirrors the MTA's
+// send-as gate (internal/mta/delivery.go) exactly, because /mail/send never
+// traverses the authenticated SMTP path where that gate runs: an empty or
+// self-matching want sends as the caller; any other address is allowed only when
+// it is one of the caller's directory identities (an alias) or when the mailbox
+// that owns it has granted the caller a send-as permission. It fails closed —
+// an unresolvable owner, an unopenable store, or an unreadable list denies the
+// identity rather than risking a forged From. representing is the authorized
+// From; sender is always the real caller so oxcmail emits a Sender header (RFC
+// 5322 "on behalf of") whenever the two differ.
+func (s *Server) resolveSender(caller, want string) (representing, sender string, ok bool) {
+	want = strings.TrimSpace(want)
+	if want == "" || strings.EqualFold(want, caller) {
+		return caller, caller, true
+	}
+	// An alias of the caller: send as it directly, with no Sender header.
+	if id, isID := s.accounts.(directory.Identifier); isID {
+		if addrs, err := id.Identities(caller); err == nil {
+			for _, a := range addrs {
+				if strings.EqualFold(strings.TrimSpace(a), want) {
+					return want, want, true
+				}
+			}
+		}
+	}
+	// A send-as grant from the mailbox that owns want: represent that mailbox,
+	// but keep the real caller in Sender so the recipient sees "caller on behalf".
+	if s.grantedSendAs(caller, want) {
+		return want, caller, true
+	}
+	return "", "", false
+}
+
+// grantedSendAs reports whether caller appears in the send-as list of the mailbox
+// that owns want. It fails closed identically to the MTA gate: any resolution,
+// open, or read failure denies the grant.
+func (s *Server) grantedSendAs(caller, want string) bool {
+	path, ok := s.accounts.Resolve(want)
+	if !ok {
+		return false
+	}
+	st, err := objectstore.Open(path)
+	if err != nil {
+		return false
+	}
+	defer st.Close()
+	list, err := st.GetSendAs()
+	if err != nil {
+		return false
+	}
+	ids := []string{caller}
+	if idr, isID := s.accounts.(directory.Identifier); isID {
+		if addrs, aerr := idr.Identities(caller); aerr == nil && len(addrs) > 0 {
+			ids = addrs
+		}
+	}
+	for _, g := range list {
+		g = strings.ToLower(strings.TrimSpace(g))
+		for _, id := range ids {
+			if strings.EqualFold(strings.TrimSpace(id), g) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // buildOutgoing maps the send fields onto a MAPI message and exports it to RFC
 // 5322 bytes via oxcmail — mirroring the server-rendered webmail's compose path.
-func (s *Server) buildOutgoing(from string, req sendRequest) ([]byte, error) {
+// representing is the authorized From identity; sender is the real authenticated
+// caller. When they differ (send-on-behalf) oxcmail emits a Sender header.
+func (s *Server) buildOutgoing(representing, sender string, req sendRequest) ([]byte, error) {
 	var props mapi.PropertyValues
 	props.Set(mapi.PrMessageClass, "IPM.Note")
-	props.Set(mapi.PrSentRepresentingSmtpAddress, from)
-	props.Set(mapi.PrSentRepresentingEmailAddress, from)
+	props.Set(mapi.PrSentRepresentingSmtpAddress, representing)
+	props.Set(mapi.PrSentRepresentingEmailAddress, representing)
 	props.Set(mapi.PrSentRepresentingAddrType, "SMTP")
+	// Sender identifies the real author; oxcmail emits a Sender header only when
+	// it differs from the representing address (on-behalf), never for a plain send.
+	props.Set(mapi.PrSenderSmtpAddress, sender)
+	props.Set(mapi.PrSenderEmailAddress, sender)
+	props.Set(mapi.PrSenderAddrType, "SMTP")
 	props.Set(mapi.PrSubject, req.Subject)
 	props.Set(mapi.PrClientSubmitTime, mapi.UnixToNTTime(time.Now()))
 	props.Set(mapi.PrInternetMessageID, "<"+randomHex()+"@"+s.hostname+">")
