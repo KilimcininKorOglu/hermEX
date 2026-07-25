@@ -340,7 +340,13 @@
     "attachContactTitle": "Attach a contact",
     "attachContactDesc": "Embed a contact as a .vcf attachment.",
     "contactAttached": "Contact attached",
-    "noContacts": "No contacts"
+    "noContacts": "No contacts",
+    "attachItem": "Attach appointment, task, or note",
+    "attachItemDesc": "Embed the selected item as an attachment.",
+    "attachAppointment": "Attach appointment",
+    "attachTask": "Attach task",
+    "attachNote": "Attach note",
+    "itemAttached": "Item attached"
   },
   "share": {
     "dialogTitle": "Share folder",

@@ -340,7 +340,13 @@
     "attachContactTitle": "Kişi ekle",
     "attachContactDesc": "Kişiyi .vcf eki olarak ekle.",
     "contactAttached": "Kişi eklendi",
-    "noContacts": "Kişi yok"
+    "noContacts": "Kişi yok",
+    "attachItem": "Randevu, görev veya not ekle",
+    "attachItemDesc": "Seçili öğeyi ek olarak göm.",
+    "attachAppointment": "Randevu ekle",
+    "attachTask": "Görev ekle",
+    "attachNote": "Not ekle",
+    "itemAttached": "Öğe eklendi"
   },
   "share": {
     "dialogTitle": "Klasörü paylaş",

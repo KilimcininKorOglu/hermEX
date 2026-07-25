@@ -5,6 +5,9 @@ import {
   Send,
   Save,
   Paperclip,
+  CalendarClock,
+  ListTodo,
+  StickyNote,
   X,
   Plus,
   Bold,
@@ -46,7 +49,8 @@ import {
 } from "@/components/ui/dialog"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
-import api, { SenderIdentity, DiagnosticEntry, Contact as ContactType, MailAttachment, SignatureEntry, TemplateEntry, Mail as MailMessage } from "@/utils/api"
+import api, { SenderIdentity, DiagnosticEntry, Contact as ContactType, MailAttachment, SignatureEntry, TemplateEntry, Mail as MailMessage, CalendarEvent, Task, Note } from "@/utils/api"
+import { taskToVTodo, noteToText, safeItemName } from "@/utils/attachItem"
 import * as smimeStore from "@/utils/smime"
 import { mailOptionsActive } from "@/utils/mailOptions"
 import { useAuth } from "@/contexts/AuthContext"
@@ -196,6 +200,14 @@ export function ComposePage() {
   // Contact picker for "attach item" (embed a contact as a .vcf attachment).
   const [contactPickerOpen, setContactPickerOpen] = useState(false)
   const [contactPickerList, setContactPickerList] = useState<ContactType[]>([])
+  // Attach-item picker: embed an appointment (.ics), task (VTODO .ics), or note
+  // (.txt) as an attachment (reference attachitem).
+  const [itemPickerOpen, setItemPickerOpen] = useState(false)
+  const [itemPickerKind, setItemPickerKind] = useState<"event" | "task" | "note">("event")
+  const [itemPickerLoading, setItemPickerLoading] = useState(false)
+  const [eventList, setEventList] = useState<CalendarEvent[]>([])
+  const [taskList, setTaskList] = useState<Task[]>([])
+  const [noteList, setNoteList] = useState<Note[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   // Free-text recipient inputs (typed email addresses, not just picked contacts)
   const [recipientInput, setRecipientInput] = useState<{ to: string; cc: string; bcc: string }>({ to: "", cc: "", bcc: "" })
@@ -648,6 +660,67 @@ export function ComposePage() {
     } catch {
       toast.error(t("compose.attachFailed"))
     }
+  }
+
+  // openItemPicker loads the chosen item kind (appointment, task, or note) into
+  // the attach-item dialog.
+  const openItemPicker = async (kind: "event" | "task" | "note") => {
+    setItemPickerKind(kind)
+    setItemPickerOpen(true)
+    setItemPickerLoading(true)
+    try {
+      if (kind === "event") {
+        const res = await api.getCalendarEvents()
+        setEventList(res.events ?? [])
+      } else if (kind === "task") {
+        const res = await api.getTasks()
+        setTaskList(res.tasks ?? [])
+      } else {
+        const res = await api.getNotes()
+        setNoteList(res.notes ?? [])
+      }
+    } catch {
+      setEventList([])
+      setTaskList([])
+      setNoteList([])
+    } finally {
+      setItemPickerLoading(false)
+    }
+  }
+
+  const pushAttachment = (file: File) => {
+    setAttachments((prev) => [...prev, { id: crypto.randomUUID(), name: file.name, size: file.size, file }])
+  }
+
+  // attachEvent embeds an appointment as an .ics file, fetched from the backend
+  // export (oxcical, faithful to VTIMEZONE and recurrence).
+  const attachEvent = async (ev: CalendarEvent) => {
+    try {
+      const res = await fetch(`/api/v1/calendar/events/${encodeURIComponent(ev.uid)}/ics`, { credentials: "include" })
+      if (!res.ok) throw new Error()
+      const ics = await res.text()
+      pushAttachment(new File([ics], `${safeItemName(ev.summary, "event")}.ics`, { type: "text/calendar" }))
+      setItemPickerOpen(false)
+      toast.success(t("compose.itemAttached"))
+    } catch {
+      toast.error(t("compose.attachFailed"))
+    }
+  }
+
+  // attachTask embeds a task as a VTODO .ics document, serialized client-side.
+  const attachTask = (tk: Task) => {
+    const ics = taskToVTodo(tk)
+    pushAttachment(new File([ics], `${safeItemName(tk.summary, "task")}.ics`, { type: "text/calendar" }))
+    setItemPickerOpen(false)
+    toast.success(t("compose.itemAttached"))
+  }
+
+  // attachNote embeds a note as a plain-text .txt document.
+  const attachNote = (nt: Note) => {
+    const txt = noteToText(nt)
+    pushAttachment(new File([txt], `${safeItemName(nt.title, "note")}.txt`, { type: "text/plain" }))
+    setItemPickerOpen(false)
+    toast.success(t("compose.itemAttached"))
   }
 
   // applyFormat wraps the current selection with markdown-style markers (the
@@ -1583,6 +1656,27 @@ export function ComposePage() {
           >
             <ContactIcon className="h-5 w-5" />
           </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" variant="outline" size="icon" title={t("compose.attachItem")}>
+                <CalendarClock className="h-5 w-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onClick={() => openItemPicker("event")}>
+                <CalendarClock className="mr-2 h-4 w-4" />
+                {t("compose.attachAppointment")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => openItemPicker("task")}>
+                <ListTodo className="mr-2 h-4 w-4" />
+                {t("compose.attachTask")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => openItemPicker("note")}>
+                <StickyNote className="mr-2 h-4 w-4" />
+                {t("compose.attachNote")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Dialog open={msgPickerOpen} onOpenChange={setMsgPickerOpen}>
             <DialogContent className="max-w-lg">
               <DialogHeader>
@@ -1653,6 +1747,77 @@ export function ComposePage() {
                       </li>
                     ))}
                   </ul>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog open={itemPickerOpen} onOpenChange={setItemPickerOpen}>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>
+                  {itemPickerKind === "event"
+                    ? t("compose.attachAppointment")
+                    : itemPickerKind === "task"
+                      ? t("compose.attachTask")
+                      : t("compose.attachNote")}
+                </DialogTitle>
+                <DialogDescription>{t("compose.attachItemDesc")}</DialogDescription>
+              </DialogHeader>
+              <div className="max-h-80 overflow-y-auto">
+                {itemPickerLoading ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">{t("common.loading")}</p>
+                ) : itemPickerKind === "event" ? (
+                  eventList.length === 0 ? (
+                    <p className="py-6 text-center text-sm text-muted-foreground">{t("common.noResults")}</p>
+                  ) : (
+                    eventList.map((ev) => (
+                      <button
+                        key={ev.uid}
+                        type="button"
+                        onClick={() => void attachEvent(ev)}
+                        className="flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-2 text-left hover:bg-accent"
+                      >
+                        <span className="w-full truncate text-sm font-medium">{ev.summary || t("compose.noSubject")}</span>
+                        <span className="w-full truncate text-xs text-muted-foreground">
+                          {ev.start ? new Date(ev.start).toLocaleString() : ""}
+                        </span>
+                      </button>
+                    ))
+                  )
+                ) : itemPickerKind === "task" ? (
+                  taskList.length === 0 ? (
+                    <p className="py-6 text-center text-sm text-muted-foreground">{t("common.noResults")}</p>
+                  ) : (
+                    taskList.map((tk) => (
+                      <button
+                        key={tk.uid}
+                        type="button"
+                        onClick={() => attachTask(tk)}
+                        className="flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-2 text-left hover:bg-accent"
+                      >
+                        <span className="w-full truncate text-sm font-medium">{tk.summary || t("compose.noSubject")}</span>
+                        {tk.due && (
+                          <span className="w-full truncate text-xs text-muted-foreground">
+                            {new Date(tk.due).toLocaleDateString()}
+                          </span>
+                        )}
+                      </button>
+                    ))
+                  )
+                ) : noteList.length === 0 ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">{t("common.noResults")}</p>
+                ) : (
+                  noteList.map((nt) => (
+                    <button
+                      key={nt.id}
+                      type="button"
+                      onClick={() => attachNote(nt)}
+                      className="flex w-full flex-col items-start gap-0.5 rounded-md px-2 py-2 text-left hover:bg-accent"
+                    >
+                      <span className="w-full truncate text-sm font-medium">{nt.title || t("compose.noSubject")}</span>
+                      <span className="w-full truncate text-xs text-muted-foreground">{nt.body}</span>
+                    </button>
+                  ))
                 )}
               </div>
             </DialogContent>
