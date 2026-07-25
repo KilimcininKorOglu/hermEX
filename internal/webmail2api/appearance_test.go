@@ -60,7 +60,7 @@ func TestAppearanceSettingsRoundTrip(t *testing.T) {
 
 	// Put dark theme + Turkish + DMY dates + 12h, plus the unread border toggle,
 	// a basic shortcut mode, and the classic icon set.
-	body := `{"theme":"dark","language":"tr","dateFormat":"dmy","timeFormat":"12","nameDisplay":"lastfirst","showUnreadCounter":true,"unreadBorder":true,"hideWidgetPanel":false,"shortcutMode":"basic","iconSet":"classic"}`
+	body := `{"theme":"dark","language":"tr","dateFormat":"dmy","timeFormat":"12","nameDisplay":"lastfirst","showUnreadCounter":true,"unreadBorder":true,"hideWidgetPanel":false,"shortcutMode":"basic","iconSet":"classic","showItemData":true}`
 	if rec := do(http.MethodPut, "/api/v1/settings/appearance", body); rec.Code != http.StatusOK {
 		t.Fatalf("put: status %d body %s", rec.Code, rec.Body.String())
 	}
@@ -81,6 +81,9 @@ func TestAppearanceSettingsRoundTrip(t *testing.T) {
 	}
 	if got.IconSet != "classic" {
 		t.Errorf("got iconSet = %q, want classic", got.IconSet)
+	}
+	if !got.ShowItemData {
+		t.Errorf("got showItemData = %v, want true", got.ShowItemData)
 	}
 
 	// A bad enum clamps: theme "neon" → system, dateFormat "us" → iso,

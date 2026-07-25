@@ -144,8 +144,11 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
   const [replyOpen, setReplyOpen] = useState(false)
   const [replyBody, setReplyBody] = useState("")
   const [replyBusy, setReplyBusy] = useState(false)
-  // Item data: a dev-only raw property dump (the JSON the API returned).
+  // Item data: a dev-only raw property dump (the JSON the API returned). The
+  // button is hidden unless the "Show item data button" advanced setting is on
+  // (reference default: off).
   const [itemDataOpen, setItemDataOpen] = useState(false)
+  const [showItemData, setShowItemData] = useState(false)
   // Propose-new-time: a dialog where the invitee picks a proposed start/end and
   // emails a METHOD:COUNTER iTIP to the organizer.
   const [proposeOpen, setProposeOpen] = useState(false)
@@ -175,6 +178,10 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
       .catch(() => {})
     api.getPreferences()
       .then((res) => { if (!cancelled) setOmitOriginal(res.preferences?.omitOriginalOnReply === true) })
+      .catch(() => {})
+    // The item-data dev button is gated by an advanced appearance setting.
+    api.getAppearanceSettings()
+      .then((a) => { if (!cancelled) setShowItemData(!!a.showItemData) })
       .catch(() => {})
     return () => { cancelled = true }
   }, [])
@@ -771,14 +778,16 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
               >
                 <Download className="h-5 w-5" />
               </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setItemDataOpen((v) => !v)}
-                title={t("emailDetail.itemData")}
-              >
-                <Braces className="h-5 w-5" />
-              </Button>
+              {showItemData && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setItemDataOpen((v) => !v)}
+                  title={t("emailDetail.itemData")}
+                >
+                  <Braces className="h-5 w-5" />
+                </Button>
+              )}
               <Button
                 variant="ghost"
                 size="icon"
@@ -1164,6 +1173,11 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                   <span className="text-xs font-medium uppercase text-muted-foreground">{t("emailDetail.itemData")}</span>
                   <button type="button" className="text-muted-foreground hover:text-foreground" onClick={() => setItemDataOpen(false)}>×</button>
                 </div>
+                <div className="mb-2 text-xs">
+                  <span className="font-medium">{t("emailDetail.objectId")}:</span>{" "}
+                  <code className="break-all">{email.id}</code>
+                </div>
+                <div className="mb-1 text-xs font-medium">{t("emailDetail.properties")}</div>
                 <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs">{JSON.stringify(email, null, 2)}</pre>
               </div>
             )}

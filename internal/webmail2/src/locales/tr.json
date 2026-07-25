@@ -231,7 +231,9 @@
     "replyPlaceholder": "Yanıtınızı yazın…",
     "replySent": "Yanıt gönderildi",
     "replyFailed": "Yanıt gönderilemedi",
-    "itemData": "Öğe verisi"
+    "itemData": "Öğe verisi",
+    "objectId": "Nesne kimliği",
+    "properties": "Özellikler"
   },
   "compose": {
     "invalidEmail": "Geçerli bir e-posta adresi girin",
@@ -685,6 +687,22 @@
       "title": "Hesap Güvenliği",
       "description": "Parolanızı ve güvenlik ayarlarınızı yönetin",
       "manage": "Hesabı Yönet"
+    },
+    "advanced": {
+      "title": "Gelişmiş",
+      "description": "Geliştirici araçları ve gelişmiş seçenekler",
+      "developerTools": "Geliştirici araçları",
+      "itemData": "Öğe verisi düğmesini göster",
+      "itemDataDescription": "Her mesajda ham öğe verisini (nesne kimliği ve özellikler) gösteren bir düğme göster."
+    },
+    "about": {
+      "title": "Hakkında",
+      "description": "Sürüm ve sistem bilgileri",
+      "application": "Uygulama",
+      "version": "Sürüm",
+      "signedInVia": "Oturum yöntemi",
+      "password": "Parola",
+      "browser": "Tarayıcı"
     },
     "password": {
       "title": "Parola değiştir",

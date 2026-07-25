@@ -239,6 +239,7 @@ export interface AppearanceSettings {
   autoCc: string
   shortcutMode: string // "off" | "basic" | "extended" keyboard-shortcut level
   iconSet: string // "breeze" | "classic" icon style
+  showItemData: boolean // developer tool: show the raw item-data button on a message
 }
 
 export interface Delegation {

@@ -106,6 +106,7 @@ type appearanceSettingsJSON struct {
 	AutoCc            string `json:"autoCc"`        // comma-separated addresses auto-added to Cc on every send
 	ShortcutMode      string `json:"shortcutMode"`  // "off" | "basic" | "extended" keyboard-shortcut level
 	IconSet           string `json:"iconSet"`       // "breeze" | "classic" icon style
+	ShowItemData      bool   `json:"showItemData"`  // developer tool: show the raw item-data button on a message
 }
 
 // readAppearanceSettings loads the display settings from the shared blob,
@@ -185,6 +186,7 @@ func (s *Server) handlePutAppearanceSettings(w http.ResponseWriter, r *http.Requ
 		a.AutoCc = in.AutoCc
 		a.ShortcutMode = in.ShortcutMode
 		a.IconSet = in.IconSet
+		a.ShowItemData = in.ShowItemData
 		clamped := readAppearanceSettings(map[string]json.RawMessage{"webmail2AppearanceSettings": mustJSON(a)})
 		raw, _ := json.Marshal(clamped)
 		m["webmail2AppearanceSettings"] = raw

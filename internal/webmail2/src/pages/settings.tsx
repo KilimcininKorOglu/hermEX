@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
-import { Moon, Sun, Bell, Shield, ShieldCheck, Palette, Keyboard, Mail, Globe, Lock, Plane, Monitor, UserCog, Trash2, Plus, Tag, X, Camera, HardDrive, FileKey, FileText } from "lucide-react"
+import { Moon, Sun, Bell, Shield, ShieldCheck, Palette, Keyboard, Mail, Globe, Lock, Plane, Monitor, UserCog, Trash2, Plus, Tag, X, Camera, HardDrive, FileKey, FileText, Info, Wrench } from "lucide-react"
 import { useTheme } from "@/components/theme-provider"
 import { useAuth } from "@/contexts/AuthContext"
 import { useI18n } from "@/hooks/useI18n"
@@ -27,6 +27,7 @@ import type { CertInfo } from "@/utils/smime"
 import { detectTimeZone, listTimeZones } from "@/utils/timezone"
 import { setShortcutMode, type ShortcutMode } from "@/utils/shortcutMode"
 import { applyIconSet } from "@/utils/iconSet"
+import pkg from "../../package.json"
 import { enablePushNotifications, disablePushNotifications, pushSupported } from "@/utils/push"
 import { RichTextEditor } from "@/components/RichTextEditor"
 
@@ -57,6 +58,23 @@ function formatStorageBytes(n: number): string {
   if (n >= 1024 ** 2) return `${(n / 1024 ** 2).toFixed(1)} MB`
   if (n >= 1024) return `${(n / 1024).toFixed(0)} KB`
   return `${n} B`
+}
+
+// detectBrowser derives a friendly "Name Version" string from the user agent for
+// the About section (mirrors the reference About widget's browser line). Order
+// matters: Edge/Opera/Brave carry "Chrome" in their UA, so they are matched
+// before Chrome, and Chrome before Safari (which every Chromium UA also lists).
+function detectBrowser(): string {
+  const ua = typeof navigator === "undefined" ? "" : navigator.userAgent
+  const pick = (re: RegExp) => ua.match(re)?.[1]
+  let name = "Unknown"
+  let ver = ""
+  if (/Edg\//.test(ua)) { name = "Edge"; ver = pick(/Edg\/(\d+)/) ?? "" }
+  else if (/OPR\//.test(ua)) { name = "Opera"; ver = pick(/OPR\/(\d+)/) ?? "" }
+  else if (/Firefox\//.test(ua)) { name = "Firefox"; ver = pick(/Firefox\/(\d+)/) ?? "" }
+  else if (/Chrome\//.test(ua)) { name = "Chrome"; ver = pick(/Chrome\/(\d+)/) ?? "" }
+  else if (/Version\/.*Safari/.test(ua)) { name = "Safari"; ver = pick(/Version\/(\d+)/) ?? "" }
+  return ver ? `${name} ${ver}` : name
 }
 
 export function SettingsPage() {
@@ -165,6 +183,7 @@ export function SettingsPage() {
     autoCc: "",
     shortcutMode: "extended",
     iconSet: "breeze",
+    showItemData: false,
   })
 
   useEffect(() => {
@@ -210,6 +229,7 @@ export function SettingsPage() {
         autoCc: a.autoCc ?? "",
         shortcutMode: a.shortcutMode ?? "extended",
         iconSet: a.iconSet ?? "breeze",
+        showItemData: a.showItemData ?? false,
       }))
       .catch(() => undefined)
       .catch(() => undefined)
@@ -274,6 +294,7 @@ export function SettingsPage() {
         autoCc: a.autoCc ?? "",
         shortcutMode: a.shortcutMode ?? "extended",
         iconSet: a.iconSet ?? "breeze",
+        showItemData: a.showItemData ?? false,
       })
       setShortcutMode((a.shortcutMode ?? "extended") as ShortcutMode)
       applyIconSet(a.iconSet ?? "breeze")
@@ -2246,6 +2267,44 @@ export function SettingsPage() {
           <Button variant="outline" onClick={() => setPwOpen(true)}>{t("settings.account.manage")}</Button>
         </div>
       </div>
+
+      {/* Advanced: developer tools (reference SettingsAdvancedCategory). */}
+      <SettingSection
+        icon={Wrench}
+        title={t("settings.advanced.title")}
+        description={t("settings.advanced.description")}
+      >
+        <p className="mb-3 text-sm font-medium">{t("settings.advanced.developerTools")}</p>
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="font-medium">{t("settings.advanced.itemData")}</p>
+            <p className="text-sm text-muted-foreground">{t("settings.advanced.itemDataDescription")}</p>
+          </div>
+          <input
+            type="checkbox"
+            checked={appearance.showItemData}
+            onChange={(e) => saveAppearance({ ...appearance, showItemData: e.target.checked })}
+          />
+        </div>
+      </SettingSection>
+
+      {/* About: system information (reference About widget). */}
+      <SettingSection
+        icon={Info}
+        title={t("settings.about.title")}
+        description={t("settings.about.description")}
+      >
+        <dl className="grid grid-cols-[max-content_1fr] gap-x-6 gap-y-2 text-sm">
+          <dt className="font-medium">{t("settings.about.application")}</dt>
+          <dd className="text-muted-foreground">hermEX Webmail</dd>
+          <dt className="font-medium">{t("settings.about.version")}</dt>
+          <dd className="text-muted-foreground">{pkg.version}</dd>
+          <dt className="font-medium">{t("settings.about.signedInVia")}</dt>
+          <dd className="text-muted-foreground">{t("settings.about.password")}</dd>
+          <dt className="font-medium">{t("settings.about.browser")}</dt>
+          <dd className="text-muted-foreground">{detectBrowser()}</dd>
+        </dl>
+      </SettingSection>
 
       <Dialog open={pwOpen} onOpenChange={setPwOpen}>
         <DialogContent>

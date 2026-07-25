@@ -231,7 +231,9 @@
     "replyPlaceholder": "Type your reply…",
     "replySent": "Reply sent",
     "replyFailed": "Reply failed",
-    "itemData": "Item data"
+    "itemData": "Item data",
+    "objectId": "Object ID",
+    "properties": "Properties"
   },
   "compose": {
     "invalidEmail": "Enter a valid email address",
@@ -685,6 +687,22 @@
       "title": "Account Security",
       "description": "Manage your password and security settings",
       "manage": "Manage Account"
+    },
+    "advanced": {
+      "title": "Advanced",
+      "description": "Developer tools and advanced options",
+      "developerTools": "Developer tools",
+      "itemData": "Show item data button",
+      "itemDataDescription": "Show a button on each message that reveals its raw item data (object ID and properties)."
+    },
+    "about": {
+      "title": "About",
+      "description": "Version and system information",
+      "application": "Application",
+      "version": "Version",
+      "signedInVia": "Signed in via",
+      "password": "Password",
+      "browser": "Browser"
     },
     "password": {
       "title": "Change password",
