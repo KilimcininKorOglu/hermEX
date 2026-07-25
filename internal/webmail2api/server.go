@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/authlimit"
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
@@ -36,6 +37,7 @@ type Server struct {
 	secret   []byte
 	dist     http.Handler // serves the built SPA with index.html fallback (nil if unset)
 	secure   bool         // mark the session cookie Secure (served behind HTTPS)
+	limiter  *authlimit.Limiter // failed-login throttle keyed by account
 
 	// Pub serves per-domain public folders; nil disables the feature (the
 	// endpoints then return an empty set). Set by the cmd after NewServer.
@@ -51,7 +53,7 @@ type Server struct {
 // the built SPA served for all non-API routes; secure marks the session cookie
 // Secure (set when the front door is HTTPS).
 func NewServer(auth Authenticator, accounts directory.Accounts, spool *relay.Spool, hostname string, secret []byte, distDir string, secure bool) *Server {
-	s := &Server{auth: auth, accounts: accounts, spool: spool, hostname: hostname, secret: secret, secure: secure}
+	s := &Server{auth: auth, accounts: accounts, spool: spool, hostname: hostname, secret: secret, secure: secure, limiter: authlimit.New(0, 0, 0)}
 	if distDir != "" {
 		s.dist = spaHandler(distDir)
 	}
@@ -361,14 +363,26 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
+	// Throttle online guessing. Keyed by account (lower-cased email), not client
+	// IP: behind the gateway every request carries the same proxy address, so an
+	// IP key would either lock all users out at once or never trip. An account key
+	// blunts credential-stuffing against one mailbox; the short window bounds the
+	// account-lockout nuisance a third party could otherwise inflict.
+	key := strings.ToLower(strings.TrimSpace(req.Email))
+	if !s.limiter.Allowed(key) {
+		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many failed attempts, try again later"})
+		return
+	}
 	// Login admits an account that must change its password so it can reach the
 	// forced-change screen; the per-request gate then confines it to the
 	// remediation allowlist until the change clears the flag.
 	mbox, ok := s.authenticateForChange(req.Email, req.Password)
 	if !ok {
+		s.limiter.Fail(key)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return
 	}
+	s.limiter.Succeed(key)
 	now := time.Now()
 	exp := now.Add(sessionTTL)
 	jti, err := newJTI()
