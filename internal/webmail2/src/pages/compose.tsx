@@ -22,7 +22,7 @@ import {
   ChevronDown,
   Shield,
   Key,
-  Gauge,
+  SlidersHorizontal,
   Contact as ContactIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -40,6 +40,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
@@ -47,6 +48,7 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import api, { SenderIdentity, DiagnosticEntry, Contact as ContactType, MailAttachment, SignatureEntry, TemplateEntry, Mail as MailMessage } from "@/utils/api"
 import * as smimeStore from "@/utils/smime"
+import { mailOptionsActive } from "@/utils/mailOptions"
 import { useAuth } from "@/contexts/AuthContext"
 import { useMailbox } from "@/contexts/MailboxContext"
 import { useI18n } from "@/hooks/useI18n"
@@ -177,6 +179,10 @@ export function ComposePage() {
   const [encryptMessage, setEncryptMessage] = useState(false)
   const [importance, setImportance] = useState<"low" | "normal" | "high">("normal")
   const [sensitivity, setSensitivity] = useState<"normal" | "personal" | "private" | "confidential">("normal")
+  // Mail options dialog gathers importance, sensitivity, and tracking (read +
+  // delivery receipt) in one place (reference MailOptions*). S/MIME sign/encrypt
+  // stay as their own toolbar toggles (not part of the reference MailOptions).
+  const [mailOptionsOpen, setMailOptionsOpen] = useState(false)
   const [attachReminderOpen, setAttachReminderOpen] = useState(false)
   const [subject, setSubject] = useState("")
   const [body, setBody] = useState("")
@@ -1669,25 +1675,13 @@ export function ComposePage() {
           </Dialog>
           <Button
             type="button"
-            variant={requestReadReceipt ? "secondary" : "outline"}
+            variant={mailOptionsActive({ importance, sensitivity, requestReadReceipt, requestDeliveryReceipt }) ? "secondary" : "outline"}
             size="sm"
-            onClick={() => setRequestReadReceipt((v) => !v)}
-            title={t("compose.requestReadReceipt")}
-            aria-pressed={requestReadReceipt}
+            onClick={() => setMailOptionsOpen(true)}
+            title={t("compose.mailOptions")}
           >
-            <Check className={requestReadReceipt ? "mr-1.5 h-4 w-4" : "mr-1.5 h-4 w-4 opacity-40"} />
-            {t("compose.readReceipt")}
-          </Button>
-          <Button
-            type="button"
-            variant={requestDeliveryReceipt ? "secondary" : "outline"}
-            size="sm"
-            onClick={() => setRequestDeliveryReceipt((v) => !v)}
-            title={t("compose.requestDeliveryReceipt")}
-            aria-pressed={requestDeliveryReceipt}
-          >
-            <Check className={requestDeliveryReceipt ? "mr-1.5 h-4 w-4" : "mr-1.5 h-4 w-4 opacity-40"} />
-            {t("compose.deliveryReceipt")}
+            <SlidersHorizontal className="mr-1.5 h-4 w-4" />
+            {t("compose.mailOptions")}
           </Button>
           <Button
             type="button"
@@ -1711,66 +1705,61 @@ export function ComposePage() {
             <Key className={encryptMessage ? "mr-1.5 h-4 w-4" : "mr-1.5 h-4 w-4 opacity-40"} />
             {t("compose.encryptMessage")}
           </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant={importance !== "normal" ? "secondary" : "outline"}
-                size="sm"
-                title={t("compose.messageImportance")}
-              >
-                <Gauge className={importance === "normal" ? "mr-1.5 h-4 w-4 opacity-40" : "mr-1.5 h-4 w-4"} />
-                {importance === "high" ? t("compose.importanceHigh") : importance === "low" ? t("compose.importanceLow") : t("compose.importanceNormal")}
-                <ChevronDown className="ml-1 h-3 w-3 opacity-50" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setImportance("low")}>
-                <span className="mr-2 text-muted-foreground">{t("compose.importanceLow")}</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setImportance("normal")}>
-                <span className="mr-2 text-muted-foreground">{t("compose.importanceNormal")}</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setImportance("high")}>
-                <span className="mr-2 font-medium">{t("compose.importanceHigh")}</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant={sensitivity !== "normal" ? "secondary" : "outline"}
-                size="sm"
-                title={t("compose.messageSensitivity")}
-              >
-                <Shield className={sensitivity === "normal" ? "mr-1.5 h-4 w-4 opacity-40" : "mr-1.5 h-4 w-4"} />
-                {sensitivity === "personal"
-                  ? t("compose.sensitivityPersonal")
-                  : sensitivity === "private"
-                    ? t("compose.sensitivityPrivate")
-                    : sensitivity === "confidential"
-                      ? t("compose.sensitivityConfidential")
-                      : t("compose.sensitivityNormal")}
-                <ChevronDown className="ml-1 h-3 w-3 opacity-50" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => setSensitivity("normal")}>
-                <span className="mr-2 text-muted-foreground">{t("compose.sensitivityNormal")}</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSensitivity("personal")}>
-                <span className="mr-2 text-muted-foreground">{t("compose.sensitivityPersonal")}</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSensitivity("private")}>
-                <span className="mr-2 text-muted-foreground">{t("compose.sensitivityPrivate")}</span>
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setSensitivity("confidential")}>
-                <span className="mr-2 font-medium">{t("compose.sensitivityConfidential")}</span>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
         </div>
+
+        {/* Mail options dialog: importance + sensitivity + tracking, gathered
+            from the former scattered toolbar controls (reference MailOptions*). */}
+        <Dialog open={mailOptionsOpen} onOpenChange={setMailOptionsOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>{t("compose.mailOptions")}</DialogTitle>
+              <DialogDescription>{t("compose.mailOptionsDescription")}</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-4">
+                <label htmlFor="mo-importance" className="text-sm font-medium">{t("compose.messageImportance")}</label>
+                <select
+                  id="mo-importance"
+                  value={importance}
+                  onChange={(e) => setImportance(e.target.value as "low" | "normal" | "high")}
+                  className="w-48 rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="low">{t("compose.importanceLow")}</option>
+                  <option value="normal">{t("compose.importanceNormal")}</option>
+                  <option value="high">{t("compose.importanceHigh")}</option>
+                </select>
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <label htmlFor="mo-sensitivity" className="text-sm font-medium">{t("compose.messageSensitivity")}</label>
+                <select
+                  id="mo-sensitivity"
+                  value={sensitivity}
+                  onChange={(e) => setSensitivity(e.target.value as "normal" | "personal" | "private" | "confidential")}
+                  className="w-48 rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+                >
+                  <option value="normal">{t("compose.sensitivityNormal")}</option>
+                  <option value="personal">{t("compose.sensitivityPersonal")}</option>
+                  <option value="private">{t("compose.sensitivityPrivate")}</option>
+                  <option value="confidential">{t("compose.sensitivityConfidential")}</option>
+                </select>
+              </div>
+              <div>
+                <p className="mb-2 text-sm font-medium">{t("compose.trackingOptions")}</p>
+                <label className="flex items-center gap-2 py-1 text-sm">
+                  <input type="checkbox" checked={requestReadReceipt} onChange={(e) => setRequestReadReceipt(e.target.checked)} />
+                  {t("compose.requestReadReceipt")}
+                </label>
+                <label className="flex items-center gap-2 py-1 text-sm">
+                  <input type="checkbox" checked={requestDeliveryReceipt} onChange={(e) => setRequestDeliveryReceipt(e.target.checked)} />
+                  {t("compose.requestDeliveryReceipt")}
+                </label>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" onClick={() => setMailOptionsOpen(false)}>{t("common.done")}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <kbd className="rounded border px-1.5 py-0.5 text-xs bg-muted">⌘</kbd>
           <span>+</span>
