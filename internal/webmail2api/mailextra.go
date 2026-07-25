@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -415,12 +416,7 @@ func mimeHasAttachment(p *mime.Part) bool {
 	if p.Disposition == "attachment" {
 		return true
 	}
-	for _, c := range p.Children {
-		if mimeHasAttachment(c) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(p.Children, mimeHasAttachment)
 }
 
 // searchFolders is the set of mail folders the search scans.
