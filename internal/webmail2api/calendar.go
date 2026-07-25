@@ -486,6 +486,52 @@ func (s *Server) handleUpdateEvent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, in)
 }
 
+// handleExportEvent streams a single calendar event as an iCalendar (.ics)
+// download, the attach-item-calendar surface: the compose editor embeds it as a
+// text/calendar attachment so a recipient imports the event into their calendar.
+// It reuses oxcical.Export (the canonical CalDAV path), so the bytes a recipient
+// receives are byte-identical to what CalDAV/EAS/EWS see.
+func (s *Server) handleExportEvent(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("uid"), 10, 64)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
+		return
+	}
+	st, _, ok := s.openStore(w, r)
+	if !ok {
+		return
+	}
+	defer st.Close()
+	msg, err := st.OpenMessage(id)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "no such event"})
+		return
+	}
+	ics, err := oxcical.Export(msg, oxcical.Options{Resolver: st.GetNamedPropIDs})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not export"})
+		return
+	}
+	filename := filenameFrom(propString(msg, mapi.PrSubject))
+	if filename == "" {
+		filename = "event"
+	}
+	w.Header().Set("Content-Type", "text/calendar; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`.ics"`)
+	_, _ = w.Write(ics)
+}
+
+// filenameFrom sanitizes a free-form string to a safe filename (alnum + -/_).
+func filenameFrom(name string) string {
+	var b strings.Builder
+	for _, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 func (s *Server) handleDeleteEvent(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("uid"), 10, 64)
 	if err != nil {
