@@ -10,6 +10,7 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
+	"time"
 
 	"hermex/internal/logging"
 )
@@ -66,7 +67,17 @@ func New(addr string, h http.Handler, tlsSrc TLSSource, logger *logging.Logger, 
 		}
 		ln = tls.NewListener(ln, tc)
 	}
-	return &Server{httpSrv: &http.Server{Handler: logMiddleware(h, logger, subsystem)}, ln: ln}, nil
+	// ReadHeaderTimeout bounds the slow-client (slowloris) window without
+	// touching the body or response phases, and IdleTimeout reaps dead
+	// keep-alive connections. WriteTimeout and ReadTimeout are deliberately
+	// left unset: this server also carries the long-poll consumers (EWS
+	// streaming, EAS Ping, MAPI/HTTP async, notify SSE), which hold a single
+	// request open far longer than any fixed write deadline would allow.
+	return &Server{httpSrv: &http.Server{
+		Handler:           logMiddleware(h, logger, subsystem),
+		ReadHeaderTimeout: 30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}, ln: ln}, nil
 }
 
 // tlsVersionName renders a TLS version constant as a human-readable number for the
