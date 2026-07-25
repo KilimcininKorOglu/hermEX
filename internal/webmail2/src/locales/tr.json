@@ -366,10 +366,31 @@
     "fetchFailed": "Paylaşım ayarları yüklenemedi",
     "grantRemoved": "Erişim kaldırıldı",
     "close": "Kapat",
-    "level": {
-      "reviewer": "İnceleyici (okuma)",
-      "author": "Yazar (okuma+yazma)",
-      "editor": "Editör (tam)"
+    "profileLabel": "İzin düzeyi",
+    "customRights": "Özel izinler",
+    "applyRecursive": "Tüm alt klasörlere uygula",
+    "profile": {
+      "owner": "Sahip",
+      "publishingEditor": "Yayımlayan Düzenleyici",
+      "editor": "Düzenleyici",
+      "publishingAuthor": "Yayımlayan Yazar",
+      "author": "Yazar",
+      "noneditingAuthor": "Düzenlemeyen Yazar",
+      "reviewer": "Gözden Geçiren",
+      "contributor": "Katkıda Bulunan",
+      "none": "Yok",
+      "custom": "Özel"
+    },
+    "right": {
+      "ReadAny": "Öğeleri oku",
+      "Create": "Öğe oluştur",
+      "EditOwned": "Kendi öğelerini düzenle",
+      "EditAny": "Tüm öğeleri düzenle",
+      "DeleteOwned": "Kendi öğelerini sil",
+      "DeleteAny": "Tüm öğeleri sil",
+      "CreateSubfolder": "Alt klasör oluştur",
+      "Owner": "Klasör sahibi",
+      "Visible": "Klasör görünür"
     }
   },
   "settings": {

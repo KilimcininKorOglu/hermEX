@@ -9,42 +9,34 @@ import (
 	"hermex/internal/objectstore"
 )
 
-// aclLetters renders mapi folder rights as an RFC 4314-style letters string the
-// SPA shows (l=lookup, r=read, s=seen, i=insert, w=write, d=delete, a=admin).
-func aclLetters(r uint32) string {
-	var b strings.Builder
-	if r&mapi.FrightsVisible != 0 {
-		b.WriteByte('l')
-	}
-	if r&mapi.FrightsReadAny != 0 {
-		b.WriteString("rs")
-	}
-	if r&mapi.FrightsCreate != 0 {
-		b.WriteByte('i')
-	}
-	if r&(mapi.FrightsEditAny|mapi.FrightsEditOwned) != 0 {
-		b.WriteByte('w')
-	}
-	if r&(mapi.FrightsDeleteAny|mapi.FrightsDeleteOwned) != 0 {
-		b.WriteByte('d')
-	}
-	if r&mapi.FrightsOwner != 0 {
-		b.WriteByte('a')
-	}
-	return b.String()
+// aclSanitizeRights masks a client-supplied MS-OXCPERM Frights bitfield down to
+// the rights a client may set over the wire (RightsMaxROP), dropping any reserved
+// or reference-private bit before storage — the same ingest allowlist
+// ModifyPermissions enforces. The SPA sends the exact Frights union of the chosen
+// permission level (or a custom per-right combination), so the stored bitmask
+// round-trips back to the named level on read.
+func aclSanitizeRights(rights uint32) uint32 {
+	return rights & mapi.RightsMaxROP
 }
 
-// aclRightsToFrights maps the SPA's RFC 4314 permission-level numbers (reviewer=3,
-// author=27, editor=239) to the matching mapi folder-rights preset.
-func aclRightsToFrights(n int) uint32 {
-	switch {
-	case n >= 239:
-		return mapi.RightsEditor
-	case n >= 27:
-		return mapi.RightsAuthor
-	default:
-		return mapi.RightsReviewer
+// folderDescendants returns the ids of every folder nested under root (children,
+// grandchildren, and so on), not including root itself, for a recursive grant.
+func folderDescendants(folders []objectstore.FolderInfo, root int64) []int64 {
+	children := map[int64][]int64{}
+	for _, f := range folders {
+		if f.ParentID != nil {
+			children[*f.ParentID] = append(children[*f.ParentID], f.ID)
+		}
 	}
+	var out []int64
+	queue := append([]int64(nil), children[root]...)
+	for len(queue) > 0 {
+		id := queue[0]
+		queue = queue[1:]
+		out = append(out, id)
+		queue = append(queue, children[id]...)
+	}
+	return out
 }
 
 // aclStore opens the mailbox for a folder-ACL request. Self-service folder sharing
@@ -98,7 +90,7 @@ func (s *Server) handleGetACL(w http.ResponseWriter, r *http.Request) {
 		if e.MemberID <= 0 { // skip the default/anonymous rows
 			continue
 		}
-		acl = append(acl, map[string]any{"Grantee": e.Name, "Rights": aclLetters(e.Rights)})
+		acl = append(acl, map[string]any{"Grantee": e.Name, "Rights": e.Rights})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"owner": c.Email, "mailbox": r.PathValue("mailbox"), "acl": acl})
 }
@@ -110,8 +102,9 @@ func (s *Server) handleSetACL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Grantee string `json:"grantee"`
-		Rights  int    `json:"rights"`
+		Grantee   string `json:"grantee"`
+		Rights    uint32 `json:"rights"` // MS-OXCPERM Frights bitfield
+		Recursive bool   `json:"recursive"`
 	}
 	if err := decodeJSON(r, &body); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
@@ -146,10 +139,20 @@ func (s *Server) handleSetACL(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "you already own this folder"})
 		return
 	}
-	change := []objectstore.PermissionChange{{Op: objectstore.PermAdd, Username: login, Rights: aclRightsToFrights(body.Rights)}}
+	change := []objectstore.PermissionChange{{Op: objectstore.PermAdd, Username: login, Rights: aclSanitizeRights(body.Rights)}}
 	if err := st.ModifyPermissions(fid, false, change); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not grant access"})
 		return
+	}
+	// When recursive, copy the same grant to every subfolder ([MS-OXCPERM] apply
+	// permissions recursively); a subfolder that fails to take the grant is
+	// skipped rather than failing the whole operation.
+	if body.Recursive {
+		if folders, err := st.ListFolders(); err == nil {
+			for _, sub := range folderDescendants(folders, fid) {
+				st.ModifyPermissions(sub, false, change)
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }

@@ -277,30 +277,75 @@ export interface DelegationInput {
   canSendOnBehalf?: boolean
 }
 
-// ACL entry for folder sharing (RFC 4314)
+// ACL entry for folder sharing. Rights is the raw MS-OXCPERM PidTagMemberRights
+// (Frights) bitfield the server stores, carried verbatim so a stored grant
+// round-trips back to its named profile without a lossy letters conversion.
 export interface ACLEntry {
   Grantee: string
-  Rights: string // human-readable string from server, e.g. "lrs"
+  Rights: number
 }
 
-// Folder permission levels mapped to RFC 4314 bitmasks (matching backend preset constants)
-export const FOLDER_PERMISSION_LEVELS = [
-  { label: "Reviewer (read)", value: "reviewer", rights: 3 },    // ACLLookup | ACLRead
-  { label: "Author (read+write)", value: "author", rights: 27 }, // ACLLookup|ACLRead|ACLSeen|ACLWrite|ACLDelete
-  { label: "Editor (full)", value: "editor", rights: 239 },       // ACLAll
+// MS-OXCPERM Frights bits ([MS-OXCPERM] 2.2.7), matching internal/mapi/permission.go.
+export const FRIGHTS = {
+  ReadAny: 0x0001,
+  Create: 0x0002,
+  EditOwned: 0x0008,
+  DeleteOwned: 0x0010,
+  EditAny: 0x0020,
+  DeleteAny: 0x0040,
+  CreateSubfolder: 0x0080,
+  Owner: 0x0100,
+  Contact: 0x0200,
+  Visible: 0x0400,
+  FreeBusySimple: 0x0800,
+  FreeBusyDetailed: 0x1000,
+} as const
+
+// The individual rights the permission grid exposes as checkboxes, in the order
+// Outlook shows them. Free/busy and contact bits are folded into the named
+// profiles rather than toggled here.
+export const FOLDER_RIGHTS = [
+  { key: "ReadAny", bit: FRIGHTS.ReadAny },
+  { key: "Create", bit: FRIGHTS.Create },
+  { key: "EditOwned", bit: FRIGHTS.EditOwned },
+  { key: "EditAny", bit: FRIGHTS.EditAny },
+  { key: "DeleteOwned", bit: FRIGHTS.DeleteOwned },
+  { key: "DeleteAny", bit: FRIGHTS.DeleteAny },
+  { key: "CreateSubfolder", bit: FRIGHTS.CreateSubfolder },
+  { key: "Owner", bit: FRIGHTS.Owner },
+  { key: "Visible", bit: FRIGHTS.Visible },
 ] as const
 
-export type FolderPermissionLevel = "reviewer" | "author" | "editor"
+export type FolderRightKey = typeof FOLDER_RIGHTS[number]["key"]
 
-export function rightsToLevel(rights: number): FolderPermissionLevel {
-  if (rights >= 239) return "editor"
-  if (rights >= 27) return "author"
-  return "reviewer"
+// The canonical Outlook permission profiles ([MS-OXCPERM] role table), each a
+// fixed union of Frights bits identical to the mapi.Rights* presets. A stored
+// grant matching none of these reads as "custom".
+const R = FRIGHTS
+export const FOLDER_PROFILES = [
+  { value: "owner", rights: R.ReadAny | R.Create | R.EditOwned | R.DeleteOwned | R.EditAny | R.DeleteAny | R.CreateSubfolder | R.Owner | R.Visible },
+  { value: "publishingEditor", rights: R.ReadAny | R.Visible | R.Create | R.DeleteOwned | R.EditOwned | R.EditAny | R.DeleteAny | R.CreateSubfolder },
+  { value: "editor", rights: R.ReadAny | R.Visible | R.Create | R.DeleteOwned | R.EditOwned | R.EditAny | R.DeleteAny },
+  { value: "publishingAuthor", rights: R.ReadAny | R.Visible | R.Create | R.DeleteOwned | R.EditOwned | R.CreateSubfolder },
+  { value: "author", rights: R.ReadAny | R.Visible | R.Create | R.DeleteOwned | R.EditOwned },
+  { value: "noneditingAuthor", rights: R.ReadAny | R.Visible | R.Create | R.DeleteOwned },
+  { value: "reviewer", rights: R.ReadAny | R.Visible },
+  { value: "contributor", rights: R.Visible | R.Create },
+  { value: "none", rights: 0 },
+] as const
+
+export type FolderProfile = typeof FOLDER_PROFILES[number]["value"] | "custom"
+
+// rightsToProfile names the profile whose bitmask exactly matches, else "custom".
+export function rightsToProfile(rights: number): FolderProfile {
+  const found = FOLDER_PROFILES.find(p => p.rights === rights)
+  return found?.value ?? "custom"
 }
 
-export function levelToRights(level: FolderPermissionLevel): number {
-  const found = FOLDER_PERMISSION_LEVELS.find(l => l.value === level)
-  return found?.rights ?? 3
+// profileToRights resolves a named profile to its Frights bitmask ("custom"
+// keeps the caller's current bits, so it returns undefined here).
+export function profileToRights(profile: FolderProfile): number | undefined {
+  return FOLDER_PROFILES.find(p => p.value === profile)?.rights
 }
 
 export interface SMIMECertInfo {
@@ -1294,8 +1339,8 @@ class API {
     return this.get(`/mailboxes/${encodeURIComponent(owner)}/${encodeURIComponent(mailbox)}/acl`)
   }
 
-  async setACL(owner: string, mailbox: string, grantee: string, rights: number): Promise<{ success: boolean }> {
-    return this.post(`/mailboxes/${encodeURIComponent(owner)}/${encodeURIComponent(mailbox)}/acl`, { grantee, rights })
+  async setACL(owner: string, mailbox: string, grantee: string, rights: number, recursive = false): Promise<{ success: boolean }> {
+    return this.post(`/mailboxes/${encodeURIComponent(owner)}/${encodeURIComponent(mailbox)}/acl`, { grantee, rights, recursive })
   }
 
   async deleteACL(owner: string, mailbox: string, grantee: string): Promise<{ success: boolean }> {

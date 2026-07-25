@@ -366,10 +366,31 @@
     "fetchFailed": "Failed to load sharing settings",
     "grantRemoved": "Access revoked",
     "close": "Close",
-    "level": {
-      "reviewer": "Reviewer (read)",
-      "author": "Author (read+write)",
-      "editor": "Editor (full)"
+    "profileLabel": "Permission level",
+    "customRights": "Custom permissions",
+    "applyRecursive": "Apply to all subfolders",
+    "profile": {
+      "owner": "Owner",
+      "publishingEditor": "Publishing Editor",
+      "editor": "Editor",
+      "publishingAuthor": "Publishing Author",
+      "author": "Author",
+      "noneditingAuthor": "Nonediting Author",
+      "reviewer": "Reviewer",
+      "contributor": "Contributor",
+      "none": "None",
+      "custom": "Custom"
+    },
+    "right": {
+      "ReadAny": "Read items",
+      "Create": "Create items",
+      "EditOwned": "Edit own items",
+      "EditAny": "Edit all items",
+      "DeleteOwned": "Delete own items",
+      "DeleteAny": "Delete all items",
+      "CreateSubfolder": "Create subfolders",
+      "Owner": "Folder owner",
+      "Visible": "Folder visible"
     }
   },
   "settings": {

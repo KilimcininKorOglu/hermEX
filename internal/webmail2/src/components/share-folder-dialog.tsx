@@ -21,7 +21,17 @@ import {
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
-import api, { ACLEntry, FOLDER_PERMISSION_LEVELS, rightsToLevel, levelToRights, FolderPermissionLevel } from "@/utils/api"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
+import api, {
+  ACLEntry,
+  FOLDER_PROFILES,
+  FOLDER_RIGHTS,
+  FolderProfile,
+  rightsToProfile,
+  profileToRights,
+} from "@/utils/api"
 
 interface ShareFolderDialogProps {
   open: boolean
@@ -30,7 +40,7 @@ interface ShareFolderDialogProps {
   folderName: string
   /** Display label shown in the dialog title */
   folderLabel: string
-  /** Owner's email — for a personal folder, the logged-in user; for a shared folder, the mailbox owner */
+  /** Owner's email — logged-in user for a personal folder, else the mailbox owner */
   owner: string
   /** Whether the current user is the folder owner (can manage ACL) */
   isOwner: boolean
@@ -49,11 +59,13 @@ export function ShareFolderDialog({
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
 
-  // New grant form
+  // New grant form: grantee, the raw Frights bitmask, and whether to cascade.
   const [newGrantee, setNewGrantee] = useState("")
-  const [newLevel, setNewLevel] = useState<FolderPermissionLevel>("reviewer")
+  const [rights, setRights] = useState<number>(profileToRights("reviewer")!)
+  const [recursive, setRecursive] = useState(false)
 
-  // Fetch ACL when dialog opens
+  const profile = rightsToProfile(rights)
+
   useEffect(() => {
     if (!open || !owner || !folderName) return
     setLoading(true)
@@ -63,16 +75,27 @@ export function ShareFolderDialog({
       .finally(() => setLoading(false))
   }, [open, owner, folderName, t])
 
+  // Selecting a named profile snaps the bitmask to its preset; "custom" is only
+  // ever a display state, so it leaves the current bits untouched.
+  const handleProfileChange = (value: string) => {
+    const preset = profileToRights(value as FolderProfile)
+    if (preset !== undefined) setRights(preset)
+  }
+
+  const toggleRight = (bit: number, on: boolean) => {
+    setRights((prev) => (on ? prev | bit : prev & ~bit))
+  }
+
   const handleAddGrant = async () => {
     if (!newGrantee.trim()) return
     setSaving(true)
     try {
-      const rights = levelToRights(newLevel)
-      await api.setACL(owner, folderName, newGrantee.trim().toLowerCase(), rights)
+      await api.setACL(owner, folderName, newGrantee.trim().toLowerCase(), rights, recursive)
       const data = await api.getACL(owner, folderName)
       setGrants(data.acl || [])
       setNewGrantee("")
-      setNewLevel("reviewer")
+      setRights(profileToRights("reviewer")!)
+      setRecursive(false)
       toast.success(t("share.grantAdded"))
     } catch {
       toast.error(t("share.grantFailed"))
@@ -94,13 +117,6 @@ export function ShareFolderDialog({
     }
   }
 
-  const grantLevel = (rights: string) => {
-    // Server returns a human-readable string; try to map it.
-    // ACLRights.String() returns e.g. "lrs" — we approximate the level.
-    const num = rightsToNumber(rights)
-    return rightsToLevel(num)
-  }
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
@@ -112,7 +128,6 @@ export function ShareFolderDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-2">
-          {/* Existing grants */}
           {loading ? (
             <div className="flex justify-center py-4">
               <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
@@ -120,33 +135,30 @@ export function ShareFolderDialog({
           ) : grants.length > 0 ? (
             <div className="space-y-2">
               <p className="text-sm font-medium">{t("share.currentGrants")}</p>
-              {grants.map((grant) => {
-                const level = grantLevel(grant.Rights)
-                return (
-                  <div
-                    key={grant.Grantee}
-                    className="flex items-center justify-between rounded-md border px-3 py-2"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium">{grant.Grantee}</span>
-                      <Badge variant="secondary" className="text-xs">
-                        {t(`share.level.${level}`)}
-                      </Badge>
-                    </div>
-                    {isOwner && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => handleRemoveGrant(grant.Grantee)}
-                        disabled={saving}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    )}
+              {grants.map((grant) => (
+                <div
+                  key={grant.Grantee}
+                  className="flex items-center justify-between rounded-md border px-3 py-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium">{grant.Grantee}</span>
+                    <Badge variant="secondary" className="text-xs">
+                      {t(`share.profile.${rightsToProfile(grant.Rights)}`)}
+                    </Badge>
                   </div>
-                )
-              })}
+                  {isOwner && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => handleRemoveGrant(grant.Grantee)}
+                      disabled={saving}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              ))}
               <Separator />
             </div>
           ) : (
@@ -155,41 +167,82 @@ export function ShareFolderDialog({
             )
           )}
 
-          {/* Add new grant */}
           {isOwner && (
-            <div className="space-y-2">
+            <div className="space-y-3">
               <p className="text-sm font-medium">{t("share.addGrant")}</p>
-              <div className="flex gap-2">
-                <Input
-                  type="email"
-                  placeholder={t("share.granteePlaceholder")}
-                  value={newGrantee}
-                  onChange={(e) => setNewGrantee(e.target.value)}
-                  className="flex-1"
-                />
-                <Select
-                  value={newLevel}
-                  onValueChange={(v) => setNewLevel(v as FolderPermissionLevel)}
-                >
-                  <SelectTrigger className="w-44">
+              <Input
+                type="email"
+                placeholder={t("share.granteePlaceholder")}
+                value={newGrantee}
+                onChange={(e) => setNewGrantee(e.target.value)}
+              />
+
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">
+                  {t("share.profileLabel")}
+                </Label>
+                <Select value={profile} onValueChange={handleProfileChange}>
+                  <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {FOLDER_PERMISSION_LEVELS.map((lvl) => (
-                      <SelectItem key={lvl.value} value={lvl.value}>
-                        {t(`share.level.${lvl.value}` as any)}
+                    {FOLDER_PROFILES.map((p) => (
+                      <SelectItem key={p.value} value={p.value}>
+                        {t(`share.profile.${p.value}`)}
                       </SelectItem>
                     ))}
+                    {profile === "custom" && (
+                      <SelectItem value="custom">
+                        {t("share.profile.custom")}
+                      </SelectItem>
+                    )}
                   </SelectContent>
                 </Select>
-                <Button onClick={handleAddGrant} disabled={saving || !newGrantee.trim()}>
-                  {saving ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <UserPlus className="h-4 w-4" />
-                  )}
-                </Button>
               </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs text-muted-foreground">
+                  {t("share.customRights")}
+                </Label>
+                <div className="grid grid-cols-2 gap-2 rounded-md border p-3">
+                  {FOLDER_RIGHTS.map((r) => (
+                    <label
+                      key={r.key}
+                      className="flex items-center gap-2 text-sm"
+                    >
+                      <Checkbox
+                        checked={(rights & r.bit) !== 0}
+                        onCheckedChange={(c) => toggleRight(r.bit, c === true)}
+                      />
+                      {t(`share.right.${r.key}`)}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <Label htmlFor="acl-recursive" className="text-sm">
+                  {t("share.applyRecursive")}
+                </Label>
+                <Switch
+                  id="acl-recursive"
+                  checked={recursive}
+                  onCheckedChange={setRecursive}
+                />
+              </div>
+
+              <Button
+                onClick={handleAddGrant}
+                disabled={saving || !newGrantee.trim()}
+                className="w-full"
+              >
+                {saving ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <UserPlus className="mr-2 h-4 w-4" />
+                )}
+                {t("share.addGrant")}
+              </Button>
             </div>
           )}
         </div>
@@ -202,25 +255,4 @@ export function ShareFolderDialog({
       </DialogContent>
     </Dialog>
   )
-}
-
-// Convert human-readable rights string to approximate number for level detection
-function rightsToNumber(rights: string): number {
-  if (!rights) return 0
-  let n = 0
-  for (const c of rights.toLowerCase()) {
-    switch (c) {
-      case "l": n |= 1; break   // ACLLookup
-      case "r": n |= 2; break   // ACLRead
-      case "s": n |= 4; break   // ACLSeen
-      case "w": n |= 8; break   // ACLWrite
-      case "i": n |= 16; break  // ACLWriteSeen (ir)
-      case "d": n |= 32; break  // ACLDelete
-      case "e": n |= 64; break  // ACLExpunge
-      case "c": n |= 128; break // ACLCreate
-      case "t": n |= 7; break   // ACLAll ("t" from "tecda" — approximated)
-      case "a": n |= 239; break // ACLAll
-    }
-  }
-  return n
 }
