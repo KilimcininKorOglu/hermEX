@@ -1348,12 +1348,21 @@ class API {
   }
 
   // Sender identities for compose
+  // getIdentities returns the caller's own send-as addresses (primary + aliases),
+  // each authorized by the send gate without a delegation grant.
+  async getIdentities(): Promise<string[]> {
+    const res = await this.get<{ identities?: string[] }>('/identities')
+    return res.identities || []
+  }
+
   async getSenderIdentities(personalEmail: string): Promise<SenderIdentity[]> {
-    const [sharedResult] = await Promise.all([
-      this.getSharedMailboxes()
+    const [sharedResult, ownAddrs] = await Promise.all([
+      this.getSharedMailboxes(),
+      this.getIdentities().catch(() => [] as string[]),
     ])
 
     const identities: SenderIdentity[] = []
+    const seen = new Set<string>()
 
     // Add personal identity (user's own mailbox)
     identities.push({
@@ -1362,12 +1371,30 @@ class API {
       type: 'personal',
       canSend: true
     })
+    seen.add(personalEmail.toLowerCase())
+
+    // Add the caller's own aliases as send-as identities (General send-as). The
+    // backend authorizes these directly, so they need no delegation grant.
+    for (const addr of ownAddrs) {
+      const key = addr.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      identities.push({
+        email: addr,
+        displayName: addr,
+        type: 'send-as',
+        canSend: true,
+      })
+    }
 
     // Add identities from shared mailboxes
     if (sharedResult.shared_mailboxes) {
       for (const mb of sharedResult.shared_mailboxes) {
         // User has access to this shared mailbox
         // They can send on behalf of the owner if they have write rights
+        const key = mb.owner.toLowerCase()
+        if (seen.has(key)) continue
+        seen.add(key)
         identities.push({
           email: mb.owner,
           displayName: `${mb.mailbox} (${mb.owner})`,

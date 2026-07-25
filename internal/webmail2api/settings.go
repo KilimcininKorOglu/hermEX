@@ -890,3 +890,30 @@ func (s *Server) handleGetSharedAsOwner(w http.ResponseWriter, r *http.Request) 
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"shared_as_owner": owned})
 }
+
+// handleGetIdentities returns the send-as addresses the caller owns directly: the
+// primary login plus every alias/altname the directory binds to it. These are the
+// "General send-as" identities the compose picker offers beyond shared mailboxes,
+// and each is one the send gate (resolveSender) authorizes without a grant. The
+// list always includes the caller, so a directory that cannot enumerate aliases
+// still yields a usable (self-only) result rather than an empty one.
+func (s *Server) handleGetIdentities(w http.ResponseWriter, r *http.Request) {
+	c, ok := s.session(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	addrs := []string{c.Email}
+	if id, isID := s.accounts.(directory.Identifier); isID {
+		if list, err := id.Identities(c.Email); err == nil {
+			for _, a := range list {
+				a = strings.TrimSpace(a)
+				if a == "" || strings.EqualFold(a, c.Email) {
+					continue
+				}
+				addrs = append(addrs, a)
+			}
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"identities": addrs})
+}

@@ -1,6 +1,7 @@
 package webmail2api
 
 import (
+	"strings"
 	"testing"
 
 	"hermex/internal/directory"
@@ -89,13 +90,13 @@ func TestBuildOutgoingOnBehalfHeaders(t *testing.T) {
 
 // headerValue returns the first value of a top-level RFC 5322 header, or "".
 func headerValue(raw, name string) string {
-	for _, line := range splitLines(raw) {
+	prefix := name + ":"
+	for line := range strings.SplitSeq(raw, "\r\n") {
 		if line == "" {
 			break // end of headers
 		}
-		if len(line) > len(name)+1 && line[len(name)] == ':' &&
-			equalFoldASCII(line[:len(name)], name) {
-			return line[len(name)+1:]
+		if len(line) >= len(prefix) && strings.EqualFold(line[:len(prefix)], prefix) {
+			return strings.TrimSpace(line[len(prefix):])
 		}
 	}
 	return ""
