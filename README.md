@@ -32,20 +32,27 @@ property tables + content-addressed CID files). Each mailbox is a directory
 holding `objects.sqlite3` + `imapindex.sqlite3` + `cid/` + `eml/`.
 
 A single TLS front door (`cmd/gateway`) reverse-proxies every HTTP-based
-protocol (`/ews`, `/Microsoft-Server-ActiveSync`, `/mapi/*`, `/rpc`, `/dav`) and
-serves the webmail SPA at `/`, so the whole stack is reachable behind one FQDN.
+protocol by longest-prefix match (`/autodiscover`, `/ews`,
+`/Microsoft-Server-ActiveSync`, `/mapi/*`, `/rpc`, `/dav`, `/.well-known/{cal,card}dav`)
+and serves the webmail SPA at the catch-all `/`, so the whole stack is reachable
+behind one FQDN. It terminates TLS from a per-SNI certificate store with
+optional ACME issuance (`internal/tlscert`).
 
 ### Components
 
 | Layer             | Packages                                                                                                                                         |
 |-------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
 | MAPI core         | `internal/mapi` (property model), `internal/ext` (MS-wire serialization), `internal/ndr` (RPC NDR), `internal/lzxpress` (ROP buffer compression) |
-| Mailbox store     | `internal/objectstore` (sole store), `internal/ics` (IDSET/GLOBSET sync codec)                                                                   |
-| Format conversion | `internal/oxcmail` (MIME ↔ MAPI), `internal/oxcical` (iCalendar), `internal/oxvcard` (vCard), `internal/mime`, `internal/smime`                  |
-| Protocol servers  | `internal/{smtp,imap,pop3,dav,activesync,ews,mapihttp,nspi,rop}`                                                                                 |
-| Mail flow         | `internal/mta` (delivery), `internal/relay` (outbound spool), `internal/antispam`, `internal/dkimsign`, `internal/mtasts`                        |
+| Mailbox store     | `internal/objectstore` (sole store), `internal/ics` (IDSET/GLOBSET sync codec), `internal/publicfolder` (public store)                           |
+| Format conversion | `internal/oxcmail` (MIME ↔ MAPI), `internal/oxcical` (iCalendar), `internal/oxvcard` (vCard), `internal/oxtask` (tasks), `internal/recurrence`, `internal/mime`, `internal/smime` |
+| Protocol servers  | `internal/{smtp,imap,pop3,dav,activesync,ews,mapihttp,nspi,rop}`, `internal/{rpchttp,wbxml}` (transport codecs), `internal/easpolicy`            |
+| Mail flow         | `internal/mta` (delivery), `internal/relay` + `internal/spooler` (outbound), `internal/meeting`, `internal/fetchmail`                            |
+| Filtering         | `internal/antispam` (SPF/DKIM/DMARC + Bayes + rules), `internal/antivirus` (clamd), `internal/quarantine`                                        |
+| Security & TLS    | `internal/dkimsign`, `internal/mtasts`, `internal/dane`, `internal/tlsrpt`, `internal/tlscert` (per-SNI cert store + ACME)                       |
 | Directory & auth  | `internal/directory` (MariaDB-backed), `internal/ldapauth` + `internal/ldapsync` (AD/LDAP sync)                                                  |
-| Web & admin       | `internal/webmail2` (React SPA) + `internal/webmail2api`, `internal/admin` (operator panel)                                                      |
+| Notifications     | `internal/notify` (publisher/consumer) + `internal/notifyd` (SSE relay), a wake bus for IDLE/Ping/streaming across daemons                       |
+| Platform          | `internal/config`, `internal/serve` (HTTP daemon base), `internal/lifecycle` (graceful shutdown), `internal/logging` (Mongo sink), `internal/health`, `internal/migrate` (schema runner) |
+| Web & admin       | `internal/webmail2` (React SPA) + `internal/webmail2api`, `internal/admin` (operator panel), `internal/gateway` (single-FQDN front door)         |
 
 ## Development
 
@@ -54,7 +61,7 @@ wraps `docker compose` and runs the toolchain in the dev container (the host Go
 toolchain has no MariaDB, so DB-backed tests skip and silently hide failures).
 
 ```sh
-make up                                   # start dev env (MariaDB + Mongo + toolchain + all services)
+make up                                   # start dev env (MariaDB + Mongo + ClamAV + toolchain + all services)
 make build                                # compile every binary into bin/
 make gate                                 # fmt-check + vet + full test, the pre-commit gate
 make test PKG=./internal/objectstore      # one package
@@ -101,9 +108,13 @@ npm test             # vitest
 | Gateway (TLS) | 8149 | 8080      |
 | Webmail2      | 8150 | 8080      |
 
-Mongo (the log sink) has no host port. `cmd/admin serve` (the operator panel) is
-not in the default compose; run it manually. It listens on `:8081` and requires
-`admin_secret`.
+Three services are internal-only and expose no host port: **Mongo** (the log
+sink), **ClamAV** (`clamav:3310`, the antivirus engine), and **notify** (the
+SSE push relay). Nothing `depends_on` them, so the mail path comes up and serves
+even when any of them is down.
+
+`cmd/admin serve` (the operator panel) is not in the default compose; run it
+manually. It listens on `:8081` (config `admin_addr`) and requires `admin_secret`.
 
 ### Key facts
 
@@ -112,14 +123,16 @@ not in the default compose; run it manually. It listens on `:8081` and requires
 - **Auth & accounts:** `internal/directory` backed by MariaDB. Config JSON holds infrastructure only (DB DSN, hostname, data_dir), never accounts or credentials.
 - **Mail construction:** `internal/oxcmail.Export()` is the single path from a MAPI object to MIME bytes; outgoing mail is never hand-rolled.
 - **Inbound filtering:** delivery scores each message through `internal/antispam` (SPF/DKIM/DMARC auth + a Bayes classifier + rules), then narrows the verdict by operator and recipient allow-block tiers.
+- **Antivirus:** delivery streams each message to ClamAV (`internal/antivirus`); a hit is quarantined (`internal/quarantine`) and the recipient plus domain admins are notified. The scan fails open, so a down clamd never blocks mail.
+- **Push:** `internal/notify` + `cmd/notify` are a self-standing SSE wake bus. Long-poll consumers (MAPI/HTTP async, EWS streaming, IMAP IDLE, EAS Ping, DAV push) wake on a mailbox change; a down relay silently drops every consumer back to polling.
 - **Logging:** a self-healing MongoDB sink. If Mongo is down, events spill to disk and replay on reconnect, and the mail path never hard-depends on it.
 
 ## Layout
 
 | Path        | Purpose                                                                                                                                        |
 |-------------|------------------------------------------------------------------------------------------------------------------------------------------------|
-| `cmd/`      | Service executables (mta, imap, pop3, webmail2, dav, activesync, ews, mapihttp, gateway, admin, fetchmail, antispam-bootstrap, antispam-rules) |
-| `internal/` | Shared libraries: MAPI core, mailbox store, format conversion, protocol servers, mail flow, directory                                          |
+| `cmd/`      | Service executables (mta, imap, pop3, webmail2, dav, activesync, ews, mapihttp, gateway, notify, admin, fetchmail, antispam-bootstrap, antispam-rules) |
+| `internal/` | Shared libraries: MAPI core, mailbox store, format conversion, protocol servers, mail flow, filtering, security/TLS, directory, notifications, platform |
 | `docker/`   | Dev and service container images                                                                                                               |
 
 ## License
