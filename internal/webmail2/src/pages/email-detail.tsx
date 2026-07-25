@@ -60,6 +60,17 @@ import { useAuth } from "@/contexts/AuthContext"
 import { useMailbox } from "@/contexts/MailboxContext"
 import { useI18n } from "@/hooks/useI18n"
 
+// pdfZoomFragment maps the appearance PDF-zoom mode onto the PDF Open Parameters
+// fragment the embedded viewer understands: "page-width"/"page-actual" become
+// FitH/actual-size #view, and "auto" leaves the viewer's own default zoom.
+function pdfZoomFragment(mode: string): string {
+  switch (mode) {
+    case "page-width": return "view=FitH"
+    case "page-actual": return "zoom=100"
+    default: return "" // auto: no override
+  }
+}
+
 // formatFileSize renders a byte count as a human-readable size.
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -149,6 +160,10 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
   // (reference default: off).
   const [itemDataOpen, setItemDataOpen] = useState(false)
   const [showItemData, setShowItemData] = useState(false)
+  // Inline attachment preview + PDF zoom, from the file-previewing appearance
+  // settings (reference SettingsFilePreviewerWidget). Preview defaults on.
+  const [filePreview, setFilePreview] = useState(true)
+  const [pdfZoom, setPdfZoom] = useState("page-width")
   // Propose-new-time: a dialog where the invitee picks a proposed start/end and
   // emails a METHOD:COUNTER iTIP to the organizer.
   const [proposeOpen, setProposeOpen] = useState(false)
@@ -179,9 +194,15 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
     api.getPreferences()
       .then((res) => { if (!cancelled) setOmitOriginal(res.preferences?.omitOriginalOnReply === true) })
       .catch(() => {})
-    // The item-data dev button is gated by an advanced appearance setting.
+    // The item-data dev button + inline preview + PDF zoom come from the
+    // appearance settings.
     api.getAppearanceSettings()
-      .then((a) => { if (!cancelled) setShowItemData(!!a.showItemData) })
+      .then((a) => {
+        if (cancelled) return
+        setShowItemData(!!a.showItemData)
+        setFilePreview(a.filePreview ?? true)
+        setPdfZoom(a.pdfZoom ?? "page-width")
+      })
       .catch(() => {})
     return () => { cancelled = true }
   }, [])
@@ -1120,7 +1141,7 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                           </span>
                           <Download className="h-4 w-4 shrink-0 text-muted-foreground" />
                         </button>
-                        {isImage && (
+                        {filePreview && isImage && (
                           <img
                             src={src}
                             alt={att.filename}
@@ -1128,9 +1149,9 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                             loading="lazy"
                           />
                         )}
-                        {isPdf && (
+                        {filePreview && isPdf && (
                           <object
-                            data={src}
+                            data={`${src}#${pdfZoomFragment(pdfZoom)}`}
                             type="application/pdf"
                             className="h-96 w-full rounded border"
                             aria-label={att.filename}

@@ -184,6 +184,8 @@ export function SettingsPage() {
     shortcutMode: "extended",
     iconSet: "breeze",
     showItemData: false,
+    filePreview: true,
+    pdfZoom: "page-width",
   })
 
   useEffect(() => {
@@ -230,6 +232,8 @@ export function SettingsPage() {
         shortcutMode: a.shortcutMode ?? "extended",
         iconSet: a.iconSet ?? "breeze",
         showItemData: a.showItemData ?? false,
+        filePreview: a.filePreview ?? true,
+        pdfZoom: a.pdfZoom ?? "page-width",
       }))
       .catch(() => undefined)
       .catch(() => undefined)
@@ -295,6 +299,8 @@ export function SettingsPage() {
         shortcutMode: a.shortcutMode ?? "extended",
         iconSet: a.iconSet ?? "breeze",
         showItemData: a.showItemData ?? false,
+        filePreview: a.filePreview ?? true,
+        pdfZoom: a.pdfZoom ?? "page-width",
       })
       setShortcutMode((a.shortcutMode ?? "extended") as ShortcutMode)
       applyIconSet(a.iconSet ?? "breeze")
@@ -2267,6 +2273,43 @@ export function SettingsPage() {
           <Button variant="outline" onClick={() => setPwOpen(true)}>{t("settings.account.manage")}</Button>
         </div>
       </div>
+
+      {/* File previewing (reference SettingsFilePreviewerWidget): inline preview
+          of PDF/image attachments, plus the PDF zoom mode. */}
+      <SettingSection
+        icon={FileText}
+        title={t("settings.filePreview.title")}
+        description={t("settings.filePreview.description")}
+      >
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="font-medium">{t("settings.filePreview.enable")}</p>
+            <p className="text-sm text-muted-foreground">{t("settings.filePreview.enableDescription")}</p>
+          </div>
+          <input
+            type="checkbox"
+            checked={appearance.filePreview}
+            onChange={(e) => saveAppearance({ ...appearance, filePreview: e.target.checked })}
+          />
+        </div>
+        <Separator />
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="font-medium">{t("settings.filePreview.pdfZoom")}</p>
+            <p className="text-sm text-muted-foreground">{t("settings.filePreview.pdfZoomDescription")}</p>
+          </div>
+          <select
+            value={appearance.pdfZoom}
+            disabled={!appearance.filePreview}
+            onChange={(e) => saveAppearance({ ...appearance, pdfZoom: e.target.value })}
+            className="max-w-[16rem] rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-50"
+          >
+            <option value="auto">{t("settings.filePreview.zoomAuto")}</option>
+            <option value="page-actual">{t("settings.filePreview.zoomActual")}</option>
+            <option value="page-width">{t("settings.filePreview.zoomWidth")}</option>
+          </select>
+        </div>
+      </SettingSection>
 
       {/* Advanced: developer tools (reference SettingsAdvancedCategory). */}
       <SettingSection

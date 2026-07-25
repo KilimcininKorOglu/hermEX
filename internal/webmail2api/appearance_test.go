@@ -57,10 +57,13 @@ func TestAppearanceSettingsRoundTrip(t *testing.T) {
 	if def.IconSet != "breeze" {
 		t.Errorf("default iconSet = %q, want breeze", def.IconSet)
 	}
+	if !def.FilePreview || def.PdfZoom != "page-width" {
+		t.Errorf("default file preview = %v/%q, want true/page-width", def.FilePreview, def.PdfZoom)
+	}
 
 	// Put dark theme + Turkish + DMY dates + 12h, plus the unread border toggle,
 	// a basic shortcut mode, and the classic icon set.
-	body := `{"theme":"dark","language":"tr","dateFormat":"dmy","timeFormat":"12","nameDisplay":"lastfirst","showUnreadCounter":true,"unreadBorder":true,"hideWidgetPanel":false,"shortcutMode":"basic","iconSet":"classic","showItemData":true}`
+	body := `{"theme":"dark","language":"tr","dateFormat":"dmy","timeFormat":"12","nameDisplay":"lastfirst","showUnreadCounter":true,"unreadBorder":true,"hideWidgetPanel":false,"shortcutMode":"basic","iconSet":"classic","showItemData":true,"filePreview":false,"pdfZoom":"auto"}`
 	if rec := do(http.MethodPut, "/api/v1/settings/appearance", body); rec.Code != http.StatusOK {
 		t.Fatalf("put: status %d body %s", rec.Code, rec.Body.String())
 	}
@@ -85,16 +88,19 @@ func TestAppearanceSettingsRoundTrip(t *testing.T) {
 	if !got.ShowItemData {
 		t.Errorf("got showItemData = %v, want true", got.ShowItemData)
 	}
+	if got.FilePreview || got.PdfZoom != "auto" {
+		t.Errorf("got file preview = %v/%q, want false/auto", got.FilePreview, got.PdfZoom)
+	}
 
 	// A bad enum clamps: theme "neon" → system, dateFormat "us" → iso,
 	// shortcutMode "vim" → extended, iconSet "flat" → breeze.
-	if rec := do(http.MethodPut, "/api/v1/settings/appearance", `{"theme":"neon","dateFormat":"us","shortcutMode":"vim","iconSet":"flat"}`); rec.Code != http.StatusOK {
+	if rec := do(http.MethodPut, "/api/v1/settings/appearance", `{"theme":"neon","dateFormat":"us","shortcutMode":"vim","iconSet":"flat","pdfZoom":"200%"}`); rec.Code != http.StatusOK {
 		t.Fatalf("clamp put: status %d", rec.Code)
 	}
 	rec = do(http.MethodGet, "/api/v1/settings/appearance", "")
 	var clamped appearanceSettingsJSON
 	_ = json.Unmarshal(rec.Body.Bytes(), &clamped)
-	if clamped.Theme != "system" || clamped.DateFormat != "iso" || clamped.ShortcutMode != "extended" || clamped.IconSet != "breeze" {
-		t.Errorf("clamped = %+v, want system/iso/extended/breeze", clamped)
+	if clamped.Theme != "system" || clamped.DateFormat != "iso" || clamped.ShortcutMode != "extended" || clamped.IconSet != "breeze" || clamped.PdfZoom != "page-width" {
+		t.Errorf("clamped = %+v, want system/iso/extended/breeze/page-width", clamped)
 	}
 }

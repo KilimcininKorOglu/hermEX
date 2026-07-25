@@ -688,6 +688,17 @@
       "description": "Manage your password and security settings",
       "manage": "Manage Account"
     },
+    "filePreview": {
+      "title": "File previewing",
+      "description": "Preview supported attachments inline",
+      "enable": "Attachment preview (PDF and images)",
+      "enableDescription": "Show a preview of PDF and image attachments directly in the message.",
+      "pdfZoom": "PDF zoom",
+      "pdfZoomDescription": "Default zoom level for the inline PDF preview.",
+      "zoomAuto": "Auto",
+      "zoomActual": "Actual size",
+      "zoomWidth": "Page width"
+    },
     "advanced": {
       "title": "Advanced",
       "description": "Developer tools and advanced options",

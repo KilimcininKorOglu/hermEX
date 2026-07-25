@@ -107,13 +107,15 @@ type appearanceSettingsJSON struct {
 	ShortcutMode      string `json:"shortcutMode"`  // "off" | "basic" | "extended" keyboard-shortcut level
 	IconSet           string `json:"iconSet"`       // "breeze" | "classic" icon style
 	ShowItemData      bool   `json:"showItemData"`  // developer tool: show the raw item-data button on a message
+	FilePreview       bool   `json:"filePreview"`   // inline attachment preview (PDF + images) on a message
+	PdfZoom           string `json:"pdfZoom"`       // "auto" | "page-actual" | "page-width" inline-PDF zoom
 }
 
 // readAppearanceSettings loads the display settings from the shared blob,
 // defaulting to system theme, browser language, ISO date, 24h time, and a
 // first-then-last name order when none are stored.
 func readAppearanceSettings(m map[string]json.RawMessage) appearanceSettingsJSON {
-	a := appearanceSettingsJSON{Theme: "system", Language: "system", DateFormat: "iso", TimeFormat: "24", NameDisplay: "firstlast", ShortcutMode: "extended", IconSet: "breeze"}
+	a := appearanceSettingsJSON{Theme: "system", Language: "system", DateFormat: "iso", TimeFormat: "24", NameDisplay: "firstlast", ShortcutMode: "extended", IconSet: "breeze", FilePreview: true, PdfZoom: "page-width"}
 	if raw, ok := m["webmail2AppearanceSettings"]; ok {
 		_ = json.Unmarshal(raw, &a)
 	}
@@ -152,6 +154,11 @@ func readAppearanceSettings(m map[string]json.RawMessage) appearanceSettingsJSON
 	default:
 		a.IconSet = "breeze"
 	}
+	switch a.PdfZoom {
+	case "auto", "page-actual", "page-width":
+	default:
+		a.PdfZoom = "page-width"
+	}
 	return a
 }
 
@@ -187,6 +194,8 @@ func (s *Server) handlePutAppearanceSettings(w http.ResponseWriter, r *http.Requ
 		a.ShortcutMode = in.ShortcutMode
 		a.IconSet = in.IconSet
 		a.ShowItemData = in.ShowItemData
+		a.FilePreview = in.FilePreview
+		a.PdfZoom = in.PdfZoom
 		clamped := readAppearanceSettings(map[string]json.RawMessage{"webmail2AppearanceSettings": mustJSON(a)})
 		raw, _ := json.Marshal(clamped)
 		m["webmail2AppearanceSettings"] = raw

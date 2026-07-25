@@ -688,6 +688,17 @@
       "description": "Parolanızı ve güvenlik ayarlarınızı yönetin",
       "manage": "Hesabı Yönet"
     },
+    "filePreview": {
+      "title": "Dosya önizleme",
+      "description": "Desteklenen ekleri satır içinde önizle",
+      "enable": "Ek önizlemesi (PDF ve görseller)",
+      "enableDescription": "PDF ve görsel eklerinin önizlemesini mesajın içinde göster.",
+      "pdfZoom": "PDF yakınlaştırma",
+      "pdfZoomDescription": "Satır içi PDF önizlemesi için varsayılan yakınlaştırma düzeyi.",
+      "zoomAuto": "Otomatik",
+      "zoomActual": "Gerçek boyut",
+      "zoomWidth": "Sayfa genişliği"
+    },
     "advanced": {
       "title": "Gelişmiş",
       "description": "Geliştirici araçları ve gelişmiş seçenekler",

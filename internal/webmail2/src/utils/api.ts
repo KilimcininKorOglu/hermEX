@@ -240,6 +240,8 @@ export interface AppearanceSettings {
   shortcutMode: string // "off" | "basic" | "extended" keyboard-shortcut level
   iconSet: string // "breeze" | "classic" icon style
   showItemData: boolean // developer tool: show the raw item-data button on a message
+  filePreview: boolean // inline attachment preview (PDF + images) on a message
+  pdfZoom: string // "auto" | "page-actual" | "page-width" inline-PDF zoom
 }
 
 export interface Delegation {
