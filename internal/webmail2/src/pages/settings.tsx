@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react"
-import { Moon, Sun, Bell, Shield, ShieldCheck, Palette, Keyboard, Mail, Globe, Lock, Plane, Monitor, UserCog, Trash2, Plus, Tag, X, Camera, HardDrive, FileKey, FileText, Info, Wrench } from "lucide-react"
+import { Moon, Sun, Bell, Shield, ShieldCheck, Palette, Keyboard, Mail, Globe, Lock, Plane, Monitor, UserCog, Trash2, Plus, Tag, X, Camera, HardDrive, FileKey, FileText, Info, Wrench, Columns3, MoveVertical } from "lucide-react"
 import { useTheme } from "@/components/theme-provider"
 import { useAuth } from "@/contexts/AuthContext"
 import { useI18n } from "@/hooks/useI18n"
@@ -27,6 +27,8 @@ import type { CertInfo } from "@/utils/smime"
 import { detectTimeZone, listTimeZones } from "@/utils/timezone"
 import { setShortcutMode, type ShortcutMode } from "@/utils/shortcutMode"
 import { applyIconSet } from "@/utils/iconSet"
+import { defaultMailColumns, setMailColumns } from "@/utils/mailListColumns"
+import { setInboxNavigation, clampPageSize, DEFAULT_PAGE_SIZE, MIN_PAGE_SIZE, MAX_PAGE_SIZE, type InboxNavMode } from "@/utils/inboxNavigation"
 import pkg from "../../package.json"
 import { enablePushNotifications, disablePushNotifications, pushSupported } from "@/utils/push"
 import { RichTextEditor } from "@/components/RichTextEditor"
@@ -186,6 +188,9 @@ export function SettingsPage() {
     showItemData: false,
     filePreview: true,
     pdfZoom: "page-width",
+    inboxNavMode: "pagination",
+    inboxPageSize: DEFAULT_PAGE_SIZE,
+    mailListColumns: defaultMailColumns(),
   })
 
   useEffect(() => {
@@ -234,8 +239,11 @@ export function SettingsPage() {
         showItemData: a.showItemData ?? false,
         filePreview: a.filePreview ?? true,
         pdfZoom: a.pdfZoom ?? "page-width",
+        inboxNavMode: a.inboxNavMode ?? "pagination",
+        inboxPageSize: a.inboxPageSize ?? DEFAULT_PAGE_SIZE,
+        mailListColumns: a.mailListColumns ?? defaultMailColumns(),
       }))
-      .catch(() => undefined)
+      .then(() => undefined)
       .catch(() => undefined)
   }, [])
 
@@ -272,6 +280,10 @@ export function SettingsPage() {
     setShortcutMode(next.shortcutMode as ShortcutMode)
     // Apply the icon set to the document root immediately for a live preview.
     applyIconSet(next.iconSet)
+    // Mirror the message-list columns to their cookie so the inbox re-reads live.
+    setMailColumns(next.mailListColumns)
+    // Mirror the inbox navigation mode + page size so MailboxContext re-reads live.
+    setInboxNavigation(next.inboxNavMode as InboxNavMode, next.inboxPageSize)
     // Let app-wide consumers (e.g. the title unread counter) re-read the settings.
     document.dispatchEvent(new CustomEvent("appearance-changed"))
     api.setAppearanceSettings(next).catch(() => undefined)
@@ -301,9 +313,14 @@ export function SettingsPage() {
         showItemData: a.showItemData ?? false,
         filePreview: a.filePreview ?? true,
         pdfZoom: a.pdfZoom ?? "page-width",
+        inboxNavMode: a.inboxNavMode ?? "pagination",
+        inboxPageSize: a.inboxPageSize ?? DEFAULT_PAGE_SIZE,
+        mailListColumns: a.mailListColumns ?? defaultMailColumns(),
       })
       setShortcutMode((a.shortcutMode ?? "extended") as ShortcutMode)
       applyIconSet(a.iconSet ?? "breeze")
+      setMailColumns(a.mailListColumns ?? defaultMailColumns())
+      setInboxNavigation((a.inboxNavMode ?? "pagination") as InboxNavMode, a.inboxPageSize ?? DEFAULT_PAGE_SIZE)
       setFirstDayOfWeek(c.firstDayOfWeek ?? 1)
       setResolution(c.resolution ?? 30)
       setWorkDayStart(c.workDayStart ?? 9)
@@ -2273,6 +2290,81 @@ export function SettingsPage() {
           <Button variant="outline" onClick={() => setPwOpen(true)}>{t("settings.account.manage")}</Button>
         </div>
       </div>
+
+      {/* Message-list columns (reference MailGridColumnModel): sender/subject/date
+          always show, so only the optional columns toggle here. */}
+      <SettingSection
+        icon={Columns3}
+        title={t("settings.mailColumns.title")}
+        description={t("settings.mailColumns.description")}
+      >
+        {([
+          ["preview", "preview"],
+          ["attachment", "attachment"],
+          ["importance", "importance"],
+          ["categories", "categories"],
+          ["size", "size"],
+          ["flag", "flag"],
+        ] as const).map(([key, label], i) => (
+          <div key={key}>
+            {i > 0 && <Separator />}
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="font-medium">{t(`settings.mailColumns.${label}`)}</p>
+                <p className="text-sm text-muted-foreground">{t(`settings.mailColumns.${label}Description`)}</p>
+              </div>
+              <input
+                type="checkbox"
+                checked={appearance.mailListColumns[key]}
+                onChange={(e) => saveAppearance({
+                  ...appearance,
+                  mailListColumns: { ...appearance.mailListColumns, [key]: e.target.checked },
+                })}
+              />
+            </div>
+          </div>
+        ))}
+      </SettingSection>
+
+      {/* Inbox navigation (reference SettingsInboxNavigationWidget): the message
+          list either paginates (prev/next) or scrolls infinitely, with a
+          configurable page/block size. */}
+      <SettingSection
+        icon={MoveVertical}
+        title={t("settings.inboxNav.title")}
+        description={t("settings.inboxNav.description")}
+      >
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="font-medium">{t("settings.inboxNav.mode")}</p>
+            <p className="text-sm text-muted-foreground">{t("settings.inboxNav.modeDescription")}</p>
+          </div>
+          <select
+            className="rounded-md border bg-background px-3 py-2 text-sm"
+            value={appearance.inboxNavMode}
+            onChange={(e) => saveAppearance({ ...appearance, inboxNavMode: e.target.value })}
+          >
+            <option value="pagination">{t("settings.inboxNav.pagination")}</option>
+            <option value="infinite">{t("settings.inboxNav.infinite")}</option>
+          </select>
+        </div>
+        <Separator />
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="font-medium">{t("settings.inboxNav.pageSize")}</p>
+            <p className="text-sm text-muted-foreground">{t("settings.inboxNav.pageSizeDescription")}</p>
+          </div>
+          <input
+            type="number"
+            min={MIN_PAGE_SIZE}
+            max={MAX_PAGE_SIZE}
+            step={10}
+            className="w-24 rounded-md border bg-background px-3 py-2 text-sm"
+            value={appearance.inboxPageSize}
+            onChange={(e) => saveAppearance({ ...appearance, inboxPageSize: clampPageSize(Number(e.target.value)) })}
+          />
+        </div>
+      </SettingSection>
 
       {/* File previewing (reference SettingsFilePreviewerWidget): inline preview
           of PDF/image attachments, plus the PDF zoom mode. */}

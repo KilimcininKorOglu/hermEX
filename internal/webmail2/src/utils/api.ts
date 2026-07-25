@@ -224,6 +224,18 @@ export interface CalendarSettings {
   defaultReminder: number // minutes (0 = none)
 }
 
+// MailListColumns is the per-user message-list column visibility (reference
+// MailGridColumnModel). Sender/subject/date always show, so only the optional
+// columns are toggleable.
+export interface MailListColumns {
+  preview: boolean // subject-line snippet ("— preview text")
+  attachment: boolean // paperclip icon when the message has attachments
+  importance: boolean // high/low importance marker
+  categories: boolean // category/label badges
+  size: boolean // message size column
+  flag: boolean // follow-up flag marker
+}
+
 // AppearanceSettings is the DB-backed display settings (theme, language,
 // date/time format, name order, unread/widget-panel toggles).
 export interface AppearanceSettings {
@@ -242,6 +254,9 @@ export interface AppearanceSettings {
   showItemData: boolean // developer tool: show the raw item-data button on a message
   filePreview: boolean // inline attachment preview (PDF + images) on a message
   pdfZoom: string // "auto" | "page-actual" | "page-width" inline-PDF zoom
+  inboxNavMode?: string // "pagination" | "infinite" message-list navigation
+  inboxPageSize?: number // rows per page/block (10..200)
+  mailListColumns?: MailListColumns // per-user message-list column visibility
 }
 
 export interface Delegation {

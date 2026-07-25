@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from "react"
 import { getCookie, setCookie } from "@/utils/cookies"
 import { setShortcutMode, type ShortcutMode } from "@/utils/shortcutMode"
 import { applyIconSet } from "@/utils/iconSet"
+import { setMailColumns } from "@/utils/mailListColumns"
 import api from "@/utils/api"
 
 type Theme = "dark" | "light" | "system"
@@ -71,6 +72,9 @@ export function ThemeProvider({
         // Apply the DB-backed icon set to <html> so glyphs render in the chosen
         // weight from first paint (this provider mounts app-wide).
         if (s.iconSet) applyIconSet(s.iconSet)
+        // Mirror the DB-backed message-list columns to their cookie so the inbox
+        // reads the chosen set synchronously on a fresh browser.
+        if (s.mailListColumns) setMailColumns(s.mailListColumns)
       })
       .catch(() => {
         /* best-effort: fall back to the cookie/default */

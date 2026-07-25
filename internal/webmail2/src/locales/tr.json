@@ -123,6 +123,9 @@
     "markAllRead": "Tümünü okundu işaretle",
     "allMarkedAsRead": "{{count}} mesaj okundu olarak işaretlendi",
     "previewPane": "Okuma bölmesini aç/kapat",
+    "columns": {
+      "flag": "Takip için işaretlendi"
+    },
     "selectMessage": "Okumak için bir mesaj seçin",
     "import": ".eml içe aktar",
     "imported": "Mesaj içe aktarıldı",
@@ -143,6 +146,8 @@
     "messageCount": "{{count}} mesaj",
     "messagesCount": "{{count}} mesaj",
     "pageOf": "Sayfa {{current}} / {{total}}",
+    "loadedCount": "{{loaded}} / {{total}} yüklendi",
+    "loadingMore": "Daha fazla yükleniyor…",
     "conversations": "Konuşmalar"
   },
   "emailDetail": {
@@ -709,6 +714,32 @@
       "zoomAuto": "Otomatik",
       "zoomActual": "Gerçek boyut",
       "zoomWidth": "Sayfa genişliği"
+    },
+    "mailColumns": {
+      "title": "Mesaj listesi sütunları",
+      "description": "Mesaj listesinde hangi sütunların görüneceğini seçin",
+      "preview": "Önizleme metni",
+      "previewDescription": "Konu satırının yanında kısa bir mesaj alıntısı gösterin.",
+      "attachment": "Ek simgesi",
+      "attachmentDescription": "Mesajda ek olduğunda ataş simgesi gösterin.",
+      "importance": "Önem işareti",
+      "importanceDescription": "Yüksek/düşük önem işaretini gösterin.",
+      "categories": "Kategori etiketleri",
+      "categoriesDescription": "Kategori rozetlerini mesaj satırında gösterin.",
+      "size": "Boyut",
+      "sizeDescription": "Mesaj boyutunu gösterin.",
+      "flag": "Takip bayrağı",
+      "flagDescription": "Takip bayrağı işaretini gösterin."
+    },
+    "inboxNav": {
+      "title": "Mesaj listesi gezinme",
+      "description": "Mesaj listesinin sayfalar arasında nasıl gezineceğini seçin",
+      "mode": "Gezinme modu",
+      "modeDescription": "Sabit sayfalar arasında gezinin veya kaydırdıkça daha fazlasını yükleyin.",
+      "pagination": "Sayfalama (önceki/sonraki)",
+      "infinite": "Sonsuz kaydırma",
+      "pageSize": "Sayfa başına mesaj",
+      "pageSizeDescription": "Her sayfada veya kaydırma bloğunda kaç mesaj yükleneceği (10–200)."
     },
     "advanced": {
       "title": "Gelişmiş",

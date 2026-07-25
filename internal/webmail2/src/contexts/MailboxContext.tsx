@@ -1,6 +1,7 @@
-import { createContext, useContext, useState, useCallback, useEffect } from 'react'
+import { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react'
 import api, { SharedMailbox, Mail } from '../utils/api'
 import { useMailEvents } from '../utils/mailEvents'
+import { getInboxNavMode, getInboxPageSize, type InboxNavMode } from '../utils/inboxNavigation'
 
 interface MailboxContextType {
   // Current active mailbox context
@@ -40,6 +41,18 @@ interface MailboxContextType {
   inboxPageSize: number
   inboxLoading: boolean
   inboxQuery: InboxQuery
+  // Navigation mode (reference SettingsInboxNavigationWidget): "pagination"
+  // shows prev/next over fixed pages; "infinite" grows one accumulated window
+  // that the inbox extends via loadMoreInbox as the user scrolls.
+  inboxNavMode: InboxNavMode
+  // inboxHasMore is true (infinite mode only) while unfetched messages remain.
+  inboxHasMore: boolean
+  // inboxLoadingMore is true while a loadMoreInbox fetch is in flight, so the
+  // inbox can show a spinner at the bottom without flashing the page skeleton.
+  inboxLoadingMore: boolean
+  // loadMoreInbox appends the next block to the accumulated window (infinite
+  // mode); a no-op in pagination mode or when nothing more remains.
+  loadMoreInbox: () => void
   // setInboxQuery merges fields (page/sort/dir/filter) and refetches the page.
   setInboxQuery: (q: Partial<InboxQuery>) => void
   refreshInbox: () => Promise<void>
@@ -56,8 +69,6 @@ export interface InboxQuery {
   dir: string // "asc" | "desc"
   filter: string // "all" | "unread" | "starred"
 }
-
-const INBOX_PAGE_SIZE = 50
 
 const MailboxContext = createContext<MailboxContextType | null>(null)
 
@@ -76,6 +87,7 @@ export function MailboxProvider({ children, personalEmail }: { children: React.R
   const [inboxTotal, setInboxTotal] = useState(0)
   const [inboxUnread, setInboxUnread] = useState(0)
   const [inboxLoading, setInboxLoading] = useState(true)
+  const [inboxLoadingMore, setInboxLoadingMore] = useState(false)
   const [inboxQuery, setInboxQueryState] = useState<InboxQuery>({ page: 0, sort: 'date', dir: 'desc', filter: 'all' })
   const setInboxQuery = useCallback((q: Partial<InboxQuery>) => {
     // A filter/sort change (no explicit page) resets to the first page so the user
@@ -83,14 +95,37 @@ export function MailboxProvider({ children, personalEmail }: { children: React.R
     setInboxQueryState((prev) => ({ ...prev, ...q, page: q.page ?? 0 }))
   }, [])
 
+  // Navigation mode + base page size come from the DB-backed appearance settings,
+  // mirrored to cookies so they can be read synchronously here (before the first
+  // fetch). The "inbox-nav-changed" event re-reads them when Settings saves.
+  const [navMode, setNavMode] = useState<InboxNavMode>(() => getInboxNavMode())
+  const [basePageSize, setBasePageSize] = useState<number>(() => getInboxPageSize())
+  useEffect(() => {
+    const onNav = () => {
+      setNavMode(getInboxNavMode())
+      setBasePageSize(getInboxPageSize())
+    }
+    document.addEventListener('inbox-nav-changed', onNav)
+    return () => document.removeEventListener('inbox-nav-changed', onNav)
+  }, [])
+
+  // Infinite mode accumulates blocks into one growing window fetched from page 0;
+  // blocksRef holds how many base-size blocks are currently shown. A ref (not
+  // state) keeps loadMoreInbox from recreating fetchInbox and reflashing the
+  // skeleton — the fetched window size is read live at call time.
+  const blocksRef = useRef(1)
+
   // fetchInbox pulls the inbox without toggling the loading flag, so background
   // polling does not flash the skeleton. When a shared mailbox is active it
   // fetches the owner's inbox instead, so switching mailboxes swaps the view.
+  // In infinite mode it always fetches page 0 over the accumulated window
+  // (base × blocks) and replaces the list, so a refresh keeps every loaded block.
   const sharedOwner = currentMailbox.type === 'shared' ? currentMailbox.owner : undefined
   const fetchInbox = useCallback(async () => {
+    const infinite = navMode === 'infinite'
     const res = await api.getMail('inbox', sharedOwner, {
-      page: inboxQuery.page,
-      pageSize: INBOX_PAGE_SIZE,
+      page: infinite ? 0 : inboxQuery.page,
+      pageSize: infinite ? basePageSize * blocksRef.current : basePageSize,
       sort: inboxQuery.sort,
       dir: inboxQuery.dir,
       filter: inboxQuery.filter,
@@ -98,9 +133,11 @@ export function MailboxProvider({ children, personalEmail }: { children: React.R
     setInboxEmails(res.emails ?? [])
     setInboxTotal(res.total ?? 0)
     setInboxUnread(res.unread ?? 0)
-  }, [sharedOwner, inboxQuery])
+  }, [sharedOwner, inboxQuery, navMode, basePageSize])
 
   const refreshInbox = useCallback(async () => {
+    // A fresh view (filter/sort/mode change) starts from the first block.
+    blocksRef.current = 1
     setInboxLoading(true)
     try {
       await fetchInbox()
@@ -110,6 +147,17 @@ export function MailboxProvider({ children, personalEmail }: { children: React.R
       setInboxLoading(false)
     }
   }, [fetchInbox])
+
+  // loadMoreInbox grows the accumulated window by one block and refetches it
+  // (infinite mode only). Guarded so it is a no-op in pagination mode, while a
+  // fetch is in flight, or once the whole folder is loaded.
+  const loadMoreInbox = useCallback(() => {
+    if (navMode !== 'infinite' || inboxLoadingMore) return
+    if (inboxEmails.length >= inboxTotal) return
+    blocksRef.current += 1
+    setInboxLoadingMore(true)
+    fetchInbox().finally(() => setInboxLoadingMore(false))
+  }, [navMode, inboxLoadingMore, inboxEmails.length, inboxTotal, fetchInbox])
 
   useEffect(() => {
     refreshInbox()
@@ -210,9 +258,13 @@ export function MailboxProvider({ children, personalEmail }: { children: React.R
     inboxEmails,
     inboxUnread,
     inboxTotal,
-    inboxPageSize: INBOX_PAGE_SIZE,
+    inboxPageSize: basePageSize,
     inboxLoading,
     inboxQuery,
+    inboxNavMode: navMode,
+    inboxHasMore: navMode === 'infinite' && inboxEmails.length < inboxTotal,
+    inboxLoadingMore,
+    loadMoreInbox,
     setInboxQuery,
     refreshInbox,
     patchInbox,

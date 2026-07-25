@@ -10,6 +10,7 @@ import {
   Upload,
   Paperclip,
   RefreshCw,
+  Loader2,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -28,6 +29,8 @@ import { useI18n } from "@/hooks/useI18n"
 import { formatAbsolute } from "@/utils/date"
 import { getCookie, setCookie } from "@/utils/cookies"
 import { getShortcutMode } from "@/utils/shortcutMode"
+import { getMailColumns } from "@/utils/mailListColumns"
+import type { MailListColumns } from "@/utils/api"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -61,6 +64,8 @@ interface Email {
   folder: string
   labels: string[]
   importance?: string
+  size: number
+  followupStatus?: number
 }
 
 // toEmail projects an API Mail row onto the inbox row model.
@@ -78,7 +83,18 @@ function toEmail(mail: Mail): Email {
     folder: mail.folder.toLowerCase(),
     labels: mail.labels ?? [],
     importance: mail.importance,
+    size: mail.size,
+    followupStatus: mail.followupStatus,
   }
+}
+
+// formatSize renders a message size as a compact human-readable string
+// (reference the mail-list Size column). Bytes below 1 KB show as "< 1 KB".
+function formatSize(bytes: number): string {
+  if (!bytes || bytes < 1024) return "< 1 KB"
+  const kb = bytes / 1024
+  if (kb < 1024) return `${Math.round(kb)} KB`
+  return `${(kb / 1024).toFixed(1)} MB`
 }
 
 interface ThreadGroup {
@@ -104,7 +120,7 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
   const { t } = useI18n()
   // Inbox data comes from the shared MailboxContext so the sidebar unread
   // badge and header notifications stay in sync with actions taken here.
-  const { inboxEmails, inboxUnread, inboxTotal, inboxPageSize, inboxLoading, setInboxQuery, refreshInbox, patchInbox, removeFromInbox } = useMailbox()
+  const { inboxEmails, inboxUnread, inboxTotal, inboxPageSize, inboxLoading, inboxNavMode, inboxHasMore, inboxLoadingMore, loadMoreInbox, setInboxQuery, refreshInbox, patchInbox, removeFromInbox } = useMailbox()
   const sel = useBulkSelection()
   const [activeFilter, setActiveFilter] = useState("all")
   const loading = inboxLoading
@@ -122,6 +138,15 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
   const [previewPane, setPreviewPane] = useState<"none" | "right">(() =>
     getCookie("hermex-preview-pane") === "right" ? "right" : "none"
   )
+  // Message-list column visibility (reference MailGridColumnModel). The DB-backed
+  // set is mirrored to a cookie so the first render reads it synchronously; a
+  // change in Settings fires "mail-columns-changed" to re-read live.
+  const [columns, setColumns] = useState<MailListColumns>(() => getMailColumns())
+  useEffect(() => {
+    const onCols = () => setColumns(getMailColumns())
+    document.addEventListener("mail-columns-changed", onCols)
+    return () => document.removeEventListener("mail-columns-changed", onCols)
+  }, [])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const setPreview = (p: "none" | "right") => {
     setPreviewPane(p)
@@ -133,11 +158,31 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
   const [sortBy, setSortBy] = useState<SortOption>("date")
   const [sortDir, setSortDir] = useState<SortDir>("desc")
   const [page, setPage] = useState(0)
+  // Sentinel row at the bottom of the list; when it scrolls into view in
+  // infinite mode, the observer asks the context to append the next block.
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
 
   // Reset to the first page when the folder or filter changes.
   useEffect(() => {
     setPage(0)
   }, [folder, activeFilter])
+
+  // Infinite-scroll trigger: observe the sentinel and load the next block when
+  // it becomes visible. Re-armed whenever the callback identity or has-more
+  // state changes so it stops firing once the folder is fully loaded.
+  useEffect(() => {
+    if (inboxNavMode !== "infinite" || !inboxHasMore) return
+    const el = loadMoreRef.current
+    if (!el) return
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) loadMoreInbox()
+      },
+      { rootMargin: "400px" }
+    )
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [inboxNavMode, inboxHasMore, loadMoreInbox])
 
   // Push the folder/filter/sort/page selection to the shared inbox query, which
   // refetches the matching server page. "starred" is a filter, not a real folder.
@@ -388,7 +433,7 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
           <span className={cn("text-sm", !email.read ? "font-semibold" : "font-normal")}>
             {viewMode === "list" ? email.from : email.from.split(" ")[0]}
           </span>
-          {email.labels.slice(0, viewMode === "compact" ? 0 : 1).map((label) => (
+          {columns.categories && email.labels.slice(0, viewMode === "compact" ? 0 : 1).map((label) => (
             <Badge key={label} variant="secondary" className="text-[10px] px-1.5 py-0">
               {label}
             </Badge>
@@ -399,20 +444,28 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
             <span className={cn(!email.read && "text-foreground font-medium")}>
               {email.subject}
             </span>
-            <span className="truncate">— {email.preview}</span>
+            {columns.preview && <span className="truncate">— {email.preview}</span>}
           </div>
         )}
       </div>
 
       <div className={cn("flex items-center gap-2 shrink-0", viewMode === "compact" && "flex-row-reverse")}>
-        {email.hasAttachments && (
+        {columns.attachment && email.hasAttachments && (
           <Paperclip className="h-4 w-4 text-muted-foreground" />
         )}
-        {email.importance === "high" && (
+        {columns.importance && email.importance === "high" && (
           <span className="text-red-500 font-bold text-xs" title={t("compose.importanceHigh")}>!</span>
         )}
-        {email.importance === "low" && (
+        {columns.importance && email.importance === "low" && (
           <span className="text-muted-foreground text-xs" title={t("compose.importanceLow")}>↓</span>
+        )}
+        {columns.flag && email.followupStatus === 2 && (
+          <span className="text-red-500 text-xs" title={t("inbox.columns.flag")}>⚑</span>
+        )}
+        {columns.size && (
+          <span className="text-xs text-muted-foreground whitespace-nowrap tabular-nums">
+            {formatSize(email.size)}
+          </span>
         )}
         {!email.read && viewMode === "list" && (
           <span className="h-2 w-2 rounded-full bg-primary" />
@@ -686,30 +739,46 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
         )}
       </div>
 
-      <div className="flex items-center justify-between">
-        <span className="text-sm text-muted-foreground">
-          {t(inboxTotal !== 1 ? "inbox.messagesCount" : "inbox.messageCount", { count: String(inboxTotal) })}
-          {totalPages > 1 && ` · ${t("inbox.pageOf", { current: String(currentPage + 1), total: String(totalPages) })}`}
-        </span>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="icon"
-            disabled={currentPage <= 0}
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            disabled={currentPage >= totalPages - 1}
-            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
+      {inboxNavMode === "infinite" ? (
+        <div className="flex flex-col items-center gap-2">
+          <span className="text-sm text-muted-foreground">
+            {t("inbox.loadedCount", { loaded: String(pageEmails.length), total: String(inboxTotal) })}
+          </span>
+          {/* Sentinel: the observer loads the next block when this scrolls in. */}
+          <div ref={loadMoreRef} className="h-1 w-full" />
+          {inboxLoadingMore && (
+            <span className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              {t("inbox.loadingMore")}
+            </span>
+          )}
         </div>
-      </div>
+      ) : (
+        <div className="flex items-center justify-between">
+          <span className="text-sm text-muted-foreground">
+            {t(inboxTotal !== 1 ? "inbox.messagesCount" : "inbox.messageCount", { count: String(inboxTotal) })}
+            {totalPages > 1 && ` · ${t("inbox.pageOf", { current: String(currentPage + 1), total: String(totalPages) })}`}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              disabled={currentPage <= 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              disabled={currentPage >= totalPages - 1}
+              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
         </div>
         {previewPane === "right" && (
           <div className="min-w-0 flex-1 rounded-lg border bg-card overflow-auto max-h-[calc(100vh-9rem)]">

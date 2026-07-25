@@ -123,6 +123,9 @@
     "markAllRead": "Mark all as read",
     "allMarkedAsRead": "{{count}} messages marked as read",
     "previewPane": "Toggle reading pane",
+    "columns": {
+      "flag": "Flagged for follow-up"
+    },
     "selectMessage": "Select a message to read it here",
     "import": "Import .eml",
     "imported": "Message imported",
@@ -143,6 +146,8 @@
     "messageCount": "{{count}} message",
     "messagesCount": "{{count}} messages",
     "pageOf": "Page {{current}} of {{total}}",
+    "loadedCount": "{{loaded}} of {{total}} loaded",
+    "loadingMore": "Loading more…",
     "conversations": "Conversations"
   },
   "emailDetail": {
@@ -709,6 +714,32 @@
       "zoomAuto": "Auto",
       "zoomActual": "Actual size",
       "zoomWidth": "Page width"
+    },
+    "mailColumns": {
+      "title": "Message list",
+      "description": "Choose which columns show in the message list",
+      "preview": "Preview text",
+      "previewDescription": "Show a snippet of the message body after the subject.",
+      "attachment": "Attachment icon",
+      "attachmentDescription": "Show a paperclip when the message has attachments.",
+      "importance": "Importance marker",
+      "importanceDescription": "Show the high/low importance indicator.",
+      "categories": "Category labels",
+      "categoriesDescription": "Show category badges next to the sender.",
+      "size": "Message size",
+      "sizeDescription": "Show the message size in the row.",
+      "flag": "Follow-up flag",
+      "flagDescription": "Show a marker when the message is flagged for follow-up."
+    },
+    "inboxNav": {
+      "title": "Message list navigation",
+      "description": "Choose how the message list pages through mail",
+      "mode": "Navigation mode",
+      "modeDescription": "Page through fixed pages, or scroll continuously to load more.",
+      "pagination": "Pagination (prev/next)",
+      "infinite": "Infinite scroll",
+      "pageSize": "Messages per page",
+      "pageSizeDescription": "How many messages to load per page or scroll block (10–200)."
     },
     "advanced": {
       "title": "Advanced",

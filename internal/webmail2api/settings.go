@@ -109,13 +109,44 @@ type appearanceSettingsJSON struct {
 	ShowItemData      bool   `json:"showItemData"`  // developer tool: show the raw item-data button on a message
 	FilePreview       bool   `json:"filePreview"`   // inline attachment preview (PDF + images) on a message
 	PdfZoom           string `json:"pdfZoom"`       // "auto" | "page-actual" | "page-width" inline-PDF zoom
+	InboxNavMode      string `json:"inboxNavMode"`  // "pagination" | "infinite" message-list navigation
+	InboxPageSize     int    `json:"inboxPageSize"` // rows per page/block (10..200)
+
+	MailListColumns *mailListColumnsJSON `json:"mailListColumns"` // per-user message-list column visibility
+}
+
+// inboxPageSize bounds match the reference SettingsInboxNavigationWidget
+// (10..200 rows per page/block); the default window is 50.
+const (
+	minInboxPageSize     = 10
+	maxInboxPageSize     = 200
+	defaultInboxPageSize = 50
+)
+
+// mailListColumnsJSON is the message-list column visibility (reference
+// MailGridColumnModel): the sender/subject/date columns are always shown, so
+// only the optional columns are toggleable. A nil struct means "all defaults".
+type mailListColumnsJSON struct {
+	Preview    bool `json:"preview"`    // subject-line snippet ("— preview text")
+	Attachment bool `json:"attachment"` // paperclip icon when the message has attachments
+	Importance bool `json:"importance"` // high/low importance marker
+	Categories bool `json:"categories"` // category/label badges
+	Size       bool `json:"size"`       // message size column
+	Flag       bool `json:"flag"`       // follow-up flag marker
+}
+
+// defaultMailListColumns is the initial column visibility: the reference shows
+// From/Subject/Received always, an attachment + importance icon, and category
+// badges; size and the follow-up flag stay hidden until the user opts in.
+func defaultMailListColumns() mailListColumnsJSON {
+	return mailListColumnsJSON{Preview: true, Attachment: true, Importance: true, Categories: true, Size: false, Flag: false}
 }
 
 // readAppearanceSettings loads the display settings from the shared blob,
 // defaulting to system theme, browser language, ISO date, 24h time, and a
 // first-then-last name order when none are stored.
 func readAppearanceSettings(m map[string]json.RawMessage) appearanceSettingsJSON {
-	a := appearanceSettingsJSON{Theme: "system", Language: "system", DateFormat: "iso", TimeFormat: "24", NameDisplay: "firstlast", ShortcutMode: "extended", IconSet: "breeze", FilePreview: true, PdfZoom: "page-width"}
+	a := appearanceSettingsJSON{Theme: "system", Language: "system", DateFormat: "iso", TimeFormat: "24", NameDisplay: "firstlast", ShortcutMode: "extended", IconSet: "breeze", FilePreview: true, PdfZoom: "page-width", InboxNavMode: "pagination", InboxPageSize: defaultInboxPageSize}
 	if raw, ok := m["webmail2AppearanceSettings"]; ok {
 		_ = json.Unmarshal(raw, &a)
 	}
@@ -159,6 +190,24 @@ func readAppearanceSettings(m map[string]json.RawMessage) appearanceSettingsJSON
 	default:
 		a.PdfZoom = "page-width"
 	}
+	if a.InboxNavMode != "infinite" {
+		a.InboxNavMode = "pagination"
+	}
+	// A never-configured (zero) page size takes the default; otherwise clamp to
+	// the reference row-count bounds.
+	if a.InboxPageSize == 0 {
+		a.InboxPageSize = defaultInboxPageSize
+	} else if a.InboxPageSize < minInboxPageSize {
+		a.InboxPageSize = minInboxPageSize
+	} else if a.InboxPageSize > maxInboxPageSize {
+		a.InboxPageSize = maxInboxPageSize
+	}
+	// A never-configured message-list gets the default column set; once stored,
+	// the persisted per-column booleans are honored verbatim.
+	if a.MailListColumns == nil {
+		d := defaultMailListColumns()
+		a.MailListColumns = &d
+	}
 	return a
 }
 
@@ -196,6 +245,13 @@ func (s *Server) handlePutAppearanceSettings(w http.ResponseWriter, r *http.Requ
 		a.ShowItemData = in.ShowItemData
 		a.FilePreview = in.FilePreview
 		a.PdfZoom = in.PdfZoom
+		a.InboxNavMode = in.InboxNavMode
+		a.InboxPageSize = in.InboxPageSize
+		// The message-list columns are stored as sent (each a plain bool); a nil
+		// input keeps the stored/default set rather than clearing every column.
+		if in.MailListColumns != nil {
+			a.MailListColumns = in.MailListColumns
+		}
 		clamped := readAppearanceSettings(map[string]json.RawMessage{"webmail2AppearanceSettings": mustJSON(a)})
 		raw, _ := json.Marshal(clamped)
 		m["webmail2AppearanceSettings"] = raw
