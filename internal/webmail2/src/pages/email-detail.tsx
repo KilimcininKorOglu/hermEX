@@ -55,6 +55,7 @@ import api from "@/utils/api"
 import type { MeetingInvite, AttachmentInfo } from "@/utils/api"
 import * as smimeStore from "@/utils/smime"
 import { formatAbsolute, withTz } from "@/utils/date"
+import { getShortcutMode } from "@/utils/shortcutMode"
 import { useAuth } from "@/contexts/AuthContext"
 import { useMailbox } from "@/contexts/MailboxContext"
 import { useI18n } from "@/hooks/useI18n"
@@ -377,14 +378,22 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
     }
   }
 
-  // r/a reply shortcuts: r → reply, a → reply-all. Ignored while typing.
+  // Reading-view shortcuts, gated by the shortcut mode: r/a (reply/reply-all)
+  // are basic; F/#/U (forward/delete/mark-unread) are extended. Ignored while
+  // typing, and fully off when the mode is "off".
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const mode = getShortcutMode()
+      if (mode === "off") return
       const el = e.target as HTMLElement | null
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return
       if (e.metaKey || e.ctrlKey || e.altKey) return
+      const extended = mode === "extended"
       if (e.key === "r") { e.preventDefault(); handleReply() }
       else if (e.key === "a") { e.preventDefault(); handleReplyAll() }
+      else if (extended && (e.key === "f" || e.key === "F")) { e.preventDefault(); handleForward() }
+      else if (extended && e.key === "#") { e.preventDefault(); void handleDelete() }
+      else if (extended && (e.key === "u" || e.key === "U")) { e.preventDefault(); void handleMarkUnread() }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)

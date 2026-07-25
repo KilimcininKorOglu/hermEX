@@ -646,7 +646,12 @@
       "title": "Keyboard Shortcuts",
       "description": "View and manage keyboard shortcuts",
       "help": "Keyboard shortcuts help you navigate and perform actions faster.",
-      "view": "View Keyboard Shortcuts"
+      "view": "View Keyboard Shortcuts",
+      "mode": "Keyboard shortcuts",
+      "modeDescription": "Choose which keyboard shortcuts are active.",
+      "modeOff": "Off",
+      "modeBasic": "Basic",
+      "modeExtended": "Extended"
     },
     "push": {
       "title": "Push Notifications",
@@ -1298,6 +1303,7 @@
   "shortcuts": {
     "title": "Keyboard Shortcuts",
     "subtitle": "Speed up your workflow with these keyboard shortcuts.",
+    "extended": "Extended",
     "pressBefore": "Press",
     "pressAfter": "to toggle this dialog",
     "cat": {

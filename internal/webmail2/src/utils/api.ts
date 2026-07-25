@@ -237,6 +237,7 @@ export interface AppearanceSettings {
   hideWidgetPanel: boolean
   startupFolder: string
   autoCc: string
+  shortcutMode: string // "off" | "basic" | "extended" keyboard-shortcut level
 }
 
 export interface Delegation {

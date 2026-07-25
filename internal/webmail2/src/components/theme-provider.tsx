@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from "react"
 import { getCookie, setCookie } from "@/utils/cookies"
+import { setShortcutMode, type ShortcutMode } from "@/utils/shortcutMode"
 import api from "@/utils/api"
 
 type Theme = "dark" | "light" | "system"
@@ -63,6 +64,9 @@ export function ThemeProvider({
         if (s.theme === "light" || s.theme === "dark" || s.theme === "system") {
           setTheme(s.theme as Theme)
         }
+        // Mirror the DB-backed shortcut mode to its cookie so the key hooks read
+        // the right level on a fresh browser (this provider mounts app-wide).
+        if (s.shortcutMode) setShortcutMode(s.shortcutMode as ShortcutMode)
       })
       .catch(() => {
         /* best-effort: fall back to the cookie/default */

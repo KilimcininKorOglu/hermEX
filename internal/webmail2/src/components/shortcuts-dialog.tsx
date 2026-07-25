@@ -9,24 +9,34 @@ import {
 } from "@/components/ui/dialog"
 import { shortcuts } from "@/hooks/useKeyboardShortcuts"
 import { Separator } from "@/components/ui/separator"
+import { Badge } from "@/components/ui/badge"
 import { useI18n } from "@/hooks/useI18n"
+import { getShortcutMode, basicEnabled, extendedEnabled, type ShortcutMode } from "@/utils/shortcutMode"
 
 export function ShortcutsDialog() {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
+  const [mode, setMode] = useState<ShortcutMode>(() => getShortcutMode())
 
   useEffect(() => {
-    const handleToggle = () => setOpen((prev) => !prev)
+    const handleToggle = () => { setMode(getShortcutMode()); setOpen((prev) => !prev) }
     const handleClose = () => setOpen(false)
+    const handleModeChange = () => setMode(getShortcutMode())
 
     document.addEventListener("toggle-shortcuts", handleToggle)
     document.addEventListener("close-dialogs", handleClose)
+    document.addEventListener("shortcut-mode-changed", handleModeChange)
 
     return () => {
       document.removeEventListener("toggle-shortcuts", handleToggle)
       document.removeEventListener("close-dialogs", handleClose)
+      document.removeEventListener("shortcut-mode-changed", handleModeChange)
     }
   }, [])
+
+  // enabled tells whether a shortcut of the given level fires under the current mode.
+  const enabled = (level: string) =>
+    level === "extended" ? extendedEnabled(mode) : basicEnabled(mode)
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -48,12 +58,21 @@ export function ShortcutsDialog() {
                   {t(section.category)}
                 </h3>
                 <div className="space-y-2">
-                  {section.items.map((item, index) => (
+                  {section.items.map((item, index) => {
+                    const active = enabled(item.level)
+                    return (
                     <div
                       key={index}
-                      className="flex items-center justify-between py-1"
+                      className={`flex items-center justify-between py-1 ${active ? "" : "opacity-40"}`}
                     >
-                      <span className="text-sm">{t(item.description)}</span>
+                      <span className="flex items-center gap-1.5 text-sm">
+                        {t(item.description)}
+                        {item.level === "extended" && (
+                          <Badge variant="secondary" className="text-[10px] px-1 py-0">
+                            {t("shortcuts.extended")}
+                          </Badge>
+                        )}
+                      </span>
                       <div className="flex items-center gap-1">
                         {item.keys.map((key, keyIndex) => (
                           <span key={keyIndex}>
@@ -67,7 +86,8 @@ export function ShortcutsDialog() {
                         ))}
                       </div>
                     </div>
-                  ))}
+                    )
+                  })}
                 </div>
               </div>
             ))}

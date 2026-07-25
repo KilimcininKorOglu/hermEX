@@ -25,6 +25,7 @@ import type { VacationAutoReply, ClientSession, Delegation, Category, RecipientR
 import * as smimeStore from "@/utils/smime"
 import type { CertInfo } from "@/utils/smime"
 import { detectTimeZone, listTimeZones } from "@/utils/timezone"
+import { setShortcutMode, type ShortcutMode } from "@/utils/shortcutMode"
 import { enablePushNotifications, disablePushNotifications, pushSupported } from "@/utils/push"
 import { RichTextEditor } from "@/components/RichTextEditor"
 
@@ -161,6 +162,7 @@ export function SettingsPage() {
     hideWidgetPanel: false,
     startupFolder: "",
     autoCc: "",
+    shortcutMode: "extended",
   })
 
   useEffect(() => {
@@ -204,6 +206,7 @@ export function SettingsPage() {
         hideWidgetPanel: a.hideWidgetPanel,
         startupFolder: a.startupFolder ?? "",
         autoCc: a.autoCc ?? "",
+        shortcutMode: a.shortcutMode ?? "extended",
       }))
       .catch(() => undefined)
       .catch(() => undefined)
@@ -238,6 +241,8 @@ export function SettingsPage() {
     setAppearance(next)
     if (next.theme !== theme) setTheme(next.theme as "light" | "dark" | "system")
     if (next.language !== "system") changeLocale(next.language)
+    // Mirror the shortcut mode to its cookie so the key hooks pick it up live.
+    setShortcutMode(next.shortcutMode as ShortcutMode)
     api.setAppearanceSettings(next).catch(() => undefined)
   }
 
@@ -260,7 +265,9 @@ export function SettingsPage() {
         hideWidgetPanel: a.hideWidgetPanel,
         startupFolder: a.startupFolder ?? "",
         autoCc: a.autoCc ?? "",
+        shortcutMode: a.shortcutMode ?? "extended",
       })
+      setShortcutMode((a.shortcutMode ?? "extended") as ShortcutMode)
       setFirstDayOfWeek(c.firstDayOfWeek ?? 1)
       setResolution(c.resolution ?? 30)
       setWorkDayStart(c.workDayStart ?? 9)
@@ -2108,6 +2115,21 @@ export function SettingsPage() {
         description={t("settings.shortcuts.description")}
       >
         <div className="space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="font-medium">{t("settings.shortcuts.mode")}</p>
+              <p className="text-sm text-muted-foreground">{t("settings.shortcuts.modeDescription")}</p>
+            </div>
+            <select
+              value={appearance.shortcutMode}
+              onChange={(e) => saveAppearance({ ...appearance, shortcutMode: e.target.value })}
+              className="max-w-[16rem] rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/20"
+            >
+              <option value="off">{t("settings.shortcuts.modeOff")}</option>
+              <option value="basic">{t("settings.shortcuts.modeBasic")}</option>
+              <option value="extended">{t("settings.shortcuts.modeExtended")}</option>
+            </select>
+          </div>
           <p className="text-sm text-muted-foreground">
             {t("settings.shortcuts.help")}
           </p>

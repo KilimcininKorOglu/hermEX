@@ -27,6 +27,7 @@ import { EmailDetailPage } from "@/pages/email-detail"
 import { useI18n } from "@/hooks/useI18n"
 import { formatAbsolute } from "@/utils/date"
 import { getCookie, setCookie } from "@/utils/cookies"
+import { getShortcutMode } from "@/utils/shortcutMode"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -170,6 +171,7 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
   // typing in an input/textarea so ordinary text entry never hijacks the keys.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (getShortcutMode() === "off") return
       const el = e.target as HTMLElement | null
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return
       if (e.metaKey || e.ctrlKey || e.altKey) return

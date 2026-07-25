@@ -646,7 +646,12 @@
       "title": "Klavye Kısayolları",
       "description": "Klavye kısayollarını görüntüleyin ve yönetin",
       "help": "Klavye kısayolları, gezinmenize ve işlemleri daha hızlı yapmanıza yardımcı olur.",
-      "view": "Klavye Kısayollarını Görüntüle"
+      "view": "Klavye Kısayollarını Görüntüle",
+      "mode": "Klavye kısayolları",
+      "modeDescription": "Hangi klavye kısayollarının etkin olacağını seçin.",
+      "modeOff": "Kapalı",
+      "modeBasic": "Temel",
+      "modeExtended": "Genişletilmiş"
     },
     "push": {
       "title": "Anlık Bildirimler",
@@ -1298,6 +1303,7 @@
   "shortcuts": {
     "title": "Klavye Kısayolları",
     "subtitle": "Bu klavye kısayollarıyla iş akışınızı hızlandırın.",
+    "extended": "Genişletilmiş",
     "pressBefore": "",
     "pressAfter": "tuşuna basarak bu pencereyi açıp kapatın",
     "cat": {
