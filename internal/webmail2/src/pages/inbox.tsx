@@ -402,6 +402,9 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
         "group flex cursor-pointer items-center gap-3 transition-all duration-200",
         viewMode === "list" ? "p-4 hover:bg-accent/50" : "p-2 hover:bg-accent/50",
         !email.read && viewMode === "list" && "bg-accent/5",
+        // Marker the unread-border CSS rule keys off (gated by the DB-backed
+        // display toggle reflected on <html>); harmless when the toggle is off.
+        !email.read && "hermex-unread",
         sel.isSelected(email.id) && "bg-primary/5",
         previewPane === "right" && selectedId === email.id && "bg-primary/10"
       )}

@@ -28,6 +28,7 @@ import { detectTimeZone, listTimeZones } from "@/utils/timezone"
 import { setShortcutMode, type ShortcutMode } from "@/utils/shortcutMode"
 import { applyIconSet } from "@/utils/iconSet"
 import { defaultMailColumns, setMailColumns } from "@/utils/mailListColumns"
+import { applyUnreadBorder } from "@/utils/displayPrefs"
 import { setInboxNavigation, clampPageSize, DEFAULT_PAGE_SIZE, MIN_PAGE_SIZE, MAX_PAGE_SIZE, type InboxNavMode } from "@/utils/inboxNavigation"
 import pkg from "../../package.json"
 import { enablePushNotifications, disablePushNotifications, pushSupported } from "@/utils/push"
@@ -282,6 +283,8 @@ export function SettingsPage() {
     applyIconSet(next.iconSet)
     // Mirror the message-list columns to their cookie so the inbox re-reads live.
     setMailColumns(next.mailListColumns)
+    // Reflect the unread-border toggle onto <html> for a live preview.
+    applyUnreadBorder(next.unreadBorder)
     // Mirror the inbox navigation mode + page size so MailboxContext re-reads live.
     setInboxNavigation(next.inboxNavMode as InboxNavMode, next.inboxPageSize)
     // Let app-wide consumers (e.g. the title unread counter) re-read the settings.
@@ -319,6 +322,7 @@ export function SettingsPage() {
       })
       setShortcutMode((a.shortcutMode ?? "extended") as ShortcutMode)
       applyIconSet(a.iconSet ?? "breeze")
+      applyUnreadBorder(a.unreadBorder ?? false)
       setMailColumns(a.mailListColumns ?? defaultMailColumns())
       setInboxNavigation((a.inboxNavMode ?? "pagination") as InboxNavMode, a.inboxPageSize ?? DEFAULT_PAGE_SIZE)
       setFirstDayOfWeek(c.firstDayOfWeek ?? 1)

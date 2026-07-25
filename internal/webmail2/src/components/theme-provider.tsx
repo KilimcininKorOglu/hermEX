@@ -3,6 +3,7 @@ import { getCookie, setCookie } from "@/utils/cookies"
 import { setShortcutMode, type ShortcutMode } from "@/utils/shortcutMode"
 import { applyIconSet } from "@/utils/iconSet"
 import { setMailColumns } from "@/utils/mailListColumns"
+import { applyUnreadBorder } from "@/utils/displayPrefs"
 import api from "@/utils/api"
 
 type Theme = "dark" | "light" | "system"
@@ -75,6 +76,9 @@ export function ThemeProvider({
         // Mirror the DB-backed message-list columns to their cookie so the inbox
         // reads the chosen set synchronously on a fresh browser.
         if (s.mailListColumns) setMailColumns(s.mailListColumns)
+        // Reflect the unread-border toggle onto <html> so index.css draws the
+        // accent border on unread rows app-wide from first paint.
+        applyUnreadBorder(s.unreadBorder)
       })
       .catch(() => {
         /* best-effort: fall back to the cookie/default */

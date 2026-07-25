@@ -192,3 +192,11 @@
 :root[data-iconset="classic"] svg.lucide {
   stroke-width: 2.75px;
 }
+
+/* Unread-border preference (reference SettingsDisplayWidget "Give unread items a
+   colored border" -> body class k-unreadborders): draw a left accent border on
+   unread message rows only while the DB-backed toggle is on. The row marks
+   itself .hermex-unread; the data attribute on <html> gates the rule app-wide. */
+:root[data-unread-border="true"] .hermex-unread {
+  border-left: 4px solid var(--color-primary);
+}

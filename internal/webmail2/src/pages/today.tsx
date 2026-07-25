@@ -41,11 +41,17 @@ export function TodayPage() {
   const [quickContactName, setQuickContactName] = useState("")
   const [quickContactEmail, setQuickContactEmail] = useState("")
   const [recentContacts, setRecentContacts] = useState<Contact[]>([])
+  // hideWidgets mirrors the DB-backed "Hide widget panel" display setting
+  // (reference zarafa/v1/widgets/sidebar/hide_widgetpanel): when on, the
+  // interactive quick-create widgets are hidden and only the read-only day
+  // summaries remain.
+  const [hideWidgets, setHideWidgets] = useState(false)
 
   useEffect(() => {
     api.getCalendarEvents().then((res) => setEvents(res.events ?? [])).catch(() => setEvents([]))
     api.getTasks().then((res) => setTasks(res.tasks ?? [])).catch(() => setTasks([]))
     api.getContacts().then((res) => setRecentContacts((res.contacts ?? []).slice(0, 5))).catch(() => setRecentContacts([]))
+    api.getAppearanceSettings().then((s) => setHideWidgets(s.hideWidgetPanel)).catch(() => undefined)
   }, [])
 
   const todayKey = dateKey(new Date())
@@ -138,6 +144,7 @@ export function TodayPage() {
         </section>
 
         {/* QuickAppointmentWidget: quick-add an appointment for today. */}
+        {!hideWidgets && (
         <section className="rounded-lg border bg-card p-4">
           <h2 className="flex items-center gap-2 font-medium">
             <Plus className="h-4 w-4" /> {t("today.quickAppointment")}
@@ -168,6 +175,7 @@ export function TodayPage() {
             </Button>
           </div>
         </section>
+        )}
 
         {/* MailWidget: inbox unread count + jump-in. */}
         <section className="rounded-lg border bg-card p-4">
@@ -216,6 +224,7 @@ export function TodayPage() {
         </section>
 
         {/* QuickNoteWidget: capture a note in one line. */}
+        {!hideWidgets && (
         <section className="rounded-lg border bg-card p-4">
           <div className="flex items-center justify-between">
             <h2 className="flex items-center gap-2 font-medium">
@@ -243,8 +252,10 @@ export function TodayPage() {
             </Button>
           </form>
         </section>
+        )}
 
         {/* QuickContactWidget: add a contact + recent contacts. */}
+        {!hideWidgets && (
         <section className="rounded-lg border bg-card p-4">
           <div className="flex items-center justify-between">
             <h2 className="flex items-center gap-2 font-medium">
@@ -288,6 +299,7 @@ export function TodayPage() {
             </ul>
           )}
         </section>
+        )}
       </div>
     </div>
   )
