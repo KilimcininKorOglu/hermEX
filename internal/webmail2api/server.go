@@ -248,7 +248,7 @@ func (s *Server) Handler() http.Handler {
 
 // securityHeaders stamps clickjacking and MIME-sniffing defences on every
 // response. X-Frame-Options: DENY and the frame-ancestors CSP both forbid
-// embedding the webmail (SPA or any endpoint) in an attacker's iframe — belt and
+// embedding the webmail (SPA or any endpoint) in an attacker's iframe: belt and
 // braces, since older browsers honour only the former and modern ones only the
 // latter. X-Content-Type-Options: nosniff stops a browser from second-guessing a
 // declared Content-Type, which matters most for attachment downloads served from
