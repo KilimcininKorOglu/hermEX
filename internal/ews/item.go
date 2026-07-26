@@ -99,7 +99,7 @@ type attachmentsWrap struct {
 func (s *Server) handleFindItem(w http.ResponseWriter, inner []byte, sess *session) {
 	var req findItemRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "FindItem: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "FindItem: invalid request", err)
 		return
 	}
 	cache := s.newStoreCache()
@@ -241,7 +241,7 @@ func (s *Server) handleFindItem(w http.ResponseWriter, inner []byte, sess *sessi
 func (s *Server) handleGetItem(w http.ResponseWriter, inner []byte, sess *session) {
 	var req getItemRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "GetItem: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "GetItem: invalid request", err)
 		return
 	}
 	cache := s.newStoreCache()
@@ -338,7 +338,7 @@ func (s *Server) handleGetItem(w http.ResponseWriter, inner []byte, sess *sessio
 func (s *Server) handleGetAttachment(w http.ResponseWriter, inner []byte, sess *session) {
 	var req getAttachmentRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "GetAttachment: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "GetAttachment: invalid request", err)
 		return
 	}
 	cache := s.newStoreCache()

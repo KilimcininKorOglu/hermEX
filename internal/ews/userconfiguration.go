@@ -140,7 +140,7 @@ type deleteUserConfigResponse struct {
 func (s *Server) handleGetUserConfiguration(w http.ResponseWriter, inner []byte, sess *session) {
 	var req getUserConfigRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "GetUserConfiguration: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "GetUserConfiguration: invalid request", err)
 		return
 	}
 	fid, code := resolveConfigFolder(req.Name)
@@ -150,13 +150,13 @@ func (s *Server) handleGetUserConfiguration(w http.ResponseWriter, inner []byte,
 	}
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	defer st.Close()
 	recs, err := st.GetUserConfigs()
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	idx := indexUserConfig(recs, fid, req.Name.Name)
@@ -174,7 +174,7 @@ func (s *Server) handleGetUserConfiguration(w http.ResponseWriter, inner []byte,
 func (s *Server) handleCreateUserConfiguration(w http.ResponseWriter, inner []byte, sess *session) {
 	var req createUserConfigRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "CreateUserConfiguration: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "CreateUserConfiguration: invalid request", err)
 		return
 	}
 	fid, code := resolveConfigFolder(req.Config.Name)
@@ -184,13 +184,13 @@ func (s *Server) handleCreateUserConfiguration(w http.ResponseWriter, inner []by
 	}
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	defer st.Close()
 	recs, err := st.GetUserConfigs()
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	rec := configFromRequest(fid, req.Config)
@@ -200,7 +200,7 @@ func (s *Server) handleCreateUserConfiguration(w http.ResponseWriter, inner []by
 		recs = append(recs, rec)
 	}
 	if err := st.SetUserConfigs(recs); err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	writeResponse(w, createUserConfigResponse{Messages: []ucActionMessage{{ResponseClass: "Success", ResponseCode: "NoError"}}})
@@ -213,7 +213,7 @@ func (s *Server) handleCreateUserConfiguration(w http.ResponseWriter, inner []by
 func (s *Server) handleUpdateUserConfiguration(w http.ResponseWriter, inner []byte, sess *session) {
 	var req updateUserConfigRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "UpdateUserConfiguration: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "UpdateUserConfiguration: invalid request", err)
 		return
 	}
 	fid, code := resolveConfigFolder(req.Config.Name)
@@ -223,13 +223,13 @@ func (s *Server) handleUpdateUserConfiguration(w http.ResponseWriter, inner []by
 	}
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	defer st.Close()
 	recs, err := st.GetUserConfigs()
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	idx := indexUserConfig(recs, fid, req.Config.Name.Name)
@@ -239,7 +239,7 @@ func (s *Server) handleUpdateUserConfiguration(w http.ResponseWriter, inner []by
 	}
 	recs[idx] = configFromRequest(fid, req.Config)
 	if err := st.SetUserConfigs(recs); err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	writeResponse(w, updateUserConfigResponse{Messages: []ucActionMessage{{ResponseClass: "Success", ResponseCode: "NoError"}}})
@@ -250,7 +250,7 @@ func (s *Server) handleUpdateUserConfiguration(w http.ResponseWriter, inner []by
 func (s *Server) handleDeleteUserConfiguration(w http.ResponseWriter, inner []byte, sess *session) {
 	var req deleteUserConfigRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "DeleteUserConfiguration: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "DeleteUserConfiguration: invalid request", err)
 		return
 	}
 	fid, code := resolveConfigFolder(req.Name)
@@ -260,13 +260,13 @@ func (s *Server) handleDeleteUserConfiguration(w http.ResponseWriter, inner []by
 	}
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	defer st.Close()
 	recs, err := st.GetUserConfigs()
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	idx := indexUserConfig(recs, fid, req.Name.Name)
@@ -276,7 +276,7 @@ func (s *Server) handleDeleteUserConfiguration(w http.ResponseWriter, inner []by
 	}
 	recs = append(recs[:idx], recs[idx+1:]...)
 	if err := st.SetUserConfigs(recs); err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	writeResponse(w, deleteUserConfigResponse{Messages: []ucActionMessage{{ResponseClass: "Success", ResponseCode: "NoError"}}})

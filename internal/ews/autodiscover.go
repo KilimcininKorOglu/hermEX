@@ -4,6 +4,9 @@ import (
 	"encoding/xml"
 	"io"
 	"net/http"
+
+	"hermex/internal/logging"
+	"hermex/internal/serve"
 )
 
 // maxAutodiscoverBody caps the Autodiscover request body read.
@@ -84,7 +87,14 @@ func (s *Server) serveAutodiscover(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := xml.Marshal(&resp)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.Logger.Emit(logging.Event{
+			Level:      logging.LevelError,
+			Subsystem:  logging.EWS,
+			Name:       "autodiscover.marshal.fail",
+			RemoteAddr: serve.ClientAddr(r),
+			Err:        err.Error(),
+		})
+		http.Error(w, "an internal error occurred", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")

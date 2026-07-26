@@ -31,7 +31,7 @@ type createFolderResponse struct {
 func (s *Server) handleCreateFolder(w http.ResponseWriter, inner []byte, sess *session) {
 	var req createFolderRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "CreateFolder: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "CreateFolder: invalid request", err)
 		return
 	}
 	targets := resolveTargets(req.ParentFolderID)
@@ -52,7 +52,7 @@ func (s *Server) handleCreateFolder(w http.ResponseWriter, inner []byte, sess *s
 
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	defer st.Close()
@@ -97,12 +97,12 @@ type deleteFolderResponse struct {
 func (s *Server) handleDeleteFolder(w http.ResponseWriter, inner []byte, sess *session) {
 	var req deleteFolderRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "DeleteFolder: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "DeleteFolder: invalid request", err)
 		return
 	}
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	defer st.Close()
@@ -174,12 +174,12 @@ type updateFolderResponse struct {
 func (s *Server) handleUpdateFolder(w http.ResponseWriter, inner []byte, sess *session) {
 	var req updateFolderRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "UpdateFolder: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "UpdateFolder: invalid request", err)
 		return
 	}
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	defer st.Close()
@@ -337,7 +337,7 @@ func (s *Server) handleCopyFolder(w http.ResponseWriter, inner []byte, sess *ses
 func (s *Server) moveCopyFolders(w http.ResponseWriter, inner []byte, sess *session, copy bool) {
 	var req moveCopyFolderRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "MoveCopyFolder: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "MoveCopyFolder: invalid request", err)
 		return
 	}
 	dests := resolveTargets(req.ToFolderID)
@@ -358,7 +358,7 @@ func (s *Server) moveCopyFolders(w http.ResponseWriter, inner []byte, sess *sess
 
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	defer st.Close()

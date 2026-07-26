@@ -66,7 +66,7 @@ func (s *Server) handleSyncFolderItems(w http.ResponseWriter, inner []byte, sess
 	s.icsSync(sess.user, "folder-items")
 	var req syncFolderItemsRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "SyncFolderItems: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "SyncFolderItems: invalid request", err)
 		return
 	}
 	targets := resolveTargets(req.SyncFolderID)
@@ -91,7 +91,7 @@ func (s *Server) handleSyncFolderItems(w http.ResponseWriter, inner []byte, sess
 	if !isOwn {
 		rights, perr := st.ResolvePermission(fid, sess.user)
 		if perr != nil {
-			writeSOAPFault(w, "ErrorInternalServerError", perr.Error())
+			s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", perr)
 			return
 		}
 		if rights&mapi.FrightsReadAny == 0 {
@@ -117,7 +117,7 @@ func (s *Server) handleSyncFolderItems(w http.ResponseWriter, inner []byte, sess
 	}
 	state, err := loadState(stateStore)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	fstate := state.folder(stateKey)
@@ -136,7 +136,7 @@ func (s *Server) handleSyncFolderItems(w http.ResponseWriter, inner []byte, sess
 
 	live, err := st.ListMessages(fid)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 
@@ -205,7 +205,7 @@ func (s *Server) handleSyncFolderItems(w http.ResponseWriter, inner []byte, sess
 	fstate.SyncState = newToken
 	fstate.Items = newSnap
 	if err := saveState(stateStore, state); err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 

@@ -30,12 +30,12 @@ type markAllReadResponse struct {
 func (s *Server) handleMarkAllItemsAsRead(w http.ResponseWriter, inner []byte, sess *session) {
 	var req markAllReadRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "MarkAllItemsAsRead: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "MarkAllItemsAsRead: invalid request", err)
 		return
 	}
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	defer st.Close()

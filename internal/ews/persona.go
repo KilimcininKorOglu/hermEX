@@ -85,7 +85,7 @@ type getPersonaResponse struct {
 func (s *Server) handleFindPeople(w http.ResponseWriter, inner []byte, _ *session) {
 	var req findPeopleRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "FindPeople: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "FindPeople: invalid request", err)
 		return
 	}
 	var personas []personaOut
@@ -112,7 +112,7 @@ func (s *Server) handleFindPeople(w http.ResponseWriter, inner []byte, _ *sessio
 func (s *Server) handleGetPersona(w http.ResponseWriter, inner []byte, _ *session) {
 	var req getPersonaRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "GetPersona: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "GetPersona: invalid request", err)
 		return
 	}
 	target := strings.TrimSpace(req.EmailAddress.EmailAddress)

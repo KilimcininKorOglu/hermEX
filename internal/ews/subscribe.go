@@ -159,7 +159,7 @@ type notifEvent struct {
 func (s *Server) handleSubscribe(w http.ResponseWriter, inner []byte, sess *session) {
 	var req subscribeRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "Subscribe: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "Subscribe: invalid request", err)
 		return
 	}
 	if req.Push != nil {
@@ -193,14 +193,14 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, inner []byte, sess *sess
 
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	defer st.Close()
 
 	snap, err := snapshotFolders(st, allFolders, folderIDs)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 
@@ -221,7 +221,7 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, inner []byte, sess *sess
 func (s *Server) handleUnsubscribe(w http.ResponseWriter, inner []byte, sess *session) {
 	var req unsubscribeRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "Unsubscribe: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "Unsubscribe: invalid request", err)
 		return
 	}
 	msg := availResponseMessage{ResponseClass: "Success", ResponseCode: "NoError"}
@@ -238,7 +238,7 @@ func (s *Server) handleUnsubscribe(w http.ResponseWriter, inner []byte, sess *se
 func (s *Server) handleGetEvents(w http.ResponseWriter, inner []byte, sess *session) {
 	var req getEventsRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "GetEvents: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "GetEvents: invalid request", err)
 		return
 	}
 	msg, err := s.getEvents(req.SubscriptionID, sess.user)
@@ -249,7 +249,7 @@ func (s *Server) handleGetEvents(w http.ResponseWriter, inner []byte, sess *sess
 			}}})
 			return
 		}
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	writeResponse(w, getEventsResponse{Messages: []getEventsResponseMessage{msg}})

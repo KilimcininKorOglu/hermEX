@@ -48,7 +48,7 @@ type rootItemID struct {
 func (s *Server) handleDeleteAttachment(w http.ResponseWriter, inner []byte, sess *session) {
 	var req deleteAttachmentRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "DeleteAttachment: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "DeleteAttachment: invalid request", err)
 		return
 	}
 	cache := s.newStoreCache()

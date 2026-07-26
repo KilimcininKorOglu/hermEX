@@ -126,7 +126,7 @@ type tzTarget struct {
 func (s *Server) handleGetServerTimeZones(w http.ResponseWriter, inner []byte, _ *session) {
 	var req getServerTimeZonesRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "GetServerTimeZones: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "GetServerTimeZones: invalid request", err)
 		return
 	}
 	want := req.Ids.IDs

@@ -62,7 +62,7 @@ type createAttachmentResponseMessage struct {
 func (s *Server) handleCreateAttachment(w http.ResponseWriter, inner []byte, sess *session) {
 	var req createAttachmentRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "CreateAttachment: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "CreateAttachment: invalid request", err)
 		return
 	}
 
@@ -152,7 +152,7 @@ func (s *Server) handleCreateAttachment(w http.ResponseWriter, inner []byte, ses
 		if err := st.ModifyMessageProperties(parent.MessageID, mapi.PropertyValues{
 			{Tag: mapi.PrLastModificationTime, Value: mapi.UnixToNTTime(time.Now())},
 		}); err != nil {
-			writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+			s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 			return
 		}
 	}

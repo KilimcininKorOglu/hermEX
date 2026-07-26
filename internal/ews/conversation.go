@@ -139,7 +139,7 @@ type stringList struct {
 func (s *Server) handleFindConversation(w http.ResponseWriter, inner []byte, sess *session) {
 	var req findConversationRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "FindConversation: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "FindConversation: invalid request", err)
 		return
 	}
 	targets := resolveTargets(req.ParentFolderID)
@@ -259,12 +259,12 @@ type itemIDElem struct {
 func (s *Server) handleGetConversationItems(w http.ResponseWriter, inner []byte, sess *session) {
 	var req getConversationItemsRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "GetConversationItems: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "GetConversationItems: invalid request", err)
 		return
 	}
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	defer st.Close()
@@ -351,12 +351,12 @@ type applyConversationActionResponse struct {
 func (s *Server) handleApplyConversationAction(w http.ResponseWriter, inner []byte, sess *session) {
 	var req applyConversationActionRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "ApplyConversationAction: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "ApplyConversationAction: invalid request", err)
 		return
 	}
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	defer st.Close()

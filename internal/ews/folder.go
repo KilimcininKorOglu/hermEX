@@ -139,7 +139,7 @@ type deleteFolderChange struct {
 func (s *Server) handleGetFolder(w http.ResponseWriter, inner []byte, sess *session) {
 	var req getFolderRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "GetFolder: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "GetFolder: invalid request", err)
 		return
 	}
 	cache := s.newStoreCache()
@@ -290,7 +290,7 @@ func emptyFindFolder() findFolderResponseMessage {
 func (s *Server) handleFindFolder(w http.ResponseWriter, inner []byte, sess *session) {
 	var req findFolderRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "FindFolder: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "FindFolder: invalid request", err)
 		return
 	}
 	cache := s.newStoreCache()
@@ -380,17 +380,17 @@ func (s *Server) handleSyncFolderHierarchy(w http.ResponseWriter, inner []byte, 
 	s.icsSync(sess.user, "folder-hierarchy")
 	var req syncFolderHierarchyRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "SyncFolderHierarchy: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "SyncFolderHierarchy: invalid request", err)
 		return
 	}
-	st, all, ok := openFolders(w, sess)
+	st, all, ok := s.openFolders(w, sess)
 	if !ok {
 		return
 	}
 	defer st.Close()
 	state, err := loadState(st)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 
@@ -406,7 +406,7 @@ func (s *Server) handleSyncFolderHierarchy(w http.ResponseWriter, inner []byte, 
 	if !primed {
 		elems, err := folderElements(st, all, all, "")
 		if err != nil {
-			writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+			s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 			return
 		}
 		for _, e := range elems {
@@ -421,7 +421,7 @@ func (s *Server) handleSyncFolderHierarchy(w http.ResponseWriter, inner []byte, 
 			if !prevSet[f.ID] {
 				e, err := buildFolderElem(st, f, all, "")
 				if err != nil {
-					writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+					s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 					return
 				}
 				changes.Create = append(changes.Create, createFolderChange{Folder: e})
@@ -440,7 +440,7 @@ func (s *Server) handleSyncFolderHierarchy(w http.ResponseWriter, inner []byte, 
 	state.HierarchyState = newToken
 	state.HierarchyFolders = cur
 	if err := saveState(st, state); err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 
@@ -459,16 +459,16 @@ func (s *Server) handleSyncFolderHierarchy(w http.ResponseWriter, inner []byte, 
 
 // openFolders opens the session's store and lists its folders, writing a Fault
 // and returning ok=false on error.
-func openFolders(w http.ResponseWriter, sess *session) (*objectstore.Store, []objectstore.FolderInfo, bool) {
+func (s *Server) openFolders(w http.ResponseWriter, sess *session) (*objectstore.Store, []objectstore.FolderInfo, bool) {
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return nil, nil, false
 	}
 	all, err := st.ListFolders()
 	if err != nil {
 		st.Close()
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return nil, nil, false
 	}
 	return st, all, true

@@ -45,7 +45,7 @@ type resolution struct {
 func (s *Server) handleResolveNames(w http.ResponseWriter, inner []byte, _ *session) {
 	var req resolveNamesRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "ResolveNames: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "ResolveNames: invalid request", err)
 		return
 	}
 	gal, ok := s.accounts.(directory.GAL)

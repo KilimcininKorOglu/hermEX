@@ -33,7 +33,7 @@ type getUserPhotoResponse struct {
 func (s *Server) handleGetUserPhoto(w http.ResponseWriter, inner []byte, sess *session) {
 	var req getUserPhotoRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "GetUserPhoto: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "GetUserPhoto: invalid request", err)
 		return
 	}
 	photo := s.userPhoto(req.Email, sess)

@@ -61,7 +61,7 @@ func (s *Server) handleGetRoomLists(w http.ResponseWriter, _ []byte, _ *session)
 	}
 	rooms, err := rl.ListRooms()
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", "GetRoomLists: "+err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "GetRoomLists: an internal error occurred", err)
 		return
 	}
 	seen := make(map[string]bool)
@@ -120,7 +120,7 @@ type roomEntry struct {
 func (s *Server) handleGetRooms(w http.ResponseWriter, inner []byte, _ *session) {
 	var req getRoomsRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "GetRooms: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "GetRooms: invalid request", err)
 		return
 	}
 	target := addrDomain(req.RoomList.EmailAddress)
@@ -136,7 +136,7 @@ func (s *Server) handleGetRooms(w http.ResponseWriter, inner []byte, _ *session)
 	}
 	rooms, err := rl.ListRooms()
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", "GetRooms: "+err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "GetRooms: an internal error occurred", err)
 		return
 	}
 	var entries []roomEntry

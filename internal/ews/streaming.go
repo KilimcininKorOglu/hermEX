@@ -60,7 +60,7 @@ type errorSubs struct {
 func (s *Server) handleGetStreamingEvents(w http.ResponseWriter, r *http.Request, inner []byte, sess *session) {
 	var req getStreamingEventsRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "GetStreamingEvents: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "GetStreamingEvents: invalid request", err)
 		return
 	}
 

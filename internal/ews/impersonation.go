@@ -55,13 +55,13 @@ func (s *Server) applyImpersonation(w http.ResponseWriter, sess *session, imp *i
 	}
 	st, err := objectstore.Open(targetPath)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return false
 	}
 	delegates, err := st.GetDelegates()
 	st.Close()
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return false
 	}
 	if !containsFold(delegates, sess.realUser) {

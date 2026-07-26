@@ -98,14 +98,14 @@ func (s *Server) handleGetInboxRules(w http.ResponseWriter, inner []byte, sess *
 
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	defer st.Close()
 
 	rules, err := st.ListRules(int64(mapi.PrivateFIDInbox))
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 
@@ -417,12 +417,12 @@ func ruleOpError(index int, fieldURI, code, message string) ruleOperationError {
 func (s *Server) handleUpdateInboxRules(w http.ResponseWriter, inner []byte, sess *session) {
 	var req updateInboxRulesRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "UpdateInboxRules: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "UpdateInboxRules: invalid request", err)
 		return
 	}
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	defer st.Close()
@@ -448,7 +448,7 @@ func (s *Server) handleUpdateInboxRules(w http.ResponseWriter, inner []byte, ses
 	}
 	if len(changes) > 0 {
 		if err := st.ModifyRules(int64(mapi.PrivateFIDInbox), false, changes); err != nil {
-			writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+			s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 			return
 		}
 	}

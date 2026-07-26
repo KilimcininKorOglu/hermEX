@@ -62,7 +62,7 @@ type createItemResponse struct {
 func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *session) {
 	var req createItemRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "CreateItem: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "CreateItem: invalid request", err)
 		return
 	}
 	disp := req.MessageDisposition
@@ -71,7 +71,7 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 	}
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	defer st.Close()

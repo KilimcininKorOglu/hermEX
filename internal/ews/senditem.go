@@ -41,7 +41,7 @@ type sendItemResponse struct {
 func (s *Server) handleSendItem(w http.ResponseWriter, inner []byte, sess *session) {
 	var req sendItemRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "SendItem: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "SendItem: invalid request", err)
 		return
 	}
 	save := strings.EqualFold(req.SaveItemToFolder, "true") || req.SaveItemToFolder == "1"

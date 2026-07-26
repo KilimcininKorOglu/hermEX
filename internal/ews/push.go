@@ -80,13 +80,13 @@ func (s *Server) handlePushSubscribe(w http.ResponseWriter, req *pushSubscriptio
 
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	snap, err := snapshotFolders(st, allFolders, folderIDs)
 	st.Close()
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 

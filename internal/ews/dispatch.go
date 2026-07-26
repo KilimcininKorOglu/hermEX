@@ -14,7 +14,7 @@ import (
 func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session) {
 	op, inner, imp, err := readEnvelope(r)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "could not parse SOAP envelope: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "could not parse SOAP envelope: invalid request", err)
 		return
 	}
 	// An ExchangeImpersonation header is gated and applied before the operation: on

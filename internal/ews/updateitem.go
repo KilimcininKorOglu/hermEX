@@ -47,7 +47,7 @@ type updateItemResponse struct {
 func (s *Server) handleUpdateItem(w http.ResponseWriter, inner []byte, sess *session) {
 	var req updateItemRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "UpdateItem: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "UpdateItem: invalid request", err)
 		return
 	}
 	cache := s.newStoreCache()
@@ -118,7 +118,7 @@ type deleteItemResponse struct {
 func (s *Server) handleDeleteItem(w http.ResponseWriter, inner []byte, sess *session) {
 	var req deleteItemRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "DeleteItem: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "DeleteItem: invalid request", err)
 		return
 	}
 	cache := s.newStoreCache()
@@ -187,7 +187,7 @@ func (s *Server) handleCopyItem(w http.ResponseWriter, inner []byte, sess *sessi
 func (s *Server) moveOrCopy(w http.ResponseWriter, inner []byte, sess *session, remove bool) {
 	var req moveCopyItemRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "Move/CopyItem: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "Move/CopyItem: invalid request", err)
 		return
 	}
 	targets := resolveTargets(req.ToFolderID)

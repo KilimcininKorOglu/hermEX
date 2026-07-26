@@ -55,7 +55,7 @@ type movedItemID struct {
 func (s *Server) handleMarkAsJunk(w http.ResponseWriter, inner []byte, sess *session) {
 	var req markAsJunkRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "MarkAsJunk: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "MarkAsJunk: invalid request", err)
 		return
 	}
 	cache := s.newStoreCache()

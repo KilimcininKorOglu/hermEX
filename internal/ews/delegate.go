@@ -192,7 +192,7 @@ func (s *Server) isOwnMailbox(sess *session, email string) bool {
 func (s *Server) handleGetDelegate(w http.ResponseWriter, inner []byte, sess *session) {
 	var req getDelegateRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "GetDelegate: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "GetDelegate: invalid request", err)
 		return
 	}
 	if !s.isOwnMailbox(sess, req.Mailbox.EmailAddress) {
@@ -202,21 +202,21 @@ func (s *Server) handleGetDelegate(w http.ResponseWriter, inner []byte, sess *se
 
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	defer st.Close()
 
 	delegates, err := st.GetDelegates()
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 
 	var grants folderGrants
 	if req.IncludePermissions {
 		if grants, err = collectFolderGrants(st); err != nil {
-			writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+			s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 			return
 		}
 	}
@@ -411,7 +411,7 @@ func indexFold(list []string, s string) int {
 func (s *Server) handleAddDelegate(w http.ResponseWriter, inner []byte, sess *session) {
 	var req addDelegateRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "AddDelegate: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "AddDelegate: invalid request", err)
 		return
 	}
 	if !s.isOwnMailbox(sess, req.Mailbox.EmailAddress) {
@@ -420,13 +420,13 @@ func (s *Server) handleAddDelegate(w http.ResponseWriter, inner []byte, sess *se
 	}
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	defer st.Close()
 	list, err := st.GetDelegates()
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 
@@ -451,7 +451,7 @@ func (s *Server) handleAddDelegate(w http.ResponseWriter, inner []byte, sess *se
 		msgs = append(msgs, delegateOK(addr))
 	}
 	if err := st.SetDelegates(list); err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	writeDelegateMutationResponse(w, "AddDelegateResponse", msgs)
@@ -465,7 +465,7 @@ func (s *Server) handleAddDelegate(w http.ResponseWriter, inner []byte, sess *se
 func (s *Server) handleRemoveDelegate(w http.ResponseWriter, inner []byte, sess *session) {
 	var req removeDelegateRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "RemoveDelegate: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "RemoveDelegate: invalid request", err)
 		return
 	}
 	if !s.isOwnMailbox(sess, req.Mailbox.EmailAddress) {
@@ -474,13 +474,13 @@ func (s *Server) handleRemoveDelegate(w http.ResponseWriter, inner []byte, sess 
 	}
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	defer st.Close()
 	list, err := st.GetDelegates()
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 
@@ -500,7 +500,7 @@ func (s *Server) handleRemoveDelegate(w http.ResponseWriter, inner []byte, sess 
 		msgs = append(msgs, delegateOK(addr))
 	}
 	if err := st.SetDelegates(list); err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	writeDelegateMutationResponse(w, "RemoveDelegateResponse", msgs)
@@ -513,7 +513,7 @@ func (s *Server) handleRemoveDelegate(w http.ResponseWriter, inner []byte, sess 
 func (s *Server) handleUpdateDelegate(w http.ResponseWriter, inner []byte, sess *session) {
 	var req updateDelegateRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "UpdateDelegate: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "UpdateDelegate: invalid request", err)
 		return
 	}
 	if !s.isOwnMailbox(sess, req.Mailbox.EmailAddress) {
@@ -522,13 +522,13 @@ func (s *Server) handleUpdateDelegate(w http.ResponseWriter, inner []byte, sess 
 	}
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	defer st.Close()
 	list, err := st.GetDelegates()
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 

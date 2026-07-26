@@ -6,6 +6,8 @@ import (
 	"io"
 	"net/http"
 	"sync/atomic"
+
+	"hermex/internal/logging"
 )
 
 // defaultMaxRequestBody caps a SOAP request body; it is the fallback when no operator
@@ -161,10 +163,29 @@ func writeSOAP(w http.ResponseWriter, innerXML []byte) {
 func writeResponse(w http.ResponseWriter, v any) {
 	out, err := xml.Marshal(v)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		// v is a server-built response struct, so a marshal failure is an internal
+		// bug, not client data; return a generic fault rather than the raw error.
+		writeSOAPFault(w, "ErrorInternalServerError", "an internal error occurred")
 		return
 	}
 	writeSOAP(w, out)
+}
+
+// soapFault logs the full internal error server-side and returns a SOAP Fault
+// carrying only the generic faultstring and response code, so raw Go error
+// strings (file paths, store and library internals) never reach the client. The
+// per-request "operation" event dispatch emits already carries the user and
+// RemoteAddr, so this records the failing error text alone. faultstring is the
+// sanitized text the client sees; err is the detail kept server-side.
+func (s *Server) soapFault(w http.ResponseWriter, code, faultstring string, err error) {
+	s.Logger.Emit(logging.Event{
+		Level:     logging.LevelError,
+		Subsystem: logging.EWS,
+		Name:      "operation.fail",
+		Fields:    logging.Fields{"code": code},
+		Err:       err.Error(),
+	})
+	writeSOAPFault(w, code, faultstring)
 }
 
 // writeSOAPFault writes an envelope-level SOAP 1.1 Fault carrying an EWS

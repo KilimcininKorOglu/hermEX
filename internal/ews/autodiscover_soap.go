@@ -4,6 +4,9 @@ import (
 	"encoding/xml"
 	"io"
 	"net/http"
+
+	"hermex/internal/logging"
+	"hermex/internal/serve"
 )
 
 // SOAP Autodiscover ([MS-OXWSADISC]) is the discovery transport Outlook uses to
@@ -79,7 +82,14 @@ func (s *Server) serveAutodiscoverSOAP(w http.ResponseWriter, r *http.Request) {
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxAutodiscoverBody))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.Logger.Emit(logging.Event{
+			Level:      logging.LevelWarn,
+			Subsystem:  logging.EWS,
+			Name:       "autodiscover.read.fail",
+			RemoteAddr: serve.ClientAddr(r),
+			Err:        err.Error(),
+		})
+		http.Error(w, "cannot read request body", http.StatusBadRequest)
 		return
 	}
 	var req adSoapRequest

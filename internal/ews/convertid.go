@@ -56,7 +56,7 @@ type alternateIDOut struct {
 func (s *Server) handleConvertId(w http.ResponseWriter, inner []byte, _ *session) {
 	var req convertIDRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "ConvertId: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "ConvertId: invalid request", err)
 		return
 	}
 	msgs := make([]convertIDMessage, 0, len(req.SourceIDs))

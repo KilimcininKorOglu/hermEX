@@ -37,12 +37,12 @@ type emptyFolderResponse struct {
 func (s *Server) handleEmptyFolder(w http.ResponseWriter, inner []byte, sess *session) {
 	var req emptyFolderRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "EmptyFolder: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "EmptyFolder: invalid request", err)
 		return
 	}
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		writeSOAPFault(w, "ErrorInternalServerError", err.Error())
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
 	}
 	defer st.Close()

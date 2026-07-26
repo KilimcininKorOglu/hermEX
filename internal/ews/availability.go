@@ -117,7 +117,7 @@ const freeBusyDetailPerms = mapi.FrightsFreeBusyDetailed | mapi.FrightsReadAny
 func (s *Server) handleGetUserAvailability(w http.ResponseWriter, inner []byte, sess *session) {
 	var req getUserAvailabilityRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
-		writeSOAPFault(w, "ErrorInvalidRequest", "GetUserAvailability: "+err.Error())
+		s.soapFault(w, "ErrorInvalidRequest", "GetUserAvailability: invalid request", err)
 		return
 	}
 	if req.FreeBusyViewOptions == nil {
