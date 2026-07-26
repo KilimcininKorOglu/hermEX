@@ -3,7 +3,6 @@ package objectstore
 import (
 	"database/sql"
 	"errors"
-	"os"
 )
 
 // DeleteMessage permanently removes a message from a folder by its IMAP UID:
@@ -37,8 +36,9 @@ func (s *Store) DeleteMessage(folderID int64, uid uint32) error {
 	if _, err := s.idxdb.Exec(`DELETE FROM mapping WHERE message_id=?`, messageID); err != nil {
 		return err
 	}
-	// The cached eml is orphaned once the index row is gone; best-effort cleanup.
-	_ = os.Remove(s.emlPath(mid))
+	// The cached eml is a regenerable cache; removeEML logs a real IO failure
+	// rather than orphaning the file silently, and treats absence as normal.
+	s.removeEML(mid)
 	// A hard delete bumps no change number, so the event carries the mid; the
 	// consumer's diff observes the vanished row regardless.
 	s.publishChange("delete", 0, mid)
@@ -70,7 +70,7 @@ func (s *Store) DeleteObject(messageID int64) error {
 	if _, err := s.idxdb.Exec(`DELETE FROM mapping WHERE message_id=?`, messageID); err != nil {
 		return err
 	}
-	_ = os.Remove(s.emlPath(mid))
+	s.removeEML(mid)
 	s.publishChange("delete", 0, mid)
 	return nil
 }

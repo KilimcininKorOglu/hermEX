@@ -3,7 +3,6 @@ package objectstore
 import (
 	"database/sql"
 	"errors"
-	"os"
 	"slices"
 	"time"
 
@@ -510,7 +509,7 @@ func (s *Store) dropIndexFolder(folderID int64) error {
 		return err
 	}
 	for _, m := range msgs {
-		_ = os.Remove(s.emlPath(m.mid))
+		s.removeEML(m.mid)
 	}
 	return nil
 }

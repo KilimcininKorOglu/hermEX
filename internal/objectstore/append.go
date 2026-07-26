@@ -1,7 +1,9 @@
 package objectstore
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -138,6 +140,17 @@ func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time
 // emlPath maps a message's mid_string to its cached wire-form file.
 func (s *Store) emlPath(mid string) string {
 	return filepath.Join(s.dir, "eml", mid)
+}
+
+// removeEML deletes a message's cached wire form. The eml is a regenerable cache,
+// so a delete never fails the caller; an already-absent file is normal and
+// silent, but a real filesystem error (a permission or I/O fault that would
+// otherwise orphan the file undetected) is logged so it is diagnosable rather
+// than swallowed.
+func (s *Store) removeEML(mid string) {
+	if err := os.Remove(s.emlPath(mid)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		s.logStoreError("remove-eml", err)
+	}
 }
 
 // writeEML writes the re-synthesized wire form to the message's eml cache,
