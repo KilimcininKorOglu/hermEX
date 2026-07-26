@@ -26,7 +26,7 @@ func newNspiSessionStore() *nspiSessionStore {
 // bind mints an NSPI session for the user and returns its sid and initial
 // sequence cookies.
 func (s *nspiSessionStore) bind(user string) (sid, sequence string) {
-	sid, sequence = newGUID(), newGUID()
+	sid, sequence = newSessionToken(), newSessionToken()
 	s.mu.Lock()
 	s.m[sid] = &nspiSession{user: user, sequence: sequence}
 	s.mu.Unlock()
@@ -51,7 +51,7 @@ func (s *nspiSessionStore) validate(sid, seq, user string) (newSeq string, code 
 	if c.sequence != seq {
 		return "", rcInvalidSeq
 	}
-	c.sequence = newGUID()
+	c.sequence = newSessionToken()
 	return c.sequence, rcSuccess
 }
 

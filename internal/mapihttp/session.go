@@ -37,7 +37,7 @@ func newSessionStore() *sessionStore {
 // when submitting mail; the authenticated user doubles as the session owner's
 // SMTP address (the From of a submitted message).
 func (s *sessionStore) create(user, mailbox string, accounts directory.Accounts, spool *relay.Spool) (sid, sequence string) {
-	sid, sequence = newGUID(), newGUID()
+	sid, sequence = newSessionToken(), newSessionToken()
 	s.mu.Lock()
 	s.m[sid] = &sessionContext{user: user, mailbox: mailbox, sequence: sequence, ropSess: rop.NewSession(mailbox, accounts, user, rop.WithSpool(spool))}
 	s.mu.Unlock()
@@ -62,7 +62,7 @@ func (s *sessionStore) execute(sid, seq, user string) (newSeq string, ctx *sessi
 	if c.sequence != seq {
 		return "", nil, rcInvalidSeq
 	}
-	c.sequence = newGUID()
+	c.sequence = newSessionToken()
 	return c.sequence, c, rcSuccess
 }
 
@@ -87,10 +87,20 @@ func (s *sessionStore) drop(sid string) {
 	}
 }
 
-// newGUID mints a random hyphenated GUID string. MAPI/HTTP cookies are opaque to
-// the client, so any stable unique value is acceptable.
+// newGUID mints a random hyphenated GUID string, used where a GUID shape is
+// required (e.g. the server GUID). Session cookies use newSessionToken instead.
 func newGUID() string {
 	var b [16]byte
 	_, _ = rand.Read(b[:])
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
+
+// newSessionToken mints a 256-bit random token as a 64-character hex string, used
+// for the opaque sid and sequence cookies. It carries more entropy than a 16-byte
+// GUID and no discernible internal structure, matching the webmail session-token
+// approach (OWASP session-id guidance).
+func newSessionToken() string {
+	var b [32]byte
+	_, _ = rand.Read(b[:])
+	return fmt.Sprintf("%x", b[:])
 }
