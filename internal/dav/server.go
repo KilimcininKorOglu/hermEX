@@ -8,6 +8,7 @@ package dav
 
 import (
 	"net/http"
+	"path"
 	"strings"
 	"sync/atomic"
 
@@ -346,16 +347,29 @@ func isReservedScheduleName(name string) bool {
 	return name == scheduleInboxName || name == scheduleOutboxName
 }
 
+// dangerousObjectExts are extensions a DAV object name must never carry: the name
+// is stored as DavResourceName and reflected in PROPFIND/REPORT, so a client that
+// mishandles Content-Type could render or execute it. A calendar/contact object is
+// only ever .ics/.vcf, so blocking these costs nothing legitimate.
+var dangerousObjectExts = map[string]bool{
+	".php": true, ".phtml": true, ".exe": true, ".html": true, ".htm": true,
+	".svg": true, ".js": true, ".sh": true, ".bat": true, ".cmd": true,
+}
+
 // validObjectName reports whether name is a safe DAV object (resource) name: a
-// single path component with no separators or traversal. A PUT stores this name
-// as the object's DavResourceName, and it is echoed back in PROPFIND/REPORT, so a
-// name carrying "/" , "\" , a NUL, or a "." / ".." traversal segment is rejected
-// rather than stored. An empty name is not a valid object either.
+// single path component with no separators or traversal, and not carrying a
+// dangerous executable/markup extension. A PUT stores this name as the object's
+// DavResourceName, echoed back in PROPFIND/REPORT, so a name with "/", "\", a NUL,
+// a "." / ".." traversal segment, or a dangerous extension is rejected rather than
+// stored. An empty name is not a valid object either.
 func validObjectName(name string) bool {
 	if name == "" || name == "." || name == ".." {
 		return false
 	}
-	return !strings.ContainsAny(name, "/\\\x00")
+	if strings.ContainsAny(name, "/\\\x00") {
+		return false
+	}
+	return !dangerousObjectExts[strings.ToLower(path.Ext(name))]
 }
 
 // classify parses a request path into a resource kind plus, for a collection, its

@@ -15,7 +15,10 @@ func TestValidObjectName(t *testing.T) {
 			t.Errorf("validObjectName(%q) = false, want true", n)
 		}
 	}
-	invalid := []string{"", ".", "..", "a/b", "../etc/passwd", `a\b`, "x\x00y", "/", `\`}
+	invalid := []string{
+		"", ".", "..", "a/b", "../etc/passwd", `a\b`, "x\x00y", "/", `\`,
+		"shell.php", "x.PHP", "page.html", "icon.svg", "run.exe", "a.js",
+	}
 	for _, n := range invalid {
 		if validObjectName(n) {
 			t.Errorf("validObjectName(%q) = true, want false", n)
@@ -34,4 +37,3 @@ func TestPutRejectsUnsafeName(t *testing.T) {
 		t.Fatalf("PUT unsafe name status %d, want 400", resp.StatusCode)
 	}
 }
-
