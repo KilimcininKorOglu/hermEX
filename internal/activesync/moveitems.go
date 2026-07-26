@@ -22,12 +22,12 @@ const (
 func (s *Server) handleMoveItems(w http.ResponseWriter, r *http.Request, sess *session) {
 	root, err := readWBXML(r)
 	if err != nil {
-		http.Error(w, "invalid WBXML: "+err.Error(), http.StatusBadRequest)
+		s.failRequest(w, r, "wbxml.parse.fail", err, http.StatusBadRequest, "invalid WBXML")
 		return
 	}
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.failRequest(w, r, "moveitems.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
 	defer st.Close()

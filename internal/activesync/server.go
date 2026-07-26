@@ -70,6 +70,25 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// failRequest logs the full internal error server-side and returns only a
+// generic message to the client, so raw Go error strings (file paths, library
+// internals, call-stack detail) never reach the wire. A 5xx logs at error, a
+// 4xx (client fault) at warn. clientMsg is the sanitized text the client sees.
+func (s *Server) failRequest(w http.ResponseWriter, r *http.Request, op string, err error, status int, clientMsg string) {
+	level := logging.LevelWarn
+	if status >= http.StatusInternalServerError {
+		level = logging.LevelError
+	}
+	s.Logger.Emit(logging.Event{
+		Level:      level,
+		Subsystem:  logging.ActiveSync,
+		Name:       op,
+		RemoteAddr: serve.ClientAddr(r),
+		Err:        err.Error(),
+	})
+	http.Error(w, clientMsg, status)
+}
+
 // serveActiveSync authenticates, answers OPTIONS with the capability headers,
 // and dispatches a POST command. Every method on this endpoint is authenticated
 // (including OPTIONS), matching Exchange behaviour.
@@ -89,7 +108,7 @@ func (s *Server) serveActiveSync(w http.ResponseWriter, r *http.Request) {
 	}
 	req, err := parseQuery(r)
 	if err != nil {
-		http.Error(w, "bad ActiveSync query: "+err.Error(), http.StatusBadRequest)
+		s.failRequest(w, r, "query.parse.fail", err, http.StatusBadRequest, "bad ActiveSync query")
 		return
 	}
 	sess := &session{

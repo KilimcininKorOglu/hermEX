@@ -21,7 +21,7 @@ const (
 func (s *Server) handleGetItemEstimate(w http.ResponseWriter, r *http.Request, sess *session) {
 	root, err := readWBXML(r)
 	if err != nil {
-		http.Error(w, "invalid WBXML: "+err.Error(), http.StatusBadRequest)
+		s.failRequest(w, r, "wbxml.parse.fail", err, http.StatusBadRequest, "invalid WBXML")
 		return
 	}
 	collections := root.Child(wbxml.GIECollections)
@@ -32,13 +32,13 @@ func (s *Server) handleGetItemEstimate(w http.ResponseWriter, r *http.Request, s
 
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.failRequest(w, r, "store.open.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
 	defer st.Close()
 	state, err := loadState(st)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.failRequest(w, r, "state.load.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
 	dev := state.device(sess.req.deviceID)
@@ -68,7 +68,7 @@ func (s *Server) handleGetItemEstimate(w http.ResponseWriter, r *http.Request, s
 		if isObjectFolder(folderID) {
 			objs, err := st.ListFolderObjects(folderID)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				s.failRequest(w, r, "objects.list.fail", err, http.StatusInternalServerError, "an internal error occurred")
 				return
 			}
 			responses = append(responses, estimateResponse(collID, estimateStatusOK, objectChangeCount(cstate.Items, objs)))
@@ -76,7 +76,7 @@ func (s *Server) handleGetItemEstimate(w http.ResponseWriter, r *http.Request, s
 		}
 		live, err := st.ListMessages(folderID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.failRequest(w, r, "messages.list.fail", err, http.StatusInternalServerError, "an internal error occurred")
 			return
 		}
 		responses = append(responses, estimateResponse(collID, estimateStatusOK, len(diffSnapshot(cstate.Items, live))))

@@ -42,21 +42,21 @@ const (
 func (s *Server) handleFolderSync(w http.ResponseWriter, r *http.Request, sess *session) {
 	root, err := readWBXML(r)
 	if err != nil {
-		http.Error(w, "invalid WBXML: "+err.Error(), http.StatusBadRequest)
+		s.failRequest(w, r, "wbxml.parse.fail", err, http.StatusBadRequest, "invalid WBXML")
 		return
 	}
 	syncKey := root.ChildText(wbxml.FHSyncKey)
 
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.failRequest(w, r, "foldersync.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
 	defer st.Close()
 
 	state, err := loadState(st)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.failRequest(w, r, "foldersync.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
 	dev := state.device(sess.req.deviceID)
@@ -65,12 +65,12 @@ func (s *Server) handleFolderSync(w http.ResponseWriter, r *http.Request, sess *
 	case syncKey == "0":
 		folders, err := syncFolders(st)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.failRequest(w, r, "foldersync.fail", err, http.StatusInternalServerError, "an internal error occurred")
 			return
 		}
 		dev.HierarchyKey = nextSyncKey(syncKey)
 		if err := saveState(st, state); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.failRequest(w, r, "foldersync.fail", err, http.StatusInternalServerError, "an internal error occurred")
 			return
 		}
 		writeWBXML(w, folderSyncResponse(dev.HierarchyKey, folders))

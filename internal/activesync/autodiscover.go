@@ -71,7 +71,7 @@ func (s *Server) serveAutodiscover(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := xml.Marshal(&resp)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.failRequest(w, r, "autodiscover.marshal.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")

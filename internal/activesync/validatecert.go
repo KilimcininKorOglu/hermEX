@@ -32,7 +32,7 @@ const (
 func (s *Server) handleValidateCert(w http.ResponseWriter, r *http.Request, _ *session) {
 	root, err := readWBXML(r)
 	if err != nil {
-		http.Error(w, "invalid WBXML: "+err.Error(), http.StatusBadRequest)
+		s.failRequest(w, r, "wbxml.parse.fail", err, http.StatusBadRequest, "invalid WBXML")
 		return
 	}
 	leaves := certElements(root.Child(wbxml.VCCertificates))

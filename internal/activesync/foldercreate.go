@@ -34,7 +34,7 @@ const (
 func (s *Server) handleFolderCreate(w http.ResponseWriter, r *http.Request, sess *session) {
 	root, err := readWBXML(r)
 	if err != nil {
-		http.Error(w, "invalid WBXML: "+err.Error(), http.StatusBadRequest)
+		s.failRequest(w, r, "wbxml.parse.fail", err, http.StatusBadRequest, "invalid WBXML")
 		return
 	}
 	syncKey := root.ChildText(wbxml.FHSyncKey)
@@ -43,14 +43,14 @@ func (s *Server) handleFolderCreate(w http.ResponseWriter, r *http.Request, sess
 
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.failRequest(w, r, "folder.create.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
 	defer st.Close()
 
 	state, err := loadState(st)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.failRequest(w, r, "folder.create.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
 	dev := state.device(sess.req.deviceID)
@@ -86,7 +86,7 @@ func (s *Server) handleFolderCreate(w http.ResponseWriter, r *http.Request, sess
 
 	dev.HierarchyKey = nextSyncKey(dev.HierarchyKey)
 	if err := saveState(st, state); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.failRequest(w, r, "folder.create.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
 	writeWBXML(w, folderCreateResponse(dev.HierarchyKey, strconv.FormatInt(fid, 10)))

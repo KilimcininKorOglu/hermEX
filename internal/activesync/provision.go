@@ -106,7 +106,7 @@ func (s *Server) devicePolicy(sess *session) easpolicy.Policy {
 func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request, sess *session) {
 	root, err := readWBXML(r)
 	if err != nil {
-		http.Error(w, "invalid WBXML: "+err.Error(), http.StatusBadRequest)
+		s.failRequest(w, r, "wbxml.parse.fail", err, http.StatusBadRequest, "invalid WBXML")
 		return
 	}
 	phaseOne := requestPolicyKey(root) == "" || requestPolicyKey(root) == "0"

@@ -35,7 +35,7 @@ const (
 func (s *Server) handlePing(w http.ResponseWriter, r *http.Request, sess *session) {
 	root, err := readWBXML(r)
 	if err != nil {
-		http.Error(w, "invalid WBXML: "+err.Error(), http.StatusBadRequest)
+		s.failRequest(w, r, "wbxml.parse.fail", err, http.StatusBadRequest, "invalid WBXML")
 		return
 	}
 	folderIDs := pingFolders(root)
@@ -55,13 +55,13 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request, sess *sessio
 
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.failRequest(w, r, "ping.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
 	state, err := loadState(st)
 	st.Close()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.failRequest(w, r, "ping.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
 	dev := state.device(sess.req.deviceID)

@@ -66,7 +66,7 @@ func parseSyncHeartbeat(s string) (d, bound time.Duration, ok bool) {
 func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, sess *session) {
 	root, err := readWBXML(r)
 	if err != nil {
-		http.Error(w, "invalid WBXML: "+err.Error(), http.StatusBadRequest)
+		s.failRequest(w, r, "wbxml.parse.fail", err, http.StatusBadRequest, "invalid WBXML")
 		return
 	}
 	collections := root.Child(wbxml.ASCollections)
@@ -91,14 +91,14 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, sess *sessio
 
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.failRequest(w, r, "sync.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
 	defer st.Close()
 
 	state, err := loadState(st)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.failRequest(w, r, "sync.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
 	dev := state.device(sess.req.deviceID)
@@ -125,13 +125,13 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, sess *sessio
 		}
 		resp, err := syncCollection(st, dev, c)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.failRequest(w, r, "sync.fail", err, http.StatusInternalServerError, "an internal error occurred")
 			return
 		}
 		out = append(out, resp)
 	}
 	if err := saveState(st, state); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.failRequest(w, r, "sync.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
 	writeWBXML(w, wbxml.Elem(wbxml.ASSync, wbxml.Elem(wbxml.ASCollections, out...)))

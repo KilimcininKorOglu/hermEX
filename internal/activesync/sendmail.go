@@ -24,12 +24,12 @@ import (
 func (s *Server) handleSendMail(w http.ResponseWriter, r *http.Request, sess *session) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxBodyLimit()))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.failRequest(w, r, "sendmail.read.fail", err, http.StatusBadRequest, "cannot read request body")
 		return
 	}
 	cm, err := extractComposeMail(body)
 	if err != nil {
-		http.Error(w, "invalid SendMail: "+err.Error(), http.StatusBadRequest)
+		s.failRequest(w, r, "sendmail.parse.fail", err, http.StatusBadRequest, "invalid SendMail")
 		return
 	}
 	recipients := recipientsOf(cm.mime)
@@ -41,7 +41,7 @@ func (s *Server) handleSendMail(w http.ResponseWriter, r *http.Request, sess *se
 	// Deliver with Bcc stripped so recipients never see the blind list; the
 	// saved copy keeps the full headers for the sender's record.
 	if _, err := mta.DeliverAndRelay(s.accounts, s.Spool, sess.user, recipients, stripBcc(cm.mime), time.Now()); err != nil {
-		http.Error(w, "delivery failed: "+err.Error(), http.StatusInternalServerError)
+		s.failRequest(w, r, "sendmail.delivery.fail", err, http.StatusInternalServerError, "delivery failed")
 		return
 	}
 
