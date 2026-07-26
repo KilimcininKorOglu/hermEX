@@ -127,6 +127,7 @@ func (s *Server) nspiUnbind(w http.ResponseWriter, r *http.Request) {
 
 // setNspiCookie sets a MAPI/HTTP session cookie scoped to the NSPI endpoint, so
 // it never collides with the EMSMDB endpoint's cookies of the same name.
+// HttpOnly prevents JavaScript access; Secure restricts transmission to HTTPS.
 func setNspiCookie(w http.ResponseWriter, name, value string) {
-	http.SetCookie(w, &http.Cookie{Name: name, Value: value, Path: "/mapi/nspi"})
+	http.SetCookie(w, &http.Cookie{Name: name, Value: value, Path: "/mapi/nspi", HttpOnly: true, Secure: true})
 }

@@ -237,6 +237,7 @@ func (s *Server) waitForNotification(reqCtx context.Context, sess *rop.Session) 
 }
 
 // setCookie sets a MAPI/HTTP session cookie scoped to the EMSMDB endpoint.
+// HttpOnly prevents JavaScript access; Secure restricts transmission to HTTPS.
 func setCookie(w http.ResponseWriter, name, value string) {
-	http.SetCookie(w, &http.Cookie{Name: name, Value: value, Path: "/mapi/emsmdb"})
+	http.SetCookie(w, &http.Cookie{Name: name, Value: value, Path: "/mapi/emsmdb", HttpOnly: true, Secure: true})
 }
