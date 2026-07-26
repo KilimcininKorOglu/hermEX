@@ -133,20 +133,28 @@ SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status,
 // one row, require an active MAILUSER account in an active domain, then verify the
 // crypt(3) password — and reports whether the account is flagged for a forced
 // password change. ok is false for bad credentials or an ineligible account.
+// decoyPasswordHash is a valid sha512-crypt hash of a value no user holds. When a
+// login names no usable account, authenticateRow still runs one verify against it
+// so an absent (or disabled) user costs the same KDF work as a present one with a
+// wrong password, closing the timing oracle that would otherwise enumerate valid
+// addresses.
+const decoyPasswordHash = "$6$hermexdecoysalt$P2XFuqS35PykVXcNA/yh4RJtQT02e6NAjgNgtz3mDpDtlxVNj4eIXW1npGMR.dviJZmFuiO.YarCZ6KyqBQ1S1"
+
 func (d *SQLDirectory) authenticateRow(user, password string) (path string, mustChange, ok bool) {
 	login := strings.ToLower(strings.TrimSpace(user))
 	row, found, err := d.resolve(login)
-	if err != nil || !found {
+	// A missing, wrong-type, disabled, or maildir-less account must not short-circuit
+	// before the password check: that timing difference leaks which addresses exist.
+	// Run the same-cost decoy verify and fall through to the uniform failure return.
+	usable := err == nil && found &&
+		row.displayType == dtMailuser &&
+		row.addrStatus&afUserMask == afUserNormal && row.addrStatus&afDomainMask == 0 && row.domainStatus == 0 &&
+		row.maildir != ""
+	if !usable {
+		sqlCryptVerify(password, decoyPasswordHash)
 		return "", false, false
 	}
-	if row.displayType != dtMailuser {
-		return "", false, false
-	}
-	// Only AF_USER_NORMAL in an active domain may log in.
-	if row.addrStatus&afUserMask != afUserNormal || row.addrStatus&afDomainMask != 0 || row.domainStatus != 0 {
-		return "", false, false
-	}
-	if row.maildir == "" || !d.verifyPassword(row, login, password) {
+	if !d.verifyPassword(row, login, password) {
 		return "", false, false
 	}
 	return d.storePath(row.maildir), row.mustChange, true
