@@ -35,8 +35,8 @@ type Server struct {
 	spool    *relay.Spool       // external-recipient relay queue the MTA drains
 	hostname string             // for outgoing Message-ID
 	secret   []byte
-	dist     http.Handler // serves the built SPA with index.html fallback (nil if unset)
-	secure   bool         // mark the session cookie Secure (served behind HTTPS)
+	dist     http.Handler       // serves the built SPA with index.html fallback (nil if unset)
+	secure   bool               // mark the session cookie Secure (served behind HTTPS)
 	limiter  *authlimit.Limiter // failed-login throttle keyed by account
 
 	// Pub serves per-domain public folders; nil disables the feature (the
