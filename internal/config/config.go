@@ -120,6 +120,11 @@ func (c *Config) TLSConfig() (*tls.Config, error) {
 	return &tls.Config{
 		Certificates: []tls.Certificate{cert},
 		MinVersion:   tls.VersionTLS12,
+		// Prefer X25519 (fast, forward-secret) then P-256 over Go's full default
+		// curve list, and keep session-ticket resumption on to spare full
+		// handshakes across the many concurrent IMAPS/POP3S/SMTPS/HTTPS connections.
+		CurvePreferences:       []tls.CurveID{tls.X25519, tls.CurveP256},
+		SessionTicketsDisabled: false,
 	}, nil
 }
 

@@ -92,7 +92,14 @@ func (p *Provider) TLSEnabled() bool {
 // TLSConfig returns a tls.Config whose GetCertificate resolves per handshake, so a
 // certificate replaced in the store is served without rebuilding the listener.
 func (p *Provider) TLSConfig() (*tls.Config, error) {
-	return &tls.Config{GetCertificate: p.getCertificate, MinVersion: tls.VersionTLS12}, nil
+	return &tls.Config{
+		GetCertificate: p.getCertificate,
+		MinVersion:     tls.VersionTLS12,
+		// Match config.TLSConfig's hardening: prefer X25519 then P-256, and keep
+		// session-ticket resumption on to spare full handshakes.
+		CurvePreferences:       []tls.CurveID{tls.X25519, tls.CurveP256},
+		SessionTicketsDisabled: false,
+	}, nil
 }
 
 // getCertificate picks the certificate for a handshake: an exact SNI match in the

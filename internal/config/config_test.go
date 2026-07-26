@@ -158,6 +158,12 @@ func TestTLSConfigHandshake(t *testing.T) {
 	if cfg.MinVersion != tls.VersionTLS12 {
 		t.Errorf("MinVersion = %#x, want TLS 1.2 (%#x)", cfg.MinVersion, tls.VersionTLS12)
 	}
+	if len(cfg.CurvePreferences) == 0 || cfg.CurvePreferences[0] != tls.X25519 {
+		t.Errorf("CurvePreferences = %v, want X25519 first", cfg.CurvePreferences)
+	}
+	if cfg.SessionTicketsDisabled {
+		t.Error("SessionTicketsDisabled = true, want session resumption enabled")
+	}
 
 	rawLn, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
