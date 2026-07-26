@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/mail"
 	"regexp"
@@ -431,12 +432,25 @@ func toCRLF(s string) string {
 	return strings.ReplaceAll(strings.ReplaceAll(s, "\r\n", "\n"), "\n", "\r\n")
 }
 
+// maxScheduleAhead caps how far in the future a message may be scheduled, so a
+// send-later cannot become a permanent dead letter occupying storage for years.
+const maxScheduleAhead = 365 * 24 * time.Hour
+
 // scheduleOutbox files a built message in the Outbox with a deferred send time
-// (RFC3339), marked unsent, so the release worker delivers it when due.
+// (RFC3339), marked unsent, so the release worker delivers it when due. The time
+// must be in the future and no more than maxScheduleAhead out, bounding both a
+// past (immediately-due) and an absurd far-future schedule.
 func scheduleOutbox(st *objectstore.Store, raw []byte, sendAt string) error {
 	when, err := time.Parse(time.RFC3339, sendAt)
 	if err != nil {
 		return err
+	}
+	now := time.Now()
+	if !when.After(now) {
+		return fmt.Errorf("scheduled send time must be in the future")
+	}
+	if when.After(now.Add(maxScheduleAhead)) {
+		return fmt.Errorf("scheduled send time is too far in the future (max 1 year)")
 	}
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDOutbox), raw, time.Now(), objectstore.FlagSeen)
 	if err != nil {
