@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"hermex/internal/authlimit"
 	"hermex/internal/directory"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
@@ -49,6 +50,7 @@ type Server struct {
 	TLSConfig *tls.Config           // when non-nil, advertise and accept STARTTLS
 	Logger    *logging.Logger       // central activity log; nil disables logging
 	Pub       *publicfolder.Service // per-domain public folders; nil disables them
+	Limiter   *authlimit.Limiter    // failed-login throttle keyed by client IP; nil disables it
 
 	// maxLiteral is the cap on a single IMAP literal in bytes (0 = the built-in
 	// defaultMaxLiteralSize), held atomically so the IMAP daemon's poll can apply an
@@ -461,13 +463,30 @@ func decodeSASLPlain(b64 string) (user, pass string, ok bool) {
 // finishAuth validates credentials and, on success, opens the user's store and
 // enters the authenticated state.
 func (c *conn) finishAuth(tag, user, pass string) {
+	// Throttle online guessing: a client IP that has piled up failed logins is
+	// refused before the password is even checked, until its lockout elapses. The
+	// limiter is keyed by IP alone (not ip:port) so every connection from one host
+	// shares a counter; the source port changes on every new connection.
+	host := remoteHost(c.nc)
+	key := authlimit.IPKey(host)
+	if c.srv.Limiter != nil && !c.srv.Limiter.Allowed(key) {
+		c.srv.Logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.IMAP, Name: "auth.throttled", User: user, RemoteAddr: host})
+		c.no(tag, "[AUTHENTICATIONFAILED] too many failed attempts, try again later")
+		return
+	}
 	path, ok := c.srv.Auth.Authenticate(user, pass)
 	if !ok {
+		if c.srv.Limiter != nil {
+			c.srv.Limiter.Fail(key)
+		}
 		// Log the attempted login (an identifier, useful for spotting brute force);
 		// never the password.
-		c.srv.Logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.IMAP, Name: "auth.fail", User: user, RemoteAddr: remoteHost(c.nc)})
+		c.srv.Logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.IMAP, Name: "auth.fail", User: user, RemoteAddr: host})
 		c.no(tag, "[AUTHENTICATIONFAILED] invalid credentials")
 		return
+	}
+	if c.srv.Limiter != nil {
+		c.srv.Limiter.Succeed(key)
 	}
 	if privs, _ := c.srv.Auth.Privileges(user); !privs.POP3IMAP {
 		c.srv.Logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.IMAP, Name: "auth.denied", User: user, RemoteAddr: remoteHost(c.nc), Fields: logging.Fields{"service": "pop3imap"}})

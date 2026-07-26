@@ -15,6 +15,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 
+	"hermex/internal/authlimit"
 	"hermex/internal/config"
 	"hermex/internal/directory"
 	"hermex/internal/health"
@@ -65,7 +66,7 @@ func main() {
 	// poll cadence. No-ops when notify_url is empty.
 	notify.EnableProducer(cfg.NotifyURL, cfg.NotifySecret, logger)
 
-	srv := &imap.Server{Auth: dir, Hostname: cfg.Hostname, Logger: logger, Pub: publicfolder.New(cfg)}
+	srv := &imap.Server{Auth: dir, Hostname: cfg.Hostname, Logger: logger, Pub: publicfolder.New(cfg), Limiter: authlimit.New(0, 0, 0)}
 	srv.SetNotify(notify.EnableConsumer(cfg.NotifyURL, cfg.NotifySecret, logger))
 	// IMAP literal size cap: read at startup and re-read every minute so an admin's
 	// change applies without a restart; 0 keeps the built-in default.
