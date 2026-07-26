@@ -68,9 +68,12 @@ func sendAutoReply(accounts directory.Accounts, st *objectstore.Store, selfAddr,
 	if to == "" {
 		return nil
 	}
-	// Internal vs external is decided by whether the sender has a local mailbox,
-	// not by string-matching domains.
-	_, internal := accounts.Resolve(to)
+	// Internal means the sender is a local mailbox in the SAME domain as the OOF
+	// owner: a sender resolving to another domain is a different tenant and must
+	// get the external (or no) reply, never the internal body, so one domain's OOF
+	// state does not leak across the tenant boundary.
+	_, resolved := accounts.Resolve(to)
+	internal := resolved && sameDomain(to, selfAddr)
 
 	// The "known senders only" external audience needs to know whether the sender
 	// is in the mailbox's contacts. Resolve it only when it can change the outcome
@@ -192,6 +195,19 @@ func bareAddress(s string) string {
 		return strings.ToLower(a.Address)
 	}
 	return strings.ToLower(strings.Trim(s, "<>"))
+}
+
+// sameDomain reports whether two addresses share a domain (case-insensitive). It
+// gates the internal-vs-external auto-reply decision so one tenant's out-of-office
+// body never reaches a sender in another domain. A missing domain on either side
+// is treated as no match.
+func sameDomain(a, b string) bool {
+	_, da, ok1 := strings.Cut(a, "@")
+	_, db, ok2 := strings.Cut(b, "@")
+	if !ok1 || !ok2 || da == "" {
+		return false
+	}
+	return strings.EqualFold(da, db)
 }
 
 // isRoleMailbox reports whether an address' local part is a role or no-reply
