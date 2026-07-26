@@ -535,13 +535,12 @@ func TestIMAPACL(t *testing.T) {
 // response, or "".
 func aclRightsOf(acl, id string) string {
 	marker := `"` + id + `" `
-	i := strings.Index(acl, marker)
-	if i < 0 {
+	_, rest, ok := strings.Cut(acl, marker)
+	if !ok {
 		return ""
 	}
-	rest := acl[i+len(marker):]
-	if j := strings.IndexByte(rest, ' '); j >= 0 {
-		return rest[:j]
+	if before, _, ok := strings.Cut(rest, " "); ok {
+		return before
 	}
 	return rest
 }
@@ -549,18 +548,17 @@ func aclRightsOf(acl, id string) string {
 // parseModseq extracts the n from the first "MODSEQ (n)" in an IMAP response.
 func parseModseq(t *testing.T, s string) uint64 {
 	t.Helper()
-	i := strings.Index(s, "MODSEQ (")
-	if i < 0 {
+	_, rest, ok := strings.Cut(s, "MODSEQ (")
+	if !ok {
 		t.Fatalf("no MODSEQ in %q", s)
 	}
-	rest := s[i+len("MODSEQ ("):]
-	j := strings.IndexByte(rest, ')')
-	if j < 0 {
+	num, _, ok := strings.Cut(rest, ")")
+	if !ok {
 		t.Fatalf("unterminated MODSEQ in %q", s)
 	}
-	n, err := strconv.ParseUint(rest[:j], 10, 64)
+	n, err := strconv.ParseUint(num, 10, 64)
 	if err != nil {
-		t.Fatalf("bad MODSEQ %q: %v", rest[:j], err)
+		t.Fatalf("bad MODSEQ %q: %v", num, err)
 	}
 	return n
 }

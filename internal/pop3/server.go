@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 
+	"hermex/internal/authlimit"
 	"hermex/internal/directory"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
@@ -28,8 +29,9 @@ import (
 type Server struct {
 	Auth      directory.Authenticator
 	Hostname  string
-	TLSConfig *tls.Config     // when non-nil, advertise (CAPA) and accept STLS
-	Logger    *logging.Logger // central activity log; nil disables logging
+	TLSConfig *tls.Config        // when non-nil, advertise (CAPA) and accept STLS
+	Logger    *logging.Logger    // central activity log; nil disables logging
+	Limiter   *authlimit.Limiter // failed-login throttle keyed by client IP; nil disables it
 
 	conns lifecycle.ConnGroup
 }
@@ -390,11 +392,25 @@ func (s *Server) finishAuth(w *bufio.Writer, conn net.Conn, user, pass string) (
 	emit := func(level logging.Level, name string, f logging.Fields) {
 		s.Logger.Emit(logging.Event{Level: level, Subsystem: logging.POP3, Name: name, User: user, RemoteAddr: conn.RemoteAddr().String(), Fields: f})
 	}
+	// Throttle online guessing: a client IP that has piled up failed logins is
+	// refused before the password is checked, until its lockout elapses.
+	key := authlimit.IPKey(conn.RemoteAddr().String())
+	if s.Limiter != nil && !s.Limiter.Allowed(key) {
+		emit(logging.LevelWarn, "auth.throttled", nil)
+		errLine(w, "[AUTH] too many failed attempts, try again later")
+		return nil, false
+	}
 	path, authed := s.Auth.Authenticate(user, pass)
 	if user == "" || !authed {
+		if s.Limiter != nil {
+			s.Limiter.Fail(key)
+		}
 		emit(logging.LevelWarn, "auth.fail", nil)
 		errLine(w, "[AUTH] authentication failed")
 		return nil, false
+	}
+	if s.Limiter != nil {
+		s.Limiter.Succeed(key)
 	}
 	if privs, _ := s.Auth.Privileges(user); !privs.POP3IMAP {
 		emit(logging.LevelWarn, "auth.denied", logging.Fields{"service": "pop3imap"})

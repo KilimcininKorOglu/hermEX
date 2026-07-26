@@ -14,6 +14,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 
+	"hermex/internal/authlimit"
 	"hermex/internal/config"
 	"hermex/internal/directory"
 	"hermex/internal/health"
@@ -57,7 +58,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("hermex-pop3: listen %s: %v", addr, err)
 	}
-	srv := &pop3.Server{Auth: dir, Hostname: cfg.Hostname, Logger: logger}
+	srv := &pop3.Server{Auth: dir, Hostname: cfg.Hostname, Logger: logger, Limiter: authlimit.New(0, 0, 0)}
 	// TLS certificates come from the provider: the config-file cert as a fallback,
 	// overridden by an admin-uploaded cert the provider polls for, so a renewal
 	// applies without a restart.

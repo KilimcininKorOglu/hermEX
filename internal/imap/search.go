@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/mail"
 	"net/textproto"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -130,12 +131,7 @@ func parseReturnOpts(cur *tokenCursor) (opts []string, present bool) {
 // always reportable.
 func (c *conn) writeESearch(tag string, byUID bool, opts []string, results []uint32) {
 	want := func(o string) bool {
-		for _, x := range opts {
-			if x == o {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(opts, o)
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "ESEARCH (TAG %s)", quoteString(tag))

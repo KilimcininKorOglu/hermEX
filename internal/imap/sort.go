@@ -392,14 +392,17 @@ func (c *conn) renderThread(n *tnode, byUID bool) string {
 		cur = cur.children[0]
 		members = append(members, fmt.Sprintf("%d", c.threadID(cur.idx, byUID)))
 	}
-	content := strings.Join(members, " ")
+	var sb strings.Builder
+	sb.WriteString(strings.Join(members, " "))
 	if len(cur.children) > 1 {
-		content += " "
+		sb.WriteByte(' ')
 		for _, ch := range cur.children {
-			content += "(" + c.renderThread(ch, byUID) + ")"
+			sb.WriteByte('(')
+			sb.WriteString(c.renderThread(ch, byUID))
+			sb.WriteByte(')')
 		}
 	}
-	return content
+	return sb.String()
 }
 
 // firstAngle returns the first <...> token in a header, or "".
