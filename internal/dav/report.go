@@ -147,12 +147,12 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox st
 	_, user, coll, _ := classify(r.URL.Path)
 	body, err := io.ReadAll(io.LimitReader(r.Body, s.vcardLimit()))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.davError(w, err, http.StatusBadRequest)
 		return
 	}
 	var req reportReq
 	if err := xml.Unmarshal(body, &req); err != nil {
-		http.Error(w, "invalid report body: "+err.Error(), http.StatusBadRequest)
+		s.davError(w, err, http.StatusBadRequest)
 		return
 	}
 
@@ -176,7 +176,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox st
 	}
 	st, err := objectstore.Open(mailbox)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	defer st.Close()
@@ -193,7 +193,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox st
 		fid, ok, err = cardCollectionFID(st, coll)
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {
@@ -231,7 +231,7 @@ func (s *Server) reportMultiget(w http.ResponseWriter, st *objectstore.Store, fi
 		name := path.Base(strings.TrimRight(h, "/"))
 		obj, found, err := findObjectByName(st, fid, ".vcf", name)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 		if !found {
@@ -240,7 +240,7 @@ func (s *Server) reportMultiget(w http.ResponseWriter, st *objectstore.Store, fi
 		}
 		data, err := addressData(st, obj.ID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 		ms.Responses = append(ms.Responses, addressDataResponse(h, obj.ChangeNumber, ad.bound(data)))
@@ -256,7 +256,7 @@ func (s *Server) reportMultiget(w http.ResponseWriter, st *objectstore.Store, fi
 func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store, user, coll string, fid int64, sinceToken uint64, sync bool, filt *filter, ad *addrDataReq) {
 	objs, err := st.ListFolderObjects(fid)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	ms := &multistatus{}
@@ -266,7 +266,7 @@ func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store,
 		}
 		data, err := addressData(st, o.ID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 		// addressbook-query: skip vCards that do not satisfy the filter (RFC 6352 §10.5).
@@ -281,7 +281,7 @@ func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store,
 		// member so it deletes the vCard locally (RFC 6578).
 		deleted, err := st.DeletedObjectsSince(fid, sinceToken)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 		for _, d := range deleted {
@@ -290,7 +290,7 @@ func (s *Server) reportQueryOrSync(w http.ResponseWriter, st *objectstore.Store,
 		}
 		syncMax, err := st.FolderObjectsSyncMax(fid)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 		ms.SyncToken = syncToken(syncMax)
@@ -310,7 +310,7 @@ func (s *Server) handleFreeBusy(w http.ResponseWriter, st *objectstore.Store, fi
 	}
 	periods, err := busyPeriods(st, fid, rangeStart, rangeEnd, okS, okE)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -364,7 +364,7 @@ func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store,
 		name := path.Base(strings.TrimRight(h, "/"))
 		obj, found, err := findObjectByName(st, fid, ".ics", name)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 		if !found {
@@ -373,7 +373,7 @@ func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store,
 		}
 		data, err := calendarObjectData(st, fid, obj.ID, name)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 		ms.Responses = append(ms.Responses, calendarDataResponse(h, obj.ChangeNumber, cd.bound(data)))
@@ -391,7 +391,7 @@ func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store,
 func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Store, user, coll string, fid int64, sinceToken uint64, sync bool, filt *filter, cd *calDataReq) {
 	objs, err := st.ListFolderObjects(fid)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	ms := &multistatus{}
@@ -402,7 +402,7 @@ func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Sto
 		name := objectName(st, o.ID, ".ics")
 		data, err := calendarObjectData(st, fid, o.ID, name)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 		// calendar-query: skip objects that do not satisfy the filter (RFC 4791 §9.7).
@@ -417,7 +417,7 @@ func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Sto
 		// member so it deletes the .ics locally (RFC 6578).
 		deleted, err := st.DeletedObjectsSince(fid, sinceToken)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 		for _, d := range deleted {
@@ -426,7 +426,7 @@ func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Sto
 		}
 		syncMax, err := st.FolderObjectsSyncMax(fid)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 		ms.SyncToken = syncToken(syncMax)

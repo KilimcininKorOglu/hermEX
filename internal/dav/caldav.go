@@ -32,14 +32,14 @@ func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox st
 	}
 	st, err := objectstore.Open(mailbox)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	defer st.Close()
 
 	fid, ok, err := calCollectionFID(st, coll)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {
@@ -48,7 +48,7 @@ func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox st
 	}
 	obj, found, err := findObjectByName(st, fid, ".ics", name)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if !found {
@@ -57,7 +57,7 @@ func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox st
 	}
 	msg, err := st.OpenMessage(obj.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	var ics []byte
@@ -66,7 +66,7 @@ func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox st
 		// The Tasks collection serves VTODO from the shared task model.
 		tk, terr := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
 		if terr != nil {
-			http.Error(w, terr.Error(), http.StatusInternalServerError)
+			s.davError(w, terr, http.StatusInternalServerError)
 			return
 		}
 		ics = oxcical.ExportVTODO(tk, name, time.Time{})
@@ -75,7 +75,7 @@ func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox st
 		ics = oxcical.ExportVJournal(msg, name)
 	default:
 		if ics, err = oxcical.Export(msg, icalOptions(st)); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 	}
@@ -104,14 +104,14 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 	}
 	st, err := objectstore.Open(mailbox)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	defer st.Close()
 
 	fid, ok, err := calCollectionFID(st, coll)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {
@@ -120,7 +120,7 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 	}
 	existing, found, err := findObjectByName(st, fid, ".ics", name)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if r.Header.Get("If-None-Match") == "*" && found {
@@ -144,7 +144,7 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, s.icalLimit()))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.davError(w, err, http.StatusBadRequest)
 		return
 	}
 	var msg *oxcmail.Message
@@ -157,24 +157,24 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 		}
 		props, perr := oxtask.ToProps(task, st.GetNamedPropIDs)
 		if perr != nil {
-			http.Error(w, perr.Error(), http.StatusInternalServerError)
+			s.davError(w, perr, http.StatusInternalServerError)
 			return
 		}
 		msg = &oxcmail.Message{Props: props}
 	case fid == int64(mapi.PrivateFIDJournal):
 		if msg, err = oxcical.ImportVJournal(body, icalOptions(st)); err != nil {
-			http.Error(w, "invalid VJOURNAL: "+err.Error(), http.StatusBadRequest)
+			s.davError(w, err, http.StatusBadRequest)
 			return
 		}
 	default:
 		if msg, err = oxcical.Import(body, icalOptions(st)); err != nil {
-			http.Error(w, "invalid iCalendar: "+err.Error(), http.StatusBadRequest)
+			s.davError(w, err, http.StatusBadRequest)
 			return
 		}
 	}
 	tag, _, err := resourceNameTag(st, true)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	msg.Props.Set(tag, name)
@@ -193,12 +193,12 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 	// Replace is delete-then-create: the object store has no in-place updater.
 	if found {
 		if err := st.DeleteObject(existing.ID); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 	}
 	if _, err := st.CreateMessage(fid, msg); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -240,14 +240,14 @@ func (s *Server) handleCalDelete(w http.ResponseWriter, r *http.Request, user, m
 	}
 	st, err := objectstore.Open(mailbox)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	defer st.Close()
 
 	fid, ok, err := calCollectionFID(st, coll)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {
@@ -256,7 +256,7 @@ func (s *Server) handleCalDelete(w http.ResponseWriter, r *http.Request, user, m
 	}
 	obj, found, err := findObjectByName(st, fid, ".ics", name)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if !found {
@@ -285,7 +285,7 @@ func (s *Server) handleCalDelete(w http.ResponseWriter, r *http.Request, user, m
 	// Route to the Recoverable Items dumpster (not a hard purge): the object leaves
 	// the live view but its bumped change number is a sync-collection tombstone.
 	if err := st.SoftDeleteObject(obj.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	// Best-effort iTIP cancel/decline; a delivery failure never fails the delete. An

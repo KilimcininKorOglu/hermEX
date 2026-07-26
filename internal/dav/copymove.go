@@ -47,14 +47,14 @@ func (s *Server) handleCopyMove(w http.ResponseWriter, r *http.Request, mailbox 
 
 	st, err := objectstore.Open(mailbox)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	defer st.Close()
 
 	srcFID, ok, err := collectionByKind(st, isCal, srcColl)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {
@@ -63,7 +63,7 @@ func (s *Server) handleCopyMove(w http.ResponseWriter, r *http.Request, mailbox 
 	}
 	dstFID, ok, err := collectionByKind(st, isCal, dstColl)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {
@@ -78,7 +78,7 @@ func (s *Server) handleCopyMove(w http.ResponseWriter, r *http.Request, mailbox 
 
 	srcObj, found, err := findObjectByName(st, srcFID, ext, srcName)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if !found {
@@ -88,7 +88,7 @@ func (s *Server) handleCopyMove(w http.ResponseWriter, r *http.Request, mailbox 
 
 	dstObj, dstExists, err := findObjectByName(st, dstFID, ext, dstName)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if dstExists && r.Header.Get("Overwrite") == "F" {
@@ -99,30 +99,30 @@ func (s *Server) handleCopyMove(w http.ResponseWriter, r *http.Request, mailbox 
 	// Re-serialize through the object's own format so the copy is a fresh message.
 	tag, _, err := resourceNameTag(st, true)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	var msg *oxcmail.Message
 	if isCal {
 		data, err := calendarData(st, srcObj.ID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 		msg, err = oxcical.Import([]byte(data), icalOptions(st))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 	} else {
 		data, err := addressData(st, srcObj.ID)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 		msg, err = oxvcard.Import([]byte(data), vcardOptions(st))
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 	}
@@ -131,18 +131,18 @@ func (s *Server) handleCopyMove(w http.ResponseWriter, r *http.Request, mailbox 
 	// Replace an existing destination (the new copy takes its place).
 	if dstExists {
 		if err := st.DeleteObject(dstObj.ID); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 	}
 	if _, err := st.CreateMessage(dstFID, msg); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if move {
 		// Route the source through the dumpster so sync-collection reports a tombstone.
 		if err := st.SoftDeleteObject(srcObj.ID); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 	}

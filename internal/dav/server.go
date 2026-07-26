@@ -56,6 +56,27 @@ func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostna
 // local-only. It is set once at startup before requests are served.
 func (s *Server) SetSpool(spool *relay.Spool) { s.spool = spool }
 
+// davError logs the full internal error server-side and returns only the generic
+// status text to the client, so raw Go error strings (file paths, store and
+// library internals) never reach a DAV client. serve.New's logMiddleware already
+// emits a per-request http.request event carrying method, path, status and
+// RemoteAddr, so this records the failing error text alone. A 5xx logs at error
+// level, a 4xx (client fault) at warn.
+func (s *Server) davError(w http.ResponseWriter, err error, status int) {
+	level := logging.LevelError
+	if status < http.StatusInternalServerError {
+		level = logging.LevelWarn
+	}
+	s.Logger.Emit(logging.Event{
+		Level:     level,
+		Subsystem: logging.DAV,
+		Name:      "request.fail",
+		Fields:    logging.Fields{"status": status},
+		Err:       err.Error(),
+	})
+	http.Error(w, http.StatusText(status), status)
+}
+
 // SetMaxICal and SetMaxVCard set the iCalendar / vCard PUT body caps in bytes (0
 // restores the built-in default). They are safe to call concurrently with request
 // handling, so an operator's edit applies without a restart.

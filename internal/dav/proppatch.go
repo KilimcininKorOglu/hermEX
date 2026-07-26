@@ -74,18 +74,18 @@ func (s *Server) handleProppatch(w http.ResponseWriter, r *http.Request, mailbox
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, s.vcardLimit()))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.davError(w, err, http.StatusBadRequest)
 		return
 	}
 	var pu propUpdate
 	if err := xml.Unmarshal(body, &pu); err != nil {
-		http.Error(w, "invalid propertyupdate: "+err.Error(), http.StatusBadRequest)
+		s.davError(w, err, http.StatusBadRequest)
 		return
 	}
 
 	st, err := objectstore.Open(mailbox)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	defer st.Close()
@@ -98,7 +98,7 @@ func (s *Server) handleProppatch(w http.ResponseWriter, r *http.Request, mailbox
 		fid, ok, err = cardCollectionFID(st, coll)
 	}
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {
@@ -154,11 +154,11 @@ func (s *Server) handleProppatch(w http.ResponseWriter, r *http.Request, mailbox
 	for _, in := range instrs {
 		if in.remove {
 			if err := st.RemoveDeadProp(fid, in.key); err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				s.davError(w, err, http.StatusInternalServerError)
 				return
 			}
 		} else if err := st.SetDeadProp(fid, in.key, propValueElement(in.node)); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 		okNames = append(okNames, propNameElement(in.node.XMLName))

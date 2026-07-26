@@ -103,14 +103,14 @@ func (s *Server) handleScheduleInboxGet(w http.ResponseWriter, r *http.Request, 
 	_, _, _, name := classify(r.URL.Path)
 	st, err := objectstore.Open(mailbox)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	defer st.Close()
 
 	items, err := scheduleInboxItems(st)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	it, ok := findInboxItem(items, name)
@@ -120,12 +120,12 @@ func (s *Server) handleScheduleInboxGet(w http.ResponseWriter, r *http.Request, 
 	}
 	msg, err := st.OpenMessage(it.id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	ics, err := oxcical.Export(msg, icalOptions(st))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	body := withMethod(string(ics), itipMethodForClass(messageStringProp(msg.Props, mapi.PrMessageClass)))
@@ -144,14 +144,14 @@ func (s *Server) handleScheduleInboxDelete(w http.ResponseWriter, r *http.Reques
 	_, _, _, name := classify(r.URL.Path)
 	st, err := objectstore.Open(mailbox)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	defer st.Close()
 
 	items, err := scheduleInboxItems(st)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	it, ok := findInboxItem(items, name)
@@ -164,7 +164,7 @@ func (s *Server) handleScheduleInboxDelete(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err := st.SoftDeleteObject(it.id); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

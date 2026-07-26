@@ -29,7 +29,7 @@ type propertySearch struct {
 func (s *Server) reportPrincipalSearch(w http.ResponseWriter, body []byte) {
 	var req principalSearchReq
 	if err := xml.Unmarshal(body, &req); err != nil {
-		http.Error(w, "invalid principal-property-search: "+err.Error(), http.StatusBadRequest)
+		s.davError(w, err, http.StatusBadRequest)
 		return
 	}
 	var match string
@@ -45,7 +45,7 @@ func (s *Server) reportPrincipalSearch(w http.ResponseWriter, body []byte) {
 	if ok && match != "" {
 		entries, err := gal.SearchGAL(match, 100)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 		for _, e := range entries {
@@ -99,7 +99,9 @@ func reportPrincipalSearchPropSet(w http.ResponseWriter) {
 	}}
 	body, err := xml.Marshal(set)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		// set is a server-built struct, so a marshal failure is an internal bug,
+		// not client data; return a generic message rather than the raw error.
+		http.Error(w, "an internal error occurred", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
@@ -127,7 +129,7 @@ type expandProp struct {
 func (s *Server) reportExpandProperty(w http.ResponseWriter, r *http.Request, user string, body []byte) {
 	var req expandProperty
 	if err := xml.Unmarshal(body, &req); err != nil {
-		http.Error(w, "invalid expand-property: "+err.Error(), http.StatusBadRequest)
+		s.davError(w, err, http.StatusBadRequest)
 		return
 	}
 	_, pathUser, _, _ := classify(r.URL.Path)

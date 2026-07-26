@@ -47,7 +47,7 @@ func (s *Server) makeCollection(w http.ResponseWriter, r *http.Request, mailbox 
 
 	st, err := objectstore.Open(mailbox)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	defer st.Close()
@@ -64,7 +64,7 @@ func (s *Server) makeCollection(w http.ResponseWriter, r *http.Request, mailbox 
 	// MKCOL/MKCALENDAR on an existing resource (the reserved name or a prior
 	// collection) fails (RFC 4918 §9.3.1, RFC 4791 §5.3.1).
 	if _, ok, err := resolve(st, coll); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	} else if ok {
 		w.Header().Set("Allow", allowMethods)
@@ -74,13 +74,13 @@ func (s *Server) makeCollection(w http.ResponseWriter, r *http.Request, mailbox 
 
 	fid, err := st.CreateFolder(&parent, coll)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	// CreateFolder defaults to the mail container class; retype the new folder so
 	// the rest of the system treats it as a calendar/contacts collection.
 	if err := st.SetFolderProperties(fid, mapi.PropertyValues{{Tag: mapi.PrContainerClass, Value: class}}); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusCreated)

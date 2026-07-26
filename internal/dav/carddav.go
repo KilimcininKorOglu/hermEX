@@ -79,14 +79,14 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, mailbox strin
 	}
 	st, err := objectstore.Open(mailbox)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	defer st.Close()
 
 	fid, ok, err := cardCollectionFID(st, coll)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {
@@ -95,7 +95,7 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, mailbox strin
 	}
 	obj, found, err := findObjectByName(st, fid, ".vcf", name)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if !found {
@@ -104,12 +104,12 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, mailbox strin
 	}
 	msg, err := st.OpenMessage(obj.ID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	vcf, err := oxvcard.Export(msg, vcardOptions(st))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "text/vcard; charset=utf-8")
@@ -132,14 +132,14 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request, mailbox strin
 	}
 	st, err := objectstore.Open(mailbox)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	defer st.Close()
 
 	fid, ok, err := cardCollectionFID(st, coll)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {
@@ -148,7 +148,7 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request, mailbox strin
 	}
 	existing, found, err := findObjectByName(st, fid, ".vcf", name)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if r.Header.Get("If-None-Match") == "*" && found {
@@ -164,17 +164,17 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request, mailbox strin
 
 	body, err := io.ReadAll(io.LimitReader(r.Body, s.vcardLimit()))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.davError(w, err, http.StatusBadRequest)
 		return
 	}
 	msg, err := oxvcard.Import(body, vcardOptions(st))
 	if err != nil {
-		http.Error(w, "invalid vCard: "+err.Error(), http.StatusBadRequest)
+		s.davError(w, err, http.StatusBadRequest)
 		return
 	}
 	tag, _, err := resourceNameTag(st, true)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	msg.Props.Set(tag, name)
@@ -183,12 +183,12 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request, mailbox strin
 	// updater, matching how drafts are re-saved.
 	if found {
 		if err := st.DeleteObject(existing.ID); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 	}
 	if _, err := st.CreateMessage(fid, msg); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -212,14 +212,14 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request, mailbox st
 	}
 	st, err := objectstore.Open(mailbox)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	defer st.Close()
 
 	fid, ok, err := cardCollectionFID(st, coll)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {
@@ -228,7 +228,7 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request, mailbox st
 	}
 	obj, found, err := findObjectByName(st, fid, ".vcf", name)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	if !found {
@@ -242,7 +242,7 @@ func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request, mailbox st
 	// Route to the Recoverable Items dumpster (not a hard purge): the contact leaves
 	// the live view but its bumped change number is a sync-collection tombstone.
 	if err := st.SoftDeleteObject(obj.ID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

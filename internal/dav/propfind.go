@@ -34,7 +34,7 @@ func (s *Server) handlePropfind(w http.ResponseWriter, r *http.Request, user, ma
 			// well-known Contacts plus any user-created ones), not their members.
 			rs, err := s.allAddressbookCollections(mailbox, pathUser)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				s.davError(w, err, http.StatusInternalServerError)
 				return
 			}
 			responses = append(responses, rs...)
@@ -42,7 +42,7 @@ func (s *Server) handlePropfind(w http.ResponseWriter, r *http.Request, user, ma
 	case kindAddressbook:
 		rs, err := s.addressbookResponses(mailbox, pathUser, coll, depth)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 		if rs == nil {
@@ -57,7 +57,7 @@ func (s *Server) handlePropfind(w http.ResponseWriter, r *http.Request, user, ma
 			// well-known Calendar plus any user-created ones), not their members.
 			rs, err := s.allCalendarCollections(mailbox, pathUser)
 			if err != nil {
-				http.Error(w, err.Error(), http.StatusInternalServerError)
+				s.davError(w, err, http.StatusInternalServerError)
 				return
 			}
 			responses = append(responses, rs...)
@@ -65,7 +65,7 @@ func (s *Server) handlePropfind(w http.ResponseWriter, r *http.Request, user, ma
 	case kindCalendar:
 		rs, err := s.calendarResponses(mailbox, pathUser, coll, depth)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 		if rs == nil {
@@ -76,7 +76,7 @@ func (s *Server) handlePropfind(w http.ResponseWriter, r *http.Request, user, ma
 	case kindScheduleInbox:
 		rs, err := s.scheduleInboxResponses(mailbox, pathUser, depth)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			s.davError(w, err, http.StatusInternalServerError)
 			return
 		}
 		responses = rs
@@ -516,7 +516,9 @@ func scheduleOutboxResponse(user string) msResponse {
 func writeMultistatus(w http.ResponseWriter, ms *multistatus) {
 	body, err := marshalMultistatus(ms)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		// ms is a server-built struct, so a marshal failure is an internal bug,
+		// not client data; return a generic message rather than the raw error.
+		http.Error(w, "an internal error occurred", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", `application/xml; charset=utf-8`)

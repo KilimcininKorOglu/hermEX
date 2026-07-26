@@ -27,7 +27,7 @@ import (
 func (s *Server) handleOutboxPost(w http.ResponseWriter, r *http.Request, user string) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, s.icalLimit()))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.davError(w, err, http.StatusBadRequest)
 		return
 	}
 	root := parseICalNode(string(body))
@@ -123,12 +123,12 @@ func (s *Server) outboxDeliver(w http.ResponseWriter, user string, root, comp *i
 
 	raw, err := buildITIP(user, recipients, scheduleSubject(method, firstPropValue(comp, "SUMMARY")), body, method)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	unresolved, err := mta.DeliverAndRelay(s.accounts, s.spool, user, stripMailtoAll(recipients), raw, time.Now())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		s.davError(w, err, http.StatusInternalServerError)
 		return
 	}
 	bad := make(map[string]bool, len(unresolved))
@@ -353,7 +353,9 @@ func schedulePreconditionFail(w http.ResponseWriter, precondition string, status
 func writeScheduleResponse(w http.ResponseWriter, resp *scheduleResponse) {
 	body, err := xml.Marshal(resp)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		// resp is a server-built struct, so a marshal failure is an internal bug,
+		// not client data; return a generic message rather than the raw error.
+		http.Error(w, "an internal error occurred", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
