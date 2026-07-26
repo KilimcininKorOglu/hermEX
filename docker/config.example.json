@@ -1,5 +1,5 @@
 {
-  "database_dsn": "root:change-me@tcp(db:3306)/email?charset=utf8mb4",
+  "database_dsn": "REPLACE_USER:REPLACE_PASSWORD@tcp(db:3306)/email?charset=utf8mb4",
   "data_dir": "/data/mailboxes",
   "hostname": "mail.hermex.test",
   "smtp_addr": ":25",
