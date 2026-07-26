@@ -1,7 +1,6 @@
 package mapihttp
 
 import (
-	"io"
 	"net/http"
 
 	"hermex/internal/logging"
@@ -93,14 +92,14 @@ func (s *Server) nspiOpAuth(w http.ResponseWriter, r *http.Request, user, reqTyp
 	}
 	setNspiCookie(w, "sequence", newSeq)
 	s.mapiEvent(r, logging.LevelDebug, logging.NSPI, "operation", user, logging.Fields{"op": reqType})
-	body, _ := io.ReadAll(r.Body)
+	body := readBody(r)
 	writeNormal(w, r, reqType, handler(body, user))
 }
 
 // nspiBind decodes the Bind request, runs it against the NSPI server, and — only
 // when the bind succeeds — establishes the sid + sequence session cookies.
 func (s *Server) nspiBind(w http.ResponseWriter, r *http.Request, user string) {
-	body, _ := io.ReadAll(r.Body)
+	body := readBody(r)
 	resp, ok := s.nsp.Bind(body)
 	if ok {
 		sid, sequence := s.nspiSessions.bind(user)
@@ -120,7 +119,7 @@ func (s *Server) nspiUnbind(w http.ResponseWriter, r *http.Request) {
 		writeRespError(w, r, "Unbind", rcMissingCookie)
 		return
 	}
-	body, _ := io.ReadAll(r.Body)
+	body := readBody(r)
 	s.nspiSessions.drop(sid.Value)
 	writeNormal(w, r, "Unbind", s.nsp.Unbind(body))
 }

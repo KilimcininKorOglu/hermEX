@@ -11,6 +11,20 @@ import (
 // serverApp is announced in X-ServerApplication; clients log but do not gate on it.
 const serverApp = "Exchange/15.02.0390.000"
 
+// maxRequestBody caps a MAPI/HTTP request body. A ROP Execute buffer is bounded
+// well under this (the client negotiates RopBufferSize in the tens of KB), so a
+// generous 32 MiB ceiling never truncates a legitimate request while it stops an
+// unbounded read from exhausting server memory.
+const maxRequestBody = 32 << 20
+
+// readBody reads at most maxRequestBody bytes of the request body. Every handler
+// reads through it rather than io.ReadAll(r.Body) directly, so no MAPI/HTTP
+// request can drive an unbounded allocation.
+func readBody(r *http.Request) []byte {
+	body, _ := io.ReadAll(io.LimitReader(r.Body, maxRequestBody))
+	return body
+}
+
 // MAPI/HTTP X-ResponseCode values ([MS-OXCMAPIHTTP] 2.2.3.3.3): 0 success then
 // the documented failure set. A non-zero code rides in the X-ResponseCode header
 // (the HTTP status stays 200).

@@ -2,7 +2,6 @@ package mapihttp
 
 import (
 	"context"
-	"io"
 	"net/http"
 	"time"
 
@@ -68,7 +67,7 @@ func (s *Server) serveEmsmdb(w http.ResponseWriter, r *http.Request) {
 // for shape; the session is keyed by the Basic-authenticated user, not the
 // request UserDn.
 func (s *Server) emsConnect(w http.ResponseWriter, r *http.Request, sess *session) {
-	body, _ := io.ReadAll(r.Body)
+	body := readBody(r)
 	rd := &reader{b: body}
 	rd.cstr() // UserDn
 	rd.u32()  // Flags
@@ -114,7 +113,7 @@ func (s *Server) emsExecute(w http.ResponseWriter, r *http.Request, sess *sessio
 	// before any later error return so the client stays in lockstep.
 	setCookie(w, "sequence", newSeq)
 
-	body, _ := io.ReadAll(r.Body)
+	body := readBody(r)
 	rd := &reader{b: body}
 	rd.u32()                     // Flags
 	cbIn := rd.u32()             // RopBufferSize
