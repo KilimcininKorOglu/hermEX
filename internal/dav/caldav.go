@@ -102,6 +102,10 @@ func (s *Server) handleCalPut(w http.ResponseWriter, r *http.Request, user, mail
 		http.Error(w, "not a calendar resource", http.StatusMethodNotAllowed)
 		return
 	}
+	if !validObjectName(name) {
+		http.Error(w, "invalid resource name", http.StatusBadRequest)
+		return
+	}
 	st, err := objectstore.Open(mailbox)
 	if err != nil {
 		s.davError(w, err, http.StatusInternalServerError)

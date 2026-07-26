@@ -346,6 +346,18 @@ func isReservedScheduleName(name string) bool {
 	return name == scheduleInboxName || name == scheduleOutboxName
 }
 
+// validObjectName reports whether name is a safe DAV object (resource) name: a
+// single path component with no separators or traversal. A PUT stores this name
+// as the object's DavResourceName, and it is echoed back in PROPFIND/REPORT, so a
+// name carrying "/" , "\" , a NUL, or a "." / ".." traversal segment is rejected
+// rather than stored. An empty name is not a valid object either.
+func validObjectName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	return !strings.ContainsAny(name, "/\\\x00")
+}
+
 // classify parses a request path into a resource kind plus, for a collection, its
 // name segment and, for an object, its resource name. Any collection name is
 // accepted (the well-known "calendar"/"contacts" plus user-created subfolders); the

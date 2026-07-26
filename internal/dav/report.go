@@ -229,6 +229,13 @@ func (s *Server) reportMultiget(w http.ResponseWriter, st *objectstore.Store, fi
 	ms := &multistatus{}
 	for _, h := range hrefs {
 		name := path.Base(strings.TrimRight(h, "/"))
+		if !validObjectName(name) {
+			// The href is client-supplied in the REPORT body; a name that is not a
+			// plain object segment (traversal, separators) names nothing in this
+			// collection, so it is reported as a 404 rather than probing the store.
+			ms.Responses = append(ms.Responses, msResponse{Href: h, Status: statusNotFound})
+			continue
+		}
 		obj, found, err := findObjectByName(st, fid, ".vcf", name)
 		if err != nil {
 			s.davError(w, err, http.StatusInternalServerError)
@@ -362,6 +369,13 @@ func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store,
 	ms := &multistatus{}
 	for _, h := range hrefs {
 		name := path.Base(strings.TrimRight(h, "/"))
+		if !validObjectName(name) {
+			// The href is client-supplied in the REPORT body; a name that is not a
+			// plain object segment (traversal, separators) names nothing in this
+			// collection, so it is reported as a 404 rather than probing the store.
+			ms.Responses = append(ms.Responses, msResponse{Href: h, Status: statusNotFound})
+			continue
+		}
 		obj, found, err := findObjectByName(st, fid, ".ics", name)
 		if err != nil {
 			s.davError(w, err, http.StatusInternalServerError)

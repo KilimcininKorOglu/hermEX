@@ -130,6 +130,10 @@ func (s *Server) handlePut(w http.ResponseWriter, r *http.Request, mailbox strin
 		http.Error(w, "not a contact resource", http.StatusMethodNotAllowed)
 		return
 	}
+	if !validObjectName(name) {
+		http.Error(w, "invalid resource name", http.StatusBadRequest)
+		return
+	}
 	st, err := objectstore.Open(mailbox)
 	if err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
