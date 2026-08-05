@@ -27,6 +27,7 @@ import (
 	"hermex/internal/logging"
 	"hermex/internal/objectstore"
 	"hermex/internal/serve"
+	"hermex/internal/tlscert"
 )
 
 // The admin server consumes the directory through its own interface; this proves
@@ -240,7 +241,18 @@ func main() {
 		httpLimiter := httplimit.NewLimiter()
 		httplimit.Apply("hermex-admin", httpLimiter, dir.GetHTTPRateLimitSettings)
 		go httplimit.RunMaintenance("hermex-admin", httpLimiter, dir.GetHTTPRateLimitSettings)
-		hs, err := serve.New(addr, srv.Handler(), cfg, logger, logging.Admin, httpLimiter)
+		// TLS certificates come from the provider: the config-file cert as a
+		// fallback, overridden by an admin-uploaded cert the provider polls for, so
+		// a renewal applies without a restart. The panel where certificates are
+		// uploaded must not be the one place that needs a restart to serve them.
+		provider, err := tlscert.New(cfg, dir, logger)
+		if err != nil {
+			log.Fatalf("hermex-admin: tls: %v", err)
+		}
+		if provider.TLSEnabled() {
+			go provider.RunMaintenance()
+		}
+		hs, err := serve.New(addr, srv.Handler(), provider, logger, logging.Admin, httpLimiter)
 		if err != nil {
 			log.Fatalf("hermex-admin: %v", err)
 		}

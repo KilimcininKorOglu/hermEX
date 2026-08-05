@@ -28,6 +28,7 @@ import (
 	"hermex/internal/publicfolder"
 	"hermex/internal/relay"
 	"hermex/internal/serve"
+	"hermex/internal/tlscert"
 	"hermex/internal/webmail2api"
 )
 
@@ -88,7 +89,17 @@ func main() {
 	httpLimiter := httplimit.NewLimiter()
 	httplimit.Apply("hermex-webmail2", httpLimiter, dir.GetHTTPRateLimitSettings)
 	go httplimit.RunMaintenance("hermex-webmail2", httpLimiter, dir.GetHTTPRateLimitSettings)
-	hs, err := serve.New(addr, api.Handler(), cfg, logger, logging.Webmail, httpLimiter)
+	// TLS certificates come from the provider: the config-file cert as a fallback,
+	// overridden by an admin-uploaded cert the provider polls for, so a renewal
+	// applies without a restart.
+	provider, err := tlscert.New(cfg, dir, logger)
+	if err != nil {
+		log.Fatalf("hermex-webmail2: tls: %v", err)
+	}
+	if provider.TLSEnabled() {
+		go provider.RunMaintenance()
+	}
+	hs, err := serve.New(addr, api.Handler(), provider, logger, logging.Webmail, httpLimiter)
 	if err != nil {
 		log.Fatalf("hermex-webmail2: %v", err)
 	}
@@ -100,8 +111,14 @@ func main() {
 	// Web push: poll push subscribers' inboxes and notify their devices of new mail.
 	api.StartPushPoller(ctx, 15*time.Second)
 	log.Printf("hermex-webmail2 listening on %s", addr)
+	checks := []health.Check{{Name: "directory", Probe: db.PingContext}}
+	if provider.TLSEnabled() {
+		// Report the serving certificate's remaining validity, so a renewal that
+		// failed shows as degraded before clients start failing handshakes.
+		checks = append(checks, tlscert.ExpiryCheck(provider))
+	}
 	comps := append([]lifecycle.Component{hs},
-		health.Components(cfg.HealthAddr, "webmail2", health.Check{Name: "directory", Probe: db.PingContext})...)
+		health.Components(cfg.HealthAddr, "webmail2", checks...)...)
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, spool.Close, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-webmail2: %v", err)
 	}

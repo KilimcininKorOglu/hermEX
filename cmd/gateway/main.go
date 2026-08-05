@@ -33,6 +33,7 @@ import (
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/serve"
+	"hermex/internal/tlscert"
 )
 
 func main() {
@@ -115,8 +116,16 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log.Printf("hermex-gateway listening on %s", addr)
+	// Report the front door certificate's remaining validity, so a renewal that
+	// failed shows as degraded before clients start failing handshakes. Only the
+	// store-backed provider is covered: in acme mode CertMagic owns the renewal
+	// cycle and reports through its own logging.
+	var checks []health.Check
+	if p, ok := tlsSrc.(*tlscert.Provider); ok && p.TLSEnabled() {
+		checks = append(checks, tlscert.ExpiryCheck(p))
+	}
 	comps := append([]lifecycle.Component{hs},
-		health.Components(cfg.HealthAddr, "gateway")...)
+		health.Components(cfg.HealthAddr, "gateway", checks...)...)
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-gateway: %v", err)
 	}

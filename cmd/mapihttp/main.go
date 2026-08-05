@@ -28,6 +28,7 @@ import (
 	"hermex/internal/objectstore"
 	"hermex/internal/relay"
 	"hermex/internal/serve"
+	"hermex/internal/tlscert"
 )
 
 func main() {
@@ -85,7 +86,17 @@ func main() {
 	httpLimiter := httplimit.NewLimiter()
 	httplimit.Apply("hermex-mapihttp", httpLimiter, dir.GetHTTPRateLimitSettings)
 	go httplimit.RunMaintenance("hermex-mapihttp", httpLimiter, dir.GetHTTPRateLimitSettings)
-	hs, err := serve.New(addr, srv.Handler(), cfg, logger, logging.MAPI, httpLimiter)
+	// TLS certificates come from the provider: the config-file cert as a fallback,
+	// overridden by an admin-uploaded cert the provider polls for, so a renewal
+	// applies without a restart.
+	provider, err := tlscert.New(cfg, dir, logger)
+	if err != nil {
+		log.Fatalf("hermex-mapihttp: tls: %v", err)
+	}
+	if provider.TLSEnabled() {
+		go provider.RunMaintenance()
+	}
+	hs, err := serve.New(addr, srv.Handler(), provider, logger, logging.MAPI, httpLimiter)
 	if err != nil {
 		log.Fatalf("hermex-mapi: %v", err)
 	}
@@ -95,8 +106,14 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log.Printf("hermex-mapi listening on %s", addr)
+	checks := []health.Check{{Name: "directory", Probe: db.PingContext}}
+	if provider.TLSEnabled() {
+		// Report the serving certificate's remaining validity, so a renewal that
+		// failed shows as degraded before clients start failing handshakes.
+		checks = append(checks, tlscert.ExpiryCheck(provider))
+	}
 	comps := append([]lifecycle.Component{hs},
-		health.Components(cfg.HealthAddr, "mapi", health.Check{Name: "directory", Probe: db.PingContext})...)
+		health.Components(cfg.HealthAddr, "mapi", checks...)...)
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, spool.Close, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-mapi: %v", err)
 	}

@@ -7,6 +7,7 @@ package tlscert
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -118,6 +119,42 @@ func (p *Provider) getCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate,
 		return p.fileCert, nil
 	}
 	return nil, fmt.Errorf("tlscert: no certificate for server name %q", hello.ServerName)
+}
+
+// Expiry reports when the soonest-expiring certificate the provider can serve
+// stops being valid, and whether there is any certificate at all. It considers
+// every stored certificate plus the configuration-file fallback, because a
+// handshake may land on any of them: the earliest expiry is the one that bites
+// first. A daemon reports it through ExpiryCheck so an operator sees a renewal
+// that failed before clients do.
+func (p *Provider) Expiry() (time.Time, bool) {
+	var earliest time.Time
+	found := false
+	consider := func(c *tls.Certificate) {
+		leaf := c.Leaf
+		if leaf == nil {
+			// Go populates Leaf when parsing a key pair; parse defensively for a
+			// certificate assembled another way.
+			if len(c.Certificate) == 0 {
+				return
+			}
+			parsed, err := x509.ParseCertificate(c.Certificate[0])
+			if err != nil {
+				return
+			}
+			leaf = parsed
+		}
+		if !found || leaf.NotAfter.Before(earliest) {
+			earliest, found = leaf.NotAfter, true
+		}
+	}
+	for _, c := range p.snap.Load().byName {
+		consider(c)
+	}
+	if p.fileCert != nil {
+		consider(p.fileCert)
+	}
+	return earliest, found
 }
 
 // Refresh reloads the snapshot from the store when its version probe has moved

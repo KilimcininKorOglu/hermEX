@@ -29,6 +29,7 @@ import (
 	"hermex/internal/objectstore"
 	"hermex/internal/relay"
 	"hermex/internal/serve"
+	"hermex/internal/tlscert"
 )
 
 func main() {
@@ -90,7 +91,17 @@ func main() {
 	httpLimiter := httplimit.NewLimiter()
 	httplimit.Apply("hermex-activesync", httpLimiter, dir.GetHTTPRateLimitSettings)
 	go httplimit.RunMaintenance("hermex-activesync", httpLimiter, dir.GetHTTPRateLimitSettings)
-	hs, err := serve.New(addr, srv.Handler(), cfg, logger, logging.ActiveSync, httpLimiter)
+	// TLS certificates come from the provider: the config-file cert as a fallback,
+	// overridden by an admin-uploaded cert the provider polls for, so a renewal
+	// applies without a restart.
+	provider, err := tlscert.New(cfg, dir, logger)
+	if err != nil {
+		log.Fatalf("hermex-activesync: tls: %v", err)
+	}
+	if provider.TLSEnabled() {
+		go provider.RunMaintenance()
+	}
+	hs, err := serve.New(addr, srv.Handler(), provider, logger, logging.ActiveSync, httpLimiter)
 	if err != nil {
 		log.Fatalf("hermex-activesync: %v", err)
 	}
@@ -101,8 +112,14 @@ func main() {
 	defer stop()
 	go purgeSessionsLoop(ctx, dir, logger)
 	log.Printf("hermex-activesync listening on %s", addr)
+	checks := []health.Check{{Name: "directory", Probe: db.PingContext}}
+	if provider.TLSEnabled() {
+		// Report the serving certificate's remaining validity, so a renewal that
+		// failed shows as degraded before clients start failing handshakes.
+		checks = append(checks, tlscert.ExpiryCheck(provider))
+	}
 	comps := append([]lifecycle.Component{hs},
-		health.Components(cfg.HealthAddr, "activesync", health.Check{Name: "directory", Probe: db.PingContext})...)
+		health.Components(cfg.HealthAddr, "activesync", checks...)...)
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, spool.Close, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-activesync: %v", err)
 	}

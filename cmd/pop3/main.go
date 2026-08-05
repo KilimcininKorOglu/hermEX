@@ -89,8 +89,14 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	checks := []health.Check{{Name: "directory", Probe: db.PingContext}}
+	if provider.TLSEnabled() {
+		// Report the serving certificate's remaining validity, so a renewal that
+		// failed shows as degraded before clients start failing handshakes.
+		checks = append(checks, tlscert.ExpiryCheck(provider))
+	}
 	comps := append([]lifecycle.Component{srv},
-		health.Components(cfg.HealthAddr, "pop3", health.Check{Name: "directory", Probe: db.PingContext})...)
+		health.Components(cfg.HealthAddr, "pop3", checks...)...)
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-pop3: %v", err)
 	}
