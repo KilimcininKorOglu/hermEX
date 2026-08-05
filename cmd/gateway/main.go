@@ -29,6 +29,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/gateway"
 	"hermex/internal/health"
+	"hermex/internal/httplimit"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/serve"
@@ -96,7 +97,15 @@ func main() {
 		go maintain()
 	}
 
-	hs, err := serve.New(addr, h, tlsSrc, logger, logging.Gateway)
+	// Per-client HTTP request limiter at the front door, keyed on the peer address
+	// (the gateway is the outermost hop, so no X-Forwarded-For is trusted here).
+	// The settings are read at startup and re-read every minute, so an operator's
+	// change applies without a restart; the limiter is off until enabled and a read
+	// failure leaves it as it is.
+	httpLimiter := httplimit.NewLimiter()
+	httplimit.Apply("hermex-gateway", httpLimiter, dir.GetHTTPRateLimitSettings)
+	go httplimit.RunMaintenance("hermex-gateway", httpLimiter, dir.GetHTTPRateLimitSettings)
+	hs, err := serve.New(addr, h, tlsSrc, logger, logging.Gateway, httpLimiter, serve.FrontDoor())
 	if err != nil {
 		log.Fatalf("hermex-gateway: %v", err)
 	}

@@ -74,3 +74,35 @@ func TestHandlerErrors(t *testing.T) {
 		t.Error("non-absolute target should error")
 	}
 }
+
+// TestForwardedForNamesTheClient proves the proxy tells the backend which client it is
+// serving. The backends key their rate limiter and their access log on the first
+// X-Forwarded-For hop, so this header must carry the client the gateway actually
+// accepted. The front door strips whatever the client sent before this runs
+// (serve.FrontDoor), which is what makes the value here trustworthy.
+func TestForwardedForNamesTheClient(t *testing.T) {
+	var got string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Get("X-Forwarded-For")
+	}))
+	defer backend.Close()
+
+	h, err := Handler([]Route{{Prefix: "/", Target: backend.URL}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	front := httptest.NewServer(h)
+	defer front.Close()
+
+	resp, err := http.Get(front.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if got == "" {
+		t.Fatal("backend received no X-Forwarded-For, so it cannot tell one client from another")
+	}
+	if strings.Contains(got, ",") {
+		t.Errorf("X-Forwarded-For = %q, want a single hop: the front door strips the client's own", got)
+	}
+}

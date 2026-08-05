@@ -19,6 +19,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/dkimsign"
 	"hermex/internal/health"
+	"hermex/internal/httplimit"
 	"hermex/internal/ldapauth"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
@@ -78,7 +79,16 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
-	hs, err := serve.New(addr, api.Handler(), cfg, logger, logging.Webmail)
+	// Per-client HTTP request limiter: read the stored settings at startup and
+	// re-read them every minute, so an operator's change applies without a restart.
+	// It is off until an operator enables it, and any read failure leaves it as it
+	// is, so a settings problem never starts throttling clients. It caps requests
+	// of every kind; the failed-login throttle in internal/authlimit is separate and
+	// stays in place.
+	httpLimiter := httplimit.NewLimiter()
+	httplimit.Apply("hermex-webmail2", httpLimiter, dir.GetHTTPRateLimitSettings)
+	go httplimit.RunMaintenance("hermex-webmail2", httpLimiter, dir.GetHTTPRateLimitSettings)
+	hs, err := serve.New(addr, api.Handler(), cfg, logger, logging.Webmail, httpLimiter)
 	if err != nil {
 		log.Fatalf("hermex-webmail2: %v", err)
 	}

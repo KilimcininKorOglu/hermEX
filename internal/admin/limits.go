@@ -30,7 +30,53 @@ func (s *Server) handleUILimits(w http.ResponseWriter, r *http.Request) {
 func (s *Server) limitsPageData(r *http.Request, notice string) map[string]any {
 	data := map[string]any{"Nav": "limits", "Notice": notice, "CSRF": csrfCookieValue(r)}
 	s.fillSizeLimits(data)
+	s.fillHTTPRateLimit(data)
 	return data
+}
+
+// defaultHTTPRateBurst and defaultHTTPRateWindow mirror the limiter's own built-in
+// values (600 requests per 60 s), shown on the page until an operator saves one.
+const (
+	defaultHTTPRateBurst  = 600
+	defaultHTTPRateWindow = 60
+)
+
+// fillHTTPRateLimit sets the per-client HTTP request limiter's toggle and tunables on
+// a page-data map, using the stored values or the limiter's built-in defaults
+// (disabled). Shared by the Limits page and the unified Settings page.
+func (s *Server) fillHTTPRateLimit(data map[string]any) {
+	data["HTTPRateEnabled"] = false
+	data["HTTPRateBurst"], data["HTTPRateWindow"] = defaultHTTPRateBurst, defaultHTTPRateWindow
+	if st, found, err := s.dir.GetHTTPRateLimitSettings(); err == nil && found {
+		data["HTTPRateEnabled"] = st.Enabled
+		data["HTTPRateBurst"] = st.Burst
+		data["HTTPRateWindow"] = st.WindowSeconds
+	}
+}
+
+// handleUISaveHTTPRateLimit persists the per-client HTTP request limiter's settings.
+// Every HTTP daemon applies the change within about a minute, no restart. A burst or
+// window below 1 is rejected so the limiter is never configured to admit zero requests
+// or collapse its window.
+func (s *Server) handleUISaveHTTPRateLimit(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	burst, window := formInt(r, "http_burst"), formInt(r, "http_window")
+	if burst < 1 || window < 1 {
+		s.render(w, "http-ratelimit-panel", s.limitsPageData(r, "Burst and window must each be at least 1; settings not saved."))
+		return
+	}
+	st := directory.HTTPRateLimitSettings{
+		Enabled:       r.FormValue("enabled") == "1",
+		Burst:         burst,
+		WindowSeconds: window,
+	}
+	if err := s.dir.SetHTTPRateLimitSettings(st); err != nil {
+		s.render(w, "http-ratelimit-panel", s.limitsPageData(r, "Could not save the request-rate settings: "+err.Error()))
+		return
+	}
+	s.render(w, "http-ratelimit-panel", s.limitsPageData(r, "Request-rate settings saved. Every HTTP daemon applies them within a minute, no restart."))
 }
 
 // fillSizeLimits sets each protocol's cap (in whole MB) on a page-data map, using the

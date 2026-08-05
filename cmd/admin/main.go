@@ -20,6 +20,7 @@ import (
 	"hermex/internal/admin"
 	"hermex/internal/config"
 	"hermex/internal/directory"
+	"hermex/internal/httplimit"
 	"hermex/internal/ldapauth"
 	"hermex/internal/ldapsync"
 	"hermex/internal/lifecycle"
@@ -231,7 +232,15 @@ func main() {
 			srv.SetLogReader(logReader) // enables the web UI log viewer
 			cleanups = append(cleanups, logReader.Close)
 		}
-		hs, err := serve.New(addr, srv.Handler(), cfg, logger, logging.Admin)
+		// Per-client HTTP request limiter: read the stored settings at startup and
+		// re-read them every minute, so an operator's change applies without a
+		// restart. It is off until an operator enables it, and any read failure
+		// leaves it as it is, so a settings problem never locks an operator out of
+		// the panel that turns it off.
+		httpLimiter := httplimit.NewLimiter()
+		httplimit.Apply("hermex-admin", httpLimiter, dir.GetHTTPRateLimitSettings)
+		go httplimit.RunMaintenance("hermex-admin", httpLimiter, dir.GetHTTPRateLimitSettings)
+		hs, err := serve.New(addr, srv.Handler(), cfg, logger, logging.Admin, httpLimiter)
 		if err != nil {
 			log.Fatalf("hermex-admin: %v", err)
 		}

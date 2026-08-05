@@ -120,6 +120,8 @@ type Directory interface {
 	SetMessageSizeSettings(directory.MessageSizeSettings) error
 	GetSizeLimits() (directory.SizeLimits, bool, error)
 	SetSizeLimits(directory.SizeLimits) error
+	GetHTTPRateLimitSettings() (directory.HTTPRateLimitSettings, bool, error)
+	SetHTTPRateLimitSettings(directory.HTTPRateLimitSettings) error
 	GetLogRetentionDays() (int, bool, error)
 	SetLogRetentionDays(int) error
 	GetRecoverableSettings() (directory.RecoverableSettings, bool, error)
@@ -379,6 +381,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/recoverable-retention", s.handleUISaveRecoverableRetention)
 	mux.HandleFunc("GET /admin/ui/limits", s.handleUILimits)
 	mux.HandleFunc("POST /admin/ui/limits", s.handleUISaveLimits)
+	mux.HandleFunc("POST /admin/ui/limits/requestrate", s.handleUISaveHTTPRateLimit)
 	mux.HandleFunc("GET /admin/ui/settings", s.handleUISettings)
 	mux.HandleFunc("GET /admin/ui/tls", s.handleUITLSCerts)
 	mux.HandleFunc("POST /admin/ui/tls/upload", s.handleUITLSCertUpload)

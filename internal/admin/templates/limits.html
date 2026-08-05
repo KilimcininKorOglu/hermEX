@@ -5,6 +5,8 @@
 <h1>Protocol size limits</h1>
 <p class="hint">The maximum request/body size each protocol accepts; a larger request is rejected. Each protocol daemon applies its own limit within about a minute, no restart. More protocol limits (EWS, ActiveSync, DAV) are added here as they are wired.</p>
 {{template "limits-panel" .}}
+<h1>Request rate</h1>
+{{template "http-ratelimit-panel" .}}
 </main>
 </div>
 {{template "foot" .}}{{end}}
@@ -18,5 +20,16 @@
 <p>CalDAV maximum iCalendar PUT (MB): <input type="number" name="dav_ical_mb" value="{{.DAVICalMB}}" min="1"></p>
 <p>CardDAV maximum vCard PUT (MB): <input type="number" name="dav_vcard_mb" value="{{.DAVVCardMB}}" min="1"></p>
 <button type="submit">Save limits</button>
+</form>
+</div>{{end}}
+
+{{define "http-ratelimit-panel"}}<div id="http-ratelimit-panel">
+{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+<p>Request rate limiting is <strong>{{if .HTTPRateEnabled}}on{{else}}off{{end}}</strong>. When on, a client address that sends more than the burst within the window is answered with 429 and a Retry-After header, so one client cannot exhaust a daemon for everyone else. It covers every HTTP surface (webmail, EWS, ActiveSync, MAPI/HTTP, DAV, this panel and the gateway) and each daemon counts on its own. Keep the burst generous: Outlook and ActiveSync clients issue large legitimate bursts during an initial sync.</p>
+<form hx-post="/admin/ui/limits/requestrate" hx-target="#http-ratelimit-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<label class="check"><input type="checkbox" name="enabled" value="1"{{if .HTTPRateEnabled}} checked{{end}}> Enable request rate limiting</label>
+<p>Burst (requests per window): <input type="number" name="http_burst" value="{{.HTTPRateBurst}}" min="1"></p>
+<p>Window (seconds): <input type="number" name="http_window" value="{{.HTTPRateWindow}}" min="1"></p>
+<button type="submit">Save settings</button>
 </form>
 </div>{{end}}

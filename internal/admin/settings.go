@@ -20,6 +20,7 @@ func (s *Server) settingsPageData(r *http.Request, notice string) map[string]any
 	data := s.antispamPageData(r, notice)
 	data["Nav"] = "settings"
 	s.fillSizeLimits(data)
+	s.fillHTTPRateLimit(data)
 	s.fillLogRetention(data)
 	s.fillRecoverableRetention(data)
 

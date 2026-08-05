@@ -76,3 +76,60 @@ func TestSaveLimitsRejectsBadValues(t *testing.T) {
 		t.Error("invalid limit must not be persisted")
 	}
 }
+
+// TestLimitsPageRendersRequestRate proves the Limits page shows the request-rate panel
+// with the limiter's built-in defaults, off, until an operator saves settings.
+func TestLimitsPageRendersRequestRate(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+
+	resp := authedGET(t, ts, "/admin/ui/limits", session)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	page := string(body)
+	if !strings.Contains(page, "Request rate limiting is <strong>off</strong>") {
+		t.Errorf("request-rate panel missing or not reported as off:\n%s", page)
+	}
+	if !strings.Contains(page, `name="http_burst" value="600"`) || !strings.Contains(page, `name="http_window" value="60"`) {
+		t.Errorf("request-rate panel missing the built-in defaults:\n%s", page)
+	}
+}
+
+// TestSaveHTTPRateLimit proves the request-rate form persists the toggle, burst and
+// window, the values every HTTP daemon then polls to apply without a restart.
+func TestSaveHTTPRateLimit(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/limits/requestrate", session, csrf,
+		url.Values{"enabled": {"1"}, "http_burst": {"900"}, "http_window": {"30"}})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Request-rate settings saved") {
+		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
+	}
+	if !d.httpRateLimitFound || !d.httpRateLimit.Enabled || d.httpRateLimit.Burst != 900 || d.httpRateLimit.WindowSeconds != 30 {
+		t.Errorf("settings not persisted as entered: found=%v %+v", d.httpRateLimitFound, d.httpRateLimit)
+	}
+}
+
+// TestSaveHTTPRateLimitRejectsBadValues proves a burst or window below 1 (which would
+// admit no requests or collapse the window) is rejected and nothing is persisted.
+func TestSaveHTTPRateLimitRejectsBadValues(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/limits/requestrate", session, csrf,
+		url.Values{"enabled": {"1"}, "http_burst": {"0"}, "http_window": {"60"}})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(body), "at least 1") {
+		t.Errorf("expected a validation message:\n%s", body)
+	}
+	if d.httpRateLimitFound {
+		t.Error("invalid request-rate settings must not be persisted")
+	}
+}

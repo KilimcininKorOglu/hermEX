@@ -45,6 +45,8 @@ type fakeDir struct {
 	greylistTimingsSet bool
 	rateLimit          directory.RateLimitSettings
 	rateLimitFound     bool
+	httpRateLimit      directory.HTTPRateLimitSettings
+	httpRateLimitFound bool
 	messageSize        directory.MessageSizeSettings
 	messageSizeFound   bool
 	sizeLimits         directory.SizeLimits
@@ -492,6 +494,13 @@ func (f *fakeDir) GetRateLimitSettings() (directory.RateLimitSettings, bool, err
 }
 func (f *fakeDir) SetRateLimitSettings(s directory.RateLimitSettings) error {
 	f.rateLimit, f.rateLimitFound = s, true
+	return nil
+}
+func (f *fakeDir) GetHTTPRateLimitSettings() (directory.HTTPRateLimitSettings, bool, error) {
+	return f.httpRateLimit, f.httpRateLimitFound, nil
+}
+func (f *fakeDir) SetHTTPRateLimitSettings(s directory.HTTPRateLimitSettings) error {
+	f.httpRateLimit, f.httpRateLimitFound = s, true
 	return nil
 }
 func (f *fakeDir) GetMessageSizeSettings() (directory.MessageSizeSettings, bool, error) {

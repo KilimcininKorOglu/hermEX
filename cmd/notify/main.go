@@ -37,7 +37,10 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
-	hs, err := serve.New(addr, srv.Handler(), cfg, logger, logging.Notify)
+	// No rate limiter here: the relay holds no database to read the settings from,
+	// and it is reachable only from the other daemons on the internal network. Its
+	// consumers hold one long-lived SSE stream each, not a request stream.
+	hs, err := serve.New(addr, srv.Handler(), cfg, logger, logging.Notify, nil)
 	if err != nil {
 		log.Fatalf("hermex-notify: %v", err)
 	}

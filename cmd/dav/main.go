@@ -20,6 +20,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/dkimsign"
 	"hermex/internal/health"
+	"hermex/internal/httplimit"
 	"hermex/internal/ldapauth"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
@@ -75,7 +76,14 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
-	hs, err := serve.New(addr, srv.Handler(), cfg, logger, logging.DAV)
+	// Per-client HTTP request limiter: read the stored settings at startup and
+	// re-read them every minute, so an operator's change applies without a restart.
+	// It is off until an operator enables it, and any read failure leaves it as it
+	// is, so a settings problem never starts throttling clients.
+	httpLimiter := httplimit.NewLimiter()
+	httplimit.Apply("hermex-dav", httpLimiter, dir.GetHTTPRateLimitSettings)
+	go httplimit.RunMaintenance("hermex-dav", httpLimiter, dir.GetHTTPRateLimitSettings)
+	hs, err := serve.New(addr, srv.Handler(), cfg, logger, logging.DAV, httpLimiter)
 	if err != nil {
 		log.Fatalf("hermex-dav: %v", err)
 	}

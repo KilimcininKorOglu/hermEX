@@ -33,7 +33,7 @@ func okHandler() http.Handler {
 // TestServePlaintext proves that with no certificate configured New falls back
 // to plaintext HTTP (backward compatible with the pre-TLS daemons).
 func TestServePlaintext(t *testing.T) {
-	hs, err := New("127.0.0.1:0", okHandler(), &config.Config{}, nil, logging.System) // TLS disabled
+	hs, err := New("127.0.0.1:0", okHandler(), &config.Config{}, nil, logging.System, nil) // TLS disabled
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestServeTLS(t *testing.T) {
 	certPath, keyPath := writeSelfSignedCert(t, dir)
 	cfg := &config.Config{TLSCert: certPath, TLSKey: keyPath}
 
-	hs, err := New("127.0.0.1:0", okHandler(), cfg, nil, logging.System)
+	hs, err := New("127.0.0.1:0", okHandler(), cfg, nil, logging.System, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestServerGracefulDrain(t *testing.T) {
 		<-releaseHandler
 		io.WriteString(w, "drained")
 	})
-	hs, err := New("127.0.0.1:0", h, &config.Config{}, nil, logging.System)
+	hs, err := New("127.0.0.1:0", h, &config.Config{}, nil, logging.System, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func TestTLSHandshakeLogged(t *testing.T) {
 	dir := t.TempDir()
 	certPath, keyPath := writeSelfSignedCert(t, dir)
 	sink := &captureSink{}
-	hs, err := New("127.0.0.1:0", okHandler(), &config.Config{TLSCert: certPath, TLSKey: keyPath}, logging.New(sink), logging.System)
+	hs, err := New("127.0.0.1:0", okHandler(), &config.Config{TLSCert: certPath, TLSKey: keyPath}, logging.New(sink), logging.System, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,7 +292,7 @@ func TestRequestLoggingEmitsEvent(t *testing.T) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTeapot) // a 4xx, to assert the warn level
 	})
-	hs, err := New("127.0.0.1:0", h, &config.Config{}, logger, logging.Webmail)
+	hs, err := New("127.0.0.1:0", h, &config.Config{}, logger, logging.Webmail, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

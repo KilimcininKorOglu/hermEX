@@ -46,6 +46,8 @@
 <h2>Protocol size limits</h2>
 <p class="hint">The maximum request/body size each protocol accepts; a larger request is rejected. More protocol limits (EWS, ActiveSync, DAV) are added here as they are wired.</p>
 {{template "limits-panel" .}}
+<h2>Request rate</h2>
+{{template "http-ratelimit-panel" .}}
 </div>
 
 <div class="tabpanel retention">

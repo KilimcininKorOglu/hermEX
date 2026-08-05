@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"time"
 
+	"hermex/internal/httplimit"
 	"hermex/internal/logging"
 )
 
@@ -34,12 +35,30 @@ type Server struct {
 	ln      net.Listener
 }
 
+// Option adjusts a Server at construction.
+type Option func(*options)
+
+type options struct{ frontDoor bool }
+
+// FrontDoor marks this server as the outermost hop, the one clients connect to
+// directly. It drops any X-Forwarded-For the client supplied, so the header the
+// backends (and this server's own access log and rate limiter) read is written by
+// the front door alone. Without it a client could name any address it liked and so
+// both escape its own rate-limit budget and poison another client's.
+func FrontDoor() Option { return func(o *options) { o.frontDoor = true } }
+
 // New binds addr and returns a Server ready to Start, terminating TLS when tls
 // supplies a certificate and serving plaintext otherwise. Binding eagerly here
 // surfaces an address-in-use error before the daemon's run loop begins. Every
 // request is logged through logger under subsystem (method/path/status/duration/
-// client/user/request-id); a nil logger disables request logging.
-func New(addr string, h http.Handler, tlsSrc TLSSource, logger *logging.Logger, subsystem logging.Subsystem) (*Server, error) {
+// client/user/request-id); a nil logger disables request logging. limiter caps
+// how many requests one client may issue per window; a nil limiter disables rate
+// limiting.
+func New(addr string, h http.Handler, tlsSrc TLSSource, logger *logging.Logger, subsystem logging.Subsystem, limiter *httplimit.Limiter, opts ...Option) (*Server, error) {
+	var o options
+	for _, opt := range opts {
+		opt(&o)
+	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
@@ -73,8 +92,15 @@ func New(addr string, h http.Handler, tlsSrc TLSSource, logger *logging.Logger, 
 	// left unset: this server also carries the long-poll consumers (EWS
 	// streaming, EAS Ping, MAPI/HTTP async, notify SSE), which hold a single
 	// request open far longer than any fixed write deadline would allow.
+	// The limiter sits inside the logger so a refused request is still recorded in
+	// the access log, and the front-door strip sits outside both so neither reads a
+	// client-supplied X-Forwarded-For.
+	handler := logMiddleware(rateLimitMiddleware(h, limiter), logger, subsystem)
+	if o.frontDoor {
+		handler = stripForwardedFor(handler)
+	}
 	return &Server{httpSrv: &http.Server{
-		Handler:           logMiddleware(h, logger, subsystem),
+		Handler:           handler,
 		ReadHeaderTimeout: 30 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}, ln: ln}, nil
