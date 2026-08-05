@@ -2,6 +2,7 @@ package mime
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 )
 
@@ -164,5 +165,40 @@ func TestParseStructureNestedMessage(t *testing.T) {
 	}
 	if b, ok := root.Extract(Section{Path: []int{2, 1}}); !ok || string(b) != "inner body" {
 		t.Errorf("BODY[2.1] = %q (ok=%v), want \"inner body\"", b, ok)
+	}
+}
+
+// TestParseStructureDepthBound proves the parser refuses to descend past
+// maxNestingDepth. The message is attacker-supplied on the unauthenticated SMTP
+// path, and each level costs a stack frame, so an unbounded descent would let one
+// message exhaust the goroutine stack and kill the process. The parse must return
+// normally and stop nesting at the cap.
+func TestParseStructureDepthBound(t *testing.T) {
+	const levels = maxNestingDepth + 40
+
+	var b bytes.Buffer
+	for i := range levels {
+		fmt.Fprintf(&b, "Content-Type: multipart/mixed; boundary=\"B%d\"\r\n\r\n--B%d\r\n", i, i)
+	}
+	b.WriteString("Content-Type: text/plain\r\n\r\ninnermost\r\n")
+	for i := levels - 1; i >= 0; i-- {
+		fmt.Fprintf(&b, "--B%d--\r\n", i)
+	}
+
+	root := ParseStructure(b.Bytes())
+
+	depth := 0
+	for p := root; p != nil; depth++ {
+		switch {
+		case len(p.Children) > 0:
+			p = p.Children[0]
+		case p.MsgBody != nil:
+			p = p.MsgBody
+		default:
+			p = nil
+		}
+	}
+	if depth > maxNestingDepth+1 {
+		t.Errorf("tree depth = %d, want at most %d", depth, maxNestingDepth+1)
 	}
 }

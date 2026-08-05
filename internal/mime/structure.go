@@ -12,6 +12,16 @@ import (
 // none (RFC 2045 §5.2).
 const defaultContentType = "text/plain"
 
+// maxNestingDepth bounds how far the parser descends into multipart and
+// message/rfc822 nesting. Each level costs a stack frame, and the message is
+// attacker-supplied from an unauthenticated SMTP peer, so unbounded recursion
+// would let one message exhaust the goroutine stack and take the process down
+// with a runtime throw that no recover can catch. Real mail nests a handful of
+// levels; Exchange and mainstream MTAs cap in the same order of magnitude.
+// An entity deeper than this is kept as a leaf: its bytes stay retrievable
+// verbatim, only the structure below it is not enumerated.
+const maxNestingDepth = 50
+
 // Part is one node of a parsed MIME tree. The exported fields carry everything
 // an IMAP BODYSTRUCTURE response needs; the unexported fields retain the exact
 // byte ranges (slices into the original message buffer) that BODY[...] section
@@ -40,7 +50,7 @@ type Part struct {
 // raw is taken as-is (CRLF line endings, as stored); no transfer decoding or
 // line-ending normalization is performed, so section fetches stay byte-exact.
 func ParseStructure(raw []byte) *Part {
-	return parseEntity(raw)
+	return parseEntity(raw, 0)
 }
 
 // Header parses and returns this entity's header fields. Repeated fields are
@@ -59,8 +69,10 @@ func (p *Part) RawHeader() []byte {
 }
 
 // parseEntity parses one MIME entity (a message or a body part): its header,
-// then its body, recursing for multipart and message/rfc822 content.
-func parseEntity(raw []byte) *Part {
+// then its body, recursing for multipart and message/rfc822 content. depth is
+// the entity's nesting level; at maxNestingDepth the entity is parsed as a leaf
+// rather than descended into.
+func parseEntity(raw []byte, depth int) *Part {
 	bodyOffset := headerEnd(raw)
 	header := parseHeader(raw[:bodyOffset])
 	body := raw[bodyOffset:]
@@ -87,13 +99,13 @@ func parseEntity(raw []byte) *Part {
 	}
 
 	switch {
-	case p.Type == "multipart" && p.Params["boundary"] != "":
+	case p.Type == "multipart" && p.Params["boundary"] != "" && depth < maxNestingDepth:
 		for _, seg := range splitParts(body, p.Params["boundary"]) {
-			p.Children = append(p.Children, parseEntity(seg))
+			p.Children = append(p.Children, parseEntity(seg, depth+1))
 		}
-	case p.Type == "message" && p.Subtype == "rfc822":
+	case p.Type == "message" && p.Subtype == "rfc822" && depth < maxNestingDepth:
 		p.Lines = lineCount(body)
-		p.MsgBody = parseEntity(body)
+		p.MsgBody = parseEntity(body, depth+1)
 		if env, err := ParseEnvelope(body); err == nil {
 			p.MsgEnvelope = env
 		}
