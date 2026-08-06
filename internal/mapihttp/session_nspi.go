@@ -1,6 +1,9 @@
 package mapihttp
 
-import "sync"
+import (
+	"sync"
+	"time"
+)
 
 // nspiSession is the server-side state an NSPI Bind establishes. NSPI is
 // otherwise stateless — the STAT cursor is client-carried and the GAL row
@@ -9,6 +12,7 @@ import "sync"
 type nspiSession struct {
 	user     string
 	sequence string
+	lastSeen time.Time // last client touch, for reclaiming sessions that never Unbind
 }
 
 // nspiSessionStore maps NSPI sid cookies to bound sessions. It mirrors the
@@ -28,7 +32,7 @@ func newNspiSessionStore() *nspiSessionStore {
 func (s *nspiSessionStore) bind(user string) (sid, sequence string) {
 	sid, sequence = newSessionToken(), newSessionToken()
 	s.mu.Lock()
-	s.m[sid] = &nspiSession{user: user, sequence: sequence}
+	s.m[sid] = &nspiSession{user: user, sequence: sequence, lastSeen: time.Now()}
 	s.mu.Unlock()
 	return sid, sequence
 }
@@ -52,7 +56,24 @@ func (s *nspiSessionStore) validate(sid, seq, user string) (newSeq string, code 
 		return "", rcInvalidSeq
 	}
 	c.sequence = newSessionToken()
+	c.lastSeen = time.Now()
 	return c.sequence, rcSuccess
+}
+
+// sweep discards every bound session idle for longer than ttl and returns how
+// many it reclaimed, so a client that disappears without Unbind does not leave
+// its binding behind for the life of the process.
+func (s *nspiSessionStore) sweep(now time.Time, ttl time.Duration) int {
+	n := 0
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for sid, c := range s.m {
+		if now.Sub(c.lastSeen) >= ttl {
+			delete(s.m, sid)
+			n++
+		}
+	}
+	return n
 }
 
 // drop discards a bound NSPI session (Unbind).

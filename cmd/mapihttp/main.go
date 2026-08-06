@@ -106,6 +106,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	log.Printf("hermex-mapi listening on %s", addr)
+	// Reclaim sessions whose client vanished without Disconnect; each one otherwise
+	// pins an open mailbox store for the life of the process.
+	go srv.RunSessionMaintenance(ctx)
 	checks := []health.Check{{Name: "directory", Probe: db.PingContext}}
 	if provider.TLSEnabled() {
 		// Report the serving certificate's remaining validity, so a renewal that

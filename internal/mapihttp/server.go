@@ -12,6 +12,7 @@
 package mapihttp
 
 import (
+	"context"
 	"net/http"
 	"strings"
 	"time"
@@ -42,6 +43,37 @@ type Server struct {
 	notifyCadence time.Duration        // how often that long-poll re-checks the shared store
 	waker         notify.Registrar     // push wake source; nil keeps the long-poll on its cadence only
 	Logger        *logging.Logger      // central activity log; nil disables logging
+}
+
+// Session reclamation. A client that dies without Disconnect (or Unbind) leaves
+// its session behind, and an EMSMDB session pins a ROP handle table with an open
+// mailbox store, so the server would accumulate them for the life of the process.
+// sessionTTL is how long a session may go untouched before it is reclaimed; it is
+// far above the notification long-poll window (notifyWaitInterval), and the poll
+// stamps the session when it parks, so a wait in progress is never reclaimed.
+const (
+	sessionTTL           = 30 * time.Minute
+	sessionSweepInterval = time.Minute
+)
+
+// RunSessionMaintenance reclaims idle EMSMDB and NSPI sessions every
+// sessionSweepInterval until ctx is cancelled. A daemon starts it alongside
+// serving; a server that never starts it keeps every session, which is what the
+// tests want.
+func (s *Server) RunSessionMaintenance(ctx context.Context) {
+	t := time.NewTicker(sessionSweepInterval)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			now := time.Now()
+			if n := s.sessions.sweep(now, sessionTTL) + s.nspiSessions.sweep(now, sessionTTL); n > 0 {
+				s.Logger.Info(logging.MAPI, "session.reclaim", logging.Fields{"count": n})
+			}
+		}
+	}
 }
 
 // mapiEvent logs a MAPI/HTTP operation tagged with the client address (and, when
