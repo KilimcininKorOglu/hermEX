@@ -1,6 +1,7 @@
 package fetchmail
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -51,7 +52,7 @@ func TestPollPOP3DeleteMode(t *testing.T) {
 	}}}
 	deliver, got := capture()
 
-	n, errs := Poll(store, deliver, pollTime)
+	n, errs := Poll(context.Background(), store, deliver, pollTime)
 	if len(errs) != 0 {
 		t.Fatalf("poll errors: %v", errs)
 	}
@@ -78,7 +79,7 @@ func TestPollPOP3KeepDedup(t *testing.T) {
 	}
 	deliver, got := capture()
 
-	n, errs := Poll(store, deliver, pollTime)
+	n, errs := Poll(context.Background(), store, deliver, pollTime)
 	if len(errs) != 0 {
 		t.Fatalf("poll errors: %v", errs)
 	}
@@ -113,7 +114,7 @@ func TestPollPOP3KeepRecordsBeforeLaterFailure(t *testing.T) {
 		return nil
 	}
 
-	n, errs := Poll(store, deliver, pollTime)
+	n, errs := Poll(context.Background(), store, deliver, pollTime)
 	if len(errs) == 0 {
 		t.Fatal("expected the later delivery failure to be reported")
 	}
@@ -136,7 +137,7 @@ func TestPollIMAPDeleteMode(t *testing.T) {
 	}}}
 	deliver, got := capture()
 
-	n, errs := Poll(store, deliver, pollTime)
+	n, errs := Poll(context.Background(), store, deliver, pollTime)
 	if len(errs) != 0 {
 		t.Fatalf("poll errors: %v", errs)
 	}
@@ -163,7 +164,7 @@ func TestPollIMAPKeepMarksSeen(t *testing.T) {
 	}}}
 	deliver, got := capture()
 
-	n, errs := Poll(store, deliver, pollTime)
+	n, errs := Poll(context.Background(), store, deliver, pollTime)
 	if len(errs) != 0 {
 		t.Fatalf("poll errors: %v", errs)
 	}

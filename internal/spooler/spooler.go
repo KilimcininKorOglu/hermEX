@@ -8,6 +8,7 @@ package spooler
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -72,7 +73,10 @@ var nameReleaseAttempts = mapi.PropertyName{
 // is moved back to Drafts (what a user-initiated cancel does) and onGiveUp is
 // called, so a message that can never be released stops burning a delivery
 // attempt every sweep and its sender is told instead of left guessing.
-func ProcessDueOutbox(st *objectstore.Store, deliver DeliverFunc, onGiveUp GiveUpFunc, now time.Time) (released int, err error) {
+// A cancelled context stops the scan between messages, so a sweep over many
+// mailboxes does not outlast the daemon's shutdown deadline. What is left simply
+// stays in the Outbox for the next sweep.
+func ProcessDueOutbox(ctx context.Context, st *objectstore.Store, deliver DeliverFunc, onGiveUp GiveUpFunc, now time.Time) (released int, err error) {
 	outbox := int64(mapi.PrivateFIDOutbox)
 	msgs, err := st.ListMessages(outbox)
 	if err != nil {
@@ -80,6 +84,9 @@ func ProcessDueOutbox(st *objectstore.Store, deliver DeliverFunc, onGiveUp GiveU
 	}
 	var errs []error
 	for _, m := range msgs {
+		if ctx.Err() != nil {
+			return released, errors.Join(errs...)
+		}
 		due, scheduled, e := deferredSendDue(st, m.ID, now)
 		if e != nil {
 			errs = append(errs, e)

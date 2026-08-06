@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"context"
 	"crypto/tls"
 	"net"
 	"testing"
@@ -178,7 +179,7 @@ func TestWorkerRecordsTLSSuccess(t *testing.T) {
 		Dialer:      func(string) (net.Conn, error) { return net.Dial("tcp", addr) },
 		TLSReporter: sp,
 	}
-	if sent, err := w.ProcessDue(now); err != nil || sent != 1 {
+	if sent, err := w.ProcessDue(context.Background(), now); err != nil || sent != 1 {
 		t.Fatalf("process: sent=%d err=%v", sent, err)
 	}
 	rep, err := sp.TLSReport(now, "remote", "org", "c", "id")
@@ -217,7 +218,7 @@ func TestWorkerRecordsStartTLSNotSupported(t *testing.T) {
 			return &mtasts.Policy{Mode: mtasts.ModeEnforce, MX: []string{"sink"}}, nil
 		},
 	}
-	if _, err := w.ProcessDue(now); err != nil {
+	if _, err := w.ProcessDue(context.Background(), now); err != nil {
 		t.Fatalf("process: %v", err)
 	}
 	rep, err := sp.TLSReport(now, "remote", "org", "c", "id")
@@ -254,7 +255,7 @@ func TestWorkerOpportunisticPlaintextNotRecorded(t *testing.T) {
 		Dialer:      func(string) (net.Conn, error) { return net.Dial("tcp", addr) },
 		TLSReporter: sp,
 	}
-	if sent, err := w.ProcessDue(now); err != nil || sent != 1 {
+	if sent, err := w.ProcessDue(context.Background(), now); err != nil || sent != 1 {
 		t.Fatalf("process: sent=%d err=%v", sent, err)
 	}
 	rep, err := sp.TLSReport(now, "remote", "org", "c", "id")
@@ -304,7 +305,7 @@ func TestWorkerRecordsDNSSECInvalid(t *testing.T) {
 		DANE:        &dane.Resolver{Addr: servfailDNS(t)},
 		TLSReporter: sp,
 	}
-	if _, err := w.ProcessDue(now); err != nil {
+	if _, err := w.ProcessDue(context.Background(), now); err != nil {
 		t.Fatalf("process: %v", err)
 	}
 	rep, err := sp.TLSReport(now, "remote", "org", "c", "id")

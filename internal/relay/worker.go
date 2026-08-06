@@ -126,7 +126,7 @@ func (w *Worker) Run(ctx context.Context, interval time.Duration) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
-		w.guardedPass()
+		w.guardedPass(ctx)
 		select {
 		case <-ctx.Done():
 			return
@@ -138,7 +138,7 @@ func (w *Worker) Run(ctx context.Context, interval time.Duration) {
 // guardedPass runs one drain pass while holding the guard's permission, and does
 // nothing at all when the guard refuses: it must not touch the spool, because
 // another instance is draining it right now.
-func (w *Worker) guardedPass() {
+func (w *Worker) guardedPass(ctx context.Context) {
 	if w.Guard != nil {
 		release, ok := w.Guard()
 		if !ok {
@@ -146,7 +146,7 @@ func (w *Worker) guardedPass() {
 		}
 		defer release()
 	}
-	if _, err := w.ProcessDue(time.Now()); err != nil {
+	if _, err := w.ProcessDue(ctx, time.Now()); err != nil {
 		w.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "relay.scan.fail", Err: err.Error()})
 	}
 }
@@ -155,7 +155,7 @@ func (w *Worker) guardedPass() {
 // attempts delivery once, settling each. It returns the number delivered. A
 // store error settling an item stops the pass and is returned; a delivery
 // failure only defers that recipient.
-func (w *Worker) ProcessDue(now time.Time) (sent int, err error) {
+func (w *Worker) ProcessDue(ctx context.Context, now time.Time) (sent int, err error) {
 	batch := w.Batch
 	if batch <= 0 {
 		batch = defaultBatch
@@ -165,6 +165,13 @@ func (w *Worker) ProcessDue(now time.Time) (sent int, err error) {
 		return 0, err
 	}
 	for _, it := range items {
+		// A single delivery may hold an SMTP session for minutes, so a pass that only
+		// checked cancellation at its end would outlast the shutdown deadline and let
+		// the spool close underneath it. Claim does not lease its rows, so the
+		// recipients left here are simply picked up by the next pass.
+		if ctx.Err() != nil {
+			return sent, nil
+		}
 		e := w.deliver(it)
 		if e == nil {
 			if se := w.Spool.Sent(it.RecipientID); se != nil {

@@ -292,7 +292,6 @@ func main() {
 			}
 		}
 	}
-	slCtx, slCancel := context.WithCancel(context.Background())
 	// Both background loops below must run in one process at a time, and neither
 	// leases the work it picks up: a second sweeper re-delivers a scheduled
 	// message, a second drainer re-delivers a spooled recipient. A named advisory
@@ -312,13 +311,12 @@ func main() {
 			return release, ok
 		}
 	}
-	sendLater := lifecycle.Func{
-		StartFn: func() error {
-			runSendLater(slCtx, dir, deliver, onGiveUp, lockPass(directory.LockSendLater), sendLaterInterval, logger)
-			return nil
-		},
-		ShutdownFn: func(context.Context) error { slCancel(); return nil },
-	}
+	// lifecycle.Loop, not lifecycle.Func: shutdown must wait for the sweep to
+	// return, because the cleanups that follow close the spool and the directory
+	// database this loop delivers through.
+	sendLater := lifecycle.Loop(func(ctx context.Context) {
+		runSendLater(ctx, dir, deliver, onGiveUp, lockPass(directory.LockSendLater), sendLaterInterval, logger)
+	})
 
 	// Drain the outbound relay spool: deliver each authenticated submission's
 	// external recipients to their mail exchangers, retrying transient failures.
@@ -362,11 +360,10 @@ func main() {
 	// and re-read every minute so an admin's change applies without a restart.
 	applyRelaySettings(dir, relayWorker)
 	go runRelayMaintenance(dir, relayWorker)
-	rwCtx, rwCancel := context.WithCancel(context.Background())
-	relayLoop := lifecycle.Func{
-		StartFn:    func() error { relayWorker.Run(rwCtx, relayInterval); return nil },
-		ShutdownFn: func(context.Context) error { rwCancel(); return nil },
-	}
+	// Joined on shutdown for the same reason as the send-later sweep: an in-flight
+	// pass that settles a delivered recipient must finish before spool.Close runs,
+	// or the settle fails and the next start re-delivers an already-sent message.
+	relayLoop := lifecycle.Loop(func(ctx context.Context) { relayWorker.Run(ctx, relayInterval) })
 
 	logger.Info(logging.System, "daemon.startup", logging.Fields{"daemon": "mta", "addr": addr})
 
@@ -701,7 +698,7 @@ func runSendLater(ctx context.Context, dir directory.MailboxLister, deliver spoo
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			guardedSweep(dir, deliver, onGiveUp, guard, logger)
+			guardedSweep(ctx, dir, deliver, onGiveUp, guard, logger)
 		}
 	}
 }
@@ -709,7 +706,7 @@ func runSendLater(ctx context.Context, dir directory.MailboxLister, deliver spoo
 // guardedSweep runs one sweep while holding the guard's permission, and skips the
 // sweep entirely when the guard refuses, because another instance is sweeping the
 // same mailboxes right now.
-func guardedSweep(dir directory.MailboxLister, deliver spooler.DeliverFunc, onGiveUp spooler.GiveUpFunc, guard func() (func(), bool), logger *logging.Logger) {
+func guardedSweep(ctx context.Context, dir directory.MailboxLister, deliver spooler.DeliverFunc, onGiveUp spooler.GiveUpFunc, guard func() (func(), bool), logger *logging.Logger) {
 	if guard != nil {
 		release, ok := guard()
 		if !ok {
@@ -717,13 +714,13 @@ func guardedSweep(dir directory.MailboxLister, deliver spooler.DeliverFunc, onGi
 		}
 		defer release()
 	}
-	sweepOutboxes(dir, deliver, onGiveUp, logger)
+	sweepOutboxes(ctx, dir, deliver, onGiveUp, logger)
 }
 
 // sweepOutboxes runs one pass: it opens each known mailbox and releases its due
 // scheduled sends. Per-mailbox failures are logged and skipped so one bad
 // mailbox cannot stall the rest.
-func sweepOutboxes(dir directory.MailboxLister, deliver spooler.DeliverFunc, onGiveUp spooler.GiveUpFunc, logger *logging.Logger) {
+func sweepOutboxes(ctx context.Context, dir directory.MailboxLister, deliver spooler.DeliverFunc, onGiveUp spooler.GiveUpFunc, logger *logging.Logger) {
 	maildirs, err := dir.Maildirs()
 	if err != nil {
 		log.Printf("hermex-mta send-later: list mailboxes: %v", err)
@@ -735,7 +732,7 @@ func sweepOutboxes(dir directory.MailboxLister, deliver spooler.DeliverFunc, onG
 			log.Printf("hermex-mta send-later: open %s: %v", path, err)
 			continue
 		}
-		released, err := spooler.ProcessDueOutbox(st, deliver, onGiveUp, time.Now())
+		released, err := spooler.ProcessDueOutbox(ctx, st, deliver, onGiveUp, time.Now())
 		st.Close()
 		if err != nil {
 			log.Printf("hermex-mta send-later: %s: %v", path, err)

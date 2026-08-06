@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 	"time"
@@ -50,7 +51,7 @@ func TestSweepOutboxesDeliversDueScheduledSend(t *testing.T) {
 		return mta.Deliver(accounts, senderOf(raw), recipients, raw, when)
 	}
 
-	sweepOutboxes(accounts, deliver, nil, nil)
+	sweepOutboxes(context.Background(), accounts, deliver, nil, nil)
 
 	if n := folderCount(t, aliceDir, int64(mapi.PrivateFIDOutbox)); n != 0 {
 		t.Errorf("alice Outbox has %d after sweep, want 0 (released)", n)
@@ -107,7 +108,7 @@ func TestGuardedSweepRefusalLeavesTheOutboxAlone(t *testing.T) {
 		return nil, nil
 	}
 
-	guardedSweep(accounts, deliver, nil, func() (func(), bool) { return nil, false }, nil)
+	guardedSweep(context.Background(), accounts, deliver, nil, func() (func(), bool) { return nil, false }, nil)
 	if delivered != 0 {
 		t.Errorf("a refused sweep delivered %d message(s), want none", delivered)
 	}
@@ -117,7 +118,7 @@ func TestGuardedSweepRefusalLeavesTheOutboxAlone(t *testing.T) {
 
 	// Permitted: the sweep runs and hands the permission back.
 	released := 0
-	guardedSweep(accounts, deliver, nil, func() (func(), bool) { return func() { released++ }, true }, nil)
+	guardedSweep(context.Background(), accounts, deliver, nil, func() (func(), bool) { return func() { released++ }, true }, nil)
 	if delivered != 1 {
 		t.Errorf("a permitted sweep delivered %d message(s), want 1", delivered)
 	}

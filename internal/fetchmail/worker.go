@@ -1,6 +1,7 @@
 package fetchmail
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -23,7 +24,10 @@ type Deliverer func(mailbox string, raw []byte, received time.Time) error
 // Poll runs one fetch cycle over every active configuration. It returns the number of
 // messages delivered and a per-config error for each account that failed — one failing
 // source never stops the others.
-func Poll(s Store, deliver Deliverer, now time.Time) (int, []error) {
+// A cancelled context stops the cycle between accounts: one account's fetch can
+// hold a POP3 or IMAP session for a while, so a cycle that ran to completion
+// regardless would outlast the daemon's shutdown deadline.
+func Poll(ctx context.Context, s Store, deliver Deliverer, now time.Time) (int, []error) {
 	configs, err := s.ListActiveFetchmail()
 	if err != nil {
 		return 0, []error{err}
@@ -31,6 +35,9 @@ func Poll(s Store, deliver Deliverer, now time.Time) (int, []error) {
 	total := 0
 	var errs []error
 	for _, cfg := range configs {
+		if ctx.Err() != nil {
+			return total, errs
+		}
 		n, err := pollConfig(s, deliver, cfg, now)
 		total += n
 		if err != nil {

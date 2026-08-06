@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -212,7 +213,7 @@ func TestWorkerDeliversToSink(t *testing.T) {
 		Router:   func(string) ([]string, error) { return []string{"sink"}, nil },
 		Dialer:   func(string) (net.Conn, error) { return net.Dial("tcp", addr) },
 	}
-	sent, err := w.ProcessDue(t0)
+	sent, err := w.ProcessDue(context.Background(), t0)
 	if err != nil {
 		t.Fatalf("process: %v", err)
 	}
@@ -257,7 +258,7 @@ func TestWorkerMTASTSEnforceSkipsUnlistedMX(t *testing.T) {
 			return &mtasts.Policy{Mode: mtasts.ModeEnforce, MX: []string{"approved.mx"}}, nil
 		},
 	}
-	if _, err := w.ProcessDue(t0); err != nil {
+	if _, err := w.ProcessDue(context.Background(), t0); err != nil {
 		t.Fatalf("process: %v", err)
 	}
 	if got := len(sink.recorded()); got != 0 {
@@ -283,7 +284,7 @@ func TestWorkerMTASTSEnforceRequiresTLS(t *testing.T) {
 			return &mtasts.Policy{Mode: mtasts.ModeEnforce, MX: []string{"sink"}}, nil
 		},
 	}
-	if _, err := w.ProcessDue(t0); err != nil {
+	if _, err := w.ProcessDue(context.Background(), t0); err != nil {
 		t.Fatalf("process: %v", err)
 	}
 	if got := len(sink.recorded()); got != 0 {
@@ -318,18 +319,18 @@ func TestWorkerRetriesTransientFailure(t *testing.T) {
 	}
 
 	// First pass: the dial fails, so the recipient is deferred, not delivered.
-	if sent, err := w.ProcessDue(t0); err != nil || sent != 0 {
+	if sent, err := w.ProcessDue(context.Background(), t0); err != nil || sent != 0 {
 		t.Fatalf("first pass: sent=%d err=%v, want 0, nil", sent, err)
 	}
 	if len(sink.recorded()) != 0 {
 		t.Fatal("nothing should reach the sink on a failed dial")
 	}
 	// It is not due again until the backoff elapses.
-	if sent, _ := w.ProcessDue(t0.Add(time.Minute)); sent != 0 {
+	if sent, _ := w.ProcessDue(context.Background(), t0.Add(time.Minute)); sent != 0 {
 		t.Errorf("a deferred recipient was delivered before its backoff elapsed")
 	}
 	// After the backoff, the retry succeeds.
-	sent, err := w.ProcessDue(t0.Add(time.Hour))
+	sent, err := w.ProcessDue(context.Background(), t0.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("retry pass: %v", err)
 	}
@@ -361,7 +362,7 @@ func TestWorkerBouncesPermanentFailure(t *testing.T) {
 		OnGiveUp: func(it Item, _ error) { bounced = append(bounced, it) },
 	}
 
-	if sent, err := w.ProcessDue(t0); err != nil || sent != 0 {
+	if sent, err := w.ProcessDue(context.Background(), t0); err != nil || sent != 0 {
 		t.Fatalf("permanent failure: sent=%d err=%v, want 0, nil", sent, err)
 	}
 	if len(bounced) != 1 || bounced[0].Recipient != "bob@remote" {
@@ -393,14 +394,14 @@ func TestWorkerGivesUpAfterMaxAttempts(t *testing.T) {
 	}
 
 	// First attempt: transient failure, deferred.
-	if sent, _ := w.ProcessDue(t0); sent != 0 {
+	if sent, _ := w.ProcessDue(context.Background(), t0); sent != 0 {
 		t.Fatal("first attempt should not deliver")
 	}
 	if len(bounced) != 0 {
 		t.Fatal("a recipient was abandoned before its attempts were exhausted")
 	}
 	// Second attempt, after the backoff: attempts are now exhausted, so it bounces.
-	if sent, _ := w.ProcessDue(t0.Add(time.Minute)); sent != 0 {
+	if sent, _ := w.ProcessDue(context.Background(), t0.Add(time.Minute)); sent != 0 {
 		t.Fatal("second attempt should not deliver")
 	}
 	if len(bounced) != 1 || bounced[0].Recipient != "bob@remote" {
@@ -430,7 +431,7 @@ func TestWorkerGuardRefusalSkipsThePass(t *testing.T) {
 		Dialer:   func(string) (net.Conn, error) { return net.Dial("tcp", addr) },
 		Guard:    func() (func(), bool) { asked++; return nil, false },
 	}
-	w.guardedPass()
+	w.guardedPass(context.Background())
 
 	if asked != 1 {
 		t.Errorf("guard asked %d times, want 1", asked)
@@ -461,7 +462,7 @@ func TestWorkerGuardPermissionIsReleased(t *testing.T) {
 		Dialer:   func(string) (net.Conn, error) { return net.Dial("tcp", addr) },
 		Guard:    func() (func(), bool) { return func() { released++ }, true },
 	}
-	w.guardedPass()
+	w.guardedPass(context.Background())
 
 	if released != 1 {
 		t.Errorf("permission released %d times, want 1", released)
@@ -489,8 +490,47 @@ func TestWorkerWithoutGuardStillDrains(t *testing.T) {
 		Router:   func(string) ([]string, error) { return []string{"sink"}, nil },
 		Dialer:   func(string) (net.Conn, error) { return net.Dial("tcp", addr) },
 	}
-	w.guardedPass()
+	w.guardedPass(context.Background())
 	if msgs := sink.recorded(); len(msgs) != 1 {
 		t.Errorf("delivered %d message(s) with no guard, want 1", len(msgs))
+	}
+}
+
+// TestProcessDueStopsOnCancellation proves a cancelled pass stops between
+// recipients instead of running the batch out. One delivery can hold an SMTP
+// session for minutes, so a pass that ignored cancellation would outlast the
+// daemon's shutdown deadline and let the spool close under an in-flight settle,
+// which is what re-delivers an already-sent message on the next start.
+func TestProcessDueStopsOnCancellation(t *testing.T) {
+	sink, addr := startSink(t)
+	sp := openSpool(t)
+	t0 := time.Unix(3_000_000, 0)
+	raw := []byte("From: alice@local\r\nSubject: out\r\n\r\nhi\r\n")
+	for _, rcpt := range []string{"a@remote", "b@remote", "c@remote"} {
+		if err := sp.Enqueue("alice@local", []string{rcpt}, raw, t0); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	w := &Worker{
+		Spool:    sp,
+		HeloName: "mx.test",
+		Router:   func(string) ([]string, error) { return []string{"sink"}, nil },
+		Dialer: func(string) (net.Conn, error) {
+			// Cancel as the first delivery starts, the way a SIGTERM arrives mid-pass.
+			cancel()
+			return net.Dial("tcp", addr)
+		},
+	}
+	sent, err := w.ProcessDue(ctx, t0)
+	if err != nil {
+		t.Fatalf("process: %v", err)
+	}
+	if sent != 1 {
+		t.Fatalf("delivered %d recipients after cancellation, want 1 (the one already in flight)", sent)
+	}
+	if n := len(sink.recorded()); n != 1 {
+		t.Errorf("the sink received %d messages, want 1; the pass kept going after cancellation", n)
 	}
 }

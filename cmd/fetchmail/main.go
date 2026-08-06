@@ -76,11 +76,12 @@ func main() {
 		return nil
 	}
 
-	wCtx, wCancel := context.WithCancel(context.Background())
-	worker := lifecycle.Func{
-		StartFn:    func() error { runFetch(wCtx, dir, deliver, fetchInterval, logger); return nil },
-		ShutdownFn: func(context.Context) error { wCancel(); return nil },
-	}
+	// lifecycle.Loop, not lifecycle.Func: shutdown must wait for the fetch cycle to
+	// return, because the cleanups that follow close the directory database this
+	// loop delivers through.
+	worker := lifecycle.Loop(func(ctx context.Context) {
+		runFetch(ctx, dir, deliver, fetchInterval, logger)
+	})
 
 	logger.Info(logging.System, "daemon.startup", logging.Fields{"daemon": "fetchmail"})
 
@@ -97,7 +98,7 @@ func main() {
 // cancelled. Exactly one process should run this loop: two concurrent pollers could fetch
 // and deliver the same message twice before either records it seen.
 func runFetch(ctx context.Context, store fetchmail.Store, deliver fetchmail.Deliverer, interval time.Duration, logger *logging.Logger) {
-	pollOnce(store, deliver, logger)
+	pollOnce(ctx, store, deliver, logger)
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -105,14 +106,14 @@ func runFetch(ctx context.Context, store fetchmail.Store, deliver fetchmail.Deli
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			pollOnce(store, deliver, logger)
+			pollOnce(ctx, store, deliver, logger)
 		}
 	}
 }
 
 // pollOnce runs one fetch cycle, logging each failed account and the delivered count.
-func pollOnce(store fetchmail.Store, deliver fetchmail.Deliverer, logger *logging.Logger) {
-	n, errs := fetchmail.Poll(store, deliver, time.Now())
+func pollOnce(ctx context.Context, store fetchmail.Store, deliver fetchmail.Deliverer, logger *logging.Logger) {
+	n, errs := fetchmail.Poll(ctx, store, deliver, time.Now())
 	for _, e := range errs {
 		logger.Emit(logging.Event{
 			Level:     logging.LevelError,
