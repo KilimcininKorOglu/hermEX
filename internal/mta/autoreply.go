@@ -37,10 +37,12 @@ func maybeAutoReply(accounts directory.Accounts, st *objectstore.Store, selfAddr
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("mta: out-of-office pass panicked for <%s>, skipped: %v", selfAddr, r)
+			logPassFailure("out-of-office", selfAddr, nil, r)
 		}
 	}()
 	if err := sendAutoReply(accounts, st, selfAddr, envelopeSender, raw, received); err != nil {
 		log.Printf("mta: out-of-office pass failed for <%s>, skipped: %v", selfAddr, err)
+		logPassFailure("out-of-office", selfAddr, nil, err)
 	}
 }
 

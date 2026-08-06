@@ -51,6 +51,7 @@ func main() {
 	}
 	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 	objectstore.SetDefaultLogger(logger)
+	mta.SetDefaultLogger(logger) // post-delivery pass failures route to the central log
 
 	// Antivirus: install the package-level scanner from clamd_addr (a no-op when
 	// unset), so fetched mail is scanned before it reaches a mailbox.

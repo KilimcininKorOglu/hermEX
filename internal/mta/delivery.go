@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/mail"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"hermex/internal/antispam"
@@ -120,6 +121,31 @@ func (s *session) Auth(username, password string) bool {
 }
 
 // target is one resolved recipient: the address it was accepted for (used as
+// defaultLogger is the activity log the post-delivery passes report through.
+// Those passes run deep inside delivery, on package functions that carry no
+// session, so a failure there had nowhere to go but stderr and never reached the
+// operator's log viewer, which is the one place they look.
+var defaultLogger atomic.Pointer[logging.Logger]
+
+// SetDefaultLogger installs the activity log the delivery passes report failures
+// to. A daemon calls it once at startup; passing nil leaves them unrecorded.
+func SetDefaultLogger(l *logging.Logger) { defaultLogger.Store(l) }
+
+// logPassFailure records a post-delivery pass that could not run. Each of these is
+// wrapped in a recover so a bug in an optional pass cannot lose the message, which
+// means the failure is otherwise invisible: the mail arrives and nothing says the
+// rule, the reply or the meeting update never ran.
+func logPassFailure(pass, subject string, fields logging.Fields, cause any) {
+	f := logging.Fields{"pass": pass}
+	for k, v := range fields {
+		f[k] = v
+	}
+	defaultLogger.Load().Emit(logging.Event{
+		Level: logging.LevelError, Subsystem: logging.MTA, Name: "delivery.pass.fail",
+		User: subject, Fields: f, Err: fmt.Sprint(cause),
+	})
+}
+
 // the From of an out-of-office auto-reply) and the mailbox store path it
 // delivers to.
 type target struct {
@@ -765,6 +791,7 @@ func autoProcessMeeting(accounts directory.Accounts, st *objectstore.Store, reci
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("mta: meeting auto-process panicked for uid %d, skipped: %v", m.UID, r)
+			logPassFailure("meeting-auto-process", "", logging.Fields{"uid": m.UID}, r)
 			handled = false
 		}
 	}()
@@ -781,6 +808,7 @@ func autoProcessReply(st *objectstore.Store, m objectstore.MessageInfo) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("mta: meeting-reply process panicked for uid %d, skipped: %v", m.UID, r)
+			logPassFailure("meeting-reply", "", logging.Fields{"uid": m.UID}, r)
 		}
 	}()
 	if OnMeetingReply != nil {
@@ -810,11 +838,13 @@ func applyInboxRules(st *objectstore.Store, m objectstore.MessageInfo, owner, en
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("mta: inbox rule pass panicked for uid %d, skipped: %v", m.UID, r)
+			logPassFailure("inbox-rules", "", logging.Fields{"uid": m.UID}, r)
 		}
 	}()
 	acts, err := st.ApplyInboxRules(m, received.Unix())
 	if err != nil {
 		log.Printf("mta: inbox rule pass failed for uid %d, skipped: %v", m.UID, err)
+		logPassFailure("inbox-rules", "", logging.Fields{"uid": m.UID}, err)
 	}
 	// The guards inspect the ORIGINAL received message, not the store's re-exported
 	// copy, which drops Auto-Submitted and our marker. Never forward, reject, or

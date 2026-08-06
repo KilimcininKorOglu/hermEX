@@ -79,6 +79,7 @@ func main() {
 	dir.SetLDAPVerifier(ldapauth.New())
 	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
+	mta.SetDefaultLogger(logger)         // post-delivery pass failures route to the central log
 
 	// Push notifications: publish every delivery's mailbox write to the relay so a
 	// recipient's parked notification long-poll (in another daemon) wakes the instant

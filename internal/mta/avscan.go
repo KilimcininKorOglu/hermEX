@@ -138,7 +138,6 @@ func scanMessage(accounts directory.Accounts, mode avMode, from string, recipien
 	}
 
 	res, err := av.scanner.Scan(raw)
-	log.Printf("DEBUG av.scan clean=%v virus=%q err=%v rawlen=%d hasEICAR=%v", res.Clean, res.VirusName, err, len(raw), bytes.Contains(raw, []byte("EICAR-STANDARD")))
 	if err != nil {
 		av.emit(logging.LevelError, "av.scanner.unavailable", from, logging.Fields{"err": err.Error()})
 		if mode == avInboundSMTP {
