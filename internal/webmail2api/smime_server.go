@@ -11,6 +11,9 @@ import (
 	"fmt"
 	"strings"
 
+	pkcs12 "software.sslmate.com/src/go-pkcs12"
+
+	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/smime"
 )
@@ -28,12 +31,35 @@ type smimeStatus struct {
 	SignedBy  string
 }
 
-// smimeP12Password derives the at-rest PKCS#12 password from the server secret,
-// so a server-mode key is never stored in plaintext.
-func smimeP12Password(secret []byte) string {
+// smimeP12Password derives the at-rest PKCS#12 password for one mailbox, so a
+// server-mode key is never stored in plaintext. The mailbox's own store GUID goes
+// into the derivation: without it every identity in the deployment shares one
+// password, and a single container that leaks together with the server secret
+// opens all of them.
+func smimeP12Password(secret []byte, mailboxGUID mapi.GUID) string {
+	h := hmac.New(sha256.New, secret)
+	h.Write([]byte("smime-p12-at-rest-v2"))
+	h.Write([]byte(mailboxGUID.String()))
+	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+}
+
+// legacySmimeP12Password is the deployment-wide password identities uploaded
+// before the per-mailbox derivation were stored under. It is only ever tried
+// after the current one fails, and a container it opens is rewritten under the
+// current one, so the migration happens on first use with nothing to run.
+func legacySmimeP12Password(secret []byte) string {
 	h := hmac.New(sha256.New, secret)
 	h.Write([]byte("smime-p12-at-rest-v1"))
 	return base64.RawURLEncoding.EncodeToString(h.Sum(nil))
+}
+
+// smimeStorePassword returns the at-rest password for the store's mailbox.
+func smimeStorePassword(st *objectstore.Store, secret []byte) (string, error) {
+	guid, err := st.StoreGUID()
+	if err != nil {
+		return "", err
+	}
+	return smimeP12Password(secret, guid), nil
 }
 
 // unlockSmimeIdentity returns a server-mode caller's stored key and certificate,
@@ -43,9 +69,22 @@ func unlockSmimeIdentity(st *objectstore.Store, secret []byte) (crypto.PrivateKe
 	if err != nil || !ok || id.Mode != "server" || len(id.P12) == 0 {
 		return nil, nil, false
 	}
-	key, cert, err := smime.ParseIdentity(id.P12, smimeP12Password(secret))
+	password, err := smimeStorePassword(st, secret)
 	if err != nil {
 		return nil, nil, false
+	}
+	if key, cert, err := smime.ParseIdentity(id.P12, password); err == nil {
+		return key, cert, true
+	}
+	// An identity stored before the per-mailbox derivation still opens under the
+	// old deployment-wide password. Rewrite it under the current one on the way
+	// out, so it is migrated the first time its owner signs or reads a message.
+	key, cert, err := smime.ParseIdentity(id.P12, legacySmimeP12Password(secret))
+	if err != nil {
+		return nil, nil, false
+	}
+	if reP12, eerr := pkcs12.Modern.Encode(key, cert, nil, password); eerr == nil {
+		_ = st.SetSmimeIdentity(objectstore.SmimeIdentity{Mode: "server", Cert: cert.Raw, P12: reP12})
 	}
 	return key, cert, true
 }

@@ -150,7 +150,12 @@ func (s *Server) handleUploadSmimeCert(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "wrong password or unreadable .p12"})
 			return
 		}
-		reP12, eerr := pkcs12.Modern.Encode(key, cert, nil, smimeP12Password(s.secret))
+		password, perr := smimeStorePassword(st, s.secret)
+		if perr != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not store the identity"})
+			return
+		}
+		reP12, eerr := pkcs12.Modern.Encode(key, cert, nil, password)
 		if eerr != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not store the identity"})
 			return
