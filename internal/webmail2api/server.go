@@ -303,6 +303,23 @@ func (s *Server) gateForcedPasswordChange(next http.Handler) http.Handler {
 	})
 }
 
+// webLoginAllowed reports whether the account may sign in to webmail, from the
+// web service privilege the admin panel exposes per user. Every other transport
+// already honours its own privilege (IMAP/POP3, SMTP submission, ActiveSync,
+// DAV), so without this the panel's Web switch was the one that did nothing.
+// A directory that does not expose privileges admits the login, matching
+// passwordChangeAllowed.
+func (s *Server) webLoginAllowed(user string) bool {
+	pr, ok := s.auth.(interface {
+		Privileges(string) (directory.ServicePrivileges, bool)
+	})
+	if !ok {
+		return true
+	}
+	privs, _ := pr.Privileges(user)
+	return privs.Web
+}
+
 // authenticateForChange verifies credentials for the webmail2 remediation flow
 // (login + current-password check), admitting an account that must change its
 // password so it can reach the forced-change screen. It falls back to the strict
@@ -383,6 +400,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.limiter.Succeed(key)
+	// The credentials are right; the account may still be barred from this service.
+	// Checked here, after the throttle is cleared, so a correct password is never
+	// counted as a guess, and before any token is minted or session recorded, so a
+	// barred account leaves nothing behind. 403 rather than 401: the identity is
+	// established, the authorization is not.
+	if !s.webLoginAllowed(req.Email) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "webmail access is disabled for this account"})
+		return
+	}
 	now := time.Now()
 	exp := now.Add(sessionTTL)
 	jti, err := newJTI()
