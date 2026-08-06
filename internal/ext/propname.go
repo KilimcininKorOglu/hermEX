@@ -96,6 +96,9 @@ func (p *Pull) PropertyNames() ([]mapi.PropertyName, error) {
 	if n == 0 {
 		return nil, nil
 	}
+	if err := p.checkCount(uint32(n)); err != nil {
+		return nil, err
+	}
 	out := make([]mapi.PropertyName, n)
 	for i := range out {
 		if out[i], err = p.PropertyName(); err != nil {
@@ -122,6 +125,9 @@ func (p *Push) PropIDs(ids []uint16) error {
 func (p *Pull) PropIDs() ([]uint16, error) {
 	n, err := p.Uint16()
 	if err != nil {
+		return nil, err
+	}
+	if err := p.checkCount(uint32(n)); err != nil {
 		return nil, err
 	}
 	out := make([]uint16, n)

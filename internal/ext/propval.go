@@ -40,6 +40,9 @@ func pullMV[T any](p *Pull, read func(*Pull) (T, error)) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := p.checkCount(n); err != nil {
+		return nil, err
+	}
 	xs := make([]T, n)
 	for i := range xs {
 		if xs[i], err = read(p); err != nil {
@@ -330,6 +333,9 @@ func (p *Pull) PropertyValues() (mapi.PropertyValues, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := p.checkCount(uint32(n)); err != nil {
+		return nil, err
+	}
 	out := make(mapi.PropertyValues, n)
 	for i := range out {
 		if out[i], err = p.TaggedPropVal(); err != nil {
@@ -355,6 +361,9 @@ func (p *Push) PropTags(tags []mapi.PropTag) error {
 func (p *Pull) PropTags() ([]mapi.PropTag, error) {
 	n, err := p.Uint16()
 	if err != nil {
+		return nil, err
+	}
+	if err := p.checkCount(uint32(n)); err != nil {
 		return nil, err
 	}
 	out := make([]mapi.PropTag, n)

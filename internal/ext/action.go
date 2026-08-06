@@ -40,6 +40,9 @@ func (p *Pull) RuleActions() (mapi.RuleActions, error) {
 	if count == 0 {
 		return mapi.RuleActions{}, ErrFormat
 	}
+	if err := p.checkCount(uint32(count)); err != nil {
+		return mapi.RuleActions{}, err
+	}
 	r := mapi.RuleActions{Blocks: make([]mapi.ActionBlock, count)}
 	for i := range r.Blocks {
 		if r.Blocks[i], err = p.actionBlock(); err != nil {
@@ -273,6 +276,9 @@ func (p *Pull) forwardDelegateAction() (mapi.ForwardDelegateAction, error) {
 	if count == 0 {
 		return mapi.ForwardDelegateAction{}, ErrFormat
 	}
+	if err := p.checkCount(uint32(count)); err != nil {
+		return mapi.ForwardDelegateAction{}, err
+	}
 	fd := mapi.ForwardDelegateAction{Recipients: make([]mapi.RecipientBlock, count)}
 	for i := range fd.Recipients {
 		if fd.Recipients[i], err = p.recipientBlock(); err != nil {
@@ -306,6 +312,9 @@ func (p *Pull) recipientBlock() (mapi.RecipientBlock, error) {
 	}
 	if count == 0 {
 		return mapi.RecipientBlock{}, ErrFormat
+	}
+	if err := p.checkCount(uint32(count)); err != nil {
+		return mapi.RecipientBlock{}, err
 	}
 	rb := mapi.RecipientBlock{PropVals: make([]mapi.TaggedPropVal, count)}
 	for i := range rb.PropVals {

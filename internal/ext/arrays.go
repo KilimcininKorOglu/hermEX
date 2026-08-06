@@ -27,6 +27,9 @@ func (p *Pull) PropTagsLong() ([]mapi.PropTag, error) {
 	if n == 0 {
 		return nil, nil
 	}
+	if err := p.checkCount(uint32(n)); err != nil {
+		return nil, err
+	}
 	out := make([]mapi.PropTag, n)
 	for i := range out {
 		v, err := p.Uint32()
@@ -60,6 +63,9 @@ func (p *Pull) PropertyValuesLong() (mapi.PropertyValues, error) {
 	if n == 0 {
 		return nil, nil
 	}
+	if err := p.checkCount(uint32(n)); err != nil {
+		return nil, err
+	}
 	out := make(mapi.PropertyValues, n)
 	for i := range out {
 		if out[i], err = p.TaggedPropVal(); err != nil {
@@ -89,6 +95,9 @@ func (p *Pull) TArraySet() ([]mapi.PropertyValues, error) {
 	}
 	if n == 0 {
 		return nil, nil
+	}
+	if err := p.checkCount(uint32(n)); err != nil {
+		return nil, err
 	}
 	out := make([]mapi.PropertyValues, n)
 	for i := range out {
@@ -122,6 +131,9 @@ func (p *Pull) ProblemArray() ([]mapi.PropertyProblem, error) {
 	}
 	if n == 0 {
 		return nil, nil
+	}
+	if err := p.checkCount(uint32(n)); err != nil {
+		return nil, err
 	}
 	out := make([]mapi.PropertyProblem, n)
 	for i := range out {
@@ -164,6 +176,9 @@ func (p *Pull) Uint64ArrayShort() ([]uint64, error) {
 	if n == 0 {
 		return nil, nil
 	}
+	if err := p.checkCount(uint32(n)); err != nil {
+		return nil, err
+	}
 	out := make([]uint64, n)
 	for i := range out {
 		if out[i], err = p.Uint64(); err != nil {
@@ -191,6 +206,9 @@ func (p *Pull) EIDs() ([]mapi.EID, error) {
 	}
 	if n == 0 {
 		return nil, nil
+	}
+	if err := p.checkCount(uint32(n)); err != nil {
+		return nil, err
 	}
 	out := make([]mapi.EID, n)
 	for i := range out {

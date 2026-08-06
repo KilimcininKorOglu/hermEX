@@ -149,6 +149,9 @@ func (p *Pull) Restriction() (mapi.Restriction, error) {
 			}
 			n = int(v)
 		}
+		if err := p.checkCount(uint32(n)); err != nil {
+			return r, err
+		}
 		kids := make([]mapi.Restriction, n)
 		for i := range kids {
 			if kids[i], err = p.Restriction(); err != nil {

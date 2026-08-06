@@ -67,6 +67,20 @@ func (p *Pull) Offset() int { return p.off }
 // Remaining reports how many unread bytes are left.
 func (p *Pull) Remaining() int { return len(p.buf) - p.off }
 
+// checkCount verifies that a decoded element count could possibly be satisfied by
+// the bytes left in the buffer, before the count is used as an allocation length.
+// Every element of every counted array on this wire costs at least one byte, so a
+// count above what remains is either corruption or a request to reserve gigabytes
+// from a handful of bytes: a 32-bit count field is independent of the transport's
+// buffer cap, so nothing upstream bounds it. This is the same discipline need()
+// applies to raw byte reads, extended to the count-then-allocate pattern.
+func (p *Pull) checkCount(n uint32) error {
+	if int64(n) > int64(p.Remaining()) {
+		return ErrUnderflow
+	}
+	return nil
+}
+
 // need verifies that n more bytes are available.
 func (p *Pull) need(n int) error {
 	if n < 0 || p.off+n > len(p.buf) {
