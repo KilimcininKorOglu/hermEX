@@ -45,9 +45,9 @@ func (d *SQLDirectory) SetRecoverableSettings(s RecoverableSettings) error {
 	return err
 }
 
-// allMaildirs returns every user's mailbox directory, skipping accounts without one
+// AllMaildirs returns every user's mailbox directory, skipping accounts without one
 // (contacts and similar non-login users carry an empty maildir).
-func (d *SQLDirectory) allMaildirs() ([]string, error) {
+func (d *SQLDirectory) AllMaildirs() ([]string, error) {
 	rows, err := d.db.Query(`SELECT maildir FROM users WHERE maildir <> ''`)
 	if err != nil {
 		return nil, err
@@ -82,7 +82,7 @@ func (d *SQLDirectory) SweepRecoverableItems(now time.Time) (int, error) {
 		return 0, nil
 	}
 	cutoff := now.Add(-time.Duration(days) * 24 * time.Hour)
-	maildirs, err := d.allMaildirs()
+	maildirs, err := d.AllMaildirs()
 	if err != nil {
 		return 0, err
 	}

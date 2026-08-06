@@ -46,6 +46,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  delete-contact <email>")
 	fmt.Fprintln(os.Stderr, "  list-contacts")
 	fmt.Fprintln(os.Stderr, "  sweep-content <email>   (reclaim orphan content files; run with the mailbox idle)")
+	fmt.Fprintln(os.Stderr, "  prune-eml <email|all> [days]   (reclaim cached wire copies older than N days, default 30)")
 	fmt.Fprintln(os.Stderr, "  ldap-sync <org-id>      (import the org's LDAP/AD accounts into the directory)")
 	fmt.Fprintln(os.Stderr, "  grant-admin <email> <system|org|domain> [scope-id]")
 	fmt.Fprintln(os.Stderr, "  list-sessions <email>   (the account's live webmail and panel sessions)")
@@ -165,6 +166,17 @@ func main() {
 			log.Fatalf("hermex-admin: sweep: %v", err)
 		}
 		fmt.Printf("swept %d orphan content file(s) from %s\n", removed, args[1])
+	case "prune-eml":
+		if len(args) < 2 || len(args) > 3 {
+			usage()
+		}
+		days := defaultEMLPruneDays
+		if len(args) == 3 {
+			if days, err = strconv.Atoi(args[2]); err != nil || days < 0 {
+				log.Fatalf("hermex-admin: days %q: want a non-negative whole number", args[2])
+			}
+		}
+		pruneEML(dir, args[1], days)
 	case "ldap-sync":
 		if len(args) != 2 {
 			usage()
@@ -366,6 +378,61 @@ func runRecoverableRetention(ctx context.Context, dir *directory.SQLDirectory) {
 			sweep()
 		}
 	}
+}
+
+// defaultEMLPruneDays is the age below which a cached wire copy is kept. Recent
+// mail is what clients actually fetch, so sparing a month keeps the working set
+// warm and still reclaims the long tail.
+const defaultEMLPruneDays = 30
+
+// pruneEML drops cached wire copies older than days from one mailbox, or from
+// every mailbox when target is "all".
+//
+// The cache holds a second copy of every live message and roughly doubles the
+// space a mailbox occupies, and nothing evicts it on its own: it is dropped when
+// a message is deleted or moved, never while the message is still there. This is
+// the operator's lever for reclaiming that space without deleting mail. Removing
+// a cached copy is always safe because the store re-synthesizes it from the
+// stored object on the next read, so the only cost is one re-export per pruned
+// message that is read again.
+func pruneEML(dir *directory.SQLDirectory, target string, days int) {
+	var maildirs []string
+	if target == "all" {
+		var err error
+		if maildirs, err = dir.AllMaildirs(); err != nil {
+			log.Fatalf("hermex-admin: list mailboxes: %v", err)
+		}
+	} else {
+		maildir, ok := dir.Resolve(target)
+		if !ok {
+			log.Fatalf("hermex-admin: unknown or unreceivable mailbox: %s", target)
+		}
+		maildirs = []string{maildir}
+	}
+
+	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	var files, boxes int
+	var reclaimed int64
+	for _, md := range maildirs {
+		store, err := objectstore.Open(md)
+		if err != nil {
+			// One unreadable mailbox must not abandon the rest of the run; report
+			// it and carry on, so a single bad account cannot block reclamation.
+			log.Printf("hermex-admin: open mailbox %s: %v", md, err)
+			continue
+		}
+		n, bytes, err := store.PruneEMLCache(cutoff)
+		store.Close()
+		if err != nil {
+			log.Printf("hermex-admin: prune %s: %v", md, err)
+		}
+		files += n
+		reclaimed += bytes
+		if n > 0 {
+			boxes++
+		}
+	}
+	fmt.Printf("pruned %d cached wire copies (%d bytes) from %d mailbox(es)\n", files, reclaimed, boxes)
 }
 
 // listSessions prints an account's live sessions on both signed-in surfaces, so an
