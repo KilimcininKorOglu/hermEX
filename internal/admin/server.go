@@ -540,12 +540,91 @@ func (s *Server) authAdmin(login, password string) (uid int64, roles []directory
 
 // issueSession mints the session and CSRF tokens for an authenticated admin.
 func (s *Server) issueSession(login string, uid int64) (session, csrf string) {
+	expiry := time.Now().Add(sessionTTL)
+	jti := newSessionID()
+	// The row is what makes the session revokable, so a store that refuses to record
+	// it must not yield a token that outlives every attempt to end it. Mint without a
+	// jti instead: the session still works, and reads as unrevokable rather than
+	// silently pretending to be revokable.
+	if store, ok := s.dir.(adminSessionStore); ok {
+		if err := store.CreateAdminSession(directory.AdminSession{
+			Jti: jti, Login: login, CreatedAt: time.Now().Unix(), ExpiresAt: expiry.Unix(),
+		}); err != nil {
+			s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.Admin,
+				Name: "session.record.fail", User: login, Err: err.Error()})
+			jti = ""
+		}
+	}
 	session = signToken(s.secret, claims{
 		Login:  login,
 		UserID: uid,
-		Expiry: time.Now().Add(sessionTTL).Unix(),
+		Expiry: expiry.Unix(),
+		Jti:    jti,
 	})
 	return session, newCSRFToken()
+}
+
+// adminSessionStore is the optional directory capability that makes a panel
+// session revokable. SQLDirectory implements it; a directory without it (a test
+// double, a static deployment) keeps the previous stateless behavior.
+type adminSessionStore interface {
+	CreateAdminSession(directory.AdminSession) error
+	AdminSessionActive(jti string, now int64) (bool, error)
+	DeleteAdminSession(login, jti string) error
+	DeleteAdminSessionsFor(login string) error
+}
+
+// newSessionID mints the random identifier that keys a session's revocation row.
+func newSessionID() string {
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString(b)
+}
+
+// sessionActive reports whether a verified token's session is still live. A token
+// with no jti, or a directory that keeps no sessions, is treated as live: those are
+// the deployments that never had revocation, and failing closed there would lock
+// every operator out. A store error is also treated as live, so a database blip
+// does not sign the whole panel out.
+func (s *Server) sessionActive(cl claims) bool {
+	if cl.Jti == "" {
+		return true
+	}
+	store, ok := s.dir.(adminSessionStore)
+	if !ok {
+		return true
+	}
+	active, err := store.AdminSessionActive(cl.Jti, time.Now().Unix())
+	if err != nil {
+		return true
+	}
+	return active
+}
+
+// revokeSession ends one signed-in session (sign-out).
+func (s *Server) revokeSession(cl claims) {
+	if cl.Jti == "" {
+		return
+	}
+	if store, ok := s.dir.(adminSessionStore); ok {
+		if err := store.DeleteAdminSession(cl.Login, cl.Jti); err != nil {
+			s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.Admin,
+				Name: "session.revoke.fail", User: cl.Login, Err: err.Error()})
+		}
+	}
+}
+
+// revokeAllSessions ends every session an account holds. A changed password must
+// not leave a browser signed in on the old one, wherever that browser is.
+func (s *Server) revokeAllSessions(login string) {
+	if store, ok := s.dir.(adminSessionStore); ok {
+		if err := store.DeleteAdminSessionsFor(login); err != nil {
+			s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.Admin,
+				Name: "session.revoke.fail", User: login, Err: err.Error()})
+		}
+	}
 }
 
 // setSessionCookies writes the session and CSRF cookies. The session cookie is
@@ -563,7 +642,10 @@ func setSessionCookies(w http.ResponseWriter, session, csrf string) {
 }
 
 // handleLogout clears the session cookie.
-func (s *Server) handleLogout(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	// Clearing the cookie only asks the browser to forget the token; anyone who
+	// captured it keeps a working session until it expires. Revoke the row too.
+	s.revokeSession(claimsOf(r))
 	http.SetCookie(w, &http.Cookie{
 		Name: sessionCookie, Path: "/admin", MaxAge: -1,
 		HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
@@ -596,6 +678,10 @@ func (s *Server) protect(next http.Handler) http.Handler {
 		cl, err := verifyToken(s.secret, c.Value)
 		if err != nil {
 			http.Error(w, "invalid session", http.StatusUnauthorized)
+			return
+		}
+		if !s.sessionActive(cl) {
+			http.Error(w, "session revoked", http.StatusUnauthorized)
 			return
 		}
 		if isUnsafeMethod(r.Method) && !validCSRF(r) {

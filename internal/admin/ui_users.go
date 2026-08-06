@@ -74,7 +74,11 @@ func (s *Server) handleUIChangePasswordSubmit(w http.ResponseWriter, r *http.Req
 		result(false, "Could not change the password.")
 		return
 	}
-	result(true, "Your password has been changed.")
+	// The old password must stop working everywhere, including on browsers already
+	// signed in with it. This ends the caller's own session too, so their next page
+	// returns them to the sign-in form.
+	s.revokeAllSessions(cl.Login)
+	result(true, "Your password has been changed. Please sign in again.")
 }
 
 // handleUIUsers renders the users management page (system administrators only).

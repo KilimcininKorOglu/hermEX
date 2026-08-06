@@ -19,6 +19,11 @@ type claims struct {
 	Login  string `json:"sub"`
 	UserID int64  `json:"uid"`
 	Expiry int64  `json:"exp"`
+	// Jti keys the session's server-side row. The signature and expiry alone say
+	// nothing about whether the session was signed out or its password changed, so
+	// the verifier's answer is only half the check; the row lookup is the other half.
+	// Empty on a token minted before this existed, which reads as unrevokable.
+	Jti string `json:"jti,omitempty"`
 }
 
 var (

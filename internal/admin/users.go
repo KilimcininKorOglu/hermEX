@@ -103,6 +103,9 @@ func (s *Server) handleSetPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
 	}
+	// A reset is often the response to a compromise, so it must also end whatever
+	// panel sessions that account already holds.
+	s.revokeAllSessions(r.PathValue("email"))
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -136,6 +139,9 @@ func (s *Server) handleChangeOwnPassword(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "no such user", http.StatusNotFound)
 		return
 	}
+	// The old password must stop working everywhere, including on browsers already
+	// signed in with it, which is the whole point of changing it.
+	s.revokeAllSessions(login)
 	w.WriteHeader(http.StatusNoContent)
 }
 

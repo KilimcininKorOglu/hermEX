@@ -19,6 +19,9 @@ func (s *Server) uiClaims(r *http.Request) (claims, bool) {
 	if err != nil {
 		return claims{}, false
 	}
+	if !s.sessionActive(cl) {
+		return claims{}, false
+	}
 	// The panel pages sit outside protect(), so they report the operator here.
 	serve.SetUser(r, cl.Login)
 	return cl, true
@@ -118,7 +121,8 @@ func (s *Server) handleUIDashboard(w http.ResponseWriter, r *http.Request) {
 // handleUILogout clears the session — a valid CSRF form token is required — and
 // returns to the login page.
 func (s *Server) handleUILogout(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.uiClaims(r); !ok {
+	cl, ok := s.uiClaims(r)
+	if !ok {
 		http.Redirect(w, r, "/admin/ui/login", http.StatusSeeOther)
 		return
 	}
@@ -126,6 +130,9 @@ func (s *Server) handleUILogout(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing or invalid CSRF token", http.StatusForbidden)
 		return
 	}
+	// Clearing the cookies only asks the browser to forget the token; anyone who
+	// captured it keeps a working session until it expires. Revoke the row too.
+	s.revokeSession(cl)
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Path: "/admin", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
 	http.SetCookie(w, &http.Cookie{Name: csrfCookie, Path: "/admin", MaxAge: -1, Secure: true, SameSite: http.SameSiteStrictMode})
 	http.Redirect(w, r, "/admin/ui/login", http.StatusSeeOther)
