@@ -20,8 +20,8 @@ import (
 )
 
 // DeliverFunc delivers a message to its recipients, returning any addresses that
-// could not be delivered locally (there is no external relay yet) and a transport
-// error. It mirrors mta.Deliver with the account directory already bound, so the
+// could not be delivered locally and a transport error. The caller binds it to the
+// full delivery path, so external recipients are relayed too. It mirrors mta.Deliver with the account directory already bound, so the
 // spooler need not depend on the transport package.
 type DeliverFunc func(recipients []string, raw []byte, when time.Time) (unresolved []string, err error)
 
@@ -57,6 +57,27 @@ var nameReleaseAttempts = mapi.PropertyName{
 	Name: "SendLaterReleaseAttempts",
 }
 
+// nameReleaseStarted is the private named property stamped on a message just
+// before it is handed to delivery. It closes the window between a successful send
+// and the Outbox removal that records it: a process that dies in between would
+// otherwise find the message still scheduled on the next sweep and send it again,
+// to every recipient including the external ones the relay carries.
+//
+// The stamp cannot say whether the send completed, only that it was started, so a
+// stamped message left in the Outbox is genuinely ambiguous. Like the attempt
+// counter it lives only on the Outbox object and never reaches a client.
+var nameReleaseStarted = mapi.PropertyName{
+	Kind: mapi.MnidString,
+	GUID: mapi.GUID{Data1: 0x6d8c1f2a, Data2: 0x4b73, Data3: 0x4d31,
+		Data4: [8]byte{0x9e, 0x55, 0x0a, 0x1c, 0x77, 0xb4, 0xe2, 0x30}},
+	Name: "SendLaterReleaseStarted",
+}
+
+// ErrAmbiguousRelease reports a scheduled message whose delivery was started but
+// whose outcome was never recorded, because the process died in between. It is
+// what the sender is told when the message is handed back to them.
+var ErrAmbiguousRelease = errors.New("the scheduled send was interrupted and may or may not have been delivered")
+
 // ProcessDueOutbox releases every Outbox message whose deferred-send time has
 // arrived: it recovers the message's recipients (To, Cc, and the blind Bcc) from
 // the stored object, delivers the wire copy with the Bcc header stripped (the
@@ -65,8 +86,8 @@ var nameReleaseAttempts = mapi.PropertyName{
 //
 // Messages without a deferred-send time, or whose time has not yet come, are left
 // untouched. Ordering is deliver -> file -> remove, so a crash between delivery
-// and removal re-delivers on the next scan (at-least-once; local-only and
-// bounded). A failure before delivery leaves the message in the Outbox to retry
+// and removal is detected on the next scan by the release stamp and handed back to
+// the sender rather than sent again. A failure before delivery leaves the message in the Outbox to retry
 // and is reported (joined) so the caller can log it, without stopping the batch.
 //
 // Retries are bounded: after maxReleaseAttempts consecutive failures the message
@@ -93,6 +114,19 @@ func ProcessDueOutbox(ctx context.Context, st *objectstore.Store, deliver Delive
 			continue
 		}
 		if !scheduled || !due {
+			continue
+		}
+		// A message stamped as started, yet still scheduled, means the previous pass
+		// died mid-release. Whether the mail went out cannot be known from here, so
+		// neither guess is honest: sending again may duplicate it, filing it to Sent
+		// may hide a message that never left. Hand it back to the sender instead.
+		if started, e := releaseStarted(st, m.ID); e != nil {
+			errs = append(errs, e)
+			continue
+		} else if started {
+			if e := returnAmbiguous(st, onGiveUp, outbox, m); e != nil {
+				errs = append(errs, e)
+			}
 			continue
 		}
 		done, e := releaseMessage(st, deliver, outbox, m, now)
@@ -125,9 +159,24 @@ func releaseMessage(st *objectstore.Store, deliver DeliverFunc, outbox int64, m 
 	if err != nil {
 		return false, err
 	}
-	// Deliver with the Bcc header removed; the unresolved list is ignored (no
-	// external relay yet, the same as the interactive compose path).
+	// Stamp the attempt before handing the message to delivery, so a process that
+	// dies after the send but before the Outbox removal leaves a record that the
+	// send was started. Written first because a stamp with no send is recoverable
+	// (the sender gets the message back) while a send with no stamp is not (it is
+	// sent again).
+	if err := markReleaseStarted(st, m.ID, now); err != nil {
+		return false, err
+	}
+	// Deliver with the Bcc header removed; unresolved local recipients are ignored,
+	// the same as the interactive compose path. External recipients are relayed:
+	// the caller binds this to the full delivery path, not to local delivery alone.
 	if _, err := deliver(recipients, stripBcc(raw), now); err != nil {
+		// Delivery answered, so the outcome is known and the stamp has nothing left
+		// to record. Clearing it keeps an ordinary failure on the retry path instead
+		// of reading as an interrupted release on the next sweep.
+		if e := clearReleaseStarted(st, m.ID); e != nil {
+			return false, errors.Join(err, e)
+		}
 		// A terminal delivery error (the message was quarantined for a virus) drops
 		// the scheduled copy without filing Sent, rather than retrying it forever.
 		var term interface{ TerminalDelivery() bool }
@@ -183,6 +232,78 @@ func recordFailure(st *objectstore.Store, onGiveUp GiveUpFunc, outbox int64, m o
 		onGiveUp(raw, recipients, cause)
 	}
 	return fmt.Errorf("gave up releasing the scheduled message after %d attempts, moved to Drafts: %w", attempts, cause)
+}
+
+// releaseStartedTag resolves the named property that carries the release stamp.
+// It holds the Unix second the attempt began; only its presence is read, the
+// value is there so an operator inspecting a returned draft can see when.
+func releaseStartedTag(st *objectstore.Store) (mapi.PropTag, error) {
+	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{nameReleaseStarted})
+	if err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 || ids[0] == 0 {
+		return 0, fmt.Errorf("spooler: could not allocate the release-stamp property")
+	}
+	return mapi.PropTag(uint32(ids[0])<<16 | uint32(mapi.PtI8)), nil
+}
+
+// markReleaseStarted stamps the message as being released right now.
+func markReleaseStarted(st *objectstore.Store, messageID int64, now time.Time) error {
+	tag, err := releaseStartedTag(st)
+	if err != nil {
+		return err
+	}
+	return st.SetMessageProperties(messageID, mapi.PropertyValues{{Tag: tag, Value: now.Unix()}})
+}
+
+// releaseStarted reports whether the message already carries a release stamp,
+// which means an earlier pass began delivering it and never finished recording
+// the outcome.
+func releaseStarted(st *objectstore.Store, messageID int64) (bool, error) {
+	tag, err := releaseStartedTag(st)
+	if err != nil {
+		return false, err
+	}
+	props, err := st.GetMessageProperties(messageID, tag)
+	if err != nil {
+		return false, err
+	}
+	_, ok := props.Get(tag)
+	return ok, nil
+}
+
+// clearReleaseStarted removes the release stamp, which is what turns "we started
+// and never found out" back into "we tried and it failed".
+func clearReleaseStarted(st *objectstore.Store, messageID int64) error {
+	tag, err := releaseStartedTag(st)
+	if err != nil {
+		return err
+	}
+	return st.ModifyMessageProperties(messageID, nil, tag)
+}
+
+// returnAmbiguous hands an interrupted release back to its sender: the message
+// moves to Drafts, the same landing place as a user-initiated cancel and as an
+// abandoned release, and the sender is told why. A human can then decide whether
+// it went out, which is the one thing the server cannot determine.
+func returnAmbiguous(st *objectstore.Store, onGiveUp GiveUpFunc, outbox int64, m objectstore.MessageInfo) error {
+	// Collect what the report needs before the move invalidates the Outbox uid.
+	var raw []byte
+	var recipients []string
+	if full, e := st.OpenMessage(m.ID); e == nil {
+		recipients = recipientAddrs(full)
+	}
+	if b, e := st.GetMessageRaw(outbox, m.UID); e == nil {
+		raw = b
+	}
+	if _, err := st.MoveMessage(outbox, m.UID, int64(mapi.PrivateFIDDraft)); err != nil {
+		return err
+	}
+	if onGiveUp != nil && raw != nil {
+		onGiveUp(raw, recipients, ErrAmbiguousRelease)
+	}
+	return fmt.Errorf("moved an interrupted scheduled send to Drafts: %w", ErrAmbiguousRelease)
 }
 
 // bumpReleaseAttempts increments the message's consecutive-failure counter and
