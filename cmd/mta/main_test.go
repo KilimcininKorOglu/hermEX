@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
@@ -197,5 +200,118 @@ func TestSweepOutboxesStopsOnShutdown(t *testing.T) {
 	}
 	if waiting != 4 {
 		t.Errorf("%d messages are still scheduled, want 4 (only the in-flight one released)", waiting)
+	}
+}
+
+// sweepSink records the events one send-later sweep emits.
+type sweepSink struct {
+	mu     sync.Mutex
+	events []logging.Event
+}
+
+func (s *sweepSink) Write(e logging.Event) {
+	s.mu.Lock()
+	s.events = append(s.events, e)
+	s.mu.Unlock()
+}
+
+func (s *sweepSink) find(name string) (logging.Event, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, e := range s.events {
+		if e.Name == name {
+			return e, true
+		}
+	}
+	return logging.Event{}, false
+}
+
+// scheduleFor files a scheduled message in a mailbox's Outbox at the given send
+// time and returns the mailbox path.
+func scheduleFor(t *testing.T, root, name string, when time.Time) string {
+	t.Helper()
+	dir := filepath.Join(root, name)
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	raw := "From: " + name + "@hermex.test\r\nTo: sink@hermex.test\r\nSubject: s\r\n\r\nbody\r\n"
+	info, err := st.AppendMessage(int64(mapi.PrivateFIDOutbox), []byte(raw), time.Unix(1, 0), objectstore.FlagSeen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetMessageProperties(info.ID, mapi.PropertyValues{
+		{Tag: mapi.PrDeferredSendTime, Value: mapi.UnixToNTTime(when)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// TestSweepEmitsQueueDepth proves each sweep reports what the queue looks like,
+// not only what it did. The per-mailbox lines appear only when something happens,
+// so a backlog that is merely growing, rather than failing, would otherwise leave
+// no trace: nothing releases and nothing errors while the queue fills.
+func TestSweepEmitsQueueDepth(t *testing.T) {
+	root := t.TempDir()
+	accounts := directory.StaticAccounts{
+		"due@hermex.test":    {MailboxPath: scheduleFor(t, root, "due", time.Now().Add(-time.Minute))},
+		"later@hermex.test":  {MailboxPath: scheduleFor(t, root, "later", time.Now().Add(time.Hour))},
+		"later2@hermex.test": {MailboxPath: scheduleFor(t, root, "later2", time.Now().Add(time.Hour))},
+	}
+	sink := &sweepSink{}
+	deliver := func([]string, []byte, time.Time) ([]string, error) { return nil, nil }
+
+	sweepOutboxes(context.Background(), accounts, deliver, nil, logging.New(sink))
+
+	e, ok := sink.find("sendlater.sweep")
+	if !ok {
+		t.Fatal("no sweep summary event; a growing backlog would be invisible")
+	}
+	if e.Fields["released"] != 1 {
+		t.Errorf("released = %v, want 1", e.Fields["released"])
+	}
+	if e.Fields["waiting"] != 2 {
+		t.Errorf("waiting = %v, want 2 (the queue depth after the pass)", e.Fields["waiting"])
+	}
+	if e.Fields["mailboxes"] != 3 {
+		t.Errorf("mailboxes = %v, want 3", e.Fields["mailboxes"])
+	}
+	if e.Level != logging.LevelInfo {
+		t.Errorf("level = %q, want info for a clean sweep", e.Level)
+	}
+}
+
+// TestSweepReportsFailuresAndRetries proves a failing send is counted and shows up
+// as retrying, and that the sweep summary rises to a warning. That is the signal
+// an operator needs before a stuck message exhausts its budget and bounces.
+func TestSweepReportsFailuresAndRetries(t *testing.T) {
+	root := t.TempDir()
+	accounts := directory.StaticAccounts{
+		"stuck@hermex.test": {MailboxPath: scheduleFor(t, root, "stuck", time.Now().Add(-time.Minute))},
+	}
+	sink := &sweepSink{}
+	failing := func([]string, []byte, time.Time) ([]string, error) {
+		return nil, errors.New("recipient mailbox unavailable")
+	}
+
+	sweepOutboxes(context.Background(), accounts, failing, nil, logging.New(sink))
+
+	e, ok := sink.find("sendlater.sweep")
+	if !ok {
+		t.Fatal("no sweep summary event")
+	}
+	if e.Fields["failed"] != 1 {
+		t.Errorf("failed = %v, want 1", e.Fields["failed"])
+	}
+	if e.Fields["retrying"] != 1 {
+		t.Errorf("retrying = %v, want 1", e.Fields["retrying"])
+	}
+	if e.Fields["released"] != 0 {
+		t.Errorf("released = %v, want 0", e.Fields["released"])
+	}
+	if e.Level != logging.LevelWarn {
+		t.Errorf("level = %q, want warn when a mailbox failed", e.Level)
 	}
 }

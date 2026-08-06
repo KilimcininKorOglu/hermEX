@@ -98,22 +98,49 @@ var ErrAmbiguousRelease = errors.New("the scheduled send was interrupted and may
 // mailboxes does not outlast the daemon's shutdown deadline. What is left simply
 // stays in the Outbox for the next sweep.
 func ProcessDueOutbox(ctx context.Context, st *objectstore.Store, deliver DeliverFunc, onGiveUp GiveUpFunc, now time.Time) (released int, err error) {
+	stats, err := ProcessDueOutboxStats(ctx, st, deliver, onGiveUp, now)
+	return stats.Released, err
+}
+
+// Stats summarizes one mailbox's sweep, so an operator can see a backlog forming
+// rather than infer it from the absence of release lines. Waiting is what a
+// queue-depth reading actually is: how much is still scheduled once the pass is
+// over. Retrying counts the messages that have already failed at least once,
+// which is where a stuck send shows up before it exhausts its budget and bounces.
+type Stats struct {
+	Scanned  int // messages examined in the Outbox
+	Released int // delivered and cleared
+	Failed   int // attempted and left for a retry
+	Waiting  int // still scheduled after the pass
+	Retrying int // of those waiting, how many have already failed at least once
+}
+
+// ProcessDueOutboxStats is ProcessDueOutbox reporting what the pass saw.
+func ProcessDueOutboxStats(ctx context.Context, st *objectstore.Store, deliver DeliverFunc, onGiveUp GiveUpFunc, now time.Time) (stats Stats, err error) {
 	outbox := int64(mapi.PrivateFIDOutbox)
 	msgs, err := st.ListMessages(outbox)
 	if err != nil {
-		return 0, err
+		return stats, err
 	}
 	var errs []error
 	for _, m := range msgs {
 		if ctx.Err() != nil {
-			return released, errors.Join(errs...)
+			return stats, errors.Join(errs...)
 		}
 		due, scheduled, e := deferredSendDue(st, m.ID, now)
 		if e != nil {
 			errs = append(errs, e)
 			continue
 		}
-		if !scheduled || !due {
+		if !scheduled {
+			continue
+		}
+		stats.Scanned++
+		if !due {
+			stats.Waiting++
+			if attempts, e := releaseAttempts(st, m.ID); e == nil && attempts > 0 {
+				stats.Retrying++
+			}
 			continue
 		}
 		// A message stamped as started, yet still scheduled, means the previous pass
@@ -134,14 +161,40 @@ func ProcessDueOutbox(ctx context.Context, st *objectstore.Store, deliver Delive
 			errs = append(errs, e)
 		}
 		if done {
-			released++
+			stats.Released++
 			continue
 		}
+		stats.Failed++
+		stats.Waiting++
+		stats.Retrying++
 		if e := recordFailure(st, onGiveUp, outbox, m, e); e != nil {
 			errs = append(errs, e)
 		}
 	}
-	return released, errors.Join(errs...)
+	return stats, errors.Join(errs...)
+}
+
+// releaseAttempts reads a message's consecutive-failure count without changing it,
+// so a sweep can report what is retrying rather than only what has failed just now.
+func releaseAttempts(st *objectstore.Store, messageID int64) (int32, error) {
+	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{nameReleaseAttempts})
+	if err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 || ids[0] == 0 {
+		return 0, fmt.Errorf("spooler: could not resolve the release-attempt property")
+	}
+	tag := mapi.PropTag(uint32(ids[0])<<16 | uint32(mapi.PtLong))
+	props, err := st.GetMessageProperties(messageID, tag)
+	if err != nil {
+		return 0, err
+	}
+	if v, ok := props.Get(tag); ok {
+		if n, ok := v.(int32); ok {
+			return n, nil
+		}
+	}
+	return 0, nil
 }
 
 // releaseMessage delivers one due message, files it to Sent, and removes it from

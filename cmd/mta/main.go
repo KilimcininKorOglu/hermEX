@@ -733,6 +733,8 @@ func sweepOutboxes(ctx context.Context, dir directory.MailboxLister, deliver spo
 		log.Printf("hermex-mta send-later: list mailboxes: %v", err)
 		return
 	}
+	var total spooler.Stats
+	mailboxesFailed := 0
 	for _, path := range maildirs {
 		// Stop between mailboxes on shutdown. ProcessDueOutbox already returns at
 		// once when cancelled, but without this the sweep would still open and close
@@ -746,15 +748,38 @@ func sweepOutboxes(ctx context.Context, dir directory.MailboxLister, deliver spo
 			log.Printf("hermex-mta send-later: open %s: %v", path, err)
 			continue
 		}
-		released, err := spooler.ProcessDueOutbox(ctx, st, deliver, onGiveUp, time.Now())
+		stats, err := spooler.ProcessDueOutboxStats(ctx, st, deliver, onGiveUp, time.Now())
 		st.Close()
+		total.Scanned += stats.Scanned
+		total.Released += stats.Released
+		total.Failed += stats.Failed
+		total.Waiting += stats.Waiting
+		total.Retrying += stats.Retrying
 		if err != nil {
+			mailboxesFailed++
 			log.Printf("hermex-mta send-later: %s: %v", path, err)
 			logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "sendlater.error", Fields: logging.Fields{"mailbox": path}, Err: err.Error()})
 		}
-		if released > 0 {
-			log.Printf("hermex-mta send-later: released %d scheduled message(s) from %s", released, path)
-			logger.Info(logging.MTA, "sendlater.release", logging.Fields{"count": released, "mailbox": path})
+		if stats.Released > 0 {
+			log.Printf("hermex-mta send-later: released %d scheduled message(s) from %s", stats.Released, path)
+			logger.Info(logging.MTA, "sendlater.release", logging.Fields{"count": stats.Released, "mailbox": path})
 		}
 	}
+	// One summary per sweep. The per-mailbox lines above only appear when something
+	// happened, so without this a backlog that is merely growing, rather than
+	// failing, leaves no trace at all: nothing is released and nothing errors while
+	// the queue fills. Waiting is the depth reading, retrying is where a stuck send
+	// shows up before it exhausts its budget.
+	level := logging.LevelInfo
+	if mailboxesFailed > 0 {
+		level = logging.LevelWarn
+	}
+	logger.Emit(logging.Event{
+		Level: level, Subsystem: logging.MTA, Name: "sendlater.sweep",
+		Fields: logging.Fields{
+			"mailboxes": len(maildirs), "mailboxes_failed": mailboxesFailed,
+			"scanned": total.Scanned, "released": total.Released, "failed": total.Failed,
+			"waiting": total.Waiting, "retrying": total.Retrying,
+		},
+	})
 }
