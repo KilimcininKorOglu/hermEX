@@ -95,14 +95,20 @@ func Unmarshal(b []byte) (*Node, error) {
 		}
 	}
 	page := byte(PageAirSync)
-	return r.element(&page)
+	return r.element(&page, 0)
 }
 
 // element parses one element: any leading SWITCH_PAGE, the tag byte, and — when
 // the content bit is set — the content items up to the matching END. A nested
 // element on a different page is introduced by its own SWITCH_PAGE, handled by
 // the recursive call.
-func (r *reader) element(page *byte) (*Node, error) {
+//
+// depth is the element's nesting level, checked because the descent is recursive
+// and a stack overflow is fatal to the process rather than to the request.
+func (r *reader) element(page *byte, depth int) (*Node, error) {
+	if depth > maxNestingDepth {
+		return nil, ErrTooDeep
+	}
 	for {
 		b, err := r.peek()
 		if err != nil {
@@ -162,7 +168,7 @@ func (r *reader) element(page *byte) (*Node, error) {
 			}
 			n.Opaque = append(n.Opaque, data...)
 		default:
-			child, err := r.element(page)
+			child, err := r.element(page, depth+1)
 			if err != nil {
 				return nil, err
 			}

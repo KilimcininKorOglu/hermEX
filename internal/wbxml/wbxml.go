@@ -10,7 +10,19 @@ var (
 	// carries attributes (unused in ActiveSync), a global token where an element
 	// was expected, or a multi-byte integer longer than five bytes.
 	ErrFormat = errors.New("wbxml: malformed data")
+	// ErrTooDeep is returned when element nesting passes maxNestingDepth. The
+	// decoder is recursive descent, so an unbounded document would exhaust the
+	// goroutine stack, which Go cannot recover from: it kills the whole process,
+	// not just the request.
+	ErrTooDeep = errors.New("wbxml: element nesting too deep")
 )
+
+// maxNestingDepth bounds how far the decoder descends into nested elements. A
+// minimal nested element costs two bytes on the wire, so the ActiveSync body cap
+// alone would allow millions of levels. Real payloads are shallow: the deepest
+// standard shape (a Sync command down to a message body) sits around a dozen, so
+// this leaves a wide margin over anything a client legitimately sends.
+const maxNestingDepth = 64
 
 // WBXML header fields. ActiveSync fixes all four and rejects any deviation:
 // WBXML 1.3, public identifier 1, charset 106 (UTF-8), and an empty string
