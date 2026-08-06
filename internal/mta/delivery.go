@@ -134,7 +134,7 @@ type target struct {
 // relays mail from any origin.
 func (s *session) Mail(from string, params smtp.MailParams) error {
 	if s.authUser != "" && !s.authorizedSender(from) {
-		return fmt.Errorf("5.7.1 <%s> is not an address you may send as", from)
+		return &smtp.PermError{Message: fmt.Sprintf("5.7.1 <%s> is not an address you may send as", from)}
 	}
 	if s.authUser != "" {
 		if err := overSendQuota(s.accounts, from); err != nil {
@@ -236,11 +236,11 @@ func (s *session) Rcpt(to string, params smtp.RcptParams) error {
 	if exp, ok := s.accounts.(MListExpander); ok {
 		leaves, isList, res, err := expandMailingList(exp, s.from, to)
 		if err != nil {
-			return fmt.Errorf("cannot route <%s>: %w", to, err)
+			return s.tempRouteFailure(to, err)
 		}
 		if isList {
 			if res != directory.MListOK {
-				return fmt.Errorf("5.7.1 posting to list <%s> is not permitted", to)
+				return &smtp.PermError{Message: fmt.Sprintf("5.7.1 posting to list <%s> is not permitted", to)}
 			}
 			// Expanded members inherit the list recipient's NOTIFY (so NOTIFY=NEVER
 			// on a list post suppresses every member's bounce) but not its ORCPT,
@@ -252,6 +252,20 @@ func (s *session) Rcpt(to string, params smtp.RcptParams) error {
 		}
 	}
 	return s.routeRecipient(to, params.Notify, params.ORCPT)
+}
+
+// tempRouteFailure records an infrastructure failure that stopped a recipient from
+// being routed and answers the sender with a temporary rejection. The directory is
+// the usual source, and a database fault is transient: a permanent rejection would
+// make the sending MTA bounce mail this server could accept a minute later. The real
+// error stays server-side, since it names database internals and port 25 takes mail
+// from unauthenticated peers.
+func (s *session) tempRouteFailure(to string, err error) error {
+	s.logger.Emit(logging.Event{
+		Level: logging.LevelError, Subsystem: logging.MTA, Name: "route.fail",
+		User: to, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}, Err: err.Error(),
+	})
+	return &smtp.TempError{Message: "4.3.0 temporary routing failure, please retry later"}
 }
 
 // routeRecipient files a single ordinary recipient: a local mailbox becomes a
@@ -272,17 +286,17 @@ func (s *session) routeRecipient(to, notify, orcpt string) error {
 		return nil
 	}
 	if s.authUser == "" {
-		return fmt.Errorf("relay denied for <%s>", to)
+		return &smtp.PermError{Message: fmt.Sprintf("relay denied for <%s>", to)}
 	}
 	external, err := isExternalDomain(s.accounts, to)
 	if err != nil {
-		return fmt.Errorf("cannot route <%s>: %w", to, err)
+		return s.tempRouteFailure(to, err)
 	}
 	if !external {
-		return fmt.Errorf("no such user <%s>", to)
+		return &smtp.PermError{Message: fmt.Sprintf("no such user <%s>", to)}
 	}
 	if s.spool == nil {
-		return fmt.Errorf("relay denied for <%s>", to)
+		return &smtp.PermError{Message: fmt.Sprintf("relay denied for <%s>", to)}
 	}
 	// Outbound abuse limiting: a local account that has sent to too many external
 	// recipients in the window (a compromise signal) has the excess deferred so it
@@ -334,7 +348,7 @@ func overReceiveQuota(path string) error {
 		return nil
 	}
 	if size > int64(q.ReceiveKB)*1024 {
-		return fmt.Errorf("mailbox is full (over receive quota)")
+		return &smtp.PermError{Message: "5.2.2 mailbox is full (over receive quota)"}
 	}
 	return nil
 }
@@ -363,7 +377,7 @@ func overSendQuota(accounts directory.Accounts, sender string) error {
 		return nil
 	}
 	if size > int64(q.SendKB)*1024 {
-		return fmt.Errorf("mailbox is full (over send quota)")
+		return &smtp.PermError{Message: "5.2.2 mailbox is full (over send quota)"}
 	}
 	return nil
 }
@@ -392,7 +406,11 @@ func isExternalDomain(accounts directory.Accounts, rcpt string) (bool, error) {
 func (s *session) Data(r io.Reader) error {
 	raw, err := io.ReadAll(r)
 	if err != nil {
-		return err
+		s.logger.Emit(logging.Event{
+			Level: logging.LevelError, Subsystem: logging.MTA, Name: "data.read.fail",
+			RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}, Err: err.Error(),
+		})
+		return &smtp.TempError{Message: "4.3.0 could not read the message, please retry later"}
 	}
 	received := time.Now()
 	// Antivirus runs before spam scoring or filing: a virus hit is quarantined (not
@@ -497,7 +515,11 @@ func (s *session) Data(r io.Reader) error {
 		}
 		if err := deliver(s.accounts, s.from, t.addr, t.path, tRaw, received, tFolder); err != nil {
 			s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "delivery.fail", User: t.addr, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}, Err: err.Error()})
-			return err
+			// A store failure is transient (the mailbox is there, the disk or the
+			// database is not answering), so defer rather than reject: a permanent
+			// reply would make the sender bounce mail this server can accept later.
+			// The error names the mailbox path on disk, so it never reaches the wire.
+			return &smtp.TempError{Message: "4.3.0 could not deliver the message, please retry later"}
 		}
 		s.logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "delivery.ok", User: t.addr, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}})
 	}
@@ -507,7 +529,8 @@ func (s *session) Data(r io.Reader) error {
 	if len(s.relayTargets) > 0 {
 		if err := s.spool.EnqueueDSN(s.from, s.ret, s.envid, s.relayTargets, raw, received); err != nil {
 			s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "relay.fail", User: s.authUser, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "recipients": len(s.relayTargets)}, Err: err.Error()})
-			return err
+			// The spool is a local database; a write failure is transient, so defer.
+			return &smtp.TempError{Message: "4.3.0 could not queue the message, please retry later"}
 		}
 		s.logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "relay.queued", User: s.authUser, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "recipients": len(s.relayTargets)}})
 	}

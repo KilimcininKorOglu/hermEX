@@ -118,6 +118,11 @@ func (s *Server) handle(conn net.Conn) {
 	event := func(level logging.Level, name string, f logging.Fields) {
 		s.Logger.Emit(logging.Event{Level: level, Subsystem: logging.SMTP, Name: name, RemoteAddr: remote, Fields: f})
 	}
+	// logInternal records an error the wire reply deliberately withholds, so a
+	// sanitized rejection is diagnosable rather than silent.
+	logInternal := func(err error) {
+		event(logging.LevelError, "session.error", logging.Fields{"reason": err.Error()})
+	}
 
 	sess, err := s.Backend.NewSession(remote)
 	if err != nil {
@@ -249,7 +254,7 @@ func (s *Server) handle(conn net.Conn) {
 				continue
 			}
 			if err := sess.Mail(addr, mailDSN); err != nil {
-				replySessionErr(w, err)
+				replySessionErr(w, err, logInternal)
 				continue
 			}
 			resetTxn()
@@ -278,7 +283,7 @@ func (s *Server) handle(conn net.Conn) {
 				continue
 			}
 			if err := sess.Rcpt(addr, rcptDSN); err != nil {
-				replySessionErr(w, err)
+				replySessionErr(w, err, logInternal)
 				continue
 			}
 			rcptCount++
@@ -414,27 +419,62 @@ type TempError struct{ Message string }
 
 func (e *TempError) Error() string { return e.Message }
 
+// PermError is the permanent counterpart of TempError: a Session error the server
+// reports as a 5xx, and whose Message is written to the wire. Only these two types
+// put text on the wire. Everything else is answered with a fixed string, because
+// port 25 takes mail from unauthenticated peers and the errors reaching these
+// helpers are not all hand-written: a store or driver failure carries the mailbox
+// path on disk or names database internals. Wrapping a business rejection in a
+// PermError is what marks its message as safe to disclose.
+type PermError struct{ Message string }
+
+func (e *PermError) Error() string { return e.Message }
+
 // replySessionErr maps a Session error to its SMTP reply: a TempError becomes a 451
-// temporary failure (the sender retries), anything else a 550 permanent rejection.
-func replySessionErr(w *bufio.Writer, err error) {
-	if te, ok := errors.AsType[*TempError](err); ok {
-		reply(w, 451, te.Message)
-		return
+// temporary failure (the sender retries), a PermError a 550 carrying its own message,
+// and anything else a 550 with a fixed string, its real error passed to logErr for
+// the server-side record.
+func replySessionErr(w *bufio.Writer, err error, logErr func(error)) {
+	switch {
+	case isTempErr(err):
+		reply(w, 451, tempMessage(err))
+	case isPermErr(err):
+		reply(w, 550, permMessage(err))
+	default:
+		logErr(err)
+		reply(w, 550, "5.3.0 recipient rejected")
 	}
-	reply(w, 550, err.Error())
 }
 
 // replyDataErr maps a Session.Data error to the SMTP reply shared by the DATA and
-// BDAT body paths: a TempError defers (451 so the sender retries), an over-size
-// body is 552, and any other failure is a 554 permanent transaction failure.
+// BDAT body paths: a TempError defers (451 so the sender retries), an over-size body
+// is 552, a PermError is a 554 carrying its own message, and any other failure is a
+// 554 with a fixed string. The DATA path already records the error, so this one
+// takes no logErr.
 func replyDataErr(w *bufio.Writer, err error) {
-	if te, ok := errors.AsType[*TempError](err); ok {
-		reply(w, 451, te.Message)
-	} else if errors.Is(err, errTooLarge) {
+	switch {
+	case isTempErr(err):
+		reply(w, 451, tempMessage(err))
+	case errors.Is(err, errTooLarge):
 		reply(w, 552, "message exceeds size limit")
-	} else {
-		reply(w, 554, "transaction failed: "+err.Error())
+	case isPermErr(err):
+		reply(w, 554, permMessage(err))
+	default:
+		reply(w, 554, "5.3.0 transaction failed")
 	}
+}
+
+func isTempErr(err error) bool { _, ok := errors.AsType[*TempError](err); return ok }
+func isPermErr(err error) bool { _, ok := errors.AsType[*PermError](err); return ok }
+
+func tempMessage(err error) string {
+	te, _ := errors.AsType[*TempError](err)
+	return te.Message
+}
+
+func permMessage(err error) string {
+	pe, _ := errors.AsType[*PermError](err)
+	return pe.Message
 }
 
 // parseBDAT parses a "BDAT <chunk-size> [LAST]" argument into the decimal octet
