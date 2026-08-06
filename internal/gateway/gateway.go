@@ -51,6 +51,15 @@ func Handler(routes []Route) (http.Handler, error) {
 		}
 		proxy := httputil.NewSingleHostReverseProxy(u)
 		proxy.Transport = transport
+		// Without this the standard proxy answers an unreachable backend with a bare
+		// 502 and an empty body, so a user whose webmail is down sees a blank page
+		// and has nothing to report. The service being unreachable is temporary, so
+		// the status says so.
+		proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, _ error) {
+			writeGatewayError(w, r, http.StatusServiceUnavailable,
+				"Service unavailable",
+				"This service is temporarily unreachable. Please try again in a moment.")
+		}
 		compiledRoutes = append(compiledRoutes, compiled{strings.ToLower(r.Prefix), proxy})
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
@@ -62,7 +71,9 @@ func Handler(routes []Route) (http.Handler, error) {
 			}
 		}
 		if best < 0 {
-			http.Error(w, "no backend for path", http.StatusBadGateway)
+			writeGatewayError(w, req, http.StatusBadGateway,
+				"Not available here",
+				"No service is configured to answer this address.")
 			return
 		}
 		compiledRoutes[best].proxy.ServeHTTP(w, req)
