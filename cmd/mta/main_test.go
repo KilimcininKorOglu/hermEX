@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -313,5 +314,82 @@ func TestSweepReportsFailuresAndRetries(t *testing.T) {
 	}
 	if e.Level != logging.LevelWarn {
 		t.Errorf("level = %q, want warn when a mailbox failed", e.Level)
+	}
+}
+
+// TestSlowMailboxDoesNotStarveTheRest is the starvation regression. The sweep
+// walks mailboxes in order, so a single slow one used to consume the whole pass
+// and every mailbox behind it waited for the next pass, and the next. Here the
+// first mailbox spends longer than its budget and the second must still be served
+// in the same pass.
+func TestSlowMailboxDoesNotStarveTheRest(t *testing.T) {
+	root := t.TempDir()
+	slowDir := filepath.Join(root, "aaa-slow")
+	fastDir := filepath.Join(root, "zzz-fast")
+	// Several due messages in the slow mailbox, so the budget expires partway.
+	for range 4 {
+		scheduleInto(t, slowDir, "slow", time.Now().Add(-time.Minute))
+	}
+	scheduleInto(t, fastDir, "fast", time.Now().Add(-time.Minute))
+
+	accounts := directory.StaticAccounts{
+		"slow@hermex.test": {MailboxPath: slowDir},
+		"fast@hermex.test": {MailboxPath: fastDir},
+	}
+	// A short budget keeps the test quick; the production value is the sweep
+	// interval, and the behaviour under test is the same at any size.
+	restore := perMailboxSweepBudget
+	perMailboxSweepBudget = 100 * time.Millisecond
+	t.Cleanup(func() { perMailboxSweepBudget = restore })
+
+	sink := &sweepSink{}
+	var mu sync.Mutex
+	served := map[string]int{}
+	deliver := func(_ []string, raw []byte, _ time.Time) ([]string, error) {
+		mu.Lock()
+		who := "fast"
+		if strings.Contains(string(raw), "slow@hermex.test") {
+			who = "slow"
+			// Each slow release eats most of the budget, so the second one crosses it.
+			time.Sleep(perMailboxSweepBudget / 2)
+		}
+		served[who]++
+		mu.Unlock()
+		return nil, nil
+	}
+
+	sweepOutboxes(context.Background(), accounts, deliver, nil, logging.New(sink))
+
+	mu.Lock()
+	defer mu.Unlock()
+	if served["fast"] != 1 {
+		t.Errorf("the fast mailbox was served %d times, want 1; the slow one starved it", served["fast"])
+	}
+	if served["slow"] >= 4 {
+		t.Errorf("the slow mailbox released %d messages, want it cut off at its budget", served["slow"])
+	}
+	if _, ok := sink.find("sendlater.budget"); !ok {
+		t.Error("no budget event; an operator could not see which mailbox is holding the sweep up")
+	}
+}
+
+// scheduleInto files one past-due scheduled message into an existing or new
+// mailbox directory.
+func scheduleInto(t *testing.T, dir, name string, when time.Time) {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	raw := "From: " + name + "@hermex.test\r\nTo: sink@hermex.test\r\nSubject: s\r\n\r\nbody\r\n"
+	info, err := st.AppendMessage(int64(mapi.PrivateFIDOutbox), []byte(raw), time.Unix(1, 0), objectstore.FlagSeen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetMessageProperties(info.ID, mapi.PropertyValues{
+		{Tag: mapi.PrDeferredSendTime, Value: mapi.UnixToNTTime(when)},
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

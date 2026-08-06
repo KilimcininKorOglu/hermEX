@@ -686,6 +686,19 @@ func runDigest(dir *directory.SQLDirectory, secret []byte, hostname string, logg
 // this bounds the send-time precision.
 const sendLaterInterval = 30 * time.Second
 
+// perMailboxSweepBudget bounds how long one mailbox may hold the send-later
+// sweep. The sweep walks mailboxes in order, so without a budget a single slow
+// one, a store on failing disk, a long queue of messages each waiting on the virus
+// scanner, consumes the whole pass and every mailbox behind it waits for the next
+// one, and the next. With the budget each mailbox is served in every pass.
+//
+// It bounds the number of messages a mailbox gets through, not a call already in
+// flight: the delivery function takes no context, so the message being released
+// when the budget expires still finishes. The one network hop inside a delivery,
+// the virus scan, carries its own 30-second deadline.
+// It is a variable so a test can shrink it; nothing else assigns to it.
+var perMailboxSweepBudget = sendLaterInterval
+
 // relayInterval is how often the relay worker scans the outbound spool. A freshly
 // submitted external message waits at most this long for its first delivery
 // attempt; deferred recipients wait for their own backoff regardless.
@@ -734,7 +747,7 @@ func sweepOutboxes(ctx context.Context, dir directory.MailboxLister, deliver spo
 		return
 	}
 	var total spooler.Stats
-	mailboxesFailed := 0
+	mailboxesFailed, mailboxesOverBudget := 0, 0
 	for _, path := range maildirs {
 		// Stop between mailboxes on shutdown. ProcessDueOutbox already returns at
 		// once when cancelled, but without this the sweep would still open and close
@@ -748,8 +761,16 @@ func sweepOutboxes(ctx context.Context, dir directory.MailboxLister, deliver spo
 			log.Printf("hermex-mta send-later: open %s: %v", path, err)
 			continue
 		}
-		stats, err := spooler.ProcessDueOutboxStats(ctx, st, deliver, onGiveUp, time.Now())
+		mbCtx, cancelMailbox := context.WithTimeout(ctx, perMailboxSweepBudget)
+		stats, err := spooler.ProcessDueOutboxStats(mbCtx, st, deliver, onGiveUp, time.Now())
+		budgetSpent := mbCtx.Err() != nil && ctx.Err() == nil
+		cancelMailbox()
 		st.Close()
+		if budgetSpent {
+			mailboxesOverBudget++
+			logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.MTA,
+				Name: "sendlater.budget", Fields: logging.Fields{"mailbox": path, "released": stats.Released}})
+		}
 		total.Scanned += stats.Scanned
 		total.Released += stats.Released
 		total.Failed += stats.Failed
@@ -771,14 +792,15 @@ func sweepOutboxes(ctx context.Context, dir directory.MailboxLister, deliver spo
 	// the queue fills. Waiting is the depth reading, retrying is where a stuck send
 	// shows up before it exhausts its budget.
 	level := logging.LevelInfo
-	if mailboxesFailed > 0 {
+	if mailboxesFailed > 0 || mailboxesOverBudget > 0 {
 		level = logging.LevelWarn
 	}
 	logger.Emit(logging.Event{
 		Level: level, Subsystem: logging.MTA, Name: "sendlater.sweep",
 		Fields: logging.Fields{
 			"mailboxes": len(maildirs), "mailboxes_failed": mailboxesFailed,
-			"scanned": total.Scanned, "released": total.Released, "failed": total.Failed,
+			"mailboxes_over_budget": mailboxesOverBudget,
+			"scanned":               total.Scanned, "released": total.Released, "failed": total.Failed,
 			"waiting": total.Waiting, "retrying": total.Retrying,
 		},
 	})
