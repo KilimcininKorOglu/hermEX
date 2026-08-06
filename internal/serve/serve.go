@@ -94,8 +94,9 @@ func New(addr string, h http.Handler, tlsSrc TLSSource, logger *logging.Logger, 
 	// request open far longer than any fixed write deadline would allow.
 	// The limiter sits inside the logger so a refused request is still recorded in
 	// the access log, and the front-door strip sits outside both so neither reads a
-	// client-supplied X-Forwarded-For.
-	handler := logMiddleware(rateLimitMiddleware(h, limiter), logger, subsystem)
+	// client-supplied X-Forwarded-For. Compression sits innermost, so the access log
+	// records the handler's real status and a refused request is never compressed.
+	handler := logMiddleware(compressMiddleware(rateLimitMiddleware(h, limiter)), logger, subsystem)
 	if o.frontDoor {
 		handler = stripForwardedFor(handler)
 	}
