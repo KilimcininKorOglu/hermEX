@@ -56,7 +56,13 @@ type Worker struct {
 	// OnGiveUp, if set, is called when a recipient is abandoned (permanent
 	// rejection or attempts exhausted) just before it is settled, so the caller
 	// can notify the sender. cause is the failure that ended delivery.
-	OnGiveUp func(it Item, cause error)
+	//
+	// Its error says whether the sender was actually told. A non-nil error keeps
+	// the recipient queued instead of settling it: an outbound message must
+	// deliver, bounce with a DSN, or stay visibly queued, and dropping the row
+	// after a failed bounce is none of the three. Returning nil when no notice was
+	// wanted (an RFC 3461 NOTIFY that excludes FAILURE) settles the row normally.
+	OnGiveUp func(it Item, cause error) error
 	// Guard, if set, is asked for permission before each pass and must report
 	// whether this process may drain the spool right now; the returned function
 	// releases the permission at the end of the pass. It is how a deployment
@@ -111,6 +117,11 @@ const (
 	defaultBackoff     = 5 * time.Minute
 	defaultMaxAttempts = 10
 	maxBackoff         = 6 * time.Hour
+	// bounceRetryBackoff is the wait before re-attempting an undeliverable bounce.
+	// It is the longest wait the worker uses anywhere, because each expiry also
+	// re-contacts the recipient's mail exchanger, which has already refused the
+	// message for good.
+	bounceRetryBackoff = maxBackoff
 	dialTimeout        = 30 * time.Second
 	sessionTimeout     = 5 * time.Minute
 )
@@ -185,7 +196,18 @@ func (w *Worker) ProcessDue(ctx context.Context, now time.Time) (sent int, err e
 		// sender is told (OnGiveUp) and the recipient settled. Otherwise defer with
 		// an exponential backoff so a transient outage is retried, not lost.
 		if isPermanent(e) || it.Attempts+1 >= w.maxAttempts() {
-			w.giveUp(it, e)
+			if be := w.giveUp(it, e); be != nil {
+				// The delivery is over and the sender was never told, so settling here
+				// would erase the message with nothing left to recover it from. Keep the
+				// recipient queued instead: it stays on the administrative mail-queue
+				// page, carrying why it is stuck, and the bounce is attempted again on
+				// each expiry until it lands or an operator drops it.
+				if re := w.Spool.Retry(it.RecipientID, now.Add(bounceRetryBackoff), "bounce undeliverable: "+be.Error()); re != nil {
+					return sent, re
+				}
+				w.log(logging.LevelError, "relay.bounce.stuck", it, be)
+				continue
+			}
 			if fe := w.Spool.Fail(it.RecipientID); fe != nil {
 				return sent, fe
 			}
@@ -200,12 +222,14 @@ func (w *Worker) ProcessDue(ctx context.Context, now time.Time) (sent int, err e
 }
 
 // giveUp abandons a recipient: it logs loudly and notifies the sender via the
-// OnGiveUp hook (if any). The caller settles the recipient afterwards.
-func (w *Worker) giveUp(it Item, cause error) {
+// OnGiveUp hook (if any). It returns the hook's error, which tells the caller
+// whether the sender was told and so whether the recipient may be settled.
+func (w *Worker) giveUp(it Item, cause error) error {
 	w.log(logging.LevelError, "relay.bounce", it, cause)
-	if w.OnGiveUp != nil {
-		w.OnGiveUp(it, cause)
+	if w.OnGiveUp == nil {
+		return nil
 	}
+	return w.OnGiveUp(it, cause)
 }
 
 func (w *Worker) maxAttempts() int {

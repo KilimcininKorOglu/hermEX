@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql"
 	"flag"
+	"fmt"
 	"hash/fnv"
 	"log"
 	"net"
@@ -342,18 +343,24 @@ func main() {
 		// When the worker abandons an external recipient, return a non-delivery
 		// report to the (local, authenticated) sender through the local delivery
 		// path, so a failed send is reported rather than lost silently.
-		OnGiveUp: func(it relay.Item, cause error) {
+		OnGiveUp: func(it relay.Item, cause error) error {
 			// RFC 3461: honor the recipient's NOTIFY. NEVER (or any value not
 			// requesting FAILURE) means the sender wants no failure notice, so
-			// suppress the bounce rather than emit backscatter.
+			// suppress the bounce rather than emit backscatter. Reported as success:
+			// nothing was lost, the sender asked not to be told.
 			if !mta.NotifyFailureWanted(it.Notify) {
-				return
+				return nil
 			}
 			report := mta.Bounce(cfg.Hostname, it.From, it.Recipient, cause.Error(), time.Now())
 			unresolved, err := mta.Deliver(dir, "", []string{it.From}, report, time.Now())
-			if err != nil || len(unresolved) > 0 {
-				logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "relay.bounce.undelivered", User: it.From, Fields: logging.Fields{"recipient": it.Recipient}})
+			if err == nil && len(unresolved) == 0 {
+				return nil
 			}
+			logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "relay.bounce.undelivered", User: it.From, Fields: logging.Fields{"recipient": it.Recipient}})
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("bounce sender %q does not resolve", it.From)
 		},
 	}
 	// Outbound delivery retry policy (base backoff and max attempts): read at startup

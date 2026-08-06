@@ -359,7 +359,7 @@ func TestWorkerBouncesPermanentFailure(t *testing.T) {
 		Spool:    sp,
 		Router:   func(string) ([]string, error) { return []string{"sink"}, nil },
 		Dialer:   func(string) (net.Conn, error) { return net.Dial("tcp", addr) },
-		OnGiveUp: func(it Item, _ error) { bounced = append(bounced, it) },
+		OnGiveUp: func(it Item, _ error) error { bounced = append(bounced, it); return nil },
 	}
 
 	if sent, err := w.ProcessDue(context.Background(), t0); err != nil || sent != 0 {
@@ -390,7 +390,7 @@ func TestWorkerGivesUpAfterMaxAttempts(t *testing.T) {
 		MaxAttempts: 2,
 		Router:      func(string) ([]string, error) { return []string{"sink"}, nil },
 		Dialer:      func(string) (net.Conn, error) { return nil, fmt.Errorf("connection refused") },
-		OnGiveUp:    func(it Item, _ error) { bounced = append(bounced, it) },
+		OnGiveUp:    func(it Item, _ error) error { bounced = append(bounced, it); return nil },
 	}
 
 	// First attempt: transient failure, deferred.
@@ -532,5 +532,56 @@ func TestProcessDueStopsOnCancellation(t *testing.T) {
 	}
 	if n := len(sink.recorded()); n != 1 {
 		t.Errorf("the sink received %d messages, want 1; the pass kept going after cancellation", n)
+	}
+}
+
+// TestWorkerKeepsItemWhenBounceCannotBeDelivered is the loss regression: on a
+// permanent rejection the recipient row and, with it, the only copy of the
+// message were deleted whether or not the DSN reached the sender. When the bounce
+// also failed the message vanished entirely, leaving nothing for the sender or an
+// operator to recover. An outbound message must deliver, bounce, or stay visibly
+// queued; this proves the third.
+func TestWorkerKeepsItemWhenBounceCannotBeDelivered(t *testing.T) {
+	sink, addr := startSink(t)
+	sink.rcptErr = fmt.Errorf("mailbox does not exist") // the sink replies 5xx to RCPT
+	sp := openSpool(t)
+	t0 := time.Unix(5_000_000, 0)
+	if err := sp.Enqueue("alice@local", []string{"bob@remote"}, []byte("raw\r\n"), t0); err != nil {
+		t.Fatal(err)
+	}
+
+	w := &Worker{
+		Spool:  sp,
+		Router: func(string) ([]string, error) { return []string{"sink"}, nil },
+		Dialer: func(string) (net.Conn, error) { return net.Dial("tcp", addr) },
+		OnGiveUp: func(Item, error) error {
+			return fmt.Errorf("sender mailbox unavailable")
+		},
+	}
+	if sent, err := w.ProcessDue(context.Background(), t0); err != nil || sent != 0 {
+		t.Fatalf("permanent failure: sent=%d err=%v, want 0, nil", sent, err)
+	}
+
+	// The row is still there, deferred rather than settled, and says why.
+	entries, err := sp.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("the mail queue holds %d entries, want 1; the message was dropped with its sender never told", len(entries))
+	}
+	if entries[0].Recipient != "bob@remote" {
+		t.Errorf("queued recipient = %q, want bob@remote", entries[0].Recipient)
+	}
+	if !strings.Contains(entries[0].LastError, "bounce undeliverable") {
+		t.Errorf("last error = %q, want it to say the bounce could not be delivered", entries[0].LastError)
+	}
+	// It is deferred, not due again immediately: every expiry also re-contacts the
+	// mail exchanger that already refused the message for good.
+	if due, _ := sp.Claim(t0, 10); len(due) != 0 {
+		t.Errorf("the stuck item is due again at once: %v", due)
+	}
+	if due, _ := sp.Claim(t0.Add(bounceRetryBackoff), 10); len(due) != 1 {
+		t.Errorf("the stuck item never becomes due again; the bounce would never be retried")
 	}
 }
