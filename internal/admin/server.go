@@ -15,6 +15,7 @@ import (
 	"hermex/internal/ldapauth"
 	"hermex/internal/logging"
 	"hermex/internal/publicfolder"
+	"hermex/internal/serve"
 )
 
 // Directory is what the admin server needs from the account directory: password
@@ -471,6 +472,9 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "malformed request", http.StatusBadRequest)
 		return
 	}
+	// A login carries no session yet, so a failed sign-in would otherwise be logged
+	// with no account at all. Reported from the claimed login, before it is verified.
+	serve.SetUser(r, req.Login)
 	uid, roles, ok, err := s.authAdmin(req.Login, req.Password)
 	if err != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)
@@ -581,6 +585,10 @@ func (s *Server) protect(next http.Handler) http.Handler {
 			http.Error(w, "missing or invalid CSRF token", http.StatusForbidden)
 			return
 		}
+		// The panel authenticates with a cookie, so the access log has no Basic
+		// header to read; report the operator here, the one gate every API route
+		// passes through.
+		serve.SetUser(r, cl.Login)
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, cl)))
 	})
 }

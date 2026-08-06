@@ -16,6 +16,7 @@ import (
 	"hermex/internal/objectstore"
 	"hermex/internal/publicfolder"
 	"hermex/internal/relay"
+	"hermex/internal/serve"
 )
 
 // Authenticator validates webmail credentials and returns the caller's mailbox
@@ -376,6 +377,9 @@ func (s *Server) session(r *http.Request) (sessionClaims, bool) {
 	if !s.sessionActive(c) {
 		return sessionClaims{}, false
 	}
+	// Webmail authenticates with a cookie, so the access log has no Basic header to
+	// read; report the account here, where every authenticated handler passes.
+	serve.SetUser(r, c.Email)
 	return c, true
 }
 
@@ -388,6 +392,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
+	// A login carries no session yet, so the access log would otherwise record the
+	// one request that matters most to an auditor, a failed sign-in, with no account
+	// at all. Reported from the claimed address, before it is verified.
+	serve.SetUser(r, req.Email)
 	// Throttle online guessing. Keyed by account (lower-cased email), not client
 	// IP: behind the gateway every request carries the same proxy address, so an
 	// IP key would either lock all users out at once or never trip. An account key

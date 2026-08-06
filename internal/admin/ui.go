@@ -4,6 +4,8 @@ import (
 	"crypto/hmac"
 	"io/fs"
 	"net/http"
+
+	"hermex/internal/serve"
 )
 
 // uiClaims returns the session claims for a UI request, or ok=false when the
@@ -17,6 +19,8 @@ func (s *Server) uiClaims(r *http.Request) (claims, bool) {
 	if err != nil {
 		return claims{}, false
 	}
+	// The panel pages sit outside protect(), so they report the operator here.
+	serve.SetUser(r, cl.Login)
 	return cl, true
 }
 

@@ -1,22 +1,65 @@
 package serve
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"hermex/internal/logging"
 )
 
+// userKey addresses the per-request identity slot in the request context.
+type userKey struct{}
+
+// requestUser is the mutable identity slot logMiddleware installs in every
+// request context. A handler that authenticates from a cookie or a request body
+// has no Basic header for the middleware to read, so it writes the account here
+// instead. The mutex guards the handler's write against the middleware's read,
+// which happens once the handler returns.
+type requestUser struct {
+	mu   sync.Mutex
+	name string
+}
+
+func (u *requestUser) set(name string) {
+	u.mu.Lock()
+	u.name = name
+	u.mu.Unlock()
+}
+
+func (u *requestUser) get() string {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.name
+}
+
+// SetUser records the account a request acts as, so the access log can attribute
+// it. Daemons that authenticate with HTTP Basic need not call it (the middleware
+// reads the header itself); the cookie-authenticated ones do, since nothing in
+// the request otherwise names the caller. It is a no-op when the request never
+// passed through the logging middleware, which is the case for an unconfigured
+// daemon and for a test driving a handler directly.
+func SetUser(r *http.Request, user string) {
+	if u, ok := r.Context().Value(userKey{}).(*requestUser); ok {
+		u.set(user)
+	}
+}
+
 // logMiddleware wraps h to emit one structured Event per HTTP request through
 // logger, tagged with subsystem. Each event records the method, path, response
 // status, and duration, plus the client address (the first X-Forwarded-For hop
 // when a proxy set it, so a request through the gateway logs the real client
-// rather than the proxy), the presented HTTP Basic user (never the password), and
-// a request id (an inbound X-Request-Id when set, otherwise a freshly minted one).
+// rather than the proxy), the acting account (never the password), and a request
+// id (an inbound X-Request-Id when set, otherwise a freshly minted one).
 // A nil logger leaves h unwrapped, so an unconfigured daemon pays nothing.
+//
+// The account comes from the presented HTTP Basic user, or, when the handler
+// reported one through SetUser, from that: a handler that authenticated the
+// caller itself knows the identity the Basic header cannot carry.
 func logMiddleware(h http.Handler, logger *logging.Logger, subsystem logging.Subsystem) http.Handler {
 	if logger == nil {
 		return h
@@ -27,9 +70,14 @@ func logMiddleware(h http.Handler, logger *logging.Logger, subsystem logging.Sub
 		if rid == "" {
 			rid = newRequestID()
 		}
+		acting := &requestUser{}
+		r = r.WithContext(context.WithValue(r.Context(), userKey{}, acting))
 		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
 		h.ServeHTTP(rec, r)
 		user, _, _ := r.BasicAuth()
+		if reported := acting.get(); reported != "" {
+			user = reported
+		}
 		logger.Emit(logging.Event{
 			Level:      levelForStatus(rec.status),
 			Subsystem:  subsystem,
