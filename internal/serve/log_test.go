@@ -92,3 +92,47 @@ func TestLogPrefersReportedUserOverBasic(t *testing.T) {
 func TestSetUserWithoutMiddlewareIsSafe(t *testing.T) {
 	SetUser(httptest.NewRequest(http.MethodGet, "/", nil), "alice@hermex.test")
 }
+
+// TestRequestIDIsReturnedToTheClient proves the correlation id reaches the
+// client. The id was already minted and logged, but never left the server, so a
+// user reporting an error had nothing to quote and support had no way to find
+// their request among all the others.
+func TestRequestIDIsReturnedToTheClient(t *testing.T) {
+	sink := &recordSink{}
+	rec := httptest.NewRecorder()
+	logMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "something failed", http.StatusInternalServerError)
+	}), logging.New(sink), logging.Webmail).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/folders", nil))
+
+	got := rec.Header().Get("X-Request-Id")
+	if got == "" {
+		t.Fatal("the response carries no request id")
+	}
+	e, ok := sink.last()
+	if !ok {
+		t.Fatal("no access-log event")
+	}
+	// The point is correlation: the id the client was given must be the id the
+	// log line carries, or quoting it finds nothing.
+	if e.RequestID != got {
+		t.Errorf("logged id %q does not match the returned id %q", e.RequestID, got)
+	}
+}
+
+// TestRequestIDEchoesTheClientsOwn proves an id a client already assigned is kept
+// rather than replaced, so a trace that starts at the caller stays one trace.
+func TestRequestIDEchoesTheClientsOwn(t *testing.T) {
+	sink := &recordSink{}
+	req := httptest.NewRequest(http.MethodGet, "/mapi/emsmdb", nil)
+	req.Header.Set("X-Request-Id", "caller-supplied-id")
+	rec := httptest.NewRecorder()
+	logMiddleware(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
+		logging.New(sink), logging.MAPI).ServeHTTP(rec, req)
+
+	if got := rec.Header().Get("X-Request-Id"); got != "caller-supplied-id" {
+		t.Errorf("returned id = %q, want the caller's own", got)
+	}
+	if e, _ := sink.last(); e.RequestID != "caller-supplied-id" {
+		t.Errorf("logged id = %q, want the caller's own", e.RequestID)
+	}
+}

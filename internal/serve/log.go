@@ -54,7 +54,8 @@ func SetUser(r *http.Request, user string) {
 // status, and duration, plus the client address (the first X-Forwarded-For hop
 // when a proxy set it, so a request through the gateway logs the real client
 // rather than the proxy), the acting account (never the password), and a request
-// id (an inbound X-Request-Id when set, otherwise a freshly minted one).
+// id (an inbound X-Request-Id when set, otherwise a freshly minted one, returned
+// to the client in the response's own X-Request-Id header).
 // A nil logger leaves h unwrapped, so an unconfigured daemon pays nothing.
 //
 // The account comes from the presented HTTP Basic user, or, when the handler
@@ -69,6 +70,14 @@ func logMiddleware(h http.Handler, logger *logging.Logger, subsystem logging.Sub
 		rid := r.Header.Get("X-Request-Id")
 		if rid == "" {
 			rid = newRequestID()
+		}
+		// Return the id to the client. It is what a user quoting an error gives
+		// support, and the only thing that ties their report to one line in the log:
+		// without it the id exists but nobody outside the server can name it. Set
+		// before the handler runs, since a handler that writes its status first would
+		// otherwise flush the headers without it.
+		if rid != "" {
+			w.Header().Set("X-Request-Id", rid)
 		}
 		acting := &requestUser{}
 		r = r.WithContext(context.WithValue(r.Context(), userKey{}, acting))
