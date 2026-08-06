@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"net/http"
+	"path"
 	"regexp"
 	"slices"
 	"sort"
@@ -16,6 +17,46 @@ import (
 	"hermex/internal/mime"
 	"hermex/internal/objectstore"
 )
+
+// safeAttachmentName reduces a sender-supplied attachment filename to something
+// safe to use as a zip entry name and inside a Content-Disposition header. The
+// wire value is whatever the sender chose to write: Part.Filename is a faithful
+// accessor for it and was never meant to yield a filesystem-safe name.
+//
+// Two sinks care. A zip entry named "../../../.ssh/authorized_keys" is written
+// outside the extraction directory by any tool that honours relative paths, so an
+// external sender would be choosing where files land on the recipient's machine.
+// A quote inside a Content-Disposition parameter ends the quoted string early and
+// hands the sender the rest of the header. Only the base name survives, and a name
+// that reduces to nothing or to a dot segment falls back to the caller's own
+// generated name.
+func safeAttachmentName(raw, fallback string) string {
+	// Senders send Windows paths too, and path.Base does not treat a backslash as
+	// a separator.
+	base := path.Base(strings.ReplaceAll(raw, "\\", "/"))
+	if base == "" || base == "." || base == ".." || base == "/" {
+		return fallback
+	}
+	var b strings.Builder
+	for _, r := range base {
+		switch {
+		case r < 0x20 || r == 0x7f:
+			// drop control characters
+		case r == '"':
+			b.WriteByte('_')
+		default:
+			b.WriteRune(r)
+		}
+		if b.Len() >= 200 {
+			break
+		}
+	}
+	name := strings.TrimSpace(b.String())
+	if name == "" || name == "." || name == ".." {
+		return fallback
+	}
+	return name
+}
 
 // maxImportBytes caps an imported .eml request body (base64 inflates ~33%, so
 // this allows roughly a 30 MiB message).
@@ -68,10 +109,7 @@ func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot decode", http.StatusInternalServerError)
 		return
 	}
-	filename := found.Filename()
-	if filename == "" {
-		filename = "attachment"
-	}
+	filename := safeAttachmentName(found.Filename(), "attachment")
 	w.Header().Set("Content-Type", found.Type+"/"+found.Subtype)
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
 	_, _ = w.Write(body)
@@ -248,10 +286,7 @@ func (s *Server) handleAttachmentsZip(w http.ResponseWriter, r *http.Request) {
 		}
 		if p.Type != "multipart" && (p.Disposition == "attachment" || name != "") {
 			if body, err := p.DecodedContent(); err == nil {
-				fn := p.Filename()
-				if fn == "" {
-					fn = "attachment-" + strconv.Itoa(idx)
-				}
+				fn := safeAttachmentName(p.Filename(), "attachment-"+strconv.Itoa(idx))
 				idx++
 				if fw, err := zw.Create(fn); err == nil {
 					_, _ = fw.Write(body)
