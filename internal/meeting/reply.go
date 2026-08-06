@@ -96,15 +96,15 @@ func parseAttendee(ics []byte) (addr, partstat string) {
 		if !found {
 			continue
 		}
-		if semi := strings.IndexByte(key, ';'); semi >= 0 {
-			key = key[:semi]
-		}
-		if !strings.EqualFold(key, "ATTENDEE") {
+		// Everything before the colon is the property name and, after the first
+		// semicolon, its parameters. Splitting here rather than re-scanning the whole
+		// line matters twice: the first semicolon of the line marks where parameters
+		// BEGIN, not where they end, and a parameterless ATTENDEE has no semicolon at
+		// all, so an offset computed from one is negative.
+		name, params, _ := strings.Cut(key, ";")
+		if !strings.EqualFold(name, "ATTENDEE") {
 			continue
 		}
-		// Parameters sit between the property name and the colon.
-		semiIdx := strings.IndexByte(line, ';')
-		params := line[len("ATTENDEE"):semiIdx]
 		if i := strings.LastIndex(strings.ToLower(params), "partstat="); i >= 0 {
 			rest := params[i+len("partstat="):]
 			if semi := strings.IndexByte(rest, ';'); semi >= 0 {
