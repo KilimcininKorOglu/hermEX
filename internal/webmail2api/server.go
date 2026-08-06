@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"hermex/internal/authlimit"
@@ -46,6 +47,13 @@ type Server struct {
 	// DigestSecret verifies quarantine-digest release tokens (the MTA mints them
 	// with the same secret); empty disables the release page. Set after NewServer.
 	DigestSecret []byte
+
+	// Web-push delivery. pushHTTP is the SSRF-guarded client built once on first
+	// use; pushAllowInternal disables the address-range block, which only a test
+	// pointing at a loopback stub needs (a real push service is public).
+	pushOnce          sync.Once
+	pushHTTP          *http.Client
+	pushAllowInternal bool
 }
 
 // NewServer builds the API server. accounts and spool back outbound mail

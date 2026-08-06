@@ -14,6 +14,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/ssrfguard"
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 )
@@ -46,6 +47,14 @@ func vapidKeys(secret []byte) (public, private string, err error) {
 		}
 	}
 	return "", "", errors.New("could not derive a vapid key from the secret")
+}
+
+// pushClient returns the SSRF-guarded client used to deliver web pushes, built once.
+// A subscription endpoint is client-supplied and the poller dials it unattended, so
+// it is never delivered with a bare http.Client.
+func (s *Server) pushClient() *http.Client {
+	s.pushOnce.Do(func() { s.pushHTTP = ssrfguard.Client(s.pushAllowInternal) })
+	return s.pushHTTP
 }
 
 // handlePushVapidKey returns the server's VAPID public key for PushManager.subscribe.
@@ -83,6 +92,15 @@ func (s *Server) handlePushSubscribe(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decodeJSON(r, &body); err != nil || body.Endpoint == "" || body.Keys.P256dh == "" || body.Keys.Auth == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad subscription"})
+		return
+	}
+	// The endpoint is whatever the browser (or a caller holding this session cookie)
+	// sent, and the poller later POSTs to it unattended, so it is refused here before
+	// it is ever stored. The dial-time block in the guarded client is the real
+	// defence, since a name that passes now can resolve elsewhere later; this gate
+	// keeps an unusable subscription out of the store and answers the caller plainly.
+	if err := ssrfguard.ValidateURL(body.Endpoint, s.pushAllowInternal); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad subscription endpoint"})
 		return
 	}
 	if err := store.SavePushSubscription(directory.PushSubscription{
@@ -171,6 +189,11 @@ func (s *Server) sendPush(sub directory.PushSubscription, payload []byte) {
 		Endpoint: sub.Endpoint,
 		Keys:     webpush.Keys{P256dh: sub.P256dh, Auth: sub.Auth},
 	}, &webpush.Options{
+		// Without this the library dials the stored endpoint with a default client
+		// that follows redirects and filters no address, so a subscription pointing
+		// at an internal service would be honoured. The guarded client blocks the
+		// non-public address space at dial time and refuses redirects.
+		HTTPClient:      s.pushClient(),
 		Subscriber:      "mailto:postmaster@" + s.hostname,
 		VAPIDPublicKey:  pub,
 		VAPIDPrivateKey: priv,

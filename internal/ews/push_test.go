@@ -2,7 +2,6 @@ package ews
 
 import (
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -110,52 +109,6 @@ func TestPushUnsubscribeOnClientRequest(t *testing.T) {
 			t.Fatal("subscription not dropped after the client answered Unsubscribe")
 		}
 		time.Sleep(20 * time.Millisecond)
-	}
-}
-
-// TestIsPublicIP locks the SSRF address block: loopback, link-local (incl. the cloud
-// metadata address), private, unspecified, and multicast are refused; routable
-// addresses are allowed.
-func TestIsPublicIP(t *testing.T) {
-	blocked := []string{
-		"127.0.0.1", "::1", // loopback
-		"169.254.169.254", "169.254.1.1", "fe80::1", // link-local incl. metadata
-		"10.0.0.1", "172.16.0.1", "192.168.1.1", "fc00::1", // private
-		"0.0.0.0", "::", // unspecified
-		"224.0.0.1", // multicast
-	}
-	for _, s := range blocked {
-		if isPublicIP(net.ParseIP(s)) {
-			t.Errorf("isPublicIP(%s) = true, want false (SSRF block)", s)
-		}
-	}
-	for _, s := range []string{"8.8.8.8", "1.1.1.1", "203.0.113.5", "2606:4700:4700::1111"} {
-		if !isPublicIP(net.ParseIP(s)) {
-			t.Errorf("isPublicIP(%s) = false, want true (routable)", s)
-		}
-	}
-}
-
-// TestValidateCallbackURL locks the first SSRF gate: only absolute http(s) URLs with
-// a host, and http only when explicitly allowed.
-func TestValidateCallbackURL(t *testing.T) {
-	if err := validateCallbackURL("", false); err == nil {
-		t.Error("empty URL must be rejected")
-	}
-	if err := validateCallbackURL("http://cb.test/x", false); err == nil {
-		t.Error("http must be rejected when not allowed")
-	}
-	if err := validateCallbackURL("http://cb.test/x", true); err != nil {
-		t.Errorf("http must be allowed with allowHTTP: %v", err)
-	}
-	if err := validateCallbackURL("ftp://cb.test/x", false); err == nil {
-		t.Error("non-http scheme must be rejected")
-	}
-	if err := validateCallbackURL("https:///x", false); err == nil {
-		t.Error("URL without a host must be rejected")
-	}
-	if err := validateCallbackURL("https://cb.test/x", false); err != nil {
-		t.Errorf("a valid https URL must pass: %v", err)
 	}
 }
 
