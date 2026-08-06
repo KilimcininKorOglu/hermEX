@@ -117,10 +117,10 @@ func (s *Server) handleUIUserSyncPolicy(w http.ResponseWriter, r *http.Request) 
 		p, perr := policyFromForm(r)
 		switch {
 		case perr != nil:
-			data["Error"] = "Invalid value: " + perr.Error()
+			data["Error"] = s.notice("Invalid value.", perr)
 		default:
 			if err := s.store.SetSyncPolicy(u.Maildir, p); err != nil {
-				data["Error"] = "Could not save sync policy: " + err.Error()
+				data["Error"] = s.notice("Could not save sync policy.", err)
 			} else {
 				data["Saved"] = true
 			}
@@ -253,10 +253,10 @@ func (s *Server) handleUISaveDomainSyncPolicy(w http.ResponseWriter, r *http.Req
 		p, perr := policyFromForm(r)
 		switch {
 		case perr != nil:
-			data["Error"] = "Invalid value: " + perr.Error()
+			data["Error"] = s.notice("Invalid value.", perr)
 		default:
 			if _, err := s.dir.SetDomainSyncPolicy(dd.Name, p); err != nil {
-				data["Error"] = "Could not save sync policy: " + err.Error()
+				data["Error"] = s.notice("Could not save sync policy.", err)
 			} else {
 				data["Saved"] = true
 			}
@@ -288,10 +288,10 @@ func (s *Server) handleUISaveSyncPolicy(w http.ResponseWriter, r *http.Request) 
 	data := map[string]any{}
 	switch {
 	case err != nil:
-		data["Error"] = "Invalid value: " + err.Error()
+		data["Error"] = s.notice("Invalid value.", err)
 	default:
 		if err := s.dir.SetDefaultSyncPolicy(p); err != nil {
-			data["Error"] = "Could not save: " + err.Error()
+			data["Error"] = s.notice("Could not save.", err)
 		} else {
 			data["Saved"] = true
 		}

@@ -51,7 +51,7 @@ func (s *Server) handleUITaskq(w http.ResponseWriter, r *http.Request) {
 	views, err := s.taskViews()
 	errMsg := ""
 	if err != nil {
-		errMsg = "Could not read the task queue: " + err.Error()
+		errMsg = s.notice("Could not read the task queue.", err)
 	}
 	s.render(w, "taskq.html", map[string]any{"Nav": "taskq", "Tasks": views, "Error": errMsg})
 }

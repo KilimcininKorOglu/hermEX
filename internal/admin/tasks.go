@@ -33,13 +33,13 @@ func (s *Server) runTask(t directory.TaskInfo) (status, message string) {
 	case "ldapsync":
 		msg, err := s.performLDAPSync()
 		if err != nil {
-			return directory.TaskFailed, "Sync failed: " + err.Error()
+			return directory.TaskFailed, s.notice("Sync failed.", err)
 		}
 		return directory.TaskDone, msg
 	case "bayes-retrain":
 		msg, err := s.performBayesRetrain()
 		if err != nil {
-			return directory.TaskFailed, "Retrain failed: " + err.Error()
+			return directory.TaskFailed, s.notice("Retrain failed.", err)
 		}
 		return directory.TaskDone, msg
 	default:

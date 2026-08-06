@@ -106,7 +106,7 @@ func (s *Server) renderQuarantine(w http.ResponseWriter, email, maildir, csrf, n
 	defer st.Close()
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDJunk))
 	if err != nil {
-		data["Error"] = "Could not read the Junk folder: " + err.Error()
+		data["Error"] = s.notice("Could not read the Junk folder.", err)
 		s.render(w, "quarantine", data)
 		return
 	}

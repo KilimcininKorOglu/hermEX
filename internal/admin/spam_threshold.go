@@ -36,7 +36,7 @@ func (s *Server) handleUIUserSpamThreshold(w http.ResponseWriter, r *http.Reques
 		data["Error"] = "Threshold must be at least 1, or empty to inherit."
 	default:
 		if err := s.dir.SetUserSpamThreshold(r.PathValue("email"), th); err != nil {
-			data["Error"] = "Could not save threshold: " + err.Error()
+			data["Error"] = s.notice("Could not save threshold.", err)
 		} else {
 			data["Saved"] = true
 		}
@@ -68,7 +68,7 @@ func (s *Server) handleUIDomainSpamThreshold(w http.ResponseWriter, r *http.Requ
 		data["Error"] = "Threshold must be at least 1, or empty to inherit."
 	default:
 		if err := s.dir.SetDomainSpamThreshold(dd.Name, th); err != nil {
-			data["Error"] = "Could not save threshold: " + err.Error()
+			data["Error"] = s.notice("Could not save threshold.", err)
 		} else {
 			data["Saved"] = true
 		}

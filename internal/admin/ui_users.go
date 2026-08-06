@@ -176,7 +176,7 @@ func (s *Server) handleUICreateUser(w http.ResponseWriter, r *http.Request) {
 func (s *Server) createUserWithDefaults(r *http.Request, email string) string {
 	maildir := s.paths.MaildirFor(email)
 	if _, err := s.dir.CreateUser(email, r.PostFormValue("password"), maildir); err != nil {
-		return "Could not create user: " + err.Error()
+		return s.notice("Could not create user.", err)
 	}
 	cb := func(name string) bool { return r.PostFormValue(name) != "" }
 	if _, err := s.dir.UpdateUser(email, directory.UserUpdate{
@@ -184,12 +184,12 @@ func (s *Server) createUserWithDefaults(r *http.Request, email string) string {
 		POP3IMAP: cb("pop3_imap"), SMTP: cb("smtp"), ChgPasswd: cb("chgpasswd"),
 		Web: cb("web"), EAS: cb("eas"), DAV: cb("dav"),
 	}); err != nil {
-		return "Created the user, but could not apply its settings: " + err.Error()
+		return s.notice("Created the user, but could not apply its settings.", err)
 	}
 	q := quotaFromForm(r)
 	if q.SendKB > 0 || q.ReceiveKB > 0 || q.StorageKB > 0 {
 		if err := s.store.SetQuota(maildir, q); err != nil {
-			return "Created the user, but could not set its quota: " + err.Error()
+			return s.notice("Created the user, but could not set its quota.", err)
 		}
 	}
 	return ""
@@ -264,7 +264,7 @@ func (s *Server) handleUIUserContact(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{}
 	switch {
 	case err != nil:
-		data["Error"] = "Could not save contact: " + err.Error()
+		data["Error"] = s.notice("Could not save contact.", err)
 	case !found:
 		data["Error"] = "No such user."
 	default:
@@ -278,7 +278,7 @@ func (s *Server) handleUIUserContact(w http.ResponseWriter, r *http.Request) {
 func (s *Server) renderUserRoles(w http.ResponseWriter, email, csrf string, uid int64, errMsg string) {
 	roles, err := s.dir.AdminRoles(uid)
 	if err != nil && errMsg == "" {
-		errMsg = "Could not load roles: " + err.Error()
+		errMsg = s.notice("Could not load roles.", err)
 	}
 	s.render(w, "user-roles", map[string]any{
 		"Email": email,
@@ -301,7 +301,7 @@ func (s *Server) handleUIUserGrantRole(w http.ResponseWriter, r *http.Request) {
 	scopeID, _ := strconv.ParseInt(r.PostFormValue("scopeID"), 10, 64)
 	errMsg := ""
 	if err := s.dir.GrantAdminRole(uid, r.PostFormValue("role"), scopeID); err != nil {
-		errMsg = "Could not grant role: " + err.Error()
+		errMsg = s.notice("Could not grant role.", err)
 	}
 	s.renderUserRoles(w, r.PathValue("email"), csrfCookieValue(r), uid, errMsg)
 }
@@ -319,7 +319,7 @@ func (s *Server) handleUIUserRevokeRole(w http.ResponseWriter, r *http.Request) 
 	scopeID, _ := strconv.ParseInt(r.PostFormValue("scopeID"), 10, 64)
 	errMsg := ""
 	if err := s.dir.RevokeAdminRole(uid, r.PostFormValue("role"), scopeID); err != nil {
-		errMsg = "Could not revoke role: " + err.Error()
+		errMsg = s.notice("Could not revoke role.", err)
 	}
 	s.renderUserRoles(w, r.PathValue("email"), csrfCookieValue(r), uid, errMsg)
 }
@@ -335,7 +335,7 @@ func (s *Server) handleUIUserAliases(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{}
 	switch {
 	case err != nil:
-		data["Error"] = "Could not save aliases: " + err.Error()
+		data["Error"] = s.notice("Could not save aliases.", err)
 	case !found:
 		data["Error"] = "No such user."
 	default:
@@ -355,7 +355,7 @@ func (s *Server) handleUIUserAltnames(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{}
 	switch {
 	case err != nil:
-		data["Error"] = "Could not save alternative names: " + err.Error()
+		data["Error"] = s.notice("Could not save alternative names.", err)
 	case !found:
 		data["Error"] = "No such user."
 	default:
@@ -388,7 +388,7 @@ func (s *Server) handleUIUserEdit(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{}
 	switch {
 	case err != nil:
-		data["Error"] = "Could not save: " + err.Error()
+		data["Error"] = s.notice("Could not save.", err)
 	case !found:
 		data["Error"] = "No such user."
 	default:

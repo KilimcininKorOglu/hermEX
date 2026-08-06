@@ -29,7 +29,7 @@ func (s *Server) handleUISaveDomainSenderName(w http.ResponseWriter, r *http.Req
 	default:
 		if err := s.dir.SetDomainNameTemplates(dd.Name,
 			r.PostFormValue("sender_name_internal"), r.PostFormValue("sender_name_external")); err != nil {
-			data["Error"] = "Could not save the templates: " + err.Error()
+			data["Error"] = s.notice("Could not save the templates.", err)
 		} else {
 			data["Saved"] = true
 		}

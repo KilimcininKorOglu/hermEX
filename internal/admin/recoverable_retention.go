@@ -35,7 +35,7 @@ func (s *Server) handleUISaveRecoverableRetention(w http.ResponseWriter, r *http
 	}
 	days := formInt(r, "recoverable_retention_days")
 	if err := s.dir.SetRecoverableSettings(directory.RecoverableSettings{RetentionDays: days}); err != nil {
-		s.render(w, "recoverable-retention-panel", s.recoverableRetentionPanelData(r, "Could not save the retention setting: "+err.Error()))
+		s.render(w, "recoverable-retention-panel", s.recoverableRetentionPanelData(r, s.notice("Could not save the retention setting.", err)))
 		return
 	}
 	msg := "Recoverable Items retention saved; the sweep purges expired items within a minute, no restart."

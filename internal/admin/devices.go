@@ -163,11 +163,11 @@ func (s *Server) handleUIUserDevices(w http.ResponseWriter, r *http.Request) {
 	if deviceID := r.PostFormValue("deviceID"); deviceID == "" {
 		errMsg = "No device specified."
 	} else if err := s.applyDeviceAction(u.Maildir, deviceID, r.PostFormValue("action")); err != nil {
-		errMsg = "Could not apply device action: " + err.Error()
+		errMsg = s.notice("Could not apply device action.", err)
 	}
 	devs, derr := s.store.ListDevices(u.Maildir)
 	if derr != nil && errMsg == "" {
-		errMsg = "Could not read devices: " + derr.Error()
+		errMsg = s.notice("Could not read devices.", derr)
 	}
 	s.renderUserDevices(w, u.Username, csrfCookieValue(r), devs, errMsg)
 }

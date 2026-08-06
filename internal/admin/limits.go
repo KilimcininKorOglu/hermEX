@@ -74,7 +74,7 @@ func (s *Server) handleUISaveHTTPRateLimit(w http.ResponseWriter, r *http.Reques
 		WindowSeconds: window,
 	}
 	if err := s.dir.SetHTTPRateLimitSettings(st); err != nil {
-		s.render(w, "http-ratelimit-panel", s.limitsPageData(r, "Could not save the request-rate settings: "+err.Error()))
+		s.render(w, "http-ratelimit-panel", s.limitsPageData(r, s.notice("Could not save the request-rate settings.", err)))
 		return
 	}
 	s.render(w, "http-ratelimit-panel", s.limitsPageData(r, "Request-rate settings saved. Every HTTP daemon applies them within a minute, no restart."))
@@ -126,7 +126,7 @@ func (s *Server) handleUISaveLimits(w http.ResponseWriter, r *http.Request) {
 		WebmailRequestBytes:    int64(webMB) * 1024 * 1024,
 	}
 	if err := s.dir.SetSizeLimits(limits); err != nil {
-		s.render(w, "limits-panel", s.limitsPageData(r, "Could not save the size limits: "+err.Error()))
+		s.render(w, "limits-panel", s.limitsPageData(r, s.notice("Could not save the size limits.", err)))
 		return
 	}
 	s.render(w, "limits-panel", s.limitsPageData(r, "Size limits saved. Each protocol applies its own within a minute, no restart."))

@@ -33,7 +33,7 @@ func (s *Server) handleUICreateContact(w http.ResponseWriter, r *http.Request) {
 		errMsg = "A contact address and a filing domain are required."
 	default:
 		if _, err := s.dir.CreateContact(email, r.PostFormValue("displayname"), r.PostFormValue("domain")); err != nil {
-			errMsg = "Could not create contact: " + err.Error()
+			errMsg = s.notice("Could not create contact.", err)
 		}
 	}
 	s.renderContactsPanel(w, r, errMsg)
@@ -48,7 +48,7 @@ func (s *Server) handleUIUpdateContact(w http.ResponseWriter, r *http.Request) {
 	}
 	var errMsg string
 	if found, err := s.dir.UpdateContact(r.PathValue("email"), r.PostFormValue("displayname")); err != nil {
-		errMsg = "Could not update contact: " + err.Error()
+		errMsg = s.notice("Could not update contact.", err)
 	} else if !found {
 		errMsg = "No such contact."
 	}
@@ -63,7 +63,7 @@ func (s *Server) handleUIDeleteContact(w http.ResponseWriter, r *http.Request) {
 	}
 	var errMsg string
 	if _, err := s.dir.DeleteContact(r.PathValue("email")); err != nil {
-		errMsg = "Could not delete contact: " + err.Error()
+		errMsg = s.notice("Could not delete contact.", err)
 	}
 	s.renderContactsPanel(w, r, errMsg)
 }

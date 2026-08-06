@@ -156,7 +156,7 @@ func (s *Server) handleUIToggleGreylist(w http.ResponseWriter, r *http.Request) 
 	}
 	on := r.FormValue("enabled") == "1"
 	if err := s.dir.SetGreylistEnabled(on); err != nil {
-		s.render(w, "greylist-panel", s.antispamPageData(r, "Could not change greylisting: "+err.Error()))
+		s.render(w, "greylist-panel", s.antispamPageData(r, s.notice("Could not change greylisting.", err)))
 		return
 	}
 	verb := "disabled"
@@ -181,7 +181,7 @@ func (s *Server) handleUISaveGreylistTimings(w http.ResponseWriter, r *http.Requ
 	}
 	t := directory.GreylistTimings{MinDelay: int64(minDelay), UnconfirmedTTL: int64(unconfirmedTTL), ConfirmedTTL: int64(confirmedTTL)}
 	if err := s.dir.SetGreylistTimings(t); err != nil {
-		s.render(w, "greylist-panel", s.antispamPageData(r, "Could not save the greylist timings: "+err.Error()))
+		s.render(w, "greylist-panel", s.antispamPageData(r, s.notice("Could not save the greylist timings.", err)))
 		return
 	}
 	s.render(w, "greylist-panel", s.antispamPageData(r, "Greylist timings saved — the MTA applies them within a minute, no restart."))
@@ -206,7 +206,7 @@ func (s *Server) handleUISaveRateLimit(w http.ResponseWriter, r *http.Request) {
 		WindowSeconds: window,
 	}
 	if err := s.dir.SetRateLimitSettings(st); err != nil {
-		s.render(w, "ratelimit-panel", s.antispamPageData(r, "Could not save rate-limit settings: "+err.Error()))
+		s.render(w, "ratelimit-panel", s.antispamPageData(r, s.notice("Could not save rate-limit settings.", err)))
 		return
 	}
 	s.render(w, "ratelimit-panel", s.antispamPageData(r, "Rate-limit settings saved — the MTA applies them within a minute, no restart."))
@@ -221,7 +221,7 @@ func (s *Server) handleUISaveMessageSize(w http.ResponseWriter, r *http.Request)
 	}
 	mb := formInt(r, "max_mb") // megabytes; 0 disables the limit, negatives clamp to 0
 	if err := s.dir.SetMessageSizeSettings(directory.MessageSizeSettings{MaxInboundBytes: int64(mb) * 1024 * 1024}); err != nil {
-		s.render(w, "message-size-panel", s.antispamPageData(r, "Could not save the message size limit: "+err.Error()))
+		s.render(w, "message-size-panel", s.antispamPageData(r, s.notice("Could not save the message size limit.", err)))
 		return
 	}
 	s.render(w, "message-size-panel", s.antispamPageData(r, "Message size limit saved — the MTA applies it within a minute, no restart."))
@@ -245,7 +245,7 @@ func (s *Server) handleUISaveOutbound(w http.ResponseWriter, r *http.Request) {
 		WindowSeconds: window,
 	}
 	if err := s.dir.SetOutboundSettings(st); err != nil {
-		s.render(w, "outbound-panel", s.antispamPageData(r, "Could not save outbound settings: "+err.Error()))
+		s.render(w, "outbound-panel", s.antispamPageData(r, s.notice("Could not save outbound settings.", err)))
 		return
 	}
 	s.render(w, "outbound-panel", s.antispamPageData(r, "Outbound settings saved — the MTA applies them within a minute, no restart."))
@@ -264,7 +264,7 @@ func (s *Server) handleUISaveRelay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.dir.SetRelaySettings(directory.RelaySettings{BackoffSeconds: backoff, MaxAttempts: attempts}); err != nil {
-		s.render(w, "relay-panel", s.antispamPageData(r, "Could not save the relay settings: "+err.Error()))
+		s.render(w, "relay-panel", s.antispamPageData(r, s.notice("Could not save the relay settings.", err)))
 		return
 	}
 	s.render(w, "relay-panel", s.antispamPageData(r, "Relay settings saved — the MTA applies them within a minute, no restart."))
@@ -294,7 +294,7 @@ func (s *Server) handleUISaveDigest(w http.ResponseWriter, r *http.Request) {
 	}
 	st := directory.DigestSettings{Enabled: enabled, IntervalHours: interval, BaseURL: baseURL}
 	if err := s.dir.SetDigestSettings(st); err != nil {
-		s.render(w, "digest-panel", s.antispamPageData(r, "Could not save digest settings: "+err.Error()))
+		s.render(w, "digest-panel", s.antispamPageData(r, s.notice("Could not save digest settings.", err)))
 		return
 	}
 	s.render(w, "digest-panel", s.antispamPageData(r, "Digest settings saved — the MTA applies them within a minute, no restart."))
@@ -348,7 +348,7 @@ func (s *Server) handleUISaveAntispamSettings(w http.ResponseWriter, r *http.Req
 		SAThreshold: saThreshold,
 	}
 	if err := s.dir.SetAntispamSettings(st); err != nil {
-		s.render(w, "scoring-panel", s.antispamPageData(r, "Could not save settings: "+err.Error()))
+		s.render(w, "scoring-panel", s.antispamPageData(r, s.notice("Could not save settings.", err)))
 		return
 	}
 	s.render(w, "scoring-panel", s.antispamPageData(r, "Settings saved — the MTA applies them within a minute, no restart."))
@@ -391,7 +391,7 @@ func (s *Server) handleUIRetrainBayes(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := s.dir.CreateTask("bayes-retrain", "", cl.Login)
 	if err != nil {
-		s.render(w, "antispam-panel", s.antispamPageData(r, "Could not queue the retrain: "+err.Error()))
+		s.render(w, "antispam-panel", s.antispamPageData(r, s.notice("Could not queue the retrain.", err)))
 		return
 	}
 	s.render(w, "antispam-panel", s.antispamPageData(r,

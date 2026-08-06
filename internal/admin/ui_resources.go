@@ -35,10 +35,10 @@ func (s *Server) handleUICreateDomain(w http.ResponseWriter, r *http.Request) {
 	if name == "" {
 		errMsg = "A domain name is required."
 	} else if id, err := s.dir.CreateDomain(name, s.paths.HomedirFor(name)); err != nil {
-		errMsg = "Could not create domain: " + err.Error()
+		errMsg = s.notice("Could not create domain.", err)
 	} else if maxUser > 0 {
 		if _, err := s.dir.UpdateDomain(id, directory.DomainUpdate{MaxUser: maxUser}); err != nil {
-			errMsg = "Created the domain, but could not set the user limit: " + err.Error()
+			errMsg = s.notice("Created the domain, but could not set the user limit.", err)
 		}
 	}
 	domains, _ := s.dir.ListDomains()
@@ -57,7 +57,7 @@ func (s *Server) handleUIPurgeDomain(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		errMsg = "Invalid domain id."
 	} else if _, err := s.dir.PurgeDomain(id, r.PostFormValue("deleteFiles") == "true"); err != nil {
-		errMsg = "Could not purge domain: " + err.Error()
+		errMsg = s.notice("Could not purge domain.", err)
 	}
 	// From the domain detail page the domain is gone, so navigate back to the
 	// list; from the list page swap the refreshed panel in place.
@@ -151,12 +151,12 @@ func (s *Server) handleUISaveDomain(w http.ResponseWriter, r *http.Request) {
 	})
 	switch {
 	case err != nil:
-		data["Error"] = "Could not save: " + err.Error()
+		data["Error"] = s.notice("Could not save.", err)
 	case !found:
 		data["Error"] = "No such domain."
 	default:
 		if _, err := s.dir.AssignDomainToOrg(id, atoi(r.PostFormValue("org"))); err != nil {
-			data["Error"] = "Saved the fields, but the organization change failed: " + err.Error()
+			data["Error"] = s.notice("Saved the fields, but the organization change failed.", err)
 		} else {
 			data["Saved"] = true
 		}
@@ -186,7 +186,7 @@ func (s *Server) handleUICreateAlias(w http.ResponseWriter, r *http.Request) {
 		errMsg = "Both the alias and the target address are required."
 	default:
 		if err := s.dir.CreateAlias(alias, main); err != nil {
-			errMsg = "Could not create alias: " + err.Error()
+			errMsg = s.notice("Could not create alias.", err)
 		}
 	}
 	aliases, _ := s.dir.ListAliases()

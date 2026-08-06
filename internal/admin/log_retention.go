@@ -36,7 +36,7 @@ func (s *Server) handleUISaveLogRetention(w http.ResponseWriter, r *http.Request
 	}
 	days := formInt(r, "log_retention_days")
 	if err := s.dir.SetLogRetentionDays(days); err != nil {
-		s.render(w, "log-retention-panel", s.logRetentionPanelData(r, "Could not save the retention setting: "+err.Error()))
+		s.render(w, "log-retention-panel", s.logRetentionPanelData(r, s.notice("Could not save the retention setting.", err)))
 		return
 	}
 	msg := "Log retention saved — the admin prunes the log store to match within a minute, no restart."

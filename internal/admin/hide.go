@@ -89,7 +89,7 @@ func (s *Server) handleUIUserHide(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{}
 	switch {
 	case err != nil:
-		data["Error"] = "Could not save visibility: " + err.Error()
+		data["Error"] = s.notice("Could not save visibility.", err)
 	case !found:
 		data["Error"] = "No such user."
 	default:

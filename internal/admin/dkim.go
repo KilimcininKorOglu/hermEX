@@ -66,11 +66,11 @@ func (s *Server) handleUIDKIMGenerate(w http.ResponseWriter, r *http.Request) {
 	}
 	privPEM, dnsTXT, err := dkimsign.GenerateKey()
 	if err != nil {
-		s.dkimPanel(w, r, dd, "Could not generate a key: "+err.Error())
+		s.dkimPanel(w, r, dd, s.notice("Could not generate a key.", err))
 		return
 	}
 	if err := s.dir.SetDKIMKey(dd.Name, dkimSelector, privPEM, dnsTXT); err != nil {
-		s.dkimPanel(w, r, dd, "Could not save the key: "+err.Error())
+		s.dkimPanel(w, r, dd, s.notice("Could not save the key.", err))
 		return
 	}
 	s.dkimPanel(w, r, dd, "Key generated. Publish the DNS record below, then enable signing.")
@@ -88,7 +88,7 @@ func (s *Server) handleUIDKIMEnable(w http.ResponseWriter, r *http.Request) {
 	}
 	enabled := r.FormValue("enabled") == "1"
 	if err := s.dir.SetDKIMEnabled(dd.Name, enabled); err != nil {
-		s.dkimPanel(w, r, dd, "Could not change signing: "+err.Error())
+		s.dkimPanel(w, r, dd, s.notice("Could not change signing.", err))
 		return
 	}
 	verb := "disabled"
@@ -108,7 +108,7 @@ func (s *Server) handleUIDKIMDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.dir.DeleteDKIMKey(dd.Name); err != nil {
-		s.dkimPanel(w, r, dd, "Could not delete the key: "+err.Error())
+		s.dkimPanel(w, r, dd, s.notice("Could not delete the key.", err))
 		return
 	}
 	s.dkimPanel(w, r, dd, "Key deleted.")

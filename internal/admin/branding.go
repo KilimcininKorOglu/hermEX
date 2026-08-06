@@ -37,7 +37,7 @@ func (s *Server) handleUISaveDomainBranding(w http.ResponseWriter, r *http.Reque
 			FooterText:   strings.TrimSpace(r.PostFormValue("footer_text")),
 		}
 		if err := s.dir.SetDomainBranding(dd.Name, b); err != nil {
-			data["Error"] = "Could not save branding: " + err.Error()
+			data["Error"] = s.notice("Could not save branding.", err)
 		} else {
 			data["Saved"] = true
 		}

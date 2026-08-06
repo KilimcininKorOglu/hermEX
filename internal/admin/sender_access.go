@@ -16,7 +16,7 @@ func (s *Server) senderAccessData(r *http.Request, notice string) map[string]any
 	data := map[string]any{"Nav": "senderaccess", "CSRF": csrfCookieValue(r), "Notice": notice}
 	rules, err := s.dir.ListSenderRules()
 	if err != nil {
-		data["Error"] = "Could not read the rules: " + err.Error()
+		data["Error"] = s.notice("Could not read the rules.", err)
 	}
 	views := make([]senderRuleView, 0, len(rules))
 	for _, rule := range rules {
@@ -46,7 +46,7 @@ func (s *Server) handleUISaveSenderRule(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := s.dir.SetSenderRule(pattern, r.FormValue("action")); err != nil {
-		s.render(w, "sender-access-panel", s.senderAccessData(r, "Could not save the rule: "+err.Error()))
+		s.render(w, "sender-access-panel", s.senderAccessData(r, s.notice("Could not save the rule.", err)))
 		return
 	}
 	s.render(w, "sender-access-panel", s.senderAccessData(r, "Rule saved."))
@@ -58,7 +58,7 @@ func (s *Server) handleUIDeleteSenderRule(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if _, err := s.dir.DeleteSenderRule(strings.TrimSpace(r.FormValue("pattern"))); err != nil {
-		s.render(w, "sender-access-panel", s.senderAccessData(r, "Could not delete the rule: "+err.Error()))
+		s.render(w, "sender-access-panel", s.senderAccessData(r, s.notice("Could not delete the rule.", err)))
 		return
 	}
 	s.render(w, "sender-access-panel", s.senderAccessData(r, "Rule removed."))

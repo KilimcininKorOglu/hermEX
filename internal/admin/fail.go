@@ -32,3 +32,20 @@ func (s *Server) fail(w http.ResponseWriter, msg string, err error, status int) 
 	})
 	http.Error(w, msg, status)
 }
+
+// notice is fail's counterpart for the HTMX panel path, which answers a failure by
+// re-rendering a panel with a notice string rather than writing an HTTP error. It
+// records the full error and returns msg, so the operator sees what failed while the
+// driver text naming tables and constraints, and the store text naming mailbox paths
+// on disk, stay server-side.
+//
+// msg is a fixed string the handler chooses; it must never be built from err.
+func (s *Server) notice(msg string, err error) string {
+	s.logger.Emit(logging.Event{
+		Level:     logging.LevelError,
+		Subsystem: logging.Admin,
+		Name:      "panel.fail",
+		Err:       err.Error(),
+	})
+	return msg
+}

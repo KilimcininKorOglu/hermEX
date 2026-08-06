@@ -57,7 +57,7 @@ func (s *Server) handleUICreateRole(w http.ResponseWriter, r *http.Request) {
 	}
 	var errMsg string
 	if _, err := s.dir.CreateRole(r.PostFormValue("name"), r.PostFormValue("description"), nil, nil); err != nil {
-		errMsg = "Could not create role: " + err.Error()
+		errMsg = s.notice("Could not create role.", err)
 	}
 	s.render(w, "roles-panel", s.rolesPanelData(r, errMsg))
 }
@@ -164,7 +164,7 @@ func (s *Server) handleUIUpdateRole(w http.ResponseWriter, r *http.Request) {
 	found, err := s.dir.UpdateRole(id, r.PostFormValue("name"), r.PostFormValue("description"), rolePermsFromForm(r), userIDs)
 	if err != nil {
 		role, _, _ := s.dir.GetRole(id)
-		s.render(w, "role-editor", s.roleDetailData(r, role, "Could not save role: "+err.Error(), false))
+		s.render(w, "role-editor", s.roleDetailData(r, role, s.notice("Could not save role.", err), false))
 		return
 	}
 	if !found {

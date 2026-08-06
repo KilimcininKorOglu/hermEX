@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -61,7 +62,7 @@ func (s *Server) renderPublicPanel(w http.ResponseWriter, domain, csrf, errMsg s
 	if domain != "" {
 		folders, err := s.publicFolderViews(domain)
 		if err != nil && errMsg == "" {
-			errMsg = "Could not read public folders: " + err.Error()
+			errMsg = s.notice("Could not read public folders.", err)
 		}
 		data["Folders"] = folders
 	}
@@ -88,7 +89,7 @@ func (s *Server) handleUIPublicFolders(w http.ResponseWriter, r *http.Request) {
 	if domain != "" {
 		folders, ferr := s.publicFolderViews(domain)
 		if ferr != nil {
-			data["Error"] = "Could not read public folders: " + ferr.Error()
+			data["Error"] = s.notice("Could not read public folders.", ferr)
 		}
 		data["Folders"] = folders
 	}
@@ -120,7 +121,7 @@ func (s *Server) handleUICreatePublicFolder(w http.ResponseWriter, r *http.Reque
 		errMsg = "Enter a folder name."
 	default:
 		if _, err := s.pub.CreateFolder(domain, name); err != nil {
-			errMsg = "Could not create folder: " + err.Error()
+			errMsg = s.notice("Could not create folder.", err)
 		}
 	}
 	s.renderPublicPanel(w, domain, csrfCookieValue(r), errMsg)
@@ -135,7 +136,13 @@ func (s *Server) handleUIDeletePublicFolder(w http.ResponseWriter, r *http.Reque
 	fid, _ := strconv.ParseInt(r.PostFormValue("fid"), 10, 64)
 	errMsg := ""
 	if err := s.pub.DeleteFolder(domain, fid); err != nil {
-		errMsg = "Could not delete folder: " + err.Error()
+		// The structural-folder refusal is the service's own rule, not a store
+		// failure, so it keeps its message: it is the reason the operator needs.
+		if errors.Is(err, publicfolder.ErrStructuralFolder) {
+			errMsg = "Cannot delete a structural folder."
+		} else {
+			errMsg = s.notice("Could not delete folder.", err)
+		}
 	}
 	s.renderPublicPanel(w, domain, csrfCookieValue(r), errMsg)
 }
@@ -153,7 +160,7 @@ func (s *Server) handleUISetPublicGrant(w http.ResponseWriter, r *http.Request) 
 	change, errMsg := s.publicGrantChange(domain, r.PostFormValue("grantee"), uint32(rights))
 	if errMsg == "" {
 		if err := s.pub.Grant(domain, fid, change); err != nil {
-			errMsg = "Could not grant: " + err.Error()
+			errMsg = s.notice("Could not grant.", err)
 		}
 	}
 	s.renderPublicPanel(w, domain, csrfCookieValue(r), errMsg)
@@ -171,7 +178,7 @@ func (s *Server) handleUIRemovePublicGrant(w http.ResponseWriter, r *http.Reques
 	errMsg := ""
 	change := objectstore.PermissionChange{Op: objectstore.PermRemove, MemberID: memberID}
 	if err := s.pub.Grant(domain, fid, change); err != nil {
-		errMsg = "Could not remove grant: " + err.Error()
+		errMsg = s.notice("Could not remove grant.", err)
 	}
 	s.renderPublicPanel(w, domain, csrfCookieValue(r), errMsg)
 }
@@ -193,7 +200,7 @@ func (s *Server) publicGrantChange(domain, grantee string, rights uint32) (objec
 	_, memberDomain, _ := strings.Cut(member, "@")
 	switch {
 	case err != nil:
-		return objectstore.PermissionChange{}, "Could not look up user: " + err.Error()
+		return objectstore.PermissionChange{}, s.notice("Could not look up user.", err)
 	case !ok:
 		return objectstore.PermissionChange{}, "No such user. Grant to \"anyone\" or a user's primary address."
 	case !strings.EqualFold(memberDomain, domain):

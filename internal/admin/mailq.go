@@ -101,7 +101,7 @@ func (s *Server) handleUIMailq(w http.ResponseWriter, r *http.Request) {
 	views, err := s.mailqViews()
 	errMsg := ""
 	if err != nil {
-		errMsg = "Could not read the mail queue: " + err.Error()
+		errMsg = s.notice("Could not read the mail queue.", err)
 	}
 	s.render(w, "mailq.html", map[string]any{
 		"Nav": "mailq", "CSRF": csrfCookieValue(r), "Queue": views, "Error": errMsg,
@@ -125,7 +125,7 @@ func (s *Server) handleUIMailqRetry(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PostFormValue("id"), 10, 64)
 	errMsg := ""
 	if err := s.mailq.RetryNow(id); err != nil {
-		errMsg = "Could not flush entry: " + err.Error()
+		errMsg = s.notice("Could not flush entry.", err)
 	}
 	s.renderMailqPanel(w, r, errMsg)
 }
@@ -138,7 +138,7 @@ func (s *Server) handleUIMailqDelete(w http.ResponseWriter, r *http.Request) {
 	id, _ := strconv.ParseInt(r.PostFormValue("id"), 10, 64)
 	errMsg := ""
 	if err := s.mailq.Delete(id); err != nil {
-		errMsg = "Could not delete entry: " + err.Error()
+		errMsg = s.notice("Could not delete entry.", err)
 	}
 	s.renderMailqPanel(w, r, errMsg)
 }
@@ -148,7 +148,7 @@ func (s *Server) handleUIMailqDelete(w http.ResponseWriter, r *http.Request) {
 func (s *Server) renderMailqPanel(w http.ResponseWriter, r *http.Request, errMsg string) {
 	views, err := s.mailqViews()
 	if err != nil && errMsg == "" {
-		errMsg = "Could not read the mail queue: " + err.Error()
+		errMsg = s.notice("Could not read the mail queue.", err)
 	}
 	s.render(w, "mailq-panel", map[string]any{
 		"CSRF": csrfCookieValue(r), "Queue": views, "Error": errMsg,

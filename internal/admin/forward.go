@@ -83,7 +83,7 @@ func (s *Server) handleUIUserForward(w http.ResponseWriter, r *http.Request) {
 	data := map[string]any{}
 	switch {
 	case err != nil:
-		data["Error"] = "Could not save forward: " + err.Error()
+		data["Error"] = s.notice("Could not save forward.", err)
 	case !found:
 		data["Error"] = "No such user."
 	default:

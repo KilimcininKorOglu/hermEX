@@ -47,7 +47,7 @@ func (s *Server) handleUIAVQuarantine(w http.ResponseWriter, r *http.Request) {
 	recs, err := s.dir.ListQuarantine(domainIDList(ids), all, 200)
 	errMsg := ""
 	if err != nil {
-		errMsg = "Could not read the quarantine: " + err.Error()
+		errMsg = s.notice("Could not read the quarantine.", err)
 	}
 	views := make([]avQuarantineView, 0, len(recs))
 	for _, rec := range recs {
@@ -99,7 +99,7 @@ func (s *Server) handleUISaveDomainAVScan(w http.ResponseWriter, r *http.Request
 		inbound := r.PostFormValue("av_scan_inbound") == "on"
 		outbound := r.PostFormValue("av_scan_outbound") == "on"
 		if err := s.dir.SetDomainAVScan(dd.Name, inbound, outbound); err != nil {
-			data["Error"] = "Could not save the antivirus toggles: " + err.Error()
+			data["Error"] = s.notice("Could not save the antivirus toggles.", err)
 		} else {
 			data["Saved"] = true
 		}

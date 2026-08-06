@@ -94,7 +94,7 @@ func (s *Server) handleUITLSSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := s.dir.SetTLSSettings(settings); err != nil {
-		s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "Could not save the certificate mode: "+err.Error()))
+		s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, s.notice("Could not save the certificate mode.", err)))
 		return
 	}
 	s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "Saved. Restart the gateway for a mode change to take effect."))
@@ -124,7 +124,7 @@ func (s *Server) handleUIMTASTSSettings(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := s.dir.SetMTASTSSettings(directory.MTASTSSettings{Enabled: enabled, Mode: mode, MaxAge: maxAge}); err != nil {
-		s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "Could not save the MTA-STS settings: "+err.Error()))
+		s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, s.notice("Could not save the MTA-STS settings.", err)))
 		return
 	}
 	s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "Saved MTA-STS publishing. Publish each domain's prescribed mta-sts and _mta-sts records (see the domain page); senders adopt a change on their next fetch."))
@@ -151,11 +151,14 @@ func (s *Server) handleUITLSCertUpload(w http.ResponseWriter, r *http.Request) {
 	keyPEM := strings.TrimSpace(r.FormValue("key")) + "\n"
 	notAfter, dnsNames, err := validateTLSCert(certPEM, keyPEM)
 	if err != nil {
+		// validateTLSCert describes the file the operator just pasted (not a pair,
+		// unparseable leaf, already expired), not a server internal, and it is the
+		// only thing telling them what to fix. It is shown rather than sanitized.
 		s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "Upload rejected: "+err.Error()))
 		return
 	}
 	if err := s.dir.SetTLSCert(name, certPEM, keyPEM, notAfter); err != nil {
-		s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "Could not store the certificate: "+err.Error()))
+		s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, s.notice("Could not store the certificate.", err)))
 		return
 	}
 	label := name
@@ -177,7 +180,7 @@ func (s *Server) handleUITLSCertDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	name := strings.ToLower(strings.TrimSpace(r.FormValue("name")))
 	if err := s.dir.DeleteTLSCert(name); err != nil {
-		s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "Could not delete the certificate: "+err.Error()))
+		s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, s.notice("Could not delete the certificate.", err)))
 		return
 	}
 	s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "Certificate deleted. Listeners fall back to the config-file certificate within a minute."))

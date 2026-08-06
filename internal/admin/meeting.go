@@ -72,7 +72,7 @@ func (s *Server) handleUIUserMeeting(w http.ResponseWriter, r *http.Request) {
 			DeclineConflict:  r.PostFormValue("declineconflict") != "",
 		}
 		if err := s.store.SetMeetingConfig(u.Maildir, cfg); err != nil {
-			data["Error"] = "Could not save meeting settings: " + err.Error()
+			data["Error"] = s.notice("Could not save meeting settings.", err)
 		} else {
 			data["Saved"] = true
 		}

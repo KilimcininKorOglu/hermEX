@@ -109,7 +109,7 @@ func (s *Server) handleUIUserQuota(w http.ResponseWriter, r *http.Request) {
 		data["Error"] = "No such user."
 	default:
 		if err := s.store.SetQuota(u.Maildir, quotaFromForm(r)); err != nil {
-			data["Error"] = "Could not save quota: " + err.Error()
+			data["Error"] = s.notice("Could not save quota.", err)
 		} else {
 			data["Saved"] = true
 		}

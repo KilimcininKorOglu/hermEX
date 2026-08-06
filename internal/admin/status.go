@@ -49,7 +49,10 @@ func (s *Server) probeHealth(ctx context.Context) []healthResult {
 	return out
 }
 
-// probeOne performs a single /healthz GET and classifies the response.
+// probeOne performs a single /healthz GET and classifies the response. Its error
+// text is shown in the monitor rather than sanitized: the target URL is the
+// operator's own configuration, and the reason a probe failed ("connection refused",
+// "no such host") is the signal the monitor exists to report, not a server internal.
 func probeOne(ctx context.Context, client *http.Client, t HealthTarget) healthResult {
 	r := healthResult{Name: t.Name, URL: t.URL, Status: "Down"}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, t.URL, nil)

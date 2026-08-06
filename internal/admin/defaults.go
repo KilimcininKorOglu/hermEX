@@ -185,7 +185,7 @@ func (s *Server) handleUISaveDomainDefaults(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		data["Error"] = "Invalid domain id."
 	} else if err := s.storeDomainOverride(id, userOverrideFromForm(r)); err != nil {
-		data["Error"] = "Could not save: " + err.Error()
+		data["Error"] = s.notice("Could not save.", err)
 	} else {
 		data["Saved"] = true
 	}
@@ -250,7 +250,7 @@ func (s *Server) handleUISaveDefaults(w http.ResponseWriter, r *http.Request) {
 	}
 	data := map[string]any{}
 	if err := s.dir.SetCreateDefaults(0, createDefaultsFromForm(r)); err != nil {
-		data["Error"] = "Could not save: " + err.Error()
+		data["Error"] = s.notice("Could not save.", err)
 	} else {
 		data["Saved"] = true
 	}

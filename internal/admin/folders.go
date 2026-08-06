@@ -202,7 +202,7 @@ func (s *Server) renderFolderPerms(w http.ResponseWriter, email, maildir string,
 	}
 	perms, err := s.store.ListFolderPermissions(maildir, fid)
 	if err != nil && errMsg == "" {
-		errMsg = "Could not read permissions: " + err.Error()
+		errMsg = s.notice("Could not read permissions.", err)
 	}
 	members := make([]folderMemberJSON, 0, len(perms))
 	for _, p := range perms {
@@ -254,12 +254,12 @@ func (s *Server) handleUISetFolderPerm(w http.ResponseWriter, r *http.Request) {
 	errMsg := ""
 	switch {
 	case mErr != nil:
-		errMsg = "Could not look up user: " + mErr.Error()
+		errMsg = s.notice("Could not look up user.", mErr)
 	case !memberOK:
 		errMsg = "No such user. Grant to the recipient's primary address."
 	default:
 		if err := s.store.SetFolderPermission(u.Maildir, fid, member, uint32(rights)); err != nil {
-			errMsg = "Could not grant: " + err.Error()
+			errMsg = s.notice("Could not grant.", err)
 		}
 	}
 	s.renderFolderPerms(w, u.Username, u.Maildir, fid, csrfCookieValue(r), errMsg)
@@ -279,7 +279,7 @@ func (s *Server) handleUIRemoveFolderPerm(w http.ResponseWriter, r *http.Request
 	memberID, _ := strconv.ParseInt(r.PostFormValue("memberID"), 10, 64)
 	errMsg := ""
 	if err := s.store.RemoveFolderPermission(u.Maildir, fid, memberID); err != nil {
-		errMsg = "Could not remove: " + err.Error()
+		errMsg = s.notice("Could not remove.", err)
 	}
 	s.renderFolderPerms(w, u.Username, u.Maildir, fid, csrfCookieValue(r), errMsg)
 }

@@ -23,7 +23,7 @@ func (s *Server) handleUIUserDelegates(w http.ResponseWriter, r *http.Request) {
 		data["Error"] = "No such user."
 	default:
 		if err := s.store.SetDelegates(u.Maildir, strings.Fields(r.PostFormValue("delegates"))); err != nil {
-			data["Error"] = "Could not save delegates: " + err.Error()
+			data["Error"] = s.notice("Could not save delegates.", err)
 		} else {
 			data["Saved"] = true
 		}

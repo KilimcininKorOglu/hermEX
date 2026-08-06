@@ -100,7 +100,7 @@ func (s *Server) handleUIUserSendAs(w http.ResponseWriter, r *http.Request) {
 			data["Error"] = "No such user: " + bad + "."
 		default:
 			if err := s.store.SetSendAs(u.Maildir, list); err != nil {
-				data["Error"] = "Could not save send-as: " + err.Error()
+				data["Error"] = s.notice("Could not save send-as.", err)
 			} else {
 				data["Saved"] = true
 			}

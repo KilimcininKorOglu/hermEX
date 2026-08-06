@@ -40,7 +40,7 @@ func (s *Server) spamHistoryPageData(r *http.Request, notice string) map[string]
 	verdicts, err := s.dir.RecentSpamVerdicts(200)
 	errMsg := ""
 	if err != nil {
-		errMsg = "Could not read the spam history: " + err.Error()
+		errMsg = s.notice("Could not read the spam history.", err)
 	}
 	views := make([]spamVerdictView, 0, len(verdicts))
 	for _, v := range verdicts {
@@ -73,7 +73,7 @@ func (s *Server) handleUISaveSpamRetention(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err := s.dir.SetSpamHistorySettings(directory.SpamHistorySettings{Retain: retain}); err != nil {
-		s.render(w, "retention-panel", s.spamHistoryPageData(r, "Could not save the retention setting: "+err.Error()))
+		s.render(w, "retention-panel", s.spamHistoryPageData(r, s.notice("Could not save the retention setting.", err)))
 		return
 	}
 	s.render(w, "retention-panel", s.spamHistoryPageData(r, "Retention saved — the MTA applies it within a minute, no restart."))

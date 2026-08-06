@@ -76,7 +76,7 @@ func (s *Server) handleUIUserStoreOwners(w http.ResponseWriter, r *http.Request)
 			data["Error"] = "No such user: " + bad + "."
 		default:
 			if err := s.store.SetStoreOwners(u.Maildir, list); err != nil {
-				data["Error"] = "Could not save store owners: " + err.Error()
+				data["Error"] = s.notice("Could not save store owners.", err)
 			} else {
 				data["Saved"] = true
 			}

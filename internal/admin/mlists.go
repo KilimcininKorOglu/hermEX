@@ -87,7 +87,7 @@ func (s *Server) handleUICreateMList(w http.ResponseWriter, r *http.Request) {
 		listType, _ := strconv.Atoi(r.PostFormValue("type"))
 		listPriv, _ := strconv.Atoi(r.PostFormValue("privilege"))
 		if _, err := s.dir.CreateMList(name, listType, listPriv); err != nil {
-			errMsg = "Could not create list: " + err.Error()
+			errMsg = s.notice("Could not create list.", err)
 		}
 	}
 	lists, _ := s.dir.ListMLists()
@@ -132,7 +132,7 @@ func (s *Server) handleUIMListMembers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	found, err := s.dir.SetMembers(r.PathValue("addr"), strings.Fields(r.PostFormValue("members")))
-	s.render(w, "user-status", mlistStatus(found, err, "members"))
+	s.render(w, "user-status", s.mlistStatus(found, err, "members"))
 }
 
 // handleUIMListSpecifieds saves a list's permitted senders from the form and
@@ -142,7 +142,7 @@ func (s *Server) handleUIMListSpecifieds(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	found, err := s.dir.SetSpecifieds(r.PathValue("addr"), strings.Fields(r.PostFormValue("specifieds")))
-	s.render(w, "user-status", mlistStatus(found, err, "permitted senders"))
+	s.render(w, "user-status", s.mlistStatus(found, err, "permitted senders"))
 }
 
 // handleUIMListOwner sets or clears a list's owner (the Exchange managedBy
@@ -152,7 +152,7 @@ func (s *Server) handleUIMListOwner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	found, err := s.dir.SetMListOwner(r.PathValue("addr"), r.PostFormValue("owner"))
-	s.render(w, "user-status", mlistStatus(found, err, "owner"))
+	s.render(w, "user-status", s.mlistStatus(found, err, "owner"))
 }
 
 // handleUIDeleteMList deletes a distribution list and redirects htmx back to the
@@ -170,11 +170,11 @@ func (s *Server) handleUIDeleteMList(w http.ResponseWriter, r *http.Request) {
 }
 
 // mlistStatus builds the status-panel data for a list membership save.
-func mlistStatus(found bool, err error, what string) map[string]any {
+func (s *Server) mlistStatus(found bool, err error, what string) map[string]any {
 	data := map[string]any{}
 	switch {
 	case err != nil:
-		data["Error"] = "Could not save " + what + ": " + err.Error()
+		data["Error"] = s.notice("Could not save "+what+".", err)
 	case !found:
 		data["Error"] = "No such list."
 	default:

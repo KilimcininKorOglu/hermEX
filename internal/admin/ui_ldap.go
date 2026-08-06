@@ -90,7 +90,7 @@ func (s *Server) handleUISaveLDAP(w http.ResponseWriter, r *http.Request) {
 	cfg.GroupBaseDN = r.PostFormValue("group_base_dn")
 	cfg.GroupFilter = r.PostFormValue("group_filter")
 	if err := s.dir.SetLDAPConfig(defaultOrgID, cfg); err != nil {
-		s.render(w, "ldap-panel", s.ldapPanelData(r, false, "", "Could not save the configuration: "+err.Error()))
+		s.render(w, "ldap-panel", s.ldapPanelData(r, false, "", s.notice("Could not save the configuration.", err)))
 		return
 	}
 	s.render(w, "ldap-panel", s.ldapPanelData(r, true, "", ""))
@@ -111,7 +111,7 @@ func (s *Server) handleUISyncLDAP(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := s.dir.CreateTask("ldapsync", "", cl.Login)
 	if err != nil {
-		s.render(w, "ldap-panel", s.ldapPanelData(r, false, "", "Could not queue the sync: "+err.Error()))
+		s.render(w, "ldap-panel", s.ldapPanelData(r, false, "", s.notice("Could not queue the sync.", err)))
 		return
 	}
 	s.render(w, "ldap-panel", s.ldapPanelData(r, false,

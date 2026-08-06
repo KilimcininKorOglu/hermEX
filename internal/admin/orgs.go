@@ -265,7 +265,7 @@ func (s *Server) handleUICreateOrg(w http.ResponseWriter, r *http.Request) {
 	if name := strings.TrimSpace(r.PostFormValue("name")); name == "" {
 		errMsg = "An organization name is required."
 	} else if _, err := s.dir.CreateOrg(name, r.PostFormValue("description")); err != nil {
-		errMsg = "Could not create organization: " + err.Error()
+		errMsg = s.notice("Could not create organization.", err)
 	}
 	orgs, _ := s.dir.ListOrgs()
 	s.render(w, "orgs-panel", map[string]any{"Orgs": orgs, "Error": errMsg})
@@ -329,7 +329,7 @@ func (s *Server) handleUIUpdateOrg(w http.ResponseWriter, r *http.Request) {
 	found, err := s.dir.UpdateOrg(id, r.PostFormValue("name"), r.PostFormValue("description"))
 	switch {
 	case err != nil:
-		data["Error"] = "Could not save: " + err.Error()
+		data["Error"] = s.notice("Could not save.", err)
 	case !found:
 		data["Error"] = "No such organization."
 	default:
@@ -370,7 +370,7 @@ func (s *Server) handleUIOrgAttachDomain(w http.ResponseWriter, r *http.Request)
 	if domID, err := strconv.ParseInt(r.PostFormValue("domainID"), 10, 64); err != nil {
 		errMsg = "Select a domain to add."
 	} else if _, err := s.dir.AssignDomainToOrg(domID, id); err != nil {
-		errMsg = "Could not attach domain: " + err.Error()
+		errMsg = s.notice("Could not attach domain.", err)
 	}
 	s.render(w, "org-domains-panel", s.orgDomainsData(id, csrfCookieValue(r), errMsg))
 }
@@ -389,7 +389,7 @@ func (s *Server) handleUIOrgDetachDomain(w http.ResponseWriter, r *http.Request)
 	if domID, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64); err != nil {
 		errMsg = "Invalid domain."
 	} else if _, err := s.dir.AssignDomainToOrg(domID, 0); err != nil {
-		errMsg = "Could not detach domain: " + err.Error()
+		errMsg = s.notice("Could not detach domain.", err)
 	}
 	s.render(w, "org-domains-panel", s.orgDomainsData(id, csrfCookieValue(r), errMsg))
 }
