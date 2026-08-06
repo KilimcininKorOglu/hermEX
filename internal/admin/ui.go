@@ -70,6 +70,12 @@ func (s *Server) handleUILoginPage(w http.ResponseWriter, r *http.Request) {
 // session and redirects to the dashboard; on failure it re-renders the form.
 func (s *Server) handleUILoginSubmit(w http.ResponseWriter, r *http.Request) {
 	login := r.PostFormValue("login")
+	serve.SetUser(r, login)
+	if !s.limiter.Allowed(loginKey(login)) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		s.render(w, "login.html", map[string]any{"Error": "Too many failed attempts, try again later."})
+		return
+	}
 	uid, _, ok, err := s.authAdmin(login, r.PostFormValue("password"))
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -77,10 +83,12 @@ func (s *Server) handleUILoginSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
+		s.limiter.Fail(loginKey(login))
 		w.WriteHeader(http.StatusUnauthorized)
 		s.render(w, "login.html", map[string]any{"Error": "Invalid email or password."})
 		return
 	}
+	s.limiter.Succeed(loginKey(login))
 	session, csrf := s.issueSession(login, uid)
 	setSessionCookies(w, session, csrf)
 	http.Redirect(w, r, "/admin/ui/", http.StatusSeeOther)

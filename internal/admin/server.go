@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"strings"
 	"time"
 
+	"hermex/internal/authlimit"
 	"hermex/internal/directory"
 	"hermex/internal/easpolicy"
 	"hermex/internal/ldapauth"
@@ -199,6 +201,7 @@ type Server struct {
 	logs          LogReader
 	syncer        LDAPSyncer
 	store         MailboxStore
+	limiter       *authlimit.Limiter // failed-login throttle keyed by admin login
 	pub           *publicfolder.Service
 	mailq         MailQueue
 	resolver      dnsResolver
@@ -223,6 +226,7 @@ func NewServer(dir Directory, paths Paths, secret []byte) *Server {
 		dir: dir, paths: paths, secret: secret,
 		store: mailboxStore{}, pub: publicfolder.New(paths),
 		mailq: relaySpool{path: paths.RelaySpoolPath()}, resolver: net.DefaultResolver,
+		limiter: authlimit.New(0, 0, 0),
 	}
 }
 
@@ -475,19 +479,32 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// A login carries no session yet, so a failed sign-in would otherwise be logged
 	// with no account at all. Reported from the claimed login, before it is verified.
 	serve.SetUser(r, req.Login)
+	if !s.limiter.Allowed(loginKey(req.Login)) {
+		http.Error(w, "too many failed attempts, try again later", http.StatusTooManyRequests)
+		return
+	}
 	uid, roles, ok, err := s.authAdmin(req.Login, req.Password)
 	if err != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
 	}
 	if !ok {
+		s.limiter.Fail(loginKey(req.Login))
 		http.Error(w, "invalid credentials", http.StatusUnauthorized)
 		return
 	}
+	s.limiter.Succeed(loginKey(req.Login))
 	session, csrf := s.issueSession(req.Login, uid)
 	setSessionCookies(w, session, csrf)
 	writeJSON(w, map[string]any{"login": req.Login, "roles": roles, "csrfToken": csrf})
 }
+
+// loginKey is the throttle key for an admin sign-in: the account, normalized, not
+// the client address. Every request arrives through the same front door, so an
+// address key would either lock out every operator at once or never trip at all.
+// An account key blunts guessing against one login; the short lockout bounds the
+// nuisance a third party could otherwise inflict on a real operator.
+func loginKey(login string) string { return strings.ToLower(strings.TrimSpace(login)) }
 
 // authAdmin authenticates a login and returns the user id and admin roles when
 // the credentials are valid AND the user holds administrative authority. Whether
