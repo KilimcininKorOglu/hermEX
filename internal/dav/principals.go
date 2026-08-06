@@ -2,6 +2,7 @@ package dav
 
 import (
 	"encoding/xml"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -173,19 +174,19 @@ func expandPrincipalProp(user string, p expandProp) string {
 // resource is expanded into a nested DAV:response carrying the sub-properties.
 func expandHrefProp(ns, name string, hrefs []string, sub []expandProp) string {
 	var b strings.Builder
-	b.WriteString("<" + name + " xmlns=\"" + ns + "\">")
+	fmt.Fprintf(&b, "<%s xmlns=\"%s\">", name, ns)
 	for _, h := range hrefs {
 		if len(sub) == 0 {
-			b.WriteString("<href xmlns=\"DAV:\">" + xmlEscape(h) + "</href>")
+			fmt.Fprintf(&b, "<href xmlns=\"DAV:\">%s</href>", xmlEscape(h))
 			continue
 		}
-		b.WriteString("<response xmlns=\"DAV:\"><href>" + xmlEscape(h) + "</href><propstat><prop>")
+		fmt.Fprintf(&b, "<response xmlns=\"DAV:\"><href>%s</href><propstat><prop>", xmlEscape(h))
 		for _, sp := range sub {
 			b.WriteString(referencedSubProp(h, sp.Name))
 		}
 		b.WriteString("</prop><status>HTTP/1.1 200 OK</status></propstat></response>")
 	}
-	b.WriteString("</" + name + ">")
+	fmt.Fprintf(&b, "</%s>", name)
 	return b.String()
 }
 
