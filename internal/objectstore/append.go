@@ -153,6 +153,27 @@ func (s *Store) removeEML(mid string) {
 	}
 }
 
+// refreshEML rebuilds a message's cached wire form after an in-place edit, so the
+// bytes GetMessageRaw serves and the RFC822 size the index reports both follow the
+// edit. Without it the cache is invalidated only by deletion, and an edited message
+// keeps serving its pre-edit bytes to every daemon that opens the mailbox.
+//
+// A message that has no cache is left alone: a non-mail object (a contact, a calendar
+// item) never has one, and an edit must not manufacture one. A rebuild failure drops
+// the stale file rather than keeping it, since serving pre-edit bytes is the very
+// fault this closes; the next read re-synthesizes and surfaces the real error. The
+// cache is regenerable, so this never fails the edit that triggered it.
+func (s *Store) refreshEML(messageID int64) {
+	mid := midString(uint64(messageID))
+	if _, err := os.Stat(s.emlPath(mid)); err != nil {
+		return
+	}
+	if _, err := s.regenerateEML(messageID, mid); err != nil {
+		s.removeEML(mid)
+		s.logStoreError("refresh-eml", err)
+	}
+}
+
 // writeEML writes the re-synthesized wire form to the message's eml cache,
 // atomically (temp file + rename) so a reader never sees a partial file.
 func (s *Store) writeEML(mid string, data []byte) error {

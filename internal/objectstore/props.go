@@ -2,6 +2,7 @@ package objectstore
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -62,9 +63,14 @@ func (s *Store) GetFolderProperties(folderID int64, tags ...mapi.PropTag) (mapi.
 	return s.getObjectProps("folder_properties", "folder_id", folderID, tags)
 }
 
-// SetMessageProperties upserts properties on a message.
+// SetMessageProperties upserts properties on a message. It rebuilds the message's
+// cached wire form, since a property write can change what the message serializes to.
 func (s *Store) SetMessageProperties(messageID int64, props mapi.PropertyValues) error {
-	return s.setObjectProps("message_properties", "message_id", messageID, props)
+	if err := s.setObjectProps("message_properties", "message_id", messageID, props); err != nil {
+		return err
+	}
+	s.refreshEML(messageID)
+	return nil
 }
 
 // GetMessageProperties returns the requested message properties; with no tags
@@ -107,13 +113,42 @@ func (s *Store) ModifyMessageProperties(messageID int64, props mapi.PropertyValu
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	// The edit is persisted; rebuild the served wire form so a reader gets the edited
+	// message rather than the cached pre-edit bytes.
+	s.refreshEML(messageID)
 	s.publishChange("modify", cn, "")
 	return nil
 }
 
-// SetRecipientProperties upserts properties on a recipient.
+// SetRecipientProperties upserts properties on a recipient. It rebuilds the parent
+// message's cached wire form, since the recipient set is what the To/Cc headers are
+// serialized from.
 func (s *Store) SetRecipientProperties(recipientID int64, props mapi.PropertyValues) error {
-	return s.setObjectProps("recipients_properties", "recipient_id", recipientID, props)
+	if err := s.setObjectProps("recipients_properties", "recipient_id", recipientID, props); err != nil {
+		return err
+	}
+	if messageID, ok := s.parentMessage("recipients", "recipient_id", recipientID); ok {
+		s.refreshEML(messageID)
+	}
+	return nil
+}
+
+// parentMessage resolves the message a child row (a recipient, an attachment) belongs
+// to, so a write to the child can rebuild the parent's cached wire form. table and
+// idCol are internal constants, never caller input, so interpolating them into the SQL
+// is safe. A row that has gone (a concurrent delete) simply reports false: there is no
+// parent left to refresh.
+func (s *Store) parentMessage(table, idCol string, id int64) (int64, bool) {
+	var messageID int64
+	err := s.objdb.QueryRow(
+		fmt.Sprintf(`SELECT message_id FROM %s WHERE %s = ?`, table, idCol), id).Scan(&messageID)
+	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			s.logStoreError("parent-message", err)
+		}
+		return 0, false
+	}
+	return messageID, true
 }
 
 // GetRecipientProperties returns the requested recipient properties; with no
@@ -158,8 +193,23 @@ func (s *Store) ListRecipients(messageID int64) ([]Recipient, error) {
 // given, removes those property tags in the same transaction (the attachment
 // counterpart of ModifyMessageProperties). An attachment carries no change number
 // of its own — the parent message's change number advances on its own save — so
-// this does not bump one.
+// this does not bump one. It does rebuild the parent message's cached wire form: this
+// is where an attachment's payload and filename land (a ROP client builds an
+// attachment as an empty CreateAttachment followed by this call), so without it the
+// attachment stays invisible to every reader served from the cache.
 func (s *Store) SetAttachmentProperties(attachmentID int64, props mapi.PropertyValues, deletes ...mapi.PropTag) error {
+	if err := s.writeAttachmentProps(attachmentID, props, deletes); err != nil {
+		return err
+	}
+	if messageID, ok := s.parentMessage("attachments", "attachment_id", attachmentID); ok {
+		s.refreshEML(messageID)
+	}
+	return nil
+}
+
+// writeAttachmentProps persists an attachment property write, upserting alone when
+// there is nothing to delete and in one transaction with the deletes otherwise.
+func (s *Store) writeAttachmentProps(attachmentID int64, props mapi.PropertyValues, deletes []mapi.PropTag) error {
 	if len(deletes) == 0 {
 		return s.setObjectProps("attachment_properties", "attachment_id", attachmentID, props)
 	}

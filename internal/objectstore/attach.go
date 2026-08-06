@@ -62,6 +62,9 @@ func (s *Store) CreateAttachment(messageID int64, initialProps mapi.PropertyValu
 	if err := tx.Commit(); err != nil {
 		return 0, 0, err
 	}
+	// Rebuild the served wire form: the message now carries an attachment the cached
+	// bytes do not.
+	s.refreshEML(messageID)
 	return aid, uint32(next), nil
 }
 
@@ -95,5 +98,11 @@ func (s *Store) DeleteAttachment(messageID int64, attachNum uint32) error {
 	if _, err := tx.Exec(`DELETE FROM attachments WHERE attachment_id=?`, aid); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	// Rebuild the served wire form, so the removed attachment stops appearing to
+	// readers served from the cache.
+	s.refreshEML(messageID)
+	return nil
 }
