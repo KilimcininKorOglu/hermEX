@@ -17,7 +17,10 @@ services:
     volumes:
       - ./docker-data/db:/var/lib/mysql
     ports:
-      - "8142:3306"
+      # Bound to the loopback address: the database is a development convenience for
+      # tools on this machine, not a service for the network. Publishing it on every
+      # interface would offer the dev credentials to anything that can reach the host.
+      - "127.0.0.1:8142:3306"
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
       interval: 5s
