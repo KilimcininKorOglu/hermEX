@@ -410,3 +410,87 @@ func TestWorkerGivesUpAfterMaxAttempts(t *testing.T) {
 		t.Errorf("an exhausted recipient was left in the spool: %v", due)
 	}
 }
+
+// TestWorkerGuardRefusalSkipsThePass proves a refused drainer does not touch the
+// spool at all. Claim does not lease the rows it returns, so a second drainer that
+// ran anyway would deliver every due recipient a second time.
+func TestWorkerGuardRefusalSkipsThePass(t *testing.T) {
+	sink, addr := startSink(t)
+	sp := openSpool(t)
+	t0 := time.Unix(3_000_000, 0)
+	if err := sp.Enqueue("alice@local", []string{"bob@remote"}, []byte("hi\r\n"), t0); err != nil {
+		t.Fatal(err)
+	}
+
+	asked := 0
+	w := &Worker{
+		Spool:    sp,
+		HeloName: "mx.test",
+		Router:   func(string) ([]string, error) { return []string{"sink"}, nil },
+		Dialer:   func(string) (net.Conn, error) { return net.Dial("tcp", addr) },
+		Guard:    func() (func(), bool) { asked++; return nil, false },
+	}
+	w.guardedPass()
+
+	if asked != 1 {
+		t.Errorf("guard asked %d times, want 1", asked)
+	}
+	if msgs := sink.recorded(); len(msgs) != 0 {
+		t.Errorf("a refused pass delivered %d message(s), want none", len(msgs))
+	}
+	if due, _ := sp.Claim(t0, 10); len(due) != 1 {
+		t.Errorf("spool holds %d due recipient(s), want the message untouched", len(due))
+	}
+}
+
+// TestWorkerGuardPermissionIsReleased proves a permitted pass drains normally and
+// hands the permission back, so the next tick (in any instance) can take it.
+func TestWorkerGuardPermissionIsReleased(t *testing.T) {
+	sink, addr := startSink(t)
+	sp := openSpool(t)
+	t0 := time.Unix(3_000_000, 0)
+	if err := sp.Enqueue("alice@local", []string{"bob@remote"}, []byte("From: a\r\n\r\nhi\r\n"), t0); err != nil {
+		t.Fatal(err)
+	}
+
+	released := 0
+	w := &Worker{
+		Spool:    sp,
+		HeloName: "mx.test",
+		Router:   func(string) ([]string, error) { return []string{"sink"}, nil },
+		Dialer:   func(string) (net.Conn, error) { return net.Dial("tcp", addr) },
+		Guard:    func() (func(), bool) { return func() { released++ }, true },
+	}
+	w.guardedPass()
+
+	if released != 1 {
+		t.Errorf("permission released %d times, want 1", released)
+	}
+	if msgs := sink.recorded(); len(msgs) != 1 {
+		t.Fatalf("a permitted pass delivered %d message(s), want 1", len(msgs))
+	}
+	if due, _ := sp.Claim(t0, 10); len(due) != 0 {
+		t.Errorf("spool not drained after a permitted pass: %v", due)
+	}
+}
+
+// TestWorkerWithoutGuardStillDrains proves the guard is optional: a single-instance
+// deployment that sets none behaves exactly as before.
+func TestWorkerWithoutGuardStillDrains(t *testing.T) {
+	sink, addr := startSink(t)
+	sp := openSpool(t)
+	t0 := time.Unix(3_000_000, 0)
+	if err := sp.Enqueue("alice@local", []string{"bob@remote"}, []byte("From: a\r\n\r\nhi\r\n"), t0); err != nil {
+		t.Fatal(err)
+	}
+	w := &Worker{
+		Spool:    sp,
+		HeloName: "mx.test",
+		Router:   func(string) ([]string, error) { return []string{"sink"}, nil },
+		Dialer:   func(string) (net.Conn, error) { return net.Dial("tcp", addr) },
+	}
+	w.guardedPass()
+	if msgs := sink.recorded(); len(msgs) != 1 {
+		t.Errorf("delivered %d message(s) with no guard, want 1", len(msgs))
+	}
+}

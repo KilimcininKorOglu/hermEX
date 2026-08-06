@@ -293,8 +293,30 @@ func main() {
 		}
 	}
 	slCtx, slCancel := context.WithCancel(context.Background())
+	// Both background loops below must run in one process at a time, and neither
+	// leases the work it picks up: a second sweeper re-delivers a scheduled
+	// message, a second drainer re-delivers a spooled recipient. A named advisory
+	// lock in the shared directory database enforces it across instances. It is
+	// taken per pass, so an instance that dies mid-pass drops its connection, the
+	// server frees the lock, and another instance takes over on its next tick.
+	lockPass := func(name string) func() (func(), bool) {
+		return func() (func(), bool) {
+			release, ok, err := dir.TryLock(context.Background(), name)
+			if err != nil {
+				// Do not proceed unguarded: a directory that cannot answer is also a
+				// directory that cannot deliver, and running anyway risks duplicates.
+				logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "worker.lock.fail",
+					Fields: logging.Fields{"lock": name}, Err: err.Error()})
+				return nil, false
+			}
+			return release, ok
+		}
+	}
 	sendLater := lifecycle.Func{
-		StartFn:    func() error { runSendLater(slCtx, dir, deliver, onGiveUp, sendLaterInterval, logger); return nil },
+		StartFn: func() error {
+			runSendLater(slCtx, dir, deliver, onGiveUp, lockPass(directory.LockSendLater), sendLaterInterval, logger)
+			return nil
+		},
 		ShutdownFn: func(context.Context) error { slCancel(); return nil },
 	}
 
@@ -306,6 +328,7 @@ func main() {
 		Spool:    spool,
 		HeloName: cfg.Hostname,
 		Logger:   logger,
+		Guard:    lockPass(directory.LockRelayDrain),
 		// Honor recipients' published MTA-STS policies (RFC 8461): a domain in
 		// enforce mode gets validated TLS to a policy-listed MX or no delivery. This
 		// only changes behavior for domains that opt in by publishing a policy.
@@ -665,11 +688,12 @@ const sendLaterInterval = 30 * time.Second
 const relayInterval = 15 * time.Second
 
 // runSendLater periodically sweeps every mailbox's Outbox, releasing scheduled
-// sends whose time has come, until ctx is cancelled. Exactly one process must run
-// this loop: a second concurrent sweeper could re-deliver a message in the window
-// between its delivery and its removal from the Outbox, so it lives in the single
-// always-on MTA daemon, not in the (possibly multi-instance, restartable) webmail.
-func runSendLater(ctx context.Context, dir directory.MailboxLister, deliver spooler.DeliverFunc, onGiveUp spooler.GiveUpFunc, interval time.Duration, logger *logging.Logger) {
+// sends whose time has come, until ctx is cancelled. Exactly one process may
+// sweep at a time: a second concurrent sweeper could re-deliver a message in the
+// window between its delivery and its removal from the Outbox. guard enforces
+// that across instances, and a process it refuses simply waits for the next tick.
+// A nil guard runs every sweep, the single-instance behaviour.
+func runSendLater(ctx context.Context, dir directory.MailboxLister, deliver spooler.DeliverFunc, onGiveUp spooler.GiveUpFunc, guard func() (func(), bool), interval time.Duration, logger *logging.Logger) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -677,9 +701,23 @@ func runSendLater(ctx context.Context, dir directory.MailboxLister, deliver spoo
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			sweepOutboxes(dir, deliver, onGiveUp, logger)
+			guardedSweep(dir, deliver, onGiveUp, guard, logger)
 		}
 	}
+}
+
+// guardedSweep runs one sweep while holding the guard's permission, and skips the
+// sweep entirely when the guard refuses, because another instance is sweeping the
+// same mailboxes right now.
+func guardedSweep(dir directory.MailboxLister, deliver spooler.DeliverFunc, onGiveUp spooler.GiveUpFunc, guard func() (func(), bool), logger *logging.Logger) {
+	if guard != nil {
+		release, ok := guard()
+		if !ok {
+			return
+		}
+		defer release()
+	}
+	sweepOutboxes(dir, deliver, onGiveUp, logger)
 }
 
 // sweepOutboxes runs one pass: it opens each known mailbox and releases its due

@@ -57,7 +57,13 @@ type Worker struct {
 	// rejection or attempts exhausted) just before it is settled, so the caller
 	// can notify the sender. cause is the failure that ended delivery.
 	OnGiveUp func(it Item, cause error)
-	Logger   *logging.Logger
+	// Guard, if set, is asked for permission before each pass and must report
+	// whether this process may drain the spool right now; the returned function
+	// releases the permission at the end of the pass. It is how a deployment
+	// enforces the one-drainer invariant Run documents. nil means "always
+	// permitted", the single-instance behaviour.
+	Guard  func() (release func(), ok bool)
+	Logger *logging.Logger
 	// Policy returns the MTA-STS policy for a recipient domain (nil, nil when the
 	// domain publishes none); nil disables MTA-STS, leaving every delivery on
 	// opportunistic STARTTLS. An enforce-mode policy makes TLS to a policy-matched
@@ -112,21 +118,36 @@ const (
 // Run drains the spool on every tick until ctx is cancelled. A scan error is
 // logged and the loop continues, so a transient store error does not stop relay.
 //
-// Exactly one process must run this loop. Claim does not lease the rows it
-// returns, so a second concurrent drainer would deliver the same recipient
-// twice; like the send-later sweep it lives in the single always-on MTA daemon.
+// Exactly one process may drain at a time. Claim does not lease the rows it
+// returns, so a second concurrent drainer would deliver the same recipient twice.
+// Guard enforces that across instances: a pass runs only while this process holds
+// the permission, and a process that is refused simply waits for the next tick.
 func (w *Worker) Run(ctx context.Context, interval time.Duration) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
-		if _, err := w.ProcessDue(time.Now()); err != nil {
-			w.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "relay.scan.fail", Err: err.Error()})
-		}
+		w.guardedPass()
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 		}
+	}
+}
+
+// guardedPass runs one drain pass while holding the guard's permission, and does
+// nothing at all when the guard refuses: it must not touch the spool, because
+// another instance is draining it right now.
+func (w *Worker) guardedPass() {
+	if w.Guard != nil {
+		release, ok := w.Guard()
+		if !ok {
+			return
+		}
+		defer release()
+	}
+	if _, err := w.ProcessDue(time.Now()); err != nil {
+		w.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "relay.scan.fail", Err: err.Error()})
 	}
 }
 
