@@ -92,6 +92,7 @@ func (s *Session) ropLogon(p *ext.Pull, out *ext.Push, handles []uint32, hindex 
 			return true
 		}
 		if !ok {
+			s.logAuthzDeny(ropLogon, st, 0, 0)
 			_ = st.Close()
 			writeErr(out, ropLogon, hindex, ecAccessDenied)
 			return true

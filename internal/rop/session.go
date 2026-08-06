@@ -11,6 +11,7 @@ import (
 
 	"hermex/internal/directory"
 	"hermex/internal/ext"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcmail"
@@ -170,6 +171,12 @@ type Session struct {
 	// send-on-behalf message goes out From, keyed by the same store as
 	// delegateCallers and dropped alongside it. An owner logon carries no entry.
 	delegateOwners map[*objectstore.Store]string
+
+	// logger records the operations the transport's access log cannot show. One
+	// HTTP POST carries an arbitrary batch of ROPs, so a per-request event says
+	// nothing about which folder was re-permissioned or which caller was refused.
+	// Nil is a no-op (Logger.Emit is nil-safe).
+	logger *logging.Logger
 }
 
 // SessionOption configures an optional Session dependency at construction.
@@ -179,6 +186,12 @@ type SessionOption func(*Session)
 // recipients are queued into. Without it, external recipients are not relayed.
 func WithSpool(sp *relay.Spool) SessionOption {
 	return func(s *Session) { s.spool = sp }
+}
+
+// WithLogger supplies the central logger the session records permission changes and
+// authorization denials through. Without it those operations are unrecorded.
+func WithLogger(l *logging.Logger) SessionOption {
+	return func(s *Session) { s.logger = l }
 }
 
 // NewSession builds an empty session bound to a mailbox maildir path. accounts
@@ -297,10 +310,48 @@ func (s *Session) denyWrite(out *ext.Push, ropID, hindex uint8, store *objectsto
 		return true
 	}
 	if !ok {
+		s.logAuthzDeny(ropID, store, folderID, need)
 		writeErr(out, ropID, hindex, ecAccessDenied)
 		return true
 	}
 	return false
+}
+
+// effectiveCaller names the identity a logon acts as: the delegate for a delegate
+// logon, the mailbox owner otherwise.
+func (s *Session) effectiveCaller(store *objectstore.Store) string {
+	if caller, delegate := s.delegateCallers[store]; delegate {
+		return caller
+	}
+	return s.owner
+}
+
+// logAuthzDeny records one refused ROP access attempt. An owner short-circuits
+// inside authorize, so a refusal is always a delegate reaching past their grant.
+// It is recorded at warn because it is the event an operator looks for when asking
+// whether an access attempt was authorized; the transport's access log cannot show
+// it, since one HTTP POST carries an arbitrary batch of ROPs.
+//
+// folderID and need are zero for a store-level refusal (opening a mailbox the
+// caller has no grant on, or a store setting reserved to the owner), where no
+// single folder or right describes what was wanted; those fields are then omitted
+// rather than logged as a misleading zero.
+//
+// The mailbox is taken from the store, not from the session: a delegate reaches
+// into someone else's mailbox, so the session's own path would name the wrong one
+// in exactly the case worth recording.
+func (s *Session) logAuthzDeny(ropID uint8, store *objectstore.Store, folderID int64, need uint32) {
+	f := logging.Fields{"rop": ropID, "mailbox": store.Dir()}
+	if folderID != 0 {
+		f["folder"] = folderID
+	}
+	if need != 0 {
+		f["required_rights"] = need
+	}
+	s.logger.Emit(logging.Event{
+		Level: logging.LevelWarn, Subsystem: logging.MAPI, Name: "authz.deny",
+		User: s.effectiveCaller(store), Fields: f,
+	})
 }
 
 // denyDelegate writes an access-denied response and reports true when store is a
@@ -310,6 +361,7 @@ func (s *Session) denyWrite(out *ext.Push, ropID, hindex uint8, store *objectsto
 // delegateCallers) passes.
 func (s *Session) denyDelegate(out *ext.Push, ropID, hindex uint8, store *objectstore.Store) bool {
 	if _, isDelegate := s.delegateCallers[store]; isDelegate {
+		s.logAuthzDeny(ropID, store, 0, 0)
 		writeErr(out, ropID, hindex, ecAccessDenied)
 		return true
 	}

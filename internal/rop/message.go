@@ -70,6 +70,7 @@ func (s *Session) ropOpenMessage(p *ext.Pull, out *ext.Push, handles []uint32, h
 		writeErr(out, ropOpenMessage, ohindex, ecError)
 		return true
 	} else if !ok {
+		s.logAuthzDeny(ropOpenMessage, parent.store, parentFID, mapi.FrightsReadAny)
 		writeErr(out, ropOpenMessage, ohindex, ecAccessDenied)
 		return true
 	}

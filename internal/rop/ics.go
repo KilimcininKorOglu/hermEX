@@ -103,6 +103,7 @@ func (s *Session) ropSynchronizationConfigure(p *ext.Pull, out *ext.Push, handle
 			writeErr(out, ropSynchronizationConfigure, ohindex, ecError)
 			return true
 		} else if !ok {
+			s.logAuthzDeny(ropSynchronizationConfigure, folder.store, folder.folderID, mapi.FrightsReadAny)
 			writeErr(out, ropSynchronizationConfigure, ohindex, ecAccessDenied)
 			return true
 		}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 
 	"hermex/internal/ext"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -191,11 +192,40 @@ func (s *Session) ropModifyPermissions(p *ext.Pull, out *ext.Push, handles []uin
 		writeErr(out, ropModifyPermissions, hindex, ecError)
 		return true
 	}
+	// A folder ACL change made from Outlook is otherwise untraceable: the transport
+	// logs one line per POST, and a POST carries an arbitrary batch of ROPs. This is
+	// the record an operator needs to answer who granted delegate access, and when.
+	s.logPermissionChange(folder, flags&modifyPermReplaceRows != 0, changes)
 
 	out.Uint8(ropModifyPermissions)
 	out.Uint8(hindex) // echo the input handle
 	out.Uint32(ecSuccess)
 	return true
+}
+
+// logPermissionChange records an applied permission batch: who changed which
+// folder's ACL, and what the batch did. The per-operation counts are recorded rather
+// than the whole row set, so a large batch stays one readable line.
+func (s *Session) logPermissionChange(folder *object, replace bool, changes []objectstore.PermissionChange) {
+	var added, modified, removed int
+	for _, c := range changes {
+		switch c.Op {
+		case objectstore.PermAdd:
+			added++
+		case objectstore.PermModify:
+			modified++
+		case objectstore.PermRemove:
+			removed++
+		}
+	}
+	s.logger.Emit(logging.Event{
+		Level: logging.LevelInfo, Subsystem: logging.MAPI, Name: "permission.modify",
+		User: s.effectiveCaller(folder.store),
+		Fields: logging.Fields{
+			"mailbox": folder.store.Dir(), "folder": folder.folderID, "replace": replace,
+			"added": added, "modified": modified, "removed": removed,
+		},
+	})
 }
 
 // memberID reads PR_MEMBER_ID (PtI8) from a permission row's property bag.

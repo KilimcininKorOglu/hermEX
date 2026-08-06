@@ -23,7 +23,7 @@ func testStore(t *testing.T) (*sessionStore, directory.StaticAccounts) {
 // with it an open mailbox handle, for the life of the process.
 func TestSweepReclaimsIdleSession(t *testing.T) {
 	store, accs := testStore(t)
-	sid, seq := store.create(testUser, accs[testUser].MailboxPath, accs, nil)
+	sid, seq := store.create(testUser, accs[testUser].MailboxPath, accs, nil, nil)
 
 	if n := store.sweep(time.Now(), sessionTTL); n != 0 {
 		t.Fatalf("swept %d fresh session(s), want 0", n)
@@ -75,7 +75,7 @@ func TestReclaimedSessionIsRejectedEndToEnd(t *testing.T) {
 // reclaimed: each Execute stamps the session, so the idle clock restarts.
 func TestExecuteKeepsASessionAlive(t *testing.T) {
 	store, accs := testStore(t)
-	sid, seq := store.create(testUser, accs[testUser].MailboxPath, accs, nil)
+	sid, seq := store.create(testUser, accs[testUser].MailboxPath, accs, nil, nil)
 
 	// Well past the limit measured from Connect, but the client just executed.
 	seq, _, code := store.execute(sid, seq, testUser)
@@ -95,7 +95,7 @@ func TestExecuteKeepsASessionAlive(t *testing.T) {
 // idle while it runs.
 func TestLookupKeepsAParkedWaitAlive(t *testing.T) {
 	store, accs := testStore(t)
-	sid, _ := store.create(testUser, accs[testUser].MailboxPath, accs, nil)
+	sid, _ := store.create(testUser, accs[testUser].MailboxPath, accs, nil, nil)
 
 	if store.lookup(sid) == nil {
 		t.Fatal("lookup did not resolve a live session")

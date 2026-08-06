@@ -161,6 +161,7 @@ func (s *Session) ropOpenFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 		writeErr(out, ropOpenFolder, ohindex, ecError)
 		return true
 	} else if !ok {
+		s.logAuthzDeny(ropOpenFolder, parent.store, fid, mapi.FrightsVisible)
 		writeErr(out, ropOpenFolder, ohindex, ecAccessDenied)
 		return true
 	}
@@ -201,6 +202,7 @@ func (s *Session) ropGetContentsTable(p *ext.Pull, out *ext.Push, handles []uint
 		writeErr(out, ropGetContentsTable, ohindex, ecError)
 		return true
 	} else if !ok {
+		s.logAuthzDeny(ropGetContentsTable, folder.store, folder.folderID, mapi.FrightsReadAny)
 		writeErr(out, ropGetContentsTable, ohindex, ecAccessDenied)
 		return true
 	}

@@ -58,6 +58,7 @@ func (s *Session) openCopySource(out *ext.Push, ropID uint8, handles []uint32, h
 		writeErr(out, ropID, ohindex, ecError)
 		return true
 	} else if !ok {
+		s.logAuthzDeny(ropID, src.store, src.folderID, mapi.FrightsReadAny)
 		writeErr(out, ropID, ohindex, ecAccessDenied)
 		return true
 	}
@@ -99,6 +100,7 @@ func (s *Session) ropFastTransferSourceCopyMessages(p *ext.Pull, out *ext.Push, 
 		writeErr(out, ropFastTransferSourceCopyMessages, ohindex, ecError)
 		return true
 	} else if !ok {
+		s.logAuthzDeny(ropFastTransferSourceCopyMessages, src.store, src.folderID, mapi.FrightsReadAny)
 		writeErr(out, ropFastTransferSourceCopyMessages, ohindex, ecAccessDenied)
 		return true
 	}
@@ -143,6 +145,7 @@ func (s *Session) ropFastTransferSourceCopyFolder(p *ext.Pull, out *ext.Push, ha
 		writeErr(out, ropFastTransferSourceCopyFolder, ohindex, ecError)
 		return true
 	} else if !ok {
+		s.logAuthzDeny(ropFastTransferSourceCopyFolder, src.store, src.folderID, mapi.FrightsReadAny)
 		writeErr(out, ropFastTransferSourceCopyFolder, ohindex, ecAccessDenied)
 		return true
 	}

@@ -42,7 +42,8 @@ type Server struct {
 	notifyWait    time.Duration        // how long a NotificationWait long-poll holds before reporting "no events"
 	notifyCadence time.Duration        // how often that long-poll re-checks the shared store
 	waker         notify.Registrar     // push wake source; nil keeps the long-poll on its cadence only
-	Logger        *logging.Logger      // central activity log; nil disables logging
+	logger        *logging.Logger      // central activity log; nil disables logging
+	ems           *rpchttp.EMSMDB      // the RPC/HTTP EMSMDB stub, held so SetLogger reaches its ROP sessions
 }
 
 // Session reclamation. A client that dies without Disconnect (or Unbind) leaves
@@ -70,16 +71,25 @@ func (s *Server) RunSessionMaintenance(ctx context.Context) {
 		case <-t.C:
 			now := time.Now()
 			if n := s.sessions.sweep(now, sessionTTL) + s.nspiSessions.sweep(now, sessionTTL); n > 0 {
-				s.Logger.Info(logging.MAPI, "session.reclaim", logging.Fields{"count": n})
+				s.logger.Info(logging.MAPI, "session.reclaim", logging.Fields{"count": n})
 			}
 		}
 	}
 }
 
+// SetLogger installs the central activity log. It fans the logger out to the
+// RPC/HTTP EMSMDB stub as well, because both transports mint ROP sessions and a
+// permission change or an access denial must be recorded whichever one carried
+// it. A daemon calls this once before serving; nil disables logging.
+func (s *Server) SetLogger(l *logging.Logger) {
+	s.logger = l
+	s.ems.Logger = l
+}
+
 // mapiEvent logs a MAPI/HTTP operation tagged with the client address (and, when
 // known, the user). A nil logger is a no-op.
 func (s *Server) mapiEvent(r *http.Request, level logging.Level, sub logging.Subsystem, name, user string, f logging.Fields) {
-	s.Logger.Emit(logging.Event{Level: level, Subsystem: sub, Name: name, User: user, RemoteAddr: serve.ClientAddr(r), Fields: f})
+	s.logger.Emit(logging.Event{Level: level, Subsystem: sub, Name: name, User: user, RemoteAddr: serve.ClientAddr(r), Fields: f})
 }
 
 // NewServer builds a MAPI/HTTP server backed by the directory for authentication.
@@ -112,6 +122,7 @@ func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostna
 	// adapter passes only the transport session's identity through to central
 	// logging (the dispatch itself needs no per-session state).
 	ems := rpchttp.NewEMSMDB(accounts)
+	s.ems = ems
 	ems.Spool = spool // external recipients of RPC/HTTP submissions are relayed
 	disp := rpchttp.NewDispatcher()
 	disp.Register(rpchttp.EMSMDBUUID, rpchttp.EMSMDBVersion, ems.Handle)
@@ -135,7 +146,7 @@ func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostna
 		if fault != 0 {
 			level, f["fault"] = logging.LevelWarn, fault
 		}
-		s.Logger.Emit(logging.Event{
+		s.logger.Emit(logging.Event{
 			Level: level, Subsystem: logging.NSPI, Name: "operation",
 			User: user, RemoteAddr: addr, Fields: f,
 		})

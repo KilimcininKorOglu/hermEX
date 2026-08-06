@@ -65,7 +65,7 @@ func main() {
 		log.Fatalf("hermex-mapi: open relay spool: %v", err)
 	}
 	srv := mapihttp.NewServer(dir, dir, cfg.Hostname, spool)
-	srv.Logger = logger
+	srv.SetLogger(logger)
 
 	// Push notifications: publish this daemon's own mailbox writes to the relay, and
 	// subscribe so a parked NotificationWait/EcDoAsyncWaitEx wakes the instant a
