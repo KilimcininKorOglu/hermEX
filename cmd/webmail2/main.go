@@ -76,6 +76,10 @@ func main() {
 	api.Pub = publicfolder.New(cfg)             // per-domain public folders, rooted at the config's HomedirFor
 	api.DigestSecret = []byte(cfg.DigestSecret) // verifies quarantine-digest release links (empty disables them)
 
+	// Webmail request-body cap: read at startup and re-read every minute so an admin's
+	// change applies without a restart; 0 keeps the built-in default.
+	applyWebmailSizeLimit(dir.GetSizeLimits, webmail2api.SetMaxRequestBody)
+	go runWebmailSizeMaintenance(dir.GetSizeLimits, webmail2api.SetMaxRequestBody)
 	addr := cfg.Webmail2Addr
 	if addr == "" {
 		addr = ":8080"
@@ -121,5 +125,30 @@ func main() {
 		health.Components(cfg.HealthAddr, "webmail2", checks...)...)
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, spool.Close, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-webmail2: %v", err)
+	}
+}
+
+// applyWebmailSizeLimit reads the stored webmail request-body cap and applies it. A
+// missing row or a read error leaves the cap unchanged, so a settings failure never
+// shrinks it unexpectedly.
+func applyWebmailSizeLimit(read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
+	s, found, err := read()
+	if err != nil {
+		log.Printf("hermex-webmail2: size limits read failed, leaving the request cap unchanged: %v", err)
+		return
+	}
+	if !found {
+		return
+	}
+	setRequestBody(s.WebmailRequestBytes)
+}
+
+// runWebmailSizeMaintenance re-applies the webmail request-body cap every minute so an
+// admin change takes effect without a restart. It runs until the process exits.
+func runWebmailSizeMaintenance(read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
+	tick := time.NewTicker(time.Minute)
+	defer tick.Stop()
+	for range tick.C {
+		applyWebmailSizeLimit(read, setRequestBody)
 	}
 }

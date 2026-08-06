@@ -243,7 +243,7 @@ func (s *Server) Handler() http.Handler {
 	if s.dist != nil {
 		mux.Handle("/", s.dist)
 	}
-	return securityHeaders(s.gateForcedPasswordChange(mux))
+	return securityHeaders(boundBody(s.gateForcedPasswordChange(mux)))
 }
 
 // securityHeaders stamps clickjacking and MIME-sniffing defences on every
