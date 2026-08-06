@@ -734,6 +734,13 @@ func sweepOutboxes(ctx context.Context, dir directory.MailboxLister, deliver spo
 		return
 	}
 	for _, path := range maildirs {
+		// Stop between mailboxes on shutdown. ProcessDueOutbox already returns at
+		// once when cancelled, but without this the sweep would still open and close
+		// a store for every remaining mailbox, which on a large deployment is the
+		// difference between a prompt drain and one that outlasts the deadline.
+		if ctx.Err() != nil {
+			return
+		}
 		st, err := objectstore.Open(path)
 		if err != nil {
 			log.Printf("hermex-mta send-later: open %s: %v", path, err)

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -124,5 +125,77 @@ func TestGuardedSweepRefusalLeavesTheOutboxAlone(t *testing.T) {
 	}
 	if released != 1 {
 		t.Errorf("permission released %d times, want 1", released)
+	}
+}
+
+// TestSweepOutboxesStopsOnShutdown proves the send-later sweep abandons its walk
+// when the daemon is shutting down. The sweep opens one mailbox store after
+// another, so without this it would keep working through every remaining mailbox
+// after the signal, and on a large deployment outlast the shutdown deadline that
+// is supposed to let it drain.
+func TestSweepOutboxesStopsOnShutdown(t *testing.T) {
+	root := t.TempDir()
+	accounts := directory.StaticAccounts{}
+	for _, name := range []string{"a", "b", "c", "d", "e"} {
+		dir := filepath.Join(root, name)
+		st, err := objectstore.Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := "From: " + name + "@hermex.test\r\nTo: sink@hermex.test\r\nSubject: s\r\n\r\nbody\r\n"
+		info, err := st.AppendMessage(int64(mapi.PrivateFIDOutbox), []byte(raw), time.Unix(1, 0), objectstore.FlagSeen)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := st.SetMessageProperties(info.ID, mapi.PropertyValues{
+			{Tag: mapi.PrDeferredSendTime, Value: mapi.UnixToNTTime(time.Now().Add(-time.Minute))},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		st.Close()
+		accounts[name+"@hermex.test"] = directory.Account{MailboxPath: dir}
+	}
+
+	// A mailbox that has never been opened. Opening a store provisions it, so
+	// whether this directory exists afterwards says whether the sweep kept walking
+	// past the shutdown signal.
+	unvisited := filepath.Join(root, "unvisited")
+	accounts["z@hermex.test"] = directory.Account{MailboxPath: unvisited}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	sends := 0
+	deliver := func([]string, []byte, time.Time) ([]string, error) {
+		sends++
+		// The shutdown signal arrives during the first mailbox's release.
+		cancel()
+		return nil, nil
+	}
+	sweepOutboxes(ctx, accounts, deliver, nil, nil)
+
+	if sends != 1 {
+		t.Errorf("the sweep released %d messages after the shutdown signal, want 1", sends)
+	}
+	if _, err := os.Stat(unvisited); err == nil {
+		t.Error("the sweep opened a further mailbox after the shutdown signal; on a large deployment it would outlast the drain deadline")
+	}
+	// The rest are untouched, still scheduled for the next start.
+	waiting := 0
+	for name := range accounts {
+		if accounts[name].MailboxPath == unvisited {
+			continue
+		}
+		st, err := objectstore.Open(accounts[name].MailboxPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		msgs, err := st.ListMessages(int64(mapi.PrivateFIDOutbox))
+		st.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		waiting += len(msgs)
+	}
+	if waiting != 4 {
+		t.Errorf("%d messages are still scheduled, want 4 (only the in-flight one released)", waiting)
 	}
 }
