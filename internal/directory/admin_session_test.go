@@ -67,3 +67,75 @@ func TestAdminSessionRoundTrip(t *testing.T) {
 		t.Error("a full revoke reached another account's session")
 	}
 }
+
+// TestEmergencySessionRevoke proves the compromise-response lever: one call ends
+// every session an account holds on each signed-in surface, without the operator
+// needing to know any identifier, and without touching anyone else. Until the
+// session stores existed the only way to end a stolen cookie was to restart every
+// daemon.
+func TestEmergencySessionRevoke(t *testing.T) {
+	db := openTestDB(t)
+	d := NewSQL(db)
+	if err := d.EnsureSchema(); err != nil {
+		t.Fatal(err)
+	}
+	cleanTables(t, db)
+
+	const now = int64(1700000000)
+	for _, jti := range []string{"web-1", "web-2"} {
+		if err := d.CreateWebmailSession(WebmailSession{
+			Jti: jti, Email: "victim@hermex.test", CreatedAt: now, LastActive: now, ExpiresAt: now + 3600,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := d.CreateWebmailSession(WebmailSession{
+		Jti: "web-other", Email: "other@hermex.test", CreatedAt: now, LastActive: now, ExpiresAt: now + 3600,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, jti := range []string{"adm-1", "adm-2"} {
+		if err := d.CreateAdminSession(AdminSession{
+			Jti: jti, Login: "victim@hermex.test", CreatedAt: now, ExpiresAt: now + 3600,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// An operator can see what is signed in before ending it.
+	panel, err := d.ListAdminSessions("VICTIM@hermex.test", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(panel) != 2 {
+		t.Errorf("listed %d panel sessions, want 2", len(panel))
+	}
+
+	web, err := d.DeleteWebmailSessionsFor("VICTIM@hermex.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if web != 2 {
+		t.Errorf("revoked %d webmail sessions, want 2", web)
+	}
+	adm, err := d.CountedDeleteAdminSessionsFor("victim@hermex.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adm != 2 {
+		t.Errorf("revoked %d panel sessions, want 2", adm)
+	}
+	for _, jti := range []string{"web-1", "web-2"} {
+		if a, _ := d.WebmailSessionActive(jti, now+1); a {
+			t.Errorf("webmail session %s survived the revoke", jti)
+		}
+	}
+	for _, jti := range []string{"adm-1", "adm-2"} {
+		if a, _ := d.AdminSessionActive(jti, now+1); a {
+			t.Errorf("panel session %s survived the revoke", jti)
+		}
+	}
+	if a, _ := d.WebmailSessionActive("web-other", now+1); !a {
+		t.Error("the revoke reached another account's session")
+	}
+}

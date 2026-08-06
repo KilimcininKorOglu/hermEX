@@ -56,6 +56,38 @@ func (d *SQLDirectory) DeleteAdminSession(login, jti string) error {
 // password change calls: the old credential must not keep a signed-in browser
 // working, wherever that browser is.
 func (d *SQLDirectory) DeleteAdminSessionsFor(login string) error {
-	_, err := d.db.Exec(`DELETE FROM admin_sessions WHERE login = ?`, strings.ToLower(login))
+	_, err := d.CountedDeleteAdminSessionsFor(login)
 	return err
+}
+
+// CountedDeleteAdminSessionsFor is DeleteAdminSessionsFor reporting how many
+// sessions it ended, which an operator running an emergency revoke wants to see.
+func (d *SQLDirectory) CountedDeleteAdminSessionsFor(login string) (int64, error) {
+	res, err := d.db.Exec(`DELETE FROM admin_sessions WHERE login = ?`, strings.ToLower(login))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+// ListAdminSessions returns an account's non-expired panel sessions, so an
+// operator can see what is signed in before deciding to end it.
+func (d *SQLDirectory) ListAdminSessions(login string, now int64) ([]AdminSession, error) {
+	rows, err := d.db.Query(
+		`SELECT jti, login, created_at, expires_at FROM admin_sessions
+		   WHERE login = ? AND expires_at > ? ORDER BY created_at DESC`,
+		strings.ToLower(login), now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AdminSession
+	for rows.Next() {
+		var s AdminSession
+		if err := rows.Scan(&s.Jti, &s.Login, &s.CreatedAt, &s.ExpiresAt); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
 }

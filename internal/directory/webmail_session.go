@@ -84,6 +84,18 @@ func (d *SQLDirectory) ListWebmailSessions(email string, now int64) ([]WebmailSe
 	return out, rows.Err()
 }
 
+// DeleteWebmailSessionsFor revokes every webmail session an account holds and
+// reports how many were removed. It is the emergency lever: an operator
+// responding to a compromised account needs one action that ends every signed-in
+// browser at once, without knowing any of their identifiers.
+func (d *SQLDirectory) DeleteWebmailSessionsFor(email string) (int64, error) {
+	res, err := d.db.Exec(`DELETE FROM webmail_sessions WHERE email = ?`, strings.ToLower(email))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // DeleteWebmailSession revokes a user's session by jti, scoped to email so a user can
 // only revoke their OWN session; ok is false when nothing matched.
 func (d *SQLDirectory) DeleteWebmailSession(email, jti string) (bool, error) {

@@ -48,6 +48,8 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  sweep-content <email>   (reclaim orphan content files; run with the mailbox idle)")
 	fmt.Fprintln(os.Stderr, "  ldap-sync <org-id>      (import the org's LDAP/AD accounts into the directory)")
 	fmt.Fprintln(os.Stderr, "  grant-admin <email> <system|org|domain> [scope-id]")
+	fmt.Fprintln(os.Stderr, "  list-sessions <email>   (the account's live webmail and panel sessions)")
+	fmt.Fprintln(os.Stderr, "  revoke-sessions <email> (end every one of them; compromise response)")
 	fmt.Fprintln(os.Stderr, "  serve                   (run the admin API HTTP server)")
 	os.Exit(2)
 }
@@ -205,6 +207,16 @@ func main() {
 			log.Fatalf("hermex-admin: %v", err)
 		}
 		fmt.Printf("granted %s the %s admin role (scope %d)\n", args[1], args[2], scope)
+	case "list-sessions":
+		if len(args) != 2 {
+			usage()
+		}
+		listSessions(dir, args[1])
+	case "revoke-sessions":
+		if len(args) != 2 {
+			usage()
+		}
+		revokeSessions(dir, args[1])
 	case "serve":
 		if cfg.AdminSecret == "" {
 			log.Fatal("hermex-admin: admin_secret is required to serve the admin API")
@@ -354,4 +366,50 @@ func runRecoverableRetention(ctx context.Context, dir *directory.SQLDirectory) {
 			sweep()
 		}
 	}
+}
+
+// listSessions prints an account's live sessions on both signed-in surfaces, so an
+// operator can see what is connected before deciding to end it.
+func listSessions(dir *directory.SQLDirectory, email string) {
+	now := time.Now().Unix()
+	web, err := dir.ListWebmailSessions(email, now)
+	if err != nil {
+		log.Fatalf("hermex-admin: list webmail sessions: %v", err)
+	}
+	panel, err := dir.ListAdminSessions(email, now)
+	if err != nil {
+		log.Fatalf("hermex-admin: list panel sessions: %v", err)
+	}
+	if len(web) == 0 && len(panel) == 0 {
+		fmt.Printf("%s has no live sessions\n", email)
+		return
+	}
+	for _, s := range web {
+		fmt.Printf("webmail  %s  from %s  last active %s  expires %s\n",
+			s.DeviceType, s.ClientIP,
+			time.Unix(s.LastActive, 0).Format(time.RFC3339),
+			time.Unix(s.ExpiresAt, 0).Format(time.RFC3339))
+	}
+	for _, s := range panel {
+		fmt.Printf("panel    signed in %s  expires %s\n",
+			time.Unix(s.CreatedAt, 0).Format(time.RFC3339),
+			time.Unix(s.ExpiresAt, 0).Format(time.RFC3339))
+	}
+}
+
+// revokeSessions ends every session an account holds on both surfaces. It is the
+// compromise-response lever: a stolen cookie is valid for the rest of its life
+// however many times its password is changed elsewhere, and until now the only
+// way to end one was to restart every daemon. Both surfaces are revoked together
+// because an operator responding to a leak does not know which one leaked.
+func revokeSessions(dir *directory.SQLDirectory, email string) {
+	web, err := dir.DeleteWebmailSessionsFor(email)
+	if err != nil {
+		log.Fatalf("hermex-admin: revoke webmail sessions: %v", err)
+	}
+	panel, err := dir.CountedDeleteAdminSessionsFor(email)
+	if err != nil {
+		log.Fatalf("hermex-admin: revoke panel sessions: %v", err)
+	}
+	fmt.Printf("revoked %d webmail and %d panel session(s) for %s\n", web, panel, email)
 }
