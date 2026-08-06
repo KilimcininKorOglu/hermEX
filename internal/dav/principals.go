@@ -44,6 +44,8 @@ func (s *Server) reportPrincipalSearch(w http.ResponseWriter, body []byte) {
 	gal, ok := s.accounts.(directory.GAL)
 	if ok && match != "" {
 		entries, err := gal.SearchGAL(match, 100)
+		// Withhold the addresses the operator hid from the address book.
+		entries = directory.VisibleGAL(entries)
 		if err != nil {
 			s.davError(w, err, http.StatusInternalServerError)
 			return

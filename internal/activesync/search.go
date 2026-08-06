@@ -56,6 +56,8 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, sess *sess
 		var entries []directory.GALEntry
 		if gal, ok := s.accounts.(directory.GAL); ok && query != "" {
 			entries, _ = gal.SearchGAL(query, galSearchLimit)
+			// Withhold the addresses the operator hid from the address book.
+			entries = directory.VisibleGAL(entries)
 		}
 		writeWBXML(w, searchGALReply(srStoreOK, entries))
 	case strings.EqualFold(name, "Mailbox"):

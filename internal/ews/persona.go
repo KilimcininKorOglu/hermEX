@@ -91,6 +91,8 @@ func (s *Server) handleFindPeople(w http.ResponseWriter, inner []byte, _ *sessio
 	var personas []personaOut
 	if gal, ok := s.accounts.(directory.GAL); ok {
 		entries, err := gal.SearchGAL(req.QueryString, personaSearchLimit)
+		// Withhold the addresses the operator hid from the address book.
+		entries = directory.VisibleGAL(entries)
 		if err == nil {
 			for _, e := range entries {
 				personas = append(personas, personaOut{DisplayName: e.DisplayName, EmailAddress: e.Address})
@@ -123,6 +125,9 @@ func (s *Server) handleGetPersona(w http.ResponseWriter, inner []byte, _ *sessio
 	var found *personaOut
 	if gal, ok := s.accounts.(directory.GAL); ok {
 		entries, err := gal.SearchGAL(target, personaSearchLimit)
+		// A hidden address has no persona to report: it answers ErrorPersonNotFound
+		// below, the same as an address absent from the directory.
+		entries = directory.VisibleGAL(entries)
 		if err == nil {
 			for _, e := range entries {
 				if strings.EqualFold(e.Address, target) {

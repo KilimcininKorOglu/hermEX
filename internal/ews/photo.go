@@ -61,6 +61,9 @@ func (s *Server) userPhoto(email string, sess *session) []byte {
 		return nil
 	}
 	entries, _ := gal.SearchGAL(email, 5)
+	// A portrait for an address the operator hid from the address book would
+	// confirm the mailbox exists; the caller's own mailbox is handled above.
+	entries = directory.VisibleGAL(entries)
 	for _, e := range entries {
 		if strings.EqualFold(e.Address, email) && e.StorePath != "" {
 			return storePhoto(e.StorePath)

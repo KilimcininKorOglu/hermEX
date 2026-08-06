@@ -25,7 +25,9 @@ func (s *Server) handleDirectory(w http.ResponseWriter, r *http.Request) {
 	// An empty query lists the whole directory (SearchGAL("") matches every
 	// address), so the contacts page can show the GAL — not only a live search.
 	if gal, ok := s.auth.(directory.GAL); ok {
+		// Withhold the addresses the operator hid from the address book.
 		if res, err := gal.SearchGAL(q, limit); err == nil {
+			res = directory.VisibleGAL(res)
 			for _, e := range res {
 				entries = append(entries, map[string]any{"name": e.DisplayName, "email": e.Address, "display_name": e.DisplayName})
 			}

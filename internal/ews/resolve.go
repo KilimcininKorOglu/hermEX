@@ -54,6 +54,8 @@ func (s *Server) handleResolveNames(w http.ResponseWriter, inner []byte, _ *sess
 		return
 	}
 	entries, err := gal.SearchGAL(req.UnresolvedEntry, resolveLimit)
+	// Withhold the addresses the operator hid from name resolution.
+	entries = directory.ResolvableGAL(entries)
 	if err != nil || len(entries) == 0 {
 		writeResolveWarning(w, "ErrorNameResolutionNoResults")
 		return

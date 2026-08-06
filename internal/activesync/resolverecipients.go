@@ -104,6 +104,8 @@ func resolveOneRecipient(gal directory.GAL, to string, opt pictureOpts, win avai
 	var entries []directory.GALEntry
 	if gal != nil && to != "" {
 		entries, _ = gal.SearchGAL(to, resolveRecipientLimit)
+		// Withhold the addresses the operator hid from name resolution.
+		entries = directory.ResolvableGAL(entries)
 	}
 	if len(entries) == 0 {
 		return wbxml.Elem(wbxml.RRResponse, append(resp,
