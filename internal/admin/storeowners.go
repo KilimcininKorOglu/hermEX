@@ -7,7 +7,7 @@ import (
 )
 
 // handleGetUserStoreOwners returns the user's additional store-owner list — the users
-// granted full read-write access to the whole mailbox (system administrators only).
+// granted full read-write access to the whole mailbox. Gated by requireUserScope.
 func (s *Server) handleGetUserStoreOwners(w http.ResponseWriter, r *http.Request) {
 	maildir, ok := s.resolveMaildir(w, r)
 	if !ok {
@@ -24,9 +24,11 @@ func (s *Server) handleGetUserStoreOwners(w http.ResponseWriter, r *http.Request
 	writeJSON(w, map[string]any{"data": list})
 }
 
-// handleSetUserStoreOwners replaces the user's additional store-owner list (system
-// administrators only). Every owner must name a real user; an unknown address is
-// refused so a dead grant is never stored.
+// handleSetUserStoreOwners replaces the user's additional store-owner list. Gated
+// by requireUserScope on the target, and separately by addressScopeError on each
+// owner: the grant hands full read-write access to a second, independent account,
+// which the target's own domain says nothing about. Every owner must name a real
+// user; an unknown address is refused so a dead grant is never stored.
 func (s *Server) handleSetUserStoreOwners(w http.ResponseWriter, r *http.Request) {
 	maildir, ok := s.resolveMaildir(w, r)
 	if !ok {
@@ -35,6 +37,10 @@ func (s *Server) handleSetUserStoreOwners(w http.ResponseWriter, r *http.Request
 	var in []string
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	if bad, ok := s.addressScopeError(s.adminPerms(claimsOf(r).UserID), in); !ok {
+		http.Error(w, scopeRefusal("store owner", bad), http.StatusForbidden)
 		return
 	}
 	list, bad, err := s.canonicalGrantees(in)
@@ -68,8 +74,12 @@ func (s *Server) handleUIUserStoreOwners(w http.ResponseWriter, r *http.Request)
 	case !ok:
 		data["Error"] = "No such user."
 	default:
-		list, bad, gErr := s.canonicalGrantees(strings.Fields(r.PostFormValue("storeowners")))
+		grantees := strings.Fields(r.PostFormValue("storeowners"))
+		list, bad, gErr := s.canonicalGrantees(grantees)
+		outOfScope, inScope := s.addressScopeError(s.adminPerms(claimsOf(r).UserID), grantees)
 		switch {
+		case !inScope:
+			data["Error"] = scopeRefusal("store owner", outOfScope)
 		case gErr != nil:
 			data["Error"] = "Server error."
 		case bad != "":

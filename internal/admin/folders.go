@@ -89,7 +89,8 @@ func (s *Server) canonicalMember(username string) (member string, ok bool, err e
 	return member, true, nil
 }
 
-// handleListUserFolders returns a user's folder tree (system administrators only).
+// handleListUserFolders returns a user's folder tree. The route is gated by
+// requireUserScope, so a domain administrator may read a user they administer.
 func (s *Server) handleListUserFolders(w http.ResponseWriter, r *http.Request) {
 	maildir, ok := s.resolveMaildir(w, r)
 	if !ok {
@@ -108,7 +109,7 @@ func (s *Server) handleListUserFolders(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleListFolderPermissions returns the permission members of one of a user's
-// folders (system administrators only).
+// folders. Gated by requireUserScope, like the rest of the folder endpoints.
 func (s *Server) handleListFolderPermissions(w http.ResponseWriter, r *http.Request) {
 	maildir, ok := s.resolveMaildir(w, r)
 	if !ok {
@@ -132,7 +133,7 @@ func (s *Server) handleListFolderPermissions(w http.ResponseWriter, r *http.Requ
 }
 
 // handleSetFolderPermission grants or updates one member's rights on a folder
-// (system administrators only). The member is addressed by username; an existing
+// (requireUserScope, plus a scope check on the member). The member is addressed by username; an existing
 // member's rights are replaced, a new member is added.
 func (s *Server) handleSetFolderPermission(w http.ResponseWriter, r *http.Request) {
 	maildir, ok := s.resolveMaildir(w, r)
@@ -152,6 +153,10 @@ func (s *Server) handleSetFolderPermission(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
+	if bad, inScope := s.addressScopeError(s.adminPerms(claimsOf(r).UserID), []string{in.Username}); !inScope {
+		http.Error(w, scopeRefusal("folder permission member", bad), http.StatusForbidden)
+		return
+	}
 	member, ok, err := s.canonicalMember(in.Username)
 	if err != nil {
 		http.Error(w, "server error", http.StatusInternalServerError)
@@ -169,7 +174,7 @@ func (s *Server) handleSetFolderPermission(w http.ResponseWriter, r *http.Reques
 }
 
 // handleRemoveFolderPermission drops one member from a folder's permission table
-// (system administrators only), addressed by the wire member id in the query.
+// (requireUserScope), addressed by the wire member id in the query.
 func (s *Server) handleRemoveFolderPermission(w http.ResponseWriter, r *http.Request) {
 	maildir, ok := s.resolveMaildir(w, r)
 	if !ok {
@@ -250,9 +255,13 @@ func (s *Server) handleUISetFolderPerm(w http.ResponseWriter, r *http.Request) {
 	}
 	fid, _ := strconv.ParseInt(r.PostFormValue("fid"), 10, 64)
 	rights, _ := strconv.ParseUint(r.PostFormValue("rights"), 10, 32)
-	member, memberOK, mErr := s.canonicalMember(r.PostFormValue("username"))
+	username := r.PostFormValue("username")
+	member, memberOK, mErr := s.canonicalMember(username)
+	outOfScope, inScope := s.addressScopeError(s.adminPerms(claimsOf(r).UserID), []string{username})
 	errMsg := ""
 	switch {
+	case !inScope:
+		errMsg = scopeRefusal("folder permission member", outOfScope)
 	case mErr != nil:
 		errMsg = s.notice("Could not look up user.", mErr)
 	case !memberOK:

@@ -245,7 +245,7 @@ func (s *Server) handleSetAltnames(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	if bad, ok := s.aliasValueScopeError(s.adminPerms(claimsOf(r).UserID), req.Altnames); !ok {
+	if bad, ok := s.addressScopeError(s.adminPerms(claimsOf(r).UserID), req.Altnames); !ok {
 		http.Error(w, scopeRefusal("alternative name", bad), http.StatusForbidden)
 		return
 	}
@@ -285,7 +285,7 @@ func (s *Server) handleSetUserAliases(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	if bad, ok := s.aliasValueScopeError(s.adminPerms(claimsOf(r).UserID), req.Aliases); !ok {
+	if bad, ok := s.addressScopeError(s.adminPerms(claimsOf(r).UserID), req.Aliases); !ok {
 		http.Error(w, scopeRefusal("alias", bad), http.StatusForbidden)
 		return
 	}

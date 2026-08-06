@@ -31,7 +31,7 @@ func (s *Server) canonicalGrantees(list []string) (canonical []string, bad strin
 }
 
 // handleGetUserSendAs returns the user's send-as list — the addresses permitted to
-// send mail as this user (system administrators only).
+// send mail as this user. Gated by requireUserScope.
 func (s *Server) handleGetUserSendAs(w http.ResponseWriter, r *http.Request) {
 	maildir, ok := s.resolveMaildir(w, r)
 	if !ok {
@@ -48,7 +48,10 @@ func (s *Server) handleGetUserSendAs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"data": list})
 }
 
-// handleSetUserSendAs replaces the user's send-as list (system administrators only).
+// handleSetUserSendAs replaces the user's send-as list. Gated by requireUserScope
+// on the target, and separately by addressScopeError on each grantee: the grant is
+// handed to a second, independent account, which the target's domain does not
+// constrain.
 // Every grantee must name a real user; an unknown address is refused so a dead grant
 // is never stored.
 func (s *Server) handleSetUserSendAs(w http.ResponseWriter, r *http.Request) {
@@ -59,6 +62,10 @@ func (s *Server) handleSetUserSendAs(w http.ResponseWriter, r *http.Request) {
 	var in []string
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	if bad, ok := s.addressScopeError(s.adminPerms(claimsOf(r).UserID), in); !ok {
+		http.Error(w, scopeRefusal("send-as grantee", bad), http.StatusForbidden)
 		return
 	}
 	list, bad, err := s.canonicalGrantees(in)
@@ -92,8 +99,12 @@ func (s *Server) handleUIUserSendAs(w http.ResponseWriter, r *http.Request) {
 	case !ok:
 		data["Error"] = "No such user."
 	default:
-		list, bad, gErr := s.canonicalGrantees(strings.Fields(r.PostFormValue("sendas")))
+		grantees := strings.Fields(r.PostFormValue("sendas"))
+		list, bad, gErr := s.canonicalGrantees(grantees)
+		outOfScope, inScope := s.addressScopeError(s.adminPerms(claimsOf(r).UserID), grantees)
 		switch {
+		case !inScope:
+			data["Error"] = scopeRefusal("send-as grantee", outOfScope)
 		case gErr != nil:
 			data["Error"] = "Server error."
 		case bad != "":

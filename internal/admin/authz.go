@@ -110,23 +110,30 @@ func (s *Server) requireUserScope(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// aliasValueScopeError reports the first alias or alternative-name value whose
-// e-mail domain the caller may not write to, or ok=true when every value is in
-// scope. It closes a value-namespace hole that requireUserScope cannot see:
-// requireUserScope authorizes the TARGET user's domain, but an alias/altname is a
-// SECOND address written into the global resolver (resolve() and GetForward() match
-// inbound mail and logins over username/altname/alias). Without this check a domain
-// admin could edit an in-scope user yet set a value in a foreign served domain
-// (e.g. aliasing alice@acme.test to ceo@victim.test), silently redirecting that
-// domain's mail and logins to the attacker's mailbox.
+// addressScopeError reports the first address whose e-mail domain the caller may
+// not write to, or ok=true when every address is in scope. It closes a hole that
+// requireUserScope cannot see: requireUserScope authorizes the TARGET user's
+// domain, but several settings on that user name a SECOND, independent address,
+// and nothing about the target's domain constrains it.
+//
+// Two families of setting need it. An alias or alternative name is written into
+// the global resolver (resolve() and GetForward() match inbound mail and logins
+// over username/altname/alias), so a domain admin could edit an in-scope user yet
+// point a foreign served domain's mail and logins at their own mailbox (aliasing
+// alice@acme.test to ceo@victim.test). A send-as grantee, an additional store
+// owner, or a folder-permission member is an access grant handed to that second
+// address, so the same admin could otherwise plant a standing grant for an account
+// in a domain they have no authority over. The store-owner grant is the sharpest:
+// it is full read-write access to the whole mailbox, and webmail honours it on its
+// own.
 //
 // A full system administrator is unrestricted (every value passes), matching their
 // authority over the whole deployment. For any other caller, a domain-qualified
-// value must name a SERVED domain the caller administers (domainWriteAllowed) — a
+// address must name a SERVED domain the caller administers (domainWriteAllowed): a
 // domain admin over "*" passes any served domain, a scoped one only its own. Bare
 // values (no "@", used as alternative login names) carry no domain to escape into
 // and are always allowed. On a directory-resolution failure it denies (fail closed).
-func (s *Server) aliasValueScopeError(perms []directory.Permission, values []string) (bad string, ok bool) {
+func (s *Server) addressScopeError(perms []directory.Permission, values []string) (bad string, ok bool) {
 	if hasPerm(perms, directory.PermSystemAdmin, "") {
 		return "", true
 	}
