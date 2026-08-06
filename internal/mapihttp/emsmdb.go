@@ -54,7 +54,7 @@ func (s *Server) serveEmsmdb(w http.ResponseWriter, r *http.Request) {
 	case "Disconnect":
 		s.emsDisconnect(w, r)
 	case "NotificationWait":
-		s.emsNotificationWait(w, r)
+		s.emsNotificationWait(w, r, sess)
 	case "PING":
 		writeNormal(w, r, "PING", nil)
 	default:
@@ -177,13 +177,16 @@ func (s *Server) emsDisconnect(w http.ResponseWriter, r *http.Request) {
 // next Execute drain. Only folder- and message-scoped subscriptions wake it; a
 // whole-store subscription is accepted at registration but not yet polled (D.Inc 2b),
 // so a client that registers only whole-store will not be woken here.
-func (s *Server) emsNotificationWait(w http.ResponseWriter, r *http.Request) {
+func (s *Server) emsNotificationWait(w http.ResponseWriter, r *http.Request, sess *session) {
 	sid, err := r.Cookie("sid")
 	if err != nil {
 		writeRespError(w, r, "NotificationWait", rcMissingCookie)
 		return
 	}
-	ctx := s.sessions.lookup(sid.Value)
+	// Resolved against the authenticated caller, not by sid alone: this runs
+	// outside the Execute sequence, so the owner check Execute performs has to be
+	// repeated here or the wait becomes a way to watch another user's mailbox.
+	ctx := s.sessions.lookup(sid.Value, sess.user)
 	if ctx == nil {
 		writeRespError(w, r, "NotificationWait", rcInvalidCtxCookie)
 		return

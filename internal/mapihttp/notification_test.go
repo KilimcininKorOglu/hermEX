@@ -109,7 +109,7 @@ func TestNotificationWaitPending(t *testing.T) {
 	sid := notifyConnect(t, ts)
 
 	// Subscribe on the live session that the NotificationWait will poll.
-	sc := srv.sessions.lookup(sid)
+	sc := srv.sessions.lookup(sid, testUser)
 	if sc == nil {
 		t.Fatal("session not found after Connect")
 	}
@@ -141,7 +141,7 @@ func TestNotificationWaitWakesMidWait(t *testing.T) {
 	mailbox := t.TempDir()
 	ts, srv := notifyTestServer(t, mailbox)
 	sid := notifyConnect(t, ts)
-	sc := srv.sessions.lookup(sid)
+	sc := srv.sessions.lookup(sid, testUser)
 	if sc == nil {
 		t.Fatal("session not found after Connect")
 	}

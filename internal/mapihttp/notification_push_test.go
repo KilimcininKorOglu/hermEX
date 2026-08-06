@@ -39,7 +39,7 @@ func TestNotificationWaitWakesViaPush(t *testing.T) {
 	t.Cleanup(func() { objectstore.SetChangePublisher(nil) })
 
 	sid := notifyConnect(t, ts)
-	sc := srv.sessions.lookup(sid)
+	sc := srv.sessions.lookup(sid, testUser)
 	if sc == nil {
 		t.Fatal("session not found after Connect")
 	}

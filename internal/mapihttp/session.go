@@ -16,25 +16,42 @@ import (
 // client holds only the opaque sid cookie that maps here. The per-Execute
 // sequence cookie is an ordering/replay guard. ropSess holds the ROP object and
 // handle table, which lives across Execute calls until Disconnect. lastSeen is
-// the last time the client touched the session, so one that stops answering can
-// be reclaimed; it is guarded by the store's mutex, not read directly.
+// the last time the client touched the session and created is when Connect minted
+// it; both are guarded by the store's mutex, not read directly.
 type sessionContext struct {
 	user     string
 	mailbox  string
 	sequence string
 	ropSess  *rop.Session
 	lastSeen time.Time
+	created  time.Time
 }
 
 // sessionStore maps sid cookies to live session contexts. A mailbox is normally
 // served by one client at a time, so a single mutex is sufficient.
+//
+// maxAge is the absolute lifetime: a session is refused and reclaimed once it
+// reaches that age however busy it has been. Idle reclamation alone never
+// reaches a client that keeps polling, and such a session pins a ROP object and
+// handle table with an open mailbox store for as long as the client runs, so
+// both the table and the handles it accumulates grow without bound. Reaching the
+// cap answers the next request with the invalid-context code, which is the
+// re-Connect signal [MS-OXCMAPIHTTP] already defines, so a live client rebuilds
+// its session rather than failing. A maxAge of zero disables the cap.
 type sessionStore struct {
-	mu sync.Mutex
-	m  map[string]*sessionContext
+	mu     sync.Mutex
+	m      map[string]*sessionContext
+	maxAge time.Duration
 }
 
-func newSessionStore() *sessionStore {
-	return &sessionStore{m: make(map[string]*sessionContext)}
+func newSessionStore(maxAge time.Duration) *sessionStore {
+	return &sessionStore{m: make(map[string]*sessionContext), maxAge: maxAge}
+}
+
+// tooOld reports whether a session has reached its absolute lifetime. The caller
+// holds the store's mutex.
+func (s *sessionStore) tooOld(c *sessionContext, now time.Time) bool {
+	return s.maxAge > 0 && now.Sub(c.created) >= s.maxAge
 }
 
 // create mints a session for the user and returns its sid and initial sequence.
@@ -43,13 +60,15 @@ func newSessionStore() *sessionStore {
 // SMTP address (the From of a submitted message).
 func (s *sessionStore) create(user, mailbox string, accounts directory.Accounts, spool *relay.Spool, logger *logging.Logger) (sid, sequence string) {
 	sid, sequence = newSessionToken(), newSessionToken()
+	now := time.Now()
 	s.mu.Lock()
 	s.m[sid] = &sessionContext{
 		user:     user,
 		mailbox:  mailbox,
 		sequence: sequence,
 		ropSess:  rop.NewSession(mailbox, accounts, user, rop.WithSpool(spool), rop.WithLogger(logger)),
-		lastSeen: time.Now(),
+		lastSeen: now,
+		created:  now,
 	}
 	s.mu.Unlock()
 	return sid, sequence
@@ -63,8 +82,9 @@ func (s *sessionStore) create(user, mailbox string, accounts directory.Accounts,
 func (s *sessionStore) execute(sid, seq, user string) (newSeq string, ctx *sessionContext, code int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	now := time.Now()
 	c, found := s.m[sid]
-	if !found {
+	if !found || s.tooOld(c, now) {
 		return "", nil, rcInvalidCtxCookie
 	}
 	if c.user != user {
@@ -74,22 +94,27 @@ func (s *sessionStore) execute(sid, seq, user string) (newSeq string, ctx *sessi
 		return "", nil, rcInvalidSeq
 	}
 	c.sequence = newSessionToken()
-	c.lastSeen = time.Now()
+	c.lastSeen = now
 	return c.sequence, c, rcSuccess
 }
 
-// lookup resolves a session by its sid cookie without rolling the sequence — for
+// lookup resolves a session by its sid cookie without rolling the sequence, for
 // NotificationWait, which runs on a parallel connection outside the Execute
-// sequence. It returns nil when the sid is unknown.
-func (s *sessionStore) lookup(sid string) *sessionContext {
+// sequence. It returns nil when the sid is unknown, when the session has reached
+// its absolute lifetime, or when it belongs to another account: the sid alone is
+// not authority over a session, and without the owner check any authenticated
+// caller holding another user's sid could park a wait on that mailbox and learn
+// when it changes.
+func (s *sessionStore) lookup(sid, user string) *sessionContext {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	c := s.m[sid]
-	if c != nil {
-		// Stamp at the start of the long poll, not its end: a wait that parks for
-		// most of a minute must not look idle while it is running.
-		c.lastSeen = time.Now()
+	if c == nil || c.user != user || s.tooOld(c, time.Now()) {
+		return nil
 	}
+	// Stamp at the start of the long poll, not its end: a wait that parks for
+	// most of a minute must not look idle while it is running.
+	c.lastSeen = time.Now()
 	return c
 }
 
@@ -105,16 +130,17 @@ func (s *sessionStore) drop(sid string) {
 	}
 }
 
-// sweep discards every session idle for longer than ttl and returns how many it
-// reclaimed. A client that dies without Disconnect leaves its session behind, and
-// each one pins a ROP handle table, so without this the server accumulates open
-// mailbox stores for clients that are never coming back. ROP tables are closed
-// outside the lock, as drop does.
+// sweep discards every session idle for longer than ttl, and every session past
+// the store's absolute lifetime however recently it was used, returning how many
+// it reclaimed. A client that dies without Disconnect leaves its session behind,
+// and each one pins a ROP handle table, so without this the server accumulates
+// open mailbox stores for clients that are never coming back. ROP tables are
+// closed outside the lock, as drop does.
 func (s *sessionStore) sweep(now time.Time, ttl time.Duration) int {
 	var expired []*sessionContext
 	s.mu.Lock()
 	for sid, c := range s.m {
-		if now.Sub(c.lastSeen) >= ttl {
+		if now.Sub(c.lastSeen) >= ttl || s.tooOld(c, now) {
 			delete(s.m, sid)
 			expired = append(expired, c)
 		}

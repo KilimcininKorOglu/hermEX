@@ -52,8 +52,16 @@ type Server struct {
 // sessionTTL is how long a session may go untouched before it is reclaimed; it is
 // far above the notification long-poll window (notifyWaitInterval), and the poll
 // stamps the session when it parks, so a wait in progress is never reclaimed.
+//
+// Idle reclamation never reaches a client that keeps polling, so sessionMaxAge
+// caps a session's absolute lifetime as well: past it the session is refused and
+// swept however busy it has been, which bounds the ROP handle table and the open
+// mailbox store a single long-running client can pin. A day is long enough that
+// a working Outlook rebuilds its session about once between sittings rather than
+// mid-task.
 const (
 	sessionTTL           = 30 * time.Minute
+	sessionMaxAge        = 24 * time.Hour
 	sessionSweepInterval = time.Minute
 )
 
@@ -109,7 +117,7 @@ func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostna
 		accounts:      accounts,
 		spool:         spool,
 		hostname:      hostname,
-		sessions:      newSessionStore(),
+		sessions:      newSessionStore(sessionMaxAge),
 		nsp:           nspi.NewServer(gal, serverGUID),
 		nspiSessions:  newNspiSessionStore(),
 		notifyWait:    notifyWaitInterval,

@@ -14,7 +14,7 @@ import (
 func testStore(t *testing.T) (*sessionStore, directory.StaticAccounts) {
 	t.Helper()
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: t.TempDir()}}
-	return newSessionStore(), accs
+	return newSessionStore(sessionMaxAge), accs
 }
 
 // TestSweepReclaimsIdleSession proves a session whose client vanished without
@@ -35,7 +35,7 @@ func TestSweepReclaimsIdleSession(t *testing.T) {
 	if _, _, code := store.execute(sid, seq, testUser); code != rcInvalidCtxCookie {
 		t.Errorf("execute after reclaim = %d, want rcInvalidCtxCookie (%d)", code, rcInvalidCtxCookie)
 	}
-	if store.lookup(sid) != nil {
+	if store.lookup(sid, testUser) != nil {
 		t.Error("lookup still resolves a reclaimed session")
 	}
 }
@@ -97,7 +97,7 @@ func TestLookupKeepsAParkedWaitAlive(t *testing.T) {
 	store, accs := testStore(t)
 	sid, _ := store.create(testUser, accs[testUser].MailboxPath, accs, nil, nil)
 
-	if store.lookup(sid) == nil {
+	if store.lookup(sid, testUser) == nil {
 		t.Fatal("lookup did not resolve a live session")
 	}
 	if n := store.sweep(time.Now(), sessionTTL); n != 0 {
