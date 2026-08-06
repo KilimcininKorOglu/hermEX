@@ -202,7 +202,16 @@ type Server struct {
 	mailq         MailQueue
 	resolver      dnsResolver
 	healthTargets []HealthTarget
+
+	// logger records the internal error behind a sanitized client response. A nil
+	// logger drops the event (Logger.Emit is nil-safe), so the panel still serves
+	// without one; only the diagnosis is lost.
+	logger *logging.Logger
 }
+
+// SetLogger attaches the central logger, so a failing request records its real
+// error server-side while the client is answered with a generic message.
+func (s *Server) SetLogger(l *logging.Logger) { s.logger = l }
 
 // NewServer builds an admin server backed by the directory, deriving new
 // resources' on-disk paths with paths and signing sessions with secret. The

@@ -86,12 +86,15 @@ func (s *Server) handleSetUserSyncPolicy(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
+	// Validate's message is written by the policy package and names the offending
+	// field, so it is the API's answer to "which field did I get wrong". It carries
+	// no driver or filesystem text and is returned to the caller as-is.
 	if err := in.Validate(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if err := s.store.SetSyncPolicy(maildir, in); err != nil {
-		http.Error(w, "could not set sync policy: "+err.Error(), http.StatusInternalServerError)
+		s.fail(w, "could not set sync policy", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -148,12 +151,15 @@ func (s *Server) handleSetDefaultSyncPolicy(w http.ResponseWriter, r *http.Reque
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
+	// Validate's message is written by the policy package and names the offending
+	// field, so it is the API's answer to "which field did I get wrong". It carries
+	// no driver or filesystem text and is returned to the caller as-is.
 	if err := in.Validate(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if err := s.dir.SetDefaultSyncPolicy(in); err != nil {
-		http.Error(w, "could not set default sync policy: "+err.Error(), http.StatusInternalServerError)
+		s.fail(w, "could not set default sync policy", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -210,12 +216,15 @@ func (s *Server) handleSetDomainSyncPolicy(w http.ResponseWriter, r *http.Reques
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
+	// Validate's message is written by the policy package and names the offending
+	// field, so it is the API's answer to "which field did I get wrong". It carries
+	// no driver or filesystem text and is returned to the caller as-is.
 	if err := in.Validate(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 	if _, err := s.dir.SetDomainSyncPolicy(dd.Name, in); err != nil {
-		http.Error(w, "could not set sync policy: "+err.Error(), http.StatusInternalServerError)
+		s.fail(w, "could not set sync policy", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

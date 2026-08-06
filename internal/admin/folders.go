@@ -162,7 +162,7 @@ func (s *Server) handleSetFolderPermission(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err := s.store.SetFolderPermission(maildir, fid, member, in.Rights); err != nil {
-		http.Error(w, "could not set permission: "+err.Error(), http.StatusInternalServerError)
+		s.fail(w, "could not set permission", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -186,7 +186,7 @@ func (s *Server) handleRemoveFolderPermission(w http.ResponseWriter, r *http.Req
 		return
 	}
 	if err := s.store.RemoveFolderPermission(maildir, fid, memberID); err != nil {
-		http.Error(w, "could not remove permission: "+err.Error(), http.StatusInternalServerError)
+		s.fail(w, "could not remove permission", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

@@ -76,7 +76,7 @@ func (s *Server) handleCreateOrg(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := s.dir.CreateOrg(in.Name, in.Description)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not create organization", err, http.StatusBadRequest)
 		return
 	}
 	writeJSONStatus(w, http.StatusCreated, map[string]int64{"id": id})
@@ -113,7 +113,7 @@ func (s *Server) handleUpdateOrg(w http.ResponseWriter, r *http.Request) {
 	}
 	found, err := s.dir.UpdateOrg(id, in.Name, in.Description)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not update organization", err, http.StatusBadRequest)
 		return
 	}
 	if !found {
@@ -133,7 +133,7 @@ func (s *Server) handleDeleteOrg(w http.ResponseWriter, r *http.Request) {
 	}
 	found, err := s.dir.DeleteOrg(id)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not delete organization", err, http.StatusBadRequest)
 		return
 	}
 	if !found {
@@ -157,7 +157,7 @@ func (s *Server) handleAssignOrgDomain(w http.ResponseWriter, r *http.Request) {
 	}
 	found, err := s.dir.AssignDomainToOrg(domID, orgID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not assign the domain to the organization", err, http.StatusBadRequest)
 		return
 	}
 	if !found {
@@ -180,7 +180,7 @@ func (s *Server) handleUnassignOrgDomain(w http.ResponseWriter, r *http.Request)
 	}
 	found, err := s.dir.AssignDomainToOrg(domID, 0)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not detach the domain from its organization", err, http.StatusBadRequest)
 		return
 	}
 	if !found {
@@ -349,7 +349,7 @@ func (s *Server) handleUIDeleteOrg(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.dir.DeleteOrg(id); err != nil {
-		http.Error(w, "could not delete organization: "+err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not delete organization", err, http.StatusBadRequest)
 		return
 	}
 	w.Header().Set("HX-Redirect", "/admin/ui/orgs")

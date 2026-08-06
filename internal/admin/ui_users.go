@@ -406,7 +406,7 @@ func (s *Server) handleUIUserDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	deleteFiles := r.PostFormValue("deleteFiles") != ""
 	if _, err := s.dir.DeleteUser(r.PathValue("email"), deleteFiles); err != nil {
-		http.Error(w, "could not delete user: "+err.Error(), http.StatusInternalServerError)
+		s.fail(w, "could not delete user", err, http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("HX-Redirect", "/admin/ui/users")

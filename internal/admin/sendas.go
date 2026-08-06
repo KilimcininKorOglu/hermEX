@@ -71,7 +71,7 @@ func (s *Server) handleSetUserSendAs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.SetSendAs(maildir, list); err != nil {
-		http.Error(w, "could not set send-as: "+err.Error(), http.StatusInternalServerError)
+		s.fail(w, "could not set send-as", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

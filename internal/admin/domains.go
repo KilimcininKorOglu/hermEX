@@ -145,7 +145,7 @@ func (s *Server) handleUpdateDomain(w http.ResponseWriter, r *http.Request) {
 		upd.Tel = *req.Tel
 	}
 	if _, err := s.dir.UpdateDomain(id, upd); err != nil {
-		http.Error(w, "could not update domain: "+err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not update domain", err, http.StatusBadRequest)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -164,12 +164,12 @@ func (s *Server) handleCreateDomain(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := s.dir.CreateDomain(req.Name, s.paths.HomedirFor(req.Name))
 	if err != nil {
-		http.Error(w, "could not create domain: "+err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not create domain", err, http.StatusBadRequest)
 		return
 	}
 	if req.MaxUser > 0 {
 		if _, err := s.dir.UpdateDomain(id, directory.DomainUpdate{MaxUser: req.MaxUser}); err != nil {
-			http.Error(w, "created the domain, but could not set the user limit: "+err.Error(), http.StatusInternalServerError)
+			s.fail(w, "created the domain, but could not set the user limit", err, http.StatusInternalServerError)
 			return
 		}
 	}
@@ -188,7 +188,7 @@ func (s *Server) handleDeleteDomain(w http.ResponseWriter, r *http.Request) {
 	}
 	ok, err := s.dir.PurgeDomain(id, r.URL.Query().Get("deleteFiles") == "true")
 	if err != nil {
-		http.Error(w, "could not purge domain: "+err.Error(), http.StatusInternalServerError)
+		s.fail(w, "could not purge domain", err, http.StatusInternalServerError)
 		return
 	}
 	if !ok {

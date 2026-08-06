@@ -104,7 +104,7 @@ func (s *Server) handleCreateUserFetchmail(w http.ResponseWriter, r *http.Reques
 	}
 	id, err := s.dir.CreateFetchmail(in.entry(r.PathValue("email")))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not create the fetchmail entry", err, http.StatusBadRequest)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")

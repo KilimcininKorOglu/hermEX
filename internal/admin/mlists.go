@@ -162,7 +162,7 @@ func (s *Server) handleUIDeleteMList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.dir.DeleteMList(r.PathValue("addr")); err != nil {
-		http.Error(w, "could not delete list: "+err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not delete list", err, http.StatusBadRequest)
 		return
 	}
 	w.Header().Set("HX-Redirect", "/admin/ui/mlists")

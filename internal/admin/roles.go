@@ -52,7 +52,7 @@ func (s *Server) handleGrantRole(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.dir.GrantAdminRole(uid, req.Role, req.ScopeID); err != nil {
-		http.Error(w, "could not grant role: "+err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not grant role", err, http.StatusBadRequest)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

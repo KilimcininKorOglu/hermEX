@@ -46,7 +46,7 @@ func (s *Server) handleSetUserMeeting(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.SetMeetingConfig(maildir, objectstore.MeetingConfig{
 		AutoAccept: in.AutoAccept, DeclineRecurring: in.DeclineRecurring, DeclineConflict: in.DeclineConflict,
 	}); err != nil {
-		http.Error(w, "could not set meeting config: "+err.Error(), http.StatusInternalServerError)
+		s.fail(w, "could not set meeting config", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

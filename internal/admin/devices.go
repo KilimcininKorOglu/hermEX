@@ -69,7 +69,7 @@ func (s *Server) handleUserDeviceAction(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := s.applyDeviceAction(u.Maildir, req.DeviceID, req.Action); err != nil {
-		http.Error(w, "could not apply device action: "+err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not apply device action", err, http.StatusBadRequest)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

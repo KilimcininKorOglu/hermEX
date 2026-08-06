@@ -168,7 +168,7 @@ func (s *Server) handleSetDomainDefaults(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := s.storeDomainOverride(id, u); err != nil {
-		http.Error(w, "could not save create defaults: "+err.Error(), http.StatusInternalServerError)
+		s.fail(w, "could not save create defaults", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -220,7 +220,7 @@ func (s *Server) handleSetDefaults(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.dir.SetCreateDefaults(0, cd); err != nil {
-		http.Error(w, "could not save create defaults: "+err.Error(), http.StatusInternalServerError)
+		s.fail(w, "could not save create defaults", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

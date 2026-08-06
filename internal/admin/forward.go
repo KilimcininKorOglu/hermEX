@@ -41,7 +41,7 @@ func (s *Server) handleSetUserForward(w http.ResponseWriter, r *http.Request) {
 	}
 	found, err := s.dir.SetForward(r.PathValue("email"), in.ForwardType, in.Destination)
 	if err != nil {
-		http.Error(w, "could not set forward: "+err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not set forward", err, http.StatusBadRequest)
 		return
 	}
 	if !found {

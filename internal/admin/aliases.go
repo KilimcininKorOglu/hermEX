@@ -27,7 +27,7 @@ func (s *Server) handleCreateAlias(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.dir.CreateAlias(req.Alias, req.Main); err != nil {
-		http.Error(w, "could not create alias: "+err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not create alias", err, http.StatusBadRequest)
 		return
 	}
 	writeJSONStatus(w, http.StatusCreated, map[string]any{"alias": req.Alias, "main": req.Main})

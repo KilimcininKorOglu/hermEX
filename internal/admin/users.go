@@ -48,7 +48,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := s.dir.CreateUser(req.Email, req.Password, s.paths.MaildirFor(req.Email))
 	if err != nil {
-		http.Error(w, "could not create user: "+err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not create user", err, http.StatusBadRequest)
 		return
 	}
 	writeJSONStatus(w, http.StatusCreated, map[string]any{"id": id, "email": req.Email})
@@ -189,7 +189,7 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		DAV:         req.DAV,
 	})
 	if err != nil {
-		http.Error(w, "could not update user: "+err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not update user", err, http.StatusBadRequest)
 		return
 	}
 	if !found {
@@ -245,7 +245,7 @@ func (s *Server) handleSetAltnames(w http.ResponseWriter, r *http.Request) {
 	}
 	found, err := s.dir.SetAltnames(r.PathValue("email"), req.Altnames)
 	if err != nil {
-		http.Error(w, "could not set alternative names: "+err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not set alternative names", err, http.StatusBadRequest)
 		return
 	}
 	if !found {
@@ -285,7 +285,7 @@ func (s *Server) handleSetUserAliases(w http.ResponseWriter, r *http.Request) {
 	}
 	found, err := s.dir.SetAliasesFor(r.PathValue("email"), req.Aliases)
 	if err != nil {
-		http.Error(w, "could not set aliases: "+err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not set aliases", err, http.StatusBadRequest)
 		return
 	}
 	if !found {
@@ -364,7 +364,7 @@ func (s *Server) handleSetContact(w http.ResponseWriter, r *http.Request) {
 	}
 	found, err := s.dir.SetUserProperties(r.PathValue("email"), contactProps(req))
 	if err != nil {
-		http.Error(w, "could not set contact: "+err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not set contact", err, http.StatusBadRequest)
 		return
 	}
 	if !found {

@@ -47,7 +47,7 @@ func (s *Server) handleSetUserStoreOwners(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if err := s.store.SetStoreOwners(maildir, list); err != nil {
-		http.Error(w, "could not set store owners: "+err.Error(), http.StatusInternalServerError)
+		s.fail(w, "could not set store owners", err, http.StatusInternalServerError)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

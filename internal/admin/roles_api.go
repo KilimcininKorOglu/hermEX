@@ -73,7 +73,7 @@ func (s *Server) handleRoleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := s.dir.CreateRole(in.Name, in.Description, in.Permissions, in.UserIDs)
 	if err != nil {
-		http.Error(w, "could not create role: "+err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not create role", err, http.StatusBadRequest)
 		return
 	}
 	writeJSONStatus(w, http.StatusCreated, map[string]any{"id": id})
@@ -112,7 +112,7 @@ func (s *Server) handleRoleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	found, err := s.dir.UpdateRole(id, in.Name, in.Description, in.Permissions, in.UserIDs)
 	if err != nil {
-		http.Error(w, "could not update role: "+err.Error(), http.StatusBadRequest)
+		s.fail(w, "could not update role", err, http.StatusBadRequest)
 		return
 	}
 	if !found {

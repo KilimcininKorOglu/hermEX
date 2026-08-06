@@ -217,6 +217,7 @@ func main() {
 		dir.SetLDAPVerifier(ldapVerifier) // an administrator may be LDAP-mastered
 		logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 		srv := admin.NewServer(dir, cfg, []byte(cfg.AdminSecret))
+		srv.SetLogger(logger)           // a failing request records its real error here, not in the response
 		srv.SetLDAPSyncer(ldapVerifier) // enables the Directory Sync trigger
 		var targets []admin.HealthTarget
 		for _, t := range cfg.HealthTargets {
