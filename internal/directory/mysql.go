@@ -262,11 +262,24 @@ LIMIT 1`, login, login, login).Scan(&id, &username)
 	if err != nil {
 		return nil, err
 	}
+	// A domain-qualified identity is only reported while this server still hosts
+	// its domain. The address it names is what the webmail compose gate and the
+	// SMTP submission MAIL FROM check accept as a From, so one left behind, by a
+	// domain that was purged out from under it or by a row predating the checks in
+	// CreateAlias, would let the account keep originating mail claiming an address
+	// the operator no longer has any authority over. A bare value carries no
+	// domain to claim and serves the alternative-login path, so it is kept.
 	out := []string{username}
 	rows, err := d.db.Query(`
-SELECT aliasname FROM aliases WHERE mainname = ?
+SELECT aliasname FROM aliases
+ WHERE mainname = ?
+   AND (LOCATE('@', aliasname) = 0
+        OR SUBSTRING_INDEX(aliasname, '@', -1) IN (SELECT domainname FROM domains))
 UNION
-SELECT altname FROM altnames WHERE user_id = ?`, username, id)
+SELECT altname FROM altnames
+ WHERE user_id = ?
+   AND (LOCATE('@', altname) = 0
+        OR SUBSTRING_INDEX(altname, '@', -1) IN (SELECT domainname FROM domains))`, username, id)
 	if err != nil {
 		return nil, err
 	}

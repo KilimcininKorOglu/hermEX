@@ -15,8 +15,10 @@ import (
 // most of it: deleting the domain row cascades its users, and each user cascades
 // its altnames, admin-role grants, named-role assignments, and properties; a
 // distribution list's pseudo-user cascades its membership rows. The rows with no
-// foreign key to a user — aliases, forwards, fetchmail entries — are removed
-// explicitly first, while the users still exist to be matched. Role permissions
+// foreign key to a user (aliases, forwards, fetchmail entries) are removed
+// explicitly first, while the users still exist to be matched; aliases are cleared
+// from both ends, since one addressed INTO this domain belongs to a user elsewhere
+// and no user-keyed delete would reach it. Role permissions
 // scoped to this domain (DomainAdmin/DomainAdminRO with the domain's id) are
 // removed too; an emptied role is left in place (harmless, admin-deletable) — a
 // deliberate, safe deviation from deleting it.
@@ -24,8 +26,8 @@ import (
 // File deletion is best-effort and happens only after the database transaction
 // commits, so a storage error never leaves the directory half-purged.
 func (d *SQLDirectory) PurgeDomain(domainID int64, deleteFiles bool) (bool, error) {
-	var homedir string
-	err := d.db.QueryRow(`SELECT homedir FROM domains WHERE id = ?`, domainID).Scan(&homedir)
+	var homedir, domainname string
+	err := d.db.QueryRow(`SELECT homedir, domainname FROM domains WHERE id = ?`, domainID).Scan(&homedir, &domainname)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
@@ -62,6 +64,15 @@ func (d *SQLDirectory) PurgeDomain(domainID int64, deleteFiles bool) (bool, erro
 
 	const usersOfDomain = `SELECT username FROM users WHERE domain_id = ?`
 	if _, err := tx.Exec(`DELETE FROM aliases WHERE mainname IN (`+usersOfDomain+`)`, domainID); err != nil {
+		return false, err
+	}
+	// Also the aliases pointing INTO this domain from a user elsewhere. Those are
+	// keyed by address string with no foreign key, so nothing above reaches them,
+	// and each is reported by Identities as an address its owner may send as: left
+	// behind, they would let an account in a surviving domain keep claiming
+	// addresses in the one that was just removed.
+	if _, err := tx.Exec(
+		`DELETE FROM aliases WHERE SUBSTRING_INDEX(aliasname, '@', -1) = ?`, domainname); err != nil {
 		return false, err
 	}
 	if _, err := tx.Exec(`DELETE FROM forwards WHERE username IN (`+usersOfDomain+`)`, domainID); err != nil {
