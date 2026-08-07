@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"slices"
 	"strings"
 	"time"
 
@@ -170,8 +171,8 @@ func dnsblQuery(ip net.IP, zone string) string {
 	}
 	if v6 := ip.To16(); v6 != nil {
 		var b strings.Builder
-		for i := len(v6) - 1; i >= 0; i-- {
-			fmt.Fprintf(&b, "%x.%x.", v6[i]&0x0f, v6[i]>>4)
+		for _, v := range slices.Backward(v6) {
+			fmt.Fprintf(&b, "%x.%x.", v&0x0f, v>>4)
 		}
 		b.WriteString(zone)
 		return b.String()

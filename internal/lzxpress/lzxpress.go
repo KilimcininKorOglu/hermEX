@@ -166,10 +166,7 @@ func Compress(data []byte) []byte {
 	}
 
 	for uPos < len(data) {
-		maxLen := len(data) - uPos
-		if maxLen > 0xffff+3 {
-			maxLen = 0xffff + 3
-		}
+		maxLen := min(len(data)-uPos, 0xffff+3)
 		there, mlen := -1, 0
 		if maxLen >= 3 {
 			h := threeByteHash(data[uPos:])
@@ -270,7 +267,7 @@ func storeMatch(hash *[1 << hashBits]uint32, h uint16, offset uint32) {
 func lookupMatch(hash *[1 << hashBits]uint32, h uint16, data []byte, offset uint32, maxLen int) (int, int) {
 	best, bestLen := -1, 0
 	here := int(offset)
-	for i := uint16(0); i < hashSearch; i++ {
+	for i := range uint16(hashSearch) {
 		o := hash[(h+i)&hashMask]
 		if o >= offset {
 			break

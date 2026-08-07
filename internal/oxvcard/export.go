@@ -126,7 +126,7 @@ func exportAddresses(b *builder, p *mapi.PropertyValues, named map[mapi.Property
 
 // exportEmails emits one EMAIL line per populated contact email slot.
 func exportEmails(b *builder, p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag) {
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		if addr := namedStr(p, named, emailSlot[i][0]); addr != "" {
 			b.line("EMAIL", addr)
 		}

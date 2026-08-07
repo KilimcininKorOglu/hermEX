@@ -434,19 +434,15 @@ func isModByte(b byte) bool {
 // toGoRegex translates a Perl regex and its modifiers into an RE2 pattern,
 // hoisting the supported i/s/m flags into a leading (?…) group.
 func toGoRegex(pat, mods string) string {
-	var flags string
+	var flags []byte
 	for _, m := range mods {
 		switch m {
-		case 'i':
-			flags += "i"
-		case 's':
-			flags += "s"
-		case 'm':
-			flags += "m"
+		case 'i', 's', 'm':
+			flags = append(flags, byte(m))
 		}
 	}
-	if flags != "" {
-		return "(?" + flags + ")" + pat
+	if len(flags) > 0 {
+		return "(?" + string(flags) + ")" + pat
 	}
 	return pat
 }

@@ -171,8 +171,7 @@ func TestRcptGreylistDefersUnauthenticated(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = sess.Rcpt("alice@test", smtp.RcptParams{})
-	var te *smtp.TempError
-	if !errors.As(err, &te) {
+	if _, ok := errors.AsType[*smtp.TempError](err); !ok {
 		t.Fatalf("first contact should defer with a TempError, got %v", err)
 	}
 }

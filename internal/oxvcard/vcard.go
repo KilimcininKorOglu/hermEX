@@ -2,6 +2,7 @@ package oxvcard
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 )
 
@@ -87,7 +88,7 @@ func splitLine(line string) (name string, params map[string][]string, value stri
 			key, val = "TYPE", p
 		}
 		key = strings.ToUpper(strings.TrimSpace(key))
-		for _, v := range strings.Split(val, ",") {
+		for v := range strings.SplitSeq(val, ",") {
 			params[key] = append(params[key], strings.Trim(strings.TrimSpace(v), `"`))
 		}
 	}
@@ -122,12 +123,7 @@ func (l vline) types() []string {
 
 // hasType reports whether the line carries the given TYPE value (case-insensitive).
 func (l vline) hasType(t string) bool {
-	for _, v := range l.types() {
-		if v == t {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(l.types(), t)
 }
 
 // text returns the line's value as a single unescaped string.

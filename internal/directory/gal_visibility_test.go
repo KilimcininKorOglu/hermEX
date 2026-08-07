@@ -1,6 +1,9 @@
 package directory
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // galSet is the four visibility cases an operator can produce with the panel's
 // hide switches.
@@ -22,12 +25,7 @@ func addresses(entries []GALEntry) []string {
 }
 
 func contains(list []string, want string) bool {
-	for _, s := range list {
-		if s == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, want)
 }
 
 // TestVisibleGALDropsOnlyGALHidden proves a browse or search surface hides the

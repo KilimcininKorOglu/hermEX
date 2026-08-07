@@ -3,6 +3,7 @@ package oxvcard
 import (
 	"encoding/base64"
 	"errors"
+	"slices"
 	"strings"
 	"time"
 
@@ -130,12 +131,7 @@ func setNamed(p *mapi.PropertyValues, named map[mapi.PropertyName]mapi.PropTag, 
 // first (a work fax is a fax, not a work voice number). Returns 0 to skip.
 func telTag(types []string) mapi.PropTag {
 	has := func(t string) bool {
-		for _, v := range types {
-			if v == t {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(types, t)
 	}
 	switch {
 	case has("fax") && has("home"):

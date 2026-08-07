@@ -68,9 +68,7 @@ func TestConcurrentRegenerationYieldsOneResult(t *testing.T) {
 	var wg sync.WaitGroup
 	start := make(chan struct{})
 	for i := range readers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			st, err := Open(dir)
 			if err != nil {
 				t.Error(err)
@@ -84,7 +82,7 @@ func TestConcurrentRegenerationYieldsOneResult(t *testing.T) {
 				return
 			}
 			results[i] = raw
-		}()
+		})
 	}
 	close(start)
 	wg.Wait()

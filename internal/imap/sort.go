@@ -3,6 +3,7 @@ package imap
 import (
 	"fmt"
 	"net/mail"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -349,8 +350,8 @@ func (c *conn) threadReferences(matched []int, byUID bool) string {
 	var roots []*tnode
 	for _, mm := range msgs {
 		parent := -1
-		for j := len(mm.refs) - 1; j >= 0; j-- {
-			if pi, ok := byMsgID[mm.refs[j]]; ok && pi != mm.idx {
+		for _, v := range slices.Backward(mm.refs) {
+			if pi, ok := byMsgID[v]; ok && pi != mm.idx {
 				parent = pi
 				break
 			}

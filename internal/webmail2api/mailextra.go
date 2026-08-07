@@ -409,8 +409,7 @@ scan:
 		// Newest first. The listing is ordered by UID ascending, so walking it
 		// forwards under a cap would keep the OLDEST matches, which is the wrong
 		// end of the mailbox for a search.
-		for i := len(msgs) - 1; i >= 0; i-- {
-			m := msgs[i]
+		for _, m := range slices.Backward(msgs) {
 			// A caller who navigated away must not leave the walk running.
 			if ctx.Err() != nil {
 				truncated = true

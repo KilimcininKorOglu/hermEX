@@ -107,12 +107,10 @@ func verifyStatus(err error) int {
 	if err == nil {
 		return vcStatusOK
 	}
-	var unknownAuth x509.UnknownAuthorityError
-	if errors.As(err, &unknownAuth) {
+	if _, ok := errors.AsType[x509.UnknownAuthorityError](err); ok {
 		return vcStatusUntrusted
 	}
-	var invalid x509.CertificateInvalidError
-	if errors.As(err, &invalid) {
+	if invalid, ok := errors.AsType[x509.CertificateInvalidError](err); ok {
 		switch invalid.Reason {
 		case x509.Expired:
 			return vcStatusBadTime

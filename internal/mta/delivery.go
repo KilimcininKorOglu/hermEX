@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net"
 	"net/mail"
 	"strings"
@@ -137,9 +138,7 @@ func SetDefaultLogger(l *logging.Logger) { defaultLogger.Store(l) }
 // rule, the reply or the meeting update never ran.
 func logPassFailure(pass, subject string, fields logging.Fields, cause any) {
 	f := logging.Fields{"pass": pass}
-	for k, v := range fields {
-		f[k] = v
-	}
+	maps.Copy(f, fields)
 	defaultLogger.Load().Emit(logging.Event{
 		Level: logging.LevelError, Subsystem: logging.MTA, Name: "delivery.pass.fail",
 		User: subject, Fields: f, Err: fmt.Sprint(cause),

@@ -3,6 +3,7 @@ package webmail2api
 import (
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -129,8 +130,7 @@ scan:
 		}
 		// Newest first and bounded, for the reason handleSearch gives: a saved
 		// search runs the same unindexed walk and reads the same messages.
-		for i := len(msgs) - 1; i >= 0; i-- {
-			msg := msgs[i]
+		for _, msg := range slices.Backward(msgs) {
 			if len(results) >= maxSearchResults {
 				break scan
 			}
