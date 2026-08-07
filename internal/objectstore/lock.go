@@ -79,6 +79,6 @@ func (s *Store) withExclusiveLock(fn func() error) error {
 	}
 	// Back to shared afterwards, so the store stays usable and a later pass can
 	// still upgrade.
-	defer syscall.Flock(fd, syscall.LOCK_SH)
+	defer func() { _ = syscall.Flock(fd, syscall.LOCK_SH) }()
 	return fn()
 }

@@ -515,7 +515,7 @@ func (s *Server) consumeData(tp *textproto.Reader, sess Session, trace string) e
 	err := sess.Data(r)
 	// Always drain the underlying dot-encoded body so the next command reads
 	// cleanly, even when delivery was rejected or the size limit tripped.
-	io.Copy(io.Discard, dot)
+	_, _ = io.Copy(io.Discard, dot)
 	return err
 }
 

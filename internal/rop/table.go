@@ -1002,7 +1002,7 @@ func (s *Session) ropCreateBookmark(_ *ext.Pull, out *ext.Push, handles []uint32
 	out.Uint8(ropCreateBookmark)
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
-	out.BinShort([]byte{byte(idx >> 8), byte(idx & 0xFF)})
+	_ = out.BinShort([]byte{byte(idx >> 8), byte(idx & 0xFF)}) // 2 bytes, so this never errors
 	return true
 }
 

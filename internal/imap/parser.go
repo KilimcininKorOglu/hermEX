@@ -182,7 +182,7 @@ func (r *commandReader) readAtom() string {
 			return sb.String()
 		}
 		if isAtomDelimiter(b) {
-			r.br.UnreadByte()
+			_ = r.br.UnreadByte() // the ReadByte above succeeded, so this cannot fail
 			return sb.String()
 		}
 		sb.WriteByte(b)

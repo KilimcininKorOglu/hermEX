@@ -182,7 +182,7 @@ func (s *Store) writeEML(mid string, data []byte) error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
+	defer func() { _ = os.Remove(tmp.Name()) }() // a no-op once the rename succeeds
 	if _, err := tmp.Write(data); err != nil {
 		tmp.Close()
 		return err

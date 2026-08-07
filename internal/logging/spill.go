@@ -46,7 +46,8 @@ func (s *MongoSink) replaySpill() {
 		return // cannot read it now; keep it and retry on the next success
 	}
 	if len(docs) == 0 {
-		os.Remove(s.spillPath)
+		// A failed removal only costs an empty re-read on the next drain.
+		_ = os.Remove(s.spillPath)
 		s.hasSpill = false
 		return
 	}
@@ -59,7 +60,10 @@ func (s *MongoSink) replaySpill() {
 			return // unreachable again — keep the file, retry later
 		}
 	}
-	os.Remove(s.spillPath)
+	// The batches are already in Mongo. A failed removal replays them on the next
+	// drain, which duplicates events rather than losing them: the safe direction,
+	// and the only one available to the logger itself.
+	_ = os.Remove(s.spillPath)
 	s.hasSpill = false
 }
 

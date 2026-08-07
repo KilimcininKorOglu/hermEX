@@ -122,7 +122,7 @@ func (m *BayesModel) SaveFile(path string) error {
 		return err
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // a no-op once the rename succeeds
+	defer func() { _ = os.Remove(tmpName) }() // a no-op once the rename succeeds
 	if err := m.Save(tmp); err != nil {
 		tmp.Close()
 		return err

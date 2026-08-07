@@ -67,7 +67,7 @@ func pollPOP3(s Store, deliver Deliverer, cfg directory.FetchmailEntry, now time
 	if err != nil {
 		return 0, err
 	}
-	defer c.quit()
+	defer func() { _ = c.quit() }()
 	if err := c.auth(cfg.SrcUser, cfg.SrcPassword); err != nil {
 		return 0, err
 	}
@@ -117,7 +117,7 @@ func pollIMAP(deliver Deliverer, cfg directory.FetchmailEntry, now time.Time) (i
 	if err != nil {
 		return 0, err
 	}
-	defer c.logout()
+	defer func() { _ = c.logout() }()
 	if err := c.login(cfg.SrcUser, cfg.SrcPassword); err != nil {
 		return 0, err
 	}
