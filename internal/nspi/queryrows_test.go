@@ -113,7 +113,7 @@ func decodeRow(t *testing.T, p *ext.Pull, cols []mapi.PropTag) mapi.PropertyValu
 func TestQueryRowsWalk(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test", "carol@hermex.test")
 	body := buildQueryRows(stat{curRec: midBeginningOfTable, codePage: 1252}, nil, 10, nil)
-	p := ext.NewPull(s.QueryRows(body), abkFlags)
+	p := ext.NewPull(s.QueryRows(body, testCaller), abkFlags)
 
 	if status := mustU32(t, p, "status"); status != 0 {
 		t.Fatalf("status = %#x, want 0", status)
@@ -157,7 +157,7 @@ func TestQueryRowsWalk(t *testing.T) {
 func TestQueryRowsExplicit(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test")
 	body := buildQueryRows(stat{codePage: 1252}, []uint32{midBase + 1, 0x9999}, 10, nil)
-	p := ext.NewPull(s.QueryRows(body), abkFlags)
+	p := ext.NewPull(s.QueryRows(body, testCaller), abkFlags)
 	mustU32(t, p, "status")
 	if result := mustU32(t, p, "result"); result != ecSuccess {
 		t.Fatalf("result = %#x", result)
@@ -190,7 +190,7 @@ func TestUpdateStatAdvance(t *testing.T) {
 	p.Uint8(1)  // delta_requested
 	p.Uint32(0) // cb_auxin
 
-	pr := ext.NewPull(s.UpdateStat(p.Bytes()), abkFlags)
+	pr := ext.NewPull(s.UpdateStat(p.Bytes(), testCaller), abkFlags)
 	mustU32(t, pr, "status")
 	if result := mustU32(t, pr, "result"); result != ecSuccess {
 		t.Fatalf("result = %#x", result)
@@ -234,7 +234,7 @@ func TestQueryColumns(t *testing.T) {
 func TestQueryRowsZeroCount(t *testing.T) {
 	s := testGAL("alice@hermex.test")
 	body := buildQueryRows(stat{codePage: 1252}, nil, 0, nil)
-	p := ext.NewPull(s.QueryRows(body), abkFlags)
+	p := ext.NewPull(s.QueryRows(body, testCaller), abkFlags)
 	mustU32(t, p, "status")
 	if result := mustU32(t, p, "result"); result != ecInvalidParam {
 		t.Errorf("count=0 result = %#x, want ecInvalidParam", result)

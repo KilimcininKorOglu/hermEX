@@ -82,6 +82,7 @@ type loginRow struct {
 	displayType  int
 	domainStatus int
 	externid     []byte // non-nil => the account is mastered in an LDAP directory
+	domainID     int64  // the account's domain (the narrow address-book scope)
 	orgID        int64  // the account's organization (selects its LDAP config)
 	mustChange   bool   // true => an admin reset requires a forced password change
 }
@@ -91,16 +92,16 @@ type loginRow struct {
 // rows (no such address) and more than one (ambiguous) are both a non-match.
 func (d *SQLDirectory) resolve(addr string) (loginRow, bool, error) {
 	const q = `
-SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, d.org_id, u.must_change_password
+SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, u.domain_id, d.org_id, u.must_change_password
   FROM users u JOIN domains d ON u.domain_id = d.id
  WHERE u.username = ?
 UNION
-SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, d.org_id, u.must_change_password
+SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, u.domain_id, d.org_id, u.must_change_password
   FROM users u JOIN domains d ON u.domain_id = d.id
   JOIN altnames a ON a.user_id = u.id
  WHERE a.altname = ?
 UNION
-SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, d.org_id, u.must_change_password
+SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, u.domain_id, d.org_id, u.must_change_password
   FROM users u JOIN domains d ON u.domain_id = d.id
   JOIN aliases al ON al.mainname = u.username
  WHERE al.aliasname = ?
@@ -114,7 +115,7 @@ SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status,
 	for rows.Next() {
 		var r loginRow
 		var mustChange int
-		if err := rows.Scan(&r.password, &r.maildir, &r.addrStatus, &r.displayType, &r.domainStatus, &r.externid, &r.orgID, &mustChange); err != nil {
+		if err := rows.Scan(&r.password, &r.maildir, &r.addrStatus, &r.displayType, &r.domainStatus, &r.externid, &r.domainID, &r.orgID, &mustChange); err != nil {
 			return loginRow{}, false, err
 		}
 		r.mustChange = mustChange != 0
@@ -311,11 +312,16 @@ SELECT DISTINCT u.maildir
 }
 
 // SharedMailboxes implements SharedMailboxLister: the address and store path of
-// every shared mailbox — a mailbox user (DT_MAILUSER) in an active domain whose
-// address_status carries the shared bit. These have no interactive login, so
-// webmail lists the ones the signed-in user has been granted access to. The
-// username column is the mailbox's e-mail address.
-func (d *SQLDirectory) SharedMailboxes() ([]SharedMailbox, error) {
+// every shared mailbox visible to caller (see galScopePredicate): a mailbox user
+// (DT_MAILUSER) in an active domain whose address_status carries the shared bit.
+// These have no interactive login, so webmail lists the ones the signed-in user
+// has been granted access to. The username column is the mailbox's e-mail
+// address.
+func (d *SQLDirectory) SharedMailboxes(caller string) ([]SharedMailbox, error) {
+	scope, ok := d.galScope(caller)
+	if !ok {
+		return nil, nil
+	}
 	const q = `
 SELECT u.username, u.maildir
   FROM users u JOIN domains d ON u.domain_id = d.id
@@ -323,9 +329,10 @@ SELECT u.username, u.maildir
    AND u.display_type = ?
    AND (u.address_status & ?) = ?
    AND (u.address_status & ?) = 0
-   AND d.domain_status = 0
+   AND d.domain_status = 0` + galScopePredicate + `
  ORDER BY u.username`
-	rows, err := d.db.Query(q, dtMailuser, afUserMask, afUserSharedMbox, afDomainMask)
+	args := append([]any{dtMailuser, afUserMask, afUserSharedMbox, afDomainMask}, scope...)
+	rows, err := d.db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -342,17 +349,23 @@ SELECT u.username, u.maildir
 }
 
 // SearchGAL implements GAL: a case-insensitive substring match over the
-// addresses of the address-book objects in an active domain — mailbox users with
-// a maildir (DT_MAILUSER) and distribution lists (DT_DISTLIST, which have no
-// mailbox) — ordered by address and capped at limit. It returns one entry per
-// object: aliases and altnames are deliberately not searched, since inbound alias
-// delivery already works via Resolve and folding them in would suggest one person
-// several times. DisplayName is the object's PR_DISPLAY_NAME from user_properties,
-// falling back to the address when none is set; DisplayType carries the object
-// class (the users.display_type column, not joined from user_properties).
-func (d *SQLDirectory) SearchGAL(query string, limit int) ([]GALEntry, error) {
+// addresses of the address-book objects visible to caller (see
+// galScopePredicate), namely mailbox users with a maildir (DT_MAILUSER) and
+// distribution lists (DT_DISTLIST, which have no mailbox), ordered by address and
+// capped at limit.
+// It returns one entry per object: aliases and altnames are deliberately not
+// searched, since inbound alias delivery already works via Resolve and folding
+// them in would suggest one person several times. DisplayName is the object's
+// PR_DISPLAY_NAME from user_properties, falling back to the address when none is
+// set; DisplayType carries the object class (the users.display_type column, not
+// joined from user_properties).
+func (d *SQLDirectory) SearchGAL(caller, query string, limit int) ([]GALEntry, error) {
 	if limit <= 0 {
 		limit = 20
+	}
+	scope, ok := d.galScope(caller)
+	if !ok {
+		return nil, nil
 	}
 	// Escape LIKE metacharacters so a typed % or _ matches literally; the pattern
 	// is a bound parameter, so only the ESCAPE clause sits in the SQL text (where
@@ -378,13 +391,16 @@ SELECT u.username, u.display_type, u.maildir, dn.propval_str, hg.propval_str, hb
    AND (u.address_status & ?) = ?
    AND (u.address_status & ?) = 0
    AND d.domain_status = 0
-   AND u.username LIKE ? ESCAPE '\\'
+   AND u.username LIKE ? ESCAPE '\\'` + galScopePredicate + `
  ORDER BY u.username
  LIMIT ?`
-	rows, err := d.db.Query(q, prDisplayName, prAttrHiddenMask, prAttrHiddenBool, prRoomCapacity,
+	args := []any{prDisplayName, prAttrHiddenMask, prAttrHiddenBool, prRoomCapacity,
 		dtMailuser, dtDistlist, dtContact, dtRoom, dtEquipment, // display_type IN
 		dtDistlist, dtContact, // maildir-exempt types (no mailbox)
-		afUserMask, afUserNormal, afDomainMask, "%"+esc+"%", limit)
+		afUserMask, afUserNormal, afDomainMask, "%" + esc + "%"}
+	args = append(args, scope...)
+	args = append(args, limit)
+	rows, err := d.db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -16,8 +16,8 @@ type hidingAccounts struct {
 	hidden map[string]uint32
 }
 
-func (h hidingAccounts) SearchGAL(q string, limit int) ([]directory.GALEntry, error) {
-	entries, err := h.StaticAccounts.SearchGAL(q, limit)
+func (h hidingAccounts) SearchGAL(caller, q string, limit int) ([]directory.GALEntry, error) {
+	entries, err := h.StaticAccounts.SearchGAL(caller, q, limit)
 	for i := range entries {
 		entries[i].HiddenFrom = h.hidden[entries[i].Address]
 	}

@@ -109,8 +109,9 @@ type SharedMailbox struct {
 // knows. Webmail lists those the signed-in user may open (access is rechecked
 // per store), so a user can browse and act on a shared mailbox they have rights
 // to. Directories that cannot enumerate may omit it; webmail then shows none.
+// caller scopes the result the same way GAL.SearchGAL does.
 type SharedMailboxLister interface {
-	SharedMailboxes() ([]SharedMailbox, error)
+	SharedMailboxes(caller string) ([]SharedMailbox, error)
 }
 
 // LocalDomains optionally reports whether a domain is one this server is
@@ -182,8 +183,15 @@ type GALEntry struct {
 // users) for entries whose address matches a typed query, backing webmail
 // recipient autocomplete and "check names" resolution. Directories that cannot
 // enumerate users may omit it; webmail then offers no suggestions.
+//
+// caller is the authenticated account making the search, and the result is
+// scoped to what that account may see. It is a required argument rather than an
+// optional refinement because an unscoped address book lets any authenticated
+// account enumerate every mailbox in the deployment; making the compiler ask for
+// it is what keeps a new surface from reintroducing that. An empty caller
+// resolves to nothing rather than everything.
 type GAL interface {
-	SearchGAL(query string, limit int) ([]GALEntry, error)
+	SearchGAL(caller, query string, limit int) ([]GALEntry, error)
 }
 
 // DisplayTypeRoom is the PR_DISPLAY_TYPE_EX value (DT_ROOM) that marks a bookable
@@ -197,8 +205,10 @@ const DisplayTypeRoom = dtRoom
 // name, DisplayType, and seating capacity. It backs the EWS GetRoomLists/GetRooms
 // room-finder operations and the webmail room picker. Directories that cannot
 // enumerate resources may omit it; the room finder then returns nothing.
+// caller scopes the result the same way GAL.SearchGAL does; a room is an
+// address-book object like any other.
 type RoomLister interface {
-	ListRooms() ([]GALEntry, error)
+	ListRooms(caller string) ([]GALEntry, error)
 }
 
 // StaticAccounts is a fixed map of lowercase address/username to Account. It
@@ -262,8 +272,9 @@ func (a StaticAccounts) Maildirs() ([]string, error) {
 }
 
 // SharedMailboxes implements SharedMailboxLister: the accounts flagged Shared,
-// by address and mailbox path, ordered by address for a stable listing.
-func (a StaticAccounts) SharedMailboxes() ([]SharedMailbox, error) {
+// by address and mailbox path, ordered by address for a stable listing. caller
+// is ignored for the reason SearchGAL gives.
+func (a StaticAccounts) SharedMailboxes(string) ([]SharedMailbox, error) {
 	out := make([]SharedMailbox, 0)
 	for addr, acc := range a {
 		if acc.Shared && acc.MailboxPath != "" {
@@ -278,7 +289,10 @@ func (a StaticAccounts) SharedMailboxes() ([]SharedMailbox, error) {
 // addresses, collapsed to one entry per mailbox so aliases that share a mailbox
 // do not suggest the same person twice. Results are ordered by address and
 // capped at limit (limit <= 0 means no cap). DisplayName mirrors the address.
-func (a StaticAccounts) SearchGAL(query string, limit int) ([]GALEntry, error) {
+//
+// caller is ignored: a static directory is one flat map with no domains, so
+// every account is in the same scope by construction.
+func (a StaticAccounts) SearchGAL(_, query string, limit int) ([]GALEntry, error) {
 	q := strings.ToLower(strings.TrimSpace(query))
 	addrs := make([]string, 0, len(a))
 	for addr := range a {
@@ -307,8 +321,8 @@ func (a StaticAccounts) SearchGAL(query string, limit int) ([]GALEntry, error) {
 // ListRooms implements RoomLister. It returns the accounts flagged Room, each as
 // a GALEntry addressed by its map key with the room display type, sorted by
 // address for a stable order. The static directory holds no capacity, so it is
-// reported as zero.
-func (a StaticAccounts) ListRooms() ([]GALEntry, error) {
+// reported as zero, and caller is ignored for the reason SearchGAL gives.
+func (a StaticAccounts) ListRooms(string) ([]GALEntry, error) {
 	addrs := make([]string, 0, len(a))
 	for addr, acc := range a {
 		if acc.Room {

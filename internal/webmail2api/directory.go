@@ -12,7 +12,8 @@ import (
 // handleDirectory backs the GAL address-book autocomplete: it searches the
 // directory's Global Address List and returns matching entries.
 func (s *Server) handleDirectory(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.session(r); !ok {
+	c, ok := s.session(r)
+	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
@@ -26,7 +27,7 @@ func (s *Server) handleDirectory(w http.ResponseWriter, r *http.Request) {
 	// address), so the contacts page can show the GAL — not only a live search.
 	if gal, ok := s.auth.(directory.GAL); ok {
 		// Withhold the addresses the operator hid from the address book.
-		if res, err := gal.SearchGAL(q, limit); err == nil {
+		if res, err := gal.SearchGAL(c.Email, q, limit); err == nil {
 			res = directory.VisibleGAL(res)
 			for _, e := range res {
 				entries = append(entries, map[string]any{"name": e.DisplayName, "email": e.Address, "display_name": e.DisplayName})

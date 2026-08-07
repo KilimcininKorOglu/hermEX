@@ -58,34 +58,36 @@ const nspiUnbindSuccess uint32 = 1
 // the transport. A decode failure returns an NDR fault; an unserved opnum returns
 // an op-range fault.
 //
-// The GAL is global to every authenticated user, so no per-bind session state is
-// kept: NspiBind mints a fresh context handle the client echoes back on each
-// call, and the data ops are stateless (the STAT cursor is client-carried). The
-// HTTP transport has already authenticated the caller via Basic auth.
-func (s *Server) DispatchRPC(opnum uint16, stub []byte) (out []byte, fault uint32) {
+// No per-bind session state is kept: NspiBind mints a fresh context handle the
+// client echoes back on each call, and the data ops are stateless (the STAT
+// cursor is client-carried). caller is the account the HTTP transport already
+// authenticated via Basic auth; the address book each op serves is scoped to it,
+// so an empty caller yields an empty address book rather than the whole
+// deployment.
+func (s *Server) DispatchRPC(opnum uint16, stub []byte, caller string) (out []byte, fault uint32) {
 	switch opnum {
 	case opNspiBind:
 		return s.rpcBind(stub)
 	case opNspiUnbind:
 		return s.rpcUnbind(stub)
 	case opNspiUpdateStat:
-		return s.rpcUpdateStat(stub)
+		return s.rpcUpdateStat(stub, caller)
 	case opNspiQueryRows:
-		return s.rpcQueryRows(stub)
+		return s.rpcQueryRows(stub, caller)
 	case opNspiSeekEntries:
-		return s.rpcSeekEntries(stub)
+		return s.rpcSeekEntries(stub, caller)
 	case opNspiGetMatches:
-		return s.rpcGetMatches(stub)
+		return s.rpcGetMatches(stub, caller)
 	case opNspiResortRestriction:
-		return s.rpcResortRestriction(stub)
+		return s.rpcResortRestriction(stub, caller)
 	case opNspiDNToMId:
-		return s.rpcDNToMid(stub)
+		return s.rpcDNToMid(stub, caller)
 	case opNspiGetPropList:
-		return s.rpcGetPropList(stub)
+		return s.rpcGetPropList(stub, caller)
 	case opNspiGetProps:
-		return s.rpcGetProps(stub)
+		return s.rpcGetProps(stub, caller)
 	case opNspiCompareMIds:
-		return s.rpcCompareMids(stub)
+		return s.rpcCompareMids(stub, caller)
 	case opNspiModProps:
 		return s.rpcModProps(stub)
 	case opNspiGetSpecialTable:
@@ -97,9 +99,9 @@ func (s *Server) DispatchRPC(opnum uint16, stub []byte) (out []byte, fault uint3
 	case opNspiQueryColumns:
 		return s.rpcQueryColumns(stub)
 	case opNspiResolveNames:
-		return s.rpcResolveNames(stub, false)
+		return s.rpcResolveNames(stub, false, caller)
 	case opNspiResolveNamesW:
-		return s.rpcResolveNames(stub, true)
+		return s.rpcResolveNames(stub, true, caller)
 	default:
 		// Opnums 15/17/18 are reserved/unused in the NSPI interface (the reference
 		// enum omits them too), and anything past 20 is out of range; none is a

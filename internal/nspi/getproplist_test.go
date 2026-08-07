@@ -21,7 +21,7 @@ func buildGetPropList(mid, codePage uint32) []byte {
 // column set, and the code page is irrelevant (the list is proptags only).
 func TestGetPropList(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test")
-	p := ext.NewPull(s.GetPropList(buildGetPropList(midBase, 1252)), abkFlags)
+	p := ext.NewPull(s.GetPropList(buildGetPropList(midBase, 1252), testCaller), abkFlags)
 	if status := mustU32(t, p, "status"); status != 0 {
 		t.Fatalf("status = %#x, want 0", status)
 	}
@@ -45,7 +45,7 @@ func TestGetPropList(t *testing.T) {
 func TestGetPropListInvalidMid(t *testing.T) {
 	s := testGAL("alice@hermex.test")
 	for _, mid := range []uint32{0, 0x9999} {
-		p := ext.NewPull(s.GetPropList(buildGetPropList(mid, 1252)), abkFlags)
+		p := ext.NewPull(s.GetPropList(buildGetPropList(mid, 1252), testCaller), abkFlags)
 		mustU32(t, p, "status")
 		if result := mustU32(t, p, "result"); result != ecInvalidObject {
 			t.Errorf("MId %#x result = %#x, want ecInvalidObject", mid, result)

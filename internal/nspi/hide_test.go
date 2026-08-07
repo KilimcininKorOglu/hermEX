@@ -12,7 +12,7 @@ import (
 // every entry is returned; the NSPI layer does the per-surface hide filtering.
 type maskedGAL []directory.GALEntry
 
-func (m maskedGAL) SearchGAL(query string, limit int) ([]directory.GALEntry, error) {
+func (m maskedGAL) SearchGAL(caller, query string, limit int) ([]directory.GALEntry, error) {
 	return []directory.GALEntry(m), nil
 }
 
@@ -42,7 +42,7 @@ func rowSMTP(t *testing.T, row mapi.PropertyValues) string {
 // TestSnapshotCarriesHideMask proves the directory's hide mask reaches the GAL
 // entry, so every downstream surface can apply its own bit.
 func TestSnapshotCarriesHideMask(t *testing.T) {
-	g := hidingServer().snapshot()
+	g := hidingServer().snapshot(testCaller)
 	want := map[string]uint32{
 		"both@hermex.test":  abHideFromGAL | abHideResolve,
 		"gal@hermex.test":   abHideFromGAL,
@@ -62,7 +62,7 @@ func TestSnapshotCarriesHideMask(t *testing.T) {
 // asking for a specific entry opens it regardless of the GAL bit.
 func TestQueryRowsHidesFromGAL(t *testing.T) {
 	s := hidingServer()
-	r := s.queryRowsCore(queryRowsRequest{stat: stat{codePage: 1252}, count: 100})
+	r := s.queryRowsCore(queryRowsRequest{stat: stat{codePage: 1252}, count: 100}, testCaller)
 	if r.result != ecSuccess {
 		t.Fatalf("result = %#x, want ecSuccess", r.result)
 	}
@@ -86,7 +86,7 @@ func TestQueryRowsHidesFromGAL(t *testing.T) {
 	// gal@ (MId 0x11) is hidden from the GAL browse but a direct fetch by its MId
 	// still returns it.
 	galMID := midBase + 1
-	d := s.queryRowsCore(queryRowsRequest{stat: stat{codePage: 1252}, explicit: []uint32{galMID}, count: 100})
+	d := s.queryRowsCore(queryRowsRequest{stat: stat{codePage: 1252}, explicit: []uint32{galMID}, count: 100}, testCaller)
 	if len(d.rows) != 1 || rowSMTP(t, d.rows[0]) != "gal@hermex.test" {
 		t.Errorf("explicit fetch of hidden gal@ = %v, want one gal@ row", d.rows)
 	}
@@ -97,7 +97,7 @@ func TestQueryRowsHidesFromGAL(t *testing.T) {
 // hidden from resolution (resol@, both@) is not. If the GAL bit ever silently
 // blocked resolution, gal@ would fail here.
 func TestResolveIndependentOfGALBit(t *testing.T) {
-	g := hidingServer().snapshot()
+	g := hidingServer().snapshot(testCaller)
 	cases := []struct {
 		token      string
 		wantStatus uint32
@@ -129,7 +129,7 @@ func TestGetMatchesHidesGALandResolve(t *testing.T) {
 	s := hidingServer()
 	f := anrFilter("@hermex.test") // matches all four addresses
 	_, mids, _, rows := decodeGetMatches(t, s.GetMatches(buildGetMatches(
-		stat{sortType: sortTypeDisplayName, codePage: 1252}, &f, 50, nil)))
+		stat{sortType: sortTypeDisplayName, codePage: 1252}, &f, 50, nil), testCaller))
 	if len(mids) != 1 {
 		t.Fatalf("mids = %d (%v), want 1 (only vis@)", len(mids), mids)
 	}
@@ -147,7 +147,7 @@ func TestSeekEntriesSkipsGALHidden(t *testing.T) {
 		stat:   stat{sortType: sortTypeDisplayName, codePage: 1252},
 		target: mapi.TaggedPropVal{Tag: mapi.PrDisplayName, Value: "g"},
 	}
-	r := s.seekEntriesCore(req)
+	r := s.seekEntriesCore(req, testCaller)
 	if r.result != ecSuccess {
 		t.Fatalf("result = %#x, want ecSuccess", r.result)
 	}
@@ -167,7 +167,7 @@ func TestDistlistRendersAsDistList(t *testing.T) {
 		{DisplayName: "team", Address: "team@hermex.test", DisplayType: mapi.DisplayTypeDistList},
 		{DisplayName: "alice", Address: "alice@hermex.test", DisplayType: mapi.DisplayTypeMailUser},
 	}, testGUID)
-	g := s.snapshot()
+	g := s.snapshot(testCaller)
 	props := map[string]mapi.PropertyValues{}
 	for _, u := range g.users {
 		props[u.smtp] = galUserProps(u)
@@ -190,7 +190,7 @@ func TestGetPropsDirectOpenIgnoresHide(t *testing.T) {
 	s := hidingServer()
 	bothMID := midBase // both@ is first, fully hidden
 	_, row := decodeGetProps(t, s.GetProps(buildGetProps(
-		stat{sortType: sortTypeDisplayName, codePage: 1252, curRec: bothMID}, nil)))
+		stat{sortType: sortTypeDisplayName, codePage: 1252, curRec: bothMID}, nil), testCaller))
 	if got := rowSMTP(t, row); got != "both@hermex.test" {
 		t.Errorf("direct GetProps of hidden both@ = %q, want both@hermex.test", got)
 	}

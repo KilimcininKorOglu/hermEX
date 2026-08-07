@@ -65,7 +65,7 @@ func decodeSeek(t *testing.T, resp []byte) (uint32, stat, mapi.PropertyValues) {
 func TestSeekEntries(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test", "carol@hermex.test")
 	st := stat{sortType: sortTypeDisplayName, codePage: 1252}
-	result, out, row := decodeSeek(t, s.SeekEntries(buildSeekEntries(st, "bob", nil, nil)))
+	result, out, row := decodeSeek(t, s.SeekEntries(buildSeekEntries(st, "bob", nil, nil), testCaller))
 	if result != ecSuccess {
 		t.Fatalf("result = %#x, want ecSuccess", result)
 	}
@@ -84,7 +84,7 @@ func TestSeekEntries(t *testing.T) {
 func TestSeekEntriesPastEnd(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test")
 	st := stat{sortType: sortTypeDisplayName, codePage: 1252}
-	result, _, _ := decodeSeek(t, s.SeekEntries(buildSeekEntries(st, "zzzz", nil, nil)))
+	result, _, _ := decodeSeek(t, s.SeekEntries(buildSeekEntries(st, "zzzz", nil, nil), testCaller))
 	if result != ecNotFound {
 		t.Errorf("result = %#x, want ecNotFound", result)
 	}
@@ -94,7 +94,7 @@ func TestSeekEntriesPastEnd(t *testing.T) {
 func TestSeekEntriesRejectsNonDisplaySort(t *testing.T) {
 	s := testGAL("alice@hermex.test")
 	st := stat{sortType: 0x99, codePage: 1252}
-	result, _, _ := decodeSeek(t, s.SeekEntries(buildSeekEntries(st, "a", nil, nil)))
+	result, _, _ := decodeSeek(t, s.SeekEntries(buildSeekEntries(st, "a", nil, nil), testCaller))
 	if result != ecError {
 		t.Errorf("result = %#x, want ecError", result)
 	}
@@ -129,16 +129,16 @@ func TestCompareMids(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test", "carol@hermex.test")
 	alice, carol := midBase, midBase+2
 
-	if cmp, result := decodeCompareMids(t, s.CompareMids(buildCompareMids(carol, alice))); result != ecSuccess || cmp != -1 {
+	if cmp, result := decodeCompareMids(t, s.CompareMids(buildCompareMids(carol, alice), testCaller)); result != ecSuccess || cmp != -1 {
 		t.Errorf("compare(carol, alice) = (cmp %d, result %#x), want (-1, ok) — alice precedes carol", cmp, result)
 	}
-	if cmp, result := decodeCompareMids(t, s.CompareMids(buildCompareMids(alice, carol))); result != ecSuccess || cmp != 1 {
+	if cmp, result := decodeCompareMids(t, s.CompareMids(buildCompareMids(alice, carol), testCaller)); result != ecSuccess || cmp != 1 {
 		t.Errorf("compare(alice, carol) = (cmp %d, result %#x), want (1, ok)", cmp, result)
 	}
-	if cmp, _ := decodeCompareMids(t, s.CompareMids(buildCompareMids(alice, alice))); cmp != 0 {
+	if cmp, _ := decodeCompareMids(t, s.CompareMids(buildCompareMids(alice, alice), testCaller)); cmp != 0 {
 		t.Errorf("compare(alice, alice) cmp = %d, want 0", cmp)
 	}
-	if _, result := decodeCompareMids(t, s.CompareMids(buildCompareMids(alice, 0x9999))); result != ecError {
+	if _, result := decodeCompareMids(t, s.CompareMids(buildCompareMids(alice, 0x9999), testCaller)); result != ecError {
 		t.Errorf("compare with an unknown MId result = %#x, want ecError", result)
 	}
 }
@@ -191,7 +191,7 @@ func TestResortRestriction(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test", "carol@hermex.test")
 	in := []uint32{midBase + 2, 0x9999, midBase, midBase + 1} // scrambled + an unknown
 	st := stat{codePage: 1252, curRec: midBase + 1}           // cur_rec (bob) is in the set
-	result, out, mids := decodeResort(t, s.ResortRestriction(buildResort(st, in)))
+	result, out, mids := decodeResort(t, s.ResortRestriction(buildResort(st, in), testCaller))
 	if result != ecSuccess {
 		t.Fatalf("result = %#x, want ecSuccess", result)
 	}
@@ -217,7 +217,7 @@ func TestResortRestriction(t *testing.T) {
 func TestResortRestrictionCursorReset(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test")
 	st := stat{codePage: 1252, curRec: 0x9999} // not in the set
-	_, out, _ := decodeResort(t, s.ResortRestriction(buildResort(st, []uint32{midBase, midBase + 1})))
+	_, out, _ := decodeResort(t, s.ResortRestriction(buildResort(st, []uint32{midBase, midBase + 1}), testCaller))
 	if out.curRec != midBeginningOfTable {
 		t.Errorf("cur_rec = %#x, want BEGINNING_OF_TABLE (current not in set)", out.curRec)
 	}

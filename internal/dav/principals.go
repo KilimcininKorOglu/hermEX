@@ -27,7 +27,7 @@ type propertySearch struct {
 // reportPrincipalSearch answers DAV:principal-property-search by matching the search
 // string against the GAL and returning one principal response per match (RFC 3744
 // §9.4). A directory without GAL support, or an empty match, yields no principals.
-func (s *Server) reportPrincipalSearch(w http.ResponseWriter, body []byte) {
+func (s *Server) reportPrincipalSearch(w http.ResponseWriter, caller string, body []byte) {
 	var req principalSearchReq
 	if err := xml.Unmarshal(body, &req); err != nil {
 		s.davError(w, err, http.StatusBadRequest)
@@ -44,7 +44,7 @@ func (s *Server) reportPrincipalSearch(w http.ResponseWriter, body []byte) {
 	ms := &multistatus{}
 	gal, ok := s.accounts.(directory.GAL)
 	if ok && match != "" {
-		entries, err := gal.SearchGAL(match, 100)
+		entries, err := gal.SearchGAL(caller, match, 100)
 		// Withhold the addresses the operator hid from the address book.
 		entries = directory.VisibleGAL(entries)
 		if err != nil {

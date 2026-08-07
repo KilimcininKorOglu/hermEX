@@ -43,7 +43,7 @@ func delegateWriterServer() (*Server, delegatingGAL) {
 // cannot persist.
 func TestModLinkAttAddsBothEntryIDFormsThenRemoves(t *testing.T) {
 	s, w := delegateWriterServer()
-	g := s.snapshot()
+	g := s.snapshot(testCaller)
 	boss, _ := g.userByAddress("boss@hermex.test")
 	carol, _ := g.userByAddress("carol@hermex.test")
 
@@ -90,7 +90,7 @@ func TestModLinkAttAddsBothEntryIDFormsThenRemoves(t *testing.T) {
 // as someone else must be ecAccessDenied and must not mutate the list.
 func TestModLinkAttDeniesEditingAnotherUsersList(t *testing.T) {
 	s, w := delegateWriterServer()
-	g := s.snapshot()
+	g := s.snapshot(testCaller)
 	boss, _ := g.userByAddress("boss@hermex.test")
 	req := modLinkAttRequest{
 		proptag:  uint32(mapi.PrEmsAbPublicDelegates),
@@ -111,7 +111,7 @@ func TestModLinkAttDeniesEditingAnotherUsersList(t *testing.T) {
 // id sits in the dangerous 20..28 range that a missing bound check would slice past.
 func TestModLinkAttRejectsBadRequests(t *testing.T) {
 	s, w := delegateWriterServer()
-	g := s.snapshot()
+	g := s.snapshot(testCaller)
 	boss, _ := g.userByAddress("boss@hermex.test")
 
 	if code := s.modLinkAttCore(modLinkAttRequest{proptag: uint32(mapi.PrDisplayName), mid: boss.mid}, "boss@hermex.test"); code != ecNotSupported {

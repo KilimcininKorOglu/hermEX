@@ -7,6 +7,12 @@ import (
 	"hermex/internal/mapi"
 )
 
+// testCaller is the authenticated account the tests run every address-book op
+// as. The test GALs are flat and ignore it; it stands in for the identity the
+// transport supplies so the scoped signatures are exercised as production uses
+// them.
+const testCaller = "alice@hermex.test"
+
 // testGUID is a fixed server GUID so a Bind response can be asserted exactly.
 var testGUID = mapi.GUID{Data1: 0x11223344, Data2: 0x5566, Data3: 0x7788, Data4: [8]byte{1, 2, 3, 4, 5, 6, 7, 8}}
 

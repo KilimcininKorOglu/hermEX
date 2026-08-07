@@ -140,11 +140,14 @@ func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostna
 	s.async = rpchttp.NewAsyncEMSMDB(ems)
 	disp.Register(rpchttp.AsyncEMSMDBUUID, rpchttp.AsyncEMSMDBVersion, s.async.Handle)
 	disp.Register(nspi.RPCInterfaceUUID, nspi.RPCInterfaceVersion, func(sess *rpchttp.Session, opnum uint16, stub []byte) ([]byte, uint32) {
-		out, fault := s.nsp.DispatchRPC(opnum, stub)
 		user, addr := "", ""
 		if sess != nil {
 			user, addr = sess.User, sess.RemoteAddr
 		}
+		// The address book is scoped to the caller, so the authenticated identity
+		// goes in rather than only being logged. A session-less call carries no
+		// identity and gets an empty address book, not the whole deployment.
+		out, fault := s.nsp.DispatchRPC(opnum, stub, user)
 		// Mirror the MAPI/HTTP NSPI path (see nspi.go): a per-op "operation" event at
 		// debug, escalated to warn on an RPC fault. This fills the gap on the RPC/HTTP
 		// (Outlook Anywhere) transport, whose shared /rpc POST hides the NSPI op from

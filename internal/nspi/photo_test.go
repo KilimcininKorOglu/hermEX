@@ -27,7 +27,7 @@ func TestGetPropsThumbnailPhoto(t *testing.T) {
 		{DisplayName: "alice@hermex.test", Address: "alice@hermex.test", StorePath: dir},
 	}, testGUID)
 	cols := []mapi.PropTag{mapi.PrEmsAbThumbnailPhoto}
-	result, row := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midBase, codePage: 1252}, cols)))
+	result, row := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midBase, codePage: 1252}, cols), testCaller))
 	if result != ecSuccess {
 		t.Fatalf("result = %#x, want ecSuccess", result)
 	}
@@ -55,7 +55,7 @@ func TestGetPropsThumbnailPhotoAbsent(t *testing.T) {
 		{DisplayName: "alice@hermex.test", Address: "alice@hermex.test", StorePath: dir},
 	}, testGUID)
 	cols := []mapi.PropTag{mapi.PrEmsAbThumbnailPhoto}
-	result, row := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midBase, codePage: 1252}, cols)))
+	result, row := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midBase, codePage: 1252}, cols), testCaller))
 	if result != ecWarnWithErrors {
 		t.Fatalf("result = %#x, want ecWarnWithErrors", result)
 	}

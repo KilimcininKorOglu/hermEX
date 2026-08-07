@@ -14,7 +14,7 @@ func browseList(t *testing.T, s *Server, containerID uint32) []string {
 	r := s.queryRowsCore(queryRowsRequest{
 		stat:  stat{sortType: sortTypeDisplayName, codePage: 1252, containerID: containerID, curRec: midBeginningOfTable},
 		count: 100,
-	})
+	}, testCaller)
 	if r.result != ecSuccess {
 		t.Fatalf("QueryRows(container %#x) result = %#x, want ecSuccess", containerID, r.result)
 	}
@@ -98,7 +98,7 @@ func TestContainerIDDoesNotCrossTalkWithMID(t *testing.T) {
 	}, testGUID)
 	// alice < boardroom by display name, so boardroom is MId midBase+1.
 	st := stat{curRec: midBase + 1, codePage: 1252, containerID: uint32(alContainerUsers)}
-	_, row := decodeGetProps(t, s.GetProps(buildGetProps(st, nil)))
+	_, row := decodeGetProps(t, s.GetProps(buildGetProps(st, nil), testCaller))
 	if got := rowSMTP(t, row); got != "boardroom@hermex.test" {
 		t.Errorf("by-MId GetProps under the All Users container = %q, want boardroom (no cross-talk)", got)
 	}
@@ -134,7 +134,7 @@ func TestGetMatchesInNamedListFiltersTypeAndHide(t *testing.T) {
 		stat:     stat{sortType: sortTypeDisplayName, codePage: 1252, containerID: uint32(alContainerUsers), curRec: midBeginningOfTable},
 		filter:   &f,
 		rowCount: 50,
-	})
+	}, testCaller)
 	if r.result != ecSuccess {
 		t.Fatalf("result = %#x, want ecSuccess", r.result)
 	}

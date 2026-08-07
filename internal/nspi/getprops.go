@@ -53,12 +53,12 @@ func pullGetProps(body []byte) (getPropsRequest, error) {
 // PT_ERROR(ecNotFound) marker and the result is ecWarnWithErrors; with no column
 // set, the entry's full default bag is returned. An unknown entry yields a row
 // of PT_ERROR markers ([MS-OXNSPI] 3.1.4.1.7 point 11).
-func (s *Server) GetProps(body []byte) []byte {
+func (s *Server) GetProps(body []byte, caller string) []byte {
 	req, err := pullGetProps(body)
 	if err != nil {
 		return s.encodeGetProps(ecError, 0, nil)
 	}
-	r := s.getPropsCore(req)
+	r := s.getPropsCore(req, caller)
 	return s.encodeGetProps(r.result, r.codePage, r.row)
 }
 
@@ -73,7 +73,7 @@ type getPropsResult struct {
 
 // getPropsCore runs the GetProps semantics on a decoded request,
 // transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it.
-func (s *Server) getPropsCore(req getPropsRequest) getPropsResult {
+func (s *Server) getPropsCore(req getPropsRequest, caller string) getPropsResult {
 	if req.stat.codePage == cpWinUnicode {
 		return getPropsResult{result: ecNotSupported, codePage: req.stat.codePage}
 	}
@@ -81,7 +81,7 @@ func (s *Server) getPropsCore(req getPropsRequest) getPropsResult {
 		return getPropsResult{result: ecTableTooBig, codePage: req.stat.codePage}
 	}
 
-	g := s.snapshot()
+	g := s.snapshot(caller)
 	u, ok := g.resolveEntry(req.stat.curRec)
 	if !ok {
 		tags := req.proptags

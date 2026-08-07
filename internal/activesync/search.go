@@ -55,7 +55,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request, sess *sess
 		query := store.ChildText(wbxml.SRQuery)
 		var entries []directory.GALEntry
 		if gal, ok := s.accounts.(directory.GAL); ok && query != "" {
-			entries, _ = gal.SearchGAL(query, galSearchLimit)
+			entries, _ = gal.SearchGAL(sess.user, query, galSearchLimit)
 			// Withhold the addresses the operator hid from the address book.
 			entries = directory.VisibleGAL(entries)
 		}

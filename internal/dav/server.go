@@ -199,7 +199,7 @@ func (s *Server) route(w http.ResponseWriter, r *http.Request) {
 	case "PROPFIND":
 		s.handlePropfind(w, r, user, mailbox)
 	case "REPORT":
-		s.handleReport(w, r, mailbox)
+		s.handleReport(w, r, user, mailbox)
 	case http.MethodGet, http.MethodHead:
 		if calObject {
 			s.handleCalGet(w, r, mailbox)

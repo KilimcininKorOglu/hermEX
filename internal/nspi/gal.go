@@ -143,15 +143,20 @@ func galLess(aDisplay, aSMTP, bDisplay, bSMTP string) bool {
 	return strings.ToLower(aSMTP) < strings.ToLower(bSMTP)
 }
 
-// snapshot builds the GAL: every directory user, ordered for the display-name
-// sort every NSPI client uses (galLess: display name, then address), each
-// assigned a stable MId by position. An empty GAL (no GAL backing, or a lookup
-// error) is a valid empty address book.
-func (s *Server) snapshot() gal {
+// snapshot builds the GAL as caller sees it: the directory objects visible to
+// that account, ordered for the display-name sort every NSPI client uses
+// (galLess: display name, then address), each assigned a stable MId by position.
+// An empty GAL (no GAL backing, a lookup error, or a caller the directory does
+// not place) is a valid empty address book.
+//
+// The snapshot is per-caller because the address book it presents is, so the
+// MIds are too. That costs nothing in stability: a client only ever compares
+// MIds within its own session, and the same caller gets the same ordering.
+func (s *Server) snapshot(caller string) gal {
 	if s.gal == nil {
 		return gal{}
 	}
-	entries, err := s.gal.SearchGAL("", galEnumLimit)
+	entries, err := s.gal.SearchGAL(caller, "", galEnumLimit)
 	if err != nil {
 		return gal{}
 	}

@@ -153,14 +153,14 @@ func TestSearchGALIncludesDistlist(t *testing.T) {
 	d := mlistTestDir(t)
 	mkList(t, d, "team@hermex.test", mlistTypeNormal, mlistPrivAll)
 
-	lists, err := d.SearchGAL("team", 50)
+	lists, err := d.SearchGAL("alice@hermex.test", "team", 50)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(lists) != 1 || lists[0].Address != "team@hermex.test" || lists[0].DisplayType != dtDistlist {
 		t.Errorf("SearchGAL(team) = %+v, want one team@hermex.test with DisplayType DT_DISTLIST", lists)
 	}
-	users, err := d.SearchGAL("alice", 50)
+	users, err := d.SearchGAL("alice@hermex.test", "alice", 50)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestMListOwner(t *testing.T) {
 		t.Fatalf("ListMLists = %+v, %v; want crew owned by alice", lists, err)
 	}
 	// The GAL search that feeds the NSPI address book carries the owner too.
-	if gal, err := d.SearchGAL("crew", 20); err != nil || len(gal) != 1 || gal[0].Owner != "alice@hermex.test" {
+	if gal, err := d.SearchGAL("alice@hermex.test", "crew", 20); err != nil || len(gal) != 1 || gal[0].Owner != "alice@hermex.test" {
 		t.Fatalf("SearchGAL owner = %+v, %v; want crew owned by alice", gal, err)
 	}
 	// The webmail group-management surface lists the lists a user owns.

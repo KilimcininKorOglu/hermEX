@@ -62,7 +62,7 @@ func midArray(p *ext.Push, mids []uint32) error {
 // DNToMId handles the NSPI DNToMId request ([MS-OXNSPI] 2.2.4): it maps each
 // input distinguished name to its MId (or MID_UNRESOLVED). Our DNs embed the
 // SMTP address as the final cn= component, so the reverse is a snapshot lookup.
-func (s *Server) DNToMId(body []byte) []byte {
+func (s *Server) DNToMId(body []byte, caller string) []byte {
 	p := ext.NewPull(body, abkFlags)
 	if _, err := p.Uint32(); err != nil { // reserved
 		return s.encodeDNToMId(ecError, nil)
@@ -80,14 +80,14 @@ func (s *Server) DNToMId(body []byte) []byte {
 	if err := skipAuxIn(p); err != nil {
 		return s.encodeDNToMId(ecError, nil)
 	}
-	return s.encodeDNToMId(ecSuccess, s.dnToMidCore(names))
+	return s.encodeDNToMId(ecSuccess, s.dnToMidCore(names, caller))
 }
 
 // dnToMidCore maps each input distinguished name to its MId (or MID_UNRESOLVED),
 // transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it. The
 // NSPI result is always ecSuccess; an unresolvable DN yields MID_UNRESOLVED.
-func (s *Server) dnToMidCore(names []string) []uint32 {
-	g := s.snapshot()
+func (s *Server) dnToMidCore(names []string, caller string) []uint32 {
+	g := s.snapshot(caller)
 	mids := make([]uint32, len(names))
 	for i, dn := range names {
 		mids[i] = midUnresolved
@@ -161,12 +161,12 @@ func pullResolveNames(body []byte) (resolveNamesRequest, error) {
 // ResolveNamesW handles the NSPI ResolveNamesW request ([MS-OXNSPI] 2.2.4): it
 // resolves each input name against the GAL, returning a per-name result code
 // (unresolved / ambiguous / resolved) and a row for each uniquely resolved name.
-func (s *Server) ResolveNamesW(body []byte) []byte {
+func (s *Server) ResolveNamesW(body []byte, caller string) []byte {
 	req, err := pullResolveNames(body)
 	if err != nil {
 		return s.encodeResolveNames(ecError, 0, nil, nil, nil)
 	}
-	r := s.resolveNamesCore(req)
+	r := s.resolveNamesCore(req, caller)
 	return s.encodeResolveNames(r.result, r.codePage, r.mids, r.cols, r.rows)
 }
 
@@ -183,7 +183,7 @@ type resolveNamesResult struct {
 
 // resolveNamesCore runs the ResolveNamesW semantics on a decoded request,
 // transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it.
-func (s *Server) resolveNamesCore(req resolveNamesRequest) resolveNamesResult {
+func (s *Server) resolveNamesCore(req resolveNamesRequest, caller string) resolveNamesResult {
 	if req.stat.codePage == cpWinUnicode {
 		return resolveNamesResult{result: ecNotSupported, codePage: req.stat.codePage}
 	}
@@ -195,7 +195,7 @@ func (s *Server) resolveNamesCore(req resolveNamesRequest) resolveNamesResult {
 		return resolveNamesResult{result: ecTableTooBig, codePage: req.stat.codePage}
 	}
 
-	g := s.snapshot()
+	g := s.snapshot(caller)
 	mids := make([]uint32, len(req.names))
 	var rows []mapi.PropertyValues
 	for i, name := range req.names {

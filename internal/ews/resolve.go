@@ -42,7 +42,7 @@ type resolution struct {
 // handleResolveNames answers ResolveNames against the directory GAL: one match is
 // a Success, several a Warning (the client picks), none a Warning with no
 // results — the same three-way outcome as the webmail "check names".
-func (s *Server) handleResolveNames(w http.ResponseWriter, inner []byte, _ *session) {
+func (s *Server) handleResolveNames(w http.ResponseWriter, inner []byte, sess *session) {
 	var req resolveNamesRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
 		s.soapFault(w, "ErrorInvalidRequest", "ResolveNames: invalid request", err)
@@ -53,7 +53,7 @@ func (s *Server) handleResolveNames(w http.ResponseWriter, inner []byte, _ *sess
 		writeResolveWarning(w, "ErrorNameResolutionNoResults")
 		return
 	}
-	entries, err := gal.SearchGAL(req.UnresolvedEntry, resolveLimit)
+	entries, err := gal.SearchGAL(sess.user, req.UnresolvedEntry, resolveLimit)
 	// Withhold the addresses the operator hid from name resolution.
 	entries = directory.ResolvableGAL(entries)
 	if err != nil || len(entries) == 0 {

@@ -36,12 +36,12 @@ func pullGetPropList(body []byte) (getPropListRequest, error) {
 // Every v1 GAL entry exposes the same fixed address-book column set, so a valid
 // MId yields defaultColumns; MId 0 and any MId without an entry are an invalid
 // object.
-func (s *Server) GetPropList(body []byte) []byte {
+func (s *Server) GetPropList(body []byte, caller string) []byte {
 	req, err := pullGetPropList(body)
 	if err != nil {
 		return s.encodeGetPropList(ecError, nil)
 	}
-	r := s.getPropListCore(req)
+	r := s.getPropListCore(req, caller)
 	return s.encodeGetPropList(r.result, r.tags)
 }
 
@@ -54,11 +54,11 @@ type getPropListResult struct {
 
 // getPropListCore runs the GetPropList semantics on a decoded request,
 // transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it.
-func (s *Server) getPropListCore(req getPropListRequest) getPropListResult {
+func (s *Server) getPropListCore(req getPropListRequest, caller string) getPropListResult {
 	if req.mid == 0 {
 		return getPropListResult{result: ecInvalidObject}
 	}
-	g := s.snapshot()
+	g := s.snapshot(caller)
 	if _, ok := g.byMID(req.mid); !ok {
 		return getPropListResult{result: ecInvalidObject}
 	}

@@ -15,13 +15,14 @@ import (
 // alongside the contact helpers in this package.)
 const prRoomCapacity = 0x08070003
 
-// ListRooms returns the organization's bookable resource mailboxes - rooms and
-// equipment (display_type DT_ROOM/DT_EQUIPMENT) - for the webmail room picker:
-// enabled entries with a mailbox, ordered by address, each with its display name
-// and (when set) seating capacity. The same active-user/active-domain filter
-// SearchGAL applies is used so a disabled room never appears.
-func (d *SQLDirectory) ListRooms() ([]GALEntry, error) {
-	const q = `
+// roomQuery selects bookable resource mailboxes - rooms and equipment
+// (display_type DT_ROOM/DT_EQUIPMENT) - that are enabled and have a mailbox,
+// ordered by address, each with its display name and (when set) seating
+// capacity. The same active-user/active-domain filter SearchGAL applies is used
+// so a disabled room never appears. scope is either the caller's address-book
+// scope predicate or empty for the unscoped operator view.
+func roomQuery(scope string) string {
+	return `
 SELECT u.username, u.display_type, COALESCE(dn.propval_str, ''), COALESCE(cap.propval_str, '')
   FROM users u JOIN domains d ON u.domain_id = d.id
   LEFT JOIN user_properties dn ON dn.user_id = u.id AND dn.proptag = ? AND dn.order_id = 1
@@ -30,9 +31,36 @@ SELECT u.username, u.display_type, COALESCE(dn.propval_str, ''), COALESCE(cap.pr
    AND u.maildir <> ''
    AND (u.address_status & ?) = ?
    AND (u.address_status & ?) = 0
-   AND d.domain_status = 0
+   AND d.domain_status = 0` + scope + `
  ORDER BY u.username`
-	rows, err := d.db.Query(q, prDisplayName, prRoomCapacity, dtRoom, dtEquipment, afUserMask, afUserNormal, afDomainMask)
+}
+
+// ListRooms returns the bookable resource mailboxes visible to caller (see
+// galScopePredicate), for the webmail room picker and the EWS room finder. A
+// room is an address-book object like any other, so it is scoped the same way
+// SearchGAL is: without that, an address the caller cannot find in the GAL would
+// still be listed here.
+func (d *SQLDirectory) ListRooms(caller string) ([]GALEntry, error) {
+	scope, ok := d.galScope(caller)
+	if !ok {
+		return nil, nil
+	}
+	args := append([]any{prDisplayName, prRoomCapacity, dtRoom, dtEquipment, afUserMask, afUserNormal, afDomainMask}, scope...)
+	return d.scanRooms(roomQuery(galScopePredicate), args...)
+}
+
+// ListAllRooms returns every bookable resource mailbox in the deployment,
+// unscoped. It backs the operator surfaces in the admin panel, which manage
+// resources across domains and are gated by the admin's own system/org/domain
+// role. No end-user surface may call it.
+func (d *SQLDirectory) ListAllRooms() ([]GALEntry, error) {
+	return d.scanRooms(roomQuery(""),
+		prDisplayName, prRoomCapacity, dtRoom, dtEquipment, afUserMask, afUserNormal, afDomainMask)
+}
+
+// scanRooms runs a room query and projects its rows.
+func (d *SQLDirectory) scanRooms(q string, args ...any) ([]GALEntry, error) {
+	rows, err := d.db.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}

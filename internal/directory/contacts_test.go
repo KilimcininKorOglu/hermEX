@@ -30,7 +30,7 @@ func contactTestDir(t *testing.T) *SQLDirectory {
 // does.
 func galEntryFor(t *testing.T, d *SQLDirectory, addr string) GALEntry {
 	t.Helper()
-	entries, err := d.SearchGAL(addr, 20)
+	entries, err := d.SearchGAL("alice@hermex.test", addr, 20)
 	if err != nil {
 		t.Fatalf("SearchGAL(%q): %v", addr, err)
 	}
@@ -136,7 +136,7 @@ func TestDeleteContact(t *testing.T) {
 	if err != nil || !removed {
 		t.Fatalf("DeleteContact = (%v, %v), want (true, nil)", removed, err)
 	}
-	entries, _ := d.SearchGAL("john@partner.example", 20)
+	entries, _ := d.SearchGAL("alice@hermex.test", "john@partner.example", 20)
 	for _, e := range entries {
 		if e.Address == "john@partner.example" {
 			t.Errorf("deleted contact still in GAL: %+v", e)

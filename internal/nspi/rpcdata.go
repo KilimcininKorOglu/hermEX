@@ -107,7 +107,7 @@ func encodeRowsetNDR(r rowsetResult) ([]byte, uint32) {
 // [in,out] unique-pointer delta whose presence asks for the applied row delta
 // back. OUT: the repositioned STAT, the delta (present only when requested), then
 // the result.
-func (s *Server) rpcUpdateStat(stub []byte) ([]byte, uint32) {
+func (s *Server) rpcUpdateStat(stub []byte, caller string) ([]byte, uint32) {
 	p := ndr.NewPull(stub)
 	if err := pullHandle(p); err != nil {
 		return nil, ndr.FaultNdr
@@ -129,7 +129,7 @@ func (s *Server) rpcUpdateStat(stub []byte) ([]byte, uint32) {
 			return nil, ndr.FaultNdr
 		}
 	}
-	r := s.updateStatCore(updateStatRequest{stat: st, deltaRequested: deltaRequested})
+	r := s.updateStatCore(updateStatRequest{stat: st, deltaRequested: deltaRequested}, caller)
 	out := ndr.NewPush()
 	pushStatNDR(out, r.stat)
 	out.UniquePtr(r.hasDelta)
@@ -143,7 +143,7 @@ func (s *Server) rpcUpdateStat(stub []byte) ([]byte, uint32) {
 // rpcQueryRows handles NspiQueryRows (opnum 3): handle, flags, STAT, the inline
 // explicit-MID array, the requested row count, and a unique-pointer column set.
 // OUT: STAT + a unique-pointer PROPROW_SET + the result.
-func (s *Server) rpcQueryRows(stub []byte) ([]byte, uint32) {
+func (s *Server) rpcQueryRows(stub []byte, caller string) ([]byte, uint32) {
 	p := ndr.NewPull(stub)
 	if err := pullHandle(p); err != nil {
 		return nil, ndr.FaultNdr
@@ -167,14 +167,14 @@ func (s *Server) rpcQueryRows(stub []byte) ([]byte, uint32) {
 	if err != nil {
 		return nil, ndr.FaultNdr
 	}
-	r := s.queryRowsCore(queryRowsRequest{stat: st, explicit: explicit, count: count, columns: cols})
+	r := s.queryRowsCore(queryRowsRequest{stat: st, explicit: explicit, count: count, columns: cols}, caller)
 	return encodeRowsetNDR(r)
 }
 
 // rpcSeekEntries handles NspiSeekEntries (opnum 4): handle, reserved, STAT, the
 // inline target PROPERTY_VALUE, a unique-pointer MID table to seek within, and a
 // unique-pointer column set. OUT: STAT + a unique-pointer PROPROW_SET + result.
-func (s *Server) rpcSeekEntries(stub []byte) ([]byte, uint32) {
+func (s *Server) rpcSeekEntries(stub []byte, caller string) ([]byte, uint32) {
 	p := ndr.NewPull(stub)
 	if err := pullHandle(p); err != nil {
 		return nil, ndr.FaultNdr
@@ -202,13 +202,13 @@ func (s *Server) rpcSeekEntries(stub []byte) ([]byte, uint32) {
 	r := s.seekEntriesCore(seekEntriesRequest{
 		reserved: reserved, stat: st, target: target,
 		table: table, columns: cols, hasCols: cols != nil,
-	})
+	}, caller)
 	return encodeRowsetNDR(r)
 }
 
 // rpcCompareMids handles NspiCompareMIds (opnum 10): handle, reserved, STAT, and
 // the two MIds. OUT: the signed comparison (no leading referent) then the result.
-func (s *Server) rpcCompareMids(stub []byte) ([]byte, uint32) {
+func (s *Server) rpcCompareMids(stub []byte, caller string) ([]byte, uint32) {
 	p := ndr.NewPull(stub)
 	if err := pullHandle(p); err != nil {
 		return nil, ndr.FaultNdr
@@ -228,7 +228,7 @@ func (s *Server) rpcCompareMids(stub []byte) ([]byte, uint32) {
 	if err != nil {
 		return nil, ndr.FaultNdr
 	}
-	r := s.compareMidsCore(compareMidsRequest{stat: st, mid1: mid1, mid2: mid2})
+	r := s.compareMidsCore(compareMidsRequest{stat: st, mid1: mid1, mid2: mid2}, caller)
 	out := ndr.NewPush()
 	out.Int32(r.cmp)
 	out.Uint32(r.result)
@@ -239,7 +239,7 @@ func (s *Server) rpcCompareMids(stub []byte) ([]byte, uint32) {
 // STAT, the inline MID array to reorder, and a reserved unique-pointer output-MID
 // array (consumed and discarded). OUT: STAT + a unique-pointer reordered MID
 // array + result.
-func (s *Server) rpcResortRestriction(stub []byte) ([]byte, uint32) {
+func (s *Server) rpcResortRestriction(stub []byte, caller string) ([]byte, uint32) {
 	p := ndr.NewPull(stub)
 	if err := pullHandle(p); err != nil {
 		return nil, ndr.FaultNdr
@@ -258,7 +258,7 @@ func (s *Server) rpcResortRestriction(stub []byte) ([]byte, uint32) {
 	if _, err := pullPtrMIDs(p); err != nil { // reserved outmids, discarded
 		return nil, ndr.FaultNdr
 	}
-	r := s.resortRestrictionCore(resortRestrictionRequest{stat: st, inmids: inmids})
+	r := s.resortRestrictionCore(resortRestrictionRequest{stat: st, inmids: inmids}, caller)
 	out := ndr.NewPush()
 	pushStatNDR(out, r.stat)
 	ok := r.result == ecSuccess
@@ -273,7 +273,7 @@ func (s *Server) rpcResortRestriction(stub []byte) ([]byte, uint32) {
 // unique-pointer column set. OUT: a unique-pointer single PROPERTY_ROW (NULL only
 // on an error that is neither success nor warn-with-errors) then the result. The
 // row is already projected, so it serializes verbatim.
-func (s *Server) rpcGetProps(stub []byte) ([]byte, uint32) {
+func (s *Server) rpcGetProps(stub []byte, caller string) ([]byte, uint32) {
 	p := ndr.NewPull(stub)
 	if err := pullHandle(p); err != nil {
 		return nil, ndr.FaultNdr
@@ -289,7 +289,7 @@ func (s *Server) rpcGetProps(stub []byte) ([]byte, uint32) {
 	if err != nil {
 		return nil, ndr.FaultNdr
 	}
-	r := s.getPropsCore(getPropsRequest{stat: st, proptags: tags, hasTags: tags != nil})
+	r := s.getPropsCore(getPropsRequest{stat: st, proptags: tags, hasTags: tags != nil}, caller)
 	out := ndr.NewPush()
 	ok := r.result == ecSuccess || r.result == ecWarnWithErrors
 	out.UniquePtr(ok)
@@ -305,7 +305,7 @@ func (s *Server) rpcGetProps(stub []byte) ([]byte, uint32) {
 // rpcGetPropList handles NspiGetPropList (opnum 8): handle, flags, the MId, and
 // the code page. OUT: a unique-pointer proptag array (NULL on a non-success
 // result) then the result.
-func (s *Server) rpcGetPropList(stub []byte) ([]byte, uint32) {
+func (s *Server) rpcGetPropList(stub []byte, caller string) ([]byte, uint32) {
 	p := ndr.NewPull(stub)
 	if err := pullHandle(p); err != nil {
 		return nil, ndr.FaultNdr
@@ -322,7 +322,7 @@ func (s *Server) rpcGetPropList(stub []byte) ([]byte, uint32) {
 	if err != nil {
 		return nil, ndr.FaultNdr
 	}
-	r := s.getPropListCore(getPropListRequest{flags: flags, mid: mid, codePage: codePage})
+	r := s.getPropListCore(getPropListRequest{flags: flags, mid: mid, codePage: codePage}, caller)
 	out := ndr.NewPush()
 	pushPtrProptags(out, r.tags, r.result == ecSuccess)
 	out.Uint32(r.result)
@@ -426,11 +426,10 @@ func (s *Server) rpcGetTemplateInfo(stub []byte) ([]byte, uint32) {
 	return out.Bytes(), 0
 }
 
-// rpcModLinkAtt handles NspiModLinkAtt (opnum 14) over RPC/HTTP: editing the
-// public-delegates list needs the caller's identity for the owner-only access
-// check, which the RPC/HTTP dispatcher does not thread through, so this returns a
-// blanket ecNotSupported. The op is served over MAPI/HTTP — the transport modern
-// Outlook uses — by ModLinkAtt. Only the handle is decoded. OUT: the bare result.
+// rpcModLinkAtt handles NspiModLinkAtt (opnum 14) over RPC/HTTP: it returns a
+// blanket ecNotSupported, since the delegate-list write path is served only over
+// MAPI/HTTP (the transport modern Outlook uses) by ModLinkAtt. Only the handle is
+// decoded. OUT: the bare result.
 func (s *Server) rpcModLinkAtt(stub []byte) ([]byte, uint32) {
 	p := ndr.NewPull(stub)
 	if err := pullHandle(p); err != nil {
@@ -446,7 +445,7 @@ func (s *Server) rpcModLinkAtt(stub []byte) ([]byte, uint32) {
 // rpcDNToMid handles NspiDNToMId (opnum 7): handle, reserved, and an 8-bit
 // strings array of distinguished names. OUT: a unique-pointer MID array (always
 // present — the result is always ecSuccess) then the result.
-func (s *Server) rpcDNToMid(stub []byte) ([]byte, uint32) {
+func (s *Server) rpcDNToMid(stub []byte, caller string) ([]byte, uint32) {
 	p := ndr.NewPull(stub)
 	if err := pullHandle(p); err != nil {
 		return nil, ndr.FaultNdr
@@ -459,7 +458,7 @@ func (s *Server) rpcDNToMid(stub []byte) ([]byte, uint32) {
 		return nil, ndr.FaultNdr
 	}
 	out := ndr.NewPush()
-	pushPtrMIDs(out, s.dnToMidCore(names), true)
+	pushPtrMIDs(out, s.dnToMidCore(names, caller), true)
 	out.Uint32(ecSuccess)
 	return out.Bytes(), 0
 }
@@ -471,7 +470,7 @@ func (s *Server) rpcDNToMid(stub []byte) ([]byte, uint32) {
 // so — like the MAPI/HTTP handler — the core rejects on it without parsing the
 // remaining fields. OUT: STAT + a unique-pointer MID array + a unique-pointer
 // PROPROW_SET + result (two NULL referents on a non-success result).
-func (s *Server) rpcGetMatches(stub []byte) ([]byte, uint32) {
+func (s *Server) rpcGetMatches(stub []byte, caller string) ([]byte, uint32) {
 	p := ndr.NewPull(stub)
 	if err := pullHandle(p); err != nil {
 		return nil, ndr.FaultNdr
@@ -510,7 +509,7 @@ func (s *Server) rpcGetMatches(stub []byte) ([]byte, uint32) {
 		// A present property name is unsupported; reject without parsing its body
 		// or the trailing fields, exactly as the MAPI/HTTP handler does.
 		req.hasPropName = true
-		return s.encodeGetMatchesNDR(s.getMatchesCore(req))
+		return s.encodeGetMatchesNDR(s.getMatchesCore(req, caller))
 	}
 	requested, err := p.Uint32()
 	if err != nil {
@@ -523,7 +522,7 @@ func (s *Server) rpcGetMatches(stub []byte) ([]byte, uint32) {
 	}
 	req.columns = cols
 	req.hasCols = cols != nil
-	return s.encodeGetMatchesNDR(s.getMatchesCore(req))
+	return s.encodeGetMatchesNDR(s.getMatchesCore(req, caller))
 }
 
 // encodeGetMatchesNDR frames the GetMatches OUT: STAT, a unique-pointer matched
@@ -550,7 +549,7 @@ func (s *Server) encodeGetMatchesNDR(r getMatchesResult) ([]byte, uint32) {
 // per-name MID array + a unique-pointer PROPROW_SET + result (two NULL referents
 // on a non-success result). The raw NSPI OUT carries no echoed code page (that is
 // a MAPI/HTTP-only field), so the core's code page is dropped here.
-func (s *Server) rpcResolveNames(stub []byte, wide bool) ([]byte, uint32) {
+func (s *Server) rpcResolveNames(stub []byte, wide bool, caller string) ([]byte, uint32) {
 	p := ndr.NewPull(stub)
 	if err := pullHandle(p); err != nil {
 		return nil, ndr.FaultNdr
@@ -570,7 +569,7 @@ func (s *Server) rpcResolveNames(stub []byte, wide bool) ([]byte, uint32) {
 	if err != nil {
 		return nil, ndr.FaultNdr
 	}
-	r := s.resolveNamesCore(resolveNamesRequest{stat: st, columns: cols, names: names})
+	r := s.resolveNamesCore(resolveNamesRequest{stat: st, columns: cols, names: names}, caller)
 	out := ndr.NewPush()
 	ok := r.result == ecSuccess
 	pushPtrMIDs(out, r.mids, ok)

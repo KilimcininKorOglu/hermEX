@@ -35,7 +35,7 @@ func TestDNRoundTrip(t *testing.T) {
 // TestSnapshotMIDs proves the GAL is address-sorted and MIds are assigned from
 // 0x10 by position (dodging the reserved 0x0–0xF range).
 func TestSnapshotMIDs(t *testing.T) {
-	g := testGAL("carol@hermex.test", "alice@hermex.test", "bob@hermex.test").snapshot()
+	g := testGAL("carol@hermex.test", "alice@hermex.test", "bob@hermex.test").snapshot(testCaller)
 	if len(g.users) != 3 {
 		t.Fatalf("snapshot has %d users, want 3", len(g.users))
 	}

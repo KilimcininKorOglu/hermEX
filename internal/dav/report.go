@@ -143,7 +143,7 @@ func (c *calDataReq) bound(data string) string {
 // handleReport dispatches a CardDAV REPORT (RFC 6352 §8) on the addressbook
 // collection: addressbook-multiget, addressbook-query, and sync-collection
 // (RFC 6578). Each returns 207 Multistatus with the requested vCards.
-func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox string) {
+func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, caller, mailbox string) {
 	_, user, coll, _ := classify(r.URL.Path)
 	body, err := io.ReadAll(io.LimitReader(r.Body, s.vcardLimit()))
 	if err != nil {
@@ -160,7 +160,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request, mailbox st
 	// answered before any collection is resolved (RFC 3744 §9.3/§9.5).
 	switch req.XMLName.Local {
 	case "principal-property-search":
-		s.reportPrincipalSearch(w, body)
+		s.reportPrincipalSearch(w, caller, body)
 		return
 	case "principal-search-property-set":
 		reportPrincipalSearchPropSet(w)

@@ -18,7 +18,7 @@ type memberGAL struct {
 	members map[string][]string
 }
 
-func (m memberGAL) SearchGAL(string, int) ([]directory.GALEntry, error) {
+func (m memberGAL) SearchGAL(string, string, int) ([]directory.GALEntry, error) {
 	return m.entries, nil
 }
 
@@ -47,7 +47,7 @@ func TestGetMatchesExpandsListMembers(t *testing.T) {
 		},
 	}
 	s := NewServer(g, testGUID)
-	snap := s.snapshot()
+	snap := s.snapshot(testCaller)
 	teamMID, ok := snap.byAddress("team@hermex.test")
 	if !ok {
 		t.Fatal("team list not found in the GAL")
@@ -60,7 +60,7 @@ func TestGetMatchesExpandsListMembers(t *testing.T) {
 			containerID: uint32(mapi.PrEmsAbMember),
 			curRec:      teamMID,
 		},
-	})
+	}, testCaller)
 	if r.result != ecSuccess {
 		t.Fatalf("result = %#x, want ecSuccess", r.result)
 	}
@@ -84,7 +84,7 @@ func TestGetMatchesMemberOfNonList(t *testing.T) {
 		entries: []directory.GALEntry{{DisplayName: "alice", Address: "alice@hermex.test"}},
 	}
 	s := NewServer(g, testGUID)
-	snap := s.snapshot()
+	snap := s.snapshot(testCaller)
 	aliceMID, _ := snap.byAddress("alice@hermex.test")
 
 	r := s.getMatchesCore(getMatchesRequest{
@@ -94,7 +94,7 @@ func TestGetMatchesMemberOfNonList(t *testing.T) {
 			containerID: uint32(mapi.PrEmsAbMember),
 			curRec:      aliceMID,
 		},
-	})
+	}, testCaller)
 	if r.result != ecSuccess || len(r.mids) != 0 {
 		t.Errorf("member expansion of a non-list = (%#x, %d mids), want (ecSuccess, 0)", r.result, len(r.mids))
 	}

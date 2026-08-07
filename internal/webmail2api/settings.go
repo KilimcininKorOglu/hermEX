@@ -839,7 +839,7 @@ func (s *Server) handleGetSharedMailboxes(w http.ResponseWriter, r *http.Request
 	// owner / folder grantee / delegate), each as the SPA's SharedMailbox object.
 	boxes := []map[string]any{}
 	if lister, ok := s.auth.(directory.SharedMailboxLister); ok {
-		if list, err := lister.SharedMailboxes(); err == nil {
+		if list, err := lister.SharedMailboxes(c.Email); err == nil {
 			for _, b := range list {
 				st, err := objectstore.Open(b.StorePath)
 				if err != nil {
@@ -875,7 +875,7 @@ func (s *Server) handleGetSharedAsOwner(w http.ResponseWriter, r *http.Request) 
 	}
 	owned := []string{}
 	if lister, ok := s.auth.(directory.SharedMailboxLister); ok {
-		if list, err := lister.SharedMailboxes(); err == nil {
+		if list, err := lister.SharedMailboxes(c.Email); err == nil {
 			for _, b := range list {
 				st, err := objectstore.Open(b.StorePath)
 				if err != nil {

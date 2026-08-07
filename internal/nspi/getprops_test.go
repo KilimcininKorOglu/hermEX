@@ -30,7 +30,7 @@ func TestGetPropsProfileFields(t *testing.T) {
 	}
 	s := NewServer(gal, testGUID)
 	_, row := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midBase, codePage: 1252},
-		[]mapi.PropTag{mapi.PrTitle, mapi.PrDepartmentName})))
+		[]mapi.PropTag{mapi.PrTitle, mapi.PrDepartmentName}), testCaller))
 	if v, _ := row.Get(mapi.PrTitle); v != "Engineer" {
 		t.Errorf("PrTitle = %v, want Engineer", v)
 	}
@@ -84,7 +84,7 @@ func decodeGetProps(t *testing.T, resp []byte) (uint32, mapi.PropertyValues) {
 // midBase) returns that entry's full default property bag.
 func TestGetPropsDefault(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test")
-	result, row := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midBase, codePage: 1252}, nil)))
+	result, row := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midBase, codePage: 1252}, nil), testCaller))
 	if result != ecSuccess {
 		t.Fatalf("result = %#x, want ecSuccess", result)
 	}
@@ -101,7 +101,7 @@ func TestGetPropsDefault(t *testing.T) {
 // entry, bob.
 func TestGetPropsByMID(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test", "carol@hermex.test")
-	_, row := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midBase + 1, codePage: 1252}, nil)))
+	_, row := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midBase + 1, codePage: 1252}, nil), testCaller))
 	if v, _ := row.Get(mapi.PrSmtpAddress); v != "bob@hermex.test" {
 		t.Errorf("cur_rec=midBase+1 SMTP = %v, want bob", v)
 	}
@@ -112,7 +112,7 @@ func TestGetPropsByMID(t *testing.T) {
 func TestGetPropsExplicitError(t *testing.T) {
 	s := testGAL("alice@hermex.test")
 	cols := []mapi.PropTag{mapi.PrDisplayName, mapi.PrContainerFlags} // the 2nd is not a GAL-user prop
-	result, row := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midBase, codePage: 1252}, cols)))
+	result, row := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midBase, codePage: 1252}, cols), testCaller))
 	if result != ecWarnWithErrors {
 		t.Fatalf("result = %#x, want ecWarnWithErrors", result)
 	}
@@ -133,7 +133,7 @@ func TestGetPropsExplicitError(t *testing.T) {
 // row of PT_ERROR markers over the default columns, with ecWarnWithErrors.
 func TestGetPropsUnknownEntry(t *testing.T) {
 	s := testGAL("alice@hermex.test")
-	result, row := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midEndOfTable, codePage: 1252}, nil)))
+	result, row := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midEndOfTable, codePage: 1252}, nil), testCaller))
 	if result != ecWarnWithErrors {
 		t.Fatalf("result = %#x, want ecWarnWithErrors", result)
 	}
@@ -149,7 +149,7 @@ func TestGetPropsUnknownEntry(t *testing.T) {
 // strings are code-page encoded), consistent with the other ops.
 func TestGetPropsUnicodeRejected(t *testing.T) {
 	s := testGAL("alice@hermex.test")
-	result, _ := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midBase, codePage: cpWinUnicode}, nil)))
+	result, _ := decodeGetProps(t, s.GetProps(buildGetProps(stat{curRec: midBase, codePage: cpWinUnicode}, nil), testCaller))
 	if result != ecNotSupported {
 		t.Errorf("result = %#x, want ecNotSupported", result)
 	}

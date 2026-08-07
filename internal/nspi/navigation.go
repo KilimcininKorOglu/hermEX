@@ -15,18 +15,18 @@ import (
 // (the only sort an online client uses for the GAL). With an explicit MId list
 // the search runs in that list's order; otherwise it binary-searches the
 // display-name-ordered GAL — the same comparison snapshot() sorts by.
-func (s *Server) SeekEntries(body []byte) []byte {
+func (s *Server) SeekEntries(body []byte, caller string) []byte {
 	req, err := pullSeekEntries(body)
 	if err != nil {
 		return s.encodeSeekEntries(ecError, stat{}, nil, nil)
 	}
-	r := s.seekEntriesCore(req)
+	r := s.seekEntriesCore(req, caller)
 	return s.encodeSeekEntries(r.result, r.stat, r.cols, r.rows)
 }
 
 // seekEntriesCore runs the SeekEntries semantics on a decoded request,
 // transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it.
-func (s *Server) seekEntriesCore(req seekEntriesRequest) rowsetResult {
+func (s *Server) seekEntriesCore(req seekEntriesRequest, caller string) rowsetResult {
 	st := req.stat
 	if st.codePage == cpWinUnicode || req.reserved != 0 {
 		return rowsetResult{result: ecNotSupported, stat: st}
@@ -48,7 +48,7 @@ func (s *Server) seekEntriesCore(req seekEntriesRequest) rowsetResult {
 		return rowsetResult{result: ecTableTooBig, stat: st}
 	}
 
-	g := s.snapshot()
+	g := s.snapshot(caller)
 	var found galUser
 	var pos, total int
 	var ok bool
@@ -191,12 +191,12 @@ func (s *Server) encodeSeekEntries(result uint32, st stat, cols []mapi.PropTag, 
 // returns the relative table order of two MIds. Because our MId encodes the
 // entry's display-name position, the comparison is the position difference. Both
 // MIds must exist, else the comparison is an error.
-func (s *Server) CompareMids(body []byte) []byte {
+func (s *Server) CompareMids(body []byte, caller string) []byte {
 	req, err := pullCompareMids(body)
 	if err != nil {
 		return s.encodeCompareMids(ecError, 0)
 	}
-	r := s.compareMidsCore(req)
+	r := s.compareMidsCore(req, caller)
 	return s.encodeCompareMids(r.result, r.cmp)
 }
 
@@ -209,11 +209,11 @@ type compareMidsResult struct {
 
 // compareMidsCore runs the CompareMids semantics on a decoded request,
 // transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it.
-func (s *Server) compareMidsCore(req compareMidsRequest) compareMidsResult {
+func (s *Server) compareMidsCore(req compareMidsRequest, caller string) compareMidsResult {
 	if req.stat.codePage == cpWinUnicode {
 		return compareMidsResult{result: ecNotSupported}
 	}
-	g := s.snapshot()
+	g := s.snapshot(caller)
 	_, ok1 := g.byMID(req.mid1)
 	_, ok2 := g.byMID(req.mid2)
 	if !ok1 || !ok2 {
@@ -278,12 +278,12 @@ func (s *Server) encodeCompareMids(result uint32, cmp int32) []byte {
 // our MId encodes the display-name position, the sort is numeric on the MIds.
 // Non-existent MIds are dropped; if the STAT's current record is no longer in
 // the set, the cursor resets to the table start.
-func (s *Server) ResortRestriction(body []byte) []byte {
+func (s *Server) ResortRestriction(body []byte, caller string) []byte {
 	req, err := pullResortRestriction(body)
 	if err != nil {
 		return s.encodeResortRestriction(ecError, stat{}, nil)
 	}
-	r := s.resortRestrictionCore(req)
+	r := s.resortRestrictionCore(req, caller)
 	return s.encodeResortRestriction(r.result, r.stat, r.mids)
 }
 
@@ -298,12 +298,12 @@ type resortResult struct {
 // resortRestrictionCore runs the ResortRestriction semantics on a decoded
 // request, transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share
 // it.
-func (s *Server) resortRestrictionCore(req resortRestrictionRequest) resortResult {
+func (s *Server) resortRestrictionCore(req resortRestrictionRequest, caller string) resortResult {
 	st := req.stat
 	if st.codePage == cpWinUnicode {
 		return resortResult{result: ecNotSupported, stat: st}
 	}
-	g := s.snapshot()
+	g := s.snapshot(caller)
 	var out []uint32
 	found := false
 	for _, mid := range req.inmids {

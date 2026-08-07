@@ -38,27 +38,27 @@ func (s *Server) serveNspi(w http.ResponseWriter, r *http.Request) {
 	case "GetSpecialTable":
 		s.nspiOp(w, r, user, "GetSpecialTable", s.nsp.GetSpecialTable)
 	case "QueryRows":
-		s.nspiOp(w, r, user, "QueryRows", s.nsp.QueryRows)
+		s.nspiOpAuth(w, r, user, "QueryRows", s.nsp.QueryRows)
 	case "UpdateStat":
-		s.nspiOp(w, r, user, "UpdateStat", s.nsp.UpdateStat)
+		s.nspiOpAuth(w, r, user, "UpdateStat", s.nsp.UpdateStat)
 	case "QueryColumns":
 		s.nspiOp(w, r, user, "QueryColumns", s.nsp.QueryColumns)
 	case "ResolveNames":
-		s.nspiOp(w, r, user, "ResolveNames", s.nsp.ResolveNamesW)
+		s.nspiOpAuth(w, r, user, "ResolveNames", s.nsp.ResolveNamesW)
 	case "DNToMId":
-		s.nspiOp(w, r, user, "DNToMId", s.nsp.DNToMId)
+		s.nspiOpAuth(w, r, user, "DNToMId", s.nsp.DNToMId)
 	case "GetMatches":
-		s.nspiOp(w, r, user, "GetMatches", s.nsp.GetMatches)
+		s.nspiOpAuth(w, r, user, "GetMatches", s.nsp.GetMatches)
 	case "GetProps":
-		s.nspiOp(w, r, user, "GetProps", s.nsp.GetProps)
+		s.nspiOpAuth(w, r, user, "GetProps", s.nsp.GetProps)
 	case "GetPropList":
-		s.nspiOp(w, r, user, "GetPropList", s.nsp.GetPropList)
+		s.nspiOpAuth(w, r, user, "GetPropList", s.nsp.GetPropList)
 	case "SeekEntries":
-		s.nspiOp(w, r, user, "SeekEntries", s.nsp.SeekEntries)
+		s.nspiOpAuth(w, r, user, "SeekEntries", s.nsp.SeekEntries)
 	case "CompareMIds":
-		s.nspiOp(w, r, user, "CompareMIds", s.nsp.CompareMids)
+		s.nspiOpAuth(w, r, user, "CompareMIds", s.nsp.CompareMids)
 	case "ResortRestriction":
-		s.nspiOp(w, r, user, "ResortRestriction", s.nsp.ResortRestriction)
+		s.nspiOpAuth(w, r, user, "ResortRestriction", s.nsp.ResortRestriction)
 	case "ModLinkAtt":
 		s.nspiOpAuth(w, r, user, "ModLinkAtt", s.nsp.ModLinkAtt)
 	default:
@@ -67,7 +67,10 @@ func (s *Server) serveNspi(w http.ResponseWriter, r *http.Request) {
 }
 
 // nspiOp runs a sequenced NSPI op whose handler needs only the request body. It
-// is nspiOpAuth with the authenticated user discarded.
+// is nspiOpAuth with the authenticated user discarded, for the two ops that
+// serve the same answer to everyone (the static column set and the special
+// table); every op that reads the address book itself uses nspiOpAuth, since the
+// entries it may return depend on who is asking.
 func (s *Server) nspiOp(w http.ResponseWriter, r *http.Request, user, reqType string, handler func([]byte) []byte) {
 	s.nspiOpAuth(w, r, user, reqType, func(body []byte, _ string) []byte {
 		return handler(body)
@@ -77,7 +80,8 @@ func (s *Server) nspiOp(w http.ResponseWriter, r *http.Request, user, reqType st
 // nspiOpAuth runs a sequenced NSPI op (everything past Bind/Unbind/PING): it
 // validates the session cookies, rolls the sequence, decodes the request body,
 // runs handler, and frames the response. handler also receives the authenticated
-// user, which an identity-bearing op (ModLinkAtt) needs for its access check.
+// user: the address book is scoped to the caller, and the delegate write op needs
+// the identity for its owner-only access check.
 func (s *Server) nspiOpAuth(w http.ResponseWriter, r *http.Request, user, reqType string, handler func([]byte, string) []byte) {
 	sid, errSid := r.Cookie("sid")
 	seq, errSeq := r.Cookie("sequence")

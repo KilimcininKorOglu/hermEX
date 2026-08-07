@@ -95,7 +95,7 @@ func TestGetMatchesAnr(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test")
 	f := anrFilter("alice")
 	result, mids, st, rows := decodeGetMatches(t, s.GetMatches(buildGetMatches(
-		stat{sortType: sortTypeDisplayName, curRec: midBeginningOfTable, codePage: 1252}, &f, 50, nil)))
+		stat{sortType: sortTypeDisplayName, curRec: midBeginningOfTable, codePage: 1252}, &f, 50, nil), testCaller))
 	if result != ecSuccess {
 		t.Fatalf("result = %#x, want ecSuccess", result)
 	}
@@ -119,7 +119,7 @@ func TestGetMatchesRowCountCap(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test", "carol@hermex.test")
 	f := anrFilter("@hermex.test") // matches all three
 	_, mids, _, _ := decodeGetMatches(t, s.GetMatches(buildGetMatches(
-		stat{sortType: sortTypeDisplayName, codePage: 1252}, &f, 2, nil)))
+		stat{sortType: sortTypeDisplayName, codePage: 1252}, &f, 2, nil), testCaller))
 	if len(mids) != 2 {
 		t.Errorf("mids = %d, want 2 (capped at rowCount)", len(mids))
 	}
@@ -131,7 +131,7 @@ func TestGetMatchesExistAll(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test", "carol@hermex.test")
 	f := mapi.Restriction{Type: mapi.ResExist, Value: mapi.ExistRestriction{PropTag: mapi.PrEntryID}}
 	_, mids, _, _ := decodeGetMatches(t, s.GetMatches(buildGetMatches(
-		stat{sortType: sortTypeDisplayName, codePage: 1252}, &f, 50, nil)))
+		stat{sortType: sortTypeDisplayName, codePage: 1252}, &f, 50, nil), testCaller))
 	if len(mids) != 3 {
 		t.Errorf("mids = %d, want 3 (all entries exist)", len(mids))
 	}
@@ -145,9 +145,9 @@ func TestGetMatchesAnrEqualsResolve(t *testing.T) {
 	const token = "carol"
 	f := anrFilter(token)
 	_, mids, _, _ := decodeGetMatches(t, s.GetMatches(buildGetMatches(
-		stat{sortType: sortTypeDisplayName, codePage: 1252}, &f, 50, nil)))
+		stat{sortType: sortTypeDisplayName, codePage: 1252}, &f, 50, nil), testCaller))
 
-	wantMID, status := s.snapshot().resolve(token)
+	wantMID, status := s.snapshot(testCaller).resolve(token)
 	if status != midResolved {
 		t.Fatalf("resolve(%q) status = %#x, want midResolved", token, status)
 	}
@@ -161,7 +161,7 @@ func TestGetMatchesSortTypeRejected(t *testing.T) {
 	s := testGAL("alice@hermex.test")
 	f := anrFilter("alice")
 	result, _, _, _ := decodeGetMatches(t, s.GetMatches(buildGetMatches(
-		stat{sortType: 0x99, codePage: 1252}, &f, 50, nil)))
+		stat{sortType: 0x99, codePage: 1252}, &f, 50, nil), testCaller))
 	if result != ecNotSupported {
 		t.Errorf("result = %#x, want ecNotSupported", result)
 	}
@@ -172,7 +172,7 @@ func TestGetMatchesUnicodeRejected(t *testing.T) {
 	s := testGAL("alice@hermex.test")
 	f := anrFilter("alice")
 	result, _, _, _ := decodeGetMatches(t, s.GetMatches(buildGetMatches(
-		stat{sortType: sortTypeDisplayName, codePage: cpWinUnicode}, &f, 50, nil)))
+		stat{sortType: sortTypeDisplayName, codePage: cpWinUnicode}, &f, 50, nil), testCaller))
 	if result != ecNotSupported {
 		t.Errorf("result = %#x, want ecNotSupported", result)
 	}

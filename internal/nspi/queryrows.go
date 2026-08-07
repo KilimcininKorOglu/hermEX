@@ -73,18 +73,18 @@ type rowsetResult struct {
 
 // QueryRows handles the NSPI QueryRows request: it returns address-book rows
 // either for an explicit MId list or by walking the STAT cursor forward.
-func (s *Server) QueryRows(body []byte) []byte {
+func (s *Server) QueryRows(body []byte, caller string) []byte {
 	req, err := pullQueryRows(body)
 	if err != nil {
 		return s.encodeQueryRows(ecError, stat{}, nil, nil)
 	}
-	r := s.queryRowsCore(req)
+	r := s.queryRowsCore(req, caller)
 	return s.encodeQueryRows(r.result, r.stat, r.cols, r.rows)
 }
 
 // queryRowsCore runs the QueryRows semantics on a decoded request,
 // transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it.
-func (s *Server) queryRowsCore(req queryRowsRequest) rowsetResult {
+func (s *Server) queryRowsCore(req queryRowsRequest, caller string) rowsetResult {
 	if req.count == 0 { // [MS-OXNSPI] 3.1.4.1.8: count must be non-zero
 		return rowsetResult{result: ecInvalidParam, stat: req.stat}
 	}
@@ -99,7 +99,7 @@ func (s *Server) queryRowsCore(req queryRowsRequest) rowsetResult {
 		return rowsetResult{result: ecTableTooBig, stat: req.stat}
 	}
 
-	g := s.snapshot()
+	g := s.snapshot(caller)
 	st := req.stat
 	var rows []mapi.PropertyValues
 	if len(req.explicit) > 0 {
@@ -218,23 +218,23 @@ type updateStatResult struct {
 
 // UpdateStat repositions the cursor by STAT.delta without returning rows,
 // reporting the applied row delta when the client asked for it.
-func (s *Server) UpdateStat(body []byte) []byte {
+func (s *Server) UpdateStat(body []byte, caller string) []byte {
 	req, err := pullUpdateStat(body)
 	if err != nil {
 		return s.encodeUpdateStat(ecError, stat{}, false, 0)
 	}
-	r := s.updateStatCore(req)
+	r := s.updateStatCore(req, caller)
 	return s.encodeUpdateStat(r.result, r.stat, r.hasDelta, r.delta)
 }
 
 // updateStatCore runs the UpdateStat semantics on a decoded request,
 // transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it.
-func (s *Server) updateStatCore(req updateStatRequest) updateStatResult {
+func (s *Server) updateStatCore(req updateStatRequest, caller string) updateStatResult {
 	if req.stat.codePage == cpWinUnicode {
 		return updateStatResult{result: ecNotSupported, stat: req.stat}
 	}
 	st := req.stat
-	v := s.snapshot().viewFor(st.containerID)
+	v := s.snapshot(caller).viewFor(st.containerID)
 	total := v.total()
 	initRow := v.position(st.curRec)
 	row := initRow

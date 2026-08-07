@@ -30,7 +30,7 @@ func TestListRooms(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rooms, err := d.ListRooms()
+	rooms, err := d.ListRooms("alice@hermex.test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,6 +57,11 @@ func TestCreateRoom(t *testing.T) {
 	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "dom")); err != nil {
 		t.Fatal(err)
 	}
+	// The room list is scoped to the caller, so the domain needs an account to
+	// ask as; a room is looked up on behalf of a person, never on its own.
+	if _, err := d.CreateUser("alice@hermex.test", "secret", filepath.Join(root, "alice")); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := d.CreateRoom("conf-a@hermex.test", "Conference A", filepath.Join(root, "conf-a"), 8, false); err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +73,7 @@ func TestCreateRoom(t *testing.T) {
 		t.Error("CreateRoom into an unknown domain should fail")
 	}
 
-	rooms, err := d.ListRooms()
+	rooms, err := d.ListRooms("alice@hermex.test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,10 +114,13 @@ func TestSearchGALRoomCapacity(t *testing.T) {
 	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "dom")); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := d.CreateUser("alice@hermex.test", "secret", filepath.Join(root, "alice")); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := d.CreateRoom("conf-a@hermex.test", "Conference A", filepath.Join(root, "conf"), 8, false); err != nil {
 		t.Fatal(err)
 	}
-	entries, err := d.SearchGAL("conf-a", 20)
+	entries, err := d.SearchGAL("alice@hermex.test", "conf-a", 20)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -46,8 +46,12 @@ func TestEndToEndNSPI(t *testing.T) {
 	}
 	nsp := nspi.NewServer(accs, mapi.GUID{Data1: 0xABCD1234})
 	disp := NewDispatcher()
-	disp.Register(nspi.RPCInterfaceUUID, nspi.RPCInterfaceVersion, func(_ *Session, opnum uint16, stub []byte) ([]byte, uint32) {
-		return nsp.DispatchRPC(opnum, stub)
+	disp.Register(nspi.RPCInterfaceUUID, nspi.RPCInterfaceVersion, func(sess *Session, opnum uint16, stub []byte) ([]byte, uint32) {
+		user := ""
+		if sess != nil {
+			user = sess.User
+		}
+		return nsp.DispatchRPC(opnum, stub, user)
 	})
 	srv := httptest.NewServer(NewServer(Config{Auth: okAuth, Dispatch: disp.Dispatch}))
 	defer srv.Close()

@@ -42,7 +42,7 @@ func buildResolveNames(codePage uint32, names ...string) []byte {
 func TestDNToMId(t *testing.T) {
 	s := testGAL("alice@hermex.test", "bob@hermex.test", "carol@hermex.test")
 	body := buildDNToMId(userDN("bob@hermex.test"), userDN("nobody@x.test"), "not-a-dn")
-	p := ext.NewPull(s.DNToMId(body), abkFlags)
+	p := ext.NewPull(s.DNToMId(body, testCaller), abkFlags)
 	mustU32(t, p, "status")
 	if r := mustU32(t, p, "result"); r != ecSuccess {
 		t.Fatalf("result = %#x", r)
@@ -79,7 +79,7 @@ func TestResolveNamesW(t *testing.T) {
 		"nobody",                 // no match -> unresolved
 		"SMTP:carol@hermex.test", // prefix-stripped, unique -> resolved
 	)
-	p := ext.NewPull(s.ResolveNamesW(body), abkFlags)
+	p := ext.NewPull(s.ResolveNamesW(body, testCaller), abkFlags)
 	mustU32(t, p, "status")
 	if r := mustU32(t, p, "result"); r != ecSuccess {
 		t.Fatalf("result = %#x", r)

@@ -75,7 +75,7 @@ type Directory interface {
 	CreateContact(email, displayName, domain string) (int64, error)
 	UpdateContact(email, displayName string) (bool, error)
 	DeleteContact(email string) (bool, error)
-	ListRooms() ([]directory.GALEntry, error)
+	ListAllRooms() ([]directory.GALEntry, error)
 	CreateRoom(email, displayName, maildir string, capacity int, equipment bool) (int64, error)
 	ListOrgs() ([]directory.OrgInfo, error)
 	GetOrg(id int64) (directory.OrgInfo, bool, error)

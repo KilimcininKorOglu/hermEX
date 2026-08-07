@@ -38,7 +38,7 @@ func TestGetMatchesPublicDelegatesReadsListAndHidesDelegate(t *testing.T) {
 		},
 	}, testGUID)
 
-	g := s.snapshot()
+	g := s.snapshot(testCaller)
 	boss, ok := g.userByAddress("boss@hermex.test")
 	if !ok {
 		t.Fatal("boss not in GAL")
@@ -46,7 +46,7 @@ func TestGetMatchesPublicDelegatesReadsListAndHidesDelegate(t *testing.T) {
 	r := s.getMatchesCore(getMatchesRequest{
 		stat:     stat{sortType: sortTypeDisplayName, codePage: 1252, containerID: uint32(mapi.PrEmsAbPublicDelegates), curRec: boss.mid},
 		rowCount: 50,
-	})
+	}, testCaller)
 	if r.result != ecSuccess {
 		t.Fatalf("result = %#x, want ecSuccess", r.result)
 	}
@@ -71,12 +71,12 @@ func TestGetMatchesPublicDelegatesWithoutReaderIsEmpty(t *testing.T) {
 	s := NewServer(maskedGAL{
 		{DisplayName: "boss@hermex.test", Address: "boss@hermex.test", DisplayType: rtUser},
 	}, testGUID)
-	g := s.snapshot()
+	g := s.snapshot(testCaller)
 	boss, _ := g.userByAddress("boss@hermex.test")
 	r := s.getMatchesCore(getMatchesRequest{
 		stat:     stat{sortType: sortTypeDisplayName, codePage: 1252, containerID: uint32(mapi.PrEmsAbPublicDelegates), curRec: boss.mid},
 		rowCount: 50,
-	})
+	}, testCaller)
 	if r.result != ecSuccess {
 		t.Fatalf("result = %#x, want ecSuccess", r.result)
 	}

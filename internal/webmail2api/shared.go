@@ -43,7 +43,7 @@ func (s *Server) openMailbox(w http.ResponseWriter, r *http.Request) (*mailboxCt
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return nil, false
 	}
-	boxes, err := lister.SharedMailboxes()
+	boxes, err := lister.SharedMailboxes(c.Email)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "directory error"})
 		return nil, false

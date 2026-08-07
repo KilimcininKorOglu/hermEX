@@ -42,7 +42,7 @@ func TestStaticAccountsSharedMailboxes(t *testing.T) {
 		"support@hermex.test": {Password: "x", MailboxPath: "/m/support", Shared: true}, // shared
 		"nopath@hermex.test":  {Password: "x", MailboxPath: "", Shared: true},           // shared but no mailbox: skipped
 	}
-	got, err := a.SharedMailboxes()
+	got, err := a.SharedMailboxes("alice@hermex.test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestStaticAccountsSearchGAL(t *testing.T) {
 
 	// "ali" matches both alice and alias, which share a mailbox, so the suggestion
 	// collapses to a single entry.
-	got, err := a.SearchGAL("ali", 0)
+	got, err := a.SearchGAL("alice@hermex.test", "ali", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,13 +115,13 @@ func TestStaticAccountsSearchGAL(t *testing.T) {
 	}
 
 	// Matching is case-insensitive.
-	if got, _ := a.SearchGAL("BOB", 0); len(got) != 1 || got[0].Address != "bob@hermex.test" {
+	if got, _ := a.SearchGAL("alice@hermex.test", "BOB", 0); len(got) != 1 || got[0].Address != "bob@hermex.test" {
 		t.Errorf("SearchGAL(%q) = %v, want [bob@hermex.test]", "BOB", got)
 	}
 
 	// A domain-wide substring returns one entry per distinct mailbox, ordered by
 	// address; the empty-mailbox account is excluded.
-	all, _ := a.SearchGAL("@hermex.test", 0)
+	all, _ := a.SearchGAL("alice@hermex.test", "@hermex.test", 0)
 	if len(all) != 3 {
 		t.Fatalf("SearchGAL(domain) = %v, want 3 distinct mailboxes", all)
 	}
@@ -130,7 +130,7 @@ func TestStaticAccountsSearchGAL(t *testing.T) {
 	}
 
 	// The limit caps the result count.
-	if got, _ := a.SearchGAL("@hermex.test", 2); len(got) != 2 {
+	if got, _ := a.SearchGAL("alice@hermex.test", "@hermex.test", 2); len(got) != 2 {
 		t.Errorf("SearchGAL(domain, limit 2) returned %d entries, want 2", len(got))
 	}
 }

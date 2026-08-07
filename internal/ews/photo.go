@@ -60,7 +60,7 @@ func (s *Server) userPhoto(email string, sess *session) []byte {
 	if !ok {
 		return nil
 	}
-	entries, _ := gal.SearchGAL(email, 5)
+	entries, _ := gal.SearchGAL(sess.user, email, 5)
 	// A portrait for an address the operator hid from the address book would
 	// confirm the mailbox exists; the caller's own mailbox is handled above.
 	entries = directory.VisibleGAL(entries)

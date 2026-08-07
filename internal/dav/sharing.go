@@ -17,7 +17,7 @@ func (s *Server) delegatedMailboxes(user string) ([]directory.SharedMailbox, err
 	if !ok {
 		return nil, nil
 	}
-	mboxes, err := lister.SharedMailboxes()
+	mboxes, err := lister.SharedMailboxes(user)
 	if err != nil {
 		return nil, err
 	}

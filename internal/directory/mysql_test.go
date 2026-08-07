@@ -373,7 +373,7 @@ func TestSQLDirectorySharedMailboxes(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := d.SharedMailboxes()
+	got, err := d.SharedMailboxes("alice@hermex.test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -421,7 +421,7 @@ func TestSQLDirectorySearchGAL(t *testing.T) {
 	// "al" substring-matches alice and albert, but albert is suspended, so only
 	// alice remains. The query is case-insensitive.
 	for _, q := range []string{"al", "AL"} {
-		got, err := d.SearchGAL(q, 0)
+		got, err := d.SearchGAL("alice@hermex.test", q, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -433,7 +433,7 @@ func TestSQLDirectorySearchGAL(t *testing.T) {
 	}
 
 	// A domain-wide query returns every active user ordered by address.
-	all, err := d.SearchGAL("hermex.test", 0)
+	all, err := d.SearchGAL("alice@hermex.test", "hermex.test", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -445,13 +445,13 @@ func TestSQLDirectorySearchGAL(t *testing.T) {
 	}
 
 	// The limit caps the result count.
-	if got, _ := d.SearchGAL("hermex.test", 1); len(got) != 1 {
+	if got, _ := d.SearchGAL("alice@hermex.test", "hermex.test", 1); len(got) != 1 {
 		t.Errorf("SearchGAL(domain, limit 1) returned %d, want 1", len(got))
 	}
 
 	// bob's PR_DISPLAY_NAME surfaces as the display name (the LEFT JOIN), while
 	// alice with none keeps the address fallback asserted above.
-	bob, _ := d.SearchGAL("bob", 0)
+	bob, _ := d.SearchGAL("alice@hermex.test", "bob", 0)
 	if len(bob) != 1 || bob[0].Address != "bob@hermex.test" || bob[0].DisplayName != "Bob Builder" {
 		t.Errorf("SearchGAL(bob) = %v, want bob@hermex.test displayed as %q", bob, "Bob Builder")
 	}

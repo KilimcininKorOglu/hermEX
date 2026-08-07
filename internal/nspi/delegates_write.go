@@ -95,7 +95,7 @@ func (s *Server) modLinkAttCore(req modLinkAttRequest, user string) uint32 {
 	if !ok {
 		return ecNotSupported
 	}
-	g := s.snapshot()
+	g := s.snapshot(user)
 	target, ok := g.byMID(req.mid)
 	if !ok {
 		return ecInvalidObject

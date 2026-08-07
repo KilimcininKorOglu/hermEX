@@ -82,7 +82,7 @@ type getPersonaResponse struct {
 
 // handleFindPeople answers FindPeople: it resolves the query string against the
 // directory GAL and returns one persona per match.
-func (s *Server) handleFindPeople(w http.ResponseWriter, inner []byte, _ *session) {
+func (s *Server) handleFindPeople(w http.ResponseWriter, inner []byte, sess *session) {
 	var req findPeopleRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
 		s.soapFault(w, "ErrorInvalidRequest", "FindPeople: invalid request", err)
@@ -90,7 +90,7 @@ func (s *Server) handleFindPeople(w http.ResponseWriter, inner []byte, _ *sessio
 	}
 	var personas []personaOut
 	if gal, ok := s.accounts.(directory.GAL); ok {
-		entries, err := gal.SearchGAL(req.QueryString, personaSearchLimit)
+		entries, err := gal.SearchGAL(sess.user, req.QueryString, personaSearchLimit)
 		// Withhold the addresses the operator hid from the address book.
 		entries = directory.VisibleGAL(entries)
 		if err == nil {
@@ -111,7 +111,7 @@ func (s *Server) handleFindPeople(w http.ResponseWriter, inner []byte, _ *sessio
 // handleGetPersona answers GetPersona: it looks up a single persona by the email
 // address in the request. A missing address is ErrorInvalidArgument; an address
 // absent from the GAL is ErrorPersonNotFound.
-func (s *Server) handleGetPersona(w http.ResponseWriter, inner []byte, _ *session) {
+func (s *Server) handleGetPersona(w http.ResponseWriter, inner []byte, sess *session) {
 	var req getPersonaRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
 		s.soapFault(w, "ErrorInvalidRequest", "GetPersona: invalid request", err)
@@ -124,7 +124,7 @@ func (s *Server) handleGetPersona(w http.ResponseWriter, inner []byte, _ *sessio
 	}
 	var found *personaOut
 	if gal, ok := s.accounts.(directory.GAL); ok {
-		entries, err := gal.SearchGAL(target, personaSearchLimit)
+		entries, err := gal.SearchGAL(sess.user, target, personaSearchLimit)
 		// A hidden address has no persona to report: it answers ErrorPersonNotFound
 		// below, the same as an address absent from the directory.
 		entries = directory.VisibleGAL(entries)

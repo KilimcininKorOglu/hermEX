@@ -110,12 +110,12 @@ func pullGetMatches(body []byte) (getMatchesRequest, error) {
 // requested row count, plus a column-projected row per match. Outlook uses it
 // with a PR_ANR restriction as an alternative to ResolveNamesW, so ANR matching
 // shares that predicate.
-func (s *Server) GetMatches(body []byte) []byte {
+func (s *Server) GetMatches(body []byte, caller string) []byte {
 	req, err := pullGetMatches(body)
 	if err != nil {
 		return s.encodeGetMatches(ecError, stat{}, nil, nil, nil)
 	}
-	r := s.getMatchesCore(req)
+	r := s.getMatchesCore(req, caller)
 	return s.encodeGetMatches(r.result, r.stat, r.mids, r.cols, r.rows)
 }
 
@@ -132,7 +132,7 @@ type getMatchesResult struct {
 
 // getMatchesCore runs the GetMatches semantics on a decoded request,
 // transport-neutral: the MAPI/HTTP handler and the RPC/HTTP stub share it.
-func (s *Server) getMatchesCore(req getMatchesRequest) getMatchesResult {
+func (s *Server) getMatchesCore(req getMatchesRequest, caller string) getMatchesResult {
 	st := req.stat
 	if st.codePage == cpWinUnicode {
 		return getMatchesResult{result: ecNotSupported, stat: st}
@@ -151,7 +151,7 @@ func (s *Server) getMatchesCore(req getMatchesRequest) getMatchesResult {
 		return getMatchesResult{result: ecTableTooBig, stat: st}
 	}
 
-	g := s.snapshot()
+	g := s.snapshot(caller)
 	var mids []uint32
 	switch {
 	case st.containerID == uint32(mapi.PrEmsAbMember):

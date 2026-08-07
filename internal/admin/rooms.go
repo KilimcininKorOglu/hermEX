@@ -20,7 +20,7 @@ func (s *Server) handleUIRooms(w http.ResponseWriter, r *http.Request) {
 	if !s.uiRequireSystemPage(w, r) {
 		return
 	}
-	rooms, _ := s.dir.ListRooms()
+	rooms, _ := s.dir.ListAllRooms()
 	s.render(w, "rooms.html", map[string]any{
 		"Nav": "rooms", "CSRF": csrfCookieValue(r),
 		"Rooms": rooms,
@@ -73,7 +73,7 @@ func (s *Server) handleUIDeleteRoom(w http.ResponseWriter, r *http.Request) {
 // optional error. The CSRF token is carried so the per-row delete forms in the
 // swapped-in fragment keep working.
 func (s *Server) renderRoomsPanel(w http.ResponseWriter, r *http.Request, errMsg string) {
-	rooms, _ := s.dir.ListRooms()
+	rooms, _ := s.dir.ListAllRooms()
 	s.render(w, "rooms-panel", map[string]any{
 		"Rooms": rooms, "CSRF": csrfCookieValue(r), "Error": errMsg,
 	})

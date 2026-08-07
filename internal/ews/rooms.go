@@ -52,14 +52,14 @@ type roomListsWrap struct {
 // handleGetRoomLists answers GetRoomLists, emitting one room-list entry per mail
 // domain that owns at least one room. RoomLists is omitted entirely when there
 // are none, matching the reference's optional element.
-func (s *Server) handleGetRoomLists(w http.ResponseWriter, _ []byte, _ *session) {
+func (s *Server) handleGetRoomLists(w http.ResponseWriter, _ []byte, sess *session) {
 	resp := getRoomListsResponse{ResponseClass: "Success", ResponseCode: "NoError"}
 	rl, ok := s.accounts.(directory.RoomLister)
 	if !ok {
 		writeResponse(w, resp)
 		return
 	}
-	rooms, err := rl.ListRooms()
+	rooms, err := rl.ListRooms(sess.user)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "GetRoomLists: an internal error occurred", err)
 		return
@@ -117,7 +117,7 @@ type roomEntry struct {
 // the requested room-list address. A request without an address is an error
 // response (the room list is mandatory); a domain with no rooms is an empty
 // success.
-func (s *Server) handleGetRooms(w http.ResponseWriter, inner []byte, _ *session) {
+func (s *Server) handleGetRooms(w http.ResponseWriter, inner []byte, sess *session) {
 	var req getRoomsRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
 		s.soapFault(w, "ErrorInvalidRequest", "GetRooms: invalid request", err)
@@ -134,7 +134,7 @@ func (s *Server) handleGetRooms(w http.ResponseWriter, inner []byte, _ *session)
 		writeResponse(w, resp)
 		return
 	}
-	rooms, err := rl.ListRooms()
+	rooms, err := rl.ListRooms(sess.user)
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "GetRooms: an internal error occurred", err)
 		return

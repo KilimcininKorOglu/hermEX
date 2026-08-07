@@ -62,7 +62,7 @@ func TestRPCUpdateStat(t *testing.T) {
 	pushStatNDR(p, stat{curRec: midBase, delta: 2, codePage: 1252})
 	p.UniquePtr(true) // delta requested
 	p.Int32(0)        // in delta value, ignored
-	out, fault := s.DispatchRPC(opNspiUpdateStat, p.Bytes())
+	out, fault := s.DispatchRPC(opNspiUpdateStat, p.Bytes(), testCaller)
 	if fault != 0 {
 		t.Fatalf("fault %#x", fault)
 	}
@@ -100,7 +100,7 @@ func TestRPCQueryRowsExplicit(t *testing.T) {
 	p.Uint32(midBase + 2) // carol
 	p.Uint32(10)          // requested
 	p.UniquePtr(false)    // default columns
-	out, fault := s.DispatchRPC(opNspiQueryRows, p.Bytes())
+	out, fault := s.DispatchRPC(opNspiQueryRows, p.Bytes(), testCaller)
 	if fault != 0 {
 		t.Fatalf("fault %#x", fault)
 	}
@@ -131,7 +131,7 @@ func TestRPCQueryRowsInvalid(t *testing.T) {
 	p.UniquePtr(false) // null MID referent
 	p.Uint32(0)        // requested count == 0 → ecInvalidParam
 	p.UniquePtr(false) // default columns
-	out, fault := s.DispatchRPC(opNspiQueryRows, p.Bytes())
+	out, fault := s.DispatchRPC(opNspiQueryRows, p.Bytes(), testCaller)
 	if fault != 0 {
 		t.Fatalf("fault %#x", fault)
 	}
@@ -162,7 +162,7 @@ func TestRPCSeekEntries(t *testing.T) {
 	}
 	p.UniquePtr(false) // no MID table
 	p.UniquePtr(false) // default columns
-	out, fault := s.DispatchRPC(opNspiSeekEntries, p.Bytes())
+	out, fault := s.DispatchRPC(opNspiSeekEntries, p.Bytes(), testCaller)
 	if fault != 0 {
 		t.Fatalf("fault %#x", fault)
 	}
@@ -191,7 +191,7 @@ func TestRPCCompareMids(t *testing.T) {
 	pushStatNDR(p, stat{codePage: 1252})
 	p.Uint32(midBase)     // alice (pos 0)
 	p.Uint32(midBase + 2) // carol (pos 2)
-	out, fault := s.DispatchRPC(opNspiCompareMIds, p.Bytes())
+	out, fault := s.DispatchRPC(opNspiCompareMIds, p.Bytes(), testCaller)
 	if fault != 0 {
 		t.Fatalf("fault %#x", fault)
 	}
@@ -213,7 +213,7 @@ func TestRPCResortRestriction(t *testing.T) {
 	pushStatNDR(p, stat{codePage: 1252})
 	pushU32ArrayNDR(p, []uint32{midBase + 2, midBase}) // inline [carol, alice]
 	p.UniquePtr(false)                                 // reserved outmids: null
-	out, fault := s.DispatchRPC(opNspiResortRestriction, p.Bytes())
+	out, fault := s.DispatchRPC(opNspiResortRestriction, p.Bytes(), testCaller)
 	if fault != 0 {
 		t.Fatalf("fault %#x", fault)
 	}
@@ -240,7 +240,7 @@ func TestRPCGetProps(t *testing.T) {
 	p.Uint32(0) // flags
 	pushStatNDR(p, stat{curRec: midBase, codePage: 1252})
 	pushPtrProptagsForTest(p, []mapi.PropTag{mapi.PrDisplayName, mapi.PrSmtpAddress})
-	out, fault := s.DispatchRPC(opNspiGetProps, p.Bytes())
+	out, fault := s.DispatchRPC(opNspiGetProps, p.Bytes(), testCaller)
 	if fault != 0 {
 		t.Fatalf("fault %#x", fault)
 	}
@@ -261,7 +261,7 @@ func TestRPCGetPropList(t *testing.T) {
 	p.Uint32(0)       // flags
 	p.Uint32(midBase) // alice
 	p.Uint32(1252)    // code page
-	out, fault := s.DispatchRPC(opNspiGetPropList, p.Bytes())
+	out, fault := s.DispatchRPC(opNspiGetPropList, p.Bytes(), testCaller)
 	if fault != 0 {
 		t.Fatalf("fault %#x", fault)
 	}
@@ -281,7 +281,7 @@ func TestRPCGetPropList(t *testing.T) {
 	p2.Uint32(0)
 	p2.Uint32(0) // MId 0
 	p2.Uint32(1252)
-	out2, _ := s.DispatchRPC(opNspiGetPropList, p2.Bytes())
+	out2, _ := s.DispatchRPC(opNspiGetPropList, p2.Bytes(), testCaller)
 	if ref, _ := ndr.NewPull(out2).Uint32(); ref != 0 {
 		t.Error("proptag referent present for MId 0, want null")
 	}
@@ -296,7 +296,7 @@ func TestRPCQueryColumns(t *testing.T) {
 	p := inHandle()
 	p.Uint32(0) // reserved
 	p.Uint32(0) // flags
-	out, fault := s.DispatchRPC(opNspiQueryColumns, p.Bytes())
+	out, fault := s.DispatchRPC(opNspiQueryColumns, p.Bytes(), testCaller)
 	if fault != 0 {
 		t.Fatalf("fault %#x", fault)
 	}
@@ -320,7 +320,7 @@ func TestRPCGetSpecialTable(t *testing.T) {
 	p.Uint32(0) // flags
 	pushStatNDR(p, stat{codePage: 1252})
 	p.Uint32(0) // client's cached version
-	out, fault := s.DispatchRPC(opNspiGetSpecialTable, p.Bytes())
+	out, fault := s.DispatchRPC(opNspiGetSpecialTable, p.Bytes(), testCaller)
 	if fault != 0 {
 		t.Fatalf("fault %#x", fault)
 	}
@@ -346,7 +346,7 @@ func TestRPCGetSpecialTable(t *testing.T) {
 // ecNotSupported (the bare result, no echoed row) instead of an op-range fault.
 func TestRPCModPropsNotSupported(t *testing.T) {
 	s := testGAL("alice@hermex.test")
-	out, fault := s.DispatchRPC(opNspiModProps, inHandle().Bytes())
+	out, fault := s.DispatchRPC(opNspiModProps, inHandle().Bytes(), testCaller)
 	if fault != 0 {
 		t.Fatalf("ModProps faulted %#x; the write-range opnums must answer, not fault", fault)
 	}
@@ -362,7 +362,7 @@ func TestRPCModPropsNotSupported(t *testing.T) {
 // ModLinkAtt answers a blanket ecNotSupported.
 func TestRPCModLinkAttNotSupported(t *testing.T) {
 	s := testGAL("alice@hermex.test")
-	out, fault := s.DispatchRPC(opNspiModLinkAtt, inHandle().Bytes())
+	out, fault := s.DispatchRPC(opNspiModLinkAtt, inHandle().Bytes(), testCaller)
 	if fault != 0 {
 		t.Fatalf("ModLinkAtt faulted %#x; the write-range opnums must answer, not fault", fault)
 	}
@@ -380,7 +380,7 @@ func TestRPCGetTemplateInfoNoTemplate(t *testing.T) {
 	s := testGAL("alice@hermex.test")
 	p := inHandle()
 	p.Uint32(tiTemplate) // Flags
-	out, fault := s.DispatchRPC(opNspiGetTemplateInfo, p.Bytes())
+	out, fault := s.DispatchRPC(opNspiGetTemplateInfo, p.Bytes(), testCaller)
 	if fault != 0 {
 		t.Fatalf("GetTemplateInfo faulted %#x; it must answer, not fault", fault)
 	}
@@ -399,7 +399,7 @@ func TestRPCGetTemplateInfoScriptNotSupported(t *testing.T) {
 	s := testGAL("alice@hermex.test")
 	p := inHandle()
 	p.Uint32(tiTemplate | tiScript) // Flags carry TI_SCRIPT
-	out, fault := s.DispatchRPC(opNspiGetTemplateInfo, p.Bytes())
+	out, fault := s.DispatchRPC(opNspiGetTemplateInfo, p.Bytes(), testCaller)
 	if fault != 0 {
 		t.Fatalf("GetTemplateInfo faulted %#x", fault)
 	}
@@ -417,7 +417,7 @@ func TestRPCDNToMid(t *testing.T) {
 	p := inHandle()
 	p.Uint32(0) // reserved
 	pushStringsArrayForTest(p, []string{userDN("bob@hermex.test"), "cn=nobody"}, false)
-	out, fault := s.DispatchRPC(opNspiDNToMId, p.Bytes())
+	out, fault := s.DispatchRPC(opNspiDNToMId, p.Bytes(), testCaller)
 	if fault != 0 {
 		t.Fatalf("fault %#x", fault)
 	}
@@ -446,7 +446,7 @@ func TestRPCGetMatches(t *testing.T) {
 	p.UniquePtr(false) // no property name
 	p.Uint32(10)       // requested
 	p.UniquePtr(false) // default columns
-	out, fault := s.DispatchRPC(opNspiGetMatches, p.Bytes())
+	out, fault := s.DispatchRPC(opNspiGetMatches, p.Bytes(), testCaller)
 	if fault != 0 {
 		t.Fatalf("fault %#x", fault)
 	}
@@ -477,7 +477,7 @@ func TestRPCGetMatchesPropName(t *testing.T) {
 	p.Uint32(0)        // reserved
 	p.UniquePtr(false) // no filter
 	p.UniquePtr(true)  // property name present → unsupported
-	out, fault := s.DispatchRPC(opNspiGetMatches, p.Bytes())
+	out, fault := s.DispatchRPC(opNspiGetMatches, p.Bytes(), testCaller)
 	if fault != 0 {
 		t.Fatalf("fault %#x", fault)
 	}
@@ -513,7 +513,7 @@ func assertResolve(t *testing.T, opnum uint16, wide bool) {
 	pushStatNDR(p, stat{codePage: 1252})
 	p.UniquePtr(false) // default columns
 	pushStringsArrayForTest(p, []string{"alice"}, wide)
-	out, fault := s.DispatchRPC(opnum, p.Bytes())
+	out, fault := s.DispatchRPC(opnum, p.Bytes(), testCaller)
 	if fault != 0 {
 		t.Fatalf("fault %#x", fault)
 	}

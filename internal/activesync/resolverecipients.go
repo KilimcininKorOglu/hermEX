@@ -103,7 +103,7 @@ func resolveOneRecipient(gal directory.GAL, to string, opt pictureOpts, win avai
 
 	var entries []directory.GALEntry
 	if gal != nil && to != "" {
-		entries, _ = gal.SearchGAL(to, resolveRecipientLimit)
+		entries, _ = gal.SearchGAL(sess.user, to, resolveRecipientLimit)
 		// Withhold the addresses the operator hid from name resolution.
 		entries = directory.ResolvableGAL(entries)
 	}

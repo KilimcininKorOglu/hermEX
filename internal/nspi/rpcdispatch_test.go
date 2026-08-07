@@ -52,7 +52,7 @@ func bindResult(t *testing.T, out []byte) (uint32, mapi.GUID) {
 // minted context handle is non-zero, and the result is ecSuccess.
 func TestRPCBindRoundTrip(t *testing.T) {
 	s := NewServer(nil, testServerGUID)
-	out, fault := s.DispatchRPC(opNspiBind, buildBindIN(0, 1252))
+	out, fault := s.DispatchRPC(opNspiBind, buildBindIN(0, 1252), testCaller)
 	if fault != 0 {
 		t.Fatalf("bind fault = %#x, want 0", fault)
 	}
@@ -98,7 +98,7 @@ func TestRPCBindMintsDistinctHandles(t *testing.T) {
 
 func bindHandleGUID(t *testing.T, s *Server) mapi.GUID {
 	t.Helper()
-	out, fault := s.DispatchRPC(opNspiBind, buildBindIN(0, 1252))
+	out, fault := s.DispatchRPC(opNspiBind, buildBindIN(0, 1252), testCaller)
 	if fault != 0 {
 		t.Fatalf("bind fault %#x", fault)
 	}
@@ -110,7 +110,7 @@ func bindHandleGUID(t *testing.T, s *Server) mapi.GUID {
 // handle, matching the MAPI/HTTP admission check.
 func TestRPCBindAnonymousRejected(t *testing.T) {
 	s := NewServer(nil, testServerGUID)
-	out, fault := s.DispatchRPC(opNspiBind, buildBindIN(fAnonymousLogin, 1252))
+	out, fault := s.DispatchRPC(opNspiBind, buildBindIN(fAnonymousLogin, 1252), testCaller)
 	if fault != 0 {
 		t.Fatalf("fault %#x", fault)
 	}
@@ -127,7 +127,7 @@ func TestRPCBindAnonymousRejected(t *testing.T) {
 // are code-page encoded, so the bind cannot proceed in Unicode).
 func TestRPCBindUnicodeRejected(t *testing.T) {
 	s := NewServer(nil, testServerGUID)
-	out, fault := s.DispatchRPC(opNspiBind, buildBindIN(0, cpWinUnicode))
+	out, fault := s.DispatchRPC(opNspiBind, buildBindIN(0, cpWinUnicode), testCaller)
 	if fault != 0 {
 		t.Fatalf("fault %#x", fault)
 	}
@@ -144,7 +144,7 @@ func TestRPCUnbind(t *testing.T) {
 	p := ndr.NewPush()
 	pushCtxHandleNDR(p, 0, testServerGUID) // a live handle the client holds
 	p.Uint32(0)                            // reserved
-	out, fault := s.DispatchRPC(opNspiUnbind, p.Bytes())
+	out, fault := s.DispatchRPC(opNspiUnbind, p.Bytes(), testCaller)
 	if fault != 0 {
 		t.Fatalf("unbind fault %#x", fault)
 	}
@@ -173,7 +173,7 @@ func TestRPCUnbind(t *testing.T) {
 // faithful MAPI error (covered by the write-range tests in rpcdata_test.go).
 func TestRPCUnsupportedOpnum(t *testing.T) {
 	s := NewServer(nil, testServerGUID)
-	out, fault := s.DispatchRPC(99, nil) // 99: past the highest defined NSPI opnum
+	out, fault := s.DispatchRPC(99, nil, testCaller) // 99: past the highest defined NSPI opnum
 	if fault != ndr.FaultOpRngError {
 		t.Errorf("opnum 99 fault = %#x, want FaultOpRngError", fault)
 	}
