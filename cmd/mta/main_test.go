@@ -132,6 +132,13 @@ func TestGuardedSweepRefusalLeavesTheOutboxAlone(t *testing.T) {
 	}
 }
 
+// orderedMaildirs is a directory.MailboxLister with a fixed walk order. The
+// static directory enumerates a map, so its order is random, and a test that
+// depends on which mailbox the sweep reaches first cannot use it.
+type orderedMaildirs struct{ paths []string }
+
+func (o orderedMaildirs) Maildirs() ([]string, error) { return o.paths, nil }
+
 // TestSweepOutboxesStopsOnShutdown proves the send-later sweep abandons its walk
 // when the daemon is shutting down. The sweep opens one mailbox store after
 // another, so without this it would keep working through every remaining mailbox
@@ -139,7 +146,7 @@ func TestGuardedSweepRefusalLeavesTheOutboxAlone(t *testing.T) {
 // is supposed to let it drain.
 func TestSweepOutboxesStopsOnShutdown(t *testing.T) {
 	root := t.TempDir()
-	accounts := directory.StaticAccounts{}
+	accounts := orderedMaildirs{}
 	for _, name := range []string{"a", "b", "c", "d", "e"} {
 		dir := filepath.Join(root, name)
 		st, err := objectstore.Open(dir)
@@ -157,14 +164,14 @@ func TestSweepOutboxesStopsOnShutdown(t *testing.T) {
 			t.Fatal(err)
 		}
 		st.Close()
-		accounts[name+"@hermex.test"] = directory.Account{MailboxPath: dir}
+		accounts.paths = append(accounts.paths, dir)
 	}
 
-	// A mailbox that has never been opened. Opening a store provisions it, so
-	// whether this directory exists afterwards says whether the sweep kept walking
-	// past the shutdown signal.
+	// A mailbox that has never been opened, listed LAST so the sweep can only
+	// reach it by continuing past the signal. Opening a store provisions it, so
+	// whether this directory exists afterwards says whether the sweep kept walking.
 	unvisited := filepath.Join(root, "unvisited")
-	accounts["z@hermex.test"] = directory.Account{MailboxPath: unvisited}
+	accounts.paths = append(accounts.paths, unvisited)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	sends := 0
@@ -184,11 +191,11 @@ func TestSweepOutboxesStopsOnShutdown(t *testing.T) {
 	}
 	// The rest are untouched, still scheduled for the next start.
 	waiting := 0
-	for name := range accounts {
-		if accounts[name].MailboxPath == unvisited {
+	for _, path := range accounts.paths {
+		if path == unvisited {
 			continue
 		}
-		st, err := objectstore.Open(accounts[name].MailboxPath)
+		st, err := objectstore.Open(path)
 		if err != nil {
 			t.Fatal(err)
 		}
