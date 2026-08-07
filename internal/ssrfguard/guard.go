@@ -68,12 +68,21 @@ func ValidateURL(raw string, allowInternal bool) error {
 // 172.16/12, 192.168/16, fc00::/7), unspecified (0.0.0.0, ::), and multicast: the
 // address space an attacker-named callback would try to pivot into.
 func IsPublicIP(ip net.IP) bool {
-	return !(ip.IsLoopback() ||
+	return !isInternalIP(ip)
+}
+
+// isInternalIP lists the address space the guard refuses, as a plain disjunction.
+// Stating it positively and negating once is what keeps the rule readable: the
+// equivalent six negated conjuncts are a predicate a reader has to evaluate rather
+// than read, which is the wrong shape for the check that decides whether an
+// attacker-named callback can reach the internal network.
+func isInternalIP(ip net.IP) bool {
+	return ip.IsLoopback() ||
 		ip.IsLinkLocalUnicast() ||
 		ip.IsLinkLocalMulticast() ||
 		ip.IsPrivate() ||
 		ip.IsUnspecified() ||
-		ip.IsMulticast())
+		ip.IsMulticast()
 }
 
 // GuardedDial returns a DialContext that resolves the target host and refuses the

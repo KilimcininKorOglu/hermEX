@@ -45,7 +45,7 @@ func TestRoundTrip(t *testing.T) {
 			t.Errorf("case %d: DecodeExecute error: %v", i, err)
 			continue
 		}
-		if !bytes.Equal(rops, c.rops) && !(len(rops) == 0 && len(c.rops) == 0) {
+		if !bytes.Equal(rops, c.rops) && (len(rops) != 0 || len(c.rops) != 0) {
 			t.Errorf("case %d: rops = %x, want %x", i, rops, c.rops)
 		}
 		if !reflect.DeepEqual(normHandles(handles), normHandles(c.handles)) {

@@ -141,7 +141,7 @@ func uploadDownloadStream(t *testing.T, dst *Store, folderID int64, items []ics.
 		}
 		i++ // past INCRSYNCCHG
 		var header mapi.PropertyValues
-		for i < len(items) && !(items[i].IsMarker && items[i].Marker == ics.MarkerIncrSyncMessage) {
+		for i < len(items) && (!items[i].IsMarker || items[i].Marker != ics.MarkerIncrSyncMessage) {
 			if items[i].IsMarker {
 				t.Fatalf("unexpected marker %#x in change header", items[i].Marker)
 			}
