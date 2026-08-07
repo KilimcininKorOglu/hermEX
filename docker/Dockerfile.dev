@@ -1,6 +1,13 @@
 # Development container for hermEX: Go toolchain for building and testing.
 # modernc.org/sqlite is pure Go, so CGO is disabled.
-FROM golang:1.26
+# Base images are pinned by tag AND digest. The tag says which version a reader is
+# looking at; the digest is what actually makes a rebuild reproducible, since a tag
+# is mutable and both of these move. With no registry and no CI, rebuilding from
+# source is the only way to reconstruct a previously running artifact, so two builds
+# of one commit have to produce the same binaries and the same runtime CVE surface.
+# The toolchain tag tracks the go directive in go.mod; update both together.
+# Refresh a digest with: docker buildx imagetools inspect <image>:<tag>
+FROM golang:1.26.2@sha256:b54cbf583d390341599d7bcbc062425c081105cc5ef6d170ced98ef9d047c716
 
 WORKDIR /src
 

@@ -1,5 +1,12 @@
 # Multi-stage build for the hermEX mail daemons (static, pure-Go binaries).
-FROM golang:1.26 AS build
+# Base images are pinned by tag AND digest. The tag says which version a reader is
+# looking at; the digest is what actually makes a rebuild reproducible, since a tag
+# is mutable and both of these move. With no registry and no CI, rebuilding from
+# source is the only way to reconstruct a previously running artifact, so two builds
+# of one commit have to produce the same binaries and the same runtime CVE surface.
+# The toolchain tag tracks the go directive in go.mod; update both together.
+# Refresh a digest with: docker buildx imagetools inspect <image>:<tag>
+FROM golang:1.26.2@sha256:b54cbf583d390341599d7bcbc062425c081105cc5ef6d170ced98ef9d047c716 AS build
 WORKDIR /src
 ENV CGO_ENABLED=0 GOFLAGS=-buildvcs=false
 
@@ -32,5 +39,5 @@ RUN go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-mta ./cmd/mta \
 # Minimal runtime image. NOTE: this image runs as root so the daemons can bind
 # the privileged mail ports (25/110); a hardened production image should run as
 # nonroot with CAP_NET_BIND_SERVICE or listen on high ports behind a proxy.
-FROM gcr.io/distroless/static-debian12
+FROM gcr.io/distroless/static-debian12:latest@sha256:a9fcaedd4c9b59e12dd65d954f0b5044f19b0647a8a3712e77205df9e7b102cd
 COPY --from=build /out/ /usr/local/bin/
