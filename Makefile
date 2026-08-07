@@ -20,7 +20,7 @@ PKG ?= ./internal/... ./cmd/...
 RUN ?=
 RUNFLAG := $(if $(RUN),-run '$(RUN)',)
 
-.PHONY: all build test test-host test-race vet fmt fmt-check gate tidy up down rebuild clean help compose-check
+.PHONY: all build test test-host test-race vet fmt fmt-check gate tidy up down rebuild clean help compose-check dump-db restore-db
 
 all: build
 
@@ -83,6 +83,25 @@ down:
 rebuild:
 	@test -n "$(SVC)" || { echo "set SVC=<service>"; exit 2; }
 	$(COMPOSE) build $(SVC) && $(COMPOSE) up -d --no-deps $(SVC)
+
+## dump-db: write a compressed dump of the whole directory database to docker-data/backup/
+# The directory database is the only copy of things the system generates and
+# cannot re-derive: every domain's DKIM signing key, every uploaded TLS private
+# key, and the accounts, aliases, admin roles and policy around them. It lives on
+# one bind mount with no replication, so losing docker-data/db loses all of it.
+# Take a dump before an upgrade, and on a schedule; keep it off this host.
+dump-db:
+	@mkdir -p docker-data/backup
+	@out=docker-data/backup/hermex-$$(date +%Y%m%d-%H%M%S).sql.gz; 	$(COMPOSE) exec -T db mariadb-dump -uroot -phermexstack 		--single-transaction --routines --events --databases email | gzip > $$out; 	echo "wrote $$out"
+
+## restore-db: load a dump back, e.g. make restore-db DUMP=docker-data/backup/hermex-....sql.gz
+# This REPLACES the current directory: every account, key and policy in the dump
+# wins. Stop the mail services first so nothing writes underneath it.
+restore-db:
+	@test -n "$(DUMP)" || { echo "set DUMP=<path to a .sql.gz from make dump-db>"; exit 2; }
+	@test -f "$(DUMP)" || { echo "no such dump: $(DUMP)"; exit 2; }
+	gzip -dc "$(DUMP)" | $(COMPOSE) exec -T db mariadb -uroot -phermexstack
+	@echo "restored $(DUMP)"
 
 ## compose-check: validate the compose file syntax
 compose-check:

@@ -33,6 +33,28 @@ func (d *SQLDirectory) DKIMKey(domain string) (privPEM []byte, selector string, 
 	return []byte(pk), sel, true, nil
 }
 
+// ExportDKIMKey returns a domain's signing key whatever its enabled state, for
+// the operator's backup path. DKIMKey deliberately refuses a disabled key so a
+// generated-but-unpublished one never signs; that is the wrong rule here, since
+// a key waiting on a DNS record is exactly the one whose loss cannot be noticed
+// until mail starts failing authentication.
+//
+// This is the only way the private key leaves the database, and it is reachable
+// only from the operator's shell. No HTTP surface reads it.
+func (d *SQLDirectory) ExportDKIMKey(domain string) (privPEM []byte, selector string, found bool, err error) {
+	var pk, sel string
+	err = d.db.QueryRow(
+		`SELECT private_key, selector FROM dkim_keys WHERE domain = ?`,
+		strings.ToLower(domain)).Scan(&pk, &sel)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, "", false, nil
+	}
+	if err != nil {
+		return nil, "", false, err
+	}
+	return []byte(pk), sel, true, nil
+}
+
 // SetDKIMKey stores or replaces a domain's signing key. It is always stored DISABLED:
 // the operator must publish the DNS record and then enable it, so generating (or
 // regenerating) a key never starts producing DKIM=fail.

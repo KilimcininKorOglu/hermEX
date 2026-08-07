@@ -47,6 +47,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  list-contacts")
 	fmt.Fprintln(os.Stderr, "  sweep-content <email>   (reclaim orphan content files; run with the mailbox idle)")
 	fmt.Fprintln(os.Stderr, "  prune-eml <email|all> [days]   (reclaim cached wire copies older than N days, default 30)")
+	fmt.Fprintln(os.Stderr, "  export-dkim <domain>    (write the domain's DKIM private key to stdout)")
 	fmt.Fprintln(os.Stderr, "  ldap-sync <org-id>      (import the org's LDAP/AD accounts into the directory)")
 	fmt.Fprintln(os.Stderr, "  grant-admin <email> <system|org|domain> [scope-id]")
 	fmt.Fprintln(os.Stderr, "  list-sessions <email>   (the account's live webmail and panel sessions)")
@@ -177,6 +178,11 @@ func main() {
 			}
 		}
 		pruneEML(dir, args[1], days)
+	case "export-dkim":
+		if len(args) != 2 {
+			usage()
+		}
+		exportDKIM(dir, args[1])
 	case "ldap-sync":
 		if len(args) != 2 {
 			usage()
@@ -433,6 +439,26 @@ func pruneEML(dir *directory.SQLDirectory, target string, days int) {
 		}
 	}
 	fmt.Printf("pruned %d cached wire copies (%d bytes) from %d mailbox(es)\n", files, reclaimed, boxes)
+}
+
+// exportDKIM writes a domain's DKIM signing key to stdout as PEM, the operator's
+// path for keeping a copy of key material the panel only ever generates inward.
+//
+// It writes nothing but the key to stdout, so the output can be redirected
+// straight into a file; the selector and the reminder go to stderr. A key waiting
+// on its DNS record is exported too: that is the state whose loss goes unnoticed
+// the longest.
+func exportDKIM(dir *directory.SQLDirectory, domain string) {
+	privPEM, selector, found, err := dir.ExportDKIMKey(domain)
+	if err != nil {
+		log.Fatalf("hermex-admin: export dkim: %v", err)
+	}
+	if !found {
+		log.Fatalf("hermex-admin: %s has no DKIM key", domain)
+	}
+	fmt.Fprintf(os.Stderr, "selector %s._domainkey.%s\n", selector, domain)
+	fmt.Fprintln(os.Stderr, "this is a private key: store it where the database backup is stored")
+	os.Stdout.Write(privPEM)
 }
 
 // listSessions prints an account's live sessions on both signed-in surfaces, so an
