@@ -1,9 +1,9 @@
 package rop
 
 import (
-	"log"
 	"time"
 
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
@@ -32,7 +32,7 @@ func (s *Session) maybeReadReceipt(store *objectstore.Store, messageID int64) {
 		mapi.PrClientSubmitTime,
 	)
 	if err != nil {
-		log.Printf("rop: read-receipt property read failed for message %d, skipped: %v", messageID, err)
+		s.logReceiptFailure(store, messageID, "read", err)
 		return
 	}
 	if req, _ := props.Get(mapi.PrReadReceiptRequested); req != true {
@@ -57,7 +57,7 @@ func (s *Session) maybeReadReceipt(store *objectstore.Store, messageID int64) {
 	}
 
 	if err := mta.SendReadReceipt(s.accounts, info, time.Now()); err != nil {
-		log.Printf("rop: read-receipt send failed for message %d, skipped: %v", messageID, err)
+		s.logReceiptFailure(store, messageID, "send", err)
 		return
 	}
 	// Fire-once: clear both request flags after sending, exactly as the reference
@@ -66,6 +66,25 @@ func (s *Session) maybeReadReceipt(store *objectstore.Store, messageID int64) {
 		{Tag: mapi.PrReadReceiptRequested, Value: false},
 		{Tag: mapi.PrNonReceiptNotificationRequested, Value: false},
 	}); err != nil {
-		log.Printf("rop: read-receipt flag clear failed for message %d: %v", messageID, err)
+		s.logReceiptFailure(store, messageID, "clear", err)
 	}
+}
+
+// logReceiptFailure records a read receipt that could not be produced. Each branch
+// is swallowed so it can never fail the read that triggered it, which is right and
+// is also what makes the failure invisible: the sender is simply never told their
+// message was read. stage names which of the three steps failed, so a systematically
+// broken send is distinguishable from a one-off store error.
+//
+// A failed clear is the one that repeats: the request flags still stand, so the next
+// read tries again and the recipient can send the same receipt more than once.
+func (s *Session) logReceiptFailure(store *objectstore.Store, messageID int64, stage string, err error) {
+	s.logger.Emit(logging.Event{
+		Level: logging.LevelError, Subsystem: logging.MAPI, Name: "readreceipt.fail",
+		User: s.effectiveCaller(store),
+		Fields: logging.Fields{
+			"stage": stage, "mailbox": store.Dir(), "message": messageID,
+		},
+		Err: err.Error(),
+	})
 }
