@@ -22,6 +22,7 @@ import (
 	"hermex/internal/authlimit"
 	"hermex/internal/config"
 	"hermex/internal/directory"
+	"hermex/internal/health"
 	"hermex/internal/httplimit"
 	"hermex/internal/ldapauth"
 	"hermex/internal/ldapsync"
@@ -315,12 +316,42 @@ func main() {
 		// Enforce the operator's Recoverable Items retention window across mailboxes.
 		go runRecoverableRetention(ctx, dir)
 		log.Printf("hermex-admin serving the admin API on %s", addr)
-		if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, []lifecycle.Component{hs}, cleanups...); err != nil {
+		// The same liveness and readiness contract every other daemon serves. This
+		// one is the consumer of all of theirs for the Live monitor, and had none of
+		// its own: nothing outside it could tell a running panel from one whose
+		// directory connection is failing, since that surfaced only as individual
+		// request errors.
+		//
+		// The log store is deliberately not probed. It self-heals by spilling to disk
+		// and reconnecting, and no daemon depends on it at startup, so reporting the
+		// panel degraded when it is down would contradict that.
+		comps := append([]lifecycle.Component{hs},
+			health.Components(cfg.HealthAddr, "admin", adminHealthChecks(db, provider)...)...)
+		if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, cleanups...); err != nil {
 			log.Fatalf("hermex-admin: %v", err)
 		}
 	default:
 		usage()
 	}
+}
+
+// pinger is the directory-connection probe the health endpoint reports. It is an
+// interface so a test can supply a connection that fails.
+type pinger interface {
+	PingContext(ctx context.Context) error
+}
+
+// adminHealthChecks builds the probes the admin daemon's health endpoint reports:
+// the directory connection every request depends on, and the serving certificate's
+// remaining validity when TLS is on, so a renewal that failed shows as degraded
+// before clients start failing handshakes. It matches what every other daemon
+// reports.
+func adminHealthChecks(db pinger, provider *tlscert.Provider) []health.Check {
+	checks := []health.Check{{Name: "directory", Probe: db.PingContext}}
+	if provider != nil && provider.TLSEnabled() {
+		checks = append(checks, tlscert.ExpiryCheck(provider))
+	}
+	return checks
 }
 
 // runLogRetention enforces the operator's central-log retention window by pruning the
