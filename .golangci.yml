@@ -13,10 +13,37 @@ issues:
 # Without these, a run reports third-party findings we cannot act on, and the
 # module cache breaks package loading outright.
 linters:
+  settings:
+    errcheck:
+      # Teardown reached through the standard interfaces. Their error arrives after
+      # the outcome is already decided, so there is nothing to do with it and
+      # nowhere to return it.
+      exclude-functions:
+        - (io.Closer).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Stmt).Close
+        - (*database/sql.Tx).Rollback
+        - (*database/sql.DB).Close
+        - (*hermex/internal/objectstore.Store).Close
+        - (*hermex/internal/publicfolder.Store).Close
   exclusions:
     paths:
       - internal/webmail2/node_modules
       - docker-data
+    rules:
+      # Deferred teardown, matched on the call itself rather than by listing every
+      # receiver type. Close, Rollback and the protocol equivalents run on a path
+      # that has already decided the outcome, so there is nothing to do with their
+      # error and nowhere to return it: a failed Rollback follows the failed Commit
+      # the caller is already reporting, and a failed Close on a read follows data
+      # the caller already has. Non-deferred calls to the same methods stay
+      # reported, which is where the ones that hid real failures were.
+      - linters: [errcheck]
+        source: '^\s*defer .*\.(Close|Rollback|Logout|logout|quit)\(\)$'
+      # Rows.Close is called in the ordinary non-deferred position too, right after
+      # the range that drained it, and its error is the one rows.Err() reports.
+      - linters: [errcheck]
+        source: '^\s*(rows|prows)\.Close\(\)$'
 
 formatters:
   exclusions:
