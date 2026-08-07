@@ -58,6 +58,31 @@ func safeAttachmentName(raw, fallback string) string {
 	return name
 }
 
+// servedAttachmentType picks the Content-Type an attachment is served with.
+//
+// The declared type is whatever the sender wrote, and the reader decides how to
+// render an attachment from it: an image/* preview goes in an <img>, an
+// application/pdf preview in an <object>. Passing the declaration through unchecked
+// lets the sender choose how their bytes are treated, so it is honoured only when it
+// names one of those two AND the bytes themselves agree. An image is served as the
+// type the bytes actually are, not the one the sender claimed.
+//
+// Everything else is served opaque, which is what the response's
+// Content-Disposition already says it is. That is deliberately narrow: a format the
+// sniffer cannot confirm (SVG, TIFF, HEIC) stops previewing rather than being
+// rendered on the sender's word.
+func servedAttachmentType(declared string, body []byte) string {
+	const opaque = "application/octet-stream"
+	sniffed, _, _ := strings.Cut(http.DetectContentType(body), ";")
+	switch {
+	case declared == "application/pdf" && sniffed == "application/pdf":
+		return declared
+	case strings.HasPrefix(declared, "image/") && strings.HasPrefix(sniffed, "image/"):
+		return sniffed
+	}
+	return opaque
+}
+
 // maxImportBytes caps an imported .eml request body (base64 inflates ~33%, so
 // this allows roughly a 30 MiB message).
 const maxImportBytes = 40 << 20
@@ -110,7 +135,7 @@ func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filename := safeAttachmentName(found.Filename(), "attachment")
-	w.Header().Set("Content-Type", found.Type+"/"+found.Subtype)
+	w.Header().Set("Content-Type", servedAttachmentType(found.Type+"/"+found.Subtype, body))
 	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
 	_, _ = w.Write(body)
 }
