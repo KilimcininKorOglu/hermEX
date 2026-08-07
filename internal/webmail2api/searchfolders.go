@@ -116,9 +116,10 @@ func (s *Server) handleSearchFolderResults(w http.ResponseWriter, r *http.Reques
 // runSearchFolder scans the saved search's folders and returns the messages
 // matching all its set criteria.
 func runSearchFolder(st *objectstore.Store, sf searchFolderJSON) []mailJSON {
-	folders := searchFolders()
 	results := []mailJSON{}
-	for slug, fid := range folders {
+scan:
+	for _, f := range searchFolders() {
+		slug, fid := f.slug, f.fid
 		if len(sf.BaseFolders) > 0 && !containsFold(sf.BaseFolders, slug) {
 			continue
 		}
@@ -126,7 +127,13 @@ func runSearchFolder(st *objectstore.Store, sf searchFolderJSON) []mailJSON {
 		if err != nil {
 			continue
 		}
-		for _, msg := range msgs {
+		// Newest first and bounded, for the reason handleSearch gives: a saved
+		// search runs the same unindexed walk and reads the same messages.
+		for i := len(msgs) - 1; i >= 0; i-- {
+			msg := msgs[i]
+			if len(results) >= maxSearchResults {
+				break scan
+			}
 			if !matchSearchFolder(st, fid, sf, msg) {
 				continue
 			}

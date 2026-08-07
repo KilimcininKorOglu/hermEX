@@ -1256,7 +1256,8 @@
     "tryDifferentKeywords": "Farklı anahtar kelimeler deneyin veya yazımınızı kontrol edin.",
     "clearSearch": "Aramayı temizle",
     "resultCount": "\"{{query}}\" için {{count}} sonuç",
-    "resultCountPlural": "\"{{query}}\" için {{count}} sonuç"
+    "resultCountPlural": "\"{{query}}\" için {{count}} sonuç",
+    "resultsTruncated": "Yalnız ilk eşleşmeler gösteriliyor; daha fazlası için aramayı daraltın."
   },
   "spam": {
     "description": "Spam olarak işaretlenen mesajlar burada görünür. Silme işlemi onları kalıcı olarak kaldırır.",

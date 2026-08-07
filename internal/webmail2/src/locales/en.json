@@ -1256,7 +1256,8 @@
     "tryDifferentKeywords": "Try different keywords or check your spelling.",
     "clearSearch": "Clear search",
     "resultCount": "{{count}} result for \"{{query}}\"",
-    "resultCountPlural": "{{count}} results for \"{{query}}\""
+    "resultCountPlural": "{{count}} results for \"{{query}}\"",
+    "resultsTruncated": "Showing the first matches only; narrow the search to see more."
   },
   "spam": {
     "description": "Messages flagged as spam appear here. Delete removes them permanently.",

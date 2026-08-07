@@ -558,8 +558,15 @@ export interface PushSubscription {
 
 export interface SearchResponse {
   emails: Mail[]
+  /** How many results came back, which is not how many exist when truncated. */
   total: number
   query: string
+  /**
+   * The server stopped the scan before it ran out of mail. Search walks the
+   * folders without an index, so a broad query is bounded rather than allowed
+   * to read the whole mailbox; the answer is then partial and says so.
+   */
+  truncated?: boolean
 }
 
 /**

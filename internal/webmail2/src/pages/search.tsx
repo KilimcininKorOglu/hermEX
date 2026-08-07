@@ -40,6 +40,7 @@ export function SearchPage() {
   const [hasSearched, setHasSearched] = useState(false)
   const [results, setResults] = useState<SearchEmail[]>([])
   const [totalResults, setTotalResults] = useState(0)
+  const [truncated, setTruncated] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [recentSearches, setRecentSearches] = useState<string[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
@@ -96,10 +97,12 @@ export function SearchPage() {
         }))
         setResults(mapped)
         setTotalResults(response.total || mapped.length)
+        setTruncated(response.truncated === true)
         saveRecentSearch(searchQuery)
       } else {
         setResults([])
         setTotalResults(0)
+        setTruncated(false)
       }
     } catch (err) {
       console.error('Search error:', err)
@@ -260,6 +263,9 @@ export function SearchPage() {
             {totalResults === 1
               ? t("search.resultCount", { count: String(totalResults), query })
               : t("search.resultCountPlural", { count: String(totalResults), query })}
+            {truncated && (
+              <span className="ml-1">{t("search.resultsTruncated")}</span>
+            )}
           </div>
           <div className="rounded-lg border bg-card divide-y">
             {results.map((email) => (

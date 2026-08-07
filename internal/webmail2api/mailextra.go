@@ -135,6 +135,20 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 // maxBulkExport caps a bulk EML export so one request cannot stream an unbounded zip.
 const maxBulkExport = 200
 
+// Search bounds. A search has no index behind it: it walks the folder listings
+// and, for any filter that needs the message text, reads and parses the message
+// itself. On a large mailbox an unbounded walk is a multi-second burst of disk
+// reads and MIME parsing inside one interactive request, and it can answer with
+// an arbitrarily large JSON array.
+//
+// maxSearchResults bounds the answer; maxSearchBodyReads bounds the expensive
+// half, the per-message read and parse. Whichever is reached first stops the
+// walk, and the reply says so rather than presenting a partial answer as whole.
+const (
+	maxSearchResults   = 200
+	maxSearchBodyReads = 2000
+)
+
 // handleExportBulk streams the selected messages as a zip of .eml files (the bulk
 // RFC822 export). Messages are addressed by the same "<folder>:<uid>" ids the list
 // view hands out and may span folders; each is gated by the folder's read
@@ -358,12 +372,29 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"emails": results, "total": 0, "query": raw})
 		return
 	}
-	for slug, fid := range searchFolders() {
+	bodyReads, truncated := 0, false
+	ctx := r.Context()
+scan:
+	for _, f := range searchFolders() {
+		slug, fid := f.slug, f.fid
 		msgs, err := st.ListMessages(fid)
 		if err != nil {
 			continue
 		}
-		for _, m := range msgs {
+		// Newest first. The listing is ordered by UID ascending, so walking it
+		// forwards under a cap would keep the OLDEST matches, which is the wrong
+		// end of the mailbox for a search.
+		for i := len(msgs) - 1; i >= 0; i-- {
+			m := msgs[i]
+			// A caller who navigated away must not leave the walk running.
+			if ctx.Err() != nil {
+				truncated = true
+				break scan
+			}
+			if len(results) >= maxSearchResults || bodyReads >= maxSearchBodyReads {
+				truncated = true
+				break scan
+			}
 			sender := strings.ToLower(m.Sender)
 			subject := strings.ToLower(m.Subject)
 			// Field filters take precedence; each must hold for a match.
@@ -385,6 +416,7 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			var body, recipients string
 			hasAtt := false
 			if needRaw {
+				bodyReads++
 				rawMsg, err := st.GetMessageRaw(fid, m.UID)
 				if err != nil {
 					continue
@@ -425,7 +457,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"emails": results, "total": len(results), "query": raw})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"emails": results, "total": len(results), "query": raw,
+		// The count is what was returned, not what exists: say plainly when the
+		// walk stopped early so the caller can narrow instead of trusting a
+		// partial answer.
+		"truncated": truncated,
+	})
 }
 
 // recipientsOf collects To/Cc/Bcc display strings from a MIME tree so the KQL
@@ -455,14 +493,25 @@ func mimeHasAttachment(p *mime.Part) bool {
 }
 
 // searchFolders is the set of mail folders the search scans.
-func searchFolders() map[string]int64 {
-	return map[string]int64{
-		"inbox":  mapi.PrivateFIDInbox,
-		"sent":   mapi.PrivateFIDSentItems,
-		"drafts": mapi.PrivateFIDDraft,
-		"trash":  mapi.PrivateFIDDeletedItems,
-		"spam":   mapi.PrivateFIDJunk,
+func searchFolders() []searchFolder {
+	// The order is fixed and not incidental: a bounded scan stops partway on a
+	// large mailbox, so which folders it reached has to be the same every time or
+	// the same query would answer differently on each run. Inbox first, because
+	// that is where a search is nearly always aimed.
+	return []searchFolder{
+		{"inbox", mapi.PrivateFIDInbox},
+		{"sent", mapi.PrivateFIDSentItems},
+		{"drafts", mapi.PrivateFIDDraft},
+		{"spam", mapi.PrivateFIDJunk},
+		{"trash", mapi.PrivateFIDDeletedItems},
 	}
+}
+
+// searchFolder is one folder a search walks: the slug the SPA addresses it by
+// and the well-known folder id.
+type searchFolder struct {
+	slug string
+	fid  int64
 }
 
 // handleImport stores an uploaded .eml (base64) into a folder of the caller's
