@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -46,7 +47,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  update-contact <email> <display-name>   (rename; an empty name clears it)")
 	fmt.Fprintln(os.Stderr, "  delete-contact <email>")
 	fmt.Fprintln(os.Stderr, "  list-contacts")
-	fmt.Fprintln(os.Stderr, "  sweep-content <email>   (reclaim orphan content files; run with the mailbox idle)")
+	fmt.Fprintln(os.Stderr, "  sweep-content <email>   (reclaim orphan content files; refuses while the mailbox is in use)")
 	fmt.Fprintln(os.Stderr, "  prune-eml <email|all> [days]   (reclaim cached wire copies older than N days, default 30)")
 	fmt.Fprintln(os.Stderr, "  export-dkim <domain>    (write the domain's DKIM private key to stdout)")
 	fmt.Fprintln(os.Stderr, "  ldap-sync <org-id>      (import the org's LDAP/AD accounts into the directory)")
@@ -164,6 +165,13 @@ func main() {
 		}
 		defer store.Close()
 		removed, err := store.SweepOrphanContent()
+		if errors.Is(err, objectstore.ErrMailboxBusy) {
+			// The sweep deletes content a live writer may be about to reference, so
+			// it declines rather than doing it anyway. Say which mailbox and what to
+			// do, since "busy" alone leaves the operator guessing.
+			log.Fatalf("hermex-admin: %s is open by a running daemon or another session; "+
+				"stop the mail services for this mailbox and retry", args[1])
+		}
 		if err != nil {
 			log.Fatalf("hermex-admin: sweep: %v", err)
 		}

@@ -54,12 +54,23 @@ var propertyTables = []string{
 // Mark-and-sweep is therefore the only safe reclamation, and it is offered as an
 // explicit maintenance pass rather than an inline delete.
 //
-// It must run with no concurrent writes to the mailbox: a write that dedup-reuses
-// an existing file and inserts its property row between the on-disk snapshot and
-// the reference scan could otherwise race that file into deletion. The on-disk
-// files are snapshotted before references are collected, so a file created during
-// the pass is never a deletion candidate.
-func (s *Store) SweepOrphanContent() (int, error) {
+// It runs with the mailbox held exclusively and reports ErrMailboxBusy rather than
+// running when anything else has it open. That precondition is not advisory: a
+// write that dedup-reuses an existing file attaches a reference without creating
+// anything on disk, so between the snapshot and the reference scan a file can go
+// from unreferenced to referenced and still be deleted, leaving a message pointing
+// at content that is gone. The on-disk files are snapshotted before references are
+// collected, so a file created during the pass is never a deletion candidate.
+func (s *Store) SweepOrphanContent() (removed int, err error) {
+	err = s.withExclusiveLock(func() error {
+		var e error
+		removed, e = s.sweepOrphanContent()
+		return e
+	})
+	return removed, err
+}
+
+func (s *Store) sweepOrphanContent() (int, error) {
 	root := filepath.Join(s.dir, "cid")
 	if _, err := os.Stat(root); errors.Is(err, fs.ErrNotExist) {
 		return 0, nil

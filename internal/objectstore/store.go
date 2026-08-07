@@ -105,6 +105,7 @@ func (s *Store) publishChange(op string, cn uint64, mid string) {
 // directory.
 type Store struct {
 	dir   string
+	lock  *os.File // advisory in-use lock, held for the store's lifetime
 	objdb *sql.DB
 	idxdb *sql.DB
 	// seedBuiltins controls whether a freshly created object store is
@@ -223,16 +224,25 @@ func openKind(dir string, seedBuiltins bool, kind storeKind) (*Store, error) {
 			return nil, err
 		}
 	}
+	// Held for the store's lifetime so a maintenance pass can tell a live mailbox
+	// from an idle one, which is the only way its "no concurrent writes"
+	// precondition can be enforced rather than merely documented.
+	lock, err := lockShared(dir)
+	if err != nil {
+		return nil, err
+	}
 	objdb, err := sql.Open("sqlite", dsn(filepath.Join(dir, "objects.sqlite3")))
 	if err != nil {
+		lock.Close()
 		return nil, err
 	}
 	idxdb, err := sql.Open("sqlite", dsn(filepath.Join(dir, "imapindex.sqlite3")))
 	if err != nil {
 		objdb.Close()
+		lock.Close()
 		return nil, err
 	}
-	s := &Store{dir: dir, objdb: objdb, idxdb: idxdb, seedBuiltins: seedBuiltins, kind: kind, logger: defaultLogger.Load()}
+	s := &Store{dir: dir, objdb: objdb, idxdb: idxdb, lock: lock, seedBuiltins: seedBuiltins, kind: kind, logger: defaultLogger.Load()}
 	if err := s.ensureSchema(); err != nil {
 		s.Close()
 		return nil, err
@@ -240,10 +250,17 @@ func openKind(dir string, seedBuiltins bool, kind storeKind) (*Store, error) {
 	return s, nil
 }
 
-// Close releases both database handles.
+// Close releases both database handles and the mailbox's in-use lock. Closing the
+// lock file is what releases it, so a store that is never closed keeps the mailbox
+// marked in use until the process exits, and a process that dies releases it at
+// once.
 func (s *Store) Close() error {
 	err1 := s.objdb.Close()
 	err2 := s.idxdb.Close()
+	if s.lock != nil {
+		s.lock.Close()
+		s.lock = nil
+	}
 	if err1 != nil {
 		return err1
 	}
