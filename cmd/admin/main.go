@@ -249,6 +249,9 @@ func main() {
 		srv := admin.NewServer(dir, cfg, []byte(cfg.AdminSecret))
 		srv.SetLogger(logger)           // a failing request records its real error here, not in the response
 		srv.SetLDAPSyncer(ldapVerifier) // enables the Directory Sync trigger
+		// The panel reports the quarantine digest as unable to send without this,
+		// rather than rendering the stored toggle as if it were the whole story.
+		srv.SetDigestSigning(cfg.DigestSecret != "")
 		var targets []admin.HealthTarget
 		for _, t := range cfg.HealthTargets {
 			targets = append(targets, admin.HealthTarget{Name: t.Name, URL: t.URL})

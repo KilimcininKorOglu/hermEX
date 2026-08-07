@@ -194,6 +194,18 @@ table.grid td.empty { color: var(--muted); text-align: center; }
 	font-size: 0.9rem;
 }
 
+/* A setting that reads as configured but cannot take effect: not an error the
+   panel hit, and not a note to skim past, so it sits between .error and .ok. */
+.warn {
+	background: #fdf6e3;
+	color: #8a6100;
+	border: 1px solid #f0dca6;
+	border-radius: 8px;
+	padding: 0.6rem 0.75rem;
+	margin-bottom: 1rem;
+	font-size: 0.9rem;
+}
+
 .ldap-form {
 	display: flex;
 	flex-direction: column;

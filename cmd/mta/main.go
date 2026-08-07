@@ -232,11 +232,15 @@ func main() {
 	go runSpamHistoryMaintenance(dir)
 	// Quarantine digest: deliver each user a periodic summary of newly quarantined
 	// mail with signed one-click release links. It needs a shared signing secret (the
-	// webmail release endpoint verifies the same key); without one the feature stays
-	// off regardless of the admin toggle.
-	if cfg.DigestSecret != "" {
-		go runDigest(dir, []byte(cfg.DigestSecret), cfg.Hostname, logger)
-	}
+	// webmail release endpoint verifies the same key); without one nothing can be
+	// sent, since every entry carries a signed link.
+	//
+	// The worker runs either way. Gating its startup on the secret made the failure
+	// silent: an operator who turned the digest on without the key was told it was
+	// active by a panel reading the toggle alone, and no goroutine existed to
+	// report otherwise. It now starts, sees the same toggle, and says on every run
+	// that it cannot send.
+	go runDigest(dir, []byte(cfg.DigestSecret), cfg.Hostname, logger)
 	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir, Greylist: greylister, RateLimit: rateLimiter, Thresholds: dir, RecipientAccess: dir, Outbound: outboundLimiter}, Hostname: cfg.Hostname, Logger: logger}
 	// TLS certificates come from the provider: the config-file cert as a fallback,
 	// overridden by an admin-uploaded cert the provider polls for, so a renewal
@@ -665,6 +669,9 @@ func runDigest(dir *directory.SQLDirectory, secret []byte, hostname string, logg
 		if err != nil || !found || !s.Enabled {
 			continue
 		}
+		if !digestCanSend(secret, logger) {
+			continue
+		}
 		interval := time.Duration(s.IntervalHours) * time.Hour
 		if interval <= 0 {
 			interval = 24 * time.Hour
@@ -680,6 +687,25 @@ func runDigest(dir *directory.SQLDirectory, secret []byte, hostname string, logg
 		lastRun = time.Now()
 		logger.Info(logging.MTA, "digest.run", logging.Fields{"sent": n})
 	}
+}
+
+// digestCanSend reports whether an enabled digest can actually produce anything,
+// and says why not when it cannot.
+//
+// Every entry in a summary carries a signed one-click release link, so with no
+// signing secret there is nothing to send, however the toggle reads. Reporting it
+// on every run is the point: the failure is otherwise perfectly silent, and
+// quarantined legitimate mail sits unnoticed for exactly as long as nobody knows
+// the summaries stopped arriving.
+func digestCanSend(secret []byte, logger *logging.Logger) bool {
+	if len(secret) > 0 {
+		return true
+	}
+	logger.Emit(logging.Event{
+		Level: logging.LevelWarn, Subsystem: logging.MTA, Name: "digest.disabled",
+		Err: "the quarantine digest is enabled but no digest_secret is configured, so no summary can be signed or sent",
+	})
+	return false
 }
 
 // sendLaterInterval is how often the worker scans every mailbox's Outbox for due

@@ -145,6 +145,10 @@ func (s *Server) antispamPageData(r *http.Request, notice string) map[string]any
 		data["DigestInterval"] = dg.IntervalHours
 		data["DigestBaseURL"] = dg.BaseURL
 	}
+	// Whether the digest can actually send. The toggle alone says nothing: without
+	// a signing secret the worker skips every run, so a panel showing only the
+	// toggle would report summaries going out that never do.
+	data["DigestSigningConfigured"] = s.digestSigning
 	return data
 }
 
@@ -297,7 +301,11 @@ func (s *Server) handleUISaveDigest(w http.ResponseWriter, r *http.Request) {
 		s.render(w, "digest-panel", s.antispamPageData(r, s.notice("Could not save digest settings.", err)))
 		return
 	}
-	s.render(w, "digest-panel", s.antispamPageData(r, "Digest settings saved — the MTA applies them within a minute, no restart."))
+	notice := "Digest settings saved; the MTA applies them within a minute, no restart."
+	if enabled && !s.digestSigning {
+		notice = "Digest settings saved, but no digest_secret is configured, so nothing will be sent."
+	}
+	s.render(w, "digest-panel", s.antispamPageData(r, notice))
 }
 
 // validBaseURL reports whether s is a full http(s) URL with a host, the form a release

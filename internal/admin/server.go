@@ -207,6 +207,12 @@ type Server struct {
 	resolver      dnsResolver
 	healthTargets []HealthTarget
 
+	// digestSigning records whether a digest signing secret is configured. The
+	// quarantine digest cannot send a single summary without one, so the panel has
+	// to know, or it reports a feature active that can never fire. It is the fact
+	// and not the key: the panel never needs the secret itself.
+	digestSigning bool
+
 	// logger records the internal error behind a sanitized client response. A nil
 	// logger drops the event (Logger.Emit is nil-safe), so the panel still serves
 	// without one; only the diagnosis is lost.
@@ -216,6 +222,11 @@ type Server struct {
 // SetLogger attaches the central logger, so a failing request records its real
 // error server-side while the client is answered with a generic message.
 func (s *Server) SetLogger(l *logging.Logger) { s.logger = l }
+
+// SetDigestSigning tells the panel whether a digest signing secret is configured,
+// so it can say plainly that the quarantine digest cannot send without one rather
+// than rendering it as on. A daemon calls this once at startup.
+func (s *Server) SetDigestSigning(configured bool) { s.digestSigning = configured }
 
 // NewServer builds an admin server backed by the directory, deriving new
 // resources' on-disk paths with paths and signing sessions with secret. The
