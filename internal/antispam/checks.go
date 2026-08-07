@@ -2,9 +2,11 @@ package antispam
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net"
 	"strings"
+	"time"
 
 	"blitiri.com.ar/go/spf"
 	"github.com/emersion/go-msgauth/dkim"
@@ -13,11 +15,38 @@ import (
 	"hermex/internal/mime"
 )
 
+// Every domain these checks query is one the connecting client chose, so the
+// nameserver that answers it is one the sender may control. They all run inline in
+// the SMTP DATA phase, before the 250 is written, and the listener accepts
+// connections without a concurrency cap. A sender whose nameserver simply never
+// answers would otherwise hold a goroutine and socket for the OS resolver's full
+// retry budget on every query, so each lookup carries a deadline and degrades to
+// the fail-open answer it already gives for any other lookup failure. This mirrors
+// the bounded PTR lookup behind the Received header.
+//
+// The values are variables so a test can shorten them; nothing else writes them.
+var (
+	// dnsTimeout bounds a single query, matching the PTR lookup's budget.
+	dnsTimeout = 3 * time.Second
+	// spfTimeout bounds an entire SPF evaluation, which RFC 7208 permits to chase
+	// up to ten records. A legitimate chain resolves in well under a second.
+	spfTimeout = 5 * time.Second
+)
+
+// resolver performs these checks' DNS queries. It is a variable so a test can
+// point it at a nameserver that never answers and prove the deadlines hold.
+var resolver = net.DefaultResolver
+
 // realSPF evaluates SPF for the connecting client and maps the RFC 7208 result to
 // an AuthResult. The library's error is advisory (it can be non-nil even on a
-// successful check), so only the Result drives the verdict.
+// successful check), so only the Result drives the verdict. A lookup that outruns
+// the deadline surfaces as TempError, which maps to AuthError, the same advisory
+// answer any other resolution failure gives.
 func realSPF(ip net.IP, helo, mailFrom string) AuthResult {
-	res, _ := spf.CheckHostWithSender(ip, helo, mailFrom)
+	ctx, cancel := context.WithTimeout(context.Background(), spfTimeout)
+	defer cancel()
+	res, _ := spf.CheckHostWithSender(ip, helo, mailFrom,
+		spf.WithContext(ctx), spf.WithResolver(resolver))
 	switch res {
 	case spf.Pass:
 		return AuthPass
@@ -50,9 +79,17 @@ func realDKIM(raw []byte) []DKIMResult {
 }
 
 // realDMARC fetches the From domain's published DMARC policy. ok is false when no
-// record exists (or the lookup errors), which the scorer treats as no policy.
+// record exists (or the lookup errors, including outrunning its deadline), which
+// the scorer treats as no policy.
 func realDMARC(domain string) (policy string, ok bool) {
-	rec, err := dmarc.Lookup(domain)
+	ctx, cancel := context.WithTimeout(context.Background(), dnsTimeout)
+	defer cancel()
+	// The library prefixes _dmarc. itself, so the callback resolves the name it is
+	// handed; its only job here is to carry the deadline the bare net.LookupTXT
+	// default cannot.
+	rec, err := dmarc.LookupWithOptions(domain, &dmarc.LookupOptions{
+		LookupTXT: func(name string) ([]string, error) { return resolver.LookupTXT(ctx, name) },
+	})
 	if err != nil || rec == nil {
 		return "", false
 	}
@@ -67,7 +104,13 @@ func realDNSBL(ip net.IP, zone string) bool {
 	if q == "" {
 		return false
 	}
-	addrs, err := net.LookupIP(q)
+	ctx, cancel := context.WithTimeout(context.Background(), dnsTimeout)
+	defer cancel()
+	// A DNSBL answers with an A record in 127/8, and isListed discards anything
+	// else, so asking only for IPv4 drops a pointless AAAA query per zone without
+	// changing the answer. Zones are checked in sequence, so a per-zone deadline is
+	// what bounds the whole loop.
+	addrs, err := resolver.LookupIP(ctx, "ip4", q)
 	if err != nil {
 		return false
 	}
