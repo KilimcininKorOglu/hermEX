@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"hermex/internal/logging"
 	"hermex/internal/mime"
 	"hermex/internal/objectstore"
 )
@@ -203,16 +204,36 @@ func (c *conn) writeFetch(seq uint32, idx int, items []fetchItem, modseqs map[ui
 	// A read-only selection (EXAMINE, or a public folder the caller cannot post to)
 	// must not implicitly set \Seen — and must never write to the public store.
 	if setSeen && !c.readOnly && msg.Flags&objectstore.FlagSeen == 0 {
-		msg.Flags |= objectstore.FlagSeen
-		c.curStore().SetMessageFlags(c.sel.id, msg.UID, msg.Flags)
-		c.sel.msgs[idx].Flags = msg.Flags
-		if !hasFlagsField(fields) {
-			fields = append(fields, fmt.Sprintf(`FLAGS (%s)`, formatFlags(msg.Flags, false)))
+		if c.markSeen(&c.sel.msgs[idx], c.curStore()) {
+			msg.Flags = c.sel.msgs[idx].Flags
+			if !hasFlagsField(fields) {
+				fields = append(fields, fmt.Sprintf(`FLAGS (%s)`, formatFlags(msg.Flags, false)))
+			}
 		}
 	}
 
 	fmt.Fprintf(c.bw, "* %d FETCH (%s)\r\n", seq, strings.Join(fields, " "))
 	c.flush()
+}
+
+// markSeen sets \Seen on a message as the side effect of a body read, and reports
+// whether the store took it. The write must be believed before the session is: if
+// it fails and the cached row is updated anyway, the client is told the message is
+// read while the store still holds it unread, so it disappears from the unread view
+// now and comes back on the next SELECT. The failure is recorded because nothing
+// else surfaces it: the read itself succeeds either way.
+func (c *conn) markSeen(msg *objectstore.MessageInfo, st *objectstore.Store) bool {
+	flags := msg.Flags | objectstore.FlagSeen
+	if err := st.SetMessageFlags(c.sel.id, msg.UID, flags); err != nil {
+		c.event(logging.LevelError, "fetch.seen.fail", logging.Fields{
+			"folder": c.sel.id,
+			"uid":    msg.UID,
+			"error":  err.Error(),
+		})
+		return false
+	}
+	msg.Flags = flags
+	return true
 }
 
 func hasFlagsField(fields []string) bool {

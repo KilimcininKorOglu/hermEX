@@ -107,9 +107,7 @@ func (s *Server) handleCreateUserFetchmail(w http.ResponseWriter, r *http.Reques
 		s.fail(w, "could not create the fetchmail entry", err, http.StatusBadRequest)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]int64{"id": id})
+	writeJSONStatus(w, http.StatusCreated, map[string]int64{"id": id})
 }
 
 // handleDeleteUserFetchmail removes one of the user's poll configurations by id.

@@ -180,7 +180,12 @@ func (s *Server) handle(conn net.Conn) {
 		case "NOOP":
 			ok(w, "")
 		case "QUIT":
-			mb.commit()
+			if failed := mb.commit(); len(failed) > 0 {
+				event(logging.LevelError, "quit.commit.fail", logging.Fields{
+					"folder": mb.folder,
+					"uids":   failed,
+				})
+			}
 			ok(w, "bye")
 			return
 		default:
@@ -358,12 +363,22 @@ func (mb *mailbox) dele(w *bufio.Writer, arg string) {
 // commit applies the session's deletions to the store on QUIT (the POP3 UPDATE
 // state). Each deletion soft-deletes into the Recoverable Items dumpster rather
 // than purging, so a POP3-deleted message stays recoverable until retention.
-func (mb *mailbox) commit() {
+// It returns the UIDs it could not delete. QUIT answers +OK regardless, because
+// the deletions are already durable from the client's point of view and there is
+// no POP3 way to report a partial UPDATE, so the caller records them instead: a
+// message the client believes it deleted and the store still holds is otherwise
+// invisible.
+func (mb *mailbox) commit() []uint32 {
+	var failed []uint32
 	for i, del := range mb.deleted {
-		if del {
-			mb.st.SoftDeleteMessage(mb.folder, mb.msgs[i].UID)
+		if !del {
+			continue
+		}
+		if err := mb.st.SoftDeleteMessage(mb.folder, mb.msgs[i].UID); err != nil {
+			failed = append(failed, mb.msgs[i].UID)
 		}
 	}
+	return failed
 }
 
 // writeDotStuffed writes a message body byte-stuffed (lines starting with '.'

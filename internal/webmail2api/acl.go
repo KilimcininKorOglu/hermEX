@@ -1,6 +1,7 @@
 package webmail2api
 
 import (
+	"log"
 	"net/http"
 	"strings"
 
@@ -146,11 +147,15 @@ func (s *Server) handleSetACL(w http.ResponseWriter, r *http.Request) {
 	}
 	// When recursive, copy the same grant to every subfolder ([MS-OXCPERM] apply
 	// permissions recursively); a subfolder that fails to take the grant is
-	// skipped rather than failing the whole operation.
+	// skipped rather than failing the whole operation. The user is told the grant
+	// succeeded either way, so a skipped subfolder is only visible here: without
+	// this line, an operator has no way to learn that a share is partial.
 	if body.Recursive {
 		if folders, err := st.ListFolders(); err == nil {
 			for _, sub := range folderDescendants(folders, fid) {
-				st.ModifyPermissions(sub, false, change)
+				if err := st.ModifyPermissions(sub, false, change); err != nil {
+					log.Printf("webmail2: recursive grant to %s skipped subfolder %d: %v", logSafe(login), sub, err)
+				}
 			}
 		}
 	}

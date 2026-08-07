@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/logging"
 	"hermex/internal/objectstore"
 )
 
@@ -474,8 +475,17 @@ func (c *conn) cmdAppend(tag string, args []token) {
 		}
 		info, err := destStore.AppendMessage(destFID, []byte(r3[0].val), date, flags)
 		if err != nil {
+			// Roll back what this MULTIAPPEND already stored. A failed rollback
+			// leaves the mailbox holding messages the client was told did not
+			// arrive, so it is recorded even though the command still fails.
 			for _, u := range uids {
-				destStore.SoftDeleteMessage(destFID, u)
+				if rerr := destStore.SoftDeleteMessage(destFID, u); rerr != nil {
+					c.event(logging.LevelError, "append.rollback.fail", logging.Fields{
+						"folder": destFID,
+						"uid":    u,
+						"error":  rerr.Error(),
+					})
+				}
 			}
 			c.no(tag, "APPEND failed")
 			return
