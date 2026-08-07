@@ -1,6 +1,6 @@
 module hermex
 
-go 1.26.2
+go 1.26.5
 
 require (
 	blitiri.com.ar/go/spf v1.5.1
