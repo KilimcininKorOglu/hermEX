@@ -62,22 +62,37 @@ wraps `docker compose` and runs the toolchain in the dev container (the host Go
 toolchain has no MariaDB, so DB-backed tests skip and silently hide failures).
 There is no CI pipeline: `make gate` run locally is the only quality gate.
 
+| Target                    | What it does                                                        |
+|---------------------------|---------------------------------------------------------------------|
+| `make up`                 | Start the dev environment (MariaDB, Mongo, ClamAV, toolchain, every mail service) |
+| `make down`               | Stop the dev environment                                            |
+| `make build`              | Compile every command binary into `bin/`                            |
+| `make gate`               | `fmt-check` + `vet` + full test, the pre-commit gate                 |
+| `make test`               | Full test run in the dev container                                  |
+| `make test-host`          | Host quick-feedback run; DB-backed tests skip                       |
+| `make test-race`          | Race-detector run in the dev container                              |
+| `make fmt`                | `gofmt -w` over the source tree                                     |
+| `make fmt-check`          | Fail when any file needs `gofmt`                                    |
+| `make vet`                | `go vet`                                                            |
+| `make tidy`               | Sync `go.mod` / `go.sum`, downloading any new dependency             |
+| `make images`             | Rebuild every service image with the source stamp                   |
+| `make rebuild SVC=<name>` | Rebuild and restart one service                                     |
+| `make dump-db`            | Write a compressed dump of the whole directory database             |
+| `make restore-db DUMP=<file>` | Load a dump back                                                |
+| `make version`            | Report the source state a build would stamp                         |
+| `make compose-check`      | Validate the compose file syntax                                    |
+| `make clean`              | Remove built binaries                                               |
+| `make help`               | List every target                                                   |
+
+`test`, `test-host` and `test-race` all take `PKG=` and `RUN=` to narrow the run:
+
 ```sh
-make up                                   # start dev env (MariaDB + Mongo + ClamAV + toolchain + all services)
-make build                                # compile every binary into bin/
-make gate                                 # fmt-check + vet + full test, the pre-commit gate
-make test PKG=./internal/objectstore      # one package
-make test PKG=./internal/objectstore RUN=TestCreateMessage   # one test
-make test-host PKG=./internal/rop         # host quick feedback (DB-backed tests skip)
-make test-race PKG=./internal/rop         # race detector
-make tidy                                 # sync go.mod / go.sum
-make rebuild SVC=webmail2                 # rebuild + restart one service after a code change
-make images                               # rebuild every service image
-make down                                 # stop dev env
+make test PKG=./internal/objectstore
+make test PKG=./internal/objectstore RUN=TestCreateMessage
 ```
 
-All test targets bake in `-count=1` (Go's test cache returns stale results
-otherwise). Run `make gate` clean before every commit.
+All three bake in `-count=1` (Go's test cache returns stale results otherwise).
+Run `make gate` clean before every commit.
 
 `go test` prints a per-package failure mid-stream, so the trailing output of a
 full run looks the same whether it passed or not. Read the exit code and grep for
@@ -93,10 +108,14 @@ container serves it on the next request:
 
 ```sh
 cd internal/webmail2
-npm run build        # regenerate dist/
-npm run lint         # eslint, max-warnings 0
-npm run typecheck    # tsc --noEmit
-npm test             # vitest
+npm run build           # regenerate dist/
+npm run dev             # Vite dev server with hot reload
+npm run preview         # serve the built bundle locally
+npm run lint            # eslint, max-warnings 0
+npm run typecheck       # tsc --noEmit
+npm test                # vitest, single run
+npm run test:watch      # vitest in watch mode
+npm run test:coverage   # vitest with coverage
 ```
 
 `make rebuild SVC=webmail2` rebuilds only the Go backend, not the bundle.
@@ -145,9 +164,20 @@ built. `make version` prints the values a build would stamp right now.
 ## Configuration
 
 `config.json` is the sole config file, loaded by every daemon including the
-gateway. `docker/config.example.json` is the template; its placeholders are
-deliberately non-functional, so an unedited copy fails to connect rather than
-starting with a working default credential.
+gateway. Each daemon takes exactly one flag and no other, so a service is only
+ever started one way:
+
+```sh
+hermex-<daemon> -config /etc/hermex/config.json
+```
+
+That `hermex-` prefix is the name inside the service images. `make build`
+compiles the same commands into `bin/` under their bare directory names
+(`bin/mta`, `bin/admin`, and so on).
+
+`docker/config.example.json` is the template; its placeholders are deliberately
+non-functional, so an unedited copy fails to connect rather than starting with a
+working default credential.
 
 It holds **infrastructure only**: the database DSN and data directory (both
 required), listen addresses, gateway backend URLs, TLS certificate paths, secrets,
@@ -182,7 +212,7 @@ the accounts, aliases, admin roles and policy around them.
 ```sh
 make dump-db                    # write a compressed dump of the whole directory database
 make restore-db DUMP=<file>     # load one back (this replaces the current directory)
-hermex-admin export-dkim <domain>   # write one domain's signing key to stdout
+hermex-admin -config <file> export-dkim <domain>   # one domain's signing key to stdout
 ```
 
 Both paths run in the operator's shell, so no private key crosses the network.
@@ -190,16 +220,63 @@ Take a dump before an upgrade, and keep it off the mail host.
 
 ### Administration
 
-`cmd/admin` is both a provisioning CLI and, under its `serve` subcommand, the
-operator panel: domains, users, aliases, mailing lists, delegates, devices, DKIM
-keys, DNS checks, the mail queue, quarantine, retention and the spam model. Run it
-with no arguments for the full subcommand list. The panel is separate from
-end-user webmail and is not behind the gateway.
+`hermex-admin` is both the provisioning CLI and, under its `serve` subcommand,
+the operator panel. Every invocation takes `-config <file>` (default
+`/etc/hermex/config.json`) before the subcommand.
+
+```sh
+hermex-admin -config config.json <command> [args]
+```
+
+| Command                                        | Purpose                                                     |
+|------------------------------------------------|-------------------------------------------------------------|
+| `ensure-schema`                                | Apply pending directory migrations and exit                 |
+| `create-domain <domain>`                       | Add a mail domain                                           |
+| `create-user <email> <password>`               | Add a mailbox                                               |
+| `create-alias <alias> <user-email>`            | Point an address at an existing mailbox                     |
+| `create-contact <email> <domain> [name]`       | Add an external mail contact to the address list            |
+| `update-contact <email> <name>`                | Rename a contact; an empty name clears it                   |
+| `delete-contact <email>`                       | Remove a contact                                            |
+| `list-contacts`                                | List every contact                                          |
+| `grant-admin <email> <system\|org\|domain> [id]` | Grant an admin role at the given scope                     |
+| `list-sessions <email>`                        | Show the account's live webmail and panel sessions          |
+| `revoke-sessions <email>`                      | End all of them; the compromise response                    |
+| `ldap-sync <org-id>`                           | Import an org's LDAP/AD accounts into the directory         |
+| `export-dkim <domain>`                         | Write the domain's DKIM private key to stdout               |
+| `sweep-content <email>`                        | Reclaim orphan content files; refuses while the mailbox is in use |
+| `prune-eml <email\|all> [days]`                | Drop cached wire copies older than N days (default 30)      |
+| `serve`                                        | Run the admin API and panel                                 |
+
+The panel covers domains, users, aliases, mailing lists, delegates, devices, DKIM
+keys, DNS checks, the mail queue, quarantine, retention and the spam model. It is
+separate from end-user webmail and is not behind the gateway.
 
 Every daemon can serve a `/healthz` endpoint reporting its dependency state and
 its build stamp. It is opt-in per daemon (`health_addr`, empty disables it), and
 the panel's live status view aggregates whichever endpoints are listed under
 `health_targets`.
+
+### Spam model and rules
+
+The Bayes model and the SpamAssassin-style ruleset are seeded by two one-shot
+tools rather than fetched at runtime:
+
+```sh
+antispam-bootstrap -spam <dir> -ham <dir> [-out model.json]
+antispam-rules -from <dir-of-.cf-files> [-out <data_dir>/antispam-rules.cf]
+```
+
+`antispam-rules` validates before writing and refuses a directory that yields no
+evaluable rules, so a wrong path fails instead of shipping an empty ruleset. The
+MTA picks up a new ruleset within a minute, with no restart. Fetching and
+verifying the upstream rules stays with the operator's own `sa-update` or a
+checkout, which is what does the signature checking.
+
+### External mail retrieval
+
+`fetchmail -config <file>` runs the POP3/IMAP retrieval loop that pulls external
+accounts into local mailboxes. The accounts themselves are configured in the
+admin panel, not on the command line.
 
 ## Layout
 
