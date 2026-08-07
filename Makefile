@@ -32,7 +32,7 @@ PKG ?= ./internal/... ./cmd/...
 RUN ?=
 RUNFLAG := $(if $(RUN),-run '$(RUN)',)
 
-.PHONY: all build test test-host test-race vet fmt fmt-check gate tidy up down rebuild clean help compose-check dump-db restore-db version
+.PHONY: all build test test-host test-race vet fmt fmt-check gate tidy up down images rebuild clean help compose-check dump-db restore-db version
 
 all: build
 
@@ -90,6 +90,13 @@ up:
 ## down: stop the dev environment
 down:
 	$(COMPOSE) down
+
+## images: rebuild every service image with the source stamp
+# A bare `docker compose build` leaves HERMEX_COMMIT unset, so the binaries in
+# those images report "unknown" and a running container cannot say what it was
+# built from. This target is the whole-stack counterpart to `rebuild`.
+images:
+	$(COMPOSE) build
 
 ## rebuild: rebuild and restart a single service, e.g. make rebuild SVC=webmail2
 rebuild:
