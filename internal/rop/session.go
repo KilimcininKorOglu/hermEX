@@ -249,21 +249,6 @@ func persistedMessageID(o *object) (int64, bool) {
 	return 0, false
 }
 
-// messageFolder returns the folder whose permissions govern writes to a
-// message-kind object — a composed message's target folder or an opened message's
-// cached parent folder — and whether o is such an object.
-func (o *object) messageFolder() (int64, bool) {
-	switch o.kind {
-	case kindMessage:
-		return o.folderID, true
-	case kindNewMessage:
-		if o.newMsg != nil {
-			return o.newMsg.folderID, true
-		}
-	}
-	return 0, false
-}
-
 // release frees a handle, closing the mailbox store if it was a logon root and
 // dropping any delegate authorization the logon carried.
 func (s *Session) release(h uint32) {

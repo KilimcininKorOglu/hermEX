@@ -9,11 +9,6 @@ import (
 	"testing"
 )
 
-// adNS is the SOAP Autodiscover namespace. The parse structs below qualify every
-// element with it, so a response that emitted the elements in the wrong namespace
-// (which a bare-local-name parser would still accept) fails the test.
-const adNS = "http://schemas.microsoft.com/exchange/2010/Autodiscover"
-
 // adReplyEnvelope parses the SOAP envelope wrapping a GetUserSettingsResponseMessage.
 // The soap and autodiscover namespaces are fully qualified so a wrong-namespace
 // emission (which a bare-local-name parser would still accept) fails the test.

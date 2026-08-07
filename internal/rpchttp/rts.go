@@ -40,9 +40,6 @@ const (
 // CONN/C2 ([MS-RPCH]); a generous value so a kept-open channel is not reaped.
 const connectionTimeoutMS uint32 = 14400000 // 4 hours
 
-// fdClient is the DESTINATION value naming the client side ([MS-RPCH]).
-const fdClient uint32 = 0
-
 // rtsCommand is one decoded RTS command: its type plus whichever payload that
 // type carries (a uint32 for the scalar commands, a GUID for cookie/group-id).
 type rtsCommand struct {

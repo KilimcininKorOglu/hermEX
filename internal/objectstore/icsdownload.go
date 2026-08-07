@@ -537,14 +537,6 @@ func (dc *DownloadContext) writeProp(sp ics.StreamProp) error {
 	return fxWriteProp(dc.producer, sp)
 }
 
-// toStreamProp maps a stored property to a stream property, resolving a
-// named-property id (>= 0x8000) to the GUID/kind/name the stream carries inline
-// so the receiver can remap it. A named id with no mapping is an error rather
-// than a silent drop.
-func (dc *DownloadContext) toStreamProp(p mapi.TaggedPropVal) (ics.StreamProp, error) {
-	return fxToStreamProp(dc.store, p)
-}
-
 // looseIDSetBytes serializes a replica-id-keyed (home) id set of bare GC values,
 // the form the deletion and read-state meta-tags carry ([MS-OXCFXICS] 3.3.5.13).
 func looseIDSetBytes(vals []uint64) ([]byte, error) {

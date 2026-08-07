@@ -42,16 +42,6 @@ func (m *selectedMailbox) maxUID() uint32 {
 	return m.msgs[len(m.msgs)-1].UID
 }
 
-// seqOf returns the 1-based sequence number of a message by UID.
-func (m *selectedMailbox) seqOf(uid uint32) (uint32, bool) {
-	for i := range m.msgs {
-		if m.msgs[i].UID == uid {
-			return uint32(i + 1), true
-		}
-	}
-	return 0, false
-}
-
 // firstUnseen returns the sequence number of the first message without the
 // \Seen flag, or 0 when every message has been seen.
 func (m *selectedMailbox) firstUnseen() uint32 {
@@ -61,15 +51,4 @@ func (m *selectedMailbox) firstUnseen() uint32 {
 		}
 	}
 	return 0
-}
-
-// countUnseen returns how many messages lack the \Seen flag.
-func (m *selectedMailbox) countUnseen() int {
-	n := 0
-	for i := range m.msgs {
-		if m.msgs[i].Flags&objectstore.FlagSeen == 0 {
-			n++
-		}
-	}
-	return n
 }

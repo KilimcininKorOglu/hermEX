@@ -198,15 +198,6 @@ func (g gal) position(curRec uint32) int {
 	return i
 }
 
-// midAt returns the MId of the row at index i, or MID_END_OF_TABLE when i is at
-// or past the end (the cursor has run off the table).
-func (g gal) midAt(i int) uint32 {
-	if i < 0 || i >= len(g.users) {
-		return midEndOfTable
-	}
-	return g.users[i].mid
-}
-
 // galView is the hide-filtered cursor view of the GAL for table walks (QueryRows,
 // SeekEntries, UpdateStat). vis holds the ascending full-snapshot indices of the
 // users visible on the GAL-browse surface, so the cursor walks the subsequence
