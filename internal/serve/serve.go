@@ -96,7 +96,9 @@ func New(addr string, h http.Handler, tlsSrc TLSSource, logger *logging.Logger, 
 	// the access log, and the front-door strip sits outside both so neither reads a
 	// client-supplied X-Forwarded-For. Compression sits innermost, so the access log
 	// records the handler's real status and a refused request is never compressed.
-	handler := logMiddleware(compressMiddleware(rateLimitMiddleware(h, limiter)), logger, subsystem)
+	// The nosniff stamp sits outermost of the four, so it also covers a response
+	// the limiter refuses before the handler ever runs.
+	handler := nosniffMiddleware(logMiddleware(compressMiddleware(rateLimitMiddleware(h, limiter)), logger, subsystem))
 	if o.frontDoor {
 		handler = stripForwardedFor(handler)
 	}
