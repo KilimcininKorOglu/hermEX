@@ -1,0 +1,25 @@
+version: "2"
+
+# Report everything. The defaults cap a run at 50 issues per linter and 3 per
+# distinct message, which silently hides the rest: a run can report "3 issues"
+# when thirty remain, and there is no CI here to catch what the cap swallowed.
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+# Two directories inside the tree hold code that is not ours and must never be
+# linted or reported on: the npm dependency tree under the webmail SPA (which
+# ships a stray Go file), and the module cache the dev container bind-mounts.
+# Without these, a run reports third-party findings we cannot act on, and the
+# module cache breaks package loading outright.
+linters:
+  exclusions:
+    paths:
+      - internal/webmail2/node_modules
+      - docker-data
+
+formatters:
+  exclusions:
+    paths:
+      - internal/webmail2/node_modules
+      - docker-data
