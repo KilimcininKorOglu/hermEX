@@ -672,6 +672,10 @@ func sortMail(in []mailJSON, field, dir string) {
 // degrades gracefully. The path is logged so the port can track what is still
 // missing.
 func (s *Server) handleStub(w http.ResponseWriter, r *http.Request) {
+	// Both values go through logSafe, which drops every C0 character and DEL and
+	// bounds the length. The scanner cannot follow a sanitizer that is not one of
+	// the standard library's, so it is told here rather than by disabling the rule.
+	// #nosec G706
 	log.Printf("webmail2api: unimplemented %s %s", logSafe(r.Method), logSafe(r.URL.Path))
 	writeJSON(w, http.StatusOK, map[string]any{})
 }
