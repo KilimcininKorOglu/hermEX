@@ -1,15 +1,37 @@
 package objectstore
 
 import (
+	"bytes"
 	"database/sql"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 
+	"golang.org/x/sync/singleflight"
+
 	"hermex/internal/mapi"
 	"hermex/internal/oxcmail"
 )
+
+// regenGroup collapses concurrent regenerations of one cached message into a
+// single pass. The key is the cache path, so it identifies the message rather than
+// the handle asking for it: a mailbox is opened per request, so two readers of the
+// same message hold different *Store values over the same directory and a lock on
+// either one would collapse nothing.
+//
+// This is not only about the wasted work. Regeneration mints fresh MIME
+// boundaries, so two passes over one message produce different bytes of possibly
+// different length, and each pass writes the file and then records the length.
+// Interleave the two and the file is one pass's bytes while the recorded size is
+// the other's, which breaks the invariant this whole path exists to hold: that
+// RFC822.SIZE equals the bytes served. A client that fetches by that size then
+// reads the wrong number of bytes.
+//
+// It is per-process. Two daemons regenerating the same message at the same instant
+// still race; collapsing that would need the export to be deterministic rather
+// than a lock.
+var regenGroup singleflight.Group
 
 // GetMessageRaw returns the RFC822 wire form of a message by folder and IMAP
 // UID. It serves the cached eml; on a cache miss it re-synthesizes the wire
@@ -45,7 +67,21 @@ func (s *Store) GetMessageRaw(folderID int64, uid uint32) (raw []byte, err error
 	if !errors.Is(err, fs.ErrNotExist) {
 		return nil, err
 	}
-	return s.regenerateEML(messageID, mid)
+	return s.regenerateOnce(messageID, mid)
+}
+
+// regenerateOnce runs regenerateEML under the shared flight for this message, so
+// concurrent readers of one cache miss produce one regeneration and all see the
+// same bytes. The result is copied per caller: singleflight hands every waiter the
+// same slice, and the cache-hit path above gives each caller its own.
+func (s *Store) regenerateOnce(messageID int64, mid string) ([]byte, error) {
+	v, err, _ := regenGroup.Do(s.emlPath(mid), func() (any, error) {
+		return s.regenerateEML(messageID, mid)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return bytes.Clone(v.([]byte)), nil
 }
 
 // regenerateEML re-synthesizes a message's wire form from the stored object,
