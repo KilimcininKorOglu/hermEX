@@ -1,10 +1,12 @@
 package admin
 
 import (
+	"bytes"
 	"crypto/hmac"
 	"io/fs"
 	"net/http"
 
+	"hermex/internal/logging"
 	"hermex/internal/serve"
 )
 
@@ -46,11 +48,26 @@ func (s *Server) uiRequireSystemPage(w http.ResponseWriter, r *http.Request) boo
 }
 
 // render writes an HTML template response.
+//
+// The template is executed into a buffer first. Executing straight into the
+// response writer commits the 200 and part of the body before a failure partway
+// through can be noticed, so the error branch could only append an error to a page
+// already on the wire: the operator got a silently truncated page under a stale
+// 200, which for a management UI is the worst outcome, since a half-rendered form
+// misrepresents state. Buffering costs one page of memory and makes the failure a
+// clean 500 carrying none of the partial render.
 func (s *Server) render(w http.ResponseWriter, name string, data any) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.ExecuteTemplate(w, name, data); err != nil {
+	var buf bytes.Buffer
+	if err := tmpl.ExecuteTemplate(&buf, name, data); err != nil {
+		s.logger.Emit(logging.Event{
+			Level: logging.LevelError, Subsystem: logging.Admin, Name: "render.fail",
+			Fields: logging.Fields{"template": name}, Err: err.Error(),
+		})
 		http.Error(w, "render error", http.StatusInternalServerError)
+		return
 	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = buf.WriteTo(w)
 }
 
 // staticHandler serves the embedded static assets under /admin/static/.
