@@ -75,8 +75,20 @@ type component struct {
 // daemon adds it to the components it hands to lifecycle.Run; ListenAndServe
 // returns http.ErrServerClosed after Shutdown, which the lifecycle runner treats
 // as the normal stop path.
+//
+// The timeouts mirror the ones the shared HTTP base gives every other listener.
+// This one carries no long-poll consumer, so unlike that base it can also bound
+// the read and write phases outright: a health probe is a small request and a
+// small JSON answer.
 func Component(addr string, h http.Handler) *component {
-	return &component{srv: &http.Server{Addr: addr, Handler: h}}
+	return &component{srv: &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 30 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       120 * time.Second,
+	}}
 }
 
 // Start runs the health listener until Shutdown is called.
