@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"strconv"
 	"strings"
 	"sync/atomic"
 
+	"github.com/GehirnInc/crypt/common"
 	"github.com/GehirnInc/crypt/md5_crypt"
 	"github.com/GehirnInc/crypt/sha512_crypt"
 
@@ -139,7 +141,10 @@ SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status,
 // so an absent (or disabled) user costs the same KDF work as a present one with a
 // wrong password, closing the timing oracle that would otherwise enumerate valid
 // addresses.
-const decoyPasswordHash = "$6$hermexdecoysalt$P2XFuqS35PykVXcNA/yh4RJtQT02e6NAjgNgtz3mDpDtlxVNj4eIXW1npGMR.dviJZmFuiO.YarCZ6KyqBQ1S1"
+// It is generated at cryptRounds, and a test holds it there: a decoy cheaper than
+// a real hash costs a fraction of the time a real verify does, which reopens the
+// oracle it exists to close.
+const decoyPasswordHash = "$6$rounds=600000$GHkoWOKQaU6pWMTt$x3tHgHwTI/JGcBXzdL1z8X2beEFisrjPQ.CQe0G.UHR5zgXYjDocrjMIefupwYN5w8QCdlgKZWZc3/12pU6F2/"
 
 func (d *SQLDirectory) authenticateRow(user, password string) (path string, mustChange, ok bool) {
 	login := strings.ToLower(strings.TrimSpace(user))
@@ -192,7 +197,11 @@ func (d *SQLDirectory) AuthenticateAllowingPasswordChange(user, password string)
 // hash it does not own.
 func (d *SQLDirectory) verifyPassword(row loginRow, login, password string) bool {
 	if len(row.externid) == 0 {
-		return sqlCryptVerify(password, row.password)
+		if !sqlCryptVerify(password, row.password) {
+			return false
+		}
+		d.upgradeHash(login, row.password, password)
+		return true
 	}
 	if d.verifier == nil {
 		return false
@@ -203,6 +212,25 @@ func (d *SQLDirectory) verifyPassword(row loginRow, login, password string) bool
 	}
 	verified, err := d.verifier.Verify(cfg, login, password)
 	return err == nil && verified
+}
+
+// upgradeHash re-stores a password at the current work factor once its owner has
+// proved it. The factor is baked into each hash, so raising it reaches only
+// passwords that are set again; without this every account keeps the factor it was
+// created with forever and the raise protects nobody who is already a user. The
+// plaintext is in hand precisely because the verify just succeeded, and this is the
+// only moment it ever will be.
+//
+// Best-effort: the login has already succeeded, so a write failure must never turn
+// a correct password into a rejected one. It runs at most once per account, since
+// the next login finds the hash already at the current factor.
+func (d *SQLDirectory) upgradeHash(login, stored, password string) {
+	if !needsRehash(stored) {
+		return
+	}
+	if _, err := d.SetPassword(login, password); err != nil {
+		log.Printf("directory: could not re-hash %s at the current work factor: %v", login, err)
+	}
 }
 
 // Resolve maps a recipient address to the store path it is delivered to,
@@ -1252,10 +1280,63 @@ func (d *SQLDirectory) ListAliases() ([]AliasInfo, error) {
 	return out, rows.Err()
 }
 
-// sqlCryptNewHash produces a sha512-crypt ($6$) hash with a random salt, the
-// default credential scheme for the directory.
+// cryptRounds is the work factor every password this directory hashes is stored
+// with. sha512-crypt's own default is 5000, three orders of magnitude below what
+// OWASP's 2025 guidance asks of a hash that has to survive a leaked database: a
+// commodity GPU does hundreds of millions of SHA-512 per second, which recovers a
+// 5000-round hash in minutes.
+//
+// The count is written into each hash, so raising it is backward compatible. An
+// older hash keeps verifying at whatever factor it was made with, and is replaced
+// at this one on its owner's next successful login.
+const cryptRounds = 600000
+
+// sha512Salt describes the salt sha512-crypt accepts. The values are the scheme's
+// own, restated because the library exposes its salt generator only through the
+// concrete type and the default it would pick is the 5000 rounds this exists to
+// leave behind.
+var sha512Salt = common.Salt{
+	MagicPrefix:   []byte(sha512_crypt.MagicPrefix),
+	SaltLenMin:    sha512_crypt.SaltLenMin,
+	SaltLenMax:    sha512_crypt.SaltLenMax,
+	RoundsDefault: sha512_crypt.RoundsDefault,
+	RoundsMin:     sha512_crypt.RoundsMin,
+	RoundsMax:     sha512_crypt.RoundsMax,
+}
+
+// sqlCryptNewHash produces a sha512-crypt ($6$) hash with a random salt at
+// cryptRounds, the default credential scheme for the directory.
 func sqlCryptNewHash(password string) (string, error) {
-	return sha512_crypt.New().Generate([]byte(password), nil)
+	salt := sha512Salt.GenerateWRounds(sha512_crypt.SaltLenMax, cryptRounds)
+	return sha512_crypt.New().Generate([]byte(password), salt)
+}
+
+// cryptRoundsOf reads the work factor out of a stored crypt(3) hash. A $6$ hash
+// with no rounds parameter was made at the scheme's own default; any other scheme
+// has no comparable factor, so it reports none.
+func cryptRoundsOf(stored string) (int, bool) {
+	rest, ok := strings.CutPrefix(stored, sha512_crypt.MagicPrefix)
+	if !ok {
+		return 0, false
+	}
+	digits, ok := strings.CutPrefix(rest, "rounds=")
+	if !ok {
+		return sha512_crypt.RoundsDefault, true
+	}
+	num, _, _ := strings.Cut(digits, "$")
+	n, err := strconv.Atoi(num)
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
+// needsRehash reports whether a stored hash was made with less work than the
+// directory now requires. A hash in any other scheme (md5-crypt, which this
+// directory still accepts for interoperability) always qualifies.
+func needsRehash(stored string) bool {
+	rounds, ok := cryptRoundsOf(stored)
+	return !ok || rounds < cryptRounds
 }
 
 // sqlCryptVerify checks a password against a stored crypt(3) hash, dispatching on
