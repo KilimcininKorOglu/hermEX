@@ -7,8 +7,9 @@ import (
 	"hermex/internal/objectstore"
 )
 
-// TestNormalizeThreadSubject proves reply/forward prefixes are stripped (matching
-// the SPA's normalizeSubject) so a reply groups with its original.
+// TestNormalizeThreadSubject proves reply/forward prefixes are stripped so a reply
+// groups with its original. This is the only place the rule lives: the SPA renders
+// the threads the endpoint returns and derives nothing from the subject.
 func TestNormalizeThreadSubject(t *testing.T) {
 	cases := map[string]string{
 		"Re: Hello":        "Hello",

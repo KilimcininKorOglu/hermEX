@@ -596,8 +596,10 @@ type threadJSON struct {
 	Unread       int        `json:"unread"`
 }
 
-// reThreadPrefix strips one or more leading Re:/Fwd:/Fw: prefixes; it mirrors the
-// SPA's normalizeSubject regex so the grouping is identical on both sides.
+// reThreadPrefix strips one or more leading Re:/Fwd:/Fw: prefixes. Grouping is
+// server-side only: the SPA renders the threads this endpoint returns and derives
+// nothing from the subject itself, so this regex has no client-side counterpart to
+// stay in step with.
 var reThreadPrefix = regexp.MustCompile(`(?i)^(\s*(re|fwd|fw)\s*:\s*)+`)
 
 // normalizeThreadSubject removes reply/forward prefixes so a reply groups with its
@@ -608,7 +610,7 @@ func normalizeThreadSubject(subject string) string {
 
 // groupThreads buckets messages by normalized subject (newest activity last within
 // a bucket, since msgs arrives oldest-first), then orders buckets with the longest
-// conversations first, the same grouping the SPA used to do client-side.
+// conversations first. The SPA used to do this client-side and no longer does.
 func groupThreads(folder string, msgs []objectstore.MessageInfo) []threadJSON {
 	order := make([]string, 0)
 	buckets := make(map[string][]mailJSON)
