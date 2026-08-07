@@ -96,6 +96,21 @@ func (d *SQLDirectory) DeleteWebmailSessionsFor(email string) (int64, error) {
 	return res.RowsAffected()
 }
 
+// DeleteOtherWebmailSessions revokes every session an account holds EXCEPT the one
+// named by keepJti, and reports how many were removed. Changing your own password
+// is the standard remediation after suspecting a session was stolen, and it is only
+// a remediation if the stolen session stops working; keeping the caller's own
+// session signed in is what stops the fix from logging the victim out of the
+// browser they just fixed it from.
+func (d *SQLDirectory) DeleteOtherWebmailSessions(email, keepJti string) (int64, error) {
+	res, err := d.db.Exec(`DELETE FROM webmail_sessions WHERE email = ? AND jti <> ?`,
+		strings.ToLower(email), keepJti)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // DeleteWebmailSession revokes a user's session by jti, scoped to email so a user can
 // only revoke their OWN session; ok is false when nothing matched.
 func (d *SQLDirectory) DeleteWebmailSession(email, jti string) (bool, error) {

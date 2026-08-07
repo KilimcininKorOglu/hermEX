@@ -20,6 +20,7 @@ type sessionStore interface {
 	TouchWebmailSession(jti string, now int64) error
 	ListWebmailSessions(email string, now int64) ([]directory.WebmailSession, error)
 	DeleteWebmailSession(email, jti string) (bool, error)
+	DeleteOtherWebmailSessions(email, keepJti string) (int64, error)
 }
 
 // sessionJSON is the SPA's ClientSession shape.

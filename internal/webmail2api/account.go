@@ -1,6 +1,7 @@
 package webmail2api
 
 import (
+	"log"
 	"net/http"
 
 	"hermex/internal/directory"
@@ -55,7 +56,32 @@ func (s *Server) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	}); ok {
 		_, _ = clr.RequirePasswordChange(c.Email, false)
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	revoked := s.revokeOtherSessions(c.Email, c.Jti)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "revokedSessions": revoked})
+}
+
+// revokeOtherSessions ends every signed-in browser but the caller's own, and
+// reports how many it ended.
+//
+// A changed password does not invalidate an already-issued token: the per-request
+// check only asks whether the session row still exists. So an attacker holding a
+// stolen cookie survived the victim changing their password, for the rest of the
+// token's lifetime, which defeats the whole point of the remediation.
+//
+// It is best-effort by design. The password is already changed by this point, and
+// failing the response would tell the user their change did not happen when it
+// did; the count in the response is what tells them whether the eviction ran.
+func (s *Server) revokeOtherSessions(email, keepJti string) int64 {
+	store, ok := s.auth.(sessionStore)
+	if !ok {
+		return 0 // stateless sessions: nothing is recorded, so nothing can be revoked
+	}
+	n, err := store.DeleteOtherWebmailSessions(email, keepJti)
+	if err != nil {
+		log.Printf("webmail2: could not revoke other sessions for %s after a password change: %v", email, err)
+		return 0
+	}
+	return n
 }
 
 // passwordChangeAllowed reports whether the user may change their own password:
