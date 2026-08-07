@@ -1385,19 +1385,7 @@
     "feature3": "Powerful search across all messages",
     "feature4": "Keyboard shortcuts for fast navigation",
     "composeEmail": "Compose Email",
-    "customize": "Customize",
-    "setupTitle": "Quick Setup Guide",
-    "gettingStarted": "Getting Started",
-    "step1Title": "Configure your domain",
-    "step1Desc": "Set up DNS records for your domain",
-    "step2Title": "Add email accounts",
-    "step2Desc": "Create user accounts in the admin panel",
-    "step3Title": "Connect email client",
-    "step3Desc": "Use IMAP/SMTP to connect your favorite email app",
-    "step4Title": "Start using email",
-    "step4Desc": "Send and receive emails securely",
-    "documentation": "Documentation",
-    "adminPanel": "Admin Panel"
+    "customize": "Customize"
   },
   "shortcuts": {
     "title": "Keyboard Shortcuts",

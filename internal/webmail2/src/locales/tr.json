@@ -1385,19 +1385,7 @@
     "feature3": "Tüm mesajlarda güçlü arama",
     "feature4": "Hızlı gezinme için klavye kısayolları",
     "composeEmail": "E-posta Oluştur",
-    "customize": "Özelleştir",
-    "setupTitle": "Hızlı Kurulum Kılavuzu",
-    "gettingStarted": "Başlarken",
-    "step1Title": "Alan adınızı yapılandırın",
-    "step1Desc": "Alan adınız için DNS kayıtlarını ayarlayın",
-    "step2Title": "E-posta hesapları ekleyin",
-    "step2Desc": "Yönetim panelinde kullanıcı hesapları oluşturun",
-    "step3Title": "E-posta istemcisi bağlayın",
-    "step3Desc": "Favori e-posta uygulamanızı bağlamak için IMAP/SMTP kullanın",
-    "step4Title": "E-posta kullanmaya başlayın",
-    "step4Desc": "E-postaları güvenle gönderin ve alın",
-    "documentation": "Belgeler",
-    "adminPanel": "Yönetim Paneli"
+    "customize": "Özelleştir"
   },
   "shortcuts": {
     "title": "Klavye Kısayolları",
