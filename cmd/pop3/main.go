@@ -59,6 +59,11 @@ func main() {
 		log.Fatalf("hermex-pop3: listen %s: %v", addr, err)
 	}
 	srv := &pop3.Server{Auth: dir, Hostname: cfg.Hostname, Logger: logger, Limiter: authlimit.New(0, 0, 0)}
+	// Failed-login lockout: read the stored tuning at startup and re-read it every
+	// minute, so an operator can tighten it during a credential-stuffing wave, or
+	// loosen it when legitimate users are being locked out, without a restart.
+	authlimit.Apply("hermex-pop3", srv.Limiter, dir.GetLoginLockoutSettings)
+	go authlimit.RunMaintenance("hermex-pop3", srv.Limiter, dir.GetLoginLockoutSettings)
 	// TLS certificates come from the provider: the config-file cert as a fallback,
 	// overridden by an admin-uploaded cert the provider polls for, so a renewal
 	// applies without a restart.

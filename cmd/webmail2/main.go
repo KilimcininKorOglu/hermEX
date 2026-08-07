@@ -15,6 +15,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 
+	"hermex/internal/authlimit"
 	"hermex/internal/config"
 	"hermex/internal/directory"
 	"hermex/internal/dkimsign"
@@ -74,6 +75,11 @@ func main() {
 	// The session cookie is marked Secure when the front door terminates TLS, which
 	// the shared config signals via a configured certificate.
 	api := webmail2api.NewServer(dir, dir, spool, cfg.Hostname, []byte(cfg.Webmail2Secret), cfg.Webmail2Dist, cfg.TLSCert != "")
+	// Failed-login lockout: read the stored tuning at startup and re-read it every
+	// minute, so an operator can tighten it during a credential-stuffing wave, or
+	// loosen it when legitimate users are being locked out, without a restart.
+	authlimit.Apply("hermex-webmail2", api.Limiter(), dir.GetLoginLockoutSettings)
+	go authlimit.RunMaintenance("hermex-webmail2", api.Limiter(), dir.GetLoginLockoutSettings)
 	api.Pub = publicfolder.New(cfg)             // per-domain public folders, rooted at the config's HomedirFor
 	api.DigestSecret = []byte(cfg.DigestSecret) // verifies quarantine-digest release links (empty disables them)
 

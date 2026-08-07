@@ -67,6 +67,11 @@ func main() {
 	notify.EnableProducer(cfg.NotifyURL, cfg.NotifySecret, logger)
 
 	srv := &imap.Server{Auth: dir, Hostname: cfg.Hostname, Logger: logger, Pub: publicfolder.New(cfg), Limiter: authlimit.New(0, 0, 0)}
+	// Failed-login lockout: read the stored tuning at startup and re-read it every
+	// minute, so an operator can tighten it during a credential-stuffing wave, or
+	// loosen it when legitimate users are being locked out, without a restart.
+	authlimit.Apply("hermex-imap", srv.Limiter, dir.GetLoginLockoutSettings)
+	go authlimit.RunMaintenance("hermex-imap", srv.Limiter, dir.GetLoginLockoutSettings)
 	srv.SetNotify(notify.EnableConsumer(cfg.NotifyURL, cfg.NotifySecret, logger))
 	// IMAP literal size cap: read at startup and re-read every minute so an admin's
 	// change applies without a restart; 0 keeps the built-in default.

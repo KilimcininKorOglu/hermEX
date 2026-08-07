@@ -69,6 +69,10 @@ func NewServer(auth Authenticator, accounts directory.Accounts, spool *relay.Spo
 	return s
 }
 
+// Limiter exposes the failed-login limiter so the daemon can apply the operator's
+// stored lockout tuning to it without a restart.
+func (s *Server) Limiter() *authlimit.Limiter { return s.limiter }
+
 // Handler routes the JSON API under /api/v1 and serves the SPA for everything
 // else. Endpoints not yet implemented fall through to a benign stub so the SPA
 // keeps rendering while the backend is built out.

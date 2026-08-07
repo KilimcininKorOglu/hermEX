@@ -137,3 +137,78 @@ func TestSaveHTTPRateLimitRejectsBadValues(t *testing.T) {
 		t.Error("invalid request-rate settings must not be persisted")
 	}
 }
+
+// TestLimitsPageRendersLoginLockout proves the login-lockout panel appears on the
+// Limits page with the limiter's own built-in tuning until an operator saves one,
+// so the numbers shown are the numbers actually in force.
+func TestLimitsPageRendersLoginLockout(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+
+	resp := authedGET(t, ts, "/admin/ui/limits", session)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	page := string(body)
+	if !strings.Contains(page, "Login lockout") {
+		t.Errorf("login-lockout panel missing:\n%s", page)
+	}
+	if !strings.Contains(page, `name="login_max_fails" value="5"`) ||
+		!strings.Contains(page, `name="login_window" value="900"`) ||
+		!strings.Contains(page, `name="login_lockout" value="900"`) {
+		t.Errorf("login-lockout panel missing the built-in tuning:\n%s", page)
+	}
+}
+
+// TestSaveLoginLockout proves the tuning persists, the whole point of the change:
+// it used to live in package constants that every call site took blind, so an
+// operator facing a credential-stuffing wave could only tighten the threshold by
+// editing source and rebuilding the affected daemon.
+func TestSaveLoginLockout(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/limits/loginlockout", session, csrf,
+		url.Values{"login_max_fails": {"3"}, "login_window": {"300"}, "login_lockout": {"1800"}})
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "Login-lockout settings saved") {
+		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", resp.StatusCode, body)
+	}
+	want := directory.LoginLockoutSettings{MaxFails: 3, WindowSeconds: 300, LockoutSeconds: 1800}
+	if !d.loginLockoutFound || d.loginLockout != want {
+		t.Errorf("settings not persisted as entered: found=%v %+v", d.loginLockoutFound, d.loginLockout)
+	}
+	// The panel has to come back showing what was saved, or the operator cannot tell
+	// a save apart from a no-op.
+	if !strings.Contains(string(body), `name="login_max_fails" value="3"`) {
+		t.Errorf("the panel does not reflect the saved tuning:\n%s", body)
+	}
+}
+
+// TestSaveLoginLockoutRejectsBadValues proves a value below 1 is refused. A
+// threshold of zero locks out every login on the daemon at the first failure, and
+// with the panel itself behind the same limiter that is an operator locking
+// themselves out of the page that would undo it.
+func TestSaveLoginLockoutRejectsBadValues(t *testing.T) {
+	for _, bad := range []url.Values{
+		{"login_max_fails": {"0"}, "login_window": {"900"}, "login_lockout": {"900"}},
+		{"login_max_fails": {"5"}, "login_window": {"0"}, "login_lockout": {"900"}},
+		{"login_max_fails": {"5"}, "login_window": {"900"}, "login_lockout": {"-1"}},
+	} {
+		d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+		ts := adminServer(t, d)
+		session, csrf := loginCookies(t, ts)
+
+		resp := htmxPOST(t, ts, "/admin/ui/limits/loginlockout", session, csrf, bad)
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if !strings.Contains(string(body), "at least 1") {
+			t.Errorf("%v: expected a validation message:\n%s", bad, body)
+		}
+		if d.loginLockoutFound {
+			t.Errorf("%v: invalid login-lockout settings must not be persisted", bad)
+		}
+	}
+}

@@ -12,6 +12,7 @@ package authlimit
 import (
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -43,12 +44,17 @@ type attempt struct {
 // Limiter tracks failed-login counts per key and locks a key out after too many
 // failures within window, for the configured lockout. The zero value is unusable;
 // build one with New.
+//
+// The tuning is held atomically so an operator's change applies to a running
+// daemon: a credential-stuffing wave has to be answerable by tightening the
+// threshold, and a lockout storm hitting legitimate users by loosening it, without
+// rebuilding and restarting the affected daemon.
 type Limiter struct {
 	mu       sync.Mutex
 	attempts map[string]*attempt
-	maxFails int
-	window   time.Duration
-	lockout  time.Duration
+	maxFails atomic.Int64
+	window   atomic.Int64     // rolling window in nanoseconds
+	lockout  atomic.Int64     // cooldown in nanoseconds
 	now      func() time.Time // injectable clock for tests
 }
 
@@ -73,8 +79,33 @@ func New(maxFails int, window, lockout time.Duration) *Limiter {
 	if lockout <= 0 {
 		lockout = DefaultLockout
 	}
-	return &Limiter{attempts: make(map[string]*attempt), maxFails: maxFails, window: window, lockout: lockout, now: time.Now}
+	l := &Limiter{attempts: make(map[string]*attempt), now: time.Now}
+	l.maxFails.Store(int64(maxFails))
+	l.window.Store(int64(window))
+	l.lockout.Store(int64(lockout))
+	return l
 }
+
+// SetLimits retunes a running limiter. A non-positive value leaves that setting
+// alone rather than adopting it: a limiter that locks out after zero failures, or
+// counts within a zero-length window, would lock out every login on the daemon.
+// Safe to call concurrently with serving.
+func (l *Limiter) SetLimits(maxFails int, window, lockout time.Duration) {
+	if maxFails > 0 {
+		l.maxFails.Store(int64(maxFails))
+	}
+	if window > 0 {
+		l.window.Store(int64(window))
+	}
+	if lockout > 0 {
+		l.lockout.Store(int64(lockout))
+	}
+}
+
+// MaxFails, Window and Lockout report the current tuning.
+func (l *Limiter) MaxFails() int          { return int(l.maxFails.Load()) }
+func (l *Limiter) Window() time.Duration  { return time.Duration(l.window.Load()) }
+func (l *Limiter) Lockout() time.Duration { return time.Duration(l.lockout.Load()) }
 
 // Allowed reports whether a login attempt for key may proceed. An empty key (the
 // caller could not identify the client) always passes, so the limiter never blocks
@@ -100,11 +131,13 @@ func (l *Limiter) Fail(key string) {
 		return
 	}
 	now := l.now()
+	window, lockout := time.Duration(l.window.Load()), time.Duration(l.lockout.Load())
+	maxFails := l.maxFails.Load()
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	a := l.attempts[key]
 	if a == nil {
-		if len(l.attempts) >= maxKeys && !l.sweep(now) {
+		if len(l.attempts) >= maxKeys && !l.sweep(now, window) {
 			return // table full of live entries → fail open, do not track
 		}
 		a = &attempt{windowStart: now}
@@ -112,12 +145,12 @@ func (l *Limiter) Fail(key string) {
 	}
 	// A fresh window, or a lockout that has since elapsed, resets the counter so the
 	// key gets a clean slate rather than staying locked forever.
-	if now.Sub(a.windowStart) >= l.window || (!a.lockedUntil.IsZero() && now.After(a.lockedUntil)) {
+	if now.Sub(a.windowStart) >= window || (!a.lockedUntil.IsZero() && now.After(a.lockedUntil)) {
 		a.count, a.windowStart, a.lockedUntil = 0, now, time.Time{}
 	}
 	a.count++
-	if a.count >= l.maxFails {
-		a.lockedUntil = now.Add(l.lockout)
+	if int64(a.count) >= maxFails {
+		a.lockedUntil = now.Add(lockout)
 	}
 }
 
@@ -132,12 +165,23 @@ func (l *Limiter) Succeed(key string) {
 	l.mu.Unlock()
 }
 
+// Prune drops entries whose window has elapsed and are not actively locked out. A
+// daemon calls it periodically so the tracking table does not grow to its cap and
+// start failing open on hosts that see many distinct client addresses.
+func (l *Limiter) Prune() {
+	now := l.now()
+	window := time.Duration(l.window.Load())
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.sweep(now, window)
+}
+
 // sweep drops entries whose window has elapsed and are not actively locked out,
 // reporting whether it freed a slot. The caller must hold l.mu.
-func (l *Limiter) sweep(now time.Time) bool {
+func (l *Limiter) sweep(now time.Time, window time.Duration) bool {
 	freed := false
 	for k, a := range l.attempts {
-		if now.Sub(a.windowStart) >= l.window && now.After(a.lockedUntil) {
+		if now.Sub(a.windowStart) >= window && now.After(a.lockedUntil) {
 			delete(l.attempts, k)
 			freed = true
 		}

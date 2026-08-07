@@ -18,6 +18,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 
 	"hermex/internal/admin"
+	"hermex/internal/authlimit"
 	"hermex/internal/config"
 	"hermex/internal/directory"
 	"hermex/internal/httplimit"
@@ -247,6 +248,11 @@ func main() {
 		dir.SetLDAPVerifier(ldapVerifier) // an administrator may be LDAP-mastered
 		logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 		srv := admin.NewServer(dir, cfg, []byte(cfg.AdminSecret))
+		// Failed-login lockout: read the stored tuning at startup and re-read it every
+		// minute, so an operator can tighten it during a credential-stuffing wave, or
+		// loosen it when legitimate users are being locked out, without a restart.
+		authlimit.Apply("hermex-admin", srv.Limiter(), dir.GetLoginLockoutSettings)
+		go authlimit.RunMaintenance("hermex-admin", srv.Limiter(), dir.GetLoginLockoutSettings)
 		srv.SetLogger(logger)           // a failing request records its real error here, not in the response
 		srv.SetLDAPSyncer(ldapVerifier) // enables the Directory Sync trigger
 		// The panel reports the quarantine digest as unable to send without this,

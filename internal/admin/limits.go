@@ -32,7 +32,51 @@ func (s *Server) limitsPageData(r *http.Request, notice string) map[string]any {
 	data := map[string]any{"Nav": "limits", "Notice": notice, "CSRF": csrfCookieValue(r)}
 	s.fillSizeLimits(data)
 	s.fillHTTPRateLimit(data)
+	s.fillLoginLockout(data)
 	return data
+}
+
+// defaultLoginMaxFails, defaultLoginWindow and defaultLoginLockout mirror the login
+// limiter's own built-in tuning (five failures in 15 minutes locks out for 15
+// minutes), shown on the page until an operator saves one.
+const (
+	defaultLoginMaxFails = 5
+	defaultLoginWindow   = 900
+	defaultLoginLockout  = 900
+)
+
+// fillLoginLockout sets the failed-login limiter's tunables on a page-data map,
+// using the stored values or the limiter's built-in defaults.
+func (s *Server) fillLoginLockout(data map[string]any) {
+	data["LoginMaxFails"] = defaultLoginMaxFails
+	data["LoginWindow"], data["LoginLockout"] = defaultLoginWindow, defaultLoginLockout
+	if st, found, err := s.dir.GetLoginLockoutSettings(); err == nil && found {
+		data["LoginMaxFails"] = st.MaxFails
+		data["LoginWindow"] = st.WindowSeconds
+		data["LoginLockout"] = st.LockoutSeconds
+	}
+}
+
+// handleUISaveLoginLockout persists the failed-login limiter's tuning. Every daemon
+// with a login chokepoint applies the change within about a minute, no restart. A
+// value below 1 is rejected: a limiter that trips after zero failures, or counts
+// within a zero-length window, would lock out every login on the daemon.
+func (s *Server) handleUISaveLoginLockout(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	fails, window := formInt(r, "login_max_fails"), formInt(r, "login_window")
+	lockout := formInt(r, "login_lockout")
+	if fails < 1 || window < 1 || lockout < 1 {
+		s.render(w, "loginlockout-panel", s.limitsPageData(r, "Failures, window and lockout must each be at least 1; settings not saved."))
+		return
+	}
+	st := directory.LoginLockoutSettings{MaxFails: fails, WindowSeconds: window, LockoutSeconds: lockout}
+	if err := s.dir.SetLoginLockoutSettings(st); err != nil {
+		s.render(w, "loginlockout-panel", s.limitsPageData(r, s.notice("Could not save the login-lockout settings.", err)))
+		return
+	}
+	s.render(w, "loginlockout-panel", s.limitsPageData(r, "Login-lockout settings saved. Every login daemon applies them within a minute, no restart."))
 }
 
 // defaultHTTPRateBurst and defaultHTTPRateWindow mirror the limiter's own built-in

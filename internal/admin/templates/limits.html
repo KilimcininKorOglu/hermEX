@@ -7,6 +7,8 @@
 {{template "limits-panel" .}}
 <h1>Request rate</h1>
 {{template "http-ratelimit-panel" .}}
+<h1>Login lockout</h1>
+{{template "loginlockout-panel" .}}
 </main>
 </div>
 {{template "foot" .}}{{end}}
@@ -31,6 +33,17 @@
 <label class="check"><input type="checkbox" name="enabled" value="1"{{if .HTTPRateEnabled}} checked{{end}}> Enable request rate limiting</label>
 <p>Burst (requests per window): <input type="number" name="http_burst" value="{{.HTTPRateBurst}}" min="1"></p>
 <p>Window (seconds): <input type="number" name="http_window" value="{{.HTTPRateWindow}}" min="1"></p>
+<button type="submit">Save settings</button>
+</form>
+</div>{{end}}
+
+{{define "loginlockout-panel"}}<div id="loginlockout-panel">
+{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+<p>A login that fails <strong>{{.LoginMaxFails}}</strong> times within <strong>{{.LoginWindow}}</strong> seconds is locked out for <strong>{{.LoginLockout}}</strong> seconds, which is what makes online password guessing hopeless. It covers webmail, IMAP, POP3 and this panel; each daemon counts on its own, keyed by client address for the line protocols and by account for the web surfaces. Tighten it during a credential-stuffing wave, loosen it if legitimate users are being locked out. There is no off switch: raise the threshold instead.</p>
+<form hx-post="/admin/ui/limits/loginlockout" hx-target="#loginlockout-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<p>Failures before lockout: <input type="number" name="login_max_fails" value="{{.LoginMaxFails}}" min="1"></p>
+<p>Window (seconds): <input type="number" name="login_window" value="{{.LoginWindow}}" min="1"></p>
+<p>Lockout (seconds): <input type="number" name="login_lockout" value="{{.LoginLockout}}" min="1"></p>
 <button type="submit">Save settings</button>
 </form>
 </div>{{end}}

@@ -125,6 +125,8 @@ type Directory interface {
 	SetSizeLimits(directory.SizeLimits) error
 	GetHTTPRateLimitSettings() (directory.HTTPRateLimitSettings, bool, error)
 	SetHTTPRateLimitSettings(directory.HTTPRateLimitSettings) error
+	GetLoginLockoutSettings() (directory.LoginLockoutSettings, bool, error)
+	SetLoginLockoutSettings(directory.LoginLockoutSettings) error
 	GetLogRetentionDays() (int, bool, error)
 	SetLogRetentionDays(int) error
 	GetRecoverableSettings() (directory.RecoverableSettings, bool, error)
@@ -240,6 +242,10 @@ func NewServer(dir Directory, paths Paths, secret []byte) *Server {
 		limiter: authlimit.New(0, 0, 0),
 	}
 }
+
+// Limiter exposes the panel's own failed-login limiter so the daemon can apply the
+// stored tuning to it, the same tuning this panel edits.
+func (s *Server) Limiter() *authlimit.Limiter { return s.limiter }
 
 // SetLogReader attaches a log store reader, enabling the log viewer.
 func (s *Server) SetLogReader(r LogReader) { s.logs = r }
@@ -407,6 +413,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /admin/ui/limits", s.handleUILimits)
 	mux.HandleFunc("POST /admin/ui/limits", s.handleUISaveLimits)
 	mux.HandleFunc("POST /admin/ui/limits/requestrate", s.handleUISaveHTTPRateLimit)
+	mux.HandleFunc("POST /admin/ui/limits/loginlockout", s.handleUISaveLoginLockout)
 	mux.HandleFunc("GET /admin/ui/settings", s.handleUISettings)
 	mux.HandleFunc("GET /admin/ui/tls", s.handleUITLSCerts)
 	mux.HandleFunc("POST /admin/ui/tls/upload", s.handleUITLSCertUpload)
