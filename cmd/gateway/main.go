@@ -68,7 +68,7 @@ func main() {
 	}
 
 	addr := gw.addr
-	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
+	logger, logClose := logging.Build("hermex-gateway", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 
 	// The gateway's database connection is used only for the TLS certificate store:
 	// it serves an admin-uploaded certificate — and picks up a renewal — at the front

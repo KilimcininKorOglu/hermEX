@@ -51,7 +51,7 @@ func main() {
 		log.Fatalf("hermex-dav: schema: %v", err)
 	}
 	dir.SetLDAPVerifier(ldapauth.New())
-	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
+	logger, logClose := logging.Build("hermex-dav", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
 
 	srv := dav.NewServer(dir, dir, cfg.Hostname)

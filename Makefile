@@ -15,12 +15,24 @@ COMPOSE := docker compose -f hermex-compose.yml
 BIN     := bin
 CMDS    := mta imap pop3 webmail2 dav activesync ews mapihttp gateway notify admin fetchmail antispam-bootstrap antispam-rules
 
+# Source state stamped into every binary this Makefile builds, and into every
+# container image it builds through compose. The images build from a context with
+# .git excluded and with VCS stamping off, so without this a deployed binary
+# carries no marker of where it came from. The -dirty suffix is not cosmetic: a
+# bare sha on a binary built from a modified tree claims a source state that was
+# never built.
+GIT_COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+GIT_DIRTY  := $(shell git diff --quiet 2>/dev/null || echo -dirty)
+export HERMEX_COMMIT     := $(GIT_COMMIT)$(GIT_DIRTY)
+export HERMEX_BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS := -X hermex/internal/buildinfo.Commit=$(HERMEX_COMMIT) -X hermex/internal/buildinfo.BuildTime=$(HERMEX_BUILD_TIME)
+
 # Test/lint scope. Override PKG (and optionally RUN) for a subset.
 PKG ?= ./internal/... ./cmd/...
 RUN ?=
 RUNFLAG := $(if $(RUN),-run '$(RUN)',)
 
-.PHONY: all build test test-host test-race vet fmt fmt-check gate tidy up down rebuild clean help compose-check dump-db restore-db
+.PHONY: all build test test-host test-race vet fmt fmt-check gate tidy up down rebuild clean help compose-check dump-db restore-db version
 
 all: build
 
@@ -29,7 +41,7 @@ build:
 	@mkdir -p $(BIN)
 	@for c in $(CMDS); do \
 		echo "  build $$c"; \
-		go build -o $(BIN)/$$c ./cmd/$$c || exit 1; \
+		go build -ldflags '$(LDFLAGS)' -o $(BIN)/$$c ./cmd/$$c || exit 1; \
 	done
 	@echo "built $(words $(CMDS)) binaries -> $(BIN)/"
 
@@ -106,6 +118,11 @@ restore-db:
 ## compose-check: validate the compose file syntax
 compose-check:
 	$(COMPOSE) config -q
+
+## version: report the source state this Makefile would stamp into a build
+version:
+	@echo "commit     $(HERMEX_COMMIT)"
+	@echo "build time $(HERMEX_BUILD_TIME)"
 
 ## clean: remove built binaries
 clean:

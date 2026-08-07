@@ -50,7 +50,7 @@ func main() {
 		log.Fatalf("hermex-imap: schema: %v", err)
 	}
 	dir.SetLDAPVerifier(ldapauth.New())
-	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
+	logger, logClose := logging.Build("hermex-imap", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
 
 	addr := cfg.IMAPAddr

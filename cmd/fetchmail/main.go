@@ -49,7 +49,7 @@ func main() {
 	if err := dir.EnsureSchema(); err != nil {
 		log.Fatalf("hermex-fetchmail: schema: %v", err)
 	}
-	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
+	logger, logClose := logging.Build("hermex-fetchmail", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 	objectstore.SetDefaultLogger(logger)
 	mta.SetDefaultLogger(logger) // post-delivery pass failures route to the central log
 

@@ -56,7 +56,7 @@ func main() {
 		log.Fatalf("hermex-webmail2: schema: %v", err)
 	}
 	dir.SetLDAPVerifier(ldapauth.New())
-	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
+	logger, logClose := logging.Build("hermex-webmail2", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
 	mta.SetDefaultLogger(logger)         // post-delivery pass failures route to the central log
 

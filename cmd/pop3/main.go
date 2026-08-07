@@ -47,7 +47,7 @@ func main() {
 		log.Fatalf("hermex-pop3: schema: %v", err)
 	}
 	dir.SetLDAPVerifier(ldapauth.New())
-	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
+	logger, logClose := logging.Build("hermex-pop3", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
 
 	addr := cfg.POP3Addr

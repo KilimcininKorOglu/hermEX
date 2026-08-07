@@ -30,7 +30,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("hermex-notify: %v", err)
 	}
-	logger, logClose := logging.Build(cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
+	logger, logClose := logging.Build("hermex-notify", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 
 	srv := notifyd.New(cfg.NotifySecret, logger)
 	addr := cfg.NotifyAddr

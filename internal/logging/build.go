@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"hermex/internal/buildinfo"
 )
 
 // logFlushTimeout bounds the final flush + disconnect the close function performs
@@ -43,16 +45,23 @@ func (m *MultiSink) Write(e Event) {
 // and a close function (flush + disconnect) to run as a shutdown cleanup; it has
 // the func() error shape lifecycle.Run expects and bounds its own flush deadline.
 //
+// daemon names the calling process; Build records it with the source state the
+// binary was built from, so a restart leaves a durable answer to which commit each
+// container is running. That answer used to exist nowhere: the images build with
+// VCS stamping off, and nothing replaced it.
+//
 // database is the Mongo database holding the logs collection (defaults to
 // "hermex" when empty); spillDir, when set, is where failed batches are buffered
 // while Mongo is unreachable. Retention is no longer applied here: the admin daemon
 // prunes the log store to the operator-set window at runtime (see Reader.PruneOlderThan),
 // so Build creates no TTL index and the window can change without a restart.
-func Build(mongoURI, database, spillDir string) (*Logger, func() error) {
+func Build(daemon, mongoURI, database, spillDir string) (*Logger, func() error) {
 	stderr := NewStderrSink(nil)
 	noop := func() error { return nil }
 	if mongoURI == "" {
-		return New(stderr), noop
+		l := New(stderr)
+		announce(l, daemon)
+		return l, noop
 	}
 	if database == "" {
 		database = "hermex"
@@ -76,12 +85,27 @@ func Build(mongoURI, database, spillDir string) (*Logger, func() error) {
 			Name:      "logging.mongo.unavailable",
 			Err:       err.Error(),
 		})
-		return New(stderr), noop
+		l := New(stderr)
+		announce(l, daemon)
+		return l, noop
 	}
 	closeFn := func() error {
 		ctx, cancel := context.WithTimeout(context.Background(), logFlushTimeout)
 		defer cancel()
 		return ms.Close(ctx)
 	}
-	return New(NewMultiSink(stderr, ms)), closeFn
+	l := New(NewMultiSink(stderr, ms))
+	announce(l, daemon)
+	return l, closeFn
+}
+
+// announce records which build of which daemon just started. It is the one line
+// that lets an operator confirm a running container matches a given source state,
+// after an incident or a rollback, without relying on recollection of the last
+// rebuild.
+func announce(l *Logger, daemon string) {
+	l.Emit(Event{
+		Level: LevelInfo, Subsystem: System, Name: "process.start",
+		Fields: Fields{"daemon": daemon, "commit": buildinfo.Revision(), "built": buildinfo.Built()},
+	})
 }
