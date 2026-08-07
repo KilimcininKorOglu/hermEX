@@ -672,7 +672,7 @@ func sortMail(in []mailJSON, field, dir string) {
 // degrades gracefully. The path is logged so the port can track what is still
 // missing.
 func (s *Server) handleStub(w http.ResponseWriter, r *http.Request) {
-	log.Printf("webmail2api: unimplemented %s %s", r.Method, r.URL.Path)
+	log.Printf("webmail2api: unimplemented %s %s", logSafe(r.Method), logSafe(r.URL.Path))
 	writeJSON(w, http.StatusOK, map[string]any{})
 }
 
