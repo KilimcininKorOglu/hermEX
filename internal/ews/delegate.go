@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -334,6 +335,27 @@ func delegateErr(code, text, addr string) delegateWriteMessage {
 	return m
 }
 
+// delegateWriteFailed is soapFault's per-item counterpart, for a failure that
+// concerns one delegate inside an otherwise successful response: the raw error
+// is recorded server-side and the client is told only that something failed.
+//
+// MessageText is serialized straight to the caller, so passing err.Error() there
+// hands a mailbox owner the store internals behind the failure, and, because
+// nothing else on this path logs, leaves the operator with no record of it at
+// all. Every other error in this file already goes through soapFault, which
+// cannot be used here: it writes an envelope-level fault, and the rest of the
+// batch still has to be reported.
+func (s *Server) delegateWriteFailed(addr string, err error) delegateWriteMessage {
+	s.Logger.Emit(logging.Event{
+		Level:     logging.LevelError,
+		Subsystem: logging.EWS,
+		Name:      "operation.fail",
+		Fields:    logging.Fields{"code": "ErrorInternalServerError", "delegate": addr},
+		Err:       err.Error(),
+	})
+	return delegateErr("ErrorInternalServerError", "an internal error occurred", addr)
+}
+
 func writeDelegateMutationResponse(w http.ResponseWriter, element string, msgs []delegateWriteMessage) {
 	writeResponse(w, delegateWriteResponse{
 		XMLName:       xml.Name{Space: nsMessages, Local: element},
@@ -444,7 +466,7 @@ func (s *Server) handleAddDelegate(w http.ResponseWriter, inner []byte, sess *se
 		// Write the grants before recording the list entry so a grant failure leaves no
 		// half-configured delegate on the list.
 		if err := writeDelegateGrants(st, addr, du.DelegatePermissions); err != nil {
-			msgs = append(msgs, delegateErr("ErrorInternalServerError", err.Error(), addr))
+			msgs = append(msgs, s.delegateWriteFailed(addr, err))
 			continue
 		}
 		list = append(list, addr)
@@ -544,7 +566,7 @@ func (s *Server) handleUpdateDelegate(w http.ResponseWriter, inner []byte, sess 
 			continue
 		}
 		if err := writeDelegateGrants(st, addr, du.DelegatePermissions); err != nil {
-			msgs = append(msgs, delegateErr("ErrorInternalServerError", err.Error(), addr))
+			msgs = append(msgs, s.delegateWriteFailed(addr, err))
 			continue
 		}
 		msgs = append(msgs, delegateOK(addr))
