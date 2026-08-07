@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { sanitizeHTML, sanitizeText } from './sanitize'
+import { sanitizeHTML, sanitizeEmailBody, sanitizeText } from './sanitize'
 
 describe('sanitizeHTML', () => {
   it('allows safe HTML tags', () => {
@@ -46,6 +46,42 @@ describe('sanitizeHTML', () => {
     expect(result).not.toMatch(new RegExp('<' + tag, 'i'))
     expect(result).not.toContain('evil.com')
     expect(result).toContain('<p>content</p>')
+  })
+
+  // The URI allowlist is what keeps a link in a received message from running
+  // script in the origin that holds the session cookie. Its scheme-less branch
+  // used to admit every scheme, so these all rendered as live javascript: links.
+  it.each([
+    ['javascript', '<a href="javascript:alert(1)">click</a>'],
+    ['mixed case', '<a href="JaVaScRiPt:alert(1)">click</a>'],
+    ['vbscript', '<a href="vbscript:msgbox(1)">click</a>'],
+    ['entity-encoded', '<a href="&#106;avascript:alert(1)">click</a>'],
+    ['image source', '<img src="javascript:alert(1)">'],
+  ])('drops a %s script URL', (_name, payload) => {
+    const result = sanitizeHTML(payload)
+    expect(result).not.toMatch(/javascript:/i)
+    expect(result).not.toMatch(/vbscript:/i)
+  })
+
+  // The same body path the reader actually renders, so the guard is proven where
+  // untrusted mail is displayed and not only on the raw helper.
+  it('drops script URLs from a rendered email body', () => {
+    const { html } = sanitizeEmailBody('<a href="javascript:alert(1)">click</a>', true)
+    expect(html).not.toMatch(/javascript:/i)
+    expect(html).toContain('click')
+  })
+
+  // Narrowing the scheme rule must not take the legitimate ones with it: inline
+  // images are cid:/data:, and a body full of stripped links would be its own bug.
+  it.each([
+    ['<a href="https://example.com/x">ok</a>', 'https://example.com/x'],
+    ['<a href="mailto:a@b.test">mail</a>', 'mailto:a@b.test'],
+    ['<a href="/relative/path">rel</a>', '/relative/path'],
+    ['<a href="#anchor">anchor</a>', '#anchor'],
+    ['<img src="cid:part1">', 'cid:part1'],
+    ['<img src="data:image/png;base64,AAA">', 'data:image/png;base64,AAA'],
+  ])('keeps %s', (input, kept) => {
+    expect(sanitizeHTML(input)).toContain(kept)
   })
 
   it('allows links with target attribute', () => {

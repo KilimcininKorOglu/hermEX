@@ -49,7 +49,12 @@ const EMAIL_SANITIZE_CONFIG = {
   FORBID_TAGS: ['script', 'style', 'iframe', 'form', 'input', 'button', 'object', 'embed'],
   FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur', 'onchange', 'onsubmit'],
   // Keep cid:/data: images for inline rendering; drop javascript: and the like.
-  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|cid|data):|[^a-z]|[a-z+\-.]+(?:[^a-z+\-.]|$))/i,
+  //
+  // The trailing alternative admits scheme-less (relative) URLs, and the ':' in
+  // its exclusion class is what makes it do only that. Without it, "javascript"
+  // matches [a-z]+ and the ':' matches the exclusion, so EVERY scheme is admitted
+  // and the allowlist in front of it decides nothing.
+  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|cid|data):|[^a-z]|[a-z+\-.]+(?:[^a-z+\-.:]|$))/i,
 }
 
 /**
