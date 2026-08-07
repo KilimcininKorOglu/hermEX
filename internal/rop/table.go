@@ -85,8 +85,10 @@ func (s *Session) ropQueryRows(p *ext.Pull, out *ext.Push, handles []uint32, hin
 	forward := forwardRead != 0
 
 	// Select the row indices to emit, in emit order, and the cursor they leave.
+	// Both branches assign newCursor, so it is declared without one: seeding it
+	// from ts.cursor reads as a fallback that no path can reach.
 	var idxs []int
-	newCursor := ts.cursor
+	var newCursor int
 	if forward {
 		end := min(ts.cursor+int(rowCount), total)
 		for i := ts.cursor; i < end; i++ {

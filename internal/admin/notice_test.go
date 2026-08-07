@@ -12,9 +12,9 @@ import (
 	"hermex/internal/logging"
 )
 
-// storePathError is the shape of a real store failure surfacing through a panel: it
+// errStorePath is the shape of a real store failure surfacing through a panel: it
 // names the mailbox directory on disk.
-var storePathError = errors.New("open /var/lib/hermex/mail/hermex.test/bob/objects.sqlite3: permission denied")
+var errStorePath = errors.New("open /var/lib/hermex/mail/hermex.test/bob/objects.sqlite3: permission denied")
 
 // loggingAdminServerStore is loggingAdminServer with a caller-supplied mailbox store,
 // so a test can make a store-backed panel fail.
@@ -35,7 +35,7 @@ func loggingAdminServerStore(t *testing.T, d Directory, store MailboxStore) (*ht
 // administrator, so the path on disk must not appear there.
 func TestPanelNoticeDoesNotLeakStorePath(t *testing.T) {
 	d := systemAdminDir()
-	ts, _ := loggingAdminServerStore(t, d, &fakeStore{setErr: storePathError})
+	ts, _ := loggingAdminServerStore(t, d, &fakeStore{setErr: errStorePath})
 	session, csrf := loginCookies(t, ts)
 
 	resp := authedReq(t, ts, http.MethodPut, "/admin/ui/users/bob@hermex.test/delegates",
@@ -57,7 +57,7 @@ func TestPanelNoticeDoesNotLeakStorePath(t *testing.T) {
 // failure: the full error reaches the central log under the admin subsystem.
 func TestPanelNoticeRecordsTheRealError(t *testing.T) {
 	d := systemAdminDir()
-	ts, sink := loggingAdminServerStore(t, d, &fakeStore{setErr: storePathError})
+	ts, sink := loggingAdminServerStore(t, d, &fakeStore{setErr: errStorePath})
 	session, csrf := loginCookies(t, ts)
 
 	resp := authedReq(t, ts, http.MethodPut, "/admin/ui/users/bob@hermex.test/delegates",

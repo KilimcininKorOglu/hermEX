@@ -183,10 +183,7 @@ func (s *Server) serveIn(w http.ResponseWriter, r *http.Request, user, mailbox s
 	}
 
 	ctx := r.Context()
-	for {
-		if ctx.Err() != nil {
-			break
-		}
+	for ctx.Err() == nil {
 		pdu, err := readPDU(r.Body)
 		if err != nil {
 			break // EOF or the client closed the IN channel

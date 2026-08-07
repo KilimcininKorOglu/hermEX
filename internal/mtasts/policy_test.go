@@ -76,7 +76,7 @@ func TestPolicyID(t *testing.T) {
 		t.Errorf("id = %q (len %d), want 32 chars", id, len(id))
 	}
 	for _, c := range id {
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
 			t.Errorf("id %q has non-alphanumeric char %q", id, c)
 		}
 	}

@@ -241,7 +241,7 @@ func (s *Store) GetHierarchySync(req HierarchySyncRequest) (HierarchySyncResult,
 		}
 		inGiven := req.Given != nil && req.Given.Contains(mapi.MakeEIDEx(homeReplID, ufid))
 		seenCN := req.Seen != nil && req.Seen.Contains(mapi.MakeEIDEx(homeReplID, ucn))
-		if !(inGiven && seenCN) {
+		if !inGiven || !seenCN {
 			res.ChangedFIDs = append(res.ChangedFIDs, ufid)
 		}
 	}

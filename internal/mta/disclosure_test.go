@@ -9,15 +9,15 @@ import (
 	"hermex/internal/smtp"
 )
 
-// driverFailure is the shape of a directory outage reaching the routing path: the
+// errDriverFailure is the shape of a directory outage reaching the routing path: the
 // unwrapped driver error, which names database internals.
-var driverFailure = errors.New("dial tcp 10.0.0.5:3306: connect: connection refused")
+var errDriverFailure = errors.New("dial tcp 10.0.0.5:3306: connect: connection refused")
 
 // brokenDomains is a directory that resolves nothing and whose domain lookup fails,
 // the state during a database outage.
 type brokenDomains struct{ directory.StaticAccounts }
 
-func (brokenDomains) IsLocalDomain(string) (bool, error) { return false, driverFailure }
+func (brokenDomains) IsLocalDomain(string) (bool, error) { return false, errDriverFailure }
 
 // TestRoutingFailureDefersInsteadOfRejecting proves a directory outage answers with a
 // temporary failure. A permanent rejection would make the sending MTA bounce mail

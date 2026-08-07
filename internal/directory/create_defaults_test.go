@@ -89,7 +89,7 @@ func TestEffectiveUserDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !(base.POP3IMAP && base.SMTP && base.Web && base.EAS && base.DAV) || base.ChgPasswd || base.Lang != "" {
+	if !base.POP3IMAP || !base.SMTP || !base.Web || !base.EAS || !base.DAV || base.ChgPasswd || base.Lang != "" {
 		t.Errorf("baseline = %+v, want POP3IMAP/SMTP/Web/EAS/DAV on, ChgPasswd off, no lang", base)
 	}
 

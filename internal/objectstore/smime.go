@@ -31,7 +31,7 @@ type identityBlob struct {
 
 // SetSmimeIdentity stores the user's S/MIME identity, replacing any previous one.
 func (s *Store) SetSmimeIdentity(id SmimeIdentity) error {
-	blob, err := json.Marshal(identityBlob{Mode: id.Mode, P12: id.P12, Cert: id.Cert})
+	blob, err := json.Marshal(identityBlob(id))
 	if err != nil {
 		return err
 	}

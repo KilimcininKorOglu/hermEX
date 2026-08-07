@@ -12,9 +12,9 @@ import (
 	"hermex/internal/logging"
 )
 
-// storePathError is the shape of a real store failure reaching the reply helpers:
+// errStorePath is the shape of a real store failure reaching the reply helpers:
 // it names the mailbox directory on disk.
-var storePathError = errors.New("open /var/lib/hermex/mail/hermex.test/bob/objects.sqlite3: permission denied")
+var errStorePath = errors.New("open /var/lib/hermex/mail/hermex.test/bob/objects.sqlite3: permission denied")
 
 // dialLoggedServer starts a server with a capturing logger and returns the reader,
 // the connection and the sink, so a test can assert both what went on the wire and
@@ -66,7 +66,7 @@ func greet(t *testing.T, r *textproto.Reader, conn net.Conn) {
 // driver fault would otherwise hand the mailbox path on disk to any remote MTA that
 // sends a message.
 func TestRcptErrorDoesNotDiscloseInternals(t *testing.T) {
-	sess := &fakeSession{rcptErr: storePathError}
+	sess := &fakeSession{rcptErr: errStorePath}
 	r, conn, _ := dialLoggedServer(t, sess)
 	greet(t, r, conn)
 
@@ -85,7 +85,7 @@ func TestRcptErrorDoesNotDiscloseInternals(t *testing.T) {
 // TestRcptErrorIsRecorded proves the withheld error is not lost: it reaches the
 // central log, so a sanitized rejection stays diagnosable.
 func TestRcptErrorIsRecorded(t *testing.T) {
-	sess := &fakeSession{rcptErr: storePathError}
+	sess := &fakeSession{rcptErr: errStorePath}
 	r, conn, sink := dialLoggedServer(t, sess)
 	greet(t, r, conn)
 
@@ -129,7 +129,7 @@ func TestDataErrorDoesNotDiscloseInternals(t *testing.T) {
 		wantText string
 		noLeak   bool
 	}{
-		{"unclassified", storePathError, 554, "", true},
+		{"unclassified", errStorePath, 554, "", true},
 		{"business", &PermError{Message: "5.2.2 mailbox is full"}, 554, "mailbox is full", false},
 		{"transient", &TempError{Message: "4.3.0 retry later"}, 451, "retry later", false},
 	} {
