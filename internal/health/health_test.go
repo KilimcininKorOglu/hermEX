@@ -9,6 +9,9 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"hermex/internal/buildinfo"
+	"hermex/internal/lifecycle"
 )
 
 // freeAddr reserves a loopback port and releases it, returning the address for a
@@ -118,5 +121,71 @@ func TestComponentServesAndStops(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+}
+
+// statusFrom starts a component, reads its /healthz once, and shuts it down.
+func statusFrom(t *testing.T, addr string, comps []lifecycle.Component) Status {
+	t.Helper()
+	if len(comps) != 1 {
+		t.Fatalf("Components returned %d components, want 1", len(comps))
+	}
+	errc := make(chan error, 1)
+	go func() { errc <- comps[0].Start() }()
+	t.Cleanup(func() {
+		comps[0].Shutdown(context.Background())
+		<-errc
+	})
+	var resp *http.Response
+	var err error
+	for range 50 {
+		if resp, err = http.Get("http://" + addr + "/healthz"); err == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("GET /healthz: %v", err)
+	}
+	defer resp.Body.Close()
+	var st Status
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
+
+// TestComponentsReportTheBuildVersion is the defect. Every daemon builds its health
+// listener through Components, which passed a literal empty string as the version,
+// so every /healthz answered with an empty one and the admin Live monitor's Version
+// column was permanently blank. That column is the one built-in answer to which
+// daemons are still on an older binary after a rolling restart, which is the
+// question schema compatibility turns on when they share one database.
+func TestComponentsReportTheBuildVersion(t *testing.T) {
+	old := buildinfo.Commit
+	buildinfo.Commit = "abc1234-dirty"
+	defer func() { buildinfo.Commit = old }()
+
+	addr := freeAddr(t)
+	st := statusFrom(t, addr, Components(addr, "imap"))
+	if st.Version != "abc1234-dirty" {
+		t.Errorf("version = %q, want the binary's own stamp", st.Version)
+	}
+	if st.Service != "imap" {
+		t.Errorf("service = %q, want imap", st.Service)
+	}
+}
+
+// TestComponentsReportAnUnstampedBuildHonestly proves a binary carrying no stamp
+// says so rather than answering with an empty string, which reads as a value the
+// operator is meant to compare against another daemon's.
+func TestComponentsReportAnUnstampedBuildHonestly(t *testing.T) {
+	old := buildinfo.Commit
+	buildinfo.Commit = ""
+	defer func() { buildinfo.Commit = old }()
+
+	addr := freeAddr(t)
+	if st := statusFrom(t, addr, Components(addr, "imap")); st.Version == "" {
+		t.Error("an unstamped build reports an empty version, which reads as a value")
 	}
 }
