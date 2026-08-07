@@ -126,12 +126,12 @@ func LoadRulesFile(path string) (*SARuleSet, error) {
 // seedRulesFile writes the embedded baseline (with a provenance header) to path
 // atomically: a temp file in the same directory, then rename.
 func seedRulesFile(path string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
 	data := append([]byte(seededHeader), embeddedRulesText()...)
 	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
 	return os.Rename(tmp, path)
