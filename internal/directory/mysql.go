@@ -1067,10 +1067,15 @@ func (d *SQLDirectory) SetAliasesFor(username string, aliases []string) (bool, e
 		return false, err
 	}
 	defer tx.Rollback()
+	// Clear first, then validate: the user's current aliases are being replaced,
+	// so they must not count as collisions against themselves.
 	if _, err := tx.Exec(`DELETE FROM aliases WHERE mainname = ?`, username); err != nil {
 		return false, err
 	}
 	for _, a := range clean {
+		if err := checkAlias(tx, a, username); err != nil {
+			return false, err
+		}
 		if _, err := tx.Exec(`INSERT INTO aliases (aliasname, mainname) VALUES (?, ?)`, a, username); err != nil {
 			return false, err
 		}
@@ -1196,10 +1201,16 @@ func (d *SQLDirectory) SetUserProperties(username string, props map[uint32]strin
 }
 
 // CreateAlias maps an alternate address (aliasname) to a canonical user
-// (mainname == users.username) in the aliases table.
+// (mainname == users.username) in the aliases table. It refuses an alias that
+// checkAlias rejects: the row is both an inbound route and a send-as identity, so
+// an unusable one is never merely inert.
 func (d *SQLDirectory) CreateAlias(aliasname, mainname string) error {
-	_, err := d.db.Exec(`INSERT INTO aliases (aliasname, mainname) VALUES (?, ?)`,
-		strings.ToLower(strings.TrimSpace(aliasname)), strings.ToLower(strings.TrimSpace(mainname)))
+	alias := strings.ToLower(strings.TrimSpace(aliasname))
+	main := strings.ToLower(strings.TrimSpace(mainname))
+	if err := checkAlias(d.db, alias, main); err != nil {
+		return err
+	}
+	_, err := d.db.Exec(`INSERT INTO aliases (aliasname, mainname) VALUES (?, ?)`, alias, main)
 	return err
 }
 
