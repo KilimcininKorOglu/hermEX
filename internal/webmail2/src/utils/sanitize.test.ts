@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { sanitizeHTML, sanitizeEmailBody, sanitizeText } from './sanitize'
+import { sanitizeHTML, sanitizeEmailBody, sanitizeText, sanitizeClipboard } from './sanitize'
 
 describe('sanitizeHTML', () => {
   it('allows safe HTML tags', () => {
@@ -111,5 +111,38 @@ describe('sanitizeText', () => {
     const input = 'Plain text without HTML'
     const result = sanitizeText(input)
     expect(result).toBe('Plain text without HTML')
+  })
+})
+
+describe('sanitizeClipboard', () => {
+  // The paste path is the one sink the value prop never guards: the browser
+  // inserts the fragment itself, so an on-insertion handler runs unless the
+  // payload is sanitized first.
+  it('strips handlers that fire on insertion', () => {
+    const result = sanitizeClipboard('<img src=x onerror="steal()"><svg onload="steal()"></svg>', '')
+    expect(result).not.toContain('onerror')
+    expect(result).not.toContain('onload')
+    expect(result).not.toContain('steal')
+  })
+
+  it('keeps the formatting a paste is for', () => {
+    const result = sanitizeClipboard('<p>Hello <strong>world</strong></p>', 'Hello world')
+    expect(result).toContain('<strong>world</strong>')
+  })
+
+  it('escapes a plain-text payload so it cannot introduce markup', () => {
+    const result = sanitizeClipboard('', '<img src=x onerror=steal()>')
+    expect(result).not.toMatch(/<img/i)
+    expect(result).toContain('&lt;img')
+  })
+
+  it('keeps line breaks in a plain-text payload', () => {
+    expect(sanitizeClipboard('', 'first\r\nsecond\nthird')).toBe('first<br>second<br>third')
+  })
+
+  // A whitespace-only text/html flavour is what a plain-text copy leaves behind
+  // in some browsers; the text payload must still win there.
+  it('falls back to the text payload when the HTML flavour is blank', () => {
+    expect(sanitizeClipboard('   ', 'plain')).toBe('plain')
   })
 })

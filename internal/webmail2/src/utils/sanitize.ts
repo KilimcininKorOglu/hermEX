@@ -81,6 +81,24 @@ export function sanitizeEmailBody(dirty: string, blockRemote: boolean): { html: 
 }
 
 /**
+ * Sanitizes a clipboard or drag payload before it is inserted into an editable
+ * surface. A browser drops the raw fragment straight into the live DOM, so an
+ * element that fires on insertion (img/onerror, svg/onload) would execute in this
+ * origin before any value prop, and therefore any sanitizer call site, sees it.
+ * A payload with no HTML flavour is escaped so plain text cannot introduce markup.
+ */
+export function sanitizeClipboard(html: string, text: string): string {
+  if (html.trim() !== '') {
+    return sanitizeHTML(html)
+  }
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\r\n|\r|\n/g, '<br>')
+}
+
+/**
  * Sanitizes plain text for safe display (strips all HTML).
  */
 export function sanitizeText(dirty: string): string {
