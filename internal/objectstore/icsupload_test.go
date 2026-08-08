@@ -812,3 +812,35 @@ func TestImportHierarchyParentResolution(t *testing.T) {
 		t.Errorf("child parent = %d, want %#x", parent, parentFID)
 	}
 }
+
+// TestICSReplaceRefreshesTheCachedEML proves an ICS/FastTransfer replace, the way
+// Outlook pushes a locally edited message back, reaches every reader. The eml
+// cache is keyed by message id alone, so a replace that leaves it in place would
+// keep serving the pre-edit bytes to IMAP FETCH, POP3 RETR and the webmail render
+// indefinitely, which is indistinguishable from the edit being lost.
+func TestICSReplaceRefreshesTheCachedEML(t *testing.T) {
+	s := openSeededStore(t)
+	info := appendForEdit(t, s, "before")
+
+	// Replace that same message id with edited content, as a client upload does.
+	body := encodeStream(t,
+		propItem(mapi.PrMessageClass, "IPM.Note"),
+		propItem(mapi.PrSubject, "after"),
+		propItem(mapi.PrNormalizedSubject, "after"),
+		propItem(mapi.PrBody, "edited body"),
+	)
+	if id := importOne(t, s, mapi.PrivateFIDInbox, uint64(info.ID), 0, body); id != uint64(info.ID) {
+		t.Fatalf("replace committed message id %d, want %d", id, info.ID)
+	}
+
+	got, err := s.GetMessageRaw(mapi.PrivateFIDInbox, info.UID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(got), "Subject: before") {
+		t.Errorf("the replace still serves the pre-edit bytes:\n%s", got)
+	}
+	if !strings.Contains(string(got), "Subject: after") {
+		t.Errorf("the replaced message does not carry the uploaded subject:\n%s", got)
+	}
+}

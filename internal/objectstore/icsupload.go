@@ -346,6 +346,12 @@ func (um *UploadMessage) Commit() (uint64, error) {
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
+	// A replace reuses the message id, and the eml cache is keyed by that id
+	// alone, so the pre-edit wire form would otherwise keep being served to every
+	// reader that goes through the cache (IMAP FETCH, POP3 RETR, the webmail
+	// render), making the client's edit look lost. Unconditional like the other
+	// message mutators: for a new id there is no cache file and this is a no-op.
+	um.store.refreshEML(id)
 	op := "modify"
 	if um.isNew {
 		op = "create"
