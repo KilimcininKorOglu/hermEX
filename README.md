@@ -234,6 +234,17 @@ on the next read of a message, so carrying them would roughly double the backup
 for nothing. The result mirrors the live directory layout, which makes restoring
 a plain file copy back into place with the mail services stopped.
 
+Both commands write into `docker-data/backup`, which is the same disk as the live
+data. **Nothing in this repository schedules them or copies the result anywhere.**
+Taking a backup off this host, and doing it on a schedule, is work the operator
+has to set up: a host loss, a disk failure or ransomware reaching `docker-data`
+destroys the live data and every backup taken so far together. Until that off-host
+copy exists, the recovery point is whenever someone last remembered to type the
+command. The database dump verifies itself before it is named, so a file under
+`docker-data/backup` is a complete dump rather than something a restore discovers
+is truncated; that is a check on the copy, not a substitute for having one
+elsewhere.
+
 ### Administration
 
 `hermex-admin` is both the provisioning CLI and, under its `serve` subcommand,

@@ -33,7 +33,7 @@ PKG ?= ./internal/... ./cmd/...
 RUN ?=
 RUNFLAG := $(if $(RUN),-run '$(RUN)',)
 
-.PHONY: all build test test-host test-race vet fmt fmt-check gate lint lint-modernize require-golangci-lint tidy up down images rebuild clean help compose-check dump-db restore-db version
+.PHONY: all build test test-host test-race vet fmt fmt-check gate lint lint-modernize require-golangci-lint tidy up down images rebuild clean help compose-check dump-db dump-mail restore-db version
 
 all: build
 
@@ -133,9 +133,27 @@ rebuild:
 # key, and the accounts, aliases, admin roles and policy around them. It lives on
 # one bind mount with no replication, so losing docker-data/db loses all of it.
 # Take a dump before an upgrade, and on a schedule; keep it off this host.
+#
+# NOTHING in this repository schedules this or copies the result anywhere: the
+# output lands beside the live database on the same disk, so it survives a
+# clumsy delete and nothing else. An off-host, scheduled copy of
+# docker-data/backup and docker-data/mailboxes is the operator's to build.
+#
+# The dump is written and compressed in separate steps rather than piped, so a
+# failure of either is caught: a pipeline hides the dump's exit status and would
+# leave a valid gzip file holding a truncated database. The result is verified
+# and only then named, so a file under docker-data/backup is always a complete
+# dump rather than something a restore discovers is unusable.
 dump-db:
 	@mkdir -p docker-data/backup
-	@out=docker-data/backup/hermex-$$(date +%Y%m%d-%H%M%S).sql.gz; 	$(COMPOSE) exec -T db mariadb-dump -uroot -phermexstack 		--single-transaction --routines --events --databases email | gzip > $$out; 	echo "wrote $$out"
+	@out=docker-data/backup/hermex-$$(date +%Y%m%d-%H%M%S).sql; \
+	$(COMPOSE) exec -T db mariadb-dump -uroot -phermexstack \
+		--single-transaction --routines --events --databases email > $$out.part || \
+		{ rm -f $$out.part; echo "dump failed; nothing written"; exit 1; }; \
+	gzip $$out.part || { rm -f $$out.part $$out.part.gz; exit 1; }; \
+	gzip -t $$out.part.gz || { rm -f $$out.part.gz; echo "the dump did not verify; nothing written"; exit 1; }; \
+	mv $$out.part.gz $$out.gz; \
+	echo "wrote $$out.gz ($$(wc -c < $$out.gz) bytes, verified)"
 
 ## dump-mail: write a consistent copy of every mailbox's mail content to docker-data/backup/
 # dump-db covers the accounts and the key material; this covers the mail. Each
