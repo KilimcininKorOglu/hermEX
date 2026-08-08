@@ -26,11 +26,26 @@ type icomp struct {
 	comps []*icomp
 }
 
+// maxNestingDepth bounds how deeply parseICal nests sub-components. The deepest
+// legal iCalendar structure is three levels (VCALENDAR > VEVENT > VALARM), so
+// the bound is far above anything a real calendar carries. It exists because the
+// resulting tree is walked by recursive descent (writeComponent, filterComp) and
+// is built from bytes an inbound sender or CalDAV client chose: without it a run
+// of BEGIN lines costs about 14 bytes per stack frame and kills the process with
+// an unrecoverable stack overflow. A component past the bound, and everything it
+// contains, is dropped rather than failing the whole parse, so a malformed part
+// never rejects the message carrying it.
+const maxNestingDepth = 20
+
 // parseICal parses raw into the top-level component (the VCALENDAR). Lines are
-// unfolded first (RFC 5545 §3.1); BEGIN/END pairs nest sub-components.
+// unfolded first (RFC 5545 §3.1); BEGIN/END pairs nest sub-components up to
+// maxNestingDepth.
 func parseICal(raw []byte) (*icomp, error) {
 	var stack []*icomp
 	var root *icomp
+	// depth counts every open BEGIN, including those past the bound, so that a
+	// matching END pops the same level it opened.
+	depth := 0
 	for _, line := range unfold(raw) {
 		if line == "" {
 			continue
@@ -38,6 +53,10 @@ func parseICal(raw []byte) (*icomp, error) {
 		name, params, value := splitLine(line)
 		switch strings.ToUpper(name) {
 		case "BEGIN":
+			depth++
+			if depth > maxNestingDepth {
+				continue
+			}
 			c := &icomp{name: strings.ToUpper(strings.TrimSpace(value))}
 			if len(stack) > 0 {
 				top := stack[len(stack)-1]
@@ -47,11 +66,14 @@ func parseICal(raw []byte) (*icomp, error) {
 			}
 			stack = append(stack, c)
 		case "END":
-			if len(stack) > 0 {
+			if depth <= maxNestingDepth && len(stack) > 0 {
 				stack = stack[:len(stack)-1]
 			}
+			if depth > 0 {
+				depth--
+			}
 		default:
-			if len(stack) > 0 {
+			if depth <= maxNestingDepth && len(stack) > 0 {
 				top := stack[len(stack)-1]
 				top.props = append(top.props, iline{name: strings.ToUpper(name), params: params, value: value})
 			}
