@@ -124,7 +124,7 @@
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label>Type
 <select name="forwardtype">
-<option value=""{{if eq .Forward.Type ""}} selected{{end}}>&mdash; No forwarding</option>
+<option value=""{{if eq .Forward.Type ""}} selected{{end}}>No forwarding</option>
 <option value="cc"{{if eq .Forward.Type "cc"}} selected{{end}}>Keep a copy and forward (CC)</option>
 <option value="redirect"{{if eq .Forward.Type "redirect"}} selected{{end}}>Forward only (Redirect)</option>
 </select></label>
@@ -206,7 +206,7 @@
 <label>Folder
 <select name="fid" hx-get="/admin/ui/users/{{.User.Username}}/folder-perms" hx-target="#folder-perms" hx-swap="innerHTML" hx-trigger="change"
         hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
-<option value="">&mdash; Select a folder &mdash;</option>
+<option value="">Select a folder</option>
 {{range .Folders}}<option value="{{.ID}}">{{.DisplayName}}</option>{{end}}
 </select></label>
 </form>
@@ -320,7 +320,7 @@
 <table class="grid">
 <thead><tr><th>Role</th><th>Scope</th><th></th></tr></thead>
 <tbody>
-{{range .Roles}}<tr><td>{{.Role}}</td><td>{{if .ScopeID}}{{.ScopeID}}{{else}}&mdash;{{end}}</td>
+{{range .Roles}}<tr><td>{{.Role}}</td><td>{{if .ScopeID}}{{.ScopeID}}{{else}}-{{end}}</td>
 <td><form hx-post="/admin/ui/users/{{$.Email}}/roles/revoke" hx-target="#user-roles" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
 <input type="hidden" name="role" value="{{.Role}}"><input type="hidden" name="scopeID" value="{{.ScopeID}}">
 <button type="submit" class="danger">Revoke</button></form></td></tr>

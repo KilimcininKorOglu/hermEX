@@ -111,7 +111,7 @@ func TestUIUserForward(t *testing.T) {
 	}
 }
 
-// TestUIUserForwardClears proves the "—" type clears the directive by passing an empty
+// TestUIUserForwardClears proves the empty type clears the directive by passing an empty
 // destination through to the directory.
 func TestUIUserForwardClears(t *testing.T) {
 	d := forwardUserDir()

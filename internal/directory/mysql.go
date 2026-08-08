@@ -1149,7 +1149,7 @@ SELECT f.forward_type, f.destination FROM forwards f
 }
 
 // SetForward sets a user's forward directive, keyed by canonical username, reporting
-// whether the user existed. An empty destination clears the forward (the "—" / none
+// whether the user existed. An empty destination clears the forward (the "none"
 // choice). forwardType is ForwardCC or ForwardRedirect; any other value is rejected.
 func (d *SQLDirectory) SetForward(username string, forwardType int, destination string) (bool, error) {
 	username = strings.ToLower(strings.TrimSpace(username))

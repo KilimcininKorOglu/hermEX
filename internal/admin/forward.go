@@ -72,7 +72,7 @@ func (s *Server) forwardViewOf(username string) forwardView {
 }
 
 // handleUIUserForward saves the user's forward directive from the detail form and
-// returns the refreshed status panel; the "—" type (or an empty destination) clears
+// returns the refreshed status panel; the empty type (or an empty destination) clears
 // it. A directory error is reported in the panel rather than failing the request.
 func (s *Server) handleUIUserForward(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.uiAuthorized(w, r); !ok {
