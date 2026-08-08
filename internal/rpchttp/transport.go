@@ -100,6 +100,10 @@ func (s *Server) serveOut(w http.ResponseWriter, r *http.Request, user, mailbox 
 	}
 	key := vconnKey(ck[0], host, port)
 	vc := s.getOrCreate(key, user, mailbox, serve.ClientAddr(r))
+	if vc == nil {
+		http.Error(w, "too many connections", http.StatusServiceUnavailable)
+		return
+	}
 	vc.mu.Lock()
 	vc.windowSize = receiveWindowSize(cmds)
 	window := vc.windowSize
@@ -174,6 +178,10 @@ func (s *Server) serveIn(w http.ResponseWriter, r *http.Request, user, mailbox s
 	}
 	key := vconnKey(ck[0], host, port)
 	vc := s.getOrCreate(key, user, mailbox, serve.ClientAddr(r))
+	if vc == nil {
+		http.Error(w, "too many connections", http.StatusServiceUnavailable)
+		return
+	}
 
 	if vc.markReady("in") {
 		vc.mu.Lock()

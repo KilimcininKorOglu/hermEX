@@ -92,14 +92,24 @@ func vconnKey(connCookie mapi.GUID, host, port string) string {
 	return strings.ToLower(connCookie.String() + ":" + port + ":" + host)
 }
 
+// maxVirtualConnections bounds how many virtual connections this daemon holds at
+// once. The key is built from a client-supplied cookie, so without a ceiling a
+// single caller can mint entries indefinitely, each carrying its own session and
+// reassembly buffers. A real deployment's Outlook clients hold one or two each.
+const maxVirtualConnections = 4096
+
 // getOrCreate returns the virtual connection for key, creating it (with a fresh
 // Session seeded from the authenticated identity and originating client address) on
-// first use.
+// first use. It returns nil when the connection table is full, which the caller
+// answers with a service-unavailable rather than admitting an unbounded table.
 func (s *Server) getOrCreate(key, user, mailbox, remoteAddr string) *vconn {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if vc, ok := s.conns[key]; ok {
 		return vc
+	}
+	if len(s.conns) >= maxVirtualConnections {
+		return nil
 	}
 	vc := &vconn{
 		key:    key,

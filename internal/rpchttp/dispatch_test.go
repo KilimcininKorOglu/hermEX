@@ -210,3 +210,67 @@ func TestRequestReassembly(t *testing.T) {
 	want := append([]byte{3, 0}, []byte("AAAABBBB")...)
 	assertPayload(t, got, want)
 }
+
+// isFault reports whether a PDU is a FAULT.
+func isFault(t *testing.T, pdu []byte) bool {
+	t.Helper()
+	h, err := ndr.ParseHeader(pdu)
+	if err != nil {
+		t.Fatalf("parse header: %v", err)
+	}
+	return h.Type == ndr.PktFault
+}
+
+// TestReassemblyStubIsBounded proves a client cannot grow one call's buffer
+// without limit. Each fragment is individually small and valid; only the client
+// decides when to set the last-fragment flag, so without a ceiling this loop is
+// an out-of-memory lever against the daemon that serves every mailbox.
+func TestReassemblyStubIsBounded(t *testing.T) {
+	d := echoDispatcher()
+	sess := &Session{}
+	d.Dispatch(sess, buildBindPDU(0x10, dummyUUID, 1, 0))
+
+	chunk := make([]byte, 64<<10)
+	out := d.Dispatch(sess, buildRequestPDU(0x22, 0, 3, chunk, ndr.PfcFirstFrag))
+	if out != nil {
+		t.Fatalf("first fragment produced %d PDUs, want 0", len(out))
+	}
+	// Feed continuation fragments until the cap answers. The loop is bounded well
+	// above the cap so a missing ceiling fails the test rather than running away.
+	faulted := false
+	for i := 0; i < (maxReassembledStub/len(chunk))+8; i++ {
+		out = d.Dispatch(sess, buildRequestPDU(0x22, 0, 3, chunk, 0))
+		if len(out) == 1 && isFault(t, out[0]) {
+			faulted = true
+			break
+		}
+	}
+	if !faulted {
+		t.Fatal("reassembly accepted more than the cap without faulting")
+	}
+	// The accumulated bytes are released with the call, not kept around.
+	if got := len(sess.reasm[0x22]); got != 0 {
+		t.Errorf("the refused call still holds %d bytes", got)
+	}
+}
+
+// TestPendingCallsAreBounded proves one session cannot hold an unbounded number
+// of half-sent calls, each with its own buffer.
+func TestPendingCallsAreBounded(t *testing.T) {
+	d := echoDispatcher()
+	sess := &Session{}
+	d.Dispatch(sess, buildBindPDU(0x10, dummyUUID, 1, 0))
+
+	for i := range maxPendingCalls {
+		if out := d.Dispatch(sess, buildRequestPDU(uint32(0x100+i), 0, 3, []byte("A"), ndr.PfcFirstFrag)); out != nil {
+			t.Fatalf("call %d was refused early: %d PDUs", i, len(out))
+		}
+	}
+	out := d.Dispatch(sess, buildRequestPDU(0x999, 0, 3, []byte("A"), ndr.PfcFirstFrag))
+	if len(out) != 1 || !isFault(t, out[0]) {
+		t.Fatalf("the call past the ceiling was accepted (%d PDUs)", len(out))
+	}
+	if got := len(sess.reasm); got != maxPendingCalls {
+		t.Errorf("session holds %d pending calls, want %d", got, maxPendingCalls)
+	}
+}

@@ -120,6 +120,21 @@ func (d *Dispatcher) handleBind(sess *Session, pdu *ndr.PDU) [][]byte {
 	return [][]byte{ndr.FrameBindAck(pdu.Header.CallID, ba)}
 }
 
+// Reassembly ceilings. A fragment is individually bounded (FragLen is 16 bits),
+// but the client decides how many fragments to send before setting the last-frag
+// flag and how many calls to leave half-sent, so without these one authenticated
+// connection can grow server-held memory without limit and take down the daemon
+// that serves every mailbox.
+const (
+	// maxReassembledStub bounds one call's reassembled stub. It matches the
+	// MAPI/HTTP request-body cap, which carries the same ROP buffers.
+	maxReassembledStub = 32 << 20
+	// maxPendingCalls bounds how many partially received calls one session may
+	// hold at once. A client works through its calls in order; a large number of
+	// simultaneously half-sent ones is not something a real client does.
+	maxPendingCalls = 16
+)
+
 // handleRequest reassembles a (possibly fragmented) request, dispatches it to
 // the bound interface, and fragments the response to the negotiated frag size.
 func (d *Dispatcher) handleRequest(sess *Session, h ndr.Header, req *ndr.Request) [][]byte {
@@ -131,9 +146,20 @@ func (d *Dispatcher) handleRequest(sess *Session, h ndr.Header, req *ndr.Request
 			sess.reasm = make(map[uint32][]byte)
 		}
 		if first {
+			if len(sess.reasm) >= maxPendingCalls {
+				// Refusing the new call keeps the ones already in flight, which is the
+				// friendlier half to drop when a client is over the ceiling.
+				return [][]byte{ndr.FrameFault(h.CallID, req.ContextID, ndr.FaultProtoError)}
+			}
 			sess.reasm[h.CallID] = append([]byte(nil), stub...)
 		} else {
 			sess.reasm[h.CallID] = append(sess.reasm[h.CallID], stub...)
+		}
+		if len(sess.reasm[h.CallID]) > maxReassembledStub {
+			// Drop what has accumulated: the call is over, and holding it would keep
+			// exactly the memory the cap exists to release.
+			delete(sess.reasm, h.CallID)
+			return [][]byte{ndr.FrameFault(h.CallID, req.ContextID, ndr.FaultProtoError)}
 		}
 		if !last {
 			return nil // await the remaining fragments
