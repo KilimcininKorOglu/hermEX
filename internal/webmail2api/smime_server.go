@@ -161,8 +161,9 @@ func (s *Server) applySmime(mailbox string, raw []byte, recipients []string, sig
 }
 
 // smimeOpen decrypts (with the server-mode reader's key) then verifies a received
-// message, returning the inner content and its status.
-func (s *Server) smimeOpen(st *objectstore.Store, raw []byte) ([]byte, smimeStatus) {
+// message, returning the inner content and its status. from is the message's own
+// From address: the signature is attributed to it or to nobody.
+func (s *Server) smimeOpen(st *objectstore.Store, raw []byte, from string) ([]byte, smimeStatus) {
 	var status smimeStatus
 	content := raw
 	if smime.IsEncrypted(content) {
@@ -175,10 +176,7 @@ func (s *Server) smimeOpen(st *objectstore.Store, raw []byte) ([]byte, smimeStat
 	}
 	if smime.IsSigned(content) {
 		status.Signed = true
-		if signer, _, err := smime.Verify(content); err == nil {
-			status.Verified = true
-			status.SignedBy = certEmail(signer)
-		}
+		status.Verified, status.SignedBy = s.smimeStatusFor(content, from)
 	}
 	return content, status
 }

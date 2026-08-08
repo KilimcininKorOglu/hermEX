@@ -1634,6 +1634,16 @@ class API {
     return this.get<{ cert: string } | null>(`/smime/recipient?address=${encodeURIComponent(address)}`)
   }
 
+  /**
+   * Asks the server whether a signer certificate may be attributed to a sender.
+   * A signature that checks out mathematically proves nothing about identity, and
+   * the browser has no trust store to decide it with, so the certificate (public
+   * data) goes to the server and the policy stays in one place.
+   */
+  async verifySMIMESigner(cert: string, from: string): Promise<{ trusted: boolean }> {
+    return this.post<{ trusted: boolean }>('/smime/verify-signer', { cert, from })
+  }
+
   /** Fetches a message's raw RFC822 bytes (used to decrypt S/MIME client-side). */
   async getMessageRaw(id: string): Promise<string> {
     const headers: Record<string, string> = {}

@@ -94,7 +94,7 @@ func TestSMIMESignedSurvivesStore(t *testing.T) {
 	if !bytes.Equal(got, msg) {
 		t.Error("served signed message differs from the stored bytes")
 	}
-	if _, _, err := smime.Verify(got); err != nil {
+	if _, err := smime.Verify(got); err != nil {
 		t.Errorf("stored signed message no longer verifies: %v", err)
 	}
 }

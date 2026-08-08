@@ -241,7 +241,7 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 	d.SmimeEncrypted = smime.IsEncrypted(raw)
 	switch {
 	case d.SmimeEncrypted && isServerMode(st):
-		content, sm := s.smimeOpen(st, raw)
+		content, sm := s.smimeOpen(st, raw, d.From)
 		inner := mime.ParseStructure(content)
 		body, inlined := inlineCIDImages(bestBody(inner), inner)
 		d.Body = body
@@ -249,10 +249,7 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 		d.HasAttachments = len(d.Attachments) > 0
 		d.SmimeVerified, d.SmimeSignedBy = sm.Verified, sm.SignedBy
 	case d.SmimeSigned && !d.SmimeEncrypted:
-		if signer, _, err := smime.Verify(raw); err == nil {
-			d.SmimeVerified = true
-			d.SmimeSignedBy = certEmail(signer)
-		}
+		d.SmimeVerified, d.SmimeSignedBy = s.smimeStatusFor(raw, d.From)
 	}
 
 	// Reading marks the message \Seen, preserving its other flags.

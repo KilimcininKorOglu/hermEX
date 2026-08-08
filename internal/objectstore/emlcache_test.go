@@ -225,7 +225,7 @@ func TestEditKeepsAPreservedOriginalVerbatim(t *testing.T) {
 	if !bytes.Equal(got, raw) {
 		t.Error("the edit rebuilt a preserved original instead of serving it verbatim")
 	}
-	if _, _, err := smime.Verify(got); err != nil {
+	if _, err := smime.Verify(got); err != nil {
 		t.Errorf("the edited message no longer verifies: %v", err)
 	}
 }

@@ -51,38 +51,49 @@ func Sign(content []byte, cert *x509.Certificate, key crypto.PrivateKey) ([]byte
 	return b.Bytes(), nil
 }
 
-// Verify checks the signature of an RFC 5751 multipart/signed message and returns
-// the signer's leaf certificate and the signed content (the inner MIME entity).
-// A valid signature returns a nil error even when the signer's certificate is
-// self-signed or issued by an unknown CA: the caller decides how far to trust the
-// returned certificate (for example by matching it to the From address).
-// Certificate-chain and trust validation is intentionally left to the caller.
-func Verify(raw []byte) (signer *x509.Certificate, content []byte, err error) {
+// Signature is a checked S/MIME signature: the leaf certificate that produced it,
+// every certificate the message carried (the signer's own plus any intermediates,
+// for chain building), and the content the signature covers.
+type Signature struct {
+	Signer  *x509.Certificate
+	Certs   []*x509.Certificate
+	Content []byte
+}
+
+// Verify checks the signature of an RFC 5751 multipart/signed message. A valid
+// signature returns a nil error even when the signer's certificate is self-signed
+// or issued by an unknown CA: this reports only that the bytes were signed by the
+// key in Signer, never that Signer belongs to whoever the message claims to be
+// from. Deciding that is the caller's job, and the caller MUST do it before
+// presenting the message as verified: match Signer against the From address, then
+// either chain-validate it (Certs carries the intermediates the message supplied)
+// or pin it to a certificate already known for that sender.
+func Verify(raw []byte) (Signature, error) {
 	raw = canonicalizeCRLF(raw) // inbound framing may use bare LF; the signature is over CRLF
 	mt, params, err := topMediaType(raw)
 	if err != nil {
-		return nil, nil, err
+		return Signature{}, err
 	}
 	if mt != "multipart/signed" {
-		return nil, nil, ErrNotSigned
+		return Signature{}, ErrNotSigned
 	}
 	boundary := params["boundary"]
 	if boundary == "" {
-		return nil, nil, errors.New("smime: multipart/signed without a boundary")
+		return Signature{}, errors.New("smime: multipart/signed without a boundary")
 	}
 	content, sigDER, err := splitSigned(raw, boundary)
 	if err != nil {
-		return nil, nil, err
+		return Signature{}, err
 	}
 	p7, err := pkcs7.Parse(sigDER)
 	if err != nil {
-		return nil, nil, fmt.Errorf("smime: parse signature: %w", err)
+		return Signature{}, fmt.Errorf("smime: parse signature: %w", err)
 	}
 	p7.Content = content // detached: verify the signature against the wire content
 	if err := p7.Verify(); err != nil {
-		return nil, nil, fmt.Errorf("smime: signature verification failed: %w", err)
+		return Signature{}, fmt.Errorf("smime: signature verification failed: %w", err)
 	}
-	return p7.GetOnlySigner(), content, nil
+	return Signature{Signer: p7.GetOnlySigner(), Certs: p7.Certificates, Content: content}, nil
 }
 
 // splitSigned extracts the signed content (the first multipart part, verbatim)

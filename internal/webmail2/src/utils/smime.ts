@@ -303,8 +303,16 @@ function signerEmail(cert: forge.pki.Certificate): string {
  * from the detached SignedData, hash the exact signed bytes (the content part
  * between the first two boundaries, as signMime emitted them), and RSA-verify.
  * Returns null when the entity is not a multipart/signed structure.
+ *
+ * verified reports the signature math ONLY. It says nothing about whether the key
+ * that signed belongs to whoever the message claims to be from: anyone can sign
+ * with a self-issued certificate carrying any address in it. signerCert (base64
+ * DER) is returned so the caller can put that question to the server, which holds
+ * the trust policy, before showing the reader a verified badge.
  */
-export function verifyMime(mime: string): { verified: boolean; signedBy: string } | null {
+export function verifyMime(
+  mime: string,
+): { verified: boolean; signedBy: string; signerCert: string } | null {
   const { headers, body } = parseEntity(mime)
   const ctRaw = headers["content-type"] || ""
   if (!ctRaw.toLowerCase().startsWith("multipart/signed")) return null
@@ -335,13 +343,18 @@ export function verifyMime(mime: string): { verified: boolean; signedBy: string 
     }
     const cert = p7.certificates[0]
     const sig = p7.rawCapture.signature
-    if (!cert || !sig) return { verified: false, signedBy: "" }
+    if (!cert || !sig) return { verified: false, signedBy: "", signerCert: "" }
     const md = forge.md.sha256.create()
     md.update(signedContent)
     const verified = (cert.publicKey as forge.pki.rsa.PublicKey).verify(md.digest().bytes(), sig)
-    return { verified, signedBy: verified ? signerEmail(cert) : "" }
+    const der = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes()
+    return {
+      verified,
+      signedBy: verified ? signerEmail(cert) : "",
+      signerCert: forge.util.encode64(der),
+    }
   } catch {
-    return { verified: false, signedBy: "" }
+    return { verified: false, signedBy: "", signerCert: "" }
   }
 }
 

@@ -250,8 +250,21 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                 const verdict = smimeStore.verifyMime(inner)
                 if (verdict) {
                   smimeSigned = true
-                  smimeVerified = verdict.verified
                   smimeSignedBy = verdict.signedBy
+                  // A valid signature only proves someone held the signing key.
+                  // Attributing it to the sender is the server's decision (it has
+                  // the trust anchors and the sender's published certificate), so
+                  // the badge waits for that answer and stays unverified without
+                  // it.
+                  smimeVerified = false
+                  if (verdict.verified && verdict.signerCert) {
+                    try {
+                      const trust = await api.verifySMIMESigner(verdict.signerCert, fromEmail)
+                      smimeVerified = trust.trusted
+                    } catch {
+                      smimeVerified = false
+                    }
+                  }
                 }
               } catch {
                 content = `<p>${t("emailDetail.smimeDecryptFailed")}</p>`

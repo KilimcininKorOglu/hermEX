@@ -81,20 +81,23 @@ func TestSignVerifyRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, got, err := Verify(signed)
+	sig, err := Verify(signed)
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	if !bytes.Equal(got, content) {
-		t.Errorf("recovered content mismatch:\n got %q\nwant %q", got, content)
+	if !bytes.Equal(sig.Content, content) {
+		t.Errorf("recovered content mismatch:\n got %q\nwant %q", sig.Content, content)
 	}
-	if signer == nil || signer.Subject.CommonName != "alice@hermex.test" {
-		t.Errorf("signer = %v, want CN alice@hermex.test", signer)
+	if sig.Signer == nil || sig.Signer.Subject.CommonName != "alice@hermex.test" {
+		t.Errorf("signer = %v, want CN alice@hermex.test", sig.Signer)
+	}
+	if len(sig.Certs) == 0 {
+		t.Error("Certs is empty; a caller cannot build a chain without the message's certificates")
 	}
 
 	// A tampered body must fail verification.
 	tampered := bytes.Replace(signed, []byte("Hello S/MIME world."), []byte("Hello EVIL world.."), 1)
-	if _, _, err := Verify(tampered); err == nil {
+	if _, err := Verify(tampered); err == nil {
 		t.Error("Verify accepted a tampered message")
 	}
 }
@@ -142,14 +145,14 @@ func TestOpensslSignThenVerify(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signer, content, err := Verify(signed)
+	sig, err := Verify(signed)
 	if err != nil {
 		t.Fatalf("Verify of openssl-signed message failed: %v", err)
 	}
-	if signer == nil {
+	if sig.Signer == nil {
 		t.Fatal("no signer certificate returned")
 	}
-	if !bytes.Contains(content, []byte("payload marker")) {
-		t.Errorf("recovered content missing payload: %q", content)
+	if !bytes.Contains(sig.Content, []byte("payload marker")) {
+		t.Errorf("recovered content missing payload: %q", sig.Content)
 	}
 }
