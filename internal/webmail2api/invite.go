@@ -343,11 +343,13 @@ func (s *Server) handleProposeTime(w http.ResponseWriter, r *http.Request) {
 	org := organizerAddress(organizer)
 	msg, berr := buildCounterRequest(c.Email, org, e)
 	if berr != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": berr.Error()})
+		logError("build-counter-proposal", berr, logging.Fields{"user": c.Email, "organizer": org})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not build the counter-proposal"})
 		return
 	}
 	if _, err := mta.DeliverAndRelay(s.accounts, s.spool, c.Email, []string{org}, msg, time.Now()); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delivery failed: " + err.Error()})
+		logError("send-counter-proposal", err, logging.Fields{"user": c.Email, "organizer": org})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delivery failed"})
 		return
 	}
 	// File a Sent copy so the invitee sees the outgoing counter-proposal.

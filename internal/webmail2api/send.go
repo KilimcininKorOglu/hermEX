@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
@@ -93,7 +94,11 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 	if req.SignMessage || req.EncryptMessage {
 		signed, aerr := s.applySmime(c.Mailbox, raw, recipients, req.SignMessage, req.EncryptMessage)
 		if aerr != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": aerr.Error()})
+			// The wrapped error names the signing library's internals and, on the
+			// encrypt path, a recipient's certificate state. The caller is told what
+			// failed, not how.
+			logError("smime-apply", aerr, logging.Fields{"user": c.Email})
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not sign or encrypt the message"})
 			return
 		}
 		raw = signed
@@ -109,7 +114,8 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 		}
 		defer st.Close()
 		if err := scheduleOutbox(st, raw, req.SendAt); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not schedule: " + err.Error()})
+			logError("schedule-send", err, logging.Fields{"user": c.Email})
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not schedule the message"})
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "scheduled": true})
@@ -117,7 +123,10 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, err := mta.DeliverAndRelay(s.accounts, s.spool, c.Email, recipients, raw, time.Now()); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delivery failed: " + err.Error()})
+		// Delivery errors carry mailbox filesystem paths and database driver text;
+		// they belong in the log, not in a response to the browser.
+		logError("send-mail", err, logging.Fields{"user": c.Email})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delivery failed"})
 		return
 	}
 
@@ -205,7 +214,8 @@ func (s *Server) handleMailSendRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := mta.DeliverAndRelay(s.accounts, s.spool, c.Email, recipients, raw, time.Now()); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delivery failed: " + err.Error()})
+		logError("send-raw", err, logging.Fields{"user": c.Email})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "delivery failed"})
 		return
 	}
 	if st, err := objectstore.Open(c.Mailbox); err == nil {
