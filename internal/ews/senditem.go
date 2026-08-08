@@ -96,12 +96,8 @@ func (s *Server) sendOne(cache *storeCache, sess *session, itemID string, save b
 		return itemError(code)
 	}
 	if !isOwn {
-		rights, err := st.ResolvePermission(id.FolderID, sess.user)
-		if err != nil {
-			return itemError("ErrorInternalServerError")
-		}
-		if rights&mapi.FrightsReadAny == 0 {
-			return itemError("ErrorAccessDenied")
+		if code := checkItemAccess(st, id, sess.user, mapi.FrightsReadAny); code != "" {
+			return itemError(code)
 		}
 		if save {
 			srights, err := st.ResolvePermission(saveFID, sess.user)

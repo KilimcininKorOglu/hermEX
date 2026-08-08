@@ -265,13 +265,8 @@ func (s *Server) handleGetItem(w http.ResponseWriter, inner []byte, sess *sessio
 			continue
 		}
 		if !isOwn {
-			rights, err := st.ResolvePermission(id.FolderID, sess.user)
-			if err != nil {
-				msgs = append(msgs, itemResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
-				continue
-			}
-			if rights&mapi.FrightsReadAny == 0 {
-				msgs = append(msgs, itemResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorAccessDenied"})
+			if code := checkItemAccess(st, id, sess.user, mapi.FrightsReadAny); code != "" {
+				msgs = append(msgs, itemResponseMessage{ResponseClass: "Error", ResponseCode: code})
 				continue
 			}
 		}
@@ -363,13 +358,9 @@ func (s *Server) handleGetAttachment(w http.ResponseWriter, inner []byte, sess *
 			continue
 		}
 		if !isOwn {
-			rights, err := st.ResolvePermission(folderID, sess.user)
-			if err != nil {
-				msgs = append(msgs, getAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
-				continue
-			}
-			if rights&mapi.FrightsReadAny == 0 {
-				msgs = append(msgs, getAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorAccessDenied"})
+			id := oxews.ItemID{FolderID: folderID, MessageID: mid, Mailbox: mailbox}
+			if code := checkItemAccess(st, id, sess.user, mapi.FrightsReadAny); code != "" {
+				msgs = append(msgs, getAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: code})
 				continue
 			}
 		}

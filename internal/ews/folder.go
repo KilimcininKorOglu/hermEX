@@ -678,15 +678,47 @@ func (c *storeCache) openForItem(sess *session, id oxews.ItemID, need uint32) (*
 		return nil, code
 	}
 	if !isOwn {
-		rights, err := st.ResolvePermission(id.FolderID, sess.user)
-		if err != nil {
-			return nil, "ErrorInternalServerError"
-		}
-		if rights&need == 0 {
-			return nil, "ErrorAccessDenied"
+		if code := checkItemAccess(st, id, sess.user, need); code != "" {
+			return nil, code
 		}
 	}
 	return st, ""
+}
+
+// checkItemAccess resolves the caller's rights for one item id, returning a
+// non-empty per-item error code when the operation must be refused.
+//
+// An item id's fields are client-supplied and independent of one another, so the
+// folder it names is first proven to be the message's REAL parent. Without that,
+// a grant on one folder authorizes reading or writing any message id in the
+// mailbox: the check would look at the granted folder while the operation ran on
+// an unrelated message. An embedded message (no parent folder) is reached through
+// its parent attachment, never by folder id, so it never matches here.
+// The rights check runs first so a caller with no access to the named folder is
+// refused identically whether or not the message id happens to exist, leaving no
+// existence oracle behind the access denial.
+func checkItemAccess(st *objectstore.Store, id oxews.ItemID, user string, need uint32) string {
+	rights, err := st.ResolvePermission(id.FolderID, user)
+	if err != nil {
+		return "ErrorInternalServerError"
+	}
+	if rights&need == 0 {
+		return "ErrorAccessDenied"
+	}
+	if id.MessageID == 0 {
+		return ""
+	}
+	parent, err := st.MessageFolder(id.MessageID)
+	if errors.Is(err, objectstore.ErrNotFound) {
+		return "ErrorItemNotFound"
+	}
+	if err != nil {
+		return "ErrorInternalServerError"
+	}
+	if parent != id.FolderID {
+		return "ErrorItemNotFound"
+	}
+	return ""
 }
 
 // folderErr builds a per-folder error response message.
