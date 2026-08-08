@@ -126,6 +126,14 @@ const (
 	sessionTimeout     = 5 * time.Minute
 )
 
+// mxLookupTimeout bounds one MX or address lookup in the default Router. It is a
+// variable, and so is the resolver, so a test can point at a nameserver that
+// never answers and prove the deadline holds; nothing else writes either.
+var (
+	mxLookupTimeout = 10 * time.Second
+	mxResolver      = net.DefaultResolver
+)
+
 // Run drains the spool on every tick until ctx is cancelled. A scan error is
 // logged and the loop continues, so a transient store error does not stop relay.
 //
@@ -487,8 +495,19 @@ func dialPort25(host string) (net.Conn, error) {
 // LookupMX is the default Router: the domain's MX hosts in priority order, or,
 // when the domain publishes no usable MX, the domain itself as an implicit mail
 // exchanger (RFC 5321 §5.1), provided it has an address record.
+//
+// Every query carries a deadline. Exactly one process drains the spool at a time
+// and this lookup starts each delivery attempt, before any of the worker's
+// connection deadlines engage, so a recipient domain whose nameserver never
+// answers (by misconfiguration, or a throwaway domain pointed at a black hole)
+// would otherwise hold the single drainer for the OS resolver's whole retry
+// budget and stall every other queued message behind it. Bounded, it degrades to
+// an ordinary retried failure. This matches the deadlines the inbound checks put
+// on their own lookups.
 func LookupMX(domain string) ([]string, error) {
-	mxs, err := net.LookupMX(domain)
+	ctx, cancel := context.WithTimeout(context.Background(), mxLookupTimeout)
+	defer cancel()
+	mxs, err := mxResolver.LookupMX(ctx, domain)
 	if err == nil && len(mxs) > 0 {
 		hosts := orderMX(mxs)
 		if len(hosts) == 0 {
@@ -496,7 +515,9 @@ func LookupMX(domain string) ([]string, error) {
 		}
 		return hosts, nil
 	}
-	if _, e := net.LookupHost(domain); e != nil {
+	hostCtx, hostCancel := context.WithTimeout(context.Background(), mxLookupTimeout)
+	defer hostCancel()
+	if _, e := mxResolver.LookupHost(hostCtx, domain); e != nil {
 		return nil, fmt.Errorf("no mail exchanger for %s", domain)
 	}
 	return []string{domain}, nil
