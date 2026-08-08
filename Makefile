@@ -9,6 +9,7 @@
 #   make test PKG=./internal/rop                # one package, dev container
 #   make test PKG=./internal/rop RUN=TestCopyToSubObjects
 #   make test-host PKG=./internal/rop RUN=TestX # host quick feedback (DB tests skip)
+#   make lint PKG=./internal/rop/...            # golangci-lint on the host, not in gate
 #   make up / make down                         # dev environment lifecycle
 
 COMPOSE := docker compose -f hermex-compose.yml
@@ -32,7 +33,7 @@ PKG ?= ./internal/... ./cmd/...
 RUN ?=
 RUNFLAG := $(if $(RUN),-run '$(RUN)',)
 
-.PHONY: all build test test-host test-race vet fmt fmt-check gate tidy up down images rebuild clean help compose-check dump-db restore-db version
+.PHONY: all build test test-host test-race vet fmt fmt-check gate lint lint-modernize require-golangci-lint tidy up down images rebuild clean help compose-check dump-db restore-db version
 
 all: build
 
@@ -73,6 +74,29 @@ fmt-check:
 
 ## gate: fmt-check + vet + full test, the pre-commit gate
 gate: fmt-check vet test
+
+## lint: golangci-lint over PKG, on the HOST (deliberately not part of gate)
+# This is a host target like test-host: the dev image carries the Go toolchain
+# only, so there is no golangci-lint inside the container to exec into. Lint stays
+# out of `gate` on purpose, since a lint sweep is its own reviewed commit rather
+# than a delivery blocker, and .golangci.yml lifts the report caps so a run here
+# shows every finding instead of the default 50-per-linter slice.
+lint: require-golangci-lint
+	golangci-lint run $(PKG)
+
+## lint-modernize: only the modernize analyzer over PKG (same host rules as lint)
+# modernize findings are HINT severity and invisible to `go vet`, so a gate-clean
+# tree can still carry them; this target is the authoritative list.
+lint-modernize: require-golangci-lint
+	golangci-lint run --default=none --enable=modernize $(PKG)
+
+# Report the missing tool and how to get it, rather than a bare "command not
+# found" from the recipe. .golangci.yml declares version: "2", so v2 is required.
+require-golangci-lint:
+	@command -v golangci-lint >/dev/null || { \
+		echo "golangci-lint is not on PATH (host tool; the dev image carries none)"; \
+		echo "install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest"; \
+		exit 2; }
 
 ## tidy: sync go.mod/go.sum in the dev container (downloads any new dependency)
 # The -e flag is required: the module cache bind-mounts under docker-data/ are
