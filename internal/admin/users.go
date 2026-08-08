@@ -103,8 +103,10 @@ func (s *Server) handleSetPassword(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "server error", http.StatusInternalServerError)
 		return
 	}
-	// A reset is often the response to a compromise, so it must also end whatever
-	// panel sessions that account already holds.
+	// A reset is often the response to a compromise, so it must also end every
+	// session that account already holds, on the panel and in webmail alike. The
+	// webmail half is the one that matters here: the account being reset is
+	// usually an ordinary mailbox user who has no panel session at all.
 	s.revokeAllSessions(r.PathValue("email"))
 	w.WriteHeader(http.StatusNoContent)
 }

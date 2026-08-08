@@ -136,3 +136,59 @@ func TestAdminSessionSurvivesWithoutARevocationStore(t *testing.T) {
 		t.Errorf("whoami without a session store = %d, want 200", code)
 	}
 }
+
+// webmailSessionDir adds the webmail session table to the admin directory double,
+// so a test can prove a password reset reaches the sessions that actually matter
+// for a compromised mailbox user.
+type webmailSessionDir struct {
+	*sessionDir
+	webmail map[string]string // jti -> email
+}
+
+func (d *webmailSessionDir) DeleteOtherWebmailSessions(email, keepJti string) (int64, error) {
+	var n int64
+	for jti, owner := range d.webmail {
+		if strings.EqualFold(owner, email) && jti != keepJti {
+			delete(d.webmail, jti)
+			n++
+		}
+	}
+	return n, nil
+}
+
+// TestPasswordResetEndsWebmailSessions is the incident-response case: an operator
+// resets a compromised user's password. Ending only the panel's sessions leaves a
+// stolen webmail cookie working for the rest of its lifetime, which looks like
+// remediation while changing nothing for the attacker.
+func TestPasswordResetEndsWebmailSessions(t *testing.T) {
+	base := newSessionDir(&fakeDir{authOK: true, password: "pw", uid: 7,
+		roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		knownUsers: map[string]directory.UserDetail{
+			"victim@hermex.test": {Username: "victim@hermex.test", ID: 11},
+		}})
+	d := &webmailSessionDir{sessionDir: base, webmail: map[string]string{
+		"stolen-jti": "victim@hermex.test",
+		"other-jti":  "victim@hermex.test",
+		"bystander":  "someone@hermex.test",
+	}}
+	srv := NewServer(d, fakePaths{root: t.TempDir()}, []byte("test-secret"))
+	srv.store = &fakeStore{}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	session, csrf := loginCookies(t, ts)
+
+	resp := authedReq(t, ts, "POST", "/admin/users/victim@hermex.test/password", session, csrf, `{"password":"newpass"}`)
+	if s := statusOf(resp); s != http.StatusNoContent {
+		t.Fatalf("password reset status = %d, want 204", s)
+	}
+
+	if _, ok := d.webmail["stolen-jti"]; ok {
+		t.Error("the reset left the user's webmail session alive; a stolen cookie still works")
+	}
+	if _, ok := d.webmail["other-jti"]; ok {
+		t.Error("the reset left a second webmail session alive")
+	}
+	if _, ok := d.webmail["bystander"]; !ok {
+		t.Error("the reset revoked another account's session")
+	}
+}

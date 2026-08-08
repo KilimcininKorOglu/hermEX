@@ -592,6 +592,14 @@ type adminSessionStore interface {
 	DeleteAdminSessionsFor(login string) error
 }
 
+// webmailSessionStore is the optional directory capability that makes a user's
+// webmail sessions revokable from here. It is separate from the panel's own store
+// because the two surfaces keep separate session tables; a password reset has to
+// reach both. SQLDirectory implements it.
+type webmailSessionStore interface {
+	DeleteOtherWebmailSessions(email, keepJti string) (int64, error)
+}
+
 // newSessionID mints the random identifier that keys a session's revocation row.
 func newSessionID() string {
 	b := make([]byte, 24)
@@ -636,11 +644,31 @@ func (s *Server) revokeSession(cl claims) {
 
 // revokeAllSessions ends every session an account holds. A changed password must
 // not leave a browser signed in on the old one, wherever that browser is.
+//
+// Both stores are reached, and the webmail one is the point: an operator resets a
+// password because an account is compromised, and the account being reset is
+// usually an ordinary mailbox user with no panel session at all. Ending only the
+// panel's sessions would leave a stolen webmail cookie working for the rest of
+// its lifetime, which reads as remediation while changing nothing for the
+// attacker.
 func (s *Server) revokeAllSessions(login string) {
 	if store, ok := s.dir.(adminSessionStore); ok {
 		if err := store.DeleteAdminSessionsFor(login); err != nil {
 			s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.Admin,
 				Name: "session.revoke.fail", User: login, Err: err.Error()})
+		}
+	}
+	if store, ok := s.dir.(webmailSessionStore); ok {
+		// An empty keep-jti matches no real session, so this ends all of them.
+		n, err := store.DeleteOtherWebmailSessions(login, "")
+		if err != nil {
+			s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.Admin,
+				Name: "session.revoke.fail", User: login, Err: err.Error()})
+			return
+		}
+		if n > 0 {
+			s.logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.Admin,
+				Name: "session.revoked", User: login, Fields: logging.Fields{"webmail_sessions": n}})
 		}
 	}
 }
