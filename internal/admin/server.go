@@ -477,7 +477,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/ldap", s.handleUISaveLDAP)
 	mux.HandleFunc("POST /admin/ui/ldap/sync", s.handleUISyncLDAP)
 	mux.HandleFunc("GET /admin/ui/", s.handleUIDashboard)
-	return mux
+	return boundBody(mux)
 }
 
 // handleLogin authenticates an administrator and, on success, sets the session
