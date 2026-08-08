@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"hermex/internal/ssrfguard"
 )
 
 // negativeTTL is how long the absence of a policy is remembered, so a domain
@@ -124,9 +126,17 @@ func (r *Resolver) txtPresent(domain string) (bool, error) {
 	return false, nil
 }
 
+// policyClient fetches the policy file. The host is "mta-sts." under a domain the
+// recipient owns, so it is chosen by whoever the sender writes to: a guarded
+// client keeps that from becoming a request into this network. It refuses
+// redirects, which RFC 8461 §3.3 requires anyway ("HTTP 3xx redirects MUST NOT be
+// followed"), and refuses to dial a non-public address, so pointing
+// mta-sts.<domain> at an internal service reaches nothing.
+var policyClient = ssrfguard.Client(false)
+
 // fetchOverHTTPS GETs the well-known policy file. The URL is fixed to HTTPS and
-// the default client validates the certificate, so the policy's authenticity
-// rests on PKIX exactly as RFC 8461 §3.3 requires.
+// the client validates the certificate, so the policy's authenticity rests on
+// PKIX exactly as RFC 8461 §3.3 requires.
 func fetchOverHTTPS(domain string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 	defer cancel()
@@ -135,7 +145,7 @@ func fetchOverHTTPS(domain string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := policyClient.Do(req)
 	if err != nil {
 		return "", err
 	}

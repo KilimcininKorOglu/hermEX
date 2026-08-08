@@ -3,6 +3,8 @@ package mtasts
 import (
 	"errors"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -72,5 +74,33 @@ func TestResolverFetchError(t *testing.T) {
 	}
 	if _, err := r.Lookup("example.com"); err != nil || !called {
 		t.Errorf("after an error the policy should be re-fetched: called=%v err=%v", called, err)
+	}
+}
+
+// TestPolicyClientRefusesInternalTarget proves the policy fetch cannot be steered
+// into this network. The recipient's domain owner controls where mta-sts.<domain>
+// resolves, so an unguarded client would dial whatever they point it at.
+func TestPolicyClientRefusesInternalTarget(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("reached"))
+	}))
+	defer srv.Close()
+
+	resp, err := policyClient.Get(srv.URL)
+	if err == nil {
+		resp.Body.Close()
+		t.Fatal("the policy client reached a loopback address")
+	}
+}
+
+// TestPolicyClientRefusesRedirects covers the second half of the guard, which is
+// also what RFC 8461 §3.3 requires: a 3xx must not be followed. The dial guard
+// blocks a loopback hop first, so the redirect policy is asserted on directly.
+func TestPolicyClientRefusesRedirects(t *testing.T) {
+	if policyClient.CheckRedirect == nil {
+		t.Fatal("the policy client follows redirects")
+	}
+	if err := policyClient.CheckRedirect(nil, nil); err == nil {
+		t.Error("CheckRedirect admitted a redirect")
 	}
 }
