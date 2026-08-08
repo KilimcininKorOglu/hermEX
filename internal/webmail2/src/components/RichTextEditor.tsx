@@ -1,7 +1,7 @@
 import { useRef, useEffect, forwardRef, useImperativeHandle } from "react"
 import { Bold, Italic, Underline, Link } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { sanitizeClipboard } from "@/utils/sanitize"
+import { isSafeLinkURL, sanitizeClipboard } from "@/utils/sanitize"
 
 // Collapses the selection at the given viewport point. Chromium and WebKit expose
 // caretRangeFromPoint, Gecko caretPositionFromPoint; with neither, the insert
@@ -69,8 +69,10 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     }
 
     const handleLink = () => {
-      const url = window.prompt("URL:")
-      if (url) execCmd("createLink", url)
+      const url = window.prompt("URL:")?.trim()
+      // A javascript: href typed here would survive into the sent body, so the
+      // scheme is checked before it ever reaches the document.
+      if (url && isSafeLinkURL(url)) execCmd("createLink", url)
     }
 
     const handleInput = () => {

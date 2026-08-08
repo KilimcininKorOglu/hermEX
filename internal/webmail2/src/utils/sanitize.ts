@@ -99,6 +99,18 @@ export function sanitizeClipboard(html: string, text: string): string {
 }
 
 /**
+ * Reports whether a URL is safe to write into an href. A relative URL has no
+ * scheme and passes; a scheme is admitted only from the allowlist. Control
+ * characters are dropped before the test because a URL parser ignores them, so
+ * "java\tscript:" navigates exactly like "javascript:".
+ */
+export function isSafeLinkURL(url: string): boolean {
+  const bare = Array.from(url).filter((ch) => ch.charCodeAt(0) > 0x20).join('')
+  const scheme = /^([a-z][a-z0-9+.-]*):/i.exec(bare)
+  return !scheme || ['http', 'https', 'mailto', 'tel'].includes(scheme[1].toLowerCase())
+}
+
+/**
  * Sanitizes plain text for safe display (strips all HTML).
  */
 export function sanitizeText(dirty: string): string {

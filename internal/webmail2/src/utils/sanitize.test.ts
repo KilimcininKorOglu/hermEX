@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { sanitizeHTML, sanitizeEmailBody, sanitizeText, sanitizeClipboard } from './sanitize'
+import { sanitizeHTML, sanitizeEmailBody, sanitizeText, sanitizeClipboard, isSafeLinkURL } from './sanitize'
 
 describe('sanitizeHTML', () => {
   it('allows safe HTML tags', () => {
@@ -144,5 +144,31 @@ describe('sanitizeClipboard', () => {
   // in some browsers; the text payload must still win there.
   it('falls back to the text payload when the HTML flavour is blank', () => {
     expect(sanitizeClipboard('   ', 'plain')).toBe('plain')
+  })
+})
+
+describe('isSafeLinkURL', () => {
+  it.each([
+    ['https://example.com'],
+    ['http://example.com/a?b=c'],
+    ['mailto:user@example.com'],
+    ['tel:+905550000000'],
+    ['/relative/path'],
+    ['#anchor'],
+    ['example.com/path'],
+  ])('admits %s', (url) => {
+    expect(isSafeLinkURL(url)).toBe(true)
+  })
+
+  // A URL parser drops control characters, so these all navigate as javascript:.
+  it.each([
+    ['javascript:alert(1)'],
+    ['JaVaScRiPt:alert(1)'],
+    ['java\tscript:alert(1)'],
+    ['java\nscript:alert(1)'],
+    ['data:text/html,<script>alert(1)</script>'],
+    ['vbscript:msgbox(1)'],
+  ])('rejects %s', (url) => {
+    expect(isSafeLinkURL(url)).toBe(false)
   })
 })
