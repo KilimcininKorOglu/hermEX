@@ -7,6 +7,7 @@ import (
 	"net/mail"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -175,7 +176,17 @@ func scanMessage(accounts directory.Accounts, mode avMode, from string, recipien
 	if direction == "outbound" {
 		affected = []string{from}
 	}
-	notifyQuarantine(accounts, directory.QuarantineRecord{ID: id, QuarantineEntry: entry, Status: "held"}, affected, admins, av.hostname, when)
+	notifyQuarantine(accounts, directory.QuarantineRecord{ID: id, QuarantineEntry: entry, Status: "held"}, affected, admins, av.hostname, when,
+		func(rcpt string, unresolved []string, err error) {
+			f := logging.Fields{"id": id, "rcpt": rcpt}
+			if err != nil {
+				f["err"] = err.Error()
+			}
+			if len(unresolved) > 0 {
+				f["unresolved"] = strings.Join(unresolved, ",")
+			}
+			av.emit(logging.LevelError, "av.notify.fail", from, f)
+		})
 	av.emit(logging.LevelWarn, "av.quarantined", from, logging.Fields{"id": id, "virus": res.VirusName, "direction": direction})
 	return avHandled
 }

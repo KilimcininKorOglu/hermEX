@@ -15,8 +15,10 @@ import (
 // sender for outbound, plus the resolved domain/org admins), one copy each. It
 // uses Deliver, the local path scanning never hooks, so the notice is never
 // itself scanned (no loop). Delivery is best-effort: a failed notice must not
-// fail the scan path.
-func notifyQuarantine(accounts directory.Accounts, rec directory.QuarantineRecord, affected, adminEmails []string, hostname string, when time.Time) {
+// fail the scan path, but it is reported through report, so an operator can see
+// that a user or an admin was never told their mail was quarantined. Without
+// that the log shows a clean quarantine and nothing else.
+func notifyQuarantine(accounts directory.Accounts, rec directory.QuarantineRecord, affected, adminEmails []string, hostname string, when time.Time, report func(rcpt string, unresolved []string, err error)) {
 	seen := map[string]bool{}
 	var to []string
 	for _, a := range append(append([]string{}, affected...), adminEmails...) {
@@ -29,7 +31,10 @@ func notifyQuarantine(accounts directory.Accounts, rec directory.QuarantineRecor
 	}
 	for _, rcpt := range to {
 		notice := buildQuarantineNotice(rec, rcpt, hostname, when)
-		_, _ = Deliver(accounts, "", []string{rcpt}, notice, when)
+		unresolved, err := Deliver(accounts, "", []string{rcpt}, notice, when)
+		if (err != nil || len(unresolved) > 0) && report != nil {
+			report(rcpt, unresolved, err)
+		}
 	}
 }
 

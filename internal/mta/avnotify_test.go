@@ -1,6 +1,7 @@
 package mta
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -72,5 +73,52 @@ func TestQuarantineNoticeFlattensUntrusted(t *testing.T) {
 	body := quarantineNoticeText(rec)
 	if !strings.Contains(body, "line1 Injected: header") {
 		t.Errorf("subject CRLF not flattened: %q", body)
+	}
+}
+
+// TestQuarantineNoticeFailureIsReported proves an undeliverable notice reaches
+// the caller's report hook. The notice is how a user and the domain's admins
+// learn a message was caught, so a run of failures that leaves the log showing
+// nothing but clean quarantines is exactly the state this hook exists to prevent.
+func TestQuarantineNoticeFailureIsReported(t *testing.T) {
+	// No account resolves, so every notice fails to find a local mailbox.
+	accounts := directory.StaticAccounts{}
+	rec := directory.QuarantineRecord{
+		ID: 42,
+		QuarantineEntry: directory.QuarantineEntry{
+			Direction: "inbound", MailFrom: "evil@spam.example", VirusName: "Eicar-Test-Signature",
+		},
+	}
+
+	var reported []string
+	notifyQuarantine(accounts, rec, []string{"victim@acme.test"}, []string{"admin@acme.test"},
+		"mail.acme.test", time.Unix(1000, 0),
+		func(rcpt string, unresolved []string, err error) {
+			reported = append(reported, rcpt)
+		})
+
+	if len(reported) != 2 {
+		t.Fatalf("reported %d failed notices, want 2 (the user and the admin)", len(reported))
+	}
+	for _, want := range []string{"victim@acme.test", "admin@acme.test"} {
+		if !slices.Contains(reported, want) {
+			t.Errorf("no failure reported for %s: %v", want, reported)
+		}
+	}
+}
+
+// TestQuarantineNoticeSuccessIsQuiet holds the other half: the hook fires on
+// failure only, so a working deployment logs nothing per notice.
+func TestQuarantineNoticeSuccessIsQuiet(t *testing.T) {
+	mbox := t.TempDir()
+	accounts := directory.StaticAccounts{"victim@acme.test": {Password: "pw", MailboxPath: mbox}}
+	rec := directory.QuarantineRecord{ID: 7, QuarantineEntry: directory.QuarantineEntry{Direction: "inbound"}}
+
+	called := 0
+	notifyQuarantine(accounts, rec, []string{"victim@acme.test"}, nil, "mail.acme.test", time.Unix(1000, 0),
+		func(string, []string, error) { called++ })
+
+	if called != 0 {
+		t.Errorf("a delivered notice reported %d failure(s)", called)
 	}
 }
