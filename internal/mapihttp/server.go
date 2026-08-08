@@ -78,7 +78,12 @@ func (s *Server) RunSessionMaintenance(ctx context.Context) {
 			return
 		case <-t.C:
 			now := time.Now()
-			if n := s.sessions.sweep(now, sessionTTL) + s.nspiSessions.sweep(now, sessionTTL); n > 0 {
+			// The RPC/HTTP (Outlook Anywhere) stub is swept here too: it mints the
+			// same kind of ROP session over a different transport, and only a clean
+			// disconnect ever removed one, so a crashed or sleeping client pinned its
+			// mailbox store indefinitely.
+			if n := s.sessions.sweep(now, sessionTTL) + s.nspiSessions.sweep(now, sessionTTL) +
+				s.ems.Sweep(now, sessionTTL); n > 0 {
 				s.logger.Info(logging.MAPI, "session.reclaim", logging.Fields{"count": n})
 			}
 		}

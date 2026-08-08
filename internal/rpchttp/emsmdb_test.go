@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"hermex/internal/mapi"
 	"hermex/internal/ndr"
@@ -210,4 +211,53 @@ func TestEndToEndConnect(t *testing.T) {
 
 	pw.Close()
 	<-inDone
+}
+
+// TestIdleSessionIsReclaimed proves an abandoned Outlook Anywhere session does
+// not pin its mailbox forever. Only a clean EcDoDisconnect ever removed one, and
+// a client that crashes, sleeps or loses its network path never sends one, so the
+// ROP session and the open mailbox store (with its advisory lock) stayed for the
+// process's life and every reconnect added another.
+func TestIdleSessionIsReclaimed(t *testing.T) {
+	ems := NewEMSMDB(nil)
+	sess := &Session{User: "alice@hermex.test", Mailbox: t.TempDir()}
+
+	out, fault := ems.Handle(sess, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
+	if fault != 0 {
+		t.Fatalf("connect fault = %#x", fault)
+	}
+	cxh, _ := parseConnectExOut(t, out)
+
+	// Not yet idle: a sweep must leave a session the client is still using.
+	if n := ems.Sweep(time.Now(), time.Hour); n != 0 {
+		t.Fatalf("swept %d live session(s)", n)
+	}
+	if _, ok := ems.lookup(cxh.GUID); !ok {
+		t.Fatal("a live session was dropped")
+	}
+
+	// Idle past the window: reclaimed, and the handle no longer resolves.
+	if n := ems.Sweep(time.Now().Add(2*time.Hour), time.Hour); n != 1 {
+		t.Fatalf("swept %d session(s), want 1", n)
+	}
+	if _, ok := ems.lookup(cxh.GUID); ok {
+		t.Error("the abandoned session is still in the table")
+	}
+}
+
+// TestSessionTouchDefersReclaim proves the sweep keys on real use: a client that
+// keeps issuing calls must not have its session pulled out from under it.
+func TestSessionTouchDefersReclaim(t *testing.T) {
+	ems := NewEMSMDB(nil)
+	sess := &Session{User: "alice@hermex.test", Mailbox: t.TempDir()}
+	out, _ := ems.Handle(sess, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"))
+	cxh, _ := parseConnectExOut(t, out)
+
+	// A touch restamps the session, so a sweep with the same window finds it fresh.
+	if _, ok := ems.lookup(cxh.GUID); !ok {
+		t.Fatal("session missing")
+	}
+	if n := ems.Sweep(time.Now(), time.Minute); n != 0 {
+		t.Errorf("swept %d session(s) that were just used", n)
+	}
 }

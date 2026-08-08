@@ -3,6 +3,7 @@ package rpchttp
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"hermex/internal/directory"
 	"hermex/internal/logging"
@@ -66,6 +67,13 @@ type emsmdbSession struct {
 	cpid    uint32
 	rop     *rop.Session
 	waiting atomic.Bool // one outstanding EcDoAsyncWaitEx long-poll per session
+
+	// lastSeen is stamped on every touch so an abandoned session can be
+	// reclaimed. Only a clean EcDoDisconnect removes an entry otherwise, and a
+	// client that crashes, sleeps or loses its network never sends one, leaving
+	// its ROP session and the open mailbox store pinned for the process's life.
+	// Guarded by EMSMDB.mu.
+	lastSeen time.Time
 }
 
 // EMSMDB is the EMSMDB RPC interface stub: it manages logon sessions keyed by
@@ -175,10 +183,11 @@ func (e *EMSMDB) connectEx(sess *Session, stub []byte) ([]byte, uint32) {
 	cxh := e.mintHandle()
 	e.mu.Lock()
 	e.sessions[cxh.GUID] = &emsmdbSession{
-		user:    sess.User,
-		mailbox: sess.Mailbox,
-		cpid:    in.cpid,
-		rop:     rop.NewSession(sess.Mailbox, e.accounts, sess.User, rop.WithSpool(e.Spool), rop.WithLogger(e.Logger)),
+		user:     sess.User,
+		mailbox:  sess.Mailbox,
+		cpid:     in.cpid,
+		rop:      rop.NewSession(sess.Mailbox, e.accounts, sess.User, rop.WithSpool(e.Spool), rop.WithLogger(e.Logger)),
+		lastSeen: time.Now(),
 	}
 	e.mu.Unlock()
 	return pushConnectExOut(cxh, sess.User, ecSuccess), 0
@@ -203,12 +212,40 @@ func (e *EMSMDB) disconnect(stub []byte) ([]byte, uint32) {
 	return out.Bytes(), 0
 }
 
-// lookup returns the session for a context handle, if live.
+// lookup returns the session for a context handle, if live, stamping it as
+// touched so the sweep only reclaims sessions the client has genuinely stopped
+// using.
 func (e *EMSMDB) lookup(g mapi.GUID) (*emsmdbSession, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	s, ok := e.sessions[g]
+	if ok {
+		s.lastSeen = time.Now()
+	}
 	return s, ok
+}
+
+// Sweep closes and drops every session untouched for at least ttl, returning how
+// many it reclaimed. A daemon runs it on a timer: a session holds an open mailbox
+// store and its advisory lock, so an abandoned one costs memory and file
+// descriptors and blocks the mailbox's maintenance sweeps until the process
+// exits. A server that never calls this keeps every session, which is what the
+// tests want.
+func (e *EMSMDB) Sweep(now time.Time, ttl time.Duration) int {
+	var expired []*emsmdbSession
+	e.mu.Lock()
+	for g, s := range e.sessions {
+		if now.Sub(s.lastSeen) >= ttl {
+			delete(e.sessions, g)
+			expired = append(expired, s)
+		}
+	}
+	e.mu.Unlock()
+	// Closed outside the lock: closing a ROP session closes its mailbox store.
+	for _, s := range expired {
+		s.rop.Close()
+	}
+	return len(expired)
 }
 
 // pushCtxHandle marshals a context handle (attributes word + GUID, 4-aligned).
