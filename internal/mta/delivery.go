@@ -650,6 +650,12 @@ func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from strin
 	// SMTP MSA via the send-later worker, and the local->local leg). A hit is
 	// quarantined and the sender plus admins notified, and the send is blocked so no
 	// Sent copy of the virus is filed; an unreachable clamd fails open.
+	// The operator's inbound size limit. SMTP refuses an oversized message during
+	// DATA; every other submission path arrives here instead, so the cap is applied
+	// once at the point they all converge on.
+	if overMessageSize(raw) {
+		return recipients, ErrMessageTooLarge
+	}
 	if scanMessage(accounts, avSubmission, from, recipients, raw, received) == avHandled {
 		return nil, ErrVirusBlocked
 	}

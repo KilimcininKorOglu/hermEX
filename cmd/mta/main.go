@@ -254,6 +254,9 @@ func main() {
 	// without a restart; 0 means no limit.
 	applyMessageSizeSettings(dir, srv)
 	go runMessageSizeMaintenance(dir, srv)
+	// The same limit on the paths that never reach an SMTP session: the send-later
+	// release, and the meeting replies this daemon files.
+	mta.StartMessageSizeLimit("hermex-mta", dir.GetMessageSizeSettings)
 	srv.AddListener(ln)
 	log.Printf("hermex-mta listening on %s", addr)
 

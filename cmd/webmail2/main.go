@@ -92,17 +92,21 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
+	// Outbound abuse limiting: this daemon queues external mail through
+	// DeliverAndRelay, so a compromised account must meet the same per-account
+	// recipient cap SMTP submission enforces. It starts disabled and follows the
+	// stored settings without a restart.
+	mta.StartOutboundLimiter("hermex-webmail2", logger, dir.GetOutboundSettings)
+	// The operator's inbound message size limit applies to this daemon's sends
+	// too: SMTP refuses an oversized message during DATA, and nothing here ever
+	// reaches an SMTP session.
+	mta.StartMessageSizeLimit("hermex-webmail2", dir.GetMessageSizeSettings)
 	// Per-client HTTP request limiter: read the stored settings at startup and
 	// re-read them every minute, so an operator's change applies without a restart.
 	// It is off until an operator enables it, and any read failure leaves it as it
 	// is, so a settings problem never starts throttling clients. It caps requests
 	// of every kind; the failed-login throttle in internal/authlimit is separate and
 	// stays in place.
-	// Outbound abuse limiting: this daemon queues external mail through
-	// DeliverAndRelay, so a compromised account must meet the same per-account
-	// recipient cap SMTP submission enforces. It starts disabled and follows the
-	// stored settings without a restart.
-	mta.StartOutboundLimiter("hermex-webmail2", logger, dir.GetOutboundSettings)
 	httpLimiter := httplimit.NewLimiter()
 	httplimit.Apply("hermex-webmail2", httpLimiter, dir.GetHTTPRateLimitSettings)
 	go httplimit.RunMaintenance("hermex-webmail2", httpLimiter, dir.GetHTTPRateLimitSettings)
