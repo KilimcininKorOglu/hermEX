@@ -51,6 +51,10 @@ type Server struct {
 	Logger    *logging.Logger       // central activity log; nil disables logging
 	Pub       *publicfolder.Service // per-domain public folders; nil disables them
 	Limiter   *authlimit.Limiter    // failed-login throttle keyed by client IP; nil disables it
+	// Accounts resolves local addresses to mailboxes. It is used to deliver the
+	// notice when an APPEND is refused for a virus; nil leaves the refusal
+	// unannounced but still refuses.
+	Accounts directory.Accounts
 
 	// maxLiteral is the cap on a single IMAP literal in bytes (0 = the built-in
 	// defaultMaxLiteralSize), held atomically so the IMAP daemon's poll can apply an

@@ -48,6 +48,12 @@ const (
 	// avFetchmail is inbound external retrieval: gate on the recipient domain's
 	// inbound toggle; an unreachable clamd fails open (no SMTP sender to defer).
 	avFetchmail
+	// avStored is content a user places directly into a mailbox over a client
+	// protocol (an EWS attachment, an imported .eml, an IMAP APPEND, a MAPI
+	// attachment save) rather than sending it as mail. It lands in that mailbox,
+	// so it gates on the owning domain's inbound toggle; an unreachable clamd
+	// fails open, as on every other authenticated path.
+	avStored
 )
 
 // avDecision is what the caller should do after a scan attempt.
@@ -117,12 +123,43 @@ func ScanFetched(accounts directory.Accounts, mailbox string, raw []byte, when t
 	return scanMessage(accounts, avFetchmail, "", []string{mailbox}, raw, when) == avHandled
 }
 
+// ScanStored scans content a user is placing directly into a mailbox rather than
+// sending it as mail: an EWS CreateAttachment body, an imported .eml, an IMAP
+// APPEND literal, a MAPI attachment save. It reports true when the content
+// matched a virus and was quarantined, so the caller must refuse the operation
+// and store nothing.
+//
+// The delivery hooks never see these bytes: nothing about them passes through
+// SMTP or fetchmail, so without this an authenticated (or compromised) account
+// can park malware in its own mailbox, or in a shared one it may edit, and wait
+// for someone to open it.
+//
+// owner is the mailbox the content is being written into; label names the item
+// (an attachment file name, a message subject) so the quarantine record says what
+// was refused. An unreachable clamd fails open, matching every other
+// authenticated path.
+func ScanStored(accounts directory.Accounts, owner, label string, raw []byte, when time.Time) bool {
+	return scanStored(accounts, owner, label, raw, when) == avHandled
+}
+
+// scanStored is ScanStored's decision-returning form, so the tests can tell "not
+// scanned" from "clean".
+func scanStored(accounts directory.Accounts, owner, label string, raw []byte, when time.Time) avDecision {
+	return scanMessageLabelled(accounts, avStored, owner, []string{owner}, raw, when, label)
+}
+
 // scanMessage scans raw at a delivery point and reports what the caller should do.
 // from is the envelope sender, recipients the envelope recipients. On a virus hit
 // it quarantines the message, writes the raw bytes to disk, and notifies the
 // affected party plus the domain/org admins, then returns avHandled so the caller
 // skips delivery.
 func scanMessage(accounts directory.Accounts, mode avMode, from string, recipients []string, raw []byte, when time.Time) avDecision {
+	return scanMessageLabelled(accounts, mode, from, recipients, raw, when, "")
+}
+
+// scanMessageLabelled is scanMessage with an explicit subject label, which the
+// stored-content path supplies (an attachment has no Subject header of its own).
+func scanMessageLabelled(accounts directory.Accounts, mode avMode, from string, recipients []string, raw []byte, when time.Time, label string) avDecision {
 	av := avCtx.Load()
 	if av == nil {
 		return avProceed
@@ -150,11 +187,15 @@ func scanMessage(accounts directory.Accounts, mode avMode, from string, recipien
 		return avProceed
 	}
 
+	subject := subjectOf(raw)
+	if label != "" {
+		subject = label
+	}
 	entry := directory.QuarantineEntry{
 		Direction:  direction,
 		MailFrom:   from,
 		Recipients: recipients,
-		Subject:    subjectOf(raw),
+		Subject:    subject,
 		VirusName:  res.VirusName,
 		DomainID:   scope,
 		CreatedAt:  when.Unix(),
@@ -198,6 +239,16 @@ func (av *avConfig) gate(mode avMode, from string, recipients []string) (scope i
 		if _, out, id, ok := av.flags(domainOf(from)); ok && out {
 			return id, "outbound", true
 		}
+	}
+	// Stored content is labelled for what it is: it was neither received nor
+	// sent, so calling it inbound would misreport where it came from.
+	if mode == avStored {
+		for _, rcpt := range recipients {
+			if in, _, id, ok := av.flags(domainOf(rcpt)); ok && in {
+				return id, "stored", true
+			}
+		}
+		return 0, "", false
 	}
 	// Both inbound modes, and the local->local leg of submission, gate on a
 	// recipient domain whose inbound toggle is set.

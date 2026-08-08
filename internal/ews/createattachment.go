@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"hermex/internal/mapi"
+	"hermex/internal/mta"
 	"hermex/internal/oxews"
 )
 
@@ -132,6 +133,13 @@ func (s *Server) handleCreateAttachment(w http.ResponseWriter, inner []byte, ses
 		}
 		if fa.IsInline {
 			props.Set(mapi.PrAttachFlags, int32(mapi.AttMhtmlRef))
+		}
+		// Bytes a client hands us to store never pass through delivery, so this is
+		// the only point they can be scanned. A hit is quarantined and the
+		// attachment is refused rather than parked in the mailbox.
+		if mta.ScanStored(s.accounts, sess.user, fa.Name, content, time.Now()) {
+			msgs = append(msgs, createAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorItemSave"})
+			continue
 		}
 		if _, _, err := st.CreateAttachment(parent.MessageID, props); err != nil {
 			msgs = append(msgs, createAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorItemSave"})

@@ -617,6 +617,13 @@ func fromHeaderDomain(raw []byte) string {
 // message can never be sent off-server. User-composed send paths that should
 // relay external recipients use DeliverAndRelay.
 func Deliver(accounts directory.Accounts, from string, recipients []string, raw []byte, received time.Time) (unresolved []string, err error) {
+	if accounts == nil {
+		// A caller with no directory (a daemon that stores mail but never
+		// delivers it, and its tests) can reach this through a notification path.
+		// Every recipient is unresolvable rather than a panic, which is also what
+		// the caller reports.
+		return append([]string(nil), recipients...), nil
+	}
 	for _, rcpt := range recipients {
 		path, ok := accounts.Resolve(rcpt)
 		if !ok {

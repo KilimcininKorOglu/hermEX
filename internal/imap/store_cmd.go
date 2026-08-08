@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"hermex/internal/logging"
+	"hermex/internal/mta"
 	"hermex/internal/objectstore"
 )
 
@@ -473,6 +474,15 @@ func (c *conn) cmdAppend(tag string, args []token) {
 			c.bad(tag, "APPEND requires a message literal")
 			return
 		}
+		// An APPEND literal is client-supplied content that never passes through
+		// delivery, so this is the only point it can be scanned. A hit is
+		// quarantined and the whole command fails, rolling back anything a
+		// MULTIAPPEND already stored.
+		if mta.ScanStored(c.srv.Accounts, c.user, "", []byte(r3[0].val), time.Now()) {
+			c.rollbackAppend(destStore, destFID, uids)
+			c.no(tag, "APPEND rejected: a virus was detected")
+			return
+		}
 		info, err := destStore.AppendMessage(destFID, []byte(r3[0].val), date, flags)
 		if err != nil {
 			// Roll back what this MULTIAPPEND already stored. A failed rollback
@@ -553,4 +563,19 @@ func ids(ns []uint32) string {
 		parts[i] = fmt.Sprintf("%d", n)
 	}
 	return strings.Join(parts, " ")
+}
+
+// rollbackAppend removes messages a MULTIAPPEND already stored, so a command that
+// fails partway leaves the mailbox as it was. A failed rollback leaves the mailbox
+// holding messages the client was told did not arrive, so it is recorded.
+func (c *conn) rollbackAppend(destStore *objectstore.Store, destFID int64, uids []uint32) {
+	for _, u := range uids {
+		if rerr := destStore.SoftDeleteMessage(destFID, u); rerr != nil {
+			c.event(logging.LevelError, "append.rollback.fail", logging.Fields{
+				"folder": destFID,
+				"uid":    u,
+				"err":    rerr.Error(),
+			})
+		}
+	}
 }

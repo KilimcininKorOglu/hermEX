@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"hermex/internal/ext"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
@@ -224,6 +225,15 @@ func (s *Session) ropSaveChangesMessage(p *ext.Pull, out *ext.Push, handles []ui
 		mid, err := obj.uploadMsg.Commit()
 		if err != nil {
 			writeErr(out, ropSaveChangesMessage, hindex, ecError)
+			return true
+		}
+		// A FastTransfer upload is client-supplied content that never passes
+		// through delivery. Its attachments only exist as stored objects once the
+		// commit has assembled them, so the scan runs here and a hit removes the
+		// message again: it never becomes readable to a client, and the quarantine
+		// keeps the evidence.
+		if s.scanUploadedMessage(obj.store, int64(mid)) {
+			writeErr(out, ropSaveChangesMessage, hindex, ecAccessDenied)
 			return true
 		}
 		out.Uint8(ropSaveChangesMessage)
@@ -690,4 +700,30 @@ func setSender(props *mapi.PropertyValues, addr string) {
 	props.Set(mapi.PrSenderSmtpAddress, addr)
 	props.Set(mapi.PrSenderEmailAddress, addr)
 	props.Set(mapi.PrSenderAddrType, "SMTP")
+}
+
+// scanUploadedMessage scans the attachment content of a message a client just
+// uploaded through FastTransfer, and removes the message when it matched. It
+// reports whether the message was refused. A store error while removing it is
+// recorded rather than swallowed: the message would otherwise stay readable.
+func (s *Session) scanUploadedMessage(store *objectstore.Store, messageID int64) bool {
+	msg, err := store.OpenMessage(messageID)
+	if err != nil {
+		return false
+	}
+	for _, att := range msg.Attachments {
+		if !s.scanAttachmentContent(att.Props) {
+			continue
+		}
+		if derr := store.DeleteObject(messageID); derr != nil {
+			s.logger.Emit(logging.Event{
+				Level: logging.LevelError, Subsystem: logging.MAPI, Name: "ics.upload.virus.delete.fail",
+				User:   s.effectiveCaller(store),
+				Fields: logging.Fields{"mailbox": store.Dir(), "message": messageID},
+				Err:    derr.Error(),
+			})
+		}
+		return true
+	}
+	return false
 }

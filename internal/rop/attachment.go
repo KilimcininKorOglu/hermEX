@@ -6,6 +6,7 @@ import (
 
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
+	"hermex/internal/mta"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcmail"
 )
@@ -254,6 +255,10 @@ func (s *Session) ropSaveChangesAttachment(p *ext.Pull, out *ext.Push, handles [
 		return true
 	}
 	aw := att.attachW
+	if s.scanAttachmentContent(aw.pending) {
+		writeErr(out, ropSaveChangesAttachment, hindex, ecAccessDenied)
+		return true
+	}
 	if aw.inMem != nil {
 		// Compose-time attachment: merge the buffered properties into the in-memory
 		// attachment and drop the buffered deletes. The message (with its attachments)
@@ -350,4 +355,25 @@ func (s *Session) ropDeleteAttachment(p *ext.Pull, out *ext.Push, handles []uint
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
 	return true
+}
+
+// scanAttachmentContent reports whether the attachment content in props matched a
+// virus. A MAPI client writes attachment bytes straight into the mailbox, so
+// nothing on the delivery path ever sees them; this is the only point they can be
+// scanned. Content that is not being written here (a property-only save) is not
+// scanned.
+func (s *Session) scanAttachmentContent(props mapi.PropertyValues) bool {
+	v, ok := props.Get(mapi.PrAttachDataBin)
+	if !ok {
+		return false
+	}
+	blob, ok := v.([]byte)
+	if !ok || len(blob) == 0 {
+		return false
+	}
+	name := ""
+	if n, ok := props.Get(mapi.PrAttachLongFilename); ok {
+		name, _ = n.(string)
+	}
+	return mta.ScanStored(s.accounts, s.owner, name, blob, time.Now())
 }

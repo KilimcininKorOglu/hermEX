@@ -23,6 +23,7 @@ import (
 	"hermex/internal/ldapauth"
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
+	"hermex/internal/mta"
 	"hermex/internal/notify"
 	"hermex/internal/objectstore"
 	"hermex/internal/publicfolder"
@@ -66,7 +67,11 @@ func main() {
 	// poll cadence. No-ops when notify_url is empty.
 	notify.EnableProducer(cfg.NotifyURL, cfg.NotifySecret, logger)
 
-	srv := &imap.Server{Auth: dir, Hostname: cfg.Hostname, Logger: logger, Pub: publicfolder.New(cfg), Limiter: authlimit.New(0, 0, 0)}
+	// Antivirus: install the package-level scanner from clamd_addr (a no-op when
+	// unset), so an APPEND cannot park malware in a mailbox unscanned. Every other
+	// daemon that stores client-supplied content already does this.
+	mta.EnableScanning(cfg.ClamdAddr, dir, cfg.QuarantinePath, cfg.Hostname, logger)
+	srv := &imap.Server{Auth: dir, Accounts: dir, Hostname: cfg.Hostname, Logger: logger, Pub: publicfolder.New(cfg), Limiter: authlimit.New(0, 0, 0)}
 	// Failed-login lockout: read the stored tuning at startup and re-read it every
 	// minute, so an operator can tighten it during a credential-stuffing wave, or
 	// loosen it when legitimate users are being locked out, without a restart.

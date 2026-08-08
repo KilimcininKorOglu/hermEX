@@ -15,6 +15,7 @@ import (
 
 	"hermex/internal/mapi"
 	"hermex/internal/mime"
+	"hermex/internal/mta"
 	"hermex/internal/objectstore"
 )
 
@@ -572,6 +573,16 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	fid, ok := folderFID(folder)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown folder"})
+		return
+	}
+	// An imported .eml carries whatever the uploader put in it and never passes
+	// through delivery, so it is scanned here or not at all.
+	owner := ""
+	if c, ok := s.session(r); ok {
+		owner = c.Email
+	}
+	if mta.ScanStored(s.accounts, owner, "", raw, time.Now()) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the message was rejected: a virus was detected"})
 		return
 	}
 	info, err := mb.st.AppendMessage(fid, raw, time.Now(), 0)
