@@ -17,7 +17,7 @@ const readReceiptSubject = "Your message has been read!"
 
 // ReadReceiptInfo carries the fields a read-receipt MDN needs, extracted by the
 // caller from the message being marked read. Reader is the mailbox owner who read
-// the message (the MDN From and Final-Recipient); To is the destination — the
+// the message (the MDN From and Final-Recipient); To is the destination, the
 // original message's PR_SENT_REPRESENTING_SMTP_ADDRESS. The Orig* fields decorate
 // the human-readable part and correlate the notification to the original message.
 type ReadReceiptInfo struct {
@@ -31,7 +31,7 @@ type ReadReceiptInfo struct {
 
 // SendReadReceipt builds an Exchange-style disposition-notification (MDN) for a
 // just-read message and delivers it to the message's represented sender. It is
-// best-effort like the out-of-office pass — the caller logs the error and never
+// best-effort like the out-of-office pass, the caller logs the error and never
 // fails the read that triggered it.
 //
 // The MDN is hand-built rather than routed through oxcmail.Export for the same
@@ -49,7 +49,7 @@ func SendReadReceipt(accounts directory.Accounts, info ReadReceiptInfo, when tim
 // buildReadReceipt assembles the multipart/report MDN: a human-readable
 // text/plain part followed by a message/disposition-notification part, wrapped in
 // the RFC 5322 envelope addressed from the reader to the represented sender. The
-// loop guard is X-Auto-Response-Suppress: All — the header Exchange uses to stop
+// loop guard is X-Auto-Response-Suppress: All, the header Exchange uses to stop
 // an auto-responder replying to the receipt (distinct from buildAutoReply's
 // Auto-Submitted, which the reference does not set on a receipt).
 func buildReadReceipt(info ReadReceiptInfo, when time.Time) []byte {

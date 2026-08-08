@@ -185,7 +185,7 @@ func (s *Server) handleUIRemovePublicGrant(w http.ResponseWriter, r *http.Reques
 
 // publicGrantChange validates a grantee and builds the permission change to add. The
 // grantee is "anyone" (the default member) or a real user whose primary address is
-// in the same domain — a cross-domain grantee would be inert, since a caller only
+// in the same domain, a cross-domain grantee would be inert, since a caller only
 // reaches their own domain's store, so it is rejected as a clear error rather than
 // stored silently dead. It returns a non-empty errMsg on rejection.
 func (s *Server) publicGrantChange(domain, grantee string, rights uint32) (objectstore.PermissionChange, string) {

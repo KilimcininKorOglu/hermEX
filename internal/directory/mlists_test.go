@@ -109,9 +109,9 @@ func TestExpandMListPrivilege(t *testing.T) {
 }
 
 // TestExpandMListTypes pins the two live list types: normal returns its explicit
-// members verbatim (a sub-list member is NOT recursed — that is the caller's job),
+// members verbatim (a sub-list member is NOT recursed, that is the caller's job),
 // and domain returns every mailbox user in the list's domain (and only mailbox
-// users — not the list itself or other lists).
+// users, not the list itself or other lists).
 func TestExpandMListTypes(t *testing.T) {
 	d := mlistTestDir(t)
 

@@ -83,7 +83,7 @@ func TestOrgCRUD(t *testing.T) {
 
 // TestDeleteOrgCascade proves DeleteOrg detaches the org's domains (org_id 0,
 // not deleted), removes its org-scoped configuration (LDAP, sync policy,
-// org-admin grants), refuses the reserved id 0, and — the landmine — never
+// org-admin grants), refuses the reserved id 0, and, the landmine, never
 // touches the global default sync policy stored on org_id 0.
 func TestDeleteOrgCascade(t *testing.T) {
 	db := openTestDB(t)
@@ -93,7 +93,7 @@ func TestDeleteOrgCascade(t *testing.T) {
 	}
 	cleanTables(t, db)
 
-	// Global default device policy on the reserved org 0 — must survive any org delete.
+	// Global default device policy on the reserved org 0, must survive any org delete.
 	if err := d.SetDefaultSyncPolicy(easpolicy.Policy{"DevicePasswordEnabled": 1}); err != nil {
 		t.Fatal(err)
 	}

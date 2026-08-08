@@ -147,7 +147,7 @@ func (a *AsyncEMSMDB) asyncWaitEx(sess *Session, stub []byte) ([]byte, uint32) {
 // The reply rides the OUT channel concurrently with the IN goroutine's synchronous
 // fragments. send() preserves PDU framing, so the worst case is PDU-order interleaving
 // (this reply spliced between two fragments of an Execute response), never byte
-// corruption — and only when an Execute response exceeds ourMaxFrag (5840) and so
+// corruption, and only when an Execute response exceeds ourMaxFrag (5840) and so
 // fragments. In the [MS-OXCRPC] topology AsyncEMSMDB binds as its own interface on a
 // connection that carries no Execute traffic, so that window does not arise in practice.
 func (a *AsyncEMSMDB) parkAndReply(s *emsmdbSession, vc *vconn, callID uint32, contextID uint16, maxFrag int) {
@@ -176,7 +176,7 @@ func (a *AsyncEMSMDB) parkAndReply(s *emsmdbSession, vc *vconn, callID uint32, c
 		case <-vc.closed:
 			return // the connection tore down; abandon the parked reply
 		case <-wake:
-			// a push wake — loop and PollForChange observes the change
+			// a push wake, loop and PollForChange observes the change
 		case <-time.After(min(a.cadence, remaining)):
 		}
 	}

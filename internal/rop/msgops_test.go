@@ -11,7 +11,7 @@ import (
 
 // buildSetMessageReadFlag builds a RopSetMessageReadFlag request. respIdx is the
 // common-header ResponseHandleIndex (echoed); msgIdx is the body InputHandleIndex
-// that addresses the message — deliberately distinct so the two-handle resolution
+// that addresses the message, deliberately distinct so the two-handle resolution
 // is exercised.
 func buildSetMessageReadFlag(respIdx, msgIdx, flags uint8) []byte {
 	b := ext.NewPush(ext.FlagUTF16)

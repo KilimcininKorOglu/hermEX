@@ -10,7 +10,7 @@ import (
 )
 
 // FolderInfo is the per-folder metadata needed to enumerate a mailbox's folder
-// tree (e.g. for IMAP LIST). ParentID is nil for a top-level folder — one
+// tree (e.g. for IMAP LIST). ParentID is nil for a top-level folder, one
 // directly under the IPM subtree, which clients see as a mailbox root.
 type FolderInfo struct {
 	ID          int64
@@ -26,7 +26,7 @@ type folderNode struct {
 }
 
 // CreateFolder creates a folder under parent and returns its id. A nil parent
-// places it at the top level — directly under the IPM subtree — which is where
+// places it at the top level, directly under the IPM subtree, which is where
 // clients create their own folders. The folder is provisioned like a built-in
 // one: a freshly allocated id, a message-id range, a change number, and the
 // standard property bag (display name, note container class, timestamps,
@@ -192,7 +192,7 @@ func (s *Store) RenameFolder(folderID int64, newParent *int64, newName string) e
 
 // SetFolderName renames a folder in place: it updates the display name and the
 // index projection's name (keeping the IMAP listing in step) without changing the
-// folder's parent — the half of RenameFolder a pure rename needs. It refuses a
+// folder's parent, the half of RenameFolder a pure rename needs. It refuses a
 // name already held by a live sibling (ErrFolderExists) so name-based resolution
 // stays unambiguous, and reports ErrNotFound when the folder is missing.
 func (s *Store) SetFolderName(folderID int64, newName string) error {

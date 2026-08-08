@@ -53,7 +53,7 @@ func domainWriteAllowed(perms []directory.Permission, domainID int64) bool {
 }
 
 // domainReadAllowed reports whether a permission set may READ a domain's users:
-// write scope, or a read-only admin (system-wide, or domain — all or this one).
+// write scope, or a read-only admin (system-wide, or domain, all or this one).
 func domainReadAllowed(perms []directory.Permission, domainID int64) bool {
 	return domainWriteAllowed(perms, domainID) ||
 		hasPerm(perms, directory.PermSystemAdminRO, "") ||
@@ -84,7 +84,7 @@ func (s *Server) scopedReadDomains(userID int64) (all bool, ids map[int64]bool) 
 // requireUserScope gates a per-user management route on the target user's domain,
 // method-aware: a read admits a read-only domain (or system) admin, a write
 // requires domain write scope. The target is the {email} path value; an unknown
-// user is 404. Role-assignment routes are deliberately NOT wrapped by this — they
+// user is 404. Role-assignment routes are deliberately NOT wrapped by this, they
 // stay full-system-admin-only so a domain admin cannot grant itself authority.
 func (s *Server) requireUserScope(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -170,8 +170,8 @@ func scopeRefusal(kind, bad string) string {
 }
 
 // requirePurge gates the destructive domain-purge endpoint: a full system admin,
-// or any holder of the DomainPurge capability. No other admin — not even a domain
-// admin of the target — may purge, matching the capability's all-or-nothing scope.
+// or any holder of the DomainPurge capability. No other admin, not even a domain
+// admin of the target, may purge, matching the capability's all-or-nothing scope.
 func (s *Server) requirePurge(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		perms := s.adminPerms(claimsOf(r).UserID)

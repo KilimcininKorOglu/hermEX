@@ -9,7 +9,7 @@ import (
 
 // pullRestrictionNDR reads an NSPI Restriction_r ([MS-OXNSPI] 2.2.3) in NDR: the
 // GetMatches filter, the only restriction NSPI carries and the only direction
-// pulled (the server never sends one). The structure is recursive — every node
+// pulled (the server never sends one). The structure is recursive, every node
 // emits its res_type twice (the top frame then the union re-emits the
 // discriminant), AND/OR/NOT defer their children through a referent, and a
 // property/content node defers a PROPERTY_VALUE. It decodes the kinds the GAL

@@ -29,7 +29,7 @@ type FileAttachment struct {
 	Content      string           `xml:"Content,omitempty"`
 }
 
-// ItemAttachment is the EWS <t:ItemAttachment> element — an attached item such as
+// ItemAttachment is the EWS <t:ItemAttachment> element, an attached item such as
 // a forwarded message (an embedded message/rfc822 part). The nested Message item
 // is filled only by GetAttachment; an item's attachment list carries metadata
 // only. v1 emits the nested item as a Message (the only item type embedded
@@ -131,7 +131,7 @@ func BuildItemAttachmentContent(folderID, messageID int64, index int, att oxcmai
 	raw := binProp(att.Props, mapi.PrAttachDataBin)
 	emb, err := oxcmail.Import(raw, oxcmail.Options{})
 	if err != nil {
-		return ia // metadata only — the encapsulated bytes did not parse
+		return ia // metadata only, the encapsulated bytes did not parse
 	}
 	content, bodyType := embeddedBodyContent(emb)
 	nested := BuildItem(emb, ItemMeta{

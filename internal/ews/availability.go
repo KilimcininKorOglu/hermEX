@@ -18,7 +18,7 @@ import (
 
 type getUserAvailabilityRequest struct {
 	// TimeZone presence is required: the reference rejects a request without it,
-	// reporting ErrorTimeZone per mailbox. v1 reads only its presence — the bias is
+	// reporting ErrorTimeZone per mailbox. v1 reads only its presence, the bias is
 	// not applied to the window (see freeBusyForTarget), a documented gap.
 	TimeZone         *serializableTimeZone `xml:"TimeZone"`
 	MailboxDataArray struct {
@@ -155,7 +155,7 @@ func (s *Server) handleGetUserAvailability(w http.ResponseWriter, inner []byte, 
 // level follows the reference: the mailbox owner querying their own calendar always
 // gets the detailed view (the reference passes a null actor, granting it implicitly),
 // while another caller is held to the free/busy rights granted on the target's
-// calendar — none of those rights means the data is denied, not shown as all-free.
+// calendar, none of those rights means the data is denied, not shown as all-free.
 func (s *Server) freeBusyForTarget(sess *session, email string, windowStart, windowEnd time.Time) freeBusyResponse {
 	targetPath, ok := s.accounts.Resolve(email)
 	if !ok {
@@ -171,7 +171,7 @@ func (s *Server) freeBusyForTarget(sess *session, email string, windowStart, win
 	// Match on the address as well as the resolved path: Authenticate (which set
 	// sess.mailbox) and Resolve are separate directory lookups that may normalize
 	// differently, and a client may list the requester's own address among the
-	// attendees — the address compare cannot over-grant (it is the same identity)
+	// attendees, the address compare cannot over-grant (it is the same identity)
 	// and catches a path divergence the path compare would miss.
 	owner := strings.EqualFold(email, sess.user) || targetPath == sess.mailbox
 
@@ -194,7 +194,7 @@ func (s *Server) freeBusyForTarget(sess *session, email string, windowStart, win
 		return errorFreeBusy("ErrorFreeBusyGenerationFailed")
 	}
 	// The reference computes std::all_of(has_details) over the events, which is the
-	// uniform detail flag — except an empty calendar yields "Detailed" (all_of over
+	// uniform detail flag, except an empty calendar yields "Detailed" (all_of over
 	// an empty range is true), a wire quirk preserved here.
 	viewType := "FreeBusy"
 	if detailed || len(events) == 0 {
@@ -212,7 +212,7 @@ func (s *Server) freeBusyForTarget(sess *session, email string, windowStart, win
 // CalendarFreeBusy enumerates the target's calendar for appointments overlapping
 // the window. A recurring series master is skipped: its stored start/end describe
 // only the first instance, so emitting it would place a misleading single block at
-// the series origin — recurrence expansion is a documented v1 gap. Detail fields
+// the series origin, recurrence expansion is a documented v1 gap. Detail fields
 // are attached only when the caller is entitled to the detailed view.
 func CalendarFreeBusy(st *objectstore.Store, windowStart, windowEnd time.Time, detailed bool) ([]CalendarEvent, error) {
 	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{

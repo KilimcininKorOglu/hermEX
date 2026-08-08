@@ -20,7 +20,7 @@ import (
 // The subset is deliberate. SpamAssassin regexes are Perl-compatible; this engine
 // compiles them with Go's RE2, which is linear-time, so a hostile message body
 // cannot trigger catastrophic backtracking (ReDoS). Rules whose regex RE2 cannot
-// compile — backreferences, lookaround — are dropped, as are eval:/plugin rules
+// compile, backreferences, lookaround, are dropped, as are eval:/plugin rules
 // (network, Bayesian, and SPF/DKIM checks this package performs natively) and
 // rules flagged "net" (they need DNS). A meta that references any dropped rule is
 // itself dropped, transitively, so a partial dependency never makes a meta
@@ -41,8 +41,8 @@ type saRule struct {
 	name   string
 	kind   saKind
 	header string         // header rules: the header to match ("ALL" = whole header block)
-	negate bool           // header rules: "!~" — matches when the regex does NOT match
-	exists bool           // header rules: "exists:" — matches when the header is present
+	negate bool           // header rules: "!~", matches when the regex does NOT match
+	exists bool           // header rules: "exists:", matches when the header is present
 	re     *regexp.Regexp // nil only for an exists test
 	score  float64
 }

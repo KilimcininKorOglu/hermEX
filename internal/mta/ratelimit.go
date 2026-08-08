@@ -10,7 +10,7 @@ import (
 // Inbound rate-limit defaults. A fixed window of defaultRateLimitWindow admits up to
 // defaultRateLimitBurst messages from one client network; further messages in the
 // same window are deferred with a temporary failure so a legitimate server retries
-// later. Chosen conservatively and DISABLED by default — an admin opts in and tunes.
+// later. Chosen conservatively and DISABLED by default, an admin opts in and tunes.
 const (
 	defaultRateLimitWindow = time.Minute
 	defaultRateLimitBurst  = 60
@@ -18,7 +18,7 @@ const (
 
 // rateLimitMaxKeys bounds the limiter's memory: the number of distinct client
 // networks tracked at once. When the table is full of still-live windows the limiter
-// fails open (admits) rather than evicting a live counter — it must never block
+// fails open (admits) rather than evicting a live counter, it must never block
 // legitimate mail to reclaim memory.
 const rateLimitMaxKeys = 100_000
 
@@ -54,7 +54,7 @@ func NewRateLimiter() *RateLimiter {
 func (rl *RateLimiter) SetEnabled(on bool) { rl.enabled.Store(on) }
 
 // SetLimits sets the burst (max messages per window) and the window length. A burst
-// below 1 or a non-positive window is ignored, leaving the current setting — the
+// below 1 or a non-positive window is ignored, leaving the current setting, the
 // limiter never admits zero messages or collapses the window to nothing.
 func (rl *RateLimiter) SetLimits(burst int, window time.Duration) {
 	if burst >= 1 {

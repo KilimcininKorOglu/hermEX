@@ -54,8 +54,8 @@ func TestOpenPublicStoreSeedsHierarchy(t *testing.T) {
 	}
 
 	// CreateFolder roots at the PUBLIC IPM subtree (0x02), not the private one
-	// (0x09): the new folder takes a user-range id and ListFolders — which walks
-	// the public subtree — enumerates exactly it. Wrong rooting would leave
+	// (0x09): the new folder takes a user-range id and ListFolders, which walks
+	// the public subtree, enumerates exactly it. Wrong rooting would leave
 	// ListFolders empty.
 	annFID, err := s.CreateFolder(nil, "Announcements")
 	if err != nil {
@@ -72,7 +72,7 @@ func TestOpenPublicStoreSeedsHierarchy(t *testing.T) {
 		t.Fatalf("ListFolders = %+v, want exactly [Announcements] directly under the public IPM subtree", folders)
 	}
 
-	// Content can be posted to a public folder — the capability every public-folder
+	// Content can be posted to a public folder, the capability every public-folder
 	// surface (IMAP APPEND, admin) ultimately writes through.
 	raw := []byte(strings.Join([]string{
 		"From: poster@local.test",

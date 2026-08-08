@@ -37,7 +37,7 @@ func (p policyAccounts) GetDomainSyncPolicy(string) (easpolicy.Policy, error) { 
 // TestProvisionServesMergedPolicy proves the Provision document carries the server
 // default with the mailbox override merged on top: an inherited field comes from the
 // default, an overridden field takes the mailbox value, and an override-only field is
-// added — the device is told exactly the resolved policy.
+// added, the device is told exactly the resolved policy.
 func TestProvisionServesMergedPolicy(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "mbox")
 	st, err := objectstore.Open(dir)

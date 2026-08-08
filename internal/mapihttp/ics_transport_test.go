@@ -201,7 +201,7 @@ func TestExecuteRopSyncDownload(t *testing.T) {
 		switch status {
 		case 0x0003: // DONE
 			done = true
-		case 0x0001: // PARTIAL — keep draining
+		case 0x0001: // PARTIAL, keep draining
 		default:
 			t.Fatalf("GetBuffer transfer_status = %#x (error or unexpected)", status)
 		}
@@ -213,7 +213,7 @@ func TestExecuteRopSyncDownload(t *testing.T) {
 		t.Fatal("FastTransfer stream was empty")
 	}
 	// The seeded message's subject rode the stream as UTF-16LE, proving the message
-	// content — not just the framing — survived the transport.
+	// content, not just the framing, survived the transport.
 	if !bytes.Contains(stream, utf16le("SYNCME")) {
 		t.Errorf("downloaded stream (%d bytes) did not carry the seeded subject", len(stream))
 	}

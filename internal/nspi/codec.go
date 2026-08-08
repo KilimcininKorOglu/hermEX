@@ -3,7 +3,7 @@ package nspi
 import "hermex/internal/ext"
 
 // stat is the NSPI address-book cursor (STAT, [MS-OXNSPI] 2.2.8): 36 bytes
-// carried in every request and returned updated. The server holds no cursor —
+// carried in every request and returned updated. The server holds no cursor,
 // a row position is recomputed from this each call (see the internal spec).
 type stat struct {
 	sortType    uint32 // SortTypeDisplayName etc.

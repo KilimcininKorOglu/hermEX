@@ -17,7 +17,7 @@ func setupTLSSettings(t *testing.T) *SQLDirectory {
 }
 
 // TestTLSSettingsDefaultsToManual proves an unconfigured deployment reads as manual
-// mode rather than erroring — an upgrade must never silently flip a running server
+// mode rather than erroring, an upgrade must never silently flip a running server
 // into reaching out to a CA, so the absent row is the safe default.
 func TestTLSSettingsDefaultsToManual(t *testing.T) {
 	d := setupTLSSettings(t)
@@ -33,8 +33,8 @@ func TestTLSSettingsDefaultsToManual(t *testing.T) {
 	}
 }
 
-// TestTLSSettingsRoundTripAndUpsert proves the ACME configuration round-trips —
-// including the agreed flag — and that saving again replaces the single row rather
+// TestTLSSettingsRoundTripAndUpsert proves the ACME configuration round-trips,
+// including the agreed flag, and that saving again replaces the single row rather
 // than adding one, so the gateway always reads exactly one current mode.
 func TestTLSSettingsRoundTripAndUpsert(t *testing.T) {
 	d := setupTLSSettings(t)

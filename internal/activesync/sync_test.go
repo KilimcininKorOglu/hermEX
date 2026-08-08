@@ -139,7 +139,7 @@ func TestSyncInitialAdds(t *testing.T) {
 
 // TestSyncFlagChangeDetected is the keystone: a read-state change made directly
 // in the store (as IMAP or webmail would) is reported on the next sync via the
-// snapshot diff — something the change-number sync cannot see.
+// snapshot diff, something the change-number sync cannot see.
 func TestSyncFlagChangeDetected(t *testing.T) {
 	ts, dir := seededServer(t)
 	seedInbox(t, dir, 2)

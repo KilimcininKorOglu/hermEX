@@ -1,6 +1,6 @@
 // Package tlscert supplies TLS serving certificates to the hermEX listeners from
 // the directory's certificate store, refreshed on a poll so an operator's uploaded
-// certificate — or a renewal — applies without restarting the daemon. It falls
+// certificate, or a renewal, applies without restarting the daemon. It falls
 // back to the configuration-file certificate when the store has no match, so a
 // deployment that sets tls_cert/tls_key keeps working unchanged.
 package tlscert
@@ -21,11 +21,11 @@ import (
 // pollInterval is how often RunMaintenance re-probes the certificate store. The
 // store is a database with no push channel, so each TLS daemon polls for a changed
 // certificate rather than being notified; this is the staleness/load tradeoff. The
-// probe is only a cheap version query (TLSCertVersion) — the full reload runs only
-// when it moves — so a short interval is inexpensive: at 15s an admin upload or a
+// probe is only a cheap version query (TLSCertVersion), the full reload runs only
+// when it moves, so a short interval is inexpensive: at 15s an admin upload or a
 // mirrored renewal applies within seconds, not a minute. (ACME-obtained certificates
 // also depend on the gateway's separate ~15-min mirror cycle, which this does not
-// change — that governs when a renewal reaches the store, this governs how fast the
+// change, that governs when a renewal reaches the store, this governs how fast the
 // daemons pick it up once it lands.)
 const pollInterval = 15 * time.Second
 
@@ -57,7 +57,7 @@ type Provider struct {
 
 // New builds a provider over store, with cfg supplying the configuration-file
 // fallback certificate (when cfg.TLSEnabled()). A file-certificate parse error is
-// fatal — it mirrors the previous startup behaviour — but a store read failure is
+// fatal, it mirrors the previous startup behaviour, but a store read failure is
 // not: the provider serves the file certificate and the poll retries, so a
 // momentarily unreachable database never stops TLS from coming up. logger may be
 // nil to disable the provider's own logging.
@@ -79,7 +79,7 @@ func New(cfg *config.Config, store CertStore, logger *logging.Logger) (*Provider
 	return p, nil
 }
 
-// TLSEnabled reports whether the provider can present any certificate — a stored
+// TLSEnabled reports whether the provider can present any certificate, a stored
 // one or the configuration-file fallback. A listener consults it once at startup
 // to choose TLS over plaintext; switching a plaintext listener to TLS still needs
 // a restart.

@@ -12,8 +12,8 @@ import (
 // and a malformed-request error.
 const (
 	ioStatusSuccess  = "1"
-	ioStatusConvFail = "14"  // CONVERSIONFAILED — the item could not be retrieved
-	ioStatusProtocol = "155" // PROTOCOLERROR — the request was malformed
+	ioStatusConvFail = "14"  // CONVERSIONFAILED, the item could not be retrieved
+	ioStatusProtocol = "155" // PROTOCOLERROR, the request was malformed
 )
 
 // handleItemOperations answers the MS-ASCMD ItemOperations command: a batch of

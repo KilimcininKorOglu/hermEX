@@ -115,7 +115,7 @@ func TestAccessEmptyMailFromNotOverridden(t *testing.T) {
 
 // TestVerdictAccessAction proves the verdict carries the operator action that
 // matched, not merely that one did: delivery reads the action to honor per-recipient
-// precedence — an operator block is absolute (a recipient's own allow cannot rescue
+// precedence, an operator block is absolute (a recipient's own allow cannot rescue
 // it) while an operator allow is narrowable by a recipient's own block.
 func TestVerdictAccessAction(t *testing.T) {
 	s := &Scorer{}
@@ -137,8 +137,8 @@ func TestVerdictAccessAction(t *testing.T) {
 }
 
 // TestVerdictDMARCReject proves the verdict flags a DMARC failure under an enforcing
-// policy (reject/quarantine) — the signal delivery uses so no per-recipient allow
-// rescues a spoof — while leaving it clear under a non-enforcing policy. This is why
+// policy (reject/quarantine), the signal delivery uses so no per-recipient allow
+// rescues a spoof, while leaving it clear under a non-enforcing policy. This is why
 // DMARC == AuthFail alone is insufficient: a p=none failure is also AuthFail but must
 // not block a recipient's allow.
 func TestVerdictDMARCReject(t *testing.T) {

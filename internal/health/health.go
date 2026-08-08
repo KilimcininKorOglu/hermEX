@@ -14,7 +14,7 @@ import (
 	"hermex/internal/lifecycle"
 )
 
-// Check is an optional readiness probe — typically a database ping — that reports
+// Check is an optional readiness probe, typically a database ping, that reports
 // whether a dependency the daemon needs is reachable. A nil error means healthy.
 type Check struct {
 	Name  string

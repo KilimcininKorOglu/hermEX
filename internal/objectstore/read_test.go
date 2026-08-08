@@ -109,7 +109,7 @@ func TestMessageListAndFlags(t *testing.T) {
 // non-mail message and confirms the change reaches the ICS read-state download.
 // A contact lives only in the object store (the IMAP index holds mail), so this
 // also pins that SetMessageReadState resolves the message from the object store,
-// not the index — an index-gated path would return ErrNotFound and silently drop
+// not the index, an index-gated path would return ErrNotFound and silently drop
 // every calendar/contact read a MAPI client makes.
 func TestSetReadStateFeedsContentSync(t *testing.T) {
 	s := openSeededStore(t)

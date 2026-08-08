@@ -46,7 +46,7 @@ func galEntryFor(t *testing.T, d *SQLDirectory, addr string) GALEntry {
 // TestCreateContactAppearsInGAL is the deliverable: a created mail contact
 // surfaces in the GAL as a DT_REMOTE_MAILUSER (display type 6) carrying its
 // display name, which is what routes it into the NSPI "All Contacts" container. A
-// contact with an external address filed under a local domain must still appear —
+// contact with an external address filed under a local domain must still appear,
 // the GAL is org-wide and the contact owns no mailbox.
 func TestCreateContactAppearsInGAL(t *testing.T) {
 	d := contactTestDir(t)
@@ -73,7 +73,7 @@ func TestCreateContactDomainMustExist(t *testing.T) {
 }
 
 // TestUpdateContact renames a contact (PR_DISPLAY_NAME upsert), clears it back to
-// the address fallback, and sets a name onto a contact that had none — the GAL
+// the address fallback, and sets a name onto a contact that had none, the GAL
 // reflects each.
 func TestUpdateContact(t *testing.T) {
 	d := contactTestDir(t)
@@ -188,7 +188,7 @@ func TestListContacts(t *testing.T) {
 }
 
 // TestContactCannotAuthenticate pins the security invariant: a contact has no
-// password and no mailbox, so it must never authenticate — the empty password
+// password and no mailbox, so it must never authenticate, the empty password
 // must not unlock it.
 func TestContactCannotAuthenticate(t *testing.T) {
 	d := contactTestDir(t)

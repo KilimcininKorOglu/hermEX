@@ -246,7 +246,7 @@ func importPhoto(msg *oxcmail.Message, card *vcard, named map[mapi.PropertyName]
 }
 
 // decodePhoto extracts raw image bytes from a PHOTO line whose value is inline
-// base64 — either a 4.0 "data:" URI or a 3.0 ENCODING=b value.
+// base64, either a 4.0 "data:" URI or a 3.0 ENCODING=b value.
 func decodePhoto(l *vline) ([]byte, bool) {
 	v := strings.TrimSpace(l.value)
 	if strings.HasPrefix(strings.ToLower(v), "data:") {

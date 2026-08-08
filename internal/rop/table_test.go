@@ -89,7 +89,7 @@ func TestBuildPropertyRowNone(t *testing.T) {
 }
 
 // TestBuildPropertyRowFlagged confirms the FLAGGED form: a missing column flips
-// the row to 0x01 and each column carries a FLAGGED_PROPVAL — 0x00 + value when
+// the row to 0x01 and each column carries a FLAGGED_PROPVAL, 0x00 + value when
 // present, a bare 0x01 when absent.
 func TestBuildPropertyRowFlagged(t *testing.T) {
 	cols := []mapi.PropTag{mapi.PrSubject, mapi.PrMessageDeliveryTime}
@@ -481,7 +481,7 @@ func TestSortTableSortsOnNonDisplayedProperty(t *testing.T) {
 }
 
 // TestSortTableRejectsCategorized confirms a categorized sort fails loud rather
-// than silently returning a flattened table — the same silent-error class the
+// than silently returning a flattened table, the same silent-error class the
 // non-categorized fix closes.
 func TestSortTableRejectsCategorized(t *testing.T) {
 	dir := t.TempDir()
@@ -920,7 +920,7 @@ func TestCreateBookmark(t *testing.T) {
 		t.Errorf("SeekRowBookmark(+0) = (invis %d, hl %d, sought %d), want (0,0,0)", invisible, hl, sought)
 	}
 
-	// QueryRows from the bookmarked position — should see m2 onwards
+	// QueryRows from the bookmarked position, should see m2 onwards
 	mustDispatchOK(t, sess, buildSetColumns(0, []mapi.PropTag{mapi.PrSubject}), []uint32{tableH}, ropSetColumns)
 	qr, _ := sess.Dispatch(buildQueryRows(0, 0, 3, 32), []uint32{tableH})
 	_, rows := queryRowsResponse(t, qr, []mapi.PropTag{mapi.PrSubject})

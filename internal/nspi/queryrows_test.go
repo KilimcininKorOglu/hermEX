@@ -7,7 +7,7 @@ import (
 	"hermex/internal/mapi"
 )
 
-// TestPushPropertyRowForms byte-checks the proprow framing — the advisor's
+// TestPushPropertyRowForms byte-checks the proprow framing, the advisor's
 // fragile keystone. A NONE row (flag 0x00, bare values) when every column is
 // present; a FLAGGED row (flag 0x01, per-column available/error markers) when
 // one is missing. The value bytes ride on internal/ext's reference-gated ABK

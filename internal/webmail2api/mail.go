@@ -51,8 +51,8 @@ func addrEmails(as []mime.Address) []string {
 	return out
 }
 
-// bestBody walks the MIME tree for the richest displayable body — text/html when
-// present, else text/plain — returning the charset-decoded UTF-8 content. The SPA
+// bestBody walks the MIME tree for the richest displayable body, text/html when
+// present, else text/plain, returning the charset-decoded UTF-8 content. The SPA
 // sanitizes it (DOMPurify) and renders with whitespace preserved, so a plain body
 // also displays correctly.
 func bestBody(root *mime.Part) string {
@@ -284,7 +284,7 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 
 // buildMailDetail builds a message's full detail JSON from its raw bytes: the
 // richest body with inline cid: images resolved, the envelope fields, and the
-// attachment list. It does NOT touch flags — the caller owns \Seen.
+// attachment list. It does NOT touch flags, the caller owns \Seen.
 func buildMailDetail(raw []byte, folder string, uid uint32) mailDetailJSON {
 	root := mime.ParseStructure(raw)
 	body, inlined := inlineCIDImages(bestBody(root), root)

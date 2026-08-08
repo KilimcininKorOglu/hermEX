@@ -22,8 +22,8 @@ var (
 	RPCInterfaceVersion uint32 = 56
 )
 
-// NSPI opnums ([MS-OXNSPI] 3.1.4). The write/template ops — ModProps (11),
-// GetTemplateInfo (13), ModLinkAtt (14) — answer with a faithful MAPI error rather
+// NSPI opnums ([MS-OXNSPI] 3.1.4). The write/template ops, ModProps (11),
+// GetTemplateInfo (13), ModLinkAtt (14), answer with a faithful MAPI error rather
 // than an op-range fault: the GAL is read-only (ModProps/ModLinkAtt → ecNotSupported)
 // and there is no display-table archive (GetTemplateInfo → ecUnknownLcid).
 const (
@@ -48,12 +48,12 @@ const (
 )
 
 // nspiUnbindSuccess is MAPI_E_UNBINDSUCCESS (1), the NSPI-specific success code
-// NspiUnbind returns ([MS-OXNSPI] 3.1.4.1.2) — not ecSuccess.
+// NspiUnbind returns ([MS-OXNSPI] 3.1.4.1.2), not ecSuccess.
 const nspiUnbindSuccess uint32 = 1
 
 // DispatchRPC routes one NSPI connection-oriented RPC call: it decodes the
 // opnum's NDR IN parameters, runs the shared typed core, and encodes the NDR OUT
-// parameters. It is transport-neutral — internal/mapihttp registers it on the
+// parameters. It is transport-neutral, internal/mapihttp registers it on the
 // RPC/HTTP DCE/RPC dispatcher through an adapter, so this package does not import
 // the transport. A decode failure returns an NDR fault; an unserved opnum returns
 // an op-range fault.
@@ -168,7 +168,7 @@ func (s *Server) rpcBind(stub []byte) ([]byte, uint32) {
 }
 
 // rpcUnbind handles NspiUnbind (opnum 1): it consumes the context handle, returns
-// a zeroed handle, and reports MAPI_E_UNBINDSUCCESS — the NSPI-specific success
+// a zeroed handle, and reports MAPI_E_UNBINDSUCCESS, the NSPI-specific success
 // code, not ecSuccess. No session is dropped because none is kept; the trailing
 // reserved word carries nothing actionable.
 func (s *Server) rpcUnbind(stub []byte) ([]byte, uint32) {

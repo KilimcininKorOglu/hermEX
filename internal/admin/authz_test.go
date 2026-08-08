@@ -35,7 +35,7 @@ func statusOf(resp *http.Response) int {
 }
 
 // TestDomainAdminScopedAccess proves a domain admin manages users in its own
-// domain but is refused — both read and write — for another domain's users.
+// domain but is refused, both read and write, for another domain's users.
 func TestDomainAdminScopedAccess(t *testing.T) {
 	d := &fakeDir{
 		authOK: true, uid: 7,
@@ -82,7 +82,7 @@ func TestDomainAdminROReadOnly(t *testing.T) {
 
 // TestDomainAdminAliasValueScope is the value-namespace boundary for a domain
 // admin: editing an in-scope user, it may set an alias or alternative name only in
-// a served domain it administers. A value in a foreign served domain is refused —
+// a served domain it administers. A value in a foreign served domain is refused,
 // otherwise the domain admin could alias one of its users to ceo@other.test and
 // silently intercept that domain's mail and logins (the resolver matches inbound
 // addresses over username/altname/alias). Bare alternative-login names carry no
@@ -104,7 +104,7 @@ func TestDomainAdminAliasValueScope(t *testing.T) {
 		`{"aliases":["sales@acme.test"]}`)); s == http.StatusForbidden {
 		t.Errorf("domain admin own-domain alias refused (403)")
 	}
-	// Foreign served-domain alias: refused — this is the interception boundary.
+	// Foreign served-domain alias: refused, this is the interception boundary.
 	if s := statusOf(authedReq(t, ts, "PUT", "/admin/users/in@acme.test/aliases", session, csrf,
 		`{"aliases":["ceo@other.test"]}`)); s != http.StatusForbidden {
 		t.Errorf("domain admin foreign-domain alias = %d, want 403", s)
@@ -142,7 +142,7 @@ func TestSystemAdminAliasValueUnrestricted(t *testing.T) {
 }
 
 // TestDomainAdminCannotGrantRoles is the privilege-escalation boundary: a domain
-// admin — even over all domains — cannot create roles or grant any tier to a
+// admin, even over all domains, cannot create roles or grant any tier to a
 // user, so it can never escalate itself to system authority. Role administration
 // stays full-system-admin-only.
 func TestDomainAdminCannotGrantRoles(t *testing.T) {
@@ -215,8 +215,8 @@ func TestDomainPurgeCapability(t *testing.T) {
 
 // TestReadOnlyAdminReadWriteSplit is the two-direction enforcement guarantee for
 // a read-only system administrator: every read is admitted (never 403) and every
-// state-changing request is refused (403). It pins the method-aware chokepoint —
-// the single place that makes SystemAdminRO read-everything-write-nothing — and
+// state-changing request is refused (403). It pins the method-aware chokepoint,
+// the single place that makes SystemAdminRO read-everything-write-nothing, and
 // the two routes that deviate from it (the org LDAP scope and the password
 // endpoint).
 func TestReadOnlyAdminReadWriteSplit(t *testing.T) {
@@ -230,7 +230,7 @@ func TestReadOnlyAdminReadWriteSplit(t *testing.T) {
 	ts := adminServer(t, d)
 	session, csrf := loginCookies(t, ts)
 
-	// A read-only admin signs in (holds authority) — login itself must succeed.
+	// A read-only admin signs in (holds authority), login itself must succeed.
 	if session == "" {
 		t.Fatal("read-only admin could not sign in")
 	}

@@ -22,7 +22,7 @@ type ReceiveFolderEntry struct {
 // to ([MS-OXCSTOR] 2.2.1.2). It walks the dotted class from the longest prefix
 // to the shortest (so "IPM.Note.Foo" tries "IPM.Note.Foo", then "IPM.Note",
 // then "IPM"), then the empty default class, and finally falls back to the Inbox
-// — so a private store always resolves. It returns the folder id and the
+// , so a private store always resolves. It returns the folder id and the
 // explicit class that matched (the empty string for the default or the Inbox
 // fallback).
 func (s *Store) GetReceiveFolder(messageClass string) (folderID int64, explicitClass string, err error) {

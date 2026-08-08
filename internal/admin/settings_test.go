@@ -10,7 +10,7 @@ import (
 )
 
 // TestSettingsPageRenders proves the unified Settings page renders for a system admin
-// with its category tabs and a representative panel from each — every operator-tunable
+// with its category tabs and a representative panel from each, every operator-tunable
 // setting consolidated onto one page.
 func TestSettingsPageRenders(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}

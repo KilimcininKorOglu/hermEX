@@ -140,7 +140,7 @@ func inboxRulesSession(t *testing.T) (*Session, uint32) {
 // TestModifyRulesAddThenGetRulesTable is the end-to-end round-trip: an ADD through
 // RopModifyRules must read back through RopGetRulesTable with its id, name, state, and
 // sequence intact. This is the test that verifies the rule proptag HEX is correct end
-// to end — a wrong id on any column would make that value fail to round-trip.
+// to end, a wrong id on any column would make that value fail to round-trip.
 func TestModifyRulesAddThenGetRulesTable(t *testing.T) {
 	sess, folderH := inboxRulesSession(t)
 
@@ -193,8 +193,8 @@ func TestModifyRulesRemoveThroughRop(t *testing.T) {
 }
 
 // TestModifyRulesBatchAlignment proves the RopModifyRules request decoder consumes its
-// body exactly — ModifyRulesFlags, the count, and every RuleData with its
-// TPROPVAL_ARRAY — so a following ROP in the same Execute batch parses from the right
+// body exactly, ModifyRulesFlags, the count, and every RuleData with its
+// TPROPVAL_ARRAY, so a following ROP in the same Execute batch parses from the right
 // offset. The single-ROP tests pin the response framing; this pins the request side.
 func TestModifyRulesBatchAlignment(t *testing.T) {
 	sess, folderH := inboxRulesSession(t)

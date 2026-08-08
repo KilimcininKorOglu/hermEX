@@ -17,7 +17,7 @@ import (
 // to surface the structured failure. reportingMTA is the host that gave up on the
 // recipient (this server's announced hostname). The report is marked
 // auto-generated (RFC 3834) so its arrival in the sender's mailbox triggers no
-// auto-reply and cannot loop — and its mailer-daemon origin is a role mailbox the
+// auto-reply and cannot loop, and its mailer-daemon origin is a role mailbox the
 // auto-reply pass already skips.
 //
 // The outbound relay calls this when it abandons a recipient, then files the
@@ -72,7 +72,7 @@ func bounceText(failed, reason string) string {
 // and status, and the SMTP diagnostic. The Reporting-MTA/Arrival-Date/
 // Final-Recipient "rfc822;"/Action:failed/Status 5.0.0 fields match the reference
 // MDA bounce; Diagnostic-Code (the remote response) and Last-Attempt-Date are
-// added — both RFC 3464 standard. Remote-MTA is omitted: the reference reports its
+// added, both RFC 3464 standard. Remote-MTA is omitted: the reference reports its
 // own host there for a local-delivery bounce, which would misattribute a relay
 // failure to this server, and the failed exchanger's name is not threaded here.
 func deliveryStatus(reportingMTA, failed, reason string, when time.Time) string {

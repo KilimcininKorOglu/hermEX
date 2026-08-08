@@ -12,7 +12,7 @@ import (
 var header = []byte{0x03, 0x01, 0x6A, 0x00}
 
 // The vectors below are authored BY HAND from the MS-ASWBXML framing rules
-// (the internal spec §3-§4), not produced by this package's encoder — so they are
+// (the internal spec §3-§4), not produced by this package's encoder, so they are
 // an independent oracle. A symmetric encode/decode bug would still satisfy a
 // pure round-trip test; it cannot satisfy these fixed bytes.
 

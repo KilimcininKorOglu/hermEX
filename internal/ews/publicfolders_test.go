@@ -91,7 +91,7 @@ func seedPublicFolder(t *testing.T, name string, rights uint32, body string) (*h
 }
 
 // TestPublicFolderRootGetFolder proves GetFolder on the public root succeeds (not
-// AccessDenied — the root carries no grant) and that a child's ParentFolderId,
+// AccessDenied, the root carries no grant) and that a child's ParentFolderId,
 // which points back at the root, is not a dead link.
 func TestPublicFolderRootGetFolder(t *testing.T) {
 	ts, _ := seedPublicFolder(t, "Announcements", mapi.FrightsVisible|mapi.FrightsReadAny, "")
@@ -140,7 +140,7 @@ func TestPublicFolderItemReadChain(t *testing.T) {
 
 // TestPublicFolderItemTwoTierGate proves the item read gate on public folders: a
 // visibility-only grant lets the caller LIST items (FindItem) but GetItem is
-// denied without read access — the same two-tier model as delegated mailboxes.
+// denied without read access, the same two-tier model as delegated mailboxes.
 func TestPublicFolderItemTwoTierGate(t *testing.T) {
 	ts, _ := seedPublicFolder(t, "Announcements", mapi.FrightsVisible,
 		"Subject: SecretNews\r\n\r\nclassified")
@@ -225,7 +225,7 @@ func TestPublicFolderRootACLFiltered(t *testing.T) {
 }
 
 // TestPublicFolderRootEmptyWhenUnprovisioned proves a domain with no public store
-// returns a successful, empty public folders root rather than an error — the same
+// returns a successful, empty public folders root rather than an error, the same
 // observable result as a provisioned store the caller can see nothing in.
 func TestPublicFolderRootEmptyWhenUnprovisioned(t *testing.T) {
 	ts, _ := publicEWS(t) // never provisioned

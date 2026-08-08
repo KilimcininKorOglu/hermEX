@@ -65,7 +65,7 @@ func TestSQLDirectoryUserDetailLifecycle(t *testing.T) {
 	}
 
 	// The domain-status bits (0x30) are cached in address_status and must survive
-	// a user-status edit — only the low nibble is replaced.
+	// a user-status edit, only the low nibble is replaced.
 	if _, err := db.Exec(`UPDATE users SET address_status = 0x20 WHERE username = ?`, "alice@hermex.test"); err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestSQLDirectoryUserDetailLifecycle(t *testing.T) {
 }
 
 // TestSQLDirectoryDeleteUserKeepsFiles proves a delete without deleteFiles leaves
-// the maildir on disk — a missing flag must never destroy a mailbox's contents.
+// the maildir on disk, a missing flag must never destroy a mailbox's contents.
 func TestSQLDirectoryDeleteUserKeepsFiles(t *testing.T) {
 	db := openTestDB(t)
 	d := NewSQL(db)
@@ -216,9 +216,9 @@ func TestSQLDirectoryAltnames(t *testing.T) {
 }
 
 // TestSQLDirectoryUserAliases proves per-user e-mail aliases round-trip through
-// Set/ListAliasesFor — normalized, de-duplicated, a replace overwrites, an
+// Set/ListAliasesFor, normalized, de-duplicated, a replace overwrites, an
 // unknown user is not-found, an in-use address is rejected with the prior set
-// intact — and that a saved alias actually routes mail (Resolve follows it).
+// intact, and that a saved alias actually routes mail (Resolve follows it).
 func TestSQLDirectoryUserAliases(t *testing.T) {
 	db := openTestDB(t)
 	d := NewSQL(db)
@@ -306,7 +306,7 @@ func TestSQLDirectoryUserProperties(t *testing.T) {
 	if err := db.QueryRow(`SELECT id FROM users WHERE username = ?`, "alice@hermex.test").Scan(&uid); err != nil {
 		t.Fatal(err)
 	}
-	// A property owned by another subsystem — a tag the contact editor never manages.
+	// A property owned by another subsystem, a tag the contact editor never manages.
 	const foreignTag = 0x0FFF001F
 	if _, err := db.Exec(`INSERT INTO user_properties (user_id, proptag, order_id, propval_str) VALUES (?, ?, 1, ?)`,
 		uid, foreignTag, "do-not-touch"); err != nil {

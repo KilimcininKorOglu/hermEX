@@ -7,7 +7,7 @@ import (
 
 // TestExpandACMENames proves the certificate allowlist covers the mail/autodiscover/
 // autoconfig hosts a client is steered to per domain plus the server hostname,
-// deduplicated, and that the apex is excluded — it is the tenant's own website and
+// deduplicated, and that the apex is excluded, it is the tenant's own website and
 // would not resolve to the gateway. Coverage matters because a missing name means
 // that host presents no valid certificate; the mail hosts in particular never reach
 // the gateway over HTTP, so on-demand issuance would skip them and only this
@@ -34,7 +34,7 @@ func TestExpandACMENames(t *testing.T) {
 }
 
 // TestExpandACMENamesMTASTS proves the mta-sts.<domain> policy host enters the
-// allowlist only when MTA-STS publishing is enabled — obtaining a certificate for it
+// allowlist only when MTA-STS publishing is enabled, obtaining a certificate for it
 // before the owner has pointed the host at the gateway would fail TLS-ALPN-01 and
 // burn the CA rate limit, so it must not be requested speculatively.
 func TestExpandACMENamesMTASTS(t *testing.T) {
@@ -66,7 +66,7 @@ func TestExpandACMENamesDedupesHostname(t *testing.T) {
 }
 
 // TestExpandACMENamesEmpty proves no domains and no hostname yield an empty list
-// rather than a slice with empty strings — CertMagic must not be asked to manage "".
+// rather than a slice with empty strings, CertMagic must not be asked to manage "".
 func TestExpandACMENamesEmpty(t *testing.T) {
 	if got := expandACMENames([]string{""}, "", false); len(got) != 0 {
 		t.Errorf("expandACMENames(empty) = %v, want no names", got)

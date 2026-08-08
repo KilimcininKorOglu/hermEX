@@ -103,7 +103,7 @@ func decideResponse(st *objectstore.Store, req *oxcmail.Message, cfg objectstore
 // hasConflict reports whether the request's time window overlaps an existing busy
 // appointment in the Calendar. Conflict detection is blind to recurring series: a
 // recurring master is skipped (no instance expansion), so auto-accept can double-book
-// against a recurring appointment — a known v1 gap shared with the free/busy view.
+// against a recurring appointment, a known v1 gap shared with the free/busy view.
 // Only a Busy or out-of-office appointment is a hard conflict; free and tentative are
 // not.
 func hasConflict(st *objectstore.Store, req *oxcmail.Message, t apptTags) (bool, error) {

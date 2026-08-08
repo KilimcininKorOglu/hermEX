@@ -40,7 +40,7 @@ func sendItemReqSaved(saveToFolder, itemID, savedFolder string) string {
 
 // TestSendItemDeliversAndConsumesDraft proves the create-then-send flow: a saved
 // draft is transmitted (loopback to the sender lands in the Inbox), a copy is
-// filed to Sent Items (SaveItemToFolder=true), and the source draft is consumed —
+// filed to Sent Items (SaveItemToFolder=true), and the source draft is consumed,
 // a sent message must not linger in Drafts looking unsent.
 func TestSendItemDeliversAndConsumesDraft(t *testing.T) {
 	ts, dir := seededWithMessage(t)
@@ -100,8 +100,8 @@ func TestSendItemNoSaveConsumesDraft(t *testing.T) {
 	}
 }
 
-// TestSendItemInvalidSaveSettings confirms the documented contradiction —
-// SaveItemToFolder=false with a SavedItemFolderId — is rejected and the draft is
+// TestSendItemInvalidSaveSettings confirms the documented contradiction,
+// SaveItemToFolder=false with a SavedItemFolderId, is rejected and the draft is
 // left untouched.
 func TestSendItemInvalidSaveSettings(t *testing.T) {
 	ts, dir := seededWithMessage(t)

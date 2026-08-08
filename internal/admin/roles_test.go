@@ -78,7 +78,7 @@ func TestAdminRevokeRole(t *testing.T) {
 	}
 }
 
-// TestAdminRolesRequireSystem proves an org admin cannot manage roles — role
+// TestAdminRolesRequireSystem proves an org admin cannot manage roles, role
 // administration is a system-level operation, so the org admin must not be able
 // to escalate.
 func TestAdminRolesRequireSystem(t *testing.T) {

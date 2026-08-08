@@ -8,8 +8,8 @@ import (
 
 // ropGetRulesTable handles RopGetRulesTable ([MS-OXORULE] 2.2.1.2): it snapshots the
 // folder's rules into a new table object whose rows the client reads with
-// RopSetColumns/RopQueryRows. The response is the bare 6-byte head — no row count,
-// matching the no-extra-body encoding — whose HandleIndex is the OUTPUT handle the
+// RopSetColumns/RopQueryRows. The response is the bare 6-byte head, no row count,
+// matching the no-extra-body encoding, whose HandleIndex is the OUTPUT handle the
 // table was allocated into (distinct from RopModifyRules, which echoes the input).
 //
 // The single defined TableFlags bit is Unicode (0x40); v1 serves PR_RULE_NAME /
@@ -83,8 +83,8 @@ const (
 )
 
 // ropModifyRules handles RopModifyRules ([MS-OXORULE] 2.2.1.1): it decodes the
-// RuleData rows — each a row flag plus a tagged-property-value array (the same shape
-// RopModifyPermissions uses, NOT a PROPERTY_ROW) — turns each into a store change, and
+// RuleData rows, each a row flag plus a tagged-property-value array (the same shape
+// RopModifyPermissions uses, NOT a PROPERTY_ROW), turns each into a store change, and
 // applies the batch. The response is the bare head whose HandleIndex echoes the input
 // folder handle.
 func (s *Session) ropModifyRules(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {

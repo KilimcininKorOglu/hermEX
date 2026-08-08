@@ -166,7 +166,7 @@ type updateFolderResponse struct {
 // handleUpdateFolder answers UpdateFolder: it applies a folder:DisplayName
 // SetFolderField as an in-place rename and a folder:PermissionSet SetFolderField as
 // a full access-control replace. A well-known (distinguished) folder's name is
-// fixed — renaming it would desync the IMAP well-known projection — so a rename of
+// fixed, renaming it would desync the IMAP well-known projection, so a rename of
 // one is refused; a permission change on one is allowed (sharing a well-known
 // folder is legitimate and does not touch the name projection). Other updatable
 // fields are accepted as a no-op success, as the reference silently drops fields it
@@ -250,7 +250,7 @@ func applyFolderRename(st *objectstore.Store, fid int64, newName string) (folder
 }
 
 // applyPermissionSet replaces a folder's whole permission table with the wire
-// PermissionSet — MS-OXWSFOLD UpdateFolder is a full ACL replace, not a diff. Each
+// PermissionSet, MS-OXWSFOLD UpdateFolder is a full ACL replace, not a diff. Each
 // member's rights are masked to the client-sendable set and normalized as the store
 // contract requires. A real member whose address does not resolve in the directory
 // is skipped (matching the ROP permission path); because this is a full replace,

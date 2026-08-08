@@ -44,7 +44,7 @@ func findEvent(events []logging.Event, name string) (logging.Event, bool) {
 
 // TestInstrumentationLogsConnAndAuth proves the POP3 server logs a connection
 // accept, a failed auth tagged with the attempted login, and a successful auth
-// tagged with the user — and that no password reaches the log.
+// tagged with the user, and that no password reaches the log.
 func TestInstrumentationLogsConnAndAuth(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "alice")
 	st, err := objectstore.Open(path)

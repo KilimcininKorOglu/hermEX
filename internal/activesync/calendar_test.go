@@ -251,8 +251,8 @@ func seedAppointment(t *testing.T, dir, subject string, start, end time.Time) {
 	}
 }
 
-// TestCalendarAppDataRecurring proves a recurring appointment — which stores only
-// its start named property plus the verbatim iCal, no end — is served with its end
+// TestCalendarAppDataRecurring proves a recurring appointment, which stores only
+// its start named property plus the verbatim iCal, no end, is served with its end
 // and an MS-ASCAL Recurrence subtree parsed from that iCal, rather than skipped.
 func TestCalendarAppDataRecurring(t *testing.T) {
 	st, err := objectstore.Open(t.TempDir())

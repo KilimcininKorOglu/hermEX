@@ -1,8 +1,8 @@
 // Package oxvcard converts between vCard (RFC 6350) and the MAPI contact object
 // model (IPM.Contact, MS-OXVCARD / MS-OXOCNTC).
 //
-// Import parses a vCard into an oxcmail.Message — a property bag plus, for a
-// contact photo, one attachment — and Export renders such a message back into a
+// Import parses a vCard into an oxcmail.Message, a property bag plus, for a
+// contact photo, one attachment, and Export renders such a message back into a
 // vCard. Import accepts vCard 3.0 and 4.0 and rejects 2.1; Export always emits
 // 4.0. It is the contact analogue of package oxcmail: the same Message type and
 // the same store seam (CreateMessage / OpenMessage) carry a contact unchanged.

@@ -102,7 +102,7 @@ func (s *Server) modLinkAttCore(req modLinkAttRequest, user string) uint32 {
 	}
 	// A caller may edit only their own delegate list: the target mailbox must be
 	// the authenticated principal. The compare is against the primary SMTP, so a
-	// caller authenticated by an alias is denied (safe — the admin editor is the
+	// caller authenticated by an alias is denied (safe, the admin editor is the
 	// fallback; see the internal spec).
 	if !strings.EqualFold(strings.TrimSpace(user), target.smtp) {
 		return ecAccessDenied
@@ -133,7 +133,7 @@ func (s *Server) modLinkAttCore(req modLinkAttRequest, user string) uint32 {
 // ephemeral id (32 bytes, first byte 0x87) carries the MId at offset 28; a
 // permanent id (flags word 0) carries the X500 DN, NUL-terminated, after the
 // 28-byte header. An id of any other type, too short, or with an unterminated DN
-// yields no address — a malformed id from a client must not panic.
+// yields no address, a malformed id from a client must not panic.
 func (g gal) entryIDToAddress(eid []byte) (string, bool) {
 	if len(eid) < 20 {
 		return "", false

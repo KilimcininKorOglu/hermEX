@@ -18,7 +18,7 @@ import (
 // tls_certs plus the config-file fallback); in acme mode it is CertMagic obtaining
 // and renewing Let's Encrypt certificates for the tenant allowlist via TLS-ALPN-01.
 // It returns the source and a maintenance function to run in the background after
-// serving starts — for acme the obtain must happen once the challenge listener is
+// serving starts, for acme the obtain must happen once the challenge listener is
 // up, so it is never run inline here. A directory read failure falls back to manual
 // rather than sinking the front door.
 func gatewayTLS(cfg *config.Config, dir *directory.SQLDirectory, logger *logging.Logger) (serve.TLSSource, func(), error) {
@@ -81,8 +81,8 @@ func acmeMaintain(acme *tlscert.ACMEProvider, dir *directory.SQLDirectory, hostn
 }
 
 // mirrorACMECerts copies each obtained certificate from CertMagic's storage into the
-// tls_certs store, so the mail daemons — which terminate TLS on their own ports and
-// only read that store — present the same Let's Encrypt certificate as the gateway.
+// tls_certs store, so the mail daemons, which terminate TLS on their own ports and
+// only read that store, present the same Let's Encrypt certificate as the gateway.
 // It is a reconcile, not an event hook: it handles both a fresh obtain and a renewal
 // with one path, and writes a name only when its expiry differs from what the store
 // already holds, so an unchanged certificate does not churn the daemons' poll.
@@ -122,7 +122,7 @@ func mirrorACMECerts(acme *tlscert.ACMEProvider, dir *directory.SQLDirectory, na
 }
 
 // acmeNames is the host-name allowlist the gateway obtains certificates for, read
-// from the directory. Only active domains are included — a suspended domain
+// from the directory. Only active domains are included, a suspended domain
 // (domain_status != 0) is not served, and obtaining a certificate for it would waste
 // the CA's per-account rate limit. The MTA-STS policy host is added only when the
 // operator publishes MTA-STS (see expandACMENames).
@@ -131,7 +131,7 @@ func acmeNames(dir *directory.SQLDirectory, hostname string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The mta-sts.<domain> host needs a certificate only when MTA-STS is published —
+	// The mta-sts.<domain> host needs a certificate only when MTA-STS is published,
 	// otherwise the owner has not pointed it at the gateway, so a TLS-ALPN-01 order
 	// for it would fail and waste the CA rate limit. A settings read failure (e.g. the
 	// mtasts_settings table not yet migrated on an upgraded DB) must NOT sink the whole
@@ -152,7 +152,7 @@ func acmeNames(dir *directory.SQLDirectory, hostname string) ([]string, error) {
 // expandACMENames builds the certificate name set: the server's own hostname plus,
 // for each domain, the mail/autodiscover/autoconfig hosts the owner points at the
 // server (the prescribed CNAMEs), and the mta-sts host when MTA-STS publishing is on.
-// The apex is deliberately excluded — it is the tenant's own website, not the mail
+// The apex is deliberately excluded, it is the tenant's own website, not the mail
 // front door, so it would not resolve here and TLS-ALPN-01 would fail for it. Each
 // included name must resolve to the gateway on :443. The result is deduplicated and
 // sorted so the obtain order is stable.

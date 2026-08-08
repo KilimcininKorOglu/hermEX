@@ -115,7 +115,7 @@ func TestLoadModelFileMissing(t *testing.T) {
 
 // TestBayesClassifies proves the model learns: after training on distinct spam
 // and ham vocabularies, held-out spam-like text scores spam and ham-like text
-// scores ham. This fails if the prior, smoothing, or log-space math is wrong —
+// scores ham. This fails if the prior, smoothing, or log-space math is wrong,
 // not merely if Train/Score execute.
 func TestBayesClassifies(t *testing.T) {
 	m := NewBayesModel()

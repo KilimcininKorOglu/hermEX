@@ -68,7 +68,7 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request, sess *sessio
 
 	// Ping can only watch a folder the device has already synced (its snapshot is
 	// the change baseline). A watched folder with no snapshot means the device
-	// must sync first — report Status 7 rather than silently ignoring it.
+	// must sync first, report Status 7 rather than silently ignoring it.
 	for _, id := range folderIDs {
 		if dev.Collections[id] == nil {
 			writeWBXML(w, pingResponse(pingStatusFolderSync, nil))
@@ -100,7 +100,7 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request, sess *sessio
 		case <-r.Context().Done():
 			return // device disconnected; nothing to write
 		case <-wake:
-			// a push wake — loop and pingCheck observes the change
+			// a push wake, loop and pingCheck observes the change
 		case <-time.After(min(pingPoll, remaining)):
 		}
 		// Keep the long-held Ping visible in the live-session monitor.
@@ -110,7 +110,7 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request, sess *sessio
 
 // pingCheck reports which watched folders have changes the device has not yet
 // synced, by diffing each folder's live state against the device's snapshot. A
-// folder with no snapshot (never synced) is skipped — the client must Sync it
+// folder with no snapshot (never synced) is skipped, the client must Sync it
 // before Ping can watch it.
 func (s *Server) pingCheck(mailbox string, dev *deviceState, folderIDs []string) []string {
 	st, err := objectstore.Open(mailbox)
@@ -157,7 +157,7 @@ func pingFolders(root *wbxml.Node) []string {
 }
 
 // parseHeartbeat parses the requested heartbeat seconds. ok is false when the
-// value was present but out of the supported range — the caller replies Status 5
+// value was present but out of the supported range, the caller replies Status 5
 // with the returned nearest bound so the device retries with an acceptable
 // interval. A missing or unparseable value defaults to the maximum with ok true.
 func parseHeartbeat(s string) (d time.Duration, ok bool) {

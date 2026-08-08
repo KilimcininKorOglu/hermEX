@@ -13,7 +13,7 @@ import (
 // sharedSettings reads the shared webmail settings blob (PrWebmailSettings) as a
 // generic object so webmail2 can update only the keys it owns without dropping
 // fields the server-rendered webmail manages (composeFormat, density, ...). Both
-// clients share categories and signatures this way — the user's real settings,
+// clients share categories and signatures this way, the user's real settings,
 // not a per-client fork.
 func sharedSettings(st *objectstore.Store) map[string]json.RawMessage {
 	m := map[string]json.RawMessage{}
@@ -127,7 +127,7 @@ const (
 // MailGridColumnModel): the sender/subject/date columns are always shown, so
 // only the optional columns are toggleable. A nil struct means "all defaults".
 type mailListColumnsJSON struct {
-	Preview    bool `json:"preview"`    // subject-line snippet ("— preview text")
+	Preview    bool `json:"preview"`    // subject-line snippet (", preview text")
 	Attachment bool `json:"attachment"` // paperclip icon when the message has attachments
 	Importance bool `json:"importance"` // high/low importance marker
 	Categories bool `json:"categories"` // category/label badges
@@ -698,7 +698,7 @@ func (s *Server) handleGetProfile(w http.ResponseWriter, r *http.Request) {
 	tz, locale := s.userLocale(c.Email)
 	prof := map[string]any{"email": c.Email, "timezone": tz, "locale": locale}
 	// The display name, title, department, and phone live in the directory's user
-	// properties (keyed by full proptag) — the same fields the GAL and Outlook show.
+	// properties (keyed by full proptag), the same fields the GAL and Outlook show.
 	if dir, ok := s.auth.(interface {
 		GetUserProperties(string) (map[uint32]string, error)
 	}); ok {
@@ -723,7 +723,7 @@ func (s *Server) handleGetProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 // profileProps maps the SPA's editable profile fields to their directory MAPI
-// proptags — the cross-protocol properties the GAL and Outlook also read.
+// proptags, the cross-protocol properties the GAL and Outlook also read.
 func profileProps() map[string]mapi.PropTag {
 	return map[string]mapi.PropTag{
 		"display_name": mapi.PrDisplayName,
@@ -740,7 +740,7 @@ func (s *Server) handlePutProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Updates are often partial (e.g. timezone only), so persist only the directory
-	// fields actually present — an absent field is left untouched, never cleared.
+	// fields actually present, an absent field is left untouched, never cleared.
 	var prof struct {
 		DisplayName *string `json:"display_name"`
 		Title       *string `json:"title"`

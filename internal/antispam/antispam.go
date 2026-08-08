@@ -87,7 +87,7 @@ type Verdict struct {
 	DKIM         AuthResult
 	DMARC        AuthResult
 	// DMARCReject reports a DMARC failure under an enforcing policy (reject or
-	// quarantine) — the strongest spoofing signal. No allow rule, operator or
+	// quarantine), the strongest spoofing signal. No allow rule, operator or
 	// per-recipient, may rescue such a message from the score-based verdict.
 	DMARCReject bool
 	DNSBL       []string // the blocklist zones that listed the client IP
@@ -233,8 +233,8 @@ func (s *Scorer) Score(in Input) Verdict {
 	// DMARC: the message passes when an authenticated identifier (SPF or DKIM)
 	// aligns, under the relaxed organizational-domain rule, with the From domain.
 	// Otherwise the domain's published policy decides whether this is a failure.
-	// dmarcReject records a failure under an enforcing policy — the strongest
-	// spoofing signal — so an allowlist override cannot rescue a spoofed sender.
+	// dmarcReject records a failure under an enforcing policy, the strongest
+	// spoofing signal, so an allowlist override cannot rescue a spoofed sender.
 	dmarcReject := false
 	if s.lookupDMARC != nil && in.FromDomain != "" {
 		policy, ok := s.lookupDMARC(in.FromDomain)
@@ -277,7 +277,7 @@ func (s *Scorer) Score(in Input) Verdict {
 	}
 
 	// SpamAssassin rule subset: the summed score of the rules that fired is one
-	// bounded signal — it contributes a single weight once it crosses the SA
+	// bounded signal, it contributes a single weight once it crosses the SA
 	// threshold, however many rules matched, so the subset's score never dominates
 	// the verdict on its own.
 	if rs := s.saRules.Load(); rs != nil && len(in.Raw) > 0 {

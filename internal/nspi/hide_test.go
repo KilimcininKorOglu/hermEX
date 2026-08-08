@@ -58,7 +58,7 @@ func TestSnapshotCarriesHideMask(t *testing.T) {
 
 // TestQueryRowsHidesFromGAL proves a GAL-browse walk drops the AB_HIDE_FROM_GAL
 // users (both, gal) and keeps the rest, with total_rec counting only the visible
-// rows — yet the hidden user is still fetchable by an explicit MId, because
+// rows, yet the hidden user is still fetchable by an explicit MId, because
 // asking for a specific entry opens it regardless of the GAL bit.
 func TestQueryRowsHidesFromGAL(t *testing.T) {
 	s := hidingServer()

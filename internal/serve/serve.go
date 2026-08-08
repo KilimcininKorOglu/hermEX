@@ -1,6 +1,6 @@
 // Package serve is the shared HTTP serving entrypoint for the hermEX daemons. It
 // terminates TLS when the configuration supplies a certificate and falls back to
-// plaintext otherwise, so a daemon gains HTTPS by configuration alone — without
+// plaintext otherwise, so a daemon gains HTTPS by configuration alone, without
 // each command duplicating the TLS-versus-plaintext decision or the hardened
 // config.TLSConfig (TLS 1.2 floor).
 package serve
@@ -139,7 +139,7 @@ func (s *Server) Start() error { return s.httpSrv.Serve(s.ln) }
 func (s *Server) Shutdown(ctx context.Context) error { return s.httpSrv.Shutdown(ctx) }
 
 // TLSListener binds addr and returns a listener that terminates TLS with the
-// hardened tls.Config from tlsSrc — the implicit-TLS entry point for the mail
+// hardened tls.Config from tlsSrc, the implicit-TLS entry point for the mail
 // daemons (IMAPS/POP3S/SMTPS), whose protocol servers accept the returned
 // net.Listener directly. It errors if tlsSrc has no certificate.
 func TLSListener(addr string, tlsSrc TLSSource) (net.Listener, error) {

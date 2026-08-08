@@ -4,8 +4,8 @@ import "hermex/internal/mapi"
 
 // subscription is a client's registered interest in mailbox events
 // (RopRegisterNotification, [MS-OXCNOTIF] 2.2.1.2), held in the session handle
-// table. Folder and message ids are objectstore ids — the request EIDs are decoded
-// once at registration — so matching an event is a plain compare. handle and
+// table. Folder and message ids are objectstore ids, the request EIDs are decoded
+// once at registration, so matching an event is a plain compare. handle and
 // logonID are echoed back as the RopNotify NotificationHandle/LogonId when an event
 // is delivered.
 type subscription struct {
@@ -33,7 +33,7 @@ func (s subscription) matches(folderID, scopeMessageID int64, typeBit uint8) boo
 
 // classifyScope returns the scope message id a content notification is matched
 // against, mirroring the reference emitters' asymmetric convention
-// (the internal spec §6): a create or new-mail is folder-scoped (id 0 — no
+// (the internal spec §6): a create or new-mail is folder-scoped (id 0, no
 // message-specific subscription can pre-exist a create), while a modify or delete is
 // message-scoped. The event's message id is recovered from the notification's wire
 // EID; the type bit is the low byte of the NotificationFlags. The caller supplies the

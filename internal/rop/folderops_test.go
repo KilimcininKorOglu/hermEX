@@ -460,7 +460,7 @@ func TestSearchCriteriaBatchAlignment(t *testing.T) {
 	if ec := mustU32(t, p, "ec"); ec != ecNotSupported {
 		t.Errorf("SetSearchCriteria ec = %#x, want ecNotSupported", ec)
 	}
-	// Second response: GetSearchCriteria — proves the parser stayed aligned.
+	// Second response: GetSearchCriteria, proves the parser stayed aligned.
 	if id := mustU8(t, p, "RopId"); id != ropGetSearchCriteria {
 		t.Fatalf("second RopId = %#x, want GetSearchCriteria (parser misaligned)", id)
 	}

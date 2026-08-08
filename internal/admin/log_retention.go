@@ -28,7 +28,7 @@ func (s *Server) logRetentionPanelData(r *http.Request, notice string) map[strin
 
 // handleUISaveLogRetention persists the central-log retention window (in whole days).
 // The admin daemon prunes the log store to match within about a minute, no restart. A
-// value of zero means keep logs forever — pruning is disabled — which is allowed and is
+// value of zero means keep logs forever, pruning is disabled, which is allowed and is
 // the safe default; formInt already maps a blank or negative entry to zero.
 func (s *Server) handleUISaveLogRetention(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.uiAuthorized(w, r); !ok {

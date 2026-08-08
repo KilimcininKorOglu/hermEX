@@ -49,7 +49,7 @@ func collectionFID(st *objectstore.Store, root int64, defaultName, name string) 
 	return st.FolderByName(&root, name)
 }
 
-// childCollections returns the child folders of a collection root — the additional
+// childCollections returns the child folders of a collection root, the additional
 // calendars/address books the home-set PROPFIND advertises beyond the well-known
 // one. Folders named for a reserved scheduling collection are skipped: they back the
 // scheduling Inbox, not a user calendar, and are served under their own kind.

@@ -132,7 +132,7 @@ type newMessageState struct {
 	savedID     int64
 }
 
-// Session is one MAPI/HTTP session's object/handle table — the analogue of a
+// Session is one MAPI/HTTP session's object/handle table, the analogue of a
 // per-logon object graph. It is created on Connect and closed on Disconnect.
 //
 // Execute requests are serialized by the MAPI/HTTP sequence cookie, but a
@@ -161,7 +161,7 @@ type Session struct {
 	// logon, so two logons never collide); the value is the caller's normalized
 	// (primary-SMTP) identity, against which the caller's folder permissions are
 	// resolved. A store ABSENT from the map is an owner logon with unrestricted
-	// access — the common case — so owner sessions carry no entry and the gate is a
+	// access, the common case, so owner sessions carry no entry and the gate is a
 	// map-miss (the regression-safe default). Populated at delegate logon, dropped
 	// when the logon store closes (release/Close).
 	delegateCallers map[*objectstore.Store]string
@@ -211,7 +211,7 @@ func NewSession(mailbox string, accounts directory.Accounts, owner string, opts 
 	return s
 }
 
-// MailboxDir reports the session's mailbox directory — the key the push relay
+// MailboxDir reports the session's mailbox directory, the key the push relay
 // stamps on a change event for this mailbox, so a notification long-poll registers
 // it to be woken the instant the mailbox changes. For an owner logon this is the
 // opened logon store's directory (logon.go opens the store at s.mailbox); a delegate
@@ -233,8 +233,8 @@ func (s *Session) alloc(o *object) uint32 {
 func (s *Session) get(h uint32) *object { return s.handles[h] }
 
 // persistedMessageID returns the store message id behind a message object when it
-// refers to a row that already exists — an opened message, or a compose message
-// after its first save — so attachment writes can target the real message. It
+// refers to a row that already exists, an opened message, or a compose message
+// after its first save, so attachment writes can target the real message. It
 // reports false for a compose message still in memory (no row yet) or a non-message
 // object.
 func persistedMessageID(o *object) (int64, bool) {
@@ -266,7 +266,7 @@ func (s *Session) release(h uint32) {
 
 // authorize reports whether the logon that owns store may exercise the need rights
 // on folderID. An owner logon (store not registered in delegateCallers) is
-// unrestricted — it short-circuits to granted without consulting the permission
+// unrestricted, it short-circuits to granted without consulting the permission
 // table, because the owner holds no permission row of their own and routing them
 // through ResolvePermission would fall to the (empty) default grant and lock them
 // out of their own mailbox. A delegate logon resolves the caller's effective folder
@@ -285,7 +285,7 @@ func (s *Session) authorize(store *objectstore.Store, folderID int64, need uint3
 }
 
 // denyWrite writes an access-denied (or error) response and reports true when the
-// caller may not exercise need on folderID — the per-operation write gate the
+// caller may not exercise need on folderID, the per-operation write gate the
 // mutating ROP handlers call after resolving their target folder. An owner logon
 // short-circuits inside authorize, so this is a no-op for an owner session.
 func (s *Session) denyWrite(out *ext.Push, ropID, hindex uint8, store *objectstore.Store, folderID int64, need uint32) bool {
@@ -341,7 +341,7 @@ func (s *Session) logAuthzDeny(ropID uint8, store *objectstore.Store, folderID i
 
 // denyDelegate writes an access-denied response and reports true when store is a
 // delegate logon. It refuses, for a non-owner caller, the store-level configuration
-// reserved to the mailbox owner — re-targeting a receive folder — which is not
+// reserved to the mailbox owner, re-targeting a receive folder, which is not
 // expressible as a per-folder right. An owner logon (store absent from
 // delegateCallers) passes.
 func (s *Session) denyDelegate(out *ext.Push, ropID, hindex uint8, store *objectstore.Store) bool {
@@ -353,7 +353,7 @@ func (s *Session) denyDelegate(out *ext.Push, ropID, hindex uint8, store *object
 	return false
 }
 
-// onDelegateList reports whether caller is a designated delegate of the mailbox —
+// onDelegateList reports whether caller is a designated delegate of the mailbox,
 // the send-on-behalf grant (and one of the two store-open paths). The match is
 // case-insensitive, like the logon-time delegate check.
 func (s *Session) onDelegateList(store *objectstore.Store, caller string) (bool, error) {
@@ -375,7 +375,7 @@ func (s *Session) onDelegateList(store *objectstore.Store, caller string) (bool,
 // sender is empty (no distinct Sender header), always permitted. A delegate may send
 // only when designated on the mailbox's delegate list (send-on-behalf); then the
 // message goes out From the mailbox owner with the delegate as its Sender. A delegate
-// admitted by a folder grant alone — not on the list — is refused: folder permissions
+// admitted by a folder grant alone, not on the list, is refused: folder permissions
 // do not by themselves confer the right to send as the mailbox. hermEX models a single
 // delegate list, mapped to send-on-behalf, so the sender always names the delegate
 // (full send-as impersonation, where the message hides the delegate, is not offered).

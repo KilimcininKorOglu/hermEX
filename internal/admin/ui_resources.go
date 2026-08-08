@@ -47,7 +47,7 @@ func (s *Server) handleUICreateDomain(w http.ResponseWriter, r *http.Request) {
 
 // handleUIPurgeDomain purges a domain from the management page and returns the
 // refreshed panel; deleteFiles also removes the on-disk mailboxes. It is gated by
-// uiAuthorized (full system admin) — the same as every other console mutation.
+// uiAuthorized (full system admin), the same as every other console mutation.
 func (s *Server) handleUIPurgeDomain(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.uiAuthorized(w, r); !ok {
 		return

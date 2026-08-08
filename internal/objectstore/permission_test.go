@@ -59,7 +59,7 @@ func TestListPermissionsTranslatesMemberIDs(t *testing.T) {
 	if e := m[mapi.MemberIDAnonymous]; e.Name != "anonymous" || e.Rights != mapi.FrightsFreeBusySimple {
 		t.Errorf("anonymous member = %+v, want id -1/name anonymous/rights 0x%X", e, mapi.FrightsFreeBusySimple)
 	}
-	// The real member's id is its row id — some value that is neither 0 nor -1.
+	// The real member's id is its row id, some value that is neither 0 nor -1.
 	var real PermissionEntry
 	for id, e := range m {
 		if id != mapi.MemberIDDefault && id != mapi.MemberIDAnonymous {
@@ -245,7 +245,7 @@ func TestAddDefaultUpsertsNoDuplicate(t *testing.T) {
 // TestResolvePermissionExactWinsOverDefault is the resolver's load-bearing rule:
 // an exact-username grant takes precedence over the "default" member grant, and a
 // user with no exact grant falls through to default. Distinct rights make the
-// precedence observable — a resolver that returned default for everyone, or
+// precedence observable, a resolver that returned default for everyone, or
 // exact-or-nothing, would fail one of the two assertions.
 func TestResolvePermissionExactWinsOverDefault(t *testing.T) {
 	s := openSeededStore(t)
@@ -266,7 +266,7 @@ func TestResolvePermissionExactWinsOverDefault(t *testing.T) {
 }
 
 // TestResolvePermissionNoDefaultIsNone confirms a user with neither an exact grant
-// nor a "default" member grant resolves to no rights (0), not an error — the inert
+// nor a "default" member grant resolves to no rights (0), not an error, the inert
 // state a seeded folder without a default has.
 func TestResolvePermissionNoDefaultIsNone(t *testing.T) {
 	s := openSeededStore(t)

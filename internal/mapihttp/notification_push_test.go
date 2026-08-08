@@ -14,7 +14,7 @@ import (
 // TestNotificationWaitWakesViaPush proves the push path end-to-end and across the
 // real wire: a delivery made through a separate store handle (a different daemon's
 // MTA) publishes to a real relay, whose event the server's consumer routes to the
-// parked NotificationWait — returning EventPending well under the poll cadence. The
+// parked NotificationWait, returning EventPending well under the poll cadence. The
 // cadence is set to 10s, so a timely return can ONLY come from the push wake, not a
 // cadence poll. It also exercises the path-key match: the publish keys on the
 // store's Dir() and the wait registers sess.MailboxDir(), which must be byte-

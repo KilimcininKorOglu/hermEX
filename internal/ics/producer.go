@@ -33,7 +33,7 @@ func (pr *Producer) WriteMarker(m uint32) {
 	pr.queue = append(pr.queue, element{header: binary.LittleEndian.AppendUint32(nil, m)})
 }
 
-// WriteProp appends a property value. PT_SVREID is silently dropped — it has no
+// WriteProp appends a property value. PT_SVREID is silently dropped, it has no
 // FastTransfer form and never appears in a valid stream. Any other unsupported
 // type returns an error so the caller can exclude the property rather than
 // corrupt the stream.
@@ -71,7 +71,7 @@ func (pr *Producer) PendingLen() int {
 // elements, splitting only inside a large value's body when a single element
 // exceeds maxLen. last reports the stream is fully drained, after which the
 // producer resets for reuse. A single atomic header larger than maxLen (a rare
-// huge multivalue) is emitted as one oversized chunk — large multivalues are a
+// huge multivalue) is emitted as one oversized chunk, large multivalues are a
 // documented v1 limitation; large strings/binaries are torn safely.
 func (pr *Producer) ReadBuffer(maxLen int) (chunk []byte, last bool) {
 	var out []byte

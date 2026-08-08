@@ -5,7 +5,7 @@ import "hermex/internal/mapi"
 // GetWebmailSettings returns the webmail settings JSON stored on the store root,
 // or the empty string when none has been saved yet. Settings live as a single
 // MAPI property (PrWebmailSettings) rather than in a dedicated table, so they
-// share the object store's storage and transaction model — the same "everything
+// share the object store's storage and transaction model, the same "everything
 // is a property" shape the rest of the store uses.
 func (s *Store) GetWebmailSettings() (string, error) {
 	props, err := s.GetStoreProperties(mapi.PrWebmailSettings)

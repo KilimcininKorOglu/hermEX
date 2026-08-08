@@ -18,7 +18,7 @@ const permTableIncludeFreeBusy uint8 = 0x02
 // ropGetPermissionsTable handles RopGetPermissionsTable ([MS-OXCPERM] 2.2.1): it
 // snapshots the folder's permission members into a new table object whose rows the
 // client reads with RopSetColumns/RopQueryRows. The response is the bare 6-byte head
-// — no row count, matching the reference's no-extra-body encoding — so the output
+// , no row count, matching the reference's no-extra-body encoding, so the output
 // handle (HandleIndex) is the only thing the client needs to start paging.
 //
 // Access is store-owner authorized: a hermEX session only ever opens its own mailbox,
@@ -57,7 +57,7 @@ func (s *Session) ropGetPermissionsTable(p *ext.Pull, out *ext.Push, handles []u
 // permissionBags builds one property bag per permission member the table serves:
 // PR_MEMBER_ID, PR_MEMBER_NAME, PR_MEMBER_RIGHTS, and a present-empty PR_ENTRYID
 // (matching the reference's empty member EntryID; a real member's address-book
-// EntryID is a v1 gap — it is informational, since Modify/Remove key on PR_MEMBER_ID).
+// EntryID is a v1 gap, it is informational, since Modify/Remove key on PR_MEMBER_ID).
 // The always-present Default (id 0) and Anonymous (id -1) members are synthesized at
 // rightsNone when the folder stores no row for them, checked against the wire member
 // ids ListPermissions already translated so a stored default/anonymous is not
@@ -153,7 +153,7 @@ func (s *Session) ropModifyPermissions(p *ext.Pull, out *ext.Push, handles []uin
 		writeErr(out, ropModifyPermissions, hindex, ecError)
 		return true
 	}
-	// Editing a folder's permission table requires owner rights — the gate that
+	// Editing a folder's permission table requires owner rights, the gate that
 	// stops a delegate from granting themselves broader access on the owner's folders.
 	if s.denyWrite(out, ropModifyPermissions, hindex, folder.store, folder.folderID, mapi.FrightsOwner) {
 		return true
@@ -254,7 +254,7 @@ func ingestRights(propvals mapi.PropertyValues, includeFreeBusy bool) uint32 {
 
 // resolvePermissionMember resolves the storage username for a real-member AddRow from
 // its address identity: the member's PR_ENTRYID (an address-book EntryID whose X500
-// DN embeds the SMTP address) first, then a literal PR_SMTP_ADDRESS — the reference's
+// DN embeds the SMTP address) first, then a literal PR_SMTP_ADDRESS, the reference's
 // precedence. When the session has a directory the address is confirmed to exist; an
 // unresolvable row yields ("", false) so the caller skips it rather than faulting.
 func (s *Session) resolvePermissionMember(propvals mapi.PropertyValues) (string, bool) {

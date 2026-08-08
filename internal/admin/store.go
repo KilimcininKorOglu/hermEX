@@ -11,7 +11,7 @@ import (
 // store rather than the directory (out-of-office, ActiveSync devices). The
 // concrete mailboxStore satisfies it; the server tests substitute a fake. The
 // settings are exchanged as the canonical objectstore/activesync types so the
-// admin UI shares one representation with webmail and the protocol handlers —
+// admin UI shares one representation with webmail and the protocol handlers,
 // never a second encoding of the same format.
 type MailboxStore interface {
 	GetOOFSettings(maildir string) (objectstore.OOFSettings, error)
@@ -193,8 +193,8 @@ func (mailboxStore) ListFolderPermissions(maildir string, folderID int64) ([]obj
 }
 
 // SetFolderPermission grants or updates one member's rights on a folder. PermAdd
-// upserts the member's row (replace=false leaves every other member — including the
-// seeded default/anonymous free-busy rows — untouched). The rights value is a
+// upserts the member's row (replace=false leaves every other member, including the
+// seeded default/anonymous free-busy rows, untouched). The rights value is a
 // canonical level (mapi.Rights*), so it is persisted as the protocol layer would.
 func (mailboxStore) SetFolderPermission(maildir string, folderID int64, username string, rights uint32) error {
 	return withStore(maildir, func(st *objectstore.Store) error {
@@ -214,7 +214,7 @@ func (mailboxStore) RemoveFolderPermission(maildir string, folderID, memberID in
 	})
 }
 
-// withStore opens the object store at maildir, runs fn, and closes it — the
+// withStore opens the object store at maildir, runs fn, and closes it, the
 // open/close boilerplate the per-device action methods share.
 func withStore(maildir string, fn func(*objectstore.Store) error) error {
 	st, err := objectstore.Open(maildir)

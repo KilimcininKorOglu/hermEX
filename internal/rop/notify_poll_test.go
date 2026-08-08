@@ -51,7 +51,7 @@ func TestDetectContentChanges(t *testing.T) {
 			events[0].folderID, events[0].messageID, wantFolder, wantMsg)
 	}
 
-	// Read-state flip advances read_cn, not change_number — the MAX-based snapshot
+	// Read-state flip advances read_cn, not change_number, the MAX-based snapshot
 	// must still see it as a modify (the discriminating check for the read_cn fix).
 	if err := st.SetMessageReadState(info.ID, true); err != nil {
 		t.Fatalf("set read state: %v", err)

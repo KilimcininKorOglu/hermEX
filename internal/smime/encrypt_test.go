@@ -60,7 +60,7 @@ func TestEncryptThenOpensslDecrypt(t *testing.T) {
 }
 
 // TestOpensslEncryptThenDecrypt proves we decrypt an envelope produced by openssl
-// with AES-256-CBC — the inbound interop direction.
+// with AES-256-CBC, the inbound interop direction.
 func TestOpensslEncryptThenDecrypt(t *testing.T) {
 	requireOpenssl(t)
 	id := newIdentity(t)

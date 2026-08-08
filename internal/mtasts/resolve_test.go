@@ -56,7 +56,7 @@ func TestResolverLookup(t *testing.T) {
 }
 
 // TestResolverFetchError proves a fetch failure is surfaced as transient, not
-// cached as "no policy" — otherwise a blip would silently disable enforcement.
+// cached as "no policy", otherwise a blip would silently disable enforcement.
 func TestResolverFetchError(t *testing.T) {
 	r := &Resolver{
 		LookupTXT:   func(string) ([]string, error) { return []string{"v=STSv1; id=x"}, nil },

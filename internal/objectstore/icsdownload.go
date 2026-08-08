@@ -215,7 +215,7 @@ var folderChangeOmit = map[mapi.PropTag]struct{}{
 }
 
 // NewHierarchyDownload computes the subfolder delta for a folder subtree against
-// the client's prior state and builds the whole hierarchy stream eagerly — folder
+// the client's prior state and builds the whole hierarchy stream eagerly, folder
 // changes, then deletions, then the new high-water state, then INCRSYNCEND
 // ([MS-OXCFXICS] 3.3.5.12). A hierarchy is small, so unlike contents it is not
 // drained through a flow list; GetBuffer simply chunks the produced bytes.

@@ -58,7 +58,7 @@ type createItemResponse struct {
 // SendOnly delivers; SaveOnly stores a draft; SendAndSaveCopy delivers and files
 // a Sent copy. The message is built into an IPM.Note and rendered by
 // oxcmail.Export (never hand-rolled MIME). Bcc recipients are delivered but kept
-// off the wire — the delivery message carries only To/Cc bags.
+// off the wire, the delivery message carries only To/Cc bags.
 func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *session) {
 	var req createItemRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
@@ -110,7 +110,7 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 		}
 
 		// Every successful CreateItemResponseMessage carries an <m:Items>
-		// container — clients reject its absence. It is empty for SendOnly
+		// container, clients reject its absence. It is empty for SendOnly
 		// (nothing is persisted) and holds the stored item's id (with a
 		// ChangeKey, as every other returned ItemId does) for SaveOnly and
 		// SendAndSaveCopy.
@@ -131,7 +131,7 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 	}
 
 	// Meeting responses ([MS-OXWSMTGS]): an Accept/Tentative/Decline answers the
-	// referenced meeting request — updating the attendee's calendar and the request,
+	// referenced meeting request, updating the attendee's calendar and the request,
 	// and (when the disposition sends) notifying the organizer with an iTIP REPLY.
 	for _, mr := range req.Items.Accept {
 		msgs = append(msgs, s.meetingRespond(sess, mr.ReferenceItemID, meeting.ResponseAccepted, send))

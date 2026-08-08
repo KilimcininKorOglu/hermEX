@@ -24,7 +24,7 @@ func IsEncrypted(raw []byte) bool {
 	return mt == "application/pkcs7-mime" || mt == "application/x-pkcs7-mime"
 }
 
-// IsSMIME reports whether raw is any S/MIME message — signed or encrypted. These
+// IsSMIME reports whether raw is any S/MIME message, signed or encrypted. These
 // are exactly the messages whose original bytes must be preserved verbatim,
 // because re-synthesizing the MIME tree would invalidate the signature or mangle
 // the envelope.

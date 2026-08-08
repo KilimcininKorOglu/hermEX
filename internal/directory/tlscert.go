@@ -14,7 +14,7 @@ type TLSCertData struct {
 	KeyPEM  string // private key PEM (secret)
 }
 
-// TLSCertInfo is a stored certificate's metadata for display — never the key:
+// TLSCertInfo is a stored certificate's metadata for display, never the key:
 // the SNI name, the leaf's expiry, and the version token of the last write.
 type TLSCertInfo struct {
 	Name      string
@@ -37,7 +37,7 @@ func (d *SQLDirectory) SetTLSCert(name, certPEM, keyPEM string, notAfter int64) 
 
 // LoadTLSCerts returns every stored certificate including its private key, for the
 // in-process certificate provider to parse into a serving snapshot. It is not an
-// admin-facing call — ListTLSCerts returns the display metadata without keys.
+// admin-facing call, ListTLSCerts returns the display metadata without keys.
 func (d *SQLDirectory) LoadTLSCerts() ([]TLSCertData, error) {
 	rows, err := d.db.Query(`SELECT name, cert_pem, key_pem FROM tls_certs`)
 	if err != nil {

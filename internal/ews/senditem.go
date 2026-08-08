@@ -30,7 +30,7 @@ type sendItemResponse struct {
 
 // handleSendItem answers SendItem ([MS-OXWSCORE] 3.1.4.8): it transmits mail that
 // was already composed and saved (a draft), addressed by ItemId. SaveItemToFolder
-// chooses whether a copy is filed — into SavedItemFolderId, or Sent Items by
+// chooses whether a copy is filed, into SavedItemFolderId, or Sent Items by
 // default; pairing SaveItemToFolder=false with a SavedItemFolderId is the
 // documented contradiction ErrorInvalidSendItemSaveSettings.
 //
@@ -79,7 +79,7 @@ func (s *Server) handleSendItem(w http.ResponseWriter, inner []byte, sess *sessi
 // sendOne transmits one saved draft and settles its fate, returning the per-item
 // response message. The SMTP envelope takes every routable recipient (To+Cc+Bcc),
 // while the transmitted copy is rebuilt through oxcmail.Export (the one proven
-// outbound path) with Bcc bags dropped — Export writes a Bcc header for any Bcc
+// outbound path) with Bcc bags dropped, Export writes a Bcc header for any Bcc
 // bag, so leaving them in the wire copy would disclose blind recipients to the
 // To/Cc readers.
 func (s *Server) sendOne(cache *storeCache, sess *session, itemID string, save bool, saveFID int64) itemResponseMessage {
@@ -141,7 +141,7 @@ func (s *Server) sendOne(cache *storeCache, sess *session, itemID string, save b
 		return itemError("ErrorInternalServerError")
 	}
 
-	// Sent — consume the draft. File the copy first (so a later delete failure
+	// Sent, consume the draft. File the copy first (so a later delete failure
 	// never loses the sent record), then drop the original.
 	if save {
 		if _, err := st.AppendMessage(saveFID, raw, time.Now(), objectstore.FlagSeen); err != nil {

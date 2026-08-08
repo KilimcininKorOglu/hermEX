@@ -14,7 +14,7 @@ import (
 )
 
 // hangingSyncReq builds a Sync carrying a HeartbeatInterval (seconds) and one
-// collection at the given key with no client commands — a pure "tell me when
+// collection at the given key with no client commands, a pure "tell me when
 // something changes" request.
 func hangingSyncReq(key, hbSeconds string) *wbxml.Node {
 	return wbxml.Elem(wbxml.ASSync,

@@ -29,7 +29,7 @@ func (f *fakeIdleWaker) fire() {
 // TestIMAPIdle proves the IDLE command end-to-end (RFC 2177): the server
 // acknowledges with a continuation, pushes an untagged EXISTS when a delivery lands
 // during IDLE (woken by the push relay, well before the 30s poll cadence), ends the
-// command with a tagged OK on DONE, and — critically — keeps parsing commands on the
+// command with a tagged OK on DONE, and, critically, keeps parsing commands on the
 // same reader afterward, proving the DONE-reader goroutine left the stream resumable.
 func TestIMAPIdle(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "alice")

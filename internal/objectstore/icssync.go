@@ -12,7 +12,7 @@ import (
 // reserved (the replguidmap allocator hands out 6 and up), and the rop layer
 // already wraps every folder/message id as MakeEIDEx(1, …) on the wire. The ics
 // replica mapper therefore maps the store's own replica GUID to this id, so a
-// client idset converted through it is keyed by 1 — the same space the diff
+// client idset converted through it is keyed by 1, the same space the diff
 // below builds its lookup EIDs in.
 const homeReplID uint16 = 1
 
@@ -24,7 +24,7 @@ const homeReplID uint16 = 1
 //
 // Each of Seen, SeenFAI, and Read must be non-nil IFF its SYNC class is enabled
 // (SYNC_NORMAL / SYNC_ASSOCIATED / SYNC_READ_STATE); a nil set disables that
-// class — normal or FAI messages of a disabled class are skipped entirely, and a
+// class, normal or FAI messages of a disabled class are skipped entirely, and a
 // nil Read suppresses read-state reporting. Given may be empty (an initial sync)
 // but should be non-nil. Every idset must be in a loose, queryable form (post
 // Convert) keyed by the home replica id.
@@ -43,7 +43,7 @@ type ContentSyncRequest struct {
 type ContentSyncResult struct {
 	ChangedMIDs  []uint64 // messages to (re)download: new or content-changed
 	UpdatedMIDs  []uint64 // the subset of ChangedMIDs the client already had (a modification, not a create)
-	GivenMIDs    []uint64 // the store's current in-scope MIDs — the client's new given set
+	GivenMIDs    []uint64 // the store's current in-scope MIDs, the client's new given set
 	DeletedMIDs  []uint64 // given MIDs that no longer exist at all
 	NoLongerMIDs []uint64 // given MIDs still stored but outside this sync's scope (e.g. FAI when only SYNC_NORMAL)
 	ReadMIDs     []uint64 // body-up-to-date MIDs whose read state changed to read
@@ -60,7 +60,7 @@ type ContentSyncResult struct {
 // Both classification branches are live end to end. The "updated" (content-
 // changed) branch fires because ModifyMessageProperties bumps change_number on an
 // in-place edit; the read-state branch fires because a read-flag flip allocates a
-// read_cn — the authoritative path in read.go, and the ImportReadStateChanges
+// read_cn, the authoritative path in read.go, and the ImportReadStateChanges
 // upload path. A client that has not seen the new change_number / read_cn is sent
 // the message again. v1 reads only live (is_deleted=0) rows, so a soft-deleted
 // given MID is reported as deleted rather than no-longer; the changed set is
@@ -203,7 +203,7 @@ type HierarchySyncRequest struct {
 // no-longer set: a given FID absent from the live subtree is reported deleted.
 type HierarchySyncResult struct {
 	ChangedFIDs []uint64 // subfolders to (re)download
-	GivenFIDs   []uint64 // the store's current subtree FIDs — the client's new given set
+	GivenFIDs   []uint64 // the store's current subtree FIDs, the client's new given set
 	DeletedFIDs []uint64 // given FIDs no longer in the live subtree
 	LastCN      uint64   // the highest change number scanned (the client's new Seen high-water mark)
 }

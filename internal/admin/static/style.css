@@ -235,7 +235,7 @@ table.grid td.empty { color: var(--muted); text-align: center; }
 	color: var(--accent);
 }
 
-/* Settings page category tabs (CSS-only, radio-driven — no JS). The radios precede
+/* Settings page category tabs (CSS-only, radio-driven, no JS). The radios precede
    the tab bar and the panels so the general-sibling combinator can reveal the
    checked tab's panel. */
 .tabs > input[type="radio"] { position: absolute; opacity: 0; pointer-events: none; }

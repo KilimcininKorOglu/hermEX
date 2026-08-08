@@ -26,7 +26,7 @@ func syncItemsReq(folder, syncState string, maxChanges int) string {
 
 // countChange counts change elements of one kind in the response. The change
 // elements live in the types namespace (t:Create/t:Update/t:Delete) inside the
-// m:Changes wrapper — the shape EWS clients require to key the change type — so
+// m:Changes wrapper, the shape EWS clients require to key the change type, so
 // the assertions match that exact wire form, not a namespace-naive tag.
 func countChange(out, kind string) int {
 	return strings.Count(out, "<"+kind+` xmlns="`+nsTypes+`">`)

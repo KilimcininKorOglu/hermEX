@@ -124,7 +124,7 @@ func TestForwardRedirectExternalRelays(t *testing.T) {
 
 // TestForwardRedirectUnreachableNotDropped (advisor #1, no silent drop): a Redirect to
 // a destination that can be neither delivered nor relayed (foreign domain, no spool)
-// surfaces as unresolved so the caller bounces it — the message must not vanish.
+// surfaces as unresolved so the caller bounces it, the message must not vanish.
 func TestForwardRedirectUnreachableNotDropped(t *testing.T) {
 	alice := filepath.Join(t.TempDir(), "alice")
 	accounts := forwardingAccounts{
@@ -143,7 +143,7 @@ func TestForwardRedirectUnreachableNotDropped(t *testing.T) {
 }
 
 // TestForwardToSelfIsNoOp: a forward whose destination is the recipient itself is
-// ignored — the message is delivered once locally, with no duplicate or loop.
+// ignored, the message is delivered once locally, with no duplicate or loop.
 func TestForwardToSelfIsNoOp(t *testing.T) {
 	alice := filepath.Join(t.TempDir(), "alice")
 	accounts := forwardingAccounts{
@@ -187,7 +187,7 @@ func TestDeliverDoesNotForward(t *testing.T) {
 }
 
 // TestForwardIsOneHop: a forwarded copy is not itself re-forwarded. alice redirects to
-// carol, carol redirects to dave — carol receives it (one hop) and it is NOT relayed
+// carol, carol redirects to dave, carol receives it (one hop) and it is NOT relayed
 // onward to dave.
 func TestForwardIsOneHop(t *testing.T) {
 	alice := filepath.Join(t.TempDir(), "alice")

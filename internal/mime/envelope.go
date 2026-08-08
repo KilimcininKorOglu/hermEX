@@ -3,8 +3,8 @@
 // headers IMAP's ENVELOPE response is built from, see ParseEnvelope) and the
 // full MIME body tree with byte-exact section extraction (ParseStructure,
 // Part, and Section, which back IMAP's BODYSTRUCTURE and BODY[...] fetches).
-// Parsing preserves the source bytes verbatim — no transfer decoding, no
-// line-ending normalization — so fetched sections match what was stored.
+// Parsing preserves the source bytes verbatim, no transfer decoding, no
+// line-ending normalization, so fetched sections match what was stored.
 package mime
 
 import (

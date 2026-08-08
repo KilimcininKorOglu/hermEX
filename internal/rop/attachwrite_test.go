@@ -20,7 +20,7 @@ func buildCreateAttachment(inIdx, outIdx uint8) []byte {
 
 // buildSaveChangesAttachment builds a RopSaveChangesAttachment request. respIdx is
 // the common-header handle (the parent message); attIdx is the body
-// InputHandleIndex (the attachment) — the asymmetric wiring the handler relies on.
+// InputHandleIndex (the attachment), the asymmetric wiring the handler relies on.
 func buildSaveChangesAttachment(respIdx, attIdx uint8) []byte {
 	b := ext.NewPush(ext.FlagUTF16)
 	b.Uint8(ropSaveChangesAttachment)
@@ -72,8 +72,8 @@ func openAttachmentEC(t *testing.T, sess *Session, msgH uint32, num uint32) uint
 // create two attachments on an opened message, fill the first, save it, save the
 // message, then prove the delete-stable numbering and the change-number bump.
 // Deleting the first attachment must leave the second resolvable at its original
-// number, and the message — changed only by attachment edits, with no top-level
-// property set — must still surface as updated in the ICS content-sync diff.
+// number, and the message, changed only by attachment edits, with no top-level
+// property set, must still surface as updated in the ICS content-sync diff.
 func TestAttachmentWriteChain(t *testing.T) {
 	dir := t.TempDir()
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))

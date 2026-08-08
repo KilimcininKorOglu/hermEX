@@ -11,8 +11,8 @@ import (
 
 // LDAPVerifier verifies a login against an organization's LDAP directory by
 // bind-to-verify (search for the login's DN under the config, then simple-bind as
-// it with the supplied password). The LDAP client — which carries the external
-// LDAP dependency — implements this; a SQLDirectory with no verifier denies
+// it with the supplied password). The LDAP client, which carries the external
+// LDAP dependency, implements this; a SQLDirectory with no verifier denies
 // LDAP-mastered logins rather than checking them against the local crypt hash.
 type LDAPVerifier interface {
 	Verify(cfg LDAPConfig, login, password string) (bool, error)
@@ -141,7 +141,7 @@ func (d *SQLDirectory) ApplyLDAPProfile(username string, values map[string]strin
 }
 
 // GetLDAPConfig returns an organization's LDAP configuration, reporting ok=false
-// when the org has none — in which case its users authenticate against local
+// when the org has none, in which case its users authenticate against local
 // crypt rather than a directory.
 func (d *SQLDirectory) GetLDAPConfig(orgID int64) (cfg LDAPConfig, ok bool, err error) {
 	var startTLS int

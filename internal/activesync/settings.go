@@ -10,7 +10,7 @@ import (
 )
 
 // easDateDashes is the ActiveSync dashed UTC timestamp (DATE_DASHES) used for OOF
-// schedule bounds — the same format the Sync command emits for dates.
+// schedule bounds, the same format the Sync command emits for dates.
 const easDateDashes = "2006-01-02T15:04:05.000Z"
 
 // OofState values (MS-ASCMD Settings): disabled, enabled globally, or enabled for
@@ -22,9 +22,9 @@ const (
 )
 
 // handleSettings answers the MS-ASCMD Settings command. It serves the sub-requests
-// a client sends in one Settings document — UserInformation Get (the account's
+// a client sends in one Settings document, UserInformation Get (the account's
 // addresses), Oof Get/Set (the out-of-office auto-reply), and DeviceInformation /
-// DevicePassword Set (acknowledged) — each with its own Status, Get responses
+// DevicePassword Set (acknowledged), each with its own Status, Get responses
 // before Set responses (the order the protocol uses).
 func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request, sess *session) {
 	root, err := readWBXML(r)
@@ -79,7 +79,7 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request, sess *se
 // hermEX's single external reply text is sent to both EAS external buckets, but
 // their Enabled bits follow the audience: ExternalKnown is enabled whenever
 // external replies are on, while ExternalUnknown is enabled only for the All
-// audience — so a known-only configuration reports unknown senders as not replied
+// audience, so a known-only configuration reports unknown senders as not replied
 // to.
 func oofGetResponse(st *objectstore.Store) *wbxml.Node {
 	cfg, err := st.GetOOFSettings()
@@ -125,8 +125,8 @@ func oofMessage(appliesTo wbxml.Tag, enabled bool, reply string) *wbxml.Node {
 }
 
 // applyOofSet writes an Oof Set into the mailbox OOF settings. It read-merges so a
-// field the EAS wire does not carry — the per-audience subjects set via webmail or
-// the admin UI — survives. The two EAS external buckets map onto hermEX's single
+// field the EAS wire does not carry, the per-audience subjects set via webmail or
+// the admin UI, survives. The two EAS external buckets map onto hermEX's single
 // external reply plus an audience selector: ExternalUnknown enabled is the All
 // audience, only ExternalKnown enabled is the Known (contacts-only) audience, and
 // neither enabled turns external replies off. The reply text comes from the

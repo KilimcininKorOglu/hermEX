@@ -10,8 +10,8 @@ import (
 const msgStatusInConflict uint32 = 0x00000800
 
 // ropReloadCachedInformation handles RopReloadCachedInformation ([MS-OXCMSG]
-// 2.2.3.4): it re-reads the open message's cached header — the subject strings
-// and (v1) an empty recipient table — after the client has changed it. The
+// 2.2.3.4): it re-reads the open message's cached header, the subject strings
+// and (v1) an empty recipient table, after the client has changed it. The
 // response is byte-identical to RopOpenMessage's tail (without the output
 // handle), so a client that refreshes after an edit reads the same shape it got
 // when it first opened the message.

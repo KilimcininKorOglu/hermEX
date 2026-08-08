@@ -76,7 +76,7 @@ func buildModifyRecipients(inIdx uint8, columns []mapi.PropTag, rows ...[]byte) 
 
 // buildSaveChangesMessage builds a RopSaveChangesMessage request. respIdx is the
 // common-header ResponseHandleIndex; msgIdx is the body InputHandleIndex that
-// indexes the message object — deliberately distinct so the handle resolution
+// indexes the message object, deliberately distinct so the handle resolution
 // is exercised.
 func buildSaveChangesMessage(respIdx, msgIdx uint8) []byte {
 	b := ext.NewPush(ext.FlagUTF16)
@@ -147,8 +147,8 @@ func TestModifyRecipientRowRemoval(t *testing.T) {
 	}
 }
 
-// TestCreateFillSaveRoundTrip drives the full ROP write sequence — CreateMessage,
-// SetProperties, ModifyRecipients, SaveChangesMessage — then re-reads the saved
+// TestCreateFillSaveRoundTrip drives the full ROP write sequence, CreateMessage,
+// SetProperties, ModifyRecipients, SaveChangesMessage, then re-reads the saved
 // message both through the ROP layer (by the EID the save returned) and directly
 // from the store, proving the message and its recipient actually persisted.
 func TestCreateFillSaveRoundTrip(t *testing.T) {
@@ -253,7 +253,7 @@ func TestCreateFillSaveRoundTrip(t *testing.T) {
 		t.Errorf("re-read subject = %v, want WRITEMSG", subj)
 	}
 
-	// White-box: open the store directly to confirm the recipient persisted —
+	// White-box: open the store directly to confirm the recipient persisted,
 	// the ROP OpenMessage response does not surface recipients (v1), so this is
 	// the only way to verify the recipient survived the write.
 	st, err := objectstore.Open(dir)
@@ -348,7 +348,7 @@ func TestCreateFillSaveSubmitDelivers(t *testing.T) {
 		t.Errorf("Bcc recipient leaked onto the wire copy:\n%s", aliceRaw)
 	}
 
-	// carol (Bcc) was delivered to as well — blind, but delivered.
+	// carol (Bcc) was delivered to as well, blind, but delivered.
 	if n := inboxCount(t, carolDir); n != 1 {
 		t.Errorf("carol (Bcc) inbox = %d messages, want 1", n)
 	}
@@ -410,7 +410,7 @@ func inboxCount(t *testing.T, dir string) int {
 }
 
 // hasFromOwner reports whether the message header block carries a From line that
-// names owner — the proof that submit stamped (and Export emitted) the sender
+// names owner, the proof that submit stamped (and Export emitted) the sender
 // identity rather than shipping a From-less message.
 func hasFromOwner(raw []byte, owner string) bool {
 	for line := range bytes.SplitSeq(raw, []byte("\r\n")) {

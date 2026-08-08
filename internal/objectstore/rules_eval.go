@@ -24,7 +24,7 @@ const ruleFuzzyContains = flSubstring | flIgnoreCase
 // fails a leaf rather than erroring, so a rule simply does not match a message
 // that lacks the tested property. Node kinds the rule editor does not produce
 // (recipient sub-objects, property-to-property compares, counts) evaluate to
-// false — they are never silently treated as a match.
+// false, they are never silently treated as a match.
 func evalRestriction(r mapi.Restriction, props mapi.PropertyValues) bool {
 	switch r.Type {
 	case mapi.ResAnd:
@@ -282,7 +282,7 @@ func (s *Store) RunRules(folderID int64, nowUnix int64) (RuleRunResult, error) {
 // message, in sequence order, stopping at a terminal move or delete. It is the
 // delivery-time entry point. The message is already filed in the inbox before
 // this runs, so a caller on the delivery path must treat a returned error as
-// advisory (log and continue) rather than failing delivery — a rule must never
+// advisory (log and continue) rather than failing delivery, a rule must never
 // be able to make a sender retry. A mailbox with no inbox rules is a no-op. The
 // outbound actions (forwards, reject bounces, vacation auto-replies) are returned
 // for the delivery path to enqueue (the store cannot send mail), and the caller
@@ -648,7 +648,7 @@ func RuleCopyAction(targetFolderID int64) mapi.ActionBlock {
 }
 
 // ForwardRequest is a forward a matched rule asked for: the addresses to send to.
-// The store collects these — it cannot send mail itself — and returns them to the
+// The store collects these, it cannot send mail itself, and returns them to the
 // delivery path, which sends the ORIGINAL received message (not the store's
 // re-exported copy, which drops headers) after its loop/abuse guards. RunRules
 // ("apply rules now") discards them on purpose.
@@ -735,8 +735,8 @@ func RuleTagAction(tag mapi.PropTag, values ...string) mapi.ActionBlock {
 	return mapi.ActionBlock{Type: mapi.OpTag, Data: mapi.TaggedPropVal{Tag: tag, Value: values}}
 }
 
-// KeywordsPropTag resolves (creating if needed) the named Keywords property tag —
-// the multi-value string property that holds a message's categories — so the rule
+// KeywordsPropTag resolves (creating if needed) the named Keywords property tag,
+// the multi-value string property that holds a message's categories, so the rule
 // editor can build a categorize action whose OpTag sets the same property the
 // categories UI reads.
 func (s *Store) KeywordsPropTag() (mapi.PropTag, error) {

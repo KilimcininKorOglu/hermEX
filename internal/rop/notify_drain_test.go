@@ -11,7 +11,7 @@ import (
 // TestNotifyDrainDeliversCreate drives the whole poll→classify→drain path end to end:
 // a client subscribes to created events on the Inbox, a message is delivered into the
 // shared store (as another daemon's MTA would, with no in-process signal), and the
-// next Execute — here a bare wake-up with no ROPs — drains the change as a byte-exact
+// next Execute, here a bare wake-up with no ROPs, drains the change as a byte-exact
 // RopNotify. A second wake-up yields nothing, proving the event is delivered once.
 func TestNotifyDrainDeliversCreate(t *testing.T) {
 	sess := NewSession(t.TempDir(), nil, "")
@@ -36,7 +36,7 @@ func TestNotifyDrainDeliversCreate(t *testing.T) {
 		t.Fatalf("append: %v", err)
 	}
 
-	// The next Execute drains the create as a RopNotify (no ROPs in the batch — a
+	// The next Execute drains the create as a RopNotify (no ROPs in the batch, a
 	// pure notification wake-up).
 	resp, _ := sess.Dispatch(nil, nil)
 	p := ext.NewPull(resp, ext.FlagUTF16)
@@ -73,7 +73,7 @@ func TestNotifyDrainDeliversCreate(t *testing.T) {
 
 // TestNotifyDrainOverflowEmitsPendingAndRequeues pins the backpressure contract (§5):
 // when the queued notifications overflow the response buffer, the drain emits exactly
-// one RopPending and re-queues the remainder — in FIFO order, none dropped — so the
+// one RopPending and re-queues the remainder, in FIFO order, none dropped, so the
 // next Execute delivers them. It populates the queue directly to exercise the drain at
 // its byte boundary without seeding tens of thousands of store rows.
 func TestNotifyDrainOverflowEmitsPendingAndRequeues(t *testing.T) {
@@ -106,7 +106,7 @@ func TestNotifyDrainOverflowEmitsPendingAndRequeues(t *testing.T) {
 	if len(sess.pending) != total-fit {
 		t.Fatalf("re-queued %d notifications, want %d (only %d fit the buffer)", len(sess.pending), total-fit, fit)
 	}
-	// The remainder is the original tail in order — nothing dropped or reordered at
+	// The remainder is the original tail in order, nothing dropped or reordered at
 	// the overflow boundary.
 	if sess.pending[0].n.messageID != uint64(fit) {
 		t.Errorf("first re-queued messageID = %d, want %d", sess.pending[0].n.messageID, fit)
@@ -124,7 +124,7 @@ func TestNotifyDrainOverflowEmitsPendingAndRequeues(t *testing.T) {
 }
 
 // TestWholeStoreDeliversCreateInAnyFolder proves a whole-store subscription is woken
-// by a message that lands in a folder other than the Inbox — the sweep covers every
+// by a message that lands in a folder other than the Inbox, the sweep covers every
 // content folder, not just one. A message is delivered into Sent Items and the next
 // Execute drains a RopNotify for it.
 func TestWholeStoreDeliversCreateInAnyFolder(t *testing.T) {

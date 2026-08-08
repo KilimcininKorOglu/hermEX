@@ -7,8 +7,8 @@ import (
 	"hermex/internal/mapi"
 )
 
-// GetStoreOwners returns the mailbox's additional store-owner list — the SMTP
-// addresses granted read-write access to every object in the mailbox — or nil when
+// GetStoreOwners returns the mailbox's additional store-owner list, the SMTP
+// addresses granted read-write access to every object in the mailbox, or nil when
 // none have been set. The list lives as a single store-root property
 // (PrAbStoreOwners), the same "everything is a property" shape the delegate and
 // send-as lists use, and deliberately not the wire-editable folder permission table so

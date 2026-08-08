@@ -65,7 +65,7 @@ func reconstructMessage(t *testing.T, dst *Store, folderID int64, body []byte) u
 
 // TestCopyToMessageRoundTrip renders a stored message as a generic-copy
 // messageContent (CopyTo, no exclusions), replays the stream through the message
-// collector, and asserts the message is reconstructed by value — property bag,
+// collector, and asserts the message is reconstructed by value, property bag,
 // recipients, and attachment payload. It proves the messageContent grammar (a bare
 // property list plus the recipient/attachment sub-object lists, with no
 // INCRSYNCCHG/INCRSYNCMESSAGE framing) parses back through hermex's own upload path.
@@ -206,7 +206,7 @@ func TestCopyMessagesMessageList(t *testing.T) {
 
 // TestCopyMessagesSingleRoundTrip frames one message as a messageList, strips the
 // leading StartMessage and trailing EndMessage markers (4 bytes each), and replays
-// the bare messageContent through the upload path — proving the framing wraps a
+// the bare messageContent through the upload path, proving the framing wraps a
 // clean, reconstructable messageContent at the segment boundary.
 func TestCopyMessagesSingleRoundTrip(t *testing.T) {
 	s := openSeededStore(t)
@@ -240,7 +240,7 @@ func TestCopyMessagesSingleRoundTrip(t *testing.T) {
 }
 
 // TestCopyMessagesRejectsForeignMessage asserts a message id that is not a live row
-// of the source folder is refused (ErrNotFound) rather than emitted — a CopyMessages
+// of the source folder is refused (ErrNotFound) rather than emitted, a CopyMessages
 // source streams only messages of its own folder.
 func TestCopyMessagesRejectsForeignMessage(t *testing.T) {
 	s := openSeededStore(t)
@@ -254,7 +254,7 @@ func TestCopyMessagesRejectsForeignMessage(t *testing.T) {
 }
 
 // firstMessageBody returns the items strictly between the first StartMessage (or
-// StartFAIMsg) and its matching EndMessage — the bare messageContent of the first
+// StartFAIMsg) and its matching EndMessage, the bare messageContent of the first
 // message in a folderContent/messageList stream.
 func firstMessageBody(t *testing.T, items []ics.Item) []ics.Item {
 	t.Helper()

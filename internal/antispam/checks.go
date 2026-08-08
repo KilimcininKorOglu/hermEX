@@ -119,8 +119,8 @@ func realDNSBL(ip net.IP, zone string) bool {
 }
 
 // isListed reports whether a DNSBL response signals a real listing: an answer in
-// 127.0.0.0/8 (the RFC 5782 convention). Any other address — a hijacked or
-// wildcard resolver returning a public A record — is rejected: a false positive
+// 127.0.0.0/8 (the RFC 5782 convention). Any other address, a hijacked or
+// wildcard resolver returning a public A record, is rejected: a false positive
 // would file a legitimate sender's mail to Junk, so the bar is the standard one.
 func isListed(addrs []net.IP) bool {
 	for _, a := range addrs {
@@ -134,7 +134,7 @@ func isListed(addrs []net.IP) bool {
 // MessageText extracts the text the Bayes model classifies: the subject plus the
 // decoded text/* body parts. Training (the bootstrap tool, self-training) and
 // live scoring must both go through it so their token vocabularies match. It is
-// best-effort — on a parse error it returns whatever was gathered (possibly just
+// best-effort, on a parse error it returns whatever was gathered (possibly just
 // the subject).
 func MessageText(raw []byte) string {
 	var b strings.Builder

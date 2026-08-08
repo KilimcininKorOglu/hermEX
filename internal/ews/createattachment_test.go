@@ -70,7 +70,7 @@ func TestCreateAttachmentRoundTrip(t *testing.T) {
 
 // TestCreateAttachmentBaseCountOffset confirms an attachment added to a message
 // that ALREADY has one resolves, via its returned id, to the new content and not
-// the pre-existing attachment — the positional-index offset (baseCount) a
+// the pre-existing attachment, the positional-index offset (baseCount) a
 // clean-message test cannot exercise.
 func TestCreateAttachmentBaseCountOffset(t *testing.T) {
 	ts, _ := seededWithMessage(t, attachMessage) // already carries doc.txt = "file data"
@@ -93,7 +93,7 @@ func TestCreateAttachmentBaseCountOffset(t *testing.T) {
 }
 
 // TestCreateAttachmentMultiple confirms two FileAttachments in a single request
-// each get a distinct id resolving to their own content — the per-loop offset
+// each get a distinct id resolving to their own content, the per-loop offset
 // (created advancing within one request) the single-attachment tests cannot reach.
 func TestCreateAttachmentMultiple(t *testing.T) {
 	ts, _ := seededWithMessage(t, plainMessage)

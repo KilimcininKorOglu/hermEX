@@ -6,8 +6,8 @@ import (
 )
 
 // nspiSession is the server-side state an NSPI Bind establishes. NSPI is
-// otherwise stateless — the STAT cursor is client-carried and the GAL row
-// identity is deterministic — so the session holds only the authenticated user
+// otherwise stateless, the STAT cursor is client-carried and the GAL row
+// identity is deterministic, so the session holds only the authenticated user
 // and the per-request sequence guard, with no ROP object table.
 type nspiSession struct {
 	user     string

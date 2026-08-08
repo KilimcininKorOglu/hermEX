@@ -29,7 +29,7 @@ const (
 )
 
 // packed reports the serialized form, which rejects mutation (Append/Remove/
-// Concatenate) and is not directly queryable — call Convert first.
+// Concatenate) and is not directly queryable, call Convert first.
 func (f Form) packed() bool { return uint8(f)&0x01 != 0 }
 
 // ReplicaMapper resolves between a 16-bit replica id and its replica GUID. The

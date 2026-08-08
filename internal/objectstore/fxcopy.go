@@ -89,7 +89,7 @@ func fxWritePropsBuilt(producer *ics.Producer, props []ics.StreamProp) error {
 // CopyContext is a generic-copy FastTransfer source ([MS-OXCFXICS] 2.2.4): a fully
 // rendered stream the client drains chunk by chunk through
 // RopFastTransferSourceGetBuffer. Unlike the ICS download it carries no
-// synchronization framing (no INCRSYNCCHG, no change header, no state) — the stream
+// synchronization framing (no INCRSYNCCHG, no change header, no state), the stream
 // is a bare messageContent or propList.
 //
 // v1 scope: the source is a single stored message (CopyTo / CopyProperties).
@@ -124,7 +124,7 @@ func (s *Store) NewCopyToMessageSource(messageID int64, exclude []mapi.PropTag) 
 	return &CopyContext{producer: pr}, nil
 }
 
-// NewCopyPropertiesMessageSource renders a stored message's property list only —
+// NewCopyPropertiesMessageSource renders a stored message's property list only,
 // the CopyProperties body, with no recipients or attachments ([MS-OXCFXICS]
 // 2.2.4.1.1). include is the inclusive tag set; an empty set copies nothing.
 func (s *Store) NewCopyPropertiesMessageSource(messageID int64, include []mapi.PropTag) (*CopyContext, error) {
@@ -177,7 +177,7 @@ func (s *Store) NewCopyMessagesSource(folderID int64, messageIDs []int64, exclud
 
 // messageIsAssociated reports whether a live message of folderID is an associated
 // (FAI) message, selecting the StartFAIMsg vs StartMessage marker for the
-// messageList. A message id that is not a live row of folderID is ErrNotFound — a
+// messageList. A message id that is not a live row of folderID is ErrNotFound, a
 // CopyMessages source emits only messages of its own folder.
 func (s *Store) messageIsAssociated(folderID, messageID int64) (bool, error) {
 	var assoc int
@@ -200,7 +200,7 @@ func (s *Store) messageIsAssociated(folderID, messageID int64) (bool, error) {
 //
 // The topFolder path uses the no-del-props foldercontent variant: the message and
 // subfolder collections follow the folder property list directly, with no
-// MetaTagFXDelProp / PR_CONTAINER_HIERARCHY collection delimiters — each message's
+// MetaTagFXDelProp / PR_CONTAINER_HIERARCHY collection delimiters, each message's
 // StartMessage/StartFAIMsg marker already carries its associated flag, so the FAI
 // and normal lists need no separating tag.
 func (s *Store) NewCopyFolderSource(folderID int64, subfolders bool) (*CopyContext, error) {
@@ -214,8 +214,8 @@ func (s *Store) NewCopyFolderSource(folderID int64, subfolders bool) (*CopyConte
 }
 
 // writeFolderContentNoDelProps emits a no-del-props folderContent: the folder's
-// property bag, its associated (FAI) message list, its normal message list, then —
-// when subfolders is set — each direct subfolder wrapped in STARTSUBFLD/ENDFOLDER,
+// property bag, its associated (FAI) message list, its normal message list, then,
+// when subfolders is set, each direct subfolder wrapped in STARTSUBFLD/ENDFOLDER,
 // recursing. It mirrors the reference record_foldercontentnodelprops.
 func (s *Store) writeFolderContentNoDelProps(pr *ics.Producer, folderID int64, subfolders bool) error {
 	props, err := s.GetFolderProperties(folderID)
@@ -304,7 +304,7 @@ func (s *Store) folderMessageIDs(folderID int64, associated bool) ([]int64, erro
 // prefixed by a MetaTagFXDelProp for its collection so the destination starts from
 // an empty collection and replaces rather than merges ([MS-OXCFXICS] 2.2.4.1.2). It
 // mirrors the ICS message-change body (writeMessageChange) minus the change header
-// and the INCRSYNCMESSAGE marker — generic-copy messageContent begins directly with
+// and the INCRSYNCMESSAGE marker, generic-copy messageContent begins directly with
 // the property list.
 func writeCopyMessageContent(pr *ics.Producer, store *Store, msg *oxcmail.Message, proptags map[mapi.PropTag]struct{}, includeMode bool) error {
 	if err := fxWriteProps(pr, store, fxFilter(msg.Props, proptags, includeMode)); err != nil {

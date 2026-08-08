@@ -14,7 +14,7 @@ const MTASTSDefaultMaxAge = 86400
 
 // MTASTSSettings is the operator's choice of whether and how the server publishes an
 // MTA-STS policy (RFC 8461) for its own domains. Enabled gates publishing entirely.
-// Mode is "testing" (a sender reports TLS failures but still delivers — the safe
+// Mode is "testing" (a sender reports TLS failures but still delivers, the safe
 // rollout default) or "enforce" (a sender refuses delivery to a non-validated MX);
 // "none" withdraws a previously published policy. MaxAge is the policy cache lifetime
 // in seconds.
@@ -26,7 +26,7 @@ type MTASTSSettings struct {
 
 // GetMTASTSSettings returns the stored MTA-STS publishing settings and whether a row
 // exists. When none has been saved, found is false and the caller treats it as
-// disabled in testing mode — the safe default, so an upgrade never silently starts
+// disabled in testing mode, the safe default, so an upgrade never silently starts
 // advertising a policy or enforcing TLS on inbound mail.
 func (d *SQLDirectory) GetMTASTSSettings() (MTASTSSettings, bool, error) {
 	var s MTASTSSettings

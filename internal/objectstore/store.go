@@ -40,7 +40,7 @@ var ErrObjectDeleted = errors.New("objectstore: object deleted")
 // defaultLogger is the central activity log stamped onto every Store opened
 // after a daemon installs it. Logging is a cross-cutting concern: every mailbox
 // store in a process belongs to one daemon and shares its log, so a package-level
-// default avoids threading a logger through Open's many call sites — a deliberate
+// default avoids threading a logger through Open's many call sites, a deliberate
 // exception to the per-server Logger field used elsewhere. It is set once at
 // daemon startup (before serving) and read-only thereafter; the atomic makes that
 // publication race-clean. A nil default (the test and library baseline) disables
@@ -58,12 +58,12 @@ func SetDefaultLogger(l *logging.Logger) {
 // ChangeEvent describes one committed mailbox mutation, published to the central
 // notify relay so a long-poll consumer (MAPI/HTTP NotificationWait, EAS Ping, EWS
 // streaming, IMAP IDLE) wakes and runs its own authoritative diff the instant the
-// change lands instead of on its next poll tick. CN/Op/Mid are enrichment — the
-// consumer's diff is what observes the change — so they need only be best-effort
+// change lands instead of on its next poll tick. CN/Op/Mid are enrichment, the
+// consumer's diff is what observes the change, so they need only be best-effort
 // accurate; a delete that bumps no change number still wakes the consumer, whose
 // diff sees the vanished row regardless.
 type ChangeEvent struct {
-	MailboxDir string // the mutated store's directory (Dir()) — the key a consumer matches against the mailbox it is polling
+	MailboxDir string // the mutated store's directory (Dir()), the key a consumer matches against the mailbox it is polling
 	Op         string // the mutation kind: create | modify | flags | delete | folder
 	CN         uint64 // the change number stamped on the write; 0 when the write bumps none (a delete, or an index-only change)
 	Mid        string // the mid_string of a deleted/created message, when cheaply in scope; empty otherwise
@@ -73,7 +73,7 @@ type ChangeEvent struct {
 // committed mailbox mutation wakes the long-poll consumers in real time. It mirrors
 // defaultLogger: a package-level atomic so Open's many write paths need no threaded
 // publisher, set once before serving and read-only after. A nil hook (the test and
-// library baseline) is byte-identical to the pre-push behaviour — publishing is a
+// library baseline) is byte-identical to the pre-push behaviour, publishing is a
 // best-effort accelerator the mail path never depends on, so an absent or failing
 // relay simply leaves consumers on their existing poll cadence.
 var changePublisher atomic.Pointer[func(ChangeEvent)]
@@ -132,7 +132,7 @@ const (
 	storePublic                   // per-domain public-folder store
 )
 
-// ipmSubtree returns the folder id of this store's IPM subtree — the container
+// ipmSubtree returns the folder id of this store's IPM subtree, the container
 // whose children are the user-visible folders. It differs by store kind, so the
 // folder API (CreateFolder/ListFolders/FolderByName) roots at the correct subtree
 // for a private mailbox or a public-folder store.
@@ -143,7 +143,7 @@ func (s *Store) ipmSubtree() int64 {
 	return int64(mapi.PrivateFIDIPMSubtree)
 }
 
-// Dir returns the mailbox directory this store is rooted at — its stable
+// Dir returns the mailbox directory this store is rooted at, its stable
 // physical identity. Two stores opened over the same mailbox report the same
 // Dir even though they are distinct handles, so a caller can tell whether two
 // handles address the same physical mailbox (as opposed to comparing the

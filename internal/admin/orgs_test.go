@@ -263,7 +263,7 @@ func TestAdminGetLDAP(t *testing.T) {
 }
 
 // TestAdminLDAPOrgScoped proves an org admin reads its own org's config but is
-// refused another org's — the first real exercise of org-scoped RBAC.
+// refused another org's, the first real exercise of org-scoped RBAC.
 func TestAdminLDAPOrgScoped(t *testing.T) {
 	d := &fakeDir{
 		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminOrg, ScopeID: 5}},

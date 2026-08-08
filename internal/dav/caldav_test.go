@@ -758,7 +758,7 @@ func TestScheduleNameReserved(t *testing.T) {
 	for _, name := range []string{"inbox", "outbox"} {
 		path := "/dav/calendars/" + testUser + "/" + name + "/"
 		// The reserved segment is a scheduling collection, so MKCALENDAR over it is
-		// not allowed (405) — the client cannot create a user calendar that shadows it.
+		// not allowed (405), the client cannot create a user calendar that shadows it.
 		if resp, _ := doFull(t, ts, "MKCALENDAR", path, "", nil); resp.StatusCode != http.StatusMethodNotAllowed {
 			t.Errorf("MKCALENDAR %s: status %d, want 405", name, resp.StatusCode)
 		}

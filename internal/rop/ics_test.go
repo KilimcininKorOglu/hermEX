@@ -335,7 +335,7 @@ func TestSyncCollectorImportReadState(t *testing.T) {
 
 // TestSyncCollectorImportDeletes opens a content collector and deletes one of two
 // seeded messages by source key through RopSyncImportDeletes, asserting the target
-// is gone and the other remains — exercising the multivalue-binary source-key
+// is gone and the other remains, exercising the multivalue-binary source-key
 // extraction.
 func TestSyncCollectorImportDeletes(t *testing.T) {
 	dir := t.TempDir()
@@ -416,7 +416,7 @@ func messageContentBody(class, subject string) []byte {
 // TestSyncImportMessageBody drives the full ICS message-upload choreography through
 // the ROP dispatch: open a collector, import a new message by source key, configure
 // a FastTransfer destination on it, stream its body, and save. The committed
-// message must carry the uploaded subject — proving ImportMessageChange,
+// message must carry the uploaded subject, proving ImportMessageChange,
 // DestinationConfigure, PutBuffer, and the SaveChangesMessage commit branch link up.
 func TestSyncImportMessageBody(t *testing.T) {
 	dir := t.TempDir()
@@ -581,7 +581,7 @@ func homeGUID(t *testing.T, dir string) mapi.GUID {
 
 // TestGetLocalReplicaIds reserves two id blocks through RopGetLocalReplicaIds and
 // asserts the response carries the home replica GUID, a non-zero starting global
-// counter, and that the second block does not overlap the first — proving the
+// counter, and that the second block does not overlap the first, proving the
 // store allocator advances across reservations.
 func TestGetLocalReplicaIds(t *testing.T) {
 	dir := t.TempDir()
@@ -628,7 +628,7 @@ func TestGetLocalReplicaIds(t *testing.T) {
 // TestSyncDownloadContents drives the full ICS download path through the ROP
 // dispatch: logon, open inbox, SyncConfigure, then GetBuffer to completion. It
 // asserts the reassembled stream carries one change per seeded message, a state
-// block, and the terminating INCRSYNCEND — proving SyncConfigure + GetBuffer wire
+// block, and the terminating INCRSYNCEND, proving SyncConfigure + GetBuffer wire
 // the existing download context end to end.
 func TestSyncDownloadContents(t *testing.T) {
 	dir := t.TempDir()

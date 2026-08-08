@@ -12,7 +12,7 @@ import (
 
 // aclSanitizeRights masks a client-supplied MS-OXCPERM Frights bitfield down to
 // the rights a client may set over the wire (RightsMaxROP), dropping any reserved
-// or reference-private bit before storage — the same ingest allowlist
+// or reference-private bit before storage, the same ingest allowlist
 // ModifyPermissions enforces. The SPA sends the exact Frights union of the chosen
 // permission level (or a custom per-right combination), so the stored bitmask
 // round-trips back to the named level on read.

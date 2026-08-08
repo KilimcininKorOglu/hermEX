@@ -173,7 +173,7 @@ func (s *Server) emsDisconnect(w http.ResponseWriter, r *http.Request) {
 // once the hold elapses. The push wake makes the poll fire the instant a change
 // lands rather than on the cadence; with the relay absent it degrades to the
 // cadence-only poll (the same model as the IMAP poll and ActiveSync Ping loops). The
-// reply is only a wake signal — the matching RopNotify bytes follow on the client's
+// reply is only a wake signal, the matching RopNotify bytes follow on the client's
 // next Execute drain. Only folder- and message-scoped subscriptions wake it; a
 // whole-store subscription is accepted at registration but not yet polled (D.Inc 2b),
 // so a client that registers only whole-store will not be woken here.
@@ -232,7 +232,7 @@ func (s *Server) waitForNotification(reqCtx context.Context, sess *rop.Session) 
 		case <-reqCtx.Done():
 			return false
 		case <-wake:
-			// a push wake — loop and PollForChange observes the change
+			// a push wake, loop and PollForChange observes the change
 		case <-time.After(min(s.notifyCadence, remaining)):
 		}
 	}

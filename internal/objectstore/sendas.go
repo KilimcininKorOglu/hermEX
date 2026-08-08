@@ -6,9 +6,9 @@ import (
 	"hermex/internal/mapi"
 )
 
-// GetSendAs returns the mailbox's send-as list — the SMTP addresses permitted to
+// GetSendAs returns the mailbox's send-as list, the SMTP addresses permitted to
 // send mail as this mailbox (the From identity, distinct from the on-behalf-of
-// delegate list) — or nil when none have been set. The list lives as a single
+// delegate list), or nil when none have been set. The list lives as a single
 // store-root property (PrAbSendAs), the same "everything is a property" shape the
 // delegate, out-of-office, and ActiveSync stores use.
 func (s *Store) GetSendAs() ([]string, error) {

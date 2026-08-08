@@ -49,14 +49,14 @@ type createAttachmentResponseMessage struct {
 // per MS-OXWSATT 3.1.4.1). The id encodes (message, position): a new attachment
 // is always last in the message's attachment_id order (AUTOINCREMENT + the
 // ORDER BY in OpenMessage), so its position is the message's prior attachment
-// count plus the number created so far in this request — the same positional
+// count plus the number created so far in this request, the same positional
 // scheme GetAttachment decodes. After writing, the parent's change number is
 // advanced (matching the reference's re-save) so ICS content sync observes the
 // new attachment. Operates on the requester's own mailbox, as GetAttachment does.
 //
 // Deviations / v1 gaps: ItemAttachment input (an embedded item) is not supported;
 // the ParentItemId ChangeKey is ignored (no optimistic-concurrency check); and the
-// positional id is not stable across deletion of a lower-positioned attachment —
+// positional id is not stable across deletion of a lower-positioned attachment,
 // the whole attachment surface (GetAttachment/DeleteAttachment) decodes positions,
 // so a stable attach-number id cannot be introduced here in isolation.
 func (s *Server) handleCreateAttachment(w http.ResponseWriter, inner []byte, sess *session) {

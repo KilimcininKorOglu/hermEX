@@ -96,8 +96,8 @@ func (s *Server) getPropsCore(req getPropsRequest, caller string) getPropsResult
 	if !req.hasTags {
 		return getPropsResult{result: ecSuccess, codePage: req.stat.codePage, row: bag}
 	}
-	// Serve the portrait lazily — only when explicitly requested, never folded into
-	// a table walk — by reading the mailbox's cross-protocol user-photo property.
+	// Serve the portrait lazily, only when explicitly requested, never folded into
+	// a table walk, by reading the mailbox's cross-protocol user-photo property.
 	if u.storePath != "" && slices.Contains(req.proptags, mapi.PrEmsAbThumbnailPhoto) {
 		if photo := userPhoto(u.storePath); photo != nil {
 			bag = append(bag, mapi.TaggedPropVal{Tag: mapi.PrEmsAbThumbnailPhoto, Value: photo})

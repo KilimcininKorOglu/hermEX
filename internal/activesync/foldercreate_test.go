@@ -33,7 +33,7 @@ func primeHierarchy(t *testing.T, ts *httptest.Server) string {
 }
 
 // folderSyncHasAdd reports whether a re-primed FolderSync advertises an Add for
-// the given server id — the device's actual view of the hierarchy.
+// the given server id, the device's actual view of the hierarchy.
 func folderSyncHasAdd(t *testing.T, ts *httptest.Server, serverID string) bool {
 	t.Helper()
 	_, root := postCommand(t, ts, "FolderSync", wbxml.Elem(wbxml.FHFolderSync, wbxml.Str(wbxml.FHSyncKey, "0")))

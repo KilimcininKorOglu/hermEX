@@ -71,7 +71,7 @@ func TestMTASTSServesPolicyForActiveDomain(t *testing.T) {
 }
 
 // TestMTASTSDisabledIs404 proves a deployment that has not enabled publishing serves
-// no policy — a sender must see "no policy" (404), never a half-published one.
+// no policy, a sender must see "no policy" (404), never a half-published one.
 func TestMTASTSDisabledIs404(t *testing.T) {
 	dir := &fakeMTASTSDir{
 		settings: directory.MTASTSSettings{Enabled: false, Mode: "testing", MaxAge: 86400}, found: true,
@@ -102,7 +102,7 @@ func TestMTASTSUnknownDomainIs404(t *testing.T) {
 }
 
 // TestMTASTSDirectoryErrorIs500 proves a directory failure is a per-request 5xx, not a
-// panic that takes the front door down — the same resilience the cert store holds.
+// panic that takes the front door down, the same resilience the cert store holds.
 func TestMTASTSDirectoryErrorIs500(t *testing.T) {
 	dir := &fakeMTASTSDir{settingsErr: errors.New("db down")}
 	h := withMTASTS(&config.Config{Hostname: "mail.hermex.test"}, dir, http.HandlerFunc(proxied))

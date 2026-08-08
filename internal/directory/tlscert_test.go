@@ -18,7 +18,7 @@ func setupTLSCerts(t *testing.T) *SQLDirectory {
 
 // TestTLSCertUpsertAndLoad proves a stored certificate round-trips with its key for
 // the in-process provider, and that storing the same name again replaces it rather
-// than adding a row — the listener must present exactly the latest uploaded
+// than adding a row, the listener must present exactly the latest uploaded
 // material, so a renewal cannot leave the previous certificate behind.
 func TestTLSCertUpsertAndLoad(t *testing.T) {
 	d := setupTLSCerts(t)
@@ -43,7 +43,7 @@ func TestTLSCertUpsertAndLoad(t *testing.T) {
 }
 
 // TestTLSCertListOmitsKey proves the admin-facing list returns only display
-// metadata (name and expiry), never key material — the panel must not be able to
+// metadata (name and expiry), never key material, the panel must not be able to
 // read back a stored private key.
 func TestTLSCertListOmitsKey(t *testing.T) {
 	d := setupTLSCerts(t)

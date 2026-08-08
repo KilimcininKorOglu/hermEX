@@ -25,7 +25,7 @@ type dstRule struct {
 
 // tzRule is a served time zone: its Windows id, display name, standard total bias
 // (minutes, UTC = local + bias, so west of UTC is positive), and optional DST
-// rule. The set is curated, not exhaustive — the reference serves no time zones at
+// rule. The set is curated, not exhaustive, the reference serves no time zones at
 // all, so this covers the common Windows ids a client is likely to request.
 type tzRule struct {
 	id      string
@@ -120,7 +120,7 @@ type tzTarget struct {
 
 // handleGetServerTimeZones answers GetServerTimeZones: it returns the curated zone
 // definitions, filtered to the requested ids when an Ids list is given (an unknown
-// id is simply absent from the result). ReturnFullTimeZoneData is ignored — full
+// id is simply absent from the result). ReturnFullTimeZoneData is ignored, full
 // definitions are always returned, which never breaks a client that asked for
 // less.
 func (s *Server) handleGetServerTimeZones(w http.ResponseWriter, inner []byte, _ *session) {

@@ -257,8 +257,8 @@ func TestExecuteRopFraming(t *testing.T) {
 	}
 }
 
-// TestExecuteRopLogon drives a complete RopLogon through the full stack —
-// Connect, then Execute with a real ROP buffer — and confirms the decoded
+// TestExecuteRopLogon drives a complete RopLogon through the full stack,
+// Connect, then Execute with a real ROP buffer, and confirms the decoded
 // response carries a non-null output handle plus the 13 special-folder EIDs.
 // This exercises the DecodeExecute -> Dispatch -> EncodeExecute path that
 // cross-Execute handle persistence rides on.

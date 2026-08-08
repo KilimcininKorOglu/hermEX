@@ -13,7 +13,7 @@ import (
 // subscription registered on a mailbox that already has its default folder tree must
 // baseline that tree, so the first poll reports no spurious folder created/deleted/
 // modified. Without the registration baseline the first drain would flood the client
-// with every existing folder as a create — the same bug class the message baseline
+// with every existing folder as a create, the same bug class the message baseline
 // guards against.
 func TestWholeStoreFolderBaselineSuppressesPreExisting(t *testing.T) {
 	sess := NewSession(t.TempDir(), nil, "")
@@ -127,7 +127,7 @@ func TestWholeStoreFolderDeleted(t *testing.T) {
 // TestWholeStoreFolderModifiedCounts proves a folder's count change surfaces as a
 // folder-modified carrying NF_HAS_TOTAL/NF_HAS_UNREAD. Subscribing to MODIFIED only
 // isolates it: the new message's own create event is filtered (the subscription lacks
-// the created bit), so the single drained RopNotify is the Inbox's count update — the
+// the created bit), so the single drained RopNotify is the Inbox's count update, the
 // event a client uses to refresh the folder tree's unread badge.
 func TestWholeStoreFolderModifiedCounts(t *testing.T) {
 	sess := NewSession(t.TempDir(), nil, "")

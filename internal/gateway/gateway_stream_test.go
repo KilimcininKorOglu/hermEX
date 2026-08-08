@@ -12,7 +12,7 @@ import (
 
 // TestGatewayForwardsChunkedIncrementally proves the front door streams a
 // chunked (no Content-Length) backend response to the client incrementally,
-// rather than buffering it until the body completes — the property EWS streaming
+// rather than buffering it until the body completes, the property EWS streaming
 // notifications depend on. The backend blocks on a channel after the first chunk,
 // so the test reading that chunk before releasing the second deterministically
 // proves incremental forwarding (a buffering proxy would deadlock here, caught by

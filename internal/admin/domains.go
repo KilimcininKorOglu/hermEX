@@ -25,7 +25,7 @@ func (s *Server) isSystemAdmin(userID int64) bool {
 // requireSystem gates a handler on system authority, method-aware: a read
 // (GET/HEAD) admits a read-only system administrator, while a state-changing
 // method requires a full system administrator. This is the chokepoint that makes
-// SystemAdminRO read-everything-write-nothing — it cannot be forgotten per
+// SystemAdminRO read-everything-write-nothing, it cannot be forgotten per
 // handler.
 func (s *Server) requireSystem(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -66,7 +66,7 @@ func (s *Server) handleListDomains(w http.ResponseWriter, r *http.Request) {
 
 // handleGetDomain returns one domain's full record, including its user counts. It
 // is readable by any administrator of that domain (a system read admin, or a
-// domain admin — read-only or full — over it), so the gate matches the list
+// domain admin, read-only or full, over it), so the gate matches the list
 // page's per-domain read scope rather than requiring full system authority.
 func (s *Server) handleGetDomain(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.ParseInt(r.PathValue("domainID"), 10, 64)
@@ -91,7 +91,7 @@ func (s *Server) handleGetDomain(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleUpdateDomain edits a domain's status, mailbox cap, and contact fields
-// (full system administrators only — its requireSystem wrapper enforces this;
+// (full system administrators only, its requireSystem wrapper enforces this;
 // the reference grants OrgAdmin, but hermEX's OrgAdmin is intentionally narrow,
 // so domain edit stays system-only). Unspecified fields keep their current value
 // (a read-merge), so a partial update never zeroes the rest. An unknown id is 404.

@@ -1,9 +1,9 @@
 // Package mapihttp serves a mailbox over the native Outlook transports: MAPI/HTTP
-// ([MS-OXCMAPIHTTP]) — the EMSMDB endpoint on /mapi/emsmdb (the store/ROP channel)
-// and the NSPI endpoint on /mapi/nspi (the address book) — and RPC-over-HTTP
+// ([MS-OXCMAPIHTTP]), the EMSMDB endpoint on /mapi/emsmdb (the store/ROP channel)
+// and the NSPI endpoint on /mapi/nspi (the address book), and RPC-over-HTTP
 // ([MS-RPCH], "Outlook Anywhere") on /rpc/rpcproxy.dll, which carries the same ROP
 // and address-book calls over a DCE/RPC tunnel. It authenticates each request with
-// HTTP Basic against the directory — modern Outlook over either transport accepts
+// HTTP Basic against the directory, modern Outlook over either transport accepts
 // Basic, so no NTLM subsystem is required.
 //
 // This package owns the transport: routing, request-type dispatch, the session
@@ -174,7 +174,7 @@ func NewServer(auth directory.Authenticator, accounts directory.Accounts, hostna
 // SetNotify wires the push wake source into both notification long-polls (MAPI/HTTP
 // NotificationWait and RPC/HTTP EcDoAsyncWaitEx), so a mailbox change wakes a parked
 // client the instant it lands instead of on the next cadence poll. A nil consumer
-// (push disabled) leaves both on their cadence — the degradation floor. The daemon
+// (push disabled) leaves both on their cadence, the degradation floor. The daemon
 // calls this once at startup, before serving.
 func (s *Server) SetNotify(c *notify.Consumer) {
 	if c == nil {

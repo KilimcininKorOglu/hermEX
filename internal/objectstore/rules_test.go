@@ -211,7 +211,7 @@ func TestListRulesEmpty(t *testing.T) {
 	}
 }
 
-// fullPatch is the RopModifyRules Add patch a client sends for a complete new rule —
+// fullPatch is the RopModifyRules Add patch a client sends for a complete new rule,
 // every modelled column present, the way Outlook's Rules manager writes an add.
 func fullPatch(r Rule) RulePatch {
 	return RulePatch{Name: &r.Name, State: &r.State, Condition: &r.Condition, Actions: &r.Actions}
@@ -239,7 +239,7 @@ func TestModifyRulesAdd(t *testing.T) {
 // semantics: a Modify that carries ONLY PR_RULE_STATE must update the state and leave
 // the condition and actions UNTOUCHED. A naive replace-all update (rewriting every
 // column from a zero-valued struct) would wipe the omitted condition/actions and the
-// rule would silently stop matching — the exact bug the reference's per-column
+// rule would silently stop matching, the exact bug the reference's per-column
 // present-only merge avoids. This test fails against a replace-all implementation.
 func TestModifyRulesPresentOnlyMerge(t *testing.T) {
 	s := openSeededStore(t)
@@ -315,7 +315,7 @@ func TestModifyRulesReplace(t *testing.T) {
 }
 
 // TestModifyRulesForeignRuleNoOp verifies a Modify keyed to a rule that lives on a
-// different folder is a silent no-op — it must never reach across folders to edit
+// different folder is a silent no-op, it must never reach across folders to edit
 // another folder's rule (the ownership guard).
 func TestModifyRulesForeignRuleNoOp(t *testing.T) {
 	s := openSeededStore(t)

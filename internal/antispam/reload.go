@@ -10,7 +10,7 @@ import (
 
 // reload.go hot-swaps the data_dir ruleset and Bayesian model into a Scorer when
 // their files change, so a ruleset refresh or a model retrain takes effect without
-// restarting the MTA — mail flow never pauses. It polls the files' modification
+// restarting the MTA, mail flow never pauses. It polls the files' modification
 // times; the swap into the Scorer is atomic (SetRules/SetModel).
 
 // Reloader watches the data_dir anti-spam files and applies changes to a Scorer.
@@ -37,7 +37,7 @@ type Reloader struct {
 // WatchSettings makes the reloader hot-apply edited settings on its tick: fn
 // returns the current Config and its version token, and the reloader calls
 // SetConfig when the version has advanced. It is kept out of the antispam package's
-// dependencies — the caller (which owns the settings store) supplies fn. The
+// dependencies, the caller (which owns the settings store) supplies fn. The
 // current version is recorded now so already-loaded settings are not re-applied on
 // the first tick.
 func (r *Reloader) WatchSettings(fn func() (*Config, int64, bool)) {

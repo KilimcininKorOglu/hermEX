@@ -29,7 +29,7 @@ func TestTokenRoundTrip(t *testing.T) {
 	}
 }
 
-// TestTokenRejectsTamperedSignature proves flipping the signature fails verification —
+// TestTokenRejectsTamperedSignature proves flipping the signature fails verification,
 // the token cannot be forged without the secret.
 func TestTokenRejectsTamperedSignature(t *testing.T) {
 	tok, _ := Mint(testSecret, Claims{Mailbox: "alice@hermex.test", UID: 1, Expiry: testNow.Add(time.Hour).Unix()})
@@ -55,7 +55,7 @@ func TestTokenRejectsTamperedPayload(t *testing.T) {
 }
 
 // TestTokenRejectsWrongSecret proves a token signed with one secret does not verify
-// under another — so a leak of one daemon's secret cannot mint links for another.
+// under another, so a leak of one daemon's secret cannot mint links for another.
 func TestTokenRejectsWrongSecret(t *testing.T) {
 	tok, _ := Mint(testSecret, Claims{Mailbox: "alice@hermex.test", UID: 1, Expiry: testNow.Add(time.Hour).Unix()})
 	if _, err := Verify([]byte("a-different-secret-entirely-32bytes!"), tok, testNow); !errors.Is(err, ErrBadToken) {
@@ -76,7 +76,7 @@ func TestTokenRejectsExpired(t *testing.T) {
 }
 
 // TestTokenNoSecret proves that without a configured secret neither minting nor
-// verifying is possible — the feature is off rather than emitting unsigned links.
+// verifying is possible, the feature is off rather than emitting unsigned links.
 func TestTokenNoSecret(t *testing.T) {
 	if _, err := Mint(nil, Claims{Mailbox: "a@b", UID: 1, Expiry: testNow.Unix()}); !errors.Is(err, ErrNoSecret) {
 		t.Errorf("mint without secret err = %v, want ErrNoSecret", err)

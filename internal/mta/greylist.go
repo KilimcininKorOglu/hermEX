@@ -38,7 +38,7 @@ type allowChecker interface {
 // Greylister defers a first-contact triplet so a legitimate MTA retries; a spammer
 // that does not retry never gets through. It is disabled by default (an admin
 // enables it). Authenticated submission, allowlisted senders, and bounces are
-// exempt, and any store error fails open (accept) — greylisting never loses mail on
+// exempt, and any store error fails open (accept), greylisting never loses mail on
 // its own failure.
 type Greylister struct {
 	store   GreylistStore
@@ -130,7 +130,7 @@ func (g *Greylister) Prune() error {
 	return g.store.PruneGreylist(now-g.unconfirmedTTL.Load(), now-g.confirmedTTL.Load())
 }
 
-// networkKey masks a client IP to its network — a /24 for IPv4, /64 for IPv6 — so a
+// networkKey masks a client IP to its network, a /24 for IPv4, /64 for IPv6, so a
 // provider that retries from a different IP in the same pool keys to the same
 // triplet. It returns "" for a nil IP so the caller fails open.
 func networkKey(ip net.IP) string {

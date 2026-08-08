@@ -117,7 +117,7 @@ func TestGetContentSync(t *testing.T) {
 	if _, err := s.objdb.Exec(`UPDATE messages SET is_associated=1 WHERE message_id=?`, mFAI); err != nil {
 		t.Fatal(err)
 	}
-	// mRead/mUnread get a freshly allocated read change number — the version the
+	// mRead/mUnread get a freshly allocated read change number, the version the
 	// read-state branch compares against the client's Read set.
 	rcnRead := allocCN(t, s)
 	if _, err := s.objdb.Exec(`UPDATE messages SET read_state=1, read_cn=? WHERE message_id=?`, int64(rcnRead), mRead); err != nil {

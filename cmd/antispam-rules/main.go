@@ -1,6 +1,6 @@
 // Command antispam-rules refreshes the SpamAssassin ruleset hermEX scores with.
-// Point -from at a directory of .cf rule files — an sa-update output or a checkout
-// of the upstream rules — and it concatenates, validates, and writes the single
+// Point -from at a directory of .cf rule files, an sa-update output or a checkout
+// of the upstream rules, and it concatenates, validates, and writes the single
 // ruleset file the MTA loads from data_dir (data_dir/antispam-rules.cf).
 //
 // Fetching and verifying the upstream rules is delegated to the operator's own

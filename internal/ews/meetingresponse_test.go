@@ -126,7 +126,7 @@ func TestMeetingResponseAccept(t *testing.T) {
 }
 
 // TestMeetingResponseDecline proves declining stamps the request declined but files
-// no appointment — a meeting you declined does not belong on your calendar.
+// no appointment, a meeting you declined does not belong on your calendar.
 func TestMeetingResponseDecline(t *testing.T) {
 	dir, itemID := seedMeetingRequest(t)
 	ts := meetingServer(t, dir)

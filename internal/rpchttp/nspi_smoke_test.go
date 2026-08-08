@@ -32,7 +32,7 @@ func pushNspiStat(p *ndr.Push, codePage, curRec uint32) {
 // TestEndToEndNSPI drives the full RPC/HTTP vertical against the NSPI address-book
 // interface: the RTS handshake, a DCE/RPC bind of the NSPI interface, then
 // NspiBind and NspiQueryRows over the live transport, proving the transport, the
-// dispatch engine, and the NSPI stub compose end-to-end against a seeded GAL —
+// dispatch engine, and the NSPI stub compose end-to-end against a seeded GAL,
 // through the same Dispatcher.Register adapter internal/mapihttp wires in
 // production.
 //

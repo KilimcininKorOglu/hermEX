@@ -27,8 +27,8 @@ func TestAppointmentProptags(t *testing.T) {
 
 // TestAppointmentNamedProps pins the calendar named properties to the (GUID, LID)
 // pair the store's allocator maps to a property id. These span three namespaces
-// — PSETID_Appointment, PSETID_Common (reminders), and PSETID_Meeting (the global
-// object id) — so each case carries its own expected GUID. A wrong GUID or LID
+// , PSETID_Appointment, PSETID_Common (reminders), and PSETID_Meeting (the global
+// object id), so each case carries its own expected GUID. A wrong GUID or LID
 // would resolve a different property than the iCalendar converter intends.
 func TestAppointmentNamedProps(t *testing.T) {
 	// PSETID_Appointment and PSETID_Meeting are distinct GUID families; the latter

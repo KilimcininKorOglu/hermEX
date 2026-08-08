@@ -92,7 +92,7 @@ func setObjectVersion(t *testing.T, dir string, v int) {
 }
 
 // TestOpenRefusesNewerSchema proves a store recorded newer than this binary is
-// refused rather than opened — the downgrade guard that protects data written
+// refused rather than opened, the downgrade guard that protects data written
 // under a schema the binary does not understand.
 func TestOpenRefusesNewerSchema(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "future")
@@ -109,8 +109,8 @@ func TestOpenRefusesNewerSchema(t *testing.T) {
 	}
 }
 
-// TestOpenRefusesPreBaselineSchema proves a store below the baseline — a
-// disposable pre-migration dev schema — is still refused.
+// TestOpenRefusesPreBaselineSchema proves a store below the baseline, a
+// disposable pre-migration dev schema, is still refused.
 func TestOpenRefusesPreBaselineSchema(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "ancient")
 	s, err := Open(dir)

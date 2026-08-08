@@ -14,7 +14,7 @@ import (
 // ([MS-OXOMSG] 3.3.4.3). It is best-effort: any storage or send failure is
 // logged and swallowed so it can never fail the SetMessageReadFlag that
 // triggered it. After a successful send it clears both request flags so the
-// receipt fires exactly once — a later read finds no pending request. A
+// receipt fires exactly once, a later read finds no pending request. A
 // read-only session (no MTA bridge) sends nothing.
 //
 // The destination is the original message's PR_SENT_REPRESENTING_SMTP_ADDRESS,

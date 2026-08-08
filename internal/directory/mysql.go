@@ -132,9 +132,9 @@ SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status,
 	return out[0], true, nil
 }
 
-// authenticateRow verifies a login the way Authenticate does — resolve to exactly
+// authenticateRow verifies a login the way Authenticate does, resolve to exactly
 // one row, require an active MAILUSER account in an active domain, then verify the
-// crypt(3) password — and reports whether the account is flagged for a forced
+// crypt(3) password, and reports whether the account is flagged for a forced
 // password change. ok is false for bad credentials or an ineligible account.
 // decoyPasswordHash is a valid sha512-crypt hash of a value no user holds. When a
 // login names no usable account, authenticateRow still runs one verify against it
@@ -192,8 +192,8 @@ func (d *SQLDirectory) AuthenticateAllowingPasswordChange(user, password string)
 // verifyPassword checks a login's password the way its account is mastered: an
 // account with an externid is verified against its organization's LDAP directory
 // (bind-to-verify), every other account against its stored crypt(3) hash. An
-// LDAP-mastered account whose org has no configured directory — or for which no
-// verifier is installed — is denied rather than silently falling back to a local
+// LDAP-mastered account whose org has no configured directory, or for which no
+// verifier is installed, is denied rather than silently falling back to a local
 // hash it does not own.
 func (d *SQLDirectory) verifyPassword(row loginRow, login, password string) bool {
 	if len(row.externid) == 0 {
@@ -268,7 +268,7 @@ func (d *SQLDirectory) IsLocalDomain(domain string) (bool, error) {
 	return true, nil
 }
 
-// Identities implements Identifier: the addresses login may send as — its
+// Identities implements Identifier: the addresses login may send as, its
 // canonical username plus every alias (aliases.mainname) and altname
 // (altnames.user_id) bound to that user. login may itself be a username, alias,
 // or altname; an unknown login yields no identities (the webmail then permits
@@ -323,7 +323,7 @@ SELECT altname FROM altnames
 }
 
 // Maildirs implements MailboxLister: the distinct store paths of every
-// login-capable user mailbox — a normal MAILUSER account in an active domain
+// login-capable user mailbox, a normal MAILUSER account in an active domain
 // with a maildir. These are exactly the accounts that can schedule a send, so
 // the send-later spooler scans their Outboxes; disabled accounts and non-mailbox
 // objects (distribution lists, rooms) are skipped.
@@ -650,7 +650,7 @@ SELECT d.id, d.domainname, d.org_id, d.domain_status, d.homedir,
 }
 
 // UpdateDomain writes a domain's editable fields, reporting whether the domain
-// existed. Setting Status to 1 suspends the domain — login (Authenticate),
+// existed. Setting Status to 1 suspends the domain, login (Authenticate),
 // delivery (IsLocalDomain), and the address-book queries all read domain_status
 // directly, so the change takes effect with no per-user update. Existence is
 // checked first (the UPDATE's affected-row count is 0 for an unchanged row, so it
@@ -836,7 +836,7 @@ func (d *SQLDirectory) IsLDAPUser(user string) (bool, error) {
 // primary username a session authenticates as, case-folding the input via GetUser.
 // ok is false for an unknown user or an address that is only an alias/altname
 // (GetUser matches the users table by primary username, so an alias does not
-// resolve) — exactly the inputs a folder grant must reject rather than store under
+// resolve), exactly the inputs a folder grant must reject rather than store under
 // a name no session will match.
 func (d *SQLDirectory) CanonicalLogin(address string) (string, bool) {
 	u, ok, err := d.GetUser(address)
@@ -954,7 +954,7 @@ func privilegeBitsFor(u UserUpdate) uint64 {
 
 // DeleteUser removes a user and its dependent rows, reporting whether the user
 // existed. altnames and admin_roles cascade via their foreign keys; aliases have
-// no FK (mainname is a plain string), so they are deleted explicitly — otherwise
+// no FK (mainname is a plain string), so they are deleted explicitly, otherwise
 // an orphaned alias would keep its UNIQUE address and block re-creating it. When
 // deleteFiles is set the maildir is removed from disk after the row is gone.
 func (d *SQLDirectory) DeleteUser(username string, deleteFiles bool) (bool, error) {
@@ -1127,7 +1127,7 @@ func (d *SQLDirectory) SetAliasesFor(username string, aliases []string) (bool, e
 // GetForward implements Forwarder: it returns the forward directive of the user the
 // address resolves to (its canonical username, an alias, or an altname), or ok=false
 // when no forward is set. The lookup is canonical so a forward configured on the
-// account applies regardless of which receiving address the mail arrived at — keying
+// account applies regardless of which receiving address the mail arrived at, keying
 // on the raw alias would let mail to an alias bypass the forward.
 func (d *SQLDirectory) GetForward(address string) (ForwardInfo, bool, error) {
 	addr := strings.ToLower(strings.TrimSpace(address))

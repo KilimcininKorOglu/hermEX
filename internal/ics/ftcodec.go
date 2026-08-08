@@ -10,8 +10,8 @@ import (
 )
 
 // StreamProp is one property carried on the FastTransfer stream: its tag, the Go
-// value (typed per the mapi value model, exactly as in ext.PropValue), and — for
-// a named property (tag id >= 0x8000) — its inline name. Resolving a named tag's
+// value (typed per the mapi value model, exactly as in ext.PropValue), and, for
+// a named property (tag id >= 0x8000), its inline name. Resolving a named tag's
 // store-local id against the named-property table is the caller's job
 // (download/upload), not the codec's.
 type StreamProp struct {
@@ -153,7 +153,7 @@ func encodeProp(p StreamProp) (header, body []byte, err error) {
 }
 
 // decodeElement reads one element from the front of b. complete is false (and
-// consumed 0) when b holds only part of the element — the caller buffers more
+// consumed 0) when b holds only part of the element, the caller buffers more
 // bytes and retries from the same offset. This length-driven rewind makes the
 // reader tolerant of a chunk boundary falling anywhere, including mid-primitive.
 func decodeElement(b []byte) (it Item, consumed int, complete bool, err error) {

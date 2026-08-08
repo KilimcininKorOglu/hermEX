@@ -13,7 +13,7 @@ import (
 )
 
 // openStream starts a GET /events consumer and returns the response once its
-// headers arrive — at which point the relay has already registered the consumer's
+// headers arrive, at which point the relay has already registered the consumer's
 // channel, so a subsequent publish cannot race ahead of registration.
 func openStream(t *testing.T, ts *httptest.Server, bearer string) *http.Response {
 	t.Helper()

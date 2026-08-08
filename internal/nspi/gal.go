@@ -52,7 +52,7 @@ const (
 // its own bit, so an admin can hide a user from GAL browse yet keep them
 // resolvable by name. GAL browse honors abHideFromGAL; name resolution honors
 // abHideResolve; distribution-list member expansion honors abHideFromAL. Direct
-// fetches by a MId the client already holds are never hidden — asking for a
+// fetches by a MId the client already holds are never hidden, asking for a
 // specific entry opens it.
 const (
 	abHideFromGAL  uint32 = 0x01
@@ -240,7 +240,7 @@ func (g gal) viewFor(containerID uint32) galView {
 // listView builds a named address list's cursor view: the GAL entries whose
 // recipient display type matches the list and that are not hidden from address
 // lists (abHideFromAL). Unlike browseView it does NOT apply the GAL-hide bit, so
-// a user hidden only from the GAL still appears in its type list — the two hide
+// a user hidden only from the GAL still appears in its type list, the two hide
 // bits are independent.
 func (g gal) listView(al addressList) galView {
 	vis := make([]int, 0, len(g.users))
@@ -318,7 +318,7 @@ func (g gal) resolve(token string) (mid, status uint32) {
 	return g.users[found].mid, midResolved
 }
 
-// byAddress resolves an exact (case-insensitive) SMTP address to its MId — the
+// byAddress resolves an exact (case-insensitive) SMTP address to its MId, the
 // reverse DNToMId applies after recovering the address from a PR_ENTRYID's DN.
 func (g gal) byAddress(smtp string) (uint32, bool) {
 	if u, ok := g.userByAddress(smtp); ok {
@@ -339,7 +339,7 @@ func (g gal) userByAddress(smtp string) (galUser, bool) {
 
 // memberMIDs expands the distribution list at curRec into the MIds of its members
 // that appear in the GAL, dropping any member hidden from address lists
-// (abHideFromAL) — the member-expansion half of the address-list hide bit. The
+// (abHideFromAL), the member-expansion half of the address-list hide bit. The
 // list is expanded with from == its own address, the address-book bypass, so
 // browsing members is not gated by the list's posting privilege. exp is the
 // directory's list expander; without one a list has no members. limit caps the
@@ -369,7 +369,7 @@ func (g gal) memberMIDs(curRec uint32, exp mlistExpander, limit int) []uint32 {
 
 // delegateMIDs reads the public-delegate list of the mailbox at curRec and returns
 // the MIds of its delegates that appear in the GAL, dropping any delegate hidden
-// from the delegate list (abHideDelegate) and any the filter excludes — the
+// from the delegate list (abHideDelegate) and any the filter excludes, the
 // delegate-list half of the address-book hide mask. reader is the directory's
 // per-mailbox delegate reader; without one a mailbox has no delegates. limit caps
 // the returned set (0 means no cap). Reading is world-readable, so it takes no

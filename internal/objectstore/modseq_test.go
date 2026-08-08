@@ -8,7 +8,7 @@ import (
 )
 
 // TestModSeqAdvancesOnEveryFlag is the load-bearing CONDSTORE invariant: a flag
-// change must advance the message's modseq and the folder's HIGHESTMODSEQ — for
+// change must advance the message's modseq and the folder's HIGHESTMODSEQ, for
 // every flag, not only \Seen (whose object-store read_cn already moved). \Flagged
 // does not touch the object store's change number, so the IMAP-local modseq is the
 // only thing that can record it.

@@ -557,7 +557,7 @@ loop:
 			break loop
 		}
 	}
-	// After the ROP batch, drain notifications into the same response — mirroring
+	// After the ROP batch, drain notifications into the same response, mirroring
 	// the reference's end-of-Execute notify drain. This runs on every Execute,
 	// including an empty one (a wake-up Execute that exists only to collect pending
 	// notifications), and is a no-op when the session has no subscriptions.

@@ -16,7 +16,7 @@ const (
 )
 
 // handleGetItemEstimate answers GetItemEstimate: per collection it reports how
-// many changes the next Sync would carry, computed by the same snapshot diff —
+// many changes the next Sync would carry, computed by the same snapshot diff,
 // purely a progress-bar hint, so it never advances any state.
 func (s *Server) handleGetItemEstimate(w http.ResponseWriter, r *http.Request, sess *session) {
 	root, err := readWBXML(r)

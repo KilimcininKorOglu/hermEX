@@ -89,7 +89,7 @@ func TestBounceMessage(t *testing.T) {
 }
 
 // TestBounceDeliversToSenderInbox proves the bounce, filed through the local
-// delivery path, lands in the sender's mailbox — the path the relay uses so a
+// delivery path, lands in the sender's mailbox, the path the relay uses so a
 // failed external send is reported to the user, not lost silently.
 func TestBounceDeliversToSenderInbox(t *testing.T) {
 	mbox := filepath.Join(t.TempDir(), "alice")

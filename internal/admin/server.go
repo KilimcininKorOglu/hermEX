@@ -158,7 +158,7 @@ type Directory interface {
 	SetDomainNameTemplates(domain, internal, external string) error
 }
 
-// LDAPSyncer downsyncs an organization's directory accounts. It is optional —
+// LDAPSyncer downsyncs an organization's directory accounts. It is optional,
 // the Directory Sync page reports sync as unavailable when none is set. The
 // concrete *ldapauth.Verifier satisfies it.
 type LDAPSyncer interface {
@@ -179,7 +179,7 @@ type Paths interface {
 	ServerHostname() string
 }
 
-// LogReader queries the central log store for the log viewer. It is optional —
+// LogReader queries the central log store for the log viewer. It is optional,
 // the viewer reports logging as unconfigured when none is set.
 type LogReader interface {
 	Recent(ctx context.Context, subsystem string, limit int64) ([]logging.LogEntry, error)
@@ -267,12 +267,12 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /admin/domains/{domainID}", s.protect(s.requireSystem(s.handleUpdateDomain)))
 	mux.Handle("DELETE /admin/domains/{domainID}", s.protect(s.requirePurge(s.handleDeleteDomain)))
 	// User list/create: list is scope-filtered, create checks the new user's
-	// domain scope — both in the handler since the target is not a path value.
+	// domain scope, both in the handler since the target is not a path value.
 	mux.Handle("GET /admin/users", s.protect(http.HandlerFunc(s.handleListUsers)))
 	mux.Handle("POST /admin/users", s.protect(http.HandlerFunc(s.handleCreateUser)))
 	// Per-user management routes are domain-scoped (requireUserScope): a domain
 	// admin may manage users in its domain. The role-assignment routes below are
-	// the exception — they stay full-system-admin-only.
+	// the exception, they stay full-system-admin-only.
 	mux.Handle("GET /admin/users/{email}", s.protect(s.requireUserScope(s.handleGetUser)))
 	mux.Handle("PUT /admin/users/{email}", s.protect(s.requireUserScope(s.handleUpdateUser)))
 	mux.Handle("DELETE /admin/users/{email}", s.protect(s.requireUserScope(s.handleDeleteUser)))
@@ -682,8 +682,8 @@ func (s *Server) handleWhoami(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"login": cl.Login, "roles": roles})
 }
 
-// protect wraps a handler so it runs only with a valid session cookie, and — for
-// a state-changing method — a matching CSRF token (double-submit: the
+// protect wraps a handler so it runs only with a valid session cookie, and, for
+// a state-changing method, a matching CSRF token (double-submit: the
 // X-CSRF-Token header must equal the CSRF cookie). It stashes the claims in the
 // request context.
 func (s *Server) protect(next http.Handler) http.Handler {

@@ -16,7 +16,7 @@ const notifyBufferCap = 0x8000
 // queuedNotify is one classified event awaiting serialization as a RopNotify. It
 // pairs the subscription's handle and logon id (echoed as the NotificationHandle and
 // LogonId) with the event. The queue persists on the session across Execute calls so
-// an event that overflows one response is delivered by the next — never dropped: the
+// an event that overflows one response is delivered by the next, never dropped: the
 // folder snapshot has already advanced past it, so it cannot be re-detected.
 type queuedNotify struct {
 	handle  uint32
@@ -28,9 +28,9 @@ type queuedNotify struct {
 // resulting notifications into the Execute response. It mirrors the reference's
 // end-of-Execute notify drain but is sourced by polling the shared store rather
 // than an async push queue, since hermEX has no central store daemon to push from
-// (the internal spec §9). It runs after the ROP batch on every Execute —
+// (the internal spec §9). It runs after the ROP batch on every Execute,
 // including an empty one, which is how a wake-up Execute collects
-// pending notifications — and is a no-op when the session has no subscriptions or
+// pending notifications, and is a no-op when the session has no subscriptions or
 // pending events.
 func (s *Session) poll(out *ext.Push) {
 	s.enqueueChanges()
@@ -135,7 +135,7 @@ func (s *Session) enqueueFolderHierarchy(o *object, folders []objectstore.Folder
 
 // drainNotifications serializes queued notifications into the response until the next
 // RopNotify would overflow notifyBufferCap, at which point it emits one RopPending and
-// stops — leaving the unsent notifications queued for the next Execute (§5). A
+// stops, leaving the unsent notifications queued for the next Execute (§5). A
 // notification whose subscription handle was released in the meantime is dropped,
 // matching the reference (a released handle has no object to notify). Each RopNotify
 // is serialized into a scratch buffer first so the cap is checked before any bytes
@@ -153,7 +153,7 @@ func (s *Session) drainNotifications(out *ext.Push) {
 			continue
 		}
 		if out.Len()+scratch.Len() > notifyBufferCap {
-			pushPending(out, 0) // session index 0 — one session per connection in v1
+			pushPending(out, 0) // session index 0, one session per connection in v1
 			return
 		}
 		out.Raw(scratch.Bytes())

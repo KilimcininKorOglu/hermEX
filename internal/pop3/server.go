@@ -89,7 +89,7 @@ func (s *Server) handle(conn net.Conn) {
 		cmd, arg, _ := strings.Cut(line, " ")
 		cmd = strings.ToUpper(cmd)
 
-		// Per-command audit at debug level — the verb only, never the argument
+		// Per-command audit at debug level, the verb only, never the argument
 		// (PASS's argument is the password).
 		event(logging.LevelDebug, "command", logging.Fields{"cmd": cmd})
 

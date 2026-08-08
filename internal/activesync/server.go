@@ -35,7 +35,7 @@ type Server struct {
 
 // SetNotify wires the push wake source so a held Ping wakes the instant the
 // mailbox changes rather than on its next cadence poll. A nil consumer (push
-// disabled) leaves Ping on its cadence — the degradation floor. The daemon calls
+// disabled) leaves Ping on its cadence, the degradation floor. The daemon calls
 // this once at startup, before serving.
 func (s *Server) SetNotify(c *notify.Consumer) {
 	if c == nil {
@@ -165,7 +165,7 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 	}
 	// A configured device policy must be acknowledged: a non-Provision command carrying a
 	// stale or missing policy key is answered with 449, forcing the device to re-provision
-	// and apply the current policy — this is how a policy change reaches an already-enrolled
+	// and apply the current policy, this is how a policy change reaches an already-enrolled
 	// device. A mailbox with no policy resolves to the baseline key "1" and requires no
 	// provisioning, so unconfigured deployments never churn. (This resolves the policy per
 	// command; a generation cache is a future optimization if it ever matters.)

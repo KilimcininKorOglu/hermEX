@@ -78,7 +78,7 @@ func TestPOP3AuthBadPassword(t *testing.T) {
 }
 
 // TestPOP3AuthPrivilegeDenied proves the AUTH path hits the same POP3/IMAP
-// privilege gate as PASS — a valid credential with the service disabled is refused,
+// privilege gate as PASS, a valid credential with the service disabled is refused,
 // so SASL is not a gate bypass.
 func TestPOP3AuthPrivilegeDenied(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "alice")

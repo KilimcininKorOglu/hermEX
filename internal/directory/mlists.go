@@ -61,7 +61,7 @@ func addrDomain(addr string) string {
 
 // ExpandMList resolves a distribution-list address to its direct members,
 // applying the list's posting privilege against the sender (from). It expands
-// one level only — a member that is itself a list is returned verbatim, and the
+// one level only, a member that is itself a list is returned verbatim, and the
 // caller recurses under its own loop guard. The
 // address-book uses from == listAddr to bypass the privilege gate; the MTA passes
 // the real sender. A non-OK result means no members are returned: MListNone says
@@ -167,7 +167,7 @@ func (d *SQLDirectory) listAssociations(listID int64) ([]string, error) {
 }
 
 // domainMailusers returns every mailbox user (display_type DT_MAILUSER) in a
-// domain — the membership of a domain-type list.
+// domain, the membership of a domain-type list.
 func (d *SQLDirectory) domainMailusers(domain string) ([]string, error) {
 	rows, err := d.db.Query(
 		`SELECT u.username FROM users u JOIN domains d ON u.domain_id = d.id

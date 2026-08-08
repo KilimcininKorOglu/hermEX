@@ -2,8 +2,8 @@ package directory
 
 import "hermex/internal/objectstore"
 
-// Delegates returns the public-delegate list stored in the mailbox of userAddr —
-// the addresses permitted to act for it — for the address book's public-delegates
+// Delegates returns the public-delegate list stored in the mailbox of userAddr,
+// the addresses permitted to act for it, for the address book's public-delegates
 // container. It resolves the address to its mailbox store and reads the list. An
 // address with no local mailbox (or no delegates set) yields none. The list lives
 // with the mailbox, not in the directory database.

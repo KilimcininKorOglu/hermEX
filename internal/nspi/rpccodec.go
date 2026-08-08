@@ -5,7 +5,7 @@ package nspi
 // encoding from the MAPI/HTTP NSPI body the rest of this package serializes via
 // internal/ext: NDR adds natural-boundary alignment, message-global referent-id
 // pointers, and conformant-array length prefixes. The transport is classic
-// NDR32, so trailer_align/union_align emit NOTHING — there is no trailing pad,
+// NDR32, so trailer_align/union_align emit NOTHING, there is no trailing pad,
 // and no "doubled" length. The shared semantics (the typed cores extracted in
 // the MAPI/HTTP handlers) are reused; only this (de)serialization is new.
 //
@@ -153,7 +153,7 @@ func pullU32ArrayNDR(p *ndr.Pull) ([]uint32, error) {
 // pullInlineMIDArrayNDR reads the QueryRows-IN explicit MID array, the ONE NSPI
 // array pulled inline rather than via pullU32ArrayNDR: a standalone count(u32) +
 // a referent + (if non-null) a conformant max_count that MUST equal the count,
-// then the count 4-byte MIds. There is NO N+1, offset, or length word here — do
+// then the count 4-byte MIds. There is NO N+1, offset, or length word here, do
 // not route this through the proptag-array helper.
 func pullInlineMIDArrayNDR(p *ndr.Pull) ([]uint32, error) {
 	count, err := p.Uint32()
@@ -418,7 +418,7 @@ func pullConfBinaryNDR(p *ndr.Pull) ([]byte, error) {
 // max_count, the row count, then every row's header (reserved + cValues +
 // referent) followed by every row's content (the projected PROPERTY_VALUEs).
 // Each row is projected against cols, so a column the row lacks becomes a
-// PT_ERROR(ecNotFound) value — the same projection the MAPI/HTTP encoder uses.
+// PT_ERROR(ecNotFound) value, the same projection the MAPI/HTTP encoder uses.
 func pushRowSetNDR(p *ndr.Push, cols []mapi.PropTag, rows []mapi.PropertyValues) error {
 	projected := make([]mapi.PropertyValues, len(rows))
 	for i, r := range rows {

@@ -22,7 +22,7 @@ type Store interface {
 type Deliverer func(mailbox string, raw []byte, received time.Time) error
 
 // Poll runs one fetch cycle over every active configuration. It returns the number of
-// messages delivered and a per-config error for each account that failed — one failing
+// messages delivered and a per-config error for each account that failed, one failing
 // source never stops the others.
 // A cancelled context stops the cycle between accounts: one account's fetch can
 // hold a POP3 or IMAP session for a while, so a cycle that ran to completion

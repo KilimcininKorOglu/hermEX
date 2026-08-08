@@ -407,8 +407,8 @@ func deferredSendDue(st *objectstore.Store, messageID int64, now time.Time) (due
 	return !when.After(now), true, nil
 }
 
-// recipientAddrs collects the SMTP address of every recipient — To, Cc, and Bcc
-// alike — since all must receive the message. The Bcc recipients survive here
+// recipientAddrs collects the SMTP address of every recipient, To, Cc, and Bcc
+// alike, since all must receive the message. The Bcc recipients survive here
 // because the stored object keeps every recipient bag; only the delivered wire
 // copy has the Bcc header stripped.
 func recipientAddrs(msg *oxcmail.Message) []string {

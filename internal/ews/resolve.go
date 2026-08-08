@@ -41,7 +41,7 @@ type resolution struct {
 
 // handleResolveNames answers ResolveNames against the directory GAL: one match is
 // a Success, several a Warning (the client picks), none a Warning with no
-// results — the same three-way outcome as the webmail "check names".
+// results, the same three-way outcome as the webmail "check names".
 func (s *Server) handleResolveNames(w http.ResponseWriter, inner []byte, sess *session) {
 	var req resolveNamesRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {

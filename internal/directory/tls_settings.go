@@ -21,7 +21,7 @@ type TLSSettings struct {
 }
 
 // GetTLSSettings returns the stored TLS-mode settings and whether a row exists. When
-// none has been saved, found is false and the caller treats it as manual mode — the
+// none has been saved, found is false and the caller treats it as manual mode, the
 // safe default that needs no ACME account, so an upgrade never silently starts
 // reaching out to a CA.
 func (d *SQLDirectory) GetTLSSettings() (TLSSettings, bool, error) {

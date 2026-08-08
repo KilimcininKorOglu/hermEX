@@ -5,8 +5,8 @@
 // implements it) rather than importing the directory, so both the MTA and webmail can
 // install the same signer on their relay spool.
 //
-// Signing fails OPEN: any problem — no key for the domain, a malformed key, an
-// unparseable From header, a library error — yields the original message unsigned. A
+// Signing fails OPEN: any problem, no key for the domain, a malformed key, an
+// unparseable From header, a library error, yields the original message unsigned. A
 // message must never be blocked or delayed because signing broke.
 package dkimsign
 

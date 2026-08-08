@@ -9,7 +9,7 @@ import (
 )
 
 // quarantineMsg is one Junk-folder message shown in the admin quarantine review:
-// metadata only (date, sender, subject, size), never the body — so an admin
+// metadata only (date, sender, subject, size), never the body, so an admin
 // reviewing a user's quarantine for false positives does not read their mail.
 type quarantineMsg struct {
 	UID     uint32
@@ -34,8 +34,8 @@ func (s *Server) handleUIQuarantine(w http.ResponseWriter, r *http.Request) {
 	s.renderQuarantine(w, r.PathValue("email"), maildir, csrfCookieValue(r), "")
 }
 
-// handleUIQuarantineRelease moves a quarantined message from Junk back to the inbox —
-// the admin has judged it a false positive (ham), so it is filed without re-scoring —
+// handleUIQuarantineRelease moves a quarantined message from Junk back to the inbox,
+// the admin has judged it a false positive (ham), so it is filed without re-scoring,
 // and re-renders the panel. A UID that has since moved (the user acted via webmail, or
 // new mail shifted the folder) yields a benign notice, not an error.
 func (s *Server) handleUIQuarantineRelease(w http.ResponseWriter, r *http.Request) {
@@ -95,7 +95,7 @@ func (s *Server) quarantineMutate(maildir string, fn func(*objectstore.Store) er
 
 // renderQuarantine reads the user's Junk folder and renders the quarantine panel. A
 // mailbox that cannot be opened (e.g. one that was never provisioned) shows an empty
-// quarantine rather than a failure — a clean mailbox is not an error.
+// quarantine rather than a failure, a clean mailbox is not an error.
 func (s *Server) renderQuarantine(w http.ResponseWriter, email, maildir, csrf, notice string) {
 	data := map[string]any{"Email": email, "CSRF": csrf, "Notice": notice}
 	st, err := objectstore.Open(maildir)

@@ -9,7 +9,7 @@ import (
 
 // Authenticator is an optional Session capability. A session that implements it
 // can validate SMTP AUTH credentials; the server then offers AUTH (PLAIN and
-// LOGIN) — but only over a TLS link, since both mechanisms send the password as
+// LOGIN), but only over a TLS link, since both mechanisms send the password as
 // reversible base64. Auth reports whether the credentials are valid; the session
 // records the authenticated identity for later send authorization.
 type Authenticator interface {

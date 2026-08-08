@@ -97,7 +97,7 @@ func TestAsyncConnectEx(t *testing.T) {
 }
 
 // TestAsyncWaitExRejectsForeignHandles proves EcDoAsyncWaitEx rejects an async
-// handle naming no live session, or one owned by another authenticated user — the
+// handle naming no live session, or one owned by another authenticated user, the
 // reference's username guard against waiting on someone else's mailbox.
 func TestAsyncWaitExRejectsForeignHandles(t *testing.T) {
 	ems := NewEMSMDB(nil)
@@ -126,7 +126,7 @@ func TestAsyncWaitExRejectsForeignHandles(t *testing.T) {
 }
 
 // TestAsyncWaitExNoNotification proves a wait on a quiet mailbox returns
-// flags_out 0 (no notification pending) with ecSuccess — the value the long-poll
+// flags_out 0 (no notification pending) with ecSuccess, the value the long-poll
 // also returns on timeout.
 func TestAsyncWaitExNoNotification(t *testing.T) {
 	ems := NewEMSMDB(nil)
@@ -220,7 +220,7 @@ func connectLogonRegister(t *testing.T, ems *EMSMDB, user, mailbox string) (Cont
 }
 
 // testVconn builds a virtual connection a parked wait can deliver its reply on,
-// without the full RTS handshake — the OUT channel is read directly.
+// without the full RTS handshake, the OUT channel is read directly.
 func testVconn() *vconn {
 	return &vconn{out: make(chan []byte, 16), closed: make(chan struct{})}
 }
@@ -290,7 +290,7 @@ func TestAsyncWaitExParksThenWakesOnDelivery(t *testing.T) {
 }
 
 // TestAsyncWaitExParkTimesOut proves a parked wait with nothing pending delivers a
-// flags_out 0 reply when the wait interval elapses — the timeout the client renews.
+// flags_out 0 reply when the wait interval elapses, the timeout the client renews.
 func TestAsyncWaitExParkTimesOut(t *testing.T) {
 	ems := NewEMSMDB(nil)
 	async := NewAsyncEMSMDB(ems)
@@ -343,7 +343,7 @@ func TestAsyncWaitExParkAbortsOnTeardown(t *testing.T) {
 }
 
 // TestAsyncWaitExConcurrentParkAndExecute runs a parked poll concurrently with
-// Executes on the same session — the poller's PollForChange against the Executes'
+// Executes on the same session, the poller's PollForChange against the Executes'
 // Dispatch on the shared rop.Session. Under `go test -race` it proves the session
 // mutex guards that concurrency, mirroring the MAPI/HTTP NotificationWait race test.
 func TestAsyncWaitExConcurrentParkAndExecute(t *testing.T) {

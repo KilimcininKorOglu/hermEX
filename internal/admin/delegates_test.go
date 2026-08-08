@@ -12,7 +12,7 @@ import (
 // TestUIUserDelegates proves the detail-form save writes the delegate list through
 // to the mailbox store, trimming each line and dropping blanks, and reports
 // success. The list is the same one NSPI serves, so an admin and Outlook manage
-// one source — a dropped or mangled entry would desync them.
+// one source, a dropped or mangled entry would desync them.
 func TestUIUserDelegates(t *testing.T) {
 	d := oofUserDir()
 	store := &fakeStore{}

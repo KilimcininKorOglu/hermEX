@@ -9,7 +9,7 @@
 // A per-domain public store mirrors the reference store model: each domain owns a
 // distinct store under its home directory, and a domain "has" public folders
 // exactly when that store has been provisioned. There is no separate runtime
-// enable flag — provision implies enabled, un-provisioned implies absent.
+// enable flag, provision implies enabled, un-provisioned implies absent.
 package publicfolder
 
 import (
@@ -71,7 +71,7 @@ func (svc *Service) Provision(domain string) error {
 
 // DirForCaller returns the public-store directory for the caller's own domain, or
 // "" when the address carries no domain. It performs no I/O and does not report
-// whether the store is provisioned — it is the tenant-isolation routing in a form a
+// whether the store is provisioned, it is the tenant-isolation routing in a form a
 // caller (e.g. the EWS store cache) can key its own handle cache on, while keeping
 // the "domain comes from the authenticated caller" rule in this one place.
 func (svc *Service) DirForCaller(callerEmail string) string {
@@ -94,7 +94,7 @@ func (svc *Service) OpenForDomain(domain string) (*objectstore.Store, error) {
 // OpenForCaller opens the public store of the CALLER's own domain for reading,
 // without creating it. ok is false (with a nil store and nil error) when the
 // caller's domain has no public store, so a surface renders an empty result
-// rather than failing. The domain is taken from callerEmail alone — the
+// rather than failing. The domain is taken from callerEmail alone, the
 // tenant-isolation chokepoint. The caller owns the returned store and must Close
 // it when ok is true.
 func (svc *Service) OpenForCaller(callerEmail string) (st *objectstore.Store, ok bool, err error) {
@@ -113,8 +113,8 @@ func (svc *Service) OpenForCaller(callerEmail string) (st *objectstore.Store, ok
 }
 
 // VisibleFolders returns the public folders in the caller's own domain that the
-// caller may see — those on which the caller's effective rights include
-// FrightsVisible — each with those rights. It returns nil when the caller's
+// caller may see, those on which the caller's effective rights include
+// FrightsVisible, each with those rights. It returns nil when the caller's
 // domain has no public store. This is the shared discovery the EWS, IMAP, and
 // webmail surfaces all render.
 func (svc *Service) VisibleFolders(callerEmail string) ([]Folder, error) {

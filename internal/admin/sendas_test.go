@@ -48,7 +48,7 @@ func TestAdminSetUserSendAs(t *testing.T) {
 }
 
 // TestAdminSetUserSendAsRejectsUnknown proves a grantee that names no real user is
-// refused — not stored as a grant the MTA could never honor.
+// refused, not stored as a grant the MTA could never honor.
 func TestAdminSetUserSendAsRejectsUnknown(t *testing.T) {
 	store := &fakeStore{}
 	ts := adminServerStore(t, knownAlice(), store) // only alice resolves

@@ -112,7 +112,7 @@ func TestCreateDeleteAttachmentStableNumbers(t *testing.T) {
 // TestImportAssignsAttachNumber confirms the import path stamps a stable attach
 // number on each attachment it stores (mail import carries none of its own), so
 // the read path resolves an imported attachment by number exactly as it does a
-// ROP-created one — the two creation paths share one numbering scheme.
+// ROP-created one, the two creation paths share one numbering scheme.
 func TestImportAssignsAttachNumber(t *testing.T) {
 	s := openSeededStore(t)
 	raw := "From: a@example.test\r\nSubject: att\r\nMIME-Version: 1.0\r\n" +

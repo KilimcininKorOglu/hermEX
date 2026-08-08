@@ -4,7 +4,7 @@
 -- consumes other domains' policies on the outbound path. Publishing is off until the
 -- operator opts in (an upgrade must not silently start advertising a policy). mode is
 -- 'testing' by default: a sender surfaces TLS failures but still delivers, so a
--- certificate problem cannot lose inbound mail — switching to 'enforce' is a
+-- certificate problem cannot lose inbound mail, switching to 'enforce' is a
 -- deliberate, warned action. max_age is the policy cache lifetime in seconds a sender
 -- honours; a short default limits the blast radius of a misconfiguration during
 -- rollout. A single row mirrors the other settings tables; the absent row means

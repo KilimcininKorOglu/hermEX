@@ -5,7 +5,7 @@ import "hermex/internal/mapi"
 // PermissionSet is the EWS <t:PermissionSet> element: a folder's access-control
 // list as a sequence of Permission members. The calendar variant
 // (CalendarPermissionSet, whose ReadItems carries free/busy levels) is not
-// modeled — v1 serves every folder as a plain <t:Folder> with PermissionSet.
+// modeled, v1 serves every folder as a plain <t:Folder> with PermissionSet.
 type PermissionSet struct {
 	Permissions []Permission `xml:"Permissions>Permission"`
 }
@@ -13,7 +13,7 @@ type PermissionSet struct {
 // Permission is one <t:Permission> member. The field order matches the schema
 // (BasePermissionType then the PermissionType extension): UserId, the five
 // booleans, EditItems, DeleteItems, ReadItems, PermissionLevel. The booleans are
-// pointers so a parsed request can tell "absent" from "false" — on read every
+// pointers so a parsed request can tell "absent" from "false", on read every
 // flag is set, on write only the present ones are layered onto the level.
 type Permission struct {
 	UserID              UserID `xml:"UserId"`
@@ -42,7 +42,7 @@ type UserID struct {
 // permissionLevels maps each (non-calendar) PermissionLevelType to its rights mask.
 // The masks are the project's own role composites, which equal the wire-canonical
 // values at every level and, for Owner, use the full mask (mapi.RightsOwner) rather
-// than the reference's frightsOwner-only quirk — matching what real clients send.
+// than the reference's frightsOwner-only quirk, matching what real clients send.
 var permissionLevels = []struct {
 	name string
 	mask uint32
@@ -71,7 +71,7 @@ func rightsForLevel(level string) uint32 {
 
 // levelForRights names the canned PermissionLevel whose mask equals the stored
 // rights, or "Custom" when none does. The stored rights are normalized (the store
-// fills implied bits on write — e.g. Owner implies visible|contact, and a read right
+// fills implied bits on write, e.g. Owner implies visible|contact, and a read right
 // implies free/busy), so each profile mask is normalized the same way before the
 // compare; a raw compare would miss. The free/busy bits are then stripped from both
 // sides: they are a calendar concept absent from the non-calendar PermissionLevel

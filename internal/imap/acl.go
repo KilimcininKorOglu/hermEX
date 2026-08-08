@@ -54,7 +54,7 @@ func aclToRights(s string) uint32 {
 
 // resolveACLFolder resolves a mailbox name to the store and folder id its ACL lives
 // in, covering both the caller's own folders and public folders. ownPrivate marks a
-// folder in the caller's own mailbox — the directory already established the caller
+// folder in the caller's own mailbox, the directory already established the caller
 // owns it, so they hold full rights there regardless of any stored permission row.
 func (c *conn) resolveACLFolder(name string) (st *objectstore.Store, fid int64, ownPrivate, ok bool) {
 	if sub, isPub := isPublicName(name); isPub {
@@ -258,7 +258,7 @@ func currentACLRights(st *objectstore.Store, fid int64, id string) uint32 {
 }
 
 // aclMemberID returns the stored member id for an identifier, or 0 (the default
-// member) when none is stored — DELETEACL of a real member needs its row id.
+// member) when none is stored, DELETEACL of a real member needs its row id.
 func aclMemberID(st *objectstore.Store, fid int64, id string) int64 {
 	entries, _ := st.ListPermissions(fid)
 	for _, e := range entries {

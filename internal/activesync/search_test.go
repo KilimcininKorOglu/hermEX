@@ -71,7 +71,7 @@ func TestSearchGAL(t *testing.T) {
 }
 
 // TestSearchGALMultiple proves a query matching two GAL users returns both
-// Results with a correct Range ("0-1") and Total ("2") — the off-by-one a single
+// Results with a correct Range ("0-1") and Total ("2"), the off-by-one a single
 // match would hide.
 func TestSearchGALMultiple(t *testing.T) {
 	ts := galServer(t)

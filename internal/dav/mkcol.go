@@ -11,7 +11,7 @@ import (
 // handleMkCalendar creates a calendar collection (RFC 4791 §5.3.1). The URL's final
 // segment names the collection and becomes the folder's display name, by which the
 // collection is then addressed; an already-existing name fails 405. A request body
-// (mkcalendar/set/prop) is accepted but its property directives are not applied —
+// (mkcalendar/set/prop) is accepted but its property directives are not applied,
 // the display name is fixed to the URL segment so name-based resolution stays
 // unambiguous (a documented v1 simplification).
 func (s *Server) handleMkCalendar(w http.ResponseWriter, r *http.Request, mailbox string) {

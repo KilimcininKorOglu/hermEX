@@ -15,7 +15,7 @@ import (
 	"hermex/internal/smime"
 )
 
-// isSchedulingMessage reports whether a message is an iTIP scheduling message — a
+// isSchedulingMessage reports whether a message is an iTIP scheduling message, a
 // meeting request, response, or cancellation, by its IPM.Schedule message class.
 // Such a message carries its invitation as a text/calendar body that re-export
 // would demote to an attachment, so the store preserves it verbatim.
@@ -43,14 +43,14 @@ type MessageInfo struct {
 // AppendMessage stores a raw RFC822 message in a folder as a MAPI object: it
 // imports the message into the object model, persists the object, re-synthesizes
 // the wire form and caches it as the served eml, then indexes the message for
-// IMAP/POP3. The original bytes are not retained — the served form is
+// IMAP/POP3. The original bytes are not retained, the served form is
 // regenerated from the object, so it is well-formed but not byte-identical to
 // arrival. The eml is generated now (rather than lazily) so the index records
 // the exact RFC822 size IMAP reports for the message. It returns the message's
 // index metadata, including its allocated UID.
 func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time, flags int64) (info MessageInfo, err error) {
 	// Every error exit here is a real store failure (a conversion, SQL, or IO
-	// error) — there is no benign not-found path on the write side — so report
+	// error), there is no benign not-found path on the write side, so report
 	// any of them under the store subsystem.
 	defer func() {
 		if err != nil {

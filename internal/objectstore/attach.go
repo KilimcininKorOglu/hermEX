@@ -8,7 +8,7 @@ import (
 )
 
 // CreateAttachment inserts a new, empty attachment under a message and assigns it
-// a stable attach number — the per-message PidTagAttachNumber the client reopens
+// a stable attach number, the per-message PidTagAttachNumber the client reopens
 // and deletes it by. The number is the message's current maximum plus one (the
 // first is 0), computed and persisted in the same transaction as the insert so
 // two creates before any other write get distinct numbers without a separate
@@ -16,7 +16,7 @@ import (
 // when a sibling attachment is deleted, so a handle the client holds stays valid.
 // initialProps are the attachment's opening properties (rendering position,
 // timestamps); the caller fills the payload and filename later via
-// SaveChangesAttachment. It does not bump the parent message's change number —
+// SaveChangesAttachment. It does not bump the parent message's change number,
 // the reference advances that only on the message's own save, so an attachment
 // change is observed by ICS only once the message is saved.
 func (s *Store) CreateAttachment(messageID int64, initialProps mapi.PropertyValues) (attachmentID int64, attachNum uint32, err error) {

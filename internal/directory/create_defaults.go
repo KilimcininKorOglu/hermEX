@@ -52,7 +52,7 @@ type ResolvedUserDefaults struct {
 	SendKB    int64
 }
 
-// builtinUserDefaults is the baseline an empty defaults configuration resolves to —
+// builtinUserDefaults is the baseline an empty defaults configuration resolves to,
 // it mirrors what CreateUser provisions when no defaults are stored (POP3/IMAP,
 // SMTP, and the DETAIL1-opt-out services web/EAS/DAV on; password change off; no
 // language; unlimited quotas), so pre-fill matches an unconfigured create.

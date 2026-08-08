@@ -25,7 +25,7 @@ type OutgoingInput struct {
 
 // BuildOutgoing builds an outgoing IPM.Note for oxcmail.Export, mirroring the
 // webmail compose path so delivery flows through Export (never hand-rolled MIME).
-// Message-ID and submit time are set explicitly — Export has no fallback, so a
+// Message-ID and submit time are set explicitly, Export has no fallback, so a
 // miss would ship dateless/idless mail.
 func BuildOutgoing(in OutgoingInput) *oxcmail.Message {
 	var props mapi.PropertyValues

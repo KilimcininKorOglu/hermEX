@@ -5,7 +5,7 @@
 // Run. Run starts every component, blocks until its context is cancelled (a
 // SIGINT/SIGTERM the main caught with signal.NotifyContext) or a component fails
 // on its own, then stops every component under one shared deadline and finally
-// runs the cleanups — so in-flight work drains before any resource it depends on
+// runs the cleanups, so in-flight work drains before any resource it depends on
 // is closed.
 package lifecycle
 
@@ -24,7 +24,7 @@ const DefaultShutdownTimeout = 30 * time.Second
 // it stops; Shutdown asks it to stop gracefully within ctx's deadline. Start is
 // expected to return once Shutdown has been invoked, and that post-shutdown
 // return (for example http.ErrServerClosed, or a "use of closed network
-// connection" error from a closed listener) is the normal path, not a failure —
+// connection" error from a closed listener) is the normal path, not a failure,
 // Run only treats a Start that returns while shutdown has NOT been requested as a
 // genuine failure.
 type Component interface {
@@ -49,7 +49,7 @@ func (f Func) Shutdown(ctx context.Context) error { return f.ShutdownFn(ctx) }
 // is cancelled or a component's Start returns while ctx is still live (a genuine
 // failure). It then shuts every component down concurrently under a fresh
 // timeout-bounded context, waits for all to return, and finally runs cleanups in
-// the given order — strictly after every Shutdown has returned, so a cleanup
+// the given order, strictly after every Shutdown has returned, so a cleanup
 // never closes a resource an in-flight handler still needs. It returns the first
 // meaningful error: a genuine Start failure, otherwise the first Shutdown or
 // cleanup error.
@@ -64,7 +64,7 @@ func Run(ctx context.Context, timeout time.Duration, components []Component, cle
 	case <-ctx.Done():
 		// Graceful shutdown was requested; component Start returns are expected.
 	case err := <-errc:
-		// A Start returned before shutdown was requested — a genuine failure.
+		// A Start returned before shutdown was requested, a genuine failure.
 		runErr = err
 	}
 

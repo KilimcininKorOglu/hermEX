@@ -22,7 +22,7 @@ func oofUserDir() *fakeDir {
 
 // TestAdminGetUserOOF proves a system admin reads a user's out-of-office settings,
 // resolved from the mailbox store at the user's maildir and serialized in the
-// canonical encoding — the external audience and the per-audience subject survive.
+// canonical encoding, the external audience and the per-audience subject survive.
 func TestAdminGetUserOOF(t *testing.T) {
 	d := oofUserDir()
 	store := &fakeStore{oof: map[string]objectstore.OOFSettings{

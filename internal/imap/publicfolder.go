@@ -35,7 +35,7 @@ func isPublicName(name string) (sub string, ok bool) {
 // curStore returns the store the currently selected folder lives in: the public
 // store when a public folder is selected, otherwise the caller's own mailbox.
 // Every operation on the selected folder (FETCH/STORE/SEARCH/COPY source, the
-// poll refresh) must route through here so it reaches the right store — folder ids
+// poll refresh) must route through here so it reaches the right store, folder ids
 // are not unique across the two stores, so the selection's store and id only mean
 // something together.
 func (c *conn) curStore() *objectstore.Store {
@@ -154,7 +154,7 @@ func (c *conn) selectPublic(tag, name, sub string, examine bool) {
 	c.selPublic = true
 	c.state = stateSelected
 	// Read-write enables unrestricted STORE and EXPUNGE on the folder's existing
-	// items, which the store applies without per-item ownership checks — so it
+	// items, which the store applies without per-item ownership checks, so it
 	// requires the "any" edit/delete rights (Editor level), not merely the create
 	// right. A pure poster (Create only) gets a read-only selection but can still
 	// APPEND, the post-without-modify semantics public folders want; this is also

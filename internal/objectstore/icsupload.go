@@ -28,8 +28,8 @@ const (
 // destination folder, the home-replica message id, the associated flag, and
 // whether that id already exists) plus the message bag a MessageCollector fills
 // from the FastTransfer content stream. The wire splits the operation across two
-// ROPs — the import-change ROP returns a message handle, then a FastTransfer
-// destination fills it — so identity and content are kept apart here: this holds
+// ROPs, the import-change ROP returns a message handle, then a FastTransfer
+// destination fills it, so identity and content are kept apart here: this holds
 // the identity, NewMessageCollector binds a collector to it, and Commit writes the
 // assembled message under the resolved id.
 type UploadMessage struct {
@@ -43,12 +43,12 @@ type UploadMessage struct {
 
 // ImportMessageChange resolves a message-change header into an UploadMessage
 // ([MS-OXCFXICS] 3.3.5.10). The header carries the four identity properties the
-// wire sends in fixed order — PR_SOURCE_KEY, PR_LAST_MODIFICATION_TIME,
-// PR_CHANGE_KEY, PR_PREDECESSOR_CHANGE_LIST — of which the 22-byte source key
+// wire sends in fixed order, PR_SOURCE_KEY, PR_LAST_MODIFICATION_TIME,
+// PR_CHANGE_KEY, PR_PREDECESSOR_CHANGE_LIST, of which the 22-byte source key
 // names the message: a home-replica source key yields the message id, and the
 // store decides new-vs-existing from it. The change key and predecessor list are
-// accepted but not stored — the store derives both from the change number on
-// download — so v1 does no predecessor-list conflict detection (last writer wins,
+// accepted but not stored, the store derives both from the change number on
+// download, so v1 does no predecessor-list conflict detection (last writer wins,
 // a documented limitation). A foreign-replica source key (a cross-store import) is
 // rejected in v1.
 func (s *Store) ImportMessageChange(folderID int64, importFlags uint8, header mapi.PropertyValues) (*UploadMessage, error) {
@@ -119,7 +119,7 @@ func propBytes(pv mapi.PropertyValues, tag mapi.PropTag) ([]byte, bool) {
 }
 
 // MessageCollector assembles the body of one uploaded message from a FastTransfer
-// content stream — the MESSAGECONTENT root form a client sends after an
+// content stream, the MESSAGECONTENT root form a client sends after an
 // import-change ROP. Top-level properties land on the message; STARTRECIP/
 // ENDTORECIP frame a recipient bag and NEWATTACH/ENDATTACH an attachment bag;
 // MetaTagFXDelProp(PR_MESSAGE_RECIPIENTS|PR_MESSAGE_ATTACHMENTS) resets that
@@ -274,8 +274,8 @@ func (c *MessageCollector) resolveTag(p ics.StreamProp) (mapi.PropTag, error) {
 // Commit writes the assembled message under its resolved id in one transaction. A
 // new id is inserted and the destination folder's allocation cursor is advanced
 // past it so a later server-side allocation never reuses it; an existing id is
-// replaced wholesale — the messages-row delete cascades to its old property bag,
-// recipients, attachments, and time-index row — and re-inserted. Either way a
+// replaced wholesale, the messages-row delete cascades to its old property bag,
+// recipients, attachments, and time-index row, and re-inserted. Either way a
 // fresh change number is allocated, which is what a later download reports as the
 // modification ("updated") that re-importing a message represents. Content
 // properties are offloaded to content files by the property layer. It returns the
@@ -369,8 +369,8 @@ func advanceFolderEID(q sqlExec, folderID int64, mid uint64) error {
 // ([MS-OXCFXICS] 3.3.5.10). Each source key is a 22-byte XID; a home-replica one
 // names a message id, which is deleted when it is present in the folder.
 // Foreign-replica keys (cross-store) and ids absent from the folder are skipped,
-// so the operation is idempotent. v1 always hard-deletes — the store keeps no
-// soft-delete state — so the soft/hard distinction the wire carries is a
+// so the operation is idempotent. v1 always hard-deletes, the store keeps no
+// soft-delete state, so the soft/hard distinction the wire carries is a
 // documented limitation. It returns the ids actually deleted.
 func (s *Store) ImportDeletes(folderID int64, sourceKeys [][]byte) ([]uint64, error) {
 	home, err := s.replicaGUID()
@@ -485,7 +485,7 @@ type ReadStateChange struct {
 // ImportReadStateChanges applies read-flag changes a client uploaded
 // ([MS-OXCFXICS] 3.3.5.10). For each home-replica message in the folder whose flag
 // actually differs (associated messages, which have no read state, are skipped) it
-// records the new flag and a freshly allocated read change number — the version
+// records the new flag and a freshly allocated read change number, the version
 // the contents delta diffs against a client's read set, and the first write path
 // to record one. It returns those read change numbers (the upload state collector
 // folds them into its read set). Foreign keys, absent ids, and no-op changes are
@@ -565,15 +565,15 @@ func (s *Store) ImportReadStateChanges(folderID int64, changes []ReadStateChange
 
 // ImportHierarchyChange creates or updates a folder a client uploaded
 // ([MS-OXCFXICS] 3.3.5.10). hichyvals carries the fixed-order identity set the wire
-// sends — parent source key, source key, last-modification time, change key,
-// predecessor list, display name — and propvals any further folder properties. The
+// sends, parent source key, source key, last-modification time, change key,
+// predecessor list, display name, and propvals any further folder properties. The
 // source key names a home folder id; an empty parent source key parents the folder
 // under the collector's root folder, otherwise the parent source key resolves to a
 // home folder. An absent id is created at that id under the parent (its message-id
 // range carved and the store cursor advanced past it); an existing id is updated
 // and moved if its parent changed. Either way a fresh change number is allocated
-// and the change key and predecessor list are derived from it — the client's are
-// accepted but not stored — so v1 does no predecessor-list conflict detection. A
+// and the change key and predecessor list are derived from it, the client's are
+// accepted but not stored, so v1 does no predecessor-list conflict detection. A
 // foreign-replica source key (a cross-store import) is rejected in v1. It returns
 // the folder id.
 func (s *Store) ImportHierarchyChange(rootFID int64, hichyvals, propvals mapi.PropertyValues) (uint64, error) {

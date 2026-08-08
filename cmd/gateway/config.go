@@ -17,7 +17,7 @@ type gatewaySettings struct {
 
 // resolveGateway reads the gateway routing settings from the shared config,
 // substituting a built-in default for every field left empty. The configuration
-// file is the sole source — there is no environment override — so the resolved
+// file is the sole source, there is no environment override, so the resolved
 // values are exactly what config.json carries (or the defaults below).
 func resolveGateway(cfg *config.Config) gatewaySettings {
 	return gatewaySettings{

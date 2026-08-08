@@ -17,7 +17,7 @@ func (p *prefixSigner) Sign(body []byte) []byte {
 }
 
 // TestEnqueueSignsOnce proves Enqueue signs the body a single time and stores that one
-// signed form for every recipient — not once per recipient — so all copies carry the
+// signed form for every recipient, not once per recipient, so all copies carry the
 // same valid signature.
 func TestEnqueueSignsOnce(t *testing.T) {
 	sp, err := Open(filepath.Join(t.TempDir(), "relay.sqlite3"))

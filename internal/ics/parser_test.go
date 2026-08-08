@@ -80,7 +80,7 @@ func assertStream(t *testing.T, items []Item, wantProps []StreamProp) {
 	}
 }
 
-// TestParserReassemblesByteByByte feeds the stream one byte at a time — the most
+// TestParserReassemblesByteByByte feeds the stream one byte at a time, the most
 // adversarial fragmentation, splitting every multi-byte primitive (markers,
 // propdefs, length prefixes) and every value body mid-element. A correct
 // length-driven parser must still reconstruct every element. This path is what a

@@ -8,8 +8,8 @@ import (
 	"hermex/internal/oxcmail"
 )
 
-// TestDeferredSendTimeRoundTrip checks that PrDeferredSendTime — the property a
-// scheduled (send-later) message carries in the Outbox — round-trips through the
+// TestDeferredSendTimeRoundTrip checks that PrDeferredSendTime, the property a
+// scheduled (send-later) message carries in the Outbox, round-trips through the
 // message property layer as a PT_SYSTIME value: an absolute time set as an
 // NT-time reads back as the same instant. The send-later worker relies on this
 // to decide when a deferred message is due.

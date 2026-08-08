@@ -98,8 +98,8 @@ func Unmarshal(b []byte) (*Node, error) {
 	return r.element(&page, 0)
 }
 
-// element parses one element: any leading SWITCH_PAGE, the tag byte, and — when
-// the content bit is set — the content items up to the matching END. A nested
+// element parses one element: any leading SWITCH_PAGE, the tag byte, and, when
+// the content bit is set, the content items up to the matching END. A nested
 // element on a different page is introduced by its own SWITCH_PAGE, handled by
 // the recursive call.
 //

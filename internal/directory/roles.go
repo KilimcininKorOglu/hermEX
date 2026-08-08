@@ -290,7 +290,7 @@ func insertRoleUsers(tx *sql.Tx, roleID int64, userIDs []int64) error {
 // role assigned to the user and the equivalents of the user's direct admin_roles
 // grants (system → SystemAdmin, org → OrgAdmin(scope), domain → DomainAdmin(scope)).
 // The legacy bridge guarantees an existing admin keeps authority when the role
-// model goes live — without it, the only system admin could be locked out.
+// model goes live, without it, the only system admin could be locked out.
 func (d *SQLDirectory) EffectivePermissions(userID int64) ([]Permission, error) {
 	seen := map[Permission]bool{}
 	var out []Permission

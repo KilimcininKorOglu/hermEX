@@ -12,7 +12,7 @@ import (
 // hasOrgScope reports whether a user may write to an organization, resolved
 // through the single permission path: a full system admin (SystemAdmin), an org
 // admin over all orgs (OrgAdmin "*"), or an org admin scoped to this org. A
-// read-only administrator is not granted write scope here — reads admit RO in
+// read-only administrator is not granted write scope here, reads admit RO in
 // orgScope instead.
 func (s *Server) hasOrgScope(userID, orgID int64) bool {
 	perms := s.adminPerms(userID)
@@ -191,7 +191,7 @@ func (s *Server) handleUnassignOrgDomain(w http.ResponseWriter, r *http.Request)
 }
 
 // handleGetLDAP returns an organization's LDAP configuration. The bind password
-// is never disclosed — only whether one is stored.
+// is never disclosed, only whether one is stored.
 func (s *Server) handleGetLDAP(w http.ResponseWriter, r *http.Request) {
 	orgID, ok := s.orgScope(w, r)
 	if !ok {

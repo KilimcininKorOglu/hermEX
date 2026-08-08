@@ -29,12 +29,12 @@ const (
 )
 
 // fastCopyTo is the FastTransfer destination source-operation for a message-content
-// copy (COPYTO) — the only mode the ICS message-body upload uses ([MS-OXCFXICS]
+// copy (COPYTO), the only mode the ICS message-body upload uses ([MS-OXCFXICS]
 // 2.2.3.1.2.1.1).
 const fastCopyTo uint8 = 0x01
 
 // importDeletesTag is the single multivalue-binary property an ImportDeletes
-// request carries — PROP_TAG(PT_MV_BINARY, 0) — whose values are the 22-byte
+// request carries, PROP_TAG(PT_MV_BINARY, 0), whose values are the 22-byte
 // source keys to delete ([MS-OXCFXICS] 2.2.3.2.4.5).
 const importDeletesTag uint32 = 0x00001102
 
@@ -51,7 +51,7 @@ const (
 const fastChunkCap = 0xF000
 
 // fastTransferSource is a server object the client drains via
-// RopFastTransferSourceGetBuffer — an ICS download collector in this increment, a
+// RopFastTransferSourceGetBuffer, an ICS download collector in this increment, a
 // transfer-state buffer in a later one.
 type fastTransferSource interface {
 	GetBuffer(maxLen int) (chunk []byte, last bool, err error)
@@ -73,7 +73,7 @@ type stateStreamSink interface {
 func (s *Session) ropSynchronizationConfigure(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8()
 	syncType, e2 := p.Uint8()
-	_, e3 := p.Uint8() // SendOptions — the stream codec always emits UTF-16
+	_, e3 := p.Uint8() // SendOptions, the stream codec always emits UTF-16
 	syncFlags, e4 := p.Uint16()
 	restrictionSize, e5 := p.Uint16()
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil {
@@ -136,7 +136,7 @@ func (s *Session) ropSynchronizationConfigure(p *ext.Pull, out *ext.Push, handle
 // sync context. BufferSize is the informational total the client will send.
 func (s *Session) ropSyncUploadStateStreamBegin(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	stateProp, e1 := p.Uint32()
-	_, e2 := p.Uint32() // BufferSize — informational
+	_, e2 := p.Uint32() // BufferSize, informational
 	if e1 != nil || e2 != nil {
 		return false
 	}
@@ -199,7 +199,7 @@ func (s *Session) ropFastTransferSourceGetBuffer(p *ext.Pull, out *ext.Push, han
 		return false
 	}
 	if bufferSize == 0xBABE {
-		if _, e := p.Uint16(); e != nil { // MaximumBufferSize — we cap ourselves
+		if _, e := p.Uint16(); e != nil { // MaximumBufferSize, we cap ourselves
 			return false
 		}
 	}
@@ -246,7 +246,7 @@ func (s *Session) ropSyncOpenCollector(p *ext.Pull, out *ext.Push, handles []uin
 		writeErr(out, ropSyncOpenCollector, ohindex, ecError)
 		return true
 	}
-	// An upload collector imports message/hierarchy changes into the folder — a bulk
+	// An upload collector imports message/hierarchy changes into the folder, a bulk
 	// write. A delegate may open one only with EditAny on the folder (this is the
 	// upload's write chokepoint; the import ROPs that follow trust the collector).
 	if s.denyWrite(out, ropSyncOpenCollector, ohindex, folder.store, folder.folderID, mapi.FrightsEditAny) {
@@ -301,7 +301,7 @@ func (s *Session) ropSyncImportHierarchyChange(p *ext.Pull, out *ext.Push, handl
 // 2.2.3.2.4.5): the request carries one multivalue-binary property whose values
 // are the source keys to hard-delete.
 func (s *Session) ropSyncImportDeletes(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	_, e1 := p.Uint8() // ImportDeleteFlags — v1 always hard-deletes
+	_, e1 := p.Uint8() // ImportDeleteFlags, v1 always hard-deletes
 	propvals, e2 := p.PropertyValues()
 	if e1 != nil || e2 != nil {
 		return false
@@ -432,7 +432,7 @@ func (s *Session) ropSyncGetTransferState(p *ext.Pull, out *ext.Push, handles []
 // ([MS-OXCFXICS] 2.2.3.2.4.2): it opens an imported message from its four-property
 // identity header and returns a message handle whose body is then filled over a
 // FastTransfer destination and persisted by RopSaveChangesMessage. The response
-// message id is zero — the client reads the server change number off the saved
+// message id is zero, the client reads the server change number off the saved
 // message, not from here.
 func (s *Session) ropSyncImportMessageChange(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8()
@@ -467,7 +467,7 @@ func (s *Session) ropSyncImportMessageChange(p *ext.Pull, out *ext.Push, handles
 func (s *Session) ropFastTransferDestConfigure(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8()
 	sourceOp, e2 := p.Uint8()
-	_, e3 := p.Uint8() // CopyFlags — only MOVE (0x01); the ICS message copy sets none
+	_, e3 := p.Uint8() // CopyFlags, only MOVE (0x01); the ICS message copy sets none
 	if e1 != nil || e2 != nil || e3 != nil {
 		return false
 	}

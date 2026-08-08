@@ -6,8 +6,8 @@ package nspi
 //
 // Container ids live in 0x3..0xF: above the table sentinels (BEGINNING=0x0,
 // CURRENT=0x1, END=0x2) and below the first entry MId (midBase=0x10), so a
-// container id can never collide with an entry MId — even though GetMatches
-// copies cur_rec (which may be an entry MId) into container_id — nor with the
+// container id can never collide with an entry MId, even though GetMatches
+// copies cur_rec (which may be an entry MId) into container_id, nor with the
 // PR_EMS_AB_MEMBER selector. 0x8..0xF stay reserved for future lists.
 const (
 	alContainerUsers     int32 = 0x3
@@ -39,7 +39,7 @@ type addressList struct {
 // addressLists is the registry of named, type-defined address lists. The order
 // is the order they appear in GetSpecialTable. "All Contacts" is served here, but
 // mail contacts (dtContact) are not yet creatable, so that list stays empty until
-// the contacts subsystem lands — the container surface is complete now.
+// the contacts subsystem lands, the container surface is complete now.
 var addressLists = []addressList{
 	{alContainerUsers, "All Users", rtUser},
 	{alContainerDistLists, "All Distribution Lists", rtDistList},

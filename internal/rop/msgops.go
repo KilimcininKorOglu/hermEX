@@ -49,7 +49,7 @@ func (s *Session) ropSetMessageReadFlag(p *ext.Pull, out *ext.Push, handles []ui
 	// prior state before the write: a message already read through another
 	// protocol (an IMAP \Seen) leaves PR_READ_RECEIPT_REQUESTED set, and a
 	// flag-only gate would fire a spurious receipt when an Outlook client later
-	// opens it. (IMAP \Seen itself generates no receipt — read receipts are a
+	// opens it. (IMAP \Seen itself generates no receipt, read receipts are a
 	// ROP-surface feature in v1.)
 	wasRead, err := obj.store.GetMessageReadState(obj.messageID)
 	if err != nil {
@@ -286,7 +286,7 @@ func (s *Session) ropMoveCopyMessages(p *ext.Pull, out *ext.Push, handles []uint
 
 // copyStoredMessage copies one message from (srcFolder, uid) into dstFolder,
 // preserving its flags and received date by re-filing the raw message under a
-// fresh uid — the same primitive the webmail move/copy path uses.
+// fresh uid, the same primitive the webmail move/copy path uses.
 func copyStoredMessage(st *objectstore.Store, srcFolder int64, uid uint32, dstFolder int64) error {
 	info, err := st.MessageByUID(srcFolder, uid)
 	if err != nil {

@@ -32,8 +32,8 @@ func (d *SQLDirectory) SetSpamHistoryRetain(n int64) {
 }
 
 // RecordSpamVerdict appends one scored message's outcome and prunes the table to
-// the retention cap. The MTA calls it fail-open — a delivery must never fail
-// because history could not be written — so the caller logs and ignores any error.
+// the retention cap. The MTA calls it fail-open, a delivery must never fail
+// because history could not be written, so the caller logs and ignores any error.
 func (d *SQLDirectory) RecordSpamVerdict(v SpamVerdict) error {
 	if len(v.Reasons) > 512 {
 		v.Reasons = v.Reasons[:512]

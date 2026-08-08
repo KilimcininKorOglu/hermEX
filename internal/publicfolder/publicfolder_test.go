@@ -50,7 +50,7 @@ func names(fs []Folder) []string {
 func TestVisibleFoldersACLAndTenantIsolation(t *testing.T) {
 	svc := New(fakePaths{root: t.TempDir()})
 
-	// A domain with no public store: nothing visible, no error — the feature is
+	// A domain with no public store: nothing visible, no error, the feature is
 	// simply absent rather than auto-provisioned by a read.
 	if got, err := svc.VisibleFolders("nobody@unprov.test"); err != nil || got != nil {
 		t.Fatalf("un-provisioned domain VisibleFolders = %v, %v; want nil, nil", got, err)
@@ -105,7 +105,7 @@ func TestVisibleFoldersACLAndTenantIsolation(t *testing.T) {
 
 	// Tenant isolation: provision a second domain with its OWN folder, then confirm
 	// a caller in that domain sees only their domain's folder and never local.test's
-	// tree — even though local.test's store exists on disk. The domain is derived
+	// tree, even though local.test's store exists on disk. The domain is derived
 	// from the caller's address, so there is no path that opens another tenant's store.
 	if err := svc.Provision("other.test"); err != nil {
 		t.Fatal(err)

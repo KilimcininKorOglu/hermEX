@@ -10,7 +10,7 @@ import (
 )
 
 // TestMaxBodyLimitResolution proves the request-body cap resolves to the operator-set
-// value when set and the built-in default otherwise — the value the daemon's poll
+// value when set and the built-in default otherwise, the value the daemon's poll
 // drives, read live at each request.
 func TestMaxBodyLimitResolution(t *testing.T) {
 	defer SetMaxRequestBody(0)

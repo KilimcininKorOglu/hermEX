@@ -207,8 +207,8 @@ func TestAutoProcessUpdateNotSelfConflict(t *testing.T) {
 }
 
 // TestAutoProcessDeliveredInvite is the end-to-end feasibility proof: a real meeting
-// invitation delivered as MIME (text/calendar; method=REQUEST) — not a hand-built
-// property bag — must, once AppendMessage imports it, carry the message class and the
+// invitation delivered as MIME (text/calendar; method=REQUEST), not a hand-built
+// property bag, must, once AppendMessage imports it, carry the message class and the
 // appointment window the auto-processor reads. It confirms the delivery path populates
 // exactly the properties the engine depends on; a unit test that sets those properties
 // directly would not catch an import that failed to produce them.

@@ -8,9 +8,9 @@ import "hermex/internal/mapi"
 // the store. The store only holds the limits; the delivery and submission paths
 // decide what to enforce against the live MailboxSize.
 type QuotaLimits struct {
-	SendKB    uint32 `json:"sendKB"`    // PR_PROHIBIT_SEND_QUOTA — block submission above this
-	ReceiveKB uint32 `json:"receiveKB"` // PR_PROHIBIT_RECEIVE_QUOTA — block delivery above this
-	StorageKB uint32 `json:"storageKB"` // PR_STORAGE_QUOTA_LIMIT — warning threshold
+	SendKB    uint32 `json:"sendKB"`    // PR_PROHIBIT_SEND_QUOTA, block submission above this
+	ReceiveKB uint32 `json:"receiveKB"` // PR_PROHIBIT_RECEIVE_QUOTA, block delivery above this
+	StorageKB uint32 `json:"storageKB"` // PR_STORAGE_QUOTA_LIMIT, warning threshold
 }
 
 // GetQuota returns the mailbox's store quota limits; an unset limit reads as 0
@@ -47,7 +47,7 @@ func (s *Store) SetQuota(q QuotaLimits) error {
 	})
 }
 
-// MailboxSize returns the mailbox's current used space in bytes — the sum of the
+// MailboxSize returns the mailbox's current used space in bytes, the sum of the
 // stored message sizes, computed on demand. It is the value the Exchange store
 // reports as PR_MESSAGE_SIZE_EXTENDED and the basis for quota enforcement.
 func (s *Store) MailboxSize() (int64, error) {

@@ -16,7 +16,7 @@ type RecipientRule struct {
 }
 
 // RecipientRulesForMaildir returns the personal allow/block rules of the mailbox at
-// maildir as a pattern→action map — the exact shape antispam.NewAccessList consumes —
+// maildir as a pattern→action map, the exact shape antispam.NewAccessList consumes,
 // so the MTA resolves a per-recipient verdict with the same matching as the operator's
 // server-wide list, with no risk of the two drifting. The map is empty when the user
 // has no rules or is unknown; the maildir identifies the user, so an alias recipient

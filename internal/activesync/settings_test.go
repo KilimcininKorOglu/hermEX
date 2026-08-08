@@ -105,7 +105,7 @@ func TestSettingsOofTimeBased(t *testing.T) {
 // TestSettingsOofExternalAudience confirms the external audience round-trips
 // through EAS's two external buckets: a Known-only Set (only ExternalKnown
 // enabled) enables just the ExternalKnown bucket on Get, while an All Set
-// (ExternalUnknown also enabled) enables both — the single reply text reaches both
+// (ExternalUnknown also enabled) enables both, the single reply text reaches both
 // buckets either way.
 func TestSettingsOofExternalAudience(t *testing.T) {
 	ts, dir := seededServer(t)

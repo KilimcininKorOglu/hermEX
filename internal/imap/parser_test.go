@@ -11,7 +11,7 @@ import (
 
 // TestReadLiteralRespectsServerLimit proves the literal cap is read live from the
 // server's atomic, so an operator's edit (applied by the poll) decides what a literal
-// may be — a literal over the cap is rejected, and raising the cap admits it, with no
+// may be, a literal over the cap is rejected, and raising the cap admits it, with no
 // reconstruction.
 func TestReadLiteralRespectsServerLimit(t *testing.T) {
 	var limit atomic.Int64

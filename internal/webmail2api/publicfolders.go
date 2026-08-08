@@ -207,7 +207,7 @@ func (s *Server) markPublicRead(mailbox, owner string, messageID int64) {
 	_ = own.MarkPublicMessageRead(owner, messageID)
 }
 
-// publicOwner returns the caller's domain — the key the SPA shows beside the
+// publicOwner returns the caller's domain, the key the SPA shows beside the
 // public-folder section.
 func publicOwner(email string) string {
 	if _, domain, ok := strings.Cut(strings.ToLower(email), "@"); ok {

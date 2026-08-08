@@ -60,7 +60,7 @@ type deleteItemChange struct {
 // folder against the per-folder item snapshot to emit Create/Update/Delete. An
 // empty SyncState is a fresh prime (every item is a Create); a matching one is a
 // delta; a stale one is rejected so the client re-primes. Change numbers cannot
-// drive this — they are INSERT-only, so flag toggles and deletes are invisible
+// drive this, they are INSERT-only, so flag toggles and deletes are invisible
 // to them; the snapshot diff is the only channel-agnostic detector.
 func (s *Server) handleSyncFolderItems(w http.ResponseWriter, inner []byte, sess *session) {
 	s.icsSync(sess.user, "folder-items")

@@ -14,8 +14,8 @@ import (
 // Inbox rules (MS-OXWSMSG GetInboxRules / UpdateInboxRules) over hermEX's stored
 // rule set. The wire Rule format is rich (dozens of predicates and actions); v1
 // maps the curated vocabulary hermEX can actually evaluate and run on delivery:
-//   conditions — ContainsSubjectStrings, ContainsSenderStrings, Importance
-//   actions    — MoveToFolder, Delete, MarkAsRead
+//   conditions, ContainsSubjectStrings, ContainsSenderStrings, Importance
+//   actions   , MoveToFolder, Delete, MarkAsRead
 // Each maps to exactly one stored RESTRICTION / RULE_ACTIONS shape, so a rule
 // round-trips read→edit→write without drifting. A stored rule using anything
 // outside this set is still listed (RuleId/DisplayName/Priority/IsEnabled) but
@@ -28,7 +28,7 @@ type getInboxRulesRequest struct {
 }
 
 // getInboxRulesResponse is a single response message (GetInboxRulesResponseType
-// extends ResponseMessageType directly — there is no ResponseMessages wrapper).
+// extends ResponseMessageType directly, there is no ResponseMessages wrapper).
 type getInboxRulesResponse struct {
 	XMLName               xml.Name    `xml:"http://schemas.microsoft.com/exchange/services/2006/messages GetInboxRulesResponse"`
 	ResponseClass         string      `xml:"ResponseClass,attr"`
@@ -90,7 +90,7 @@ type targetFolder struct {
 // --- handler ---
 
 // handleGetInboxRules answers GetInboxRules: it lists the requester's inbox rules,
-// mapping each stored rule to a wire Rule. OutlookRuleBlobExists is always false —
+// mapping each stored rule to a wire Rule. OutlookRuleBlobExists is always false,
 // hermEX keeps no Outlook rule blob; the rules are the authoritative set.
 func (s *Server) handleGetInboxRules(w http.ResponseWriter, inner []byte, sess *session) {
 	var req getInboxRulesRequest
@@ -155,7 +155,7 @@ func (p rulePredicates) empty() bool {
 func predicatesFromRestriction(r mapi.Restriction) (rulePredicates, bool) {
 	var p rulePredicates
 	// ResNull is the explicit "no restriction" type. ResAnd is 0x00, so it must NOT
-	// be treated as the zero value here — an empty AND is handled in mergePredicate.
+	// be treated as the zero value here, an empty AND is handled in mergePredicate.
 	if r.Type == mapi.ResNull {
 		return p, true
 	}
@@ -169,7 +169,7 @@ func mergePredicate(p *rulePredicates, r mapi.Restriction) bool {
 	switch r.Type {
 	case mapi.ResAnd:
 		if r.Value == nil {
-			return true // an empty AND matches every message — no predicates
+			return true // an empty AND matches every message, no predicates
 		}
 		kids, ok := r.Value.([]mapi.Restriction)
 		if !ok {
@@ -313,7 +313,7 @@ type updateInboxRulesRequest struct {
 
 // ruleOperations is the ordered Create/Set/Delete operation list. A custom
 // unmarshaler preserves document order so a RuleOperationError's OperationIndex
-// matches the request — a per-element-type split would lose the interleaving.
+// matches the request, a per-element-type split would lose the interleaving.
 type ruleOperations struct {
 	Ops []ruleOperation
 }
@@ -411,7 +411,7 @@ func ruleOpError(index int, fieldURI, code, message string) ruleOperationError {
 }
 
 // handleUpdateInboxRules answers UpdateInboxRules: it validates every operation,
-// and — matching MS-OXWSMSG's atomic semantics — applies the whole batch only if
+// and, matching MS-OXWSMSG's atomic semantics, applies the whole batch only if
 // all operations are valid, else applies nothing and returns the per-operation
 // RuleOperationErrors. RemoveOutlookRuleBlob is ignored (hermEX keeps no blob).
 func (s *Server) handleUpdateInboxRules(w http.ResponseWriter, inner []byte, sess *session) {
@@ -546,7 +546,7 @@ func restrictionFromPredicates(p rulePredicates) (mapi.Restriction, bool) {
 }
 
 // containsLeaf builds a single content restriction or, for multiple strings, an OR
-// of them — the same form the read side recognizes as an array predicate.
+// of them, the same form the read side recognizes as an array predicate.
 func containsLeaf(build func(string) mapi.Restriction, vals []string) mapi.Restriction {
 	if len(vals) == 1 {
 		return build(vals[0])

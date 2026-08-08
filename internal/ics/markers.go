@@ -68,12 +68,12 @@ const (
 const (
 	cpUTF16          uint16 = 1200
 	fxCodepageFlag   uint16 = 0x8000
-	propIDMessageCls uint16 = 0x001A // PR_MESSAGE_CLASS — always written PT_STRING8
+	propIDMessageCls uint16 = 0x001A // PR_MESSAGE_CLASS, always written PT_STRING8
 )
 
 // Exported FastTransfer markers the sync context objects emit. The download and
 // upload paths live in internal/objectstore (objectstore imports ics, so ics
-// cannot import it) and drive the producer/parser with these — exported aliases
+// cannot import it) and drive the producer/parser with these, exported aliases
 // of the single-source words above so a caller need not hard-code wire values.
 const (
 	MarkerIncrSyncChg        = markerIncrSyncChg
@@ -111,8 +111,8 @@ func IsStateMetaTag(tag uint32) bool {
 
 // IsGivenStateMetaTag reports whether a state meta-tag carries a given idset (the
 // set of ids the client already holds). An upload-state collector accepts it for
-// protocol compliance but retains nothing — an importing context needs no record
-// of what the client has — so the given stream is discarded ([MS-OXCFXICS]
+// protocol compliance but retains nothing, an importing context needs no record
+// of what the client has, so the given stream is discarded ([MS-OXCFXICS]
 // 3.3.5.2).
 func IsGivenStateMetaTag(tag uint32) bool {
 	return tag == metaTagIdsetGiven || tag == metaTagIdsetGiven1

@@ -16,7 +16,7 @@ import (
 // add-in's state). Each carries a typed dictionary, an opaque XML section, and an
 // opaque binary section, identified by (folder, name).
 //
-// hermEX persists them as the mailbox's PrUserConfigurations store property — the
+// hermEX persists them as the mailbox's PrUserConfigurations store property, the
 // same provider-defined JSON-in-a-property mechanism the out-of-office and sync
 // settings use, keyed by the resolving folder id and the name. The dictionary's
 // per-entry types and the XML/binary base64 text are stored verbatim, so a config

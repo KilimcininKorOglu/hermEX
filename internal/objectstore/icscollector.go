@@ -230,7 +230,7 @@ func (c *UploadCollector) ImportMessageMove(srcFolderKey, srcMsgKey, dstMsgKey [
 // GetTransferState renders the collected synchronization state as a FastTransfer
 // stream the client reads back to adopt as its next checkpoint: INCRSYNCSTATEBEGIN,
 // one property per populated idset, INCRSYNCSTATEEND ([MS-OXCFXICS] 3.2.5.5). It
-// carries no INCRSYNCEND — a transfer state is a bare state block, not a sync flow.
+// carries no INCRSYNCEND, a transfer state is a bare state block, not a sync flow.
 func (c *UploadCollector) GetTransferState() ([]byte, error) {
 	props, err := c.state.Serialize()
 	if err != nil {

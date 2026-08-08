@@ -30,7 +30,7 @@ const (
 )
 
 // syncHoldCadence is the fallback poll interval during a hanging Sync when the push
-// relay is absent or a wake is missed — the degradation floor matching the
+// relay is absent or a wake is missed, the degradation floor matching the
 // reference's 30s heartbeat poll.
 const syncHoldCadence = 30 * time.Second
 
@@ -160,7 +160,7 @@ func syncHasCommands(collections *wbxml.Node) bool {
 }
 
 // syncHasChanges reports whether any watched collection has server changes the
-// device has not yet synced. It is a pure read — it never advances a snapshot — so
+// device has not yet synced. It is a pure read, it never advances a snapshot, so
 // it is safe to call repeatedly during a hold.
 func syncHasChanges(st *objectstore.Store, dev *deviceState, collections *wbxml.Node) bool {
 	for _, c := range collections.Children {
@@ -203,7 +203,7 @@ func collectionHasChanges(st *objectstore.Store, dev *deviceState, c *wbxml.Node
 }
 
 // objectsDiffer reports whether an object folder's items differ from the device
-// snapshot (an add, a change-number bump, or a delete) — the read-only counterpart
+// snapshot (an add, a change-number bump, or a delete), the read-only counterpart
 // of objectChanges' diff.
 func objectsDiffer(snap map[string]int64, objs []objectstore.FolderObject) bool {
 	live := make(map[string]bool, len(objs))
@@ -223,7 +223,7 @@ func objectsDiffer(snap map[string]int64, objs []objectstore.FolderObject) bool 
 }
 
 // objectChangeCount counts how many of an object folder's items differ from the
-// device snapshot — adds, change-number bumps, and deletes — the GetItemEstimate
+// device snapshot, adds, change-number bumps, and deletes, the GetItemEstimate
 // counterpart of objectChanges' diff.
 func objectChangeCount(snap map[string]int64, objs []objectstore.FolderObject) int {
 	count := 0
@@ -507,8 +507,8 @@ func parseBodyPref(c *wbxml.Node) bodyPref {
 }
 
 // emailAppData builds the ApplicationData for an Email-class item: the listing
-// properties from the index, the message body in the requested representation, and —
-// when the message carries attachments — an AirSyncBase Attachments listing whose
+// properties from the index, the message body in the requested representation, and,
+// when the message carries attachments, an AirSyncBase Attachments listing whose
 // FileReferences the device fetches through ItemOperations.
 func emailAppData(raw []byte, m objectstore.MessageInfo, collID, serverID string, pref bodyPref) *wbxml.Node {
 	// A signed or encrypted message keeps the generic IPM.Note class in the store;

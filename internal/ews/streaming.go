@@ -52,7 +52,7 @@ type errorSubs struct {
 
 // handleGetStreamingEvents answers GetStreamingEvents (MS-OXWSNTIF streaming): it
 // holds the connection open and writes a sequence of GetStreamingEventsResponse
-// envelopes — an initial one carrying ConnectionStatus=OK (and any invalid
+// envelopes, an initial one carrying ConnectionStatus=OK (and any invalid
 // subscription ids), then a continuation every interval with the polled events
 // (or a StatusEvent heartbeat when idle), then a final one with
 // ConnectionStatus=Closed when the connection timeout expires. The response is
@@ -64,7 +64,7 @@ func (s *Server) handleGetStreamingEvents(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Validate each subscription (existence + owner), evicting any that expired —
+	// Validate each subscription (existence + owner), evicting any that expired,
 	// the entry sweep also reclaims streaming subscriptions created but never
 	// otherwise accessed.
 	var valid, bad []string
@@ -139,7 +139,7 @@ func (s *Server) handleGetStreamingEvents(w http.ResponseWriter, r *http.Request
 		case <-ctx.Done():
 			return // client disconnected: no Closed chunk
 		case <-wake:
-			// a push wake — loop and streamNotifications emits the change
+			// a push wake, loop and streamNotifications emits the change
 		case <-ticker.C:
 		}
 	}
@@ -259,7 +259,7 @@ func statusEvent() notifEvent {
 
 // writeStreamChunk marshals one response, writes it as a SOAP envelope (the XML
 // declaration only on the first chunk), and flushes. It returns false when any
-// write or the flush fails — the signal that the client has gone.
+// write or the flush fails, the signal that the client has gone.
 func writeStreamChunk(w http.ResponseWriter, rc *http.ResponseController, resp getStreamingEventsResponse, withDecl bool) bool {
 	body, err := xml.Marshal(resp)
 	if err != nil {

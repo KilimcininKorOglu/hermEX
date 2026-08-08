@@ -45,7 +45,7 @@ func notifyConnect(t *testing.T, ts *httptest.Server) string {
 
 // notificationWaitFlags posts a NotificationWait and returns its EventPending flags,
 // asserting the response carries the full 4-uint32 body (Status, Error, EventPending,
-// AuxiliaryBufferSize) — the trailing AuxiliaryBufferSize is what the old stub
+// AuxiliaryBufferSize), the trailing AuxiliaryBufferSize is what the old stub
 // omitted.
 func notificationWaitFlags(t *testing.T, ts *httptest.Server, sid string) uint32 {
 	t.Helper()
@@ -101,7 +101,7 @@ func TestNotificationWaitTimeout(t *testing.T) {
 }
 
 // TestNotificationWaitPending: once a subscribed folder gains a message, the wait
-// returns EventPending=1 — the wake signal that tells the client to Execute and drain
+// returns EventPending=1, the wake signal that tells the client to Execute and drain
 // the RopNotify.
 func TestNotificationWaitPending(t *testing.T) {
 	mailbox := t.TempDir()

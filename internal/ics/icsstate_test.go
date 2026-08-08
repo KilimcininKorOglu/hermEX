@@ -28,7 +28,7 @@ func stateTags(props []StreamProp) map[uint32]bool {
 }
 
 // TestStateRoundTrip seeds every idset of a download state, serializes it, then
-// reads it back into a fresh state and asserts membership is preserved — the
+// reads it back into a fresh state and asserts membership is preserved, the
 // path by which a client's prior state and a server's new state are exchanged.
 func TestStateRoundTrip(t *testing.T) {
 	m := newStubMapper(map[uint16]mapi.GUID{1: guidA})
@@ -64,7 +64,7 @@ func TestStateRoundTrip(t *testing.T) {
 }
 
 // TestStateUploadCumulativeMerge verifies that on an upload state successive
-// CnsetSeen uploads UNION rather than replace — the cached-mode client sends
+// CnsetSeen uploads UNION rather than replace, the cached-mode client sends
 // incremental state and the server must accumulate it.
 func TestStateUploadCumulativeMerge(t *testing.T) {
 	m := newStubMapper(map[uint16]mapi.GUID{1: guidA})

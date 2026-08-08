@@ -24,7 +24,7 @@ const (
 )
 
 // handleValidateCert answers ValidateCert ([MS-ASCMD] 2.2.2.21): each certificate
-// in the request is validated for S/MIME signing — parsed, then verified to chain
+// in the request is validated for S/MIME signing, parsed, then verified to chain
 // to a trusted root (the server's configured anchors, or the system roots) with
 // any supplied CertificateChain certs as intermediates. The reply carries an
 // overall status and one per-certificate status. v1 does not perform CRL

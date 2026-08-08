@@ -48,7 +48,7 @@ func TestAdminSetUserStoreOwners(t *testing.T) {
 }
 
 // TestAdminSetUserStoreOwnersRejectsUnknown proves an owner that names no real user is
-// refused — a privileged full-access grant must never name a non-existent principal.
+// refused, a privileged full-access grant must never name a non-existent principal.
 func TestAdminSetUserStoreOwnersRejectsUnknown(t *testing.T) {
 	store := &fakeStore{}
 	ts := adminServerStore(t, knownAlice(), store) // only alice resolves
@@ -66,7 +66,7 @@ func TestAdminSetUserStoreOwnersRejectsUnknown(t *testing.T) {
 }
 
 // TestAdminUserStoreOwnersRequiresSystem proves a domain admin cannot read or write a
-// user's store-owner list through the system-scoped endpoints — granting full mailbox
+// user's store-owner list through the system-scoped endpoints, granting full mailbox
 // access is a system-administrator privilege.
 func TestAdminUserStoreOwnersRequiresSystem(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}

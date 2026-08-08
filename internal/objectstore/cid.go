@@ -48,8 +48,8 @@ var propertyTables = []string{
 }
 
 // SweepOrphanContent reclaims content files that no property references, returning
-// the number removed. The content store is content-addressed and deduplicated —
-// one file can back several properties across different messages — so deleting a
+// the number removed. The content store is content-addressed and deduplicated,
+// one file can back several properties across different messages, so deleting a
 // file the moment one referencing property is removed would corrupt the others.
 // Mark-and-sweep is therefore the only safe reclamation, and it is offered as an
 // explicit maintenance pass rather than an inline delete.

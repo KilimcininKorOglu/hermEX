@@ -9,7 +9,7 @@ import (
 // parsed from the REPORT body and evaluated against each resource's iCalendar or
 // vCard text; a resource is returned only when the filter matches. The matcher
 // parses just enough of the resource (component tree, properties, parameters,
-// DTSTART/DTEND for time-range) to evaluate the filter — it is not a full RFC 5545
+// DTSTART/DTEND for time-range) to evaluate the filter, it is not a full RFC 5545
 // model.
 
 // filter is the <C:filter> of a calendar-query (one VCALENDAR comp-filter) or the

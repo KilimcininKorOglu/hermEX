@@ -72,7 +72,7 @@ func fakePOP3(t *testing.T, messages []string) (host string, port int, deleted *
 
 // TestPOP3Client proves the client round-trips a POP3 session: it authenticates, lists
 // the unique-ids, downloads a message verbatim with CRLF endings, deletes by number, and
-// quits — the operations the worker composes.
+// quits, the operations the worker composes.
 func TestPOP3Client(t *testing.T) {
 	msgs := []string{
 		"From: a@example.com\r\nSubject: One\r\n\r\nfirst body",

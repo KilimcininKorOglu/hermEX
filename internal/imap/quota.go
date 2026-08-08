@@ -1,7 +1,7 @@
 package imap
 
-// QUOTA (RFC 2087). hermEX has one quota root per mailbox — the store root,
-// addressed by the empty name "" — so the resource model is a single STORAGE
+// QUOTA (RFC 2087). hermEX has one quota root per mailbox, the store root,
+// addressed by the empty name "", so the resource model is a single STORAGE
 // limit read from the objectstore quota properties against the live mailbox size.
 
 // writeQuota emits an untagged QUOTA response for the mailbox's single root. The

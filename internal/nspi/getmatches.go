@@ -55,7 +55,7 @@ func pullGetMatches(body []byte) (getMatchesRequest, error) {
 		}
 	}
 	// Explicit input-MId list: consumed and discarded (the interface handler
-	// takes no inmids — matching is driven by the filter only).
+	// takes no inmids, matching is driven by the filter only).
 	hasInMids, err := p.Uint8()
 	if err != nil {
 		return r, err
@@ -276,7 +276,7 @@ func matchNode(u galUser, res *mapi.Restriction) bool {
 }
 
 // matchProperty evaluates a single property restriction. PR_ANR (and its ANSI
-// variant) is a search directive — not a stored value — so it matches the token
+// variant) is a search directive, not a stored value, so it matches the token
 // against the entry's display name and SMTP address, the same predicate
 // ResolveNamesW uses. Any other tag is compared against the entry's value.
 func matchProperty(u galUser, pr mapi.PropertyRestriction) bool {

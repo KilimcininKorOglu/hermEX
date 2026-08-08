@@ -11,7 +11,7 @@ import (
 )
 
 // TestPollForChangeDetectsCreate pins the wake signal: PollForChange is false on a
-// quiet mailbox and true once a subscribed folder gains a message — the boolean a
+// quiet mailbox and true once a subscribed folder gains a message, the boolean a
 // NotificationWait long-poll turns into FLAG_NOTIFICATION_PENDING.
 func TestPollForChangeDetectsCreate(t *testing.T) {
 	sess := NewSession(t.TempDir(), nil, "")
@@ -39,7 +39,7 @@ func TestPollForChangeDetectsCreate(t *testing.T) {
 // depends on: a NotificationWait connection's PollForChange enqueues the event AND
 // advances the snapshot, then a SEPARATE Execute connection drains it. Each half has
 // its own unit test, but only this one proves the pending queue carries the detection
-// across the two connections — if PollForChange ever detected without enqueuing, both
+// across the two connections, if PollForChange ever detected without enqueuing, both
 // halves would stay green while the live flow silently dropped every notification (the
 // Execute's own poll finds nothing, since the snapshot already moved).
 func TestPollForChangeThenExecuteDrains(t *testing.T) {
@@ -65,8 +65,8 @@ func TestPollForChangeThenExecuteDrains(t *testing.T) {
 	}
 
 	// A separate Execute connection (here an empty wake-up batch) drains the RopNotify
-	// PollForChange enqueued. The Execute's own poll finds nothing — the snapshot has
-	// already advanced — so delivery rides entirely on the pending queue.
+	// PollForChange enqueued. The Execute's own poll finds nothing, the snapshot has
+	// already advanced, so delivery rides entirely on the pending queue.
 	resp, _ := sess.Dispatch(nil, nil)
 	p := ext.NewPull(resp, ext.FlagUTF16)
 	if id := mustU8(t, p, "RopId"); id != ropNotify {
@@ -85,9 +85,9 @@ func TestPollForChangeThenExecuteDrains(t *testing.T) {
 	}
 }
 
-// TestSessionConcurrentDispatchPollClose hammers one session from four goroutines —
+// TestSessionConcurrentDispatchPollClose hammers one session from four goroutines,
 // a separate-handle writer (the cross-process MTA), a NotificationWait poll loop
-// (PollForChange), an Execute loop (Dispatch), and a Disconnect (Close) — so
+// (PollForChange), an Execute loop (Dispatch), and a Disconnect (Close), so
 // `go test -race` proves the session mutex actually guards the object table, the
 // per-subscription snapshots, and the pending queue against the parallel
 // NotificationWait connection. It asserts only the absence of a race or panic; the
@@ -103,7 +103,7 @@ func TestSessionConcurrentDispatchPollClose(t *testing.T) {
 	sess.Dispatch(buildRegisterNotification(0, 1, uint8(fnevObjectCreated|fnevObjectModified|fnevObjectDeleted), 1, 0, 0), []uint32{logonH, 0xFFFFFFFF})
 
 	// The writer opens its own store handle on the same mailbox, mirroring a
-	// separate delivering daemon — the session's handle is never touched outside its
+	// separate delivering daemon, the session's handle is never touched outside its
 	// own locked methods.
 	writer, err := objectstore.Open(sess.mailbox)
 	if err != nil {

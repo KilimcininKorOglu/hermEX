@@ -104,8 +104,8 @@ func (d *SQLDirectory) UpdateOrg(id int64, name, description string) (bool, erro
 
 // DeleteOrg deletes an organization and detaches its dependents in one
 // transaction: its domains become organizationless (org_id 0) and its
-// org-scoped configuration — the LDAP config, the default sync policy, and any
-// org-admin grants — is removed. It reports ok=false for an unknown id and
+// org-scoped configuration, the LDAP config, the default sync policy, and any
+// org-admin grants, is removed. It reports ok=false for an unknown id and
 // refuses id 0: that is the reserved "organizationless" sentinel, and a delete
 // scoped to it would wipe shared rows such as the global default sync policy.
 func (d *SQLDirectory) DeleteOrg(id int64) (bool, error) {

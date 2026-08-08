@@ -19,7 +19,7 @@ func deviceTestStore(t *testing.T) *objectstore.Store {
 
 // TestRecordDeviceContact proves the first contact stamps firstSync and an OK
 // wipe status, and a later contact refreshes lastSync and the live attributes
-// without resetting firstSync or clearing an outstanding wipe status — otherwise
+// without resetting firstSync or clearing an outstanding wipe status, otherwise
 // every subsequent sync would silently cancel an administrator's pending wipe.
 func TestRecordDeviceContact(t *testing.T) {
 	st := deviceTestStore(t)

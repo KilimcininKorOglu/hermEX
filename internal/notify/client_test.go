@@ -13,7 +13,7 @@ import (
 
 // sseStub is a controllable relay /events endpoint: the test feeds events to
 // stream, observes each established connection via connect, and drops the current
-// connection via drop — enough to exercise wake, coalescing, and reconnect.
+// connection via drop, enough to exercise wake, coalescing, and reconnect.
 type sseStub struct {
 	feed    chan notifyd.Event
 	connect chan struct{}
@@ -133,7 +133,7 @@ func TestConsumerMultiWaiter(t *testing.T) {
 }
 
 // TestConsumerReconnectFiresAll proves that after the stream drops and reconnects,
-// every registered waiter is woken once — the catch-up that observes changes missed
+// every registered waiter is woken once, the catch-up that observes changes missed
 // during the disconnect gap.
 func TestConsumerReconnectFiresAll(t *testing.T) {
 	srv, st := newSSEStub()
@@ -185,7 +185,7 @@ func TestPublisherPostsEvent(t *testing.T) {
 }
 
 // TestNilClientsAreNoops proves an empty notify_url disables push cleanly: the
-// constructors return nil, and the nil values are safe to use — the degradation
+// constructors return nil, and the nil values are safe to use, the degradation
 // floor a daemon relies on when push is not configured.
 func TestNilClientsAreNoops(t *testing.T) {
 	if NewPublisher("", "s") != nil {

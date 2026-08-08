@@ -17,7 +17,7 @@ const (
 
 // ropOpenEmbeddedMessage handles RopOpenEmbeddedMessage ([MS-OXCMSG] 2.2.3.22): it
 // opens the message encapsulated in the parent attachment. The embedded message is
-// addressed only by the parent attachment handle — the request carries no message
+// addressed only by the parent attachment handle, the request carries no message
 // id. hermEX stores an embedded message as the raw RFC822 bytes in the parent
 // attachment's PR_ATTACH_DATA_BIN (the proven oxcmail path), so the handler serves
 // reads by importing those bytes and serves a compose (MAPI_CREATE) by exporting

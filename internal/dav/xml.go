@@ -60,7 +60,7 @@ type msProp struct {
 	ScheduleInboxURL       *href    `xml:"urn:ietf:params:xml:ns:caldav schedule-inbox-URL,omitempty"`
 	ScheduleOutboxURL      *href    `xml:"urn:ietf:params:xml:ns:caldav schedule-outbox-URL,omitempty"`
 	// WebDAV ACL (RFC 3744): the owner principal and the privileges the current user
-	// holds on the resource — the property a client reads to decide read-only vs
+	// holds on the resource, the property a client reads to decide read-only vs
 	// read-write.
 	Owner              *href         `xml:"DAV: owner,omitempty"`
 	CurrentUserPrivSet *privilegeSet `xml:"DAV: current-user-privilege-set,omitempty"`

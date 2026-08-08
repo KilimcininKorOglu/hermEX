@@ -10,8 +10,8 @@ import (
 	"github.com/smallstep/pkcs7"
 )
 
-// Sign wraps content — a complete inner MIME entity (its own Content-Type header,
-// a blank line, then the body, with CRLF line endings) — in an RFC 5751
+// Sign wraps content, a complete inner MIME entity (its own Content-Type header,
+// a blank line, then the body, with CRLF line endings), in an RFC 5751
 // multipart/signed entity carrying a detached SHA-256 PKCS#7 signature
 // (smime.p7s). The returned bytes start with the multipart/signed Content-Type
 // header, so the caller splices the message identity headers (From/To/Subject/

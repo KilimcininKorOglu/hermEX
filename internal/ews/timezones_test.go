@@ -58,7 +58,7 @@ func offsetChangeDay(loc *time.Location, year int, m time.Month) int {
 // TestServerTimeZonesMatchTZData is the table's authoritative check: every served
 // zone's standard and daylight biases, and every DST transition day, must agree
 // with Go's embedded IANA database. This converts the hand-curated rules from
-// "recalled and plausible" to "verified against tzdata" — a wrong sign, magnitude,
+// "recalled and plausible" to "verified against tzdata", a wrong sign, magnitude,
 // month, or occurrence fails here.
 func TestServerTimeZonesMatchTZData(t *testing.T) {
 	const year = 2024 // a stable year for all served rules (Turkey fixed since 2016).
@@ -181,7 +181,7 @@ func TestGetServerTimeZonesAll(t *testing.T) {
 }
 
 // TestGetServerTimeZonesFilterUnknown confirms an Ids filter returns exactly the
-// known requested zones — an unknown id is silently absent, not an error.
+// known requested zones, an unknown id is silently absent, not an error.
 func TestGetServerTimeZonesFilterUnknown(t *testing.T) {
 	ts, _ := seededEWS(t)
 	_, out := soapPost(t, ts, getServerTimeZonesReq("UTC", "No Such Zone"), true)

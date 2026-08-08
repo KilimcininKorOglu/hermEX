@@ -94,22 +94,22 @@ const (
 	// metadata write never collides with the sync-state blob a command updates.
 	PrActiveSyncDevices = PropTag(0x6779001F) // PtUnicode
 	// PrAbDelegates is the provider-defined store-root property (0x677A) holding the
-	// mailbox's public-delegate list — the addresses permitted to act for this
-	// mailbox — as a JSON array of SMTP addresses. NSPI serves it on the
+	// mailbox's public-delegate list, the addresses permitted to act for this
+	// mailbox, as a JSON array of SMTP addresses. NSPI serves it on the
 	// PR_EMS_AB_PUBLIC_DELEGATES container and edits it via ModLinkAtt; the admin
 	// console manages the same list. It is per-mailbox (a store property, not the
 	// directory DB), like the other subsystem state.
 	PrAbDelegates = PropTag(0x677A001F) // PtUnicode
 	// PrAbSendAs is the provider-defined store-root property (0x677B) holding the
-	// mailbox's send-as list — the addresses permitted to send mail AS this mailbox
-	// (the From identity, not "on behalf of") — as a JSON array of SMTP addresses.
+	// mailbox's send-as list, the addresses permitted to send mail AS this mailbox
+	// (the From identity, not "on behalf of"), as a JSON array of SMTP addresses.
 	// It is per-mailbox (a store property, not the directory DB) like PrAbDelegates;
 	// the MTA consults it to authorize an authenticated submission whose envelope
 	// sender is another mailbox, and the admin console manages the same list.
 	PrAbSendAs = PropTag(0x677B001F) // PtUnicode
 	// PrAbStoreOwners is the provider-defined store-root property (0x677C) holding the
-	// mailbox's additional store-owner list — the addresses granted read-write access
-	// to every object in the mailbox (full mailbox access) — as a JSON array of SMTP
+	// mailbox's additional store-owner list, the addresses granted read-write access
+	// to every object in the mailbox (full mailbox access), as a JSON array of SMTP
 	// addresses. It is per-mailbox (a store property, not the directory DB) like
 	// PrAbDelegates and, deliberately, not the wire-editable folder permission table:
 	// the privileged store-owner grant is admin-managed and must survive a client's
@@ -171,7 +171,7 @@ const (
 // header-derived properties an imported message carries.
 const (
 	PrMessageClass        = PropTag(0x001A001F) // PtUnicode (PidTagMessageClass)
-	PrMessageClassA       = PropTag(0x001A001E) // PtString8 (PidTagMessageClass, ASCII — receive-folder table)
+	PrMessageClassA       = PropTag(0x001A001E) // PtString8 (PidTagMessageClass, ASCII, receive-folder table)
 	PrSubject             = PropTag(0x0037001F) // PtUnicode
 	PrSubjectPrefix       = PropTag(0x003D001F) // PtUnicode
 	PrNormalizedSubject   = PropTag(0x0E1D001F) // PtUnicode
@@ -179,15 +179,15 @@ const (
 	PrSensitivity         = PropTag(0x00360003) // PtLong
 	PrClientSubmitTime    = PropTag(0x00390040) // PtSysTime
 	PrMessageDeliveryTime = PropTag(0x0E060040) // PtSysTime
-	PrDeferredSendTime    = PropTag(0x3FEF0040) // PtSysTime (PidTagDeferredSendTime, MS-OXOMSG) — absolute time to release a deferred send
+	PrDeferredSendTime    = PropTag(0x3FEF0040) // PtSysTime (PidTagDeferredSendTime, MS-OXOMSG), absolute time to release a deferred send
 	PrDeletedOn           = PropTag(0x668F0040) // PtSysTime (PidTagDeletedOn): when a message was soft-deleted into the Recoverable Items dumpster; drives retention
-	PrStartDate           = PropTag(0x00600040) // PtSysTime (PidTagStartDate) — appointment start, mirrors PidLidAppointmentStartWhole
-	PrEndDate             = PropTag(0x00610040) // PtSysTime (PidTagEndDate) — appointment end, mirrors PidLidAppointmentEndWhole
+	PrStartDate           = PropTag(0x00600040) // PtSysTime (PidTagStartDate), appointment start, mirrors PidLidAppointmentStartWhole
+	PrEndDate             = PropTag(0x00610040) // PtSysTime (PidTagEndDate), appointment end, mirrors PidLidAppointmentEndWhole
 	PrMessageFlags        = PropTag(0x0E070003) // PtLong
-	PrMessageSize         = PropTag(0x0E080003) // PtLong (PidTagMessageSize) — total message size in bytes
-	PrFlagStatus          = PropTag(0x10900003) // PtLong (PidTagFlagStatus, MS-OXOFLAG) — 0 none / 1 complete / 2 flagged
-	PrFollowupIcon        = PropTag(0x10950003) // PtLong (PidTagFollowupIcon) — flag color: 0 clear / 1 purple / 2 orange / 3 green / 4 yellow / 5 blue / 6 red
-	PrFlagCompleteTime    = PropTag(0x10910040) // PtSysTime (PidTagFlagCompleteTime) — when the flag was marked complete
+	PrMessageSize         = PropTag(0x0E080003) // PtLong (PidTagMessageSize), total message size in bytes
+	PrFlagStatus          = PropTag(0x10900003) // PtLong (PidTagFlagStatus, MS-OXOFLAG), 0 none / 1 complete / 2 flagged
+	PrFollowupIcon        = PropTag(0x10950003) // PtLong (PidTagFollowupIcon), flag color: 0 clear / 1 purple / 2 orange / 3 green / 4 yellow / 5 blue / 6 red
+	PrFlagCompleteTime    = PropTag(0x10910040) // PtSysTime (PidTagFlagCompleteTime), when the flag was marked complete
 	// Reply/forward verb tracking (MS-OXOMSG 2.2.1.14-15): the last reply or
 	// forward action performed on a message and when, which a client renders as
 	// the replied/forwarded icon. SmartReply and SmartForward stamp these onto the
@@ -301,7 +301,7 @@ const (
 	// NSPI layer serves the owner's permanent address-book EntryID.
 	PrEmsAbOwner = PropTag(0x800C0102) // PtBinary
 	// PrEmsAbThumbnailPhoto (PidTagThumbnailPhoto) is the address-book object's
-	// portrait as raw image bytes — what Outlook and OWA show for a GAL entry. The
+	// portrait as raw image bytes, what Outlook and OWA show for a GAL entry. The
 	// NSPI layer serves it from the mailbox's cross-protocol user-photo property.
 	PrEmsAbThumbnailPhoto = PropTag(0x8C9E0102) // PtBinary
 	// PrEmsAbX509Cert (PidTagAddressBookX509Certificate) is the GAL entry's S/MIME

@@ -18,7 +18,7 @@ func (f fixedRecipAccess) RecipientRulesForMaildir(maildir string) (map[string]s
 
 // The five tests below are the precedence matrix the operator chose: an operator block
 // beats a recipient's allow, a recipient's block narrows an operator allow, and a
-// recipient's allow rescues a message — but never a hard DMARC failure. Each encodes
+// recipient's allow rescues a message, but never a hard DMARC failure. Each encodes
 // the policy, not just the mechanism.
 
 // TestRecipientAllowCannotRescueOperatorBlock proves an operator block is absolute: a
@@ -105,7 +105,7 @@ func TestRecipientBlockJunksCleanScore(t *testing.T) {
 }
 
 // TestRecipientAccessFilesEachRecipientIndependently is the core of the feature: one
-// message, scored once, is filed differently for two recipients — the one who blocked
+// message, scored once, is filed differently for two recipients, the one who blocked
 // the sender gets it in Junk, the one with no rule gets it in the inbox.
 func TestRecipientAccessFilesEachRecipientIndependently(t *testing.T) {
 	root := t.TempDir()

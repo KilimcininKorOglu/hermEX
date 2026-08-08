@@ -10,7 +10,7 @@ import (
 )
 
 // buildTransportHeaderOnly builds a header-only transport ROP request (RopId,
-// LogonId, InputHandleIndex) — the wire shape of RopSetSpooler and
+// LogonId, InputHandleIndex), the wire shape of RopSetSpooler and
 // RopGetTransportFolder, neither of which carries fields beyond the head.
 func buildTransportHeaderOnly(ropID, inIdx uint8) []byte {
 	b := ext.NewPush(ext.FlagUTF16)
@@ -50,7 +50,7 @@ func TestSetSpooler(t *testing.T) {
 }
 
 // TestGetTransportFolder confirms RopGetTransportFolder returns the Outbox folder
-// id as an EID after the head — the id a client deposits outgoing mail into.
+// id as an EID after the head, the id a client deposits outgoing mail into.
 func TestGetTransportFolder(t *testing.T) {
 	sess, logonH := transportSession(t)
 	defer sess.Close()
@@ -92,8 +92,8 @@ func folderMsgCount(t *testing.T, dir string, folderID int64) int {
 }
 
 // TestTransportSendDelivers composes a message and sends it through RopTransportSend,
-// proving it reaches the recipient with the NoPropertiesReturned response and — the
-// behaviour that distinguishes it from RopSubmitMessage — that it files NO Sent
+// proving it reaches the recipient with the NoPropertiesReturned response and, the
+// behaviour that distinguishes it from RopSubmitMessage, that it files NO Sent
 // Items copy (the reference does not file one here, leaving disposition to the client).
 func TestTransportSendDelivers(t *testing.T) {
 	ownerDir, aliceDir := t.TempDir(), t.TempDir()

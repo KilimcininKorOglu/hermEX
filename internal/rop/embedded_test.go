@@ -120,7 +120,7 @@ func TestOpenEmbeddedMessageRead(t *testing.T) {
 	}
 
 	// GetProperties on the embedded handle reads the embedded message's body from the
-	// in-memory imported message — the read ROP backing that makes the handle useful.
+	// in-memory imported message, the read ROP backing that makes the handle useful.
 	cols := []mapi.PropTag{mapi.PrBody}
 	gps, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{embH})
 	p = ext.NewPull(gps, ext.FlagUTF16)
@@ -186,7 +186,7 @@ func TestOpenEmbeddedMessageErrors(t *testing.T) {
 // opens an empty embedded message to compose, its subject and body are set, and
 // SaveChangesMessage exports it into the parent attachment. After the attachment
 // and carrier are saved, the composed message is re-opened through the read path
-// and its subject and body are read back — proving the compose → export → store →
+// and its subject and body are read back, proving the compose → export → store →
 // import round-trip, and that the parent attachment ends up tagged method-5.
 func TestComposeEmbeddedMessage(t *testing.T) {
 	dir := t.TempDir()
@@ -292,7 +292,7 @@ func TestComposeEmbeddedMessage(t *testing.T) {
 }
 
 // emlNestedAttach is a carrier whose message/rfc822 attachment is itself a
-// multipart message with a body and a file attachment — so an embedded message
+// multipart message with a body and a file attachment, so an embedded message
 // opened from it has its own nested attachment to enumerate.
 const emlNestedAttach = "From: fwd@hermex.test\r\nTo: dest@hermex.test\r\nSubject: Carrier2\r\n" +
 	"MIME-Version: 1.0\r\n" +

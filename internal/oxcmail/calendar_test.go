@@ -13,7 +13,7 @@ import (
 
 // TestExportCalendarAlternative confirms a pre-rendered iTIP body is carried as a
 // text/calendar alternative beside the text body, with the METHOD surfaced on the
-// part's Content-Type — and that without one the message stays a plain leaf.
+// part's Content-Type, and that without one the message stays a plain leaf.
 func TestExportCalendarAlternative(t *testing.T) {
 	msg := &Message{Props: mapi.PropertyValues{
 		{Tag: mapi.PrSubject, Value: "Accepted: Quarterly Review"},
@@ -68,7 +68,7 @@ func TestExportCalendarAlternative(t *testing.T) {
 		t.Error("no text/plain alternative in the exported message")
 	}
 
-	// Without a calendar body the message stays a plain leaf — no calendar part.
+	// Without a calendar body the message stays a plain leaf, no calendar part.
 	plain, err := Export(msg, Options{})
 	if err != nil {
 		t.Fatal(err)

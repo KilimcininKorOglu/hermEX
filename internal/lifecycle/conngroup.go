@@ -14,7 +14,7 @@ import (
 //
 // Shutdown closes every registered listener (so the accept loops stop) and then
 // waits for the active handlers under the caller's deadline. New handlers can
-// only start while not draining — the draining flag and the wait-group's Add are
+// only start while not draining, the draining flag and the wait-group's Add are
 // serialized by the same mutex, so no Add ever races the drain's Wait.
 type ConnGroup struct {
 	mu        sync.Mutex
@@ -86,7 +86,7 @@ func (g *ConnGroup) isDraining() bool {
 	return g.draining
 }
 
-// Shutdown stops accepting — closing every registered listener — and drains the
+// Shutdown stops accepting, closing every registered listener, and drains the
 // in-flight handlers, giving up when ctx's deadline passes.
 func (g *ConnGroup) Shutdown(ctx context.Context) error {
 	g.mu.Lock()

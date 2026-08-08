@@ -139,7 +139,7 @@ func parseQuery(r *http.Request) (asRequest, error) {
 // decoded layout is: protocol version (1), command code (1), locale (2),
 // device id (length-prefixed), policy key (length-prefixed, 0 or 4 bytes),
 // device type (length-prefixed), then optional command-parameter TLVs (ignored
-// here — the variant fields below are not needed to route a command).
+// here, the variant fields below are not needed to route a command).
 func parseBase64Query(raw string) (asRequest, error) {
 	data, err := decodeBase64(raw)
 	if err != nil {

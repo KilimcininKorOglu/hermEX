@@ -145,7 +145,7 @@ func TestGetAttachment(t *testing.T) {
 // stores the originator as a formatted string; for a sender with no display name
 // it is "addr <addr>", whose bare-address display name net/mail rejects. The
 // summary must still expose a clean EmailAddress (not the whole malformed string)
-// so a client populates its list view and reply-to correctly — this is exactly
+// so a client populates its list view and reply-to correctly, this is exactly
 // where the FindItem path differs from GetItem, which reads the address property
 // directly.
 func TestSplitAddress(t *testing.T) {

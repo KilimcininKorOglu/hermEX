@@ -8,7 +8,7 @@ import (
 // DeleteMessage permanently removes a message from a folder by its IMAP UID:
 // the object (foreign-key cascade drops its property bags, recipients,
 // attachments, and time-index row), the index row and mapping, and the cached
-// eml. Content files are left in place — they are content-addressed and may be
+// eml. Content files are left in place, they are content-addressed and may be
 // shared with other messages, so reclaiming them is a separate sweep. It
 // reports ErrNotFound when no such message exists.
 func (s *Store) DeleteMessage(folderID int64, uid uint32) error {

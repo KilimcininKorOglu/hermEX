@@ -17,8 +17,8 @@ const meetingMail = "From: organizer@hermex.test\r\n" +
 	"--b--\r\n"
 
 // TestImportCalendarMerge proves Import overlays a scheduling calendar object's
-// class and named appointment properties onto the message — while leaving the
-// email's own subject (a regular property the calendar also carries) intact — and
+// class and named appointment properties onto the message, while leaving the
+// email's own subject (a regular property the calendar also carries) intact, and
 // that a calendar object without a message class is not overlaid at all.
 func TestImportCalendarMerge(t *testing.T) {
 	startTag := mapi.MakeTag(0x8005, mapi.PtSysTime) // a named appointment property
@@ -67,7 +67,7 @@ func TestImportCalendarMerge(t *testing.T) {
 	}
 
 	// Without an importer, the calendar part stays unparsed and becomes an
-	// attachment — the message is plain mail.
+	// attachment, the message is plain mail.
 	msg3, err := Import([]byte(meetingMail), Options{})
 	if err != nil {
 		t.Fatal(err)

@@ -75,7 +75,7 @@ func writeStreamWritten(t *testing.T, sess *Session, streamH uint32, data []byte
 // TestStreamWriteAttachmentData drives the large-attachment-payload write path: a
 // stream is opened for write over a created attachment's PR_ATTACH_DATA_BIN, the
 // payload is written in two chunks, read back on the same stream after a seek, then
-// committed and saved. It proves the written bytes reach the stored attachment —
+// committed and saved. It proves the written bytes reach the stored attachment,
 // the path SetProperties was too small for and CreateAttachment deferred to streams.
 func TestStreamWriteAttachmentData(t *testing.T) {
 	dir := t.TempDir()
@@ -235,7 +235,7 @@ func TestStreamWriteMechanics(t *testing.T) {
 
 // TestStreamReadComposeAttachment opens a read-mode stream over a created
 // attachment that has not been saved yet and reads back the property the client
-// just set — read-your-writes on a compose attachment, the attachment counterpart
+// just set, read-your-writes on a compose attachment, the attachment counterpart
 // of the message read overlay. Previously a read-mode stream over a kindAttachWrite
 // had no backing and reported not-found.
 func TestStreamReadComposeAttachment(t *testing.T) {

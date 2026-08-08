@@ -13,8 +13,8 @@ import (
 
 // handleCopyMove implements COPY and MOVE for a calendar or address-book object
 // (RFC 4918 §9.8/§9.9). The object is re-created in the destination collection
-// through the same iCal/vCard path a PUT uses — so the copy gets a fresh identity
-// rather than duplicating the source's — and for MOVE the source is then removed.
+// through the same iCal/vCard path a PUT uses, so the copy gets a fresh identity
+// rather than duplicating the source's, and for MOVE the source is then removed.
 // Collection-level COPY/MOVE is not supported.
 func (s *Server) handleCopyMove(w http.ResponseWriter, r *http.Request, mailbox string, move bool) {
 	srcKind, _, srcColl, srcName := classify(r.URL.Path)

@@ -29,8 +29,8 @@ type Server struct {
 	// best-effort and surface here rather than failing the calendar write.
 	Logger *logging.Logger
 	// spool is the outbound relay queue scheduling-Outbox iTIP messages are handed to
-	// for external recipients (RFC 6638 §5). It is nil by default — then delivery is
-	// local-only and a remote recipient is reported as undeliverable — and set by the
+	// for external recipients (RFC 6638 §5). It is nil by default, then delivery is
+	// local-only and a remote recipient is reported as undeliverable, and set by the
 	// daemon via SetSpool when a relay queue is available.
 	spool *relay.Spool
 	// notifier is the wake-bus consumer a push long-poll registers on so a change in any
@@ -113,7 +113,7 @@ func (s *Server) vcardLimit() int64 {
 }
 
 // Handler returns the HTTP handler for the DAV server. Every path is routed
-// through one handler that authenticates first, then dispatches by method —
+// through one handler that authenticates first, then dispatches by method,
 // a single DAV URL serves many methods (PROPFIND/REPORT/GET/PUT/DELETE), so
 // method-pattern muxing is the wrong model.
 func (s *Server) Handler() http.Handler {

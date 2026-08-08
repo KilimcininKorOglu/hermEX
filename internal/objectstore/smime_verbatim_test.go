@@ -65,7 +65,7 @@ func TestSMIMEVerbatimPreservation(t *testing.T) {
 }
 
 // TestSMIMESignedSurvivesStore is the end-to-end proof: a genuinely signed
-// message, once stored, is still served byte-for-byte and still verifies — even
+// message, once stored, is still served byte-for-byte and still verifies, even
 // after the regenerable eml cache is dropped, so the durable preserved original
 // (not just the cache) carries the signature.
 func TestSMIMESignedSurvivesStore(t *testing.T) {

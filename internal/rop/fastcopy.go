@@ -77,7 +77,7 @@ func (s *Session) openCopySource(out *ext.Push, ropID uint8, handles []uint32, h
 
 // ropFastTransferSourceCopyMessages handles RopFastTransferSourceCopyMessages
 // ([MS-OXCFXICS] 2.2.3.1.1.3 / 2.2.4.1.3): it opens a generic-copy download of the
-// listed messages of a source folder as a messageList — each message framed by a
+// listed messages of a source folder as a messageList, each message framed by a
 // StartMessage (or StartFAIMsg) / EndMessage pair around its messageContent. The
 // CopyFlags Move/SendEntryId bits are parsed but not honored (the stream is a plain
 // content copy, as Exchange 2010+ ignores Move here); SendOptions selects no codec
@@ -85,8 +85,8 @@ func (s *Session) openCopySource(out *ext.Push, ropID uint8, handles []uint32, h
 func (s *Session) ropFastTransferSourceCopyMessages(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8()
 	eids, e2 := p.EIDs()
-	_, e3 := p.Uint8() // CopyFlags — Move/SendEntryId not honored (plain content copy)
-	_, e4 := p.Uint8() // SendOptions — the stream codec is always UTF-16
+	_, e3 := p.Uint8() // CopyFlags, Move/SendEntryId not honored (plain content copy)
+	_, e4 := p.Uint8() // SendOptions, the stream codec is always UTF-16
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
 		return false
 	}
@@ -124,14 +124,14 @@ func (s *Session) ropFastTransferSourceCopyMessages(p *ext.Pull, out *ext.Push, 
 
 // ropFastTransferSourceCopyFolder handles RopFastTransferSourceCopyFolder
 // ([MS-OXCFXICS] 2.2.3.1.1.4 / 2.2.4.1.4): it opens a generic-copy download of a
-// source folder as a topFolder — STARTTOPFLD, the folder's foldercontent (its
+// source folder as a topFolder, STARTTOPFLD, the folder's foldercontent (its
 // property list, FAI then normal message lists, then each subfolder recursively),
 // ENDFOLDER. The Move / CopySubfolders CopyFlags bits select whether the descendant
 // folders are streamed; Move is otherwise not honored (the download is read-only).
 func (s *Session) ropFastTransferSourceCopyFolder(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8()
 	copyFlags, e2 := p.Uint8()
-	_, e3 := p.Uint8() // SendOptions — the stream codec is always UTF-16
+	_, e3 := p.Uint8() // SendOptions, the stream codec is always UTF-16
 	if e1 != nil || e2 != nil || e3 != nil {
 		return false
 	}
@@ -171,9 +171,9 @@ func (s *Session) ropFastTransferSourceCopyFolder(p *ext.Pull, out *ext.Push, ha
 // (the stream codec is always UTF-16) are parsed but not honored.
 func (s *Session) ropFastTransferSourceCopyTo(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8()
-	_, e2 := p.Uint8()  // Level — embedded-message recursion depth, flat in v1
-	_, e3 := p.Uint32() // CopyFlags — not applicable to a read-only download source
-	_, e4 := p.Uint8()  // SendOptions — the stream codec is always UTF-16
+	_, e2 := p.Uint8()  // Level, embedded-message recursion depth, flat in v1
+	_, e3 := p.Uint32() // CopyFlags, not applicable to a read-only download source
+	_, e4 := p.Uint8()  // SendOptions, the stream codec is always UTF-16
 	excluded, e5 := p.PropTags()
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil {
 		return false
@@ -190,9 +190,9 @@ func (s *Session) ropFastTransferSourceCopyTo(p *ext.Pull, out *ext.Push, handle
 // The Level byte and SendOptions are parsed but not honored (as for CopyTo).
 func (s *Session) ropFastTransferSourceCopyProperties(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8()
-	_, e2 := p.Uint8() // Level — embedded-message recursion depth, flat in v1
-	_, e3 := p.Uint8() // CopyFlags — not applicable to a read-only download source
-	_, e4 := p.Uint8() // SendOptions — the stream codec is always UTF-16
+	_, e2 := p.Uint8() // Level, embedded-message recursion depth, flat in v1
+	_, e3 := p.Uint8() // CopyFlags, not applicable to a read-only download source
+	_, e4 := p.Uint8() // SendOptions, the stream codec is always UTF-16
 	included, e5 := p.PropTags()
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil {
 		return false

@@ -95,7 +95,7 @@ func TestProviderResolutionOrder(t *testing.T) {
 
 // TestProviderRefreshReloadsOnVersionChange proves the poll reloads only when the
 // store's version probe moves: an unchanged probe skips the (re-parsing) load, and
-// a bumped probe picks up the new material — so a renewal applies without a restart
+// a bumped probe picks up the new material, so a renewal applies without a restart
 // while idle polls stay cheap.
 func TestProviderRefreshReloadsOnVersionChange(t *testing.T) {
 	cert, key := genCertPEM(t, "mail.example.com")

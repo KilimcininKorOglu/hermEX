@@ -42,8 +42,8 @@ func find(events []logging.Event, name string) (logging.Event, bool) {
 }
 
 // TestInstrumentationLogsConnAndAuth proves the IMAP server emits the audit events
-// — a connection accept, a successful auth tagged with the user, and a failed auth
-// tagged with the attempted login — and that no password reaches the log.
+// , a connection accept, a successful auth tagged with the user, and a failed auth
+// tagged with the attempted login, and that no password reaches the log.
 func TestInstrumentationLogsConnAndAuth(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "alice")
 	st, err := objectstore.Open(path)

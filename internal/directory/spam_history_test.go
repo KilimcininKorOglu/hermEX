@@ -21,7 +21,7 @@ func setupSpamHistory(t *testing.T) *SQLDirectory {
 }
 
 // TestSpamHistoryRecordAndList proves recorded verdicts come back newest-first
-// with their fields intact — the directory backend for the admin Spam History page.
+// with their fields intact, the directory backend for the admin Spam History page.
 func TestSpamHistoryRecordAndList(t *testing.T) {
 	d := setupSpamHistory(t)
 

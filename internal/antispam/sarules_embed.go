@@ -13,7 +13,7 @@ import (
 )
 
 // sarules_embed.go vendors a baseline SpamAssassin ruleset into the binary and,
-// on first run, seeds it into data_dir/antispam-rules.cf — the live ruleset the
+// on first run, seeds it into data_dir/antispam-rules.cf, the live ruleset the
 // MTA loads thereafter. An operator (or the refresh tool) edits that data_dir
 // file to update the rules without rebuilding the binary; the embedded copy is
 // only the first-run seed. The vendored .cf files (and their Apache-2.0 LICENSE

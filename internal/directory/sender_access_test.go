@@ -30,7 +30,7 @@ func TestSenderRuleRoundTrip(t *testing.T) {
 	if err != nil || len(rules) != 2 {
 		t.Fatalf("ListSenderRules = %+v (err %v), want 2 rules", rules, err)
 	}
-	// ORDER BY action, pattern: "block" sorts before "allow"? No — alphabetical:
+	// ORDER BY action, pattern: "block" sorts before "allow"? No, alphabetical:
 	// allow < block, so the allow row leads.
 	if rules[0].Pattern != "partner@example.com" || rules[0].Action != SenderAllow {
 		t.Errorf("rule[0] = %+v, want the normalised allow rule", rules[0])
@@ -41,7 +41,7 @@ func TestSenderRuleRoundTrip(t *testing.T) {
 }
 
 // TestSenderRuleFlip proves re-adding a pattern with the other action flips it in
-// place (one row, not two) — so a pattern always carries exactly one action.
+// place (one row, not two), so a pattern always carries exactly one action.
 func TestSenderRuleFlip(t *testing.T) {
 	d := setupSenderAccess(t)
 	if err := d.SetSenderRule("x@example.com", SenderAllow); err != nil {

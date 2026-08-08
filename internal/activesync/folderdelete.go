@@ -13,9 +13,9 @@ import (
 // handleFolderDelete answers FolderDelete ([MS-ASCMD] 2.2.2.3): it removes the
 // named folder (and its subtree) and returns an advanced hierarchy sync key. The
 // device's sync key must match the current hierarchy key; a mismatch reports
-// Status 9 so the device re-primes. A built-in folder is protected — only ids at
+// Status 9 so the device re-primes. A built-in folder is protected, only ids at
 // or above the unassigned range are deletable, matching the EWS and webmail
-// folder-management guards — and reports Status 3.
+// folder-management guards, and reports Status 3.
 func (s *Server) handleFolderDelete(w http.ResponseWriter, r *http.Request, sess *session) {
 	root, err := readWBXML(r)
 	if err != nil {

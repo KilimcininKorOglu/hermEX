@@ -7,7 +7,7 @@ import (
 
 // ropDeleteProperties handles RopDeleteProperties ([MS-OXCPRPT] 2.2.2.7) and
 // ropDeletePropertiesNoReplicate handles RopDeletePropertiesNoReplicate
-// (2.2.2.8) — identical save-replication aside, which is a no-op on a single
+// (2.2.2.8), identical save-replication aside, which is a no-op on a single
 // replica. Both remove the request's property tags from the open object.
 func (s *Session) ropDeleteProperties(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	return s.deleteProperties(ropDeleteProperties, p, out, handles, hindex)
@@ -22,7 +22,7 @@ func (s *Session) ropDeletePropertiesNoReplicate(p *ext.Pull, out *ext.Push, han
 // counterpart of buffered SetProperties, reallocating the change number on save);
 // on an in-memory message, embedded message, or created attachment the tags are
 // dropped from the in-memory bag. A delete also drops any buffered set for the same
-// tag so a delete-after-set wins. The response carries an empty problem array — v1
+// tag so a delete-after-set wins. The response carries an empty problem array, v1
 // removes every requested tag without enforcing read-only/sticky-tag protection.
 func (s *Session) deleteProperties(ropID uint8, p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	tags, e1 := p.PropTags()
@@ -85,7 +85,7 @@ func removeTag(pv mapi.PropertyValues, tag mapi.PropTag) mapi.PropertyValues {
 	return out
 }
 
-// dropDeleteTag returns a copy of tags with every occurrence of tag removed — the
+// dropDeleteTag returns a copy of tags with every occurrence of tag removed, the
 // PropTag-slice counterpart of removeTag, used when a buffered set supersedes a
 // pending delete for the same tag.
 func dropDeleteTag(tags []mapi.PropTag, tag mapi.PropTag) []mapi.PropTag {

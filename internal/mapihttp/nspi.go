@@ -100,8 +100,8 @@ func (s *Server) nspiOpAuth(w http.ResponseWriter, r *http.Request, user, reqTyp
 	writeNormal(w, r, reqType, handler(body, user))
 }
 
-// nspiBind decodes the Bind request, runs it against the NSPI server, and — only
-// when the bind succeeds — establishes the sid + sequence session cookies.
+// nspiBind decodes the Bind request, runs it against the NSPI server, and, only
+// when the bind succeeds, establishes the sid + sequence session cookies.
 func (s *Server) nspiBind(w http.ResponseWriter, r *http.Request, user string) {
 	body := readBody(r)
 	resp, ok := s.nsp.Bind(body)

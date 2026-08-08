@@ -137,8 +137,8 @@ func TestGetPermissionsTableFreeBusyMasking(t *testing.T) {
 }
 
 // TestGetPermissionsTableSynthesizesSpecials confirms that a folder with no stored
-// permissions still serves the two always-present special members — Default (id 0)
-// and Anonymous (id -1) — at rightsNone, so an Outlook dialog can edit them.
+// permissions still serves the two always-present special members, Default (id 0)
+// and Anonymous (id -1), at rightsNone, so an Outlook dialog can edit them.
 func TestGetPermissionsTableSynthesizesSpecials(t *testing.T) {
 	dir := t.TempDir()
 	st, err := objectstore.Open(dir)
@@ -208,7 +208,7 @@ func abMemberEntryID(smtp string) []byte {
 
 // applyModify dispatches a RopModifyPermissions request and asserts the response is
 // the bare MS-OXCPERM head (RopId + HandleIndex echoing the input + ReturnValue, no
-// trailing bytes), returning nothing — the effect is read back via readPermRows.
+// trailing bytes), returning nothing, the effect is read back via readPermRows.
 func applyModify(t *testing.T, sess *Session, folderH uint32, modifyFlags uint8, rows []permDataRow) {
 	t.Helper()
 	resp, _ := sess.Dispatch(buildModifyPermissions(t, 0, modifyFlags, rows), []uint32{folderH})
@@ -235,7 +235,7 @@ func testAccounts(addr string) directory.Accounts {
 
 // TestModifyAddMemberViaEntryID drives the primary AddRow path: a real member
 // identified by an address-book PR_ENTRYID whose DN embeds the SMTP address. The
-// member must land in the table at a positive id with the granted rights — proving
+// member must land in the table at a positive id with the granted rights, proving
 // the EntryID parse and the directory existence check close end to end.
 func TestModifyAddMemberViaEntryID(t *testing.T) {
 	dir := t.TempDir()
@@ -332,7 +332,7 @@ func TestModifyUnknownMemberSkipped(t *testing.T) {
 // TestModifyIngestMasksAndNormalizesRights pins the security-relevant ingest
 // transform: a client's forbidden bits are masked off (store-owner 0x2000) and the
 // implied rights are filled (ReadAny implies Visible), so what lands is the
-// normalized, masked value — not the raw client bits.
+// normalized, masked value, not the raw client bits.
 func TestModifyIngestMasksAndNormalizesRights(t *testing.T) {
 	dir := t.TempDir()
 	st, err := objectstore.Open(dir)
@@ -367,7 +367,7 @@ func TestModifyIngestMasksAndNormalizesRights(t *testing.T) {
 }
 
 // TestModifyDefaultThroughRop edits the synthesized Default member (wire id 0) on a
-// folder with no stored default row and confirms the grant persists — the
+// folder with no stored default row and confirms the grant persists, the
 // create-on-modify path, exercised end to end through the ROP layer.
 func TestModifyDefaultThroughRop(t *testing.T) {
 	dir := t.TempDir()
@@ -465,8 +465,8 @@ func TestModifyRemoveMember(t *testing.T) {
 }
 
 // TestModifyPermissionsBatchAlignment proves the RopModifyPermissions request decoder
-// consumes its body exactly — ModifyFlags, the count, and every PermissionData with
-// its TPROPVAL_ARRAY — so a following ROP in the same Execute batch parses from the
+// consumes its body exactly, ModifyFlags, the count, and every PermissionData with
+// its TPROPVAL_ARRAY, so a following ROP in the same Execute batch parses from the
 // right offset. A short or long read would surface as the second RopId coming back
 // wrong. The single-ROP tests pin the response framing; this pins the request side.
 func TestModifyPermissionsBatchAlignment(t *testing.T) {

@@ -64,7 +64,7 @@ func updateFolderRenameReq(folderID, newName string) string {
 }
 
 // TestUpdateFolderRename confirms a folder:DisplayName update renames a user
-// folder — the new name appears in a follow-up FindFolder, the old one does not.
+// folder, the new name appears in a follow-up FindFolder, the old one does not.
 func TestUpdateFolderRename(t *testing.T) {
 	ts, _ := seededEWS(t)
 	id := createUserFolder(t, ts, "inbox", "Old")
@@ -271,7 +271,7 @@ func folderPerms(t *testing.T, dir string, fid int64) map[string]uint32 {
 
 // TestUpdateFolderPermissionSetReplaces confirms a folder:PermissionSet write
 // stores each member's rights and that a second write fully replaces the ACL (a
-// member absent from the second set is dropped — MS-OXWSFOLD replace semantics).
+// member absent from the second set is dropped, MS-OXWSFOLD replace semantics).
 func TestUpdateFolderPermissionSetReplaces(t *testing.T) {
 	ts, dir := seededEWS(t)
 	box := createUserFolder(t, ts, "inbox", "Shared")
@@ -332,7 +332,7 @@ func TestUpdateFolderPermissionSetUnknownMemberSkipped(t *testing.T) {
 }
 
 // TestUpdateFolderPermissionSetDistinguishedAllowed confirms a permission write to a
-// well-known folder is allowed (unlike a rename, which is refused) — sharing a
+// well-known folder is allowed (unlike a rename, which is refused), sharing a
 // distinguished folder is legitimate and does not touch the name projection.
 func TestUpdateFolderPermissionSetDistinguishedAllowed(t *testing.T) {
 	ts, dir := seededEWS(t)
@@ -416,7 +416,7 @@ func TestGetFolderPermissionSetRoundTrip(t *testing.T) {
 }
 
 // TestGetFolderPermissionSetOmittedByDefault confirms PermissionSet is returned only
-// when folder:PermissionSet is requested — a plain GetFolder must not carry it.
+// when folder:PermissionSet is requested, a plain GetFolder must not carry it.
 func TestGetFolderPermissionSetOmittedByDefault(t *testing.T) {
 	ts, _ := seededEWS(t)
 	box := createUserFolder(t, ts, "inbox", "Shared")

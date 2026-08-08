@@ -31,7 +31,7 @@ const (
 // buildPropertyRow serializes one PROPERTY_ROW against the column set
 // ([MS-OXCDATA] 2.8.1, mirroring cu_propvals_to_row + p_proprow): a NONE row
 // (flag 0x00, then a bare value per column) when every column is present, else
-// a FLAGGED row (flag 0x01, then a FLAGGED_PROPVAL per column — available with
+// a FLAGGED row (flag 0x01, then a FLAGGED_PROPVAL per column, available with
 // its value, or unavailable). The column proptag types how each value encodes.
 func buildPropertyRow(out *ext.Push, columns []mapi.PropTag, props mapi.PropertyValues) error {
 	allPresent := true
@@ -187,7 +187,7 @@ type sortKey struct {
 
 // sortableType reports whether a property type has a defined sort order. Any other
 // type (objects, restrictions, multivalue, ...) makes RopSortTable fail loud rather
-// than return an unsorted table — the silent-error class this handler closes.
+// than return an unsorted table, the silent-error class this handler closes.
 func sortableType(t mapi.PropType) bool {
 	switch t {
 	case mapi.PtShort, mapi.PtLong, mapi.PtCurrency, mapi.PtI8, mapi.PtSysTime,
@@ -277,8 +277,8 @@ func (t *tableState) rowKeyProps(store *objectstore.Store, baseIdx int, tags []m
 	}
 }
 
-// rebuildView recomputes the QueryRows view from the immutable base — filter, then
-// sort — and resets the cursor to the beginning ([MS-OXCTABL]: RopRestrict and
+// rebuildView recomputes the QueryRows view from the immutable base, filter, then
+// sort, and resets the cursor to the beginning ([MS-OXCTABL]: RopRestrict and
 // RopSortTable reposition to row 0). The filter and sort keys are projected per
 // base row independently of the display columns (an O(N) store walk, acceptable for
 // v1's eager tables). With neither a filter nor a sort the view is the identity
@@ -389,7 +389,7 @@ func (s *Session) ropSortTable(p *ext.Pull, out *ext.Push, handles []uint32, hin
 // ropRestrict handles RopRestrict ([MS-OXCTABL] 2.2.2.4): it installs a filter so
 // QueryRows returns only the matching rows. An empty restriction clears the filter.
 // A restriction this server cannot evaluate fails loud (ecNotSupported) rather than
-// returning an unfiltered table the client would trust — the silent-error class
+// returning an unfiltered table the client would trust, the silent-error class
 // this handler closes.
 func (s *Session) ropRestrict(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	_, e1 := p.Uint8()        // RestrictFlags
@@ -957,8 +957,8 @@ func (s *Session) ropFreeBookmark(p *ext.Pull, out *ext.Push, handles []uint32, 
 }
 
 // ropResetTable handles RopResetTable ([MS-OXCTABL] 2.2.2.14): it returns the table
-// to its initial state — clearing the column set, sort order, restriction, and
-// cursor — so the client starts a fresh SetColumns / Sort / Restrict cycle.
+// to its initial state, clearing the column set, sort order, restriction, and
+// cursor, so the client starts a fresh SetColumns / Sort / Restrict cycle.
 func (s *Session) ropResetTable(_ *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	table := s.get(handleAt(handles, hindex))
 	if table == nil || table.kind != kindTable {
@@ -1051,7 +1051,7 @@ func (s *Session) ropSeekRowBookmark(p *ext.Pull, out *ext.Push, handles []uint3
 	out.Uint8(ropSeekRowBookmark)
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
-	out.Uint8(0) // RowInvisible \u2014 bookmark origin always valid
+	out.Uint8(0) // RowInvisible, bookmark origin always valid
 	out.Uint8(hasSoughtLess)
 	out.Uint32(uint32(sought))
 	return true
@@ -1060,7 +1060,7 @@ func (s *Session) ropSeekRowBookmark(p *ext.Pull, out *ext.Push, handles []uint3
 // ropExpandRow handles RopExpandRow ([MS-OXCTABL] 2.2.2.8): it expands a collapsed
 // category to show its child rows. Uncategorized (flat) tables have no categories,
 // so this ROP always returns ecNotSupported. The body (MaxCount u32 + CategoryID u64)
-// is NOT consumed here — this ROP must be alone in its batch.
+// is NOT consumed here, this ROP must be alone in its batch.
 func (s *Session) ropExpandRow(_ *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	table := s.get(handleAt(handles, hindex))
 	if table == nil || table.kind != kindTable {
@@ -1074,7 +1074,7 @@ func (s *Session) ropExpandRow(_ *ext.Pull, out *ext.Push, handles []uint32, hin
 // ropCollapseRow handles RopCollapseRow ([MS-OXCTABL] 2.2.2.7): it collapses an
 // expanded category to hide its child rows. Uncategorized (flat) tables have no
 // categories, so this ROP always returns ecNotSupported. The body (CategoryID u64)
-// is NOT consumed here — this ROP must be alone in its batch.
+// is NOT consumed here, this ROP must be alone in its batch.
 func (s *Session) ropCollapseRow(_ *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	table := s.get(handleAt(handles, hindex))
 	if table == nil || table.kind != kindTable {
@@ -1088,7 +1088,7 @@ func (s *Session) ropCollapseRow(_ *ext.Pull, out *ext.Push, handles []uint32, h
 // ropSetCollapseState handles RopSetCollapseState ([MS-OXCTABL] 2.2.2.11): it sets
 // the collapsed/expanded state of all categories in the table. Uncategorized
 // (flat) tables have no categories, so this ROP always returns ecNotSupported.
-// The body (collapse_state binary blob) is NOT consumed here — this ROP must be
+// The body (collapse_state binary blob) is NOT consumed here, this ROP must be
 // alone in its batch.
 func (s *Session) ropSetCollapseState(_ *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	table := s.get(handleAt(handles, hindex))

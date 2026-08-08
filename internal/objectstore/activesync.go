@@ -4,7 +4,7 @@ import "hermex/internal/mapi"
 
 // GetActiveSyncState returns the ActiveSync sync-state JSON stored on the store
 // root, or the empty string when no device has synced yet. The state lives as a
-// single MAPI property (PrActiveSyncState) rather than in a dedicated table —
+// single MAPI property (PrActiveSyncState) rather than in a dedicated table,
 // the same "everything is a property" shape the rest of the store uses, mirroring
 // the webmail-settings and out-of-office stores.
 func (s *Store) GetActiveSyncState() (string, error) {

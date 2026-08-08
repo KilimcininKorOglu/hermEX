@@ -7,7 +7,7 @@ import (
 
 // ropRegisterNotification handles RopRegisterNotification ([MS-OXCNOTIF] 2.2.1.2;
 // request format in the internal spec §2): the client registers an interest
-// in mailbox events — whole-store, or scoped to a folder or a single message — and
+// in mailbox events, whole-store, or scoped to a folder or a single message, and
 // the server allocates a subscription object whose handle it echoes back as the
 // NotificationHandle of every RopNotify the subscription later delivers. The ROP has
 // no response body, only the standard 6-byte head, and the response HandleIndex is
@@ -18,7 +18,7 @@ import (
 // the shared store (the internal spec §9). That makes the folder baseline
 // snapshot load-bearing here: it MUST be taken at registration so the first poll
 // diffs against the state at subscribe time and reports nothing for messages that
-// already existed — otherwise the first drain would flood the client with every
+// already existed, otherwise the first drain would flood the client with every
 // existing message as an ObjectCreated. A folder- or message-scoped subscription
 // baselines and polls its one folder (the classifier filters per scope); a
 // whole-store subscription baselines every content folder and is polled across all of
@@ -63,7 +63,7 @@ func (s *Session) ropRegisterNotification(p *ext.Pull, out *ext.Push, handles []
 		},
 	}
 	// Baseline at registration (see the doc comment). A folder- or message-scoped
-	// subscription baselines its one folder — the poll diffs the folder and the
+	// subscription baselines its one folder, the poll diffs the folder and the
 	// classifier narrows to the message. A whole-store subscription baselines every
 	// content folder, so its first poll likewise reports nothing pre-existing.
 	if wholeStore {

@@ -44,8 +44,8 @@ func TestLoadAndDerivations(t *testing.T) {
 
 // TestMaildirForPartitions proves data_partitions spreads new mailboxes across
 // roots by a stable hash: an empty pool leaves every mailbox under DataDir, while
-// a configured pool places each user deterministically (same address — even
-// across casing — always the same root, so a re-derivation never relocates a live
+// a configured pool places each user deterministically (same address, even
+// across casing, always the same root, so a re-derivation never relocates a live
 // mailbox), always inside the pool, keeping the {root}/user/{domain}/{local}
 // shape, and actually using more than one partition.
 func TestMaildirForPartitions(t *testing.T) {
@@ -144,7 +144,7 @@ func TestTLSConfigRequiresCert(t *testing.T) {
 
 // TestTLSConfigHandshake proves the builder yields a config a real client can
 // complete a >= TLS 1.2 handshake against. It drives a live tls.NewListener fed
-// by TLSConfig() and dials it trusting only the configured cert — this fails iff
+// by TLSConfig() and dials it trusting only the configured cert, this fails iff
 // the builder is wrong (httptest.NewTLSServer would not, as it injects its own
 // certificate and never touches TLSConfig).
 func TestTLSConfigHandshake(t *testing.T) {

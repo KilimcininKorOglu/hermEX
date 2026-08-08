@@ -22,7 +22,7 @@ type namedField struct {
 }
 
 // contactNamed is the fixed set of contact named properties oxvcard maps,
-// resolved as a batch through the resolver. Order is irrelevant — results are
+// resolved as a batch through the resolver. Order is irrelevant, results are
 // keyed by PropertyName.
 var contactNamed = []namedField{
 	{mapi.NameEmail1Address, mapi.PtUnicode},

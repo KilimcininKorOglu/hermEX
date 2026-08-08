@@ -28,7 +28,7 @@ func TestResolveGatewayDefaults(t *testing.T) {
 
 // TestResolveGatewayFromConfig proves the config values override the defaults and
 // that the source is the config file alone (no environment is consulted): each field
-// set in config.json is the one used. This guards the env→json migration — if a field
+// set in config.json is the one used. This guards the env→json migration, if a field
 // silently fell back to a default or an env value, routing would diverge from what the
 // operator configured.
 func TestResolveGatewayFromConfig(t *testing.T) {
@@ -55,7 +55,7 @@ func TestResolveGatewayFromConfig(t *testing.T) {
 }
 
 // TestResolveGatewayPartialOverride proves a single configured field is honored while
-// the rest still default — the per-field fallback is independent, not all-or-nothing.
+// the rest still default, the per-field fallback is independent, not all-or-nothing.
 func TestResolveGatewayPartialOverride(t *testing.T) {
 	gw := resolveGateway(&config.Config{GatewayBackendWebmail: "https://webmail:8080"})
 	if gw.backendWebmail != "https://webmail:8080" {

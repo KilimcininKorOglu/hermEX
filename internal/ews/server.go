@@ -1,6 +1,6 @@
 // Package ews serves a mailbox over Exchange Web Services (EWS, MS-OXWS*): the
 // SOAP endpoint on /EWS/Exchange.asmx and the Outlook-schema Autodiscover
-// endpoint. It is a thin protocol adapter — the MAPI<->EWS-XML conversion lives
+// endpoint. It is a thin protocol adapter, the MAPI<->EWS-XML conversion lives
 // in internal/oxews; this package handles SOAP routing, operation dispatch, and
 // faults, authenticating each request with HTTP Basic against the directory and
 // operating on the MAPI object store, reusing the same infrastructure as the
@@ -62,7 +62,7 @@ func (s *Server) ensurePushClient() {
 
 // SetNotify wires the push wake source so a held GetStreamingEvents emits a
 // continuation the instant a watched mailbox changes rather than on its interval. A
-// nil consumer (push disabled) leaves streaming on its interval — the degradation
+// nil consumer (push disabled) leaves streaming on its interval, the degradation
 // floor. The daemon calls this once at startup, before serving.
 func (s *Server) SetNotify(c *notify.Consumer) {
 	if c == nil {

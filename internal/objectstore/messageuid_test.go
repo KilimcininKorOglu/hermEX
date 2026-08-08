@@ -9,8 +9,8 @@ import (
 )
 
 // TestMessageUIDByID confirms an indexed mail message resolves to its IMAP UID,
-// and that a calendar item created with CreateMessage — which never enters the
-// index — reports ok=false (its notification id then carries no UID).
+// and that a calendar item created with CreateMessage, which never enters the
+// index, reports ok=false (its notification id then carries no UID).
 func TestMessageUIDByID(t *testing.T) {
 	s := openSeededStore(t)
 

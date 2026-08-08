@@ -36,7 +36,7 @@ func New() *Verifier {
 }
 
 // Verify reports whether login/password authenticate against the directory cfg
-// describes. An empty password is rejected outright — an empty simple bind is an
+// describes. An empty password is rejected outright, an empty simple bind is an
 // unauthenticated (anonymous) bind a server would accept, which must never pass
 // for a password check. A directory or system error is returned as such; a
 // failed user bind or an absent/ambiguous account is a clean false.
@@ -103,7 +103,7 @@ func loginAttr(cfg directory.LDAPConfig) string {
 
 // SyncedUser is one account discovered in the directory: its login (the value of
 // the configured login attribute) and the directory's stable identifier (the
-// account's externid — objectGUID on Active Directory, entryUUID on OpenLDAP).
+// account's externid, objectGUID on Active Directory, entryUUID on OpenLDAP).
 type SyncedUser struct {
 	Username string
 	ExternID []byte
@@ -115,7 +115,7 @@ type SyncedUser struct {
 // Sync lists the directory's accounts for downsync into the local directory: it
 // searches the base for every entry carrying the login attribute and returns
 // each one's login and stable identifier. An entry with no stable identifier is
-// skipped — there is nothing to bind its externid to.
+// skipped, there is nothing to bind its externid to.
 func (v *Verifier) Sync(cfg directory.LDAPConfig) ([]SyncedUser, error) {
 	c, err := v.connect(cfg)
 	if err != nil {

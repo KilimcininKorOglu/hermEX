@@ -333,7 +333,7 @@ func statBytes(curRec uint32) []byte {
 }
 
 // getMatchesBody frames a GetMatches request with a PR_ANR restriction whose
-// search token is encoded as UTF-16LE — a hand-built wire vector independent of
+// search token is encoded as UTF-16LE, a hand-built wire vector independent of
 // our own encoder, so it proves the restriction's address-book string decodes
 // correctly off the wire.
 func getMatchesBody(token string) []byte {
@@ -363,7 +363,7 @@ func getMatchesBody(token string) []byte {
 }
 
 // TestNspiGetMatches drives Bind then GetMatches with a UTF-16 PR_ANR
-// restriction and confirms the seeded user is matched and projected — the
+// restriction and confirms the seeded user is matched and projected, the
 // address-book acid test for the restriction's string encoding on the wire.
 func TestNspiGetMatches(t *testing.T) {
 	ts := newTestServer(t)
@@ -396,7 +396,7 @@ func TestNspiGetMatches(t *testing.T) {
 		t.Errorf("mids marker = %#x, want 0xFF (a match follows)", p[45])
 	}
 	// The matched row carries alice as UTF-16LE: the UTF-16 ANR token decoded,
-	// matched, and the row projected — all independent of our own encoder.
+	// matched, and the row projected, all independent of our own encoder.
 	if u16 := []byte{'a', 0, 'l', 0, 'i', 0, 'c', 0, 'e', 0}; !bytes.Contains(p, u16) {
 		t.Error("GetMatches response does not carry the matched user as UTF-16LE")
 	}
@@ -479,7 +479,7 @@ func TestNspiGetPropList(t *testing.T) {
 }
 
 // seekEntriesBody frames a SeekEntries request with a PR_DISPLAY_NAME target
-// encoded as UTF-16LE — a hand-built wire vector that proves the seek target's
+// encoded as UTF-16LE, a hand-built wire vector that proves the seek target's
 // address-book string decodes correctly off the wire.
 func seekEntriesBody(target string) []byte {
 	var b []byte

@@ -163,7 +163,7 @@ func TestRoleCRUD(t *testing.T) {
 // must keep honoring a user's direct admin_roles grants (mapped to their
 // permission equivalents) once the named-role model is live, and must union
 // those with any named-role permissions without duplicating an overlap. Without
-// this bridge an existing — possibly sole — admin loses access the moment the
+// this bridge an existing, possibly sole, admin loses access the moment the
 // resolver governs a real check.
 func TestEffectivePermissionsUnionBridge(t *testing.T) {
 	db := openTestDB(t)

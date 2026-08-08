@@ -14,7 +14,7 @@ import (
 // target value, returning that entry's row. v1 supports the display-name sort
 // (the only sort an online client uses for the GAL). With an explicit MId list
 // the search runs in that list's order; otherwise it binary-searches the
-// display-name-ordered GAL — the same comparison snapshot() sorts by.
+// display-name-ordered GAL, the same comparison snapshot() sorts by.
 func (s *Server) SeekEntries(body []byte, caller string) []byte {
 	req, err := pullSeekEntries(body)
 	if err != nil {

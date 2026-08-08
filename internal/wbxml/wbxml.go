@@ -42,7 +42,7 @@ const (
 	gOpaque     byte = 0xC3
 
 	cbContent    byte = 0x40 // the tag has element content
-	cbAttributes byte = 0x80 // the tag has attributes — rejected
+	cbAttributes byte = 0x80 // the tag has attributes, rejected
 	tokenMask    byte = 0x3F // the tag token, masking the control bits
 )
 

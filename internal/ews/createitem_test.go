@@ -65,12 +65,12 @@ func TestCreateItemSaveOnly(t *testing.T) {
 }
 
 // TestCreateItemSendOnly confirms SendOnly delivers (loopback) but files no Sent
-// copy, and — the regression guard — that the response still carries an <Items>
+// copy, and, the regression guard, that the response still carries an <Items>
 // container. A real EWS client rejects a CreateItemResponseMessage with no Items
 // element; SendOnly persists nothing, so its container is present but empty. The
 // store-only assertions in the sibling tests passed while this wire shape was
 // malformed (the container omitted entirely), which is exactly how the defect
-// reached the live smoke — so this test gates the shape, not just the effect.
+// reached the live smoke, so this test gates the shape, not just the effect.
 func TestCreateItemSendOnly(t *testing.T) {
 	ts, dir := seededWithMessage(t)
 	_, out := soapPost(t, ts, createItemReq("SendOnly", testUser, "Send via EWS", "fire and forget"), true)

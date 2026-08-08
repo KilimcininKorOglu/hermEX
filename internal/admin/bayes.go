@@ -18,8 +18,8 @@ import (
 // unbounded.
 const retrainSampleCap = 500
 
-// performBayesRetrain rebuilds the Bayesian spam model from every mailbox — the
-// Junk folder as spam, the inbox as ham — and writes it atomically to the path the
+// performBayesRetrain rebuilds the Bayesian spam model from every mailbox, the
+// Junk folder as spam, the inbox as ham, and writes it atomically to the path the
 // MTA loads at startup. It is the handler for the "bayes-retrain" task. A mailbox
 // that fails to open is skipped, so one bad store cannot fail the whole retrain.
 func (s *Server) performBayesRetrain() (string, error) {

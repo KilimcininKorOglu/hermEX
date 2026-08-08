@@ -155,8 +155,8 @@ func TestRequestUnboundContextFaults(t *testing.T) {
 }
 
 // TestResponseFragmentation proves a response larger than the negotiated frag
-// size splits into multiple RESPONSE PDUs — FIRST on the first, LAST on the
-// last — that reassemble to the full stub.
+// size splits into multiple RESPONSE PDUs, FIRST on the first, LAST on the
+// last, that reassemble to the full stub.
 func TestResponseFragmentation(t *testing.T) {
 	d := echoDispatcher()
 	sess := &Session{}

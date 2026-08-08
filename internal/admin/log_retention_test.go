@@ -29,7 +29,7 @@ func TestSaveLogRetention(t *testing.T) {
 }
 
 // TestSaveLogRetentionKeepForever proves zero is accepted and persisted as keep-forever
-// (pruning disabled) — the safe default the dangerous "expire everything" path can never
+// (pruning disabled), the safe default the dangerous "expire everything" path can never
 // reach because zero simply means never prune.
 func TestSaveLogRetentionKeepForever(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}

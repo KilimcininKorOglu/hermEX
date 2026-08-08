@@ -16,7 +16,7 @@ import (
 // TestDeliverForwardsViaRuleWithGuards proves the delivery-time forward action
 // sends through the OnRuleForward hook for ordinary mail (with the loop-break
 // marker stamped), and that the guards suppress forwarding a bounce, an
-// auto-submitted message, and an already-forwarded one — so a rule cannot become
+// auto-submitted message, and an already-forwarded one, so a rule cannot become
 // a backscatter or mail-loop source.
 func TestDeliverForwardsViaRuleWithGuards(t *testing.T) {
 	mbox := filepath.Join(t.TempDir(), "alice")

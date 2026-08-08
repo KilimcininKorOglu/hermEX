@@ -16,7 +16,7 @@ var errNoStreamProp = errors.New("rop: stream property not present")
 // a read/write cursor. A read-only stream is a snapshot of the property's bytes. A
 // writable stream (opened with a write open-mode over a writable parent) buffers
 // edits in data and, on CommitStream, stages them back into the parent object's
-// write buffer for tag — which the parent's SaveChanges then persists.
+// write buffer for tag, which the parent's SaveChanges then persists.
 type streamState struct {
 	data     []byte
 	pos      int
@@ -26,8 +26,8 @@ type streamState struct {
 	tag      mapi.PropTag // the property the stream is bound to
 }
 
-// stream open-mode write intent: any bit of MAPI_BEST_ACCESS (0x03) — ReadWrite
-// (0x01), Create (0x02), or BestAccess (0x03) — requests write access.
+// stream open-mode write intent: any bit of MAPI_BEST_ACCESS (0x03), ReadWrite
+// (0x01), Create (0x02), or BestAccess (0x03), requests write access.
 const streamWriteMode uint8 = 0x03
 
 // SeekStream origins ([MS-OXCPRPT] 2.2.2.18 / STREAM_SEEK_*).
@@ -62,7 +62,7 @@ func streamBytes(typ mapi.PropType, v any) []byte {
 }
 
 // streamData reads the bytes a stream exposes for the property tag on the parent
-// object — a message property (via the store) or an opened attachment's
+// object, a message property (via the store) or an opened attachment's
 // property bag (e.g. PrAttachDataBin).
 func (s *Session) streamData(parent *object, tag mapi.PropTag) ([]byte, error) {
 	switch {
@@ -95,8 +95,8 @@ func (s *Session) streamData(parent *object, tag mapi.PropTag) ([]byte, error) {
 		// A created attachment being filled: read its buffered write bag first, so a
 		// read-mode stream sees the client's own writes before SaveChangesAttachment
 		// (read-your-writes on a compose attachment). After the save the buffer is
-		// flushed — to the in-memory compose attachment, or to the store row for a
-		// persisted one — so fall back to those for a read on a saved write handle.
+		// flushed, to the in-memory compose attachment, or to the store row for a
+		// persisted one, so fall back to those for a read on a saved write handle.
 		aw := parent.attachW
 		if v, ok := aw.pending.Get(tag); ok {
 			return streamBytes(tag.Type(), v), nil
@@ -250,7 +250,7 @@ func (s *Session) ropReadStream(p *ext.Pull, out *ext.Push, handles []uint32, hi
 // stream's bytes at the cursor with the request data, growing (zero-extending) the
 // buffer when the write runs past the end, then advances the cursor. The data is a
 // 16-bit-length-prefixed binary, so a single write carries at most 0xFFFF bytes.
-// The bytes are not yet staged to the parent — that happens at CommitStream.
+// The bytes are not yet staged to the parent, that happens at CommitStream.
 //
 // v1 reallocates the whole buffer on each past-end write, so streaming a large
 // property in 0xFFFF-byte chunks is O(n^2); acceptable for v1's small streams, but
@@ -289,8 +289,8 @@ func (s *Session) ropWriteStream(p *ext.Pull, out *ext.Push, handles []uint32, h
 // ropCommitStream handles RopCommitStream ([MS-OXCPRPT] 2.2.2.19): it stages a
 // writable stream's bytes back into the parent object's write buffer for the
 // stream's property, where the parent's SaveChanges then persists it. (hermEX has
-// no instance-staging layer, so unlike the reference — where this is a no-op for
-// message/attachment streams and the flush happens at save — the commit is the
+// no instance-staging layer, so unlike the reference, where this is a no-op for
+// message/attachment streams and the flush happens at save, the commit is the
 // point the bytes reach the parent.) A read-only stream commits nothing.
 func (s *Session) ropCommitStream(_ *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	obj := s.get(handleAt(handles, hindex))
@@ -334,7 +334,7 @@ func (s *Session) commitStream(st *streamState) bool {
 }
 
 // streamValue converts a stream's bytes back to the value form of its property
-// type — the inverse of streamBytes: a Unicode string from UTF-16LE, a string8
+// type, the inverse of streamBytes: a Unicode string from UTF-16LE, a string8
 // from its code-page bytes, binary verbatim.
 func streamValue(typ mapi.PropType, data []byte) any {
 	switch typ {

@@ -21,7 +21,7 @@ func Export(msg *oxcmail.Message, opt Options) ([]byte, error) {
 	// identity; a plain appointment emits none of that, so its output is unchanged.
 	partstat := responsePartStat(getStr(p, mapi.PrMessageClass))
 
-	// A recurring event preserved verbatim is returned unchanged — but only when
+	// A recurring event preserved verbatim is returned unchanged, but only when
 	// rendering the appointment itself. A response synthesizes a REPLY below;
 	// returning the preserved REQUEST verbatim would send the invitation back to the
 	// organizer instead of the attendee's reply.
@@ -139,7 +139,7 @@ func Export(msg *oxcmail.Message, opt Options) ([]byte, error) {
 }
 
 // responsePartStat maps a meeting-response message class to the iCalendar PARTSTAT
-// its REPLY reports — the inverse of import's meetingClass mapping, kept beside it
+// its REPLY reports, the inverse of import's meetingClass mapping, kept beside it
 // so the two directions cannot drift. A non-response class yields "" (no METHOD,
 // organizer, or attendee is emitted, leaving a plain appointment's output as is).
 func responsePartStat(class string) string {

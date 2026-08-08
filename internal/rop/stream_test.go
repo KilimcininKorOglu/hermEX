@@ -73,7 +73,7 @@ func decodeUTF16LE(b []byte) string {
 }
 
 // TestOpenReadStream opens a stream over the message body and reads it back in
-// two chunks — the 2-byte ByteCount form then the 0xBABE 6-byte form — checking
+// two chunks, the 2-byte ByteCount form then the 0xBABE 6-byte form, checking
 // the size, that the chunks reassemble to the UTF-16LE body, and that a read at
 // end-of-stream returns zero bytes.
 func TestOpenReadStream(t *testing.T) {

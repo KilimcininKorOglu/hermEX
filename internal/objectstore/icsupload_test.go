@@ -263,7 +263,7 @@ func assertMessageEqual(t *testing.T, ctx string, want, got *oxcmail.Message) {
 // it, drop the messages, then replay the download stream as a client upload and
 // assert each message is reconstructed by value (properties, recipients, and
 // attachment payload). The replay is same-store so the home-replica source keys
-// resolve to the original ids — now absent, so each is an insert. The teeth are
+// resolve to the original ids, now absent, so each is an insert. The teeth are
 // the by-value equality, which a dropped or swapped value (which a marker-count
 // check would miss) fails. Independent oracle remains Outlook-PENDING: producer
 // and collector are both hermex code, so a symmetric wire-format error survives.
@@ -320,7 +320,7 @@ func TestImportMessageFullLoop(t *testing.T) {
 // TestImportMessageAssociatedRoundTrip closes the FAI flag end-to-end: an
 // associated message downloaded with SYNC_ASSOCIATED carries PR_ASSOCIATED, which
 // the upload transform turns back into the import-associated flag, so the
-// reconstructed message is associated again — and its body still matches by value.
+// reconstructed message is associated again, and its body still matches by value.
 func TestImportMessageAssociatedRoundTrip(t *testing.T) {
 	s := openSeededStore(t)
 	fld := int64(mapi.PrivateFIDContacts)
@@ -388,7 +388,7 @@ func TestImportAdvancesFolderCursor(t *testing.T) {
 
 // TestImportMessageByteTearing feeds a body carrying a long string through tiny
 // PutBuffer chunks, so the value is torn at many boundaries. The collector's
-// parser must reassemble it exactly — surface the Inc 2 parser tests did not
+// parser must reassemble it exactly, surface the Inc 2 parser tests did not
 // exercise on the upload path. The symmetric full loop would not catch a tearing
 // bug here, so this is asserted directly against the stored value.
 func TestImportMessageByteTearing(t *testing.T) {
@@ -430,7 +430,7 @@ func TestImportMessageByteTearing(t *testing.T) {
 // TestImportMessageUpdatedBranch re-imports an existing message and asserts the
 // store bumps its change number, replaces (not appends) its content, and that a
 // download holding the prior version is told the message both changed and is an
-// update it already had — the delta engine's "updated" branch, which only this
+// update it already had, the delta engine's "updated" branch, which only this
 // re-import write path exercises with real data.
 func TestImportMessageUpdatedBranch(t *testing.T) {
 	s := openSeededStore(t)
@@ -471,7 +471,7 @@ func TestImportMessageUpdatedBranch(t *testing.T) {
 }
 
 // TestImportNamedPropertyRemap checks that a named property carried inline is
-// allocated a store-local id on import and resolves back to the same name — the
+// allocated a store-local id on import and resolves back to the same name, the
 // remap that lets a client's id space and the store's differ.
 func TestImportNamedPropertyRemap(t *testing.T) {
 	s := openSeededStore(t)
@@ -532,7 +532,7 @@ func TestImportRejectsEmbedded(t *testing.T) {
 }
 
 // TestImportRejectsStateMetaTag checks that an ICS state idset meta-tag in the
-// content stream is rejected — state travels via the upload-state-stream ROPs, and
+// content stream is rejected, state travels via the upload-state-stream ROPs, and
 // silently storing it as a message property would corrupt the message.
 func TestImportRejectsStateMetaTag(t *testing.T) {
 	s := openSeededStore(t)
@@ -594,7 +594,7 @@ func TestImportDeletes(t *testing.T) {
 
 // TestImportReadStateChanges marks a message read by its source key and asserts the
 // stored flag flipped, a read change number was recorded, and a download holding
-// the body but not that read change is told the read state changed — the engine's
+// the body but not that read change is told the read state changed, the engine's
 // read-state branch, which only this write path feeds with a real read change
 // number. A repeat of the same flag is a no-op.
 func TestImportReadStateChanges(t *testing.T) {
@@ -729,7 +729,7 @@ func TestImportHierarchyCreate(t *testing.T) {
 }
 
 // TestImportHierarchyUpdate re-imports an existing folder with a new name and
-// asserts it is updated in place — name changed, change number bumped, not
+// asserts it is updated in place, name changed, change number bumped, not
 // duplicated.
 func TestImportHierarchyUpdate(t *testing.T) {
 	s := openSeededStore(t)

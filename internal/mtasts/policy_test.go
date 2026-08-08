@@ -3,7 +3,7 @@ package mtasts
 import "testing"
 
 // TestBuildPolicy proves Build emits the exact RFC 8461 §3.2 wire form a sender
-// fetches — version first, one mx line per pattern, CRLF-terminated — and that it
+// fetches, version first, one mx line per pattern, CRLF-terminated, and that it
 // round-trips through Parse. The exact bytes are load-bearing: a sender validates
 // our published policy verbatim, so a missing field or a wrong line ending would
 // make every conformant sender reject it.
@@ -65,7 +65,7 @@ func TestParsePolicy(t *testing.T) {
 }
 
 // TestPolicyID proves the published id is a 32-char alphanumeric string that is
-// stable for a given policy and changes when any field changes — the property a
+// stable for a given policy and changes when any field changes, the property a
 // sender relies on to detect a new policy. A timestamp-based id would miss a change
 // to an input (like the hostname) that does not touch the settings row, so it is
 // derived from the policy bytes.

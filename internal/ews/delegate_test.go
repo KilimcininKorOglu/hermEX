@@ -72,7 +72,7 @@ func grantFolder(t *testing.T, path string, fid int64, username string, rights u
 // TestGetDelegateReportsListAndLevels confirms GetDelegate returns each delegate with
 // the per-folder permission level its exact frights grant maps to (Editor/Reviewer),
 // reports an ungranted folder as None, and always emits the meeting-message and
-// private-item flags plus the delivery scope — the elements a strict client requires
+// private-item flags plus the delivery scope, the elements a strict client requires
 // present even though v1 does not model their behaviour.
 func TestGetDelegateReportsListAndLevels(t *testing.T) {
 	ts, paths := delegateServer(t)
@@ -257,7 +257,7 @@ func resolveGrant(t *testing.T, path string, fid int64, username string) uint32 
 }
 
 // ownFolderGrant returns a user's OWN explicit grant on a folder and whether such a
-// row exists — distinct from ResolvePermission, which falls back to the seeded
+// row exists, distinct from ResolvePermission, which falls back to the seeded
 // "default" free/busy grant when the user has no row of their own.
 func ownFolderGrant(t *testing.T, path string, fid int64, username string) (uint32, bool) {
 	t.Helper()
@@ -452,7 +452,7 @@ func TestUpdateDelegateNoneClearsGrant(t *testing.T) {
 }
 
 // TestAddThenGetDelegateRoundTrip confirms a grant written by AddDelegate reads back at
-// the same level through GetDelegate — the two EWS operations agree end to end.
+// the same level through GetDelegate, the two EWS operations agree end to end.
 func TestAddThenGetDelegateRoundTrip(t *testing.T) {
 	ts, _ := delegateServer(t)
 
@@ -485,7 +485,7 @@ func crossMailboxGetFolder(distinguishedID, mailbox string) string {
 }
 
 // TestGetFolderCrossMailboxWithGrant confirms a caller granted access on another
-// mailbox's folder reads that folder through a Mailbox-targeted GetFolder — the EWS
+// mailbox's folder reads that folder through a Mailbox-targeted GetFolder, the EWS
 // access path honoring the same grant the ROP path does.
 func TestGetFolderCrossMailboxWithGrant(t *testing.T) {
 	ts, paths := delegateServer(t)
@@ -696,7 +696,7 @@ func TestUpdateItemCrossMailboxWithGrant(t *testing.T) {
 }
 
 // TestUpdateItemCrossMailboxDenied confirms a read-only (reviewer) delegate cannot edit
-// an item in another mailbox — editing needs edit access, which visibility/read lack.
+// an item in another mailbox, editing needs edit access, which visibility/read lack.
 func TestUpdateItemCrossMailboxDenied(t *testing.T) {
 	ts, paths := delegateServer(t)
 	id := bobItemIDWithGrant(t, ts, paths, mapi.RightsReviewer)
@@ -1055,7 +1055,7 @@ func TestSyncFolderItemsCrossMailboxDenied(t *testing.T) {
 // TestSyncFolderItemsCrossMailboxStateIsolated confirms the delegate's cross-mailbox
 // sync cursor persists in the delegate's own store, keyed to the target: priming the
 // sync returns the item as a Create, and re-syncing with the returned token reports no
-// new creates — the state advanced and was not lost or mis-keyed.
+// new creates, the state advanced and was not lost or mis-keyed.
 func TestSyncFolderItemsCrossMailboxStateIsolated(t *testing.T) {
 	ts, paths := delegateServer(t)
 	grantFolder(t, paths["bob@hermex.test"], int64(mapi.PrivateFIDInbox), testUser, mapi.RightsReviewer)

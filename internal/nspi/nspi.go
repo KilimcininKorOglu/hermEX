@@ -3,7 +3,7 @@
 // It answers a real Outlook's Global Address List (GAL) browse and recipient
 // resolution, backed by the directory GAL.
 //
-// The transport — HTTP, Basic auth, and the sid/sequence session cookies —
+// The transport, HTTP, Basic auth, and the sid/sequence session cookies,
 // belongs to internal/mapihttp; this package owns the NSPI request/response wire
 // format and the per-op semantics over internal/ext. Every response opens with a
 // MAPI/HTTP-level status (always 0: the request was processed) and the op's
@@ -21,7 +21,7 @@ import (
 
 // NSPI bind flags ([MS-OXNSPI] 2.2.1.1) and code pages ([MS-OXCDATA] / defs).
 const (
-	fAnonymousLogin uint32 = 0x20   // anonymous bind — unsupported
+	fAnonymousLogin uint32 = 0x20   // anonymous bind, unsupported
 	cpWinUnicode    uint32 = 0x04B0 // CP_WINUNICODE (1200): NSPI cannot bind in Unicode
 )
 
@@ -41,7 +41,7 @@ const (
 )
 
 // NspiGetTemplateInfo Flags ([MS-OXNSPI] 2.2.4 / 3.1.4.10): the reference accepts
-// only TI_TEMPLATE alone — a request carrying TI_SCRIPT (or neither) is ecNotSupported.
+// only TI_TEMPLATE alone, a request carrying TI_SCRIPT (or neither) is ecNotSupported.
 const (
 	tiTemplate uint32 = 0x00000001
 	tiScript   uint32 = 0x00000004

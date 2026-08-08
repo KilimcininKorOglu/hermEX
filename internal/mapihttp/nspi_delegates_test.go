@@ -108,7 +108,7 @@ func TestNspiModLinkAttWritesOwnDelegateList(t *testing.T) {
 		t.Fatalf("alice's delegates = %v, want [bob@hermex.test]", got)
 	}
 
-	// alice tries to edit bob's list (mid 0x11) — denied (0x80070005), no mutation.
+	// alice tries to edit bob's list (mid 0x11), denied (0x80070005), no mutation.
 	if result := modLink(0x11, ephemeralEID(0x10)); result != 0x80070005 {
 		t.Errorf("ModLinkAtt on another user's list = result %#x, want ecAccessDenied", result)
 	}

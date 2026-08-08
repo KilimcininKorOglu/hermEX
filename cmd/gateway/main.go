@@ -6,11 +6,11 @@
 // Like the other daemons it reads the shared config (-config, default
 // /etc/hermex/config.json) for the database DSN, the TLS certificate
 // (tls_cert/tls_key), central logging, and the hostname; only the gateway-specific
-// routing is environment-driven — HERMEX_GATEWAY_ADDR sets the listen address and
+// routing is environment-driven, HERMEX_GATEWAY_ADDR sets the listen address and
 // HERMEX_BACKEND_* override the backend base URLs (defaulting to the compose
 // service names). TLS is served through the certificate store: an admin-uploaded
 // certificate (picked up live on renewal), falling back to the config-file
-// certificate — so the front door and the mail daemons present one certificate
+// certificate, so the front door and the mail daemons present one certificate
 // from one source.
 package main
 
@@ -71,12 +71,12 @@ func main() {
 	logger, logClose := logging.Build("hermex-gateway", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 
 	// The gateway's database connection is used only for the TLS certificate store:
-	// it serves an admin-uploaded certificate — and picks up a renewal — at the front
+	// it serves an admin-uploaded certificate, and picks up a renewal, at the front
 	// door without a restart, falling back to the config-file certificate when the
 	// store has none. The connection is opened lazily (no startup Ping): if the
 	// directory is unreachable when the gateway starts, it still comes up on the
 	// config-file certificate and the provider's poll adopts the store once it
-	// returns — the front door must not be held hostage to the cert store at boot.
+	// returns, the front door must not be held hostage to the cert store at boot.
 	db, err := sql.Open("mysql", cfg.DatabaseDSN)
 	if err != nil {
 		log.Fatalf("hermex-gateway: open directory: %v", err)

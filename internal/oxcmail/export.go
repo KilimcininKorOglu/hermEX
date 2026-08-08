@@ -392,7 +392,7 @@ func writePreservedHeaders(b *bytes.Buffer, msg *Message) {
 // EnsureMessageID assigns PR_INTERNET_MESSAGE_ID to an originating message that
 // has none, so the transmitted message carries an RFC 5322 Message-ID. A
 // submission path calls it before Export, the way the reference assigns the id on
-// the message rather than synthesizing it during serialization — Export itself
+// the message rather than synthesizing it during serialization, Export itself
 // only emits a present id. A message that already has one is left unchanged.
 func EnsureMessageID(props *mapi.PropertyValues) {
 	if propString(*props, mapi.PrInternetMessageID) != "" {

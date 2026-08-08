@@ -34,7 +34,7 @@ func TestUICreateContact(t *testing.T) {
 }
 
 // TestUICreateContactRequiresDomain proves the handler rejects a missing filing
-// domain with a message rather than calling the directory — a contact must ride
+// domain with a message rather than calling the directory, a contact must ride
 // on a real local domain (the domain_id foreign key).
 func TestUICreateContactRequiresDomain(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}

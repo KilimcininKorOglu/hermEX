@@ -9,7 +9,7 @@ type XID struct {
 }
 
 // LongTermID is a specific form of XID (MS-OXCDATA §2.2.1.3.1): a database GUID,
-// a 6-byte global counter, and two padding bytes — a fixed 24-byte structure.
+// a 6-byte global counter, and two padding bytes, a fixed 24-byte structure.
 type LongTermID struct {
 	GUID          GUID
 	GlobalCounter GlobCnt

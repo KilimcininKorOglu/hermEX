@@ -1,7 +1,7 @@
 // Command notify runs the hermEX central push-notification relay: a tiny HTTP
 // server that fans mailbox-change wake signals from the writer daemons out to the
 // long-poll consumers over Server-Sent Events. It holds no database and no mailbox
-// store — it is a pure in-memory relay — so it starts instantly and depends on
+// store, it is a pure in-memory relay, so it starts instantly and depends on
 // nothing. The mail path never hard-depends on it: when it is down, producers fail
 // their publish silently and consumers fall back to polling.
 package main

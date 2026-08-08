@@ -228,7 +228,7 @@ func knownAlice() *fakeDir {
 }
 
 // TestSetFolderPermissionRejectsUnknownMember proves a grant to an address that names
-// no real user is refused — not silently stored as a row the access path (which
+// no real user is refused, not silently stored as a row the access path (which
 // compares the stored name verbatim against the login) would never match.
 func TestSetFolderPermissionRejectsUnknownMember(t *testing.T) {
 	store := &fakeStore{}

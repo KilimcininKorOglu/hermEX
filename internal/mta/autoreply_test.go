@@ -58,7 +58,7 @@ func TestAutoReplySuppressed(t *testing.T) {
 // TestAutoReplyDecision covers subject/body selection and the external-reply
 // gate, including the external audience. The external rows are the ones the
 // delivery-path tests cannot reach (an external sender has no local mailbox, so
-// its reply is dropped), so they are pinned here — in particular that the
+// its reply is dropped), so they are pinned here, in particular that the
 // known-only audience withholds the reply from an unknown sender.
 func TestAutoReplyDecision(t *testing.T) {
 	cfg := objectstore.OOFSettings{

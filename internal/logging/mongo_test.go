@@ -45,7 +45,7 @@ func (f *fakeInserter) totals() (calls, docs int) {
 }
 
 // TestMongoSinkFlushesBufferedEventsOnClose proves every enqueued event reaches
-// the inserter — Close drains the buffer and makes a final flush.
+// the inserter, Close drains the buffer and makes a final flush.
 func TestMongoSinkFlushesBufferedEventsOnClose(t *testing.T) {
 	fi := &fakeInserter{}
 	s := newAsyncSink(readyConn(fi), "")
@@ -68,7 +68,7 @@ func TestMongoSinkFlushesBufferedEventsOnClose(t *testing.T) {
 }
 
 // TestMongoSinkWriteNeverBlocks proves Write drops and counts events instead of
-// blocking when the writer is stalled and the buffer fills — logging must never
+// blocking when the writer is stalled and the buffer fills, logging must never
 // stall a protocol hot path.
 func TestMongoSinkWriteNeverBlocks(t *testing.T) {
 	block := make(chan struct{})
@@ -102,7 +102,7 @@ func TestMongoSinkWriteNeverBlocks(t *testing.T) {
 
 // TestMongoSinkIntegration drives a real MongoDB (the dev container's mongo): it
 // writes an event through NewMongoSink, reads it back, and confirms the stored
-// shape and that the filter indexes were created — and that NO TTL index exists,
+// shape and that the filter indexes were created, and that NO TTL index exists,
 // since retention is enforced by the admin's pruning, not a TTL. It skips without
 // the env, so the host quick-feedback run is unaffected.
 func TestMongoSinkIntegration(t *testing.T) {

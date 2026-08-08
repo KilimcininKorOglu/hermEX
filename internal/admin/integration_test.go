@@ -165,7 +165,7 @@ func TestAdminServerIntegration(t *testing.T) {
 	}
 
 	// 6. Provision a new user through the API (a state-changing request with CSRF)
-	// and confirm it lands in the directory — proving the create path and the
+	// and confirm it lands in the directory, proving the create path and the
 	// config-derived maildir end-to-end.
 	cr := authedPOST(t, ts, "/admin/users", session, csrf,
 		`{"email":"intern@hermex.test","password":"pw2"}`)
@@ -209,7 +209,7 @@ func TestAdminServerIntegration(t *testing.T) {
 	// The reset stored the new hash and flagged the account for a forced change.
 	// The strict Authenticate now denies a flagged account, so verify the stored
 	// hash via the lenient path and assert the strict path refuses it even with the
-	// correct password — that refusal is what locks the temporary password out of
+	// correct password, that refusal is what locks the temporary password out of
 	// every client protocol until the user changes it.
 	if _, ok := dir.AuthenticateAllowingPasswordChange("intern@hermex.test", "pw3"); !ok {
 		t.Error("the API-reset password does not authenticate via the lenient path")

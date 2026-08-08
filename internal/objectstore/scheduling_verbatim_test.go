@@ -10,8 +10,8 @@ import (
 )
 
 // TestSchedulingMessageServedVerbatim proves a delivered meeting request is served
-// byte-for-byte — its text/calendar invitation stays a body alternative rather than
-// being demoted to an attachment by re-export — both from the eml cache and, with
+// byte-for-byte, its text/calendar invitation stays a body alternative rather than
+// being demoted to an attachment by re-export, both from the eml cache and, with
 // the cache gone, regenerated from the preserved original.
 func TestSchedulingMessageServedVerbatim(t *testing.T) {
 	dir := t.TempDir()

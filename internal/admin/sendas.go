@@ -30,7 +30,7 @@ func (s *Server) canonicalGrantees(list []string) (canonical []string, bad strin
 	return canonical, "", nil
 }
 
-// handleGetUserSendAs returns the user's send-as list — the addresses permitted to
+// handleGetUserSendAs returns the user's send-as list, the addresses permitted to
 // send mail as this user. Gated by requireUserScope.
 func (s *Server) handleGetUserSendAs(w http.ResponseWriter, r *http.Request) {
 	maildir, ok := s.resolveMaildir(w, r)

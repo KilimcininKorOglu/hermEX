@@ -169,7 +169,7 @@ func TestIMAPPublicFolders(t *testing.T) {
 	}
 
 	// Bulletin: alice has the Create right (post) but not edit/delete. She may
-	// APPEND, but the selection is read-only — a poster must not be able to modify
+	// APPEND, but the selection is read-only, a poster must not be able to modify
 	// or delete others' messages.
 	if status := c.appendMsg("a2", `"Public Folders/Bulletin"`, "Subject: hi\r\n\r\nhello world"); status != "OK" {
 		t.Fatalf("APPEND to Bulletin = %s, want OK", status)

@@ -12,7 +12,7 @@ import (
 // queued recipient deliveries, flush a deferred one to immediate retry, or drop
 // one. The concrete relaySpool satisfies it; tests substitute a real spool at a
 // temp path (the spool is plain SQLite, so no fake is needed). It is the native
-// equivalent of a postfix-style mail-queue page — hermEX has no postfix, so it
+// equivalent of a postfix-style mail-queue page, hermEX has no postfix, so it
 // reads its own durable relay spool instead.
 type MailQueue interface {
 	List() ([]relay.QueueEntry, error)

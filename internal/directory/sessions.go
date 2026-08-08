@@ -75,8 +75,8 @@ func (d *SQLDirectory) ListActiveSessions(now int64) ([]SessionRecord, error) {
 	return out, rows.Err()
 }
 
-// PurgeStaleSessions deletes aged rows as of now (unix seconds) — ended sessions
-// past sessionEndedTTL and running sessions past sessionRunningTTL — and reports
+// PurgeStaleSessions deletes aged rows as of now (unix seconds), ended sessions
+// past sessionEndedTTL and running sessions past sessionRunningTTL, and reports
 // how many were removed. Best-effort table hygiene; ListActiveSessions already
 // hides stale rows by age.
 func (d *SQLDirectory) PurgeStaleSessions(now int64) (int64, error) {

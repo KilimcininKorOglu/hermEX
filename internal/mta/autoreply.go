@@ -26,7 +26,7 @@ const dateLayout = "Mon, 02 Jan 2006 15:04:05 -0700"
 // logged and swallowed so it can never fail the delivery that triggered it (a
 // failed delivery makes the sender retry and double-deliver). The reply carries
 // "Auto-Submitted: auto-replied", which makes the recipient of the reply
-// suppress their own auto-reply — that is what prevents an infinite loop
+// suppress their own auto-reply, that is what prevents an infinite loop
 // between two mailboxes that both have out-of-office enabled.
 //
 // The loop break reads that header off the raw bytes handed to deliver, not the
@@ -79,7 +79,7 @@ func sendAutoReply(accounts directory.Accounts, st *objectstore.Store, selfAddr,
 
 	// The "known senders only" external audience needs to know whether the sender
 	// is in the mailbox's contacts. Resolve it only when it can change the outcome
-	// — an external sender under that audience — so ordinary delivery pays nothing.
+	//, an external sender under that audience, so ordinary delivery pays nothing.
 	senderKnown := false
 	if !internal && cfg.ExternalEnabled && cfg.ExternalAudience == objectstore.OOFExternalKnown {
 		known, err := st.ContactHasAddress(to)
@@ -100,7 +100,7 @@ func sendAutoReply(accounts directory.Accounts, st *objectstore.Store, selfAddr,
 	// in their inbox; its Auto-Submitted header makes their own out-of-office
 	// suppress, so the exchange ends after one message. An external recipient
 	// has no local mailbox and no relay exists yet, so the reply is reported
-	// unresolved and dropped — consistent with the rest of the server.
+	// unresolved and dropped, consistent with the rest of the server.
 	if _, err := Deliver(accounts, selfAddr, []string{to}, reply, received); err != nil {
 		return err
 	}
@@ -112,10 +112,10 @@ func sendAutoReply(accounts directory.Accounts, st *objectstore.Store, selfAddr,
 // body and whether to send. send is false for a suppressed sender (see
 // autoReplySuppressed); for an external sender (no local mailbox) when external
 // replies are not enabled; and for an external sender outside the configured
-// audience — when ExternalAudience is OOFExternalKnown, only a sender already in
+// audience, when ExternalAudience is OOFExternalKnown, only a sender already in
 // the mailbox's contacts (senderKnown) is replied to. Internal senders always get
-// the internal reply. Keeping the decision pure — senderKnown is resolved by the
-// caller — makes every branch, including the external ones the delivery path
+// the internal reply. Keeping the decision pure, senderKnown is resolved by the
+// caller, makes every branch, including the external ones the delivery path
 // cannot exercise without an outbound relay, unit-testable.
 func autoReplyDecision(hdr mail.Header, envelopeSender, selfAddr string, cfg objectstore.OOFSettings, internal, senderKnown bool) (subject, body string, send bool) {
 	if autoReplySuppressed(hdr, envelopeSender, selfAddr) {
@@ -136,13 +136,13 @@ func autoReplyDecision(hdr mail.Header, envelopeSender, selfAddr string, cfg obj
 // autoReplySuppressed reports whether an out-of-office auto-reply MUST NOT be
 // sent in response to an incoming message, following RFC 3834 and common
 // mailing-list conventions. It returns true (suppress) when any of these hold,
-// so an ordinary person-to-person message — which carries none of them — is
+// so an ordinary person-to-person message, which carries none of them, is
 // replied to:
 //   - the envelope sender is empty or the null return-path "<>" (a bounce);
 //   - the sender is this mailbox itself, or a role/no-reply mailbox
 //     (postmaster, mailer-daemon, no-reply, ...);
 //   - Auto-Submitted is present with a keyword other than "no" (automated mail,
-//     including our own auto-replies — this is what breaks the reply loop);
+//     including our own auto-replies, this is what breaks the reply loop);
 //   - Precedence is bulk, list, or junk;
 //   - the message is mailing-list traffic (List-Id / List-Unsubscribe / List-Post).
 //
@@ -229,7 +229,7 @@ func isRoleMailbox(addr string) bool {
 
 // buildAutoReply assembles a minimal RFC 5322 plain-text auto-reply. It is
 // hand-built rather than routed through oxcmail.Export because Export emits a
-// fixed header set with no way to carry Auto-Submitted — the one header that
+// fixed header set with no way to carry Auto-Submitted, the one header that
 // breaks the reply loop.
 func buildAutoReply(from, to, subject, body, inReplyTo string, when time.Time) []byte {
 	if strings.TrimSpace(subject) == "" {

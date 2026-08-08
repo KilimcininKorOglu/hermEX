@@ -14,7 +14,7 @@ import (
 
 // handleQuarantineForm is the GET landing for a spam-digest release link. It
 // verifies the token and shows a confirmation page whose POST performs the
-// release — the confirm-then-POST defeats email-client link prefetch (the token
+// release, the confirm-then-POST defeats email-client link prefetch (the token
 // is the sole credential, so there is no CSRF surface). Unauthenticated.
 func (s *Server) handleQuarantineForm(w http.ResponseWriter, r *http.Request) {
 	if len(s.DigestSecret) == 0 {
@@ -31,7 +31,7 @@ func (s *Server) handleQuarantineForm(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleQuarantineRelease verifies the token and moves the one message it names
-// from Junk back to the Inbox. Unauthenticated — the token is the only credential;
+// from Junk back to the Inbox. Unauthenticated, the token is the only credential;
 // since Junk UIDs are never reused, a stale token can only ever find nothing.
 func (s *Server) handleQuarantineRelease(w http.ResponseWriter, r *http.Request) {
 	if len(s.DigestSecret) == 0 {
@@ -68,7 +68,7 @@ func (s *Server) handleQuarantineRelease(w http.ResponseWriter, r *http.Request)
 	writeQuarantinePage(w, http.StatusOK, "Released", "The message has been moved back to your inbox.", "")
 }
 
-// writeQuarantinePage renders a minimal standalone result page (no SPA — the user
+// writeQuarantinePage renders a minimal standalone result page (no SPA, the user
 // arrives from an email link with no session). A non-empty confirmToken renders
 // the release form.
 func writeQuarantinePage(w http.ResponseWriter, status int, heading, message, confirmToken string) {

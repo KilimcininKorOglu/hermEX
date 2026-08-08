@@ -20,8 +20,8 @@ const negativeTTL = 5 * time.Minute
 // or hostile policy host cannot stall a delivery.
 const fetchTimeout = 10 * time.Second
 
-// Resolver fetches and caches MTA-STS policies. The two lookups — the
-// _mta-sts.<domain> TXT presence record and the HTTPS policy file — are injectable
+// Resolver fetches and caches MTA-STS policies. The two lookups, the
+// _mta-sts.<domain> TXT presence record and the HTTPS policy file, are injectable
 // so the relay drives the real network while tests stay deterministic and offline.
 type Resolver struct {
 	// LookupTXT returns the TXT records of name; nil uses net.LookupTXT.

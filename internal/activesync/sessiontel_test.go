@@ -35,7 +35,7 @@ func (f *fakeRecorder) all() []directory.SessionRecord {
 
 // TestDispatchRecordsSession proves dispatch opens a live-session row at the start
 // (still running) and stamps it ended on exit, with the request's metadata. The
-// command handler erroring on the empty body is irrelevant — telemetry wraps it.
+// command handler erroring on the empty body is irrelevant, telemetry wraps it.
 func TestDispatchRecordsSession(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "mbox")
 	st, err := objectstore.Open(dir)

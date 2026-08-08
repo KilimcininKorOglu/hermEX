@@ -202,7 +202,7 @@ func (c *conn) writeFetch(seq uint32, idx int, items []fetchItem, modseqs map[ui
 	}
 
 	// A read-only selection (EXAMINE, or a public folder the caller cannot post to)
-	// must not implicitly set \Seen — and must never write to the public store.
+	// must not implicitly set \Seen, and must never write to the public store.
 	if setSeen && !c.readOnly && msg.Flags&objectstore.FlagSeen == 0 {
 		if c.markSeen(&c.sel.msgs[idx], c.curStore()) {
 			msg.Flags = c.sel.msgs[idx].Flags
@@ -376,7 +376,7 @@ func parseOneItem(cur *tokenCursor) ([]fetchItem, error) {
 }
 
 // parseBinarySection parses BINARY[part]/BINARY.PEEK[part]/BINARY.SIZE[part]
-// (RFC 3516). Only a numeric part path is valid — BINARY does not take the
+// (RFC 3516). Only a numeric part path is valid, BINARY does not take the
 // HEADER/TEXT/MIME specifiers that BODY does.
 func parseBinarySection(cur *tokenCursor, peek, sizeOnly bool) ([]fetchItem, error) {
 	cur.next() // consume '['

@@ -83,7 +83,7 @@ func saveState(st *objectstore.Store, s *asState) error {
 
 // nextSyncKey returns the successor of an opaque integer sync key; an empty or
 // unparseable key yields "1" (a fresh prime). v1 uses a plain monotonic counter,
-// not the {UUID}N form — the key is opaque to the client, and a stale key after
+// not the {UUID}N form, the key is opaque to the client, and a stale key after
 // a re-prime is rejected as a mismatch, forcing the client to re-prime.
 func nextSyncKey(key string) string {
 	n, err := strconv.ParseUint(key, 10, 64)

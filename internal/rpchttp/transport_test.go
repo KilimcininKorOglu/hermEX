@@ -89,7 +89,7 @@ func TestRTSRoundTrip(t *testing.T) {
 // TestRendezvous proves the dual-channel handshake: an RPC_OUT_DATA request
 // opens the OUT channel and gets CONN/A3 immediately; once an RPC_IN_DATA
 // request opens the matching IN channel (same connection cookie), the server
-// emits CONN/C2 on the OUT channel — the "virtual connection established" event
+// emits CONN/C2 on the OUT channel, the "virtual connection established" event
 // that splices the two HTTP requests into one logical RPC connection.
 func TestRendezvous(t *testing.T) {
 	srv := httptest.NewServer(NewServer(Config{Auth: okAuth}))

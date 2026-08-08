@@ -16,7 +16,7 @@ func inHandle() *ndr.Push {
 	return p
 }
 
-// tailResult reads the trailing result u32 — the last field of every NSPI OUT,
+// tailResult reads the trailing result u32, the last field of every NSPI OUT,
 // regardless of the variable-length body before it.
 func tailResult(out []byte) uint32 {
 	return binary.LittleEndian.Uint32(out[len(out)-4:])
@@ -394,7 +394,7 @@ func TestRPCGetTemplateInfoNoTemplate(t *testing.T) {
 
 // TestRPCGetTemplateInfoScriptNotSupported: a request that is not TI_TEMPLATE alone
 // (here it also carries TI_SCRIPT) is rejected with ecNotSupported, mirroring the
-// reference flags rung — the branch the no-template case does not exercise.
+// reference flags rung, the branch the no-template case does not exercise.
 func TestRPCGetTemplateInfoScriptNotSupported(t *testing.T) {
 	s := testGAL("alice@hermex.test")
 	p := inHandle()

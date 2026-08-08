@@ -14,7 +14,7 @@ import (
 // in here rather than supplied by the caller.
 const logFlushTimeout = 10 * time.Second
 
-// MultiSink fans each event out to several sinks — e.g. stderr for operator
+// MultiSink fans each event out to several sinks, e.g. stderr for operator
 // visibility plus MongoDB for the queryable store. A member's Write is best
 // effort; one slow or failing sink does not stop the others.
 type MultiSink struct{ sinks []Sink }

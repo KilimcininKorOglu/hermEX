@@ -1,5 +1,5 @@
 -- Quarantine digest: digest_settings is the single-row toggle and tunables for the
--- periodic per-user summary of quarantined (Junk) mail — whether it runs, how often,
+-- periodic per-user summary of quarantined (Junk) mail, whether it runs, how often,
 -- and the externally-reachable base URL the release links point at. digest_state is
 -- the per-mailbox watermark: the highest Junk IMAP UID already summarized, so each run
 -- includes only newer messages and skips a mailbox with nothing new (no empty or

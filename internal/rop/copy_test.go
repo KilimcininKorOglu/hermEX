@@ -319,7 +319,7 @@ func asBytes(v any) []byte {
 }
 
 // mustDispatch dispatches a single ROP with a two-slot handle array and returns the
-// response bytes — a small helper for the save steps in the copy tests.
+// response bytes, a small helper for the save steps in the copy tests.
 func mustDispatch(sess *Session, rop []byte, h0, h1 uint32) []byte {
 	resp, _ := sess.Dispatch(rop, []uint32{h0, h1})
 	return resp

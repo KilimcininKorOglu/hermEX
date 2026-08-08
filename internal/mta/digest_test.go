@@ -137,7 +137,7 @@ func TestDigestRunDeliversAndWatermarks(t *testing.T) {
 		t.Errorf("digest body missing quarantined subjects:\n%s", body)
 	}
 	// The release link actually authorizes releasing one of these messages from this
-	// mailbox — verifying the token is the load-bearing check, not just the URL text.
+	// mailbox, verifying the token is the load-bearing check, not just the URL text.
 	claims, err := quarantine.Verify(digestSecret, firstToken(t, body), r.Now())
 	if err != nil {
 		t.Fatalf("release token does not verify: %v", err)

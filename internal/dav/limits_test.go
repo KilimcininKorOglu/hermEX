@@ -3,7 +3,7 @@ package dav
 import "testing"
 
 // TestBodyLimitResolution proves the iCalendar/vCard PUT caps resolve to the
-// operator-set value when set and the built-in default otherwise — the values the DAV
+// operator-set value when set and the built-in default otherwise, the values the DAV
 // daemon's poll drives, read live by the PUT handlers, applied without a restart.
 func TestBodyLimitResolution(t *testing.T) {
 	s := NewServer(nil, nil, "mail.test")

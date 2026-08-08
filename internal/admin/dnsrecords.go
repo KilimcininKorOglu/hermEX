@@ -20,7 +20,7 @@ type prescribedRecord struct {
 
 // prescribeDomainDNS returns the full set of DNS records a domain owner must
 // publish so mail for domain routes to this server and passes SPF/DKIM/DMARC.
-// hostname is the server's public mail FQDN — the MX target and the
+// hostname is the server's public mail FQDN, the MX target and the
 // autodiscover/autoconfig host clients are pointed at. dkimName/dkimValue carry
 // the domain's generated DKIM record; both empty means no key exists yet, and the
 // DKIM row points the owner at the DKIM panel rather than dropping the
@@ -65,8 +65,8 @@ func prescribeDomainDNS(domain, hostname, dkimName, dkimValue string, sts direct
 	// CalDAV/CardDAV (RFC 6764) clients find the server by SRV lookup without manual
 	// host entry; the DAV TXT advertises the well-known path. These are optional
 	// conveniences (mail still flows without them), and the health check verifies the
-	// same records. Only the TLS variants are prescribed — clients should not connect
-	// in the clear — so the secure SRV names carry the standard implicit-TLS ports.
+	// same records. Only the TLS variants are prescribed, clients should not connect
+	// in the clear, so the secure SRV names carry the standard implicit-TLS ports.
 	recs = append(recs,
 		prescribedRecord{Label: "IMAP SRV", Name: "_imaps._tcp." + domain, Type: "SRV", Value: "0 0 993 " + hostname,
 			Note: "Lets mail clients discover the IMAP server for this domain."},

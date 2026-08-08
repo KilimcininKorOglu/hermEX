@@ -154,7 +154,7 @@ func runActiveSyncSizeMaintenance(read func() (directory.SizeLimits, bool, error
 // purgeSessionsLoop sweeps aged live-session telemetry rows once a minute until
 // the daemon shuts down, keeping the active_sessions table from growing without
 // bound. The read path already hides stale rows by age, so a missed sweep is
-// harmless — failures are logged, not fatal.
+// harmless, failures are logged, not fatal.
 func purgeSessionsLoop(ctx context.Context, dir *directory.SQLDirectory, logger *logging.Logger) {
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()

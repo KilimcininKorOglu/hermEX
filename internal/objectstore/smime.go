@@ -11,7 +11,7 @@ import (
 // PKCS#12 container and the public certificate (DER) extracted from it. The
 // container stays encrypted at rest under its own passphrase, which the webmail
 // unlocks per session and never persists. Both live as JSON on a single store
-// property, mirroring how webmail settings are stored — no bespoke table.
+// property, mirroring how webmail settings are stored, no bespoke table.
 type SmimeIdentity struct {
 	// Mode is "server" (the encrypted P12 below holds the key, the server signs
 	// and decrypts) or "browser" (only Cert is set; the private key lives in the

@@ -309,7 +309,7 @@ const (
 	RRMaxPictures       Tag = 0x0A1D // request: cap on portraits returned
 )
 
-// ValidateCert (code page 0x0B) — S/MIME certificate validation.
+// ValidateCert (code page 0x0B), S/MIME certificate validation.
 const (
 	VCValidateCert     Tag = 0x0B05
 	VCCertificates     Tag = 0x0B06
@@ -418,7 +418,7 @@ const (
 	SRLongId        Tag = 0x0F18
 )
 
-// GAL (code page 0x10) — the address-book properties a Search result carries.
+// GAL (code page 0x10), the address-book properties a Search result carries.
 // v1 populates the display name and address; the GALEntry model holds no other
 // fields (phone, office, title, …). FirstName/LastName are emitted empty because
 // some clients require the elements to be present to render an entry at all.
@@ -494,7 +494,7 @@ const (
 	CMAccountID       Tag = 0x1513
 )
 
-// Move (code page 0x05) — the MoveItems command.
+// Move (code page 0x05), the MoveItems command.
 const (
 	MOMoves    Tag = 0x0505
 	MOMove     Tag = 0x0506

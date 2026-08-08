@@ -13,7 +13,7 @@ import (
 // TestMeetingResponseAccept proves the full inbound path: a delivered meeting-request
 // email (its appointment parsed from the text/calendar part on import) is resolved by
 // its FolderId/RequestId, accepted through the shared workflow, and answered Status 1
-// with the new CalendarId — and the filed appointment carries the invitation's UID.
+// with the new CalendarId, and the filed appointment carries the invitation's UID.
 func TestMeetingResponseAccept(t *testing.T) {
 	ts, dir := seededServer(t)
 	uid := seedMeetingRequest(t, dir)
@@ -62,8 +62,8 @@ func TestMeetingResponseAccept(t *testing.T) {
 }
 
 // seedMeetingRequest delivers a meeting-request email (a text/calendar METHOD:REQUEST
-// part beside a plain body) into the Inbox through the normal append path — so its
-// appointment is parsed on import exactly as a real inbound request — and returns its
+// part beside a plain body) into the Inbox through the normal append path, so its
+// appointment is parsed on import exactly as a real inbound request, and returns its
 // IMAP UID. The organizer is a foreign address, so accepting it queues no local
 // notification error.
 func seedMeetingRequest(t *testing.T, dir string) uint32 {

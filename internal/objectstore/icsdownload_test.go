@@ -68,7 +68,7 @@ func hasPropID(items []ics.Item, propid uint16) bool {
 }
 
 // downloadState returns an empty ContentsDown state seeded against the store's
-// replica mapper — the form a client uploads before a contents sync.
+// replica mapper, the form a client uploads before a contents sync.
 func downloadState(t *testing.T, s *Store) *ics.State {
 	t.Helper()
 	m, err := s.ReplicaMapper()
@@ -80,9 +80,9 @@ func downloadState(t *testing.T, s *Store) *ics.State {
 
 // TestContentDownloadInitialSync drives an initial sync (empty client state):
 // every message is a change. It asserts the stream's structure round-trips
-// through the parser — one INCRSYNCCHG per message, each change header leading
+// through the parser, one INCRSYNCCHG per message, each change header leading
 // with PR_SOURCE_KEY, a trailing state block (with the seen change-number set)
-// and INCRSYNCEND — exercised across small chunks so the producer's tearing and
+// and INCRSYNCEND, exercised across small chunks so the producer's tearing and
 // the parser's reassembly are both on the real path.
 func TestContentDownloadInitialSync(t *testing.T) {
 	s := openSeededStore(t)

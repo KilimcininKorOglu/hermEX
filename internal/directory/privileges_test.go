@@ -4,7 +4,7 @@ import "testing"
 
 // TestPrivilegesFromBits proves the privilege_bits decoding: POP3/IMAP, SMTP and
 // CHGPASSWD are plain bits, while WEB/EAS/DAV follow the DETAIL1 opt-out
-// convention — granted by default, revoked only when DETAIL1 is set and the
+// convention, granted by default, revoked only when DETAIL1 is set and the
 // service bit is clear. This is the wire contract the reference shares, so a
 // legacy row (DETAIL1 unset) must read every detail service granted.
 func TestPrivilegesFromBits(t *testing.T) {
@@ -51,7 +51,7 @@ func TestPrivilegesFromBits(t *testing.T) {
 // TestPrivilegeBitsRoundTrip proves the admin write (privilegeBitsFor) and the
 // protocol read (privilegesFromBits) are inverse over the managed services, so a
 // service disabled in the admin form is exactly what the protocol later reads and
-// enforces — not silently re-granted by the DETAIL1 default.
+// enforces, not silently re-granted by the DETAIL1 default.
 func TestPrivilegeBitsRoundTrip(t *testing.T) {
 	cases := []UserUpdate{
 		{}, // every service off

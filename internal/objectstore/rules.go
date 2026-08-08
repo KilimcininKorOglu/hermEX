@@ -11,13 +11,13 @@ import (
 
 // ruleExtFlags freezes the encoding used for the condition (RESTRICTION) and
 // actions (RULE_ACTIONS) blobs stored in the rules table. Zero flags select the
-// internal form — UTF-8 strings and 16-bit AND/OR child counts — and the same
+// internal form, UTF-8 strings and 16-bit AND/OR child counts, and the same
 // flags must be used to read a blob back. It mirrors propExtFlags (value.go).
 const ruleExtFlags = ext.Flags(0)
 
 // ruleProviderDefault is the PR_RULE_PROVIDER value stamped on rules created
 // through this API when the caller leaves Provider empty. "RuleOrganizer" is the
-// standard provider for the user-managed rule set — the rules a desktop client's
+// standard provider for the user-managed rule set, the rules a desktop client's
 // Rules manager creates and edits.
 const ruleProviderDefault = "RuleOrganizer"
 
@@ -203,7 +203,7 @@ const (
 
 // RulePatch is a RopModifyRules row's rule columns, with a nil pointer meaning the
 // property was absent from the wire row. An Add carries the rule's required columns; a
-// Modify carries only the columns the client actually sent — the store updates those
+// Modify carries only the columns the client actually sent, the store updates those
 // and leaves the rest unchanged, mirroring the reference's present-only merge (an
 // omitted column is never wiped). hermEX models the six columns its rules table holds;
 // the reference's level/user_flags/provider_data are not stored.
@@ -230,7 +230,7 @@ type RuleChange struct {
 // under which the wire carries only adds). An Add inserts a new rule; a Modify updates
 // the present columns of the rule with the given id (only when it belongs to the
 // folder); a Remove drops it. A Modify or Remove of an absent or foreign rule is a
-// no-op, not a fault — the reference tolerates a stale id within a batch.
+// no-op, not a fault, the reference tolerates a stale id within a batch.
 func (s *Store) ModifyRules(folderID int64, replace bool, changes []RuleChange) error {
 	tx, err := s.objdb.Begin()
 	if err != nil {
@@ -309,9 +309,9 @@ func insertRulePatch(tx *sql.Tx, folderID int64, p RulePatch) error {
 }
 
 // updateRulePatch updates only the columns a Modify row carried, keyed by (folder_id,
-// rule_id) — the reference's per-column present-only merge. It first confirms the rule
+// rule_id), the reference's per-column present-only merge. It first confirms the rule
 // belongs to the folder; a missing or foreign rule is a silent no-op. (hermEX also
-// honors a present PR_RULE_NAME on modify, which the reference omits — a harmless
+// honors a present PR_RULE_NAME on modify, which the reference omits, a harmless
 // superset, since a client sending the name expects it applied.)
 func updateRulePatch(tx *sql.Tx, folderID, ruleID int64, p RulePatch) error {
 	var owner int64

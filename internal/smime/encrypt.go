@@ -10,14 +10,14 @@ import (
 	"github.com/smallstep/pkcs7"
 )
 
-// init selects AES-256-CBC as the EnvelopedData content-encryption algorithm —
+// init selects AES-256-CBC as the EnvelopedData content-encryption algorithm,
 // the S/MIME default cipher (RFC 5751). The pkcs7 setting is a package global and
 // hermex always encrypts with AES-256-CBC, so it is set once at load.
 func init() {
 	pkcs7.ContentEncryptionAlgorithm = pkcs7.EncryptionAlgorithmAES256CBC
 }
 
-// Encrypt enciphers inner — a complete MIME entity — to the recipient
+// Encrypt enciphers inner, a complete MIME entity, to the recipient
 // certificates as an RFC 5751 application/pkcs7-mime enveloped-data entity
 // (smime.p7m): AES-256-CBC content encryption under a fresh key, that key
 // RSA-wrapped to each recipient. The returned bytes start with the

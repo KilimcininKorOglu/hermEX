@@ -11,8 +11,8 @@ import (
 // SynchronizationConfigure opens it with the requested sync type, flags, and
 // property filter; the client then replays its prior checkpoint as state streams;
 // the first GetBuffer call lazily computes the delta and streams it. Unlike the
-// upload collector, the download RETAINS the client's given set — it is the basis
-// for the deletions report — so its state stream buffers every idset, including
+// upload collector, the download RETAINS the client's given set, it is the basis
+// for the deletions report, so its state stream buffers every idset, including
 // given.
 //
 // The DownloadContext is built on the first GetBuffer rather than at configure

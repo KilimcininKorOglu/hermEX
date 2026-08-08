@@ -17,7 +17,7 @@ func setupMTASTSSettings(t *testing.T) *SQLDirectory {
 }
 
 // TestMTASTSSettingsDefaultsToDisabled proves an unconfigured deployment reads as
-// disabled in testing mode rather than erroring — publishing MTA-STS (and especially
+// disabled in testing mode rather than erroring, publishing MTA-STS (and especially
 // enforcing TLS on inbound mail) must be a deliberate opt-in, so an upgrade never
 // silently starts advertising a policy.
 func TestMTASTSSettingsDefaultsToDisabled(t *testing.T) {

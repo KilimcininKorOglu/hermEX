@@ -11,8 +11,8 @@ const ModelFileName = "antispam-model.json"
 
 // seedSpam and seedHam are a small, curated bootstrap corpus of representative
 // spam and legitimate messages. They give the model a cold-start floor before any
-// self-training. The floor is deliberately small and conservative — its weight
-// alone cannot reach the spam threshold — and an operator can train a far better
+// self-training. The floor is deliberately small and conservative, its weight
+// alone cannot reach the spam threshold, and an operator can train a far better
 // model from a full corpus (cmd/antispam-bootstrap, e.g. the SpamAssassin public
 // corpus) into data_dir, which then supersedes this floor.
 var seedSpam = []string{

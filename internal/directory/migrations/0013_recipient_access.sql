@@ -5,8 +5,8 @@
 -- list: an operator block beats a user allow, while an operator allow can be narrowed
 -- by a user block. pattern is a lowercased email address or bare domain, UNIQUE per
 -- user so a pattern carries exactly one action (re-adding it with the other action
--- flips it). The row is owned by the user and cascades away when the user — or its
--- domain — is deleted, so a purged mailbox leaves no dangling rules. Applied once by
+-- flips it). The row is owned by the user and cascades away when the user, or its
+-- domain, is deleted, so a purged mailbox leaves no dangling rules. Applied once by
 -- the runner and recorded in schema_migrations.
 CREATE TABLE IF NOT EXISTS recipient_access (
 	id         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,

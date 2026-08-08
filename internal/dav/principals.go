@@ -10,7 +10,7 @@ import (
 )
 
 // Principal-search reports (RFC 3744 §9.3-§9.5) let a client discover other calendar
-// users — driving attendee and recipient lookup. They are backed by the directory's
+// users, driving attendee and recipient lookup. They are backed by the directory's
 // Global Address List; a directory that cannot enumerate users yields no matches.
 
 // principalSearchReq is a DAV:principal-property-search body: one or more

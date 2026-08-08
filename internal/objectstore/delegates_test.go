@@ -9,7 +9,7 @@ import (
 // store-root property, reads back as no delegates on a fresh mailbox, and clears
 // on an empty set. NSPI and the admin console both manage delegation through this
 // list, so a silent drop would let a removed delegate keep acting or hide a
-// granted one — order is preserved because the list is the address book's row order.
+// granted one, order is preserved because the list is the address book's row order.
 func TestDelegatesRoundTrip(t *testing.T) {
 	s := openTestStore(t)
 

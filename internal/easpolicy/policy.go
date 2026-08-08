@@ -1,6 +1,6 @@
 // Package easpolicy models an ActiveSync device security policy (the EASProvisionDoc
 // of MS-ASPROV) and the two-layer resolution the server applies: a global default
-// overridden per mailbox. A policy is a partial set of fields — an unset field is not
+// overridden per mailbox. A policy is a partial set of fields, an unset field is not
 // enforced and inherits the lower layer (the global default, then the device's own
 // default), so a mailbox override carries only what it changes.
 package easpolicy
@@ -98,7 +98,7 @@ type Policy map[string]int
 // stored and then silently ignored at provisioning) and an out-of-range value: a toggle
 // must be 0 or 1 and a numeric limit must not be negative. It does not enforce per-field
 // upper bounds (those vary by field and EAS version); the guard's purpose is to keep a
-// grossly invalid value — a negative limit, a non-boolean toggle — out of the document a
+// grossly invalid value, a negative limit, a non-boolean toggle, out of the document a
 // device might otherwise reject wholesale.
 func (p Policy) Validate() error {
 	for name, v := range p {
@@ -141,7 +141,7 @@ func (p Policy) Clone() Policy {
 	return out
 }
 
-// Key returns a stable policy-generation token for p — a value that changes whenever the
+// Key returns a stable policy-generation token for p, a value that changes whenever the
 // policy's content changes, so a device holding an old token can be detected as stale and
 // forced to re-provision. An empty policy returns "1", the baseline token an unconfigured
 // server has always issued, so existing devices are not churned until a policy is actually

@@ -70,7 +70,7 @@ func TestExtractSections(t *testing.T) {
 	}
 
 	// Each leaf part's extracted body equals its reported Size, with the
-	// boundary's CRLF excluded — distinct bytes per part catch off-by-CRLF.
+	// boundary's CRLF excluded, distinct bytes per part catch off-by-CRLF.
 	if b, ok := root.Extract(Section{Path: []int{1}}); !ok || string(b) != "Hello body" {
 		t.Errorf("BODY[1] = %q, want \"Hello body\"", b)
 	}

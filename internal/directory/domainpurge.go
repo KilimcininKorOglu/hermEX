@@ -20,7 +20,7 @@ import (
 // from both ends, since one addressed INTO this domain belongs to a user elsewhere
 // and no user-keyed delete would reach it. Role permissions
 // scoped to this domain (DomainAdmin/DomainAdminRO with the domain's id) are
-// removed too; an emptied role is left in place (harmless, admin-deletable) — a
+// removed too; an emptied role is left in place (harmless, admin-deletable), a
 // deliberate, safe deviation from deleting it.
 //
 // File deletion is best-effort and happens only after the database transaction

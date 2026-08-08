@@ -10,8 +10,8 @@ import (
 	"hermex/internal/mapi"
 )
 
-// le16/le32/le64/utf16z build the expected wire bytes by hand — independent of
-// pushNotify's own logic — so the test pins the actual byte layout, not a
+// le16/le32/le64/utf16z build the expected wire bytes by hand, independent of
+// pushNotify's own logic, so the test pins the actual byte layout, not a
 // re-derivation of the serializer (Rule 11). The expected slices below encode the
 // per-type field order and gating of the internal spec §3 field by field.
 func le16(v uint16) []byte { b := make([]byte, 2); binary.LittleEndian.PutUint16(b, v); return b }
@@ -84,7 +84,7 @@ func TestPushNotify(t *testing.T) {
 		},
 		{
 			// folder_modified with total+unread: folder_id, proptags, total, unread.
-			// No parent_id — Modified is not in the parent_id gate set.
+			// No parent_id, Modified is not in the parent_id gate set.
 			name: "folder_modified_counts",
 			n: &notification{
 				flags:    fnevObjectModified | nfHasTotal | nfHasUnread,

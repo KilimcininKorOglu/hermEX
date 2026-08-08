@@ -22,8 +22,8 @@ type mtastsDirectory interface {
 // from (RFC 8461 §3.3), under the per-domain policy host mta-sts.<domain>.
 const mtastsPolicyPath = "/.well-known/mta-sts.txt"
 
-// withMTASTS wraps next so a request to an MTA-STS policy host — Host mta-sts.<domain>
-// for the well-known policy path — is answered locally with this server's published
+// withMTASTS wraps next so a request to an MTA-STS policy host, Host mta-sts.<domain>
+// for the well-known policy path, is answered locally with this server's published
 // policy, while every other request is proxied to a backend. Publishing MTA-STS means
 // serving this file over HTTPS, and the gateway is the TLS front door, so it is where
 // the policy is served. A per-request directory failure answers 5xx rather than
@@ -45,7 +45,7 @@ func withMTASTS(cfg *config.Config, dir mtastsDirectory, next http.Handler) http
 
 // serveMTASTSPolicy writes the published MTA-STS policy for domain, or 404 when
 // publishing is disabled or domain is not an active local domain. The policy's single
-// mx is this server's hostname — the MX target every domain's mail routes to — and the
+// mx is this server's hostname, the MX target every domain's mail routes to, and the
 // mode and max_age come from the operator's settings.
 func serveMTASTSPolicy(w http.ResponseWriter, cfg *config.Config, dir mtastsDirectory, domain string) {
 	settings, _, err := dir.GetMTASTSSettings()

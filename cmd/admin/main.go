@@ -383,7 +383,7 @@ func runLogRetention(ctx context.Context, dir *directory.SQLDirectory, reader *l
 			return
 		}
 		if days <= 0 {
-			return // keep forever — never prune
+			return // keep forever, never prune
 		}
 		cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
 		pruneCtx, cancel := context.WithTimeout(ctx, 30*time.Second)

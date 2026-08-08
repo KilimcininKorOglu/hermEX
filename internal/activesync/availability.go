@@ -103,7 +103,7 @@ func mergedFreeBusy(e directory.GALEntry, win availabilityWindow, sess *session)
 
 // quantizeFreeBusy renders busy blocks as a MergedFreeBusy string: one digit per
 // 30-minute slot from start to end (the slot count rounded up), each digit the
-// highest-priority status of any event overlapping that slot — Free 0 < Tentative
+// highest-priority status of any event overlapping that slot, Free 0 < Tentative
 // 1 < Busy 2 < OOF 3. Per MS-ASCMD 2.2.3.107 the higher digit wins within a slot,
 // so an event covering only part of a slot still claims the whole slot.
 func quantizeFreeBusy(start, end time.Time, events []ews.CalendarEvent) string {

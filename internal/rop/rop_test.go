@@ -23,9 +23,9 @@ func logonRequest(hindex uint8, logonFlags uint8) []byte {
 }
 
 // TestRopLogonResponse is the byte-layout keystone: it asserts RopLogon emits
-// the exact LOGON_PMB_RESPONSE field order — header, the 13 special-folder EIDs
+// the exact LOGON_PMB_RESPONSE field order, header, the 13 special-folder EIDs
 // (replica id 1), ResponseFlags, MailboxGuid, ReplId=5, ReplGuid, an 8-byte
-// LogonTime, GwartTime, StoreState — and registers a logon object at the slot.
+// LogonTime, GwartTime, StoreState, and registers a logon object at the slot.
 func TestRopLogonResponse(t *testing.T) {
 	dir := t.TempDir()
 	sess := NewSession(dir, nil, "")
@@ -65,7 +65,7 @@ func TestRopLogonResponse(t *testing.T) {
 	if got := mustU8(t, p, "ResponseFlags"); got != ownerResponseFlags {
 		t.Errorf("ResponseFlags = %#x, want %#x (owner)", got, ownerResponseFlags)
 	}
-	// MailboxGuid is the store record key; ReplGuid is the mapping signature —
+	// MailboxGuid is the store record key; ReplGuid is the mapping signature,
 	// both sourced from the store's persisted identity, not derived ad hoc.
 	wantMbg, err := obj.store.StoreGUID()
 	if err != nil {

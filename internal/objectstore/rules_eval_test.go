@@ -21,7 +21,7 @@ func sampleBag() mapi.PropertyValues {
 
 // TestEvalRestrictionLeaves checks each curated condition matches the right
 // messages and, crucially, that an absent property fails the leaf instead of
-// matching or panicking — the difference between a rule that fires correctly and
+// matching or panicking, the difference between a rule that fires correctly and
 // one that fires on everything or nothing.
 func TestEvalRestrictionLeaves(t *testing.T) {
 	bag := sampleBag()
@@ -166,8 +166,8 @@ func ruleMsg(subject, from, extraHeader string) string {
 }
 
 // TestRuleCopyActionIsNonTerminal checks the copy action duplicates a matching
-// message to the target folder while leaving the original in place, and — being
-// non-terminal — does not stop a later rule from acting on the original.
+// message to the target folder while leaving the original in place, and, being
+// non-terminal, does not stop a later rule from acting on the original.
 func TestRuleCopyActionIsNonTerminal(t *testing.T) {
 	s := openSeededStore(t)
 	inbox := int64(mapi.PrivateFIDInbox)
@@ -261,7 +261,7 @@ func TestRuleExitLevelStopsProcessing(t *testing.T) {
 
 // TestRunRulesEndToEnd is the discriminating test: it delivers real messages
 // through the real Import path, then runs rules and asserts on the actual store
-// state — a message moved to the target folder, another marked read, an
+// state, a message moved to the target folder, another marked read, an
 // unmatched one untouched. It would fail if Import stored the subject or sender
 // under a tag the evaluator does not read, which a pure-evaluator test cannot
 // catch. It also locks the terminal-action invariant: a message a move rule
@@ -350,7 +350,7 @@ func TestRunRulesEndToEnd(t *testing.T) {
 
 // TestApplyInboxRulesMalformedBlobIsError verifies that a corrupt stored rule
 // (a condition blob that is not a valid RESTRICTION) surfaces as an error rather
-// than a panic, and that the delivered message is preserved regardless — the
+// than a panic, and that the delivered message is preserved regardless, the
 // delivery path relies on this so a corrupt rule cannot lose mail.
 func TestApplyInboxRulesMalformedBlobIsError(t *testing.T) {
 	s := openSeededStore(t)
@@ -644,7 +644,7 @@ func TestRuleOOFActiveCondition(t *testing.T) {
 		t.Fatalf("AddRule: %v", err)
 	}
 
-	// OOF off: the rule must not fire — the message stays in the inbox.
+	// OOF off: the rule must not fire, the message stays in the inbox.
 	m1 := deliverTo(t, s, inbox, ruleMsg("urgent 1", "x@y.com", ""))
 	if _, err := s.ApplyInboxRules(m1, 1000); err != nil {
 		t.Fatalf("ApplyInboxRules (off): %v", err)
@@ -653,7 +653,7 @@ func TestRuleOOFActiveCondition(t *testing.T) {
 		t.Errorf("with OOF off the OOF-conditional rule should not move the message: %v", err)
 	}
 
-	// OOF on: the rule fires — the message is moved out of the inbox.
+	// OOF on: the rule fires, the message is moved out of the inbox.
 	if err := s.SetOOFSettings(OOFSettings{Enabled: true}); err != nil {
 		t.Fatalf("SetOOFSettings: %v", err)
 	}

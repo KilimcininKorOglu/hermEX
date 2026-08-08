@@ -46,7 +46,7 @@ func (m *BayesModel) Train(text string, spam bool) {
 
 // Score returns the probability (0..1) that text is spam, by multinomial naive
 // Bayes with Laplace smoothing computed in log space. A model not trained on both
-// classes has no baseline and returns 0.5 — no signal.
+// classes has no baseline and returns 0.5, no signal.
 func (m *BayesModel) Score(text string) float64 {
 	if m.SpamMsgs == 0 || m.HamMsgs == 0 {
 		return 0.5

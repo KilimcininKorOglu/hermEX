@@ -31,7 +31,7 @@ func TestCryptInterop(t *testing.T) {
 		}
 	}
 
-	// Poul-Henning Kamp's canonical md5-crypt vector for "Hello world!" — a hash
+	// Poul-Henning Kamp's canonical md5-crypt vector for "Hello world!", a hash
 	// this code did not generate, so verifying it proves real external interop.
 	if !sqlCryptVerify(pw, "$1$saltstri$YMyguxXMBpd2TEZ.vS/3q1") {
 		t.Error("the canonical external md5-crypt vector failed to verify")

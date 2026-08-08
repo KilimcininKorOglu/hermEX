@@ -74,7 +74,7 @@ func cleanTables(t *testing.T, db *sql.DB) {
 }
 
 // TestForwardDirective covers the forwards model: a directive set on a user is read
-// back, an alias to that user resolves to the same directive (canonical keying — mail
+// back, an alias to that user resolves to the same directive (canonical keying, mail
 // to an alias must not bypass the forward), clearing removes it, an unknown user is
 // reported absent, and DeleteUser leaves no orphan forward row.
 func TestForwardDirective(t *testing.T) {
@@ -103,7 +103,7 @@ func TestForwardDirective(t *testing.T) {
 	if fi, ok, err := d.GetForward("alice@hermex.test"); err != nil || !ok || fi.Type != ForwardRedirect || fi.Destination != "boss@external.test" {
 		t.Errorf("GetForward(user) = %+v, %v, %v; want {Redirect boss@external.test}, true", fi, ok, err)
 	}
-	// An alias to the user must resolve to the same directive — keying on the raw
+	// An alias to the user must resolve to the same directive, keying on the raw
 	// alias would let mail to sales@ bypass alice's forward.
 	if fi, ok, err := d.GetForward("sales@hermex.test"); err != nil || !ok || fi.Destination != "boss@external.test" {
 		t.Errorf("GetForward(alias) = %+v, %v, %v; want the user's directive", fi, ok, err)
@@ -230,7 +230,7 @@ func TestSQLDirectoryIsLocalDomain(t *testing.T) {
 
 // TestResolveOpensStoreAcrossPartitions proves mailbox reading is
 // partition-agnostic: two users provisioned under two distinct storage roots
-// each resolve to their own root — never the other's — and the resolved path
+// each resolve to their own root, never the other's, and the resolved path
 // opens as a real, seeded object store. The directory carries the full maildir
 // verbatim, so a mailbox may live on any partition without the read path knowing
 // where; an alias chains to the user's one stored path rather than re-deriving a
@@ -286,7 +286,7 @@ func TestResolveOpensStoreAcrossPartitions(t *testing.T) {
 }
 
 // TestSQLDirectoryMaildirs checks that MailboxLister enumerates the store paths
-// of active user mailboxes — the set the send-later spooler scans — and skips a
+// of active user mailboxes, the set the send-later spooler scans, and skips a
 // suspended account, so the worker never releases mail on a disabled user's
 // behalf.
 func TestSQLDirectoryMaildirs(t *testing.T) {

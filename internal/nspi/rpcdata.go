@@ -330,7 +330,7 @@ func (s *Server) rpcGetPropList(stub []byte, caller string) ([]byte, uint32) {
 }
 
 // rpcQueryColumns handles NspiQueryColumns (opnum 16): handle, reserved, flags.
-// OUT: a unique-pointer proptag array (always present — the result is always
+// OUT: a unique-pointer proptag array (always present, the result is always
 // ecSuccess) then the result.
 func (s *Server) rpcQueryColumns(stub []byte) ([]byte, uint32) {
 	p := ndr.NewPull(stub)
@@ -388,7 +388,7 @@ func (s *Server) rpcGetSpecialTable(stub []byte) ([]byte, uint32) {
 // there is no successor op to misalign. ---
 
 // rpcModProps handles NspiModProps (opnum 11): nothing in the GAL is writable, so it
-// returns ecNotSupported unconditionally — the exact reference behavior. The body past
+// returns ecNotSupported unconditionally, the exact reference behavior. The body past
 // the handle (STAT, the delete-proptag array, the value row) is not decoded. OUT: the
 // bare result.
 func (s *Server) rpcModProps(stub []byte) ([]byte, uint32) {
@@ -405,7 +405,7 @@ func (s *Server) rpcModProps(stub []byte) ([]byte, uint32) {
 // display-table (.abkt) archive, so a well-formed template request is permanently "no
 // template for this locale" → ecUnknownLcid; a request that is not TI_TEMPLATE alone
 // (e.g. one carrying TI_SCRIPT) is ecNotSupported, mirroring the reference's flags
-// rung. The handle and Flags are read; Type/DN/CodePage/LocaleID are not — the answer
+// rung. The handle and Flags are read; Type/DN/CodePage/LocaleID are not, the answer
 // never depends on them. OUT: a null pData unique-ptr then the result.
 func (s *Server) rpcGetTemplateInfo(stub []byte) ([]byte, uint32) {
 	p := ndr.NewPull(stub)
@@ -444,7 +444,7 @@ func (s *Server) rpcModLinkAtt(stub []byte) ([]byte, uint32) {
 
 // rpcDNToMid handles NspiDNToMId (opnum 7): handle, reserved, and an 8-bit
 // strings array of distinguished names. OUT: a unique-pointer MID array (always
-// present — the result is always ecSuccess) then the result.
+// present, the result is always ecSuccess) then the result.
 func (s *Server) rpcDNToMid(stub []byte, caller string) ([]byte, uint32) {
 	p := ndr.NewPull(stub)
 	if err := pullHandle(p); err != nil {
@@ -467,7 +467,7 @@ func (s *Server) rpcDNToMid(stub []byte, caller string) ([]byte, uint32) {
 // reserved unique-pointer MID array (discarded), a reserved word, the
 // unique-pointer restriction, a unique-pointer property name, the requested row
 // count, and a unique-pointer column set. A present property name is unsupported,
-// so — like the MAPI/HTTP handler — the core rejects on it without parsing the
+// so, like the MAPI/HTTP handler, the core rejects on it without parsing the
 // remaining fields. OUT: STAT + a unique-pointer MID array + a unique-pointer
 // PROPROW_SET + result (two NULL referents on a non-success result).
 func (s *Server) rpcGetMatches(stub []byte, caller string) ([]byte, uint32) {
@@ -545,7 +545,7 @@ func (s *Server) encodeGetMatchesNDR(r getMatchesResult) ([]byte, uint32) {
 
 // rpcResolveNames handles NspiResolveNames (opnum 19) and NspiResolveNamesW
 // (opnum 20): handle, reserved, STAT, a unique-pointer column set, and the names
-// array (8-bit for 19, UTF-16 for 20 — wide selects which). OUT: a unique-pointer
+// array (8-bit for 19, UTF-16 for 20, wide selects which). OUT: a unique-pointer
 // per-name MID array + a unique-pointer PROPROW_SET + result (two NULL referents
 // on a non-success result). The raw NSPI OUT carries no echoed code page (that is
 // a MAPI/HTTP-only field), so the core's code page is dropped here.

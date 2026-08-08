@@ -273,7 +273,7 @@ func TestPublicFolders(t *testing.T) {
 }
 
 // TestPublicFoldersAccessGate proves a same-domain caller WITHOUT a grant, and a
-// foreign-domain caller, both see nothing and cannot read a forged fid — the ACL
+// foreign-domain caller, both see nothing and cannot read a forged fid, the ACL
 // gate plus tenant isolation (the domain is derived from the caller).
 func TestPublicFoldersAccessGate(t *testing.T) {
 	svc := publicfolder.New(fakePaths{t.TempDir()})

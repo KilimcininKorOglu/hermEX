@@ -79,7 +79,7 @@ func TestProcessDueOutboxReleasesDueMessage(t *testing.T) {
 		t.Fatalf("released %d, want 1", released)
 	}
 
-	// Every recipient — including the blind Bcc — must be delivered to.
+	// Every recipient, including the blind Bcc, must be delivered to.
 	for _, want := range []string{"to@example.com", "cc@example.com", "bcc@example.com"} {
 		if !slices.Contains(gotRcpts, want) {
 			t.Errorf("delivery recipients %v missing %q", gotRcpts, want)

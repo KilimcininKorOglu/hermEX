@@ -62,7 +62,7 @@ func TestResolveSenderAuthorizes(t *testing.T) {
 
 // TestBuildOutgoingOnBehalfHeaders proves the wire result: a plain send names
 // only From, while a send-on-behalf (representing differs from sender) also emits
-// a Sender header naming the real caller — the RFC 5322 "on behalf of" form.
+// a Sender header naming the real caller, the RFC 5322 "on behalf of" form.
 func TestBuildOutgoingOnBehalfHeaders(t *testing.T) {
 	accounts := directory.StaticAccounts{"alice@hermex.test": {MailboxPath: t.TempDir()}}
 	srv := NewServer(accounts, accounts, nil, "mail.hermex.test", []byte("s"), "", false)

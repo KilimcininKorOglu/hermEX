@@ -70,7 +70,7 @@ func TestParseSARulesDropCounts(t *testing.T) {
 }
 
 // TestEvaluateSumsHitScores proves the score is the sum of the fired rules and
-// metas — here viagra subject + free money body + a bit.ly link + a List-Id all
+// metas, here viagra subject + free money body + a bit.ly link + a List-Id all
 // fire, and because the two component rules fire COMBO_SPAM fires too.
 func TestEvaluateSumsHitScores(t *testing.T) {
 	rs := ParseSARules(sampleRules)

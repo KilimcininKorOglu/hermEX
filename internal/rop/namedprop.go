@@ -48,7 +48,7 @@ func (s *Session) ropGetPropertyIdsFromNames(p *ext.Pull, out *ext.Push, handles
 // ropGetNamesFromPropertyIds handles RopGetNamesFromPropertyIds ([MS-OXCPRPT]
 // 2.2.2.12): it resolves store property ids back to their named properties. An id
 // with no mapping (a static id below the named range, or an unknown one) yields a
-// PropertyName with the "none" kind — the wire's slot for an unresolved id.
+// PropertyName with the "none" kind, the wire's slot for an unresolved id.
 func (s *Session) ropGetNamesFromPropertyIds(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ids, e1 := p.PropIDs()
 	if e1 != nil {

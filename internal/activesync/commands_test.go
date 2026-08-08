@@ -31,7 +31,7 @@ func seededServer(t *testing.T) (*httptest.Server, string) {
 
 // galServer starts an ActiveSync server whose directory holds two GAL users that
 // share a common prefix ("al"), so a single query resolves to more than one
-// match — exercising the multi-recipient paths (RecipientCount, result Range and
+// match, exercising the multi-recipient paths (RecipientCount, result Range and
 // Total) that a single match would not.
 func galServer(t *testing.T) *httptest.Server {
 	t.Helper()

@@ -8,7 +8,7 @@ import (
 )
 
 // prDisplayName is PR_DISPLAY_NAME (PtUnicode): the user_properties row (order_id
-// 1) a contact's friendly name lives in — the same row SearchGAL reads the
+// 1) a contact's friendly name lives in, the same row SearchGAL reads the
 // display name from, falling back to the address when it is absent.
 const prDisplayName = 0x3001001F
 
@@ -24,7 +24,7 @@ type ContactInfo struct {
 // (display_type = DT_REMOTE_MAILUSER, no password or maildir, so it cannot log in
 // and owns no mailbox) filed under an existing local domain, plus its
 // PR_DISPLAY_NAME property when a name is given, in one transaction. The address
-// is the GAL address users see and send to — typically external; it must be an
+// is the GAL address users see and send to, typically external; it must be an
 // email and unused. The filing domain must already exist; because the GAL is
 // org-wide, it only scopes which active domain the contact rides on, not who can
 // see it.

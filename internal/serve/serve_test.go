@@ -103,7 +103,7 @@ func TestServeTLS(t *testing.T) {
 
 // TestServerGracefulDrain proves Shutdown drains an in-flight request instead of
 // cutting it off: a request enters a blocked handler, Shutdown is started while
-// it is still running, and only then is the handler released — the response must
+// it is still running, and only then is the handler released, the response must
 // still complete with its body, and Shutdown must report success. A hard close
 // would fail the in-flight request instead.
 func TestServerGracefulDrain(t *testing.T) {
@@ -282,9 +282,9 @@ func TestTLSHandshakeLogged(t *testing.T) {
 }
 
 // TestRequestLoggingEmitsEvent proves the serve middleware records one structured
-// event per request — method, path, status (and a 4xx level), the presented
+// event per request, method, path, status (and a 4xx level), the presented
 // Basic-auth user, the real client from X-Forwarded-For, and the inbound request
-// id — and that the password never reaches the event. This is the seam the central
+// id, and that the password never reaches the event. This is the seam the central
 // log uses to reconstruct who did what over HTTP.
 func TestRequestLoggingEmitsEvent(t *testing.T) {
 	sink := &captureSink{}

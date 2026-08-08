@@ -24,7 +24,7 @@ func (s *Server) handleDirectory(w http.ResponseWriter, r *http.Request) {
 	}
 	entries := []map[string]any{}
 	// An empty query lists the whole directory (SearchGAL("") matches every
-	// address), so the contacts page can show the GAL — not only a live search.
+	// address), so the contacts page can show the GAL, not only a live search.
 	if gal, ok := s.auth.(directory.GAL); ok {
 		// Withhold the addresses the operator hid from the address book.
 		if res, err := gal.SearchGAL(c.Email, q, limit); err == nil {

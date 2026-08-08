@@ -35,7 +35,7 @@ func fillAndSaveAttachment(t *testing.T, sess *Session, msgH, attH uint32, name 
 // message is saved, and SaveChangesMessage writes the message with its surviving
 // attachment in a single CreateMessage. It proves the staged attachment persists
 // with its filename and data, that the pre-save delete is honoured, and that the
-// surviving attachment keeps its original (non-renumbered) attach number — the
+// surviving attachment keeps its original (non-renumbered) attach number, the
 // guarantee that makes a client's AttachmentId stable across a sibling delete.
 func TestComposeMessageWithAttachment(t *testing.T) {
 	dir := t.TempDir()

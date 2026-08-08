@@ -48,7 +48,7 @@ func TestHandlerHealthy(t *testing.T) {
 
 // TestHandlerDegraded proves a failing readiness check flips the daemon to 503
 // with ok=false and the failing dependency named, while a passing check reads
-// "ok" — so the monitor can tell a degraded daemon from a healthy one.
+// "ok", so the monitor can tell a degraded daemon from a healthy one.
 func TestHandlerDegraded(t *testing.T) {
 	h := Handler("mta", "test", time.Now(),
 		Check{Name: "directory", Probe: func(context.Context) error { return errors.New("dial tcp: refused") }},

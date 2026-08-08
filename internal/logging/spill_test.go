@@ -70,7 +70,7 @@ func TestConnectFailureSpillsThenRecovers(t *testing.T) {
 	}
 
 	// Run 2: the store is back. With nothing new buffered, the sink must still
-	// reconnect and drain the spill — the self-heal the user chose.
+	// reconnect and drain the spill, the self-heal the user chose.
 	var got fakeInserter
 	s2 := newAsyncSink(readyConn(&got), spillPath)
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)

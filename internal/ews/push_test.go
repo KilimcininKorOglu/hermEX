@@ -32,7 +32,7 @@ func pushSubscribeInner(callbackURL string) string {
 // TestPushSubscribeDelivers proves the push path end-to-end: a Subscribe with a
 // PushSubscriptionRequest registers a worker; a delivery plus a relay wake makes the
 // worker POST a SendNotification carrying the CreatedEvent to the client's callback
-// — without waiting out the StatusFrequency. The callback runs on loopback, so the
+// , without waiting out the StatusFrequency. The callback runs on loopback, so the
 // test allows internal callbacks (the SSRF IP block is exercised separately).
 func TestPushSubscribeDelivers(t *testing.T) {
 	srv, sess, path := subServer(t)

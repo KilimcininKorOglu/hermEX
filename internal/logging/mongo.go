@@ -35,7 +35,7 @@ func (c collInserter) InsertMany(ctx context.Context, docs []any) error {
 // connector establishes (and validates) the connection to the log store and
 // returns the inserter to write through. The writer goroutine calls it lazily and
 // retries it on every flush until it first succeeds, so a sink whose store is down
-// at startup keeps buffering to disk and self-heals when the store comes up —
+// at startup keeps buffering to disk and self-heals when the store comes up,
 // logging never blocks a daemon, and no events are lost to a store that is merely
 // late to start.
 type connector func(ctx context.Context) (inserter, error)
@@ -61,11 +61,11 @@ type MongoSink struct {
 
 // NewMongoSink prepares a sink for the log collection "logs" in database at uri and
 // starts the background writer. It returns an error only for a permanently broken
-// (malformed) URI — a store that is merely unreachable is NOT an error: mongo.Connect
+// (malformed) URI, a store that is merely unreachable is NOT an error: mongo.Connect
 // is lazy, so the sink starts, spills to disk, and connects (Ping + index creation)
 // on the first flush that finds the store up. This keeps a daemon serving even when
 // the log store is down at boot. spillPath is the local file batches are appended to
-// while the store is unreachable (empty disables the spill — events drop on failure).
+// while the store is unreachable (empty disables the spill, events drop on failure).
 func NewMongoSink(uri, database, spillPath string) (*MongoSink, error) {
 	client, err := mongo.Connect(options.Client().ApplyURI(uri))
 	if err != nil {
@@ -128,7 +128,7 @@ func (s *MongoSink) run() {
 	batch := make([]Event, 0, mongoBatchSize)
 
 	flush := func() {
-		// Nothing buffered and nothing spilled — no reason to touch the store.
+		// Nothing buffered and nothing spilled, no reason to touch the store.
 		if len(batch) == 0 && !s.hasSpill {
 			return
 		}
@@ -153,13 +153,13 @@ func (s *MongoSink) run() {
 				docs[i] = toDoc(e)
 			}
 			if err := s.ins.InsertMany(ctx, docs); err != nil {
-				s.spill(batch) // transient write failure — preserve and replay later
+				s.spill(batch) // transient write failure, preserve and replay later
 				batch = batch[:0]
 				return
 			}
 			batch = batch[:0]
 		}
-		s.replaySpill() // connected and caught up — drain anything spilled earlier
+		s.replaySpill() // connected and caught up, drain anything spilled earlier
 	}
 
 	for {
@@ -234,11 +234,11 @@ func toDoc(e Event) mongoDoc {
 }
 
 // ensureIndexes creates the compound indexes the admin panel filters on
-// (subsystem, user, level — each paired with a descending time for recent-first
+// (subsystem, user, level, each paired with a descending time for recent-first
 // scans). It deliberately creates NO TTL index: retention is enforced dynamically by
 // the admin daemon, which prunes the collection to the operator-set window so the
 // window can change at runtime. A TTL index here would override that with its stale
-// startup value, so it is gone — see Reader.PruneOlderThan and DropLegacyTTLIndex.
+// startup value, so it is gone, see Reader.PruneOlderThan and DropLegacyTTLIndex.
 func ensureIndexes(ctx context.Context, coll *mongo.Collection) error {
 	models := []mongo.IndexModel{
 		{Keys: bson.D{{Key: "subsystem", Value: 1}, {Key: "ts", Value: -1}}},

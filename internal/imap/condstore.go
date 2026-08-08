@@ -61,7 +61,7 @@ func selectEnablesCondstore(args []token) bool {
 
 // parseQResync extracts a SELECT (QRESYNC (uidvalidity modseq ...)) parameter
 // (RFC 7162), returning the client's last-known UIDVALIDITY and modseq. Any
-// known-uid / seq-match data that follows is accepted and ignored — the server
+// known-uid / seq-match data that follows is accepted and ignored, the server
 // resolves VANISHED and changes from the modseq alone.
 func parseQResync(args []token) (uidvalidity uint32, modseq uint64, present bool) {
 	for i, t := range args {

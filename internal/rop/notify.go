@@ -8,7 +8,7 @@ import (
 // MS-OXCNOTIF NotificationType flags ([MS-OXCNOTIF] 2.2.1.1, NotificationFlags).
 // The low 12 bits select the notification type (exactly one set per event); the
 // high bits are modifiers that ride in the same 16-bit word and gate which
-// optional fields the RopNotify body carries. The values are the wire contract —
+// optional fields the RopNotify body carries. The values are the wire contract,
 // see the internal spec §1/§3.
 const (
 	fnevNewMail        uint16 = 0x0002
@@ -74,7 +74,7 @@ type notification struct {
 // subscription identified by handle. The field order and the bit-gated presence
 // of every optional field are the wire contract (the internal spec §3) and
 // must reproduce the reference byte-for-byte. The push buffer must carry FlagUTF16
-// — the ROP dispatch buffer does — so the new-mail MessageClass serializes as
+// , the ROP dispatch buffer does, so the new-mail MessageClass serializes as
 // UTF-16LE. It returns an error only when a variable-length field overflows its
 // 16-bit length prefix.
 func pushNotify(out *ext.Push, handle uint32, logonID uint8, n *notification) error {

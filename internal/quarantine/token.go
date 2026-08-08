@@ -1,8 +1,8 @@
 // Package quarantine carries the signed, expiring credential that a quarantine-digest
 // release link puts in the user's hands. The MTA's digest worker mints a token per
 // quarantined message; the webmail release endpoint verifies it. Because the token is
-// the SOLE credential that endpoint trusts — there is no session behind a link clicked
-// from an email — it is HMAC-SHA256 signed, scoped to releasing exactly one message
+// the SOLE credential that endpoint trusts, there is no session behind a link clicked
+// from an email, it is HMAC-SHA256 signed, scoped to releasing exactly one message
 // from one mailbox's Junk folder, and short-lived. The package is deliberately
 // daemon-neutral (no mail-store or directory imports) so both daemons can share it.
 package quarantine
@@ -28,7 +28,7 @@ type Claims struct {
 
 var (
 	// ErrNoSecret reports that no signing secret is configured, so tokens can be
-	// neither minted nor verified — the digest feature is effectively off.
+	// neither minted nor verified, the digest feature is effectively off.
 	ErrNoSecret = errors.New("quarantine: no signing secret configured")
 	// ErrBadToken reports a malformed token or a signature that does not match.
 	ErrBadToken = errors.New("quarantine: invalid release token")

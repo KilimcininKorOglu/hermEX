@@ -8,7 +8,7 @@ import (
 )
 
 // folderSnapshot maps a content folder's live objectstore message ids to their
-// latest modification counter (MAX(change_number, read_cn)) — the baseline a
+// latest modification counter (MAX(change_number, read_cn)), the baseline a
 // notification poll diffs against.
 type folderSnapshot map[int64]uint64
 
@@ -50,16 +50,16 @@ func folderMetaSnapshot(st *objectstore.Store, folders []objectstore.FolderInfo)
 // folder created, deleted, or modified. A folder absent from prev is a create
 // (folder_id + parent_id); a folder absent from cur is a delete (folder_id + its old
 // parent_id); a folder whose (total, unread) moved is a modify carrying both counts
-// (NF_HAS_TOTAL|NF_HAS_UNREAD, and — per the wire gate — no parent_id). All events
+// (NF_HAS_TOTAL|NF_HAS_UNREAD, and, per the wire gate, no parent_id). All events
 // clear nfByMessage (they are folder-level), so no message id rides. Creates and
 // modifies come first in folder-id order, then deletes in id order, for a
 // deterministic batch. Folder counts are message-derived, so a new subfolder does not
-// itself modify its parent here — its own create event signals it to the client.
+// itself modify its parent here, its own create event signals it to the client.
 //
 // The modify trigger is count-only: a rename or other property change that leaves
 // (total, unread) unchanged produces no event (folderMeta tracks no display name), and
 // a folder move is the separate fnevObjectMoved increment. Both are deliberate
-// deferrals — the events this emits are the ones a client needs to keep the tree's
+// deferrals, the events this emits are the ones a client needs to keep the tree's
 // unread badges live.
 func detectFolderChanges(prev, cur map[int64]folderMeta) []notification {
 	var out []notification
@@ -108,7 +108,7 @@ func detectFolderChanges(prev, cur map[int64]folderMeta) []notification {
 // current state and returns one message notification per change, plus the refreshed
 // snapshot to carry into the next poll. A new id is a create, a changed counter a
 // modify, and a vanished id a delete (the counter does not advance on a hard delete,
-// so a delete is seen as the id's absence — see the internal spec §9).
+// so a delete is seen as the id's absence, see the internal spec §9).
 // Changes are ordered by id (creates and modifies, then deletes) for a deterministic
 // batch. folderID is the objectstore id; the notifications carry wire EIDs. Reading
 // only the shared store makes this multi-process safe: it sees a change any daemon

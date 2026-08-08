@@ -23,8 +23,8 @@ func (s *stubVerifier) Verify(cfg LDAPConfig, login, password string) (bool, err
 
 // TestAuthenticateLDAPBranch proves the auth chain queries MySQL first, then
 // routes by externid: a local account verifies against its crypt hash, an
-// LDAP-mastered account against the verifier (and is denied — never falling back
-// to the local hash — when no verifier is installed).
+// LDAP-mastered account against the verifier (and is denied, never falling back
+// to the local hash, when no verifier is installed).
 func TestAuthenticateLDAPBranch(t *testing.T) {
 	db := openTestDB(t)
 	d := NewSQL(db)
@@ -56,7 +56,7 @@ func TestAuthenticateLDAPBranch(t *testing.T) {
 		t.Error("local crypt authentication failed")
 	}
 
-	// 2. An LDAP-mastered account is denied with no verifier — and must NOT be
+	// 2. An LDAP-mastered account is denied with no verifier, and must NOT be
 	// admitted by its (irrelevant) local hash.
 	if _, ok := d.Authenticate("ext@hermex.test", "anything"); ok {
 		t.Error("LDAP-mastered login succeeded with no verifier installed")

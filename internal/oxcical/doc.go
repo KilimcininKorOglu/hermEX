@@ -9,7 +9,7 @@
 //
 //   - A non-recurring timed or all-day event is synthesized into MAPI properties
 //     (start/end whole, location, busy status, subtype, etc.); Export rebuilds the
-//     .ics from those properties — the same round-trip path mail takes.
+//     .ics from those properties, the same round-trip path mail takes.
 //   - A recurring event (one carrying RRULE or RECURRENCE-ID) is preserved
 //     VERBATIM in PrIcalOriginal and served back unchanged, because v1 does not
 //     synthesize the binary recurrence pattern. This mirrors the S/MIME verbatim

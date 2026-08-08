@@ -47,7 +47,7 @@ func messageAttachmentBags(o *object) ([]mapi.PropertyValues, error) {
 // AttachmentId is the stored PidTagAttachNumber, which is stable across sibling
 // deletes; the match is therefore by that property, not by row position. When no
 // bag carries a stored number (legacy data predating stored attach numbers),
-// AttachmentId is treated as the row ordinal — the same fallback the attachment
+// AttachmentId is treated as the row ordinal, the same fallback the attachment
 // table's column synthesis uses, so the two read paths agree.
 func resolveAttachment(bags []mapi.PropertyValues, attachID uint32) (mapi.PropertyValues, bool) {
 	anyNumbered := false
@@ -67,7 +67,7 @@ func resolveAttachment(bags []mapi.PropertyValues, attachID uint32) (mapi.Proper
 
 // ropGetAttachmentTable handles RopGetAttachmentTable ([MS-OXCMSG] 2.2.3.18): it
 // snapshots the message's attachments into a new attachment table. The response
-// is the bare header — the client reads the rows with QueryRows (the row count
+// is the bare header, the client reads the rows with QueryRows (the row count
 // is not in the open response, unlike the contents/hierarchy tables).
 func (s *Session) ropGetAttachmentTable(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8() // OutputHandleIndex
@@ -157,7 +157,7 @@ func (s *Session) ropCreateAttachment(p *ext.Pull, out *ext.Push, handles []uint
 	now := mapi.UnixToNTTime(time.Now())
 
 	// Compose message not yet persisted: stage the attachment in memory. The whole
-	// message — including its attachments — is written when SaveChangesMessage calls
+	// message, including its attachments, is written when SaveChangesMessage calls
 	// CreateMessage, so the attach number is assigned here (MAX+1, like the store)
 	// and the opening properties carried on the in-memory attachment.
 	if msg.kind == kindNewMessage && !msg.newMsg.saved {
@@ -186,7 +186,7 @@ func (s *Session) ropCreateAttachment(p *ext.Pull, out *ext.Push, handles []uint
 
 	// Attaching to an existing message modifies it: a delegate needs EditAny on its
 	// folder (a compose message trusts the Create gate it was opened with). This is
-	// the attachment write's open chokepoint — the attachment handle it returns is
+	// the attachment write's open chokepoint, the attachment handle it returns is
 	// then trusted by SaveChangesAttachment.
 	if msg.kind == kindMessage && s.denyWrite(out, ropCreateAttachment, ohindex, msg.store, msg.folderID, mapi.FrightsEditAny) {
 		return true
@@ -239,7 +239,7 @@ func nextNewAttachNum(atts []*newAttachment) uint32 {
 // wiring is asymmetric with CreateAttachment and load-bearing: the common-header
 // handle resolves the parent MESSAGE, while the body's InputHandleIndex (ihindex2)
 // resolves the ATTACHMENT being saved. The save marks the parent message dirty so
-// its own SaveChangesMessage advances the change number — an attachment change is
+// its own SaveChangesMessage advances the change number, an attachment change is
 // observed by ICS only through the message's change number, which this ROP does
 // not itself bump.
 func (s *Session) ropSaveChangesAttachment(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {

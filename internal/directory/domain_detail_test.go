@@ -62,7 +62,7 @@ func TestDomainDetailAndCounts(t *testing.T) {
 // TestDomainStatusEnforcement proves suspending a domain via UpdateDomain blocks
 // authentication and local delivery through the real authority path (which reads
 // domain_status directly), and that reactivating restores both. It tests the
-// genuine enforcement points — not a per-user status cascade, which the codebase
+// genuine enforcement points, not a per-user status cascade, which the codebase
 // does not use.
 func TestDomainStatusEnforcement(t *testing.T) {
 	db := openTestDB(t)
@@ -130,7 +130,7 @@ func TestCreateUserMaxUser(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Default max_user 0 means unlimited — creation is not blocked.
+	// Default max_user 0 means unlimited, creation is not blocked.
 	if _, err := d.CreateUser("u1@acme.test", "pw", filepath.Join(root, "u1")); err != nil {
 		t.Fatalf("max_user 0 (unlimited) blocked a create: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestCreateUserMaxUser(t *testing.T) {
 }
 
 // TestSchemaUpgradeAddsDomainColumns proves the idempotent ALTERs actually upgrade
-// a pre-existing domains table that lacks the new columns — the path no fresh-DB
+// a pre-existing domains table that lacks the new columns, the path no fresh-DB
 // test exercises (CREATE TABLE already carries them there). It drops the added
 // columns to simulate an old database, re-runs EnsureSchema, then confirms the
 // columns are back by driving the operations that read them: CreateUser selects
@@ -184,7 +184,7 @@ func TestSchemaUpgradeAddsDomainColumns(t *testing.T) {
 		}
 	}
 	// Also clear the migration bookkeeping so the runner re-applies v1 (the
-	// idempotent baseline) instead of seeing the database as already current —
+	// idempotent baseline) instead of seeing the database as already current,
 	// the realistic adoption path for a database that predates migrations.
 	if _, err := db.Exec("DELETE FROM schema_migrations"); err != nil {
 		t.Fatalf("reset migration bookkeeping: %v", err)
@@ -200,7 +200,7 @@ func TestSchemaUpgradeAddsDomainColumns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// CreateUser reads max_user — this fails outright if the column was not re-added.
+	// CreateUser reads max_user, this fails outright if the column was not re-added.
 	if _, err := d.CreateUser("u@acme.test", "pw", filepath.Join(root, "u")); err != nil {
 		t.Fatalf("CreateUser after upgrade: %v", err)
 	}
@@ -215,8 +215,8 @@ func TestSchemaUpgradeAddsDomainColumns(t *testing.T) {
 	}
 }
 
-// TestSchemaBaselineAdoption proves adopting a pre-migration database — every
-// table already present with data, but no schema_migrations bookkeeping — is a
+// TestSchemaBaselineAdoption proves adopting a pre-migration database, every
+// table already present with data, but no schema_migrations bookkeeping, is a
 // clean no-op: the baseline is recorded as v1 and existing data is untouched. It
 // is the safety proof that turning on the migration runner cannot disturb a
 // deployed directory.
@@ -248,7 +248,7 @@ func TestSchemaBaselineAdoption(t *testing.T) {
 	if err := db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&ver); err != nil || ver != want {
 		t.Fatalf("recorded version = %d (err %v), want %d (the latest migration)", ver, err, want)
 	}
-	// The existing domain — and so all data — survived the adoption.
+	// The existing domain, and so all data, survived the adoption.
 	if dd, ok, err := d.GetDomain(id); err != nil || !ok || dd.Name != "base.test" {
 		t.Fatalf("domain lost across adoption: %+v, ok %v, err %v", dd, ok, err)
 	}

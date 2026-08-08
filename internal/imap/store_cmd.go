@@ -500,7 +500,7 @@ func (c *conn) cmdAppend(tag string, args []token) {
 
 	// Surface the new count only when the destination IS the selected folder. Folder
 	// ids are not unique across the own and public stores, so the selection's store
-	// and id must both match — comparing ids alone would falsely fire across stores.
+	// and id must both match, comparing ids alone would falsely fire across stores.
 	if c.state == stateSelected && c.curStore() == destStore && c.sel.id == destFID {
 		c.poll()
 	}

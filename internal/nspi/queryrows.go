@@ -6,7 +6,7 @@ import (
 )
 
 // defaultColumns is the column set QueryRows/QueryColumns use when the client
-// requests none — the core address-book fields a GAL row supplies.
+// requests none, the core address-book fields a GAL row supplies.
 var defaultColumns = []mapi.PropTag{
 	mapi.PrEntryID, mapi.PrDisplayName, mapi.PrAddrType,
 	mapi.PrEmailAddress, mapi.PrSmtpAddress, mapi.PrObjectType, mapi.PrDisplayType,

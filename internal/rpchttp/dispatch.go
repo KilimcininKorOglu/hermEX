@@ -163,7 +163,7 @@ func (d *Dispatcher) handleRequest(sess *Session, h ndr.Header, req *ndr.Request
 // faultParked is the sentinel an interface handler returns to signal that it has
 // parked the call (e.g. EcDoAsyncWaitEx's long-poll): no reply is framed now; the
 // handler delivers its response on the OUT channel when it completes. It is not a
-// DCE/RPC NCA fault code — handleRequest intercepts it before any fault framing.
+// DCE/RPC NCA fault code, handleRequest intercepts it before any fault framing.
 const faultParked uint32 = 0xFFFFFFFF
 
 // offersNDR reports whether the client offered the NDR (v2) transfer syntax.

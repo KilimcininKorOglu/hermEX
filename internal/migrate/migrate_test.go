@@ -39,7 +39,7 @@ func userVersion(t *testing.T, db *sql.DB) int {
 
 // TestSQLiteRunApplyAndReRun proves a forward run applies every pending step once
 // and a second run is a no-op. The first migration's step has no IF NOT EXISTS,
-// so a re-application would fail with "table already exists" — the run-once
+// so a re-application would fail with "table already exists", the run-once
 // guarantee is what keeps the second call green.
 func TestSQLiteRunApplyAndReRun(t *testing.T) {
 	db := openSQLite(t)
@@ -57,7 +57,7 @@ func TestSQLiteRunApplyAndReRun(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO t (a, b) VALUES ('x', 'y')`); err != nil {
 		t.Fatalf("insert into migrated table: %v", err)
 	}
-	// Second run must do nothing — re-running v1's CREATE would error.
+	// Second run must do nothing, re-running v1's CREATE would error.
 	if err := Run(context.Background(), &SQLiteDriver{DB: db, Ver: UserVersion()}, 0, migs); err != nil {
 		t.Fatalf("re-run should be a no-op, got: %v", err)
 	}

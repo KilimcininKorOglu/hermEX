@@ -14,7 +14,7 @@ import (
 // TestConnGroupDrainsInFlight proves Shutdown lets an in-flight connection finish
 // its handler instead of cutting it off, and stops accepting new connections: a
 // connection enters a blocked handler, Shutdown is started, and only then is the
-// handler released — the connection must still receive its response, Shutdown and
+// handler released, the connection must still receive its response, Shutdown and
 // Start must both report success, and a later dial must be refused.
 func TestConnGroupDrainsInFlight(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -71,7 +71,7 @@ func TestConnGroupDrainsInFlight(t *testing.T) {
 }
 
 // TestConnGroupShutdownTimeout proves Shutdown honors its deadline rather than
-// blocking forever on a handler that will not drain — the select on ctx.Done(),
+// blocking forever on a handler that will not drain, the select on ctx.Done(),
 // not a bare WaitGroup wait.
 func TestConnGroupShutdownTimeout(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

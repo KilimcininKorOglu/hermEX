@@ -13,7 +13,7 @@ import (
 // message EID from the folder's range and a fresh change number, writes the
 // denormalized message row, then the top-level property bag, one recipient row
 // per recipient bag, one attachment row per attachment bag, and the time-sort
-// index entry — all in a single transaction so the message and everything it
+// index entry, all in a single transaction so the message and everything it
 // owns commit atomically. Content properties (bodies, attachment payloads) are
 // offloaded to content files by the property layer. It returns the new message
 // EID.
@@ -81,7 +81,7 @@ func (s *Store) CreateMessage(folderID int64, msg *oxcmail.Message) (int64, erro
 			return 0, err
 		}
 		// Assign a stable per-message attach number (PidTagAttachNumber) when the
-		// source did not carry one — mail import does not, an ICS upload does. The
+		// source did not carry one, mail import does not, an ICS upload does. The
 		// number is the ordinal here, matching the 0-based sequence CreateAttachment
 		// continues, so the read path can resolve an attachment by it rather than by
 		// a position that shifts on a sibling delete.
@@ -109,8 +109,8 @@ func (s *Store) CreateMessage(folderID int64, msg *oxcmail.Message) (int64, erro
 	return id, nil
 }
 
-// midString derives a message's mid_string — its eml filename and the bridge
-// between the object store and the IMAP index — from its EID. The EID is unique
+// midString derives a message's mid_string, its eml filename and the bridge
+// between the object store and the IMAP index, from its EID. The EID is unique
 // per mailbox, so the derived id is too, and it is stable for the message's
 // life. The "m" prefix keeps it textually distinct from any bare-numeric id.
 func midString(eid uint64) string {
@@ -118,7 +118,7 @@ func midString(eid uint64) string {
 }
 
 // isAssociated reports the stored associated flag for a new message: a message
-// is folder-associated (FAI — a hidden setting/rule/form, not a visible item)
+// is folder-associated (FAI, a hidden setting/rule/form, not a visible item)
 // when it carries PidTagAssociated set true. The flag is fixed at creation; the
 // contents-table query splits associated from normal messages by this column.
 func isAssociated(props mapi.PropertyValues) int {

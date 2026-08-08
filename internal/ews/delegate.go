@@ -41,7 +41,7 @@ type delegateReqUserId struct {
 	PrimarySmtpAddress string `xml:"PrimarySmtpAddress"`
 }
 
-// containsFold reports whether list holds s under case-insensitive comparison — the
+// containsFold reports whether list holds s under case-insensitive comparison, the
 // same case-folded identity the ROP delegate-list check uses.
 func containsFold(list []string, s string) bool {
 	for _, v := range list {
@@ -160,7 +160,7 @@ func collectFolderGrants(st *objectstore.Store) (folderGrants, error) {
 
 // levelsFor reports one delegate's permission level on each of the six folders. The
 // lookup is case-folded (lowercased) so a delegate-list entry and its permission
-// rows match even when stored in different case — the same case-insensitive identity
+// rows match even when stored in different case, the same case-insensitive identity
 // the ROP delegate-list check uses.
 func (g folderGrants) levelsFor(delegate string) delegatePermissions {
 	key := strings.ToLower(delegate)
@@ -367,7 +367,7 @@ func writeDelegateMutationResponse(w http.ResponseWriter, element string, msgs [
 
 // delegateLevelToFrights maps a DelegateFolderPermissionLevelType to its frights
 // mask. Only the three settable roles map to rights; None, Custom, and any
-// unrecognized level clear the grant — Custom is not a writable role through this
+// unrecognized level clear the grant, Custom is not a writable role through this
 // enum. The role constants already carry their implied bits and free/busy is left to
 // the mailbox's default grant, so the mask is stored as-is (the read mapping strips
 // the ambient free/busy bits back off).

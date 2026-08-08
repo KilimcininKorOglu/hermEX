@@ -32,7 +32,7 @@ type getFolderRequest struct {
 }
 
 // folderShape carries the requested BaseShape and the AdditionalProperties FieldURI
-// list. v1 reads it only to detect a folder:PermissionSet request — the base shape
+// list. v1 reads it only to detect a folder:PermissionSet request, the base shape
 // is otherwise always served as the same folder subset.
 type folderShape struct {
 	BaseShape            string `xml:"BaseShape"`
@@ -154,7 +154,7 @@ func (s *Server) handleGetFolder(w http.ResponseWriter, inner []byte, sess *sess
 		}
 		if tgt.public {
 			// The public folders root carries no grant of its own (its children do),
-			// so it cannot go through the per-folder visibility gate below — it is a
+			// so it cannot go through the per-folder visibility gate below, it is a
 			// distinguished, always-present container rendered synthetically.
 			msgs = append(msgs, s.getPublicRoot(cache, sess))
 			continue
@@ -276,7 +276,7 @@ func (s *Server) getPublicRoot(cache *storeCache, sess *session) folderResponseM
 	}
 }
 
-// emptyFindFolder is a successful FindFolder result with no folders — the answer
+// emptyFindFolder is a successful FindFolder result with no folders, the answer
 // for a public folders root the caller can see nothing in (or whose domain has no
 // public store): publicfoldersroot is a distinguished folder the protocol treats as
 // always present, so "empty for you" is the honest, uniform response.
@@ -479,7 +479,7 @@ func (s *Server) openFolders(w http.ResponseWriter, sess *session) (*objectstore
 // characters no SMTP address can, so it never collides with a real mailbox; it is
 // only ever encoded inside opaque folder ids, never rendered to the client. The
 // store cache resolves it through the publicfolder service, which derives the
-// domain from the authenticated caller — so a crafted id can never reach another
+// domain from the authenticated caller, so a crafted id can never reach another
 // tenant's public store.
 const publicMailboxToken = "\x00public-folders"
 
@@ -498,8 +498,8 @@ type folderTarget struct {
 	recoverable bool   // the recoverableitemsdeletions distinguished id: the mailbox-wide soft-deleted dumpster
 }
 
-// filterVisible keeps only the folders the caller may see — those on which their
-// effective rights include FrightsVisible — the per-folder ACL gate public-folder
+// filterVisible keeps only the folders the caller may see, those on which their
+// effective rights include FrightsVisible, the per-folder ACL gate public-folder
 // enumeration needs (grants live on each folder, not on the IPM subtree parent).
 func filterVisible(st *objectstore.Store, infos []objectstore.FolderInfo, user string) ([]objectstore.FolderInfo, error) {
 	out := make([]objectstore.FolderInfo, 0, len(infos))
@@ -524,7 +524,7 @@ func refMailbox(m *delegateMailbox) string {
 	return ""
 }
 
-// resolveTargets resolves the requested folder ids — distinguished names via the
+// resolveTargets resolves the requested folder ids, distinguished names via the
 // built-in map, opaque ids via the id codec. An unresolved id carries the right
 // error code: a distinguished name we do not map is a folder this mailbox lacks
 // (ErrorFolderNotFound), while an undecodable opaque id is malformed
@@ -566,7 +566,7 @@ func resolveTargets(refs folderRefs) []folderTarget {
 			}
 			// A public-store IPM subtree id (the public root, e.g. minted as a public
 			// child's ParentFolderId) is the public folders root, enumerated per-child
-			// by ACL — the same as the publicfoldersroot distinguished name.
+			// by ACL, the same as the publicfoldersroot distinguished name.
 			public := mb == publicMailboxToken && fid == int64(mapi.PublicFIDIPMSubtree)
 			out = append(out, folderTarget{fid: fid, ok: true, mailbox: mb, public: public})
 		} else {
@@ -666,8 +666,8 @@ func (c *storeCache) closeAll() {
 	}
 }
 
-// openForItem opens the mailbox an item id targets — the caller's own when the id
-// carries no mailbox — and enforces the caller's access to the item's folder. need is
+// openForItem opens the mailbox an item id targets, the caller's own when the id
+// carries no mailbox, and enforces the caller's access to the item's folder. need is
 // the frights bit the operation requires (read, edit, delete). A non-empty code names
 // the per-item error to report; own-mailbox access is never gated. This is the single
 // chokepoint every item-id-driven handler routes through, so a delegated id can never

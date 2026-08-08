@@ -23,7 +23,7 @@ type ThreadHeaders struct {
 const threadChunk = 900
 
 // ConversationThreading batch-reads the RFC 5322 threading headers for the given
-// message ids — a folder's messages, whose ids come from ListMessages — so a
+// message ids, a folder's messages, whose ids come from ListMessages, so a
 // threaded list view does one query per chunk instead of a property read per
 // message. The headers live in the message property bag (the IMAP index mirrors
 // the reference schema and carries no message-id/references columns). Messages

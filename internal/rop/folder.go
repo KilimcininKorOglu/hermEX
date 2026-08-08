@@ -82,7 +82,7 @@ func (t *tableState) baseIndex(idx int) int {
 // rowProps projects the column set for the row at idx from the store: a message
 // property bag for a contents table, a folder property bag for a hierarchy one.
 // The row identity (PrMid / PrFolderID) is the object's EID, not a stored
-// property, so it is synthesized when requested — without it the client has no
+// property, so it is synthesized when requested, without it the client has no
 // id to OpenMessage / OpenFolder the row it just found (the browse->open chain).
 func (t *tableState) rowProps(store *objectstore.Store, idx int) (mapi.PropertyValues, error) {
 	base := t.baseIndex(idx)

@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// DKIMKeyInfo is a domain's DKIM key metadata for display — never the private key: the
+// DKIMKeyInfo is a domain's DKIM key metadata for display, never the private key: the
 // selector, the TXT record value to publish, and whether signing is enabled.
 type DKIMKeyInfo struct {
 	Selector  string

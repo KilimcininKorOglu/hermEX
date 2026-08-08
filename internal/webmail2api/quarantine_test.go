@@ -40,7 +40,7 @@ func TestQuarantineRelease(t *testing.T) {
 		t.Fatalf("mint: %v", err)
 	}
 
-	// GET shows the confirmation form (not a release yet — prefetch-safe).
+	// GET shows the confirmation form (not a release yet, prefetch-safe).
 	rec := httptest.NewRecorder()
 	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/quarantine/release?t="+url.QueryEscape(tok), nil))
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "<form") {

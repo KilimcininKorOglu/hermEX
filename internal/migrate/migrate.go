@@ -7,7 +7,7 @@
 // as one unit and roll back cleanly on failure. MySQL/MariaDB DDL is not: each
 // step auto-commits and the version is recorded after the steps succeed, so a
 // partial failure leaves the version unrecorded and must be safe to re-run
-// (steps are single statements or idempotent). Migrations are forward only — a
+// (steps are single statements or idempotent). Migrations are forward only, a
 // database recorded at a version higher than the binary supports is refused
 // rather than silently downgraded, since data written under a newer schema may
 // be unreadable.
@@ -65,7 +65,7 @@ func Run(ctx context.Context, d Driver, baseline int, migs []Migration) error {
 	}
 
 	// Fast path: an unlocked read avoids taking the write lock on every open
-	// once the database has reached the target — the overwhelmingly common case.
+	// once the database has reached the target, the overwhelmingly common case.
 	cur, err := d.Version(ctx)
 	if err != nil {
 		return err

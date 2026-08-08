@@ -77,8 +77,8 @@ func (s *Store) CountMessages(folderID int64) (total, unread int, err error) {
 	return total, unread, err
 }
 
-// FolderSize returns the total byte size of the messages in a folder — the sum of
-// their RFC 822 sizes — for the sidebar's per-folder size display.
+// FolderSize returns the total byte size of the messages in a folder, the sum of
+// their RFC 822 sizes, for the sidebar's per-folder size display.
 func (s *Store) FolderSize(folderID int64) (int64, error) {
 	var size int64
 	err := s.idxdb.QueryRow(
@@ -102,7 +102,7 @@ func (s *Store) MessageByUID(folderID int64, uid uint32) (MessageInfo, error) {
 // the index. ok is false when the message has no index entry: a calendar or
 // contact item is created with CreateMessage and never enters the IMAP index, so
 // a poll over such a folder yields an item with no UID (and a (folder, UID)-keyed
-// body read is then unavailable — a documented limit for non-mail notification
+// body read is then unavailable, a documented limit for non-mail notification
 // targets). A missing row is not an error.
 func (s *Store) MessageUIDByID(folderID, messageID int64) (uint32, bool, error) {
 	var uid int64
@@ -154,7 +154,7 @@ func (s *Store) SetMessageFlags(folderID int64, uid uint32, flags int64) error {
 		return err
 	}
 	// The object store is authoritative for read_state and its read_cn, so mirror
-	// the read bit there first — allocating a read_cn when it actually flips — before
+	// the read bit there first, allocating a read_cn when it actually flips, before
 	// rewriting the IMAP mask. Ordering it first keeps a failed mask update from
 	// leaving a read change without the read_cn the ICS download depends on.
 	if _, err := s.setObjReadState(messageID, bit(FlagSeen)); err != nil {
@@ -189,7 +189,7 @@ func (s *Store) SetMessageFlags(folderID int64, uid uint32, flags int64) error {
 }
 
 // SetMessageReadState sets or clears a single message's read flag by its object
-// id, touching only the read bit — unlike SetMessageFlags, which replaces the
+// id, touching only the read bit, unlike SetMessageFlags, which replaces the
 // whole IMAP flag mask and so would clobber the answered/flagged/deleted bits.
 // It mirrors the state into both the index and the object store and reports
 // ErrNotFound when no such message exists.
@@ -219,7 +219,7 @@ func (s *Store) SetMessageReadState(messageID int64, read bool) error {
 }
 
 // GetMessageReadState reports whether a message is currently marked read, reading
-// the object store's read_state column — the store of record SetMessageReadState
+// the object store's read_state column, the store of record SetMessageReadState
 // writes. It reports ErrNotFound when no such message exists. The read-receipt
 // trigger reads this before SetMessageReadState so it can fire only on an
 // unread→read transition: a message already read through another protocol (an
@@ -242,7 +242,7 @@ func (s *Store) GetMessageReadState(messageID int64) (bool, error) {
 // read and the row update share one transaction, so concurrent flips cannot land on
 // the same change number (the read_cn UNIQUE column is the backstop). Folder-
 // associated messages carry no read state and are left untouched. It reports whether
-// the message exists in the object store — the store of record for every message
+// the message exists in the object store, the store of record for every message
 // type, mail or not.
 func (s *Store) setObjReadState(messageID int64, want int) (found bool, err error) {
 	tx, err := s.objdb.Begin()
@@ -259,7 +259,7 @@ func (s *Store) setObjReadState(messageID int64, want int) (found bool, err erro
 		return false, err
 	}
 	if assoc != 0 || cur == want {
-		return true, nil // associated (no read state) or already in state — no new read_cn
+		return true, nil // associated (no read state) or already in state, no new read_cn
 	}
 	rcn, err := allocateCN(tx)
 	if err != nil {

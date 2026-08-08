@@ -81,7 +81,7 @@ func (s *Session) ropLogon(p *ext.Pull, out *ext.Push, handles []uint32, hindex 
 	}
 	sendsOnBehalf := false
 	if delegate {
-		// A delegate may open the mailbox only with some access to it — a designated
+		// A delegate may open the mailbox only with some access to it, a designated
 		// delegate, or a grant on any folder. The per-folder gates then govern what
 		// they can actually read and change. Delegate-list membership additionally
 		// confers the send-on-behalf right, advertised in the response flags below.
@@ -158,7 +158,7 @@ func (s *Session) ropRelease(handles []uint32, hindex uint8) {
 	s.release(handleAt(handles, hindex))
 }
 
-// essdnToSMTP recovers the target mailbox's SMTP address from a RopLogon Essdn —
+// essdnToSMTP recovers the target mailbox's SMTP address from a RopLogon Essdn,
 // an X500 address-book DN whose final "/cn=" component is the SMTP address, the
 // reversible form the GAL hands out. ok is false when the DN carries no such
 // component (so the caller falls back to opening its own mailbox). The match is
@@ -181,15 +181,15 @@ func essdnToSMTP(dn string) (string, bool) {
 // they are on its delegate list. A caller may open when designated on the delegate
 // list, when they are an additional store owner (full mailbox access), or when they
 // hold an explicit per-user grant on any folder. The open gate is deliberately
-// caller-specific — it counts only the caller's OWN grants, never the universal
+// caller-specific, it counts only the caller's OWN grants, never the universal
 // "default" member, so the always-present default free/busy grant does not let every
 // authenticated user open every mailbox. (The per-folder gates then govern what the
-// opened session can actually read and change, and those DO honour the default grant —
+// opened session can actually read and change, and those DO honour the default grant,
 // open vs per-folder use different criteria on purpose.) A default-member or group
 // grant alone does not enable a store-open; that is the documented v1 limitation
 // (free/busy is served via NSPI/EWS/CalDAV, not a ROP logon, so free/busy sharing is
 // unaffected). onList reports the delegate-list membership the caller separately needs
-// to send on the mailbox's behalf — store ownership confers access, not send-on-behalf.
+// to send on the mailbox's behalf, store ownership confers access, not send-on-behalf.
 func (s *Session) mayOpenDelegate(store *objectstore.Store, caller string) (mayOpen, onList bool, err error) {
 	onList, err = s.onDelegateList(store, caller)
 	if err != nil || onList {

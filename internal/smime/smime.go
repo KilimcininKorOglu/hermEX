@@ -1,6 +1,6 @@
 // Package smime implements server-side S/MIME (RFC 5751): signing, verifying,
-// encrypting, and decrypting mail. It wraps the CMS/PKCS#7 layer — SignedData for
-// signatures, EnvelopedData for encryption — and frames the results as the
+// encrypting, and decrypting mail. It wraps the CMS/PKCS#7 layer, SignedData for
+// signatures, EnvelopedData for encryption, and frames the results as the
 // multipart/signed and application/pkcs7-mime MIME entities that S/MIME clients
 // (Outlook, Thunderbird) interoperate with. Content is treated as opaque bytes
 // with CRLF line endings, as S/MIME requires, and never re-encoded, so a

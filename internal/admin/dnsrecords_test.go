@@ -20,7 +20,7 @@ func byLabel(recs []prescribedRecord) map[string]prescribedRecord {
 
 // TestPrescribeDomainDNS proves the prescription a domain owner is shown: each
 // record targets the right host with a value that actually makes mail route and
-// authenticate against this server. The values are load-bearing — a wrong MX
+// authenticate against this server. The values are load-bearing, a wrong MX
 // target or a CNAME pointing elsewhere silently breaks delivery or autodiscovery,
 // so the test pins the host the records point at, not merely that a row exists.
 func TestPrescribeDomainDNS(t *testing.T) {
@@ -28,7 +28,7 @@ func TestPrescribeDomainDNS(t *testing.T) {
 	recs := prescribeDomainDNS("tenant.com", host, "hermex._domainkey.tenant.com", "v=DKIM1; k=rsa; p=ABC",
 		directory.MTASTSSettings{Enabled: false})
 	by := byLabel(recs)
-	// With MTA-STS publishing off, its records must be absent — their host serves no
+	// With MTA-STS publishing off, its records must be absent, their host serves no
 	// policy yet, so prescribing them would point senders at a 404.
 	for _, lbl := range []string{"MTA-STS host", "MTA-STS", "TLS reporting"} {
 		if _, ok := by[lbl]; ok {
@@ -45,8 +45,8 @@ func TestPrescribeDomainDNS(t *testing.T) {
 	if r := by["SPF"]; r.Type != "TXT" || !strings.HasPrefix(r.Value, "v=spf1") {
 		t.Errorf("SPF = %+v, want a v=spf1 TXT record", r)
 	}
-	// The DKIM row publishes exactly what the signer generated — name and value
-	// verbatim — so the operator copies the real key, not a guess.
+	// The DKIM row publishes exactly what the signer generated, name and value
+	// verbatim, so the operator copies the real key, not a guess.
 	if r := by["DKIM"]; r.Name != "hermex._domainkey.tenant.com" || r.Value != "v=DKIM1; k=rsa; p=ABC" {
 		t.Errorf("DKIM = %+v, want the generated record name and value verbatim", r)
 	}
@@ -92,7 +92,7 @@ func TestPrescribeDomainDNS(t *testing.T) {
 // TestPrescribeDomainDNSWithoutDKIMKey proves the prescription stays complete
 // before a DKIM key exists: the DKIM requirement is still listed (so the owner
 // knows it is needed) but, with no key, the row points at the DKIM panel instead
-// of a value — a placeholder must never read as a publishable record.
+// of a value, a placeholder must never read as a publishable record.
 func TestPrescribeDomainDNSWithoutDKIMKey(t *testing.T) {
 	recs := prescribeDomainDNS("tenant.com", "mail.hermex.test", "", "", directory.MTASTSSettings{Enabled: false})
 	by := byLabel(recs)
@@ -134,7 +134,7 @@ func TestPrescribeDomainDNSWithMTASTS(t *testing.T) {
 }
 
 // TestDomainDetailShowsDNSRecords proves the prescription actually reaches the
-// page a system admin sees — the section and records pointing at the server host
+// page a system admin sees, the section and records pointing at the server host
 // render in the domain detail HTML. It guards the handler wiring and the template
 // block, which the pure prescribeDomainDNS test cannot: a dropped template range
 // or a renamed field would still pass the unit test but fail here.

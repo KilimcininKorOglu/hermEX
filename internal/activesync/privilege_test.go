@@ -26,7 +26,7 @@ func (d privDir) Privileges(user string) (directory.ServicePrivileges, bool) {
 }
 
 // TestActiveSyncPrivilegeDenied proves a user with valid credentials but no EAS
-// service privilege is refused with 403 before any command runs — so revoking
+// service privilege is refused with 403 before any command runs, so revoking
 // the privilege actually blocks the device, rather than merely being stored.
 func TestActiveSyncPrivilegeDenied(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "u")

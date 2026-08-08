@@ -12,7 +12,7 @@ import (
 )
 
 // TestReaderPruneOlderThan proves the retention prune deletes only events older than
-// the cutoff and leaves newer ones — the operation the admin runs to enforce the
+// the cutoff and leaves newer ones, the operation the admin runs to enforce the
 // retention window without a TTL index. Skips without the dev container's mongo.
 func TestReaderPruneOlderThan(t *testing.T) {
 	uri := os.Getenv("HERMEX_TEST_MONGO_URI")

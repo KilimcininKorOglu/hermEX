@@ -35,14 +35,14 @@ const (
 )
 
 // errRecipientFraming marks a MODIFYRECIPIENT_ROW whose fixed framing (row id,
-// type, size) could not be read — an unrecoverable desync that ends the batch,
+// type, size) could not be read, an unrecoverable desync that ends the batch,
 // unlike a malformed row body, which is skipped (the row was size-bounded).
 var errRecipientFraming = errors.New("rop: malformed recipient row framing")
 
 // ropCreateMessage handles RopCreateMessage ([MS-OXCMSG] 2.2.3.1): it opens an
 // in-memory message under the output handle, to be filled by SetProperties /
 // ModifyRecipients and persisted by SaveChangesMessage. The response carries no
-// message id (HasMessageId 0) — the id is allocated when the message is saved.
+// message id (HasMessageId 0), the id is allocated when the message is saved.
 func (s *Session) ropCreateMessage(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	ohindex, e1 := p.Uint8()    // OutputHandleIndex
 	_, e2 := p.Uint16()         // CodePageId
@@ -98,7 +98,7 @@ func (s *Session) ropCreateMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 // occupy a length-bounded region, read from an isolated slice so trailing bytes
 // in that region cannot be over-read. It supports both a message being composed
 // (kindNewMessage) and an existing message opened for edit (kindMessage), whose
-// changes are buffered in pendingProps and flushed by SaveChangesMessage —
+// changes are buffered in pendingProps and flushed by SaveChangesMessage,
 // MAPI's transactional semantics keep an edit invisible until that save. It
 // reports no property problems.
 func (s *Session) ropSetProperties(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
@@ -178,7 +178,7 @@ func (s *Session) ropModifyRecipients(p *ext.Pull, out *ext.Push, handles []uint
 	for range int(count) {
 		bag, ok, err := pullModifyRecipientBag(p, columns)
 		if err != nil {
-			return false // framing desync — the batch can no longer be located
+			return false // framing desync, the batch can no longer be located
 		}
 		if ok {
 			recipients = append(recipients, bag)
@@ -460,7 +460,7 @@ func pullRecipientRow(p *ext.Pull, columns []mapi.PropTag) (mapi.PropertyValues,
 	case addrKindSMTP:
 		bag.Set(mapi.PrAddrType, "SMTP")
 	default:
-		return nil, false // MSMAIL / FAX / personal distribution list — unsupported in v1
+		return nil, false // MSMAIL / FAX / personal distribution list, unsupported in v1
 	}
 
 	// Trailing PROPERTY_ROW over the first RecipientColumnCount columns; its
@@ -534,7 +534,7 @@ func pullPropertyRow(p *ext.Pull, columns []mapi.PropTag, bag *mapi.PropertyValu
 // consumes the source draft so the submitted message is not left duplicated.
 // Single input handle; the response is the bare header.
 func (s *Session) ropSubmitMessage(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	if _, err := p.Uint8(); err != nil { // SubmitFlags (PreProcess/NeedsSpooler — v1 ignores)
+	if _, err := p.Uint8(); err != nil { // SubmitFlags (PreProcess/NeedsSpooler, v1 ignores)
 		return false
 	}
 	obj := s.get(handleAt(handles, hindex))
@@ -573,9 +573,9 @@ func (s *Session) ropSubmitMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 		return true
 	}
 	// Delivery has succeeded. The Sent Items copy is filed in the mailbox the message
-	// was sent from — for a send-on-behalf submit that is the principal's mailbox, not
+	// was sent from, for a send-on-behalf submit that is the principal's mailbox, not
 	// the delegate's (a deliberate v1 default). Filing the copy and consuming the
-	// source draft are best-effort follow-up — a failure here must not re-fail a
+	// source draft are best-effort follow-up, a failure here must not re-fail a
 	// message that has already gone out (which would make the client resend it).
 	_, _ = obj.store.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), int64(objectstore.FlagSeen))
 	_ = obj.store.DeleteObject(nm.savedID)
@@ -592,10 +592,10 @@ func (s *Session) ropSubmitMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 var errNoRecipient = errors.New("rop: no routable recipient")
 
 // deliverComposed exports a saved composed message through oxcmail and hands it to
-// the MTA bridge — the export+deliver core shared by RopSubmitMessage and
+// the MTA bridge, the export+deliver core shared by RopSubmitMessage and
 // RopTransportSend, the single proven outbound path the oxcmail.Export invariant
 // protects. It splits the recipient bags (the delivery list takes every resolvable
-// SMTP address To+Cc+Bcc, while the exported wire copy carries only To+Cc bags —
+// SMTP address To+Cc+Bcc, while the exported wire copy carries only To+Cc bags,
 // oxcmail.Export writes a Bcc header for any RecipBcc bag, so leaving Bcc in the
 // wire copy would disclose blind recipients to the To/Cc readers), stamps the
 // representing and sender identities the caller resolved (representing is the From; a
@@ -637,7 +637,7 @@ func (s *Session) deliverComposed(nm *newMessageState, representing, sender stri
 // recipientSMTP extracts a routable SMTP address from a recipient bag: the
 // explicit PR_SMTP_ADDRESS if present, else PR_EMAIL_ADDRESS when the address
 // type is SMTP. X500/EX recipients (resolved through NSPI) carry no SMTP address
-// and yield "" — v1 cannot route them.
+// and yield "", v1 cannot route them.
 func recipientSMTP(bag mapi.PropertyValues) string {
 	if v, ok := bag.Get(mapi.PrSmtpAddress); ok {
 		if s, _ := v.(string); s != "" {
@@ -658,7 +658,7 @@ func recipientSMTP(bag mapi.PropertyValues) string {
 
 // stampSubmitIdentity fixes the representing/sender identities and submit time on a
 // message about to be exported. An owner send (sender == "") stamps the representing
-// identity only when the client left it unset — a client composing in its own mailbox
+// identity only when the client left it unset, a client composing in its own mailbox
 // may legitimately name its own From. A delegate send-on-behalf (sender != "") FORCES
 // both identities, overwriting whatever the client supplied, so a client cannot
 // dictate who the message claims to be from: the representing identity is the mailbox

@@ -111,7 +111,7 @@ func TestUnauthenticated(t *testing.T) {
 }
 
 // TestPlainQueryDispatch confirms a plain-query command reaches dispatch.
-// GetAttachment is not implemented in v1, so it returns 501 — proving the
+// GetAttachment is not implemented in v1, so it returns 501, proving the
 // transport and parse path works end to end (implemented commands are exercised
 // by the command tests).
 func TestPlainQueryDispatch(t *testing.T) {

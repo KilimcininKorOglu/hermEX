@@ -20,7 +20,7 @@ func dkimTestDir() *fakeDir {
 }
 
 // TestDKIMGenerateStoresDisabled is the load-bearing test: generating a key stores it
-// but does NOT enable signing, and the response shows the DNS record to publish — so
+// but does NOT enable signing, and the response shows the DNS record to publish, so
 // signing never starts before the operator publishes the record and enables it.
 func TestDKIMGenerateStoresDisabled(t *testing.T) {
 	d := dkimTestDir()

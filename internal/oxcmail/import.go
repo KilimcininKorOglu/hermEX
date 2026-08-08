@@ -369,9 +369,9 @@ type bodyParts struct {
 }
 
 // parseContent selects the message's body parts and attachments. It fills the
-// body properties — PR_BODY from the plain part (charset-decoded to UTF-8) and
+// body properties, PR_BODY from the plain part (charset-decoded to UTF-8) and
 // PR_HTML + PR_INTERNET_CPID from a single HTML part (raw bytes in its original
-// charset) — then turns every non-body leaf part into an attachment.
+// charset), then turns every non-body leaf part into an attachment.
 // Multiple-HTML joining, enriched, and calendar bodies are deferred.
 func parseContent(root *mime.Part, msg *Message, stamp uint64, calImport CalendarImporter) {
 	var bp bodyParts
@@ -402,7 +402,7 @@ func parseContent(root *mime.Part, msg *Message, stamp uint64, calImport Calenda
 }
 
 // mergeCalendar parses a text/calendar part through the injected importer and, when
-// it yields a scheduling object (one carrying a message class — a meeting request,
+// it yields a scheduling object (one carrying a message class, a meeting request,
 // response, or cancellation), overlays that object's message class and named
 // appointment properties onto the message. Only the scheduling properties the header
 // parse cannot carry are added; the email's own body, subject, and envelope are left

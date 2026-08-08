@@ -6,9 +6,9 @@ import (
 )
 
 // refVectors pairs an input with the compressed bytes produced by an
-// independent C implementation of the [MS-XCA] Plain-LZ77 algorithm — an oracle
+// independent C implementation of the [MS-XCA] Plain-LZ77 algorithm, an oracle
 // independent of this Go port. Decompress(comp, len(plain)) MUST reproduce
-// plain — this is the byte-format anchor a self-round-trip alone cannot give.
+// plain, this is the byte-format anchor a self-round-trip alone cannot give.
 // The set exercises every decode branch: bare literals + indicator fill
 // (single/alphabet), a short match (repeat_abc), the >=7 length nibble and the
 // >=15 extra byte (run52a), the 255 -> uint16 extension (run300a), and a

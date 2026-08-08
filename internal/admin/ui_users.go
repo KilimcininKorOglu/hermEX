@@ -10,7 +10,7 @@ import (
 
 // uiAuthorized authorizes a UI state-changing request: a valid session, a
 // matching CSRF header (the htmx double-submit), and full system authority. A
-// read-only system administrator is refused here — they may view pages but not
+// read-only system administrator is refused here, they may view pages but not
 // change state. On failure it writes an error response and returns ok=false.
 func (s *Server) uiAuthorized(w http.ResponseWriter, r *http.Request) (claims, bool) {
 	cl, ok := s.uiClaims(r)
@@ -30,7 +30,7 @@ func (s *Server) uiAuthorized(w http.ResponseWriter, r *http.Request) (claims, b
 }
 
 // handleUIChangePassword renders the self-service change-password page for any
-// logged-in administrator — it needs no system-admin scope because it only ever
+// logged-in administrator, it needs no system-admin scope because it only ever
 // affects the caller's own account.
 func (s *Server) handleUIChangePassword(w http.ResponseWriter, r *http.Request) {
 	cl, ok := s.uiClaims(r)
@@ -172,7 +172,7 @@ func (s *Server) handleUICreateUser(w http.ResponseWriter, r *http.Request) {
 }
 
 // createUserWithDefaults creates the user, then applies the form's per-user
-// settings (language, the six service toggles, and the quotas) — the values the
+// settings (language, the six service toggles, and the quotas), the values the
 // create form carried, pre-filled from the domain's effective defaults and
 // possibly edited. It returns an error message, or "" on success. The quota is
 // applied only when a limit is set, so an unlimited account does not need its

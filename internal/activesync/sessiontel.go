@@ -35,7 +35,7 @@ func newSessionID() string {
 
 // beginSession opens telemetry for a request: it mints a per-connection id and
 // writes the initial (still-running) row. A no-op when telemetry is disabled.
-// Best-effort — a write failure leaves the session simply unmonitored and never
+// Best-effort, a write failure leaves the session simply unmonitored and never
 // affects the command.
 func (s *Server) beginSession(r *http.Request, sess *session) {
 	if s.Sessions == nil {

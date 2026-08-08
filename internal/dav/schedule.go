@@ -88,7 +88,7 @@ func (s *Server) outboxFreeBusy(w http.ResponseWriter, user string, vfb *icalNod
 // outboxDeliver delivers an iTIP scheduling message (REQUEST/CANCEL from the
 // organizer, REPLY from an attendee) to its recipients through the shared mail
 // submission path, then reports per-recipient status (RFC 6638 §5.2). The message
-// is wrapped as iMIP via oxcmail.Export — the one proven outgoing-mail path — and
+// is wrapped as iMIP via oxcmail.Export, the one proven outgoing-mail path, and
 // handed to mta.DeliverAndRelay, which files it in each local recipient's mailbox
 // and relays external ones when a spool is configured.
 func (s *Server) outboxDeliver(w http.ResponseWriter, user string, root, comp *icalNode, body string) {

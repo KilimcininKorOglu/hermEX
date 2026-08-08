@@ -9,7 +9,7 @@ import (
 )
 
 // TestRespondDeclineAfterAccept proves that declining a meeting a prior accept put
-// on the calendar removes that appointment — matching the reference's doDecline,
+// on the calendar removes that appointment, matching the reference's doDecline,
 // which deletes the calendar items carrying the meeting's UID. A meeting you decline
 // must not linger on your calendar.
 func TestRespondDeclineAfterAccept(t *testing.T) {
@@ -52,7 +52,7 @@ func TestRespondDeclineAfterAccept(t *testing.T) {
 }
 
 // TestRespondStripsInboundCruft proves that a real delivered request's inbound-mail
-// cruft — its Message-ID and verbatim transport headers — does not ride along onto
+// cruft, its Message-ID and verbatim transport headers, does not ride along onto
 // the filed appointment, while the appointment data (the UID) is kept. The same strip
 // lets the organizer response mint its own Message-ID rather than reuse the request's.
 func TestRespondStripsInboundCruft(t *testing.T) {

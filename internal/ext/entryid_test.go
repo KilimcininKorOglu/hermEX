@@ -72,7 +72,7 @@ func TestLongTermIDRoundTrip(t *testing.T) {
 	}
 }
 
-// TestFolderEntryIDVector locks the field order, widths, and — critically — the
+// TestFolderEntryIDVector locks the field order, widths, and, critically, the
 // distinction between the flat provider uid (emitted verbatim) and the
 // structured database GUID (Data1-3 byte-swapped). A field-order bug between two
 // 16-byte members would survive a round-trip but not this vector.

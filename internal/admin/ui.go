@@ -31,7 +31,7 @@ func (s *Server) uiClaims(r *http.Request) (claims, bool) {
 
 // uiRequireSystemPage gates a UI read page on a session and read authority: no
 // session redirects to login; a caller without system read access gets 403. A
-// read-only system administrator is admitted — pages only read — while write
+// read-only system administrator is admitted, pages only read, while write
 // actions on those pages are gated separately by uiAuthorized. ok=false means a
 // response was already written.
 func (s *Server) uiRequireSystemPage(w http.ResponseWriter, r *http.Request) bool {
@@ -135,7 +135,7 @@ func (s *Server) handleUIDashboard(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleUILogout clears the session — a valid CSRF form token is required — and
+// handleUILogout clears the session, a valid CSRF form token is required, and
 // returns to the login page.
 func (s *Server) handleUILogout(w http.ResponseWriter, r *http.Request) {
 	cl, ok := s.uiClaims(r)
@@ -164,7 +164,7 @@ func csrfCookieValue(r *http.Request) string {
 }
 
 // validFormCSRF reports whether the request's _csrf form field equals its CSRF
-// cookie (compared in constant time) — the form equivalent of the header
+// cookie (compared in constant time), the form equivalent of the header
 // double-submit the JSON API uses.
 func validFormCSRF(r *http.Request) bool {
 	cookie, err := r.Cookie(csrfCookie)

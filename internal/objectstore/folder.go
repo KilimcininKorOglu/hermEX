@@ -57,8 +57,8 @@ var builtinFolders = []builtinFolder{
 }
 
 // builtinPublicFolders is the per-domain public-store hierarchy, kept faithful to
-// the reference public store (mkpublic): a Root Container holding IPM_SUBTREE —
-// where the administrator's user-visible public folders live — and a sibling
+// the reference public store (mkpublic): a Root Container holding IPM_SUBTREE,
+// where the administrator's user-visible public folders live, and a sibling
 // NON_IPM_SUBTREE holding the EFORMS REGISTRY. New public folders are created
 // under IPM_SUBTREE with ids from PublicFIDUnassignedStart upward. Note IPM_SUBTREE
 // keeps the literal name "IPM_SUBTREE" here, unlike a private mailbox where the
@@ -107,7 +107,7 @@ func (s *Store) seedMailbox(replica mapi.GUID) error {
 // seedPublicStore provisions a fresh per-domain public-folder store: the store-root
 // property bag and the public-folder hierarchy. Unlike a private mailbox it has no
 // receive table (public folders are posted to directly via the protocols, never
-// delivered by the MTA) and no default free/busy permissions — access is granted
+// delivered by the MTA) and no default free/busy permissions, access is granted
 // per folder by the administrator, so the store starts locked down with no
 // org-wide grant (the seeded store-wide default permission is FrightsNone).
 func (s *Store) seedPublicStore(replica mapi.GUID) error {

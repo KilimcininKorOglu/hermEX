@@ -23,7 +23,7 @@ func (r *reader) byte() (uint8, bool) {
 
 // appendName writes a PROPERTY_NAME inline: the 16-byte GUID, the kind byte, and
 // then either the LID (MnidID) or the name as naked double-NUL-terminated
-// UTF-16LE with NO length prefix (MnidString) — the FastTransfer form, distinct
+// UTF-16LE with NO length prefix (MnidString), the FastTransfer form, distinct
 // from the length-prefixed PROPERTY_NAME used elsewhere.
 func appendName(b []byte, n mapi.PropertyName) ([]byte, error) {
 	f := n.GUID.Flat()

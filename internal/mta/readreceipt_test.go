@@ -15,8 +15,8 @@ import (
 // with a text/plain part FIRST and a message/disposition-notification part SECOND,
 // the DN part carrying Final-Recipient and the "displayed" disposition, and the
 // envelope addressed from the reader to the represented sender with the
-// X-Auto-Response-Suppress loop guard. Parsing the bytes back — rather than string
-// matching — is what catches a boundary bug in the hand-built multipart.
+// X-Auto-Response-Suppress loop guard. Parsing the bytes back, rather than string
+// matching, is what catches a boundary bug in the hand-built multipart.
 func TestBuildReadReceiptMDN(t *testing.T) {
 	when := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
 	raw := buildReadReceipt(ReadReceiptInfo{
@@ -96,7 +96,7 @@ func TestBuildReadReceiptMDN(t *testing.T) {
 
 // TestBuildReadReceiptOmitsAbsentFields confirms the optional decorations are
 // dropped when their source is empty: no Original-Message-ID line without an
-// original id, and no Time line without a submit time — the message stays
+// original id, and no Time line without a submit time, the message stays
 // well-formed and parseable.
 func TestBuildReadReceiptOmitsAbsentFields(t *testing.T) {
 	when := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)

@@ -4,7 +4,7 @@
 // daemon holds a Consumer, which streams the relay's events and exposes a per-
 // mailbox wake channel its long-polls select on. Both are best-effort: a Publisher
 // drops on a full queue, a Consumer reconnects on drop, and neither ever blocks
-// the mail path — when the relay is down, consumers simply fall back to polling.
+// the mail path, when the relay is down, consumers simply fall back to polling.
 package notify
 
 import (
@@ -42,9 +42,9 @@ const (
 
 // internalTransport dials the notify daemon, which terminates TLS with a self-
 // signed certificate on the internal network (like the other daemons behind the
-// gateway). Verification is skipped on this internal hop only — the relay is bound
+// gateway). Verification is skipped on this internal hop only, the relay is bound
 // internal-only with no host port, and it carries no message content, only wake
-// signals — mirroring the gateway→backend transport.
+// signals, mirroring the gateway→backend transport.
 func internalTransport() *http.Transport {
 	return &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
 }
@@ -88,7 +88,7 @@ func (p *Publisher) Publish(ev objectstore.ChangeEvent) {
 	}
 	select {
 	case p.queue <- notifyd.Event{Mailbox: ev.MailboxDir, Op: ev.Op, CN: ev.CN, Mid: ev.Mid}:
-	default: // queue full — drop (best-effort; the poll cadence is the floor)
+	default: // queue full, drop (best-effort; the poll cadence is the floor)
 	}
 }
 
@@ -162,7 +162,7 @@ func NewConsumer(baseURL, secret string, logger *logging.Logger) *Consumer {
 }
 
 // Register subscribes to wake signals for one mailbox directory (a store's Dir()).
-// The returned channel receives a value each time that mailbox changes — coalesced,
+// The returned channel receives a value each time that mailbox changes, coalesced,
 // since it is buffered size 1, so a burst of changes before the waiter runs becomes
 // one wake. The cancel func unregisters; a long-poll MUST defer it. A nil Consumer
 // returns a nil channel and a no-op cancel, so a caller writes one select arm that
@@ -299,7 +299,7 @@ func (c *Consumer) stream(first bool) (connected bool) {
 		}
 		c.wake(ev.Mailbox)
 	}
-	// The scan ended (the stream dropped); the reason is informational only — the
+	// The scan ended (the stream dropped); the reason is informational only, the
 	// reconnect loop handles it either way.
 	if err := sc.Err(); err != nil && c.logger != nil {
 		c.logger.Debug(logging.Notify, "consumer.stream.end", logging.Fields{"err": err.Error()})
@@ -312,7 +312,7 @@ func (c *Consumer) stream(first bool) (connected bool) {
 // EnableProducer installs the objectstore change publisher from the notify config,
 // so every committed mailbox mutation in this daemon best-effort wakes the relay's
 // consumers. It is a no-op when notifyURL is empty (push disabled), leaving the
-// objectstore hook nil — byte-identical to the pre-push behaviour. The startup log
+// objectstore hook nil, byte-identical to the pre-push behaviour. The startup log
 // line doubles as the per-daemon confirmation that the new binary deployed.
 func EnableProducer(notifyURL, secret string, logger *logging.Logger) {
 	pub := NewPublisher(notifyURL, secret)
@@ -327,7 +327,7 @@ func EnableProducer(notifyURL, secret string, logger *logging.Logger) {
 }
 
 // EnableConsumer starts the relay consumer from the notify config and returns it
-// (nil when notifyURL is empty, which the caller treats as push disabled — its
+// (nil when notifyURL is empty, which the caller treats as push disabled, its
 // long-polls then fall back to polling). The startup log line is the per-daemon
 // confirmation the consumer side deployed.
 func EnableConsumer(notifyURL, secret string, logger *logging.Logger) *Consumer {

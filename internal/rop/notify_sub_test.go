@@ -9,7 +9,7 @@ import (
 // TestSubscriptionMatches pins the [MS-OXCNOTIF] match rule and the scope
 // asymmetry it depends on: a whole-store subscription sees every event, a folder
 // subscription sees folder-scoped events (a create), and a message subscription
-// sees message-scoped events (a modify/delete) — each gated by the type bitmask.
+// sees message-scoped events (a modify/delete), each gated by the type bitmask.
 func TestSubscriptionMatches(t *testing.T) {
 	const folderF, folderG int64 = 100, 200
 	const msgM int64 = 555

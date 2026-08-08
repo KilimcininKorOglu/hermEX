@@ -10,7 +10,7 @@ import (
 
 // PermissionEntry is one row of a folder's permission table as the wire serves it:
 // the member's wire id, the member display name, and the rights bitfield. The wire
-// id is the MS-OXCPERM translation of the stored username — 0 for the "default"
+// id is the MS-OXCPERM translation of the stored username, 0 for the "default"
 // member, -1 for the anonymous member (stored as ""), else the row's own id.
 type PermissionEntry struct {
 	MemberID int64  // PR_MEMBER_ID (0=default, -1=anonymous, else the row id)
@@ -84,8 +84,8 @@ func (s *Store) ListPermissions(folderID int64) ([]PermissionEntry, error) {
 // replace is set the folder's whole permission set is cleared first (the
 // REPLACEROWS flag). Each change is keyed by its operation: an Add upserts the
 // member's row, a Modify rewrites an existing member's rights, a Remove drops it.
-// The member is located by the MS-OXCPERM rule — id 0/-1 map to the stored
-// "default"/"" rows, any other id to the row with that id — so a client editing the
+// The member is located by the MS-OXCPERM rule, id 0/-1 map to the stored
+// "default"/"" rows, any other id to the row with that id, so a client editing the
 // default free/busy permission (always id 0) addresses the seeded row, not a rowid.
 // The whole batch runs in one transaction.
 func (s *Store) ModifyPermissions(folderID int64, replace bool, changes []PermissionChange) error {
@@ -111,7 +111,7 @@ func (s *Store) ModifyPermissions(folderID int64, replace bool, changes []Permis
 			if username, special := specialUsername(c.MemberID); special {
 				// A Modify of the default/anonymous member must create its row when
 				// none is stored (the client edits the synthesized member), so it
-				// upserts by username — never a no-op UPDATE that drops the edit.
+				// upserts by username, never a no-op UPDATE that drops the edit.
 				err = upsertPermission(tx, folderID, username, c.Rights)
 			} else {
 				_, err = tx.Exec(`UPDATE permissions SET permission=? WHERE folder_id=? AND member_id=?`,
@@ -135,7 +135,7 @@ func (s *Store) ModifyPermissions(folderID int64, replace bool, changes []Permis
 // MS-OXCPERM resolution order: an exact-username grant wins; absent that, the
 // "default" member grant applies; absent that, no rights. The group/DL step the
 // reference unions in (every mailing-list grant the user belongs to) is a documented
-// v1 gap — hermEX models aliases/altnames, not mailing lists — and is skipped; the
+// v1 gap, hermEX models aliases/altnames, not mailing lists, and is skipped; the
 // store-level configurations fallback (config_id 8/9) is unused in v1 and likewise
 // yields no rights. An anonymous caller (empty username) matches the stored
 // anonymous ("") row through the exact lookup. Rights come back as the stored,
@@ -176,11 +176,11 @@ func (s *Store) lookupPermission(folderID int64, username string) (uint32, bool,
 }
 
 // HasFolderGrant reports whether the user holds a non-zero permission on any folder
-// under their OWN username — a caller-specific grant, distinct from the universal
+// under their OWN username, a caller-specific grant, distinct from the universal
 // "default" member. It is the store-open primitive: a delegate logon requires this or
 // a delegate designation, so the always-present default free/busy grant does not by
 // itself let every authenticated user open every mailbox. The per-folder
-// ResolvePermission still honours the default grant — the open gate and the
+// ResolvePermission still honours the default grant, the open gate and the
 // per-folder gate use different criteria on purpose ("may you get a session at all"
 // vs "what may you do once in"). A default-member or group grant alone therefore does
 // not enable a ROP store-open (free/busy is served via NSPI/EWS/CalDAV, not a logon);
@@ -223,7 +223,7 @@ func memberDisplayName(username string) string {
 }
 
 // upsertPermission inserts a member's row or updates its rights, keyed by the unique
-// (folder_id, username) index — the shared write for an Add and for a Modify of a
+// (folder_id, username) index, the shared write for an Add and for a Modify of a
 // special member that has no stored row yet.
 func upsertPermission(tx *sql.Tx, folderID int64, username string, rights uint32) error {
 	_, err := tx.Exec(
@@ -233,8 +233,8 @@ func upsertPermission(tx *sql.Tx, folderID int64, username string, rights uint32
 	return err
 }
 
-// specialUsername maps a special member id to its stored username — 0 → "default",
-// -1 → "" (anonymous) — reporting false for a real member (addressed by row id).
+// specialUsername maps a special member id to its stored username, 0 → "default",
+// -1 → "" (anonymous), reporting false for a real member (addressed by row id).
 func specialUsername(memberID int64) (string, bool) {
 	switch memberID {
 	case mapi.MemberIDDefault:
@@ -248,7 +248,7 @@ func specialUsername(memberID int64) (string, bool) {
 
 // addUsername resolves the storage username for an Add. A real-member Add carries a
 // resolved Username (an SMTP address, never the literal "default"/"anonymous"), so a
-// non-empty Username wins and MemberID is ignored — this is what keeps a real Add
+// non-empty Username wins and MemberID is ignored, this is what keeps a real Add
 // whose MemberID is the int64 zero value from being misrouted to the default member.
 // A special-member Add carries an empty Username and selects default vs anonymous by
 // its MemberID (the wire 0 / -1).

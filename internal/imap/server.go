@@ -29,7 +29,7 @@ import (
 const capabilities = "IMAP4rev1 LITERAL+ NAMESPACE AUTH=PLAIN AUTH=LOGIN IDLE CHILDREN ID UNSELECT UIDPLUS MOVE SPECIAL-USE QUOTA ESEARCH MULTIAPPEND SORT THREAD=ORDEREDSUBJECT THREAD=REFERENCES BINARY ENABLE CONDSTORE QRESYNC ACL"
 
 // idlePollCadence is the fallback poll interval during IDLE when the push relay is
-// absent or a wake is missed — the degradation floor that keeps IDLE emitting
+// absent or a wake is missed, the degradation floor that keeps IDLE emitting
 // updates on time even with no push.
 const idlePollCadence = 30 * time.Second
 
@@ -65,7 +65,7 @@ type Server struct {
 
 // SetNotify wires the push wake source so an IDLE-ing client receives untagged
 // updates the instant its mailbox changes rather than on the IDLE poll cadence. A
-// nil consumer (push disabled) leaves IDLE on its cadence — the degradation floor.
+// nil consumer (push disabled) leaves IDLE on its cadence, the degradation floor.
 // The daemon calls this once at startup, before serving.
 func (s *Server) SetNotify(c *notify.Consumer) {
 	if c == nil {
@@ -244,7 +244,7 @@ func (c *conn) dispatch(toks []token) {
 	name, _ := toks[1].str()
 	args := toks[2:]
 
-	// Per-command audit at debug level — the command name only, never its
+	// Per-command audit at debug level, the command name only, never its
 	// arguments (LOGIN/AUTHENTICATE arguments carry credentials).
 	c.event(logging.LevelDebug, "command", logging.Fields{"cmd": strings.ToUpper(name)})
 
@@ -530,7 +530,7 @@ func (c *conn) cmdStartTLS(tag string) {
 	if c.rd.br.Buffered() > 0 {
 		// Pipelined plaintext behind STARTTLS (injection attempt): end the
 		// session without replying so the smuggled command never runs. Setting
-		// stateLogout breaks the dispatch loop — a bare return here would only
+		// stateLogout breaks the dispatch loop, a bare return here would only
 		// leave cmdStartTLS and let handle read the injected command next.
 		c.event(logging.LevelWarn, "starttls.injection", nil)
 		c.state = stateLogout
@@ -959,7 +959,7 @@ func (c *conn) poll() {
 // client until the client ends the command with DONE. A push wake surfaces a change
 // at once; a fallback cadence covers a missing relay. The client MUST NOT send
 // anything but DONE while idling (RFC 2177), so a single goroutine does the one
-// blocking read for the terminating line — a raw line read off the same buffered
+// blocking read for the terminating line, a raw line read off the same buffered
 // reader, which writes nothing, so it cannot race the main loop's untagged writes.
 // No SetReadDeadline is used: a deadline firing mid-line would leave the reader in
 // an unresumable partial state, and the command loop must keep reading on it after

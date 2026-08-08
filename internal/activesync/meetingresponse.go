@@ -32,8 +32,8 @@ func userResponse(u int) (int32, bool) {
 
 // handleMeetingResponse answers the MeetingResponse command (MS-ASCMD): the device
 // accepts, tentatively accepts, or declines meeting requests it received. Each
-// Request is recorded through the shared meeting workflow — filing the appointment
-// and notifying the organizer — and answered with the resulting CalendarId.
+// Request is recorded through the shared meeting workflow, filing the appointment
+// and notifying the organizer, and answered with the resulting CalendarId.
 func (s *Server) handleMeetingResponse(w http.ResponseWriter, r *http.Request, sess *session) {
 	root, err := readWBXML(r)
 	if err != nil {

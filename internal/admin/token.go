@@ -1,7 +1,7 @@
 // Package admin serves the hermEX administration API: it authenticates
 // administrators against the directory, enforces their system/org/domain roles,
 // and exposes the directory's resources over HTTP. The session is a self-signed
-// HS256 JWT in a cookie — no external token library.
+// HS256 JWT in a cookie, no external token library.
 package admin
 
 import (

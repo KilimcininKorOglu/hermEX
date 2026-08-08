@@ -10,7 +10,7 @@ import (
 	"hermex/internal/objectstore"
 )
 
-// looseSet builds a loose, home-replica-keyed idset over single values — the
+// looseSet builds a loose, home-replica-keyed idset over single values, the
 // form GetContentSync compares a client's prior synchronization state against.
 func looseSet(vs ...uint64) *ics.IDSet {
 	s := ics.NewIDSet(ics.FormIDLoose, nil)
@@ -49,7 +49,7 @@ func containsMID(mids []uint64, mid uint64) bool {
 // existing message in place through the ROP write path (OpenMessage →
 // SetProperties → SaveChangesMessage) must reallocate the message's change
 // number so the ICS content-sync diff reports it as an UPDATE, not leave it
-// looking unchanged. A props-readback alone would not prove the unblock — the
+// looking unchanged. A props-readback alone would not prove the unblock, the
 // load-bearing assertion is that GetContentSync, run against the state the client
 // held before the edit, now lists the message in both ChangedMIDs and
 // UpdatedMIDs with an advanced high-water change number.
@@ -79,7 +79,7 @@ func TestInPlaceModifyBumpsChangeNumber(t *testing.T) {
 		t.Fatal("create did not assign a change number")
 	}
 
-	// With the create CN acknowledged, the message is up to date — not in the delta.
+	// With the create CN acknowledged, the message is up to date, not in the delta.
 	base, err := store.GetContentSync(objectstore.ContentSyncRequest{
 		FolderID: inboxFID, Given: looseSet(mid), Seen: looseSet(cn1),
 	})

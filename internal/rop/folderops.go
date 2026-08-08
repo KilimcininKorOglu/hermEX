@@ -122,7 +122,7 @@ func (s *Session) ropMoveFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	}
 	movedFID := int64(mapi.EID(fid).GCValue())
 	// Moving (or renaming) a folder modifies the folder itself: it requires owner
-	// rights on the folder being moved — the same right RopDeleteFolder requires to
+	// rights on the folder being moved, the same right RopDeleteFolder requires to
 	// remove one. For an owner this short-circuits.
 	if s.denyWrite(out, ropMoveFolder, hindex, folder.store, movedFID, mapi.FrightsOwner) {
 		return true
@@ -155,7 +155,7 @@ func (s *Session) ropMoveFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 }
 
 // ropCopyFolder handles RopCopyFolder ([MS-OXCFOLD] 2.2.1.4): it copies the folder
-// identified by fid (with its messages, and — when WantRecursive is set — its
+// identified by fid (with its messages, and, when WantRecursive is set, its
 // subfolders) under the destination folder at DestHandleIndex, with the supplied
 // new name. Copying a folder into its own subtree is refused with
 // MAPI_E_FOLDER_CYCLE. v1 is always synchronous.

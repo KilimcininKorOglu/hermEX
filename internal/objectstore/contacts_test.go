@@ -38,7 +38,7 @@ func has(t *testing.T, s *Store, addr string) bool {
 // TestContactHasAddress proves the known-sender lookup that gates the
 // out-of-office external audience: a stored contact's address matches
 // case-insensitively and through a display-name form, a slot-2/3 address is found
-// (all three e-mail slots are scanned), and a non-contact address does not match —
+// (all three e-mail slots are scanned), and a non-contact address does not match,
 // the property that makes "external known only" actually withhold replies.
 func TestContactHasAddress(t *testing.T) {
 	s := openSeededStore(t)
@@ -66,7 +66,7 @@ func TestContactHasAddress(t *testing.T) {
 }
 
 // TestContactHasAddressNoContacts proves a mailbox that has never stored a contact
-// e-mail resolves no named ids and reports false without error — the fast path that
+// e-mail resolves no named ids and reports false without error, the fast path that
 // keeps ordinary delivery free of a folder scan.
 func TestContactHasAddressNoContacts(t *testing.T) {
 	s := openSeededStore(t)

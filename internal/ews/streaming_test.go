@@ -90,7 +90,7 @@ func TestGetStreamingEventsMultiSub(t *testing.T) {
 	if !strings.Contains(body, "CreatedEvent") {
 		t.Errorf("the inbox change must surface for the inbox subscription: %s", body)
 	}
-	// The change is in inbox scope only; the sentitems sub never sees a create —
+	// The change is in inbox scope only; the sentitems sub never sees a create,
 	// the demux guarantee (a whole-store sub instead would also see it).
 	if !strings.Contains(body, "StatusEvent") {
 		t.Errorf("the out-of-scope subscription must heartbeat, not carry the create: %s", body)

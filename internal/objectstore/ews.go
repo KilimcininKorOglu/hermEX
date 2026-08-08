@@ -4,7 +4,7 @@ import "hermex/internal/mapi"
 
 // GetEwsState returns the EWS sync-state JSON stored on the store root, or the
 // empty string when no client has synced yet. The state lives as a single MAPI
-// property (PrEwsSyncState) rather than in a dedicated table — the same
+// property (PrEwsSyncState) rather than in a dedicated table, the same
 // "everything is a property" shape the ActiveSync, webmail-settings, and
 // out-of-office stores use.
 func (s *Store) GetEwsState() (string, error) {

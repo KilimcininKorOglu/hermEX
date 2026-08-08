@@ -17,7 +17,7 @@ const (
 	fhStatusNotFound       = 4  // the target folder does not exist
 	fhStatusParentNotFound = 5  // the named parent folder does not exist
 	fhStatusServerError    = 6  // an error occurred on the server
-	fhStatusBadSyncKey     = 9  // the hierarchy sync key did not match — device must re-prime
+	fhStatusBadSyncKey     = 9  // the hierarchy sync key did not match, device must re-prime
 	fhStatusBadRequest     = 10 // the request was malformed (e.g. an empty name)
 )
 
@@ -29,7 +29,7 @@ const (
 // top-level folder); any other ParentId names an existing folder.
 //
 // The request's folder Type is not honored: every folder is created as a mail
-// (note) folder, the only collection class v1 synchronizes — a calendar or
+// (note) folder, the only collection class v1 synchronizes, a calendar or
 // contact folder type would not sync anyway.
 func (s *Server) handleFolderCreate(w http.ResponseWriter, r *http.Request, sess *session) {
 	root, err := readWBXML(r)

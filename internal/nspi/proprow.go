@@ -14,7 +14,7 @@ const (
 // pushPropertyRow serializes one column-projected PROPERTY_ROW ([MS-OXCDATA]
 // 2.8.1) against cols, the shape QueryRows' row set uses: a NONE row (flag 0x00,
 // a bare value per column) when every column is present, else a FLAGGED row
-// (flag 0x01, a FLAGGED_PROPVAL per column — available with its value, or a
+// (flag 0x01, a FLAGGED_PROPVAL per column, available with its value, or a
 // PT_ERROR marker carrying ecNotFound when the column has no value, matching the
 // reference's per-property fetch). The column proptag types each value, and
 // because the push runs under EXT_FLAG_ABK the string/binary values carry the

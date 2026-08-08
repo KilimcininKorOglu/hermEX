@@ -30,8 +30,8 @@ type Policy struct {
 }
 
 // Parse reads an mta-sts.txt policy (RFC 8461 §3.2): CRLF-separated "key: value"
-// lines. It requires version STSv1, a recognised mode, a positive max_age, and —
-// unless the policy is withdrawing (mode none) — at least one mx pattern. Unknown
+// lines. It requires version STSv1, a recognised mode, a positive max_age, and,
+// unless the policy is withdrawing (mode none), at least one mx pattern. Unknown
 // keys are ignored, as the RFC requires for forward compatibility.
 func Parse(text string) (*Policy, error) {
 	var p Policy
@@ -74,7 +74,7 @@ func Parse(text string) (*Policy, error) {
 
 // Build serializes a policy to mta-sts.txt form (RFC 8461 §3.2): CRLF-separated
 // "key: value" lines, the version first, one mx line per pattern, then max_age. It
-// is the inverse of Parse — Parse(Build(p)) reproduces p — and is how the server
+// is the inverse of Parse, Parse(Build(p)) reproduces p, and is how the server
 // publishes its own policy at /.well-known/mta-sts.txt.
 func Build(p Policy) string {
 	var b strings.Builder
@@ -95,7 +95,7 @@ func Build(p Policy) string {
 
 // PolicyID derives the identifier a domain publishes in its _mta-sts TXT record
 // (RFC 8461 §3.1) from the policy text. A sender re-fetches the policy when this id
-// changes, so it must change exactly when the served policy does — deriving it from
+// changes, so it must change exactly when the served policy does, deriving it from
 // the policy bytes (rather than a timestamp) guarantees that, even when an input like
 // the server hostname changes without any settings write. It is the hex of the first
 // 16 bytes of the SHA-256 of the policy: 32 alphanumeric characters, the RFC maximum.

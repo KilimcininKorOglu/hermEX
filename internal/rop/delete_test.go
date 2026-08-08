@@ -106,7 +106,7 @@ func TestDeleteMessageProperties(t *testing.T) {
 
 // TestSetAfterDeleteWins drives the reverse of the delete-after-set case: a
 // property is deleted then set again before any save. The buffered set must
-// supersede the buffered delete so the value survives — otherwise
+// supersede the buffered delete so the value survives, otherwise
 // SaveChangesMessage would insert the row and then delete it in the same
 // transaction, losing the client's write.
 func TestSetAfterDeleteWins(t *testing.T) {

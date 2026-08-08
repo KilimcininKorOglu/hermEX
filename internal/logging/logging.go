@@ -1,6 +1,6 @@
 // Package logging is hermEX's central, structured activity log. Every subsystem
-// emits Events — a connection, an authentication attempt, a protocol operation,
-// an error — through a Logger to a Sink. The schema is original and independent
+// emits Events, a connection, an authentication attempt, a protocol operation,
+// an error, through a Logger to a Sink. The schema is original and independent
 // of the mailbox store's on-disk schema: one flat Event document with a small set
 // of indexed columns (time, level, subsystem, user) plus a free-form Fields map
 // for the rest.
@@ -53,7 +53,7 @@ func (l Level) String() string {
 // security/sync layers, and the operational surfaces.
 type Subsystem string
 
-// The subsystem taxonomy. Keep this list and the instrumentation in lockstep —
+// The subsystem taxonomy. Keep this list and the instrumentation in lockstep,
 // each value should have at least one emitting call site and an integration test
 // that asserts a document lands.
 const (
@@ -103,7 +103,7 @@ type Event struct {
 }
 
 // Sink consumes finished Events. Implementations must be safe for concurrent use
-// and must not block the caller for long — the protocol hot paths emit events, so
+// and must not block the caller for long, the protocol hot paths emit events, so
 // a slow sink (a remote database) buffers asynchronously rather than blocking.
 type Sink interface {
 	Write(Event)

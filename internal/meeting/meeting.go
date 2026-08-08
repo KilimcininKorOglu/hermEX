@@ -1,6 +1,6 @@
 // Package meeting carries the protocol-neutral meeting-response workflow shared by
 // EWS (MS-OXWSMTGS) and ActiveSync (MS-ASCMD MeetingResponse): recording an
-// attendee's accept/tentative/decline on a meeting request — stamping the request,
+// attendee's accept/tentative/decline on a meeting request, stamping the request,
 // filing the appointment in the Calendar, and notifying the organizer with an iTIP
 // REPLY. The orchestration lives here so each protocol handler only decodes its own
 // request and renders its own response.
@@ -77,7 +77,7 @@ func ResolveTags(st *objectstore.Store) (Tags, error) {
 
 // Respond records an attendee's response to the meeting request at messageID: it
 // stamps the request as responded, files the appointment in the Calendar for an
-// accept or tentative (declining files none), and — when send is set — notifies the
+// accept or tentative (declining files none), and, when send is set, notifies the
 // organizer with an iTIP REPLY routed from sender. It returns the message id of the
 // filed Calendar appointment (0 when declined). sender is the responder's address;
 // accounts and spool route the organizer notification.
@@ -262,7 +262,7 @@ func responsePrefix(response int32) string {
 	}
 }
 
-// responseRequested reports whether the organizer wants a response — true unless
+// responseRequested reports whether the organizer wants a response, true unless
 // PR_RESPONSE_REQUESTED is explicitly false.
 func responseRequested(props mapi.PropertyValues) bool {
 	if v, ok := props.Get(mapi.PrResponseRequested); ok {

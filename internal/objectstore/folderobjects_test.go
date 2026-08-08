@@ -58,7 +58,7 @@ func TestListFolderObjects(t *testing.T) {
 		t.Errorf("change numbers not monotonic: %d, %d", objs[0].ChangeNumber, objs[1].ChangeNumber)
 	}
 
-	// The IMAP index never saw these objects — this is why DAV needs the object
+	// The IMAP index never saw these objects, this is why DAV needs the object
 	// store primitive rather than ListMessages.
 	if idx, err := s.ListMessages(mapi.PrivateFIDContacts); err != nil {
 		t.Fatal(err)

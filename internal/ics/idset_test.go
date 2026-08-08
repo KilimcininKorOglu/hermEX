@@ -115,7 +115,7 @@ func TestConcatenate(t *testing.T) {
 }
 
 // TestForEachRange verifies every range is enumerated with its replica id,
-// including foreign replicas (replid > 1) — the delta engine's deletion pass
+// including foreign replicas (replid > 1), the delta engine's deletion pass
 // depends on this to walk the client's given set.
 func TestForEachRange(t *testing.T) {
 	s := NewIDSet(FormIDLoose, nil)

@@ -264,7 +264,7 @@ func (s *Server) handleMailDraft(w http.ResponseWriter, r *http.Request) {
 // traverses the authenticated SMTP path where that gate runs: an empty or
 // self-matching want sends as the caller; any other address is allowed only when
 // it is one of the caller's directory identities (an alias) or when the mailbox
-// that owns it has granted the caller a send-as permission. It fails closed —
+// that owns it has granted the caller a send-as permission. It fails closed,
 // an unresolvable owner, an unopenable store, or an unreadable list denies the
 // identity rather than risking a forged From. representing is the authorized
 // From; sender is always the real caller so oxcmail emits a Sender header (RFC
@@ -327,7 +327,7 @@ func (s *Server) grantedSendAs(caller, want string) bool {
 }
 
 // buildOutgoing maps the send fields onto a MAPI message and exports it to RFC
-// 5322 bytes via oxcmail — mirroring the server-rendered webmail's compose path.
+// 5322 bytes via oxcmail, mirroring the server-rendered webmail's compose path.
 // representing is the authorized From identity; sender is the real authenticated
 // caller. When they differ (send-on-behalf) oxcmail emits a Sender header.
 func (s *Server) buildOutgoing(representing, sender string, req sendRequest) ([]byte, error) {

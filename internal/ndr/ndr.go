@@ -5,7 +5,7 @@
 // This is a distinct layer from package ext, which serializes MS-OXC property
 // *values*: NDR adds natural-boundary alignment (each scalar is preceded by
 // padding to its own width, measured from the stream start) and the referent-id
-// pointer model. v1 is little-endian only — every Windows RPC client sends its
+// pointer model. v1 is little-endian only, every Windows RPC client sends its
 // data representation little-endian, and a big-endian peer is rejected at the
 // PDU layer (see pdu.go).
 package ndr

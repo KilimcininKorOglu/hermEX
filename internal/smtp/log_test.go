@@ -39,8 +39,8 @@ func findEvent(events []logging.Event, name string) (logging.Event, bool) {
 }
 
 // TestInstrumentationLogsTransaction proves the SMTP server logs a message intake
-// — a connection accept, the envelope sender and recipient, and the accepted
-// message — each tagged with the client address (so every log line carries the
+// , a connection accept, the envelope sender and recipient, and the accepted
+// message, each tagged with the client address (so every log line carries the
 // originating IP).
 func TestInstrumentationLogsTransaction(t *testing.T) {
 	sink := &captureSink{}

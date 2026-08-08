@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// handleGetUserStoreOwners returns the user's additional store-owner list — the users
+// handleGetUserStoreOwners returns the user's additional store-owner list, the users
 // granted full read-write access to the whole mailbox. Gated by requireUserScope.
 func (s *Server) handleGetUserStoreOwners(w http.ResponseWriter, r *http.Request) {
 	maildir, ok := s.resolveMaildir(w, r)

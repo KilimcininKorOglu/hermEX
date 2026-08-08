@@ -80,10 +80,10 @@ func (s *Store) GetMessageProperties(messageID int64, tags ...mapi.PropTag) (map
 }
 
 // ModifyMessageProperties upserts properties on an existing message and, in the
-// same transaction, reallocates the message's change number — the in-place-edit
+// same transaction, reallocates the message's change number, the in-place-edit
 // counterpart to SetMessageProperties (a pure upsert that leaves the change
 // number untouched). The reference allocates a fresh PidTagChangeNumber on every
-// dirty message save — for a modify exactly as for a create — so an edited-and-
+// dirty message save, for a modify exactly as for a create, so an edited-and-
 // resaved message is observed as changed. The load-bearing write is the
 // messages-row change_number bump: ICS content-sync reports the message as
 // updated only when that column advances, so this is what drives the "updated"
@@ -192,7 +192,7 @@ func (s *Store) ListRecipients(messageID int64) ([]Recipient, error) {
 // SetAttachmentProperties upserts properties on an attachment and, when deletes are
 // given, removes those property tags in the same transaction (the attachment
 // counterpart of ModifyMessageProperties). An attachment carries no change number
-// of its own — the parent message's change number advances on its own save — so
+// of its own, the parent message's change number advances on its own save, so
 // this does not bump one. It does rebuild the parent message's cached wire form: this
 // is where an attachment's payload and filename land (a ROP client builds an
 // attachment as an empty CreateAttachment followed by this call), so without it the
@@ -354,7 +354,7 @@ func (s *Store) scanProps(query string, args []any) (mapi.PropertyValues, error)
 }
 
 // storedPropval computes the value written into a propval column. Content
-// properties (bodies, attachment payloads — see isCIDProp) are offloaded to a
+// properties (bodies, attachment payloads, see isCIDProp) are offloaded to a
 // content file and the column holds the returned content id; every other
 // property is encoded inline as a queryable scalar or a length-prefixed blob.
 func (s *Store) storedPropval(tag mapi.PropTag, v any) (any, error) {

@@ -24,7 +24,7 @@ const (
 
 // RightsAll is full ownership: every standard right except the free/busy-only and
 // contact bits the dedicated roles add. RightsMaxROP is the set a client may set
-// over the wire — ModifyPermissions ingest masks each row with it, so any bit
+// over the wire, ModifyPermissions ingest masks each row with it, so any bit
 // outside this allowlist (reference-private extensions, reserved bits) is dropped
 // before storage. Both are symbolic unions so they cannot transcribe-error.
 const (

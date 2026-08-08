@@ -9,7 +9,7 @@ import (
 // TestWriteAtomic proves the ruleset is published atomically: the target ends with
 // exactly the written bytes, the temporary file is renamed away (never left behind for
 // a reader to mistake for the ruleset), and a second write replaces the first. The
-// atomicity matters because the MTA polls this file live — a reader must never observe
+// atomicity matters because the MTA polls this file live, a reader must never observe
 // a half-written ruleset.
 func TestWriteAtomic(t *testing.T) {
 	dir := t.TempDir()

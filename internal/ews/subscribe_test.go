@@ -88,7 +88,7 @@ func seedInbox(t *testing.T, path, subject string) (int64, uint32) {
 }
 
 // TestSubscribeBaselineNoFlood confirms a message that already exists when the
-// subscription is created is NOT reported as a create on the first poll — the
+// subscription is created is NOT reported as a create on the first poll, the
 // baseline-at-registration invariant.
 func TestSubscribeBaselineNoFlood(t *testing.T) {
 	srv, sess, path := subServer(t)
@@ -203,7 +203,7 @@ func TestGetEventsStatusOnEmpty(t *testing.T) {
 }
 
 // TestEventTypeMaskGating confirms a subscription to CreatedEvent only does not
-// report a modify — the event-type mask gates production.
+// report a modify, the event-type mask gates production.
 func TestEventTypeMaskGating(t *testing.T) {
 	srv, sess, path := subServer(t)
 	mid, _ := seedInbox(t, path, "modify me")

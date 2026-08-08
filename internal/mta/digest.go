@@ -110,7 +110,7 @@ func (r *DigestRunner) digestMailbox(email, maildir string) (bool, error) {
 		return false, err
 	}
 	// Advance the watermark only after delivery. If this fails, the worst case is a
-	// duplicate digest next run — preferable to losing the notification entirely.
+	// duplicate digest next run, preferable to losing the notification entirely.
 	if err := r.Dir.SetDigestWatermark(maildir, maxUID); err != nil {
 		return true, err
 	}

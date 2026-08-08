@@ -58,7 +58,7 @@ func TestLoadRulesUsesExistingFileWithoutReseeding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadRules: %v", err)
 	}
-	// Only the operator's single rule loaded — not the hundreds in the baseline.
+	// Only the operator's single rule loaded, not the hundreds in the baseline.
 	if rules, _ := rs.RuleCount(); rules != 1 {
 		t.Errorf("live rules = %d, want 1 (the operator's file, not the baseline)", rules)
 	}

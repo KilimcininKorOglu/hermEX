@@ -348,8 +348,8 @@ func boolStr(b bool) string {
 }
 
 // objectChanges diffs an object folder's stored items (calendar appointments or
-// contacts) against the device snapshot — keyed by object id -> change number, since
-// these items carry no IMAP flags — and builds the Add/Change/Delete commands, capped
+// contacts) against the device snapshot, keyed by object id -> change number, since
+// these items carry no IMAP flags, and builds the Add/Change/Delete commands, capped
 // at the window. A new id is an Add, a bumped change number a Change, a vanished id a
 // Delete; the snapshot records the change number of every item it sends, so a
 // capped-out item is re-detected on the next sync. appData renders one item's

@@ -13,7 +13,7 @@ import (
 // processor: when it handles a message (a meeting request) the out-of-office reply is
 // skipped (the organizer gets a meeting response, not an OOF); when it does not, the
 // out-of-office reply still fires for ordinary mail. The second direction is the
-// load-bearing half — it proves wiring the processor in did not break OOF delivery.
+// load-bearing half, it proves wiring the processor in did not break OOF delivery.
 func TestDeliverMeetingHookGatesAutoReply(t *testing.T) {
 	for _, tc := range []struct {
 		name        string

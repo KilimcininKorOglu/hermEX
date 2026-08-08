@@ -99,7 +99,7 @@ func TestSignVerifyRoundTrip(t *testing.T) {
 	}
 }
 
-// TestSignThenOpensslVerify proves our signed output verifies under openssl — the
+// TestSignThenOpensslVerify proves our signed output verifies under openssl, the
 // interop oracle, not our own verifier.
 func TestSignThenOpensslVerify(t *testing.T) {
 	requireOpenssl(t)
@@ -123,7 +123,7 @@ func TestSignThenOpensslVerify(t *testing.T) {
 	}
 }
 
-// TestOpensslSignThenVerify proves we verify a signature produced by openssl —
+// TestOpensslSignThenVerify proves we verify a signature produced by openssl,
 // the inbound interop direction.
 func TestOpensslSignThenVerify(t *testing.T) {
 	requireOpenssl(t)

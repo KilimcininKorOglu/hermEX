@@ -34,7 +34,7 @@ type dnsReport struct {
 }
 
 // checkDomainDNS resolves the mail-relevant DNS records for a domain and reports
-// what was found. It is a read-only diagnostic over the supplied resolver — it
+// what was found. It is a read-only diagnostic over the supplied resolver, it
 // reports the live records rather than comparing against an expected target, so
 // every result reflects real DNS state.
 func checkDomainDNS(ctx context.Context, r dnsResolver, domain, hostname string) dnsReport {
@@ -44,7 +44,7 @@ func checkDomainDNS(ctx context.Context, r dnsResolver, domain, hostname string)
 	}
 
 	// Reachability: the server's mail host must resolve publicly, or none of the
-	// per-domain records below lead anywhere — every prescribed MX/CNAME/SRV target
+	// per-domain records below lead anywhere, every prescribed MX/CNAME/SRV target
 	// points at this host. hostname is the server's mail FQDN.
 	if hostname != "" {
 		if hosts, err := r.LookupHost(ctx, hostname); err == nil && len(hosts) > 0 {

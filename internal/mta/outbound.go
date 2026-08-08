@@ -10,7 +10,7 @@ import (
 // (authenticated) account may send to within it. A compromised account blasting spam
 // trips the cap; the excess is deferred and the admin is alerted once per window.
 // Chosen high enough to tolerate ordinary use (including a legitimate post to an
-// external-heavy list) and DISABLED by default — an admin opts in and tunes.
+// external-heavy list) and DISABLED by default, an admin opts in and tunes.
 const (
 	defaultOutboundWindow = time.Hour
 	defaultOutboundCap    = 500
@@ -18,7 +18,7 @@ const (
 
 // outboundMaxKeys bounds the limiter's memory: the number of accounts tracked at
 // once. A full table of still-live windows fails open (admits) rather than evict a
-// live counter — it must never block a legitimate account to reclaim memory.
+// live counter, it must never block a legitimate account to reclaim memory.
 const outboundMaxKeys = 100_000
 
 // obWindow is one account's fixed-window recipient counter, plus whether the

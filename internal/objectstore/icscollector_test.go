@@ -39,7 +39,7 @@ func streamPropBytes(items []ics.Item, tag mapi.PropTag) ([]byte, bool) {
 }
 
 // TestUploadStateStreamRoundTrip replays a prior seen set as a chunked state
-// stream, then asserts GetTransferState frames it back exactly — INCRSYNCSTATEBEGIN
+// stream, then asserts GetTransferState frames it back exactly, INCRSYNCSTATEBEGIN
 // first, INCRSYNCSTATEEND last, with the uploaded change-number range surviving the
 // GUID-packed serialize/deserialize/convert cycle the wire imposes.
 func TestUploadStateStreamRoundTrip(t *testing.T) {
@@ -107,7 +107,7 @@ func TestUploadStateStreamRoundTrip(t *testing.T) {
 }
 
 // TestUploadCollectorReadStateFeedsState asserts a read-state import folds its
-// store-assigned read change number into the collector's read set — the only
+// store-assigned read change number into the collector's read set, the only
 // contents import that touches the upload state.
 func TestUploadCollectorReadStateFeedsState(t *testing.T) {
 	s := openSeededStore(t)

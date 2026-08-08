@@ -104,7 +104,7 @@ func (s *Server) handleUITLSSettings(w http.ResponseWriter, r *http.Request) {
 // gateway serves this server's policy at mta-sts.<domain> and the domain-detail page
 // prescribes the records a domain owner publishes. Enforce mode is gated behind an
 // explicit confirmation: a sender refuses delivery to a non-validated MX, so a
-// certificate problem under enforce loses inbound mail — testing mode reports failures
+// certificate problem under enforce loses inbound mail, testing mode reports failures
 // but still delivers, the safe default.
 func (s *Server) handleUIMTASTSSettings(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.uiAuthorized(w, r); !ok {
@@ -140,7 +140,7 @@ func (s *Server) handleUITLSCerts(w http.ResponseWriter, r *http.Request) {
 
 // handleUITLSCertUpload validates an uploaded certificate/key pair and stores it,
 // keyed by an optional SNI name ("" is the default). The listeners pick it up on
-// their next poll, so an operator's upload — or a renewal — applies without a
+// their next poll, so an operator's upload, or a renewal, applies without a
 // restart.
 func (s *Server) handleUITLSCertUpload(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.uiAuthorized(w, r); !ok {

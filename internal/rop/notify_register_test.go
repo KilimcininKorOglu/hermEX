@@ -10,7 +10,7 @@ import (
 
 // buildRegisterNotification builds a RopRegisterNotification request: header (RopId,
 // LogonId, InputHandleIndex) + body (OutputHandleIndex, NotificationTypes, Reserved,
-// WantWholeStore, and — only when not whole-store — FolderId, MessageId).
+// WantWholeStore, and, only when not whole-store, FolderId, MessageId).
 func buildRegisterNotification(inIdx, outIdx, ntypes, wantWhole uint8, folderEID, messageEID uint64) []byte {
 	b := ext.NewPush(ext.FlagUTF16)
 	b.Uint8(ropRegisterNotification)
@@ -30,7 +30,7 @@ func buildRegisterNotification(inIdx, outIdx, ntypes, wantWhole uint8, folderEID
 // TestRegisterNotificationFolderScope drives RopRegisterNotification over a real
 // session and pins the three contract points: the bare 6-byte response head (no
 // body, HandleIndex = OutputHandleIndex), the subscription object created with the
-// wire EIDs decoded to the objectstore scope, and — the load-bearing invariant — the
+// wire EIDs decoded to the objectstore scope, and, the load-bearing invariant, the
 // baseline snapshot taken at registration so the first poll suppresses a message that
 // already existed when the client subscribed.
 func TestRegisterNotificationFolderScope(t *testing.T) {
@@ -54,7 +54,7 @@ func TestRegisterNotificationFolderScope(t *testing.T) {
 	inboxEID := uint64(mapi.MakeEIDEx(1, uint64(inbox)))
 	resp, h := sess.Dispatch(buildRegisterNotification(0, 1, ntypes, 0, inboxEID, 0), []uint32{logonH, 0xFFFFFFFF})
 
-	// Response: the bare head only — RopId, OutputHandleIndex, ecSuccess, nothing more.
+	// Response: the bare head only, RopId, OutputHandleIndex, ecSuccess, nothing more.
 	p := ext.NewPull(resp, ext.FlagUTF16)
 	if id := mustU8(t, p, "RopId"); id != ropRegisterNotification {
 		t.Fatalf("RopId = %#x, want %#x", id, ropRegisterNotification)
@@ -92,7 +92,7 @@ func TestRegisterNotificationFolderScope(t *testing.T) {
 	}
 
 	// The baseline captured the pre-existing message, so a poll diff against it is
-	// empty — the load-bearing baseline-at-registration invariant.
+	// empty, the load-bearing baseline-at-registration invariant.
 	if _, ok := obj.subSnapshot[info.ID]; !ok {
 		t.Errorf("baseline snapshot missing pre-existing message %d: %v", info.ID, obj.subSnapshot)
 	}
@@ -106,8 +106,8 @@ func TestRegisterNotificationFolderScope(t *testing.T) {
 }
 
 // TestRegisterNotificationWholeStore confirms a whole-store subscription is accepted
-// and given a handle — Outlook commonly registers one, and rejecting it would break
-// the client — but is left without a folder baseline, since the all-folders poll it
+// and given a handle, Outlook commonly registers one, and rejecting it would break
+// the client, but is left without a folder baseline, since the all-folders poll it
 // needs is deferred (the internal spec §9).
 func TestRegisterNotificationWholeStore(t *testing.T) {
 	sess := NewSession(t.TempDir(), nil, "")

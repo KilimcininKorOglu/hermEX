@@ -15,7 +15,7 @@ const (
 
 // pushTypedString writes a TYPED_STRING: a 1-byte type then, for UNICODE, the
 // UTF-16LE string. An empty value is encoded as EMPTY (present but empty) with
-// no body — matching the reference rop_openmessage, which uses EMPTY rather than
+// no body, matching the reference rop_openmessage, which uses EMPTY rather than
 // NONE for an absent subject prefix / normalized subject.
 func pushTypedString(out *ext.Push, s string) {
 	if s == "" {
@@ -37,7 +37,7 @@ func stringProp(pv mapi.PropertyValues, tag mapi.PropTag) string {
 }
 
 // ropOpenMessage handles RopOpenMessage ([MS-OXCMSG] 2.2.3.1): it resolves the
-// message entry id, registers a message object, and writes the open response —
+// message entry id, registers a message object, and writes the open response,
 // the subject TYPED_STRINGs and (v1) an empty recipient table. The 64-bit
 // MessageId is an EID whose global-counter value is the objectstore id; the
 // FolderId is informational since message ids are store-global.
@@ -57,7 +57,7 @@ func (s *Session) ropOpenMessage(p *ext.Pull, out *ext.Push, handles []uint32, h
 	}
 	msgID := int64(mapi.EID(messageEID).GCValue())
 	// A delegate may read a message only with ReadAny on its REAL parent folder,
-	// resolved from the store — never the wire FolderId, which is informational and
+	// resolved from the store, never the wire FolderId, which is informational and
 	// could name a folder the caller can read to reach one they cannot. The lookup
 	// also serves as the existence check (ErrNotFound → ecNotFound), so an owner,
 	// who is unrestricted, sees identical behavior.

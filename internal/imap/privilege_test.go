@@ -27,7 +27,7 @@ func (d privDir) Privileges(user string) (directory.ServicePrivileges, bool) {
 }
 
 // TestIMAPPrivilegeDenied proves a user with valid credentials but no POP3/IMAP
-// service privilege is refused at LOGIN — so revoking the privilege actually
+// service privilege is refused at LOGIN, so revoking the privilege actually
 // blocks access, rather than merely being stored.
 func TestIMAPPrivilegeDenied(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "alice")

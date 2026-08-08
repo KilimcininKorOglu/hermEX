@@ -4,7 +4,7 @@ package ics
 // (PutBuffer fragments) that may split an element at ANY byte boundary,
 // including mid-primitive. Feed appends a chunk; Next yields each complete
 // element in order and reports NeedMore (ok=false) when the buffered bytes hold
-// only part of the next element — the caller then Feeds more and retries. This
+// only part of the next element, the caller then Feeds more and retries. This
 // length-driven reassembly is what makes the reader interoperate with a real
 // client's arbitrary chunking, which we cannot otherwise observe.
 type Parser struct {

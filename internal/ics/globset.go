@@ -11,9 +11,9 @@ import (
 // below are the fixed commands.
 const (
 	glbEnd     = 0x00 // terminates a replica's GLOBSET
-	glbBitmask = 0x42 // 'B' — bitmask expansion (decode only; see deserializeGlobset)
-	glbPop     = 0x50 // 'P' — pop the top stack frame
-	glbRange   = 0x52 // 'R' — a low/high pair, each (6-depth) bytes
+	glbBitmask = 0x42 // 'B', bitmask expansion (decode only; see deserializeGlobset)
+	glbPop     = 0x50 // 'P', pop the top stack frame
+	glbRange   = 0x52 // 'R', a low/high pair, each (6-depth) bytes
 )
 
 // rangeNode is one inclusive [lo,hi] interval of 48-bit global-counter values.

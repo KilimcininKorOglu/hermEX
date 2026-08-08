@@ -6,8 +6,8 @@ import (
 	"hermex/internal/directory"
 )
 
-// maxListDepth caps nested distribution-list expansion. It is a backstop only —
-// the seen-set already breaks cycles — so it is set well above any sane nesting.
+// maxListDepth caps nested distribution-list expansion. It is a backstop only,
+// the seen-set already breaks cycles, so it is set well above any sane nesting.
 const maxListDepth = 20
 
 // MListExpander is the directory capability the MTA needs to expand distribution
@@ -25,7 +25,7 @@ var _ MListExpander = (*directory.SQLDirectory)(nil)
 
 // expandMailingList resolves a recipient address to its final non-list member
 // addresses, recursively expanding nested lists. from is the original sender,
-// re-checked at every level — a nested list that refuses the sender contributes
+// re-checked at every level, a nested list that refuses the sender contributes
 // nothing. The seen-set breaks membership cycles and de-duplicates recipients, so
 // each address appears at most once however the lists are wired.
 //

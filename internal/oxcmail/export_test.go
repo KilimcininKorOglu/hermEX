@@ -28,7 +28,7 @@ var plainVector = []byte("From: Alice Example <alice@example.com>\r\n" +
 // TestExportPreservesXSpamHeaders proves the anti-spam X-Spam headers survive the
 // MAPI round trip. The structured export reconstructs the message from properties,
 // so it must re-emit these (stored at import in the transport header block)
-// explicitly — otherwise client-side spam filtering on the delivered copy breaks.
+// explicitly, otherwise client-side spam filtering on the delivered copy breaks.
 func TestExportPreservesXSpamHeaders(t *testing.T) {
 	raw := []byte("X-Spam-Flag: YES\r\n" +
 		"X-Spam-Score: 12\r\n" +
@@ -174,7 +174,7 @@ func TestEnsureMessageID(t *testing.T) {
 	if got := exported(t, p3); got != "<keep@host>" {
 		t.Errorf("explicit Message-ID = %q, want it preserved", got)
 	}
-	// Export alone (no EnsureMessageID) emits no Message-ID — the reference
+	// Export alone (no EnsureMessageID) emits no Message-ID, the reference
 	// behaviour, keeping a re-served stored message byte-stable.
 	if got := exported(t, newSender()); got != "" {
 		t.Errorf("Export emitted Message-ID %q without one set, want none", got)

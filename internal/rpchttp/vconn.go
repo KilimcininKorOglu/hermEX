@@ -55,7 +55,7 @@ type vconn struct {
 
 // markReady records that the named channel ("in" or "out") has attached and
 // reports whether this call completed the pair (and CONN/C2 has not yet been
-// queued) — i.e. whether the caller should now emit CONN/C2.
+// queued), i.e. whether the caller should now emit CONN/C2.
 func (vc *vconn) markReady(kind string) bool {
 	vc.mu.Lock()
 	defer vc.mu.Unlock()

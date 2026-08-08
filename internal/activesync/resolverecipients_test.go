@@ -95,7 +95,7 @@ func TestResolveRecipientsMultipleQueries(t *testing.T) {
 }
 
 // TestResolveRecipientsAmbiguous proves a single query matching two GAL users
-// returns both recipients with RecipientCount 2 — the multi-recipient path a
+// returns both recipients with RecipientCount 2, the multi-recipient path a
 // single match would not exercise.
 func TestResolveRecipientsAmbiguous(t *testing.T) {
 	ts := galServer(t)

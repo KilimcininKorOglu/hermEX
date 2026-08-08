@@ -54,7 +54,7 @@ func (s *Server) dkimDomain(w http.ResponseWriter, r *http.Request) (directory.D
 }
 
 // handleUIDKIMGenerate mints a fresh signing key for the domain, stored DISABLED, and
-// shows the DNS record to publish. Generating never starts signing — the operator
+// shows the DNS record to publish. Generating never starts signing, the operator
 // publishes the record, then enables it as a separate step.
 func (s *Server) handleUIDKIMGenerate(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.uiAuthorized(w, r); !ok {

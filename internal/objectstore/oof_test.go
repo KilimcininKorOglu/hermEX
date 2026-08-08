@@ -64,7 +64,7 @@ func TestOOFSettingsRoundTrip(t *testing.T) {
 }
 
 // TestOOFSettingsLegacySubject proves a config stored before the subject was split
-// per audience — carrying the single "subject" key — still surfaces its reply
+// per audience, carrying the single "subject" key, still surfaces its reply
 // subject after the upgrade, folded into InternalSubject rather than silently lost.
 func TestOOFSettingsLegacySubject(t *testing.T) {
 	s := openTestStore(t)

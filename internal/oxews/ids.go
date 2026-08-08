@@ -12,7 +12,7 @@ import (
 var errBadID = errors.New("oxews: malformed id")
 
 // ItemID is the decoded form of an opaque EWS item id. It carries every key the
-// object store needs — the objdb message id and the idxdb (folder, uid) pair —
+// object store needs, the objdb message id and the idxdb (folder, uid) pair,
 // so one id drives OpenMessage (message id), GetMessageRaw/SetMessageFlags/
 // DeleteMessage ((folder, uid)), and folder context. EWS clients treat the
 // encoded id as opaque, so this layout is private.

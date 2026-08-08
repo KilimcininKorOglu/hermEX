@@ -10,7 +10,7 @@ import (
 
 // TestSelfSigned proves the helper produces a certificate the daemon TLS tests can
 // actually serve with: the written PEM pair loads, the leaf is currently valid, and it
-// covers localhost and 127.0.0.1. The coverage is load-bearing — a test dialing
+// covers localhost and 127.0.0.1. The coverage is load-bearing, a test dialing
 // 127.0.0.1 with SNI "localhost" must get a matching certificate, so a regression that
 // dropped either name would silently break every daemon TLS test that depends on it.
 func TestSelfSigned(t *testing.T) {

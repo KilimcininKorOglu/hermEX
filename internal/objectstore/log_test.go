@@ -97,7 +97,7 @@ func TestStoreLogsAppendError(t *testing.T) {
 // TestStoreReadNotFoundIsNotLogged proves a benign miss is not reported as an
 // infrastructure failure: ErrNotFound is a logical outcome, and flooding the
 // audit with every not-found would bury the real store errors. The store stays
-// open, so only the missing UID — not a broken database — drives the result.
+// open, so only the missing UID, not a broken database, drives the result.
 func TestStoreReadNotFoundIsNotLogged(t *testing.T) {
 	st, err := Open(t.TempDir())
 	if err != nil {
@@ -116,8 +116,8 @@ func TestStoreReadNotFoundIsNotLogged(t *testing.T) {
 }
 
 // TestSetDefaultLoggerStampsStore proves a daemon's SetDefaultLogger reaches a
-// store opened afterwards. Production opens never set the logger field directly —
-// they rely on this stamp — so the wiring itself must be verified, not just the
+// store opened afterwards. Production opens never set the logger field directly,
+// they rely on this stamp, so the wiring itself must be verified, not just the
 // field-level emit.
 func TestSetDefaultLoggerStampsStore(t *testing.T) {
 	sink := &captureSink{}

@@ -167,9 +167,9 @@ func TestRPCUnbind(t *testing.T) {
 
 // TestRPCUnsupportedOpnum proves an opnum the dispatch does not handle returns an
 // op-range fault, not a silent empty response. opnum 99 is well past the highest
-// defined NSPI operation (ResolveNamesW = 20), so it is unambiguously unhandled — no
+// defined NSPI operation (ResolveNamesW = 20), so it is unambiguously unhandled, no
 // reserved-vs-defined question (the reference reserves 15/17/18 in-range and faults
-// them too). The write/template opnums 11/13/14 no longer fault — they answer with a
+// them too). The write/template opnums 11/13/14 no longer fault, they answer with a
 // faithful MAPI error (covered by the write-range tests in rpcdata_test.go).
 func TestRPCUnsupportedOpnum(t *testing.T) {
 	s := NewServer(nil, testServerGUID)

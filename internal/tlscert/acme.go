@@ -22,7 +22,7 @@ import (
 // certificate source in "acme" mode, satisfying serve.TLSSource so the front door
 // uses it in place of the manual Provider. Names are managed proactively (not
 // on-demand): the gateway obtains the full tenant allowlist up front so a name that
-// only ever sees mail traffic — which never reaches this HTTPS listener — is still
+// only ever sees mail traffic, which never reaches this HTTPS listener, is still
 // covered, and the certificate exists before the first client connects.
 type ACMEProvider struct {
 	magic    *certmagic.Config
@@ -33,14 +33,14 @@ type ACMEProvider struct {
 
 // NewACME builds an ACME-managed certificate source. cfg supplies the
 // configuration-file fallback certificate (when cfg.TLSEnabled()): until CertMagic
-// has obtained a name — or whenever the CA is unreachable or rate-limited — the
+// has obtained a name, or whenever the CA is unreachable or rate-limited, the
 // front door still serves that certificate rather than failing every handshake, the
 // same invariant the manual provider holds. storageDir holds CertMagic's account,
 // certificate and lock state (its built-in FileStorage, which provides the correct
 // cross-process locking). The CA directory, account email and ToS agreement come
 // from settings; an empty CA URL uses CertMagic's default (Let's Encrypt
 // production). caRootFile, when set, is a PEM bundle of additional roots trusted for
-// the ACME endpoint itself — needed only against a private/test CA (pebble) whose
+// the ACME endpoint itself, needed only against a private/test CA (pebble) whose
 // API serves a self-signed certificate; production CAs use publicly trusted TLS and
 // leave it empty. An unreadable caRootFile is logged and ignored rather than fatal,
 // so a misconfigured roots path degrades ACME to the system trust store instead of
@@ -106,8 +106,8 @@ func (p *ACMEProvider) TLSConfig() (*tls.Config, error) {
 	return tc, nil
 }
 
-// getCertificate resolves a handshake through CertMagic — which both serves managed
-// certificates and answers the TLS-ALPN-01 challenge — and, only when CertMagic has
+// getCertificate resolves a handshake through CertMagic, which both serves managed
+// certificates and answers the TLS-ALPN-01 challenge, and, only when CertMagic has
 // nothing for the name (not yet obtained, CA unreachable, or rate-limited), falls
 // back to the config-file certificate so the front door stays up while ACME catches
 // up. The challenge path inside CertMagic always succeeds for a validation handshake,

@@ -75,7 +75,7 @@ func TestProvisionKeyReflectsPolicy(t *testing.T) {
 
 // TestStalePolicyKeyForcesReprovision is the load-bearing propagation test: with a policy
 // configured, a command with a missing or stale key is refused with 449 while the current
-// key passes — and after the policy changes, the previously-valid key goes stale, so an
+// key passes, and after the policy changes, the previously-valid key goes stale, so an
 // already-enrolled device is forced to re-provision and pick up the change.
 func TestStalePolicyKeyForcesReprovision(t *testing.T) {
 	ts, dir := seededServer(t)

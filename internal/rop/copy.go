@@ -9,7 +9,7 @@ import (
 )
 
 // Copy-flag bits ([MS-OXCPRPT] 2.2.1.10 / mapidefs MAPI_*). MAPI_MOVE would delete
-// the source after the copy (unsupported — it would orphan or duplicate data);
+// the source after the copy (unsupported, it would orphan or duplicate data);
 // MAPI_NOREPLACE leaves a destination property that already exists untouched.
 const (
 	mapiMove      uint8 = 0x01
@@ -88,8 +88,8 @@ func (s *Session) copyProperties(ropID uint8, out *ext.Push, handles []uint32, h
 		writeErr(out, ropID, hindex, ecDeclineCopy)
 		return true
 	}
-	// A property copy writes the destination object — SetProperties reached through a
-	// different entry — so it gates the same way: editing an existing stored message
+	// A property copy writes the destination object, SetProperties reached through a
+	// different entry, so it gates the same way: editing an existing stored message
 	// requires EditAny on its folder. A compose message, a created attachment, and a
 	// composed embedded message are gated at their own create chokepoints and persist
 	// only through the parent message's gated save, so they take no copy-time gate.

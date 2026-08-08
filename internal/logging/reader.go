@@ -81,7 +81,7 @@ func (r *Reader) PruneOlderThan(ctx context.Context, cutoff time.Time) (int64, e
 // logs collection. Earlier builds created such an index from the static retention
 // config; retention is now enforced by PruneOlderThan, so a leftover TTL would silently
 // delete logs on its own stale schedule and override the operator's window. Dropping it
-// is idempotent — a collection with no TTL index is left unchanged.
+// is idempotent, a collection with no TTL index is left unchanged.
 func (r *Reader) DropLegacyTTLIndex(ctx context.Context) error {
 	cur, err := r.coll.Indexes().List(ctx)
 	if err != nil {

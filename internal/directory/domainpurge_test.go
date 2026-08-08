@@ -8,8 +8,8 @@ import (
 )
 
 // TestPurgeDomainCascade proves a domain purge removes the domain and everything
-// scoped to it — users, aliases, forwards, fetchmail, altnames, mailing lists,
-// and domain-scoped role permissions — while leaving another domain's data and a
+// scoped to it, users, aliases, forwards, fetchmail, altnames, mailing lists,
+// and domain-scoped role permissions, while leaving another domain's data and a
 // surviving role intact (the landmine: never delete rows that belong elsewhere).
 func TestPurgeDomainCascade(t *testing.T) {
 	db := openTestDB(t)
@@ -56,9 +56,9 @@ func TestPurgeDomainCascade(t *testing.T) {
 	acmeStr, otherStr := strconv.FormatInt(acme, 10), strconv.FormatInt(other, 10)
 	roleID, err := d.CreateRole("Helpdesk", "",
 		[]Permission{
-			{Name: PermDomainAdmin, Params: acmeStr},  // scoped to the purged domain — removed
-			{Name: PermDomainAdmin, Params: otherStr}, // scoped elsewhere — survives
-			{Name: PermSystemAdmin},                   // unscoped — survives
+			{Name: PermDomainAdmin, Params: acmeStr},  // scoped to the purged domain, removed
+			{Name: PermDomainAdmin, Params: otherStr}, // scoped elsewhere, survives
+			{Name: PermSystemAdmin},                   // unscoped, survives
 		},
 		[]int64{alice})
 	if err != nil {

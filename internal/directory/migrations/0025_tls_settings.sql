@@ -7,7 +7,7 @@
 -- settings tables. acme_ca_url empty means the CertMagic default CA; set it to a
 -- staging or test (pebble) directory in non-production. acme_agreed records that the
 -- operator accepted the CA's terms of service (ACME requires it). Switching mode is
--- structural, so the gateway reads this at startup; the admin seeds nothing — the
+-- structural, so the gateway reads this at startup; the admin seeds nothing, the
 -- absent row means 'manual'. Applied once by the runner and recorded in
 -- schema_migrations.
 CREATE TABLE IF NOT EXISTS tls_settings (

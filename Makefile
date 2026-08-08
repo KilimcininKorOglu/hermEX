@@ -1,6 +1,6 @@
 # hermEX build & workflow entrypoint.
 #
-# All build, test, lint and container commands go through this Makefile — do not
+# All build, test, lint and container commands go through this Makefile, do not
 # invoke `go` or `docker` directly. Build outputs land in bin/.
 #
 # Common use:
@@ -71,7 +71,7 @@ fmt-check:
 	@out="$$($(COMPOSE) exec -T dev gofmt -l internal cmd)"; \
 	if [ -n "$$out" ]; then echo "gofmt needed on:"; echo "$$out"; exit 1; fi
 
-## gate: fmt-check + vet + full test — the pre-commit gate
+## gate: fmt-check + vet + full test, the pre-commit gate
 gate: fmt-check vet test
 
 ## tidy: sync go.mod/go.sum in the dev container (downloads any new dependency)

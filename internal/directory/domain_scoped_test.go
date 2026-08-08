@@ -15,7 +15,7 @@ func hasUser(us []UserInfo, name string) bool {
 }
 
 // TestListInDomainScoping proves the per-domain list methods return only the
-// requested domain's rows — the directory backend for the admin domain accordion.
+// requested domain's rows, the directory backend for the admin domain accordion.
 func TestListInDomainScoping(t *testing.T) {
 	db := openTestDB(t)
 	d := NewSQL(db)

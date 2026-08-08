@@ -47,7 +47,7 @@ var cfg = directory.LDAPConfig{
 }
 
 // TestVerifyEmptyPasswordRejected proves an empty password is refused before any
-// directory contact — an empty simple bind is an anonymous bind a server accepts.
+// directory contact, an empty simple bind is an anonymous bind a server accepts.
 func TestVerifyEmptyPasswordRejected(t *testing.T) {
 	fc := &fakeConn{}
 	ok, err := verifierWith(fc).Verify(cfg, "alice@hermex.test", "")

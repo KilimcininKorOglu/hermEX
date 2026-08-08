@@ -46,7 +46,7 @@ func genCertKeyPEM(t *testing.T, cn string, dnsNames []string, notAfter time.Tim
 // TestValidateTLSCert proves the gate an upload must pass before it is stored: a
 // matching pair within its validity is accepted and its expiry and SAN names are
 // surfaced, while a mismatched key, an expired certificate, and garbage are each
-// rejected — a bad certificate must never reach the listener.
+// rejected, a bad certificate must never reach the listener.
 func TestValidateTLSCert(t *testing.T) {
 	cert, key := genCertKeyPEM(t, "mail.example.com", []string{"mail.example.com", "autodiscover.example.com"}, time.Now().Add(365*24*time.Hour))
 	notAfter, dnsNames, err := validateTLSCert(cert, key)
@@ -60,7 +60,7 @@ func TestValidateTLSCert(t *testing.T) {
 		t.Errorf("dnsNames = %v, want the certificate's SAN host names", dnsNames)
 	}
 
-	// A key from a different certificate must not pass — pairing is the core check.
+	// A key from a different certificate must not pass, pairing is the core check.
 	_, otherKey := genCertKeyPEM(t, "other.example.com", nil, time.Now().Add(time.Hour))
 	if _, _, err := validateTLSCert(cert, otherKey); err == nil {
 		t.Error("a mismatched key was accepted; the pair check must reject it")
@@ -176,7 +176,7 @@ func TestTLSSettingsModeSwitch(t *testing.T) {
 
 // TestMTASTSSettingsForm proves the panel saves MTA-STS publishing and that switching
 // to enforce is gated: enforce mode makes senders refuse mail to a non-validated MX,
-// so it must not flip on from a stray click — only an explicit confirmation enables
+// so it must not flip on from a stray click, only an explicit confirmation enables
 // it. Testing mode and disabling carry no such gate.
 func TestMTASTSSettingsForm(t *testing.T) {
 	d := systemAdminDir()

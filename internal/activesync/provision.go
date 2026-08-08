@@ -57,13 +57,13 @@ var provisionToken = map[string]wbxml.Tag{
 
 // defaultSyncPolicyProvider is the optional directory capability the Provision handler
 // uses to read the server-wide default device policy; the concrete SQLDirectory
-// satisfies it. The accounts interface stays minimal — only this handler needs it.
+// satisfies it. The accounts interface stays minimal, only this handler needs it.
 type defaultSyncPolicyProvider interface {
 	GetDefaultSyncPolicy() (easpolicy.Policy, error)
 }
 
 // domainSyncPolicyProvider is the optional directory capability for a domain's
-// device-policy override — the middle inheritance layer between the server default
+// device-policy override, the middle inheritance layer between the server default
 // and the per-user override. The concrete SQLDirectory satisfies it.
 type domainSyncPolicyProvider interface {
 	GetDomainSyncPolicy(domain string) (easpolicy.Policy, error)
@@ -99,7 +99,7 @@ func (s *Server) devicePolicy(sess *session) easpolicy.Policy {
 // (the request carries no policy key, or key 0) returns the policy key plus the
 // policy document; phase two (the device echoes the key) returns the key alone.
 // Both responses report Status 1. The key is the policy's generation token
-// (easpolicy.Key) — it changes when the resolved policy changes, which is how a
+// (easpolicy.Key), it changes when the resolved policy changes, which is how a
 // later command carrying a stale key is detected and forced to re-provision. When
 // a remote wipe is outstanding the response also carries the wipe directive, and
 // the device's acknowledgement in the request advances the wipe to completed.
@@ -140,7 +140,7 @@ func (s *Server) provisionWipe(sess *session, acked bool) int {
 }
 
 // requestWipeAck reports whether the Provision request carries the device's
-// acknowledgement of a remote wipe — a RemoteWipe or AccountOnlyRemoteWipe
+// acknowledgement of a remote wipe, a RemoteWipe or AccountOnlyRemoteWipe
 // element, which the device sends once it has completed the wipe.
 func requestWipeAck(root *wbxml.Node) bool {
 	if root == nil {
@@ -166,7 +166,7 @@ func requestPolicyKey(root *wbxml.Node) string {
 }
 
 // provisionResponse builds the Provision reply. When withDoc is set (phase one) it
-// includes the EAS provision document carrying the resolved device policy — the fields
+// includes the EAS provision document carrying the resolved device policy, the fields
 // set in pol, in canonical wire order; an empty policy yields the permissive
 // DevicePasswordEnabled=0 document, matching the unconfigured default. When wipe is not
 // wipeEmitNone it appends the corresponding empty remote-wipe element after the

@@ -17,7 +17,7 @@ func testGAL(addrs ...string) *Server {
 	return NewServer(accs, testGUID)
 }
 
-// TestDNRoundTrip proves userDN and dnToSMTP are inverses — the reversible DN
+// TestDNRoundTrip proves userDN and dnToSMTP are inverses, the reversible DN
 // scheme that lets DNToMId recover an MId from a PR_ENTRYID without a snapshot.
 func TestDNRoundTrip(t *testing.T) {
 	for _, smtp := range []string{"alice@hermex.test", "a.b+tag@sub.example.org"} {

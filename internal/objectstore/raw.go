@@ -40,7 +40,7 @@ var regenGroup singleflight.Group
 // such message exists.
 func (s *Store) GetMessageRaw(folderID int64, uid uint32) (raw []byte, err error) {
 	// A read failure during serving (a FETCH, a RETR, a webmail render) is
-	// otherwise invisible — the protocol layer only logs the request, not the
+	// otherwise invisible, the protocol layer only logs the request, not the
 	// store error underneath it. Report any infrastructure failure here; a
 	// benign ErrNotFound is not one.
 	defer func() {
@@ -89,8 +89,8 @@ func (s *Store) regenerateOnce(messageID int64, mid string) ([]byte, error) {
 // RFC822.SIZE matches the bytes now served (a regenerated message uses fresh
 // MIME boundaries and may differ in length from any earlier rendering).
 func (s *Store) regenerateEML(messageID int64, mid string) ([]byte, error) {
-	// A preserved original — an S/MIME message, or a scheduling message whose
-	// text/calendar body re-export would demote to an attachment — is served
+	// A preserved original, an S/MIME message, or a scheduling message whose
+	// text/calendar body re-export would demote to an attachment, is served
 	// verbatim: re-synthesizing it would destroy the signature, the envelope, or the
 	// invitation, so it is never regenerated via Export.
 	for _, tag := range []mapi.PropTag{mapi.PrSmimeOriginal, mapi.PrScheduleOriginal} {

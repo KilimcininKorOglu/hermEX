@@ -35,7 +35,7 @@ func TestGreylistEnabledRoundTrip(t *testing.T) {
 // TestGreylistTimingsRoundTrip proves the timings report unsaved on a fresh database
 // (so the caller keeps the greylister's built-in defaults), persist when saved, and
 // are orthogonal to the enable toggle: enabling does not reset saved timings, and
-// saving timings does not flip the enable state — the two share one row but are edited
+// saving timings does not flip the enable state, the two share one row but are edited
 // by separate partial upserts.
 func TestGreylistTimingsRoundTrip(t *testing.T) {
 	db := openTestDB(t)

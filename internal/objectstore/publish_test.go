@@ -56,7 +56,7 @@ func publishTestMessage() []byte {
 }
 
 // TestChangePublisher proves each instrumented mutation publishes a change event
-// keyed to the mutated mailbox, with the right op — the contract the push
+// keyed to the mutated mailbox, with the right op, the contract the push
 // consumers wake on. The cn/op/mid are enrichment; the load-bearing assertion is
 // that every content-changing write fires exactly one consumer-visible wake of the
 // expected kind, so a missed site (which would silently strand a consumer on its
@@ -70,7 +70,7 @@ func TestChangePublisher(t *testing.T) {
 	inbox := int64(mapi.PrivateFIDInbox)
 
 	// Delivery: AppendMessage publishes a create for the object store, then a second
-	// create once the IMAP index row exists — both for this mailbox.
+	// create once the IMAP index row exists, both for this mailbox.
 	info, err := s.AppendMessage(inbox, publishTestMessage(), time.Unix(1700000000, 0), 0)
 	if err != nil {
 		t.Fatal(err)
@@ -148,7 +148,7 @@ func TestChangePublisherSoftDelete(t *testing.T) {
 }
 
 // TestChangePublisherNilIsNoop proves a store with no publisher installed runs its
-// mutations unchanged — the degradation floor that keeps the mail path independent
+// mutations unchanged, the degradation floor that keeps the mail path independent
 // of the push relay.
 func TestChangePublisherNilIsNoop(t *testing.T) {
 	SetChangePublisher(nil)

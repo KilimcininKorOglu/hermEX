@@ -6,8 +6,8 @@ import (
 	"hermex/internal/mapi"
 )
 
-// GetDelegates returns the mailbox's public-delegate list — the SMTP addresses
-// permitted to act for this mailbox — or nil when none have been set. The list
+// GetDelegates returns the mailbox's public-delegate list, the SMTP addresses
+// permitted to act for this mailbox, or nil when none have been set. The list
 // lives as a single store-root property (PrAbDelegates), the same "everything is
 // a property" shape the out-of-office and ActiveSync stores use, mirroring the
 // reference's per-mailbox delegate storage.

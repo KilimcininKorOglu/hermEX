@@ -6,7 +6,7 @@
 // long-poll, which then runs its own authoritative diff.
 //
 // The relay is deliberately dumb and best-effort. It holds no per-mailbox
-// subscription state — it broadcasts every event to every consumer, which filters
+// subscription state, it broadcasts every event to every consumer, which filters
 // locally. A slow consumer's buffer overflows into dropped events rather than
 // back-pressure on the producer; the consumer's poll cadence is the floor that
 // catches anything dropped. Nothing here is on the mail-delivery path: if this
@@ -25,7 +25,7 @@ import (
 
 // consumerBuffer is the per-consumer event queue depth. A consumer that cannot
 // drain this fast (its long-poll is mid-diff, the network stalled) drops further
-// events until it catches up — the consumer's poll cadence covers the gap, so a
+// events until it catches up, the consumer's poll cadence covers the gap, so a
 // dropped wake costs at most one cadence interval, never a missed change.
 const consumerBuffer = 256
 
@@ -33,7 +33,7 @@ const consumerBuffer = 256
 // producer's objectstore.ChangeEvent to the consumers; the notify daemon links
 // neither package, so the shape is duplicated here as the contract between them.
 type Event struct {
-	Mailbox string `json:"mailbox"` // the per-mailbox store directory (store.Dir()) — the key a consumer matches against its active long-polls
+	Mailbox string `json:"mailbox"` // the per-mailbox store directory (store.Dir()), the key a consumer matches against its active long-polls
 	Op      string `json:"op"`      // the mutation kind (create|modify|flags|delete|folder|…): observability and optional consumer-side pre-filtering only
 	CN      uint64 `json:"cn"`      // the change number stamped on the write; 0 for a hard delete, which carries no CN
 	Mid     string `json:"mid"`     // the message id for a delete that bumped no CN; empty otherwise
@@ -80,7 +80,7 @@ func (s *Server) authorized(r *http.Request) bool {
 }
 
 // handlePublish accepts one Event from a producer and fans it out to every
-// connected consumer without blocking — a consumer whose buffer is full drops the
+// connected consumer without blocking, a consumer whose buffer is full drops the
 // event (best-effort relay). It always answers fast (204) so a producer's publish
 // never stalls a write path.
 func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {

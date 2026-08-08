@@ -150,7 +150,7 @@ func TestAdminChangeOwnPassword(t *testing.T) {
 }
 
 // TestAdminChangeOwnPasswordWrongCurrent proves a wrong current password is a 403
-// and never touches the stored password — the re-authentication is load-bearing,
+// and never touches the stored password, the re-authentication is load-bearing,
 // not cosmetic.
 func TestAdminChangeOwnPasswordWrongCurrent(t *testing.T) {
 	d := &fakeDir{authOK: true, password: "pw", uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
@@ -282,7 +282,7 @@ func TestAdminDeleteUser(t *testing.T) {
 }
 
 // TestAdminDeleteUserKeepsFilesByDefault proves the maildir is preserved unless
-// deleteFiles is explicitly requested — a missing flag must never destroy mail.
+// deleteFiles is explicitly requested, a missing flag must never destroy mail.
 func TestAdminDeleteUserKeepsFilesByDefault(t *testing.T) {
 	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
 	ts := adminServer(t, d)

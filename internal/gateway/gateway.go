@@ -3,8 +3,8 @@
 // client (Outlook, a browser, a phone) reaches autodiscover, EWS, MAPI/HTTP,
 // RPC/HTTP, ActiveSync, DAV and webmail through one host. TLS is terminated by
 // the caller (serve.ListenAndServe); the gateway forwards to the backends on the
-// internal network — plaintext, or HTTPS with verification skipped on that internal
-// hop when the backends present self-signed certificates — and passes the
+// internal network, plaintext, or HTTPS with verification skipped on that internal
+// hop when the backends present self-signed certificates, and passes the
 // Authorization header through for the backends to authenticate.
 package gateway
 

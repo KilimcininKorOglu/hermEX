@@ -84,7 +84,7 @@ const (
 )
 
 // TestAvailabilityOwnerDetailed confirms a mailbox owner querying their own
-// calendar always gets the detailed view, with appointment subject — the implicit
+// calendar always gets the detailed view, with appointment subject, the implicit
 // owner access the seeded free/busy-simple default would otherwise withhold.
 func TestAvailabilityOwnerDetailed(t *testing.T) {
 	ts, paths := availabilityServer(t)
@@ -131,7 +131,7 @@ func TestAvailabilityCrossUserFreeBusy(t *testing.T) {
 }
 
 // TestAvailabilityCrossUserDetailed confirms an exact free/busy-detailed grant
-// to the caller yields the detailed view with subject — and, since the grant is
+// to the caller yields the detailed view with subject, and, since the grant is
 // keyed by the caller's authenticated address, that the resolver matches the
 // permission username against the request's user form.
 func TestAvailabilityCrossUserDetailed(t *testing.T) {
@@ -164,7 +164,7 @@ func TestAvailabilityCrossUserDetailed(t *testing.T) {
 }
 
 // TestAvailabilityMultiMailbox confirms several mailboxes in one request pair 1:1
-// with the response array in order — Outlook's scheduling assistant sends all
+// with the response array in order, Outlook's scheduling assistant sends all
 // attendees at once and relies on positional pairing.
 func TestAvailabilityMultiMailbox(t *testing.T) {
 	ts, paths := availabilityServer(t)
@@ -230,7 +230,7 @@ func TestAvailabilityDenied(t *testing.T) {
 }
 
 // TestAvailabilitySpanningEvent confirms an appointment that starts before the
-// window and ends after it still appears — the overlap predicate, not containment.
+// window and ends after it still appears, the overlap predicate, not containment.
 func TestAvailabilitySpanningEvent(t *testing.T) {
 	ts, paths := availabilityServer(t)
 	start := time.Date(2026, 6, 19, 9, 0, 0, 0, time.UTC) // before the window
@@ -261,7 +261,7 @@ func TestAvailabilityRecurringSkipped(t *testing.T) {
 }
 
 // TestAvailabilityEmptyIsDetailed confirms an empty calendar yields a "Detailed"
-// view even for a non-detailed (cross-user free/busy-simple) caller — the
+// view even for a non-detailed (cross-user free/busy-simple) caller, the
 // all-of-over-empty quirk the reference preserves.
 func TestAvailabilityEmptyIsDetailed(t *testing.T) {
 	ts, paths := availabilityServer(t)

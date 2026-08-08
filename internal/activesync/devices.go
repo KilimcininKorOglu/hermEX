@@ -34,7 +34,7 @@ const (
 )
 
 // wipeOutstanding reports whether a remote wipe is pending delivery or awaiting
-// the device's acknowledgement — the states that force re-provisioning and re-emit
+// the device's acknowledgement, the states that force re-provisioning and re-emit
 // the directive. The terminal wiped states are NOT outstanding: a device that
 // completed a wipe (and, after an account-only wipe, may re-add the account on the
 // same hardware) must not be wiped again in a loop.
@@ -105,7 +105,7 @@ func saveDevices(st *objectstore.Store, m *devicesMeta) error {
 }
 
 // recordDeviceContact stamps a device's metadata on the store and returns the
-// device's current wipe status. The caller treats the write as best-effort — it
+// device's current wipe status. The caller treats the write as best-effort, it
 // is a pure side effect that must never alter or fail a command response.
 // firstSync and the OK status are set once; lastSync and the live attributes
 // refresh every call. A blank device id is a no-op.
@@ -195,8 +195,8 @@ func ResyncDevice(st *objectstore.Store, deviceID string) error {
 	return saveState(st, state)
 }
 
-// DeleteDevice removes a device entirely — both its sync state and its recorded
-// metadata — so it disappears from the device list until it next connects.
+// DeleteDevice removes a device entirely, both its sync state and its recorded
+// metadata, so it disappears from the device list until it next connects.
 func DeleteDevice(st *objectstore.Store, deviceID string) error {
 	state, err := loadState(st)
 	if err != nil {

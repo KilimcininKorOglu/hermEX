@@ -20,7 +20,7 @@ type ewsState struct {
 // folderItemState is one folder's item sync state for SyncFolderItems: the
 // current sync-state token and the item snapshot (opaque ItemId -> flag bits)
 // the snapshot-diff compares the live folder against. Change numbers cannot
-// drive this (they are INSERT-only — read/flag changes and deletes never bump
+// drive this (they are INSERT-only, read/flag changes and deletes never bump
 // them), so a snapshot diff is the only channel-agnostic way to detect them.
 type folderItemState struct {
 	SyncState string           `json:"syncState,omitempty"`

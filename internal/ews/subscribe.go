@@ -43,8 +43,8 @@ type ewsSubscription struct {
 
 // eventWants records which producible event types a subscription wants. The poll
 // diff produces only Created/Deleted/Modified; Moved/Copied/NewMail/FreeBusy are
-// accepted in the request but never produced — a poll cannot distinguish a move
-// or copy from a create/delete, and new-mail is delivery-triggered — a documented
+// accepted in the request but never produced, a poll cannot distinguish a move
+// or copy from a create/delete, and new-mail is delivery-triggered, a documented
 // gap shared with the ROP notification path.
 type eventWants struct {
 	created, deleted, modified bool
@@ -336,7 +336,7 @@ func (s *Server) getEvents(id, user string) (getEventsResponseMessage, error) {
 }
 
 // snapshotFolders captures the message change-number map of every in-scope folder
-// — the baseline a subsequent poll diffs against.
+// , the baseline a subsequent poll diffs against.
 func snapshotFolders(st *objectstore.Store, allFolders bool, folderIDs []int64) (map[int64]map[int64]uint64, error) {
 	folders, err := scopeFolders(st, allFolders, folderIDs)
 	if err != nil {
@@ -353,8 +353,8 @@ func snapshotFolders(st *objectstore.Store, allFolders bool, folderIDs []int64) 
 	return snap, nil
 }
 
-// scopeFolders resolves the folder set to poll: the explicit list, or — for a
-// whole-store subscription — the mailbox's current folders, re-enumerated each
+// scopeFolders resolves the folder set to poll: the explicit list, or, for a
+// whole-store subscription, the mailbox's current folders, re-enumerated each
 // call so a folder created after the subscription is included.
 func scopeFolders(st *objectstore.Store, allFolders bool, folderIDs []int64) ([]int64, error) {
 	if !allFolders {

@@ -9,8 +9,8 @@ import (
 )
 
 // handlePropfind answers a PROPFIND. It walks the discovery chain a CardDAV
-// client follows — root (current-user-principal) -> principal
-// (addressbook-home-set) -> home set -> the Contacts address book — and, at
+// client follows, root (current-user-principal) -> principal
+// (addressbook-home-set) -> home set -> the Contacts address book, and, at
 // Depth 1 on the address book, lists its member vCards. The requested property
 // set is not filtered: a useful standard set is returned for each resource (a
 // documented v1 simplification; clients ignore properties they did not ask for).

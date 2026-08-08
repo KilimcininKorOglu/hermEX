@@ -18,7 +18,7 @@ func storedRights(p Permission) uint32 {
 // TestPermissionLevelRoundTrip is the mapping's authoritative check: each canned
 // PermissionLevel, sent on the wire, must survive the write path (mask + normalize
 // as the store does) and be recovered as the same level on read. This proves the
-// level table is consistent in both directions — including Owner, which the store
+// level table is consistent in both directions, including Owner, which the store
 // normalizes (owner implies visible|contact) and a raw-mask compare would miss.
 func TestPermissionLevelRoundTrip(t *testing.T) {
 	levels := []string{
@@ -48,7 +48,7 @@ func TestPermissionLevelFreeBusyAgnostic(t *testing.T) {
 
 // TestPermissionEditDeleteAllRoundTrip confirms EditItems/DeleteItems="All" survive
 // the round-trip. The reference's write loses the Owned bit on "All"; the store's
-// normalize fills it (editAny implies editOwned), so "All" reads back as "All" —
+// normalize fills it (editAny implies editOwned), so "All" reads back as "All",
 // more correct than the reference, and the reason a round-trip is the right test.
 func TestPermissionEditDeleteAllRoundTrip(t *testing.T) {
 	stored := storedRights(Permission{

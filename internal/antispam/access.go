@@ -31,7 +31,7 @@ func NewAccessList(rules map[string]string) *AccessList {
 	return &AccessList{rules: m}
 }
 
-// Action returns the rule that applies to a sender — AccessAllow, AccessBlock, or
+// Action returns the rule that applies to a sender, AccessAllow, AccessBlock, or
 // "" for none. An exact email-address rule wins over a domain rule (most specific
 // first); at the domain tier the envelope domain is tried before the From-header
 // domain. An empty mailFrom (a bounce) matches nothing.
@@ -41,7 +41,7 @@ func (a *AccessList) Action(mailFrom, fromDomain string) string {
 	}
 	email := strings.ToLower(strings.TrimSpace(mailFrom))
 	if act, ok := a.rules[email]; ok {
-		return act // exact address — most specific
+		return act // exact address, most specific
 	}
 	if d := domainOf(email); d != "" {
 		if act, ok := a.rules[d]; ok {
