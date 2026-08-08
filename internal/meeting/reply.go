@@ -17,7 +17,15 @@ import (
 // It is best-effort and never errors a delivery: a malformed or unmatched REPLY
 // is left as an ordinary email the organizer can read, not a delivery failure.
 func ProcessReply(st *objectstore.Store, messageID int64) bool {
-	raw, err := st.GetMessageRaw(mapi.PrivateFIDInbox, uint32(messageID))
+	// The delivery pass hands an object-store message id; the raw read is keyed by
+	// IMAP UID, and the two diverge as soon as a mailbox holds any non-mail object
+	// (a calendar item consumes an id but no UID). Resolving one to the other is
+	// what makes tracking work in a mailbox that has ever held an appointment.
+	uidOf, ok, err := st.MessageUIDByID(int64(mapi.PrivateFIDInbox), messageID)
+	if err != nil || !ok {
+		return false
+	}
+	raw, err := st.GetMessageRaw(int64(mapi.PrivateFIDInbox), uidOf)
 	if err != nil {
 		return false
 	}
