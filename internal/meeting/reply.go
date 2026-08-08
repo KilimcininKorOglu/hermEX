@@ -14,9 +14,18 @@ import (
 // PidLidResponseStatus on the organizer's calendar event (matched by the REPLY's
 // iCalendar UID). It reports whether a REPLY was handled.
 //
-// It is best-effort and never errors a delivery: a malformed or unmatched REPLY
-// is left as an ordinary email the organizer can read, not a delivery failure.
-func ProcessReply(st *objectstore.Store, messageID int64) bool {
+// sender is the delivered message's envelope sender. The ATTENDEE line is body
+// content, so it says only who the message CLAIMS to answer for: without this
+// check any invitee who knows the meeting UID could set a co-invitee's tracking
+// status by mailing the organizer. A REPLY is therefore honoured only for the
+// attendee who actually sent it. That is deliberately strict: a reply relayed by
+// anyone else (a delegate answering for an attendee) updates nothing, because
+// nothing in the message proves the attendee authorized it.
+//
+// It is best-effort and never errors a delivery: a malformed, unmatched or
+// unauthorized REPLY is left as an ordinary email the organizer can read, not a
+// delivery failure.
+func ProcessReply(st *objectstore.Store, sender string, messageID int64) bool {
 	// The delivery pass hands an object-store message id; the raw read is keyed by
 	// IMAP UID, and the two diverge as soon as a mailbox holds any non-mail object
 	// (a calendar item consumes an id but no UID). Resolving one to the other is
@@ -39,6 +48,12 @@ func ProcessReply(st *objectstore.Store, messageID int64) bool {
 	uid := strings.TrimSpace(icalLine(ics, "UID"))
 	attendee, partstat := parseAttendee(ics)
 	if uid == "" || attendee == "" {
+		return false
+	}
+	// An empty envelope sender (a bounce, or a locally injected message that
+	// carries none) proves nothing either, so it updates no tracking.
+	from := strings.ToLower(strings.TrimSpace(sender))
+	if from == "" || from != strings.ToLower(strings.TrimSpace(attendee)) {
 		return false
 	}
 	tags, err := ResolveTags(st)

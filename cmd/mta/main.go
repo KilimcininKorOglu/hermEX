@@ -116,8 +116,8 @@ func main() {
 	}
 	// An inbound iTIP REPLY updates the organizer's calendar event so the
 	// TrackingTab reflects attendee responses; best-effort, delivery-independent.
-	mta.OnMeetingReply = func(st *objectstore.Store, msgID int64) bool {
-		return meeting.ProcessReply(st, msgID)
+	mta.OnMeetingReply = func(st *objectstore.Store, sender string, msgID int64) bool {
+		return meeting.ProcessReply(st, sender, msgID)
 	}
 
 	addr := cfg.SMTPAddr

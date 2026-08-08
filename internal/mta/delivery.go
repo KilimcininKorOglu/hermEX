@@ -782,7 +782,7 @@ func deliver(accounts directory.Accounts, from, rcptAddr, path string, raw []byt
 	// An inbound iTIP REPLY (an attendee's response) updates the organizer's
 	// calendar event so the TrackingTab reflects it; best-effort, never fails
 	// delivery, and runs after the OOF pass so a REPLY never triggers an auto-reply.
-	autoProcessReply(st, info)
+	autoProcessReply(st, from, info)
 	return nil
 }
 
@@ -797,7 +797,9 @@ var OnMeetingRequest func(st *objectstore.Store, accounts directory.Accounts, re
 // side: it updates the matching attendee's response status on the organizer's
 // calendar event so the TrackingTab reflects responses. Wired by cmd/mta to the
 // meeting package; the indirection breaks the meeting→mta import cycle.
-var OnMeetingReply func(st *objectstore.Store, messageID int64) bool
+// sender is the delivered message's envelope sender, so the processor can refuse
+// a REPLY that claims to speak for an attendee who did not send it.
+var OnMeetingReply func(st *objectstore.Store, sender string, messageID int64) bool
 
 // autoProcessMeeting runs the registered meeting-request processor (if any) on a
 // just-delivered message, swallowing any panic exactly like the other delivery-time
@@ -820,7 +822,7 @@ func autoProcessMeeting(accounts directory.Accounts, st *objectstore.Store, reci
 // autoProcessReply runs the registered inbound-REPLY processor (if any) on a
 // just-delivered message, panic-swallowed like the request pass: a misbehaving
 // processor must never fail delivery. It reports whether a REPLY was handled.
-func autoProcessReply(st *objectstore.Store, m objectstore.MessageInfo) {
+func autoProcessReply(st *objectstore.Store, sender string, m objectstore.MessageInfo) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("mta: meeting-reply process panicked for uid %d, skipped: %v", m.UID, r)
@@ -828,7 +830,7 @@ func autoProcessReply(st *objectstore.Store, m objectstore.MessageInfo) {
 		}
 	}()
 	if OnMeetingReply != nil {
-		OnMeetingReply(st, m.ID)
+		OnMeetingReply(st, sender, m.ID)
 	}
 }
 

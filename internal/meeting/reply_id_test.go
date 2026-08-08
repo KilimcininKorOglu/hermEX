@@ -53,7 +53,7 @@ func TestProcessReplyResolvesTheMessageID(t *testing.T) {
 		t.Fatalf("the seeding did not separate id %d from UID %d, so the case is not covered", info.ID, info.UID)
 	}
 
-	if !ProcessReply(st, info.ID) {
+	if !ProcessReply(st, "bob@hermex.test", info.ID) {
 		t.Fatal("the REPLY was not processed")
 	}
 	recips, err := st.ListRecipients(eventID)
