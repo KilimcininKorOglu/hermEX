@@ -98,6 +98,11 @@ func main() {
 	// is, so a settings problem never starts throttling clients. It caps requests
 	// of every kind; the failed-login throttle in internal/authlimit is separate and
 	// stays in place.
+	// Outbound abuse limiting: this daemon queues external mail through
+	// DeliverAndRelay, so a compromised account must meet the same per-account
+	// recipient cap SMTP submission enforces. It starts disabled and follows the
+	// stored settings without a restart.
+	mta.StartOutboundLimiter("hermex-webmail2", logger, dir.GetOutboundSettings)
 	httpLimiter := httplimit.NewLimiter()
 	httplimit.Apply("hermex-webmail2", httpLimiter, dir.GetHTTPRateLimitSettings)
 	go httplimit.RunMaintenance("hermex-webmail2", httpLimiter, dir.GetHTTPRateLimitSettings)

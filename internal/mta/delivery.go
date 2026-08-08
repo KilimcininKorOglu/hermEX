@@ -656,6 +656,16 @@ func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from strin
 	if err := overSendQuota(accounts, from); err != nil {
 		return recipients, err
 	}
+	// Outbound abuse limiting for every client that does not go through SMTP
+	// submission (webmail, EWS, ActiveSync, ROP, DAV scheduling, send-later): the
+	// same per-account external-recipient cap session.Rcpt applies, so a
+	// compromised account is capped whichever protocol it sends through. Nothing is
+	// delivered on refusal, an API send fails whole rather than half.
+	if spool != nil {
+		if err := limitOutbound(accounts, from, recipients); err != nil {
+			return recipients, err
+		}
+	}
 	// A distribution-list recipient expands to its members before delivery; a list
 	// whose posting privilege refuses this sender is reported as undeliverable.
 	leaves, refused := expandRecipientList(accounts, from, recipients)

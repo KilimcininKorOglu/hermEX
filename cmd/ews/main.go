@@ -88,6 +88,11 @@ func main() {
 	// re-read them every minute, so an operator's change applies without a restart.
 	// It is off until an operator enables it, and any read failure leaves it as it
 	// is, so a settings problem never starts throttling clients.
+	// Outbound abuse limiting: this daemon queues external mail through
+	// DeliverAndRelay, so a compromised account must meet the same per-account
+	// recipient cap SMTP submission enforces. It starts disabled and follows the
+	// stored settings without a restart.
+	mta.StartOutboundLimiter("hermex-ews", logger, dir.GetOutboundSettings)
 	httpLimiter := httplimit.NewLimiter()
 	httplimit.Apply("hermex-ews", httpLimiter, dir.GetHTTPRateLimitSettings)
 	go httplimit.RunMaintenance("hermex-ews", httpLimiter, dir.GetHTTPRateLimitSettings)

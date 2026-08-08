@@ -192,12 +192,7 @@ func main() {
 	// Outbound abuse limiting caps how many external recipients a local account may
 	// send to per window, a compromised account that blasts spam is deferred and the
 	// admin is alerted. It starts disabled; the alert is a central-log event.
-	outboundLimiter := mta.NewOutboundLimiter()
-	outboundLimiter.SetAlerter(func(user string, count int) {
-		logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "outbound.abuse", User: user, Fields: logging.Fields{"recipients": count}})
-	})
-	applyOutboundSettings(dir, outboundLimiter)
-	go runOutboundMaintenance(dir, outboundLimiter)
+	outboundLimiter := mta.StartOutboundLimiter("hermex-mta", logger, dir.GetOutboundSettings)
 
 	// Wire delivery-time inbox-rule forwarding to the relay spool, gated by the
 	// outbound abuse limiter (the per-user cap). Wired here, not in the mta package,
@@ -529,40 +524,6 @@ func runRateLimitMaintenance(dir *directory.SQLDirectory, rl *mta.RateLimiter) {
 			applyRateLimitSettings(dir, rl)
 		case <-pruneTick.C:
 			rl.Prune()
-		}
-	}
-}
-
-// applyOutboundSettings reads the stored outbound-abuse settings and applies them to
-// the limiter. A missing row or a read error leaves the limiter unchanged, so a
-// settings failure never starts throttling unexpectedly.
-func applyOutboundSettings(dir *directory.SQLDirectory, l *mta.OutboundLimiter) {
-	s, found, err := dir.GetOutboundSettings()
-	if err != nil {
-		log.Printf("hermex-mta: outbound settings read failed, leaving outbound limiting unchanged: %v", err)
-		return
-	}
-	if !found {
-		return
-	}
-	l.SetLimits(s.RecipientCap, time.Duration(s.WindowSeconds)*time.Second)
-	l.SetEnabled(s.Enabled)
-}
-
-// runOutboundMaintenance re-applies the outbound-abuse settings every minute so an
-// admin change takes effect without a restart, and prunes the limiter's window table
-// hourly to keep it bounded.
-func runOutboundMaintenance(dir *directory.SQLDirectory, l *mta.OutboundLimiter) {
-	applyTick := time.NewTicker(time.Minute)
-	pruneTick := time.NewTicker(time.Hour)
-	defer applyTick.Stop()
-	defer pruneTick.Stop()
-	for {
-		select {
-		case <-applyTick.C:
-			applyOutboundSettings(dir, l)
-		case <-pruneTick.C:
-			l.Prune()
 		}
 	}
 }
