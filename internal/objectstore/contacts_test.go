@@ -55,7 +55,7 @@ func TestContactHasAddress(t *testing.T) {
 		t.Error("a display-name form must reduce to the bare addr-spec and match")
 	}
 	if !has(t, s, "grace@navy.example") {
-		t.Error("an address in the second e-mail slot must match — every slot is scanned")
+		t.Error("an address in the second e-mail slot must match, every slot is scanned")
 	}
 	if has(t, s, "stranger@elsewhere.example") {
 		t.Error("an address belonging to no contact must NOT match, or known-only would reply to everyone")

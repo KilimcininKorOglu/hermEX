@@ -76,7 +76,7 @@ export function Layout() {
         s?.focus()
       } else if (e.key === "?") {
         e.preventDefault()
-        alert("Keyboard shortcuts\n\nc — Compose\n/ — Focus search\nj / ↓ — Next message\nk / ↑ — Previous message\nEnter — Open message")
+        alert("Keyboard shortcuts\n\nc - Compose\n/ - Focus search\nj / ↓ - Next message\nk / ↑ - Previous message\nEnter - Open message")
       }
     }
     window.addEventListener("keydown", onKey)

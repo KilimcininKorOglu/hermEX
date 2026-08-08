@@ -382,7 +382,7 @@ func TestImportAdvancesFolderCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 	if uint64(other) == mid {
-		t.Fatalf("CreateMessage reused imported id %#x — the folder cursor was not advanced", mid)
+		t.Fatalf("CreateMessage reused imported id %#x, the folder cursor was not advanced", mid)
 	}
 }
 
@@ -782,7 +782,7 @@ func TestImportHierarchyAdvancesStoreCursor(t *testing.T) {
 		t.Fatalf("CreateFolder after import: %v (store cursor likely collided with the import)", err)
 	}
 	if uint64(other) == fid {
-		t.Fatalf("CreateFolder reused imported id %#x — the store cursor was not advanced", fid)
+		t.Fatalf("CreateFolder reused imported id %#x, the store cursor was not advanced", fid)
 	}
 }
 

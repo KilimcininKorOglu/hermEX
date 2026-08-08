@@ -151,7 +151,7 @@ export function DraftsPage() {
                   </div>
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <span className="truncate">{t("common.to")}: {draft.to || t("drafts.noRecipient")}</span>
-                    <span className="truncate">— {draft.preview}</span>
+                    <span className="truncate">- {draft.preview}</span>
                   </div>
                 </div>
                 <span className="whitespace-nowrap text-sm text-muted-foreground">

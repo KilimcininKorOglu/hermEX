@@ -115,5 +115,5 @@ func (s *Server) handleUISyncLDAP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, "ldap-panel", s.ldapPanelData(r, false,
-		fmt.Sprintf("Directory sync queued as task #%d — watch the Task queue for its result.", id), ""))
+		fmt.Sprintf("Directory sync queued as task #%d, watch the Task queue for its result.", id), ""))
 }

@@ -167,7 +167,7 @@ func (s *Server) handleUIToggleGreylist(w http.ResponseWriter, r *http.Request) 
 	if on {
 		verb = "enabled"
 	}
-	s.render(w, "greylist-panel", s.antispamPageData(r, "Greylisting "+verb+" — the MTA applies it within about a minute."))
+	s.render(w, "greylist-panel", s.antispamPageData(r, "Greylisting "+verb+", the MTA applies it within about a minute."))
 }
 
 // handleUISaveGreylistTimings persists the greylist timings (the minimum delay before
@@ -188,7 +188,7 @@ func (s *Server) handleUISaveGreylistTimings(w http.ResponseWriter, r *http.Requ
 		s.render(w, "greylist-panel", s.antispamPageData(r, s.notice("Could not save the greylist timings.", err)))
 		return
 	}
-	s.render(w, "greylist-panel", s.antispamPageData(r, "Greylist timings saved — the MTA applies them within a minute, no restart."))
+	s.render(w, "greylist-panel", s.antispamPageData(r, "Greylist timings saved, the MTA applies them within a minute, no restart."))
 }
 
 // handleUISaveRateLimit persists the inbound rate-limit settings (enable, burst, and
@@ -213,7 +213,7 @@ func (s *Server) handleUISaveRateLimit(w http.ResponseWriter, r *http.Request) {
 		s.render(w, "ratelimit-panel", s.antispamPageData(r, s.notice("Could not save rate-limit settings.", err)))
 		return
 	}
-	s.render(w, "ratelimit-panel", s.antispamPageData(r, "Rate-limit settings saved — the MTA applies them within a minute, no restart."))
+	s.render(w, "ratelimit-panel", s.antispamPageData(r, "Rate-limit settings saved, the MTA applies them within a minute, no restart."))
 }
 
 // handleUISaveMessageSize persists the inbound message size limit (entered in whole
@@ -228,7 +228,7 @@ func (s *Server) handleUISaveMessageSize(w http.ResponseWriter, r *http.Request)
 		s.render(w, "message-size-panel", s.antispamPageData(r, s.notice("Could not save the message size limit.", err)))
 		return
 	}
-	s.render(w, "message-size-panel", s.antispamPageData(r, "Message size limit saved — the MTA applies it within a minute, no restart."))
+	s.render(w, "message-size-panel", s.antispamPageData(r, "Message size limit saved, the MTA applies it within a minute, no restart."))
 }
 
 // handleUISaveOutbound persists the outbound-abuse settings (enable, external-recipient
@@ -252,7 +252,7 @@ func (s *Server) handleUISaveOutbound(w http.ResponseWriter, r *http.Request) {
 		s.render(w, "outbound-panel", s.antispamPageData(r, s.notice("Could not save outbound settings.", err)))
 		return
 	}
-	s.render(w, "outbound-panel", s.antispamPageData(r, "Outbound settings saved — the MTA applies them within a minute, no restart."))
+	s.render(w, "outbound-panel", s.antispamPageData(r, "Outbound settings saved, the MTA applies them within a minute, no restart."))
 }
 
 // handleUISaveRelay persists the outbound delivery retry policy (base backoff in
@@ -271,7 +271,7 @@ func (s *Server) handleUISaveRelay(w http.ResponseWriter, r *http.Request) {
 		s.render(w, "relay-panel", s.antispamPageData(r, s.notice("Could not save the relay settings.", err)))
 		return
 	}
-	s.render(w, "relay-panel", s.antispamPageData(r, "Relay settings saved — the MTA applies them within a minute, no restart."))
+	s.render(w, "relay-panel", s.antispamPageData(r, "Relay settings saved, the MTA applies them within a minute, no restart."))
 }
 
 // handleUISaveDigest persists the quarantine-digest settings (enable, interval in
@@ -359,7 +359,7 @@ func (s *Server) handleUISaveAntispamSettings(w http.ResponseWriter, r *http.Req
 		s.render(w, "scoring-panel", s.antispamPageData(r, s.notice("Could not save settings.", err)))
 		return
 	}
-	s.render(w, "scoring-panel", s.antispamPageData(r, "Settings saved — the MTA applies them within a minute, no restart."))
+	s.render(w, "scoring-panel", s.antispamPageData(r, "Settings saved, the MTA applies them within a minute, no restart."))
 }
 
 // formInt reads a non-negative integer form field, returning 0 when absent or
@@ -403,7 +403,7 @@ func (s *Server) handleUIRetrainBayes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, "antispam-panel", s.antispamPageData(r,
-		fmt.Sprintf("Retrain queued as task #%d — watch the Task queue for its result.", id)))
+		fmt.Sprintf("Retrain queued as task #%d, watch the Task queue for its result.", id)))
 }
 
 // trainFolder trains the model on up to retrainSampleCap of a folder's most recent

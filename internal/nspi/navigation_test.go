@@ -130,7 +130,7 @@ func TestCompareMids(t *testing.T) {
 	alice, carol := midBase, midBase+2
 
 	if cmp, result := decodeCompareMids(t, s.CompareMids(buildCompareMids(carol, alice), testCaller)); result != ecSuccess || cmp != -1 {
-		t.Errorf("compare(carol, alice) = (cmp %d, result %#x), want (-1, ok) — alice precedes carol", cmp, result)
+		t.Errorf("compare(carol, alice) = (cmp %d, result %#x), want (-1, ok), alice precedes carol", cmp, result)
 	}
 	if cmp, result := decodeCompareMids(t, s.CompareMids(buildCompareMids(alice, carol), testCaller)); result != ecSuccess || cmp != 1 {
 		t.Errorf("compare(alice, carol) = (cmp %d, result %#x), want (1, ok)", cmp, result)

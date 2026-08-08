@@ -3,7 +3,7 @@
 {{template "sidebar" .}}
 <main>
 <h1>Settings</h1>
-<p class="hint">Every operator-tunable setting in one place. Changes apply automatically within about a minute — no restart.</p>
+<p class="hint">Every operator-tunable setting in one place. Changes apply automatically within about a minute, no restart.</p>
 
 <div class="tabs">
 <input type="radio" name="settab" id="settab-antispam" checked>
@@ -22,8 +22,8 @@
 {{template "scoring-panel" .}}
 <h2>SpamAssassin ruleset</h2>
 <p>Source: {{.SASource}}</p>
-<p>{{.SARules}} rules and {{.SAMetas}} meta rules in use; {{.SASkipped}} rules and {{.SADropped}} metas are dropped (network-, plugin-, and Bayes-backed rules and patterns the engine cannot compile — those checks are done natively).</p>
-<p class="hint">The rules contribute one combined signal: when their summed score reaches {{.SAThreshold}}, the verdict gains {{.SAWeight}} points. The ruleset is seeded into data_dir on first run; refresh it with the antispam-rules tool — changes are applied automatically within about a minute, no restart.</p>
+<p>{{.SARules}} rules and {{.SAMetas}} meta rules in use; {{.SASkipped}} rules and {{.SADropped}} metas are dropped (network-, plugin-, and Bayes-backed rules and patterns the engine cannot compile, those checks are done natively).</p>
+<p class="hint">The rules contribute one combined signal: when their summed score reaches {{.SAThreshold}}, the verdict gains {{.SAWeight}} points. The ruleset is seeded into data_dir on first run; refresh it with the antispam-rules tool, changes are applied automatically within about a minute, no restart.</p>
 {{template "antispam-panel" .}}
 <h2>Greylisting</h2>
 {{template "greylist-panel" .}}

@@ -30,7 +30,7 @@ func TestOrgCRUD(t *testing.T) {
 		t.Fatal(err)
 	}
 	if id == 0 {
-		t.Fatal("org id 0 issued — it collides with the reserved organizationless sentinel")
+		t.Fatal("org id 0 issued, it collides with the reserved organizationless sentinel")
 	}
 	if _, err := d.CreateOrg("Acme", ""); err == nil {
 		t.Error("duplicate org name accepted")

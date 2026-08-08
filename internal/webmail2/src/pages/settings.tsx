@@ -138,7 +138,7 @@ export function SettingsPage() {
     }
   }
 
-  // Directory profile (display name, title, department, phone) — shown in the
+  // Directory profile (display name, title, department, phone), shown in the
   // GAL and on Outlook contact cards. Self-service via /api/v1/profile.
   const [profile, setProfile] = useState({ display_name: "", title: "", department: "", phone: "" })
   const [profileBusy, setProfileBusy] = useState(false)
@@ -147,7 +147,7 @@ export function SettingsPage() {
   // 0 = disabled/unlimited), surfaced by GET /profile for the storage gauge.
   const [quota, setQuota] = useState({ used: 0, limit: 0, warn: 0, prohibitSend: 0 })
 
-  // Display timezone — the IANA zone every date is rendered in. Empty means
+  // Display timezone, the IANA zone every date is rendered in. Empty means
   // "follow this device". Saved on change (like the theme buttons) and applied
   // live across the app via updatePrefs.
   const timeZones = useMemo(listTimeZones, [])
@@ -2264,7 +2264,7 @@ export function SettingsPage() {
                     {s.device_type || t("settings.sessions.unknownDevice")} · {s.client_ip || t("settings.sessions.unknownIp")}
                   </p>
                   <p className="text-xs text-muted-foreground truncate">
-                    {s.user_agent || "—"}
+                    {s.user_agent || "-"}
                   </p>
                   <p className="text-xs text-muted-foreground">{t("settings.sessions.lastActive", { time: s.last_active })}</p>
                 </div>
@@ -2516,9 +2516,9 @@ export function SettingsPage() {
                 <span className="text-muted-foreground font-medium">{t("settings.privacy.smimeCertIssuer")}:</span>
                 <span className="break-all">{smimeCert.issuer}</span>
                 <span className="text-muted-foreground font-medium">{t("settings.privacy.smimeCertValidFrom")}:</span>
-                <span>{smimeCert.notBefore ? new Date(smimeCert.notBefore).toLocaleDateString() : "—"}</span>
+                <span>{smimeCert.notBefore ? new Date(smimeCert.notBefore).toLocaleDateString() : "-"}</span>
                 <span className="text-muted-foreground font-medium">{t("settings.privacy.smimeCertValidUntil")}:</span>
-                <span>{smimeCert.notAfter ? new Date(smimeCert.notAfter).toLocaleDateString() : "—"}</span>
+                <span>{smimeCert.notAfter ? new Date(smimeCert.notAfter).toLocaleDateString() : "-"}</span>
                 <span className="text-muted-foreground font-medium">{t("settings.privacy.smimeCertSerial")}:</span>
                 <span className="font-mono text-xs break-all">{smimeCert.serialNumber}</span>
                 <span className="text-muted-foreground font-medium">{t("settings.privacy.smimeCertFingerprint")}:</span>

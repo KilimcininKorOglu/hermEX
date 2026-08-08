@@ -228,7 +228,7 @@ export interface CalendarSettings {
 // MailGridColumnModel). Sender/subject/date always show, so only the optional
 // columns are toggleable.
 export interface MailListColumns {
-  preview: boolean // subject-line snippet ("— preview text")
+  preview: boolean // subject-line snippet ("- preview text")
   attachment: boolean // paperclip icon when the message has attachments
   importance: boolean // high/low importance marker
   categories: boolean // category/label badges
@@ -698,7 +698,7 @@ class API {
   // mailboxOwner, when set, makes every mail call target a shared mailbox the
   // user has access to (the owner's address). MailboxContext sets it on switch
   // and clears it when returning to the personal mailbox, so page components
-  // need no per-call wiring — they automatically follow the active mailbox.
+  // need no per-call wiring, they automatically follow the active mailbox.
   mailboxOwner: string | undefined
 
   constructor() {
@@ -1341,7 +1341,7 @@ class API {
     return this.get<{ shared_as_owner?: string[] }>('/mailboxes/shared-as-owner')
   }
 
-  // Folder ACL (RFC 4314) — owner/mailbox are canonical names (INBOX, custom-folder, etc.)
+  // Folder ACL (RFC 4314), owner/mailbox are canonical names (INBOX, custom-folder, etc.)
   async getACL(owner: string, mailbox: string): Promise<{ owner: string; mailbox: string; acl: ACLEntry[] }> {
     return this.get(`/mailboxes/${encodeURIComponent(owner)}/${encodeURIComponent(mailbox)}/acl`)
   }
@@ -1485,7 +1485,7 @@ class API {
   }
 
   // dismissReminder clears a reminder server-side (PidLidReminderSet=false) so it
-  // never fires again — persistent, unlike the old session-only dismissal.
+  // never fires again, persistent, unlike the old session-only dismissal.
   async dismissReminder(id: string): Promise<void> {
     await this.post(`/reminders/${encodeURIComponent(id)}/dismiss`, {})
   }

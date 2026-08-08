@@ -60,6 +60,6 @@ func TestGatewayForwardsChunkedIncrementally(t *testing.T) {
 			t.Errorf("first chunk = %q, want chunk-one", line)
 		}
 	case <-time.After(2 * time.Second):
-		t.Fatal("first chunk did not arrive incrementally — the gateway buffered the stream")
+		t.Fatal("first chunk did not arrive incrementally, the gateway buffered the stream")
 	}
 }

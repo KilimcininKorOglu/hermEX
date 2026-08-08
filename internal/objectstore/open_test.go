@@ -16,7 +16,7 @@ import (
 func TestOpenMessage(t *testing.T) {
 	s := openSeededStore(t)
 
-	bodyText := "gövde içeriği — ünïçödé"
+	bodyText := "gövde içeriği, ünïçödé"
 	attachData := []byte("PDF-DATA-bytes")
 	msg := &oxcmail.Message{
 		Props: mapi.PropertyValues{

@@ -253,7 +253,7 @@ func TestMySQLBaselineAdoption(t *testing.T) {
 	}
 	var rows, ver int
 	if err := db.QueryRow("SELECT COUNT(*) FROM mt1").Scan(&rows); err != nil || rows != 3 {
-		t.Fatalf("existing rows = %d (err %v), want 3 — adoption must not recreate", rows, err)
+		t.Fatalf("existing rows = %d (err %v), want 3, adoption must not recreate", rows, err)
 	}
 	if err := db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&ver); err != nil || ver != 1 {
 		t.Fatalf("recorded version = %d (err %v), want 1", ver, err)

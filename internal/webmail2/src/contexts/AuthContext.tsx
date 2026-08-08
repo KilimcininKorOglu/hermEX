@@ -100,7 +100,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (me?.authenticated && me.email) {
           applyMe(me)
         } else {
-          // Soft 200 with authenticated:false — the stored session is no longer
+          // Soft 200 with authenticated:false, the stored session is no longer
           // valid. Clear the marker so we stop probing on future loads.
           deleteCookie(sessionMarkerKey)
         }

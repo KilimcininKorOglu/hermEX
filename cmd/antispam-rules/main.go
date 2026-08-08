@@ -38,7 +38,7 @@ func main() {
 	log.Printf("antispam-rules: %d rules, %d metas evaluable; dropped %d rules and %d metas (network/plugin/incompatible)",
 		rules, metas, rs.SkippedRules, rs.DroppedMetas)
 	if rules == 0 {
-		log.Fatalf("antispam-rules: %s produced no evaluable rules — wrong directory?", *from)
+		log.Fatalf("antispam-rules: %s produced no evaluable rules, wrong directory?", *from)
 	}
 
 	header := fmt.Sprintf("# hermEX anti-spam ruleset, refreshed from %s\n"+
@@ -53,7 +53,7 @@ func main() {
 	if err := writeAtomic(*out, payload); err != nil {
 		log.Fatalf("antispam-rules: write %s: %v", *out, err)
 	}
-	log.Printf("antispam-rules: wrote %s — the MTA picks it up automatically within a minute (no restart)", *out)
+	log.Printf("antispam-rules: wrote %s, the MTA picks it up automatically within a minute (no restart)", *out)
 }
 
 // writeAtomic writes data to path via a temp file in the same directory, then

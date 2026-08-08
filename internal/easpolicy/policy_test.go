@@ -23,7 +23,7 @@ func TestKey(t *testing.T) {
 
 	changed := Policy{"DevicePasswordEnabled": 1, "MinDevicePasswordLength": 6}
 	if Key(a) == Key(changed) {
-		t.Errorf("a value change did not change the key (%q) — a policy edit would not propagate", Key(a))
+		t.Errorf("a value change did not change the key (%q), a policy edit would not propagate", Key(a))
 	}
 	if k := Key(a); k == "0" || k == "1" {
 		t.Errorf("a non-empty policy collided with a reserved key: %q", k)

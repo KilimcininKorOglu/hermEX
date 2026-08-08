@@ -92,7 +92,7 @@ func TestRpcExt2Logon(t *testing.T) {
 	rp.Uint8()           // OutputHandleIndex
 	rv, _ := rp.Uint32() // ReturnValue
 	if ropID != 0xFE || rv != ecSuccess {
-		t.Errorf("ROP response = (RopId %#x, ReturnValue %#x), want (0xFE, 0) — a RopLogon success", ropID, rv)
+		t.Errorf("ROP response = (RopId %#x, ReturnValue %#x), want (0xFE, 0), a RopLogon success", ropID, rv)
 	}
 }
 
@@ -160,7 +160,7 @@ func TestRpcExt2CrossExecuteHandle(t *testing.T) {
 	rp.Uint8()           // OutputHandleIndex
 	rv, _ := rp.Uint32() // ReturnValue
 	if ropID != 0x02 || rv != ecSuccess {
-		t.Fatalf("open-folder response = (RopId %#x, ReturnValue %#x), want (0x02, 0) — the logon handle did not survive into the second Execute", ropID, rv)
+		t.Fatalf("open-folder response = (RopId %#x, ReturnValue %#x), want (0x02, 0), the logon handle did not survive into the second Execute", ropID, rv)
 	}
 	if len(handles) != 2 || handles[1] == 0xFFFFFFFF {
 		t.Fatalf("open-folder did not mint a folder handle in slot 1: %v", handles)

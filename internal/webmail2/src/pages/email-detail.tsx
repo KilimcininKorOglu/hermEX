@@ -284,7 +284,7 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
             smimeSignedBy,
           })
           // Mark the message read on open (server-side) if it was unread, so
-          // the unread count reflects reading — standard mail-client behavior.
+          // the unread count reflects reading, standard mail-client behavior.
           // Fire-and-forget: a failure must not block reading the message.
           if (!result.read) {
             api.setFlag(result.id, "\\Seen", true).catch(() => undefined)

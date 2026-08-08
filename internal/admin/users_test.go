@@ -486,7 +486,7 @@ func TestAdminSetContact(t *testing.T) {
 		t.Errorf("set props = %v, want displayname+title mapped to proptags", d.setProps)
 	}
 	if len(d.setProps) != 2 {
-		t.Errorf("set props has %d entries, want 2 — an unknown field name must not become a property", len(d.setProps))
+		t.Errorf("set props has %d entries, want 2, an unknown field name must not become a property", len(d.setProps))
 	}
 }
 

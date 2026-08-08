@@ -80,7 +80,7 @@ func TestMaildirForPartitions(t *testing.T) {
 	// The whole point of a pool is to spread: a hash that parked everyone on one
 	// partition would defeat it.
 	if len(roots) < 2 {
-		t.Errorf("partition hash used only %d root(s): %v — it does not spread", len(roots), roots)
+		t.Errorf("partition hash used only %d root(s): %v, it does not spread", len(roots), roots)
 	}
 }
 

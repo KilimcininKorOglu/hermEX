@@ -35,7 +35,7 @@ func childIDs(t *testing.T, s *Store, query string, args ...any) []int64 {
 func TestCreateMessage(t *testing.T) {
 	s := openSeededStore(t)
 
-	bodyText := bytes.Repeat([]byte("merhaba dünya — gövde\n"), 500)
+	bodyText := bytes.Repeat([]byte("merhaba dünya, gövde\n"), 500)
 	attachData := bytes.Repeat([]byte{0x25, 0x50, 0x44, 0x46}, 800)
 	deliveredNT := mapi.UnixToNTTime(time.Unix(1700000000, 0))
 

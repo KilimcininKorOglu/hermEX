@@ -112,7 +112,7 @@ export function MailboxProvider({ children, personalEmail }: { children: React.R
   // Infinite mode accumulates blocks into one growing window fetched from page 0;
   // blocksRef holds how many base-size blocks are currently shown. A ref (not
   // state) keeps loadMoreInbox from recreating fetchInbox and reflashing the
-  // skeleton — the fetched window size is read live at call time.
+  // skeleton, the fetched window size is read live at call time.
   const blocksRef = useRef(1)
 
   // fetchInbox pulls the inbox without toggling the loading flag, so background
@@ -216,7 +216,7 @@ export function MailboxProvider({ children, personalEmail }: { children: React.R
   const switchMailbox = useCallback((email: string, owner?: string) => {
     // A mailbox is shared when its owner is not the signed-in user. A pure shared
     // mailbox has owner === email (both the shared address), so comparing the
-    // owner to the personal email — not to email — is what distinguishes it.
+    // owner to the personal email, not to email, is what distinguishes it.
     if (owner && owner !== personalEmail) {
       // This is a shared mailbox: route every subsequent mail call to the owner.
       api.setMailboxOwner(owner)

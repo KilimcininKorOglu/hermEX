@@ -70,7 +70,7 @@ func TestPollForChangeThenExecuteDrains(t *testing.T) {
 	resp, _ := sess.Dispatch(nil, nil)
 	p := ext.NewPull(resp, ext.FlagUTF16)
 	if id := mustU8(t, p, "RopId"); id != ropNotify {
-		t.Fatalf("Execute after PollForChange drained no RopNotify (RopId %#x) — the wait→execute seam dropped the event", id)
+		t.Fatalf("Execute after PollForChange drained no RopNotify (RopId %#x), the wait→execute seam dropped the event", id)
 	}
 	if got := mustU32(t, p, "NotificationHandle"); got != subH {
 		t.Errorf("NotificationHandle = %d, want %d", got, subH)

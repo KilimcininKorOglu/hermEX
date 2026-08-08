@@ -14,7 +14,7 @@
 <table class="grid">
 <thead><tr><th>Time</th><th>Level</th><th>Subsystem</th><th>Event</th><th>User</th><th>Address</th></tr></thead>
 <tbody>
-{{range .Entries}}<tr><td>{{.Time.Format "2006-01-02 15:04:05"}}</td><td>{{.Level}}</td><td>{{.Subsystem}}</td><td>{{.Name}}{{if .Err}} — {{.Err}}{{end}}</td><td>{{.User}}</td><td>{{.RemoteAddr}}</td></tr>
+{{range .Entries}}<tr><td>{{.Time.Format "2006-01-02 15:04:05"}}</td><td>{{.Level}}</td><td>{{.Subsystem}}</td><td>{{.Name}}{{if .Err}}, {{.Err}}{{end}}</td><td>{{.User}}</td><td>{{.RemoteAddr}}</td></tr>
 {{else}}<tr><td colspan="6" class="empty">No log events.</td></tr>
 {{end}}
 </tbody>

@@ -447,7 +447,7 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
             <span className={cn(!email.read && "text-foreground font-medium")}>
               {email.subject}
             </span>
-            {columns.preview && <span className="truncate">— {email.preview}</span>}
+            {columns.preview && <span className="truncate">- {email.preview}</span>}
           </div>
         )}
       </div>
@@ -687,7 +687,7 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
             ) : (
               threadGroups.map((thread) => (
                 <div key={thread.key}>
-                  {/* Thread header — click to expand */}
+                  {/* Thread header, click to expand */}
                   <div
                     className="flex cursor-pointer items-center gap-3 p-4 hover:bg-accent/50 transition-all"
                     onClick={() => toggleThread(thread.key)}

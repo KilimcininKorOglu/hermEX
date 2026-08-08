@@ -58,7 +58,7 @@ func (s *Server) handleQuarantineRelease(w http.ResponseWriter, r *http.Request)
 	if _, err := st.MoveMessage(int64(mapi.PrivateFIDJunk), claims.UID, int64(mapi.PrivateFIDInbox)); err != nil {
 		if errors.Is(err, objectstore.ErrNotFound) {
 			writeQuarantinePage(w, http.StatusOK, "Already handled",
-				"This message has already been handled — it is no longer in your Junk folder.", "")
+				"This message has already been handled, it is no longer in your Junk folder.", "")
 			return
 		}
 		writeQuarantinePage(w, http.StatusInternalServerError, "Could not release",

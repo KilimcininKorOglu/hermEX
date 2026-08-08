@@ -40,7 +40,7 @@ interface ShareFolderDialogProps {
   folderName: string
   /** Display label shown in the dialog title */
   folderLabel: string
-  /** Owner's email — logged-in user for a personal folder, else the mailbox owner */
+  /** Owner's email, logged-in user for a personal folder, else the mailbox owner */
   owner: string
   /** Whether the current user is the folder owner (can manage ACL) */
   isOwner: boolean

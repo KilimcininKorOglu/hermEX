@@ -7,7 +7,7 @@ import { getCookie, setCookie, deleteCookie } from "./cookies"
 // chosen IANA zone is kept in a module singleton so the pure formatter functions
 // (used across many pages) can read it without threading React context through
 // every call site. AuthContext sets it from /auth/me on load and onboarding /
-// settings update it on change. An empty value means "follow the device" —
+// settings update it on change. An empty value means "follow the device",
 // formatters then omit the timeZone option and fall back to the browser zone.
 
 const TZ_COOKIE_KEY = 'hermex-timezone'

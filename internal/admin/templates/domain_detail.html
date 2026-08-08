@@ -141,7 +141,7 @@
 </form>
 
 <h2>DKIM signing</h2>
-<p class="hint">Signs outbound mail from this domain so it passes DKIM and DMARC at receivers. Generate a key, publish the DNS record it shows, allow a few minutes for it to propagate, then enable signing — enabling before the record is published and visible would make your mail fail DKIM.</p>
+<p class="hint">Signs outbound mail from this domain so it passes DKIM and DMARC at receivers. Generate a key, publish the DNS record it shows, allow a few minutes for it to propagate, then enable signing, enabling before the record is published and visible would make your mail fail DKIM.</p>
 {{template "dkim-panel" .}}
 
 <h2>Required DNS records</h2>
@@ -174,7 +174,7 @@
 {{define "dkim-panel"}}<div id="dkim-panel">
 {{if .DKIMNotice}}<p class="ok">{{.DKIMNotice}}</p>{{end}}
 {{if .DKIMHasKey}}
-<p>Status: <strong>{{if .DKIMEnabled}}enabled — outbound mail from this domain is signed{{else}}not signing — key generated, publish the record then enable{{end}}</strong> (selector {{.DKIMSelector}}).</p>
+<p>Status: <strong>{{if .DKIMEnabled}}enabled, outbound mail from this domain is signed{{else}}not signing, key generated, publish the record then enable{{end}}</strong> (selector {{.DKIMSelector}}).</p>
 <p>Publish this TXT record:</p>
 <p class="hint">Name: <code>{{.DKIMRecordName}}</code></p>
 <pre class="dns-record">{{.DKIMPublicTXT}}</pre>

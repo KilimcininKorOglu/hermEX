@@ -76,5 +76,5 @@ func (s *Server) handleUISaveSpamRetention(w http.ResponseWriter, r *http.Reques
 		s.render(w, "retention-panel", s.spamHistoryPageData(r, s.notice("Could not save the retention setting.", err)))
 		return
 	}
-	s.render(w, "retention-panel", s.spamHistoryPageData(r, "Retention saved — the MTA applies it within a minute, no restart."))
+	s.render(w, "retention-panel", s.spamHistoryPageData(r, "Retention saved, the MTA applies it within a minute, no restart."))
 }

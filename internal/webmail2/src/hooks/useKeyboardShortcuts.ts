@@ -108,7 +108,7 @@ export function useKeyboardShortcuts() {
 // category/description hold i18n keys (shortcuts.*) resolved at render time in
 // ShortcutsDialog via t(); keys are literal keyboard glyphs and stay as-is.
 // level marks whether a shortcut fires in "basic" (and thus also "extended") or
-// only in "extended", mirroring what the hooks actually bind — the dialog badges
+// only in "extended", mirroring what the hooks actually bind, the dialog badges
 // each row and dims the ones the current mode does not enable. Every entry here
 // is bound somewhere (no phantom rows).
 export const shortcuts = [

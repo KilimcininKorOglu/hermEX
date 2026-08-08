@@ -97,8 +97,8 @@ func (s *Server) roleDetailData(r *http.Request, role directory.RoleDetail, errM
 		return false
 	}
 	caps := []capCheck{
-		{directory.PermSystemAdmin, "System administrator — full", has(directory.PermSystemAdmin, "")},
-		{directory.PermSystemAdminRO, "System administrator — read-only", has(directory.PermSystemAdminRO, "")},
+		{directory.PermSystemAdmin, "System administrator (full)", has(directory.PermSystemAdmin, "")},
+		{directory.PermSystemAdminRO, "System administrator (read-only)", has(directory.PermSystemAdminRO, "")},
 		{directory.PermDomainPurge, "Purge domains", has(directory.PermDomainPurge, "")},
 		{directory.PermResetPasswd, "Reset user passwords", has(directory.PermResetPasswd, "")},
 	}

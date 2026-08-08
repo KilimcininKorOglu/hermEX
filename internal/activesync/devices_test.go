@@ -158,7 +158,7 @@ func TestDeviceMutations(t *testing.T) {
 		t.Fatalf("contact after wipe: %v", err)
 	}
 	if got := deviceWipe(t, st, "dev1"); got != WipeStatusPending {
-		t.Errorf("queued wipe after contact = %d, want pending(%d) — a contact must not cancel a wipe", got, WipeStatusPending)
+		t.Errorf("queued wipe after contact = %d, want pending(%d), a contact must not cancel a wipe", got, WipeStatusPending)
 	}
 	if err := CancelWipe(st, "dev1"); err != nil {
 		t.Fatalf("cancel: %v", err)

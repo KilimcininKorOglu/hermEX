@@ -290,7 +290,7 @@ export function SearchPage() {
                   </div>
                   <div className="text-sm">
                     <span className="font-medium">{email.subject}</span>
-                    <span className="text-muted-foreground"> — {email.preview}</span>
+                    <span className="text-muted-foreground"> - {email.preview}</span>
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">
                     {email.date}

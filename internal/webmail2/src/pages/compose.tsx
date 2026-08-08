@@ -214,7 +214,7 @@ export function ComposePage() {
   const [recipientInput, setRecipientInput] = useState<{ to: string; cc: string; bcc: string }>({ to: "", cc: "", bcc: "" })
   const [checkingNames, setCheckingNames] = useState(false)
   // Which recipient field is being typed in, so GAL suggestions show inline
-  // under that field (typing the main field — not just the "+" picker — surfaces
+  // under that field (typing the main field, not just the "+" picker, surfaces
   // directory matches).
   const [activeField, setActiveField] = useState<"to" | "cc" | "bcc" | null>(null)
   const [showCc, setShowCc] = useState(false)

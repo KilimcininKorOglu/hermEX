@@ -30,7 +30,7 @@ export function LoginPage() {
       .then((r) => (r.ok ? r.json() : null))
       .then((b: Branding | null) => {
         // Apply branding when the tenant set ANY customization, not just an
-        // app name — a tenant may override only the logo, tagline, or footer.
+        // app name, a tenant may override only the logo, tagline, or footer.
         const hasBranding =
           !!b && (!!b.app_name || !!b.logo_url || !!b.primary_color || !!b.tagline || !!b.footer_text)
         if (!cancelled) setBranding(hasBranding ? b : null)

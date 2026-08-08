@@ -7,7 +7,7 @@
 <form>
 <label>Domain
 <select name="domain" hx-get="/admin/ui/public-folders/panel" hx-trigger="change" hx-target="#pf-panel" hx-swap="innerHTML">
-<option value="">— select a domain —</option>
+<option value="">select a domain</option>
 {{range .Domains}}<option value="{{.Name}}"{{if eq .Name $.Domain}} selected{{end}}>{{.Name}}</option>{{end}}
 </select>
 </label>
@@ -42,7 +42,7 @@
 <td><form hx-post="/admin/ui/public-folders/grant/remove" hx-target="#pf-panel" hx-swap="innerHTML" hx-headers='{"X-CSRF-Token": "{{$.CSRF}}"}'>
 <input type="hidden" name="domain" value="{{$.Domain}}"><input type="hidden" name="fid" value="{{$fid}}"><input type="hidden" name="memberID" value="{{.MemberID}}">
 <button type="submit">Remove</button></form></td></tr>
-{{else}}<tr><td colspan="3" class="empty">No grants yet — nobody can see this folder.</td></tr>
+{{else}}<tr><td colspan="3" class="empty">No grants yet, nobody can see this folder.</td></tr>
 {{end}}
 </tbody>
 </table>

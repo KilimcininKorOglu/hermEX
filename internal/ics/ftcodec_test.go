@@ -187,7 +187,7 @@ func TestValueRoundTrips(t *testing.T) {
 		{Tag: tag(0x1007, mapi.PtI8), Value: int64(0x0102030405060708)},
 		{Tag: tag(0x1008, mapi.PtSysTime), Value: uint64(0x01D9ABCDEF012345)},
 		{Tag: tag(0x1009, mapi.PtCLSID), Value: g},
-		{Tag: tag(0x100A, mapi.PtUnicode), Value: "héllo — ünïcode"},
+		{Tag: tag(0x100A, mapi.PtUnicode), Value: "héllo, ünïcode"},
 		{Tag: tag(0x100B, mapi.PtBinary), Value: []byte{0, 1, 2, 250, 255}},
 		{Tag: tag(0x100C, mapi.PtMvLong), Value: []int32{1, -2, 3}},
 		{Tag: tag(0x100D, mapi.PtMvUnicode), Value: []string{"a", "bb", ""}},

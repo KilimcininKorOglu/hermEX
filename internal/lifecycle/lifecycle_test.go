@@ -126,7 +126,7 @@ func TestRunHonorsShutdownTimeout(t *testing.T) {
 		t.Errorf("Run returned in %v, before the %v shutdown deadline", elapsed, timeout)
 	}
 	if elapsed > timeout+2*time.Second {
-		t.Errorf("Run took %v, far past the %v deadline — the shared timeout was not honored", elapsed, timeout)
+		t.Errorf("Run took %v, far past the %v deadline, the shared timeout was not honored", elapsed, timeout)
 	}
 	if err == nil {
 		t.Error("Run = nil, want the shutdown-deadline error surfaced")

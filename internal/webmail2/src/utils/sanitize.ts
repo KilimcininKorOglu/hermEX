@@ -6,7 +6,7 @@ let blockRemoteImages = false
 let remoteWasBlocked = false
 
 // Single afterSanitizeAttributes hook: injects rel="noopener noreferrer" on
-// target="_blank" links (CWE-1022), and — when blocking is on — neutralizes
+// target="_blank" links (CWE-1022), and, when blocking is on, neutralizes
 // remote images (http/https or protocol-relative) so tracking pixels do not load.
 // Inline images (cid:/data:) are kept untouched.
 DOMPurify.addHook('afterSanitizeAttributes', (node) => {

@@ -269,7 +269,7 @@ func TestBrowseOpenChain(t *testing.T) {
 	}
 	midVal, ok := rows[0].Get(mapi.PrMid)
 	if !ok {
-		t.Fatal("row has no PrMid — the browse->open chain is broken (no id to open)")
+		t.Fatal("row has no PrMid, the browse->open chain is broken (no id to open)")
 	}
 	mid, ok := midVal.(int64)
 	if !ok {

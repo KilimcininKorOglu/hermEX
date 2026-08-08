@@ -11,8 +11,8 @@
 
 <h2>SpamAssassin ruleset</h2>
 <p>Source: {{.SASource}}</p>
-<p>{{.SARules}} rules and {{.SAMetas}} meta rules in use; {{.SASkipped}} rules and {{.SADropped}} metas are dropped (network-, plugin-, and Bayes-backed rules and patterns the engine cannot compile — those checks are done natively).</p>
-<p class="hint">The rules contribute one combined signal: when their summed score reaches {{.SAThreshold}}, the verdict gains {{.SAWeight}} points. The ruleset is seeded into data_dir on first run; refresh it with the antispam-rules tool — changes are applied automatically within about a minute, no restart.</p>
+<p>{{.SARules}} rules and {{.SAMetas}} meta rules in use; {{.SASkipped}} rules and {{.SADropped}} metas are dropped (network-, plugin-, and Bayes-backed rules and patterns the engine cannot compile, those checks are done natively).</p>
+<p class="hint">The rules contribute one combined signal: when their summed score reaches {{.SAThreshold}}, the verdict gains {{.SAWeight}} points. The ruleset is seeded into data_dir on first run; refresh it with the antispam-rules tool, changes are applied automatically within about a minute, no restart.</p>
 
 <h2>Greylisting</h2>
 {{template "greylist-panel" .}}
@@ -76,7 +76,7 @@
 
 {{define "outbound-panel"}}<div id="outbound-panel">
 {{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
-<p>Outbound abuse limiting is <strong>{{if .OutboundEnabled}}on{{else}}off{{end}}</strong>. When on, a local account that sends to more than the cap of external recipients within the window has the excess deferred with a temporary failure — a compromised account cannot blast spam unchecked — and an <code>outbound.abuse</code> event is logged once per window so you can disable the account. Authenticated submission only; inbound mail is never affected.</p>
+<p>Outbound abuse limiting is <strong>{{if .OutboundEnabled}}on{{else}}off{{end}}</strong>. When on, a local account that sends to more than the cap of external recipients within the window has the excess deferred with a temporary failure, a compromised account cannot blast spam unchecked, and an <code>outbound.abuse</code> event is logged once per window so you can disable the account. Authenticated submission only; inbound mail is never affected.</p>
 <form hx-post="/admin/ui/antispam/outbound" hx-target="#outbound-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <label class="check"><input type="checkbox" name="enabled" value="1"{{if .OutboundEnabled}} checked{{end}}> Enable outbound limiting</label>
 <p>External recipients per window: <input type="number" name="cap" value="{{.OutboundCap}}" min="1"></p>
@@ -117,7 +117,7 @@
       hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <button type="submit">Retrain from mailboxes</button>
 </form>
-<p class="hint">Retraining reads each mailbox's Junk folder as spam and inbox as ham; it runs in the background — watch the Task queue for the result.</p>
+<p class="hint">Retraining reads each mailbox's Junk folder as spam and inbox as ham; it runs in the background, watch the Task queue for the result.</p>
 </div>{{end}}
 
 {{define "scoring-panel"}}<div id="scoring-panel">

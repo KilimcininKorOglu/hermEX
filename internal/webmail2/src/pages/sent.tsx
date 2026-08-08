@@ -151,7 +151,7 @@ export function SentPage() {
                   </div>
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <span className="font-medium">{email.subject}</span>
-                    <span className="truncate">— {email.preview}</span>
+                    <span className="truncate">- {email.preview}</span>
                   </div>
                 </div>
                 <span className="whitespace-nowrap text-sm text-muted-foreground">

@@ -52,7 +52,7 @@ func (s *Server) handleUIQuarantineRelease(w http.ResponseWriter, r *http.Reques
 		_, err := st.MoveMessage(int64(mapi.PrivateFIDJunk), uid, int64(mapi.PrivateFIDInbox))
 		return err
 	}); err != nil {
-		notice = "Could not release the message — it may already have been moved."
+		notice = "Could not release the message, it may already have been moved."
 	}
 	s.renderQuarantine(w, r.PathValue("email"), maildir, csrfCookieValue(r), notice)
 }
@@ -72,7 +72,7 @@ func (s *Server) handleUIQuarantineDelete(w http.ResponseWriter, r *http.Request
 	if err := s.quarantineMutate(maildir, func(st *objectstore.Store) error {
 		return st.DeleteMessage(int64(mapi.PrivateFIDJunk), uid)
 	}); err != nil {
-		notice = "Could not delete the message — it may already be gone."
+		notice = "Could not delete the message, it may already be gone."
 	}
 	s.renderQuarantine(w, r.PathValue("email"), maildir, csrfCookieValue(r), notice)
 }

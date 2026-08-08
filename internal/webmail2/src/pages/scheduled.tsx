@@ -86,7 +86,7 @@ export function ScheduledPage() {
                     )}
                   </div>
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <span className="truncate">{t("common.to")}: {m.to.join(", ") || "—"}</span>
+                    <span className="truncate">{t("common.to")}: {m.to.join(", ") || "-"}</span>
                   </div>
                   {m.status === "failed" && m.error && (
                     <div className="truncate text-xs text-destructive">{m.error}</div>

@@ -71,7 +71,7 @@ export function PublicFoldersPage() {
           <div className="text-sm text-muted-foreground mb-4">
             <span className="font-medium text-foreground">{message.fromName || message.from}</span>
             {message.fromName && <span> &lt;{message.from}&gt;</span>}
-            {message.date && <span> — {new Date(message.date).toLocaleString()}</span>}
+            {message.date && <span> - {new Date(message.date).toLocaleString()}</span>}
           </div>
           <div className="prose prose-sm max-w-none dark:prose-invert" dangerouslySetInnerHTML={{ __html: html }} />
         </div>
@@ -109,7 +109,7 @@ export function PublicFoldersPage() {
                     <p className="font-medium truncate">{m.subject || "(no subject)"}</p>
                     <p className="text-xs text-muted-foreground truncate">
                       {m.fromName || m.from}
-                      {m.date ? " — " + new Date(m.date).toLocaleDateString() : ""}
+                      {m.date ? " - " + new Date(m.date).toLocaleDateString() : ""}
                     </p>
                   </div>
                   <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />

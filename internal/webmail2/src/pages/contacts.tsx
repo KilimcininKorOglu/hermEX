@@ -99,7 +99,7 @@ export function ContactsPage() {
   const { t } = useI18n()
   const [contacts, setContacts] = useState<Contact[]>([])
   // The Global Address List (every directory user) shown as its own group, the
-  // Exchange way — separate from the user's personal contacts.
+  // Exchange way, separate from the user's personal contacts.
   const [galEntries, setGalEntries] = useState<DirectoryEntry[]>([])
   const [searchQuery, setSearchQuery] = useState("")
   const [showAddDialog, setShowAddDialog] = useState(false)

@@ -2,7 +2,7 @@
 // sessionStorage (see .project/AGENT_DIRECTIVES.md §8.1); client-readable
 // preferences (language, theme, timezone, session marker, recent searches)
 // live in cookies. The auth JWT itself stays in a separate HttpOnly cookie the
-// client cannot read — these helpers are for non-sensitive readable state only.
+// client cannot read, these helpers are for non-sensitive readable state only.
 
 // getCookie returns the decoded value of a cookie, or null when absent.
 export function getCookie(name: string): string | null {

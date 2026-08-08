@@ -68,8 +68,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 // RequireOnboarded sends a signed-in user who has not finished first-run
 // onboarding to /onboarding. It fires ONLY when the flag is explicitly false
-// (a fresh/unmigrated account); when it is undefined — e.g. a login fallback
-// that could not read /auth/me — the user is not trapped.
+// (a fresh/unmigrated account); when it is undefined, e.g. a login fallback
+// that could not read /auth/me, the user is not trapped.
 function RequireOnboarded({ children }: { children: React.ReactNode }) {
   const { user } = useAuth()
   if (user && user.onboarded === false) {

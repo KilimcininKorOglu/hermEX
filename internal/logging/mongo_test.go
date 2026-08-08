@@ -160,7 +160,7 @@ func TestMongoSinkIntegration(t *testing.T) {
 	}
 	for _, m := range idx {
 		if _, ok := m["expireAfterSeconds"]; ok {
-			t.Errorf("a TTL index exists: %v — retention is prune-based, no TTL must be created", m)
+			t.Errorf("a TTL index exists: %v, retention is prune-based, no TTL must be created", m)
 		}
 	}
 }
@@ -208,7 +208,7 @@ func TestMongoSinkCreatesNoTTLIndex(t *testing.T) {
 	}
 	for _, m := range idx {
 		if _, ok := m["expireAfterSeconds"]; ok {
-			t.Fatalf("a TTL index was created: %v — retention is prune-based, no TTL must exist", m)
+			t.Fatalf("a TTL index was created: %v, retention is prune-based, no TTL must exist", m)
 		}
 	}
 	if len(idx) < 4 {

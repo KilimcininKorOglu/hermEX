@@ -130,7 +130,7 @@ func TestExpandMListTypes(t *testing.T) {
 		got, res := expandSorted(t, d, "everyone@hermex.test", "x@y.test")
 		want := []string{"alice@hermex.test", "bob@hermex.test", "carol@hermex.test"}
 		if res != MListOK || !slices.Equal(got, want) {
-			t.Errorf("got (%v, %d), want (%v, OK) — distribution lists must be excluded", got, res, want)
+			t.Errorf("got (%v, %d), want (%v, OK), distribution lists must be excluded", got, res, want)
 		}
 	})
 }

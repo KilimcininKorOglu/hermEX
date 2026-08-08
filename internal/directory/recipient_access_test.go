@@ -79,7 +79,7 @@ func TestRecipientRuleDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	if ok, err := d.DeleteRecipientRule("alice@hermex.test", "X@Example.com"); err != nil || !ok {
-		t.Fatalf("delete = (%v, %v), want (true, nil) — pattern is matched case-insensitively", ok, err)
+		t.Fatalf("delete = (%v, %v), want (true, nil), pattern is matched case-insensitively", ok, err)
 	}
 	if ok, _ := d.DeleteRecipientRule("alice@hermex.test", "x@example.com"); ok {
 		t.Error("deleting a missing rule must report ok=false")
