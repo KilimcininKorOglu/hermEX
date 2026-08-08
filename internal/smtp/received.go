@@ -35,8 +35,13 @@ func buildReceived(helo, remoteAddr, rdns, hostname string, tls bool, now time.T
 	if from == "" {
 		from = "unknown"
 	}
+	// A PTR record is free-form data from an unauthenticated source the sending
+	// party usually controls, so it carries no single-line guarantee of its own: a
+	// name with a control byte in it would end this header and start one of the
+	// sender's choosing. Anything that is not a printable host name is reported as
+	// unknown, exactly like a missing record.
 	rev := rdns
-	if rev == "" {
+	if rev == "" || !printableName(rev) {
 		rev = "unknown"
 	}
 	date := now.Format("Mon, 02 Jan 2006 15:04:05 -0700")
@@ -59,5 +64,21 @@ func lookupRDNS(remoteAddr string) string {
 	if err != nil || len(names) == 0 {
 		return ""
 	}
-	return strings.TrimSuffix(names[0], ".")
+	name := strings.TrimSuffix(names[0], ".")
+	if !printableName(name) {
+		return ""
+	}
+	return name
+}
+
+// printableName reports whether s is usable inside a header value. A host name is
+// printable ASCII with no spaces; a byte outside that range means the record is
+// not a host name, and one of them (CR or LF) would end the header line.
+func printableName(s string) bool {
+	for i := range len(s) {
+		if s[i] <= ' ' || s[i] > '~' {
+			return false
+		}
+	}
+	return true
 }
