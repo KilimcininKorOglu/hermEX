@@ -179,6 +179,11 @@ func (w *Worker) ProcessDue(ctx context.Context, now time.Time) (sent int, err e
 	if batch <= 0 {
 		batch = defaultBatch
 	}
+	// Rows left mid-attempt by an earlier pass are resolved first, and never by
+	// delivering them again.
+	if err := w.resolveUnsettled(ctx, now); err != nil {
+		return 0, err
+	}
 	items, err := w.Spool.Claim(now, batch)
 	if err != nil {
 		return 0, err
@@ -191,14 +196,34 @@ func (w *Worker) ProcessDue(ctx context.Context, now time.Time) (sent int, err e
 		if ctx.Err() != nil {
 			return sent, nil
 		}
+		// Stamp the attempt before handing the message to delivery. A stamp with no
+		// send is recoverable (the sender gets the message back); a send with no
+		// stamp is not, because nothing then stops the next pass from sending it
+		// again. A failure to write the stamp leaves the row untouched and
+		// undelivered, so the pass simply stops.
+		if me := w.Spool.MarkStarted(it.RecipientID, now); me != nil {
+			return sent, me
+		}
 		e := w.deliver(it)
 		if e == nil {
+			// The mail exchanger has the message. Record that before removing the
+			// row, so a failure of either write leaves a state that says "delivered,
+			// settle outstanding" rather than one that reads as never attempted.
+			if de := w.Spool.MarkDelivered(it.RecipientID); de != nil {
+				return sent, de
+			}
 			if se := w.Spool.Sent(it.RecipientID); se != nil {
 				return sent, se
 			}
 			sent++
 			w.log(logging.LevelInfo, "relay.sent", it, nil)
 			continue
+		}
+		// Delivery answered, so the outcome is known and the stamp has nothing left
+		// to record. Clearing it returns the row to the ordinary retry path instead
+		// of leaving it looking like an interrupted attempt.
+		if ce := w.Spool.ClearStarted(it.RecipientID); ce != nil {
+			return sent, ce
 		}
 		// Give up on a permanent rejection or once attempts are exhausted; the
 		// sender is told (OnGiveUp) and the recipient settled. Otherwise defer with
@@ -227,6 +252,52 @@ func (w *Worker) ProcessDue(ctx context.Context, now time.Time) (sent int, err e
 		w.log(logging.LevelWarn, "relay.defer", it, e)
 	}
 	return sent, nil
+}
+
+// interruptedDelivery is the cause reported to the sender for a delivery whose
+// outcome cannot be established. It is not a rejection by the recipient's server.
+var interruptedDelivery = errors.New(
+	"delivery was interrupted and its outcome is unknown; it was not sent again, to avoid delivering the message twice")
+
+// resolveUnsettled clears rows an earlier pass left mid-attempt, without ever
+// opening a second SMTP session for them. There are two cases and they are not
+// alike: a row already accepted by the mail exchanger needs only its bookkeeping
+// finished, while a row whose attempt was started and never concluded has an
+// outcome nobody can determine from here. Sending that one again risks a
+// duplicate and dropping it risks a silent loss, so the sender is told, which is
+// the same answer the scheduled-send path gives to the same question.
+func (w *Worker) resolveUnsettled(ctx context.Context, now time.Time) error {
+	items, err := w.Spool.Unsettled()
+	if err != nil {
+		return err
+	}
+	for _, it := range items {
+		if ctx.Err() != nil {
+			return nil
+		}
+		if it.Delivered {
+			if se := w.Spool.Sent(it.RecipientID); se != nil {
+				return se
+			}
+			w.log(logging.LevelInfo, "relay.settled.late", it, nil)
+			continue
+		}
+		if be := w.giveUp(it, interruptedDelivery); be != nil {
+			// The sender was never told, so settling here would erase the message
+			// with nothing left to recover it from. Keep the row queued, where the
+			// mail-queue page shows it, and try the notice again later.
+			if re := w.Spool.Retry(it.RecipientID, now.Add(bounceRetryBackoff), "interrupted delivery, bounce undeliverable: "+be.Error()); re != nil {
+				return re
+			}
+			w.log(logging.LevelError, "relay.bounce.stuck", it, be)
+			continue
+		}
+		if fe := w.Spool.Fail(it.RecipientID); fe != nil {
+			return fe
+		}
+		w.log(logging.LevelWarn, "relay.interrupted", it, interruptedDelivery)
+	}
+	return nil
 }
 
 // giveUp abandons a recipient: it logs loudly and notifies the sender via the

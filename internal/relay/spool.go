@@ -62,6 +62,10 @@ type Item struct {
 	// (e.g. "NEVER" or "SUCCESS,FAILURE"), empty when the sender supplied none.
 	// The give-up path consults it to decide whether a failure DSN is wanted.
 	Notify string
+	// Delivered is set on an item read back by Unsettled: true when the mail
+	// exchanger already accepted the message and only the bookkeeping is missing,
+	// false when the attempt was started and its outcome is unknown.
+	Delivered bool
 }
 
 // DSNRecipient is one external recipient together with its RFC 3461 per-recipient
@@ -89,6 +93,11 @@ type QueueEntry struct {
 	NextAttempt time.Time
 	LastError   string
 	Size        int
+	// Interrupted marks a recipient whose delivery attempt was started but never
+	// settled, so the queue page shows why it is sitting there rather than being
+	// retried: it is never handed back to delivery, because it may already have
+	// been accepted.
+	Interrupted bool
 }
 
 // dsn mirrors the object store's connection string: a busy timeout, WAL
@@ -179,11 +188,16 @@ func (s *Spool) EnqueueDSN(from, ret, envid string, recipients []DSNRecipient, b
 // Claim returns up to limit recipient deliveries whose next-attempt time has
 // arrived (next_attempt <= now), oldest first, so the worker drains the backlog
 // fairly.
+//
+// A row whose delivery was started but never settled is deliberately excluded: it
+// may already have been accepted by the recipient's mail exchanger, and handing it
+// back here would send the message a second time. Unsettled reports those rows for
+// the worker to resolve without a new SMTP session.
 func (s *Spool) Claim(now time.Time, limit int) ([]Item, error) {
 	rows, err := s.db.Query(`
 SELECT r.id, m.envelope_from, r.recipient, m.body, r.attempts, r.notify
   FROM recipients r JOIN messages m ON m.id = r.message_id
- WHERE r.next_attempt <= ?
+ WHERE r.next_attempt <= ? AND r.delivery_started = 0 AND r.delivered = 0
  ORDER BY r.next_attempt, r.id
  LIMIT ?`, now.Unix(), limit)
 	if err != nil {
@@ -196,6 +210,58 @@ SELECT r.id, m.envelope_from, r.recipient, m.body, r.attempts, r.notify
 		if err := rows.Scan(&it.RecipientID, &it.From, &it.Recipient, &it.Body, &it.Attempts, &it.Notify); err != nil {
 			return nil, err
 		}
+		items = append(items, it)
+	}
+	return items, rows.Err()
+}
+
+// MarkStarted records that a delivery attempt for this recipient is under way.
+// It is written before the attempt, because a stamp with no send is recoverable
+// (the sender gets the message back) while a send with no stamp is not (it is
+// sent again).
+func (s *Spool) MarkStarted(recipientID int64, now time.Time) error {
+	_, err := s.db.Exec(`UPDATE recipients SET delivery_started = ? WHERE id = ?`, now.Unix(), recipientID)
+	return err
+}
+
+// ClearStarted removes the in-flight stamp after an attempt that answered with a
+// failure. The outcome is known, so the stamp has nothing left to record and the
+// row returns to the ordinary retry path.
+func (s *Spool) ClearStarted(recipientID int64) error {
+	_, err := s.db.Exec(`UPDATE recipients SET delivery_started = 0 WHERE id = ?`, recipientID)
+	return err
+}
+
+// MarkDelivered records that the recipient's mail exchanger accepted the message.
+// From here the only thing left is removing the row, which Unsettled lets a later
+// pass retry without opening a second SMTP session.
+func (s *Spool) MarkDelivered(recipientID int64) error {
+	_, err := s.db.Exec(`UPDATE recipients SET delivered = 1 WHERE id = ?`, recipientID)
+	return err
+}
+
+// Unsettled returns every recipient whose delivery was started or completed but
+// whose row was never removed, oldest first. Delivered separates the two cases the
+// worker must treat differently: a delivered row needs only its settle retried,
+// while a started-but-not-delivered row has an unknowable outcome.
+func (s *Spool) Unsettled() ([]Item, error) {
+	rows, err := s.db.Query(`
+SELECT r.id, m.envelope_from, r.recipient, m.body, r.attempts, r.notify, r.delivered
+  FROM recipients r JOIN messages m ON m.id = r.message_id
+ WHERE r.delivery_started > 0 OR r.delivered > 0
+ ORDER BY r.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Item
+	for rows.Next() {
+		var it Item
+		var delivered int
+		if err := rows.Scan(&it.RecipientID, &it.From, &it.Recipient, &it.Body, &it.Attempts, &it.Notify, &delivered); err != nil {
+			return nil, err
+		}
+		it.Delivered = delivered != 0
 		items = append(items, it)
 	}
 	return items, rows.Err()
@@ -225,7 +291,8 @@ func (s *Spool) Retry(recipientID int64, nextAttempt time.Time, lastErr string) 
 func (s *Spool) List() ([]QueueEntry, error) {
 	rows, err := s.db.Query(`
 SELECT r.id, m.id, m.envelope_from, r.recipient, r.attempts,
-       m.enqueued_at, r.next_attempt, r.last_error, LENGTH(m.body)
+       m.enqueued_at, r.next_attempt, r.last_error, LENGTH(m.body),
+       r.delivery_started, r.delivered
   FROM recipients r JOIN messages m ON m.id = r.message_id
  ORDER BY m.enqueued_at DESC, r.id`)
 	if err != nil {
@@ -235,11 +302,12 @@ SELECT r.id, m.id, m.envelope_from, r.recipient, r.attempts,
 	var out []QueueEntry
 	for rows.Next() {
 		var e QueueEntry
-		var enq, next int64
+		var enq, next, started, delivered int64
 		if err := rows.Scan(&e.RecipientID, &e.MessageID, &e.From, &e.Recipient,
-			&e.Attempts, &enq, &next, &e.LastError, &e.Size); err != nil {
+			&e.Attempts, &enq, &next, &e.LastError, &e.Size, &started, &delivered); err != nil {
 			return nil, err
 		}
+		e.Interrupted = started > 0 || delivered > 0
 		e.EnqueuedAt = time.Unix(enq, 0).UTC()
 		e.NextAttempt = time.Unix(next, 0).UTC()
 		out = append(out, e)

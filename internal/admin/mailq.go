@@ -83,6 +83,12 @@ func (s *Server) mailqViews() ([]mailqView, error) {
 			status = "Deferred"
 			next = e.NextAttempt.Format("2006-01-02 15:04:05")
 		}
+		// An interrupted row is never handed back to delivery (it may already have
+		// been accepted by the recipient's server), so it would otherwise sit here
+		// looking like an ordinary deferral that never retries.
+		if e.Interrupted {
+			status = "Interrupted"
+		}
 		out = append(out, mailqView{
 			ID: e.RecipientID, From: e.From, Recipient: e.Recipient, Attempts: e.Attempts,
 			Enqueued: e.EnqueuedAt.Format("2006-01-02 15:04:05"), NextAttempt: next,

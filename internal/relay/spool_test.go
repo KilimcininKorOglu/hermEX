@@ -51,11 +51,18 @@ func TestSpoolBaselineAdoption(t *testing.T) {
 		t.Fatalf("open existing spool: %v", err)
 	}
 	defer s.Close()
-	// Adoption records v1, then the pending DSN migration carries it to v2 and the
-	// TLS-RPT migration to v3; every pending statement must apply cleanly to a
-	// baseline-adopted spool.
-	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != 3 {
-		t.Fatalf("user_version after adoption = %d (err %v), want 3", v, err)
+	// Adoption records the baseline, then every pending migration applies in turn,
+	// so the spool ends at the newest version the binary carries. Computed from the
+	// migration set rather than hardcoded: a new migration must not require editing
+	// this assertion to keep passing.
+	want := 0
+	for _, m := range spoolMigrations {
+		if m.Version > want {
+			want = m.Version
+		}
+	}
+	if err := s.db.QueryRow("PRAGMA user_version").Scan(&v); err != nil || v != want {
+		t.Fatalf("user_version after adoption = %d (err %v), want %d", v, err, want)
 	}
 	var n int
 	if err := s.db.QueryRow("SELECT COUNT(*) FROM messages").Scan(&n); err != nil || n != 1 {
