@@ -18,6 +18,32 @@ import (
 // unbounded.
 const retrainSampleCap = 500
 
+// minMailboxContribution is the floor under the per-mailbox cap: below it a large
+// instance would train on too little of each mailbox to model anything.
+const minMailboxContribution = 50
+
+// perMailboxCap bounds one mailbox's contribution to a class. A folder's contents
+// are entirely under its owner's control (anyone can file self-authored messages
+// into their own Junk, or leave chosen content in their Inbox), so an unbounded
+// share is a poisoning primitive against a model that scores mail for everyone:
+// the cap makes one mailbox's influence fall as the instance grows, while the
+// floor keeps a small instance trainable.
+//
+// The cap is the only control that holds here. Anything read out of the message
+// itself (a Received header proving it arrived, the sender it claims) is written
+// by whoever filed it, so it can be fabricated as easily as the label it would
+// vouch for. Bounding the share does not depend on the content being honest.
+func perMailboxCap(mailboxes int) int {
+	if mailboxes <= 1 {
+		return retrainSampleCap
+	}
+	cap := retrainSampleCap / mailboxes
+	if cap < minMailboxContribution {
+		return minMailboxContribution
+	}
+	return cap
+}
+
 // performBayesRetrain rebuilds the Bayesian spam model from every mailbox, the
 // Junk folder as spam, the inbox as ham, and writes it atomically to the path the
 // MTA loads at startup. It is the handler for the "bayes-retrain" task. A mailbox
@@ -28,14 +54,15 @@ func (s *Server) performBayesRetrain() (string, error) {
 		return "", err
 	}
 	model := antispam.NewBayesModel()
+	limit := perMailboxCap(len(dirs))
 	var nspam, nham, nbox int
 	for _, dir := range dirs {
 		st, err := objectstore.Open(dir)
 		if err != nil {
 			continue
 		}
-		nspam += trainFolder(st, model, int64(mapi.PrivateFIDJunk), true)
-		nham += trainFolder(st, model, int64(mapi.PrivateFIDInbox), false)
+		nspam += trainFolder(st, model, int64(mapi.PrivateFIDJunk), true, limit)
+		nham += trainFolder(st, model, int64(mapi.PrivateFIDInbox), false, limit)
 		st.Close()
 		nbox++
 	}
@@ -406,9 +433,9 @@ func (s *Server) handleUIRetrainBayes(w http.ResponseWriter, r *http.Request) {
 		fmt.Sprintf("Retrain queued as task #%d, watch the Task queue for its result.", id)))
 }
 
-// trainFolder trains the model on up to retrainSampleCap of a folder's most recent
-// messages with the given label, returning the number trained.
-func trainFolder(st *objectstore.Store, m *antispam.BayesModel, folder int64, spam bool) int {
+// trainFolder trains the model on up to limit of a folder's most recent messages
+// with the given label, returning the number trained.
+func trainFolder(st *objectstore.Store, m *antispam.BayesModel, folder int64, spam bool, limit int) int {
 	msgs, err := st.ListMessages(folder)
 	if err != nil {
 		return 0
@@ -417,8 +444,8 @@ func trainFolder(st *objectstore.Store, m *antispam.BayesModel, folder int64, sp
 		msgs = msgs[len(msgs)-retrainSampleCap:]
 	}
 	n := 0
-	for _, mi := range msgs {
-		raw, err := st.GetMessageRaw(folder, mi.UID)
+	for i := len(msgs) - 1; i >= 0 && n < limit; i-- {
+		raw, err := st.GetMessageRaw(folder, msgs[i].UID)
 		if err != nil {
 			continue
 		}

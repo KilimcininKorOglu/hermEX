@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -441,5 +442,52 @@ func TestPerformBayesRetrain(t *testing.T) {
 	}
 	if model.SpamMsgs != 1 || model.HamMsgs != 1 {
 		t.Errorf("model counts = spam %d ham %d, want 1/1", model.SpamMsgs, model.HamMsgs)
+	}
+}
+
+// seedFolder appends n messages carrying body to a mailbox folder.
+func seedFolder(t *testing.T, mbox string, folder int64, n int, body string) {
+	t.Helper()
+	st, err := objectstore.Open(mbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	for i := range n {
+		raw := fmt.Sprintf("Subject: m%d\r\n\r\n%s", i, body)
+		if _, err := st.AppendMessage(folder, []byte(raw), time.Now(), 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestRetrainBoundsOneMailboxsShare proves no single mailbox decides the shared
+// model: with several mailboxes on the instance, one that files far more than the
+// others still contributes only its capped share.
+func TestRetrainBoundsOneMailboxsShare(t *testing.T) {
+	tmp := t.TempDir()
+	var dirs []string
+	for _, name := range []string{"a", "b", "c", "d", "e"} {
+		dirs = append(dirs, filepath.Join(tmp, name))
+	}
+	// One mailbox floods its Junk folder; the others hold a little real spam.
+	seedFolder(t, dirs[0], int64(mapi.PrivateFIDJunk), 400, "competitor brandname roadmap")
+	for _, d := range dirs[1:] {
+		seedFolder(t, d, int64(mapi.PrivateFIDJunk), 5, "buy now discount pills")
+	}
+
+	s := NewServer(&fakeDir{maildirs: dirs}, fakePaths{root: tmp}, []byte("secret"))
+	if _, err := s.performBayesRetrain(); err != nil {
+		t.Fatal(err)
+	}
+	model, err := antispam.LoadModelFile(fakePaths{root: tmp}.AntispamModelPath())
+	if err != nil || model == nil {
+		t.Fatalf("model file = (%v, %v), want a trained model", model, err)
+	}
+	// The cap for five mailboxes is 100, so the flooder contributes 100 of the 120
+	// trained messages instead of 400 of 420. The point of the assertion is the cap
+	// itself: the count is bounded by it, not by what one user chose to file.
+	if want := perMailboxCap(len(dirs)) + 20; model.SpamMsgs != want {
+		t.Errorf("spam messages trained = %d, want %d (one mailbox capped)", model.SpamMsgs, want)
 	}
 }
