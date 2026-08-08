@@ -489,6 +489,12 @@ func recipientList(msg *Message, rcptType int32) string {
 		if addr == "" {
 			continue
 		}
+		// mail.Address.String() escapes the local part but concatenates the domain
+		// verbatim, so an "address" carrying CR/LF would end the header and start
+		// attacker-chosen ones. Such a value is not an addr-spec at all: drop it.
+		if strings.ContainsAny(addr, "\r\n") {
+			continue
+		}
 		a := mail.Address{Name: propString(r, mapi.PrDisplayName), Address: addr}
 		addrs = append(addrs, a.String())
 	}
@@ -556,9 +562,16 @@ func is7bitClean(b []byte) bool {
 func writeField(b *bytes.Buffer, name, value string) {
 	b.WriteString(name)
 	b.WriteString(": ")
-	b.WriteString(value)
+	// A stored property is client-written on every protocol, so a value carrying a
+	// line break would splice headers of the client's choosing into the message (or
+	// end the header block early and push the rest into the body). Folding it back
+	// onto one line keeps the field's content and removes the ability to inject.
+	b.WriteString(headerLineBreaks.Replace(value))
 	b.WriteString("\r\n")
 }
+
+// headerLineBreaks flattens the two characters that can end a header line.
+var headerLineBreaks = strings.NewReplacer("\r", " ", "\n", " ")
 
 // propString returns a string-typed property, or "" when absent or not a string.
 func propString(props mapi.PropertyValues, tag mapi.PropTag) string {

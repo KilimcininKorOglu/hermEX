@@ -68,6 +68,10 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
+	if bad, found := firstUnusableAddress(req.To, req.Cc, req.Bcc); found {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a valid email address: " + bad})
+		return
+	}
 	recipients := collectRecipients(req.To, req.Cc, req.Bcc)
 	if len(recipients) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "at least one recipient is required"})
@@ -138,8 +142,29 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
+// firstUnusableAddress returns the first entry that cannot be parsed as an
+// address. Such a string must never be carried into the message: mail.Address's
+// String() escapes the local part but concatenates the domain verbatim, so an
+// entry holding a line break would splice headers of the sender's choosing into
+// the outgoing message (or end the header block and push the rest into the body).
+func firstUnusableAddress(groups ...[]string) (string, bool) {
+	for _, group := range groups {
+		for _, a := range group {
+			if a = strings.TrimSpace(a); a == "" {
+				continue
+			}
+			if _, err := mail.ParseAddress(a); err != nil {
+				return a, true
+			}
+		}
+	}
+	return "", false
+}
+
 // collectRecipients flattens To/Cc/Bcc into a deduplicated-by-position address
-// list, parsing each entry as a mail address but keeping bare strings as-is.
+// list. An entry that does not parse as an address is dropped rather than passed
+// through raw: it cannot be delivered anyway, and the handlers reject one before
+// reaching here.
 func collectRecipients(groups ...[]string) []string {
 	out := make([]string, 0)
 	for _, group := range groups {
@@ -147,11 +172,11 @@ func collectRecipients(groups ...[]string) []string {
 			if a = strings.TrimSpace(a); a == "" {
 				continue
 			}
-			if parsed, err := mail.ParseAddress(a); err == nil {
-				out = append(out, parsed.Address)
-			} else {
-				out = append(out, a)
+			parsed, err := mail.ParseAddress(a)
+			if err != nil {
+				continue
 			}
+			out = append(out, parsed.Address)
 		}
 	}
 	return out
@@ -169,6 +194,10 @@ func (s *Server) handleMailBuild(w http.ResponseWriter, r *http.Request) {
 	var req sendRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	if bad, found := firstUnusableAddress(req.To, req.Cc, req.Bcc); found {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a valid email address: " + bad})
 		return
 	}
 	representing, sender, ok := s.resolveSender(c.Email, req.From)
@@ -208,6 +237,10 @@ func (s *Server) handleMailSendRaw(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid raw message"})
 		return
 	}
+	if bad, found := firstUnusableAddress(req.To, req.Cc, req.Bcc); found {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a valid email address: " + bad})
+		return
+	}
 	recipients := collectRecipients(req.To, req.Cc, req.Bcc)
 	if len(recipients) == 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "at least one recipient is required"})
@@ -243,6 +276,10 @@ func (s *Server) handleMailDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	if bad, found := firstUnusableAddress(req.To, req.Cc, req.Bcc); found {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a valid email address: " + bad})
 		return
 	}
 	raw, err := s.buildOutgoing(c.Email, c.Email, sendRequest{To: req.To, Cc: req.Cc, Bcc: req.Bcc, Subject: req.Subject, Body: req.Body})
@@ -413,10 +450,14 @@ func rcptBags(addrs []string, rcptType int32) []mapi.PropertyValues {
 		if a = strings.TrimSpace(a); a == "" {
 			continue
 		}
-		name, addr := "", a
-		if parsed, err := mail.ParseAddress(a); err == nil {
-			name, addr = parsed.Name, parsed.Address
+		// No raw fallback: an unparseable string is not an address, and using it as
+		// one is what lets a line break reach the header block. The handlers reject
+		// such an entry up front, so nothing legitimate is dropped here.
+		parsed, err := mail.ParseAddress(a)
+		if err != nil {
+			continue
 		}
+		name, addr := parsed.Name, parsed.Address
 		var bag mapi.PropertyValues
 		bag.Set(mapi.PrRecipientType, rcptType)
 		bag.Set(mapi.PrAddrType, "SMTP")
