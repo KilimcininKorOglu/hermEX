@@ -59,6 +59,7 @@ func main() {
 	logger, logClose := logging.Build("hermex-webmail2", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
 	mta.SetDefaultLogger(logger)         // post-delivery pass failures route to the central log
+	webmail2api.SetDefaultLogger(logger) // best-effort API failures (a Sent copy that could not be filed) route there too
 
 	// Antivirus: install the package-level scanner from clamd_addr (a no-op when
 	// unset), so authenticated submissions are scanned before relay.

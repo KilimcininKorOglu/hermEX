@@ -12,6 +12,7 @@ import (
 
 	"hermex/internal/authlimit"
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/publicfolder"
@@ -445,7 +446,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// Record the session so the user can list and revoke it; best-effort, so a store
 	// error is logged but never fails the login (the token still authenticates).
 	if err := s.recordLoginSession(r, req.Email, jti, now, exp); err != nil {
-		log.Printf("webmail2: record login session failed: %v", err)
+		logError("record-login-session", err, logging.Fields{"user": req.Email})
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,

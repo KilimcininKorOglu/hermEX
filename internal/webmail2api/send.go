@@ -123,7 +123,7 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 
 	// File a Sent copy (best-effort; a delivered message is not lost if this fails).
 	if st, err := objectstore.Open(c.Mailbox); err == nil {
-		_, _ = st.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), objectstore.FlagSeen)
+		fileSentCopy(st, raw, c.Email, "mail")
 		st.Close()
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
@@ -209,7 +209,7 @@ func (s *Server) handleMailSendRaw(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st, err := objectstore.Open(c.Mailbox); err == nil {
-		_, _ = st.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), objectstore.FlagSeen)
+		fileSentCopy(st, raw, c.Email, "mail-raw")
 		st.Close()
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})

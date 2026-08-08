@@ -1,11 +1,11 @@
 package webmail2api
 
 import (
-	"log"
 	"net/http"
 	"strings"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -154,7 +154,7 @@ func (s *Server) handleSetACL(w http.ResponseWriter, r *http.Request) {
 		if folders, err := st.ListFolders(); err == nil {
 			for _, sub := range folderDescendants(folders, fid) {
 				if err := st.ModifyPermissions(sub, false, change); err != nil {
-					log.Printf("webmail2: recursive grant to %s skipped subfolder %d: %v", logSafe(login), sub, err)
+					logError("recursive-grant", err, logging.Fields{"grantee": logSafe(login), "folder": sub})
 				}
 			}
 		}

@@ -1,10 +1,10 @@
 package webmail2api
 
 import (
-	"log"
 	"net/http"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 )
 
 // handleChangePassword verifies the caller's current password and stores a new
@@ -78,7 +78,7 @@ func (s *Server) revokeOtherSessions(email, keepJti string) int64 {
 	}
 	n, err := store.DeleteOtherWebmailSessions(email, keepJti)
 	if err != nil {
-		log.Printf("webmail2: could not revoke other sessions for %s after a password change: %v", email, err)
+		logError("revoke-other-sessions", err, logging.Fields{"user": email})
 		return 0
 	}
 	return n

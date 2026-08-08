@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
@@ -442,7 +443,7 @@ func (s *Server) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
 		if raw, recipients, berr := buildMeetingRequest(organizer, in); berr == nil && organizer != "" {
 			if _, derr := mta.DeliverAndRelay(s.accounts, s.spool, organizer, recipients, raw, time.Now()); derr == nil {
 				// File a Sent copy so the organizer sees the outgoing invite.
-				_, _ = st.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), objectstore.FlagSeen)
+				fileSentCopy(st, raw, organizer, "meeting-request")
 			}
 		}
 	}
@@ -478,7 +479,7 @@ func (s *Server) handleUpdateEvent(w http.ResponseWriter, r *http.Request) {
 			in.UID = uidOrGenerated(in.UID)
 			if raw, recipients, berr := buildMeetingRequest(c.Email, in); berr == nil {
 				if _, derr := mta.DeliverAndRelay(s.accounts, s.spool, c.Email, recipients, raw, time.Now()); derr == nil {
-					_, _ = st.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), objectstore.FlagSeen)
+					fileSentCopy(st, raw, c.Email, "meeting-update")
 				}
 			}
 		}
@@ -561,8 +562,10 @@ func (s *Server) handleDeleteEvent(w http.ResponseWriter, r *http.Request) {
 					summary = propStr(pv, mapi.PrSubject)
 				}
 				if raw, rec, berr := buildCancellationRequest(c.Email, eventJSON{UID: strconv.FormatInt(id, 10), Summary: summary, Attendees: addrs}); berr == nil {
-					_, _ = mta.DeliverAndRelay(s.accounts, s.spool, c.Email, rec, raw, time.Now())
-					_, _ = st.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), objectstore.FlagSeen)
+					if _, derr := mta.DeliverAndRelay(s.accounts, s.spool, c.Email, rec, raw, time.Now()); derr != nil {
+						logError("send-meeting-cancellation", derr, logging.Fields{"user": c.Email})
+					}
+					fileSentCopy(st, raw, c.Email, "meeting-cancellation")
 				}
 			}
 		}

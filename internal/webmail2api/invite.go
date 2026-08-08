@@ -7,10 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"hermex/internal/mapi"
+	"hermex/internal/logging"
 	"hermex/internal/mime"
 	"hermex/internal/mta"
-	"hermex/internal/objectstore"
 )
 
 // findCalendarPart returns the decoded iCalendar (text/calendar or an .ics
@@ -191,8 +190,10 @@ func (s *Server) handleRSVP(w http.ResponseWriter, r *http.Request) {
 	organizer, _ := icalProp(ics, "ORGANIZER")
 	if org := organizerAddress(organizer); org != "" {
 		if msg, berr := buildReplyRequest(c.Email, org, icalToEvent(ics, 0), req.Response); berr == nil {
-			_, _ = mta.DeliverAndRelay(s.accounts, s.spool, c.Email, []string{org}, msg, time.Now())
-			_, _ = st.AppendMessage(int64(mapi.PrivateFIDSentItems), msg, time.Now(), objectstore.FlagSeen)
+			if _, derr := mta.DeliverAndRelay(s.accounts, s.spool, c.Email, []string{org}, msg, time.Now()); derr != nil {
+				logError("send-meeting-reply", derr, logging.Fields{"user": c.Email, "organizer": org})
+			}
+			fileSentCopy(st, msg, c.Email, "meeting-reply")
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": req.Response + "ed"})
@@ -350,6 +351,6 @@ func (s *Server) handleProposeTime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// File a Sent copy so the invitee sees the outgoing counter-proposal.
-	_, _ = st.AppendMessage(int64(mapi.PrivateFIDSentItems), msg, time.Now(), objectstore.FlagSeen)
+	fileSentCopy(st, msg, c.Email, "counter-proposal")
 	writeJSON(w, http.StatusOK, map[string]string{"status": "proposed"})
 }

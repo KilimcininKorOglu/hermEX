@@ -1,13 +1,13 @@
 package webmail2api
 
 import (
-	"log"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/serve"
 )
 
@@ -85,7 +85,7 @@ func (s *Server) revokeCurrentSession(c sessionClaims) {
 	}
 	if store, ok := s.auth.(sessionStore); ok {
 		if _, err := store.DeleteWebmailSession(c.Email, c.Jti); err != nil {
-			log.Printf("webmail2: revoke current session failed: %v", err)
+			logError("revoke-session", err, logging.Fields{"user": c.Email})
 		}
 	}
 }
