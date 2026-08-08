@@ -137,6 +137,20 @@ dump-db:
 	@mkdir -p docker-data/backup
 	@out=docker-data/backup/hermex-$$(date +%Y%m%d-%H%M%S).sql.gz; 	$(COMPOSE) exec -T db mariadb-dump -uroot -phermexstack 		--single-transaction --routines --events --databases email | gzip > $$out; 	echo "wrote $$out"
 
+## dump-mail: write a consistent copy of every mailbox's mail content to docker-data/backup/
+# dump-db covers the accounts and the key material; this covers the mail. Each
+# mailbox's two SQLite files are snapshotted inside a read transaction and its
+# content files copied, so the dump is safe to take while the services are
+# running. The regenerable wire-form cache is deliberately left out.
+#
+# The result mirrors the live layout, so restoring is copying a directory back
+# into place with the mail services stopped, not running an importer. Keep it off
+# this host, like the database dump.
+dump-mail:
+	@mkdir -p docker-data/backup
+	@out=docker-data/backup/mail-$$(date +%Y%m%d-%H%M%S); \
+	$(COMPOSE) exec -T dev go run ./cmd/admin -config docker-data/config.json backup-mail all $$out
+
 ## restore-db: load a dump back, e.g. make restore-db DUMP=docker-data/backup/hermex-....sql.gz
 # This REPLACES the current directory: every account, key and policy in the dump
 # wins. Stop the mail services first so nothing writes underneath it.

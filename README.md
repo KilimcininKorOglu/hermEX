@@ -218,6 +218,22 @@ hermex-admin -config <file> export-dkim <domain>   # one domain's signing key to
 Both paths run in the operator's shell, so no private key crosses the network.
 Take a dump before an upgrade, and keep it off the mail host.
 
+The mail itself is a separate backup. Each mailbox is its own pair of SQLite
+files plus a content tree, none of which the directory dump touches.
+
+```sh
+make dump-mail                  # a consistent copy of every mailbox's mail content
+hermex-admin -config <file> backup-mail <email|all> <dest-dir>   # one mailbox, or all
+```
+
+The copy is taken with the services running: each mailbox's databases are
+snapshotted inside a read transaction rather than copied as files, and the
+content files are copied afterwards so everything the snapshot references is
+present. The cached wire copies are left out on purpose; the store rebuilds one
+on the next read of a message, so carrying them would roughly double the backup
+for nothing. The result mirrors the live directory layout, which makes restoring
+a plain file copy back into place with the mail services stopped.
+
 ### Administration
 
 `hermex-admin` is both the provisioning CLI and, under its `serve` subcommand,

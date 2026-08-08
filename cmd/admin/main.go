@@ -12,7 +12,9 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -50,6 +52,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  list-contacts")
 	fmt.Fprintln(os.Stderr, "  sweep-content <email>   (reclaim orphan content files; refuses while the mailbox is in use)")
 	fmt.Fprintln(os.Stderr, "  prune-eml <email|all> [days]   (reclaim cached wire copies older than N days, default 30)")
+	fmt.Fprintln(os.Stderr, "  backup-mail <email|all> <dest-dir>   (consistent copy of mail content; safe on a live mailbox)")
 	fmt.Fprintln(os.Stderr, "  export-dkim <domain>    (write the domain's DKIM private key to stdout)")
 	fmt.Fprintln(os.Stderr, "  ldap-sync <org-id>      (import the org's LDAP/AD accounts into the directory)")
 	fmt.Fprintln(os.Stderr, "  grant-admin <email> <system|org|domain> [scope-id]")
@@ -188,6 +191,11 @@ func main() {
 			}
 		}
 		pruneEML(dir, args[1], days)
+	case "backup-mail":
+		if len(args) != 3 {
+			usage()
+		}
+		backupMail(dir, cfg, args[1], args[2])
 	case "export-dkim":
 		if len(args) != 2 {
 			usage()
@@ -487,6 +495,90 @@ func pruneEML(dir *directory.SQLDirectory, target string, days int) {
 		}
 	}
 	fmt.Printf("pruned %d cached wire copies (%d bytes) from %d mailbox(es)\n", files, reclaimed, boxes)
+}
+
+// backupMail writes a consistent copy of one mailbox, or of every mailbox and
+// every domain's public store, under dest. The directory dump covers the accounts
+// and the key material; this covers the mail itself, which nothing else in the
+// tooling did.
+//
+// The copy mirrors the source layout (user/<domain>/<local>, domain/<domain>), so
+// restoring is copying a directory back into place with the services stopped, not
+// running an importer. It works on a live mailbox: the databases are snapshotted
+// inside a read transaction rather than copied as files.
+func backupMail(dir *directory.SQLDirectory, cfg *config.Config, target, dest string) {
+	// sources pairs each store directory with its path relative to the data root,
+	// which is where it is written under dest.
+	type source struct{ dir, rel string }
+	var sources []source
+
+	if target == "all" {
+		maildirs, err := dir.AllMaildirs()
+		if err != nil {
+			log.Fatalf("hermex-admin: list mailboxes: %v", err)
+		}
+		for _, md := range maildirs {
+			sources = append(sources, source{md, backupRel(cfg, md)})
+		}
+		domains, err := dir.ListDomains()
+		if err != nil {
+			log.Fatalf("hermex-admin: list domains: %v", err)
+		}
+		for _, d := range domains {
+			// A domain has a public store only once something is filed in it, so an
+			// absent directory is normal rather than a fault.
+			home := cfg.HomedirFor(d.Name)
+			if _, err := os.Stat(filepath.Join(home, "objects.sqlite3")); err != nil {
+				continue
+			}
+			sources = append(sources, source{home, backupRel(cfg, home)})
+		}
+	} else {
+		maildir, ok := dir.Resolve(target)
+		if !ok {
+			log.Fatalf("hermex-admin: unknown or unreceivable mailbox: %s", target)
+		}
+		sources = append(sources, source{maildir, backupRel(cfg, maildir)})
+	}
+
+	var done int
+	for _, src := range sources {
+		store, err := objectstore.Open(src.dir)
+		if err != nil {
+			// One unreadable mailbox must not abandon the rest of the run: a backup
+			// that covers all but one account is worth far more than none.
+			log.Printf("hermex-admin: open mailbox %s: %v", src.dir, err)
+			continue
+		}
+		err = store.Backup(filepath.Join(dest, src.rel))
+		store.Close()
+		if err != nil {
+			log.Printf("hermex-admin: back up %s: %v", src.dir, err)
+			continue
+		}
+		done++
+	}
+	fmt.Printf("backed up %d of %d mailbox(es) to %s\n", done, len(sources), dest)
+	if done < len(sources) {
+		// The exit status is what a scheduled run checks, so a partial backup must
+		// not look like a clean one.
+		os.Exit(1)
+	}
+}
+
+// backupRel maps a store directory to its path under the backup root. A store
+// inside the data root keeps its own relative path; one on a separate placement
+// partition keeps the tail that identifies it (user/<domain>/<local>), so two
+// partitions never collide and the layout stays restorable by hand.
+func backupRel(cfg *config.Config, storeDir string) string {
+	if rel, err := filepath.Rel(cfg.DataDir, storeDir); err == nil && !strings.HasPrefix(rel, "..") {
+		return rel
+	}
+	parts := strings.Split(filepath.ToSlash(storeDir), "/")
+	if n := len(parts); n >= 3 {
+		return filepath.Join(parts[n-3], parts[n-2], parts[n-1])
+	}
+	return filepath.Base(storeDir)
 }
 
 // exportDKIM writes a domain's DKIM signing key to stdout as PEM, the operator's
