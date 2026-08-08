@@ -572,6 +572,9 @@ func (d *SQLDirectory) ListUsersInDomain(domainID int64) ([]UserInfo, error) {
 
 // CreateDomain inserts a domain and returns its id, creating its homedir on disk.
 func (d *SQLDirectory) CreateDomain(domainname, homedir string) (int64, error) {
+	if err := ValidateDomain(domainname); err != nil {
+		return 0, err
+	}
 	res, err := d.db.Exec(
 		`INSERT INTO domains (domainname, homedir, org_id, homeserver, domain_status)
 		 VALUES (?, ?, 0, 0, 0)`,
@@ -679,6 +682,9 @@ func (d *SQLDirectory) CreateUser(username, password, maildir string) (int64, er
 	at := strings.LastIndexByte(username, '@')
 	if at <= 0 {
 		return 0, errors.New("directory: username must be an email address")
+	}
+	if err := ValidateAddress(username); err != nil {
+		return 0, err
 	}
 	domain := username[at+1:]
 	var domainID, maxUser int64

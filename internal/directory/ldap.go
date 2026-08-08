@@ -189,6 +189,9 @@ func (d *SQLDirectory) UpsertLDAPUser(username string, externid []byte, maildir 
 	if at <= 0 {
 		return false, errors.New("directory: username must be an email address")
 	}
+	if err := ValidateAddress(username); err != nil {
+		return false, err
+	}
 	domain := username[at+1:]
 	var domainID int64
 	switch err = d.db.QueryRow(`SELECT id FROM domains WHERE domainname = ?`, domain).Scan(&domainID); {

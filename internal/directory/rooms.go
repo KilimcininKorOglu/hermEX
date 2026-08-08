@@ -92,6 +92,9 @@ func (d *SQLDirectory) CreateRoom(email, displayName, maildir string, capacity i
 	if at <= 0 {
 		return 0, errors.New("directory: room address must be an email address")
 	}
+	if err := ValidateAddress(email); err != nil {
+		return 0, err
+	}
 	domain := email[at+1:]
 	var domainID int64
 	err := d.db.QueryRow(`SELECT id FROM domains WHERE domainname = ?`, domain).Scan(&domainID)
