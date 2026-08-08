@@ -7,6 +7,9 @@ import (
 	stdmime "mime"
 	"mime/quotedprintable"
 	"strings"
+
+	"golang.org/x/text/encoding/htmlindex"
+	"golang.org/x/text/encoding/ianaindex"
 )
 
 // DecodedContent returns the part's body with its Content-Transfer-Encoding
@@ -40,19 +43,39 @@ func (p *Part) DecodedText() (string, error) {
 }
 
 // DecodeCharset converts bytes in the named charset to a UTF-8 string. UTF-8 and
-// US-ASCII pass through; the Latin-1 / Windows-1252 family maps byte-to-rune;
-// unrecognized charsets are treated as UTF-8 on a best-effort basis.
+// US-ASCII pass through unchanged; anything else is transcoded with a real
+// charset table.
+//
+// The decoded string is all that survives: the plain-text body is stored as
+// PR_BODY and the original bytes are not kept anywhere, so reading them as UTF-8
+// because the name was unfamiliar corrupts the message permanently, and every
+// later reader (IMAP, EWS, ActiveSync, the web UI) sees only the damage. That
+// makes broad charset coverage a correctness requirement, not a nicety: Cyrillic,
+// Greek, Hebrew, Arabic, Japanese, Korean and Chinese mail all routinely declare
+// charsets outside the Western European set.
+//
+// A name nothing recognizes, or a byte sequence the table rejects, still falls
+// back to the raw string. Losing the body entirely would be worse than showing it
+// imperfectly.
 func DecodeCharset(b []byte, charset string) string {
-	switch strings.ToLower(strings.TrimSpace(charset)) {
-	case "iso-8859-1", "latin1", "iso8859-1", "windows-1252", "cp1252":
-		runes := make([]rune, len(b))
-		for i, c := range b {
-			runes[i] = rune(c)
-		}
-		return string(runes)
-	default:
+	name := strings.ToLower(strings.TrimSpace(charset))
+	switch name {
+	case "", "utf-8", "utf8", "us-ascii", "ascii":
 		return string(b)
 	}
+	enc, err := htmlindex.Get(name)
+	if err != nil || enc == nil {
+		// htmlindex covers the WHATWG set and its aliases; the IANA registry
+		// carries names that set omits (and mail does use them).
+		if enc, err = ianaindex.MIME.Encoding(name); err != nil || enc == nil {
+			return string(b)
+		}
+	}
+	out, err := enc.NewDecoder().Bytes(b)
+	if err != nil {
+		return string(b)
+	}
+	return string(out)
 }
 
 // Filename returns the part's suggested file name from its Content-Disposition
