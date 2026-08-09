@@ -1,7 +1,7 @@
-import { useRef, useEffect, forwardRef, useImperativeHandle } from "react"
+import { useRef, useEffect, useMemo, forwardRef, useImperativeHandle } from "react"
 import { Bold, Italic, Underline, Link } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { isSafeLinkURL, sanitizeClipboard } from "@/utils/sanitize"
+import { isSafeLinkURL, sanitizeClipboard, sanitizeHTML } from "@/utils/sanitize"
 
 // Collapses the selection at the given viewport point. Chromium and WebKit expose
 // caretRangeFromPoint, Gecko caretPositionFromPoint; with neither, the insert
@@ -46,21 +46,28 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
   ({ value, onChange, placeholder, className }, ref) => {
     const editorRef = useRef<HTMLDivElement>(null)
 
+    // Everything this component renders goes into a live contentEditable, so it
+    // sanitizes here rather than trusting each caller: the value arrives from the
+    // server (a quoted reply, a stored signature or template) and a sink whose
+    // safety depends on every call site remembering regenerates the hole the next
+    // time someone adds one.
+    const safeValue = useMemo(() => sanitizeHTML(value), [value])
+
     useImperativeHandle(ref, () => ({
       getHTML: () => editorRef.current?.innerHTML ?? "",
       setHTML: (html: string) => {
         if (editorRef.current) {
-          editorRef.current.innerHTML = html
+          editorRef.current.innerHTML = sanitizeHTML(html)
         }
       },
     }))
 
     // Sync external value changes (e.g., when editing a different signature)
     useEffect(() => {
-      if (editorRef.current && editorRef.current.innerHTML !== value) {
-        editorRef.current.innerHTML = value
+      if (editorRef.current && editorRef.current.innerHTML !== safeValue) {
+        editorRef.current.innerHTML = safeValue
       }
-    }, [value])
+    }, [safeValue])
 
     const execCmd = (cmd: string, val?: string) => {
       document.execCommand(cmd, false, val)
@@ -163,7 +170,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           onPaste={handlePaste}
           onDrop={handleDrop}
           suppressContentEditableWarning
-          dangerouslySetInnerHTML={{ __html: value }}
+          dangerouslySetInnerHTML={{ __html: safeValue }}
           data-placeholder={placeholder}
         />
         <style>{`
