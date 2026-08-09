@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -562,44 +561,40 @@ func (s *Server) handleMailFolder(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
-	msgs, err := mb.st.ListMessages(fid)
+	// Filter, sort and paginate in the query, so a page turn costs the page and
+	// not the folder: reading every row and sorting it in memory made an inbox
+	// request scale with how long the account had existed. The SPA receives one
+	// already-ordered page plus the matching total (for the pager) and the
+	// folder's unread count (for the badge).
+	q := r.URL.Query()
+	opt := objectstore.ListOptions{
+		Unread:  q.Get("filter") == "unread",
+		Flagged: q.Get("filter") == "starred",
+		Sort:    objectstore.SortKey(q.Get("sort")),
+		Desc:    q.Get("dir") != "asc",
+	}
+	// Pagination is opt-in: a caller that sends no pageSize (e.g. the sent/drafts
+	// pages) still gets the whole sorted/filtered folder.
+	if ps := q.Get("pageSize"); ps != "" {
+		opt.Limit = atoiOr(ps, 50)
+		if opt.Limit < 1 || opt.Limit > 200 {
+			opt.Limit = 50
+		}
+		opt.Offset = max(atoiOr(q.Get("page"), 0), 0) * opt.Limit
+	}
+	page, err := mb.st.ListMessagesPage(fid, opt)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list failed"})
 		return
 	}
-	emails := make([]mailJSON, 0, len(msgs))
-	unread := 0
-	for _, m := range msgs {
-		row := mailRow(folder, m)
-		if !row.Read {
-			unread++
-		}
-		emails = append(emails, row)
-	}
-	// Filter, sort, and paginate server-side so a large folder scales: the SPA
-	// receives one already-ordered, already-filtered page plus the whole-folder
-	// total (for the pager) and unread count (for the badge).
-	emails = filterMail(emails, r.URL.Query().Get("filter"))
-	sortMail(emails, r.URL.Query().Get("sort"), r.URL.Query().Get("dir"))
-	total := len(emails)
-	// Pagination is opt-in: a caller that sends no pageSize (e.g. the sent/drafts
-	// pages) still gets the whole sorted/filtered folder, so only the inbox, which
-	// requests pages, changes behavior.
-	if ps := r.URL.Query().Get("pageSize"); ps != "" {
-		pageSize := atoiOr(ps, 50)
-		if pageSize < 1 || pageSize > 200 {
-			pageSize = 50
-		}
-		start := atoiOr(r.URL.Query().Get("page"), 0) * pageSize
-		if start < 0 || start > total {
-			start = total
-		}
-		emails = emails[start:min(start+pageSize, total)]
+	emails := make([]mailJSON, 0, len(page.Messages))
+	for _, m := range page.Messages {
+		emails = append(emails, mailRow(folder, m))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"emails": emails,
-		"total":  total,
-		"unread": unread,
+		"total":  page.Total,
+		"unread": page.Unread,
 	})
 }
 
@@ -624,50 +619,6 @@ func atoiOr(s string, def int) int {
 		return n
 	}
 	return def
-}
-
-// filterMail keeps only the rows matching filter ("unread"/"starred"); any other
-// value ("all"/"") returns the rows unchanged.
-func filterMail(in []mailJSON, filter string) []mailJSON {
-	if filter != "unread" && filter != "starred" {
-		return in
-	}
-	out := in[:0:0]
-	for _, m := range in {
-		if (filter == "unread" && !m.Read) || (filter == "starred" && m.Starred) {
-			out = append(out, m)
-		}
-	}
-	return out
-}
-
-// sortMail orders rows by field ("from"/"subject"/"size", else date) and direction
-// ("asc", else desc). Dates are RFC3339 UTC, so a lexical compare is chronological;
-// the default (date desc) keeps the previous newest-first listing. Date is the
-// stable tiebreak so equal keys never reorder between requests.
-func sortMail(in []mailJSON, field, dir string) {
-	asc := dir == "asc"
-	sort.SliceStable(in, func(i, j int) bool {
-		a, b := in[i], in[j]
-		var c int
-		switch field {
-		case "from":
-			c = strings.Compare(strings.ToLower(a.From), strings.ToLower(b.From))
-		case "subject":
-			c = strings.Compare(strings.ToLower(a.Subject), strings.ToLower(b.Subject))
-		case "size":
-			c = a.Size - b.Size
-		default:
-			c = strings.Compare(a.Date, b.Date)
-		}
-		if c == 0 {
-			c = strings.Compare(a.Date, b.Date)
-		}
-		if asc {
-			return c < 0
-		}
-		return c > 0
-	})
 }
 
 // handleStub answers not-yet-implemented API calls with an empty body so the SPA
