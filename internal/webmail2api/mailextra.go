@@ -544,7 +544,11 @@ type searchFolder struct {
 // OWN mailbox (default Inbox), the same way AppendMessage imports delivered mail.
 // Importing into a shared mailbox is not supported (mirrors webmail).
 func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxImportBytes)
+	// A tighter cap than the shared one, sharing its overflow state so an oversized
+	// upload is still answered 413 rather than "malformed".
+	if state := bodyState(r); state != nil {
+		r.Body = boundedBody(w, r.Body, maxImportBytes, state)
+	}
 	var req struct {
 		File   string `json:"file"` // base64-encoded .eml
 		Folder string `json:"folder"`
