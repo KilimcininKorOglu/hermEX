@@ -90,9 +90,17 @@ services:
       - .:/src
       - ./docker-data/cache/go-build:/root/.cache/go-build
       - ./docker-data/cache/go-mod:/go/pkg/mod
-      - ./docker-data:/data
+      # The source tree carries docker-data, so the three things a build tool must
+      # never be able to write are re-mounted read-only on top of it: the serving
+      # TLS private keys, the database datadir (the only copy of every DKIM
+      # signing key), and the config file holding every daemon secret. This
+      # container runs project and dependency test code, which is exactly the code
+      # that should not be one stray path away from the key material. The mail
+      # daemons that only read the same keys already mount them :ro.
+      - ./docker-data/mailboxes/tls:/src/docker-data/mailboxes/tls:ro
+      - ./docker-data/db:/src/docker-data/db:ro
+      - ./docker-data/config.json:/src/docker-data/config.json:ro
     environment:
-      - HERMEX_DATA_DIR=/data
       - HERMEX_TEST_MYSQL_DSN=root:hermexstack@tcp(db:3306)/hermex_test?charset=utf8mb4
       - HERMEX_TEST_MONGO_URI=mongodb://mongo:27017
     depends_on:
