@@ -100,7 +100,16 @@ func (s *Server) serveAutodiscoverSOAP(w http.ResponseWriter, r *http.Request) {
 
 	host := s.hostname
 	if host == "" {
-		host = r.Host
+		// The configured hostname is authoritative; fall back to the request Host
+		// only when it is a valid public FQDN, since that header is client-supplied
+		// and must not steer a client at an attacker-chosen address. The POX and
+		// ActiveSync Autodiscover surfaces gate the same fallback the same way.
+		if serve.ValidPublicHost(r.Host) {
+			host = r.Host
+		} else {
+			http.Error(w, "autodiscover unavailable: server hostname not configured", http.StatusServiceUnavailable)
+			return
+		}
 	}
 	switch {
 	case req.Body.UserReq != nil:
