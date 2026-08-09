@@ -265,14 +265,17 @@ func (p Pattern) toRRule() (string, bool) {
 		r.Interval = 1
 	}
 	switch p.EndType {
-	case EndAfterDate, EndNeverAlt:
+	case EndAfterDate:
 		if p.EndDate != 0 && p.EndDate != noEndDate {
 			r.Until = timeFromMinutes(p.EndDate)
 		}
 	case EndAfterN:
 		r.Count = int(p.OccurrenceCount)
-	case EndNever:
-		// open-ended
+	case EndNever, EndNeverAlt:
+		// Open-ended. EndNeverAlt is the pre-2007 encoding of the same thing, so
+		// whatever EndDate the blob carries is stale and must not become an
+		// UNTIL: a series the author meant to run forever would stop at a date
+		// they never chose.
 	default:
 		return "", false
 	}

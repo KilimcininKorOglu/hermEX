@@ -180,3 +180,53 @@ func splitParts(s string) map[string]string {
 	}
 	return out
 }
+
+// TestLegacyNeverEndTypeStaysOpenEnded proves the pre-2007 "never ends" EndType
+// decodes as open-ended whatever EndDate the blob carries. Grouping it with the
+// end-by-date case fabricated an UNTIL the author never set, so a series meant to
+// run forever stopped at a stale date on every non-MAPI surface.
+func TestLegacyNeverEndTypeStaysOpenEnded(t *testing.T) {
+	start := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+	blob, err := FromRRule("FREQ=DAILY;INTERVAL=3", start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Rewrite the daily layout's EndType and EndDate the way a legacy client
+	// would: the alternate never-ends sentinel beside a real, non-sentinel date.
+	stale := minutesSince1601(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC))
+	binary.LittleEndian.PutUint32(blob[26:30], EndNeverAlt)
+	binary.LittleEndian.PutUint32(blob[50:54], stale)
+
+	got, ok := ToRRule(blob)
+	if !ok {
+		t.Fatalf("decode of the legacy end type failed")
+	}
+	if strings.Contains(got, "UNTIL") {
+		t.Errorf("decoded %q, want no UNTIL: the pattern says the series never ends", got)
+	}
+	if !rruleEqual(got, "FREQ=DAILY;INTERVAL=3") {
+		t.Errorf("decoded %q, want the open-ended daily rule", got)
+	}
+}
+
+// TestEndAfterDateStillBounds is the negative control: the genuine end-by-date
+// type must keep producing an UNTIL, so the fix narrows the case rather than
+// dropping the bound.
+func TestEndAfterDateStillBounds(t *testing.T) {
+	start := time.Date(2026, 7, 6, 0, 0, 0, 0, time.UTC)
+	blob, err := FromRRule("FREQ=DAILY;INTERVAL=3", start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	until := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	binary.LittleEndian.PutUint32(blob[26:30], EndAfterDate)
+	binary.LittleEndian.PutUint32(blob[50:54], minutesSince1601(until))
+
+	got, ok := ToRRule(blob)
+	if !ok {
+		t.Fatalf("decode of the end-by-date type failed")
+	}
+	if !strings.Contains(got, "UNTIL=20270101T000000Z") {
+		t.Errorf("decoded %q, want the bound the pattern actually carries", got)
+	}
+}
