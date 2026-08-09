@@ -53,7 +53,7 @@ import api, { SenderIdentity, DiagnosticEntry, Contact as ContactType, MailAttac
 import { taskToVTodo, noteToText, safeItemName } from "@/utils/attachItem"
 import * as smimeStore from "@/utils/smime"
 import { mailOptionsActive } from "@/utils/mailOptions"
-import { sanitizeHTML } from "@/utils/sanitize"
+import { prefillFromDraft, prefillFromParams } from "@/utils/composePrefill"
 import { useAuth } from "@/contexts/AuthContext"
 import { useMailbox } from "@/contexts/MailboxContext"
 import { useI18n } from "@/hooks/useI18n"
@@ -298,20 +298,13 @@ export function ComposePage() {
       .catch(() => undefined)
   }, [])
 
-  // Prefill subject/body from query params (used by reply and forward). The body
-  // carries the quoted original, which is attacker-controlled HTML from any
-  // sender, and the parameter itself is reachable through a crafted link, so it
-  // is sanitized here: the editor renders its value as HTML, and the backend
-  // serves mail bodies unsanitized by design.
+  // Prefill subject/body from query params (used by reply and forward). The
+  // sanitization the body needs lives in prefillFromParams, which is where the
+  // tests hold it.
   useEffect(() => {
-    const subjectParam = searchParams.get("subject")
-    if (subjectParam) {
-      setSubject(subjectParam)
-    }
-    const bodyParam = searchParams.get("body")
-    if (bodyParam) {
-      setBody(sanitizeHTML(bodyParam))
-    }
+    const prefill = prefillFromParams(searchParams)
+    if (prefill.subject) setSubject(prefill.subject)
+    if (prefill.body) setBody(prefill.body)
   }, [searchParams])
 
   // Outgoing-mail signatures: load the list once; the picker shows the first
@@ -389,10 +382,7 @@ export function ComposePage() {
         if (!active || !msg) return
         setDraftId(msg.id || draftParam)
         setSubject(msg.subject || "")
-        // The draft id comes from the URL, so a crafted link can point this at
-        // any readable message, not only one the user wrote. Sanitize before it
-        // reaches the editor's HTML rendering.
-        setBody(sanitizeHTML(msg.body || ""))
+        setBody(prefillFromDraft(msg.body))
         if (Array.isArray(msg.to)) {
           const recipients = msg.to
             .map((t) => t.trim())

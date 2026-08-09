@@ -52,6 +52,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { toast } from "sonner"
 import { sanitizeEmailBody } from "@/utils/sanitize"
+import { forwardParams, replyAllParams, replyParams, type QuoteLabels } from "@/utils/replyParams"
 import api from "@/utils/api"
 import type { MeetingInvite, AttachmentInfo } from "@/utils/api"
 import * as smimeStore from "@/utils/smime"
@@ -387,16 +388,20 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
     }
   }
 
+  // quoteLabels resolves the localized strings the query-string builders need,
+  // so those stay free of the i18n context and testable on their own.
+  const quoteLabels = (): QuoteLabels => ({
+    replyHeader: email ? t("emailDetail.replyQuoteHeader", { sender: email.from, date: email.date }) : "",
+    forwardedMessage: t("emailDetail.forwardedMessage"),
+    from: t("common.from"),
+    date: t("common.date"),
+    subject: t("common.subject"),
+    to: t("common.to"),
+  })
+
   const handleReply = () => {
     if (!email) return
-    const params = new URLSearchParams({
-      replyTo: email.fromEmail,
-      subject: email.subject.startsWith("Re: ") ? email.subject : `Re: ${email.subject}`,
-    })
-    if (!omitOriginal) {
-      params.set("body", `\n\n${t("emailDetail.replyQuoteHeader", { sender: email.from, date: email.date })}\n${email.content}`)
-    }
-    navigate(`/compose?${params.toString()}`)
+    navigate(`/compose?${replyParams(email, quoteLabels(), omitOriginal).toString()}`)
   }
 
   // handleInlineReply sends a quick reply from the inline box (no compose round-trip).
@@ -443,38 +448,12 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
 
   const handleReplyAll = () => {
     if (!email) return
-    const self = user?.email?.toLowerCase()
-    // Other To recipients become Cc, excluding the original sender and ourselves.
-    const others = email.to
-      .map((t) => {
-        const m = t.match(/<([^>]+)>/)
-        return (m ? m[1] : t).trim()
-      })
-      .filter(
-        (e) =>
-          e &&
-          e.toLowerCase() !== self &&
-          e.toLowerCase() !== email.fromEmail.toLowerCase()
-      )
-    const params = new URLSearchParams({
-      replyTo: email.fromEmail,
-      subject: email.subject.startsWith("Re: ") ? email.subject : `Re: ${email.subject}`,
-    })
-    if (others.length > 0) params.set("cc", others.join(","))
-    if (!omitOriginal) {
-      params.set("body", `\n\n${t("emailDetail.replyQuoteHeader", { sender: email.from, date: email.date })}\n${email.content}`)
-    }
-    navigate(`/compose?${params.toString()}`)
+    navigate(`/compose?${replyAllParams(email, quoteLabels(), user?.email, omitOriginal).toString()}`)
   }
 
   const handleForward = () => {
     if (!email) return
-    const quoted = `\n\n---------- ${t("emailDetail.forwardedMessage")} ----------\n${t("common.from")}: ${email.from} <${email.fromEmail}>\n${t("common.date")}: ${email.date}\n${t("common.subject")}: ${email.subject}\n${t("common.to")}: ${email.to.join(", ")}\n\n${email.content}`
-    const params = new URLSearchParams({
-      subject: email.subject.startsWith("Fwd: ") ? email.subject : `Fwd: ${email.subject}`,
-      body: quoted,
-    })
-    navigate(`/compose?${params.toString()}`)
+    navigate(`/compose?${forwardParams(email, quoteLabels()).toString()}`)
   }
 
   const handleMarkUnread = async () => {
