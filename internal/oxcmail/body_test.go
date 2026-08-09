@@ -3,6 +3,7 @@ package oxcmail
 import (
 	"bytes"
 	"testing"
+	"unicode/utf8"
 
 	"hermex/internal/mapi"
 	"hermex/internal/mime"
@@ -357,5 +358,101 @@ func TestExportHTMLOnly(t *testing.T) {
 	h2, _ := bytesProp(msg2.Props, mapi.PrHTML)
 	if !bytes.Equal(h1, h2) {
 		t.Errorf("PR_HTML drifted: %q -> %q", h1, h2)
+	}
+}
+
+// TestHTMLCharsetOutsideTheWesternSet proves an HTML body in a charset the small
+// original table missed keeps both its raw bytes and a code page that describes
+// them. Every consumer decodes PR_HTML by that code page and Export copies it
+// into the outgoing Content-Type, so a wrong label renders and forwards the
+// message as garbage.
+func TestHTMLCharsetOutsideTheWesternSet(t *testing.T) {
+	cases := []struct {
+		charset string
+		cpid    int32
+		body    byte // one byte that is not valid UTF-8 on its own
+	}{
+		{"koi8-r", 20866, 0xd0},      // Cyrillic
+		{"windows-1253", 1253, 0xe1}, // Greek
+		{"windows-1255", 1255, 0xe0}, // Hebrew
+		{"windows-1256", 1256, 0xc7}, // Arabic
+		{"iso-8859-7", 28597, 0xe1},  // Greek
+		{"iso-8859-5", 28595, 0xd0},  // Cyrillic
+		{"iso-8859-15", 28605, 0xa4}, // the euro sign
+		{"windows-1257", 1257, 0xe0}, // Baltic
+	}
+	for _, tc := range cases {
+		// The body byte is appended raw: writing it through string() would encode
+		// it as UTF-8 and defeat the point of the case.
+		raw := []byte("From: a@b.com\r\nSubject: s\r\n" +
+			"Content-Type: text/html; charset=" + tc.charset + "\r\n" +
+			"Content-Transfer-Encoding: 8bit\r\n\r\n" +
+			"<p>x")
+		raw = append(raw, tc.body)
+		raw = append(raw, "</p>\r\n"...)
+
+		msg, err := Import(raw, Options{})
+		if err != nil {
+			t.Fatalf("%s: Import: %v", tc.charset, err)
+		}
+		if v, _ := propInt32(msg.Props, mapi.PrInternetCodepage); v != tc.cpid {
+			t.Errorf("%s: PR_INTERNET_CPID = %d, want %d", tc.charset, v, tc.cpid)
+		}
+		h, ok := bytesProp(msg.Props, mapi.PrHTML)
+		if !ok || !bytes.Contains(h, []byte{tc.body}) {
+			t.Errorf("%s: PR_HTML = %q, want the raw byte preserved", tc.charset, h)
+		}
+		wire, err := Export(msg, Options{})
+		if err != nil {
+			t.Fatalf("%s: Export: %v", tc.charset, err)
+		}
+		if !bytes.Contains(wire, []byte("charset="+tc.charset)) {
+			t.Errorf("%s: exported message lost the charset label:\n%s", tc.charset, wire)
+		}
+	}
+}
+
+// TestHTMLUnknownCharsetIsMadeUTF8 proves the label never lies: a charset with no
+// code page of its own gets its bytes transcoded to UTF-8 rather than relabeled,
+// so what Export declares matches what it sends.
+func TestHTMLUnknownCharsetIsMadeUTF8(t *testing.T) {
+	// windows-1251 bytes for "да", declared under an alias no code page covers.
+	raw := []byte("From: a@b.com\r\nSubject: s\r\n" +
+		"Content-Type: text/html; charset=x-cp1251\r\n" +
+		"Content-Transfer-Encoding: 8bit\r\n\r\n" +
+		"<p>\xe4\xe0</p>\r\n")
+
+	msg, err := Import(raw, Options{})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if v, _ := propInt32(msg.Props, mapi.PrInternetCodepage); v != 65001 {
+		t.Fatalf("PR_INTERNET_CPID = %d, want 65001 for an unmapped charset", v)
+	}
+	h, _ := bytesProp(msg.Props, mapi.PrHTML)
+	if !utf8.Valid(h) {
+		t.Errorf("PR_HTML = %q is labelled utf-8 but is not valid UTF-8", h)
+	}
+	if !bytes.Contains(h, []byte("да")) {
+		t.Errorf("PR_HTML = %q, want the text transcoded rather than mangled", h)
+	}
+}
+
+// TestHTMLUnknownCharsetKeepsValidUTF8Bytes is the negative control for the
+// transcode: a body that is already UTF-8 must pass through untouched, whatever
+// the declared name says.
+func TestHTMLUnknownCharsetKeepsValidUTF8Bytes(t *testing.T) {
+	raw := []byte("From: a@b.com\r\nSubject: s\r\n" +
+		"Content-Type: text/html; charset=x-made-up\r\n" +
+		"Content-Transfer-Encoding: 8bit\r\n\r\n" +
+		"<p>café</p>\r\n")
+
+	msg, err := Import(raw, Options{})
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	h, _ := bytesProp(msg.Props, mapi.PrHTML)
+	if !bytes.Contains(h, []byte("café")) {
+		t.Errorf("PR_HTML = %q, want the UTF-8 body unchanged", h)
 	}
 }

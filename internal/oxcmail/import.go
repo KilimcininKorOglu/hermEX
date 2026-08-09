@@ -6,6 +6,7 @@ import (
 	"net/textproto"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"hermex/internal/mapi"
 	"hermex/internal/mime"
@@ -575,6 +576,15 @@ func selectParts(part *mime.Part, info *bodyParts, level int) {
 // setHTMLBody stores an HTML part as PR_HTML (transfer-decoded raw bytes in the
 // part's own charset) and PR_INTERNET_CPID (that charset's code page). Unlike
 // the plain body, the HTML is not converted to UTF-8.
+//
+// The exception is a charset with no code page of its own: labeling those bytes
+// UTF-8 and storing them unchanged, which is what this used to do, produces a
+// message whose label contradicts its content, and Export copies that false
+// label into the outgoing Content-Type. Such a part is transcoded to UTF-8
+// instead, so the label is true. (An in-body <meta charset> then names the
+// original, but nothing in the pipeline reads it: the code page reaches MAPI and
+// EWS clients directly, the sanitizer drops meta before the web UI renders, and
+// an explicit Content-Type charset outranks meta for a text/html part.)
 func setHTMLBody(msg *Message, part *mime.Part) {
 	raw, err := part.DecodedContent()
 	if err != nil {
@@ -584,7 +594,14 @@ func setHTMLBody(msg *Message, part *mime.Part) {
 	if charset == "" {
 		charset = "us-ascii"
 	}
-	msg.Props.Set(mapi.PrInternetCodepage, csetToCPID(charset))
+	cpid, known := csetToCPID(charset)
+	if !known {
+		cpid = cpUTF8
+		if !utf8.Valid(raw) {
+			raw = []byte(mime.DecodeCharset(raw, charset))
+		}
+	}
+	msg.Props.Set(mapi.PrInternetCodepage, cpid)
 	msg.Props.Set(mapi.PrHTML, raw)
 }
 
