@@ -224,6 +224,27 @@ func main() {
 	// admin's change applies without a restart.
 	applySpamHistorySettings(dir, logger)
 	go runSpamHistoryMaintenance(dir, logger)
+	// The three background loops in this daemon must each run in one process at a
+	// time, and none of them leases the work it picks up: a second sweeper
+	// re-delivers a scheduled message, a second drainer re-delivers a spooled
+	// recipient, a second digest pass re-reads a watermark its sibling has not
+	// advanced yet and mails the summary twice. A named advisory lock in the shared
+	// directory database enforces it across instances. It is taken per pass, so an
+	// instance that dies mid-pass drops its connection, the server frees the lock,
+	// and another instance takes over on its next tick.
+	lockPass := func(name string) func() (func(), bool) {
+		return func() (func(), bool) {
+			release, ok, err := dir.TryLock(context.Background(), name)
+			if err != nil {
+				// Do not proceed unguarded: a directory that cannot answer is also a
+				// directory that cannot deliver, and running anyway risks duplicates.
+				logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "worker.lock.fail",
+					Fields: logging.Fields{"lock": name}, Err: err.Error()})
+				return nil, false
+			}
+			return release, ok
+		}
+	}
 	// Quarantine digest: deliver each user a periodic summary of newly quarantined
 	// mail with signed one-click release links. It needs a shared signing secret (the
 	// webmail release endpoint verifies the same key); without one nothing can be
@@ -234,7 +255,7 @@ func main() {
 	// active by a panel reading the toggle alone, and no goroutine existed to
 	// report otherwise. It now starts, sees the same toggle, and says on every run
 	// that it cannot send.
-	go runDigest(dir, []byte(cfg.DigestSecret), cfg.Hostname, logger)
+	go runDigest(dir, []byte(cfg.DigestSecret), cfg.Hostname, lockPass(directory.LockDigest), logger)
 	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir, Greylist: greylister, RateLimit: rateLimiter, Thresholds: dir, RecipientAccess: dir, Outbound: outboundLimiter, Limiter: loginLimiter}, Hostname: cfg.Hostname, Logger: logger}
 	// TLS certificates come from the provider: the config-file cert as a fallback,
 	// overridden by an admin-uploaded cert the provider polls for, so a renewal
@@ -293,25 +314,6 @@ func main() {
 			if err != nil || len(unresolved) > 0 {
 				logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "sendlater.bounce.undelivered", User: from, Fields: logging.Fields{"recipient": rcpt}})
 			}
-		}
-	}
-	// Both background loops below must run in one process at a time, and neither
-	// leases the work it picks up: a second sweeper re-delivers a scheduled
-	// message, a second drainer re-delivers a spooled recipient. A named advisory
-	// lock in the shared directory database enforces it across instances. It is
-	// taken per pass, so an instance that dies mid-pass drops its connection, the
-	// server frees the lock, and another instance takes over on its next tick.
-	lockPass := func(name string) func() (func(), bool) {
-		return func() (func(), bool) {
-			release, ok, err := dir.TryLock(context.Background(), name)
-			if err != nil {
-				// Do not proceed unguarded: a directory that cannot answer is also a
-				// directory that cannot deliver, and running anyway risks duplicates.
-				logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "worker.lock.fail",
-					Fields: logging.Fields{"lock": name}, Err: err.Error()})
-				return nil, false
-			}
-			return release, ok
 		}
 	}
 	// lifecycle.Loop, not lifecycle.Func: shutdown must wait for the sweep to
@@ -646,7 +648,7 @@ func runRelayMaintenance(dir *directory.SQLDirectory, logger *logging.Logger, w 
 // configured interval has elapsed since the last; the per-mailbox watermark keeps each
 // pass to mail that arrived since that mailbox's last summary. Release links are valid
 // for the interval plus a week's grace so a user has time to act before they expire.
-func runDigest(dir *directory.SQLDirectory, secret []byte, hostname string, logger *logging.Logger) {
+func runDigest(dir *directory.SQLDirectory, secret []byte, hostname string, guard func() (func(), bool), logger *logging.Logger) {
 	const checkEvery = time.Hour
 	const grace = 7 * 24 * time.Hour
 	t := time.NewTicker(checkEvery)
@@ -671,10 +673,28 @@ func runDigest(dir *directory.SQLDirectory, secret []byte, hostname string, logg
 			Dir: dir, Secret: secret, BaseURL: s.BaseURL, Hostname: hostname,
 			TokenTTL: interval + grace, Now: time.Now, Logger: logger,
 		}
-		n := runner.Run()
+		n, ran := digestOnce(runner, guard)
+		if !ran {
+			continue // another instance is running this pass; retry next tick
+		}
 		lastRun = time.Now()
 		logger.Info(logging.MTA, "digest.run", logging.Fields{"sent": n})
 	}
+}
+
+// digestOnce runs one digest pass while holding the pass lock, reporting how many
+// digests went out and whether the pass ran at all. Each mailbox's watermark is
+// advanced only after its digest is delivered, so two overlapping passes both read
+// the pre-advance watermark and each mails a full summary carrying its own valid
+// release links. Refusing the pass (another instance holds the lock, or the
+// directory could not answer) leaves lastRun alone so this instance retries.
+func digestOnce(runner *mta.DigestRunner, guard func() (func(), bool)) (int, bool) {
+	release, ok := guard()
+	if !ok {
+		return 0, false
+	}
+	defer release()
+	return runner.Run(), true
 }
 
 // digestCanSend reports whether an enabled digest can actually produce anything,

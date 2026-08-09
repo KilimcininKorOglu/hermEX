@@ -454,3 +454,28 @@ func TestRuleHookStaysSilentOnSuccess(t *testing.T) {
 		t.Errorf("a successful forward emitted %d events, want none: %+v", len(sink.events), sink.events)
 	}
 }
+
+// TestDigestOnceRunsOnlyUnderTheLock proves the digest pass is guarded like the
+// other two singleton sweeps in this daemon. Without the guard, two instances read
+// the same pre-advance watermark and each mails a full digest, with its own set of
+// valid one-click release links.
+func TestDigestOnceRunsOnlyUnderTheLock(t *testing.T) {
+	// An empty runner returns immediately without touching the directory, so this
+	// exercises the guard alone.
+	runner := &mta.DigestRunner{}
+
+	released := false
+	held := func() (func(), bool) { return func() { released = true }, true }
+	if _, ran := digestOnce(runner, held); !ran {
+		t.Error("the pass did not run while holding the lock")
+	}
+	if !released {
+		t.Error("the pass kept the lock after finishing; the next tick would find it held")
+	}
+
+	// Refused: another instance is mid-pass, or the directory could not answer.
+	refused := func() (func(), bool) { return nil, false }
+	if _, ran := digestOnce(runner, refused); ran {
+		t.Error("the pass ran without the lock")
+	}
+}

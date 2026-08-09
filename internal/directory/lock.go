@@ -19,6 +19,11 @@ const (
 	// lease the rows it returns, so two drainers would deliver the same recipient
 	// twice.
 	LockRelayDrain = "hermex_relay_drain"
+	// LockDigest guards the quarantine digest pass. Each mailbox's watermark is
+	// advanced only after its digest is delivered, so two concurrent passes read
+	// the same stale watermark and each sends a full digest, with its own valid
+	// release links. The watermark alone dedups passes that do not overlap.
+	LockDigest = "hermex_quarantine_digest"
 )
 
 // TryLock takes the named advisory lock without waiting and returns a function
