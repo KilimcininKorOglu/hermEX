@@ -257,7 +257,26 @@ func (s *Server) Handler() http.Handler {
 	if s.dist != nil {
 		mux.Handle("/", s.dist)
 	}
-	return securityHeaders(boundBody(s.gateForcedPasswordChange(mux)))
+	return securityHeaders(noStoreAPI(boundBody(s.gateForcedPasswordChange(mux))))
+}
+
+// noStoreAPI marks every API response uncacheable. Nearly all of them carry the
+// caller's mail: a body, an attachment, a raw .eml, a header block, a zip. Without
+// a directive the browser is free to keep any of that in its disk cache and its
+// back/forward cache, so a later user of the same profile, or anyone recovering
+// the disk, can read mail from a session that ended.
+//
+// It sets the header before the handler runs, so a handler with a deliberate
+// caching policy (the avatar's short private cache) still overrides it, and it
+// covers the API only: the SPA's own static assets keep the long-lived caching
+// that makes them worth serving from a bundle.
+func noStoreAPI(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/v1/") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // securityHeaders stamps clickjacking and MIME-sniffing defences on every

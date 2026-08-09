@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -147,5 +149,95 @@ func TestMarkAllReadOwnMailboxStillWorks(t *testing.T) {
 	}
 	if n := unreadCount(t, own); n != 0 {
 		t.Errorf("%d messages still unread in the caller's own mailbox", n)
+	}
+}
+
+// TestMailResponsesAreNoStore proves every API response carrying mail is marked
+// uncacheable. Nothing told the browser not to keep a message body, an attachment
+// or an exported .eml, so a later user of the same profile, or anyone recovering
+// the disk, could read mail from a session that had ended.
+func TestMailResponsesAreNoStore(t *testing.T) {
+	own := sharedInboxFor(t, "nobody@hermex.test", 0)
+	accounts := directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: own}}
+	secret := []byte("no-store-test-secret")
+	srv := NewServer(accounts, accounts, nil, "mail.hermex.test", secret, "", false)
+	token, err := mintToken(secret, sessionClaims{
+		Email: "alice@hermex.test", Mailbox: own, Exp: time.Now().Add(time.Hour).Unix(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// One representative per class: a listing, a message body, a raw source, a
+	// header block and an export. Whether the path exists is beside the point; the
+	// header must be on the response either way.
+	for _, target := range []string{
+		"/api/v1/mail/inbox",
+		"/api/v1/mail/message?id=inbox:1",
+		"/api/v1/mail/source?id=inbox:1",
+		"/api/v1/mail/headers?id=inbox:1",
+		"/api/v1/mail/export?id=inbox:1",
+	} {
+		req := httptest.NewRequest(http.MethodGet, target, nil)
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+			t.Errorf("GET %s Cache-Control = %q, want no-store (status %d)", target, got, rec.Code)
+		}
+	}
+}
+
+// TestStaticAssetsKeepTheirCaching is the negative control: the blanket no-store
+// covers the API only, so the SPA bundle keeps the long-lived caching that makes
+// serving it from a bundle worthwhile.
+func TestStaticAssetsKeepTheirCaching(t *testing.T) {
+	dist := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dist, "index.html"), []byte("<html></html>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	accounts := directory.StaticAccounts{}
+	srv := NewServer(accounts, accounts, nil, "mail.hermex.test", []byte("s"), dist, false)
+
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/index.html", nil))
+	if got := rec.Header().Get("Cache-Control"); got == "no-store" {
+		t.Errorf("static asset Cache-Control = %q, want its own caching policy", got)
+	}
+}
+
+// TestAvatarKeepsItsPrivateCache is the second negative control: the blanket
+// no-store is applied before the handler runs, so an endpoint that deliberately
+// wants a short private cache (the caller's own portrait, refetched on every
+// message row) still gets to say so.
+func TestAvatarKeepsItsPrivateCache(t *testing.T) {
+	own := t.TempDir()
+	st, err := objectstore.Open(own)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.SetUserPhoto([]byte("\x89PNG\r\n\x1a\nphoto")); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+
+	accounts := directory.StaticAccounts{"alice@hermex.test": {Password: "pw", MailboxPath: own}}
+	secret := []byte("no-store-test-secret")
+	srv := NewServer(accounts, accounts, nil, "mail.hermex.test", secret, "", false)
+	token, err := mintToken(secret, sessionClaims{
+		Email: "alice@hermex.test", Mailbox: own, Exp: time.Now().Add(time.Hour).Unix(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/avatar", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+	rec := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("avatar status = %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "private, max-age=300" {
+		t.Errorf("avatar Cache-Control = %q, want its own private cache", got)
 	}
 }
