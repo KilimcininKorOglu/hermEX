@@ -400,3 +400,57 @@ func scheduleInto(t *testing.T, dir, name string, when time.Time) {
 		t.Fatal(err)
 	}
 }
+
+// ruleSink collects the events a rule hook emits.
+type ruleSink struct{ events []logging.Event }
+
+func (s *ruleSink) Write(e logging.Event) { s.events = append(s.events, e) }
+
+// TestRuleHookRecordsBothFailures proves a delivery-time inbox rule that does not
+// reach the wire leaves a record. Both paths are silent to the user (neither can
+// fail the delivery that triggered the rule), so without the event an operator
+// investigating "my forwarding rule did not fire" has nothing to look at.
+func TestRuleHookRecordsBothFailures(t *testing.T) {
+	// A cap of one recipient window, so the second call is over the cap.
+	limiter := mta.NewOutboundLimiter()
+	limiter.SetLimits(1, time.Hour)
+	limiter.SetEnabled(true)
+
+	sink := &ruleSink{}
+	failing := func(string, []string, []byte, time.Time) error { return errors.New("spool is full") }
+	hook := ruleHook("forward", limiter, failing, logging.New(sink))
+
+	// First call is under the cap and reaches the spool, which refuses it.
+	hook("alice@hermex.test", []string{"bob@example.com"}, []byte("raw"))
+	// Second call is over the cap and never reaches the spool.
+	hook("alice@hermex.test", []string{"bob@example.com"}, []byte("raw"))
+
+	if len(sink.events) != 2 {
+		t.Fatalf("hook emitted %d events, want one per failure", len(sink.events))
+	}
+	if e := sink.events[0]; e.Name != "rule.forward.enqueue" || e.Err != "spool is full" || e.User != "alice@hermex.test" {
+		t.Errorf("enqueue failure = %s user=%q err=%q, want rule.forward.enqueue naming the owner and the error",
+			e.Name, e.User, e.Err)
+	}
+	if e := sink.events[1]; e.Name != "rule.forward.deferred" || e.Level != logging.LevelWarn {
+		t.Errorf("over-cap event = %s/%s, want warn/rule.forward.deferred", e.Level, e.Name)
+	}
+}
+
+// TestRuleHookStaysSilentOnSuccess is the negative control: a forward that goes out
+// is the normal case and must not log.
+func TestRuleHookStaysSilentOnSuccess(t *testing.T) {
+	sink := &ruleSink{}
+	var sent int
+	ok := func(string, []string, []byte, time.Time) error { sent++; return nil }
+	hook := ruleHook("send", mta.NewOutboundLimiter(), ok, logging.New(sink))
+
+	hook("alice@hermex.test", []string{"bob@example.com"}, []byte("raw"))
+
+	if sent != 1 {
+		t.Errorf("the hook enqueued %d times, want 1", sent)
+	}
+	if len(sink.events) != 0 {
+		t.Errorf("a successful forward emitted %d events, want none: %+v", len(sink.events), sink.events)
+	}
+}

@@ -214,27 +214,11 @@ func main() {
 	// to keep the store free of any send dependency (like OnMeetingRequest). The
 	// envelope sender is the forwarding owner so bounces return to them and the relay
 	// DKIM path signs for their domain; the loop/backscatter guards already ran.
-	mta.OnRuleForward = func(owner string, to []string, raw []byte) {
-		if !outboundLimiter.Allow(owner) {
-			log.Printf("hermex-mta: rule forward for <%s> deferred by the outbound cap", owner)
-			return
-		}
-		if err := spool.Enqueue(owner, to, raw, time.Now()); err != nil {
-			log.Printf("hermex-mta: enqueue rule forward for <%s>: %v", owner, err)
-		}
-	}
+	mta.OnRuleForward = ruleHook("forward", outboundLimiter, spool.Enqueue, logger)
 	// Reject bounces and vacation auto-replies a delivery-time inbox rule generated:
 	// enqueued from the owning mailbox (DKIM domain) under the same outbound cap. The
 	// store built the bytes and applied the backscatter/loop guards.
-	mta.OnRuleSend = func(owner string, to []string, raw []byte) {
-		if !outboundLimiter.Allow(owner) {
-			log.Printf("hermex-mta: rule send for <%s> deferred by the outbound cap", owner)
-			return
-		}
-		if err := spool.Enqueue(owner, to, raw, time.Now()); err != nil {
-			log.Printf("hermex-mta: enqueue rule send for <%s>: %v", owner, err)
-		}
-	}
+	mta.OnRuleSend = ruleHook("send", outboundLimiter, spool.Enqueue, logger)
 	// Spam-history retention: how many of the most recent scored verdicts the
 	// spam_history table keeps. It is read at startup and re-read every minute so an
 	// admin's change applies without a restart.
@@ -459,6 +443,31 @@ func antispamAccess(dir *directory.SQLDirectory) (*antispam.AccessList, uint64, 
 		m[r.Pattern] = r.Action
 	}
 	return antispam.NewAccessList(m), accessHash(rules), nil
+}
+
+// enqueueFunc is the spool entry point a rule hook puts mail on: (*relay.Spool).Enqueue.
+type enqueueFunc func(from string, to []string, raw []byte, now time.Time) error
+
+// ruleHook builds the hook a delivery-time inbox rule calls to put mail on the wire,
+// either a forward or a rule-generated bounce/vacation reply (kind names which). Both
+// outcomes it can fail with are silent to the user whose rule it is: the outbound cap
+// defers the mail, or the spool refuses it. Neither can fail the delivery that
+// triggered the rule, which is exactly why both are recorded, an operator asked "why
+// did my forwarding rule not fire" has nothing else to go on.
+func ruleHook(kind string, limiter *mta.OutboundLimiter, enqueue enqueueFunc, logger *logging.Logger) func(string, []string, []byte) {
+	return func(owner string, to []string, raw []byte) {
+		if !limiter.Allow(owner) {
+			logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.MTA,
+				Name: "rule." + kind + ".deferred", User: owner,
+				Fields: logging.Fields{"recipients": len(to), "detail": "the outbound cap was reached"}})
+			return
+		}
+		if err := enqueue(owner, to, raw, time.Now()); err != nil {
+			logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA,
+				Name: "rule." + kind + ".enqueue", User: owner,
+				Fields: logging.Fields{"recipients": len(to)}, Err: err.Error()})
+		}
+	}
 }
 
 // accessHash folds the rules (already returned in a deterministic order) into a
