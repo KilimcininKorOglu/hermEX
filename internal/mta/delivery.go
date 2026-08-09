@@ -822,7 +822,7 @@ var OnMeetingRequest func(st *objectstore.Store, accounts directory.Accounts, re
 // meeting package; the indirection breaks the meeting→mta import cycle.
 // sender is the delivered message's envelope sender, so the processor can refuse
 // a REPLY that claims to speak for an attendee who did not send it.
-var OnMeetingReply func(st *objectstore.Store, sender string, messageID int64) bool
+var OnMeetingReply func(st *objectstore.Store, sender string, messageID int64) (bool, error)
 
 // autoProcessMeeting runs the registered meeting-request processor (if any) on a
 // just-delivered message, swallowing any panic exactly like the other delivery-time
@@ -852,8 +852,14 @@ func autoProcessReply(st *objectstore.Store, sender string, m objectstore.Messag
 			logPassFailure("meeting-reply", "", logging.Fields{"uid": m.UID}, r)
 		}
 	}()
-	if OnMeetingReply != nil {
-		OnMeetingReply(st, sender, m.ID)
+	if OnMeetingReply == nil {
+		return
+	}
+	// The reply itself is delivered either way; what can fail here is the tracking
+	// write on the organizer's event, and that failure is invisible to everyone
+	// (the organizer just sees an attendee who never answered) unless it is logged.
+	if _, err := OnMeetingReply(st, sender, m.ID); err != nil {
+		logPassFailure("meeting-reply", "", logging.Fields{"uid": m.UID}, err)
 	}
 }
 

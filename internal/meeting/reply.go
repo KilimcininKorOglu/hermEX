@@ -22,50 +22,58 @@ import (
 // anyone else (a delegate answering for an attendee) updates nothing, because
 // nothing in the message proves the attendee authorized it.
 //
+// It reports whether a REPLY was handled, plus the error from the one step that
+// actually changes state (writing the attendee's response status). Both matter:
+// the tracking update can fail on its own while the message is delivered fine, and
+// then the organizer's Tracking tab shows the attendee as never having answered.
+// The caller logs the error and carries on.
+//
 // It is best-effort and never errors a delivery: a malformed, unmatched or
 // unauthorized REPLY is left as an ordinary email the organizer can read, not a
 // delivery failure.
-func ProcessReply(st *objectstore.Store, sender string, messageID int64) bool {
+func ProcessReply(st *objectstore.Store, sender string, messageID int64) (bool, error) {
 	// The delivery pass hands an object-store message id; the raw read is keyed by
 	// IMAP UID, and the two diverge as soon as a mailbox holds any non-mail object
 	// (a calendar item consumes an id but no UID). Resolving one to the other is
 	// what makes tracking work in a mailbox that has ever held an appointment.
 	uidOf, ok, err := st.MessageUIDByID(int64(mapi.PrivateFIDInbox), messageID)
 	if err != nil || !ok {
-		return false
+		return false, nil
 	}
 	raw, err := st.GetMessageRaw(int64(mapi.PrivateFIDInbox), uidOf)
 	if err != nil {
-		return false
+		return false, nil
 	}
 	ics := findCalendarPart(mime.ParseStructure(raw))
 	if ics == nil {
-		return false
+		return false, nil
 	}
 	if !strings.EqualFold(strings.TrimSpace(icalLine(ics, "METHOD")), "REPLY") {
-		return false
+		return false, nil
 	}
 	uid := strings.TrimSpace(icalLine(ics, "UID"))
 	attendee, partstat := parseAttendee(ics)
 	if uid == "" || attendee == "" {
-		return false
+		return false, nil
 	}
 	// An empty envelope sender (a bounce, or a locally injected message that
 	// carries none) proves nothing either, so it updates no tracking.
 	from := strings.ToLower(strings.TrimSpace(sender))
 	if from == "" || from != strings.ToLower(strings.TrimSpace(attendee)) {
-		return false
+		return false, nil
 	}
 	tags, err := ResolveTags(st)
 	if err != nil {
-		return false
+		return false, nil
 	}
 	resp := partstatResponse(partstat)
 	if resp == 0 {
-		return false
+		return false, nil
 	}
-	_ = ApplyReply(st, tags, uid, attendee, resp)
-	return true
+	// Report the failure rather than swallowing it: the REPLY was understood and
+	// authorized, so "handled" is true, but the tracking write is the whole point
+	// and losing it silently leaves the organizer with a stale Tracking tab.
+	return true, ApplyReply(st, tags, uid, attendee, resp)
 }
 
 // findCalendarPart returns the decoded text/calendar (or .ics) body, or nil.

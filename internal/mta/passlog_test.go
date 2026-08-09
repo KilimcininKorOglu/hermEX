@@ -1,10 +1,12 @@
 package mta
 
 import (
+	"errors"
 	"sync"
 	"testing"
 
 	"hermex/internal/logging"
+	"hermex/internal/objectstore"
 )
 
 // passSink records the events a delivery pass emits.
@@ -101,4 +103,51 @@ func TestDeliveryPassLoggingIsOptional(t *testing.T) {
 	t.Cleanup(func() { defaultLogger.Store(prev) })
 
 	logPassFailure("inbox-rules", "", logging.Fields{"uid": uint32(1)}, "boom")
+}
+
+// TestMeetingReplyTrackingFailureIsRecorded proves a failed tracking update on an
+// inbound meeting REPLY reaches the central log. The reply is delivered as a
+// normal message either way, so if the write of the attendee's response status
+// fails, the only visible effect is an organizer whose Tracking tab shows that
+// attendee as never having answered. Discarding the error left nothing to look at.
+func TestMeetingReplyTrackingFailureIsRecorded(t *testing.T) {
+	sink := withPassLogger(t)
+
+	prev := OnMeetingReply
+	OnMeetingReply = func(*objectstore.Store, string, int64) (bool, error) {
+		return true, errors.New("store write failed")
+	}
+	t.Cleanup(func() { OnMeetingReply = prev })
+
+	autoProcessReply(nil, "bob@hermex.test", objectstore.MessageInfo{UID: 7})
+
+	e, ok := sink.find("delivery.pass.fail")
+	if !ok {
+		t.Fatal("a failed meeting-reply tracking update produced no event")
+	}
+	if e.Fields["pass"] != "meeting-reply" {
+		t.Errorf("pass = %v, want meeting-reply", e.Fields["pass"])
+	}
+	if e.Fields["uid"] != uint32(7) {
+		t.Errorf("uid = %v, want the message it failed on", e.Fields["uid"])
+	}
+	if e.Err != "store write failed" {
+		t.Errorf("err = %q, want the store's error", e.Err)
+	}
+}
+
+// TestMeetingReplySuccessIsSilent is the negative control: the common case runs on
+// every delivered reply, so logging it would be noise, not signal.
+func TestMeetingReplySuccessIsSilent(t *testing.T) {
+	sink := withPassLogger(t)
+
+	prev := OnMeetingReply
+	OnMeetingReply = func(*objectstore.Store, string, int64) (bool, error) { return true, nil }
+	t.Cleanup(func() { OnMeetingReply = prev })
+
+	autoProcessReply(nil, "bob@hermex.test", objectstore.MessageInfo{UID: 7})
+
+	if _, ok := sink.find("delivery.pass.fail"); ok {
+		t.Error("a successful tracking update emitted a failure event")
+	}
 }

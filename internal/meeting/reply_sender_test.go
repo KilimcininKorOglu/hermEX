@@ -84,7 +84,7 @@ func TestProcessReplyRefusesForgedAttendee(t *testing.T) {
 	st, tags, recipID := organizerWithEvent(t, "meeting-1", "bob@hermex.test")
 	msgID := deliverReply(t, st, "meeting-1", "bob@hermex.test", "ACCEPTED")
 
-	if ProcessReply(st, "mallory@hermex.test", msgID) {
+	if handled, _ := ProcessReply(st, "mallory@hermex.test", msgID); handled {
 		t.Error("a REPLY from another sender was processed")
 	}
 	if got := responseOf(t, st, tags, recipID); got != 0 {
@@ -97,7 +97,7 @@ func TestProcessReplyAcceptsTheAttendeesOwnReply(t *testing.T) {
 	st, tags, recipID := organizerWithEvent(t, "meeting-2", "bob@hermex.test")
 	msgID := deliverReply(t, st, "meeting-2", "bob@hermex.test", "ACCEPTED")
 
-	if !ProcessReply(st, "Bob@Hermex.Test", msgID) {
+	if handled, _ := ProcessReply(st, "Bob@Hermex.Test", msgID); !handled {
 		t.Fatal("the attendee's own REPLY was not processed")
 	}
 	if got := responseOf(t, st, tags, recipID); got != ResponseAccepted {
@@ -111,7 +111,7 @@ func TestProcessReplyRefusesEmptySender(t *testing.T) {
 	st, tags, recipID := organizerWithEvent(t, "meeting-3", "bob@hermex.test")
 	msgID := deliverReply(t, st, "meeting-3", "bob@hermex.test", "DECLINED")
 
-	if ProcessReply(st, "", msgID) {
+	if handled, _ := ProcessReply(st, "", msgID); handled {
 		t.Error("a REPLY with no envelope sender was processed")
 	}
 	if got := responseOf(t, st, tags, recipID); got != 0 {
