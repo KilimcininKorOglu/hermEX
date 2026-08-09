@@ -162,40 +162,59 @@ func (s *Server) handleGetUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, u)
 }
 
-// handleUpdateUser replaces the editable subset of a user's record (system
-// administrators only). The whole subset is replaced, so every editable field
-// must be supplied; identity fields (username, domain, maildir) are immutable.
+// handleUpdateUser edits the editable subset of a user's record (system
+// administrators only); identity fields (username, domain, maildir) are
+// immutable. Unspecified fields keep their current value (a read-merge), so a
+// partial update never zeroes the rest, the same guarantee handleUpdateDomain
+// gives. It matters most for the protocol flags: without the merge, a body that
+// simply did not mention SMTP or ActiveSync would turn that protocol off for the
+// account, since an absent JSON bool decodes to false.
 func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
+	cur, found, err := s.dir.GetUser(r.PathValue("email"))
+	if err != nil {
+		s.fail(w, "could not read user", err, http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.Error(w, "no such user", http.StatusNotFound)
+		return
+	}
 	var req struct {
-		Status      int    `json:"status"`
-		Lang        string `json:"lang"`
-		Timezone    string `json:"timezone"`
-		DisplayType int    `json:"displayType"`
-		Homeserver  int    `json:"homeserver"`
-		POP3IMAP    bool   `json:"pop3_imap"`
-		SMTP        bool   `json:"smtp"`
-		ChgPasswd   bool   `json:"chgpasswd"`
-		Web         bool   `json:"web"`
-		EAS         bool   `json:"eas"`
-		DAV         bool   `json:"dav"`
+		Status      *int    `json:"status"`
+		Lang        *string `json:"lang"`
+		Timezone    *string `json:"timezone"`
+		DisplayType *int    `json:"displayType"`
+		Homeserver  *int    `json:"homeserver"`
+		POP3IMAP    *bool   `json:"pop3_imap"`
+		SMTP        *bool   `json:"smtp"`
+		ChgPasswd   *bool   `json:"chgpasswd"`
+		Web         *bool   `json:"web"`
+		EAS         *bool   `json:"eas"`
+		DAV         *bool   `json:"dav"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-	found, err := s.dir.UpdateUser(r.PathValue("email"), directory.UserUpdate{
-		Status:      req.Status,
-		Lang:        req.Lang,
-		Timezone:    req.Timezone,
-		DisplayType: req.DisplayType,
-		Homeserver:  req.Homeserver,
-		POP3IMAP:    req.POP3IMAP,
-		SMTP:        req.SMTP,
-		ChgPasswd:   req.ChgPasswd,
-		Web:         req.Web,
-		EAS:         req.EAS,
-		DAV:         req.DAV,
-	})
+	upd := directory.UserUpdate{
+		Status: cur.Status, Lang: cur.Lang, Timezone: cur.Timezone,
+		DisplayType: cur.DisplayType, Homeserver: cur.Homeserver,
+		POP3IMAP: cur.POP3IMAP, SMTP: cur.SMTP, ChgPasswd: cur.ChgPasswd,
+		Web: cur.Web, EAS: cur.EAS, DAV: cur.DAV,
+	}
+	setIf(&upd.Status, req.Status)
+	setIf(&upd.Lang, req.Lang)
+	setIf(&upd.Timezone, req.Timezone)
+	setIf(&upd.DisplayType, req.DisplayType)
+	setIf(&upd.Homeserver, req.Homeserver)
+	setIf(&upd.POP3IMAP, req.POP3IMAP)
+	setIf(&upd.SMTP, req.SMTP)
+	setIf(&upd.ChgPasswd, req.ChgPasswd)
+	setIf(&upd.Web, req.Web)
+	setIf(&upd.EAS, req.EAS)
+	setIf(&upd.DAV, req.DAV)
+
+	found, err = s.dir.UpdateUser(r.PathValue("email"), upd)
 	if err != nil {
 		s.fail(w, "could not update user", err, http.StatusBadRequest)
 		return
@@ -205,6 +224,14 @@ func (s *Server) handleUpdateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// setIf overwrites dst only when the request carried that field, the read-merge
+// rule in one line: a nil pointer means the caller said nothing about it.
+func setIf[T any](dst *T, v *T) {
+	if v != nil {
+		*dst = *v
+	}
 }
 
 // handleDeleteUser removes a user (system administrators only). The maildir is
