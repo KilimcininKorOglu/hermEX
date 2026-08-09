@@ -39,7 +39,10 @@ var (
 var resolver = net.DefaultResolver
 
 // realSPF evaluates SPF for the connecting client and maps the RFC 7208 result to
-// an AuthResult. The library's error is advisory (it can be non-nil even on a
+// an AuthResult. The evaluation itself comes from blitiri.com.ar/go/spf, a
+// single-maintainer module: see the note on its require line in go.mod before
+// bumping it, since this is one of the three signals the anti-spoofing verdict
+// rests on and a weakened result here is invisible in normal operation. The library's error is advisory (it can be non-nil even on a
 // successful check), so only the Result drives the verdict. A lookup that outruns
 // the deadline surfaces as TempError, which maps to AuthError, the same advisory
 // answer any other resolution failure gives.

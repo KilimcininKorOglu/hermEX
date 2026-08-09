@@ -3,6 +3,12 @@ module hermex
 go 1.26.5
 
 require (
+	// A single-maintainer module, published from a personal domain rather than a
+	// shared forge account, and the only maintained SPF implementation in Go. It
+	// decides whether inbound mail passes sender authentication, so a bad release
+	// would weaken anti-spoofing quietly: pin an exact version (this line is not a
+	// range), read the diff on every bump, and never bump it in a commit that does
+	// anything else.
 	blitiri.com.ar/go/spf v1.5.1
 	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/caddyserver/certmagic v0.25.4
