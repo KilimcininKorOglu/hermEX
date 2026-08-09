@@ -74,6 +74,7 @@ func fakePOP3(t *testing.T, messages []string) (host string, port int, deleted *
 // the unique-ids, downloads a message verbatim with CRLF endings, deletes by number, and
 // quits, the operations the worker composes.
 func TestPOP3Client(t *testing.T) {
+	allowLoopback(t)
 	msgs := []string{
 		"From: a@example.com\r\nSubject: One\r\n\r\nfirst body",
 		"From: b@example.com\r\nSubject: Two\r\n\r\nsecond body",

@@ -64,6 +64,12 @@ func main() {
 	applyFetchSizeLimit(dir.GetMessageSizeSettings, fetchmail.SetMaxMessage, logger)
 	go runFetchSizeMaintenance(dir.GetMessageSizeSettings, fetchmail.SetMaxMessage, logger)
 
+	// Source-address policy: whether a configured source may resolve to an internal
+	// address. Off unless a system administrator turns it on, and re-read on the
+	// same cadence so the change applies without a restart.
+	applyFetchPolicy(dir.GetFetchSettings, fetchmail.SetAllowInternalSources, logger)
+	go runFetchPolicyMaintenance(dir.GetFetchSettings, fetchmail.SetAllowInternalSources, logger)
+
 	// Antivirus: install the package-level scanner from clamd_addr (a no-op when
 	// unset), so fetched mail is scanned before it reaches a mailbox.
 	mta.EnableScanning(cfg.ClamdAddr, dir, cfg.QuarantinePath, cfg.Hostname, logger)
@@ -161,5 +167,30 @@ func runFetchSizeMaintenance(read func() (directory.MessageSizeSettings, bool, e
 	defer tick.Stop()
 	for range tick.C {
 		applyFetchSizeLimit(read, setMax, logger)
+	}
+}
+
+// applyFetchPolicy reads the operator's source policy and applies it. A missing row
+// keeps the built-in default (internal sources refused) and a read error leaves the
+// current setting in place, so a settings failure never opens the block by accident.
+func applyFetchPolicy(read func() (directory.FetchSettings, bool, error), setAllow func(bool), logger *logging.Logger) {
+	s, found, err := read()
+	if err != nil {
+		logging.SettingsReadFailed(logger, "hermex-fetchmail", "fetch-policy", "leaving the source policy unchanged", err)
+		return
+	}
+	if !found {
+		return
+	}
+	setAllow(s.AllowInternalSources)
+}
+
+// runFetchPolicyMaintenance re-applies the source policy every minute so an admin
+// change takes effect without a restart. It runs until the process exits.
+func runFetchPolicyMaintenance(read func() (directory.FetchSettings, bool, error), setAllow func(bool), logger *logging.Logger) {
+	tick := time.NewTicker(time.Minute)
+	defer tick.Stop()
+	for range tick.C {
+		applyFetchPolicy(read, setAllow, logger)
 	}
 }

@@ -217,3 +217,63 @@ func TestSaveLoginLockoutRejectsBadValues(t *testing.T) {
 		}
 	}
 }
+
+// TestFetchPolicyIsSystemAdminOnly proves the source-address switch is a full
+// system-administrator decision and round-trips through the store. Domain admins
+// create the fetchmail entries the block guards, so if they could also lift the
+// block it would guard nothing.
+func TestFetchPolicyIsSystemAdminOnly(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	// The page renders the switch, off by default.
+	req, _ := http.NewRequest("GET", ts.URL+"/admin/ui/limits", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
+	resp, err := noRedirectClient().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(page), `name="fetch_allow_internal"`) {
+		t.Errorf("limits page missing the fetch policy switch:\n%s", page)
+	}
+	if strings.Contains(string(page), `name="fetch_allow_internal" value="1" checked`) {
+		t.Errorf("the switch renders as on by default; internal sources must be refused until allowed")
+	}
+
+	// A system admin can turn it on.
+	saved := htmxPOST(t, ts, "/admin/ui/limits/fetchpolicy", session, csrf, url.Values{"fetch_allow_internal": {"1"}})
+	body, _ := io.ReadAll(saved.Body)
+	saved.Body.Close()
+	if saved.StatusCode != http.StatusOK || !strings.Contains(string(body), "Fetch policy saved") {
+		t.Fatalf("save = %d body=%q, want 200 acknowledging the save", saved.StatusCode, body)
+	}
+	if !d.fetchSettingsFound || !d.fetchSettings.AllowInternalSources {
+		t.Errorf("policy not persisted: found=%v %+v", d.fetchSettingsFound, d.fetchSettings)
+	}
+
+	// Clearing the box turns it back off (an unchecked checkbox posts nothing).
+	htmxPOST(t, ts, "/admin/ui/limits/fetchpolicy", session, csrf, url.Values{}).Body.Close()
+	if d.fetchSettings.AllowInternalSources {
+		t.Error("clearing the switch left internal sources allowed")
+	}
+}
+
+// TestFetchPolicyRefusesADomainAdmin is the security half: the role that can
+// create a fetchmail entry must not be able to lift the address block.
+func TestFetchPolicyRefusesADomainAdmin(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 9, roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}}}
+	ts := adminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+
+	resp := htmxPOST(t, ts, "/admin/ui/limits/fetchpolicy", session, csrf, url.Values{"fetch_allow_internal": {"1"}})
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Errorf("status = %d, want 403 for a domain-scoped admin", resp.StatusCode)
+	}
+	if d.fetchSettings.AllowInternalSources {
+		t.Error("a domain-scoped admin lifted the internal-address block")
+	}
+}

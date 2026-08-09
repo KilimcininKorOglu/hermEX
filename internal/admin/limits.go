@@ -34,6 +34,7 @@ func (s *Server) limitsPageData(r *http.Request, notice string) map[string]any {
 	s.fillSizeLimits(data)
 	s.fillHTTPRateLimit(data)
 	s.fillLoginLockout(data)
+	s.fillFetchPolicy(data)
 	return data
 }
 
@@ -178,4 +179,29 @@ func (s *Server) handleUISaveLimits(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, "limits-panel", s.limitsPageData(r, "Size limits saved. Each protocol applies its own within a minute, no restart."))
+}
+
+// fillFetchPolicy sets the fetch worker's source policy on a page-data map. The
+// default is the worker's own: internal source addresses refused.
+func (s *Server) fillFetchPolicy(data map[string]any) {
+	data["FetchAllowInternal"] = false
+	if st, found, err := s.dir.GetFetchSettings(); err == nil && found {
+		data["FetchAllowInternal"] = st.AllowInternalSources
+	}
+}
+
+// handleUISaveFetchPolicy persists the fetch worker's source policy. It is a full
+// system-administrator decision (uiAuthorized enforces that): a fetchmail entry is
+// created by a domain-scoped admin, so letting that role also lift the address
+// block would leave the block guarding nothing.
+func (s *Server) handleUISaveFetchPolicy(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	st := directory.FetchSettings{AllowInternalSources: r.PostFormValue("fetch_allow_internal") != ""}
+	if err := s.dir.SetFetchSettings(st); err != nil {
+		s.render(w, "fetchpolicy-panel", s.limitsPageData(r, s.notice("Could not save the fetch policy.", err)))
+		return
+	}
+	s.render(w, "fetchpolicy-panel", s.limitsPageData(r, "Fetch policy saved. The fetch worker applies it within a minute, no restart."))
 }

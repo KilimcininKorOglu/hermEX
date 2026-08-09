@@ -70,6 +70,7 @@ func fakeIMAP(t *testing.T, body string) (host string, port int, stored *[]strin
 // TestIMAPClient proves the client round-trips an IMAP session: login, select, UID search,
 // a literal-precise body fetch, marking seen, and a delete (store \Deleted + expunge).
 func TestIMAPClient(t *testing.T) {
+	allowLoopback(t)
 	msg := "From: a@example.com\r\nSubject: Hi\r\n\r\nbody line"
 	host, port, recorded := fakeIMAP(t, msg)
 

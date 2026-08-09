@@ -2,7 +2,6 @@ package fetchmail
 
 import (
 	"bufio"
-	"crypto/tls"
 	"fmt"
 	"io"
 	"net"
@@ -33,10 +32,9 @@ func dialIMAP(server string, port int, ssl, verify bool) (*imapConn, error) {
 	var conn net.Conn
 	var err error
 	if ssl {
-		conn, err = tls.DialWithDialer(&net.Dialer{Timeout: dialTimeout}, "tcp", addr,
-			&tls.Config{ServerName: server, InsecureSkipVerify: !verify}) //nolint:gosec // verify is the admin's explicit choice
+		conn, err = tlsDialSource(addr, server, verify)
 	} else {
-		conn, err = net.DialTimeout("tcp", addr, dialTimeout)
+		conn, err = dialSource(addr)
 	}
 	if err != nil {
 		return nil, err

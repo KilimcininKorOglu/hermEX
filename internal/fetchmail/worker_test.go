@@ -43,6 +43,7 @@ func capture() (Deliverer, *[]string) {
 // TestPollPOP3DeleteMode proves a non-kept POP3 account delivers every message and deletes
 // each from the source (so the source itself prevents a re-fetch).
 func TestPollPOP3DeleteMode(t *testing.T) {
+	allowLoopback(t)
 	msgs := []string{"From: a\r\n\r\none", "From: b\r\n\r\ntwo"}
 	host, port, deleted := fakePOP3(t, msgs)
 	store := &fakeWorkerStore{configs: []directory.FetchmailEntry{{
@@ -67,6 +68,7 @@ func TestPollPOP3DeleteMode(t *testing.T) {
 // TestPollPOP3KeepDedup proves a kept POP3 account skips an already-seen id, delivers only
 // the new message, records its id, and deletes nothing on the source.
 func TestPollPOP3KeepDedup(t *testing.T) {
+	allowLoopback(t)
 	msgs := []string{"From: a\r\n\r\none", "From: b\r\n\r\ntwo"}
 	host, port, deleted := fakePOP3(t, msgs)
 	store := &fakeWorkerStore{
@@ -98,6 +100,7 @@ func TestPollPOP3KeepDedup(t *testing.T) {
 // is delivered, not after the whole batch: when delivery fails on a later message, the ones
 // already delivered stay recorded so the next poll does not re-deliver them.
 func TestPollPOP3KeepRecordsBeforeLaterFailure(t *testing.T) {
+	allowLoopback(t)
 	msgs := []string{"From: a\r\n\r\none", "From: b\r\n\r\ntwo"}
 	host, port, _ := fakePOP3(t, msgs)
 	store := &fakeWorkerStore{configs: []directory.FetchmailEntry{{
@@ -129,6 +132,7 @@ func TestPollPOP3KeepRecordsBeforeLaterFailure(t *testing.T) {
 // TestPollIMAPDeleteMode proves a non-kept IMAP account delivers and deletes (store
 // \Deleted + expunge) each message.
 func TestPollIMAPDeleteMode(t *testing.T) {
+	allowLoopback(t)
 	host, port, recorded := fakeIMAP(t, "From: a\r\n\r\nbody")
 	store := &fakeWorkerStore{configs: []directory.FetchmailEntry{{
 		ID: 1, Mailbox: "alice@hermex.test", Active: true,
@@ -156,6 +160,7 @@ func TestPollIMAPDeleteMode(t *testing.T) {
 // TestPollIMAPKeepMarksSeen proves a kept IMAP account delivers and marks each \Seen (the
 // dedup for the next poll) without deleting.
 func TestPollIMAPKeepMarksSeen(t *testing.T) {
+	allowLoopback(t)
 	host, port, recorded := fakeIMAP(t, "From: a\r\n\r\nbody")
 	store := &fakeWorkerStore{configs: []directory.FetchmailEntry{{
 		ID: 1, Mailbox: "alice@hermex.test", Active: true,

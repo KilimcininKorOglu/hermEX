@@ -31,6 +31,8 @@ type fakeDir struct {
 	createdRoomEquip   bool
 	aliases            []directory.AliasInfo
 	listUsersErr       error
+	fetchSettings      directory.FetchSettings
+	fetchSettingsFound bool
 	maildirs           []string
 	verdicts           []directory.SpamVerdict
 	spamHistory        directory.SpamHistorySettings
@@ -343,6 +345,15 @@ func (f *fakeDir) RequirePasswordChange(_ string, _ bool) (bool, error) {
 	return true, nil
 }
 func (f *fakeDir) ListAliases() ([]directory.AliasInfo, error) { return f.aliases, nil }
+
+func (f *fakeDir) GetFetchSettings() (directory.FetchSettings, bool, error) {
+	return f.fetchSettings, f.fetchSettingsFound, nil
+}
+
+func (f *fakeDir) SetFetchSettings(s directory.FetchSettings) error {
+	f.fetchSettings, f.fetchSettingsFound = s, true
+	return nil
+}
 func (f *fakeDir) CreateAlias(aliasname, mainname string) error {
 	if f.createErr != nil {
 		return f.createErr

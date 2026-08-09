@@ -9,6 +9,8 @@
 {{template "http-ratelimit-panel" .}}
 <h1>Login lockout</h1>
 {{template "loginlockout-panel" .}}
+<h1>Mail fetching</h1>
+{{template "fetchpolicy-panel" .}}
 </main>
 </div>
 {{template "foot" .}}{{end}}
@@ -46,5 +48,14 @@
 <p>Window (seconds): <input type="number" name="login_window" value="{{.LoginWindow}}" min="1"></p>
 <p>Lockout (seconds): <input type="number" name="login_lockout" value="{{.LoginLockout}}" min="1"></p>
 <button type="submit">Save settings</button>
+</form>
+</div>{{end}}
+
+{{define "fetchpolicy-panel"}}<div id="fetchpolicy-panel">
+{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+<p>A fetchmail source is dialled by this server on a schedule, so a source pointed at an internal address reaches services that are not exposed to the network at all. Internal, loopback and link-local source addresses are therefore refused unless you allow them here. Turn this on only if you fetch from a server on your own private network. Domain administrators can create fetchmail entries; only a full system administrator can change this.</p>
+<form hx-post="/admin/ui/limits/fetchpolicy" hx-target="#fetchpolicy-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<p><label><input type="checkbox" name="fetch_allow_internal" value="1"{{if .FetchAllowInternal}} checked{{end}}> Allow fetchmail sources on internal addresses</label></p>
+<button type="submit">Save policy</button>
 </form>
 </div>{{end}}
