@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/mime"
 	"hermex/internal/mta"
@@ -710,7 +711,10 @@ func (s *Server) handleMarkAllRead(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown folder"})
 		return
 	}
-	if !mb.readAllowed(fid) {
+	// This is a bulk write, so it takes the write gate, not the read one: a
+	// read-only grant on someone else's folder must not let the grantee clear
+	// their unread state.
+	if !mb.writeAllowed(fid) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 		return
 	}
@@ -719,13 +723,23 @@ func (s *Server) handleMarkAllRead(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot read folder"})
 		return
 	}
-	marked := 0
+	marked, failed := 0, 0
 	for _, m := range msgs {
 		if m.Flags&objectstore.FlagSeen == 0 {
-			if err := mb.st.SetMessageFlags(fid, m.UID, m.Flags|objectstore.FlagSeen); err == nil {
-				marked++
+			if err := mb.st.SetMessageFlags(fid, m.UID, m.Flags|objectstore.FlagSeen); err != nil {
+				// A discarded error made a partial pass indistinguishable from a
+				// folder that simply had less unread mail in it.
+				failed++
+				logError("mark-all-read", err, logging.Fields{"user": mb.user, "folder": req.Folder, "uid": m.UID})
+				continue
 			}
+			marked++
 		}
+	}
+	if failed > 0 {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{
+			"error": "some messages could not be marked", "marked": marked, "failed": failed})
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"marked": marked})
 }
