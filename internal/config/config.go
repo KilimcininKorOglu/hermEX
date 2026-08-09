@@ -87,6 +87,31 @@ type HealthTarget struct {
 }
 
 // Load reads and validates a JSON config file.
+// PlaceholderSecret is the value docker/config.example.json carries for every
+// secret field. It exists so the template can show where a secret belongs and
+// roughly what it should look like without a copied-but-unedited file quietly
+// running on a key that is published in this repository. Load refuses it, so an
+// unedited copy fails to start instead of signing sessions and wrapping stored
+// private keys with a value anyone can read.
+const PlaceholderSecret = "REPLACE_WITH_A_LONG_RANDOM_STRING"
+
+// checkSecrets rejects any secret left at the template placeholder, naming the
+// field so the operator knows which one to generate.
+func (c *Config) checkSecrets() error {
+	for field, value := range map[string]string{
+		"webmail2_secret": c.Webmail2Secret,
+		"admin_secret":    c.AdminSecret,
+		"key_secret":      c.KeySecret,
+		"digest_secret":   c.DigestSecret,
+		"notify_secret":   c.NotifySecret,
+	} {
+		if value == PlaceholderSecret {
+			return fmt.Errorf("config: %s is still the example placeholder; generate one with: openssl rand -hex 32", field)
+		}
+	}
+	return nil
+}
+
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -101,6 +126,9 @@ func Load(path string) (*Config, error) {
 	}
 	if c.DataDir == "" {
 		return nil, fmt.Errorf("config: data_dir is required")
+	}
+	if err := c.checkSecrets(); err != nil {
+		return nil, err
 	}
 	return &c, nil
 }

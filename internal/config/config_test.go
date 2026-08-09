@@ -234,3 +234,54 @@ func writeSelfSignedCert(t *testing.T, dir string) (certPath, keyPath string) {
 	}
 	return certPath, keyPath
 }
+
+// TestLoadRefusesPlaceholderSecrets proves an unedited copy of the example config
+// fails to start rather than running on a secret published in this repository. A
+// placeholder that merely looks obvious is worse than an empty one: it would sign
+// session cookies and wrap stored private keys with a value anyone can read.
+func TestLoadRefusesPlaceholderSecrets(t *testing.T) {
+	for _, field := range []string{"webmail2_secret", "admin_secret", "key_secret", "digest_secret", "notify_secret"} {
+		doc := fmt.Sprintf(`{"database_dsn":"d","data_dir":"/x","%s":%q}`, field, PlaceholderSecret)
+		p := filepath.Join(t.TempDir(), "c.json")
+		if err := os.WriteFile(p, []byte(doc), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(p)
+		if err == nil {
+			t.Errorf("Load with %s left at the placeholder succeeded", field)
+			continue
+		}
+		if !strings.Contains(err.Error(), field) {
+			t.Errorf("error for %s = %v, want the field named", field, err)
+		}
+		if !strings.Contains(err.Error(), "openssl rand") {
+			t.Errorf("error for %s = %v, want it to say how to generate one", field, err)
+		}
+	}
+}
+
+// TestLoadAcceptsRealSecrets is the negative control: a configured secret loads,
+// and so does a config that sets none (the daemons that require one check for
+// themselves, and the optional ones treat empty as disabled).
+func TestLoadAcceptsRealSecrets(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "c.json")
+	doc := `{"database_dsn":"d","data_dir":"/x","admin_secret":"7f3a9c1e5b8d2f460a1c","notify_secret":""}`
+	if err := os.WriteFile(p, []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load with a real secret: %v", err)
+	}
+	if c.AdminSecret != "7f3a9c1e5b8d2f460a1c" {
+		t.Errorf("admin_secret = %q, want the configured value", c.AdminSecret)
+	}
+}
+
+// TestExampleConfigIsRefused proves the shipped template itself does not load, so
+// the convention the README states is enforced by the code rather than by trust.
+func TestExampleConfigIsRefused(t *testing.T) {
+	if _, err := Load(filepath.Join("..", "..", "docker", "config.example.json")); err == nil {
+		t.Error("the example config loaded; an unedited copy must fail")
+	}
+}

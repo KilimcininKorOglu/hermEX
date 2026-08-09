@@ -184,7 +184,14 @@ compiles the same commands into `bin/` under their bare directory names
 
 `docker/config.example.json` is the template; its placeholders are deliberately
 non-functional, so an unedited copy fails to connect rather than starting with a
-working default credential.
+working default credential. That holds for the signing secrets too: every daemon
+refuses to start while one is still `REPLACE_WITH_A_LONG_RANDOM_STRING`, rather
+than signing sessions and wrapping stored private keys with a value published in
+this repository. Generate each one separately:
+
+```sh
+openssl rand -hex 32
+```
 
 It holds **infrastructure only**: the database DSN and data directory (both
 required), listen addresses, gateway backend URLs, TLS certificate paths, secrets,
