@@ -26,7 +26,8 @@ const fetchTimeout = 10 * time.Second
 // _mta-sts.<domain> TXT presence record and the HTTPS policy file, are injectable
 // so the relay drives the real network while tests stay deterministic and offline.
 type Resolver struct {
-	// LookupTXT returns the TXT records of name; nil uses net.LookupTXT.
+	// LookupTXT returns the TXT records of name; nil uses a deadline-bound
+	// net.DefaultResolver lookup (see lookupTXTWithDeadline).
 	LookupTXT func(name string) ([]string, error)
 	// FetchPolicy GETs https://mta-sts.<domain>/.well-known/mta-sts.txt and returns
 	// the body; nil uses fetchOverHTTPS, which requires a PKIX-valid certificate.
@@ -103,11 +104,33 @@ func (r *Resolver) store(domain string, p *Policy, expires time.Time) {
 	r.cache[domain] = cacheEntry{policy: p, expires: expires}
 }
 
+// txtResolver performs the default TXT lookup. It is a variable so a test can
+// substitute a resolver that never answers, which is the condition the deadline
+// exists for.
+var txtResolver = net.DefaultResolver
+
+// lookupTXTWithin resolves name under a deadline. net.LookupTXT resolves against
+// context.Background and so has no deadline at all, which would let a policy host's
+// nameserver that never answers hold a delivery open indefinitely. The relay worker
+// is a single drainer, so that one recipient domain stalls the whole outbound queue
+// behind it. Going through net.Resolver is what makes fetchTimeout reach the lookup.
+func lookupTXTWithin(timeout time.Duration, name string) ([]string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return txtResolver.LookupTXT(ctx, name)
+}
+
+// lookupTXTWithDeadline is the default TXT lookup, bounded by the same fetchTimeout
+// that bounds the policy GET.
+func lookupTXTWithDeadline(name string) ([]string, error) {
+	return lookupTXTWithin(fetchTimeout, name)
+}
+
 // txtPresent reports whether _mta-sts.<domain> publishes an STSv1 record.
 func (r *Resolver) txtPresent(domain string) (bool, error) {
 	lookup := r.LookupTXT
 	if lookup == nil {
-		lookup = net.LookupTXT
+		lookup = lookupTXTWithDeadline
 	}
 	records, err := lookup("_mta-sts." + domain)
 	if err != nil {

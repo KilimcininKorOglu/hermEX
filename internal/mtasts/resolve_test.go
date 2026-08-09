@@ -1,6 +1,7 @@
 package mtasts
 
 import (
+	"context"
 	"errors"
 	"net"
 	"net/http"
@@ -102,5 +103,66 @@ func TestPolicyClientRefusesRedirects(t *testing.T) {
 	}
 	if err := policyClient.CheckRedirect(nil, nil); err == nil {
 		t.Error("CheckRedirect admitted a redirect")
+	}
+}
+
+// TestDefaultTXTLookupHasADeadline proves the presence lookup gives up instead of
+// waiting forever on a nameserver that accepts the query and never answers. The
+// relay worker drains the outbound queue one item at a time, so an unbounded
+// lookup here parks every other delivery behind one recipient domain.
+func TestDefaultTXTLookupHasADeadline(t *testing.T) {
+	hung := make(chan struct{})
+	defer close(hung)
+
+	prev := txtResolver
+	txtResolver = &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+			// Accept the dial, then never speak: the resolver waits on the read.
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-hung:
+				return nil, errors.New("test over")
+			}
+		},
+	}
+	defer func() { txtResolver = prev }()
+
+	start := time.Now()
+	_, err := lookupTXTWithin(50*time.Millisecond, "_mta-sts.example.test")
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("a resolver that never answers returned success")
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("the lookup took %s to give up; the deadline is not reaching it", elapsed)
+	}
+}
+
+// TestLookupUsesTheDeadlineBoundDefault proves a zero-value Resolver, which is what
+// the relay constructs, resolves through the deadline-bound path rather than the
+// bare package-level lookup that has no deadline at all. Substituting the resolver
+// is only visible if that path is the one taken.
+func TestLookupUsesTheDeadlineBoundDefault(t *testing.T) {
+	dialed := false
+	prev := txtResolver
+	txtResolver = &net.Resolver{
+		PreferGo: true,
+		Dial: func(context.Context, string, string) (net.Conn, error) {
+			dialed = true
+			return nil, errors.New("no nameserver in this test")
+		},
+	}
+	defer func() { txtResolver = prev }()
+
+	r := &Resolver{} // exactly what cmd/mta builds
+	_, err := r.txtPresent("example.test")
+	if !dialed {
+		t.Fatal("the default lookup bypassed the deadline-bound resolver")
+	}
+	if err == nil {
+		t.Error("the presence lookup reported success with no nameserver")
 	}
 }
