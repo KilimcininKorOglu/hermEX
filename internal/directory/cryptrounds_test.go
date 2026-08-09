@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/GehirnInc/crypt/sha512_crypt"
+	"hermex/internal/crypt"
 )
 
 // TestNewHashesCarryTheCurrentWorkFactor is the defect itself. The scheme's own
@@ -20,7 +20,7 @@ func TestNewHashesCarryTheCurrentWorkFactor(t *testing.T) {
 	if !strings.HasPrefix(h, "$6$rounds=") {
 		t.Fatalf("hash %q carries no rounds parameter, so it was made at the scheme default", h)
 	}
-	rounds, ok := cryptRoundsOf(h)
+	rounds, ok := crypt.Rounds(h)
 	if !ok || rounds != cryptRounds {
 		t.Errorf("hash was made at %d rounds (ok=%v), want %d", rounds, ok, cryptRounds)
 	}
@@ -38,7 +38,7 @@ func TestNewHashesCarryTheCurrentWorkFactor(t *testing.T) {
 // decoy makes the decoy a fraction of the cost, and the difference enumerates which
 // addresses exist.
 func TestDecoyMatchesTheCurrentWorkFactor(t *testing.T) {
-	rounds, ok := cryptRoundsOf(decoyPasswordHash)
+	rounds, ok := crypt.Rounds(decoyPasswordHash)
 	if !ok {
 		t.Fatalf("the decoy is not a sha512-crypt hash: %q", decoyPasswordHash)
 	}
@@ -47,23 +47,23 @@ func TestDecoyMatchesTheCurrentWorkFactor(t *testing.T) {
 	}
 }
 
-// TestCryptRoundsOfReadsStoredHashes pins the parser the upgrade decision rests on.
-func TestCryptRoundsOfReadsStoredHashes(t *testing.T) {
+// TestCryptRoundsReadsStoredHashes pins the parser the upgrade decision rests on.
+func TestCryptRoundsReadsStoredHashes(t *testing.T) {
 	for _, tc := range []struct {
 		name, stored string
 		want         int
 		wantOK       bool
 	}{
 		{"explicit rounds", "$6$rounds=600000$salt$hash", 600000, true},
-		{"no rounds parameter", "$6$salt$hash", sha512_crypt.RoundsDefault, true},
+		{"no rounds parameter", "$6$salt$hash", crypt.SHA512RoundsDefault, true},
 		{"md5-crypt", "$1$salt$hash", 0, false},
 		{"empty", "", 0, false},
 		{"unparseable rounds", "$6$rounds=abc$salt$hash", 0, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := cryptRoundsOf(tc.stored)
+			got, ok := crypt.Rounds(tc.stored)
 			if got != tc.want || ok != tc.wantOK {
-				t.Errorf("cryptRoundsOf(%q) = (%d, %v), want (%d, %v)", tc.stored, got, ok, tc.want, tc.wantOK)
+				t.Errorf("crypt.Rounds(%q) = (%d, %v), want (%d, %v)", tc.stored, got, ok, tc.want, tc.wantOK)
 			}
 		})
 	}
@@ -115,7 +115,7 @@ func TestLoginUpgradesAnOldHash(t *testing.T) {
 
 	// Put the account back on a hash made at the old default, the state every
 	// account created before this change is in.
-	weak, err := sha512_crypt.New().Generate([]byte(pass), nil)
+	weak, err := crypt.NewSHA512(pass, crypt.SHA512RoundsDefault)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestWrongPasswordDoesNotUpgrade(t *testing.T) {
 	if _, err := d.CreateUser(user, pass, filepath.Join(t.TempDir(), "bob")); err != nil {
 		t.Fatal(err)
 	}
-	weak, err := sha512_crypt.New().Generate([]byte(pass), nil)
+	weak, err := crypt.NewSHA512(pass, crypt.SHA512RoundsDefault)
 	if err != nil {
 		t.Fatal(err)
 	}

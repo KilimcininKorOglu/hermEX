@@ -11,10 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/GehirnInc/crypt/common"
-	"github.com/GehirnInc/crypt/md5_crypt"
-	"github.com/GehirnInc/crypt/sha512_crypt"
-
+	"hermex/internal/crypt"
 	"hermex/internal/migrate"
 )
 
@@ -1302,66 +1299,23 @@ func (d *SQLDirectory) ListAliases() ([]AliasInfo, error) {
 // at this one on its owner's next successful login.
 const cryptRounds = 600000
 
-// sha512Salt describes the salt sha512-crypt accepts. The values are the scheme's
-// own, restated because the library exposes its salt generator only through the
-// concrete type and the default it would pick is the 5000 rounds this exists to
-// leave behind.
-var sha512Salt = common.Salt{
-	MagicPrefix:   []byte(sha512_crypt.MagicPrefix),
-	SaltLenMin:    sha512_crypt.SaltLenMin,
-	SaltLenMax:    sha512_crypt.SaltLenMax,
-	RoundsDefault: sha512_crypt.RoundsDefault,
-	RoundsMin:     sha512_crypt.RoundsMin,
-	RoundsMax:     sha512_crypt.RoundsMax,
-}
-
 // sqlCryptNewHash produces a sha512-crypt ($6$) hash with a random salt at
 // cryptRounds, the default credential scheme for the directory.
 func sqlCryptNewHash(password string) (string, error) {
-	salt := sha512Salt.GenerateWRounds(sha512_crypt.SaltLenMax, cryptRounds)
-	return sha512_crypt.New().Generate([]byte(password), salt)
-}
-
-// cryptRoundsOf reads the work factor out of a stored crypt(3) hash. A $6$ hash
-// with no rounds parameter was made at the scheme's own default; any other scheme
-// has no comparable factor, so it reports none.
-func cryptRoundsOf(stored string) (int, bool) {
-	rest, ok := strings.CutPrefix(stored, sha512_crypt.MagicPrefix)
-	if !ok {
-		return 0, false
-	}
-	digits, ok := strings.CutPrefix(rest, "rounds=")
-	if !ok {
-		return sha512_crypt.RoundsDefault, true
-	}
-	num, _, _ := strings.Cut(digits, "$")
-	n, err := strconv.Atoi(num)
-	if err != nil {
-		return 0, false
-	}
-	return n, true
+	return crypt.NewSHA512(password, cryptRounds)
 }
 
 // needsRehash reports whether a stored hash was made with less work than the
 // directory now requires. A hash in any other scheme (md5-crypt, which this
 // directory still accepts for interoperability) always qualifies.
 func needsRehash(stored string) bool {
-	rounds, ok := cryptRoundsOf(stored)
+	rounds, ok := crypt.Rounds(stored)
 	return !ok || rounds < cryptRounds
 }
 
-// sqlCryptVerify checks a password against a stored crypt(3) hash, dispatching on
-// the hash's scheme prefix so a password set by an external crypt(3) tool
-// interoperates: $6$ (sha512-crypt, the directory's own default) and $1$
-// (md5-crypt) are both accepted. An empty hash, or one of an unrecognized
-// scheme, never matches.
+// sqlCryptVerify checks a password against a stored crypt(3) hash. Both schemes
+// the directory accepts are handled there: $6$ (sha512-crypt, what it writes) and
+// $1$ (md5-crypt), so a password set by an external crypt(3) tool interoperates.
 func sqlCryptVerify(password, stored string) bool {
-	switch {
-	case strings.HasPrefix(stored, "$6$"):
-		return sha512_crypt.New().Verify(stored, []byte(password)) == nil
-	case strings.HasPrefix(stored, "$1$"):
-		return md5_crypt.New().Verify(stored, []byte(password)) == nil
-	default:
-		return false
-	}
+	return crypt.Verify(password, stored)
 }

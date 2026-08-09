@@ -3,26 +3,24 @@ package directory
 import (
 	"testing"
 
-	"github.com/GehirnInc/crypt/md5_crypt"
-	"github.com/GehirnInc/crypt/sha512_crypt"
+	"hermex/internal/crypt"
 )
 
 // TestCryptInterop proves sqlCryptVerify accepts both sha512-crypt ($6$, the
 // directory's own scheme) and md5-crypt ($1$) hashes, round-trips its own
-// generated hash, accepts an external md5-crypt vector it did not produce, and
-// rejects wrong passwords and unsupported schemes.
+// generated hash, accepts external vectors it did not produce, and rejects wrong
+// passwords and unsupported schemes.
 func TestCryptInterop(t *testing.T) {
 	const pw = "Hello world!"
 
-	sha6, err := sha512_crypt.New().Generate([]byte(pw), nil)
+	sha6, err := crypt.NewSHA512(pw, crypt.SHA512RoundsDefault)
 	if err != nil {
 		t.Fatal(err)
 	}
-	md1, err := md5_crypt.New().Generate([]byte(pw), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, h := range []string{sha6, md1} {
+	// An external sha512-crypt vector (OpenSSL's own output for this password and
+	// salt), so the interop claim rests on a hash this tree did not make.
+	const external = "$6$saltstring$svn8UoSVapNtMuq1ukKS4tPQd8iKwSMHWjl/O817G3uBnIFNjnQJuesI68u4OTLiBFdcbYEdFCoEOfaS35inz1"
+	for _, h := range []string{sha6, external} {
 		if !sqlCryptVerify(pw, h) {
 			t.Errorf("hash %q failed to verify its password", h)
 		}
