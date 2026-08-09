@@ -15,6 +15,8 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+
+	"hermex/internal/serve"
 )
 
 // Route maps a path prefix (matched case-insensitively) to a backend base URL.
@@ -55,6 +57,15 @@ func Handler(routes []Route) (http.Handler, error) {
 		// 502 and an empty body, so a user whose webmail is down sees a blank page
 		// and has nothing to report. The service being unreachable is temporary, so
 		// the status says so.
+		// The front door stamps its own security headers on the way out, and the
+		// backend stamped the same ones. The proxy copies backend headers in
+		// addition to what is already set, so both would reach the client, and a
+		// header that arrives twice may be ignored altogether. The backend's copy
+		// is dropped here so exactly one survives.
+		proxy.ModifyResponse = func(res *http.Response) error {
+			serve.StripSecurityHeaders(res.Header)
+			return nil
+		}
 		proxy.ErrorHandler = func(w http.ResponseWriter, r *http.Request, _ error) {
 			writeGatewayError(w, r, http.StatusServiceUnavailable,
 				"Service unavailable",

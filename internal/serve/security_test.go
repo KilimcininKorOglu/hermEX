@@ -34,7 +34,7 @@ func TestNosniffReachesTheWire(t *testing.T) {
 // webmail SPA. Without the header a browser is free to disregard text/vcard and
 // render the stored bytes as HTML.
 func TestNosniffOnEveryResponse(t *testing.T) {
-	h := nosniffMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := securityHeadersMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/vcard; charset=utf-8")
 		_, _ = w.Write([]byte("BEGIN:VCARD\r\nFN:<script>alert(1)</script>\r\nEND:VCARD\r\n"))
 	}))
@@ -55,7 +55,7 @@ func TestNosniffOnEveryResponse(t *testing.T) {
 // stamping it afterwards would look correct in the source and do nothing on the
 // wire.
 func TestNosniffSetBeforeTheBody(t *testing.T) {
-	h := nosniffMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := securityHeadersMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("body"))
 	}))
@@ -73,7 +73,7 @@ func TestNosniffSetBeforeTheBody(t *testing.T) {
 // set the identical value, so the result must still be a single well-formed header
 // rather than a duplicated or concatenated one.
 func TestNosniffDoesNotOverrideAHandlersOwnValue(t *testing.T) {
-	h := nosniffMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	h := securityHeadersMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 	}))
 
@@ -82,5 +82,51 @@ func TestNosniffDoesNotOverrideAHandlersOwnValue(t *testing.T) {
 
 	if v := rec.Header().Values("X-Content-Type-Options"); len(v) != 1 || v[0] != "nosniff" {
 		t.Errorf("X-Content-Type-Options = %v, want exactly one nosniff", v)
+	}
+}
+
+// TestFramingIsRefusedOnEveryResponse is the defect this middleware grew for.
+// Only webmail2api refused framing, in its own handler-local middleware, so the
+// admin panel, the one surface whose cookie-authenticated forms create users and
+// grant system-admin roles, served with nothing stopping a page from framing it.
+func TestFramingIsRefusedOnEveryResponse(t *testing.T) {
+	base := startLimited(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("<html><form method=post></form></html>"))
+	}), nil)
+
+	resp, err := http.Get(base + "admin/ui/users")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if got := resp.Header.Get("X-Frame-Options"); got != "DENY" {
+		t.Errorf("X-Frame-Options = %q, want DENY", got)
+	}
+	if got := resp.Header.Get("Content-Security-Policy"); got != "frame-ancestors 'none'" {
+		t.Errorf("Content-Security-Policy = %q, want frame-ancestors 'none'", got)
+	}
+}
+
+// TestStripSecurityHeadersClearsExactlyTheStampedSet proves the helper the front
+// door uses drops what it stamps and nothing else, so a backend's own headers
+// (a Content-Type, a cache policy) still reach the client.
+func TestStripSecurityHeadersClearsExactlyTheStampedSet(t *testing.T) {
+	h := http.Header{}
+	for _, hd := range securityHeaders {
+		h.Set(hd.name, hd.value)
+	}
+	h.Set("Content-Type", "application/json")
+	h.Set("Cache-Control", "no-store")
+
+	StripSecurityHeaders(h)
+
+	for _, hd := range securityHeaders {
+		if got := h.Get(hd.name); got != "" {
+			t.Errorf("%s survived the strip as %q", hd.name, got)
+		}
+	}
+	if h.Get("Content-Type") != "application/json" || h.Get("Cache-Control") != "no-store" {
+		t.Errorf("the strip took an unrelated header too: %v", h)
 	}
 }
