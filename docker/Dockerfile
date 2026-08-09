@@ -36,8 +36,13 @@ RUN go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-mta ./cmd/mta \
  && go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-notify ./cmd/notify \
  && go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-fetchmail ./cmd/fetchmail
 
-# Minimal runtime image. NOTE: this image runs as root so the daemons can bind
-# the privileged mail ports (25/110); a hardened production image should run as
-# nonroot with CAP_NET_BIND_SERVICE or listen on high ports behind a proxy.
+# Minimal runtime image. The daemons run unprivileged: nothing here parses
+# attacker-supplied network input as uid 0. The three that listen below port 1024
+# (SMTP 25, POP3 110, IMAP 143) get the privilege they need from a namespaced
+# sysctl in the compose file rather than from being root; a capability would not
+# help, since capabilities are dropped on exec for a non-root user without file
+# capabilities. 65532 is the distroless nonroot user; the compose file overrides
+# it with the invoking user's id so the bind-mounted data stays writable.
 FROM gcr.io/distroless/static-debian12:latest@sha256:a9fcaedd4c9b59e12dd65d954f0b5044f19b0647a8a3712e77205df9e7b102cd
 COPY --from=build /out/ /usr/local/bin/
+USER 65532:65532

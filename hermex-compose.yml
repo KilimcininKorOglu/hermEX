@@ -76,6 +76,10 @@ services:
       start_period: 180s
     restart: unless-stopped
 
+  # The dev toolchain container deliberately stays root: it is a local build tool
+  # with no listening port and no attacker input, and the module cache it writes
+  # through is bind-mounted from root-owned directories, so changing its identity
+  # would only break the build.
   dev:
     container_name: hermex-dev
     build:
@@ -100,6 +104,15 @@ services:
 
   mta:
     container_name: hermex-mta
+    # Unprivileged: a parsing bug in this daemon must not land an attacker at
+    # uid 0. The id is the invoking user's (the Makefile exports it) so the
+    # bind-mounted mail data stays writable; 65532 is the image default.
+    user: "${HERMEX_UID:-65532}:${HERMEX_GID:-65532}"
+    # Lets the unprivileged process bind its below-1024 port. A capability
+    # would not work here: without file capabilities they are dropped on exec
+    # for a non-root user. This sysctl is namespaced to this container.
+    sysctls:
+      - net.ipv4.ip_unprivileged_port_start=0
     build: *hermex-build
     command: ["/usr/local/bin/hermex-mta", "-config", "/config/config.json"]
     volumes:
@@ -121,6 +134,15 @@ services:
 
   pop3:
     container_name: hermex-pop3
+    # Unprivileged: a parsing bug in this daemon must not land an attacker at
+    # uid 0. The id is the invoking user's (the Makefile exports it) so the
+    # bind-mounted mail data stays writable; 65532 is the image default.
+    user: "${HERMEX_UID:-65532}:${HERMEX_GID:-65532}"
+    # Lets the unprivileged process bind its below-1024 port. A capability
+    # would not work here: without file capabilities they are dropped on exec
+    # for a non-root user. This sysctl is namespaced to this container.
+    sysctls:
+      - net.ipv4.ip_unprivileged_port_start=0
     build: *hermex-build
     command: ["/usr/local/bin/hermex-pop3", "-config", "/config/config.json"]
     volumes:
@@ -138,6 +160,15 @@ services:
 
   imap:
     container_name: hermex-imap
+    # Unprivileged: a parsing bug in this daemon must not land an attacker at
+    # uid 0. The id is the invoking user's (the Makefile exports it) so the
+    # bind-mounted mail data stays writable; 65532 is the image default.
+    user: "${HERMEX_UID:-65532}:${HERMEX_GID:-65532}"
+    # Lets the unprivileged process bind its below-1024 port. A capability
+    # would not work here: without file capabilities they are dropped on exec
+    # for a non-root user. This sysctl is namespaced to this container.
+    sysctls:
+      - net.ipv4.ip_unprivileged_port_start=0
     build: *hermex-build
     command: ["/usr/local/bin/hermex-imap", "-config", "/config/config.json"]
     volumes:
@@ -158,6 +189,10 @@ services:
   # gateway proxies at the front-door root.
   webmail2:
     container_name: hermex-webmail2
+    # Unprivileged: a parsing bug in this daemon must not land an attacker at
+    # uid 0. The id is the invoking user's (the Makefile exports it) so the
+    # bind-mounted mail data stays writable; 65532 is the image default.
+    user: "${HERMEX_UID:-65532}:${HERMEX_GID:-65532}"
     build: *hermex-build
     command: ["/usr/local/bin/hermex-webmail2", "-config", "/config/config.json"]
     volumes:
@@ -174,6 +209,10 @@ services:
 
   dav:
     container_name: hermex-dav
+    # Unprivileged: a parsing bug in this daemon must not land an attacker at
+    # uid 0. The id is the invoking user's (the Makefile exports it) so the
+    # bind-mounted mail data stays writable; 65532 is the image default.
+    user: "${HERMEX_UID:-65532}:${HERMEX_GID:-65532}"
     build: *hermex-build
     command: ["/usr/local/bin/hermex-dav", "-config", "/config/config.json"]
     volumes:
@@ -191,6 +230,10 @@ services:
 
   activesync:
     container_name: hermex-activesync
+    # Unprivileged: a parsing bug in this daemon must not land an attacker at
+    # uid 0. The id is the invoking user's (the Makefile exports it) so the
+    # bind-mounted mail data stays writable; 65532 is the image default.
+    user: "${HERMEX_UID:-65532}:${HERMEX_GID:-65532}"
     build: *hermex-build
     command: ["/usr/local/bin/hermex-activesync", "-config", "/config/config.json"]
     volumes:
@@ -208,6 +251,10 @@ services:
 
   ews:
     container_name: hermex-ews
+    # Unprivileged: a parsing bug in this daemon must not land an attacker at
+    # uid 0. The id is the invoking user's (the Makefile exports it) so the
+    # bind-mounted mail data stays writable; 65532 is the image default.
+    user: "${HERMEX_UID:-65532}:${HERMEX_GID:-65532}"
     build: *hermex-build
     command: ["/usr/local/bin/hermex-ews", "-config", "/config/config.json"]
     volumes:
@@ -225,6 +272,10 @@ services:
 
   mapi:
     container_name: hermex-mapi
+    # Unprivileged: a parsing bug in this daemon must not land an attacker at
+    # uid 0. The id is the invoking user's (the Makefile exports it) so the
+    # bind-mounted mail data stays writable; 65532 is the image default.
+    user: "${HERMEX_UID:-65532}:${HERMEX_GID:-65532}"
     build: *hermex-build
     command: ["/usr/local/bin/hermex-mapi", "-config", "/config/config.json"]
     volumes:
@@ -249,6 +300,10 @@ services:
   # never blocks the stack from serving mail.
   notify:
     container_name: hermex-notify
+    # Unprivileged: a parsing bug in this daemon must not land an attacker at
+    # uid 0. The id is the invoking user's (the Makefile exports it) so the
+    # bind-mounted mail data stays writable; 65532 is the image default.
+    user: "${HERMEX_UID:-65532}:${HERMEX_GID:-65532}"
     build: *hermex-build
     command: ["/usr/local/bin/hermex-notify", "-config", "/config/config.json"]
     volumes:
@@ -268,6 +323,10 @@ services:
   # the writable /data/acme mount; production leaves acme_ca_root empty.
   gateway:
     container_name: hermex-gateway
+    # Unprivileged: a parsing bug in this daemon must not land an attacker at
+    # uid 0. The id is the invoking user's (the Makefile exports it) so the
+    # bind-mounted mail data stays writable; 65532 is the image default.
+    user: "${HERMEX_UID:-65532}:${HERMEX_GID:-65532}"
     build: *hermex-build
     command: ["/usr/local/bin/hermex-gateway", "-config", "/config/config.json"]
     volumes:
@@ -326,6 +385,10 @@ services:
   # run this loop (two would double-fetch), so it is its own always-on daemon.
   fetchmail:
     container_name: hermex-fetchmail
+    # Unprivileged: a parsing bug in this daemon must not land an attacker at
+    # uid 0. The id is the invoking user's (the Makefile exports it) so the
+    # bind-mounted mail data stays writable; 65532 is the image default.
+    user: "${HERMEX_UID:-65532}:${HERMEX_GID:-65532}"
     build: *hermex-build
     command: ["/usr/local/bin/hermex-fetchmail", "-config", "/config/config.json"]
     volumes:

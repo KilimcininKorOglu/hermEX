@@ -28,6 +28,13 @@ export HERMEX_COMMIT     := $(GIT_COMMIT)$(GIT_DIRTY)
 export HERMEX_BUILD_TIME := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS := -X hermex/internal/buildinfo.Commit=$(HERMEX_COMMIT) -X hermex/internal/buildinfo.BuildTime=$(HERMEX_BUILD_TIME)
 
+# The identity the mail daemons run as. They must not run as root, and the id has
+# to be this user's: the mail data is a bind mount owned on the host, so a fixed
+# uid would make it unwritable. The compose file falls back to the image's nonroot
+# user when these are unset (a bare `docker compose up`).
+export HERMEX_UID := $(shell id -u)
+export HERMEX_GID := $(shell id -g)
+
 # Test/lint scope. Override PKG (and optionally RUN) for a subset.
 PKG ?= ./internal/... ./cmd/...
 RUN ?=
@@ -186,6 +193,7 @@ compose-check:
 version:
 	@echo "commit     $(HERMEX_COMMIT)"
 	@echo "build time $(HERMEX_BUILD_TIME)"
+	@echo "run as     $(HERMEX_UID):$(HERMEX_GID)"
 
 ## clean: remove built binaries
 clean:

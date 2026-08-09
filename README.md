@@ -218,6 +218,12 @@ hermex-admin -config <file> export-dkim <domain>   # one domain's signing key to
 Both paths run in the operator's shell, so no private key crosses the network.
 Take a dump before an upgrade, and keep it off the mail host.
 
+The daemons run unprivileged. `make up` passes your own user and group id to
+every mail container, so nothing that parses network input runs as root and the
+bind-mounted `docker-data/` tree stays writable by the account that owns it. The
+three daemons that listen below port 1024 (SMTP 25, POP3 110, IMAP 143) bind
+through a sysctl scoped to their own container rather than through root.
+
 Set `key_secret` in the configuration file. With it, the DKIM and TLS private
 keys are encrypted in the database, so a dump on its own no longer hands anyone a
 working signing key: opening it needs the configuration file too. Without it the
