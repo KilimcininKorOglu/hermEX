@@ -20,6 +20,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 
 	"hermex/internal/antispam"
+	"hermex/internal/authlimit"
 	"hermex/internal/config"
 	"hermex/internal/dane"
 	"hermex/internal/directory"
@@ -193,6 +194,12 @@ func main() {
 	// send to per window, a compromised account that blasts spam is deferred and the
 	// admin is alerted. It starts disabled; the alert is a central-log event.
 	outboundLimiter := mta.StartOutboundLimiter("hermex-mta", logger, dir.GetOutboundSettings)
+	// Failed-login throttle on SMTP AUTH: a client address that piles up failed
+	// logins is locked out for the window the operator configured, so submission
+	// cannot be used to guess passwords unbounded.
+	loginLimiter := authlimit.New(0, 0, 0)
+	authlimit.Apply("hermex-mta", loginLimiter, dir.GetLoginLockoutSettings)
+	go authlimit.RunMaintenance("hermex-mta", loginLimiter, dir.GetLoginLockoutSettings)
 
 	// Wire delivery-time inbox-rule forwarding to the relay spool, gated by the
 	// outbound abuse limiter (the per-user cap). Wired here, not in the mta package,
@@ -236,7 +243,7 @@ func main() {
 	// report otherwise. It now starts, sees the same toggle, and says on every run
 	// that it cannot send.
 	go runDigest(dir, []byte(cfg.DigestSecret), cfg.Hostname, logger)
-	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir, Greylist: greylister, RateLimit: rateLimiter, Thresholds: dir, RecipientAccess: dir, Outbound: outboundLimiter}, Hostname: cfg.Hostname, Logger: logger}
+	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir, Greylist: greylister, RateLimit: rateLimiter, Thresholds: dir, RecipientAccess: dir, Outbound: outboundLimiter, Limiter: loginLimiter}, Hostname: cfg.Hostname, Logger: logger}
 	// TLS certificates come from the provider: the config-file cert as a fallback,
 	// overridden by an admin-uploaded cert the provider polls for, so a renewal
 	// applies without a restart.

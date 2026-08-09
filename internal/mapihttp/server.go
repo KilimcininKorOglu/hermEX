@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/authlimit"
 	"hermex/internal/directory"
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
@@ -44,6 +45,7 @@ type Server struct {
 	waker         notify.Registrar     // push wake source; nil keeps the long-poll on its cadence only
 	logger        *logging.Logger      // central activity log; nil disables logging
 	ems           *rpchttp.EMSMDB      // the RPC/HTTP EMSMDB stub, held so SetLogger reaches its ROP sessions
+	limiter       *authlimit.Limiter   // failed-login throttle keyed by account; nil disables it
 }
 
 // Session reclamation. A client that dies without Disconnect (or Unbind) leaves
@@ -98,6 +100,11 @@ func (s *Server) SetLogger(l *logging.Logger) {
 	s.logger = l
 	s.ems.Logger = l
 }
+
+// SetLimiter installs the failed-login throttle. Without one every Basic-Auth
+// request runs the directory's 600k-round hash, so an unauthenticated client can
+// both guess passwords indefinitely and keep the daemon busy doing it.
+func (s *Server) SetLimiter(l *authlimit.Limiter) { s.limiter = l }
 
 // mapiEvent logs a MAPI/HTTP operation tagged with the client address (and, when
 // known, the user). A nil logger is a no-op.
@@ -223,8 +230,24 @@ type session struct {
 func (s *Server) basicAuth(w http.ResponseWriter, r *http.Request) (user, mailbox string, ok bool) {
 	u, p, hasAuth := r.BasicAuth()
 	if hasAuth {
+		// Throttle online guessing: an account that has piled up failed logins is
+		// refused before the password is checked, which also stops the 600k-round
+		// hash from running. The key is the account, not the client address: behind
+		// the gateway the only address available is a header the client can set.
+		key := authlimit.AccountKey(u)
+		if s.limiter != nil && !s.limiter.Allowed(key) {
+			s.mapiEvent(r, logging.LevelWarn, logging.MAPI, "auth.throttled", u, nil)
+			http.Error(w, "too many failed attempts, try again later", http.StatusTooManyRequests)
+			return "", "", false
+		}
 		if path, good := s.auth.Authenticate(u, p); good {
+			if s.limiter != nil {
+				s.limiter.Succeed(key)
+			}
 			return u, path, true
+		}
+		if s.limiter != nil {
+			s.limiter.Fail(key)
 		}
 	}
 	w.Header().Set("WWW-Authenticate", `Basic realm="hermEX"`)

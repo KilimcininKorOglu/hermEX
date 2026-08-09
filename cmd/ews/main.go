@@ -15,6 +15,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 
+	"hermex/internal/authlimit"
 	"hermex/internal/config"
 	"hermex/internal/directory"
 	"hermex/internal/ews"
@@ -67,6 +68,12 @@ func main() {
 
 	srv := ews.NewServer(dir, dir, cfg.Hostname)
 	srv.Logger = logger
+	// Failed-login throttle: an account that piles up failed logins is locked
+	// out for the window the operator configured, so a client cannot guess
+	// passwords unbounded (nor keep the daemon busy hashing them).
+	srv.Limiter = authlimit.New(0, 0, 0)
+	authlimit.Apply("hermex-ews", srv.Limiter, dir.GetLoginLockoutSettings)
+	go authlimit.RunMaintenance("hermex-ews", srv.Limiter, dir.GetLoginLockoutSettings)
 	srv.SetNotify(notify.EnableConsumer(cfg.NotifyURL, cfg.NotifySecret, logger))
 	srv.Pub = publicfolder.New(cfg) // per-domain public folders rooted at HomedirFor
 	// Enqueue external recipients of sent items into the shared relay spool the

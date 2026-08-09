@@ -11,6 +11,7 @@ package authlimit
 
 import (
 	"net"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -28,6 +29,16 @@ func IPKey(remoteAddr string) string {
 		return host
 	}
 	return remoteAddr
+}
+
+// AccountKey reduces a login name to the key the gateway-fronted HTTP protocols
+// (EWS, ActiveSync, DAV, MAPI/HTTP) throttle on. They cannot key on the client
+// address: behind the front door every request carries the proxy's, and the only
+// client address available is a header the client itself can set, so an IP key
+// would either lock everyone out at once or be trivially rotated. An account key
+// blunts guessing against one mailbox instead.
+func AccountKey(user string) string {
+	return strings.ToLower(strings.TrimSpace(user))
 }
 
 // maxKeys bounds memory: distinct keys tracked at once. A full table of still-

@@ -17,6 +17,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 
 	"hermex/internal/activesync"
+	"hermex/internal/authlimit"
 	"hermex/internal/config"
 	"hermex/internal/directory"
 	"hermex/internal/health"
@@ -67,6 +68,12 @@ func main() {
 
 	srv := activesync.NewServer(dir, dir, cfg.Hostname)
 	srv.Logger = logger
+	// Failed-login throttle: an account that piles up failed logins is locked
+	// out for the window the operator configured, so a client cannot guess
+	// passwords unbounded (nor keep the daemon busy hashing them).
+	srv.Limiter = authlimit.New(0, 0, 0)
+	authlimit.Apply("hermex-activesync", srv.Limiter, dir.GetLoginLockoutSettings)
+	go authlimit.RunMaintenance("hermex-activesync", srv.Limiter, dir.GetLoginLockoutSettings)
 	srv.SetNotify(notify.EnableConsumer(cfg.NotifyURL, cfg.NotifySecret, logger))
 	// Enqueue external recipients of SendMail into the shared relay spool the MTA
 	// drains; without it ActiveSync would send local-only.

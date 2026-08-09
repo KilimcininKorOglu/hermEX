@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"hermex/internal/antispam"
+	"hermex/internal/authlimit"
 	"hermex/internal/directory"
 	"hermex/internal/logging"
 	"hermex/internal/mapi"
@@ -69,11 +70,12 @@ type Backend struct {
 	Thresholds      SpamThresholdResolver   // per-recipient spam-threshold overrides; nil files every recipient by the global threshold
 	RecipientAccess RecipientAccessResolver // per-recipient allow/block rules; nil applies no personal overrides
 	Outbound        *OutboundLimiter        // outbound per-account abuse limiting; nil (or disabled) admits every recipient
+	Limiter         *authlimit.Limiter      // failed-login throttle keyed by client IP; nil disables it
 }
 
 // NewSession implements smtp.Backend.
 func (b *Backend) NewSession(remoteAddr string) (smtp.Session, error) {
-	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History, greylist: b.Greylist, rateLimit: b.RateLimit, thresholds: b.Thresholds, recipAccess: b.RecipientAccess, outbound: b.Outbound}, nil
+	return &session{accounts: b.Accounts, spool: b.Spool, logger: b.Logger, remoteAddr: remoteAddr, scorer: b.Scorer, history: b.History, greylist: b.Greylist, rateLimit: b.RateLimit, thresholds: b.Thresholds, recipAccess: b.RecipientAccess, outbound: b.Outbound, limiter: b.Limiter}, nil
 }
 
 type session struct {
@@ -88,6 +90,7 @@ type session struct {
 	thresholds   SpamThresholdResolver
 	recipAccess  RecipientAccessResolver
 	outbound     *OutboundLimiter
+	limiter      *authlimit.Limiter
 	from         string
 	targets      []target             // local recipients, filed into mailboxes
 	relayTargets []relay.DSNRecipient // external recipients (with DSN params), spooled for outbound relay
@@ -105,9 +108,23 @@ func (s *session) Auth(username, password string) bool {
 	if !ok {
 		return false
 	}
+	// Throttle online guessing: a client address that has piled up failed logins
+	// is refused before the password is checked, so the directory's 600k-round hash
+	// never runs for it. Keyed by IP alone, like IMAP and POP3: submission is a
+	// direct connection, so the address is the real client's.
+	key := authlimit.IPKey(s.remoteAddr)
+	if s.limiter != nil && !s.limiter.Allowed(key) {
+		return false
+	}
 	path, ok := authn.Authenticate(username, password)
 	if !ok {
+		if s.limiter != nil {
+			s.limiter.Fail(key)
+		}
 		return false
+	}
+	if s.limiter != nil {
+		s.limiter.Succeed(key)
 	}
 	// The SMTP privilege gates authenticated submission only; inbound intake never
 	// authenticates, so a user whose SMTP privilege is revoked can still receive

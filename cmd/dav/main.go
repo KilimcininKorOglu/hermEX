@@ -15,6 +15,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 
+	"hermex/internal/authlimit"
 	"hermex/internal/config"
 	"hermex/internal/dav"
 	"hermex/internal/directory"
@@ -57,6 +58,12 @@ func main() {
 
 	srv := dav.NewServer(dir, dir, cfg.Hostname)
 	srv.Logger = logger // implicit-scheduling delivery failures route to the central log
+	// Failed-login throttle: an account that piles up failed logins is locked
+	// out for the window the operator configured, so a client cannot guess
+	// passwords unbounded (nor keep the daemon busy hashing them).
+	srv.Limiter = authlimit.New(0, 0, 0)
+	authlimit.Apply("hermex-dav", srv.Limiter, dir.GetLoginLockoutSettings)
+	go authlimit.RunMaintenance("hermex-dav", srv.Limiter, dir.GetLoginLockoutSettings)
 	// Scheduling-Outbox iTIP messages with external recipients are enqueued into the
 	// shared relay spool the MTA drains, DKIM-signed with the sending domain's key as
 	// they are spooled (RFC 6638 §5).

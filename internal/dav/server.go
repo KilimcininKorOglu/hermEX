@@ -12,11 +12,13 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"hermex/internal/authlimit"
 	"hermex/internal/directory"
 	"hermex/internal/logging"
 	"hermex/internal/notify"
 	"hermex/internal/objectstore"
 	"hermex/internal/relay"
+	"hermex/internal/serve"
 )
 
 // Server answers DAV requests for the authenticated user's mailbox.
@@ -28,6 +30,8 @@ type Server struct {
 	// daemon after construction. Implicit-scheduling delivery failures (RFC 6638) are
 	// best-effort and surface here rather than failing the calendar write.
 	Logger *logging.Logger
+	// Limiter is the failed-login throttle keyed by account; nil disables it.
+	Limiter *authlimit.Limiter
 	// spool is the outbound relay queue scheduling-Outbox iTIP messages are handed to
 	// for external recipients (RFC 6638 §5). It is nil by default, then delivery is
 	// local-only and a remote recipient is reported as undeliverable, and set by the
@@ -243,17 +247,47 @@ const allowMethods = "OPTIONS, PROPFIND, PROPPATCH, REPORT, GET, HEAD, PUT, DELE
 func (s *Server) basicAuth(w http.ResponseWriter, r *http.Request) (user, mailbox string, ok bool) {
 	u, p, hasAuth := r.BasicAuth()
 	if hasAuth {
+		// Throttle online guessing: an account that has piled up failed logins is
+		// refused before the password is checked, which also stops the 600k-round
+		// hash from running. The key is the account, not the client address: behind
+		// the gateway the only address available is a header the client can set.
+		key := authlimit.AccountKey(u)
+		if s.Limiter != nil && !s.Limiter.Allowed(key) {
+			s.logThrottled(r, u)
+			http.Error(w, "too many failed attempts, try again later", http.StatusTooManyRequests)
+			return "", "", false
+		}
 		if path, good := s.auth.Authenticate(u, p); good {
+			// The credentials were right, so the attempt is a success even when the
+			// service privilege then refuses it.
+			if s.Limiter != nil {
+				s.Limiter.Succeed(key)
+			}
 			if privs, _ := s.auth.Privileges(u); !privs.DAV {
 				http.Error(w, "DAV access is disabled for this account", http.StatusForbidden)
 				return "", "", false
 			}
 			return u, path, true
 		}
+		if s.Limiter != nil {
+			s.Limiter.Fail(key)
+		}
 	}
 	w.Header().Set("WWW-Authenticate", `Basic realm="hermEX"`)
 	http.Error(w, "unauthorized", http.StatusUnauthorized)
 	return "", "", false
+}
+
+// logThrottled records a refused-before-checked login so the operator sees a
+// guessing wave rather than silence.
+func (s *Server) logThrottled(r *http.Request, user string) {
+	if s.Logger == nil {
+		return
+	}
+	s.Logger.Emit(logging.Event{
+		Level: logging.LevelWarn, Subsystem: logging.DAV, Name: "auth.throttled",
+		User: user, RemoteAddr: serve.ClientAddr(r),
+	})
 }
 
 // resolveTarget maps the URL's principal segment to the mailbox a request operates on.

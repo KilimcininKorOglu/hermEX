@@ -15,6 +15,7 @@ import (
 
 	_ "github.com/go-sql-driver/mysql"
 
+	"hermex/internal/authlimit"
 	"hermex/internal/config"
 	"hermex/internal/directory"
 	"hermex/internal/health"
@@ -66,6 +67,13 @@ func main() {
 		log.Fatalf("hermex-mapi: open relay spool: %v", err)
 	}
 	srv := mapihttp.NewServer(dir, dir, cfg.Hostname, spool)
+	// Failed-login throttle: an account that piles up failed logins is locked
+	// out for the window the operator configured, so a client cannot guess
+	// passwords unbounded (nor keep the daemon busy hashing them).
+	loginLimiter := authlimit.New(0, 0, 0)
+	srv.SetLimiter(loginLimiter)
+	authlimit.Apply("hermex-mapihttp", loginLimiter, dir.GetLoginLockoutSettings)
+	go authlimit.RunMaintenance("hermex-mapihttp", loginLimiter, dir.GetLoginLockoutSettings)
 	srv.SetLogger(logger)
 
 	// Push notifications: publish this daemon's own mailbox writes to the relay, and
