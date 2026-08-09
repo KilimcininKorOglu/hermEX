@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"hermex/internal/buildinfo"
 	"hermex/internal/directory"
 )
 
@@ -52,5 +53,44 @@ func TestHandleBrandingPerDomain(t *testing.T) {
 	}
 	if b := get("other.test"); b["app_name"] != "hermEX" {
 		t.Errorf("unknown-host app_name = %v, want the hermEX default", b["app_name"])
+	}
+}
+
+// TestBrandingCarriesTheBuildStamp proves the login footer gets a real version to
+// render, and that a tenant cannot overwrite it with a version it is not running.
+func TestBrandingCarriesTheBuildStamp(t *testing.T) {
+	old := buildinfo.Commit
+	buildinfo.Commit = "abc1234-dirty"
+	defer func() { buildinfo.Commit = old }()
+
+	auth := brandingAuth{
+		StaticAccounts: directory.StaticAccounts{},
+		branding: map[string]directory.DomainBranding{
+			"acme.test": {AppName: "Acme Mail", FooterText: "Acme"},
+		},
+	}
+	srv := NewServer(auth, directory.StaticAccounts{}, nil, "mail.hermex.test", []byte("s"), "", false)
+	get := func(domain string) map[string]any {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/branding?domain="+domain, nil)
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		var out map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("branding(%q) bad json: %v", domain, err)
+		}
+		return out
+	}
+	// A domain that customized nothing still gets the stamp, since the footer
+	// renders it for every tenant.
+	if b := get("other.test"); b["version"] != "abc1234-dirty" {
+		t.Errorf("default version = %v, want the build stamp", b["version"])
+	}
+	// A branded domain gets its own footer text and the same stamp.
+	b := get("acme.test")
+	if b["footer_text"] != "Acme" {
+		t.Errorf("footer_text = %v, want the tenant value", b["footer_text"])
+	}
+	if b["version"] != "abc1234-dirty" {
+		t.Errorf("branded version = %v, want the build stamp, not a tenant value", b["version"])
 	}
 }

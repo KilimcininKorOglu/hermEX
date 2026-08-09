@@ -9,6 +9,9 @@ interface Branding {
   primary_color: string
   tagline: string
   footer_text: string
+  // Build stamp from the server. Not tenant-configurable, and reported as
+  // "unknown" by a binary that was not stamped, which the footer then omits.
+  version: string
 }
 
 export function LoginPage() {
@@ -31,8 +34,11 @@ export function LoginPage() {
       .then((b: Branding | null) => {
         // Apply branding when the tenant set ANY customization, not just an
         // app name, a tenant may override only the logo, tagline, or footer.
+        // The build stamp counts too, since it is served even to a domain that
+        // customized nothing.
         const hasBranding =
-          !!b && (!!b.app_name || !!b.logo_url || !!b.primary_color || !!b.tagline || !!b.footer_text)
+          !!b &&
+          (!!b.app_name || !!b.logo_url || !!b.primary_color || !!b.tagline || !!b.footer_text || !!b.version)
         if (!cancelled) setBranding(hasBranding ? b : null)
       })
       .catch(() => {})
@@ -42,6 +48,9 @@ export function LoginPage() {
   }, [host])
 
   const appName = branding?.app_name || 'hermEX'
+  // An unstamped binary reports "unknown", which says nothing useful in a footer,
+  // so the version is left out entirely rather than rendered as a non-answer.
+  const version = branding?.version && branding.version !== 'unknown' ? branding.version : ''
   useEffect(() => {
     document.title = `${appName} ${t('login.webmail')}`
   }, [appName, t])
@@ -141,7 +150,8 @@ export function LoginPage() {
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-4">
-          {branding?.footer_text || `hermEX v1.0 - ${t('login.tagline')}`}
+          {branding?.footer_text || appName}
+          {version && <span className="font-mono ml-1">{version}</span>}
         </p>
       </div>
     </div>

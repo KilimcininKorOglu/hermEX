@@ -1306,8 +1306,7 @@
     "signIn": "Giriş Yap",
     "signingIn": "Giriş yapılıyor...",
     "invalidCredentials": "Geçersiz e-posta veya parola",
-    "connectionError": "Bağlantı hatası. Lütfen tekrar deneyin.",
-    "tagline": "Açık kaynaklı e-posta sunucusu"
+    "connectionError": "Bağlantı hatası. Lütfen tekrar deneyin."
   },
   "header": {
     "searchPlaceholder": "E-postalarda ara...",

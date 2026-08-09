@@ -1306,8 +1306,7 @@
     "signIn": "Sign In",
     "signingIn": "Signing in...",
     "invalidCredentials": "Invalid email or password",
-    "connectionError": "Connection error. Please try again.",
-    "tagline": "Open Source Email Server"
+    "connectionError": "Connection error. Please try again."
   },
   "header": {
     "searchPlaceholder": "Search emails...",

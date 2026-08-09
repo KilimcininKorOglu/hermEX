@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"hermex/internal/buildinfo"
 	"hermex/internal/directory"
 )
 
@@ -18,12 +19,18 @@ type brandingStore interface {
 // before sign-in with the accessed domain, so a tenant sees its own name and colours
 // on the login screen. A domain with no branding set (or no directory) gets the
 // global default.
+//
+// The response also carries the build stamp, which the login footer renders. That is
+// the only version this project has: there are no release tags, so the commit the
+// binary was built from is the honest answer. It is not tenant-configurable, so a
+// tenant cannot claim to run a build it is not running.
 func (s *Server) handleBranding(w http.ResponseWriter, r *http.Request) {
 	out := map[string]any{
 		"app_name":      "hermEX",
 		"primary_color": "#4f46e5",
 		"tagline":       "Secure self-hosted email",
 		"footer_text":   "hermEX",
+		"version":       buildinfo.Revision(),
 	}
 	host := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("domain")))
 	if store, ok := s.auth.(brandingStore); ok && host != "" {
