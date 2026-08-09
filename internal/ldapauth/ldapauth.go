@@ -72,6 +72,13 @@ func (v *Verifier) Verify(cfg directory.LDAPConfig, login, password string) (boo
 // search service account (an anonymous bind when none is configured). The caller
 // closes the returned connection.
 func (v *Verifier) connect(cfg directory.LDAPConfig) (conn, error) {
+	// Refuse a plaintext session outright. Verifying a password means binding as
+	// the user, so a plain bind hands every LDAP-mastered account's real mailbox
+	// password to anyone on the path. A stored configuration predating the save
+	// check would otherwise keep doing exactly that, silently.
+	if !cfg.EncryptedTransport() {
+		return nil, directory.ErrInsecureLDAP
+	}
 	c, err := v.dial(cfg.URI)
 	if err != nil {
 		return nil, err

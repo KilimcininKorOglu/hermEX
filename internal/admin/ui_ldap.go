@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -27,6 +28,11 @@ type ldapFieldView struct {
 // one is set, and an optional saved/sync/error message.
 func (s *Server) ldapPanelData(r *http.Request, saved bool, syncResult, errMsg string) map[string]any {
 	cfg, ok, _ := s.dir.GetLDAPConfig(defaultOrgID)
+	if !ok {
+		// A fresh form starts with StartTLS on: an unchecked box next to an ldap://
+		// URI is a plaintext bind, and that must not be the path of least resistance.
+		cfg.StartTLS = true
+	}
 	bindSet := ok && cfg.BindPassword != ""
 	cfg.BindPassword = "" // never echo the secret back to the browser
 	fields := make([]ldapFieldView, 0)
@@ -90,7 +96,11 @@ func (s *Server) handleUISaveLDAP(w http.ResponseWriter, r *http.Request) {
 	cfg.GroupBaseDN = r.PostFormValue("group_base_dn")
 	cfg.GroupFilter = r.PostFormValue("group_filter")
 	if err := s.dir.SetLDAPConfig(defaultOrgID, cfg); err != nil {
-		s.render(w, "ldap-panel", s.ldapPanelData(r, false, "", s.notice("Could not save the configuration.", err)))
+		msg := "Could not save the configuration."
+		if errors.Is(err, directory.ErrInsecureLDAP) {
+			msg = "Use an ldaps:// URI or enable StartTLS: a plain bind sends every user's password in the clear."
+		}
+		s.render(w, "ldap-panel", s.ldapPanelData(r, false, "", s.notice(msg, err)))
 		return
 	}
 	s.render(w, "ldap-panel", s.ldapPanelData(r, true, "", ""))

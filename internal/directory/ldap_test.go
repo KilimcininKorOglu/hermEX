@@ -47,7 +47,7 @@ func TestAuthenticateLDAPBranch(t *testing.T) {
 	if _, err := db.Exec(`UPDATE users SET externid=? WHERE username=?`, []byte{0x01, 0x02}, "ext@hermex.test"); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.SetLDAPConfig(0, LDAPConfig{URI: "ldap://ad.hermex.test", BaseDN: "dc=hermex,dc=test", UsernameAttr: "mail"}); err != nil {
+	if err := d.SetLDAPConfig(0, LDAPConfig{URI: "ldaps://ad.hermex.test", BaseDN: "dc=hermex,dc=test", UsernameAttr: "mail"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -72,7 +72,7 @@ func TestAuthenticateLDAPBranch(t *testing.T) {
 	if _, ok := d.Authenticate("ext@hermex.test", "ldappass"); !ok {
 		t.Fatal("LDAP authentication with an accepting verifier failed")
 	}
-	if stub.gotLogin != "ext@hermex.test" || stub.gotPass != "ldappass" || stub.gotCfg.URI != "ldap://ad.hermex.test" {
+	if stub.gotLogin != "ext@hermex.test" || stub.gotPass != "ldappass" || stub.gotCfg.URI != "ldaps://ad.hermex.test" {
 		t.Errorf("verifier saw cfg=%+v login=%q pass=%q; want the resolved config + login/password",
 			stub.gotCfg, stub.gotLogin, stub.gotPass)
 	}
@@ -162,8 +162,9 @@ func TestLDAPConfigRoundTrip(t *testing.T) {
 	}
 
 	// A second Set for the same org replaces the row rather than failing on the
-	// primary key or leaving the old values.
-	want.URI = "ldap://ad2.hermex.test:389"
+	// primary key or leaving the old values. The replacement stays encrypted:
+	// SetLDAPConfig refuses a plaintext bind whichever write it is.
+	want.URI = "ldaps://ad2.hermex.test:636"
 	want.StartTLS = false
 	if err := d.SetLDAPConfig(7, want); err != nil {
 		t.Fatal(err)

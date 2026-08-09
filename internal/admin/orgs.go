@@ -2,6 +2,7 @@ package admin
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -235,6 +236,10 @@ func (s *Server) handlePutLDAP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := s.dir.SetLDAPConfig(orgID, cfg); err != nil {
+		if errors.Is(err, directory.ErrInsecureLDAP) {
+			http.Error(w, "the directory URI must be ldaps:// or StartTLS must be enabled", http.StatusBadRequest)
+			return
+		}
 		http.Error(w, "could not save LDAP configuration", http.StatusInternalServerError)
 		return
 	}

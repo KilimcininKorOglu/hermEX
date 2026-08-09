@@ -110,7 +110,7 @@ func TestDeleteOrgCascade(t *testing.T) {
 	if _, err := d.AssignDomainToOrg(domID, id); err != nil {
 		t.Fatal(err)
 	}
-	if err := d.SetLDAPConfig(id, LDAPConfig{URI: "ldap://acme"}); err != nil {
+	if err := d.SetLDAPConfig(id, LDAPConfig{URI: "ldaps://acme"}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO sync_policy (org_id, policy) VALUES (?, '{}')`, id); err != nil {

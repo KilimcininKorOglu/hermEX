@@ -215,9 +215,28 @@ func (d *SQLDirectory) UpsertLDAPUser(username string, externid []byte, maildir 
 	return true, nil
 }
 
+// ErrInsecureLDAP rejects a configuration that would bind in the clear. The
+// verifier binds as the user to check a password, so a plain session puts every
+// LDAP-mastered account's real mailbox password on the network on every login.
+var ErrInsecureLDAP = errors.New("directory: an LDAP directory must be reached over ldaps:// or with StartTLS")
+
+// EncryptedTransport reports whether this configuration yields an encrypted LDAP
+// session: an ldaps:// URI, or StartTLS negotiated on a plain one. Scheme and
+// StartTLS are two independent fields, and only their combination decides it.
+func (c LDAPConfig) EncryptedTransport() bool {
+	if c.StartTLS {
+		return true
+	}
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(c.URI)), "ldaps://")
+}
+
 // SetLDAPConfig stores (replacing any existing) an organization's LDAP
-// configuration.
+// configuration. A configuration that would bind in the clear is refused; an
+// empty URI is how an operator turns the directory off and is left alone.
 func (d *SQLDirectory) SetLDAPConfig(orgID int64, cfg LDAPConfig) error {
+	if strings.TrimSpace(cfg.URI) != "" && !cfg.EncryptedTransport() {
+		return ErrInsecureLDAP
+	}
 	startTLS := 0
 	if cfg.StartTLS {
 		startTLS = 1

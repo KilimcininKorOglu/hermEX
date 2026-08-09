@@ -38,8 +38,11 @@ func oneEntry(dn string) *ldap.SearchResult {
 	return &ldap.SearchResult{Entries: []*ldap.Entry{{DN: dn}}}
 }
 
+// The fixture negotiates StartTLS: the verifier refuses a plaintext session, so
+// an unencrypted configuration never reaches any of the behaviour below.
 var cfg = directory.LDAPConfig{
 	URI:          "ldap://ad.hermex.test:389",
+	StartTLS:     true,
 	BindDN:       "cn=svc,dc=hermex,dc=test",
 	BindPassword: "svc",
 	BaseDN:       "dc=hermex,dc=test",
@@ -161,6 +164,7 @@ func TestSyncProfile(t *testing.T) {
 	pcfg := directory.LDAPConfig{
 		BaseDN:       "dc=hermex,dc=test",
 		UsernameAttr: "mail",
+		StartTLS:     true,
 		SyncFields: map[string]directory.LDAPSyncField{
 			"displayName": {Enabled: true},
 			"title":       {Enabled: true, Attr: "jobTitle"},
@@ -195,7 +199,7 @@ func TestSyncGroups(t *testing.T) {
 		{Name: "member", Values: []string{"uid=bob,dc=hermex,dc=test", "uid=carol,dc=hermex,dc=test"}},
 	}}
 	fc := &fakeConn{searchRes: &ldap.SearchResult{Entries: []*ldap.Entry{g}}}
-	cfg := directory.LDAPConfig{BaseDN: "dc=hermex,dc=test", UsernameAttr: "mail", SyncGroups: true}
+	cfg := directory.LDAPConfig{BaseDN: "dc=hermex,dc=test", UsernameAttr: "mail", SyncGroups: true, StartTLS: true}
 	groups, err := verifierWith(fc).SyncGroups(cfg)
 	if err != nil {
 		t.Fatal(err)
@@ -209,5 +213,38 @@ func TestSyncGroups(t *testing.T) {
 
 	if got, _ := verifierWith(fc).SyncGroups(directory.LDAPConfig{}); got != nil {
 		t.Errorf("SyncGroups disabled = %v, want nil (no-op)", got)
+	}
+}
+
+// TestVerifyRefusesPlaintextTransport proves a configuration that would bind in
+// the clear never reaches the directory. Verifying a password means binding as
+// the user, so a plain session would put every LDAP-mastered account's real
+// mailbox password on the network.
+func TestVerifyRefusesPlaintextTransport(t *testing.T) {
+	fc := &fakeConn{searchRes: oneEntry("uid=alice,dc=hermex,dc=test")}
+	plain := cfg
+	plain.StartTLS = false
+
+	ok, err := verifierWith(fc).Verify(plain, "alice@hermex.test", "correct")
+	if ok {
+		t.Error("a plaintext configuration authenticated a login")
+	}
+	if err == nil {
+		t.Error("a plaintext configuration must report why it was refused")
+	}
+	if len(fc.binds) != 0 {
+		t.Errorf("the password reached the directory anyway: %v", fc.binds)
+	}
+}
+
+// TestVerifyAcceptsLDAPS proves the other secure shape works: an ldaps:// URI
+// with no StartTLS upgrade.
+func TestVerifyAcceptsLDAPS(t *testing.T) {
+	fc := &fakeConn{searchRes: oneEntry("uid=alice,dc=hermex,dc=test")}
+	secure := cfg
+	secure.URI, secure.StartTLS = "ldaps://ad.hermex.test:636", false
+
+	if ok, err := verifierWith(fc).Verify(secure, "alice@hermex.test", "correct"); !ok || err != nil {
+		t.Errorf("Verify over ldaps = (%v, %v), want (true, nil)", ok, err)
 	}
 }
