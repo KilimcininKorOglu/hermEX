@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -164,5 +165,80 @@ func TestUILogout(t *testing.T) {
 	if r2.StatusCode != http.StatusSeeOther || r2.Header.Get("Location") != "/admin/ui/login" {
 		t.Errorf("logout with the CSRF field = %d -> %q, want 303 -> /admin/ui/login",
 			r2.StatusCode, r2.Header.Get("Location"))
+	}
+}
+
+// TestUIDashboardScopesCountsToTheCallersDomains proves a domain-scoped admin's
+// first screen reports their own domain only. The dashboard is the one page they
+// reach with no permission check, so unscoped totals would hand them every other
+// tenant's mailbox, domain and alias counts.
+func TestUIDashboardScopesCountsToTheCallersDomains(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7,
+		roles: []directory.AdminRole{{Role: directory.AdminDomain, ScopeID: 1}},
+		users: []directory.UserInfo{
+			{ID: 1, DomainID: 1}, {ID: 2, DomainID: 1},
+			{ID: 3, DomainID: 2}, {ID: 4, DomainID: 2}, {ID: 5, DomainID: 2},
+		},
+		domains: []directory.DomainInfo{{ID: 1, Name: "mine.test"}, {ID: 2, Name: "theirs.test"}},
+		aliases: []directory.AliasInfo{
+			{ID: 1, Alias: "sales@mine.test", Main: "a@mine.test"},
+			{ID: 2, Alias: "info@theirs.test", Main: "b@theirs.test"},
+			{ID: 3, Alias: "help@theirs.test", Main: "b@theirs.test"},
+		},
+	}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+
+	req, _ := http.NewRequest("GET", ts.URL+"/admin/ui/", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
+	resp, err := noRedirectClient().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	page := string(body)
+
+	// Two users, one domain, one alias, all from mine.test.
+	for _, want := range []string{
+		`<span class="num">2</span><span class="label">Users</span>`,
+		`<span class="num">1</span><span class="label">Domains</span>`,
+		`<span class="num">1</span><span class="label">Aliases</span>`,
+	} {
+		if !strings.Contains(page, want) {
+			t.Errorf("dashboard missing %q:\n%s", want, page)
+		}
+	}
+	// The deployment totals must appear nowhere.
+	if strings.Contains(page, `<span class="num">5</span>`) || strings.Contains(page, `<span class="num">3</span>`) {
+		t.Errorf("dashboard leaked a deployment-wide total:\n%s", page)
+	}
+}
+
+// TestUIDashboardReportsADirectoryFailure proves a failed read says so instead of
+// rendering three zeroes, which an operator would read as an empty deployment.
+func TestUIDashboardReportsADirectoryFailure(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		listUsersErr: errors.New("directory unreachable"),
+	}
+	ts := adminServer(t, d)
+	session, _ := loginCookies(t, ts)
+
+	req, _ := http.NewRequest("GET", ts.URL+"/admin/ui/", nil)
+	req.AddCookie(&http.Cookie{Name: sessionCookie, Value: session})
+	resp, err := noRedirectClient().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	page := string(body)
+	if !strings.Contains(page, "Could not read the directory") {
+		t.Errorf("a failed read rendered without an error:\n%s", page)
+	}
+	if strings.Contains(page, `<span class="num">0</span>`) {
+		t.Errorf("a failed read rendered zero counts, which reads as an empty deployment:\n%s", page)
 	}
 }

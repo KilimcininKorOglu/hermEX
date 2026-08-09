@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"io/fs"
 	"net/http"
+	"strings"
 
 	"hermex/internal/logging"
 	"hermex/internal/serve"
@@ -115,24 +116,80 @@ func (s *Server) handleUILoginSubmit(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleUIDashboard renders the dashboard, redirecting to login without a
-// session.
+// session. The counts are scoped to what the caller may read: this page is the
+// panel's first screen and the only one a domain-scoped admin reaches without a
+// permission check, so unscoped totals would tell them how many mailboxes,
+// domains and aliases every other tenant has.
 func (s *Server) handleUIDashboard(w http.ResponseWriter, r *http.Request) {
 	cl, ok := s.uiClaims(r)
 	if !ok {
 		http.Redirect(w, r, "/admin/ui/login", http.StatusSeeOther)
 		return
 	}
-	users, _ := s.dir.ListUsers()
-	domains, _ := s.dir.ListDomains()
-	aliases, _ := s.dir.ListAliases()
+	counts, err := s.dashboardCounts(cl.UserID)
+	if err != nil {
+		// A failed query must not read as an empty deployment: report it rather
+		// than rendering three confident zeroes.
+		s.render(w, "dashboard.html", map[string]any{
+			"Nav": "dashboard", "Login": cl.Login, "CSRF": csrfCookieValue(r),
+			"Error": s.notice("Could not read the directory.", err),
+		})
+		return
+	}
 	s.render(w, "dashboard.html", map[string]any{
 		"Nav":         "dashboard",
 		"Login":       cl.Login,
 		"CSRF":        csrfCookieValue(r),
-		"UserCount":   len(users),
-		"DomainCount": len(domains),
-		"AliasCount":  len(aliases),
+		"UserCount":   counts.users,
+		"DomainCount": counts.domains,
+		"AliasCount":  counts.aliases,
 	})
+}
+
+// dashboardCount holds the three headline numbers, already scoped.
+type dashboardCount struct{ users, domains, aliases int }
+
+// dashboardCounts totals the users, domains and aliases the caller may read. A
+// system (or all-domains) admin counts everything; anyone else counts only their
+// own domains. Aliases carry no domain id, so they are matched by the domain part
+// of the alias address against the caller's domain names.
+func (s *Server) dashboardCounts(userID int64) (dashboardCount, error) {
+	users, err := s.dir.ListUsers()
+	if err != nil {
+		return dashboardCount{}, err
+	}
+	domains, err := s.dir.ListDomains()
+	if err != nil {
+		return dashboardCount{}, err
+	}
+	aliases, err := s.dir.ListAliases()
+	if err != nil {
+		return dashboardCount{}, err
+	}
+	all, ids := s.scopedReadDomains(userID)
+	if all {
+		return dashboardCount{users: len(users), domains: len(domains), aliases: len(aliases)}, nil
+	}
+
+	var out dashboardCount
+	names := map[string]bool{}
+	for _, d := range domains {
+		if ids[d.ID] {
+			out.domains++
+			names[strings.ToLower(d.Name)] = true
+		}
+	}
+	for _, u := range users {
+		if ids[u.DomainID] {
+			out.users++
+		}
+	}
+	for _, a := range aliases {
+		if at := strings.LastIndex(a.Alias, "@"); at >= 0 && names[strings.ToLower(a.Alias[at+1:])] {
+			out.aliases++
+		}
+	}
+	return out, nil
 }
 
 // handleUILogout clears the session, a valid CSRF form token is required, and

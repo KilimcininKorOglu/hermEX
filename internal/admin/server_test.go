@@ -30,6 +30,7 @@ type fakeDir struct {
 	createdRoomCap     int
 	createdRoomEquip   bool
 	aliases            []directory.AliasInfo
+	listUsersErr       error
 	maildirs           []string
 	verdicts           []directory.SpamVerdict
 	spamHistory        directory.SpamHistorySettings
@@ -298,7 +299,7 @@ func (f *fakeDir) RevokeAdminRole(_ int64, role string, scopeID int64) error {
 	return nil
 }
 func (f *fakeDir) ListDomains() ([]directory.DomainInfo, error) { return f.domains, nil }
-func (f *fakeDir) ListUsers() ([]directory.UserInfo, error)     { return f.users, nil }
+func (f *fakeDir) ListUsers() ([]directory.UserInfo, error)     { return f.users, f.listUsersErr }
 func (f *fakeDir) CreateDomain(name, homedir string) (int64, error) {
 	if f.createErr != nil {
 		return 0, f.createErr
