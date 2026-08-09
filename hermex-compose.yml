@@ -13,6 +13,15 @@ name: hermex
 # otherwise carry no marker of what it was built from. The Makefile exports both;
 # a bare `docker compose build` leaves them empty and the binaries report
 # "unknown" rather than something false.
+# Every hermEX daemon carries a memory and CPU ceiling. Each of them parses input
+# from a peer it does not trust (an SMTP sender, an IMAP or HTTP client, a remote
+# mailbox for fetchmail), so an allocation bug on any one of those paths must cost
+# at most that one container, not the host and every service beside it, including
+# the database each of them needs to authenticate anyone at all. The ceilings are
+# sized well above a normal working set; the ones that stream whole messages (mta,
+# imap, webmail2) get the larger share. The third-party images are deliberately
+# left alone: clamav in particular holds its whole signature database in memory,
+# and guessing a limit for it would break scanning rather than protect anything.
 x-hermex-build: &hermex-build
   context: .
   dockerfile: docker/Dockerfile
@@ -138,6 +147,8 @@ services:
         condition: service_healthy
       # No dependency on mongo: the log sink self-heals (spills to disk and
       # reconnects), so mail must start and serve even if the log store is absent.
+    mem_limit: 1g
+    cpus: "2.0"
     restart: unless-stopped
 
   pop3:
@@ -164,6 +175,8 @@ services:
         condition: service_healthy
       # No dependency on mongo: the log sink self-heals (spills to disk and
       # reconnects), so mail must start and serve even if the log store is absent.
+    mem_limit: 512m
+    cpus: "1.0"
     restart: unless-stopped
 
   imap:
@@ -190,6 +203,8 @@ services:
         condition: service_healthy
       # No dependency on mongo: the log sink self-heals (spills to disk and
       # reconnects), so mail must start and serve even if the log store is absent.
+    mem_limit: 1g
+    cpus: "2.0"
     restart: unless-stopped
 
   # webmail2: the React SPA + its /api/v1 JSON API. The built SPA (dist) is
@@ -213,6 +228,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    mem_limit: 1g
+    cpus: "2.0"
     restart: unless-stopped
 
   dav:
@@ -234,6 +251,8 @@ services:
         condition: service_healthy
       # No dependency on mongo: the log sink self-heals (spills to disk and
       # reconnects), so mail must start and serve even if the log store is absent.
+    mem_limit: 512m
+    cpus: "1.0"
     restart: unless-stopped
 
   activesync:
@@ -255,6 +274,8 @@ services:
         condition: service_healthy
       # No dependency on mongo: the log sink self-heals (spills to disk and
       # reconnects), so mail must start and serve even if the log store is absent.
+    mem_limit: 512m
+    cpus: "1.0"
     restart: unless-stopped
 
   ews:
@@ -276,6 +297,8 @@ services:
         condition: service_healthy
       # No dependency on mongo: the log sink self-heals (spills to disk and
       # reconnects), so mail must start and serve even if the log store is absent.
+    mem_limit: 512m
+    cpus: "1.0"
     restart: unless-stopped
 
   mapi:
@@ -297,6 +320,8 @@ services:
         condition: service_healthy
       # No dependency on mongo: the log sink self-heals (spills to disk and
       # reconnects), so mail must start and serve even if the log store is absent.
+    mem_limit: 512m
+    cpus: "1.0"
     restart: unless-stopped
 
   # Central push-notification relay. Internal-only like mongo/clamav: the writer
@@ -318,6 +343,8 @@ services:
       - ./docker-data/config.json:/config/config.json:ro
       - ./docker-data/mailboxes/tls:/data/mailboxes/tls:ro
       - ./docker-data/spill/notify:/data/logspill
+    mem_limit: 256m
+    cpus: "1.0"
     restart: unless-stopped
 
   # Single-FQDN front door: reverse-proxies to the HTTP daemons by path prefix so
@@ -370,6 +397,8 @@ services:
         condition: service_started
       webmail2:
         condition: service_started
+    mem_limit: 512m
+    cpus: "2.0"
     restart: unless-stopped
 
   # Pebble: a small ACME test CA (https://github.com/letsencrypt/pebble) for
@@ -406,4 +435,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    mem_limit: 512m
+    cpus: "1.0"
     restart: unless-stopped
