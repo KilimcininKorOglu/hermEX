@@ -34,7 +34,8 @@ RUN go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-mta ./cmd/mta \
  && go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-mapi ./cmd/mapihttp \
  && go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-gateway ./cmd/gateway \
  && go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-notify ./cmd/notify \
- && go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-fetchmail ./cmd/fetchmail
+ && go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-fetchmail ./cmd/fetchmail \
+ && go build -trimpath -ldflags "$LDFLAGS" -o /out/hermex-healthcheck ./cmd/healthcheck
 
 # Minimal runtime image. The daemons run unprivileged: nothing here parses
 # attacker-supplied network input as uid 0. The three that listen below port 1024

@@ -149,6 +149,13 @@ services:
       # reconnects), so mail must start and serve even if the log store is absent.
     mem_limit: 1g
     cpus: "2.0"
+    healthcheck:
+      # Distroless: no shell, no curl. The probe binary ships in the same image.
+      test: ["CMD", "/usr/local/bin/hermex-healthcheck", "http://127.0.0.1:8090/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   pop3:
@@ -177,6 +184,13 @@ services:
       # reconnects), so mail must start and serve even if the log store is absent.
     mem_limit: 512m
     cpus: "1.0"
+    healthcheck:
+      # Distroless: no shell, no curl. The probe binary ships in the same image.
+      test: ["CMD", "/usr/local/bin/hermex-healthcheck", "http://127.0.0.1:8090/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   imap:
@@ -205,6 +219,13 @@ services:
       # reconnects), so mail must start and serve even if the log store is absent.
     mem_limit: 1g
     cpus: "2.0"
+    healthcheck:
+      # Distroless: no shell, no curl. The probe binary ships in the same image.
+      test: ["CMD", "/usr/local/bin/hermex-healthcheck", "http://127.0.0.1:8090/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   # webmail2: the React SPA + its /api/v1 JSON API. The built SPA (dist) is
@@ -230,6 +251,13 @@ services:
         condition: service_healthy
     mem_limit: 1g
     cpus: "2.0"
+    healthcheck:
+      # Distroless: no shell, no curl. The probe binary ships in the same image.
+      test: ["CMD", "/usr/local/bin/hermex-healthcheck", "http://127.0.0.1:8090/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   dav:
@@ -253,6 +281,13 @@ services:
       # reconnects), so mail must start and serve even if the log store is absent.
     mem_limit: 512m
     cpus: "1.0"
+    healthcheck:
+      # Distroless: no shell, no curl. The probe binary ships in the same image.
+      test: ["CMD", "/usr/local/bin/hermex-healthcheck", "http://127.0.0.1:8090/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   activesync:
@@ -276,6 +311,13 @@ services:
       # reconnects), so mail must start and serve even if the log store is absent.
     mem_limit: 512m
     cpus: "1.0"
+    healthcheck:
+      # Distroless: no shell, no curl. The probe binary ships in the same image.
+      test: ["CMD", "/usr/local/bin/hermex-healthcheck", "http://127.0.0.1:8090/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   ews:
@@ -299,6 +341,13 @@ services:
       # reconnects), so mail must start and serve even if the log store is absent.
     mem_limit: 512m
     cpus: "1.0"
+    healthcheck:
+      # Distroless: no shell, no curl. The probe binary ships in the same image.
+      test: ["CMD", "/usr/local/bin/hermex-healthcheck", "http://127.0.0.1:8090/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   mapi:
@@ -322,6 +371,13 @@ services:
       # reconnects), so mail must start and serve even if the log store is absent.
     mem_limit: 512m
     cpus: "1.0"
+    healthcheck:
+      # Distroless: no shell, no curl. The probe binary ships in the same image.
+      test: ["CMD", "/usr/local/bin/hermex-healthcheck", "http://127.0.0.1:8090/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   # Central push-notification relay. Internal-only like mongo/clamav: the writer
@@ -345,6 +401,13 @@ services:
       - ./docker-data/spill/notify:/data/logspill
     mem_limit: 256m
     cpus: "1.0"
+    healthcheck:
+      # Distroless: no shell, no curl. The probe binary ships in the same image.
+      test: ["CMD", "/usr/local/bin/hermex-healthcheck", "http://127.0.0.1:8090/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   # Single-FQDN front door: reverse-proxies to the HTTP daemons by path prefix so
@@ -388,17 +451,24 @@ services:
       db:
         condition: service_started
       mapi:
-        condition: service_started
+        condition: service_healthy
       ews:
-        condition: service_started
+        condition: service_healthy
       activesync:
-        condition: service_started
+        condition: service_healthy
       dav:
-        condition: service_started
+        condition: service_healthy
       webmail2:
-        condition: service_started
+        condition: service_healthy
     mem_limit: 512m
     cpus: "2.0"
+    healthcheck:
+      # Distroless: no shell, no curl. The probe binary ships in the same image.
+      test: ["CMD", "/usr/local/bin/hermex-healthcheck", "http://127.0.0.1:8090/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   # Pebble: a small ACME test CA (https://github.com/letsencrypt/pebble) for
@@ -437,4 +507,11 @@ services:
         condition: service_healthy
     mem_limit: 512m
     cpus: "1.0"
+    healthcheck:
+      # Distroless: no shell, no curl. The probe binary ships in the same image.
+      test: ["CMD", "/usr/local/bin/hermex-healthcheck", "http://127.0.0.1:8090/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
