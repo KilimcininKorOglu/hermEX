@@ -5,8 +5,10 @@
 package fetchmail
 
 import (
+	"bytes"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"net"
 	"net/textproto"
 	"strconv"
@@ -123,17 +125,28 @@ func (c *pop3Conn) uidl() (map[int]string, error) {
 	return out, nil
 }
 
-// retr downloads message n as a raw RFC 822 message with CRLF line endings.
+// retr downloads message n as a raw RFC 822 message with CRLF line endings,
+// reading at most maxMessage bytes. The dot-stream is drained either way, so an
+// over-cap message costs the cap plus discarded bytes and leaves the session
+// usable for the next message rather than desynced.
 func (c *pop3Conn) retr(n int) ([]byte, error) {
 	if _, err := c.cmd("RETR %d", n); err != nil {
 		return nil, err
 	}
 	setDeadline(c.conn)
-	lines, err := c.tp.ReadDotLines()
+	dot := c.tp.DotReader()
+	limit := maxMessage()
+	body, err := io.ReadAll(io.LimitReader(dot, limit+1))
 	if err != nil {
 		return nil, err
 	}
-	return []byte(strings.Join(lines, "\r\n") + "\r\n"), nil
+	if int64(len(body)) > limit {
+		_, _ = io.Copy(io.Discard, dot)
+		return nil, ErrMessageTooLarge
+	}
+	// DotReader hands back LF endings; the wire form is CRLF, which is what
+	// ReadDotLines-then-join produced before.
+	return bytes.ReplaceAll(body, []byte("\n"), []byte("\r\n")), nil
 }
 
 // dele marks message n for deletion (applied by the server on QUIT).

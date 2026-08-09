@@ -118,6 +118,7 @@ func (c *imapConn) fetchBody(uid string) ([]byte, error) {
 		return nil, err
 	}
 	var body []byte
+	tooLarge := false
 	for {
 		line, err := c.r.ReadString('\n')
 		if err != nil {
@@ -126,21 +127,36 @@ func (c *imapConn) fetchBody(uid string) ([]byte, error) {
 		t := strings.TrimRight(line, "\r\n")
 		if n, ok := literalSize(t); ok {
 			setDeadline(c.conn)
-			buf := make([]byte, n)
-			if _, err := io.ReadFull(c.r, buf); err != nil {
-				return nil, err
+			// The size comes from the server, so it is checked before the
+			// allocation, not after: make([]byte, n) on an advertised gigabyte
+			// costs the memory whether or not those bytes ever arrive. An
+			// over-cap literal is discarded rather than read into memory, which
+			// keeps the session in step for the tagged response.
+			if int64(n) > maxMessage() {
+				tooLarge = true
+				if _, err := io.CopyN(io.Discard, c.r, int64(n)); err != nil {
+					return nil, err
+				}
+			} else {
+				buf := make([]byte, n)
+				if _, err := io.ReadFull(c.r, buf); err != nil {
+					return nil, err
+				}
+				body = buf
 			}
-			body = buf
 			if _, err := c.r.ReadString('\n'); err != nil { // trailing ")" after the literal
 				return nil, err
 			}
 			continue
 		}
 		if rest, ok := strings.CutPrefix(t, tag+" "); ok {
-			if strings.HasPrefix(rest, "OK") {
-				return body, nil
+			if !strings.HasPrefix(rest, "OK") {
+				return nil, fmt.Errorf("imap fetch: %s", rest)
 			}
-			return nil, fmt.Errorf("imap fetch: %s", rest)
+			if tooLarge {
+				return nil, ErrMessageTooLarge
+			}
+			return body, nil
 		}
 	}
 }

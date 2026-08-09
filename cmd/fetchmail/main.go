@@ -57,6 +57,13 @@ func main() {
 	objectstore.SetDefaultLogger(logger)
 	mta.SetDefaultLogger(logger) // post-delivery pass failures route to the central log
 
+	// Per-message size cap for the fetch clients: a remote source decides how many
+	// bytes it sends, so the operator's inbound limit bounds what one message may
+	// cost. Read at startup and re-read every minute, so a change applies without a
+	// restart; 0 keeps the client's built-in ceiling.
+	applyFetchSizeLimit(dir.GetMessageSizeSettings, fetchmail.SetMaxMessage, logger)
+	go runFetchSizeMaintenance(dir.GetMessageSizeSettings, fetchmail.SetMaxMessage, logger)
+
 	// Antivirus: install the package-level scanner from clamd_addr (a no-op when
 	// unset), so fetched mail is scanned before it reaches a mailbox.
 	mta.EnableScanning(cfg.ClamdAddr, dir, cfg.QuarantinePath, cfg.Hostname, logger)
@@ -129,5 +136,30 @@ func pollOnce(ctx context.Context, store fetchmail.Store, deliver fetchmail.Deli
 	}
 	if n > 0 {
 		logger.Info(logging.MTA, "fetchmail.delivered", logging.Fields{"count": n})
+	}
+}
+
+// applyFetchSizeLimit reads the operator's inbound message size limit and applies it
+// to the fetch clients. A missing row or a read error leaves the cap unchanged, so a
+// settings failure never starts refusing mail unexpectedly.
+func applyFetchSizeLimit(read func() (directory.MessageSizeSettings, bool, error), setMax func(int64), logger *logging.Logger) {
+	s, found, err := read()
+	if err != nil {
+		logging.SettingsReadFailed(logger, "hermex-fetchmail", "message-size", "leaving the fetch cap unchanged", err)
+		return
+	}
+	if !found {
+		return
+	}
+	setMax(s.MaxInboundBytes)
+}
+
+// runFetchSizeMaintenance re-applies the cap every minute so an admin change takes
+// effect without a restart. It runs until the process exits.
+func runFetchSizeMaintenance(read func() (directory.MessageSizeSettings, bool, error), setMax func(int64), logger *logging.Logger) {
+	tick := time.NewTicker(time.Minute)
+	defer tick.Stop()
+	for range tick.C {
+		applyFetchSizeLimit(read, setMax, logger)
 	}
 }
