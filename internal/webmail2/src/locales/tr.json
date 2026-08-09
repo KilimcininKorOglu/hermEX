@@ -1307,7 +1307,6 @@
     "signingIn": "Giriş yapılıyor...",
     "invalidCredentials": "Geçersiz e-posta veya parola",
     "connectionError": "Bağlantı hatası. Lütfen tekrar deneyin.",
-    "demoAccounts": "Demo hesaplar:",
     "tagline": "Açık kaynaklı e-posta sunucusu"
   },
   "header": {

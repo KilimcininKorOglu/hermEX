@@ -1307,7 +1307,6 @@
     "signingIn": "Signing in...",
     "invalidCredentials": "Invalid email or password",
     "connectionError": "Connection error. Please try again.",
-    "demoAccounts": "Demo accounts:",
     "tagline": "Open Source Email Server"
   },
   "header": {

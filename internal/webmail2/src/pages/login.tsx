@@ -138,12 +138,6 @@ export function LoginPage() {
               {loading ? t('login.signingIn') : t('login.signIn')}
             </button>
           </form>
-
-          <div className="mt-8 pt-6 border-t border-gray-200">
-            <p className="text-center text-sm text-gray-500">
-              {t('login.demoAccounts')} <span className="font-mono text-xs">demo@localhost / demo1234</span>
-            </p>
-          </div>
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-4">
