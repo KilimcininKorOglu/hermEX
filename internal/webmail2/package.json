@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "prebuild": "npm ci --prefer-offline --no-audit --no-fund",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint . --ext js,jsx,ts,tsx --report-unused-disable-directives --max-warnings 0",
@@ -29,8 +30,7 @@
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.0",
     "date-fns": "^4.0.0",
-    "dompurify": "^3.4.0",
-    "isomorphic-dompurify": "^3.7.1",
+    "isomorphic-dompurify": "3.8.0",
     "node-forge": "^1.4.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
