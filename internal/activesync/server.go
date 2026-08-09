@@ -230,12 +230,13 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 func (s *Server) basicAuth(w http.ResponseWriter, r *http.Request) (user, mailbox string, ok bool) {
 	u, p, hasAuth := r.BasicAuth()
 	if hasAuth {
-		// Throttle online guessing: an account that has piled up failed logins is
-		// refused before the password is checked, which also stops the 600k-round
-		// hash from running. The key is the account, not the client address: behind
-		// the gateway the only address available is a header the client can set.
-		key := authlimit.AccountKey(u)
-		if s.Limiter != nil && !s.Limiter.Allowed(key) {
+		// Throttle online guessing: an account that has piled up failed logins, or
+		// the address they came from, is refused before the password is checked,
+		// which also stops the 600k-round hash from running. The address axis reads
+		// the forwarded client rather than the raw connection, since behind the
+		// front door every request otherwise carries the proxy's own address.
+		addr := serve.ClientAddr(r)
+		if s.Limiter != nil && !s.Limiter.Allowed(addr, u) {
 			s.logThrottled(r, u)
 			http.Error(w, "too many failed attempts, try again later", http.StatusTooManyRequests)
 			return "", "", false
@@ -244,7 +245,7 @@ func (s *Server) basicAuth(w http.ResponseWriter, r *http.Request) (user, mailbo
 			// The credentials were right, so the attempt is a success even when the
 			// service privilege then refuses it.
 			if s.Limiter != nil {
-				s.Limiter.Succeed(key)
+				s.Limiter.Succeed(addr, u)
 			}
 			if privs, _ := s.auth.Privileges(u); !privs.EAS {
 				http.Error(w, "ActiveSync access is disabled for this account", http.StatusForbidden)
@@ -253,7 +254,7 @@ func (s *Server) basicAuth(w http.ResponseWriter, r *http.Request) (user, mailbo
 			return u, path, true
 		}
 		if s.Limiter != nil {
-			s.Limiter.Fail(key)
+			s.Limiter.Fail(addr, u)
 		}
 	}
 	w.Header().Set("WWW-Authenticate", `Basic realm="hermEX"`)

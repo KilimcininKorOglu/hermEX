@@ -407,10 +407,12 @@ func (s *Server) finishAuth(w *bufio.Writer, conn net.Conn, user, pass string) (
 	emit := func(level logging.Level, name string, f logging.Fields) {
 		s.Logger.Emit(logging.Event{Level: level, Subsystem: logging.POP3, Name: name, User: user, RemoteAddr: conn.RemoteAddr().String(), Fields: f})
 	}
-	// Throttle online guessing: a client IP that has piled up failed logins is
-	// refused before the password is checked, until its lockout elapses.
-	key := authlimit.IPKey(conn.RemoteAddr().String())
-	if s.Limiter != nil && !s.Limiter.Allowed(key) {
+	// Throttle online guessing: a client that has piled up failed logins, or an
+	// account that has, is refused before the password is checked, until the
+	// lockout elapses. Both axes count, so neither one host guessing at many
+	// accounts nor many hosts guessing at one account slips through.
+	addr := conn.RemoteAddr().String()
+	if s.Limiter != nil && !s.Limiter.Allowed(addr, user) {
 		emit(logging.LevelWarn, "auth.throttled", nil)
 		errLine(w, "[AUTH] too many failed attempts, try again later")
 		return nil, false
@@ -418,14 +420,14 @@ func (s *Server) finishAuth(w *bufio.Writer, conn net.Conn, user, pass string) (
 	path, authed := s.Auth.Authenticate(user, pass)
 	if user == "" || !authed {
 		if s.Limiter != nil {
-			s.Limiter.Fail(key)
+			s.Limiter.Fail(addr, user)
 		}
 		emit(logging.LevelWarn, "auth.fail", nil)
 		errLine(w, "[AUTH] authentication failed")
 		return nil, false
 	}
 	if s.Limiter != nil {
-		s.Limiter.Succeed(key)
+		s.Limiter.Succeed(addr, user)
 	}
 	if privs, _ := s.Auth.Privileges(user); !privs.POP3IMAP {
 		emit(logging.LevelWarn, "auth.denied", logging.Fields{"service": "pop3imap"})

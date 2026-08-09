@@ -42,7 +42,7 @@
 
 {{define "loginlockout-panel"}}<div id="loginlockout-panel">
 {{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
-<p>A login that fails <strong>{{.LoginMaxFails}}</strong> times within <strong>{{.LoginWindow}}</strong> seconds is locked out for <strong>{{.LoginLockout}}</strong> seconds, which is what makes online password guessing hopeless. It covers webmail, IMAP, POP3 and this panel; each daemon counts on its own, keyed by client address for the line protocols and by account for the web surfaces. Tighten it during a credential-stuffing wave, loosen it if legitimate users are being locked out. There is no off switch: raise the threshold instead.</p>
+<p>A login that fails <strong>{{.LoginMaxFails}}</strong> times within <strong>{{.LoginWindow}}</strong> seconds is locked out for <strong>{{.LoginLockout}}</strong> seconds, which is what makes online password guessing hopeless. It covers webmail, IMAP, POP3 and this panel; each daemon counts on its own, and every attempt counts twice: once against the account and once against the client address. The address is locked out at four times this threshold, since one address is often a whole office behind a NAT. Tighten it during a credential-stuffing wave, loosen it if legitimate users are being locked out. There is no off switch: raise the threshold instead.</p>
 <form hx-post="/admin/ui/limits/loginlockout" hx-target="#loginlockout-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
 <p>Failures before lockout: <input type="number" name="login_max_fails" value="{{.LoginMaxFails}}" min="1"></p>
 <p>Window (seconds): <input type="number" name="login_window" value="{{.LoginWindow}}" min="1"></p>

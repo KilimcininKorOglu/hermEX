@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// TestLockoutAfterThreshold proves the limiter admits a key until the failure
+// TestLockoutAfterThreshold proves the limiter admits an account until the failure
 // threshold, then refuses it for the lockout window, then admits it again once the
 // cooldown elapses, the full brute-force-blunting cycle on an injected clock.
 func TestLockoutAfterThreshold(t *testing.T) {
@@ -13,50 +13,50 @@ func TestLockoutAfterThreshold(t *testing.T) {
 	l := New(3, time.Minute, 5*time.Minute)
 	l.now = func() time.Time { return now }
 
-	const key = "1.2.3.4"
+	const acct = "victim@hermex.test"
 	for i := range 2 {
-		if !l.Allowed(key) {
+		if !l.Allowed("", acct) {
 			t.Fatalf("attempt %d refused early", i)
 		}
-		l.Fail(key)
+		l.Fail("", acct)
 	}
 	// Third failure trips the lockout.
-	if !l.Allowed(key) {
+	if !l.Allowed("", acct) {
 		t.Fatal("third attempt refused before threshold")
 	}
-	l.Fail(key)
-	if l.Allowed(key) {
-		t.Fatal("key not locked out after reaching threshold")
+	l.Fail("", acct)
+	if l.Allowed("", acct) {
+		t.Fatal("the account was not locked out after reaching the threshold")
 	}
 	// Still locked one second before the cooldown ends.
 	now = now.Add(5*time.Minute - time.Second)
-	if l.Allowed(key) {
-		t.Fatal("key admitted before lockout elapsed")
+	if l.Allowed("", acct) {
+		t.Fatal("the account was admitted before the lockout elapsed")
 	}
 	// Admitted once the cooldown passes.
 	now = now.Add(2 * time.Second)
-	if !l.Allowed(key) {
-		t.Fatal("key still locked after cooldown elapsed")
+	if !l.Allowed("", acct) {
+		t.Fatal("the account is still locked after the cooldown elapsed")
 	}
 }
 
 // TestSucceedClears proves a success wipes accrued failures so a user who finally
-// types the right password is not held to a stale counter, and an empty key (an
-// unkeyable caller) is never tracked.
+// types the right password is not held to a stale counter, and an attempt with
+// neither axis (an unkeyable caller) is never tracked.
 func TestSucceedClears(t *testing.T) {
 	l := New(3, time.Minute, time.Minute)
-	l.Fail("u")
-	l.Fail("u")
-	l.Succeed("u")
-	l.Fail("u")
-	if !l.Allowed("u") {
+	l.Fail("", "u")
+	l.Fail("", "u")
+	l.Succeed("", "u")
+	l.Fail("", "u")
+	if !l.Allowed("", "u") {
 		t.Fatal("counter not reset after Succeed")
 	}
 	// Empty key always passes and never locks.
 	for range 10 {
-		l.Fail("")
+		l.Fail("", "")
 	}
-	if !l.Allowed("") {
-		t.Fatal("empty key was locked out")
+	if !l.Allowed("", "") {
+		t.Fatal("an unkeyable caller was locked out")
 	}
 }

@@ -420,13 +420,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// one request that matters most to an auditor, a failed sign-in, with no account
 	// at all. Reported from the claimed address, before it is verified.
 	serve.SetUser(r, req.Email)
-	// Throttle online guessing. Keyed by account (lower-cased email), not client
-	// IP: behind the gateway every request carries the same proxy address, so an
-	// IP key would either lock all users out at once or never trip. An account key
-	// blunts credential-stuffing against one mailbox; the short window bounds the
-	// account-lockout nuisance a third party could otherwise inflict.
-	key := strings.ToLower(strings.TrimSpace(req.Email))
-	if !s.limiter.Allowed(key) {
+	// Throttle online guessing on both axes. The account axis blunts
+	// credential-stuffing against one mailbox; the address axis blunts one host
+	// spraying a password across the whole directory, which an account axis alone
+	// never sees. The address is the forwarded client, not the raw connection:
+	// behind the gateway every request otherwise carries the same proxy address.
+	addr := serve.ClientAddr(r)
+	if !s.limiter.Allowed(addr, req.Email) {
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many failed attempts, try again later"})
 		return
 	}
@@ -435,11 +435,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	// remediation allowlist until the change clears the flag.
 	mbox, ok := s.authenticateForChange(req.Email, req.Password)
 	if !ok {
-		s.limiter.Fail(key)
+		s.limiter.Fail(addr, req.Email)
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid credentials"})
 		return
 	}
-	s.limiter.Succeed(key)
+	s.limiter.Succeed(addr, req.Email)
 	// The credentials are right; the account may still be barred from this service.
 	// Checked here, after the throttle is cleared, so a correct password is never
 	// counted as a guess, and before any token is minted or session recorded, so a

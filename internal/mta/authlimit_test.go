@@ -34,13 +34,15 @@ func authSession(t *testing.T, b *Backend, remote string) *session {
 }
 
 // TestSMTPAuthThrottlesGuessing proves submission cannot be used to guess
-// passwords unbounded. It is keyed by client address, like IMAP and POP3: the MTA
-// is not behind the gateway, so the address is the real client's.
+// passwords unbounded, and that the account axis holds across client addresses:
+// a guesser who rotates source addresses (a botnet, a proxy pool) still runs into
+// the target account's own counter.
 func TestSMTPAuthThrottlesGuessing(t *testing.T) {
 	calls := 0
 	accounts := countingAuth{
 		StaticAccounts: directory.StaticAccounts{
 			"alice@acme.test": {Password: "secret", MailboxPath: t.TempDir()},
+			"bob@acme.test":   {Password: "secret", MailboxPath: t.TempDir()},
 		},
 		calls: &calls,
 	}
@@ -59,10 +61,15 @@ func TestSMTPAuthThrottlesGuessing(t *testing.T) {
 		t.Errorf("the password was checked %d more times while locked out", calls-before)
 	}
 
-	// A different client is unaffected: the key is the address, and one guesser
-	// must not lock the deployment out.
-	if !authSession(t, b, "203.0.113.9:2525").Auth("alice@acme.test", "secret") {
-		t.Error("another client address was locked out too")
+	// Moving to a fresh address does not reset the account's counter: that is the
+	// whole point of counting the account as well as the address.
+	if authSession(t, b, "203.0.113.9:2525").Auth("alice@acme.test", "secret") {
+		t.Error("the locked-out account was admitted from a different address")
+	}
+	// Another account is unaffected: the address axis is nowhere near its own,
+	// larger threshold, so one guesser must not lock the deployment out.
+	if !authSession(t, b, "198.51.100.7:2525").Auth("bob@acme.test", "secret") {
+		t.Error("an unrelated account was locked out too")
 	}
 }
 

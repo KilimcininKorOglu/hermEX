@@ -27,18 +27,18 @@ func TestApplyRetunesARunningLimiter(t *testing.T) {
 	}
 
 	// The new threshold governs an actual lockout, not just the reported numbers.
-	const key = "1.2.3.4"
-	l.Fail(key)
-	if !l.Allowed(key) {
-		t.Fatal("one failure locked the key out under a threshold of two")
+	const acct = "victim@hermex.test"
+	l.Fail("", acct)
+	if !l.Allowed("", acct) {
+		t.Fatal("one failure locked the account out under a threshold of two")
 	}
-	l.Fail(key)
-	if l.Allowed(key) {
+	l.Fail("", acct)
+	if l.Allowed("", acct) {
 		t.Fatal("the tightened threshold was reported but not enforced")
 	}
 	now = now.Add(5*time.Minute + time.Second)
-	if !l.Allowed(key) {
-		t.Error("the key is still locked after the configured lockout elapsed")
+	if !l.Allowed("", acct) {
+		t.Error("the account is still locked after the configured lockout elapsed")
 	}
 }
 
@@ -49,21 +49,21 @@ func TestApplyLoosensAsWellAsTightens(t *testing.T) {
 	l := New(2, time.Minute, time.Minute)
 	l.now = func() time.Time { return time.Unix(0, 0) }
 
-	const key = "10.0.0.1"
-	l.Fail(key)
-	l.Fail(key)
-	if l.Allowed(key) {
-		t.Fatal("the key was not locked out to begin with")
+	const acct = "operator@hermex.test"
+	l.Fail("", acct)
+	l.Fail("", acct)
+	if l.Allowed("", acct) {
+		t.Fatal("the account was not locked out to begin with")
 	}
 
 	Apply("test", nil, l, stored(Settings{MaxFails: 10, WindowSeconds: 60, LockoutSeconds: 60}))
 	// The existing lockout stands (it was earned under the old rule), but the next
 	// window counts to the new threshold.
-	l.Succeed(key)
+	l.Succeed("", acct)
 	for i := range 9 {
-		l.Fail(key)
-		if !l.Allowed(key) {
-			t.Fatalf("failure %d locked the key out under a threshold of ten", i+1)
+		l.Fail("", acct)
+		if !l.Allowed("", acct) {
+			t.Fatalf("failure %d locked the account out under a threshold of ten", i+1)
 		}
 	}
 }
@@ -114,23 +114,23 @@ func TestPruneDropsElapsedCountersButNotLockouts(t *testing.T) {
 	l := New(2, time.Minute, time.Hour)
 	l.now = func() time.Time { return now }
 
-	l.Fail("stale")                // one failure, never locked out
-	l.Fail("locked")               // ...
-	l.Fail("locked")               // two failures: locked out for an hour
+	l.Fail("", "stale")            // one failure, never locked out
+	l.Fail("", "locked")           // ...
+	l.Fail("", "locked")           // two failures: locked out for an hour
 	now = now.Add(2 * time.Minute) // the window has elapsed for both
 	l.Prune()
 
 	l.mu.Lock()
-	_, staleKept := l.attempts["stale"]
-	_, lockedKept := l.attempts["locked"]
+	_, staleKept := l.attempts[accountKey("stale")]
+	_, lockedKept := l.attempts[accountKey("locked")]
 	l.mu.Unlock()
 	if staleKept {
 		t.Error("an elapsed counter was kept, so the table grows to its cap and fails open")
 	}
 	if !lockedKept {
-		t.Error("a key still inside its lockout was pruned, releasing it early")
+		t.Error("an entry still inside its lockout was pruned, releasing it early")
 	}
-	if l.Allowed("locked") {
-		t.Error("the pruned key is admitted despite its lockout")
+	if l.Allowed("", "locked") {
+		t.Error("the pruned entry is admitted despite its lockout")
 	}
 }

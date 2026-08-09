@@ -92,7 +92,8 @@ func (s *Server) handleUILoginPage(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleUILoginSubmit(w http.ResponseWriter, r *http.Request) {
 	login := r.PostFormValue("login")
 	serve.SetUser(r, login)
-	if !s.limiter.Allowed(loginKey(login)) {
+	addr := serve.ClientAddr(r)
+	if !s.limiter.Allowed(addr, login) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		s.render(w, "login.html", map[string]any{"Error": "Too many failed attempts, try again later."})
 		return
@@ -104,12 +105,12 @@ func (s *Server) handleUILoginSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !ok {
-		s.limiter.Fail(loginKey(login))
+		s.limiter.Fail(addr, login)
 		w.WriteHeader(http.StatusUnauthorized)
 		s.render(w, "login.html", map[string]any{"Error": "Invalid email or password."})
 		return
 	}
-	s.limiter.Succeed(loginKey(login))
+	s.limiter.Succeed(addr, login)
 	session, csrf := s.issueSession(login, uid)
 	setSessionCookies(w, session, csrf)
 	http.Redirect(w, r, "/admin/ui/", http.StatusSeeOther)

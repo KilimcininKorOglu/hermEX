@@ -467,13 +467,12 @@ func decodeSASLPlain(b64 string) (user, pass string, ok bool) {
 // finishAuth validates credentials and, on success, opens the user's store and
 // enters the authenticated state.
 func (c *conn) finishAuth(tag, user, pass string) {
-	// Throttle online guessing: a client IP that has piled up failed logins is
-	// refused before the password is even checked, until its lockout elapses. The
-	// limiter is keyed by IP alone (not ip:port) so every connection from one host
-	// shares a counter; the source port changes on every new connection.
+	// Throttle online guessing: a client that has piled up failed logins, or an
+	// account that has, is refused before the password is even checked, until the
+	// lockout elapses. Both axes count, so neither one host guessing at many
+	// accounts nor many hosts guessing at one account slips through.
 	host := remoteHost(c.nc)
-	key := authlimit.IPKey(host)
-	if c.srv.Limiter != nil && !c.srv.Limiter.Allowed(key) {
+	if c.srv.Limiter != nil && !c.srv.Limiter.Allowed(host, user) {
 		c.srv.Logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.IMAP, Name: "auth.throttled", User: user, RemoteAddr: host})
 		c.no(tag, "[AUTHENTICATIONFAILED] too many failed attempts, try again later")
 		return
@@ -481,7 +480,7 @@ func (c *conn) finishAuth(tag, user, pass string) {
 	path, ok := c.srv.Auth.Authenticate(user, pass)
 	if !ok {
 		if c.srv.Limiter != nil {
-			c.srv.Limiter.Fail(key)
+			c.srv.Limiter.Fail(host, user)
 		}
 		// Log the attempted login (an identifier, useful for spotting brute force);
 		// never the password.
@@ -490,7 +489,7 @@ func (c *conn) finishAuth(tag, user, pass string) {
 		return
 	}
 	if c.srv.Limiter != nil {
-		c.srv.Limiter.Succeed(key)
+		c.srv.Limiter.Succeed(host, user)
 	}
 	if privs, _ := c.srv.Auth.Privileges(user); !privs.POP3IMAP {
 		c.srv.Logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.IMAP, Name: "auth.denied", User: user, RemoteAddr: remoteHost(c.nc), Fields: logging.Fields{"service": "pop3imap"}})

@@ -230,24 +230,25 @@ type session struct {
 func (s *Server) basicAuth(w http.ResponseWriter, r *http.Request) (user, mailbox string, ok bool) {
 	u, p, hasAuth := r.BasicAuth()
 	if hasAuth {
-		// Throttle online guessing: an account that has piled up failed logins is
-		// refused before the password is checked, which also stops the 600k-round
-		// hash from running. The key is the account, not the client address: behind
-		// the gateway the only address available is a header the client can set.
-		key := authlimit.AccountKey(u)
-		if s.limiter != nil && !s.limiter.Allowed(key) {
+		// Throttle online guessing: an account that has piled up failed logins, or
+		// the address they came from, is refused before the password is checked,
+		// which also stops the 600k-round hash from running. The address axis reads
+		// the forwarded client rather than the raw connection, since behind the
+		// front door every request otherwise carries the proxy's own address.
+		addr := serve.ClientAddr(r)
+		if s.limiter != nil && !s.limiter.Allowed(addr, u) {
 			s.mapiEvent(r, logging.LevelWarn, logging.MAPI, "auth.throttled", u, nil)
 			http.Error(w, "too many failed attempts, try again later", http.StatusTooManyRequests)
 			return "", "", false
 		}
 		if path, good := s.auth.Authenticate(u, p); good {
 			if s.limiter != nil {
-				s.limiter.Succeed(key)
+				s.limiter.Succeed(addr, u)
 			}
 			return u, path, true
 		}
 		if s.limiter != nil {
-			s.limiter.Fail(key)
+			s.limiter.Fail(addr, u)
 		}
 	}
 	w.Header().Set("WWW-Authenticate", `Basic realm="hermEX"`)

@@ -108,23 +108,22 @@ func (s *session) Auth(username, password string) bool {
 	if !ok {
 		return false
 	}
-	// Throttle online guessing: a client address that has piled up failed logins
-	// is refused before the password is checked, so the directory's 600k-round hash
-	// never runs for it. Keyed by IP alone, like IMAP and POP3: submission is a
-	// direct connection, so the address is the real client's.
-	key := authlimit.IPKey(s.remoteAddr)
-	if s.limiter != nil && !s.limiter.Allowed(key) {
+	// Throttle online guessing: a client address that has piled up failed logins,
+	// or an account that has, is refused before the password is checked, so the
+	// directory's 600k-round hash never runs for it. Submission is a direct
+	// connection, so the address axis is the real client's.
+	if s.limiter != nil && !s.limiter.Allowed(s.remoteAddr, username) {
 		return false
 	}
 	path, ok := authn.Authenticate(username, password)
 	if !ok {
 		if s.limiter != nil {
-			s.limiter.Fail(key)
+			s.limiter.Fail(s.remoteAddr, username)
 		}
 		return false
 	}
 	if s.limiter != nil {
-		s.limiter.Succeed(key)
+		s.limiter.Succeed(s.remoteAddr, username)
 	}
 	// The SMTP privilege gates authenticated submission only; inbound intake never
 	// authenticates, so a user whose SMTP privilege is revoked can still receive
