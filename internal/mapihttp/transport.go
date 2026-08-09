@@ -5,23 +5,44 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync/atomic"
 	"unicode/utf16"
 )
 
 // serverApp is announced in X-ServerApplication; clients log but do not gate on it.
 const serverApp = "Exchange/15.02.0390.000"
 
-// maxRequestBody caps a MAPI/HTTP request body. A ROP Execute buffer is bounded
-// well under this (the client negotiates RopBufferSize in the tens of KB), so a
-// generous 32 MiB ceiling never truncates a legitimate request while it stops an
-// unbounded read from exhausting server memory.
-const maxRequestBody = 32 << 20
+// defaultMaxRequestBody caps a MAPI/HTTP request body when no operator limit has
+// been set. A ROP Execute buffer is bounded well under this (the client negotiates
+// RopBufferSize in the tens of KB), so a generous 32 MiB ceiling never truncates a
+// legitimate request while it stops an unbounded read from exhausting server memory.
+const defaultMaxRequestBody = 32 << 20
 
-// readBody reads at most maxRequestBody bytes of the request body. Every handler
-// reads through it rather than io.ReadAll(r.Body) directly, so no MAPI/HTTP
-// request can drive an unbounded allocation.
+// reqBodyLimit holds the operator-set request-body cap (bytes; 0 = use the default),
+// set by SetMaxRequestBody and read live by readBody, so the MAPI/HTTP daemon's poll
+// can apply an edit without a restart. The service is a per-process singleton, so a
+// package-level value is the right scope (mirrors the EWS transport).
+var reqBodyLimit atomic.Int64
+
+// SetMaxRequestBody sets the maximum accepted request body in bytes (0 restores the
+// built-in default). It is safe to call concurrently with request handling, so an
+// operator's edit applies without a restart.
+func SetMaxRequestBody(n int64) {
+	if n < 0 {
+		n = 0
+	}
+	reqBodyLimit.Store(n)
+}
+
+// readBody reads at most the current cap of the request body. Every handler reads
+// through it rather than io.ReadAll(r.Body) directly, so no MAPI/HTTP request can
+// drive an unbounded allocation.
 func readBody(r *http.Request) []byte {
-	body, _ := io.ReadAll(io.LimitReader(r.Body, maxRequestBody))
+	limit := reqBodyLimit.Load()
+	if limit <= 0 {
+		limit = defaultMaxRequestBody
+	}
+	body, _ := io.ReadAll(io.LimitReader(r.Body, limit))
 	return body
 }
 

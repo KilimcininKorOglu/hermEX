@@ -16,6 +16,7 @@ type SizeLimits struct {
 	DAVICalBytes           int64
 	DAVVCardBytes          int64
 	WebmailRequestBytes    int64
+	MapiRequestBytes       int64
 }
 
 // GetSizeLimits returns the stored size limits and whether a row has been saved. When
@@ -24,10 +25,10 @@ func (d *SQLDirectory) GetSizeLimits() (SizeLimits, bool, error) {
 	var s SizeLimits
 	err := d.db.QueryRow(
 		`SELECT imap_literal_bytes, ews_request_bytes, activesync_request_bytes, dav_ical_bytes, dav_vcard_bytes,
-		        webmail_request_bytes
+		        webmail_request_bytes, mapi_request_bytes
 		   FROM size_limits WHERE id = 1`).
 		Scan(&s.IMAPLiteralBytes, &s.EWSRequestBytes, &s.ActiveSyncRequestBytes, &s.DAVICalBytes, &s.DAVVCardBytes,
-			&s.WebmailRequestBytes)
+			&s.WebmailRequestBytes, &s.MapiRequestBytes)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SizeLimits{}, false, nil
 	}
@@ -43,15 +44,16 @@ func (d *SQLDirectory) SetSizeLimits(s SizeLimits) error {
 	_, err := d.db.Exec(
 		`INSERT INTO size_limits
 		   (id, imap_literal_bytes, ews_request_bytes, activesync_request_bytes, dav_ical_bytes, dav_vcard_bytes,
-		    webmail_request_bytes, updated_at)
-		 VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+		    webmail_request_bytes, mapi_request_bytes, updated_at)
+		 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON DUPLICATE KEY UPDATE imap_literal_bytes = VALUES(imap_literal_bytes),
 		   ews_request_bytes = VALUES(ews_request_bytes),
 		   activesync_request_bytes = VALUES(activesync_request_bytes),
 		   dav_ical_bytes = VALUES(dav_ical_bytes), dav_vcard_bytes = VALUES(dav_vcard_bytes),
 		   webmail_request_bytes = VALUES(webmail_request_bytes),
+		   mapi_request_bytes = VALUES(mapi_request_bytes),
 		   updated_at = VALUES(updated_at)`,
 		s.IMAPLiteralBytes, s.EWSRequestBytes, s.ActiveSyncRequestBytes, s.DAVICalBytes, s.DAVVCardBytes,
-		s.WebmailRequestBytes, time.Now().UnixMilli())
+		s.WebmailRequestBytes, s.MapiRequestBytes, time.Now().UnixMilli())
 	return err
 }

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
 
@@ -101,6 +102,10 @@ func main() {
 	// too: SMTP refuses an oversized message during DATA, and nothing here ever
 	// reaches an SMTP session.
 	mta.StartMessageSizeLimit("hermex-mapihttp", dir.GetMessageSizeSettings)
+	// MAPI/HTTP request-body cap: read at startup and re-read every minute so an admin's
+	// change applies without a restart; 0 keeps the built-in default.
+	applyMapiSizeLimit(dir.GetSizeLimits, mapihttp.SetMaxRequestBody)
+	go runMapiSizeMaintenance(dir.GetSizeLimits, mapihttp.SetMaxRequestBody)
 	// Per-client HTTP request limiter: read the stored settings at startup and
 	// re-read them every minute, so an operator's change applies without a restart.
 	// It is off until an operator enables it, and any read failure leaves it as it
@@ -141,5 +146,30 @@ func main() {
 		health.Components(cfg.HealthAddr, "mapi", checks...)...)
 	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, spool.Close, logClose, db.Close); err != nil {
 		log.Fatalf("hermex-mapi: %v", err)
+	}
+}
+
+// applyMapiSizeLimit reads the stored MAPI/HTTP request-body cap and applies it. A
+// missing row or a read error leaves the cap unchanged, so a settings failure never
+// shrinks it unexpectedly.
+func applyMapiSizeLimit(read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
+	s, found, err := read()
+	if err != nil {
+		log.Printf("hermex-mapi: size limits read failed, leaving the request cap unchanged: %v", err)
+		return
+	}
+	if !found {
+		return
+	}
+	setRequestBody(s.MapiRequestBytes)
+}
+
+// runMapiSizeMaintenance re-applies the MAPI/HTTP request-body cap every minute so an
+// admin change takes effect without a restart. It runs until the process exits.
+func runMapiSizeMaintenance(read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
+	tick := time.NewTicker(time.Minute)
+	defer tick.Stop()
+	for range tick.C {
+		applyMapiSizeLimit(read, setRequestBody)
 	}
 }

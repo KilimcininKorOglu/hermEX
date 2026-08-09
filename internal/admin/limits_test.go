@@ -39,6 +39,9 @@ func TestLimitsPageRenders(t *testing.T) {
 	if !strings.Contains(page, "Webmail maximum request") || !strings.Contains(page, `name="webmail_request_mb" value="40"`) {
 		t.Errorf("limits page missing the webmail limit/default:\n%s", page)
 	}
+	if !strings.Contains(page, "MAPI/HTTP maximum request") || !strings.Contains(page, `name="mapi_request_mb" value="32"`) {
+		t.Errorf("limits page missing the MAPI/HTTP limit/default:\n%s", page)
+	}
 }
 
 // TestSaveLimits proves the form converts the entered MB to bytes and persists it, the
@@ -51,6 +54,7 @@ func TestSaveLimits(t *testing.T) {
 	resp := htmxPOST(t, ts, "/admin/ui/limits", session, csrf, url.Values{
 		"imap_literal_mb": {"10"}, "ews_request_mb": {"4"}, "activesync_request_mb": {"2"},
 		"dav_ical_mb": {"3"}, "dav_vcard_mb": {"5"}, "webmail_request_mb": {"20"},
+		"mapi_request_mb": {"16"},
 	})
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -59,7 +63,8 @@ func TestSaveLimits(t *testing.T) {
 	}
 	if !d.sizeLimitsFound || d.sizeLimits.IMAPLiteralBytes != 10*1024*1024 || d.sizeLimits.EWSRequestBytes != 4*1024*1024 ||
 		d.sizeLimits.ActiveSyncRequestBytes != 2*1024*1024 || d.sizeLimits.DAVICalBytes != 3*1024*1024 ||
-		d.sizeLimits.DAVVCardBytes != 5*1024*1024 || d.sizeLimits.WebmailRequestBytes != 20*1024*1024 {
+		d.sizeLimits.DAVVCardBytes != 5*1024*1024 || d.sizeLimits.WebmailRequestBytes != 20*1024*1024 ||
+		d.sizeLimits.MapiRequestBytes != 16*1024*1024 {
 		t.Errorf("limits not persisted as bytes: found=%v %+v", d.sizeLimitsFound, d.sizeLimits)
 	}
 }

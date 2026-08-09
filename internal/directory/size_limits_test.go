@@ -28,6 +28,7 @@ func TestSizeLimitsRoundTrip(t *testing.T) {
 	want := SizeLimits{
 		IMAPLiteralBytes: 10485760, EWSRequestBytes: 4194304, ActiveSyncRequestBytes: 2097152,
 		DAVICalBytes: 1048576, DAVVCardBytes: 3145728, WebmailRequestBytes: 41943040,
+		MapiRequestBytes: 33554432,
 	}
 	if err := d.SetSizeLimits(want); err != nil {
 		t.Fatal(err)
