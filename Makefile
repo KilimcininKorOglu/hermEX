@@ -10,6 +10,7 @@
 #   make test PKG=./internal/rop RUN=TestCopyToSubObjects
 #   make test-host PKG=./internal/rop RUN=TestX # host quick feedback (DB tests skip)
 #   make lint PKG=./internal/rop/...            # golangci-lint on the host, not in gate
+#   make audit-deps                             # dependency advisories, host; monthly and pre-release
 #   make up / make down                         # dev environment lifecycle
 
 COMPOSE := docker compose -f hermex-compose.yml
@@ -40,7 +41,7 @@ PKG ?= ./internal/... ./cmd/...
 RUN ?=
 RUNFLAG := $(if $(RUN),-run '$(RUN)',)
 
-.PHONY: all build test test-host test-race vet fmt fmt-check gate lint lint-modernize require-golangci-lint tidy up down images rebuild clean help compose-check dump-db dump-mail restore-db version
+.PHONY: all build test test-host test-race vet fmt fmt-check gate lint lint-modernize require-golangci-lint audit-deps require-govulncheck tidy up down images rebuild clean help compose-check dump-db dump-mail restore-db version
 
 all: build
 
@@ -103,6 +104,30 @@ require-golangci-lint:
 	@command -v golangci-lint >/dev/null || { \
 		echo "golangci-lint is not on PATH (host tool; the dev image carries none)"; \
 		echo "install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest"; \
+		exit 2; }
+
+## audit-deps: check both dependency trees against published advisories (HOST)
+# There is no CI and no bot watching this repository, so the window between a CVE
+# being published and this project hearing about it is exactly as long as the gap
+# between runs of this target. Run it before every release and at least monthly;
+# it is deliberately not part of `gate`, because an advisory published overnight
+# is not a reason to block an unrelated commit, and because it reaches the network
+# while the gate must not.
+#
+# Go and npm are both covered: the SPA bundle an operator serves is built from the
+# npm tree, so scanning only go.mod would leave the code that runs in a user's
+# browser unwatched. govulncheck reports only advisories that reach a symbol this
+# code actually calls, so a finding here is a real reachable path, not a version
+# match.
+audit-deps: require-govulncheck
+	govulncheck ./internal/... ./cmd/...
+	cd internal/webmail2 && npm audit
+
+# Report the missing tool and how to get it, matching require-golangci-lint.
+require-govulncheck:
+	@command -v govulncheck >/dev/null || { \
+		echo "govulncheck is not on PATH (host tool; the dev image carries none)"; \
+		echo "install: go install golang.org/x/vuln/cmd/govulncheck@latest"; \
 		exit 2; }
 
 ## tidy: sync go.mod/go.sum in the dev container (downloads any new dependency)
