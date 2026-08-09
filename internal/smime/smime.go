@@ -5,6 +5,13 @@
 // (Outlook, Thunderbird) interoperate with. Content is treated as opaque bytes
 // with CRLF line endings, as S/MIME requires, and never re-encoded, so a
 // signature stays valid.
+//
+// The CMS/PKCS#7 structures are parsed by github.com/smallstep/pkcs7, which is
+// deliberately a fork: the nominal upstream (fullsailor/pkcs7) is unmaintained
+// and no longer builds against a current Go toolchain, so the whole Go ecosystem
+// is on forks and there is no canonical name to "restore". See the note on the
+// require line in go.mod before bumping it; this is the code path that decodes
+// attacker-supplied ASN.1 out of a mail body.
 package smime
 
 import (

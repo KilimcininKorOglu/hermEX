@@ -11,6 +11,13 @@ require (
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/klauspost/compress v1.18.7
 	github.com/miekg/dns v1.1.72
+	// Deliberately a fork. The nominal "pkcs7" project (fullsailor/pkcs7) is
+	// unmaintained and no longer builds against a current Go toolchain, so every
+	// Go consumer of CMS is on one fork or another; this one is kept current by
+	// the step-ca maintainers, who use it in their own certificate authority.
+	// Moving to the obvious-looking canonical name would be a regression, not a
+	// cleanup. It parses attacker-supplied ASN.1 in internal/smime, so a bump is
+	// a security-relevant change: read the diff rather than taking the tag.
 	github.com/smallstep/pkcs7 v0.2.1
 	go.mongodb.org/mongo-driver/v2 v2.7.0
 	golang.org/x/net v0.56.0
