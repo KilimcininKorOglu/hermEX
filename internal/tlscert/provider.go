@@ -53,6 +53,9 @@ type Provider struct {
 	snap     atomic.Pointer[snapshot]
 	ver      int64 // last store version seen by refresh (only touched by refresh)
 	cnt      int64 // last store row count seen by refresh
+	// lastExpiryNotice throttles the expiry warning; only the RunMaintenance
+	// goroutine reads or writes it, the same goroutine that owns ver and cnt.
+	lastExpiryNotice time.Time
 }
 
 // New builds a provider over store, with cfg supplying the configuration-file
@@ -188,7 +191,9 @@ func (p *Provider) Refresh() error {
 
 // RunMaintenance polls the store every pollInterval and refreshes the snapshot when
 // it changes, so an admin's upload or renewal applies without a restart. It runs
-// until the process exits, mirroring the other settings-reload loops.
+// until the process exits, mirroring the other settings-reload loops. The same poll
+// reports an approaching expiry to the central log, so a failed renewal reaches the
+// operator without anyone opening a status page.
 func (p *Provider) RunMaintenance() {
 	tick := time.NewTicker(pollInterval)
 	defer tick.Stop()
@@ -196,6 +201,7 @@ func (p *Provider) RunMaintenance() {
 		if err := p.Refresh(); err != nil {
 			p.warn("certificate refresh failed; keeping the current certificates", err)
 		}
+		p.noteExpiry(time.Now())
 	}
 }
 

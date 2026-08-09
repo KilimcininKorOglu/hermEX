@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"hermex/internal/health"
+	"hermex/internal/logging"
 )
 
 // expiryWarning is how long before a serving certificate lapses that the health
@@ -13,6 +14,45 @@ import (
 // about a month to spare, so a warning this late means renewal has actually
 // failed and an operator has to act, not that the clock is simply ticking.
 const expiryWarning = 14 * 24 * time.Hour
+
+// expiryNoticeInterval throttles the warning the certificate poll emits. The poll
+// runs every pollInterval and an expiring certificate keeps expiring, so an
+// unthrottled notice would repeat thousands of times a day and bury everything
+// else in the log. Six hours puts several notices a day in front of an operator
+// reading the log sink while keeping the volume negligible.
+const expiryNoticeInterval = 6 * time.Hour
+
+// noteExpiry reports an approaching or passed expiry to the central log, at most
+// once per expiryNoticeInterval. It is the push half of the expiry reaction:
+// ExpiryCheck judges the same condition, but only answers a caller that polls
+// /healthz, which is opt-in and not enabled by default, so on a deployment that
+// never enables it nothing about a failed renewal reaches the operator until
+// clients start failing. Only RunMaintenance calls this, so the throttle stamp
+// needs no synchronization.
+func (p *Provider) noteExpiry(now time.Time) {
+	if p.logger == nil {
+		return
+	}
+	notAfter, ok := p.Expiry()
+	if !ok {
+		return // nothing served over TLS, nothing to judge
+	}
+	left := notAfter.Sub(now)
+	if left >= expiryWarning {
+		return
+	}
+	if !p.lastExpiryNotice.IsZero() && now.Sub(p.lastExpiryNotice) < expiryNoticeInterval {
+		return
+	}
+	p.lastExpiryNotice = now
+	f := logging.Fields{"expires": notAfter.UTC().Format(time.RFC3339)}
+	if left <= 0 {
+		p.logger.Error(logging.TLS, "certificate.expired", f)
+		return
+	}
+	f["days_left"] = int(left / (24 * time.Hour))
+	p.logger.Warn(logging.TLS, "certificate.expiring", f)
+}
 
 // ExpiryCheck builds the readiness probe that reports the serving certificate's
 // remaining validity. It fails once the certificate has lapsed (clients can no

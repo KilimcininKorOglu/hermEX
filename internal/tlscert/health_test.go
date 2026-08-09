@@ -15,6 +15,7 @@ import (
 
 	"hermex/internal/config"
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/tlstest"
 )
 
@@ -193,5 +194,98 @@ func TestExpiryIncludesTheFileCertificate(t *testing.T) {
 	}
 	if err := ExpiryCheck(p).Probe(context.Background()); err == nil {
 		t.Error("probe healthy with an hour left, want degraded inside the warning window")
+	}
+}
+
+// captureSink collects the events a provider emits so the expiry notice can be
+// asserted on level, name and fields.
+type captureSink struct{ events []logging.Event }
+
+func (s *captureSink) Write(e logging.Event) { s.events = append(s.events, e) }
+
+// providerLogging builds a provider over one certificate expiring at notAfter,
+// wired to a capturing sink.
+func providerLogging(t *testing.T, notAfter time.Time) (*Provider, *captureSink) {
+	t.Helper()
+	cert, key := genCertExpiring(t, "mail.example.com", notAfter)
+	store := &fakeStore{
+		certs:   []directory.TLSCertData{{Name: "", CertPEM: cert, KeyPEM: key}},
+		version: 1, count: 1,
+	}
+	sink := &captureSink{}
+	p, err := New(nil, store, logging.New(sink))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p, sink
+}
+
+// TestExpiryNoticeWarnsAndThrottles proves the poll pushes an approaching expiry
+// to the central log, naming the remaining days, and that repeating the poll does
+// not repeat the warning until the throttle interval has passed. Without the
+// throttle the 15s poll would emit it thousands of times a day.
+func TestExpiryNoticeWarnsAndThrottles(t *testing.T) {
+	now := time.Now()
+	p, sink := providerLogging(t, now.Add(7*24*time.Hour))
+
+	p.noteExpiry(now)
+	if len(sink.events) != 1 {
+		t.Fatalf("first poll emitted %d events, want 1", len(sink.events))
+	}
+	e := sink.events[0]
+	if e.Level != logging.LevelWarn || e.Subsystem != logging.TLS || e.Name != "certificate.expiring" {
+		t.Errorf("event = %s/%s/%s, want warn/tls/certificate.expiring", e.Level, e.Subsystem, e.Name)
+	}
+	if days, _ := e.Fields["days_left"].(int); days != 6 && days != 7 {
+		t.Errorf("days_left = %v, want the remaining week", e.Fields["days_left"])
+	}
+
+	// The next few polls stay silent, the one after the interval speaks again.
+	p.noteExpiry(now.Add(pollInterval))
+	p.noteExpiry(now.Add(expiryNoticeInterval - time.Second))
+	if len(sink.events) != 1 {
+		t.Fatalf("polls inside the throttle window emitted %d events, want the original 1", len(sink.events))
+	}
+	p.noteExpiry(now.Add(expiryNoticeInterval))
+	if len(sink.events) != 2 {
+		t.Errorf("poll after the throttle window emitted %d events in total, want 2", len(sink.events))
+	}
+}
+
+// TestExpiryNoticeEscalatesAfterExpiry proves a certificate that has actually
+// lapsed is reported at error level, not as another warning: clients can no
+// longer connect, so it is not the same condition as an approaching renewal.
+func TestExpiryNoticeEscalatesAfterExpiry(t *testing.T) {
+	now := time.Now()
+	p, sink := providerLogging(t, now.Add(-time.Hour))
+
+	p.noteExpiry(now)
+	if len(sink.events) != 1 {
+		t.Fatalf("expired certificate emitted %d events, want 1", len(sink.events))
+	}
+	if e := sink.events[0]; e.Level != logging.LevelError || e.Name != "certificate.expired" {
+		t.Errorf("event = %s/%s, want error/certificate.expired", e.Level, e.Name)
+	}
+}
+
+// TestExpiryNoticeSilentOutsideTheWindow is the negative control: a certificate
+// with months left, and a provider with no certificate at all, both emit nothing.
+// A notice that fires either way would train the operator to ignore it.
+func TestExpiryNoticeSilentOutsideTheWindow(t *testing.T) {
+	now := time.Now()
+	p, sink := providerLogging(t, now.Add(60*24*time.Hour))
+	p.noteExpiry(now)
+	if len(sink.events) != 0 {
+		t.Errorf("a certificate 60 days out emitted %d events, want none: %+v", len(sink.events), sink.events)
+	}
+
+	empty := &captureSink{}
+	bare, err := New(nil, &fakeStore{}, logging.New(empty))
+	if err != nil {
+		t.Fatal(err)
+	}
+	bare.noteExpiry(now)
+	if len(empty.events) != 0 {
+		t.Errorf("a provider serving no certificate emitted %d events, want none", len(empty.events))
 	}
 }

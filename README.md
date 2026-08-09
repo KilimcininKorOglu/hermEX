@@ -300,6 +300,12 @@ its build stamp. It is opt-in per daemon (`health_addr`, empty disables it), and
 the panel's live status view aggregates whichever endpoints are listed under
 `health_targets`.
 
+A serving certificate that is within two weeks of expiry is reported two ways: the
+`/healthz` probe marks the daemon degraded, and the certificate poll writes a
+warning to the central log every few hours (an error once the certificate has
+lapsed). The log path needs no configuration, so a deployment that leaves
+`health_addr` empty still learns about a failed renewal.
+
 ### Spam model and rules
 
 The Bayes model and the SpamAssassin-style ruleset are seeded by two one-shot
