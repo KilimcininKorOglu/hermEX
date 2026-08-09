@@ -186,7 +186,7 @@ func (c *conn) statusPublic(tag, name, sub string, items []string) {
 	uidv, _ := st.UIDValidity(f.ID)
 	uidn, _ := st.UIDNext(f.ID)
 	hms, _ := st.FolderHighestModSeq(f.ID)
-	c.untagged("STATUS %s (%s)", quoteString(name), statusParts(items, msgs, uidv, uidn, hms))
+	c.untagged("STATUS %s (%s)", safeQuoted(name), statusParts(items, msgs, uidv, uidn, hms))
 	c.ok(tag, "STATUS completed")
 }
 
@@ -257,12 +257,12 @@ func (c *conn) listPublicFolders(verb, full string) {
 		return
 	}
 	if imapMatch(full, publicNamespaceRoot) {
-		c.untagged(`%s (\HasChildren \Noselect) "%s" %s`, verb, hierarchySep, quoteString(publicNamespaceRoot))
+		c.untagged(`%s (\HasChildren \Noselect) "%s" %s`, verb, hierarchySep, safeQuoted(publicNamespaceRoot))
 	}
 	for _, f := range visible {
 		path := publicNamespacePrefix + f.DisplayName
 		if imapMatch(full, path) {
-			c.untagged(`%s (\HasNoChildren) "%s" %s`, verb, hierarchySep, quoteString(path))
+			c.untagged(`%s (\HasNoChildren) "%s" %s`, verb, hierarchySep, safeQuoted(path))
 		}
 	}
 }

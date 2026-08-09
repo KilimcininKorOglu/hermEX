@@ -134,7 +134,7 @@ func (c *conn) writeESearch(tag string, byUID bool, opts []string, results []uin
 		return slices.Contains(opts, o)
 	}
 	var sb strings.Builder
-	fmt.Fprintf(&sb, "ESEARCH (TAG %s)", quoteString(tag))
+	fmt.Fprintf(&sb, "ESEARCH (TAG %s)", safeQuoted(tag))
 	if byUID {
 		sb.WriteString(" UID")
 	}

@@ -38,6 +38,28 @@ func imapStr(s string) string {
 	return literalize(s)
 }
 
+// safeQuoted renders a mailbox name, an ACL identifier or an echoed command tag
+// for an untagged response. It stays a quoted string, byte for byte as stored,
+// so an 8-bit name keeps rendering exactly as before; a value carrying CR, LF or
+// NUL cannot be quoted without breaking the response framing, so that one goes
+// out as a length-prefixed literal and the client reads it as data instead of
+// parsing an injected line. CREATE and RENAME refuse such a name, so this covers
+// the names another protocol stored.
+func safeQuoted(s string) string {
+	if strings.ContainsAny(s, "\r\n\x00") {
+		return literalize(s)
+	}
+	return quoteString(s)
+}
+
+// mailboxSafe reports whether a client-supplied mailbox name is free of the
+// control characters that have no place in one (RFC 3501 ASTRING-CHAR excludes
+// CTL). A literal argument carries raw octets, so CREATE/RENAME are where a CR
+// or LF would otherwise enter the folder tree.
+func mailboxSafe(s string) bool {
+	return !strings.ContainsFunc(s, func(r rune) bool { return r < 0x20 || r == 0x7f })
+}
+
 // nstring renders an IMAP nstring: the atom NIL for an absent value, otherwise
 // a quoted string or literal. Clients branch on NIL vs "", so an empty value
 // must be NIL, never an empty quoted string.

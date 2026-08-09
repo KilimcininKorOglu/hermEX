@@ -15,10 +15,10 @@ func (c *conn) writeQuota(root string) {
 		limitKB = q.ReceiveKB // fall back to the hard receive limit
 	}
 	if limitKB == 0 {
-		c.untagged("QUOTA %s ()", quoteString(root))
+		c.untagged("QUOTA %s ()", safeQuoted(root))
 		return
 	}
-	c.untagged("QUOTA %s (STORAGE %d %d)", quoteString(root), used/1024, limitKB)
+	c.untagged("QUOTA %s (STORAGE %d %d)", safeQuoted(root), used/1024, limitKB)
 }
 
 // cmdGetQuotaRoot handles GETQUOTAROOT: it names the quota root(s) for a mailbox
@@ -33,7 +33,7 @@ func (c *conn) cmdGetQuotaRoot(tag string, args []token) {
 		c.bad(tag, "GETQUOTAROOT requires a mailbox")
 		return
 	}
-	c.untagged(`QUOTAROOT %s ""`, quoteString(mailbox))
+	c.untagged(`QUOTAROOT %s ""`, safeQuoted(mailbox))
 	c.writeQuota("")
 	c.ok(tag, "GETQUOTAROOT completed")
 }

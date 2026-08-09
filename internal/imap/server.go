@@ -647,7 +647,7 @@ func (c *conn) cmdList(tag string, args []token, lsub bool) {
 		if su := specialUse(n.info.ID); su != "" {
 			attr += " " + su
 		}
-		c.untagged(`%s (%s) "%s" %s`, verb, attr, hierarchySep, quoteString(n.path))
+		c.untagged(`%s (%s) "%s" %s`, verb, attr, hierarchySep, safeQuoted(n.path))
 	}
 	c.listPublicFolders(verb, full)
 	c.ok(tag, verb+" completed")
@@ -706,7 +706,7 @@ func (c *conn) cmdStatus(tag string, args []token) {
 	uidv, _ := c.st.UIDValidity(node.info.ID)
 	uidn, _ := c.st.UIDNext(node.info.ID)
 	hms, _ := c.st.FolderHighestModSeq(node.info.ID)
-	c.untagged("STATUS %s (%s)", quoteString(node.path), statusParts(items, msgs, uidv, uidn, hms))
+	c.untagged("STATUS %s (%s)", safeQuoted(node.path), statusParts(items, msgs, uidv, uidn, hms))
 	c.ok(tag, "STATUS completed")
 }
 
@@ -748,6 +748,10 @@ func (c *conn) cmdCreate(tag string, args []token) {
 	name, ok := arg0(args)
 	if !ok || name == "" {
 		c.bad(tag, "CREATE requires a mailbox name")
+		return
+	}
+	if !mailboxSafe(name) {
+		c.no(tag, "mailbox name contains an illegal character")
 		return
 	}
 	// A trailing hierarchy separator (declaring intent to hold children) is
@@ -846,6 +850,10 @@ func (c *conn) cmdRename(tag string, args []token) {
 	to, ok2 := argN(args, 1)
 	if !ok1 || !ok2 || to == "" {
 		c.bad(tag, "RENAME requires source and destination names")
+		return
+	}
+	if !mailboxSafe(to) {
+		c.no(tag, "mailbox name contains an illegal character")
 		return
 	}
 	if strings.EqualFold(from, inboxName) {

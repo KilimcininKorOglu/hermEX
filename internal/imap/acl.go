@@ -95,7 +95,7 @@ func (c *conn) cmdMyRights(tag string, args []token) {
 	if !ownPrivate {
 		rights, _ = st.ResolvePermission(fid, c.user)
 	}
-	c.untagged("MYRIGHTS %s %s", quoteString(name), rightsToACL(rights))
+	c.untagged("MYRIGHTS %s %s", safeQuoted(name), rightsToACL(rights))
 	c.ok(tag, "MYRIGHTS completed")
 }
 
@@ -124,16 +124,16 @@ func (c *conn) cmdGetACL(tag string, args []token) {
 		if e.Name == c.user {
 			listed = true
 		}
-		parts = append(parts, quoteString(e.Name)+" "+rightsToACL(e.Rights))
+		parts = append(parts, safeQuoted(e.Name)+" "+rightsToACL(e.Rights))
 	}
 	owner := ownPrivate
 	if !owner {
 		owner, _ = st.IsStoreOwner(c.user)
 	}
 	if owner && !listed {
-		parts = append([]string{quoteString(c.user) + " " + rightsToACL(mapi.RightsAll)}, parts...)
+		parts = append([]string{safeQuoted(c.user) + " " + rightsToACL(mapi.RightsAll)}, parts...)
 	}
-	c.untagged("ACL %s %s", quoteString(name), strings.Join(parts, " "))
+	c.untagged("ACL %s %s", safeQuoted(name), strings.Join(parts, " "))
 	c.ok(tag, "GETACL completed")
 }
 
@@ -213,7 +213,7 @@ func (c *conn) cmdListRights(tag string, args []token) {
 		c.no(tag, "no such mailbox")
 		return
 	}
-	c.untagged("LISTRIGHTS %s %s l r s w i p k x t e a", quoteString(name), quoteString(id))
+	c.untagged("LISTRIGHTS %s %s l r s w i p k x t e a", safeQuoted(name), safeQuoted(id))
 	c.ok(tag, "LISTRIGHTS completed")
 }
 
