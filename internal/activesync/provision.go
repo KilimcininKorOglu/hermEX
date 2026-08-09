@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"hermex/internal/easpolicy"
+	"hermex/internal/logging"
 	"hermex/internal/objectstore"
 	"hermex/internal/wbxml"
 )
@@ -75,24 +76,55 @@ type domainSyncPolicyProvider interface {
 // nothing, so an unconfigured server serves no policy. Errors are swallowed to a
 // less-restrictive policy rather than failing provisioning, which would lock the
 // device out of mail entirely.
+//
+// Swallowed, but recorded. A layer that fails to read contributes nothing, and a
+// policy that merges to nothing has the baseline key, which is exactly the value
+// the enforcement check treats as "this device needs no policy". So a directory
+// outage does not just lose a setting, it stops challenging devices to
+// re-provision, and without this log the operator has no way to know it happened.
 func (s *Server) devicePolicy(sess *session) easpolicy.Policy {
 	var def, dom easpolicy.Policy
 	if p, ok := s.accounts.(defaultSyncPolicyProvider); ok {
-		def, _ = p.GetDefaultSyncPolicy()
+		var err error
+		if def, err = p.GetDefaultSyncPolicy(); err != nil {
+			s.logPolicyReadFail("default", sess, err)
+		}
 	}
 	if p, ok := s.accounts.(domainSyncPolicyProvider); ok {
 		if at := strings.LastIndexByte(sess.user, '@'); at >= 0 {
-			dom, _ = p.GetDomainSyncPolicy(sess.user[at+1:])
+			var err error
+			if dom, err = p.GetDomainSyncPolicy(sess.user[at+1:]); err != nil {
+				s.logPolicyReadFail("domain", sess, err)
+			}
 		}
 	}
 	var override easpolicy.Policy
 	if sess.mailbox != "" {
-		if st, err := objectstore.Open(sess.mailbox); err == nil {
-			override, _ = st.GetSyncPolicy()
+		st, err := objectstore.Open(sess.mailbox)
+		if err != nil {
+			s.logPolicyReadFail("mailbox", sess, err)
+		} else {
+			if override, err = st.GetSyncPolicy(); err != nil {
+				s.logPolicyReadFail("mailbox", sess, err)
+			}
 			st.Close()
 		}
 	}
 	return easpolicy.Merge(easpolicy.Merge(def, dom), override)
+}
+
+// logPolicyReadFail records a device-policy layer that could not be read, so a
+// weakened enforcement window is visible in the log store rather than only in its
+// consequences.
+func (s *Server) logPolicyReadFail(layer string, sess *session, err error) {
+	s.Logger.Emit(logging.Event{
+		Level:      logging.LevelWarn,
+		Subsystem:  logging.ActiveSync,
+		Name:       "policy.read.fail",
+		User:       sess.user,
+		RemoteAddr: sess.tel.IP,
+		Fields:     logging.Fields{"layer": layer, "device": sess.req.deviceID, "error": err.Error()},
+	})
 }
 
 // handleProvision answers the two-phase EAS provisioning handshake. Phase one
