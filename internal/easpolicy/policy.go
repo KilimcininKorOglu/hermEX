@@ -84,12 +84,6 @@ var known = func() map[string]Field {
 	return m
 }()
 
-// IsField reports whether name is a recognized policy field.
-func IsField(name string) bool {
-	_, ok := known[name]
-	return ok
-}
-
 // Policy is a partial device policy: a field present in the map is enforced at its
 // value; an absent field is not enforced and inherits the lower layer.
 type Policy map[string]int
