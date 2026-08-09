@@ -48,6 +48,11 @@ type SQLDirectory struct {
 	// edited value while inbound sessions record verdicts concurrently, with no
 	// restart. NewSQL seeds it with the built-in default.
 	spamRetain atomic.Int64
+	// keySecret is the derived at-rest wrapping key for the private keys this
+	// directory stores; nil leaves them in plaintext. Held atomically because a
+	// daemon installs it once at startup while nothing else is running, and every
+	// later read is concurrent.
+	keySecret atomic.Pointer[[]byte]
 }
 
 // NewSQL wraps an open database handle. A user's mailbox store is the object

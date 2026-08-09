@@ -30,7 +30,28 @@ func (d *SQLDirectory) DKIMKey(domain string) (privPEM []byte, selector string, 
 	if err != nil {
 		return nil, "", false, err
 	}
-	return []byte(pk), sel, true, nil
+	pem, err := d.openDKIMKey(domain, pk)
+	if err != nil {
+		return nil, "", false, err
+	}
+	return []byte(pem), sel, true, nil
+}
+
+// openDKIMKey decrypts a stored signing key and, when the row is still plaintext
+// and a secret is configured, writes it back wrapped. The rewrite is best-effort:
+// it must never turn a readable key into a signing failure, so its error is
+// swallowed and the key is returned either way.
+func (d *SQLDirectory) openDKIMKey(domain, stored string) (string, error) {
+	pem, wrapped, err := d.unwrapKey(wrapDKIM, stored)
+	if err != nil {
+		return "", err
+	}
+	if d.rewrapNeeded(wrapped) {
+		if sealed, err := d.wrapKey(wrapDKIM, pem); err == nil {
+			_, _ = d.db.Exec(`UPDATE dkim_keys SET private_key = ? WHERE domain = ?`, sealed, strings.ToLower(domain))
+		}
+	}
+	return pem, nil
 }
 
 // ExportDKIMKey returns a domain's signing key whatever its enabled state, for
@@ -52,19 +73,29 @@ func (d *SQLDirectory) ExportDKIMKey(domain string) (privPEM []byte, selector st
 	if err != nil {
 		return nil, "", false, err
 	}
-	return []byte(pk), sel, true, nil
+	pem, err := d.openDKIMKey(domain, pk)
+	if err != nil {
+		return nil, "", false, err
+	}
+	return []byte(pem), sel, true, nil
 }
 
 // SetDKIMKey stores or replaces a domain's signing key. It is always stored DISABLED:
 // the operator must publish the DNS record and then enable it, so generating (or
 // regenerating) a key never starts producing DKIM=fail.
 func (d *SQLDirectory) SetDKIMKey(domain, selector string, privPEM []byte, publicTXT string) error {
-	_, err := d.db.Exec(
+	// The database is the only copy of this key, so it is wrapped at rest when a
+	// key secret is configured; without one it is stored as before.
+	sealed, err := d.wrapKey(wrapDKIM, string(privPEM))
+	if err != nil {
+		return err
+	}
+	_, err = d.db.Exec(
 		`INSERT INTO dkim_keys (domain, selector, private_key, public_txt, enabled, created_at)
 		 VALUES (?, ?, ?, ?, 0, ?)
 		 ON DUPLICATE KEY UPDATE selector = VALUES(selector), private_key = VALUES(private_key),
 		   public_txt = VALUES(public_txt), enabled = 0, created_at = VALUES(created_at)`,
-		strings.ToLower(domain), selector, string(privPEM), publicTXT, time.Now().UnixMilli())
+		strings.ToLower(domain), selector, sealed, publicTXT, time.Now().UnixMilli())
 	return err
 }
 

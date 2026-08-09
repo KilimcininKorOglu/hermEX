@@ -33,6 +33,7 @@ type Config struct {
 	MapiAddr       string   `json:"mapi_addr"`       // MAPI/HTTP (native Outlook) HTTP listen address (default ":8080")
 	AdminAddr      string   `json:"admin_addr"`      // admin API HTTP listen address (default ":8081")
 	AdminSecret    string   `json:"admin_secret"`    // signing key for admin session tokens; required to serve the admin API
+	KeySecret      string   `json:"key_secret"`      // at-rest wrapping secret for the DKIM and TLS private keys the directory stores; empty falls back to admin_secret, and with neither set those keys are stored unencrypted
 	DigestSecret   string   `json:"digest_secret"`   // signing key for quarantine-digest release links; the MTA mints and webmail verifies, both daemons must share it, empty disables release links
 	HealthAddr     string   `json:"health_addr"`     // per-daemon /healthz listen address (e.g. ":8090"); empty disables the health endpoint
 	TLSCert        string   `json:"tls_cert"`        // PEM certificate (chain) for implicit-TLS/HTTPS listeners
@@ -132,6 +133,18 @@ func (c *Config) TLSConfig() (*tls.Config, error) {
 // whether listeners should terminate TLS rather than fall back to plaintext.
 func (c *Config) TLSEnabled() bool {
 	return c.TLSCert != "" && c.TLSKey != ""
+}
+
+// KeyWrapSecret returns the secret the directory wraps its stored private keys
+// (DKIM signing keys, uploaded TLS keys) with: key_secret when set, otherwise
+// admin_secret, so a deployment that already has one secret configured does not
+// need a second. An empty result leaves those keys unencrypted, which every
+// daemon reports at startup.
+func (c *Config) KeyWrapSecret() []byte {
+	if c.KeySecret != "" {
+		return []byte(c.KeySecret)
+	}
+	return []byte(c.AdminSecret)
 }
 
 // ServerHostname reports the server's public mail hostname (config Hostname). It

@@ -1,6 +1,7 @@
 package directory
 
 import (
+	"slices"
 	"strings"
 	"time"
 )
@@ -26,12 +27,18 @@ type TLSCertInfo struct {
 // default). notAfter is the leaf's expiry in unix milliseconds, recorded for
 // display. updated_at is bumped so a polling provider reloads the new material.
 func (d *SQLDirectory) SetTLSCert(name, certPEM, keyPEM string, notAfter int64) error {
-	_, err := d.db.Exec(
+	// The database is the only copy of this key, so it is wrapped at rest when a
+	// key secret is configured; without one it is stored as before.
+	sealed, err := d.wrapKey(wrapTLS, keyPEM)
+	if err != nil {
+		return err
+	}
+	_, err = d.db.Exec(
 		`INSERT INTO tls_certs (name, cert_pem, key_pem, not_after, updated_at)
 		 VALUES (?, ?, ?, ?, ?)
 		 ON DUPLICATE KEY UPDATE cert_pem = VALUES(cert_pem), key_pem = VALUES(key_pem),
 		   not_after = VALUES(not_after), updated_at = VALUES(updated_at)`,
-		strings.ToLower(name), certPEM, keyPEM, notAfter, time.Now().UnixMilli())
+		strings.ToLower(name), certPEM, sealed, notAfter, time.Now().UnixMilli())
 	return err
 }
 
@@ -45,14 +52,37 @@ func (d *SQLDirectory) LoadTLSCerts() ([]TLSCertData, error) {
 	}
 	defer rows.Close()
 	var out []TLSCertData
+	var plaintext []string // rows still stored unwrapped, rewritten after the scan
 	for rows.Next() {
 		var c TLSCertData
 		if err := rows.Scan(&c.Name, &c.CertPEM, &c.KeyPEM); err != nil {
 			return nil, err
 		}
+		key, wrapped, err := d.unwrapKey(wrapTLS, c.KeyPEM)
+		if err != nil {
+			return nil, err
+		}
+		c.KeyPEM = key
+		if d.rewrapNeeded(wrapped) {
+			plaintext = append(plaintext, c.Name)
+		}
 		out = append(out, c)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// Converge an existing deployment on encryption with nothing to run. Done
+	// after the scan (the rows are still open above) and best-effort: a failed
+	// rewrite must never stop a daemon from serving TLS.
+	for _, c := range out {
+		if !slices.Contains(plaintext, c.Name) {
+			continue
+		}
+		if sealed, err := d.wrapKey(wrapTLS, c.KeyPEM); err == nil {
+			_, _ = d.db.Exec(`UPDATE tls_certs SET key_pem = ? WHERE name = ?`, sealed, c.Name)
+		}
+	}
+	return out, nil
 }
 
 // TLSCertVersion returns a cheap change probe for the certificate provider's poll:

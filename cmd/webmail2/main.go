@@ -52,6 +52,10 @@ func main() {
 		log.Fatalf("hermex-webmail2: directory unreachable: %v", err)
 	}
 	dir := directory.NewSQL(db)
+	// At-rest wrapping for the private keys the directory stores (DKIM signing
+	// keys, uploaded TLS keys). An unset secret leaves them in plaintext and says
+	// so on startup.
+	dir.SetKeySecret(cfg.KeyWrapSecret())
 	if err := dir.EnsureSchema(); err != nil {
 		log.Fatalf("hermex-webmail2: schema: %v", err)
 	}

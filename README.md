@@ -218,6 +218,17 @@ hermex-admin -config <file> export-dkim <domain>   # one domain's signing key to
 Both paths run in the operator's shell, so no private key crosses the network.
 Take a dump before an upgrade, and keep it off the mail host.
 
+Set `key_secret` in the configuration file. With it, the DKIM and TLS private
+keys are encrypted in the database, so a dump on its own no longer hands anyone a
+working signing key: opening it needs the configuration file too. Without it the
+keys are stored as they always were, and every daemon says so at startup. Keys
+written before the secret was set are re-encrypted the next time they are read,
+with nothing to run.
+
+The secret is not recoverable. Losing it loses every stored DKIM and TLS key with
+it, so back it up separately from the database dump, and export what you need
+before changing it.
+
 The mail itself is a separate backup. Each mailbox is its own pair of SQLite
 files plus a content tree, none of which the directory dump touches.
 
