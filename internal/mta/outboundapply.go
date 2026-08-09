@@ -2,7 +2,6 @@ package mta
 
 import (
 	"errors"
-	"log"
 	"sync/atomic"
 	"time"
 
@@ -45,11 +44,13 @@ func SetOutboundLimiter(l *OutboundLimiter) { outboundLimiter.Store(l) }
 // A missing row or a read error leaves the limiter as it is, so a settings failure
 // never starts throttling unexpectedly and a transient read error keeps the last
 // applied value rather than flipping the limiter off. daemon names the caller in
-// the log line.
-func ApplyOutboundSettings(daemon string, l *OutboundLimiter, read OutboundReader) {
+// the log line, and logger carries the failure to the central store so an operator
+// can see that the running cap has stopped tracking the stored one.
+func ApplyOutboundSettings(daemon string, logger *logging.Logger, l *OutboundLimiter, read OutboundReader) {
 	s, found, err := read()
 	if err != nil {
-		log.Printf("%s: outbound settings read failed, leaving outbound limiting unchanged: %v", daemon, err)
+		logging.SettingsReadFailed(logger, daemon, "outbound",
+			"leaving outbound limiting unchanged", err)
 		return
 	}
 	if !found {
@@ -62,7 +63,7 @@ func ApplyOutboundSettings(daemon string, l *OutboundLimiter, read OutboundReade
 // RunOutboundMaintenance re-applies the settings every minute so an admin change
 // takes effect without a restart, and prunes the limiter's window table hourly to
 // keep it bounded. It runs until the process exits.
-func RunOutboundMaintenance(daemon string, l *OutboundLimiter, read OutboundReader) {
+func RunOutboundMaintenance(daemon string, logger *logging.Logger, l *OutboundLimiter, read OutboundReader) {
 	applyTick := time.NewTicker(outboundApplyInterval)
 	pruneTick := time.NewTicker(outboundPruneInterval)
 	defer applyTick.Stop()
@@ -70,7 +71,7 @@ func RunOutboundMaintenance(daemon string, l *OutboundLimiter, read OutboundRead
 	for {
 		select {
 		case <-applyTick.C:
-			ApplyOutboundSettings(daemon, l, read)
+			ApplyOutboundSettings(daemon, logger, l, read)
 		case <-pruneTick.C:
 			l.Prune()
 		}
@@ -95,8 +96,8 @@ func StartOutboundLimiter(daemon string, logger *logging.Logger, read OutboundRe
 			Fields:    logging.Fields{"recipients": count},
 		})
 	})
-	ApplyOutboundSettings(daemon, l, read)
-	go RunOutboundMaintenance(daemon, l, read)
+	ApplyOutboundSettings(daemon, logger, l, read)
+	go RunOutboundMaintenance(daemon, logger, l, read)
 	SetOutboundLimiter(l)
 	return l
 }

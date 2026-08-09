@@ -66,8 +66,8 @@ func main() {
 	// out for the window the operator configured, so a client cannot guess
 	// passwords unbounded (nor keep the daemon busy hashing them).
 	srv.Limiter = authlimit.New(0, 0, 0)
-	authlimit.Apply("hermex-dav", srv.Limiter, dir.GetLoginLockoutSettings)
-	go authlimit.RunMaintenance("hermex-dav", srv.Limiter, dir.GetLoginLockoutSettings)
+	authlimit.Apply("hermex-dav", logger, srv.Limiter, dir.GetLoginLockoutSettings)
+	go authlimit.RunMaintenance("hermex-dav", logger, srv.Limiter, dir.GetLoginLockoutSettings)
 	// Scheduling-Outbox iTIP messages with external recipients are enqueued into the
 	// shared relay spool the MTA drains, DKIM-signed with the sending domain's key as
 	// they are spooled (RFC 6638 §5).
@@ -83,8 +83,8 @@ func main() {
 	srv.SetNotify(notify.EnableConsumer(cfg.NotifyURL, cfg.NotifySecret, logger))
 	// CalDAV/CardDAV PUT body caps: read at startup and re-read every minute so an
 	// admin's change applies without a restart; 0 keeps the built-in defaults.
-	applyDAVSizeLimits(dir.GetSizeLimits, srv.SetMaxICal, srv.SetMaxVCard)
-	go runDAVSizeMaintenance(dir.GetSizeLimits, srv.SetMaxICal, srv.SetMaxVCard)
+	applyDAVSizeLimits(logger, dir.GetSizeLimits, srv.SetMaxICal, srv.SetMaxVCard)
+	go runDAVSizeMaintenance(logger, dir.GetSizeLimits, srv.SetMaxICal, srv.SetMaxVCard)
 	addr := cfg.DAVAddr
 	if addr == "" {
 		addr = ":8080"
@@ -97,14 +97,14 @@ func main() {
 	// The operator's inbound message size limit applies to this daemon's sends
 	// too: SMTP refuses an oversized message during DATA, and nothing here ever
 	// reaches an SMTP session.
-	mta.StartMessageSizeLimit("hermex-dav", dir.GetMessageSizeSettings)
+	mta.StartMessageSizeLimit("hermex-dav", logger, dir.GetMessageSizeSettings)
 	// Per-client HTTP request limiter: read the stored settings at startup and
 	// re-read them every minute, so an operator's change applies without a restart.
 	// It is off until an operator enables it, and any read failure leaves it as it
 	// is, so a settings problem never starts throttling clients.
 	httpLimiter := httplimit.NewLimiter()
-	httplimit.Apply("hermex-dav", httpLimiter, dir.GetHTTPRateLimitSettings)
-	go httplimit.RunMaintenance("hermex-dav", httpLimiter, dir.GetHTTPRateLimitSettings)
+	httplimit.Apply("hermex-dav", logger, httpLimiter, dir.GetHTTPRateLimitSettings)
+	go httplimit.RunMaintenance("hermex-dav", logger, httpLimiter, dir.GetHTTPRateLimitSettings)
 	// TLS certificates come from the provider: the config-file cert as a fallback,
 	// overridden by an admin-uploaded cert the provider polls for, so a renewal
 	// applies without a restart.
@@ -141,10 +141,10 @@ func main() {
 // applyDAVSizeLimits reads the stored CalDAV/CardDAV PUT body caps and applies them to
 // the server. A missing row or a read error leaves the caps unchanged, so a settings
 // failure never shrinks them unexpectedly.
-func applyDAVSizeLimits(read func() (directory.SizeLimits, bool, error), setICal, setVCard func(int64)) {
+func applyDAVSizeLimits(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setICal, setVCard func(int64)) {
 	s, found, err := read()
 	if err != nil {
-		log.Printf("hermex-dav: size limits read failed, leaving the body caps unchanged: %v", err)
+		logging.SettingsReadFailed(logger, "hermex-dav", "size-limits", "leaving the body caps unchanged", err)
 		return
 	}
 	if !found {
@@ -156,10 +156,10 @@ func applyDAVSizeLimits(read func() (directory.SizeLimits, bool, error), setICal
 
 // runDAVSizeMaintenance re-applies the DAV PUT body caps every minute so an admin
 // change takes effect without a restart. It runs until the process exits.
-func runDAVSizeMaintenance(read func() (directory.SizeLimits, bool, error), setICal, setVCard func(int64)) {
+func runDAVSizeMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setICal, setVCard func(int64)) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for range tick.C {
-		applyDAVSizeLimits(read, setICal, setVCard)
+		applyDAVSizeLimits(logger, read, setICal, setVCard)
 	}
 }

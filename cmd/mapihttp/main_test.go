@@ -14,7 +14,7 @@ func TestApplyMapiSizeLimit(t *testing.T) {
 	const sentinel int64 = -1
 
 	got := sentinel
-	applyMapiSizeLimit(
+	applyMapiSizeLimit(nil,
 		func() (directory.SizeLimits, bool, error) {
 			return directory.SizeLimits{MapiRequestBytes: 8192}, true, nil
 		},
@@ -24,7 +24,7 @@ func TestApplyMapiSizeLimit(t *testing.T) {
 	}
 
 	got = sentinel
-	applyMapiSizeLimit(
+	applyMapiSizeLimit(nil,
 		func() (directory.SizeLimits, bool, error) {
 			return directory.SizeLimits{}, false, errors.New("db down")
 		},
@@ -34,7 +34,7 @@ func TestApplyMapiSizeLimit(t *testing.T) {
 	}
 
 	got = sentinel
-	applyMapiSizeLimit(
+	applyMapiSizeLimit(nil,
 		func() (directory.SizeLimits, bool, error) { return directory.SizeLimits{}, false, nil },
 		func(n int64) { got = n })
 	if got != sentinel {

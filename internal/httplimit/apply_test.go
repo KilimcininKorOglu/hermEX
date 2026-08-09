@@ -13,7 +13,7 @@ func TestApplyInjectsStoredSettings(t *testing.T) {
 	read := func() (Settings, bool, error) {
 		return Settings{Enabled: true, Burst: 42, WindowSeconds: 15}, true, nil
 	}
-	Apply("test", l, read)
+	Apply("test", nil, l, read)
 	if !l.Enabled() {
 		t.Error("limiter disabled after applying an enabled row")
 	}
@@ -33,19 +33,19 @@ func TestApplyReinjectsOnEveryPoll(t *testing.T) {
 	stored := Settings{Enabled: true, Burst: 100, WindowSeconds: 60}
 	read := func() (Settings, bool, error) { return stored, true, nil }
 
-	Apply("test", l, read)
+	Apply("test", nil, l, read)
 	if l.Burst() != 100 {
 		t.Fatalf("burst after first poll = %d, want 100", l.Burst())
 	}
 
 	stored = Settings{Enabled: true, Burst: 250, WindowSeconds: 30}
-	Apply("test", l, read) // the ticker calls exactly this
+	Apply("test", nil, l, read) // the ticker calls exactly this
 	if l.Burst() != 250 || l.Period() != 30*time.Second {
 		t.Errorf("after the second poll = %d/%v, want 250/30s", l.Burst(), l.Period())
 	}
 
 	stored.Enabled = false
-	Apply("test", l, read)
+	Apply("test", nil, l, read)
 	if l.Enabled() {
 		t.Error("limiter still enabled after the operator turned it off")
 	}
@@ -56,10 +56,10 @@ func TestApplyReinjectsOnEveryPoll(t *testing.T) {
 // on (which would throttle clients because of a database blip).
 func TestApplyKeepsSettingsOnReadError(t *testing.T) {
 	l := NewLimiter()
-	Apply("test", l, func() (Settings, bool, error) {
+	Apply("test", nil, l, func() (Settings, bool, error) {
 		return Settings{Enabled: true, Burst: 77, WindowSeconds: 20}, true, nil
 	})
-	Apply("test", l, func() (Settings, bool, error) {
+	Apply("test", nil, l, func() (Settings, bool, error) {
 		return Settings{}, false, errors.New("directory unreachable")
 	})
 	if !l.Enabled() || l.Burst() != 77 || l.Period() != 20*time.Second {
@@ -73,7 +73,7 @@ func TestApplyKeepsSettingsOnReadError(t *testing.T) {
 // throttling anyone.
 func TestApplyKeepsDefaultsWhenUnset(t *testing.T) {
 	l := NewLimiter()
-	Apply("test", l, func() (Settings, bool, error) { return Settings{}, false, nil })
+	Apply("test", nil, l, func() (Settings, bool, error) { return Settings{}, false, nil })
 	if l.Enabled() {
 		t.Error("limiter enabled with no stored row, want disabled")
 	}

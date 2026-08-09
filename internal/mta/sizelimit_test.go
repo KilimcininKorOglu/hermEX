@@ -84,14 +84,14 @@ func TestApplyMessageSizeSettings(t *testing.T) {
 	SetMaxMessageSize(0)
 	t.Cleanup(func() { SetMaxMessageSize(0) })
 
-	ApplyMessageSizeSettings("test", func() (MessageSizeSettings, bool, error) {
+	ApplyMessageSizeSettings("test", nil, func() (MessageSizeSettings, bool, error) {
 		return MessageSizeSettings{MaxInboundBytes: 4096}, false, nil
 	})
 	if overMessageSize(make([]byte, 8192)) {
 		t.Error("an unsaved settings row applied a limit")
 	}
 
-	ApplyMessageSizeSettings("test", func() (MessageSizeSettings, bool, error) {
+	ApplyMessageSizeSettings("test", nil, func() (MessageSizeSettings, bool, error) {
 		return MessageSizeSettings{MaxInboundBytes: 4096}, true, nil
 	})
 	if !overMessageSize(make([]byte, 8192)) {

@@ -14,7 +14,7 @@ func TestApplyEWSSizeLimit(t *testing.T) {
 	const sentinel int64 = -1
 
 	got := sentinel
-	applyEWSSizeLimit(
+	applyEWSSizeLimit(nil,
 		func() (directory.SizeLimits, bool, error) {
 			return directory.SizeLimits{EWSRequestBytes: 8192}, true, nil
 		},
@@ -24,7 +24,7 @@ func TestApplyEWSSizeLimit(t *testing.T) {
 	}
 
 	got = sentinel
-	applyEWSSizeLimit(
+	applyEWSSizeLimit(nil,
 		func() (directory.SizeLimits, bool, error) {
 			return directory.SizeLimits{}, false, errors.New("db down")
 		},
@@ -34,7 +34,7 @@ func TestApplyEWSSizeLimit(t *testing.T) {
 	}
 
 	got = sentinel
-	applyEWSSizeLimit(
+	applyEWSSizeLimit(nil,
 		func() (directory.SizeLimits, bool, error) { return directory.SizeLimits{}, false, nil },
 		func(n int64) { got = n })
 	if got != sentinel {

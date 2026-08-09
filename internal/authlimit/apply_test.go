@@ -21,7 +21,7 @@ func TestApplyRetunesARunningLimiter(t *testing.T) {
 	l := New(0, 0, 0)
 	l.now = func() time.Time { return now }
 
-	Apply("test", l, stored(Settings{MaxFails: 2, WindowSeconds: 60, LockoutSeconds: 300}))
+	Apply("test", nil, l, stored(Settings{MaxFails: 2, WindowSeconds: 60, LockoutSeconds: 300}))
 	if l.MaxFails() != 2 || l.Window() != time.Minute || l.Lockout() != 5*time.Minute {
 		t.Fatalf("tuning = %d/%s/%s, want 2/1m0s/5m0s", l.MaxFails(), l.Window(), l.Lockout())
 	}
@@ -56,7 +56,7 @@ func TestApplyLoosensAsWellAsTightens(t *testing.T) {
 		t.Fatal("the key was not locked out to begin with")
 	}
 
-	Apply("test", l, stored(Settings{MaxFails: 10, WindowSeconds: 60, LockoutSeconds: 60}))
+	Apply("test", nil, l, stored(Settings{MaxFails: 10, WindowSeconds: 60, LockoutSeconds: 60}))
 	// The existing lockout stands (it was earned under the old rule), but the next
 	// window counts to the new threshold.
 	l.Succeed(key)
@@ -73,7 +73,7 @@ func TestApplyLoosensAsWellAsTightens(t *testing.T) {
 // zero-length window resets nothing.
 func TestApplyIgnoresNonPositiveValues(t *testing.T) {
 	l := New(5, 15*time.Minute, 15*time.Minute)
-	Apply("test", l, stored(Settings{MaxFails: 0, WindowSeconds: -1, LockoutSeconds: 0}))
+	Apply("test", nil, l, stored(Settings{MaxFails: 0, WindowSeconds: -1, LockoutSeconds: 0}))
 	if l.MaxFails() != 5 || l.Window() != 15*time.Minute || l.Lockout() != 15*time.Minute {
 		t.Errorf("a zeroed row retuned the limiter to %d/%s/%s", l.MaxFails(), l.Window(), l.Lockout())
 	}
@@ -84,13 +84,13 @@ func TestApplyIgnoresNonPositiveValues(t *testing.T) {
 // operator's tightening exactly when the database is unhappy.
 func TestApplyKeepsTheCurrentTuningOnFailure(t *testing.T) {
 	l := New(0, 0, 0)
-	Apply("test", l, stored(Settings{MaxFails: 3, WindowSeconds: 60, LockoutSeconds: 60}))
+	Apply("test", nil, l, stored(Settings{MaxFails: 3, WindowSeconds: 60, LockoutSeconds: 60}))
 
-	Apply("test", l, func() (Settings, bool, error) { return Settings{}, false, errors.New("db down") })
+	Apply("test", nil, l, func() (Settings, bool, error) { return Settings{}, false, errors.New("db down") })
 	if l.MaxFails() != 3 {
 		t.Errorf("a read error reset the threshold to %d", l.MaxFails())
 	}
-	Apply("test", l, func() (Settings, bool, error) { return Settings{}, false, nil })
+	Apply("test", nil, l, func() (Settings, bool, error) { return Settings{}, false, nil })
 	if l.MaxFails() != 3 {
 		t.Errorf("an empty settings table reset the threshold to %d", l.MaxFails())
 	}
@@ -100,7 +100,7 @@ func TestApplyKeepsTheCurrentTuningOnFailure(t *testing.T) {
 // behaves exactly as it did before this setting existed.
 func TestApplyWithNoRowKeepsTheDefaults(t *testing.T) {
 	l := New(0, 0, 0)
-	Apply("test", l, func() (Settings, bool, error) { return Settings{}, false, nil })
+	Apply("test", nil, l, func() (Settings, bool, error) { return Settings{}, false, nil })
 	if l.MaxFails() != DefaultMaxFails || l.Window() != DefaultWindow || l.Lockout() != DefaultLockout {
 		t.Errorf("defaults = %d/%s/%s, want the built-in tuning", l.MaxFails(), l.Window(), l.Lockout())
 	}

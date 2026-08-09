@@ -58,6 +58,10 @@ func senderOf(raw []byte) string {
 	return addrs[0].Address
 }
 
+// daemonName identifies this process in the central log and in every settings
+// applier's failure record.
+const daemonName = "hermex-mta"
+
 func main() {
 	cfgPath := flag.String("config", "/etc/hermex/config.json", "path to the JSON config file")
 	flag.Parse()
@@ -82,7 +86,7 @@ func main() {
 		log.Fatalf("hermex-mta: schema: %v", err)
 	}
 	dir.SetLDAPVerifier(ldapauth.New())
-	logger, logClose := logging.Build("hermex-mta", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
+	logger, logClose := logging.Build(daemonName, cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 	objectstore.SetDefaultLogger(logger) // store infra failures route to the central log
 	mta.SetDefaultLogger(logger)         // post-delivery pass failures route to the central log
 
@@ -186,24 +190,24 @@ func main() {
 	// starts disabled; the admin toggle is read at startup and hot-reloaded, and the
 	// triplet table is pruned periodically to stay bounded.
 	greylister := mta.NewGreylister(dir, scorer)
-	applyGreylistSettings(dir, greylister)
-	go runGreylistMaintenance(dir, greylister)
+	applyGreylistSettings(dir, logger, greylister)
+	go runGreylistMaintenance(dir, logger, greylister)
 	// Inbound rate limiting caps how many messages an unauthenticated client network
 	// may send per window. It starts disabled; the stored settings are read at startup
 	// and hot-reloaded, and the window table is pruned periodically to stay bounded.
 	rateLimiter := mta.NewRateLimiter()
-	applyRateLimitSettings(dir, rateLimiter)
-	go runRateLimitMaintenance(dir, rateLimiter)
+	applyRateLimitSettings(dir, logger, rateLimiter)
+	go runRateLimitMaintenance(dir, logger, rateLimiter)
 	// Outbound abuse limiting caps how many external recipients a local account may
 	// send to per window, a compromised account that blasts spam is deferred and the
 	// admin is alerted. It starts disabled; the alert is a central-log event.
-	outboundLimiter := mta.StartOutboundLimiter("hermex-mta", logger, dir.GetOutboundSettings)
+	outboundLimiter := mta.StartOutboundLimiter(daemonName, logger, dir.GetOutboundSettings)
 	// Failed-login throttle on SMTP AUTH: a client address that piles up failed
 	// logins is locked out for the window the operator configured, so submission
 	// cannot be used to guess passwords unbounded.
 	loginLimiter := authlimit.New(0, 0, 0)
-	authlimit.Apply("hermex-mta", loginLimiter, dir.GetLoginLockoutSettings)
-	go authlimit.RunMaintenance("hermex-mta", loginLimiter, dir.GetLoginLockoutSettings)
+	authlimit.Apply(daemonName, logger, loginLimiter, dir.GetLoginLockoutSettings)
+	go authlimit.RunMaintenance(daemonName, logger, loginLimiter, dir.GetLoginLockoutSettings)
 
 	// Wire delivery-time inbox-rule forwarding to the relay spool, gated by the
 	// outbound abuse limiter (the per-user cap). Wired here, not in the mta package,
@@ -234,8 +238,8 @@ func main() {
 	// Spam-history retention: how many of the most recent scored verdicts the
 	// spam_history table keeps. It is read at startup and re-read every minute so an
 	// admin's change applies without a restart.
-	applySpamHistorySettings(dir)
-	go runSpamHistoryMaintenance(dir)
+	applySpamHistorySettings(dir, logger)
+	go runSpamHistoryMaintenance(dir, logger)
 	// Quarantine digest: deliver each user a periodic summary of newly quarantined
 	// mail with signed one-click release links. It needs a shared signing secret (the
 	// webmail release endpoint verifies the same key); without one nothing can be
@@ -263,11 +267,11 @@ func main() {
 	// Inbound message size limit: the max bytes the SMTP server accepts and advertises
 	// (SMTP SIZE). Read at startup and re-read every minute so an admin's change applies
 	// without a restart; 0 means no limit.
-	applyMessageSizeSettings(dir, srv)
-	go runMessageSizeMaintenance(dir, srv)
+	applyMessageSizeSettings(dir, logger, srv)
+	go runMessageSizeMaintenance(dir, logger, srv)
 	// The same limit on the paths that never reach an SMTP session: the send-later
 	// release, and the meeting replies this daemon files.
-	mta.StartMessageSizeLimit("hermex-mta", dir.GetMessageSizeSettings)
+	mta.StartMessageSizeLimit(daemonName, logger, dir.GetMessageSizeSettings)
 	srv.AddListener(ln)
 	log.Printf("hermex-mta listening on %s", addr)
 
@@ -379,8 +383,8 @@ func main() {
 	}
 	// Outbound delivery retry policy (base backoff and max attempts): read at startup
 	// and re-read every minute so an admin's change applies without a restart.
-	applyRelaySettings(dir, relayWorker)
-	go runRelayMaintenance(dir, relayWorker)
+	applyRelaySettings(dir, logger, relayWorker)
+	go runRelayMaintenance(dir, logger, relayWorker)
 	// Joined on shutdown for the same reason as the send-later sweep: an in-flight
 	// pass that settles a delivered recipient must finish before spool.Close runs,
 	// or the settle fails and the next start re-delivers an already-sent message.
@@ -474,14 +478,14 @@ func accessHash(rules []directory.SenderRule) uint64 {
 // applies both to the greylister. A read error leaves that part unchanged, so a
 // transient failure never flips greylisting or resets a timing; a missing timings row
 // keeps the greylister's built-in defaults.
-func applyGreylistSettings(dir *directory.SQLDirectory, g *mta.Greylister) {
+func applyGreylistSettings(dir *directory.SQLDirectory, logger *logging.Logger, g *mta.Greylister) {
 	if on, err := dir.GetGreylistEnabled(); err != nil {
-		log.Printf("hermex-mta: greylist toggle read failed, leaving it unchanged: %v", err)
+		logging.SettingsReadFailed(logger, daemonName, "greylist-toggle", "leaving it unchanged", err)
 	} else {
 		g.SetEnabled(on)
 	}
 	if t, found, err := dir.GetGreylistTimings(); err != nil {
-		log.Printf("hermex-mta: greylist timings read failed, leaving them unchanged: %v", err)
+		logging.SettingsReadFailed(logger, daemonName, "greylist-timings", "leaving them unchanged", err)
 	} else if found {
 		g.SetTimings(t.MinDelay, t.UnconfirmedTTL, t.ConfirmedTTL)
 	}
@@ -490,7 +494,7 @@ func applyGreylistSettings(dir *directory.SQLDirectory, g *mta.Greylister) {
 // runGreylistMaintenance hot-reloads the greylist toggle and timings every minute and
 // prunes the expired triplets hourly, so an admin change applies without a restart
 // and the table stays bounded. It runs until the process exits.
-func runGreylistMaintenance(dir *directory.SQLDirectory, g *mta.Greylister) {
+func runGreylistMaintenance(dir *directory.SQLDirectory, logger *logging.Logger, g *mta.Greylister) {
 	applyTick := time.NewTicker(time.Minute)
 	pruneTick := time.NewTicker(time.Hour)
 	defer applyTick.Stop()
@@ -498,7 +502,7 @@ func runGreylistMaintenance(dir *directory.SQLDirectory, g *mta.Greylister) {
 	for {
 		select {
 		case <-applyTick.C:
-			applyGreylistSettings(dir, g)
+			applyGreylistSettings(dir, logger, g)
 		case <-pruneTick.C:
 			if err := g.Prune(); err != nil {
 				log.Printf("hermex-mta: greylist prune failed: %v", err)
@@ -511,10 +515,10 @@ func runGreylistMaintenance(dir *directory.SQLDirectory, g *mta.Greylister) {
 // limiter. A missing row or a read error leaves the limiter at its defaults, so a
 // settings failure never starts throttling unexpectedly; a transient read error keeps
 // the last applied setting rather than flipping the limiter off.
-func applyRateLimitSettings(dir *directory.SQLDirectory, rl *mta.RateLimiter) {
+func applyRateLimitSettings(dir *directory.SQLDirectory, logger *logging.Logger, rl *mta.RateLimiter) {
 	s, found, err := dir.GetRateLimitSettings()
 	if err != nil {
-		log.Printf("hermex-mta: rate-limit settings read failed, leaving rate limiting unchanged: %v", err)
+		logging.SettingsReadFailed(logger, daemonName, "inbound-rate-limit", "leaving rate limiting unchanged", err)
 		return
 	}
 	if !found {
@@ -527,7 +531,7 @@ func applyRateLimitSettings(dir *directory.SQLDirectory, rl *mta.RateLimiter) {
 // runRateLimitMaintenance re-applies the rate-limit settings every minute so an admin
 // change takes effect without a restart, and prunes the limiter's window table hourly
 // to keep it bounded.
-func runRateLimitMaintenance(dir *directory.SQLDirectory, rl *mta.RateLimiter) {
+func runRateLimitMaintenance(dir *directory.SQLDirectory, logger *logging.Logger, rl *mta.RateLimiter) {
 	applyTick := time.NewTicker(time.Minute)
 	pruneTick := time.NewTicker(time.Hour)
 	defer applyTick.Stop()
@@ -535,7 +539,7 @@ func runRateLimitMaintenance(dir *directory.SQLDirectory, rl *mta.RateLimiter) {
 	for {
 		select {
 		case <-applyTick.C:
-			applyRateLimitSettings(dir, rl)
+			applyRateLimitSettings(dir, logger, rl)
 		case <-pruneTick.C:
 			rl.Prune()
 		}
@@ -546,10 +550,10 @@ func runRateLimitMaintenance(dir *directory.SQLDirectory, rl *mta.RateLimiter) {
 // the directory's runtime bound. A missing row or a read error leaves the bound
 // unchanged, so a settings failure never shrinks the history unexpectedly. Pruning
 // itself happens per-insert in RecordSpamVerdict, so this only re-reads the bound.
-func applySpamHistorySettings(dir *directory.SQLDirectory) {
+func applySpamHistorySettings(dir *directory.SQLDirectory, logger *logging.Logger) {
 	s, found, err := dir.GetSpamHistorySettings()
 	if err != nil {
-		log.Printf("hermex-mta: spam-history retention read failed, leaving it unchanged: %v", err)
+		logging.SettingsReadFailed(logger, daemonName, "spam-history", "leaving the retention unchanged", err)
 		return
 	}
 	if !found {
@@ -560,21 +564,21 @@ func applySpamHistorySettings(dir *directory.SQLDirectory) {
 
 // runSpamHistoryMaintenance re-applies the spam-history retention every minute so an
 // admin change takes effect without a restart. It runs until the process exits.
-func runSpamHistoryMaintenance(dir *directory.SQLDirectory) {
+func runSpamHistoryMaintenance(dir *directory.SQLDirectory, logger *logging.Logger) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for range tick.C {
-		applySpamHistorySettings(dir)
+		applySpamHistorySettings(dir, logger)
 	}
 }
 
 // applyMessageSizeSettings reads the stored inbound message size limit and applies it
 // to the SMTP server. A missing row or a read error leaves the limit unchanged, so a
 // settings failure never starts rejecting mail unexpectedly.
-func applyMessageSizeSettings(dir *directory.SQLDirectory, srv *smtp.Server) {
+func applyMessageSizeSettings(dir *directory.SQLDirectory, logger *logging.Logger, srv *smtp.Server) {
 	s, found, err := dir.GetMessageSizeSettings()
 	if err != nil {
-		log.Printf("hermex-mta: message size settings read failed, leaving the limit unchanged: %v", err)
+		logging.SettingsReadFailed(logger, daemonName, "message-size", "leaving the limit unchanged", err)
 		return
 	}
 	if !found {
@@ -585,11 +589,11 @@ func applyMessageSizeSettings(dir *directory.SQLDirectory, srv *smtp.Server) {
 
 // runMessageSizeMaintenance re-applies the inbound message size limit every minute so
 // an admin change takes effect without a restart. It runs until the process exits.
-func runMessageSizeMaintenance(dir *directory.SQLDirectory, srv *smtp.Server) {
+func runMessageSizeMaintenance(dir *directory.SQLDirectory, logger *logging.Logger, srv *smtp.Server) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for range tick.C {
-		applyMessageSizeSettings(dir, srv)
+		applyMessageSizeSettings(dir, logger, srv)
 	}
 }
 
@@ -606,10 +610,10 @@ func daneResolver(addr string) *dane.Resolver {
 // applyRelaySettings reads the stored outbound retry policy and applies it to the relay
 // worker. A missing row or a read error leaves the policy unchanged, so a settings
 // failure never alters delivery behavior unexpectedly.
-func applyRelaySettings(dir *directory.SQLDirectory, w *relay.Worker) {
+func applyRelaySettings(dir *directory.SQLDirectory, logger *logging.Logger, w *relay.Worker) {
 	s, found, err := dir.GetRelaySettings()
 	if err != nil {
-		log.Printf("hermex-mta: relay settings read failed, leaving the retry policy unchanged: %v", err)
+		logging.SettingsReadFailed(logger, daemonName, "relay", "leaving the retry policy unchanged", err)
 		return
 	}
 	if !found {
@@ -620,11 +624,11 @@ func applyRelaySettings(dir *directory.SQLDirectory, w *relay.Worker) {
 
 // runRelayMaintenance re-applies the outbound retry policy every minute so an admin
 // change takes effect without a restart. It runs until the process exits.
-func runRelayMaintenance(dir *directory.SQLDirectory, w *relay.Worker) {
+func runRelayMaintenance(dir *directory.SQLDirectory, logger *logging.Logger, w *relay.Worker) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for range tick.C {
-		applyRelaySettings(dir, w)
+		applyRelaySettings(dir, logger, w)
 	}
 }
 

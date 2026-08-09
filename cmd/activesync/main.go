@@ -76,8 +76,8 @@ func main() {
 	// out for the window the operator configured, so a client cannot guess
 	// passwords unbounded (nor keep the daemon busy hashing them).
 	srv.Limiter = authlimit.New(0, 0, 0)
-	authlimit.Apply("hermex-activesync", srv.Limiter, dir.GetLoginLockoutSettings)
-	go authlimit.RunMaintenance("hermex-activesync", srv.Limiter, dir.GetLoginLockoutSettings)
+	authlimit.Apply("hermex-activesync", logger, srv.Limiter, dir.GetLoginLockoutSettings)
+	go authlimit.RunMaintenance("hermex-activesync", logger, srv.Limiter, dir.GetLoginLockoutSettings)
 	srv.SetNotify(notify.EnableConsumer(cfg.NotifyURL, cfg.NotifySecret, logger))
 	// Enqueue external recipients of SendMail into the shared relay spool the MTA
 	// drains; without it ActiveSync would send local-only.
@@ -90,8 +90,8 @@ func main() {
 	srv.Sessions = dir
 	// ActiveSync request-body cap: read at startup and re-read every minute so an
 	// admin's change applies without a restart; 0 keeps the built-in default.
-	applyActiveSyncSizeLimit(dir.GetSizeLimits, activesync.SetMaxRequestBody)
-	go runActiveSyncSizeMaintenance(dir.GetSizeLimits, activesync.SetMaxRequestBody)
+	applyActiveSyncSizeLimit(logger, dir.GetSizeLimits, activesync.SetMaxRequestBody)
+	go runActiveSyncSizeMaintenance(logger, dir.GetSizeLimits, activesync.SetMaxRequestBody)
 	addr := cfg.ActiveSyncAddr
 	if addr == "" {
 		addr = ":8080"
@@ -104,14 +104,14 @@ func main() {
 	// The operator's inbound message size limit applies to this daemon's sends
 	// too: SMTP refuses an oversized message during DATA, and nothing here ever
 	// reaches an SMTP session.
-	mta.StartMessageSizeLimit("hermex-activesync", dir.GetMessageSizeSettings)
+	mta.StartMessageSizeLimit("hermex-activesync", logger, dir.GetMessageSizeSettings)
 	// Per-client HTTP request limiter: read the stored settings at startup and
 	// re-read them every minute, so an operator's change applies without a restart.
 	// It is off until an operator enables it, and any read failure leaves it as it
 	// is, so a settings problem never starts throttling clients.
 	httpLimiter := httplimit.NewLimiter()
-	httplimit.Apply("hermex-activesync", httpLimiter, dir.GetHTTPRateLimitSettings)
-	go httplimit.RunMaintenance("hermex-activesync", httpLimiter, dir.GetHTTPRateLimitSettings)
+	httplimit.Apply("hermex-activesync", logger, httpLimiter, dir.GetHTTPRateLimitSettings)
+	go httplimit.RunMaintenance("hermex-activesync", logger, httpLimiter, dir.GetHTTPRateLimitSettings)
 	// TLS certificates come from the provider: the config-file cert as a fallback,
 	// overridden by an admin-uploaded cert the provider polls for, so a renewal
 	// applies without a restart.
@@ -149,10 +149,10 @@ func main() {
 // applyActiveSyncSizeLimit reads the stored ActiveSync request-body cap and applies it.
 // A missing row or a read error leaves the cap unchanged, so a settings failure never
 // shrinks it unexpectedly.
-func applyActiveSyncSizeLimit(read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
+func applyActiveSyncSizeLimit(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
 	s, found, err := read()
 	if err != nil {
-		log.Printf("hermex-activesync: size limits read failed, leaving the request cap unchanged: %v", err)
+		logging.SettingsReadFailed(logger, "hermex-activesync", "size-limits", "leaving the request cap unchanged", err)
 		return
 	}
 	if !found {
@@ -163,11 +163,11 @@ func applyActiveSyncSizeLimit(read func() (directory.SizeLimits, bool, error), s
 
 // runActiveSyncSizeMaintenance re-applies the ActiveSync request-body cap every minute
 // so an admin change takes effect without a restart. It runs until the process exits.
-func runActiveSyncSizeMaintenance(read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
+func runActiveSyncSizeMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for range tick.C {
-		applyActiveSyncSizeLimit(read, setRequestBody)
+		applyActiveSyncSizeLimit(logger, read, setRequestBody)
 	}
 }
 

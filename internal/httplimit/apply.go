@@ -1,10 +1,10 @@
 package httplimit
 
 import (
-	"log"
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 )
 
 // Settings is the stored configuration a daemon reads for its limiter. It is the
@@ -27,11 +27,14 @@ const (
 // Apply reads the stored settings and applies them to the limiter. A missing row
 // or a read error leaves the limiter as it is, so a settings failure never starts
 // throttling unexpectedly and a transient read error keeps the last applied value
-// rather than flipping the limiter off. daemon names the caller in the log line.
-func Apply(daemon string, l *Limiter, read Reader) {
+// rather than flipping the limiter off. daemon names the caller in the log line, and
+// logger carries the failure to the central store, so an operator can see that the
+// running limits have stopped tracking the stored ones.
+func Apply(daemon string, logger *logging.Logger, l *Limiter, read Reader) {
 	s, found, err := read()
 	if err != nil {
-		log.Printf("%s: HTTP rate-limit settings read failed, leaving rate limiting unchanged: %v", daemon, err)
+		logging.SettingsReadFailed(logger, daemon, "http-rate-limit",
+			"leaving rate limiting unchanged", err)
 		return
 	}
 	if !found {
@@ -44,7 +47,7 @@ func Apply(daemon string, l *Limiter, read Reader) {
 // RunMaintenance re-applies the settings every minute so an admin change takes
 // effect without a restart, and prunes the limiter's window table hourly to keep
 // it bounded. It runs until the process exits.
-func RunMaintenance(daemon string, l *Limiter, read Reader) {
+func RunMaintenance(daemon string, logger *logging.Logger, l *Limiter, read Reader) {
 	applyTick := time.NewTicker(applyInterval)
 	pruneTick := time.NewTicker(pruneInterval)
 	defer applyTick.Stop()
@@ -52,7 +55,7 @@ func RunMaintenance(daemon string, l *Limiter, read Reader) {
 	for {
 		select {
 		case <-applyTick.C:
-			Apply(daemon, l, read)
+			Apply(daemon, logger, l, read)
 		case <-pruneTick.C:
 			l.Prune()
 		}

@@ -108,8 +108,8 @@ func main() {
 	// change applies without a restart; the limiter is off until enabled and a read
 	// failure leaves it as it is.
 	httpLimiter := httplimit.NewLimiter()
-	httplimit.Apply("hermex-gateway", httpLimiter, dir.GetHTTPRateLimitSettings)
-	go httplimit.RunMaintenance("hermex-gateway", httpLimiter, dir.GetHTTPRateLimitSettings)
+	httplimit.Apply("hermex-gateway", logger, httpLimiter, dir.GetHTTPRateLimitSettings)
+	go httplimit.RunMaintenance("hermex-gateway", logger, httpLimiter, dir.GetHTTPRateLimitSettings)
 	hs, err := serve.New(addr, h, tlsSrc, logger, logging.Gateway, httpLimiter, serve.FrontDoor())
 	if err != nil {
 		log.Fatalf("hermex-gateway: %v", err)

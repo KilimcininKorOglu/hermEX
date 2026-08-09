@@ -14,7 +14,7 @@ func TestApplyDAVSizeLimits(t *testing.T) {
 	const sentinel int64 = -1
 
 	ical, vcard := sentinel, sentinel
-	applyDAVSizeLimits(
+	applyDAVSizeLimits(nil,
 		func() (directory.SizeLimits, bool, error) {
 			return directory.SizeLimits{DAVICalBytes: 1000, DAVVCardBytes: 2000}, true, nil
 		},
@@ -24,7 +24,7 @@ func TestApplyDAVSizeLimits(t *testing.T) {
 	}
 
 	ical, vcard = sentinel, sentinel
-	applyDAVSizeLimits(
+	applyDAVSizeLimits(nil,
 		func() (directory.SizeLimits, bool, error) {
 			return directory.SizeLimits{}, false, errors.New("db down")
 		},
@@ -34,7 +34,7 @@ func TestApplyDAVSizeLimits(t *testing.T) {
 	}
 
 	ical, vcard = sentinel, sentinel
-	applyDAVSizeLimits(
+	applyDAVSizeLimits(nil,
 		func() (directory.SizeLimits, bool, error) { return directory.SizeLimits{}, false, nil },
 		func(n int64) { ical = n }, func(n int64) { vcard = n })
 	if ical != sentinel || vcard != sentinel {

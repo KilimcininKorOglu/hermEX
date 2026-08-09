@@ -1,11 +1,11 @@
 package mta
 
 import (
-	"log"
 	"sync/atomic"
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 )
 
 // MessageSizeSettings is the stored inbound message size limit. The alias keeps
@@ -39,11 +39,12 @@ func SetMaxMessageSize(n int64) { maxMessageBytes.Store(n) }
 
 // ApplyMessageSizeSettings reads the stored limit and applies it. A missing row or
 // a read error leaves the current value in place, so a settings failure never
-// starts rejecting mail unexpectedly. daemon names the caller in the log line.
-func ApplyMessageSizeSettings(daemon string, read MessageSizeReader) {
+// starts rejecting mail unexpectedly. daemon names the caller in the log line, and
+// logger carries the failure to the central store so a stale cap is visible.
+func ApplyMessageSizeSettings(daemon string, logger *logging.Logger, read MessageSizeReader) {
 	s, found, err := read()
 	if err != nil {
-		log.Printf("%s: message size settings read failed, leaving the limit unchanged: %v", daemon, err)
+		logging.SettingsReadFailed(logger, daemon, "message-size", "leaving the limit unchanged", err)
 		return
 	}
 	if !found {
@@ -54,11 +55,11 @@ func ApplyMessageSizeSettings(daemon string, read MessageSizeReader) {
 
 // RunMessageSizeMaintenance re-applies the limit every minute so an admin change
 // takes effect without a restart. It runs until the process exits.
-func RunMessageSizeMaintenance(daemon string, read MessageSizeReader) {
+func RunMessageSizeMaintenance(daemon string, logger *logging.Logger, read MessageSizeReader) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for range tick.C {
-		ApplyMessageSizeSettings(daemon, read)
+		ApplyMessageSizeSettings(daemon, logger, read)
 	}
 }
 
@@ -66,9 +67,9 @@ func RunMessageSizeMaintenance(daemon string, read MessageSizeReader) {
 // binary that can submit mail calls it, so the operator's cap holds on the paths
 // that never pass through an SMTP session (webmail, EWS, ActiveSync, ROP, DAV
 // scheduling, send-later release).
-func StartMessageSizeLimit(daemon string, read MessageSizeReader) {
-	ApplyMessageSizeSettings(daemon, read)
-	go RunMessageSizeMaintenance(daemon, read)
+func StartMessageSizeLimit(daemon string, logger *logging.Logger, read MessageSizeReader) {
+	ApplyMessageSizeSettings(daemon, logger, read)
+	go RunMessageSizeMaintenance(daemon, logger, read)
 }
 
 // overMessageSize reports whether raw exceeds the configured limit.

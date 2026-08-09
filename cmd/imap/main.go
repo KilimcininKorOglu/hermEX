@@ -79,13 +79,13 @@ func main() {
 	// Failed-login lockout: read the stored tuning at startup and re-read it every
 	// minute, so an operator can tighten it during a credential-stuffing wave, or
 	// loosen it when legitimate users are being locked out, without a restart.
-	authlimit.Apply("hermex-imap", srv.Limiter, dir.GetLoginLockoutSettings)
-	go authlimit.RunMaintenance("hermex-imap", srv.Limiter, dir.GetLoginLockoutSettings)
+	authlimit.Apply("hermex-imap", logger, srv.Limiter, dir.GetLoginLockoutSettings)
+	go authlimit.RunMaintenance("hermex-imap", logger, srv.Limiter, dir.GetLoginLockoutSettings)
 	srv.SetNotify(notify.EnableConsumer(cfg.NotifyURL, cfg.NotifySecret, logger))
 	// IMAP literal size cap: read at startup and re-read every minute so an admin's
 	// change applies without a restart; 0 keeps the built-in default.
-	applyIMAPSizeLimit(dir.GetSizeLimits, srv.SetMaxLiteralSize)
-	go runIMAPSizeMaintenance(dir.GetSizeLimits, srv.SetMaxLiteralSize)
+	applyIMAPSizeLimit(logger, dir.GetSizeLimits, srv.SetMaxLiteralSize)
+	go runIMAPSizeMaintenance(logger, dir.GetSizeLimits, srv.SetMaxLiteralSize)
 	// TLS certificates come from the provider: the config-file cert as a fallback,
 	// overridden by an admin-uploaded cert the provider polls for, so a renewal
 	// applies without a restart.
@@ -132,10 +132,10 @@ func main() {
 // applyIMAPSizeLimit reads the stored IMAP literal cap and applies it to the server. A
 // missing row or a read error leaves the cap unchanged, so a settings failure never
 // shrinks the limit unexpectedly.
-func applyIMAPSizeLimit(read func() (directory.SizeLimits, bool, error), setLiteral func(int64)) {
+func applyIMAPSizeLimit(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setLiteral func(int64)) {
 	s, found, err := read()
 	if err != nil {
-		log.Printf("hermex-imap: size limits read failed, leaving the literal cap unchanged: %v", err)
+		logging.SettingsReadFailed(logger, "hermex-imap", "size-limits", "leaving the literal cap unchanged", err)
 		return
 	}
 	if !found {
@@ -146,10 +146,10 @@ func applyIMAPSizeLimit(read func() (directory.SizeLimits, bool, error), setLite
 
 // runIMAPSizeMaintenance re-applies the IMAP literal cap every minute so an admin
 // change takes effect without a restart. It runs until the process exits.
-func runIMAPSizeMaintenance(read func() (directory.SizeLimits, bool, error), setLiteral func(int64)) {
+func runIMAPSizeMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setLiteral func(int64)) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for range tick.C {
-		applyIMAPSizeLimit(read, setLiteral)
+		applyIMAPSizeLimit(logger, read, setLiteral)
 	}
 }

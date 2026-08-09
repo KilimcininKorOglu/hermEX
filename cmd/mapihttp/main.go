@@ -77,8 +77,8 @@ func main() {
 	// passwords unbounded (nor keep the daemon busy hashing them).
 	loginLimiter := authlimit.New(0, 0, 0)
 	srv.SetLimiter(loginLimiter)
-	authlimit.Apply("hermex-mapihttp", loginLimiter, dir.GetLoginLockoutSettings)
-	go authlimit.RunMaintenance("hermex-mapihttp", loginLimiter, dir.GetLoginLockoutSettings)
+	authlimit.Apply("hermex-mapihttp", logger, loginLimiter, dir.GetLoginLockoutSettings)
+	go authlimit.RunMaintenance("hermex-mapihttp", logger, loginLimiter, dir.GetLoginLockoutSettings)
 	srv.SetLogger(logger)
 
 	// Push notifications: publish this daemon's own mailbox writes to the relay, and
@@ -101,18 +101,18 @@ func main() {
 	// The operator's inbound message size limit applies to this daemon's sends
 	// too: SMTP refuses an oversized message during DATA, and nothing here ever
 	// reaches an SMTP session.
-	mta.StartMessageSizeLimit("hermex-mapihttp", dir.GetMessageSizeSettings)
+	mta.StartMessageSizeLimit("hermex-mapihttp", logger, dir.GetMessageSizeSettings)
 	// MAPI/HTTP request-body cap: read at startup and re-read every minute so an admin's
 	// change applies without a restart; 0 keeps the built-in default.
-	applyMapiSizeLimit(dir.GetSizeLimits, mapihttp.SetMaxRequestBody)
-	go runMapiSizeMaintenance(dir.GetSizeLimits, mapihttp.SetMaxRequestBody)
+	applyMapiSizeLimit(logger, dir.GetSizeLimits, mapihttp.SetMaxRequestBody)
+	go runMapiSizeMaintenance(logger, dir.GetSizeLimits, mapihttp.SetMaxRequestBody)
 	// Per-client HTTP request limiter: read the stored settings at startup and
 	// re-read them every minute, so an operator's change applies without a restart.
 	// It is off until an operator enables it, and any read failure leaves it as it
 	// is, so a settings problem never starts throttling clients.
 	httpLimiter := httplimit.NewLimiter()
-	httplimit.Apply("hermex-mapihttp", httpLimiter, dir.GetHTTPRateLimitSettings)
-	go httplimit.RunMaintenance("hermex-mapihttp", httpLimiter, dir.GetHTTPRateLimitSettings)
+	httplimit.Apply("hermex-mapihttp", logger, httpLimiter, dir.GetHTTPRateLimitSettings)
+	go httplimit.RunMaintenance("hermex-mapihttp", logger, httpLimiter, dir.GetHTTPRateLimitSettings)
 	// TLS certificates come from the provider: the config-file cert as a fallback,
 	// overridden by an admin-uploaded cert the provider polls for, so a renewal
 	// applies without a restart.
@@ -152,10 +152,10 @@ func main() {
 // applyMapiSizeLimit reads the stored MAPI/HTTP request-body cap and applies it. A
 // missing row or a read error leaves the cap unchanged, so a settings failure never
 // shrinks it unexpectedly.
-func applyMapiSizeLimit(read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
+func applyMapiSizeLimit(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
 	s, found, err := read()
 	if err != nil {
-		log.Printf("hermex-mapi: size limits read failed, leaving the request cap unchanged: %v", err)
+		logging.SettingsReadFailed(logger, "hermex-mapihttp", "size-limits", "leaving the request cap unchanged", err)
 		return
 	}
 	if !found {
@@ -166,10 +166,10 @@ func applyMapiSizeLimit(read func() (directory.SizeLimits, bool, error), setRequ
 
 // runMapiSizeMaintenance re-applies the MAPI/HTTP request-body cap every minute so an
 // admin change takes effect without a restart. It runs until the process exits.
-func runMapiSizeMaintenance(read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
+func runMapiSizeMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for range tick.C {
-		applyMapiSizeLimit(read, setRequestBody)
+		applyMapiSizeLimit(logger, read, setRequestBody)
 	}
 }

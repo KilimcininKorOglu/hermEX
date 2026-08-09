@@ -110,14 +110,14 @@ func TestDeliverAndRelayWithoutLimiterIsUnchanged(t *testing.T) {
 // no stored row leaves the limiter alone, a stored row applies without a restart.
 func TestApplyOutboundSettings(t *testing.T) {
 	l := NewOutboundLimiter()
-	ApplyOutboundSettings("test", l, func() (OutboundSettings, bool, error) {
+	ApplyOutboundSettings("test", nil, l, func() (OutboundSettings, bool, error) {
 		return OutboundSettings{}, false, nil
 	})
 	if !l.Allow("alice@acme.test") {
 		t.Error("an unsaved settings row enabled limiting")
 	}
 
-	ApplyOutboundSettings("test", l, func() (OutboundSettings, bool, error) {
+	ApplyOutboundSettings("test", nil, l, func() (OutboundSettings, bool, error) {
 		return OutboundSettings{Enabled: true, RecipientCap: 1, WindowSeconds: 3600}, true, nil
 	})
 	if !l.Allow("bob@acme.test") {

@@ -83,15 +83,15 @@ func main() {
 	// Failed-login lockout: read the stored tuning at startup and re-read it every
 	// minute, so an operator can tighten it during a credential-stuffing wave, or
 	// loosen it when legitimate users are being locked out, without a restart.
-	authlimit.Apply("hermex-webmail2", api.Limiter(), dir.GetLoginLockoutSettings)
-	go authlimit.RunMaintenance("hermex-webmail2", api.Limiter(), dir.GetLoginLockoutSettings)
+	authlimit.Apply("hermex-webmail2", logger, api.Limiter(), dir.GetLoginLockoutSettings)
+	go authlimit.RunMaintenance("hermex-webmail2", logger, api.Limiter(), dir.GetLoginLockoutSettings)
 	api.Pub = publicfolder.New(cfg)             // per-domain public folders, rooted at the config's HomedirFor
 	api.DigestSecret = []byte(cfg.DigestSecret) // verifies quarantine-digest release links (empty disables them)
 
 	// Webmail request-body cap: read at startup and re-read every minute so an admin's
 	// change applies without a restart; 0 keeps the built-in default.
-	applyWebmailSizeLimit(dir.GetSizeLimits, webmail2api.SetMaxRequestBody)
-	go runWebmailSizeMaintenance(dir.GetSizeLimits, webmail2api.SetMaxRequestBody)
+	applyWebmailSizeLimit(logger, dir.GetSizeLimits, webmail2api.SetMaxRequestBody)
+	go runWebmailSizeMaintenance(logger, dir.GetSizeLimits, webmail2api.SetMaxRequestBody)
 	addr := cfg.Webmail2Addr
 	if addr == "" {
 		addr = ":8080"
@@ -104,7 +104,7 @@ func main() {
 	// The operator's inbound message size limit applies to this daemon's sends
 	// too: SMTP refuses an oversized message during DATA, and nothing here ever
 	// reaches an SMTP session.
-	mta.StartMessageSizeLimit("hermex-webmail2", dir.GetMessageSizeSettings)
+	mta.StartMessageSizeLimit("hermex-webmail2", logger, dir.GetMessageSizeSettings)
 	// Per-client HTTP request limiter: read the stored settings at startup and
 	// re-read them every minute, so an operator's change applies without a restart.
 	// It is off until an operator enables it, and any read failure leaves it as it
@@ -112,8 +112,8 @@ func main() {
 	// of every kind; the failed-login throttle in internal/authlimit is separate and
 	// stays in place.
 	httpLimiter := httplimit.NewLimiter()
-	httplimit.Apply("hermex-webmail2", httpLimiter, dir.GetHTTPRateLimitSettings)
-	go httplimit.RunMaintenance("hermex-webmail2", httpLimiter, dir.GetHTTPRateLimitSettings)
+	httplimit.Apply("hermex-webmail2", logger, httpLimiter, dir.GetHTTPRateLimitSettings)
+	go httplimit.RunMaintenance("hermex-webmail2", logger, httpLimiter, dir.GetHTTPRateLimitSettings)
 	// TLS certificates come from the provider: the config-file cert as a fallback,
 	// overridden by an admin-uploaded cert the provider polls for, so a renewal
 	// applies without a restart.
@@ -152,10 +152,10 @@ func main() {
 // applyWebmailSizeLimit reads the stored webmail request-body cap and applies it. A
 // missing row or a read error leaves the cap unchanged, so a settings failure never
 // shrinks it unexpectedly.
-func applyWebmailSizeLimit(read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
+func applyWebmailSizeLimit(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
 	s, found, err := read()
 	if err != nil {
-		log.Printf("hermex-webmail2: size limits read failed, leaving the request cap unchanged: %v", err)
+		logging.SettingsReadFailed(logger, "hermex-webmail2", "size-limits", "leaving the request cap unchanged", err)
 		return
 	}
 	if !found {
@@ -166,10 +166,10 @@ func applyWebmailSizeLimit(read func() (directory.SizeLimits, bool, error), setR
 
 // runWebmailSizeMaintenance re-applies the webmail request-body cap every minute so an
 // admin change takes effect without a restart. It runs until the process exits.
-func runWebmailSizeMaintenance(read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
+func runWebmailSizeMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for range tick.C {
-		applyWebmailSizeLimit(read, setRequestBody)
+		applyWebmailSizeLimit(logger, read, setRequestBody)
 	}
 }
