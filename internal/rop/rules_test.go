@@ -222,3 +222,40 @@ func TestModifyRulesBatchAlignment(t *testing.T) {
 		t.Errorf("GetRulesTable ec = %#x", ec)
 	}
 }
+
+// TestDelegateRulesTableRequiresReadAny proves a delegate holding only Visible on a
+// folder cannot read its rules. Opening a folder requires Visible alone, so without
+// its own gate this handler handed over the rules' conditions and actions, which
+// carry forward-to addresses, block patterns and vacation text: mailbox
+// configuration a merely visible folder must not expose.
+func TestDelegateRulesTableRequiresReadAny(t *testing.T) {
+	dir := t.TempDir()
+	const delegate = "delegate@hermex.test"
+
+	grantFolderPermission(t, dir, int64(mapi.PrivateFIDInbox), delegate, mapi.RightsReviewer)     // ReadAny|Visible
+	grantFolderPermission(t, dir, int64(mapi.PrivateFIDSentItems), delegate, mapi.FrightsVisible) // Visible only
+
+	sess, logonH := delegateLogon(t, dir, delegate)
+	defer sess.Close()
+
+	// Visible only: the folder opens, its rules do not.
+	sentEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDSentItems))
+	openSent, h := sess.Dispatch(buildOpenFolder(0, 1, sentEID), []uint32{logonH, 0xFFFFFFFF})
+	if ec := ropResultEC(t, openSent); ec != ecSuccess {
+		t.Fatalf("OpenFolder(SentItems) ec = %#x, want success (Visible held)", ec)
+	}
+	sentH := h[1]
+	if ec := ropResultEC(t, mustDispatch(sess, buildGetRulesTable(0, 1, 0x40), sentH, 0xFFFFFFFF)); ec != ecAccessDenied {
+		t.Errorf("GetRulesTable(SentItems) ec = %#x, want AccessDenied (no ReadAny)", ec)
+	}
+
+	// ReadAny: the same call succeeds, so the gate refuses only what it should.
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	openInbox, h2 := sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
+	if ec := ropResultEC(t, openInbox); ec != ecSuccess {
+		t.Fatalf("OpenFolder(Inbox) ec = %#x, want success", ec)
+	}
+	if ec := ropResultEC(t, mustDispatch(sess, buildGetRulesTable(0, 1, 0x40), h2[1], 0xFFFFFFFF)); ec != ecSuccess {
+		t.Errorf("GetRulesTable(Inbox) ec = %#x, want success (ReadAny held)", ec)
+	}
+}

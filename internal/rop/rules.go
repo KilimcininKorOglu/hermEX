@@ -26,6 +26,13 @@ func (s *Session) ropGetRulesTable(p *ext.Pull, out *ext.Push, handles []uint32,
 		writeErr(out, ropGetRulesTable, ohindex, ecError)
 		return true
 	}
+	// Opening the folder required only Visible; reading its rules requires ReadAny,
+	// the same gate the contents table takes. A rule carries forward-to addresses,
+	// block patterns and vacation text, so it is mailbox configuration a merely
+	// visible folder must not hand over.
+	if s.denyWrite(out, ropGetRulesTable, ohindex, folder.store, folder.folderID, mapi.FrightsReadAny) {
+		return true
+	}
 	bags, err := ruleBags(folder.store, folder.folderID)
 	if err != nil {
 		writeErr(out, ropGetRulesTable, ohindex, ecError)
