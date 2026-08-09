@@ -30,6 +30,13 @@ func main() {
 	if err != nil {
 		log.Fatalf("hermex-notify: %v", err)
 	}
+	// The relay serves nobody without a shared secret. Both endpoints are gated by
+	// the same check, and subscribing alone reveals which mailbox is receiving and
+	// reading mail, so refusing to start is the only safe reading of "unset": an
+	// insecure mode must never be what an omitted field gets you.
+	if cfg.NotifySecret == "" {
+		log.Fatal("hermex-notify: notify_secret is required")
+	}
 	logger, logClose := logging.Build("hermex-notify", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
 
 	srv := notifyd.New(cfg.NotifySecret, logger)

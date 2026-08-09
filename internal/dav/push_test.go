@@ -14,6 +14,10 @@ import (
 	"hermex/internal/objectstore"
 )
 
+// pushTestSecret is the relay bearer this test shares between the stub relay,
+// its consumer and its publisher: the relay serves nobody without one.
+const pushTestSecret = "dav-push-test-secret"
+
 // TestPushTransportAdvertised confirms a calendar collection PROPFIND advertises the
 // calendarserver-push transport pointing at the /dav/push long-poll, with a pushkey, so
 // a client discovers how to subscribe (#118).
@@ -32,11 +36,11 @@ func TestPushTransportAdvertised(t *testing.T) {
 // verify, gated on LATENCY (the cadence floor is 30s, so a return within 5s can only be
 // a wake, not a poll timeout).
 func TestPushPollWakesOnChange(t *testing.T) {
-	relay := httptest.NewServer(notifyd.New("", nil).Handler())
+	relay := httptest.NewServer(notifyd.New(pushTestSecret, nil).Handler())
 	t.Cleanup(relay.Close)
-	consumer := notify.NewConsumer(relay.URL, "", nil)
+	consumer := notify.NewConsumer(relay.URL, pushTestSecret, nil)
 	t.Cleanup(consumer.Close)
-	publisher := notify.NewPublisher(relay.URL, "")
+	publisher := notify.NewPublisher(relay.URL, pushTestSecret)
 
 	mboxDir := filepath.Join(t.TempDir(), "alice")
 	st, err := objectstore.Open(mboxDir)

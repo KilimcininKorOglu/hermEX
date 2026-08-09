@@ -64,12 +64,16 @@ func (s *Server) Handler() http.Handler {
 	return mux
 }
 
-// authorized reports whether the request carries the shared bearer secret. An
-// empty configured secret disables the check (dev only). The compare is
-// constant-time so the endpoint does not leak the secret through timing.
+// authorized reports whether the request carries the shared bearer secret. It
+// fails closed on an empty configured secret: both endpoints are gated by this one
+// function, and subscribing alone is a live feed of which mailbox is receiving and
+// reading mail, so "no secret configured" must mean "serve nobody" rather than
+// "serve everybody". cmd/notify refuses to start without one, so an empty secret
+// here means a library caller built the server wrong. The compare is constant-time
+// so the endpoint does not leak the secret through timing.
 func (s *Server) authorized(r *http.Request) bool {
 	if s.secret == "" {
-		return true
+		return false
 	}
 	const prefix = "Bearer "
 	h := r.Header.Get("Authorization")

@@ -74,7 +74,7 @@ type Config struct {
 	// best-effort accelerator, never a delivery requirement.
 	NotifyAddr   string `json:"notify_addr"`   // the notify daemon's own listen address (default ":8080"); only the notify daemon reads it
 	NotifyURL    string `json:"notify_url"`    // base URL producers/consumers reach the notify daemon at (e.g. "http://notify:8080"); empty = push disabled, poll-only
-	NotifySecret string `json:"notify_secret"` // shared bearer secret authenticating publish/subscribe; empty disables the auth check (dev only)
+	NotifySecret string `json:"notify_secret"` // shared bearer secret authenticating publish/subscribe; required to serve the relay, which refuses to start without it
 
 	HealthTargets []HealthTarget `json:"health_targets"` // daemons the admin Live status page probes (each daemon's /healthz URL)
 }

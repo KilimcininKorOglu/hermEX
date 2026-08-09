@@ -12,6 +12,10 @@ import (
 	"time"
 )
 
+// testSecret is the shared bearer every test presents: the relay serves nobody
+// without one, so there is no unauthenticated shortcut to take here either.
+const testSecret = "notifyd-test-secret"
+
 // openStream starts a GET /events consumer and returns the response once its
 // headers arrive, at which point the relay has already registered the consumer's
 // channel, so a subsequent publish cannot race ahead of registration.
@@ -89,14 +93,14 @@ func publish(t *testing.T, ts *httptest.Server, bearer string, ev Event) *http.R
 // TestPublishReachesConsumer proves the core relay contract: an event POSTed to
 // /publish is delivered verbatim to a connected /events consumer.
 func TestPublishReachesConsumer(t *testing.T) {
-	ts := httptest.NewServer(New("", nil).Handler())
+	ts := httptest.NewServer(New(testSecret, nil).Handler())
 	defer ts.Close()
 
-	resp := openStream(t, ts, "")
+	resp := openStream(t, ts, testSecret)
 	defer resp.Body.Close()
 
 	want := Event{Mailbox: "/data/mailboxes/user/acme.test/alice", Op: "create", CN: 42, Mid: "7"}
-	if pr := publish(t, ts, "", want); pr.StatusCode != http.StatusNoContent {
+	if pr := publish(t, ts, testSecret, want); pr.StatusCode != http.StatusNoContent {
 		t.Fatalf("publish status = %d, want 204", pr.StatusCode)
 	}
 
@@ -109,16 +113,16 @@ func TestPublishReachesConsumer(t *testing.T) {
 // TestPublishFanout proves a single publish reaches every connected consumer
 // (broadcast, not point-to-point).
 func TestPublishFanout(t *testing.T) {
-	ts := httptest.NewServer(New("", nil).Handler())
+	ts := httptest.NewServer(New(testSecret, nil).Handler())
 	defer ts.Close()
 
-	a := openStream(t, ts, "")
+	a := openStream(t, ts, testSecret)
 	defer a.Body.Close()
-	b := openStream(t, ts, "")
+	b := openStream(t, ts, testSecret)
 	defer b.Body.Close()
 
 	want := Event{Mailbox: "/data/mailboxes/user/acme.test/bob", Op: "flags", CN: 9}
-	publish(t, ts, "", want)
+	publish(t, ts, testSecret, want)
 
 	if got := readEvent(t, a.Body); got != want {
 		t.Errorf("consumer A = %+v, want %+v", got, want)
@@ -164,10 +168,11 @@ func TestBearerRequired(t *testing.T) {
 
 // TestPublishBadBody rejects a malformed event without disturbing the relay.
 func TestPublishBadBody(t *testing.T) {
-	ts := httptest.NewServer(New("", nil).Handler())
+	ts := httptest.NewServer(New(testSecret, nil).Handler())
 	defer ts.Close()
 
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/publish", strings.NewReader("{not json"))
+	req.Header.Set("Authorization", "Bearer "+testSecret)
 	resp, err := ts.Client().Do(req)
 	if err != nil {
 		t.Fatalf("publish: %v", err)
@@ -182,16 +187,16 @@ func TestPublishBadBody(t *testing.T) {
 // instead of blocking the publisher: publishing far more than the buffer holds, to
 // a consumer that never reads, still returns promptly every time.
 func TestSlowConsumerDropsRatherThanBlock(t *testing.T) {
-	ts := httptest.NewServer(New("", nil).Handler())
+	ts := httptest.NewServer(New(testSecret, nil).Handler())
 	defer ts.Close()
 
-	resp := openStream(t, ts, "") // a consumer that never reads its body
+	resp := openStream(t, ts, testSecret) // a consumer that never reads its body
 	defer resp.Body.Close()
 
 	done := make(chan struct{})
 	go func() {
 		for i := range consumerBuffer * 4 {
-			pr := publish(t, ts, "", Event{Mailbox: "/m/x", Op: "create", CN: uint64(i)})
+			pr := publish(t, ts, testSecret, Event{Mailbox: "/m/x", Op: "create", CN: uint64(i)})
 			pr.Body.Close()
 		}
 		close(done)
@@ -204,7 +209,7 @@ func TestSlowConsumerDropsRatherThanBlock(t *testing.T) {
 }
 
 func TestMethodNotAllowed(t *testing.T) {
-	ts := httptest.NewServer(New("", nil).Handler())
+	ts := httptest.NewServer(New(testSecret, nil).Handler())
 	defer ts.Close()
 	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/publish", nil)
 	resp, err := ts.Client().Do(req)
@@ -214,5 +219,30 @@ func TestMethodNotAllowed(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusMethodNotAllowed {
 		t.Errorf("GET /publish = %d, want 405", resp.StatusCode)
+	}
+}
+
+// TestNoSecretServesNobody proves the relay fails closed when it is built without
+// a secret. Both endpoints share one check, and subscribing alone is a live feed
+// of which mailbox is receiving and reading mail, so an unset secret must mean
+// "serve nobody" rather than "serve everybody". cmd/notify refuses to start in
+// this state; this is the second line of defence.
+func TestNoSecretServesNobody(t *testing.T) {
+	ts := httptest.NewServer(New("", nil).Handler())
+	defer ts.Close()
+
+	pub := publish(t, ts, "", Event{Mailbox: "/m/alice"})
+	pub.Body.Close()
+	if pub.StatusCode != http.StatusUnauthorized {
+		t.Errorf("publish against a secretless relay = %d, want 401", pub.StatusCode)
+	}
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/events", nil)
+	ev, err := ts.Client().Do(req)
+	if err != nil {
+		t.Fatalf("events request: %v", err)
+	}
+	ev.Body.Close()
+	if ev.StatusCode != http.StatusUnauthorized {
+		t.Errorf("subscribe against a secretless relay = %d, want 401", ev.StatusCode)
 	}
 }

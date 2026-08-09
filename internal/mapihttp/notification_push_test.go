@@ -11,6 +11,10 @@ import (
 	"hermex/internal/objectstore"
 )
 
+// pushTestSecret is the relay bearer this test shares between the stub relay,
+// its consumer and its publisher: the relay serves nobody without one.
+const pushTestSecret = "mapi-push-test-secret"
+
 // TestNotificationWaitWakesViaPush proves the push path end-to-end and across the
 // real wire: a delivery made through a separate store handle (a different daemon's
 // MTA) publishes to a real relay, whose event the server's consumer routes to the
@@ -27,14 +31,14 @@ func TestNotificationWaitWakesViaPush(t *testing.T) {
 
 	// The full wire chain the daemons use: a real relay, a real consumer subscribed
 	// to it, and a real publisher installed as the objectstore change hook.
-	relaySrv := httptest.NewServer(notifyd.New("", nil).Handler())
+	relaySrv := httptest.NewServer(notifyd.New(pushTestSecret, nil).Handler())
 	defer relaySrv.Close()
-	consumer := notify.NewConsumer(relaySrv.URL, "", nil)
+	consumer := notify.NewConsumer(relaySrv.URL, pushTestSecret, nil)
 	defer consumer.Close()
 	srv.SetNotify(consumer)
 	time.Sleep(200 * time.Millisecond) // let the consumer's stream establish before any publish
 
-	pub := notify.NewPublisher(relaySrv.URL, "")
+	pub := notify.NewPublisher(relaySrv.URL, pushTestSecret)
 	objectstore.SetChangePublisher(pub.Publish)
 	t.Cleanup(func() { objectstore.SetChangePublisher(nil) })
 
