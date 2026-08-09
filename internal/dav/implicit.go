@@ -63,8 +63,11 @@ func (s *Server) scheduleOnChange(owner, oldBody, newBody string, suppressReply 
 			continue
 		}
 		if len(unresolved) > 0 {
+			// A count, never the addresses: these are the event's attendees (or its
+			// organizer on a REPLY), and the log sink is browsable by any operator with
+			// panel access. The two branches above already log only a count.
 			s.Logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.DAV, Name: "schedule.deliver.unresolved", User: owner,
-				Fields: logging.Fields{"method": m.method, "unresolved": strings.Join(unresolved, ",")}})
+				Fields: logging.Fields{"method": m.method, "unresolved": len(unresolved), "recipients": len(m.recipients)}})
 		}
 	}
 }
