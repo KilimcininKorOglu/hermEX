@@ -98,6 +98,13 @@ Run `make gate` clean before every commit.
 full run looks the same whether it passed or not. Read the exit code and grep for
 failures rather than the tail of the log.
 
+Some tests need infrastructure and skip without it, which is why a green
+`make test-host` proves less than a green `make test`: MariaDB, MongoDB and
+clamd are reached through `HERMEX_TEST_MYSQL_DSN`, `HERMEX_TEST_MONGO_URI` and
+`HERMEX_TEST_CLAMD_ADDR`, which the dev container sets and the host does not, and
+the S/MIME interop tests need `openssl` on PATH. The dev image asserts openssl at
+build time, so those four tests always run under `make gate`.
+
 ### Webmail2 SPA
 
 The webmail2 service serves a **prebuilt** React bundle from
