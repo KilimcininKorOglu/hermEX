@@ -15,9 +15,6 @@ import (
 	"time"
 )
 
-// dialTimeout bounds the TCP/TLS connect to a remote source server.
-const dialTimeout = 30 * time.Second
-
 // opTimeout bounds each protocol operation's reads once connected, so a remote that accepts
 // the connection but then stalls cannot hang the worker forever. It is refreshed before
 // every command, so the deadline advances with progress and a long-but-moving transfer is
