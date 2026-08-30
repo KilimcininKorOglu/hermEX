@@ -254,9 +254,9 @@ func (w *Worker) ProcessDue(ctx context.Context, now time.Time) (sent int, err e
 	return sent, nil
 }
 
-// interruptedDelivery is the cause reported to the sender for a delivery whose
+// errInterruptedDelivery is the cause reported to the sender for a delivery whose
 // outcome cannot be established. It is not a rejection by the recipient's server.
-var interruptedDelivery = errors.New(
+var errInterruptedDelivery = errors.New(
 	"delivery was interrupted and its outcome is unknown; it was not sent again, to avoid delivering the message twice")
 
 // resolveUnsettled clears rows an earlier pass left mid-attempt, without ever
@@ -282,7 +282,7 @@ func (w *Worker) resolveUnsettled(ctx context.Context, now time.Time) error {
 			w.log(logging.LevelInfo, "relay.settled.late", it, nil)
 			continue
 		}
-		if be := w.giveUp(it, interruptedDelivery); be != nil {
+		if be := w.giveUp(it, errInterruptedDelivery); be != nil {
 			// The sender was never told, so settling here would erase the message
 			// with nothing left to recover it from. Keep the row queued, where the
 			// mail-queue page shows it, and try the notice again later.
@@ -295,7 +295,7 @@ func (w *Worker) resolveUnsettled(ctx context.Context, now time.Time) error {
 		if fe := w.Spool.Fail(it.RecipientID); fe != nil {
 			return fe
 		}
-		w.log(logging.LevelWarn, "relay.interrupted", it, interruptedDelivery)
+		w.log(logging.LevelWarn, "relay.interrupted", it, errInterruptedDelivery)
 	}
 	return nil
 }
