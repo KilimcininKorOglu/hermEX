@@ -3,9 +3,12 @@ package admin
 import (
 	"bytes"
 	"crypto/hmac"
+	"crypto/sha256"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"strings"
+	"time"
 
 	"hermex/internal/logging"
 	"hermex/internal/serve"
@@ -71,10 +74,68 @@ func (s *Server) render(w http.ResponseWriter, name string, data any) {
 	_, _ = buf.WriteTo(w)
 }
 
-// staticHandler serves the embedded static assets under /admin/static/.
+// noStoreAdmin marks every admin response no-store, so operator HTML (domains,
+// users, DKIM keys, the mail queue) never lands in a browser's disk cache or
+// back/forward cache, where a later user of a shared machine could read it. It
+// exempts /admin/static/, whose files carry no operator data and keep their own
+// cacheable policy.
+func noStoreAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, "/admin/static/") {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// staticAsset is one embedded file served under /admin/static/, with a content
+// hash computed once at startup so a conditional request can be answered without
+// re-hashing.
+type staticAsset struct {
+	data []byte
+	etag string
+}
+
+// buildStaticAssets hashes every embedded static file once, keyed by its base
+// name, so staticHandler can serve a strong ETag without touching disk per
+// request.
+func buildStaticAssets() map[string]staticAsset {
+	assets := make(map[string]staticAsset)
+	entries, err := fs.ReadDir(staticFS, "static")
+	if err != nil {
+		return assets
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		data, err := staticFS.ReadFile("static/" + e.Name())
+		if err != nil {
+			continue
+		}
+		assets[e.Name()] = staticAsset{data: data, etag: fmt.Sprintf(`"%x"`, sha256.Sum256(data))}
+	}
+	return assets
+}
+
+// staticHandler serves the embedded static assets under /admin/static/. The
+// filenames are not content-hashed, so the assets get a short max-age plus a
+// strong ETag rather than immutable caching: http.ServeContent then answers a
+// matching If-None-Match with 304 and handles Range and HEAD. A zero modTime
+// makes it rely on the ETag alone, never a restart-varying Last-Modified.
 func staticHandler() http.Handler {
-	sub, _ := fs.Sub(staticFS, "static")
-	return http.StripPrefix("/admin/static/", http.FileServer(http.FS(sub)))
+	assets := buildStaticAssets()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(r.URL.Path, "/admin/static/")
+		a, ok := assets[name]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Header().Set("ETag", a.etag)
+		http.ServeContent(w, r, name, time.Time{}, bytes.NewReader(a.data))
+	})
 }
 
 // handleUILoginPage renders the login form, redirecting an already-signed-in
