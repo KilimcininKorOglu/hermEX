@@ -48,7 +48,9 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
+	// no-store, not no-cache: an SSE stream is never a cacheable body, and this
+	// keeps the endpoint on the same policy noStoreAPI stamps on the rest of the API.
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Connection", "keep-alive")
 	_, _ = fmt.Fprint(w, ": connected\n\n") // SSE preamble; a failed write means the client is gone and the stream loop will end
 	flusher.Flush()
