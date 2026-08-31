@@ -212,7 +212,7 @@ func TestHardDeleteMessagesToDumpster(t *testing.T) {
 	body := ext.NewPush(ext.FlagUTF16)
 	body.Uint8(0)
 	body.Uint8(0)
-	body.BinShort(blob)
+	_ = body.BinShort(blob)
 
 	resp, _ := sess.Dispatch(toROPRequest(ropHardDeleteMessages, 0, body.Bytes()), []uint32{inboxH})
 	if ec := readEC(t, resp, ropHardDeleteMessages); ec != ecSuccess {
@@ -392,9 +392,9 @@ func TestSetSearchCriteriaReturnsNotSupported(t *testing.T) {
 
 	// SetSearchCriteria body: RestrictionDataSize (u16) + RestrictionData + FolderIds (EID_ARRAY) + SearchFlags (u32)
 	body := ext.NewPush(ext.FlagUTF16)
-	body.Uint16(0) // RestrictionDataSize (no restriction)
-	body.EIDs(nil) // FolderIds (empty EID_ARRAY)
-	body.Uint32(1) // SearchFlags (RESTART_SEARCH)
+	body.Uint16(0)     // RestrictionDataSize (no restriction)
+	_ = body.EIDs(nil) // FolderIds (empty EID_ARRAY)
+	body.Uint32(1)     // SearchFlags (RESTART_SEARCH)
 
 	resp, _ := sess.Dispatch(toROPRequest(ropSetSearchCriteria, 0, body.Bytes()), []uint32{inboxH})
 	if ec := readEC(t, resp, ropSetSearchCriteria); ec != ecNotSupported {
@@ -439,9 +439,9 @@ func TestSearchCriteriaBatchAlignment(t *testing.T) {
 	b.Uint8(ropSetSearchCriteria)
 	b.Uint8(0)
 	b.Uint8(0)
-	b.Uint16(0) // RestrictionDataSize
-	b.EIDs(nil) // FolderIds
-	b.Uint32(1) // SearchFlags
+	b.Uint16(0)     // RestrictionDataSize
+	_ = b.EIDs(nil) // FolderIds
+	b.Uint32(1)     // SearchFlags
 	b.Uint8(ropGetSearchCriteria)
 	b.Uint8(0)
 	b.Uint8(0)

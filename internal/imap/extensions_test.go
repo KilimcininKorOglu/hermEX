@@ -27,7 +27,7 @@ func (c *testClient) collectTagged(tag string) string {
 // taggedLine sends a command and returns its full tagged completion line.
 func (c *testClient) taggedLine(tag, cmd string) string {
 	c.t.Helper()
-	fmt.Fprintf(c.conn, "%s %s\r\n", tag, cmd)
+	_, _ = fmt.Fprintf(c.conn, "%s %s\r\n", tag, cmd)
 	return c.collectTagged(tag)
 }
 
@@ -83,11 +83,11 @@ func TestIMAPUIDPlus(t *testing.T) {
 
 	// APPEND replies with an [APPENDUID uidvalidity uid] response code.
 	msg := "Subject: appended\r\n\r\nbody"
-	fmt.Fprintf(c.conn, "a3 APPEND INBOX {%d}\r\n", len(msg))
+	_, _ = fmt.Fprintf(c.conn, "a3 APPEND INBOX {%d}\r\n", len(msg))
 	if cont := c.line(); !strings.HasPrefix(cont, "+") {
 		t.Fatalf("APPEND continuation = %q, want +", cont)
 	}
-	fmt.Fprintf(c.conn, "%s\r\n", msg)
+	_, _ = fmt.Fprintf(c.conn, "%s\r\n", msg)
 	if a3 := c.collectTagged("a3"); !strings.Contains(a3, "[APPENDUID ") {
 		t.Errorf("APPEND = %q, want an [APPENDUID ...] response code", a3)
 	}
@@ -178,15 +178,15 @@ func TestIMAPAuthLogin(t *testing.T) {
 	}
 
 	enc := func(s string) string { return base64.StdEncoding.EncodeToString([]byte(s)) }
-	fmt.Fprintf(c.conn, "a1 AUTHENTICATE LOGIN\r\n")
+	_, _ = fmt.Fprintf(c.conn, "a1 AUTHENTICATE LOGIN\r\n")
 	if l := c.line(); l != "+ "+enc("Username:") {
 		t.Fatalf("username challenge = %q, want %q", l, "+ "+enc("Username:"))
 	}
-	fmt.Fprintf(c.conn, "%s\r\n", enc("alice"))
+	_, _ = fmt.Fprintf(c.conn, "%s\r\n", enc("alice"))
 	if l := c.line(); l != "+ "+enc("Password:") {
 		t.Fatalf("password challenge = %q, want %q", l, "+ "+enc("Password:"))
 	}
-	fmt.Fprintf(c.conn, "%s\r\n", enc("secret"))
+	_, _ = fmt.Fprintf(c.conn, "%s\r\n", enc("secret"))
 	if _, status := c.collect("a1"); status != "OK" {
 		t.Fatalf("AUTHENTICATE LOGIN status = %s, want OK", status)
 	}
@@ -270,15 +270,15 @@ func TestIMAPMultiAppend(t *testing.T) {
 	}
 
 	m1, m2 := "Subject: m1\r\n\r\nb1", "Subject: m2\r\n\r\nb2"
-	fmt.Fprintf(c.conn, "a3 APPEND INBOX {%d}\r\n", len(m1))
+	_, _ = fmt.Fprintf(c.conn, "a3 APPEND INBOX {%d}\r\n", len(m1))
 	if l := c.line(); !strings.HasPrefix(l, "+") {
 		t.Fatalf("first continuation = %q, want +", l)
 	}
-	fmt.Fprintf(c.conn, "%s {%d}\r\n", m1, len(m2))
+	_, _ = fmt.Fprintf(c.conn, "%s {%d}\r\n", m1, len(m2))
 	if l := c.line(); !strings.HasPrefix(l, "+") {
 		t.Fatalf("second continuation = %q, want +", l)
 	}
-	fmt.Fprintf(c.conn, "%s\r\n", m2)
+	_, _ = fmt.Fprintf(c.conn, "%s\r\n", m2)
 	if a3 := c.collectTagged("a3"); !strings.Contains(a3, "[APPENDUID ") {
 		t.Errorf("MULTIAPPEND = %q, want an [APPENDUID ...] response code", a3)
 	}
@@ -373,7 +373,7 @@ func TestIMAPCompress(t *testing.T) {
 	}
 
 	// Activate compression; the tagged OK arrives uncompressed.
-	fmt.Fprintf(c.conn, "a2 COMPRESS DEFLATE\r\n")
+	_, _ = fmt.Fprintf(c.conn, "a2 COMPRESS DEFLATE\r\n")
 	if _, status := c.collect("a2"); status != "OK" {
 		t.Fatalf("COMPRESS status = %s, want OK", status)
 	}
@@ -386,7 +386,7 @@ func TestIMAPCompress(t *testing.T) {
 	c.br = bufio.NewReader(flate.NewReader(c.br))
 
 	// A command over the compressed link must round-trip.
-	fmt.Fprintf(fw, "a3 CAPABILITY\r\n")
+	_, _ = fmt.Fprintf(fw, "a3 CAPABILITY\r\n")
 	if err := fw.Flush(); err != nil {
 		t.Fatal(err)
 	}

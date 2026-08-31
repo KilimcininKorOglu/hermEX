@@ -26,9 +26,9 @@ func TestReaderPruneOlderThan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer raw.Disconnect(bg)
-	raw.Database(db).Drop(bg)
-	defer raw.Database(db).Drop(bg)
+	defer func() { _ = raw.Disconnect(bg) }()
+	_ = raw.Database(db).Drop(bg)
+	defer func() { _ = raw.Database(db).Drop(bg) }()
 
 	now := time.Now().UTC()
 	coll := raw.Database(db).Collection("logs")
@@ -78,9 +78,9 @@ func TestReaderDropLegacyTTLIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer raw.Disconnect(bg)
-	raw.Database(db).Drop(bg)
-	defer raw.Database(db).Drop(bg)
+	defer func() { _ = raw.Disconnect(bg) }()
+	_ = raw.Database(db).Drop(bg)
+	defer func() { _ = raw.Database(db).Drop(bg) }()
 
 	coll := raw.Database(db).Collection("logs")
 	// A legacy TTL index plus an ordinary filter index, the way an older build left it.

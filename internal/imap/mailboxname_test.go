@@ -20,11 +20,11 @@ func TestCreateRefusesAControlCharacterInAMailboxName(t *testing.T) {
 	c, _ := startServer(t)
 	c.mustOK("a1", "LOGIN alice secret")
 
-	fmt.Fprintf(c.conn, "a2 CREATE {%d}\r\n", len(injected))
+	_, _ = fmt.Fprintf(c.conn, "a2 CREATE {%d}\r\n", len(injected))
 	if cont := c.line(); !strings.HasPrefix(cont, "+") {
 		t.Fatalf("CREATE continuation = %q, want +", cont)
 	}
-	fmt.Fprintf(c.conn, "%s\r\n", injected)
+	_, _ = fmt.Fprintf(c.conn, "%s\r\n", injected)
 	if _, status := c.collect("a2"); status != "NO" {
 		t.Errorf("CREATE with an embedded CRLF = %s, want NO", status)
 	}
@@ -44,11 +44,11 @@ func TestRenameRefusesAControlCharacterInAMailboxName(t *testing.T) {
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "CREATE plain")
 
-	fmt.Fprintf(c.conn, "a3 RENAME plain {%d}\r\n", len(injected))
+	_, _ = fmt.Fprintf(c.conn, "a3 RENAME plain {%d}\r\n", len(injected))
 	if cont := c.line(); !strings.HasPrefix(cont, "+") {
 		t.Fatalf("RENAME continuation = %q, want +", cont)
 	}
-	fmt.Fprintf(c.conn, "%s\r\n", injected)
+	_, _ = fmt.Fprintf(c.conn, "%s\r\n", injected)
 	if _, status := c.collect("a3"); status != "NO" {
 		t.Errorf("RENAME to a name with an embedded CRLF = %s, want NO", status)
 	}

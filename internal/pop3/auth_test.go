@@ -96,19 +96,19 @@ func TestPOP3AuthPrivilegeDenied(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ln.Close() })
-	go (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln)
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln) }()
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	r := textproto.NewReader(bufio.NewReader(conn))
 	if l, _ := r.ReadLine(); !strings.HasPrefix(l, "+OK") { // greeting
 		t.Fatalf("greeting = %q", l)
 	}
-	fmt.Fprintf(conn, "AUTH PLAIN %s\r\n", b64("\x00alice\x00secret"))
+	_, _ = fmt.Fprintf(conn, "AUTH PLAIN %s\r\n", b64("\x00alice\x00secret"))
 	l, err := r.ReadLine()
 	if err != nil {
 		t.Fatal(err)

@@ -97,7 +97,7 @@ func TestMongoSinkWriteNeverBlocks(t *testing.T) {
 	close(block) // let the writer drain so Close can finish
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	s.Close(ctx)
+	_ = s.Close(ctx)
 }
 
 // TestMongoSinkIntegration drives a real MongoDB (the dev container's mongo): it
@@ -117,9 +117,9 @@ func TestMongoSinkIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer raw.Disconnect(bg)
-	raw.Database(db).Drop(bg) // clean slate
-	defer raw.Database(db).Drop(bg)
+	defer func() { _ = raw.Disconnect(bg) }()
+	_ = raw.Database(db).Drop(bg) // clean slate
+	defer func() { _ = raw.Database(db).Drop(bg) }()
 
 	sink, err := NewMongoSink(uri, db, "")
 	if err != nil {
@@ -181,9 +181,9 @@ func TestMongoSinkCreatesNoTTLIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
-	defer raw.Disconnect(bg)
-	raw.Database(db).Drop(bg)
-	defer raw.Database(db).Drop(bg)
+	defer func() { _ = raw.Disconnect(bg) }()
+	_ = raw.Database(db).Drop(bg)
+	defer func() { _ = raw.Database(db).Drop(bg) }()
 
 	sink, err := NewMongoSink(uri, db, "")
 	if err != nil {

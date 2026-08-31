@@ -46,7 +46,7 @@ func TestIMAPPrivilegeDenied(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	go (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln)
+	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln) }()
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
@@ -58,7 +58,7 @@ func TestIMAPPrivilegeDenied(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	fmt.Fprintf(conn, "a LOGIN alice secret\r\n")
+	_, _ = fmt.Fprintf(conn, "a LOGIN alice secret\r\n")
 	resp, err := br.ReadString('\n')
 	if err != nil {
 		t.Fatal(err)

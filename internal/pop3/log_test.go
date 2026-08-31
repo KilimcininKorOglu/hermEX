@@ -60,7 +60,7 @@ func TestInstrumentationLogsConnAndAuth(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	go (&Server{Auth: auth, Hostname: "mail.test", Logger: logging.New(sink)}).Serve(ln)
+	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test", Logger: logging.New(sink)}).Serve(ln) }()
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
@@ -76,7 +76,7 @@ func TestInstrumentationLogsConnAndAuth(t *testing.T) {
 	// event was captured. A failed PASS resets the auth state, so the successful
 	// login still runs on the same connection.
 	send := func(s string) {
-		fmt.Fprintf(conn, "%s\r\n", s)
+		_, _ = fmt.Fprintf(conn, "%s\r\n", s)
 		if _, err := r.ReadLine(); err != nil {
 			t.Fatalf("read response to %q: %v", s, err)
 		}

@@ -30,7 +30,7 @@ func TestSMTPToStoreDelivery(t *testing.T) {
 	}
 	defer ln.Close()
 	srv := &smtp.Server{Backend: &Backend{Accounts: accounts}, Hostname: "mail.test"}
-	go srv.Serve(ln)
+	go func() { _ = srv.Serve(ln) }()
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
@@ -46,21 +46,21 @@ func TestSMTPToStoreDelivery(t *testing.T) {
 	}
 
 	expect(220)
-	fmt.Fprint(conn, "EHLO client\r\n")
+	_, _ = fmt.Fprint(conn, "EHLO client\r\n")
 	expect(250)
-	fmt.Fprint(conn, "MAIL FROM:<bob@external>\r\n")
+	_, _ = fmt.Fprint(conn, "MAIL FROM:<bob@external>\r\n")
 	expect(250)
-	fmt.Fprint(conn, "RCPT TO:<alice@test>\r\n")
+	_, _ = fmt.Fprint(conn, "RCPT TO:<alice@test>\r\n")
 	expect(250)
 	// Unknown recipient is refused, not relayed.
-	fmt.Fprint(conn, "RCPT TO:<nobody@test>\r\n")
+	_, _ = fmt.Fprint(conn, "RCPT TO:<nobody@test>\r\n")
 	expect(550)
-	fmt.Fprint(conn, "DATA\r\n")
+	_, _ = fmt.Fprint(conn, "DATA\r\n")
 	expect(354)
 	msg := "Subject: hello\r\n\r\nhi alice\r\n"
-	fmt.Fprintf(conn, "%s.\r\n", msg)
+	_, _ = fmt.Fprintf(conn, "%s.\r\n", msg)
 	expect(250)
-	fmt.Fprint(conn, "QUIT\r\n")
+	_, _ = fmt.Fprint(conn, "QUIT\r\n")
 	expect(221)
 
 	st, err := objectstore.Open(mboxPath)

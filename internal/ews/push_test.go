@@ -44,7 +44,7 @@ func TestPushSubscribeDelivers(t *testing.T) {
 	cb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		got <- string(body)
-		io.WriteString(w, notificationResult("OK"))
+		_, _ = io.WriteString(w, notificationResult("OK"))
 	}))
 	defer cb.Close()
 
@@ -77,8 +77,8 @@ func TestPushUnsubscribeOnClientRequest(t *testing.T) {
 
 	hit := make(chan struct{}, 4)
 	cb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		io.Copy(io.Discard, r.Body)
-		io.WriteString(w, notificationResult("Unsubscribe"))
+		_, _ = io.Copy(io.Discard, r.Body)
+		_, _ = io.WriteString(w, notificationResult("Unsubscribe"))
 		select {
 		case hit <- struct{}{}:
 		default:

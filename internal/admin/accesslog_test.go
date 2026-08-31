@@ -50,8 +50,8 @@ func servedAdmin(t *testing.T, d Directory) (string, *accessSink) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go hs.Start()
-	t.Cleanup(func() { hs.Shutdown(context.Background()) })
+	go func() { _ = hs.Start() }()
+	t.Cleanup(func() { _ = hs.Shutdown(context.Background()) })
 	return "http://" + hs.Addr().String(), sink
 }
 

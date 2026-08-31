@@ -47,7 +47,7 @@ func TestPOP3PrivilegeDenied(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	go (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln)
+	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln) }()
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
@@ -64,9 +64,9 @@ func TestPOP3PrivilegeDenied(t *testing.T) {
 		}
 	}
 	mustOK() // greeting
-	fmt.Fprintf(conn, "USER alice\r\n")
+	_, _ = fmt.Fprintf(conn, "USER alice\r\n")
 	mustOK()
-	fmt.Fprintf(conn, "PASS secret\r\n")
+	_, _ = fmt.Fprintf(conn, "PASS secret\r\n")
 	l, err := r.ReadLine()
 	if err != nil {
 		t.Fatal(err)

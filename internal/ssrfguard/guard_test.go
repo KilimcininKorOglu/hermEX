@@ -101,7 +101,7 @@ func TestGuardedDialAllowsInternalWhenPermitted(t *testing.T) {
 	defer ln.Close()
 	go func() {
 		if c, err := ln.Accept(); err == nil {
-			c.Close()
+			_ = c.Close()
 		}
 	}()
 
@@ -109,7 +109,7 @@ func TestGuardedDialAllowsInternalWhenPermitted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("an internal dial was refused with allowInternal set: %v", err)
 	}
-	conn.Close()
+	_ = conn.Close()
 }
 
 // TestClientRefusesInternalTarget proves the guard reaches real traffic: a request

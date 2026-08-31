@@ -113,7 +113,7 @@ func outboundSession(t *testing.T, ob *OutboundLimiter, authUser string) *sessio
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { sp.Close() })
+	t.Cleanup(func() { _ = sp.Close() })
 	return &session{accounts: accounts, spool: sp, authUser: authUser, outbound: ob}
 }
 

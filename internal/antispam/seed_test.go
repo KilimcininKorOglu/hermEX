@@ -41,7 +41,7 @@ func TestLoadModelPrefersDataDir(t *testing.T) {
 	if err := custom.Save(f); err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	_ = f.Close()
 
 	got, err := LoadModel(dir)
 	if err != nil {

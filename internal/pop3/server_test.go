@@ -42,7 +42,7 @@ func TestPOP3RetrieveAndDelete(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	go (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln)
+	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln) }()
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
@@ -51,7 +51,7 @@ func TestPOP3RetrieveAndDelete(t *testing.T) {
 	defer conn.Close()
 	r := textproto.NewReader(bufio.NewReader(conn))
 
-	send := func(s string) { fmt.Fprintf(conn, "%s\r\n", s) }
+	send := func(s string) { _, _ = fmt.Fprintf(conn, "%s\r\n", s) }
 	wantOK := func() string {
 		t.Helper()
 		l, err := r.ReadLine()

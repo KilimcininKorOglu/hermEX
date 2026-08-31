@@ -48,7 +48,7 @@ func TestTryLockDoesNotWait(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		second.TryLock(ctx, LockRelayDrain)
+		_, _, _ = second.TryLock(ctx, LockRelayDrain)
 		close(done)
 	}()
 	select {

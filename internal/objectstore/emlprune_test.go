@@ -119,7 +119,7 @@ func TestPruneEMLCacheSkipsInFlightWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tmp.Close()
+	_ = tmp.Close()
 	when := time.Now().Add(-90 * 24 * time.Hour)
 	if err := os.Chtimes(tmp.Name(), when, when); err != nil {
 		t.Fatal(err)

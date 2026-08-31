@@ -35,17 +35,17 @@ func dialPOP3(t *testing.T, msg string) (*textproto.Reader, func(string), func()
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ln.Close() })
-	go (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln)
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln) }()
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	r := textproto.NewReader(bufio.NewReader(conn))
 
-	send := func(s string) { fmt.Fprintf(conn, "%s\r\n", s) }
+	send := func(s string) { _, _ = fmt.Fprintf(conn, "%s\r\n", s) }
 	wantOK := func() string {
 		t.Helper()
 		l, err := r.ReadLine()

@@ -20,7 +20,7 @@ func fakePOP3(t *testing.T, messages []string) (host string, port int, deleted *
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() { _ = ln.Close() })
 	del := &[]int{}
 	go func() {
 		conn, err := ln.Accept()
@@ -29,7 +29,7 @@ func fakePOP3(t *testing.T, messages []string) (host string, port int, deleted *
 		}
 		defer conn.Close()
 		r := bufio.NewReader(conn)
-		io.WriteString(conn, "+OK ready\r\n")
+		_, _ = io.WriteString(conn, "+OK ready\r\n")
 		for {
 			line, err := r.ReadString('\n')
 			if err != nil {
@@ -41,7 +41,7 @@ func fakePOP3(t *testing.T, messages []string) (host string, port int, deleted *
 			}
 			switch strings.ToUpper(f[0]) {
 			case "USER", "PASS":
-				io.WriteString(conn, "+OK\r\n")
+				_, _ = io.WriteString(conn, "+OK\r\n")
 			case "UIDL":
 				var b strings.Builder
 				b.WriteString("+OK\r\n")
@@ -49,19 +49,19 @@ func fakePOP3(t *testing.T, messages []string) (host string, port int, deleted *
 					fmt.Fprintf(&b, "%d uid%d\r\n", i+1, i+1)
 				}
 				b.WriteString(".\r\n")
-				io.WriteString(conn, b.String())
+				_, _ = io.WriteString(conn, b.String())
 			case "RETR":
 				n, _ := strconv.Atoi(f[1])
-				io.WriteString(conn, "+OK\r\n"+messages[n-1]+"\r\n.\r\n")
+				_, _ = io.WriteString(conn, "+OK\r\n"+messages[n-1]+"\r\n.\r\n")
 			case "DELE":
 				n, _ := strconv.Atoi(f[1])
 				*del = append(*del, n)
-				io.WriteString(conn, "+OK\r\n")
+				_, _ = io.WriteString(conn, "+OK\r\n")
 			case "QUIT":
-				io.WriteString(conn, "+OK bye\r\n")
+				_, _ = io.WriteString(conn, "+OK bye\r\n")
 				return
 			default:
-				io.WriteString(conn, "-ERR unknown\r\n")
+				_, _ = io.WriteString(conn, "-ERR unknown\r\n")
 			}
 		}
 	}()
@@ -127,7 +127,7 @@ func TestPOP3StallTimesOut(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() { _ = ln.Close() })
 	stop := make(chan struct{})
 	t.Cleanup(func() { close(stop) })
 	go func() {

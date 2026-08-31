@@ -29,9 +29,9 @@ func captureStderr(t *testing.T, fn func()) string {
 	}()
 	fn()
 	os.Stderr = old
-	w.Close()
+	_ = w.Close()
 	out := <-done
-	r.Close()
+	_ = r.Close()
 	return out
 }
 

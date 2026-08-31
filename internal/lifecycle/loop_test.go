@@ -56,7 +56,7 @@ func TestLoopShutdownReportsAStuckLoop(t *testing.T) {
 	t.Cleanup(func() { close(release) })
 
 	comp := lifecycle.Loop(func(context.Context) { <-release })
-	go comp.Start()
+	go func() { _ = comp.Start() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -73,7 +73,7 @@ func TestLoopShutdownReportsAStuckLoop(t *testing.T) {
 // own: a loop that honours cancellation is shut down immediately.
 func TestLoopShutdownIsPromptWhenTheLoopReturns(t *testing.T) {
 	comp := lifecycle.Loop(func(ctx context.Context) { <-ctx.Done() })
-	go comp.Start()
+	go func() { _ = comp.Start() }()
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()

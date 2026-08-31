@@ -160,7 +160,7 @@ func TestContactPhotoRoundTrip(t *testing.T) {
 	if _, err := fw.Write(photo); err != nil {
 		t.Fatalf("write photo: %v", err)
 	}
-	mw.Close()
+	_ = mw.Close()
 	if rec := do(http.MethodPut, photoTarget, buf.String(), mw.FormDataContentType()); rec.Code != http.StatusOK {
 		t.Fatalf("put photo: status %d body %s", rec.Code, rec.Body.String())
 	}

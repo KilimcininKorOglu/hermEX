@@ -58,8 +58,8 @@ func publicServer(t *testing.T, accounts directory.StaticAccounts, pub *publicfo
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ln.Close() })
-	go (&Server{Auth: accounts, Hostname: "mail.test", Pub: pub}).Serve(ln)
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() { _ = (&Server{Auth: accounts, Hostname: "mail.test", Pub: pub}).Serve(ln) }()
 	return ln.Addr().String()
 }
 
@@ -70,7 +70,7 @@ func dialLogin(t *testing.T, addr, user, pass string) *testClient {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	c := &testClient{t: t, conn: conn, br: bufio.NewReader(conn)}
 	c.expectUntagged("OK", "greeting")
 	c.mustOK("login", "LOGIN "+user+" "+pass)
@@ -81,7 +81,7 @@ func dialLogin(t *testing.T, addr, user, pass string) *testClient {
 // completion line (so a test can inspect a response code like [READ-ONLY]).
 func (c *testClient) doFull(tag, cmd string) (untagged []string, tagged string) {
 	c.t.Helper()
-	fmt.Fprintf(c.conn, "%s %s\r\n", tag, cmd)
+	_, _ = fmt.Fprintf(c.conn, "%s %s\r\n", tag, cmd)
 	for {
 		l := c.line()
 		if strings.HasPrefix(l, tag+" ") {

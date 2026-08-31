@@ -26,8 +26,8 @@ func TestConnGroupDrainsInFlight(t *testing.T) {
 	handle := func(nc net.Conn) {
 		entered <- struct{}{}
 		<-release
-		nc.Write([]byte("drained"))
-		nc.Close()
+		_, _ = nc.Write([]byte("drained"))
+		_ = nc.Close()
 	}
 
 	var g lifecycle.ConnGroup
@@ -65,7 +65,7 @@ func TestConnGroupDrainsInFlight(t *testing.T) {
 		t.Errorf("Start = %v, want nil after a graceful stop", err)
 	}
 	if c, err := net.Dial("tcp", ln.Addr().String()); err == nil {
-		c.Close()
+		_ = c.Close()
 		t.Error("listener still accepting connections after Shutdown")
 	}
 }
@@ -84,11 +84,13 @@ func TestConnGroupShutdownTimeout(t *testing.T) {
 
 	var g lifecycle.ConnGroup
 	g.AddListener(ln)
-	go g.Start(func(nc net.Conn) {
-		entered <- struct{}{}
-		<-stuck
-		nc.Close()
-	})
+	go func() {
+		_ = g.Start(func(nc net.Conn) {
+			entered <- struct{}{}
+			<-stuck
+			_ = nc.Close()
+		})
+	}()
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {

@@ -14,7 +14,7 @@ import (
 func TestRoutingByLongestPrefix(t *testing.T) {
 	echo := func(name string) *httptest.Server {
 		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			io.WriteString(w, name+" "+r.URL.Path+" auth="+r.Header.Get("Authorization"))
+			_, _ = io.WriteString(w, name+" "+r.URL.Path+" auth="+r.Header.Get("Authorization"))
 		}))
 	}
 	mapi := echo("mapi")

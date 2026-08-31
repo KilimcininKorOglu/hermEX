@@ -199,18 +199,18 @@ func TestNDRRowSetProjection(t *testing.T) {
 	mustU32NDR(t, pl, "crows actual", 1)
 	mustU32NDR(t, pl, "row reserved", 0)
 	mustU32NDR(t, pl, "row cValues", 2) // both columns present in the row, the 2nd an error
-	pl.Uint32()                         // referent
+	_, _ = pl.Uint32()                  // referent
 	mustU32NDR(t, pl, "value-array max_count", 2)
 	// First value: PrDisplayName (unicode, present).
 	mustU32NDR(t, pl, "v0 proptag", uint32(mapi.PrDisplayName))
-	pl.Uint32() // reserved
+	_, _ = pl.Uint32() // reserved
 	mustU32NDR(t, pl, "v0 ptype", uint32(mapi.PtUnicode))
-	pl.Uint32() // string referent
+	_, _ = pl.Uint32() // string referent
 	// Second value: the absent column rewritten to PT_ERROR.
 	if tag, _ := pl.Uint32(); mapi.PropTag(tag).Type() != mapi.PtError {
 		t.Errorf("absent column type = %#x, want PtError", mapi.PropTag(tag).Type())
 	}
-	pl.Uint32() // reserved
+	_, _ = pl.Uint32() // reserved
 	mustU32NDR(t, pl, "v1 ptype", uint32(mapi.PtError))
 	mustU32NDR(t, pl, "v1 scode", uint32(ecNotFound))
 }

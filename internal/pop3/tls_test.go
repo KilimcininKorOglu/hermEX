@@ -41,9 +41,9 @@ func startSTLSServer(t *testing.T) (addr, certPath string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() { _ = ln.Close() })
 	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
-	go (&Server{Auth: auth, Hostname: "mail.test", TLSConfig: tlsCfg}).Serve(ln)
+	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test", TLSConfig: tlsCfg}).Serve(ln) }()
 	return ln.Addr().String(), certPath
 }
 
@@ -60,11 +60,11 @@ func TestSTLSUpgrade(t *testing.T) {
 	br := bufio.NewReader(conn)
 	mustPrefix(t, br, "+OK") // greeting
 
-	io.WriteString(conn, "CAPA\r\n")
+	_, _ = io.WriteString(conn, "CAPA\r\n")
 	if capa := readUntilDot(t, br); !strings.Contains(capa, "STLS") {
 		t.Errorf("CAPA does not advertise STLS:\n%s", capa)
 	}
-	io.WriteString(conn, "STLS\r\n")
+	_, _ = io.WriteString(conn, "STLS\r\n")
 	mustPrefix(t, br, "+OK")
 
 	tconn := tls.Client(conn, &tls.Config{RootCAs: certPool(t, certPath), ServerName: "127.0.0.1"})
@@ -74,15 +74,15 @@ func TestSTLSUpgrade(t *testing.T) {
 	tbr := bufio.NewReader(tconn)
 	// After STLS the session stays in AUTHORIZATION (RFC 2595); CAPA must no
 	// longer offer STLS now that the link is encrypted.
-	io.WriteString(tconn, "CAPA\r\n")
+	_, _ = io.WriteString(tconn, "CAPA\r\n")
 	if capa := readUntilDot(t, tbr); strings.Contains(capa, "STLS") {
 		t.Errorf("STLS still advertised after TLS:\n%s", capa)
 	}
-	io.WriteString(tconn, "USER alice\r\n")
+	_, _ = io.WriteString(tconn, "USER alice\r\n")
 	mustPrefix(t, tbr, "+OK")
-	io.WriteString(tconn, "PASS secret\r\n")
+	_, _ = io.WriteString(tconn, "PASS secret\r\n")
 	mustPrefix(t, tbr, "+OK")
-	io.WriteString(tconn, "QUIT\r\n")
+	_, _ = io.WriteString(tconn, "QUIT\r\n")
 	mustPrefix(t, tbr, "+OK")
 }
 
@@ -103,7 +103,7 @@ func TestSTLSRejectsPipelinedInjection(t *testing.T) {
 	if _, err := conn.Write([]byte("STLS\r\nCAPA\r\n")); err != nil {
 		t.Fatal(err)
 	}
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	rest, _ := io.ReadAll(conn)
 	if strings.Contains(string(rest), "capabilities") {
 		t.Errorf("injected CAPA executed across the TLS boundary: %q", rest)

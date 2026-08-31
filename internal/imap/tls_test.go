@@ -49,9 +49,9 @@ func TestImplicitTLSSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { rawLn.Close() })
+	t.Cleanup(func() { _ = rawLn.Close() })
 	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
-	go (&Server{Auth: auth, Hostname: "mail.test"}).Serve(tls.NewListener(rawLn, tlsCfg))
+	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test"}).Serve(tls.NewListener(rawLn, tlsCfg)) }()
 
 	pemBytes, err := os.ReadFile(certPath)
 	if err != nil {
@@ -65,7 +65,7 @@ func TestImplicitTLSSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tls.Dial: %v", err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	if v := conn.ConnectionState().Version; v < tls.VersionTLS12 {
 		t.Errorf("negotiated TLS version = %#x, want >= 1.2", v)
 	}
@@ -115,9 +115,9 @@ func startSTARTTLSServer(t *testing.T) (addr, certPath string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() { _ = ln.Close() })
 	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
-	go (&Server{Auth: auth, Hostname: "mail.test", TLSConfig: tlsCfg}).Serve(ln)
+	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test", TLSConfig: tlsCfg}).Serve(ln) }()
 	return ln.Addr().String(), certPath
 }
 
@@ -167,7 +167,7 @@ func TestStartTLSRejectsPipelinedInjection(t *testing.T) {
 	if _, err := conn.Write([]byte("a1 STARTTLS\r\na2 NOOP\r\n")); err != nil {
 		t.Fatal(err)
 	}
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	rest, _ := io.ReadAll(conn)
 	if strings.Contains(string(rest), "a2 OK") {
 		t.Errorf("injected command executed across the TLS boundary: %q", rest)

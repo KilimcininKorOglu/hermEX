@@ -26,7 +26,7 @@ import (
 
 func okHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		io.WriteString(w, "ok")
+		_, _ = io.WriteString(w, "ok")
 	})
 }
 
@@ -37,8 +37,8 @@ func TestServePlaintext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go hs.Start()
-	defer hs.Shutdown(context.Background())
+	go func() { _ = hs.Start() }()
+	defer func() { _ = hs.Shutdown(context.Background()) }()
 
 	resp, err := http.Get("http://" + hs.Addr().String() + "/")
 	if err != nil {
@@ -65,8 +65,8 @@ func TestServeTLS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go hs.Start()
-	defer hs.Shutdown(context.Background())
+	go func() { _ = hs.Start() }()
+	defer func() { _ = hs.Shutdown(context.Background()) }()
 
 	pemBytes, err := os.ReadFile(certPath)
 	if err != nil {
@@ -112,13 +112,13 @@ func TestServerGracefulDrain(t *testing.T) {
 	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		close(handlerEntered)
 		<-releaseHandler
-		io.WriteString(w, "drained")
+		_, _ = io.WriteString(w, "drained")
 	})
 	hs, err := New("127.0.0.1:0", h, &config.Config{}, nil, logging.System, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	go hs.Start()
+	go func() { _ = hs.Start() }()
 
 	type result struct {
 		body string
@@ -244,8 +244,8 @@ func TestTLSHandshakeLogged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go hs.Start()
-	defer hs.Shutdown(context.Background())
+	go func() { _ = hs.Start() }()
+	defer func() { _ = hs.Shutdown(context.Background()) }()
 
 	pemBytes, err := os.ReadFile(certPath)
 	if err != nil {
@@ -296,8 +296,8 @@ func TestRequestLoggingEmitsEvent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	go hs.Start()
-	defer hs.Shutdown(context.Background())
+	go func() { _ = hs.Start() }()
+	defer func() { _ = hs.Shutdown(context.Background()) }()
 
 	req, _ := http.NewRequest(http.MethodGet, "http://"+hs.Addr().String()+"/mail/inbox", nil)
 	req.SetBasicAuth("alice@hermex.test", "hunter2")

@@ -163,7 +163,7 @@ func TestQueryRowsExplicit(t *testing.T) {
 		t.Fatalf("result = %#x", result)
 	}
 	mustU8(t, p, "STAT marker")
-	pullStat(p)
+	_, _ = pullStat(p)
 	mustU8(t, p, "rows marker")
 	cols, _ := p.PropTagsLong()
 	if n := mustU32(t, p, "row count"); n != 2 {

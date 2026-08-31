@@ -19,7 +19,7 @@ func fakeIMAP(t *testing.T, body string) (host string, port int, stored *[]strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() { _ = ln.Close() })
 	rec := &[]string{}
 	go func() {
 		conn, err := ln.Accept()
@@ -28,7 +28,7 @@ func fakeIMAP(t *testing.T, body string) (host string, port int, stored *[]strin
 		}
 		defer conn.Close()
 		r := bufio.NewReader(conn)
-		io.WriteString(conn, "* OK ready\r\n")
+		_, _ = io.WriteString(conn, "* OK ready\r\n")
 		for {
 			line, err := r.ReadString('\n')
 			if err != nil {
@@ -41,24 +41,24 @@ func fakeIMAP(t *testing.T, body string) (host string, port int, stored *[]strin
 			tag, verb := f[0], strings.ToUpper(f[1])
 			switch {
 			case verb == "LOGIN":
-				io.WriteString(conn, tag+" OK\r\n")
+				_, _ = io.WriteString(conn, tag+" OK\r\n")
 			case verb == "SELECT":
-				io.WriteString(conn, "* 2 EXISTS\r\n"+tag+" OK [READ-WRITE]\r\n")
+				_, _ = io.WriteString(conn, "* 2 EXISTS\r\n"+tag+" OK [READ-WRITE]\r\n")
 			case verb == "UID" && strings.ToUpper(f[2]) == "SEARCH":
-				io.WriteString(conn, "* SEARCH 101 102\r\n"+tag+" OK\r\n")
+				_, _ = io.WriteString(conn, "* SEARCH 101 102\r\n"+tag+" OK\r\n")
 			case verb == "UID" && strings.ToUpper(f[2]) == "FETCH":
-				fmt.Fprintf(conn, "* 1 FETCH (UID %s BODY[] {%d}\r\n%s)\r\n%s OK\r\n", f[3], len(body), body, tag)
+				_, _ = fmt.Fprintf(conn, "* 1 FETCH (UID %s BODY[] {%d}\r\n%s)\r\n%s OK\r\n", f[3], len(body), body, tag)
 			case verb == "UID" && strings.ToUpper(f[2]) == "STORE":
 				*rec = append(*rec, strings.TrimSpace(line))
-				io.WriteString(conn, tag+" OK\r\n")
+				_, _ = io.WriteString(conn, tag+" OK\r\n")
 			case verb == "EXPUNGE":
 				*rec = append(*rec, "EXPUNGE")
-				io.WriteString(conn, tag+" OK\r\n")
+				_, _ = io.WriteString(conn, tag+" OK\r\n")
 			case verb == "LOGOUT":
-				io.WriteString(conn, "* BYE\r\n"+tag+" OK\r\n")
+				_, _ = io.WriteString(conn, "* BYE\r\n"+tag+" OK\r\n")
 				return
 			default:
-				io.WriteString(conn, tag+" BAD unknown\r\n")
+				_, _ = io.WriteString(conn, tag+" BAD unknown\r\n")
 			}
 		}
 	}()

@@ -23,7 +23,7 @@ func freeAddr(t *testing.T) string {
 		t.Fatal(err)
 	}
 	addr := ln.Addr().String()
-	ln.Close()
+	_ = ln.Close()
 	return addr
 }
 
@@ -133,7 +133,7 @@ func statusFrom(t *testing.T, addr string, comps []lifecycle.Component) Status {
 	errc := make(chan error, 1)
 	go func() { errc <- comps[0].Start() }()
 	t.Cleanup(func() {
-		comps[0].Shutdown(context.Background())
+		_ = comps[0].Shutdown(context.Background())
 		<-errc
 	})
 	var resp *http.Response

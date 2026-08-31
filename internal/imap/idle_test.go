@@ -48,17 +48,17 @@ func TestIMAPIdle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() { _ = ln.Close() })
 	srv := &Server{Auth: auth, Hostname: "mail.test"}
 	waker := &fakeIdleWaker{ch: make(chan struct{}, 1)}
 	srv.waker = waker
-	go srv.Serve(ln)
+	go func() { _ = srv.Serve(ln) }()
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	c := &testClient{t: t, conn: conn, br: bufio.NewReader(conn)}
 	c.expectUntagged("OK", "greeting")
 
@@ -72,7 +72,7 @@ func TestIMAPIdle(t *testing.T) {
 	}
 
 	// Begin IDLE: the server requests a continuation.
-	fmt.Fprintf(c.conn, "a4 IDLE\r\n")
+	_, _ = fmt.Fprintf(c.conn, "a4 IDLE\r\n")
 	if cont := c.line(); !strings.HasPrefix(cont, "+") {
 		t.Fatalf("IDLE continuation = %q, want a + line", cont)
 	}
@@ -89,7 +89,7 @@ func TestIMAPIdle(t *testing.T) {
 	st2.Close()
 	waker.fire()
 
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second)) // bound the wait: cadence is 30s
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second)) // bound the wait: cadence is 30s
 	gotExists := false
 	for !gotExists {
 		l := c.line()
@@ -97,13 +97,13 @@ func TestIMAPIdle(t *testing.T) {
 			gotExists = true
 		}
 	}
-	conn.SetReadDeadline(time.Time{}) // clear
+	_ = conn.SetReadDeadline(time.Time{}) // clear
 	if !gotExists {
 		t.Fatal("no untagged EXISTS arrived during IDLE")
 	}
 
 	// End IDLE with DONE; the server sends the tagged completion.
-	fmt.Fprintf(c.conn, "DONE\r\n")
+	_, _ = fmt.Fprintf(c.conn, "DONE\r\n")
 	if _, status := c.collect("a4"); status != "OK" {
 		t.Errorf("IDLE terminated status = %s, want OK", status)
 	}

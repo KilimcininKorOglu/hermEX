@@ -14,7 +14,7 @@ func openSpool(t *testing.T) *Spool {
 	if err != nil {
 		t.Fatalf("open spool: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 

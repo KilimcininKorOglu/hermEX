@@ -53,7 +53,7 @@ func TestCompressesLargeJSON(t *testing.T) {
 	body := jsonBody(200)
 	rec := serveCompressed(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, body)
+		_, _ = io.WriteString(w, body)
 	}, gzipRequest())
 
 	if enc := rec.Header().Get("Content-Encoding"); enc != "gzip" {
@@ -84,7 +84,7 @@ func TestDoesNotCompressWithoutAcceptEncoding(t *testing.T) {
 	body := jsonBody(200)
 	rec := serveCompressed(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, body)
+		_, _ = io.WriteString(w, body)
 	}, httptest.NewRequest(http.MethodGet, "/api/v1/folders", nil))
 
 	if enc := rec.Header().Get("Content-Encoding"); enc != "" {
@@ -106,7 +106,7 @@ func TestDoesNotCompressOtherTypes(t *testing.T) {
 		t.Run(ct, func(t *testing.T) {
 			rec := serveCompressed(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Type", ct)
-				io.WriteString(w, jsonBody(200))
+				_, _ = io.WriteString(w, jsonBody(200))
 			}, gzipRequest())
 			if enc := rec.Header().Get("Content-Encoding"); enc != "" {
 				t.Errorf("Content-Encoding = %q, want none for %s", enc, ct)
@@ -120,7 +120,7 @@ func TestDoesNotCompressOtherTypes(t *testing.T) {
 func TestDoesNotCompressSmallJSON(t *testing.T) {
 	rec := serveCompressed(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"ok":true}`)
+		_, _ = io.WriteString(w, `{"ok":true}`)
 	}, gzipRequest())
 
 	if enc := rec.Header().Get("Content-Encoding"); enc != "" {
@@ -137,7 +137,7 @@ func TestDoesNotDoubleEncode(t *testing.T) {
 	rec := serveCompressed(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Content-Encoding", "br")
-		io.WriteString(w, jsonBody(200))
+		_, _ = io.WriteString(w, jsonBody(200))
 	}, gzipRequest())
 
 	if enc := rec.Header().Get("Content-Encoding"); enc != "br" {
@@ -157,7 +157,7 @@ func TestStreamingResponseStillFlushes(t *testing.T) {
 		defer close(done)
 		compressMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "text/event-stream")
-			io.WriteString(w, "data: first\n\n")
+			_, _ = io.WriteString(w, "data: first\n\n")
 			if err := http.NewResponseController(w).Flush(); err != nil {
 				t.Errorf("flush: %v", err)
 			}
@@ -185,7 +185,7 @@ func TestPreservesStatusCode(t *testing.T) {
 	rec := serveCompressed(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		io.WriteString(w, `{"error":"not found"}`)
+		_, _ = io.WriteString(w, `{"error":"not found"}`)
 	}, gzipRequest())
 
 	if rec.Code != http.StatusNotFound {
@@ -215,14 +215,14 @@ func TestServedDaemonCompresses(t *testing.T) {
 	body := jsonBody(200)
 	h := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, body)
+		_, _ = io.WriteString(w, body)
 	})
 	hs, err := New("127.0.0.1:0", h, &config.Config{}, nil, logging.Webmail, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	go hs.Start()
-	defer hs.Shutdown(context.Background())
+	go func() { _ = hs.Start() }()
+	defer func() { _ = hs.Shutdown(context.Background()) }()
 
 	req, err := http.NewRequest(http.MethodGet, "http://"+hs.Addr().String()+"/api/v1/folders", nil)
 	if err != nil {

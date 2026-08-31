@@ -43,9 +43,9 @@ func newSSEStub() (*httptest.Server, *sseStub) {
 				return
 			case ev := <-st.feed:
 				body, _ := json.Marshal(ev)
-				w.Write([]byte("data: "))
-				w.Write(body)
-				w.Write([]byte("\n\n"))
+				_, _ = w.Write([]byte("data: "))
+				_, _ = w.Write(body)
+				_, _ = w.Write([]byte("\n\n"))
 				if rc.Flush() != nil {
 					return
 				}

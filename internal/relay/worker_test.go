@@ -189,8 +189,8 @@ func startSink(t *testing.T) (*recordingBackend, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ln.Close() })
-	go (&hsmtp.Server{Backend: be, Hostname: "sink.test"}).Serve(ln)
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() { _ = (&hsmtp.Server{Backend: be, Hostname: "sink.test"}).Serve(ln) }()
 	return be, ln.Addr().String()
 }
 

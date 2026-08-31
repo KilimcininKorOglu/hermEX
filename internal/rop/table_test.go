@@ -870,7 +870,7 @@ func buildSeekRowBookmark(inIdx uint8, bookmark []byte, offset int32) []byte {
 	b.Uint8(ropSeekRowBookmark)
 	b.Uint8(0)
 	b.Uint8(inIdx)
-	b.BinShort(bookmark)
+	_ = b.BinShort(bookmark)
 	b.Uint32(uint32(offset))
 	b.Uint8(0) // WantRowMovedCount
 	return b.Bytes()

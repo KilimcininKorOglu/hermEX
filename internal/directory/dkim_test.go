@@ -71,8 +71,8 @@ func TestDKIMKeyInfo(t *testing.T) {
 // rotated key cannot keep signing before its new DNS record is published.
 func TestDKIMRegenerateResetsEnabled(t *testing.T) {
 	d := setupDKIM(t)
-	d.SetDKIMKey("example.com", "sel1", []byte("OLD"), "txt-old")
-	d.SetDKIMEnabled("example.com", true)
+	_ = d.SetDKIMKey("example.com", "sel1", []byte("OLD"), "txt-old")
+	_ = d.SetDKIMEnabled("example.com", true)
 
 	if err := d.SetDKIMKey("example.com", "sel2", []byte("NEW"), "txt-new"); err != nil {
 		t.Fatal(err)
@@ -89,7 +89,7 @@ func TestDKIMRegenerateResetsEnabled(t *testing.T) {
 // TestDeleteDKIMKey proves removal.
 func TestDeleteDKIMKey(t *testing.T) {
 	d := setupDKIM(t)
-	d.SetDKIMKey("example.com", "sel1", []byte("PEM"), "txt")
+	_ = d.SetDKIMKey("example.com", "sel1", []byte("PEM"), "txt")
 	if err := d.DeleteDKIMKey("example.com"); err != nil {
 		t.Fatal(err)
 	}

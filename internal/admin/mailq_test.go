@@ -47,7 +47,7 @@ func TestMailQueueManage(t *testing.T) {
 		t.Fatalf("seeded %d entries, want 1", len(entries))
 	}
 	id := strconv.FormatInt(entries[0].RecipientID, 10)
-	sp.Close()
+	_ = sp.Close()
 
 	session, csrf := loginCookies(t, ts)
 
@@ -130,7 +130,7 @@ func TestMailQueueJSONMutations(t *testing.T) {
 		t.Fatalf("seeded %d entries, want 1", len(entries))
 	}
 	id := strconv.FormatInt(entries[0].RecipientID, 10)
-	sp.Close()
+	_ = sp.Close()
 
 	session, csrf := loginCookies(t, ts)
 
@@ -155,7 +155,7 @@ func TestMailQueueJSONMutations(t *testing.T) {
 	if entries, _ := sp.List(); len(entries) != 1 {
 		t.Errorf("after flush %d entries, want 1 (flush must not drop)", len(entries))
 	}
-	sp.Close()
+	_ = sp.Close()
 
 	// Delete answers 204 and removes the entry.
 	if code := authedMailqDo(t, ts, "DELETE", "/admin/mailq/"+id, session, csrf); code != http.StatusNoContent {
@@ -165,7 +165,7 @@ func TestMailQueueJSONMutations(t *testing.T) {
 	if entries, _ := sp.List(); len(entries) != 0 {
 		t.Errorf("after delete %d entries, want 0", len(entries))
 	}
-	sp.Close()
+	_ = sp.Close()
 }
 
 // TestMailQueueRequiresSystem proves an org admin cannot reach the mail-queue page.

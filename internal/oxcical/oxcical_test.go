@@ -201,7 +201,7 @@ func TestImportOrganizer(t *testing.T) {
 // attendee carrying the response in PARTSTAT, the inverse of the import mapping.
 func TestExportReplyIdentity(t *testing.T) {
 	r := newResolver()
-	r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID}) // allocate named ids, as a writer would
+	_, _ = r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID}) // allocate named ids, as a writer would
 	msg := &oxcmail.Message{Props: mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: "IPM.Schedule.Meeting.Resp.Neg"},
 		{Tag: r.tag(mapi.NameAppointmentStartWhole, mapi.PtSysTime), Value: mapi.UnixToNTTime(time.Date(2026, 7, 1, 14, 0, 0, 0, time.UTC))},
@@ -235,7 +235,7 @@ func TestExportReplyIdentity(t *testing.T) {
 // organizer with the attendee's PARTSTAT, never echo the invitation back.
 func TestExportReplyOverridesVerbatim(t *testing.T) {
 	r := newResolver()
-	r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID})
+	_, _ = r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole, nameICalUID})
 	verbatimRequest := "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\nUID:rec-1\r\n" +
 		"RRULE:FREQ=WEEKLY\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
 	msg := &oxcmail.Message{Props: mapi.PropertyValues{
@@ -268,7 +268,7 @@ func TestExportReplyOverridesVerbatim(t *testing.T) {
 // ordinary calendar event.
 func TestExportPlainAppointmentNoItip(t *testing.T) {
 	r := newResolver()
-	r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole}) // allocate named ids, as a writer would
+	_, _ = r.resolve(true, []mapi.PropertyName{mapi.NameAppointmentStartWhole}) // allocate named ids, as a writer would
 	msg := &oxcmail.Message{Props: mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: "IPM.Appointment"},
 		{Tag: r.tag(mapi.NameAppointmentStartWhole, mapi.PtSysTime), Value: mapi.UnixToNTTime(time.Date(2026, 7, 1, 14, 0, 0, 0, time.UTC))},

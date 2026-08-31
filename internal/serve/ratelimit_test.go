@@ -19,8 +19,8 @@ func startLimited(t *testing.T, h http.Handler, limiter *httplimit.Limiter, opts
 	if err != nil {
 		t.Fatal(err)
 	}
-	go hs.Start()
-	t.Cleanup(func() { hs.Shutdown(context.Background()) })
+	go func() { _ = hs.Start() }()
+	t.Cleanup(func() { _ = hs.Shutdown(context.Background()) })
 	return "http://" + hs.Addr().String() + "/"
 }
 

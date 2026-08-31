@@ -181,7 +181,7 @@ func servfailResolver(t *testing.T) *Resolver {
 		m.SetRcode(r, dns.RcodeServerFailure)
 		_ = w.WriteMsg(m)
 	})}
-	go srv.ActivateAndServe()
+	go func() { _ = srv.ActivateAndServe() }()
 	t.Cleanup(func() { _ = srv.Shutdown() })
 	return &Resolver{Addr: pc.LocalAddr().String()}
 }

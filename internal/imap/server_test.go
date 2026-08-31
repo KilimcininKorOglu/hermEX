@@ -47,14 +47,14 @@ func startServer(t *testing.T) (*testClient, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ln.Close() })
-	go (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln)
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test"}).Serve(ln) }()
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	c := &testClient{t: t, conn: conn, br: bufio.NewReader(conn)}
 	c.expectUntagged("OK", "greeting")
 	return c, path
@@ -117,7 +117,7 @@ func (c *testClient) expectUntagged(word, what string) string {
 // status word (OK/NO/BAD).
 func (c *testClient) do(tag, cmd string) (untagged []string, status string) {
 	c.t.Helper()
-	fmt.Fprintf(c.conn, "%s %s\r\n", tag, cmd)
+	_, _ = fmt.Fprintf(c.conn, "%s %s\r\n", tag, cmd)
 	return c.collect(tag)
 }
 
@@ -138,11 +138,11 @@ func (c *testClient) collect(tag string) (untagged []string, status string) {
 // continuation handshake, and returns the tagged status.
 func (c *testClient) appendMsg(tag, mailbox, msg string) string {
 	c.t.Helper()
-	fmt.Fprintf(c.conn, "%s APPEND %s {%d}\r\n", tag, mailbox, len(msg))
+	_, _ = fmt.Fprintf(c.conn, "%s APPEND %s {%d}\r\n", tag, mailbox, len(msg))
 	if cont := c.line(); !strings.HasPrefix(cont, "+") {
 		c.t.Fatalf("APPEND continuation = %q, want +", cont)
 	}
-	fmt.Fprintf(c.conn, "%s\r\n", msg)
+	_, _ = fmt.Fprintf(c.conn, "%s\r\n", msg)
 	_, status := c.collect(tag)
 	return status
 }

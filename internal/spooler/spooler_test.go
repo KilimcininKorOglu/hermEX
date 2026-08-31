@@ -280,7 +280,7 @@ func TestProcessDueOutboxAttemptBudgetIsPerMessage(t *testing.T) {
 		return nil, nil
 	}
 	for range maxReleaseAttempts - 1 {
-		ProcessDueOutbox(context.Background(), st, deliver, nil, time.Now())
+		_, _ = ProcessDueOutbox(context.Background(), st, deliver, nil, time.Now())
 	}
 	if n := count(t, st, int64(mapi.PrivateFIDOutbox)); n != 2 {
 		t.Fatalf("Outbox holds %d, want both messages still waiting", n)

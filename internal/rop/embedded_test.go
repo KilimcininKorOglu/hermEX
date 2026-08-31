@@ -268,7 +268,7 @@ func TestComposeEmbeddedMessage(t *testing.T) {
 		t.Fatalf("OpenEmbeddedMessage(read-back) ReturnValue = %#x (composed embedded must round-trip)", ec)
 	}
 	mustU8(t, p, "Reserved")
-	p.Uint64() // MessageId
+	_, _ = p.Uint64() // MessageId
 	mustU8(t, p, "HasNamedProperties")
 	readTypedString(t, p) // SubjectPrefix
 	if subj := readTypedString(t, p); subj != "Composed Inner" {

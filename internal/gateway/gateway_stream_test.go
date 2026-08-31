@@ -26,10 +26,10 @@ func TestGatewayForwardsChunkedIncrementally(t *testing.T) {
 			t.Error("backend ResponseWriter is not a Flusher")
 			return
 		}
-		io.WriteString(w, "chunk-one\n")
+		_, _ = io.WriteString(w, "chunk-one\n")
 		fl.Flush()
 		<-release // hold the connection open (no Content-Length, body not done)
-		io.WriteString(w, "chunk-two\n")
+		_, _ = io.WriteString(w, "chunk-two\n")
 		fl.Flush()
 	}))
 	defer backend.Close()

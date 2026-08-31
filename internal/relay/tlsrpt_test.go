@@ -121,7 +121,7 @@ func TestTLSReportDurableAcrossReopen(t *testing.T) {
 		t.Fatal(err)
 	}
 	record(t, sp, day, "remote.example", tlsrpt.PolicyTypeSTS, "mx.remote.example", "")
-	sp.Close()
+	_ = sp.Close()
 
 	reopened, err := Open(path)
 	if err != nil {
@@ -154,9 +154,9 @@ func startTLSSink(t *testing.T) (*recordingBackend, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ln.Close() })
+	t.Cleanup(func() { _ = ln.Close() })
 	srv := &hsmtp.Server{Backend: be, Hostname: "sink.test", TLSConfig: &tls.Config{Certificates: []tls.Certificate{cert}}}
-	go srv.Serve(ln)
+	go func() { _ = srv.Serve(ln) }()
 	return be, ln.Addr().String()
 }
 
@@ -281,7 +281,7 @@ func servfailDNS(t *testing.T) string {
 		m.SetRcode(r, dns.RcodeServerFailure)
 		_ = w.WriteMsg(m)
 	})}
-	go srv.ActivateAndServe()
+	go func() { _ = srv.ActivateAndServe() }()
 	t.Cleanup(func() { _ = srv.Shutdown() })
 	return pc.LocalAddr().String()
 }
