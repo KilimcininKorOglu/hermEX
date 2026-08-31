@@ -50,7 +50,7 @@ func TestInstrumentationLogsTransaction(t *testing.T) {
 	}
 	defer ln.Close()
 	srv := &Server{Backend: &fakeBackend{sess: &fakeSession{}}, Hostname: "mail.test", Logger: logging.New(sink)}
-	go srv.Serve(ln)
+	go func() { _ = srv.Serve(ln) }()
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
@@ -63,7 +63,7 @@ func TestInstrumentationLogsTransaction(t *testing.T) {
 	}
 
 	send := func(line string, code int) {
-		fmt.Fprintf(conn, "%s\r\n", line)
+		_, _ = fmt.Fprintf(conn, "%s\r\n", line)
 		if _, _, err := r.ReadResponse(code); err != nil {
 			t.Fatalf("%q: %v", line, err)
 		}
@@ -71,11 +71,11 @@ func TestInstrumentationLogsTransaction(t *testing.T) {
 	send("EHLO client.test", 250)
 	send("MAIL FROM:<alice@example.com>", 250)
 	send("RCPT TO:<bob@hermex.test>", 250)
-	fmt.Fprint(conn, "DATA\r\n")
+	_, _ = fmt.Fprint(conn, "DATA\r\n")
 	if _, _, err := r.ReadResponse(354); err != nil {
 		t.Fatalf("DATA: %v", err)
 	}
-	fmt.Fprint(conn, "Subject: hi\r\n\r\nbody\r\n.\r\n")
+	_, _ = fmt.Fprint(conn, "Subject: hi\r\n\r\nbody\r\n.\r\n")
 	if _, _, err := r.ReadResponse(250); err != nil {
 		t.Fatalf("end of DATA: %v", err)
 	}

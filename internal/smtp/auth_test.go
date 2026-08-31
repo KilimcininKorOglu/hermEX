@@ -49,8 +49,10 @@ func startAuthServer(t *testing.T, sess Session) (addr, certPath string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ln.Close() })
-	go (&Server{Backend: sessionBackend{sess}, Hostname: "mail.test", TLSConfig: tlsCfg}).Serve(ln)
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		_ = (&Server{Backend: sessionBackend{sess}, Hostname: "mail.test", TLSConfig: tlsCfg}).Serve(ln)
+	}()
 	return ln.Addr().String(), certPath
 }
 
@@ -63,16 +65,16 @@ func dialTLS(t *testing.T, addr, certPath string) (*textproto.Reader, net.Conn) 
 		t.Fatal(err)
 	}
 	r := textproto.NewReader(bufio.NewReader(conn))
-	r.ReadResponse(220)
-	fmt.Fprint(conn, "EHLO c\r\n")
-	r.ReadResponse(250)
-	fmt.Fprint(conn, "STARTTLS\r\n")
-	r.ReadResponse(220)
+	expect(t, r, 220)
+	send(t, conn, "EHLO c\r\n")
+	expect(t, r, 250)
+	send(t, conn, "STARTTLS\r\n")
+	expect(t, r, 220)
 	tconn := tls.Client(conn, &tls.Config{RootCAs: certPool(t, certPath), ServerName: "127.0.0.1"})
 	if err := tconn.Handshake(); err != nil {
 		t.Fatalf("client handshake: %v", err)
 	}
-	t.Cleanup(func() { tconn.Close() })
+	t.Cleanup(func() { _ = tconn.Close() })
 	return textproto.NewReader(bufio.NewReader(tconn)), tconn
 }
 
@@ -83,7 +85,7 @@ func TestAuthPlainSuccess(t *testing.T) {
 	addr, certPath := startAuthServer(t, sess)
 	tr, tconn := dialTLS(t, addr, certPath)
 
-	fmt.Fprint(tconn, "EHLO c\r\n")
+	_, _ = fmt.Fprint(tconn, "EHLO c\r\n")
 	_, msg, err := tr.ReadResponse(250)
 	if err != nil {
 		t.Fatalf("EHLO over TLS: %v", err)
@@ -93,7 +95,7 @@ func TestAuthPlainSuccess(t *testing.T) {
 	}
 
 	cred := base64.StdEncoding.EncodeToString([]byte("\x00alice@test\x00secret"))
-	fmt.Fprintf(tconn, "AUTH PLAIN %s\r\n", cred)
+	_, _ = fmt.Fprintf(tconn, "AUTH PLAIN %s\r\n", cred)
 	if _, _, err := tr.ReadResponse(235); err != nil {
 		t.Fatalf("AUTH PLAIN valid: want 235: %v", err)
 	}
@@ -109,7 +111,7 @@ func TestAuthPlainFailure(t *testing.T) {
 	tr, tconn := dialTLS(t, addr, certPath)
 
 	cred := base64.StdEncoding.EncodeToString([]byte("\x00alice@test\x00wrong"))
-	fmt.Fprintf(tconn, "AUTH PLAIN %s\r\n", cred)
+	_, _ = fmt.Fprintf(tconn, "AUTH PLAIN %s\r\n", cred)
 	if _, _, err := tr.ReadResponse(535); err != nil {
 		t.Fatalf("AUTH PLAIN invalid: want 535: %v", err)
 	}
@@ -124,15 +126,15 @@ func TestAuthLoginSuccess(t *testing.T) {
 	addr, certPath := startAuthServer(t, sess)
 	tr, tconn := dialTLS(t, addr, certPath)
 
-	fmt.Fprint(tconn, "AUTH LOGIN\r\n")
+	_, _ = fmt.Fprint(tconn, "AUTH LOGIN\r\n")
 	if _, _, err := tr.ReadResponse(334); err != nil {
 		t.Fatalf("AUTH LOGIN username challenge: %v", err)
 	}
-	fmt.Fprintf(tconn, "%s\r\n", base64.StdEncoding.EncodeToString([]byte("alice@test")))
+	_, _ = fmt.Fprintf(tconn, "%s\r\n", base64.StdEncoding.EncodeToString([]byte("alice@test")))
 	if _, _, err := tr.ReadResponse(334); err != nil {
 		t.Fatalf("AUTH LOGIN password challenge: %v", err)
 	}
-	fmt.Fprintf(tconn, "%s\r\n", base64.StdEncoding.EncodeToString([]byte("secret")))
+	_, _ = fmt.Fprintf(tconn, "%s\r\n", base64.StdEncoding.EncodeToString([]byte("secret")))
 	if _, _, err := tr.ReadResponse(235); err != nil {
 		t.Fatalf("AUTH LOGIN valid: want 235: %v", err)
 	}
@@ -149,8 +151,8 @@ func TestAuthRejectedWithoutTLS(t *testing.T) {
 	}
 	defer conn.Close()
 	r := textproto.NewReader(bufio.NewReader(conn))
-	r.ReadResponse(220)
-	fmt.Fprint(conn, "EHLO c\r\n")
+	expect(t, r, 220)
+	send(t, conn, "EHLO c\r\n")
 	_, msg, err := r.ReadResponse(250)
 	if err != nil {
 		t.Fatalf("EHLO: %v", err)
@@ -158,7 +160,7 @@ func TestAuthRejectedWithoutTLS(t *testing.T) {
 	if strings.Contains(msg, "AUTH") {
 		t.Errorf("AUTH advertised on a plaintext link:\n%s", msg)
 	}
-	fmt.Fprint(conn, "AUTH PLAIN AGFsaWNlQHRlc3QAc2VjcmV0\r\n")
+	send(t, conn, "AUTH PLAIN AGFsaWNlQHRlc3QAc2VjcmV0\r\n")
 	if _, _, err := r.ReadResponse(538); err != nil {
 		t.Fatalf("AUTH on a plaintext link: want 538: %v", err)
 	}

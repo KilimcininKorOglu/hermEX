@@ -33,8 +33,10 @@ func startSTARTTLSServer(t *testing.T, sess *fakeSession) (addr, certPath string
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { ln.Close() })
-	go (&Server{Backend: &fakeBackend{sess: sess}, Hostname: "mail.test", TLSConfig: tlsCfg}).Serve(ln)
+	t.Cleanup(func() { _ = ln.Close() })
+	go func() {
+		_ = (&Server{Backend: &fakeBackend{sess: sess}, Hostname: "mail.test", TLSConfig: tlsCfg}).Serve(ln)
+	}()
 	return ln.Addr().String(), certPath
 }
 
@@ -53,7 +55,7 @@ func TestStartTLSUpgrade(t *testing.T) {
 	if _, _, err := r.ReadResponse(220); err != nil {
 		t.Fatalf("greeting: %v", err)
 	}
-	fmt.Fprint(conn, "EHLO client.test\r\n")
+	send(t, conn, "EHLO client.test\r\n")
 	_, msg, err := r.ReadResponse(250)
 	if err != nil {
 		t.Fatalf("EHLO: %v", err)
@@ -61,7 +63,7 @@ func TestStartTLSUpgrade(t *testing.T) {
 	if !strings.Contains(msg, "STARTTLS") {
 		t.Errorf("EHLO does not advertise STARTTLS:\n%s", msg)
 	}
-	fmt.Fprint(conn, "STARTTLS\r\n")
+	send(t, conn, "STARTTLS\r\n")
 	if _, _, err := r.ReadResponse(220); err != nil {
 		t.Fatalf("STARTTLS: %v", err)
 	}
@@ -71,7 +73,7 @@ func TestStartTLSUpgrade(t *testing.T) {
 		t.Fatalf("client handshake: %v", err)
 	}
 	tr := textproto.NewReader(bufio.NewReader(tconn))
-	fmt.Fprint(tconn, "EHLO client.test\r\n")
+	_, _ = fmt.Fprint(tconn, "EHLO client.test\r\n")
 	_, msg2, err := tr.ReadResponse(250)
 	if err != nil {
 		t.Fatalf("EHLO over TLS: %v", err)
@@ -79,16 +81,16 @@ func TestStartTLSUpgrade(t *testing.T) {
 	if strings.Contains(msg2, "STARTTLS") {
 		t.Errorf("STARTTLS still advertised after TLS:\n%s", msg2)
 	}
-	fmt.Fprint(tconn, "MAIL FROM:<alice@test>\r\n")
+	_, _ = fmt.Fprint(tconn, "MAIL FROM:<alice@test>\r\n")
 	if _, _, err := tr.ReadResponse(250); err != nil {
 		t.Fatalf("MAIL over TLS: %v", err)
 	}
-	fmt.Fprint(tconn, "RCPT TO:<bob@test>\r\n")
+	_, _ = fmt.Fprint(tconn, "RCPT TO:<bob@test>\r\n")
 	if _, _, err := tr.ReadResponse(250); err != nil {
 		t.Fatalf("RCPT over TLS: %v", err)
 	}
-	fmt.Fprint(tconn, "QUIT\r\n")
-	tr.ReadResponse(221)
+	_, _ = fmt.Fprint(tconn, "QUIT\r\n")
+	_, _, _ = tr.ReadResponse(221)
 
 	if sess.from != "alice@test" {
 		t.Errorf("transaction over TLS recorded from=%q, want alice@test", sess.from)
@@ -113,7 +115,7 @@ func TestStartTLSRejectsPipelinedInjection(t *testing.T) {
 	if _, err := conn.Write([]byte("STARTTLS\r\nMAIL FROM:<evil@test>\r\n")); err != nil {
 		t.Fatal(err)
 	}
-	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
 	rest, _ := io.ReadAll(conn)
 	if strings.Contains(string(rest), "250") {
 		t.Errorf("injected MAIL accepted across the TLS boundary: %q", rest)

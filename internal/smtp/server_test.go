@@ -19,11 +19,11 @@ func TestServerRcptTempErrorIsTemporary(t *testing.T) {
 	sess := &fakeSession{rcptErr: &TempError{Message: "greylisted, retry later"}}
 	r, conn := dialServer(t, sess)
 	expect(t, r, 220)
-	fmt.Fprint(conn, "EHLO client.test\r\n")
+	send(t, conn, "EHLO client.test\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	send(t, conn, "MAIL FROM:<alice@test>\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+	send(t, conn, "RCPT TO:<bob@test>\r\n")
 	expect(t, r, 451)
 }
 
@@ -33,11 +33,11 @@ func TestServerRcptPermErrorIsPermanent(t *testing.T) {
 	sess := &fakeSession{rcptErr: errors.New("no such mailbox")}
 	r, conn := dialServer(t, sess)
 	expect(t, r, 220)
-	fmt.Fprint(conn, "EHLO client.test\r\n")
+	send(t, conn, "EHLO client.test\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	send(t, conn, "MAIL FROM:<alice@test>\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+	send(t, conn, "RCPT TO:<bob@test>\r\n")
 	expect(t, r, 550)
 }
 
@@ -58,15 +58,15 @@ func TestServerDataTempErrorIsTemporary(t *testing.T) {
 			sess := &fakeSession{dataErr: tc.err}
 			r, conn := dialServer(t, sess)
 			expect(t, r, 220)
-			fmt.Fprint(conn, "EHLO client.test\r\n")
+			send(t, conn, "EHLO client.test\r\n")
 			expect(t, r, 250)
-			fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+			send(t, conn, "MAIL FROM:<alice@test>\r\n")
 			expect(t, r, 250)
-			fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+			send(t, conn, "RCPT TO:<bob@test>\r\n")
 			expect(t, r, 250)
-			fmt.Fprint(conn, "DATA\r\n")
+			send(t, conn, "DATA\r\n")
 			expect(t, r, 354)
-			fmt.Fprint(conn, "Subject: hi\r\n\r\nbody\r\n.\r\n")
+			send(t, conn, "Subject: hi\r\n\r\nbody\r\n.\r\n")
 			expect(t, r, tc.code)
 		})
 	}
@@ -116,14 +116,23 @@ func dialServer(t *testing.T, sess *fakeSession) (*textproto.Reader, net.Conn) {
 		t.Fatal(err)
 	}
 	srv := &Server{Backend: &fakeBackend{sess: sess}, Hostname: "mail.test"}
-	go srv.Serve(ln)
+	go func() { _ = srv.Serve(ln) }()
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
-		ln.Close()
+		_ = ln.Close()
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close(); ln.Close() })
+	t.Cleanup(func() { _ = conn.Close(); _ = ln.Close() })
 	return textproto.NewReader(bufio.NewReader(conn)), conn
+}
+
+// send writes a client line to the server connection, failing the test if the
+// write does not complete: a broken write means the test setup is unusable.
+func send(t *testing.T, c net.Conn, s string) {
+	t.Helper()
+	if _, err := fmt.Fprint(c, s); err != nil {
+		t.Fatalf("write %q: %v", s, err)
+	}
 }
 
 func expect(t *testing.T, r *textproto.Reader, code int) {
@@ -138,20 +147,20 @@ func TestServerTransaction(t *testing.T) {
 	r, conn := dialServer(t, sess)
 
 	expect(t, r, 220)
-	fmt.Fprint(conn, "EHLO client.test\r\n")
+	send(t, conn, "EHLO client.test\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	send(t, conn, "MAIL FROM:<alice@test>\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+	send(t, conn, "RCPT TO:<bob@test>\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "RCPT TO:<carol@test>\r\n")
+	send(t, conn, "RCPT TO:<carol@test>\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "DATA\r\n")
+	send(t, conn, "DATA\r\n")
 	expect(t, r, 354)
 	// "..dotstuffed" on the wire must arrive as ".dotstuffed" after unstuffing.
-	fmt.Fprint(conn, "Subject: hi\r\n\r\nline one\r\n..dotstuffed\r\n.\r\n")
+	send(t, conn, "Subject: hi\r\n\r\nline one\r\n..dotstuffed\r\n.\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "QUIT\r\n")
+	send(t, conn, "QUIT\r\n")
 	expect(t, r, 221)
 
 	if sess.from != "alice@test" {
@@ -191,15 +200,15 @@ func TestServerMailRequiresGreeting(t *testing.T) {
 	expect(t, r, 220)
 
 	// MAIL with no prior greeting is a bad sequence.
-	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	send(t, conn, "MAIL FROM:<alice@test>\r\n")
 	expect(t, r, 503)
 	// A non-mail command needs no greeting (§4.1.4).
-	fmt.Fprint(conn, "VRFY bob@test\r\n")
+	send(t, conn, "VRFY bob@test\r\n")
 	expect(t, r, 252)
 	// After EHLO the transaction opens normally.
-	fmt.Fprint(conn, "EHLO client.test\r\n")
+	send(t, conn, "EHLO client.test\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	send(t, conn, "MAIL FROM:<alice@test>\r\n")
 	expect(t, r, 250)
 }
 
@@ -210,17 +219,17 @@ func TestServerMailRequiresGreeting(t *testing.T) {
 func TestServerServiceCommands(t *testing.T) {
 	r, conn := dialServer(t, &fakeSession{})
 	expect(t, r, 220)
-	fmt.Fprint(conn, "EHLO client.test\r\n")
+	send(t, conn, "EHLO client.test\r\n")
 	expect(t, r, 250)
 
-	fmt.Fprint(conn, "VRFY bob@test\r\n")
+	send(t, conn, "VRFY bob@test\r\n")
 	expect(t, r, 252)
-	fmt.Fprint(conn, "EXPN staff@test\r\n")
+	send(t, conn, "EXPN staff@test\r\n")
 	expect(t, r, 502)
-	fmt.Fprint(conn, "HELP\r\n")
+	send(t, conn, "HELP\r\n")
 	expect(t, r, 214)
 	// A genuinely unknown verb still falls through to 500.
-	fmt.Fprint(conn, "FROBNICATE\r\n")
+	send(t, conn, "FROBNICATE\r\n")
 	expect(t, r, 500)
 }
 
@@ -231,17 +240,17 @@ func TestServerEnforcesMaxSize(t *testing.T) {
 	}
 	srv := &Server{Backend: &fakeBackend{sess: &fakeSession{}}, Hostname: "mail.test"}
 	srv.SetMaxSize(64) // 64 bytes
-	go srv.Serve(ln)
+	go func() { _ = srv.Serve(ln) }()
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
-		ln.Close()
+		_ = ln.Close()
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close(); ln.Close() })
+	t.Cleanup(func() { _ = conn.Close(); _ = ln.Close() })
 	r := textproto.NewReader(bufio.NewReader(conn))
 
 	expect(t, r, 220)
-	fmt.Fprint(conn, "EHLO client.test\r\n")
+	send(t, conn, "EHLO client.test\r\n")
 	_, msg, err := r.ReadResponse(250)
 	if err != nil {
 		t.Fatalf("EHLO: %v", err)
@@ -249,14 +258,14 @@ func TestServerEnforcesMaxSize(t *testing.T) {
 	if !strings.Contains(msg, "SIZE 64") {
 		t.Errorf("EHLO did not advertise the configured size limit: %q", msg)
 	}
-	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	send(t, conn, "MAIL FROM:<alice@test>\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+	send(t, conn, "RCPT TO:<bob@test>\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "DATA\r\n")
+	send(t, conn, "DATA\r\n")
 	expect(t, r, 354)
 	// A body well past 64 bytes is rejected with 552, not accepted.
-	fmt.Fprint(conn, "Subject: hi\r\n\r\n"+strings.Repeat("x", 500)+"\r\n.\r\n")
+	send(t, conn, "Subject: hi\r\n\r\n"+strings.Repeat("x", 500)+"\r\n.\r\n")
 	expect(t, r, 552)
 }
 
@@ -268,7 +277,7 @@ func TestServerSMTPUTF8(t *testing.T) {
 	r, conn := dialServer(t, sess)
 	expect(t, r, 220)
 
-	fmt.Fprint(conn, "EHLO client.test\r\n")
+	send(t, conn, "EHLO client.test\r\n")
 	_, ehlo, err := r.ReadResponse(250)
 	if err != nil {
 		t.Fatalf("EHLO: %v", err)
@@ -278,7 +287,7 @@ func TestServerSMTPUTF8(t *testing.T) {
 	}
 
 	const utf8From = "bücher@例え.test"
-	fmt.Fprint(conn, "MAIL FROM:<"+utf8From+"> SMTPUTF8\r\n")
+	send(t, conn, "MAIL FROM:<"+utf8From+"> SMTPUTF8\r\n")
 	expect(t, r, 250)
 	if sess.from != utf8From {
 		t.Errorf("UTF-8 sender mangled: from = %q, want %q", sess.from, utf8From)
@@ -301,7 +310,7 @@ func TestServerEnhancedStatusCodes(t *testing.T) {
 		t.Errorf("220 banner carries an enhanced code, want bare: %q", banner)
 	}
 
-	fmt.Fprint(conn, "EHLO client.test\r\n")
+	send(t, conn, "EHLO client.test\r\n")
 	_, ehlo, err := r.ReadResponse(250)
 	if err != nil {
 		t.Fatalf("EHLO: %v", err)
@@ -311,7 +320,7 @@ func TestServerEnhancedStatusCodes(t *testing.T) {
 	}
 
 	// A bare 250 gains the class default 2.0.0.
-	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	send(t, conn, "MAIL FROM:<alice@test>\r\n")
 	_, mailMsg, err := r.ReadResponse(250)
 	if err != nil {
 		t.Fatalf("MAIL: %v", err)
@@ -321,7 +330,7 @@ func TestServerEnhancedStatusCodes(t *testing.T) {
 	}
 
 	// A bare error reply carries the 5.0.0 class default.
-	fmt.Fprint(conn, "DATA\r\n")
+	send(t, conn, "DATA\r\n")
 	_, dataMsg, err := r.ReadResponse(503)
 	if err != nil {
 		t.Fatalf("DATA: %v", err)
@@ -331,7 +340,7 @@ func TestServerEnhancedStatusCodes(t *testing.T) {
 	}
 
 	// A reply that already embeds a specific code is not double-prefixed.
-	fmt.Fprint(conn, "VRFY bob@test\r\n")
+	send(t, conn, "VRFY bob@test\r\n")
 	_, vrfyMsg, err := r.ReadResponse(252)
 	if err != nil {
 		t.Fatalf("VRFY: %v", err)
@@ -349,10 +358,10 @@ func TestServerCommandLineLimit(t *testing.T) {
 	expect(t, r, 220)
 
 	// A command line far past the 512-octet limit is refused.
-	fmt.Fprint(conn, "EHLO "+strings.Repeat("a", 600)+"\r\n")
+	send(t, conn, "EHLO "+strings.Repeat("a", 600)+"\r\n")
 	expect(t, r, 500)
 	// The reader drained the overlong line, so a normal command still works.
-	fmt.Fprint(conn, "EHLO client.test\r\n")
+	send(t, conn, "EHLO client.test\r\n")
 	expect(t, r, 250)
 }
 
@@ -367,28 +376,28 @@ func TestServerSizeDeclaration(t *testing.T) {
 	}
 	srv := &Server{Backend: &fakeBackend{sess: &fakeSession{}}, Hostname: "mail.test"}
 	srv.SetMaxSize(1000)
-	go srv.Serve(ln)
+	go func() { _ = srv.Serve(ln) }()
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
-		ln.Close()
+		_ = ln.Close()
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close(); ln.Close() })
+	t.Cleanup(func() { _ = conn.Close(); _ = ln.Close() })
 	r := textproto.NewReader(bufio.NewReader(conn))
 
 	expect(t, r, 220)
-	fmt.Fprint(conn, "EHLO client.test\r\n")
+	send(t, conn, "EHLO client.test\r\n")
 	expect(t, r, 250)
 	// Over the 1000-byte limit: rejected at MAIL, no transaction opened.
-	fmt.Fprint(conn, "MAIL FROM:<alice@test> SIZE=5000\r\n")
+	send(t, conn, "MAIL FROM:<alice@test> SIZE=5000\r\n")
 	expect(t, r, 552)
 	// Under the limit: accepted.
-	fmt.Fprint(conn, "MAIL FROM:<alice@test> SIZE=200\r\n")
+	send(t, conn, "MAIL FROM:<alice@test> SIZE=200\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "RSET\r\n")
+	send(t, conn, "RSET\r\n")
 	expect(t, r, 250)
 	// No SIZE parameter at all: unaffected.
-	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	send(t, conn, "MAIL FROM:<alice@test>\r\n")
 	expect(t, r, 250)
 }
 
@@ -467,7 +476,7 @@ func TestServerBDATChunking(t *testing.T) {
 	r, conn := dialServer(t, sess)
 	expect(t, r, 220)
 
-	fmt.Fprint(conn, "EHLO client.test\r\n")
+	send(t, conn, "EHLO client.test\r\n")
 	_, ehlo, err := r.ReadResponse(250)
 	if err != nil {
 		t.Fatalf("EHLO: %v", err)
@@ -476,17 +485,17 @@ func TestServerBDATChunking(t *testing.T) {
 		t.Errorf("EHLO did not advertise CHUNKING/BINARYMIME: %q", ehlo)
 	}
 
-	fmt.Fprint(conn, "MAIL FROM:<alice@test> BODY=BINARYMIME\r\n")
+	send(t, conn, "MAIL FROM:<alice@test> BODY=BINARYMIME\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+	send(t, conn, "RCPT TO:<bob@test>\r\n")
 	expect(t, r, 250)
 
 	// First chunk (6 octets, not last): acknowledged, the message stays open. The
 	// leading "." is data here, not a terminator, and must be preserved verbatim.
-	fmt.Fprint(conn, "BDAT 6\r\n.Hello")
+	send(t, conn, "BDAT 6\r\n.Hello")
 	expect(t, r, 250)
 	// Final chunk (7 octets): delivers the assembled body.
-	fmt.Fprint(conn, "BDAT 7 LAST\r\n, World")
+	send(t, conn, "BDAT 7 LAST\r\n, World")
 	expect(t, r, 250)
 
 	got := string(sess.data)
@@ -508,27 +517,27 @@ func TestServerBDATSequencing(t *testing.T) {
 	t.Run("data after bdat", func(t *testing.T) {
 		r, conn := dialServer(t, &fakeSession{})
 		expect(t, r, 220)
-		fmt.Fprint(conn, "EHLO client.test\r\n")
+		send(t, conn, "EHLO client.test\r\n")
 		expect(t, r, 250)
-		fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+		send(t, conn, "MAIL FROM:<alice@test>\r\n")
 		expect(t, r, 250)
-		fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+		send(t, conn, "RCPT TO:<bob@test>\r\n")
 		expect(t, r, 250)
-		fmt.Fprint(conn, "BDAT 5\r\nHello")
+		send(t, conn, "BDAT 5\r\nHello")
 		expect(t, r, 250)
-		fmt.Fprint(conn, "DATA\r\n")
+		send(t, conn, "DATA\r\n")
 		expect(t, r, 503)
 	})
 	t.Run("binarymime refuses data", func(t *testing.T) {
 		r, conn := dialServer(t, &fakeSession{})
 		expect(t, r, 220)
-		fmt.Fprint(conn, "EHLO client.test\r\n")
+		send(t, conn, "EHLO client.test\r\n")
 		expect(t, r, 250)
-		fmt.Fprint(conn, "MAIL FROM:<alice@test> BODY=BINARYMIME\r\n")
+		send(t, conn, "MAIL FROM:<alice@test> BODY=BINARYMIME\r\n")
 		expect(t, r, 250)
-		fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+		send(t, conn, "RCPT TO:<bob@test>\r\n")
 		expect(t, r, 250)
-		fmt.Fprint(conn, "DATA\r\n")
+		send(t, conn, "DATA\r\n")
 		expect(t, r, 503)
 	})
 }
@@ -544,29 +553,29 @@ func TestServerBDATSizeLimit(t *testing.T) {
 	}
 	srv := &Server{Backend: &fakeBackend{sess: &fakeSession{}}, Hostname: "mail.test"}
 	srv.SetMaxSize(64)
-	go srv.Serve(ln)
+	go func() { _ = srv.Serve(ln) }()
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
-		ln.Close()
+		_ = ln.Close()
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close(); ln.Close() })
+	t.Cleanup(func() { _ = conn.Close(); _ = ln.Close() })
 	r := textproto.NewReader(bufio.NewReader(conn))
 
 	expect(t, r, 220)
-	fmt.Fprint(conn, "EHLO client.test\r\n")
+	send(t, conn, "EHLO client.test\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	send(t, conn, "MAIL FROM:<alice@test>\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+	send(t, conn, "RCPT TO:<bob@test>\r\n")
 	expect(t, r, 250)
 	// A 100-octet chunk past the 64-byte limit is refused with 552.
-	fmt.Fprint(conn, "BDAT 100\r\n"+strings.Repeat("x", 100))
+	send(t, conn, "BDAT 100\r\n"+strings.Repeat("x", 100))
 	expect(t, r, 552)
 	// The chunk was drained, so the stream is still at a command boundary.
-	fmt.Fprint(conn, "RSET\r\n")
+	send(t, conn, "RSET\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "MAIL FROM:<carol@test>\r\n")
+	send(t, conn, "MAIL FROM:<carol@test>\r\n")
 	expect(t, r, 250)
 }
 
@@ -604,7 +613,7 @@ func TestServerMTPriority(t *testing.T) {
 	r, conn := dialServer(t, &fakeSession{})
 	expect(t, r, 220)
 
-	fmt.Fprint(conn, "EHLO client.test\r\n")
+	send(t, conn, "EHLO client.test\r\n")
 	_, ehlo, err := r.ReadResponse(250)
 	if err != nil {
 		t.Fatalf("EHLO: %v", err)
@@ -614,15 +623,15 @@ func TestServerMTPriority(t *testing.T) {
 	}
 
 	// An in-range priority is accepted.
-	fmt.Fprint(conn, "MAIL FROM:<alice@test> MT-PRIORITY=4\r\n")
+	send(t, conn, "MAIL FROM:<alice@test> MT-PRIORITY=4\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "RSET\r\n")
+	send(t, conn, "RSET\r\n")
 	expect(t, r, 250)
 	// Out of range is a 501 parameter syntax error.
-	fmt.Fprint(conn, "MAIL FROM:<alice@test> MT-PRIORITY=42\r\n")
+	send(t, conn, "MAIL FROM:<alice@test> MT-PRIORITY=42\r\n")
 	expect(t, r, 501)
 	// Non-integer is likewise refused.
-	fmt.Fprint(conn, "MAIL FROM:<alice@test> MT-PRIORITY=urgent\r\n")
+	send(t, conn, "MAIL FROM:<alice@test> MT-PRIORITY=urgent\r\n")
 	expect(t, r, 501)
 }
 
@@ -631,24 +640,24 @@ func TestServerSequencingAndSyntax(t *testing.T) {
 	r, conn := dialServer(t, sess)
 
 	expect(t, r, 220)
-	fmt.Fprint(conn, "EHLO client.test\r\n")
+	send(t, conn, "EHLO client.test\r\n")
 	expect(t, r, 250)
 	// RCPT before MAIL is a bad sequence.
-	fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+	send(t, conn, "RCPT TO:<bob@test>\r\n")
 	expect(t, r, 503)
 	// Malformed MAIL argument is a syntax error.
-	fmt.Fprint(conn, "MAIL FROM:alice@test\r\n")
+	send(t, conn, "MAIL FROM:alice@test\r\n")
 	expect(t, r, 501)
-	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	send(t, conn, "MAIL FROM:<alice@test>\r\n")
 	expect(t, r, 250)
 	// DATA before any RCPT is a bad sequence.
-	fmt.Fprint(conn, "DATA\r\n")
+	send(t, conn, "DATA\r\n")
 	expect(t, r, 503)
-	fmt.Fprint(conn, "RSET\r\n")
+	send(t, conn, "RSET\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "FOOBAR\r\n")
+	send(t, conn, "FOOBAR\r\n")
 	expect(t, r, 500)
-	fmt.Fprint(conn, "QUIT\r\n")
+	send(t, conn, "QUIT\r\n")
 	expect(t, r, 221)
 }
 
@@ -736,7 +745,7 @@ func TestServerDSN(t *testing.T) {
 	r, conn := dialServer(t, sess)
 	expect(t, r, 220)
 
-	fmt.Fprint(conn, "EHLO client.test\r\n")
+	send(t, conn, "EHLO client.test\r\n")
 	_, ehlo, err := r.ReadResponse(250)
 	if err != nil {
 		t.Fatalf("EHLO: %v", err)
@@ -746,25 +755,25 @@ func TestServerDSN(t *testing.T) {
 	}
 
 	// Valid RET/ENVID on MAIL reach the session.
-	fmt.Fprint(conn, "MAIL FROM:<alice@test> RET=HDRS ENVID=id01\r\n")
+	send(t, conn, "MAIL FROM:<alice@test> RET=HDRS ENVID=id01\r\n")
 	expect(t, r, 250)
 	if sess.lastMail.RET != "HDRS" || sess.lastMail.ENVID != "id01" {
 		t.Errorf("session MailParams = %+v, want RET=HDRS ENVID=id01", sess.lastMail)
 	}
 	// Valid NOTIFY/ORCPT on RCPT reach the session.
-	fmt.Fprint(conn, "RCPT TO:<bob@test> NOTIFY=NEVER ORCPT=rfc822;bob@test\r\n")
+	send(t, conn, "RCPT TO:<bob@test> NOTIFY=NEVER ORCPT=rfc822;bob@test\r\n")
 	expect(t, r, 250)
 	if sess.lastRcpt.Notify != "NEVER" || sess.lastRcpt.ORCPT != "rfc822;bob@test" {
 		t.Errorf("session RcptParams = %+v, want NOTIFY=NEVER ORCPT=rfc822;bob@test", sess.lastRcpt)
 	}
 
 	// A malformed DSN parameter is a 501 before the transaction opens.
-	fmt.Fprint(conn, "RSET\r\n")
+	send(t, conn, "RSET\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "MAIL FROM:<alice@test> RET=PARTIAL\r\n")
+	send(t, conn, "MAIL FROM:<alice@test> RET=PARTIAL\r\n")
 	expect(t, r, 501)
-	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	send(t, conn, "MAIL FROM:<alice@test>\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "RCPT TO:<bob@test> NOTIFY=NEVER,SUCCESS\r\n")
+	send(t, conn, "RCPT TO:<bob@test> NOTIFY=NEVER,SUCCESS\r\n")
 	expect(t, r, 501)
 }

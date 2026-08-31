@@ -3,7 +3,6 @@ package smtp
 import (
 	"bufio"
 	"errors"
-	"fmt"
 	"net"
 	"net/textproto"
 	"strings"
@@ -27,13 +26,13 @@ func dialLoggedServer(t *testing.T, sess *fakeSession) (*textproto.Reader, net.C
 		t.Fatal(err)
 	}
 	srv := &Server{Backend: &fakeBackend{sess: sess}, Hostname: "mail.test", Logger: logging.New(sink)}
-	go srv.Serve(ln)
+	go func() { _ = srv.Serve(ln) }()
 	conn, err := net.Dial("tcp", ln.Addr().String())
 	if err != nil {
-		ln.Close()
+		_ = ln.Close()
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close(); ln.Close() })
+	t.Cleanup(func() { _ = conn.Close(); _ = ln.Close() })
 	return textproto.NewReader(bufio.NewReader(conn)), conn, sink
 }
 
@@ -55,9 +54,9 @@ func readReply(t *testing.T, r *textproto.Reader) (int, string) {
 func greet(t *testing.T, r *textproto.Reader, conn net.Conn) {
 	t.Helper()
 	expect(t, r, 220)
-	fmt.Fprint(conn, "EHLO client.test\r\n")
+	send(t, conn, "EHLO client.test\r\n")
 	expect(t, r, 250)
-	fmt.Fprint(conn, "MAIL FROM:<alice@test>\r\n")
+	send(t, conn, "MAIL FROM:<alice@test>\r\n")
 	expect(t, r, 250)
 }
 
@@ -70,7 +69,7 @@ func TestRcptErrorDoesNotDiscloseInternals(t *testing.T) {
 	r, conn, _ := dialLoggedServer(t, sess)
 	greet(t, r, conn)
 
-	fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+	send(t, conn, "RCPT TO:<bob@test>\r\n")
 	code, msg := readReply(t, r)
 	if code != 550 {
 		t.Fatalf("reply code = %d, want 550", code)
@@ -89,7 +88,7 @@ func TestRcptErrorIsRecorded(t *testing.T) {
 	r, conn, sink := dialLoggedServer(t, sess)
 	greet(t, r, conn)
 
-	fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+	send(t, conn, "RCPT TO:<bob@test>\r\n")
 	readReply(t, r)
 
 	e, ok := findEvent(sink.snapshot(), "session.error")
@@ -109,7 +108,7 @@ func TestRcptPermErrorReachesTheWire(t *testing.T) {
 	r, conn, _ := dialLoggedServer(t, sess)
 	greet(t, r, conn)
 
-	fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+	send(t, conn, "RCPT TO:<bob@test>\r\n")
 	code, msg := readReply(t, r)
 	if code != 550 {
 		t.Fatalf("reply code = %d, want 550", code)
@@ -137,11 +136,11 @@ func TestDataErrorDoesNotDiscloseInternals(t *testing.T) {
 			sess := &fakeSession{dataErr: tc.err}
 			r, conn, _ := dialLoggedServer(t, sess)
 			greet(t, r, conn)
-			fmt.Fprint(conn, "RCPT TO:<bob@test>\r\n")
+			send(t, conn, "RCPT TO:<bob@test>\r\n")
 			expect(t, r, 250)
-			fmt.Fprint(conn, "DATA\r\n")
+			send(t, conn, "DATA\r\n")
 			expect(t, r, 354)
-			fmt.Fprint(conn, "Subject: hi\r\n\r\nbody\r\n.\r\n")
+			send(t, conn, "Subject: hi\r\n\r\nbody\r\n.\r\n")
 
 			code, msg := readReply(t, r)
 			if code != tc.code {
