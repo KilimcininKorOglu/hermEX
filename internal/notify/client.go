@@ -46,7 +46,7 @@ const (
 // internal-only with no host port, and it carries no message content, only wake
 // signals, mirroring the gateway→backend transport.
 func internalTransport() *http.Transport {
-	return &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	return &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}} // #nosec G402 -- internal self-signed notify hop, wake signals only, mirrors the gateway backend transport
 }
 
 // --- Producer ---

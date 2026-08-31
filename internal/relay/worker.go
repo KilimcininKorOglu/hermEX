@@ -452,14 +452,14 @@ func (w *Worker) send(host string, it Item, requireTLS bool) error {
 		policyType = tlsrpt.PolicyTypeSTS
 	}
 	if ok, _ := c.Extension("STARTTLS"); ok {
-		cfg := &tls.Config{ServerName: host, InsecureSkipVerify: !requireTLS}
+		cfg := &tls.Config{ServerName: host, InsecureSkipVerify: !requireTLS} // #nosec G402 -- opportunistic STARTTLS, verification is on when requireTLS and off only for best-effort delivery
 		if len(daneRecs) > 0 {
 			// Authenticate against the TLSA records instead of the PKIX trust
 			// store: skip the default verification and match the presented chain
 			// in VerifyConnection (RFC 7672 §3).
 			cfg = &tls.Config{
 				ServerName:         host,
-				InsecureSkipVerify: true,
+				InsecureSkipVerify: true, // #nosec G402 -- DANE TLSA path, PKIX skipped and the presented chain is checked in VerifyConnection (RFC 7672)
 				VerifyConnection: func(cs tls.ConnectionState) error {
 					return dane.Match(daneRecs, cs.PeerCertificates, host)
 				},

@@ -42,7 +42,7 @@ func Handler(routes []Route) (http.Handler, error) {
 	// Backends share one transport. When TLS is terminated end-to-end they present
 	// self-signed certificates on the internal network, so verification is skipped on
 	// the gateway→backend hop (the external hop to the client stays verified).
-	transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	transport := &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}} // #nosec G402 -- gateway to backend internal hop presents self-signed certs, the external hop to the client stays verified
 	for _, r := range routes {
 		u, err := url.Parse(r.Target)
 		if err != nil {
