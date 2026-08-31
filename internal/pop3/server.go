@@ -50,9 +50,42 @@ func (s *Server) Serve(l net.Listener) error { return s.conns.Serve(l, s.handle)
 // Shutdown stops accepting and drains in-flight sessions within ctx's deadline.
 func (s *Server) Shutdown(ctx context.Context) error { return s.conns.Shutdown(ctx) }
 
+// ew wraps the response bufio.Writer and records the first write error. The POP3
+// response helpers stay linear (no error return threaded through every line), and
+// handle checks err once per command: a failed write to the client means the
+// connection is gone, so the session is abandoned.
+type ew struct {
+	out *bufio.Writer
+	err error
+}
+
+func (e *ew) str(s string) {
+	if e.err == nil {
+		_, e.err = e.out.WriteString(s)
+	}
+}
+
+func (e *ew) wbyte(b byte) {
+	if e.err == nil {
+		e.err = e.out.WriteByte(b)
+	}
+}
+
+func (e *ew) printf(format string, a ...any) {
+	if e.err == nil {
+		_, e.err = fmt.Fprintf(e.out, format, a...)
+	}
+}
+
+func (e *ew) flush() {
+	if e.err == nil {
+		e.err = e.out.Flush()
+	}
+}
+
 func (s *Server) handle(conn net.Conn) {
-	defer func() { conn.Close() }() // closes the upgraded conn after an STLS swap
-	w := bufio.NewWriter(conn)
+	defer func() { _ = conn.Close() }() // closes the upgraded conn after an STLS swap
+	w := &ew{out: bufio.NewWriter(conn)}
 	tp := textproto.NewReader(bufio.NewReader(conn))
 	_, isTLS := conn.(*tls.Conn)
 
@@ -85,6 +118,9 @@ func (s *Server) handle(conn net.Conn) {
 		line, err := tp.ReadLine()
 		if err != nil {
 			return // client gone; per RFC no deletions are committed
+		}
+		if w.err != nil {
+			return // a prior response failed to reach the client; the link is gone
 		}
 		cmd, arg, _ := strings.Cut(line, " ")
 		cmd = strings.ToUpper(cmd)
@@ -144,7 +180,7 @@ func (s *Server) handle(conn net.Conn) {
 					return // handshake failed; deferred close fires
 				}
 				conn = tc
-				w = bufio.NewWriter(tc)
+				w = &ew{out: bufio.NewWriter(tc)}
 				tp = textproto.NewReader(bufio.NewReader(tc))
 				isTLS = true
 				user = "" // discard any USER given before TLS
@@ -248,7 +284,7 @@ func (mb *mailbox) index(arg string) (int, bool) {
 	return n, true
 }
 
-func (mb *mailbox) list(w *bufio.Writer, arg string, uidl bool) {
+func (mb *mailbox) list(w *ew, arg string, uidl bool) {
 	if strings.TrimSpace(arg) != "" {
 		n, valid := mb.index(arg)
 		if !valid {
@@ -268,16 +304,16 @@ func (mb *mailbox) list(w *bufio.Writer, arg string, uidl bool) {
 			continue
 		}
 		if uidl {
-			fmt.Fprintf(w, "%d %d\r\n", i+1, m.UID)
+			w.printf("%d %d\r\n", i+1, m.UID)
 		} else {
-			fmt.Fprintf(w, "%d %d\r\n", i+1, m.Size)
+			w.printf("%d %d\r\n", i+1, m.Size)
 		}
 	}
-	w.WriteString(".\r\n")
-	w.Flush()
+	w.str(".\r\n")
+	w.flush()
 }
 
-func (mb *mailbox) retr(w *bufio.Writer, arg string) {
+func (mb *mailbox) retr(w *ew, arg string) {
 	n, valid := mb.index(arg)
 	if !valid {
 		errLine(w, "no such message")
@@ -288,15 +324,15 @@ func (mb *mailbox) retr(w *bufio.Writer, arg string) {
 		errLine(w, "[SYS/TEMP] retrieval failed")
 		return
 	}
-	fmt.Fprintf(w, "+OK %d octets\r\n", len(raw))
+	w.printf("+OK %d octets\r\n", len(raw))
 	writeDotStuffed(w, raw)
-	w.Flush()
+	w.flush()
 }
 
 // top implements RFC 1939 TOP: it writes a message's full headers plus the first
 // n lines of its body (n >= 0), dot-stuffed and terminated like RETR. It does not
 // mark the message and is valid only in the TRANSACTION state.
-func (mb *mailbox) top(w *bufio.Writer, arg string) {
+func (mb *mailbox) top(w *ew, arg string) {
 	fields := strings.Fields(arg)
 	if len(fields) != 2 {
 		errLine(w, "TOP requires a message number and a line count")
@@ -319,7 +355,7 @@ func (mb *mailbox) top(w *bufio.Writer, arg string) {
 	}
 	ok(w, "")
 	writeDotStuffed(w, topBytes(raw, lines))
-	w.Flush()
+	w.flush()
 }
 
 // topBytes returns a message's header block (up to and including the blank line
@@ -350,7 +386,7 @@ func topBytes(data []byte, n int) []byte {
 	return out
 }
 
-func (mb *mailbox) dele(w *bufio.Writer, arg string) {
+func (mb *mailbox) dele(w *ew, arg string) {
 	n, valid := mb.index(arg)
 	if !valid {
 		errLine(w, "no such message")
@@ -383,19 +419,19 @@ func (mb *mailbox) commit() []uint32 {
 
 // writeDotStuffed writes a message body byte-stuffed (lines starting with '.'
 // get an extra '.'), terminated by a CRLF and a lone "." line.
-func writeDotStuffed(w *bufio.Writer, data []byte) {
+func writeDotStuffed(w *ew, data []byte) {
 	atLineStart := true
 	for _, b := range data {
 		if atLineStart && b == '.' {
-			w.WriteByte('.')
+			w.wbyte('.')
 		}
-		w.WriteByte(b)
+		w.wbyte(b)
 		atLineStart = b == '\n'
 	}
 	if len(data) == 0 || data[len(data)-1] != '\n' {
-		w.WriteString("\r\n")
+		w.str("\r\n")
 	}
-	w.WriteString(".\r\n")
+	w.str(".\r\n")
 }
 
 // finishAuth validates credentials, enforces the POP3/IMAP privilege gate, and on
@@ -403,7 +439,7 @@ func writeDotStuffed(w *bufio.Writer, data []byte) {
 // the right RFC 3206 response code on failure) and returns the opened mailbox for
 // the caller to install. It is the single chokepoint for USER/PASS and every SASL
 // mechanism, so the privilege gate can never be bypassed.
-func (s *Server) finishAuth(w *bufio.Writer, conn net.Conn, user, pass string) (*mailbox, bool) {
+func (s *Server) finishAuth(w *ew, conn net.Conn, user, pass string) (*mailbox, bool) {
 	emit := func(level logging.Level, name string, f logging.Fields) {
 		s.Logger.Emit(logging.Event{Level: level, Subsystem: logging.POP3, Name: name, User: user, RemoteAddr: conn.RemoteAddr().String(), Fields: f})
 	}
@@ -449,15 +485,15 @@ func (s *Server) finishAuth(w *bufio.Writer, conn net.Conn, user, pass string) (
 // supported ones; PLAIN and LOGIN are password mechanisms funnelled through
 // finishAuth (CRAM/DIGEST-MD5 are impossible against crypt_sha512 storage). It
 // returns the authenticated user and opened mailbox on success.
-func (s *Server) authSASL(w *bufio.Writer, tp *textproto.Reader, conn net.Conn, arg string) (string, *mailbox, bool) {
+func (s *Server) authSASL(w *ew, tp *textproto.Reader, conn net.Conn, arg string) (string, *mailbox, bool) {
 	mech, initial, _ := strings.Cut(strings.TrimSpace(arg), " ")
 	switch strings.ToUpper(mech) {
 	case "":
-		w.WriteString("+OK\r\n")
-		w.WriteString("PLAIN\r\n")
-		w.WriteString("LOGIN\r\n")
-		w.WriteString(".\r\n")
-		w.Flush()
+		w.str("+OK\r\n")
+		w.str("PLAIN\r\n")
+		w.str("LOGIN\r\n")
+		w.str(".\r\n")
+		w.flush()
 		return "", nil, false
 	case "PLAIN":
 		return s.authPlain(w, tp, conn, initial)
@@ -471,7 +507,7 @@ func (s *Server) authSASL(w *bufio.Writer, tp *textproto.Reader, conn net.Conn, 
 
 // authPlain handles AUTH PLAIN (RFC 4616): a single base64 token decoding to
 // authzid NUL authcid NUL passwd, inline or after a continuation.
-func (s *Server) authPlain(w *bufio.Writer, tp *textproto.Reader, conn net.Conn, initial string) (string, *mailbox, bool) {
+func (s *Server) authPlain(w *ew, tp *textproto.Reader, conn net.Conn, initial string) (string, *mailbox, bool) {
 	resp, cont := saslResponse(w, tp, initial, "")
 	if !cont {
 		errLine(w, "[AUTH] authentication cancelled")
@@ -493,7 +529,7 @@ func (s *Server) authPlain(w *bufio.Writer, tp *textproto.Reader, conn net.Conn,
 
 // authLogin handles AUTH LOGIN: the server prompts (base64) for the username then
 // the password; the username may arrive inline with the AUTH command.
-func (s *Server) authLogin(w *bufio.Writer, tp *textproto.Reader, conn net.Conn, initial string) (string, *mailbox, bool) {
+func (s *Server) authLogin(w *ew, tp *textproto.Reader, conn net.Conn, initial string) (string, *mailbox, bool) {
 	u, cont := saslResponse(w, tp, initial, "VXNlcm5hbWU6") // base64("Username:")
 	if !cont {
 		errLine(w, "[AUTH] authentication cancelled")
@@ -522,14 +558,14 @@ func (s *Server) authLogin(w *bufio.Writer, tp *textproto.Reader, conn net.Conn,
 // saslResponse returns the client's SASL token: the inline value when present (a
 // lone "=" is a zero-length initial response, RFC 5034), otherwise a "+ <challenge>"
 // continuation is sent and the base64 line read. A lone "*" aborts the exchange.
-func saslResponse(w *bufio.Writer, tp *textproto.Reader, inline, challenge string) (string, bool) {
+func saslResponse(w *ew, tp *textproto.Reader, inline, challenge string) (string, bool) {
 	resp := inline
 	switch resp {
 	case "=":
 		return "", true
 	case "":
-		fmt.Fprintf(w, "+ %s\r\n", challenge)
-		w.Flush()
+		w.printf("+ %s\r\n", challenge)
+		w.flush()
 		line, err := tp.ReadLine()
 		if err != nil {
 			return "", false
@@ -546,37 +582,37 @@ func saslResponse(w *bufio.Writer, tp *textproto.Reader, inline, challenge strin
 // extension hermEX supports: TOP (RFC 1939), UIDL, RESP-CODES + LOGIN-DELAY + EXPIRE
 // + PIPELINING + IMPLEMENTATION (RFC 2449), UTF8 + LANG (RFC 6856), and STLS (RFC
 // 2595) only when a TLS config is present and the link is not already encrypted.
-func (s *Server) writeCapa(w *bufio.Writer, isTLS bool) {
-	w.WriteString("+OK Capability list follows\r\n")
-	w.WriteString("TOP\r\n")
-	w.WriteString("USER\r\n")
-	w.WriteString("UIDL\r\n")
-	w.WriteString("SASL PLAIN LOGIN\r\n")
-	w.WriteString("PIPELINING\r\n")
-	w.WriteString("RESP-CODES\r\n")
-	w.WriteString("LOGIN-DELAY 0\r\n")
-	w.WriteString("EXPIRE NEVER\r\n")
-	w.WriteString("UTF8\r\n")
-	w.WriteString("LANG\r\n")
+func (s *Server) writeCapa(w *ew, isTLS bool) {
+	w.str("+OK Capability list follows\r\n")
+	w.str("TOP\r\n")
+	w.str("USER\r\n")
+	w.str("UIDL\r\n")
+	w.str("SASL PLAIN LOGIN\r\n")
+	w.str("PIPELINING\r\n")
+	w.str("RESP-CODES\r\n")
+	w.str("LOGIN-DELAY 0\r\n")
+	w.str("EXPIRE NEVER\r\n")
+	w.str("UTF8\r\n")
+	w.str("LANG\r\n")
 	if s.TLSConfig != nil && !isTLS {
-		w.WriteString("STLS\r\n")
+		w.str("STLS\r\n")
 	}
-	w.WriteString("IMPLEMENTATION hermEX\r\n")
-	w.WriteString(".\r\n")
-	w.Flush()
+	w.str("IMPLEMENTATION hermEX\r\n")
+	w.str(".\r\n")
+	w.flush()
 }
 
 // writeLang answers the RFC 6856 LANG command. With no argument it lists the
 // supported languages; with a basic language range matching "en" (or "*" for the
 // default) it selects English. hermEX only emits English response text, so any
 // other range is refused.
-func writeLang(w *bufio.Writer, arg string) {
+func writeLang(w *ew, arg string) {
 	arg = strings.TrimSpace(arg)
 	if arg == "" {
-		w.WriteString("+OK Language listing follows:\r\n")
-		w.WriteString("en English\r\n")
-		w.WriteString(".\r\n")
-		w.Flush()
+		w.str("+OK Language listing follows:\r\n")
+		w.str("en English\r\n")
+		w.str(".\r\n")
+		w.flush()
 		return
 	}
 	low := strings.ToLower(arg)
@@ -587,16 +623,16 @@ func writeLang(w *bufio.Writer, arg string) {
 	errLine(w, "invalid language, only en is available")
 }
 
-func ok(w *bufio.Writer, msg string) {
+func ok(w *ew, msg string) {
 	if msg == "" {
-		w.WriteString("+OK\r\n")
+		w.str("+OK\r\n")
 	} else {
-		fmt.Fprintf(w, "+OK %s\r\n", msg)
+		w.printf("+OK %s\r\n", msg)
 	}
-	w.Flush()
+	w.flush()
 }
 
-func errLine(w *bufio.Writer, msg string) {
-	fmt.Fprintf(w, "-ERR %s\r\n", msg)
-	w.Flush()
+func errLine(w *ew, msg string) {
+	w.printf("-ERR %s\r\n", msg)
+	w.flush()
 }
