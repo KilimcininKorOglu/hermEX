@@ -212,7 +212,7 @@ func (c *conn) writeFetch(seq uint32, idx int, items []fetchItem, modseqs map[ui
 		}
 	}
 
-	fmt.Fprintf(c.bw, "* %d FETCH (%s)\r\n", seq, strings.Join(fields, " "))
+	c.wf("* %d FETCH (%s)\r\n", seq, strings.Join(fields, " "))
 	c.flush()
 }
 

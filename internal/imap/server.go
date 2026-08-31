@@ -130,7 +130,7 @@ func (s *Server) handle(nc net.Conn) {
 	if _, ok := nc.(*tls.Conn); ok {
 		c.isTLS = true
 	}
-	defer func() { c.nc.Close() }() // closes the upgraded conn after a STARTTLS swap
+	defer func() { _ = c.nc.Close() }() // closes the upgraded conn after a STARTTLS swap
 	defer func() {
 		if c.st != nil {
 			c.st.Close()
@@ -150,6 +150,9 @@ func (s *Server) handle(nc net.Conn) {
 			return // connection closed or unreadable
 		}
 		c.dispatch(toks)
+		if c.werr != nil {
+			return // a response failed to reach the client; the connection is gone
+		}
 	}
 }
 
@@ -159,6 +162,7 @@ type conn struct {
 	nc         net.Conn // underlying connection, swapped for the TLS conn on STARTTLS
 	rd         *commandReader
 	bw         *bufio.Writer
+	werr       error // first response-write error; a set value ends the session
 	state      connState
 	user       string
 	st         *objectstore.Store
@@ -440,7 +444,7 @@ func (c *conn) authLogin(tag string, args []token) {
 // saslChallenge sends a "+ <challenge>" continuation and reads the client's base64
 // response line. A lone "*" cancels the exchange (ok=false).
 func (c *conn) saslChallenge(challenge string) (string, bool) {
-	fmt.Fprintf(c.bw, "+ %s\r\n", challenge)
+	c.wf("+ %s\r\n", challenge)
 	c.flush()
 	line, err := c.rd.readLine()
 	if err != nil || line == "*" {
@@ -981,7 +985,7 @@ func (c *conn) cmdIdle(tag string) {
 		return
 	}
 	// Continuation request: tell the client we are idling (RFC 2177 §3).
-	c.bw.WriteString("+ idling\r\n")
+	c.wstr("+ idling\r\n")
 	c.flush()
 
 	// Register a push wake for the selected mailbox before idling. A nil waker (push
@@ -1063,15 +1067,15 @@ func quoteString(s string) string {
 // --- response writers ---
 
 func (c *conn) untagged(format string, a ...any) {
-	c.bw.WriteString("* ")
-	fmt.Fprintf(c.bw, format, a...)
-	c.bw.WriteString("\r\n")
+	c.wstr("* ")
+	c.wf(format, a...)
+	c.wstr("\r\n")
 }
 
 func (c *conn) respond(tag, status, format string, a ...any) {
-	fmt.Fprintf(c.bw, "%s %s ", tag, status)
-	fmt.Fprintf(c.bw, format, a...)
-	c.bw.WriteString("\r\n")
+	c.wf("%s %s ", tag, status)
+	c.wf(format, a...)
+	c.wstr("\r\n")
 	c.flush()
 }
 
@@ -1080,10 +1084,27 @@ func (c *conn) no(tag, text string)  { c.respond(tag, "NO", "%s", text) }
 func (c *conn) bad(tag, text string) { c.respond(tag, "BAD", "%s", text) }
 
 func (c *conn) flush() {
-	c.bw.Flush()
-	if c.fw != nil {
+	if c.werr == nil {
+		c.werr = c.bw.Flush()
+	}
+	if c.fw != nil && c.werr == nil {
 		// The bufio writer drained into the DEFLATE writer; push its compressed
 		// output through to the connection so the client sees this response now.
-		c.fw.Flush()
+		c.werr = c.fw.Flush()
+	}
+}
+
+// wstr and wf write a response fragment to the client, recording the first write
+// error in werr so the response helpers stay linear and the session loop can end
+// the connection once a write has failed.
+func (c *conn) wstr(s string) {
+	if c.werr == nil {
+		_, c.werr = c.bw.WriteString(s)
+	}
+}
+
+func (c *conn) wf(format string, a ...any) {
+	if c.werr == nil {
+		_, c.werr = fmt.Fprintf(c.bw, format, a...)
 	}
 }
