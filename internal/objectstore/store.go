@@ -233,13 +233,13 @@ func openKind(dir string, seedBuiltins bool, kind storeKind) (*Store, error) {
 	}
 	objdb, err := sql.Open("sqlite", dsn(filepath.Join(dir, "objects.sqlite3")))
 	if err != nil {
-		lock.Close()
+		_ = lock.Close()
 		return nil, err
 	}
 	idxdb, err := sql.Open("sqlite", dsn(filepath.Join(dir, "imapindex.sqlite3")))
 	if err != nil {
 		objdb.Close()
-		lock.Close()
+		_ = lock.Close()
 		return nil, err
 	}
 	s := &Store{dir: dir, objdb: objdb, idxdb: idxdb, lock: lock, seedBuiltins: seedBuiltins, kind: kind, logger: defaultLogger.Load()}
@@ -257,14 +257,20 @@ func openKind(dir string, seedBuiltins bool, kind storeKind) (*Store, error) {
 func (s *Store) Close() error {
 	err1 := s.objdb.Close()
 	err2 := s.idxdb.Close()
+	var err3 error
 	if s.lock != nil {
-		s.lock.Close()
+		// Closing the lock file is what releases the mailbox, so a failure here
+		// leaves it marked in use: surface it rather than dropping it.
+		err3 = s.lock.Close()
 		s.lock = nil
 	}
 	if err1 != nil {
 		return err1
 	}
-	return err2
+	if err2 != nil {
+		return err2
+	}
+	return err3
 }
 
 // ensureSchema creates the schema on a fresh mailbox and rejects an unknown one.
