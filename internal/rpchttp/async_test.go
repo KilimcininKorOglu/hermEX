@@ -374,7 +374,7 @@ func TestAsyncWaitExConcurrentParkAndExecute(t *testing.T) {
 			return
 		}
 		defer st.Close()
-		st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0)
+		_, _ = st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("From: a@test\r\n\r\nhi\r\n"), time.Unix(1700000000, 0), 0)
 	})
 	wg.Wait()
 

@@ -41,9 +41,9 @@ func buildConnectExStub(userDN string) []byte {
 
 // pullConfString reads a unique-pointer conformant-varying string.
 func pullConfString(p *ndr.Pull) string {
-	p.Uint32() // referent id
-	p.Uint32() // max_count
-	p.Uint32() // offset
+	_, _ = p.Uint32() // referent id
+	_, _ = p.Uint32() // max_count
+	_, _ = p.Uint32() // offset
 	n, _ := p.Uint32()
 	b, _ := p.Raw(int(n))
 	return trimNUL(b)
@@ -58,21 +58,21 @@ func parseConnectExOut(t *testing.T, stub []byte) (ContextHandle, uint32) {
 	if err != nil {
 		t.Fatalf("ctx handle: %v", err)
 	}
-	p.Uint32() // max_polls
-	p.Uint32() // max_retry
-	p.Uint32() // retry_delay
-	p.Uint16() // cxr
+	_, _ = p.Uint32() // max_polls
+	_, _ = p.Uint32() // max_retry
+	_, _ = p.Uint32() // retry_delay
+	_, _ = p.Uint16() // cxr
 	pullConfString(p)
 	pullConfString(p)
 	for range 6 { // server + best versions
-		p.Uint16()
+		_, _ = p.Uint16()
 	}
-	p.Uint32()          // timestamp
-	mc, _ := p.Uint32() // AUX max_count
-	p.Uint32()          // offset
-	p.Uint32()          // actual_count
-	p.Raw(int(mc))      // AUX bytes
-	p.Uint32()          // cb_auxout (redundant)
+	_, _ = p.Uint32()     // timestamp
+	mc, _ := p.Uint32()   // AUX max_count
+	_, _ = p.Uint32()     // offset
+	_, _ = p.Uint32()     // actual_count
+	_, _ = p.Raw(int(mc)) // AUX bytes
+	_, _ = p.Uint32()     // cb_auxout (redundant)
 	result, _ := p.Uint32()
 	return cxh, result
 }
@@ -165,13 +165,13 @@ func TestEndToEndConnect(t *testing.T) {
 		}
 		inDone <- err
 	}()
-	pw.Write(connB1())
+	_, _ = pw.Write(connB1())
 	if _, err := readPDU(outResp.Body); err != nil { // CONN/C2
 		t.Fatalf("read CONN/C2: %v", err)
 	}
 
 	// Bind the EMSMDB interface.
-	pw.Write(buildBindPDU(0x30, EMSMDBUUID, EMSMDBVersion, 0))
+	_, _ = pw.Write(buildBindPDU(0x30, EMSMDBUUID, EMSMDBVersion, 0))
 	bindAck, err := readPDU(outResp.Body)
 	if err != nil {
 		t.Fatalf("read bind_ack: %v", err)
@@ -181,7 +181,7 @@ func TestEndToEndConnect(t *testing.T) {
 	}
 
 	// EcDoConnectEx.
-	pw.Write(buildRequestPDU(0x31, 0, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"), ndr.PfcFirstFrag|ndr.PfcLastFrag))
+	_, _ = pw.Write(buildRequestPDU(0x31, 0, opEcDoConnectEx, buildConnectExStub("/o=hermex/cn=alice"), ndr.PfcFirstFrag|ndr.PfcLastFrag))
 	connResp, err := readPDU(outResp.Body)
 	if err != nil {
 		t.Fatalf("read connect response: %v", err)
@@ -197,7 +197,7 @@ func TestEndToEndConnect(t *testing.T) {
 	// EcDoDisconnect.
 	ds := ndr.NewPush()
 	pushCtxHandle(ds, cxh)
-	pw.Write(buildRequestPDU(0x32, 0, opEcDoDisconnect, ds.Bytes(), ndr.PfcFirstFrag|ndr.PfcLastFrag))
+	_, _ = pw.Write(buildRequestPDU(0x32, 0, opEcDoDisconnect, ds.Bytes(), ndr.PfcFirstFrag|ndr.PfcLastFrag))
 	discResp, err := readPDU(outResp.Body)
 	if err != nil {
 		t.Fatalf("read disconnect response: %v", err)
@@ -209,7 +209,7 @@ func TestEndToEndConnect(t *testing.T) {
 		t.Error("session still present after end-to-end disconnect")
 	}
 
-	pw.Close()
+	_ = pw.Close()
 	<-inDone
 }
 

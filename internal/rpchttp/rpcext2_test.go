@@ -30,18 +30,18 @@ func parseRpcExt2Out(t *testing.T, stub []byte) (ContextHandle, []byte, uint32) 
 	t.Helper()
 	p := ndr.NewPull(stub)
 	cxh, _ := pullCtxHandle(p)
-	p.Uint32()          // flags
+	_, _ = p.Uint32()   // flags
 	mc, _ := p.Uint32() // cb_out max_count
-	p.Uint32()          // offset
-	p.Uint32()          // actual_count
+	_, _ = p.Uint32()   // offset
+	_, _ = p.Uint32()   // actual_count
 	pout, _ := p.Raw(int(mc))
-	p.Uint32()           // cb_out (redundant)
+	_, _ = p.Uint32()    // cb_out (redundant)
 	amc, _ := p.Uint32() // AUX max_count
-	p.Uint32()           // offset
-	p.Uint32()           // actual_count
-	p.Raw(int(amc))
-	p.Uint32() // cb_auxout (redundant)
-	p.Uint32() // trans_time
+	_, _ = p.Uint32()    // offset
+	_, _ = p.Uint32()    // actual_count
+	_, _ = p.Raw(int(amc))
+	_, _ = p.Uint32() // cb_auxout (redundant)
+	_, _ = p.Uint32() // trans_time
 	result, _ := p.Uint32()
 	return cxh, pout, result
 }
@@ -89,7 +89,7 @@ func TestRpcExt2Logon(t *testing.T) {
 	}
 	rp := ext.NewPull(rops, ext.FlagUTF16)
 	ropID, _ := rp.Uint8()
-	rp.Uint8()           // OutputHandleIndex
+	_, _ = rp.Uint8()    // OutputHandleIndex
 	rv, _ := rp.Uint32() // ReturnValue
 	if ropID != 0xFE || rv != ecSuccess {
 		t.Errorf("ROP response = (RopId %#x, ReturnValue %#x), want (0xFE, 0), a RopLogon success", ropID, rv)
@@ -157,7 +157,7 @@ func TestRpcExt2CrossExecuteHandle(t *testing.T) {
 	}
 	rp := ext.NewPull(rops, ext.FlagUTF16)
 	ropID, _ := rp.Uint8()
-	rp.Uint8()           // OutputHandleIndex
+	_, _ = rp.Uint8()    // OutputHandleIndex
 	rv, _ := rp.Uint32() // ReturnValue
 	if ropID != 0x02 || rv != ecSuccess {
 		t.Fatalf("open-folder response = (RopId %#x, ReturnValue %#x), want (0x02, 0), the logon handle did not survive into the second Execute", ropID, rv)

@@ -140,7 +140,7 @@ func TestRendezvous(t *testing.T) {
 		t.Errorf("second OUT PDU is not CONN/C2: %v", cmds)
 	}
 
-	pw.Close()
+	_ = pw.Close()
 	<-inDone
 }
 

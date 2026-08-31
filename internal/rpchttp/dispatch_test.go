@@ -81,9 +81,9 @@ func responseStub(t *testing.T, pdu []byte) []byte {
 	if _, err := p.Raw(16); err != nil { // header
 		t.Fatal(err)
 	}
-	p.Uint32() // alloc_hint
-	p.Uint16() // context_id
-	p.Uint8()  // cancel_count
+	_, _ = p.Uint32() // alloc_hint
+	_, _ = p.Uint16() // context_id
+	_, _ = p.Uint8()  // cancel_count
 	p.Align(8)
 	return p.Rest()
 }

@@ -75,13 +75,13 @@ func TestEndToEndNSPI(t *testing.T) {
 		}
 		inDone <- err
 	}()
-	pw.Write(connB1())
+	_, _ = pw.Write(connB1())
 	if _, err := readPDU(outResp.Body); err != nil { // CONN/C2
 		t.Fatalf("read CONN/C2: %v", err)
 	}
 
 	// Bind the NSPI interface (UUID f5cc5a18…, version 56).
-	pw.Write(buildBindPDU(0x30, nspi.RPCInterfaceUUID, nspi.RPCInterfaceVersion, 0))
+	_, _ = pw.Write(buildBindPDU(0x30, nspi.RPCInterfaceUUID, nspi.RPCInterfaceVersion, 0))
 	bindAck, err := readPDU(outResp.Body)
 	if err != nil {
 		t.Fatalf("read bind_ack: %v", err)
@@ -96,7 +96,7 @@ func TestEndToEndNSPI(t *testing.T) {
 	pushNspiStat(bindStub, 1252, 0)
 	bindStub.Uint32(0x00020000) // server GUID referent (non-null)
 	bindStub.Raw(make([]byte, 16))
-	pw.Write(buildRequestPDU(0x31, 0, 0, bindStub.Bytes(), ndr.PfcFirstFrag|ndr.PfcLastFrag))
+	_, _ = pw.Write(buildRequestPDU(0x31, 0, 0, bindStub.Bytes(), ndr.PfcFirstFrag|ndr.PfcLastFrag))
 	bindResp, err := readPDU(outResp.Body)
 	if err != nil {
 		t.Fatalf("read NspiBind response: %v", err)
@@ -105,8 +105,8 @@ func TestEndToEndNSPI(t *testing.T) {
 		t.Fatalf("NspiBind reply type = %#x, want RESPONSE", h.Type)
 	}
 	bp := ndr.NewPull(responseStub(t, bindResp))
-	bp.Uint32() // server GUID referent
-	bp.Raw(16)  // server GUID flat bytes
+	_, _ = bp.Uint32() // server GUID referent
+	_, _ = bp.Raw(16)  // server GUID flat bytes
 	handle, err := pullCtxHandle(bp)
 	if err != nil {
 		t.Fatalf("NspiBind handle: %v", err)
@@ -126,7 +126,7 @@ func TestEndToEndNSPI(t *testing.T) {
 	qrStub.Uint32(0)  // null MID referent
 	qrStub.Uint32(10) // requested rows
 	qrStub.Uint32(0)  // null column referent
-	pw.Write(buildRequestPDU(0x32, 0, 3, qrStub.Bytes(), ndr.PfcFirstFrag|ndr.PfcLastFrag))
+	_, _ = pw.Write(buildRequestPDU(0x32, 0, 3, qrStub.Bytes(), ndr.PfcFirstFrag|ndr.PfcLastFrag))
 	qrResp, err := readPDU(outResp.Body)
 	if err != nil {
 		t.Fatalf("read NspiQueryRows response: %v", err)
@@ -139,6 +139,6 @@ func TestEndToEndNSPI(t *testing.T) {
 		t.Errorf("NspiQueryRows result = %#x, want ecSuccess", qrResult)
 	}
 
-	pw.Close()
+	_ = pw.Close()
 	<-inDone
 }
