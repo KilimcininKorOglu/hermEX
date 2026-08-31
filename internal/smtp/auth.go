@@ -1,7 +1,6 @@
 package smtp
 
 import (
-	"bufio"
 	"encoding/base64"
 	"net/textproto"
 	"strings"
@@ -19,7 +18,7 @@ type Authenticator interface {
 // handleAuth runs the AUTH exchange (RFC 4954) for PLAIN and LOGIN. AUTH is
 // refused on a plaintext link or by a session that cannot authenticate. A
 // successful exchange replies 235; a rejected credential replies 535.
-func (s *Server) handleAuth(w *bufio.Writer, tp *textproto.Reader, arg string, sess Session, isTLS, canAuth bool) {
+func (s *Server) handleAuth(w *ew, tp *textproto.Reader, arg string, sess Session, isTLS, canAuth bool) {
 	auth, ok := sess.(Authenticator)
 	if !canAuth || !ok {
 		reply(w, 503, "5.5.1 AUTH not available")
@@ -43,7 +42,7 @@ func (s *Server) handleAuth(w *bufio.Writer, tp *textproto.Reader, arg string, s
 // authPlain handles AUTH PLAIN: the credential is a single base64 token decoding
 // to authzid\0authcid\0password (RFC 4616). It may arrive inline or in a
 // continuation line after a 334 challenge.
-func authPlain(w *bufio.Writer, tp *textproto.Reader, initial string, auth Authenticator) {
+func authPlain(w *ew, tp *textproto.Reader, initial string, auth Authenticator) {
 	resp, ok := authResponse(w, tp, initial, "")
 	if !ok {
 		return
@@ -63,7 +62,7 @@ func authPlain(w *bufio.Writer, tp *textproto.Reader, initial string, auth Authe
 
 // authLogin handles AUTH LOGIN: the server prompts for the base64 username then
 // password (the username may arrive inline with the AUTH command).
-func authLogin(w *bufio.Writer, tp *textproto.Reader, initial string, auth Authenticator) {
+func authLogin(w *ew, tp *textproto.Reader, initial string, auth Authenticator) {
 	user, ok := authResponse(w, tp, initial, "VXNlcm5hbWU6") // "Username:"
 	if !ok {
 		return
@@ -88,7 +87,7 @@ func authLogin(w *bufio.Writer, tp *textproto.Reader, initial string, auth Authe
 // authResponse returns the client's response token: the inline value when
 // present, else a 334 challenge is sent and the continuation line read. A lone
 // "*" aborts the exchange (RFC 4954).
-func authResponse(w *bufio.Writer, tp *textproto.Reader, inline, challenge string) (string, bool) {
+func authResponse(w *ew, tp *textproto.Reader, inline, challenge string) (string, bool) {
 	resp := inline
 	if resp == "" {
 		reply(w, 334, challenge)
@@ -106,7 +105,7 @@ func authResponse(w *bufio.Writer, tp *textproto.Reader, inline, challenge strin
 }
 
 // finishAuth validates the credentials and replies.
-func finishAuth(w *bufio.Writer, auth Authenticator, user, password string) {
+func finishAuth(w *ew, auth Authenticator, user, password string) {
 	if !auth.Auth(user, password) {
 		reply(w, 535, "5.7.8 authentication failed")
 		return

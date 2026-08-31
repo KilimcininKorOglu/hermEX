@@ -106,8 +106,8 @@ func (s *Server) hostname() string {
 }
 
 func (s *Server) handle(conn net.Conn) {
-	defer func() { conn.Close() }() // closes the upgraded conn after a STARTTLS swap
-	w := bufio.NewWriter(conn)
+	defer func() { _ = conn.Close() }() // closes the upgraded conn after a STARTTLS swap
+	w := &ew{out: bufio.NewWriter(conn)}
 	tp := textproto.NewReader(bufio.NewReader(conn))
 	_, isTLS := conn.(*tls.Conn)
 
@@ -173,6 +173,9 @@ func (s *Server) handle(conn net.Conn) {
 		if err != nil {
 			return
 		}
+		if w.err != nil {
+			return // a prior reply failed to reach the client; the link is gone
+		}
 		cmd, arg, _ := strings.Cut(line, " ")
 		event(logging.LevelDebug, "command", logging.Fields{"cmd": strings.ToUpper(cmd)})
 		switch strings.ToUpper(cmd) {
@@ -205,7 +208,7 @@ func (s *Server) handle(conn net.Conn) {
 				return // handshake failed; deferred close fires
 			}
 			conn = tc
-			w = bufio.NewWriter(tc)
+			w = &ew{out: bufio.NewWriter(tc)}
 			tp = textproto.NewReader(bufio.NewReader(tc))
 			isTLS = true
 			// RFC 3207: discard all state negotiated before TLS; the client
@@ -434,7 +437,27 @@ func (e *PermError) Error() string { return e.Message }
 // temporary failure (the sender retries), a PermError a 550 carrying its own message,
 // and anything else a 550 with a fixed string, its real error passed to logErr for
 // the server-side record.
-func replySessionErr(w *bufio.Writer, err error, logErr func(error)) {
+// ew wraps the response bufio.Writer and records the first write error, so the
+// reply helpers stay linear; the command loop checks err once per command and
+// abandons the connection when a reply has failed to reach the client.
+type ew struct {
+	out *bufio.Writer
+	err error
+}
+
+func (e *ew) printf(format string, a ...any) {
+	if e.err == nil {
+		_, e.err = fmt.Fprintf(e.out, format, a...)
+	}
+}
+
+func (e *ew) flush() {
+	if e.err == nil {
+		e.err = e.out.Flush()
+	}
+}
+
+func replySessionErr(w *ew, err error, logErr func(error)) {
 	switch {
 	case isTempErr(err):
 		reply(w, 451, tempMessage(err))
@@ -451,7 +474,7 @@ func replySessionErr(w *bufio.Writer, err error, logErr func(error)) {
 // is 552, a PermError is a 554 carrying its own message, and any other failure is a
 // 554 with a fixed string. The DATA path already records the error, so this one
 // takes no logErr.
-func replyDataErr(w *bufio.Writer, err error) {
+func replyDataErr(w *ew, err error) {
 	switch {
 	case isTempErr(err):
 		reply(w, 451, tempMessage(err))
@@ -565,7 +588,7 @@ func (d *dotReader) fill() error {
 	return nil
 }
 
-func (s *Server) greetEHLO(w *bufio.Writer, arg string, isTLS, authAvailable bool) {
+func (s *Server) greetEHLO(w *ew, arg string, isTLS, authAvailable bool) {
 	lines := []string{
 		fmt.Sprintf("%s Hello %s", s.hostname(), strings.TrimSpace(arg)),
 		"PIPELINING",
@@ -591,9 +614,9 @@ func (s *Server) greetEHLO(w *bufio.Writer, arg string, isTLS, authAvailable boo
 		if i == len(lines)-1 {
 			sep = " "
 		}
-		fmt.Fprintf(w, "250%s%s\r\n", sep, l)
+		w.printf("250%s%s\r\n", sep, l)
 	}
-	w.Flush()
+	w.flush()
 }
 
 // maxCommandLine is the RFC 5321 §4.5.3.1.4 limit on a command line including the
@@ -645,12 +668,12 @@ func readCommandLine(r *bufio.Reader) (string, error) {
 // while a message that already carries a specific code (e.g. "5.7.1") is left as
 // is. The connection/STARTTLS 220 banner and the 354 intermediate stay bare:
 // 3xx has no enhanced class and a code in the banner would shadow the domain.
-func reply(w *bufio.Writer, code int, msg string) {
+func reply(w *ew, code int, msg string) {
 	if enh := defaultEnhanced(code); enh != "" && !startsWithEnhanced(msg) {
 		msg = enh + " " + msg
 	}
-	fmt.Fprintf(w, "%d %s\r\n", code, msg)
-	w.Flush()
+	w.printf("%d %s\r\n", code, msg)
+	w.flush()
 }
 
 // defaultEnhanced returns the class-default RFC 3463 status code for an SMTP
