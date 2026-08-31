@@ -523,7 +523,7 @@ func writeMultistatus(w http.ResponseWriter, ms *multistatus) {
 	}
 	w.Header().Set("Content-Type", `application/xml; charset=utf-8`)
 	w.WriteHeader(http.StatusMultiStatus)
-	w.Write(body)
+	_, _ = w.Write(body) // final response body; a failed write means the client is gone
 }
 
 // etag is a quoted entity tag derived from an object's change number.

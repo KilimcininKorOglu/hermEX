@@ -3,6 +3,7 @@ package migrate
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -49,12 +50,10 @@ func (d *MySQLDriver) Lock(ctx context.Context) (int, error) {
 	}
 	var got sql.NullInt64
 	if err := c.QueryRowContext(ctx, "SELECT GET_LOCK(?, ?)", mysqlMigrateLock, 10).Scan(&got); err != nil {
-		c.Close()
-		return 0, err
+		return 0, errors.Join(err, c.Close())
 	}
 	if got.Int64 != 1 {
-		c.Close()
-		return 0, fmt.Errorf("migrate: could not acquire advisory lock %q", mysqlMigrateLock)
+		return 0, errors.Join(fmt.Errorf("migrate: could not acquire advisory lock %q", mysqlMigrateLock), c.Close())
 	}
 	d.conn = c
 	if _, err := c.ExecContext(ctx, schemaMigrationsDDL); err != nil {

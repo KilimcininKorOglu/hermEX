@@ -220,7 +220,9 @@ func (s *StderrSink) Write(e Event) {
 		fmt.Fprintf(&b, " err=%q", e.Err)
 	}
 	b.WriteByte('\n')
-	io.WriteString(s.w, b.String())
+	// This is the fallback stderr sink itself; a failed write to it has nowhere to
+	// be reported, so the error is deliberately discarded.
+	_, _ = io.WriteString(s.w, b.String())
 }
 
 // sortedKeys returns f's keys in sorted order, for a stable one-line rendering.

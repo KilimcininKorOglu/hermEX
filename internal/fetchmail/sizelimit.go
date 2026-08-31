@@ -75,8 +75,7 @@ func tlsDialSource(addr, serverName string, verify bool) (net.Conn, error) {
 	}
 	conn := tls.Client(raw, &tls.Config{ServerName: serverName, InsecureSkipVerify: !verify}) // #nosec G402 -- verify is the admin's explicit choice, skipped only when the operator disabled it
 	if err := conn.HandshakeContext(context.Background()); err != nil {
-		raw.Close()
-		return nil, err
+		return nil, errors.Join(err, raw.Close())
 	}
 	return conn, nil
 }

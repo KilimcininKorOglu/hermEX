@@ -7,6 +7,7 @@ package ldapauth
 
 import (
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -86,14 +87,12 @@ func (v *Verifier) connect(cfg directory.LDAPConfig) (conn, error) {
 	if cfg.StartTLS {
 		host, _ := hostOf(cfg.URI)
 		if err := c.StartTLS(&tls.Config{ServerName: host}); err != nil {
-			c.Close()
-			return nil, err
+			return nil, errors.Join(err, c.Close())
 		}
 	}
 	if cfg.BindDN != "" {
 		if err := c.Bind(cfg.BindDN, cfg.BindPassword); err != nil {
-			c.Close()
-			return nil, err
+			return nil, errors.Join(err, c.Close())
 		}
 	}
 	return c, nil

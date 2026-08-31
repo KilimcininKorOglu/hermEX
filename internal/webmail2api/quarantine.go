@@ -79,7 +79,7 @@ func writeQuarantinePage(w http.ResponseWriter, status int, heading, message, co
 		form = `<form method="post" action="/quarantine/release"><input type="hidden" name="t" value="` +
 			html.EscapeString(confirmToken) + `"><button type="submit">Release to inbox</button></form>`
 	}
-	fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta charset="utf-8">`+
+	_, _ = fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta charset="utf-8">`+
 		`<meta name="viewport" content="width=device-width,initial-scale=1"><title>hermEX</title>`+
 		`<style>body{font-family:system-ui,sans-serif;background:#f4f4f5;margin:0;display:flex;`+
 		`min-height:100vh;align-items:center;justify-content:center}.card{background:#fff;border-radius:12px;`+

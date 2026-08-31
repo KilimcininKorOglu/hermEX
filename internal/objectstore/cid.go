@@ -197,8 +197,7 @@ func (s *Store) putContent(data []byte) (string, error) {
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }() // a no-op once the rename succeeds
 	if _, err := tmp.Write(cidEncoder.EncodeAll(data, nil)); err != nil {
-		tmp.Close()
-		return "", err
+		return "", errors.Join(err, tmp.Close())
 	}
 	if err := tmp.Close(); err != nil {
 		return "", err

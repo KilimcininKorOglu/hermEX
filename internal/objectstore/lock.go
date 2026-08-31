@@ -42,11 +42,11 @@ func lockShared(dir string) (*os.File, error) {
 			return f, nil
 		}
 		if !errors.Is(err, syscall.EWOULDBLOCK) || time.Now().After(deadline) {
-			f.Close()
+			cerr := f.Close()
 			if errors.Is(err, syscall.EWOULDBLOCK) {
-				return nil, fmt.Errorf("objectstore: %s is being maintained: %w", dir, err)
+				return nil, errors.Join(fmt.Errorf("objectstore: %s is being maintained: %w", dir, err), cerr)
 			}
-			return nil, err
+			return nil, errors.Join(err, cerr)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

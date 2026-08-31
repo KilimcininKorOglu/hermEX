@@ -52,7 +52,7 @@ func (r *Reader) Recent(ctx context.Context, subsystem string, limit int64) ([]L
 	if err != nil {
 		return nil, err
 	}
-	defer cur.Close(ctx)
+	defer func() { _ = cur.Close(ctx) }() // deferred cursor teardown; its error is unactionable here
 
 	var entries []LogEntry
 	for cur.Next(ctx) {

@@ -90,7 +90,8 @@ func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox st
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	w.Write(ics)
+	// Final response body; a write failure means the client is gone, with no recourse.
+	_, _ = w.Write(ics)
 }
 
 // handleCalPut creates or replaces a calendar object from an iCalendar body. It

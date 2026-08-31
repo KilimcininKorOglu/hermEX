@@ -47,7 +47,9 @@ func main() {
 	payload := append([]byte(header), data...)
 
 	if *out == "" {
-		os.Stdout.Write(payload)
+		if _, err := os.Stdout.Write(payload); err != nil {
+			log.Fatalf("antispam-rules: writing to stdout: %v", err)
+		}
 		return
 	}
 	if err := writeAtomic(*out, payload); err != nil {

@@ -3,6 +3,7 @@ package directory
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -44,16 +45,13 @@ func (d *SQLDirectory) TryLock(ctx context.Context, name string) (release func()
 	// A zero timeout means "report failure immediately" rather than queueing every
 	// instance behind the holder, which would pile up passes instead of skipping.
 	if err := c.QueryRowContext(ctx, "SELECT GET_LOCK(?, 0)", name).Scan(&got); err != nil {
-		c.Close()
-		return nil, false, err
+		return nil, false, errors.Join(err, c.Close())
 	}
 	if !got.Valid {
-		c.Close()
-		return nil, false, fmt.Errorf("directory: advisory lock %q errored", name)
+		return nil, false, errors.Join(fmt.Errorf("directory: advisory lock %q errored", name), c.Close())
 	}
 	if got.Int64 != 1 {
-		c.Close()
-		return nil, false, nil // held elsewhere
+		return nil, false, c.Close() // held elsewhere; nil unless the close itself failed
 	}
 	released := false
 	return func() {
@@ -66,6 +64,6 @@ func (d *SQLDirectory) TryLock(ctx context.Context, name string) (release func()
 		// the lock too, which is the guarantee this relies on. Use a cancel-free
 		// context so a shutdown mid-pass still runs the release.
 		_, _ = c.ExecContext(context.WithoutCancel(ctx), "SELECT RELEASE_LOCK(?)", name)
-		c.Close()
+		_ = c.Close() // best-effort teardown; the closed connection releases the lock regardless
 	}, true, nil
 }

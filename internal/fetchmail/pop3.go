@@ -6,6 +6,7 @@ package fetchmail
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -60,8 +61,7 @@ func dialPOP3(server string, port int, ssl, verify bool) (*pop3Conn, error) {
 	c := &pop3Conn{conn: conn, tp: textproto.NewConn(conn)}
 	setDeadline(conn)
 	if _, err := c.readOK(); err != nil { // server greeting
-		conn.Close()
-		return nil, err
+		return nil, errors.Join(err, conn.Close())
 	}
 	return c, nil
 }
@@ -153,6 +153,5 @@ func (c *pop3Conn) dele(n int) error {
 // quit ends the session, committing any pending deletions, and closes the connection.
 func (c *pop3Conn) quit() error {
 	_, err := c.cmd("QUIT")
-	c.tp.Close()
-	return err
+	return errors.Join(err, c.tp.Close())
 }

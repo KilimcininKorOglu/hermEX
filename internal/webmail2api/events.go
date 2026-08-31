@@ -50,7 +50,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	fmt.Fprint(w, ": connected\n\n")
+	_, _ = fmt.Fprint(w, ": connected\n\n") // SSE preamble; a failed write means the client is gone and the stream loop will end
 	flusher.Flush()
 
 	lastTotal, lastUnread := -1, -1

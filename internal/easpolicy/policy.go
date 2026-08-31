@@ -150,7 +150,8 @@ func Key(p Policy) string {
 	h := fnv.New32a()
 	for _, f := range Fields {
 		if v, ok := p[f.Name]; ok {
-			fmt.Fprintf(h, "%s=%d;", f.Name, v)
+			// Writing to a hash.Hash never returns an error (hash.Hash contract).
+			_, _ = fmt.Fprintf(h, "%s=%d;", f.Name, v)
 		}
 	}
 	sum := h.Sum32()

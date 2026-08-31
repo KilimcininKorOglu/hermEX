@@ -602,7 +602,9 @@ func exportDKIM(dir *directory.SQLDirectory, domain string) {
 	}
 	fmt.Fprintf(os.Stderr, "selector %s._domainkey.%s\n", selector, domain)
 	fmt.Fprintln(os.Stderr, "this is a private key: store it where the database backup is stored")
-	os.Stdout.Write(privPEM)
+	if _, err := os.Stdout.Write(privPEM); err != nil {
+		log.Fatalf("hermex-admin: writing key to stdout: %v", err)
+	}
 }
 
 // listSessions prints an account's live sessions on both signed-in surfaces, so an

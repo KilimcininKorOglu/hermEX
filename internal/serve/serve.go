@@ -8,6 +8,7 @@ package serve
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"net"
 	"net/http"
 	"time"
@@ -66,8 +67,7 @@ func New(addr string, h http.Handler, tlsSrc TLSSource, logger *logging.Logger, 
 	if tlsSrc.TLSEnabled() {
 		tc, err := tlsSrc.TLSConfig()
 		if err != nil {
-			ln.Close()
-			return nil, err
+			return nil, errors.Join(err, ln.Close())
 		}
 		if logger != nil {
 			// Log each completed TLS handshake (version + cipher) under the tls

@@ -408,8 +408,7 @@ func (w *Worker) send(host string, it Item, requireTLS bool) error {
 	_ = conn.SetDeadline(time.Now().Add(sessionTimeout))
 	c, err := smtp.NewClient(conn, host)
 	if err != nil {
-		conn.Close()
-		return err
+		return errors.Join(err, conn.Close())
 	}
 	defer c.Close()
 

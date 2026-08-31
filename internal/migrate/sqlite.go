@@ -3,6 +3,7 @@ package migrate
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -62,8 +63,7 @@ func (d *SQLiteDriver) Lock(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	if _, err := c.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-		c.Close()
-		return 0, err
+		return 0, errors.Join(err, c.Close())
 	}
 	d.conn = c
 	v, err := d.Ver.Read(ctx, c)

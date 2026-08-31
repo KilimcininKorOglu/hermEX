@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sync"
 )
@@ -68,8 +69,7 @@ func (g *ConnGroup) Serve(l net.Listener, handle func(net.Conn)) error {
 		g.mu.Lock()
 		if g.draining {
 			g.mu.Unlock()
-			nc.Close()
-			return nil
+			return nc.Close() // rejecting a late connection during shutdown; nil unless the close failed
 		}
 		g.handlers.Add(1)
 		g.mu.Unlock()
@@ -91,8 +91,9 @@ func (g *ConnGroup) isDraining() bool {
 func (g *ConnGroup) Shutdown(ctx context.Context) error {
 	g.mu.Lock()
 	g.draining = true
+	var closeErr error
 	for _, l := range g.listeners {
-		l.Close()
+		closeErr = errors.Join(closeErr, l.Close())
 	}
 	g.mu.Unlock()
 
@@ -103,8 +104,8 @@ func (g *ConnGroup) Shutdown(ctx context.Context) error {
 	}()
 	select {
 	case <-done:
-		return nil
+		return closeErr
 	case <-ctx.Done():
-		return ctx.Err()
+		return errors.Join(closeErr, ctx.Err())
 	}
 }

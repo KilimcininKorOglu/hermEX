@@ -79,5 +79,6 @@ func serveMTASTSPolicy(w http.ResponseWriter, cfg *config.Config, dir mtastsDire
 		MaxAge: settings.MaxAge,
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	io.WriteString(w, mtasts.Build(policy))
+	// Final response body; a write failure means the client is gone, with no recourse.
+	_, _ = io.WriteString(w, mtasts.Build(policy))
 }

@@ -135,7 +135,7 @@ func (s *Server) handleScheduleInboxGet(w http.ResponseWriter, r *http.Request, 
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	w.Write([]byte(body))
+	_, _ = w.Write([]byte(body)) // final response body; a failed write means the client is gone
 }
 
 // handleScheduleInboxDelete removes a scheduling Inbox member, soft-deleting the

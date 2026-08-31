@@ -118,7 +118,7 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, mailbox strin
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	w.Write(vcf)
+	_, _ = w.Write(vcf) // final response body; a failed write means the client is gone
 }
 
 // handlePut creates or replaces a contact from a vCard body. It honors

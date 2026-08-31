@@ -2,6 +2,7 @@ package fetchmail
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -43,12 +44,10 @@ func dialIMAP(server string, port int, ssl, verify bool) (*imapConn, error) {
 	setDeadline(conn)
 	line, err := c.r.ReadString('\n')
 	if err != nil {
-		conn.Close()
-		return nil, err
+		return nil, errors.Join(err, conn.Close())
 	}
 	if !strings.HasPrefix(line, "* OK") && !strings.HasPrefix(line, "* PREAUTH") {
-		conn.Close()
-		return nil, fmt.Errorf("imap greeting: %s", strings.TrimSpace(line))
+		return nil, errors.Join(fmt.Errorf("imap greeting: %s", strings.TrimSpace(line)), conn.Close())
 	}
 	return c, nil
 }
@@ -175,8 +174,7 @@ func (c *imapConn) deleteMessage(uid string) error {
 
 func (c *imapConn) logout() error {
 	_, err := c.do("LOGOUT")
-	c.conn.Close()
-	return err
+	return errors.Join(err, c.conn.Close())
 }
 
 // literalSize reports the byte count of a trailing IMAP literal marker "{N}".

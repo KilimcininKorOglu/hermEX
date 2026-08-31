@@ -346,7 +346,8 @@ func stripMailto(uri string) string {
 func schedulePreconditionFail(w http.ResponseWriter, precondition string, status int) {
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.WriteHeader(status)
-	fmt.Fprintf(w, "%s<D:error xmlns:D=\"DAV:\" xmlns:C=\"urn:ietf:params:xml:ns:caldav\"><C:%s/></D:error>\n", xml.Header, precondition)
+	// Final response body; a write failure means the client is gone, with no recourse.
+	_, _ = fmt.Fprintf(w, "%s<D:error xmlns:D=\"DAV:\" xmlns:C=\"urn:ietf:params:xml:ns:caldav\"><C:%s/></D:error>\n", xml.Header, precondition)
 }
 
 // writeScheduleResponse serializes a CALDAV:schedule-response (RFC 6638 §5.2).
