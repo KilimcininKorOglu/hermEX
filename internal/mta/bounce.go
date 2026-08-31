@@ -23,20 +23,18 @@ import (
 // The outbound relay calls this when it abandons a recipient, then files the
 // result into the sender's mailbox through the local delivery path, so a user
 // whose external mail fails learns of it rather than the failure being silent.
-func Bounce(reportingMTA, sender, failed, reason string, when time.Time) []byte {
+func Bounce(reportingMTA, sender, failed, reason string, when time.Time) ([]byte, error) {
 	var parts bytes.Buffer
 	mw := multipart.NewWriter(&parts)
-	if p, err := mw.CreatePart(textproto.MIMEHeader{
-		"Content-Type": {"text/plain; charset=utf-8"},
-	}); err == nil {
-		p.Write([]byte(bounceText(failed, reason)))
+	if err := writeReportPart(mw, "text/plain; charset=utf-8", []byte(bounceText(failed, reason))); err != nil {
+		return nil, err
 	}
-	if p, err := mw.CreatePart(textproto.MIMEHeader{
-		"Content-Type": {"message/delivery-status"},
-	}); err == nil {
-		p.Write([]byte(deliveryStatus(reportingMTA, failed, reason, when)))
+	if err := writeReportPart(mw, "message/delivery-status", []byte(deliveryStatus(reportingMTA, failed, reason, when))); err != nil {
+		return nil, err
 	}
-	mw.Close()
+	if err := mw.Close(); err != nil {
+		return nil, err
+	}
 
 	var b bytes.Buffer
 	daemon := "mailer-daemon@" + domainOf(sender)
@@ -53,7 +51,18 @@ func Bounce(reportingMTA, sender, failed, reason string, when time.Time) []byte 
 		`multipart/report; report-type="delivery-status"; boundary="`+mw.Boundary()+`"`)
 	b.WriteString("\r\n")
 	b.Write(parts.Bytes())
-	return b.Bytes()
+	return b.Bytes(), nil
+}
+
+// writeReportPart writes one multipart/report body part with the given
+// Content-Type and payload, propagating any part-creation or write error.
+func writeReportPart(mw *multipart.Writer, contentType string, data []byte) error {
+	p, err := mw.CreatePart(textproto.MIMEHeader{"Content-Type": {contentType}})
+	if err != nil {
+		return err
+	}
+	_, err = p.Write(data)
+	return err
 }
 
 // bounceText is the human-readable part of the report.

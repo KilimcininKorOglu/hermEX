@@ -94,7 +94,10 @@ func sendAutoReply(accounts directory.Accounts, st *objectstore.Store, selfAddr,
 		return nil
 	}
 
-	reply := buildAutoReply(selfAddr, to, subject, body, msg.Header.Get("Message-ID"), received)
+	reply, err := buildAutoReply(selfAddr, to, subject, body, msg.Header.Get("Message-ID"), received)
+	if err != nil {
+		return err
+	}
 
 	// Deliver the reply through the normal path. A local recipient receives it
 	// in their inbox; its Auto-Submitted header makes their own out-of-office
@@ -231,7 +234,7 @@ func isRoleMailbox(addr string) bool {
 // hand-built rather than routed through oxcmail.Export because Export emits a
 // fixed header set with no way to carry Auto-Submitted, the one header that
 // breaks the reply loop.
-func buildAutoReply(from, to, subject, body, inReplyTo string, when time.Time) []byte {
+func buildAutoReply(from, to, subject, body, inReplyTo string, when time.Time) ([]byte, error) {
 	if strings.TrimSpace(subject) == "" {
 		subject = "Automatic reply"
 	}
@@ -253,9 +256,13 @@ func buildAutoReply(from, to, subject, body, inReplyTo string, when time.Time) [
 	writeReplyField(&b, "Content-Transfer-Encoding", "quoted-printable")
 	b.WriteString("\r\n")
 	qp := quotedprintable.NewWriter(&b)
-	qp.Write([]byte(body))
-	qp.Close()
-	return b.Bytes()
+	if _, err := qp.Write([]byte(body)); err != nil {
+		return nil, err
+	}
+	if err := qp.Close(); err != nil {
+		return nil, err
+	}
+	return b.Bytes(), nil
 }
 
 // writeReplyField writes one "Name: value" header line terminated with CRLF.

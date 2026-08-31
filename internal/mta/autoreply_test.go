@@ -120,7 +120,10 @@ func TestAutoSubmittedKeyword(t *testing.T) {
 // round-trips through quoted-printable.
 func TestBuildAutoReply(t *testing.T) {
 	when := time.Unix(1700000000, 0)
-	raw := buildAutoReply("me@hermex.test", "bob@example.com", "Away until Monday", "I am out of office.", "<orig@example.com>", when)
+	raw, err := buildAutoReply("me@hermex.test", "bob@example.com", "Away until Monday", "I am out of office.", "<orig@example.com>", when)
+	if err != nil {
+		t.Fatalf("auto-reply does not build: %v", err)
+	}
 
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
 	if err != nil {
@@ -151,7 +154,10 @@ func TestBuildAutoReply(t *testing.T) {
 // default and a non-ASCII subject is RFC 2047 encoded (and decodes back).
 func TestBuildAutoReplyDefaultsAndEncoding(t *testing.T) {
 	when := time.Unix(1700000000, 0)
-	raw := buildAutoReply("me@hermex.test", "bob@example.com", "", "body", "", when)
+	raw, err := buildAutoReply("me@hermex.test", "bob@example.com", "", "body", "", when)
+	if err != nil {
+		t.Fatalf("auto-reply does not build: %v", err)
+	}
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
 	if err != nil {
 		t.Fatal(err)
@@ -160,7 +166,10 @@ func TestBuildAutoReplyDefaultsAndEncoding(t *testing.T) {
 		t.Errorf("empty subject did not default: %q", got)
 	}
 
-	raw = buildAutoReply("me@hermex.test", "bob@example.com", "Ofis dışındayım", "body", "", when)
+	raw, err = buildAutoReply("me@hermex.test", "bob@example.com", "Ofis dışındayım", "body", "", when)
+	if err != nil {
+		t.Fatalf("auto-reply does not build: %v", err)
+	}
 	msg, err = mail.ReadMessage(bytes.NewReader(raw))
 	if err != nil {
 		t.Fatal(err)

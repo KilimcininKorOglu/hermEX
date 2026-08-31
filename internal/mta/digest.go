@@ -154,8 +154,12 @@ func (r *DigestRunner) buildDigest(email string, msgs []objectstore.MessageInfo,
 	writeReplyField(&b, "Content-Transfer-Encoding", "quoted-printable")
 	b.WriteString("\r\n")
 	qp := quotedprintable.NewWriter(&b)
-	qp.Write([]byte(body.String()))
-	qp.Close()
+	if _, err := qp.Write([]byte(body.String())); err != nil {
+		return nil, err
+	}
+	if err := qp.Close(); err != nil {
+		return nil, err
+	}
 	return b.Bytes(), nil
 }
 

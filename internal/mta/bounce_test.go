@@ -23,7 +23,10 @@ import (
 // failed recipient and reason and a machine-readable message/delivery-status part
 // carrying the structured failure a client parses.
 func TestBounceMessage(t *testing.T) {
-	raw := Bounce("mail.hermex.test", "alice@local", "bob@remote", "550 mailbox does not exist", time.Unix(1_700_000_000, 0))
+	raw, err := Bounce("mail.hermex.test", "alice@local", "bob@remote", "550 mailbox does not exist", time.Unix(1_700_000_000, 0))
+	if err != nil {
+		t.Fatalf("bounce does not build: %v", err)
+	}
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
 	if err != nil {
 		t.Fatalf("bounce is not a valid message: %v", err)
@@ -95,7 +98,10 @@ func TestBounceDeliversToSenderInbox(t *testing.T) {
 	mbox := filepath.Join(t.TempDir(), "alice")
 	accounts := directory.StaticAccounts{"alice@local": {MailboxPath: mbox}}
 
-	raw := Bounce("mail.hermex.test", "alice@local", "bob@remote", "host unreachable", time.Now())
+	raw, err := Bounce("mail.hermex.test", "alice@local", "bob@remote", "host unreachable", time.Now())
+	if err != nil {
+		t.Fatalf("bounce does not build: %v", err)
+	}
 	unresolved, err := Deliver(accounts, "", []string{"alice@local"}, raw, time.Now())
 	if err != nil {
 		t.Fatalf("deliver bounce: %v", err)

@@ -19,7 +19,7 @@ import (
 // matching, is what catches a boundary bug in the hand-built multipart.
 func TestBuildReadReceiptMDN(t *testing.T) {
 	when := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
-	raw := buildReadReceipt(ReadReceiptInfo{
+	raw, err := buildReadReceipt(ReadReceiptInfo{
 		Reader:      "reader@hermex.test",
 		To:          "sender@hermex.test",
 		OrigFrom:    "sender@hermex.test",
@@ -27,6 +27,9 @@ func TestBuildReadReceiptMDN(t *testing.T) {
 		OrigMsgID:   "<orig-1@hermex.test>",
 		SubmitTime:  when,
 	}, when)
+	if err != nil {
+		t.Fatalf("receipt does not build: %v", err)
+	}
 
 	msg, err := mail.ReadMessage(strings.NewReader(string(raw)))
 	if err != nil {
@@ -100,10 +103,13 @@ func TestBuildReadReceiptMDN(t *testing.T) {
 // well-formed and parseable.
 func TestBuildReadReceiptOmitsAbsentFields(t *testing.T) {
 	when := time.Date(2026, 6, 19, 12, 0, 0, 0, time.UTC)
-	raw := buildReadReceipt(ReadReceiptInfo{
+	raw, err := buildReadReceipt(ReadReceiptInfo{
 		Reader: "reader@hermex.test",
 		To:     "sender@hermex.test",
 	}, when)
+	if err != nil {
+		t.Fatalf("receipt does not build: %v", err)
+	}
 
 	if _, err := mail.ReadMessage(strings.NewReader(string(raw))); err != nil {
 		t.Fatalf("receipt with absent optional fields does not parse: %v", err)

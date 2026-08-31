@@ -309,7 +309,11 @@ func main() {
 			return
 		}
 		for _, rcpt := range recipients {
-			report := mta.Bounce(cfg.Hostname, from, rcpt, cause.Error(), time.Now())
+			report, err := mta.Bounce(cfg.Hostname, from, rcpt, cause.Error(), time.Now())
+			if err != nil {
+				logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "sendlater.bounce.build", User: from, Fields: logging.Fields{"recipient": rcpt}, Err: err.Error()})
+				continue
+			}
 			unresolved, err := mta.Deliver(dir, "", []string{from}, report, time.Now())
 			if err != nil || len(unresolved) > 0 {
 				logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "sendlater.bounce.undelivered", User: from, Fields: logging.Fields{"recipient": rcpt}})
@@ -355,7 +359,10 @@ func main() {
 			if !mta.NotifyFailureWanted(it.Notify) {
 				return nil
 			}
-			report := mta.Bounce(cfg.Hostname, it.From, it.Recipient, cause.Error(), time.Now())
+			report, err := mta.Bounce(cfg.Hostname, it.From, it.Recipient, cause.Error(), time.Now())
+			if err != nil {
+				return err
+			}
 			unresolved, err := mta.Deliver(dir, "", []string{it.From}, report, time.Now())
 			if err == nil && len(unresolved) == 0 {
 				return nil

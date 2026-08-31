@@ -50,9 +50,11 @@ func Export(msg *Message, opt Options) ([]byte, error) {
 
 	// The innermost unit is the body, wrapped in multipart/related when it has
 	// inline images.
-	innerHdr, innerBytes := renderBody(msg, opt)
+	innerHdr, innerBytes, err := renderBody(msg, opt)
+	if err != nil {
+		return nil, err
+	}
 	if len(inline) > 0 {
-		var err error
 		innerHdr, innerBytes, err = renderRelated(innerHdr, innerBytes, inline)
 		if err != nil {
 			return nil, err
@@ -73,14 +75,18 @@ func Export(msg *Message, opt Options) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	iw.Write(innerBytes)
+	if _, err := iw.Write(innerBytes); err != nil {
+		return nil, err
+	}
 	for _, att := range regular {
 		ah, adata := renderAttachment(att)
 		aw, err := mw.CreatePart(ah)
 		if err != nil {
 			return nil, err
 		}
-		aw.Write(adata)
+		if _, err := aw.Write(adata); err != nil {
+			return nil, err
+		}
 	}
 	if err := mw.Close(); err != nil {
 		return nil, err
@@ -100,14 +106,18 @@ func renderRelated(bodyHdr textproto.MIMEHeader, bodyBytes []byte, inline []Atta
 	if err != nil {
 		return nil, nil, err
 	}
-	bw.Write(bodyBytes)
+	if _, err := bw.Write(bodyBytes); err != nil {
+		return nil, nil, err
+	}
 	for _, att := range inline {
 		ah, adata := renderAttachment(att)
 		aw, err := mw.CreatePart(ah)
 		if err != nil {
 			return nil, nil, err
 		}
-		aw.Write(adata)
+		if _, err := aw.Write(adata); err != nil {
+			return nil, nil, err
+		}
 	}
 	if err := mw.Close(); err != nil {
 		return nil, nil, err
@@ -129,7 +139,7 @@ func isInlineAttachment(att Attachment) bool {
 // and HTML bodies are present, text/html when only HTML, text/plain otherwise.
 // When opt carries a calendar body (an iTIP message), the body becomes a
 // multipart/alternative whose final alternative is that text/calendar part.
-func renderBody(msg *Message, opt Options) (textproto.MIMEHeader, []byte) {
+func renderBody(msg *Message, opt Options) (textproto.MIMEHeader, []byte, error) {
 	plain := propString(msg.Props, mapi.PrBody)
 	html, hasHTML := bytesProp(msg.Props, mapi.PrHTML)
 	if len(opt.CalendarBody) > 0 {
@@ -150,60 +160,77 @@ func renderBody(msg *Message, opt Options) (textproto.MIMEHeader, []byte) {
 // receiving client renders the text it understands or processes the calendar
 // part; the method on the part's Content-Type must match the METHOD inside the
 // iCalendar, so it is carried through rather than re-parsed.
-func renderCalendarAlternative(plain string, html []byte, hasHTML bool, htmlCset string, ical []byte, method string) (textproto.MIMEHeader, []byte) {
+func renderCalendarAlternative(plain string, html []byte, hasHTML bool, htmlCset string, ical []byte, method string) (textproto.MIMEHeader, []byte, error) {
 	var parts bytes.Buffer
 	mw := multipart.NewWriter(&parts)
-	ph, penc := renderLeaf("text/plain; charset=utf-8", []byte(plain))
-	if pw, err := mw.CreatePart(ph); err == nil {
-		pw.Write(penc)
+	if err := writeAlternativePart(mw, "text/plain; charset=utf-8", []byte(plain)); err != nil {
+		return nil, nil, err
 	}
 	if hasHTML {
-		hh, henc := renderLeaf("text/html; charset="+htmlCset, html)
-		if hw, err := mw.CreatePart(hh); err == nil {
-			hw.Write(henc)
+		if err := writeAlternativePart(mw, "text/html; charset="+htmlCset, html); err != nil {
+			return nil, nil, err
 		}
 	}
 	ct := "text/calendar; charset=utf-8"
 	if method != "" {
 		ct += "; method=" + method
 	}
-	ch, cenc := renderLeaf(ct, ical)
-	if cw, err := mw.CreatePart(ch); err == nil {
-		cw.Write(cenc)
+	if err := writeAlternativePart(mw, ct, ical); err != nil {
+		return nil, nil, err
 	}
-	mw.Close()
+	if err := mw.Close(); err != nil {
+		return nil, nil, err
+	}
 	h := textproto.MIMEHeader{}
 	h.Set("Content-Type", "multipart/alternative; boundary=\""+mw.Boundary()+"\"")
-	return h, parts.Bytes()
+	return h, parts.Bytes(), nil
+}
+
+// writeAlternativePart renders one alternative body part and writes it into the
+// multipart writer, propagating any encode or write error.
+func writeAlternativePart(mw *multipart.Writer, contentType string, raw []byte) error {
+	hdr, enc, err := renderLeaf(contentType, raw)
+	if err != nil {
+		return err
+	}
+	pw, err := mw.CreatePart(hdr)
+	if err != nil {
+		return err
+	}
+	_, err = pw.Write(enc)
+	return err
 }
 
 // renderLeaf renders a single content part: a Content-Type and the
 // transfer-encoded body with its Content-Transfer-Encoding.
-func renderLeaf(contentType string, raw []byte) (textproto.MIMEHeader, []byte) {
-	cte, enc := encodeForTransfer(raw)
+func renderLeaf(contentType string, raw []byte) (textproto.MIMEHeader, []byte, error) {
+	cte, enc, err := encodeForTransfer(raw)
+	if err != nil {
+		return nil, nil, err
+	}
 	h := textproto.MIMEHeader{}
 	h.Set("Content-Type", contentType)
 	h.Set("Content-Transfer-Encoding", cte)
-	return h, enc
+	return h, enc, nil
 }
 
 // renderAlternative renders a multipart/alternative part with a text/plain and a
 // text/html alternative. The boundary is generated by the multipart writer.
-func renderAlternative(plain string, html []byte, htmlCset string) (textproto.MIMEHeader, []byte) {
+func renderAlternative(plain string, html []byte, htmlCset string) (textproto.MIMEHeader, []byte, error) {
 	var parts bytes.Buffer
 	mw := multipart.NewWriter(&parts)
-	ph, penc := renderLeaf("text/plain; charset=utf-8", []byte(plain))
-	if pw, err := mw.CreatePart(ph); err == nil {
-		pw.Write(penc)
+	if err := writeAlternativePart(mw, "text/plain; charset=utf-8", []byte(plain)); err != nil {
+		return nil, nil, err
 	}
-	hh, henc := renderLeaf("text/html; charset="+htmlCset, html)
-	if hw, err := mw.CreatePart(hh); err == nil {
-		hw.Write(henc)
+	if err := writeAlternativePart(mw, "text/html; charset="+htmlCset, html); err != nil {
+		return nil, nil, err
 	}
-	mw.Close()
+	if err := mw.Close(); err != nil {
+		return nil, nil, err
+	}
 	h := textproto.MIMEHeader{}
 	h.Set("Content-Type", "multipart/alternative; boundary=\""+mw.Boundary()+"\"")
-	return h, parts.Bytes()
+	return h, parts.Bytes(), nil
 }
 
 // renderAttachment renders one attachment as a by-value MIME part: its content
@@ -430,15 +457,19 @@ func newMessageID(props mapi.PropertyValues) string {
 // encodeForTransfer picks a content-transfer-encoding for raw and returns the
 // encoding name and the encoded bytes: 7bit when the content is 7-bit-clean,
 // quoted-printable otherwise.
-func encodeForTransfer(raw []byte) (string, []byte) {
+func encodeForTransfer(raw []byte) (string, []byte, error) {
 	if is7bitClean(raw) {
-		return "7bit", raw
+		return "7bit", raw, nil
 	}
 	var buf bytes.Buffer
 	w := quotedprintable.NewWriter(&buf)
-	w.Write(raw)
-	w.Close()
-	return "quoted-printable", buf.Bytes()
+	if _, err := w.Write(raw); err != nil {
+		return "", nil, err
+	}
+	if err := w.Close(); err != nil {
+		return "", nil, err
+	}
+	return "quoted-printable", buf.Bytes(), nil
 }
 
 // htmlCharset returns the charset name for the HTML body from PR_INTERNET_CPID,

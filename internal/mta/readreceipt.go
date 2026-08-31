@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"mime"
 	"mime/multipart"
-	"net/textproto"
 	"time"
 
 	"hermex/internal/directory"
@@ -39,7 +38,10 @@ type ReadReceiptInfo struct {
 // cannot produce the multipart/report; report-type=disposition-notification
 // structure by which a receiving client recognizes a message as a read receipt.
 func SendReadReceipt(accounts directory.Accounts, info ReadReceiptInfo, when time.Time) error {
-	raw := buildReadReceipt(info, when)
+	raw, err := buildReadReceipt(info, when)
+	if err != nil {
+		return err
+	}
 	if _, err := Deliver(accounts, info.Reader, []string{info.To}, raw, when); err != nil {
 		return err
 	}
@@ -52,20 +54,18 @@ func SendReadReceipt(accounts directory.Accounts, info ReadReceiptInfo, when tim
 // loop guard is X-Auto-Response-Suppress: All, the header Exchange uses to stop
 // an auto-responder replying to the receipt (distinct from buildAutoReply's
 // Auto-Submitted, which the reference does not set on a receipt).
-func buildReadReceipt(info ReadReceiptInfo, when time.Time) []byte {
+func buildReadReceipt(info ReadReceiptInfo, when time.Time) ([]byte, error) {
 	var parts bytes.Buffer
 	mw := multipart.NewWriter(&parts)
-	if p, err := mw.CreatePart(textproto.MIMEHeader{
-		"Content-Type": {"text/plain; charset=utf-8"},
-	}); err == nil {
-		p.Write([]byte(readReceiptText(info)))
+	if err := writeReportPart(mw, "text/plain; charset=utf-8", []byte(readReceiptText(info))); err != nil {
+		return nil, err
 	}
-	if p, err := mw.CreatePart(textproto.MIMEHeader{
-		"Content-Type": {"message/disposition-notification"},
-	}); err == nil {
-		p.Write([]byte(dispositionNotification(info)))
+	if err := writeReportPart(mw, "message/disposition-notification", []byte(dispositionNotification(info))); err != nil {
+		return nil, err
 	}
-	mw.Close()
+	if err := mw.Close(); err != nil {
+		return nil, err
+	}
 
 	var msg bytes.Buffer
 	writeReplyField(&msg, "From", info.Reader)
@@ -79,7 +79,7 @@ func buildReadReceipt(info ReadReceiptInfo, when time.Time) []byte {
 		`multipart/report; report-type="disposition-notification"; boundary="`+mw.Boundary()+`"`)
 	msg.WriteString("\r\n")
 	msg.Write(parts.Bytes())
-	return msg.Bytes()
+	return msg.Bytes(), nil
 }
 
 // readReceiptText is the human-readable part, modeled on the reference's

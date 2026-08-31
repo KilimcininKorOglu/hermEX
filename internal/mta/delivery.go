@@ -915,10 +915,19 @@ func applyInboxRules(st *objectstore.Store, m objectstore.MessageInfo, owner, en
 		return
 	}
 	for _, b := range acts.Bounces {
-		OnRuleSend(owner, []string{envelopeFrom}, Bounce(domainPart(owner), envelopeFrom, owner, b.Reason, received))
+		report, err := Bounce(domainPart(owner), envelopeFrom, owner, b.Reason, received)
+		if err != nil {
+			logPassFailure("rule.bounce", owner, nil, err)
+			continue
+		}
+		OnRuleSend(owner, []string{envelopeFrom}, report)
 	}
 	for _, ar := range acts.AutoReplies {
-		reply := buildAutoReply(owner, envelopeFrom, ruleVacationSubject, ar.Message, msg.Header.Get("Message-ID"), received)
+		reply, err := buildAutoReply(owner, envelopeFrom, ruleVacationSubject, ar.Message, msg.Header.Get("Message-ID"), received)
+		if err != nil {
+			logPassFailure("rule.autoreply", owner, nil, err)
+			continue
+		}
 		OnRuleSend(owner, []string{envelopeFrom}, reply)
 	}
 }
