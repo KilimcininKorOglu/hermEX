@@ -39,9 +39,6 @@ func NewPush() *Push { return &Push{} }
 // Bytes returns the accumulated bytes; the slice aliases the internal buffer.
 func (p *Push) Bytes() []byte { return p.buf }
 
-// Len reports how many bytes have been written (the current stream offset).
-func (p *Push) Len() int { return len(p.buf) }
-
 // Align pads with zero bytes up to an n-byte boundary.
 func (p *Push) Align(n int) {
 	for len(p.buf)%n != 0 {
@@ -62,12 +59,6 @@ func (p *Push) Uint16(v uint16) {
 func (p *Push) Uint32(v uint32) {
 	p.Align(4)
 	p.buf = binary.LittleEndian.AppendUint32(p.buf, v)
-}
-
-// Uint64 writes a 64-bit integer aligned to 8.
-func (p *Push) Uint64(v uint64) {
-	p.Align(8)
-	p.buf = binary.LittleEndian.AppendUint64(p.buf, v)
 }
 
 // Int32 writes a signed 32-bit integer aligned to 4.
@@ -108,9 +99,6 @@ type Pull struct {
 
 // NewPull returns a Pull over buf.
 func NewPull(buf []byte) *Pull { return &Pull{buf: buf} }
-
-// Offset reports the current read position.
-func (p *Pull) Offset() int { return p.off }
 
 // Remaining reports how many unread bytes are left.
 func (p *Pull) Remaining() int { return len(p.buf) - p.off }
@@ -172,17 +160,6 @@ func (p *Pull) Uint32() (uint32, error) {
 	}
 	v := binary.LittleEndian.Uint32(p.buf[p.off:])
 	p.off += 4
-	return v, nil
-}
-
-// Uint64 reads a 64-bit integer aligned to 8.
-func (p *Pull) Uint64() (uint64, error) {
-	p.Align(8)
-	if err := p.need(8); err != nil {
-		return 0, err
-	}
-	v := binary.LittleEndian.Uint64(p.buf[p.off:])
-	p.off += 8
 	return v, nil
 }
 

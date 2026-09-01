@@ -62,9 +62,6 @@ type Pull struct {
 // NewPull returns a Pull over buf using the given encoding flags.
 func NewPull(buf []byte, flags Flags) *Pull { return &Pull{buf: buf, flags: flags} }
 
-// Offset reports the current read position.
-func (p *Pull) Offset() int { return p.off }
-
 // Remaining reports how many unread bytes are left.
 func (p *Pull) Remaining() int { return len(p.buf) - p.off }
 
