@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 )
 
 // TestUIAVQuarantine proves the quarantine page renders the held messages a system
@@ -84,5 +85,41 @@ func TestUIDomainAVScanSave(t *testing.T) {
 	}
 	if !strings.Contains(string(body), `class="ok"`) {
 		t.Errorf("save response = %s, want a success acknowledgement", body)
+	}
+}
+
+// TestUIDomainAVScanEmitsAudit proves changing a domain's antivirus toggles records
+// a setting.change audit event naming the operator and the before/after values, so
+// an incident responder can answer who turned AV scanning off and when.
+func TestUIDomainAVScanEmitsAudit(t *testing.T) {
+	d := &fakeDir{
+		authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}},
+		domainDetail: directory.DomainDetail{ID: 1, Name: "acme.test"},
+		avInbound:    true, avOutbound: true, // prior state: both on
+	}
+	ts, sink := loggingAdminServer(t, d)
+	session, csrf := loginCookies(t, ts)
+	resp := htmxPUT(t, ts, "/admin/ui/domains/1/avscan", session, csrf,
+		url.Values{"av_scan_inbound": {"on"}}) // outbound omitted: turned off
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("avscan save status %d, want 200", resp.StatusCode)
+	}
+
+	e, ok := sink.find("setting.change")
+	if !ok {
+		t.Fatal("no setting.change audit event was recorded for the AV toggle change")
+	}
+	if e.User != "admin@hermex.test" {
+		t.Errorf("audit actor = %q, want the operator login", e.User)
+	}
+	if e.Fields["setting"] != "av_scan" {
+		t.Errorf("audit setting = %v, want av_scan", e.Fields["setting"])
+	}
+	if e.Fields["old_outbound"] != true || e.Fields["new_outbound"] != false {
+		t.Errorf("audit did not capture the outbound before/after: %v", e.Fields)
+	}
+	if e.Level != logging.LevelInfo {
+		t.Errorf("audit level = %v, want info (a positive event, not a failure)", e.Level)
 	}
 }

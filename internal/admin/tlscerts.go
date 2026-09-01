@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 )
 
 // validateTLSCert checks an uploaded certificate/key pair before it is stored: the
@@ -62,9 +63,11 @@ func (s *Server) tlsCertsPageData(r *http.Request, notice string) map[string]any
 // so it applies when the gateway next starts (the certificate contents still
 // hot-reload without a restart).
 func (s *Server) handleUITLSSettings(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.uiAuthorized(w, r); !ok {
+	cl, ok := s.uiAuthorized(w, r)
+	if !ok {
 		return
 	}
+	oldSettings, _, _ := s.dir.GetTLSSettings()
 	mode := strings.ToLower(strings.TrimSpace(r.FormValue("mode")))
 	if mode != "acme" {
 		mode = "manual"
@@ -97,6 +100,7 @@ func (s *Server) handleUITLSSettings(w http.ResponseWriter, r *http.Request) {
 		s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, s.notice("Could not save the certificate mode.", err)))
 		return
 	}
+	s.auditSettingChange(cl.Login, "tls_mode", logging.Fields{"old_mode": oldSettings.Mode, "new_mode": settings.Mode})
 	s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "Saved. Restart the gateway for a mode change to take effect."))
 }
 
@@ -107,9 +111,11 @@ func (s *Server) handleUITLSSettings(w http.ResponseWriter, r *http.Request) {
 // certificate problem under enforce loses inbound mail, testing mode reports failures
 // but still delivers, the safe default.
 func (s *Server) handleUIMTASTSSettings(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.uiAuthorized(w, r); !ok {
+	cl, ok := s.uiAuthorized(w, r)
+	if !ok {
 		return
 	}
+	oldSTS, _, _ := s.dir.GetMTASTSSettings()
 	enabled := r.FormValue("mtasts_enabled") == "on"
 	mode := strings.ToLower(strings.TrimSpace(r.FormValue("mtasts_mode")))
 	if mode != "enforce" && mode != "none" {
@@ -127,6 +133,10 @@ func (s *Server) handleUIMTASTSSettings(w http.ResponseWriter, r *http.Request) 
 		s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, s.notice("Could not save the MTA-STS settings.", err)))
 		return
 	}
+	s.auditSettingChange(cl.Login, "mtasts", logging.Fields{
+		"old_enabled": oldSTS.Enabled, "new_enabled": enabled,
+		"old_mode": oldSTS.Mode, "new_mode": mode,
+	})
 	s.render(w, "tls-certs-panel", s.tlsCertsPageData(r, "Saved MTA-STS publishing. Publish each domain's prescribed mta-sts and _mta-sts records (see the domain page); senders adopt a change on their next fetch."))
 }
 

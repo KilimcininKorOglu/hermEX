@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"hermex/internal/logging"
 )
 
 // avQuarantineView is one quarantine record formatted for the panel.
@@ -79,7 +81,8 @@ func domainIDList(ids map[int64]bool) []int64 {
 // toggles from the domain-detail form (a system administrator action, like the
 // domain's other settings), returning the shared save-status partial for htmx.
 func (s *Server) handleUISaveDomainAVScan(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.uiAuthorized(w, r); !ok {
+	cl, ok := s.uiAuthorized(w, r)
+	if !ok {
 		return
 	}
 	data := map[string]any{}
@@ -96,12 +99,17 @@ func (s *Server) handleUISaveDomainAVScan(w http.ResponseWriter, r *http.Request
 	case !found:
 		data["Error"] = "No such domain."
 	default:
+		oldIn, oldOut, _ := s.dir.GetDomainAVScan(dd.Name)
 		inbound := r.PostFormValue("av_scan_inbound") == "on"
 		outbound := r.PostFormValue("av_scan_outbound") == "on"
 		if err := s.dir.SetDomainAVScan(dd.Name, inbound, outbound); err != nil {
 			data["Error"] = s.notice("Could not save the antivirus toggles.", err)
 		} else {
 			data["Saved"] = true
+			s.auditSettingChange(cl.Login, "av_scan", logging.Fields{
+				"domain": dd.Name, "old_inbound": oldIn, "new_inbound": inbound,
+				"old_outbound": oldOut, "new_outbound": outbound,
+			})
 		}
 	}
 	s.render(w, "user-status", data)
