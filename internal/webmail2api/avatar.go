@@ -33,6 +33,12 @@ func (s *Server) handleGetAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", http.DetectContentType(photo))
+	// The portrait is owner-only (a non-owner gets 404 above), so the private cache
+	// must be keyed to the session, not just the URL. Vary: Cookie makes the browser
+	// cache entry depend on the session cookie, so a later user of a shared browser
+	// (a different cookie) cannot replay the previous user's cached portrait: their
+	// request misses the cache and the server runs the owner-only check again.
+	w.Header().Set("Vary", "Cookie")
 	w.Header().Set("Cache-Control", "private, max-age=300")
 	_, _ = w.Write(photo)
 }

@@ -240,4 +240,9 @@ func TestAvatarKeepsItsPrivateCache(t *testing.T) {
 	if got := rec.Header().Get("Cache-Control"); got != "private, max-age=300" {
 		t.Errorf("avatar Cache-Control = %q, want its own private cache", got)
 	}
+	// The private cache must be keyed to the session, so a later user of a shared
+	// browser cannot replay the previous user's cached portrait.
+	if got := rec.Header().Get("Vary"); !strings.Contains(got, "Cookie") {
+		t.Errorf("avatar Vary = %q, want it to include Cookie so the cache is session-keyed", got)
+	}
 }
