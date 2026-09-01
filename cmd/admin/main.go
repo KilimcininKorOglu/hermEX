@@ -31,6 +31,7 @@ import (
 	"hermex/internal/lifecycle"
 	"hermex/internal/logging"
 	"hermex/internal/objectstore"
+	"hermex/internal/relay"
 	"hermex/internal/serve"
 	"hermex/internal/tlscert"
 )
@@ -504,7 +505,8 @@ func pruneEML(dir *directory.SQLDirectory, target string, days int) {
 // backupMail writes a consistent copy of one mailbox, or of every mailbox and
 // every domain's public store, under dest. The directory dump covers the accounts
 // and the key material; this covers the mail itself, which nothing else in the
-// tooling did.
+// tooling did. For the "all" target it also snapshots the relay spool and the
+// quarantine samples, the data_dir artifacts that live outside any mailbox store.
 //
 // The copy mirrors the source layout (user/<domain>/<local>, domain/<domain>), so
 // restoring is copying a directory back into place with the services stopped, not
@@ -563,11 +565,74 @@ func backupMail(dir *directory.SQLDirectory, cfg *config.Config, target, dest st
 		done++
 	}
 	fmt.Printf("backed up %d of %d mailbox(es) to %s\n", done, len(sources), dest)
-	if done < len(sources) {
+	failed := done < len(sources)
+	// A full-mailbox backup also captures the data_dir artifacts that mailbox stores
+	// do not hold: the relay spool (external mail already accepted with a 250 but not
+	// yet delivered) and the quarantine .eml samples the restored directory rows
+	// reference. Without these a data_dir loss silently drops accepted outbound mail
+	// and leaves quarantine rows dangling. A single-mailbox backup skips them: they
+	// are shared, not part of one account.
+	if target == "all" {
+		if err := backupSpool(cfg, filepath.Join(dest, "relay.sqlite3")); err != nil {
+			log.Printf("hermex-admin: back up relay spool: %v", err)
+			failed = true
+		} else {
+			fmt.Printf("backed up the relay spool to %s\n", filepath.Join(dest, "relay.sqlite3"))
+		}
+		if err := backupQuarantine(cfg, filepath.Join(dest, "quarantine")); err != nil {
+			log.Printf("hermex-admin: back up quarantine: %v", err)
+			failed = true
+		}
+	}
+	if failed {
 		// The exit status is what a scheduled run checks, so a partial backup must
 		// not look like a clean one.
 		os.Exit(1)
 	}
+}
+
+// backupSpool writes a consistent snapshot of the relay spool into dest via the
+// spool's VACUUM INTO backup, so accepted-but-undelivered outbound mail is captured.
+func backupSpool(cfg *config.Config, dest string) error {
+	sp, err := relay.Open(cfg.RelaySpoolPath())
+	if err != nil {
+		return err
+	}
+	defer sp.Close()
+	return sp.Backup(dest)
+}
+
+// backupQuarantine copies the quarantine .eml tree into dest. A missing tree is not
+// an error: a server that has quarantined nothing has no quarantine directory.
+func backupQuarantine(cfg *config.Config, dest string) error {
+	src := filepath.Join(cfg.DataDir, "quarantine")
+	if _, err := os.Stat(src); os.IsNotExist(err) {
+		return nil
+	}
+	return filepath.WalkDir(src, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		target := filepath.Join(dest, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0o700)
+		}
+		if !d.Type().IsRegular() {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+			return err
+		}
+		return os.WriteFile(target, data, 0o600)
+	})
 }
 
 // backupRel maps a store directory to its path under the backup root. A store

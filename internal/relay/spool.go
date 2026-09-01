@@ -19,6 +19,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"os"
 	"time"
 
 	"hermex/internal/migrate"
@@ -126,6 +127,18 @@ func Open(path string) (*Spool, error) {
 
 // Close releases the database handle.
 func (s *Spool) Close() error { return s.db.Close() }
+
+// Backup writes a consistent snapshot of the spool to dest via VACUUM INTO, so a
+// live spool holding accepted-but-undelivered outbound mail is captured without a
+// torn copy. VACUUM INTO refuses to overwrite, so an existing dest is removed first,
+// making a re-run into the same path replace rather than fail.
+func (s *Spool) Backup(dest string) error {
+	if err := os.Remove(dest); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	_, err := s.db.Exec(`VACUUM INTO ?`, dest)
+	return err
+}
 
 func (s *Spool) ensureSchema() error {
 	if err := migrate.Run(context.Background(),

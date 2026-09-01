@@ -300,3 +300,38 @@ func TestSpoolDSNNotifyRoundTrip(t *testing.T) {
 		t.Errorf("claimed NOTIFY for plain@remote = %q (present %v), want empty", v, ok)
 	}
 }
+
+// TestSpoolBackupSnapshotsQueuedMail proves the spool backup produces an openable
+// copy that still holds the accepted-but-undelivered outbound mail, so a data_dir
+// loss followed by a restore does not silently drop mail senders were told was
+// accepted.
+func TestSpoolBackupSnapshotsQueuedMail(t *testing.T) {
+	sp := openSpool(t)
+	t0 := time.Unix(3_000_000, 0)
+	if err := sp.Enqueue("alice@local", []string{"bob@remote"},
+		[]byte("From: alice@local\r\nSubject: queued\r\n\r\nhi\r\n"), t0); err != nil {
+		t.Fatal(err)
+	}
+
+	dest := filepath.Join(t.TempDir(), "relay-copy.sqlite3")
+	if err := sp.Backup(dest); err != nil {
+		t.Fatalf("Backup: %v", err)
+	}
+	// A re-run replaces rather than fails.
+	if err := sp.Backup(dest); err != nil {
+		t.Fatalf("Backup re-run: %v", err)
+	}
+
+	copySpool, err := Open(dest)
+	if err != nil {
+		t.Fatalf("the backup does not open as a spool: %v", err)
+	}
+	defer copySpool.Close()
+	queued, err := copySpool.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queued) != 1 || queued[0].Recipient != "bob@remote" {
+		t.Fatalf("backup holds %+v, want the one queued recipient bob@remote", queued)
+	}
+}
