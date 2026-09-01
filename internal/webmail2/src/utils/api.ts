@@ -1474,8 +1474,13 @@ class API {
   }
 
   // Calendar (CalDAV-backed)
-  async getCalendarEvents(): Promise<{ events?: CalendarEvent[] }> {
-    return this.get<{ events?: CalendarEvent[] }>('/calendar/events')
+  async getCalendarEvents(range?: { start: string; end: string }): Promise<{ events?: CalendarEvent[] }> {
+    // When a range is given, scope the export to that window (RFC3339); the
+    // backend prunes out-of-range appointments before the costly iCal export.
+    const qs = range
+      ? `?start=${encodeURIComponent(range.start)}&end=${encodeURIComponent(range.end)}`
+      : ''
+    return this.get<{ events?: CalendarEvent[] }>(`/calendar/events${qs}`)
   }
 
   // getReminders lists the due reminders (appointments + tasks) the server has

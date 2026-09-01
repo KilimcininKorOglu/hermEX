@@ -344,6 +344,20 @@ func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
+	// Optional [start,end) window. When both params parse, an object is pruned by
+	// its cheap start/end named props before the costly per-object iCal export
+	// (mirrors today.go's appointmentsOn). Absent or malformed params keep the
+	// full-calendar export so an unbounded client is never silently truncated.
+	winStart, winEnd, windowed := eventWindow(r)
+	var winStartTag, winEndTag mapi.PropTag
+	if windowed {
+		if ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole}); err == nil && len(ids) == 2 {
+			winStartTag = mapi.MakeTag(ids[0], mapi.PtSysTime)
+			winEndTag = mapi.MakeTag(ids[1], mapi.PtSysTime)
+		} else {
+			windowed = false // cannot resolve the time tags; fail open to full export
+		}
+	}
 	opt := oxcical.Options{Resolver: st.GetNamedPropIDs}
 	events := make([]eventJSON, 0)
 	// busyTag resolves PidLidBusyStatus once; an absent tag (fresh store) means the
@@ -358,6 +372,9 @@ func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		for _, o := range objs {
+			if windowed && !objectInWindow(st, o.ID, winStartTag, winEndTag, winStart, winEnd) {
+				continue
+			}
 			msg, err := st.OpenMessage(o.ID)
 			if err != nil {
 				continue
@@ -410,6 +427,40 @@ func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": events})
+}
+
+// eventWindow parses the optional start/end RFC3339 query params of the events
+// list request. windowed is true only when both parse and start precedes end; a
+// partial or malformed range falls back to the full-calendar export so an
+// unbounded client is never silently truncated.
+func eventWindow(r *http.Request) (start, end time.Time, windowed bool) {
+	q := r.URL.Query()
+	s, err1 := time.Parse(time.RFC3339, q.Get("start"))
+	e, err2 := time.Parse(time.RFC3339, q.Get("end"))
+	if err1 != nil || err2 != nil || !s.Before(e) {
+		return time.Time{}, time.Time{}, false
+	}
+	return s, e, true
+}
+
+// objectInWindow reports whether the appointment's [start,end] overlaps
+// [winStart,winEnd). It reads the start/end named props directly, so an
+// out-of-range object is pruned before the costly iCal export. An object with no
+// readable start is kept (fail open) so an untimed item is never hidden.
+func objectInWindow(st *objectstore.Store, id int64, startTag, endTag mapi.PropTag, winStart, winEnd time.Time) bool {
+	props, err := st.GetMessageProperties(id)
+	if err != nil {
+		return true
+	}
+	start := propTime(props, startTag)
+	if start.IsZero() {
+		return true
+	}
+	end := propTime(props, endTag)
+	if end.IsZero() {
+		end = start
+	}
+	return start.Before(winEnd) && !end.Before(winStart)
 }
 
 func (s *Server) handleCreateEvent(w http.ResponseWriter, r *http.Request) {

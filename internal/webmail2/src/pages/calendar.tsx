@@ -347,10 +347,19 @@ export function CalendarPage() {
     }
   }, [])
 
+  // Fetch a bounded window around the cursor's month (previous month through the
+  // month after next) rather than the whole calendar, so the backend export scales
+  // with the visible range, not the age of the account. The window is keyed on
+  // year/month, so day/week navigation within a month reuses the same fetch and
+  // only a month change triggers a reload.
+  const cursorYear = cursor.getFullYear()
+  const cursorMonth = cursor.getMonth()
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await api.getCalendarEvents()
+      const start = new Date(cursorYear, cursorMonth - 1, 1)
+      const end = new Date(cursorYear, cursorMonth + 2, 1)
+      const res = await api.getCalendarEvents({ start: start.toISOString(), end: end.toISOString() })
       const list = (res.events ?? []).slice().sort((a, b) => a.start.localeCompare(b.start))
       setEvents(list)
     } catch {
@@ -358,7 +367,7 @@ export function CalendarPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [cursorYear, cursorMonth])
 
   useEffect(() => {
     load()

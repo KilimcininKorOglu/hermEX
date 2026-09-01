@@ -408,3 +408,67 @@ func TestCalendarEventCategoriesRoundTrip(t *testing.T) {
 		t.Fatalf("categories = %v, want [Work Urgent]", got)
 	}
 }
+
+// TestGetEventsRespectsWindow proves the events list honors an optional [start,end)
+// query window: an appointment outside the window is pruned before export, while a
+// request without a window still returns the whole calendar. This bounds the
+// backend iCal-export cost to the visible range instead of the account's age.
+func TestGetEventsRespectsWindow(t *testing.T) {
+	dir := t.TempDir()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	st.Close()
+
+	secret := []byte("calendar-window-test-secret")
+	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
+	do := func(method, target, body string) *httptest.ResponseRecorder {
+		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
+		var req *http.Request
+		if body == "" {
+			req = httptest.NewRequest(method, target, nil)
+		} else {
+			req = httptest.NewRequest(method, target, strings.NewReader(body))
+		}
+		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec
+	}
+	list := func(target string) []eventJSON {
+		rec := do(http.MethodGet, target, "")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list %q: status %d", target, rec.Code)
+		}
+		var out struct {
+			Events []eventJSON `json:"events"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+			t.Fatalf("decode %q: %v", target, err)
+		}
+		return out.Events
+	}
+
+	// One appointment inside the window, one far outside it.
+	if rec := do(http.MethodPost, "/api/v1/calendar/events", `{"summary":"InWindow","start":"2026-08-15T09:00:00Z","end":"2026-08-15T10:00:00Z"}`); rec.Code != http.StatusOK {
+		t.Fatalf("create in-window: status %d", rec.Code)
+	}
+	if rec := do(http.MethodPost, "/api/v1/calendar/events", `{"summary":"OutOfWindow","start":"2020-01-15T09:00:00Z","end":"2020-01-15T10:00:00Z"}`); rec.Code != http.StatusOK {
+		t.Fatalf("create out-of-window: status %d", rec.Code)
+	}
+
+	// No window: the whole calendar is returned (backward compatible).
+	if all := list("/api/v1/calendar/events"); len(all) != 2 {
+		t.Fatalf("unwindowed list = %d events, want 2", len(all))
+	}
+
+	// Windowed to August 2026: only the in-window appointment survives.
+	scoped := list("/api/v1/calendar/events?start=2026-08-01T00:00:00Z&end=2026-09-01T00:00:00Z")
+	if len(scoped) != 1 {
+		t.Fatalf("windowed list = %d events, want 1", len(scoped))
+	}
+	if scoped[0].Summary != "InWindow" {
+		t.Fatalf("windowed event = %q, want InWindow", scoped[0].Summary)
+	}
+}
