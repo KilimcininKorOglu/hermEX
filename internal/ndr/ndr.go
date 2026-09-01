@@ -115,6 +115,19 @@ func (p *Pull) Offset() int { return p.off }
 // Remaining reports how many unread bytes are left.
 func (p *Pull) Remaining() int { return len(p.buf) - p.off }
 
+// CheckCount rejects a decoded element count the remaining bytes cannot satisfy,
+// before it is used as a make() length. Every element of these NDR arrays is at
+// least a 4-byte word on the wire, so a count needing more than the bytes left is
+// corruption or a request to reserve gigabytes from a short buffer. A 32-bit count
+// is independent of the transport's body cap, so nothing upstream bounds it; this
+// mirrors the count-then-allocate discipline ext.checkCount applies.
+func (p *Pull) CheckCount(n uint32) error {
+	if int64(n)*4 > int64(p.Remaining()) {
+		return ErrUnderflow
+	}
+	return nil
+}
+
 // need verifies n more bytes are available.
 func (p *Pull) need(n int) error {
 	if n < 0 || p.off+n > len(p.buf) {

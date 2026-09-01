@@ -256,3 +256,19 @@ func TestFrameFault(t *testing.T) {
 		t.Errorf("fault status = %#x, want %#x", status, FaultOpRngError)
 	}
 }
+
+// TestPullCheckCount rejects an element count the remaining bytes cannot satisfy,
+// the guard that stops an NSPI NDR array from allocating gigabytes off a short
+// buffer.
+func TestPullCheckCount(t *testing.T) {
+	p := NewPull([]byte{1, 2, 3, 4}) // 4 bytes remaining: one 4-byte element fits
+	if err := p.CheckCount(1); err != nil {
+		t.Errorf("count 1 over 4 bytes = %v, want nil", err)
+	}
+	if err := p.CheckCount(2); err != ErrUnderflow {
+		t.Errorf("count 2 over 4 bytes = %v, want ErrUnderflow", err)
+	}
+	if err := p.CheckCount(^uint32(0)); err != ErrUnderflow {
+		t.Errorf("max count over 4 bytes = %v, want ErrUnderflow", err)
+	}
+}

@@ -141,6 +141,9 @@ func pullU32ArrayNDR(p *ndr.Pull) ([]uint32, error) {
 	if maxCount != cValues+1 || offset != 0 || length != cValues {
 		return nil, fmt.Errorf("%w: proptag array shape (max=%d cValues=%d off=%d len=%d)", ndr.ErrFormat, maxCount, cValues, offset, length)
 	}
+	if err := p.CheckCount(cValues); err != nil {
+		return nil, err
+	}
 	out := make([]uint32, cValues)
 	for i := range out {
 		if out[i], err = p.Uint32(); err != nil {
@@ -173,6 +176,9 @@ func pullInlineMIDArrayNDR(p *ndr.Pull) ([]uint32, error) {
 	}
 	if maxCount != count {
 		return nil, fmt.Errorf("%w: inline MID array count=%d max_count=%d", ndr.ErrFormat, count, maxCount)
+	}
+	if err := p.CheckCount(count); err != nil {
+		return nil, err
 	}
 	out := make([]uint32, count)
 	for i := range out {
@@ -492,6 +498,9 @@ func pullStringsArrayNDR(p *ndr.Pull, wide bool) ([]string, error) {
 	}
 	if maxCount != count {
 		return nil, fmt.Errorf("%w: strings array count=%d max_count=%d", ndr.ErrFormat, count, maxCount)
+	}
+	if err := p.CheckCount(count); err != nil {
+		return nil, err
 	}
 	present := make([]bool, count)
 	for i := range present {
