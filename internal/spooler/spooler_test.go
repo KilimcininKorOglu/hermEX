@@ -13,6 +13,14 @@ import (
 	"hermex/internal/objectstore"
 )
 
+// releaseOutbox runs one Outbox sweep through the production ProcessDueOutboxStats
+// and projects the released count the tests assert on, so the tests exercise the
+// single production entry point rather than a wrapper that no production path calls.
+func releaseOutbox(ctx context.Context, st *objectstore.Store, deliver DeliverFunc, onGiveUp GiveUpFunc, now time.Time) (int, error) {
+	stats, err := ProcessDueOutboxStats(ctx, st, deliver, onGiveUp, now)
+	return stats.Released, err
+}
+
 // openStore provisions a fresh, fully seeded mailbox (Outbox and Sent present).
 func openStore(t *testing.T) *objectstore.Store {
 	t.Helper()
@@ -71,7 +79,7 @@ func TestProcessDueOutboxReleasesDueMessage(t *testing.T) {
 		return nil, nil
 	}
 
-	released, err := ProcessDueOutbox(context.Background(), st, deliver, nil, time.Now())
+	released, err := releaseOutbox(context.Background(), st, deliver, nil, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +134,7 @@ func TestProcessDueOutboxSkipsFutureMessage(t *testing.T) {
 		called = true
 		return nil, nil
 	}
-	released, err := ProcessDueOutbox(context.Background(), st, deliver, nil, time.Now())
+	released, err := releaseOutbox(context.Background(), st, deliver, nil, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +156,7 @@ func TestProcessDueOutboxKeepsOnDeliverError(t *testing.T) {
 	deliver := func(rcpts []string, raw []byte, when time.Time) ([]string, error) {
 		return nil, errors.New("transport unavailable")
 	}
-	released, err := ProcessDueOutbox(context.Background(), st, deliver, nil, time.Now())
+	released, err := releaseOutbox(context.Background(), st, deliver, nil, time.Now())
 	if released != 0 {
 		t.Errorf("released %d on delivery failure, want 0", released)
 	}
@@ -180,7 +188,7 @@ func TestProcessDueOutboxNeverRedeliversWhenFilingFails(t *testing.T) {
 		deliveries++
 		return nil, nil
 	}
-	released, err := ProcessDueOutbox(context.Background(), st, deliver, nil, time.Now())
+	released, err := releaseOutbox(context.Background(), st, deliver, nil, time.Now())
 	if released != 1 {
 		t.Errorf("released %d, want 1: the mail did go out", released)
 	}
@@ -192,7 +200,7 @@ func TestProcessDueOutboxNeverRedeliversWhenFilingFails(t *testing.T) {
 	}
 
 	// A second sweep must not send the message again.
-	if _, err := ProcessDueOutbox(context.Background(), st, deliver, nil, time.Now()); err != nil {
+	if _, err := releaseOutbox(context.Background(), st, deliver, nil, time.Now()); err != nil {
 		t.Fatalf("second sweep: %v", err)
 	}
 	if deliveries != 1 {
@@ -221,7 +229,7 @@ func TestProcessDueOutboxGivesUpAfterMaxAttempts(t *testing.T) {
 	}
 
 	for i := 1; i < maxReleaseAttempts; i++ {
-		if _, err := ProcessDueOutbox(context.Background(), st, deliver, onGiveUp, time.Now()); err == nil {
+		if _, err := releaseOutbox(context.Background(), st, deliver, onGiveUp, time.Now()); err == nil {
 			t.Fatalf("attempt %d: a delivery failure should be reported", i)
 		}
 		if gaveUp != 0 {
@@ -232,7 +240,7 @@ func TestProcessDueOutboxGivesUpAfterMaxAttempts(t *testing.T) {
 		}
 	}
 
-	if _, err := ProcessDueOutbox(context.Background(), st, deliver, onGiveUp, time.Now()); err == nil {
+	if _, err := releaseOutbox(context.Background(), st, deliver, onGiveUp, time.Now()); err == nil {
 		t.Fatal("the final attempt should report the abandonment")
 	}
 	if gaveUp != 1 {
@@ -280,13 +288,13 @@ func TestProcessDueOutboxAttemptBudgetIsPerMessage(t *testing.T) {
 		return nil, nil
 	}
 	for range maxReleaseAttempts - 1 {
-		_, _ = ProcessDueOutbox(context.Background(), st, deliver, nil, time.Now())
+		_, _ = releaseOutbox(context.Background(), st, deliver, nil, time.Now())
 	}
 	if n := count(t, st, int64(mapi.PrivateFIDOutbox)); n != 2 {
 		t.Fatalf("Outbox holds %d, want both messages still waiting", n)
 	}
 	fail = false
-	released, err := ProcessDueOutbox(context.Background(), st, deliver, nil, time.Now())
+	released, err := releaseOutbox(context.Background(), st, deliver, nil, time.Now())
 	if err != nil {
 		t.Fatalf("release after a recovery: %v", err)
 	}

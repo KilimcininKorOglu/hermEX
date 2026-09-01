@@ -78,11 +78,24 @@ var nameReleaseStarted = mapi.PropertyName{
 // what the sender is told when the message is handed back to them.
 var ErrAmbiguousRelease = errors.New("the scheduled send was interrupted and may or may not have been delivered")
 
-// ProcessDueOutbox releases every Outbox message whose deferred-send time has
+// Stats summarizes one mailbox's sweep, so an operator can see a backlog forming
+// rather than infer it from the absence of release lines. Waiting is what a
+// queue-depth reading actually is: how much is still scheduled once the pass is
+// over. Retrying counts the messages that have already failed at least once,
+// which is where a stuck send shows up before it exhausts its budget and bounces.
+type Stats struct {
+	Scanned  int // messages examined in the Outbox
+	Released int // delivered and cleared
+	Failed   int // attempted and left for a retry
+	Waiting  int // still scheduled after the pass
+	Retrying int // of those waiting, how many have already failed at least once
+}
+
+// ProcessDueOutboxStats releases every Outbox message whose deferred-send time has
 // arrived: it recovers the message's recipients (To, Cc, and the blind Bcc) from
 // the stored object, delivers the wire copy with the Bcc header stripped (the
 // blind list must never reach the wire), files the with-Bcc copy to Sent, and
-// then removes it from the Outbox. It returns the number released.
+// then removes it from the Outbox. It reports what the pass saw (see Stats).
 //
 // Messages without a deferred-send time, or whose time has not yet come, are left
 // untouched. Ordering is deliver -> file -> remove, so a crash between delivery
@@ -97,25 +110,6 @@ var ErrAmbiguousRelease = errors.New("the scheduled send was interrupted and may
 // A cancelled context stops the scan between messages, so a sweep over many
 // mailboxes does not outlast the daemon's shutdown deadline. What is left simply
 // stays in the Outbox for the next sweep.
-func ProcessDueOutbox(ctx context.Context, st *objectstore.Store, deliver DeliverFunc, onGiveUp GiveUpFunc, now time.Time) (released int, err error) {
-	stats, err := ProcessDueOutboxStats(ctx, st, deliver, onGiveUp, now)
-	return stats.Released, err
-}
-
-// Stats summarizes one mailbox's sweep, so an operator can see a backlog forming
-// rather than infer it from the absence of release lines. Waiting is what a
-// queue-depth reading actually is: how much is still scheduled once the pass is
-// over. Retrying counts the messages that have already failed at least once,
-// which is where a stuck send shows up before it exhausts its budget and bounces.
-type Stats struct {
-	Scanned  int // messages examined in the Outbox
-	Released int // delivered and cleared
-	Failed   int // attempted and left for a retry
-	Waiting  int // still scheduled after the pass
-	Retrying int // of those waiting, how many have already failed at least once
-}
-
-// ProcessDueOutboxStats is ProcessDueOutbox reporting what the pass saw.
 func ProcessDueOutboxStats(ctx context.Context, st *objectstore.Store, deliver DeliverFunc, onGiveUp GiveUpFunc, now time.Time) (stats Stats, err error) {
 	outbox := int64(mapi.PrivateFIDOutbox)
 	msgs, err := st.ListMessages(outbox)

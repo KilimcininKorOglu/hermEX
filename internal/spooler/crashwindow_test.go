@@ -28,7 +28,7 @@ func TestInterruptedReleaseIsNotDeliveredTwice(t *testing.T) {
 	}
 	func() {
 		defer func() { _ = recover() }()
-		_, _ = ProcessDueOutbox(context.Background(), st, crashAfterSending, nil, time.Now())
+		_, _ = releaseOutbox(context.Background(), st, crashAfterSending, nil, time.Now())
 	}()
 	if sends != 1 {
 		t.Fatalf("the first pass sent %d times, want 1", sends)
@@ -40,7 +40,7 @@ func TestInterruptedReleaseIsNotDeliveredTwice(t *testing.T) {
 	// The process restarts and sweeps again.
 	var reported error
 	onGiveUp := func(_ []byte, _ []string, cause error) { reported = cause }
-	if _, err := ProcessDueOutbox(context.Background(), st, crashAfterSending, onGiveUp, time.Now()); err == nil {
+	if _, err := releaseOutbox(context.Background(), st, crashAfterSending, onGiveUp, time.Now()); err == nil {
 		t.Error("the interrupted release was reported as a clean pass")
 	}
 	if sends != 1 {
@@ -70,7 +70,7 @@ func TestFailedDeliveryStillRetries(t *testing.T) {
 		return nil, errors.New("mailbox temporarily unavailable")
 	}
 	for range 3 {
-		if _, err := ProcessDueOutbox(context.Background(), st, failing, nil, time.Now()); err == nil {
+		if _, err := releaseOutbox(context.Background(), st, failing, nil, time.Now()); err == nil {
 			t.Fatal("a failed delivery was reported as a clean pass")
 		}
 	}
@@ -97,7 +97,7 @@ func TestSuccessfulReleaseLeavesNoStamp(t *testing.T) {
 		sends++
 		return nil, nil
 	}
-	released, err := ProcessDueOutbox(context.Background(), st, ok, nil, time.Now())
+	released, err := releaseOutbox(context.Background(), st, ok, nil, time.Now())
 	if err != nil || released != 1 {
 		t.Fatalf("release: released=%d err=%v, want 1, nil", released, err)
 	}
@@ -108,7 +108,7 @@ func TestSuccessfulReleaseLeavesNoStamp(t *testing.T) {
 		t.Errorf("Sent holds %d messages, want the released copy", n)
 	}
 	// A second sweep must find nothing left to do.
-	if released, err := ProcessDueOutbox(context.Background(), st, ok, nil, time.Now()); err != nil || released != 0 {
+	if released, err := releaseOutbox(context.Background(), st, ok, nil, time.Now()); err != nil || released != 0 {
 		t.Errorf("second sweep: released=%d err=%v, want 0, nil", released, err)
 	}
 	if sends != 1 {
