@@ -74,28 +74,3 @@ func (s *Scanner) Scan(raw []byte) (Result, error) {
 	}
 	return parseReply(reply)
 }
-
-// Ping verifies clamd is reachable and responding (zPING -> PONG). It is a health
-// probe, not part of scanning.
-func (s *Scanner) Ping() error {
-	conn, err := net.DialTimeout(s.network, s.address, s.timeout)
-	if err != nil {
-		return fmt.Errorf("antivirus: dial clamd: %w", err)
-	}
-	defer conn.Close()
-	if s.timeout > 0 {
-		_ = conn.SetDeadline(time.Now().Add(s.timeout))
-	}
-	if _, err := io.WriteString(conn, "zPING\x00"); err != nil {
-		return fmt.Errorf("antivirus: ping clamd: %w", err)
-	}
-	reply, err := io.ReadAll(conn)
-	if err != nil {
-		return fmt.Errorf("antivirus: read ping reply: %w", err)
-	}
-	got := strings.Trim(string(reply), "\x00\n\r ")
-	if !strings.HasPrefix(got, "PONG") {
-		return fmt.Errorf("antivirus: unexpected ping reply %q", got)
-	}
-	return nil
-}
