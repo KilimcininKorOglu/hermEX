@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand/v2"
 	"net"
+	"net/http"
 	"net/smtp"
 	"net/textproto"
 	"os"
@@ -90,6 +91,25 @@ type Worker struct {
 	// error is logged, never propagated, so it cannot fail a delivery.
 	TLSReporter TLSReporter
 
+	// The fields below wire the reporting half of TLS-RPT: the daily pass assembles
+	// the previous UTC day's aggregate report per recipient domain, discovers where
+	// that domain wants reports sent (its published rua=), and delivers there. All
+	// nil/empty (the default) makes the pass a no-op, byte-identical to a worker that
+	// only records counters.
+	//
+	// TLSResolver discovers a recipient domain's _smtp._tls reporting policy; nil
+	// disables report dispatch. TLSHTTPClient delivers to https: rua targets (use an
+	// SSRF-guarded client). ReportOrg/ReportContact/ReportDomain populate the report's
+	// identifying fields and the submitting domain in the mailto report email.
+	TLSResolver   *tlsrpt.Resolver
+	TLSHTTPClient *http.Client
+	ReportOrg     string
+	ReportContact string
+	ReportDomain  string
+	// lastReportDay is the UTC date (dayFormat) the daily pass last ran for; it is
+	// touched only by the single Run goroutine, so it needs no synchronization.
+	lastReportDay string
+
 	// backoffOverride (nanoseconds) and maxAttemptsOverride hold an operator's edited
 	// retry policy, set via SetRetryPolicy. They are read atomically by the single Run
 	// goroutine so the MTA's poll can apply a change while delivery runs, with no
@@ -167,6 +187,32 @@ func (w *Worker) guardedPass(ctx context.Context) {
 	}
 	if _, err := w.ProcessDue(ctx, time.Now()); err != nil {
 		w.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "relay.scan.fail", Err: err.Error()})
+	}
+	// Dispatch the previous day's TLS-RPT reports at most once per UTC day, while the
+	// drain guard is still held so only one instance sends them.
+	w.maybeDailyReport(ctx, time.Now())
+}
+
+// maybeDailyReport sends the previous UTC day's TLS-RPT aggregate reports once per
+// calendar day. It is a no-op until the reporting half is wired (nil TLSResolver).
+// On the first tick after start it runs for yesterday too; MarkReported makes that
+// idempotent, so a frequently-restarted process still dispatches exactly one report
+// per (day, domain) rather than skipping or duplicating. It runs under the drain
+// guard (its caller holds it), so only one instance dispatches.
+func (w *Worker) maybeDailyReport(ctx context.Context, now time.Time) {
+	if w.TLSResolver == nil {
+		return
+	}
+	today := now.UTC().Format(dayFormat)
+	if w.lastReportDay == today {
+		return
+	}
+	w.lastReportDay = today
+	if err := w.sendTLSReports(ctx, now.UTC().AddDate(0, 0, -1)); err != nil && w.Logger != nil {
+		w.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "tlsrpt.report.fail", Err: err.Error()})
+	}
+	if err := w.Spool.PruneTLSReports(now.UTC().AddDate(0, 0, -7)); err != nil && w.Logger != nil {
+		w.Logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "tlsrpt.prune.fail", Err: err.Error()})
 	}
 }
 

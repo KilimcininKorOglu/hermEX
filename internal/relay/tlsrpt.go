@@ -97,3 +97,56 @@ SELECT policy_type, mx_host, result_type, sessions
 		Policies:    policies,
 	}, nil
 }
+
+// UnreportedDomains returns the recipient policy domains that have recorded TLS
+// counters for the UTC day containing day but whose daily report has not yet been
+// dispatched (no tlsrpt_reports_sent row). The daily pass iterates these to send one
+// report per domain.
+func (s *Spool) UnreportedDomains(day time.Time) ([]string, error) {
+	d := day.UTC().Truncate(24 * time.Hour).Format(dayFormat)
+	rows, err := s.db.Query(`
+SELECT DISTINCT c.policy_domain
+  FROM tlsrpt_counters c
+ WHERE c.report_day = ?
+   AND NOT EXISTS (
+       SELECT 1 FROM tlsrpt_reports_sent r
+        WHERE r.report_day = c.report_day AND r.policy_domain = c.policy_domain)
+ ORDER BY c.policy_domain`, d)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var domains []string
+	for rows.Next() {
+		var dom string
+		if err := rows.Scan(&dom); err != nil {
+			return nil, err
+		}
+		domains = append(domains, dom)
+	}
+	return domains, rows.Err()
+}
+
+// MarkReported records that the report for (day, policyDomain) has been dispatched,
+// so a later pass over the same day does not re-send it. It is idempotent: a second
+// call for the same key is ignored.
+func (s *Spool) MarkReported(day time.Time, policyDomain string, now time.Time) error {
+	d := day.UTC().Truncate(24 * time.Hour).Format(dayFormat)
+	_, err := s.db.Exec(`
+INSERT INTO tlsrpt_reports_sent (report_day, policy_domain, sent_at)
+VALUES (?, ?, ?)
+ON CONFLICT(report_day, policy_domain) DO NOTHING`, d, policyDomain, now.Unix())
+	return err
+}
+
+// PruneTLSReports deletes TLS-RPT counters and dispatch records for report days
+// strictly before the UTC day containing before, bounding both tables. Reports are
+// sent for the previous day, so a retention window of a few days is ample.
+func (s *Spool) PruneTLSReports(before time.Time) error {
+	cutoff := before.UTC().Truncate(24 * time.Hour).Format(dayFormat)
+	if _, err := s.db.Exec(`DELETE FROM tlsrpt_counters WHERE report_day < ?`, cutoff); err != nil {
+		return err
+	}
+	_, err := s.db.Exec(`DELETE FROM tlsrpt_reports_sent WHERE report_day < ?`, cutoff)
+	return err
+}

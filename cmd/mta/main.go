@@ -38,7 +38,9 @@ import (
 	"hermex/internal/serve"
 	"hermex/internal/smtp"
 	"hermex/internal/spooler"
+	"hermex/internal/ssrfguard"
 	"hermex/internal/tlscert"
+	"hermex/internal/tlsrpt"
 )
 
 // senderOf returns the envelope sender for a released Outbox message: the
@@ -345,9 +347,18 @@ func main() {
 		// Empty leaves DANE off, so delivery stays on opportunistic TLS + MTA-STS.
 		DANE: daneResolver(cfg.DaneResolver),
 		// TLS-RPT (RFC 8460): record each outbound TLS session outcome so the spool
-		// can build the recipient domain's daily aggregate report. The spool is the
-		// store, so it doubles as the reporter.
-		TLSReporter: spool,
+		// can build the recipient domain's daily aggregate report, then dispatch that
+		// report once per UTC day. The spool is the store, so it doubles as the
+		// reporter; the resolver discovers each recipient's published rua= endpoint,
+		// the SSRF-guarded client delivers to https targets, and mailto targets go out
+		// the ordinary relay path. Reports are sent only to domains that publish a
+		// policy, so this is opt-in per recipient, like MTA-STS and DANE.
+		TLSReporter:   spool,
+		TLSResolver:   &tlsrpt.Resolver{},
+		TLSHTTPClient: ssrfguard.Client(false),
+		ReportOrg:     cfg.Hostname,
+		ReportContact: "mailto:postmaster@" + cfg.Hostname,
+		ReportDomain:  cfg.Hostname,
 		// When the worker abandons an external recipient, return a non-delivery
 		// report to the (local, authenticated) sender through the local delivery
 		// path, so a failed send is reported rather than lost silently.
