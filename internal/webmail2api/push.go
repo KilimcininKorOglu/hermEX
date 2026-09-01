@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/ssrfguard"
@@ -183,6 +184,7 @@ func (s *Server) handlePushSubscriptions(w http.ResponseWriter, r *http.Request)
 func (s *Server) sendPush(sub directory.PushSubscription, payload []byte) {
 	pub, priv, err := vapidKeys(s.secret)
 	if err != nil {
+		logError("push-vapid-keys", err, logging.Fields{})
 		return
 	}
 	resp, err := webpush.SendNotification(payload, &webpush.Subscription{
@@ -200,12 +202,15 @@ func (s *Server) sendPush(sub directory.PushSubscription, payload []byte) {
 		TTL:             60,
 	})
 	if err != nil {
+		logError("push-send", err, logging.Fields{"endpoint": sub.Endpoint})
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone {
 		if store, ok := s.auth.(pushStore); ok {
-			_ = store.DeletePushSubscription(sub.Endpoint)
+			if err := store.DeletePushSubscription(sub.Endpoint); err != nil {
+				logError("push-delete-subscription", err, logging.Fields{"endpoint": sub.Endpoint})
+			}
 		}
 	}
 }
@@ -246,9 +251,15 @@ func (s *Server) StartPushPoller(ctx context.Context, interval time.Duration) {
 }
 
 // safePoll runs one poll, recovering from any panic so a push-poll bug can never
-// crash the mail-serving webmail process.
+// crash the mail-serving webmail process. The recovered panic is logged, not
+// discarded: a poll that panics every tick silently stops all web push, so the
+// panic value is the operator's only lead to the root cause.
 func (s *Server) safePoll(store pushStore, seen map[string]int) {
-	defer func() { _ = recover() }()
+	defer func() {
+		if r := recover(); r != nil {
+			logError("push-poll-panic", fmt.Errorf("%v", r), logging.Fields{})
+		}
+	}()
 	s.pollPushOnce(store, seen)
 }
 
@@ -256,6 +267,7 @@ func (s *Server) safePoll(store pushStore, seen map[string]int) {
 func (s *Server) pollPushOnce(store pushStore, seen map[string]int) {
 	emails, err := store.PushSubscriberEmails()
 	if err != nil {
+		logError("push-subscriber-emails", err, logging.Fields{})
 		return
 	}
 	live := make(map[string]bool, len(emails))
@@ -288,11 +300,13 @@ func (s *Server) inboxTotal(email string) (int, bool) {
 	}
 	st, err := objectstore.Open(path)
 	if err != nil {
+		logError("push-inbox-open", err, logging.Fields{"user": email})
 		return 0, false
 	}
 	defer st.Close()
 	total, _, err := st.CountMessages(mapi.PrivateFIDInbox)
 	if err != nil {
+		logError("push-inbox-count", err, logging.Fields{"user": email})
 		return 0, false
 	}
 	return total, true
@@ -302,6 +316,7 @@ func (s *Server) inboxTotal(email string) (int, bool) {
 func (s *Server) pushNewMail(store pushStore, email string, n int) {
 	subs, err := store.ListPushSubscriptions(email)
 	if err != nil {
+		logError("push-list-subscriptions", err, logging.Fields{"user": email})
 		return
 	}
 	body := "You have new mail"

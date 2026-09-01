@@ -5,6 +5,7 @@ import (
 	"sync"
 	"testing"
 
+	"hermex/internal/directory"
 	"hermex/internal/logging"
 )
 
@@ -80,4 +81,38 @@ func TestLogErrorWithoutALoggerIsSafe(t *testing.T) {
 
 	logError("file-sent-copy", errors.New("boom"), nil)
 	logError("file-sent-copy", nil, nil)
+}
+
+// panicPushStore is a pushStore whose subscriber enumeration panics, to drive
+// safePoll's recover path.
+type panicPushStore struct{}
+
+func (panicPushStore) SavePushSubscription(directory.PushSubscription) error { return nil }
+func (panicPushStore) ListPushSubscriptions(string) ([]directory.PushSubscription, error) {
+	return nil, nil
+}
+func (panicPushStore) DeletePushSubscription(string) error { return nil }
+func (panicPushStore) PushSubscriberEmails() ([]string, error) {
+	panic("push poll blew up")
+}
+
+// TestSafePollLogsRecoveredPanic proves a panicking poll no longer vanishes: the
+// recover records the panic value so an operator can find why web push stopped,
+// instead of the panic being discarded and leaving a clean log with no push.
+func TestSafePollLogsRecoveredPanic(t *testing.T) {
+	sink := withSink(t)
+
+	s := &Server{}
+	s.safePoll(panicPushStore{}, map[string]int{}) // must not crash the process
+
+	e, ok := sink.find("push-poll-panic")
+	if !ok {
+		t.Fatal("the recovered push-poll panic was not recorded")
+	}
+	if e.Level != logging.LevelError {
+		t.Errorf("level = %v, want error", e.Level)
+	}
+	if e.Err == "" {
+		t.Error("the panic value was discarded; the operator has no lead to the cause")
+	}
 }
