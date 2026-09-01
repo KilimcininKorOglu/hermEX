@@ -13,9 +13,12 @@ import (
 
 // roomLister is the optional directory capability that lists bookable resource
 // mailboxes for the room picker. SQLDirectory implements it; absent (static
-// accounts) yields an empty room list.
+// accounts) yields an empty room list. ListRooms is caller-scoped and fails closed,
+// so the signature must carry the authenticated caller, matching the concrete
+// SQLDirectory/StaticAccounts methods; a no-arg declaration never satisfies either
+// and the type assertion silently misses, leaving the picker empty.
 type roomLister interface {
-	ListRooms() ([]directory.GALEntry, error)
+	ListRooms(caller string) ([]directory.GALEntry, error)
 }
 
 type roomJSON struct {
@@ -26,7 +29,8 @@ type roomJSON struct {
 
 // handleRooms lists the organization's bookable rooms for the room picker.
 func (s *Server) handleRooms(w http.ResponseWriter, r *http.Request) {
-	if _, ok := s.session(r); !ok {
+	c, ok := s.session(r)
+	if !ok {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
 		return
 	}
@@ -35,7 +39,8 @@ func (s *Server) handleRooms(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"rooms": []roomJSON{}})
 		return
 	}
-	entries, err := lister.ListRooms()
+	// ListRooms is caller-scoped and fails closed: an empty caller returns nothing.
+	entries, err := lister.ListRooms(c.Email)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "list failed"})
 		return
