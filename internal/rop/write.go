@@ -631,7 +631,14 @@ func (s *Session) deliverComposed(nm *newMessageState, representing, sender stri
 	// the representing identity, so an unstamped message ships From-less and is
 	// rejected downstream. Copy the bag first so the in-memory draft is untouched.
 	props := append(mapi.PropertyValues(nil), nm.props...)
-	stampSubmitIdentity(&props, representing, sender)
+	// On an owner submit the client may legitimately name one of the owner's own
+	// aliases as From; resolve that identity set so a foreign representing address
+	// is overwritten rather than trusted.
+	var ownerIDs []string
+	if sender == "" {
+		ownerIDs = s.ownerIdentities()
+	}
+	stampSubmitIdentity(&props, representing, sender, ownerIDs)
 	oxcmail.EnsureMessageID(&props)
 
 	raw, err := oxcmail.Export(&oxcmail.Message{Props: props, Recipients: wire}, oxcmail.Options{})
@@ -667,16 +674,17 @@ func recipientSMTP(bag mapi.PropertyValues) string {
 }
 
 // stampSubmitIdentity fixes the representing/sender identities and submit time on a
-// message about to be exported. An owner send (sender == "") stamps the representing
-// identity only when the client left it unset, a client composing in its own mailbox
-// may legitimately name its own From. A delegate send-on-behalf (sender != "") FORCES
-// both identities, overwriting whatever the client supplied, so a client cannot
-// dictate who the message claims to be from: the representing identity is the mailbox
-// owner (the From) and the sender is the delegate (the Sender). Export emits a Sender
-// header whenever the two differ, producing the "<delegate> on behalf of <owner>" form.
-func stampSubmitIdentity(props *mapi.PropertyValues, representing, sender string) {
+// message about to be exported. An owner send (sender == "") keeps the client's
+// representing address only when it is one of the owner's own identities (ownerIDs,
+// the primary plus aliases); an unset, empty, or foreign address is overwritten with
+// the owner's own address, so a client cannot put another user in the From. A delegate
+// send-on-behalf (sender != "") FORCES both identities, overwriting whatever the client
+// supplied: the representing identity is the mailbox owner (the From) and the sender is
+// the delegate (the Sender). Export emits a Sender header whenever the two differ,
+// producing the "<delegate> on behalf of <owner>" form.
+func stampSubmitIdentity(props *mapi.PropertyValues, representing, sender string, ownerIDs []string) {
 	if sender == "" {
-		if v, ok := props.Get(mapi.PrSentRepresentingSmtpAddress); representing != "" && (!ok || v == "") {
+		if representing != "" && !ownerMayRepresent(props, ownerIDs) {
 			setRepresenting(props, representing)
 		}
 	} else {
@@ -700,6 +708,28 @@ func setSender(props *mapi.PropertyValues, addr string) {
 	props.Set(mapi.PrSenderSmtpAddress, addr)
 	props.Set(mapi.PrSenderEmailAddress, addr)
 	props.Set(mapi.PrSenderAddrType, "SMTP")
+}
+
+// ownerMayRepresent reports whether the message's current representing address is
+// one the owner is entitled to name in From: a non-empty PR_SENT_REPRESENTING_SMTP_
+// ADDRESS matching one of ownerIDs (the owner's primary plus aliases, case-insensitive).
+// An unset, empty, or foreign address returns false so the caller overwrites it with
+// the owner's own address.
+func ownerMayRepresent(props *mapi.PropertyValues, ownerIDs []string) bool {
+	v, ok := props.Get(mapi.PrSentRepresentingSmtpAddress)
+	if !ok {
+		return false
+	}
+	cur, _ := v.(string)
+	if cur == "" {
+		return false
+	}
+	for _, id := range ownerIDs {
+		if strings.EqualFold(strings.TrimSpace(id), strings.TrimSpace(cur)) {
+			return true
+		}
+	}
+	return false
 }
 
 // scanUploadedMessage scans the attachment content of a message a client just

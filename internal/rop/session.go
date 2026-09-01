@@ -393,6 +393,23 @@ func (s *Session) delegateSendIdentity(store *objectstore.Store) (representing, 
 	return s.delegateOwners[store], s.owner, true, nil
 }
 
+// ownerIdentities returns the addresses the owner may legitimately name in From on
+// an owner submit: the primary address plus any directory aliases. It fails closed,
+// an Accounts backend that does not implement Identifier, or one that cannot answer,
+// yields only the owner's own address, so an unresolvable identity set never widens
+// what the owner may claim.
+func (s *Session) ownerIdentities() []string {
+	ident, ok := s.accounts.(directory.Identifier)
+	if !ok {
+		return []string{s.owner}
+	}
+	ids, err := ident.Identities(s.owner)
+	if err != nil || len(ids) == 0 {
+		return []string{s.owner}
+	}
+	return ids
+}
+
 // Close releases every handle (Disconnect), closing any open store. It takes the
 // lock because a parked NotificationWait may be reading the object table on a
 // parallel connection when Disconnect lands.

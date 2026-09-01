@@ -371,6 +371,61 @@ func TestCreateFillSaveSubmitDelivers(t *testing.T) {
 	}
 }
 
+// TestSubmitOverwritesForgedRepresenting proves an owner submit cannot ship a
+// From header naming another local user: the client sets PR_SENT_REPRESENTING_SMTP_
+// ADDRESS to a co-worker's address before submitting, but the delivered wire copy
+// carries the owner's own From, never the forged one. Without the owner-identity
+// gate the spoofed representing address would flow straight into the From header and
+// get DKIM-signed as an internal impersonation.
+func TestSubmitOverwritesForgedRepresenting(t *testing.T) {
+	ownerDir, aliceDir, victimDir := t.TempDir(), t.TempDir(), t.TempDir()
+	accounts := directory.StaticAccounts{
+		"owner@hermex.test":  {MailboxPath: ownerDir},
+		"alice@hermex.test":  {MailboxPath: aliceDir},
+		"victim@hermex.test": {MailboxPath: victimDir},
+	}
+	draftsEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDDraft))
+
+	sess := NewSession(ownerDir, accounts, "owner@hermex.test")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+
+	_, h = sess.Dispatch(buildCreateMessage(0, 1, draftsEID), []uint32{logonH, 0xFFFFFFFF})
+	msgH := h[1]
+
+	// The client forges the representing address to a co-worker before submitting.
+	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
+		{Tag: mapi.PrSubject, Value: "FORGED"},
+		{Tag: mapi.PrBody, Value: "spoof attempt"},
+		{Tag: mapi.PrSentRepresentingSmtpAddress, Value: "victim@hermex.test"},
+		{Tag: mapi.PrSentRepresentingEmailAddress, Value: "victim@hermex.test"},
+		{Tag: mapi.PrSentRepresentingAddrType, Value: "SMTP"},
+	}), []uint32{msgH})
+
+	toRow := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
+	sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, toRow), []uint32{msgH})
+	sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
+
+	sub, _ := sess.Dispatch(buildSubmitMessage(0), []uint32{msgH})
+	p := ext.NewPull(sub, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropSubmitMessage {
+		t.Fatalf("SubmitMessage RopId = %#x", id)
+	}
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("SubmitMessage ReturnValue = %#x", ec)
+	}
+
+	aliceRaw := firstInboxRaw(t, aliceDir)
+	if !hasFromOwner(aliceRaw, "owner@hermex.test") {
+		t.Errorf("delivered From is not the owner; the forged representing address was trusted:\n%s", aliceRaw)
+	}
+	if bytes.Contains(bytes.ToLower(aliceRaw), []byte("victim@hermex.test")) {
+		t.Errorf("forged representing address leaked into the delivered message:\n%s", aliceRaw)
+	}
+}
+
 // firstInboxRaw opens a mailbox and returns the re-synthesized raw of the single
 // message in its inbox, failing if the count is not exactly one.
 func firstInboxRaw(t *testing.T, dir string) []byte {
