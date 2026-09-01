@@ -24,6 +24,16 @@ import (
 // everything the snapshot points at is already on disk by the time the copy walks
 // cid/. Doing it the other way round could miss a file the snapshot references.
 //
+// The two databases are snapshotted in reverse write order: the IMAP index first,
+// the objects second. Each VACUUM INTO is its own read transaction, so against a
+// live writer the two snapshots are taken at different instants with no cross-file
+// point-in-time. A live append commits the object first and the index row last, so
+// snapshotting the index first guarantees that every index row in the copy points at
+// an object already committed before that snapshot, hence present in the later
+// objects snapshot. The only residual skew is the harmless direction: an object with
+// no index row yet (invisible to IMAP, reclaimed by the orphan-content sweep), never
+// an index row whose message body is missing.
+//
 // The eml/ cache is deliberately not copied. It is a second copy of every message
 // that the store re-synthesizes on the next read, so carrying it would roughly
 // double the size of a backup that is no more complete for it.
@@ -31,12 +41,12 @@ func (s *Store) Backup(dest string) error {
 	if err := os.MkdirAll(dest, 0o700); err != nil {
 		return err
 	}
-	for _, db := range []struct {
+	for i, db := range []struct {
 		handle *sql.DB
 		name   string
 	}{
-		{s.objdb, "objects.sqlite3"},
 		{s.idxdb, "imapindex.sqlite3"},
+		{s.objdb, "objects.sqlite3"},
 	} {
 		out := filepath.Join(dest, db.name)
 		// VACUUM INTO refuses to overwrite, so a re-run into the same directory
@@ -46,6 +56,11 @@ func (s *Store) Backup(dest string) error {
 		}
 		if _, err := db.handle.Exec(`VACUUM INTO ?`, out); err != nil {
 			return fmt.Errorf("objectstore: snapshot %s: %w", db.name, err)
+		}
+		// Test-only seam: fire a concurrent write into the between-snapshots window
+		// so a test can prove the copy is still consistent. Nil in production.
+		if i == 0 && s.backupHook != nil {
+			s.backupHook()
 		}
 	}
 	return copyTree(filepath.Join(s.dir, "cid"), filepath.Join(dest, "cid"))

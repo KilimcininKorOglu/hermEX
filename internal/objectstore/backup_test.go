@@ -124,6 +124,59 @@ func TestBackupCarriesContentFiles(t *testing.T) {
 	}
 }
 
+// TestBackupIsConsistentAcrossTheSnapshotWindow proves a message delivered in the
+// window between the two database snapshots never yields a copy whose IMAP index
+// lists a message the objects snapshot lacks. A live append commits the object first
+// and the index row last, and Backup snapshots the index first, so the mid-window
+// message is either absent from both snapshots or leaves only a harmless orphan
+// object, never a listed-but-unfetchable message. Reversing the snapshot order would
+// strand an index row with no object, and every listed message would then have to be
+// fetchable, so this asserts exactly that.
+func TestBackupIsConsistentAcrossTheSnapshotWindow(t *testing.T) {
+	s := openSeededStore(t)
+	first := []byte("From: a@example.test\r\nTo: b@example.test\r\nSubject: first\r\n" +
+		"Date: Wed, 15 Nov 2023 10:13:20 +0000\r\n\r\nbefore the backup\r\n")
+	if _, err := s.AppendMessage(mapi.PrivateFIDInbox, first, time.Unix(1700000000, 0), 0); err != nil {
+		t.Fatal(err)
+	}
+
+	// A message delivered exactly between the index snapshot and the objects
+	// snapshot: it commits its object, then its index row, in that order.
+	s.backupHook = func() {
+		window := []byte("From: c@example.test\r\nTo: b@example.test\r\nSubject: window\r\n" +
+			"Date: Wed, 15 Nov 2023 10:14:20 +0000\r\n\r\ndelivered mid-backup\r\n")
+		if _, err := s.AppendMessage(mapi.PrivateFIDInbox, window, time.Unix(1700000060, 0), 0); err != nil {
+			t.Errorf("mid-window append: %v", err)
+		}
+	}
+
+	dest := filepath.Join(t.TempDir(), "copy")
+	if err := s.Backup(dest); err != nil {
+		t.Fatalf("Backup: %v", err)
+	}
+
+	copyStore, err := Open(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer copyStore.Close()
+	msgs, err := copyStore.ListMessages(mapi.PrivateFIDInbox)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Every index row the copy lists must resolve to a fetchable body. A dangling
+	// index row (the reverse snapshot order) would fail here.
+	for _, m := range msgs {
+		got, err := copyStore.GetMessageRaw(mapi.PrivateFIDInbox, m.UID)
+		if err != nil {
+			t.Fatalf("listed message uid %d has no body in the copy (torn snapshot): %v", m.UID, err)
+		}
+		if len(got) == 0 {
+			t.Fatalf("listed message uid %d served empty from the copy", m.UID)
+		}
+	}
+}
+
 // TestBackupOmitsTheEMLCache holds the deliberate exclusion: the cache is a second
 // copy of every message that the store rebuilds on demand, so carrying it would
 // double the backup for nothing. The message must still serve from the copy.

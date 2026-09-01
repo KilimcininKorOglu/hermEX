@@ -119,6 +119,10 @@ type Store struct {
 	// logger receives store infrastructure failures (SQL/IO errors); nil
 	// disables logging. Stamped from defaultLogger at Open.
 	logger *logging.Logger
+	// backupHook is a test-only seam invoked by Backup between the two database
+	// snapshots. Production leaves it nil (zero cost); a test sets it to drive a
+	// concurrent append into the skew window and assert the copy stays consistent.
+	backupHook func()
 }
 
 // storeKind distinguishes a private mailbox store from a per-domain public-folder
