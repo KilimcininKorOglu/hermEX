@@ -164,12 +164,19 @@ rebuild:
 # cannot re-derive: every domain's DKIM signing key, every uploaded TLS private
 # key, and the accounts, aliases, admin roles and policy around them. It lives on
 # one bind mount with no replication, so losing docker-data/db loses all of it.
+#
+# The DKIM and TLS private keys are stored AES-GCM wrapped once a wrapping secret
+# is set (key_secret, else admin_secret, both config.json only), so this dump
+# holds only ciphertext for them and CANNOT recover those keys on its own.
+# config.json is therefore a required part of the backup: keep it, separately
+# from the dump, or the wrapped keys are permanently undecryptable on restore.
 # Take a dump before an upgrade, and on a schedule; keep it off this host.
 #
 # NOTHING in this repository schedules this or copies the result anywhere: the
 # output lands beside the live database on the same disk, so it survives a
 # clumsy delete and nothing else. An off-host, scheduled copy of
-# docker-data/backup and docker-data/mailboxes is the operator's to build.
+# docker-data/backup, docker-data/mailboxes and config.json (the last kept
+# separately, because it holds the key-wrapping secret) is the operator's to build.
 #
 # The dump is written and compressed in separate steps rather than piped, so a
 # failure of either is caught: a pipeline hides the dump's exit status and would
@@ -186,6 +193,7 @@ dump-db:
 	gzip -t $$out.part.gz || { rm -f $$out.part.gz; echo "the dump did not verify; nothing written"; exit 1; }; \
 	mv $$out.part.gz $$out.gz; \
 	echo "wrote $$out.gz ($$(wc -c < $$out.gz) bytes, verified)"
+	@echo "reminder: back up config.json separately; it holds the key-wrapping secret without which the wrapped DKIM/TLS keys in this dump cannot be decrypted"
 
 ## dump-mail: write a consistent copy of every mailbox's mail content to docker-data/backup/
 # dump-db covers the accounts and the key material; this covers the mail. Each
