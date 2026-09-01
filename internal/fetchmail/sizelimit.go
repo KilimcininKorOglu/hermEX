@@ -74,7 +74,13 @@ func tlsDialSource(addr, serverName string, verify bool) (net.Conn, error) {
 		return nil, err
 	}
 	conn := tls.Client(raw, &tls.Config{ServerName: serverName, InsecureSkipVerify: !verify}) // #nosec G402 -- verify is the admin's explicit choice, skipped only when the operator disabled it
-	if err := conn.HandshakeContext(context.Background()); err != nil {
+	// Bound the handshake: the TCP connect is timed by ssrfguard and post-connect
+	// reads by opTimeout, but a source that accepts the connection and then stalls
+	// mid-handshake would otherwise block the sequential poll indefinitely and
+	// starve every other tenant's fetchmail.
+	ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+	defer cancel()
+	if err := conn.HandshakeContext(ctx); err != nil {
 		return nil, errors.Join(err, raw.Close())
 	}
 	return conn, nil

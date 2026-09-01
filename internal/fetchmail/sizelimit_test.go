@@ -2,9 +2,51 @@ package fetchmail
 
 import (
 	"errors"
+	"net"
 	"strings"
 	"testing"
+	"time"
 )
+
+// TestTLSDialSourceHandshakeIsBounded proves a source that accepts the TCP connect
+// and then stalls before speaking TLS fails after a bounded interval instead of
+// blocking forever. The poll is a single sequential worker, so an unbounded
+// handshake would starve every other tenant's fetchmail.
+func TestTLSDialSourceHandshakeIsBounded(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	// The server accepts and then holds the connection open without ever speaking
+	// TLS, until the test is done. Keeping it open past the 1s assertion window is
+	// what gives the test teeth: only the handshake deadline can end the dial in
+	// under a second, so an unbounded handshake would blow the budget.
+	done := make(chan struct{})
+	go func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		<-done
+		c.Close()
+	}()
+	t.Cleanup(func() { close(done) })
+
+	old := opTimeout
+	opTimeout = 150 * time.Millisecond
+	t.Cleanup(func() { opTimeout = old })
+	SetAllowInternalSources(true) // the listener is on loopback
+	t.Cleanup(func() { SetAllowInternalSources(false) })
+
+	start := time.Now()
+	if _, err := tlsDialSource(ln.Addr().String(), "example.test", true); err == nil {
+		t.Fatal("expected the stalled handshake to fail")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("handshake was not bounded: took %v", elapsed)
+	}
+}
 
 // allowLoopback lets a test dial its own stub server, which the source-address
 // guard refuses by default. It restores the production default afterwards, so a
