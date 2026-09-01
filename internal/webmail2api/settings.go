@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+	"sync"
 
 	"hermex/internal/directory"
 	"hermex/internal/mapi"
@@ -37,6 +38,16 @@ func saveSharedSettings(st *objectstore.Store, m map[string]json.RawMessage) err
 	return st.SetStoreProperties(props)
 }
 
+// lockSettings acquires the per-mailbox settings lock and returns its unlock. The
+// lock spans the read-modify-write in withSettings, so concurrent PUTs to one
+// mailbox's settings blob are serialized rather than racing on a shared read.
+func (s *Server) lockSettings(mailbox string) func() {
+	mu, _ := s.settingsLocks.LoadOrStore(mailbox, &sync.Mutex{})
+	m := mu.(*sync.Mutex)
+	m.Lock()
+	return m.Unlock
+}
+
 // withSettings opens the caller's store and runs fn against its shared settings
 // map, persisting it when fn returns true.
 func (s *Server) withSettings(w http.ResponseWriter, r *http.Request, fn func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool)) {
@@ -51,6 +62,11 @@ func (s *Server) withSettings(w http.ResponseWriter, r *http.Request, fn func(st
 		return
 	}
 	defer st.Close()
+	// Serialize the whole read-modify-write per mailbox, so a concurrent PUT on a
+	// different settings key cannot read the same starting blob and overwrite this
+	// change (or have this one overwrite it).
+	unlock := s.lockSettings(c.Mailbox)
+	defer unlock()
 	m := sharedSettings(st)
 	resp, save := fn(st, m)
 	if save {

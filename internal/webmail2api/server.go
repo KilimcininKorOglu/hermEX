@@ -55,6 +55,13 @@ type Server struct {
 	pushOnce          sync.Once
 	pushHTTP          *http.Client
 	pushAllowInternal bool
+
+	// settingsLocks serializes the read-modify-write of each mailbox's shared
+	// settings blob (PrWebmailSettings), keyed by mailbox path. Two concurrent PUTs
+	// on different keys would otherwise each read the same starting blob and the
+	// last writer would drop the other's change; the per-mailbox lock makes the
+	// read-modify-write atomic within this process.
+	settingsLocks sync.Map // mailbox path -> *sync.Mutex
 }
 
 // NewServer builds the API server. accounts and spool back outbound mail
