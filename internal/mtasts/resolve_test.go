@@ -166,3 +166,34 @@ func TestLookupUsesTheDeadlineBoundDefault(t *testing.T) {
 		t.Error("the presence lookup reported success with no nameserver")
 	}
 }
+
+// TestResolverEvictsExpiredEntries proves the cache does not grow without bound: an
+// entry for a domain that is never looked up again is deleted once it expires, the
+// next time any miss stores a new entry. Without eviction the map would retain one
+// entry per distinct domain ever queried for the process's whole life.
+func TestResolverEvictsExpiredEntries(t *testing.T) {
+	clock := time.Unix(1_000_000, 0)
+	r := &Resolver{
+		Now:       func() time.Time { return clock },
+		LookupTXT: func(string) ([]string, error) { return nil, nil }, // no policy: negative cache
+	}
+	if _, err := r.Lookup("oneoff.example"); err != nil {
+		t.Fatal(err)
+	}
+	// The one-off domain is now negatively cached; let it expire.
+	clock = clock.Add(negativeTTL + time.Minute)
+	// A miss for a different domain stores a new entry and sweeps the expired one.
+	if _, err := r.Lookup("other.example"); err != nil {
+		t.Fatal(err)
+	}
+	r.mu.Lock()
+	_, stillThere := r.cache["oneoff.example"]
+	size := len(r.cache)
+	r.mu.Unlock()
+	if stillThere {
+		t.Error("expired one-off entry was not evicted; the cache grows without bound")
+	}
+	if size != 1 {
+		t.Errorf("cache holds %d entries, want only the live one", size)
+	}
+}

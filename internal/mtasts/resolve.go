@@ -50,10 +50,7 @@ type cacheEntry struct {
 // caller treats it as a transient condition rather than a withdrawn policy.
 func (r *Resolver) Lookup(domain string) (*Policy, error) {
 	domain = strings.ToLower(strings.TrimSuffix(domain, "."))
-	now := time.Now
-	if r.Now != nil {
-		now = r.Now
-	}
+	now := r.now
 	if e, ok := r.cached(domain, now()); ok {
 		return e.policy, nil
 	}
@@ -101,7 +98,25 @@ func (r *Resolver) store(domain string, p *Policy, expires time.Time) {
 	if r.cache == nil {
 		r.cache = make(map[string]cacheEntry)
 	}
+	// Opportunistic eviction: drop entries that have already expired, so the cache
+	// holds roughly the currently-live domains rather than every domain ever looked
+	// up. store runs on each cache miss, so this bounds the map without a background
+	// sweep; a one-off recipient domain is reclaimed the next time any miss stores.
+	now := r.now()
+	for d, e := range r.cache {
+		if now.After(e.expires) {
+			delete(r.cache, d)
+		}
+	}
 	r.cache[domain] = cacheEntry{policy: p, expires: expires}
+}
+
+// now reads the resolver's clock, defaulting to time.Now when Now is unset.
+func (r *Resolver) now() time.Time {
+	if r.Now != nil {
+		return r.Now()
+	}
+	return time.Now()
 }
 
 // txtResolver performs the default TXT lookup. It is a variable so a test can
