@@ -1,6 +1,7 @@
 package webmail2api
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -470,5 +471,42 @@ func TestGetEventsRespectsWindow(t *testing.T) {
 	}
 	if scoped[0].Summary != "InWindow" {
 		t.Fatalf("windowed event = %q, want InWindow", scoped[0].Summary)
+	}
+}
+
+// TestMeetingRequestRejectsHeaderInjection proves a CR/LF in the event summary
+// cannot inject an extra RFC 5322 header (or terminate the header block) into an
+// outbound meeting request, and cannot break out of the iCalendar SUMMARY line.
+// Without sanitizing the summary, an authenticated user could add a Reply-To or
+// Bcc header to a DKIM-signed invite relayed to attendees.
+func TestMeetingRequestRejectsHeaderInjection(t *testing.T) {
+	for _, build := range []struct {
+		name string
+		fn   func(string, eventJSON) ([]byte, []string, error)
+	}{
+		{"request", buildMeetingRequest},
+		{"cancel", buildCancellationRequest},
+	} {
+		raw, _, err := build.fn("organizer@hermex.test", eventJSON{
+			Summary:   "Sync\r\nReply-To: attacker@evil.example\r\nBcc: leak@evil.example",
+			Attendees: []string{"victim@ext.example"},
+			Start:     "2026-09-01T10:00:00Z",
+			End:       "2026-09-01T11:00:00Z",
+		})
+		if err != nil {
+			t.Fatalf("%s: build: %v", build.name, err)
+		}
+		header, _, _ := bytes.Cut(raw, []byte("\r\n\r\n"))
+		for line := range bytes.SplitSeq(header, []byte("\r\n")) {
+			low := bytes.ToLower(line)
+			if bytes.HasPrefix(low, []byte("reply-to:")) || bytes.HasPrefix(low, []byte("bcc:")) {
+				t.Errorf("%s: injected header line survived into the header block: %q", build.name, line)
+			}
+		}
+		// The iCalendar SUMMARY must not contain a raw CRLF that starts a new
+		// property; the escaper turns the newline into a literal \n on one line.
+		if bytes.Contains(raw, []byte("SUMMARY:Sync\r\nReply-To")) {
+			t.Errorf("%s: raw CRLF broke out of the iCalendar SUMMARY line", build.name)
+		}
 	}
 }

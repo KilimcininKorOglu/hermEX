@@ -209,12 +209,41 @@ func fromICalTime(v string) (string, bool) {
 	return v, false
 }
 
+// headerSafe flattens CR and LF to spaces so a user-supplied value cannot inject
+// extra RFC 5322 header lines (or terminate the header block) when written onto a
+// header line. It matches how oxcmail's structured export sanitizes header fields.
+func headerSafe(s string) string {
+	return strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
+}
+
+// icalText escapes a value for an iCalendar TEXT field per RFC 5545 3.3.11:
+// backslash, comma and semicolon are backslash-escaped, a newline becomes the
+// literal \n, and a bare CR is dropped. This keeps a user-supplied SUMMARY or
+// LOCATION from breaking out of its content line and injecting extra properties.
+func icalText(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '\\', ',', ';':
+			b.WriteByte('\\')
+			b.WriteByte(s[i])
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			// drop bare CR; the \n handling carries the line break
+		default:
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
+}
+
 // buildICal renders a minimal VEVENT for the proven oxcical import path.
 func buildICal(e eventJSON) []byte {
 	var b strings.Builder
 	b.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//webmail2//EN\r\nBEGIN:VEVENT\r\n")
 	fmt.Fprintf(&b, "UID:%s\r\n", e.UID)
-	fmt.Fprintf(&b, "SUMMARY:%s\r\n", e.Summary)
+	fmt.Fprintf(&b, "SUMMARY:%s\r\n", icalText(e.Summary))
 	fmt.Fprintf(&b, "DTSTART%s\r\n", toICalTime(e.Start, e.AllDay))
 	if e.End != "" {
 		fmt.Fprintf(&b, "DTEND%s\r\n", toICalTime(e.End, e.AllDay))
@@ -226,10 +255,10 @@ func buildICal(e eventJSON) []byte {
 		fmt.Fprintf(&b, "ATTENDEE;CN=%s;ROLE=OPT-PARTICIPANT:mailto:%s\r\n", a, a)
 	}
 	if e.Description != "" {
-		fmt.Fprintf(&b, "DESCRIPTION:%s\r\n", e.Description)
+		fmt.Fprintf(&b, "DESCRIPTION:%s\r\n", icalText(e.Description))
 	}
 	if e.Location != "" {
-		fmt.Fprintf(&b, "LOCATION:%s\r\n", e.Location)
+		fmt.Fprintf(&b, "LOCATION:%s\r\n", icalText(e.Location))
 	}
 	if e.ReminderMinutes != nil && *e.ReminderMinutes > 0 {
 		b.WriteString("BEGIN:VALARM\r\nACTION:DISPLAY\r\n")
@@ -765,13 +794,13 @@ func buildMeetingRequest(organizer string, e eventJSON) ([]byte, []string, error
 	var cal strings.Builder
 	cal.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//webmail2//EN\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\n")
 	fmt.Fprintf(&cal, "UID:%s\r\n", uidOrGenerated(e.UID))
-	fmt.Fprintf(&cal, "SUMMARY:%s\r\n", e.Summary)
+	fmt.Fprintf(&cal, "SUMMARY:%s\r\n", icalText(e.Summary))
 	fmt.Fprintf(&cal, "DTSTART%s\r\n", toICalTime(e.Start, e.AllDay))
 	if e.End != "" {
 		fmt.Fprintf(&cal, "DTEND%s\r\n", toICalTime(e.End, e.AllDay))
 	}
 	if e.Location != "" {
-		fmt.Fprintf(&cal, "LOCATION:%s\r\n", e.Location)
+		fmt.Fprintf(&cal, "LOCATION:%s\r\n", icalText(e.Location))
 	}
 	fmt.Fprintf(&cal, "ORGANIZER;CN=%s:mailto:%s\r\n", organizer, organizer)
 	for _, a := range recipients {
@@ -805,7 +834,7 @@ func buildMeetingRequest(organizer string, e eventJSON) ([]byte, []string, error
 	var b strings.Builder
 	fmt.Fprintf(&b, "From: %s\r\n", organizer)
 	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(recipients, ", "))
-	fmt.Fprintf(&b, "Subject: %s\r\n", e.Summary)
+	fmt.Fprintf(&b, "Subject: %s\r\n", headerSafe(e.Summary))
 	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))
 	fmt.Fprintf(&b, "Message-ID: <%s@hermex>\r\n", randomHex())
 	b.WriteString("MIME-Version: 1.0\r\n")
@@ -847,7 +876,7 @@ func buildCancellationRequest(organizer string, e eventJSON) ([]byte, []string, 
 	var cal strings.Builder
 	cal.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//webmail2//EN\r\nMETHOD:CANCEL\r\nBEGIN:VEVENT\r\n")
 	fmt.Fprintf(&cal, "UID:%s\r\n", uidOrGenerated(e.UID))
-	fmt.Fprintf(&cal, "SUMMARY:%s\r\n", e.Summary)
+	fmt.Fprintf(&cal, "SUMMARY:%s\r\n", icalText(e.Summary))
 	fmt.Fprintf(&cal, "DTSTART%s\r\n", toICalTime(e.Start, e.AllDay))
 	fmt.Fprintf(&cal, "STATUS:CANCELLED\r\n")
 	fmt.Fprintf(&cal, "ORGANIZER;CN=%s:mailto:%s\r\n", organizer, organizer)
@@ -860,7 +889,7 @@ func buildCancellationRequest(organizer string, e eventJSON) ([]byte, []string, 
 	var b strings.Builder
 	fmt.Fprintf(&b, "From: %s\r\n", organizer)
 	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(recipients, ", "))
-	fmt.Fprintf(&b, "Subject: Cancelled: %s\r\n", e.Summary)
+	fmt.Fprintf(&b, "Subject: Cancelled: %s\r\n", headerSafe(e.Summary))
 	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))
 	fmt.Fprintf(&b, "Message-ID: <%s@hermex>\r\n", randomHex())
 	b.WriteString("MIME-Version: 1.0\r\n")
