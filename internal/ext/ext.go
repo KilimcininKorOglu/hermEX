@@ -53,9 +53,10 @@ func (p *Push) Len() int { return len(p.buf) }
 
 // Pull reads little-endian, unaligned bytes from a fixed buffer.
 type Pull struct {
-	buf   []byte
-	off   int
-	flags Flags
+	buf      []byte
+	off      int
+	flags    Flags
+	resDepth int // current Restriction recursion depth, bounded in Restriction
 }
 
 // NewPull returns a Pull over buf using the given encoding flags.

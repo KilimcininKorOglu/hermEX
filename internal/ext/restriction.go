@@ -1,6 +1,20 @@
 package ext
 
-import "hermex/internal/mapi"
+import (
+	"errors"
+
+	"hermex/internal/mapi"
+)
+
+// maxRestrictionDepth bounds how deeply a decoded restriction may nest. A search
+// restriction over attacker bytes can chain single-child nodes (NOT/SUB/COMMENT/
+// COUNT) one per byte, so an unbounded decoder recurses once per input byte and a
+// large filter overflows the goroutine stack, an unrecoverable runtime throw. Real
+// filters nest only a handful deep; this cap is far above any legitimate one.
+const maxRestrictionDepth = 100
+
+// errRestrictionTooDeep reports a restriction nested past maxRestrictionDepth.
+var errRestrictionTooDeep = errors.New("restriction nested past the depth limit")
 
 // Restriction writes a search restriction: a one-byte type tag
 // followed by the payload for that type. AND/OR child counts follow FlagWCount
@@ -128,6 +142,11 @@ func (p *Push) Restriction(r mapi.Restriction) error {
 // Restriction reads a search restriction, mirroring the type
 // dispatch and count-width rules of Push.Restriction.
 func (p *Pull) Restriction() (mapi.Restriction, error) {
+	p.resDepth++
+	defer func() { p.resDepth-- }()
+	if p.resDepth > maxRestrictionDepth {
+		return mapi.Restriction{}, errRestrictionTooDeep
+	}
 	rt, err := p.Uint8()
 	if err != nil {
 		return mapi.Restriction{}, err

@@ -154,3 +154,14 @@ func TestRestrictionPropValueDispatch(t *testing.T) {
 		t.Fatalf("dispatch round-trip = %#v, want %#v", v, r)
 	}
 }
+
+// TestRestrictionDepthBounded proves a decoded restriction that nests past the
+// depth limit is refused rather than overflowing the goroutine stack. One byte of
+// ResNot begins another nested restriction, so a run of them recurses once per
+// input byte.
+func TestRestrictionDepthBounded(t *testing.T) {
+	buf := bytes.Repeat([]byte{byte(mapi.ResNot)}, maxRestrictionDepth+5)
+	if _, err := NewPull(buf, 0).Restriction(); !errors.Is(err, errRestrictionTooDeep) {
+		t.Fatalf("deep restriction err = %v, want errRestrictionTooDeep", err)
+	}
+}
