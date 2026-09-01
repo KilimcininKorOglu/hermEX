@@ -87,6 +87,10 @@ func (r *DigestRunner) digestMailbox(email, maildir string) (bool, error) {
 	defer st.Close()
 	msgs, err := st.ListMessages(int64(mapi.PrivateFIDJunk))
 	if err != nil {
+		// The store opened but the Junk read failed (a transient lock or a damaged
+		// index): skip this mailbox so one fault never fails the whole run, but record
+		// it, or a systematically broken digest run leaves no operator signal.
+		r.logErr(email, "digest.list", err)
 		return false, nil
 	}
 	var fresh []objectstore.MessageInfo

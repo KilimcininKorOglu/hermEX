@@ -1,6 +1,7 @@
 package mta
 
 import (
+	"database/sql"
 	"io"
 	"mime/quotedprintable"
 	"path/filepath"
@@ -9,9 +10,12 @@ import (
 	"time"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/quarantine"
+
+	_ "modernc.org/sqlite"
 )
 
 // fakeDigestDir is an in-memory DigestDirectory for the worker tests.
@@ -203,4 +207,52 @@ func TestDigestDisabledWithoutSecret(t *testing.T) {
 		t.Errorf("run without a secret sent %d digests, want 0", sent)
 	}
 	inboxRaw(t, maildir, 0)
+}
+
+// TestDigestLogsJunkListReadFailure proves a Junk read fault on an opened mailbox
+// store is recorded, not silently swallowed. The store opens fine but ListMessages
+// fails (a transient lock or a damaged index); the run must skip the mailbox without
+// failing, and the operator must see a digest.list event rather than a clean run.
+func TestDigestLogsJunkListReadFailure(t *testing.T) {
+	maildir := t.TempDir()
+	appendJunk(t, maildir, "spammy") // provisions the store and seeds a junk message
+
+	// Break the index so Open still succeeds but ListMessages fails: drop the
+	// messages table without touching the recorded schema version, so Open runs no
+	// migration to recreate it.
+	db, err := sql.Open("sqlite", filepath.Join(maildir, "imapindex.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`DROP TABLE messages`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	sink := &captureSink{}
+	r := newDigestRunner(&fakeDigestDir{
+		maildirs:  map[string]string{"alice@test": maildir},
+		watermark: map[string]uint32{},
+	})
+	r.Logger = logging.New(sink)
+
+	delivered, err := r.digestMailbox("alice@test", maildir)
+	if err != nil {
+		t.Fatalf("a read fault must not fail the whole run: %v", err)
+	}
+	if delivered {
+		t.Error("no digest should be delivered when the Junk read failed")
+	}
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	found := false
+	for _, e := range sink.events {
+		if e.Name == "digest.list" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the Junk read failure was not logged; the operator would see a clean run")
+	}
 }
