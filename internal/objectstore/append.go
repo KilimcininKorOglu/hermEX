@@ -166,12 +166,28 @@ func (s *Store) removeEML(mid string) {
 func (s *Store) refreshEML(messageID int64) {
 	mid := midString(uint64(messageID))
 	if _, err := os.Stat(s.emlPath(mid)); err != nil {
-		return
+		// The cache file is absent. A non-mail object (contact, calendar item) has no
+		// IMAP index row and must never get a cache, so skip it. A mail message with
+		// no cache is a pruned one: regenerate so the served bytes and the index
+		// RFC822 size both follow the edit, rather than leaving a stale size the next
+		// body fetch would contradict.
+		if !s.indexedMessage(messageID) {
+			return
+		}
 	}
 	if _, err := s.regenerateEML(messageID, mid); err != nil {
 		s.removeEML(mid)
 		s.logStoreError("refresh-eml", err)
 	}
+}
+
+// indexedMessage reports whether the message has an IMAP index row, i.e. it is a
+// mail message (contacts, calendar items and other object-store-only items are not
+// indexed). It distinguishes a pruned mail cache, which must be regenerated to keep
+// the recorded RFC822 size correct, from a non-mail object, which has no size to sync.
+func (s *Store) indexedMessage(messageID int64) bool {
+	var one int
+	return s.idxdb.QueryRow(`SELECT 1 FROM messages WHERE message_id=?`, messageID).Scan(&one) == nil
 }
 
 // writeEML writes the re-synthesized wire form to the message's eml cache,
