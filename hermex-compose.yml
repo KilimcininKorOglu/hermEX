@@ -245,7 +245,7 @@ services:
       - ./internal/webmail2/dist:/webmail2-dist:ro
       - ./docker-data/spill/webmail2:/data/logspill
     ports:
-      - "8150:8080"
+      - "127.0.0.1:8150:8080"
     depends_on:
       db:
         condition: service_healthy
@@ -273,7 +273,7 @@ services:
       - ./docker-data/config.json:/config/config.json:ro
       - ./docker-data/spill/dav:/data/logspill
     ports:
-      - "8145:8080"
+      - "127.0.0.1:8145:8080"
     depends_on:
       db:
         condition: service_healthy
@@ -303,7 +303,7 @@ services:
       - ./docker-data/config.json:/config/config.json:ro
       - ./docker-data/spill/activesync:/data/logspill
     ports:
-      - "8146:8080"
+      - "127.0.0.1:8146:8080"
     depends_on:
       db:
         condition: service_healthy
@@ -333,7 +333,7 @@ services:
       - ./docker-data/config.json:/config/config.json:ro
       - ./docker-data/spill/ews:/data/logspill
     ports:
-      - "8147:8080"
+      - "127.0.0.1:8147:8080"
     depends_on:
       db:
         condition: service_healthy
@@ -363,7 +363,7 @@ services:
       - ./docker-data/config.json:/config/config.json:ro
       - ./docker-data/spill/mapi:/data/logspill
     ports:
-      - "8148:8080"
+      - "127.0.0.1:8148:8080"
     depends_on:
       db:
         condition: service_healthy
