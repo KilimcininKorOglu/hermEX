@@ -292,7 +292,7 @@ func applyContactClientCommands(st *objectstore.Store, cstate *collectionState, 
 			if err != nil {
 				continue
 			}
-			if st.DeleteObject(id) == nil {
+			if st.SoftDeleteObject(id) == nil {
 				delete(cstate.Items, sid)
 			}
 		}

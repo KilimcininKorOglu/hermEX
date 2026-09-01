@@ -85,7 +85,7 @@ func emptyFolder(st *objectstore.Store, folderID int64, deleteSubs bool) error {
 		return err
 	}
 	for _, m := range msgs {
-		if err := st.DeleteMessage(folderID, m.UID); err != nil {
+		if err := st.SoftDeleteMessage(folderID, m.UID); err != nil {
 			return err
 		}
 	}

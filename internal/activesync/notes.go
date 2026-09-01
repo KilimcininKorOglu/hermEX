@@ -168,7 +168,7 @@ func applyNoteClientCommands(st *objectstore.Store, cstate *collectionState, c *
 			if err != nil {
 				continue
 			}
-			if st.DeleteObject(id) == nil {
+			if st.SoftDeleteObject(id) == nil {
 				delete(cstate.Items, sid)
 			}
 		}

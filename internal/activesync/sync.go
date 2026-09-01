@@ -449,7 +449,7 @@ func applyClientCommands(st *objectstore.Store, folderID int64, cstate *collecti
 				cstate.Items[sid] = cur
 			}
 		case wbxml.ASDelete:
-			if st.DeleteMessage(folderID, uid) == nil {
+			if st.SoftDeleteMessage(folderID, uid) == nil {
 				delete(cstate.Items, sid)
 			}
 		}
