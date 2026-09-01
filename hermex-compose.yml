@@ -32,6 +32,8 @@ x-hermex-build: &hermex-build
 services:
   db:
     container_name: hermex-db
+    security_opt:
+      - no-new-privileges:true
     image: mariadb:11
     environment:
       - MARIADB_ROOT_PASSWORD=hermexstack
@@ -55,6 +57,8 @@ services:
   # (the admin panel, not direct access, is how logs are inspected).
   mongo:
     container_name: hermex-mongo
+    security_opt:
+      - no-new-privileges:true
     image: mongo:7
     volumes:
       - ./docker-data/mongo:/data/db
@@ -71,6 +75,8 @@ services:
   # so a slow first freshclam download never blocks the stack from coming up.
   clamav:
     container_name: hermex-clamav
+    security_opt:
+      - no-new-privileges:true
     image: clamav/clamav:1.4
     # The official ClamAV image publishes linux/amd64 only; pin the platform so it
     # runs natively on amd64 hosts and under emulation on an arm64 dev machine.
@@ -91,6 +97,8 @@ services:
   # would only break the build.
   dev:
     container_name: hermex-dev
+    security_opt:
+      - no-new-privileges:true
     build:
       context: .
       dockerfile: docker/Dockerfile.dev
@@ -121,6 +129,10 @@ services:
 
   mta:
     container_name: hermex-mta
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     # Unprivileged: a parsing bug in this daemon must not land an attacker at
     # uid 0. The id is the invoking user's (the Makefile exports it) so the
     # bind-mounted mail data stays writable; 65532 is the image default.
@@ -160,6 +172,10 @@ services:
 
   pop3:
     container_name: hermex-pop3
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     # Unprivileged: a parsing bug in this daemon must not land an attacker at
     # uid 0. The id is the invoking user's (the Makefile exports it) so the
     # bind-mounted mail data stays writable; 65532 is the image default.
@@ -195,6 +211,10 @@ services:
 
   imap:
     container_name: hermex-imap
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     # Unprivileged: a parsing bug in this daemon must not land an attacker at
     # uid 0. The id is the invoking user's (the Makefile exports it) so the
     # bind-mounted mail data stays writable; 65532 is the image default.
@@ -233,6 +253,10 @@ services:
   # gateway proxies at the front-door root.
   webmail2:
     container_name: hermex-webmail2
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     # Unprivileged: a parsing bug in this daemon must not land an attacker at
     # uid 0. The id is the invoking user's (the Makefile exports it) so the
     # bind-mounted mail data stays writable; 65532 is the image default.
@@ -262,6 +286,10 @@ services:
 
   dav:
     container_name: hermex-dav
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     # Unprivileged: a parsing bug in this daemon must not land an attacker at
     # uid 0. The id is the invoking user's (the Makefile exports it) so the
     # bind-mounted mail data stays writable; 65532 is the image default.
@@ -292,6 +320,10 @@ services:
 
   activesync:
     container_name: hermex-activesync
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     # Unprivileged: a parsing bug in this daemon must not land an attacker at
     # uid 0. The id is the invoking user's (the Makefile exports it) so the
     # bind-mounted mail data stays writable; 65532 is the image default.
@@ -322,6 +354,10 @@ services:
 
   ews:
     container_name: hermex-ews
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     # Unprivileged: a parsing bug in this daemon must not land an attacker at
     # uid 0. The id is the invoking user's (the Makefile exports it) so the
     # bind-mounted mail data stays writable; 65532 is the image default.
@@ -352,6 +388,10 @@ services:
 
   mapi:
     container_name: hermex-mapi
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     # Unprivileged: a parsing bug in this daemon must not land an attacker at
     # uid 0. The id is the invoking user's (the Makefile exports it) so the
     # bind-mounted mail data stays writable; 65532 is the image default.
@@ -389,6 +429,10 @@ services:
   # never blocks the stack from serving mail.
   notify:
     container_name: hermex-notify
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     # Unprivileged: a parsing bug in this daemon must not land an attacker at
     # uid 0. The id is the invoking user's (the Makefile exports it) so the
     # bind-mounted mail data stays writable; 65532 is the image default.
@@ -421,6 +465,10 @@ services:
   # the writable /data/acme mount; production leaves acme_ca_root empty.
   gateway:
     container_name: hermex-gateway
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     # Unprivileged: a parsing bug in this daemon must not land an attacker at
     # uid 0. The id is the invoking user's (the Makefile exports it) so the
     # bind-mounted mail data stays writable; 65532 is the image default.
@@ -479,6 +527,8 @@ services:
   # path, only used when TLS mode is set to acme with the pebble directory URL.
   pebble:
     container_name: hermex-pebble
+    security_opt:
+      - no-new-privileges:true
     image: ghcr.io/letsencrypt/pebble:2.10.1
     command: ["-config", "/test/config/pebble-config.json"]
     environment:
@@ -492,6 +542,10 @@ services:
   # run this loop (two would double-fetch), so it is its own always-on daemon.
   fetchmail:
     container_name: hermex-fetchmail
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     # Unprivileged: a parsing bug in this daemon must not land an attacker at
     # uid 0. The id is the invoking user's (the Makefile exports it) so the
     # bind-mounted mail data stays writable; 65532 is the image default.
