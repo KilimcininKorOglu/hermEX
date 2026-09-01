@@ -1,11 +1,13 @@
 package mta
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 
 	"hermex/internal/antispam"
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 )
 
 // fixedRecipAccess is a per-maildir personal allow/block rule set; a maildir absent
@@ -126,5 +128,42 @@ func TestRecipientAccessFilesEachRecipientIndependently(t *testing.T) {
 	}
 	if junk, inbox := folderCounts(t, bobMbox); junk != 0 || inbox != 1 {
 		t.Errorf("bob (no rule): junk=%d inbox=%d, want it in the inbox", junk, inbox)
+	}
+}
+
+// erroringRecipAccess fails every rule read, to drive the fail-open branch.
+type erroringRecipAccess struct{}
+
+func (erroringRecipAccess) RecipientRulesForMaildir(string) (map[string]string, error) {
+	return nil, errors.New("directory unavailable")
+}
+
+// TestRecipientRuleReadFailureIsLogged proves a DB fault reading a recipient's
+// personal allow/block rules is fail-open but not silent: the message still files
+// per the message-level verdict, and a settings.read.fail event names the failure
+// so the operator does not see a clean run while every recipient's own filtering
+// has quietly reverted to the score default.
+func TestRecipientRuleReadFailureIsLogged(t *testing.T) {
+	mbox := filepath.Join(t.TempDir(), "alice")
+	accounts := directory.StaticAccounts{"alice@test": {MailboxPath: mbox}}
+	sink := &captureSink{}
+	b := &Backend{
+		Accounts:        accounts,
+		Scorer:          &recordingScorer{verdict: antispam.Verdict{Score: 9, Spam: true}},
+		RecipientAccess: erroringRecipAccess{},
+		Logger:          logging.New(sink),
+	}
+	deliverInbound(t, b, "buddy@friend.example", "alice@test")
+
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	found := false
+	for _, e := range sink.events {
+		if e.Name == "settings.read.fail" && e.Fields["settings"] == "recipient_rules" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("recipient rule read failure was not logged; the fail-open path is silent")
 	}
 }

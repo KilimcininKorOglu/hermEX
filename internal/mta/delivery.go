@@ -522,7 +522,15 @@ func (s *session) Data(r io.Reader) error {
 		if scored {
 			userAction := ""
 			if s.recipAccess != nil && v.AccessAction != antispam.AccessBlock {
-				if rules, err := s.recipAccess.RecipientRulesForMaildir(t.path); err == nil && len(rules) > 0 {
+				rules, err := s.recipAccess.RecipientRulesForMaildir(t.path)
+				switch {
+				case err != nil && s.logger != nil:
+					// Fail-open, but not silent: without this a DB fault would revert
+					// the recipient's personal allow/block to the score default with no
+					// operator signal at all.
+					logging.SettingsReadFailed(s.logger, "mta", "recipient_rules",
+						"recipient spam rules skipped, using message-level verdict", err)
+				case len(rules) > 0:
 					userAction = antispam.NewAccessList(rules).Action(s.from, fromDom)
 				}
 			}
@@ -543,7 +551,12 @@ func (s *session) Data(r io.Reader) error {
 				tFolder = int64(mapi.PrivateFIDInbox)
 				tRaw = antispam.Tag(raw, tv)
 			case s.thresholds != nil:
-				if override, ok, err := s.thresholds.SpamThresholdForMaildir(t.path); err == nil && ok {
+				override, ok, err := s.thresholds.SpamThresholdForMaildir(t.path)
+				switch {
+				case err != nil && s.logger != nil:
+					logging.SettingsReadFailed(s.logger, "mta", "spam_threshold",
+						"recipient threshold skipped, using default", err)
+				case ok:
 					tv := v
 					tv.Spam = v.Score >= override
 					tFolder = int64(mapi.PrivateFIDInbox)
