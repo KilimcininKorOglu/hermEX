@@ -94,6 +94,27 @@ func TestDNSBLIsBounded(t *testing.T) {
 	}
 }
 
+// TestDKIMIsBounded proves the same for the DKIM public-key lookup. Each signature
+// names a selector in a domain the sender chose, and verification fetches that
+// selector's TXT record; the bare dkim.Verify default carried no deadline, so a
+// signing domain whose nameserver never answered pinned the DATA-phase goroutine.
+func TestDKIMIsBounded(t *testing.T) {
+	boundedChecks(t, 200*time.Millisecond)
+	raw := []byte("DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=sender.invalid;\r\n" +
+		" s=sel; h=from:subject; bh=AAAA; b=AAAA\r\n" +
+		"From: someone@sender.invalid\r\nSubject: hi\r\n\r\nbody\r\n")
+	var res []DKIMResult
+	mustReturnWithin(t, 5*time.Second, "realDKIM", func() {
+		res = realDKIM(raw)
+	})
+	// A timed-out key lookup fails that signature; it must never read as valid.
+	for _, r := range res {
+		if r.Valid {
+			t.Errorf("an unanswerable DKIM key lookup reported domain %q as valid", r.Domain)
+		}
+	}
+}
+
 // TestScoreIsBoundedWithUnanswerableDNS is the end-to-end statement: one message
 // scored against a nameserver that answers nothing still returns, rather than
 // pinning the connection's goroutine for the resolver's full retry budget across

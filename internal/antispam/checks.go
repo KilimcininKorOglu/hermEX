@@ -69,9 +69,16 @@ func realSPF(ip net.IP, helo, mailFrom string) AuthResult {
 
 // realDKIM verifies the message's DKIM signatures and returns each signature's
 // claiming domain with whether it validated. A parse error yields no results, so
-// the scorer treats the message as unsigned.
+// the scorer treats the message as unsigned. Each signature names a selector in a
+// domain the sender chose, so the public-key TXT lookup carries the deadline the
+// bare net.LookupTXT default cannot; one context bounds every signature's query,
+// and a lookup that outruns it fails that signature like any other failure.
 func realDKIM(raw []byte) []DKIMResult {
-	vs, err := dkim.Verify(bytes.NewReader(raw))
+	ctx, cancel := context.WithTimeout(context.Background(), dnsTimeout)
+	defer cancel()
+	vs, err := dkim.VerifyWithOptions(bytes.NewReader(raw), &dkim.VerifyOptions{
+		LookupTXT: func(name string) ([]string, error) { return resolver.LookupTXT(ctx, name) },
+	})
 	if err != nil {
 		return nil
 	}
