@@ -155,3 +155,60 @@ func TestFailedDeliveryClearsTheStamp(t *testing.T) {
 		t.Errorf("attempts = %d, want 1", queued[0].Attempts)
 	}
 }
+
+// TestInterruptedBounceStuckClearsStampAndBacksOff proves an interrupted delivery
+// whose bounce cannot be delivered is not reprocessed every tick. The first pass
+// gives up (bounce fails), clears the in-flight stamp, and defers the row by the
+// bounce backoff. A second pass before the backoff expires must not touch the row
+// again: without clearing the stamp, Unsettled would re-select it every tick and
+// busy-loop the drainer.
+func TestInterruptedBounceStuckClearsStampAndBacksOff(t *testing.T) {
+	sp := openSpool(t)
+	t0 := time.Unix(3_000_000, 0)
+	if err := sp.Enqueue("alice@local", []string{"bob@remote"},
+		[]byte("From: alice@local\r\nSubject: out\r\n\r\nhi bob\r\n"), t0); err != nil {
+		t.Fatal(err)
+	}
+	items, err := sp.Claim(t0, 10)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("claim: %v (%d items)", err, len(items))
+	}
+	if err := sp.MarkStarted(items[0].RecipientID, t0); err != nil {
+		t.Fatal(err)
+	}
+
+	var gaveUp int
+	w := &Worker{
+		Spool:    sp,
+		HeloName: "mx.test",
+		Router:   func(string) ([]string, error) { return []string{"sink"}, nil },
+		Dialer:   func(string) (net.Conn, error) { return nil, errors.New("no sink") },
+		OnGiveUp: func(Item, error) error { gaveUp++; return errors.New("bounce undeliverable") },
+	}
+
+	if _, err := w.ProcessDue(context.Background(), t0.Add(time.Minute)); err != nil {
+		t.Fatalf("first pass: %v", err)
+	}
+	if gaveUp != 1 {
+		t.Fatalf("first pass gave up %d times, want 1", gaveUp)
+	}
+
+	// Second pass well before the 6h backoff expires: the row must be untouched.
+	if _, err := w.ProcessDue(context.Background(), t0.Add(2*time.Minute)); err != nil {
+		t.Fatalf("second pass: %v", err)
+	}
+	if gaveUp != 1 {
+		t.Errorf("the stuck bounce was reprocessed before its backoff (%d give-ups); the stamp was not cleared", gaveUp)
+	}
+
+	queued, err := sp.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queued) != 1 {
+		t.Fatalf("spool holds %d recipient(s), want the deferred bounce", len(queued))
+	}
+	if queued[0].Interrupted {
+		t.Error("the stuck bounce is still marked interrupted; the in-flight stamp was not cleared")
+	}
+}

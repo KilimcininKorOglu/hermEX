@@ -286,6 +286,14 @@ func (w *Worker) resolveUnsettled(ctx context.Context, now time.Time) error {
 			// The sender was never told, so settling here would erase the message
 			// with nothing left to recover it from. Keep the row queued, where the
 			// mail-queue page shows it, and try the notice again later.
+			//
+			// Clear the in-flight stamp first: Unsettled selects purely on
+			// delivery_started > 0 with no next_attempt filter, so a row left stamped
+			// would be reprocessed every tick, ignoring the backoff just written.
+			// Clearing it returns the row to the Claim path, which honors next_attempt.
+			if ce := w.Spool.ClearStarted(it.RecipientID); ce != nil {
+				return ce
+			}
 			if re := w.Spool.Retry(it.RecipientID, now.Add(bounceRetryBackoff), "interrupted delivery, bounce undeliverable: "+be.Error()); re != nil {
 				return re
 			}
