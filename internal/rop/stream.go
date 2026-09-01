@@ -12,6 +12,13 @@ import (
 // opened over.
 var errNoStreamProp = errors.New("rop: stream property not present")
 
+// maxStreamSize caps a single in-memory ROP stream buffer. RopSetStreamSize and
+// RopSeekStream take a client uint64 length or offset and grow the buffer to it, so
+// without a cap one request reserves multiple gigabytes (an OOM) and a size at or
+// above 2^63 wraps int() negative and panics make(). The cap is far above any real
+// property or attachment stream.
+const maxStreamSize = 1 << 30 // 1 GiB
+
 // streamState is an open property stream: the property's bytes held in memory and
 // a read/write cursor. A read-only stream is a snapshot of the property's bytes. A
 // writable stream (opened with a write open-mode over a writable parent) buffers
@@ -380,7 +387,7 @@ func (s *Session) ropSeekStream(p *ext.Pull, out *ext.Push, handles []uint32, hi
 		return true
 	}
 	newpos := base + int64(offRaw)
-	if newpos < 0 {
+	if newpos < 0 || newpos > maxStreamSize {
 		writeErr(out, ropSeekStream, hindex, ecInvalidParam)
 		return true
 	}
@@ -418,6 +425,10 @@ func (s *Session) ropSetStreamSize(p *ext.Pull, out *ext.Push, handles []uint32,
 	st := obj.stream
 	if !st.writable {
 		writeErr(out, ropSetStreamSize, hindex, ecAccessDenied)
+		return true
+	}
+	if size > maxStreamSize {
+		writeErr(out, ropSetStreamSize, hindex, ecInvalidParam)
 		return true
 	}
 	n := int(size)

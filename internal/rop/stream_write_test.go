@@ -287,3 +287,43 @@ func TestStreamReadPersistedAttachmentAfterSave(t *testing.T) {
 		t.Errorf("post-save read over persisted attachment write handle = %q, want %q", got, want)
 	}
 }
+
+// TestStreamSizeCapped proves RopSetStreamSize and RopSeekStream refuse a size or
+// position past the memory-safety cap rather than reserving gigabytes or wrapping
+// int() negative and panicking make().
+func TestStreamSizeCapped(t *testing.T) {
+	dir := t.TempDir()
+	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
+	mid := uint64(seedInboxMessage(t, dir, "CAPHOST"))
+
+	sess := NewSession(dir, nil, "")
+	defer sess.Close()
+	_, h := sess.Dispatch(logonRequest(0, 0x01), []uint32{0xFFFFFFFF})
+	logonH := h[0]
+	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
+	msgH := h[1]
+	_, attH := createAttachmentNum(t, sess, msgH)
+	_, h = sess.Dispatch(buildOpenStream(0, 1, uint32(mapi.PrAttachDataBin), mapiModify), []uint32{attH, 0xFFFFFFFF})
+	streamH := h[1]
+
+	// A size past the cap is refused, not allocated. 1<<63 also wraps int()
+	// negative and would panic make() without the guard.
+	for _, size := range []uint64{maxStreamSize + 1, 1 << 40, 1 << 63} {
+		ss, _ := sess.Dispatch(buildSetStreamSize(0, size), []uint32{streamH})
+		p := ext.NewPull(ss, ext.FlagUTF16)
+		mustU8(t, p, "RopId")
+		mustU8(t, p, "hindex")
+		if ec := mustU32(t, p, "ec"); ec != ecInvalidParam {
+			t.Errorf("SetStreamSize(%#x) ec = %#x, want ecInvalidParam", size, ec)
+		}
+	}
+
+	// A seek past the cap is refused too.
+	se, _ := sess.Dispatch(buildSeekStream(0, streamSeekSet, 1<<40), []uint32{streamH})
+	p := ext.NewPull(se, ext.FlagUTF16)
+	mustU8(t, p, "RopId")
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecInvalidParam {
+		t.Errorf("SeekStream(SET, 1<<40) ec = %#x, want ecInvalidParam", ec)
+	}
+}
