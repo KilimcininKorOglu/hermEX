@@ -119,6 +119,29 @@ func TestSendMailNoSentCopy(t *testing.T) {
 	}
 }
 
+// TestSendMailRejectsForgedFrom confirms SendMail refuses a message whose From
+// header names a same-domain mailbox the authenticated caller may not send as,
+// and delivers nothing, closing the DKIM-aligned sender-spoofing gap.
+func TestSendMailRejectsForgedFrom(t *testing.T) {
+	ts, aliceDir, bobDir := sendServer(t)
+	forged := "From: bob@hermex.test\r\nTo: bob@hermex.test\r\nSubject: spoof\r\n" +
+		"Date: Mon, 15 Jun 2026 09:00:00 +0000\r\nMessage-ID: <f1@hermex.test>\r\n\r\nnot really from bob\r\n"
+	sm := wbxml.Elem(wbxml.CMSendMail,
+		wbxml.Empty(wbxml.CMSaveInSentItems),
+		wbxml.Opaque(wbxml.CMMIME, []byte(forged)))
+
+	resp, _ := postRaw(t, ts, "SendMail", wbxml.Marshal(sm))
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status %d, want 403 for a forged From", resp.StatusCode)
+	}
+	if n := folderCount(t, bobDir, int64(mapi.PrivateFIDInbox)); n != 0 {
+		t.Errorf("bob's Inbox has %d messages, want 0 (delivery must be refused)", n)
+	}
+	if n := folderCount(t, aliceDir, int64(mapi.PrivateFIDSentItems)); n != 0 {
+		t.Errorf("alice's Sent has %d messages, want 0", n)
+	}
+}
+
 // TestSendMailLegacyRawMIME confirms the pre-14 path (a raw-MIME body, no WBXML
 // envelope) also delivers.
 func TestSendMailLegacyRawMIME(t *testing.T) {

@@ -2,6 +2,7 @@ package activesync
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"net/mail"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/directory"
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
@@ -35,6 +37,15 @@ func (s *Server) handleSendMail(w http.ResponseWriter, r *http.Request, sess *se
 	recipients := recipientsOf(cm.mime)
 	if len(recipients) == 0 {
 		http.Error(w, "SendMail has no recipients", http.StatusBadRequest)
+		return
+	}
+
+	// The device composes the whole MIME, so the From header is client-controlled
+	// and the DKIM signer keys on its domain. Authorize it against the caller the
+	// same way every other send path does, and fail closed rather than relay a
+	// DKIM-aligned message the caller may not send as.
+	if !s.authorizedFrom(sess.user, cm.mime) {
+		s.failRequest(w, r, "sendmail.sender.denied", errUnauthorizedFrom, http.StatusForbidden, "sender not authorized")
 		return
 	}
 
@@ -68,6 +79,95 @@ func (s *Server) handleSendMail(w http.ResponseWriter, r *http.Request, sess *se
 		}
 	}
 	w.WriteHeader(http.StatusOK)
+}
+
+// errUnauthorizedFrom is returned when a SendMail message carries a From header
+// the authenticated caller is not allowed to send as.
+var errUnauthorizedFrom = errors.New("message From not authorized for caller")
+
+// authorizedFrom reports whether the authenticated caller may put the message's
+// From header on the wire. It fails closed like the MTA send-as gate
+// (internal/mta/delivery.go): an absent or unparseable From is allowed (there is
+// no identity to forge and delivery keeps the caller as sender), the caller's own
+// address or an alias is allowed, and any other address is allowed only when the
+// mailbox that owns it has granted the caller a send-as permission.
+func (s *Server) authorizedFrom(caller string, mime []byte) bool {
+	from, ok := parseFromAddress(mime)
+	if !ok {
+		return true
+	}
+	ids := s.callerIdentities(caller)
+	want := strings.ToLower(strings.TrimSpace(from))
+	if containsFold(ids, want) {
+		return true
+	}
+	return s.grantedSendAs(want, ids)
+}
+
+// callerIdentities returns the caller's own address plus any directory aliases.
+func (s *Server) callerIdentities(caller string) []string {
+	ids := []string{caller}
+	if idr, ok := s.accounts.(directory.Identifier); ok {
+		if addrs, err := idr.Identities(caller); err == nil && len(addrs) > 0 {
+			ids = addrs
+		}
+	}
+	return ids
+}
+
+// grantedSendAs reports whether one of the caller's identities appears in the
+// send-as list of the mailbox that owns from. It fails closed: an address that
+// resolves to no local mailbox, a store that will not open, or an unreadable list
+// denies the grant rather than risking a forged From.
+func (s *Server) grantedSendAs(from string, ids []string) bool {
+	path, ok := s.accounts.Resolve(from)
+	if !ok {
+		return false
+	}
+	st, err := objectstore.Open(path)
+	if err != nil {
+		return false
+	}
+	defer st.Close()
+	list, err := st.GetSendAs()
+	if err != nil {
+		return false
+	}
+	for _, g := range list {
+		if containsFold(ids, strings.ToLower(strings.TrimSpace(g))) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsFold reports whether want (already lowercased) equals any address in
+// list, compared case-insensitively after trimming.
+func containsFold(list []string, want string) bool {
+	for _, a := range list {
+		if strings.ToLower(strings.TrimSpace(a)) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// parseFromAddress extracts the bare address from a message's From header, or
+// reports ok=false when there is no parseable From.
+func parseFromAddress(mime []byte) (addr string, ok bool) {
+	msg, err := mail.ReadMessage(bytes.NewReader(mime))
+	if err != nil {
+		return "", false
+	}
+	h := msg.Header.Get("From")
+	if h == "" {
+		return "", false
+	}
+	a, err := mail.ParseAddress(h)
+	if err != nil {
+		return "", false
+	}
+	return a.Address, true
 }
 
 // composeMail is a decoded ComposeMail request: the message MIME, whether to save
