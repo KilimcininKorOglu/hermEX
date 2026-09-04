@@ -46,6 +46,12 @@ func TestQuarantineRelease(t *testing.T) {
 	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "<form") {
 		t.Fatalf("confirm page = %d: %s", rec.Code, rec.Body.String())
 	}
+	// The page body carries the release token, and this route is outside the API
+	// prefix the blanket no-store middleware covers, so the page must say so itself
+	// or the token can be recovered from a shared browser's cache and replayed.
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("confirm page Cache-Control = %q, want no-store; it embeds the release token", cc)
+	}
 
 	// POST performs the release.
 	rec = httptest.NewRecorder()

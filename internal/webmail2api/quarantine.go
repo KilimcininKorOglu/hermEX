@@ -73,6 +73,11 @@ func (s *Server) handleQuarantineRelease(w http.ResponseWriter, r *http.Request)
 // the release form.
 func writeQuarantinePage(w http.ResponseWriter, status int, heading, message, confirmToken string) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// The page body carries the release token, and this route sits outside the API
+	// prefix the blanket no-store middleware guards, so it needs its own directive.
+	// Without it the token can persist in a shared browser's disk or back/forward
+	// cache for a later user to replay.
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(status)
 	form := ""
 	if confirmToken != "" {
