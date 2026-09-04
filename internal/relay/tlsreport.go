@@ -158,7 +158,9 @@ func buildReportMail(fromDomain, toAddr, policyDomain string, r *tlsrpt.Report, 
 	if err != nil {
 		return nil, err
 	}
-	fmt.Fprintf(note, "This is an aggregate TLS report from %s for %s.\r\n", fromDomain, policyDomain)
+	if _, err := fmt.Fprintf(note, "This is an aggregate TLS report from %s for %s.\r\n", fromDomain, policyDomain); err != nil {
+		return nil, err
+	}
 
 	att, err := mw.CreatePart(textproto.MIMEHeader{
 		"Content-Type":              {"application/tlsrpt+gzip"},

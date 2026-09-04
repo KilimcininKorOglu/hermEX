@@ -29,7 +29,7 @@ func TestTLSDialSourceHandshakeIsBounded(t *testing.T) {
 			return
 		}
 		<-done
-		c.Close()
+		_ = c.Close()
 	}()
 	t.Cleanup(func() { close(done) })
 
