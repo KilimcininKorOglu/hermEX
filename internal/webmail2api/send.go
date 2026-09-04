@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/mail"
@@ -45,6 +46,25 @@ type sendRequest struct {
 	SignMessage            bool             `json:"signMessage"`    // server-mode S/MIME sign
 	EncryptMessage         bool             `json:"encryptMessage"` // server-mode S/MIME encrypt
 	From                   string           `json:"from"`           // chosen sender identity (send-as / on-behalf); empty = self
+}
+
+// badAttachmentError reports an attachment whose body could not be decoded. It is
+// a fault in what the client sent, not in the server, so the send paths answer it
+// with a client error naming the file rather than a generic failure.
+type badAttachmentError struct{ name string }
+
+func (e badAttachmentError) Error() string { return "attachment could not be decoded: " + e.name }
+
+// writeBuildError answers a failed message build. An attachment the client sent
+// that will not decode is the client's fault and names the file so it can be
+// corrected; anything else is an internal failure and stays generic.
+func writeBuildError(w http.ResponseWriter, err error, generic string) {
+	var bad badAttachmentError
+	if errors.As(err, &bad) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not read attachment " + bad.name})
+		return
+	}
+	writeJSON(w, http.StatusInternalServerError, map[string]string{"error": generic})
 }
 
 // decodeAttachment decodes an attachment body, accepting raw base64 or a data URL.
@@ -90,7 +110,7 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 
 	raw, err := s.buildOutgoing(representing, sender, req)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not build the message"})
+		writeBuildError(w, err, "could not build the message")
 		return
 	}
 
@@ -208,7 +228,7 @@ func (s *Server) handleMailBuild(w http.ResponseWriter, r *http.Request) {
 	}
 	raw, err := s.buildOutgoing(representing, sender, req)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not build the message"})
+		writeBuildError(w, err, "could not build the message")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"raw": base64.StdEncoding.EncodeToString(raw)})
@@ -458,7 +478,11 @@ func (s *Server) buildOutgoing(representing, sender string, req sendRequest) ([]
 	for _, a := range req.Attachments {
 		data, err := decodeAttachment(a.Content)
 		if err != nil {
-			continue
+			// Never send the message without it. The sender attached this file on
+			// purpose, so skipping it delivers a message the sender believes carries
+			// an attachment it does not, and answers with success. Refuse instead and
+			// name the file, so the failure is visible where it can be corrected.
+			return nil, badAttachmentError{name: a.Filename}
 		}
 		var p mapi.PropertyValues
 		p.Set(mapi.PrAttachMethod, int32(mapi.AttachByValue))
