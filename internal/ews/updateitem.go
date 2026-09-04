@@ -250,13 +250,13 @@ func (s *Server) moveOrCopy(w http.ResponseWriter, inner []byte, sess *session, 
 			if remove {
 				need = mapi.FrightsDeleteAny
 			}
-			rights, err := srcSt.ResolvePermission(id.FolderID, sess.user)
-			if err != nil {
-				msgs = append(msgs, itemError("ErrorInternalServerError"))
-				continue
-			}
-			if rights&need == 0 {
-				msgs = append(msgs, itemError("ErrorAccessDenied"))
+			// checkItemAccess also binds the message to the folder that was
+			// authorized. The recovery below addresses a soft-deleted message by id
+			// alone, so without that binding a delegate could pair a folder they hold
+			// rights on with a message deleted from a folder they cannot reach, and
+			// restore it into a folder they can read.
+			if code := checkItemAccess(srcSt, id, sess.user, need); code != "" {
+				msgs = append(msgs, itemError(code))
 				continue
 			}
 		}
