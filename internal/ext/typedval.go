@@ -1,6 +1,7 @@
 package ext
 
 import (
+	"errors"
 	"fmt"
 
 	"hermex/internal/mapi"
@@ -14,8 +15,24 @@ func (p *Push) TypedPropVal(t mapi.TypedPropVal) error {
 	return p.PropValue(t.Type, t.Value)
 }
 
+// maxTypedValDepth bounds how deeply a self-describing value may nest. A value
+// whose type is PtUnspecified is read back through TypedPropVal, so the two
+// functions call each other and a run of zero bytes drives one frame per two
+// bytes of input. Unbounded, a few megabytes of attacker bytes exceed the
+// goroutine stack, which is a runtime throw no caller can recover from. Real
+// values never nest; this cap is far above anything legitimate.
+const maxTypedValDepth = 100
+
+// errTypedValTooDeep reports a value nested past maxTypedValDepth.
+var errTypedValTooDeep = errors.New("typed property value nested past the depth limit")
+
 // TypedPropVal reads a value that carries its own type.
 func (p *Pull) TypedPropVal() (mapi.TypedPropVal, error) {
+	p.valDepth++
+	defer func() { p.valDepth-- }()
+	if p.valDepth > maxTypedValDepth {
+		return mapi.TypedPropVal{}, errTypedValTooDeep
+	}
 	typ, err := p.Uint16()
 	if err != nil {
 		return mapi.TypedPropVal{}, err

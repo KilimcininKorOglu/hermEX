@@ -40,20 +40,20 @@ certificate store with optional ACME issuance (`internal/tlscert`).
 
 ### Components
 
-| Layer             | Packages                                                                                                                                         |
-|-------------------|--------------------------------------------------------------------------------------------------------------------------------------------------|
-| MAPI core         | `internal/mapi` (property model), `internal/ext` (MS-wire serialization), `internal/ndr` (RPC NDR), `internal/lzxpress` (ROP buffer compression) |
-| Mailbox store     | `internal/objectstore` (sole store), `internal/ics` (IDSET/GLOBSET sync codec), `internal/publicfolder` (public store)                           |
-| Format conversion | `internal/oxcmail` (MIME to MAPI and back), `internal/oxcical` (iCalendar), `internal/oxvcard` (vCard), `internal/oxtask` (tasks), `internal/recurrence`, `internal/conversation`, `internal/mime`, `internal/smime` |
-| Protocol servers  | `internal/{smtp,imap,pop3,dav,activesync,ews,mapihttp,nspi,rop}`, transport codecs `internal/{rpchttp,wbxml,oxews,oxmapihttp}`, `internal/easpolicy` |
-| Mail flow         | `internal/mta` (delivery), `internal/relay` + `internal/spooler` (outbound), `internal/meeting`, `internal/fetchmail`                            |
-| Filtering         | `internal/antispam` (SPF/DKIM/DMARC + Bayes + rules), `internal/antivirus` (clamd), `internal/quarantine`                                        |
-| Security & TLS    | `internal/dkimsign`, `internal/mtasts`, `internal/dane`, `internal/tlsrpt`, `internal/tlscert` (per-SNI cert store + ACME), `internal/ssrfguard`  |
-| Abuse control     | `internal/authlimit` (failed-login lockout), `internal/httplimit` (per-client request cap); both are DB-backed and tunable without a restart      |
-| Directory & auth  | `internal/directory` (MariaDB-backed), `internal/ldapauth` + `internal/ldapsync` (AD/LDAP sync)                                                  |
-| Notifications     | `internal/notify` (publisher/consumer) + `internal/notifyd` (SSE relay), a wake bus for IDLE/Ping/streaming across daemons                       |
+| Layer             | Packages                                                                                                                                                                                                                                          |
+|-------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| MAPI core         | `internal/mapi` (property model), `internal/ext` (MS-wire serialization), `internal/ndr` (RPC NDR), `internal/lzxpress` (ROP buffer compression)                                                                                                  |
+| Mailbox store     | `internal/objectstore` (sole store), `internal/ics` (IDSET/GLOBSET sync codec), `internal/publicfolder` (public store)                                                                                                                            |
+| Format conversion | `internal/oxcmail` (MIME to MAPI and back), `internal/oxcical` (iCalendar), `internal/oxvcard` (vCard), `internal/oxtask` (tasks), `internal/recurrence`, `internal/conversation`, `internal/mime`, `internal/smime`                              |
+| Protocol servers  | `internal/{smtp,imap,pop3,dav,activesync,ews,mapihttp,nspi,rop}`, transport codecs `internal/{rpchttp,wbxml,oxews,oxmapihttp}`, `internal/easpolicy`                                                                                              |
+| Mail flow         | `internal/mta` (delivery), `internal/relay` + `internal/spooler` (outbound), `internal/meeting`, `internal/fetchmail`                                                                                                                             |
+| Filtering         | `internal/antispam` (SPF/DKIM/DMARC + Bayes + rules), `internal/antivirus` (clamd), `internal/quarantine`                                                                                                                                         |
+| Security & TLS    | `internal/dkimsign`, `internal/mtasts`, `internal/dane`, `internal/tlsrpt`, `internal/tlscert` (per-SNI cert store + ACME), `internal/ssrfguard`                                                                                                  |
+| Abuse control     | `internal/authlimit` (failed-login lockout), `internal/httplimit` (per-client request cap); both are DB-backed and tunable without a restart                                                                                                      |
+| Directory & auth  | `internal/directory` (MariaDB-backed), `internal/ldapauth` + `internal/ldapsync` (AD/LDAP sync)                                                                                                                                                   |
+| Notifications     | `internal/notify` (publisher/consumer) + `internal/notifyd` (SSE relay), a wake bus for IDLE/Ping/streaming across daemons                                                                                                                        |
 | Platform          | `internal/config`, `internal/serve` (HTTP daemon base), `internal/lifecycle` (graceful shutdown), `internal/logging` (Mongo sink), `internal/health`, `internal/migrate` (schema runner), `internal/buildinfo` (source stamp), `internal/tlstest` |
-| Web & admin       | `internal/webmail2` (React SPA) + `internal/webmail2api`, `internal/admin` (operator panel), `internal/gateway` (single-FQDN front door)         |
+| Web & admin       | `internal/webmail2` (React SPA) + `internal/webmail2api`, `internal/admin` (operator panel), `internal/gateway` (single-FQDN front door)                                                                                                          |
 
 ## Development
 
@@ -62,27 +62,27 @@ wraps `docker compose` and runs the toolchain in the dev container (the host Go
 toolchain has no MariaDB, so DB-backed tests skip and silently hide failures).
 There is no CI pipeline: `make gate` run locally is the only quality gate.
 
-| Target                    | What it does                                                        |
-|---------------------------|---------------------------------------------------------------------|
-| `make up`                 | Start the dev environment (MariaDB, Mongo, ClamAV, toolchain, every mail service) |
-| `make down`               | Stop the dev environment                                            |
-| `make build`              | Compile every command binary into `bin/`                            |
-| `make gate`               | `fmt-check` + `vet` + full test, the pre-commit gate                 |
-| `make test`               | Full test run in the dev container                                  |
-| `make test-host`          | Host quick-feedback run; DB-backed tests skip                       |
-| `make test-race`          | Race-detector run in the dev container                              |
-| `make fmt`                | `gofmt -w` over the source tree                                     |
-| `make fmt-check`          | Fail when any file needs `gofmt`                                    |
-| `make vet`                | `go vet`                                                            |
-| `make tidy`               | Sync `go.mod` / `go.sum`, downloading any new dependency             |
-| `make images`             | Rebuild every service image with the source stamp                   |
-| `make rebuild SVC=<name>` | Rebuild and restart one service                                     |
-| `make dump-db`            | Write a compressed dump of the whole directory database             |
-| `make restore-db DUMP=<file>` | Load a dump back                                                |
-| `make version`            | Report the source state a build would stamp                         |
-| `make compose-check`      | Validate the compose file syntax                                    |
-| `make clean`              | Remove built binaries                                               |
-| `make help`               | List every target                                                   |
+| Target                        | What it does                                                                      |
+|-------------------------------|-----------------------------------------------------------------------------------|
+| `make up`                     | Start the dev environment (MariaDB, Mongo, ClamAV, toolchain, every mail service) |
+| `make down`                   | Stop the dev environment                                                          |
+| `make build`                  | Compile every command binary into `bin/`                                          |
+| `make gate`                   | `fmt-check` + `vet` + full test, the pre-commit gate                              |
+| `make test`                   | Full test run in the dev container                                                |
+| `make test-host`              | Host quick-feedback run; DB-backed tests skip                                     |
+| `make test-race`              | Race-detector run in the dev container                                            |
+| `make fmt`                    | `gofmt -w` over the source tree                                                   |
+| `make fmt-check`              | Fail when any file needs `gofmt`                                                  |
+| `make vet`                    | `go vet`                                                                          |
+| `make tidy`                   | Sync `go.mod` / `go.sum`, downloading any new dependency                          |
+| `make images`                 | Rebuild every service image with the source stamp                                 |
+| `make rebuild SVC=<name>`     | Rebuild and restart one service                                                   |
+| `make dump-db`                | Write a compressed dump of the whole directory database                           |
+| `make restore-db DUMP=<file>` | Load a dump back                                                                  |
+| `make version`                | Report the source state a build would stamp                                       |
+| `make compose-check`          | Validate the compose file syntax                                                  |
+| `make clean`                  | Remove built binaries                                                             |
+| `make help`                   | List every target                                                                 |
 
 `test`, `test-host` and `test-race` all take `PKG=` and `RUN=` to narrow the run:
 
@@ -286,24 +286,24 @@ the operator panel. Every invocation takes `-config <file>` (default
 hermex-admin -config config.json <command> [args]
 ```
 
-| Command                                        | Purpose                                                     |
-|------------------------------------------------|-------------------------------------------------------------|
-| `ensure-schema`                                | Apply pending directory migrations and exit                 |
-| `create-domain <domain>`                       | Add a mail domain                                           |
-| `create-user <email> <password>`               | Add a mailbox                                               |
-| `create-alias <alias> <user-email>`            | Point an address at an existing mailbox                     |
-| `create-contact <email> <domain> [name]`       | Add an external mail contact to the address list            |
-| `update-contact <email> <name>`                | Rename a contact; an empty name clears it                   |
-| `delete-contact <email>`                       | Remove a contact                                            |
-| `list-contacts`                                | List every contact                                          |
-| `grant-admin <email> <system\|org\|domain> [id]` | Grant an admin role at the given scope                     |
-| `list-sessions <email>`                        | Show the account's live webmail and panel sessions          |
-| `revoke-sessions <email>`                      | End all of them; the compromise response                    |
-| `ldap-sync <org-id>`                           | Import an org's LDAP/AD accounts into the directory         |
-| `export-dkim <domain>`                         | Write the domain's DKIM private key to stdout               |
-| `sweep-content <email>`                        | Reclaim orphan content files; refuses while the mailbox is in use |
-| `prune-eml <email\|all> [days]`                | Drop cached wire copies older than N days (default 30)      |
-| `serve`                                        | Run the admin API and panel                                 |
+| Command                                          | Purpose                                                           |
+|--------------------------------------------------|-------------------------------------------------------------------|
+| `ensure-schema`                                  | Apply pending directory migrations and exit                       |
+| `create-domain <domain>`                         | Add a mail domain                                                 |
+| `create-user <email> <password>`                 | Add a mailbox                                                     |
+| `create-alias <alias> <user-email>`              | Point an address at an existing mailbox                           |
+| `create-contact <email> <domain> [name]`         | Add an external mail contact to the address list                  |
+| `update-contact <email> <name>`                  | Rename a contact; an empty name clears it                         |
+| `delete-contact <email>`                         | Remove a contact                                                  |
+| `list-contacts`                                  | List every contact                                                |
+| `grant-admin <email> <system\|org\|domain> [id]` | Grant an admin role at the given scope                            |
+| `list-sessions <email>`                          | Show the account's live webmail and panel sessions                |
+| `revoke-sessions <email>`                        | End all of them; the compromise response                          |
+| `ldap-sync <org-id>`                             | Import an org's LDAP/AD accounts into the directory               |
+| `export-dkim <domain>`                           | Write the domain's DKIM private key to stdout                     |
+| `sweep-content <email>`                          | Reclaim orphan content files; refuses while the mailbox is in use |
+| `prune-eml <email\|all> [days]`                  | Drop cached wire copies older than N days (default 30)            |
+| `serve`                                          | Run the admin API and panel                                       |
 
 The panel covers domains, users, aliases, mailing lists, delegates, devices, DKIM
 keys, DNS checks, the mail queue, quarantine, retention and the spam model. It is
@@ -344,11 +344,11 @@ admin panel, not on the command line.
 
 ## Layout
 
-| Path        | Purpose                                                                                                                                        |
-|-------------|------------------------------------------------------------------------------------------------------------------------------------------------|
-| `cmd/`      | Service executables (mta, imap, pop3, webmail2, dav, activesync, ews, mapihttp, gateway, notify, admin, fetchmail, antispam-bootstrap, antispam-rules) |
+| Path        | Purpose                                                                                                                                                 |
+|-------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `cmd/`      | Service executables (mta, imap, pop3, webmail2, dav, activesync, ews, mapihttp, gateway, notify, admin, fetchmail, antispam-bootstrap, antispam-rules)  |
 | `internal/` | Shared libraries: MAPI core, mailbox store, format conversion, protocol servers, mail flow, filtering, security/TLS, directory, notifications, platform |
-| `docker/`   | Dev and service container images                                                                                                               |
+| `docker/`   | Dev and service container images                                                                                                                        |
 
 ## Key facts
 
