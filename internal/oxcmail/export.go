@@ -238,11 +238,15 @@ func renderAlternative(plain string, html []byte, htmlCset string) (textproto.MI
 // optional content id, and base64-encoded data.
 func renderAttachment(att Attachment) (textproto.MIMEHeader, []byte) {
 	data, _ := bytesProp(att.Props, mapi.PrAttachDataBin)
-	mimeType := propString(att.Props, mapi.PrAttachMimeTag)
+	// These are client-written on every protocol and go straight into part header
+	// lines, which the multipart writer emits verbatim without validating them. A
+	// line break would start a header of the sender's choosing, or end the part
+	// header block and push the rest into the part body.
+	mimeType := headerLineBreaks.Replace(propString(att.Props, mapi.PrAttachMimeTag))
 	if mimeType == "" {
 		mimeType = "application/octet-stream"
 	}
-	filename := propString(att.Props, mapi.PrAttachLongFilename)
+	filename := headerParam(propString(att.Props, mapi.PrAttachLongFilename))
 
 	h := textproto.MIMEHeader{}
 	ct := mimeType
@@ -273,7 +277,7 @@ func renderAttachment(att Attachment) (textproto.MIMEHeader, []byte) {
 		disposition += "; filename=\"" + filename + "\""
 	}
 	h.Set("Content-Disposition", disposition)
-	if cid := propString(att.Props, mapi.PrAttachContentID); cid != "" {
+	if cid := headerParam(propString(att.Props, mapi.PrAttachContentID)); cid != "" {
 		h.Set("Content-ID", "<"+cid+">")
 	}
 	return h, body
@@ -603,6 +607,15 @@ func writeField(b *bytes.Buffer, name, value string) {
 
 // headerLineBreaks flattens the two characters that can end a header line.
 var headerLineBreaks = strings.NewReplacer("\r", " ", "\n", " ")
+
+// headerParamUnsafe prepares a client-written value for a quoted or bracketed MIME
+// header parameter. Line breaks are flattened for the same reason writeField
+// flattens them, and the quote, backslash and angle brackets are dropped so the
+// value cannot escape the delimiters it sits inside and add parameters of its own.
+var headerParamUnsafe = strings.NewReplacer("\r", " ", "\n", " ", `"`, "", `\`, "", "<", "", ">", "")
+
+// headerParam is headerParamUnsafe applied to one value.
+func headerParam(s string) string { return headerParamUnsafe.Replace(s) }
 
 // propString returns a string-typed property, or "" when absent or not a string.
 func propString(props mapi.PropertyValues, tag mapi.PropTag) string {
