@@ -59,7 +59,11 @@ func sendNotificationEnvelope(subID string, events []notifEvent) ([]byte, error)
 // the rest mirrors the pull/streaming path (resolve folders, snapshot baseline).
 func (s *Server) handlePushSubscribe(w http.ResponseWriter, req *pushSubscriptionReq, sess *session) {
 	if err := validateCallbackURL(req.URL, s.pushAllowInternal); err != nil {
-		writeSOAPFault(w, "ErrorInvalidSubscriptionRequest", "Subscribe: "+err.Error())
+		// The rejection reason names the address the callback resolved to, so
+		// returning it would let a subscriber use this endpoint to map internal
+		// addresses, which is what the guard exists to prevent. Keep the detail in
+		// the log and tell the client only that the callback was refused.
+		s.soapFault(w, "ErrorInvalidSubscriptionRequest", "Subscribe: the callback address was refused", err)
 		return
 	}
 	all := req.SubscribeToAllFolders
