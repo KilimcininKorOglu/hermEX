@@ -15,8 +15,12 @@ import (
 // byte; any recipients beyond 255 are not inlined (a client reads them with
 // RopReadRecipients, which is out of scope here).
 func writeRecipientTable(out *ext.Push, recipients []mapi.PropertyValues) {
-	out.Uint16(uint16(len(recipients))) // RecipientCount (total, not just inlined)
-	_ = out.PropTags(nil)               // RecipientColumns (empty)
+	// RecipientCount is a 16-bit field, so it saturates the way RowCount below
+	// saturates its byte: a stored message can hold more recipients than the field
+	// can name (an ICS import or a list expansion is not bound by the 16-bit count
+	// RopModifyRecipients uses), and wrapping would misstate the table's size.
+	out.Uint16(uint16(min(len(recipients), 0xFFFF))) // RecipientCount (total, not just inlined)
+	_ = out.PropTags(nil)                            // RecipientColumns (empty)
 	n := min(len(recipients), 0xFF)
 	out.Uint8(uint8(n)) // RowCount
 	for _, r := range recipients[:n] {
