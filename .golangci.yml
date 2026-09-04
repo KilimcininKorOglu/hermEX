@@ -13,7 +13,15 @@ issues:
 # Without these, a run reports third-party findings we cannot act on, and the
 # module cache breaks package loading outright.
 linters:
+  # The project rule caps every function at a cyclomatic complexity of 10 and
+  # forbids raising or suppressing that limit, but nothing measured it: the v2
+  # default set has no complexity linter, and lint is deliberately outside the
+  # commit gate, so functions grew past the cap with no signal anywhere.
+  enable:
+    - gocyclo
   settings:
+    gocyclo:
+      min-complexity: 10
     errcheck:
       # Teardown reached through the standard interfaces. Their error arrives after
       # the outcome is already decided, so there is nothing to do with it and
