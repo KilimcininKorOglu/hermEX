@@ -12,7 +12,8 @@ import (
 // eventsPollInterval is how often an open Server-Sent Events stream samples the
 // caller's inbox for changes. Each tick either pushes a change event or a heartbeat
 // comment, so it doubles as the keep-alive.
-const eventsPollInterval = 10 * time.Second
+// It is a var so a test can shorten it; production never assigns it.
+var eventsPollInterval = 10 * time.Second
 
 // inboxDelta classifies a change in the inbox counts into the SSE event the SPA
 // listens for, or "" when nothing actionable changed. The first observation
@@ -63,6 +64,13 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case <-ticker.C:
+			// Re-check the session every tick. A stream opened once would otherwise
+			// keep reporting the mailbox's activity for its whole lifetime, past a
+			// logout elsewhere, an admin revoke, a password change, or the token's own
+			// expiry, none of which are seen again after the open.
+			if _, ok := s.session(r); !ok {
+				return
+			}
 			event := ""
 			if c.Mailbox != "" {
 				// Open-count-close per tick (as the push poller does) so the stream
