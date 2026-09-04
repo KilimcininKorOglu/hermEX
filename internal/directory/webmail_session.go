@@ -122,3 +122,15 @@ func (d *SQLDirectory) DeleteWebmailSession(email, jti string) (bool, error) {
 	n, err := res.RowsAffected()
 	return n > 0, err
 }
+
+// PurgeExpiredWebmailSessions deletes every session whose expiry has passed. The
+// active and listing queries already filter on expiry, so an expired row is inert;
+// without this sweep it simply accumulates, one per login that ended by the browser
+// closing rather than by an explicit logout. It reports how many rows it removed.
+func (d *SQLDirectory) PurgeExpiredWebmailSessions(now int64) (int64, error) {
+	res, err := d.db.Exec(`DELETE FROM webmail_sessions WHERE expires_at <= ?`, now)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

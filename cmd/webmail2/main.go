@@ -135,6 +135,7 @@ func main() {
 	defer stop()
 	// Web push: poll push subscribers' inboxes and notify their devices of new mail.
 	api.StartPushPoller(ctx, 15*time.Second)
+	go runWebmailSessionPrune(ctx, dir, logger)
 	log.Printf("hermex-webmail2 listening on %s", addr)
 	checks := []health.Check{{Name: "directory", Probe: db.PingContext}}
 	if provider.TLSEnabled() {
@@ -172,5 +173,38 @@ func runWebmailSizeMaintenance(logger *logging.Logger, read func() (directory.Si
 	defer tick.Stop()
 	for range tick.C {
 		applyWebmailSizeLimit(logger, read, setRequestBody, setFreeBusyTargets)
+	}
+}
+
+// runWebmailSessionPrune deletes expired webmail session rows once a minute. Every
+// read already filters on expiry, so an expired row is inert, but nothing removed it:
+// each login that ended by the browser closing rather than by an explicit logout left
+// a row behind forever. Guarded so several instances do not scan the same table at
+// once; a refusal or a lock error simply skips this pass.
+func runWebmailSessionPrune(ctx context.Context, dir *directory.SQLDirectory, logger *logging.Logger) {
+	sweep := func() {
+		release, ok, err := dir.TryLock(ctx, directory.LockWebmailSessionPrune)
+		if err != nil {
+			logger.Info(logging.Webmail, "session.prune.lock.fail", logging.Fields{"error": err.Error()})
+			return
+		}
+		if !ok {
+			return
+		}
+		defer release()
+		if _, err := dir.PurgeExpiredWebmailSessions(time.Now().Unix()); err != nil {
+			logger.Info(logging.Webmail, "session.prune.fail", logging.Fields{"error": err.Error()})
+		}
+	}
+	sweep()
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			sweep()
+		}
 	}
 }

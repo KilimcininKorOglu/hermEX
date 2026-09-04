@@ -25,6 +25,14 @@ const (
 	// the same stale watermark and each sends a full digest, with its own valid
 	// release links. The watermark alone dedups passes that do not overlap.
 	LockDigest = "hermex_quarantine_digest"
+	// LockWebmailSessionPrune and LockAdminSessionPrune guard the two expired-session
+	// sweeps. The delete itself is idempotent, so a second pass is harmless; the locks
+	// keep several instances from running the same scan against one database every
+	// minute. They are separate names because each daemon prunes only its own table,
+	// and one shared name would let whichever instance won leave the other table
+	// untouched.
+	LockWebmailSessionPrune = "hermex_webmail_session_prune"
+	LockAdminSessionPrune   = "hermex_admin_session_prune"
 )
 
 // TryLock takes the named advisory lock without waiting and returns a function

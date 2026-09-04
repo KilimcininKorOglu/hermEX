@@ -91,3 +91,14 @@ func (d *SQLDirectory) ListAdminSessions(login string, now int64) ([]AdminSessio
 	}
 	return out, rows.Err()
 }
+
+// PurgeExpiredAdminSessions deletes every panel session whose expiry has passed, for
+// the same reason its webmail counterpart does: an expired row is already inert, but
+// nothing removed it, so the table only grew.
+func (d *SQLDirectory) PurgeExpiredAdminSessions(now int64) (int64, error) {
+	res, err := d.db.Exec(`DELETE FROM admin_sessions WHERE expires_at <= ?`, now)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}

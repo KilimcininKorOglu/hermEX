@@ -328,6 +328,7 @@ func main() {
 		}
 		// Enforce the operator's Recoverable Items retention window across mailboxes.
 		go runRecoverableRetention(ctx, dir)
+		go runAdminSessionPrune(ctx, dir)
 		log.Printf("hermex-admin serving the admin API on %s", addr)
 		// The same liveness and readiness contract every other daemon serves. This
 		// one is the consumer of all of theirs for the Live monitor, and had none of
@@ -716,4 +717,37 @@ func revokeSessions(dir *directory.SQLDirectory, email string) {
 		log.Fatalf("hermex-admin: revoke panel sessions: %v", err)
 	}
 	fmt.Printf("revoked %d webmail and %d panel session(s) for %s\n", web, panel, email)
+}
+
+// runAdminSessionPrune deletes expired panel session rows once a minute, for the
+// same reason the webmail sweep exists: every read already filters on expiry, so an
+// expired row is inert, but nothing removed it and the table only grew. Guarded so
+// several instances do not scan the same table at once; a refusal or a lock error
+// simply skips this pass.
+func runAdminSessionPrune(ctx context.Context, dir *directory.SQLDirectory) {
+	sweep := func() {
+		release, ok, err := dir.TryLock(ctx, directory.LockAdminSessionPrune)
+		if err != nil {
+			log.Printf("hermex-admin: session prune lock: %v", err)
+			return
+		}
+		if !ok {
+			return
+		}
+		defer release()
+		if _, err := dir.PurgeExpiredAdminSessions(time.Now().Unix()); err != nil {
+			log.Printf("hermex-admin: prune expired sessions: %v", err)
+		}
+	}
+	sweep()
+	t := time.NewTicker(time.Minute)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			sweep()
+		}
+	}
 }
