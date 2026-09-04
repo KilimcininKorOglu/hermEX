@@ -2,6 +2,7 @@ package webmail2api
 
 import (
 	"encoding/json"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -39,6 +40,11 @@ type noteJSON struct {
 	Body  string `json:"body"`
 	Color int    `json:"color,omitempty"` // PidLidNoteColor: 0 blue, 1 green, 2 pink, 3 yellow, 4 white
 }
+
+// fitsMAPILong reports whether a JSON integer fits the 32-bit MAPI long it is
+// about to be stored in. JSON carries no width, so a value beyond int32 would
+// otherwise wrap on assignment and land as a different, valid-looking setting.
+func fitsMAPILong(v int) bool { return v >= math.MinInt32 && v <= math.MaxInt32 }
 
 // propString returns a message property as a string (props may hold string or
 // []byte for text values).
@@ -335,7 +341,7 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 	props.Set(mapi.PrBody, in.Body)
 	// Color 0 means unset; an absent PidLidNoteColor reads back as yellow (3),
 	// the Outlook default. A non-zero color is stamped explicitly.
-	if in.Color != 0 {
+	if in.Color != 0 && fitsMAPILong(in.Color) {
 		if tag, err := noteColorTag(st, true); err == nil && tag != 0 {
 			props.Set(tag, int32(in.Color))
 		}
@@ -370,7 +376,7 @@ func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 	props.Set(mapi.PrMessageClass, "IPM.StickyNote")
 	props.Set(mapi.PrSubject, in.Title)
 	props.Set(mapi.PrBody, in.Body)
-	if in.Color != 0 {
+	if in.Color != 0 && fitsMAPILong(in.Color) {
 		if tag, err := noteColorTag(st, true); err == nil && tag != 0 {
 			props.Set(tag, int32(in.Color))
 		}

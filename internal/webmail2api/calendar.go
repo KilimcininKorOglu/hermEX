@@ -936,7 +936,7 @@ func storeEvent(st *objectstore.Store, e eventJSON, folderID int64) (string, err
 	// BusyStatus is set directly as a named prop because the iCal TRANSP/STATUS
 	// path oxcical imports from cannot express all four values (oof has no iCal
 	// mapping); the SPA's choice is authoritative, so override the import default.
-	if e.BusyStatus != nil {
+	if e.BusyStatus != nil && fitsMAPILong(*e.BusyStatus) {
 		if tag, err := busyStatusTag(st, true); err == nil && tag != 0 {
 			var props mapi.PropertyValues
 			props.Set(tag, int32(*e.BusyStatus))

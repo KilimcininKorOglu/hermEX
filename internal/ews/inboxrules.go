@@ -2,6 +2,7 @@ package ews
 
 import (
 	"encoding/xml"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -502,6 +503,12 @@ func rulePatchFromWire(r ewsRule, index int) (objectstore.RulePatch, ruleOperati
 	acts, ok := blocksFromActions(*r.Actions)
 	if !ok {
 		return objectstore.RulePatch{}, ruleOpError(index, "Actions", "UnsupportedRule", "rule action is not supported"), false
+	}
+	// Priority is the rule's evaluation order and is stored as a 32-bit sequence.
+	// The wire value is not bound by that width, so refuse one that does not fit
+	// rather than wrapping a high priority into a low one.
+	if r.Priority < math.MinInt32 || r.Priority > math.MaxInt32 {
+		return objectstore.RulePatch{}, ruleOpError(index, "Priority", "InvalidValueForProperty", "rule priority is out of range"), false
 	}
 	name := r.DisplayName
 	seq := int32(r.Priority)

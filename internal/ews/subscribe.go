@@ -62,6 +62,10 @@ const (
 	errSubAccess  subError = "ErrorAccessDenied"
 )
 
+// maxSubscriptionTimeoutMin is the upper bound [MS-OXWSNTIF] 2.2.4.24 puts on a
+// pull subscription's Timeout, in minutes (24 hours).
+const maxSubscriptionTimeoutMin = 1440
+
 // --- request types ---
 
 type subscribeRequest struct {
@@ -204,9 +208,13 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, inner []byte, sess *sess
 		return
 	}
 
-	timeoutMin := sub.Timeout
-	if timeoutMin <= 0 {
-		timeoutMin = 30 // the reference's default pull timeout
+	// [MS-OXWSNTIF] 2.2.4.24 bounds a pull subscription's Timeout to 1..1440
+	// minutes. The value is the client's, and it decides how long the server holds
+	// the subscription: unbounded, it both outlives any session and overflows the
+	// 32-bit field the id carries, so a caller could pin state indefinitely.
+	timeoutMin := min(max(sub.Timeout, 1), maxSubscriptionTimeoutMin)
+	if sub.Timeout <= 0 {
+		timeoutMin = 30 // the default pull timeout
 	}
 	id := s.registerSubscription(sess, streaming, allFolders, folderIDs, parseEventWants(sub.EventTypes.Types), timeoutMin, snap)
 
