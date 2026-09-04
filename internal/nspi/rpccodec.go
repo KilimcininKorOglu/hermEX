@@ -310,7 +310,9 @@ func pullPropValNDR(p *ndr.Pull) (mapi.TaggedPropVal, error) {
 		return tv, err
 	}
 	tv.Tag = mapi.PropTag(tag)
-	if uint16(ptype) != uint16(mapi.PropTag(tag).Type()) {
+	// Compare the full 32 bits the wire carried. PropType is 16 bits, so a
+	// truncating comparison ignored whatever the client put in the high half.
+	if ptype != uint32(mapi.PropTag(tag).Type()) {
 		return tv, fmt.Errorf("%w: property value type %#x != tag type %#x", ndr.ErrFormat, ptype, uint32(mapi.PropTag(tag).Type()))
 	}
 	switch mapi.PropTag(tag).Type() {

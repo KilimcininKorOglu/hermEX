@@ -2,6 +2,7 @@ package nspi
 
 import (
 	"fmt"
+	"math"
 
 	"hermex/internal/mapi"
 	"hermex/internal/ndr"
@@ -44,6 +45,12 @@ func pullRestrictionDepth(p *ndr.Pull, depth int) (mapi.Restriction, error) {
 	}
 	if resType2 != resType {
 		return mapi.Restriction{}, fmt.Errorf("%w: restriction type %d != union type %d", ndr.ErrFormat, resType, resType2)
+	}
+	// The wire carries the discriminant in 32 bits and RestrictionType is 8, so a
+	// value above the byte range would truncate into a structural kind the switch
+	// below accepts, and the node would then be parsed with the wrong layout.
+	if resType > math.MaxUint8 {
+		return mapi.Restriction{}, fmt.Errorf("%w: restriction type %#x out of range", ndr.ErrFormat, resType)
 	}
 	r := mapi.Restriction{Type: mapi.RestrictionType(resType)}
 	switch r.Type {
@@ -116,6 +123,11 @@ func pullRestrictionDepth(p *ndr.Pull, depth int) (mapi.Restriction, error) {
 		relop, err := p.Uint32()
 		if err != nil {
 			return r, err
+		}
+		// Relop is 8 bits, so an out-of-range wire value would truncate into a
+		// different, valid comparison rather than being refused.
+		if relop > math.MaxUint8 {
+			return r, fmt.Errorf("%w: relational operator %#x out of range", ndr.ErrFormat, relop)
 		}
 		pr.Relop = mapi.Relop(relop)
 		tag, err := p.Uint32()
