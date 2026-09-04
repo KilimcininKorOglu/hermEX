@@ -396,14 +396,22 @@ func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 	// each attendee's response from its recipient row.
 	respTag, _ := responseStatusTag(st, false)
 	for _, cal := range listCalendars(st) {
-		objs, err := st.ListFolderObjects(calendarFolderID(cal.ID))
+		fid := calendarFolderID(cal.ID)
+		var objs []objectstore.FolderObject
+		var err error
+		if windowed {
+			// The store applies the window, so the export below runs only for the
+			// objects that survive it. Reading each object's properties back to
+			// compare two times costs a query per object and grows with the calendar,
+			// not with the answer.
+			objs, err = st.ListFolderObjectsInWindow(fid, winStartTag, winEndTag, winStart, winEnd)
+		} else {
+			objs, err = st.ListFolderObjects(fid)
+		}
 		if err != nil {
 			continue
 		}
 		for _, o := range objs {
-			if windowed && !objectInWindow(st, o.ID, winStartTag, winEndTag, winStart, winEnd) {
-				continue
-			}
 			msg, err := st.OpenMessage(o.ID)
 			if err != nil {
 				continue
@@ -470,26 +478,6 @@ func eventWindow(r *http.Request) (start, end time.Time, windowed bool) {
 		return time.Time{}, time.Time{}, false
 	}
 	return s, e, true
-}
-
-// objectInWindow reports whether the appointment's [start,end] overlaps
-// [winStart,winEnd). It reads the start/end named props directly, so an
-// out-of-range object is pruned before the costly iCal export. An object with no
-// readable start is kept (fail open) so an untimed item is never hidden.
-func objectInWindow(st *objectstore.Store, id int64, startTag, endTag mapi.PropTag, winStart, winEnd time.Time) bool {
-	props, err := st.GetMessageProperties(id)
-	if err != nil {
-		return true
-	}
-	start := propTime(props, startTag)
-	if start.IsZero() {
-		return true
-	}
-	end := propTime(props, endTag)
-	if end.IsZero() {
-		end = start
-	}
-	return start.Before(winEnd) && !end.Before(winStart)
 }
 
 func (s *Server) handleCreateEvent(w http.ResponseWriter, r *http.Request) {

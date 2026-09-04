@@ -403,7 +403,7 @@ func (s *Server) reportCalMultiget(w http.ResponseWriter, st *objectstore.Store,
 // limit-recurrence-set / limit-freebusy-set, RFC 4791 §9.6) shape each member's
 // returned data; the filter still matches against the master span.
 func (s *Server) reportCalQueryOrSync(w http.ResponseWriter, st *objectstore.Store, user, coll string, fid int64, sinceToken uint64, sync bool, filt *filter, cd *calDataReq) {
-	objs, err := st.ListFolderObjects(fid)
+	objs, err := calQueryObjects(st, fid, sync, filt)
 	if err != nil {
 		s.davError(w, err, http.StatusInternalServerError)
 		return
@@ -513,4 +513,50 @@ func parseSyncToken(token string) uint64 {
 		return 0
 	}
 	return n
+}
+
+// calQueryObjects lists the members a calendar-query has to consider. When the
+// request is the ordinary "give me the VEVENTs in this range" query, the store
+// applies the range and the loop never builds calendar-data for an object outside
+// it; every other shape (a sync-collection, a filter over several components, an
+// is-not-defined branch, an unparseable bound) falls back to the full listing.
+//
+// The pre-filter is sound only because compSatisfies ANDs its child comp-filters:
+// with exactly one VEVENT child carrying the range, an object that fails the range
+// fails the whole filter. It is also wider than that test, so an object it keeps is
+// still judged by calendarMatches.
+func calQueryObjects(st *objectstore.Store, fid int64, sync bool, filt *filter) ([]objectstore.FolderObject, error) {
+	tr, ok := soleEventTimeRange(sync, filt)
+	if !ok {
+		return st.ListFolderObjects(fid)
+	}
+	start, okS := parseFilterTime(tr.Start)
+	end, okE := parseFilterTime(tr.End)
+	if !okS || !okE {
+		return st.ListFolderObjects(fid)
+	}
+	startTag, endTag, ok := st.AppointmentTimeTags()
+	if !ok {
+		return st.ListFolderObjects(fid)
+	}
+	return st.ListFolderObjectsInWindow(fid, startTag, endTag, start, end)
+}
+
+// soleEventTimeRange returns the time-range of a filter shaped exactly as
+// VCALENDAR > VEVENT[time-range], the query every calendar client sends for a view.
+// Any other shape reports false, because only this one lets the range decide the
+// whole filter.
+func soleEventTimeRange(sync bool, filt *filter) (*timeRange, bool) {
+	if sync || filt == nil || len(filt.CompFilters) != 1 {
+		return nil, false
+	}
+	cal := filt.CompFilters[0]
+	if cal.IsNotDefined != nil || !strings.EqualFold(cal.Name, "VCALENDAR") || len(cal.CompFilters) != 1 {
+		return nil, false
+	}
+	ev := cal.CompFilters[0]
+	if ev.IsNotDefined != nil || !strings.EqualFold(ev.Name, "VEVENT") || ev.TimeRange == nil {
+		return nil, false
+	}
+	return ev.TimeRange, true
 }

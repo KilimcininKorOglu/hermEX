@@ -1,6 +1,11 @@
 package objectstore
 
-import "database/sql"
+import (
+	"database/sql"
+	"time"
+
+	"hermex/internal/mapi"
+)
 
 // FolderObject is one stored object as the object/DAV layer sees it: its EID plus
 // an opaque monotonic version (the change number) used as the DAV ETag and the
@@ -23,6 +28,68 @@ func (s *Store) ListFolderObjects(folderID int64) ([]FolderObject, error) {
 		`SELECT message_id, change_number FROM messages
 		 WHERE parent_fid=? AND is_deleted=0 AND is_associated=0
 		 ORDER BY message_id`, folderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []FolderObject
+	for rows.Next() {
+		var id, cn int64
+		if err := rows.Scan(&id, &cn); err != nil {
+			return nil, err
+		}
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		out = append(out, FolderObject{ID: id, ChangeNumber: uint64(cn)})
+	}
+	return out, rows.Err()
+}
+
+// AppointmentTimeTags resolves the two PtSysTime named properties an appointment's
+// span lives in, PidLidAppointmentStartWhole and PidLidAppointmentEndWhole, to this
+// store's tags. It reports ok=false when the store has never allocated them, which
+// is the state of a mailbox that holds no appointment yet; a caller then falls back
+// to its unwindowed path rather than filtering on a tag that matches nothing.
+// It never allocates, because a read must not write to the store.
+func (s *Store) AppointmentTimeTags() (start, end mapi.PropTag, ok bool) {
+	ids, err := s.GetNamedPropIDs(false, []mapi.PropertyName{
+		mapi.NameAppointmentStartWhole,
+		mapi.NameAppointmentEndWhole,
+	})
+	if err != nil || len(ids) != 2 || ids[0] == 0 || ids[1] == 0 {
+		return 0, 0, false
+	}
+	return mapi.MakeTag(ids[0], mapi.PtSysTime), mapi.MakeTag(ids[1], mapi.PtSysTime), true
+}
+
+// ListFolderObjectsInWindow returns the folder's live, non-associated objects whose
+// [startTag, endTag] span can overlap [start, end), resolved by the store instead of
+// by the caller. It is the enumeration primitive for a calendar range request: the
+// alternative is to list every object in the folder and read each one's properties
+// back to compare two times, which costs one query per object and materializes
+// property bags for objects the caller is about to discard.
+//
+// The window is DELIBERATELY WIDER than any caller's own filter, so it can never
+// change a result. An object whose start property is absent is returned, because the
+// callers disagree about what an undated object means and only they can decide.
+// endTag is optional (a zero tag, or a missing value, reads as an instant at start).
+// A caller keeps its own exact filter and applies it to what comes back; this only
+// removes objects every filter would remove anyway.
+//
+// startTag and endTag are PtSysTime named-property tags, stored as NT FILETIME
+// integers, which is what makes the comparison a plain SQL range predicate.
+func (s *Store) ListFolderObjectsInWindow(folderID int64, startTag, endTag mapi.PropTag, start, end time.Time) ([]FolderObject, error) {
+	// #nosec G115 -- an NT FILETIME crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	winStart, winEnd := int64(mapi.UnixToNTTime(start)), int64(mapi.UnixToNTTime(end))
+	rows, err := s.objdb.Query(
+		`SELECT m.message_id, m.change_number
+		   FROM messages m
+		   LEFT JOIN message_properties ps ON ps.message_id = m.message_id AND ps.proptag = ?
+		   LEFT JOIN message_properties pe ON pe.message_id = m.message_id AND pe.proptag = ?
+		  WHERE m.parent_fid = ? AND m.is_deleted = 0 AND m.is_associated = 0
+		    AND (ps.propval IS NULL
+		         OR (ps.propval < ? AND COALESCE(pe.propval, ps.propval) >= ?))
+		  ORDER BY m.message_id`,
+		int64(uint32(startTag)), int64(uint32(endTag)), folderID, winEnd, winStart)
 	if err != nil {
 		return nil, err
 	}

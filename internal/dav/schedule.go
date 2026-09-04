@@ -269,7 +269,7 @@ func attendeeFreeBusy(mailboxPath, organizer, recipient string, rangeStart, rang
 // iCalendar PERIOD strings for a VFREEBUSY (RFC 4791 §7.10). okS/okE mark which
 // bounds are set; an unset bound leaves that side open.
 func busyPeriods(st *objectstore.Store, fid int64, rangeStart, rangeEnd time.Time, okS, okE bool) ([]string, error) {
-	objs, err := st.ListFolderObjects(fid)
+	objs, err := folderObjectsForRange(st, fid, rangeStart, rangeEnd, okS, okE)
 	if err != nil {
 		return nil, err
 	}
@@ -397,4 +397,20 @@ func maxFreeBusyTargets() int {
 		return int(n)
 	}
 	return defaultFreeBusyTargets
+}
+
+// folderObjectsForRange lists a calendar folder's objects, letting the store apply
+// the range when both bounds are set. The store's window is wider than the exact
+// span test each caller runs afterwards, so this only skips objects that test would
+// skip too. It matters because the exact test needs the object's iCalendar, and
+// exporting one per object costs the whole calendar on every free-busy request.
+func folderObjectsForRange(st *objectstore.Store, fid int64, rangeStart, rangeEnd time.Time, okS, okE bool) ([]objectstore.FolderObject, error) {
+	if !okS || !okE {
+		return st.ListFolderObjects(fid) // an open-ended range bounds nothing
+	}
+	startTag, endTag, ok := st.AppointmentTimeTags()
+	if !ok {
+		return st.ListFolderObjects(fid)
+	}
+	return st.ListFolderObjectsInWindow(fid, startTag, endTag, rangeStart, rangeEnd)
 }

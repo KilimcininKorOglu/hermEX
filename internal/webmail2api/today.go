@@ -104,8 +104,6 @@ func inboxUnread(st *objectstore.Store, n int) (int, []todayMail) {
 // It reads PidLidAppointmentStartWhole/EndWhole/SubType directly (no per-item iCal
 // export), so the dashboard is cheap even for a large calendar.
 func appointmentsOn(st *objectstore.Store, dayStart, dayEnd time.Time) []todayItem {
-	objs, _ := st.ListFolderObjects(mapi.PrivateFIDCalendar)
-	out := make([]todayItem, 0, len(objs))
 	ids, _ := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole, mapi.NameAppointmentSubType})
 	var startTag, endTag, subTag mapi.PropTag
 	if len(ids) == 3 {
@@ -113,8 +111,19 @@ func appointmentsOn(st *objectstore.Store, dayStart, dayEnd time.Time) []todayIt
 		endTag = mapi.MakeTag(ids[1], mapi.PtSysTime)
 		subTag = mapi.MakeTag(ids[2], mapi.PtBoolean)
 	}
+	// Let the store apply the day window. Its predicate is wider than the one
+	// below (it keeps a span that merely overlaps, and an object with no start),
+	// so the exact test still runs, but it runs over the day rather than over the
+	// whole calendar.
+	var objs []objectstore.FolderObject
+	if startTag != 0 && endTag != 0 {
+		objs, _ = st.ListFolderObjectsInWindow(mapi.PrivateFIDCalendar, startTag, endTag, dayStart, dayEnd)
+	} else {
+		objs, _ = st.ListFolderObjects(mapi.PrivateFIDCalendar)
+	}
+	out := make([]todayItem, 0, len(objs))
 	for _, o := range objs {
-		props, err := st.GetMessageProperties(o.ID)
+		props, err := st.GetMessageProperties(o.ID, mapi.PrSubject, startTag, endTag, subTag)
 		if err != nil {
 			continue
 		}
