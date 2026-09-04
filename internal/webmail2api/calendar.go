@@ -770,11 +770,16 @@ func buildMeetingRequest(organizer string, e eventJSON) ([]byte, []string, error
 	seen := map[string]bool{}
 	add := func(list []string, optional bool) {
 		for _, a := range list {
-			addr := strings.TrimSpace(a)
-			if parsed, err := mail.ParseAddress(addr); err == nil {
-				addr = parsed.Address
+			// Drop what does not parse rather than carrying the raw string forward.
+			// It reaches the invite's To header and the iCal ATTENDEE line, so an
+			// entry holding a line break would splice headers of the organizer's
+			// choosing into a message the server relays externally, or end the header
+			// block and push the rest into the body.
+			parsed, err := mail.ParseAddress(strings.TrimSpace(a))
+			if err != nil {
+				continue
 			}
-			addr = strings.ToLower(addr)
+			addr := strings.ToLower(parsed.Address)
 			if addr == "" || seen[addr] || addr == strings.ToLower(organizer) {
 				continue
 			}
