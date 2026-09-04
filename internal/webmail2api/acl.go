@@ -50,6 +50,7 @@ func (s *Server) aclStore(w http.ResponseWriter, r *http.Request, c sessionClaim
 	}
 	st, err := objectstore.Open(c.Mailbox)
 	if err != nil {
+		logError("acl-open-store", err, logging.Fields{"user": c.Email})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return nil, false
 	}
@@ -83,6 +84,7 @@ func (s *Server) handleGetACL(w http.ResponseWriter, r *http.Request) {
 	}
 	entries, err := st.ListPermissions(fid)
 	if err != nil {
+		logError("acl-list", err, logging.Fields{"user": c.Email, "folder": fid})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not read permissions"})
 		return
 	}

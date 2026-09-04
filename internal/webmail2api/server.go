@@ -389,6 +389,11 @@ func (s *Server) openStore(w http.ResponseWriter, r *http.Request) (*objectstore
 	}
 	st, err := objectstore.Open(c.Mailbox)
 	if err != nil {
+		logError("open-store", err, logging.Fields{"user": c.Email})
+		// The client is told only that the mailbox is unavailable, so this line is
+		// the operator's only trace of why. A store that will not open is an
+		// infrastructure fault (a corrupt database, a failing disk, a held lock),
+		// exactly the class that cannot be diagnosed from the status alone.
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
 		return nil, sessionClaims{}, false
 	}

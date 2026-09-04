@@ -505,6 +505,7 @@ func (s *Server) handleCreateEvent(w http.ResponseWriter, r *http.Request) {
 	defer st.Close()
 	uid, err := storeEvent(st, in, calendarFolderID(in.CalendarID))
 	if err != nil {
+		logError("calendar-save", err, logging.Fields{"calendar": in.CalendarID})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save event"})
 		return
 	}
