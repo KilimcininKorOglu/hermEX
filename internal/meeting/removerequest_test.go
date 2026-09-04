@@ -1,6 +1,7 @@
 package meeting
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -162,5 +163,33 @@ func responseName(r int32) string {
 		return "tentative"
 	default:
 		return "declined"
+	}
+}
+
+// TestRespondSurvivesAFailedCleanup is the ordering guarantee. The cleanup runs
+// after the response is recorded, the appointment booked and the organizer told, so
+// a failure there must not report failure for work that already completed: a client
+// that retried would send the organizer a second reply.
+func TestRespondSurvivesAFailedCleanup(t *testing.T) {
+	st, err := objectstore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.SetMeetingConfig(objectstore.MeetingConfig{RemoveRequestOnResponse: true}); err != nil {
+		t.Fatal(err)
+	}
+	removeHook = func() error { return errors.New("the mailbox refused the move") }
+	t.Cleanup(func() { removeHook = nil })
+
+	reqID := appendRequest(t, st)
+	if _, err := Respond(st, nil, nil, "alice@hermex.test", reqID, ResponseAccepted, false); err != nil {
+		t.Fatalf("a failed cleanup failed the whole response: %v", err)
+	}
+	if n := folderCount(t, st, int64(mapi.PrivateFIDInbox)); n != 1 {
+		t.Errorf("Inbox holds %d messages, want the request left where it was", n)
+	}
+	if n := folderCount(t, st, int64(mapi.PrivateFIDCalendar)); n != 1 {
+		t.Errorf("Calendar holds %d appointments, want the booking to have stood", n)
 	}
 }

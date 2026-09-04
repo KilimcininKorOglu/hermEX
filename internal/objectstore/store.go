@@ -174,6 +174,13 @@ func (s *Store) logStoreError(op string, err error) {
 	})
 }
 
+// LogSwallowedError records a store failure a caller deliberately did not
+// propagate. A best-effort step that keeps failing would otherwise leave the
+// operator's log showing a clean run, so the step stays optional while its failure
+// stays visible. Pass only infrastructure failures, the same class logStoreError
+// takes; a logical outcome such as ErrNotFound does not belong here.
+func (s *Store) LogSwallowedError(op string, err error) { s.logStoreError(op, err) }
+
 // dsn builds the modernc.org/sqlite connection string with the pragmas applied
 // on every pooled connection: a busy timeout, WAL journaling, enforced foreign
 // keys, and FULL synchronous mode for durability.

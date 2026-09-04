@@ -117,11 +117,20 @@ func Respond(st *objectstore.Store, accounts directory.Accounts, spool *relay.Sp
 			return 0, err
 		}
 	}
+	// The cleanup is a courtesy and runs after the response is already recorded,
+	// the appointment booked or removed, and the organizer told. Failing the call
+	// here would report failure for work that completed, and a client retry would
+	// send the organizer a second reply, so the failure is logged and swallowed.
 	if err := removeRequestMail(st, messageID); err != nil {
-		return 0, err
+		st.LogSwallowedError("meeting.remove-request", err)
 	}
 	return calendarID, nil
 }
+
+// removeHook fails the request cleanup on demand, so a test can prove a failure
+// there does not fail the response. Production never assigns it; it mirrors the
+// seams the object store keeps on its backup and regeneration paths.
+var removeHook func() error
 
 // removeRequestMail takes the answered request out of the Inbox when the mailbox
 // asks for it, the way Outlook's "delete meeting requests and notifications from
@@ -133,6 +142,11 @@ func Respond(st *objectstore.Store, accounts directory.Accounts, spool *relay.Sp
 // left alone; so is one already sitting in Deleted Items, because moving a message
 // onto itself would allocate a new UID for no reason.
 func removeRequestMail(st *objectstore.Store, messageID int64) error {
+	if removeHook != nil {
+		if err := removeHook(); err != nil {
+			return err
+		}
+	}
 	cfg, err := st.GetMeetingConfig()
 	if err != nil || !cfg.RemoveRequestOnResponse {
 		return err
