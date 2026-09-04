@@ -81,6 +81,7 @@ func (s *Store) ReindexFolder(folderID int64) error {
 		if err != nil {
 			return err
 		}
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		mid := midString(uint64(id))
 		eml, err := oxcmail.Export(msg, oxcmail.Options{Resolver: s.GetNamedPropIDs})
 		if err != nil {

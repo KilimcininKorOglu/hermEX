@@ -939,6 +939,7 @@ func storeEvent(st *objectstore.Store, e eventJSON, folderID int64) (string, err
 	if e.BusyStatus != nil && fitsMAPILong(*e.BusyStatus) {
 		if tag, err := busyStatusTag(st, true); err == nil && tag != 0 {
 			var props mapi.PropertyValues
+			// #nosec G115 -- the fitsMAPILong guard on the same line refuses a value the property cannot carry
 			props.Set(tag, int32(*e.BusyStatus))
 			_ = st.SetMessageProperties(id, props)
 		}

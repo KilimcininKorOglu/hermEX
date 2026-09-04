@@ -336,6 +336,7 @@ func ParseHeader(buf []byte) (Header, error) {
 // with a trailer alignment); v1 emits no auth verifier (auth_length 0).
 func Frame(typ, flags uint8, callID uint32, body []byte) []byte {
 	p := NewPush()
+	// #nosec G115 -- the body is a fragment the dispatcher already sized to the negotiated frag length, at most 5840 bytes
 	pushHeader(p, Header{Type: typ, Flags: flags, FragLen: uint16(16 + len(body)), CallID: callID})
 	p.Raw(body)
 	return p.Bytes()
@@ -351,10 +352,12 @@ func buildBindAckBody(ba *BindAck) []byte {
 		p.Uint16(0)
 	} else {
 		sa := append([]byte(ba.SecondaryAddress), 0)
+		// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 		p.Uint16(uint16(len(sa)))
 		p.Raw(sa)
 	}
 	p.Align(4) // the pad blob between the secondary address and the result count
+	// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 	p.Uint8(uint8(len(ba.Results)))
 	for _, c := range ba.Results {
 		p.Align(4)

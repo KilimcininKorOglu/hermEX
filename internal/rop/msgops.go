@@ -147,6 +147,7 @@ func (s *Session) ropSetReadFlags(p *ext.Pull, out *ext.Push, handles []uint32, 
 		}
 	} else {
 		for _, eid := range ids {
+			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 			targets = append(targets, int64(mapi.EID(eid).GCValue()))
 		}
 	}
@@ -198,6 +199,7 @@ func (s *Session) ropDeleteMessages(p *ext.Pull, out *ext.Push, handles []uint32
 	}
 	var partial uint8
 	for _, eid := range ids {
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		if err := folder.store.SoftDeleteObject(int64(mapi.EID(eid).GCValue())); err != nil {
 			partial = 1
 		}
@@ -262,6 +264,7 @@ func (s *Session) ropMoveCopyMessages(p *ext.Pull, out *ext.Push, handles []uint
 	}
 	var partial uint8
 	for _, eid := range ids {
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		uid, ok := uidByID[int64(mapi.EID(eid).GCValue())]
 		if !ok {
 			partial = 1

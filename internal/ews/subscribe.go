@@ -270,6 +270,7 @@ func (s *Server) registerSubscription(sess *session, streaming, allFolders bool,
 	s.subMu.Lock()
 	defer s.subMu.Unlock()
 	s.subSeq++
+	// #nosec G115 -- the timeout is clamped to the spec ceiling before it reaches here
 	id := encodeSubscriptionID(s.subSeq, uint32(timeoutMin))
 	s.subs[id] = &ewsSubscription{
 		user:       sess.user,

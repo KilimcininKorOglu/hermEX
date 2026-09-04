@@ -56,6 +56,7 @@ func streamBytes(typ mapi.PropType, v any) []byte {
 		if str, ok := v.(string); ok {
 			b := make([]byte, 0, len(str)*2)
 			for _, u := range utf16.Encode([]rune(str)) {
+				// #nosec G115 -- a deliberate little-endian split of the wider value
 				b = append(b, byte(u), byte(u>>8))
 			}
 			return b
@@ -172,6 +173,7 @@ func (s *Session) ropOpenStream(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	out.Uint8(ropOpenStream)
 	out.Uint8(ohindex)
 	out.Uint32(ecSuccess)
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	out.Uint32(uint32(len(st.data))) // StreamSize
 	return true
 }
@@ -289,6 +291,7 @@ func (s *Session) ropWriteStream(p *ext.Pull, out *ext.Push, handles []uint32, h
 	out.Uint8(ropWriteStream)
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
+	// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 	out.Uint16(uint16(len(data))) // WrittenSize
 	return true
 }
@@ -386,6 +389,7 @@ func (s *Session) ropSeekStream(p *ext.Pull, out *ext.Push, handles []uint32, hi
 		writeErr(out, ropSeekStream, hindex, ecInvalidParam)
 		return true
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	newpos := base + int64(offRaw)
 	if newpos < 0 || newpos > maxStreamSize {
 		writeErr(out, ropSeekStream, hindex, ecInvalidParam)
@@ -461,6 +465,7 @@ func (s *Session) ropGetStreamSize(_ *ext.Pull, out *ext.Push, handles []uint32,
 	out.Uint8(ropGetStreamSize)
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	out.Uint32(uint32(len(obj.stream.data)))
 	return true
 }

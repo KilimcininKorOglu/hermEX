@@ -119,6 +119,7 @@ func (s *Server) encodeGetSpecialTable(result, codePage uint32, rows []mapi.Prop
 		p.Uint8(0) // HasRows = false
 	} else {
 		p.Uint8(0xFF) // HasRows = true
+		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 		p.Uint32(uint32(len(rows)))
 		for _, row := range rows {
 			_ = p.PropertyValuesLong(row) // TPROPVAL_ARRAY per row (ABK)

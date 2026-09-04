@@ -236,10 +236,13 @@ func longProp(props mapi.PropertyValues, tag mapi.PropTag, def int32) int32 {
 		case int32:
 			return n
 		case int64:
+			// #nosec G115 -- the property was stored as a PtLong
 			return int32(n)
 		case int:
+			// #nosec G115 -- the property was stored as a PtLong
 			return int32(n)
 		case uint32:
+			// #nosec G115 -- the signed and unsigned views of the same 32 bits
 			return int32(n)
 		}
 	}

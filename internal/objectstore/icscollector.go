@@ -223,6 +223,7 @@ func (c *UploadCollector) ImportMessageMove(srcFolderKey, srcMsgKey, dstMsgKey [
 	if foreign {
 		return fmt.Errorf("objectstore: cross-store move destination message unsupported")
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	_, err = c.store.MoveMessageImport(int64(srcFID), int64(srcMID), c.folderID, int64(dstMID))
 	return err
 }
@@ -258,8 +259,10 @@ func (c *UploadCollector) GetTransferState() ([]byte, error) {
 // folderChangeNumber reads a folder's current change number from the MAPI store.
 func (s *Store) folderChangeNumber(fid uint64) (uint64, error) {
 	var cn int64
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	if err := s.objdb.QueryRow(`SELECT change_number FROM folders WHERE folder_id=?`, int64(fid)).Scan(&cn); err != nil {
 		return 0, fmt.Errorf("objectstore: read folder %d change number: %w", fid, err)
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	return uint64(cn), nil
 }

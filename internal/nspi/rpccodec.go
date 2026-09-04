@@ -27,6 +27,7 @@ func encodeUTF16LE(s string) []byte {
 	units := utf16.Encode([]rune(s))
 	out := make([]byte, 0, len(units)*2+2)
 	for _, u := range units {
+		// #nosec G115 -- a deliberate little-endian split of the wider value
 		out = append(out, byte(u), byte(u>>8))
 	}
 	return append(out, 0, 0) // NUL terminator
@@ -80,6 +81,7 @@ func pullStatNDR(p *ndr.Pull) (stat, error) {
 			return stat{}, err
 		}
 		if i == 3 {
+			// #nosec G115 -- the signed and unsigned views of the same 32 bits
 			s.delta = int32(v) // signed
 			continue
 		}
@@ -109,6 +111,7 @@ func pullCtxHandleNDR(p *ndr.Pull) (handleType uint32, guid mapi.GUID, err error
 // 4-byte elements. The deliberate N+1 conformance size matches the reference and
 // the IDL dimension.
 func pushU32ArrayNDR(p *ndr.Push, vals []uint32) {
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	n := uint32(len(vals))
 	p.Uint32(n + 1) // conformant max_count = N+1
 	p.Uint32(n)     // cValues
@@ -212,6 +215,7 @@ func pushPropValHeaderNDR(p *ndr.Push, tag mapi.PropTag, value any) error {
 		if !ok {
 			return fmt.Errorf("%w: PtLong value is %T", ndr.ErrFormat, value)
 		}
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		p.Uint32(uint32(v))
 	case mapi.PtBoolean:
 		v, ok := value.(bool)
@@ -236,6 +240,7 @@ func pushPropValHeaderNDR(p *ndr.Push, tag mapi.PropTag, value any) error {
 		if !ok {
 			return fmt.Errorf("%w: PtBinary value is %T", ndr.ErrFormat, value)
 		}
+		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 		p.Uint32(uint32(len(v))) // cb
 		p.UniquePtr(true)        // bytes follow in the content pass
 	case mapi.PtMvBinary:
@@ -243,6 +248,7 @@ func pushPropValHeaderNDR(p *ndr.Push, tag mapi.PropTag, value any) error {
 		if !ok {
 			return fmt.Errorf("%w: PtMvBinary value is %T", ndr.ErrFormat, value)
 		}
+		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 		p.Uint32(uint32(len(v))) // count of entries
 		p.UniquePtr(true)        // the array follows in the content pass
 	default:
@@ -259,6 +265,7 @@ func pushPropValContentNDR(p *ndr.Push, tag mapi.PropTag, value any) error {
 	case mapi.PtUnicode:
 		v, _ := value.(string)
 		b := encodeUTF16LE(v)
+		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 		n := uint32(len(b) / 2) // code units, terminator included
 		p.Uint32(n)             // max_count
 		p.Uint32(0)             // offset
@@ -267,6 +274,7 @@ func pushPropValContentNDR(p *ndr.Push, tag mapi.PropTag, value any) error {
 	case mapi.PtString8:
 		v, _ := value.(string)
 		b := append([]byte(v), 0) // NUL terminator
+		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 		n := uint32(len(b))
 		p.Uint32(n) // max_count
 		p.Uint32(0) // offset
@@ -274,18 +282,22 @@ func pushPropValContentNDR(p *ndr.Push, tag mapi.PropTag, value any) error {
 		p.Raw(b)
 	case mapi.PtBinary:
 		v, _ := value.([]byte)
+		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 		p.Uint32(uint32(len(v))) // conformant max_count
 		p.Raw(v)
 	case mapi.PtMvBinary:
 		// BINARY_ARRAY: max_count, then every entry's header (cb + referent),
 		// then every entry's content (conformant max_count + raw bytes).
 		v, _ := value.([][]byte)
+		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 		p.Uint32(uint32(len(v))) // max_count = count
 		for _, b := range v {
+			// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 			p.Uint32(uint32(len(b))) // cb
 			p.UniquePtr(true)
 		}
 		for _, b := range v {
+			// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 			p.Uint32(uint32(len(b))) // conformant max_count
 			p.Raw(b)
 		}
@@ -321,12 +333,14 @@ func pullPropValNDR(p *ndr.Pull) (mapi.TaggedPropVal, error) {
 		if err != nil {
 			return tv, err
 		}
+		// #nosec G115 -- the signed and unsigned views of the same 16 bits
 		tv.Value = int16(v)
 	case mapi.PtLong:
 		v, err := p.Uint32()
 		if err != nil {
 			return tv, err
 		}
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		tv.Value = int32(v)
 	case mapi.PtBoolean:
 		v, err := p.Uint8()
@@ -432,15 +446,18 @@ func pushRowSetNDR(p *ndr.Push, cols []mapi.PropTag, rows []mapi.PropertyValues)
 	for i, r := range rows {
 		projected[i], _ = projectProps(r, cols)
 	}
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	crows := uint32(len(projected))
 	p.Uint32(crows) // conformant max_count
 	p.Uint32(crows) // actual count
 	for _, vals := range projected {
-		p.Uint32(0)                 // reserved
+		p.Uint32(0) // reserved
+		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 		p.Uint32(uint32(len(vals))) // cValues
 		p.UniquePtr(true)           // values referent (bytes follow in the content pass)
 	}
 	for _, vals := range projected {
+		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 		p.Uint32(uint32(len(vals))) // conformant max_count of the value array
 		for _, v := range vals {
 			if err := pushPropValHeaderNDR(p, v.Tag, v.Value); err != nil {
@@ -461,9 +478,11 @@ func pushRowSetNDR(p *ndr.Push, cols []mapi.PropTag, rows []mapi.PropertyValues)
 // projects the row against cols like pushRowSetNDR does per row.
 func pushPropertyRowNDR(p *ndr.Push, cols []mapi.PropTag, row mapi.PropertyValues) error {
 	vals, _ := projectProps(row, cols)
-	p.Uint32(0)                 // reserved
+	p.Uint32(0) // reserved
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	p.Uint32(uint32(len(vals))) // cValues
 	p.UniquePtr(true)           // values referent
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	p.Uint32(uint32(len(vals))) // conformant max_count
 	for _, v := range vals {
 		if err := pushPropValHeaderNDR(p, v.Tag, v.Value); err != nil {

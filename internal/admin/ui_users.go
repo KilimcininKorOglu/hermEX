@@ -126,9 +126,12 @@ func userCreateFieldsOf(rd directory.ResolvedUserDefaults) userCreateFields {
 	return userCreateFields{
 		Lang: rd.Lang, POP3IMAP: rd.POP3IMAP, SMTP: rd.SMTP, ChgPasswd: rd.ChgPasswd,
 		Web: rd.Web, EAS: rd.EAS, DAV: rd.DAV,
+		// #nosec G115 -- a quota the operator set, reported in MB from the KB the directory stores; no realistic quota reaches four petabytes
 		StorageMB: uint32(rd.StorageKB / 1024),
+		// #nosec G115 -- a quota the operator set, reported in MB from the KB the directory stores; no realistic quota reaches four petabytes
 		ReceiveMB: uint32(rd.ReceiveKB / 1024),
-		SendMB:    uint32(rd.SendKB / 1024),
+		// #nosec G115 -- a quota the operator set, reported in MB from the KB the directory stores; no realistic quota reaches four petabytes
+		SendMB: uint32(rd.SendKB / 1024),
 	}
 }
 

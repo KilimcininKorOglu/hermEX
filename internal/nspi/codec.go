@@ -29,6 +29,7 @@ func pullStat(p *ext.Pull) (stat, error) {
 			return stat{}, err
 		}
 		if i == 3 {
+			// #nosec G115 -- the signed and unsigned views of the same 32 bits
 			s.delta = int32(v) // the 4th field is signed
 			continue
 		}
@@ -42,6 +43,7 @@ func pushStat(p *ext.Push, s stat) {
 	p.Uint32(s.sortType)
 	p.Uint32(s.containerID)
 	p.Uint32(s.curRec)
+	// #nosec G115 -- the signed and unsigned views of the same 32 bits
 	p.Uint32(uint32(s.delta))
 	p.Uint32(s.numPos)
 	p.Uint32(s.totalRec)

@@ -147,6 +147,7 @@ func evalBitmask(b mapi.BitmaskRestriction, props mapi.PropertyValues) bool {
 	if !ok {
 		return false
 	}
+	// #nosec G115 -- the value is a 32-bit MAPI property, read back at the width it was stored with
 	masked := uint32(n) & b.Mask
 	if b.Relop == mapi.BmrEqz {
 		return masked == 0
@@ -177,6 +178,7 @@ func toInt64(v any) (int64, bool) {
 	case uint32:
 		return int64(n), true
 	case uint64:
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		return int64(n), true
 	case int:
 		return int64(n), true
@@ -322,6 +324,7 @@ func (s *Store) applyRulesToMessage(folderID int64, m MessageInfo, rules []Rule,
 	if err != nil {
 		return false, InboxRuleActions{}, err
 	}
+	// #nosec G115 -- the value is a 32-bit MAPI property, read back at the width it was stored with
 	props.Set(mapi.PrMessageSize, int32(m.Size))
 	// Inject the out-of-office marker exactly when OOF is active, so a RuleOOFActive
 	// (ResExist) condition gates its rule on the away state.
@@ -455,6 +458,7 @@ func moveTargetFolder(data any) (int64, bool) {
 	if !ok {
 		return 0, false
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	return int64(svr.FolderID), true
 }
 
@@ -590,6 +594,7 @@ func RuleImportanceIs(level int) mapi.Restriction {
 	return mapi.Restriction{Type: mapi.ResProperty, Value: mapi.PropertyRestriction{
 		Relop:   mapi.RelopEQ,
 		PropTag: mapi.PrImportance,
+		// #nosec G115 -- the value is a 32-bit MAPI property, read back at the width it was stored with
 		PropVal: mapi.TaggedPropVal{Tag: mapi.PrImportance, Value: int32(level)},
 	}}
 }
@@ -601,6 +606,7 @@ func RuleSensitivityIs(level int) mapi.Restriction {
 	return mapi.Restriction{Type: mapi.ResProperty, Value: mapi.PropertyRestriction{
 		Relop:   mapi.RelopEQ,
 		PropTag: mapi.PrSensitivity,
+		// #nosec G115 -- the value is a 32-bit MAPI property, read back at the width it was stored with
 		PropVal: mapi.TaggedPropVal{Tag: mapi.PrSensitivity, Value: int32(level)},
 	}}
 }
@@ -610,6 +616,7 @@ func RuleSizeAtLeast(bytes int) mapi.Restriction {
 	return mapi.Restriction{Type: mapi.ResProperty, Value: mapi.PropertyRestriction{
 		Relop:   mapi.RelopGE,
 		PropTag: mapi.PrMessageSize,
+		// #nosec G115 -- the value is a 32-bit MAPI property, read back at the width it was stored with
 		PropVal: mapi.TaggedPropVal{Tag: mapi.PrMessageSize, Value: int32(bytes)},
 	}}
 }
@@ -634,6 +641,7 @@ func RuleDeleteAction() mapi.ActionBlock { return mapi.ActionBlock{Type: mapi.Op
 func RuleMoveAction(targetFolderID int64) mapi.ActionBlock {
 	return mapi.ActionBlock{Type: mapi.OpMove, Data: mapi.MoveCopyAction{
 		SameStore: true,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		FolderEID: mapi.SVREID{FolderID: mapi.EID(uint64(targetFolderID))},
 	}}
 }
@@ -643,6 +651,7 @@ func RuleMoveAction(targetFolderID int64) mapi.ActionBlock {
 func RuleCopyAction(targetFolderID int64) mapi.ActionBlock {
 	return mapi.ActionBlock{Type: mapi.OpCopy, Data: mapi.MoveCopyAction{
 		SameStore: true,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		FolderEID: mapi.SVREID{FolderID: mapi.EID(uint64(targetFolderID))},
 	}}
 }

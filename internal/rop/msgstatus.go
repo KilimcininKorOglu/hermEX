@@ -65,6 +65,7 @@ func (s *Session) ropGetMessageStatus(p *ext.Pull, out *ext.Push, handles []uint
 		writeErr(out, ropGetMessageStatus, hindex, ecNotSupported)
 		return true
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	mid := int64(mapi.EID(msgEID).GCValue())
 	props, err := folder.store.GetMessageProperties(mid, mapi.PrMsgStatus)
 	if err != nil {
@@ -111,6 +112,7 @@ func (s *Session) ropSetMessageStatus(p *ext.Pull, out *ext.Push, handles []uint
 	if s.denyWrite(out, ropSetMessageStatus, hindex, folder.store, folder.folderID, mapi.FrightsEditAny) {
 		return true
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	mid := int64(mapi.EID(msgEID).GCValue())
 	props, err := folder.store.GetMessageProperties(mid, mapi.PrMsgStatus)
 	if err != nil {
@@ -130,6 +132,7 @@ func (s *Session) ropSetMessageStatus(p *ext.Pull, out *ext.Push, handles []uint
 	// Keep the original bits the mask did not select: merged = applied | original
 	// with the masked-and-cleared bits removed from original.
 	merged := applied | (original &^ (mask &^ applied))
+	// #nosec G115 -- the signed and unsigned views of the same 32 bits
 	if err := folder.store.SetMessageProperties(mid, mapi.PropertyValues{{Tag: mapi.PrMsgStatus, Value: int32(merged)}}); err != nil {
 		writeErr(out, ropSetMessageStatus, hindex, ecError)
 		return true
@@ -147,6 +150,7 @@ func (s *Session) ropSetMessageStatus(p *ext.Pull, out *ext.Push, handles []uint
 func messageStatus(props mapi.PropertyValues) (uint32, bool) {
 	if v, ok := props.Get(mapi.PrMsgStatus); ok {
 		if n, ok := v.(int32); ok {
+			// #nosec G115 -- the signed and unsigned views of the same 32 bits
 			return uint32(n), true
 		}
 	}

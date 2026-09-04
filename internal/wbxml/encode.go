@@ -67,6 +67,7 @@ func (w *writer) element(n *Node, page *byte) {
 		w.buf = append(w.buf, gEnd)
 	case n.Opaque != nil:
 		w.buf = append(w.buf, tok|cbContent, gOpaque)
+		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 		w.mbUint(uint32(len(n.Opaque)))
 		w.buf = append(w.buf, n.Opaque...)
 		w.buf = append(w.buf, gEnd)

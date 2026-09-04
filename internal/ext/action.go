@@ -21,6 +21,7 @@ func (p *Push) RuleActions(r mapi.RuleActions) error {
 	if len(r.Blocks) == 0 || len(r.Blocks) > 0xFFFF {
 		return ErrFormat
 	}
+	// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 	p.Uint16(uint16(len(r.Blocks)))
 	for _, b := range r.Blocks {
 		if err := p.actionBlock(b); err != nil {
@@ -70,6 +71,7 @@ func (p *Push) actionBlock(a mapi.ActionBlock) error {
 	if body > 0xFFFF {
 		return ErrFormat
 	}
+	// #nosec G115 -- the range check on the line above refuses a body the 16-bit length cannot carry
 	p.patchU16(lenOff, uint16(body))
 	return nil
 }
@@ -210,6 +212,7 @@ func (p *Push) moveCopyAction(m mapi.MoveCopyAction) error {
 	if eidSize > 0xFFFF {
 		return ErrFormat
 	}
+	// #nosec G115 -- the range check on the line above refuses a body the 16-bit length cannot carry
 	p.patchU16(lenOff, uint16(eidSize))
 	bin, err := asType[[]byte](m.FolderEID)
 	if err != nil {
@@ -259,6 +262,7 @@ func (p *Push) forwardDelegateAction(fd mapi.ForwardDelegateAction) error {
 	if len(fd.Recipients) == 0 || len(fd.Recipients) > 0xFFFF {
 		return ErrFormat
 	}
+	// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 	p.Uint16(uint16(len(fd.Recipients)))
 	for _, rb := range fd.Recipients {
 		if err := p.recipientBlock(rb); err != nil {
@@ -293,6 +297,7 @@ func (p *Push) recipientBlock(rb mapi.RecipientBlock) error {
 		return ErrFormat
 	}
 	p.Uint8(0) // reserved
+	// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 	p.Uint16(uint16(len(rb.PropVals)))
 	for _, pv := range rb.PropVals {
 		if err := p.TaggedPropVal(pv); err != nil {

@@ -181,8 +181,10 @@ func Compress(data []byte) []byte {
 			continue
 		}
 		// encode the match
+		// #nosec G115 -- the match length and offset are bounded by the compressor's own window, far below the fields that carry them
 		matchLen := uint32(mlen - 3)
 		bestOffset := uint32(uPos - there - 1)
+		// #nosec G115 -- the match length and offset are bounded by the compressor's own window, far below the fields that carry them
 		binary.LittleEndian.PutUint16(out[pos:], uint16(bestOffset<<3|min(matchLen, 7)))
 		pos += 2
 		if matchLen >= 7 {

@@ -32,6 +32,7 @@ func loadMailbox(st *objectstore.Store, id int64, path string) (*selectedMailbox
 }
 
 // maxSeq returns the highest message sequence number (the message count).
+// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 func (m *selectedMailbox) maxSeq() uint32 { return uint32(len(m.msgs)) }
 
 // maxUID returns the highest UID in the snapshot, or 0 when empty.

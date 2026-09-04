@@ -38,6 +38,7 @@ func (s *Session) ropGetReceiveFolder(p *ext.Pull, out *ext.Push, handles []uint
 	out.Uint8(ropGetReceiveFolder)
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	out.Uint64(uint64(mapi.MakeEIDEx(1, uint64(fid)))) // FolderId (EID, like RopLogon)
 	out.String8(explicit)
 	return true
@@ -63,6 +64,7 @@ func (s *Session) ropSetReceiveFolder(p *ext.Pull, out *ext.Push, handles []uint
 	if s.denyDelegate(out, ropSetReceiveFolder, hindex, logon.store) {
 		return true
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	fid := int64(mapi.EID(fidRaw).GCValue())
 	if class == "" && fid == 0 {
 		writeErr(out, ropSetReceiveFolder, hindex, ecError) // cannot remove the default with a zero folder
@@ -106,6 +108,7 @@ func (s *Session) ropGetReceiveFolderTable(_ *ext.Pull, out *ext.Push, handles [
 	rows := ext.NewPush(ext.FlagUTF16)
 	for _, e := range entries {
 		vals := mapi.PropertyValues{
+			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 			{Tag: mapi.PrFolderID, Value: int64(mapi.MakeEIDEx(1, uint64(e.FolderID)))},
 			{Tag: mapi.PrMessageClassA, Value: e.Class},
 			{Tag: mapi.PrLastModificationTime, Value: e.ModifiedTime},
@@ -118,6 +121,7 @@ func (s *Session) ropGetReceiveFolderTable(_ *ext.Pull, out *ext.Push, handles [
 	out.Uint8(ropGetReceiveFolderTable)
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	out.Uint32(uint32(len(entries))) // RowCount
 	out.Raw(rows.Bytes())
 	return true

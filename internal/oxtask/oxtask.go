@@ -112,9 +112,11 @@ func ToProps(t Task, resolve Resolver) (mapi.PropertyValues, error) {
 	p.Set(mapi.PrSubject, t.Subject)
 	p.Set(mapi.PrBody, t.Body)
 	if t.Importance >= 0 && fitsLong(t.Importance) {
+		// #nosec G115 -- the guard on the same line refuses a value the property cannot carry
 		p.Set(mapi.PrImportance, int32(t.Importance))
 	}
 	if t.Sensitivity >= 0 && fitsLong(t.Sensitivity) {
+		// #nosec G115 -- the guard on the same line refuses a value the property cannot carry
 		p.Set(mapi.PrSensitivity, int32(t.Sensitivity))
 	}
 	setTime := func(idx int, when time.Time) {
@@ -136,6 +138,7 @@ func ToProps(t Task, resolve Resolver) (mapi.PropertyValues, error) {
 		// Status takes precedence when set; otherwise derive from Complete.
 		status := int32(0)
 		if t.Status >= 0 && fitsLong(t.Status) {
+			// #nosec G115 -- the guard on the same line refuses a value the property cannot carry
 			status = int32(t.Status)
 		} else if t.Complete {
 			status = 2 // olComplete
@@ -190,6 +193,7 @@ func ToProps(t Task, resolve Resolver) (mapi.PropertyValues, error) {
 		// the default Outlook writes for an unassigned task.
 		state := int32(0)
 		if t.AcceptanceState >= 0 && fitsLong(t.AcceptanceState) {
+			// #nosec G115 -- the guard on the same line refuses a value the property cannot carry
 			state = int32(t.AcceptanceState)
 		}
 		p.Set(mapi.MakeTag(ids[idxAcceptanceState], mapi.PtLong), state)

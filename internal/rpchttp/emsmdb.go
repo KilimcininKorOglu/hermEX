@@ -369,6 +369,7 @@ func pushConnectExOut(cxh ContextHandle, displayName string, result uint32) []by
 func pushConfString(p *ndr.Push, s string) {
 	p.UniquePtr(true)
 	b := append([]byte(s), 0)
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	n := uint32(len(b))
 	p.Uint32(n) // max_count
 	p.Uint32(0) // offset
@@ -442,6 +443,7 @@ func pushRpcExt2Out(cxh ContextHandle, pout []byte, result uint32) []byte {
 	p := ndr.NewPush()
 	pushCtxHandle(p, cxh)
 	p.Uint32(0) // flags
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	n := uint32(len(pout))
 	p.Uint32(n) // cb_out max_count
 	p.Uint32(0) // offset

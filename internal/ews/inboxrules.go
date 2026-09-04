@@ -275,6 +275,7 @@ func actionsFromBlocks(a mapi.RuleActions) (ruleActions, bool) {
 			if !ok {
 				return ruleActions{}, false
 			}
+			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 			fid := oxews.EncodeFolderID(int64(svr.FolderID))
 			out.MoveToFolder = &targetFolder{FolderID: &oxews.FolderID{ID: fid}}
 		default:

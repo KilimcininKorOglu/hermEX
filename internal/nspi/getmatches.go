@@ -176,6 +176,7 @@ func (s *Server) getMatchesCore(req getMatchesRequest, caller string) getMatches
 		// A named address list: restrict to its recipient type and honor the
 		// address-list and name-resolution hide bits. An unknown container matches
 		// nothing.
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		if al, ok := addressListByID(int32(st.containerID)); ok {
 			mids = g.matchAll(req.filter, req.rowCount, st, abHideFromAL|abHideResolve, &al)
 		}
@@ -208,6 +209,7 @@ func (g gal) matchAll(filter *mapi.Restriction, rowCount uint32, st stat, hideMa
 	}
 	var mids []uint32
 	for i := g.position(st.curRec); i < len(g.users); i++ {
+		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 		if uint32(len(mids)) >= rowCount {
 			break
 		}

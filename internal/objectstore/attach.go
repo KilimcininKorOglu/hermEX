@@ -54,6 +54,7 @@ func (s *Store) CreateAttachment(messageID int64, initialProps mapi.PropertyValu
 	}
 
 	props := append(mapi.PropertyValues(nil), initialProps...)
+	// #nosec G115 -- the attachment number is a 32-bit MAPI long counted within one message
 	props.Set(mapi.PrAttachNum, int32(next))
 	if err := s.insertProps(tx, "attachment_properties", "attachment_id", aid, props); err != nil {
 		return 0, 0, err
@@ -65,6 +66,7 @@ func (s *Store) CreateAttachment(messageID int64, initialProps mapi.PropertyValu
 	// Rebuild the served wire form: the message now carries an attachment the cached
 	// bytes do not.
 	s.refreshEML(messageID)
+	// #nosec G115 -- the attachment number is a 32-bit MAPI long counted within one message
 	return aid, uint32(next), nil
 }
 

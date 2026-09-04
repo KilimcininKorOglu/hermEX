@@ -210,6 +210,7 @@ func objectsDiffer(snap map[string]int64, objs []objectstore.FolderObject) bool 
 	for _, o := range objs {
 		sid := strconv.FormatInt(o.ID, 10)
 		live[sid] = true
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		if prev, ok := snap[sid]; !ok || prev != int64(o.ChangeNumber) {
 			return true
 		}
@@ -231,6 +232,7 @@ func objectChangeCount(snap map[string]int64, objs []objectstore.FolderObject) i
 	for _, o := range objs {
 		sid := strconv.FormatInt(o.ID, 10)
 		live[sid] = true
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		if prev, ok := snap[sid]; !ok || prev != int64(o.ChangeNumber) {
 			count++
 		}

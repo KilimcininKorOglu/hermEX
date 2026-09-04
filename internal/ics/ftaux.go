@@ -100,18 +100,21 @@ func appendMV(b []byte, typ mapi.PropType, value any) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
+		// #nosec G115 -- the signed and unsigned views of the same 16 bits
 		return appendMVElems(b, xs, func(b []byte, x int16) []byte { return binary.LittleEndian.AppendUint16(b, uint16(x)) }), nil
 	case mapi.PtMvLong:
 		xs, err := asVal[[]int32](value)
 		if err != nil {
 			return nil, err
 		}
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		return appendMVElems(b, xs, func(b []byte, x int32) []byte { return binary.LittleEndian.AppendUint32(b, uint32(x)) }), nil
 	case mapi.PtMvCurrency, mapi.PtMvI8:
 		xs, err := asVal[[]int64](value)
 		if err != nil {
 			return nil, err
 		}
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		return appendMVElems(b, xs, func(b []byte, x int64) []byte { return binary.LittleEndian.AppendUint64(b, uint64(x)) }), nil
 	case mapi.PtMvSysTime:
 		xs, err := asVal[[]uint64](value)
@@ -144,6 +147,7 @@ func appendMV(b []byte, typ mapi.PropType, value any) ([]byte, error) {
 		}
 		return appendMVElems(b, xs, func(b []byte, x string) []byte {
 			body := append([]byte(x), 0)
+			// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 			b = binary.LittleEndian.AppendUint32(b, uint32(len(body)))
 			return append(b, body...)
 		}), nil
@@ -154,6 +158,7 @@ func appendMV(b []byte, typ mapi.PropType, value any) ([]byte, error) {
 		}
 		return appendMVElems(b, xs, func(b []byte, x string) []byte {
 			body := encodeUTF16(x)
+			// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 			b = binary.LittleEndian.AppendUint32(b, uint32(len(body)))
 			return append(b, body...)
 		}), nil
@@ -163,6 +168,7 @@ func appendMV(b []byte, typ mapi.PropType, value any) ([]byte, error) {
 			return nil, err
 		}
 		return appendMVElems(b, xs, func(b []byte, x []byte) []byte {
+			// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 			b = binary.LittleEndian.AppendUint32(b, uint32(len(x)))
 			return append(b, x...)
 		}), nil
@@ -172,6 +178,7 @@ func appendMV(b []byte, typ mapi.PropType, value any) ([]byte, error) {
 }
 
 func appendMVElems[T any](b []byte, xs []T, w func([]byte, T) []byte) []byte {
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	b = binary.LittleEndian.AppendUint32(b, uint32(len(xs)))
 	for _, x := range xs {
 		b = w(b, x)
@@ -191,10 +198,13 @@ func decodeMV(b []byte, typ mapi.PropType) (any, int, bool, error) {
 	}
 	switch typ {
 	case mapi.PtMvShort:
+		// #nosec G115 -- the signed and unsigned views of the same 16 bits
 		return decodeMVElems(&r, count, func(r *reader) (int16, bool) { v, ok := r.u16(); return int16(v), ok })
 	case mapi.PtMvLong:
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		return decodeMVElems(&r, count, func(r *reader) (int32, bool) { v, ok := r.u32(); return int32(v), ok })
 	case mapi.PtMvCurrency, mapi.PtMvI8:
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		return decodeMVElems(&r, count, func(r *reader) (int64, bool) { v, ok := r.u64(); return int64(v), ok })
 	case mapi.PtMvSysTime:
 		return decodeMVElems(&r, count, func(r *reader) (uint64, bool) { return r.u64() })

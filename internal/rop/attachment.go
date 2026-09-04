@@ -55,6 +55,7 @@ func resolveAttachment(bags []mapi.PropertyValues, attachID uint32) (mapi.Proper
 	for _, b := range bags {
 		if v, ok := b.Get(mapi.PrAttachNum); ok {
 			anyNumbered = true
+			// #nosec G115 -- the signed and unsigned views of the same 32 bits
 			if n, ok := v.(int32); ok && uint32(n) == attachID {
 				return b, true
 			}
@@ -165,6 +166,7 @@ func (s *Session) ropCreateAttachment(p *ext.Pull, out *ext.Push, handles []uint
 		nm := msg.newMsg
 		num := nextNewAttachNum(nm.attachments)
 		na := &newAttachment{attachNum: num, props: mapi.PropertyValues{
+			// #nosec G115 -- the signed and unsigned views of the same 32 bits
 			{Tag: mapi.PrAttachNum, Value: int32(num)},
 			{Tag: mapi.PrRenderingPosition, Value: int32(-1)}, // 0xFFFFFFFF: not rendered in the body
 			{Tag: mapi.PrCreationTime, Value: now},

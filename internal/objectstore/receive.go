@@ -81,6 +81,7 @@ func (s *Store) SetReceiveFolder(messageClass string, folderID int64) error {
 	if !exists {
 		return ErrNotFound
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	now := int64(mapi.UnixToNTTime(time.Now()))
 	_, err = s.objdb.Exec(
 		`INSERT INTO receive_table (class, folder_id, modified_time) VALUES (?, ?, ?)
@@ -104,6 +105,7 @@ func (s *Store) ReceiveFolderTable() ([]ReceiveFolderEntry, error) {
 		if err := rows.Scan(&e.Class, &e.FolderID, &mt); err != nil {
 			return nil, err
 		}
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		e.ModifiedTime = uint64(mt)
 		out = append(out, e)
 	}

@@ -132,6 +132,7 @@ func (s *Session) ropQueryRows(p *ext.Pull, out *ext.Push, handles []uint32, hin
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
 	out.Uint8(seekPos)
+	// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 	out.Uint16(uint16(len(idxs)))
 	out.Raw(rows.Bytes())
 	return true
@@ -166,6 +167,7 @@ func (s *Session) ropGetHierarchyTable(p *ext.Pull, out *ext.Push, handles []uin
 	out.Uint8(ropGetHierarchyTable)
 	out.Uint8(ohindex)
 	out.Uint32(ecSuccess)
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	out.Uint32(uint32(len(children))) // RowCount
 	return true
 }
@@ -633,6 +635,7 @@ func evalBitmask(b mapi.BitmaskRestriction, props mapi.PropertyValues) bool {
 	if !ok {
 		return false
 	}
+	// #nosec G115 -- the signed and unsigned views of the same 32 bits
 	masked := uint32(n) & b.Mask
 	switch b.Relop {
 	case mapi.BmrEqz:
@@ -672,6 +675,7 @@ func (s *Session) ropSeekRow(p *ext.Pull, out *ext.Push, handles []uint32, hinde
 		writeErr(out, ropSeekRow, hindex, ecError)
 		return true
 	}
+	// #nosec G115 -- the signed and unsigned views of the same 32 bits
 	offset := int32(off)
 	target := origin + int(offset)
 	if target < 0 {
@@ -845,7 +849,9 @@ func (s *Session) ropQueryPosition(_ *ext.Pull, out *ext.Push, handles []uint32,
 	out.Uint8(ropQueryPosition)
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
-	out.Uint32(uint32(ts.cursor))  // Numerator
+	// #nosec G115 -- a row index in an in-memory table view
+	out.Uint32(uint32(ts.cursor)) // Numerator
+	// #nosec G115 -- a row index in an in-memory table view
 	out.Uint32(uint32(ts.total())) // Denominator
 	return true
 }
@@ -870,6 +876,7 @@ func (s *Session) ropSeekRowFractional(p *ext.Pull, out *ext.Push, handles []uin
 		return true
 	}
 	ts := table.table
+	// #nosec G115 -- int is 64-bit on every platform this builds for, so the value round-trips exactly
 	pos := min(int(uint64(numerator)*uint64(ts.total())/uint64(denominator)), ts.total())
 	ts.cursor = pos
 	out.Uint8(ropSeekRowFractional)
@@ -1035,6 +1042,7 @@ func (s *Session) ropSeekRowBookmark(p *ext.Pull, out *ext.Push, handles []uint3
 		return true
 	}
 	total := ts.total()
+	// #nosec G115 -- the signed and unsigned views of the same 32 bits
 	off := int32(offset)
 	target := origin + int(off)
 	if target < 0 {
@@ -1043,6 +1051,7 @@ func (s *Session) ropSeekRowBookmark(p *ext.Pull, out *ext.Push, handles []uint3
 		target = total
 	}
 	ts.cursor = target
+	// #nosec G115 -- a row index in an in-memory table view
 	sought := int32(target - origin)
 	var hasSoughtLess uint8
 	if sought != off {
@@ -1053,6 +1062,7 @@ func (s *Session) ropSeekRowBookmark(p *ext.Pull, out *ext.Push, handles []uint3
 	out.Uint32(ecSuccess)
 	out.Uint8(0) // RowInvisible, bookmark origin always valid
 	out.Uint8(hasSoughtLess)
+	// #nosec G115 -- the signed and unsigned views of the same 32 bits
 	out.Uint32(uint32(sought))
 	return true
 }

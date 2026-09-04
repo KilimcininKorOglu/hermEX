@@ -39,9 +39,11 @@ func (s subscription) matches(folderID, scopeMessageID int64, typeBit uint8) boo
 // EID; the type bit is the low byte of the NotificationFlags. The caller supplies the
 // folder id to matches (it owns the folder the poll ran against).
 func classifyScope(n *notification) (scopeMessageID int64, typeBit uint8) {
+	// #nosec G115 -- the event type is the low byte of the flags
 	typeBit = uint8(n.flags)
 	if n.flags&(fnevObjectCreated|fnevNewMail) != 0 {
 		return 0, typeBit
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	return int64(mapi.EID(n.messageID).GCValue()), typeBit
 }

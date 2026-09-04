@@ -33,12 +33,14 @@ func (s *Store) CreateMessage(folderID int64, msg *oxcmail.Message) (int64, erro
 		return 0, err
 	}
 	mid := midString(eid)
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	id := int64(eid)
 
 	if _, err := tx.Exec(
 		`INSERT INTO messages
 		   (message_id, parent_fid, is_associated, change_number, read_state, message_size, mid_string)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		id, folderID, isAssociated(msg.Props), int64(cn), readState(msg.Props), messageSize(msg), mid); err != nil {
 		return 0, err
 	}
@@ -193,8 +195,11 @@ func insertMsgTime(tx *sql.Tx, folderID, messageID int64, props mapi.PropertyVal
 		`INSERT INTO msgtime_index (folder_id, message_id, mtime, rcvtime, sndtime)
 		 VALUES (?, ?, ?, ?, ?)`,
 		folderID, messageID,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		int64(mapi.UnixToNTTime(time.Now())),
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		int64(ntProp(props, mapi.PrMessageDeliveryTime)),
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		int64(ntProp(props, mapi.PrClientSubmitTime)))
 	return err
 }

@@ -61,6 +61,7 @@ func (s *Store) CreateFolder(parent *int64, displayName string) (int64, error) {
 	}
 	if _, err := tx.Exec(
 		`INSERT INTO folders (folder_id, parent_id, change_number, cur_eid, max_eid) VALUES (?, ?, ?, ?, ?)`,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		int64(fid), parentFID, int64(cn), int64(begin), int64(end)); err != nil {
 		return 0, err
 	}
@@ -69,6 +70,7 @@ func (s *Store) CreateFolder(parent *int64, displayName string) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	if err := insertProps(tx, "folder_properties", "folder_id", int64(fid), props); err != nil {
 		return 0, err
 	}
@@ -76,6 +78,7 @@ func (s *Store) CreateFolder(parent *int64, displayName string) (int64, error) {
 		return 0, err
 	}
 	s.publishChange("folder", cn, "")
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	return int64(fid), nil
 }
 

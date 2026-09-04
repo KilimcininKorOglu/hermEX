@@ -29,11 +29,13 @@ func (p *Push) Restriction(r mapi.Restriction) error {
 			return err
 		}
 		if p.flags&FlagWCount != 0 {
+			// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 			p.Uint32(uint32(len(kids)))
 		} else {
 			if len(kids) > 0xFFFF {
 				return ErrFormat
 			}
+			// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 			p.Uint16(uint16(len(kids)))
 		}
 		for _, k := range kids {
@@ -113,6 +115,7 @@ func (p *Push) Restriction(r mapi.Restriction) error {
 		if len(c.PropVals) == 0 || len(c.PropVals) > 0xFF {
 			return ErrFormat
 		}
+		// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 		p.Uint8(uint8(len(c.PropVals)))
 		for _, pv := range c.PropVals {
 			if err := p.TaggedPropVal(pv); err != nil {
@@ -168,6 +171,7 @@ func (p *Pull) Restriction() (mapi.Restriction, error) {
 			}
 			n = int(v)
 		}
+		// #nosec G115 -- n was just read as a uint32 or a uint16, so it fits back into one
 		if err := p.checkCount(uint32(n)); err != nil {
 			return r, err
 		}

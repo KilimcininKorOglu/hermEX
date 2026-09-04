@@ -661,6 +661,7 @@ func (s *Server) handleSetContactPhoto(w http.ResponseWriter, r *http.Request) {
 	// Drop an existing photo first so the contact has at most one photo.
 	if msg, err := st.OpenMessage(id); err == nil {
 		if num, _, has := contactPhotoAttachment(msg); has {
+			// #nosec G115 -- the signed and unsigned views of the same 32 bits
 			_ = st.DeleteAttachment(id, uint32(num))
 		}
 	}
@@ -703,6 +704,7 @@ func (s *Server) handleDeleteContactPhoto(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if num, _, has := contactPhotoAttachment(msg); has {
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		_ = st.DeleteAttachment(id, uint32(num))
 	}
 	if tag, err := hasPictureTag(st, true); err == nil && tag != 0 {

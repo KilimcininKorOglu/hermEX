@@ -231,6 +231,7 @@ func (g gal) viewFor(containerID uint32) galView {
 	if containerID == uint32(galContainerID) {
 		return g.browseView()
 	}
+	// #nosec G115 -- the signed and unsigned views of the same 32 bits
 	if al, ok := addressListByID(int32(containerID)); ok {
 		return g.listView(al)
 	}
@@ -437,6 +438,7 @@ func galUserProps(u galUser) mapi.PropertyValues {
 	// A resource mailbox (room/equipment) advertises its seating capacity so Outlook
 	// shows it when booking; PR_EMS_AB_ROOM_CAPACITY is a PtLong.
 	if u.capacity > 0 {
+		// #nosec G115 -- PR_EMS_AB_ROOM_CAPACITY is a PtLong, which is the wire ceiling for an operator-set capacity anyway
 		props = append(props, mapi.TaggedPropVal{Tag: mapi.PrEmsAbRoomCapacity, Value: int32(u.capacity)})
 	}
 	// A distribution list advertises its owner's EntryID as PR_EMS_AB_OWNER (the

@@ -125,6 +125,7 @@ func (s *Session) enqueueFolderHierarchy(o *object, folders []objectstore.Folder
 	}
 	events := detectFolderChanges(o.subFolderMeta, cur)
 	for i := range events {
+		// #nosec G115 -- the event type is the low byte of the flags, as the line says
 		typeBit := uint8(events[i].flags) // the fnev type is the low byte; modifiers ride above it
 		if o.sub.matches(0, 0, typeBit) {
 			s.pending = append(s.pending, queuedNotify{handle: o.sub.handle, logonID: o.sub.logonID, n: events[i]})

@@ -47,9 +47,11 @@ func BuildTask(t oxtask.Task, meta ItemMeta) Task {
 		out.Body = &Body{BodyType: "Text", Content: t.Body}
 	}
 	if t.Importance >= 0 {
+		// #nosec G115 -- ToProps bounds the model's integers at this width before they are stored
 		out.Importance = importanceName(int32(t.Importance))
 	}
 	if t.Sensitivity >= 0 {
+		// #nosec G115 -- ToProps bounds the model's integers at this width before they are stored
 		out.Sensitivity = sensitivityName(int32(t.Sensitivity))
 	}
 	if len(t.Categories) > 0 {

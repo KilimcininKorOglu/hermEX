@@ -125,6 +125,7 @@ func (c *conn) sortKeysFor(i int, needHdr bool) sortKeys {
 	m := c.sel.msgs[i]
 	k := sortKeys{idx: i, arrival: m.InternalDate, date: m.InternalDate, size: m.Size}
 	if needHdr {
+		// #nosec G115 -- an IMAP sequence number, an index into the selected mailbox's in-memory message list
 		sc := &searchCtx{seq: uint32(i + 1), msg: m, c: c}
 		k.from = sortAddr(sc.header("From"))
 		k.to = sortAddr(sc.header("To"))
@@ -209,6 +210,7 @@ func (c *conn) threadID(idx int, byUID bool) uint32 {
 	if byUID {
 		return c.sel.msgs[idx].UID
 	}
+	// #nosec G115 -- an IMAP sequence number, an index into the selected mailbox's in-memory message list
 	return uint32(idx + 1)
 }
 
@@ -273,6 +275,7 @@ type threadMsg struct {
 func (c *conn) threadMsgs(matched []int) []threadMsg {
 	out := make([]threadMsg, 0, len(matched))
 	for _, i := range matched {
+		// #nosec G115 -- an IMAP sequence number, an index into the selected mailbox's in-memory message list
 		sc := &searchCtx{seq: uint32(i + 1), msg: c.sel.msgs[i], c: c}
 		d := c.sel.msgs[i].InternalDate
 		if pd, err := mail.ParseDate(sc.header("Date")); err == nil {

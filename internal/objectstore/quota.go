@@ -32,6 +32,7 @@ func (s *Store) GetQuota() (QuotaLimits, error) {
 func quotaProp(props mapi.PropertyValues, tag mapi.PropTag) uint32 {
 	if v, ok := props.Get(tag); ok {
 		if n, ok := v.(int32); ok {
+			// #nosec G115 -- the signed and unsigned views of the same 32 bits
 			return uint32(n)
 		}
 	}
@@ -41,8 +42,11 @@ func quotaProp(props mapi.PropertyValues, tag mapi.PropTag) uint32 {
 // SetQuota replaces the mailbox's store quota limits.
 func (s *Store) SetQuota(q QuotaLimits) error {
 	return s.SetStoreProperties(mapi.PropertyValues{
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		{Tag: mapi.PrProhibitSendQuota, Value: int32(q.SendKB)},
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		{Tag: mapi.PrProhibitReceiveQuota, Value: int32(q.ReceiveKB)},
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		{Tag: mapi.PrStorageQuotaLimit, Value: int32(q.StorageKB)},
 	})
 }

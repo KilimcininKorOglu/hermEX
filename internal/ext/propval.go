@@ -25,6 +25,7 @@ func pushMV[T any](p *Push, v any, write func(*Push, T) error) error {
 	if err != nil {
 		return err
 	}
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	p.Uint32(uint32(len(xs)))
 	for _, x := range xs {
 		if err := write(p, x); err != nil {
@@ -106,12 +107,14 @@ func (p *Push) PropValue(typ mapi.PropType, v any) error {
 		if err != nil {
 			return err
 		}
+		// #nosec G115 -- the signed and unsigned views of the same 16 bits
 		p.Uint16(uint16(x))
 	case mapi.PtLong:
 		x, err := asType[int32](v)
 		if err != nil {
 			return err
 		}
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		p.Uint32(uint32(x))
 	case mapi.PtError:
 		x, err := asType[uint32](v)
@@ -136,6 +139,7 @@ func (p *Push) PropValue(typ mapi.PropType, v any) error {
 		if err != nil {
 			return err
 		}
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		p.Uint64(uint64(x))
 	case mapi.PtSysTime:
 		x, err := asType[uint64](v)
@@ -185,10 +189,13 @@ func (p *Push) PropValue(typ mapi.PropType, v any) error {
 		}
 		return p.Bin(x)
 	case mapi.PtMvShort:
+		// #nosec G115 -- the signed and unsigned views of the same 16 bits
 		return pushMV(p, v, func(p *Push, x int16) error { p.Uint16(uint16(x)); return nil })
 	case mapi.PtMvLong:
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		return pushMV(p, v, func(p *Push, x int32) error { p.Uint32(uint32(x)); return nil })
 	case mapi.PtMvCurrency, mapi.PtMvI8:
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		return pushMV(p, v, func(p *Push, x int64) error { p.Uint64(uint64(x)); return nil })
 	case mapi.PtMvSysTime:
 		return pushMV(p, v, func(p *Push, x uint64) error { p.Uint64(x); return nil })
@@ -239,9 +246,11 @@ func (p *Pull) PropValue(typ mapi.PropType) (any, error) {
 		return p.RuleActions()
 	case mapi.PtShort:
 		v, err := p.Uint16()
+		// #nosec G115 -- the signed and unsigned views of the same 16 bits
 		return int16(v), err
 	case mapi.PtLong:
 		v, err := p.Uint32()
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		return int32(v), err
 	case mapi.PtError:
 		v, err := p.Uint32()
@@ -252,6 +261,7 @@ func (p *Pull) PropValue(typ mapi.PropType) (any, error) {
 		return p.Float64()
 	case mapi.PtCurrency, mapi.PtI8:
 		v, err := p.Uint64()
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		return int64(v), err
 	case mapi.PtSysTime:
 		return p.Uint64()
@@ -271,10 +281,13 @@ func (p *Pull) PropValue(typ mapi.PropType) (any, error) {
 		}
 		return p.Bin()
 	case mapi.PtMvShort:
+		// #nosec G115 -- the signed and unsigned views of the same 16 bits
 		return pullMV(p, func(p *Pull) (int16, error) { v, err := p.Uint16(); return int16(v), err })
 	case mapi.PtMvLong:
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		return pullMV(p, func(p *Pull) (int32, error) { v, err := p.Uint32(); return int32(v), err })
 	case mapi.PtMvCurrency, mapi.PtMvI8:
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		return pullMV(p, func(p *Pull) (int64, error) { v, err := p.Uint64(); return int64(v), err })
 	case mapi.PtMvSysTime:
 		return pullMV(p, func(p *Pull) (uint64, error) { return p.Uint64() })
@@ -318,6 +331,7 @@ func (p *Push) PropertyValues(pv mapi.PropertyValues) error {
 	if len(pv) > 0xFFFF {
 		return ErrFormat
 	}
+	// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 	p.Uint16(uint16(len(pv)))
 	for _, tp := range pv {
 		if err := p.TaggedPropVal(tp); err != nil {
@@ -350,6 +364,7 @@ func (p *Push) PropTags(tags []mapi.PropTag) error {
 	if len(tags) > 0xFFFF {
 		return ErrFormat
 	}
+	// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 	p.Uint16(uint16(len(tags)))
 	for _, t := range tags {
 		p.Uint32(uint32(t))

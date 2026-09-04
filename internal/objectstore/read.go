@@ -40,6 +40,7 @@ func scanMessageInfo(sc interface{ Scan(...any) error }) (MessageInfo, error) {
 	if err := sc.Scan(&m.ID, &uid, &received, &m.Size, &read, &replied, &flagged, &deleted, &unsent, &m.Subject, &m.Sender); err != nil {
 		return MessageInfo{}, err
 	}
+	// #nosec G115 -- an IMAP UID is a 32-bit counter kept in SQLite's signed 64-bit column
 	m.UID = uint32(uid)
 	m.InternalDate = time.Unix(received, 0).UTC()
 	m.Flags = composeFlags(read, replied, flagged, deleted, unsent)
@@ -114,6 +115,7 @@ func (s *Store) MessageUIDByID(folderID, messageID int64) (uint32, bool, error) 
 	if err != nil {
 		return 0, false, err
 	}
+	// #nosec G115 -- an IMAP UID is a 32-bit counter kept in SQLite's signed 64-bit column
 	return uint32(uid), true, nil
 }
 
@@ -266,6 +268,7 @@ func (s *Store) setObjReadState(messageID int64, want int) (found bool, err erro
 		return true, err
 	}
 	if _, err := tx.Exec(
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		`UPDATE messages SET read_state=?, read_cn=? WHERE message_id=?`, want, int64(rcn), messageID); err != nil {
 		return true, err
 	}

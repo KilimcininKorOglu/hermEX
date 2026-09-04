@@ -26,6 +26,7 @@ func writeStream(conn net.Conn, raw []byte) error {
 	var hdr [4]byte
 	for off := 0; off < len(raw); {
 		end := min(off+chunkSize, len(raw))
+		// #nosec G115 -- one INSTREAM chunk, at most chunkSize bytes
 		binary.BigEndian.PutUint32(hdr[:], uint32(end-off))
 		if _, err := conn.Write(hdr[:]); err != nil {
 			return err

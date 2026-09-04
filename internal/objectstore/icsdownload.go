@@ -270,12 +270,14 @@ func (s *Store) NewHierarchyDownload(folderID int64, state *ics.State, syncFlags
 // stored bag minus server-internal tags and named properties, plus the computed
 // source key and parent source key (empty when the parent is the sync root).
 func (dc *DownloadContext) writeFolderChange(fid uint64) error {
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	props, err := dc.store.GetFolderProperties(int64(fid))
 	if err != nil {
 		return err
 	}
 	var parent sql.NullInt64
 	if err := dc.store.objdb.QueryRow(
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		`SELECT parent_id FROM folders WHERE folder_id=? AND is_deleted=0`, int64(fid)).Scan(&parent); err != nil {
 		return err
 	}
@@ -295,6 +297,7 @@ func (dc *DownloadContext) writeFolderChange(fid uint64) error {
 	out = append(out, mapi.TaggedPropVal{Tag: mapi.PrSourceKey, Value: sourceKey(dc.replica, fid)})
 	psk := []byte{}
 	if parent.Valid && parent.Int64 != dc.rootFID {
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		psk = sourceKey(dc.replica, uint64(parent.Int64))
 	}
 	out = append(out, mapi.TaggedPropVal{Tag: mapi.PrParentSourceKey, Value: psk})
@@ -347,6 +350,7 @@ func (dc *DownloadContext) writeMessageChange(mid uint64) error {
 	)
 	err := dc.store.objdb.QueryRow(
 		`SELECT change_number, is_associated, message_size FROM messages WHERE message_id=? AND is_deleted=0`,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		int64(mid)).Scan(&cn, &assoc, &size)
 	if err == sql.ErrNoRows {
 		// The message vanished between the delta scan and now; the client is told
@@ -357,16 +361,19 @@ func (dc *DownloadContext) writeMessageChange(mid uint64) error {
 	if err != nil {
 		return err
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	msg, err := dc.store.OpenMessage(int64(mid))
 	if err != nil {
 		return err
 	}
 	isFAI := assoc.Valid && assoc.Int64 != 0
 
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	ck, err := changeKey(dc.replica, uint64(cn))
 	if err != nil {
 		return err
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	pcl, err := predecessorChangeList(dc.replica, uint64(cn))
 	if err != nil {
 		return err
@@ -379,12 +386,15 @@ func (dc *DownloadContext) writeMessageChange(mid uint64) error {
 		{Tag: mapi.PrAssociated, Value: isFAI},
 	}
 	if dc.extraFlags&SyncExtraFlagEID != 0 {
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		header = append(header, mapi.TaggedPropVal{Tag: mapi.PrMid, Value: int64(mapi.MakeEIDEx(homeReplID, mid))})
 	}
 	if dc.extraFlags&SyncExtraFlagMessageSize != 0 {
+		// #nosec G115 -- PR_MESSAGE_SIZE is a PtLong, which is the ceiling for the value on the wire
 		header = append(header, mapi.TaggedPropVal{Tag: mapi.PrMessageSize, Value: int32(size)})
 	}
 	if dc.extraFlags&SyncExtraFlagCN != 0 {
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		header = append(header, mapi.TaggedPropVal{Tag: mapi.PrChangeNumber, Value: int64(mapi.MakeEIDEx(homeReplID, uint64(cn)))})
 	}
 

@@ -209,6 +209,7 @@ func (c *Config) maildirRoot(address string) string {
 	}
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(address))
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	return c.DataPartitions[h.Sum32()%uint32(len(c.DataPartitions))]
 }
 

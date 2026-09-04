@@ -153,12 +153,14 @@ func allocateEID(q sqlExec) (uint64, error) {
 			curEID+1, maxEID, time.Now().Unix()); err != nil {
 			return 0, err
 		}
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		if _, err := q.Exec(`UPDATE configurations SET config_value=? WHERE config_id=?`, int64(maxEID), cfgMaximumEID); err != nil {
 			return 0, err
 		}
 	}
 	eid := curEID
 	curEID++
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	if _, err := q.Exec(`UPDATE configurations SET config_value=? WHERE config_id=?`, int64(curEID), cfgCurrentEID); err != nil {
 		return 0, err
 	}
@@ -238,6 +240,7 @@ func allocateEIDFromFolder(q sqlExec, folderID int64) (uint64, error) {
 	}
 	eid := curEID
 	curEID++
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	if _, err := q.Exec(`UPDATE folders SET cur_eid=?, max_eid=? WHERE folder_id=?`, int64(curEID), int64(maxEID), folderID); err != nil {
 		return 0, err
 	}

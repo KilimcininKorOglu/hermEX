@@ -39,6 +39,7 @@ func (s *Store) MessageModSeqs(folderID int64) (map[uint32]uint64, error) {
 		if err := rows.Scan(&uid, &ms); err != nil {
 			return nil, err
 		}
+		// #nosec G115 -- an IMAP UID is a 32-bit counter kept in SQLite's signed 64-bit column
 		out[uint32(uid)] = uint64(ms)
 	}
 	return out, rows.Err()
@@ -85,6 +86,7 @@ func (s *Store) recordVanishedAndDrop(messageID int64) error {
 // than sinceModSeq, in UID order (QRESYNC VANISHED EARLIER, RFC 7162).
 func (s *Store) VanishedSince(folderID int64, sinceModSeq uint64) ([]uint32, error) {
 	rows, err := s.idxdb.Query(
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		`SELECT uid FROM vanished WHERE folder_id=? AND modseq>? ORDER BY uid`, folderID, int64(sinceModSeq))
 	if err != nil {
 		return nil, err
@@ -96,6 +98,7 @@ func (s *Store) VanishedSince(folderID int64, sinceModSeq uint64) ([]uint32, err
 		if err := rows.Scan(&uid); err != nil {
 			return nil, err
 		}
+		// #nosec G115 -- an IMAP UID is a 32-bit counter kept in SQLite's signed 64-bit column
 		out = append(out, uint32(uid))
 	}
 	return out, rows.Err()
@@ -112,5 +115,6 @@ func (s *Store) FolderHighestModSeq(folderID int64) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	return uint64(ms), nil
 }

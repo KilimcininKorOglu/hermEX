@@ -287,6 +287,7 @@ func alarmMinutes(al *icomp) (int32, bool) {
 	if !ok {
 		return 0, false
 	}
+	// #nosec G115 -- a Duration is int64 nanoseconds, so its minute count never leaves the 32-bit range
 	mins := int32(-d / time.Minute)
 	if mins < 0 {
 		mins = -mins

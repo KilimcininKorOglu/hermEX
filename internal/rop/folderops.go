@@ -55,6 +55,7 @@ func (s *Session) ropCreateFolder(p *ext.Pull, out *ext.Push, handles []uint32, 
 	out.Uint8(ropCreateFolder)
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	out.Uint64(uint64(mapi.MakeEIDEx(1, uint64(folderID)))) // FolderId (EID, matching RopLogon's encoding)
 	out.Uint8(0)                                            // IsExisting
 	out.Uint8(0)                                            // HasRules
@@ -76,9 +77,11 @@ func (s *Session) ropDeleteFolder(p *ext.Pull, out *ext.Push, handles []uint32, 
 		return true
 	}
 	// Deleting a folder requires owner rights on the folder being removed.
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	if s.denyWrite(out, ropDeleteFolder, hindex, folder.store, int64(mapi.EID(fid).GCValue()), mapi.FrightsOwner) {
 		return true
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	if err := folder.store.DeleteFolder(int64(mapi.EID(fid).GCValue())); err != nil {
 		writeErr(out, ropDeleteFolder, hindex, ecError)
 		return true
@@ -120,6 +123,7 @@ func (s *Session) ropMoveFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 		writeErr(out, ropMoveFolder, hindex, ecError)
 		return true
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	movedFID := int64(mapi.EID(fid).GCValue())
 	// Moving (or renaming) a folder modifies the folder itself: it requires owner
 	// rights on the folder being moved, the same right RopDeleteFolder requires to
@@ -188,6 +192,7 @@ func (s *Session) ropCopyFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 		writeErr(out, ropCopyFolder, hindex, ecError)
 		return true
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	copiedFID := int64(mapi.EID(fid).GCValue())
 	// Copying a folder reads its contents: it requires ReadAny on the folder being
 	// copied (denyWrite gates an arbitrary right, not only writes). For an owner the
@@ -359,6 +364,7 @@ func (s *Session) ropHardDeleteMessages(p *ext.Pull, out *ext.Push, handles []ui
 			uint64(mids[i+2])<<16 | uint64(mids[i+3])<<24 |
 			uint64(mids[i+4])<<32 | uint64(mids[i+5])<<40 |
 			uint64(mids[i+6])<<48 | uint64(mids[i+7])<<56
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		mid := int64(mapi.EID(eid).GCValue())
 		if err := folder.store.SoftDeleteObject(mid); err != nil {
 			writeErr(out, ropHardDeleteMessages, hindex, ecError)

@@ -94,6 +94,7 @@ func (s *Store) GetContentSync(req ContentSyncRequest) (ContentSyncResult, error
 		if err := rows.Scan(&mid, &cn, &assoc, &readState, &readCN); err != nil {
 			return res, err
 		}
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		umid, ucn := uint64(mid), uint64(cn)
 		allMIDs[umid] = struct{}{}
 
@@ -109,7 +110,9 @@ func (s *Store) GetContentSync(req ContentSyncRequest) (ContentSyncResult, error
 		if ucn > res.LastCN {
 			res.LastCN = ucn
 		}
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		if readCN.Valid && uint64(readCN.Int64) > res.LastReadCN {
+			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 			res.LastReadCN = uint64(readCN.Int64)
 		}
 
@@ -126,6 +129,7 @@ func (s *Store) GetContentSync(req ContentSyncRequest) (ContentSyncResult, error
 			// Body up to date. For a normal message, a read_cn the client has not
 			// acknowledged is a read-state-only change.
 			if !isFAI && req.Read != nil && readCN.Valid && readCN.Int64 != 0 &&
+				// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 				!req.Read.Contains(mapi.MakeEIDEx(homeReplID, uint64(readCN.Int64))) {
 				readChanges = append(readChanges, readChange{umid, readState != 0})
 			}
@@ -234,6 +238,7 @@ func (s *Store) GetHierarchySync(req HierarchySyncRequest) (HierarchySyncResult,
 		if err := rows.Scan(&fid, &cn); err != nil {
 			return res, err
 		}
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		ufid, ucn := uint64(fid), uint64(cn)
 		existence[ufid] = struct{}{}
 		if ucn > res.LastCN {

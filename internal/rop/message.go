@@ -55,6 +55,7 @@ func (s *Session) ropOpenMessage(p *ext.Pull, out *ext.Push, handles []uint32, h
 		writeErr(out, ropOpenMessage, ohindex, ecError)
 		return true
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	msgID := int64(mapi.EID(messageEID).GCValue())
 	// A delegate may read a message only with ReadAny on its REAL parent folder,
 	// resolved from the store, never the wire FolderId, which is informational and

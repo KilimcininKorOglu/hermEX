@@ -10,12 +10,14 @@ const timeFixupSeconds = 11644473600
 // 1601-01-01 UTC, the on-the-wire form of a PtSysTime value
 // (rop_util_unix_to_nttime). Sub-100ns precision is dropped.
 func UnixToNTTime(t time.Time) uint64 {
+	// #nosec G115 -- a Unix time and its nanosecond remainder, both non-negative for any time this handles
 	return uint64(t.Unix()+timeFixupSeconds)*10000000 + uint64(t.Nanosecond()/100)
 }
 
 // NTTimeToUnix converts an NT FILETIME back to a Go time in UTC
 // (rop_util_nttime_to_unix), at 100-nanosecond resolution.
 func NTTimeToUnix(nt uint64) time.Time {
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	sec := int64(nt/10000000) - timeFixupSeconds
 	nsec := int64(nt%10000000) * 100
 	return time.Unix(sec, nsec).UTC()

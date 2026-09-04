@@ -99,6 +99,7 @@ func (c *conn) cmdStore(tag string, args []token, byUID bool) {
 		postModseqs = c.modseqMap()
 	}
 	for _, i := range reported {
+		// #nosec G115 -- an IMAP sequence number, an index into the selected mailbox's in-memory message list
 		c.untagged("%d FETCH (%s)", uint32(i+1), storeFetchFields(c.sel.msgs[i], byUID, c.condstore, postModseqs))
 	}
 

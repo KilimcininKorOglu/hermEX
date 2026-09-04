@@ -135,6 +135,7 @@ func receiveWindowSize(cmds []rtsCommand) uint32 {
 func buildRTSBody(flags uint16, cmds []rtsCommand) []byte {
 	p := ndr.NewPush()
 	p.Uint16(flags)
+	// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 	p.Uint16(uint16(len(cmds)))
 	for _, c := range cmds {
 		p.Uint32(c.Type)

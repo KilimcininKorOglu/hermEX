@@ -76,6 +76,7 @@ func (s *Store) ImportMessageChange(folderID int64, importFlags uint8, header ma
 		return nil, fmt.Errorf("objectstore: cross-store message import is not supported in v1")
 	}
 	var exists int
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	err = s.objdb.QueryRow(`SELECT 1 FROM messages WHERE message_id=?`, int64(mid)).Scan(&exists)
 	isNew := err == sql.ErrNoRows
 	if err != nil && !isNew {
@@ -243,12 +244,14 @@ func (c *MessageCollector) delProp(v any) error {
 	if c.frame != nil {
 		return fmt.Errorf("objectstore: MetaTagFXDelProp inside marker %#x", c.frame.marker)
 	}
+	// #nosec G115 -- the signed and unsigned views of the same 32 bits
 	switch mapi.PropTag(uint32(tag)) {
 	case mapi.PrMessageRecipients:
 		c.um.msg.Recipients = nil
 	case mapi.PrMessageAttachments:
 		c.um.msg.Attachments = nil
 	default:
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		return fmt.Errorf("objectstore: unsupported MetaTagFXDelProp target %#x", uint32(tag))
 	}
 	return nil
@@ -295,6 +298,7 @@ func (um *UploadMessage) Commit() (uint64, error) {
 		if err := advanceFolderEID(tx, um.folderID, um.mid); err != nil {
 			return 0, err
 		}
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	} else if _, err := tx.Exec(`DELETE FROM messages WHERE message_id=?`, int64(um.mid)); err != nil {
 		return 0, err
 	}
@@ -303,11 +307,13 @@ func (um *UploadMessage) Commit() (uint64, error) {
 	if um.associated {
 		assoc = 1
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	id := int64(um.mid)
 	if _, err := tx.Exec(
 		`INSERT INTO messages
 		   (message_id, parent_fid, is_associated, change_number, read_state, message_size, mid_string)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		id, um.folderID, assoc, int64(cn), readState(um.msg.Props), messageSize(um.msg), midString(um.mid)); err != nil {
 		return 0, err
 	}
@@ -367,6 +373,7 @@ func (um *UploadMessage) Commit() (uint64, error) {
 func advanceFolderEID(q sqlExec, folderID int64, mid uint64) error {
 	_, err := q.Exec(
 		`UPDATE folders SET cur_eid=?+1 WHERE folder_id=? AND ?>=cur_eid AND ?<=max_eid`,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		int64(mid), folderID, int64(mid), int64(mid))
 	return err
 }
@@ -393,6 +400,7 @@ func (s *Store) ImportDeletes(folderID int64, sourceKeys [][]byte) ([]uint64, er
 			continue
 		}
 		var present int
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		err = s.objdb.QueryRow(`SELECT 1 FROM messages WHERE message_id=? AND parent_fid=?`, int64(mid), folderID).Scan(&present)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
@@ -400,6 +408,7 @@ func (s *Store) ImportDeletes(folderID int64, sourceKeys [][]byte) ([]uint64, er
 		if err != nil {
 			return nil, err
 		}
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		if err := s.DeleteObject(int64(mid)); err != nil && !errors.Is(err, ErrNotFound) {
 			return nil, err
 		}
@@ -447,6 +456,7 @@ func (s *Store) MoveMessageImport(srcFolderID, srcMID, destFolderID, dstMID int6
 	}
 	if _, err := tx.Exec(
 		`UPDATE messages SET message_id=?, parent_fid=?, change_number=?, mid_string=? WHERE message_id=?`,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		dstMID, destFolderID, int64(cn), midString(uint64(dstMID)), srcMID); err != nil {
 		return false, err
 	}
@@ -455,6 +465,7 @@ func (s *Store) MoveMessageImport(srcFolderID, srcMID, destFolderID, dstMID int6
 		destFolderID, dstMID, srcFolderID); err != nil {
 		return false, err
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	if err := advanceFolderEID(tx, destFolderID, uint64(dstMID)); err != nil {
 		return false, err
 	}
@@ -468,6 +479,7 @@ func (s *Store) MoveMessageImport(srcFolderID, srcMID, destFolderID, dstMID int6
 	// Drop those rows so an IMAP view does not show a ghost in the source folder,
 	// and orphan its cached eml, exactly as DeleteObject does. The destination is
 	// not re-indexed: the ICS upload path indexes only mail, as ImportMessageChange.
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	srcMidString := midString(uint64(srcMID))
 	if _, err := s.idxdb.Exec(`DELETE FROM messages WHERE message_id=?`, srcMID); err != nil {
 		return assoc != 0, err
@@ -477,6 +489,7 @@ func (s *Store) MoveMessageImport(srcFolderID, srcMID, destFolderID, dstMID int6
 	}
 	_ = os.Remove(s.emlPath(srcMidString))
 
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	s.publishChange("create", cn, midString(uint64(dstMID)))
 	return assoc != 0, nil
 }
@@ -524,6 +537,7 @@ func (s *Store) ImportReadStateChanges(folderID int64, changes []ReadStateChange
 		var cur, assoc int
 		err = tx.QueryRow(
 			`SELECT read_state, is_associated FROM messages WHERE message_id=? AND parent_fid=? AND is_deleted=0`,
+			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 			int64(mid), folderID).Scan(&cur, &assoc)
 		if errors.Is(err, sql.ErrNoRows) {
 			continue
@@ -547,6 +561,7 @@ func (s *Store) ImportReadStateChanges(folderID int64, changes []ReadStateChange
 		}
 		if _, err := tx.Exec(
 			`UPDATE messages SET read_state=?, read_cn=? WHERE message_id=?`,
+			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 			want, int64(rcn), int64(mid)); err != nil {
 			return nil, err
 		}
@@ -559,6 +574,7 @@ func (s *Store) ImportReadStateChanges(folderID int64, changes []ReadStateChange
 	for _, m := range mirror {
 		// The message need not be in the IMAP index (only mail is); a no-op update
 		// there is harmless.
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		if _, err := s.idxdb.Exec(`UPDATE messages SET read=? WHERE message_id=?`, m.read, int64(m.mid)); err != nil {
 			return nil, err
 		}
@@ -598,6 +614,7 @@ func (s *Store) ImportHierarchyChange(rootFID int64, hichyvals, propvals mapi.Pr
 	if foreign {
 		return 0, fmt.Errorf("objectstore: cross-store folder import is not supported in v1")
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	parent := uint64(rootFID)
 	if psk, ok := propBytes(hichyvals, mapi.PrParentSourceKey); ok && len(psk) > 0 {
 		p, pforeign, err := parseSourceKeyMID(psk, home)
@@ -615,6 +632,7 @@ func (s *Store) ImportHierarchyChange(rootFID int64, hichyvals, propvals mapi.Pr
 		hasName = true
 	}
 
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	exists, err := s.FolderExists(int64(fid))
 	if err != nil {
 		return 0, err
@@ -635,6 +653,7 @@ func (s *Store) ImportHierarchyChange(rootFID int64, hichyvals, propvals mapi.Pr
 	if exists {
 		if _, err := tx.Exec(
 			`UPDATE folders SET parent_id=?, change_number=? WHERE folder_id=?`,
+			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 			int64(parent), int64(cn), int64(fid)); err != nil {
 			return 0, err
 		}
@@ -642,6 +661,7 @@ func (s *Store) ImportHierarchyChange(rootFID int64, hichyvals, propvals mapi.Pr
 		if err != nil {
 			return 0, err
 		}
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		if err := s.insertProps(tx, "folder_properties", "folder_id", int64(fid), bag); err != nil {
 			return 0, err
 		}
@@ -652,6 +672,7 @@ func (s *Store) ImportHierarchyChange(rootFID int64, hichyvals, propvals mapi.Pr
 		}
 		if _, err := tx.Exec(
 			`INSERT INTO folders (folder_id, parent_id, change_number, cur_eid, max_eid) VALUES (?, ?, ?, ?, ?)`,
+			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 			int64(fid), int64(parent), int64(cn), int64(begin), int64(end)); err != nil {
 			return 0, err
 		}
@@ -662,6 +683,7 @@ func (s *Store) ImportHierarchyChange(rootFID int64, hichyvals, propvals mapi.Pr
 		if err != nil {
 			return 0, err
 		}
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		if err := s.insertProps(tx, "folder_properties", "folder_id", int64(fid), bag); err != nil {
 			return 0, err
 		}
@@ -753,6 +775,7 @@ func advanceStoreEID(q sqlExec, fid uint64) error {
 		`UPDATE configurations SET config_value=?+1
 		   WHERE config_id=? AND ?>=config_value
 		     AND ?+1 <= (SELECT config_value FROM configurations WHERE config_id=?)`,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		int64(fid), cfgCurrentEID, int64(fid), int64(fid), cfgMaximumEID)
 	return err
 }

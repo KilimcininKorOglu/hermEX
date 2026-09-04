@@ -25,6 +25,7 @@ func (s *Store) AllocUID(folderID int64) (uint32, error) {
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
+	// #nosec G115 -- an IMAP UID is a 32-bit counter kept in SQLite's signed 64-bit column
 	return uint32(uid), nil
 }
 
@@ -32,12 +33,14 @@ func (s *Store) AllocUID(folderID int64) (uint32, error) {
 // folder (the IMAP UIDNEXT).
 func (s *Store) UIDNext(folderID int64) (uint32, error) {
 	v, err := s.idxFolderField(folderID, "uidnext")
+	// #nosec G115 -- an IMAP UID is a 32-bit counter kept in SQLite's signed 64-bit column
 	return uint32(v), err
 }
 
 // UIDValidity returns the folder's IMAP UIDVALIDITY.
 func (s *Store) UIDValidity(folderID int64) (uint32, error) {
 	v, err := s.idxFolderField(folderID, "uidvalidity")
+	// #nosec G115 -- an IMAP UID is a 32-bit counter kept in SQLite's signed 64-bit column
 	return uint32(v), err
 }
 

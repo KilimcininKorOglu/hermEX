@@ -85,6 +85,7 @@ func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time
 	if err != nil {
 		return MessageInfo{}, err
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	mid := midString(uint64(eid))
 
 	// Some messages must be served byte-for-byte rather than re-synthesized:
@@ -127,7 +128,8 @@ func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time
 	// event would not yet see it. This second wake fires once the index is in place.
 	s.publishChange("create", 0, mid)
 	return MessageInfo{
-		ID:           eid,
+		ID: eid,
+		// #nosec G115 -- an IMAP UID is a 32-bit counter kept in SQLite's signed 64-bit column
 		UID:          uint32(uid),
 		InternalDate: internalDate.UTC(),
 		Size:         int64(len(eml)),
@@ -164,6 +166,7 @@ func (s *Store) removeEML(mid string) {
 // fault this closes; the next read re-synthesizes and surfaces the real error. The
 // cache is regenerable, so this never fails the edit that triggered it.
 func (s *Store) refreshEML(messageID int64) {
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	mid := midString(uint64(messageID))
 	if _, err := os.Stat(s.emlPath(mid)); err != nil {
 		// The cache file is absent. A non-mail object (contact, calendar item) has no

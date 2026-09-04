@@ -10,6 +10,7 @@ type Tag uint16
 func (t Tag) Page() byte { return byte(t >> 8) }
 
 // Token reports the tag token within its code page.
+// #nosec G115 -- a WBXML token is the low byte of the tag; the code page is the high byte
 func (t Tag) Token() byte { return byte(t) }
 
 // ActiveSync code pages (MS-ASWBXML). The page byte follows a SWITCH_PAGE.

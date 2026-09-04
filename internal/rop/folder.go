@@ -93,6 +93,7 @@ func (t *tableState) rowProps(store *objectstore.Store, idx int) (mapi.PropertyV
 			return nil, err
 		}
 		if slices.Contains(t.columns, mapi.PrFolderID) {
+			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 			props.Set(mapi.PrFolderID, int64(mapi.MakeEIDEx(1, uint64(fid))))
 		}
 		return props, nil
@@ -114,6 +115,7 @@ func (t *tableState) rowProps(store *objectstore.Store, idx int) (mapi.PropertyV
 		row := append(mapi.PropertyValues(nil), t.attachments[base]...)
 		if slices.Contains(t.columns, mapi.PrAttachNum) {
 			if _, ok := row.Get(mapi.PrAttachNum); !ok {
+				// #nosec G115 -- an index into the message's in-memory attachment list
 				row.Set(mapi.PrAttachNum, int32(base))
 			}
 		}
@@ -125,6 +127,7 @@ func (t *tableState) rowProps(store *objectstore.Store, idx int) (mapi.PropertyV
 		return nil, err
 	}
 	if slices.Contains(t.columns, mapi.PrMid) {
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		props.Set(mapi.PrMid, int64(mapi.MakeEIDEx(1, uint64(mid))))
 	}
 	return props, nil
@@ -146,6 +149,7 @@ func (s *Session) ropOpenFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 		writeErr(out, ropOpenFolder, ohindex, ecError)
 		return true
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	fid := int64(mapi.EID(folderEID).GCValue())
 	exists, err := parent.store.FolderExists(fid)
 	if err != nil {
@@ -229,6 +233,7 @@ func (s *Session) ropGetContentsTable(p *ext.Pull, out *ext.Push, handles []uint
 	out.Uint8(ropGetContentsTable)
 	out.Uint8(ohindex)
 	out.Uint32(ecSuccess)
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	out.Uint32(uint32(len(msgs))) // RowCount
 	return true
 }

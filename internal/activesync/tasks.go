@@ -373,6 +373,7 @@ func applyTaskClientCommands(st *objectstore.Store, cstate *collectionState, c *
 		if objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDTasks)); err == nil {
 			for _, o := range objs {
 				if sid := strconv.FormatInt(o.ID, 10); added[sid] {
+					// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 					cstate.Items[sid] = int64(o.ChangeNumber)
 				}
 			}

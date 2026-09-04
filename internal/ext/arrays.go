@@ -11,6 +11,7 @@ import "hermex/internal/mapi"
 // PropTagsLong writes a wide-count property-tag array: a uint32 count followed
 // by each 32-bit tag. It differs from PropTags only in the count width.
 func (p *Push) PropTagsLong(tags []mapi.PropTag) error {
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	p.Uint32(uint32(len(tags)))
 	for _, t := range tags {
 		p.Uint32(uint32(t))
@@ -45,6 +46,7 @@ func (p *Pull) PropTagsLong() ([]mapi.PropTag, error) {
 // followed by each tagged property value. It differs from PropertyValues only
 // in the count width.
 func (p *Push) PropertyValuesLong(pv mapi.PropertyValues) error {
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	p.Uint32(uint32(len(pv)))
 	for _, tp := range pv {
 		if err := p.TaggedPropVal(tp); err != nil {
@@ -78,6 +80,7 @@ func (p *Pull) PropertyValuesLong() (mapi.PropertyValues, error) {
 // TArraySet writes a TARRAY_SET (row set): a uint32 row count followed by each
 // row as a 16-bit-counted property-value array.
 func (p *Push) TArraySet(rows []mapi.PropertyValues) error {
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	p.Uint32(uint32(len(rows)))
 	for _, row := range rows {
 		if err := p.PropertyValues(row); err != nil {
@@ -114,6 +117,7 @@ func (p *Push) ProblemArray(probs []mapi.PropertyProblem) error {
 	if len(probs) > 0xFFFF {
 		return ErrFormat
 	}
+	// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 	p.Uint16(uint16(len(probs)))
 	for _, pr := range probs {
 		p.Uint16(pr.Index)
@@ -159,6 +163,7 @@ func (p *Push) Uint64ArrayShort(vs []uint64) error {
 	if len(vs) > 0xFFFF {
 		return ErrFormat
 	}
+	// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 	p.Uint16(uint16(len(vs)))
 	for _, v := range vs {
 		p.Uint64(v)
@@ -191,6 +196,7 @@ func (p *Pull) Uint64ArrayShort() ([]uint64, error) {
 // EIDs writes an EID_ARRAY: a uint32 count followed by each 64-bit entry id
 // (the wide-count form).
 func (p *Push) EIDs(ids []mapi.EID) error {
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	p.Uint32(uint32(len(ids)))
 	for _, id := range ids {
 		p.Uint64(uint64(id))

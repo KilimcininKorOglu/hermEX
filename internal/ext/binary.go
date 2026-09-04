@@ -17,6 +17,7 @@ func (p *Push) BinShort(b []byte) error {
 	if len(b) > 0xFFFF {
 		return ErrFormat
 	}
+	// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 	p.Uint16(uint16(len(b)))
 	p.Raw(b)
 	return nil
@@ -33,6 +34,7 @@ func (p *Pull) BinShort() ([]byte, error) {
 
 // BinEx writes a blob with a 32-bit length prefix regardless of FlagWCount.
 func (p *Push) BinEx(b []byte) {
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	p.Uint32(uint32(len(b)))
 	p.Raw(b)
 }
@@ -59,13 +61,21 @@ func (p *Pull) Blob() ([]byte, error) { return p.Raw(p.Remaining()) }
 // SystemTime writes a 16-byte SYSTEMTIME: eight little-endian int16 fields in
 // year, month, day-of-week, day, hour, minute, second, millisecond order.
 func (p *Push) SystemTime(t mapi.SystemTime) {
+	// #nosec G115 -- the signed and unsigned views of the same 16 bits
 	p.Uint16(uint16(t.Year))
+	// #nosec G115 -- the signed and unsigned views of the same 16 bits
 	p.Uint16(uint16(t.Month))
+	// #nosec G115 -- the signed and unsigned views of the same 16 bits
 	p.Uint16(uint16(t.DayOfWeek))
+	// #nosec G115 -- the signed and unsigned views of the same 16 bits
 	p.Uint16(uint16(t.Day))
+	// #nosec G115 -- the signed and unsigned views of the same 16 bits
 	p.Uint16(uint16(t.Hour))
+	// #nosec G115 -- the signed and unsigned views of the same 16 bits
 	p.Uint16(uint16(t.Minute))
+	// #nosec G115 -- the signed and unsigned views of the same 16 bits
 	p.Uint16(uint16(t.Second))
+	// #nosec G115 -- the signed and unsigned views of the same 16 bits
 	p.Uint16(uint16(t.Milliseconds))
 }
 
@@ -81,6 +91,7 @@ func (p *Pull) SystemTime() (mapi.SystemTime, error) {
 		if err != nil {
 			return mapi.SystemTime{}, err
 		}
+		// #nosec G115 -- the signed and unsigned views of the same 16 bits
 		*f = int16(v)
 	}
 	return t, nil

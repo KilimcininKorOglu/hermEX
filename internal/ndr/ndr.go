@@ -62,6 +62,7 @@ func (p *Push) Uint32(v uint32) {
 }
 
 // Int32 writes a signed 32-bit integer aligned to 4.
+// #nosec G115 -- the signed and unsigned views of the same 32 bits
 func (p *Push) Int32(v int32) { p.Uint32(uint32(v)) }
 
 // Raw writes b verbatim with no alignment or length prefix.
@@ -166,6 +167,7 @@ func (p *Pull) Uint32() (uint32, error) {
 // Int32 reads a signed 32-bit integer aligned to 4.
 func (p *Pull) Int32() (int32, error) {
 	v, err := p.Uint32()
+	// #nosec G115 -- the signed and unsigned views of the same 32 bits
 	return int32(v), err
 }
 

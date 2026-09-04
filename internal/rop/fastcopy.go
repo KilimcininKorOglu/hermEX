@@ -107,6 +107,7 @@ func (s *Session) ropFastTransferSourceCopyMessages(p *ext.Pull, out *ext.Push, 
 
 	mids := make([]int64, len(eids))
 	for i, eid := range eids {
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		mids[i] = int64(eid.GCValue())
 	}
 	col, err := src.store.NewCopyMessagesSource(src.folderID, mids, nil)

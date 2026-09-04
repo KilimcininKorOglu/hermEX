@@ -96,7 +96,8 @@ func (s *Server) deleteOneAttachment(cache *storeCache, sess *session, attachID 
 	return deleteAttachmentResponseMessage{
 		ResponseClass: "Success",
 		ResponseCode:  "NoError",
-		RootItemID:    &rootItemID{RootItemID: rootID, RootItemChangeKey: oxews.ChangeKey(uint64(mid))},
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		RootItemID: &rootItemID{RootItemID: rootID, RootItemChangeKey: oxews.ChangeKey(uint64(mid))},
 	}
 }
 
@@ -113,10 +114,13 @@ func attachNumber(att oxcmail.Attachment) (uint32, bool) {
 	}
 	switch n := v.(type) {
 	case int32:
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		return uint32(n), true
 	case int64:
+		// #nosec G115 -- PidTagAttachNumber is a PtLong, so the stored value is already 32-bit
 		return uint32(n), true
 	case int:
+		// #nosec G115 -- PidTagAttachNumber is a PtLong, so the stored value is already 32-bit
 		return uint32(n), true
 	default:
 		return 0, false

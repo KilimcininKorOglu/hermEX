@@ -278,6 +278,7 @@ func cloneAttachProps(src mapi.PropertyValues, num uint32) mapi.PropertyValues {
 		}
 		out = append(out, pv)
 	}
+	// #nosec G115 -- the signed and unsigned views of the same 32 bits
 	out.Set(mapi.PrAttachNum, int32(num))
 	return out
 }

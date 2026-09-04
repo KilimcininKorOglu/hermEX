@@ -57,6 +57,7 @@ func pushColRow(p *ext.Push, cols []mapi.PropTag, rows []mapi.PropertyValues) er
 	if err := p.PropTagsLong(cols); err != nil {
 		return err
 	}
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	p.Uint32(uint32(len(rows)))
 	for _, row := range rows {
 		if err := pushPropertyRow(p, cols, row); err != nil {

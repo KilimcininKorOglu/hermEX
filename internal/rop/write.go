@@ -57,6 +57,7 @@ func (s *Session) ropCreateMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 		writeErr(out, ropCreateMessage, ohindex, ecError)
 		return true
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	fid := int64(mapi.EID(folderEID).GCValue())
 	exists, err := parent.store.FolderExists(fid)
 	if err != nil {
@@ -232,6 +233,7 @@ func (s *Session) ropSaveChangesMessage(p *ext.Pull, out *ext.Push, handles []ui
 		// commit has assembled them, so the scan runs here and a hit removes the
 		// message again: it never becomes readable to a client, and the quarantine
 		// keeps the evidence.
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		if s.scanUploadedMessage(obj.store, int64(mid)) {
 			writeErr(out, ropSaveChangesMessage, hindex, ecAccessDenied)
 			return true
@@ -268,6 +270,7 @@ func (s *Session) ropSaveChangesMessage(p *ext.Pull, out *ext.Push, handles []ui
 		out.Uint8(hindex)
 		out.Uint32(ecSuccess)
 		out.Uint8(ihindex2)
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		out.Uint64(uint64(mapi.MakeEIDEx(1, uint64(obj.messageID))))
 		return true
 	}
@@ -335,6 +338,7 @@ func (s *Session) ropSaveChangesMessage(p *ext.Pull, out *ext.Push, handles []ui
 	out.Uint8(hindex) // ResponseHandleIndex (echoed in the header)
 	out.Uint32(ecSuccess)
 	out.Uint8(ihindex2) // InputHandleIndex (echoed in the body)
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	out.Uint64(uint64(mapi.MakeEIDEx(1, uint64(id))))
 	return true
 }
@@ -364,6 +368,7 @@ func pullModifyRecipientBag(p *ext.Pull, columns []mapi.PropTag) (mapi.PropertyV
 	if !ok {
 		return nil, false, nil
 	}
+	// #nosec G115 -- the signed and unsigned views of the same 32 bits
 	bag.Set(mapi.PrRowid, int32(rowID))
 	bag.Set(mapi.PrRecipientType, int32(rcptType))
 	return bag, true, nil

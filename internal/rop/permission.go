@@ -91,8 +91,9 @@ func permissionBags(store *objectstore.Store, folderID int64, includeFreeBusy bo
 			rights &^= mapi.FrightsFreeBusySimple | mapi.FrightsFreeBusyDetailed
 		}
 		var bag mapi.PropertyValues
-		bag.Set(mapi.PrMemberID, e.MemberID)        // PtI8
-		bag.Set(mapi.PrMemberName, e.Name)          // PtUnicode
+		bag.Set(mapi.PrMemberID, e.MemberID) // PtI8
+		bag.Set(mapi.PrMemberName, e.Name)   // PtUnicode
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		bag.Set(mapi.PrMemberRights, int32(rights)) // PtLong
 		bag.Set(mapi.PrEntryID, []byte{})           // present-empty member EntryID
 		bags = append(bags, bag)
@@ -246,6 +247,7 @@ func ingestRights(propvals mapi.PropertyValues, includeFreeBusy bool) uint32 {
 	var rights uint32
 	if v, ok := propvals.Get(mapi.PrMemberRights); ok {
 		if r, ok := v.(int32); ok {
+			// #nosec G115 -- the signed and unsigned views of the same 32 bits
 			rights = uint32(r)
 		}
 	}

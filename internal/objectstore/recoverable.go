@@ -82,6 +82,7 @@ func (s *Store) softDeleteRow(messageID int64) error {
 	}
 	if _, err := tx.Exec(
 		`UPDATE messages SET is_deleted=1, change_number=? WHERE message_id=?`,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		int64(cn), messageID); err != nil {
 		return err
 	}
@@ -106,6 +107,7 @@ func (s *Store) softDeleteRow(messageID int64) error {
 	}
 	// A soft delete leaves every live view (the index row is gone), so consumers
 	// observe it as a removal; the change number was bumped above.
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	s.publishChange("delete", 0, midString(uint64(messageID)))
 	return nil
 }
@@ -302,6 +304,7 @@ func (s *Store) restoreMessageRow(messageID, destFID int64, readSt int) (Message
 	}
 	if _, err := tx.Exec(
 		`UPDATE messages SET is_deleted=0, parent_fid=?, change_number=? WHERE message_id=?`,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		destFID, int64(cn), messageID); err != nil {
 		return MessageInfo{}, err
 	}
@@ -315,6 +318,7 @@ func (s *Store) restoreMessageRow(messageID, destFID int64, readSt int) (Message
 	if err != nil {
 		return MessageInfo{}, err
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	mid := midString(uint64(messageID))
 	eml, err := oxcmail.Export(msg, oxcmail.Options{Resolver: s.GetNamedPropIDs})
 	if err != nil {
@@ -333,7 +337,8 @@ func (s *Store) restoreMessageRow(messageID, destFID int64, readSt int) (Message
 		return MessageInfo{}, err
 	}
 	return MessageInfo{
-		ID:           messageID,
+		ID: messageID,
+		// #nosec G115 -- an IMAP UID is a 32-bit counter kept in SQLite's signed 64-bit column
 		UID:          uint32(uid),
 		InternalDate: received.UTC(),
 		Size:         int64(len(eml)),

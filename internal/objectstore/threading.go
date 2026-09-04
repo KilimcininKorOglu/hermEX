@@ -74,6 +74,7 @@ func (s *Store) threadingChunk(ids []int64, tags []any, out map[int64]ThreadHead
 		if err := rows.Scan(&mid, &rawTag, &col); err != nil {
 			return err
 		}
+		// #nosec G115 -- a proptag is 32 bits and was stored as one
 		tag := mapi.PropTag(uint32(rawTag))
 		val, err := s.loadPropval(tag, col)
 		if err != nil {

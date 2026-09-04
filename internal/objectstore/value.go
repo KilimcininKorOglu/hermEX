@@ -50,6 +50,7 @@ func encodeValue(typ mapi.PropType, v any) (any, error) {
 		return asType[int64](v)
 	case mapi.PtSysTime:
 		x, err := asType[uint64](v)
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		return int64(x), err
 	case mapi.PtFloat:
 		x, err := asType[float32](v)
@@ -78,17 +79,21 @@ func decodeValue(typ mapi.PropType, col any) (any, error) {
 		return x != 0, err
 	case mapi.PtShort:
 		x, err := asType[int64](col)
+		// #nosec G115 -- the column is decoded at the type it was encoded with, so it holds a value of that width
 		return int16(x), err
 	case mapi.PtLong:
 		x, err := asType[int64](col)
+		// #nosec G115 -- the column is decoded at the type it was encoded with, so it holds a value of that width
 		return int32(x), err
 	case mapi.PtError:
 		x, err := asType[int64](col)
+		// #nosec G115 -- the column is decoded at the type it was encoded with, so it holds a value of that width
 		return uint32(x), err
 	case mapi.PtI8, mapi.PtCurrency:
 		return asType[int64](col)
 	case mapi.PtSysTime:
 		x, err := asType[int64](col)
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		return uint64(x), err
 	case mapi.PtFloat:
 		x, err := asType[float64](col)

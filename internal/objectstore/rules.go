@@ -71,6 +71,7 @@ func (s *Store) AddRule(r Rule) (int64, error) {
 			`SELECT MAX(sequence) FROM rules WHERE folder_id=?`, r.FolderID).Scan(&max); err != nil {
 			return 0, err
 		}
+		// #nosec G115 -- a rule's sequence and state are 32-bit MAPI properties
 		seq = int32(max.Int64) + 1
 	}
 	res, err := tx.Exec(
@@ -115,6 +116,7 @@ func (s *Store) ListRules(folderID int64) ([]Rule, error) {
 		}
 		r.FolderID = folderID
 		r.Name = name.String
+		// #nosec G115 -- a rule's sequence and state are 32-bit MAPI properties
 		r.State = uint32(state)
 		if r.Condition, err = ext.NewPull(condBlob, ruleExtFlags).Restriction(); err != nil {
 			return nil, err
@@ -299,6 +301,7 @@ func insertRulePatch(tx *sql.Tx, folderID int64, p RulePatch) error {
 		if err := tx.QueryRow(`SELECT MAX(sequence) FROM rules WHERE folder_id=?`, folderID).Scan(&max); err != nil {
 			return err
 		}
+		// #nosec G115 -- a rule's sequence and state are 32-bit MAPI properties
 		seq = int32(max.Int64) + 1
 	}
 	_, err = tx.Exec(

@@ -33,6 +33,7 @@ func (s *Store) ListFolderObjects(folderID int64) ([]FolderObject, error) {
 		if err := rows.Scan(&id, &cn); err != nil {
 			return nil, err
 		}
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		out = append(out, FolderObject{ID: id, ChangeNumber: uint64(cn)})
 	}
 	return out, rows.Err()
@@ -55,6 +56,7 @@ func (s *Store) FolderMaxChangeNumber(folderID int64) (uint64, error) {
 	if !max.Valid {
 		return 0, nil
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	return uint64(max.Int64), nil
 }
 
@@ -74,6 +76,7 @@ func (s *Store) FolderObjectsSyncMax(folderID int64) (uint64, error) {
 	if !max.Valid {
 		return 0, nil
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	return uint64(max.Int64), nil
 }
 
@@ -85,7 +88,9 @@ func (s *Store) DeletedObjectsSince(folderID int64, sinceCN uint64) ([]FolderObj
 	rows, err := s.objdb.Query(
 		`SELECT message_id, change_number FROM messages
 		 WHERE parent_fid=? AND is_deleted=1 AND is_associated=0 AND change_number>?
-		 ORDER BY message_id`, folderID, int64(sinceCN))
+		 ORDER BY message_id`,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		folderID, int64(sinceCN))
 	if err != nil {
 		return nil, err
 	}
@@ -96,6 +101,7 @@ func (s *Store) DeletedObjectsSince(folderID int64, sinceCN uint64) ([]FolderObj
 		if err := rows.Scan(&id, &cn); err != nil {
 			return nil, err
 		}
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		out = append(out, FolderObject{ID: id, ChangeNumber: uint64(cn)})
 	}
 	return out, rows.Err()
@@ -124,6 +130,7 @@ func (s *Store) FolderMessageChangeNumbers(folderID int64) (map[int64]uint64, er
 		if err := rows.Scan(&id, &cn); err != nil {
 			return nil, err
 		}
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		out[id] = uint64(cn)
 	}
 	return out, rows.Err()

@@ -158,11 +158,13 @@ func (p *Pull) GUID() (mapi.GUID, error) {
 // set, otherwise 16-bit; a value too large for a 16-bit prefix is rejected.
 func (p *Push) Bin(b []byte) error {
 	if p.flags&FlagWCount != 0 {
+		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 		p.Uint32(uint32(len(b)))
 	} else {
 		if len(b) > 0xFFFF {
 			return ErrFormat
 		}
+		// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 		p.Uint16(uint16(len(b)))
 	}
 	p.Raw(b)

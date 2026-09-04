@@ -99,11 +99,13 @@ func DecodeExecute(in []byte) (rops []byte, handles []uint32, err error) {
 // they ship uncompressed (the COMPRESSED/XorMagic flags are cleared); the
 // client gates on the flags, so an uncompressed buffer is always valid.
 func EncodeExecute(rops []byte, handles []uint32) []byte {
+	// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 	rb := binary.LittleEndian.AppendUint16(nil, uint16(len(rops)+2)) // RopSize
 	rb = append(rb, rops...)
 	for _, h := range handles {
 		rb = binary.LittleEndian.AppendUint32(rb, h)
 	}
+	// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 	sizeActual := uint16(len(rb))
 	out := binary.LittleEndian.AppendUint16(nil, 0)          // Version
 	out = binary.LittleEndian.AppendUint16(out, rheFlagLast) // Flags

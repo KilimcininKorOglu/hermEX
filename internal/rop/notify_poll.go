@@ -40,6 +40,7 @@ func folderMetaSnapshot(st *objectstore.Store, folders []objectstore.FolderInfo)
 		if f.ParentID != nil {
 			parent = *f.ParentID
 		}
+		// #nosec G115 -- a folder's message counts
 		out[f.ID] = folderMeta{parentID: parent, total: uint32(total), unread: uint32(unread)}
 	}
 	return out, nil
@@ -70,12 +71,14 @@ func detectFolderChanges(prev, cur map[int64]folderMeta) []notification {
 	slices.Sort(ids)
 	for _, id := range ids {
 		c := cur[id]
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		fid := uint64(mapi.MakeEIDEx(1, uint64(id)))
 		switch p, ok := prev[id]; {
 		case !ok:
 			out = append(out, notification{
 				flags:    fnevObjectCreated,
 				folderID: fid,
+				// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 				parentID: uint64(mapi.MakeEIDEx(1, uint64(c.parentID))),
 			})
 		case p.total != c.total || p.unread != c.unread:
@@ -96,8 +99,10 @@ func detectFolderChanges(prev, cur map[int64]folderMeta) []notification {
 	slices.Sort(deleted)
 	for _, id := range deleted {
 		out = append(out, notification{
-			flags:    fnevObjectDeleted,
+			flags: fnevObjectDeleted,
+			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 			folderID: uint64(mapi.MakeEIDEx(1, uint64(id))),
+			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 			parentID: uint64(mapi.MakeEIDEx(1, uint64(prev[id].parentID))),
 		})
 	}
@@ -119,6 +124,7 @@ func detectContentChanges(st *objectstore.Store, folderID int64, prev folderSnap
 	if err != nil {
 		return nil, nil, err
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	fid := uint64(mapi.MakeEIDEx(1, uint64(folderID)))
 
 	ids := make([]int64, 0, len(cur))
@@ -129,6 +135,7 @@ func detectContentChanges(st *objectstore.Store, folderID int64, prev folderSnap
 
 	var out []notification
 	for _, id := range ids {
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		mid := uint64(mapi.MakeEIDEx(1, uint64(id)))
 		switch prevCN, ok := prev[id]; {
 		case !ok:
@@ -146,6 +153,7 @@ func detectContentChanges(st *objectstore.Store, folderID int64, prev folderSnap
 	}
 	slices.Sort(deleted)
 	for _, id := range deleted {
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		mid := uint64(mapi.MakeEIDEx(1, uint64(id)))
 		out = append(out, notification{flags: fnevObjectDeleted | nfByMessage, folderID: fid, messageID: mid})
 	}

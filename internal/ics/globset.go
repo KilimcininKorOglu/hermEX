@@ -155,6 +155,7 @@ func serializeGlobset(rs rangeSet) []byte {
 // pushCmd writes a "push N" command: the length byte (1..6) then the N common
 // bytes.
 func pushCmd(out []byte, length int, common []byte) []byte {
+	// #nosec G115 -- a deliberate little-endian split of the wider value
 	out = append(out, byte(length))
 	return append(out, common...)
 }

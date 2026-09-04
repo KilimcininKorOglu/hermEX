@@ -282,7 +282,8 @@ func (s *Server) handleGetItem(w http.ResponseWriter, inner []byte, sess *sessio
 		if itemClass(msg.Props) == oxtask.MessageClass {
 			tk, _ := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
 			elem := oxews.BuildTask(tk, oxews.ItemMeta{
-				ItemID:         ref.ID,
+				ItemID: ref.ID,
+				// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 				ChangeKey:      oxews.ChangeKey(uint64(id.MessageID)),
 				HasAttachments: hasAttach,
 			})
@@ -295,6 +296,7 @@ func (s *Server) handleGetItem(w http.ResponseWriter, inner []byte, sess *sessio
 		// A sticky note is rendered as a base <t:Item> (EWS has no Note type) from its
 		// shared properties.
 		if itemClass(msg.Props) == oxews.NoteClass {
+			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 			elem := buildNoteItem(st, msg.Props, ref.ID, oxews.ChangeKey(uint64(id.MessageID)))
 			msgs = append(msgs, itemResponseMessage{
 				ResponseClass: "Success", ResponseCode: "NoError",
@@ -307,10 +309,11 @@ func (s *Server) handleGetItem(w http.ResponseWriter, inner []byte, sess *sessio
 			body, bodyType = bodyFromRaw(raw)
 		}
 		elem := oxews.BuildItem(msg, oxews.ItemMeta{
-			ItemID:         ref.ID,
-			FolderID:       id.FolderID,
-			MessageID:      id.MessageID,
-			Mailbox:        id.Mailbox,
+			ItemID:    ref.ID,
+			FolderID:  id.FolderID,
+			MessageID: id.MessageID,
+			Mailbox:   id.Mailbox,
+			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 			ChangeKey:      oxews.ChangeKey(uint64(id.MessageID)),
 			IsRead:         info.Flags&objectstore.FlagSeen != 0,
 			HasAttachments: hasAttach,
@@ -433,7 +436,8 @@ func itemSummary(st *objectstore.Store, folderID int64, info objectstore.Message
 	hasAttach, _ := st.HasAttachments(info.ID)
 	name, email := splitAddress(info.Sender)
 	return oxews.BuildSummary(oxews.SummaryMeta{
-		ItemID:         oxews.EncodeItemID(oxews.ItemID{FolderID: folderID, MessageID: info.ID, UID: info.UID, Mailbox: mailbox}),
+		ItemID: oxews.EncodeItemID(oxews.ItemID{FolderID: folderID, MessageID: info.ID, UID: info.UID, Mailbox: mailbox}),
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		ChangeKey:      oxews.ChangeKey(uint64(info.ID)),
 		Subject:        info.Subject,
 		SenderName:     name,
@@ -460,7 +464,8 @@ func itemClass(props mapi.PropertyValues) string {
 // complete summary is acceptable.
 func taskSummary(st *objectstore.Store, folderID, objectID int64, mailbox string) oxews.Task {
 	meta := oxews.ItemMeta{
-		ItemID:    oxews.EncodeItemID(oxews.ItemID{FolderID: folderID, MessageID: objectID, Mailbox: mailbox}),
+		ItemID: oxews.EncodeItemID(oxews.ItemID{FolderID: folderID, MessageID: objectID, Mailbox: mailbox}),
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		ChangeKey: oxews.ChangeKey(uint64(objectID)),
 	}
 	if msg, err := st.OpenMessage(objectID); err == nil {
@@ -484,6 +489,7 @@ func buildNoteItem(st *objectstore.Store, props mapi.PropertyValues, itemID, cha
 // noteSummary builds a <t:Item> for FindItem on the Notes folder from a stored object.
 func noteSummary(st *objectstore.Store, folderID, objectID int64, mailbox string) oxews.Item {
 	itemID := oxews.EncodeItemID(oxews.ItemID{FolderID: folderID, MessageID: objectID, Mailbox: mailbox})
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	changeKey := oxews.ChangeKey(uint64(objectID))
 	if msg, err := st.OpenMessage(objectID); err == nil {
 		return buildNoteItem(st, msg.Props, itemID, changeKey)

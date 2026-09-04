@@ -65,8 +65,9 @@ func ruleBags(store *objectstore.Store, folderID int64) ([]mapi.PropertyValues, 
 	bags := make([]mapi.PropertyValues, 0, len(rules))
 	for _, r := range rules {
 		var bag mapi.PropertyValues
-		bag.Set(mapi.PrRuleID, r.ID)               // PtI8
-		bag.Set(mapi.PrRuleSequence, r.Sequence)   // PtLong
+		bag.Set(mapi.PrRuleID, r.ID)             // PtI8
+		bag.Set(mapi.PrRuleSequence, r.Sequence) // PtLong
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		bag.Set(mapi.PrRuleState, int32(r.State))  // PtLong
 		bag.Set(mapi.PrRuleName, r.Name)           // PtUnicode
 		bag.Set(mapi.PrRuleProvider, r.Provider)   // PtUnicode
@@ -188,6 +189,7 @@ func rulePatch(propvals mapi.PropertyValues) objectstore.RulePatch {
 	}
 	if v, ok := propvals.Get(mapi.PrRuleState); ok {
 		if n, ok := v.(int32); ok {
+			// #nosec G115 -- the signed and unsigned views of the same 32 bits
 			state := uint32(n)
 			patch.State = &state
 		}

@@ -71,6 +71,7 @@ func encodeProp(p StreamProp) (header, body []byte, err error) {
 		if err != nil {
 			return nil, nil, err
 		}
+		// #nosec G115 -- the signed and unsigned views of the same 16 bits
 		header = binary.LittleEndian.AppendUint16(header, uint16(v))
 	case mapi.PtLong, mapi.PtError:
 		header, err = appendU32Val(header, p.Value, typ)
@@ -104,6 +105,7 @@ func encodeProp(p StreamProp) (header, body []byte, err error) {
 		if err != nil {
 			return nil, nil, err
 		}
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		header = binary.LittleEndian.AppendUint64(header, uint64(v))
 	case mapi.PtSysTime:
 		v, err := asVal[uint64](p.Value)
@@ -124,6 +126,7 @@ func encodeProp(p StreamProp) (header, body []byte, err error) {
 			return nil, nil, err
 		}
 		body = encodeUTF16(s)
+		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 		header = binary.LittleEndian.AppendUint32(header, uint32(len(body)))
 	case mapi.PtString8:
 		s, err := asVal[string](p.Value)
@@ -131,6 +134,7 @@ func encodeProp(p StreamProp) (header, body []byte, err error) {
 			return nil, nil, err
 		}
 		body = append([]byte(s), 0) // code-page bytes + NUL; length includes the NUL
+		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 		header = binary.LittleEndian.AppendUint32(header, uint32(len(body)))
 	case mapi.PtBinary, mapi.PtObject:
 		b, err := asVal[[]byte](p.Value)
@@ -138,6 +142,7 @@ func encodeProp(p StreamProp) (header, body []byte, err error) {
 			return nil, nil, err
 		}
 		body = b
+		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 		header = binary.LittleEndian.AppendUint32(header, uint32(len(b)))
 	default:
 		if isMultivalue(wireType) {
@@ -210,9 +215,11 @@ func decodeValue(b []byte, typ mapi.PropType) (val any, consumed int, ok bool, e
 	switch typ {
 	case mapi.PtShort:
 		v, ok := r.u16()
+		// #nosec G115 -- the signed and unsigned views of the same 16 bits
 		return int16(v), r.pos, ok, nil
 	case mapi.PtLong:
 		v, ok := r.u32()
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		return int32(v), r.pos, ok, nil
 	case mapi.PtError:
 		v, ok := r.u32()
@@ -228,6 +235,7 @@ func decodeValue(b []byte, typ mapi.PropType) (val any, consumed int, ok bool, e
 		return v != 0, r.pos, ok, nil
 	case mapi.PtCurrency, mapi.PtI8:
 		v, ok := r.u64()
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		return int64(v), r.pos, ok, nil
 	case mapi.PtSysTime:
 		v, ok := r.u64()
@@ -348,6 +356,7 @@ func appendU32Val(b []byte, v any, typ mapi.PropType) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// #nosec G115 -- the signed and unsigned views of the same 32 bits
 	return binary.LittleEndian.AppendUint32(b, uint32(x)), nil
 }
 

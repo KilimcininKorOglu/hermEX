@@ -151,7 +151,9 @@ func (v galView) walk(st stat, count uint32) ([]mapi.PropertyValues, stat) {
 		st.curRec = v.midAt(start + n)
 	}
 	st.delta = 0
+	// #nosec G115 -- a position in the in-memory address-book view, bounded by the directory's own size
 	st.numPos = uint32(start + n)
+	// #nosec G115 -- a position in the in-memory address-book view, bounded by the directory's own size
 	st.totalRec = uint32(total)
 	return rows, st
 }
@@ -238,6 +240,7 @@ func (s *Server) updateStatCore(req updateStatRequest, caller string) updateStat
 	total := v.total()
 	initRow := v.position(st.curRec)
 	row := initRow
+	// #nosec G115 -- a position in the in-memory address-book view, bounded by the directory's own size
 	if st.delta < 0 && uint32(-st.delta) >= uint32(row) {
 		row = 0
 	} else {
@@ -249,9 +252,11 @@ func (s *Server) updateStatCore(req updateStatRequest, caller string) updateStat
 	} else {
 		st.curRec = v.midAt(row)
 	}
+	// #nosec G115 -- a position in the in-memory address-book view, bounded by the directory's own size
 	delta := int32(row - initRow)
 	st.delta = 0
 	st.numPos = uint32(row)
+	// #nosec G115 -- a position in the in-memory address-book view, bounded by the directory's own size
 	st.totalRec = uint32(total)
 	return updateStatResult{result: ecSuccess, stat: st, hasDelta: req.deltaRequested, delta: delta}
 }
@@ -267,6 +272,7 @@ func (s *Server) encodeUpdateStat(result uint32, st stat, hasDelta bool, delta i
 	pushStat(p, st)
 	if hasDelta && result == ecSuccess {
 		p.Uint8(0xFF)
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		p.Uint32(uint32(delta))
 	} else {
 		p.Uint8(0)

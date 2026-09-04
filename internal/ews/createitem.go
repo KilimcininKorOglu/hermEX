@@ -124,6 +124,7 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 			}
 			if info, err := st.AppendMessage(folder, raw, time.Now(), flags); err == nil {
 				id := oxews.EncodeItemID(oxews.ItemID{FolderID: folder, MessageID: info.ID, UID: info.UID})
+				// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 				rm.Items.Messages = []oxews.Message{{ItemID: oxews.ItemIDElem{ID: id, ChangeKey: oxews.ChangeKey(uint64(info.ID))}}}
 			}
 		}

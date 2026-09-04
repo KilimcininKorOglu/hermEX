@@ -400,13 +400,16 @@ func patternFromRecurrence(r rrule, start time.Time) (Pattern, error) {
 	case "DAILY":
 		p.RecurFrequency = FreqDaily
 		p.PatternType = PatternDay
+		// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
 		periodMinutes := uint32(max(r.Interval, 1)) * 24 * 60
 		p.Period = periodMinutes
 		p.FirstDateTime = p.StartDate % periodMinutes
 	case "WEEKLY":
 		p.RecurFrequency = FreqWeekly
 		p.PatternType = PatternWeek
+		// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
 		p.Period = uint32(max(r.Interval, 1)) // weeks
+		// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
 		p.DayOfWeek = uint32(weekdayBitmask(r.Weekdays))
 		if p.DayOfWeek == 0 {
 			p.DayOfWeek = 1 << uint(start.Weekday()) // default to the start weekday
@@ -416,32 +419,40 @@ func patternFromRecurrence(r rrule, start time.Time) (Pattern, error) {
 		p.RecurFrequency = FreqMonthly
 		if len(r.Weekdays) > 0 {
 			p.PatternType = PatternMonthNth
+			// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
 			p.DayOfWeek = uint32(weekdayBitmask(r.Weekdays))
 			p.WeekOfMonth = weekOfMonthFromSetPos(r.SetPos)
 		} else {
 			p.PatternType = PatternMonth
 			if r.MonthDay != 0 {
+				// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
 				p.DayOfMonth = uint32(r.MonthDay)
 			} else {
+				// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
 				p.DayOfMonth = uint32(start.Day())
 			}
 		}
+		// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
 		p.Period = uint32(max(r.Interval, 1)) // months
 		p.FirstDateTime = monthlyFirstDateTime(start, p.Period)
 	case "YEARLY":
 		p.RecurFrequency = FreqYearly
 		if len(r.Weekdays) > 0 {
 			p.PatternType = PatternMonthNth
+			// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
 			p.DayOfWeek = uint32(weekdayBitmask(r.Weekdays))
 			p.WeekOfMonth = weekOfMonthFromSetPos(r.SetPos)
 		} else {
 			p.PatternType = PatternMonth
 			if r.MonthDay != 0 {
+				// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
 				p.DayOfMonth = uint32(r.MonthDay)
 			} else {
+				// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
 				p.DayOfMonth = uint32(start.Day())
 			}
 		}
+		// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
 		p.Period = uint32(max(r.Interval, 1)) * 12 // months per interval
 		p.FirstDateTime = monthlyFirstDateTime(start, p.Period)
 	default:
@@ -455,6 +466,7 @@ func patternFromRecurrence(r rrule, start time.Time) (Pattern, error) {
 		p.OccurrenceCount = 0xA // computed; Outlook tolerates the placeholder for end-by-date
 	case r.Count > 0:
 		p.EndType = EndAfterN
+		// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
 		p.OccurrenceCount = uint32(r.Count)
 		p.EndDate = noEndDate
 	default:
@@ -514,12 +526,14 @@ func minutesSince1601(t time.Time) uint32 {
 		days += time.Date(y, 12, 31, 0, 0, 0, 0, time.UTC).YearDay()
 	}
 	days += t.YearDay() - 1
+	// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
 	return uint32(days)*24*60 + uint32(t.Hour())*60 + uint32(t.Minute())
 }
 
 // weeklyFirstDateTime computes the minutes from 1601 to the first day of the week
 // containing start (using Sunday as the week start), modulo the period in minutes.
 func weeklyFirstDateTime(start time.Time, periodWeeks uint32) uint32 {
+	// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
 	daysSinceSunday := uint32(start.Weekday())
 	weekStart := start.AddDate(0, 0, -int(daysSinceSunday))
 	weekStart = time.Date(weekStart.Year(), weekStart.Month(), weekStart.Day(), 0, 0, 0, 0, time.UTC)
@@ -533,6 +547,7 @@ func weeklyFirstDateTime(start time.Time, periodWeeks uint32) uint32 {
 // monthlyFirstDateTime computes the months from 1601-01 to start's month, modulo
 // the period in months.
 func monthlyFirstDateTime(start time.Time, periodMonths uint32) uint32 {
+	// #nosec G115 -- the interval and the count are bounded where the RRULE is parsed; the weekday mask, the day of month and the calendar fields are small by construction
 	monthsSince1601 := uint32(start.Year()-1601)*12 + uint32(start.Month()-1)
 	if periodMonths == 0 {
 		return 0

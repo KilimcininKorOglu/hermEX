@@ -169,10 +169,12 @@ func createGenericFolder(tx *sql.Tx, replica mapi.GUID, ntNow uint64, f builtinF
 	}
 	var parent any
 	if f.parent != 0 {
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		parent = int64(f.parent)
 	}
 	if _, err := tx.Exec(
 		`INSERT INTO folders (folder_id, parent_id, change_number, cur_eid, max_eid) VALUES (?, ?, ?, ?, ?)`,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		int64(f.fid), parent, int64(cn), int64(begin), int64(end)); err != nil {
 		return err
 	}
@@ -180,6 +182,7 @@ func createGenericFolder(tx *sql.Tx, replica mapi.GUID, ntNow uint64, f builtinF
 	if err != nil {
 		return err
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	return insertProps(tx, "folder_properties", "folder_id", int64(f.fid), props)
 }
 
@@ -192,6 +195,7 @@ func createSearchFolder(tx *sql.Tx, replica mapi.GUID, ntNow uint64, fid, parent
 	}
 	if _, err := tx.Exec(
 		`INSERT INTO folders (folder_id, parent_id, change_number, is_search, cur_eid, max_eid) VALUES (?, ?, ?, 1, 0, 0)`,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		int64(fid), int64(parent), int64(cn)); err != nil {
 		return err
 	}
@@ -199,6 +203,7 @@ func createSearchFolder(tx *sql.Tx, replica mapi.GUID, ntNow uint64, fid, parent
 	if err != nil {
 		return err
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	return insertProps(tx, "folder_properties", "folder_id", int64(fid), props)
 }
 
@@ -224,6 +229,7 @@ func folderPropertyBag(tx *sql.Tx, replica mapi.GUID, ntNow, cn uint64, dispName
 		{Tag: mapi.PrDeletedCountTotal, Value: int32(0)},
 		{Tag: mapi.PrDeletedFolderCount, Value: int32(0)},
 		{Tag: mapi.PrHierarchyChangeNum, Value: int32(0)},
+		// #nosec G115 -- the article number is a PtLong counted within one folder
 		{Tag: mapi.PrInternetArticleNumber, Value: int32(art)},
 	}
 	if addNext {
@@ -308,6 +314,7 @@ func seedReceiveTable(tx *sql.Tx, ntNow uint64) error {
 	for _, r := range rows {
 		if _, err := tx.Exec(
 			`INSERT INTO receive_table (class, folder_id, modified_time) VALUES (?, ?, ?)`,
+			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 			r.class, int64(r.fid), int64(ntNow)); err != nil {
 			return err
 		}
@@ -328,6 +335,7 @@ func seedDefaultPermissions(tx *sql.Tx) error {
 	for _, r := range rows {
 		if _, err := tx.Exec(
 			`INSERT INTO permissions (folder_id, username, permission) VALUES (?, 'default', ?)`,
+			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 			int64(r.fid), r.perm); err != nil {
 			return err
 		}

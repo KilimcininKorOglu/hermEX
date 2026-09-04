@@ -207,11 +207,18 @@ func (s *Session) mayOpenDelegate(store *objectstore.Store, caller string) (mayO
 // Minutes, Hour, DayOfWeek (Sunday=0), Day, Month each as a byte, then Year as
 // a 16-bit value.
 func pushLogonTime(out *ext.Push, t time.Time) {
+	// #nosec G115 -- a calendar field of the current time
 	out.Uint8(uint8(t.Second()))
+	// #nosec G115 -- a calendar field of the current time
 	out.Uint8(uint8(t.Minute()))
+	// #nosec G115 -- a calendar field of the current time
 	out.Uint8(uint8(t.Hour()))
+	// #nosec G115 -- a calendar field of the current time
 	out.Uint8(uint8(t.Weekday()))
+	// #nosec G115 -- a calendar field of the current time
 	out.Uint8(uint8(t.Day()))
+	// #nosec G115 -- a calendar field of the current time
 	out.Uint8(uint8(t.Month()))
+	// #nosec G115 -- a calendar field of the current time
 	out.Uint16(uint16(t.Year()))
 }

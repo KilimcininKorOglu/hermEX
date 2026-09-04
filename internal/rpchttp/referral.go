@@ -74,6 +74,7 @@ func pullRfrString(p *ndr.Pull, capLen uint32) (string, error) {
 // offset + actual + NUL-terminated bytes); the caller emits the referent first.
 func pushRfrString(p *ndr.Push, s string) {
 	b := append([]byte(s), 0)
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	n := uint32(len(b))
 	p.Uint32(n)
 	p.Uint32(0)

@@ -37,6 +37,7 @@ func Index(convID []byte, when time.Time) []byte {
 	ft := mapi.UnixToNTTime(when) >> 24 // the high 40 bits of the FILETIME
 	idx := make([]byte, 0, 22)
 	idx = append(idx, 0x01)
+	// #nosec G115 -- a deliberate little-endian split of the wider value
 	idx = append(idx, byte(ft>>32), byte(ft>>24), byte(ft>>16), byte(ft>>8), byte(ft))
 	idx = append(idx, convID...)
 	return idx

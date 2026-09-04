@@ -343,6 +343,7 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 	// the Outlook default. A non-zero color is stamped explicitly.
 	if in.Color != 0 && fitsMAPILong(in.Color) {
 		if tag, err := noteColorTag(st, true); err == nil && tag != 0 {
+			// #nosec G115 -- the fitsMAPILong guard on the same line refuses a value the property cannot carry
 			props.Set(tag, int32(in.Color))
 		}
 	}
@@ -378,6 +379,7 @@ func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 	props.Set(mapi.PrBody, in.Body)
 	if in.Color != 0 && fitsMAPILong(in.Color) {
 		if tag, err := noteColorTag(st, true); err == nil && tag != 0 {
+			// #nosec G115 -- the fitsMAPILong guard on the same line refuses a value the property cannot carry
 			props.Set(tag, int32(in.Color))
 		}
 	}

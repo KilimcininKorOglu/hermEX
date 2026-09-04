@@ -69,7 +69,9 @@ func (s *Server) seekEntriesCore(req seekEntriesRequest, caller string) rowsetRe
 		return rowsetResult{result: ecNotFound, stat: st}
 	}
 	st.curRec = found.mid
+	// #nosec G115 -- a position in the in-memory address-book view, bounded by the directory's own size
 	st.numPos = uint32(pos)
+	// #nosec G115 -- a position in the in-memory address-book view, bounded by the directory's own size
 	st.totalRec = uint32(total)
 	rows := []mapi.PropertyValues{galUserProps(found)}
 	return rowsetResult{result: ecSuccess, stat: st, cols: cols, rows: rows}
@@ -266,7 +268,8 @@ func pullCompareMids(body []byte) (compareMidsRequest, error) {
 // the result and is always present.
 func (s *Server) encodeCompareMids(result uint32, cmp int32) []byte {
 	p := ext.NewPush(abkFlags)
-	p.Uint32(0)           // status
+	p.Uint32(0) // status
+	// #nosec G115 -- the signed and unsigned views of the same 32 bits
 	p.Uint32(uint32(cmp)) // comparison result (signed)
 	p.Uint32(result)      // result
 	p.Uint32(0)           // AuxiliaryBufferSize
@@ -315,6 +318,7 @@ func (s *Server) resortRestrictionCore(req resortRestrictionRequest, caller stri
 		}
 	}
 	slices.Sort(out) // ascending MId == display-name order
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	st.totalRec = uint32(len(out))
 	if !found {
 		st.curRec = midBeginningOfTable

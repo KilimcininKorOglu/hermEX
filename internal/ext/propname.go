@@ -24,6 +24,7 @@ func (p *Push) PropertyName(n mapi.PropertyName) error {
 		if len(nb) > 0xFF {
 			return ErrFormat
 		}
+		// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 		p.Uint8(uint8(len(nb)))
 		p.Raw(nb)
 	}
@@ -78,6 +79,7 @@ func (p *Push) PropertyNames(names []mapi.PropertyName) error {
 	if len(names) > 0xFFFF {
 		return ErrFormat
 	}
+	// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 	p.Uint16(uint16(len(names)))
 	for _, n := range names {
 		if err := p.PropertyName(n); err != nil {
@@ -114,6 +116,7 @@ func (p *Push) PropIDs(ids []uint16) error {
 	if len(ids) > 0xFFFF {
 		return ErrFormat
 	}
+	// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 	p.Uint16(uint16(len(ids)))
 	for _, id := range ids {
 		p.Uint16(id)

@@ -510,10 +510,11 @@ func (s *Session) ropFastTransferDestPutBuffer(p *ext.Pull, out *ext.Push, handl
 	out.Uint8(ropFastTransferDestPutBuffer)
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
-	out.Uint16(0)                 // TransferStatus (0 = ready for a destination)
-	out.Uint16(0)                 // InProgressCount
-	out.Uint16(1)                 // TotalStepCount
-	out.Uint8(0)                  // Reserved
+	out.Uint16(0) // TransferStatus (0 = ready for a destination)
+	out.Uint16(0) // InProgressCount
+	out.Uint16(1) // TotalStepCount
+	out.Uint8(0)  // Reserved
+	// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 	out.Uint16(uint16(len(data))) // UsedSize
 	return true
 }

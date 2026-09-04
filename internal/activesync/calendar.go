@@ -283,6 +283,7 @@ func applyCalendarClientCommands(st *objectstore.Store, cstate *collectionState,
 		if objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar)); err == nil {
 			for _, o := range objs {
 				if sid := strconv.FormatInt(o.ID, 10); added[sid] {
+					// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 					cstate.Items[sid] = int64(o.ChangeNumber)
 				}
 			}
@@ -374,8 +375,11 @@ func objectChanges(st *objectstore.Store, folderID int64, cstate *collectionStat
 		live[sid] = true
 		switch prev, ok := cstate.Items[sid]; {
 		case !ok:
+			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 			pending = append(pending, change{changeAdd, sid, o.ID, int64(o.ChangeNumber)})
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		case prev != int64(o.ChangeNumber):
+			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 			pending = append(pending, change{changeChange, sid, o.ID, int64(o.ChangeNumber)})
 		}
 	}

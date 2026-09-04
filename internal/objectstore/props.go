@@ -107,6 +107,7 @@ func (s *Store) ModifyMessageProperties(messageID int64, props mapi.PropertyValu
 	if err != nil {
 		return err
 	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	if _, err := tx.Exec(`UPDATE messages SET change_number=? WHERE message_id=?`, int64(cn), messageID); err != nil {
 		return err
 	}
@@ -343,6 +344,7 @@ func (s *Store) scanProps(query string, args []any) (mapi.PropertyValues, error)
 		if err := rows.Scan(&rawTag, &col); err != nil {
 			return nil, err
 		}
+		// #nosec G115 -- a proptag is 32 bits and was stored as one
 		tag := mapi.PropTag(uint32(rawTag))
 		val, err := s.loadPropval(tag, col)
 		if err != nil {

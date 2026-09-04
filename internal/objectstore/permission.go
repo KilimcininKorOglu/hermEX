@@ -70,7 +70,8 @@ func (s *Store) ListPermissions(folderID int64) ([]PermissionEntry, error) {
 		out = append(out, PermissionEntry{
 			MemberID: wireMemberID(rowID, username),
 			Name:     memberDisplayName(username),
-			Rights:   uint32(perm),
+			// #nosec G115 -- a folder rights mask is 32 bits
+			Rights: uint32(perm),
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -173,6 +174,7 @@ func (s *Store) lookupPermission(folderID int64, username string) (uint32, bool,
 		s.logStoreError("resolve-permission", err)
 		return 0, false, err
 	}
+	// #nosec G115 -- a folder rights mask is 32 bits
 	return uint32(perm), true, nil
 }
 

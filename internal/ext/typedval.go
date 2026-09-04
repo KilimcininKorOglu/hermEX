@@ -51,6 +51,7 @@ func (p *Push) SVREID(s mapi.SVREID) error {
 		if len(s.Bin)+1 > 0xFFFF {
 			return ErrFormat
 		}
+		// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
 		p.Uint16(uint16(len(s.Bin) + 1))
 		p.Uint8(0)
 		p.Raw(s.Bin)

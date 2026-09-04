@@ -154,9 +154,10 @@ func (s *Server) emsExecute(w http.ResponseWriter, r *http.Request, sess *sessio
 	}
 
 	var out writer
-	out.u32(rcSuccess)            // StatusCode
-	out.u32(0)                    // ErrorCode
-	out.u32(0)                    // Flags
+	out.u32(rcSuccess) // StatusCode
+	out.u32(0)         // ErrorCode
+	out.u32(0)         // Flags
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	out.u32(uint32(len(respRop))) // RopBufferSize
 	out.raw(respRop)              // RopBuffer
 	out.u32(0)                    // AuxiliaryBufferSize

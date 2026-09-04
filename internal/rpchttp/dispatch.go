@@ -111,7 +111,9 @@ func (d *Dispatcher) handleBind(sess *Session, pdu *ndr.PDU) [][]byte {
 	frag := negotiateFrag(b.MaxXmitFrag, b.MaxRecvFrag)
 	sess.maxFrag = frag
 	ba := &ndr.BindAck{
-		MaxXmitFrag:      uint16(frag),
+		// #nosec G115 -- frag is min(client, ourMaxFrag) clamped to at least 256, so it fits the 16-bit field the client sent it in
+		MaxXmitFrag: uint16(frag),
+		// #nosec G115 -- frag is min(client, ourMaxFrag) clamped to at least 256, so it fits the 16-bit field the client sent it in
 		MaxRecvFrag:      uint16(frag),
 		AssocGroupID:     sess.assocGroup,
 		SecondaryAddress: "6001", // the EMSMDB endpoint; vestigial over RPC/HTTP
@@ -214,6 +216,7 @@ func negotiateFrag(clientXmit, clientRecv uint16) int {
 // the negotiated fragment size, marking the first and last fragments. alloc_hint
 // carries the full stub size so the client can pre-size its reassembly buffer.
 func fragmentResponse(callID uint32, contextID uint16, stub []byte, maxFrag int) [][]byte {
+	// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
 	total := uint32(len(stub))
 	chunk := max(maxFrag-24, 16) // minus the response PDU header overhead
 	chunk &^= 15                 // a fragment's stub is a multiple of 16
