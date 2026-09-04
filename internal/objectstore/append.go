@@ -175,7 +175,12 @@ func (s *Store) refreshEML(messageID int64) {
 			return
 		}
 	}
-	if _, err := s.regenerateEML(messageID, mid); err != nil {
+	// Through the shared flight, not regenerateEML directly: an edit regenerates the
+	// same bytes a read miss would, and each pass mints fresh MIME boundaries, so two
+	// uncollapsed passes can leave the renamed file and the recorded size coming from
+	// different renderings. That is the exact mismatch between RFC822.SIZE and the
+	// served bytes the flight exists to prevent.
+	if _, err := s.regenerateOnce(messageID, mid); err != nil {
 		s.removeEML(mid)
 		s.logStoreError("refresh-eml", err)
 	}

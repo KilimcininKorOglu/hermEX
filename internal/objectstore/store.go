@@ -123,6 +123,11 @@ type Store struct {
 	// snapshots. Production leaves it nil (zero cost); a test sets it to drive a
 	// concurrent append into the skew window and assert the copy stays consistent.
 	backupHook func()
+	// regenHook is a test-only seam invoked on entry to a wire-form regeneration.
+	// Production leaves it nil (zero cost); a test sets it to hold one regeneration
+	// open and prove a second, concurrent one is collapsed into it rather than
+	// producing a second rendering.
+	regenHook func()
 }
 
 // storeKind distinguishes a private mailbox store from a per-domain public-folder

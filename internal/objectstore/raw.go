@@ -89,6 +89,9 @@ func (s *Store) regenerateOnce(messageID int64, mid string) ([]byte, error) {
 // RFC822.SIZE matches the bytes now served (a regenerated message uses fresh
 // MIME boundaries and may differ in length from any earlier rendering).
 func (s *Store) regenerateEML(messageID int64, mid string) ([]byte, error) {
+	if s.regenHook != nil {
+		s.regenHook()
+	}
 	// A preserved original, an S/MIME message, or a scheduling message whose
 	// text/calendar body re-export would demote to an attachment, is served
 	// verbatim: re-synthesizing it would destroy the signature, the envelope, or the
