@@ -8,6 +8,8 @@ import (
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+
+	"hermex/internal/logging"
 )
 
 // --- request types ---
@@ -126,11 +128,23 @@ func (s *Server) handleGetUserAvailability(w http.ResponseWriter, inner []byte, 
 		return
 	}
 
+	// Each target opens a store and scans a whole calendar, and the request body
+	// admits tens of thousands of list entries, so answer only the first N rather
+	// than letting one request drive unbounded disk work. Truncating keeps the
+	// response shape every client expects; refusing would break ordinary requests
+	// that merely sit near the cap. It is applied before the branches below so the
+	// response length is bounded on every path, not just the one that reads disk.
+	items := req.MailboxDataArray.Items
+	if max := maxFreeBusyTargets(); len(items) > max {
+		s.logTruncatedAvailability(sess, len(items), max)
+		items = items[:max]
+	}
+
 	// A missing time zone is not fatal: every mailbox reports ErrorTimeZone,
 	// matching the reference (which fills the whole array with the error).
 	if req.TimeZone == nil {
 		resp := getUserAvailabilityResponse{}
-		for range req.MailboxDataArray.Items {
+		for range items {
 			resp.Responses = append(resp.Responses, errorFreeBusy("ErrorTimeZone"))
 		}
 		writeResponse(w, resp)
@@ -145,7 +159,7 @@ func (s *Server) handleGetUserAvailability(w http.ResponseWriter, inner []byte, 
 	}
 
 	resp := getUserAvailabilityResponse{}
-	for _, md := range req.MailboxDataArray.Items {
+	for _, md := range items {
 		resp.Responses = append(resp.Responses, s.freeBusyForTarget(sess, md.Email.Address, windowStart, windowEnd))
 	}
 	writeResponse(w, resp)
@@ -382,4 +396,17 @@ func strVal(pv mapi.PropertyValues, tag mapi.PropTag) string {
 		}
 	}
 	return ""
+}
+
+// logTruncatedAvailability records that a request asked for more mailboxes than the
+// cap allows. Without it the operator sees a normal-looking response and no sign
+// that the cap is biting, which is the only signal that a client is misbehaving or
+// that the limit is set too low.
+func (s *Server) logTruncatedAvailability(sess *session, asked, allowed int) {
+	if s.Logger == nil {
+		return
+	}
+	s.Logger.Warn(logging.EWS, "availability.truncated", logging.Fields{
+		"user": sess.user, "asked": asked, "allowed": allowed,
+	})
 }

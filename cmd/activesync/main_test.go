@@ -18,7 +18,7 @@ func TestApplyActiveSyncSizeLimit(t *testing.T) {
 		func() (directory.SizeLimits, bool, error) {
 			return directory.SizeLimits{ActiveSyncRequestBytes: 16384}, true, nil
 		},
-		func(n int64) { got = n })
+		func(n int64) { got = n }, func(int64) {})
 	if got != 16384 {
 		t.Errorf("applied cap = %d, want 16384", got)
 	}
@@ -28,7 +28,7 @@ func TestApplyActiveSyncSizeLimit(t *testing.T) {
 		func() (directory.SizeLimits, bool, error) {
 			return directory.SizeLimits{}, false, errors.New("db down")
 		},
-		func(n int64) { got = n })
+		func(n int64) { got = n }, func(int64) {})
 	if got != sentinel {
 		t.Errorf("setter called on read error (got %d); the cap must be left unchanged", got)
 	}
@@ -36,7 +36,7 @@ func TestApplyActiveSyncSizeLimit(t *testing.T) {
 	got = sentinel
 	applyActiveSyncSizeLimit(nil,
 		func() (directory.SizeLimits, bool, error) { return directory.SizeLimits{}, false, nil },
-		func(n int64) { got = n })
+		func(n int64) { got = n }, func(int64) {})
 	if got != sentinel {
 		t.Errorf("setter called with no stored row (got %d); the default must stand", got)
 	}

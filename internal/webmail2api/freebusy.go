@@ -5,10 +5,13 @@ import (
 	"strings"
 	"time"
 
+	"fmt"
 	"hermex/internal/directory"
 	"hermex/internal/ews"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"sync/atomic"
 )
 
 // roomLister is the optional directory capability that lists bookable resource
@@ -83,8 +86,17 @@ func (s *Server) handleFreeBusy(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad window"})
 		return
 	}
+	// Each target opens a store and scans a whole calendar, and the query string
+	// admits thousands of entries, so answer only the first N rather than letting
+	// one request drive unbounded disk work.
+	users := splitCSV(q.Get("users"))
+	if max := maxFreeBusyTargets(); len(users) > max {
+		logError("freebusy-truncated", fmt.Errorf("asked for %d targets, cap is %d", len(users), max),
+			logging.Fields{"user": c.Email})
+		users = users[:max]
+	}
 	out := make([]freeBusyJSON, 0)
-	for _, email := range splitCSV(q.Get("users")) {
+	for _, email := range users {
 		out = append(out, freeBusyJSON{User: email, Busy: s.busyFor(c, email, start, end)})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"freeBusy": out})
@@ -134,4 +146,32 @@ func splitCSV(s string) []string {
 		}
 	}
 	return out
+}
+
+// defaultFreeBusyTargets caps how many mailboxes one availability request may fan
+// out to when no operator limit is set. Each target costs a store open and a full
+// calendar scan, and the request admits far more list entries than that, so the
+// count needs its own bound; the byte cap does not provide one.
+const defaultFreeBusyTargets = 100
+
+// freeBusyTargetLimit holds the operator-set availability target cap (0 = use the
+// default), set by SetMaxFreeBusyTargets and read live per request.
+var freeBusyTargetLimit atomic.Int64
+
+// SetMaxFreeBusyTargets sets how many mailboxes one availability request may fan out
+// to (0 restores the built-in default). It is safe to call concurrently with request
+// handling, so an operator's edit applies without a restart.
+func SetMaxFreeBusyTargets(n int64) {
+	if n < 0 {
+		n = 0
+	}
+	freeBusyTargetLimit.Store(n)
+}
+
+// maxFreeBusyTargets returns the cap in force.
+func maxFreeBusyTargets() int {
+	if n := freeBusyTargetLimit.Load(); n > 0 {
+		return int(n)
+	}
+	return defaultFreeBusyTargets
 }

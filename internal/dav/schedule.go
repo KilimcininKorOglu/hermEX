@@ -12,6 +12,7 @@ import (
 	"hermex/internal/mta"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcmail"
+	"sync/atomic"
 )
 
 // CalDAV scheduling (RFC 6638). The scheduling Outbox accepts a POST carrying an
@@ -63,8 +64,14 @@ func (s *Server) outboxFreeBusy(w http.ResponseWriter, user string, vfb *icalNod
 	rangeStart, okS := propTimeValue(vfb, "DTSTART")
 	rangeEnd, okE := propTimeValue(vfb, "DTEND")
 
+	// Each attendee opens a store and scans a whole calendar, so bound how many one
+	// scheduling request may ask for.
+	attendees := vfb.propsByName("ATTENDEE")
+	if max := maxFreeBusyTargets(); len(attendees) > max {
+		attendees = attendees[:max]
+	}
 	resp := &scheduleResponse{}
-	for _, att := range vfb.propsByName("ATTENDEE") {
+	for _, att := range attendees {
 		recipient := strings.TrimSpace(att.value)
 		path, ok := s.accounts.Resolve(stripMailto(recipient))
 		if !ok {
@@ -362,4 +369,32 @@ func writeScheduleResponse(w http.ResponseWriter, resp *scheduleResponse) {
 	w.Header().Set("Content-Type", "application/xml; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(append([]byte(xml.Header), body...))
+}
+
+// defaultFreeBusyTargets caps how many mailboxes one availability request may fan
+// out to when no operator limit is set. Each target costs a store open and a full
+// calendar scan, and the request admits far more list entries than that, so the
+// count needs its own bound; the byte cap does not provide one.
+const defaultFreeBusyTargets = 100
+
+// freeBusyTargetLimit holds the operator-set availability target cap (0 = use the
+// default), set by SetMaxFreeBusyTargets and read live per request.
+var freeBusyTargetLimit atomic.Int64
+
+// SetMaxFreeBusyTargets sets how many mailboxes one availability request may fan out
+// to (0 restores the built-in default). It is safe to call concurrently with request
+// handling, so an operator's edit applies without a restart.
+func SetMaxFreeBusyTargets(n int64) {
+	if n < 0 {
+		n = 0
+	}
+	freeBusyTargetLimit.Store(n)
+}
+
+// maxFreeBusyTargets returns the cap in force.
+func maxFreeBusyTargets() int {
+	if n := freeBusyTargetLimit.Load(); n > 0 {
+		return int(n)
+	}
+	return defaultFreeBusyTargets
 }

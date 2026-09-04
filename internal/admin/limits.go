@@ -17,6 +17,9 @@ const (
 	defaultDAVVCardMB          = 4
 	defaultWebmailRequestMB    = 40
 	defaultMapiRequestMB       = 32
+	// defaultFreeBusyTargets is a count, not a size: how many mailboxes one
+	// availability request may fan out to. It mirrors each daemon's built-in value.
+	defaultFreeBusyTargets = 100
 )
 
 // handleUILimits renders the protocol size-limits page (system admins).
@@ -133,6 +136,7 @@ func (s *Server) fillSizeLimits(data map[string]any) {
 	imapMB, ewsMB, easMB := int64(defaultIMAPLiteralMB), int64(defaultEWSRequestMB), int64(defaultActiveSyncRequestMB)
 	icalMB, vcardMB := int64(defaultDAVICalMB), int64(defaultDAVVCardMB)
 	webMB, mapiMB := int64(defaultWebmailRequestMB), int64(defaultMapiRequestMB)
+	fbTargets := int64(defaultFreeBusyTargets)
 	if sl, found, err := s.dir.GetSizeLimits(); err == nil && found {
 		imapMB = sl.IMAPLiteralBytes / (1024 * 1024)
 		ewsMB = sl.EWSRequestBytes / (1024 * 1024)
@@ -141,6 +145,7 @@ func (s *Server) fillSizeLimits(data map[string]any) {
 		vcardMB = sl.DAVVCardBytes / (1024 * 1024)
 		webMB = sl.WebmailRequestBytes / (1024 * 1024)
 		mapiMB = sl.MapiRequestBytes / (1024 * 1024)
+		fbTargets = sl.FreeBusyMaxTargets
 	}
 	data["IMAPLiteralMB"] = imapMB
 	data["EWSRequestMB"] = ewsMB
@@ -149,6 +154,7 @@ func (s *Server) fillSizeLimits(data map[string]any) {
 	data["DAVVCardMB"] = vcardMB
 	data["WebmailRequestMB"] = webMB
 	data["MapiRequestMB"] = mapiMB
+	data["FreeBusyMaxTargets"] = fbTargets
 }
 
 // handleUISaveLimits persists the protocol size limits (entered in whole MB). Each
@@ -165,6 +171,13 @@ func (s *Server) handleUISaveLimits(w http.ResponseWriter, r *http.Request) {
 		s.render(w, "limits-panel", s.limitsPageData(r, "Each limit must be at least 1 MB; settings not saved."))
 		return
 	}
+	// A count of mailboxes, not a size, so it is validated on its own and never
+	// scaled by the megabyte factor the fields above use.
+	fbTargets := formInt(r, "freebusy_max_targets")
+	if fbTargets < 1 {
+		s.render(w, "limits-panel", s.limitsPageData(r, "The free/busy target cap must be at least 1; settings not saved."))
+		return
+	}
 	limits := directory.SizeLimits{
 		IMAPLiteralBytes:       int64(imapMB) * 1024 * 1024,
 		EWSRequestBytes:        int64(ewsMB) * 1024 * 1024,
@@ -173,6 +186,7 @@ func (s *Server) handleUISaveLimits(w http.ResponseWriter, r *http.Request) {
 		DAVVCardBytes:          int64(vcardMB) * 1024 * 1024,
 		WebmailRequestBytes:    int64(webMB) * 1024 * 1024,
 		MapiRequestBytes:       int64(mapiMB) * 1024 * 1024,
+		FreeBusyMaxTargets:     int64(fbTargets),
 	}
 	if err := s.dir.SetSizeLimits(limits); err != nil {
 		s.render(w, "limits-panel", s.limitsPageData(r, s.notice("Could not save the size limits.", err)))

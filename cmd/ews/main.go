@@ -89,8 +89,8 @@ func main() {
 	srv.Spool = spool
 	// EWS SOAP request-body cap: read at startup and re-read every minute so an admin's
 	// change applies without a restart; 0 keeps the built-in default.
-	applyEWSSizeLimit(logger, dir.GetSizeLimits, ews.SetMaxRequestBody)
-	go runEWSSizeMaintenance(logger, dir.GetSizeLimits, ews.SetMaxRequestBody)
+	applyEWSSizeLimit(logger, dir.GetSizeLimits, ews.SetMaxRequestBody, ews.SetMaxFreeBusyTargets)
+	go runEWSSizeMaintenance(logger, dir.GetSizeLimits, ews.SetMaxRequestBody, ews.SetMaxFreeBusyTargets)
 	addr := cfg.EWSAddr
 	if addr == "" {
 		addr = ":8080"
@@ -147,7 +147,7 @@ func main() {
 // applyEWSSizeLimit reads the stored EWS request-body cap and applies it. A missing row
 // or a read error leaves the cap unchanged, so a settings failure never shrinks it
 // unexpectedly.
-func applyEWSSizeLimit(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
+func applyEWSSizeLimit(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody, setFreeBusyTargets func(int64)) {
 	s, found, err := read()
 	if err != nil {
 		logging.SettingsReadFailed(logger, "hermex-ews", "size-limits", "leaving the request cap unchanged", err)
@@ -157,14 +157,15 @@ func applyEWSSizeLimit(logger *logging.Logger, read func() (directory.SizeLimits
 		return
 	}
 	setRequestBody(s.EWSRequestBytes)
+	setFreeBusyTargets(s.FreeBusyMaxTargets)
 }
 
 // runEWSSizeMaintenance re-applies the EWS request-body cap every minute so an admin
 // change takes effect without a restart. It runs until the process exits.
-func runEWSSizeMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
+func runEWSSizeMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody, setFreeBusyTargets func(int64)) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for range tick.C {
-		applyEWSSizeLimit(logger, read, setRequestBody)
+		applyEWSSizeLimit(logger, read, setRequestBody, setFreeBusyTargets)
 	}
 }

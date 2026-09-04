@@ -30,6 +30,34 @@ func SetMaxRequestBody(n int64) {
 	reqBodyLimit.Store(n)
 }
 
+// defaultFreeBusyTargets caps how many mailboxes one availability request may fan
+// out to when no operator limit is set. Each target costs a store open and a full
+// calendar scan, and the request body admits tens of thousands of list entries, so
+// the count needs its own bound; the byte cap does not provide one.
+const defaultFreeBusyTargets = 100
+
+// freeBusyTargetLimit holds the operator-set availability target cap (0 = use the
+// default), set by SetMaxFreeBusyTargets and read live per request.
+var freeBusyTargetLimit atomic.Int64
+
+// SetMaxFreeBusyTargets sets how many mailboxes one availability request may fan out
+// to (0 restores the built-in default). It is safe to call concurrently with request
+// handling, so an operator's edit applies without a restart.
+func SetMaxFreeBusyTargets(n int64) {
+	if n < 0 {
+		n = 0
+	}
+	freeBusyTargetLimit.Store(n)
+}
+
+// maxFreeBusyTargets returns the cap in force.
+func maxFreeBusyTargets() int {
+	if n := freeBusyTargetLimit.Load(); n > 0 {
+		return int(n)
+	}
+	return defaultFreeBusyTargets
+}
+
 // EWS XML namespaces (MS-OXWS). Clients are namespace-aware (they match on the
 // URI, not the prefix), so responses declare these as the relevant element's
 // namespace and the exact prefix string does not matter.

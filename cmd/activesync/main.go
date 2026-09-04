@@ -90,8 +90,8 @@ func main() {
 	srv.Sessions = dir
 	// ActiveSync request-body cap: read at startup and re-read every minute so an
 	// admin's change applies without a restart; 0 keeps the built-in default.
-	applyActiveSyncSizeLimit(logger, dir.GetSizeLimits, activesync.SetMaxRequestBody)
-	go runActiveSyncSizeMaintenance(logger, dir.GetSizeLimits, activesync.SetMaxRequestBody)
+	applyActiveSyncSizeLimit(logger, dir.GetSizeLimits, activesync.SetMaxRequestBody, activesync.SetMaxFreeBusyTargets)
+	go runActiveSyncSizeMaintenance(logger, dir.GetSizeLimits, activesync.SetMaxRequestBody, activesync.SetMaxFreeBusyTargets)
 	addr := cfg.ActiveSyncAddr
 	if addr == "" {
 		addr = ":8080"
@@ -149,7 +149,7 @@ func main() {
 // applyActiveSyncSizeLimit reads the stored ActiveSync request-body cap and applies it.
 // A missing row or a read error leaves the cap unchanged, so a settings failure never
 // shrinks it unexpectedly.
-func applyActiveSyncSizeLimit(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
+func applyActiveSyncSizeLimit(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody, setFreeBusyTargets func(int64)) {
 	s, found, err := read()
 	if err != nil {
 		logging.SettingsReadFailed(logger, "hermex-activesync", "size-limits", "leaving the request cap unchanged", err)
@@ -159,15 +159,16 @@ func applyActiveSyncSizeLimit(logger *logging.Logger, read func() (directory.Siz
 		return
 	}
 	setRequestBody(s.ActiveSyncRequestBytes)
+	setFreeBusyTargets(s.FreeBusyMaxTargets)
 }
 
 // runActiveSyncSizeMaintenance re-applies the ActiveSync request-body cap every minute
 // so an admin change takes effect without a restart. It runs until the process exits.
-func runActiveSyncSizeMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody func(int64)) {
+func runActiveSyncSizeMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody, setFreeBusyTargets func(int64)) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for range tick.C {
-		applyActiveSyncSizeLimit(logger, read, setRequestBody)
+		applyActiveSyncSizeLimit(logger, read, setRequestBody, setFreeBusyTargets)
 	}
 }
 

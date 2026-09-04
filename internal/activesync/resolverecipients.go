@@ -8,6 +8,7 @@ import (
 	"hermex/internal/directory"
 	"hermex/internal/objectstore"
 	"hermex/internal/wbxml"
+	"sync/atomic"
 )
 
 // resolveRecipientLimit caps the GAL matches returned for one recipient query.
@@ -66,6 +67,11 @@ func (s *Server) handleResolveRecipients(w http.ResponseWriter, r *http.Request,
 
 	gal, _ := s.accounts.(directory.GAL)
 	children := []*wbxml.Node{wbxml.Str(wbxml.RRStatus, strconv.Itoa(rrStatusOK))}
+	// Each entry can resolve to many mailboxes and, with availability requested,
+	// each match opens a store and scans a calendar, so bound the entry count.
+	if max := maxFreeBusyTargets(); len(tos) > max {
+		tos = tos[:max]
+	}
 	pictures := 0
 	for _, to := range tos {
 		children = append(children, resolveOneRecipient(gal, to, opt, win, sess, &pictures))
@@ -164,4 +170,32 @@ func recipientPhoto(storePath string) []byte {
 	defer st.Close()
 	p, _ := st.UserPhoto()
 	return p
+}
+
+// defaultFreeBusyTargets caps how many mailboxes one availability request may fan
+// out to when no operator limit is set. Each target costs a store open and a full
+// calendar scan, and the request admits far more list entries than that, so the
+// count needs its own bound; the byte cap does not provide one.
+const defaultFreeBusyTargets = 100
+
+// freeBusyTargetLimit holds the operator-set availability target cap (0 = use the
+// default), set by SetMaxFreeBusyTargets and read live per request.
+var freeBusyTargetLimit atomic.Int64
+
+// SetMaxFreeBusyTargets sets how many mailboxes one availability request may fan out
+// to (0 restores the built-in default). It is safe to call concurrently with request
+// handling, so an operator's edit applies without a restart.
+func SetMaxFreeBusyTargets(n int64) {
+	if n < 0 {
+		n = 0
+	}
+	freeBusyTargetLimit.Store(n)
+}
+
+// maxFreeBusyTargets returns the cap in force.
+func maxFreeBusyTargets() int {
+	if n := freeBusyTargetLimit.Load(); n > 0 {
+		return int(n)
+	}
+	return defaultFreeBusyTargets
 }

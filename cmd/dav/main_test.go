@@ -18,7 +18,7 @@ func TestApplyDAVSizeLimits(t *testing.T) {
 		func() (directory.SizeLimits, bool, error) {
 			return directory.SizeLimits{DAVICalBytes: 1000, DAVVCardBytes: 2000}, true, nil
 		},
-		func(n int64) { ical = n }, func(n int64) { vcard = n })
+		func(n int64) { ical = n }, func(n int64) { vcard = n }, func(int64) {})
 	if ical != 1000 || vcard != 2000 {
 		t.Errorf("applied caps = ical %d, vcard %d; want 1000, 2000", ical, vcard)
 	}
@@ -28,7 +28,7 @@ func TestApplyDAVSizeLimits(t *testing.T) {
 		func() (directory.SizeLimits, bool, error) {
 			return directory.SizeLimits{}, false, errors.New("db down")
 		},
-		func(n int64) { ical = n }, func(n int64) { vcard = n })
+		func(n int64) { ical = n }, func(n int64) { vcard = n }, func(int64) {})
 	if ical != sentinel || vcard != sentinel {
 		t.Errorf("setters called on read error (ical %d, vcard %d); the caps must be left unchanged", ical, vcard)
 	}
@@ -36,7 +36,7 @@ func TestApplyDAVSizeLimits(t *testing.T) {
 	ical, vcard = sentinel, sentinel
 	applyDAVSizeLimits(nil,
 		func() (directory.SizeLimits, bool, error) { return directory.SizeLimits{}, false, nil },
-		func(n int64) { ical = n }, func(n int64) { vcard = n })
+		func(n int64) { ical = n }, func(n int64) { vcard = n }, func(int64) {})
 	if ical != sentinel || vcard != sentinel {
 		t.Errorf("setters called with no stored row (ical %d, vcard %d); the defaults must stand", ical, vcard)
 	}

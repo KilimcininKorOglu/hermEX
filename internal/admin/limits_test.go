@@ -54,7 +54,7 @@ func TestSaveLimits(t *testing.T) {
 	resp := htmxPOST(t, ts, "/admin/ui/limits", session, csrf, url.Values{
 		"imap_literal_mb": {"10"}, "ews_request_mb": {"4"}, "activesync_request_mb": {"2"},
 		"dav_ical_mb": {"3"}, "dav_vcard_mb": {"5"}, "webmail_request_mb": {"20"},
-		"mapi_request_mb": {"16"},
+		"mapi_request_mb": {"16"}, "freebusy_max_targets": {"25"},
 	})
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
@@ -66,6 +66,10 @@ func TestSaveLimits(t *testing.T) {
 		d.sizeLimits.DAVVCardBytes != 5*1024*1024 || d.sizeLimits.WebmailRequestBytes != 20*1024*1024 ||
 		d.sizeLimits.MapiRequestBytes != 16*1024*1024 {
 		t.Errorf("limits not persisted as bytes: found=%v %+v", d.sizeLimitsFound, d.sizeLimits)
+	}
+	// The free/busy cap is a count, so it must persist unscaled by the megabyte factor.
+	if d.sizeLimits.FreeBusyMaxTargets != 25 {
+		t.Errorf("free/busy target cap = %d, want 25 (a count, not a size)", d.sizeLimits.FreeBusyMaxTargets)
 	}
 }
 

@@ -83,8 +83,8 @@ func main() {
 	srv.SetNotify(notify.EnableConsumer(cfg.NotifyURL, cfg.NotifySecret, logger))
 	// CalDAV/CardDAV PUT body caps: read at startup and re-read every minute so an
 	// admin's change applies without a restart; 0 keeps the built-in defaults.
-	applyDAVSizeLimits(logger, dir.GetSizeLimits, srv.SetMaxICal, srv.SetMaxVCard)
-	go runDAVSizeMaintenance(logger, dir.GetSizeLimits, srv.SetMaxICal, srv.SetMaxVCard)
+	applyDAVSizeLimits(logger, dir.GetSizeLimits, srv.SetMaxICal, srv.SetMaxVCard, dav.SetMaxFreeBusyTargets)
+	go runDAVSizeMaintenance(logger, dir.GetSizeLimits, srv.SetMaxICal, srv.SetMaxVCard, dav.SetMaxFreeBusyTargets)
 	addr := cfg.DAVAddr
 	if addr == "" {
 		addr = ":8080"
@@ -141,7 +141,7 @@ func main() {
 // applyDAVSizeLimits reads the stored CalDAV/CardDAV PUT body caps and applies them to
 // the server. A missing row or a read error leaves the caps unchanged, so a settings
 // failure never shrinks them unexpectedly.
-func applyDAVSizeLimits(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setICal, setVCard func(int64)) {
+func applyDAVSizeLimits(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setICal, setVCard, setFreeBusyTargets func(int64)) {
 	s, found, err := read()
 	if err != nil {
 		logging.SettingsReadFailed(logger, "hermex-dav", "size-limits", "leaving the body caps unchanged", err)
@@ -152,14 +152,15 @@ func applyDAVSizeLimits(logger *logging.Logger, read func() (directory.SizeLimit
 	}
 	setICal(s.DAVICalBytes)
 	setVCard(s.DAVVCardBytes)
+	setFreeBusyTargets(s.FreeBusyMaxTargets)
 }
 
 // runDAVSizeMaintenance re-applies the DAV PUT body caps every minute so an admin
 // change takes effect without a restart. It runs until the process exits.
-func runDAVSizeMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setICal, setVCard func(int64)) {
+func runDAVSizeMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setICal, setVCard, setFreeBusyTargets func(int64)) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for range tick.C {
-		applyDAVSizeLimits(logger, read, setICal, setVCard)
+		applyDAVSizeLimits(logger, read, setICal, setVCard, setFreeBusyTargets)
 	}
 }

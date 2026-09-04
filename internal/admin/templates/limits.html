@@ -25,6 +25,7 @@
 <p>CardDAV maximum vCard PUT (MB): <input type="number" name="dav_vcard_mb" value="{{.DAVVCardMB}}" min="1"></p>
 <p>Webmail maximum request (MB): <input type="number" name="webmail_request_mb" value="{{.WebmailRequestMB}}" min="1"></p>
 <p>MAPI/HTTP maximum request (MB): <input type="number" name="mapi_request_mb" value="{{.MapiRequestMB}}" min="1"></p>
+<p>Free/busy maximum mailboxes per request: <input type="number" name="freebusy_max_targets" value="{{.FreeBusyMaxTargets}}" min="1"></p>
 <button type="submit">Save limits</button>
 </form>
 </div>{{end}}
