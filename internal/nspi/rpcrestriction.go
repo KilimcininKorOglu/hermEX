@@ -17,6 +17,23 @@ import (
 // matcher treats as no-match, matching the MAPI/HTTP path). A structural kind
 // the GAL never receives is a loud error, not a silent wire desync.
 func pullRestrictionNDR(p *ndr.Pull) (mapi.Restriction, error) {
+	return pullRestrictionDepth(p, 0)
+}
+
+// maxRestrictionDepth bounds how deeply a decoded restriction may nest. AND, OR
+// and NOT recurse, and a NOT chain costs only twelve wire bytes per level, so an
+// unbounded decoder recurses once per few input bytes and a large filter
+// overflows the goroutine stack, which is an unrecoverable runtime throw rather
+// than an error a caller can catch. Real filters nest a handful deep; this cap
+// matches the one the property-model restriction decoder applies.
+const maxRestrictionDepth = 100
+
+// pullRestrictionDepth carries the current nesting level so the recursion stays
+// bounded.
+func pullRestrictionDepth(p *ndr.Pull, depth int) (mapi.Restriction, error) {
+	if depth > maxRestrictionDepth {
+		return mapi.Restriction{}, fmt.Errorf("%w: restriction nested past the depth limit", ndr.ErrFormat)
+	}
 	resType, err := p.Uint32()
 	if err != nil {
 		return mapi.Restriction{}, err
@@ -49,9 +66,15 @@ func pullRestrictionNDR(p *ndr.Pull) (mapi.Restriction, error) {
 		if count != cres {
 			return r, fmt.Errorf("%w: restriction child count %d != %d", ndr.ErrFormat, count, cres)
 		}
+		// The count is a 32-bit field independent of the transport's body cap, so
+		// nothing upstream bounds it: reject one the remaining bytes cannot satisfy
+		// before it becomes a make() length, exactly as the sibling array decoders do.
+		if err := p.CheckCount(count); err != nil {
+			return r, err
+		}
 		kids := make([]mapi.Restriction, count)
 		for i := range kids {
-			if kids[i], err = pullRestrictionNDR(p); err != nil {
+			if kids[i], err = pullRestrictionDepth(p, depth+1); err != nil {
 				return r, err
 			}
 		}
@@ -62,7 +85,7 @@ func pullRestrictionNDR(p *ndr.Pull) (mapi.Restriction, error) {
 			return r, err
 		}
 		if ref != 0 {
-			inner, err := pullRestrictionNDR(p)
+			inner, err := pullRestrictionDepth(p, depth+1)
 			if err != nil {
 				return r, err
 			}
