@@ -59,8 +59,7 @@ func (e badAttachmentError) Error() string { return "attachment could not be dec
 // that will not decode is the client's fault and names the file so it can be
 // corrected; anything else is an internal failure and stays generic.
 func writeBuildError(w http.ResponseWriter, err error, generic string) {
-	var bad badAttachmentError
-	if errors.As(err, &bad) {
+	if bad, ok := errors.AsType[badAttachmentError](err); ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not read attachment " + bad.name})
 		return
 	}
