@@ -135,6 +135,10 @@ func TestBlobRoundTrip(t *testing.T) {
 		{"monthly-day", "FREQ=MONTHLY;INTERVAL=1;BYMONTHDAY=15"},
 		{"monthly-nth", "FREQ=MONTHLY;INTERVAL=1;BYDAY=MO;BYSETPOS=1"},
 		{"yearly", "FREQ=YEARLY;INTERVAL=1;BYMONTHDAY=1"},
+		// A yearly Period is carried in MONTHS, so an interval above one is where a
+		// missing conversion on either side shows up: it would come back as 24.
+		{"yearly-interval", "FREQ=YEARLY;INTERVAL=2;BYMONTHDAY=1"},
+		{"yearly-nth", "FREQ=YEARLY;INTERVAL=3;BYDAY=TU;BYSETPOS=2"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
