@@ -65,15 +65,16 @@ func ValidateURL(raw string, allowInternal bool) error {
 // IsPublicIP reports whether ip is a routable, non-internal address a callback is
 // permitted to reach. It rejects loopback (127/8, ::1), link-local (169.254/16
 // including the 169.254.169.254 cloud-metadata address, fe80::/10), private (10/8,
-// 172.16/12, 192.168/16, fc00::/7), unspecified (0.0.0.0, ::), and multicast: the
-// address space an attacker-named callback would try to pivot into.
+// 172.16/12, 192.168/16, fc00::/7), RFC 6598 shared space (100.64/10), unspecified
+// (0.0.0.0, ::), and multicast: the address space an attacker-named callback would
+// try to pivot into.
 func IsPublicIP(ip net.IP) bool {
 	return !isInternalIP(ip)
 }
 
 // isInternalIP lists the address space the guard refuses, as a plain disjunction.
 // Stating it positively and negating once is what keeps the rule readable: the
-// equivalent six negated conjuncts are a predicate a reader has to evaluate rather
+// equivalent negated conjuncts are a predicate a reader has to evaluate rather
 // than read, which is the wrong shape for the check that decides whether an
 // attacker-named callback can reach the internal network.
 func isInternalIP(ip net.IP) bool {
@@ -82,7 +83,20 @@ func isInternalIP(ip net.IP) bool {
 		ip.IsLinkLocalMulticast() ||
 		ip.IsPrivate() ||
 		ip.IsUnspecified() ||
-		ip.IsMulticast()
+		ip.IsMulticast() ||
+		isSharedAddressSpace(ip)
+}
+
+// sharedAddressSpace is RFC 6598 carrier-grade NAT space. IsPrivate covers RFC 1918
+// and RFC 4193 only, by design, so this range is public to the standard library
+// while cloud providers routinely use it for internal NAT gateways, load balancers
+// and container networks. Without it an attacker-named callback resolving into the
+// range is dialed as if it were on the internet.
+var sharedAddressSpace = net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+
+// isSharedAddressSpace reports whether ip falls in RFC 6598 space.
+func isSharedAddressSpace(ip net.IP) bool {
+	return sharedAddressSpace.Contains(ip)
 }
 
 // GuardedDial returns a DialContext that resolves the target host and refuses the
