@@ -62,11 +62,14 @@ type fakeAVDir struct {
 	domainID          int64
 	known             bool
 	quarantined       []directory.QuarantineEntry
+	// adminsErr makes the admin lookup fail, the case a virus event must still
+	// record rather than treat as "this domain has no admins".
+	adminsErr error
 }
 
 func (f *fakeAVDir) GetDomainAVScan(string) (bool, bool, error)   { return f.inbound, f.outbound, nil }
 func (f *fakeAVDir) DomainID(string) (int64, bool, error)         { return f.domainID, f.known, nil }
-func (f *fakeAVDir) DomainOrgAdminEmails(int64) ([]string, error) { return nil, nil }
+func (f *fakeAVDir) DomainOrgAdminEmails(int64) ([]string, error) { return nil, f.adminsErr }
 func (f *fakeAVDir) QuarantineMessage(e directory.QuarantineEntry) (int64, error) {
 	f.quarantined = append(f.quarantined, e)
 	return int64(len(f.quarantined)), nil

@@ -212,7 +212,13 @@ func scanMessageLabelled(accounts directory.Accounts, mode avMode, from string, 
 	if werr := writeQuarantineEml(av.quarPath(id), raw); werr != nil {
 		av.emit(logging.LevelError, "av.quarantine.eml.fail", from, logging.Fields{"id": id, "err": werr.Error()})
 	}
-	admins, _ := av.dir.DomainOrgAdminEmails(scope)
+	// A failed lookup returns no admins, which is indistinguishable from a domain
+	// that has none: without this line a directory outage silently skips every
+	// admin alert for a virus event and the log shows a clean quarantine.
+	admins, aerr := av.dir.DomainOrgAdminEmails(scope)
+	if aerr != nil {
+		av.emit(logging.LevelError, "av.admins.fail", from, logging.Fields{"id": id, "err": aerr.Error()})
+	}
 	affected := recipients
 	if direction == "outbound" {
 		affected = []string{from}
