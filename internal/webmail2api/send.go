@@ -1,6 +1,7 @@
 package webmail2api
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -237,6 +238,20 @@ func (s *Server) handleMailSendRaw(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid raw message"})
 		return
 	}
+	// The bytes are client-built, so the identity they assert has to clear the same
+	// send-as gate the two building handlers apply. The message is never rewritten
+	// here (that would break an S/MIME signature), so the From header is read out
+	// and authorized as-is; the outbound signer keys DKIM off this same header, so
+	// an unauthorized From would otherwise be relayed DMARC-aligned.
+	from, ok := rawFromAddress(raw)
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid raw message"})
+		return
+	}
+	if _, _, allowed := s.resolveSender(c.Email, from); !allowed {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "you may not send as this address"})
+		return
+	}
 	if bad, found := firstUnusableAddress(req.To, req.Cc, req.Bcc); found {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a valid email address: " + bad})
 		return
@@ -303,6 +318,22 @@ func (s *Server) handleMailDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"id": messageID("drafts", info.UID)})
+}
+
+// rawFromAddress reads the single From identity a client-built raw message
+// asserts. RFC 5322 permits a From list, but a compose never emits one and a
+// second address is a way to hide the address that will actually be authorized,
+// so exactly one is required; anything else is refused as malformed.
+func rawFromAddress(raw []byte) (string, bool) {
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		return "", false
+	}
+	list, err := mail.ParseAddressList(msg.Header.Get("From"))
+	if err != nil || len(list) != 1 {
+		return "", false
+	}
+	return list[0].Address, true
 }
 
 // resolveSender authorizes the caller's chosen From identity and returns the
