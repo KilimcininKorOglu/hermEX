@@ -163,15 +163,23 @@ func mailtoParams(p *mapi.PropertyValues, smtpTag, nameTag mapi.PropTag, partsta
 	if addr == "" {
 		return ""
 	}
+	addr = icalParamSafe.Replace(addr)
 	s := ""
 	if partstat != "" {
 		s += ";PARTSTAT=" + partstat
 	}
-	if cn := getStr(p, nameTag); cn != "" {
-		s += ";CN=\"" + strings.ReplaceAll(cn, "\"", "") + "\""
+	if cn := icalParamSafe.Replace(getStr(p, nameTag)); cn != "" {
+		s += ";CN=\"" + cn + "\""
 	}
 	return s + ":mailto:" + addr
 }
+
+// icalParamSafe cleans a stored identity for a content line. This line is written
+// unescaped (it is parameters and a URI, not a TEXT value), so a line break in the
+// display name or address would end the line and start a property of the client's
+// choosing, and a double quote would close the quoted parameter early. The values
+// are stored MAPI strings any protocol can write, so neither is trustworthy.
+var icalParamSafe = strings.NewReplacer("\r", "", "\n", "", `"`, "")
 
 // dtLine renders a DTSTART/DTEND line: a date-only value for an all-day event,
 // else a UTC date-time.
