@@ -41,7 +41,7 @@ func AutoProcess(st *objectstore.Store, accounts directory.Accounts, spool *rela
 	if err != nil {
 		return false, nil // a message that cannot be opened is not auto-processed
 	}
-	if propStr(req.Props, mapi.PrMessageClass) != "IPM.Schedule.Meeting.Request" {
+	if propStr(req.Props, mapi.PrMessageClass) != requestClass {
 		return false, nil
 	}
 	resp, err := decideResponse(st, req, cfg)

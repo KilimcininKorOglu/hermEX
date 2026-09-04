@@ -193,3 +193,122 @@ func TestRespondSurvivesAFailedCleanup(t *testing.T) {
 		t.Errorf("Calendar holds %d appointments, want the booking to have stood", n)
 	}
 }
+
+// seedAppointmentFor stores a Calendar appointment carrying the meeting's UID, the
+// object a calendar-view response answers.
+func seedAppointmentFor(t *testing.T, st *objectstore.Store, tags Tags, uid string) int64 {
+	t.Helper()
+	raw := []byte("From: bob@hermex.test\r\nTo: alice@hermex.test\r\nSubject: Sync\r\n" +
+		"Date: Mon, 01 Jun 2026 10:00:00 +0000\r\n\r\nbody\r\n")
+	info, err := st.AppendMessage(int64(mapi.PrivateFIDCalendar), raw, time.Now(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.ModifyMessageProperties(info.ID, mapi.PropertyValues{
+		{Tag: mapi.PrMessageClass, Value: "IPM.Appointment"},
+		{Tag: tags.UID, Value: uid},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return info.ID
+}
+
+// appendRequestWithUID is appendRequest with the meeting's UID stamped on, so the
+// calendar-view path can find it.
+func appendRequestWithUID(t *testing.T, st *objectstore.Store, tags Tags, uid string) int64 {
+	t.Helper()
+	id := appendRequest(t, st)
+	if err := st.ModifyMessageProperties(id, mapi.PropertyValues{{Tag: tags.UID, Value: uid}}); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// TestRespondFromCalendarNeverFilesTheAppointment is the guard. The answered object
+// is the appointment when the user responds from the calendar, so moving the
+// answered object would take the appointment off the calendar and into Deleted
+// Items, which is the opposite of what accepting a meeting means.
+func TestRespondFromCalendarNeverFilesTheAppointment(t *testing.T) {
+	st, err := objectstore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.SetMeetingConfig(objectstore.MeetingConfig{RemoveRequestOnResponse: true}); err != nil {
+		t.Fatal(err)
+	}
+	tags, err := ResolveTags(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apptID := seedAppointmentFor(t, st, tags, "no-request-here")
+
+	if _, err := Respond(st, nil, nil, "alice@hermex.test", apptID, ResponseAccepted, false); err != nil {
+		t.Fatal(err)
+	}
+	if n := folderCount(t, st, int64(mapi.PrivateFIDDeletedItems)); n != 0 {
+		t.Errorf("Deleted Items holds %d objects, want 0: the appointment itself was filed away", n)
+	}
+}
+
+// TestRespondFromCalendarRemovesTheRequest is the consistency half. A mailbox must
+// not end up in a different state depending on which view the user answered from,
+// so a calendar response finds the invitation in the Inbox by the meeting's UID and
+// files that away instead.
+func TestRespondFromCalendarRemovesTheRequest(t *testing.T) {
+	st, err := objectstore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.SetMeetingConfig(objectstore.MeetingConfig{RemoveRequestOnResponse: true}); err != nil {
+		t.Fatal(err)
+	}
+	tags, err := ResolveTags(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const uid = "meeting-uid-1"
+	appendRequestWithUID(t, st, tags, uid)
+	apptID := seedAppointmentFor(t, st, tags, uid)
+
+	if _, err := Respond(st, nil, nil, "alice@hermex.test", apptID, ResponseAccepted, false); err != nil {
+		t.Fatal(err)
+	}
+	if n := folderCount(t, st, int64(mapi.PrivateFIDInbox)); n != 0 {
+		t.Errorf("Inbox holds %d messages, want the request moved out", n)
+	}
+	if n := folderCount(t, st, int64(mapi.PrivateFIDDeletedItems)); n != 1 {
+		t.Errorf("Deleted Items holds %d messages, want just the request", n)
+	}
+	if _, err := st.OpenMessage(apptID); err != nil {
+		t.Errorf("the appointment is gone: %v", err)
+	}
+}
+
+// TestRespondFromCalendarLeavesOtherMeetings keeps the UID lookup honest: an
+// invitation for a different meeting must not be swept up.
+func TestRespondFromCalendarLeavesOtherMeetings(t *testing.T) {
+	st, err := objectstore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.SetMeetingConfig(objectstore.MeetingConfig{RemoveRequestOnResponse: true}); err != nil {
+		t.Fatal(err)
+	}
+	tags, err := ResolveTags(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendRequestWithUID(t, st, tags, "answered-meeting")
+	appendRequestWithUID(t, st, tags, "some-other-meeting")
+	apptID := seedAppointmentFor(t, st, tags, "answered-meeting")
+
+	if _, err := Respond(st, nil, nil, "alice@hermex.test", apptID, ResponseAccepted, false); err != nil {
+		t.Fatal(err)
+	}
+	if n := folderCount(t, st, int64(mapi.PrivateFIDInbox)); n != 1 {
+		t.Errorf("Inbox holds %d messages, want the other meeting's invitation left alone", n)
+	}
+}
