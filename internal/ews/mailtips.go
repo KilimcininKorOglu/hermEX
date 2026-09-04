@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/directory"
 	"hermex/internal/objectstore"
 )
 
@@ -78,14 +79,14 @@ type mailTipReplyBody struct {
 // handleGetMailTips answers GetMailTips: one response message per requested
 // recipient, carrying the out-of-office tip when that recipient is a local mailbox
 // with an active auto-reply.
-func (s *Server) handleGetMailTips(w http.ResponseWriter, inner []byte, _ *session) {
+func (s *Server) handleGetMailTips(w http.ResponseWriter, inner []byte, sess *session) {
 	var req getMailTipsRequest
 	_ = xml.Unmarshal(inner, &req)
 
 	now := time.Now().Unix()
 	msgs := make([]mailTipsResponseMessage, 0, len(req.Recipients.Mailbox))
 	for _, rcpt := range req.Recipients.Mailbox {
-		msgs = append(msgs, s.mailTipFor(rcpt.EmailAddress, now))
+		msgs = append(msgs, s.mailTipFor(sess.user, rcpt.EmailAddress, now))
 	}
 
 	writeResponse(w, getMailTipsResponse{
@@ -96,12 +97,12 @@ func (s *Server) handleGetMailTips(w http.ResponseWriter, inner []byte, _ *sessi
 }
 
 // mailTipFor builds one recipient's MailTips response message.
-func (s *Server) mailTipFor(address string, now int64) mailTipsResponseMessage {
+func (s *Server) mailTipFor(caller, address string, now int64) mailTipsResponseMessage {
 	tips := mailTips{
 		RecipientAddress: mailTipRecipient{EmailAddress: address, RoutingType: "SMTP"},
 		MailboxFull:      false,
 	}
-	if reply := s.recipientActiveOOF(address, now); reply != "" {
+	if reply := s.recipientActiveOOF(caller, address, now); reply != "" {
 		tips.OutOfOffice = &oofMailTip{ReplyBody: mailTipReplyBody{Message: reply}}
 	}
 	return mailTipsResponseMessage{ResponseClass: "Success", ResponseCode: "NoError", MailTips: tips}
@@ -111,9 +112,21 @@ func (s *Server) mailTipFor(address string, now int64) mailTipsResponseMessage {
 // "" when the address is not a local mailbox or its auto-reply is not active. A
 // non-local address (a valid external recipient is indistinguishable from a typo)
 // yields no tip rather than a false "invalid recipient".
-func (s *Server) recipientActiveOOF(address string, now int64) string {
+func (s *Server) recipientActiveOOF(caller, address string, now int64) string {
 	address = strings.TrimSpace(address)
 	if address == "" {
+		return ""
+	}
+	// The internal reply is same-organization content, so it is disclosed only
+	// inside the caller's address-book scope. A directory with no scope model
+	// refuses the disclosure rather than serving it deployment-wide, and an
+	// out-of-scope recipient answers exactly like an unknown one, so the response
+	// is not an existence or out-of-office oracle either.
+	scoped, isScoped := s.accounts.(directory.ScopeChecker)
+	if !isScoped {
+		return ""
+	}
+	if same, err := scoped.SameScope(caller, address); err != nil || !same {
 		return ""
 	}
 	path, ok := s.accounts.Resolve(address)

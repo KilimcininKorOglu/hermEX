@@ -34,3 +34,32 @@ func (d *SQLDirectory) galScope(caller string) (args []any, ok bool) {
 	}
 	return []any{row.orgID, row.orgID, row.orgID, row.domainID}, true
 }
+
+// SameScope implements ScopeChecker with the rule galScopePredicate encodes: two
+// addresses share a scope when they are in the same organization, or, when the
+// caller's domain belongs to none (the org_id 0 sentinel), when they are in the
+// same domain. It fails closed, so an empty or unresolvable address on either
+// side is out of scope rather than in it.
+func (d *SQLDirectory) SameScope(caller, other string) (bool, error) {
+	a, ok, err := d.scopeRow(caller)
+	if err != nil || !ok {
+		return false, err
+	}
+	b, ok, err := d.scopeRow(other)
+	if err != nil || !ok {
+		return false, err
+	}
+	if a.orgID != 0 {
+		return a.orgID == b.orgID, nil
+	}
+	return b.orgID == 0 && a.domainID == b.domainID, nil
+}
+
+// scopeRow resolves one address to the organization and domain that place it.
+func (d *SQLDirectory) scopeRow(address string) (loginRow, bool, error) {
+	address = strings.ToLower(strings.TrimSpace(address))
+	if address == "" {
+		return loginRow{}, false, nil
+	}
+	return d.resolve(address)
+}

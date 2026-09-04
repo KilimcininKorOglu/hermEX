@@ -90,6 +90,18 @@ type CanonicalResolver interface {
 	CanonicalLogin(address string) (login string, ok bool)
 }
 
+// ScopeChecker reports whether two addresses share an address-book scope: the
+// same organization, or the same domain when the domain belongs to none. It is
+// the same rule the scoped address-book reads apply, exposed for the surfaces
+// that disclose one mailbox's content to another mailbox's owner.
+//
+// Optional: a directory that has no organization model may omit it, and a caller
+// must then refuse the disclosure rather than serve it unscoped. That is the
+// direction the mistake has to fail in.
+type ScopeChecker interface {
+	SameScope(caller, other string) (bool, error)
+}
+
 // MailboxLister enumerates the store paths of every mailbox the directory knows.
 // A background worker with no address to resolve (the send-later spooler, which
 // must scan each user's Outbox) uses it to find all stores. Directories that
@@ -223,6 +235,34 @@ func (a StaticAccounts) Resolve(address string) (string, bool) {
 		return "", false
 	}
 	return acc.MailboxPath, true
+}
+
+// SameScope implements ScopeChecker. Static accounts carry no organization, so
+// the scope is the domain part, and both addresses must be accounts this
+// directory knows. An unknown address on either side is out of scope.
+func (a StaticAccounts) SameScope(caller, other string) (bool, error) {
+	callerDomain, ok := staticScopeDomain(a, caller)
+	if !ok {
+		return false, nil
+	}
+	otherDomain, ok := staticScopeDomain(a, other)
+	if !ok {
+		return false, nil
+	}
+	return callerDomain == otherDomain, nil
+}
+
+// staticScopeDomain returns the domain part of a known static account.
+func staticScopeDomain(a StaticAccounts, address string) (string, bool) {
+	address = strings.ToLower(strings.TrimSpace(address))
+	if _, known := a[address]; !known {
+		return "", false
+	}
+	at := strings.LastIndex(address, "@")
+	if at < 0 {
+		return "", false
+	}
+	return address[at+1:], true
 }
 
 // CanonicalLogin implements CanonicalResolver: a known address's canonical login is
