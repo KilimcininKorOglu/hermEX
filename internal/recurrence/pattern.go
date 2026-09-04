@@ -12,6 +12,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -82,8 +83,16 @@ type rrule struct {
 	Month    int
 }
 
+// maxRRuleInterval bounds INTERVAL so every period this package derives from it
+// stays inside the pattern's 32-bit fields. The widest multiplier is the weekly
+// branch's minutes-per-week, so that is what the bound divides by. A value past it
+// does not merely truncate: a product landing on exactly zero modulo 2^32 turns
+// the daily branch's FirstDateTime modulo into a division by zero.
+const maxRRuleInterval = math.MaxUint32 / (7 * 24 * 60)
+
 // parseRRule parses an RRULE value (the text after "RRULE:") into the local rrule. A
-// value with no FREQ is rejected.
+// value with no FREQ, or an INTERVAL or COUNT the pattern cannot represent, is
+// rejected.
 func parseRRule(value string) (rrule, bool) {
 	r := rrule{Interval: 1}
 	for part := range strings.SplitSeq(value, ";") {
@@ -95,11 +104,19 @@ func parseRRule(value string) (rrule, bool) {
 		case "FREQ":
 			r.Freq = strings.ToUpper(strings.TrimSpace(val))
 		case "INTERVAL":
-			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			n, err := strconv.Atoi(val)
+			if err == nil && n > maxRRuleInterval {
+				return rrule{}, false
+			}
+			if err == nil && n > 0 {
 				r.Interval = n
 			}
 		case "COUNT":
-			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+			n, err := strconv.Atoi(val)
+			if err == nil && n > math.MaxUint32 {
+				return rrule{}, false
+			}
+			if err == nil && n > 0 {
 				r.Count = n
 			}
 		case "UNTIL":
