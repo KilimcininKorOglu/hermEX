@@ -48,6 +48,13 @@ func verifyToken(secret []byte, token string) (claims, error) {
 	if len(parts) != 3 {
 		return claims{}, errBadToken
 	}
+	// Pin the header rather than signing over whatever the caller sent. The HMAC
+	// already covers it, so a rewritten alg cannot pass without the secret, but
+	// pinning keeps the verifier's algorithm independent of the token: the day a
+	// second algorithm is added, the choice stays the server's.
+	if parts[0] != joseHeader {
+		return claims{}, errBadToken
+	}
 	signing := parts[0] + "." + parts[1]
 	if !hmac.Equal([]byte(parts[2]), []byte(sign(secret, signing))) {
 		return claims{}, errBadToken
