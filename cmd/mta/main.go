@@ -118,13 +118,7 @@ func main() {
 	// external organizer is not, auto-relaying machine-generated replies to arbitrary
 	// external addresses is a backscatter vector, gated separately like the
 	// out-of-office reply.
-	mta.OnMeetingRequest = func(st *objectstore.Store, accounts directory.Accounts, recipient string, msgID int64) bool {
-		handled, err := meeting.AutoProcess(st, accounts, nil, recipient, msgID)
-		if err != nil {
-			log.Printf("hermex-mta: meeting auto-process for <%s>: %v", recipient, err)
-		}
-		return handled
-	}
+	mta.OnMeetingRequest = meetingHook(meeting.AutoProcess, logger)
 	// An inbound iTIP REPLY updates the organizer's calendar event so the
 	// TrackingTab reflects attendee responses; best-effort, delivery-independent.
 	mta.OnMeetingReply = func(st *objectstore.Store, sender string, msgID int64) (bool, error) {
@@ -490,6 +484,30 @@ func ruleHook(kind string, limiter *mta.OutboundLimiter, enqueue enqueueFunc, lo
 				Name: "rule." + kind + ".enqueue", User: owner,
 				Fields: logging.Fields{"recipients": len(to)}, Err: err.Error()})
 		}
+	}
+}
+
+// autoProcessFunc is the meeting auto-processing pass, taken as a parameter so the
+// hook's reporting can be exercised without a live store.
+type autoProcessFunc func(*objectstore.Store, directory.Accounts, *relay.Spool, string, int64) (bool, error)
+
+// meetingHook builds the delivery-time meeting auto-processing hook. A failure is
+// swallowed on purpose (delivery already succeeded), so this reports it to the
+// central sink: without that line the organizer is silently never told the request
+// was accepted or declined, and nothing in the operator's log says why.
+func meetingHook(auto autoProcessFunc, logger *logging.Logger) func(*objectstore.Store, directory.Accounts, string, int64) bool {
+	return func(st *objectstore.Store, accounts directory.Accounts, recipient string, msgID int64) bool {
+		handled, err := auto(st, accounts, nil, recipient, msgID)
+		if err != nil {
+			logger.Emit(logging.Event{
+				Level:     logging.LevelError,
+				Subsystem: logging.MTA,
+				Name:      "meeting.autoprocess.fail",
+				User:      recipient,
+				Err:       err.Error(),
+			})
+		}
+		return handled
 	}
 }
 
