@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"hermex/internal/mapi"
+	"hermex/internal/mta"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcmail"
 	"hermex/internal/oxvcard"
@@ -636,6 +637,18 @@ func (s *Server) handleSetContactPhoto(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(file)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not read upload"})
+		return
+	}
+	c, ok := s.session(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return
+	}
+	// The bytes are written straight into the mailbox as an attachment and never
+	// pass through delivery, so they are scanned here or not at all, like every
+	// other path that stores client-supplied attachment content.
+	if mta.ScanStored(s.accounts, c.Email, "contact-photo", data, time.Now()) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the photo was rejected: a virus was detected"})
 		return
 	}
 	st, _, ok := s.openStore(w, r)
