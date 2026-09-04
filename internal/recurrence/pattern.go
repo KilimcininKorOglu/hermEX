@@ -90,10 +90,16 @@ type rrule struct {
 // the daily branch's FirstDateTime modulo into a division by zero.
 const maxRRuleInterval = math.MaxUint32 / (7 * 24 * 60)
 
+// ErrInvalidRRule reports an RRULE this package will not encode. Every rejection
+// wraps it and names the field that failed, because "invalid RRULE" alone leaves an
+// operator unable to tell a client that omitted FREQ from one that sent an interval
+// the pattern cannot carry.
+var ErrInvalidRRule = errors.New("recurrence: invalid RRULE")
+
 // parseRRule parses an RRULE value (the text after "RRULE:") into the local rrule. A
 // value with no FREQ, or an INTERVAL or COUNT the pattern cannot represent, is
 // rejected.
-func parseRRule(value string) (rrule, bool) {
+func parseRRule(value string) (rrule, error) {
 	r := rrule{Interval: 1}
 	for part := range strings.SplitSeq(value, ";") {
 		key, val, ok := strings.Cut(part, "=")
@@ -106,7 +112,7 @@ func parseRRule(value string) (rrule, bool) {
 		case "INTERVAL":
 			n, err := strconv.Atoi(val)
 			if err == nil && n > maxRRuleInterval {
-				return rrule{}, false
+				return rrule{}, fmt.Errorf("%w: INTERVAL %d exceeds %d", ErrInvalidRRule, n, maxRRuleInterval)
 			}
 			if err == nil && n > 0 {
 				r.Interval = n
@@ -114,7 +120,7 @@ func parseRRule(value string) (rrule, bool) {
 		case "COUNT":
 			n, err := strconv.Atoi(val)
 			if err == nil && n > math.MaxUint32 {
-				return rrule{}, false
+				return rrule{}, fmt.Errorf("%w: COUNT %d exceeds %d", ErrInvalidRRule, n, uint32(math.MaxUint32))
 			}
 			if err == nil && n > 0 {
 				r.Count = n
@@ -140,9 +146,9 @@ func parseRRule(value string) (rrule, bool) {
 		}
 	}
 	if r.Freq == "" {
-		return rrule{}, false
+		return rrule{}, fmt.Errorf("%w: no FREQ", ErrInvalidRRule)
 	}
-	return r, true
+	return r, nil
 }
 
 // parseByDay splits a BYDAY value into its weekday tokens, returning any single
@@ -379,9 +385,9 @@ func timeFromMinutes(min uint32) time.Time {
 // the nth-weekday monthly/yearly shapes carry WeekOfMonth + DayOfWeek. It does not
 // emit exceptions and uses a no-DST TimeZone.
 func FromRRule(rruleText string, seriesStart time.Time) ([]byte, error) {
-	rec, ok := parseRRule(rruleText)
-	if !ok {
-		return nil, errors.New("recurrence: invalid RRULE")
+	rec, err := parseRRule(rruleText)
+	if err != nil {
+		return nil, err
 	}
 	p, err := patternFromRecurrence(rec, seriesStart)
 	if err != nil {

@@ -1,6 +1,8 @@
 package recurrence
 
 import (
+	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -20,8 +22,16 @@ func TestFromRRuleRejectsUnrepresentableInterval(t *testing.T) {
 		"FREQ=WEEKLY;INTERVAL=4294967297",
 		"FREQ=YEARLY;INTERVAL=4294967296",
 	} {
-		if _, err := FromRRule(rule, start); err == nil {
+		_, err := FromRRule(rule, start)
+		if err == nil {
 			t.Errorf("%s was accepted", rule)
+			continue
+		}
+		if !errors.Is(err, ErrInvalidRRule) {
+			t.Errorf("%s gave %v, want an ErrInvalidRRule", rule, err)
+		}
+		if !strings.Contains(err.Error(), "INTERVAL") {
+			t.Errorf("%s gave %q, which does not name the field that failed", rule, err)
 		}
 	}
 }
@@ -38,6 +48,35 @@ func TestFromRRuleKeepsOrdinaryIntervals(t *testing.T) {
 	} {
 		if _, err := FromRRule(rule, start); err != nil {
 			t.Errorf("%s was refused: %v", rule, err)
+		}
+	}
+}
+
+// TestFromRRuleNamesTheFieldItRejected keeps every rejection diagnosable. A bare
+// "invalid RRULE" leaves an operator unable to tell a client that omitted FREQ from
+// one that sent a value the pattern cannot carry, and those call for different
+// answers.
+func TestFromRRuleNamesTheFieldItRejected(t *testing.T) {
+	start := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
+	cases := []struct {
+		rule  string
+		names string
+	}{
+		{"INTERVAL=2;BYMONTHDAY=1", "FREQ"},
+		{"FREQ=DAILY;INTERVAL=134217728", "INTERVAL"},
+		{"FREQ=DAILY;COUNT=4294967296", "COUNT"},
+	}
+	for _, c := range cases {
+		_, err := FromRRule(c.rule, start)
+		if err == nil {
+			t.Errorf("%s was accepted", c.rule)
+			continue
+		}
+		if !errors.Is(err, ErrInvalidRRule) {
+			t.Errorf("%s gave %v, want an ErrInvalidRRule", c.rule, err)
+		}
+		if !strings.Contains(err.Error(), c.names) {
+			t.Errorf("%s gave %q, want it to name %s", c.rule, err, c.names)
 		}
 	}
 }
