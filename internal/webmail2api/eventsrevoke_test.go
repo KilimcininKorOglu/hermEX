@@ -37,12 +37,14 @@ func TestEventStreamEndsWhenSessionIsRevoked(t *testing.T) {
 	eventsPollInterval = 20 * time.Millisecond
 	t.Cleanup(func() { eventsPollInterval = prev })
 
-	box := t.TempDir()
-	auth := &revokingAuth{StaticAccounts: directory.StaticAccounts{"alice@hermex.test": {MailboxPath: box}}}
+	auth := &revokingAuth{StaticAccounts: directory.StaticAccounts{"alice@hermex.test": {MailboxPath: t.TempDir()}}}
 	secret := []byte("events-revoke-test-secret")
 	srv := NewServer(auth, auth.StaticAccounts, nil, "mail.hermex.test", secret, "", false)
+	// An empty Mailbox keeps every tick free of store I/O. The property under test is
+	// the per-tick session re-check, and opening a mailbox 50 times a second makes the
+	// stream's exit latency track disk speed instead of that check.
 	token, err := mintToken(secret, sessionClaims{
-		Email: "alice@hermex.test", Mailbox: box, Jti: "jti-1", Exp: time.Now().Add(time.Hour).Unix(),
+		Email: "alice@hermex.test", Jti: "jti-1", Exp: time.Now().Add(time.Hour).Unix(),
 	})
 	if err != nil {
 		t.Fatal(err)
