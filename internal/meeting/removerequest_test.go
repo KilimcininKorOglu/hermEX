@@ -312,3 +312,37 @@ func TestRespondFromCalendarLeavesOtherMeetings(t *testing.T) {
 		t.Errorf("Inbox holds %d messages, want the other meeting's invitation left alone", n)
 	}
 }
+
+// TestRespondFromCalendarRemovesEveryInvitation covers the updated meeting. An
+// organizer who changes a meeting sends another invitation, so the Inbox holds more
+// than one for the same UID. Filing only the first away leaves an answered
+// invitation sitting there, which is the state this setting exists to avoid.
+func TestRespondFromCalendarRemovesEveryInvitation(t *testing.T) {
+	st, err := objectstore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.SetMeetingConfig(objectstore.MeetingConfig{RemoveRequestOnResponse: true}); err != nil {
+		t.Fatal(err)
+	}
+	tags, err := ResolveTags(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const uid = "updated-meeting"
+	appendRequestWithUID(t, st, tags, uid)
+	appendRequestWithUID(t, st, tags, uid) // the organizer's update
+	appendRequestWithUID(t, st, tags, "another-meeting")
+	apptID := seedAppointmentFor(t, st, tags, uid)
+
+	if _, err := Respond(st, nil, nil, "alice@hermex.test", apptID, ResponseAccepted, false); err != nil {
+		t.Fatal(err)
+	}
+	if n := folderCount(t, st, int64(mapi.PrivateFIDInbox)); n != 1 {
+		t.Errorf("Inbox holds %d messages, want only the other meeting's invitation", n)
+	}
+	if n := folderCount(t, st, int64(mapi.PrivateFIDDeletedItems)); n != 2 {
+		t.Errorf("Deleted Items holds %d messages, want both invitations for the answered meeting", n)
+	}
+}

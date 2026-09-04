@@ -146,10 +146,6 @@ var removeHook func() error
 // the Inbox by the meeting's UID; moving the answered object itself would file the
 // appointment away. Responding from the mail view answers the request directly and
 // moves that message.
-//
-// A request that never entered the IMAP index has no (folder, UID) to move and is
-// left alone, and so is one already sitting in Deleted Items, because moving a
-// message onto itself would allocate a new UID for no reason.
 func removeRequestMail(st *objectstore.Store, answered *oxcmail.Message, tags Tags, messageID int64) error {
 	if removeHook != nil {
 		if err := removeHook(); err != nil {
@@ -160,15 +156,26 @@ func removeRequestMail(st *objectstore.Store, answered *oxcmail.Message, tags Ta
 	if err != nil || !cfg.RemoveRequestOnResponse {
 		return err
 	}
-	target := messageID
-	if propStr(answered.Props, mapi.PrMessageClass) != requestClass {
-		found, ok := findRequestByUID(st, tags.UID, uidOf(answered.Props, tags))
-		if !ok {
-			return nil // nothing in the Inbox claims this meeting
-		}
-		target = found
+	if propStr(answered.Props, mapi.PrMessageClass) == requestClass {
+		return fileAway(st, messageID)
 	}
-	folderID, uid, ok, err := st.MessageIndexLocation(target)
+	// Every invitation for this meeting, not just the first: an organizer who
+	// updates a meeting sends another one, so the Inbox can hold several, and
+	// leaving the rest is the state this setting exists to avoid.
+	var errs []error
+	for _, id := range findRequestsByUID(st, tags.UID, uidOf(answered.Props, tags)) {
+		if err := fileAway(st, id); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// fileAway moves one message to Deleted Items. A message with no IMAP index entry
+// has no (folder, UID) to move and is left alone, and so is one already in Deleted
+// Items, because moving a message onto itself would allocate a new UID for nothing.
+func fileAway(st *objectstore.Store, messageID int64) error {
+	folderID, uid, ok, err := st.MessageIndexLocation(messageID)
 	if err != nil || !ok || folderID == int64(mapi.PrivateFIDDeletedItems) {
 		return err
 	}
@@ -176,18 +183,19 @@ func removeRequestMail(st *objectstore.Store, answered *oxcmail.Message, tags Ta
 	return err
 }
 
-// findRequestByUID returns the id of the Inbox meeting request carrying the given
+// findRequestsByUID returns every Inbox meeting request carrying the given
 // iCalendar UID, the counterpart of findCalendarByUID. It matches the request class
 // only, so a response or a cancellation sharing the UID is left where it is. An
 // empty UID matches nothing.
-func findRequestByUID(st *objectstore.Store, uidTag mapi.PropTag, uid string) (int64, bool) {
+func findRequestsByUID(st *objectstore.Store, uidTag mapi.PropTag, uid string) []int64 {
 	if uid == "" {
-		return 0, false
+		return nil
 	}
 	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDInbox))
 	if err != nil {
-		return 0, false
+		return nil
 	}
+	var out []int64
 	for _, obj := range objs {
 		pv, err := st.GetMessageProperties(obj.ID, uidTag, mapi.PrMessageClass)
 		if err != nil {
@@ -198,11 +206,11 @@ func findRequestByUID(st *objectstore.Store, uidTag mapi.PropTag, uid string) (i
 		}
 		if v, ok := pv.Get(uidTag); ok {
 			if s, _ := v.(string); s == uid {
-				return obj.ID, true
+				out = append(out, obj.ID)
 			}
 		}
 	}
-	return 0, false
+	return out
 }
 
 // file files (or, matched by iCalendar UID, updates) the Calendar appointment for an
