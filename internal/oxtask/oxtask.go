@@ -5,11 +5,18 @@
 package oxtask
 
 import (
+	"math"
 	"time"
 
 	"hermex/internal/mapi"
 	"hermex/internal/recurrence"
 )
+
+// fitsLong reports whether a model integer fits the 32-bit MAPI long it is about
+// to be written into. The model's ints come from protocol mappers fed by client
+// input (a JSON body, a WBXML element, a SOAP element), none of which is bound by
+// that width, so a value past it would wrap into a different valid setting.
+func fitsLong(v int) bool { return v >= math.MinInt32 && v <= math.MaxInt32 }
 
 // MessageClass is the store message class for a task object.
 const MessageClass = "IPM.Task"
@@ -104,10 +111,10 @@ func ToProps(t Task, resolve Resolver) (mapi.PropertyValues, error) {
 	p.Set(mapi.PrMessageClass, MessageClass)
 	p.Set(mapi.PrSubject, t.Subject)
 	p.Set(mapi.PrBody, t.Body)
-	if t.Importance >= 0 {
+	if t.Importance >= 0 && fitsLong(t.Importance) {
 		p.Set(mapi.PrImportance, int32(t.Importance))
 	}
-	if t.Sensitivity >= 0 {
+	if t.Sensitivity >= 0 && fitsLong(t.Sensitivity) {
 		p.Set(mapi.PrSensitivity, int32(t.Sensitivity))
 	}
 	setTime := func(idx int, when time.Time) {
@@ -128,7 +135,7 @@ func ToProps(t Task, resolve Resolver) (mapi.PropertyValues, error) {
 	if ids[idxStatus] != 0 {
 		// Status takes precedence when set; otherwise derive from Complete.
 		status := int32(0)
-		if t.Status >= 0 {
+		if t.Status >= 0 && fitsLong(t.Status) {
 			status = int32(t.Status)
 		} else if t.Complete {
 			status = 2 // olComplete
@@ -182,7 +189,7 @@ func ToProps(t Task, resolve Resolver) (mapi.PropertyValues, error) {
 		// AcceptanceState takes precedence when set; otherwise 0 (not assigned) is
 		// the default Outlook writes for an unassigned task.
 		state := int32(0)
-		if t.AcceptanceState >= 0 {
+		if t.AcceptanceState >= 0 && fitsLong(t.AcceptanceState) {
 			state = int32(t.AcceptanceState)
 		}
 		p.Set(mapi.MakeTag(ids[idxAcceptanceState], mapi.PtLong), state)
