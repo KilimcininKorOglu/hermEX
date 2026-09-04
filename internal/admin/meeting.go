@@ -7,13 +7,14 @@ import (
 	"hermex/internal/objectstore"
 )
 
-// meetingPayload is the JSON shape of a mailbox's automatic meeting-processing
-// configuration: accept conflict-free requests (the master), and decline recurring or
-// conflicting ones.
+// meetingPayload is the JSON shape of a mailbox's meeting-request handling
+// configuration: accept conflict-free requests (the master), decline recurring or
+// conflicting ones, and whether answering a request also files it away.
 type meetingPayload struct {
-	AutoAccept       bool `json:"autoAccept"`
-	DeclineRecurring bool `json:"declineRecurring"`
-	DeclineConflict  bool `json:"declineConflict"`
+	AutoAccept              bool `json:"autoAccept"`
+	DeclineRecurring        bool `json:"declineRecurring"`
+	DeclineConflict         bool `json:"declineConflict"`
+	RemoveRequestOnResponse bool `json:"removeRequestOnResponse"`
 }
 
 // handleGetUserMeeting returns a user's automatic meeting-processing settings (system
@@ -28,7 +29,12 @@ func (s *Server) handleGetUserMeeting(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "could not read meeting config", http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, meetingPayload{AutoAccept: cfg.AutoAccept, DeclineRecurring: cfg.DeclineRecurring, DeclineConflict: cfg.DeclineConflict})
+	writeJSON(w, meetingPayload{
+		AutoAccept:              cfg.AutoAccept,
+		DeclineRecurring:        cfg.DeclineRecurring,
+		DeclineConflict:         cfg.DeclineConflict,
+		RemoveRequestOnResponse: cfg.RemoveRequestOnResponse,
+	})
 }
 
 // handleSetUserMeeting replaces a user's automatic meeting-processing settings (system
@@ -44,7 +50,10 @@ func (s *Server) handleSetUserMeeting(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.store.SetMeetingConfig(maildir, objectstore.MeetingConfig{
-		AutoAccept: in.AutoAccept, DeclineRecurring: in.DeclineRecurring, DeclineConflict: in.DeclineConflict,
+		AutoAccept:              in.AutoAccept,
+		DeclineRecurring:        in.DeclineRecurring,
+		DeclineConflict:         in.DeclineConflict,
+		RemoveRequestOnResponse: in.RemoveRequestOnResponse,
 	}); err != nil {
 		s.fail(w, "could not set meeting config", err, http.StatusInternalServerError)
 		return
@@ -52,8 +61,8 @@ func (s *Server) handleSetUserMeeting(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleUIUserMeeting saves the automatic meeting-processing checkboxes from the
-// detail form and returns the refreshed status panel.
+// handleUIUserMeeting saves the meeting-handling checkboxes from the detail form
+// and returns the refreshed status panel.
 func (s *Server) handleUIUserMeeting(w http.ResponseWriter, r *http.Request) {
 	if _, ok := s.uiAuthorized(w, r); !ok {
 		return
@@ -67,9 +76,10 @@ func (s *Server) handleUIUserMeeting(w http.ResponseWriter, r *http.Request) {
 		data["Error"] = "No such user."
 	default:
 		cfg := objectstore.MeetingConfig{
-			AutoAccept:       r.PostFormValue("autoaccept") != "",
-			DeclineRecurring: r.PostFormValue("declinerecurring") != "",
-			DeclineConflict:  r.PostFormValue("declineconflict") != "",
+			AutoAccept:              r.PostFormValue("autoaccept") != "",
+			DeclineRecurring:        r.PostFormValue("declinerecurring") != "",
+			DeclineConflict:         r.PostFormValue("declineconflict") != "",
+			RemoveRequestOnResponse: r.PostFormValue("removerequest") != "",
 		}
 		if err := s.store.SetMeetingConfig(u.Maildir, cfg); err != nil {
 			data["Error"] = s.notice("Could not save meeting settings.", err)

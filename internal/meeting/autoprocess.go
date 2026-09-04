@@ -22,8 +22,10 @@ import (
 // an existing appointment and DeclineConflict is set; a conflict-free request is
 // accepted; any remaining (conflicting but not declined) request is filed tentatively.
 // An accept or decline notifies the organizer (an iTIP REPLY); a tentative filing does
-// not. The booking and notification are delegated to Respond. The just-delivered inbox
-// copy is intentionally left in place.
+// not. The booking and notification are delegated to Respond, which also decides
+// what happens to the just-delivered inbox copy: it stays where it is unless the
+// mailbox has RemoveRequestOnResponse set, in which case it goes to Deleted Items
+// like any other answered request.
 //
 // spool routes the organizer notification; passing nil keeps it local-only (an
 // external organizer is not notified), matching the out-of-office reply's behavior.

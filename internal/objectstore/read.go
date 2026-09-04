@@ -119,6 +119,26 @@ func (s *Store) MessageUIDByID(folderID, messageID int64) (uint32, bool, error) 
 	return uint32(uid), true, nil
 }
 
+// MessageIndexLocation resolves a message's folder and IMAP UID from its
+// object-store id alone. It is the lookup a caller needs when it holds only the id
+// and has to reach a (folder, UID)-keyed operation such as MoveMessage.
+// ok is false when the message has no index entry: a calendar or contact item is
+// created with CreateMessage and never enters the IMAP index. A missing row is not
+// an error.
+func (s *Store) MessageIndexLocation(messageID int64) (folderID int64, uid uint32, ok bool, err error) {
+	var u int64
+	err = s.idxdb.QueryRow(
+		`SELECT folder_id, uid FROM messages WHERE message_id=?`, messageID).Scan(&folderID, &u)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, false, nil
+	}
+	if err != nil {
+		return 0, 0, false, err
+	}
+	// #nosec G115 -- an IMAP UID is a 32-bit counter kept in SQLite's signed 64-bit column
+	return folderID, uint32(u), true, nil
+}
+
 // MessageFlags returns a message's current IMAP flag mask, reporting ErrNotFound
 // when no such message exists.
 func (s *Store) MessageFlags(folderID int64, uid uint32) (int64, error) {

@@ -77,7 +77,7 @@ func TestUIUserDetailShowsMeeting(t *testing.T) {
 	resp := authedGET(t, ts, "/admin/ui/users/alice@hermex.test", session)
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
-	for _, want := range []string{"Automatic processing of meeting requests", `name="autoaccept" checked`, `name="declinerecurring"`} {
+	for _, want := range []string{"Meeting requests", `name="autoaccept" checked`, `name="declinerecurring"`, `name="removerequest"`} {
 		if !strings.Contains(string(body), want) {
 			t.Errorf("detail page meeting section missing %q", want)
 		}
@@ -94,13 +94,16 @@ func TestUIUserMeeting(t *testing.T) {
 	resp := htmxPUT(t, ts, "/admin/ui/users/alice@hermex.test/meeting", session, csrf, url.Values{
 		"autoaccept":      {"on"},
 		"declineconflict": {"on"},
+		"removerequest":   {"on"},
 		// declinerecurring omitted → unchecked
 	})
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("ui meeting save status %d, want 200", resp.StatusCode)
 	}
-	want := objectstore.MeetingConfig{AutoAccept: true, DeclineRecurring: false, DeclineConflict: true}
+	want := objectstore.MeetingConfig{
+		AutoAccept: true, DeclineRecurring: false, DeclineConflict: true, RemoveRequestOnResponse: true,
+	}
 	if store.setMeetingConfig != want {
 		t.Errorf("stored meeting = %+v, want %+v", store.setMeetingConfig, want)
 	}

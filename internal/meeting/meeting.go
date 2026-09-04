@@ -117,7 +117,32 @@ func Respond(st *objectstore.Store, accounts directory.Accounts, spool *relay.Sp
 			return 0, err
 		}
 	}
+	if err := removeRequestMail(st, messageID); err != nil {
+		return 0, err
+	}
 	return calendarID, nil
+}
+
+// removeRequestMail takes the answered request out of the Inbox when the mailbox
+// asks for it, the way Outlook's "delete meeting requests and notifications from
+// Inbox after responding" option does. It moves the mail to Deleted Items rather
+// than deleting it, so the response stays recoverable from the folder a user looks
+// in first. A mailbox that has not turned the setting on keeps the request.
+//
+// A request that never entered the IMAP index has no (folder, UID) to move and is
+// left alone; so is one already sitting in Deleted Items, because moving a message
+// onto itself would allocate a new UID for no reason.
+func removeRequestMail(st *objectstore.Store, messageID int64) error {
+	cfg, err := st.GetMeetingConfig()
+	if err != nil || !cfg.RemoveRequestOnResponse {
+		return err
+	}
+	folderID, uid, ok, err := st.MessageIndexLocation(messageID)
+	if err != nil || !ok || folderID == int64(mapi.PrivateFIDDeletedItems) {
+		return err
+	}
+	_, err = st.MoveMessage(folderID, uid, int64(mapi.PrivateFIDDeletedItems))
+	return err
 }
 
 // file files (or, matched by iCalendar UID, updates) the Calendar appointment for an
