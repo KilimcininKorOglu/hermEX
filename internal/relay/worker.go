@@ -546,7 +546,13 @@ func (w *Worker) send(host string, it Item, requireTLS bool) error {
 	if err := wc.Close(); err != nil {
 		return err
 	}
-	return c.Quit()
+	// The 250 the mail exchanger returns to the end-of-data dot is the acceptance,
+	// so the message is delivered from here on. QUIT only closes the session
+	// politely, and many servers hang up as soon as they have accepted, so a QUIT
+	// error must not undo the acceptance: reporting it as a failure would send the
+	// same message again to the next host and again on the next pass.
+	_ = c.Quit()
+	return nil
 }
 
 // recordTLS reports one TLS session outcome to the TLS-RPT store (RFC 8460),
