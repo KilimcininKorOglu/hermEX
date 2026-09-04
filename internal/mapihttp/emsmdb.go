@@ -20,6 +20,15 @@ const (
 	notifyWaitInterval             = 50 * time.Second
 	notifyPollCadence              = 5 * time.Second
 	flagNotificationPending uint32 = 0x00000001 // EventPending: events are queued; call Execute to drain them
+
+	// maxROPBuffer bounds the ROP response this transport frames, matching the
+	// bound and the refusal code the RPC/HTTP transport already applies. The
+	// buffer's own RopSize and the RPC_HEADER_EXT SizeActual are 16-bit fields, so
+	// an unbounded response eventually wraps both and hands the client a length
+	// that does not describe the bytes behind it; this keeps every framed response
+	// well inside them.
+	maxROPBuffer            = 0x8000
+	ecResponseTooBig uint32 = 0x0000047D
 )
 
 // serveEmsmdb authenticates and dispatches the EMSMDB endpoint (/mapi/emsmdb) by
@@ -137,6 +146,10 @@ func (s *Server) emsExecute(w http.ResponseWriter, r *http.Request, sess *sessio
 			return
 		}
 		respRops, respHandles := ctx.ropSess.Dispatch(reqRops, reqHandles)
+		if 2+len(respRops)+4*len(respHandles) > maxROPBuffer {
+			writeExecuteError(w, r, ecResponseTooBig)
+			return
+		}
 		respRop = oxmapihttp.EncodeExecute(respRops, respHandles)
 	}
 
@@ -147,6 +160,19 @@ func (s *Server) emsExecute(w http.ResponseWriter, r *http.Request, sess *sessio
 	out.u32(uint32(len(respRop))) // RopBufferSize
 	out.raw(respRop)              // RopBuffer
 	out.u32(0)                    // AuxiliaryBufferSize
+	writeNormal(w, r, "Execute", out.b)
+}
+
+// writeExecuteError answers an Execute whose response cannot be framed: a
+// successful transport status carrying the ROP-level error and an empty buffer,
+// the shape the RPC/HTTP transport uses for the same refusal.
+func writeExecuteError(w http.ResponseWriter, r *http.Request, code uint32) {
+	var out writer
+	out.u32(rcSuccess) // StatusCode
+	out.u32(code)      // ErrorCode
+	out.u32(0)         // Flags
+	out.u32(0)         // RopBufferSize
+	out.u32(0)         // AuxiliaryBufferSize
 	writeNormal(w, r, "Execute", out.b)
 }
 
