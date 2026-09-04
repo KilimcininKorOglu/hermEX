@@ -91,6 +91,7 @@ func (s *Server) handleCalGet(w http.ResponseWriter, r *http.Request, mailbox st
 		return
 	}
 	// Final response body; a write failure means the client is gone, with no recourse.
+	// #nosec G705 -- the daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set explicitly, so the bytes are never interpreted as a document
 	_, _ = w.Write(ics)
 }
 

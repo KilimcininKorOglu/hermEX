@@ -121,6 +121,7 @@ func (s *Store) referencedContentIDs() (map[string]struct{}, error) {
 	refs := make(map[string]struct{})
 	for _, table := range propertyTables {
 		// table is an internal constant (propertyTables), never caller input.
+		// #nosec G202 -- table and the placeholder run are internal; every proptag travels as a query argument
 		rows, err := s.objdb.Query(`SELECT propval FROM `+table+` WHERE proptag IN (`+in+`)`, args...)
 		if err != nil {
 			return nil, err

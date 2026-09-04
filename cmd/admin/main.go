@@ -625,6 +625,7 @@ func backupQuarantine(cfg *config.Config, dest string) error {
 		if !d.Type().IsRegular() {
 			return nil
 		}
+		// #nosec G122 G304 -- a backup pass over the operator's own data directory; the path comes from WalkDir over that tree, never from a client
 		data, err := os.ReadFile(path)
 		if err != nil {
 			return err
@@ -632,6 +633,7 @@ func backupQuarantine(cfg *config.Config, dest string) error {
 		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			return err
 		}
+		// #nosec G703 -- target is dest joined with a path relative to src, so a copied file never leaves the backup root
 		return os.WriteFile(target, data, 0o600)
 	})
 }

@@ -478,6 +478,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if err := s.recordLoginSession(r, req.Email, jti, now, exp); err != nil {
 		logError("record-login-session", err, logging.Fields{"user": req.Email})
 	}
+	// #nosec G124 -- Secure tracks the deployment: set whenever the server serves TLS, cleared only for a plain-HTTP dev run
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
 		Value:    tok,
@@ -495,6 +496,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, ok := s.session(r); ok {
 		s.revokeCurrentSession(c)
 	}
+	// #nosec G124 -- Secure tracks the deployment: set whenever the server serves TLS, cleared only for a plain-HTTP dev run
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
 		Value:    "",

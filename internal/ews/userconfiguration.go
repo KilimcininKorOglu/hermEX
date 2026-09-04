@@ -1,6 +1,7 @@
 package ews
 
 import (
+	// #nosec G501 -- MD5 derives an opaque wire id for a config with no backing message; it authenticates nothing
 	"crypto/md5"
 	"encoding/binary"
 	"encoding/xml"
@@ -390,6 +391,7 @@ func echoConfigName(n ucName) ucNameOut {
 // folder and name. Store-property storage has no backing message, so the id is for
 // wire shape only; clients address a config by its name, not this id.
 func synthConfigItemID(fid int64, name string) *ucItemIDOut {
+	// #nosec G401 -- MD5 derives an opaque wire id for a config with no backing message; it authenticates nothing
 	h := md5.Sum(fmt.Appendf(nil, "%d/%s", fid, name))
 	mid := int64(binary.BigEndian.Uint64(h[:8]) >> 1)
 	id := oxews.EncodeItemID(oxews.ItemID{FolderID: fid, MessageID: mid})

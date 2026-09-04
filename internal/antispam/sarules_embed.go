@@ -100,6 +100,7 @@ func ConcatRulesDir(dir string) ([]byte, error) {
 	sort.Strings(matches)
 	var b bytes.Buffer
 	for _, m := range matches {
+		// #nosec G304 -- the rule files are the .cf matches under the operator's own rules directory
 		data, err := os.ReadFile(m)
 		if err != nil {
 			return nil, err
@@ -113,6 +114,7 @@ func ConcatRulesDir(dir string) ([]byte, error) {
 // LoadRulesFile parses a .cf ruleset file. A missing file returns (nil, nil) so
 // the caller can fall back to the baseline; any other read error is returned.
 func LoadRulesFile(path string) (*SARuleSet, error) {
+	// #nosec G304 -- the ruleset path comes from the operator's config, never from a client
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil

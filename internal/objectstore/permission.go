@@ -119,6 +119,7 @@ func (s *Store) ModifyPermissions(folderID int64, replace bool, changes []Permis
 			}
 		case PermRemove:
 			clause, arg := memberLocator(c.MemberID)
+			// #nosec G202 -- clause is one of two internal literals; the member value travels as a query argument
 			_, err = tx.Exec(`DELETE FROM permissions WHERE folder_id=? AND `+clause, append([]any{folderID}, arg...)...)
 		default:
 			return fmt.Errorf("objectstore: unknown permission op %d", c.Op)

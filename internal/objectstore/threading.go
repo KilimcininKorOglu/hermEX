@@ -58,6 +58,7 @@ func (s *Store) threadingChunk(ids []int64, tags []any, out map[int64]ThreadHead
 		tph[i] = "?"
 		args = append(args, t)
 	}
+	// #nosec G201 -- the formatted parts are runs of ? placeholders; every value travels as a query argument
 	query := fmt.Sprintf(
 		`SELECT message_id, proptag, propval FROM message_properties
 		 WHERE message_id IN (%s) AND proptag IN (%s)`,

@@ -270,6 +270,7 @@ func (s *Server) handleUILogout(w http.ResponseWriter, r *http.Request) {
 	// captured it keeps a working session until it expires. Revoke the row too.
 	s.revokeSession(cl)
 	http.SetCookie(w, &http.Cookie{Name: sessionCookie, Path: "/admin", MaxAge: -1, HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode})
+	// #nosec G124 -- clearing the readable CSRF cookie; it is Secure and SameSite=Strict
 	http.SetCookie(w, &http.Cookie{Name: csrfCookie, Path: "/admin", MaxAge: -1, Secure: true, SameSite: http.SameSiteStrictMode})
 	http.Redirect(w, r, "/admin/ui/login", http.StatusSeeOther)
 }

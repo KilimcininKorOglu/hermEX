@@ -72,6 +72,7 @@ func (s *MongoSink) replaySpill() {
 // re-insert). A torn trailing record from a crash mid-spill is tolerated: decoding
 // stops at the first malformed value and replays the records that decoded cleanly.
 func readSpill(path string) ([]any, error) {
+	// #nosec G304 -- the spill file lives in the daemon's own spill directory, derived from the config
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

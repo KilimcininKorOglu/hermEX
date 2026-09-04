@@ -93,6 +93,7 @@ func copyTree(src, dst string) error {
 
 // copyFile copies one regular file, creating the destination fresh.
 func copyFile(src, dst string) error {
+	// #nosec G304 -- both paths are inside the operator's data directory and the backup root
 	in, err := os.Open(src)
 	if err != nil {
 		return err
@@ -101,6 +102,7 @@ func copyFile(src, dst string) error {
 	if err := os.MkdirAll(filepath.Dir(dst), 0o700); err != nil {
 		return err
 	}
+	// #nosec G304 -- both paths are inside the operator's data directory and the backup root
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err

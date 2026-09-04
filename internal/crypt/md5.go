@@ -1,5 +1,6 @@
 package crypt
 
+// #nosec G501 -- the $1$ scheme is MD5 by definition; this code only verifies hashes set elsewhere and never issues one
 import "crypto/md5"
 
 // md5Rounds is the fixed work factor of the $1$ scheme. Unlike sha512-crypt it
@@ -18,6 +19,7 @@ var md5Order = []int{
 // and md5-crypt's 1000 fixed rounds are far below what a stored credential
 // needs today (a $1$ hash is re-hashed at the current factor on next login).
 func md5Crypt(password, salt []byte) []byte {
+	// #nosec G401 -- the $1$ scheme is MD5 by definition; this code only verifies hashes set elsewhere and never issues one
 	h := md5.New()
 
 	// Digest B over password, salt, password.

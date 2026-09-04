@@ -166,6 +166,7 @@ func (p *ACMEProvider) LoadObtainedCert(ctx context.Context, domain string) (cer
 // loadACMERoots reads a PEM bundle into a certificate pool for trusting a private
 // ACME endpoint.
 func loadACMERoots(path string) (*x509.CertPool, error) {
+	// #nosec G304 -- the CA bundle path comes from the operator's config, never from a client
 	pem, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("tlscert: read ACME CA roots: %w", err)

@@ -113,6 +113,7 @@ func (c *Config) checkSecrets() error {
 }
 
 func Load(path string) (*Config, error) {
+	// #nosec G304 -- the path is the config file named on the daemon's command line, never client input
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err

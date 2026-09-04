@@ -87,6 +87,7 @@ func (s *Store) ListMessagesPage(folderID int64, opt ListOptions) (MessagePage, 
 		return MessagePage{}, err
 	}
 
+	// #nosec G202 -- the column list is a constant, the clause is built from literals, and orderBy is a whitelist switch
 	query := `SELECT ` + messageInfoCols + ` FROM messages WHERE ` + clause + ` ORDER BY ` + opt.orderBy()
 	if opt.Limit > 0 {
 		query += " LIMIT ? OFFSET ?"

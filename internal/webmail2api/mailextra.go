@@ -156,6 +156,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "message/rfc822")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"message.eml\"")
+	// #nosec G705 -- the daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set explicitly, so the bytes are never interpreted as a document
 	_, _ = w.Write(raw)
 }
 
@@ -263,6 +264,7 @@ func (s *Server) handleSource(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	// #nosec G705 -- the daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set explicitly, so the bytes are never interpreted as a document
 	_, _ = w.Write(raw)
 }
 
@@ -281,6 +283,7 @@ func (s *Server) handleHeaders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	// #nosec G705 -- the daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set explicitly, so the bytes are never interpreted as a document
 	_, _ = w.Write(headerBlock(raw))
 }
 

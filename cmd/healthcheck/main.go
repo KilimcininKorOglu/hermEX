@@ -40,10 +40,12 @@ func main() {
 func probe(url string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
 	defer cancel()
+	// #nosec G704 -- the URL is the probe target the container healthcheck passes on the command line; fetching it is this binary's whole purpose
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return err
 	}
+	// #nosec G704 -- the URL is the probe target the container healthcheck passes on the command line; fetching it is this binary's whole purpose
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err

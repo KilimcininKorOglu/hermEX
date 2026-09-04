@@ -31,6 +31,7 @@ const openTimeout = 3 * time.Second
 // excluded. It retries briefly rather than failing the instant a pass holds the
 // mailbox, since a pass finishes on its own.
 func lockShared(dir string) (*os.File, error) {
+	// #nosec G304 -- the lock file is a fixed name inside the mailbox directory the store was opened on
 	f, err := os.OpenFile(filepath.Join(dir, lockName), os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err

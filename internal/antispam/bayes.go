@@ -103,6 +103,7 @@ func TrainFromDir(m *BayesModel, dir string, spam bool) (int, error) {
 		if e.IsDir() {
 			continue
 		}
+		// #nosec G304 -- the corpus directory is named by the operator on the command line
 		data, err := os.ReadFile(filepath.Join(dir, e.Name()))
 		if err != nil {
 			return n, err
@@ -135,6 +136,7 @@ func (m *BayesModel) SaveFile(path string) error {
 // LoadModelFile reads a Bayes model from path. A missing file returns (nil, nil)
 // so the caller can run with the model dormant; any other error is returned.
 func LoadModelFile(path string) (*BayesModel, error) {
+	// #nosec G304 -- the model path comes from the operator's config, never from a client
 	f, err := os.Open(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, nil

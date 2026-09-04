@@ -611,6 +611,7 @@ func (s *Server) handleGetContactPhoto(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "image/jpeg")
 	w.Header().Set("Cache-Control", "no-store")
+	// #nosec G705 -- the daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set explicitly, so the bytes are never interpreted as a document
 	_, _ = w.Write(data)
 }
 
@@ -624,6 +625,7 @@ func (s *Server) handleSetContactPhoto(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
+	// #nosec G120 -- the request body is already capped by the API's MaxBytesReader, so the multipart parse is bounded before it starts
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected multipart file upload"})
 		return
@@ -765,5 +767,6 @@ func (s *Server) handleExportContact(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/vcard; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`.vcf"`)
+	// #nosec G705 -- the daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set explicitly, so the bytes are never interpreted as a document
 	_, _ = w.Write(vcf)
 }

@@ -668,6 +668,7 @@ func orderMX(mxs []*net.MX) []string {
 			j++
 		}
 		group := sorted[i:j]
+		// #nosec G404 -- the shuffle spreads load across equal-preference MX hosts; it guards nothing
 		rand.Shuffle(len(group), func(a, b int) { group[a], group[b] = group[b], group[a] })
 		for _, mx := range group {
 			if h := strings.TrimSuffix(mx.Host, "."); h != "" {

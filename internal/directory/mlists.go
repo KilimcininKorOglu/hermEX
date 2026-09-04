@@ -482,6 +482,7 @@ func replaceAssociations(tx *sql.Tx, listID int64, members []string) error {
 // client input.
 func (d *SQLDirectory) listJoinByName(table, listname string) ([]string, error) {
 	rows, err := d.db.Query(
+		// #nosec G202 -- table is one of two internal literals chosen by the caller, never client input
 		`SELECT t.username FROM `+table+` t JOIN mlists m ON t.list_id = m.id
 		  WHERE m.listname = ? ORDER BY t.username`,
 		strings.ToLower(strings.TrimSpace(listname)))

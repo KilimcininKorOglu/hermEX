@@ -679,6 +679,7 @@ func setSessionCookies(w http.ResponseWriter, session, csrf string) {
 		Name: sessionCookie, Value: session, Path: "/admin",
 		MaxAge: int(sessionTTL.Seconds()), HttpOnly: true, Secure: true, SameSite: http.SameSiteStrictMode,
 	})
+	// #nosec G124 -- the CSRF cookie is the double-submit token and must stay readable to the page; it is Secure and SameSite=Strict
 	http.SetCookie(w, &http.Cookie{
 		Name: csrfCookie, Value: csrf, Path: "/admin",
 		MaxAge: int(sessionTTL.Seconds()), Secure: true, SameSite: http.SameSiteStrictMode,

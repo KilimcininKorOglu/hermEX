@@ -118,6 +118,7 @@ func (s *Server) handleGet(w http.ResponseWriter, r *http.Request, mailbox strin
 		w.WriteHeader(http.StatusOK)
 		return
 	}
+	// #nosec G705 -- the daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set explicitly, so the bytes are never interpreted as a document
 	_, _ = w.Write(vcf) // final response body; a failed write means the client is gone
 }
 

@@ -6,6 +6,7 @@
 package conversation
 
 import (
+	// #nosec G501 -- MD5 derives a fixed 16-byte conversation id, the GUID width; it authenticates nothing
 	"crypto/md5"
 	"net/textproto"
 	"strings"
@@ -23,6 +24,7 @@ import (
 // hash.
 func ID(raw []byte) []byte {
 	root := rootKey(mime.ParseStructure(raw).Header())
+	// #nosec G401 -- MD5 derives a fixed 16-byte conversation id, the GUID width; it authenticates nothing
 	sum := md5.Sum([]byte(root))
 	return sum[:]
 }

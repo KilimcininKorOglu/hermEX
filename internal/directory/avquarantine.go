@@ -70,6 +70,7 @@ func (d *SQLDirectory) ListQuarantine(domainIDs []int64, all bool, limit int) ([
 			ph[i] = "?"
 			args = append(args, id)
 		}
+		// #nosec G202 -- the concatenated part is a run of ? placeholders; every domain id travels as a query argument
 		q += " WHERE domain_id IN (" + strings.Join(ph, ",") + ")"
 	}
 	q += " ORDER BY id DESC LIMIT ?"
