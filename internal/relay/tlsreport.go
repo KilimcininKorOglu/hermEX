@@ -5,10 +5,10 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"mime"
 	"mime/multipart"
-	"net/http"
 	"net/textproto"
 	"strings"
 	"time"
@@ -92,15 +92,18 @@ func (w *Worker) deliverReport(uri, policyDomain string, report *tlsrpt.Report, 
 // application/tlsrpt+gzip (RFC 8460 §3). The client is the SSRF-guarded one, so a
 // target that resolves to a non-public address is refused at dial.
 func (w *Worker) deliverReportHTTPS(uri string, jsonBytes []byte) error {
+	// The target comes from the destination domain's own DNS record, so every safety
+	// property of this call lives in the injected client: its timeout, its refusal to
+	// follow redirects, and its dial-time address check. Falling back to the default
+	// client would keep the URL but drop all three, so refuse to send instead.
+	if w.TLSHTTPClient == nil {
+		return errors.New("tlsrpt: no guarded HTTP client configured for report delivery")
+	}
 	gz, err := gzipBytes(jsonBytes)
 	if err != nil {
 		return err
 	}
-	client := w.TLSHTTPClient
-	if client == nil {
-		client = http.DefaultClient
-	}
-	resp, err := client.Post(uri, "application/tlsrpt+gzip", bytes.NewReader(gz))
+	resp, err := w.TLSHTTPClient.Post(uri, "application/tlsrpt+gzip", bytes.NewReader(gz))
 	if err != nil {
 		return err
 	}
