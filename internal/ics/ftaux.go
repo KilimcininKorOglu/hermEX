@@ -244,6 +244,13 @@ func decodeMV(b []byte, typ mapi.PropType) (any, int, bool, error) {
 }
 
 func decodeMVElems[T any](r *reader, count uint32, rd func(*reader) (T, bool)) (any, int, bool, error) {
+	// The absolute cap above still admits a count that the stream cannot possibly
+	// satisfy, so check it against the bytes actually left before it becomes a make()
+	// length. Every element costs at least two wire bytes, so a larger count is either
+	// corruption or a request to reserve megabytes from a handful of bytes.
+	if int64(count)*2 > int64(r.remaining()) {
+		return nil, 0, false, fmt.Errorf("ics: multivalue count %d exceeds the %d bytes left", count, r.remaining())
+	}
 	xs := make([]T, count)
 	for i := range xs {
 		v, ok := rd(r)

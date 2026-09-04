@@ -275,6 +275,10 @@ type reader struct {
 	pos int
 }
 
+// remaining reports how many unread bytes are left, so a decoded element count can
+// be checked against them before it becomes an allocation length.
+func (r *reader) remaining() int { return len(r.b) - r.pos }
+
 func (r *reader) u16() (uint16, bool) {
 	if r.pos+2 > len(r.b) {
 		return 0, false
