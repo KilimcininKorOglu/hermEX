@@ -88,7 +88,7 @@ func (s *Server) handlePushSubscribe(w http.ResponseWriter, req *pushSubscriptio
 		return
 	}
 	snap, err := snapshotFolders(st, allFolders, folderIDs)
-	st.Close()
+	_ = st.Close()
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return
@@ -184,7 +184,7 @@ func (s *Server) pushPollAndSend(id string, sub *ewsSubscription, heartbeat bool
 		return true // transient store error; keep the subscription
 	}
 	events, perr := pollSubscription(st, sub)
-	st.Close()
+	_ = st.Close()
 	sub.mu.Unlock()
 	if perr != nil {
 		return true

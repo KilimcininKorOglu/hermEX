@@ -516,10 +516,10 @@ func meetingHook(auto autoProcessFunc, logger *logging.Logger) func(*objectstore
 func accessHash(rules []directory.SenderRule) uint64 {
 	h := fnv.New64a()
 	for _, r := range rules {
-		h.Write([]byte(r.Pattern))
-		h.Write([]byte{0})
-		h.Write([]byte(r.Action))
-		h.Write([]byte{'\n'})
+		_, _ = h.Write([]byte(r.Pattern))
+		_, _ = h.Write([]byte{0})
+		_, _ = h.Write([]byte(r.Action))
+		_, _ = h.Write([]byte{'\n'})
 	}
 	return h.Sum64()
 }
@@ -843,7 +843,7 @@ func sweepOutboxes(ctx context.Context, dir directory.MailboxLister, deliver spo
 		stats, err := spooler.ProcessDueOutboxStats(mbCtx, st, deliver, onGiveUp, time.Now())
 		budgetSpent := mbCtx.Err() != nil && ctx.Err() == nil
 		cancelMailbox()
-		st.Close()
+		_ = st.Close()
 		if budgetSpent {
 			mailboxesOverBudget++
 			logger.Emit(logging.Event{Level: logging.LevelWarn, Subsystem: logging.MTA,

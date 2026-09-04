@@ -63,7 +63,7 @@ func (s *Server) performBayesRetrain() (string, error) {
 		}
 		nspam += trainFolder(st, model, int64(mapi.PrivateFIDJunk), true, limit)
 		nham += trainFolder(st, model, int64(mapi.PrivateFIDInbox), false, limit)
-		st.Close()
+		_ = st.Close()
 		nbox++
 	}
 	if err := model.SaveFile(s.paths.AntispamModelPath()); err != nil {

@@ -155,7 +155,7 @@ func (s *Server) publicTarget(email string, fid int64) (*objectstore.Store, stri
 	}
 	all, err := st.ListFolders()
 	if err != nil {
-		st.Close()
+		_ = st.Close()
 		return nil, "", false
 	}
 	name := ""
@@ -166,12 +166,12 @@ func (s *Server) publicTarget(email string, fid int64) (*objectstore.Store, stri
 		}
 	}
 	if name == "" {
-		st.Close()
+		_ = st.Close()
 		return nil, "", false
 	}
 	rights, err := st.ResolvePermission(fid, strings.ToLower(email))
 	if err != nil || rights&mapi.FrightsReadAny == 0 {
-		st.Close()
+		_ = st.Close()
 		return nil, "", false
 	}
 	return st, name, true

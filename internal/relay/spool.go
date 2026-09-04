@@ -119,7 +119,7 @@ func Open(path string) (*Spool, error) {
 	}
 	s := &Spool{db: db}
 	if err := s.ensureSchema(); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, err
 	}
 	return s, nil

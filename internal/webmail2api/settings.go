@@ -733,7 +733,7 @@ func (s *Server) handleGetProfile(w http.ResponseWriter, r *http.Request) {
 			prof["quota_used"] = used
 		}
 		prof["onboarded"] = onboardedFlag(st)
-		st.Close()
+		_ = st.Close()
 	}
 	writeJSON(w, http.StatusOK, prof)
 }
@@ -816,7 +816,7 @@ func (s *Server) handlePutProfile(w http.ResponseWriter, r *http.Request) {
 				m["onboarded"] = b
 				_ = saveSharedSettings(st, m)
 			}
-			st.Close()
+			_ = st.Close()
 		}
 	}
 	// Return the re-read profile so the SPA reflects the persisted directory state.
@@ -869,7 +869,7 @@ func (s *Server) handleGetSharedMailboxes(w http.ResponseWriter, r *http.Request
 						"rights":      "read",
 					})
 				}
-				st.Close()
+				_ = st.Close()
 			}
 		}
 	}
@@ -900,7 +900,7 @@ func (s *Server) handleGetSharedAsOwner(w http.ResponseWriter, r *http.Request) 
 				if owner, err := st.IsStoreOwner(c.Email); err == nil && owner {
 					owned = append(owned, b.Address)
 				}
-				st.Close()
+				_ = st.Close()
 			}
 		}
 	}

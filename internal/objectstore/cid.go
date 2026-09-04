@@ -128,7 +128,7 @@ func (s *Store) referencedContentIDs() (map[string]struct{}, error) {
 		for rows.Next() {
 			var col any
 			if err := rows.Scan(&col); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return nil, err
 			}
 			if cid, err := asString(col); err == nil {
@@ -136,10 +136,10 @@ func (s *Store) referencedContentIDs() (map[string]struct{}, error) {
 			}
 		}
 		if err := rows.Err(); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
-		rows.Close()
+		_ = rows.Close()
 	}
 	return refs, nil
 }

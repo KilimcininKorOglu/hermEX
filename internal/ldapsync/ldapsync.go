@@ -70,7 +70,7 @@ func Run(cfg directory.LDAPConfig, syncer Syncer, store Store, maildirFor func(s
 				if err := st.SetUserPhoto(u.Photo); err != nil {
 					logf("%s photo: %v", u.Username, err)
 				}
-				st.Close()
+				_ = st.Close()
 			}
 		}
 	}

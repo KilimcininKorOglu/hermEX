@@ -490,7 +490,7 @@ func pruneEML(dir *directory.SQLDirectory, target string, days int) {
 			continue
 		}
 		n, bytes, err := store.PruneEMLCache(cutoff)
-		store.Close()
+		_ = store.Close()
 		if err != nil {
 			log.Printf("hermex-admin: prune %s: %v", md, err)
 		}
@@ -558,7 +558,7 @@ func backupMail(dir *directory.SQLDirectory, cfg *config.Config, target, dest st
 			continue
 		}
 		err = store.Backup(filepath.Join(dest, src.rel))
-		store.Close()
+		_ = store.Close()
 		if err != nil {
 			log.Printf("hermex-admin: back up %s: %v", src.dir, err)
 			continue

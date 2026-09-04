@@ -124,13 +124,13 @@ func (s *Store) ListSoftDeleted(folderID int64) ([]SoftDeletedMessage, error) {
 	for rows.Next() {
 		var id, size int64
 		if err := rows.Scan(&id, &size); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		ids = append(ids, id)
 		sizes[id] = size
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -187,12 +187,12 @@ func (s *Store) ListAllSoftDeleted() ([]SoftDeletedItem, error) {
 	for rows.Next() {
 		var r rawRow
 		if err := rows.Scan(&r.id, &r.parent, &r.size, &r.read); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		raw = append(raw, r)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
@@ -397,12 +397,12 @@ func (s *Store) PurgeSoftDeletedOlderThan(cutoff time.Time) (int, error) {
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return 0, err
 		}
 		ids = append(ids, id)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return 0, err
 	}

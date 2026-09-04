@@ -80,7 +80,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 						event = inboxDelta(lastTotal, lastUnread, total, unread)
 						lastTotal, lastUnread = total, unread
 					}
-					st.Close()
+					_ = st.Close()
 				}
 			}
 			var err error

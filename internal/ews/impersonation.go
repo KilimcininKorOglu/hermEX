@@ -59,7 +59,7 @@ func (s *Server) applyImpersonation(w http.ResponseWriter, sess *session, imp *i
 		return false
 	}
 	delegates, err := st.GetDelegates()
-	st.Close()
+	_ = st.Close()
 	if err != nil {
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return false

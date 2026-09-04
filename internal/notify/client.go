@@ -117,7 +117,7 @@ func (p *Publisher) post(ev notifyd.Event) {
 	if err != nil {
 		return
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 }
 
 // --- Consumer ---

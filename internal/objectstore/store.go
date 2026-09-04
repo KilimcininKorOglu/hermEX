@@ -247,13 +247,13 @@ func openKind(dir string, seedBuiltins bool, kind storeKind) (*Store, error) {
 	}
 	idxdb, err := sql.Open("sqlite", dsn(filepath.Join(dir, "imapindex.sqlite3")))
 	if err != nil {
-		objdb.Close()
+		_ = objdb.Close()
 		_ = lock.Close()
 		return nil, err
 	}
 	s := &Store{dir: dir, objdb: objdb, idxdb: idxdb, lock: lock, seedBuiltins: seedBuiltins, kind: kind, logger: defaultLogger.Load()}
 	if err := s.ensureSchema(); err != nil {
-		s.Close()
+		_ = s.Close()
 		return nil, err
 	}
 	return s, nil

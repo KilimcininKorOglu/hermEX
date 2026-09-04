@@ -59,7 +59,7 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request, sess *sessio
 		return
 	}
 	state, err := loadState(st)
-	st.Close()
+	_ = st.Close()
 	if err != nil {
 		s.failRequest(w, r, "ping.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return

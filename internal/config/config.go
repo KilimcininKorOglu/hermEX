@@ -207,7 +207,7 @@ func (c *Config) maildirRoot(address string) string {
 		return c.DataDir
 	}
 	h := fnv.New32a()
-	h.Write([]byte(address))
+	_, _ = h.Write([]byte(address))
 	return c.DataPartitions[h.Sum32()%uint32(len(c.DataPartitions))]
 }
 

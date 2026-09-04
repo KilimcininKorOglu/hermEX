@@ -96,12 +96,12 @@ func (s *Store) FolderByName(parent *int64, name string) (id int64, ok bool, err
 	for rows.Next() {
 		var fid int64
 		if err := rows.Scan(&fid); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return 0, false, err
 		}
 		ids = append(ids, fid)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return 0, false, err
 	}
@@ -488,12 +488,12 @@ func (s *Store) dropIndexFolder(folderID int64) error {
 	for rows.Next() {
 		var m msg
 		if err := rows.Scan(&m.id, &m.mid); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return err
 		}
 		msgs = append(msgs, m)
 	}
-	rows.Close()
+	_ = rows.Close()
 	if err := rows.Err(); err != nil {
 		return err
 	}

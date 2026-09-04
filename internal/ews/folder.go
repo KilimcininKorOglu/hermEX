@@ -467,7 +467,7 @@ func (s *Server) openFolders(w http.ResponseWriter, sess *session) (*objectstore
 	}
 	all, err := st.ListFolders()
 	if err != nil {
-		st.Close()
+		_ = st.Close()
 		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
 		return nil, nil, false
 	}
@@ -620,7 +620,7 @@ func (c *storeCache) open(sess *session, mailbox string) (*objectstore.Store, []
 	}
 	all, err := st.ListFolders()
 	if err != nil {
-		st.Close()
+		_ = st.Close()
 		return nil, nil, false, "ErrorInternalServerError"
 	}
 	c.stores[dir] = st
@@ -652,7 +652,7 @@ func (c *storeCache) openPublic(sess *session) (*objectstore.Store, []objectstor
 	}
 	all, err := st.ListFolders()
 	if err != nil {
-		st.Close()
+		_ = st.Close()
 		return nil, nil, false, "ErrorInternalServerError"
 	}
 	c.stores[dir] = st
@@ -662,7 +662,7 @@ func (c *storeCache) openPublic(sess *session) (*objectstore.Store, []objectstor
 
 func (c *storeCache) closeAll() {
 	for _, st := range c.stores {
-		st.Close()
+		_ = st.Close()
 	}
 }
 

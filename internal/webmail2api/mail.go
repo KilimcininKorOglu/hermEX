@@ -337,7 +337,7 @@ func (s *Server) locate(w http.ResponseWriter, r *http.Request, id string) (*obj
 	// store has to be open before a custom folder can be resolved by name.
 	fid, ok := resolveFolder(st, folder)
 	if !ok {
-		st.Close()
+		_ = st.Close()
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown folder"})
 		return nil, 0, 0, false
 	}

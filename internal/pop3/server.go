@@ -92,7 +92,7 @@ func (s *Server) handle(conn net.Conn) {
 	var mb *mailbox
 	defer func() {
 		if mb != nil {
-			mb.st.Close()
+			_ = mb.st.Close()
 		}
 	}()
 
@@ -248,7 +248,7 @@ func openMailbox(path string) (*mailbox, error) {
 	// directly by its fixed id.
 	mb := &mailbox{st: st, folder: int64(mapi.PrivateFIDInbox)}
 	if mb.msgs, err = st.ListMessages(mb.folder); err != nil {
-		st.Close()
+		_ = st.Close()
 		return nil, err
 	}
 	mb.deleted = make([]bool, len(mb.msgs))

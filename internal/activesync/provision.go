@@ -107,7 +107,7 @@ func (s *Server) devicePolicy(sess *session) easpolicy.Policy {
 			if override, err = st.GetSyncPolicy(); err != nil {
 				s.logPolicyReadFail("mailbox", sess, err)
 			}
-			st.Close()
+			_ = st.Close()
 		}
 	}
 	return easpolicy.Merge(easpolicy.Merge(def, dom), override)

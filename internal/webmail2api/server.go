@@ -520,7 +520,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 			hasAvatar = true
 		}
 		onboarded = onboardedFlag(st)
-		st.Close()
+		_ = st.Close()
 	}
 	// Timezone + locale come from the directory so the SPA restores the chosen
 	// zone on reload instead of clearing it; empty means follow-the-device.

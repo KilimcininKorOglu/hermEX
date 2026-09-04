@@ -31,7 +31,7 @@ func (s *Server) delegatedMailboxes(user string) ([]directory.SharedMailbox, err
 			continue
 		}
 		dels, derr := ost.GetDelegates()
-		ost.Close()
+		_ = ost.Close()
 		if derr != nil {
 			continue
 		}
@@ -60,7 +60,7 @@ func (s *Server) sharedCalendars(user string) ([]msResponse, error) {
 			continue
 		}
 		cr, cerr := calCollectionResponse(ost, m.Address, calendarName, m.Address+" calendar", int64(mapi.PrivateFIDCalendar))
-		ost.Close()
+		_ = ost.Close()
 		if cerr != nil {
 			continue
 		}
@@ -83,7 +83,7 @@ func (s *Server) sharedAddressBooks(user string) ([]msResponse, error) {
 			continue
 		}
 		cr, cerr := cardCollectionResponse(ost, m.Address, addressbookName, m.Address+" contacts", int64(mapi.PrivateFIDContacts))
-		ost.Close()
+		_ = ost.Close()
 		if cerr != nil {
 			continue
 		}

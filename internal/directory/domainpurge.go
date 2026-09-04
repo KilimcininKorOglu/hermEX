@@ -44,16 +44,16 @@ func (d *SQLDirectory) PurgeDomain(domainID int64, deleteFiles bool) (bool, erro
 		for rows.Next() {
 			var m string
 			if err := rows.Scan(&m); err != nil {
-				rows.Close()
+				_ = rows.Close()
 				return false, err
 			}
 			maildirs = append(maildirs, m)
 		}
 		if err := rows.Err(); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return false, err
 		}
-		rows.Close()
+		_ = rows.Close()
 	}
 
 	tx, err := d.db.Begin()

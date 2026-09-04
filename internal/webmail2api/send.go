@@ -157,7 +157,7 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 	// File a Sent copy (best-effort; a delivered message is not lost if this fails).
 	if st, err := objectstore.Open(c.Mailbox); err == nil {
 		fileSentCopy(st, raw, c.Email, "mail")
-		st.Close()
+		_ = st.Close()
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
@@ -287,7 +287,7 @@ func (s *Server) handleMailSendRaw(w http.ResponseWriter, r *http.Request) {
 	}
 	if st, err := objectstore.Open(c.Mailbox); err == nil {
 		fileSentCopy(st, raw, c.Email, "mail-raw")
-		st.Close()
+		_ = st.Close()
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

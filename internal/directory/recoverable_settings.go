@@ -93,7 +93,7 @@ func (d *SQLDirectory) SweepRecoverableItems(now time.Time) (int, error) {
 			continue
 		}
 		n, err := st.PurgeSoftDeletedOlderThan(cutoff)
-		st.Close()
+		_ = st.Close()
 		if err != nil {
 			continue
 		}

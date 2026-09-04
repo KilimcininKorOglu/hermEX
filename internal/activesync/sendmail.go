@@ -75,7 +75,7 @@ func (s *Server) handleSendMail(w http.ResponseWriter, r *http.Request, sess *se
 			if needMark {
 				markReplyForwardSource(st, srcFolder, srcItem, forward)
 			}
-			st.Close()
+			_ = st.Close()
 		}
 	}
 	w.WriteHeader(http.StatusOK)

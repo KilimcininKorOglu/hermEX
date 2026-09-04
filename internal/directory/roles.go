@@ -141,16 +141,16 @@ func (d *SQLDirectory) GetRole(id int64) (RoleDetail, bool, error) {
 	for prows.Next() {
 		var p Permission
 		if err := prows.Scan(&p.Name, &p.Params); err != nil {
-			prows.Close()
+			_ = prows.Close()
 			return RoleDetail{}, false, err
 		}
 		rd.Permissions = append(rd.Permissions, p)
 	}
 	if err := prows.Err(); err != nil {
-		prows.Close()
+		_ = prows.Close()
 		return RoleDetail{}, false, err
 	}
-	prows.Close()
+	_ = prows.Close()
 	urows, err := d.db.Query(`SELECT user_id FROM user_roles WHERE role_id = ? ORDER BY user_id`, id)
 	if err != nil {
 		return RoleDetail{}, false, err
@@ -311,16 +311,16 @@ func (d *SQLDirectory) EffectivePermissions(userID int64) ([]Permission, error) 
 	for rows.Next() {
 		var p Permission
 		if err := rows.Scan(&p.Name, &p.Params); err != nil {
-			rows.Close()
+			_ = rows.Close()
 			return nil, err
 		}
 		add(p)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return nil, err
 	}
-	rows.Close()
+	_ = rows.Close()
 	legacy, err := d.AdminRoles(userID)
 	if err != nil {
 		return nil, err

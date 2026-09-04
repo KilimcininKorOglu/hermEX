@@ -133,10 +133,10 @@ func (s *Server) handle(nc net.Conn) {
 	defer func() { _ = c.nc.Close() }() // closes the upgraded conn after a STARTTLS swap
 	defer func() {
 		if c.st != nil {
-			c.st.Close()
+			_ = c.st.Close()
 		}
 		if c.pubStore != nil {
-			c.pubStore.Close()
+			_ = c.pubStore.Close()
 		}
 	}()
 

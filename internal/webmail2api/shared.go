@@ -58,7 +58,7 @@ func (s *Server) openMailbox(w http.ResponseWriter, r *http.Request) (*mailboxCt
 			return nil, false
 		}
 		if !callerMayOpenShared(st, c.Email) {
-			st.Close()
+			_ = st.Close()
 			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
 			return nil, false
 		}

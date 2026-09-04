@@ -28,12 +28,12 @@ func (s *Store) ReindexFolder(folderID int64) error {
 		var id int64
 		var read int
 		if err := objRows.Scan(&id, &read); err != nil {
-			objRows.Close()
+			_ = objRows.Close()
 			return err
 		}
 		objState[id] = read
 	}
-	objRows.Close()
+	_ = objRows.Close()
 	if err := objRows.Err(); err != nil {
 		return err
 	}
@@ -48,12 +48,12 @@ func (s *Store) ReindexFolder(folderID int64) error {
 		var id int64
 		var mid string
 		if err := idxRows.Scan(&id, &mid); err != nil {
-			idxRows.Close()
+			_ = idxRows.Close()
 			return err
 		}
 		idxMid[id] = mid
 	}
-	idxRows.Close()
+	_ = idxRows.Close()
 	if err := idxRows.Err(); err != nil {
 		return err
 	}
