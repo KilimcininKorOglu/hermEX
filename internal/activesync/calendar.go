@@ -197,7 +197,9 @@ func parseCalendarItem(st *objectstore.Store, data *wbxml.Node) (mapi.PropertyVa
 		props = append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(ids[1], mapi.PtSysTime), Value: mapi.UnixToNTTime(t)})
 	}
 	if b := data.ChildText(wbxml.CalBusyStatus); b != "" {
-		if n, err := strconv.Atoi(b); err == nil {
+		// PtLong is 32-bit, and the value comes off the wire: parse at that width so
+		// an out-of-range status is rejected rather than wrapped into a valid one.
+		if n, err := strconv.ParseInt(b, 10, 32); err == nil {
 			props = append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(ids[2], mapi.PtLong), Value: int32(n)})
 		}
 	}

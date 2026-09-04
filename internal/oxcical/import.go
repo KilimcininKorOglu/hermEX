@@ -119,7 +119,9 @@ func Import(raw []byte, opt Options) (*oxcmail.Message, error) {
 	if imp, ok := priorityImportance(vev.propText("PRIORITY")); ok {
 		p.Set(mapi.PrImportance, imp)
 	}
-	if n, err := strconv.Atoi(strings.TrimSpace(vev.propText("SEQUENCE"))); err == nil {
+	// The sequence lands in a 32-bit named long, so parse at that width: an
+	// iCalendar body may carry any integer, and a wider one would wrap.
+	if n, err := strconv.ParseInt(strings.TrimSpace(vev.propText("SEQUENCE")), 10, 32); err == nil {
 		setNamedLong(p, named, mapi.NameAppointmentSequence, int32(n))
 	}
 	if al := vev.sub("VALARM"); al != nil {
