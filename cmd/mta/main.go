@@ -259,6 +259,9 @@ func main() {
 	// that it cannot send.
 	go runDigest(dir, []byte(cfg.DigestSecret), cfg.Hostname, lockPass(directory.LockDigest), logger)
 	srv := &smtp.Server{Backend: &mta.Backend{Accounts: dir, Spool: spool, Logger: logger, Scorer: scorer, History: dir, Greylist: greylister, RateLimit: rateLimiter, Thresholds: dir, RecipientAccess: dir, Outbound: outboundLimiter, Limiter: loginLimiter}, Hostname: cfg.Hostname, Logger: logger}
+	// The built-in ceiling holds from the first accepted connection, so a settings
+	// read that fails at startup still leaves inbound DATA bounded.
+	srv.SetMaxSize(directory.DefaultMaxInboundBytes)
 	// TLS certificates come from the provider: the config-file cert as a fallback,
 	// overridden by an admin-uploaded cert the provider polls for, so a renewal
 	// applies without a restart.
@@ -602,8 +605,9 @@ func runSpamHistoryMaintenance(dir *directory.SQLDirectory, logger *logging.Logg
 }
 
 // applyMessageSizeSettings reads the stored inbound message size limit and applies it
-// to the SMTP server. A missing row or a read error leaves the limit unchanged, so a
-// settings failure never starts rejecting mail unexpectedly.
+// to the SMTP server. A missing row means nothing was ever chosen, so the built-in
+// ceiling applies; a read error leaves the limit unchanged, so a settings failure
+// never starts rejecting mail unexpectedly.
 func applyMessageSizeSettings(dir *directory.SQLDirectory, logger *logging.Logger, srv *smtp.Server) {
 	s, found, err := dir.GetMessageSizeSettings()
 	if err != nil {
@@ -611,6 +615,9 @@ func applyMessageSizeSettings(dir *directory.SQLDirectory, logger *logging.Logge
 		return
 	}
 	if !found {
+		// Nothing has ever been saved, so the built-in ceiling applies. A stored 0
+		// is an operator who chose no limit and is honored below.
+		srv.SetMaxSize(directory.DefaultMaxInboundBytes)
 		return
 	}
 	srv.SetMaxSize(s.MaxInboundBytes)

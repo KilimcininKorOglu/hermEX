@@ -142,7 +142,9 @@ func (s *Server) antispamPageData(r *http.Request, notice string) map[string]any
 	}
 
 	// Inbound message size limit: shown in whole MB (0 = no limit); stored as bytes.
-	data["MessageSizeMB"] = int64(0)
+	// With nothing saved the server enforces its built-in ceiling, so show that
+	// rather than 0, which would claim a limit the server does not actually apply.
+	data["MessageSizeMB"] = int64(directory.DefaultMaxInboundBytes / (1024 * 1024))
 	if ms, found, err := s.dir.GetMessageSizeSettings(); err == nil && found {
 		data["MessageSizeMB"] = ms.MaxInboundBytes / (1024 * 1024)
 	}

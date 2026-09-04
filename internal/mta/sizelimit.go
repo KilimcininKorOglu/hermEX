@@ -33,13 +33,16 @@ var ErrMessageTooLarge error = messageTooLarge{}
 // this covers the paths that never touch an SMTP session.
 var maxMessageBytes atomic.Int64
 
+func init() { maxMessageBytes.Store(directory.DefaultMaxInboundBytes) }
+
 // SetMaxMessageSize installs the inbound size limit every send path is measured
 // against; 0 removes it.
 func SetMaxMessageSize(n int64) { maxMessageBytes.Store(n) }
 
-// ApplyMessageSizeSettings reads the stored limit and applies it. A missing row or
-// a read error leaves the current value in place, so a settings failure never
-// starts rejecting mail unexpectedly. daemon names the caller in the log line, and
+// ApplyMessageSizeSettings reads the stored limit and applies it. A missing row
+// means nothing was ever chosen, so the built-in ceiling applies; a read error
+// leaves the current value in place, so a settings failure never starts rejecting
+// mail unexpectedly. daemon names the caller in the log line, and
 // logger carries the failure to the central store so a stale cap is visible.
 func ApplyMessageSizeSettings(daemon string, logger *logging.Logger, read MessageSizeReader) {
 	s, found, err := read()
@@ -48,6 +51,10 @@ func ApplyMessageSizeSettings(daemon string, logger *logging.Logger, read Messag
 		return
 	}
 	if !found {
+		// No row was ever saved, so nothing has chosen a limit and the built-in
+		// ceiling applies. A stored 0 is different: that is an operator who chose
+		// no limit, and it is honored below.
+		SetMaxMessageSize(directory.DefaultMaxInboundBytes)
 		return
 	}
 	SetMaxMessageSize(s.MaxInboundBytes)

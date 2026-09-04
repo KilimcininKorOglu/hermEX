@@ -6,6 +6,14 @@ import (
 	"time"
 )
 
+// DefaultMaxInboundBytes is the ceiling that applies when no limit has ever been
+// saved. Inbound SMTP on port 25 is the widest unauthenticated surface there is,
+// and the body is buffered whole before it is parsed, scanned and scored, so
+// shipping with no ceiling lets one anonymous peer exhaust a fresh install. An
+// operator who wants no limit still has one: a stored 0 is a choice and stays
+// unlimited.
+const DefaultMaxInboundBytes = 50 << 20
+
 // MessageSizeSettings is the operator-editable inbound SMTP message size limit, in
 // bytes (0 means no limit). It is stored as a single row; the MTA polls it and applies
 // a change without a restart.
