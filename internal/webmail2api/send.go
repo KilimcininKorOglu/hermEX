@@ -465,14 +465,27 @@ func (s *Server) buildOutgoing(representing, sender string, req sendRequest) ([]
 	}
 	// The SPA sends a single body; is_html marks it HTML. Export needs the plain
 	// part too (the text/plain alternative), derived by stripping tags.
+	// A picture pasted into the composer arrives as a data: URI. It has to become
+	// an inline attachment before the body is stored, because Outlook and Gmail
+	// refuse to render a data: image in a received message.
+	var inlineImages []oxcmail.Attachment
+	body := req.Body
 	if req.IsHTML {
-		props.Set(mapi.PrHTML, []byte(toCRLF(req.Body)))
-		props.Set(mapi.PrBody, toCRLF(stripTags(req.Body)))
+		rewritten, imgs, err := oxcmail.InlineDataURIs(body, func(n int) string {
+			return fmt.Sprintf("img%d.%s@%s", n+1, randomHex(), s.hostname)
+		})
+		if err != nil {
+			return nil, err
+		}
+		body, inlineImages = rewritten, imgs
+		props.Set(mapi.PrHTML, []byte(toCRLF(body)))
+		props.Set(mapi.PrBody, toCRLF(stripTags(body)))
 	} else {
-		props.Set(mapi.PrBody, toCRLF(req.Body))
+		props.Set(mapi.PrBody, toCRLF(body))
 	}
 
 	msg := &oxcmail.Message{Props: props}
+	msg.Attachments = append(msg.Attachments, inlineImages...)
 	msg.Recipients = append(rcptBags(req.To, mapi.RecipTo), rcptBags(req.Cc, mapi.RecipCc)...)
 	for _, a := range req.Attachments {
 		data, err := decodeAttachment(a.Content)
