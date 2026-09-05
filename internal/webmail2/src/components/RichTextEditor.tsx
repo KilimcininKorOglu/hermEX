@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import { isSafeLinkURL, sanitizeClipboard, sanitizeHTML } from "@/utils/sanitize"
 import { linkifyHTML, linkifyNode } from "@/utils/linkify"
 import { countMissingImages, fillMissingImages, imageFilesFrom, imagesFragment, readAsDataURL } from "@/utils/pasteImages"
+import { extractRtfImages } from "@/utils/rtfImages"
 
 // Collapses the selection at the given viewport point. Chromium and WebKit expose
 // caretRangeFromPoint, Gecko caretPositionFromPoint; with neither, the insert
@@ -134,6 +135,11 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
         // text is still worth inserting.
         sources = []
       }
+      // Word puts no image files on the clipboard at all; its pictures live only
+      // in the RTF flavour. The two sources are never mixed, because a clipboard
+      // that carries files carries them for the SAME pictures and interleaving
+      // would place each one twice.
+      if (sources.length === 0) sources = extractRtfImages(data.getData("text/rtf"))
       if (sources.length === 0) return html
       // Re-sanitized because the markup is rebuilt here; the sources are local
       // File bytes, but the sink must not depend on that being remembered.
