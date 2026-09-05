@@ -15,9 +15,9 @@ var errNoEvent = errors.New("oxcical: no VEVENT in calendar")
 
 // iCalendar busy/transparency maps to PidLidBusyStatus values.
 const (
-	busyFree      int32 = 0
-	busyTentative int32 = 1
-	busyBusy      int32 = 2
+	busyFree      = mapi.BusyFree
+	busyTentative = mapi.BusyTentative
+	busyBusy      = mapi.BusyBusy
 )
 
 // Import parses an iCalendar object into an IPM.Appointment message. A

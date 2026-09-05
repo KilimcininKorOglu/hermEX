@@ -79,10 +79,13 @@ func Export(msg *oxcmail.Message, opt Options) ([]byte, error) {
 		b.add(dtLine("DTEND", end, allDay))
 	}
 	if busy, ok := namedLong(p, named, mapi.NameBusyStatus); ok {
-		if busy == busyFree {
-			b.add("TRANSP:TRANSPARENT")
-		} else {
+		// TRANSP says whether the event takes the attendee's time, which is what a
+		// VFREEBUSY reader aggregates. Working elsewhere does not, so exporting it
+		// as opaque would block a whole home office day for every CalDAV client.
+		if mapi.BusyStatusOccupies(busy) {
 			b.add("TRANSP:OPAQUE")
+		} else {
+			b.add("TRANSP:TRANSPARENT")
 		}
 	}
 	if v, ok := p.Get(mapi.PrSensitivity); ok {

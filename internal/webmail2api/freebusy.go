@@ -132,6 +132,13 @@ func (s *Server) busyFor(c sessionClaims, email string, start, end time.Time) []
 	}
 	busy := make([]busyJSON, 0, len(events))
 	for _, ev := range events {
+		// The grid shows time that is TAKEN. An appointment marked free, or one
+		// marking a home office day (working elsewhere), says where the attendee is
+		// rather than that they are unavailable, so reporting it as busy would empty
+		// the day of candidate times.
+		if !mapi.BusyStatusOccupies(ev.Status) {
+			continue
+		}
 		busy = append(busy, busyJSON{Start: ev.StartTime, End: ev.EndTime})
 	}
 	return busy

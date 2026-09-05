@@ -84,10 +84,14 @@ type calendarEventArray struct {
 // RFC3339 UTC. Exported so webmail2 can reuse CalendarFreeBusy without duplicating
 // the calendar read.
 type CalendarEvent struct {
-	StartTime string                `xml:"StartTime"`
-	EndTime   string                `xml:"EndTime"`
-	BusyType  string                `xml:"BusyType"`
-	Details   *calendarEventDetails `xml:"CalendarEventDetails,omitempty"`
+	StartTime string `xml:"StartTime"`
+	EndTime   string `xml:"EndTime"`
+	BusyType  string `xml:"BusyType"`
+	// Status is the numeric PidLidBusyStatus the BusyType was rendered from. It
+	// is not marshalled: EWS carries the name, and a Go caller needs the value to
+	// decide whether the block occupies the attendee.
+	Status  int32                 `xml:"-"`
+	Details *calendarEventDetails `xml:"CalendarEventDetails,omitempty"`
 }
 
 type calendarEventDetails struct {
@@ -285,10 +289,12 @@ func CalendarFreeBusy(st *objectstore.Store, windowStart, windowEnd time.Time, d
 		if !start.Before(windowEnd) || !end.After(windowStart) {
 			continue
 		}
+		status := longVal(pv, busyTag)
 		ev := CalendarEvent{
 			StartTime: start.UTC().Format(time.RFC3339),
 			EndTime:   end.UTC().Format(time.RFC3339),
-			BusyType:  busyTypeName(longVal(pv, busyTag)),
+			BusyType:  busyTypeName(status),
+			Status:    status,
 		}
 		if detailed {
 			ev.Details = &calendarEventDetails{

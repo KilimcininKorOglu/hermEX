@@ -39,9 +39,9 @@ const (
 // PidLidBusyStatus values (MS-OXOCAL 2.2.1.2): the response sets how the
 // appointment shows on the attendee's free/busy.
 const (
-	busyFree      int32 = 0
-	busyTentative int32 = 1
-	busyBusy      int32 = 2
+	busyFree      = mapi.BusyFree
+	busyTentative = mapi.BusyTentative
+	busyBusy      = mapi.BusyBusy
 )
 
 // ErrRequestNotFound is returned when the referenced meeting request cannot be

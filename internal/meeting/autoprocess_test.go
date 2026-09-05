@@ -292,3 +292,44 @@ func TestAutoProcessTentativeOnConflict(t *testing.T) {
 		t.Errorf("calendar busy statuses = %v, want exactly one tentative (%d)", got, busyTentative)
 	}
 }
+
+// TestAutoProcessWorkingElsewhereIsNoConflict is the distinction the scheduler
+// turns on. Working elsewhere is the status Outlook writes for a home office
+// day, so it says where the attendee is rather than that they are unavailable.
+// Counting it as a conflict declines every request that lands on such a day.
+func TestAutoProcessWorkingElsewhereIsNoConflict(t *testing.T) {
+	st, tags, accounts := apSetup(t, objectstore.MeetingConfig{AutoAccept: true, DeclineConflict: true})
+	seedAppointment(t, st, tags, "", apBase, apBase.Add(8*time.Hour), mapi.BusyWorkingElsewhere)
+	id := seedRequest(t, st, tags, "", apBase.Add(time.Hour), apBase.Add(2*time.Hour), false)
+
+	handled, err := AutoProcess(st, accounts, nil, "room@hermex.test", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !handled {
+		t.Fatal("AutoProcess did not handle the request")
+	}
+	// The home office marker plus the accepted meeting.
+	if got := calBusyStatuses(t, st, tags); len(got) != 2 {
+		t.Errorf("calendar = %v, want the marker and the accepted meeting", got)
+	}
+}
+
+// TestAutoProcessOutOfOfficeIsAConflict keeps the other end of the distinction:
+// an attendee who is away is unavailable, and that still blocks.
+func TestAutoProcessOutOfOfficeIsAConflict(t *testing.T) {
+	st, tags, accounts := apSetup(t, objectstore.MeetingConfig{AutoAccept: true, DeclineConflict: true})
+	seedAppointment(t, st, tags, "", apBase, apBase.Add(8*time.Hour), mapi.BusyOOF)
+	id := seedRequest(t, st, tags, "", apBase.Add(time.Hour), apBase.Add(2*time.Hour), false)
+
+	handled, err := AutoProcess(st, accounts, nil, "room@hermex.test", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !handled {
+		t.Fatal("AutoProcess did not handle the request")
+	}
+	if got := calBusyStatuses(t, st, tags); len(got) != 1 {
+		t.Errorf("calendar = %v, want only the out-of-office block (request declined)", got)
+	}
+}

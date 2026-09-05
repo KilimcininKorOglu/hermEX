@@ -138,8 +138,8 @@ func hasConflict(st *objectstore.Store, req *oxcmail.Message, t apptTags) (bool,
 		if boolVal(pv, t.recur) {
 			continue // recurring master: no instance expansion (documented gap)
 		}
-		if longVal(pv, t.busy) < busyBusy {
-			continue // free/tentative does not block
+		if !mapi.BusyStatusOccupies(longVal(pv, t.busy)) {
+			continue // free, and working elsewhere, do not block
 		}
 		start, ok1 := ntTime(pv, t.start)
 		end, ok2 := ntTime(pv, t.end)
