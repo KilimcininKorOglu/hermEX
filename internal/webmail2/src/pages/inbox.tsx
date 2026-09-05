@@ -391,7 +391,14 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
   const currentPage = Math.min(page, totalPages - 1)
   const pageEmails = emails
 
-  const EmailRow = ({ email }: { email: Email }) => (
+  const EmailRow = ({ email }: { email: Email }) => {
+    // A follow-up flag tints the whole row, not just the small glyph in the flag
+    // column: that column can be switched off, and even with it on a flagged mail
+    // is easy to miss in a full list. A completed flag is not tinted, because the
+    // point of the tint is what still needs doing.
+    const flagged = email.followupStatus === 2
+    const rowSelected = sel.isSelected(email.id) || (previewPane === "right" && selectedId === email.id)
+    return (
     <div
       draggable
       onDragStart={(e) => {
@@ -400,13 +407,23 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
       }}
       className={cn(
         "group flex cursor-pointer items-center gap-3 transition-all duration-200",
-        viewMode === "list" ? "p-4 hover:bg-accent/50" : "p-2 hover:bg-accent/50",
-        !email.read && viewMode === "list" && "bg-accent/5",
+        viewMode === "list" ? "p-4" : "p-2",
         // Marker the unread-border CSS rule keys off (gated by the DB-backed
         // display toggle reflected on <html>); harmless when the toggle is off.
         !email.read && "hermex-unread",
-        sel.isSelected(email.id) && "bg-primary/5",
-        previewPane === "right" && selectedId === email.id && "bg-primary/10"
+        // The tint has to survive hover and selection, so the flagged row carries
+        // its own hover and selected shades rather than falling through to the
+        // accent ones, which would replace it on the first mouseover.
+        flagged
+          ? rowSelected
+            ? "bg-amber-200/70 hover:bg-amber-200 dark:bg-amber-900/50 dark:hover:bg-amber-900/70"
+            : "bg-amber-100/70 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-950/60"
+          : cn(
+              "hover:bg-accent/50",
+              !email.read && viewMode === "list" && "bg-accent/5",
+              sel.isSelected(email.id) && "bg-primary/5",
+              previewPane === "right" && selectedId === email.id && "bg-primary/10"
+            )
       )}
       onClick={() => {
         if (previewPane === "right") setSelectedId(email.id)
@@ -524,6 +541,7 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
       </div>
     </div>
   )
+  }
 
   return (
     <div className="space-y-4">
