@@ -40,28 +40,114 @@ import (
 // the concrete *SQLDirectory satisfies it.
 var _ admin.Directory = (*directory.SQLDirectory)(nil)
 
+// cmdContext is what a subcommand is handed: the opened directory and database,
+// the loaded config, and the command line from the command name onward.
+type cmdContext struct {
+	dir  *directory.SQLDirectory
+	cfg  *config.Config
+	db   *sql.DB
+	args []string
+}
+
+// command is one hermex-admin subcommand. The table below is the SINGLE source
+// for both the dispatch and the help text: a command added to one is a command
+// added to the other, so the help can never describe a command that is not
+// there, nor omit one that is.
+//
+// minArgs and maxArgs count the command name itself. Zero means unchecked, which
+// is what a command taking any number of arguments uses.
+type command struct {
+	name    string
+	args    string // the argument summary shown after the name
+	note    string // the parenthetical explanation, empty for none
+	minArgs int
+	maxArgs int
+	run     func(c *cmdContext)
+}
+
+var commands = []command{
+	{name: "ensure-schema", run: func(*cmdContext) { fmt.Println("schema ensured") }},
+	{name: "create-domain", args: "<domainname>", minArgs: 2, maxArgs: 2, run: runCreateDomain},
+	{name: "create-user", args: "<email> <password>", minArgs: 3, maxArgs: 3, run: runCreateUser},
+	{name: "create-alias", args: "<alias-address> <user-email>", minArgs: 3, maxArgs: 3, run: runCreateAlias},
+	{name: "create-contact", args: "<email> <domain> [display-name]", note: "an org mail contact in the GAL",
+		minArgs: 3, maxArgs: 4, run: runCreateContact},
+	{name: "update-contact", args: "<email> <display-name>", note: "rename; an empty name clears it",
+		minArgs: 3, maxArgs: 3, run: runUpdateContact},
+	{name: "delete-contact", args: "<email>", minArgs: 2, maxArgs: 2, run: runDeleteContact},
+	{name: "list-contacts", run: runListContacts},
+	{name: "sweep-content", args: "<email>", note: "reclaim orphan content files; refuses while the mailbox is in use",
+		minArgs: 2, maxArgs: 2, run: runSweepContent},
+	{name: "prune-eml", args: "<email|all> [days]", note: "reclaim cached wire copies older than N days, default 30",
+		minArgs: 2, maxArgs: 3, run: runPruneEML},
+	{name: "backfill-previews", args: "<email|all>",
+		note:    "fill the message-list snippet and attachment flag on rows indexed before those columns existed",
+		minArgs: 2, maxArgs: 2, run: func(c *cmdContext) { backfillPreviews(c.dir, c.args[1]) }},
+	{name: "backup-mail", args: "<email|all> <dest-dir>", note: "consistent copy of mail content; safe on a live mailbox",
+		minArgs: 3, maxArgs: 3, run: func(c *cmdContext) { backupMail(c.dir, c.cfg, c.args[1], c.args[2]) }},
+	{name: "export-dkim", args: "<domain>", note: "write the domain's DKIM private key to stdout",
+		minArgs: 2, maxArgs: 2, run: func(c *cmdContext) { exportDKIM(c.dir, c.args[1]) }},
+	{name: "ldap-sync", args: "<org-id>", note: "import the org's LDAP/AD accounts into the directory",
+		minArgs: 2, maxArgs: 2, run: runLDAPSync},
+	{name: "grant-admin", args: "<email> <system|org|domain> [scope-id]", minArgs: 3, maxArgs: 4, run: runGrantAdmin},
+	{name: "list-sessions", args: "<email>", note: "the account's live webmail and panel sessions",
+		minArgs: 2, maxArgs: 2, run: func(c *cmdContext) { listSessions(c.dir, c.args[1]) }},
+	{name: "revoke-sessions", args: "<email>", note: "end every one of them; compromise response",
+		minArgs: 2, maxArgs: 2, run: func(c *cmdContext) { revokeSessions(c.dir, c.args[1]) }},
+	{name: "serve", note: "run the admin API HTTP server", run: runServe},
+}
+
+// lookup returns the command with that name.
+func lookup(name string) (command, bool) {
+	for _, c := range commands {
+		if c.name == name {
+			return c, true
+		}
+	}
+	return command{}, false
+}
+
+// accepts reports whether the command takes this many arguments, counting the
+// command name.
+func (c command) accepts(n int) bool {
+	if c.minArgs > 0 && n < c.minArgs {
+		return false
+	}
+	return c.maxArgs <= 0 || n <= c.maxArgs
+}
+
 func usage() {
 	fmt.Fprintln(os.Stderr, "usage: hermex-admin -config <file> <command> [args]")
 	fmt.Fprintln(os.Stderr, "commands:")
-	fmt.Fprintln(os.Stderr, "  ensure-schema")
-	fmt.Fprintln(os.Stderr, "  create-domain <domainname>")
-	fmt.Fprintln(os.Stderr, "  create-user <email> <password>")
-	fmt.Fprintln(os.Stderr, "  create-alias <alias-address> <user-email>")
-	fmt.Fprintln(os.Stderr, "  create-contact <email> <domain> [display-name]   (an org mail contact in the GAL)")
-	fmt.Fprintln(os.Stderr, "  update-contact <email> <display-name>   (rename; an empty name clears it)")
-	fmt.Fprintln(os.Stderr, "  delete-contact <email>")
-	fmt.Fprintln(os.Stderr, "  list-contacts")
-	fmt.Fprintln(os.Stderr, "  sweep-content <email>   (reclaim orphan content files; refuses while the mailbox is in use)")
-	fmt.Fprintln(os.Stderr, "  prune-eml <email|all> [days]   (reclaim cached wire copies older than N days, default 30)")
-	fmt.Fprintln(os.Stderr, "  backfill-previews <email|all>   (fill the message-list snippet and attachment flag on rows indexed before those columns existed)")
-	fmt.Fprintln(os.Stderr, "  backup-mail <email|all> <dest-dir>   (consistent copy of mail content; safe on a live mailbox)")
-	fmt.Fprintln(os.Stderr, "  export-dkim <domain>    (write the domain's DKIM private key to stdout)")
-	fmt.Fprintln(os.Stderr, "  ldap-sync <org-id>      (import the org's LDAP/AD accounts into the directory)")
-	fmt.Fprintln(os.Stderr, "  grant-admin <email> <system|org|domain> [scope-id]")
-	fmt.Fprintln(os.Stderr, "  list-sessions <email>   (the account's live webmail and panel sessions)")
-	fmt.Fprintln(os.Stderr, "  revoke-sessions <email> (end every one of them; compromise response)")
-	fmt.Fprintln(os.Stderr, "  serve                   (run the admin API HTTP server)")
+	// The notes line up in a column, which is what makes a list this long
+	// readable. The width comes from the table rather than from padding baked
+	// into each string, so adding a command cannot leave the column ragged.
+	width := 0
+	for _, c := range commands {
+		if c.note == "" {
+			continue
+		}
+		if n := len(c.signature()); n > width {
+			width = n
+		}
+	}
+	for _, c := range commands {
+		sig := c.signature()
+		if c.note == "" {
+			fmt.Fprintln(os.Stderr, "  "+sig)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "  %-*s   (%s)\n", width, sig, c.note)
+	}
 	os.Exit(2)
+}
+
+// signature is the command as it is typed: its name and its arguments.
+func (c command) signature() string {
+	if c.args == "" {
+		return c.name
+	}
+	return c.name + " " + c.args
 }
 
 func main() {
@@ -90,268 +176,250 @@ func main() {
 		log.Fatalf("hermex-admin: schema: %v", err)
 	}
 
-	switch args[0] {
-	case "ensure-schema":
-		fmt.Println("schema ensured")
-	case "create-domain":
-		if len(args) != 2 {
-			usage()
-		}
-		if _, err := dir.CreateDomain(args[1], cfg.HomedirFor(args[1])); err != nil {
-			log.Fatalf("hermex-admin: %v", err)
-		}
-		fmt.Printf("domain %s created\n", args[1])
-	case "create-user":
-		if len(args) != 3 {
-			usage()
-		}
-		if _, err := dir.CreateUser(args[1], args[2], cfg.MaildirFor(args[1])); err != nil {
-			log.Fatalf("hermex-admin: %v", err)
-		}
-		fmt.Printf("user %s created\n", args[1])
-	case "create-alias":
-		if len(args) != 3 {
-			usage()
-		}
-		if err := dir.CreateAlias(args[1], args[2]); err != nil {
-			log.Fatalf("hermex-admin: %v", err)
-		}
-		fmt.Printf("alias %s -> %s created\n", args[1], args[2])
-	case "create-contact":
-		if len(args) < 3 || len(args) > 4 {
-			usage()
-		}
-		name := ""
-		if len(args) == 4 {
-			name = args[3]
-		}
-		if _, err := dir.CreateContact(args[1], name, args[2]); err != nil {
-			log.Fatalf("hermex-admin: %v", err)
-		}
-		fmt.Printf("contact %s created\n", args[1])
-	case "update-contact":
-		if len(args) != 3 {
-			usage()
-		}
-		found, err := dir.UpdateContact(args[1], args[2])
-		if err != nil {
-			log.Fatalf("hermex-admin: %v", err)
-		}
-		if !found {
-			log.Fatalf("hermex-admin: no such contact: %s", args[1])
-		}
-		fmt.Printf("contact %s updated\n", args[1])
-	case "delete-contact":
-		if len(args) != 2 {
-			usage()
-		}
-		removed, err := dir.DeleteContact(args[1])
-		if err != nil {
-			log.Fatalf("hermex-admin: %v", err)
-		}
-		if !removed {
-			log.Fatalf("hermex-admin: no such contact: %s", args[1])
-		}
-		fmt.Printf("contact %s deleted\n", args[1])
-	case "list-contacts":
-		contacts, err := dir.ListContacts()
-		if err != nil {
-			log.Fatalf("hermex-admin: %v", err)
-		}
-		for _, c := range contacts {
-			fmt.Printf("%s\t%s\t%s\n", c.Address, c.DisplayName, c.Domain)
-		}
-	case "sweep-content":
-		if len(args) != 2 {
-			usage()
-		}
-		maildir, ok := dir.Resolve(args[1])
-		if !ok {
-			log.Fatalf("hermex-admin: unknown or unreceivable mailbox: %s", args[1])
-		}
-		store, err := objectstore.OpenExisting(maildir)
-		if err != nil {
-			log.Fatalf("hermex-admin: open mailbox %s: %v", maildir, err)
-		}
-		defer store.Close()
-		removed, err := store.SweepOrphanContent()
-		if errors.Is(err, objectstore.ErrMailboxBusy) {
-			// The sweep deletes content a live writer may be about to reference, so
-			// it declines rather than doing it anyway. Say which mailbox and what to
-			// do, since "busy" alone leaves the operator guessing.
-			log.Fatalf("hermex-admin: %s is open by a running daemon or another session; "+
-				"stop the mail services for this mailbox and retry", args[1])
-		}
-		if err != nil {
-			log.Fatalf("hermex-admin: sweep: %v", err)
-		}
-		fmt.Printf("swept %d orphan content file(s) from %s\n", removed, args[1])
-	case "prune-eml":
-		if len(args) < 2 || len(args) > 3 {
-			usage()
-		}
-		days := defaultEMLPruneDays
-		if len(args) == 3 {
-			if days, err = strconv.Atoi(args[2]); err != nil || days < 0 {
-				log.Fatalf("hermex-admin: days %q: want a non-negative whole number", args[2])
-			}
-		}
-		pruneEML(dir, args[1], days)
-	case "backfill-previews":
-		if len(args) != 2 {
-			usage()
-		}
-		backfillPreviews(dir, args[1])
-	case "backup-mail":
-		if len(args) != 3 {
-			usage()
-		}
-		backupMail(dir, cfg, args[1], args[2])
-	case "export-dkim":
-		if len(args) != 2 {
-			usage()
-		}
-		exportDKIM(dir, args[1])
-	case "ldap-sync":
-		if len(args) != 2 {
-			usage()
-		}
-		orgID, err := strconv.ParseInt(args[1], 10, 64)
-		if err != nil {
-			log.Fatalf("hermex-admin: org id %q: %v", args[1], err)
-		}
-		lcfg, ok, err := dir.GetLDAPConfig(orgID)
-		if err != nil {
-			log.Fatalf("hermex-admin: ldap config: %v", err)
-		}
-		if !ok {
-			log.Fatalf("hermex-admin: organization %d has no LDAP configuration", orgID)
-		}
-		summary, err := ldapsync.Run(lcfg, ldapauth.New(), dir, cfg.MaildirFor,
-			func(f string, a ...any) { log.Printf("hermex-admin: "+f, a...) })
-		if err != nil {
-			log.Fatalf("hermex-admin: ldap sync: %v", err)
-		}
-		fmt.Printf("ldap-sync org %d: %s\n", orgID, summary)
-	case "grant-admin":
-		if len(args) < 3 || len(args) > 4 {
-			usage()
-		}
-		uid, ok, err := dir.UserID(args[1])
-		if err != nil {
-			log.Fatalf("hermex-admin: %v", err)
-		}
-		if !ok {
-			log.Fatalf("hermex-admin: unknown user: %s", args[1])
-		}
-		var scope int64
-		if len(args) == 4 {
-			if scope, err = strconv.ParseInt(args[3], 10, 64); err != nil {
-				log.Fatalf("hermex-admin: scope id %q: %v", args[3], err)
-			}
-		}
-		if err := dir.GrantAdminRole(uid, args[2], scope); err != nil {
-			log.Fatalf("hermex-admin: %v", err)
-		}
-		fmt.Printf("granted %s the %s admin role (scope %d)\n", args[1], args[2], scope)
-	case "list-sessions":
-		if len(args) != 2 {
-			usage()
-		}
-		listSessions(dir, args[1])
-	case "revoke-sessions":
-		if len(args) != 2 {
-			usage()
-		}
-		revokeSessions(dir, args[1])
-	case "serve":
-		if cfg.AdminSecret == "" {
-			log.Fatal("hermex-admin: admin_secret is required to serve the admin API")
-		}
-		addr := cfg.AdminAddr
-		if addr == "" {
-			addr = ":8081"
-		}
-		ldapVerifier := ldapauth.New()
-		dir.SetLDAPVerifier(ldapVerifier) // an administrator may be LDAP-mastered
-		logger, logClose := logging.Build("hermex-admin", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
-		srv := admin.NewServer(dir, cfg, []byte(cfg.AdminSecret))
-		// Failed-login lockout: read the stored tuning at startup and re-read it every
-		// minute, so an operator can tighten it during a credential-stuffing wave, or
-		// loosen it when legitimate users are being locked out, without a restart.
-		authlimit.Apply("hermex-admin", logger, srv.Limiter(), dir.GetLoginLockoutSettings)
-		go authlimit.RunMaintenance("hermex-admin", logger, srv.Limiter(), dir.GetLoginLockoutSettings)
-		srv.SetLogger(logger)           // a failing request records its real error here, not in the response
-		srv.SetLDAPSyncer(ldapVerifier) // enables the Directory Sync trigger
-		// The panel reports the quarantine digest as unable to send without this,
-		// rather than rendering the stored toggle as if it were the whole story.
-		srv.SetDigestSigning(cfg.DigestSecret != "")
-		var targets []admin.HealthTarget
-		for _, t := range cfg.HealthTargets {
-			targets = append(targets, admin.HealthTarget{Name: t.Name, URL: t.URL})
-		}
-		srv.SetHealthTargets(targets) // enables the Live status monitor
-		cleanups := []func() error{logClose}
-		var logReader *logging.Reader
-		if cfg.MongoURI != "" {
-			logReader, err = logging.NewReader(cfg.MongoURI, cfg.LogDatabase)
-			if err != nil {
-				log.Fatalf("hermex-admin: log reader: %v", err)
-			}
-			srv.SetLogReader(logReader) // enables the web UI log viewer
-			cleanups = append(cleanups, logReader.Close)
-		}
-		// Per-client HTTP request limiter: read the stored settings at startup and
-		// re-read them every minute, so an operator's change applies without a
-		// restart. It is off until an operator enables it, and any read failure
-		// leaves it as it is, so a settings problem never locks an operator out of
-		// the panel that turns it off.
-		httpLimiter := httplimit.NewLimiter()
-		httplimit.Apply("hermex-admin", logger, httpLimiter, dir.GetHTTPRateLimitSettings)
-		go httplimit.RunMaintenance("hermex-admin", logger, httpLimiter, dir.GetHTTPRateLimitSettings)
-		// TLS certificates come from the provider: the config-file cert as a
-		// fallback, overridden by an admin-uploaded cert the provider polls for, so
-		// a renewal applies without a restart. The panel where certificates are
-		// uploaded must not be the one place that needs a restart to serve them.
-		provider, err := tlscert.New(cfg, dir, logger)
-		if err != nil {
-			log.Fatalf("hermex-admin: tls: %v", err)
-		}
-		if provider.TLSEnabled() {
-			go provider.RunMaintenance()
-		}
-		hs, err := serve.New(addr, srv.Handler(), provider, logger, logging.Admin, httpLimiter)
-		if err != nil {
-			log.Fatalf("hermex-admin: %v", err)
-		}
-		logger.Info(logging.Admin, "daemon.startup", logging.Fields{"daemon": "admin", "addr": addr})
-		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
-		go srv.RunTaskWorker(ctx, 5*time.Second) // drains the async admin task queue
-		if logReader != nil {
-			// Enforce the operator's log-retention window by pruning the store.
-			go runLogRetention(ctx, dir, logReader, cfg.LogRetentionDays)
-		}
-		// Enforce the operator's Recoverable Items retention window across mailboxes.
-		go runRecoverableRetention(ctx, dir)
-		go runAdminSessionPrune(ctx, dir)
-		log.Printf("hermex-admin serving the admin API on %s", addr)
-		// The same liveness and readiness contract every other daemon serves. This
-		// one is the consumer of all of theirs for the Live monitor, and had none of
-		// its own: nothing outside it could tell a running panel from one whose
-		// directory connection is failing, since that surfaced only as individual
-		// request errors.
-		//
-		// The log store is deliberately not probed. It self-heals by spilling to disk
-		// and reconnecting, and no daemon depends on it at startup, so reporting the
-		// panel degraded when it is down would contradict that.
-		comps := append([]lifecycle.Component{hs},
-			health.Components(cfg.HealthAddr, "admin", adminHealthChecks(db, provider)...)...)
-		if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, cleanups...); err != nil {
-			log.Fatalf("hermex-admin: %v", err)
-		}
-	default:
+	cmd, ok := lookup(args[0])
+	if !ok || !cmd.accepts(len(args)) {
 		usage()
+	}
+	cmd.run(&cmdContext{dir: dir, cfg: cfg, db: db, args: args})
+}
+
+func runCreateDomain(c *cmdContext) {
+	if _, err := c.dir.CreateDomain(c.args[1], c.cfg.HomedirFor(c.args[1])); err != nil {
+		log.Fatalf("hermex-admin: %v", err)
+	}
+	fmt.Printf("domain %s created\n", c.args[1])
+}
+
+func runCreateUser(c *cmdContext) {
+	if _, err := c.dir.CreateUser(c.args[1], c.args[2], c.cfg.MaildirFor(c.args[1])); err != nil {
+		log.Fatalf("hermex-admin: %v", err)
+	}
+	fmt.Printf("user %s created\n", c.args[1])
+}
+
+func runCreateAlias(c *cmdContext) {
+	if err := c.dir.CreateAlias(c.args[1], c.args[2]); err != nil {
+		log.Fatalf("hermex-admin: %v", err)
+	}
+	fmt.Printf("alias %s -> %s created\n", c.args[1], c.args[2])
+}
+
+func runCreateContact(c *cmdContext) {
+	name := ""
+	if len(c.args) == 4 {
+		name = c.args[3]
+	}
+	if _, err := c.dir.CreateContact(c.args[1], name, c.args[2]); err != nil {
+		log.Fatalf("hermex-admin: %v", err)
+	}
+	fmt.Printf("contact %s created\n", c.args[1])
+}
+
+func runUpdateContact(c *cmdContext) {
+	found, err := c.dir.UpdateContact(c.args[1], c.args[2])
+	if err != nil {
+		log.Fatalf("hermex-admin: %v", err)
+	}
+	if !found {
+		log.Fatalf("hermex-admin: no such contact: %s", c.args[1])
+	}
+	fmt.Printf("contact %s updated\n", c.args[1])
+}
+
+func runDeleteContact(c *cmdContext) {
+	removed, err := c.dir.DeleteContact(c.args[1])
+	if err != nil {
+		log.Fatalf("hermex-admin: %v", err)
+	}
+	if !removed {
+		log.Fatalf("hermex-admin: no such contact: %s", c.args[1])
+	}
+	fmt.Printf("contact %s deleted\n", c.args[1])
+}
+
+func runListContacts(c *cmdContext) {
+	contacts, err := c.dir.ListContacts()
+	if err != nil {
+		log.Fatalf("hermex-admin: %v", err)
+	}
+	for _, ct := range contacts {
+		fmt.Printf("%s\t%s\t%s\n", ct.Address, ct.DisplayName, ct.Domain)
+	}
+}
+
+func runSweepContent(c *cmdContext) {
+	maildir, ok := c.dir.Resolve(c.args[1])
+	if !ok {
+		log.Fatalf("hermex-admin: unknown or unreceivable mailbox: %s", c.args[1])
+	}
+	store, err := objectstore.OpenExisting(maildir)
+	if err != nil {
+		log.Fatalf("hermex-admin: open mailbox %s: %v", maildir, err)
+	}
+	defer store.Close()
+	removed, err := store.SweepOrphanContent()
+	if errors.Is(err, objectstore.ErrMailboxBusy) {
+		// The sweep deletes content a live writer may be about to reference, so
+		// it declines rather than doing it anyway. Say which mailbox and what to
+		// do, since "busy" alone leaves the operator guessing.
+		log.Fatalf("hermex-admin: %s is open by a running daemon or another session; "+
+			"stop the mail services for this mailbox and retry", c.args[1])
+	}
+	if err != nil {
+		log.Fatalf("hermex-admin: sweep: %v", err)
+	}
+	fmt.Printf("swept %d orphan content file(s) from %s\n", removed, c.args[1])
+}
+
+func runPruneEML(c *cmdContext) {
+	days := defaultEMLPruneDays
+	if len(c.args) == 3 {
+		n, err := strconv.Atoi(c.args[2])
+		if err != nil || n < 0 {
+			log.Fatalf("hermex-admin: days %q: want a non-negative whole number", c.args[2])
+		}
+		days = n
+	}
+	pruneEML(c.dir, c.args[1], days)
+}
+
+func runLDAPSync(c *cmdContext) {
+	orgID, err := strconv.ParseInt(c.args[1], 10, 64)
+	if err != nil {
+		log.Fatalf("hermex-admin: org id %q: %v", c.args[1], err)
+	}
+	lcfg, ok, err := c.dir.GetLDAPConfig(orgID)
+	if err != nil {
+		log.Fatalf("hermex-admin: ldap config: %v", err)
+	}
+	if !ok {
+		log.Fatalf("hermex-admin: organization %d has no LDAP configuration", orgID)
+	}
+	summary, err := ldapsync.Run(lcfg, ldapauth.New(), c.dir, c.cfg.MaildirFor,
+		func(f string, a ...any) { log.Printf("hermex-admin: "+f, a...) })
+	if err != nil {
+		log.Fatalf("hermex-admin: ldap sync: %v", err)
+	}
+	fmt.Printf("ldap-sync org %d: %s\n", orgID, summary)
+}
+
+func runGrantAdmin(c *cmdContext) {
+	uid, ok, err := c.dir.UserID(c.args[1])
+	if err != nil {
+		log.Fatalf("hermex-admin: %v", err)
+	}
+	if !ok {
+		log.Fatalf("hermex-admin: unknown user: %s", c.args[1])
+	}
+	var scope int64
+	if len(c.args) == 4 {
+		if scope, err = strconv.ParseInt(c.args[3], 10, 64); err != nil {
+			log.Fatalf("hermex-admin: scope id %q: %v", c.args[3], err)
+		}
+	}
+	if err := c.dir.GrantAdminRole(uid, c.args[2], scope); err != nil {
+		log.Fatalf("hermex-admin: %v", err)
+	}
+	fmt.Printf("granted %s the %s admin role (scope %d)\n", c.args[1], c.args[2], scope)
+}
+
+// attachLogReader gives the panel its log viewer when a log store is
+// configured. Returns nil when none is: the panel serves without one, because
+// the log store is not something the mail path or the panel depends on.
+func attachLogReader(srv *admin.Server, cfg *config.Config) *logging.Reader {
+	if cfg.MongoURI == "" {
+		return nil
+	}
+	reader, err := logging.NewReader(cfg.MongoURI, cfg.LogDatabase)
+	if err != nil {
+		log.Fatalf("hermex-admin: log reader: %v", err)
+	}
+	srv.SetLogReader(reader)
+	return reader
+}
+
+// runServe runs the admin API HTTP server until the process is signalled.
+func runServe(c *cmdContext) {
+	cfg, dir, db := c.cfg, c.dir, c.db
+	if cfg.AdminSecret == "" {
+		log.Fatal("hermex-admin: admin_secret is required to serve the admin API")
+	}
+	addr := cfg.AdminAddr
+	if addr == "" {
+		addr = ":8081"
+	}
+	ldapVerifier := ldapauth.New()
+	dir.SetLDAPVerifier(ldapVerifier) // an administrator may be LDAP-mastered
+	logger, logClose := logging.Build("hermex-admin", cfg.MongoURI, cfg.LogDatabase, cfg.LogSpillDir)
+	srv := admin.NewServer(dir, cfg, []byte(cfg.AdminSecret))
+	// Failed-login lockout: read the stored tuning at startup and re-read it every
+	// minute, so an operator can tighten it during a credential-stuffing wave, or
+	// loosen it when legitimate users are being locked out, without a restart.
+	authlimit.Apply("hermex-admin", logger, srv.Limiter(), dir.GetLoginLockoutSettings)
+	go authlimit.RunMaintenance("hermex-admin", logger, srv.Limiter(), dir.GetLoginLockoutSettings)
+	srv.SetLogger(logger)           // a failing request records its real error here, not in the response
+	srv.SetLDAPSyncer(ldapVerifier) // enables the Directory Sync trigger
+	// The panel reports the quarantine digest as unable to send without this,
+	// rather than rendering the stored toggle as if it were the whole story.
+	srv.SetDigestSigning(cfg.DigestSecret != "")
+	var targets []admin.HealthTarget
+	for _, t := range cfg.HealthTargets {
+		targets = append(targets, admin.HealthTarget{Name: t.Name, URL: t.URL})
+	}
+	srv.SetHealthTargets(targets) // enables the Live status monitor
+	logReader := attachLogReader(srv, cfg)
+	cleanups := []func() error{logClose}
+	if logReader != nil {
+		cleanups = append(cleanups, logReader.Close)
+	}
+	// Per-client HTTP request limiter: read the stored settings at startup and
+	// re-read them every minute, so an operator's change applies without a
+	// restart. It is off until an operator enables it, and any read failure
+	// leaves it as it is, so a settings problem never locks an operator out of
+	// the panel that turns it off.
+	httpLimiter := httplimit.NewLimiter()
+	httplimit.Apply("hermex-admin", logger, httpLimiter, dir.GetHTTPRateLimitSettings)
+	go httplimit.RunMaintenance("hermex-admin", logger, httpLimiter, dir.GetHTTPRateLimitSettings)
+	// TLS certificates come from the provider: the config-file cert as a
+	// fallback, overridden by an admin-uploaded cert the provider polls for, so
+	// a renewal applies without a restart. The panel where certificates are
+	// uploaded must not be the one place that needs a restart to serve them.
+	provider, err := tlscert.New(cfg, dir, logger)
+	if err != nil {
+		log.Fatalf("hermex-admin: tls: %v", err)
+	}
+	if provider.TLSEnabled() {
+		go provider.RunMaintenance()
+	}
+	hs, err := serve.New(addr, srv.Handler(), provider, logger, logging.Admin, httpLimiter)
+	if err != nil {
+		log.Fatalf("hermex-admin: %v", err)
+	}
+	logger.Info(logging.Admin, "daemon.startup", logging.Fields{"daemon": "admin", "addr": addr})
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go srv.RunTaskWorker(ctx, 5*time.Second) // drains the async admin task queue
+	if logReader != nil {
+		// Enforce the operator's log-retention window by pruning the store.
+		go runLogRetention(ctx, dir, logReader, cfg.LogRetentionDays)
+	}
+	// Enforce the operator's Recoverable Items retention window across mailboxes.
+	go runRecoverableRetention(ctx, dir)
+	go runAdminSessionPrune(ctx, dir)
+	log.Printf("hermex-admin serving the admin API on %s", addr)
+	// The same liveness and readiness contract every other daemon serves. This
+	// one is the consumer of all of theirs for the Live monitor, and had none of
+	// its own: nothing outside it could tell a running panel from one whose
+	// directory connection is failing, since that surfaced only as individual
+	// request errors.
+	//
+	// The log store is deliberately not probed. It self-heals by spilling to disk
+	// and reconnecting, and no daemon depends on it at startup, so reporting the
+	// panel degraded when it is down would contradict that.
+	comps := append([]lifecycle.Component{hs},
+		health.Components(cfg.HealthAddr, "admin", adminHealthChecks(db, provider)...)...)
+	if err := lifecycle.Run(ctx, lifecycle.DefaultShutdownTimeout, comps, cleanups...); err != nil {
+		log.Fatalf("hermex-admin: %v", err)
 	}
 }
 
