@@ -16,7 +16,12 @@ import (
 // --- UpdateItem ---
 
 type updateItemRequest struct {
-	ItemChanges struct {
+	// MessageDisposition decides what happens after the update: SaveOnly (the
+	// default) leaves the message where it is, SendOnly and SendAndSaveCopy
+	// transmit it. A client that composes by creating a draft and then updating
+	// it sends through this attribute and never calls SendItem at all.
+	MessageDisposition string `xml:"MessageDisposition,attr"`
+	ItemChanges        struct {
 		Changes []itemChangeReq `xml:"ItemChange"`
 	} `xml:"ItemChanges"`
 }
@@ -87,18 +92,28 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, inner []byte, sess *ses
 		s.soapFault(w, "ErrorInvalidRequest", "UpdateItem: invalid request", err)
 		return
 	}
+	disp := req.MessageDisposition
+	if disp == "" {
+		disp = "SaveOnly"
+	}
+	if disp != "SaveOnly" && disp != "SendOnly" && disp != "SendAndSaveCopy" {
+		writeResponse(w, updateItemResponse{Messages: []itemResponseMessage{itemError("ErrorInvalidRequest")}})
+		return
+	}
 	cache := s.newStoreCache()
 	defer cache.closeAll()
 
 	var msgs []itemResponseMessage
 	for _, ch := range req.ItemChanges.Changes {
-		msgs = append(msgs, s.updateOne(cache, sess, ch))
+		msgs = append(msgs, s.updateOne(cache, sess, ch, disp))
 	}
 	writeResponse(w, updateItemResponse{Messages: msgs})
 }
 
-// updateOne applies one ItemChange and returns its response message.
-func (s *Server) updateOne(cache *storeCache, sess *session, ch itemChangeReq) itemResponseMessage {
+// updateOne applies one ItemChange and returns its response message. disp is the
+// request's MessageDisposition, which decides whether the updated message is
+// also transmitted.
+func (s *Server) updateOne(cache *storeCache, sess *session, ch itemChangeReq, disp string) itemResponseMessage {
 	id, err := oxews.DecodeItemID(ch.ItemID.ID)
 	if err != nil {
 		return itemError("ErrorInvalidRequest")
@@ -108,10 +123,8 @@ func (s *Server) updateOne(cache *storeCache, sess *session, ch itemChangeReq) i
 	if code != "" {
 		return itemError(code)
 	}
-	for _, sf := range ch.Updates.SetFields {
-		if !rewritesContent(sf.FieldURI.URI) && sf.FieldURI.URI != fieldIsRead {
-			return itemError("ErrorInvalidPropertySet")
-		}
+	if !everyFieldIsWritten(ch.Updates.SetFields) {
+		return itemError("ErrorInvalidPropertySet")
 	}
 	// The content rewrite runs first and yields a new uid, so the read flag is
 	// then set on the message that survives.
@@ -127,11 +140,37 @@ func (s *Server) updateOne(cache *storeCache, sess *session, ch itemChangeReq) i
 	if err := applyReadFlag(st, id, ch.Updates.SetFields); err != nil {
 		return itemError("ErrorItemNotFound")
 	}
+	// The send runs on the updated message, so the recipients and body the same
+	// request just wrote are the ones that go out. sendOne consumes the draft, so
+	// the response carries no item id: the message the client asked about is gone
+	// from where it was.
+	if sends(disp) {
+		rm := s.sendOne(cache, sess, newID, disp == "SendAndSaveCopy", int64(mapi.PrivateFIDSentItems))
+		if rm.Items == nil {
+			rm.Items = &itemsWrap{}
+		}
+		return rm
+	}
 	return itemResponseMessage{
 		ResponseClass: "Success", ResponseCode: "NoError",
 		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		Items: &itemsWrap{Messages: []oxews.Message{{ItemID: oxews.ItemIDElem{ID: newID, ChangeKey: oxews.ChangeKey(uint64(id.MessageID))}}}},
 	}
+}
+
+// everyFieldIsWritten reports whether the handler writes every field named.
+func everyFieldIsWritten(fields []setItemField) bool {
+	for _, sf := range fields {
+		if !rewritesContent(sf.FieldURI.URI) && sf.FieldURI.URI != fieldIsRead {
+			return false
+		}
+	}
+	return true
+}
+
+// sends reports whether a disposition transmits the message.
+func sends(disp string) bool {
+	return disp == "SendOnly" || disp == "SendAndSaveCopy"
 }
 
 // hasContentUpdate reports whether any field changes what the message says.
