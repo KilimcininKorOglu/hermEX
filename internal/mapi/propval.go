@@ -56,3 +56,16 @@ func (pv *PropertyValues) Set(tag PropTag, val any) {
 	}
 	*pv = append(*pv, TaggedPropVal{Tag: tag, Value: val})
 }
+
+// Remove drops the value stored for tag, if any. A caller that replaces one
+// representation of a value with another (an HTML body for a plain-text one)
+// needs the old one gone, because a set holding both leaves every reader free to
+// pick the stale half.
+func (pv *PropertyValues) Remove(tag PropTag) {
+	for i := range *pv {
+		if (*pv)[i].Tag == tag {
+			*pv = append((*pv)[:i], (*pv)[i+1:]...)
+			return
+		}
+	}
+}

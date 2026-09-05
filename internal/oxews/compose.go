@@ -35,22 +35,22 @@ func BuildOutgoing(in OutgoingInput) *oxcmail.Message {
 		props.Set(mapi.PrSentRepresentingEmailAddress, in.From)
 		props.Set(mapi.PrSentRepresentingAddrType, "SMTP")
 	}
-	props.Set(mapi.PrSubject, in.Subject)
+	oxcmail.SetSubject(&props, in.Subject)
 	props.Set(mapi.PrClientSubmitTime, mapi.UnixToNTTime(in.Sent))
 	props.Set(mapi.PrInternetMessageID, in.MessageID)
 	if strings.EqualFold(in.BodyType, "HTML") {
-		props.Set(mapi.PrHTML, []byte(toCRLF(in.Body)))
+		props.Set(mapi.PrHTML, []byte(ToCRLF(in.Body)))
 	} else {
-		props.Set(mapi.PrBody, toCRLF(in.Body))
+		props.Set(mapi.PrBody, ToCRLF(in.Body))
 	}
 	msg := &oxcmail.Message{Props: props}
-	msg.Recipients = append(msg.Recipients, outgoingBags(in.To, mapi.RecipTo)...)
-	msg.Recipients = append(msg.Recipients, outgoingBags(in.Cc, mapi.RecipCc)...)
+	msg.Recipients = append(msg.Recipients, RecipientBags(in.To, mapi.RecipTo)...)
+	msg.Recipients = append(msg.Recipients, RecipientBags(in.Cc, mapi.RecipCc)...)
 	return msg
 }
 
-// outgoingBags builds recipient property bags from mailboxes.
-func outgoingBags(boxes []Mailbox, rcptType int32) []mapi.PropertyValues {
+// RecipientBags builds recipient property bags from mailboxes.
+func RecipientBags(boxes []Mailbox, rcptType int32) []mapi.PropertyValues {
 	var out []mapi.PropertyValues
 	for _, b := range boxes {
 		if b.EmailAddress == "" {
@@ -69,8 +69,8 @@ func outgoingBags(boxes []Mailbox, rcptType int32) []mapi.PropertyValues {
 	return out
 }
 
-// toCRLF normalizes line endings to CRLF for the wire/store.
-func toCRLF(s string) string {
+// ToCRLF normalizes line endings to CRLF for the wire/store.
+func ToCRLF(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	return strings.ReplaceAll(s, "\n", "\r\n")
 }

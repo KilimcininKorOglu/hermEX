@@ -9,6 +9,7 @@ import (
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
+	"hermex/internal/oxcmail"
 	"hermex/internal/oxews"
 )
 
@@ -31,9 +32,43 @@ type setItemField struct {
 	FieldURI struct {
 		URI string `xml:"FieldURI,attr"`
 	} `xml:"FieldURI"`
-	Message struct {
-		IsRead string `xml:"IsRead"`
-	} `xml:"Message"`
+	Message updateMessageFields `xml:"Message"`
+}
+
+// updateMessageFields is the <t:Message> a SetItemField carries. Every update
+// repeats the whole element, so only the field the FieldURI names is read.
+type updateMessageFields struct {
+	Subject string `xml:"Subject"`
+	Body    struct {
+		Type    string `xml:"BodyType,attr"`
+		Content string `xml:",chardata"`
+	} `xml:"Body"`
+	ToRecipients  mailboxList `xml:"ToRecipients"`
+	CcRecipients  mailboxList `xml:"CcRecipients"`
+	BccRecipients mailboxList `xml:"BccRecipients"`
+	IsRead        string      `xml:"IsRead"`
+}
+
+// The item fields UpdateItem writes. A field outside this set is refused rather
+// than accepted and dropped, because a client that is told its edit succeeded
+// has no way to learn that the message still holds the old value.
+const (
+	fieldSubject = "item:Subject"
+	fieldBody    = "item:Body"
+	fieldTo      = "message:ToRecipients"
+	fieldCc      = "message:CcRecipients"
+	fieldBcc     = "message:BccRecipients"
+	fieldIsRead  = "message:IsRead"
+)
+
+// rewritesContent reports whether a field changes what the message says, as
+// opposed to the read flag, which is index state and needs no rewrite.
+func rewritesContent(uri string) bool {
+	switch uri {
+	case fieldSubject, fieldBody, fieldTo, fieldCc, fieldBcc:
+		return true
+	}
+	return false
 }
 
 type updateItemResponse struct {
@@ -41,9 +76,11 @@ type updateItemResponse struct {
 	Messages []itemResponseMessage `xml:"ResponseMessages>UpdateItemResponseMessage"`
 }
 
-// handleUpdateItem answers UpdateItem. v1 honors the message:IsRead field
-// (read/unread toggle → SetMessageFlags); other SetItemField updates are
-// accepted but ignored. Categories and arbitrary property updates are deferred.
+// handleUpdateItem answers UpdateItem ([MS-OXWSCORE] 3.1.4.9). It writes the
+// subject, the body, the To/Cc/Bcc recipients and the read flag, which is what a
+// client editing a draft sends. A field it does not write is REFUSED, never
+// accepted and dropped: a client told its edit succeeded has no way to learn
+// that the message still holds the old value.
 func (s *Server) handleUpdateItem(w http.ResponseWriter, inner []byte, sess *session) {
 	var req updateItemRequest
 	if err := xml.Unmarshal(inner, &req); err != nil {
@@ -55,48 +92,156 @@ func (s *Server) handleUpdateItem(w http.ResponseWriter, inner []byte, sess *ses
 
 	var msgs []itemResponseMessage
 	for _, ch := range req.ItemChanges.Changes {
-		id, err := oxews.DecodeItemID(ch.ItemID.ID)
-		if err != nil {
-			msgs = append(msgs, itemError("ErrorInvalidRequest"))
-			continue
-		}
-		// The id self-encodes its mailbox; a delegated item is gated on edit access.
-		st, code := cache.openForItem(sess, id, mapi.FrightsEditAny)
-		if code != "" {
-			msgs = append(msgs, itemError(code))
-			continue
-		}
-		failed := false
-		for _, sf := range ch.Updates.SetFields {
-			if sf.FieldURI.URI != "message:IsRead" {
-				continue
-			}
-			flags, err := st.MessageFlags(id.FolderID, id.UID)
-			if err != nil {
-				failed = true
-				break
-			}
-			if strings.EqualFold(strings.TrimSpace(sf.Message.IsRead), "true") {
-				flags |= objectstore.FlagSeen
-			} else {
-				flags &^= objectstore.FlagSeen
-			}
-			if err := st.SetMessageFlags(id.FolderID, id.UID, flags); err != nil {
-				failed = true
-				break
-			}
-		}
-		if failed {
-			msgs = append(msgs, itemError("ErrorItemNotFound"))
-			continue
-		}
-		msgs = append(msgs, itemResponseMessage{
-			ResponseClass: "Success", ResponseCode: "NoError",
-			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-			Items: &itemsWrap{Messages: []oxews.Message{{ItemID: oxews.ItemIDElem{ID: ch.ItemID.ID, ChangeKey: oxews.ChangeKey(uint64(id.MessageID))}}}},
-		})
+		msgs = append(msgs, s.updateOne(cache, sess, ch))
 	}
 	writeResponse(w, updateItemResponse{Messages: msgs})
+}
+
+// updateOne applies one ItemChange and returns its response message.
+func (s *Server) updateOne(cache *storeCache, sess *session, ch itemChangeReq) itemResponseMessage {
+	id, err := oxews.DecodeItemID(ch.ItemID.ID)
+	if err != nil {
+		return itemError("ErrorInvalidRequest")
+	}
+	// The id self-encodes its mailbox; a delegated item is gated on edit access.
+	st, code := cache.openForItem(sess, id, mapi.FrightsEditAny)
+	if code != "" {
+		return itemError(code)
+	}
+	for _, sf := range ch.Updates.SetFields {
+		if !rewritesContent(sf.FieldURI.URI) && sf.FieldURI.URI != fieldIsRead {
+			return itemError("ErrorInvalidPropertySet")
+		}
+	}
+	// The content rewrite runs first and yields a new uid, so the read flag is
+	// then set on the message that survives.
+	newID := ch.ItemID.ID
+	if hasContentUpdate(ch.Updates.SetFields) {
+		info, err := rewriteItem(st, id, ch.Updates.SetFields)
+		if err != nil {
+			return itemError("ErrorItemNotFound")
+		}
+		id.MessageID, id.UID = info.ID, info.UID
+		newID = oxews.EncodeItemID(id)
+	}
+	if err := applyReadFlag(st, id, ch.Updates.SetFields); err != nil {
+		return itemError("ErrorItemNotFound")
+	}
+	return itemResponseMessage{
+		ResponseClass: "Success", ResponseCode: "NoError",
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		Items: &itemsWrap{Messages: []oxews.Message{{ItemID: oxews.ItemIDElem{ID: newID, ChangeKey: oxews.ChangeKey(uint64(id.MessageID))}}}},
+	}
+}
+
+// hasContentUpdate reports whether any field changes what the message says.
+func hasContentUpdate(fields []setItemField) bool {
+	for _, sf := range fields {
+		if rewritesContent(sf.FieldURI.URI) {
+			return true
+		}
+	}
+	return false
+}
+
+// applyReadFlag writes the read flag when the request names it.
+func applyReadFlag(st *objectstore.Store, id oxews.ItemID, fields []setItemField) error {
+	for _, sf := range fields {
+		if sf.FieldURI.URI != fieldIsRead {
+			continue
+		}
+		flags, err := st.MessageFlags(id.FolderID, id.UID)
+		if err != nil {
+			return err
+		}
+		if strings.EqualFold(strings.TrimSpace(sf.Message.IsRead), "true") {
+			flags |= objectstore.FlagSeen
+		} else {
+			flags &^= objectstore.FlagSeen
+		}
+		if err := st.SetMessageFlags(id.FolderID, id.UID, flags); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// rewriteItem applies the content updates and stores the result in place of the
+// original, returning the new message. The stored form is rebuilt through
+// oxcmail.Export, the one proven outbound path, so an edited draft serializes
+// exactly as a composed one does.
+//
+// The message is replaced rather than patched because a stored message is its
+// serialized bytes; the same delete-then-append the webmail draft autosave uses.
+// The new id is returned to the client in the response, so the client follows
+// the message rather than holding an id that no longer resolves.
+func rewriteItem(st *objectstore.Store, id oxews.ItemID, fields []setItemField) (objectstore.MessageInfo, error) {
+	msg, err := st.OpenMessage(id.MessageID)
+	if err != nil {
+		return objectstore.MessageInfo{}, err
+	}
+	for _, sf := range fields {
+		applyField(msg, sf)
+	}
+	oxcmail.EnsureMessageID(&msg.Props)
+	raw, err := oxcmail.Export(msg, oxcmail.Options{Resolver: st.GetNamedPropIDs})
+	if err != nil {
+		return objectstore.MessageInfo{}, err
+	}
+	flags, date := int64(0), time.Now()
+	if info, err := st.MessageByUID(id.FolderID, id.UID); err == nil {
+		flags, date = info.Flags, info.InternalDate
+	}
+	// The replacement is filed before the original is dropped, so a failure
+	// between the two leaves a duplicate rather than nothing at all.
+	info, err := st.AppendMessage(id.FolderID, raw, date, flags)
+	if err != nil {
+		return objectstore.MessageInfo{}, err
+	}
+	if err := st.DeleteMessage(id.FolderID, id.UID); err != nil {
+		return objectstore.MessageInfo{}, err
+	}
+	return info, nil
+}
+
+// applyField writes one update onto the stored message.
+func applyField(msg *oxcmail.Message, sf setItemField) {
+	switch sf.FieldURI.URI {
+	case fieldSubject:
+		oxcmail.SetSubject(&msg.Props, sf.Message.Subject)
+	case fieldBody:
+		setBody(msg, sf.Message.Body.Type, sf.Message.Body.Content)
+	case fieldTo:
+		setRecipients(msg, mapi.RecipTo, sf.Message.ToRecipients)
+	case fieldCc:
+		setRecipients(msg, mapi.RecipCc, sf.Message.CcRecipients)
+	case fieldBcc:
+		setRecipients(msg, mapi.RecipBcc, sf.Message.BccRecipients)
+	}
+}
+
+// setBody replaces the body in the requested format and removes the other one,
+// because a message carrying both would export the stale half.
+func setBody(msg *oxcmail.Message, bodyType, content string) {
+	if strings.EqualFold(bodyType, "HTML") {
+		msg.Props.Set(mapi.PrHTML, []byte(oxews.ToCRLF(content)))
+		msg.Props.Remove(mapi.PrBody)
+		return
+	}
+	msg.Props.Set(mapi.PrBody, oxews.ToCRLF(content))
+	msg.Props.Remove(mapi.PrHTML)
+}
+
+// setRecipients replaces every recipient of one class, leaving the other classes
+// alone: a request that names only ToRecipients must not drop the Cc list.
+func setRecipients(msg *oxcmail.Message, rcptType int32, list mailboxList) {
+	kept := make([]mapi.PropertyValues, 0, len(msg.Recipients))
+	for _, bag := range msg.Recipients {
+		if rt, _ := bag.Get(mapi.PrRecipientType); rt != rcptType {
+			kept = append(kept, bag)
+		}
+	}
+	msg.Recipients = append(kept, oxews.RecipientBags(toMailboxes(list), rcptType)...)
 }
 
 // --- DeleteItem ---

@@ -264,20 +264,28 @@ func copyProp(msg *Message, dst, src mapi.PropTag) {
 	}
 }
 
+// SetSubject writes a subject onto a stored message the way an imported one
+// carries it: PR_SUBJECT plus the prefix/normalized pair Export reads back.
+// Setting PR_SUBJECT alone does NOT change the exported Subject, because Export
+// prefers the pair when it is present, so every writer goes through here.
+func SetSubject(props *mapi.PropertyValues, subject string) {
+	subject = strings.TrimSpace(subject)
+	props.Set(mapi.PrSubject, subject)
+	if prefix, normalized, ok := splitSubjectPrefix(subject); ok {
+		props.Set(mapi.PrSubjectPrefix, prefix)
+		props.Set(mapi.PrNormalizedSubject, normalized)
+		return
+	}
+	props.Set(mapi.PrSubjectPrefix, "")
+	props.Set(mapi.PrNormalizedSubject, subject)
+}
+
 // parseSubject sets PR_SUBJECT and splits a leading prefix ("RE: ", "FW: ")
 // into PR_SUBJECT_PREFIX and PR_NORMALIZED_SUBJECT, per MS-OXCMAIL subject
 // parsing plus the no-prefix defaults: both the prefix and the normalized
 // subject are always set.
 func parseSubject(field string, props *mapi.PropertyValues) {
-	subject := decodeHeaderWord(field)
-	props.Set(mapi.PrSubject, subject)
-	if prefix, normalized, ok := splitSubjectPrefix(subject); ok {
-		props.Set(mapi.PrSubjectPrefix, prefix)
-		props.Set(mapi.PrNormalizedSubject, normalized)
-	} else {
-		props.Set(mapi.PrSubjectPrefix, "")
-		props.Set(mapi.PrNormalizedSubject, subject)
-	}
+	SetSubject(props, decodeHeaderWord(field))
 }
 
 // splitSubjectPrefix detects a "<label>: " prefix where label is 1-3 characters,
