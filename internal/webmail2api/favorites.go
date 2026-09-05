@@ -75,7 +75,13 @@ func (s *Server) handleToggleFavorite(w http.ResponseWriter, r *http.Request) {
 func (s *Server) retitleFavorite(st *objectstore.Store, mailbox, oldName, newName string) {
 	unlock := s.lockSettings(mailbox)
 	defer unlock()
-	m := sharedSettings(st)
+	m, loaded := settingsForWrite(st)
+	if !loaded {
+		// The pin is upkeep on a folder operation that already succeeded; writing
+		// a blob assembled from an unreadable one would cost far more than a stale
+		// pin.
+		return
+	}
 	fav := readFavorites(m)
 	out := make([]string, 0, len(fav))
 	changed := false

@@ -173,7 +173,7 @@ func TestCategoryListSeedsFromTheOlderList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := sharedSettings(st)
+	m, _ := sharedSettings(st)
 	m["categories"] = json.RawMessage(`[{"name":"Old","color":"#e7a1a2"}]`)
 	if err := saveSharedSettings(st, m); err != nil {
 		t.Fatal(err)

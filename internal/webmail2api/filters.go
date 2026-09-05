@@ -211,7 +211,8 @@ type runFiltersRequest struct {
 // fall back to running everything.
 func ruleIDForFilter(st *objectstore.Store, filterID string) (int64, bool) {
 	seq := -1
-	for i, f := range readFilters(sharedSettings(st)) {
+	stored, _ := sharedSettings(st)
+	for i, f := range readFilters(stored) {
 		if f.ID == filterID {
 			seq = i
 			break

@@ -54,7 +54,7 @@ func TestSettingsConcurrentPutsDoNotLoseUpdates(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer st2.Close()
-	got := sharedSettings(st2)
+	got, _ := sharedSettings(st2)
 	missing := 0
 	for i := range n {
 		if _, ok := got[fmt.Sprintf("key%d", i)]; !ok {

@@ -2,6 +2,7 @@ package webmail2api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
@@ -17,16 +18,42 @@ import (
 // fields the server-rendered webmail manages (composeFormat, density, ...). Both
 // clients share categories and signatures this way, the user's real settings,
 // not a per-client fork.
-func sharedSettings(st *objectstore.Store) map[string]json.RawMessage {
-	m := map[string]json.RawMessage{}
-	if props, err := st.GetStoreProperties(mapi.PrWebmailSettings); err == nil {
-		if v, ok := props.Get(mapi.PrWebmailSettings); ok {
-			if str, ok := v.(string); ok && str != "" {
-				_ = json.Unmarshal([]byte(str), &m)
-			}
-		}
+// It reports ok=false when the stored blob could not be read or parsed, which is
+// NOT the same as a mailbox that has none. Both used to answer with an empty
+// map, and a write then put that empty map back, so one unreadable read cost the
+// user every favourite, category, signature and display setting they had, and
+// the write reported success.
+func sharedSettings(st *objectstore.Store) (m map[string]json.RawMessage, ok bool) {
+	m = map[string]json.RawMessage{}
+	props, err := st.GetStoreProperties(mapi.PrWebmailSettings)
+	if err != nil {
+		st.LogSwallowedError("settings.read", err)
+		return nil, false
 	}
-	return m
+	v, has := props.Get(mapi.PrWebmailSettings)
+	if !has {
+		return m, true // a mailbox that has never stored settings
+	}
+	str, isStr := v.(string)
+	if !isStr {
+		st.LogSwallowedError("settings.read", fmt.Errorf("stored settings are %T, not a string", v))
+		return nil, false
+	}
+	if str == "" {
+		return m, true
+	}
+	if err := json.Unmarshal([]byte(str), &m); err != nil {
+		st.LogSwallowedError("settings.parse", err)
+		return nil, false
+	}
+	return m, true
+}
+
+// settingsForWrite loads the blob for a read-modify-write. It refuses when the
+// stored blob is unreadable, because writing back what was assembled from
+// nothing replaces the user's settings with only the key being set.
+func settingsForWrite(st *objectstore.Store) (map[string]json.RawMessage, bool) {
+	return sharedSettings(st)
 }
 
 func saveSharedSettings(st *objectstore.Store, m map[string]json.RawMessage) error {
@@ -68,7 +95,13 @@ func (s *Server) withSettings(w http.ResponseWriter, r *http.Request, fn func(st
 	// change (or have this one overwrite it).
 	unlock := s.lockSettings(c.Mailbox)
 	defer unlock()
-	m := sharedSettings(st)
+	m, loaded := sharedSettings(st)
+	if !loaded {
+		// Reading failed, so what is stored is unknown. Handing an empty map to a
+		// handler that saves would write the user's settings away.
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "settings unavailable"})
+		return
+	}
 	resp, save := fn(st, m)
 	if save {
 		if err := saveSharedSettings(st, m); err != nil {
@@ -290,6 +323,29 @@ func (s *Server) handlePutAppearanceSettings(w http.ResponseWriter, r *http.Requ
 	})
 }
 
+// setOnboardedFlag records that the caller finished first-run onboarding. It
+// leaves the blob alone when it could not be read, because writing back what was
+// assembled from an unreadable one replaces the user's settings.
+func setOnboardedFlag(mailbox string, done bool) {
+	st, err := objectstore.Open(mailbox)
+	if err != nil {
+		return
+	}
+	defer st.Close()
+	m, loaded := settingsForWrite(st)
+	if !loaded {
+		return
+	}
+	b, err := json.Marshal(done)
+	if err != nil {
+		return
+	}
+	m["onboarded"] = b
+	if err := saveSharedSettings(st, m); err != nil {
+		st.LogSwallowedError("settings.onboarded", err)
+	}
+}
+
 // mustJSON marshals v, returning nil on error (the input is a controlled struct).
 func mustJSON(v any) json.RawMessage {
 	b, err := json.Marshal(v)
@@ -485,7 +541,8 @@ func (s *Server) handlePutCategories(w http.ResponseWriter, r *http.Request) {
 // safeSenders reads the shared safe-sender allowlist from the settings blob.
 func safeSenders(st *objectstore.Store) []string {
 	list := []string{}
-	if raw, ok := sharedSettings(st)["safeSenders"]; ok {
+	stored, _ := sharedSettings(st)
+	if raw, ok := stored["safeSenders"]; ok {
 		_ = json.Unmarshal(raw, &list)
 	}
 	return list
@@ -741,7 +798,7 @@ func (s *Server) userLocale(email string) (timezone, locale string) {
 // The flag lives in the shared webmail settings blob; an absent flag means a
 // fresh account that has not onboarded yet, so the onboarding gate still fires.
 func onboardedFlag(st *objectstore.Store) bool {
-	m := sharedSettings(st)
+	m, _ := sharedSettings(st)
 	if raw, ok := m["onboarded"]; ok {
 		var b bool
 		if json.Unmarshal(raw, &b) == nil {
@@ -856,14 +913,7 @@ func (s *Server) handlePutProfile(w http.ResponseWriter, r *http.Request) {
 	// The onboarded flag lives in the shared webmail settings blob (per-mailbox
 	// store), set true when the user finishes the first-run onboarding step.
 	if prof.Onboarded != nil {
-		if st, err := objectstore.Open(c.Mailbox); err == nil {
-			m := sharedSettings(st)
-			if b, err := json.Marshal(*prof.Onboarded); err == nil {
-				m["onboarded"] = b
-				_ = saveSharedSettings(st, m)
-			}
-			_ = st.Close()
-		}
+		setOnboardedFlag(c.Mailbox, *prof.Onboarded)
 	}
 	// Return the re-read profile so the SPA reflects the persisted directory state.
 	s.handleGetProfile(w, r)
