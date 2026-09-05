@@ -554,12 +554,12 @@
       "externalMessageHelp": "If left blank, the internal reply is used for external senders too.",
       "startDate": "Start date (optional)",
       "endDate": "End date (optional)",
-      "subjectRequired": "Subject is required when auto-reply is enabled",
       "messageRequired": "Message is required when auto-reply is enabled",
       "saved": "Auto-reply saved",
       "saveFailed": "Failed to save auto-reply",
       "disabled": "Auto-reply disabled",
-      "disableFailed": "Failed to disable auto-reply"
+      "disableFailed": "Failed to disable auto-reply",
+      "subjectOptional": "Leave empty to use the reply subject the server composes from the message being answered."
     },
     "signature": {
       "title": "Signatures",

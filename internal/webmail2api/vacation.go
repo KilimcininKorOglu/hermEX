@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"time"
 
+	"hermex/internal/directory"
 	"hermex/internal/objectstore"
 )
 
@@ -18,6 +19,10 @@ type vacationJSON struct {
 	Audience        string `json:"audience,omitempty"`
 	StartDate       string `json:"start_date,omitempty"`
 	EndDate         string `json:"end_date,omitempty"`
+	// SubjectPrefix is READ-ONLY: the operator's fallback wording, served so the
+	// form can show what an empty subject will produce. A value the client sends
+	// back is ignored, because this is not the user's setting to change.
+	SubjectPrefix string `json:"subject_prefix,omitempty"`
 }
 
 func oofToVacation(o objectstore.OOFSettings) vacationJSON {
@@ -87,7 +92,27 @@ func (s *Server) handleGetVacation(w http.ResponseWriter, r *http.Request) {
 	}
 	defer st.Close()
 	o, _ := st.GetOOFSettings()
-	writeJSON(w, http.StatusOK, oofToVacation(o))
+	v := oofToVacation(o)
+	v.SubjectPrefix = s.autoReplyPrefix()
+	writeJSON(w, http.StatusOK, v)
+}
+
+// autoReplyPrefix returns the operator's out-of-office subject prefix, or the
+// built-in default when the directory cannot report one. It is read per request
+// rather than cached, because the value is a single indexed row and the endpoint
+// is opened once per visit to the settings page.
+func (s *Server) autoReplyPrefix() string {
+	rd, ok := s.auth.(interface {
+		GetAutoReplySettings() (directory.AutoReplySettings, bool, error)
+	})
+	if !ok {
+		return directory.DefaultAutoReplySubjectPrefix
+	}
+	cfg, found, err := rd.GetAutoReplySettings()
+	if err != nil || !found || cfg.SubjectPrefix == "" {
+		return directory.DefaultAutoReplySubjectPrefix
+	}
+	return cfg.SubjectPrefix
 }
 
 func (s *Server) handlePutVacation(w http.ResponseWriter, r *http.Request) {
@@ -111,6 +136,9 @@ func (s *Server) handlePutVacation(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save"})
 		return
 	}
+	// The prefix is the operator's, not the user's: whatever the client sent is
+	// replaced by the stored one, so the echo cannot report a value nobody saved.
+	v.SubjectPrefix = s.autoReplyPrefix()
 	writeJSON(w, http.StatusOK, v)
 }
 

@@ -666,10 +666,9 @@ export function SettingsPage() {
   }, [loadVacation])
 
   const handleVacationSave = async () => {
-    if (vacation.enabled && !vacation.subject.trim()) {
-      toast.error(t("settings.autoReply.subjectRequired"))
-      return
-    }
+    // The subject is optional on purpose: EWS and ActiveSync carry no subject
+    // field, so an empty one is the normal state for a mailbox configured from
+    // Outlook or a phone, and the server composes the subject for it.
     if (vacation.enabled && !vacation.message.trim()) {
       toast.error(t("settings.autoReply.messageRequired"))
       return
@@ -1648,9 +1647,19 @@ export function SettingsPage() {
                 id="vacation-subject"
                 value={vacation.subject}
                 onChange={(e) => setVacation({ ...vacation, subject: e.target.value })}
-                placeholder={t("settings.autoReply.subjectPlaceholder")}
+                // The placeholder is what an empty field actually produces: the
+                // server's prefix followed by the subject of the message it
+                // answers.
+                placeholder={
+                  vacation.subject_prefix
+                    ? `${vacation.subject_prefix}: ...`
+                    : t("settings.autoReply.subjectPlaceholder")
+                }
                 disabled={!vacation.enabled}
               />
+              <p className="text-xs text-muted-foreground">
+                {t("settings.autoReply.subjectOptional")}
+              </p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="vacation-audience">{t("settings.autoReply.audience")}</Label>

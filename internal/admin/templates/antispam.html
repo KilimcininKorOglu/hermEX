@@ -64,6 +64,16 @@
 </form>
 </div>{{end}}
 
+{{define "autoreply-panel"}}<div id="autoreply-panel">
+{{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
+<p>An out-of-office reply is sent under the subject the user configured. EWS and ActiveSync carry no subject field, so a mailbox turned out of office from Outlook or a phone has none, and the reply uses this prefix followed by the subject of the message it answers.</p>
+<p class="hint">A mailbox that stores its own subject keeps it; this is only the fallback. Leave the field empty to restore the built-in wording.</p>
+<form hx-post="/admin/ui/antispam/autoreply" hx-target="#autoreply-panel" hx-swap="outerHTML" hx-headers='{"X-CSRF-Token": "{{.CSRF}}"}'>
+<p>Subject prefix: <input type="text" name="subject_prefix" value="{{.AutoReplyPrefix}}" size="30" maxlength="128"></p>
+<button type="submit">Save settings</button>
+</form>
+</div>{{end}}
+
 {{define "relay-panel"}}<div id="relay-panel">
 {{if .Notice}}<p class="ok">{{.Notice}}</p>{{end}}
 <p>When delivery to a remote server fails transiently, the message is retried with an exponential backoff (the base delay below, doubling each attempt) until it succeeds or the attempt limit is reached, after which a non-delivery report is returned to the sender.</p>

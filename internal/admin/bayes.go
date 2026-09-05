@@ -158,6 +158,8 @@ func (s *Server) antispamPageData(r *http.Request, notice string) map[string]any
 		data["OutboundWindow"] = ob.WindowSeconds
 	}
 
+	data["AutoReplyPrefix"] = s.autoReplyPrefix()
+
 	// Outbound delivery retry policy: the stored values, or the relay worker's built-in
 	// defaults (300 s base backoff, 10 attempts) when none has been saved.
 	data["RelayBackoff"], data["RelayMaxAttempts"] = 300, 10
@@ -282,6 +284,39 @@ func (s *Server) handleUISaveOutbound(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, "outbound-panel", s.antispamPageData(r, "Outbound settings saved, the MTA applies them within a minute, no restart."))
+}
+
+// autoReplyPrefix returns the stored out-of-office subject prefix, or the MTA's
+// built-in default when none has been saved or the read fails. The form shows
+// what the MTA would actually use, so an unreadable row must not render as an
+// empty field the operator then saves.
+func (s *Server) autoReplyPrefix() string {
+	ar, found, err := s.dir.GetAutoReplySettings()
+	if err != nil || !found || ar.SubjectPrefix == "" {
+		return directory.DefaultAutoReplySubjectPrefix
+	}
+	return ar.SubjectPrefix
+}
+
+// handleUISaveAutoReply persists the out-of-office subject prefix. It is used
+// for every mailbox that stores no subject of its own, which is every mailbox
+// configured over EWS or ActiveSync, since neither protocol carries a subject
+// field. An empty prefix restores the built-in default rather than sending
+// replies with no subject at all.
+func (s *Server) handleUISaveAutoReply(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.uiAuthorized(w, r); !ok {
+		return
+	}
+	prefix := strings.TrimSpace(r.PostFormValue("subject_prefix"))
+	if prefix == "" {
+		prefix = directory.DefaultAutoReplySubjectPrefix
+	}
+	if err := s.dir.SetAutoReplySettings(directory.AutoReplySettings{SubjectPrefix: prefix}); err != nil {
+		s.render(w, "autoreply-panel", s.antispamPageData(r, s.notice("Could not save the auto-reply settings.", err)))
+		return
+	}
+	s.render(w, "autoreply-panel", s.antispamPageData(r,
+		"Auto-reply settings saved, the MTA applies them within a minute, no restart."))
 }
 
 // handleUISaveRelay persists the outbound delivery retry policy (base backoff in

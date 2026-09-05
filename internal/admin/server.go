@@ -134,6 +134,8 @@ type Directory interface {
 	SetRecoverableSettings(directory.RecoverableSettings) error
 	GetOutboundSettings() (directory.OutboundSettings, bool, error)
 	SetOutboundSettings(directory.OutboundSettings) error
+	GetAutoReplySettings() (directory.AutoReplySettings, bool, error)
+	SetAutoReplySettings(directory.AutoReplySettings) error
 	GetRelaySettings() (directory.RelaySettings, bool, error)
 	SetRelaySettings(directory.RelaySettings) error
 	GetDigestSettings() (directory.DigestSettings, bool, error)
@@ -410,6 +412,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /admin/ui/antispam/ratelimit", s.handleUISaveRateLimit)
 	mux.HandleFunc("POST /admin/ui/antispam/message-size", s.handleUISaveMessageSize)
 	mux.HandleFunc("POST /admin/ui/antispam/outbound", s.handleUISaveOutbound)
+	mux.HandleFunc("POST /admin/ui/antispam/autoreply", s.handleUISaveAutoReply)
 	mux.HandleFunc("POST /admin/ui/antispam/relay", s.handleUISaveRelay)
 	mux.HandleFunc("POST /admin/ui/antispam/digest", s.handleUISaveDigest)
 	mux.HandleFunc("GET /admin/ui/spam-history", s.handleUISpamHistory)

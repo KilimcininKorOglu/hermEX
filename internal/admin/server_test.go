@@ -62,6 +62,8 @@ type fakeDir struct {
 	recoverableFound   bool
 	outbound           directory.OutboundSettings
 	outboundFound      bool
+	autoReply          directory.AutoReplySettings
+	autoReplyFound     bool
 	relay              directory.RelaySettings
 	relayFound         bool
 	digest             directory.DigestSettings
@@ -572,6 +574,13 @@ func (f *fakeDir) SetRelaySettings(s directory.RelaySettings) error {
 }
 func (f *fakeDir) SetOutboundSettings(s directory.OutboundSettings) error {
 	f.outbound, f.outboundFound = s, true
+	return nil
+}
+func (f *fakeDir) GetAutoReplySettings() (directory.AutoReplySettings, bool, error) {
+	return f.autoReply, f.autoReplyFound, nil
+}
+func (f *fakeDir) SetAutoReplySettings(s directory.AutoReplySettings) error {
+	f.autoReply, f.autoReplyFound = s, true
 	return nil
 }
 func (f *fakeDir) GetDigestSettings() (directory.DigestSettings, bool, error) {

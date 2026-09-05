@@ -93,6 +93,11 @@ func sendAutoReply(accounts directory.Accounts, st *objectstore.Store, selfAddr,
 	if !send {
 		return nil
 	}
+	// A mailbox that turned out of office on from EWS or ActiveSync has no stored
+	// subject, because neither protocol carries one. The reply then says what it
+	// is and which message it answers, which is what Outlook shows for the same
+	// mailbox on an Exchange server.
+	subject = composeAutoReplySubject(subject, msg.Header.Get("Subject"))
 
 	reply, err := buildAutoReply(selfAddr, to, subject, body, msg.Header.Get("Message-ID"), received)
 	if err != nil {
@@ -234,9 +239,54 @@ func isRoleMailbox(addr string) bool {
 // hand-built rather than routed through oxcmail.Export because Export emits a
 // fixed header set with no way to carry Auto-Submitted, the one header that
 // breaks the reply loop.
+// maxOriginalSubject bounds how much of the incoming subject the reply repeats.
+// The value is attacker-controlled and unbounded on the wire, and a header line
+// that long serves nobody.
+const maxOriginalSubject = 200
+
+// composeAutoReplySubject returns the subject the auto-reply is sent under. A
+// mailbox that stored its own subject keeps it verbatim. One that did not, which
+// is every mailbox configured over EWS or ActiveSync, gets the operator's prefix
+// followed by the subject of the message being answered, so the sender can tell
+// which of their messages the reply is for.
+//
+// The incoming subject is decoded, stripped of every control character and
+// bounded. It is attacker-controlled: buildAutoReply's Q-encoding already
+// refuses to emit a raw CR or LF, so this is the second of two guards, not the
+// only one.
+func composeAutoReplySubject(stored, original string) string {
+	if strings.TrimSpace(stored) != "" {
+		return stored
+	}
+	prefix := currentAutoReplyPrefix()
+	decoded, err := new(mime.WordDecoder).DecodeHeader(original)
+	if err != nil {
+		decoded = original
+	}
+	decoded = strings.TrimSpace(stripControl(decoded))
+	if decoded == "" {
+		return prefix
+	}
+	if len(decoded) > maxOriginalSubject {
+		decoded = strings.ToValidUTF8(decoded[:maxOriginalSubject], "")
+	}
+	return prefix + ": " + decoded
+}
+
+// stripControl removes every C0 control character and DEL, so nothing in the
+// incoming subject can start a new header line or a new field.
+func stripControl(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, s)
+}
+
 func buildAutoReply(from, to, subject, body, inReplyTo string, when time.Time) ([]byte, error) {
 	if strings.TrimSpace(subject) == "" {
-		subject = "Automatic reply"
+		subject = DefaultAutoReplyPrefix
 	}
 	var b bytes.Buffer
 	writeReplyField(&b, "From", from)

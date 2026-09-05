@@ -198,6 +198,9 @@ func main() {
 	// send to per window, a compromised account that blasts spam is deferred and the
 	// admin is alerted. It starts disabled; the alert is a central-log event.
 	outboundLimiter := mta.StartOutboundLimiter(daemonName, logger, dir.GetOutboundSettings)
+	// The out-of-office reply's subject prefix, used for every mailbox that stores
+	// no subject of its own.
+	mta.StartAutoReply(daemonName, logger, dir.GetAutoReplySettings)
 	// Failed-login throttle on SMTP AUTH: a client address that piles up failed
 	// logins is locked out for the window the operator configured, so submission
 	// cannot be used to guess passwords unbounded.

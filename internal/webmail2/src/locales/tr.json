@@ -554,12 +554,12 @@
       "externalMessageHelp": "Boş bırakılırsa dış gönderenler için iç yanıt kullanılır.",
       "startDate": "Başlangıç tarihi (isteğe bağlı)",
       "endDate": "Bitiş tarihi (isteğe bağlı)",
-      "subjectRequired": "Otomatik yanıt etkinken konu gereklidir",
       "messageRequired": "Otomatik yanıt etkinken mesaj gereklidir",
       "saved": "Otomatik yanıt kaydedildi",
       "saveFailed": "Otomatik yanıt kaydedilemedi",
       "disabled": "Otomatik yanıt devre dışı bırakıldı",
-      "disableFailed": "Otomatik yanıt devre dışı bırakılamadı"
+      "disableFailed": "Otomatik yanıt devre dışı bırakılamadı",
+      "subjectOptional": "Boş bırakırsanız sunucu, yanıtladığı mesajın subject'inden bir subject oluşturur."
     },
     "signature": {
       "title": "İmzalar",

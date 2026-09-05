@@ -98,6 +98,7 @@ func main() {
 	// recipient cap SMTP submission enforces. It starts disabled and follows the
 	// stored settings without a restart.
 	mta.StartOutboundLimiter("hermex-mapihttp", logger, dir.GetOutboundSettings)
+	mta.StartAutoReply("hermex-mapihttp", logger, dir.GetAutoReplySettings)
 	// The operator's inbound message size limit applies to this daemon's sends
 	// too: SMTP refuses an oversized message during DATA, and nothing here ever
 	// reaches an SMTP session.

@@ -573,6 +573,11 @@ export interface VacationAutoReply {
   audience?: string
   start_date?: string
   end_date?: string
+  /**
+   * Read-only: the operator's fallback wording, used when `subject` is empty.
+   * The server replaces whatever the client sends, so it is shown and never set.
+   */
+  subject_prefix?: string
   send_interval?: number
   exclude_addresses?: string[]
   ignore_lists?: boolean
