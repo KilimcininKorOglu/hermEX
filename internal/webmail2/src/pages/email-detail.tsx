@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useParams, useNavigate } from "react-router-dom"
 import {
   ArrowLeft,
@@ -54,6 +54,7 @@ import {
 import { toast } from "sonner"
 import { sanitizeEmailBody } from "@/utils/sanitize"
 import { forwardParams, replyAllParams, replyParams, type QuoteLabels } from "@/utils/replyParams"
+import { MAX_DRAG_BYTES, blobToBase64, setAttachmentDrag } from "@/utils/attachmentDrag"
 import api from "@/utils/api"
 import type { MeetingInvite, AttachmentInfo, Note } from "@/utils/api"
 import * as smimeStore from "@/utils/smime"
@@ -183,6 +184,11 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
   // moment the message opens. Above the threshold the preview waits for a click,
   // and these are the attachments the reader asked for by hand.
   const [previewRequested, setPreviewRequested] = useState<number[]>([])
+  // Bytes held for a drag, by attachment index. A drag cannot fetch: the payload
+  // has to be on the DataTransfer synchronously, so it is read when the reader
+  // points at the attachment. A drag begun before that read answers carries no
+  // payload, and dragging again works.
+  const dragPayloads = useRef<Record<number, string>>({})
   // The cap itself is the operator's, served with the appearance settings. The
   // fallback here only covers the moment before that request answers.
   const [previewMaxBytes, setPreviewMaxBytes] = useState(FALLBACK_PREVIEW_MAX_BYTES)
@@ -638,6 +644,34 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
     } finally {
       setProposeBusy(false)
     }
+  }
+
+  // prepareDrag reads one attachment so it can ride on a drag into a composer,
+  // including one in another tab, which shares no state with this page.
+  const prepareDrag = async (att: AttachmentInfo) => {
+    if (!email || dragPayloads.current[att.index] !== undefined) return
+    if (att.size > MAX_DRAG_BYTES) return
+    try {
+      const res = await fetch(
+        `/api/v1/mail/attachment?id=${encodeURIComponent(email.id)}&index=${att.index}`,
+        { credentials: "include" },
+      )
+      if (!res.ok) return
+      const blob = await res.blob()
+      dragPayloads.current[att.index] = await blobToBase64(blob)
+    } catch {
+      // A drag that finds nothing prepared simply carries no payload.
+    }
+  }
+
+  const handleDragStart = (e: React.DragEvent, att: AttachmentInfo) => {
+    const content = dragPayloads.current[att.index]
+    if (content === undefined) return
+    setAttachmentDrag(e.dataTransfer, {
+      name: att.filename,
+      type: att.contentType || "application/octet-stream",
+      content,
+    })
   }
 
   const handleDownloadAttachment = async (att: AttachmentInfo) => {
@@ -1282,6 +1316,9 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                     return (
                       <div key={att.index} className="flex flex-col gap-1">
                         <button
+                          draggable
+                          onPointerEnter={() => void prepareDrag(att)}
+                          onDragStart={(e) => handleDragStart(e, att)}
                           onClick={() => handleDownloadAttachment(att)}
                           className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-left text-sm hover:bg-accent/50 transition-colors"
                           title={t("emailDetail.downloadAttachment", { filename: att.filename })}

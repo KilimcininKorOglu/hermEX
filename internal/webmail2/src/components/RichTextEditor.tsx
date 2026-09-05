@@ -152,9 +152,19 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       void insertTransfer(e.clipboardData)
     }
 
+    // editorTakes reports whether a drop belongs in the body. A file the editor
+    // cannot place (a PDF, an archive) belongs to whoever wraps the editor, which
+    // attaches it, so swallowing the event here would lose the file silently.
+    const editorTakes = (data: DataTransfer): boolean => {
+      if (imageFilesFrom(data).length > 0) return true
+      if (Array.from(data.types ?? []).includes("Files")) return false
+      return true
+    }
+
     // Move the caret to the drop point first, so intercepting the drop does not
     // move the content to wherever the previous selection happened to be.
     const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+      if (!editorTakes(e.dataTransfer)) return
       e.preventDefault()
       placeCaret(e.clientX, e.clientY)
       void insertTransfer(e.dataTransfer)

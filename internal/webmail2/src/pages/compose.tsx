@@ -51,6 +51,7 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import api, { SenderIdentity, DiagnosticEntry, Contact as ContactType, MailAttachment, SignatureEntry, TemplateEntry, Mail as MailMessage, CalendarEvent, Task, Note } from "@/utils/api"
 import { singleFlight } from "@/utils/singleFlight"
+import { DRAG_TYPE, fileFromDrag } from "@/utils/attachmentDrag"
 import { taskToVTodo, noteToText, safeItemName } from "@/utils/attachItem"
 import * as smimeStore from "@/utils/smime"
 import { mailOptionsActive } from "@/utils/mailOptions"
@@ -601,23 +602,55 @@ export function ComposePage() {
     }
   }
 
+  // attachFiles is the one way a file becomes an attachment, so the picker and a
+  // drop cannot drift apart.
+  const attachFiles = useCallback((files: File[]) => {
+    if (files.length === 0) return
+    setAttachments((prev) => [
+      ...prev,
+      ...files.map((file) => ({ id: crypto.randomUUID(), name: file.name, size: file.size, file })),
+    ])
+    toast.success(
+      files.length > 1
+        ? t("compose.filesAttached", { count: String(files.length) })
+        : t("compose.fileAttached", { count: String(files.length) })
+    )
+  }, [t])
+
   const handleAttach = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files
-    if (files) {
-      const newAttachments = Array.from(files).map((file) => ({
-        id: crypto.randomUUID(),
-        name: file.name,
-        size: file.size,
-        file,
-      }))
-      setAttachments([...attachments, ...newAttachments])
-      toast.success(
-        files.length > 1
-          ? t("compose.filesAttached", { count: String(files.length) })
-          : t("compose.fileAttached", { count: String(files.length) })
-      )
-    }
+    attachFiles(Array.from(e.target.files ?? []))
   }
+
+  // A file dropped anywhere on the composer is attached. The listeners sit on the
+  // WINDOW because a drop that lands on a plain element, the subject field or the
+  // page background reaches no React handler, and the browser then navigates to
+  // the dropped file, which discards the message being written.
+  useEffect(() => {
+    const carriesFiles = (e: DragEvent) =>
+      Array.from(e.dataTransfer?.types ?? []).includes("Files")
+    const carriesAttachment = (e: DragEvent) =>
+      Array.from(e.dataTransfer?.types ?? []).includes(DRAG_TYPE)
+    const onDragOver = (e: DragEvent) => {
+      if (carriesFiles(e) || carriesAttachment(e)) e.preventDefault()
+    }
+    const onDrop = (e: DragEvent) => {
+      // The editor handles its own drop, and calling preventDefault is how it
+      // says so; attaching here as well would add the file twice.
+      if (e.defaultPrevented) return
+      const dragged = e.dataTransfer ? fileFromDrag(e.dataTransfer) : null
+      if (!carriesFiles(e) && !dragged) return
+      e.preventDefault()
+      // An attachment dragged out of a message carries its own payload: a drag
+      // started inside the browser cannot populate dataTransfer.files.
+      attachFiles(dragged ? [dragged] : Array.from(e.dataTransfer?.files ?? []))
+    }
+    window.addEventListener("dragover", onDragOver)
+    window.addEventListener("drop", onDrop)
+    return () => {
+      window.removeEventListener("dragover", onDragOver)
+      window.removeEventListener("drop", onDrop)
+    }
+  }, [attachFiles])
 
   const removeAttachment = (id: string) => {
     setAttachments(attachments.filter((a) => a.id !== id))
