@@ -63,3 +63,38 @@ func (s *Server) handleToggleFavorite(w http.ResponseWriter, r *http.Request) {
 		return map[string]any{"favorites": fav}, true
 	})
 }
+
+// retitleFavorite keeps the sidebar pins in step with a folder operation. A
+// favourite is stored by DISPLAY NAME, so a rename that does not carry the pin
+// drops it, and a delete that does not clear it leaves the sidebar pointing at a
+// folder that is no longer there. An empty newName removes the pin.
+//
+// It reports its own failure rather than the caller's: the folder operation has
+// already succeeded by the time this runs, and a pin left behind must not be
+// answered as a failed rename.
+func (s *Server) retitleFavorite(st *objectstore.Store, mailbox, oldName, newName string) {
+	unlock := s.lockSettings(mailbox)
+	defer unlock()
+	m := sharedSettings(st)
+	fav := readFavorites(m)
+	out := make([]string, 0, len(fav))
+	changed := false
+	for _, f := range fav {
+		switch {
+		case f != oldName:
+			out = append(out, f)
+		case newName != "":
+			out = append(out, newName)
+			changed = true
+		default:
+			changed = true
+		}
+	}
+	if !changed {
+		return
+	}
+	writeFavorites(m, out)
+	if err := saveSharedSettings(st, m); err != nil {
+		st.LogSwallowedError("favorites.retitle", err)
+	}
+}

@@ -71,7 +71,7 @@ func (s *Server) handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "name is required"})
 		return
 	}
-	st, _, ok := s.openStore(w, r)
+	st, c, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
@@ -82,16 +82,21 @@ func (s *Server) handleRenameFolder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := st.RenameFolder(id, nil, body.Name); err != nil {
+		if errors.Is(err, objectstore.ErrBuiltinFolder) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "this folder cannot be renamed"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not rename folder"})
 		return
 	}
+	s.retitleFavorite(st, c.Mailbox, current, body.Name)
 	writeJSON(w, http.StatusOK, map[string]string{"name": body.Name})
 }
 
 // handleDeleteFolder removes a user folder by display name.
 func (s *Server) handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	st, _, ok := s.openStore(w, r)
+	st, c, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
@@ -122,6 +127,7 @@ func (s *Server) handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not delete folder"})
 			return
 		}
+		s.retitleFavorite(st, c.Mailbox, name, "")
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "movedToTrash": true})
 		return
 	}
@@ -136,6 +142,7 @@ func (s *Server) handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not delete folder"})
 		return
 	}
+	s.retitleFavorite(st, c.Mailbox, name, "")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "movedToTrash": false})
 }
 
