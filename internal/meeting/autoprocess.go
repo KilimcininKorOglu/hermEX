@@ -50,7 +50,7 @@ func AutoProcess(st *objectstore.Store, accounts directory.Accounts, spool *rela
 	}
 	// A tentative outcome books the request silently; an accept or decline tells the
 	// organizer.
-	_, err = Respond(st, accounts, spool, recipient, messageID, resp, resp != ResponseTentative)
+	_, err = respondAutomatically(st, accounts, spool, recipient, messageID, resp, resp != ResponseTentative)
 	return true, err
 }
 

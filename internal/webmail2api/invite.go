@@ -1,6 +1,7 @@
 package webmail2api
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/mail"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"hermex/internal/logging"
+	"hermex/internal/meeting"
 	"hermex/internal/mime"
 	"hermex/internal/mta"
 )
@@ -143,9 +145,28 @@ func sanitizeICSName(s string) string {
 	return strings.Trim(b.String(), "_.")
 }
 
-// handleRSVP responds to a meeting invite: accept and tentative add the event to
-// the calendar; decline only acknowledges. (Mailing the iTIP reply back to the
-// organizer is a follow-up.)
+// meetingResponseCode maps the SPA's response vocabulary to the stored response
+// value. An unknown word yields 0, which the caller refuses.
+func meetingResponseCode(response string) int32 {
+	switch response {
+	case "accept":
+		return meeting.ResponseAccepted
+	case "tentative":
+		return meeting.ResponseTentative
+	case "decline":
+		return meeting.ResponseDeclined
+	}
+	return 0
+}
+
+// handleRSVP responds to a meeting invite through the SAME model every other
+// protocol answers with.
+//
+// It used to answer on its own: declining recorded nothing at all, the response
+// properties the organizer's tracking reads were never written, and accepting
+// filed a fresh appointment with no regard for one already there, so answering
+// twice, or answering after the server had auto-processed the invitation, left
+// two appointments for one meeting.
 func (s *Server) handleRSVP(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ID       string `json:"id"`
@@ -153,6 +174,11 @@ func (s *Server) handleRSVP(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := decodeJSON(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	response := meetingResponseCode(req.Response)
+	if response == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "response must be accept, tentative or decline"})
 		return
 	}
 	c, ok := s.session(r)
@@ -165,102 +191,25 @@ func (s *Server) handleRSVP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	if req.Response == "decline" {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "declined"})
-		return
-	}
-	raw, err := st.GetMessageRaw(fid, uid)
+	info, err := st.MessageByUID(fid, uid)
 	if err != nil {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
-	ics := findCalendarPart(mime.ParseStructure(raw))
-	if ics == nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a meeting invite"})
-		return
-	}
-	// An accepted invite lands in the default calendar.
-	if _, err := storeEvent(st, icalToEvent(ics, 0), calendarFolderID("")); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not add to calendar"})
-		return
-	}
-	// Email the iTIP REPLY back to the organizer so they can track the response
-	// (the TrackingTab the organizer's event shows). Best-effort: a delivery
-	// failure does not undo the calendar add.
-	organizer, _ := icalProp(ics, "ORGANIZER")
-	if org := organizerAddress(organizer); org != "" {
-		if msg, berr := buildReplyRequest(c.Email, org, icalToEvent(ics, 0), req.Response); berr == nil {
-			if _, derr := mta.DeliverAndRelay(s.accounts, s.spool, c.Email, []string{org}, msg, time.Now()); derr != nil {
-				logError("send-meeting-reply", derr, logging.Fields{"user": c.Email, "organizer": org})
-			}
-			fileSentCopy(st, msg, c.Email, "meeting-reply")
+	// This is the reader's own answer, so it also clears the request mail when the
+	// mailbox asked for that.
+	if _, err := meeting.Respond(st, s.accounts, s.spool, c.Email, info.ID, response, true); err != nil {
+		if errors.Is(err, meeting.ErrRequestNotFound) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+			return
 		}
+		logError("rsvp", err, logging.Fields{"user": c.Email})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not record the response"})
+		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": req.Response + "ed"})
 }
 
-// partstatFor maps the SPA's response vocabulary to the iCalendar PARTSTAT an
-// iTIP REPLY carries (RFC 5546 §3.2.12).
-func partstatFor(response string) string {
-	switch response {
-	case "accept":
-		return "ACCEPTED"
-	case "tentative":
-		return "TENTATIVE"
-	case "decline":
-		return "DECLINED"
-	}
-	return "NEEDS-ACTION"
-}
-
-// buildReplyRequest renders a METHOD:REPLY iTIP message: the attendee tells the
-// organizer their response (PARTSTAT). The VEVENT carries the original UID and a
-// single ATTENDEE (the responder) with its PARTSTAT, addressed to the organizer.
-func buildReplyRequest(responder, organizer string, e eventJSON, response string) ([]byte, error) {
-	addr := strings.TrimSpace(organizer)
-	if parsed, err := mail.ParseAddress(addr); err == nil {
-		addr = parsed.Address
-	}
-	if addr == "" {
-		return nil, fmt.Errorf("no organizer address")
-	}
-	var cal strings.Builder
-	cal.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//webmail2//EN\r\nMETHOD:REPLY\r\nBEGIN:VEVENT\r\n")
-	fmt.Fprintf(&cal, "UID:%s\r\n", uidOrGenerated(e.UID))
-	fmt.Fprintf(&cal, "SUMMARY:%s\r\n", e.Summary)
-	fmt.Fprintf(&cal, "DTSTART%s\r\n", toICalTime(e.Start, e.AllDay))
-	if e.End != "" {
-		fmt.Fprintf(&cal, "DTEND%s\r\n", toICalTime(e.End, e.AllDay))
-	}
-	fmt.Fprintf(&cal, "ORGANIZER;CN=%s:mailto:%s\r\n", organizer, organizer)
-	fmt.Fprintf(&cal, "ATTENDEE;CN=%s;PARTSTAT=%s:mailto:%s\r\n", responder, partstatFor(response), responder)
-	cal.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
-	textBody := fmt.Sprintf("%s has %s the meeting: %s", responder, response, e.Summary)
-	boundary := "hermex-reply-" + randomHex()
-	var b strings.Builder
-	fmt.Fprintf(&b, "From: %s\r\n", responder)
-	fmt.Fprintf(&b, "To: %s\r\n", addr)
-	fmt.Fprintf(&b, "Subject: %s: %s\r\n", response, e.Summary)
-	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))
-	fmt.Fprintf(&b, "Message-ID: <%s@hermex>\r\n", randomHex())
-	b.WriteString("MIME-Version: 1.0\r\n")
-	fmt.Fprintf(&b, "Content-Type: multipart/mixed; boundary=%q\r\n\r\n", boundary)
-	fmt.Fprintf(&b, "--%s\r\n", boundary)
-	b.WriteString("Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
-	b.WriteString(textBody)
-	b.WriteString("\r\n")
-	fmt.Fprintf(&b, "--%s\r\n", boundary)
-	b.WriteString("Content-Type: text/calendar; method=REPLY; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
-	b.WriteString(cal.String())
-	fmt.Fprintf(&b, "\r\n--%s--\r\n", boundary)
-	return []byte(b.String()), nil
-}
-
-// buildCounterRequest renders a METHOD:COUNTER iTIP message (RFC 5546 §3.6): an
-// invitee proposes a new time to the organizer. The iCalendar carries the
-// original meeting UID and the proposed start/end; the MIME body is a plain-text
-// note plus the text/calendar;method=COUNTER part. It is addressed to the
-// organizer only and returns the raw message.
 func buildCounterRequest(proposer, organizer string, e eventJSON) ([]byte, error) {
 	addr := strings.TrimSpace(organizer)
 	if parsed, err := mail.ParseAddress(addr); err == nil {

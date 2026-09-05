@@ -75,13 +75,29 @@ func ResolveTags(st *objectstore.Store) (Tags, error) {
 	}, nil
 }
 
-// Respond records an attendee's response to the meeting request at messageID: it
-// stamps the request as responded, files the appointment in the Calendar for an
+// Respond records an ATTENDEE'S OWN response to the meeting request at messageID:
+// it stamps the request as responded, files the appointment in the Calendar for an
 // accept or tentative (declining files none), and, when send is set, notifies the
 // organizer with an iTIP REPLY routed from sender. It returns the message id of the
 // filed Calendar appointment (0 when declined). sender is the responder's address;
 // accounts and spool route the organizer notification.
+//
+// It is the path a person took, which is what lets it clear the request mail when
+// the mailbox asked for that. A response the SERVER decided goes through
+// respondAutomatically instead.
 func Respond(st *objectstore.Store, accounts directory.Accounts, spool *relay.Spool, sender string, messageID int64, response int32, send bool) (int64, error) {
+	return respond(st, accounts, spool, sender, messageID, response, send, true)
+}
+
+// respondAutomatically records a response the server decided on the mailbox's
+// behalf. It never clears the request mail: the reader has not seen the invitation
+// yet, and a message that disappears without anyone acting on it is one they can
+// no longer find.
+func respondAutomatically(st *objectstore.Store, accounts directory.Accounts, spool *relay.Spool, sender string, messageID int64, response int32, send bool) (int64, error) {
+	return respond(st, accounts, spool, sender, messageID, response, send, false)
+}
+
+func respond(st *objectstore.Store, accounts directory.Accounts, spool *relay.Spool, sender string, messageID int64, response int32, send bool, userAction bool) (int64, error) {
 	req, err := st.OpenMessage(messageID)
 	if err != nil {
 		return 0, ErrRequestNotFound
@@ -121,10 +137,20 @@ func Respond(st *objectstore.Store, accounts directory.Accounts, spool *relay.Sp
 	// the appointment booked or removed, and the organizer told. Failing the call
 	// here would report failure for work that completed, and a client retry would
 	// send the organizer a second reply, so the failure is logged and swallowed.
+	clearAnsweredRequest(st, req, tags, messageID, userAction)
+	return calendarID, nil
+}
+
+// clearAnsweredRequest takes the answered request out of the Inbox, but only for
+// a response the reader gave. A response the server decided leaves the mail where
+// the reader can still find it.
+func clearAnsweredRequest(st *objectstore.Store, req *oxcmail.Message, tags Tags, messageID int64, userAction bool) {
+	if !userAction {
+		return
+	}
 	if err := removeRequestMail(st, req, tags, messageID); err != nil {
 		st.LogSwallowedError("meeting.remove-request", err)
 	}
-	return calendarID, nil
 }
 
 // requestClass is the message class a delivered meeting invitation carries.

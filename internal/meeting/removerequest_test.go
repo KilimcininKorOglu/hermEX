@@ -2,6 +2,7 @@ package meeting
 
 import (
 	"errors"
+	"hermex/internal/directory"
 	"testing"
 	"time"
 
@@ -344,5 +345,52 @@ func TestRespondFromCalendarRemovesEveryInvitation(t *testing.T) {
 	}
 	if n := folderCount(t, st, int64(mapi.PrivateFIDDeletedItems)); n != 2 {
 		t.Errorf("Deleted Items holds %d messages, want both invitations for the answered meeting", n)
+	}
+}
+
+// TestAutoProcessKeepsTheRequestMail is the line between a response the reader
+// gave and one the server decided. Auto-processing books the meeting before
+// anyone has opened the invitation, so clearing the mail there would take away a
+// message the reader has never seen and cannot find again.
+func TestAutoProcessKeepsTheRequestMail(t *testing.T) {
+	st, err := objectstore.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.SetMeetingConfig(objectstore.MeetingConfig{
+		AutoAccept:              true,
+		RemoveRequestOnResponse: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The organizer notification needs the two mailboxes resolvable; the spool is
+	// nil, which the auto-process tests already rely on.
+	accounts := directory.StaticAccounts{
+		"alice@hermex.test": {MailboxPath: t.TempDir()},
+		"bob@hermex.test":   {MailboxPath: t.TempDir()},
+	}
+	reqID := appendRequest(t, st)
+	handled, err := AutoProcess(st, accounts, nil, "alice@hermex.test", reqID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !handled {
+		t.Fatal("the request was not auto-processed, so this proves nothing")
+	}
+	if n := folderCount(t, st, int64(mapi.PrivateFIDInbox)); n != 1 {
+		t.Errorf("Inbox holds %d messages, want the request left where the reader can see it", n)
+	}
+	if n := folderCount(t, st, int64(mapi.PrivateFIDDeletedItems)); n != 0 {
+		t.Errorf("Deleted Items holds %d messages, want none", n)
+	}
+
+	// The reader's own answer still clears it, so the setting is not simply off.
+	if _, err := Respond(st, accounts, nil, "alice@hermex.test", reqID, ResponseAccepted, false); err != nil {
+		t.Fatal(err)
+	}
+	if n := folderCount(t, st, int64(mapi.PrivateFIDInbox)); n != 0 {
+		t.Errorf("after the reader answered, the Inbox still holds %d messages", n)
 	}
 }
