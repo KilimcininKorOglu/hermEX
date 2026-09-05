@@ -75,3 +75,39 @@ func TestGetIdentitiesFallsBackToSelf(t *testing.T) {
 		t.Errorf("identities = %v, want [bob@hermex.test]", got.Identities)
 	}
 }
+
+// TestSendingFromAnOwnAliasIsNotADelegateSend is the distinction the sent copy
+// depends on. One person can be spelled several ways, and comparing the chosen
+// From with the login address alone reads an alias of the sender as somebody
+// else. That verdict is what decides whether the message is represented on
+// behalf of another mailbox.
+func TestSendingFromAnOwnAliasIsNotADelegateSend(t *testing.T) {
+	accs := aliasAccounts{
+		StaticAccounts: directory.StaticAccounts{
+			"alice@hermex.test": {MailboxPath: t.TempDir()},
+		},
+		aliases: map[string][]string{
+			"alice@hermex.test": {"alice@hermex.test", "a.smith@hermex.test", "sales@hermex.test"},
+		},
+	}
+	srv := NewServer(accs, accs, nil, "mail.hermex.test", []byte("identity-secret"), "", false)
+
+	for _, want := range []string{"", "alice@hermex.test", "ALICE@HERMEX.TEST", "a.smith@hermex.test", "sales@hermex.test"} {
+		representing, sender, ok := srv.resolveSender("alice@hermex.test", want)
+		if !ok {
+			t.Errorf("%q was refused as the sender's own identity", want)
+			continue
+		}
+		// Own identity: nothing is represented on behalf of anyone, so
+		// representing and sender name the same person.
+		if representing != sender {
+			t.Errorf("%q resolved to representing %q, sender %q; an own identity is not a delegate send",
+				want, representing, sender)
+		}
+	}
+
+	// A stranger, with no send-as grant, is still refused.
+	if _, _, ok := srv.resolveSender("alice@hermex.test", "bob@hermex.test"); ok {
+		t.Error("a mailbox the caller holds no grant on was accepted as the sender")
+	}
+}
