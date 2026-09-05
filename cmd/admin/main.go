@@ -53,6 +53,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  list-contacts")
 	fmt.Fprintln(os.Stderr, "  sweep-content <email>   (reclaim orphan content files; refuses while the mailbox is in use)")
 	fmt.Fprintln(os.Stderr, "  prune-eml <email|all> [days]   (reclaim cached wire copies older than N days, default 30)")
+	fmt.Fprintln(os.Stderr, "  backfill-previews <email|all>   (fill the message-list snippet and attachment flag on rows indexed before those columns existed)")
 	fmt.Fprintln(os.Stderr, "  backup-mail <email|all> <dest-dir>   (consistent copy of mail content; safe on a live mailbox)")
 	fmt.Fprintln(os.Stderr, "  export-dkim <domain>    (write the domain's DKIM private key to stdout)")
 	fmt.Fprintln(os.Stderr, "  ldap-sync <org-id>      (import the org's LDAP/AD accounts into the directory)")
@@ -196,6 +197,11 @@ func main() {
 			}
 		}
 		pruneEML(dir, args[1], days)
+	case "backfill-previews":
+		if len(args) != 2 {
+			usage()
+		}
+		backfillPreviews(dir, args[1])
 	case "backup-mail":
 		if len(args) != 3 {
 			usage()
@@ -464,19 +470,7 @@ const defaultEMLPruneDays = 30
 // stored object on the next read, so the only cost is one re-export per pruned
 // message that is read again.
 func pruneEML(dir *directory.SQLDirectory, target string, days int) {
-	var maildirs []string
-	if target == "all" {
-		var err error
-		if maildirs, err = dir.AllMaildirs(); err != nil {
-			log.Fatalf("hermex-admin: list mailboxes: %v", err)
-		}
-	} else {
-		maildir, ok := dir.Resolve(target)
-		if !ok {
-			log.Fatalf("hermex-admin: unknown or unreceivable mailbox: %s", target)
-		}
-		maildirs = []string{maildir}
-	}
+	maildirs := resolveMaildirs(dir, target)
 
 	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
 	var files, boxes int
@@ -501,6 +495,50 @@ func pruneEML(dir *directory.SQLDirectory, target string, days int) {
 		}
 	}
 	fmt.Printf("pruned %d cached wire copies (%d bytes) from %d mailbox(es)\n", files, reclaimed, boxes)
+}
+
+// backfillPreviews fills the message-list projections on index rows written
+// before those columns existed. Without it an upgraded deployment lists every
+// existing message with a blank snippet and no paperclip, because a migration
+// cannot compute either from SQL alone.
+func backfillPreviews(dir *directory.SQLDirectory, target string) {
+	maildirs := resolveMaildirs(dir, target)
+	var rows, boxes int
+	for _, md := range maildirs {
+		store, err := objectstore.Open(md)
+		if err != nil {
+			// One unreadable mailbox must not abandon the rest of the run.
+			log.Printf("hermex-admin: open mailbox %s: %v", md, err)
+			continue
+		}
+		n, err := store.BackfillPreviews()
+		_ = store.Close()
+		if err != nil {
+			log.Printf("hermex-admin: backfill %s: %v", md, err)
+		}
+		rows += n
+		if n > 0 {
+			boxes++
+		}
+	}
+	fmt.Printf("filled %d message row(s) in %d mailbox(es)\n", rows, boxes)
+}
+
+// resolveMaildirs turns an "email or all" argument into the mailbox paths to
+// work on.
+func resolveMaildirs(dir *directory.SQLDirectory, target string) []string {
+	if target == "all" {
+		maildirs, err := dir.AllMaildirs()
+		if err != nil {
+			log.Fatalf("hermex-admin: list mailboxes: %v", err)
+		}
+		return maildirs
+	}
+	maildir, ok := dir.Resolve(target)
+	if !ok {
+		log.Fatalf("hermex-admin: unknown or unreceivable mailbox: %s", target)
+	}
+	return []string{maildir}
 }
 
 // backupMail writes a consistent copy of one mailbox, or of every mailbox and

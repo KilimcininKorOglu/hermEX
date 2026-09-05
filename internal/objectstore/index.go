@@ -3,6 +3,8 @@ package objectstore
 import (
 	"database/sql"
 	"fmt"
+	"html"
+	"strings"
 	"time"
 
 	"hermex/internal/mapi"
@@ -65,12 +67,13 @@ func (s *Store) indexMessage(folderID, messageID int64, mid string, msg *oxcmail
 		`INSERT INTO messages
 		   (message_id, folder_id, mid_string, idx, mod_time, uid,
 		    unsent, recent, read, flagged, replied, forwarded, deleted,
-		    subject, sender, rcpt, size, received, modseq)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
+		    subject, sender, rcpt, size, received, modseq, preview, has_attach)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		messageID, folderID, mid, idx, time.Now().Unix(), uid,
 		bit(FlagDraft), bit(FlagSeen), bit(FlagFlagged), bit(FlagAnswered), bit(FlagDeleted),
 		projectSubject(msg.Props), projectSender(msg.Props), projectRcpt(msg.Recipients),
-		wireSize, received.Unix(), modseq); err != nil {
+		wireSize, received.Unix(), modseq,
+		projectPreview(msg.Props), boolToInt(projectHasAttachments(msg))); err != nil {
 		return 0, err
 	}
 	if _, err := tx.Exec(
@@ -207,4 +210,99 @@ func stringProp(props mapi.PropertyValues, tag mapi.PropTag) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// previewRunes bounds the stored snippet. A message list shows one line, so a
+// longer store costs index size for text nothing renders.
+const previewRunes = 200
+
+// projectPreview is the index's message-list snippet: the first line of the
+// body, whitespace collapsed. It comes from the plain body when there is one and
+// from the HTML body otherwise, because a message with only an HTML body must
+// still show a snippet.
+func projectPreview(props mapi.PropertyValues) string {
+	text, _ := stringProp(props, mapi.PrBody)
+	if strings.TrimSpace(text) == "" {
+		if v, ok := props.Get(mapi.PrHTML); ok {
+			if b, ok := v.([]byte); ok {
+				text = stripHTMLTags(string(b))
+			}
+		}
+	}
+	return snippetOf(text, previewRunes)
+}
+
+// projectHasAttachments reports whether a reader would say the message carries
+// an attachment. An inline picture referenced by the HTML body does not count:
+// marking every message with a signature logo would make the paperclip
+// meaningless.
+func projectHasAttachments(msg *oxcmail.Message) bool {
+	for _, att := range msg.Attachments {
+		if v, ok := att.Props.Get(mapi.PrAttachFlags); ok {
+			if f, ok := v.(int32); ok && f&mapi.AttMhtmlRef != 0 {
+				continue
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// snippetOf collapses whitespace and returns at most n runes.
+func snippetOf(s string, n int) string {
+	out := strings.Join(strings.Fields(s), " ")
+	if len([]rune(out)) <= n {
+		return out
+	}
+	return string([]rune(out)[:n])
+}
+
+// stripHTMLTags reduces an HTML body to its text, so a message with no plain
+// body still yields a snippet.
+func stripHTMLTags(s string) string {
+	s = dropBlocks(s, "script")
+	s = dropBlocks(s, "style")
+	var b strings.Builder
+	inTag := false
+	for i := 0; i < len(s); i++ {
+		switch {
+		case s[i] == '<':
+			inTag = true
+		case s[i] == '>':
+			inTag = false
+		case !inTag:
+			b.WriteByte(s[i])
+		}
+	}
+	return html.UnescapeString(b.String())
+}
+
+// dropBlocks removes every "<name …>…</name>" span. Their text is markup rather
+// than the message, so a stylesheet would otherwise become the snippet.
+func dropBlocks(s, name string) string {
+	open, closing := "<"+name, "</"+name
+	for {
+		lower := strings.ToLower(s)
+		i := strings.Index(lower, open)
+		if i < 0 {
+			return s
+		}
+		j := strings.Index(lower[i:], closing)
+		if j < 0 {
+			return s[:i] // unterminated: everything after it is that block
+		}
+		k := strings.Index(lower[i+j:], ">")
+		if k < 0 {
+			return s[:i]
+		}
+		s = s[:i] + s[i+j+k+1:]
+	}
+}
+
+// boolToInt renders a bool for SQLite's integer column.
+func boolToInt(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }

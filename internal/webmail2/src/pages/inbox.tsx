@@ -464,7 +464,9 @@ export function InboxPage({ folder = "inbox" }: InboxPageProps) {
             <span className={cn(!email.read && "text-foreground font-medium")}>
               {email.subject}
             </span>
-            {columns.preview && <span className="truncate">- {email.preview}</span>}
+            {/* A message with no snippet, and one indexed before the column
+                existed, would otherwise render a dangling separator. */}
+            {columns.preview && email.preview && <span className="truncate">- {email.preview}</span>}
           </div>
         )}
       </div>

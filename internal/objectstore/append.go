@@ -38,6 +38,11 @@ type MessageInfo struct {
 	// the formatted originator ("Name <addr>"); see projectSubject/projectSender.
 	Subject string
 	Sender  string
+	// Preview is the body's first line and HasAttachments drives the message
+	// list's paperclip; both are denormalized here for the same reason as
+	// Subject and Sender. See projectPreview/projectHasAttachments.
+	Preview        string
+	HasAttachments bool
 }
 
 // AppendMessage stores a raw RFC822 message in a folder as a MAPI object: it

@@ -640,11 +640,14 @@ func mailRow(folder string, m objectstore.MessageInfo) mailJSON {
 		From:     m.Sender,
 		FromName: m.Sender,
 		Subject:  m.Subject,
-		Date:     m.InternalDate.Format(time.RFC3339),
-		Read:     m.Flags&objectstore.FlagSeen != 0,
-		Starred:  m.Flags&objectstore.FlagFlagged != 0,
-		Folder:   folder,
-		Size:     int(m.Size),
+		// Both come off the index row, so a page of rows costs no message reads.
+		Preview:        m.Preview,
+		HasAttachments: m.HasAttachments,
+		Date:           m.InternalDate.Format(time.RFC3339),
+		Read:           m.Flags&objectstore.FlagSeen != 0,
+		Starred:        m.Flags&objectstore.FlagFlagged != 0,
+		Folder:         folder,
+		Size:           int(m.Size),
 	}
 }
 
