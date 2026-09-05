@@ -1032,7 +1032,10 @@
       "addHeaderFields": "Add header actions need a header name and value",
       "deleteHeaderName": "Delete header actions need a header name",
       "flagName": "Flag actions need a flag name"
-    }
+    },
+    "runFolder": "Folder",
+    "runFolderHint": "The folder the filters are applied to",
+    "runThis": "Run this filter on the selected folder"
   },
   "contacts": {
     "searchPlaceholder": "Search contacts...",

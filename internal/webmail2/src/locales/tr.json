@@ -1032,7 +1032,10 @@
       "addHeaderFields": "Başlık ekleme işlemleri bir başlık adı ve değeri gerektirir",
       "deleteHeaderName": "Başlık silme işlemleri bir başlık adı gerektirir",
       "flagName": "İşaret işlemleri bir işaret adı gerektirir"
-    }
+    },
+    "runFolder": "Klasör",
+    "runFolderHint": "Filtrelerin uygulanacağı klasör",
+    "runThis": "Bu filtreyi seçili klasörde çalıştır"
   },
   "contacts": {
     "searchPlaceholder": "Kişilerde ara...",

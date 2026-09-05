@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -153,17 +154,82 @@ func (s *Server) handleReorderFilters(w http.ResponseWriter, r *http.Request) {
 // existed. It runs the stored rules as-is and never rebuilds them, so rules set
 // by other clients are left untouched.
 func (s *Server) handleRunFilters(w http.ResponseWriter, r *http.Request) {
+	var req runFiltersRequest
+	// An empty body is the whole-inbox run, which is what the button sent before
+	// either selection existed.
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+	target := int64(mapi.PrivateFIDInbox)
+	if req.Folder != "" {
+		fid, ok := folderFID(strings.ToLower(req.Folder))
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown folder"})
+			return
+		}
+		target = fid
+	}
 	st, _, ok := s.openStore(w, r)
 	if !ok {
 		return
 	}
 	defer st.Close()
-	res, err := st.RunRules(mapi.PrivateFIDInbox, time.Now().Unix())
+
+	opt := objectstore.RunRulesOptions{
+		RuleFolderID:   mapi.PrivateFIDInbox,
+		TargetFolderID: target,
+	}
+	if req.Filter != "" {
+		id, ok := ruleIDForFilter(st, req.Filter)
+		if !ok {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown filter"})
+			return
+		}
+		opt.RuleID = id
+	}
+	res, err := st.RunRulesIn(opt, time.Now().Unix())
 	if err != nil {
+		logError("run-filters", err, logging.Fields{"folder": req.Folder})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not run filters"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"affected": res.Affected, "evaluated": res.Evaluated})
+}
+
+// runFiltersRequest selects what a manual filter run covers. An empty Folder is
+// the Inbox and an empty Filter is every enabled filter, so a caller that sends
+// nothing gets the whole-inbox run.
+type runFiltersRequest struct {
+	Folder string `json:"folder,omitempty"`
+	Filter string `json:"filter,omitempty"`
+}
+
+// ruleIDForFilter resolves a SPA filter id to the stored rule rebuildInboxRules
+// wrote for it. The two are tied by position: a filter's index in the saved list is
+// the Sequence of its rule. A filter with no rule (its condition or action is not
+// one the engine evaluates) resolves to nothing, so a run over it does not silently
+// fall back to running everything.
+func ruleIDForFilter(st *objectstore.Store, filterID string) (int64, bool) {
+	seq := -1
+	for i, f := range readFilters(sharedSettings(st)) {
+		if f.ID == filterID {
+			seq = i
+			break
+		}
+	}
+	if seq < 0 {
+		return 0, false
+	}
+	rules, err := st.ListRules(mapi.PrivateFIDInbox)
+	if err != nil {
+		return 0, false
+	}
+	for _, r := range rules {
+		if int(r.Sequence) == seq {
+			return r.ID, true
+		}
+	}
+	return 0, false
 }
 
 // rebuildInboxRules replaces the inbox's stored rules with the evaluatable subset

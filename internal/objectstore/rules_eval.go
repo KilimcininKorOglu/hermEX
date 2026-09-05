@@ -245,21 +245,46 @@ type RuleRunResult struct {
 	Affected  int // messages a matching rule acted on (moved, deleted, or marked read)
 }
 
-// RunRules evaluates a folder's enabled rules against every message in it, in
+// RunRulesOptions selects what a manual rule run does. RuleFolderID names the
+// folder the rules are read from, which for webmail's filters is always the Inbox
+// because that is where they are stored. TargetFolderID names the folder whose
+// messages are swept, and it is also the source folder a matched action moves,
+// copies or deletes from. A zero RuleID runs every enabled rule in sequence; a
+// non-zero one runs only that rule, and still only when it is enabled.
+type RunRulesOptions struct {
+	RuleFolderID   int64
+	TargetFolderID int64
+	RuleID         int64
+}
+
+// RunRules evaluates a folder's enabled rules against every message in it, the
+// one-folder form of RunRulesIn.
+func (s *Store) RunRules(folderID int64, nowUnix int64) (RuleRunResult, error) {
+	return s.RunRulesIn(RunRulesOptions{RuleFolderID: folderID, TargetFolderID: folderID}, nowUnix)
+}
+
+// RunRulesIn evaluates rules against the messages already in a folder, in
 // PR_RULE_SEQUENCE order, applying the actions of each matching rule. It is the
 // on-demand entry point (a user's "apply rules now"); incoming mail is processed
 // per-message as it is delivered. A move or delete is terminal for that message:
 // once it leaves the folder, no further rule is evaluated against it.
-func (s *Store) RunRules(folderID int64, nowUnix int64) (RuleRunResult, error) {
+//
+// The rules and the messages may live in different folders, so a user can sweep an
+// archive folder with the rules they wrote for the Inbox. Nothing is stored per run
+// and no rule is rewritten; the stored rules are read as they are.
+func (s *Store) RunRulesIn(opt RunRulesOptions, nowUnix int64) (RuleRunResult, error) {
 	var res RuleRunResult
-	rules, err := s.ListRules(folderID)
+	rules, err := s.ListRules(opt.RuleFolderID)
 	if err != nil {
 		return res, err
+	}
+	if opt.RuleID != 0 {
+		rules = onlyRule(rules, opt.RuleID)
 	}
 	if len(rules) == 0 {
 		return res, nil
 	}
-	msgs, err := s.ListMessages(folderID)
+	msgs, err := s.ListMessages(opt.TargetFolderID)
 	if err != nil {
 		return res, err
 	}
@@ -269,7 +294,7 @@ func (s *Store) RunRules(folderID int64, nowUnix int64) (RuleRunResult, error) {
 		// "Apply rules now" deliberately discards forward requests: re-running rules
 		// over an existing folder must not re-send (mass-forward) old mail. Forwards
 		// fire only at delivery, through ApplyInboxRules.
-		acted, _, err := s.applyRulesToMessage(folderID, m, rules, oofActive)
+		acted, _, err := s.applyRulesToMessage(opt.TargetFolderID, m, rules, oofActive)
 		if err != nil {
 			return res, err
 		}
@@ -278,6 +303,18 @@ func (s *Store) RunRules(folderID int64, nowUnix int64) (RuleRunResult, error) {
 		}
 	}
 	return res, nil
+}
+
+// onlyRule narrows a rule list to the one with the given id, or to none when the
+// mailbox holds no such rule. A run that names a rule which no longer exists must
+// touch nothing rather than fall back to running everything.
+func onlyRule(rules []Rule, id int64) []Rule {
+	for _, r := range rules {
+		if r.ID == id {
+			return []Rule{r}
+		}
+	}
+	return nil
 }
 
 // ApplyInboxRules applies the inbox's enabled rules to a single just-delivered
@@ -415,7 +452,10 @@ func (s *Store) applyRuleActions(srcFolder int64, uid uint32, acts mapi.RuleActi
 			}
 		case mapi.OpCopy:
 			dst, ok := moveTargetFolder(b.Data)
-			if !ok {
+			if !ok || dst == srcFolder {
+				// Copying a message into the folder it is already in duplicates it,
+				// which a manual run over the rule's own destination folder would do
+				// to every message there.
 				continue
 			}
 			if err := s.copyMessage(srcFolder, uid, dst); err != nil {
@@ -425,7 +465,12 @@ func (s *Store) applyRuleActions(srcFolder int64, uid uint32, acts mapi.RuleActi
 			// blocks and rules still apply to the original.
 		case mapi.OpMove:
 			dst, ok := moveTargetFolder(b.Data)
-			if !ok {
+			if !ok || dst == srcFolder {
+				// A move onto the folder the message is already in is not a no-op
+				// here: it would re-append the message under a fresh UID and delete
+				// the original, invalidating every client's cache for nothing. A
+				// manual run over the rule's own destination folder does exactly
+				// that to every message in it.
 				continue
 			}
 			if err := s.moveMessage(srcFolder, uid, dst); err != nil {

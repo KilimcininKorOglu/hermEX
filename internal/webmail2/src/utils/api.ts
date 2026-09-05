@@ -1229,10 +1229,14 @@ class API {
     await this.post('/filters/reorder', { filterIds })
   }
 
-  // runFilters applies the inbox filters to the mail already in the inbox now
-  // (the "run now" sweep), returning how many messages were examined and acted on.
-  async runFilters(): Promise<{ affected: number; evaluated: number }> {
-    return this.post<{ affected: number; evaluated: number }>('/filters/run', {})
+  // runFilters applies the saved filters to the mail already in a folder (the "run
+  // now" sweep), returning how many messages were examined and acted on. An omitted
+  // folder is the inbox and an omitted filter is every enabled filter.
+  async runFilters(opts: { folder?: string; filter?: string } = {}): Promise<{
+    affected: number
+    evaluated: number
+  }> {
+    return this.post<{ affected: number; evaluated: number }>('/filters/run', opts)
   }
 
   // exportRules downloads the user's filters as an Outlook .rwz file and triggers

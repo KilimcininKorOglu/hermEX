@@ -26,6 +26,10 @@ import { useI18n } from "@/hooks/useI18n"
 import api from "@/utils/api"
 import type { Filter, FilterCondition, FilterAction, FilterInput } from "@/utils/api"
 
+// RUN_FOLDERS are the folders a manual filter run may sweep, matching the slugs the
+// API resolves.
+const RUN_FOLDERS = ["inbox", "spam", "trash", "sent", "drafts"] as const
+
 type TFunc = (key: string, params?: Record<string, string>) => string
 
 const conditionFields = (t: TFunc): { value: FilterCondition["field"]; label: string }[] => [
@@ -220,6 +224,10 @@ export function FiltersPage() {
   const [deleteTarget, setDeleteTarget] = useState<Filter | null>(null)
   const [transferring, setTransferring] = useState(false)
   const [running, setRunning] = useState(false)
+  // runFolder is the folder a manual run sweeps. Filters are stored on the inbox,
+  // so a rule written after the fact is applied to wherever the old mail actually
+  // is by choosing that folder here.
+  const [runFolder, setRunFolder] = useState("inbox")
   const importInputRef = useRef<HTMLInputElement>(null)
 
   const loadFilters = useCallback(async () => {
@@ -254,19 +262,25 @@ export function FiltersPage() {
     }
   }, [t])
 
-  // handleRunNow applies the saved filters to the inbox's existing mail and
-  // reports how many messages a rule acted on (the old webmail's "run now").
-  const handleRunNow = useCallback(async () => {
-    setRunning(true)
-    try {
-      const res = await api.runFilters()
-      toast.success(t("filters.toast.ran", { affected: String(res.affected), evaluated: String(res.evaluated) }))
-    } catch {
-      toast.error(t("filters.toast.runFailed"))
-    } finally {
-      setRunning(false)
-    }
-  }, [t])
+  // handleRunNow applies the saved filters to the chosen folder's existing mail and
+  // reports how many messages a rule acted on (the old webmail's "run now"). A
+  // filter id runs only that one, so fixing a single filter does not re-run the rest.
+  const handleRunNow = useCallback(
+    async (filterId?: string) => {
+      setRunning(true)
+      try {
+        const res = await api.runFilters({ folder: runFolder, filter: filterId })
+        toast.success(
+          t("filters.toast.ran", { affected: String(res.affected), evaluated: String(res.evaluated) }),
+        )
+      } catch {
+        toast.error(t("filters.toast.runFailed"))
+      } finally {
+        setRunning(false)
+      }
+    },
+    [runFolder, t],
+  )
 
   const handleImportFile = useCallback(
     async (file: File) => {
@@ -501,9 +515,21 @@ export function FiltersPage() {
             <Download className="h-4 w-4 mr-1" />
             {t("filters.export")}
           </Button>
+          <Select value={runFolder} onValueChange={setRunFolder}>
+            <SelectTrigger className="w-36" title={t("filters.runFolderHint")}>
+              <SelectValue placeholder={t("filters.runFolder")} />
+            </SelectTrigger>
+            <SelectContent>
+              {RUN_FOLDERS.map((f) => (
+                <SelectItem key={f} value={f}>
+                  {t(`nav.${f}`)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button
             variant="outline"
-            onClick={handleRunNow}
+            onClick={() => handleRunNow()}
             disabled={running || filters.length === 0}
             title={t("filters.runNowHint")}
           >
@@ -594,6 +620,16 @@ export function FiltersPage() {
                     checked={filter.enabled}
                     onCheckedChange={() => handleToggle(filter)}
                   />
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    disabled={running || !filter.enabled}
+                    title={t("filters.runThis")}
+                    onClick={() => handleRunNow(filter.id)}
+                  >
+                    <Play className="h-4 w-4" />
+                  </Button>
                   <Button
                     variant="ghost"
                     size="icon"
