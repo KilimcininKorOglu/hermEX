@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { DRAG_TYPE, MAX_DRAG_BYTES, fileFromDrag, setAttachmentDrag } from './attachmentDrag'
+import { DRAG_TYPE, MAX_DRAG_BYTES, fileFromDrag, filesFromDrag, setAttachmentDrag } from './attachmentDrag'
 
 // fakeTransfer stands in for a DataTransfer, which jsdom does not construct.
 function fakeTransfer(entries: Record<string, string> = {}): DataTransfer {
@@ -86,5 +86,40 @@ describe('fileFromDrag', () => {
     const big = btoa('x'.repeat(MAX_DRAG_BYTES + 1))
     const data = fakeTransfer({ [DRAG_TYPE]: JSON.stringify({ name: 'big.bin', type: 'application/octet-stream', content: big }) })
     expect(fileFromDrag(data)).toBeNull()
+  })
+})
+
+describe('a selection', () => {
+  const one = { name: 'a.pdf', type: 'application/pdf', content: helloB64 }
+  const two = { name: 'b.pdf', type: 'application/pdf', content: helloB64 }
+
+  it('carries every attachment of the selection', () => {
+    const data = fakeTransfer()
+    setAttachmentDrag(data, [one, two])
+    expect(filesFromDrag(data).map((f) => f.name)).toEqual(['a.pdf', 'b.pdf'])
+  })
+
+  // A selection of one must look exactly like a single drag, so a drop side
+  // written before selections existed still reads it.
+  it('writes a selection of one as a single payload', () => {
+    const data = fakeTransfer()
+    setAttachmentDrag(data, [one])
+    expect(Array.isArray(JSON.parse(data.getData(DRAG_TYPE)))).toBe(false)
+    expect(fileFromDrag(data)!.name).toBe('a.pdf')
+  })
+
+  it('names every attachment in the plain-text flavour', () => {
+    const data = fakeTransfer()
+    setAttachmentDrag(data, [one, two])
+    expect(data.getData('text/plain')).toBe('a.pdf, b.pdf')
+  })
+
+  // One payload the drop side cannot trust must not cost the reader the rest of
+  // the selection they asked to move.
+  it('drops an untrustworthy payload and keeps the rest', () => {
+    const data = fakeTransfer({
+      [DRAG_TYPE]: JSON.stringify([one, { name: 'bad', type: 'x', content: '' }, two]),
+    })
+    expect(filesFromDrag(data).map((f) => f.name)).toEqual(['a.pdf', 'b.pdf'])
   })
 })

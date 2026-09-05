@@ -248,7 +248,8 @@
     "noteAdded": "Note added",
     "noteFailed": "Could not save the note",
     "deleteNote": "Delete note",
-    "previewLarge": "Preview ({size})"
+    "previewLarge": "Preview ({size})",
+    "downloadSelected": "Download {count} selected"
   },
   "compose": {
     "invalidEmail": "Enter a valid email address",

@@ -55,6 +55,8 @@ import { toast } from "sonner"
 import { sanitizeEmailBody } from "@/utils/sanitize"
 import { forwardParams, replyAllParams, replyParams, type QuoteLabels } from "@/utils/replyParams"
 import { MAX_DRAG_BYTES, blobToBase64, setAttachmentDrag } from "@/utils/attachmentDrag"
+import { dragSet, emptySelection, selectOnClick } from "@/utils/attachmentSelection"
+import { cn } from "@/lib/utils"
 import api from "@/utils/api"
 import type { MeetingInvite, AttachmentInfo, Note } from "@/utils/api"
 import * as smimeStore from "@/utils/smime"
@@ -189,6 +191,9 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
   // points at the attachment. A drag begun before that read answers carries no
   // payload, and dragging again works.
   const dragPayloads = useRef<Record<number, string>>({})
+  // Which attachments the reader has selected. A drag or a download started
+  // inside the selection covers all of it.
+  const [attachSelection, setAttachSelection] = useState(emptySelection)
   // The cap itself is the operator's, served with the appearance settings. The
   // fallback here only covers the moment before that request answers.
   const [previewMaxBytes, setPreviewMaxBytes] = useState(FALLBACK_PREVIEW_MAX_BYTES)
@@ -240,6 +245,7 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
   useEffect(() => {
     setShowImages(false) // re-block remote images for each newly opened message
     setPreviewRequested([]) // a request to preview covers one message, not the next
+    setAttachSelection(emptySelection)
     const loadEmail = async () => {
       if (!id) {
         setLoading(false)
@@ -665,13 +671,47 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
   }
 
   const handleDragStart = (e: React.DragEvent, att: AttachmentInfo) => {
-    const content = dragPayloads.current[att.index]
-    if (content === undefined) return
-    setAttachmentDrag(e.dataTransfer, {
-      name: att.filename,
-      type: att.contentType || "application/octet-stream",
-      content,
-    })
+    if (!email) return
+    const wanted = dragSet(attachSelection, att.index)
+    const payloads = []
+    for (const i of wanted) {
+      const content = dragPayloads.current[i]
+      // The selection travels whole or not at all: handing over the part that
+      // happens to be read would drop the rest without saying so. The missing
+      // ones are being read now, so the next drag carries everything.
+      if (content === undefined) {
+        for (const a of email.attachments) {
+          if (wanted.includes(a.index)) void prepareDrag(a)
+        }
+        return
+      }
+      const a = email.attachments.find((x) => x.index === i)
+      payloads.push({
+        name: a?.filename ?? "attachment",
+        type: a?.contentType || "application/octet-stream",
+        content,
+      })
+    }
+    setAttachmentDrag(e.dataTransfer, payloads)
+  }
+
+  // handleAttachmentClick selects when the click carries a modifier, and opens
+  // the attachment otherwise.
+  const handleAttachmentClick = (e: React.MouseEvent, att: AttachmentInfo) => {
+    const { selection, selected } = selectOnClick(attachSelection, att.index, e)
+    if (selected) {
+      e.preventDefault()
+      setAttachSelection(selection)
+      // Selecting starts the reads, so a drag of the selection can hand it over
+      // whole.
+      if (email) {
+        for (const a of email.attachments) {
+          if (selection.indexes.includes(a.index)) void prepareDrag(a)
+        }
+      }
+      return
+    }
+    void handleDownloadAttachment(att)
   }
 
   const handleDownloadAttachment = async (att: AttachmentInfo) => {
@@ -685,10 +725,14 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
 
   // handleDownloadAll fetches every attachment as one .zip. A same-origin anchor
   // carries the session cookie, and the server names the file.
+  // handleDownloadAll fetches an archive of the attachments. With a selection it
+  // holds exactly that selection, because one archive is all the operating
+  // system takes from a single gesture.
   const handleDownloadAll = () => {
     if (!email) return
+    const indexes = attachSelection.indexes.map((i) => `&index=${i}`).join("")
     const a = document.createElement("a")
-    a.href = `/api/v1/mail/attachments-zip?id=${encodeURIComponent(email.id)}`
+    a.href = `/api/v1/mail/attachments-zip?id=${encodeURIComponent(email.id)}${indexes}`
     a.download = "attachments.zip"
     document.body.appendChild(a)
     a.click()
@@ -1302,7 +1346,9 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                       title={t("emailDetail.downloadAll")}
                     >
                       <Download className="h-3.5 w-3.5" />
-                      {t("emailDetail.downloadAll")}
+                      {attachSelection.indexes.length > 0
+                        ? t("emailDetail.downloadSelected", { count: String(attachSelection.indexes.length) })
+                        : t("emailDetail.downloadAll")}
                     </button>
                   )}
                 </div>
@@ -1319,8 +1365,13 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                           draggable
                           onPointerEnter={() => void prepareDrag(att)}
                           onDragStart={(e) => handleDragStart(e, att)}
-                          onClick={() => handleDownloadAttachment(att)}
-                          className="flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-left text-sm hover:bg-accent/50 transition-colors"
+                          onClick={(e) => handleAttachmentClick(e, att)}
+                          className={cn(
+                            "flex items-center gap-2 rounded-lg border bg-card px-3 py-2 text-left text-sm transition-colors",
+                            attachSelection.indexes.includes(att.index)
+                              ? "border-primary bg-primary/10"
+                              : "hover:bg-accent/50",
+                          )}
                           title={t("emailDetail.downloadAttachment", { filename: att.filename })}
                         >
                           <Paperclip className="h-4 w-4 shrink-0 text-muted-foreground" />

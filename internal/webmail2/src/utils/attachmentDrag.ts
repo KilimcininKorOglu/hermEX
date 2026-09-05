@@ -25,28 +25,48 @@ export interface DragPayload {
   content: string // base64
 }
 
-// setAttachmentDrag puts one attachment on the drag.
-export function setAttachmentDrag(data: DataTransfer, payload: DragPayload): void {
-  data.setData(DRAG_TYPE, JSON.stringify(payload))
+// setAttachmentDrag puts one attachment, or a whole selection, on the drag. The
+// drop side reads either shape, so a selection of one is not a special case.
+export function setAttachmentDrag(data: DataTransfer, payload: DragPayload | DragPayload[]): void {
+  const list = Array.isArray(payload) ? payload : [payload]
+  data.setData(DRAG_TYPE, JSON.stringify(list.length === 1 ? list[0] : list))
   // A plain-text flavour so a drop onto something that only understands text
   // still says what was dragged rather than arriving empty.
-  data.setData("text/plain", payload.name)
+  data.setData("text/plain", list.map((p) => p.name).join(", "))
   data.effectAllowed = "copy"
 }
 
-// fileFromDrag rebuilds the dragged attachment as a File, or returns null when
-// the drag carries no payload or one that cannot be trusted.
+// fileFromDrag rebuilds the FIRST dragged attachment, kept for a caller that
+// wants one file. It returns null when the drag carries no payload.
 export function fileFromDrag(data: DataTransfer): File | null {
-  const raw = data.getData(DRAG_TYPE)
-  if (!raw) return null
-  let payload: DragPayload
-  try {
-    payload = JSON.parse(raw) as DragPayload
-  } catch {
-    return null
-  }
-  if (!payload || typeof payload.content !== "string") return null
+  const files = filesFromDrag(data)
+  return files.length > 0 ? files[0] : null
+}
 
+// filesFromDrag rebuilds every dragged attachment as a File. A payload that
+// cannot be trusted is dropped rather than failing the whole drag, because the
+// rest of the selection is still what the reader asked to move.
+export function filesFromDrag(data: DataTransfer): File[] {
+  const raw = data.getData(DRAG_TYPE)
+  if (!raw) return []
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    return []
+  }
+  const list = Array.isArray(parsed) ? parsed : [parsed]
+  const out: File[] = []
+  for (const item of list) {
+    const file = fileFromPayload(item as DragPayload)
+    if (file) out.push(file)
+  }
+  return out
+}
+
+// fileFromPayload rebuilds one payload, refusing what it cannot trust.
+function fileFromPayload(payload: DragPayload): File | null {
+  if (!payload || typeof payload.content !== "string") return null
   const bytes = decodeBase64(payload.content)
   if (!bytes || bytes.length === 0 || bytes.length > MAX_DRAG_BYTES) return null
   return new File([bytes], safeName(payload.name), { type: safeType(payload.type) })

@@ -248,7 +248,8 @@
     "noteAdded": "Not eklendi",
     "noteFailed": "Not kaydedilemedi",
     "deleteNote": "Notu sil",
-    "previewLarge": "Önizle ({size})"
+    "previewLarge": "Önizle ({size})",
+    "downloadSelected": "Seçili {count} eki indir"
   },
   "compose": {
     "invalidEmail": "Geçerli bir e-posta adresi girin",
