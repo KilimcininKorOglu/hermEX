@@ -370,7 +370,7 @@ func (s *Store) ensureObjectSchema() error {
 	}
 	// Fresh and existing stores converge here: apply any migrations beyond the
 	// baseline once, and refuse a store recorded newer than this binary.
-	return migrate.Run(context.Background(), s.objectDriver(), objectSchemaVersion, objectMigrations)
+	return s.migrateAndBackfill()
 }
 
 // objectDriver migrates objects.sqlite3, whose schema version lives in the

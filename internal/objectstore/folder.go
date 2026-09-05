@@ -43,6 +43,14 @@ var builtinFolders = []builtinFolder{
 	{mapi.PrivateFIDGALContacts, mapi.PrivateFIDContacts, "GAL Contacts", "IPF.Contact.GalContacts", true},
 	{mapi.PrivateFIDJunk, mapi.PrivateFIDIPMSubtree, "Junk Email", mapi.ContainerClassNote, false},
 	{mapi.PrivateFIDConversationActionSettings, mapi.PrivateFIDIPMSubtree, "Conversation Action Settings", "IPF.Configuration", true},
+	{mapi.PrivateFIDArchive, mapi.PrivateFIDIPMSubtree, "Archive", mapi.ContainerClassNote, false},
+	{mapi.PrivateFIDConversationHistory, mapi.PrivateFIDIPMSubtree, "Conversation History", mapi.ContainerClassNote, false},
+	// The recipient cache is where a client keeps the addresses it has
+	// autocompleted. It holds contacts, so it carries a contact container class.
+	// It is NOT hidden: a hidden folder is left out of the folder listing, and a
+	// client that cannot bind to this one creates a second cache of its own that
+	// no other client can read.
+	{mapi.PrivateFIDRecipientCache, mapi.PrivateFIDIPMSubtree, "Recipient Cache", "IPF.Contact.RecipientCache", false},
 	{mapi.PrivateFIDDeferredAction, mapi.PrivateFIDRoot, "Deferred Action", "", false},
 	{mapi.PrivateFIDCommonViews, mapi.PrivateFIDRoot, "Common Views", "", false},
 	{mapi.PrivateFIDSchedule, mapi.PrivateFIDRoot, "Schedule", "", false},

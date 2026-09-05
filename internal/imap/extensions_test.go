@@ -93,8 +93,8 @@ func TestIMAPUIDPlus(t *testing.T) {
 	}
 
 	// COPY into a new folder replies with a [COPYUID uidvalidity src dst] code.
-	c.mustOK("a4", "CREATE Archive")
-	if a5 := c.taggedLine("a5", "COPY 1 Archive"); !strings.Contains(a5, "[COPYUID ") {
+	c.mustOK("a4", "CREATE Projects")
+	if a5 := c.taggedLine("a5", "COPY 1 Projects"); !strings.Contains(a5, "[COPYUID ") {
 		t.Errorf("COPY = %q, want a [COPYUID ...] response code", a5)
 	}
 
@@ -125,13 +125,13 @@ func TestIMAPMove(t *testing.T) {
 	c, _ := startServer(t)
 	c.mustOK("a1", "LOGIN alice secret")
 	c.mustOK("a2", "SELECT INBOX") // UIDs 1, 2
-	c.mustOK("a3", "CREATE Archive")
+	c.mustOK("a3", "CREATE Projects")
 
 	if caps := strings.Join(c.mustOK("a0", "CAPABILITY"), " "); !strings.Contains(caps, "MOVE") {
 		t.Errorf("CAPABILITY missing MOVE: %s", caps)
 	}
 
-	un, status := c.do("a4", "MOVE 1 Archive")
+	un, status := c.do("a4", "MOVE 1 Projects")
 	if status != "OK" {
 		t.Fatalf("MOVE status = %s, want OK", status)
 	}
@@ -146,8 +146,8 @@ func TestIMAPMove(t *testing.T) {
 	if got := strings.Join(c.mustOK("a5", "SELECT INBOX"), " "); !strings.Contains(got, "1 EXISTS") {
 		t.Errorf("after MOVE, INBOX = %q, want 1 EXISTS (source lost the message)", got)
 	}
-	if got := strings.Join(c.mustOK("a6", "SELECT Archive"), " "); !strings.Contains(got, "1 EXISTS") {
-		t.Errorf("after MOVE, Archive = %q, want 1 EXISTS (destination gained it)", got)
+	if got := strings.Join(c.mustOK("a6", "SELECT Projects"), " "); !strings.Contains(got, "1 EXISTS") {
+		t.Errorf("after MOVE, Projects = %q, want 1 EXISTS (destination gained it)", got)
 	}
 }
 

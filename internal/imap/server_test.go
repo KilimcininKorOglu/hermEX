@@ -196,27 +196,27 @@ func TestIMAPCreateSubscribeLsub(t *testing.T) {
 	c, _ := startServer(t)
 	c.mustOK("a1", "LOGIN alice secret")
 
-	c.mustOK("a2", "CREATE Archive")
-	if un := c.mustOK("a3", `LIST "" "*"`); !containsSubstr(un, `"Archive"`) {
-		t.Errorf("LIST after CREATE missing Archive: %v", un)
+	c.mustOK("a2", "CREATE Projects")
+	if un := c.mustOK("a3", `LIST "" "*"`); !containsSubstr(un, `"Projects"`) {
+		t.Errorf("LIST after CREATE missing Projects: %v", un)
 	}
-	// Created folders are subscribed by default, so LSUB shows Archive...
-	if un := c.mustOK("a4", `LSUB "" "*"`); !containsSubstr(un, `"Archive"`) {
-		t.Errorf("LSUB missing Archive: %v", un)
+	// Created folders are subscribed by default, so LSUB shows Projects...
+	if un := c.mustOK("a4", `LSUB "" "*"`); !containsSubstr(un, `"Projects"`) {
+		t.Errorf("LSUB missing Projects: %v", un)
 	}
 	// ...and disappears from LSUB after UNSUBSCRIBE, while staying in LIST.
-	c.mustOK("a5", "UNSUBSCRIBE Archive")
-	if un := c.mustOK("a6", `LSUB "" "*"`); containsSubstr(un, `"Archive"`) {
-		t.Errorf("LSUB still lists unsubscribed Archive: %v", un)
+	c.mustOK("a5", "UNSUBSCRIBE Projects")
+	if un := c.mustOK("a6", `LSUB "" "*"`); containsSubstr(un, `"Projects"`) {
+		t.Errorf("LSUB still lists unsubscribed Projects: %v", un)
 	}
-	if un := c.mustOK("a7", `LIST "" "*"`); !containsSubstr(un, `"Archive"`) {
-		t.Errorf("LIST dropped Archive after UNSUBSCRIBE: %v", un)
+	if un := c.mustOK("a7", `LIST "" "*"`); !containsSubstr(un, `"Projects"`) {
+		t.Errorf("LIST dropped Projects after UNSUBSCRIBE: %v", un)
 	}
 
 	// DELETE removes it from LIST.
-	c.mustOK("a8", "DELETE Archive")
-	if un := c.mustOK("a9", `LIST "" "*"`); containsSubstr(un, `"Archive"`) {
-		t.Errorf("LIST still has deleted Archive: %v", un)
+	c.mustOK("a8", "DELETE Projects")
+	if un := c.mustOK("a9", `LIST "" "*"`); containsSubstr(un, `"Projects"`) {
+		t.Errorf("LIST still has deleted Projects: %v", un)
 	}
 }
 
@@ -320,13 +320,13 @@ func TestIMAPStoreAndSearch(t *testing.T) {
 func TestIMAPCopyAndAppend(t *testing.T) {
 	c, _ := startServer(t)
 	c.mustOK("a1", "LOGIN alice secret")
-	c.mustOK("a2", "CREATE Archive")
+	c.mustOK("a2", "CREATE Projects")
 	c.mustOK("a3", "SELECT INBOX")
 
-	// COPY message 1 into Archive, then verify Archive holds exactly one.
-	c.mustOK("a4", "COPY 1 Archive")
-	if un := c.mustOK("a5", "EXAMINE Archive"); !hasPrefixAny(un, "* 1 EXISTS") {
-		t.Errorf("Archive after COPY = %v", un)
+	// COPY message 1 into Projects, then verify Projects holds exactly one.
+	c.mustOK("a4", "COPY 1 Projects")
+	if un := c.mustOK("a5", "EXAMINE Projects"); !hasPrefixAny(un, "* 1 EXISTS") {
+		t.Errorf("Projects after COPY = %v", un)
 	}
 
 	// APPEND a new message into INBOX (synchronizing literal), then confirm the

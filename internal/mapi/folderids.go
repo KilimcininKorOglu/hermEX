@@ -35,7 +35,10 @@ const (
 	PrivateFIDLocalFailures              = 0x1b
 	PrivateFIDServerFailures             = 0x1c
 	PrivateFIDConversationActionSettings = 0x1d
-	PrivateFIDUnassignedStart            = 0x1e
+	PrivateFIDArchive                    = 0x1e
+	PrivateFIDConversationHistory        = 0x1f
+	PrivateFIDRecipientCache             = 0x20
+	PrivateFIDUnassignedStart            = 0x21
 )
 
 // Built-in folder identifiers for a public store (MS-OXOSFLD).

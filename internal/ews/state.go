@@ -91,4 +91,10 @@ var distinguishedFolders = map[string]int64{
 	"tasks":         mapi.PrivateFIDTasks,
 	"notes":         mapi.PrivateFIDNotes,
 	"journal":       mapi.PrivateFIDJournal,
+	// Folders a desktop client asks for by name. The recipient cache is where it
+	// keeps the addresses it has autocompleted; without a folder to put them in,
+	// the client creates one of its own and the two never agree.
+	"archive":             mapi.PrivateFIDArchive,
+	"conversationhistory": mapi.PrivateFIDConversationHistory,
+	"recipientcache":      mapi.PrivateFIDRecipientCache,
 }
