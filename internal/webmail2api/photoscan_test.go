@@ -6,11 +6,11 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
 	"hermex/internal/avtest"
-	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
 
@@ -61,28 +61,27 @@ func putPhoto(t *testing.T, srv *Server, token, id string, photo []byte) *httpte
 	return rec
 }
 
-// contactHasPhoto reports whether the contact carries a photo attachment.
+// contactHasPhoto reports whether the NAMED contact carries a photo attachment.
+// It opens that one contact rather than scanning the folder, because a scan
+// answers "some contact has a photo" and passes on a mailbox holding a single
+// contact even when the upload landed on the wrong object.
 func contactHasPhoto(t *testing.T, mbox, id string) bool {
 	t.Helper()
+	mid, err := strconv.ParseInt(id, 10, 64)
+	if err != nil {
+		t.Fatalf("contact id %q is not a message id: %v", id, err)
+	}
 	st, err := objectstore.Open(mbox)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	msgs, err := st.ListFolderObjects(int64(mapi.PrivateFIDContacts))
+	msg, err := st.OpenMessage(mid)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("open contact %d: %v", mid, err)
 	}
-	for _, mid := range msgs {
-		msg, err := st.OpenMessage(mid.ID)
-		if err != nil {
-			continue
-		}
-		if _, _, has := contactPhotoAttachment(msg); has {
-			return true
-		}
-	}
-	return false
+	_, _, has := contactPhotoAttachment(msg)
+	return has
 }
 
 // TestContactPhotoRefusesInfectedContent is the missing-scan defect. The uploaded
