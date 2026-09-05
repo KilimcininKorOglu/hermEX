@@ -516,6 +516,42 @@ func notesLinkedTo(st *objectstore.Store, messageID string) []noteJSON {
 	return out
 }
 
+// mailLinkFor reads the Message-ID of one mail server-side. A non-zero status is
+// the failure to report, with the reason to send back; the browser never handles
+// the Message-ID and so cannot link a note to a mail it cannot open.
+func mailLinkFor(st *objectstore.Store, fid int64, uid uint32) (link string, status int, reason string) {
+	info, err := st.MessageByUID(fid, uid)
+	if err != nil {
+		return "", http.StatusNotFound, "not found"
+	}
+	msg, err := st.OpenMessage(info.ID)
+	if err != nil {
+		return "", http.StatusNotFound, "not found"
+	}
+	link = propString(msg, mapi.PrInternetMessageID)
+	if link == "" {
+		// A draft or an item this server composed, not received mail.
+		return "", http.StatusBadRequest, "this message cannot be annotated"
+	}
+	return link, 0, ""
+}
+
+// noteProps builds the sticky note that carries the link back to the mail.
+func noteProps(st *objectstore.Store, title, body string, color int, link string) mapi.PropertyValues {
+	var props mapi.PropertyValues
+	props.Set(mapi.PrMessageClass, "IPM.StickyNote")
+	props.Set(mapi.PrSubject, title)
+	props.Set(mapi.PrBody, body)
+	if color != 0 && fitsMAPILong(color) {
+		if tag, err := noteColorTag(st, true); err == nil && tag != 0 {
+			// #nosec G115 -- the fitsMAPILong guard on the same line refuses a value the property cannot carry
+			props.Set(tag, int32(color))
+		}
+	}
+	setNoteLink(st, &props, link)
+	return props
+}
+
 // handleCreateMailNote annotates one mail. The mail is named by the SPA's opaque
 // message id and its Message-ID is read server-side, the same way
 // handleGetMailNotes reads it, so the browser never handles it and cannot link a
@@ -537,33 +573,13 @@ func (s *Server) handleCreateMailNote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	info, err := st.MessageByUID(fid, uid)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-		return
-	}
-	msg, err := st.OpenMessage(info.ID)
-	if err != nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
-		return
-	}
-	link := propString(msg, mapi.PrInternetMessageID)
-	if link == "" {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "this message cannot be annotated"})
+	link, status, reason := mailLinkFor(st, fid, uid)
+	if status != 0 {
+		writeJSON(w, status, map[string]string{"error": reason})
 		return
 	}
 
-	var props mapi.PropertyValues
-	props.Set(mapi.PrMessageClass, "IPM.StickyNote")
-	props.Set(mapi.PrSubject, in.Title)
-	props.Set(mapi.PrBody, in.Body)
-	if in.Color != 0 && fitsMAPILong(in.Color) {
-		if tag, err := noteColorTag(st, true); err == nil && tag != 0 {
-			// #nosec G115 -- the fitsMAPILong guard on the same line refuses a value the property cannot carry
-			props.Set(tag, int32(in.Color))
-		}
-	}
-	setNoteLink(st, &props, link)
+	props := noteProps(st, in.Title, in.Body, in.Color, link)
 	id, err := st.CreateMessage(mapi.PrivateFIDNotes, &oxcmail.Message{Props: props})
 	if err != nil {
 		logError("create-mail-note", err, logging.Fields{})

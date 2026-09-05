@@ -87,24 +87,7 @@ func Decode(raw []byte) (List, error) {
 	for _, c := range doc.Categories {
 		cat := Category{Color: -1}
 		for _, a := range c.Attrs {
-			switch a.Name.Local {
-			case "name":
-				cat.Name = a.Value
-			case "color":
-				cat.Color = atoiDefault(a.Value, -1)
-			case "guid":
-				cat.GUID = a.Value
-			case "keyboardShortcut":
-				cat.KeyboardShortcut = a.Value
-			case "usageCount":
-				cat.UsageCount = a.Value
-			case "lastTimeUsed":
-				cat.LastTimeUsed = a.Value
-			case "lastSessionUsed":
-				cat.LastSessionUsed = a.Value
-			default:
-				cat.Other = append(cat.Other, a)
-			}
+			applyCategoryAttr(&cat, a)
 		}
 		if cat.Name == "" {
 			continue // a category with no name is not addressable by a keyword
@@ -112,6 +95,30 @@ func Decode(raw []byte) (List, error) {
 		out.Categories = append(out.Categories, cat)
 	}
 	return out, nil
+}
+
+// applyCategoryAttr copies one XML attribute into the field it belongs to. An
+// attribute this version does not model rides in Other and is written back
+// verbatim, because it belongs to Outlook.
+func applyCategoryAttr(cat *Category, a xml.Attr) {
+	switch a.Name.Local {
+	case "name":
+		cat.Name = a.Value
+	case "color":
+		cat.Color = atoiDefault(a.Value, -1)
+	case "guid":
+		cat.GUID = a.Value
+	case "keyboardShortcut":
+		cat.KeyboardShortcut = a.Value
+	case "usageCount":
+		cat.UsageCount = a.Value
+	case "lastTimeUsed":
+		cat.LastTimeUsed = a.Value
+	case "lastSessionUsed":
+		cat.LastSessionUsed = a.Value
+	default:
+		cat.Other = append(cat.Other, a)
+	}
 }
 
 // Encode renders the list back to the XML the configuration message carries.

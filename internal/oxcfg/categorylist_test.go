@@ -26,6 +26,15 @@ func TestDecodeOutlookList(t *testing.T) {
 	if len(l.Categories) != 2 {
 		t.Fatalf("got %d categories, want 2", len(l.Categories))
 	}
+}
+
+// TestDecodeCategoryAttributes pins the per-category fields, including the
+// bookkeeping hermEX does not use but must carry.
+func TestDecodeCategoryAttributes(t *testing.T) {
+	l, err := Decode([]byte(outlookList))
+	if err != nil {
+		t.Fatal(err)
+	}
 	c := l.Categories[0]
 	if c.Name != "Red category" || c.Color != 0 || c.GUID != "{11111111-2222-3333-4444-555555555555}" {
 		t.Errorf("first category = %+v", c)

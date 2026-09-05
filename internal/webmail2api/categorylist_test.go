@@ -55,17 +55,10 @@ func readCategories(t *testing.T, do func(string, string, string) *httptest.Resp
 	return out.Categories
 }
 
-// TestCategoryListIsStoredWhereOutlookReadsIt is the interop guarantee. A category
-// saved from webmail has to land in the configuration message Outlook reads, or
-// the two clients show different lists for one mailbox.
-func TestCategoryListIsStoredWhereOutlookReadsIt(t *testing.T) {
-	do, dir := categoryHarness(t)
-
-	if rec := do(http.MethodPut, "/api/v1/categories",
-		`{"categories":[{"name":"Project X","color":"#b6cbe4"}]}`); rec.Code != http.StatusOK {
-		t.Fatalf("put: status %d body %s", rec.Code, rec.Body.String())
-	}
-
+// storedList reads the configuration message straight out of the mailbox, the way
+// Outlook would, without going through the API that wrote it.
+func storedList(t *testing.T, dir string) oxcfg.List {
+	t.Helper()
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -85,19 +78,59 @@ func TestCategoryListIsStoredWhereOutlookReadsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return l
+}
+
+// seedOutlookList writes a list into the mailbox the way Outlook would have.
+func seedOutlookList(t *testing.T, dir string, l oxcfg.List) {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := writeCategoryList(st, l); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// assertCalendarHasNoVisibleObjects proves the configuration message is
+// associated. An unassociated one shows up as an item in the user's calendar.
+func assertCalendarHasNoVisibleObjects(t *testing.T, dir string) {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objs) != 0 {
+		t.Errorf("the calendar lists %d visible objects; the configuration message is not associated", len(objs))
+	}
+}
+
+// TestCategoryListIsStoredWhereOutlookReadsIt is the interop guarantee. A category
+// saved from webmail has to land in the configuration message Outlook reads, or
+// the two clients show different lists for one mailbox.
+func TestCategoryListIsStoredWhereOutlookReadsIt(t *testing.T) {
+	do, dir := categoryHarness(t)
+
+	if rec := do(http.MethodPut, "/api/v1/categories",
+		`{"categories":[{"name":"Project X","color":"#b6cbe4"}]}`); rec.Code != http.StatusOK {
+		t.Fatalf("put: status %d body %s", rec.Code, rec.Body.String())
+	}
+
+	l := storedList(t, dir)
 	if len(l.Categories) != 1 || l.Categories[0].Name != "Project X" {
 		t.Fatalf("stored list = %+v", l.Categories)
 	}
 	if l.Categories[0].Color != 7 {
 		t.Errorf("colour = %d, want the palette index 7 for #b6cbe4", l.Categories[0].Color)
 	}
-	// The configuration message must be associated, or it shows up as an item in
-	// the user's calendar.
-	if objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar)); err != nil {
-		t.Fatal(err)
-	} else if len(objs) != 0 {
-		t.Errorf("the calendar lists %d visible objects; the configuration message is not associated", len(objs))
-	}
+	assertCalendarHasNoVisibleObjects(t, dir)
 }
 
 // TestCategoryEditKeepsOutlooksBookkeeping proves an edit from webmail folds onto
@@ -106,33 +139,16 @@ func TestCategoryListIsStoredWhereOutlookReadsIt(t *testing.T) {
 func TestCategoryEditKeepsOutlooksBookkeeping(t *testing.T) {
 	do, dir := categoryHarness(t)
 
-	// Seed the mailbox the way Outlook would have.
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	seeded := oxcfg.List{Default: "Project X", Categories: []oxcfg.Category{{
+	seedOutlookList(t, dir, oxcfg.List{Default: "Project X", Categories: []oxcfg.Category{{
 		Name: "Project X", Color: 7, GUID: "{abc}", KeyboardShortcut: "3", UsageCount: "9",
-	}}}
-	if err := writeCategoryList(st, seeded); err != nil {
-		t.Fatal(err)
-	}
-	st.Close()
+	}}})
 
 	if rec := do(http.MethodPut, "/api/v1/categories",
 		`{"categories":[{"name":"Project X","color":"#c0e2b1"}]}`); rec.Code != http.StatusOK {
 		t.Fatalf("put: status %d", rec.Code)
 	}
 
-	st, err = objectstore.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	l, ok, err := readCategoryList(st)
-	if err != nil || !ok {
-		t.Fatalf("read back: ok=%v err=%v", ok, err)
-	}
+	l := storedList(t, dir)
 	if len(l.Categories) != 1 {
 		t.Fatalf("got %d categories", len(l.Categories))
 	}
