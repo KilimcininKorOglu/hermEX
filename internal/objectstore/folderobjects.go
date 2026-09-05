@@ -202,3 +202,35 @@ func (s *Store) FolderMessageChangeNumbers(folderID int64) (map[int64]uint64, er
 	}
 	return out, rows.Err()
 }
+
+// FindAssociatedByClass returns the id of the folder's associated (FAI) message
+// carrying the given message class, the way a configuration item is addressed:
+// nobody holds an id for it, so it is found by what it is. ok is false when the
+// folder holds none.
+//
+// An FAI message is invisible to ListFolderObjects by design, so this is the only
+// way to reach one. A folder holding several of one class returns the lowest id,
+// which is the oldest, because a duplicate is a client's mistake and the first one
+// written is the one every other client already agreed on.
+func (s *Store) FindAssociatedByClass(folderID int64, class string) (int64, bool, error) {
+	rows, err := s.objdb.Query(
+		`SELECT m.message_id
+		   FROM messages m
+		   JOIN message_properties p ON p.message_id = m.message_id AND p.proptag = ?
+		  WHERE m.parent_fid = ? AND m.is_deleted = 0 AND m.is_associated = 1
+		    AND p.propval = ?
+		  ORDER BY m.message_id`,
+		int64(uint32(mapi.PrMessageClass)), folderID, class)
+	if err != nil {
+		return 0, false, err
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		return 0, false, rows.Err()
+	}
+	var id int64
+	if err := rows.Scan(&id); err != nil {
+		return 0, false, err
+	}
+	return id, true, rows.Err()
+}

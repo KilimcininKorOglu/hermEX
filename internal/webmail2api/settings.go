@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -408,13 +409,32 @@ type categoryJSON struct {
 	Color string `json:"color"`
 }
 
+// handleGetCategories serves the mailbox's master category list. It is read from
+// the Outlook-compatible configuration message, so webmail and Outlook show the
+// same categories; a mailbox that has only the older webmail-private list is
+// seeded from it once, on this first read.
 func (s *Server) handleGetCategories(w http.ResponseWriter, r *http.Request) {
-	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		cats := []categoryJSON{}
-		if raw, ok := m["categories"]; ok {
-			_ = json.Unmarshal(raw, &cats)
+	s.withSettings(w, r, func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
+		l, ok, err := readCategoryList(st)
+		if err != nil {
+			logError("read-category-list", err, logging.Fields{})
+			// Fall back to the webmail-private list rather than showing none: a
+			// stream this server cannot parse is Outlook's, and the user still has
+			// categories on their messages either way.
+			cats := []categoryJSON{}
+			if raw, hasRaw := m["categories"]; hasRaw {
+				_ = json.Unmarshal(raw, &cats)
+			}
+			return map[string]any{"categories": cats}, false
 		}
-		return map[string]any{"categories": cats}, false
+		if !ok {
+			seeded, serr := seedCategoryList(st, m)
+			if serr != nil {
+				logError("seed-category-list", serr, logging.Fields{})
+			}
+			l = seeded
+		}
+		return map[string]any{"categories": categoriesFromList(l)}, false
 	})
 }
 
@@ -426,10 +446,22 @@ func (s *Server) handlePutCategories(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
+	s.withSettings(w, r, func(st *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
+		// Fold the edit onto the stored list so each surviving category keeps the
+		// guid, shortcut and usage counts Outlook owns.
+		stored, _, err := readCategoryList(st)
+		if err != nil {
+			logError("read-category-list", err, logging.Fields{})
+		}
+		merged := mergeCategories(stored, body.Categories)
+		if err := writeCategoryList(st, merged); err != nil {
+			logError("write-category-list", err, logging.Fields{})
+		}
+		// The webmail-private copy is kept in step so a client reading the settings
+		// blob directly does not see a stale list.
 		raw, _ := json.Marshal(body.Categories)
 		m["categories"] = raw
-		return map[string]any{"categories": body.Categories}, true
+		return map[string]any{"categories": categoriesFromList(merged)}, true
 	})
 }
 

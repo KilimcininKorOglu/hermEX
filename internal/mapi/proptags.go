@@ -61,6 +61,11 @@ const (
 	// settings and signatures persist as a MAPI property rather than in a
 	// dedicated table.
 	PrWebmailSettings = PropTag(0x6772001F) // PtUnicode
+
+	// PrRoamingXmlStream is the XML payload of an FAI configuration message
+	// ([MS-OXOCFG] 2.2.1). The master category list rides it as the XML of
+	// [MS-OXOCFG] 2.2.5, which is what makes the list interoperate with Outlook.
+	PrRoamingXmlStream = PropTag(0x7C080102) // PtBinary
 	// PrOOFSettings is the provider-defined store-root property (0x6773) holding
 	// the out-of-office configuration (reply text, subject, schedule) as a JSON
 	// string. The on/off flag is mirrored into the standard PrOOFState boolean.
