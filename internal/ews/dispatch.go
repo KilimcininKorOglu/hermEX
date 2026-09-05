@@ -143,6 +143,8 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		// Streaming holds the connection open and writes chunked continuations, so
 		// it needs the request (its context signals client disconnect).
 		s.handleGetStreamingEvents(w, r, inner, sess)
+	case "GetAppMarketplaceUrl":
+		s.handleGetAppMarketplaceURL(w)
 	default:
 		writeSOAPFault(w, "ErrorInvalidRequest", "unsupported operation: "+op)
 	}
