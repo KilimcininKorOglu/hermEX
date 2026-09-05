@@ -249,7 +249,9 @@
     "noteFailed": "Could not save the note",
     "deleteNote": "Delete note",
     "previewLarge": "Preview ({size})",
-    "downloadSelected": "Download {count} selected"
+    "downloadSelected": "Download {count} selected",
+    "openInNewTab": "Open in a new tab",
+    "openAttachment": "Open {filename} in a new tab"
   },
   "compose": {
     "invalidEmail": "Enter a valid email address",

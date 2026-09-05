@@ -75,6 +75,21 @@ func safeAttachmentName(raw, fallback string) string {
 // Content-Disposition already says it is. That is deliberately narrow: a format the
 // sniffer cannot confirm (SVG, TIFF, HEIC) stops previewing rather than being
 // rendered on the sender's word.
+// attachmentDisposition decides whether the browser renders the attachment or
+// saves it. Rendering is offered only for the types servedAttachmentType lets
+// through as themselves, a PDF or an image, because everything else is served as
+// opaque bytes precisely so the browser does not interpret sender-controlled
+// content in this origin. Saving stays the default, so a caller that does not
+// ask still gets what it always got.
+func attachmentDisposition(served, want, filename string) string {
+	inline := want == "inline" && (served == "application/pdf" || strings.HasPrefix(served, "image/"))
+	kind := "attachment"
+	if inline {
+		kind = "inline"
+	}
+	return kind + "; filename=\"" + filename + "\""
+}
+
 func servedAttachmentType(declared string, body []byte) string {
 	const opaque = "application/octet-stream"
 	sniffed, _, _ := strings.Cut(http.DetectContentType(body), ";")
@@ -139,8 +154,9 @@ func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	filename := safeAttachmentName(found.Filename(), "attachment")
-	w.Header().Set("Content-Type", servedAttachmentType(found.Type+"/"+found.Subtype, body))
-	w.Header().Set("Content-Disposition", "attachment; filename=\""+filename+"\"")
+	served := servedAttachmentType(found.Type+"/"+found.Subtype, body)
+	w.Header().Set("Content-Type", served)
+	w.Header().Set("Content-Disposition", attachmentDisposition(served, r.URL.Query().Get("disposition"), filename))
 	_, _ = w.Write(body)
 }
 

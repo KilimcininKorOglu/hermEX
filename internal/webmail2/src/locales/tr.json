@@ -249,7 +249,9 @@
     "noteFailed": "Not kaydedilemedi",
     "deleteNote": "Notu sil",
     "previewLarge": "Önizle ({size})",
-    "downloadSelected": "Seçili {count} eki indir"
+    "downloadSelected": "Seçili {count} eki indir",
+    "openInNewTab": "Yeni sekmede aç",
+    "openAttachment": "{filename} dosyasını yeni sekmede aç"
   },
   "compose": {
     "invalidEmail": "Geçerli bir e-posta adresi girin",

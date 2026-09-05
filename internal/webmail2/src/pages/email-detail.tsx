@@ -1357,6 +1357,10 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                     const isImage = att.contentType?.startsWith("image/")
                     const isPdf = att.contentType === "application/pdf"
                     const src = `/api/v1/mail/attachment?id=${encodeURIComponent(email.id)}&index=${att.index}`
+                    // The server saves rather than renders unless asked, and it
+                    // only honours the ask for the types it serves as themselves
+                    // (a PDF or an image). Everything else stays opaque bytes.
+                    const inlineSrc = `${src}&disposition=inline`
                     const pdfPreviewable =
                       att.size <= previewMaxBytes || previewRequested.includes(att.index)
                     return (
@@ -1381,9 +1385,23 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                           </span>
                           <Download className="h-4 w-4 shrink-0 text-muted-foreground" />
                         </button>
+                        {/* Open the attachment on its own, for reading a long
+                            document without the message around it. It is a link
+                            rather than a button so the browser's own "open in a
+                            new window" and "copy address" apply to it. */}
+                        <a
+                          href={inlineSrc}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1 self-start text-xs text-muted-foreground hover:text-foreground transition-colors"
+                          title={t("emailDetail.openAttachment", { filename: att.filename })}
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          {t("emailDetail.openInNewTab")}
+                        </a>
                         {filePreview && isImage && (
                           <img
-                            src={src}
+                            src={inlineSrc}
                             alt={att.filename}
                             className="max-h-48 w-auto rounded border"
                             loading="lazy"
@@ -1399,7 +1417,7 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                         )}
                         {filePreview && isPdf && pdfPreviewable && (
                           <object
-                            data={`${src}#${pdfZoomFragment(pdfZoom)}`}
+                            data={`${inlineSrc}#${pdfZoomFragment(pdfZoom)}`}
                             type="application/pdf"
                             className="h-96 w-full rounded border"
                             aria-label={att.filename}
