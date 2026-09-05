@@ -3,6 +3,7 @@ import { Bold, Italic, Underline, Link } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { isSafeLinkURL, sanitizeClipboard, sanitizeHTML } from "@/utils/sanitize"
 import { linkifyHTML, linkifyNode } from "@/utils/linkify"
+import { countMissingImages, fillMissingImages, imageFilesFrom, imagesFragment, readAsDataURL } from "@/utils/pasteImages"
 
 // Collapses the selection at the given viewport point. Chromium and WebKit expose
 // caretRangeFromPoint, Gecko caretPositionFromPoint; with neither, the insert
@@ -105,18 +106,44 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
 
     // Insert a transferred payload ourselves instead of letting the browser drop
     // the raw fragment into the live DOM, which would run any handler it carries.
-    const insertTransfer = (data: DataTransfer) => {
+    const insertTransfer = async (data: DataTransfer) => {
       // Linkified after sanitizing, so a pasted address is a link on arrival and
       // the anchors this adds are the only ones the sanitizer never saw.
-      const html = linkifyHTML(sanitizeClipboard(data.getData("text/html"), data.getData("text/plain")))
+      let html = linkifyHTML(sanitizeClipboard(data.getData("text/html"), data.getData("text/plain")))
+      html = await withPastedImages(html, data)
       editorRef.current?.focus()
       document.execCommand("insertHTML", false, html)
       onChange(editorRef.current?.innerHTML ?? "")
     }
 
+    // withPastedImages fills the pictures the markup could not supply. A paste
+    // carries its pictures in a flavour of its own: as files for a screenshot,
+    // and only inside the RTF for anything copied out of Word, whose HTML points
+    // at local `file:///` paths no browser will load.
+    const withPastedImages = async (html: string, data: DataTransfer): Promise<string> => {
+      const holes = countMissingImages(html)
+      const bare = html.trim() === ""
+      if (holes === 0 && !bare) return html
+
+      const files = imageFilesFrom(data)
+      let sources: string[] = []
+      try {
+        sources = await Promise.all(files.map(readAsDataURL))
+      } catch {
+        // A picture that will not read leaves the paste as it was, because the
+        // text is still worth inserting.
+        sources = []
+      }
+      if (sources.length === 0) return html
+      // Re-sanitized because the markup is rebuilt here; the sources are local
+      // File bytes, but the sink must not depend on that being remembered.
+      if (bare) return sanitizeHTML(imagesFragment(sources))
+      return sanitizeHTML(fillMissingImages(html, sources))
+    }
+
     const handlePaste = (e: React.ClipboardEvent<HTMLDivElement>) => {
       e.preventDefault()
-      insertTransfer(e.clipboardData)
+      void insertTransfer(e.clipboardData)
     }
 
     // Move the caret to the drop point first, so intercepting the drop does not
@@ -124,7 +151,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
       e.preventDefault()
       placeCaret(e.clientX, e.clientY)
-      insertTransfer(e.dataTransfer)
+      void insertTransfer(e.dataTransfer)
     }
 
     return (
