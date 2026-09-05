@@ -169,9 +169,9 @@ func main() {
 		if !ok {
 			log.Fatalf("hermex-admin: unknown or unreceivable mailbox: %s", args[1])
 		}
-		store, err := objectstore.Open(maildir)
+		store, err := objectstore.OpenExisting(maildir)
 		if err != nil {
-			log.Fatalf("hermex-admin: open mailbox: %v", err)
+			log.Fatalf("hermex-admin: open mailbox %s: %v", maildir, err)
 		}
 		defer store.Close()
 		removed, err := store.SweepOrphanContent()
@@ -473,16 +473,17 @@ func pruneEML(dir *directory.SQLDirectory, target string, days int) {
 	maildirs := resolveMaildirs(dir, target)
 
 	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
-	var files, boxes int
+	var files, boxes, opened int
 	var reclaimed int64
 	for _, md := range maildirs {
-		store, err := objectstore.Open(md)
+		store, err := objectstore.OpenExisting(md)
 		if err != nil {
 			// One unreadable mailbox must not abandon the rest of the run; report
 			// it and carry on, so a single bad account cannot block reclamation.
 			log.Printf("hermex-admin: open mailbox %s: %v", md, err)
 			continue
 		}
+		opened++
 		n, bytes, err := store.PruneEMLCache(cutoff)
 		_ = store.Close()
 		if err != nil {
@@ -494,6 +495,7 @@ func pruneEML(dir *directory.SQLDirectory, target string, days int) {
 			boxes++
 		}
 	}
+	requireOpened(opened, maildirs)
 	fmt.Printf("pruned %d cached wire copies (%d bytes) from %d mailbox(es)\n", files, reclaimed, boxes)
 }
 
@@ -503,14 +505,15 @@ func pruneEML(dir *directory.SQLDirectory, target string, days int) {
 // cannot compute either from SQL alone.
 func backfillPreviews(dir *directory.SQLDirectory, target string) {
 	maildirs := resolveMaildirs(dir, target)
-	var rows, boxes int
+	var rows, boxes, opened int
 	for _, md := range maildirs {
-		store, err := objectstore.Open(md)
+		store, err := objectstore.OpenExisting(md)
 		if err != nil {
 			// One unreadable mailbox must not abandon the rest of the run.
 			log.Printf("hermex-admin: open mailbox %s: %v", md, err)
 			continue
 		}
+		opened++
 		n, err := store.BackfillPreviews()
 		_ = store.Close()
 		if err != nil {
@@ -521,7 +524,17 @@ func backfillPreviews(dir *directory.SQLDirectory, target string) {
 			boxes++
 		}
 	}
+	requireOpened(opened, maildirs)
 	fmt.Printf("filled %d message row(s) in %d mailbox(es)\n", rows, boxes)
+}
+
+// requireOpened refuses to report success when not one mailbox opened. That is
+// never "nothing to do": it means the run cannot see the mailboxes at all, and a
+// zero count read as success hides it.
+func requireOpened(opened int, maildirs []string) {
+	if opened == 0 && len(maildirs) > 0 {
+		log.Fatalf("hermex-admin: no mailbox opened; the first was %s. Run this where the mailbox paths resolve.", maildirs[0])
+	}
 }
 
 // resolveMaildirs turns an "email or all" argument into the mailbox paths to
@@ -586,15 +599,16 @@ func backupMail(dir *directory.SQLDirectory, cfg *config.Config, target, dest st
 		sources = append(sources, source{maildir, backupRel(cfg, maildir)})
 	}
 
-	var done int
+	var done, opened int
 	for _, src := range sources {
-		store, err := objectstore.Open(src.dir)
+		store, err := objectstore.OpenExisting(src.dir)
 		if err != nil {
 			// One unreadable mailbox must not abandon the rest of the run: a backup
 			// that covers all but one account is worth far more than none.
 			log.Printf("hermex-admin: open mailbox %s: %v", src.dir, err)
 			continue
 		}
+		opened++
 		err = store.Backup(filepath.Join(dest, src.rel))
 		_ = store.Close()
 		if err != nil {
@@ -602,6 +616,9 @@ func backupMail(dir *directory.SQLDirectory, cfg *config.Config, target, dest st
 			continue
 		}
 		done++
+	}
+	if opened == 0 && len(sources) > 0 {
+		log.Fatalf("hermex-admin: no mailbox opened; the first was %s. Run this where the mailbox paths resolve.", sources[0].dir)
 	}
 	fmt.Printf("backed up %d of %d mailbox(es) to %s\n", done, len(sources), dest)
 	failed := done < len(sources)

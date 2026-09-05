@@ -20,10 +20,10 @@ import (
 // ErrNotFound is reported when a folder or message lookup finds no such object.
 var ErrNotFound = errors.New("objectstore: not found")
 
-// ErrNotProvisioned is reported by OpenPublicExisting when a domain has no public
-// store yet. Read surfaces treat it as "this domain has no public folders" rather
-// than provisioning one as a side effect of a read.
-var ErrNotProvisioned = errors.New("objectstore: public store not provisioned")
+// ErrNotProvisioned is reported by OpenExisting and OpenPublicExisting when no
+// store has been provisioned at the path. Read and maintenance surfaces treat it
+// as "there is no mailbox here" rather than provisioning one as a side effect.
+var ErrNotProvisioned = errors.New("objectstore: store not provisioned")
 
 // ErrFolderCycle is reported when a folder copy would place a folder inside its
 // own subtree, which would recurse without end.
@@ -222,6 +222,24 @@ func OpenPublicExisting(dir string) (*Store, error) {
 		return nil, err
 	}
 	return OpenPublic(dir)
+}
+
+// OpenExisting opens a private mailbox store only when it already exists, never
+// creating one. It returns ErrNotProvisioned when no store has been provisioned
+// at dir.
+//
+// Open CREATES the store, which is what delivery to a new account needs and what
+// a maintenance pass must never do: run in a place where the mailbox path does
+// not resolve, Open leaves an empty mailbox behind and the pass reports success
+// over work it did not do.
+func OpenExisting(dir string) (*Store, error) {
+	if _, err := os.Stat(filepath.Join(dir, "objects.sqlite3")); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrNotProvisioned
+		}
+		return nil, err
+	}
+	return Open(dir)
 }
 
 // open is the shared constructor for a private-kind store. seedBuiltins selects
