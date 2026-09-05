@@ -219,6 +219,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/reminders/{id}/dismiss", s.handleDismissReminder)
 	mux.HandleFunc("POST /api/v1/reminders/{id}/snooze", s.handleSnoozeReminder)
 	mux.HandleFunc("GET /api/v1/notes", s.handleGetNotes)
+	mux.HandleFunc("GET /api/v1/mail/notes", s.handleGetMailNotes)
+	mux.HandleFunc("POST /api/v1/mail/notes", s.handleCreateMailNote)
 	mux.HandleFunc("POST /api/v1/notes", s.handleCreateNote)
 	mux.HandleFunc("PUT /api/v1/notes/{id}", s.handleUpdateNote)
 	mux.HandleFunc("DELETE /api/v1/notes/{id}", s.handleDeleteNote)

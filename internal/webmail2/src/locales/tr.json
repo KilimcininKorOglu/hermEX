@@ -240,7 +240,14 @@
     "replyFailed": "Yanıt gönderilemedi",
     "itemData": "Öğe verisi",
     "objectId": "Nesne kimliği",
-    "properties": "Özellikler"
+    "properties": "Özellikler",
+    "notes": "Notlar",
+    "addNote": "Not ekle",
+    "noNotes": "Bu iletide not yok",
+    "notePlaceholder": "Bu ileti hakkında bir not yazın",
+    "noteAdded": "Not eklendi",
+    "noteFailed": "Not kaydedilemedi",
+    "deleteNote": "Notu sil"
   },
   "compose": {
     "invalidEmail": "Geçerli bir e-posta adresi girin",

@@ -240,7 +240,14 @@
     "replyFailed": "Reply failed",
     "itemData": "Item data",
     "objectId": "Object ID",
-    "properties": "Properties"
+    "properties": "Properties",
+    "notes": "Notes",
+    "addNote": "Add note",
+    "noNotes": "No notes on this message",
+    "notePlaceholder": "Write a note about this message",
+    "noteAdded": "Note added",
+    "noteFailed": "Could not save the note",
+    "deleteNote": "Delete note"
   },
   "compose": {
     "invalidEmail": "Enter a valid email address",

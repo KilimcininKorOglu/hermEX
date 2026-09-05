@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcmail"
@@ -39,6 +40,36 @@ type noteJSON struct {
 	Title string `json:"title"`
 	Body  string `json:"body"`
 	Color int    `json:"color,omitempty"` // PidLidNoteColor: 0 blue, 1 green, 2 pink, 3 yellow, 4 white
+	// LinkedMessageID annotates a mail: it holds that mail's
+	// PR_INTERNET_MESSAGE_ID, so the note travels with the mail rather than with
+	// the folder it happens to sit in. Empty on a free-standing note.
+	LinkedMessageID string `json:"linkedMessageId,omitempty"`
+}
+
+// nameNoteLink is webmail's private named property holding the Message-ID of the
+// mail a note annotates. The mail itself is never written to: an annotation must
+// not change the message a mailbox may be sharing with someone else, and the
+// Message-ID survives the mail being moved between folders, which its store id
+// does not.
+var nameNoteLink = mapi.PropertyName{Kind: mapi.MnidString, GUID: webmailNamespace, Name: "LinkedMessageID"}
+
+// noteLinkTag resolves the note-link named property to a PtUnicode tag for this
+// store, allocating its id when create is set (idempotent).
+func noteLinkTag(st *objectstore.Store, create bool) (mapi.PropTag, error) {
+	ids, err := st.GetNamedPropIDs(create, []mapi.PropertyName{nameNoteLink})
+	if err != nil || len(ids) == 0 || ids[0] == 0 {
+		return 0, err
+	}
+	return mapi.MakeTag(ids[0], mapi.PtUnicode), nil
+}
+
+// noteLinkOf reads the Message-ID a note annotates, or "" when it annotates none.
+func noteLinkOf(st *objectstore.Store, msg *oxcmail.Message) string {
+	tag, err := noteLinkTag(st, false)
+	if err != nil || tag == 0 {
+		return ""
+	}
+	return propString(msg, tag)
 }
 
 // fitsMAPILong reports whether a JSON integer fits the 32-bit MAPI long it is
@@ -315,10 +346,11 @@ func (s *Server) handleGetNotes(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		notes = append(notes, noteJSON{
-			ID:    strconv.FormatInt(o.ID, 10),
-			Title: propString(msg, mapi.PrSubject),
-			Body:  propString(msg, mapi.PrBody),
-			Color: noteColorOf(st, msg),
+			ID:              strconv.FormatInt(o.ID, 10),
+			Title:           propString(msg, mapi.PrSubject),
+			Body:            propString(msg, mapi.PrBody),
+			Color:           noteColorOf(st, msg),
+			LinkedMessageID: noteLinkOf(st, msg),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"notes": notes})
@@ -347,6 +379,7 @@ func (s *Server) handleCreateNote(w http.ResponseWriter, r *http.Request) {
 			props.Set(tag, int32(in.Color))
 		}
 	}
+	setNoteLink(st, &props, in.LinkedMessageID)
 	id, err := st.CreateMessage(mapi.PrivateFIDNotes, &oxcmail.Message{Props: props})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save note"})
@@ -383,6 +416,7 @@ func (s *Server) handleUpdateNote(w http.ResponseWriter, r *http.Request) {
 			props.Set(tag, int32(in.Color))
 		}
 	}
+	setNoteLink(st, &props, in.LinkedMessageID)
 	id, err := st.CreateMessage(mapi.PrivateFIDNotes, &oxcmail.Message{Props: props})
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save note"})
@@ -414,4 +448,130 @@ func (s *Server) deleteObjectByPath(w http.ResponseWriter, r *http.Request, seg 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// setNoteLink stamps the annotated mail's Message-ID onto a note's properties. An
+// empty id leaves the property unset, which is a free-standing note.
+func setNoteLink(st *objectstore.Store, props *mapi.PropertyValues, messageID string) {
+	if messageID == "" {
+		return
+	}
+	if tag, err := noteLinkTag(st, true); err == nil && tag != 0 {
+		props.Set(tag, messageID)
+	}
+}
+
+// handleGetMailNotes returns the notes annotating one mail. The mail is named by
+// the SPA's opaque message id and its Message-ID is read server-side, so the
+// browser never has to know or send it, and a mail that carries none (a draft, an
+// item this server composed) simply has no notes.
+func (s *Server) handleGetMailNotes(w http.ResponseWriter, r *http.Request) {
+	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"))
+	if !ok {
+		return
+	}
+	defer st.Close()
+	info, err := st.MessageByUID(fid, uid)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	msg, err := st.OpenMessage(info.ID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	notes := make([]noteJSON, 0)
+	if link := propString(msg, mapi.PrInternetMessageID); link != "" {
+		notes = notesLinkedTo(st, link)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"notes": notes})
+}
+
+// notesLinkedTo collects the mailbox's notes annotating the given Message-ID. A
+// store that has never stored such a note resolves no tag and matches nothing.
+func notesLinkedTo(st *objectstore.Store, messageID string) []noteJSON {
+	out := make([]noteJSON, 0)
+	tag, err := noteLinkTag(st, false)
+	if err != nil || tag == 0 {
+		return out
+	}
+	objs, _ := st.ListFolderObjects(mapi.PrivateFIDNotes)
+	for _, o := range objs {
+		msg, err := st.OpenMessage(o.ID)
+		if err != nil {
+			continue
+		}
+		if propString(msg, tag) != messageID {
+			continue
+		}
+		out = append(out, noteJSON{
+			ID:              strconv.FormatInt(o.ID, 10),
+			Title:           propString(msg, mapi.PrSubject),
+			Body:            propString(msg, mapi.PrBody),
+			Color:           noteColorOf(st, msg),
+			LinkedMessageID: messageID,
+		})
+	}
+	return out
+}
+
+// handleCreateMailNote annotates one mail. The mail is named by the SPA's opaque
+// message id and its Message-ID is read server-side, the same way
+// handleGetMailNotes reads it, so the browser never handles it and cannot link a
+// note to a mail it cannot open. A mail carrying no Message-ID cannot be
+// annotated; that is a draft or an item this server composed, not received mail.
+func (s *Server) handleCreateMailNote(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+		Body  string `json:"body"`
+		Color int    `json:"color,omitempty"`
+	}
+	if err := decodeJSON(r, &in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	st, fid, uid, ok := s.locate(w, r, in.ID)
+	if !ok {
+		return
+	}
+	defer st.Close()
+	info, err := st.MessageByUID(fid, uid)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	msg, err := st.OpenMessage(info.ID)
+	if err != nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		return
+	}
+	link := propString(msg, mapi.PrInternetMessageID)
+	if link == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "this message cannot be annotated"})
+		return
+	}
+
+	var props mapi.PropertyValues
+	props.Set(mapi.PrMessageClass, "IPM.StickyNote")
+	props.Set(mapi.PrSubject, in.Title)
+	props.Set(mapi.PrBody, in.Body)
+	if in.Color != 0 && fitsMAPILong(in.Color) {
+		if tag, err := noteColorTag(st, true); err == nil && tag != 0 {
+			// #nosec G115 -- the fitsMAPILong guard on the same line refuses a value the property cannot carry
+			props.Set(tag, int32(in.Color))
+		}
+	}
+	setNoteLink(st, &props, link)
+	id, err := st.CreateMessage(mapi.PrivateFIDNotes, &oxcmail.Message{Props: props})
+	if err != nil {
+		logError("create-mail-note", err, logging.Fields{})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save note"})
+		return
+	}
+	writeJSON(w, http.StatusOK, noteJSON{
+		ID: strconv.FormatInt(id, 10), Title: in.Title, Body: in.Body,
+		Color: in.Color, LinkedMessageID: link,
+	})
 }

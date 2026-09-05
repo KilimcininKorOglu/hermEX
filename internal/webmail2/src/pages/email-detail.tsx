@@ -27,6 +27,7 @@ import {
   RotateCcw,
   Copy,
   Braces,
+  StickyNote,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -54,7 +55,7 @@ import { toast } from "sonner"
 import { sanitizeEmailBody } from "@/utils/sanitize"
 import { forwardParams, replyAllParams, replyParams, type QuoteLabels } from "@/utils/replyParams"
 import api from "@/utils/api"
-import type { MeetingInvite, AttachmentInfo } from "@/utils/api"
+import type { MeetingInvite, AttachmentInfo, Note } from "@/utils/api"
 import * as smimeStore from "@/utils/smime"
 import { formatAbsolute, withTz } from "@/utils/date"
 import { getShortcutMode } from "@/utils/shortcutMode"
@@ -151,6 +152,12 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
   const [newLabel, setNewLabel] = useState("")
   const [labelEditing, setLabelEditing] = useState(false)
   const [invite, setInvite] = useState<MeetingInvite | null>(null)
+  // Notes annotating this mail. They live in the Notes folder and reference the
+  // mail by its Message-ID, so nothing is written to the mail itself.
+  const [notes, setNotes] = useState<Note[]>([])
+  const [noteDraft, setNoteDraft] = useState("")
+  const [noteOpen, setNoteOpen] = useState(false)
+  const [noteBusy, setNoteBusy] = useState(false)
   const [rsvpStatus, setRsvpStatus] = useState<string | null>(null)
   const [rsvpBusy, setRsvpBusy] = useState(false)
   // Inline reply: a quick reply box under the message (no compose round-trip).
@@ -311,6 +318,14 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
             setInvite(inv.isInvite ? inv : null)
           } catch {
             setInvite(null)
+          }
+          // Annotations are an aside: a failure to read them must not stop the
+          // mail from being read.
+          try {
+            const res = await api.getMailNotes(result.id)
+            setNotes(res.notes ?? [])
+          } catch {
+            setNotes([])
           }
         } else {
           toast.error(t("emailDetail.notFound"))
@@ -524,6 +539,39 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
   const handleRemoveLabel = (label: string) => {
     if (!email) return
     void saveLabels(email.labels.filter((l) => l !== label))
+  }
+
+  // handleAddNote attaches an annotation to this mail. The note is stored in the
+  // Notes folder keyed by the mail's Message-ID, so the mail itself is untouched
+  // and the annotation follows it when it is filed elsewhere.
+  const handleAddNote = async () => {
+    const body = noteDraft.trim()
+    if (!body || !email) return
+    setNoteBusy(true)
+    try {
+      await api.addMailNote(email.id, { title: email.subject || "", body })
+      const res = await api.getMailNotes(email.id)
+      setNotes(res.notes ?? [])
+      setNoteDraft("")
+      setNoteOpen(false)
+      toast.success(t("emailDetail.noteAdded"))
+    } catch {
+      toast.error(t("emailDetail.noteFailed"))
+    } finally {
+      setNoteBusy(false)
+    }
+  }
+
+  // handleDeleteNote removes one annotation. The mail is not touched either way.
+  const handleDeleteNote = async (id: string) => {
+    if (!email) return
+    try {
+      await api.deleteNote(id)
+      const res = await api.getMailNotes(email.id)
+      setNotes(res.notes ?? [])
+    } catch {
+      toast.error(t("emailDetail.noteFailed"))
+    }
   }
 
   // handleRsvp responds to a meeting invite. Accept/tentative add the event to
@@ -990,6 +1038,65 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                   </div>
                 </div>
               </div>
+            </div>
+
+            {/* Annotations: sticky notes attached to this mail */}
+            <div className="mx-6 mt-4 rounded-lg border p-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-sm font-medium">
+                  <StickyNote className="h-4 w-4" />
+                  {t("emailDetail.notes")}
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setNoteOpen((open) => !open)}
+                  disabled={noteBusy}
+                >
+                  <Plus className="mr-1 h-3.5 w-3.5" />
+                  {t("emailDetail.addNote")}
+                </Button>
+              </div>
+              {notes.length === 0 && !noteOpen && (
+                <p className="mt-2 text-sm text-muted-foreground">{t("emailDetail.noNotes")}</p>
+              )}
+              {notes.length > 0 && (
+                <ul className="mt-2 space-y-2">
+                  {notes.map((n) => (
+                    <li key={n.id} className="flex items-start justify-between gap-2 rounded-md bg-muted/50 p-2">
+                      {/* Note bodies are plain text; React escapes them. */}
+                      <span className="whitespace-pre-wrap text-sm">{n.body}</span>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-6 w-6 shrink-0"
+                        onClick={() => handleDeleteNote(n.id)}
+                        title={t("emailDetail.deleteNote")}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {noteOpen && (
+                <div className="mt-2 space-y-2">
+                  <Textarea
+                    value={noteDraft}
+                    onChange={(e) => setNoteDraft(e.target.value)}
+                    placeholder={t("emailDetail.notePlaceholder")}
+                    rows={3}
+                  />
+                  <div className="flex justify-end gap-2">
+                    <Button size="sm" variant="outline" onClick={() => { setNoteOpen(false); setNoteDraft("") }}>
+                      {t("common.cancel")}
+                    </Button>
+                    <Button size="sm" onClick={handleAddNote} disabled={noteBusy || !noteDraft.trim()}>
+                      {t("common.save")}
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Meeting invitation: RSVP actions */}

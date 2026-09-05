@@ -208,9 +208,12 @@ export interface Note {
   color?: number // PidLidNoteColor: 0 blue, 1 green, 2 pink, 3 yellow, 4 white
   created?: string
   updated?: string
+  // linkedMessageId is the Message-ID of the mail this note annotates, so the note
+  // stays with the mail when it is filed elsewhere. Absent on a free-standing note.
+  linkedMessageId?: string
 }
 
-export type NoteInput = { title: string; body: string; color?: number }
+export type NoteInput = { title: string; body: string; color?: number; linkedMessageId?: string }
 
 // CalendarSettings is the DB-backed calendar display + defaults (per-user).
 export interface CalendarSettings {
@@ -1599,6 +1602,19 @@ class API {
   // Notes (Outlook IPM.StickyNote, shared with EWS/IMAP/JMAP via the Notes folder)
   async getNotes(): Promise<{ notes?: Note[] }> {
     return this.get<{ notes?: Note[] }>('/notes')
+  }
+
+  // getMailNotes returns the notes annotating one mail. The mail is named by its
+  // opaque id and its Message-ID is read server-side, so the browser never handles
+  // it.
+  async getMailNotes(mailId: string): Promise<{ notes?: Note[] }> {
+    return this.get<{ notes?: Note[] }>(`/mail/notes?id=${encodeURIComponent(mailId)}`)
+  }
+
+  // addMailNote annotates one mail. The mail is named by its opaque id and the
+  // link is resolved server-side, so the browser never handles the Message-ID.
+  async addMailNote(mailId: string, note: { title?: string; body: string; color?: number }): Promise<Note> {
+    return this.post<Note>('/mail/notes', { id: mailId, ...note })
   }
 
   async createNote(note: NoteInput): Promise<Note> {
