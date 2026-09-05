@@ -50,6 +50,7 @@ import {
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 import api, { SenderIdentity, DiagnosticEntry, Contact as ContactType, MailAttachment, SignatureEntry, TemplateEntry, Mail as MailMessage, CalendarEvent, Task, Note } from "@/utils/api"
+import { singleFlight } from "@/utils/singleFlight"
 import { taskToVTodo, noteToText, safeItemName } from "@/utils/attachItem"
 import * as smimeStore from "@/utils/smime"
 import { mailOptionsActive } from "@/utils/mailOptions"
@@ -220,6 +221,14 @@ export function ComposePage() {
   const [showCc, setShowCc] = useState(false)
   const [showBcc, setShowBcc] = useState(false)
   const [sending, setSending] = useState(false)
+  // The in-flight gates live outside React state: a second Ctrl+Enter or click
+  // can arrive before a re-render, and the Send button's disabled attribute does
+  // not cover the keyboard path at all. Without them one message sends twice, and
+  // two draft saves that both start before the first answers each carry no draft
+  // id and create a SEPARATE draft. The two draft-save paths share ONE gate.
+  const [savingDraft, setSavingDraft] = useState(false)
+  const sendGate = useRef(singleFlight(setSending))
+  const draftGate = useRef(singleFlight(setSavingDraft))
   // Scheduled ("send later"): scheduleOpen toggles the picker; scheduledAt holds
   // the chosen wall clock (datetime-local value, interpreted in the display tz).
   const [scheduleOpen, setScheduleOpen] = useState(false)
@@ -807,7 +816,13 @@ export function ComposePage() {
     ? t("compose.noSendPermission", { email: selectedSender.email })
     : null
   
-  const handleSend = async (skipAttachReminder = false) => {
+  // handleSend runs through the gate, so the Ctrl+Enter shortcut and the button
+  // cannot both start a send.
+  const handleSend = (skipAttachReminder = false) => {
+    void sendGate.current.run(() => doSend(skipAttachReminder))
+  }
+
+  const doSend = async (skipAttachReminder = false) => {
     if (to.length === 0) {
       toast.error(t("compose.selectRecipient"))
       return
@@ -863,7 +878,6 @@ export function ComposePage() {
       }
     }
 
-    setSending(true)
     toast.success(sendAtISO ? t("compose.schedulingEmail") : t("compose.sendingEmail"))
 
     try {
@@ -938,7 +952,6 @@ export function ComposePage() {
       console.error('Failed to send email:', err)
       const fallback = sendAtISO ? t("compose.scheduleFailed") : t("compose.sendFailed")
       toast.error(err instanceof Error && err.message ? err.message : fallback)
-      setSending(false)
     }
   }
 
@@ -947,24 +960,29 @@ export function ComposePage() {
       toast.error(t("compose.nothingToSave"))
       return
     }
-    try {
-      const senderEmail = selectedSender?.email || user?.email || ''
-      const res = await api.saveDraft({
-        id: draftId ?? undefined,
-        to: to.map((r) => r.email),
-        cc: cc.map((r) => r.email),
-        bcc: bcc.map((r) => r.email),
-        subject,
-        body,
-        from: senderEmail,
-      })
-      if (res?.id) setDraftId(res.id)
-      toast.success(t("compose.draftSaved"))
-      navigate("/drafts")
-    } catch (err) {
-      console.error('Failed to save draft:', err)
-      toast.error(t("compose.draftSaveFailed"))
-    }
+    // One save at a time, shared with the timer-driven autosave: the draft id
+    // only exists after the first save answers, so two overlapping saves both
+    // post without one and the mailbox ends up with two drafts.
+    await draftGate.current.run(async () => {
+      try {
+        const senderEmail = selectedSender?.email || user?.email || ''
+        const res = await api.saveDraft({
+          id: draftId ?? undefined,
+          to: to.map((r) => r.email),
+          cc: cc.map((r) => r.email),
+          bcc: bcc.map((r) => r.email),
+          subject,
+          body,
+          from: senderEmail,
+        })
+        if (res?.id) setDraftId(res.id)
+        toast.success(t("compose.draftSaved"))
+        navigate("/drafts")
+      } catch (err) {
+        console.error('Failed to save draft:', err)
+        toast.error(t("compose.draftSaveFailed"))
+      }
+    })
   }
 
   // autoSaveDraft is a silent (no navigate, no toast) version of handleSaveDraft,
@@ -972,21 +990,23 @@ export function ComposePage() {
   // fires when there is something to save and never on the first empty render.
   const autoSaveDraft = async () => {
     if (!(subject || body || to.length > 0 || cc.length > 0 || bcc.length > 0)) return
-    try {
-      const senderEmail = selectedSender?.email || user?.email || ''
-      const res = await api.saveDraft({
-        id: draftId ?? undefined,
-        to: to.map((r) => r.email),
-        cc: cc.map((r) => r.email),
-        bcc: bcc.map((r) => r.email),
-        subject,
-        body,
-        from: senderEmail,
-      })
-      if (res?.id) setDraftId(res.id)
-    } catch {
-      /* best-effort: a failed autosave must not interrupt composing */
-    }
+    await draftGate.current.run(async () => {
+      try {
+        const senderEmail = selectedSender?.email || user?.email || ''
+        const res = await api.saveDraft({
+          id: draftId ?? undefined,
+          to: to.map((r) => r.email),
+          cc: cc.map((r) => r.email),
+          bcc: bcc.map((r) => r.email),
+          subject,
+          body,
+          from: senderEmail,
+        })
+        if (res?.id) setDraftId(res.id)
+      } catch {
+        /* best-effort: a failed autosave must not interrupt composing */
+      }
+    })
   }
 
   useEffect(() => {
@@ -1054,7 +1074,7 @@ export function ComposePage() {
               <Maximize2 className="h-4 w-4" />
             )}
           </Button>
-          <Button variant="ghost" size="icon" onClick={handleSaveDraft} title={t("compose.saveDraftTooltip")}>
+          <Button variant="ghost" size="icon" onClick={handleSaveDraft} disabled={savingDraft} title={t("compose.saveDraftTooltip")}>
             <Save className="h-4 w-4" />
           </Button>
           <Button
