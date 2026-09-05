@@ -561,6 +561,7 @@ func (s *Store) isBuiltinFolder(folderID int64) bool {
 		table = builtinPublicFolders
 	}
 	for _, f := range table {
+		// #nosec G115 -- every fid in these tables is a compile-time constant below PrivateFIDUnassignedStart, far inside int64
 		if int64(f.fid) == folderID {
 			return true
 		}
