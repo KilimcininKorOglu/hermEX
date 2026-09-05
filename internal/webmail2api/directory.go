@@ -1,10 +1,12 @@
 package webmail2api
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
 	"hermex/internal/directory"
+	"hermex/internal/logging"
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 )
@@ -99,11 +101,42 @@ func (s *Server) handleDeleteFolder(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "folder not found"})
 		return
 	}
-	if err := st.DeleteFolder(id); err != nil {
+	if st.IsBuiltinFolder(id) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "this folder cannot be deleted"})
+		return
+	}
+	// Two stages, as Exchange does it: a folder is deleted by moving it under
+	// Deleted Items, and deleting it AGAIN from there removes it. Which stage
+	// applies is decided from the folder's stored parent chain, never from where
+	// the caller believes it is.
+	trash := int64(mapi.PrivateFIDDeletedItems)
+	inTrash, err := st.FolderIsUnder(id, trash)
+	if err != nil {
+		logError("delete-folder", err, logging.Fields{"folder": name})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not delete folder"})
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	if !inTrash {
+		if err := st.RenameFolder(id, &trash, name); err != nil {
+			logError("delete-folder.move", err, logging.Fields{"folder": name})
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not delete folder"})
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "movedToTrash": true})
+		return
+	}
+	if err := st.DeleteFolder(id); err != nil {
+		// A built-in folder is not the caller's to remove, and it can only be
+		// reached here by name, so answer it as a refusal rather than a fault.
+		if errors.Is(err, objectstore.ErrBuiltinFolder) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "this folder cannot be deleted"})
+			return
+		}
+		logError("delete-folder", err, logging.Fields{"folder": name})
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not delete folder"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "movedToTrash": false})
 }
 
 // handleEmptyFolder removes every message from a folder: permanently from Deleted

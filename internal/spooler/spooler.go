@@ -240,7 +240,7 @@ func releaseMessage(st *objectstore.Store, deliver DeliverFunc, outbox int64, m 
 	// Outbox: the mail is already out, and leaving it scheduled would re-deliver
 	// it to every recipient on the next sweep, once every sweep, forever. Losing
 	// the Sent copy is the lesser harm, and it is logged.
-	_, fileErr := st.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, now, objectstore.FlagSeen)
+	fileErr := fileToSent(st, raw, now)
 	if err := st.DeleteMessage(outbox, m.UID); err != nil {
 		return false, errors.Join(fileErr, err)
 	}
@@ -456,4 +456,12 @@ func isBccField(line []byte) bool {
 		return false
 	}
 	return strings.EqualFold(string(bytes.TrimSpace(name)), "Bcc")
+}
+
+// fileToSent writes the Sent copy. It is a variable so a test can make filing
+// fail permanently: the store refuses to remove a built-in folder, which is how
+// that failure used to be staged.
+var fileToSent = func(st *objectstore.Store, raw []byte, now time.Time) error {
+	_, err := st.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, now, objectstore.FlagSeen)
+	return err
 }

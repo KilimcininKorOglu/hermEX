@@ -271,8 +271,10 @@ func TestSetSubscribed(t *testing.T) {
 	}
 }
 
-// TestDeleteFolder removes a user folder holding a message and confirms the
-// object, index, and cached eml are all gone, and a repeat delete is reported.
+// TestDeleteFolder removes a user folder holding a message. The folder and its
+// index rows go; the MESSAGE does not, because a folder delete routes its mail
+// to Recoverable Items like every other delete path, and the cached eml has to
+// survive with it or the recovered message cannot be served.
 func TestDeleteFolder(t *testing.T) {
 	s := openSeededStore(t)
 
@@ -298,9 +300,7 @@ func TestDeleteFolder(t *testing.T) {
 	if countRows(t, s, `SELECT COUNT(*) FROM folders WHERE folder_id=?`, id) != 0 {
 		t.Error("object folder survived delete")
 	}
-	if countRows(t, s, `SELECT COUNT(*) FROM messages WHERE message_id=?`, info.ID) != 0 {
-		t.Error("object message survived folder delete")
-	}
+	assertRecoverable(t, s, info.ID)
 	var idxFolders int
 	if err := s.idxdb.QueryRow(`SELECT COUNT(*) FROM folders WHERE folder_id=?`, id).Scan(&idxFolders); err != nil {
 		t.Fatal(err)
@@ -308,13 +308,61 @@ func TestDeleteFolder(t *testing.T) {
 	if idxFolders != 0 {
 		t.Error("index folder row survived delete")
 	}
-	if _, err := os.Stat(eml); !os.IsNotExist(err) {
-		t.Errorf("cached eml survived folder delete: %v", err)
+	if _, err := os.Stat(eml); err != nil {
+		t.Errorf("the recoverable message lost its cached eml: %v", err)
 	}
 	if _, ok := folderByName(t, s)["Temp"]; ok {
 		t.Error("deleted folder still listed")
 	}
 	if err := s.DeleteFolder(id); !errors.Is(err, ErrNotFound) {
 		t.Errorf("repeat delete = %v, want ErrNotFound", err)
+	}
+}
+
+// assertRecoverable proves a message the folder held is in Recoverable Items
+// rather than destroyed: soft-deleted, and filed under Deleted Items so it
+// survives the folder row that used to hold it.
+func assertRecoverable(t *testing.T, s *Store, messageID int64) {
+	t.Helper()
+	if countRows(t, s, `SELECT COUNT(*) FROM messages WHERE message_id=? AND is_deleted=1`, messageID) != 1 {
+		t.Error("the folder's message was destroyed rather than moved to Recoverable Items")
+	}
+	if countRows(t, s, `SELECT COUNT(*) FROM messages WHERE message_id=? AND parent_fid=?`,
+		messageID, int64(mapi.PrivateFIDDeletedItems)) != 1 {
+		t.Error("the recoverable message was not filed under Deleted Items")
+	}
+}
+
+// TestBuiltinFolderCannotBeRemovedOrRenamed holds the invariant for every
+// protocol, not just the one that exposed it: the store provisions these folders
+// and every surface addresses them by PrivateFID_* constant, so removing one
+// takes its messages with it and renaming one leaves those constants pointing at
+// something the user no longer recognises.
+func TestBuiltinFolderCannotBeRemovedOrRenamed(t *testing.T) {
+	s := openSeededStore(t)
+
+	for _, fid := range []int64{
+		int64(mapi.PrivateFIDInbox),
+		int64(mapi.PrivateFIDDeletedItems),
+		int64(mapi.PrivateFIDCalendar),
+		int64(mapi.PrivateFIDIPMSubtree),
+	} {
+		if err := s.DeleteFolder(fid); !errors.Is(err, ErrBuiltinFolder) {
+			t.Errorf("DeleteFolder(%d) = %v, want ErrBuiltinFolder", fid, err)
+		}
+		if err := s.RenameFolder(fid, nil, "Renamed"); !errors.Is(err, ErrBuiltinFolder) {
+			t.Errorf("RenameFolder(%d) = %v, want ErrBuiltinFolder", fid, err)
+		}
+	}
+	// A user folder is still the caller's to remove and rename.
+	id, err := s.CreateFolder(nil, "Mine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RenameFolder(id, nil, "Mine 2"); err != nil {
+		t.Errorf("RenameFolder on a user folder: %v", err)
+	}
+	if err := s.DeleteFolder(id); err != nil {
+		t.Errorf("DeleteFolder on a user folder: %v", err)
 	}
 }

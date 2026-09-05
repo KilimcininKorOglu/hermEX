@@ -178,10 +178,13 @@ func TestProcessDueOutboxKeepsOnDeliverError(t *testing.T) {
 func TestProcessDueOutboxNeverRedeliversWhenFilingFails(t *testing.T) {
 	st := openStore(t)
 	scheduleOutbox(t, st, time.Now().Add(-time.Minute))
-	// Remove Sent so filing the copy fails for good.
-	if err := st.DeleteFolder(int64(mapi.PrivateFIDSentItems)); err != nil {
-		t.Fatal(err)
+	// Make filing the Sent copy fail for good. The store refuses to remove a
+	// built-in folder, so the failure is staged at the write itself.
+	restore := fileToSent
+	fileToSent = func(*objectstore.Store, []byte, time.Time) error {
+		return errors.New("sent folder unavailable")
 	}
+	t.Cleanup(func() { fileToSent = restore })
 
 	deliveries := 0
 	deliver := func(rcpts []string, raw []byte, when time.Time) ([]string, error) {

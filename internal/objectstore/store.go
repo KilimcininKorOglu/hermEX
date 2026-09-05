@@ -25,6 +25,11 @@ var ErrNotFound = errors.New("objectstore: not found")
 // as "there is no mailbox here" rather than provisioning one as a side effect.
 var ErrNotProvisioned = errors.New("objectstore: store not provisioned")
 
+// ErrBuiltinFolder is reported when a caller tries to remove a folder the store
+// provisions itself. Every surface addresses those by PrivateFID_* constant, and
+// deleting one takes its messages with it, so no protocol may.
+var ErrBuiltinFolder = errors.New("objectstore: built-in folder cannot be deleted")
+
 // ErrFolderCycle is reported when a folder copy would place a folder inside its
 // own subtree, which would recurse without end.
 var ErrFolderCycle = errors.New("objectstore: folder copied into its own subtree")

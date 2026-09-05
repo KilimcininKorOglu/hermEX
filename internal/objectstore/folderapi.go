@@ -157,6 +157,12 @@ func (s *Store) ListFolders() ([]FolderInfo, error) {
 // RenameFolder moves a folder under newParent (nil for the top level) and sets
 // its display name. It reports ErrNotFound when the folder is missing.
 func (s *Store) RenameFolder(folderID int64, newParent *int64, newName string) error {
+	// Renaming or reparenting a folder the store provisions itself would leave
+	// every surface that addresses it by PrivateFID_* constant pointing at a
+	// folder the user no longer recognises, so no protocol may.
+	if s.isBuiltinFolder(folderID) {
+		return ErrBuiltinFolder
+	}
 	parentFID := s.ipmSubtree()
 	if newParent != nil {
 		parentFID = *newParent
@@ -229,13 +235,27 @@ func (s *Store) SetFolderName(folderID int64, newName string) error {
 // foreign-key cascade drops child folders, messages, and property bags) and
 // the matching index rows, mappings, and cached eml files. It reports
 // ErrNotFound when no such folder exists.
+//
+// A built-in folder is refused with ErrBuiltinFolder. The store provisions the
+// hierarchy every surface addresses by PrivateFID_* constant, and the cascade
+// would take every message in it, so removing one is not a user operation on any
+// protocol.
 func (s *Store) DeleteFolder(folderID int64) error {
+	if s.isBuiltinFolder(folderID) {
+		return ErrBuiltinFolder
+	}
 	subtree, err := s.folderSubtreeIDs(folderID)
 	if err != nil {
 		return err
 	}
 	if len(subtree) == 0 {
 		return ErrNotFound
+	}
+	// The folder rows go, and the foreign key takes every message with them, so
+	// the mail has to leave first. Recoverable Items is the dumpster every other
+	// hard delete routes to, and a folder delete is no different.
+	if err := s.dumpsterSubtree(subtree); err != nil {
+		return err
 	}
 	res, err := s.objdb.Exec(`DELETE FROM folders WHERE folder_id=?`, folderID)
 	if err != nil {
@@ -526,4 +546,103 @@ func boolProp(props mapi.PropertyValues, tag mapi.PropTag) bool {
 		}
 	}
 	return false
+}
+
+// IsBuiltinFolder reports whether folderID is one the store provisions itself, so
+// a surface can refuse an operation on one before deciding what to do with it.
+func (s *Store) IsBuiltinFolder(folderID int64) bool { return s.isBuiltinFolder(folderID) }
+
+// isBuiltinFolder reports whether folderID is one the store provisions itself.
+// The private and public hierarchies number their folders separately and the
+// ranges overlap, so the store's own kind decides which table to consult.
+func (s *Store) isBuiltinFolder(folderID int64) bool {
+	table := builtinFolders
+	if s.kind == storePublic {
+		table = builtinPublicFolders
+	}
+	for _, f := range table {
+		if int64(f.fid) == folderID {
+			return true
+		}
+	}
+	return false
+}
+
+// dumpsterSubtree moves every message of the folders about to be removed into
+// Recoverable Items, soft-deleted. Without it the folder row's cascade destroys
+// the mail outright, which no other delete path in the store does.
+//
+// A public store has no Deleted Items, so there the messages go with the folder,
+// as they did before.
+func (s *Store) dumpsterSubtree(subtree []int64) error {
+	if s.kind != storePrivate {
+		return nil
+	}
+	trash := int64(mapi.PrivateFIDDeletedItems)
+	for _, fid := range subtree {
+		if fid == trash {
+			continue // already where the mail is being moved to
+		}
+		ids, err := s.allFolderMessageIDs(fid)
+		if err != nil {
+			return err
+		}
+		for _, id := range ids {
+			// Soft-delete first: it drops the index row and stamps PR_DELETED_ON,
+			// which is what makes the message recoverable rather than merely moved.
+			if err := s.SoftDeleteObject(id); err != nil && !errors.Is(err, ErrNotFound) {
+				return err
+			}
+			if _, err := s.objdb.Exec(
+				`UPDATE messages SET parent_fid=? WHERE message_id=?`, trash, id); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// allFolderMessageIDs lists every message a folder holds, live or already in its
+// own dumpster and of either associated class, because all of them are lost when
+// the folder row goes.
+func (s *Store) allFolderMessageIDs(folderID int64) ([]int64, error) {
+	rows, err := s.objdb.Query(`SELECT message_id FROM messages WHERE parent_fid=?`, folderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// FolderIsUnder reports whether folderID sits at or below ancestor, walking the
+// STORED parent chain. A caller must not decide that from where it believes the
+// folder is: the answer chooses between moving a folder to Deleted Items and
+// removing it for good.
+func (s *Store) FolderIsUnder(folderID, ancestor int64) (bool, error) {
+	for id := folderID; id != 0; {
+		if id == ancestor {
+			return true, nil
+		}
+		var parent sql.NullInt64
+		err := s.objdb.QueryRow(`SELECT parent_id FROM folders WHERE folder_id=?`, id).Scan(&parent)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, ErrNotFound
+		}
+		if err != nil {
+			return false, err
+		}
+		if !parent.Valid || parent.Int64 == id {
+			return false, nil
+		}
+		id = parent.Int64
+	}
+	return false, nil
 }
