@@ -481,7 +481,7 @@ func (c *conn) finishAuth(tag, user, pass string) {
 		c.no(tag, "[AUTHENTICATIONFAILED] too many failed attempts, try again later")
 		return
 	}
-	path, ok := c.srv.Auth.Authenticate(user, pass)
+	path, ok := directory.AuthenticateClient(c.srv.Auth, user, pass)
 	if !ok {
 		if c.srv.Limiter != nil {
 			c.srv.Limiter.Fail(host, user)

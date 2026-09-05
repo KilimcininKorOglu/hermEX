@@ -830,6 +830,24 @@
       "disableDescription": "Enter your password to confirm.",
       "disabled": "Two-step verification is off.",
       "disableFailed": "Could not turn it off."
+    },
+    "appPasswords": {
+      "title": "App passwords",
+      "description": "Mail programs cannot ask for a code, so each one gets its own credential.",
+      "create": "Create",
+      "createTitle": "Create an app password",
+      "createDescription": "Name the program it is for, then confirm with your account password.",
+      "nameLabel": "Name",
+      "namePlaceholder": "Phone, Outlook, Thunderbird",
+      "passwordLabel": "Your account password",
+      "secretShownOnce": "Enter this in the mail program. It is shown only now.",
+      "savedIt": "I have saved it",
+      "createFailed": "Could not create the app password.",
+      "revoke": "Revoke",
+      "revoked": "The app password was revoked.",
+      "revokeFailed": "Could not revoke it.",
+      "lastUsed": "Last used {when}",
+      "neverUsed": "Never used"
     }
   },
   "calendar": {

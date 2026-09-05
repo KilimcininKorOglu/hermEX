@@ -85,16 +85,16 @@ func sfHarness(t *testing.T) (*sfAuth, requestFunc) {
 	auth := &sfAuth{accounts: directory.StaticAccounts{
 		"alice@hermex.test": {Password: "pw", MailboxPath: dir},
 	}}
-	return auth, browser(auth)
+	return auth, browser(auth, auth.accounts)
 }
 
 // requestFunc is one browser: it carries its own cookie jar across calls.
 type requestFunc func(method, target, body string) *httptest.ResponseRecorder
 
-// browser returns a second, independent client against the same directory, which
-// is what a replay test needs: the attacker is not the user's own session.
-func browser(auth *sfAuth) requestFunc {
-	srv := NewServer(auth, auth.accounts, nil, "mail.hermex.test", []byte("second-factor-secret"), "", false)
+// browser returns an independent client against the given directory. A replay
+// test needs a second one, because the attacker is not the user's own session.
+func browser(auth Authenticator, accs directory.StaticAccounts) requestFunc {
+	srv := NewServer(auth, accs, nil, "mail.hermex.test", []byte("second-factor-secret"), "", false)
 	var jar []*http.Cookie
 	return func(method, target, body string) *httptest.ResponseRecorder {
 		var req *http.Request
@@ -263,7 +263,7 @@ func TestACodeIsNotReplayable(t *testing.T) {
 		t.Fatalf("verify = %d: %s", rec.Code, rec.Body.String())
 	}
 	// A second browser, with the same digits, inside the same step.
-	other := browser(auth)
+	other := browser(auth, auth.accounts)
 	sfLogin(t, other)
 	if rec := other(http.MethodPost, "/api/v1/auth/2fa/verify", `{"code":"`+code+`"}`); rec.Code != http.StatusUnauthorized {
 		t.Errorf("the same code was accepted twice: %d", rec.Code)
@@ -297,7 +297,7 @@ func TestARecoveryCodeSignsInOnce(t *testing.T) {
 	if rec := do(http.MethodPost, "/api/v1/auth/2fa/verify", `{"code":"`+codes[0]+`"}`); rec.Code != http.StatusOK {
 		t.Fatalf("a recovery code was refused: %d %s", rec.Code, rec.Body.String())
 	}
-	other := browser(auth)
+	other := browser(auth, auth.accounts)
 	sfLogin(t, other)
 	if rec := other(http.MethodPost, "/api/v1/auth/2fa/verify", `{"code":"`+codes[0]+`"}`); rec.Code != http.StatusUnauthorized {
 		t.Errorf("the same recovery code was accepted twice: %d", rec.Code)

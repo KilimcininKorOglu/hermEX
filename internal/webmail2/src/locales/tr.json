@@ -830,6 +830,24 @@
       "disableDescription": "Onaylamak için parolanızı girin.",
       "disabled": "İki adımlı doğrulama kapalı.",
       "disableFailed": "Kapatılamadı."
+    },
+    "appPasswords": {
+      "title": "App password'ler",
+      "description": "Mail programları kod isteyemez, bu yüzden her biri kendi credential'ını alır.",
+      "create": "Oluştur",
+      "createTitle": "App password oluştur",
+      "createDescription": "Hangi program için olduğunu yazın, sonra hesap parolanızla onaylayın.",
+      "nameLabel": "Ad",
+      "namePlaceholder": "Telefon, Outlook, Thunderbird",
+      "passwordLabel": "Hesap parolanız",
+      "secretShownOnce": "Bunu mail programına girin. Yalnız şimdi gösterilir.",
+      "savedIt": "Kaydettim",
+      "createFailed": "App password oluşturulamadı.",
+      "revoke": "İptal et",
+      "revoked": "App password iptal edildi.",
+      "revokeFailed": "İptal edilemedi.",
+      "lastUsed": "Son kullanım {when}",
+      "neverUsed": "Hiç kullanılmadı"
     }
   },
   "calendar": {

@@ -80,6 +80,7 @@ func (d *SQLDirectory) storePath(maildir string) string {
 
 // loginRow is one resolved candidate from the username/altname/alias union.
 type loginRow struct {
+	id           int64 // the resolved user's row id, which an alias login also needs
 	password     string
 	maildir      string
 	addrStatus   int
@@ -91,21 +92,31 @@ type loginRow struct {
 	mustChange   bool   // true => an admin reset requires a forced password change
 }
 
+// eligible reports whether a resolved row may authenticate at all: an active
+// mail user in an active domain, with a mailbox. Every credential the account
+// holds is checked against it, so disabling an account closes its app passwords
+// at the same moment it closes its password.
+func (r loginRow) eligible() bool {
+	return r.displayType == dtMailuser &&
+		r.addrStatus&afUserMask == afUserNormal && r.addrStatus&afDomainMask == 0 &&
+		r.domainStatus == 0 && r.maildir != ""
+}
+
 // resolve runs the three-key resolution: the input must match
 // exactly one of users.username, altnames.altname, or aliases.aliasname. Zero
 // rows (no such address) and more than one (ambiguous) are both a non-match.
 func (d *SQLDirectory) resolve(addr string) (loginRow, bool, error) {
 	const q = `
-SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, u.domain_id, d.org_id, u.must_change_password
+SELECT u.id, u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, u.domain_id, d.org_id, u.must_change_password
   FROM users u JOIN domains d ON u.domain_id = d.id
  WHERE u.username = ?
 UNION
-SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, u.domain_id, d.org_id, u.must_change_password
+SELECT u.id, u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, u.domain_id, d.org_id, u.must_change_password
   FROM users u JOIN domains d ON u.domain_id = d.id
   JOIN altnames a ON a.user_id = u.id
  WHERE a.altname = ?
 UNION
-SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, u.domain_id, d.org_id, u.must_change_password
+SELECT u.id, u.password, u.maildir, u.address_status, u.display_type, d.domain_status, u.externid, u.domain_id, d.org_id, u.must_change_password
   FROM users u JOIN domains d ON u.domain_id = d.id
   JOIN aliases al ON al.mainname = u.username
  WHERE al.aliasname = ?
@@ -119,7 +130,7 @@ SELECT u.password, u.maildir, u.address_status, u.display_type, d.domain_status,
 	for rows.Next() {
 		var r loginRow
 		var mustChange int
-		if err := rows.Scan(&r.password, &r.maildir, &r.addrStatus, &r.displayType, &r.domainStatus, &r.externid, &r.domainID, &r.orgID, &mustChange); err != nil {
+		if err := rows.Scan(&r.id, &r.password, &r.maildir, &r.addrStatus, &r.displayType, &r.domainStatus, &r.externid, &r.domainID, &r.orgID, &mustChange); err != nil {
 			return loginRow{}, false, err
 		}
 		r.mustChange = mustChange != 0
@@ -154,10 +165,7 @@ func (d *SQLDirectory) authenticateRow(user, password string) (path string, must
 	// A missing, wrong-type, disabled, or maildir-less account must not short-circuit
 	// before the password check: that timing difference leaks which addresses exist.
 	// Run the same-cost decoy verify and fall through to the uniform failure return.
-	usable := err == nil && found &&
-		row.displayType == dtMailuser &&
-		row.addrStatus&afUserMask == afUserNormal && row.addrStatus&afDomainMask == 0 && row.domainStatus == 0 &&
-		row.maildir != ""
+	usable := err == nil && found && row.eligible()
 	if !usable {
 		sqlCryptVerify(password, decoyPasswordHash)
 		return "", false, false

@@ -258,7 +258,7 @@ func (s *Server) basicAuth(w http.ResponseWriter, r *http.Request) (user, mailbo
 			http.Error(w, "too many failed attempts, try again later", http.StatusTooManyRequests)
 			return "", "", false
 		}
-		if path, good := s.auth.Authenticate(u, p); good {
+		if path, good := directory.AuthenticateClient(s.auth, u, p); good {
 			// The credentials were right, so the attempt is a success even when the
 			// service privilege then refuses it.
 			if s.Limiter != nil {

@@ -453,7 +453,7 @@ func (s *Server) finishAuth(w *ew, conn net.Conn, user, pass string) (*mailbox, 
 		errLine(w, "[AUTH] too many failed attempts, try again later")
 		return nil, false
 	}
-	path, authed := s.Auth.Authenticate(user, pass)
+	path, authed := directory.AuthenticateClient(s.Auth, user, pass)
 	if user == "" || !authed {
 		if s.Limiter != nil {
 			s.Limiter.Fail(addr, user)

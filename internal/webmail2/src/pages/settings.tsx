@@ -34,6 +34,7 @@ import pkg from "../../package.json"
 import { enablePushNotifications, disablePushNotifications, pushSupported } from "@/utils/push"
 import { RichTextEditor } from "@/components/RichTextEditor"
 import { SecondFactorCard } from "@/components/settings/second-factor-card"
+import { AppPasswordsCard } from "@/components/settings/app-passwords-card"
 
 // rfc3339ToDate extracts the YYYY-MM-DD part from an RFC3339 string for <input type="date">.
 function rfc3339ToDate(value?: string): string {
@@ -2296,8 +2297,10 @@ export function SettingsPage() {
         </div>
       </div>
 
-      {/* Second factor, next to the password it backs. */}
+      {/* Second factor, next to the password it backs, and the per-client
+          credentials it makes necessary. */}
       <SecondFactorCard />
+      <AppPasswordsCard />
 
       {/* Message-list columns (reference MailGridColumnModel): sender/subject/date
           always show, so only the optional columns toggle here. */}

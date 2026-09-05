@@ -115,7 +115,7 @@ func (s *session) Auth(username, password string) bool {
 	if s.limiter != nil && !s.limiter.Allowed(s.remoteAddr, username) {
 		return false
 	}
-	path, ok := authn.Authenticate(username, password)
+	path, ok := directory.AuthenticateClient(authn, username, password)
 	if !ok {
 		if s.limiter != nil {
 			s.limiter.Fail(s.remoteAddr, username)

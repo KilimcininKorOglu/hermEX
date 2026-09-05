@@ -39,6 +39,15 @@ export interface SecondFactorStatus {
   recoveryRemaining: number
 }
 
+// AppPasswordEntry is one per-client credential as it is listed. The secret is
+// absent: it exists in the response that minted it and nowhere else.
+export interface AppPasswordEntry {
+  id: number
+  name: string
+  createdAt: number
+  lastUsedAt: number
+}
+
 export interface Mail {
   id: string
   from: string // bare sender address
@@ -839,6 +848,23 @@ class API {
   // because turning the factor off is what a stolen session would do first.
   async disableSecondFactor(password: string): Promise<void> {
     await this.post('/account/2fa/disable', { password })
+  }
+
+  // listAppPasswords returns the account's per-client credentials. The secrets
+  // are never in the listing; each exists only in the response that minted it.
+  async listAppPasswords(): Promise<{ appPasswords: AppPasswordEntry[] }> {
+    return this.get<{ appPasswords: AppPasswordEntry[] }>('/account/app-passwords')
+  }
+
+  // createAppPassword mints a credential for one mail program and returns the
+  // secret, which is shown once.
+  async createAppPassword(name: string, password: string): Promise<{ secret: string }> {
+    return this.post<{ secret: string }>('/account/app-passwords', { name, password })
+  }
+
+  // deleteAppPassword revokes one credential without touching the others.
+  async deleteAppPassword(id: number): Promise<void> {
+    await this.delete(`/account/app-passwords/${id}`)
   }
 
   // changePassword updates the authenticated user's own password.
