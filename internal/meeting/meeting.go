@@ -373,22 +373,15 @@ func findCalendarByUID(st *objectstore.Store, uidTag mapi.PropTag, uid string) (
 	if uid == "" {
 		return 0, false
 	}
-	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	// The store resolves the match. Listing the calendar and reading the property
+	// back one object at a time costs a query per appointment to find one of them,
+	// and this runs on the delivery path for every inbound meeting message.
+	id, found, err := st.FindObjectByProperty(int64(mapi.PrivateFIDCalendar), uidTag, uid)
 	if err != nil {
+		st.LogSwallowedError("meeting.find-by-uid", err)
 		return 0, false
 	}
-	for _, obj := range objs {
-		pv, err := st.GetMessageProperties(obj.ID, uidTag)
-		if err != nil {
-			continue
-		}
-		if v, ok := pv.Get(uidTag); ok {
-			if s, _ := v.(string); s == uid {
-				return obj.ID, true
-			}
-		}
-	}
-	return 0, false
+	return id, found
 }
 
 // ApplyReply processes an incoming iTIP REPLY on the organizer's side: it locates

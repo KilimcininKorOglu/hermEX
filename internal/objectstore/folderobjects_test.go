@@ -100,3 +100,71 @@ func TestDeleteObject(t *testing.T) {
 		t.Errorf("second delete: err %v, want ErrNotFound", err)
 	}
 }
+
+// TestFindObjectByProperty pins the lookup the delivery path uses to match an
+// inbound meeting message to its appointment.
+func TestFindObjectByProperty(t *testing.T) {
+	s := openSeededStore(t)
+	cal := int64(mapi.PrivateFIDCalendar)
+
+	mk := func(uid string) int64 {
+		var props mapi.PropertyValues
+		props.Set(mapi.PrSubject, "appt "+uid)
+		props.Set(mapi.PrInternetMessageID, uid)
+		id, err := s.CreateMessage(cal, &oxcmail.Message{Props: props})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	first := mk("shared@hermex.test")
+	mk("other@hermex.test")
+	second := mk("shared@hermex.test")
+
+	id, ok, err := s.FindObjectByProperty(cal, mapi.PrInternetMessageID, "other@hermex.test")
+	if err != nil || !ok {
+		t.Fatalf("lookup = ok %v err %v", ok, err)
+	}
+	if got := s.subjectOf(t, id); got != "appt other@hermex.test" {
+		t.Errorf("matched the wrong object: %q", got)
+	}
+
+	if _, ok, err := s.FindObjectByProperty(cal, mapi.PrInternetMessageID, "absent@hermex.test"); err != nil || ok {
+		t.Errorf("absent value = ok %v err %v, want not found", ok, err)
+	}
+	assertDuplicateResolvesToTheOldest(t, s, first, second)
+}
+
+// assertDuplicateResolvesToTheOldest pins the tie-break, which is what a scan in
+// id order returned before the lookup moved into the store, and pins that a
+// soft-deleted object leaves the live view.
+func assertDuplicateResolvesToTheOldest(t *testing.T, s *Store, first, second int64) {
+	t.Helper()
+	cal := int64(mapi.PrivateFIDCalendar)
+	id, ok, err := s.FindObjectByProperty(cal, mapi.PrInternetMessageID, "shared@hermex.test")
+	if err != nil || !ok {
+		t.Fatalf("duplicate lookup = ok %v err %v", ok, err)
+	}
+	if id != first {
+		t.Errorf("duplicate resolved to %d, want the oldest (%d)", id, first)
+	}
+	if err := s.SoftDeleteObject(first); err != nil {
+		t.Fatal(err)
+	}
+	id, ok, err = s.FindObjectByProperty(cal, mapi.PrInternetMessageID, "shared@hermex.test")
+	if err != nil || !ok || id != second {
+		t.Errorf("after soft-deleting the oldest, lookup = %d ok %v err %v, want %d", id, ok, err, second)
+	}
+}
+
+// subjectOf reads one object's subject.
+func (s *Store) subjectOf(t *testing.T, id int64) string {
+	t.Helper()
+	pv, err := s.GetMessageProperties(id, mapi.PrSubject)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, _ := pv.Get(mapi.PrSubject)
+	str, _ := v.(string)
+	return str
+}

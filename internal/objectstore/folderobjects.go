@@ -2,6 +2,7 @@ package objectstore
 
 import (
 	"database/sql"
+	"errors"
 	"time"
 
 	"hermex/internal/mapi"
@@ -233,4 +234,33 @@ func (s *Store) FindAssociatedByClass(folderID int64, class string) (int64, bool
 		return 0, false, err
 	}
 	return id, true, rows.Err()
+}
+
+// FindObjectByProperty returns the id of the folder's first live, non-associated
+// object whose property tag equals value, resolved by the store.
+//
+// The alternative is to list the folder and read the property back one object at
+// a time, which costs a query per object to find one of them. The lookup runs on
+// the delivery path (an inbound meeting response is matched to its appointment by
+// iCalendar UID), so the cost has to follow the answer rather than the size of
+// the calendar. Ties go to the lowest id, which is the oldest object, matching
+// what a scan in id order returned.
+func (s *Store) FindObjectByProperty(folderID int64, tag mapi.PropTag, value string) (int64, bool, error) {
+	var id int64
+	err := s.objdb.QueryRow(
+		`SELECT m.message_id
+		   FROM messages m
+		   JOIN message_properties p ON p.message_id = m.message_id AND p.proptag = ?
+		  WHERE m.parent_fid = ? AND m.is_deleted = 0 AND m.is_associated = 0
+		    AND p.propval = ?
+		  ORDER BY m.message_id
+		  LIMIT 1`,
+		int64(uint32(tag)), folderID, value).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return id, true, nil
 }

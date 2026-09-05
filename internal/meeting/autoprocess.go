@@ -115,7 +115,11 @@ func hasConflict(st *objectstore.Store, req *oxcmail.Message, t apptTags) (bool,
 		return false, nil // a request with no time window cannot be judged in conflict
 	}
 	reqUID := propStr(req.Props, t.uid)
-	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	// The store applies the request's own window, so the scan costs the number of
+	// appointments that could overlap rather than the size of the calendar. This
+	// runs on the delivery path, once per inbound meeting request. The store's
+	// predicate is wider than the overlap test below, which is unchanged.
+	objs, err := st.ListFolderObjectsInWindow(int64(mapi.PrivateFIDCalendar), t.start, t.end, reqStart, reqEnd)
 	if err != nil {
 		return false, err
 	}
