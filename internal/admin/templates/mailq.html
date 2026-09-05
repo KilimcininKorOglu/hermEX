@@ -4,6 +4,7 @@
 <main>
 <h1>Mail queue</h1>
 <p class="hint">Outbound deliveries awaiting relay. Pending entries have not been attempted yet; deferred ones failed transiently and will retry at the shown time. Flush a deferred entry to retry it now, or delete one to drop it (no bounce is sent).</p>
+<p><button hx-get="/admin/ui/mailq/panel" hx-target="#mailq-panel" hx-swap="innerHTML">Refresh</button></p>
 <div id="mailq-panel">{{template "mailq-panel" .}}</div>
 </main>
 </div>

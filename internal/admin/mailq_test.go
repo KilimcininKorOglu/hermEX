@@ -179,3 +179,42 @@ func TestMailQueueRequiresSystem(t *testing.T) {
 		t.Errorf("org-admin mail-queue page = %d, want 403", resp.StatusCode)
 	}
 }
+
+// TestMailQueuePanelIsReachable pins the refresh path. The panel handler renders
+// the queue table on its own for a swap, and the page has to reach it: a handler
+// no page calls is a surface nobody can use.
+func TestMailQueuePanelIsReachable(t *testing.T) {
+	d := &fakeDir{authOK: true, uid: 7, roles: []directory.AdminRole{{Role: directory.AdminSystem}}}
+	ts, root := mailqServer(t, d)
+
+	sp, err := relay.Open(filepath.Join(root, "relay.sqlite3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sp.Enqueue("boss@local.test", []string{"ext@remote.test"},
+		[]byte("Subject: hi\r\n\r\nbody"), time.Unix(1700000000, 0)); err != nil {
+		t.Fatal(err)
+	}
+	_ = sp.Close()
+
+	session, _ := loginCookies(t, ts)
+
+	// The page carries a control that fetches the panel.
+	resp := authedGET(t, ts, "/admin/ui/mailq", session)
+	page, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if !strings.Contains(string(page), `hx-get="/admin/ui/mailq/panel"`) {
+		t.Errorf("the page never fetches the panel, so the handler cannot be reached:\n%s", page)
+	}
+
+	// And the panel answers with the table alone, not the whole page.
+	resp = authedGET(t, ts, "/admin/ui/mailq/panel", session)
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || !strings.Contains(string(body), "ext@remote.test") {
+		t.Fatalf("panel (%d) missing the queued recipient:\n%s", resp.StatusCode, body)
+	}
+	if strings.Contains(string(body), "<html") {
+		t.Error("the panel returned a whole page; a swap target must be the fragment")
+	}
+}
