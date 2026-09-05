@@ -54,6 +54,18 @@ describe('singleFlight', () => {
     expect(await gate.run(async () => {})).toBe(true)
   })
 
+  // begin/end is the same gate for a handler that already has its own
+  // try/finally, so it must drop a second caller exactly as run does.
+  it('admits one caller through begin and reopens on end', () => {
+    const gate = singleFlight()
+    expect(gate.begin()).toBe(true)
+    expect(gate.begin()).toBe(false)
+    expect(gate.busy()).toBe(true)
+    gate.end()
+    expect(gate.busy()).toBe(false)
+    expect(gate.begin()).toBe(true)
+  })
+
   it('reports every busy transition to the observer', async () => {
     const seen: boolean[] = []
     const gate = singleFlight((b) => seen.push(b))

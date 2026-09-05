@@ -15,6 +15,7 @@ import {
 import { toast } from "sonner"
 import api, { type Note } from "@/utils/api"
 import { useI18n } from "@/hooks/useI18n"
+import { useBusyGate } from "@/hooks/useBusyGate"
 
 interface NoteForm {
   title: string
@@ -43,7 +44,9 @@ export function NotesPage() {
   const { t } = useI18n()
   const [notes, setNotes] = useState<Note[]>([])
   const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState(false)
+  // One mutation at a time: a button's disabled attribute is not the guard,
+  // because a second click can arrive before React re-renders with the new state.
+  const { busy, begin: beginMutation, end: endMutation } = useBusyGate()
   const [editing, setEditing] = useState<Note | null>(null)
   const [creating, setCreating] = useState(false)
   const [form, setForm] = useState<NoteForm>(emptyForm)
@@ -83,7 +86,7 @@ export function NotesPage() {
       toast.error(t("notes.titleOrBodyRequired"))
       return
     }
-    setBusy(true)
+    if (!beginMutation()) return
     try {
       await api.createNote({ title: form.title.trim(), body: form.body, color: form.color })
       toast.success(t("notes.noteCreated"))
@@ -92,7 +95,7 @@ export function NotesPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("notes.createFailed"))
     } finally {
-      setBusy(false)
+      endMutation()
     }
   }
 
@@ -102,7 +105,7 @@ export function NotesPage() {
       toast.error(t("notes.titleOrBodyRequired"))
       return
     }
-    setBusy(true)
+    if (!beginMutation()) return
     try {
       await api.updateNote(editing.id, { title: form.title.trim(), body: form.body, color: form.color })
       toast.success(t("notes.noteUpdated"))
@@ -111,13 +114,13 @@ export function NotesPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("notes.saveFailed"))
     } finally {
-      setBusy(false)
+      endMutation()
     }
   }
 
   const confirmDelete = async () => {
     if (!deleteTarget || busy) return
-    setBusy(true)
+    if (!beginMutation()) return
     try {
       await api.deleteNote(deleteTarget.id)
       toast.success(t("notes.noteDeleted"))
@@ -126,7 +129,7 @@ export function NotesPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("notes.deleteFailed"))
     } finally {
-      setBusy(false)
+      endMutation()
     }
   }
 

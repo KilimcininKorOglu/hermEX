@@ -11,6 +11,11 @@ export interface Gate {
   run(fn: () => Promise<void>): Promise<boolean>
   // busy reports whether a run is in flight, for a button's disabled state.
   busy(): boolean
+  // begin admits one runner and reports whether it was admitted. It pairs with
+  // end for a handler that already has its own try/finally, so the guard is two
+  // lines rather than a rewrite of the handler's shape.
+  begin(): boolean
+  end(): void
 }
 
 export function singleFlight(onBusyChange?: (busy: boolean) => void): Gate {
@@ -19,19 +24,25 @@ export function singleFlight(onBusyChange?: (busy: boolean) => void): Gate {
     running = v
     onBusyChange?.(v)
   }
-  return {
+  const gate: Gate = {
     async run(fn: () => Promise<void>): Promise<boolean> {
-      if (running) return false
-      set(true)
+      if (!gate.begin()) return false
       try {
         await fn()
       } finally {
         // The gate reopens even when fn threw, because a refused action must be
         // retryable; leaving it shut would strand the dialog.
-        set(false)
+        gate.end()
       }
       return true
     },
     busy: () => running,
+    begin: () => {
+      if (running) return false
+      set(true)
+      return true
+    },
+    end: () => set(false),
   }
+  return gate
 }

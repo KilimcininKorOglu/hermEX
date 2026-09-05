@@ -34,6 +34,7 @@ import api, { type Calendar, type CalendarEvent, type UserFreeBusy, type Room, t
 import { useI18n } from "@/hooks/useI18n"
 import { useAuth } from "@/contexts/AuthContext"
 import { ShareFolderDialog } from "@/components/share-folder-dialog"
+import { useBusyGate } from "@/hooks/useBusyGate"
 
 type TFunc = (key: string, params?: Record<string, string>) => string
 
@@ -294,7 +295,9 @@ export function CalendarPage() {
   // edited, shown read-only as the organizer's TrackingTab. Null when not editing.
   const [editingTracking, setEditingTracking] = useState<{ email: string; response: number }[] | null>(null)
   const [form, setForm] = useState<EventForm>(emptyForm)
-  const [busy, setBusy] = useState(false)
+  // One mutation at a time: a button's disabled attribute is not the guard,
+  // because a second click can arrive before React re-renders with the new state.
+  const { busy, begin: beginMutation, end: endMutation } = useBusyGate()
   const [deleteTarget, setDeleteTarget] = useState<CalendarEvent | null>(null)
   const [rooms, setRooms] = useState<Room[]>([])
   // allCategories is the user's master category list (name + color), loaded once
@@ -464,7 +467,7 @@ export function CalendarPage() {
       // floating dates.
       timezone: form.allDay ? undefined : (getDisplayTimeZone() || detectTimeZone()),
     }
-    setBusy(true)
+    if (!beginMutation()) return
     try {
       if (editingUID) {
         await api.updateCalendarEvent(editingUID, payload)
@@ -483,13 +486,13 @@ export function CalendarPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("calendar.saveFailed"))
     } finally {
-      setBusy(false)
+      endMutation()
     }
   }
 
   const confirmDelete = async () => {
     if (!deleteTarget || busy) return
-    setBusy(true)
+    if (!beginMutation()) return
     try {
       await api.deleteCalendarEvent(deleteTarget.uid)
       toast.success(t("calendar.eventDeleted"))
@@ -498,7 +501,7 @@ export function CalendarPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("calendar.deleteFailed"))
     } finally {
-      setBusy(false)
+      endMutation()
     }
   }
 

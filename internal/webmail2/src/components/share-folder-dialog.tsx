@@ -32,6 +32,7 @@ import api, {
   rightsToProfile,
   profileToRights,
 } from "@/utils/api"
+import { useBusyGate } from "@/hooks/useBusyGate"
 
 interface ShareFolderDialogProps {
   open: boolean
@@ -57,7 +58,9 @@ export function ShareFolderDialog({
   const { t } = useI18n()
   const [grants, setGrants] = useState<ACLEntry[]>([])
   const [loading, setLoading] = useState(false)
-  const [saving, setSaving] = useState(false)
+  // One mutation at a time: a button's disabled attribute is not the guard,
+  // because a second click can arrive before React re-renders with the new state.
+  const { busy: saving, begin: beginMutation, end: endMutation } = useBusyGate()
 
   // New grant form: grantee, the raw Frights bitmask, and whether to cascade.
   const [newGrantee, setNewGrantee] = useState("")
@@ -88,7 +91,7 @@ export function ShareFolderDialog({
 
   const handleAddGrant = async () => {
     if (!newGrantee.trim()) return
-    setSaving(true)
+    if (!beginMutation()) return
     try {
       await api.setACL(owner, folderName, newGrantee.trim().toLowerCase(), rights, recursive)
       const data = await api.getACL(owner, folderName)
@@ -100,12 +103,12 @@ export function ShareFolderDialog({
     } catch {
       toast.error(t("share.grantFailed"))
     } finally {
-      setSaving(false)
+      endMutation()
     }
   }
 
   const handleRemoveGrant = async (grantee: string) => {
-    setSaving(true)
+    if (!beginMutation()) return
     try {
       await api.deleteACL(owner, folderName, grantee)
       setGrants((prev) => prev.filter((g) => g.Grantee !== grantee))
@@ -113,7 +116,7 @@ export function ShareFolderDialog({
     } catch {
       toast.error(t("share.removeFailed"))
     } finally {
-      setSaving(false)
+      endMutation()
     }
   }
 

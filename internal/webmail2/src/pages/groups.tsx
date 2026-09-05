@@ -5,6 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "sonner"
 import { useI18n } from "@/hooks/useI18n"
 import api from "@/utils/api"
+import { useBusyGate } from "@/hooks/useBusyGate"
 
 /**
  * GroupsPage lets a distribution-list owner manage the membership of the lists they
@@ -17,7 +18,9 @@ export function GroupsPage() {
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<string>("")
   const [members, setMembers] = useState<string>("")
-  const [saving, setSaving] = useState(false)
+  // One mutation at a time: a button's disabled attribute is not the guard,
+  // because a second click can arrive before React re-renders with the new state.
+  const { busy: saving, begin: beginMutation, end: endMutation } = useBusyGate()
   const fileRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -46,14 +49,14 @@ export function GroupsPage() {
       .split("\n")
       .map((s) => s.trim())
       .filter(Boolean)
-    setSaving(true)
+    if (!beginMutation()) return
     try {
       await api.setGroupMembers(selected, list)
       toast.success(t("groups.saved"))
     } catch {
       toast.error(t("groups.saveError"))
     } finally {
-      setSaving(false)
+      endMutation()
     }
   }, [selected, members, t])
 

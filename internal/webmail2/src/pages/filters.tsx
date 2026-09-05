@@ -25,6 +25,7 @@ import { toast } from "sonner"
 import { useI18n } from "@/hooks/useI18n"
 import api from "@/utils/api"
 import type { Filter, FilterCondition, FilterAction, FilterInput } from "@/utils/api"
+import { useBusyGate } from "@/hooks/useBusyGate"
 
 // RUN_FOLDERS are the folders a manual filter run may sweep, matching the slugs the
 // API resolves.
@@ -220,7 +221,9 @@ export function FiltersPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState<FilterInput>(emptyDraft())
-  const [saving, setSaving] = useState(false)
+  // One mutation at a time: a button's disabled attribute is not the guard,
+  // because a second click can arrive before React re-renders with the new state.
+  const { busy: saving, begin: beginMutation, end: endMutation } = useBusyGate()
   const [deleteTarget, setDeleteTarget] = useState<Filter | null>(null)
   const [transferring, setTransferring] = useState(false)
   const [running, setRunning] = useState(false)
@@ -415,7 +418,7 @@ export function FiltersPage() {
       toast.error(error)
       return
     }
-    setSaving(true)
+    if (!beginMutation()) return
     try {
       if (editingId) {
         await api.updateFilter(editingId, draft)
@@ -437,7 +440,7 @@ export function FiltersPage() {
     } catch {
       toast.error(t("filters.toast.saveFailed"))
     } finally {
-      setSaving(false)
+      endMutation()
     }
   }
 

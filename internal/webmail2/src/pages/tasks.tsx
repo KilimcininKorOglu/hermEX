@@ -22,6 +22,7 @@ import {
 import { toast } from "sonner"
 import api, { type Task, type TaskInput } from "@/utils/api"
 import { useI18n } from "@/hooks/useI18n"
+import { useBusyGate } from "@/hooks/useBusyGate"
 
 function dueLabel(due?: string): string {
   if (!due) return ""
@@ -52,7 +53,9 @@ export function TasksPage() {
   const [allCategories, setAllCategories] = useState<{ name: string; color?: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [quickAdd, setQuickAdd] = useState("")
-  const [busy, setBusy] = useState(false)
+  // One mutation at a time: a button's disabled attribute is not the guard,
+  // because a second click can arrive before React re-renders with the new state.
+  const { busy, begin: beginMutation, end: endMutation } = useBusyGate()
   const [editing, setEditing] = useState<Task | null>(null)
   const [form, setForm] = useState<TaskForm>(emptyForm)
   const [deleteTarget, setDeleteTarget] = useState<Task | null>(null)
@@ -86,7 +89,7 @@ export function TasksPage() {
   const handleQuickAdd = async () => {
     const summary = quickAdd.trim()
     if (!summary) return
-    setBusy(true)
+    if (!beginMutation()) return
     try {
       await api.createTask({ summary, completed: false })
       setQuickAdd("")
@@ -94,7 +97,7 @@ export function TasksPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("tasks.addFailed"))
     } finally {
-      setBusy(false)
+      endMutation()
     }
   }
 
@@ -171,7 +174,7 @@ export function TasksPage() {
       toast.error(t("tasks.titleRequired"))
       return
     }
-    setBusy(true)
+    if (!beginMutation()) return
     try {
       await api.updateTask(editing.uid, {
         summary: form.summary.trim(),
@@ -193,13 +196,13 @@ export function TasksPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("tasks.saveFailed"))
     } finally {
-      setBusy(false)
+      endMutation()
     }
   }
 
   const confirmDelete = async () => {
     if (!deleteTarget || busy) return
-    setBusy(true)
+    if (!beginMutation()) return
     try {
       await api.deleteTask(deleteTarget.uid)
       toast.success(t("tasks.taskDeleted"))
@@ -208,7 +211,7 @@ export function TasksPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t("tasks.deleteFailed"))
     } finally {
-      setBusy(false)
+      endMutation()
     }
   }
 
