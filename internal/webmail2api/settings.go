@@ -228,10 +228,22 @@ func readAppearanceSettings(m map[string]json.RawMessage) appearanceSettingsJSON
 	return a
 }
 
+// appearanceResponseJSON is the appearance settings plus the operator's inline
+// preview cap. The cap is NOT a user setting and is never read back from a PUT: it
+// rides here because this is where the client already learns whether to preview at
+// all, so it costs no extra request when a message opens.
+type appearanceResponseJSON struct {
+	appearanceSettingsJSON
+	PreviewMaxBytes int64 `json:"previewMaxBytes"`
+}
+
 // handleGetAppearanceSettings returns the user's display/appearance settings.
 func (s *Server) handleGetAppearanceSettings(w http.ResponseWriter, r *http.Request) {
 	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
-		return readAppearanceSettings(m), false
+		return appearanceResponseJSON{
+			appearanceSettingsJSON: readAppearanceSettings(m),
+			PreviewMaxBytes:        maxPreviewBytes(),
+		}, false
 	})
 }
 
@@ -272,7 +284,9 @@ func (s *Server) handlePutAppearanceSettings(w http.ResponseWriter, r *http.Requ
 		clamped := readAppearanceSettings(map[string]json.RawMessage{"webmail2AppearanceSettings": mustJSON(a)})
 		raw, _ := json.Marshal(clamped)
 		m["webmail2AppearanceSettings"] = raw
-		return clamped, true
+		// The stored blob holds the user's settings only; the operator's preview cap
+		// rides back on the response so a save does not leave the client without it.
+		return appearanceResponseJSON{appearanceSettingsJSON: clamped, PreviewMaxBytes: maxPreviewBytes()}, true
 	})
 }
 

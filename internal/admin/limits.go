@@ -20,6 +20,9 @@ const (
 	// defaultFreeBusyTargets is a count, not a size: how many mailboxes one
 	// availability request may fan out to. It mirrors each daemon's built-in value.
 	defaultFreeBusyTargets = 100
+	// defaultWebmailPreviewMB mirrors webmail2api's built-in inline-preview cap: the
+	// largest attachment the message view previews without being asked.
+	defaultWebmailPreviewMB = 2
 )
 
 // handleUILimits renders the protocol size-limits page (system admins).
@@ -136,7 +139,7 @@ func (s *Server) fillSizeLimits(data map[string]any) {
 	imapMB, ewsMB, easMB := int64(defaultIMAPLiteralMB), int64(defaultEWSRequestMB), int64(defaultActiveSyncRequestMB)
 	icalMB, vcardMB := int64(defaultDAVICalMB), int64(defaultDAVVCardMB)
 	webMB, mapiMB := int64(defaultWebmailRequestMB), int64(defaultMapiRequestMB)
-	fbTargets := int64(defaultFreeBusyTargets)
+	fbTargets, previewMB := int64(defaultFreeBusyTargets), int64(defaultWebmailPreviewMB)
 	if sl, found, err := s.dir.GetSizeLimits(); err == nil && found {
 		imapMB = sl.IMAPLiteralBytes / (1024 * 1024)
 		ewsMB = sl.EWSRequestBytes / (1024 * 1024)
@@ -146,6 +149,7 @@ func (s *Server) fillSizeLimits(data map[string]any) {
 		webMB = sl.WebmailRequestBytes / (1024 * 1024)
 		mapiMB = sl.MapiRequestBytes / (1024 * 1024)
 		fbTargets = sl.FreeBusyMaxTargets
+		previewMB = sl.WebmailPreviewMaxBytes / (1024 * 1024)
 	}
 	data["IMAPLiteralMB"] = imapMB
 	data["EWSRequestMB"] = ewsMB
@@ -155,6 +159,7 @@ func (s *Server) fillSizeLimits(data map[string]any) {
 	data["WebmailRequestMB"] = webMB
 	data["MapiRequestMB"] = mapiMB
 	data["FreeBusyMaxTargets"] = fbTargets
+	data["WebmailPreviewMB"] = previewMB
 }
 
 // handleUISaveLimits persists the protocol size limits (entered in whole MB). Each
@@ -167,7 +172,8 @@ func (s *Server) handleUISaveLimits(w http.ResponseWriter, r *http.Request) {
 	imapMB, ewsMB, easMB := formInt(r, "imap_literal_mb"), formInt(r, "ews_request_mb"), formInt(r, "activesync_request_mb")
 	icalMB, vcardMB := formInt(r, "dav_ical_mb"), formInt(r, "dav_vcard_mb")
 	webMB, mapiMB := formInt(r, "webmail_request_mb"), formInt(r, "mapi_request_mb")
-	if imapMB < 1 || ewsMB < 1 || easMB < 1 || icalMB < 1 || vcardMB < 1 || webMB < 1 || mapiMB < 1 {
+	previewMB := formInt(r, "webmail_preview_mb")
+	if imapMB < 1 || ewsMB < 1 || easMB < 1 || icalMB < 1 || vcardMB < 1 || webMB < 1 || mapiMB < 1 || previewMB < 1 {
 		s.render(w, "limits-panel", s.limitsPageData(r, "Each limit must be at least 1 MB; settings not saved."))
 		return
 	}
@@ -187,6 +193,7 @@ func (s *Server) handleUISaveLimits(w http.ResponseWriter, r *http.Request) {
 		WebmailRequestBytes:    int64(webMB) * 1024 * 1024,
 		MapiRequestBytes:       int64(mapiMB) * 1024 * 1024,
 		FreeBusyMaxTargets:     int64(fbTargets),
+		WebmailPreviewMaxBytes: int64(previewMB) * 1024 * 1024,
 	}
 	if err := s.dir.SetSizeLimits(limits); err != nil {
 		s.render(w, "limits-panel", s.limitsPageData(r, s.notice("Could not save the size limits.", err)))

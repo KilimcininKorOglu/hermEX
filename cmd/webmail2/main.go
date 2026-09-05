@@ -90,8 +90,8 @@ func main() {
 
 	// Webmail request-body cap: read at startup and re-read every minute so an admin's
 	// change applies without a restart; 0 keeps the built-in default.
-	applyWebmailSizeLimit(logger, dir.GetSizeLimits, webmail2api.SetMaxRequestBody, webmail2api.SetMaxFreeBusyTargets)
-	go runWebmailSizeMaintenance(logger, dir.GetSizeLimits, webmail2api.SetMaxRequestBody, webmail2api.SetMaxFreeBusyTargets)
+	applyWebmailSizeLimit(logger, dir.GetSizeLimits, webmail2api.SetMaxRequestBody, webmail2api.SetMaxFreeBusyTargets, webmail2api.SetMaxPreviewBytes)
+	go runWebmailSizeMaintenance(logger, dir.GetSizeLimits, webmail2api.SetMaxRequestBody, webmail2api.SetMaxFreeBusyTargets, webmail2api.SetMaxPreviewBytes)
 	addr := cfg.Webmail2Addr
 	if addr == "" {
 		addr = ":8080"
@@ -153,7 +153,7 @@ func main() {
 // applyWebmailSizeLimit reads the stored webmail request-body cap and applies it. A
 // missing row or a read error leaves the cap unchanged, so a settings failure never
 // shrinks it unexpectedly.
-func applyWebmailSizeLimit(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody, setFreeBusyTargets func(int64)) {
+func applyWebmailSizeLimit(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody, setFreeBusyTargets, setPreviewBytes func(int64)) {
 	s, found, err := read()
 	if err != nil {
 		logging.SettingsReadFailed(logger, "hermex-webmail2", "size-limits", "leaving the request cap unchanged", err)
@@ -164,15 +164,16 @@ func applyWebmailSizeLimit(logger *logging.Logger, read func() (directory.SizeLi
 	}
 	setRequestBody(s.WebmailRequestBytes)
 	setFreeBusyTargets(s.FreeBusyMaxTargets)
+	setPreviewBytes(s.WebmailPreviewMaxBytes)
 }
 
 // runWebmailSizeMaintenance re-applies the webmail request-body cap every minute so an
 // admin change takes effect without a restart. It runs until the process exits.
-func runWebmailSizeMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody, setFreeBusyTargets func(int64)) {
+func runWebmailSizeMaintenance(logger *logging.Logger, read func() (directory.SizeLimits, bool, error), setRequestBody, setFreeBusyTargets, setPreviewBytes func(int64)) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for range tick.C {
-		applyWebmailSizeLimit(logger, read, setRequestBody, setFreeBusyTargets)
+		applyWebmailSizeLimit(logger, read, setRequestBody, setFreeBusyTargets, setPreviewBytes)
 	}
 }
 

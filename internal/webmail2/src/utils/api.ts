@@ -260,6 +260,10 @@ export interface AppearanceSettings {
   inboxNavMode?: string // "pagination" | "infinite" message-list navigation
   inboxPageSize?: number // rows per page/block (10..200)
   mailListColumns?: MailListColumns // per-user message-list column visibility
+  // previewMaxBytes is the operator's inline-preview cap, served with these
+  // settings but owned by the server: it is read-only here and a PUT never
+  // persists it. A larger attachment previews only when the reader asks.
+  previewMaxBytes?: number
 }
 
 export interface Delegation {

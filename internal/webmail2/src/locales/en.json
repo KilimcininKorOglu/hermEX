@@ -247,7 +247,8 @@
     "notePlaceholder": "Write a note about this message",
     "noteAdded": "Note added",
     "noteFailed": "Could not save the note",
-    "deleteNote": "Delete note"
+    "deleteNote": "Delete note",
+    "previewLarge": "Preview ({size})"
   },
   "compose": {
     "invalidEmail": "Enter a valid email address",

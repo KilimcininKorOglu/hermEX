@@ -25,10 +25,13 @@ func TestSizeLimitsRoundTrip(t *testing.T) {
 		t.Fatalf("Get on empty = found %v err %v, want not found", found, err)
 	}
 
+	// Every field carries a DISTINCT non-zero value, because the assertion below
+	// compares the whole struct: a field left at zero round-trips even when its
+	// column was never written, so it would prove nothing.
 	want := SizeLimits{
 		IMAPLiteralBytes: 10485760, EWSRequestBytes: 4194304, ActiveSyncRequestBytes: 2097152,
 		DAVICalBytes: 1048576, DAVVCardBytes: 3145728, WebmailRequestBytes: 41943040,
-		MapiRequestBytes: 33554432,
+		MapiRequestBytes: 33554432, FreeBusyMaxTargets: 42, WebmailPreviewMaxBytes: 5242880,
 	}
 	if err := d.SetSizeLimits(want); err != nil {
 		t.Fatal(err)

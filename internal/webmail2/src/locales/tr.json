@@ -247,7 +247,8 @@
     "notePlaceholder": "Bu ileti hakkında bir not yazın",
     "noteAdded": "Not eklendi",
     "noteFailed": "Not kaydedilemedi",
-    "deleteNote": "Notu sil"
+    "deleteNote": "Notu sil",
+    "previewLarge": "Önizle ({size})"
   },
   "compose": {
     "invalidEmail": "Geçerli bir e-posta adresi girin",

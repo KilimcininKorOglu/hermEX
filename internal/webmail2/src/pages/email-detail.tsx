@@ -97,6 +97,11 @@ const FOLLOWUP_COLORS = [
 // custom-folder list.
 const STANDARD_FOLDERS = new Set(["inbox", "sent", "drafts", "trash", "junk", "scheduled"])
 
+// Largest PDF that previews on its own when the message opens, used only until the
+// appearance request answers with the operator's own cap. It matches the server's
+// built-in default, so the two agree when no operator value has been saved.
+const FALLBACK_PREVIEW_MAX_BYTES = 2 * 1024 * 1024
+
 // toDatetimeLocal converts an RFC3339 instant to the "YYYY-MM-DDTHH:mm" value a
 // native datetime-local input expects, in the browser's local zone.
 function toDatetimeLocal(iso?: string): string {
@@ -173,6 +178,14 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
   // settings (reference SettingsFilePreviewerWidget). Preview defaults on.
   const [filePreview, setFilePreview] = useState(true)
   const [pdfZoom, setPdfZoom] = useState("page-width")
+  // A PDF preview renders through <object>, which the browser does not defer the
+  // way it defers a lazy <img>, so every previewed PDF downloads in full the
+  // moment the message opens. Above the threshold the preview waits for a click,
+  // and these are the attachments the reader asked for by hand.
+  const [previewRequested, setPreviewRequested] = useState<number[]>([])
+  // The cap itself is the operator's, served with the appearance settings. The
+  // fallback here only covers the moment before that request answers.
+  const [previewMaxBytes, setPreviewMaxBytes] = useState(FALLBACK_PREVIEW_MAX_BYTES)
   // Propose-new-time: a dialog where the invitee picks a proposed start/end and
   // emails a METHOD:COUNTER iTIP to the organizer.
   const [proposeOpen, setProposeOpen] = useState(false)
@@ -211,6 +224,7 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
         setShowItemData(!!a.showItemData)
         setFilePreview(a.filePreview ?? true)
         setPdfZoom(a.pdfZoom ?? "page-width")
+        if (a.previewMaxBytes && a.previewMaxBytes > 0) setPreviewMaxBytes(a.previewMaxBytes)
       })
       .catch(() => {})
     return () => { cancelled = true }
@@ -219,6 +233,7 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
   // Load the message by id (the backend resolves it across all folders).
   useEffect(() => {
     setShowImages(false) // re-block remote images for each newly opened message
+    setPreviewRequested([]) // a request to preview covers one message, not the next
     const loadEmail = async () => {
       if (!id) {
         setLoading(false)
@@ -1262,6 +1277,8 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                     const isImage = att.contentType?.startsWith("image/")
                     const isPdf = att.contentType === "application/pdf"
                     const src = `/api/v1/mail/attachment?id=${encodeURIComponent(email.id)}&index=${att.index}`
+                    const pdfPreviewable =
+                      att.size <= previewMaxBytes || previewRequested.includes(att.index)
                     return (
                       <div key={att.index} className="flex flex-col gap-1">
                         <button
@@ -1284,7 +1301,15 @@ export function EmailDetailPage({ id: propId, embedded }: { id?: string; embedde
                             loading="lazy"
                           />
                         )}
-                        {filePreview && isPdf && (
+                        {filePreview && isPdf && !pdfPreviewable && (
+                          <button
+                            onClick={() => setPreviewRequested((prev) => [...prev, att.index])}
+                            className="rounded-lg border bg-card px-3 py-2 text-left text-sm hover:bg-accent/50 transition-colors"
+                          >
+                            {t("emailDetail.previewLarge", { size: formatFileSize(att.size) })}
+                          </button>
+                        )}
+                        {filePreview && isPdf && pdfPreviewable && (
                           <object
                             data={`${src}#${pdfZoomFragment(pdfZoom)}`}
                             type="application/pdf"

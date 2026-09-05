@@ -22,6 +22,10 @@ type SizeLimits struct {
 	// out to. Each target costs a store open and a full calendar scan, so this is a
 	// cap on work per request rather than on bytes accepted.
 	FreeBusyMaxTargets int64
+	// WebmailPreviewMaxBytes bounds the attachment webmail previews inline on its
+	// own when a message opens. A larger one waits for a click, because the preview
+	// downloads the whole file before the reader has asked for it.
+	WebmailPreviewMaxBytes int64
 }
 
 // GetSizeLimits returns the stored size limits and whether a row has been saved. When
@@ -30,10 +34,10 @@ func (d *SQLDirectory) GetSizeLimits() (SizeLimits, bool, error) {
 	var s SizeLimits
 	err := d.db.QueryRow(
 		`SELECT imap_literal_bytes, ews_request_bytes, activesync_request_bytes, dav_ical_bytes, dav_vcard_bytes,
-		        webmail_request_bytes, mapi_request_bytes, freebusy_max_targets
+		        webmail_request_bytes, mapi_request_bytes, freebusy_max_targets, webmail_preview_max_bytes
 		   FROM size_limits WHERE id = 1`).
 		Scan(&s.IMAPLiteralBytes, &s.EWSRequestBytes, &s.ActiveSyncRequestBytes, &s.DAVICalBytes, &s.DAVVCardBytes,
-			&s.WebmailRequestBytes, &s.MapiRequestBytes, &s.FreeBusyMaxTargets)
+			&s.WebmailRequestBytes, &s.MapiRequestBytes, &s.FreeBusyMaxTargets, &s.WebmailPreviewMaxBytes)
 	if errors.Is(err, sql.ErrNoRows) {
 		return SizeLimits{}, false, nil
 	}
@@ -49,8 +53,8 @@ func (d *SQLDirectory) SetSizeLimits(s SizeLimits) error {
 	_, err := d.db.Exec(
 		`INSERT INTO size_limits
 		   (id, imap_literal_bytes, ews_request_bytes, activesync_request_bytes, dav_ical_bytes, dav_vcard_bytes,
-		    webmail_request_bytes, mapi_request_bytes, freebusy_max_targets, updated_at)
-		 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		    webmail_request_bytes, mapi_request_bytes, freebusy_max_targets, webmail_preview_max_bytes, updated_at)
+		 VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON DUPLICATE KEY UPDATE imap_literal_bytes = VALUES(imap_literal_bytes),
 		   ews_request_bytes = VALUES(ews_request_bytes),
 		   activesync_request_bytes = VALUES(activesync_request_bytes),
@@ -58,8 +62,10 @@ func (d *SQLDirectory) SetSizeLimits(s SizeLimits) error {
 		   webmail_request_bytes = VALUES(webmail_request_bytes),
 		   mapi_request_bytes = VALUES(mapi_request_bytes),
 		   freebusy_max_targets = VALUES(freebusy_max_targets),
+		   webmail_preview_max_bytes = VALUES(webmail_preview_max_bytes),
 		   updated_at = VALUES(updated_at)`,
 		s.IMAPLiteralBytes, s.EWSRequestBytes, s.ActiveSyncRequestBytes, s.DAVICalBytes, s.DAVVCardBytes,
-		s.WebmailRequestBytes, s.MapiRequestBytes, s.FreeBusyMaxTargets, time.Now().UnixMilli())
+		s.WebmailRequestBytes, s.MapiRequestBytes, s.FreeBusyMaxTargets, s.WebmailPreviewMaxBytes,
+		time.Now().UnixMilli())
 	return err
 }
