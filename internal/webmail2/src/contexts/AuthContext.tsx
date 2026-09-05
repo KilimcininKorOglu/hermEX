@@ -17,6 +17,10 @@ interface AuthUser extends UserPrefs {
   // mustChangePassword is set by an admin password reset; the SPA forces the user
   // through a password-change screen until they clear it by changing it.
   mustChangePassword?: boolean
+  // secondFactorRequired marks a session that has cleared the password only. The
+  // API answers 403 for everything but the code prompt while it is set, so this
+  // flag decides which screen to draw, not whether the data is protected.
+  secondFactorRequired?: boolean
 }
 
 interface AuthContextType {
@@ -65,6 +69,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       locale: me.locale,
       theme: me.theme,
       mustChangePassword: me.must_change_password,
+      secondFactorRequired: me.second_factor_required,
     })
     setIsAuthenticated(true)
     setDisplayTimeZone(me.timezone || '')
@@ -123,8 +128,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setError(null)
     try {
       // Token is now in HttpOnly cookie - no need to store in memory
-      await api.post<{ expiresIn?: number }>('/auth/login', { email, password })
+      const res = await api.post<{ expiresIn?: number; secondFactorRequired?: boolean }>(
+        '/auth/login', { email, password })
       setCookie(sessionMarkerKey, '1')
+      // The password was right, but the account carries a second factor. Nothing
+      // else is readable yet, so the identity stops here and the app routes to
+      // the code prompt.
+      if (res?.secondFactorRequired) {
+        setUser({ email, secondFactorRequired: true })
+        setIsAuthenticated(true)
+        return true
+      }
       // Pull the full identity + presentation prefs so the onboarding gate and
       // chosen timezone are known immediately after login.
       try {

@@ -809,6 +809,27 @@
       "resetSettings": "Ayarları sıfırla",
       "settingsReset": "Ayarlar sıfırlandı",
       "resetFailed": "Sıfırlama başarısız"
+    },
+    "twoFactor": {
+      "title": "İki adımlı doğrulama",
+      "description": "Paroladan sonra authenticator uygulamasından bir kod ister.",
+      "enabledDescription": "Açık. {count} recovery code kaldı.",
+      "enable": "Aç",
+      "disable": "Kapat",
+      "beginFailed": "Kurulum başlatılamadı.",
+      "scanTitle": "Bunu authenticator uygulamanızla okutun",
+      "scanDescription": "Sonra uygulamanın gösterdiği altı haneli kodu girin.",
+      "qrAlt": "Authenticator uygulaması için kurulum kodu",
+      "codeLabel": "Uygulamadaki kod",
+      "confirm": "Onayla",
+      "invalidCode": "Bu kod kabul edilmedi.",
+      "recoveryTitle": "Bu recovery code'ları saklayın",
+      "recoveryDescription": "Telefonunuzu kaybederseniz her biri sizi bir kez içeri alır. Yalnız şimdi gösterilir.",
+      "savedThem": "Sakladım",
+      "disableTitle": "İki adımlı doğrulamayı kapat",
+      "disableDescription": "Onaylamak için parolanızı girin.",
+      "disabled": "İki adımlı doğrulama kapalı.",
+      "disableFailed": "Kapatılamadı."
     }
   },
   "calendar": {
@@ -1494,5 +1515,14 @@
     "openNotes": "Notları aç",
     "quickContact": "Hızlı kişi",
     "openContacts": "Kişileri aç"
+  },
+  "secondFactor": {
+    "title": "İki adımlı doğrulama",
+    "subtitle": "Girişi tamamlamak için authenticator uygulamanızdaki kodu girin.",
+    "codeLabel": "Doğrulama kodu",
+    "recoveryHint": "Telefonunuz yanınızda değil mi? Recovery code'larınızdan birini girin.",
+    "submit": "Doğrula",
+    "cancel": "Başka bir hesapla giriş yap",
+    "invalid": "Bu kod kabul edilmedi."
   }
 }

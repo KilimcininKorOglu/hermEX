@@ -15,6 +15,30 @@ function ownerQuery(owner: string | undefined, sep: '?' | '&'): string {
 // Type Definitions
 // ============================================================================
 
+// MeResponse is the session probe. A session that has cleared the password but
+// not the second factor is authenticated and carries secondFactorRequired, and
+// describes nothing else about the mailbox.
+export interface MeResponse {
+  authenticated: boolean
+  email?: string
+  isAdmin?: boolean
+  has_avatar?: boolean
+  onboarded?: boolean
+  timezone?: string
+  locale?: string
+  theme?: string
+  must_change_password?: boolean
+  second_factor_required?: boolean
+}
+
+// SecondFactorStatus is the caller's own enrollment. pending marks a setup that
+// was started and never confirmed, which gates nothing.
+export interface SecondFactorStatus {
+  enabled: boolean
+  pending: boolean
+  recoveryRemaining: number
+}
+
 export interface Mail {
   id: string
   from: string // bare sender address
@@ -784,8 +808,37 @@ class API {
   // me returns the caller's session status for rehydration. /auth/me is a soft
   // check that answers 200 either way: authenticated=false when no valid session
   // exists (so the login screen never logs a 401), otherwise the identity.
-  async me(): Promise<{ authenticated: boolean; email?: string; isAdmin?: boolean; has_avatar?: boolean; onboarded?: boolean; timezone?: string; locale?: string; theme?: string; must_change_password?: boolean }> {
-    return this.get<{ authenticated: boolean; email?: string; isAdmin?: boolean; has_avatar?: boolean; onboarded?: boolean; timezone?: string; locale?: string; theme?: string; must_change_password?: boolean }>('/auth/me')
+  async me(): Promise<MeResponse> {
+    return this.get<MeResponse>('/auth/me')
+  }
+
+  // verifySecondFactor completes a login that stopped at the code prompt. It
+  // takes either a code from the authenticator or one of the recovery codes.
+  async verifySecondFactor(code: string): Promise<void> {
+    await this.post('/auth/2fa/verify', { code })
+  }
+
+  // secondFactorStatus reports the caller's own enrollment.
+  async secondFactorStatus(): Promise<SecondFactorStatus> {
+    return this.get<SecondFactorStatus>('/account/2fa')
+  }
+
+  // beginSecondFactor mints a fresh secret and the otpauth URI the authenticator
+  // app scans. Nothing is gated until activateSecondFactor confirms it.
+  async beginSecondFactor(): Promise<{ secret: string; uri: string }> {
+    return this.post<{ secret: string; uri: string }>('/account/2fa/begin', {})
+  }
+
+  // activateSecondFactor turns the pending enrollment on and returns the recovery
+  // codes, which the server never shows again.
+  async activateSecondFactor(code: string): Promise<{ recoveryCodes: string[] }> {
+    return this.post<{ recoveryCodes: string[] }>('/account/2fa/activate', { code })
+  }
+
+  // disableSecondFactor removes the enrollment. The password is asked for again
+  // because turning the factor off is what a stolen session would do first.
+  async disableSecondFactor(password: string): Promise<void> {
+    await this.post('/account/2fa/disable', { password })
   }
 
   // changePassword updates the authenticated user's own password.

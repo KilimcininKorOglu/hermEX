@@ -809,6 +809,27 @@
       "resetSettings": "Reset settings",
       "settingsReset": "Settings reset",
       "resetFailed": "Reset failed"
+    },
+    "twoFactor": {
+      "title": "Two-step verification",
+      "description": "Ask for a code from an authenticator app after the password.",
+      "enabledDescription": "On. {count} recovery codes left.",
+      "enable": "Turn on",
+      "disable": "Turn off",
+      "beginFailed": "Could not start the setup.",
+      "scanTitle": "Scan this with your authenticator app",
+      "scanDescription": "Then enter the six-digit code it shows to confirm.",
+      "qrAlt": "Setup code for your authenticator app",
+      "codeLabel": "Code from the app",
+      "confirm": "Confirm",
+      "invalidCode": "That code was not accepted.",
+      "recoveryTitle": "Keep these recovery codes",
+      "recoveryDescription": "Each one signs you in once if you lose your phone. They are shown only now.",
+      "savedThem": "I have saved them",
+      "disableTitle": "Turn off two-step verification",
+      "disableDescription": "Enter your password to confirm.",
+      "disabled": "Two-step verification is off.",
+      "disableFailed": "Could not turn it off."
     }
   },
   "calendar": {
@@ -1494,5 +1515,14 @@
     "openNotes": "Open notes",
     "quickContact": "Quick contact",
     "openContacts": "Open contacts"
+  },
+  "secondFactor": {
+    "title": "Two-step verification",
+    "subtitle": "Enter the code from your authenticator app to finish signing in.",
+    "codeLabel": "Verification code",
+    "recoveryHint": "Lost your phone? Enter one of your recovery codes instead.",
+    "submit": "Verify",
+    "cancel": "Sign in as someone else",
+    "invalid": "That code was not accepted."
   }
 }

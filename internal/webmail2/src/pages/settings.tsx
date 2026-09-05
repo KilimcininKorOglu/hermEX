@@ -33,6 +33,7 @@ import { setInboxNavigation, clampPageSize, DEFAULT_PAGE_SIZE, MIN_PAGE_SIZE, MA
 import pkg from "../../package.json"
 import { enablePushNotifications, disablePushNotifications, pushSupported } from "@/utils/push"
 import { RichTextEditor } from "@/components/RichTextEditor"
+import { SecondFactorCard } from "@/components/settings/second-factor-card"
 
 // rfc3339ToDate extracts the YYYY-MM-DD part from an RFC3339 string for <input type="date">.
 function rfc3339ToDate(value?: string): string {
@@ -2294,6 +2295,9 @@ export function SettingsPage() {
           <Button variant="outline" onClick={() => setPwOpen(true)}>{t("settings.account.manage")}</Button>
         </div>
       </div>
+
+      {/* Second factor, next to the password it backs. */}
+      <SecondFactorCard />
 
       {/* Message-list columns (reference MailGridColumnModel): sender/subject/date
           always show, so only the optional columns toggle here. */}

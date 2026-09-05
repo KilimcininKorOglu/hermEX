@@ -29,6 +29,8 @@ import { GroupsPage } from "@/pages/groups"
 import { ThreadsPage } from "@/pages/threads"
 import { OnboardingPage } from "@/pages/onboarding"
 import { ForcePasswordChangePage } from "@/pages/force-password"
+import { SecondFactorPage } from "@/pages/second-factor"
+import { firstGate, type Gate } from "@/utils/authGate"
 import { ShortcutsDialog } from "@/components/shortcuts-dialog"
 import { Toaster } from "@/components/ui/sonner"
 import { useKeyboardShortcuts } from "@/hooks/useKeyboardShortcuts"
@@ -66,14 +68,15 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return children
 }
 
-// RequireOnboarded sends a signed-in user who has not finished first-run
-// onboarding to /onboarding. It fires ONLY when the flag is explicitly false
-// (a fresh/unmigrated account); when it is undefined, e.g. a login fallback
-// that could not read /auth/me, the user is not trapped.
-function RequireOnboarded({ children }: { children: React.ReactNode }) {
+// RequireGates sends a signed-in user to whichever screen still stands between
+// them and their mail. The order lives in firstGate, which is where it is
+// tested; a route that renders one of those screens excludes itself with
+// `except`, so it cannot bounce to itself.
+function RequireGates({ except, children }: { except?: Gate; children: React.ReactNode }) {
   const { user } = useAuth()
-  if (user && user.onboarded === false) {
-    return <Navigate to="/onboarding" replace />
+  const gate = firstGate(user)
+  if (gate && gate !== except) {
+    return <Navigate to={gate} replace />
   }
   return children
 }
@@ -88,15 +91,14 @@ function OnboardingGate() {
   return <OnboardingPage />
 }
 
-// RequirePasswordCurrent sends a user whose password an admin reset (must change)
-// to the forced change screen before any other route. It takes priority over
-// onboarding so a temporary admin-set password is replaced first.
-function RequirePasswordCurrent({ children }: { children: React.ReactNode }) {
+// SecondFactorGate renders the code prompt, bouncing a session that has already
+// cleared it back to the inbox so the route cannot be revisited.
+function SecondFactorGate() {
   const { user } = useAuth()
-  if (user && user.mustChangePassword) {
-    return <Navigate to="/force-password" replace />
+  if (user && !user.secondFactorRequired) {
+    return <Navigate to="/inbox" replace />
   }
-  return children
+  return <SecondFactorPage />
 }
 
 // ForcePasswordGate renders the forced password-change screen, bouncing a user
@@ -118,10 +120,20 @@ function AppContent() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route
+          path="/second-factor"
+          element={
+            <ProtectedRoute>
+              <SecondFactorGate />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/force-password"
           element={
             <ProtectedRoute>
-              <ForcePasswordGate />
+              <RequireGates except="/force-password">
+                <ForcePasswordGate />
+              </RequireGates>
             </ProtectedRoute>
           }
         />
@@ -129,9 +141,9 @@ function AppContent() {
           path="/onboarding"
           element={
             <ProtectedRoute>
-              <RequirePasswordCurrent>
+              <RequireGates except="/onboarding">
                 <OnboardingGate />
-              </RequirePasswordCurrent>
+              </RequireGates>
             </ProtectedRoute>
           }
         />
@@ -139,13 +151,11 @@ function AppContent() {
           path="/"
           element={
             <ProtectedRoute>
-              <RequirePasswordCurrent>
-                <RequireOnboarded>
-                  <MailboxProvider personalEmail={user?.email || ""}>
-                    <Layout />
-                  </MailboxProvider>
-                </RequireOnboarded>
-              </RequirePasswordCurrent>
+              <RequireGates>
+                <MailboxProvider personalEmail={user?.email || ""}>
+                  <Layout />
+                </MailboxProvider>
+              </RequireGates>
             </ProtectedRoute>
           }
         >
