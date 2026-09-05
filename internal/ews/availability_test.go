@@ -301,3 +301,31 @@ func TestAvailabilityUnknownUser(t *testing.T) {
 		t.Errorf("unknown target must yield ErrorMailRecipientNotFound: %s", out)
 	}
 }
+
+// TestAvailabilityWindowEdges pins the window boundary, which is what a filter
+// pushed into the store query could quietly change. The store's predicate is
+// wider than the overlap test here on purpose; these are the appointments it
+// lets through and the caller still has to drop.
+func TestAvailabilityWindowEdges(t *testing.T) {
+	ts, paths := availabilityServer(t)
+	day := func(h, m int) time.Time { return time.Date(2026, 6, 19, h, m, 0, 0, time.UTC) }
+	// Ends exactly when the window opens, and starts exactly when it closes:
+	// neither occupies any part of the window.
+	seedAppointment(t, paths["alice@hermex.test"], day(9, 0), day(10, 0), 2, "Ends at the edge", false)
+	seedAppointment(t, paths["alice@hermex.test"], day(11, 0), day(12, 0), 2, "Starts at the edge", false)
+	// Wholly outside, on both sides.
+	seedAppointment(t, paths["alice@hermex.test"], day(7, 0), day(8, 0), 2, "Long before", false)
+	seedAppointment(t, paths["alice@hermex.test"], day(15, 0), day(16, 0), 2, "Long after", false)
+	// One minute inside, so the test fails if the window stops matching at all.
+	seedAppointment(t, paths["alice@hermex.test"], day(10, 30), day(10, 31), 2, "Inside", false)
+
+	_, out := soapPost(t, ts, availabilityReq("alice@hermex.test", winStart, winEnd, true), true)
+	if !strings.Contains(out, ">Inside<") {
+		t.Errorf("the appointment inside the window is missing: %s", out)
+	}
+	for _, subject := range []string{"Ends at the edge", "Starts at the edge", "Long before", "Long after"} {
+		if strings.Contains(out, ">"+subject+"<") {
+			t.Errorf("%q occupies no part of the window and must not be reported: %s", subject, out)
+		}
+	}
+}

@@ -255,7 +255,14 @@ func CalendarFreeBusy(st *objectstore.Store, windowStart, windowEnd time.Time, d
 
 	// Calendar items are created with CreateMessage and never enter the IMAP index,
 	// so they are read from the object store directly (ListMessages would miss them).
-	objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
+	//
+	// The window is applied by the STORE. Listing the whole calendar and reading
+	// each object's properties back costs one query per appointment, and a free/busy
+	// request repeats that for every attendee, so the cost is the folder's size
+	// times the attendee count rather than the size of the answer. The store's
+	// predicate is deliberately wider than the overlap test below, which is kept
+	// exactly as it was.
+	objs, err := st.ListFolderObjectsInWindow(int64(mapi.PrivateFIDCalendar), startTag, endTag, windowStart, windowEnd)
 	if err != nil {
 		return nil, err
 	}
