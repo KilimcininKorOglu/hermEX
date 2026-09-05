@@ -913,7 +913,8 @@
     "respTentative": "Tentatif",
     "respAccepted": "Kabul",
     "respDeclined": "Reddedildi",
-    "optionalAttendees": "İsteğe bağlı katılımcılar"
+    "optionalAttendees": "İsteğe bağlı katılımcılar",
+    "busyWorkingElsewhere": "Başka yerde çalışıyor"
   },
   "filters": {
     "description": "Gelen postaları otomatik olarak sırala ve işle",

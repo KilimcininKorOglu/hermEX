@@ -913,7 +913,8 @@
     "respTentative": "Tentative",
     "respAccepted": "Accepted",
     "respDeclined": "Declined",
-    "optionalAttendees": "Optional attendees"
+    "optionalAttendees": "Optional attendees",
+    "busyWorkingElsewhere": "Working Elsewhere"
   },
   "filters": {
     "description": "Sort and act on incoming mail automatically",

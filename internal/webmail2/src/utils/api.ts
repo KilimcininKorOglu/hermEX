@@ -137,7 +137,7 @@ export interface CalendarEvent {
   recurrence?: string // raw RRULE value, e.g. "FREQ=WEEKLY"
   timezone?: string // IANA zone anchoring civil start/end (recurrence DST safety)
   reminderMinutes?: number // reminder lead time in minutes (VALARM); absent/0 = none
-  busyStatus?: number // PidLidBusyStatus: 0=free, 1=tentative, 2=busy, 3=oof
+  busyStatus?: number // PidLidBusyStatus: 0=free, 1=tentative, 2=busy, 3=oof, 4=working elsewhere
   sensitivity?: number // PR_SENSITIVITY: 0=normal, 2=private, 3=confidential
   categories?: string[] // PidNameKeywords, the shared category list
   tracking?: { email: string; response: number }[] // per-attendee PidLidResponseStatus: 0=none, 2=tentative, 3=accepted, 4=declined

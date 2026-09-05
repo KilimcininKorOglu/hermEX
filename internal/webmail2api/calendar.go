@@ -20,7 +20,8 @@ import (
 // "calendar" value is the built-in default calendar. ReminderMinutes is the
 // reminder lead time in minutes (a nil/zero value means no reminder); it round-
 // trips through oxcical's VALARM (NameReminderSet/NameReminderDelta named props).
-// BusyStatus is PidLidBusyStatus (0=free, 1=tentative, 2=busy, 3=oof); it is set
+// BusyStatus is PidLidBusyStatus (0=free, 1=tentative, 2=busy, 3=oof,
+// 4=working elsewhere); it is set
 // and read directly as a named prop because the iCal TRANSP/STATUS path oxcical
 // uses cannot express all four values (oof has no iCal mapping), so the SPA's
 // choice is authoritative, not the iCal-derived default.
@@ -426,8 +427,10 @@ func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 			// a store handle, so the message id - not icalToEvent's UID - is surfaced.
 			e.UID = strconv.FormatInt(o.ID, 10)
 			e.CalendarID = cal.ID
-			// BusyStatus is read directly from the named prop so all four values
-			// (incl. oof) survive the reload; the exported iCal loses tentative/oof.
+			// BusyStatus is read directly from the named prop so every value
+			// survives the reload; the exported iCal can only say opaque or
+			// transparent, so tentative, oof and working-elsewhere are lost there.
+			// An appointment migrated from Exchange commonly carries 4.
 			if busyTag != 0 {
 				if pv, err := st.GetMessageProperties(o.ID, busyTag); err == nil {
 					if bs, ok := propInt32(pv, busyTag); ok {

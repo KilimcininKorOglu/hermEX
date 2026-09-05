@@ -73,7 +73,7 @@ interface EventForm {
   recurrence: string // "" | DAILY | WEEKLY | MONTHLY | YEARLY
   calendarId: string // target calendar ("calendar" = default)
   reminder: string // "" = none, else a minute offset ("15", "30", "60", ...)
-  busyStatus: string // "" = default (busy), else "0".."3" (free/tentative/busy/oof)
+  busyStatus: string // "" = default (busy), else "0".."4" (free/tentative/busy/oof/working elsewhere)
   sensitivity: string // "" = normal, else "2" (private) or "3" (confidential)
   categories: string[] // selected category names
   sendInvite: boolean // email a METHOD:REQUEST invite to attendees on create
@@ -1104,6 +1104,7 @@ export function CalendarPage() {
                   <SelectItem value="1">{t("calendar.busyTentative")}</SelectItem>
                   <SelectItem value="2">{t("calendar.busyBusy")}</SelectItem>
                   <SelectItem value="3">{t("calendar.busyOof")}</SelectItem>
+                  <SelectItem value="4">{t("calendar.busyWorkingElsewhere")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
