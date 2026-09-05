@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/base64"
+	"fmt"
 	"net/http"
 	"net/mail"
 	"path"
@@ -315,11 +316,40 @@ func (s *Server) handleAttachmentsZip(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
+	parts := attachmentParts(mime.ParseStructure(raw))
+	// Repeated index parameters narrow the archive to exactly those attachments,
+	// numbered as the single-attachment endpoint numbers them. Without any, the
+	// archive holds the whole message, as it always has.
+	wanted, err := wantedAttachments(r.URL.Query()["index"], len(parts))
+	if err != nil {
+		// Refused before a byte is written: the response streams, so a bad index
+		// discovered mid-archive would already have been answered 200 and the
+		// reader would get a short archive that looks complete.
+		http.Error(w, "bad attachment index", http.StatusBadRequest)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"attachments.zip\"")
 	zw := zip.NewWriter(w)
 	defer zw.Close()
-	idx := 0
+	for _, i := range wanted {
+		body, err := parts[i].DecodedContent()
+		if err != nil {
+			continue
+		}
+		fn := safeAttachmentName(parts[i].Filename(), "attachment-"+strconv.Itoa(i))
+		if fw, err := zw.Create(fn); err == nil {
+			_, _ = fw.Write(body)
+		}
+	}
+}
+
+// attachmentParts returns the message's attachment parts in the order the
+// single-attachment endpoint numbers them, so an index means the same thing on
+// both.
+func attachmentParts(root *mime.Part) []*mime.Part {
+	var out []*mime.Part
 	var walk func(p *mime.Part)
 	walk = func(p *mime.Part) {
 		if p == nil {
@@ -330,22 +360,44 @@ func (s *Server) handleAttachmentsZip(w http.ResponseWriter, r *http.Request) {
 			name = p.Params["name"]
 		}
 		if p.Type != "multipart" && (p.Disposition == "attachment" || name != "") {
-			if body, err := p.DecodedContent(); err == nil {
-				fn := safeAttachmentName(p.Filename(), "attachment-"+strconv.Itoa(idx))
-				idx++
-				if fw, err := zw.Create(fn); err == nil {
-					_, _ = fw.Write(body)
-				}
-			}
+			out = append(out, p)
 		}
 		for _, ch := range p.Children {
 			walk(ch)
 		}
 	}
-	walk(mime.ParseStructure(raw))
+	walk(root)
+	return out
 }
 
-// handleRecover restores a message from Deleted Items back to the Inbox.
+// wantedAttachments resolves the requested indexes against the message. No index
+// asks for all of them. An index the message does not hold is an error rather
+// than a silent omission, because the caller cannot tell a narrowed archive from
+// one missing a file it asked for.
+func wantedAttachments(values []string, total int) ([]int, error) {
+	if len(values) == 0 {
+		out := make([]int, total)
+		for i := range out {
+			out[i] = i
+		}
+		return out, nil
+	}
+	seen := make(map[int]bool, len(values))
+	out := make([]int, 0, len(values))
+	for _, v := range values {
+		i, err := strconv.Atoi(strings.TrimSpace(v))
+		if err != nil || i < 0 || i >= total {
+			return nil, fmt.Errorf("attachment index %q is not one of this message's %d", v, total)
+		}
+		if seen[i] {
+			continue // asking twice yields one copy, not two entries of one name
+		}
+		seen[i] = true
+		out = append(out, i)
+	}
+	return out, nil
+}
+
 func (s *Server) handleRecover(w http.ResponseWriter, r *http.Request) {
 	st, fid, uid, ok := s.locate(w, r, r.URL.Query().Get("id"))
 	if !ok {
