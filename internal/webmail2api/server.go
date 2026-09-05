@@ -88,6 +88,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/auth/login", s.handleLogin)
 	mux.HandleFunc("POST /api/v1/auth/logout", s.handleLogout)
 	mux.HandleFunc("GET /api/v1/auth/me", s.handleMe)
+	mux.HandleFunc("POST /api/v1/auth/2fa/verify", s.handleSecondFactorVerify)
+	mux.HandleFunc("GET /api/v1/account/2fa", s.handleSecondFactorStatus)
+	mux.HandleFunc("POST /api/v1/account/2fa/begin", s.handleSecondFactorBegin)
+	mux.HandleFunc("POST /api/v1/account/2fa/activate", s.handleSecondFactorActivate)
+	mux.HandleFunc("POST /api/v1/account/2fa/disable", s.handleSecondFactorDisable)
 	mux.HandleFunc("GET /api/v1/groups", s.handleGroups)
 	mux.HandleFunc("GET /api/v1/groups/members", s.handleGroupMembers)
 	mux.HandleFunc("PUT /api/v1/groups/members", s.handleGroupSetMembers)
@@ -266,7 +271,9 @@ func (s *Server) Handler() http.Handler {
 	if s.dist != nil {
 		mux.Handle("/", s.dist)
 	}
-	return securityHeaders(noStoreAPI(boundBody(s.gateForcedPasswordChange(mux))))
+	// The second-factor gate runs OUTSIDE the forced-change one: a session that
+	// has not finished logging in must not reach even the remediation endpoints.
+	return securityHeaders(noStoreAPI(boundBody(s.gateSecondFactor(s.gateForcedPasswordChange(mux)))))
 }
 
 // noStoreAPI marks every API response uncacheable. Nearly all of them carry the
@@ -463,23 +470,26 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "webmail access is disabled for this account"})
 		return
 	}
-	now := time.Now()
-	exp := now.Add(sessionTTL)
-	jti, err := newJTI()
+	// An enrolled account has proved only its password so far. It receives a
+	// pending cookie, which the per-request gate confines to the code prompt, and
+	// no session is recorded until the second factor is cleared. A directory that
+	// cannot answer refuses the login rather than admitting it, because the
+	// permissive answer here is the one that skips the second factor entirely.
+	enrolled, err := s.secondFactorEnabled(req.Email)
 	if err != nil {
+		logError("second-factor-check", err, logging.Fields{"user": req.Email})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
-	tok, err := mintToken(s.secret, sessionClaims{Email: req.Email, Mailbox: mbox, Jti: jti, Exp: exp.Unix()})
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+	if enrolled {
+		s.issuePendingSession(w, req.Email, mbox)
 		return
 	}
-	// Record the session so the user can list and revoke it; best-effort, so a store
-	// error is logged but never fails the login (the token still authenticates).
-	if err := s.recordLoginSession(r, req.Email, jti, now, exp); err != nil {
-		logError("record-login-session", err, logging.Fields{"user": req.Email})
-	}
+	s.issueSession(w, r, req.Email, mbox)
+}
+
+// setSessionCookie writes the session cookie for a minted token.
+func (s *Server) setSessionCookie(w http.ResponseWriter, tok string, exp time.Time) {
 	// #nosec G124 -- Secure tracks the deployment: set whenever the server serves TLS, cleared only for a plain-HTTP dev run
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
@@ -490,6 +500,46 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		Expires:  exp,
 	})
+}
+
+// issuePendingSession answers a password that was right for an account that also
+// carries a second factor. The cookie authenticates nothing but the code prompt.
+func (s *Server) issuePendingSession(w http.ResponseWriter, email, mbox string) {
+	exp := time.Now().Add(pendingTTL)
+	tok, err := mintToken(s.secret, sessionClaims{Email: email, Mailbox: mbox, Pending: true, Exp: exp.Unix()})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	s.setSessionCookie(w, tok, exp)
+	writeJSON(w, http.StatusOK, map[string]any{
+		"secondFactorRequired": true,
+		"expiresIn":            int(pendingTTL.Seconds()),
+	})
+}
+
+// issueSession mints the full session cookie and records the session. It is the
+// one place a session begins, so the login path and the second-factor path
+// cannot drift in what they set.
+func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, email, mbox string) {
+	now := time.Now()
+	exp := now.Add(sessionTTL)
+	jti, err := newJTI()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	tok, err := mintToken(s.secret, sessionClaims{Email: email, Mailbox: mbox, Jti: jti, Exp: exp.Unix()})
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
+	}
+	// Record the session so the user can list and revoke it; best-effort, so a store
+	// error is logged but never fails the login (the token still authenticates).
+	if err := s.recordLoginSession(r, email, jti, now, exp); err != nil {
+		logError("record-login-session", err, logging.Fields{"user": email})
+	}
+	s.setSessionCookie(w, tok, exp)
 	writeJSON(w, http.StatusOK, map[string]any{"expiresIn": int(sessionTTL.Seconds())})
 }
 
@@ -516,6 +566,17 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	c, ok := s.session(r)
 	if !ok {
 		writeJSON(w, http.StatusOK, map[string]any{"authenticated": false})
+		return
+	}
+	// A pending session has cleared the password only. It is told so and nothing
+	// else, because the mailbox it would describe is exactly what the second
+	// factor is still standing in front of.
+	if c.Pending {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"authenticated":          true,
+			"email":                  c.Email,
+			"second_factor_required": true,
+		})
 		return
 	}
 	hasAvatar, onboarded := false, false

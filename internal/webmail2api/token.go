@@ -18,10 +18,14 @@ import (
 // cookie is HttpOnly, so the value is never read by the browser. Jti keys the
 // server-side session record (for listing and revocation); it is omitted from
 // older tokens minted before sessions existed.
+// Pending marks a token that has cleared the password but not the second
+// factor. It is a real session cookie, so the per-request gate is what confines
+// it to the code prompt; nothing else may be reached with it.
 type sessionClaims struct {
 	Email   string `json:"email"`
 	Mailbox string `json:"mbox"`
 	Jti     string `json:"jti,omitempty"`
+	Pending bool   `json:"pnd,omitempty"`
 	Exp     int64  `json:"exp"`
 }
 
