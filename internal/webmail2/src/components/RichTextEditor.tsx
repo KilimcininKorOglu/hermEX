@@ -2,6 +2,7 @@ import { useRef, useEffect, useMemo, forwardRef, useImperativeHandle } from "rea
 import { Bold, Italic, Underline, Link } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { isSafeLinkURL, sanitizeClipboard, sanitizeHTML } from "@/utils/sanitize"
+import { linkifyHTML, linkifyNode } from "@/utils/linkify"
 
 // Collapses the selection at the given viewport point. Chromium and WebKit expose
 // caretRangeFromPoint, Gecko caretPositionFromPoint; with neither, the insert
@@ -86,6 +87,17 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
       onChange(editorRef.current?.innerHTML ?? "")
     }
 
+    // Bare URLs and addresses become links when the field is left, not while it is
+    // typed in: replacing the text node the caret sits in would move the caret, and
+    // the user would lose their place mid-word.
+    const handleBlur = () => {
+      const el = editorRef.current
+      if (!el) return
+      const before = el.innerHTML
+      linkifyNode(el)
+      if (el.innerHTML !== before) onChange(el.innerHTML)
+    }
+
     const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
       // Prevent formatting shortcuts from being swallowed
       e.stopPropagation()
@@ -94,7 +106,9 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
     // Insert a transferred payload ourselves instead of letting the browser drop
     // the raw fragment into the live DOM, which would run any handler it carries.
     const insertTransfer = (data: DataTransfer) => {
-      const html = sanitizeClipboard(data.getData("text/html"), data.getData("text/plain"))
+      // Linkified after sanitizing, so a pasted address is a link on arrival and
+      // the anchors this adds are the only ones the sanitizer never saw.
+      const html = linkifyHTML(sanitizeClipboard(data.getData("text/html"), data.getData("text/plain")))
       editorRef.current?.focus()
       document.execCommand("insertHTML", false, html)
       onChange(editorRef.current?.innerHTML ?? "")
@@ -166,6 +180,7 @@ export const RichTextEditor = forwardRef<RichTextEditorHandle, RichTextEditorPro
           className={`min-h-[100px] max-h-[300px] overflow-y-auto rounded-md border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${className ?? ""}`}
           style={{ whiteSpace: "pre-wrap" }}
           onInput={handleInput}
+          onBlur={handleBlur}
           onKeyDown={handleKeyDown}
           onPaste={handlePaste}
           onDrop={handleDrop}
