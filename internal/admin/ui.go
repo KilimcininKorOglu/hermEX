@@ -25,6 +25,12 @@ func (s *Server) uiClaims(r *http.Request) (claims, bool) {
 	if err != nil {
 		return claims{}, false
 	}
+	// A pending session has cleared the password only. Reading it as no session
+	// at all here gates every panel page at once, rather than leaving each page
+	// to remember a check of its own.
+	if cl.Pending {
+		return claims{}, false
+	}
 	if !s.sessionActive(cl) {
 		return claims{}, false
 	}
@@ -172,9 +178,31 @@ func (s *Server) handleUILoginSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.limiter.Succeed(addr, login)
+	required, err := s.secondFactorRequired(login)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		s.render(w, "login.html", map[string]any{"Error": "Server error, please try again."})
+		return
+	}
+	if required {
+		session, csrf := s.issuePendingSession(login, uid)
+		setSessionCookies(w, session, csrf)
+		http.Redirect(w, r, "/admin/ui/second-factor", http.StatusSeeOther)
+		return
+	}
 	session, csrf := s.issueSession(login, uid)
 	setSessionCookies(w, session, csrf)
 	http.Redirect(w, r, "/admin/ui/", http.StatusSeeOther)
+}
+
+// handleUISecondFactorPage draws the code prompt for a pending panel login,
+// sending anyone without one back to the sign-in form.
+func (s *Server) handleUISecondFactorPage(w http.ResponseWriter, r *http.Request) {
+	if _, ok := s.pendingClaims(r); !ok {
+		http.Redirect(w, r, "/admin/ui/login", http.StatusSeeOther)
+		return
+	}
+	s.renderCodeForm(w, r, http.StatusOK, "")
 }
 
 // handleUIDashboard renders the dashboard, redirecting to login without a

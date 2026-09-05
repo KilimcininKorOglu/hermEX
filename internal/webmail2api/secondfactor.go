@@ -17,10 +17,6 @@ import (
 // standing at the code prompt.
 const pendingTTL = 5 * time.Minute
 
-// totpSkew is how many steps either side of now a code may come from, which
-// absorbs the clock drift of the user's phone. One step is thirty seconds.
-const totpSkew = 1
-
 // secondFactor returns the directory's second-factor capability. A directory
 // that does not implement it has no second factor at all, so every caller
 // treats ok=false as "nobody is enrolled" rather than as a failure.
@@ -34,15 +30,7 @@ func (s *Server) secondFactor() (directory.SecondFactorStore, bool) {
 // swallowing it would answer "no second factor" and let the login through: the
 // fallback here is the LESS restrictive one.
 func (s *Server) secondFactorEnabled(user string) (bool, error) {
-	sf, ok := s.secondFactor()
-	if !ok {
-		return false, nil
-	}
-	e, found, err := sf.TOTPEnrollment(user)
-	if err != nil {
-		return false, err
-	}
-	return found && e.Enabled, nil
+	return directory.SecondFactorEnabled(s.auth, user)
 }
 
 // pendingAllowed reports whether a path stays reachable while the session has
@@ -97,7 +85,7 @@ func (s *Server) handleSecondFactorVerify(w http.ResponseWriter, r *http.Request
 		writeJSON(w, http.StatusTooManyRequests, map[string]string{"error": "too many failed attempts, try again later"})
 		return
 	}
-	accepted, err := s.spendSecondFactor(c.Email, req.Code)
+	accepted, err := directory.SpendSecondFactor(s.auth, c.Email, req.Code, time.Now())
 	if err != nil {
 		logError("second-factor-verify", err, logging.Fields{"user": c.Email})
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
@@ -110,28 +98,6 @@ func (s *Server) handleSecondFactorVerify(w http.ResponseWriter, r *http.Request
 	}
 	s.limiter.Succeed(addr, c.Email)
 	s.issueSession(w, r, c.Email, c.Mailbox)
-}
-
-// spendSecondFactor accepts a code from the authenticator or a recovery code and
-// reports whether one was spent. The authenticator is tried first, so a typo
-// there never burns a recovery code.
-func (s *Server) spendSecondFactor(user, code string) (bool, error) {
-	sf, ok := s.secondFactor()
-	if !ok {
-		return false, nil
-	}
-	e, found, err := sf.TOTPEnrollment(user)
-	if err != nil || !found || !e.Enabled {
-		return false, err
-	}
-	code = strings.TrimSpace(code)
-	if step, matched := totp.Verify(e.Secret, code, time.Now(), totpSkew); matched {
-		// Verify only says the code belongs to this secret and window. The store
-		// decides whether that step has already been spent, which is what stops a
-		// code observed once from being replayed inside its own window.
-		return sf.ConsumeTOTPStep(user, step)
-	}
-	return sf.ConsumeRecoveryCode(user, code)
 }
 
 // secondFactorJSON is the SPA's view of the account's own enrollment.
@@ -233,7 +199,7 @@ func (s *Server) handleSecondFactorActivate(w http.ResponseWriter, r *http.Reque
 		writeJSON(w, http.StatusConflict, map[string]string{"error": "no enrollment is pending"})
 		return
 	}
-	step, matched := totp.Verify(e.Secret, strings.TrimSpace(req.Code), time.Now(), totpSkew)
+	step, matched := totp.Verify(e.Secret, strings.TrimSpace(req.Code), time.Now(), directory.TOTPSkew)
 	if !matched {
 		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "invalid code"})
 		return

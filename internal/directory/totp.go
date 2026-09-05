@@ -31,6 +31,49 @@ type SecondFactorStore interface {
 	RecoveryCodesRemaining(user string) (int, error)
 }
 
+// TOTPSkew is how many time steps either side of now a code may come from,
+// which absorbs the clock drift of the user's phone. One step is thirty seconds.
+const TOTPSkew = 1
+
+// SecondFactorEnabled reports whether the account must clear a second factor. A
+// directory without the capability has no second factor at all, so it reports
+// false; a directory that HAS the capability but cannot answer returns the
+// error, because the permissive answer here is the one that skips the factor.
+func SecondFactorEnabled(dir any, user string) (bool, error) {
+	sf, ok := dir.(SecondFactorStore)
+	if !ok {
+		return false, nil
+	}
+	e, found, err := sf.TOTPEnrollment(user)
+	if err != nil {
+		return false, err
+	}
+	return found && e.Enabled, nil
+}
+
+// SpendSecondFactor accepts a code from the authenticator or one of the recovery
+// codes and reports whether one was spent. Both login surfaces call it, so the
+// order cannot drift between them: the authenticator is tried first, and a typo
+// there never burns a recovery code.
+func SpendSecondFactor(dir any, user, code string, now time.Time) (bool, error) {
+	sf, ok := dir.(SecondFactorStore)
+	if !ok {
+		return false, nil
+	}
+	e, found, err := sf.TOTPEnrollment(user)
+	if err != nil || !found || !e.Enabled {
+		return false, err
+	}
+	code = strings.TrimSpace(code)
+	if step, matched := totp.Verify(e.Secret, code, now, TOTPSkew); matched {
+		// Verify only says the code belongs to this secret and window. The store
+		// decides whether that step has already been spent, which is what stops a
+		// code observed once from being replayed inside its own window.
+		return sf.ConsumeTOTPStep(user, step)
+	}
+	return sf.ConsumeRecoveryCode(user, code)
+}
+
 // userIDFor resolves a username to its row id, reporting ok=false for an unknown
 // user rather than an error, because every caller here treats an unknown user
 // and an unenrolled one the same way.

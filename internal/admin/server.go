@@ -258,6 +258,9 @@ func (s *Server) SetLDAPSyncer(syncer LDAPSyncer) { s.syncer = syncer }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /admin/login", s.handleLogin)
+	// Outside protect() on purpose: a pending session is exactly what protect
+	// refuses, and this is the one call that clears it.
+	mux.HandleFunc("POST /admin/2fa/verify", s.handleSecondFactorVerify)
 	mux.Handle("POST /admin/logout", s.protect(http.HandlerFunc(s.handleLogout)))
 	mux.Handle("GET /admin/whoami", s.protect(http.HandlerFunc(s.handleWhoami)))
 	// Domain list/create: list is scope-filtered in the handler; creating a new
@@ -349,6 +352,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /admin/static/", staticHandler())
 	mux.HandleFunc("GET /admin/ui/login", s.handleUILoginPage)
 	mux.HandleFunc("POST /admin/ui/login", s.handleUILoginSubmit)
+	mux.HandleFunc("GET /admin/ui/second-factor", s.handleUISecondFactorPage)
+	mux.HandleFunc("POST /admin/ui/second-factor", s.handleUISecondFactorSubmit)
 	mux.HandleFunc("POST /admin/ui/logout", s.handleUILogout)
 	mux.HandleFunc("GET /admin/ui/change-password", s.handleUIChangePassword)
 	mux.HandleFunc("PUT /admin/ui/change-password", s.handleUIChangePasswordSubmit)
@@ -517,6 +522,19 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.limiter.Succeed(addr, req.Login)
+	// An operator who carries a second factor has proved only their password. The
+	// cookie they receive reaches the code prompt and nothing else.
+	required, err := s.secondFactorRequired(req.Login)
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
+	if required {
+		session, csrf := s.issuePendingSession(req.Login, uid)
+		setSessionCookies(w, session, csrf)
+		writeJSON(w, map[string]any{"login": req.Login, "secondFactorRequired": true, "csrfToken": csrf})
+		return
+	}
 	session, csrf := s.issueSession(req.Login, uid)
 	setSessionCookies(w, session, csrf)
 	writeJSON(w, map[string]any{"login": req.Login, "roles": roles, "csrfToken": csrf})
@@ -723,6 +741,12 @@ func (s *Server) protect(next http.Handler) http.Handler {
 		cl, err := verifyToken(s.secret, c.Value)
 		if err != nil {
 			http.Error(w, "invalid session", http.StatusUnauthorized)
+			return
+		}
+		// A pending session has not finished logging in. It reaches the code
+		// endpoint, which sits outside this gate, and nothing else.
+		if cl.Pending {
+			http.Error(w, "second factor required", http.StatusForbidden)
 			return
 		}
 		if !s.sessionActive(cl) {

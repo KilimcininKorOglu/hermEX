@@ -1,0 +1,14 @@
+{{define "second_factor.html"}}{{template "head" .}}
+<main class="login">
+<h1>hermEX Admin</h1>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+<p>Enter the code from your authenticator app, or one of your recovery codes.</p>
+<form method="post" action="/admin/ui/second-factor">
+<input type="hidden" name="_csrf" value="{{.CSRF}}">
+<label>Verification code
+<input type="text" name="code" autocomplete="one-time-code" required autofocus>
+</label>
+<button type="submit">Verify</button>
+</form>
+</main>
+{{template "foot" .}}{{end}}

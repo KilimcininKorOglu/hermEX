@@ -24,6 +24,10 @@ type claims struct {
 	// the verifier's answer is only half the check; the row lookup is the other half.
 	// Empty on a token minted before this existed, which reads as unrevokable.
 	Jti string `json:"jti,omitempty"`
+	// Pending marks a token that has cleared the password but not the second
+	// factor. It is a real session cookie, so every gate refuses it: it reaches
+	// the code prompt and nothing else.
+	Pending bool `json:"pnd,omitempty"`
 }
 
 var (
