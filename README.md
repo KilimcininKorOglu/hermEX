@@ -129,7 +129,7 @@ npm run test:coverage   # vitest with coverage
 
 ### Service ports
 
-`make up` exposes the 8140-8149 host block; webmail2 runs alongside at 8150.
+`make up` exposes the 8140-8149 host block; webmail2 runs alongside at 8450.
 
 | Service       | Host | Container |
 |---------------|------|-----------|
@@ -142,7 +142,7 @@ npm run test:coverage   # vitest with coverage
 | EWS           | 8147 | 8080      |
 | MAPI/HTTP     | 8148 | 8080      |
 | Gateway (TLS) | 8149 | 8080      |
-| Webmail2      | 8150 | 8080      |
+| Webmail2      | 8450 | 8080      |
 
 The database port is published on the loopback interface only, so the dev
 credentials are not reachable from the network.

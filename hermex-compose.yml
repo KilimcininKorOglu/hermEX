@@ -269,7 +269,7 @@ services:
       - ./internal/webmail2/dist:/webmail2-dist:ro
       - ./docker-data/spill/webmail2:/data/logspill
     ports:
-      - "127.0.0.1:8150:8080"
+      - "127.0.0.1:8450:8080"
     depends_on:
       db:
         condition: service_healthy
