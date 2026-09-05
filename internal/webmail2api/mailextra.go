@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"net/http"
+	"net/mail"
 	"path"
 	"regexp"
 	"slices"
@@ -593,12 +594,32 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the message was rejected: a virus was detected"})
 		return
 	}
-	info, err := mb.st.AppendMessage(fid, raw, time.Now(), 0)
+	info, err := mb.st.AppendMessage(fid, raw, importDate(raw, time.Now()), 0)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not import message"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"uid": info.UID, "folder": folder})
+}
+
+// importDate is the internal date an imported .eml is filed under. An import is a
+// restore, so the message keeps the moment it was written rather than the moment it
+// was uploaded: filing it under now would put a years-old archive message at the top
+// of a date-ordered folder, which is where new mail belongs.
+//
+// RFC 5322 defines no receive time, so the Date header is the closest thing the file
+// carries. A message with no usable Date falls back to now, which is also what IMAP
+// APPEND does for a client that supplies no date.
+func importDate(raw []byte, now time.Time) time.Time {
+	msg, err := mail.ReadMessage(bytes.NewReader(raw))
+	if err != nil {
+		return now
+	}
+	sent, err := msg.Header.Date()
+	if err != nil || sent.IsZero() {
+		return now
+	}
+	return sent.UTC()
 }
 
 // handleThreads returns the inbox grouped into simple subject threads.
