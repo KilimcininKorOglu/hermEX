@@ -148,65 +148,61 @@ func (s *Server) handleGetFolder(w http.ResponseWriter, inner []byte, sess *sess
 
 	var msgs []folderResponseMessage
 	for _, tgt := range resolveTargets(req.FolderIDs) {
-		if !tgt.ok {
-			msgs = append(msgs, folderErr(tgt.code))
-			continue
-		}
-		if tgt.public {
-			// The public folders root carries no grant of its own (its children do),
-			// so it cannot go through the per-folder visibility gate below, it is a
-			// distinguished, always-present container rendered synthetically.
-			msgs = append(msgs, s.getPublicRoot(cache, sess))
-			continue
-		}
-		st, all, isOwn, code := cache.open(sess, tgt.mailbox)
-		if code == codePublicAbsent {
-			code = "ErrorFolderNotFound" // a public folder whose domain store is gone
-		}
-		if code != "" {
-			msgs = append(msgs, folderErr(code))
-			continue
-		}
-		// A delegated (non-own) mailbox is gated per folder: the caller must hold at
-		// least visibility on the folder, the same right the ROP enforcement path uses.
-		if !isOwn {
-			rights, err := st.ResolvePermission(tgt.fid, sess.user)
-			if err != nil {
-				msgs = append(msgs, folderErr("ErrorInternalServerError"))
-				continue
-			}
-			if rights&mapi.FrightsVisible == 0 {
-				msgs = append(msgs, folderErr("ErrorAccessDenied"))
-				continue
-			}
-		}
-		idMailbox := ""
-		if !isOwn {
-			idMailbox = tgt.mailbox
-		}
-		f, code, err := folderElement(st, tgt.fid, folderIndex(all), all, idMailbox)
-		switch {
-		case err != nil:
-			msgs = append(msgs, folderErr("ErrorInternalServerError"))
-			continue
-		case code != "":
-			msgs = append(msgs, folderErr(code))
-			continue
-		}
-		if wantPerms {
-			ps, err := folderPermissionSet(st, tgt.fid)
-			if err != nil {
-				msgs = append(msgs, folderErr("ErrorInternalServerError"))
-				continue
-			}
-			f.PermissionSet = ps
-		}
-		msgs = append(msgs, folderResponseMessage{
-			ResponseClass: "Success", ResponseCode: "NoError",
-			Folders: &foldersWrap{Folders: []oxews.Folder{f}},
-		})
+		msgs = append(msgs, s.getOneFolder(cache, sess, tgt, wantPerms))
 	}
 	writeResponse(w, getFolderResponse{Messages: msgs})
+}
+
+// getOneFolder renders one requested folder.
+func (s *Server) getOneFolder(cache *storeCache, sess *session, tgt folderTarget, wantPerms bool) folderResponseMessage {
+	if !tgt.ok {
+		return folderErr(tgt.code)
+	}
+	if tgt.public {
+		// The public folders root carries no grant of its own (its children do),
+		// so it cannot go through the per-folder visibility gate below, it is a
+		// distinguished, always-present container rendered synthetically.
+		return s.getPublicRoot(cache, sess)
+	}
+	st, all, isOwn, code := cache.open(sess, tgt.mailbox)
+	if code == codePublicAbsent {
+		code = "ErrorFolderNotFound" // a public folder whose domain store is gone
+	}
+	if code != "" {
+		return folderErr(code)
+	}
+	// A delegated (non-own) mailbox is gated per folder: the caller must hold at
+	// least visibility on the folder, the same right the ROP enforcement path uses.
+	if !isOwn {
+		if code := folderVisibleAccess(st, tgt.fid, sess.user); code != "" {
+			return folderErr(code)
+		}
+	}
+	return renderFolderElement(st, tgt.fid, all, delegatedMailbox(tgt, isOwn), wantPerms)
+}
+
+// renderFolderElement builds one folder's response element, with its permission
+// set when the request's shape asked for one.
+func renderFolderElement(st *objectstore.Store, fid int64, all []objectstore.FolderInfo,
+	idMailbox string, wantPerms bool) folderResponseMessage {
+	f, code, err := folderElement(st, fid, folderIndex(all), all, idMailbox)
+	switch {
+	case err != nil:
+		return folderErr("ErrorInternalServerError")
+	case code != "":
+		return folderErr(code)
+	}
+	if wantPerms {
+		ps, err := folderPermissionSet(st, fid)
+		if err != nil {
+			return folderErr("ErrorInternalServerError")
+		}
+		f.PermissionSet = ps
+	}
+	return folderResponseMessage{
+		ResponseClass: "Success", ResponseCode: "NoError",
+		Folders: &foldersWrap{Folders: []oxews.Folder{f}},
+	}
 }
 
 // folderPermissionSet reads a folder's access-control list as a wire PermissionSet.
@@ -299,77 +295,79 @@ func (s *Server) handleFindFolder(w http.ResponseWriter, inner []byte, sess *ses
 
 	var msgs []findFolderResponseMessage
 	for _, tgt := range resolveTargets(req.ParentFolderIDs) {
-		if !tgt.ok {
-			msgs = append(msgs, findFolderResponseMessage{ResponseClass: "Error", ResponseCode: tgt.code})
-			continue
-		}
-		st, all, isOwn, code := cache.open(sess, tgt.mailbox)
-		if tgt.public && code == codePublicAbsent {
-			// The caller's domain has no public store: the public folders root is
-			// simply empty for them, not an error (same response as a provisioned
-			// store with no folders the caller may see).
-			msgs = append(msgs, emptyFindFolder())
-			continue
-		}
-		if code == codePublicAbsent {
-			code = "ErrorFolderNotFound" // a specific public folder in an un-provisioned domain
-		}
-		if code != "" {
-			msgs = append(msgs, findFolderResponseMessage{ResponseClass: "Error", ResponseCode: code})
-			continue
-		}
-		var children []objectstore.FolderInfo
-		if tgt.public {
-			// all is already the public store's IPM-subtree folders (ListFolders roots
-			// there). Shallow takes the top-level ones (nil parent under the subtree),
-			// Deep takes the whole set. The IPM subtree itself carries no grant, so
-			// filter its children per folder.
-			var under []objectstore.FolderInfo
-			for _, f := range all {
-				if deep || f.ParentID == nil {
-					under = append(under, f)
-				}
-			}
-			vis, err := filterVisible(st, under, sess.user)
-			if err != nil {
-				msgs = append(msgs, findFolderResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
-				continue
-			}
-			children = vis
-		} else {
-			// Enumerating another mailbox's subfolders requires visibility on the parent.
-			if !isOwn {
-				rights, err := st.ResolvePermission(tgt.fid, sess.user)
-				if err != nil {
-					msgs = append(msgs, findFolderResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
-					continue
-				}
-				if rights&mapi.FrightsVisible == 0 {
-					msgs = append(msgs, findFolderResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorAccessDenied"})
-					continue
-				}
-			}
-			children = collectChildren(all, tgt.fid, deep)
-		}
-		idMailbox := ""
-		if !isOwn {
-			idMailbox = tgt.mailbox
-		}
-		elems, err := folderElements(st, children, all, idMailbox)
-		if err != nil {
-			msgs = append(msgs, findFolderResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
-			continue
-		}
-		msgs = append(msgs, findFolderResponseMessage{
-			ResponseClass: "Success", ResponseCode: "NoError",
-			RootFolder: &findRootFolder{
-				TotalItemsInView:        len(elems),
-				IncludesLastItemInRange: true,
-				Folders:                 foldersWrap{Folders: elems},
-			},
-		})
+		msgs = append(msgs, findFolderForTarget(cache, sess, tgt, deep))
 	}
 	writeResponse(w, findFolderResponse{Messages: msgs})
+}
+
+// findFolderForTarget enumerates one requested parent folder's children.
+func findFolderForTarget(cache *storeCache, sess *session, tgt folderTarget, deep bool) findFolderResponseMessage {
+	if !tgt.ok {
+		return findFolderError(tgt.code)
+	}
+	st, all, isOwn, code := cache.open(sess, tgt.mailbox)
+	if tgt.public && code == codePublicAbsent {
+		// The caller's domain has no public store: the public folders root is
+		// simply empty for them, not an error (same response as a provisioned
+		// store with no folders the caller may see).
+		return emptyFindFolder()
+	}
+	if code == codePublicAbsent {
+		code = "ErrorFolderNotFound" // a specific public folder in an un-provisioned domain
+	}
+	if code != "" {
+		return findFolderError(code)
+	}
+	children, code := findFolderChildren(st, sess, tgt, all, isOwn, deep)
+	if code != "" {
+		return findFolderError(code)
+	}
+	elems, err := folderElements(st, children, all, delegatedMailbox(tgt, isOwn))
+	if err != nil {
+		return findFolderError("ErrorInternalServerError")
+	}
+	return findFolderResponseMessage{
+		ResponseClass: "Success", ResponseCode: "NoError",
+		RootFolder: &findRootFolder{
+			TotalItemsInView:        len(elems),
+			IncludesLastItemInRange: true,
+			Folders:                 foldersWrap{Folders: elems},
+		},
+	}
+}
+
+// findFolderChildren selects the child folders one target contributes. For a
+// public target, all is already the public store's IPM-subtree folders
+// (ListFolders roots there): Shallow takes the top-level ones (nil parent under
+// the subtree), Deep takes the whole set, and because the IPM subtree itself
+// carries no grant its children are filtered per folder. For a private target,
+// enumerating another mailbox's subfolders requires visibility on the parent.
+func findFolderChildren(st *objectstore.Store, sess *session, tgt folderTarget,
+	all []objectstore.FolderInfo, isOwn, deep bool) ([]objectstore.FolderInfo, string) {
+	if tgt.public {
+		var under []objectstore.FolderInfo
+		for _, f := range all {
+			if deep || f.ParentID == nil {
+				under = append(under, f)
+			}
+		}
+		vis, err := filterVisible(st, under, sess.user)
+		if err != nil {
+			return nil, "ErrorInternalServerError"
+		}
+		return vis, ""
+	}
+	if !isOwn {
+		if code := folderVisibleAccess(st, tgt.fid, sess.user); code != "" {
+			return nil, code
+		}
+	}
+	return collectChildren(all, tgt.fid, deep), ""
+}
+
+// findFolderError builds a FindFolder error response message.
+func findFolderError(code string) findFolderResponseMessage {
+	return findFolderResponseMessage{ResponseClass: "Error", ResponseCode: code}
 }
 
 // handleSyncFolderHierarchy answers SyncFolderHierarchy: an empty or stale
@@ -395,45 +393,15 @@ func (s *Server) handleSyncFolderHierarchy(w http.ResponseWriter, inner []byte, 
 	}
 
 	cur := make([]int64, len(all))
-	curSet := make(map[int64]bool, len(all))
 	for i, f := range all {
 		cur[i] = f.ID
-		curSet[f.ID] = true
 	}
 
-	var changes hierarchyChanges
 	primed := req.SyncState != "" && req.SyncState == state.HierarchyState
-	if !primed {
-		elems, err := folderElements(st, all, all, "")
-		if err != nil {
-			s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
-			return
-		}
-		for _, e := range elems {
-			changes.Create = append(changes.Create, createFolderChange{Folder: e})
-		}
-	} else {
-		prevSet := make(map[int64]bool, len(state.HierarchyFolders))
-		for _, id := range state.HierarchyFolders {
-			prevSet[id] = true
-		}
-		for _, f := range all {
-			if !prevSet[f.ID] {
-				e, err := buildFolderElem(st, f, all, "")
-				if err != nil {
-					s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
-					return
-				}
-				changes.Create = append(changes.Create, createFolderChange{Folder: e})
-			}
-		}
-		for _, id := range state.HierarchyFolders {
-			if !curSet[id] {
-				changes.Delete = append(changes.Delete, deleteFolderChange{
-					FolderID: oxews.FolderID{ID: oxews.EncodeFolderID(id)},
-				})
-			}
-		}
+	changes, err := hierarchyDiff(st, all, state.HierarchyFolders, primed)
+	if err != nil {
+		s.soapFault(w, "ErrorInternalServerError", "an internal error occurred", err)
+		return
 	}
 
 	newToken := nextSyncState(state.HierarchyState)
@@ -453,6 +421,48 @@ func (s *Server) handleSyncFolderHierarchy(w http.ResponseWriter, inner []byte, 
 			Changes:                   changes,
 		}},
 	})
+}
+
+// hierarchyDiff builds the folder changes one SyncFolderHierarchy reports. A
+// request whose SyncState this server did not issue is a fresh prime and gets
+// every folder as a Create; a primed request gets the folders added and removed
+// since the snapshot.
+func hierarchyDiff(st *objectstore.Store, all []objectstore.FolderInfo, prev []int64, primed bool) (hierarchyChanges, error) {
+	var changes hierarchyChanges
+	if !primed {
+		elems, err := folderElements(st, all, all, "")
+		if err != nil {
+			return hierarchyChanges{}, err
+		}
+		for _, e := range elems {
+			changes.Create = append(changes.Create, createFolderChange{Folder: e})
+		}
+		return changes, nil
+	}
+	prevSet := make(map[int64]bool, len(prev))
+	for _, id := range prev {
+		prevSet[id] = true
+	}
+	curSet := make(map[int64]bool, len(all))
+	for _, f := range all {
+		curSet[f.ID] = true
+		if prevSet[f.ID] {
+			continue
+		}
+		e, err := buildFolderElem(st, f, all, "")
+		if err != nil {
+			return hierarchyChanges{}, err
+		}
+		changes.Create = append(changes.Create, createFolderChange{Folder: e})
+	}
+	for _, id := range prev {
+		if !curSet[id] {
+			changes.Delete = append(changes.Delete, deleteFolderChange{
+				FolderID: oxews.FolderID{ID: oxews.EncodeFolderID(id)},
+			})
+		}
+	}
+	return changes, nil
 }
 
 // --- helpers ---

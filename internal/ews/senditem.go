@@ -45,25 +45,10 @@ func (s *Server) handleSendItem(w http.ResponseWriter, inner []byte, sess *sessi
 		return
 	}
 	save := strings.EqualFold(req.SaveItemToFolder, "true") || req.SaveItemToFolder == "1"
-	hasSaveFolder := len(req.SavedItemFolderID.Distinguished) > 0 || len(req.SavedItemFolderID.Folders) > 0
-
-	if !save && hasSaveFolder {
-		writeResponse(w, sendItemResponse{Messages: []itemResponseMessage{itemError("ErrorInvalidSendItemSaveSettings")}})
+	saveFID, code := sendItemSaveFolder(req, save)
+	if code != "" {
+		writeResponse(w, sendItemResponse{Messages: []itemResponseMessage{itemError(code)}})
 		return
-	}
-
-	saveFID := int64(mapi.PrivateFIDSentItems)
-	if hasSaveFolder {
-		targets := resolveTargets(req.SavedItemFolderID)
-		if len(targets) == 0 || !targets[0].ok {
-			code := "ErrorInvalidRequest"
-			if len(targets) > 0 {
-				code = targets[0].code
-			}
-			writeResponse(w, sendItemResponse{Messages: []itemResponseMessage{itemError(code)}})
-			return
-		}
-		saveFID = targets[0].fid
 	}
 
 	cache := s.newStoreCache()
@@ -74,6 +59,27 @@ func (s *Server) handleSendItem(w http.ResponseWriter, inner []byte, sess *sessi
 		msgs = append(msgs, s.sendOne(cache, sess, ref.ID, save, saveFID))
 	}
 	writeResponse(w, sendItemResponse{Messages: msgs})
+}
+
+// sendItemSaveFolder resolves the folder the sent copy is filed into. Naming a
+// folder while asking for no copy is a contradiction the protocol rejects, and
+// the default is Sent Items. A non-empty code refuses the request.
+func sendItemSaveFolder(req sendItemRequest, save bool) (int64, string) {
+	hasSaveFolder := len(req.SavedItemFolderID.Distinguished) > 0 || len(req.SavedItemFolderID.Folders) > 0
+	if !save && hasSaveFolder {
+		return 0, "ErrorInvalidSendItemSaveSettings"
+	}
+	if !hasSaveFolder {
+		return int64(mapi.PrivateFIDSentItems), ""
+	}
+	targets := resolveTargets(req.SavedItemFolderID)
+	if len(targets) == 0 {
+		return 0, "ErrorInvalidRequest"
+	}
+	if !targets[0].ok {
+		return 0, targets[0].code
+	}
+	return targets[0].fid, ""
 }
 
 // sendOne transmits one saved draft and settles its fate, returning the per-item
@@ -95,35 +101,15 @@ func (s *Server) sendOne(cache *storeCache, sess *session, itemID string, save b
 	if code != "" {
 		return itemError(code)
 	}
-	if !isOwn {
-		if code := checkItemAccess(st, id, sess.user, mapi.FrightsReadAny); code != "" {
-			return itemError(code)
-		}
-		if save {
-			srights, err := st.ResolvePermission(saveFID, sess.user)
-			if err != nil {
-				return itemError("ErrorInternalServerError")
-			}
-			if srights&mapi.FrightsCreate == 0 {
-				return itemError("ErrorAccessDenied")
-			}
-		}
+	if code := checkSendAccess(st, sess, id, isOwn, save, saveFID); code != "" {
+		return itemError(code)
 	}
 	msg, err := st.OpenMessage(id.MessageID)
 	if err != nil {
 		return itemError("ErrorItemNotFound")
 	}
 
-	var recips []string
-	wire := make([]mapi.PropertyValues, 0, len(msg.Recipients))
-	for _, bag := range msg.Recipients {
-		if addr := recipientSMTP(bag); addr != "" {
-			recips = append(recips, addr)
-		}
-		if rt, _ := bag.Get(mapi.PrRecipientType); rt != int32(mapi.RecipBcc) {
-			wire = append(wire, bag)
-		}
-	}
+	recips, wire := splitRecipients(msg.Recipients)
 	if len(recips) == 0 {
 		return itemError("ErrorInvalidRecipients")
 	}
@@ -137,17 +123,54 @@ func (s *Server) sendOne(cache *storeCache, sess *session, itemID string, save b
 		return itemError("ErrorInternalServerError")
 	}
 
-	// Sent, consume the draft. File the copy first (so a later delete failure
-	// never loses the sent record), then drop the original.
-	if save {
-		if _, err := st.AppendMessage(saveFID, raw, time.Now(), objectstore.FlagSeen); err != nil {
-			return itemError("ErrorInternalServerError")
-		}
-	}
-	if err := st.DeleteMessage(id.FolderID, id.UID); err != nil {
+	if err := consumeDraft(st, id, raw, save, saveFID); err != nil {
 		return itemError("ErrorInternalServerError")
 	}
 	return itemResponseMessage{ResponseClass: "Success", ResponseCode: "NoError"}
+}
+
+// consumeDraft files the sent copy and drops the original draft. The copy is
+// filed first, so a later delete failure never loses the sent record.
+func consumeDraft(st *objectstore.Store, id oxews.ItemID, raw []byte, save bool, saveFID int64) error {
+	if save {
+		if _, err := st.AppendMessage(saveFID, raw, time.Now(), objectstore.FlagSeen); err != nil {
+			return err
+		}
+	}
+	return st.DeleteMessage(id.FolderID, id.UID)
+}
+
+// checkSendAccess gates sending another mailbox's draft (send-on-behalf: the
+// draft already carries the principal's From) on read access to its folder, and
+// filing the sent copy on create access to the save folder. An empty code means
+// the send may proceed.
+func checkSendAccess(st *objectstore.Store, sess *session, id oxews.ItemID, isOwn, save bool, saveFID int64) string {
+	if isOwn {
+		return ""
+	}
+	if code := checkItemAccess(st, id, sess.user, mapi.FrightsReadAny); code != "" {
+		return code
+	}
+	if !save {
+		return ""
+	}
+	return folderCreateAccess(st, saveFID, sess.user)
+}
+
+// splitRecipients returns the routable addresses the message is delivered to and
+// the recipient bags that ride on the wire, which exclude Bcc so recipients never
+// see the blind list.
+func splitRecipients(bags []mapi.PropertyValues) (recips []string, wire []mapi.PropertyValues) {
+	wire = make([]mapi.PropertyValues, 0, len(bags))
+	for _, bag := range bags {
+		if addr := recipientSMTP(bag); addr != "" {
+			recips = append(recips, addr)
+		}
+		if rt, _ := bag.Get(mapi.PrRecipientType); rt != int32(mapi.RecipBcc) {
+			wire = append(wire, bag)
+		}
+	}
+	return recips, wire
 }
 
 // recipientSMTP extracts a routable SMTP address from a recipient bag: the

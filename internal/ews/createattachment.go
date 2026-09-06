@@ -8,6 +8,7 @@ import (
 
 	"hermex/internal/mapi"
 	"hermex/internal/mta"
+	"hermex/internal/objectstore"
 	"hermex/internal/oxews"
 )
 
@@ -73,84 +74,31 @@ func (s *Server) handleCreateAttachment(w http.ResponseWriter, inner []byte, ses
 		return
 	}
 
-	// errAll fails every requested attachment with one shared response code (used
-	// when the parent itself is unusable).
-	errAll := func(code string) {
-		msgs := make([]createAttachmentResponseMessage, total)
-		for i := range msgs {
-			msgs[i] = createAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: code}
-		}
-		writeResponse(w, createAttachmentResponse{Messages: msgs})
-	}
-
-	parent, err := oxews.DecodeItemID(req.ParentItemID.ID)
-	if err != nil {
-		errAll("ErrorInvalidId")
-		return
-	}
 	// The parent id self-encodes its mailbox; attaching to a delegated item is gated on
 	// edit access to its folder (reference: CreateAttachment checks frightsEditAny on
 	// the parent item's folder).
 	cache := s.newStoreCache()
 	defer cache.closeAll()
-	st, code := cache.openForItem(sess, parent, mapi.FrightsEditAny)
+	parent, st, baseCount, code := s.openAttachmentParent(cache, sess, req.ParentItemID.ID)
 	if code != "" {
-		errAll(code)
+		// Fail every requested attachment with one shared response code, since the
+		// parent itself is unusable.
+		msgs := make([]createAttachmentResponseMessage, total)
+		for i := range msgs {
+			msgs[i] = attachmentError(code)
+		}
+		writeResponse(w, createAttachmentResponse{Messages: msgs})
 		return
 	}
-
-	msg, err := st.OpenMessage(parent.MessageID)
-	if err != nil {
-		errAll("ErrorItemNotFound")
-		return
-	}
-	baseCount := len(msg.Attachments)
 
 	var msgs []createAttachmentResponseMessage
 	created := 0
 	for _, fa := range req.Attachments.Files {
-		content, err := base64.StdEncoding.DecodeString(fa.Content)
-		if err != nil {
-			msgs = append(msgs, createAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInvalidRequest"})
-			continue
+		resp, ok := s.createOneAttachment(st, sess, parent, fa, baseCount+created)
+		if ok {
+			created++
 		}
-		now := mapi.UnixToNTTime(time.Now())
-		props := mapi.PropertyValues{
-			{Tag: mapi.PrAttachMethod, Value: int32(mapi.AttachByValue)},
-			{Tag: mapi.PrRenderingPosition, Value: int32(-1)}, // 0xFFFFFFFF: not body-rendered
-			{Tag: mapi.PrCreationTime, Value: now},
-			{Tag: mapi.PrLastModificationTime, Value: now},
-			{Tag: mapi.PrAttachLongFilename, Value: fa.Name},
-			{Tag: mapi.PrAttachFilename, Value: fa.Name},
-			{Tag: mapi.PrDisplayName, Value: fa.Name},
-			{Tag: mapi.PrAttachDataBin, Value: content},
-		}
-		if fa.ContentType != "" {
-			props.Set(mapi.PrAttachMimeTag, fa.ContentType)
-		}
-		if fa.ContentID != "" {
-			props.Set(mapi.PrAttachContentID, fa.ContentID)
-		}
-		if fa.IsInline {
-			props.Set(mapi.PrAttachFlags, int32(mapi.AttMhtmlRef))
-		}
-		// Bytes a client hands us to store never pass through delivery, so this is
-		// the only point they can be scanned. A hit is quarantined and the
-		// attachment is refused rather than parked in the mailbox.
-		if mta.ScanStored(s.accounts, sess.user, fa.Name, content, time.Now()) {
-			msgs = append(msgs, createAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorItemSave"})
-			continue
-		}
-		if _, _, err := st.CreateAttachment(parent.MessageID, props); err != nil {
-			msgs = append(msgs, createAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorItemSave"})
-			continue
-		}
-		id := oxews.EncodeAttachmentID(parent.FolderID, parent.MessageID, baseCount+created, parent.Mailbox)
-		created++
-		msgs = append(msgs, createAttachmentResponseMessage{
-			ResponseClass: "Success", ResponseCode: "NoError",
-			Attachments: &attachmentsWrap{Files: []oxews.FileAttachment{{AttachmentID: oxews.AttachmentIDElem{ID: id}}}},
-		})
+		msgs = append(msgs, resp)
 	}
 	for range req.Attachments.Items {
 		msgs = append(msgs, createAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInvalidRequest"})
@@ -165,4 +113,78 @@ func (s *Server) handleCreateAttachment(w http.ResponseWriter, inner []byte, ses
 		}
 	}
 	writeResponse(w, createAttachmentResponse{Messages: msgs})
+}
+
+// openAttachmentParent resolves the parent item, opens its gated store, and
+// reports how many attachments it already carries (a new attachment is always
+// last, so that count is the first new position). A non-empty code refuses the
+// whole request.
+func (s *Server) openAttachmentParent(cache *storeCache, sess *session, parentID string) (oxews.ItemID, *objectstore.Store, int, string) {
+	parent, err := oxews.DecodeItemID(parentID)
+	if err != nil {
+		return oxews.ItemID{}, nil, 0, "ErrorInvalidId"
+	}
+	st, code := cache.openForItem(sess, parent, mapi.FrightsEditAny)
+	if code != "" {
+		return oxews.ItemID{}, nil, 0, code
+	}
+	msg, err := st.OpenMessage(parent.MessageID)
+	if err != nil {
+		return oxews.ItemID{}, nil, 0, "ErrorItemNotFound"
+	}
+	return parent, st, len(msg.Attachments), ""
+}
+
+// createOneAttachment stores one file attachment on the parent item and reports
+// whether it was created.
+func (s *Server) createOneAttachment(st *objectstore.Store, sess *session, parent oxews.ItemID,
+	fa reqFileAttachment, index int) (createAttachmentResponseMessage, bool) {
+	content, err := base64.StdEncoding.DecodeString(fa.Content)
+	if err != nil {
+		return attachmentError("ErrorInvalidRequest"), false
+	}
+	// Bytes a client hands us to store never pass through delivery, so this is
+	// the only point they can be scanned. A hit is quarantined and the
+	// attachment is refused rather than parked in the mailbox.
+	if mta.ScanStored(s.accounts, sess.user, fa.Name, content, time.Now()) {
+		return attachmentError("ErrorItemSave"), false
+	}
+	if _, _, err := st.CreateAttachment(parent.MessageID, attachmentProps(fa, content)); err != nil {
+		return attachmentError("ErrorItemSave"), false
+	}
+	id := oxews.EncodeAttachmentID(parent.FolderID, parent.MessageID, index, parent.Mailbox)
+	return createAttachmentResponseMessage{
+		ResponseClass: "Success", ResponseCode: "NoError",
+		Attachments: &attachmentsWrap{Files: []oxews.FileAttachment{{AttachmentID: oxews.AttachmentIDElem{ID: id}}}},
+	}, true
+}
+
+// attachmentProps builds the stored properties of one file attachment.
+func attachmentProps(fa reqFileAttachment, content []byte) mapi.PropertyValues {
+	now := mapi.UnixToNTTime(time.Now())
+	props := mapi.PropertyValues{
+		{Tag: mapi.PrAttachMethod, Value: int32(mapi.AttachByValue)},
+		{Tag: mapi.PrRenderingPosition, Value: int32(-1)}, // 0xFFFFFFFF: not body-rendered
+		{Tag: mapi.PrCreationTime, Value: now},
+		{Tag: mapi.PrLastModificationTime, Value: now},
+		{Tag: mapi.PrAttachLongFilename, Value: fa.Name},
+		{Tag: mapi.PrAttachFilename, Value: fa.Name},
+		{Tag: mapi.PrDisplayName, Value: fa.Name},
+		{Tag: mapi.PrAttachDataBin, Value: content},
+	}
+	if fa.ContentType != "" {
+		props.Set(mapi.PrAttachMimeTag, fa.ContentType)
+	}
+	if fa.ContentID != "" {
+		props.Set(mapi.PrAttachContentID, fa.ContentID)
+	}
+	if fa.IsInline {
+		props.Set(mapi.PrAttachFlags, int32(mapi.AttMhtmlRef))
+	}
+	return props
+}
+
+// attachmentError builds a CreateAttachment error response message.
+func attachmentError(code string) createAttachmentResponseMessage {
+	return createAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: code}
 }

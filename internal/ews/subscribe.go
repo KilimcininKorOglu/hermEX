@@ -179,21 +179,12 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, inner []byte, sess *sess
 		return
 	}
 
-	all := sub.SubscribeToAllFolders
-	targets := resolveTargets(sub.FolderIDs)
-	if all && len(targets) > 0 {
-		writeSOAPFault(w, "ErrorInvalidSubscriptionRequest", "Subscribe: SubscribeToAllFolders with explicit FolderIds")
+	folderIDs, reason := subscriptionFolders(sub)
+	if reason != "" {
+		writeSOAPFault(w, "ErrorInvalidSubscriptionRequest", reason)
 		return
 	}
-	var folderIDs []int64
-	for _, t := range targets {
-		if !t.ok {
-			writeSOAPFault(w, "ErrorInvalidSubscriptionRequest", "Subscribe: unresolvable folder id")
-			return
-		}
-		folderIDs = append(folderIDs, t.fid)
-	}
-	allFolders := all || len(folderIDs) == 0
+	allFolders := sub.SubscribeToAllFolders || len(folderIDs) == 0
 
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
@@ -221,6 +212,24 @@ func (s *Server) handleSubscribe(w http.ResponseWriter, inner []byte, sess *sess
 	writeResponse(w, subscribeResponse{Messages: []subscribeResponseMessage{{
 		ResponseClass: "Success", ResponseCode: "NoError", SubscriptionID: id,
 	}}})
+}
+
+// subscriptionFolders resolves the folders a subscription watches. A non-empty
+// reason refuses the request: naming folders alongside SubscribeToAllFolders is a
+// contradiction, and a folder id that does not resolve cannot be watched.
+func subscriptionFolders(sub *subscriptionReq) ([]int64, string) {
+	targets := resolveTargets(sub.FolderIDs)
+	if sub.SubscribeToAllFolders && len(targets) > 0 {
+		return nil, "Subscribe: SubscribeToAllFolders with explicit FolderIds"
+	}
+	var folderIDs []int64
+	for _, t := range targets {
+		if !t.ok {
+			return nil, "Subscribe: unresolvable folder id"
+		}
+		folderIDs = append(folderIDs, t.fid)
+	}
+	return folderIDs, ""
 }
 
 // handleUnsubscribe answers Unsubscribe: it drops the subscription, reporting
@@ -399,23 +408,7 @@ func pollSubscription(st *objectstore.Store, sub *ewsSubscription) ([]notifEvent
 		if err != nil {
 			return nil, err
 		}
-		prev := sub.snap[fid] // nil for a folder new since the baseline → its messages are creates
-		for mid, cn := range cur {
-			pcn, existed := prev[mid]
-			switch {
-			case !existed && sub.want.created:
-				events = append(events, messageEvent(st, "CreatedEvent", fid, mid, now))
-			case existed && cn != pcn && sub.want.modified:
-				events = append(events, messageEvent(st, "ModifiedEvent", fid, mid, now))
-			}
-		}
-		if sub.want.deleted {
-			for mid := range prev {
-				if _, still := cur[mid]; !still {
-					events = append(events, messageEvent(st, "DeletedEvent", fid, mid, now))
-				}
-			}
-		}
+		events = append(events, folderEvents(st, sub, fid, cur, now)...)
 		sub.snap[fid] = cur
 	}
 	// Prune snapshot entries for folders no longer in scope (a deleted folder for a
@@ -429,6 +422,32 @@ func pollSubscription(st *objectstore.Store, sub *ewsSubscription) ([]notifEvent
 		}
 	}
 	return events, nil
+}
+
+// folderEvents diffs one folder's current message change numbers against the
+// subscription's snapshot and builds the events the subscription asked for. A
+// folder new since the baseline has no snapshot, so all its messages are creates.
+func folderEvents(st *objectstore.Store, sub *ewsSubscription, fid int64, cur map[int64]uint64, now string) []notifEvent {
+	prev := sub.snap[fid]
+	var events []notifEvent
+	for mid, cn := range cur {
+		pcn, existed := prev[mid]
+		switch {
+		case !existed && sub.want.created:
+			events = append(events, messageEvent(st, "CreatedEvent", fid, mid, now))
+		case existed && cn != pcn && sub.want.modified:
+			events = append(events, messageEvent(st, "ModifiedEvent", fid, mid, now))
+		}
+	}
+	if !sub.want.deleted {
+		return events
+	}
+	for mid := range prev {
+		if _, still := cur[mid]; !still {
+			events = append(events, messageEvent(st, "DeletedEvent", fid, mid, now))
+		}
+	}
+	return events
 }
 
 // messageEvent builds one message change event. The item id resolves the message

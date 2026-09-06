@@ -88,15 +88,7 @@ func (s *Server) markOneAsJunk(cache *storeCache, sess *session, itemID string, 
 		return markJunkErr("ErrorItemNotFound")
 	}
 
-	if sender := senderSMTP(msg.Props); sender != "" {
-		if ruleStore, ok := s.accounts.(junkRuleStore); ok {
-			if isJunk {
-				_ = ruleStore.SetRecipientRule(sess.user, sender, directory.SenderBlock)
-			} else {
-				_, _ = ruleStore.DeleteRecipientRule(sess.user, sender)
-			}
-		}
-	}
+	s.updateJunkRule(sess.user, senderSMTP(msg.Props), isJunk)
 
 	resp := markAsJunkResponseMessage{ResponseClass: "Success", ResponseCode: "NoError"}
 	if moveItem {
@@ -115,6 +107,24 @@ func (s *Server) markOneAsJunk(cache *storeCache, sess *session, itemID string, 
 		}
 	}
 	return resp
+}
+
+// updateJunkRule adds or removes the caller's block rule for one sender. It is
+// best-effort: a directory without the rule store, or a message with no SMTP
+// sender, leaves the block list untouched.
+func (s *Server) updateJunkRule(user, sender string, isJunk bool) {
+	if sender == "" {
+		return
+	}
+	ruleStore, ok := s.accounts.(junkRuleStore)
+	if !ok {
+		return
+	}
+	if isJunk {
+		_ = ruleStore.SetRecipientRule(user, sender, directory.SenderBlock)
+		return
+	}
+	_, _ = ruleStore.DeleteRecipientRule(user, sender)
 }
 
 // markJunkErr builds an error response message.

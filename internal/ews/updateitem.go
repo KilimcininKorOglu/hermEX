@@ -375,100 +375,125 @@ func (s *Server) moveOrCopy(w http.ResponseWriter, inner []byte, sess *session, 
 		s.soapFault(w, "ErrorInvalidRequest", "Move/CopyItem: invalid request", err)
 		return
 	}
-	targets := resolveTargets(req.ToFolderID)
-	if len(targets) == 0 {
-		writeMoveCopy(w, remove, []itemResponseMessage{itemError("ErrorInvalidRequest")})
-		return
-	}
-	if !targets[0].ok {
-		writeMoveCopy(w, remove, []itemResponseMessage{itemError(targets[0].code)})
-		return
-	}
-	toFID := targets[0].fid
-
 	cache := s.newStoreCache()
 	defer cache.closeAll()
-
-	// Open and gate the destination once: a non-own target folder requires create access.
-	destSt, _, destOwn, code := cache.open(sess, targets[0].mailbox)
+	dest, code := openMoveCopyDest(cache, sess, req.ToFolderID)
 	if code != "" {
 		writeMoveCopy(w, remove, []itemResponseMessage{itemError(code)})
 		return
 	}
-	if !destOwn {
-		rights, err := destSt.ResolvePermission(toFID, sess.user)
-		if err != nil {
-			writeMoveCopy(w, remove, []itemResponseMessage{itemError("ErrorInternalServerError")})
-			return
-		}
-		if rights&mapi.FrightsCreate == 0 {
-			writeMoveCopy(w, remove, []itemResponseMessage{itemError("ErrorAccessDenied")})
-			return
-		}
-	}
-	destMailbox := ""
-	if !destOwn {
-		destMailbox = targets[0].mailbox
-	}
 
 	var msgs []itemResponseMessage
 	for _, ref := range req.ItemIDs.Items {
-		id, err := oxews.DecodeItemID(ref.ID)
-		if err != nil {
-			msgs = append(msgs, itemError("ErrorInvalidRequest"))
-			continue
-		}
-		srcSt, _, srcOwn, code := cache.open(sess, id.Mailbox)
-		if code != "" {
-			msgs = append(msgs, itemError(code))
-			continue
-		}
-		// The copy runs within a single store; moving an item across mailboxes is not
-		// supported (the source and destination must be the same mailbox).
-		if srcSt != destSt {
-			msgs = append(msgs, itemError("ErrorAccessDenied"))
-			continue
-		}
-		// A non-own source is gated on delete (move) or read (copy) of the source folder.
-		if !srcOwn {
-			need := mapi.FrightsReadAny
-			if remove {
-				need = mapi.FrightsDeleteAny
-			}
-			// checkItemAccess also binds the message to the folder that was
-			// authorized. The recovery below addresses a soft-deleted message by id
-			// alone, so without that binding a delegate could pair a folder they hold
-			// rights on with a message deleted from a folder they cannot reach, and
-			// restore it into a folder they can read.
-			if code := checkItemAccess(srcSt, id, sess.user, need); code != "" {
-				msgs = append(msgs, itemError(code))
-				continue
-			}
-		}
-		var info objectstore.MessageInfo
-		if remove {
-			// A soft-deleted source item (recovered from the Recoverable Items dumpster) has
-			// no live uid, so MoveItem on it is a recovery into the chosen target folder; a
-			// live item falls through to a normal move.
-			info, err = destSt.RecoverMessageTo(id.MessageID, toFID)
-			if errors.Is(err, objectstore.ErrNotFound) {
-				info, err = moveMessage(destSt, id.FolderID, id.UID, toFID)
-			}
-		} else {
-			info, err = copyMessage(destSt, id.FolderID, id.UID, toFID)
-		}
-		if err != nil {
-			msgs = append(msgs, itemError("ErrorItemNotFound"))
-			continue
-		}
-		newID := oxews.EncodeItemID(oxews.ItemID{FolderID: toFID, MessageID: info.ID, UID: info.UID, Mailbox: destMailbox})
-		msgs = append(msgs, itemResponseMessage{
-			ResponseClass: "Success", ResponseCode: "NoError",
-			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-			Items: &itemsWrap{Messages: []oxews.Message{{ItemID: oxews.ItemIDElem{ID: newID, ChangeKey: oxews.ChangeKey(uint64(info.ID))}}}},
-		})
+		msgs = append(msgs, moveCopyOne(cache, sess, dest, ref.ID, remove))
 	}
 	writeMoveCopy(w, remove, msgs)
+}
+
+// moveCopyDest is the gated destination one Move/CopyItem writes into.
+type moveCopyDest struct {
+	st      *objectstore.Store
+	fid     int64
+	mailbox string // stamped into the new item ids, empty for the caller's own mailbox
+}
+
+// openMoveCopyDest resolves and gates the destination folder once: a folder in a
+// mailbox the caller does not own requires create access.
+func openMoveCopyDest(cache *storeCache, sess *session, refs folderRefs) (moveCopyDest, string) {
+	targets := resolveTargets(refs)
+	if len(targets) == 0 {
+		return moveCopyDest{}, "ErrorInvalidRequest"
+	}
+	if !targets[0].ok {
+		return moveCopyDest{}, targets[0].code
+	}
+	st, _, isOwn, code := cache.open(sess, targets[0].mailbox)
+	if code != "" {
+		return moveCopyDest{}, code
+	}
+	if !isOwn {
+		if code := folderCreateAccess(st, targets[0].fid, sess.user); code != "" {
+			return moveCopyDest{}, code
+		}
+	}
+	return moveCopyDest{st: st, fid: targets[0].fid, mailbox: delegatedMailbox(targets[0], isOwn)}, ""
+}
+
+// folderCreateAccess reports the response code refusing a caller who cannot
+// create items in a folder they do not own; an empty code means they may.
+func folderCreateAccess(st *objectstore.Store, fid int64, user string) string {
+	rights, err := st.ResolvePermission(fid, user)
+	if err != nil {
+		return "ErrorInternalServerError"
+	}
+	if rights&mapi.FrightsCreate == 0 {
+		return "ErrorAccessDenied"
+	}
+	return ""
+}
+
+// moveCopyOne moves or copies one item into the gated destination.
+func moveCopyOne(cache *storeCache, sess *session, dest moveCopyDest, itemID string, remove bool) itemResponseMessage {
+	id, err := oxews.DecodeItemID(itemID)
+	if err != nil {
+		return itemError("ErrorInvalidRequest")
+	}
+	if code := checkMoveCopySource(cache, sess, dest, id, remove); code != "" {
+		return itemError(code)
+	}
+	info, err := applyMoveCopy(dest, id, remove)
+	if err != nil {
+		return itemError("ErrorItemNotFound")
+	}
+	newID := oxews.EncodeItemID(oxews.ItemID{FolderID: dest.fid, MessageID: info.ID, UID: info.UID, Mailbox: dest.mailbox})
+	return itemResponseMessage{
+		ResponseClass: "Success", ResponseCode: "NoError",
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		Items: &itemsWrap{Messages: []oxews.Message{{ItemID: oxews.ItemIDElem{ID: newID, ChangeKey: oxews.ChangeKey(uint64(info.ID))}}}},
+	}
+}
+
+// checkMoveCopySource opens and gates the source of one item; an empty code means
+// the operation may proceed.
+func checkMoveCopySource(cache *storeCache, sess *session, dest moveCopyDest, id oxews.ItemID, remove bool) string {
+	srcSt, _, srcOwn, code := cache.open(sess, id.Mailbox)
+	if code != "" {
+		return code
+	}
+	// The copy runs within a single store; moving an item across mailboxes is not
+	// supported (the source and destination must be the same mailbox).
+	if srcSt != dest.st {
+		return "ErrorAccessDenied"
+	}
+	if srcOwn {
+		return ""
+	}
+	// A non-own source is gated on delete (move) or read (copy) of the source folder.
+	need := mapi.FrightsReadAny
+	if remove {
+		need = mapi.FrightsDeleteAny
+	}
+	// checkItemAccess also binds the message to the folder that was authorized.
+	// The recovery below addresses a soft-deleted message by id alone, so without
+	// that binding a delegate could pair a folder they hold rights on with a
+	// message deleted from a folder they cannot reach, and restore it into a
+	// folder they can read.
+	return checkItemAccess(srcSt, id, sess.user, need)
+}
+
+// applyMoveCopy performs the move or copy. A soft-deleted source item (recovered
+// from the Recoverable Items dumpster) has no live uid, so a move on it is a
+// recovery into the chosen target folder; a live item falls through to a normal
+// move.
+func applyMoveCopy(dest moveCopyDest, id oxews.ItemID, remove bool) (objectstore.MessageInfo, error) {
+	if !remove {
+		return copyMessage(dest.st, id.FolderID, id.UID, dest.fid)
+	}
+	info, err := dest.st.RecoverMessageTo(id.MessageID, dest.fid)
+	if errors.Is(err, objectstore.ErrNotFound) {
+		return moveMessage(dest.st, id.FolderID, id.UID, dest.fid)
+	}
+	return info, err
 }
 
 func writeMoveCopy(w http.ResponseWriter, moved bool, msgs []itemResponseMessage) {

@@ -169,19 +169,7 @@ func predicatesFromRestriction(r mapi.Restriction) (rulePredicates, bool) {
 func mergePredicate(p *rulePredicates, r mapi.Restriction) bool {
 	switch r.Type {
 	case mapi.ResAnd:
-		if r.Value == nil {
-			return true // an empty AND matches every message, no predicates
-		}
-		kids, ok := r.Value.([]mapi.Restriction)
-		if !ok {
-			return false
-		}
-		for _, k := range kids {
-			if !mergePredicate(p, k) {
-				return false
-			}
-		}
-		return true
+		return mergeAnd(p, r)
 	case mapi.ResOr:
 		kids, ok := r.Value.([]mapi.Restriction)
 		if !ok {
@@ -195,15 +183,39 @@ func mergePredicate(p *rulePredicates, r mapi.Restriction) bool {
 		}
 		return appendContains(p, c.PropTag, contentString(c))
 	case mapi.ResProperty:
-		pr, ok := r.Value.(mapi.PropertyRestriction)
-		if !ok || pr.PropTag != mapi.PrImportance || pr.Relop != mapi.RelopEQ {
-			return false
-		}
-		n, _ := pr.PropVal.Value.(int32)
-		p.Importance = importanceWire(int(n))
-		return p.Importance != ""
+		return mergeImportance(p, r)
 	}
 	return false
+}
+
+// mergeAnd folds every child of an AND into the predicates. An empty AND matches
+// every message, so it contributes no predicate and still maps.
+func mergeAnd(p *rulePredicates, r mapi.Restriction) bool {
+	if r.Value == nil {
+		return true
+	}
+	kids, ok := r.Value.([]mapi.Restriction)
+	if !ok {
+		return false
+	}
+	for _, k := range kids {
+		if !mergePredicate(p, k) {
+			return false
+		}
+	}
+	return true
+}
+
+// mergeImportance folds the one property restriction the wire predicates carry,
+// an importance equality, into the predicates.
+func mergeImportance(p *rulePredicates, r mapi.Restriction) bool {
+	pr, ok := r.Value.(mapi.PropertyRestriction)
+	if !ok || pr.PropTag != mapi.PrImportance || pr.Relop != mapi.RelopEQ {
+		return false
+	}
+	n, _ := pr.PropVal.Value.(int32)
+	p.Importance = importanceWire(int(n))
+	return p.Importance != ""
 }
 
 // mergeContentOr folds an OR of same-tag content restrictions into the matching
@@ -335,35 +347,8 @@ func (o *ruleOperations) UnmarshalXML(d *xml.Decoder, start xml.StartElement) er
 		}
 		switch t := tok.(type) {
 		case xml.StartElement:
-			switch t.Name.Local {
-			case "CreateRuleOperation":
-				var op struct {
-					Rule ewsRule `xml:"Rule"`
-				}
-				if err := d.DecodeElement(&op, &t); err != nil {
-					return err
-				}
-				o.Ops = append(o.Ops, ruleOperation{Kind: opCreate, Rule: op.Rule})
-			case "SetRuleOperation":
-				var op struct {
-					Rule ewsRule `xml:"Rule"`
-				}
-				if err := d.DecodeElement(&op, &t); err != nil {
-					return err
-				}
-				o.Ops = append(o.Ops, ruleOperation{Kind: opSet, Rule: op.Rule})
-			case "DeleteRuleOperation":
-				var op struct {
-					RuleID string `xml:"RuleId"`
-				}
-				if err := d.DecodeElement(&op, &t); err != nil {
-					return err
-				}
-				o.Ops = append(o.Ops, ruleOperation{Kind: opDelete, RuleID: op.RuleID})
-			default:
-				if err := d.Skip(); err != nil {
-					return err
-				}
+			if err := o.decodeOperation(d, t); err != nil {
+				return err
 			}
 		case xml.EndElement:
 			if t.Name == start.Name {
@@ -371,6 +356,40 @@ func (o *ruleOperations) UnmarshalXML(d *xml.Decoder, start xml.StartElement) er
 			}
 		}
 	}
+}
+
+// decodeOperation reads one rule operation element, skipping an element this
+// server does not implement.
+func (o *ruleOperations) decodeOperation(d *xml.Decoder, t xml.StartElement) error {
+	switch t.Name.Local {
+	case "CreateRuleOperation":
+		return o.decodeRuleOp(d, t, opCreate)
+	case "SetRuleOperation":
+		return o.decodeRuleOp(d, t, opSet)
+	case "DeleteRuleOperation":
+		var op struct {
+			RuleID string `xml:"RuleId"`
+		}
+		if err := d.DecodeElement(&op, &t); err != nil {
+			return err
+		}
+		o.Ops = append(o.Ops, ruleOperation{Kind: opDelete, RuleID: op.RuleID})
+		return nil
+	default:
+		return d.Skip()
+	}
+}
+
+// decodeRuleOp reads one operation that carries a whole rule.
+func (o *ruleOperations) decodeRuleOp(d *xml.Decoder, t xml.StartElement, kind string) error {
+	var op struct {
+		Rule ewsRule `xml:"Rule"`
+	}
+	if err := d.DecodeElement(&op, &t); err != nil {
+		return err
+	}
+	o.Ops = append(o.Ops, ruleOperation{Kind: kind, Rule: op.Rule})
+	return nil
 }
 
 // updateInboxRulesResponse is a single response message (UpdateInboxRulesResponseType

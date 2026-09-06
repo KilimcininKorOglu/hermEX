@@ -186,51 +186,55 @@ func (s *Server) handleUpdateFolder(w http.ResponseWriter, inner []byte, sess *s
 
 	var msgs []folderResponseMessage
 	for _, ch := range req.FolderChanges.Changes {
-		targets := resolveTargets(ch.folderRefs)
-		if len(targets) != 1 {
-			msgs = append(msgs, folderError("ErrorInvalidRequest"))
-			continue
-		}
-		if !targets[0].ok {
-			msgs = append(msgs, folderError(targets[0].code))
-			continue
-		}
-		fid := targets[0].fid
-
-		var newName string
-		var permSet *oxews.PermissionSet
-		for _, set := range ch.Updates.Sets {
-			switch set.FieldURI.URI {
-			case "folder:DisplayName":
-				if set.Folder.DisplayName != nil {
-					newName = *set.Folder.DisplayName
-				}
-			case "folder:PermissionSet":
-				if set.Folder.PermissionSet != nil {
-					permSet = set.Folder.PermissionSet
-				}
-			}
-		}
-
-		if newName != "" {
-			if fid < mapi.PrivateFIDUnassignedStart {
-				msgs = append(msgs, folderError("ErrorAccessDenied"))
-				continue
-			}
-			if msg, ok := applyFolderRename(st, fid, newName); !ok {
-				msgs = append(msgs, msg)
-				continue
-			}
-		}
-		if permSet != nil {
-			if msg, ok := s.applyPermissionSet(st, fid, permSet); !ok {
-				msgs = append(msgs, msg)
-				continue
-			}
-		}
-		msgs = append(msgs, folderOK(fid))
+		msgs = append(msgs, s.updateOneFolder(st, ch))
 	}
 	writeResponse(w, updateFolderResponse{Messages: msgs})
+}
+
+// updateOneFolder applies one folder change: a rename, a permission set, or both.
+func (s *Server) updateOneFolder(st *objectstore.Store, ch folderChange) folderResponseMessage {
+	targets := resolveTargets(ch.folderRefs)
+	if len(targets) != 1 {
+		return folderError("ErrorInvalidRequest")
+	}
+	if !targets[0].ok {
+		return folderError(targets[0].code)
+	}
+	fid := targets[0].fid
+	newName, permSet := folderUpdates(ch)
+
+	if newName != "" {
+		if fid < mapi.PrivateFIDUnassignedStart {
+			return folderError("ErrorAccessDenied")
+		}
+		if msg, ok := applyFolderRename(st, fid, newName); !ok {
+			return msg
+		}
+	}
+	if permSet != nil {
+		if msg, ok := s.applyPermissionSet(st, fid, permSet); !ok {
+			return msg
+		}
+	}
+	return folderOK(fid)
+}
+
+// folderUpdates reads the two updates UpdateFolder honors out of a change's
+// SetFolderField list.
+func folderUpdates(ch folderChange) (newName string, permSet *oxews.PermissionSet) {
+	for _, set := range ch.Updates.Sets {
+		switch set.FieldURI.URI {
+		case "folder:DisplayName":
+			if set.Folder.DisplayName != nil {
+				newName = *set.Folder.DisplayName
+			}
+		case "folder:PermissionSet":
+			if set.Folder.PermissionSet != nil {
+				permSet = set.Folder.PermissionSet
+			}
+		}
+	}
+	return newName, permSet
 }
 
 // applyFolderRename renames the folder, mapping store errors to response codes. It
@@ -340,20 +344,10 @@ func (s *Server) moveCopyFolders(w http.ResponseWriter, inner []byte, sess *sess
 		s.soapFault(w, "ErrorInvalidRequest", "MoveCopyFolder: invalid request", err)
 		return
 	}
-	dests := resolveTargets(req.ToFolderID)
-	if len(dests) != 1 || !dests[0].ok {
-		code := "ErrorInvalidRequest"
-		if len(dests) == 1 && dests[0].code != "" {
-			code = dests[0].code
-		}
+	dest, code := moveCopyFolderDest(req.ToFolderID)
+	if code != "" {
 		writeResponse(w, moveCopyResponse(copy, []folderResponseMessage{folderError(code)}))
 		return
-	}
-	dest := dests[0].fid
-	var destArg *int64
-	if dest != mapi.PrivateFIDIPMSubtree && dest != mapi.PrivateFIDRoot {
-		d := dest
-		destArg = &d
 	}
 
 	st, err := objectstore.Open(sess.mailbox)
@@ -365,40 +359,65 @@ func (s *Server) moveCopyFolders(w http.ResponseWriter, inner []byte, sess *sess
 
 	var msgs []folderResponseMessage
 	for _, src := range resolveTargets(req.FolderIDs) {
-		if !src.ok {
-			msgs = append(msgs, folderError(src.code))
-			continue
-		}
-		fid := src.fid
-		if !copy && fid < mapi.PrivateFIDUnassignedStart {
-			msgs = append(msgs, folderError("ErrorMoveDistinguishedFolder"))
-			continue
-		}
-		props, err := st.GetFolderProperties(fid, mapi.PrDisplayName)
-		if err != nil {
-			msgs = append(msgs, folderError("ErrorFolderNotFound"))
-			continue
-		}
-		name, _ := props.Get(mapi.PrDisplayName)
-		folderName, _ := name.(string)
-		// Reject a destination name collision. A move excludes the folder itself
-		// (moving it to where it already sits is a no-op, not a collision); a copy
-		// does not (a copy beside an identically named sibling is a real clash).
-		if existing, ok, err := st.FolderByName(destArg, folderName); err != nil {
-			msgs = append(msgs, folderError("ErrorFolderNotFound"))
-			continue
-		} else if ok && (copy || existing != fid) {
-			msgs = append(msgs, folderError("ErrorFolderExists"))
-			continue
-		}
-		if copy {
-			newID, err := st.CopyFolder(fid, dest, folderName, true)
-			msgs = append(msgs, moveCopyResult(newID, err))
-		} else {
-			msgs = append(msgs, moveCopyResult(fid, st.RenameFolder(fid, &dest, folderName)))
-		}
+		msgs = append(msgs, moveCopyOneFolder(st, src, dest, copy))
 	}
 	writeResponse(w, moveCopyResponse(copy, msgs))
+}
+
+// moveCopyFolderDest resolves the single destination folder a MoveFolder or
+// CopyFolder names, reporting the response code refusing a malformed request.
+func moveCopyFolderDest(refs folderRefs) (int64, string) {
+	dests := resolveTargets(refs)
+	if len(dests) != 1 || !dests[0].ok {
+		if len(dests) == 1 && dests[0].code != "" {
+			return 0, dests[0].code
+		}
+		return 0, "ErrorInvalidRequest"
+	}
+	return dests[0].fid, ""
+}
+
+// moveCopyOneFolder moves or copies one folder into the destination.
+func moveCopyOneFolder(st *objectstore.Store, src folderTarget, dest int64, copy bool) folderResponseMessage {
+	if !src.ok {
+		return folderError(src.code)
+	}
+	fid := src.fid
+	if !copy && fid < mapi.PrivateFIDUnassignedStart {
+		return folderError("ErrorMoveDistinguishedFolder")
+	}
+	props, err := st.GetFolderProperties(fid, mapi.PrDisplayName)
+	if err != nil {
+		return folderError("ErrorFolderNotFound")
+	}
+	name, _ := props.Get(mapi.PrDisplayName)
+	folderName, _ := name.(string)
+	if code := checkFolderNameFree(st, dest, folderName, fid, copy); code != "" {
+		return folderError(code)
+	}
+	if copy {
+		newID, err := st.CopyFolder(fid, dest, folderName, true)
+		return moveCopyResult(newID, err)
+	}
+	return moveCopyResult(fid, st.RenameFolder(fid, &dest, folderName))
+}
+
+// checkFolderNameFree rejects a destination name collision. A move excludes the
+// folder itself (moving it to where it already sits is a no-op, not a collision);
+// a copy does not (a copy beside an identically named sibling is a real clash).
+func checkFolderNameFree(st *objectstore.Store, dest int64, folderName string, fid int64, copy bool) string {
+	var parent *int64
+	if dest != mapi.PrivateFIDIPMSubtree && dest != mapi.PrivateFIDRoot {
+		parent = &dest
+	}
+	existing, ok, err := st.FolderByName(parent, folderName)
+	if err != nil {
+		return "ErrorFolderNotFound"
+	}
+	if ok && (copy || existing != fid) {
+		return "ErrorFolderExists"
+	}
+	return ""
 }
 
 // moveCopyResult maps a move/copy store outcome to a response message carrying the

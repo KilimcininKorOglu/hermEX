@@ -64,44 +64,15 @@ func (s *Server) handleGetStreamingEvents(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Validate each subscription (existence + owner), evicting any that expired,
-	// the entry sweep also reclaims streaming subscriptions created but never
-	// otherwise accessed.
-	var valid, bad []string
-	for _, id := range req.SubscriptionIDs {
-		if s.streamSubValid(id, sess.user) {
-			valid = append(valid, id)
-		} else {
-			bad = append(bad, id)
-		}
-	}
-
-	// Resolve cadence and lifetime, mapping the zero values to production defaults
-	// before the ticker is built (a zero interval would panic NewTicker).
-	interval := s.streamInterval
-	if interval <= 0 {
-		interval = defaultStreamInterval
-	}
-	window := s.streamWindow
-	if window <= 0 {
-		mins := min(max(req.ConnectionTimeout, minConnectionTimeout), maxConnectionTimeout)
-		window = time.Duration(mins) * time.Minute
-	}
+	valid, bad := s.partitionSubscriptions(req.SubscriptionIDs, sess.user)
+	interval, window := s.streamCadence(req.ConnectionTimeout)
 
 	// Headers freeze on the first write; set the content type and leave the length
 	// unset so the response is chunked.
 	w.Header().Set("Content-Type", "text/xml; charset=utf-8")
 	rc := http.NewResponseController(w)
 
-	initMsg := getStreamingEventsResponseMessage{
-		ResponseClass: "Success", ResponseCode: "NoError", ConnectionStatus: "OK",
-	}
-	if len(bad) > 0 {
-		initMsg.ResponseClass = "Error"
-		initMsg.ResponseCode = "ErrorInvalidSubscription"
-		initMsg.ErrorSubs = &errorSubs{IDs: bad}
-	}
-	if !writeStreamChunk(w, rc, streamEnvelope(initMsg), true) {
+	if !writeStreamChunk(w, rc, streamEnvelope(streamOpening(bad)), true) {
 		return
 	}
 
@@ -111,9 +82,28 @@ func (s *Server) handleGetStreamingEvents(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Poll once immediately so a change between Subscribe and this call lands in the
-	// first continuation, then continue on the interval until the window expires or
-	// the client disconnects.
+	s.streamUntilClosed(w, r, rc, valid, interval, window)
+}
+
+// partitionSubscriptions validates each subscription (existence + owner),
+// evicting any that expired. The entry sweep also reclaims streaming
+// subscriptions created but never otherwise accessed.
+func (s *Server) partitionSubscriptions(ids []string, user string) (valid, bad []string) {
+	for _, id := range ids {
+		if s.streamSubValid(id, user) {
+			valid = append(valid, id)
+		} else {
+			bad = append(bad, id)
+		}
+	}
+	return valid, bad
+}
+
+// streamUntilClosed polls once immediately, so a change between Subscribe and this
+// call lands in the first continuation, then continues on the interval until the
+// window expires or the client disconnects.
+func (s *Server) streamUntilClosed(w http.ResponseWriter, r *http.Request, rc *http.ResponseController,
+	valid []string, interval, window time.Duration) {
 	deadline := time.Now().Add(window)
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -143,6 +133,36 @@ func (s *Server) handleGetStreamingEvents(w http.ResponseWriter, r *http.Request
 		case <-ticker.C:
 		}
 	}
+}
+
+// streamCadence resolves the poll interval and the connection lifetime, mapping
+// the zero values to production defaults before the ticker is built (a zero
+// interval would panic NewTicker).
+func (s *Server) streamCadence(connectionTimeout int) (interval, window time.Duration) {
+	interval = s.streamInterval
+	if interval <= 0 {
+		interval = defaultStreamInterval
+	}
+	window = s.streamWindow
+	if window <= 0 {
+		mins := min(max(connectionTimeout, minConnectionTimeout), maxConnectionTimeout)
+		window = time.Duration(mins) * time.Minute
+	}
+	return interval, window
+}
+
+// streamOpening builds the first chunk's response message, which reports any
+// subscription id the request named that this server will not stream.
+func streamOpening(bad []string) getStreamingEventsResponseMessage {
+	msg := getStreamingEventsResponseMessage{
+		ResponseClass: "Success", ResponseCode: "NoError", ConnectionStatus: "OK",
+	}
+	if len(bad) > 0 {
+		msg.ResponseClass = "Error"
+		msg.ResponseCode = "ErrorInvalidSubscription"
+		msg.ErrorSubs = &errorSubs{IDs: bad}
+	}
+	return msg
 }
 
 // streamWakes registers a push wake for each distinct mailbox among the given

@@ -81,54 +81,7 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 
 	var msgs []itemResponseMessage
 	for _, m := range req.Items.Messages {
-		out := oxews.BuildOutgoing(oxews.OutgoingInput{
-			From:      sess.user,
-			Subject:   m.Subject,
-			Body:      m.Body.Content,
-			BodyType:  m.Body.Type,
-			To:        toMailboxes(m.ToRecipients),
-			Cc:        toMailboxes(m.CcRecipients),
-			MessageID: newMessageID(s.hostname),
-			Sent:      time.Now(),
-		})
-		raw, err := oxcmail.Export(out, oxcmail.Options{})
-		if err != nil {
-			msgs = append(msgs, itemError("ErrorInternalServerError"))
-			continue
-		}
-
-		if send {
-			recips := recipientEmails(m)
-			if len(recips) == 0 {
-				msgs = append(msgs, itemError("ErrorInvalidRecipients"))
-				continue
-			}
-			if _, err := mta.DeliverAndRelay(s.accounts, s.Spool, sess.user, recips, raw, time.Now()); err != nil {
-				msgs = append(msgs, itemError("ErrorInternalServerError"))
-				continue
-			}
-		}
-
-		// Every successful CreateItemResponseMessage carries an <m:Items>
-		// container, clients reject its absence. It is empty for SendOnly
-		// (nothing is persisted) and holds the stored item's id (with a
-		// ChangeKey, as every other returned ItemId does) for SaveOnly and
-		// SendAndSaveCopy.
-		rm := itemResponseMessage{ResponseClass: "Success", ResponseCode: "NoError", Items: &itemsWrap{}}
-		if save {
-			folder := int64(mapi.PrivateFIDSentItems)
-			flags := int64(objectstore.FlagSeen)
-			if disp == "SaveOnly" {
-				folder = int64(mapi.PrivateFIDDraft)
-				flags = objectstore.FlagDraft
-			}
-			if info, err := st.AppendMessage(folder, raw, time.Now(), flags); err == nil {
-				id := oxews.EncodeItemID(oxews.ItemID{FolderID: folder, MessageID: info.ID, UID: info.UID})
-				// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-				rm.Items.Messages = []oxews.Message{{ItemID: oxews.ItemIDElem{ID: id, ChangeKey: oxews.ChangeKey(uint64(info.ID))}}}
-			}
-		}
-		msgs = append(msgs, rm)
+		msgs = append(msgs, s.createOneItem(st, sess, m, disp, send, save))
 	}
 
 	// Meeting responses ([MS-OXWSMTGS]): an Accept/Tentative/Decline answers the
@@ -144,6 +97,71 @@ func (s *Server) handleCreateItem(w http.ResponseWriter, inner []byte, sess *ses
 		msgs = append(msgs, s.meetingRespond(sess, mr.ReferenceItemID, meeting.ResponseDeclined, send))
 	}
 	writeResponse(w, createItemResponse{Messages: msgs})
+}
+
+// createOneItem builds one outgoing message, sends it when the disposition asks,
+// and files the copy the disposition asks for.
+func (s *Server) createOneItem(st *objectstore.Store, sess *session, m createMessage,
+	disp string, send, save bool) itemResponseMessage {
+	out := oxews.BuildOutgoing(oxews.OutgoingInput{
+		From:      sess.user,
+		Subject:   m.Subject,
+		Body:      m.Body.Content,
+		BodyType:  m.Body.Type,
+		To:        toMailboxes(m.ToRecipients),
+		Cc:        toMailboxes(m.CcRecipients),
+		MessageID: newMessageID(s.hostname),
+		Sent:      time.Now(),
+	})
+	raw, err := oxcmail.Export(out, oxcmail.Options{})
+	if err != nil {
+		return itemError("ErrorInternalServerError")
+	}
+	if send {
+		if code := s.sendCreatedItem(sess, m, raw); code != "" {
+			return itemError(code)
+		}
+	}
+	// Every successful CreateItemResponseMessage carries an <m:Items> container,
+	// clients reject its absence. It is empty for SendOnly (nothing is persisted)
+	// and holds the stored item's id (with a ChangeKey, as every other returned
+	// ItemId does) for SaveOnly and SendAndSaveCopy.
+	rm := itemResponseMessage{ResponseClass: "Success", ResponseCode: "NoError", Items: &itemsWrap{}}
+	if save {
+		fileCreatedItem(st, raw, disp, rm.Items)
+	}
+	return rm
+}
+
+// sendCreatedItem relays one built message to its recipients, reporting the
+// response code refusing the send; an empty code means it went out.
+func (s *Server) sendCreatedItem(sess *session, m createMessage, raw []byte) string {
+	recips := recipientEmails(m)
+	if len(recips) == 0 {
+		return "ErrorInvalidRecipients"
+	}
+	if _, err := mta.DeliverAndRelay(s.accounts, s.Spool, sess.user, recips, raw, time.Now()); err != nil {
+		return "ErrorInternalServerError"
+	}
+	return ""
+}
+
+// fileCreatedItem stores the copy the disposition asks for: a draft for SaveOnly,
+// a sent copy otherwise, and records its id in the response.
+func fileCreatedItem(st *objectstore.Store, raw []byte, disp string, items *itemsWrap) {
+	folder := int64(mapi.PrivateFIDSentItems)
+	flags := int64(objectstore.FlagSeen)
+	if disp == "SaveOnly" {
+		folder = int64(mapi.PrivateFIDDraft)
+		flags = objectstore.FlagDraft
+	}
+	info, err := st.AppendMessage(folder, raw, time.Now(), flags)
+	if err != nil {
+		return
+	}
+	id := oxews.EncodeItemID(oxews.ItemID{FolderID: folder, MessageID: info.ID, UID: info.UID})
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	items.Messages = []oxews.Message{{ItemID: oxews.ItemIDElem{ID: id, ChangeKey: oxews.ChangeKey(uint64(info.ID))}}}
 }
 
 // itemError builds an error response message with the given EWS response code.

@@ -222,15 +222,32 @@ func (s *Server) handleGetDelegate(w http.ResponseWriter, inner []byte, sess *se
 		}
 	}
 
-	// An optional UserIds filter narrows the result to specific delegates; absent it,
-	// every delegate is returned.
+	msgs := delegateMessages(delegates, requestedDelegates(req), grants, req.IncludePermissions)
+
+	writeResponse(w, getDelegateResponse{
+		ResponseClass:          "Success",
+		ResponseCode:           "NoError",
+		Messages:               msgs,
+		DeliverMeetingRequests: "DelegatesAndMe", // v1 default; routing scope is not modelled
+	})
+}
+
+// requestedDelegates reads the optional UserIds filter that narrows the result to
+// specific delegates; an empty list means every delegate is returned.
+func requestedDelegates(req getDelegateRequest) []string {
 	var requested []string
 	for _, u := range req.UserIds {
 		if u.PrimarySmtpAddress != "" {
 			requested = append(requested, u.PrimarySmtpAddress)
 		}
 	}
+	return requested
+}
 
+// delegateMessages renders one response message per delegate. A requested
+// delegate that is not on the list is reported per id, mirroring the
+// per-delegate result model.
+func delegateMessages(delegates, requested []string, grants folderGrants, includePermissions bool) []delegateUserResponseMessage {
 	msgs := make([]delegateUserResponseMessage, 0, len(delegates))
 	found := make([]string, 0, len(requested))
 	for _, d := range delegates {
@@ -238,7 +255,7 @@ func (s *Server) handleGetDelegate(w http.ResponseWriter, inner []byte, sess *se
 			continue
 		}
 		du := &delegateUser{UserId: delegateUserId{PrimarySmtpAddress: d}}
-		if req.IncludePermissions {
+		if includePermissions {
 			lv := grants.levelsFor(d)
 			du.DelegatePermissions = &lv
 		}
@@ -249,8 +266,6 @@ func (s *Server) handleGetDelegate(w http.ResponseWriter, inner []byte, sess *se
 		})
 		found = append(found, d)
 	}
-	// A requested delegate that is not on the list is reported per id, mirroring the
-	// per-delegate result model.
 	for _, r := range requested {
 		if !containsFold(found, r) {
 			msgs = append(msgs, delegateUserResponseMessage{
@@ -260,13 +275,7 @@ func (s *Server) handleGetDelegate(w http.ResponseWriter, inner []byte, sess *se
 			})
 		}
 	}
-
-	writeResponse(w, getDelegateResponse{
-		ResponseClass:          "Success",
-		ResponseCode:           "NoError",
-		Messages:               msgs,
-		DeliverMeetingRequests: "DelegatesAndMe", // v1 default; routing scope is not modelled
-	})
+	return msgs
 }
 
 // --- delegate mutation (Add/Remove/Update) ---

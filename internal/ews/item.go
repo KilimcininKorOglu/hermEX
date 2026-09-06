@@ -107,132 +107,145 @@ func (s *Server) handleFindItem(w http.ResponseWriter, inner []byte, sess *sessi
 
 	var msgs []findItemResponseMessage
 	for _, tgt := range resolveTargets(req.ParentFolderIDs) {
-		// A recoverable (Recoverable Items dumpster) target is intentionally ok=false so
-		// every other handler still reports ErrorFolderNotFound; FindItem serves it.
-		if !tgt.ok && !tgt.recoverable {
-			msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: tgt.code})
-			continue
-		}
-		if tgt.public {
-			// The public folders root is a container holding no items of its own; its
-			// public child folders carry the items and are addressed by their own ids.
-			msgs = append(msgs, findItemResponseMessage{
-				ResponseClass: "Success", ResponseCode: "NoError",
-				RootFolder: &findItemRoot{IncludesLastItemInRange: true},
-			})
-			continue
-		}
-		if tgt.recoverable {
-			// The Recoverable Items dumpster aggregates soft-deleted items mailbox-wide,
-			// so it is served only for the caller's own mailbox (no per-folder ACL applies
-			// to an aggregate). Each item keeps its original parent folder in its id.
-			st, _, isOwn, code := cache.open(sess, tgt.mailbox)
-			if code != "" {
-				msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: code})
-				continue
-			}
-			if !isOwn {
-				msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorAccessDenied"})
-				continue
-			}
-			items, err := st.ListAllSoftDeleted()
-			if err != nil {
-				msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
-				continue
-			}
-			elems := make([]oxews.Message, 0, len(items))
-			for _, it := range items {
-				elems = append(elems, itemSummary(st, it.FolderID, it.Info, ""))
-			}
-			msgs = append(msgs, findItemResponseMessage{
-				ResponseClass: "Success", ResponseCode: "NoError",
-				RootFolder: &findItemRoot{
-					TotalItemsInView:        len(elems),
-					IncludesLastItemInRange: true,
-					Items:                   itemsWrap{Messages: elems},
-				},
-			})
-			continue
-		}
-		st, _, isOwn, code := cache.open(sess, tgt.mailbox)
-		if code == codePublicAbsent {
-			code = "ErrorFolderNotFound" // a public folder whose domain store is gone
-		}
-		if code != "" {
-			msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: code})
-			continue
-		}
-		// Listing another mailbox's folder requires only folder visibility; reading an
-		// item's content (GetItem) is separately gated on read access. This two-tier
-		// model matches the EWS enforcement contract.
-		if !isOwn {
-			rights, err := st.ResolvePermission(tgt.fid, sess.user)
-			if err != nil {
-				msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInternalServerError"})
-				continue
-			}
-			if rights&mapi.FrightsVisible == 0 {
-				msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorAccessDenied"})
-				continue
-			}
-		}
-		items, err := st.ListMessages(tgt.fid)
-		if err != nil {
-			msgs = append(msgs, findItemResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorItemNotFound"})
-			continue
-		}
-		idMailbox := ""
-		if !isOwn {
-			idMailbox = tgt.mailbox
-		}
-		if tgt.fid == int64(mapi.PrivateFIDTasks) {
-			// Tasks live in the object store (versioned by change number), not the IMAP
-			// index, so they are listed as folder objects rather than messages.
-			objs, _ := st.ListFolderObjects(tgt.fid)
-			tasks := make([]oxews.Task, 0, len(objs))
-			for _, o := range objs {
-				tasks = append(tasks, taskSummary(st, tgt.fid, o.ID, idMailbox))
-			}
-			msgs = append(msgs, findItemResponseMessage{
-				ResponseClass: "Success", ResponseCode: "NoError",
-				RootFolder: &findItemRoot{
-					TotalItemsInView:        len(tasks),
-					IncludesLastItemInRange: true,
-					Items:                   itemsWrap{Tasks: tasks},
-				},
-			})
-			continue
-		}
-		if tgt.fid == int64(mapi.PrivateFIDNotes) {
-			objs, _ := st.ListFolderObjects(tgt.fid)
-			notes := make([]oxews.Item, 0, len(objs))
-			for _, o := range objs {
-				notes = append(notes, noteSummary(st, tgt.fid, o.ID, idMailbox))
-			}
-			msgs = append(msgs, findItemResponseMessage{
-				ResponseClass: "Success", ResponseCode: "NoError",
-				RootFolder: &findItemRoot{
-					TotalItemsInView:        len(notes),
-					IncludesLastItemInRange: true,
-					Items:                   itemsWrap{BaseItems: notes},
-				},
-			})
-			continue
-		}
-		elems := make([]oxews.Message, 0, len(items))
-		for _, info := range items {
-			elems = append(elems, itemSummary(st, tgt.fid, info, idMailbox))
-		}
-		msgs = append(msgs, findItemResponseMessage{
-			ResponseClass: "Success", ResponseCode: "NoError",
-			RootFolder: &findItemRoot{
-				TotalItemsInView:        len(elems),
-				IncludesLastItemInRange: true,
-				Items:                   itemsWrap{Messages: elems},
-			},
-		})
+		msgs = append(msgs, findItemForTarget(cache, sess, tgt))
 	}
 	writeResponse(w, findItemResponse{Messages: msgs})
+}
+
+// findItemForTarget lists one requested folder.
+func findItemForTarget(cache *storeCache, sess *session, tgt folderTarget) findItemResponseMessage {
+	// A recoverable (Recoverable Items dumpster) target is intentionally ok=false so
+	// every other handler still reports ErrorFolderNotFound; FindItem serves it.
+	if !tgt.ok && !tgt.recoverable {
+		return findItemError(tgt.code)
+	}
+	if tgt.public {
+		// The public folders root is a container holding no items of its own; its
+		// public child folders carry the items and are addressed by their own ids.
+		return findItemFound(&findItemRoot{IncludesLastItemInRange: true})
+	}
+	if tgt.recoverable {
+		return recoverableItemsFor(cache, sess, tgt)
+	}
+	st, _, isOwn, code := cache.open(sess, tgt.mailbox)
+	if code == codePublicAbsent {
+		code = "ErrorFolderNotFound" // a public folder whose domain store is gone
+	}
+	if code != "" {
+		return findItemError(code)
+	}
+	// Listing another mailbox's folder requires only folder visibility; reading an
+	// item's content (GetItem) is separately gated on read access. This two-tier
+	// model matches the EWS enforcement contract.
+	if !isOwn {
+		if code := folderVisibleAccess(st, tgt.fid, sess.user); code != "" {
+			return findItemError(code)
+		}
+	}
+	return folderItemsFound(st, tgt.fid, delegatedMailbox(tgt, isOwn))
+}
+
+// recoverableItemsFor lists the Recoverable Items dumpster, which aggregates
+// soft-deleted items mailbox-wide. It is served only for the caller's own mailbox
+// (no per-folder ACL applies to an aggregate), and each item keeps its original
+// parent folder in its id.
+func recoverableItemsFor(cache *storeCache, sess *session, tgt folderTarget) findItemResponseMessage {
+	st, _, isOwn, code := cache.open(sess, tgt.mailbox)
+	if code != "" {
+		return findItemError(code)
+	}
+	if !isOwn {
+		return findItemError("ErrorAccessDenied")
+	}
+	items, err := st.ListAllSoftDeleted()
+	if err != nil {
+		return findItemError("ErrorInternalServerError")
+	}
+	elems := make([]oxews.Message, 0, len(items))
+	for _, it := range items {
+		elems = append(elems, itemSummary(st, it.FolderID, it.Info, ""))
+	}
+	return findItemFound(&findItemRoot{
+		TotalItemsInView:        len(elems),
+		IncludesLastItemInRange: true,
+		Items:                   itemsWrap{Messages: elems},
+	})
+}
+
+// folderItemsFound lists one folder's items in the shape its class calls for.
+// Tasks and notes live in the object store (versioned by change number), not the
+// IMAP index, so they are listed as folder objects rather than messages.
+func folderItemsFound(st *objectstore.Store, fid int64, idMailbox string) findItemResponseMessage {
+	switch fid {
+	case int64(mapi.PrivateFIDTasks):
+		objs, _ := st.ListFolderObjects(fid)
+		tasks := make([]oxews.Task, 0, len(objs))
+		for _, o := range objs {
+			tasks = append(tasks, taskSummary(st, fid, o.ID, idMailbox))
+		}
+		return findItemFound(&findItemRoot{
+			TotalItemsInView:        len(tasks),
+			IncludesLastItemInRange: true,
+			Items:                   itemsWrap{Tasks: tasks},
+		})
+	case int64(mapi.PrivateFIDNotes):
+		objs, _ := st.ListFolderObjects(fid)
+		notes := make([]oxews.Item, 0, len(objs))
+		for _, o := range objs {
+			notes = append(notes, noteSummary(st, fid, o.ID, idMailbox))
+		}
+		return findItemFound(&findItemRoot{
+			TotalItemsInView:        len(notes),
+			IncludesLastItemInRange: true,
+			Items:                   itemsWrap{BaseItems: notes},
+		})
+	}
+	items, err := st.ListMessages(fid)
+	if err != nil {
+		return findItemError("ErrorItemNotFound")
+	}
+	elems := make([]oxews.Message, 0, len(items))
+	for _, info := range items {
+		elems = append(elems, itemSummary(st, fid, info, idMailbox))
+	}
+	return findItemFound(&findItemRoot{
+		TotalItemsInView:        len(elems),
+		IncludesLastItemInRange: true,
+		Items:                   itemsWrap{Messages: elems},
+	})
+}
+
+// folderVisibleAccess reports the response code refusing a caller who cannot see
+// a folder they do not own; an empty code means the folder is visible to them.
+func folderVisibleAccess(st *objectstore.Store, fid int64, user string) string {
+	rights, err := st.ResolvePermission(fid, user)
+	if err != nil {
+		return "ErrorInternalServerError"
+	}
+	if rights&mapi.FrightsVisible == 0 {
+		return "ErrorAccessDenied"
+	}
+	return ""
+}
+
+// delegatedMailbox returns the mailbox to stamp into the item ids: empty for the
+// caller's own mailbox, the target's for a delegated one, so the client reopens
+// the right mailbox on a follow-up.
+func delegatedMailbox(tgt folderTarget, isOwn bool) string {
+	if isOwn {
+		return ""
+	}
+	return tgt.mailbox
+}
+
+// findItemError builds a FindItem error response message.
+func findItemError(code string) findItemResponseMessage {
+	return findItemResponseMessage{ResponseClass: "Error", ResponseCode: code}
+}
+
+// findItemFound builds a FindItem success response message over one root folder.
+func findItemFound(root *findItemRoot) findItemResponseMessage {
+	return findItemResponseMessage{ResponseClass: "Success", ResponseCode: "NoError", RootFolder: root}
 }
 
 // handleGetItem answers GetItem: each requested item is opened, its body read
@@ -249,85 +262,75 @@ func (s *Server) handleGetItem(w http.ResponseWriter, inner []byte, sess *sessio
 
 	var msgs []itemResponseMessage
 	for _, ref := range req.ItemIDs.Items {
-		id, err := oxews.DecodeItemID(ref.ID)
-		if err != nil {
-			msgs = append(msgs, itemResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInvalidRequest"})
-			continue
-		}
-		// The id self-encodes its mailbox: an own-mailbox id (empty) opens the caller's
-		// store, a delegated id opens the target and is gated on the caller's read access.
-		st, _, isOwn, code := cache.open(sess, id.Mailbox)
-		if code == codePublicAbsent {
-			code = "ErrorItemNotFound" // a public item whose domain store is gone
-		}
-		if code != "" {
-			msgs = append(msgs, itemResponseMessage{ResponseClass: "Error", ResponseCode: code})
-			continue
-		}
-		if !isOwn {
-			if code := checkItemAccess(st, id, sess.user, mapi.FrightsReadAny); code != "" {
-				msgs = append(msgs, itemResponseMessage{ResponseClass: "Error", ResponseCode: code})
-				continue
-			}
-		}
-		msg, err := st.OpenMessage(id.MessageID)
-		if err != nil {
-			msgs = append(msgs, itemResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorItemNotFound"})
-			continue
-		}
-		info, _ := st.MessageByUID(id.FolderID, id.UID)
-		hasAttach, _ := st.HasAttachments(id.MessageID)
-		// A task is rendered as <t:Task> from its shared properties, not the mail
-		// MIME path (a task has no RFC822 form).
-		if itemClass(msg.Props) == oxtask.MessageClass {
-			tk, _ := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
-			elem := oxews.BuildTask(tk, oxews.ItemMeta{
-				ItemID: ref.ID,
-				// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-				ChangeKey:      oxews.ChangeKey(uint64(id.MessageID)),
-				HasAttachments: hasAttach,
-			})
-			msgs = append(msgs, itemResponseMessage{
-				ResponseClass: "Success", ResponseCode: "NoError",
-				Items: &itemsWrap{Tasks: []oxews.Task{elem}},
-			})
-			continue
-		}
-		// A sticky note is rendered as a base <t:Item> (EWS has no Note type) from its
-		// shared properties.
-		if itemClass(msg.Props) == oxews.NoteClass {
-			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-			elem := buildNoteItem(st, msg.Props, ref.ID, oxews.ChangeKey(uint64(id.MessageID)))
-			msgs = append(msgs, itemResponseMessage{
-				ResponseClass: "Success", ResponseCode: "NoError",
-				Items: &itemsWrap{BaseItems: []oxews.Item{elem}},
-			})
-			continue
-		}
-		body, bodyType := "", "Text"
-		if raw, err := st.GetMessageRaw(id.FolderID, id.UID); err == nil {
-			body, bodyType = bodyFromRaw(raw)
-		}
-		elem := oxews.BuildItem(msg, oxews.ItemMeta{
-			ItemID:    ref.ID,
-			FolderID:  id.FolderID,
-			MessageID: id.MessageID,
-			Mailbox:   id.Mailbox,
-			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-			ChangeKey:      oxews.ChangeKey(uint64(id.MessageID)),
-			IsRead:         info.Flags&objectstore.FlagSeen != 0,
-			HasAttachments: hasAttach,
-			Received:       info.InternalDate,
-			Size:           int(info.Size),
-			Body:           body,
-			BodyType:       bodyType,
-		})
-		msgs = append(msgs, itemResponseMessage{
-			ResponseClass: "Success", ResponseCode: "NoError",
-			Items: &itemsWrap{Messages: []oxews.Message{elem}},
-		})
+		msgs = append(msgs, getOneItem(cache, sess, ref.ID))
 	}
 	writeResponse(w, getItemResponse{Messages: msgs})
+}
+
+// getOneItem renders one requested item in the shape its class calls for.
+func getOneItem(cache *storeCache, sess *session, itemID string) itemResponseMessage {
+	id, err := oxews.DecodeItemID(itemID)
+	if err != nil {
+		return itemError("ErrorInvalidRequest")
+	}
+	// The id self-encodes its mailbox: an own-mailbox id (empty) opens the caller's
+	// store, a delegated id opens the target and is gated on the caller's read access.
+	st, _, isOwn, code := cache.open(sess, id.Mailbox)
+	if code == codePublicAbsent {
+		code = "ErrorItemNotFound" // a public item whose domain store is gone
+	}
+	if code != "" {
+		return itemError(code)
+	}
+	if !isOwn {
+		if code := checkItemAccess(st, id, sess.user, mapi.FrightsReadAny); code != "" {
+			return itemError(code)
+		}
+	}
+	msg, err := st.OpenMessage(id.MessageID)
+	if err != nil {
+		return itemError("ErrorItemNotFound")
+	}
+	hasAttach, _ := st.HasAttachments(id.MessageID)
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	changeKey := oxews.ChangeKey(uint64(id.MessageID))
+	switch itemClass(msg.Props) {
+	case oxtask.MessageClass:
+		// A task is rendered as <t:Task> from its shared properties, not the mail
+		// MIME path (a task has no RFC822 form).
+		tk, _ := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
+		elem := oxews.BuildTask(tk, oxews.ItemMeta{ItemID: itemID, ChangeKey: changeKey, HasAttachments: hasAttach})
+		return itemFound(&itemsWrap{Tasks: []oxews.Task{elem}})
+	case oxews.NoteClass:
+		// A sticky note is rendered as a base <t:Item> (EWS has no Note type) from
+		// its shared properties.
+		elem := buildNoteItem(st, msg.Props, itemID, changeKey)
+		return itemFound(&itemsWrap{BaseItems: []oxews.Item{elem}})
+	}
+	info, _ := st.MessageByUID(id.FolderID, id.UID)
+	body, bodyType := "", "Text"
+	if raw, err := st.GetMessageRaw(id.FolderID, id.UID); err == nil {
+		body, bodyType = bodyFromRaw(raw)
+	}
+	elem := oxews.BuildItem(msg, oxews.ItemMeta{
+		ItemID:         itemID,
+		FolderID:       id.FolderID,
+		MessageID:      id.MessageID,
+		Mailbox:        id.Mailbox,
+		ChangeKey:      changeKey,
+		IsRead:         info.Flags&objectstore.FlagSeen != 0,
+		HasAttachments: hasAttach,
+		Received:       info.InternalDate,
+		Size:           int(info.Size),
+		Body:           body,
+		BodyType:       bodyType,
+	})
+	return itemFound(&itemsWrap{Messages: []oxews.Message{elem}})
+}
+
+// itemFound builds a GetItem success response message over one rendered item.
+func itemFound(items *itemsWrap) itemResponseMessage {
+	return itemResponseMessage{ResponseClass: "Success", ResponseCode: "NoError", Items: items}
 }
 
 // handleGetAttachment answers GetAttachment: each attachment id is resolved to
@@ -344,52 +347,56 @@ func (s *Server) handleGetAttachment(w http.ResponseWriter, inner []byte, sess *
 
 	var msgs []getAttachmentResponseMessage
 	for _, ref := range req.AttachmentIDs.IDs {
-		folderID, mid, idx, mailbox, err := oxews.DecodeAttachmentID(ref.ID)
-		if err != nil {
-			msgs = append(msgs, getAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorInvalidRequest"})
-			continue
-		}
-		// The id self-encodes its mailbox and parent folder; a delegated attachment is
-		// gated on read access to that folder (reference: GetAttachment checks
-		// frightsReadAny on the attachment's parent folder).
-		st, _, isOwn, code := cache.open(sess, mailbox)
-		if code == codePublicAbsent {
-			code = "ErrorItemNotFound" // a public attachment whose domain store is gone
-		}
-		if code != "" {
-			msgs = append(msgs, getAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: code})
-			continue
-		}
-		if !isOwn {
-			id := oxews.ItemID{FolderID: folderID, MessageID: mid, Mailbox: mailbox}
-			if code := checkItemAccess(st, id, sess.user, mapi.FrightsReadAny); code != "" {
-				msgs = append(msgs, getAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: code})
-				continue
-			}
-		}
-		msg, err := st.OpenMessage(mid)
-		if err != nil || idx < 0 || idx >= len(msg.Attachments) {
-			msgs = append(msgs, getAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: "ErrorItemNotFound"})
-			continue
-		}
-		att := msg.Attachments[idx]
-		if oxews.IsEmbeddedAttachment(att) {
-			// An embedded message is returned as an ItemAttachment carrying the nested
-			// message item, not a file blob.
-			ia := oxews.BuildItemAttachmentContent(folderID, mid, idx, att, mailbox)
-			msgs = append(msgs, getAttachmentResponseMessage{
-				ResponseClass: "Success", ResponseCode: "NoError",
-				Attachments: &attachmentsWrap{Items: []oxews.ItemAttachment{ia}},
-			})
-			continue
-		}
-		fa := oxews.BuildAttachmentContent(folderID, mid, idx, att, mailbox)
-		msgs = append(msgs, getAttachmentResponseMessage{
-			ResponseClass: "Success", ResponseCode: "NoError",
-			Attachments: &attachmentsWrap{Files: []oxews.FileAttachment{fa}},
-		})
+		msgs = append(msgs, getOneAttachment(cache, sess, ref.ID))
 	}
 	writeResponse(w, getAttachmentResponse{Messages: msgs})
+}
+
+// getOneAttachment resolves one attachment id to its content.
+func getOneAttachment(cache *storeCache, sess *session, attachmentID string) getAttachmentResponseMessage {
+	folderID, mid, idx, mailbox, err := oxews.DecodeAttachmentID(attachmentID)
+	if err != nil {
+		return getAttachmentError("ErrorInvalidRequest")
+	}
+	// The id self-encodes its mailbox and parent folder; a delegated attachment is
+	// gated on read access to that folder (reference: GetAttachment checks
+	// frightsReadAny on the attachment's parent folder).
+	st, _, isOwn, code := cache.open(sess, mailbox)
+	if code == codePublicAbsent {
+		code = "ErrorItemNotFound" // a public attachment whose domain store is gone
+	}
+	if code != "" {
+		return getAttachmentError(code)
+	}
+	if !isOwn {
+		id := oxews.ItemID{FolderID: folderID, MessageID: mid, Mailbox: mailbox}
+		if code := checkItemAccess(st, id, sess.user, mapi.FrightsReadAny); code != "" {
+			return getAttachmentError(code)
+		}
+	}
+	msg, err := st.OpenMessage(mid)
+	if err != nil || idx < 0 || idx >= len(msg.Attachments) {
+		return getAttachmentError("ErrorItemNotFound")
+	}
+	att := msg.Attachments[idx]
+	if oxews.IsEmbeddedAttachment(att) {
+		// An embedded message is returned as an ItemAttachment carrying the nested
+		// message item, not a file blob.
+		ia := oxews.BuildItemAttachmentContent(folderID, mid, idx, att, mailbox)
+		return getAttachmentFound(&attachmentsWrap{Items: []oxews.ItemAttachment{ia}})
+	}
+	fa := oxews.BuildAttachmentContent(folderID, mid, idx, att, mailbox)
+	return getAttachmentFound(&attachmentsWrap{Files: []oxews.FileAttachment{fa}})
+}
+
+// getAttachmentError builds a GetAttachment error response message.
+func getAttachmentError(code string) getAttachmentResponseMessage {
+	return getAttachmentResponseMessage{ResponseClass: "Error", ResponseCode: code}
+}
+
+// getAttachmentFound builds a GetAttachment success response message.
+func getAttachmentFound(atts *attachmentsWrap) getAttachmentResponseMessage {
+	return getAttachmentResponseMessage{ResponseClass: "Success", ResponseCode: "NoError", Attachments: atts}
 }
 
 // --- helpers ---

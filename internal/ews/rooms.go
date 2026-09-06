@@ -139,9 +139,19 @@ func (s *Server) handleGetRooms(w http.ResponseWriter, inner []byte, sess *sessi
 		s.soapFault(w, "ErrorInternalServerError", "GetRooms: an internal error occurred", err)
 		return
 	}
+	entries := roomEntriesIn(rooms, target)
+	if len(entries) > 0 {
+		resp.Rooms = &roomsWrap{Rooms: entries}
+	}
+	writeResponse(w, resp)
+}
+
+// roomEntriesIn renders the rooms of one domain as GetRooms entries, standing the
+// address in for a room that carries no display name.
+func roomEntriesIn(rooms []directory.GALEntry, domain string) []roomEntry {
 	var entries []roomEntry
 	for _, r := range rooms {
-		if r.DisplayType != directory.DisplayTypeRoom || addrDomain(r.Address) != target {
+		if r.DisplayType != directory.DisplayTypeRoom || addrDomain(r.Address) != domain {
 			continue
 		}
 		name := r.DisplayName
@@ -155,10 +165,7 @@ func (s *Server) handleGetRooms(w http.ResponseWriter, inner []byte, sess *sessi
 			MailboxType:  "Mailbox",
 		}})
 	}
-	if len(entries) > 0 {
-		resp.Rooms = &roomsWrap{Rooms: entries}
-	}
-	writeResponse(w, resp)
+	return entries
 }
 
 // addrDomain returns the lowercased domain part of an SMTP address (or a bare

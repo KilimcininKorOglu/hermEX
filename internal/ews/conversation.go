@@ -373,42 +373,53 @@ func (s *Server) handleApplyConversationAction(w http.ResponseWriter, inner []by
 func applyOneConversationAction(st *objectstore.Store, a conversationAction, members []convMember) folderResponseMessage {
 	switch a.Action {
 	case "Move", "AlwaysMove":
-		target, ok := singleFolderTarget(a.DestinationFolderID)
-		if !ok {
+		if !relocateConversation(st, a.DestinationFolderID, members, moveMessage) {
 			return folderError("ErrorInvalidRequest")
-		}
-		for _, m := range members {
-			_, _ = moveMessage(st, m.folderID, m.info.UID, target)
 		}
 	case "Copy":
-		target, ok := singleFolderTarget(a.DestinationFolderID)
-		if !ok {
+		if !relocateConversation(st, a.DestinationFolderID, members, copyMessage) {
 			return folderError("ErrorInvalidRequest")
-		}
-		for _, m := range members {
-			_, _ = copyMessage(st, m.folderID, m.info.UID, target)
 		}
 	case "Delete", "AlwaysDelete":
 		for _, m := range members {
 			_ = st.SoftDeleteMessage(m.folderID, m.info.UID)
 		}
 	case "SetReadState":
-		read := a.IsRead != nil && *a.IsRead
-		for _, m := range members {
-			next := m.info.Flags
-			if read {
-				next |= objectstore.FlagSeen
-			} else {
-				next &^= objectstore.FlagSeen
-			}
-			if next != m.info.Flags {
-				_ = st.SetMessageFlags(m.folderID, m.info.UID, next)
-			}
-		}
+		setConversationRead(st, members, a.IsRead != nil && *a.IsRead)
 	default:
 		return folderError("ErrorInvalidRequest")
 	}
 	return folderResponseMessage{ResponseClass: "Success", ResponseCode: "NoError"}
+}
+
+// relocateConversation moves or copies every member of a conversation into the
+// named destination folder, reporting false when the destination does not resolve.
+func relocateConversation(st *objectstore.Store, refs folderRefs, members []convMember,
+	relocate func(*objectstore.Store, int64, uint32, int64) (objectstore.MessageInfo, error)) bool {
+	target, ok := singleFolderTarget(refs)
+	if !ok {
+		return false
+	}
+	for _, m := range members {
+		_, _ = relocate(st, m.folderID, m.info.UID, target)
+	}
+	return true
+}
+
+// setConversationRead marks every member of a conversation read or unread,
+// touching only the ones whose flag actually changes.
+func setConversationRead(st *objectstore.Store, members []convMember, read bool) {
+	for _, m := range members {
+		next := m.info.Flags
+		if read {
+			next |= objectstore.FlagSeen
+		} else {
+			next &^= objectstore.FlagSeen
+		}
+		if next != m.info.Flags {
+			_ = st.SetMessageFlags(m.folderID, m.info.UID, next)
+		}
+	}
 }
 
 // singleFolderTarget resolves a destination folder reference to one folder id in

@@ -276,17 +276,8 @@ func CalendarFreeBusy(st *objectstore.Store, windowStart, windowEnd time.Time, d
 		if err != nil {
 			continue
 		}
-		start, ok1 := ntTimeVal(pv, startTag)
-		end, ok2 := ntTimeVal(pv, endTag)
-		if !ok1 || !ok2 {
-			continue
-		}
-		if boolVal(pv, recurTag) {
-			continue // recurring master (v1 gap: no instance expansion)
-		}
-		// Overlap, not containment: an appointment that starts before the window and
-		// ends after it still occupies the whole window and must appear.
-		if !start.Before(windowEnd) || !end.After(windowStart) {
+		start, end, ok := appointmentWindow(pv, startTag, endTag, recurTag, windowStart, windowEnd)
+		if !ok {
 			continue
 		}
 		status := longVal(pv, busyTag)
@@ -306,6 +297,27 @@ func CalendarFreeBusy(st *objectstore.Store, windowStart, windowEnd time.Time, d
 		events = append(events, ev)
 	}
 	return events, nil
+}
+
+// appointmentWindow reports whether one appointment belongs in the free/busy
+// answer, and its span. A recurring master is skipped (v1 gap: no instance
+// expansion). The test is overlap, not containment: an appointment that starts
+// before the window and ends after it still occupies the whole window and must
+// appear.
+func appointmentWindow(pv mapi.PropertyValues, startTag, endTag, recurTag mapi.PropTag,
+	windowStart, windowEnd time.Time) (start, end time.Time, ok bool) {
+	start, ok1 := ntTimeVal(pv, startTag)
+	end, ok2 := ntTimeVal(pv, endTag)
+	if !ok1 || !ok2 {
+		return time.Time{}, time.Time{}, false
+	}
+	if boolVal(pv, recurTag) {
+		return time.Time{}, time.Time{}, false
+	}
+	if !start.Before(windowEnd) || !end.After(windowStart) {
+		return time.Time{}, time.Time{}, false
+	}
+	return start, end, true
 }
 
 // --- helpers ---

@@ -32,120 +32,81 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		Fields:     operationFields(op, sess),
 	})
 	switch op {
-	case "GetFolder":
-		s.handleGetFolder(w, inner, sess)
-	case "FindFolder":
-		s.handleFindFolder(w, inner, sess)
-	case "SyncFolderHierarchy":
-		s.handleSyncFolderHierarchy(w, inner, sess)
-	case "FindItem":
-		s.handleFindItem(w, inner, sess)
-	case "GetItem":
-		s.handleGetItem(w, inner, sess)
-	case "GetAttachment":
-		s.handleGetAttachment(w, inner, sess)
-	case "CreateAttachment":
-		s.handleCreateAttachment(w, inner, sess)
-	case "SyncFolderItems":
-		s.handleSyncFolderItems(w, inner, sess)
-	case "CreateItem":
-		s.handleCreateItem(w, inner, sess)
-	case "SendItem":
-		s.handleSendItem(w, inner, sess)
-	case "ResolveNames":
-		s.handleResolveNames(w, inner, sess)
-	case "GetUserPhoto":
-		s.handleGetUserPhoto(w, inner, sess)
-	case "UpdateItem":
-		s.handleUpdateItem(w, inner, sess)
-	case "DeleteItem":
-		s.handleDeleteItem(w, inner, sess)
-	case "MoveItem":
-		s.handleMoveItem(w, inner, sess)
-	case "CopyItem":
-		s.handleCopyItem(w, inner, sess)
-	case "CreateFolder":
-		s.handleCreateFolder(w, inner, sess)
-	case "DeleteFolder":
-		s.handleDeleteFolder(w, inner, sess)
-	case "UpdateFolder":
-		s.handleUpdateFolder(w, inner, sess)
-	case "MoveFolder":
-		s.handleMoveFolder(w, inner, sess)
-	case "CopyFolder":
-		s.handleCopyFolder(w, inner, sess)
-	case "GetServerTimeZones":
-		s.handleGetServerTimeZones(w, inner, sess)
-	case "GetInboxRules":
-		s.handleGetInboxRules(w, inner, sess)
-	case "UpdateInboxRules":
-		s.handleUpdateInboxRules(w, inner, sess)
-	case "GetDelegate":
-		s.handleGetDelegate(w, inner, sess)
-	case "AddDelegate":
-		s.handleAddDelegate(w, inner, sess)
-	case "RemoveDelegate":
-		s.handleRemoveDelegate(w, inner, sess)
-	case "UpdateDelegate":
-		s.handleUpdateDelegate(w, inner, sess)
-	case "GetUserAvailabilityRequest":
-		// MS-OXWSAVAIL names the request element GetUserAvailabilityRequest (the
-		// "Request" suffix is unlike the other operations' bare names).
-		s.handleGetUserAvailability(w, inner, sess)
-	case "GetUserOofSettingsRequest":
-		// MS-OXWSOOF likewise names its request elements with a "Request" suffix.
-		s.handleGetUserOofSettings(w, inner, sess)
-	case "SetUserOofSettingsRequest":
-		s.handleSetUserOofSettings(w, inner, sess)
-	case "GetMailTips":
-		s.handleGetMailTips(w, inner, sess)
-	case "ExpandDL":
-		s.handleExpandDL(w, inner, sess)
-	case "EmptyFolder":
-		s.handleEmptyFolder(w, inner, sess)
-	case "MarkAllItemsAsRead":
-		s.handleMarkAllItemsAsRead(w, inner, sess)
-	case "DeleteAttachment":
-		s.handleDeleteAttachment(w, inner, sess)
-	case "MarkAsJunk":
-		s.handleMarkAsJunk(w, inner, sess)
-	case "FindConversation":
-		s.handleFindConversation(w, inner, sess)
-	case "GetConversationItems":
-		s.handleGetConversationItems(w, inner, sess)
-	case "ApplyConversationAction":
-		s.handleApplyConversationAction(w, inner, sess)
-	case "GetUserConfiguration":
-		s.handleGetUserConfiguration(w, inner, sess)
-	case "CreateUserConfiguration":
-		s.handleCreateUserConfiguration(w, inner, sess)
-	case "UpdateUserConfiguration":
-		s.handleUpdateUserConfiguration(w, inner, sess)
-	case "DeleteUserConfiguration":
-		s.handleDeleteUserConfiguration(w, inner, sess)
-	case "ConvertId":
-		s.handleConvertId(w, inner, sess)
-	case "FindPeople":
-		s.handleFindPeople(w, inner, sess)
-	case "GetPersona":
-		s.handleGetPersona(w, inner, sess)
-	case "GetRoomLists":
-		s.handleGetRoomLists(w, inner, sess)
-	case "GetRooms":
-		s.handleGetRooms(w, inner, sess)
-	case "Subscribe":
-		s.handleSubscribe(w, inner, sess)
-	case "Unsubscribe":
-		s.handleUnsubscribe(w, inner, sess)
-	case "GetEvents":
-		s.handleGetEvents(w, inner, sess)
 	case "GetStreamingEvents":
 		// Streaming holds the connection open and writes chunked continuations, so
 		// it needs the request (its context signals client disconnect).
 		s.handleGetStreamingEvents(w, r, inner, sess)
+		return
 	case "GetAppMarketplaceUrl":
+		// The marketplace URL is a constant, so it reads nothing from the request.
 		s.handleGetAppMarketplaceURL(w)
-	default:
-		writeSOAPFault(w, "ErrorInvalidRequest", "unsupported operation: "+op)
+		return
 	}
+	handler, ok := ewsOperations[op]
+	if !ok {
+		writeSOAPFault(w, "ErrorInvalidRequest", "unsupported operation: "+op)
+		return
+	}
+	handler(s, w, inner, sess)
+}
+
+// ewsOperations is the single routing source from a SOAP operation name to its
+// handler. A name absent here is an operation this server does not implement, and
+// the two operations with their own signature are routed before this table.
+//
+// MS-OXWSAVAIL and MS-OXWSOOF name their request elements with a "Request"
+// suffix, unlike every other operation's bare name.
+var ewsOperations = map[string]func(*Server, http.ResponseWriter, []byte, *session){
+	"GetFolder":                  (*Server).handleGetFolder,
+	"FindFolder":                 (*Server).handleFindFolder,
+	"SyncFolderHierarchy":        (*Server).handleSyncFolderHierarchy,
+	"FindItem":                   (*Server).handleFindItem,
+	"GetItem":                    (*Server).handleGetItem,
+	"GetAttachment":              (*Server).handleGetAttachment,
+	"CreateAttachment":           (*Server).handleCreateAttachment,
+	"SyncFolderItems":            (*Server).handleSyncFolderItems,
+	"CreateItem":                 (*Server).handleCreateItem,
+	"SendItem":                   (*Server).handleSendItem,
+	"ResolveNames":               (*Server).handleResolveNames,
+	"GetUserPhoto":               (*Server).handleGetUserPhoto,
+	"UpdateItem":                 (*Server).handleUpdateItem,
+	"DeleteItem":                 (*Server).handleDeleteItem,
+	"MoveItem":                   (*Server).handleMoveItem,
+	"CopyItem":                   (*Server).handleCopyItem,
+	"CreateFolder":               (*Server).handleCreateFolder,
+	"DeleteFolder":               (*Server).handleDeleteFolder,
+	"UpdateFolder":               (*Server).handleUpdateFolder,
+	"MoveFolder":                 (*Server).handleMoveFolder,
+	"CopyFolder":                 (*Server).handleCopyFolder,
+	"GetServerTimeZones":         (*Server).handleGetServerTimeZones,
+	"GetInboxRules":              (*Server).handleGetInboxRules,
+	"UpdateInboxRules":           (*Server).handleUpdateInboxRules,
+	"GetDelegate":                (*Server).handleGetDelegate,
+	"AddDelegate":                (*Server).handleAddDelegate,
+	"RemoveDelegate":             (*Server).handleRemoveDelegate,
+	"UpdateDelegate":             (*Server).handleUpdateDelegate,
+	"GetUserAvailabilityRequest": (*Server).handleGetUserAvailability,
+	"GetUserOofSettingsRequest":  (*Server).handleGetUserOofSettings,
+	"SetUserOofSettingsRequest":  (*Server).handleSetUserOofSettings,
+	"GetMailTips":                (*Server).handleGetMailTips,
+	"ExpandDL":                   (*Server).handleExpandDL,
+	"EmptyFolder":                (*Server).handleEmptyFolder,
+	"MarkAllItemsAsRead":         (*Server).handleMarkAllItemsAsRead,
+	"DeleteAttachment":           (*Server).handleDeleteAttachment,
+	"MarkAsJunk":                 (*Server).handleMarkAsJunk,
+	"FindConversation":           (*Server).handleFindConversation,
+	"GetConversationItems":       (*Server).handleGetConversationItems,
+	"ApplyConversationAction":    (*Server).handleApplyConversationAction,
+	"GetUserConfiguration":       (*Server).handleGetUserConfiguration,
+	"CreateUserConfiguration":    (*Server).handleCreateUserConfiguration,
+	"UpdateUserConfiguration":    (*Server).handleUpdateUserConfiguration,
+	"DeleteUserConfiguration":    (*Server).handleDeleteUserConfiguration,
+	"ConvertId":                  (*Server).handleConvertId,
+	"FindPeople":                 (*Server).handleFindPeople,
+	"GetPersona":                 (*Server).handleGetPersona,
+	"GetRoomLists":               (*Server).handleGetRoomLists,
+	"GetRooms":                   (*Server).handleGetRooms,
+	"Subscribe":                  (*Server).handleSubscribe,
+	"Unsubscribe":                (*Server).handleUnsubscribe,
+	"GetEvents":                  (*Server).handleGetEvents,
 }
