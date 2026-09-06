@@ -157,11 +157,16 @@ func (s *Server) handle(conn net.Conn) {
 	var binaryMIME bool
 	var bdatBuf *bytes.Buffer
 	var bdatErr bool
+	// smtputf8 records that the current transaction's MAIL carried the SMTPUTF8
+	// keyword (RFC 6531). It is what permits a non-ASCII address on this
+	// transaction's RCPT commands, since SMTPUTF8 is negotiated once on MAIL and
+	// has no RCPT counterpart.
+	var smtputf8 bool
 	// resetTxn clears all envelope and body state at a transaction boundary (a new
 	// MAIL, RSET, a completed DATA/BDAT, or a re-greeting), leaving the greeting
 	// (greeted/helo) untouched.
 	resetTxn := func() {
-		hasFrom, rcptCount, binaryMIME = false, 0, false
+		hasFrom, rcptCount, binaryMIME, smtputf8 = false, 0, false, false
 		bdatBuf, bdatErr = nil, false
 	}
 	for {
@@ -229,6 +234,16 @@ func (s *Server) handle(conn net.Conn) {
 				continue
 			}
 			params := esmtpParams(arg)
+			// RFC 6531 §3.5: a non-ASCII address is only permitted once the client
+			// has asked for the extension on this MAIL. Accepting one without it
+			// would let an address this server cannot promise to relay enter the
+			// queue, since the SMTPUTF8 requirement is negotiated per transaction
+			// and never re-derived downstream.
+			_, wantsUTF8 := params["SMTPUTF8"]
+			if needsUTF8Keyword(addr, wantsUTF8) {
+				reply(w, 550, "5.6.7 non-ASCII address requires the SMTPUTF8 extension")
+				continue
+			}
 			// RFC 1870: when the client declares SIZE and it exceeds the
 			// advertised maximum, refuse the whole transaction now with 552
 			// rather than accepting MAIL/RCPT and streaming the body only to
@@ -265,6 +280,7 @@ func (s *Server) handle(conn net.Conn) {
 			// RFC 3030: BODY=BINARYMIME commits the sender to delivering the body
 			// over BDAT; a later DATA in this transaction is then a sequence error.
 			binaryMIME = strings.EqualFold(params["BODY"], "BINARYMIME")
+			smtputf8 = wantsUTF8
 			event(logging.LevelInfo, "mail.from", logging.Fields{"from": addr})
 			reply(w, 250, "OK")
 		case "RCPT":
@@ -275,6 +291,13 @@ func (s *Server) handle(conn net.Conn) {
 			addr, ok := extractPath(arg, "TO:")
 			if !ok {
 				reply(w, 501, "syntax: RCPT TO:<address>")
+				continue
+			}
+			// RFC 6531 §3.5: SMTPUTF8 is negotiated on MAIL, so a non-ASCII
+			// recipient belongs to a transaction that asked for it. 553 is the
+			// recipient-side code (550 is the sender's).
+			if needsUTF8Keyword(addr, smtputf8) {
+				reply(w, 553, "5.6.7 non-ASCII address requires the SMTPUTF8 extension")
 				continue
 			}
 			// RFC 3461 §5.1(b): a malformed or duplicated NOTIFY/ORCPT MUST be
@@ -730,6 +753,22 @@ func extractPath(arg, prefix string) (string, bool) {
 		return "", false
 	}
 	return rest[1:closeIdx], true
+}
+
+// needsUTF8Keyword reports whether an envelope address must be refused: it
+// carries a byte outside ASCII, which only the SMTPUTF8 extension permits
+// (RFC 6531 §3.2), and the transaction did not ask for it. An empty
+// reverse-path (the null sender) is ASCII and always passes.
+func needsUTF8Keyword(addr string, negotiated bool) bool {
+	if negotiated {
+		return false
+	}
+	for i := range len(addr) {
+		if addr[i] > 0x7f {
+			return true
+		}
+	}
+	return false
 }
 
 // esmtpParams parses the space-separated ESMTP parameters that follow the
