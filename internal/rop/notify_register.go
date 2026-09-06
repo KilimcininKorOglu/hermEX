@@ -3,6 +3,7 @@ package rop
 import (
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
 )
 
 // ropRegisterNotification handles RopRegisterNotification ([MS-OXCNOTIF] 2.2.1.2;
@@ -26,27 +27,11 @@ import (
 // folder's parent and message counts), so the first poll likewise reports no spurious
 // folder created/deleted/modified for the tree that existed at subscribe time.
 func (s *Session) ropRegisterNotification(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	ohindex, e1 := p.Uint8()   // OutputHandleIndex
-	ntypes, e2 := p.Uint8()    // NotificationTypes (one byte; subscribable types fit 0x02..0x80)
-	_, e3 := p.Uint8()         // Reserved
-	wantWhole, e4 := p.Uint8() // WantWholeStore
-	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
+	req, framed := pullRegisterNotificationRequest(p)
+	if !framed {
 		return false
 	}
-	wholeStore := wantWhole != 0
-	var folderID, messageID int64
-	if !wholeStore {
-		folderEID, e5 := p.Uint64()  // FolderId
-		messageEID, e6 := p.Uint64() // MessageId
-		if e5 != nil || e6 != nil {
-			return false
-		}
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		folderID = int64(mapi.EID(folderEID).GCValue())
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		messageID = int64(mapi.EID(messageEID).GCValue())
-	}
-
+	ohindex := req.ohindex
 	parent := s.get(handleAt(handles, hindex))
 	if parent == nil || parent.store == nil {
 		writeErr(out, ropRegisterNotification, ohindex, ecError)
@@ -58,46 +43,15 @@ func (s *Session) ropRegisterNotification(p *ext.Pull, out *ext.Push, handles []
 		store: parent.store,
 		sub: subscription{
 			logonID:    0, // a single logon in v1 (the dispatch discards the per-ROP LogonId)
-			types:      ntypes,
-			wholeStore: wholeStore,
-			folderID:   folderID,
-			messageID:  messageID,
+			types:      req.types,
+			wholeStore: req.wholeStore,
+			folderID:   req.folderID,
+			messageID:  req.messageID,
 		},
 	}
-	// Baseline at registration (see the doc comment). A folder- or message-scoped
-	// subscription baselines its one folder, the poll diffs the folder and the
-	// classifier narrows to the message. A whole-store subscription baselines every
-	// content folder, so its first poll likewise reports nothing pre-existing.
-	if wholeStore {
-		folders, err := parent.store.ListFolders()
-		if err != nil {
-			writeErr(out, ropRegisterNotification, ohindex, ecError)
-			return true
-		}
-		obj.subFolders = make(map[int64]folderSnapshot, len(folders))
-		for _, f := range folders {
-			snap, err := parent.store.FolderMessageChangeNumbers(f.ID)
-			if err != nil {
-				writeErr(out, ropRegisterNotification, ohindex, ecError)
-				return true
-			}
-			obj.subFolders[f.ID] = snap
-		}
-		// Baseline the folder hierarchy too, so the first poll reports no spurious
-		// folder created/deleted/modified for the tree present at subscribe time.
-		meta, err := folderMetaSnapshot(parent.store, folders)
-		if err != nil {
-			writeErr(out, ropRegisterNotification, ohindex, ecError)
-			return true
-		}
-		obj.subFolderMeta = meta
-	} else {
-		snap, err := parent.store.FolderMessageChangeNumbers(folderID)
-		if err != nil {
-			writeErr(out, ropRegisterNotification, ohindex, ecError)
-			return true
-		}
-		obj.subSnapshot = snap
+	if err := baselineSubscription(obj, parent.store, req); err != nil {
+		writeErr(out, ropRegisterNotification, ohindex, ecError)
+		return true
 	}
 
 	h := s.alloc(obj)
@@ -108,4 +62,75 @@ func (s *Session) ropRegisterNotification(p *ext.Pull, out *ext.Push, handles []
 	out.Uint8(ohindex)
 	out.Uint32(ecSuccess)
 	return true
+}
+
+// registerNotificationRequest is a decoded RopRegisterNotification request. A
+// whole-store subscription carries no ids, so folderID and messageID are read
+// only when it is scoped.
+type registerNotificationRequest struct {
+	ohindex    uint8
+	types      uint8
+	wholeStore bool
+	folderID   int64
+	messageID  int64
+}
+
+func pullRegisterNotificationRequest(p *ext.Pull) (registerNotificationRequest, bool) {
+	var req registerNotificationRequest
+	ohindex, e1 := p.Uint8()   // OutputHandleIndex
+	ntypes, e2 := p.Uint8()    // NotificationTypes (one byte; subscribable types fit 0x02..0x80)
+	_, e3 := p.Uint8()         // Reserved
+	wantWhole, e4 := p.Uint8() // WantWholeStore
+	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
+		return req, false
+	}
+	req = registerNotificationRequest{ohindex: ohindex, types: ntypes, wholeStore: wantWhole != 0}
+	if req.wholeStore {
+		return req, true
+	}
+	folderEID, e5 := p.Uint64()  // FolderId
+	messageEID, e6 := p.Uint64() // MessageId
+	if e5 != nil || e6 != nil {
+		return req, false
+	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	req.folderID = int64(mapi.EID(folderEID).GCValue())
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	req.messageID = int64(mapi.EID(messageEID).GCValue())
+	return req, true
+}
+
+// baselineSubscription records the mailbox state at registration, so the first
+// poll reports nothing that already existed. A folder- or message-scoped
+// subscription baselines its one folder: the poll diffs that folder and the
+// classifier narrows to the message. A whole-store subscription baselines every
+// content folder and the folder hierarchy, so its first poll reports no spurious
+// create, delete or modify for the tree present at subscribe time.
+func baselineSubscription(obj *object, store *objectstore.Store, req registerNotificationRequest) error {
+	if !req.wholeStore {
+		snap, err := store.FolderMessageChangeNumbers(req.folderID)
+		if err != nil {
+			return err
+		}
+		obj.subSnapshot = snap
+		return nil
+	}
+	folders, err := store.ListFolders()
+	if err != nil {
+		return err
+	}
+	obj.subFolders = make(map[int64]folderSnapshot, len(folders))
+	for _, f := range folders {
+		snap, err := store.FolderMessageChangeNumbers(f.ID)
+		if err != nil {
+			return err
+		}
+		obj.subFolders[f.ID] = snap
+	}
+	meta, err := folderMetaSnapshot(store, folders)
+	if err != nil {
+		return err
+	}
+	obj.subFolderMeta = meta
+	return nil
 }

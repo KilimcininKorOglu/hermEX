@@ -246,14 +246,12 @@ func nextNewAttachNum(atts []*newAttachment) uint32 {
 // observed by ICS only through the message's change number, which this ROP does
 // not itself bump.
 func (s *Session) ropSaveChangesAttachment(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	ihindex2, e1 := p.Uint8() // InputHandleIndex (indexes the attachment object)
-	_, e2 := p.Uint8()        // SaveFlags
-	if e1 != nil || e2 != nil {
+	ihindex2, framed := pullSaveChangesRequest(p)
+	if !framed {
 		return false
 	}
-	att := s.get(handleAt(handles, ihindex2))
-	if att == nil || att.kind != kindAttachWrite || att.attachW == nil || att.store == nil {
-		writeErr(out, ropSaveChangesAttachment, hindex, ecError)
+	att, ok := s.openAttachWrite(out, ropSaveChangesAttachment, handles, ihindex2, hindex)
+	if !ok {
 		return true
 	}
 	aw := att.attachW
@@ -262,30 +260,15 @@ func (s *Session) ropSaveChangesAttachment(p *ext.Pull, out *ext.Push, handles [
 		return true
 	}
 	if aw.inMem != nil {
-		// Compose-time attachment: merge the buffered properties into the in-memory
-		// attachment and drop the buffered deletes. The message (with its attachments)
-		// is written when its own SaveChangesMessage calls CreateMessage, so there is no
-		// store row to flush to and no parent change number to bump here.
-		for _, tv := range aw.pending {
-			aw.inMem.props.Set(tv.Tag, tv.Value)
-		}
-		for _, t := range aw.pendingDeletes {
-			aw.inMem.props = removeTag(aw.inMem.props, t)
-		}
-		aw.pending = nil
-		aw.pendingDeletes = nil
+		flushComposeAttachment(aw)
 		out.Uint8(ropSaveChangesAttachment)
 		out.Uint8(hindex)
 		out.Uint32(ecSuccess)
 		return true
 	}
-	if len(aw.pending) > 0 || len(aw.pendingDeletes) > 0 {
-		if err := att.store.SetAttachmentProperties(aw.attachmentID, aw.pending, aw.pendingDeletes...); err != nil {
-			writeErr(out, ropSaveChangesAttachment, hindex, ecError)
-			return true
-		}
-		aw.pending = nil
-		aw.pendingDeletes = nil
+	if err := flushStoredAttachment(att, aw); err != nil {
+		writeErr(out, ropSaveChangesAttachment, hindex, ecError)
+		return true
 	}
 	// Mark the parent message (the common-header handle) dirty so SaveChangesMessage
 	// bumps its change number even when no top-level property changed.
@@ -297,6 +280,88 @@ func (s *Session) ropSaveChangesAttachment(p *ext.Pull, out *ext.Push, handles [
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
 	return true
+}
+
+// openAttachWrite resolves a handle to an attachment being written, with its
+// write state and store bound.
+func (s *Session) openAttachWrite(out *ext.Push, ropID uint8, handles []uint32, hindex, errIndex uint8) (*object, bool) {
+	att := s.get(handleAt(handles, hindex))
+	if att == nil || att.kind != kindAttachWrite || att.attachW == nil || att.store == nil {
+		writeErr(out, ropID, errIndex, ecError)
+		return nil, false
+	}
+	return att, true
+}
+
+// flushComposeAttachment merges a compose-time attachment's buffered changes
+// into the in-memory attachment. The message (with its attachments) is written
+// when its own SaveChangesMessage calls CreateMessage, so there is no store row
+// to flush to and no parent change number to bump.
+func flushComposeAttachment(aw *attachWrite) {
+	for _, tv := range aw.pending {
+		aw.inMem.props.Set(tv.Tag, tv.Value)
+	}
+	for _, t := range aw.pendingDeletes {
+		aw.inMem.props = removeTag(aw.inMem.props, t)
+	}
+	aw.pending = nil
+	aw.pendingDeletes = nil
+}
+
+// flushStoredAttachment writes a persisted attachment's buffered changes to its
+// store row. With nothing buffered it is a no-op success.
+func flushStoredAttachment(att *object, aw *attachWrite) error {
+	if len(aw.pending) == 0 && len(aw.pendingDeletes) == 0 {
+		return nil
+	}
+	if err := att.store.SetAttachmentProperties(aw.attachmentID, aw.pending, aw.pendingDeletes...); err != nil {
+		return err
+	}
+	aw.pending = nil
+	aw.pendingDeletes = nil
+	return nil
+}
+
+// deleteStoredAttachment removes a persisted message's attachment row and marks
+// the message dirty, so a following SaveChangesMessage advances its change
+// number. Removing an attachment modifies the message, so a delegate needs
+// EditAny on its folder; a compose message trusted its Create gate at open.
+// It reports false when the response was already written.
+func (s *Session) deleteStoredAttachment(out *ext.Push, msg *object, hindex uint8, attachID uint32) bool {
+	if msg.kind == kindMessage && s.denyWrite(out, ropDeleteAttachment, hindex, msg.store, msg.folderID, mapi.FrightsEditAny) {
+		return false
+	}
+	messageID, ok := persistedMessageID(msg)
+	if !ok {
+		writeErr(out, ropDeleteAttachment, hindex, ecError)
+		return false
+	}
+	if err := msg.store.DeleteAttachment(messageID, attachID); err != nil {
+		writeErr(out, ropDeleteAttachment, hindex, notFoundOrError(err))
+		return false
+	}
+	msg.touched = true
+	return true
+}
+
+// dropStagedAttachment removes a compose message's staged attachment by its
+// attach number, reporting whether one matched.
+func dropStagedAttachment(nm *newMessageState, attachID uint32) bool {
+	for i, a := range nm.attachments {
+		if a.attachNum == attachID {
+			nm.attachments = append(nm.attachments[:i], nm.attachments[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// notFoundOrError maps a store failure to the ROP return code it earns.
+func notFoundOrError(err error) uint32 {
+	if errors.Is(err, objectstore.ErrNotFound) {
+		return ecNotFound
+	}
+	return ecError
 }
 
 // ropDeleteAttachment handles RopDeleteAttachment ([MS-OXCMSG] 2.2.3.7): it
@@ -319,39 +384,18 @@ func (s *Session) ropDeleteAttachment(p *ext.Pull, out *ext.Push, handles []uint
 
 	// Compose message not yet persisted: drop the staged attachment in memory.
 	if msg.kind == kindNewMessage && !msg.newMsg.saved {
-		nm := msg.newMsg
-		for i, a := range nm.attachments {
-			if a.attachNum == attachID {
-				nm.attachments = append(nm.attachments[:i], nm.attachments[i+1:]...)
-				out.Uint8(ropDeleteAttachment)
-				out.Uint8(hindex)
-				out.Uint32(ecSuccess)
-				return true
-			}
-		}
-		writeErr(out, ropDeleteAttachment, hindex, ecNotFound)
-		return true
-	}
-
-	// Removing an attachment from a persisted message modifies it: EditAny on its
-	// folder (a compose message trusted its Create gate above).
-	if msg.kind == kindMessage && s.denyWrite(out, ropDeleteAttachment, hindex, msg.store, msg.folderID, mapi.FrightsEditAny) {
-		return true
-	}
-	messageID, ok := persistedMessageID(msg)
-	if !ok {
-		writeErr(out, ropDeleteAttachment, hindex, ecError)
-		return true
-	}
-	if err := msg.store.DeleteAttachment(messageID, attachID); err != nil {
-		if errors.Is(err, objectstore.ErrNotFound) {
+		if !dropStagedAttachment(msg.newMsg, attachID) {
 			writeErr(out, ropDeleteAttachment, hindex, ecNotFound)
 			return true
 		}
-		writeErr(out, ropDeleteAttachment, hindex, ecError)
+		out.Uint8(ropDeleteAttachment)
+		out.Uint8(hindex)
+		out.Uint32(ecSuccess)
 		return true
 	}
-	msg.touched = true
+	if !s.deleteStoredAttachment(out, msg, hindex, attachID) {
+		return true
+	}
 
 	out.Uint8(ropDeleteAttachment)
 	out.Uint8(hindex)
