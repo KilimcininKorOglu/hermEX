@@ -105,335 +105,464 @@ func (s *Server) hostname() string {
 	return "localhost"
 }
 
-func (s *Server) handle(conn net.Conn) {
-	defer func() { _ = conn.Close() }() // closes the upgraded conn after a STARTTLS swap
-	w := &ew{out: bufio.NewWriter(conn)}
-	tp := textproto.NewReader(bufio.NewReader(conn))
-	_, isTLS := conn.(*tls.Conn)
+// smtpConn is one connection's state: everything a command handler reads or
+// writes. STARTTLS replaces conn, w and tp and flips tls, so every handler takes
+// a pointer receiver and every write goes through c.w rather than a captured
+// writer.
+type smtpConn struct {
+	srv     *Server
+	conn    net.Conn
+	w       *ew
+	tp      *textproto.Reader
+	tls     bool
+	remote  string
+	sess    Session
+	canAuth bool
 
-	remote := conn.RemoteAddr().String()
-	// event logs through the server's logger, tagged with the client address. SMTP
-	// intake has no authenticated user, so the envelope sender goes in Fields, not
-	// the User column. A nil logger is a no-op.
-	event := func(level logging.Level, name string, f logging.Fields) {
-		s.Logger.Emit(logging.Event{Level: level, Subsystem: logging.SMTP, Name: name, RemoteAddr: remote, Fields: f})
-	}
-	// logInternal records an error the wire reply deliberately withholds, so a
-	// sanitized rejection is diagnosable rather than silent.
-	logInternal := func(err error) {
-		event(logging.LevelError, "session.error", logging.Fields{"reason": err.Error()})
-	}
-
-	sess, err := s.Backend.NewSession(remote)
-	if err != nil {
-		event(logging.LevelWarn, "conn.reject", logging.Fields{"reason": err.Error()})
-		reply(w, 421, s.hostname()+" service not available")
-		return
-	}
-	defer sess.Logout()
-
-	reply(w, 220, s.hostname()+" ESMTP hermEX")
-	event(logging.LevelInfo, "conn.accept", logging.Fields{"tls": isTLS})
-
-	// A session that can validate credentials enables AUTH, but only over TLS,
-	// so the EHLO advertisement is also gated on the link being secured.
-	_, canAuth := sess.(Authenticator)
-	var hasFrom bool
-	var rcptCount int
 	// greeted records that the client has sent HELO/EHLO. RFC 5321 §4.1.4: a
 	// session carrying mail transactions MUST first be initialized by EHLO, so
 	// MAIL before a greeting is a 503. Non-mail commands (VRFY/EXPN/HELP) are
 	// accepted without it. STARTTLS clears it (the client re-issues EHLO).
-	var greeted bool
-	// Trace context for the Received: header stamped at DATA time: the HELO/EHLO
-	// argument names the connecting client. It is cleared by STARTTLS, which
-	// discards all prior session state (RFC 3207).
-	var helo string
-	// BDAT/CHUNKING transaction state (RFC 3030). binaryMIME records a
-	// BODY=BINARYMIME MAIL parameter, which mandates BDAT (not DATA) for the body.
-	// bdatBuf accumulates the BDAT chunks of the current transaction (nil until the
-	// first chunk); bdatErr marks a chunk that failed (size exceeded), so further
-	// chunks are drained and dropped until RSET clears the transaction.
-	var binaryMIME bool
-	var bdatBuf *bytes.Buffer
-	var bdatErr bool
-	// smtputf8 records that the current transaction's MAIL carried the SMTPUTF8
-	// keyword (RFC 6531). It is what permits a non-ASCII address on this
-	// transaction's RCPT commands, since SMTPUTF8 is negotiated once on MAIL and
-	// has no RCPT counterpart.
-	var smtputf8 bool
-	// resetTxn clears all envelope and body state at a transaction boundary (a new
-	// MAIL, RSET, a completed DATA/BDAT, or a re-greeting), leaving the greeting
-	// (greeted/helo) untouched.
-	resetTxn := func() {
-		hasFrom, rcptCount, binaryMIME, smtputf8 = false, 0, false, false
-		bdatBuf, bdatErr = nil, false
+	greeted bool
+	// helo is trace context for the Received: header stamped at DATA time: the
+	// HELO/EHLO argument names the connecting client. It is cleared by STARTTLS,
+	// which discards all prior session state (RFC 3207).
+	helo      string
+	hasFrom   bool
+	rcptCount int
+	// binaryMIME records a BODY=BINARYMIME MAIL parameter (RFC 3030), which
+	// mandates BDAT rather than DATA for the body.
+	binaryMIME bool
+	// smtputf8 records that this transaction's MAIL carried the SMTPUTF8 keyword
+	// (RFC 6531). It is what permits a non-ASCII address on this transaction's
+	// RCPT commands, since SMTPUTF8 is negotiated once on MAIL and has no RCPT
+	// counterpart.
+	smtputf8 bool
+	// bdatBuf accumulates the BDAT chunks of the current transaction (nil until
+	// the first chunk); bdatErr marks a chunk that failed (size exceeded), so
+	// further chunks are drained and dropped until RSET clears the transaction.
+	bdatBuf *bytes.Buffer
+	bdatErr bool
+}
+
+// commandTable maps an upper-cased SMTP verb to its handler. A handler returns
+// false to abandon the connection; true continues the loop. It is the single
+// source of dispatch: adding a verb here is the whole wiring, and a verb absent
+// from it falls through to the 500 an unknown command gets.
+//
+// The HELP reply lists the supported verbs by hand rather than from this table,
+// because a handler reading the table Go initializes from that handler is an
+// initialization cycle the compiler refuses.
+var commandTable = map[string]func(*smtpConn, string) bool{
+	"HELO":     (*smtpConn).cmdHELO,
+	"EHLO":     (*smtpConn).cmdEHLO,
+	"AUTH":     (*smtpConn).cmdAUTH,
+	"STARTTLS": (*smtpConn).cmdSTARTTLS,
+	"MAIL":     (*smtpConn).cmdMAIL,
+	"RCPT":     (*smtpConn).cmdRCPT,
+	"DATA":     (*smtpConn).cmdDATA,
+	"BDAT":     (*smtpConn).cmdBDAT,
+	"RSET":     (*smtpConn).cmdRSET,
+	"NOOP":     (*smtpConn).cmdNOOP,
+	"QUIT":     (*smtpConn).cmdQUIT,
+	"VRFY":     (*smtpConn).cmdVRFY,
+	"EXPN":     (*smtpConn).cmdEXPN,
+	"HELP":     (*smtpConn).cmdHELP,
+}
+
+func (s *Server) handle(conn net.Conn) {
+	remote := conn.RemoteAddr().String()
+	sess, err := s.Backend.NewSession(remote)
+	if err != nil {
+		s.Logger.Emit(logging.Event{
+			Level: logging.LevelWarn, Subsystem: logging.SMTP, Name: "conn.reject",
+			RemoteAddr: remote, Fields: logging.Fields{"reason": err.Error()},
+		})
+		reply(&ew{out: bufio.NewWriter(conn)}, 421, s.hostname()+" service not available")
+		_ = conn.Close()
+		return
 	}
+	// A session that can validate credentials enables AUTH, but only over TLS,
+	// so the EHLO advertisement is also gated on the link being secured.
+	_, canAuth := sess.(Authenticator)
+	_, isTLS := conn.(*tls.Conn)
+	c := &smtpConn{
+		srv:     s,
+		conn:    conn,
+		w:       &ew{out: bufio.NewWriter(conn)},
+		tp:      textproto.NewReader(bufio.NewReader(conn)),
+		tls:     isTLS,
+		remote:  remote,
+		sess:    sess,
+		canAuth: canAuth,
+	}
+	defer func() { _ = c.conn.Close() }() // closes the upgraded conn after a STARTTLS swap
+	defer sess.Logout()
+
+	c.reply(220, s.hostname()+" ESMTP hermEX")
+	c.event(logging.LevelInfo, "conn.accept", logging.Fields{"tls": isTLS})
+	c.loop()
+}
+
+// loop reads and dispatches commands until the client quits, the link fails, or
+// a handler abandons the connection.
+func (c *smtpConn) loop() {
 	for {
-		line, err := readCommandLine(tp.R)
+		line, err := readCommandLine(c.tp.R)
 		if errors.Is(err, errLineTooLong) {
-			reply(w, 500, "5.5.2 line too long")
+			c.reply(500, "5.5.2 line too long")
 			continue
 		}
 		if err != nil {
 			return
 		}
-		if w.err != nil {
+		if c.w.err != nil {
 			return // a prior reply failed to reach the client; the link is gone
 		}
 		cmd, arg, _ := strings.Cut(line, " ")
-		event(logging.LevelDebug, "command", logging.Fields{"cmd": strings.ToUpper(cmd)})
-		switch strings.ToUpper(cmd) {
-		case "HELO":
-			resetTxn()
-			greeted = true
-			helo = arg
-			sess.Reset()
-			reply(w, 250, s.hostname())
-		case "EHLO":
-			resetTxn()
-			greeted = true
-			helo = arg
-			sess.Reset()
-			s.greetEHLO(w, arg, isTLS, canAuth && isTLS)
-		case "AUTH":
-			s.handleAuth(w, tp, arg, sess, isTLS, canAuth)
-		case "STARTTLS":
-			if s.TLSConfig == nil || isTLS {
-				reply(w, 502, "STARTTLS not available")
-				continue
-			}
-			if tp.R.Buffered() > 0 {
-				event(logging.LevelWarn, "starttls.injection", nil)
-				return // pipelined plaintext behind STARTTLS; abort the connection
-			}
-			reply(w, 220, "ready to start TLS")
-			tc := tls.Server(conn, s.TLSConfig)
-			if err := tc.Handshake(); err != nil {
-				return // handshake failed; deferred close fires
-			}
-			conn = tc
-			w = &ew{out: bufio.NewWriter(tc)}
-			tp = textproto.NewReader(bufio.NewReader(tc))
-			isTLS = true
-			// RFC 3207: discard all state negotiated before TLS; the client
-			// re-issues EHLO over the secured link.
-			sess.Reset()
-			resetTxn()
-			greeted = false
-			helo = ""
-			event(logging.LevelInfo, "starttls", nil)
-		case "MAIL":
-			if !greeted {
-				reply(w, 503, "5.5.1 send HELO/EHLO first")
-				continue
-			}
-			addr, ok := extractPath(arg, "FROM:")
-			if !ok {
-				reply(w, 501, "syntax: MAIL FROM:<address>")
-				continue
-			}
-			params := esmtpParams(arg)
-			// RFC 6531 §3.5: a non-ASCII address is only permitted once the client
-			// has asked for the extension on this MAIL. Accepting one without it
-			// would let an address this server cannot promise to relay enter the
-			// queue, since the SMTPUTF8 requirement is negotiated per transaction
-			// and never re-derived downstream.
-			_, wantsUTF8 := params["SMTPUTF8"]
-			if needsUTF8Keyword(addr, wantsUTF8) {
-				reply(w, 550, "5.6.7 non-ASCII address requires the SMTPUTF8 extension")
-				continue
-			}
-			// RFC 1870: when the client declares SIZE and it exceeds the
-			// advertised maximum, refuse the whole transaction now with 552
-			// rather than accepting MAIL/RCPT and streaming the body only to
-			// reject it after the bytes have crossed the wire.
-			if max := s.maxSize.Load(); max > 0 {
-				if sz, ok := declaredSize(params); ok && sz > max {
-					reply(w, 552, "5.3.4 message size exceeds limit")
-					continue
-				}
-			}
-			// RFC 6710 §4.1: a present-but-invalid MT-PRIORITY (malformed, out of
-			// the -9..9 range, or duplicated) MUST be refused. The value itself is
-			// otherwise unused: this MTA applies the default priority policy (all
-			// messages at priority 0), which also satisfies the rule that an
-			// untrusted sender MUST NOT upgrade a message's priority.
-			if present, ok := mtPriorityValid(arg); present && !ok {
-				reply(w, 501, "5.5.2 syntax error in MT-PRIORITY parameter")
-				continue
-			}
-			// RFC 3461 §5.1(a): a malformed or duplicated RET/ENVID MUST be
-			// refused with 501; a valid one never changes the reply this MAIL
-			// would otherwise get.
-			mailDSN, ok := dsnMailParams(arg)
-			if !ok {
-				reply(w, 501, "5.5.4 syntax error in DSN parameter")
-				continue
-			}
-			if err := sess.Mail(addr, mailDSN); err != nil {
-				replySessionErr(w, err, logInternal)
-				continue
-			}
-			resetTxn()
-			hasFrom = true
-			// RFC 3030: BODY=BINARYMIME commits the sender to delivering the body
-			// over BDAT; a later DATA in this transaction is then a sequence error.
-			binaryMIME = strings.EqualFold(params["BODY"], "BINARYMIME")
-			smtputf8 = wantsUTF8
-			event(logging.LevelInfo, "mail.from", logging.Fields{"from": addr})
-			reply(w, 250, "OK")
-		case "RCPT":
-			if !hasFrom {
-				reply(w, 503, "need MAIL before RCPT")
-				continue
-			}
-			addr, ok := extractPath(arg, "TO:")
-			if !ok {
-				reply(w, 501, "syntax: RCPT TO:<address>")
-				continue
-			}
-			// RFC 6531 §3.5: SMTPUTF8 is negotiated on MAIL, so a non-ASCII
-			// recipient belongs to a transaction that asked for it. 553 is the
-			// recipient-side code (550 is the sender's).
-			if needsUTF8Keyword(addr, smtputf8) {
-				reply(w, 553, "5.6.7 non-ASCII address requires the SMTPUTF8 extension")
-				continue
-			}
-			// RFC 3461 §5.1(b): a malformed or duplicated NOTIFY/ORCPT MUST be
-			// refused with 501; a valid one never changes the reply this RCPT
-			// would otherwise get.
-			rcptDSN, ok := dsnRcptParams(arg)
-			if !ok {
-				reply(w, 501, "5.5.4 syntax error in DSN parameter")
-				continue
-			}
-			if err := sess.Rcpt(addr, rcptDSN); err != nil {
-				replySessionErr(w, err, logInternal)
-				continue
-			}
-			rcptCount++
-			event(logging.LevelInfo, "rcpt.to", logging.Fields{"to": addr})
-			reply(w, 250, "OK")
-		case "DATA":
-			// RFC 3030: DATA and BDAT cannot mix in one transaction, and a
-			// BINARYMIME body must arrive via BDAT; both are 503 sequence errors.
-			if bdatBuf != nil {
-				reply(w, 503, "5.5.1 DATA not allowed after BDAT; send RSET")
-				continue
-			}
-			if binaryMIME {
-				reply(w, 503, "5.5.1 BINARYMIME requires BDAT, not DATA")
-				continue
-			}
-			if rcptCount == 0 {
-				reply(w, 503, "need RCPT before DATA")
-				continue
-			}
-			reply(w, 354, "end data with <CR><LF>.<CR><LF>")
-			rdns := lookupRDNS(remote)
-			trace := buildReceived(helo, remote, rdns, s.hostname(), isTLS, time.Now())
-			if err := s.consumeData(tp, sess, trace); err != nil {
-				event(logging.LevelWarn, "message.reject", logging.Fields{"recipients": rcptCount, "reason": err.Error()})
-				replyDataErr(w, err)
-			} else {
-				event(logging.LevelInfo, "message.accept", logging.Fields{"recipients": rcptCount})
-				reply(w, 250, "OK")
-			}
-			resetTxn()
-		case "BDAT":
-			// RFC 3030 CHUNKING: "BDAT <chunk-size> [LAST]". The chunk's octets
-			// follow the command line's CRLF directly, with no dot-stuffing and no
-			// "." terminator; the receiver reads exactly chunk-size octets.
-			size, last, ok := parseBDAT(arg)
-			if !ok {
-				// Without a valid octet count the chunk cannot be framed, so the
-				// stream position is unknown; refuse rather than guess.
-				reply(w, 501, "5.5.4 syntax: BDAT <chunk-size> [LAST]")
-				continue
-			}
-			// The chunk is always read off the wire before any reply (RFC 3030: a
-			// failure "MUST accept and discard the associated message data before
-			// sending the appropriate 5XX or 4XX code"), or the next command read
-			// would parse message bytes. It is buffered only when the transaction
-			// can accept it, and accumulation is capped at the size limit so an
-			// oversized declared chunk cannot exhaust memory (OWASP A05).
-			max := s.maxSize.Load()
-			viable := greeted && rcptCount > 0 && !bdatErr
-			if viable {
-				if bdatBuf == nil {
-					bdatBuf = new(bytes.Buffer)
-				}
-				toBuf := size
-				if max > 0 {
-					if room := max + 1 - int64(bdatBuf.Len()); room < toBuf {
-						if room < 0 {
-							room = 0
-						}
-						toBuf = room
-					}
-				}
-				if _, err := io.CopyN(bdatBuf, tp.R, toBuf); err != nil {
-					return // truncated chunk; the stream is no longer framed
-				}
-				if _, err := io.CopyN(io.Discard, tp.R, size-toBuf); err != nil {
-					return
-				}
-			} else if _, err := io.CopyN(io.Discard, tp.R, size); err != nil {
-				return
-			}
-			switch {
-			case !greeted:
-				reply(w, 503, "5.5.1 send HELO/EHLO first")
-			case rcptCount == 0:
-				reply(w, 503, "5.5.1 need MAIL and RCPT before BDAT")
-			case bdatErr:
-				reply(w, 503, "5.5.0 BDAT transaction failed; send RSET")
-			case max > 0 && int64(bdatBuf.Len()) > max:
-				bdatErr = true // poison the transaction; later chunks drain until RSET
-				reply(w, 552, "5.3.4 message size exceeds limit")
-			case !last:
-				reply(w, 250, fmt.Sprintf("2.0.0 %d octets received", size))
-			default:
-				rdns := lookupRDNS(remote)
-				trace := buildReceived(helo, remote, rdns, s.hostname(), isTLS, time.Now())
-				body := io.MultiReader(strings.NewReader(trace), bytes.NewReader(bdatBuf.Bytes()))
-				if err := sess.Data(body); err != nil {
-					event(logging.LevelWarn, "message.reject", logging.Fields{"recipients": rcptCount, "reason": err.Error()})
-					replyDataErr(w, err)
-				} else {
-					event(logging.LevelInfo, "message.accept", logging.Fields{"recipients": rcptCount})
-					reply(w, 250, "OK")
-				}
-				resetTxn()
-			}
-		case "RSET":
-			sess.Reset()
-			resetTxn()
-			reply(w, 250, "OK")
-		case "NOOP":
-			reply(w, 250, "OK")
-		case "QUIT":
-			reply(w, 221, s.hostname()+" closing connection")
+		verb := strings.ToUpper(cmd)
+		c.event(logging.LevelDebug, "command", logging.Fields{"cmd": verb})
+		run, known := commandTable[verb]
+		if !known {
+			c.reply(500, "command not recognized")
+			continue
+		}
+		if !run(c, arg) {
 			return
-		case "VRFY":
-			// RFC 5321 §3.5.1/§7.3: never confirm or deny a specific address
-			// (that is user enumeration). Return the privacy-preserving 252,
-			// which promises only to accept and attempt delivery; a 250 or 550
-			// would leak whether the mailbox exists.
-			reply(w, 252, "2.1.5 Cannot VRFY user, but will accept message and attempt delivery")
-		case "EXPN":
-			// RFC 5321 §3.5.2/§7.3: mailing-list expansion is disabled (an
-			// address-harvesting vector); 502 marks it recognized but not
-			// implemented (§4.2.4), not the 500 of an unknown command.
-			reply(w, 502, "5.5.1 EXPN not available")
-		case "HELP":
-			// RFC 5321 §4.1.1.8: a 214 help reply, recognized rather than 500.
-			reply(w, 214, "2.0.0 hermEX ESMTP; supported: HELO EHLO MAIL RCPT DATA BDAT RSET NOOP QUIT (RFC 5321)")
-		default:
-			reply(w, 500, "command not recognized")
 		}
 	}
+}
+
+// reply writes one SMTP reply through the connection's current writer, which
+// STARTTLS replaces.
+func (c *smtpConn) reply(code int, msg string) { reply(c.w, code, msg) }
+
+// event logs through the server's logger, tagged with the client address. SMTP
+// intake has no authenticated user, so the envelope sender goes in Fields, not
+// the User column. A nil logger is a no-op.
+func (c *smtpConn) event(level logging.Level, name string, f logging.Fields) {
+	c.srv.Logger.Emit(logging.Event{
+		Level: level, Subsystem: logging.SMTP, Name: name, RemoteAddr: c.remote, Fields: f,
+	})
+}
+
+// logInternal records an error the wire reply deliberately withholds, so a
+// sanitized rejection is diagnosable rather than silent.
+func (c *smtpConn) logInternal(err error) {
+	c.event(logging.LevelError, "session.error", logging.Fields{"reason": err.Error()})
+}
+
+// resetTxn clears all envelope and body state at a transaction boundary (a new
+// MAIL, RSET, a completed DATA/BDAT, or a re-greeting), leaving the greeting
+// (greeted/helo) untouched.
+func (c *smtpConn) resetTxn() {
+	c.hasFrom, c.rcptCount, c.binaryMIME, c.smtputf8 = false, 0, false, false
+	c.bdatBuf, c.bdatErr = nil, false
+}
+
+func (c *smtpConn) cmdHELO(arg string) bool {
+	c.resetTxn()
+	c.greeted, c.helo = true, arg
+	c.sess.Reset()
+	c.reply(250, c.srv.hostname())
+	return true
+}
+
+func (c *smtpConn) cmdEHLO(arg string) bool {
+	c.resetTxn()
+	c.greeted, c.helo = true, arg
+	c.sess.Reset()
+	c.srv.greetEHLO(c.w, arg, c.tls, c.canAuth && c.tls)
+	return true
+}
+
+func (c *smtpConn) cmdAUTH(arg string) bool {
+	c.srv.handleAuth(c.w, c.tp, arg, c.sess, c.tls, c.canAuth)
+	return true
+}
+
+func (c *smtpConn) cmdSTARTTLS(string) bool {
+	if c.srv.TLSConfig == nil || c.tls {
+		c.reply(502, "STARTTLS not available")
+		return true
+	}
+	if c.tp.R.Buffered() > 0 {
+		c.event(logging.LevelWarn, "starttls.injection", nil)
+		return false // pipelined plaintext behind STARTTLS; abort the connection
+	}
+	c.reply(220, "ready to start TLS")
+	tc := tls.Server(c.conn, c.srv.TLSConfig)
+	if err := tc.Handshake(); err != nil {
+		return false // handshake failed; the deferred close fires
+	}
+	c.conn = tc
+	c.w = &ew{out: bufio.NewWriter(tc)}
+	c.tp = textproto.NewReader(bufio.NewReader(tc))
+	c.tls = true
+	// RFC 3207: discard all state negotiated before TLS; the client re-issues
+	// EHLO over the secured link.
+	c.sess.Reset()
+	c.resetTxn()
+	c.greeted, c.helo = false, ""
+	c.event(logging.LevelInfo, "starttls", nil)
+	return true
+}
+
+func (c *smtpConn) cmdMAIL(arg string) bool {
+	if !c.greeted {
+		c.reply(503, "5.5.1 send HELO/EHLO first")
+		return true
+	}
+	addr, ok := extractPath(arg, "FROM:")
+	if !ok {
+		c.reply(501, "syntax: MAIL FROM:<address>")
+		return true
+	}
+	params := esmtpParams(arg)
+	// RFC 6531 §3.5: a non-ASCII address is only permitted once the client has
+	// asked for the extension on this MAIL. Accepting one without it would let an
+	// address this server cannot promise to relay enter the queue, since the
+	// SMTPUTF8 requirement is negotiated per transaction and never re-derived
+	// downstream.
+	_, wantsUTF8 := params["SMTPUTF8"]
+	if needsUTF8Keyword(addr, wantsUTF8) {
+		c.reply(550, "5.6.7 non-ASCII address requires the SMTPUTF8 extension")
+		return true
+	}
+	mailDSN, code, msg, ok := c.checkMailParams(arg, params)
+	if !ok {
+		c.reply(code, msg)
+		return true
+	}
+	if err := c.sess.Mail(addr, mailDSN); err != nil {
+		replySessionErr(c.w, err, c.logInternal)
+		return true
+	}
+	c.resetTxn()
+	c.hasFrom = true
+	// RFC 3030: BODY=BINARYMIME commits the sender to delivering the body over
+	// BDAT; a later DATA in this transaction is then a sequence error.
+	c.binaryMIME = strings.EqualFold(params["BODY"], "BINARYMIME")
+	c.smtputf8 = wantsUTF8
+	c.event(logging.LevelInfo, "mail.from", logging.Fields{"from": addr})
+	c.reply(250, "OK")
+	return true
+}
+
+// checkMailParams validates the ESMTP parameters that can refuse a MAIL before
+// the backend is consulted. It returns the DSN parameters to hand the session,
+// or ok=false with the reply the refusal earns.
+func (c *smtpConn) checkMailParams(arg string, params map[string]string) (MailParams, int, string, bool) {
+	// RFC 1870: when the client declares SIZE and it exceeds the advertised
+	// maximum, refuse the whole transaction now with 552 rather than accepting
+	// MAIL/RCPT and streaming the body only to reject it after the bytes have
+	// crossed the wire.
+	if limit := c.srv.maxSize.Load(); limit > 0 {
+		if sz, ok := declaredSize(params); ok && sz > limit {
+			return MailParams{}, 552, "5.3.4 message size exceeds limit", false
+		}
+	}
+	// RFC 6710 §4.1: a present-but-invalid MT-PRIORITY (malformed, out of the
+	// -9..9 range, or duplicated) MUST be refused. The value itself is otherwise
+	// unused: this MTA applies the default priority policy (all messages at
+	// priority 0), which also satisfies the rule that an untrusted sender MUST NOT
+	// upgrade a message's priority.
+	if present, ok := mtPriorityValid(arg); present && !ok {
+		return MailParams{}, 501, "5.5.2 syntax error in MT-PRIORITY parameter", false
+	}
+	// RFC 3461 §5.1(a): a malformed or duplicated RET/ENVID MUST be refused with
+	// 501; a valid one never changes the reply this MAIL would otherwise get.
+	mailDSN, ok := dsnMailParams(arg)
+	if !ok {
+		return MailParams{}, 501, "5.5.4 syntax error in DSN parameter", false
+	}
+	return mailDSN, 0, "", true
+}
+
+func (c *smtpConn) cmdRCPT(arg string) bool {
+	if !c.hasFrom {
+		c.reply(503, "need MAIL before RCPT")
+		return true
+	}
+	addr, ok := extractPath(arg, "TO:")
+	if !ok {
+		c.reply(501, "syntax: RCPT TO:<address>")
+		return true
+	}
+	// RFC 6531 §3.5: SMTPUTF8 is negotiated on MAIL, so a non-ASCII recipient
+	// belongs to a transaction that asked for it. 553 is the recipient-side code
+	// (550 is the sender's).
+	if needsUTF8Keyword(addr, c.smtputf8) {
+		c.reply(553, "5.6.7 non-ASCII address requires the SMTPUTF8 extension")
+		return true
+	}
+	// RFC 3461 §5.1(b): a malformed or duplicated NOTIFY/ORCPT MUST be refused
+	// with 501; a valid one never changes the reply this RCPT would otherwise get.
+	rcptDSN, ok := dsnRcptParams(arg)
+	if !ok {
+		c.reply(501, "5.5.4 syntax error in DSN parameter")
+		return true
+	}
+	if err := c.sess.Rcpt(addr, rcptDSN); err != nil {
+		replySessionErr(c.w, err, c.logInternal)
+		return true
+	}
+	c.rcptCount++
+	c.event(logging.LevelInfo, "rcpt.to", logging.Fields{"to": addr})
+	c.reply(250, "OK")
+	return true
+}
+
+func (c *smtpConn) cmdDATA(string) bool {
+	// RFC 3030: DATA and BDAT cannot mix in one transaction, and a BINARYMIME
+	// body must arrive via BDAT; both are 503 sequence errors.
+	switch {
+	case c.bdatBuf != nil:
+		c.reply(503, "5.5.1 DATA not allowed after BDAT; send RSET")
+		return true
+	case c.binaryMIME:
+		c.reply(503, "5.5.1 BINARYMIME requires BDAT, not DATA")
+		return true
+	case c.rcptCount == 0:
+		c.reply(503, "need RCPT before DATA")
+		return true
+	}
+	c.reply(354, "end data with <CR><LF>.<CR><LF>")
+	c.reportBody(c.srv.consumeData(c.tp, c.sess, c.trace()))
+	c.resetTxn()
+	return true
+}
+
+// trace builds the Received: header stamped on the body this transaction is
+// about to accept.
+func (c *smtpConn) trace() string {
+	return buildReceived(c.helo, c.remote, lookupRDNS(c.remote), c.srv.hostname(), c.tls, time.Now())
+}
+
+// reportBody logs and answers the outcome of a body the session consumed, the
+// one place DATA and BDAT agree on.
+func (c *smtpConn) reportBody(err error) {
+	if err != nil {
+		c.event(logging.LevelWarn, "message.reject", logging.Fields{"recipients": c.rcptCount, "reason": err.Error()})
+		replyDataErr(c.w, err)
+		return
+	}
+	c.event(logging.LevelInfo, "message.accept", logging.Fields{"recipients": c.rcptCount})
+	c.reply(250, "OK")
+}
+
+// cmdBDAT implements RFC 3030 CHUNKING: "BDAT <chunk-size> [LAST]". The chunk's
+// octets follow the command line's CRLF directly, with no dot-stuffing and no
+// "." terminator; the receiver reads exactly chunk-size octets.
+func (c *smtpConn) cmdBDAT(arg string) bool {
+	size, last, ok := parseBDAT(arg)
+	if !ok {
+		// Without a valid octet count the chunk cannot be framed, so the stream
+		// position is unknown; refuse rather than guess.
+		c.reply(501, "5.5.4 syntax: BDAT <chunk-size> [LAST]")
+		return true
+	}
+	limit := c.srv.maxSize.Load()
+	if !c.readChunk(size, limit) {
+		return false
+	}
+	c.replyBDAT(size, last, limit)
+	return true
+}
+
+// readChunk takes the chunk off the wire before any reply is sent (RFC 3030: a
+// failure "MUST accept and discard the associated message data before sending
+// the appropriate 5XX or 4XX code"), or the next command read would parse
+// message bytes. It reports false when the chunk was truncated, which leaves the
+// stream unframed and the connection unusable.
+func (c *smtpConn) readChunk(size, limit int64) bool {
+	if !c.chunkViable() {
+		_, err := io.CopyN(io.Discard, c.tp.R, size)
+		return err == nil
+	}
+	return c.bufferChunk(size, limit)
+}
+
+// chunkViable reports whether the transaction can accept this chunk at all.
+func (c *smtpConn) chunkViable() bool {
+	return c.greeted && c.rcptCount > 0 && !c.bdatErr
+}
+
+// bufferChunk accumulates the chunk, capped at the size limit so an oversized
+// declared chunk cannot exhaust memory (OWASP A05); the remainder is drained.
+func (c *smtpConn) bufferChunk(size, limit int64) bool {
+	if c.bdatBuf == nil {
+		c.bdatBuf = new(bytes.Buffer)
+	}
+	toBuf := size
+	if limit > 0 {
+		toBuf = min(toBuf, max(limit+1-int64(c.bdatBuf.Len()), 0))
+	}
+	if _, err := io.CopyN(c.bdatBuf, c.tp.R, toBuf); err != nil {
+		return false // truncated chunk; the stream is no longer framed
+	}
+	_, err := io.CopyN(io.Discard, c.tp.R, size-toBuf)
+	return err == nil
+}
+
+// replyBDAT answers a chunk that has already been read off the wire.
+func (c *smtpConn) replyBDAT(size int64, last bool, limit int64) {
+	switch {
+	case !c.greeted:
+		c.reply(503, "5.5.1 send HELO/EHLO first")
+	case c.rcptCount == 0:
+		c.reply(503, "5.5.1 need MAIL and RCPT before BDAT")
+	case c.bdatErr:
+		c.reply(503, "5.5.0 BDAT transaction failed; send RSET")
+	case limit > 0 && int64(c.bdatBuf.Len()) > limit:
+		c.bdatErr = true // poison the transaction; later chunks drain until RSET
+		c.reply(552, "5.3.4 message size exceeds limit")
+	case !last:
+		c.reply(250, fmt.Sprintf("2.0.0 %d octets received", size))
+	default:
+		body := io.MultiReader(strings.NewReader(c.trace()), bytes.NewReader(c.bdatBuf.Bytes()))
+		c.reportBody(c.sess.Data(body))
+		c.resetTxn()
+	}
+}
+
+func (c *smtpConn) cmdRSET(string) bool {
+	c.sess.Reset()
+	c.resetTxn()
+	c.reply(250, "OK")
+	return true
+}
+
+func (c *smtpConn) cmdNOOP(string) bool {
+	c.reply(250, "OK")
+	return true
+}
+
+func (c *smtpConn) cmdQUIT(string) bool {
+	c.reply(221, c.srv.hostname()+" closing connection")
+	return false
+}
+
+// cmdVRFY answers RFC 5321 §3.5.1/§7.3: never confirm or deny a specific address
+// (that is user enumeration). The privacy-preserving 252 promises only to accept
+// and attempt delivery; a 250 or 550 would leak whether the mailbox exists.
+func (c *smtpConn) cmdVRFY(string) bool {
+	c.reply(252, "2.1.5 Cannot VRFY user, but will accept message and attempt delivery")
+	return true
+}
+
+// cmdEXPN answers RFC 5321 §3.5.2/§7.3: mailing-list expansion is disabled (an
+// address-harvesting vector); 502 marks it recognized but not implemented
+// (§4.2.4), not the 500 of an unknown command.
+func (c *smtpConn) cmdEXPN(string) bool {
+	c.reply(502, "5.5.1 EXPN not available")
+	return true
+}
+
+// cmdHELP answers RFC 5321 §4.1.1.8 with a 214, recognized rather than 500.
+func (c *smtpConn) cmdHELP(string) bool {
+	c.reply(214, "2.0.0 hermEX ESMTP; supported: HELO EHLO MAIL RCPT DATA BDAT RSET NOOP QUIT (RFC 5321)")
+	return true
 }
 
 var errTooLarge = errors.New("message too large")
