@@ -45,33 +45,12 @@ var errRecipientFraming = errors.New("rop: malformed recipient row framing")
 // ModifyRecipients and persisted by SaveChangesMessage. The response carries no
 // message id (HasMessageId 0), the id is allocated when the message is saved.
 func (s *Session) ropCreateMessage(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	ohindex, e1 := p.Uint8()    // OutputHandleIndex
-	_, e2 := p.Uint16()         // CodePageId
-	folderEID, e3 := p.Uint64() // FolderId
-	associated, e4 := p.Uint8() // AssociatedFlag
-	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
+	ohindex, folderEID, associated, ok := pullCreateMessageRequest(p)
+	if !ok {
 		return false
 	}
-	parent := s.get(handleAt(handles, hindex))
-	if parent == nil || parent.store == nil {
-		writeErr(out, ropCreateMessage, ohindex, ecError)
-		return true
-	}
-	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-	fid := int64(mapi.EID(folderEID).GCValue())
-	exists, err := parent.store.FolderExists(fid)
-	if err != nil {
-		writeErr(out, ropCreateMessage, ohindex, ecError)
-		return true
-	}
-	if !exists {
-		writeErr(out, ropCreateMessage, ohindex, ecNotFound)
-		return true
-	}
-	// Creating a message in the folder requires the Create right; this is the
-	// compose handle's gate, so the SetProperties/ModifyRecipients/SaveChanges that
-	// fill it inherit it.
-	if s.denyWrite(out, ropCreateMessage, ohindex, parent.store, fid, mapi.FrightsCreate) {
+	parent, fid, ok := s.createMessageTarget(out, handles, hindex, ohindex, folderEID)
+	if !ok {
 		return true
 	}
 	props := mapi.PropertyValues{}
@@ -93,6 +72,43 @@ func (s *Session) ropCreateMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 	out.Uint32(ecSuccess)
 	out.Uint8(0) // HasMessageId: id is assigned at SaveChangesMessage
 	return true
+}
+
+// pullCreateMessageRequest reads the RopCreateMessage request fields. The code
+// page is discarded: this session speaks Unicode throughout.
+func pullCreateMessageRequest(p *ext.Pull) (ohindex uint8, folderEID uint64, associated uint8, ok bool) {
+	ohindex, e1 := p.Uint8()    // OutputHandleIndex
+	_, e2 := p.Uint16()         // CodePageId
+	folderEID, e3 := p.Uint64() // FolderId
+	associated, e4 := p.Uint8() // AssociatedFlag
+	return ohindex, folderEID, associated, e1 == nil && e2 == nil && e3 == nil && e4 == nil
+}
+
+// createMessageTarget resolves the parent folder a new message is composed in
+// and gates it on the Create right, which is this compose handle's only check:
+// the SetProperties/ModifyRecipients/SaveChanges that fill the message inherit
+// it. ok=false means the response was already written.
+func (s *Session) createMessageTarget(out *ext.Push, handles []uint32, hindex, ohindex uint8, folderEID uint64) (*object, int64, bool) {
+	parent := s.get(handleAt(handles, hindex))
+	if parent == nil || parent.store == nil {
+		writeErr(out, ropCreateMessage, ohindex, ecError)
+		return nil, 0, false
+	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	fid := int64(mapi.EID(folderEID).GCValue())
+	exists, err := parent.store.FolderExists(fid)
+	if err != nil {
+		writeErr(out, ropCreateMessage, ohindex, ecError)
+		return nil, 0, false
+	}
+	if !exists {
+		writeErr(out, ropCreateMessage, ohindex, ecNotFound)
+		return nil, 0, false
+	}
+	if s.denyWrite(out, ropCreateMessage, ohindex, parent.store, fid, mapi.FrightsCreate) {
+		return nil, 0, false
+	}
+	return parent, fid, true
 }
 
 // ropSetProperties handles RopSetProperties ([MS-OXCPRPT] 2.2.2.5): it merges
@@ -121,39 +137,7 @@ func (s *Session) ropSetProperties(p *ext.Pull, out *ext.Push, handles []uint32,
 		writeErr(out, ropSetProperties, hindex, ecError)
 		return true
 	}
-	switch obj.kind {
-	case kindNewMessage:
-		for _, tv := range propvals {
-			obj.newMsg.props.Set(tv.Tag, tv.Value)
-		}
-	case kindMessage:
-		// Editing an existing message requires EditAny on its folder (the read-mode
-		// open only proved ReadAny). Compose (kindNewMessage) and attachment writes
-		// are gated at their own create chokepoints.
-		if s.denyWrite(out, ropSetProperties, hindex, obj.store, obj.folderID, mapi.FrightsEditAny) {
-			return true
-		}
-		for _, tv := range propvals {
-			obj.pendingProps.Set(tv.Tag, tv.Value)
-			// A set supersedes a buffered delete for the same tag: drop the tag from
-			// pendingDeletes so SaveChangesMessage does not delete the row it just
-			// inserted (delete-then-set within one edit session). This is the mirror
-			// of deleteProperties dropping a buffered set.
-			obj.pendingDeletes = dropDeleteTag(obj.pendingDeletes, tv.Tag)
-		}
-	case kindAttachWrite:
-		for _, tv := range propvals {
-			obj.attachW.pending.Set(tv.Tag, tv.Value)
-			obj.attachW.pendingDeletes = dropDeleteTag(obj.attachW.pendingDeletes, tv.Tag)
-		}
-	case kindEmbedded:
-		// A composed embedded message buffers its edits in memory; they are exported
-		// into the parent attachment when SaveChangesMessage runs.
-		for _, tv := range propvals {
-			obj.embedded.msg.Props.Set(tv.Tag, tv.Value)
-		}
-	default:
-		writeErr(out, ropSetProperties, hindex, ecError)
+	if !s.applySetProperties(out, obj, hindex, propvals) {
 		return true
 	}
 
@@ -162,6 +146,53 @@ func (s *Session) ropSetProperties(p *ext.Pull, out *ext.Push, handles []uint32,
 	out.Uint32(ecSuccess)
 	out.Uint16(0) // PropertyProblemCount
 	return true
+}
+
+// applySetProperties merges the values into whichever bag the open object keeps
+// its edits in. It reports false when the response was already written: an
+// object kind that holds no writable bag, or an edit the folder rights refuse.
+func (s *Session) applySetProperties(out *ext.Push, obj *object, hindex uint8, propvals []mapi.TaggedPropVal) bool {
+	switch obj.kind {
+	case kindNewMessage:
+		setAll(&obj.newMsg.props, propvals)
+	case kindMessage:
+		// Editing an existing message requires EditAny on its folder (the read-mode
+		// open only proved ReadAny). Compose (kindNewMessage) and attachment writes
+		// are gated at their own create chokepoints.
+		if s.denyWrite(out, ropSetProperties, hindex, obj.store, obj.folderID, mapi.FrightsEditAny) {
+			return false
+		}
+		obj.pendingDeletes = setAllOverridingDeletes(&obj.pendingProps, obj.pendingDeletes, propvals)
+	case kindAttachWrite:
+		obj.attachW.pendingDeletes = setAllOverridingDeletes(&obj.attachW.pending, obj.attachW.pendingDeletes, propvals)
+	case kindEmbedded:
+		// A composed embedded message buffers its edits in memory; they are exported
+		// into the parent attachment when SaveChangesMessage runs.
+		setAll(&obj.embedded.msg.Props, propvals)
+	default:
+		writeErr(out, ropSetProperties, hindex, ecError)
+		return false
+	}
+	return true
+}
+
+// setAll merges every tagged value into bag.
+func setAll(bag *mapi.PropertyValues, propvals []mapi.TaggedPropVal) {
+	for _, tv := range propvals {
+		bag.Set(tv.Tag, tv.Value)
+	}
+}
+
+// setAllOverridingDeletes merges the values and drops each tag from the buffered
+// deletes, because a set supersedes a delete of the same tag within one edit
+// session: SaveChangesMessage must not delete the row it just inserted. It is
+// the mirror of deleteProperties dropping a buffered set.
+func setAllOverridingDeletes(bag *mapi.PropertyValues, deletes []mapi.PropTag, propvals []mapi.TaggedPropVal) []mapi.PropTag {
+	for _, tv := range propvals {
+		bag.Set(tv.Tag, tv.Value)
+		deletes = dropDeleteTag(deletes, tv.Tag)
+	}
+	return deletes
 }
 
 // ropModifyRecipients handles RopModifyRecipients ([MS-OXCMSG] 2.2.3.5): it
@@ -206,9 +237,8 @@ func (s *Session) ropModifyRecipients(p *ext.Pull, out *ext.Push, handles []uint
 // the response echoes. A second save updates the stored properties in place
 // rather than inserting a duplicate.
 func (s *Session) ropSaveChangesMessage(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	ihindex2, e1 := p.Uint8() // InputHandleIndex (indexes the message object)
-	_, e2 := p.Uint8()        // SaveFlags
-	if e1 != nil || e2 != nil {
+	ihindex2, ok := pullSaveChangesRequest(p)
+	if !ok {
 		return false
 	}
 	obj := s.get(handleAt(handles, ihindex2))
@@ -216,131 +246,150 @@ func (s *Session) ropSaveChangesMessage(p *ext.Pull, out *ext.Push, handles []ui
 		writeErr(out, ropSaveChangesMessage, hindex, ecError)
 		return true
 	}
-	// An ICS-imported message commits its FastTransfer-uploaded body here, the same
-	// point a composed message is saved ([MS-OXCFXICS] 3.3.5.6).
-	if obj.kind == kindUploadMessage {
-		if obj.uploadMsg == nil {
-			writeErr(out, ropSaveChangesMessage, hindex, ecError)
-			return true
-		}
-		mid, err := obj.uploadMsg.Commit()
-		if err != nil {
-			writeErr(out, ropSaveChangesMessage, hindex, ecError)
-			return true
-		}
-		// A FastTransfer upload is client-supplied content that never passes
-		// through delivery. Its attachments only exist as stored objects once the
-		// commit has assembled them, so the scan runs here and a hit removes the
-		// message again: it never becomes readable to a client, and the quarantine
-		// keeps the evidence.
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		if s.scanUploadedMessage(obj.store, int64(mid)) {
-			writeErr(out, ropSaveChangesMessage, hindex, ecAccessDenied)
-			return true
-		}
-		out.Uint8(ropSaveChangesMessage)
-		out.Uint8(hindex)
-		out.Uint32(ecSuccess)
-		out.Uint8(ihindex2)
-		out.Uint64(uint64(mapi.MakeEIDEx(1, mid)))
-		return true
-	}
-	// An existing message opened for edit flushes its buffered property changes
-	// in place, reallocating the change number so ICS observes the edit. A pending
-	// property change or a touched flag (set when an attachment was added or
-	// deleted) bumps the change number; with neither, the save is a no-op success
-	// (no spurious bump), matching the reference's untouched-message early-out. An
-	// attachment-only change carries no pending properties, so ModifyMessageProperties
-	// runs with an empty bag and advances only the change number.
-	if obj.kind == kindMessage {
-		// Persisting an edit to an existing message requires EditAny on its folder.
-		if s.denyWrite(out, ropSaveChangesMessage, hindex, obj.store, obj.folderID, mapi.FrightsEditAny) {
-			return true
-		}
-		if len(obj.pendingProps) > 0 || len(obj.pendingDeletes) > 0 || obj.touched {
-			if err := obj.store.ModifyMessageProperties(obj.messageID, obj.pendingProps, obj.pendingDeletes...); err != nil {
-				writeErr(out, ropSaveChangesMessage, hindex, ecError)
-				return true
-			}
-			obj.pendingProps = nil
-			obj.pendingDeletes = nil
-			obj.touched = false
-		}
-		out.Uint8(ropSaveChangesMessage)
-		out.Uint8(hindex)
-		out.Uint32(ecSuccess)
-		out.Uint8(ihindex2)
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		out.Uint64(uint64(mapi.MakeEIDEx(1, uint64(obj.messageID))))
-		return true
-	}
-	// A composed embedded message is persisted by exporting it back into its parent
-	// attachment: the export bytes, method, and MIME tag are staged into the
-	// attachment's pending bag, which the client's SaveChangesAttachment then writes
-	// through the ordinary attachment path. A read-only embedded message (opened over
-	// an existing attachment) has no write-back target and cannot be saved.
-	if obj.kind == kindEmbedded {
-		emb := obj.embedded
-		if emb == nil || emb.writeback == nil {
-			writeErr(out, ropSaveChangesMessage, hindex, ecNotSupported)
-			return true
-		}
-		raw, err := oxcmail.Export(emb.msg, oxcmail.Options{})
-		if err != nil {
-			writeErr(out, ropSaveChangesMessage, hindex, ecError)
-			return true
-		}
-		emb.writeback.pending.Set(mapi.PrAttachMethod, int32(mapi.AttachEmbeddedMsg))
-		emb.writeback.pending.Set(mapi.PrAttachMimeTag, "message/rfc822")
-		emb.writeback.pending.Set(mapi.PrAttachDataBin, raw)
-
-		out.Uint8(ropSaveChangesMessage)
-		out.Uint8(hindex)
-		out.Uint32(ecSuccess)
-		out.Uint8(ihindex2)
-		out.Uint64(uint64(mapi.MakeEIDEx(1, uint64(handleAt(handles, ihindex2)))))
-		return true
-	}
-	if obj.kind != kindNewMessage {
+	switch obj.kind {
+	case kindUploadMessage:
+		s.saveUploadedMessage(out, obj, hindex, ihindex2)
+	case kindMessage:
+		s.saveOpenedMessage(out, obj, hindex, ihindex2)
+	case kindEmbedded:
+		saveEmbeddedMessage(out, obj, hindex, ihindex2, handleAt(handles, ihindex2))
+	case kindNewMessage:
+		saveComposedMessage(out, obj, hindex, ihindex2)
+	default:
 		writeErr(out, ropSaveChangesMessage, hindex, ecError)
-		return true
 	}
-	nm := obj.newMsg
-	var id int64
-	var err error
-	if nm.saved {
-		// A composed message re-saved after its first persist is an in-place edit:
-		// reallocate the change number through the same path an opened message
-		// uses, rather than a pure upsert (which would leave the message looking
-		// unchanged to ICS).
-		err = obj.store.ModifyMessageProperties(nm.savedID, nm.props)
-		id = nm.savedID
-	} else {
-		// The attachments staged during compose are written together with the message.
-		atts := make([]oxcmail.Attachment, len(nm.attachments))
-		for i, a := range nm.attachments {
-			atts[i] = oxcmail.Attachment{Props: a.props}
-		}
-		id, err = obj.store.CreateMessage(nm.folderID, &oxcmail.Message{
-			Props:       nm.props,
-			Recipients:  nm.recipients,
-			Attachments: atts,
-		})
-	}
-	if err != nil {
-		writeErr(out, ropSaveChangesMessage, hindex, ecError)
-		return true
-	}
-	nm.saved = true
-	nm.savedID = id
+	return true
+}
 
+// pullSaveChangesRequest reads the RopSaveChangesMessage request fields. The
+// save flags are discarded: this implementation always saves.
+func pullSaveChangesRequest(p *ext.Pull) (ihindex uint8, ok bool) {
+	ihindex, e1 := p.Uint8() // InputHandleIndex (indexes the message object)
+	_, e2 := p.Uint8()       // SaveFlags
+	return ihindex, e1 == nil && e2 == nil
+}
+
+// writeSaveChangesOK appends the success response, whose MessageId is an EID
+// built from the caller's global counter value.
+func writeSaveChangesOK(out *ext.Push, hindex, ihindex uint8, gcValue uint64) {
 	out.Uint8(ropSaveChangesMessage)
 	out.Uint8(hindex) // ResponseHandleIndex (echoed in the header)
 	out.Uint32(ecSuccess)
-	out.Uint8(ihindex2) // InputHandleIndex (echoed in the body)
+	out.Uint8(ihindex) // InputHandleIndex (echoed in the body)
+	out.Uint64(uint64(mapi.MakeEIDEx(1, gcValue)))
+}
+
+// saveUploadedMessage commits an ICS-imported message's FastTransfer-uploaded
+// body, the same point a composed message is saved ([MS-OXCFXICS] 3.3.5.6).
+func (s *Session) saveUploadedMessage(out *ext.Push, obj *object, hindex, ihindex uint8) {
+	if obj.uploadMsg == nil {
+		writeErr(out, ropSaveChangesMessage, hindex, ecError)
+		return
+	}
+	mid, err := obj.uploadMsg.Commit()
+	if err != nil {
+		writeErr(out, ropSaveChangesMessage, hindex, ecError)
+		return
+	}
+	// A FastTransfer upload is client-supplied content that never passes through
+	// delivery. Its attachments only exist as stored objects once the commit has
+	// assembled them, so the scan runs here and a hit removes the message again:
+	// it never becomes readable to a client, and the quarantine keeps the evidence.
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-	out.Uint64(uint64(mapi.MakeEIDEx(1, uint64(id))))
-	return true
+	if s.scanUploadedMessage(obj.store, int64(mid)) {
+		writeErr(out, ropSaveChangesMessage, hindex, ecAccessDenied)
+		return
+	}
+	writeSaveChangesOK(out, hindex, ihindex, mid)
+}
+
+// saveOpenedMessage flushes an existing message's buffered property changes in
+// place, reallocating the change number so ICS observes the edit. A pending
+// property change or a touched flag (set when an attachment was added or
+// deleted) bumps the change number; with neither, the save is a no-op success
+// (no spurious bump), matching the untouched-message early-out. An
+// attachment-only change carries no pending properties, so
+// ModifyMessageProperties runs with an empty bag and advances only the change
+// number.
+func (s *Session) saveOpenedMessage(out *ext.Push, obj *object, hindex, ihindex uint8) {
+	// Persisting an edit to an existing message requires EditAny on its folder.
+	if s.denyWrite(out, ropSaveChangesMessage, hindex, obj.store, obj.folderID, mapi.FrightsEditAny) {
+		return
+	}
+	if obj.hasBufferedChanges() {
+		if err := obj.store.ModifyMessageProperties(obj.messageID, obj.pendingProps, obj.pendingDeletes...); err != nil {
+			writeErr(out, ropSaveChangesMessage, hindex, ecError)
+			return
+		}
+		obj.pendingProps = nil
+		obj.pendingDeletes = nil
+		obj.touched = false
+	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	writeSaveChangesOK(out, hindex, ihindex, uint64(obj.messageID))
+}
+
+// hasBufferedChanges reports whether an opened message has anything to flush.
+func (o *object) hasBufferedChanges() bool {
+	return len(o.pendingProps) > 0 || len(o.pendingDeletes) > 0 || o.touched
+}
+
+// saveEmbeddedMessage persists a composed embedded message by exporting it back
+// into its parent attachment: the export bytes, method, and MIME tag are staged
+// into the attachment's pending bag, which the client's SaveChangesAttachment
+// then writes through the ordinary attachment path. A read-only embedded message
+// (opened over an existing attachment) has no write-back target and cannot be
+// saved.
+func saveEmbeddedMessage(out *ext.Push, obj *object, hindex, ihindex uint8, handle uint32) {
+	emb := obj.embedded
+	if emb == nil || emb.writeback == nil {
+		writeErr(out, ropSaveChangesMessage, hindex, ecNotSupported)
+		return
+	}
+	raw, err := oxcmail.Export(emb.msg, oxcmail.Options{})
+	if err != nil {
+		writeErr(out, ropSaveChangesMessage, hindex, ecError)
+		return
+	}
+	emb.writeback.pending.Set(mapi.PrAttachMethod, int32(mapi.AttachEmbeddedMsg))
+	emb.writeback.pending.Set(mapi.PrAttachMimeTag, "message/rfc822")
+	emb.writeback.pending.Set(mapi.PrAttachDataBin, raw)
+	writeSaveChangesOK(out, hindex, ihindex, uint64(handle))
+}
+
+// saveComposedMessage persists a message built through the compose handle,
+// creating it on the first save and editing it in place on any later one.
+func saveComposedMessage(out *ext.Push, obj *object, hindex, ihindex uint8) {
+	nm := obj.newMsg
+	id, err := persistComposedMessage(obj.store, nm)
+	if err != nil {
+		writeErr(out, ropSaveChangesMessage, hindex, ecError)
+		return
+	}
+	nm.saved = true
+	nm.savedID = id
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	writeSaveChangesOK(out, hindex, ihindex, uint64(id))
+}
+
+// persistComposedMessage writes the composed message and returns its id. A
+// re-save after the first persist is an in-place edit through the same path an
+// opened message uses, rather than a pure upsert, which would leave the message
+// looking unchanged to ICS.
+func persistComposedMessage(store *objectstore.Store, nm *newMessageState) (int64, error) {
+	if nm.saved {
+		return nm.savedID, store.ModifyMessageProperties(nm.savedID, nm.props)
+	}
+	// The attachments staged during compose are written together with the message.
+	atts := make([]oxcmail.Attachment, len(nm.attachments))
+	for i, a := range nm.attachments {
+		atts[i] = oxcmail.Attachment{Props: a.props}
+	}
+	return store.CreateMessage(nm.folderID, &oxcmail.Message{
+		Props:       nm.props,
+		Recipients:  nm.recipients,
+		Attachments: atts,
+	})
 }
 
 // pullModifyRecipientBag parses one MODIFYRECIPIENT_ROW ([MS-OXCMSG] 2.2.3.5.2)
@@ -386,111 +435,186 @@ func pullRecipientRow(p *ext.Pull, columns []mapi.PropTag) (mapi.PropertyValues,
 	if err != nil {
 		return nil, false
 	}
-	unicode := flags&recipientRowUnicode != 0
-	addrKind := flags & 0x0007
-
-	readStr := func() (string, error) {
-		if unicode {
-			return p.Unicode()
-		}
-		return p.String8()
+	row := recipientRow{flags: flags, addrKind: flags & 0x0007}
+	rd := rowReader{p: p, unicode: flags&recipientRowUnicode != 0}
+	if !row.pullAddress(rd) || !row.pullNames(rd) {
+		return nil, false
 	}
+	bag, ok := row.props()
+	if !ok {
+		return nil, false
+	}
+	if !pullRecipientColumns(p, columns, &bag) {
+		return nil, false
+	}
+	return bag, true
+}
 
-	var x500dn, addrType, mailAddr, displayName, transmitName string
-	var haveX500, haveAddrType, haveMail, haveDisplay, haveTransmit bool
+// rowReader reads a RECIPIENT_ROW string in the encoding the row's flags select:
+// the whole row is either Unicode or ASCII, decided once by the flag word.
+type rowReader struct {
+	p       *ext.Pull
+	unicode bool
+}
 
-	switch addrKind {
+func (r rowReader) str() (string, error) {
+	if r.unicode {
+		return r.p.Unicode()
+	}
+	return r.p.String8()
+}
+
+// recipientRow is the flag-driven part of a RECIPIENT_ROW, decoded but not yet
+// turned into properties. Each have* field says whether the flags called for
+// that member at all, which is not the same as it being empty.
+type recipientRow struct {
+	flags    uint16
+	addrKind uint16
+
+	x500dn       string
+	addrType     string
+	mailAddr     string
+	displayName  string
+	transmitName string
+
+	haveX500     bool
+	haveAddrType bool
+	haveMail     bool
+	haveDisplay  bool
+	haveTransmit bool
+}
+
+// pullAddress reads the members the address kind dictates: the X500 DN for an
+// EX recipient, the entry id and search key of a distribution list (both
+// discarded in v1), and the out-of-standard address type of an untyped one.
+func (r *recipientRow) pullAddress(rd rowReader) bool {
+	if !r.pullAddressKind(rd) {
+		return false
+	}
+	if r.addrKind == addrKindNoType && r.flags&recipientRowOutOfStandard != 0 {
+		var err error
+		if r.addrType, err = rd.p.String8(); err != nil { // AddressType (always ASCII)
+			return false
+		}
+		r.haveAddrType = true
+	}
+	return true
+}
+
+// pullAddressKind reads the members only one address kind carries. Every other
+// kind contributes nothing here and is judged in props instead.
+func (r *recipientRow) pullAddressKind(rd rowReader) bool {
+	switch r.addrKind {
 	case addrKindX500DN:
-		if _, err = p.Uint8(); err != nil { // PrefixUsed
-			return nil, false
-		}
-		if _, err = p.Uint8(); err != nil { // DisplayType
-			return nil, false
-		}
-		if x500dn, err = p.String8(); err != nil { // X500DN (always ASCII)
-			return nil, false
-		}
-		haveX500 = true
+		return r.pullX500(rd)
 	case addrKindDList1, addrKindDList2:
-		if _, err = p.Bin(); err != nil { // EntryId
-			return nil, false
-		}
-		if _, err = p.Bin(); err != nil { // SearchKey
-			return nil, false
-		}
+		return skipDistributionList(rd.p)
 	}
-	if addrKind == addrKindNoType && flags&recipientRowOutOfStandard != 0 {
-		if addrType, err = p.String8(); err != nil { // AddressType (always ASCII)
-			return nil, false
-		}
-		haveAddrType = true
-	}
-	if flags&recipientRowEmail != 0 {
-		if mailAddr, err = readStr(); err != nil {
-			return nil, false
-		}
-		haveMail = true
-	}
-	if flags&recipientRowDisplay != 0 {
-		if displayName, err = readStr(); err != nil {
-			return nil, false
-		}
-		haveDisplay = true
-	}
-	if flags&recipientRowSimple != 0 {
-		if _, err = readStr(); err != nil { // SimpleDisplayName (v1 ignores)
-			return nil, false
-		}
-	}
-	if flags&recipientRowTransmittable != 0 {
-		if transmitName, err = readStr(); err != nil {
-			return nil, false
-		}
-		haveTransmit = true
-	}
+	return true
+}
 
+// pullX500 reads an EX recipient's DN, preceded by the two bytes v1 discards.
+func (r *recipientRow) pullX500(rd rowReader) bool {
+	var err error
+	if _, err = rd.p.Uint8(); err != nil { // PrefixUsed
+		return false
+	}
+	if _, err = rd.p.Uint8(); err != nil { // DisplayType
+		return false
+	}
+	if r.x500dn, err = rd.p.String8(); err != nil { // X500DN (always ASCII)
+		return false
+	}
+	r.haveX500 = true
+	return true
+}
+
+// skipDistributionList consumes a distribution list's entry id and search key,
+// which v1 does not model but must read to keep the stream framed.
+func skipDistributionList(p *ext.Pull) bool {
+	if _, err := p.Bin(); err != nil { // EntryId
+		return false
+	}
+	_, err := p.Bin() // SearchKey
+	return err == nil
+}
+
+// pullNames reads the optional name members, each present only when its flag is
+// set. SimpleDisplayName is read to keep the stream framed and then discarded.
+func (r *recipientRow) pullNames(rd rowReader) bool {
+	var err error
+	if r.flags&recipientRowEmail != 0 {
+		if r.mailAddr, err = rd.str(); err != nil {
+			return false
+		}
+		r.haveMail = true
+	}
+	if r.flags&recipientRowDisplay != 0 {
+		if r.displayName, err = rd.str(); err != nil {
+			return false
+		}
+		r.haveDisplay = true
+	}
+	if r.flags&recipientRowSimple != 0 {
+		if _, err = rd.str(); err != nil { // SimpleDisplayName (v1 ignores)
+			return false
+		}
+	}
+	if r.flags&recipientRowTransmittable != 0 {
+		if r.transmitName, err = rd.str(); err != nil {
+			return false
+		}
+		r.haveTransmit = true
+	}
+	return true
+}
+
+// props turns the decoded row into its property bag. ok is false for an address
+// kind v1 does not support, and for an EX recipient whose DN never arrived.
+func (r *recipientRow) props() (mapi.PropertyValues, bool) {
 	bag := mapi.PropertyValues{}
-	bag.Set(mapi.PrResponsibility, flags&recipientRowResponsible != 0)
-	bag.Set(mapi.PrSendRichInfo, flags&recipientRowNonRich != 0)
-	if haveTransmit {
-		bag.Set(mapi.PrTransmitableDisplayName, transmitName)
+	bag.Set(mapi.PrResponsibility, r.flags&recipientRowResponsible != 0)
+	bag.Set(mapi.PrSendRichInfo, r.flags&recipientRowNonRich != 0)
+	if r.haveTransmit {
+		bag.Set(mapi.PrTransmitableDisplayName, r.transmitName)
 	}
-	if haveDisplay {
-		bag.Set(mapi.PrDisplayName, displayName)
+	if r.haveDisplay {
+		bag.Set(mapi.PrDisplayName, r.displayName)
 	}
-	if haveMail {
-		bag.Set(mapi.PrEmailAddress, mailAddr)
+	if r.haveMail {
+		bag.Set(mapi.PrEmailAddress, r.mailAddr)
 	}
-	switch addrKind {
+	switch r.addrKind {
 	case addrKindNoType:
-		if haveAddrType {
-			bag.Set(mapi.PrAddrType, addrType)
+		if r.haveAddrType {
+			bag.Set(mapi.PrAddrType, r.addrType)
 		}
 	case addrKindX500DN:
-		if !haveX500 {
+		if !r.haveX500 {
 			return nil, false
 		}
 		bag.Set(mapi.PrAddrType, "EX")
-		bag.Set(mapi.PrEmailAddress, x500dn)
+		bag.Set(mapi.PrEmailAddress, r.x500dn)
 	case addrKindSMTP:
 		bag.Set(mapi.PrAddrType, "SMTP")
 	default:
 		return nil, false // MSMAIL / FAX / personal distribution list, unsupported in v1
 	}
+	return bag, true
+}
 
-	// Trailing PROPERTY_ROW over the first RecipientColumnCount columns; its
-	// values (e.g. PR_SMTP_ADDRESS) are merged after the flag-driven fields.
+// pullRecipientColumns merges the trailing PROPERTY_ROW over the first
+// RecipientColumnCount columns; its values (e.g. PR_SMTP_ADDRESS) land after the
+// flag-driven fields, so they win where both carry the same property.
+func pullRecipientColumns(p *ext.Pull, columns []mapi.PropTag, bag *mapi.PropertyValues) bool {
 	count, err := p.Uint16()
 	if err != nil {
-		return nil, false
+		return false
 	}
 	if int(count) > len(columns) {
-		return nil, false
+		return false
 	}
-	if err := pullPropertyRow(p, columns[:count], &bag); err != nil {
-		return nil, false
-	}
-	return bag, true
+	return pullPropertyRow(p, columns[:count], bag) == nil
 }
 
 // pullPropertyRow parses a PROPERTY_ROW ([MS-OXCDATA] 2.8.1) over columns and
@@ -505,35 +629,55 @@ func pullPropertyRow(p *ext.Pull, columns []mapi.PropTag, bag *mapi.PropertyValu
 	}
 	switch flag {
 	case propertyRowNone:
-		for _, col := range columns {
-			v, err := p.PropValue(col.Type())
-			if err != nil {
-				return err
-			}
-			bag.Set(col, v)
-		}
+		return pullBareRow(p, columns, bag)
 	case propertyRowFlagged:
-		for _, col := range columns {
-			marker, err := p.Uint8()
-			if err != nil {
-				return err
-			}
-			switch marker {
-			case mapi.FlaggedAvailable:
-				v, err := p.PropValue(col.Type())
-				if err != nil {
-					return err
-				}
-				bag.Set(col, v)
-			case mapi.FlaggedUnavailable:
-				// no value present for this column
-			case mapi.FlaggedError:
-				if _, err := p.Uint32(); err != nil { // error code, discarded
-					return err
-				}
-			default:
-				return errRecipientFraming
-			}
+		return pullFlaggedRow(p, columns, bag)
+	}
+	return errRecipientFraming
+}
+
+// pullBareRow reads the NONE form: one value per column, every column present.
+func pullBareRow(p *ext.Pull, columns []mapi.PropTag, bag *mapi.PropertyValues) error {
+	for _, col := range columns {
+		v, err := p.PropValue(col.Type())
+		if err != nil {
+			return err
+		}
+		bag.Set(col, v)
+	}
+	return nil
+}
+
+// pullFlaggedRow reads the FLAGGED form: each column carries a marker saying
+// whether its value is present, absent, or replaced by an error code.
+func pullFlaggedRow(p *ext.Pull, columns []mapi.PropTag, bag *mapi.PropertyValues) error {
+	for _, col := range columns {
+		marker, err := p.Uint8()
+		if err != nil {
+			return err
+		}
+		if err := pullFlaggedValue(p, col, marker, bag); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pullFlaggedValue reads one FLAGGED_PROPVAL body, whichever form its marker
+// selected.
+func pullFlaggedValue(p *ext.Pull, col mapi.PropTag, marker uint8, bag *mapi.PropertyValues) error {
+	switch marker {
+	case mapi.FlaggedAvailable:
+		v, err := p.PropValue(col.Type())
+		if err != nil {
+			return err
+		}
+		bag.Set(col, v)
+	case mapi.FlaggedUnavailable:
+		// no value present for this column
+	case mapi.FlaggedError:
+		if _, err := p.Uint32(); err != nil { // error code, discarded
+			return err
 		}
 	default:
 		return errRecipientFraming
@@ -557,27 +701,11 @@ func (s *Session) ropSubmitMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 		writeErr(out, ropSubmitMessage, hindex, ecNotFound)
 		return true
 	}
-	// Submitting is governed by send-on-behalf: an owner sends as itself, a delegate
-	// only when designated on the mailbox's delegate list (folder rights alone do not
-	// confer it). The resolved identities are stamped into the outgoing copy below.
-	representing, sender, allowed, err := s.delegateSendIdentity(obj.store)
-	if err != nil {
-		writeErr(out, ropSubmitMessage, hindex, ecError)
-		return true
-	}
-	if !allowed {
-		writeErr(out, ropSubmitMessage, hindex, ecAccessDenied)
+	representing, sender, ok := s.authorizeSubmit(out, obj, hindex)
+	if !ok {
 		return true
 	}
 	nm := obj.newMsg
-	// The message must be persisted (the reference checks the assigned id is
-	// non-zero) and the session must have an MTA bridge wired (a read-only
-	// session carries none).
-	if !nm.saved || nm.savedID == 0 || s.accounts == nil {
-		writeErr(out, ropSubmitMessage, hindex, ecNotSupported)
-		return true
-	}
-
 	raw, err := s.deliverComposed(nm, representing, sender)
 	if err != nil {
 		if errors.Is(err, errNoRecipient) {
@@ -600,6 +728,33 @@ func (s *Session) ropSubmitMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
 	return true
+}
+
+// authorizeSubmit resolves the identities the outgoing copy is stamped with and
+// checks the submit is allowed at all. ok=false means the response was already
+// written.
+//
+// Submitting is governed by send-on-behalf: an owner sends as itself, a delegate
+// only when designated on the mailbox's delegate list (folder rights alone do
+// not confer it). The message must also be persisted (its assigned id is
+// non-zero) and the session must have an MTA bridge wired, which a read-only
+// session does not.
+func (s *Session) authorizeSubmit(out *ext.Push, obj *object, hindex uint8) (representing, sender string, ok bool) {
+	representing, sender, allowed, err := s.delegateSendIdentity(obj.store)
+	if err != nil {
+		writeErr(out, ropSubmitMessage, hindex, ecError)
+		return "", "", false
+	}
+	if !allowed {
+		writeErr(out, ropSubmitMessage, hindex, ecAccessDenied)
+		return "", "", false
+	}
+	nm := obj.newMsg
+	if !nm.saved || nm.savedID == 0 || s.accounts == nil {
+		writeErr(out, ropSubmitMessage, hindex, ecNotSupported)
+		return "", "", false
+	}
+	return representing, sender, true
 }
 
 // errNoRecipient is returned by deliverComposed when a saved composed message
