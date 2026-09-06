@@ -248,6 +248,17 @@ func (s *Session) openFolder(out *ext.Push, ropID uint8, handles []uint32, hinde
 	return folder, true
 }
 
+// openMessage resolves a handle to a store-bound message object, the counterpart
+// of openFolder for the ROPs that act on an opened (not composed) message.
+func (s *Session) openMessage(out *ext.Push, ropID uint8, handles []uint32, hindex, errIndex uint8) (*object, bool) {
+	msg := s.get(handleAt(handles, hindex))
+	if msg == nil || msg.kind != kindMessage || msg.store == nil {
+		writeErr(out, ropID, errIndex, ecError)
+		return nil, false
+	}
+	return msg, true
+}
+
 // persistedMessageID returns the store message id behind a message object when it
 // refers to a row that already exists, an opened message, or a compose message
 // after its first save, so attachment writes can target the real message. It

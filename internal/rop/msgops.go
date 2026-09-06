@@ -35,9 +35,8 @@ func (s *Session) ropSetMessageReadFlag(p *ext.Pull, out *ext.Push, handles []ui
 	if e1 != nil || e2 != nil {
 		return false
 	}
-	obj := s.get(handleAt(handles, ihindex2))
-	if obj == nil || obj.kind != kindMessage || obj.store == nil {
-		writeErr(out, ropSetMessageReadFlag, hindex, ecError)
+	obj, ok := s.openMessage(out, ropSetMessageReadFlag, handles, ihindex2, hindex)
+	if !ok {
 		return true
 	}
 	// Changing a message's read state modifies it: a delegate needs EditAny on the
@@ -57,29 +56,19 @@ func (s *Session) ropSetMessageReadFlag(p *ext.Pull, out *ext.Push, handles []ui
 		return true
 	}
 	// [MS-OXCMSG] 2.2.3.10: dispatch on the whole flag byte (reserved bits
-	// masked), not a per-bit test. Only rfDefault/rfSuppressReceipt mark the
-	// message read and only rfClearReadFlag (optionally with rfSuppressReceipt)
-	// marks it unread; the receipt-only and notify-clear flags change no read
-	// state. Write only when the action changes state, so the call is idempotent.
-	var read, change, receipt bool
-	switch flags &^ rfReserved {
-	case rfDefault:
-		read, change = true, true
-		receipt = !wasRead // only the unread→read transition owes a receipt
-	case rfSuppressReceipt:
-		read, change = true, true // marked read, receipt explicitly suppressed
-	case rfClearReadFlag, rfClearReadFlag | rfSuppressReceipt:
-		change = true
-	case rfGenerateReceiptOnly:
-		receipt = true // send the receipt without changing read state
-	}
-	if change {
-		if err := obj.store.SetMessageReadState(obj.messageID, read); err != nil {
+	// masked), not a per-bit test, which decodeReadFlags does. Only the default
+	// action owes a receipt here, and only on the unread-to-read transition.
+	action := decodeReadFlags(flags)
+	if action.change {
+		// Only the unread-to-read transition owes a receipt. The receipt-only
+		// action does not change state and sends unconditionally.
+		action.receipt = action.receipt && !wasRead
+		if err := obj.store.SetMessageReadState(obj.messageID, action.read); err != nil {
 			writeErr(out, ropSetMessageReadFlag, hindex, ecError)
 			return true
 		}
 	}
-	if receipt {
+	if action.receipt {
 		s.maybeReadReceipt(obj.store, obj.messageID)
 	}
 	out.Uint8(ropSetMessageReadFlag)
@@ -118,65 +107,96 @@ func (s *Session) ropSetReadFlags(p *ext.Pull, out *ext.Push, handles []uint32, 
 		return true
 	}
 
-	// Decode the flag byte once; it applies uniformly to every target message (the
-	// same exact-value dispatch as the single ROP, reserved bits masked off).
-	var read, change, receipt bool
-	switch flags &^ rfReserved {
-	case rfDefault:
-		read, change, receipt = true, true, true
-	case rfSuppressReceipt:
-		read, change = true, true // marked read, receipt suppressed
-	case rfClearReadFlag, rfClearReadFlag | rfSuppressReceipt:
-		change = true // mark unread; no receipt
-	case rfGenerateReceiptOnly:
-		receipt = true // receipt only, no state change
+	action := decodeReadFlags(flags)
+	targets, err := readFlagTargets(folder, ids)
+	if err != nil {
+		writeErr(out, ropSetReadFlags, hindex, ecError)
+		return true
 	}
-
-	// An empty request list means every message in the folder; an explicit list maps
-	// each EID to its store object id (the global-counter value).
-	targets := make([]int64, 0, len(ids))
-	if len(ids) == 0 {
-		msgs, err := folder.store.ListMessages(folder.folderID)
-		if err != nil {
-			writeErr(out, ropSetReadFlags, hindex, ecError)
-			return true
-		}
-		for _, m := range msgs {
-			targets = append(targets, m.ID)
-		}
-	} else {
-		for _, eid := range ids {
-			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-			targets = append(targets, int64(mapi.EID(eid).GCValue()))
-		}
-	}
-
 	var partial uint8
 	for _, mid := range targets {
-		if change {
-			// A read receipt is owed only on the unread->read transition, so read the
-			// prior state before writing.
-			var wasRead bool
-			if receipt {
-				if w, err := folder.store.GetMessageReadState(mid); err == nil {
-					wasRead = w
-				}
-			}
-			if err := folder.store.SetMessageReadState(mid, read); err != nil {
-				partial = 1
-				continue
-			}
-			if receipt && read && !wasRead {
-				s.maybeReadReceipt(folder.store, mid)
-			}
-		} else if receipt {
-			s.maybeReadReceipt(folder.store, mid)
+		if !s.applyReadFlag(folder, mid, action) {
+			partial = 1
 		}
 	}
 	out.Uint8(ropSetReadFlags)
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
 	out.Uint8(partial) // PartialCompletion
+	return true
+}
+
+// readFlagAction is what one ReadFlags byte asks for: whether the read state
+// changes at all, what it becomes, and whether a read receipt may be sent.
+type readFlagAction struct {
+	read    bool
+	change  bool
+	receipt bool
+}
+
+// decodeReadFlags maps the ReadFlags byte to the action it selects. It is the
+// same exact-value dispatch RopSetMessageReadFlag uses, with the reserved bits
+// masked off; an unrecognized value asks for nothing.
+func decodeReadFlags(flags uint8) readFlagAction {
+	switch flags &^ rfReserved {
+	case rfDefault:
+		return readFlagAction{read: true, change: true, receipt: true}
+	case rfSuppressReceipt:
+		return readFlagAction{read: true, change: true} // marked read, receipt suppressed
+	case rfClearReadFlag, rfClearReadFlag | rfSuppressReceipt:
+		return readFlagAction{change: true} // mark unread; no receipt
+	case rfGenerateReceiptOnly:
+		return readFlagAction{receipt: true} // receipt only, no state change
+	}
+	return readFlagAction{}
+}
+
+// readFlagTargets resolves the request's message ids. An empty list means every
+// message in the folder; an explicit list maps each EID to its store object id.
+func readFlagTargets(folder *object, ids []uint64) ([]int64, error) {
+	if len(ids) == 0 {
+		msgs, err := folder.store.ListMessages(folder.folderID)
+		if err != nil {
+			return nil, err
+		}
+		targets := make([]int64, 0, len(msgs))
+		for _, m := range msgs {
+			targets = append(targets, m.ID)
+		}
+		return targets, nil
+	}
+	targets := make([]int64, 0, len(ids))
+	for _, eid := range ids {
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		targets = append(targets, int64(mapi.EID(eid).GCValue()))
+	}
+	return targets, nil
+}
+
+// applyReadFlag applies one message's read-state change and any receipt it owes.
+// It reports false when the write failed, which makes the whole ROP report
+// partial completion.
+func (s *Session) applyReadFlag(folder *object, mid int64, action readFlagAction) bool {
+	if !action.change {
+		if action.receipt {
+			s.maybeReadReceipt(folder.store, mid)
+		}
+		return true
+	}
+	// A read receipt is owed only on the unread-to-read transition, so read the
+	// prior state before writing.
+	var wasRead bool
+	if action.receipt {
+		if w, err := folder.store.GetMessageReadState(mid); err == nil {
+			wasRead = w
+		}
+	}
+	if err := folder.store.SetMessageReadState(mid, action.read); err != nil {
+		return false
+	}
+	if action.receipt && action.read && !wasRead {
+		s.maybeReadReceipt(folder.store, mid)
+	}
 	return true
 }
 
@@ -224,34 +244,60 @@ func (s *Session) ropMoveCopyMessages(p *ext.Pull, out *ext.Push, handles []uint
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
 		return false
 	}
-	src := s.get(handleAt(handles, hindex))
-	dst := s.get(handleAt(handles, dhindex))
-	if src == nil || src.kind != kindFolder || src.store == nil || dst == nil || dst.kind != kindFolder {
-		writeErr(out, ropMoveCopyMessages, hindex, ecError)
+	src, dst, ok := s.moveCopyEndpoints(out, handles, hindex, dhindex, wantCopy == 0)
+	if !ok {
 		return true
 	}
-	// A move/copy spans two folders. The copy runs entirely through the source
-	// store, so source and destination must be the same physical mailbox; a
-	// delegate session can hold handles into two mailboxes, and the well-known
-	// folder ids collide across mailboxes, so a cross-mailbox move/copy would file
-	// into the wrong store. It is refused (an owner never crosses mailboxes, so
-	// this is inert for an owner). Then the two-sided rights gate: a copy reads the
-	// source (ReadAny) while a move removes from it (DeleteAny), and either adds to
-	// the destination (Create). For an owner both authorize checks short-circuit.
+	partial := moveCopyEach(src, dst, ids, wantCopy == 0)
+	out.Uint8(ropMoveCopyMessages)
+	out.Uint8(hindex)
+	out.Uint32(ecSuccess)
+	out.Uint8(partial) // PartialCompletion
+	return true
+}
+
+// moveCopyEndpoints resolves the source and destination folder handles and gates
+// both sides. ok is false when the response was already written.
+//
+// A move/copy spans two folders. The copy runs entirely through the source
+// store, so source and destination must be the same physical mailbox: a delegate
+// session can hold handles into two mailboxes, and the well-known folder ids
+// collide across mailboxes, so a cross-mailbox move/copy would file into the
+// wrong store. It is refused (an owner never crosses mailboxes, so this is inert
+// for an owner). Then the two-sided rights gate: a copy reads the source
+// (ReadAny) while a move removes from it (DeleteAny), and either adds to the
+// destination (Create). For an owner both authorize checks short-circuit.
+func (s *Session) moveCopyEndpoints(out *ext.Push, handles []uint32, hindex, dhindex uint8, move bool) (src, dst *object, ok bool) {
+	src, ok = s.openFolder(out, ropMoveCopyMessages, handles, hindex, hindex)
+	if !ok {
+		return nil, nil, false
+	}
+	dst = s.get(handleAt(handles, dhindex))
+	if dst == nil || dst.kind != kindFolder {
+		writeErr(out, ropMoveCopyMessages, hindex, ecError)
+		return nil, nil, false
+	}
 	if dst.store == nil || src.store.Dir() != dst.store.Dir() {
 		writeErr(out, ropMoveCopyMessages, hindex, ecNotSupported)
-		return true
+		return nil, nil, false
 	}
 	srcRight := uint32(mapi.FrightsReadAny)
-	if wantCopy == 0 {
+	if move {
 		srcRight = mapi.FrightsDeleteAny // a move deletes from the source
 	}
 	if s.denyWrite(out, ropMoveCopyMessages, hindex, src.store, src.folderID, srcRight) {
-		return true
+		return nil, nil, false
 	}
 	if s.denyWrite(out, ropMoveCopyMessages, hindex, dst.store, dst.folderID, mapi.FrightsCreate) {
-		return true
+		return nil, nil, false
 	}
+	return src, dst, true
+}
+
+// moveCopyEach copies every listed message and, for a move, drops the source
+// copy afterwards. It returns the PartialCompletion flag: 1 when any id could
+// not be processed.
+func moveCopyEach(src, dst *object, ids []uint64, move bool) uint8 {
 	// Resolve each message id to its uid within the source folder; the raw
 	// round-trip copy needs the uid and carries the original flags and date.
 	uidByID := map[int64]uint32{}
@@ -263,26 +309,23 @@ func (s *Session) ropMoveCopyMessages(p *ext.Pull, out *ext.Push, handles []uint
 	var partial uint8
 	for _, eid := range ids {
 		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		uid, ok := uidByID[int64(mapi.EID(eid).GCValue())]
-		if !ok {
+		uid, known := uidByID[int64(mapi.EID(eid).GCValue())]
+		if !known || !moveCopyOne(src, dst, uid, move) {
 			partial = 1
-			continue
-		}
-		if err := copyStoredMessage(src.store, src.folderID, uid, dst.folderID); err != nil {
-			partial = 1
-			continue
-		}
-		if wantCopy == 0 { // move: drop the source copy after a successful copy
-			if err := src.store.DeleteMessage(src.folderID, uid); err != nil {
-				partial = 1
-			}
 		}
 	}
-	out.Uint8(ropMoveCopyMessages)
-	out.Uint8(hindex)
-	out.Uint32(ecSuccess)
-	out.Uint8(partial) // PartialCompletion
-	return true
+	return partial
+}
+
+// moveCopyOne copies one message and, for a move, deletes the source.
+func moveCopyOne(src, dst *object, uid uint32, move bool) bool {
+	if err := copyStoredMessage(src.store, src.folderID, uid, dst.folderID); err != nil {
+		return false
+	}
+	if !move {
+		return true
+	}
+	return src.store.DeleteMessage(src.folderID, uid) == nil
 }
 
 // copyStoredMessage copies one message from (srcFolder, uid) into dstFolder,
