@@ -105,6 +105,7 @@ func numberedAttachProps(props mapi.PropertyValues, ordinal int) mapi.PropertyVa
 		return props
 	}
 	out := append(mapi.PropertyValues(nil), props...)
+	// #nosec G115 -- the ordinal indexes one message's in-memory attachment slice, orders of magnitude below the int32 PidTagAttachNumber holds
 	out.Set(mapi.PrAttachNum, int32(ordinal))
 	return out
 }
