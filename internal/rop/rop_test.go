@@ -229,6 +229,46 @@ func wantGUID(t *testing.T, p *ext.Pull, field string, want mapi.GUID) {
 	}
 }
 
+// ropOK reads a response's common header (RopId, HandleIndex, ReturnValue) and
+// asserts it is the expected ROP reporting success, leaving the reader
+// positioned at the body. A test driving a chain of ROPs repeats that header
+// check at every step; done inline it is three branches per step and it hides
+// what the step is actually for.
+func ropOK(t *testing.T, resp []byte, ropID uint8, what string) *ext.Pull {
+	t.Helper()
+	p := ext.NewPull(resp, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropID {
+		t.Fatalf("%s RopId = %#x, want %#x", what, id, ropID)
+	}
+	mustU8(t, p, "hindex")
+	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
+		t.Fatalf("%s ReturnValue = %#x", what, ec)
+	}
+	return p
+}
+
+// ropReturn reads a response's common header and returns its ReturnValue, for a
+// step whose refusal is what the test is checking.
+func ropReturn(t *testing.T, resp []byte, ropID uint8, what string) uint32 {
+	t.Helper()
+	p := ext.NewPull(resp, ext.FlagUTF16)
+	if id := mustU8(t, p, "RopId"); id != ropID {
+		t.Fatalf("%s RopId = %#x, want %#x", what, id, ropID)
+	}
+	mustU8(t, p, "hindex")
+	return mustU32(t, p, "ec")
+}
+
+// wantProp asserts a property bag carries the expected value for one tag. An
+// absent property compares against the zero value, which is what makes a missing
+// property fail rather than pass quietly.
+func wantProp(t *testing.T, bag mapi.PropertyValues, tag mapi.PropTag, want any, label string) {
+	t.Helper()
+	if got, _ := bag.Get(tag); got != want {
+		t.Errorf("%s = %v, want %v", label, got, want)
+	}
+}
+
 // wantDrained asserts the reader consumed the whole response, which is what
 // proves a layout test checked every field the server emitted.
 func wantDrained(t *testing.T, p *ext.Pull, what string) {

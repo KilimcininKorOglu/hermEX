@@ -104,30 +104,14 @@ func TestModifyRecipientRowParse(t *testing.T) {
 	if !ok {
 		t.Fatal("recipient row was skipped, want included")
 	}
-	if v, _ := bag.Get(mapi.PrRowid); v != int32(7) {
-		t.Errorf("PrRowid = %v, want 7", v)
-	}
-	if v, _ := bag.Get(mapi.PrRecipientType); v != int32(mapi.RecipCc) {
-		t.Errorf("PrRecipientType = %v, want %d", v, mapi.RecipCc)
-	}
-	if v, _ := bag.Get(mapi.PrEmailAddress); v != "bob@hermex.test" {
-		t.Errorf("PrEmailAddress = %v, want bob@hermex.test", v)
-	}
-	if v, _ := bag.Get(mapi.PrDisplayName); v != "Bob" {
-		t.Errorf("PrDisplayName = %v, want Bob", v)
-	}
-	if v, _ := bag.Get(mapi.PrAddrType); v != "SMTP" {
-		t.Errorf("PrAddrType = %v, want SMTP", v)
-	}
-	if v, ok := bag.Get(mapi.PrSmtpAddress); !ok || v != "bob@hermex.test" {
-		t.Errorf("PrSmtpAddress (trailing column) = %v present=%v, want bob@hermex.test", v, ok)
-	}
-	if v, _ := bag.Get(mapi.PrResponsibility); v != false {
-		t.Errorf("PrResponsibility = %v, want false (flag unset)", v)
-	}
-	if p.Remaining() != 0 {
-		t.Errorf("recipient row left %d bytes unconsumed", p.Remaining())
-	}
+	wantProp(t, bag, mapi.PrRowid, int32(7), "PrRowid")
+	wantProp(t, bag, mapi.PrRecipientType, int32(mapi.RecipCc), "PrRecipientType")
+	wantProp(t, bag, mapi.PrEmailAddress, "bob@hermex.test", "PrEmailAddress")
+	wantProp(t, bag, mapi.PrDisplayName, "Bob", "PrDisplayName")
+	wantProp(t, bag, mapi.PrAddrType, "SMTP", "PrAddrType")
+	wantProp(t, bag, mapi.PrSmtpAddress, "bob@hermex.test", "PrSmtpAddress (trailing column)")
+	wantProp(t, bag, mapi.PrResponsibility, false, "PrResponsibility (flag unset)")
+	wantDrained(t, p, "the recipient row")
 }
 
 // TestModifyRecipientRowRemoval confirms a zero-size row (the recipient-removal
@@ -162,17 +146,8 @@ func TestCreateFillSaveRoundTrip(t *testing.T) {
 
 	// CreateMessage off the logon: parent at slot 0, new message at slot 1.
 	cm, h := sess.Dispatch(buildCreateMessage(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
-	p := ext.NewPull(cm, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropCreateMessage {
-		t.Fatalf("CreateMessage RopId = %#x", id)
-	}
-	mustU8(t, p, "ohindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("CreateMessage ReturnValue = %#x", ec)
-	}
-	if hasID := mustU8(t, p, "hasMessageId"); hasID != 0 {
-		t.Errorf("CreateMessage HasMessageId = %d, want 0 (id assigned at save)", hasID)
-	}
+	p := ropOK(t, cm, ropCreateMessage, "CreateMessage")
+	wantU8(t, p, "CreateMessage HasMessageId (id assigned at save)", 0)
 	msgH := h[1]
 	if obj := sess.get(msgH); obj == nil || obj.kind != kindNewMessage {
 		t.Fatalf("new-message object wrong: %+v", obj)
@@ -182,49 +157,21 @@ func TestCreateFillSaveRoundTrip(t *testing.T) {
 	sp, _ := sess.Dispatch(
 		buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "WRITEMSG"}}),
 		[]uint32{msgH})
-	p = ext.NewPull(sp, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropSetProperties {
-		t.Fatalf("SetProperties RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("SetProperties ReturnValue = %#x", ec)
-	}
-	if pc := mustU16(t, p, "problemCount"); pc != 0 {
-		t.Errorf("SetProperties PropertyProblemCount = %d, want 0", pc)
-	}
+	p = ropOK(t, sp, ropSetProperties, "SetProperties")
+	wantU16(t, p, "SetProperties PropertyProblemCount", 0)
 
 	// ModifyRecipients: one SMTP To recipient.
 	row := buildSMTPRecipientRow(0, mapi.RecipTo, "alice@hermex.test", "Alice")
 	mr, _ := sess.Dispatch(buildModifyRecipients(0, []mapi.PropTag{mapi.PrSmtpAddress}, row), []uint32{msgH})
-	p = ext.NewPull(mr, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropModifyRecipients {
-		t.Fatalf("ModifyRecipients RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("ModifyRecipients ReturnValue = %#x", ec)
-	}
+	ropOK(t, mr, ropModifyRecipients, "ModifyRecipients")
 
 	// SaveChangesMessage: the message lives at slot 1 (ihindex2), while the
 	// common-header ResponseHandleIndex points at slot 0 (the logon). Resolving
 	// the message at the header handle instead of ihindex2 would fail here.
 	sc, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
-	p = ext.NewPull(sc, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropSaveChangesMessage {
-		t.Fatalf("SaveChangesMessage RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("SaveChangesMessage ReturnValue = %#x (message must resolve at ihindex2)", ec)
-	}
-	if ih2 := mustU8(t, p, "ihindex2"); ih2 != 1 {
-		t.Errorf("SaveChangesMessage echoed ihindex2 = %d, want 1", ih2)
-	}
-	savedEID, err := p.Uint64()
-	if err != nil {
-		t.Fatalf("SaveChangesMessage MessageId: %v", err)
-	}
+	p = ropOK(t, sc, ropSaveChangesMessage, "SaveChangesMessage (message must resolve at ihindex2)")
+	wantU8(t, p, "SaveChangesMessage ihindex2", 1)
+	savedEID := mustU64(t, p, "SaveChangesMessage MessageId")
 	if savedEID == 0 {
 		t.Fatal("SaveChangesMessage returned a zero MessageId")
 	}
@@ -233,29 +180,24 @@ func TestCreateFillSaveRoundTrip(t *testing.T) {
 	// Black-box: re-open by the returned EID through the ROP layer and read the
 	// subject back, proving the EID round-trips and the property persisted.
 	om, h := sess.Dispatch(buildOpenMessage(0, 1, inboxEID, savedEID), []uint32{logonH, 0xFFFFFFFF})
-	p = ext.NewPull(om, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "ohindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("OpenMessage(saved EID) ReturnValue = %#x", ec)
-	}
+	ropOK(t, om, ropOpenMessage, "OpenMessage(saved EID)")
 	reopenedH := h[1]
 	cols := []mapi.PropTag{mapi.PrSubject}
 	gps, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{reopenedH})
-	p = ext.NewPull(gps, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("GetPropertiesSpecific(saved) ReturnValue = %#x", ec)
-	}
+	p = ropOK(t, gps, ropGetPropertiesSpecific, "GetPropertiesSpecific(saved)")
 	rrow := decodeRow(t, p, cols)
 	if subj, _ := rrow.Get(mapi.PrSubject); subj != "WRITEMSG" {
 		t.Errorf("re-read subject = %v, want WRITEMSG", subj)
 	}
 
-	// White-box: open the store directly to confirm the recipient persisted,
-	// the ROP OpenMessage response does not surface recipients (v1), so this is
-	// the only way to verify the recipient survived the write.
+	assertSavedRecipient(t, dir, savedID)
+}
+
+// assertSavedRecipient opens the store directly to confirm the recipient
+// persisted. The ROP OpenMessage response does not surface recipients in v1, so
+// this white-box read is the only way to verify the write.
+func assertSavedRecipient(t *testing.T, dir string, savedID int64) {
+	t.Helper()
 	st, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -326,14 +268,7 @@ func TestCreateFillSaveSubmitDelivers(t *testing.T) {
 
 	// SubmitMessage.
 	sub, _ := sess.Dispatch(buildSubmitMessage(0), []uint32{msgH})
-	p := ext.NewPull(sub, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropSubmitMessage {
-		t.Fatalf("SubmitMessage RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("SubmitMessage ReturnValue = %#x", ec)
-	}
+	ropOK(t, sub, ropSubmitMessage, "SubmitMessage")
 
 	// alice (To) received it: the wire copy must carry a From line for the owner
 	// and the subject, and must never disclose the Bcc recipient.
@@ -353,21 +288,31 @@ func TestCreateFillSaveSubmitDelivers(t *testing.T) {
 		t.Errorf("carol (Bcc) inbox = %d messages, want 1", n)
 	}
 
-	// owner: a Sent Items copy exists and the source draft was consumed.
+	assertSubmitConsumedDraft(t, ownerDir)
+}
+
+// assertSubmitConsumedDraft checks the sender's own mailbox after a submit: a
+// Sent Items copy exists and the source draft is gone.
+func assertSubmitConsumedDraft(t *testing.T, ownerDir string) {
+	t.Helper()
 	st, err := objectstore.Open(ownerDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer st.Close()
-	if sent, err := st.ListMessages(int64(mapi.PrivateFIDSentItems)); err != nil {
+	wantFolderCount(t, st, mapi.PrivateFIDSentItems, 1, "owner Sent Items")
+	wantFolderCount(t, st, mapi.PrivateFIDDraft, 0, "source draft (consumed on submit)")
+}
+
+// wantFolderCount asserts how many messages a folder holds.
+func wantFolderCount(t *testing.T, st *objectstore.Store, fid uint64, want int, label string) {
+	t.Helper()
+	msgs, err := st.ListMessages(int64(fid))
+	if err != nil {
 		t.Fatal(err)
-	} else if len(sent) != 1 {
-		t.Errorf("owner Sent Items = %d messages, want 1", len(sent))
 	}
-	if drafts, err := st.ListMessages(int64(mapi.PrivateFIDDraft)); err != nil {
-		t.Fatal(err)
-	} else if len(drafts) != 0 {
-		t.Errorf("source draft = %d messages, want 0 (consumed on submit)", len(drafts))
+	if len(msgs) != want {
+		t.Errorf("%s = %d messages, want %d", label, len(msgs), want)
 	}
 }
 
