@@ -71,57 +71,23 @@ type stateStreamSink interface {
 // not applied in v1 (a documented limitation, as with RopRestrict). The response
 // places the new sync-context handle in the output slot.
 func (s *Session) ropSynchronizationConfigure(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	ohindex, e1 := p.Uint8()
-	syncType, e2 := p.Uint8()
-	_, e3 := p.Uint8() // SendOptions, the stream codec always emits UTF-16
-	syncFlags, e4 := p.Uint16()
-	restrictionSize, e5 := p.Uint16()
-	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil {
+	req, framed := pullSyncConfigureRequest(p)
+	if !framed {
 		return false
 	}
-	if restrictionSize != 0 {
-		if _, err := p.Raw(int(restrictionSize)); err != nil {
-			return false
-		}
-	}
-	extraFlags, e6 := p.Uint32()
-	propTags, e7 := p.PropTags()
-	if e6 != nil || e7 != nil {
-		return false
-	}
-	folder, ok := s.openFolder(out, ropSynchronizationConfigure, handles, hindex, ohindex)
+	folder, ok := s.openFolder(out, ropSynchronizationConfigure, handles, hindex, req.ohindex)
 	if !ok {
 		return true
 	}
-	// A contents download bulk-reads the folder's items, bypassing per-message open,
-	// so a delegate needs ReadAny; a hierarchy download reads only subfolder
-	// metadata, covered by the Visible the folder was opened with. Owner is
-	// unrestricted.
-	if syncType == objectstore.SyncTypeContents {
-		if ok, err := s.authorize(folder.store, folder.folderID, mapi.FrightsReadAny); err != nil {
-			writeErr(out, ropSynchronizationConfigure, ohindex, ecError)
-			return true
-		} else if !ok {
-			s.logAuthzDeny(ropSynchronizationConfigure, folder.store, folder.folderID, mapi.FrightsReadAny)
-			writeErr(out, ropSynchronizationConfigure, ohindex, ecAccessDenied)
-			return true
-		}
-	}
-	var col *objectstore.DownloadCollector
-	var err error
-	switch syncType {
-	case objectstore.SyncTypeContents:
-		col, err = folder.store.NewContentDownloadCollector(folder.folderID, syncFlags, extraFlags, propTags)
-	case objectstore.SyncTypeHierarchy:
-		col, err = folder.store.NewHierarchyDownloadCollector(folder.folderID, syncFlags, propTags)
-	default:
-		writeErr(out, ropSynchronizationConfigure, ohindex, ecError)
+	if !s.authorizeSyncDownload(out, folder, req) {
 		return true
 	}
+	col, err := newDownloadCollector(folder, req)
 	if err != nil {
-		writeErr(out, ropSynchronizationConfigure, ohindex, ecError)
+		writeErr(out, ropSynchronizationConfigure, req.ohindex, ecError)
 		return true
 	}
+	ohindex := req.ohindex
 	h := s.alloc(&object{kind: kindSync, store: folder.store, fastSrc: col, stateSink: col})
 	setHandle(handles, ohindex, h)
 	out.Uint8(ropSynchronizationConfigure)
@@ -129,6 +95,82 @@ func (s *Session) ropSynchronizationConfigure(p *ext.Pull, out *ext.Push, handle
 	out.Uint32(ecSuccess)
 	return true
 }
+
+// syncConfigureRequest is a decoded RopSynchronizationConfigure request. The
+// send options are discarded because the stream codec always emits UTF-16, and
+// the restriction is skipped rather than applied: v1 downloads the whole folder.
+type syncConfigureRequest struct {
+	ohindex    uint8
+	syncType   uint8
+	syncFlags  uint16
+	extraFlags uint32
+	propTags   []mapi.PropTag
+}
+
+func pullSyncConfigureRequest(p *ext.Pull) (syncConfigureRequest, bool) {
+	var req syncConfigureRequest
+	ohindex, e1 := p.Uint8()
+	syncType, e2 := p.Uint8()
+	_, e3 := p.Uint8() // SendOptions, the stream codec always emits UTF-16
+	syncFlags, e4 := p.Uint16()
+	restrictionSize, e5 := p.Uint16()
+	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil {
+		return req, false
+	}
+	if restrictionSize != 0 {
+		if _, err := p.Raw(int(restrictionSize)); err != nil {
+			return req, false
+		}
+	}
+	extraFlags, e6 := p.Uint32()
+	propTags, e7 := p.PropTags()
+	if e6 != nil || e7 != nil {
+		return req, false
+	}
+	return syncConfigureRequest{
+		ohindex:    ohindex,
+		syncType:   syncType,
+		syncFlags:  syncFlags,
+		extraFlags: extraFlags,
+		propTags:   propTags,
+	}, true
+}
+
+// authorizeSyncDownload gates the download. A contents download bulk-reads the
+// folder's items, bypassing per-message open, so a delegate needs ReadAny; a
+// hierarchy download reads only subfolder metadata, covered by the Visible the
+// folder was opened with. An owner is unrestricted. It reports false when the
+// response was already written.
+func (s *Session) authorizeSyncDownload(out *ext.Push, folder *object, req syncConfigureRequest) bool {
+	if req.syncType != objectstore.SyncTypeContents {
+		return true
+	}
+	allowed, err := s.authorize(folder.store, folder.folderID, mapi.FrightsReadAny)
+	if err != nil {
+		writeErr(out, ropSynchronizationConfigure, req.ohindex, ecError)
+		return false
+	}
+	if !allowed {
+		s.logAuthzDeny(ropSynchronizationConfigure, folder.store, folder.folderID, mapi.FrightsReadAny)
+		writeErr(out, ropSynchronizationConfigure, req.ohindex, ecAccessDenied)
+		return false
+	}
+	return true
+}
+
+// newDownloadCollector opens the collector the requested sync type needs.
+func newDownloadCollector(folder *object, req syncConfigureRequest) (*objectstore.DownloadCollector, error) {
+	switch req.syncType {
+	case objectstore.SyncTypeContents:
+		return folder.store.NewContentDownloadCollector(folder.folderID, req.syncFlags, req.extraFlags, req.propTags)
+	case objectstore.SyncTypeHierarchy:
+		return folder.store.NewHierarchyDownloadCollector(folder.folderID, req.syncFlags, req.propTags)
+	}
+	return nil, errUnknownSyncType
+}
+
+// errUnknownSyncType is returned for a sync type this server does not implement.
+var errUnknownSyncType = errors.New("rop: unknown synchronization type")
 
 // ropSyncUploadStateStreamBegin handles RopSyncUploadStateStreamBegin
 // ([MS-OXCFXICS] 2.2.3.2.2.1): it opens a state stream for one idset meta-tag on a

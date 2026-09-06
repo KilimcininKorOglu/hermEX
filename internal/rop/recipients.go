@@ -48,38 +48,8 @@ func writeOpenRecipientRow(out *ext.Push, r mapi.PropertyValues) {
 // the SMTP/EX/other address kind derived from PR_ADDRTYPE, and an empty trailing
 // PROPERTY_ROW.
 func pushRecipientRow(out *ext.Push, r mapi.PropertyValues) {
-	display := stringProp(r, mapi.PrDisplayName)
-	addrType := stringProp(r, mapi.PrAddrType)
-	email := stringProp(r, mapi.PrEmailAddress)
-	if smtp := stringProp(r, mapi.PrSmtpAddress); smtp != "" && (addrType == "" || strings.EqualFold(addrType, "SMTP")) {
-		email, addrType = smtp, "SMTP"
-	}
-
-	flags := recipientRowUnicode
-	if display != "" {
-		flags |= recipientRowDisplay
-	}
-	if boolProp(r, mapi.PrResponsibility) {
-		flags |= recipientRowResponsible
-	}
-	if boolProp(r, mapi.PrSendRichInfo) {
-		flags |= recipientRowNonRich
-	}
-
-	switch {
-	case strings.EqualFold(addrType, "EX"):
-		flags |= addrKindX500DN
-	case addrType == "" || strings.EqualFold(addrType, "SMTP"):
-		flags |= addrKindSMTP
-		if email != "" {
-			flags |= recipientRowEmail
-		}
-	default:
-		flags |= addrKindNoType | recipientRowOutOfStandard
-		if email != "" {
-			flags |= recipientRowEmail
-		}
-	}
+	display, addrType, email := recipientAddress(r)
+	flags := recipientRowFlags(r, display, addrType, email)
 	out.Uint16(flags)
 
 	switch flags & 0x0007 {
@@ -100,6 +70,47 @@ func pushRecipientRow(out *ext.Push, r mapi.PropertyValues) {
 	}
 	out.Uint16(0)                     // RecipientColumnCount (no extra columns)
 	_ = buildPropertyRow(out, nil, r) // empty PROPERTY_ROW (single NONE flag byte)
+}
+
+// recipientAddress picks the address this row goes out with. A stored SMTP
+// address wins over the generic e-mail slot when the address type agrees, so a
+// recipient carrying both is written as SMTP rather than by whatever the
+// e-mail slot happened to hold.
+func recipientAddress(r mapi.PropertyValues) (display, addrType, email string) {
+	display = stringProp(r, mapi.PrDisplayName)
+	addrType = stringProp(r, mapi.PrAddrType)
+	email = stringProp(r, mapi.PrEmailAddress)
+	if smtp := stringProp(r, mapi.PrSmtpAddress); smtp != "" && (addrType == "" || strings.EqualFold(addrType, "SMTP")) {
+		return display, "SMTP", smtp
+	}
+	return display, addrType, email
+}
+
+// recipientRowFlags builds the flag word: the encoding, which optional members
+// follow, and the address kind the type string selects.
+func recipientRowFlags(r mapi.PropertyValues, display, addrType, email string) uint16 {
+	flags := recipientRowUnicode
+	if display != "" {
+		flags |= recipientRowDisplay
+	}
+	if boolProp(r, mapi.PrResponsibility) {
+		flags |= recipientRowResponsible
+	}
+	if boolProp(r, mapi.PrSendRichInfo) {
+		flags |= recipientRowNonRich
+	}
+	switch {
+	case strings.EqualFold(addrType, "EX"):
+		return flags | addrKindX500DN // the DN carries the address; no e-mail member
+	case addrType == "" || strings.EqualFold(addrType, "SMTP"):
+		flags |= addrKindSMTP
+	default:
+		flags |= addrKindNoType | recipientRowOutOfStandard
+	}
+	if email != "" {
+		flags |= recipientRowEmail
+	}
+	return flags
 }
 
 // boolProp reads a PtBoolean property, defaulting to false when absent.

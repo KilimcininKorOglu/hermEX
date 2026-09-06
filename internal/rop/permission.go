@@ -128,26 +128,81 @@ const abEntryIDHeaderLen = 28
 //
 // Access is store-owner authorized (see ropGetPermissionsTable): the caller is always
 // the mailbox owner today, so the frightsOwner gate passes by the owner bypass.
+// permRow is one PERMISSION_DATA row: the operation it asks for and the
+// properties naming the member and its rights.
+type permRow struct {
+	flags    uint8
+	propvals mapi.PropertyValues
+}
+
+// pullPermissionRows reads the request's PERMISSION_DATA array. The rows are
+// parsed before the handle is resolved so the batch stays aligned even when the
+// handle turns out to be wrong.
+func pullPermissionRows(p *ext.Pull, count int) ([]permRow, bool) {
+	rows := make([]permRow, 0, count)
+	for range count {
+		rowFlags, e1 := p.Uint8()
+		propvals, e2 := p.PropertyValues()
+		if e1 != nil || e2 != nil {
+			return nil, false
+		}
+		rows = append(rows, permRow{flags: rowFlags, propvals: propvals})
+	}
+	return rows, true
+}
+
+// permissionChanges turns the request rows into store operations. A row whose
+// member cannot be resolved is skipped rather than faulted, which is what lets a
+// client send a table it did not fully author.
+func (s *Session) permissionChanges(rows []permRow, includeFB bool) []objectstore.PermissionChange {
+	changes := make([]objectstore.PermissionChange, 0, len(rows))
+	for _, r := range rows {
+		if c, ok := s.permissionChange(r, includeFB); ok {
+			changes = append(changes, c)
+		}
+	}
+	return changes
+}
+
+// permissionChange maps one row to its store operation.
+func (s *Session) permissionChange(r permRow, includeFB bool) (objectstore.PermissionChange, bool) {
+	switch r.flags {
+	case permRowAdd:
+		username, ok := s.resolvePermissionMember(r.propvals)
+		if !ok {
+			return objectstore.PermissionChange{}, false
+		}
+		return objectstore.PermissionChange{
+			Op: objectstore.PermAdd, Username: username, Rights: ingestRights(r.propvals, includeFB),
+		}, true
+	case permRowModify:
+		id, ok := memberID(r.propvals)
+		if !ok {
+			return objectstore.PermissionChange{}, false
+		}
+		return objectstore.PermissionChange{
+			Op: objectstore.PermModify, MemberID: id, Rights: ingestRights(r.propvals, includeFB),
+		}, true
+	case permRowRemove:
+		id, ok := memberID(r.propvals)
+		if !ok {
+			return objectstore.PermissionChange{}, false
+		}
+		return objectstore.PermissionChange{Op: objectstore.PermRemove, MemberID: id}, true
+	}
+	return objectstore.PermissionChange{}, false
+}
+
 func (s *Session) ropModifyPermissions(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	flags, e1 := p.Uint8()  // ModifyFlags
 	count, e2 := p.Uint16() // PermissionsCount
 	if e1 != nil || e2 != nil {
 		return false
 	}
-	type permRow struct {
-		flags    uint8
-		propvals mapi.PropertyValues
+	rows, framed := pullPermissionRows(p, int(count))
+	if !framed {
+		return false
 	}
-	rows := make([]permRow, 0, count)
-	for i := 0; i < int(count); i++ {
-		rowFlags, e3 := p.Uint8()
-		propvals, e4 := p.PropertyValues()
-		if e3 != nil || e4 != nil {
-			return false
-		}
-		rows = append(rows, permRow{flags: rowFlags, propvals: propvals})
-	}
-
 	folder, ok := s.openFolder(out, ropModifyPermissions, handles, hindex, hindex)
 	if !ok {
 		return true
@@ -158,35 +213,7 @@ func (s *Session) ropModifyPermissions(p *ext.Pull, out *ext.Push, handles []uin
 		return true
 	}
 
-	includeFB := flags&modifyPermIncludeFreeBusy != 0
-	changes := make([]objectstore.PermissionChange, 0, len(rows))
-	for _, r := range rows {
-		switch r.flags {
-		case permRowAdd:
-			username, ok := s.resolvePermissionMember(r.propvals)
-			if !ok {
-				continue // a member that cannot be resolved is skipped, never faulted
-			}
-			changes = append(changes, objectstore.PermissionChange{
-				Op: objectstore.PermAdd, Username: username, Rights: ingestRights(r.propvals, includeFB),
-			})
-		case permRowModify:
-			id, ok := memberID(r.propvals)
-			if !ok {
-				continue
-			}
-			changes = append(changes, objectstore.PermissionChange{
-				Op: objectstore.PermModify, MemberID: id, Rights: ingestRights(r.propvals, includeFB),
-			})
-		case permRowRemove:
-			id, ok := memberID(r.propvals)
-			if !ok {
-				continue
-			}
-			changes = append(changes, objectstore.PermissionChange{Op: objectstore.PermRemove, MemberID: id})
-		}
-	}
-
+	changes := s.permissionChanges(rows, flags&modifyPermIncludeFreeBusy != 0)
 	if err := folder.store.ModifyPermissions(folder.folderID, flags&modifyPermReplaceRows != 0, changes); err != nil {
 		writeErr(out, ropModifyPermissions, hindex, ecError)
 		return true
