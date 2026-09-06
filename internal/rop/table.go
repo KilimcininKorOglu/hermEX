@@ -64,6 +64,47 @@ func buildPropertyRow(out *ext.Push, columns []mapi.PropTag, props mapi.Property
 	return nil
 }
 
+// openTable resolves a handle to a table object. ok is false when the handle
+// names something else, in which case the caller's error response is written
+// here rather than at each call site.
+func (s *Session) openTable(out *ext.Push, ropID uint8, handles []uint32, hindex uint8, ec uint32) (*object, bool) {
+	table := s.get(handleAt(handles, hindex))
+	if table == nil || table.kind != kindTable {
+		writeErr(out, ropID, hindex, ec)
+		return nil, false
+	}
+	return table, true
+}
+
+// openStoreTable is openTable for the ROPs that reach the store: those also need
+// the table bound to one.
+func (s *Session) openStoreTable(out *ext.Push, ropID uint8, handles []uint32, hindex uint8) (*object, bool) {
+	table, ok := s.openTable(out, ropID, handles, hindex, ecError)
+	if !ok {
+		return nil, false
+	}
+	if table.store == nil {
+		writeErr(out, ropID, hindex, ecError)
+		return nil, false
+	}
+	return table, true
+}
+
+// openProjectedTable is openStoreTable for the ROPs that project row data: those
+// also need the column set chosen, since a table with no columns can project
+// nothing.
+func (s *Session) openProjectedTable(out *ext.Push, ropID uint8, handles []uint32, hindex uint8) (*object, bool) {
+	table, ok := s.openStoreTable(out, ropID, handles, hindex)
+	if !ok {
+		return nil, false
+	}
+	if table.table.columns == nil {
+		writeErr(out, ropID, hindex, ecError)
+		return nil, false
+	}
+	return table, true
+}
+
 // ropQueryRows handles RopQueryRows ([MS-OXCTABL] 2.2.2.5): it pages the table's
 // row snapshot from the cursor, projects each row's columns from the store as a
 // PROPERTY_ROW, advances the cursor (unless the no-advance flag is set), and
@@ -75,58 +116,24 @@ func (s *Session) ropQueryRows(p *ext.Pull, out *ext.Push, handles []uint32, hin
 	if e1 != nil || e2 != nil || e3 != nil {
 		return false
 	}
-	table := s.get(handleAt(handles, hindex))
-	if table == nil || table.kind != kindTable || table.store == nil || table.table.columns == nil {
-		writeErr(out, ropQueryRows, hindex, ecError)
+	table, ok := s.openProjectedTable(out, ropQueryRows, handles, hindex)
+	if !ok {
 		return true
 	}
 	ts := table.table
 	total := ts.total()
 	forward := forwardRead != 0
 
-	// Select the row indices to emit, in emit order, and the cursor they leave.
-	// Both branches assign newCursor, so it is declared without one: seeding it
-	// from ts.cursor reads as a fallback that no path can reach.
-	var idxs []int
-	var newCursor int
-	if forward {
-		end := min(ts.cursor+int(rowCount), total)
-		for i := ts.cursor; i < end; i++ {
-			idxs = append(idxs, i)
-		}
-		newCursor = end
-	} else {
-		start := max(ts.cursor-int(rowCount), 0)
-		for i := ts.cursor - 1; i >= start; i-- {
-			idxs = append(idxs, i)
-		}
-		newCursor = start
-	}
-
-	rows := ext.NewPush(ext.FlagUTF16)
-	for _, i := range idxs {
-		props, err := ts.rowProps(table.store, i)
-		if err != nil {
-			writeErr(out, ropQueryRows, hindex, ecError)
-			return true
-		}
-		if err := buildPropertyRow(rows, ts.columns, props); err != nil {
-			writeErr(out, ropQueryRows, hindex, ecError)
-			return true
-		}
+	idxs, newCursor := ts.pageIndices(int(rowCount), forward, total)
+	rows, err := ts.encodeRows(table.store, idxs)
+	if err != nil {
+		writeErr(out, ropQueryRows, hindex, ecError)
+		return true
 	}
 	if flags&queryRowsNoAdvance == 0 {
 		ts.cursor = newCursor
 	}
-
-	seekPos := bookmarkCurrent
-	if forward {
-		if ts.cursor >= total {
-			seekPos = bookmarkEnd
-		}
-	} else if ts.cursor == 0 {
-		seekPos = bookmarkBeginning
-	}
+	seekPos := ts.seekPosition(forward, total)
 
 	out.Uint8(ropQueryRows)
 	out.Uint8(hindex)
@@ -136,6 +143,65 @@ func (s *Session) ropQueryRows(p *ext.Pull, out *ext.Push, handles []uint32, hin
 	out.Uint16(uint16(len(idxs)))
 	out.Raw(rows.Bytes())
 	return true
+}
+
+// pullSeekRowRequest reads a RopSeekRow request. The offset is carried as an
+// unsigned field but read as signed, and WantRowMovedCount is discarded because
+// the response always reports the count.
+func pullSeekRowRequest(p *ext.Pull) (seekPos uint8, offset uint32, ok bool) {
+	seekPos, e1 := p.Uint8()
+	offset, e2 := p.Uint32() // Offset, signed
+	_, e3 := p.Uint8()       // WantRowMovedCount
+	return seekPos, offset, e1 == nil && e2 == nil && e3 == nil
+}
+
+// pageIndices selects the row indices one RopQueryRows emits, in emit order,
+// and the cursor position the page leaves behind. A backward read walks down
+// from the row before the cursor, so the two directions never return the same
+// row twice.
+func (ts *tableState) pageIndices(rowCount int, forward bool, total int) ([]int, int) {
+	if !forward {
+		start := max(ts.cursor-rowCount, 0)
+		var idxs []int
+		for i := ts.cursor - 1; i >= start; i-- {
+			idxs = append(idxs, i)
+		}
+		return idxs, start
+	}
+	end := min(ts.cursor+rowCount, total)
+	var idxs []int
+	for i := ts.cursor; i < end; i++ {
+		idxs = append(idxs, i)
+	}
+	return idxs, end
+}
+
+// encodeRows projects each index as a PROPERTY_ROW over the table's columns,
+// into one buffer.
+func (ts *tableState) encodeRows(store *objectstore.Store, idxs []int) (*ext.Push, error) {
+	rows := ext.NewPush(ext.FlagUTF16)
+	for _, i := range idxs {
+		props, err := ts.rowProps(store, i)
+		if err != nil {
+			return nil, err
+		}
+		if err := buildPropertyRow(rows, ts.columns, props); err != nil {
+			return nil, err
+		}
+	}
+	return rows, nil
+}
+
+// seekPosition reports where the cursor now stands, which the response carries
+// so the client knows whether it reached an end of the table.
+func (ts *tableState) seekPosition(forward bool, total int) uint8 {
+	switch {
+	case forward && ts.cursor >= total:
+		return bookmarkEnd
+	case !forward && ts.cursor == 0:
+		return bookmarkBeginning
+	}
+	return bookmarkCurrent
 }
 
 // ropGetHierarchyTable handles RopGetHierarchyTable ([MS-OXCFOLD] 2.2.1.13): it
@@ -204,52 +270,73 @@ func sortableType(t mapi.PropType) bool {
 // Push.PropValue emits for the column's type; a type mismatch (which the store
 // should never produce) compares equal, so the stable sort keeps input order.
 func compareValues(a, b any) int {
+	if r, ok := compareNumbers(a, b); ok {
+		return r
+	}
+	if r, ok := compareTextual(a, b); ok {
+		return r
+	}
+	return 0
+}
+
+// compareNumbers orders the integer and floating-point types. ok is false when
+// a is not one of them, or when b is a different type.
+func compareNumbers(a, b any) (int, bool) {
 	switch x := a.(type) {
 	case int16:
-		if y, ok := b.(int16); ok {
-			return cmp.Compare(x, y)
-		}
+		return compareOrdered(x, b)
 	case int32:
-		if y, ok := b.(int32); ok {
-			return cmp.Compare(x, y)
-		}
+		return compareOrdered(x, b)
 	case int64:
-		if y, ok := b.(int64); ok {
-			return cmp.Compare(x, y)
-		}
+		return compareOrdered(x, b)
 	case uint64:
-		if y, ok := b.(uint64); ok {
-			return cmp.Compare(x, y)
-		}
+		return compareOrdered(x, b)
 	case float32:
-		if y, ok := b.(float32); ok {
-			return cmp.Compare(x, y)
-		}
+		return compareOrdered(x, b)
 	case float64:
-		if y, ok := b.(float64); ok {
-			return cmp.Compare(x, y)
-		}
+		return compareOrdered(x, b)
+	}
+	return 0, false
+}
+
+// compareTextual orders the remaining sortable types: booleans (false before
+// true), strings and binary.
+func compareTextual(a, b any) (int, bool) {
+	switch x := a.(type) {
 	case bool:
 		if y, ok := b.(bool); ok {
-			switch {
-			case x == y:
-				return 0
-			case !x:
-				return -1
-			default:
-				return 1
-			}
+			return compareBool(x, y), true
 		}
 	case string:
 		if y, ok := b.(string); ok {
-			return strings.Compare(x, y)
+			return strings.Compare(x, y), true
 		}
 	case []byte:
 		if y, ok := b.([]byte); ok {
-			return bytes.Compare(x, y)
+			return bytes.Compare(x, y), true
 		}
 	}
-	return 0
+	return 0, false
+}
+
+// compareOrdered compares x against b when b holds the same ordered type.
+func compareOrdered[T cmp.Ordered](x T, b any) (int, bool) {
+	y, ok := b.(T)
+	if !ok {
+		return 0, false
+	}
+	return cmp.Compare(x, y), true
+}
+
+// compareBool orders false before true.
+func compareBool(x, y bool) int {
+	switch {
+	case x == y:
+		return 0
+	case !x:
+		return -1
+	}
+	return 1
 }
 
 // viewTags is every property the active filter and sort need, read independently
@@ -293,14 +380,9 @@ func (t *tableState) rebuildView(store *objectstore.Store) error {
 		return nil
 	}
 	n := t.baseCount()
-	tags := t.viewTags()
-	bags := make([]mapi.PropertyValues, n)
-	for i := range n {
-		b, err := t.rowKeyProps(store, i, tags)
-		if err != nil {
-			return err
-		}
-		bags[i] = b
+	bags, err := t.keyProps(store, n)
+	if err != nil {
+		return err
 	}
 	view := make([]int, 0, n)
 	for i := range n {
@@ -310,31 +392,63 @@ func (t *tableState) rebuildView(store *objectstore.Store) error {
 	}
 	if len(t.sortKeys) > 0 {
 		slices.SortStableFunc(view, func(a, b int) int {
-			for _, k := range t.sortKeys {
-				av, aok := bags[a].Get(k.tag)
-				bv, bok := bags[b].Get(k.tag)
-				if !aok || !bok {
-					if aok == bok {
-						continue // both absent: tie on this key
-					}
-					if !aok {
-						return 1 // a absent -> after b
-					}
-					return -1 // b absent -> a before b
-				}
-				c := compareValues(av, bv)
-				if k.descending {
-					c = -c
-				}
-				if c != 0 {
-					return c
-				}
-			}
-			return 0
+			return t.compareRows(bags[a], bags[b])
 		})
 	}
 	t.view = view
 	return nil
+}
+
+// keyProps reads, for every base row, the properties the active filter and sort
+// need. They are read once here rather than per comparison, because a sort
+// touches a row many times.
+func (t *tableState) keyProps(store *objectstore.Store, n int) ([]mapi.PropertyValues, error) {
+	tags := t.viewTags()
+	bags := make([]mapi.PropertyValues, n)
+	for i := range n {
+		b, err := t.rowKeyProps(store, i, tags)
+		if err != nil {
+			return nil, err
+		}
+		bags[i] = b
+	}
+	return bags, nil
+}
+
+// compareRows orders two rows by the table's sort keys, in key order. A row
+// missing a key sorts after one that has it, and two rows both missing it tie on
+// that key and fall through to the next.
+func (t *tableState) compareRows(a, b mapi.PropertyValues) int {
+	for _, k := range t.sortKeys {
+		av, aok := a.Get(k.tag)
+		bv, bok := b.Get(k.tag)
+		if !aok || !bok {
+			if c, tie := compareAbsent(aok, bok); !tie {
+				return c
+			}
+			continue
+		}
+		c := compareValues(av, bv)
+		if k.descending {
+			c = -c
+		}
+		if c != 0 {
+			return c
+		}
+	}
+	return 0
+}
+
+// compareAbsent orders a pair where at least one side lacks the key. tie is true
+// when both lack it, which leaves the decision to the next sort key.
+func compareAbsent(aok, bok bool) (c int, tie bool) {
+	if aok == bok {
+		return 0, true // both absent: tie on this key
+	}
+	if !aok {
+		return 1, false // a absent -> after b
+	}
+	return -1, false // b absent -> a before b
 }
 
 // ropSortTable handles RopSortTable ([MS-OXCTABL] 2.2.2.3): it orders the table's
@@ -342,34 +456,16 @@ func (t *tableState) rebuildView(store *objectstore.Store) error {
 // non-sortable column types are not implemented and fail loud rather than returning
 // a wrongly-ordered table the client would trust.
 func (s *Session) ropSortTable(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	_, e1 := p.Uint8()         // TableFlags
-	count, e2 := p.Uint16()    // SortOrderCount
-	catCount, e3 := p.Uint16() // CategoryCount
-	expanded, e4 := p.Uint16() // ExpandedCount
-	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
+	count, catCount, expanded, ok := pullSortHeader(p)
+	if !ok {
 		return false
 	}
-	keys := make([]sortKey, 0, count)
-	unsupported := false
-	for range int(count) {
-		ptype, ea := p.Uint16() // PropertyType
-		pid, eb := p.Uint16()   // PropertyId
-		order, ec := p.Uint8()  // Order
-		if ea != nil || eb != nil || ec != nil {
-			return false
-		}
-		desc := order == sortDescend
-		if order != sortAscend && order != sortDescend {
-			unsupported = true // a category order, not plain ascending/descending
-		}
-		if !sortableType(mapi.PropType(ptype)) {
-			unsupported = true
-		}
-		keys = append(keys, sortKey{tag: mapi.MakeTag(pid, mapi.PropType(ptype)), descending: desc})
+	keys, unsupported, framed := pullSortKeys(p, int(count))
+	if !framed {
+		return false
 	}
-	table := s.get(handleAt(handles, hindex))
-	if table == nil || table.kind != kindTable || table.store == nil {
-		writeErr(out, ropSortTable, hindex, ecError)
+	table, bound := s.openStoreTable(out, ropSortTable, handles, hindex)
+	if !bound {
 		return true
 	}
 	if catCount != 0 || expanded != 0 || unsupported {
@@ -388,6 +484,51 @@ func (s *Session) ropSortTable(p *ext.Pull, out *ext.Push, handles []uint32, hin
 	return true
 }
 
+// pullSortHeader reads the fixed part of a RopSortTable request. The table flags
+// are discarded; the category counts are returned because a non-zero one asks
+// for a categorized table, which this server refuses rather than flattening.
+func pullSortHeader(p *ext.Pull) (count, catCount, expanded uint16, ok bool) {
+	_, e1 := p.Uint8()         // TableFlags
+	count, e2 := p.Uint16()    // SortOrderCount
+	catCount, e3 := p.Uint16() // CategoryCount
+	expanded, e4 := p.Uint16() // ExpandedCount
+	return count, catCount, expanded, e1 == nil && e2 == nil && e3 == nil && e4 == nil
+}
+
+// pullSortKeys reads the request's SortOrder array. unsupported reports a key
+// this server cannot honour, which the caller answers with ecNotSupported rather
+// than returning a wrongly-ordered table; framed is false when the array itself
+// could not be read, which ends the batch.
+func pullSortKeys(p *ext.Pull, count int) (keys []sortKey, unsupported, framed bool) {
+	keys = make([]sortKey, 0, count)
+	for range count {
+		ptype, ea := p.Uint16() // PropertyType
+		pid, eb := p.Uint16()   // PropertyId
+		order, ec := p.Uint8()  // Order
+		if ea != nil || eb != nil || ec != nil {
+			return nil, false, false
+		}
+		if !sortOrderSupported(order, mapi.PropType(ptype)) {
+			unsupported = true
+		}
+		keys = append(keys, sortKey{
+			tag:        mapi.MakeTag(pid, mapi.PropType(ptype)),
+			descending: order == sortDescend,
+		})
+	}
+	return keys, unsupported, true
+}
+
+// sortOrderSupported reports whether one sort key can be honoured: a plain
+// ascending or descending order (not a category order) over a type with a
+// defined ordering.
+func sortOrderSupported(order uint8, ptype mapi.PropType) bool {
+	if order != sortAscend && order != sortDescend {
+		return false // a category order, not plain ascending/descending
+	}
+	return sortableType(ptype)
+}
+
 // ropRestrict handles RopRestrict ([MS-OXCTABL] 2.2.2.4): it installs a filter so
 // QueryRows returns only the matching rows. An empty restriction clears the filter.
 // A restriction this server cannot evaluate fails loud (ecNotSupported) rather than
@@ -403,9 +544,8 @@ func (s *Session) ropRestrict(p *ext.Pull, out *ext.Push, handles []uint32, hind
 	if e3 != nil {
 		return false
 	}
-	table := s.get(handleAt(handles, hindex))
-	if table == nil || table.kind != kindTable || table.store == nil {
-		writeErr(out, ropRestrict, hindex, ecError)
+	table, ok := s.openStoreTable(out, ropRestrict, handles, hindex)
+	if !ok {
 		return true
 	}
 	var restriction *mapi.Restriction
@@ -452,48 +592,65 @@ func restrictionSupported(r mapi.Restriction) bool {
 	switch r.Type {
 	case mapi.ResAnd, mapi.ResOr:
 		kids, _ := r.Value.([]mapi.Restriction)
-		for _, k := range kids {
-			if !restrictionSupported(k) {
-				return false
-			}
-		}
-		return true
+		return allRestrictionsSupported(kids)
 	case mapi.ResNot:
 		inner, _ := r.Value.(mapi.Restriction)
 		return restrictionSupported(inner)
 	case mapi.ResComment:
 		c, _ := r.Value.(mapi.CommentRestriction)
-		if c.Res == nil {
-			return true
-		}
-		return restrictionSupported(*c.Res)
+		return c.Res == nil || restrictionSupported(*c.Res)
 	case mapi.ResExist:
 		return true
 	case mapi.ResProperty:
 		pr, _ := r.Value.(mapi.PropertyRestriction)
-		switch pr.Relop {
-		case mapi.RelopLT, mapi.RelopLE, mapi.RelopGT, mapi.RelopGE, mapi.RelopEQ, mapi.RelopNE:
-			return true
-		}
-		return false // RelopRE / member-of-DL not evaluated
+		return relopSupported(pr.Relop)
 	case mapi.ResContent:
 		c, _ := r.Value.(mapi.ContentRestriction)
-		if c.PropTag.Type() != mapi.PtUnicode && c.PropTag.Type() != mapi.PtString8 {
-			return false // v1 content matching is text-only
-		}
-		if c.FuzzyLevel&^(0xFFFF|fuzzyIgnoreCase) != 0 {
-			return false // a fuzzy flag beyond IGNORECASE (IGNORENONSPACE / LOOSE)
-		}
-		switch c.FuzzyLevel & 0xFFFF {
-		case fuzzyFullString, fuzzySubString, fuzzyPrefix:
-			return true
-		}
-		return false
+		return contentRestrictionSupported(c)
 	case mapi.ResBitmask:
 		b, _ := r.Value.(mapi.BitmaskRestriction)
 		return b.PropTag.Type() == mapi.PtLong
 	}
 	return false // compare-props, size, subobject, count, annotation, null
+}
+
+// allRestrictionsSupported reports whether every child of an AND or OR is one
+// this server evaluates; one unsupported child makes the whole node unsupported.
+func allRestrictionsSupported(kids []mapi.Restriction) bool {
+	for _, k := range kids {
+		if !restrictionSupported(k) {
+			return false
+		}
+	}
+	return true
+}
+
+// relopSupported reports whether a property restriction's relational operator is
+// one this server evaluates. RelopRE (regular expression) and member-of-DL are
+// not.
+func relopSupported(relop mapi.Relop) bool {
+	switch relop {
+	case mapi.RelopLT, mapi.RelopLE, mapi.RelopGT, mapi.RelopGE, mapi.RelopEQ, mapi.RelopNE:
+		return true
+	}
+	return false
+}
+
+// contentRestrictionSupported reports whether a content restriction is one this
+// server evaluates: text-only, and a fuzzy level no stronger than IGNORECASE
+// over full-string, substring or prefix matching.
+func contentRestrictionSupported(c mapi.ContentRestriction) bool {
+	if c.PropTag.Type() != mapi.PtUnicode && c.PropTag.Type() != mapi.PtString8 {
+		return false // v1 content matching is text-only
+	}
+	if c.FuzzyLevel&^(0xFFFF|fuzzyIgnoreCase) != 0 {
+		return false // a fuzzy flag beyond IGNORECASE (IGNORENONSPACE / LOOSE)
+	}
+	switch c.FuzzyLevel & 0xFFFF {
+	case fuzzyFullString, fuzzySubString, fuzzyPrefix:
+		return true
+	}
+	return false
 }
 
 // restrictionTags collects every property the restriction references, so
@@ -538,29 +695,16 @@ func evalRestriction(r mapi.Restriction, props mapi.PropertyValues) bool {
 	switch r.Type {
 	case mapi.ResAnd:
 		kids, _ := r.Value.([]mapi.Restriction)
-		for _, k := range kids {
-			if !evalRestriction(k, props) {
-				return false
-			}
-		}
-		return true
+		return evalAll(kids, props)
 	case mapi.ResOr:
 		kids, _ := r.Value.([]mapi.Restriction)
-		for _, k := range kids {
-			if evalRestriction(k, props) {
-				return true
-			}
-		}
-		return false
+		return evalAny(kids, props)
 	case mapi.ResNot:
 		inner, _ := r.Value.(mapi.Restriction)
 		return !evalRestriction(inner, props)
 	case mapi.ResComment:
 		c, _ := r.Value.(mapi.CommentRestriction)
-		if c.Res == nil {
-			return true
-		}
-		return evalRestriction(*c.Res, props)
+		return c.Res == nil || evalRestriction(*c.Res, props)
 	case mapi.ResExist:
 		e, _ := r.Value.(mapi.ExistRestriction)
 		_, present := props.Get(e.PropTag)
@@ -571,6 +715,27 @@ func evalRestriction(r mapi.Restriction, props mapi.PropertyValues) bool {
 		return evalContent(r.Value.(mapi.ContentRestriction), props)
 	case mapi.ResBitmask:
 		return evalBitmask(r.Value.(mapi.BitmaskRestriction), props)
+	}
+	return false
+}
+
+// evalAll is the AND node: every child must match. An empty AND matches.
+func evalAll(kids []mapi.Restriction, props mapi.PropertyValues) bool {
+	for _, k := range kids {
+		if !evalRestriction(k, props) {
+			return false
+		}
+	}
+	return true
+}
+
+// evalAny is the OR node: one matching child is enough. An empty OR matches
+// nothing.
+func evalAny(kids []mapi.Restriction, props mapi.PropertyValues) bool {
+	for _, k := range kids {
+		if evalRestriction(k, props) {
+			return true
+		}
 	}
 	return false
 }
@@ -650,40 +815,28 @@ func evalBitmask(b mapi.BitmaskRestriction, props mapi.PropertyValues) bool {
 // signed offset from an origin (beginning/current/end), clamped to the view, and
 // reports whether it stopped short and how many rows it actually moved.
 func (s *Session) ropSeekRow(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	seekPos, e1 := p.Uint8()
-	off, e2 := p.Uint32() // Offset, signed
-	_, e3 := p.Uint8()    // WantRowMovedCount
-	if e1 != nil || e2 != nil || e3 != nil {
+	seekPos, off, framed := pullSeekRowRequest(p)
+	if !framed {
 		return false
 	}
-	table := s.get(handleAt(handles, hindex))
-	if table == nil || table.kind != kindTable {
-		writeErr(out, ropSeekRow, hindex, ecError)
+	table, ok := s.openTable(out, ropSeekRow, handles, hindex, ecError)
+	if !ok {
 		return true
 	}
 	ts := table.table
 	total := ts.total()
-	var origin int
-	switch seekPos {
-	case bookmarkBeginning:
-		origin = 0
-	case bookmarkCurrent:
-		origin = ts.cursor
-	case bookmarkEnd:
-		origin = total
-	default:
+	origin, valid := ts.seekOrigin(seekPos)
+	if !valid {
 		writeErr(out, ropSeekRow, hindex, ecError)
 		return true
 	}
 	// #nosec G115 -- the signed and unsigned views of the same 32 bits
 	offset := int32(off)
-	target := origin + int(offset)
-	if target < 0 {
-		target = 0
-	} else if target > total {
-		target = total
-	}
+	// Both target and origin are clamped into [0, total], a Go slice length, so
+	// their difference fits an int32 with room to spare.
+	target := min(max(origin+int(offset), 0), total)
 	ts.cursor = target
+	// #nosec G115 -- target and origin are both in [0, total], a Go slice length, so the difference is far inside int32
 	sought := int32(target - origin)
 	var hasSoughtLess uint8
 	if sought != offset {
@@ -693,6 +846,7 @@ func (s *Session) ropSeekRow(p *ext.Pull, out *ext.Push, handles []uint32, hinde
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
 	out.Uint8(hasSoughtLess)
+	// #nosec G115 -- the signed and unsigned views of the same 32 bits, which is what RowsSought carries on the wire
 	out.Uint32(uint32(sought))
 	return true
 }
@@ -720,74 +874,26 @@ func (t *tableState) matchRow(store *objectstore.Store, viewIdx int, r *mapi.Res
 // the cursor there, and returns that row. With no match it reports HasRowData=0.
 // The custom-bookmark origin needs bookmarks and is not yet supported.
 func (s *Session) ropFindRow(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	flags, e1 := p.Uint8()
-	resSize, e2 := p.Uint16()
-	if e1 != nil || e2 != nil {
+	req, ok := pullFindRowRequest(p)
+	if !ok {
 		return false
 	}
-	raw, e3 := p.Raw(int(resSize)) // RestrictionData
-	if e3 != nil {
-		return false
-	}
-	seekPos, e4 := p.Uint8()
-	_, e5 := p.BinShort() // Bookmark (used only for the custom origin, deferred)
-	if e4 != nil || e5 != nil {
-		return false
-	}
-	table := s.get(handleAt(handles, hindex))
-	if table == nil || table.kind != kindTable || table.store == nil || table.table.columns == nil {
-		writeErr(out, ropFindRow, hindex, ecError)
+	table, ok := s.openProjectedTable(out, ropFindRow, handles, hindex)
+	if !ok {
 		return true
 	}
 	ts := table.table
-	var restriction *mapi.Restriction
-	if resSize > 0 {
-		r, err := ext.NewPull(raw, ext.FlagUTF16).Restriction()
-		if err != nil {
-			writeErr(out, ropFindRow, hindex, ecError)
-			return true
-		}
-		if !restrictionSupported(r) {
-			writeErr(out, ropFindRow, hindex, ecNotSupported)
-			return true
-		}
-		restriction = &r
+	restriction, ok := parseFindRowRestriction(out, hindex, req.restrictionData)
+	if !ok {
+		return true
 	}
-	total := ts.total()
-	var start int
-	switch seekPos {
-	case bookmarkBeginning:
-		start = 0
-	case bookmarkCurrent:
-		start = ts.cursor
-	case bookmarkEnd:
-		start = total
-	default:
+	start, ok := ts.seekOrigin(req.seekPos)
+	if !ok {
 		writeErr(out, ropFindRow, hindex, ecNotSupported) // custom bookmark / invalid
 		return true
 	}
-
-	found := -1
-	var scanErr error
-	probe := func(i int) bool {
-		m, err := ts.matchRow(table.store, i, restriction)
-		if err != nil {
-			scanErr = err
-			return true
-		}
-		if m {
-			found = i
-		}
-		return m
-	}
-	if flags&findRowBackward == 0 {
-		for i := start; i < total && !probe(i); i++ {
-		}
-	} else {
-		for i := start - 1; i >= 0 && !probe(i); i-- {
-		}
-	}
-	if scanErr != nil {
+	found, err := ts.scanForRow(table.store, start, restriction, req.flags&findRowBackward != 0)
+	if err != nil {
 		writeErr(out, ropFindRow, hindex, ecError)
 		return true
 	}
@@ -795,17 +901,10 @@ func (s *Session) ropFindRow(p *ext.Pull, out *ext.Push, handles []uint32, hinde
 	var rowBytes []byte
 	if found >= 0 {
 		ts.cursor = found
-		row, err := ts.rowProps(table.store, found)
-		if err != nil {
+		if rowBytes, err = ts.encodeRow(table.store, found); err != nil {
 			writeErr(out, ropFindRow, hindex, ecError)
 			return true
 		}
-		rp := ext.NewPush(ext.FlagUTF16)
-		if err := buildPropertyRow(rp, ts.columns, row); err != nil {
-			writeErr(out, ropFindRow, hindex, ecError)
-			return true
-		}
-		rowBytes = rp.Bytes()
 	}
 
 	out.Uint8(ropFindRow)
@@ -821,13 +920,107 @@ func (s *Session) ropFindRow(p *ext.Pull, out *ext.Push, handles []uint32, hinde
 	return true
 }
 
+// findRowRequest is a decoded RopFindRow request. The bookmark is read but not
+// kept: it applies only to the custom origin, which is deferred.
+type findRowRequest struct {
+	flags           uint8
+	seekPos         uint8
+	restrictionData []byte
+}
+
+func pullFindRowRequest(p *ext.Pull) (findRowRequest, bool) {
+	var req findRowRequest
+	flags, e1 := p.Uint8()
+	resSize, e2 := p.Uint16()
+	if e1 != nil || e2 != nil {
+		return req, false
+	}
+	raw, e3 := p.Raw(int(resSize)) // RestrictionData
+	if e3 != nil {
+		return req, false
+	}
+	seekPos, e4 := p.Uint8()
+	_, e5 := p.BinShort() // Bookmark (used only for the custom origin, deferred)
+	if e4 != nil || e5 != nil {
+		return req, false
+	}
+	return findRowRequest{flags: flags, seekPos: seekPos, restrictionData: raw}, true
+}
+
+// parseFindRowRestriction decodes the request's restriction, if it carries one.
+// A nil restriction matches every row. ok=false means the response was already
+// written.
+func parseFindRowRestriction(out *ext.Push, hindex uint8, data []byte) (*mapi.Restriction, bool) {
+	if len(data) == 0 {
+		return nil, true
+	}
+	r, err := ext.NewPull(data, ext.FlagUTF16).Restriction()
+	if err != nil {
+		writeErr(out, ropFindRow, hindex, ecError)
+		return nil, false
+	}
+	if !restrictionSupported(r) {
+		writeErr(out, ropFindRow, hindex, ecNotSupported)
+		return nil, false
+	}
+	return &r, true
+}
+
+// seekOrigin resolves a bookmark origin to the row index a scan starts from.
+// ok=false for a custom or invalid bookmark, which this table does not serve.
+func (ts *tableState) seekOrigin(seekPos uint8) (int, bool) {
+	switch seekPos {
+	case bookmarkBeginning:
+		return 0, true
+	case bookmarkCurrent:
+		return ts.cursor, true
+	case bookmarkEnd:
+		return ts.total(), true
+	}
+	return 0, false
+}
+
+// scanForRow walks the table from start until a row matches the restriction,
+// returning its index or -1 when none does. A store error stops the scan.
+func (ts *tableState) scanForRow(store *objectstore.Store, start int, restriction *mapi.Restriction, backward bool) (int, error) {
+	total := ts.total()
+	step := 1
+	if backward {
+		// A backward scan starts at the row before the origin, so the origin's own
+		// row is not re-examined.
+		start, step = start-1, -1
+	}
+	for i := start; i >= 0 && i < total; i += step {
+		match, err := ts.matchRow(store, i, restriction)
+		if err != nil {
+			return -1, err
+		}
+		if match {
+			return i, nil
+		}
+	}
+	return -1, nil
+}
+
+// encodeRow serializes one row as a PROPERTY_ROW over the table's columns.
+func (ts *tableState) encodeRow(store *objectstore.Store, index int) ([]byte, error) {
+	row, err := ts.rowProps(store, index)
+	if err != nil {
+		return nil, err
+	}
+	rp := ext.NewPush(ext.FlagUTF16)
+	if err := buildPropertyRow(rp, ts.columns, row); err != nil {
+		return nil, err
+	}
+	return rp.Bytes(), nil
+}
+
 // ropGetStatus handles RopGetStatus ([MS-OXCTABL] 2.2.2.9): it reports the table's
 // asynchronous-operation status. hermEX builds every table synchronously, so the
 // table is always fully populated: the status is TBLSTAT_COMPLETE.
 func (s *Session) ropGetStatus(_ *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	table := s.get(handleAt(handles, hindex))
-	if table == nil || table.kind != kindTable {
-		writeErr(out, ropGetStatus, hindex, ecNotSupported)
+	_, ok := s.openTable(out, ropGetStatus, handles, hindex, ecNotSupported)
+	if !ok {
 		return true
 	}
 	out.Uint8(ropGetStatus)
@@ -840,9 +1033,8 @@ func (s *Session) ropGetStatus(_ *ext.Pull, out *ext.Push, handles []uint32, hin
 // ropQueryPosition handles RopQueryPosition ([MS-OXCTABL] 2.2.2.5): it returns the
 // cursor's current row index (Numerator) and the table's row count (Denominator).
 func (s *Session) ropQueryPosition(_ *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	table := s.get(handleAt(handles, hindex))
-	if table == nil || table.kind != kindTable {
-		writeErr(out, ropQueryPosition, hindex, ecNotSupported)
+	table, ok := s.openTable(out, ropQueryPosition, handles, hindex, ecNotSupported)
+	if !ok {
 		return true
 	}
 	ts := table.table
@@ -866,9 +1058,8 @@ func (s *Session) ropSeekRowFractional(p *ext.Pull, out *ext.Push, handles []uin
 	if e1 != nil || e2 != nil {
 		return false
 	}
-	table := s.get(handleAt(handles, hindex))
-	if table == nil || table.kind != kindTable {
-		writeErr(out, ropSeekRowFractional, hindex, ecNotSupported)
+	table, ok := s.openTable(out, ropSeekRowFractional, handles, hindex, ecNotSupported)
+	if !ok {
 		return true
 	}
 	if denominator == 0 {
@@ -890,9 +1081,8 @@ func (s *Session) ropSeekRowFractional(p *ext.Pull, out *ext.Push, handles []uin
 // fixed schema, so the answer is the currently configured display column set (empty
 // before the first RopSetColumns).
 func (s *Session) ropQueryColumnsAll(_ *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	table := s.get(handleAt(handles, hindex))
-	if table == nil || table.kind != kindTable {
-		writeErr(out, ropQueryColumnsAll, hindex, ecNotSupported)
+	table, ok := s.openTable(out, ropQueryColumnsAll, handles, hindex, ecNotSupported)
+	if !ok {
 		return true
 	}
 	out.Uint8(ropQueryColumnsAll)
@@ -907,9 +1097,8 @@ func (s *Session) ropQueryColumnsAll(_ *ext.Pull, out *ext.Push, handles []uint3
 // operation to abort: the ROP fails with ecUnableToAbort, as Exchange does once the
 // build has completed.
 func (s *Session) ropAbort(_ *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	table := s.get(handleAt(handles, hindex))
-	if table == nil || table.kind != kindTable {
-		writeErr(out, ropAbort, hindex, ecNotSupported)
+	_, ok := s.openTable(out, ropAbort, handles, hindex, ecNotSupported)
+	if !ok {
 		return true
 	}
 	writeErr(out, ropAbort, hindex, ecUnableToAbort)
@@ -927,9 +1116,8 @@ func (s *Session) ropGetCollapseState(p *ext.Pull, out *ext.Push, handles []uint
 	if e1 != nil || e2 != nil {
 		return false
 	}
-	table := s.get(handleAt(handles, hindex))
-	if table == nil || table.kind != kindTable {
-		writeErr(out, ropGetCollapseState, hindex, ecError)
+	_, ok := s.openTable(out, ropGetCollapseState, handles, hindex, ecError)
+	if !ok {
 		return true
 	}
 	writeErr(out, ropGetCollapseState, hindex, ecNotSupported)
@@ -945,9 +1133,8 @@ func (s *Session) ropFreeBookmark(p *ext.Pull, out *ext.Push, handles []uint32, 
 	if e1 != nil {
 		return false
 	}
-	table := s.get(handleAt(handles, hindex))
-	if table == nil || table.kind != kindTable {
-		writeErr(out, ropFreeBookmark, hindex, ecError)
+	table, ok := s.openTable(out, ropFreeBookmark, handles, hindex, ecError)
+	if !ok {
 		return true
 	}
 	ts := table.table
@@ -967,9 +1154,8 @@ func (s *Session) ropFreeBookmark(p *ext.Pull, out *ext.Push, handles []uint32, 
 // to its initial state, clearing the column set, sort order, restriction, and
 // cursor, so the client starts a fresh SetColumns / Sort / Restrict cycle.
 func (s *Session) ropResetTable(_ *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	table := s.get(handleAt(handles, hindex))
-	if table == nil || table.kind != kindTable {
-		writeErr(out, ropResetTable, hindex, ecError)
+	table, ok := s.openTable(out, ropResetTable, handles, hindex, ecError)
+	if !ok {
 		return true
 	}
 	ts := table.table
@@ -995,9 +1181,8 @@ func (ts *tableState) ensureBookmarks() {
 // current cursor position under a new bookmark index and returns that index as a
 // BinShort. The bookmark persists until the table is released.
 func (s *Session) ropCreateBookmark(_ *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	table := s.get(handleAt(handles, hindex))
-	if table == nil || table.kind != kindTable {
-		writeErr(out, ropCreateBookmark, hindex, ecError)
+	table, ok := s.openTable(out, ropCreateBookmark, handles, hindex, ecError)
+	if !ok {
 		return true
 	}
 	ts := table.table
@@ -1024,9 +1209,8 @@ func (s *Session) ropSeekRowBookmark(p *ext.Pull, out *ext.Push, handles []uint3
 	if e1 != nil || e2 != nil || e3 != nil {
 		return false
 	}
-	table := s.get(handleAt(handles, hindex))
-	if table == nil || table.kind != kindTable {
-		writeErr(out, ropSeekRowBookmark, hindex, ecError)
+	table, ok := s.openTable(out, ropSeekRowBookmark, handles, hindex, ecError)
+	if !ok {
 		return true
 	}
 	ts := table.table
@@ -1072,9 +1256,8 @@ func (s *Session) ropSeekRowBookmark(p *ext.Pull, out *ext.Push, handles []uint3
 // so this ROP always returns ecNotSupported. The body (MaxCount u32 + CategoryID u64)
 // is NOT consumed here, this ROP must be alone in its batch.
 func (s *Session) ropExpandRow(_ *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	table := s.get(handleAt(handles, hindex))
-	if table == nil || table.kind != kindTable {
-		writeErr(out, ropExpandRow, hindex, ecError)
+	_, ok := s.openTable(out, ropExpandRow, handles, hindex, ecError)
+	if !ok {
 		return true
 	}
 	writeErr(out, ropExpandRow, hindex, ecNotSupported)
@@ -1086,9 +1269,8 @@ func (s *Session) ropExpandRow(_ *ext.Pull, out *ext.Push, handles []uint32, hin
 // categories, so this ROP always returns ecNotSupported. The body (CategoryID u64)
 // is NOT consumed here, this ROP must be alone in its batch.
 func (s *Session) ropCollapseRow(_ *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	table := s.get(handleAt(handles, hindex))
-	if table == nil || table.kind != kindTable {
-		writeErr(out, ropCollapseRow, hindex, ecError)
+	_, ok := s.openTable(out, ropCollapseRow, handles, hindex, ecError)
+	if !ok {
 		return true
 	}
 	writeErr(out, ropCollapseRow, hindex, ecNotSupported)
