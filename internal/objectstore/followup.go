@@ -73,36 +73,39 @@ func (s *Store) GetFollowupFlag(messageID int64) (FollowupFlag, error) {
 	if err != nil {
 		return f, err
 	}
-	if v, ok := props.Get(mapi.PrFlagStatus); ok {
-		if n, ok := v.(int32); ok {
-			f.Status = n
-		}
-	}
-	if v, ok := props.Get(mapi.PrFollowupIcon); ok {
-		if n, ok := v.(int32); ok {
-			f.Color = n
-		}
-	}
-	if v, ok := props.Get(mapi.PrFlagCompleteTime); ok {
-		if nt, ok := v.(uint64); ok {
-			f.Complete = mapi.NTTimeToUnix(nt)
-		}
-	}
+	f.Status = propOr[int32](props, mapi.PrFlagStatus, 0)
+	f.Color = propOr[int32](props, mapi.PrFollowupIcon, 0)
+	f.Complete = propTime(props, mapi.PrFlagCompleteTime)
 	if hasReq {
-		if v, ok := props.Get(reqTag); ok {
-			if str, ok := v.(string); ok {
-				f.Request = str
-			}
-		}
+		f.Request = propOr(props, reqTag, "")
 	}
 	if hasDue {
-		if v, ok := props.Get(dueTag); ok {
-			if nt, ok := v.(uint64); ok {
-				f.DueBy = mapi.NTTimeToUnix(nt)
-			}
-		}
+		f.DueBy = propTime(props, dueTag)
 	}
 	return f, nil
+}
+
+// propOr reads a property as the type the caller expects, falling back to a
+// default when it is absent or stored as another type.
+func propOr[T any](props mapi.PropertyValues, tag mapi.PropTag, fallback T) T {
+	v, ok := props.Get(tag)
+	if !ok {
+		return fallback
+	}
+	typed, ok := v.(T)
+	if !ok {
+		return fallback
+	}
+	return typed
+}
+
+// propTime reads a PtSysTime property as a Go time, zero when absent.
+func propTime(props mapi.PropertyValues, tag mapi.PropTag) time.Time {
+	nt := propOr[uint64](props, tag, 0)
+	if nt == 0 {
+		return time.Time{}
+	}
+	return mapi.NTTimeToUnix(nt)
 }
 
 // SetFollowupFlag writes a message's follow-up flag and keeps the IMAP \Flagged

@@ -327,45 +327,61 @@ func updateRulePatch(tx *sql.Tx, folderID, ruleID int64, p RulePatch) error {
 		return nil // foreign rule: skip
 	}
 
-	if p.Name != nil {
-		if _, err := tx.Exec(`UPDATE rules SET name=? WHERE rule_id=?`, *p.Name, ruleID); err != nil {
-			return err
-		}
+	if err := updateRuleColumns(tx, ruleID, p); err != nil {
+		return err
 	}
-	if p.Provider != nil {
-		if _, err := tx.Exec(`UPDATE rules SET provider=? WHERE rule_id=?`, *p.Provider, ruleID); err != nil {
-			return err
-		}
+	return updateRuleBlobs(tx, ruleID, p)
+}
+
+// updateRuleColumns writes the patch's scalar columns, each only when the patch
+// carries it, so an omitted column keeps its stored value.
+func updateRuleColumns(tx *sql.Tx, ruleID int64, p RulePatch) error {
+	if err := setRuleColumn(tx, ruleID, "name", p.Name); err != nil {
+		return err
 	}
-	if p.Sequence != nil {
-		if _, err := tx.Exec(`UPDATE rules SET sequence=? WHERE rule_id=?`, *p.Sequence, ruleID); err != nil {
-			return err
-		}
+	if err := setRuleColumn(tx, ruleID, "provider", p.Provider); err != nil {
+		return err
 	}
-	if p.State != nil {
-		if _, err := tx.Exec(`UPDATE rules SET state=? WHERE rule_id=?`, int64(*p.State), ruleID); err != nil {
-			return err
-		}
+	if err := setRuleColumn(tx, ruleID, "sequence", p.Sequence); err != nil {
+		return err
 	}
+	if p.State == nil {
+		return nil
+	}
+	state := int64(*p.State)
+	return setRuleColumn(tx, ruleID, "state", &state)
+}
+
+// updateRuleBlobs writes the patch's serialized columns, each only when the
+// patch carries it.
+func updateRuleBlobs(tx *sql.Tx, ruleID int64, p RulePatch) error {
 	if p.Condition != nil {
 		blob, err := marshalRestriction(p.Condition)
 		if err != nil {
 			return err
 		}
-		if _, err := tx.Exec(`UPDATE rules SET condition=? WHERE rule_id=?`, blob, ruleID); err != nil {
+		if err := setRuleColumn(tx, ruleID, "condition", &blob); err != nil {
 			return err
 		}
 	}
-	if p.Actions != nil {
-		blob, err := marshalRuleActions(p.Actions)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(`UPDATE rules SET actions=? WHERE rule_id=?`, blob, ruleID); err != nil {
-			return err
-		}
+	if p.Actions == nil {
+		return nil
 	}
-	return nil
+	blob, err := marshalRuleActions(p.Actions)
+	if err != nil {
+		return err
+	}
+	return setRuleColumn(tx, ruleID, "actions", &blob)
+}
+
+// setRuleColumn writes one rule column, or nothing when the patch left it unset.
+func setRuleColumn[T any](tx *sql.Tx, ruleID int64, column string, v *T) error {
+	if v == nil {
+		return nil
+	}
+	// #nosec G202 -- column is one of this file's own literals, never client input
+	_, err := tx.Exec(`UPDATE rules SET `+column+`=? WHERE rule_id=?`, *v, ruleID)
+	return err
 }
 
 // marshalRestriction serializes a rule condition to its stored blob; a nil pointer
