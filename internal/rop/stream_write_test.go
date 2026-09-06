@@ -94,15 +94,8 @@ func TestStreamWriteAttachmentData(t *testing.T) {
 
 	// OpenStream for write (ReadWrite mode) over the attachment's data property.
 	os, h := sess.Dispatch(buildOpenStream(0, 1, uint32(mapi.PrAttachDataBin), mapiModify), []uint32{attH, 0xFFFFFFFF})
-	p := ext.NewPull(os, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "ohindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("OpenStream(write) ReturnValue = %#x", ec)
-	}
-	if sz := mustU32(t, p, "StreamSize"); sz != 0 {
-		t.Fatalf("new attachment stream size = %d, want 0", sz)
-	}
+	p := ropOK(t, os, ropOpenStream, "OpenStream(write)")
+	wantU32(t, p, "new attachment stream size", 0)
 	streamH := h[1]
 
 	// Write the payload in two chunks; the cursor advances across them.
@@ -115,23 +108,13 @@ func TestStreamWriteAttachmentData(t *testing.T) {
 
 	// GetStreamSize reflects both writes.
 	gs, _ := sess.Dispatch(buildGetStreamSize(0), []uint32{streamH})
-	p = ext.NewPull(gs, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	mustU32(t, p, "ec")
-	if sz := mustU32(t, p, "StreamSize"); sz != 11 {
-		t.Fatalf("stream size after writes = %d, want 11", sz)
-	}
+	p = ropOK(t, gs, ropGetStreamSize, "GetStreamSize")
+	wantU32(t, p, "stream size after writes", 11)
 
 	// Seek to the start and read the written bytes back on the same stream.
 	sk, _ := sess.Dispatch(buildSeekStream(0, streamSeekSet, 0), []uint32{streamH})
-	p = ext.NewPull(sk, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	mustU32(t, p, "ec")
-	if pos, _ := p.Uint64(); pos != 0 {
-		t.Fatalf("SeekStream(SET,0) NewPosition = %d, want 0", pos)
-	}
+	p = ropOK(t, sk, ropSeekStream, "SeekStream(SET,0)")
+	wantU64(t, p, "SeekStream(SET,0) NewPosition", 0)
 	if got := readStreamChunk(t, sess, streamH, 64, 0); !bytes.Equal(got, []byte("HELLO WORLD")) {
 		t.Errorf("read-after-write = %q, want HELLO WORLD", got)
 	}
@@ -139,29 +122,17 @@ func TestStreamWriteAttachmentData(t *testing.T) {
 	// Commit stages the bytes into the attachment; SaveChangesAttachment + the
 	// carrier save persist them.
 	cm, _ := sess.Dispatch(buildCommitStream(0), []uint32{streamH})
-	p = ext.NewPull(cm, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("CommitStream ReturnValue = %#x", ec)
-	}
+	ropOK(t, cm, ropCommitStream, "CommitStream")
 	scA, _ := sess.Dispatch(buildSaveChangesAttachment(0, 1), []uint32{msgH, attH})
-	pa := ext.NewPull(scA, ext.FlagUTF16)
-	mustU8(t, pa, "RopId")
-	mustU8(t, pa, "hindex")
-	if ec := mustU32(t, pa, "ec"); ec != ecSuccess {
-		t.Fatalf("SaveChangesAttachment ReturnValue = %#x", ec)
-	}
+	ropOK(t, scA, ropSaveChangesAttachment, "SaveChangesAttachment")
 	sc, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
 	saveChangesEID(t, sc)
 
 	// White-box: the streamed payload is the stored attachment's data.
+	assertAttachmentCount(t, store, mid, 1, "host message")
 	saved, err := store.OpenMessage(int64(mid))
 	if err != nil {
 		t.Fatal(err)
-	}
-	if len(saved.Attachments) != 1 {
-		t.Fatalf("host message has %d attachments, want 1", len(saved.Attachments))
 	}
 	v, _ := saved.Attachments[0].Props.Get(mapi.PrAttachDataBin)
 	if vb, _ := v.([]byte); !bytes.Equal(vb, []byte("HELLO WORLD")) {

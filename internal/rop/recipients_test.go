@@ -1,6 +1,7 @@
 package rop
 
 import (
+	"fmt"
 	"testing"
 
 	"hermex/internal/ext"
@@ -28,46 +29,29 @@ func TestRecipientTableRoundTrip(t *testing.T) {
 	writeRecipientTable(out, recipients)
 
 	p := ext.NewPull(out.Bytes(), ext.FlagUTF16)
-	count, err := p.Uint16()
-	if err != nil || count != 2 {
-		t.Fatalf("RecipientCount = %d, err %v", count, err)
-	}
+	wantU16(t, p, "RecipientCount", 2)
 	cols, err := p.PropTags()
 	if err != nil {
 		t.Fatalf("RecipientColumns: %v", err)
 	}
-	rowCount, err := p.Uint8()
-	if err != nil || rowCount != 2 {
-		t.Fatalf("RowCount = %d, err %v", rowCount, err)
-	}
+	wantU8(t, p, "RowCount", 2)
 
-	wants := []struct {
+	for i, w := range []struct {
 		typ         uint8
 		name, email string
 	}{
 		{uint8(mapi.RecipTo), "Alice", "alice@example.com"},
 		{uint8(mapi.RecipCc), "Bob", "bob@example.com"},
-	}
-	for i, w := range wants {
-		rcptType, _ := p.Uint8()
-		if rcptType != w.typ {
-			t.Errorf("row %d type = %d, want %d", i, rcptType, w.typ)
-		}
-		if _, err := p.Uint16(); err != nil { // CodePageId
-			t.Fatalf("row %d cpid: %v", i, err)
-		}
-		if _, err := p.Uint16(); err != nil { // Reserved
-			t.Fatalf("row %d reserved: %v", i, err)
-		}
+	} {
+		label := fmt.Sprintf("row %d", i)
+		wantU8(t, p, label+" type", w.typ)
+		mustU16(t, p, label+" CodePageId")
+		mustU16(t, p, label+" Reserved")
 		bag, ok := pullRecipientRow(p, cols)
 		if !ok {
-			t.Fatalf("row %d: RecipientRow decode failed", i)
+			t.Fatalf("%s: RecipientRow decode failed", label)
 		}
-		if got := stringProp(bag, mapi.PrDisplayName); got != w.name {
-			t.Errorf("row %d name = %q, want %q", i, got, w.name)
-		}
-		if got := stringProp(bag, mapi.PrEmailAddress); got != w.email {
-			t.Errorf("row %d email = %q, want %q", i, got, w.email)
-		}
+		wantProp(t, bag, mapi.PrDisplayName, w.name, label+" name")
+		wantProp(t, bag, mapi.PrEmailAddress, w.email, label+" email")
 	}
 }
