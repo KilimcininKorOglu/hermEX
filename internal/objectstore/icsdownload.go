@@ -146,17 +146,7 @@ func (s *Store) NewContentDownload(folderID int64, state *ics.State, syncFlags u
 	if err != nil {
 		return nil, err
 	}
-	req := ContentSyncRequest{FolderID: folderID, Given: state.Given()}
-	if syncFlags&SyncNormal != 0 {
-		req.Seen = state.Seen()
-	}
-	if syncFlags&SyncAssociated != 0 {
-		req.SeenFAI = state.SeenFAI()
-	}
-	if syncFlags&SyncReadState != 0 {
-		req.Read = state.Read()
-	}
-	res, err := s.GetContentSync(req)
+	res, err := s.GetContentSync(contentSyncRequestFor(folderID, state, syncFlags))
 	if err != nil {
 		return nil, err
 	}
@@ -182,24 +172,49 @@ func (s *Store) NewContentDownload(folderID int64, state *ics.State, syncFlags u
 		dc.proptags[t] = struct{}{}
 	}
 
+	dc.flow = contentFlow(res, syncFlags)
+	return dc, nil
+}
+
+// contentSyncRequestFor builds the delta request from the client's state,
+// passing only the idsets the enabled classes make meaningful. A nil set tells
+// the diff that class is out of scope.
+func contentSyncRequestFor(folderID int64, state *ics.State, syncFlags uint16) ContentSyncRequest {
+	req := ContentSyncRequest{FolderID: folderID, Given: state.Given()}
+	if syncFlags&SyncNormal != 0 {
+		req.Seen = state.Seen()
+	}
+	if syncFlags&SyncAssociated != 0 {
+		req.SeenFAI = state.SeenFAI()
+	}
+	if syncFlags&SyncReadState != 0 {
+		req.Read = state.Read()
+	}
+	return req
+}
+
+// contentFlow plans what the download emits and in what order: the changed
+// messages, then the optional deletion and read-state blocks, then the state and
+// the end marker.
+func contentFlow(res ContentSyncResult, syncFlags uint16) []flowNode {
 	updated := make(map[uint64]struct{}, len(res.UpdatedMIDs))
 	for _, m := range res.UpdatedMIDs {
 		updated[m] = struct{}{}
 	}
+	var flow []flowNode
 	if syncFlags&(SyncAssociated|SyncNormal) != 0 {
 		for _, mid := range res.ChangedMIDs {
 			_, upd := updated[mid]
-			dc.flow = append(dc.flow, flowNode{kind: flowMessage, mid: mid, updated: upd})
+			flow = append(flow, flowNode{kind: flowMessage, mid: mid, updated: upd})
 		}
 	}
 	if syncFlags&SyncNoDeletions == 0 {
-		dc.flow = append(dc.flow, flowNode{kind: flowDeletions})
+		flow = append(flow, flowNode{kind: flowDeletions})
 	}
 	if syncFlags&SyncReadState != 0 {
-		dc.flow = append(dc.flow, flowNode{kind: flowReadState})
+		flow = append(flow, flowNode{kind: flowReadState})
 	}
-	dc.flow = append(dc.flow, flowNode{kind: flowState}, flowNode{kind: flowEnd})
-	return dc, nil
+	return append(flow, flowNode{kind: flowState}, flowNode{kind: flowEnd})
 }
 
 // folderChangeOmit are server-internal/computed folder properties never sent in
@@ -366,21 +381,45 @@ func (dc *DownloadContext) writeMessageChange(mid uint64) error {
 	if err != nil {
 		return err
 	}
-	isFAI := assoc.Valid && assoc.Int64 != 0
-
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-	ck, err := changeKey(dc.replica, uint64(cn))
+	header, err := dc.messageHeader(mid, uint64(cn), size, assoc.Valid && assoc.Int64 != 0, msg.Props)
 	if err != nil {
 		return err
 	}
-	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-	pcl, err := predecessorChangeList(dc.replica, uint64(cn))
-	if err != nil {
+
+	dc.producer.WriteMarker(ics.MarkerIncrSyncChg)
+	if err := dc.writeProps(header); err != nil {
 		return err
+	}
+	dc.producer.WriteMarker(ics.MarkerIncrSyncMessage)
+	if err := dc.writeProps(dc.filter(msg.Props)); err != nil {
+		return err
+	}
+	if err := dc.writeCollection(mapi.PrMessageRecipients, ics.MarkerStartRecip, ics.MarkerEndToRecip, msg.Recipients); err != nil {
+		return err
+	}
+	attachProps := make([]mapi.PropertyValues, len(msg.Attachments))
+	for i, a := range msg.Attachments {
+		attachProps[i] = a.Props
+	}
+	return dc.writeCollection(mapi.PrMessageAttachments, ics.MarkerNewAttach, ics.MarkerEndAttach, attachProps)
+}
+
+// messageHeader builds the INCRSYNCCHG identity block: the source key and change
+// tracking every download carries, plus the members the request's extra flags
+// asked for.
+func (dc *DownloadContext) messageHeader(mid, cn uint64, size int64, isFAI bool, props mapi.PropertyValues) (mapi.PropertyValues, error) {
+	ck, err := changeKey(dc.replica, cn)
+	if err != nil {
+		return nil, err
+	}
+	pcl, err := predecessorChangeList(dc.replica, cn)
+	if err != nil {
+		return nil, err
 	}
 	header := mapi.PropertyValues{
 		{Tag: mapi.PrSourceKey, Value: sourceKey(dc.replica, mid)},
-		{Tag: mapi.PrLastModificationTime, Value: lastModTime(msg.Props)},
+		{Tag: mapi.PrLastModificationTime, Value: lastModTime(props)},
 		{Tag: mapi.PrChangeKey, Value: ck},
 		{Tag: mapi.PrPredecessorChangeList, Value: pcl},
 		{Tag: mapi.PrAssociated, Value: isFAI},
@@ -395,37 +434,24 @@ func (dc *DownloadContext) writeMessageChange(mid uint64) error {
 	}
 	if dc.extraFlags&SyncExtraFlagCN != 0 {
 		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		header = append(header, mapi.TaggedPropVal{Tag: mapi.PrChangeNumber, Value: int64(mapi.MakeEIDEx(homeReplID, uint64(cn)))})
+		header = append(header, mapi.TaggedPropVal{Tag: mapi.PrChangeNumber, Value: int64(mapi.MakeEIDEx(homeReplID, cn))})
 	}
+	return header, nil
+}
 
-	dc.producer.WriteMarker(ics.MarkerIncrSyncChg)
-	if err := dc.writeProps(header); err != nil {
+// writeCollection emits one child collection: a MetaTagFXDelProp naming the
+// collection, so the receiver clears it before the members arrive, then each
+// member between its open and close markers.
+func (dc *DownloadContext) writeCollection(tag mapi.PropTag, openMarker, closeMarker uint32, members []mapi.PropertyValues) error {
+	if err := dc.writeProp(ics.StreamProp{Tag: mapi.PropTag(ics.MetaTagFXDelProp), Value: int32(tag)}); err != nil {
 		return err
 	}
-	dc.producer.WriteMarker(ics.MarkerIncrSyncMessage)
-	if err := dc.writeProps(dc.filter(msg.Props)); err != nil {
-		return err
-	}
-
-	if err := dc.writeProp(ics.StreamProp{Tag: mapi.PropTag(ics.MetaTagFXDelProp), Value: int32(mapi.PrMessageRecipients)}); err != nil {
-		return err
-	}
-	for _, r := range msg.Recipients {
-		dc.producer.WriteMarker(ics.MarkerStartRecip)
-		if err := dc.writeProps(dc.filter(r)); err != nil {
+	for _, m := range members {
+		dc.producer.WriteMarker(openMarker)
+		if err := dc.writeProps(dc.filter(m)); err != nil {
 			return err
 		}
-		dc.producer.WriteMarker(ics.MarkerEndToRecip)
-	}
-	if err := dc.writeProp(ics.StreamProp{Tag: mapi.PropTag(ics.MetaTagFXDelProp), Value: int32(mapi.PrMessageAttachments)}); err != nil {
-		return err
-	}
-	for _, a := range msg.Attachments {
-		dc.producer.WriteMarker(ics.MarkerNewAttach)
-		if err := dc.writeProps(dc.filter(a.Props)); err != nil {
-			return err
-		}
-		dc.producer.WriteMarker(ics.MarkerEndAttach)
+		dc.producer.WriteMarker(closeMarker)
 	}
 	return nil
 }
@@ -486,29 +512,18 @@ func (dc *DownloadContext) writeReadState() error {
 // seen/seenFAI/read change-number sets become a single high-water range over the
 // enabled classes ([MS-OXCFXICS] 3.3.5.13; the download replaces, never merges).
 func (dc *DownloadContext) writeState() error {
-	var out *ics.State
+	kind := ics.ContentsDown
 	if dc.syncType == SyncTypeHierarchy {
-		out = ics.NewState(ics.HierarchyDown, dc.mapper)
-	} else {
-		out = ics.NewState(ics.ContentsDown, dc.mapper)
+		kind = ics.HierarchyDown
 	}
+	out := ics.NewState(kind, dc.mapper)
 	for _, id := range dc.givenKeep {
 		out.Given().Append(mapi.MakeEIDEx(homeReplID, id))
 	}
 	if dc.syncType == SyncTypeHierarchy {
-		if dc.lastCN != 0 {
-			out.Seen().AppendRange(homeReplID, 1, dc.lastCN)
-		}
+		appendSeenRange(out.Seen(), dc.lastCN)
 	} else {
-		if dc.syncFlags&SyncNormal != 0 && dc.lastCN != 0 {
-			out.Seen().AppendRange(homeReplID, 1, dc.lastCN)
-		}
-		if dc.syncFlags&SyncAssociated != 0 && dc.lastCN != 0 {
-			out.SeenFAI().AppendRange(homeReplID, 1, dc.lastCN)
-		}
-		if dc.syncFlags&SyncReadState != 0 && dc.lastReadCN != 0 {
-			out.Read().AppendRange(homeReplID, 1, dc.lastReadCN)
-		}
+		dc.appendContentSeen(out)
 	}
 	props, err := out.Serialize()
 	if err != nil {
@@ -520,6 +535,30 @@ func (dc *DownloadContext) writeState() error {
 	}
 	dc.producer.WriteMarker(ics.MarkerIncrSyncStateEnd)
 	return nil
+}
+
+// appendContentSeen records what a contents download acknowledged, one set per
+// class the request enabled: normal messages, associated messages, and read
+// state each carry their own high-water mark.
+func (dc *DownloadContext) appendContentSeen(out *ics.State) {
+	if dc.syncFlags&SyncNormal != 0 {
+		appendSeenRange(out.Seen(), dc.lastCN)
+	}
+	if dc.syncFlags&SyncAssociated != 0 {
+		appendSeenRange(out.SeenFAI(), dc.lastCN)
+	}
+	if dc.syncFlags&SyncReadState != 0 {
+		appendSeenRange(out.Read(), dc.lastReadCN)
+	}
+}
+
+// appendSeenRange records everything up to a high-water mark as acknowledged. A
+// zero mark means the download saw nothing, so there is nothing to acknowledge.
+func appendSeenRange(set *ics.IDSet, high uint64) {
+	if high == 0 {
+		return
+	}
+	set.AppendRange(homeReplID, 1, high)
 }
 
 // filter applies the SyncConfigure property filter: an inclusion list under
