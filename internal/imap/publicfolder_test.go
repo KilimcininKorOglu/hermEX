@@ -110,14 +110,60 @@ func TestIMAPPublicFolders(t *testing.T) {
 	mbox := filepath.Join(root, "alice")
 	emptyMailbox(t, mbox)
 
+	pub := seedPublicGrants(t, root)
+	accounts := directory.StaticAccounts{"alice@local.test": {Password: "secret", MailboxPath: mbox}}
+	c := dialLogin(t, publicServer(t, accounts, pub), "alice@local.test", "secret")
+
+	// NAMESPACE advertises the public shared namespace.
+	wantLine(t, "NAMESPACE", c.mustOK("ns", "NAMESPACE"), `("Public Folders/" "/")`)
+
+	// LIST shows the folders alice may see (Announcements, Bulletin) and the
+	// namespace container, but not Staff (granted only to bob).
+	listUn := c.mustOK("l", `LIST "" "*"`)
+	wantLine(t, "LIST", listUn, `"Public Folders/Announcements"`)
+	wantLine(t, "LIST", listUn, `"Public Folders/Bulletin"`)
+	wantNoLine(t, "LIST (alice has no grant on Staff)", listUn, "Staff")
+
+	// A folder alice cannot see is not selectable.
+	wantStatus(t, "SELECT Staff", c, "s0", `SELECT "Public Folders/Staff"`, "NO")
+
+	// Announcements: anyone-Reviewer → selectable, but read-only (no post rights).
+	wantSelect(t, "SELECT Announcements", c, "s1", `SELECT "Public Folders/Announcements"`, "[READ-ONLY]")
+	wantEq(t, "APPEND to read-only Announcements",
+		c.appendMsg("a1", `"Public Folders/Announcements"`, "Subject: x\r\n\r\nno"), "NO")
+
+	// Bulletin: alice has the Create right (post) but not edit/delete. She may
+	// APPEND, but the selection is read-only, a poster must not be able to modify
+	// or delete others' messages.
+	if status := c.appendMsg("a2", `"Public Folders/Bulletin"`, "Subject: hi\r\n\r\nhello world"); status != "OK" {
+		t.Fatalf("APPEND to Bulletin = %s, want OK", status)
+	}
+	selUn := wantSelect(t, "SELECT Bulletin (poster, no edit/delete)", c, "s2", `SELECT "Public Folders/Bulletin"`, "[READ-ONLY]")
+	wantLine(t, "SELECT Bulletin after the post", selUn, "1 EXISTS")
+	// A poster cannot mutate existing items: STORE is refused on the read-only selection.
+	wantStatus(t, "STORE on a poster's read-only public selection", c, "st", `STORE 1 +FLAGS (\Deleted)`, "NO")
+	// The posted message still reads back from the public store (cross-store FETCH).
+	wantLine(t, "FETCH from a public folder", c.mustOK("f", "FETCH 1 (BODY[TEXT])"), "hello world")
+
+	// Team: alice is an Editor (edit/delete any) → read-write selection, STORE works.
+	wantSelect(t, "SELECT Team (editor)", c, "s3", `SELECT "Public Folders/Team"`, "[READ-WRITE]")
+	wantStatus(t, "STORE on an editor's public selection", c, "st2", `STORE 1 +FLAGS (\Flagged)`, "OK")
+
+	// STATUS answers for a LIST-advertised public folder (clients poll it for badges).
+	stUn, _ := c.doFull("status", `STATUS "Public Folders/Announcements" (MESSAGES UNSEEN)`)
+	wantLine(t, "STATUS on a public folder", stUn, "MESSAGES")
+}
+
+// seedPublicGrants provisions one domain's public store with four folders whose
+// grants cover the access tiers: anyone-readable, poster-only, another user's,
+// and editor.
+func seedPublicGrants(t *testing.T, root string) *publicfolder.Service {
+	t.Helper()
 	pub := publicfolder.New(pubPaths{root: root})
-	if err := pub.Provision("local.test"); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "provision the public store", pub.Provision("local.test"))
 	ps, err := pub.OpenForDomain("local.test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "open the public store", err)
+	defer ps.Close()
 	ann, _ := ps.CreateFolder(nil, "Announcements")
 	bul, _ := ps.CreateFolder(nil, "Bulletin")
 	staff, _ := ps.CreateFolder(nil, "Staff")
@@ -126,85 +172,42 @@ func TestIMAPPublicFolders(t *testing.T) {
 	grantUser(t, ps, bul, "alice@local.test", mapi.FrightsVisible|mapi.FrightsReadAny|mapi.FrightsCreate) // alice may post, not modify
 	grantUser(t, ps, staff, "bob@local.test", mapi.FrightsVisible|mapi.FrightsReadAny)                    // bob only
 	grantUser(t, ps, team, "alice@local.test", mapi.RightsEditor)                                         // alice may edit/delete any
-	if _, err := ps.AppendMessage(team, []byte("Subject: t\r\n\r\nteam body"), time.Unix(2, 0), 0); err != nil {
-		t.Fatal(err)
-	}
-	ps.Close()
+	_, err = ps.AppendMessage(team, []byte("Subject: t\r\n\r\nteam body"), time.Unix(2, 0), 0)
+	mustNoErr(t, "seed the team message", err)
+	return pub
+}
 
-	accounts := directory.StaticAccounts{"alice@local.test": {Password: "secret", MailboxPath: mbox}}
-	addr := publicServer(t, accounts, pub)
-	c := dialLogin(t, addr, "alice@local.test", "secret")
+// wantLine fails when the untagged responses carry no line with the fragment.
+func wantLine(t *testing.T, what string, lines []string, want string) {
+	t.Helper()
+	if !hasLine(lines, want) {
+		t.Errorf("%s is missing %q: %v", what, want, lines)
+	}
+}
 
-	// NAMESPACE advertises the public shared namespace.
-	nsUn := c.mustOK("ns", "NAMESPACE")
-	if !hasLine(nsUn, `("Public Folders/" "/")`) {
-		t.Errorf("NAMESPACE missing the public shared namespace: %v", nsUn)
+// wantNoLine fails when the untagged responses carry a fragment they must not.
+func wantNoLine(t *testing.T, what string, lines []string, unwanted string) {
+	t.Helper()
+	if hasLine(lines, unwanted) {
+		t.Errorf("%s leaked %q: %v", what, unwanted, lines)
 	}
+}
 
-	// LIST shows the folders alice may see (Announcements, Bulletin) and the
-	// namespace container, but not Staff (granted only to bob).
-	listUn := c.mustOK("l", `LIST "" "*"`)
-	if !hasLine(listUn, `"Public Folders/Announcements"`) {
-		t.Errorf("LIST missing Announcements: %v", listUn)
-	}
-	if !hasLine(listUn, `"Public Folders/Bulletin"`) {
-		t.Errorf("LIST missing Bulletin: %v", listUn)
-	}
-	if hasLine(listUn, "Staff") {
-		t.Errorf("LIST leaked Staff (alice has no grant): %v", listUn)
-	}
+// wantStatus runs one command and checks the tagged status it answers.
+func wantStatus(t *testing.T, what string, c *testClient, tag, cmd, want string) {
+	t.Helper()
+	_, status := c.do(tag, cmd)
+	wantEq(t, what, status, want)
+}
 
-	// A folder alice cannot see is not selectable.
-	if _, status := c.do("s0", `SELECT "Public Folders/Staff"`); status != "NO" {
-		t.Errorf("SELECT Staff = %s, want NO", status)
-	}
-
-	// Announcements: anyone-Reviewer → selectable, but read-only (no post rights).
-	_, tagged := c.doFull("s1", `SELECT "Public Folders/Announcements"`)
-	if !strings.Contains(tagged, "OK") || !strings.Contains(tagged, "[READ-ONLY]") {
-		t.Errorf("SELECT Announcements = %q, want OK [READ-ONLY]", tagged)
-	}
-	if status := c.appendMsg("a1", `"Public Folders/Announcements"`, "Subject: x\r\n\r\nno"); status != "NO" {
-		t.Errorf("APPEND to read-only Announcements = %s, want NO", status)
-	}
-
-	// Bulletin: alice has the Create right (post) but not edit/delete. She may
-	// APPEND, but the selection is read-only, a poster must not be able to modify
-	// or delete others' messages.
-	if status := c.appendMsg("a2", `"Public Folders/Bulletin"`, "Subject: hi\r\n\r\nhello world"); status != "OK" {
-		t.Fatalf("APPEND to Bulletin = %s, want OK", status)
-	}
-	selUn, tagged := c.doFull("s2", `SELECT "Public Folders/Bulletin"`)
-	if !strings.Contains(tagged, "OK") || !strings.Contains(tagged, "[READ-ONLY]") {
-		t.Errorf("SELECT Bulletin (poster, no edit/delete) = %q, want OK [READ-ONLY]", tagged)
-	}
-	if !hasLine(selUn, "1 EXISTS") {
-		t.Errorf("SELECT Bulletin should show 1 EXISTS after the post: %v", selUn)
-	}
-	// A poster cannot mutate existing items: STORE is refused on the read-only selection.
-	if _, status := c.do("st", `STORE 1 +FLAGS (\Deleted)`); status != "NO" {
-		t.Errorf("STORE on a poster's read-only public selection = %s, want NO", status)
-	}
-	// The posted message still reads back from the public store (cross-store FETCH).
-	fetchUn := c.mustOK("f", "FETCH 1 (BODY[TEXT])")
-	if !hasLine(fetchUn, "hello world") {
-		t.Errorf("FETCH from public folder did not return the body: %v", fetchUn)
-	}
-
-	// Team: alice is an Editor (edit/delete any) → read-write selection, STORE works.
-	_, tagged = c.doFull("s3", `SELECT "Public Folders/Team"`)
-	if !strings.Contains(tagged, "OK") || !strings.Contains(tagged, "[READ-WRITE]") {
-		t.Errorf("SELECT Team (editor) = %q, want OK [READ-WRITE]", tagged)
-	}
-	if _, status := c.do("st2", `STORE 1 +FLAGS (\Flagged)`); status != "OK" {
-		t.Errorf("STORE on an editor's public selection = %s, want OK", status)
-	}
-
-	// STATUS answers for a LIST-advertised public folder (clients poll it for badges).
-	stUn, _ := c.doFull("status", `STATUS "Public Folders/Announcements" (MESSAGES UNSEEN)`)
-	if !hasLine(stUn, "MESSAGES") {
-		t.Errorf("STATUS on a public folder should return counts: %v", stUn)
-	}
+// wantSelect runs a SELECT, requires it to succeed with the given access code,
+// and returns its untagged responses.
+func wantSelect(t *testing.T, what string, c *testClient, tag, cmd, access string) []string {
+	t.Helper()
+	un, tagged := c.doFull(tag, cmd)
+	wantContains(t, what, tagged, "OK")
+	wantContains(t, what+" access", tagged, access)
+	return un
 }
 
 // TestIMAPPublicFolderTenantIsolation proves an IMAP client only ever sees its own

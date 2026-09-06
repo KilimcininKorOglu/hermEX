@@ -33,21 +33,12 @@ func (f *fakeIdleWaker) fire() {
 // same reader afterward, proving the DONE-reader goroutine left the stream resumable.
 func TestIMAPIdle(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "alice")
-	st, err := objectstore.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
 	inbox := int64(mapi.PrivateFIDInbox)
-	if _, err := st.AppendMessage(inbox, []byte("Subject: one\r\n\r\nbody"), time.Unix(1, 0), 0); err != nil {
-		t.Fatal(err)
-	}
-	st.Close()
+	appendTo(t, path, inbox, "Subject: one\r\n\r\nbody", time.Unix(1, 0))
 
 	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "listen", err)
 	t.Cleanup(func() { _ = ln.Close() })
 	srv := &Server{Auth: auth, Hostname: "mail.test"}
 	waker := &fakeIdleWaker{ch: make(chan struct{}, 1)}
@@ -55,9 +46,7 @@ func TestIMAPIdle(t *testing.T) {
 	go func() { _ = srv.Serve(ln) }()
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "dial", err)
 	t.Cleanup(func() { _ = conn.Close() })
 	c := &testClient{t: t, conn: conn, br: bufio.NewReader(conn)}
 	c.expectUntagged("OK", "greeting")
@@ -67,47 +56,41 @@ func TestIMAPIdle(t *testing.T) {
 
 	// IDLE must be advertised in CAPABILITY (RFC 2177 §3).
 	caps := c.mustOK("a3", "CAPABILITY")
-	if len(caps) == 0 || !strings.Contains(caps[0], "IDLE") {
-		t.Errorf("CAPABILITY does not advertise IDLE: %v", caps)
+	if len(caps) == 0 {
+		t.Fatal("CAPABILITY returned nothing")
 	}
+	wantContains(t, "CAPABILITY", caps[0], "IDLE")
 
 	// Begin IDLE: the server requests a continuation.
 	_, _ = fmt.Fprintf(c.conn, "a4 IDLE\r\n")
-	if cont := c.line(); !strings.HasPrefix(cont, "+") {
-		t.Fatalf("IDLE continuation = %q, want a + line", cont)
-	}
+	wantPrefix(t, "the IDLE continuation", c.line(), "+")
 
 	// A delivery during IDLE, through a separate store handle (a different daemon's
 	// MTA), plus the push wake: the untagged EXISTS must arrive without the cadence.
-	st2, err := objectstore.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st2.AppendMessage(inbox, []byte("Subject: new\r\n\r\nbody"), time.Unix(3, 0), 0); err != nil {
-		t.Fatal(err)
-	}
-	st2.Close()
+	appendTo(t, path, inbox, "Subject: new\r\n\r\nbody", time.Unix(3, 0))
 	waker.fire()
 
 	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second)) // bound the wait: cadence is 30s
-	gotExists := false
-	for !gotExists {
-		l := c.line()
-		if strings.Contains(l, "EXISTS") {
-			gotExists = true
-		}
+	for !strings.Contains(c.line(), "EXISTS") {
 	}
 	_ = conn.SetReadDeadline(time.Time{}) // clear
-	if !gotExists {
-		t.Fatal("no untagged EXISTS arrived during IDLE")
-	}
 
 	// End IDLE with DONE; the server sends the tagged completion.
 	_, _ = fmt.Fprintf(c.conn, "DONE\r\n")
-	if _, status := c.collect("a4"); status != "OK" {
-		t.Errorf("IDLE terminated status = %s, want OK", status)
-	}
+	_, status := c.collect("a4")
+	wantEq(t, "the IDLE termination status", status, "OK")
 
 	// The reader resumed cleanly: a normal command after IDLE still parses.
 	c.mustOK("a5", "NOOP")
+}
+
+// appendTo stores one message in a mailbox through its own store handle, which is
+// how another daemon's delivery reaches a mailbox an IMAP session holds open.
+func appendTo(t *testing.T, path string, folderID int64, raw string, when time.Time) {
+	t.Helper()
+	st, err := objectstore.Open(path)
+	mustNoErr(t, "open the mailbox", err)
+	defer st.Close()
+	_, err = st.AppendMessage(folderID, []byte(raw), when, 0)
+	mustNoErr(t, "append the message", err)
 }

@@ -26,45 +26,21 @@ import (
 // serve.TLSListener handshake test alone does not.
 func TestImplicitTLSSession(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "alice")
-	st, err := objectstore.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("Subject: one\r\n\r\nbody"), time.Unix(1, 0), 0); err != nil {
-		t.Fatal(err)
-	}
-	st.Close()
+	seedOneMessage(t, path)
 
 	certPath, keyPath, err := tlstest.SelfSigned(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg := &config.Config{TLSCert: certPath, TLSKey: keyPath}
-	tlsCfg, err := cfg.TLSConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "issue a self-signed certificate", err)
+	tlsCfg, err := (&config.Config{TLSCert: certPath, TLSKey: keyPath}).TLSConfig()
+	mustNoErr(t, "build the TLS config", err)
 
 	rawLn, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "listen", err)
 	t.Cleanup(func() { _ = rawLn.Close() })
 	auth := directory.StaticAccounts{"alice": {Password: "secret", MailboxPath: path}}
 	go func() { _ = (&Server{Auth: auth, Hostname: "mail.test"}).Serve(tls.NewListener(rawLn, tlsCfg)) }()
 
-	pemBytes, err := os.ReadFile(certPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(pemBytes) {
-		t.Fatal("AppendCertsFromPEM: no cert added")
-	}
-	conn, err := tls.Dial("tcp", rawLn.Addr().String(), &tls.Config{RootCAs: pool, ServerName: "127.0.0.1"})
-	if err != nil {
-		t.Fatalf("tls.Dial: %v", err)
-	}
+	conn, err := tls.Dial("tcp", rawLn.Addr().String(), &tls.Config{RootCAs: certPool(t, certPath), ServerName: "127.0.0.1"})
+	mustNoErr(t, "dial over TLS", err)
 	t.Cleanup(func() { _ = conn.Close() })
 	if v := conn.ConnectionState().Version; v < tls.VersionTLS12 {
 		t.Errorf("negotiated TLS version = %#x, want >= 1.2", v)
@@ -77,16 +53,18 @@ func TestImplicitTLSSession(t *testing.T) {
 	if status != "OK" {
 		t.Fatalf("SELECT status = %s, want OK", status)
 	}
-	gotExists := false
-	for _, l := range un {
-		if strings.Contains(l, "EXISTS") {
-			gotExists = true
-		}
-	}
-	if !gotExists {
-		t.Errorf("SELECT INBOX over TLS reported no EXISTS: %v", un)
-	}
+	wantLine(t, "SELECT INBOX over TLS", un, "EXISTS")
 	c.mustOK("a3", "LOGOUT")
+}
+
+// seedOneMessage creates a mailbox holding a single Inbox message.
+func seedOneMessage(t *testing.T, path string) {
+	t.Helper()
+	st, err := objectstore.Open(path)
+	mustNoErr(t, "open the mailbox", err)
+	defer st.Close()
+	_, err = st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("Subject: one\r\n\r\nbody"), time.Unix(1, 0), 0)
+	mustNoErr(t, "append the message", err)
 }
 
 // startSTARTTLSServer brings up a plaintext IMAP listener whose server has a TLS
@@ -94,14 +72,7 @@ func TestImplicitTLSSession(t *testing.T) {
 func startSTARTTLSServer(t *testing.T) (addr, certPath string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "alice")
-	st, err := objectstore.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AppendMessage(int64(mapi.PrivateFIDInbox), []byte("Subject: one\r\n\r\nbody"), time.Unix(1, 0), 0); err != nil {
-		t.Fatal(err)
-	}
-	st.Close()
+	seedOneMessage(t, path)
 
 	certPath, keyPath, err := tlstest.SelfSigned(t.TempDir())
 	if err != nil {
@@ -183,12 +154,11 @@ func containsSub(lines []string, sub string) bool {
 	return false
 }
 
+// certPool builds a client trust pool holding one PEM certificate.
 func certPool(t *testing.T, certPath string) *x509.CertPool {
 	t.Helper()
 	pemBytes, err := os.ReadFile(certPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "read the certificate", err)
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(pemBytes) {
 		t.Fatal("AppendCertsFromPEM: no cert added")
