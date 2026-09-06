@@ -424,6 +424,7 @@ func (s *Session) ropSeekStream(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	out.Uint8(ropSeekStream)
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
+	// #nosec G115 -- newpos was range-checked into [0, maxStreamSize] above, and seekTo only ever lowers it
 	out.Uint64(uint64(newpos)) // NewPosition
 	return true
 }
