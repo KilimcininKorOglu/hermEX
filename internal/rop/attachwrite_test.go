@@ -110,14 +110,7 @@ func TestAttachmentWriteChain(t *testing.T) {
 	}), []uint32{attH})
 	// SaveChangesAttachment: message at the header slot (0), attachment at ihindex2 (1).
 	scA, _ := sess.Dispatch(buildSaveChangesAttachment(0, 1), []uint32{msgH, attH})
-	p := ext.NewPull(scA, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropSaveChangesAttachment {
-		t.Fatalf("SaveChangesAttachment RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("SaveChangesAttachment ReturnValue = %#x", ec)
-	}
+	ropOK(t, scA, ropSaveChangesAttachment, "SaveChangesAttachment")
 
 	// Second attachment: create (num 1).
 	num1, _ := createAttachmentNum(t, sess, msgH)
@@ -130,38 +123,57 @@ func TestAttachmentWriteChain(t *testing.T) {
 	saveChangesEID(t, sc)
 
 	// The first attachment reads back the saved filename + data.
-	if ec := openAttachmentEC(t, sess, msgH, num0); ec != ecSuccess {
-		t.Fatalf("OpenAttachment(num0) after save = %#x", ec)
-	}
-	saved, err := store.OpenMessage(int64(mid))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(saved.Attachments) != 2 {
-		t.Fatalf("message has %d attachments, want 2", len(saved.Attachments))
-	}
+	wantOpenAttachment(t, sess, msgH, num0, ecSuccess, "OpenAttachment(num0) after save")
+	assertAttachmentCount(t, store, mid, 2, "message")
 
 	// Delete the first attachment; the second must keep number 1 (not renumber).
 	del, _ := sess.Dispatch(buildDeleteAttachment(0, num0), []uint32{msgH})
-	p = ext.NewPull(del, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropDeleteAttachment {
-		t.Fatalf("DeleteAttachment RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("DeleteAttachment ReturnValue = %#x", ec)
-	}
-	if ec := openAttachmentEC(t, sess, msgH, num1); ec != ecSuccess {
-		t.Errorf("surviving attachment not resolvable at num %d after sibling delete: %#x", num1, ec)
-	}
-	if ec := openAttachmentEC(t, sess, msgH, num0); ec != ecNotFound {
-		t.Errorf("deleted attachment OpenAttachment(num0) = %#x, want ecNotFound", ec)
-	}
+	ropOK(t, del, ropDeleteAttachment, "DeleteAttachment")
+	wantOpenAttachment(t, sess, msgH, num1, ecSuccess, "surviving attachment after sibling delete")
+	wantOpenAttachment(t, sess, msgH, num0, ecNotFound, "deleted attachment")
 
-	// The attachment-only change advanced the message change number, so the message
-	// surfaces as updated against the pre-change sync state.
+	assertAttachmentEditsBumpedCN(t, store, inboxFID, mid, cn1)
+
+	// White-box: the surviving attachment kept its own number rather than being
+	// renumbered when its sibling went away.
+	surv, err := store.OpenMessage(int64(mid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(surv.Attachments) != 1 {
+		t.Fatalf("after delete: %d attachments, want 1", len(surv.Attachments))
+	}
+	wantProp(t, surv.Attachments[0].Props, mapi.PrAttachNum, int32(num1), "surviving attach number")
+}
+
+// wantOpenAttachment asserts RopOpenAttachment answers a given return code for
+// one attach number.
+func wantOpenAttachment(t *testing.T, sess *Session, msgH uint32, num uint32, want uint32, label string) {
+	t.Helper()
+	if ec := openAttachmentEC(t, sess, msgH, num); ec != want {
+		t.Errorf("%s: OpenAttachment(%d) = %#x, want %#x", label, num, ec, want)
+	}
+}
+
+// assertAttachmentCount asserts how many attachments a stored message holds.
+func assertAttachmentCount(t *testing.T, store *objectstore.Store, mid uint64, want int, label string) {
+	t.Helper()
+	msg, err := store.OpenMessage(int64(mid))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msg.Attachments) != want {
+		t.Fatalf("%s has %d attachments, want %d", label, len(msg.Attachments), want)
+	}
+}
+
+// assertAttachmentEditsBumpedCN checks that an attachment-only change advanced
+// the parent message's change number, so the message surfaces as updated against
+// the pre-change sync state.
+func assertAttachmentEditsBumpedCN(t *testing.T, store *objectstore.Store, folderID int64, mid, cn1 uint64) {
+	t.Helper()
 	post, err := store.GetContentSync(objectstore.ContentSyncRequest{
-		FolderID: inboxFID, Given: looseSet(mid), Seen: looseSet(cn1),
+		FolderID: folderID, Given: looseSet(mid), Seen: looseSet(cn1),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -171,18 +183,6 @@ func TestAttachmentWriteChain(t *testing.T) {
 	}
 	if !containsMID(post.UpdatedMIDs, mid) {
 		t.Errorf("message with attachment edits missing from UpdatedMIDs: %v", post.UpdatedMIDs)
-	}
-
-	// White-box: the surviving attachment's stored data is intact.
-	surv, err := store.OpenMessage(int64(mid))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(surv.Attachments) != 1 {
-		t.Fatalf("after delete: %d attachments, want 1", len(surv.Attachments))
-	}
-	if v, _ := surv.Attachments[0].Props.Get(mapi.PrAttachNum); v != int32(num1) {
-		t.Errorf("surviving attach number = %v, want %d", v, num1)
 	}
 }
 
