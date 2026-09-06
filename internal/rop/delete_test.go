@@ -51,57 +51,34 @@ func TestDeleteMessageProperties(t *testing.T) {
 	if _, ok := before.Get(mapi.PrImportance); !ok {
 		t.Fatal("PrImportance missing before delete")
 	}
-	syncAfterSet, err := store.GetContentSync(objectstore.ContentSyncRequest{FolderID: inboxFID, Given: looseSet(mid), Seen: looseSet()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cnSet := syncAfterSet.LastCN
+	cnSet := contentSync(t, store, inboxFID, mid).LastCN
 
 	// Set PrSensitivity (buffered, unsaved), then delete subject + importance +
 	// sensitivity in one call: the sensitivity delete must override its buffered set.
+	deleted := []mapi.PropTag{mapi.PrSubject, mapi.PrImportance, mapi.PrSensitivity}
 	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{{Tag: mapi.PrSensitivity, Value: int32(1)}}), []uint32{msgH})
-	dp, _ := sess.Dispatch(buildDeletePropsOp(ropDeleteProperties, 0, []mapi.PropTag{mapi.PrSubject, mapi.PrImportance, mapi.PrSensitivity}), []uint32{msgH})
-	p := ext.NewPull(dp, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropDeleteProperties {
-		t.Fatalf("DeleteProperties RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("DeleteProperties ReturnValue = %#x", ec)
-	}
-	if pc := mustU16(t, p, "problemCount"); pc != 0 {
-		t.Errorf("DeleteProperties PropertyProblemCount = %d, want 0", pc)
-	}
+	dp, _ := sess.Dispatch(buildDeletePropsOp(ropDeleteProperties, 0, deleted), []uint32{msgH})
+	p := ropOK(t, dp, ropDeleteProperties, "DeleteProperties")
+	wantU16(t, p, "DeleteProperties PropertyProblemCount", 0)
 	sc2, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
 	saveChangesEID(t, sc2)
 
 	// All three are gone from the store; the buffered sensitivity set did not leak.
-	after, _ := store.GetMessageProperties(int64(mid), mapi.PrSubject, mapi.PrImportance, mapi.PrSensitivity)
-	for _, tag := range []mapi.PropTag{mapi.PrSubject, mapi.PrImportance, mapi.PrSensitivity} {
+	after, _ := store.GetMessageProperties(int64(mid), deleted...)
+	for _, tag := range deleted {
 		if _, ok := after.Get(tag); ok {
 			t.Errorf("property %s survived DeleteProperties", tag)
 		}
 	}
 
 	// The delete advanced the change number beyond the set-save.
-	post, err := store.GetContentSync(objectstore.ContentSyncRequest{FolderID: inboxFID, Given: looseSet(mid), Seen: looseSet(cnSet)})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if post.LastCN <= cnSet {
+	if post := contentSync(t, store, inboxFID, mid, cnSet); post.LastCN <= cnSet {
 		t.Errorf("DeleteProperties did not advance the change number: %d -> %d", cnSet, post.LastCN)
 	}
 
 	// The NoReplicate variant is accepted and reports success (nothing left to delete).
 	nr, _ := sess.Dispatch(buildDeletePropsOp(ropDeletePropertiesNoReplicate, 0, []mapi.PropTag{mapi.PrSubject}), []uint32{msgH})
-	p = ext.NewPull(nr, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropDeletePropertiesNoReplicate {
-		t.Fatalf("DeletePropertiesNoReplicate RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Errorf("DeletePropertiesNoReplicate ReturnValue = %#x", ec)
-	}
+	ropOK(t, nr, ropDeletePropertiesNoReplicate, "DeletePropertiesNoReplicate")
 }
 
 // TestSetAfterDeleteWins drives the reverse of the delete-after-set case: a

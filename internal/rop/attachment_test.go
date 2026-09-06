@@ -78,17 +78,8 @@ func TestAttachmentReadChain(t *testing.T) {
 
 	// GetAttachmentTable: bare success header, no row count.
 	gat, h := sess.Dispatch(buildGetAttachmentTable(0, 1), []uint32{msgH, 0xFFFFFFFF})
-	p := ext.NewPull(gat, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropGetAttachmentTable {
-		t.Fatalf("GetAttachmentTable RopId = %#x", id)
-	}
-	mustU8(t, p, "ohindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("GetAttachmentTable ReturnValue = %#x", ec)
-	}
-	if p.Remaining() != 0 {
-		t.Errorf("GetAttachmentTable response has %d trailing bytes, want a bare header", p.Remaining())
-	}
+	p := ropOK(t, gat, ropGetAttachmentTable, "GetAttachmentTable")
+	wantDrained(t, p, "GetAttachmentTable (its response is a bare header)")
 	tableH := h[1]
 
 	// QueryRows the attachment table for PR_ATTACH_NUM + filename.
@@ -99,36 +90,18 @@ func TestAttachmentReadChain(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("attachment table rows = %d, want 1", len(rows))
 	}
-	if num, _ := rows[0].Get(mapi.PrAttachNum); num != int32(0) {
-		t.Errorf("PR_ATTACH_NUM = %v, want 0", num)
-	}
-	if fn, _ := rows[0].Get(mapi.PrAttachLongFilename); fn != "a.bin" {
-		t.Errorf("attachment filename = %v, want \"a.bin\"", fn)
-	}
+	wantProp(t, rows[0], mapi.PrAttachNum, int32(0), "PR_ATTACH_NUM")
+	wantProp(t, rows[0], mapi.PrAttachLongFilename, "a.bin", "attachment filename")
 
 	// OpenAttachment(num=0): bare success header.
 	oa, h := sess.Dispatch(buildOpenAttachment(0, 1, 0), []uint32{msgH, 0xFFFFFFFF})
-	p = ext.NewPull(oa, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropOpenAttachment {
-		t.Fatalf("OpenAttachment RopId = %#x", id)
-	}
-	mustU8(t, p, "ohindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("OpenAttachment ReturnValue = %#x", ec)
-	}
+	ropOK(t, oa, ropOpenAttachment, "OpenAttachment")
 	attachH := h[1]
 
 	// OpenStream + ReadStream the attachment data.
 	os, h := sess.Dispatch(buildOpenStream(0, 1, uint32(mapi.PrAttachDataBin), 0), []uint32{attachH, 0xFFFFFFFF})
-	p = ext.NewPull(os, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "ohindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("OpenStream(attachment) ReturnValue = %#x", ec)
-	}
-	if size := mustU32(t, p, "StreamSize"); size != uint32(len("ATTACHDATA")) {
-		t.Errorf("attachment StreamSize = %d, want %d", size, len("ATTACHDATA"))
-	}
+	p = ropOK(t, os, ropOpenStream, "OpenStream(attachment)")
+	wantU32(t, p, "attachment StreamSize", uint32(len("ATTACHDATA")))
 	streamH := h[1]
 	if got := readStreamChunk(t, sess, streamH, 0xFFFF, 0); !bytes.Equal(got, []byte("ATTACHDATA")) {
 		t.Errorf("attachment data = %q, want \"ATTACHDATA\"", got)
