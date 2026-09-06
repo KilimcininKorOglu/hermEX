@@ -22,59 +22,36 @@ func TestSubmissionRelayRouting(t *testing.T) {
 	mbox := filepath.Join(t.TempDir(), "alice")
 	accounts := directory.StaticAccounts{"alice@local": {Password: "pw", MailboxPath: mbox}}
 	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "open the relay spool", err)
 	defer sp.Close()
 
 	// Authenticated submission.
 	s := &session{accounts: accounts, spool: sp, authUser: "alice@local"}
-	if err := s.Mail("alice@local", smtp.MailParams{}); err != nil {
-		t.Fatalf("mail: %v", err)
-	}
-	if err := s.Rcpt("alice@local", smtp.RcptParams{}); err != nil {
-		t.Fatalf("rcpt local: %v", err)
-	}
-	if err := s.Rcpt("bob@remote", smtp.RcptParams{}); err != nil {
-		t.Fatalf("rcpt external: %v", err)
-	}
+	mustNoErr(t, "MAIL FROM", s.Mail("alice@local", smtp.MailParams{}))
+	mustNoErr(t, "RCPT to a local user", s.Rcpt("alice@local", smtp.RcptParams{}))
+	mustNoErr(t, "RCPT to an external user", s.Rcpt("bob@remote", smtp.RcptParams{}))
 	if err := s.Rcpt("ghost@local", smtp.RcptParams{}); err == nil {
 		t.Error("an unknown user in a local domain must be refused, never relayed")
 	}
-	if len(s.targets) != 1 || s.targets[0].addr != "alice@local" {
-		t.Fatalf("local targets = %v, want [alice@local]", s.targets)
+	if len(s.targets) != 1 || len(s.relayTargets) != 1 {
+		t.Fatalf("routing = %d local / %d relay, want one each", len(s.targets), len(s.relayTargets))
 	}
-	if len(s.relayTargets) != 1 || s.relayTargets[0].Addr != "bob@remote" {
-		t.Fatalf("relay targets = %v, want [bob@remote]", s.relayTargets)
-	}
+	wantEq(t, "the local target", s.targets[0].addr, "alice@local")
+	wantEq(t, "the relay target", s.relayTargets[0].Addr, "bob@remote")
 
 	raw := []byte("Subject: hi\r\n\r\nhello\r\n")
-	if err := s.Data(bytes.NewReader(raw)); err != nil {
-		t.Fatalf("data: %v", err)
-	}
+	mustNoErr(t, "DATA", s.Data(bytes.NewReader(raw)))
 
 	// The local recipient landed in the inbox.
-	st, err := objectstore.Open(mbox)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(msgs) != 1 {
-		t.Fatalf("local inbox has %d messages, want 1", len(msgs))
-	}
+	wantEq(t, "messages in the local inbox", len(inboxMessages(t, mbox)), 1)
 
 	// The external recipient is durably queued for relay with the wire bytes intact.
 	due, err := sp.Claim(time.Now(), 10)
-	if err != nil {
-		t.Fatal(err)
+	mustNoErr(t, "claim the spool", err)
+	if len(due) != 1 {
+		t.Fatalf("spool claim = %v, want one item", due)
 	}
-	if len(due) != 1 || due[0].Recipient != "bob@remote" {
-		t.Fatalf("spool claim = %v, want one item for bob@remote", due)
-	}
+	wantEq(t, "the spooled recipient", due[0].Recipient, "bob@remote")
 	if !bytes.Equal(due[0].Body, raw) {
 		t.Error("spooled relay body does not match the submitted message")
 	}
@@ -86,6 +63,17 @@ func TestSubmissionRelayRouting(t *testing.T) {
 	}
 }
 
+// inboxMessages lists a mailbox's Inbox.
+func inboxMessages(t *testing.T, mbox string) []objectstore.MessageInfo {
+	t.Helper()
+	st, err := objectstore.Open(mbox)
+	mustNoErr(t, "open the mailbox", err)
+	defer st.Close()
+	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
+	mustNoErr(t, "list the inbox", err)
+	return msgs
+}
+
 // TestDeliverAndRelayRoutesExternal proves the shared user-composed send path,
 // used by webmail compose and the send-later release, relays a foreign-domain
 // recipient through the spool while still filing local ones and reporting a
@@ -94,38 +82,35 @@ func TestDeliverAndRelayRoutesExternal(t *testing.T) {
 	mbox := filepath.Join(t.TempDir(), "alice")
 	accounts := directory.StaticAccounts{"alice@local": {MailboxPath: mbox}}
 	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "open the relay spool", err)
 	defer sp.Close()
 
 	raw := []byte("Subject: hi\r\n\r\nhello\r\n")
 	unresolved, err := DeliverAndRelay(accounts, sp, "alice@local",
 		[]string{"alice@local", "bob@remote", "ghost@local"}, raw, time.Now())
-	if err != nil {
-		t.Fatalf("deliver-and-relay: %v", err)
-	}
+	mustNoErr(t, "deliver and relay", err)
 	// Only the local-domain user-unknown is reported; the external is relayed.
-	if len(unresolved) != 1 || unresolved[0] != "ghost@local" {
-		t.Fatalf("unresolved = %v, want only ghost@local", unresolved)
-	}
+	wantOnly(t, "the unresolved recipients", unresolved, "ghost@local")
 
-	st, err := objectstore.Open(mbox)
-	if err != nil {
-		t.Fatal(err)
+	wantEq(t, "messages in the local inbox", len(inboxMessages(t, mbox)), 1)
+	due, err := sp.Claim(time.Now(), 10)
+	mustNoErr(t, "claim the spool", err)
+	if len(due) != 1 {
+		t.Fatalf("spool = %v, want one item queued for relay", due)
 	}
-	defer st.Close()
-	if msgs, _ := st.ListMessages(int64(mapi.PrivateFIDInbox)); len(msgs) != 1 {
-		t.Fatalf("local inbox has %d messages, want 1", len(msgs))
-	}
-	due, _ := sp.Claim(time.Now(), 10)
-	if len(due) != 1 || due[0].Recipient != "bob@remote" {
-		t.Fatalf("spool = %v, want bob@remote queued for relay", due)
-	}
+	wantEq(t, "the spooled recipient", due[0].Recipient, "bob@remote")
 
 	// With a nil spool the external recipient falls back to unresolved.
-	un2, _ := DeliverAndRelay(accounts, nil, "alice@local", []string{"bob@remote"}, raw, time.Now())
-	if len(un2) != 1 || un2[0] != "bob@remote" {
-		t.Errorf("nil-spool unresolved = %v, want bob@remote (no relay)", un2)
+	un2, err := DeliverAndRelay(accounts, nil, "alice@local", []string{"bob@remote"}, raw, time.Now())
+	mustNoErr(t, "deliver with no spool", err)
+	wantOnly(t, "the unresolved recipients with no spool", un2, "bob@remote")
+}
+
+// wantOnly checks a recipient list holds exactly the one address wanted.
+func wantOnly(t *testing.T, what string, got []string, want string) {
+	t.Helper()
+	if len(got) != 1 {
+		t.Fatalf("%s = %v, want only %q", what, got, want)
 	}
+	wantEq(t, what, got[0], want)
 }

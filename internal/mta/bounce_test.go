@@ -7,7 +7,6 @@ import (
 	"mime/multipart"
 	"net/mail"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -24,22 +23,13 @@ import (
 // carrying the structured failure a client parses.
 func TestBounceMessage(t *testing.T) {
 	raw, err := Bounce("mail.hermex.test", "alice@local", "bob@remote", "550 mailbox does not exist", time.Unix(1_700_000_000, 0))
-	if err != nil {
-		t.Fatalf("bounce does not build: %v", err)
-	}
+	mustNoErr(t, "build the bounce", err)
 	msg, err := mail.ReadMessage(bytes.NewReader(raw))
-	if err != nil {
-		t.Fatalf("bounce is not a valid message: %v", err)
-	}
-	if got := msg.Header.Get("To"); got != "alice@local" {
-		t.Errorf("To = %q, want alice@local", got)
-	}
-	if got := msg.Header.Get("Auto-Submitted"); got != "auto-generated" {
-		t.Errorf("Auto-Submitted = %q, want auto-generated (RFC 3834 loop break)", got)
-	}
-	if from := msg.Header.Get("From"); !strings.Contains(from, "mailer-daemon@local") {
-		t.Errorf("From = %q, want a mailer-daemon origin", from)
-	}
+	mustNoErr(t, "parse the bounce", err)
+
+	wantEq(t, "the To", msg.Header.Get("To"), "alice@local")
+	wantEq(t, "the Auto-Submitted loop break (RFC 3834)", msg.Header.Get("Auto-Submitted"), "auto-generated")
+	wantContains(t, "the From", msg.Header.Get("From"), "mailer-daemon@local")
 	// The mailer-daemon origin must be a role mailbox the auto-reply pass skips,
 	// or delivering the bounce could provoke a reply loop.
 	if !isRoleMailbox("mailer-daemon@local") {
@@ -48,36 +38,17 @@ func TestBounceMessage(t *testing.T) {
 
 	// It is a multipart/report; report-type=delivery-status (RFC 3464).
 	mediaType, params, err := mime.ParseMediaType(msg.Header.Get("Content-Type"))
-	if err != nil || mediaType != "multipart/report" {
-		t.Fatalf("Content-Type = %q, want multipart/report", msg.Header.Get("Content-Type"))
+	mustNoErr(t, "parse the Content-Type", err)
+	if mediaType != "multipart/report" {
+		t.Fatalf("media type = %q, want multipart/report", mediaType)
 	}
-	if params["report-type"] != "delivery-status" {
-		t.Errorf("report-type = %q, want delivery-status", params["report-type"])
-	}
+	wantEq(t, "the report type", params["report-type"], "delivery-status")
 
 	// A human-readable text/plain part and a machine-readable
 	// message/delivery-status part; a client parses the latter for the failure.
-	var human, status string
-	mr := multipart.NewReader(msg.Body, params["boundary"])
-	for {
-		p, err := mr.NextPart()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			t.Fatalf("malformed multipart/report: %v", err)
-		}
-		b, _ := io.ReadAll(p)
-		switch ct, _, _ := mime.ParseMediaType(p.Header.Get("Content-Type")); ct {
-		case "text/plain":
-			human = string(b)
-		case "message/delivery-status":
-			status = string(b)
-		}
-	}
-	if !strings.Contains(human, "bob@remote") || !strings.Contains(human, "550 mailbox does not exist") {
-		t.Errorf("human-readable part missing the recipient or reason: %q", human)
-	}
+	parts := reportParts(t, msg.Body, params["boundary"])
+	wantContains(t, "the human-readable part", parts["text/plain"], "bob@remote")
+	wantContains(t, "the human-readable part", parts["text/plain"], "550 mailbox does not exist")
 	for _, want := range []string{
 		"Reporting-MTA: dns;mail.hermex.test",
 		"Final-Recipient: rfc822;bob@remote",
@@ -85,9 +56,25 @@ func TestBounceMessage(t *testing.T) {
 		"Status: 5.0.0",
 		"Diagnostic-Code: smtp; 550 mailbox does not exist",
 	} {
-		if !strings.Contains(status, want) {
-			t.Errorf("delivery-status part missing %q:\n%s", want, status)
+		wantContains(t, "the delivery-status part", parts["message/delivery-status"], want)
+	}
+}
+
+// reportParts reads a multipart/report body into its parts, keyed by media type.
+func reportParts(t *testing.T, body io.Reader, boundary string) map[string]string {
+	t.Helper()
+	parts := map[string]string{}
+	mr := multipart.NewReader(body, boundary)
+	for {
+		p, err := mr.NextPart()
+		if err == io.EOF {
+			return parts
 		}
+		mustNoErr(t, "read the next report part", err)
+		b, err := io.ReadAll(p)
+		mustNoErr(t, "read the report part body", err)
+		ct, _, _ := mime.ParseMediaType(p.Header.Get("Content-Type"))
+		parts[ct] = string(b)
 	}
 }
 

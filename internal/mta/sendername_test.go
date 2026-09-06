@@ -24,19 +24,12 @@ func TestRewriteFromDisplayName(t *testing.T) {
 
 	out := RewriteFromDisplayName([]byte(base), "Ali Veli (Acme)")
 	m, err := mail.ReadMessage(bytes.NewReader(out))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if from, _ := mail.ParseAddress(m.Header.Get("From")); from == nil ||
-		from.Name != "Ali Veli (Acme)" || from.Address != "alice@example.com" {
-		t.Errorf("From = %+v, want the rewritten name with the original address", from)
-	}
-	if m.Header.Get("Sender") != "relay@example.com" {
-		t.Errorf("Sender = %q, want untouched", m.Header.Get("Sender"))
-	}
-	if body, _ := io.ReadAll(m.Body); string(body) != "body\r\n" {
-		t.Errorf("body = %q, want untouched", body)
-	}
+	mustNoErr(t, "parse the rewritten message", err)
+	wantFromAddress(t, "the rewritten From", m, "Ali Veli (Acme)", "alice@example.com")
+	wantEq(t, "the Sender (untouched)", m.Header.Get("Sender"), "relay@example.com")
+	body, err := io.ReadAll(m.Body)
+	mustNoErr(t, "read the body", err)
+	wantEq(t, "the body (untouched)", string(body), "body\r\n")
 
 	if got := RewriteFromDisplayName([]byte(base), ""); !bytes.Equal(got, []byte(base)) {
 		t.Error("empty name should return the message unchanged")
@@ -47,11 +40,18 @@ func TestRewriteFromDisplayName(t *testing.T) {
 	}
 
 	folded := []byte("From: Alice\r\n <alice@example.com>\r\nSubject: x\r\n\r\nb\r\n")
-	fm, _ := mail.ReadMessage(bytes.NewReader(RewriteFromDisplayName(folded, "Bob")))
-	if fa, _ := mail.ParseAddress(fm.Header.Get("From")); fa == nil ||
-		fa.Address != "alice@example.com" || fa.Name != "Bob" {
-		t.Errorf("folded From rewrite = %+v, want Bob with the original address", fa)
-	}
+	fm, err := mail.ReadMessage(bytes.NewReader(RewriteFromDisplayName(folded, "Bob")))
+	mustNoErr(t, "parse the rewritten folded message", err)
+	wantFromAddress(t, "the rewritten folded From", fm, "Bob", "alice@example.com")
+}
+
+// wantFromAddress checks a message's From display name and address.
+func wantFromAddress(t *testing.T, what string, m *mail.Message, name, address string) {
+	t.Helper()
+	from, err := mail.ParseAddress(m.Header.Get("From"))
+	mustNoErr(t, "parse "+what, err)
+	wantEq(t, what+" display name", from.Name, name)
+	wantEq(t, what+" address", from.Address, address)
 }
 
 // senderKeys serves one domain's DKIM key for the sign/verify test.

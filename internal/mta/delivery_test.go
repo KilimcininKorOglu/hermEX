@@ -25,17 +25,13 @@ func TestSMTPToStoreDelivery(t *testing.T) {
 	accounts := directory.StaticAccounts{"alice@test": {MailboxPath: mboxPath}}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "listen", err)
 	defer ln.Close()
 	srv := &smtp.Server{Backend: &Backend{Accounts: accounts}, Hostname: "mail.test"}
 	go func() { _ = srv.Serve(ln) }()
 
 	conn, err := net.Dial("tcp", ln.Addr().String())
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "dial", err)
 	defer conn.Close()
 	r := textproto.NewReader(bufio.NewReader(conn))
 	expect := func(code int) {
@@ -64,31 +60,21 @@ func TestSMTPToStoreDelivery(t *testing.T) {
 	expect(221)
 
 	st, err := objectstore.Open(mboxPath)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "open the mailbox", err)
 	defer st.Close()
 	inbox := int64(mapi.PrivateFIDInbox)
 	msgs, err := st.ListMessages(inbox)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "list the inbox", err)
 	if len(msgs) != 1 {
 		t.Fatalf("delivered messages = %d, want 1", len(msgs))
 	}
 	raw, err := st.GetMessageRaw(inbox, msgs[0].UID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "read the delivered message", err)
 	// The served message is re-synthesized from the stored MAPI object, so it
 	// is not byte-identical to arrival; assert the subject and body survived.
 	env, err := mime.ParseEnvelope(raw)
-	if err != nil {
-		t.Fatalf("parse delivered message: %v", err)
-	}
-	if env.Subject != "hello" {
-		t.Errorf("subject = %q, want %q", env.Subject, "hello")
-	}
+	mustNoErr(t, "parse the delivered message", err)
+	wantEq(t, "the subject", env.Subject, "hello")
 	if !bytes.Contains(raw, []byte("hi alice")) {
 		t.Errorf("body text not preserved in %q", raw)
 	}

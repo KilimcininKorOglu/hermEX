@@ -88,66 +88,64 @@ func TestScanMessage(t *testing.T) {
 
 	set := func(addr string, fd *fakeAVDir) {
 		sc, err := antivirus.New(addr)
-		if err != nil {
-			t.Fatal(err)
-		}
+		mustNoErr(t, "build the scanner", err)
 		SetScanner(sc, fd, quarPath, "mail.test", nil)
 	}
 	t.Cleanup(func() { SetScanner(nil, nil, nil, "", nil) })
+	inbound := func() avDecision {
+		return scanMessage(accounts, avInboundSMTP, "e@x", []string{"v@acme.test"}, raw, when)
+	}
+	submission := func() avDecision {
+		return scanMessage(accounts, avSubmission, "s@acme.test", []string{"ext@far.test"}, raw, when)
+	}
 
 	// Toggles off: never scanned.
 	set(found, &fakeAVDir{domainID: 7, known: true})
-	if d := scanMessage(accounts, avInboundSMTP, "e@x", []string{"v@acme.test"}, raw, when); d != avProceed {
-		t.Fatalf("toggles off: got %d, want avProceed", d)
-	}
+	wantEq(t, "the decision with the toggles off", inbound(), avProceed)
 
 	// Inbound on + clean: proceed.
 	set(clean, &fakeAVDir{inbound: true, domainID: 7, known: true})
-	if d := scanMessage(accounts, avInboundSMTP, "e@x", []string{"v@acme.test"}, raw, when); d != avProceed {
-		t.Fatalf("clean: got %d, want avProceed", d)
-	}
+	wantEq(t, "the decision on a clean message", inbound(), avProceed)
 
 	// Inbound on + FOUND: quarantined (direction inbound, scope 7), eml written.
 	fin := &fakeAVDir{inbound: true, domainID: 7, known: true}
 	set(found, fin)
-	if d := scanMessage(accounts, avInboundSMTP, "e@x", []string{"v@acme.test"}, raw, when); d != avHandled {
-		t.Fatalf("found inbound: got %d, want avHandled", d)
-	}
-	if len(fin.quarantined) != 1 || fin.quarantined[0].Direction != "inbound" ||
-		fin.quarantined[0].DomainID != 7 || fin.quarantined[0].VirusName != "Eicar-Test-Signature" {
-		t.Fatalf("quarantine = %+v", fin.quarantined)
-	}
+	wantEq(t, "the decision on an inbound hit", inbound(), avHandled)
+	entry := onlyQuarantine(t, "the inbound quarantine", fin)
+	wantEq(t, "the quarantine direction", entry.Direction, "inbound")
+	wantEq(t, "the quarantine domain", entry.DomainID, int64(7))
+	wantEq(t, "the quarantined virus", entry.VirusName, "Eicar-Test-Signature")
 	if _, err := os.Stat(quarPath(1)); err != nil {
 		t.Errorf("eml not written: %v", err)
 	}
 
 	// Inbound + clamd down: temp-fail (sender retries).
 	set(dead, &fakeAVDir{inbound: true, domainID: 7, known: true})
-	if d := scanMessage(accounts, avInboundSMTP, "e@x", []string{"v@acme.test"}, raw, when); d != avTempFail {
-		t.Fatalf("inbound clamd down: got %d, want avTempFail", d)
-	}
+	wantEq(t, "the decision when clamd is down inbound", inbound(), avTempFail)
 
 	// Submission + clamd down: fail open.
 	set(dead, &fakeAVDir{outbound: true, domainID: 7, known: true})
-	if d := scanMessage(accounts, avSubmission, "s@acme.test", []string{"ext@far.test"}, raw, when); d != avProceed {
-		t.Fatalf("submission clamd down: got %d, want avProceed", d)
-	}
+	wantEq(t, "the decision when clamd is down on submission", submission(), avProceed)
 
 	// Submission + sender outbound + FOUND: handled, direction outbound.
 	fout := &fakeAVDir{outbound: true, domainID: 9, known: true}
 	set(found, fout)
-	if d := scanMessage(accounts, avSubmission, "s@acme.test", []string{"ext@far.test"}, raw, when); d != avHandled {
-		t.Fatalf("submission found: got %d, want avHandled", d)
-	}
-	if len(fout.quarantined) != 1 || fout.quarantined[0].Direction != "outbound" {
-		t.Fatalf("outbound quarantine = %+v", fout.quarantined)
-	}
+	wantEq(t, "the decision on an outbound hit", submission(), avHandled)
+	wantEq(t, "the outbound quarantine direction", onlyQuarantine(t, "the outbound quarantine", fout).Direction, "outbound")
 
 	// No scanner installed: proceed.
 	SetScanner(nil, nil, nil, "", nil)
-	if d := scanMessage(accounts, avInboundSMTP, "e@x", []string{"v@acme.test"}, raw, when); d != avProceed {
-		t.Fatalf("no scanner: got %d, want avProceed", d)
+	wantEq(t, "the decision with no scanner", inbound(), avProceed)
+}
+
+// onlyQuarantine requires the fake directory to hold exactly one quarantine
+// record and returns it.
+func onlyQuarantine(t *testing.T, what string, fd *fakeAVDir) directory.QuarantineEntry {
+	t.Helper()
+	if len(fd.quarantined) != 1 {
+		t.Fatalf("%s = %+v, want one record", what, fd.quarantined)
 	}
+	return fd.quarantined[0]
 }
 
 // TestDeliverAndRelayBlocksVirus proves an outbound virus is quarantined and the

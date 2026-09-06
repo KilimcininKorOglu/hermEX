@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,16 +22,13 @@ import (
 func TestDeliverForwardsViaRuleWithGuards(t *testing.T) {
 	mbox := filepath.Join(t.TempDir(), "alice")
 	st, err := objectstore.Open(mbox)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.AddRule(objectstore.Rule{
+	mustNoErr(t, "open the mailbox", err)
+	_, err = st.AddRule(objectstore.Rule{
 		FolderID: int64(mapi.PrivateFIDInbox), Name: "forward urgent", State: mapi.RuleStateEnabled,
 		Condition: objectstore.RuleSubjectContains("urgent"),
 		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{objectstore.RuleForwardAction("boss@example.com")}},
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
+	mustNoErr(t, "add the forward rule", err)
 	st.Close()
 
 	type capture struct {
@@ -46,6 +44,7 @@ func TestDeliverForwardsViaRuleWithGuards(t *testing.T) {
 	t.Cleanup(func() { OnRuleForward = prev })
 
 	deliverMsg := func(from, subject, extra string) {
+		t.Helper()
 		raw := "From: " + from + "\r\nTo: alice@test\r\nSubject: " + subject + "\r\n"
 		if extra != "" {
 			raw += extra + "\r\n"
@@ -55,9 +54,8 @@ func TestDeliverForwardsViaRuleWithGuards(t *testing.T) {
 		if subject == "urgent bounce" {
 			envFrom = "" // a bounce: null envelope sender
 		}
-		if err := deliver(nil, envFrom, "alice@test", mbox, []byte(raw), time.Now(), int64(mapi.PrivateFIDInbox)); err != nil {
-			t.Fatalf("deliver(%q): %v", subject, err)
-		}
+		mustNoErr(t, "deliver "+subject,
+			deliver(nil, envFrom, "alice@test", mbox, []byte(raw), time.Now(), int64(mapi.PrivateFIDInbox)))
 	}
 
 	// 1. Ordinary matching mail forwards, with the marker stamped.
@@ -65,9 +63,8 @@ func TestDeliverForwardsViaRuleWithGuards(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("ordinary message: got %d forwards, want 1", len(got))
 	}
-	if got[0].owner != "alice@test" || len(got[0].to) != 1 || got[0].to[0] != "boss@example.com" {
-		t.Errorf("forward owner/to = %q/%v, want alice@test/[boss@example.com]", got[0].owner, got[0].to)
-	}
+	wantEq(t, "the forward owner", got[0].owner, "alice@test")
+	wantEq(t, "the forward destinations", strings.Join(got[0].to, ","), "boss@example.com")
 	if !bytes.Contains(got[0].raw, []byte(forwardMarkerHeader)) {
 		t.Errorf("forwarded copy missing the loop-break marker header")
 	}

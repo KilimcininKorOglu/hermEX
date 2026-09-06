@@ -147,29 +147,18 @@ func TestInboundSpamRecordedToHistory(t *testing.T) {
 	hist := &recordingHistory{}
 	rec := &recordingScorer{verdict: antispam.Verdict{Score: 9, Spam: true, Reasons: []string{"SPF fail", "listed on DNSBL zen.example"}}}
 	b := &Backend{Accounts: accounts, Scorer: rec, History: hist}
-
-	sess, err := b.NewSession("203.0.113.9:1234")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := sess.Mail("bob@external.example", smtp.MailParams{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := sess.Rcpt("alice@test", smtp.RcptParams{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := sess.Data(strings.NewReader("From: bob@external.example\r\nSubject: x\r\n\r\nbody")); err != nil {
-		t.Fatal(err)
-	}
+	deliverBody(t, b, "203.0.113.9:1234", "bob@external.example", "alice@test",
+		"From: bob@external.example\r\nSubject: x\r\n\r\nbody")
 
 	if len(hist.records) != 1 {
 		t.Fatalf("history records = %d, want 1", len(hist.records))
 	}
 	r0 := hist.records[0]
-	if r0.MailFrom != "bob@external.example" || !r0.Spam || r0.Score != 9 ||
-		r0.Reasons != "SPF fail; listed on DNSBL zen.example" || r0.RemoteAddr != "203.0.113.9" {
-		t.Errorf("recorded verdict = %+v, want the scored values", r0)
-	}
+	wantEq(t, "the recorded sender", r0.MailFrom, "bob@external.example")
+	wantEq(t, "the recorded spam flag", r0.Spam, true)
+	wantEq(t, "the recorded score", r0.Score, 9)
+	wantEq(t, "the recorded reasons", r0.Reasons, "SPF fail; listed on DNSBL zen.example")
+	wantEq(t, "the recorded client address", r0.RemoteAddr, "203.0.113.9")
 }
 
 // TestSpamHistoryFailOpen proves a history write error never fails the delivery:
@@ -213,42 +202,18 @@ func TestSpamFiledToJunk(t *testing.T) {
 	mbox := filepath.Join(t.TempDir(), "alice")
 	accounts := directory.StaticAccounts{"alice@test": {MailboxPath: mbox}}
 	b := &Backend{Accounts: accounts, Scorer: &recordingScorer{verdict: antispam.Verdict{Score: 99, Spam: true}}}
+	deliverBody(t, b, "203.0.113.9:1234", "bob@external.example", "alice@test",
+		"From: bob@external.example\r\nSubject: spam\r\n\r\nbuy now")
 
-	sess, err := b.NewSession("203.0.113.9:1234")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := sess.Mail("bob@external.example", smtp.MailParams{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := sess.Rcpt("alice@test", smtp.RcptParams{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := sess.Data(strings.NewReader("From: bob@external.example\r\nSubject: spam\r\n\r\nbuy now")); err != nil {
-		t.Fatal(err)
-	}
+	junk := folderMessages(t, mbox, int64(mapi.PrivateFIDJunk))
+	wantEq(t, "messages in Junk", len(junk), 1)
+	wantEq(t, "messages in the inbox", len(folderMessages(t, mbox, int64(mapi.PrivateFIDInbox))), 0)
 
 	st, err := objectstore.Open(mbox)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "open the mailbox", err)
 	defer st.Close()
-	junk, err := st.ListMessages(int64(mapi.PrivateFIDJunk))
-	if err != nil {
-		t.Fatal(err)
-	}
-	inbox, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(junk) != 1 || len(inbox) != 0 {
-		t.Fatalf("junk=%d inbox=%d, want the spam in Junk only", len(junk), len(inbox))
-	}
 	raw, err := st.GetMessageRaw(int64(mapi.PrivateFIDJunk), junk[0].UID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(raw), "X-Spam-Flag: YES") {
-		t.Errorf("filed spam lost its X-Spam tag through the store round-trip:\n%s", raw)
-	}
+	mustNoErr(t, "read the filed spam", err)
+	wantContains(t, "the filed spam (its X-Spam tag must survive the store round-trip)",
+		string(raw), "X-Spam-Flag: YES")
 }

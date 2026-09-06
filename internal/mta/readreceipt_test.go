@@ -27,74 +27,57 @@ func TestBuildReadReceiptMDN(t *testing.T) {
 		OrigMsgID:   "<orig-1@hermex.test>",
 		SubmitTime:  when,
 	}, when)
-	if err != nil {
-		t.Fatalf("receipt does not build: %v", err)
-	}
+	mustNoErr(t, "build the receipt", err)
 
 	msg, err := mail.ReadMessage(strings.NewReader(string(raw)))
-	if err != nil {
-		t.Fatalf("receipt does not parse as a message: %v", err)
-	}
+	mustNoErr(t, "parse the receipt as a message", err)
 
-	if got := msg.Header.Get("From"); got != "reader@hermex.test" {
-		t.Errorf("From = %q, want the reader", got)
-	}
-	if got := msg.Header.Get("To"); got != "sender@hermex.test" {
-		t.Errorf("To = %q, want the represented sender", got)
-	}
-	if got := msg.Header.Get("X-Auto-Response-Suppress"); got != "All" {
-		t.Errorf("X-Auto-Response-Suppress = %q, want All (the loop guard)", got)
-	}
-	if subj, err := (&mime.WordDecoder{}).DecodeHeader(msg.Header.Get("Subject")); err != nil || subj != readReceiptSubject {
-		t.Errorf("Subject = %q (err %v), want %q", msg.Header.Get("Subject"), err, readReceiptSubject)
-	}
+	wantEq(t, "the From (the reader)", msg.Header.Get("From"), "reader@hermex.test")
+	wantEq(t, "the To (the represented sender)", msg.Header.Get("To"), "sender@hermex.test")
+	wantEq(t, "the X-Auto-Response-Suppress loop guard", msg.Header.Get("X-Auto-Response-Suppress"), "All")
+	subj, err := (&mime.WordDecoder{}).DecodeHeader(msg.Header.Get("Subject"))
+	mustNoErr(t, "decode the subject", err)
+	wantEq(t, "the subject", subj, readReceiptSubject)
 
 	mediaType, params, err := mime.ParseMediaType(msg.Header.Get("Content-Type"))
-	if err != nil {
-		t.Fatalf("Content-Type parse: %v", err)
-	}
+	mustNoErr(t, "parse the Content-Type", err)
 	if mediaType != "multipart/report" {
 		t.Fatalf("media type = %q, want multipart/report", mediaType)
 	}
-	if rt := params["report-type"]; rt != "disposition-notification" {
-		t.Errorf("report-type = %q, want disposition-notification", rt)
-	}
+	wantEq(t, "the report type", params["report-type"], "disposition-notification")
 
 	mr := multipart.NewReader(msg.Body, params["boundary"])
 
-	p1, err := mr.NextPart()
-	if err != nil {
-		t.Fatalf("first part: %v", err)
-	}
-	if ct := p1.Header.Get("Content-Type"); !strings.HasPrefix(ct, "text/plain") {
-		t.Errorf("part 1 Content-Type = %q, want text/plain first", ct)
-	}
-	body1, _ := io.ReadAll(p1)
-	if !strings.Contains(string(body1), "reader@hermex.test") || !strings.Contains(string(body1), "Quarterly numbers") {
-		t.Errorf("part 1 body missing reader or original subject: %q", body1)
-	}
+	body1 := nextPart(t, mr, "part 1", "text/plain")
+	wantContains(t, "part 1", body1, "reader@hermex.test")
+	wantContains(t, "part 1", body1, "Quarterly numbers")
 
-	p2, err := mr.NextPart()
-	if err != nil {
-		t.Fatalf("second part: %v", err)
-	}
-	if ct := p2.Header.Get("Content-Type"); !strings.HasPrefix(ct, "message/disposition-notification") {
-		t.Errorf("part 2 Content-Type = %q, want message/disposition-notification second", ct)
-	}
-	dn, _ := io.ReadAll(p2)
+	dn := nextPart(t, mr, "part 2", "message/disposition-notification")
 	for _, want := range []string{
 		"Final-Recipient: rfc822;reader@hermex.test",
 		"Disposition: automatic-action/MDN-sent-automatically; displayed",
 		"Original-Message-ID: <orig-1@hermex.test>",
 	} {
-		if !strings.Contains(string(dn), want) {
-			t.Errorf("disposition-notification missing %q in:\n%s", want, dn)
-		}
+		wantContains(t, "the disposition-notification", dn, want)
 	}
 
 	if _, err := mr.NextPart(); err != io.EOF {
 		t.Errorf("want exactly two parts, got a third (err=%v)", err)
 	}
+}
+
+// nextPart reads the next MIME part, requiring the content type it must carry,
+// and returns its body.
+func nextPart(t *testing.T, mr *multipart.Reader, what, mediaType string) string {
+	t.Helper()
+	p, err := mr.NextPart()
+	mustNoErr(t, "read "+what, err)
+	if ct := p.Header.Get("Content-Type"); !strings.HasPrefix(ct, mediaType) {
+		t.Errorf("%s Content-Type = %q, want %s", what, ct, mediaType)
+	}
+	body, err := io.ReadAll(p)
+	mustNoErr(t, "read the body of "+what, err)
+	return string(body)
 }
 
 // TestBuildReadReceiptOmitsAbsentFields confirms the optional decorations are

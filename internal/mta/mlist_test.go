@@ -50,10 +50,9 @@ func TestExpandMailingListRecursion(t *testing.T) {
 	t.Run("flat list returns members", func(t *testing.T) {
 		f := fakeExpander{"team@local": ok("alice@local", "bob@local")}
 		leaves, isList, res, _ := expandMailingList(f, from, "team@local")
-		slices.Sort(leaves)
-		if !isList || res != directory.MListOK || !slices.Equal(leaves, []string{"alice@local", "bob@local"}) {
-			t.Errorf("got (%v, list=%v, res=%d), want [alice bob] OK", leaves, isList, res)
-		}
+		wantEq(t, "the address is a list", isList, true)
+		wantEq(t, "the expansion result", res, directory.MListOK)
+		wantMembers(t, "the flat expansion", leaves, "alice@local", "bob@local")
 	})
 
 	t.Run("nested list flattens", func(t *testing.T) {
@@ -62,10 +61,7 @@ func TestExpandMailingListRecursion(t *testing.T) {
 			"team@local": ok("bob@local", "carol@local"),
 		}
 		leaves, _, _, _ := expandMailingList(f, from, "all@local")
-		slices.Sort(leaves)
-		if want := []string{"alice@local", "bob@local", "carol@local"}; !slices.Equal(leaves, want) {
-			t.Errorf("nested expansion = %v, want %v", leaves, want)
-		}
+		wantMembers(t, "the nested expansion", leaves, "alice@local", "bob@local", "carol@local")
 	})
 
 	t.Run("membership cycle terminates and de-duplicates", func(t *testing.T) {
@@ -74,10 +70,7 @@ func TestExpandMailingListRecursion(t *testing.T) {
 			"b@local": ok("bob@local", "a@local", "alice@local"), // loops back + repeats alice
 		}
 		leaves, _, _, _ := expandMailingList(f, from, "a@local")
-		slices.Sort(leaves)
-		if want := []string{"alice@local", "bob@local"}; !slices.Equal(leaves, want) {
-			t.Errorf("cyclic expansion = %v, want %v (no loop, deduped)", leaves, want)
-		}
+		wantMembers(t, "the cyclic expansion (no loop, deduped)", leaves, "alice@local", "bob@local")
 	})
 
 	t.Run("top-level posting refusal is reported", func(t *testing.T) {
@@ -94,10 +87,18 @@ func TestExpandMailingListRecursion(t *testing.T) {
 			"closed@local": {members: []string{"secret@local"}, res: directory.MListPrivilDomain},
 		}
 		leaves, _, _, _ := expandMailingList(f, from, "a@local")
-		if !slices.Equal(leaves, []string{"alice@local"}) {
-			t.Errorf("got %v, want [alice@local] (refused sub-list contributes nothing)", leaves)
-		}
+		wantMembers(t, "the expansion (a refused sub-list contributes nothing)", leaves, "alice@local")
 	})
+}
+
+// wantMembers checks a list expansion holds exactly the members wanted, in any
+// order.
+func wantMembers(t *testing.T, what string, got []string, want ...string) {
+	t.Helper()
+	slices.Sort(got)
+	if !slices.Equal(got, want) {
+		t.Errorf("%s = %v, want %v", what, got, want)
+	}
 }
 
 // mlistDir is a directory that both resolves mailboxes (via the embedded static

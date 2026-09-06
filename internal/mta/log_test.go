@@ -2,14 +2,12 @@ package mta
 
 import (
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 
 	"hermex/internal/directory"
 	"hermex/internal/logging"
 	"hermex/internal/objectstore"
-	"hermex/internal/smtp"
 )
 
 // captureSink records every event for assertion.
@@ -29,27 +27,13 @@ func (c *captureSink) Write(e logging.Event) {
 func TestDeliveryLogsRecipient(t *testing.T) {
 	mbox := filepath.Join(t.TempDir(), "alice")
 	st, err := objectstore.Open(mbox)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "open the mailbox", err)
 	st.Close()
 
 	sink := &captureSink{}
 	accounts := directory.StaticAccounts{"alice@test": {MailboxPath: mbox}}
 	b := &Backend{Accounts: accounts, Logger: logging.New(sink)}
-	sess, err := b.NewSession("203.0.113.5:1234")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := sess.Mail("sender@example.com", smtp.MailParams{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := sess.Rcpt("alice@test", smtp.RcptParams{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := sess.Data(strings.NewReader("Subject: hi\r\n\r\nbody\r\n")); err != nil {
-		t.Fatalf("Data: %v", err)
-	}
+	deliverBody(t, b, "203.0.113.5:1234", "sender@example.com", "alice@test", "Subject: hi\r\n\r\nbody\r\n")
 
 	sink.mu.Lock()
 	events := append([]logging.Event(nil), sink.events...)
@@ -61,15 +45,9 @@ func TestDeliveryLogsRecipient(t *testing.T) {
 			continue
 		}
 		found = true
-		if e.User != "alice@test" {
-			t.Errorf("delivery.ok user = %q, want alice@test", e.User)
-		}
-		if e.Fields["from"] != "sender@example.com" {
-			t.Errorf("delivery.ok from = %v, want sender@example.com", e.Fields["from"])
-		}
-		if e.RemoteAddr != "203.0.113.5:1234" {
-			t.Errorf("delivery.ok remote = %q, want the client address", e.RemoteAddr)
-		}
+		wantEq(t, "the delivery.ok user", e.User, "alice@test")
+		wantEq(t, "the delivery.ok sender", e.Fields["from"], "sender@example.com")
+		wantEq(t, "the delivery.ok client address", e.RemoteAddr, "203.0.113.5:1234")
 	}
 	if !found {
 		t.Error("no delivery.ok event for the delivered recipient")
