@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"hermex/internal/directory"
+	"hermex/internal/objectstore"
 )
 
 // People and personas (MS-OXWSCOS) expose the address book as aggregated contact
@@ -38,36 +39,54 @@ type getPersonaRequest struct {
 
 // --- responses ---
 
-// personaOut is a Persona (types namespace). Only the fields the GAL can fill are
-// emitted; the rest are omitted. EmailAddress is a plain address string here, not a
-// structured mailbox.
+// personaID is the persona's handle. A client keys the row it caches on this, and
+// drops a persona that carries none. hermEX has no per-persona store item, so the
+// id is the address it was built from, which is stable for the same person.
+type personaID struct {
+	ID string `xml:"Id,attr"`
+}
+
+// personaEmail is the EmailAddressType a persona carries. It is a nested block,
+// not an address string: a client reads the address out of the inner element and
+// finds nothing when the outer one holds it directly.
+type personaEmail struct {
+	Name         string `xml:"Name,omitempty"`
+	EmailAddress string `xml:"EmailAddress,omitempty"`
+	RoutingType  string `xml:"RoutingType,omitempty"`
+}
+
+// personaOut is a Persona (types namespace). The element order follows the
+// schema's sequence, which is what a validating client checks before it reads
+// any of the values.
 type personaOut struct {
-	XMLName             xml.Name `xml:"http://schemas.microsoft.com/exchange/services/2006/types Persona"`
-	DisplayName         string   `xml:"DisplayName,omitempty"`
-	EmailAddress        string   `xml:"EmailAddress,omitempty"`
-	Title               string   `xml:"Title,omitempty"`
-	Nickname            string   `xml:"Nickname,omitempty"`
-	BusinessPhoneNumber string   `xml:"BusinessPhoneNumber,omitempty"`
-	MobilePhoneNumber   string   `xml:"MobilePhoneNumber,omitempty"`
-	HomeAddress         string   `xml:"HomeAddress,omitempty"`
-	Comment             string   `xml:"Comment,omitempty"`
+	XMLName        xml.Name      `xml:"http://schemas.microsoft.com/exchange/services/2006/types Persona"`
+	PersonaID      personaID     `xml:"PersonaId"`
+	PersonaType    string        `xml:"PersonaType,omitempty"`
+	DisplayName    string        `xml:"DisplayName,omitempty"`
+	GivenName      string        `xml:"GivenName,omitempty"`
+	Surname        string        `xml:"Surname,omitempty"`
+	EmailAddress   *personaEmail `xml:"EmailAddress,omitempty"`
+	RelevanceScore *int          `xml:"RelevanceScore,omitempty"`
 }
 
 type peopleWrap struct {
 	Personas []personaOut
 }
 
+// findPeopleResponse is the FindPeople answer. FindPeople is NOT a batch
+// operation: ResponseClass sits on the root and ResponseCode, People and the row
+// counters are its direct children. Wrapping it in the ResponseMessages envelope
+// the batch operations use makes a client discard every response whatever it
+// holds, which is why autocomplete returned nothing at all.
 type findPeopleResponse struct {
-	XMLName  xml.Name                    `xml:"http://schemas.microsoft.com/exchange/services/2006/messages FindPeopleResponse"`
-	Messages []findPeopleResponseMessage `xml:"ResponseMessages>FindPeopleResponseMessage"`
-}
-
-type findPeopleResponseMessage struct {
+	XMLName                   xml.Name    `xml:"http://schemas.microsoft.com/exchange/services/2006/messages FindPeopleResponse"`
 	ResponseClass             string      `xml:"ResponseClass,attr"`
 	MessageText               string      `xml:"MessageText,omitempty"`
 	ResponseCode              string      `xml:"ResponseCode"`
 	People                    *peopleWrap `xml:"People,omitempty"`
 	TotalNumberOfPeopleInView *int        `xml:"TotalNumberOfPeopleInView,omitempty"`
+	FirstMatchingRowIndex     *int        `xml:"FirstMatchingRowIndex,omitempty"`
+	FirstLoadedRowIndex       *int        `xml:"FirstLoadedRowIndex,omitempty"`
 }
 
 // getPersonaResponse is the GetPersona response. Its root is the response message
@@ -88,24 +107,110 @@ func (s *Server) handleFindPeople(w http.ResponseWriter, inner []byte, sess *ses
 		s.soapFault(w, "ErrorInvalidRequest", "FindPeople: invalid request", err)
 		return
 	}
+	personas := s.searchPeople(sess, req.QueryString)
+	// The counters are always emitted, including the zero case: a client reads
+	// them to decide whether to ask for another page, and an absent count is not
+	// the same answer as none.
+	n, zero := len(personas), 0
+	resp := findPeopleResponse{
+		ResponseClass: "Success", ResponseCode: "NoError",
+		TotalNumberOfPeopleInView: &n,
+		FirstMatchingRowIndex:     &zero,
+		FirstLoadedRowIndex:       &zero,
+	}
+	if n > 0 {
+		resp.People = &peopleWrap{Personas: personas}
+	}
+	writeResponse(w, resp)
+}
+
+// searchPeople resolves an autocomplete query against the two address sources a
+// client expects: the organization's address book and the user's own contacts.
+// The contacts matter because an address the user corresponds with is often not
+// in the GAL at all, and that is exactly the address autocomplete is for.
+//
+// The GAL comes first, because a colleague is the likelier match, and an address
+// found in both is emitted once.
+func (s *Server) searchPeople(sess *session, query string) []personaOut {
 	var personas []personaOut
+	seen := map[string]bool{}
+	add := func(displayName, address string) {
+		key := strings.ToLower(strings.TrimSpace(address))
+		if key == "" || seen[key] {
+			return
+		}
+		seen[key] = true
+		personas = append(personas, newPersona(displayName, address))
+	}
 	if gal, ok := s.accounts.(directory.GAL); ok {
-		entries, err := gal.SearchGAL(sess.user, req.QueryString, personaSearchLimit)
+		entries, err := gal.SearchGAL(sess.user, query, personaSearchLimit)
 		// Withhold the addresses the operator hid from the address book.
-		entries = directory.VisibleGAL(entries)
 		if err == nil {
-			for _, e := range entries {
-				personas = append(personas, personaOut{DisplayName: e.DisplayName, EmailAddress: e.Address})
+			for _, e := range directory.VisibleGAL(entries) {
+				add(e.DisplayName, e.Address)
 			}
 		}
 	}
-	msg := findPeopleResponseMessage{ResponseClass: "Success", ResponseCode: "NoError"}
-	if len(personas) > 0 {
-		n := len(personas)
-		msg.People = &peopleWrap{Personas: personas}
-		msg.TotalNumberOfPeopleInView = &n
+	for _, c := range s.searchOwnContacts(sess, query, personaSearchLimit-len(personas)) {
+		add(c.DisplayName, c.Address)
 	}
-	writeResponse(w, findPeopleResponse{Messages: []findPeopleResponseMessage{msg}})
+	return personas
+}
+
+// searchOwnContacts matches the query against the caller's own Contacts folder.
+// The store is the caller's own, so there is no cross-mailbox surface here; a
+// mailbox that will not open yields nothing rather than failing the query, since
+// the address book half has already answered.
+func (s *Server) searchOwnContacts(sess *session, query string, limit int) []objectstore.ContactMatch {
+	if limit <= 0 {
+		return nil
+	}
+	st, err := objectstore.Open(sess.mailbox)
+	if err != nil {
+		return nil
+	}
+	defer st.Close()
+	matches, err := st.SearchContacts(query, limit)
+	if err != nil {
+		return nil
+	}
+	return matches
+}
+
+// newPersona builds one persona from a display name and an address. The id is the
+// address: hermEX has no per-persona store item, and a client that caches a row
+// needs a handle that means the same person on the next query.
+func newPersona(displayName, address string) personaOut {
+	name := displayName
+	if name == "" {
+		name = address
+	}
+	given, surname := splitName(displayName)
+	return personaOut{
+		PersonaID:   personaID{ID: address},
+		PersonaType: "Person",
+		DisplayName: name,
+		GivenName:   given,
+		Surname:     surname,
+		EmailAddress: &personaEmail{
+			Name:         name,
+			EmailAddress: address,
+			RoutingType:  "SMTP",
+		},
+	}
+}
+
+// splitName separates a display name into its given name and surname on the
+// first space. It yields neither for a name that carries no space, because a
+// directory that holds only an address would otherwise report that address as
+// somebody's first name, and a client shows an empty field more usefully than a
+// wrong one.
+func splitName(displayName string) (given, surname string) {
+	first, rest, found := strings.Cut(strings.TrimSpace(displayName), " ")
+	if !found {
+		return "", ""
+	}
+	return first, strings.TrimSpace(rest)
 }
 
 // handleGetPersona answers GetPersona: it looks up a single persona by the email
@@ -131,7 +236,8 @@ func (s *Server) handleGetPersona(w http.ResponseWriter, inner []byte, sess *ses
 		if err == nil {
 			for _, e := range entries {
 				if strings.EqualFold(e.Address, target) {
-					found = &personaOut{DisplayName: e.DisplayName, EmailAddress: e.Address}
+					p := newPersona(e.DisplayName, e.Address)
+					found = &p
 					break
 				}
 			}
