@@ -75,16 +75,8 @@ func (s *Store) sweepOrphanContent() (int, error) {
 	if _, err := os.Stat(root); errors.Is(err, fs.ErrNotExist) {
 		return 0, nil
 	}
-	var files []string
-	if err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if !d.IsDir() && strings.HasSuffix(path, ".zst") {
-			files = append(files, path)
-		}
-		return nil
-	}); err != nil {
+	files, err := contentFiles(root)
+	if err != nil {
 		return 0, err
 	}
 	referenced, err := s.referencedContentIDs()
@@ -106,6 +98,21 @@ func (s *Store) sweepOrphanContent() (int, error) {
 		removed++
 	}
 	return removed, nil
+}
+
+// contentFiles lists every offloaded content blob under the cid directory.
+func contentFiles(root string) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() && strings.HasSuffix(path, ".zst") {
+			files = append(files, path)
+		}
+		return nil
+	})
+	return files, err
 }
 
 // referencedContentIDs gathers every content id still referenced by a property in

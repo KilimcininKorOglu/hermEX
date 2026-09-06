@@ -47,22 +47,8 @@ func (s *Store) CreateFolder(parent *int64, displayName string) (int64, error) {
 	}
 	defer tx.Rollback()
 
-	fid, err := allocateEID(tx)
+	fid, cn, err := insertFolderRow(tx, parentFID)
 	if err != nil {
-		return 0, err
-	}
-	begin, end, err := allocateRange(tx)
-	if err != nil {
-		return 0, err
-	}
-	cn, err := allocateCN(tx)
-	if err != nil {
-		return 0, err
-	}
-	if _, err := tx.Exec(
-		`INSERT INTO folders (folder_id, parent_id, change_number, cur_eid, max_eid) VALUES (?, ?, ?, ?, ?)`,
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		int64(fid), parentFID, int64(cn), int64(begin), int64(end)); err != nil {
 		return 0, err
 	}
 	props, err := folderPropertyBag(tx, replica, mapi.UnixToNTTime(time.Now()), cn,
@@ -80,6 +66,31 @@ func (s *Store) CreateFolder(parent *int64, displayName string) (int64, error) {
 	s.publishChange("folder", cn, "")
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	return int64(fid), nil
+}
+
+// insertFolderRow allocates a new folder's id, its reserved message-id range and
+// its change number, and writes the row. The range is carved at creation so
+// every message the folder later holds draws its id from the folder's own block.
+func insertFolderRow(tx *sql.Tx, parentFID int64) (fid, cn uint64, err error) {
+	fid, err = allocateEID(tx)
+	if err != nil {
+		return 0, 0, err
+	}
+	begin, end, err := allocateRange(tx)
+	if err != nil {
+		return 0, 0, err
+	}
+	cn, err = allocateCN(tx)
+	if err != nil {
+		return 0, 0, err
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO folders (folder_id, parent_id, change_number, cur_eid, max_eid) VALUES (?, ?, ?, ?, ?)`,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		int64(fid), parentFID, int64(cn), int64(begin), int64(end)); err != nil {
+		return 0, 0, err
+	}
+	return fid, cn, nil
 }
 
 // FolderByName looks up a folder by parent and display name, reporting
@@ -308,36 +319,55 @@ func (s *Store) copyFolderInto(srcFolderID, newParent int64, newName string, rec
 	if err != nil {
 		return 0, err
 	}
+	if err := s.copyFolderMessages(srcFolderID, newID); err != nil {
+		return 0, err
+	}
+	if !recursive {
+		return newID, nil
+	}
+	if err := s.copySubfolders(srcFolderID, newID); err != nil {
+		return 0, err
+	}
+	return newID, nil
+}
+
+// copyFolderMessages re-files every message from one folder into another,
+// preserving each message's flags and received date.
+func (s *Store) copyFolderMessages(srcFolderID, dstFolderID int64) error {
 	msgs, err := s.ListMessages(srcFolderID)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	for _, m := range msgs {
 		raw, err := s.GetMessageRaw(srcFolderID, m.UID)
 		if err != nil {
-			return 0, err
+			return err
 		}
-		if _, err := s.AppendMessage(newID, raw, m.InternalDate, m.Flags); err != nil {
-			return 0, err
+		if _, err := s.AppendMessage(dstFolderID, raw, m.InternalDate, m.Flags); err != nil {
+			return err
 		}
 	}
-	if recursive {
-		children, err := s.childFolderIDs(srcFolderID)
+	return nil
+}
+
+// copySubfolders copies each direct subfolder's whole subtree under the new
+// parent, keeping each one's display name.
+func (s *Store) copySubfolders(srcFolderID, dstFolderID int64) error {
+	children, err := s.childFolderIDs(srcFolderID)
+	if err != nil {
+		return err
+	}
+	for _, childID := range children {
+		props, err := s.GetFolderProperties(childID, mapi.PrDisplayName)
 		if err != nil {
-			return 0, err
+			return err
 		}
-		for _, childID := range children {
-			props, err := s.GetFolderProperties(childID, mapi.PrDisplayName)
-			if err != nil {
-				return 0, err
-			}
-			childName, _ := stringProp(props, mapi.PrDisplayName)
-			if _, err := s.copyFolderInto(childID, newID, childName, true); err != nil {
-				return 0, err
-			}
+		childName, _ := stringProp(props, mapi.PrDisplayName)
+		if _, err := s.copyFolderInto(childID, dstFolderID, childName, true); err != nil {
+			return err
 		}
 	}
-	return newID, nil
+	return nil
 }
 
 // childFolderIDs returns the ids of a folder's direct, live subfolders.

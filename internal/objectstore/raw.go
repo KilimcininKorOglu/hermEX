@@ -88,27 +88,34 @@ func (s *Store) regenerateOnce(messageID int64, mid string) ([]byte, error) {
 // writes it to the eml cache, and updates the index size so the recorded
 // RFC822.SIZE matches the bytes now served (a regenerated message uses fresh
 // MIME boundaries and may differ in length from any earlier rendering).
-func (s *Store) regenerateEML(messageID int64, mid string) ([]byte, error) {
-	if s.regenHook != nil {
-		s.regenHook()
-	}
-	// A preserved original, an S/MIME message, or a scheduling message whose
-	// text/calendar body re-export would demote to an attachment, is served
-	// verbatim: re-synthesizing it would destroy the signature, the envelope, or the
-	// invitation, so it is never regenerated via Export.
+// preservedOriginal returns the arrival bytes a message must be served as, or
+// nil when it is re-synthesized like every other message.
+//
+// An S/MIME message and a scheduling message whose text/calendar body a
+// re-export would demote to an attachment are served verbatim: re-synthesizing
+// either destroys the signature, the envelope, or the invitation.
+func (s *Store) preservedOriginal(messageID int64) []byte {
 	for _, tag := range []mapi.PropTag{mapi.PrSmimeOriginal, mapi.PrScheduleOriginal} {
 		props, err := s.GetMessageProperties(messageID, tag)
 		if err != nil {
 			continue
 		}
-		if v, ok := props.Get(tag); ok {
-			if orig, ok := v.([]byte); ok && len(orig) > 0 {
-				if err := s.writeEML(mid, orig); err != nil {
-					return nil, err
-				}
-				return orig, nil
-			}
+		if orig := propOr[[]byte](props, tag, nil); len(orig) > 0 {
+			return orig
 		}
+	}
+	return nil
+}
+
+func (s *Store) regenerateEML(messageID int64, mid string) ([]byte, error) {
+	if s.regenHook != nil {
+		s.regenHook()
+	}
+	if orig := s.preservedOriginal(messageID); orig != nil {
+		if err := s.writeEML(mid, orig); err != nil {
+			return nil, err
+		}
+		return orig, nil
 	}
 	msg, err := s.OpenMessage(messageID)
 	if err != nil {

@@ -42,24 +42,38 @@ func (s *Store) PruneEMLCache(cutoff time.Time) (removed int, reclaimed int64, e
 		if e.IsDir() || strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
-		info, err := e.Info()
-		if errors.Is(err, fs.ErrNotExist) {
-			continue // removed underneath us; nothing left to reclaim
-		}
+		size, gone, err := pruneCacheEntry(root, e, cutoff)
 		if err != nil {
 			return removed, reclaimed, err
 		}
-		if !info.ModTime().Before(cutoff) {
-			continue
+		if gone {
+			removed++
+			reclaimed += size
 		}
-		if err := os.Remove(filepath.Join(root, e.Name())); err != nil {
-			if errors.Is(err, fs.ErrNotExist) {
-				continue
-			}
-			return removed, reclaimed, err
-		}
-		removed++
-		reclaimed += info.Size()
 	}
 	return removed, reclaimed, nil
+}
+
+// pruneCacheEntry removes one cache file when it is older than the cutoff,
+// reporting the bytes it reclaimed. A file that vanished underneath the walk is
+// not an error and reclaims nothing, because another pass or a delete already
+// took it.
+func pruneCacheEntry(root string, e fs.DirEntry, cutoff time.Time) (size int64, removed bool, err error) {
+	info, err := e.Info()
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	if !info.ModTime().Before(cutoff) {
+		return 0, false, nil
+	}
+	if err := os.Remove(filepath.Join(root, e.Name())); err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	return info.Size(), true, nil
 }
