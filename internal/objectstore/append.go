@@ -93,31 +93,9 @@ func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	mid := midString(uint64(eid))
 
-	// Some messages must be served byte-for-byte rather than re-synthesized:
-	// oxcmail.Export rebuilds the MIME tree, which invalidates an S/MIME signature
-	// (turning an envelope into plain multipart/mixed) and demotes a meeting
-	// invitation's text/calendar body to an attachment. For those, preserve the
-	// arrival bytes on the message and serve them verbatim; every other message is
-	// re-synthesized.
-	eml := raw
-	switch {
-	case smime.IsSMIME(raw):
-		if err := s.SetMessageProperties(eid, mapi.PropertyValues{
-			{Tag: mapi.PrSmimeOriginal, Value: raw},
-		}); err != nil {
-			return MessageInfo{}, err
-		}
-	case isSchedulingMessage(msg):
-		if err := s.SetMessageProperties(eid, mapi.PropertyValues{
-			{Tag: mapi.PrScheduleOriginal, Value: raw},
-		}); err != nil {
-			return MessageInfo{}, err
-		}
-	default:
-		eml, err = oxcmail.Export(msg, resolver)
-		if err != nil {
-			return MessageInfo{}, fmt.Errorf("objectstore: export: %w", err)
-		}
+	eml, err := s.wireForm(eid, raw, msg, resolver)
+	if err != nil {
+		return MessageInfo{}, err
 	}
 	if err := s.writeEML(mid, eml); err != nil {
 		return MessageInfo{}, err
@@ -142,6 +120,34 @@ func (s *Store) AppendMessage(folderID int64, raw []byte, internalDate time.Time
 		Subject:      projectSubject(msg.Props),
 		Sender:       projectSender(msg.Props),
 	}, nil
+}
+
+// wireForm decides what bytes the message is served as, and preserves the
+// arrival bytes on the message when they must be served verbatim.
+//
+// oxcmail.Export rebuilds the MIME tree, which invalidates an S/MIME signature
+// (turning an envelope into plain multipart/mixed) and demotes a meeting
+// invitation's text/calendar body to an attachment. Those two classes keep their
+// arrival bytes; every other message is re-synthesized, so a property edit shows
+// up in what a client reads.
+func (s *Store) wireForm(eid int64, raw []byte, msg *oxcmail.Message, resolver oxcmail.Options) ([]byte, error) {
+	var preserve mapi.PropTag
+	switch {
+	case smime.IsSMIME(raw):
+		preserve = mapi.PrSmimeOriginal
+	case isSchedulingMessage(msg):
+		preserve = mapi.PrScheduleOriginal
+	default:
+		eml, err := oxcmail.Export(msg, resolver)
+		if err != nil {
+			return nil, fmt.Errorf("objectstore: export: %w", err)
+		}
+		return eml, nil
+	}
+	if err := s.SetMessageProperties(eid, mapi.PropertyValues{{Tag: preserve, Value: raw}}); err != nil {
+		return nil, err
+	}
+	return raw, nil
 }
 
 // emlPath maps a message's mid_string to its cached wire-form file.

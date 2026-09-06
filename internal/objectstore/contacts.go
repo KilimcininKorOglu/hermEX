@@ -29,18 +29,12 @@ func (s *Store) ContactHasAddress(address string) (bool, error) {
 	if want == "" {
 		return false, nil
 	}
-	ids, err := s.GetNamedPropIDs(false, contactEmailNames)
+	tags, err := s.contactEmailTags()
 	if err != nil {
 		return false, err
 	}
-	var tags []mapi.PropTag
-	for _, id := range ids {
-		if id != 0 {
-			tags = append(tags, mapi.PropTag(uint32(id)<<16|uint32(mapi.PtUnicode)))
-		}
-	}
 	if len(tags) == 0 {
-		return false, nil // no contact e-mail named ids allocated → nothing to match
+		return false, nil // no contact e-mail named ids allocated, so nothing to match
 	}
 	objs, err := s.ListFolderObjects(int64(mapi.PrivateFIDContacts))
 	if err != nil {
@@ -51,15 +45,43 @@ func (s *Store) ContactHasAddress(address string) (bool, error) {
 		if err != nil {
 			continue
 		}
-		for _, tag := range tags {
-			if v, ok := pv.Get(tag); ok {
-				if str, ok := v.(string); ok && normalizeContactAddress(str) == want {
-					return true, nil
-				}
-			}
+		if bagHasAddress(pv, tags, want) {
+			return true, nil
 		}
 	}
 	return false, nil
+}
+
+// contactEmailTags resolves this store's tags for a contact's three e-mail
+// slots. It never allocates, so a mailbox that has never stored a contact
+// resolves to nothing.
+func (s *Store) contactEmailTags() ([]mapi.PropTag, error) {
+	ids, err := s.GetNamedPropIDs(false, contactEmailNames)
+	if err != nil {
+		return nil, err
+	}
+	var tags []mapi.PropTag
+	for _, id := range ids {
+		if id != 0 {
+			tags = append(tags, mapi.MakeTag(id, mapi.PtUnicode))
+		}
+	}
+	return tags, nil
+}
+
+// bagHasAddress reports whether any of the tags carries the wanted address,
+// compared in the normalized form both sides were reduced to.
+func bagHasAddress(pv mapi.PropertyValues, tags []mapi.PropTag, want string) bool {
+	for _, tag := range tags {
+		v, ok := pv.Get(tag)
+		if !ok {
+			continue
+		}
+		if str, ok := v.(string); ok && normalizeContactAddress(str) == want {
+			return true
+		}
+	}
+	return false
 }
 
 // ContactMatch is one contact an autocomplete query matched: the name to show

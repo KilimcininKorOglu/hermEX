@@ -329,48 +329,61 @@ func (s *Store) ensureObjectSchema() error {
 		`SELECT name FROM sqlite_master WHERE type='table' AND name='configurations'`).Scan(&name)
 	switch {
 	case err == sql.ErrNoRows:
-		// Fresh store: create the baseline schema, stamp its version, and seed.
-		for _, stmt := range objectBaseline {
-			if _, err := s.objdb.Exec(stmt); err != nil {
-				return fmt.Errorf("exec %q: %w", firstLine(stmt), err)
-			}
-		}
-		if _, err := s.objdb.Exec(
-			`INSERT INTO configurations (config_id, config_value) VALUES (?, ?)`,
-			cfgSchemaVersion, objectSchemaVersion); err != nil {
+		if err := s.createObjectBaseline(); err != nil {
 			return err
-		}
-		guid, err := s.seedStore()
-		if err != nil {
-			return err
-		}
-		if s.seedBuiltins {
-			if s.kind == storePublic {
-				if err := s.seedPublicStore(guid); err != nil {
-					return err
-				}
-			} else if err := s.seedMailbox(guid); err != nil {
-				return err
-			}
 		}
 	case err != nil:
 		return err
 	default:
-		// Existing store: a version below the baseline is a pre-migration dev
-		// schema (disposable, never deployed), so it is still refused. Versions at
-		// or above the baseline are carried forward by the runner below.
-		var v int
-		if err := s.objdb.QueryRow(
-			`SELECT config_value FROM configurations WHERE config_id=?`, cfgSchemaVersion).Scan(&v); err != nil {
-			return fmt.Errorf("read schema version: %w", err)
-		}
-		if v < objectSchemaVersion {
-			return fmt.Errorf("schema version %d unsupported (want %d)", v, objectSchemaVersion)
+		if err := s.checkObjectVersion(); err != nil {
+			return err
 		}
 	}
 	// Fresh and existing stores converge here: apply any migrations beyond the
 	// baseline once, and refuse a store recorded newer than this binary.
 	return s.migrateAndBackfill()
+}
+
+// createObjectBaseline builds a fresh store: the baseline schema, its stamped
+// version, and the seeded folder tree the store kind calls for.
+func (s *Store) createObjectBaseline() error {
+	for _, stmt := range objectBaseline {
+		if _, err := s.objdb.Exec(stmt); err != nil {
+			return fmt.Errorf("exec %q: %w", firstLine(stmt), err)
+		}
+	}
+	if _, err := s.objdb.Exec(
+		`INSERT INTO configurations (config_id, config_value) VALUES (?, ?)`,
+		cfgSchemaVersion, objectSchemaVersion); err != nil {
+		return err
+	}
+	guid, err := s.seedStore()
+	if err != nil {
+		return err
+	}
+	if !s.seedBuiltins {
+		return nil
+	}
+	if s.kind == storePublic {
+		return s.seedPublicStore(guid)
+	}
+	return s.seedMailbox(guid)
+}
+
+// checkObjectVersion refuses an existing store this binary cannot read. A
+// version below the baseline is a pre-migration dev schema (disposable, never
+// deployed). Versions at or above the baseline are carried forward by the
+// migration runner.
+func (s *Store) checkObjectVersion() error {
+	var v int
+	if err := s.objdb.QueryRow(
+		`SELECT config_value FROM configurations WHERE config_id=?`, cfgSchemaVersion).Scan(&v); err != nil {
+		return fmt.Errorf("read schema version: %w", err)
+	}
+	if v < objectSchemaVersion {
+		return fmt.Errorf("schema version %d unsupported (want %d)", v, objectSchemaVersion)
+	}
+	return nil
 }
 
 // objectDriver migrates objects.sqlite3, whose schema version lives in the
