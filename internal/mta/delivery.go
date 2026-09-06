@@ -314,17 +314,7 @@ func (s *session) tempRouteFailure(to string, err error) error {
 // authenticated submission relaying to an external domain.
 func (s *session) routeRecipient(to, notify, orcpt string) error {
 	if path, ok := s.accounts.Resolve(to); ok {
-		if err := overReceiveQuota(path); err != nil {
-			return err
-		}
-		// Greylist a first-contact triplet from unauthenticated intake: defer with a
-		// temporary failure so a legitimate MTA retries. Authenticated submission,
-		// allowlisted senders, and bounces are exempt; a store error fails open.
-		if s.authUser == "" && s.greylist != nil && s.greylist.ShouldDefer(clientIP(s.remoteAddr), s.from, to) {
-			return &smtp.TempError{Message: "4.7.1 greylisted, please retry shortly"}
-		}
-		s.targets = append(s.targets, target{addr: to, path: path})
-		return nil
+		return s.routeLocal(to, path)
 	}
 	if s.authUser == "" {
 		return &smtp.PermError{Message: fmt.Sprintf("relay denied for <%s>", to)}
@@ -347,6 +337,21 @@ func (s *session) routeRecipient(to, notify, orcpt string) error {
 		return &smtp.TempError{Message: "4.7.4 too many recipients in a short time, please retry later"}
 	}
 	s.relayTargets = append(s.relayTargets, relay.DSNRecipient{Addr: to, Notify: notify, ORCPT: orcpt})
+	return nil
+}
+
+// routeLocal accepts a recipient that resolves to a local mailbox.
+func (s *session) routeLocal(to, path string) error {
+	if err := overReceiveQuota(path); err != nil {
+		return err
+	}
+	// Greylist a first-contact triplet from unauthenticated intake: defer with a
+	// temporary failure so a legitimate MTA retries. Authenticated submission,
+	// allowlisted senders, and bounces are exempt; a store error fails open.
+	if s.authUser == "" && s.greylist != nil && s.greylist.ShouldDefer(clientIP(s.remoteAddr), s.from, to) {
+		return &smtp.TempError{Message: "4.7.1 greylisted, please retry shortly"}
+	}
+	s.targets = append(s.targets, target{addr: to, path: path})
 	return nil
 }
 
@@ -454,119 +459,93 @@ func (s *session) Data(r io.Reader) error {
 		return &smtp.TempError{Message: "4.3.0 could not read the message, please retry later"}
 	}
 	received := time.Now()
-	// Antivirus runs before spam scoring or filing: a virus hit is quarantined (not
-	// delivered) and the affected parties notified. An unreachable clamd temp-fails
-	// unauthenticated inbound (the sender retries) and fails open on an authenticated
-	// submission. With no scanner configured this is a no-op.
-	avM := avSubmission
-	if s.authUser == "" {
-		avM = avInboundSMTP
-	}
-	switch scanMessage(s.accounts, avM, s.from, avRecipients(s.targets, relayAddrs(s.relayTargets)), raw, received) {
+	switch s.avVerdict(raw, received) {
 	case avTempFail:
 		return &smtp.TempError{Message: "4.7.1 virus scanner temporarily unavailable, retry later"}
 	case avHandled:
 		return nil // quarantined: 250 to the sender, nothing filed or relayed
 	}
-	// Inbound (unauthenticated) mail bound for a local mailbox is spam-scored: the
-	// filed copy is tagged with advisory X-Spam headers (so a client can filter on
-	// them, preserved through the store by oxcmail), and a message over the threshold
-	// is filed to Junk instead of the inbox. Scoring is fail-open, it never blocks
-	// delivery, and the user's own authenticated submissions and the outbound relay
-	// copy are not scanned.
-	localRaw := raw
-	folder := int64(mapi.PrivateFIDInbox)
-	var v antispam.Verdict
-	var fromDom string
-	scored := s.scorer != nil && s.authUser == "" && len(s.targets) > 0
-	if scored {
-		ip := clientIP(s.remoteAddr)
-		fromDom = fromHeaderDomain(raw)
-		v = s.scorer.Score(antispam.Input{
-			Raw: raw, ClientIP: ip, MailFrom: s.from, FromDomain: fromDom,
-		})
-		localRaw = antispam.Tag(raw, v)
-		if v.Spam {
-			folder = int64(mapi.PrivateFIDJunk)
-		}
-		// The reasons aggregate every signal that fired (SPF/DKIM/DMARC, DNSBL zones,
-		// Bayesian, SA rules), so an admin can debug a false positive.
-		reasons := strings.Join(v.Reasons, "; ")
-		if s.logger != nil {
-			s.logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "spam.scored", RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "score": v.Score, "spam": v.Spam, "reasons": reasons}})
-		}
-		// Persist the verdict for the admin Spam History view, fail-open: a history
-		// write must never fail the delivery.
-		if s.history != nil {
-			addr := ""
-			if ip != nil {
-				addr = ip.String()
-			}
-			rec := directory.SpamVerdict{Time: received.Unix(), MailFrom: s.from, RemoteAddr: addr, Score: v.Score, Spam: v.Spam, Reasons: reasons}
-			if err := s.history.RecordSpamVerdict(rec); err != nil && s.logger != nil {
-				s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "spam.history.fail", RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}, Err: err.Error()})
-			}
-		}
+	sc := s.scoreInbound(raw, received)
+	if err := s.deliverTargets(sc, received); err != nil {
+		return err
 	}
+	return s.queueRelay(raw, received)
+}
+
+// avVerdict runs the antivirus gate, which precedes spam scoring and filing. A
+// hit is quarantined (not delivered) and the affected parties notified. An
+// unreachable clamd temp-fails unauthenticated inbound (the sender retries) and
+// fails open on an authenticated submission. With no scanner configured this is a
+// no-op.
+func (s *session) avVerdict(raw []byte, received time.Time) avDecision {
+	mode := avSubmission
+	if s.authUser == "" {
+		mode = avInboundSMTP
+	}
+	return scanMessage(s.accounts, mode, s.from, avRecipients(s.targets, relayAddrs(s.relayTargets)), raw, received)
+}
+
+// scoring is one message's spam verdict plus the message-level filing it implies.
+type scoring struct {
+	scored   bool
+	verdict  antispam.Verdict
+	fromDom  string
+	raw      []byte // the tagged copy filed locally
+	original []byte // the untagged wire form, re-tagged per recipient
+	folder   int64
+}
+
+// scoreInbound scores inbound (unauthenticated) mail bound for a local mailbox:
+// the filed copy is tagged with advisory X-Spam headers (so a client can filter on
+// them, preserved through the store by oxcmail), and a message over the threshold
+// is filed to Junk instead of the inbox. Scoring is fail-open, it never blocks
+// delivery, and the user's own authenticated submissions and the outbound relay
+// copy are not scored.
+func (s *session) scoreInbound(raw []byte, received time.Time) scoring {
+	sc := scoring{raw: raw, original: raw, folder: int64(mapi.PrivateFIDInbox)}
+	sc.scored = s.scorer != nil && s.authUser == "" && len(s.targets) > 0
+	if !sc.scored {
+		return sc
+	}
+	ip := clientIP(s.remoteAddr)
+	sc.fromDom = fromHeaderDomain(raw)
+	sc.verdict = s.scorer.Score(antispam.Input{
+		Raw: raw, ClientIP: ip, MailFrom: s.from, FromDomain: sc.fromDom,
+	})
+	sc.raw = antispam.Tag(raw, sc.verdict)
+	if sc.verdict.Spam {
+		sc.folder = int64(mapi.PrivateFIDJunk)
+	}
+	// The reasons aggregate every signal that fired (SPF/DKIM/DMARC, DNSBL zones,
+	// Bayesian, SA rules), so an admin can debug a false positive.
+	reasons := strings.Join(sc.verdict.Reasons, "; ")
+	if s.logger != nil {
+		s.logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "spam.scored", RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "score": sc.verdict.Score, "spam": sc.verdict.Spam, "reasons": reasons}})
+	}
+	s.recordVerdict(sc.verdict, ip, reasons, received)
+	return sc
+}
+
+// recordVerdict persists the verdict for the admin Spam History view. It is
+// fail-open: a history write must never fail the delivery.
+func (s *session) recordVerdict(v antispam.Verdict, ip net.IP, reasons string, received time.Time) {
+	if s.history == nil {
+		return
+	}
+	addr := ""
+	if ip != nil {
+		addr = ip.String()
+	}
+	rec := directory.SpamVerdict{Time: received.Unix(), MailFrom: s.from, RemoteAddr: addr, Score: v.Score, Spam: v.Spam, Reasons: reasons}
+	if err := s.history.RecordSpamVerdict(rec); err != nil && s.logger != nil {
+		s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "spam.history.fail", RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}, Err: err.Error()})
+	}
+}
+
+// deliverTargets files the message into every local recipient's mailbox.
+func (s *session) deliverTargets(sc scoring, received time.Time) error {
 	for _, t := range s.targets {
-		tRaw, tFolder := localRaw, folder
-		// Per-recipient overrides re-decide only this recipient's Junk filing and the
-		// X-Spam flag, never the score, which is intrinsic to the message. Precedence,
-		// strongest first: an operator block is absolute; a recipient's own block
-		// narrows an operator allow (or blocks independently); an operator allow files
-		// to the inbox; a recipient's own allow rescues the message, but never a hard
-		// DMARC failure (a spoof a user cannot tell from the real sender); finally a
-		// per-recipient threshold re-evaluates a purely score-driven verdict. Every
-		// lookup is fail-open. An operator block makes a recipient's rules moot, so the
-		// lookup is skipped in that case.
-		if scored {
-			userAction := ""
-			if s.recipAccess != nil && v.AccessAction != antispam.AccessBlock {
-				rules, err := s.recipAccess.RecipientRulesForMaildir(t.path)
-				switch {
-				case err != nil && s.logger != nil:
-					// Fail-open, but not silent: without this a DB fault would revert
-					// the recipient's personal allow/block to the score default with no
-					// operator signal at all.
-					logging.SettingsReadFailed(s.logger, "mta", "recipient_rules",
-						"recipient spam rules skipped, using message-level verdict", err)
-				case len(rules) > 0:
-					userAction = antispam.NewAccessList(rules).Action(s.from, fromDom)
-				}
-			}
-			switch {
-			case v.AccessAction == antispam.AccessBlock:
-				// Operator block, absolute; the message-level Junk filing stands.
-			case userAction == antispam.AccessBlock:
-				tv := v
-				tv.Spam = true
-				tFolder = int64(mapi.PrivateFIDJunk)
-				tRaw = antispam.Tag(raw, tv)
-			case v.AccessAction == antispam.AccessAllow:
-				// Operator allow, the message-level inbox filing stands (a hard DMARC
-				// failure already left it Junk inside the scorer).
-			case userAction == antispam.AccessAllow && !v.DMARCReject:
-				tv := v
-				tv.Spam = false
-				tFolder = int64(mapi.PrivateFIDInbox)
-				tRaw = antispam.Tag(raw, tv)
-			case s.thresholds != nil:
-				override, ok, err := s.thresholds.SpamThresholdForMaildir(t.path)
-				switch {
-				case err != nil && s.logger != nil:
-					logging.SettingsReadFailed(s.logger, "mta", "spam_threshold",
-						"recipient threshold skipped, using default", err)
-				case ok:
-					tv := v
-					tv.Spam = v.Score >= override
-					tFolder = int64(mapi.PrivateFIDInbox)
-					if tv.Spam {
-						tFolder = int64(mapi.PrivateFIDJunk)
-					}
-					tRaw = antispam.Tag(raw, tv)
-				}
-			}
-		}
+		tRaw, tFolder := s.recipientFiling(t, sc)
 		if err := deliver(s.accounts, s.from, t.addr, t.path, tRaw, received, tFolder); err != nil {
 			s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "delivery.fail", User: t.addr, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}, Err: err.Error()})
 			// A store failure is transient (the mailbox is there, the disk or the
@@ -577,17 +556,108 @@ func (s *session) Data(r io.Reader) error {
 		}
 		s.logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "delivery.ok", User: t.addr, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from}})
 	}
-	// External recipients are handed to the durable relay spool. Once Enqueue
-	// commits, the worker owns their delivery (and retry), so returning success
-	// here lets the server answer 250, the message is no longer at risk of loss.
-	if len(s.relayTargets) > 0 {
-		if err := s.spool.EnqueueDSN(s.from, s.ret, s.envid, s.relayTargets, raw, received); err != nil {
-			s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "relay.fail", User: s.authUser, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "recipients": len(s.relayTargets)}, Err: err.Error()})
-			// The spool is a local database; a write failure is transient, so defer.
-			return &smtp.TempError{Message: "4.3.0 could not queue the message, please retry later"}
-		}
-		s.logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "relay.queued", User: s.authUser, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "recipients": len(s.relayTargets)}})
+	return nil
+}
+
+// recipientFiling applies the per-recipient overrides, which re-decide only this
+// recipient's Junk filing and the X-Spam flag, never the score, which is intrinsic
+// to the message. Precedence, strongest first: an operator block is absolute; a
+// recipient's own block narrows an operator allow (or blocks independently); an
+// operator allow files to the inbox; a recipient's own allow rescues the message,
+// but never a hard DMARC failure (a spoof a user cannot tell from the real
+// sender); finally a per-recipient threshold re-evaluates a purely score-driven
+// verdict. Every lookup is fail-open.
+func (s *session) recipientFiling(t target, sc scoring) ([]byte, int64) {
+	if !sc.scored {
+		return sc.raw, sc.folder
 	}
+	v := sc.verdict
+	userAction := s.recipientAction(t, sc)
+	switch {
+	case v.AccessAction == antispam.AccessBlock:
+		// Operator block, absolute; the message-level Junk filing stands.
+		return sc.raw, sc.folder
+	case userAction == antispam.AccessBlock:
+		return retagged(sc, true), int64(mapi.PrivateFIDJunk)
+	case v.AccessAction == antispam.AccessAllow:
+		// Operator allow, the message-level inbox filing stands (a hard DMARC
+		// failure already left it Junk inside the scorer).
+		return sc.raw, sc.folder
+	case userAction == antispam.AccessAllow && !v.DMARCReject:
+		return retagged(sc, false), int64(mapi.PrivateFIDInbox)
+	}
+	return s.thresholdFiling(t, sc)
+}
+
+// recipientAction reads the recipient's own allow/block rules. An operator block
+// makes them moot, so the lookup is skipped in that case.
+func (s *session) recipientAction(t target, sc scoring) string {
+	if s.recipAccess == nil || sc.verdict.AccessAction == antispam.AccessBlock {
+		return ""
+	}
+	rules, err := s.recipAccess.RecipientRulesForMaildir(t.path)
+	switch {
+	case err != nil:
+		// Fail-open, but not silent: without this a DB fault would revert the
+		// recipient's personal allow/block to the score default with no operator
+		// signal at all.
+		if s.logger != nil {
+			logging.SettingsReadFailed(s.logger, "mta", "recipient_rules",
+				"recipient spam rules skipped, using message-level verdict", err)
+		}
+		return ""
+	case len(rules) > 0:
+		return antispam.NewAccessList(rules).Action(s.from, sc.fromDom)
+	}
+	return ""
+}
+
+// thresholdFiling re-evaluates a purely score-driven verdict against the
+// recipient's own spam threshold.
+func (s *session) thresholdFiling(t target, sc scoring) ([]byte, int64) {
+	if s.thresholds == nil {
+		return sc.raw, sc.folder
+	}
+	override, ok, err := s.thresholds.SpamThresholdForMaildir(t.path)
+	switch {
+	case err != nil:
+		if s.logger != nil {
+			logging.SettingsReadFailed(s.logger, "mta", "spam_threshold",
+				"recipient threshold skipped, using default", err)
+		}
+	case ok:
+		spam := sc.verdict.Score >= override
+		folder := int64(mapi.PrivateFIDInbox)
+		if spam {
+			folder = int64(mapi.PrivateFIDJunk)
+		}
+		return retagged(sc, spam), folder
+	}
+	return sc.raw, sc.folder
+}
+
+// retagged re-tags the untagged wire form with the message's verdict, overriding
+// only its spam flag.
+func retagged(sc scoring, spam bool) []byte {
+	v := sc.verdict
+	v.Spam = spam
+	return antispam.Tag(sc.original, v)
+}
+
+// queueRelay hands the external recipients to the durable relay spool. Once
+// Enqueue commits, the worker owns their delivery (and retry), so returning
+// success here lets the server answer 250, the message is no longer at risk of
+// loss.
+func (s *session) queueRelay(raw []byte, received time.Time) error {
+	if len(s.relayTargets) == 0 {
+		return nil
+	}
+	if err := s.spool.EnqueueDSN(s.from, s.ret, s.envid, s.relayTargets, raw, received); err != nil {
+		s.logger.Emit(logging.Event{Level: logging.LevelError, Subsystem: logging.MTA, Name: "relay.fail", User: s.authUser, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "recipients": len(s.relayTargets)}, Err: err.Error()})
+		// The spool is a local database; a write failure is transient, so defer.
+		return &smtp.TempError{Message: "4.3.0 could not queue the message, please retry later"}
+	}
+	s.logger.Emit(logging.Event{Level: logging.LevelInfo, Subsystem: logging.MTA, Name: "relay.queued", User: s.authUser, RemoteAddr: s.remoteAddr, Fields: logging.Fields{"from": s.from, "recipients": len(s.relayTargets)}})
 	return nil
 }
 
@@ -711,38 +781,57 @@ func DeliverAndRelay(accounts directory.Accounts, spool *relay.Spool, from strin
 	// to bounce, never a silent drop.
 	leaves, dests := applyForwards(accounts, leaves)
 	leaves = append(leaves, dests...)
-	// Per-tenant outgoing display name: rewrite the From display name separately for
-	// the local-delivery copy (the sender domain's internal template) and the relayed
-	// copy (its external template), when the sender's domain customizes it. An empty
-	// name for a direction leaves that copy's From untouched.
-	localRaw, relayRaw := raw, raw
-	if r, ok := accounts.(senderNameResolver); ok {
-		if in, ex, e := r.OutgoingDisplayNames(from); e == nil {
-			localRaw = RewriteFromDisplayName(raw, in)
-			relayRaw = RewriteFromDisplayName(raw, ex)
-		}
-	}
+	localRaw, relayRaw := outgoingCopies(accounts, from, raw)
 	unresolved, err = Deliver(accounts, from, leaves, localRaw, received)
 	if err != nil {
 		return append(unresolved, refused...), err
 	}
 	if spool != nil && len(unresolved) > 0 {
-		var external, stuck []string
-		for _, rcpt := range unresolved {
-			if ext, e := isExternalDomain(accounts, rcpt); e == nil && ext {
-				external = append(external, rcpt)
-			} else {
-				stuck = append(stuck, rcpt)
-			}
-		}
-		if len(external) > 0 {
-			if e := spool.Enqueue(from, external, relayRaw, received); e != nil {
-				return append(stuck, refused...), e
-			}
+		stuck, e := relayUnresolved(accounts, spool, from, unresolved, relayRaw, received)
+		if e != nil {
+			return append(stuck, refused...), e
 		}
 		unresolved = stuck
 	}
 	return append(unresolved, refused...), nil
+}
+
+// outgoingCopies applies the per-tenant outgoing display name: the From display
+// name is rewritten separately for the local-delivery copy (the sender domain's
+// internal template) and the relayed copy (its external template), when the
+// sender's domain customizes it. An empty name for a direction leaves that copy's
+// From untouched.
+func outgoingCopies(accounts directory.Accounts, from string, raw []byte) (localRaw, relayRaw []byte) {
+	r, ok := accounts.(senderNameResolver)
+	if !ok {
+		return raw, raw
+	}
+	in, ex, err := r.OutgoingDisplayNames(from)
+	if err != nil {
+		return raw, raw
+	}
+	return RewriteFromDisplayName(raw, in), RewriteFromDisplayName(raw, ex)
+}
+
+// relayUnresolved spools the recipients that belong to a foreign domain and
+// returns the ones that stay unresolved for the caller to bounce.
+func relayUnresolved(accounts directory.Accounts, spool *relay.Spool, from string,
+	unresolved []string, relayRaw []byte, received time.Time) ([]string, error) {
+	var external, stuck []string
+	for _, rcpt := range unresolved {
+		if ext, err := isExternalDomain(accounts, rcpt); err == nil && ext {
+			external = append(external, rcpt)
+		} else {
+			stuck = append(stuck, rcpt)
+		}
+	}
+	if len(external) == 0 {
+		return stuck, nil
+	}
+	if err := spool.Enqueue(from, external, relayRaw, received); err != nil {
+		return stuck, err
+	}
+	return stuck, nil
 }
 
 // applyForwards consults each resolved recipient's mail-forward directive and splits
@@ -912,22 +1001,36 @@ func applyInboxRules(st *objectstore.Store, m objectstore.MessageInfo, owner, en
 	msg, perr := mail.ReadMessage(bytes.NewReader(raw))
 	suppressed := perr != nil || autoReplySuppressed(msg.Header, envelopeFrom, owner)
 
-	// Forward sends the original bytes (a faithful redirect); the marker breaks
-	// forward-to-forward loops on a redelivery of the same message.
-	if OnRuleForward != nil && len(acts.Forwards) > 0 && !suppressed && msg.Header.Get(forwardMarkerHeader) == "" {
-		marked := append([]byte(forwardMarkerHeader+": "+owner+"\r\n"), raw...)
-		for _, fwd := range acts.Forwards {
-			OnRuleForward(owner, fwd.To, marked)
-		}
-	}
-
-	// Reject bounces and vacation auto-replies are sent back to the sender, so they
-	// need a real return address and the same backscatter guard. OnRuleSend enqueues
-	// them from the owner's mailbox under the outbound abuse cap.
-	if OnRuleSend == nil || suppressed || envelopeFrom == "" {
+	if suppressed {
 		return
 	}
-	for _, b := range acts.Bounces {
+	runRuleForwards(acts.Forwards, msg, owner, raw)
+
+	// Reject bounces and vacation auto-replies are sent back to the sender, so they
+	// need a real return address. OnRuleSend enqueues them from the owner's mailbox
+	// under the outbound abuse cap.
+	if OnRuleSend == nil || envelopeFrom == "" {
+		return
+	}
+	runRuleBounces(acts.Bounces, owner, envelopeFrom, received)
+	runRuleAutoReplies(acts.AutoReplies, msg, owner, envelopeFrom, received)
+}
+
+// runRuleForwards redirects the original bytes (a faithful redirect); the marker
+// breaks forward-to-forward loops on a redelivery of the same message.
+func runRuleForwards(forwards []objectstore.ForwardRequest, msg *mail.Message, owner string, raw []byte) {
+	if OnRuleForward == nil || len(forwards) == 0 || msg.Header.Get(forwardMarkerHeader) != "" {
+		return
+	}
+	marked := append([]byte(forwardMarkerHeader+": "+owner+"\r\n"), raw...)
+	for _, fwd := range forwards {
+		OnRuleForward(owner, fwd.To, marked)
+	}
+}
+
+// runRuleBounces sends one reject report per bounce action back to the sender.
+func runRuleBounces(bounces []objectstore.BounceRequest, owner, envelopeFrom string, received time.Time) {
+	for _, b := range bounces {
 		report, err := Bounce(domainPart(owner), envelopeFrom, owner, b.Reason, received)
 		if err != nil {
 			logPassFailure("rule.bounce", owner, nil, err)
@@ -935,7 +1038,11 @@ func applyInboxRules(st *objectstore.Store, m objectstore.MessageInfo, owner, en
 		}
 		OnRuleSend(owner, []string{envelopeFrom}, report)
 	}
-	for _, ar := range acts.AutoReplies {
+}
+
+// runRuleAutoReplies sends one vacation reply per auto-reply action.
+func runRuleAutoReplies(replies []objectstore.AutoReplyRequest, msg *mail.Message, owner, envelopeFrom string, received time.Time) {
+	for _, ar := range replies {
 		reply, err := buildAutoReply(owner, envelopeFrom, ruleVacationSubject, ar.Message, msg.Header.Get("Message-ID"), received)
 		if err != nil {
 			logPassFailure("rule.autoreply", owner, nil, err)

@@ -56,31 +56,36 @@ func RewriteFromDisplayName(raw []byte, name string) []byte {
 func headerSpan(raw []byte, name string) (start, end int, ok bool) {
 	prefix := strings.ToLower(name) + ":"
 	for i := 0; i < len(raw); {
-		lineEnd := i
-		for lineEnd < len(raw) && raw[lineEnd] != '\n' {
-			lineEnd++
-		}
-		next := lineEnd
-		if next < len(raw) {
-			next++ // include the '\n'
-		}
+		next := lineAfter(raw, i)
 		content := bytes.TrimRight(raw[i:next], "\r\n")
 		if len(content) == 0 {
 			return 0, 0, false // blank line: end of the header block
 		}
 		if strings.HasPrefix(strings.ToLower(string(content)), prefix) {
-			end = next
-			for end < len(raw) && (raw[end] == ' ' || raw[end] == '\t') {
-				for end < len(raw) && raw[end] != '\n' {
-					end++
-				}
-				if end < len(raw) {
-					end++
-				}
-			}
-			return i, end, true
+			return i, foldedEnd(raw, next), true
 		}
 		i = next
 	}
 	return 0, 0, false
+}
+
+// lineAfter returns the offset just past the line starting at i, including its
+// terminating newline when one is present.
+func lineAfter(raw []byte, i int) int {
+	for i < len(raw) && raw[i] != '\n' {
+		i++
+	}
+	if i < len(raw) {
+		i++
+	}
+	return i
+}
+
+// foldedEnd extends a header's span over its folded continuation lines, which are
+// the following lines that begin with whitespace.
+func foldedEnd(raw []byte, end int) int {
+	for end < len(raw) && (raw[end] == ' ' || raw[end] == '\t') {
+		end = lineAfter(raw, end)
+	}
+	return end
 }

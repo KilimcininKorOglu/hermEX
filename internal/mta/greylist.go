@@ -105,19 +105,23 @@ func (g *Greylister) ShouldDefer(ip net.IP, sender, recipient string) bool {
 	if err != nil {
 		return false // fail open
 	}
+	return g.deferTriplet(ipKey, sender, recipient, rec, found, now)
+}
+
+// deferTriplet decides one triplet's fate against its stored record. Every store
+// failure accepts the message rather than deferring it forever.
+func (g *Greylister) deferTriplet(ipKey, sender, recipient string, rec directory.Greylisted, found bool, now int64) bool {
 	switch {
 	case !found:
 		if err := g.store.GreylistUpsertSeen(ipKey, sender, recipient, now); err != nil {
-			return false // could not record → accept rather than defer forever
+			return false
 		}
 		return true // first contact
 	case rec.Confirmed:
 		_ = g.store.GreylistUpsertSeen(ipKey, sender, recipient, now) // refresh TTL, best-effort
 		return false
 	case now-rec.FirstSeen >= g.minDelay.Load():
-		if err := g.store.GreylistConfirm(ipKey, sender, recipient, now); err != nil {
-			return false
-		}
+		_ = g.store.GreylistConfirm(ipKey, sender, recipient, now)
 		return false // retried after the delay → accept and confirm
 	default:
 		return true // retried too soon

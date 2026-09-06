@@ -93,16 +93,7 @@ func (r *DigestRunner) digestMailbox(email, maildir string) (bool, error) {
 		r.logErr(email, "digest.list", err)
 		return false, nil
 	}
-	var fresh []objectstore.MessageInfo
-	maxUID := last
-	for _, m := range msgs {
-		if m.UID > last {
-			fresh = append(fresh, m)
-			if m.UID > maxUID {
-				maxUID = m.UID
-			}
-		}
-	}
+	fresh, maxUID := messagesAfter(msgs, last)
 	if len(fresh) == 0 {
 		return false, nil
 	}
@@ -119,6 +110,23 @@ func (r *DigestRunner) digestMailbox(email, maildir string) (bool, error) {
 		return true, err
 	}
 	return true, nil
+}
+
+// messagesAfter selects the messages newer than the watermark and returns the
+// highest UID seen, which becomes the new watermark.
+func messagesAfter(msgs []objectstore.MessageInfo, last uint32) ([]objectstore.MessageInfo, uint32) {
+	var fresh []objectstore.MessageInfo
+	maxUID := last
+	for _, m := range msgs {
+		if m.UID <= last {
+			continue
+		}
+		fresh = append(fresh, m)
+		if m.UID > maxUID {
+			maxUID = m.UID
+		}
+	}
+	return fresh, maxUID
 }
 
 // buildDigest assembles the plain-text RFC 5322 digest. Quarantined subjects and

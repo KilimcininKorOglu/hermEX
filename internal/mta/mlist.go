@@ -47,31 +47,34 @@ func expandMailingList(exp MListExpander, from, to string) (leaves []string, isL
 	}
 
 	seen := map[string]bool{strings.ToLower(strings.TrimSpace(to)): true}
-	var collect func(addrs []string, depth int)
-	collect = func(addrs []string, depth int) {
-		for _, m := range addrs {
-			key := strings.ToLower(strings.TrimSpace(m))
-			if key == "" || seen[key] {
-				continue
-			}
-			seen[key] = true
-			if depth >= maxListDepth {
-				leaves = append(leaves, m) // refuse to recurse further; treat as a leaf
-				continue
-			}
-			sub, subRes, subErr := exp.ExpandMList(m, from)
-			switch {
-			case subErr != nil || subRes == directory.MListNone:
-				leaves = append(leaves, m) // an ordinary recipient
-			case subRes == directory.MListOK:
-				collect(sub, depth+1)
-			default:
-				// a nested list that refuses this sender contributes nothing
-			}
+	leaves = collectListMembers(exp, from, members, seen, 1, nil)
+	return leaves, true, directory.MListOK, nil
+}
+
+// collectListMembers flattens a list's members, expanding a nested list in turn
+// and stopping at maxListDepth. An address already seen is skipped, so a
+// membership cycle terminates, and a nested list that refuses this sender
+// contributes nothing.
+func collectListMembers(exp MListExpander, from string, addrs []string, seen map[string]bool, depth int, leaves []string) []string {
+	for _, m := range addrs {
+		key := strings.ToLower(strings.TrimSpace(m))
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		if depth >= maxListDepth {
+			leaves = append(leaves, m) // refuse to recurse further; treat as a leaf
+			continue
+		}
+		sub, subRes, subErr := exp.ExpandMList(m, from)
+		switch {
+		case subErr != nil || subRes == directory.MListNone:
+			leaves = append(leaves, m) // an ordinary recipient
+		case subRes == directory.MListOK:
+			leaves = collectListMembers(exp, from, sub, seen, depth+1, leaves)
 		}
 	}
-	collect(members, 1)
-	return leaves, true, directory.MListOK, nil
+	return leaves
 }
 
 // expandRecipientList expands every distribution list in a recipient set into its

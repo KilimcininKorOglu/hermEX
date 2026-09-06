@@ -77,18 +77,10 @@ func sendAutoReply(accounts directory.Accounts, st *objectstore.Store, selfAddr,
 	_, resolved := accounts.Resolve(to)
 	internal := resolved && sameDomain(to, selfAddr)
 
-	// The "known senders only" external audience needs to know whether the sender
-	// is in the mailbox's contacts. Resolve it only when it can change the outcome
-	//, an external sender under that audience, so ordinary delivery pays nothing.
-	senderKnown := false
-	if !internal && cfg.ExternalEnabled && cfg.ExternalAudience == objectstore.OOFExternalKnown {
-		known, err := st.ContactHasAddress(to)
-		if err != nil {
-			return err
-		}
-		senderKnown = known
+	senderKnown, err := senderIsKnown(st, cfg, to, internal)
+	if err != nil {
+		return err
 	}
-
 	subject, body, send := autoReplyDecision(msg.Header, envelopeSender, selfAddr, cfg, internal, senderKnown)
 	if !send {
 		return nil
@@ -113,6 +105,17 @@ func sendAutoReply(accounts directory.Accounts, st *objectstore.Store, selfAddr,
 		return err
 	}
 	return nil
+}
+
+// senderIsKnown answers whether the sender is in the mailbox's contacts, which
+// the "known senders only" external audience turns on. It is resolved only when it
+// can change the outcome, an external sender under that audience, so ordinary
+// delivery pays nothing.
+func senderIsKnown(st *objectstore.Store, cfg objectstore.OOFSettings, to string, internal bool) (bool, error) {
+	if internal || !cfg.ExternalEnabled || cfg.ExternalAudience != objectstore.OOFExternalKnown {
+		return false, nil
+	}
+	return st.ContactHasAddress(to)
 }
 
 // autoReplyDecision is the pure out-of-office decision for a mailbox whose

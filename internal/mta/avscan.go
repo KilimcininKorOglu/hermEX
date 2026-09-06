@@ -209,18 +209,28 @@ func scanMessageLabelled(accounts directory.Accounts, mode avMode, from string, 
 		}
 		return avHandled
 	}
+	av.fileQuarantine(accounts, id, entry, raw, when)
+	av.emit(logging.LevelWarn, "av.quarantined", from, logging.Fields{"id": id, "virus": res.VirusName, "direction": direction})
+	return avHandled
+}
+
+// fileQuarantine writes the quarantined message to disk and notifies the affected
+// parties: the recipients of an inbound message, or the sender of an outbound one,
+// plus the domain's and organization's administrators.
+func (av *avConfig) fileQuarantine(accounts directory.Accounts, id int64, entry directory.QuarantineEntry, raw []byte, when time.Time) {
+	from := entry.MailFrom
 	if werr := writeQuarantineEml(av.quarPath(id), raw); werr != nil {
 		av.emit(logging.LevelError, "av.quarantine.eml.fail", from, logging.Fields{"id": id, "err": werr.Error()})
 	}
 	// A failed lookup returns no admins, which is indistinguishable from a domain
 	// that has none: without this line a directory outage silently skips every
 	// admin alert for a virus event and the log shows a clean quarantine.
-	admins, aerr := av.dir.DomainOrgAdminEmails(scope)
+	admins, aerr := av.dir.DomainOrgAdminEmails(entry.DomainID)
 	if aerr != nil {
 		av.emit(logging.LevelError, "av.admins.fail", from, logging.Fields{"id": id, "err": aerr.Error()})
 	}
-	affected := recipients
-	if direction == "outbound" {
+	affected := entry.Recipients
+	if entry.Direction == "outbound" {
 		affected = []string{from}
 	}
 	notifyQuarantine(accounts, directory.QuarantineRecord{ID: id, QuarantineEntry: entry, Status: "held"}, affected, admins, av.hostname, when,
@@ -234,8 +244,6 @@ func scanMessageLabelled(accounts directory.Accounts, mode avMode, from string, 
 			}
 			av.emit(logging.LevelError, "av.notify.fail", from, f)
 		})
-	av.emit(logging.LevelWarn, "av.quarantined", from, logging.Fields{"id": id, "virus": res.VirusName, "direction": direction})
-	return avHandled
 }
 
 // gate decides whether to scan and, if so, the scoping domain id and the
@@ -247,23 +255,29 @@ func (av *avConfig) gate(mode avMode, from string, recipients []string) (scope i
 		}
 	}
 	// Stored content is labelled for what it is: it was neither received nor
-	// sent, so calling it inbound would misreport where it came from.
+	// sent, so calling it inbound would misreport where it came from. Both inbound
+	// modes, and the local->local leg of submission, gate on a recipient domain
+	// whose inbound toggle is set.
+	label := "inbound"
 	if mode == avStored {
-		for _, rcpt := range recipients {
-			if in, _, id, ok := av.flags(domainOf(rcpt)); ok && in {
-				return id, "stored", true
-			}
-		}
+		label = "stored"
+	}
+	id, ok := av.inboundScope(recipients)
+	if !ok {
 		return 0, "", false
 	}
-	// Both inbound modes, and the local->local leg of submission, gate on a
-	// recipient domain whose inbound toggle is set.
+	return id, label, true
+}
+
+// inboundScope returns the id of the first recipient domain whose inbound toggle
+// is set, which is the domain a quarantine record is scoped to.
+func (av *avConfig) inboundScope(recipients []string) (int64, bool) {
 	for _, rcpt := range recipients {
 		if in, _, id, ok := av.flags(domainOf(rcpt)); ok && in {
-			return id, "inbound", true
+			return id, true
 		}
 	}
-	return 0, "", false
+	return 0, false
 }
 
 // flags resolves a domain's scan toggles and id, reporting ok=false when the
