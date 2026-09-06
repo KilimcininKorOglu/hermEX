@@ -443,6 +443,7 @@ func (dc *DownloadContext) messageHeader(mid, cn uint64, size int64, isFAI bool,
 // collection, so the receiver clears it before the members arrive, then each
 // member between its open and close markers.
 func (dc *DownloadContext) writeCollection(tag mapi.PropTag, openMarker, closeMarker uint32, members []mapi.PropertyValues) error {
+	// #nosec G115 -- MetaTagFXDelProp carries its argument as a PtLong, so the proptag naming the collection crosses as the signed view of the same 32 bits
 	if err := dc.writeProp(ics.StreamProp{Tag: mapi.PropTag(ics.MetaTagFXDelProp), Value: int32(tag)}); err != nil {
 		return err
 	}
