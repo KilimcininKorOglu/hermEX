@@ -47,57 +47,46 @@ func TestListRooms(t *testing.T) {
 // from a room by display_type, that an unknown domain is rejected, and that the
 // resource carries no password so it cannot sign in.
 func TestCreateRoom(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
+	d, db := freshDirectory(t)
 	root := t.TempDir()
-	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "dom")); err != nil {
-		t.Fatal(err)
-	}
+	mustCreateDomain(t, d, root, "hermex.test")
 	// The room list is scoped to the caller, so the domain needs an account to
 	// ask as; a room is looked up on behalf of a person, never on its own.
-	if _, err := d.CreateUser("alice@hermex.test", "secret", filepath.Join(root, "alice")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.CreateRoom("conf-a@hermex.test", "Conference A", filepath.Join(root, "conf-a"), 8, false); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.CreateRoom("projector-1@hermex.test", "Projector", filepath.Join(root, "proj"), 0, true); err != nil {
-		t.Fatal(err)
-	}
+	mustCreateUser(t, d, root, "alice@hermex.test", "secret")
+	_, err := d.CreateRoom("conf-a@hermex.test", "Conference A", filepath.Join(root, "conf-a"), 8, false)
+	mustNoErr(t, "create the conference room", err)
+	_, err = d.CreateRoom("projector-1@hermex.test", "Projector", filepath.Join(root, "proj"), 0, true)
+	mustNoErr(t, "create the equipment", err)
 	// A room must belong to a known domain.
-	if _, err := d.CreateRoom("ghost@nope.test", "Ghost", filepath.Join(root, "ghost"), 0, false); err == nil {
-		t.Error("CreateRoom into an unknown domain should fail")
-	}
+	_, err = d.CreateRoom("ghost@nope.test", "Ghost", filepath.Join(root, "ghost"), 0, false)
+	wantErr(t, "CreateRoom into an unknown domain succeeded", err)
 
 	rooms, err := d.ListRooms("alice@hermex.test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "list rooms", err)
 	byAddr := map[string]GALEntry{}
 	for _, r := range rooms {
 		byAddr[r.Address] = r
 	}
-	conf, ok := byAddr["conf-a@hermex.test"]
-	if !ok || conf.DisplayName != "Conference A" || conf.Capacity != 8 || conf.DisplayType != dtRoom {
-		t.Errorf("conference room = %+v, want name=Conference A capacity=8 DT_ROOM", conf)
-	}
-	proj, ok := byAddr["projector-1@hermex.test"]
-	if !ok || proj.DisplayName != "Projector" || proj.Capacity != 0 || proj.DisplayType != dtEquipment {
-		t.Errorf("equipment = %+v, want name=Projector capacity=0 DT_EQUIPMENT", proj)
-	}
+	wantResource(t, byAddr, "conf-a@hermex.test", "Conference A", 8, dtRoom)
+	wantResource(t, byAddr, "projector-1@hermex.test", "Projector", 0, dtEquipment)
 
 	// The resource cannot sign in: no password is stored.
 	var pw string
-	if err := db.QueryRow("SELECT password FROM users WHERE username = ?", "conf-a@hermex.test").Scan(&pw); err != nil {
-		t.Fatal(err)
+	mustNoErr(t, "read the room's password",
+		db.QueryRow("SELECT password FROM users WHERE username = ?", "conf-a@hermex.test").Scan(&pw))
+	wantEq(t, "room password (a resource cannot sign in)", pw, "")
+}
+
+// wantResource checks one listed resource carries its name, capacity and kind.
+func wantResource(t *testing.T, byAddr map[string]GALEntry, addr, name string, capacity int, displayType int) {
+	t.Helper()
+	got, ok := byAddr[addr]
+	if !ok {
+		t.Fatalf("%s is not in the room list", addr)
 	}
-	if pw != "" {
-		t.Errorf("room password = %q, want empty (a resource cannot sign in)", pw)
-	}
+	wantEq(t, addr+" display name", got.DisplayName, name)
+	wantEq(t, addr+" capacity", got.Capacity, capacity)
+	wantEq(t, addr+" display type", got.DisplayType, displayType)
 }
 
 // TestSearchGALRoomCapacity proves the GAL enumeration that feeds the NSPI address

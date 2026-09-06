@@ -99,51 +99,35 @@ func TestNeedsRehashCoversEveryWeakerHash(t *testing.T) {
 // for an existing account until its password is set again, which for most accounts
 // is never.
 func TestLoginUpgradesAnOldHash(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-	if _, err := d.CreateDomain("acme.test", filepath.Join(t.TempDir(), "dom")); err != nil {
-		t.Fatal(err)
-	}
+	d, db := freshDirectory(t)
+	root := t.TempDir()
+	mustCreateDomain(t, d, root, "acme.test")
 	const user, pass = "alice@acme.test", "correct horse battery staple"
-	if _, err := d.CreateUser(user, pass, filepath.Join(t.TempDir(), "alice")); err != nil {
-		t.Fatal(err)
-	}
+	mustCreateUser(t, d, root, user, pass)
 
 	// Put the account back on a hash made at the old default, the state every
 	// account created before this change is in.
 	weak, err := crypt.NewSHA512(pass, crypt.SHA512RoundsDefault)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "build the old-style hash", err)
 	if !strings.HasPrefix(weak, "$6$") || strings.Contains(weak, "rounds=") {
 		t.Fatalf("the fixture is not an old-style hash: %q", weak)
 	}
-	if _, err := db.Exec(`UPDATE users SET password = ? WHERE username = ?`, weak, user); err != nil {
-		t.Fatal(err)
-	}
+	_, err = db.Exec(`UPDATE users SET password = ? WHERE username = ?`, weak, user)
+	mustNoErr(t, "store the old-style hash", err)
 
-	if _, ok := d.Authenticate(user, pass); !ok {
-		t.Fatal("the old hash no longer authenticates, so raising the factor broke existing logins")
-	}
+	_, ok := d.Authenticate(user, pass)
+	wantEq(t, "the old hash authenticates (raising the factor must not break logins)", ok, true)
 
 	var stored string
-	if err := db.QueryRow(`SELECT password FROM users WHERE username = ?`, user).Scan(&stored); err != nil {
-		t.Fatal(err)
-	}
-	if needsRehash(stored) {
-		t.Errorf("the stored hash is still below the current factor after a successful login: %q", stored)
-	}
+	mustNoErr(t, "read the stored hash",
+		db.QueryRow(`SELECT password FROM users WHERE username = ?`, user).Scan(&stored))
+	wantEq(t, "the stored hash is still below the current factor after a login", needsRehash(stored), false)
+
 	// The upgrade must not have changed what the password is.
-	if _, ok := d.Authenticate(user, pass); !ok {
-		t.Error("the re-hashed account no longer accepts its own password")
-	}
-	if _, ok := d.Authenticate(user, "wrong password"); ok {
-		t.Error("the re-hashed account accepts a wrong password")
-	}
+	_, ok = d.Authenticate(user, pass)
+	wantEq(t, "the re-hashed account accepts its own password", ok, true)
+	_, wrong := d.Authenticate(user, "wrong password")
+	wantEq(t, "the re-hashed account accepts a wrong password", wrong, false)
 }
 
 // TestWrongPasswordDoesNotUpgrade proves the re-hash is gated on a successful

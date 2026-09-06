@@ -147,32 +147,33 @@ func storedTLSKey(t *testing.T, d *SQLDirectory, name string) string {
 // TestDKIMKeyIsEncryptedAtRest proves the database no longer holds a usable
 // signing key: a dump of it is not enough to sign for the domain.
 func TestDKIMKeyIsEncryptedAtRest(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
+	d, _ := freshDirectory(t)
 	d.SetKeySecret([]byte("a-long-operator-secret"))
 
-	if err := d.SetDKIMKey("hermex.test", "sel1", []byte(wrapTestPEM), "v=DKIM1; p=AAAA"); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "store the DKIM key",
+		d.SetDKIMKey("hermex.test", "sel1", []byte(wrapTestPEM), "v=DKIM1; p=AAAA"))
 	if at := storedDKIM(t, d, "hermex.test"); strings.Contains(at, "BEGIN") {
 		t.Errorf("the key column still holds the key:\n%s", at)
 	}
 	// The signer and the operator's export both get the real key back.
-	if err := d.SetDKIMEnabled("hermex.test", true); err != nil {
-		t.Fatal(err)
-	}
-	pem, _, found, err := d.DKIMKey("hermex.test")
-	if err != nil || !found || string(pem) != wrapTestPEM {
-		t.Errorf("DKIMKey = (%q, %v, %v), want the original key", pem, found, err)
-	}
-	pem, _, found, err = d.ExportDKIMKey("hermex.test")
-	if err != nil || !found || string(pem) != wrapTestPEM {
-		t.Errorf("ExportDKIMKey = (%q, %v, %v), want the original key", pem, found, err)
-	}
+	mustNoErr(t, "enable DKIM", d.SetDKIMEnabled("hermex.test", true))
+	wantUnwrappedKey(t, "DKIMKey", func() ([]byte, bool, error) {
+		pem, _, found, err := d.DKIMKey("hermex.test")
+		return pem, found, err
+	})
+	wantUnwrappedKey(t, "ExportDKIMKey", func() ([]byte, bool, error) {
+		pem, _, found, err := d.ExportDKIMKey("hermex.test")
+		return pem, found, err
+	})
+}
+
+// wantUnwrappedKey checks a key reader returns the original PEM, found.
+func wantUnwrappedKey(t *testing.T, what string, read func() ([]byte, bool, error)) {
+	t.Helper()
+	pem, found, err := read()
+	mustNoErr(t, what, err)
+	wantEq(t, what+" found the key", found, true)
+	wantEq(t, what+" returned the original key", string(pem), wrapTestPEM)
 }
 
 // TestDKIMPlaintextRowIsRewrapped proves an existing deployment converges on

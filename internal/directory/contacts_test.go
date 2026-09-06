@@ -1,29 +1,38 @@
 package directory
 
-import (
-	"path/filepath"
-	"testing"
-)
+import "testing"
 
 // contactTestDir builds a directory with one active domain and one mailbox user,
 // ready for CreateContact calls. The user (a dt=0 row) is there so a dt=6 contact
 // has a mailbox account to be contrasted against.
 func contactTestDir(t *testing.T) *SQLDirectory {
 	t.Helper()
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
+	d, _ := freshDirectory(t)
 	root := t.TempDir()
-	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "domains", "hermex.test")); err != nil {
-		t.Fatalf("create domain: %v", err)
-	}
-	if _, err := d.CreateUser("alice@hermex.test", "pw", filepath.Join(root, "users", "alice")); err != nil {
-		t.Fatalf("create user: %v", err)
-	}
+	mustCreateDomain(t, d, root, "hermex.test")
+	mustCreateUser(t, d, root, "alice@hermex.test", "pw")
 	return d
+}
+
+// mustCreateContact files a mail contact under the test domain.
+func mustCreateContact(t *testing.T, d *SQLDirectory, addr, name string) {
+	t.Helper()
+	_, err := d.CreateContact(addr, name, "hermex.test")
+	mustNoErr(t, "create contact "+addr, err)
+}
+
+// mustUpdateContact renames a contact and requires the update to have found it.
+func mustUpdateContact(t *testing.T, d *SQLDirectory, addr, name string) {
+	t.Helper()
+	ok, err := d.UpdateContact(addr, name)
+	mustNoErr(t, "update contact "+addr, err)
+	wantEq(t, "the update found "+addr, ok, true)
+}
+
+// wantGALName checks the display name the GAL reports for one address.
+func wantGALName(t *testing.T, d *SQLDirectory, addr, want string) {
+	t.Helper()
+	wantEq(t, "the GAL display name of "+addr, galEntryFor(t, d, addr).DisplayName, want)
 }
 
 // galEntryFor returns the GAL entry whose address matches addr, failing when none
@@ -50,16 +59,10 @@ func galEntryFor(t *testing.T, d *SQLDirectory, addr string) GALEntry {
 // the GAL is org-wide and the contact owns no mailbox.
 func TestCreateContactAppearsInGAL(t *testing.T) {
 	d := contactTestDir(t)
-	if _, err := d.CreateContact("john@partner.example", "John Partner", "hermex.test"); err != nil {
-		t.Fatalf("CreateContact: %v", err)
-	}
+	mustCreateContact(t, d, "john@partner.example", "John Partner")
 	e := galEntryFor(t, d, "john@partner.example")
-	if e.DisplayName != "John Partner" {
-		t.Errorf("contact DisplayName = %q, want %q", e.DisplayName, "John Partner")
-	}
-	if e.DisplayType != dtContact {
-		t.Errorf("contact DisplayType = %d, want %d (DT_REMOTE_MAILUSER)", e.DisplayType, dtContact)
-	}
+	wantEq(t, "the contact display name", e.DisplayName, "John Partner")
+	wantEq(t, "the contact display type (DT_REMOTE_MAILUSER)", e.DisplayType, dtContact)
 }
 
 // TestCreateContactDomainMustExist pins that a contact is filed under a real local
@@ -77,32 +80,19 @@ func TestCreateContactDomainMustExist(t *testing.T) {
 // reflects each.
 func TestUpdateContact(t *testing.T) {
 	d := contactTestDir(t)
-	if _, err := d.CreateContact("john@partner.example", "John Partner", "hermex.test"); err != nil {
-		t.Fatalf("CreateContact: %v", err)
-	}
-	if ok, err := d.UpdateContact("john@partner.example", "Jonathan Partner"); err != nil || !ok {
-		t.Fatalf("UpdateContact rename = (%v, %v), want (true, nil)", ok, err)
-	}
-	if e := galEntryFor(t, d, "john@partner.example"); e.DisplayName != "Jonathan Partner" {
-		t.Errorf("after rename DisplayName = %q, want Jonathan Partner", e.DisplayName)
-	}
+	mustCreateContact(t, d, "john@partner.example", "John Partner")
+
+	mustUpdateContact(t, d, "john@partner.example", "Jonathan Partner")
+	wantGALName(t, d, "john@partner.example", "Jonathan Partner")
+
 	// an empty name clears the property → the GAL falls back to the address
-	if ok, err := d.UpdateContact("john@partner.example", "  "); err != nil || !ok {
-		t.Fatalf("UpdateContact clear = (%v, %v), want (true, nil)", ok, err)
-	}
-	if e := galEntryFor(t, d, "john@partner.example"); e.DisplayName != "john@partner.example" {
-		t.Errorf("after clear DisplayName = %q, want the address fallback", e.DisplayName)
-	}
+	mustUpdateContact(t, d, "john@partner.example", "  ")
+	wantGALName(t, d, "john@partner.example", "john@partner.example")
+
 	// set a name onto a contact created without one
-	if _, err := d.CreateContact("kate@vendor.example", "", "hermex.test"); err != nil {
-		t.Fatalf("CreateContact kate: %v", err)
-	}
-	if ok, err := d.UpdateContact("kate@vendor.example", "Kate Vendor"); err != nil || !ok {
-		t.Fatalf("UpdateContact set = (%v, %v), want (true, nil)", ok, err)
-	}
-	if e := galEntryFor(t, d, "kate@vendor.example"); e.DisplayName != "Kate Vendor" {
-		t.Errorf("after set DisplayName = %q, want Kate Vendor", e.DisplayName)
-	}
+	mustCreateContact(t, d, "kate@vendor.example", "")
+	mustUpdateContact(t, d, "kate@vendor.example", "Kate Vendor")
+	wantGALName(t, d, "kate@vendor.example", "Kate Vendor")
 }
 
 // TestUpdateContactGuard pins that UpdateContact only touches contacts: handed a
@@ -129,23 +119,22 @@ func TestUpdateContactMissing(t *testing.T) {
 // reports it removed one, and a second delete reports none.
 func TestDeleteContact(t *testing.T) {
 	d := contactTestDir(t)
-	if _, err := d.CreateContact("john@partner.example", "John", "hermex.test"); err != nil {
-		t.Fatalf("CreateContact: %v", err)
-	}
+	mustCreateContact(t, d, "john@partner.example", "John")
+
 	removed, err := d.DeleteContact("john@partner.example")
-	if err != nil || !removed {
-		t.Fatalf("DeleteContact = (%v, %v), want (true, nil)", removed, err)
-	}
+	mustNoErr(t, "delete the contact", err)
+	wantEq(t, "the delete removed one", removed, true)
+
 	entries, _ := d.SearchGAL("alice@hermex.test", "john@partner.example", 20)
 	for _, e := range entries {
 		if e.Address == "john@partner.example" {
 			t.Errorf("deleted contact still in GAL: %+v", e)
 		}
 	}
+
 	removed, err = d.DeleteContact("john@partner.example")
-	if err != nil || removed {
-		t.Fatalf("second DeleteContact = (%v, %v), want (false, nil)", removed, err)
-	}
+	mustNoErr(t, "delete the contact again", err)
+	wantEq(t, "the second delete removed one", removed, false)
 }
 
 // TestDeleteContactLeavesMailboxUsers pins the display_type guard: DeleteContact
@@ -166,25 +155,19 @@ func TestDeleteContactLeavesMailboxUsers(t *testing.T) {
 // address, with the address standing in as display name when none is set.
 func TestListContacts(t *testing.T) {
 	d := contactTestDir(t)
-	if _, err := d.CreateContact("john@partner.example", "John Partner", "hermex.test"); err != nil {
-		t.Fatalf("CreateContact john: %v", err)
-	}
-	if _, err := d.CreateContact("kate@vendor.example", "", "hermex.test"); err != nil {
-		t.Fatalf("CreateContact kate: %v", err)
-	}
+	mustCreateContact(t, d, "john@partner.example", "John Partner")
+	mustCreateContact(t, d, "kate@vendor.example", "")
+
 	got, err := d.ListContacts()
-	if err != nil {
-		t.Fatalf("ListContacts: %v", err)
-	}
+	mustNoErr(t, "list the contacts", err)
 	if len(got) != 2 {
 		t.Fatalf("ListContacts returned %d entries, want 2 (the mailbox user must not list): %+v", len(got), got)
 	}
-	if got[0].Address != "john@partner.example" || got[0].DisplayName != "John Partner" || got[0].Domain != "hermex.test" {
-		t.Errorf("entry 0 = %+v, want john@partner.example / John Partner / hermex.test", got[0])
-	}
-	if got[1].Address != "kate@vendor.example" || got[1].DisplayName != "kate@vendor.example" {
-		t.Errorf("entry 1 = %+v, want kate@vendor.example with the address as display name", got[1])
-	}
+	wantEq(t, "entry 0 address", got[0].Address, "john@partner.example")
+	wantEq(t, "entry 0 display name", got[0].DisplayName, "John Partner")
+	wantEq(t, "entry 0 domain", got[0].Domain, "hermex.test")
+	wantEq(t, "entry 1 address", got[1].Address, "kate@vendor.example")
+	wantEq(t, "entry 1 display name (the address stands in)", got[1].DisplayName, "kate@vendor.example")
 }
 
 // TestContactCannotAuthenticate pins the security invariant: a contact has no
@@ -192,9 +175,7 @@ func TestListContacts(t *testing.T) {
 // must not unlock it.
 func TestContactCannotAuthenticate(t *testing.T) {
 	d := contactTestDir(t)
-	if _, err := d.CreateContact("john@partner.example", "John", "hermex.test"); err != nil {
-		t.Fatalf("CreateContact: %v", err)
-	}
+	mustCreateContact(t, d, "john@partner.example", "John")
 	if _, ok := d.Authenticate("john@partner.example", ""); ok {
 		t.Error("a mail contact authenticated; contacts must never be able to log in")
 	}

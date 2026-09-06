@@ -1,7 +1,6 @@
 package directory
 
 import (
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -54,35 +53,13 @@ func TestRolePermissionValidation(t *testing.T) {
 // and uniqueness, the permission set and user assignments round-trip, update
 // replaces both sets wholesale, and delete cascades the assignment rows.
 func TestRoleCRUD(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-
+	d, db := freshDirectory(t)
 	root := t.TempDir()
-	if _, err := d.CreateDomain("acme.test", filepath.Join(root, "acme.test")); err != nil {
-		t.Fatal(err)
-	}
-	alice, err := d.CreateUser("alice@acme.test", "pw", filepath.Join(root, "alice"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	bob, err := d.CreateUser("bob@acme.test", "pw", filepath.Join(root, "bob"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustCreateDomain(t, d, root, "acme.test")
+	alice := mustCreateUser(t, d, root, "alice@acme.test", "pw")
+	bob := mustCreateUser(t, d, root, "bob@acme.test", "pw")
 
-	if _, err := d.CreateRole("", "x", nil, nil); err == nil {
-		t.Error("empty role name accepted")
-	}
-	if _, err := d.CreateRole(strings.Repeat("a", 65), "x", nil, nil); err == nil {
-		t.Error("65-character role name accepted (limit is 64)")
-	}
-	if _, err := d.CreateRole("Bad", "x", []Permission{{Name: "Nonsense"}}, nil); err == nil {
-		t.Error("role with an unknown permission accepted")
-	}
+	wantRoleNameRules(t, d)
 
 	perms := []Permission{
 		{Name: PermSystemAdminRO},
@@ -90,72 +67,102 @@ func TestRoleCRUD(t *testing.T) {
 		{Name: PermResetPasswd},
 	}
 	id, err := d.CreateRole("Helpdesk", "Read-only plus password reset", perms, []int64{alice})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if id == 0 {
-		t.Fatal("role id 0 issued")
-	}
-	if _, err := d.CreateRole("Helpdesk", "", nil, nil); err == nil {
-		t.Error("duplicate role name accepted")
-	}
+	mustNoErr(t, "create role", err)
+	wantNonZeroID(t, "role id", id)
+	_, err = d.CreateRole("Helpdesk", "", nil, nil)
+	wantErr(t, "duplicate role name accepted", err)
 
-	got, ok, err := d.GetRole(id)
-	if err != nil || !ok {
-		t.Fatalf("GetRole = %+v, %v, %v", got, ok, err)
-	}
-	if got.Name != "Helpdesk" || got.Description != "Read-only plus password reset" {
-		t.Errorf("role identity = %+v", got.RoleInfo)
-	}
-	if got.PermCount != 3 || len(got.Permissions) != 3 {
-		t.Errorf("permission count = %d, want 3", got.PermCount)
-	}
-	if !hasPerm(got.Permissions, PermSystemAdminRO, "") ||
-		!hasPerm(got.Permissions, PermDomainAdmin, "*") ||
-		!hasPerm(got.Permissions, PermResetPasswd, "") {
-		t.Errorf("permissions did not round-trip: %+v", got.Permissions)
-	}
-	if got.UserCount != 1 || len(got.UserIDs) != 1 || got.UserIDs[0] != alice {
-		t.Errorf("user assignment = %+v, want [%d]", got.UserIDs, alice)
-	}
+	got := mustGetRole(t, d, id)
+	wantEq(t, "role name", got.Name, "Helpdesk")
+	wantEq(t, "role description", got.Description, "Read-only plus password reset")
+	wantEq(t, "permission count", got.PermCount, 3)
+	wantEq(t, "permissions stored", len(got.Permissions), 3)
+	wantPermissions(t, got.Permissions, perms)
+	wantEq(t, "assigned user count", got.UserCount, 1)
+	wantOneID(t, "assigned users", got.UserIDs, alice)
 
 	roles, err := d.ListRoles()
-	if err != nil || len(roles) != 1 || roles[0].UserCount != 1 || roles[0].PermCount != 3 {
-		t.Fatalf("ListRoles = %+v, %v", roles, err)
+	mustNoErr(t, "list roles", err)
+	if len(roles) != 1 {
+		t.Fatalf("ListRoles = %+v, want one role", roles)
 	}
+	wantEq(t, "listed user count", roles[0].UserCount, 1)
+	wantEq(t, "listed permission count", roles[0].PermCount, 3)
 
 	// Update replaces both sets wholesale: a different permission, a different user.
 	newPerms := []Permission{{Name: PermDomainAdminRO, Params: "7"}}
-	if ok, err := d.UpdateRole(id, "Helpdesk RO", "now read-only", newPerms, []int64{bob}); err != nil || !ok {
-		t.Fatalf("UpdateRole = %v, %v", ok, err)
-	}
-	got, _, _ = d.GetRole(id)
-	if got.Name != "Helpdesk RO" || got.PermCount != 1 || !hasPerm(got.Permissions, PermDomainAdminRO, "7") {
-		t.Errorf("after update permissions = %+v (name %q)", got.Permissions, got.Name)
-	}
-	if got.UserCount != 1 || got.UserIDs[0] != bob {
-		t.Errorf("after update users = %+v, want [%d]", got.UserIDs, bob)
-	}
-	if ok, _ := d.UpdateRole(999999, "x", "", nil, nil); ok {
-		t.Error("UpdateRole on an unknown id returned ok=true")
-	}
+	ok, err := d.UpdateRole(id, "Helpdesk RO", "now read-only", newPerms, []int64{bob})
+	mustNoErr(t, "update role", err)
+	wantEq(t, "UpdateRole reported the role exists", ok, true)
+	got = mustGetRole(t, d, id)
+	wantEq(t, "name after update", got.Name, "Helpdesk RO")
+	wantEq(t, "permission count after update", got.PermCount, 1)
+	wantPermissions(t, got.Permissions, newPerms)
+	wantEq(t, "user count after update", got.UserCount, 1)
+	wantOneID(t, "users after update", got.UserIDs, bob)
+	unknown, _ := d.UpdateRole(999999, "x", "", nil, nil)
+	wantEq(t, "UpdateRole on an unknown id", unknown, false)
 
-	if ok, err := d.DeleteRole(id); err != nil || !ok {
-		t.Fatalf("DeleteRole = %v, %v", ok, err)
-	}
-	if _, ok, _ := d.GetRole(id); ok {
-		t.Error("role still present after delete")
-	}
+	deleted, err := d.DeleteRole(id)
+	mustNoErr(t, "delete role", err)
+	wantEq(t, "DeleteRole reported the role existed", deleted, true)
+	_, stillThere, _ := d.GetRole(id)
+	wantEq(t, "role present after delete", stillThere, false)
 	// Assignment rows cascade with the role.
-	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM user_roles WHERE role_id = ?`, id).Scan(&n); err != nil {
-		t.Fatal(err)
+	wantRows(t, db, "user_roles rows after the role delete (cascade)", 0,
+		`SELECT COUNT(*) FROM user_roles WHERE role_id = ?`, id)
+	missing, err := d.DeleteRole(999999)
+	mustNoErr(t, "delete an unknown role", err)
+	wantEq(t, "DeleteRole(unknown)", missing, false)
+}
+
+// wantRoleNameRules proves the create path refuses a nameless role, an
+// over-length name, and an unknown permission.
+func wantRoleNameRules(t *testing.T, d *SQLDirectory) {
+	t.Helper()
+	_, err := d.CreateRole("", "x", nil, nil)
+	wantErr(t, "empty role name accepted", err)
+	_, err = d.CreateRole(strings.Repeat("a", 65), "x", nil, nil)
+	wantErr(t, "65-character role name accepted (the limit is 64)", err)
+	_, err = d.CreateRole("Bad", "x", []Permission{{Name: "Nonsense"}}, nil)
+	wantErr(t, "role with an unknown permission accepted", err)
+}
+
+// mustGetRole reads a role back, requiring it to exist.
+func mustGetRole(t *testing.T, d *SQLDirectory, id int64) RoleDetail {
+	t.Helper()
+	got, ok, err := d.GetRole(id)
+	mustNoErr(t, "get role", err)
+	if !ok {
+		t.Fatalf("role %d not found", id)
 	}
-	if n != 0 {
-		t.Errorf("user_roles rows = %d after role delete, want 0 (cascade)", n)
+	return got
+}
+
+// wantPermissions checks every expected (name, params) pair round-tripped.
+func wantPermissions(t *testing.T, got, want []Permission) {
+	t.Helper()
+	for _, w := range want {
+		if !hasPerm(got, w.Name, w.Params) {
+			t.Errorf("permission %+v did not round-trip: %+v", w, got)
+		}
 	}
-	if ok, err := d.DeleteRole(999999); ok || err != nil {
-		t.Errorf("DeleteRole(unknown) = %v, %v; want false, nil", ok, err)
+}
+
+// wantOneID checks an id list holds exactly the one id.
+func wantOneID(t *testing.T, label string, got []int64, want int64) {
+	t.Helper()
+	if len(got) != 1 {
+		t.Fatalf("%s = %v, want [%d]", label, got, want)
+	}
+	wantEq(t, label, got[0], want)
+}
+
+// wantNonZeroID fails when the database issued no id.
+func wantNonZeroID(t *testing.T, label string, id int64) {
+	t.Helper()
+	if id == 0 {
+		t.Fatalf("%s is 0; no row was inserted", label)
 	}
 }
 
@@ -166,88 +173,67 @@ func TestRoleCRUD(t *testing.T) {
 // this bridge an existing, possibly sole, admin loses access the moment the
 // resolver governs a real check.
 func TestEffectivePermissionsUnionBridge(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-
+	d, _ := freshDirectory(t)
 	root := t.TempDir()
-	if _, err := d.CreateDomain("acme.test", filepath.Join(root, "acme.test")); err != nil {
-		t.Fatal(err)
-	}
+	mustCreateDomain(t, d, root, "acme.test")
 	mk := func(login string) int64 {
-		id, err := d.CreateUser(login+"@acme.test", "pw", filepath.Join(root, login))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return id
+		t.Helper()
+		return mustCreateUser(t, d, root, login+"@acme.test", "pw")
 	}
 
 	// A user with ONLY a legacy direct grant must still resolve to authority.
 	legacyOnly := mk("legacy")
-	if err := d.GrantAdminRole(legacyOnly, AdminSystem, 0); err != nil {
-		t.Fatal(err)
-	}
-	perms, err := d.EffectivePermissions(legacyOnly)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "grant system admin", d.GrantAdminRole(legacyOnly, AdminSystem, 0))
+	perms := mustEffectivePermissions(t, d, legacyOnly)
 	if !hasPerm(perms, PermSystemAdmin, "") {
 		t.Fatalf("legacy system admin lost authority under the resolver: %+v", perms)
 	}
 
 	// Org and domain grants map to their scoped permission equivalents.
 	scoped := mk("scoped")
-	if err := d.GrantAdminRole(scoped, AdminOrg, 5); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.GrantAdminRole(scoped, AdminDomain, 7); err != nil {
-		t.Fatal(err)
-	}
-	perms, _ = d.EffectivePermissions(scoped)
-	if !hasPerm(perms, PermOrgAdmin, "5") {
-		t.Errorf("org grant scope 5 did not map to OrgAdmin(5): %+v", perms)
-	}
-	if !hasPerm(perms, PermDomainAdmin, "7") {
-		t.Errorf("domain grant scope 7 did not map to DomainAdmin(7): %+v", perms)
-	}
+	mustNoErr(t, "grant org admin", d.GrantAdminRole(scoped, AdminOrg, 5))
+	mustNoErr(t, "grant domain admin", d.GrantAdminRole(scoped, AdminDomain, 7))
+	perms = mustEffectivePermissions(t, d, scoped)
+	wantPermissions(t, perms, []Permission{
+		{Name: PermOrgAdmin, Params: "5"},
+		{Name: PermDomainAdmin, Params: "7"},
+	})
 
 	// A named role's permissions surface, and overlapping the legacy bridge does
 	// not duplicate the permission.
 	both := mk("both")
-	if err := d.GrantAdminRole(both, AdminOrg, 9); err != nil {
-		t.Fatal(err)
-	}
-	roleID, err := d.CreateRole("Extra",
-		"",
+	mustNoErr(t, "grant org admin", d.GrantAdminRole(both, AdminOrg, 9))
+	_, err := d.CreateRole("Extra", "",
 		[]Permission{
 			{Name: PermResetPasswd},
 			{Name: PermOrgAdmin, Params: "9"}, // duplicates the legacy org grant scope 9
 		},
 		[]int64{both})
-	if err != nil {
-		t.Fatal(err)
-	}
-	perms, _ = d.EffectivePermissions(both)
-	if !hasPerm(perms, PermResetPasswd, "") {
-		t.Errorf("named-role permission missing: %+v", perms)
-	}
-	dups := 0
-	for _, p := range perms {
-		if p.Name == PermOrgAdmin && p.Params == "9" {
-			dups++
-		}
-	}
-	if dups != 1 {
-		t.Errorf("OrgAdmin(9) appeared %d times, want 1 (union must dedupe the role/legacy overlap)", dups)
-	}
+	mustNoErr(t, "create role", err)
+	perms = mustEffectivePermissions(t, d, both)
+	wantPermissions(t, perms, []Permission{{Name: PermResetPasswd}})
+	wantEq(t, "OrgAdmin(9) occurrences (the union must dedupe the role/legacy overlap)",
+		countPerm(perms, PermOrgAdmin, "9"), 1)
 
 	// Cleanup-only sanity: a user with no grants and no roles resolves empty.
-	none := mk("none")
-	if perms, _ := d.EffectivePermissions(none); len(perms) != 0 {
-		t.Errorf("user with no authority resolved %+v, want empty", perms)
+	wantEq(t, "permissions of a user with no authority", len(mustEffectivePermissions(t, d, mk("none"))), 0)
+}
+
+// mustEffectivePermissions resolves a user's whole permission set.
+func mustEffectivePermissions(t *testing.T, d *SQLDirectory, userID int64) []Permission {
+	t.Helper()
+	perms, err := d.EffectivePermissions(userID)
+	mustNoErr(t, "effective permissions", err)
+	return perms
+}
+
+// countPerm counts how many times an exact (name, params) pair appears.
+func countPerm(perms []Permission, name, params string) int {
+	n := 0
+	for _, p := range perms {
+		if p.Name == name && p.Params == params {
+			n++
+		}
 	}
-	_ = roleID
+	return n
 }

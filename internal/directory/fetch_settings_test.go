@@ -7,43 +7,28 @@ import "testing"
 // default matters as much as the round trip: an install that never opens the page
 // must not fetch from internal addresses.
 func TestFetchSettingsRoundTrip(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-	if _, err := db.Exec("DELETE FROM fetch_settings"); err != nil {
-		t.Fatal(err)
-	}
-
-	if s, found, err := d.GetFetchSettings(); err != nil || found || s.AllowInternalSources {
-		t.Fatalf("Get on empty = %+v found %v err %v, want not found and refusing", s, found, err)
+	d, db := freshDirectory(t)
+	_, err := db.Exec("DELETE FROM fetch_settings")
+	mustNoErr(t, "clear the settings row", err)
+	read := func() (FetchSettings, bool) {
+		t.Helper()
+		s, found, err := d.GetFetchSettings()
+		mustNoErr(t, "get the fetch settings", err)
+		return s, found
 	}
 
-	if err := d.SetFetchSettings(FetchSettings{AllowInternalSources: true}); err != nil {
-		t.Fatal(err)
-	}
-	got, found, err := d.GetFetchSettings()
-	if err != nil || !found {
-		t.Fatalf("Get after Set = found %v err %v, want found", found, err)
-	}
-	if !got.AllowInternalSources {
-		t.Error("the stored policy did not read back as allowed")
-	}
+	s, found := read()
+	wantEq(t, "a row is found on an empty table", found, false)
+	wantEq(t, "internal sources allowed by default", s.AllowInternalSources, false)
+
+	mustNoErr(t, "allow internal sources", d.SetFetchSettings(FetchSettings{AllowInternalSources: true}))
+	s, found = read()
+	wantEq(t, "the row is found after the set", found, true)
+	wantEq(t, "internal sources allowed after the set", s.AllowInternalSources, true)
 
 	// Turning it back off upserts the same row rather than adding another.
-	if err := d.SetFetchSettings(FetchSettings{}); err != nil {
-		t.Fatal(err)
-	}
-	if got, _, _ := d.GetFetchSettings(); got.AllowInternalSources {
-		t.Error("the policy stayed allowed after being turned off")
-	}
-	var rows int
-	if err := db.QueryRow("SELECT COUNT(*) FROM fetch_settings").Scan(&rows); err != nil {
-		t.Fatal(err)
-	}
-	if rows != 1 {
-		t.Errorf("fetch_settings holds %d rows, want the single row", rows)
-	}
+	mustNoErr(t, "refuse internal sources", d.SetFetchSettings(FetchSettings{}))
+	s, _ = read()
+	wantEq(t, "internal sources allowed after being turned off", s.AllowInternalSources, false)
+	wantRows(t, db, "fetch_settings rows (it is a single-row table)", 1, "SELECT COUNT(*) FROM fetch_settings")
 }

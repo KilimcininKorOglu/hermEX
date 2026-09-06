@@ -1,6 +1,7 @@
 package directory
 
 import (
+	"database/sql"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -15,44 +16,36 @@ import (
 // It returns the directory and the domain ids in seeding order.
 func scopedDirectory(t *testing.T) *SQLDirectory {
 	t.Helper()
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-
+	d, db := freshDirectory(t)
 	root := t.TempDir()
 	orgID, err := d.CreateOrg("acme", "one company, two domains")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "create org", err)
 	for _, dom := range []string{"sales.acme.test", "eng.acme.test", "other.test"} {
 		domID, err := d.CreateDomain(dom, filepath.Join(root, "domains", dom))
-		if err != nil {
-			t.Fatal(err)
-		}
+		mustNoErr(t, "create domain "+dom, err)
 		if dom != "other.test" {
-			if ok, err := d.AssignDomainToOrg(domID, orgID); err != nil || !ok {
-				t.Fatalf("assign %s to the org: %v", dom, err)
-			}
+			ok, err := d.AssignDomainToOrg(domID, orgID)
+			mustNoErr(t, "assign "+dom+" to the org", err)
+			wantEq(t, "the assign found "+dom, ok, true)
 		}
-		for _, local := range []string{"user", "shared", "room"} {
-			addr := local + "@" + dom
-			if _, err := d.CreateUser(addr, "secret", filepath.Join(root, "users", addr)); err != nil {
-				t.Fatal(err)
-			}
-		}
-		if _, err := db.Exec(`UPDATE users SET address_status = ? WHERE username = ?`,
-			afUserSharedMbox, "shared@"+dom); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := db.Exec(`UPDATE users SET display_type = ? WHERE username = ?`,
-			dtRoom, "room@"+dom); err != nil {
-			t.Fatal(err)
-		}
+		seedScopedPrincipals(t, d, db, root, dom)
 	}
 	return d
+}
+
+// seedScopedPrincipals gives one domain a mailbox user, a shared mailbox and a
+// room, so every scoped query has something to find in every domain.
+func seedScopedPrincipals(t *testing.T, d *SQLDirectory, db *sql.DB, root, dom string) {
+	t.Helper()
+	for _, local := range []string{"user", "shared", "room"} {
+		addr := local + "@" + dom
+		_, err := d.CreateUser(addr, "secret", filepath.Join(root, "users", addr))
+		mustNoErr(t, "create "+addr, err)
+	}
+	_, err := db.Exec(`UPDATE users SET address_status = ? WHERE username = ?`, afUserSharedMbox, "shared@"+dom)
+	mustNoErr(t, "mark the shared mailbox", err)
+	_, err = db.Exec(`UPDATE users SET display_type = ? WHERE username = ?`, dtRoom, "room@"+dom)
+	mustNoErr(t, "mark the room", err)
 }
 
 // galAddresses runs an unfiltered GAL search as caller and returns the addresses.

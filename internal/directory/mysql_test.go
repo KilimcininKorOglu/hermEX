@@ -78,120 +78,94 @@ func cleanTables(t *testing.T, db *sql.DB) {
 // to an alias must not bypass the forward), clearing removes it, an unknown user is
 // reported absent, and DeleteUser leaves no orphan forward row.
 func TestForwardDirective(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-
+	d, db := freshDirectory(t)
 	root := t.TempDir()
-	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "domains", "hermex.test")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.CreateUser("alice@hermex.test", "secret", filepath.Join(root, "alice")); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.CreateAlias("sales@hermex.test", "alice@hermex.test"); err != nil {
-		t.Fatal(err)
-	}
+	mustCreateDomain(t, d, root, "hermex.test")
+	mustCreateUser(t, d, root, "alice@hermex.test", "secret")
+	mustNoErr(t, "create alias", d.CreateAlias("sales@hermex.test", "alice@hermex.test"))
 
 	// Set a Redirect and read it back by canonical username.
-	if existed, err := d.SetForward("alice@hermex.test", ForwardRedirect, "boss@external.test"); err != nil || !existed {
-		t.Fatalf("SetForward = %v, %v; want true, nil", existed, err)
-	}
-	if fi, ok, err := d.GetForward("alice@hermex.test"); err != nil || !ok || fi.Type != ForwardRedirect || fi.Destination != "boss@external.test" {
-		t.Errorf("GetForward(user) = %+v, %v, %v; want {Redirect boss@external.test}, true", fi, ok, err)
-	}
+	existed, err := d.SetForward("alice@hermex.test", ForwardRedirect, "boss@external.test")
+	mustNoErr(t, "set forward", err)
+	wantEq(t, "SetForward found the user", existed, true)
+	fi := mustGetForward(t, d, "alice@hermex.test")
+	wantEq(t, "forward type", fi.Type, ForwardRedirect)
+	wantEq(t, "forward destination", fi.Destination, "boss@external.test")
 	// An alias to the user must resolve to the same directive, keying on the raw
 	// alias would let mail to sales@ bypass alice's forward.
-	if fi, ok, err := d.GetForward("sales@hermex.test"); err != nil || !ok || fi.Destination != "boss@external.test" {
-		t.Errorf("GetForward(alias) = %+v, %v, %v; want the user's directive", fi, ok, err)
-	}
+	wantEq(t, "the alias resolves to the user's directive",
+		mustGetForward(t, d, "sales@hermex.test").Destination, "boss@external.test")
 
 	// An empty destination clears the forward.
-	if existed, err := d.SetForward("alice@hermex.test", ForwardCC, ""); err != nil || !existed {
-		t.Fatalf("SetForward(clear) = %v, %v; want true, nil", existed, err)
-	}
-	if _, ok, err := d.GetForward("alice@hermex.test"); err != nil || ok {
-		t.Errorf("GetForward after clear = ok %v, %v; want false", ok, err)
-	}
+	existed, err = d.SetForward("alice@hermex.test", ForwardCC, "")
+	mustNoErr(t, "clear forward", err)
+	wantEq(t, "SetForward(clear) found the user", existed, true)
+	_, ok, err := d.GetForward("alice@hermex.test")
+	mustNoErr(t, "get forward", err)
+	wantEq(t, "forward present after clearing", ok, false)
 
 	// An unknown user is reported absent, not created.
-	if existed, err := d.SetForward("ghost@hermex.test", ForwardCC, "x@y.test"); err != nil || existed {
-		t.Errorf("SetForward(unknown) = %v, %v; want false, nil", existed, err)
-	}
+	existed, err = d.SetForward("ghost@hermex.test", ForwardCC, "x@y.test")
+	mustNoErr(t, "set a forward on an unknown user", err)
+	wantEq(t, "SetForward(unknown) found a user", existed, false)
 
 	// DeleteUser leaves no orphan forward row.
-	if _, err := d.SetForward("alice@hermex.test", ForwardCC, "boss@external.test"); err != nil {
-		t.Fatal(err)
+	_, err = d.SetForward("alice@hermex.test", ForwardCC, "boss@external.test")
+	mustNoErr(t, "set forward", err)
+	_, err = d.DeleteUser("alice@hermex.test", false)
+	mustNoErr(t, "delete user", err)
+	wantRows(t, db, "forward rows after DeleteUser", 0,
+		`SELECT COUNT(*) FROM forwards WHERE username = ?`, "alice@hermex.test")
+}
+
+// mustGetForward reads a forward directive, requiring one to be set.
+func mustGetForward(t *testing.T, d *SQLDirectory, address string) ForwardInfo {
+	t.Helper()
+	fi, ok, err := d.GetForward(address)
+	mustNoErr(t, "get forward", err)
+	if !ok {
+		t.Fatalf("no forward set for %q", address)
 	}
-	if _, err := d.DeleteUser("alice@hermex.test", false); err != nil {
-		t.Fatal(err)
-	}
-	var n int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM forwards WHERE username = ?`, "alice@hermex.test").Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	if n != 0 {
-		t.Errorf("forwards rows after DeleteUser = %d, want 0", n)
-	}
+	return fi
 }
 
 func TestSQLDirectoryFaithfulResolution(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-
+	d, db := freshDirectory(t)
 	root := t.TempDir()
-	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "domains", "hermex.test")); err != nil {
-		t.Fatal(err)
-	}
+	mustCreateDomain(t, d, root, "hermex.test")
 	maildir := filepath.Join(root, "users", "hermex.test", "alice")
-	if _, err := d.CreateUser("Alice@Hermex.Test", "secret", maildir); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.CreateAlias("postmaster@hermex.test", "alice@hermex.test"); err != nil {
-		t.Fatal(err)
-	}
+	_, err := d.CreateUser("Alice@Hermex.Test", "secret", maildir)
+	mustNoErr(t, "create user", err)
+	mustNoErr(t, "create alias", d.CreateAlias("postmaster@hermex.test", "alice@hermex.test"))
 
 	// Resolution yields the maildir itself: that is the path handed to
 	// objectstore.Open, which opens objects.sqlite3 + imapindex.sqlite3 inside it.
-	wantMaildir := maildir
 
 	// Authentication: correct password (case-insensitive login), wrong password,
 	// and unknown user.
-	if path, ok := d.Authenticate("alice@hermex.test", "secret"); !ok || path != wantMaildir {
-		t.Errorf("Authenticate(correct) = %q, %v; want %q, true", path, ok, wantMaildir)
-	}
-	if _, ok := d.Authenticate("alice@hermex.test", "wrong"); ok {
-		t.Error("Authenticate(wrong password) should fail")
-	}
-	if _, ok := d.Authenticate("ghost@hermex.test", "secret"); ok {
-		t.Error("Authenticate(unknown user) should fail")
-	}
+	path, ok := d.Authenticate("alice@hermex.test", "secret")
+	wantEq(t, "Authenticate admitted the correct password", ok, true)
+	wantEq(t, "the authenticated mailbox path", path, maildir)
+	_, wrong := d.Authenticate("alice@hermex.test", "wrong")
+	wantEq(t, "Authenticate admitted a wrong password", wrong, false)
+	_, ghost := d.Authenticate("ghost@hermex.test", "secret")
+	wantEq(t, "Authenticate admitted an unknown user", ghost, false)
 
 	// Recipient resolution: the user, an alias to the user, and an unknown.
-	if path, ok := d.Resolve("alice@hermex.test"); !ok || path != wantMaildir {
-		t.Errorf("Resolve(user) = %q, %v; want %q, true", path, ok, wantMaildir)
-	}
-	if path, ok := d.Resolve("postmaster@hermex.test"); !ok || path != wantMaildir {
-		t.Errorf("Resolve(alias) = %q, %v; want %q, true", path, ok, wantMaildir)
-	}
-	if _, ok := d.Resolve("nobody@hermex.test"); ok {
-		t.Error("Resolve(unknown) should be refused")
-	}
+	path, ok = d.Resolve("alice@hermex.test")
+	wantEq(t, "Resolve found the user", ok, true)
+	wantEq(t, "the resolved mailbox path", path, maildir)
+	path, ok = d.Resolve("postmaster@hermex.test")
+	wantEq(t, "Resolve followed the alias", ok, true)
+	wantEq(t, "the alias's mailbox path", path, maildir)
+	_, unknown := d.Resolve("nobody@hermex.test")
+	wantEq(t, "Resolve found an unknown address", unknown, false)
 
 	// A suspended account (address_status != NORMAL) must not log in.
-	if _, err := db.Exec(`UPDATE users SET address_status = ? WHERE username = ?`, afUserSuspended, "alice@hermex.test"); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := d.Authenticate("alice@hermex.test", "secret"); ok {
-		t.Error("Authenticate should fail for a suspended account")
-	}
+	_, err = db.Exec(`UPDATE users SET address_status = ? WHERE username = ?`, afUserSuspended, "alice@hermex.test")
+	mustNoErr(t, "suspend the account", err)
+	_, suspended := d.Authenticate("alice@hermex.test", "secret")
+	wantEq(t, "Authenticate admitted a suspended account", suspended, false)
 }
 
 // TestSQLDirectoryIsLocalDomain checks the LocalDomains predicate against the
@@ -236,30 +210,18 @@ func TestSQLDirectoryIsLocalDomain(t *testing.T) {
 // where; an alias chains to the user's one stored path rather than re-deriving a
 // default location.
 func TestResolveOpensStoreAcrossPartitions(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-
-	if _, err := d.CreateDomain("hermex.test", filepath.Join(t.TempDir(), "domains", "hermex.test")); err != nil {
-		t.Fatal(err)
-	}
+	d, _ := freshDirectory(t)
+	mustCreateDomain(t, d, t.TempDir(), "hermex.test")
 
 	// Two independent storage roots stand in for two data partitions.
 	part0, part1 := t.TempDir(), t.TempDir()
 	aliceDir := filepath.Join(part0, "user", "hermex.test", "alice")
 	bobDir := filepath.Join(part1, "user", "hermex.test", "bob")
-	if _, err := d.CreateUser("alice@hermex.test", "pw", aliceDir); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.CreateUser("bob@hermex.test", "pw", bobDir); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.CreateAlias("a@hermex.test", "alice@hermex.test"); err != nil {
-		t.Fatal(err)
-	}
+	_, err := d.CreateUser("alice@hermex.test", "pw", aliceDir)
+	mustNoErr(t, "create alice", err)
+	_, err = d.CreateUser("bob@hermex.test", "pw", bobDir)
+	mustNoErr(t, "create bob", err)
+	mustNoErr(t, "create the alias", d.CreateAlias("a@hermex.test", "alice@hermex.test"))
 
 	for _, tc := range []struct{ addr, want string }{
 		{"alice@hermex.test", aliceDir},
@@ -267,21 +229,23 @@ func TestResolveOpensStoreAcrossPartitions(t *testing.T) {
 		{"a@hermex.test", aliceDir}, // alias -> alice's partition, not bob's, not a default
 	} {
 		path, ok := d.Resolve(tc.addr)
-		if !ok || path != tc.want {
-			t.Fatalf("Resolve(%q) = %q, %v; want %q, true", tc.addr, path, ok, tc.want)
-		}
-		store, err := objectstore.Open(path)
-		if err != nil {
-			t.Fatalf("objectstore.Open(%q): %v", path, err)
-		}
-		folders, err := store.ListFolders()
-		store.Close()
-		if err != nil {
-			t.Fatalf("ListFolders on the store at %q: %v", path, err)
-		}
-		if len(folders) == 0 {
-			t.Errorf("store at %q opened with no folders; it was not initialized", path)
-		}
+		wantEq(t, "Resolve found "+tc.addr, ok, true)
+		wantEq(t, "the path "+tc.addr+" resolves to", path, tc.want)
+		wantSeededStore(t, path)
+	}
+}
+
+// wantSeededStore proves a resolved path opens as a real, initialized object
+// store rather than an empty directory.
+func wantSeededStore(t *testing.T, path string) {
+	t.Helper()
+	store, err := objectstore.Open(path)
+	mustNoErr(t, "open the store at "+path, err)
+	defer store.Close()
+	folders, err := store.ListFolders()
+	mustNoErr(t, "list folders in the store at "+path, err)
+	if len(folders) == 0 {
+		t.Errorf("the store at %q opened with no folders; it was not initialized", path)
 	}
 }
 
@@ -338,52 +302,34 @@ func TestSQLDirectoryMaildirs(t *testing.T) {
 // its address and store path), a normal mailbox is excluded, and a shared
 // mailbox in a disabled domain is excluded by the domain join.
 func TestSQLDirectorySharedMailboxes(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-
+	d, db := freshDirectory(t)
 	root := t.TempDir()
-	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "domains", "hermex.test")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.CreateDomain("old.test", filepath.Join(root, "domains", "old.test")); err != nil {
-		t.Fatal(err)
-	}
-	aliceDir := filepath.Join(root, "users", "alice")
+	mustCreateDomain(t, d, root, "hermex.test")
+	mustCreateDomain(t, d, root, "old.test")
 	supportDir := filepath.Join(root, "users", "support")
-	archiveDir := filepath.Join(root, "users", "archive")
 	for addr, dir := range map[string]string{
-		"alice@hermex.test":   aliceDir,   // a normal mailbox: not shared
-		"support@hermex.test": supportDir, // a shared mailbox in an active domain
-		"archive@old.test":    archiveDir, // shared, but its domain is disabled
+		// alice is a normal mailbox (not shared), support is shared in an active
+		// domain, and archive is shared but its domain gets disabled below.
+		"alice@hermex.test":   filepath.Join(root, "users", "alice"),
+		"support@hermex.test": supportDir,
+		"archive@old.test":    filepath.Join(root, "users", "archive"),
 	} {
-		if _, err := d.CreateUser(addr, "secret", dir); err != nil {
-			t.Fatal(err)
-		}
+		_, err := d.CreateUser(addr, "secret", dir)
+		mustNoErr(t, "create "+addr, err)
 	}
 	// Flag the two shared mailboxes, then disable the old.test domain.
-	if _, err := db.Exec(`UPDATE users SET address_status = ? WHERE username IN (?, ?)`,
-		afUserSharedMbox, "support@hermex.test", "archive@old.test"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`UPDATE domains SET domain_status = 1 WHERE domainname = ?`, "old.test"); err != nil {
-		t.Fatal(err)
-	}
+	_, err := db.Exec(`UPDATE users SET address_status = ? WHERE username IN (?, ?)`,
+		afUserSharedMbox, "support@hermex.test", "archive@old.test")
+	mustNoErr(t, "flag the shared mailboxes", err)
+	_, err = db.Exec(`UPDATE domains SET domain_status = 1 WHERE domainname = ?`, "old.test")
+	mustNoErr(t, "disable the old domain", err)
 
 	got, err := d.SharedMailboxes("alice@hermex.test")
-	if err != nil {
-		t.Fatal(err)
+	mustNoErr(t, "list shared mailboxes", err)
+	if len(got) != 1 {
+		t.Fatalf("SharedMailboxes = %v, want only the active-domain shared mailbox (the normal user and the disabled domain's are excluded)", got)
 	}
-	want := []SharedMailbox{{Address: "support@hermex.test", StorePath: supportDir}}
-	if len(got) != len(want) {
-		t.Fatalf("SharedMailboxes = %v, want only the active-domain shared mailbox %v (normal user and disabled-domain shared excluded)", got, want)
-	}
-	if got[0] != want[0] {
-		t.Errorf("SharedMailboxes[0] = %+v, want %+v", got[0], want[0])
-	}
+	wantEq(t, "the shared mailbox", got[0], SharedMailbox{Address: "support@hermex.test", StorePath: supportDir})
 }
 
 // TestSQLDirectorySearchGAL checks GAL recipient search over the SQL directory:
@@ -392,67 +338,56 @@ func TestSQLDirectorySharedMailboxes(t *testing.T) {
 // the display name taken from PR_DISPLAY_NAME in user_properties, and the address
 // used as the fallback when no display name is set.
 func TestSQLDirectorySearchGAL(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-
+	d, db := freshDirectory(t)
 	root := t.TempDir()
-	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "domains", "hermex.test")); err != nil {
-		t.Fatal(err)
-	}
+	mustCreateDomain(t, d, root, "hermex.test")
 	for _, u := range []string{"alice@hermex.test", "albert@hermex.test", "bob@hermex.test"} {
-		if _, err := d.CreateUser(u, "secret", filepath.Join(root, "users", u)); err != nil {
-			t.Fatal(err)
-		}
+		mustCreateUser(t, d, root, u, "secret")
 	}
 	// Suspend albert: a disabled account must not surface in the address list.
-	if _, err := db.Exec(`UPDATE users SET address_status = ? WHERE username = ?`, afUserSuspended, "albert@hermex.test"); err != nil {
-		t.Fatal(err)
-	}
+	_, err := db.Exec(`UPDATE users SET address_status = ? WHERE username = ?`, afUserSuspended, "albert@hermex.test")
+	mustNoErr(t, "suspend albert", err)
 	// Give bob a PR_DISPLAY_NAME so the GAL returns the name, not the address;
 	// alice keeps none, exercising the address fallback.
-	if _, err := d.SetUserProperties("bob@hermex.test", map[uint32]string{0x3001001F: "Bob Builder"}); err != nil {
-		t.Fatal(err)
-	}
+	_, err = d.SetUserProperties("bob@hermex.test", map[uint32]string{0x3001001F: "Bob Builder"})
+	mustNoErr(t, "set bob's display name", err)
 
 	// "al" substring-matches alice and albert, but albert is suspended, so only
 	// alice remains. The query is case-insensitive.
 	for _, q := range []string{"al", "AL"} {
-		got, err := d.SearchGAL("alice@hermex.test", q, 0)
-		if err != nil {
-			t.Fatal(err)
+		got := mustSearchGAL(t, d, q, 0)
+		if len(got) != 1 {
+			t.Fatalf("SearchGAL(%q) = %v, want [alice@hermex.test] (albert is suspended)", q, got)
 		}
-		if len(got) != 1 || got[0].Address != "alice@hermex.test" {
-			t.Errorf("SearchGAL(%q) = %v, want [alice@hermex.test] (albert is suspended)", q, got)
-		} else if got[0].DisplayName != got[0].Address {
-			t.Errorf("DisplayName %q should mirror Address %q", got[0].DisplayName, got[0].Address)
-		}
+		wantEq(t, "matched address", got[0].Address, "alice@hermex.test")
+		wantEq(t, "display name falls back to the address", got[0].DisplayName, got[0].Address)
 	}
 
 	// A domain-wide query returns every active user ordered by address.
-	all, err := d.SearchGAL("alice@hermex.test", "hermex.test", 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	all := mustSearchGAL(t, d, "hermex.test", 0)
 	if len(all) != 2 {
 		t.Fatalf("SearchGAL(domain) = %v, want alice and bob (albert is suspended)", all)
 	}
-	if all[0].Address != "alice@hermex.test" || all[1].Address != "bob@hermex.test" {
-		t.Errorf("SearchGAL(domain) = %v, want ordered [alice, bob]", all)
-	}
+	wantEq(t, "first address (ordered)", all[0].Address, "alice@hermex.test")
+	wantEq(t, "second address (ordered)", all[1].Address, "bob@hermex.test")
 
 	// The limit caps the result count.
-	if got, _ := d.SearchGAL("alice@hermex.test", "hermex.test", 1); len(got) != 1 {
-		t.Errorf("SearchGAL(domain, limit 1) returned %d, want 1", len(got))
-	}
+	wantEq(t, "results under a limit of 1", len(mustSearchGAL(t, d, "hermex.test", 1)), 1)
 
 	// bob's PR_DISPLAY_NAME surfaces as the display name (the LEFT JOIN), while
 	// alice with none keeps the address fallback asserted above.
-	bob, _ := d.SearchGAL("alice@hermex.test", "bob", 0)
-	if len(bob) != 1 || bob[0].Address != "bob@hermex.test" || bob[0].DisplayName != "Bob Builder" {
-		t.Errorf("SearchGAL(bob) = %v, want bob@hermex.test displayed as %q", bob, "Bob Builder")
+	bob := mustSearchGAL(t, d, "bob", 0)
+	if len(bob) != 1 {
+		t.Fatalf("SearchGAL(bob) = %v, want one entry", bob)
 	}
+	wantEq(t, "bob's address", bob[0].Address, "bob@hermex.test")
+	wantEq(t, "bob's display name", bob[0].DisplayName, "Bob Builder")
+}
+
+// mustSearchGAL runs a GAL search as alice.
+func mustSearchGAL(t *testing.T, d *SQLDirectory, query string, limit int) []GALEntry {
+	t.Helper()
+	got, err := d.SearchGAL("alice@hermex.test", query, limit)
+	mustNoErr(t, "search GAL", err)
+	return got
 }

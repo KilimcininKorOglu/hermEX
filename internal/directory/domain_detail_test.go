@@ -1,6 +1,7 @@
 package directory
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 
@@ -12,51 +13,46 @@ import (
 // reflect the reference split: a normal mailbox is active, a suspended one is
 // inactive, and a user with no maildir is virtual.
 func TestDomainDetailAndCounts(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
+	d, _ := freshDirectory(t)
 	root := t.TempDir()
-
-	id, err := d.CreateDomain("acme.test", filepath.Join(root, "acme.test"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	id := mustCreateDomain(t, d, root, "acme.test")
 
 	// One user per count bucket.
-	if _, err := d.CreateUser("active@acme.test", "pw", filepath.Join(root, "active")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.CreateUser("suspended@acme.test", "pw", filepath.Join(root, "suspended")); err != nil {
-		t.Fatal(err)
-	}
-	if ok, err := d.UpdateUser("suspended@acme.test", UserUpdate{Status: afUserSuspended}); err != nil || !ok {
-		t.Fatalf("suspend user = %v, %v", ok, err)
-	}
-	if _, err := d.CreateUser("virtual@acme.test", "pw", ""); err != nil { // no maildir
-		t.Fatal(err)
-	}
+	mustCreateUser(t, d, root, "active@acme.test", "pw")
+	mustCreateUser(t, d, root, "suspended@acme.test", "pw")
+	ok, err := d.UpdateUser("suspended@acme.test", UserUpdate{Status: afUserSuspended})
+	mustNoErr(t, "suspend the user", err)
+	wantEq(t, "the suspend found the user", ok, true)
+	_, err = d.CreateUser("virtual@acme.test", "pw", "") // no maildir
+	mustNoErr(t, "create the virtual user", err)
 
-	if ok, err := d.UpdateDomain(id, DomainUpdate{
+	ok, err = d.UpdateDomain(id, DomainUpdate{
 		Status: 0, MaxUser: 50, Title: "Acme Inc", Address: "1 Road", AdminName: "Pat", Tel: "555",
-	}); err != nil || !ok {
-		t.Fatalf("UpdateDomain = %v, %v", ok, err)
-	}
+	})
+	mustNoErr(t, "update domain", err)
+	wantEq(t, "UpdateDomain found the domain", ok, true)
 
+	dd := mustGetDomain(t, d, id)
+	wantEq(t, "domain name", dd.Name, "acme.test")
+	wantEq(t, "max user", dd.MaxUser, int64(50))
+	wantEq(t, "title", dd.Title, "Acme Inc")
+	wantEq(t, "address", dd.Address, "1 Road")
+	wantEq(t, "admin name", dd.AdminName, "Pat")
+	wantEq(t, "telephone", dd.Tel, "555")
+	wantEq(t, "active users", dd.ActiveUsers, 1)
+	wantEq(t, "inactive users", dd.InactiveUsers, 1)
+	wantEq(t, "virtual users", dd.VirtualUsers, 1)
+}
+
+// mustGetDomain reads a domain back, requiring it to exist.
+func mustGetDomain(t *testing.T, d *SQLDirectory, id int64) DomainDetail {
+	t.Helper()
 	dd, ok, err := d.GetDomain(id)
-	if err != nil || !ok {
-		t.Fatalf("GetDomain = %v, %v", ok, err)
+	mustNoErr(t, "get domain", err)
+	if !ok {
+		t.Fatalf("domain %d not found", id)
 	}
-	if dd.Name != "acme.test" || dd.MaxUser != 50 || dd.Title != "Acme Inc" ||
-		dd.Address != "1 Road" || dd.AdminName != "Pat" || dd.Tel != "555" {
-		t.Errorf("GetDomain fields = %+v, want the values written by UpdateDomain", dd)
-	}
-	if dd.ActiveUsers != 1 || dd.InactiveUsers != 1 || dd.VirtualUsers != 1 {
-		t.Errorf("counts = active %d / inactive %d / virtual %d, want 1/1/1",
-			dd.ActiveUsers, dd.InactiveUsers, dd.VirtualUsers)
-	}
+	return dd
 }
 
 // TestDomainStatusEnforcement proves suspending a domain via UpdateDomain blocks
@@ -65,51 +61,40 @@ func TestDomainDetailAndCounts(t *testing.T) {
 // genuine enforcement points, not a per-user status cascade, which the codebase
 // does not use.
 func TestDomainStatusEnforcement(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
+	d, _ := freshDirectory(t)
 	root := t.TempDir()
-
-	id, err := d.CreateDomain("acme.test", filepath.Join(root, "acme.test"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.CreateUser("alice@acme.test", "pw", filepath.Join(root, "alice")); err != nil {
-		t.Fatal(err)
-	}
+	id := mustCreateDomain(t, d, root, "acme.test")
+	mustCreateUser(t, d, root, "alice@acme.test", "pw")
 
 	// Active domain: login and local-delivery both succeed.
-	if _, ok := d.Authenticate("alice@acme.test", "pw"); !ok {
-		t.Fatal("active domain: Authenticate denied a valid login")
-	}
-	if local, err := d.IsLocalDomain("acme.test"); err != nil || !local {
-		t.Fatalf("active domain: IsLocalDomain = %v, %v, want true", local, err)
-	}
+	wantDomainServes(t, d, "active domain", true)
 
 	// Suspend: both must be refused.
-	if ok, err := d.UpdateDomain(id, DomainUpdate{Status: 1}); err != nil || !ok {
-		t.Fatalf("suspend domain = %v, %v", ok, err)
-	}
-	if _, ok := d.Authenticate("alice@acme.test", "pw"); ok {
-		t.Error("suspended domain: Authenticate admitted a login")
-	}
-	if local, err := d.IsLocalDomain("acme.test"); err != nil || local {
-		t.Errorf("suspended domain: IsLocalDomain = %v, %v, want false", local, err)
-	}
+	setDomainStatus(t, d, id, 1)
+	wantDomainServes(t, d, "suspended domain", false)
 
 	// Reactivate: both restored.
-	if ok, err := d.UpdateDomain(id, DomainUpdate{Status: 0}); err != nil || !ok {
-		t.Fatalf("reactivate domain = %v, %v", ok, err)
-	}
-	if _, ok := d.Authenticate("alice@acme.test", "pw"); !ok {
-		t.Error("reactivated domain: Authenticate denied a valid login")
-	}
-	if local, err := d.IsLocalDomain("acme.test"); err != nil || !local {
-		t.Errorf("reactivated domain: IsLocalDomain = %v, %v, want true", local, err)
-	}
+	setDomainStatus(t, d, id, 0)
+	wantDomainServes(t, d, "reactivated domain", true)
+}
+
+// setDomainStatus writes a domain's status through the admin path.
+func setDomainStatus(t *testing.T, d *SQLDirectory, id int64, status int) {
+	t.Helper()
+	ok, err := d.UpdateDomain(id, DomainUpdate{Status: status})
+	mustNoErr(t, "set domain status", err)
+	wantEq(t, "UpdateDomain found the domain", ok, true)
+}
+
+// wantDomainServes checks both enforcement points, authentication and local
+// delivery, agree on whether the domain is serving.
+func wantDomainServes(t *testing.T, d *SQLDirectory, what string, serves bool) {
+	t.Helper()
+	_, authed := d.Authenticate("alice@acme.test", "pw")
+	wantEq(t, what+": Authenticate admitted the login", authed, serves)
+	local, err := d.IsLocalDomain("acme.test")
+	mustNoErr(t, "is local domain", err)
+	wantEq(t, what+": IsLocalDomain", local, serves)
 }
 
 // TestCreateUserMaxUser proves the domain mailbox cap is enforced at user
@@ -117,42 +102,28 @@ func TestDomainStatusEnforcement(t *testing.T) {
 // suddenly closed), a positive cap rejects creation once reached, and raising or
 // clearing the cap reopens creation.
 func TestCreateUserMaxUser(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
+	d, _ := freshDirectory(t)
 	root := t.TempDir()
-
-	id, err := d.CreateDomain("acme.test", filepath.Join(root, "acme.test"))
-	if err != nil {
-		t.Fatal(err)
+	id := mustCreateDomain(t, d, root, "acme.test")
+	setMaxUser := func(cap int64) {
+		t.Helper()
+		ok, err := d.UpdateDomain(id, DomainUpdate{MaxUser: cap})
+		mustNoErr(t, "set max_user", err)
+		wantEq(t, "UpdateDomain found the domain", ok, true)
 	}
 
 	// Default max_user 0 means unlimited, creation is not blocked.
-	if _, err := d.CreateUser("u1@acme.test", "pw", filepath.Join(root, "u1")); err != nil {
-		t.Fatalf("max_user 0 (unlimited) blocked a create: %v", err)
-	}
+	mustCreateUser(t, d, root, "u1@acme.test", "pw")
 
 	// Cap at 2: one more is allowed (count 1 < 2), then the next is refused.
-	if ok, err := d.UpdateDomain(id, DomainUpdate{MaxUser: 2}); err != nil || !ok {
-		t.Fatalf("set max_user = %v, %v", ok, err)
-	}
-	if _, err := d.CreateUser("u2@acme.test", "pw", filepath.Join(root, "u2")); err != nil {
-		t.Fatalf("create within cap blocked: %v", err)
-	}
-	if _, err := d.CreateUser("u3@acme.test", "pw", filepath.Join(root, "u3")); err == nil {
-		t.Error("create over the cap succeeded, want the limit error")
-	}
+	setMaxUser(2)
+	mustCreateUser(t, d, root, "u2@acme.test", "pw")
+	_, err := d.CreateUser("u3@acme.test", "pw", filepath.Join(root, "u3"))
+	wantErr(t, "a create over the cap succeeded", err)
 
 	// Clearing the cap reopens creation.
-	if ok, err := d.UpdateDomain(id, DomainUpdate{MaxUser: 0}); err != nil || !ok {
-		t.Fatalf("clear max_user = %v, %v", ok, err)
-	}
-	if _, err := d.CreateUser("u3@acme.test", "pw", filepath.Join(root, "u3")); err != nil {
-		t.Errorf("create after clearing the cap blocked: %v", err)
-	}
+	setMaxUser(0)
+	mustCreateUser(t, d, root, "u3@acme.test", "pw")
 }
 
 // TestSchemaUpgradeAddsDomainColumns proves the idempotent ALTERs actually upgrade
@@ -163,56 +134,47 @@ func TestCreateUserMaxUser(t *testing.T) {
 // max_user (so every user creation depends on this upgrade), GetDomain selects all
 // of them, and GetDomainSyncPolicy selects sync_policy.
 func TestSchemaUpgradeAddsDomainColumns(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
+	d, db := freshDirectory(t)
+	dropDomainColumns(t, db)
 
-	// Simulate a database created before the columns existed. The drop rebuilds the
-	// table (ALGORITHM=COPY) instead of MariaDB's default instant DROP: an instant
-	// drop leaves per-column metadata that the matching instant re-add (EnsureSchema
-	// below) compounds, and against the persistent test database this accumulates
-	// across runs until it crosses the InnoDB row-size limit and every EnsureSchema
-	// fails with "Row size too large". A copy rebuild leaves the table clean each
-	// run, and also more faithfully mirrors an old database (built before instant
-	// DDL existed).
+	// The upgrade must re-add every column.
+	mustNoErr(t, "upgrade EnsureSchema", d.EnsureSchema())
+
+	root := t.TempDir()
+	id := mustCreateDomain(t, d, root, "acme.test")
+	// CreateUser reads max_user, this fails outright if the column was not re-added.
+	mustCreateUser(t, d, root, "u@acme.test", "pw")
+	ok, err := d.UpdateDomain(id, DomainUpdate{MaxUser: 5, Title: "Acme"})
+	mustNoErr(t, "update domain after the upgrade", err)
+	wantEq(t, "UpdateDomain found the domain", ok, true)
+	dd := mustGetDomain(t, d, id)
+	wantEq(t, "max user after the upgrade", dd.MaxUser, int64(5))
+	wantEq(t, "title after the upgrade", dd.Title, "Acme")
+	ok, err = d.SetDomainSyncPolicy("acme.test", easpolicy.Policy{"DevicePasswordEnabled": 1})
+	mustNoErr(t, "set the sync policy after the upgrade", err)
+	wantEq(t, "SetDomainSyncPolicy found the domain", ok, true)
+}
+
+// dropDomainColumns simulates a database created before the columns existed.
+//
+// The drop rebuilds the table (ALGORITHM=COPY) instead of MariaDB's default
+// instant DROP: an instant drop leaves per-column metadata that the matching
+// instant re-add (the EnsureSchema that follows) compounds, and against the
+// persistent test database this accumulates across runs until it crosses the
+// InnoDB row-size limit and every EnsureSchema fails with "Row size too large".
+// A copy rebuild leaves the table clean each run, and also more faithfully
+// mirrors an old database (built before instant DDL existed).
+func dropDomainColumns(t *testing.T, db *sql.DB) {
+	t.Helper()
 	for _, col := range []string{"max_user", "title", "address", "admin_name", "tel", "sync_policy"} {
-		if _, err := db.Exec("ALTER TABLE domains DROP COLUMN IF EXISTS " + col + ", ALGORITHM=COPY"); err != nil {
-			t.Fatalf("drop column %s: %v", col, err)
-		}
+		_, err := db.Exec("ALTER TABLE domains DROP COLUMN IF EXISTS " + col + ", ALGORITHM=COPY")
+		mustNoErr(t, "drop column "+col, err)
 	}
 	// Also clear the migration bookkeeping so the runner re-applies v1 (the
 	// idempotent baseline) instead of seeing the database as already current,
 	// the realistic adoption path for a database that predates migrations.
-	if _, err := db.Exec("DELETE FROM schema_migrations"); err != nil {
-		t.Fatalf("reset migration bookkeeping: %v", err)
-	}
-
-	// The upgrade must re-add every column.
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatalf("upgrade EnsureSchema: %v", err)
-	}
-
-	root := t.TempDir()
-	id, err := d.CreateDomain("acme.test", filepath.Join(root, "acme.test"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// CreateUser reads max_user, this fails outright if the column was not re-added.
-	if _, err := d.CreateUser("u@acme.test", "pw", filepath.Join(root, "u")); err != nil {
-		t.Fatalf("CreateUser after upgrade: %v", err)
-	}
-	if ok, err := d.UpdateDomain(id, DomainUpdate{MaxUser: 5, Title: "Acme"}); err != nil || !ok {
-		t.Fatalf("UpdateDomain after upgrade = %v, %v", ok, err)
-	}
-	if dd, ok, err := d.GetDomain(id); err != nil || !ok || dd.MaxUser != 5 || dd.Title != "Acme" {
-		t.Fatalf("GetDomain after upgrade = %+v, ok %v, err %v", dd, ok, err)
-	}
-	if ok, err := d.SetDomainSyncPolicy("acme.test", easpolicy.Policy{"DevicePasswordEnabled": 1}); err != nil || !ok {
-		t.Fatalf("SetDomainSyncPolicy after upgrade = %v, %v", ok, err)
-	}
+	_, err := db.Exec("DELETE FROM schema_migrations")
+	mustNoErr(t, "reset the migration bookkeeping", err)
 }
 
 // TestSchemaBaselineAdoption proves adopting a pre-migration database, every
@@ -258,44 +220,35 @@ func TestSchemaBaselineAdoption(t *testing.T) {
 // by domain name, that an empty policy clears it, and that an unknown domain is
 // reported as not found.
 func TestDomainSyncPolicyRoundTrip(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
+	d, _ := freshDirectory(t)
 	root := t.TempDir()
-
-	if _, err := d.CreateDomain("acme.test", filepath.Join(root, "acme.test")); err != nil {
-		t.Fatal(err)
+	mustCreateDomain(t, d, root, "acme.test")
+	readPolicy := func() easpolicy.Policy {
+		t.Helper()
+		p, err := d.GetDomainSyncPolicy("acme.test")
+		mustNoErr(t, "get the domain sync policy", err)
+		return p
 	}
 
 	// No override yet.
-	if p, err := d.GetDomainSyncPolicy("acme.test"); err != nil || p != nil {
-		t.Fatalf("initial GetDomainSyncPolicy = %v, %v, want nil/nil", p, err)
-	}
+	wantEq(t, "policy fields before any override", len(readPolicy()), 0)
 
 	// Set, read back.
-	if ok, err := d.SetDomainSyncPolicy("acme.test", easpolicy.Policy{"DevicePasswordEnabled": 1}); err != nil || !ok {
-		t.Fatalf("SetDomainSyncPolicy = %v, %v", ok, err)
-	}
-	got, err := d.GetDomainSyncPolicy("acme.test")
-	if err != nil || got["DevicePasswordEnabled"] != 1 {
-		t.Fatalf("GetDomainSyncPolicy = %v, %v, want the stored field", got, err)
-	}
+	ok, err := d.SetDomainSyncPolicy("acme.test", easpolicy.Policy{"DevicePasswordEnabled": 1})
+	mustNoErr(t, "set the domain sync policy", err)
+	wantEq(t, "SetDomainSyncPolicy found the domain", ok, true)
+	wantEq(t, "the stored policy field", readPolicy()["DevicePasswordEnabled"], 1)
 
 	// Clearing removes the override.
-	if ok, err := d.SetDomainSyncPolicy("acme.test", easpolicy.Policy{}); err != nil || !ok {
-		t.Fatalf("clear = %v, %v", ok, err)
-	}
-	if p, err := d.GetDomainSyncPolicy("acme.test"); err != nil || p != nil {
-		t.Errorf("after clear GetDomainSyncPolicy = %v, %v, want nil/nil", p, err)
-	}
+	ok, err = d.SetDomainSyncPolicy("acme.test", easpolicy.Policy{})
+	mustNoErr(t, "clear the domain sync policy", err)
+	wantEq(t, "the clear found the domain", ok, true)
+	wantEq(t, "policy fields after clearing", len(readPolicy()), 0)
 
 	// Unknown domain.
-	if ok, err := d.SetDomainSyncPolicy("ghost.test", easpolicy.Policy{"DevicePasswordEnabled": 1}); err != nil || ok {
-		t.Errorf("SetDomainSyncPolicy(unknown) = %v, %v, want false/nil", ok, err)
-	}
+	ghost, err := d.SetDomainSyncPolicy("ghost.test", easpolicy.Policy{"DevicePasswordEnabled": 1})
+	mustNoErr(t, "set a policy on an unknown domain", err)
+	wantEq(t, "SetDomainSyncPolicy(unknown) found a domain", ghost, false)
 }
 
 // TestGetUpdateDomainUnknown proves an unknown domain id is reported as not found

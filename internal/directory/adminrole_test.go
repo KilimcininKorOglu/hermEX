@@ -1,72 +1,52 @@
 package directory
 
-import (
-	"path/filepath"
-	"testing"
-)
+import "testing"
 
 // TestAdminRoles proves a login resolves to its user id, admin roles round-trip
 // (grant is idempotent), and an unknown role tier is rejected.
 func TestAdminRoles(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-
+	d, _ := freshDirectory(t)
 	root := t.TempDir()
-	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "dom")); err != nil {
-		t.Fatal(err)
-	}
-	uid, err := d.CreateUser("admin@hermex.test", "pw", filepath.Join(root, "admin"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustCreateDomain(t, d, root, "hermex.test")
+	uid := mustCreateUser(t, d, root, "admin@hermex.test", "pw")
 
 	id, ok, err := d.UserID("admin@hermex.test")
-	if err != nil || !ok || id != uid {
-		t.Fatalf("UserID = (%d, %v, %v), want (%d, true, nil)", id, ok, err, uid)
-	}
-	if _, ok, _ := d.UserID("ghost@hermex.test"); ok {
-		t.Error("UserID resolved an unknown login")
-	}
+	mustNoErr(t, "resolve the login", err)
+	wantEq(t, "UserID found the login", ok, true)
+	wantEq(t, "resolved user id", id, uid)
+	_, found, _ := d.UserID("ghost@hermex.test")
+	wantEq(t, "UserID resolved an unknown login", found, false)
 
-	if roles, err := d.AdminRoles(uid); err != nil || len(roles) != 0 {
-		t.Fatalf("AdminRoles (fresh) = (%v, %v), want empty", roles, err)
-	}
+	wantEq(t, "roles of a fresh user", len(mustAdminRoles(t, d, uid)), 0)
 
-	if err := d.GrantAdminRole(uid, AdminSystem, 0); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.GrantAdminRole(uid, AdminOrg, 5); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.GrantAdminRole(uid, AdminOrg, 5); err != nil { // idempotent
-		t.Fatal(err)
-	}
+	mustNoErr(t, "grant system admin", d.GrantAdminRole(uid, AdminSystem, 0))
+	mustNoErr(t, "grant org admin", d.GrantAdminRole(uid, AdminOrg, 5))
+	mustNoErr(t, "re-grant org admin (idempotent)", d.GrantAdminRole(uid, AdminOrg, 5))
 
-	roles, err := d.AdminRoles(uid)
-	if err != nil {
-		t.Fatal(err)
-	}
+	roles := mustAdminRoles(t, d, uid)
 	if len(roles) != 2 {
 		t.Fatalf("AdminRoles = %v, want 2 (system + org:5)", roles)
 	}
-	var hasSystem, hasOrg bool
-	for _, r := range roles {
-		if r.Role == AdminSystem && r.ScopeID == 0 {
-			hasSystem = true
-		}
-		if r.Role == AdminOrg && r.ScopeID == 5 {
-			hasOrg = true
-		}
-	}
-	if !hasSystem || !hasOrg {
-		t.Errorf("roles = %v, want system(scope 0) + org(scope 5)", roles)
-	}
+	wantEq(t, "system grant present", hasRole(roles, AdminSystem, 0), true)
+	wantEq(t, "org:5 grant present", hasRole(roles, AdminOrg, 5), true)
 
-	if err := d.GrantAdminRole(uid, "wizard", 0); err == nil {
-		t.Error("GrantAdminRole accepted an unknown role tier")
+	wantErr(t, "GrantAdminRole accepted an unknown role tier", d.GrantAdminRole(uid, "wizard", 0))
+}
+
+// mustAdminRoles reads a user's direct admin grants.
+func mustAdminRoles(t *testing.T, d *SQLDirectory, uid int64) []AdminRole {
+	t.Helper()
+	roles, err := d.AdminRoles(uid)
+	mustNoErr(t, "read admin roles", err)
+	return roles
+}
+
+// hasRole reports whether a grant list carries an exact (tier, scope) pair.
+func hasRole(roles []AdminRole, role string, scope int64) bool {
+	for _, r := range roles {
+		if r.Role == role && r.ScopeID == scope {
+			return true
+		}
 	}
+	return false
 }

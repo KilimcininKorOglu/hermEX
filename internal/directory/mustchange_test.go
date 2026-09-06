@@ -1,52 +1,38 @@
 package directory
 
-import (
-	"path/filepath"
-	"testing"
-)
+import "testing"
 
 // TestRequirePasswordChange proves the must-change-password flag set by an admin
 // reset round-trips through GetUser, and that the user clears it by changing their
 // own password. A fresh account does not require a change; this is what gates the
 // webmail forced-change screen.
 func TestRequirePasswordChange(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
+	d, _ := freshDirectory(t)
 	root := t.TempDir()
-
-	if _, err := d.CreateDomain("acme.test", filepath.Join(root, "acme.test")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.CreateUser("u@acme.test", "pw", filepath.Join(root, "u")); err != nil {
-		t.Fatal(err)
-	}
+	mustCreateDomain(t, d, root, "acme.test")
+	mustCreateUser(t, d, root, "u@acme.test", "pw")
 
 	// A fresh account does not require a password change.
-	if u, ok, err := d.GetUser("u@acme.test"); err != nil || !ok {
-		t.Fatalf("GetUser fresh = ok %v, err %v", ok, err)
-	} else if u.MustChangePassword {
-		t.Fatal("a fresh account must not require a password change")
-	}
+	wantEq(t, "a fresh account requires a password change",
+		mustGetUser(t, d, "u@acme.test").MustChangePassword, false)
 
 	// An admin reset sets the flag.
-	if ok, err := d.RequirePasswordChange("u@acme.test", true); err != nil || !ok {
-		t.Fatalf("RequirePasswordChange(true) = ok %v, err %v", ok, err)
-	}
-	if u, _, _ := d.GetUser("u@acme.test"); !u.MustChangePassword {
-		t.Error("must_change_password should be true after an admin reset")
-	}
+	setMustChange(t, d, true)
+	wantEq(t, "must_change_password after an admin reset",
+		mustGetUser(t, d, "u@acme.test").MustChangePassword, true)
 
 	// The user changing their own password clears it.
-	if ok, err := d.RequirePasswordChange("u@acme.test", false); err != nil || !ok {
-		t.Fatalf("RequirePasswordChange(false) = ok %v, err %v", ok, err)
-	}
-	if u, _, _ := d.GetUser("u@acme.test"); u.MustChangePassword {
-		t.Error("must_change_password should be cleared after the user changes it")
-	}
+	setMustChange(t, d, false)
+	wantEq(t, "must_change_password after the user changes it",
+		mustGetUser(t, d, "u@acme.test").MustChangePassword, false)
+}
+
+// setMustChange writes the forced-change flag, requiring the user to exist.
+func setMustChange(t *testing.T, d *SQLDirectory, required bool) {
+	t.Helper()
+	ok, err := d.RequirePasswordChange("u@acme.test", required)
+	mustNoErr(t, "set the forced-change flag", err)
+	wantEq(t, "RequirePasswordChange found the user", ok, true)
 }
 
 // TestAuthenticateDeniesMustChange proves the fail-closed flip: once an account is
@@ -57,48 +43,34 @@ func TestRequirePasswordChange(t *testing.T) {
 // normal authentication. This is what stops a temporary admin-set password from
 // working on IMAP/POP3/SMTP/EWS/ActiveSync/MAPI/DAV.
 func TestAuthenticateDeniesMustChange(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
+	d, _ := freshDirectory(t)
 	root := t.TempDir()
-
-	if _, err := d.CreateDomain("acme.test", filepath.Join(root, "acme.test")); err != nil {
-		t.Fatal(err)
+	mustCreateDomain(t, d, root, "acme.test")
+	mustCreateUser(t, d, root, "u@acme.test", "pw")
+	strict := func(password string) bool {
+		t.Helper()
+		_, ok := d.Authenticate("u@acme.test", password)
+		return ok
 	}
-	if _, err := d.CreateUser("u@acme.test", "pw", filepath.Join(root, "u")); err != nil {
-		t.Fatal(err)
+	remediation := func(password string) bool {
+		t.Helper()
+		_, ok := d.AuthenticateAllowingPasswordChange("u@acme.test", password)
+		return ok
 	}
 
 	// Unflagged: both paths admit the correct password.
-	if _, ok := d.Authenticate("u@acme.test", "pw"); !ok {
-		t.Fatal("a fresh account must authenticate via the strict path")
-	}
+	wantEq(t, "a fresh account authenticates on the strict path", strict("pw"), true)
 
-	if ok, err := d.RequirePasswordChange("u@acme.test", true); err != nil || !ok {
-		t.Fatalf("RequirePasswordChange(true) = ok %v, err %v", ok, err)
-	}
+	setMustChange(t, d, true)
 
 	// Flagged: the strict path denies even the correct password...
-	if _, ok := d.Authenticate("u@acme.test", "pw"); ok {
-		t.Error("a flagged account must be denied by the strict Authenticate path")
-	}
+	wantEq(t, "a flagged account on the strict path", strict("pw"), false)
 	// ...but the remediation path still admits it so the user can change it.
-	if _, ok := d.AuthenticateAllowingPasswordChange("u@acme.test", "pw"); !ok {
-		t.Error("the remediation path must admit a flagged account with the correct password")
-	}
+	wantEq(t, "a flagged account on the remediation path", remediation("pw"), true)
 	// A wrong password is denied by both paths regardless of the flag.
-	if _, ok := d.AuthenticateAllowingPasswordChange("u@acme.test", "nope"); ok {
-		t.Error("the remediation path must still reject a wrong password")
-	}
+	wantEq(t, "a wrong password on the remediation path", remediation("nope"), false)
 
 	// Clearing the flag restores normal strict authentication.
-	if ok, err := d.RequirePasswordChange("u@acme.test", false); err != nil || !ok {
-		t.Fatalf("RequirePasswordChange(false) = ok %v, err %v", ok, err)
-	}
-	if _, ok := d.Authenticate("u@acme.test", "pw"); !ok {
-		t.Error("clearing the flag must restore strict authentication")
-	}
+	setMustChange(t, d, false)
+	wantEq(t, "the strict path after clearing the flag", strict("pw"), true)
 }

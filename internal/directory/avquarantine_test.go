@@ -1,30 +1,15 @@
 package directory
 
-import (
-	"path/filepath"
-	"testing"
-)
+import "testing"
 
 // TestQuarantineCRUD proves a quarantined message round-trips (recipients
 // reassembled), an unknown id is a clean miss, and the domain-scoped list only
 // returns records a given admin scope may see.
 func TestQuarantineCRUD(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-
+	d, _ := freshDirectory(t)
 	root := t.TempDir()
-	dom, err := d.CreateDomain("acme.test", filepath.Join(root, "acme"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	other, err := d.CreateDomain("other.test", filepath.Join(root, "other"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	dom := mustCreateDomain(t, d, root, "acme.test")
+	other := mustCreateDomain(t, d, root, "other.test")
 
 	id, err := d.QuarantineMessage(QuarantineEntry{
 		Direction:    "inbound",
@@ -36,104 +21,72 @@ func TestQuarantineCRUD(t *testing.T) {
 		DomainID:     dom,
 		CreatedAt:    1000,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if id == 0 {
-		t.Fatal("QuarantineMessage returned id 0")
-	}
+	mustNoErr(t, "quarantine message", err)
+	wantNonZeroID(t, "quarantine id", id)
 
 	rec, ok, err := d.GetQuarantine(id)
-	if err != nil || !ok {
-		t.Fatalf("GetQuarantine = (%v, %v)", ok, err)
-	}
-	if rec.VirusName != "Eicar-Test-Signature" || rec.MailFrom != "evil@spam.example" ||
-		rec.InfectedFile != "invoice.exe" || rec.DomainID != dom || rec.Status != "held" {
-		t.Fatalf("record mismatch: %+v", rec)
-	}
-	if len(rec.Recipients) != 2 || rec.Recipients[0] != "victim@acme.test" {
+	mustNoErr(t, "get quarantine record", err)
+	wantEq(t, "record found", ok, true)
+	wantEq(t, "virus name", rec.VirusName, "Eicar-Test-Signature")
+	wantEq(t, "mail from", rec.MailFrom, "evil@spam.example")
+	wantEq(t, "infected file", rec.InfectedFile, "invoice.exe")
+	wantEq(t, "domain id", rec.DomainID, dom)
+	wantEq(t, "status", rec.Status, "held")
+	if len(rec.Recipients) != 2 {
 		t.Fatalf("recipients = %v, want 2 reassembled", rec.Recipients)
 	}
+	wantEq(t, "first recipient", rec.Recipients[0], "victim@acme.test")
 
-	if _, ok, err := d.GetQuarantine(id + 999); ok || err != nil {
-		t.Fatalf("GetQuarantine(unknown) = (%v, %v), want (false, nil)", ok, err)
-	}
+	_, found, err := d.GetQuarantine(id + 999)
+	mustNoErr(t, "get an unknown record", err)
+	wantEq(t, "GetQuarantine(unknown) found", found, false)
 
 	// Scoping: system (all) sees it, the owning domain sees it, another domain
 	// and an empty scope see nothing.
-	if recs, err := d.ListQuarantine(nil, true, 0); err != nil || len(recs) != 1 {
-		t.Fatalf("ListQuarantine(all) = (%d, %v), want 1", len(recs), err)
-	}
-	if recs, err := d.ListQuarantine([]int64{dom}, false, 0); err != nil || len(recs) != 1 {
-		t.Fatalf("ListQuarantine([dom]) = (%d, %v), want 1", len(recs), err)
-	}
-	if recs, err := d.ListQuarantine([]int64{other}, false, 0); err != nil || len(recs) != 0 {
-		t.Fatalf("ListQuarantine([other]) = (%d, %v), want 0", len(recs), err)
-	}
-	if recs, err := d.ListQuarantine(nil, false, 0); err != nil || len(recs) != 0 {
-		t.Fatalf("ListQuarantine(no scope) = (%d, %v), want 0", len(recs), err)
-	}
+	wantEq(t, "records a system admin sees", len(mustListQuarantine(t, d, nil, true)), 1)
+	wantEq(t, "records the owning domain sees", len(mustListQuarantine(t, d, []int64{dom}, false)), 1)
+	wantEq(t, "records another domain sees", len(mustListQuarantine(t, d, []int64{other}, false)), 0)
+	wantEq(t, "records an empty scope sees", len(mustListQuarantine(t, d, nil, false)), 0)
 
-	if err := d.DeleteQuarantine(id); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok, _ := d.GetQuarantine(id); ok {
-		t.Error("record survived DeleteQuarantine")
-	}
+	mustNoErr(t, "delete quarantine record", d.DeleteQuarantine(id))
+	_, stillThere, _ := d.GetQuarantine(id)
+	wantEq(t, "record present after delete", stillThere, false)
+}
+
+// mustListQuarantine lists the quarantine records one admin scope may see.
+func mustListQuarantine(t *testing.T, d *SQLDirectory, domains []int64, all bool) []QuarantineRecord {
+	t.Helper()
+	recs, err := d.ListQuarantine(domains, all, 0)
+	mustNoErr(t, "list quarantine records", err)
+	return recs
 }
 
 // TestDomainOrgAdminEmails proves the notification resolver returns a domain's
 // domain admins plus its organization's org admins, and excludes non-admins.
 func TestDomainOrgAdminEmails(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-
+	d, _ := freshDirectory(t)
 	root := t.TempDir()
-	dom, err := d.CreateDomain("acme.test", filepath.Join(root, "acme"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	dom := mustCreateDomain(t, d, root, "acme.test")
 	org, err := d.CreateOrg("acme-org", "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.AssignDomainToOrg(dom, org); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "create org", err)
+	_, err = d.AssignDomainToOrg(dom, org)
+	mustNoErr(t, "assign the domain to the org", err)
 
-	mk := func(addr string) int64 {
-		uid, err := d.CreateUser(addr, "pw", filepath.Join(root, addr))
-		if err != nil {
-			t.Fatal(err)
-		}
-		return uid
-	}
-	dadmin := mk("dadmin@acme.test")
-	oadmin := mk("oadmin@acme.test")
-	mk("plain@acme.test") // no admin role
+	dadmin := mustCreateUser(t, d, root, "dadmin@acme.test", "pw")
+	oadmin := mustCreateUser(t, d, root, "oadmin@acme.test", "pw")
+	mustCreateUser(t, d, root, "plain@acme.test", "pw") // no admin role
 
-	if err := d.GrantAdminRole(dadmin, AdminDomain, dom); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.GrantAdminRole(oadmin, AdminOrg, org); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "grant domain admin", d.GrantAdminRole(dadmin, AdminDomain, dom))
+	mustNoErr(t, "grant org admin", d.GrantAdminRole(oadmin, AdminOrg, org))
 
 	emails, err := d.DomainOrgAdminEmails(dom)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "resolve the notification addresses", err)
 	got := map[string]bool{}
 	for _, e := range emails {
 		got[e] = true
 	}
-	if !got["dadmin@acme.test"] || !got["oadmin@acme.test"] {
-		t.Fatalf("emails = %v, want both the domain and org admin", emails)
-	}
+	wantEq(t, "the domain admin is notified", got["dadmin@acme.test"], true)
+	wantEq(t, "the org admin is notified", got["oadmin@acme.test"], true)
 	if got["plain@acme.test"] {
 		t.Error("DomainOrgAdminEmails included a non-admin")
 	}

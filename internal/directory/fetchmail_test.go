@@ -1,131 +1,108 @@
 package directory
 
-import (
-	"path/filepath"
-	"testing"
-)
+import "testing"
 
 // TestFetchmailCRUD covers the poll-config store: an entry round-trips its fields, the
 // active-only listing excludes a disabled entry, an unknown protocol is rejected, delete
 // reports existence, and deleting the owning user removes its entries.
 func TestFetchmailCRUD(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-
+	d, _ := freshDirectory(t)
 	root := t.TempDir()
-	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "hermex.test")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.CreateUser("alice@hermex.test", "pw", filepath.Join(root, "alice")); err != nil {
-		t.Fatal(err)
-	}
+	mustCreateDomain(t, d, root, "hermex.test")
+	mustCreateUser(t, d, root, "alice@hermex.test", "pw")
 
-	if list, err := d.ListFetchmail("alice@hermex.test"); err != nil || len(list) != 0 {
-		t.Fatalf("fresh list = %v, %v; want empty", list, err)
-	}
+	wantEq(t, "entries of a fresh mailbox", len(mustListFetchmail(t, d)), 0)
 
 	id, err := d.CreateFetchmail(FetchmailEntry{
 		Mailbox: "alice@hermex.test", Active: true,
 		SrcServer: "mail.example.com", SrcPort: 993, SrcUser: "alice", SrcPassword: "secret",
 		Protocol: "IMAP", SrcFolder: "INBOX", FetchAll: false, Keep: true, UseSSL: true, SSLVerify: true,
 	})
-	if err != nil {
-		t.Fatalf("CreateFetchmail: %v", err)
-	}
+	mustNoErr(t, "create fetchmail entry", err)
 
-	list, err := d.ListFetchmail("alice@hermex.test")
-	if err != nil || len(list) != 1 {
-		t.Fatalf("list = %v, %v; want one entry", list, err)
+	list := mustListFetchmail(t, d)
+	if len(list) != 1 {
+		t.Fatalf("list = %v, want one entry", list)
 	}
-	got := list[0]
-	if got.SrcServer != "mail.example.com" || got.SrcPort != 993 || got.SrcUser != "alice" ||
-		got.SrcPassword != "secret" || got.Protocol != "IMAP" || !got.Keep || !got.UseSSL || got.FetchAll {
-		t.Errorf("entry did not round-trip: %+v", got)
-	}
+	wantFetchmailRoundTrip(t, list[0])
 
 	// A disabled entry is excluded from the worker's active listing.
-	if _, err := d.CreateFetchmail(FetchmailEntry{
+	_, err = d.CreateFetchmail(FetchmailEntry{
 		Mailbox: "alice@hermex.test", Active: false,
 		SrcServer: "old.example.com", SrcUser: "alice", Protocol: "POP3",
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
+	mustNoErr(t, "create a disabled entry", err)
 	active, err := d.ListActiveFetchmail()
-	if err != nil || len(active) != 1 || active[0].ID != id {
-		t.Errorf("active listing = %v, %v; want only the active entry", active, err)
+	mustNoErr(t, "list active entries", err)
+	if len(active) != 1 {
+		t.Fatalf("active listing = %v, want only the active entry", active)
 	}
+	wantEq(t, "the active entry", active[0].ID, id)
 
 	// Validation rejects an unknown protocol before storage.
-	if _, err := d.CreateFetchmail(FetchmailEntry{
+	_, err = d.CreateFetchmail(FetchmailEntry{
 		Mailbox: "alice@hermex.test", SrcServer: "x", SrcUser: "x", Protocol: "FTP",
-	}); err == nil {
-		t.Error("an unknown protocol was accepted; want rejected")
-	}
+	})
+	wantErr(t, "an unknown protocol was accepted", err)
 
 	// Delete reports existence.
-	if ok, err := d.DeleteFetchmail(id); err != nil || !ok {
-		t.Errorf("DeleteFetchmail = %v, %v; want true", ok, err)
-	}
-	if ok, _ := d.DeleteFetchmail(id); ok {
-		t.Error("second delete reported a row; want false")
-	}
+	deleted, err := d.DeleteFetchmail(id)
+	mustNoErr(t, "delete fetchmail entry", err)
+	wantEq(t, "DeleteFetchmail reported the entry existed", deleted, true)
+	again, _ := d.DeleteFetchmail(id)
+	wantEq(t, "the second delete", again, false)
 
 	// Deleting the user removes its remaining entries.
-	if _, err := d.DeleteUser("alice@hermex.test", false); err != nil {
-		t.Fatal(err)
-	}
-	if list, _ := d.ListFetchmail("alice@hermex.test"); len(list) != 0 {
-		t.Errorf("after user delete, fetchmail entries = %v; want none", list)
-	}
+	_, err = d.DeleteUser("alice@hermex.test", false)
+	mustNoErr(t, "delete user", err)
+	wantEq(t, "fetchmail entries after the user delete", len(mustListFetchmail(t, d)), 0)
+}
+
+// mustListFetchmail lists alice's poll configurations.
+func mustListFetchmail(t *testing.T, d *SQLDirectory) []FetchmailEntry {
+	t.Helper()
+	list, err := d.ListFetchmail("alice@hermex.test")
+	mustNoErr(t, "list fetchmail entries", err)
+	return list
+}
+
+// wantFetchmailRoundTrip checks every stored field came back as written.
+func wantFetchmailRoundTrip(t *testing.T, got FetchmailEntry) {
+	t.Helper()
+	wantEq(t, "source server", got.SrcServer, "mail.example.com")
+	wantEq(t, "source port", got.SrcPort, 993)
+	wantEq(t, "source user", got.SrcUser, "alice")
+	wantEq(t, "source password", got.SrcPassword, "secret")
+	wantEq(t, "protocol", got.Protocol, "IMAP")
+	wantEq(t, "keep", got.Keep, true)
+	wantEq(t, "use ssl", got.UseSSL, true)
+	wantEq(t, "fetch all", got.FetchAll, false)
 }
 
 // TestFetchmailSeen covers the POP3 dedup state: recorded ids read back, a re-record is
 // idempotent, and deleting the owning entry cascades its seen rows away.
 func TestFetchmailSeen(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-
+	d, _ := freshDirectory(t)
 	root := t.TempDir()
-	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "hermex.test")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.CreateUser("alice@hermex.test", "pw", filepath.Join(root, "alice")); err != nil {
-		t.Fatal(err)
-	}
+	mustCreateDomain(t, d, root, "hermex.test")
+	mustCreateUser(t, d, root, "alice@hermex.test", "pw")
 	id, err := d.CreateFetchmail(FetchmailEntry{
 		Mailbox: "alice@hermex.test", Active: true, SrcServer: "s", SrcUser: "u", Protocol: "POP3", Keep: true,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "create fetchmail entry", err)
 
-	if err := d.MarkFetchmailSeen(id, []string{"uidA", "uidB"}); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.MarkFetchmailSeen(id, []string{"uidA"}); err != nil { // idempotent re-record
-		t.Fatalf("re-record: %v", err)
-	}
+	mustNoErr(t, "record seen ids", d.MarkFetchmailSeen(id, []string{"uidA", "uidB"}))
+	mustNoErr(t, "re-record a seen id", d.MarkFetchmailSeen(id, []string{"uidA"}))
 	seen, err := d.FetchmailSeen(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(seen) != 2 || !seen["uidA"] || !seen["uidB"] {
-		t.Errorf("seen = %v, want {uidA, uidB}", seen)
-	}
+	mustNoErr(t, "read seen ids", err)
+	wantEq(t, "seen id count", len(seen), 2)
+	wantEq(t, "uidA seen", seen["uidA"], true)
+	wantEq(t, "uidB seen", seen["uidB"], true)
 
 	// Deleting the entry cascades its seen rows.
-	if _, err := d.DeleteFetchmail(id); err != nil {
-		t.Fatal(err)
-	}
-	if seen, _ := d.FetchmailSeen(id); len(seen) != 0 {
-		t.Errorf("after entry delete, seen = %v; want none (cascade)", seen)
-	}
+	_, err = d.DeleteFetchmail(id)
+	mustNoErr(t, "delete fetchmail entry", err)
+	after, err := d.FetchmailSeen(id)
+	mustNoErr(t, "read seen ids", err)
+	wantEq(t, "seen rows after the entry delete (cascade)", len(after), 0)
 }

@@ -1,9 +1,6 @@
 package directory
 
-import (
-	"path/filepath"
-	"testing"
-)
+import "testing"
 
 // TestSetUserLocale proves the webmail-facing locale write persists the user's
 // timezone + language and, crucially, leaves the rest of the record untouched.
@@ -12,47 +9,26 @@ import (
 // homeserver, status and privilege bits): a user changing their timezone during
 // onboarding must never wipe their password or mailbox path.
 func TestSetUserLocale(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
+	d, _ := freshDirectory(t)
 	root := t.TempDir()
-
-	if _, err := d.CreateDomain("acme.test", filepath.Join(root, "acme.test")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.CreateUser("u@acme.test", "pw", filepath.Join(root, "u")); err != nil {
-		t.Fatal(err)
-	}
+	mustCreateDomain(t, d, root, "acme.test")
+	mustCreateUser(t, d, root, "u@acme.test", "pw")
 
 	// A fresh user has no locale set; capture the record to diff against later.
-	before, ok, err := d.GetUser("u@acme.test")
-	if err != nil || !ok {
-		t.Fatalf("GetUser fresh = ok %v, err %v", ok, err)
-	}
-	if before.Timezone != "" || before.Lang != "" {
-		t.Fatalf("fresh user locale = (%q,%q), want empty", before.Timezone, before.Lang)
-	}
+	before := mustGetUser(t, d, "u@acme.test")
+	wantEq(t, "fresh user timezone", before.Timezone, "")
+	wantEq(t, "fresh user lang", before.Lang, "")
 
-	if ok, err := d.SetUserLocale("u@acme.test", "America/New_York", "en"); err != nil || !ok {
-		t.Fatalf("SetUserLocale = ok %v, err %v", ok, err)
-	}
+	ok, err := d.SetUserLocale("u@acme.test", "America/New_York", "en")
+	mustNoErr(t, "set user locale", err)
+	wantEq(t, "SetUserLocale found the user", ok, true)
 
-	after, ok, err := d.GetUser("u@acme.test")
-	if err != nil || !ok {
-		t.Fatalf("GetUser after set = ok %v, err %v", ok, err)
-	}
-	if after.Timezone != "America/New_York" || after.Lang != "en" {
-		t.Errorf("locale round-trip = (%q,%q), want (America/New_York, en)", after.Timezone, after.Lang)
-	}
+	after := mustGetUser(t, d, "u@acme.test")
+	wantEq(t, "timezone after the write", after.Timezone, "America/New_York")
+	wantEq(t, "lang after the write", after.Lang, "en")
 
 	// No-clobber: the narrow write must not disturb the rest of the record.
-	if _, ok := d.Authenticate("u@acme.test", "pw"); !ok {
-		t.Error("password no longer authenticates after a locale write")
-	}
-	if after.Maildir != before.Maildir {
-		t.Errorf("maildir changed after a locale write = %q, want %q", after.Maildir, before.Maildir)
-	}
+	_, authed := d.Authenticate("u@acme.test", "pw")
+	wantEq(t, "the password still authenticates after a locale write", authed, true)
+	wantEq(t, "maildir after a locale write", after.Maildir, before.Maildir)
 }

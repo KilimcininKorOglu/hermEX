@@ -29,66 +29,63 @@ func setupSpamThreshold(t *testing.T) (*SQLDirectory, string) {
 // keyed by maildir.
 func TestSpamThresholdResolution(t *testing.T) {
 	d, maildir := setupSpamThreshold(t)
+	resolve := func(what string) (int, bool) {
+		t.Helper()
+		th, ok, err := d.SpamThresholdForMaildir(maildir)
+		mustNoErr(t, "resolve the threshold "+what, err)
+		return th, ok
+	}
 
 	// No overrides → not found (the caller uses the global threshold).
-	if _, ok, err := d.SpamThresholdForMaildir(maildir); err != nil || ok {
-		t.Fatalf("fresh user resolves to ok=%v err=%v, want no override", ok, err)
-	}
+	_, ok := resolve("with no override")
+	wantEq(t, "a fresh user resolves to an override", ok, false)
 
 	// A domain override applies when the user has none.
 	dom := 12
-	if err := d.SetDomainSpamThreshold("hermex.test", &dom); err != nil {
-		t.Fatal(err)
-	}
-	if th, ok, err := d.SpamThresholdForMaildir(maildir); err != nil || !ok || th != 12 {
-		t.Fatalf("domain override = (%d, %v, %v), want (12, true, nil)", th, ok, err)
-	}
+	mustNoErr(t, "set the domain override", d.SetDomainSpamThreshold("hermex.test", &dom))
+	th, ok := resolve("with a domain override")
+	wantEq(t, "the domain override was found", ok, true)
+	wantEq(t, "the resolved threshold", th, 12)
 
 	// A user override beats the domain override.
 	usr := 4
-	if err := d.SetUserSpamThreshold("alice@hermex.test", &usr); err != nil {
-		t.Fatal(err)
-	}
-	if th, ok, err := d.SpamThresholdForMaildir(maildir); err != nil || !ok || th != 4 {
-		t.Fatalf("user override = (%d, %v, %v), want (4, true, nil)", th, ok, err)
-	}
+	mustNoErr(t, "set the user override", d.SetUserSpamThreshold("alice@hermex.test", &usr))
+	th, ok = resolve("with a user override")
+	wantEq(t, "the user override was found", ok, true)
+	wantEq(t, "the resolved threshold", th, 4)
 
 	// Clearing the user override falls back to the domain override.
-	if err := d.SetUserSpamThreshold("alice@hermex.test", nil); err != nil {
-		t.Fatal(err)
-	}
-	if th, ok, _ := d.SpamThresholdForMaildir(maildir); !ok || th != 12 {
-		t.Errorf("after clearing user override = (%d, %v), want (12, true)", th, ok)
-	}
+	mustNoErr(t, "clear the user override", d.SetUserSpamThreshold("alice@hermex.test", nil))
+	th, ok = resolve("after clearing the user override")
+	wantEq(t, "the domain override was found again", ok, true)
+	wantEq(t, "the resolved threshold", th, 12)
 }
 
 // TestSpamThresholdGetReflectsSet proves the per-scope getters read back what was set
 // and report nil (inherit) once cleared.
 func TestSpamThresholdGetReflectsSet(t *testing.T) {
 	d, _ := setupSpamThreshold(t)
+	userThreshold := func() *int {
+		t.Helper()
+		v, err := d.GetUserSpamThreshold("alice@hermex.test")
+		mustNoErr(t, "get the user threshold", err)
+		return v
+	}
 
-	if v, err := d.GetUserSpamThreshold("alice@hermex.test"); err != nil || v != nil {
-		t.Fatalf("fresh user threshold = %v err %v, want nil", v, err)
+	if v := userThreshold(); v != nil {
+		t.Fatalf("a fresh user threshold = %d, want unset", *v)
 	}
 	n := 7
-	if err := d.SetUserSpamThreshold("alice@hermex.test", &n); err != nil {
-		t.Fatal(err)
-	}
-	if v, err := d.GetUserSpamThreshold("alice@hermex.test"); err != nil || v == nil || *v != 7 {
-		t.Fatalf("user threshold after set = %v err %v, want 7", v, err)
-	}
-	if err := d.SetUserSpamThreshold("alice@hermex.test", nil); err != nil {
-		t.Fatal(err)
-	}
-	if v, _ := d.GetUserSpamThreshold("alice@hermex.test"); v != nil {
-		t.Errorf("user threshold after clear = %v, want nil", v)
+	mustNoErr(t, "set the user threshold", d.SetUserSpamThreshold("alice@hermex.test", &n))
+	wantSet(t, "the user threshold after the set", userThreshold(), 7)
+	mustNoErr(t, "clear the user threshold", d.SetUserSpamThreshold("alice@hermex.test", nil))
+	if v := userThreshold(); v != nil {
+		t.Errorf("the user threshold after clearing = %d, want unset", *v)
 	}
 
 	dn := 15
-	if err := d.SetDomainSpamThreshold("hermex.test", &dn); err != nil {
-		t.Fatal(err)
-	}
-	if v, err := d.GetDomainSpamThreshold("hermex.test"); err != nil || v == nil || *v != 15 {
-		t.Fatalf("domain threshold after set = %v err %v, want 15", v, err)
-	}
+	mustNoErr(t, "set the domain threshold", d.SetDomainSpamThreshold("hermex.test", &dn))
+	v, err := d.GetDomainSpamThreshold("hermex.test")
+	mustNoErr(t, "get the domain threshold", err)
+	wantSet(t, "the domain threshold after the set", v, 15)
 }

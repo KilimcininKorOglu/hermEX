@@ -5,44 +5,51 @@ import "testing"
 // TestCreateDefaultsRoundTrip proves a scope's defaults store and read back, and
 // that a per-domain scope is independent of the system scope.
 func TestCreateDefaultsRoundTrip(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
+	d, _ := freshDirectory(t)
 
-	if _, ok, err := d.GetCreateDefaults(0); err != nil || ok {
-		t.Fatalf("initial GetCreateDefaults(0) = ok %v, err %v, want false/nil", ok, err)
-	}
+	_, ok, err := d.GetCreateDefaults(0)
+	mustNoErr(t, "read the unset system scope", err)
+	wantEq(t, "a scope with nothing stored is found", ok, false)
 
-	sys := CreateDefaults{
+	mustNoErr(t, "set the system scope", d.SetCreateDefaults(0, CreateDefaults{
 		Domain: DomainCreateDefaults{MaxUser: 50},
 		User:   UserCreateDefaults{Lang: new("tr"), Web: new(false), StorageKB: new(int64(1024))},
-	}
-	if err := d.SetCreateDefaults(0, sys); err != nil {
-		t.Fatal(err)
-	}
-	got, ok, err := d.GetCreateDefaults(0)
-	if err != nil || !ok {
-		t.Fatalf("GetCreateDefaults(0) = ok %v, err %v", ok, err)
-	}
-	if got.Domain.MaxUser != 50 || got.User.Lang == nil || *got.User.Lang != "tr" ||
-		got.User.Web == nil || *got.User.Web != false {
-		t.Errorf("round-trip = %+v, want maxUser 50 / lang tr / web false", got)
-	}
+	}))
+	got := mustCreateDefaults(t, d, 0)
+	wantEq(t, "stored max user", got.Domain.MaxUser, int64(50))
+	wantSet(t, "stored lang", got.User.Lang, "tr")
+	wantSet(t, "stored web flag", got.User.Web, false)
 
 	// A per-domain scope is stored independently.
-	if err := d.SetCreateDefaults(5, CreateDefaults{User: UserCreateDefaults{EAS: new(false)}}); err != nil {
-		t.Fatal(err)
-	}
-	if dom, ok, _ := d.GetCreateDefaults(5); !ok || dom.User.EAS == nil || *dom.User.EAS != false {
-		t.Errorf("per-domain round-trip = %+v, ok %v, want EAS false", dom, ok)
-	}
+	mustNoErr(t, "set the domain scope",
+		d.SetCreateDefaults(5, CreateDefaults{User: UserCreateDefaults{EAS: new(false)}}))
+	wantSet(t, "the domain scope's EAS flag", mustCreateDefaults(t, d, 5).User.EAS, false)
 	// System scope unaffected.
-	if sys0, _, _ := d.GetCreateDefaults(0); sys0.User.EAS != nil {
-		t.Errorf("system scope leaked the per-domain EAS override")
+	if mustCreateDefaults(t, d, 0).User.EAS != nil {
+		t.Error("the system scope leaked the per-domain EAS override")
 	}
+}
+
+// mustCreateDefaults reads one scope's stored defaults, requiring the row to
+// exist.
+func mustCreateDefaults(t *testing.T, d *SQLDirectory, scopeID int64) CreateDefaults {
+	t.Helper()
+	got, ok, err := d.GetCreateDefaults(scopeID)
+	mustNoErr(t, "get create defaults", err)
+	if !ok {
+		t.Fatalf("no create defaults stored for scope %d", scopeID)
+	}
+	return got
+}
+
+// wantSet checks an optional field carries the expected value. A nil pointer
+// means the layer says nothing about it, which is not the same as a zero value.
+func wantSet[T comparable](t *testing.T, label string, got *T, want T) {
+	t.Helper()
+	if got == nil {
+		t.Fatalf("%s is unset, want %v", label, want)
+	}
+	wantEq(t, label, *got, want)
 }
 
 // TestPurgeDomainClearsCreateDefaults proves a domain purge removes its per-domain
@@ -77,50 +84,51 @@ func TestPurgeDomainClearsCreateDefaults(t *testing.T) {
 // baseline, the system layer over it, and the per-domain override on top, merged
 // field by field. It also proves clearing a domain override falls back to system.
 func TestEffectiveUserDefaults(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
+	d, _ := freshDirectory(t)
 
 	// Nothing stored: the built-in baseline (the unconfigured-create behaviour).
-	base, err := d.EffectiveUserDefaults(5)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !base.POP3IMAP || !base.SMTP || !base.Web || !base.EAS || !base.DAV || base.ChgPasswd || base.Lang != "" {
-		t.Errorf("baseline = %+v, want POP3IMAP/SMTP/Web/EAS/DAV on, ChgPasswd off, no lang", base)
-	}
+	base := mustEffectiveDefaults(t, d, 5)
+	wantEq(t, "baseline POP3IMAP", base.POP3IMAP, true)
+	wantEq(t, "baseline SMTP", base.SMTP, true)
+	wantEq(t, "baseline Web", base.Web, true)
+	wantEq(t, "baseline EAS", base.EAS, true)
+	wantEq(t, "baseline DAV", base.DAV, true)
+	wantEq(t, "baseline ChgPasswd", base.ChgPasswd, false)
+	wantEq(t, "baseline lang", base.Lang, "")
 
 	// System layer turns Web off, sets lang and a storage quota.
-	if err := d.SetCreateDefaults(0, CreateDefaults{
+	mustNoErr(t, "set the system layer", d.SetCreateDefaults(0, CreateDefaults{
 		User: UserCreateDefaults{Lang: new("tr"), Web: new(false), StorageKB: new(int64(2048))},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	sys, _ := d.EffectiveUserDefaults(0)
-	if sys.Web || sys.Lang != "tr" || sys.StorageKB != 2048 || !sys.EAS {
-		t.Errorf("system-effective = %+v, want Web off / lang tr / storage 2048 / EAS still on", sys)
-	}
+	}))
+	sys := mustEffectiveDefaults(t, d, 0)
+	wantEq(t, "system-effective Web", sys.Web, false)
+	wantEq(t, "system-effective lang", sys.Lang, "tr")
+	wantEq(t, "system-effective storage", sys.StorageKB, int64(2048))
+	wantEq(t, "system-effective EAS (untouched by the layer)", sys.EAS, true)
 
 	// Domain 5 re-enables Web and turns EAS off; lang/quota inherit from system.
-	if err := d.SetCreateDefaults(5, CreateDefaults{
+	mustNoErr(t, "set the domain layer", d.SetCreateDefaults(5, CreateDefaults{
 		User: UserCreateDefaults{Web: new(true), EAS: new(false)},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	eff, _ := d.EffectiveUserDefaults(5)
-	if !eff.Web || eff.EAS || eff.Lang != "tr" || eff.StorageKB != 2048 {
-		t.Errorf("domain-effective = %+v, want Web on (domain) / EAS off (domain) / lang tr+storage 2048 (system)", eff)
-	}
+	}))
+	eff := mustEffectiveDefaults(t, d, 5)
+	wantEq(t, "domain-effective Web (domain layer)", eff.Web, true)
+	wantEq(t, "domain-effective EAS (domain layer)", eff.EAS, false)
+	wantEq(t, "domain-effective lang (inherited)", eff.Lang, "tr")
+	wantEq(t, "domain-effective storage (inherited)", eff.StorageKB, int64(2048))
 
 	// Clearing the domain override falls back to the system layer (Web off again).
-	if ok, err := d.DeleteCreateDefaults(5); err != nil || !ok {
-		t.Fatalf("DeleteCreateDefaults(5) = %v, %v", ok, err)
-	}
-	back, _ := d.EffectiveUserDefaults(5)
-	if back.Web || !back.EAS {
-		t.Errorf("after clearing override = %+v, want Web off / EAS on (system layer)", back)
-	}
+	ok, err := d.DeleteCreateDefaults(5)
+	mustNoErr(t, "delete the domain layer", err)
+	wantEq(t, "DeleteCreateDefaults found the layer", ok, true)
+	back := mustEffectiveDefaults(t, d, 5)
+	wantEq(t, "Web after clearing the override (system layer)", back.Web, false)
+	wantEq(t, "EAS after clearing the override (system layer)", back.EAS, true)
+}
+
+// mustEffectiveDefaults resolves the create defaults for one domain scope.
+func mustEffectiveDefaults(t *testing.T, d *SQLDirectory, domainID int64) ResolvedUserDefaults {
+	t.Helper()
+	got, err := d.EffectiveUserDefaults(domainID)
+	mustNoErr(t, "resolve user defaults", err)
+	return got
 }

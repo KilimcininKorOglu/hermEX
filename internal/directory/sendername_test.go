@@ -70,37 +70,28 @@ func TestDomainNameTemplatesRoundtrip(t *testing.T) {
 // into the internal and external From display names, and that a domain with no
 // templates yields empty strings (no customization, no profile read needed).
 func TestOutgoingDisplayNames(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
+	d, _ := freshDirectory(t)
 	root := t.TempDir()
-	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "dom")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.CreateUser("ali@hermex.test", "pw", filepath.Join(root, "u")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.SetUserProperties("ali@hermex.test", map[uint32]string{
+	mustCreateDomain(t, d, root, "hermex.test")
+	mustCreateUser(t, d, root, "ali@hermex.test", "pw")
+	_, err := d.SetUserProperties("ali@hermex.test", map[uint32]string{
 		0x3001001F: "Ali Veli", 0x3A16001F: "Acme", 0x3A17001F: "Sales",
-	}); err != nil {
-		t.Fatal(err)
+	})
+	mustNoErr(t, "set the profile fields", err)
+	names := func() (internal, external string) {
+		t.Helper()
+		in, ex, err := d.OutgoingDisplayNames("ali@hermex.test")
+		mustNoErr(t, "resolve the display names", err)
+		return in, ex
 	}
 
-	if in, ex, err := d.OutgoingDisplayNames("ali@hermex.test"); err != nil || in != "" || ex != "" {
-		t.Fatalf("no templates = (%q,%q,%v), want empty", in, ex, err)
-	}
-	if err := d.SetDomainNameTemplates("hermex.test", "{name} ({title})", "{name} ({company} - {title})"); err != nil {
-		t.Fatal(err)
-	}
-	in, ex, err := d.OutgoingDisplayNames("ali@hermex.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if in != "Ali Veli (Sales)" || ex != "Ali Veli (Acme - Sales)" {
-		t.Errorf("names = (%q, %q), want internal %q and external %q",
-			in, ex, "Ali Veli (Sales)", "Ali Veli (Acme - Sales)")
-	}
+	in, ex := names()
+	wantEq(t, "the internal name with no templates", in, "")
+	wantEq(t, "the external name with no templates", ex, "")
+
+	mustNoErr(t, "set the domain templates",
+		d.SetDomainNameTemplates("hermex.test", "{name} ({title})", "{name} ({company} - {title})"))
+	in, ex = names()
+	wantEq(t, "the internal display name", in, "Ali Veli (Sales)")
+	wantEq(t, "the external display name", ex, "Ali Veli (Acme - Sales)")
 }

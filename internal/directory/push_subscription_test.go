@@ -6,53 +6,43 @@ import "testing"
 // lowercased email, re-saving the same endpoint upserts rather than duplicates, the
 // poll loop can enumerate distinct subscribers, and a subscription is removable.
 func TestPushSubscriptionRoundTrip(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
+	d, _ := freshDirectory(t)
 
 	sub := PushSubscription{Endpoint: "https://push.example/abc", Email: "Alice@hermex.test", P256dh: "key1", Auth: "auth1", CreatedAt: 100}
-	if err := d.SavePushSubscription(sub); err != nil {
-		t.Fatal(err)
-	}
-	got, err := d.ListPushSubscriptions("alice@hermex.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 || got[0].Endpoint != sub.Endpoint || got[0].P256dh != "key1" {
-		t.Fatalf("list = %+v, want one subscription with key1 under the lowercased email", got)
-	}
+	mustNoErr(t, "save subscription", d.SavePushSubscription(sub))
+	got := mustOneSubscription(t, d, "stored under the lowercased email")
+	wantEq(t, "stored endpoint", got.Endpoint, sub.Endpoint)
+	wantEq(t, "stored key", got.P256dh, "key1")
 
 	// Re-saving the same endpoint upserts (new keys), not duplicates.
 	sub.P256dh = "key2"
-	if err := d.SavePushSubscription(sub); err != nil {
-		t.Fatal(err)
-	}
-	got, _ = d.ListPushSubscriptions("alice@hermex.test")
-	if len(got) != 1 || got[0].P256dh != "key2" {
-		t.Fatalf("after upsert = %+v, want one subscription with key2", got)
-	}
+	mustNoErr(t, "re-save the subscription", d.SavePushSubscription(sub))
+	wantEq(t, "key after the upsert", mustOneSubscription(t, d, "after the upsert").P256dh, "key2")
 
 	// A second device, then distinct subscriber enumeration for the poll loop.
-	if err := d.SavePushSubscription(PushSubscription{Endpoint: "https://push.example/xyz", Email: "alice@hermex.test", P256dh: "k", Auth: "a", CreatedAt: 101}); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "save a second device", d.SavePushSubscription(PushSubscription{
+		Endpoint: "https://push.example/xyz", Email: "alice@hermex.test", P256dh: "k", Auth: "a", CreatedAt: 101,
+	}))
 	emails, err := d.PushSubscriberEmails()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(emails) != 1 || emails[0] != "alice@hermex.test" {
+	mustNoErr(t, "enumerate subscribers", err)
+	if len(emails) != 1 {
 		t.Fatalf("subscriber emails = %v, want [alice@hermex.test]", emails)
 	}
+	wantEq(t, "the distinct subscriber", emails[0], "alice@hermex.test")
 
 	// Delete by endpoint leaves the other device.
-	if err := d.DeletePushSubscription("https://push.example/abc"); err != nil {
-		t.Fatal(err)
+	mustNoErr(t, "delete a subscription", d.DeletePushSubscription("https://push.example/abc"))
+	wantEq(t, "the surviving endpoint",
+		mustOneSubscription(t, d, "after the delete").Endpoint, "https://push.example/xyz")
+}
+
+// mustOneSubscription reads alice's subscriptions, requiring exactly one.
+func mustOneSubscription(t *testing.T, d *SQLDirectory, what string) PushSubscription {
+	t.Helper()
+	got, err := d.ListPushSubscriptions("alice@hermex.test")
+	mustNoErr(t, "list subscriptions", err)
+	if len(got) != 1 {
+		t.Fatalf("subscriptions %s = %+v, want one", what, got)
 	}
-	got, _ = d.ListPushSubscriptions("alice@hermex.test")
-	if len(got) != 1 || got[0].Endpoint != "https://push.example/xyz" {
-		t.Fatalf("after delete = %+v, want only the xyz subscription", got)
-	}
+	return got[0]
 }

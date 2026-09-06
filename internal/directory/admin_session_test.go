@@ -8,64 +8,43 @@ import "testing"
 // another operator out, and a password change can clear every session an account
 // holds at once.
 func TestAdminSessionRoundTrip(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
+	d, _ := freshDirectory(t)
 
 	const now = int64(1700000000)
 	mk := func(jti, login string) {
 		t.Helper()
-		if err := d.CreateAdminSession(AdminSession{
+		mustNoErr(t, "create panel session "+jti, d.CreateAdminSession(AdminSession{
 			Jti: jti, Login: login, CreatedAt: now, ExpiresAt: now + 3600,
-		}); err != nil {
-			t.Fatal(err)
-		}
+		}))
+	}
+	active := func(jti string, at int64) bool {
+		t.Helper()
+		a, err := d.AdminSessionActive(jti, at)
+		mustNoErr(t, "read session state", err)
+		return a
 	}
 	mk("adm-1", "Op@hermex.test")
 
-	if a, err := d.AdminSessionActive("adm-1", now+1); err != nil || !a {
-		t.Fatalf("active before expiry = %v (err %v), want true", a, err)
-	}
-	if a, _ := d.AdminSessionActive("adm-1", now+3601); a {
-		t.Error("session should be inactive after expiry")
-	}
-	if a, _ := d.AdminSessionActive("nope", now+1); a {
-		t.Error("absent jti should be inactive")
-	}
+	wantEq(t, "active before expiry", active("adm-1", now+1), true)
+	wantEq(t, "active after expiry", active("adm-1", now+3601), false)
+	wantEq(t, "an absent jti is active", active("nope", now+1), false)
 
 	// Revoke is owner-scoped: another login must not delete it.
-	if err := d.DeleteAdminSession("other@hermex.test", "adm-1"); err != nil {
-		t.Fatal(err)
-	}
-	if a, _ := d.AdminSessionActive("adm-1", now+1); !a {
-		t.Error("a foreign login revoked someone else's session")
-	}
+	mustNoErr(t, "revoke under a foreign login", d.DeleteAdminSession("other@hermex.test", "adm-1"))
+	wantEq(t, "the session survived a foreign login's revoke", active("adm-1", now+1), true)
 	// The owner revokes it, matched case-insensitively against the stored login.
-	if err := d.DeleteAdminSession("op@hermex.test", "adm-1"); err != nil {
-		t.Fatal(err)
-	}
-	if a, _ := d.AdminSessionActive("adm-1", now+1); a {
-		t.Error("the owner's revoke left the session active")
-	}
+	mustNoErr(t, "revoke under the owner login", d.DeleteAdminSession("op@hermex.test", "adm-1"))
+	wantEq(t, "active after the owner's revoke", active("adm-1", now+1), false)
 
 	// A password change clears every session the account holds, not just one.
 	mk("adm-2", "op@hermex.test")
 	mk("adm-3", "op@hermex.test")
 	mk("adm-4", "other@hermex.test")
-	if err := d.DeleteAdminSessionsFor("OP@hermex.test"); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "revoke every session the account holds", d.DeleteAdminSessionsFor("OP@hermex.test"))
 	for _, jti := range []string{"adm-2", "adm-3"} {
-		if a, _ := d.AdminSessionActive(jti, now+1); a {
-			t.Errorf("%s survived a full revoke", jti)
-		}
+		wantEq(t, jti+" survived the full revoke", active(jti, now+1), false)
 	}
-	if a, _ := d.AdminSessionActive("adm-4", now+1); !a {
-		t.Error("a full revoke reached another account's session")
-	}
+	wantEq(t, "another account's session survived the full revoke", active("adm-4", now+1), true)
 }
 
 // TestEmergencySessionRevoke proves the compromise-response lever: one call ends
@@ -74,68 +53,43 @@ func TestAdminSessionRoundTrip(t *testing.T) {
 // session stores existed the only way to end a stolen cookie was to restart every
 // daemon.
 func TestEmergencySessionRevoke(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
+	d, _ := freshDirectory(t)
 
 	const now = int64(1700000000)
 	for _, jti := range []string{"web-1", "web-2"} {
-		if err := d.CreateWebmailSession(WebmailSession{
+		mustNoErr(t, "create webmail session", d.CreateWebmailSession(WebmailSession{
 			Jti: jti, Email: "victim@hermex.test", CreatedAt: now, LastActive: now, ExpiresAt: now + 3600,
-		}); err != nil {
-			t.Fatal(err)
-		}
+		}))
 	}
-	if err := d.CreateWebmailSession(WebmailSession{
+	mustNoErr(t, "create another account's session", d.CreateWebmailSession(WebmailSession{
 		Jti: "web-other", Email: "other@hermex.test", CreatedAt: now, LastActive: now, ExpiresAt: now + 3600,
-	}); err != nil {
-		t.Fatal(err)
-	}
+	}))
 	for _, jti := range []string{"adm-1", "adm-2"} {
-		if err := d.CreateAdminSession(AdminSession{
+		mustNoErr(t, "create panel session", d.CreateAdminSession(AdminSession{
 			Jti: jti, Login: "victim@hermex.test", CreatedAt: now, ExpiresAt: now + 3600,
-		}); err != nil {
-			t.Fatal(err)
-		}
+		}))
 	}
 
 	// An operator can see what is signed in before ending it.
 	panel, err := d.ListAdminSessions("VICTIM@hermex.test", now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(panel) != 2 {
-		t.Errorf("listed %d panel sessions, want 2", len(panel))
-	}
+	mustNoErr(t, "list panel sessions", err)
+	wantEq(t, "listed panel sessions", len(panel), 2)
 
 	web, err := d.DeleteWebmailSessionsFor("VICTIM@hermex.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if web != 2 {
-		t.Errorf("revoked %d webmail sessions, want 2", web)
-	}
+	mustNoErr(t, "revoke webmail sessions", err)
+	wantEq(t, "revoked webmail sessions", web, int64(2))
 	adm, err := d.CountedDeleteAdminSessionsFor("victim@hermex.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if adm != 2 {
-		t.Errorf("revoked %d panel sessions, want 2", adm)
-	}
+	mustNoErr(t, "revoke panel sessions", err)
+	wantEq(t, "revoked panel sessions", adm, int64(2))
+
 	for _, jti := range []string{"web-1", "web-2"} {
-		if a, _ := d.WebmailSessionActive(jti, now+1); a {
-			t.Errorf("webmail session %s survived the revoke", jti)
-		}
+		active, _ := d.WebmailSessionActive(jti, now+1)
+		wantEq(t, "webmail session "+jti+" survived the revoke", active, false)
 	}
 	for _, jti := range []string{"adm-1", "adm-2"} {
-		if a, _ := d.AdminSessionActive(jti, now+1); a {
-			t.Errorf("panel session %s survived the revoke", jti)
-		}
+		active, _ := d.AdminSessionActive(jti, now+1)
+		wantEq(t, "panel session "+jti+" survived the revoke", active, false)
 	}
-	if a, _ := d.WebmailSessionActive("web-other", now+1); !a {
-		t.Error("the revoke reached another account's session")
-	}
+	other, _ := d.WebmailSessionActive("web-other", now+1)
+	wantEq(t, "another account's session survived (the revoke must not reach it)", other, true)
 }

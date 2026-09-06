@@ -26,96 +26,75 @@ func (s *stubVerifier) Verify(cfg LDAPConfig, login, password string) (bool, err
 // LDAP-mastered account against the verifier (and is denied, never falling back
 // to the local hash, when no verifier is installed).
 func TestAuthenticateLDAPBranch(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-
+	d, db := freshDirectory(t)
 	root := t.TempDir()
-	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "domains", "hermex.test")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.CreateUser("local@hermex.test", "localpass", filepath.Join(root, "users", "local")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.CreateUser("ext@hermex.test", "ignored-local-hash", filepath.Join(root, "users", "ext")); err != nil {
-		t.Fatal(err)
-	}
+	mustCreateDomain(t, d, root, "hermex.test")
+	mustCreateUser(t, d, root, "local@hermex.test", "localpass")
+	mustCreateUser(t, d, root, "ext@hermex.test", "ignored-local-hash")
 	// Master ext@ in LDAP (externid set) and give its org a directory config.
-	if _, err := db.Exec(`UPDATE users SET externid=? WHERE username=?`, []byte{0x01, 0x02}, "ext@hermex.test"); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.SetLDAPConfig(0, LDAPConfig{URI: "ldaps://ad.hermex.test", BaseDN: "dc=hermex,dc=test", UsernameAttr: "mail"}); err != nil {
-		t.Fatal(err)
+	_, err := db.Exec(`UPDATE users SET externid=? WHERE username=?`, []byte{0x01, 0x02}, "ext@hermex.test")
+	mustNoErr(t, "master the account in LDAP", err)
+	mustNoErr(t, "set the LDAP config", d.SetLDAPConfig(0,
+		LDAPConfig{URI: "ldaps://ad.hermex.test", BaseDN: "dc=hermex,dc=test", UsernameAttr: "mail"}))
+	admits := func(login, password string) bool {
+		t.Helper()
+		_, ok := d.Authenticate(login, password)
+		return ok
 	}
 
 	// 1. A local account still authenticates against its crypt hash.
-	if _, ok := d.Authenticate("local@hermex.test", "localpass"); !ok {
-		t.Error("local crypt authentication failed")
-	}
+	wantEq(t, "local crypt authentication", admits("local@hermex.test", "localpass"), true)
 
 	// 2. An LDAP-mastered account is denied with no verifier, and must NOT be
 	// admitted by its (irrelevant) local hash.
-	if _, ok := d.Authenticate("ext@hermex.test", "anything"); ok {
-		t.Error("LDAP-mastered login succeeded with no verifier installed")
-	}
-	if _, ok := d.Authenticate("ext@hermex.test", "ignored-local-hash"); ok {
-		t.Error("LDAP-mastered login fell back to the local crypt hash")
-	}
+	wantEq(t, "an LDAP-mastered login with no verifier installed", admits("ext@hermex.test", "anything"), false)
+	wantEq(t, "an LDAP-mastered login falling back to the local crypt hash",
+		admits("ext@hermex.test", "ignored-local-hash"), false)
 
 	// 3. With an accepting verifier it authenticates, and the verifier receives
 	// the resolved config plus the login and password.
 	stub := &stubVerifier{result: true}
 	d.SetLDAPVerifier(stub)
-	if _, ok := d.Authenticate("ext@hermex.test", "ldappass"); !ok {
-		t.Fatal("LDAP authentication with an accepting verifier failed")
-	}
-	if stub.gotLogin != "ext@hermex.test" || stub.gotPass != "ldappass" || stub.gotCfg.URI != "ldaps://ad.hermex.test" {
-		t.Errorf("verifier saw cfg=%+v login=%q pass=%q; want the resolved config + login/password",
-			stub.gotCfg, stub.gotLogin, stub.gotPass)
-	}
+	wantEq(t, "an LDAP login with an accepting verifier", admits("ext@hermex.test", "ldappass"), true)
+	wantEq(t, "the login the verifier saw", stub.gotLogin, "ext@hermex.test")
+	wantEq(t, "the password the verifier saw", stub.gotPass, "ldappass")
+	wantEq(t, "the config the verifier saw", stub.gotCfg.URI, "ldaps://ad.hermex.test")
 
 	// 4. A rejecting verifier denies the login.
 	d.SetLDAPVerifier(&stubVerifier{result: false})
-	if _, ok := d.Authenticate("ext@hermex.test", "wrong"); ok {
-		t.Error("LDAP authentication succeeded when the verifier rejected")
-	}
+	wantEq(t, "an LDAP login the verifier rejected", admits("ext@hermex.test", "wrong"), false)
 }
 
 // TestUpsertLDAPUser proves a downsync marks an existing user LDAP-mastered (sets
 // its externid) and creates a brand-new user carrying its externid.
 func TestUpsertLDAPUser(t *testing.T) {
-	db := openTestDB(t)
-	d := NewSQL(db)
-	if err := d.EnsureSchema(); err != nil {
-		t.Fatal(err)
-	}
-	cleanTables(t, db)
-
+	d, _ := freshDirectory(t)
 	root := t.TempDir()
-	if _, err := d.CreateDomain("hermex.test", filepath.Join(root, "dom")); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := d.CreateUser("alice@hermex.test", "localpw", filepath.Join(root, "alice")); err != nil {
-		t.Fatal(err)
-	}
+	mustCreateDomain(t, d, root, "hermex.test")
+	mustCreateUser(t, d, root, "alice@hermex.test", "localpw")
 
 	// An existing user gains its externid (created=false).
-	if created, err := d.UpsertLDAPUser("alice@hermex.test", []byte{0x01, 0x02}, ""); err != nil || created {
-		t.Fatalf("upsert existing = (created %v, err %v); want (false, nil)", created, err)
-	}
-	if row, ok, err := d.resolve("alice@hermex.test"); err != nil || !ok || len(row.externid) == 0 {
-		t.Errorf("existing user not marked LDAP-mastered (externid=%v, ok=%v, err=%v)", row.externid, ok, err)
-	}
+	created, err := d.UpsertLDAPUser("alice@hermex.test", []byte{0x01, 0x02}, "")
+	mustNoErr(t, "upsert an existing user", err)
+	wantEq(t, "the upsert created the existing user", created, false)
+	wantMastered(t, d, "alice@hermex.test")
 
 	// A new login is created with its externid (created=true).
-	if created, err := d.UpsertLDAPUser("bob@hermex.test", []byte{0x03, 0x04}, filepath.Join(root, "bob")); err != nil || !created {
-		t.Fatalf("upsert new = (created %v, err %v); want (true, nil)", created, err)
-	}
-	if row, ok, err := d.resolve("bob@hermex.test"); err != nil || !ok || len(row.externid) == 0 {
-		t.Errorf("new LDAP user not created with externid (ok=%v, err=%v)", ok, err)
+	created, err = d.UpsertLDAPUser("bob@hermex.test", []byte{0x03, 0x04}, filepath.Join(root, "bob"))
+	mustNoErr(t, "upsert a new user", err)
+	wantEq(t, "the upsert created the new user", created, true)
+	wantMastered(t, d, "bob@hermex.test")
+}
+
+// wantMastered checks a login exists and carries an externid, which is what marks
+// it LDAP-mastered.
+func wantMastered(t *testing.T, d *SQLDirectory, login string) {
+	t.Helper()
+	row, ok, err := d.resolve(login)
+	mustNoErr(t, "resolve "+login, err)
+	wantEq(t, login+" exists", ok, true)
+	if len(row.externid) == 0 {
+		t.Errorf("%s carries no externid, so it is not LDAP-mastered", login)
 	}
 }
 
