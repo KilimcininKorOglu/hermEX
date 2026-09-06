@@ -131,6 +131,11 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// Drop expired notification subscriptions. A pull or streaming subscription has
+	// no worker of its own, so one left behind by a client that went away stayed in
+	// the registry for the life of the process, holding a snapshot as large as the
+	// mailbox.
+	go srv.RunSubscriptionSweep(ctx)
 	log.Printf("hermex-ews listening on %s", addr)
 	checks := []health.Check{{Name: "directory", Probe: db.PingContext}}
 	if provider.TLSEnabled() {
