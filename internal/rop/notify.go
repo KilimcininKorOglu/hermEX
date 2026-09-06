@@ -84,65 +84,89 @@ func pushNotify(out *ext.Push, handle uint32, logonID uint8, n *notification) er
 	out.Uint16(n.flags)
 
 	if n.flags&fnevTableModified != 0 {
-		out.Uint16(n.tableEvent)
-		am := n.tableEvent == tableRowAdded || n.tableEvent == tableRowModified
-		amd := am || n.tableEvent == tableRowDeleted
-		if amd {
-			out.Uint64(n.rowFolderID)
-		}
-		if amd && n.flags&nfByMessage != 0 {
-			out.Uint64(n.rowMessageID)
-			out.Uint32(n.rowInstance)
-		}
-		if am {
-			out.Uint64(n.afterFolderID)
-		}
-		if am && n.flags&nfByMessage != 0 {
-			out.Uint64(n.afterRowID)
-			out.Uint32(n.afterInstance)
-		}
-		if am {
-			if err := out.BinShort(n.rowData); err != nil {
-				return err
-			}
+		if err := pushTableNotify(out, n); err != nil {
+			return err
 		}
 	}
-	if n.flags&(fnevTableModified|nfExtended) == 0 {
-		out.Uint64(n.folderID)
-	}
-	if n.flags&(fnevTableModified|nfExtended|nfByMessage) == nfByMessage {
-		out.Uint64(n.messageID)
-	}
-	// ParentId rides only on object create/delete/move/copy, and only when the
-	// search-folder and message-level bits agree (the reference's xnor gate).
-	if n.flags&(fnevObjectCreated|fnevObjectDeleted|fnevObjectMoved|fnevObjectCopied) != 0 &&
-		(n.flags&nfBySearch != 0) == (n.flags&nfByMessage != 0) {
-		out.Uint64(n.parentID)
-	}
-	if n.flags&(fnevObjectMoved|fnevObjectCopied) != 0 {
-		out.Uint64(n.oldFolderID)
-	}
-	if n.flags&(fnevObjectMoved|fnevObjectCopied) != 0 && n.flags&nfByMessage != 0 {
-		out.Uint64(n.oldMessageID)
-	}
-	if n.flags&(fnevObjectMoved|fnevObjectCopied) != 0 && n.flags&nfByMessage == 0 {
-		out.Uint64(n.oldParentID)
-	}
+	pushObjectIDs(out, n)
+	pushMoveCopyIDs(out, n)
 	if n.flags&(fnevObjectCreated|fnevObjectModified) != 0 {
 		if err := out.PropTags(n.proptags); err != nil {
 			return err
 		}
 	}
-	if n.flags&nfHasTotal != 0 {
-		out.Uint32(n.totalCount)
-	}
-	if n.flags&nfHasUnread != 0 {
-		out.Uint32(n.unreadCount)
-	}
+	pushCounts(out, n)
 	if n.flags&fnevNewMail != 0 {
 		out.Uint32(n.msgFlags)
 		out.Uint8(1) // UnicodeFlag: the MessageClass below is UTF-16LE
 		out.Unicode(n.msgClass)
 	}
 	return nil
+}
+
+// pushTableNotify writes the TABLE_MODIFIED body, whose members depend on the
+// table event: a delete carries the changed row's ids, an add or a modify also
+// carries the row it now follows and the row data itself.
+func pushTableNotify(out *ext.Push, n *notification) error {
+	out.Uint16(n.tableEvent)
+	am := n.tableEvent == tableRowAdded || n.tableEvent == tableRowModified
+	amd := am || n.tableEvent == tableRowDeleted
+	byMessage := n.flags&nfByMessage != 0
+	if amd {
+		out.Uint64(n.rowFolderID)
+	}
+	if amd && byMessage {
+		out.Uint64(n.rowMessageID)
+		out.Uint32(n.rowInstance)
+	}
+	if !am {
+		return nil
+	}
+	out.Uint64(n.afterFolderID)
+	if byMessage {
+		out.Uint64(n.afterRowID)
+		out.Uint32(n.afterInstance)
+	}
+	return out.BinShort(n.rowData)
+}
+
+// pushObjectIDs writes the folder, message and parent ids a non-table
+// notification carries. ParentId rides only on object create/delete/move/copy,
+// and only when the search-folder and message-level bits agree.
+func pushObjectIDs(out *ext.Push, n *notification) {
+	if n.flags&(fnevTableModified|nfExtended) == 0 {
+		out.Uint64(n.folderID)
+	}
+	if n.flags&(fnevTableModified|nfExtended|nfByMessage) == nfByMessage {
+		out.Uint64(n.messageID)
+	}
+	if n.flags&(fnevObjectCreated|fnevObjectDeleted|fnevObjectMoved|fnevObjectCopied) != 0 &&
+		(n.flags&nfBySearch != 0) == (n.flags&nfByMessage != 0) {
+		out.Uint64(n.parentID)
+	}
+}
+
+// pushMoveCopyIDs writes the source-side ids a move or copy carries: the old
+// folder always, then either the old message or the old parent depending on
+// whether the notification is message-level.
+func pushMoveCopyIDs(out *ext.Push, n *notification) {
+	if n.flags&(fnevObjectMoved|fnevObjectCopied) == 0 {
+		return
+	}
+	out.Uint64(n.oldFolderID)
+	if n.flags&nfByMessage != 0 {
+		out.Uint64(n.oldMessageID)
+		return
+	}
+	out.Uint64(n.oldParentID)
+}
+
+// pushCounts writes the optional total and unread counts.
+func pushCounts(out *ext.Push, n *notification) {
+	if n.flags&nfHasTotal != 0 {
+		out.Uint32(n.totalCount)
+	}
+	if n.flags&nfHasUnread != 0 {
+		out.Uint32(n.unreadCount)
+	}
 }

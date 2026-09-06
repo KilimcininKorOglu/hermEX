@@ -71,87 +71,24 @@ func (s *Session) copyProperties(ropID uint8, out *ext.Push, handles []uint32, h
 		writeErr(out, ropID, hindex, ecNotSupported)
 		return true
 	}
-	src := s.get(handleAt(handles, hindex))
-	if src == nil {
-		writeErr(out, ropID, hindex, ecError)
-		return true
-	}
-	dst := s.get(handleAt(handles, dhindex))
-	if dst == nil {
-		out.Uint8(ropID)
-		out.Uint8(hindex)
-		out.Uint32(ecDstNullObject)
-		out.Uint32(uint32(dhindex)) // NULL_DST1: the destination handle index
-		return true
-	}
-	if objectCategory(src) == catNone || objectCategory(src) != objectCategory(dst) {
-		writeErr(out, ropID, hindex, ecDeclineCopy)
-		return true
-	}
-	// A property copy writes the destination object, SetProperties reached through a
-	// different entry, so it gates the same way: editing an existing stored message
-	// requires EditAny on its folder. A compose message, a created attachment, and a
-	// composed embedded message are gated at their own create chokepoints and persist
-	// only through the parent message's gated save, so they take no copy-time gate.
-	if dst.kind == kindMessage && s.denyWrite(out, ropID, hindex, dst.store, dst.folderID, mapi.FrightsEditAny) {
+	src, dst, ok := s.copyEndpoints(ropID, out, handles, hindex, dhindex)
+	if !ok {
 		return true
 	}
 
-	// Decide the sub-object copy up front (only meaningful for a message source):
-	// a CopyTo with WantSubObjects copies each collection unless its tag is excluded;
-	// a CopyProperties copies a collection only when its tag is explicitly listed.
-	// If sub-objects are requested but the destination cannot stage them (only a
-	// compose message can), refuse before applying anything.
-	copyRecips, copyAttachs := false, false
-	if objectCategory(src) == catMessage {
-		copyRecips, copyAttachs = subObjectsToCopy(exclude, wantSub, tags)
-	}
-	if (copyRecips || copyAttachs) && !canWriteSubObjects(dst) {
+	copyRecips, copyAttachs, stageable := plannedSubObjects(src, dst, tags, exclude, wantSub)
+	if !stageable {
 		writeErr(out, ropID, hindex, ecNotSupported)
 		return true
 	}
 
-	srcProps, ok := s.objectAllProps(src)
-	if !ok {
-		writeErr(out, ropID, hindex, ecError)
+	if ec, done := s.copyPropertyBag(src, dst, tags, exclude, copyFlags); !done {
+		writeErr(out, ropID, hindex, ec)
 		return true
 	}
-	var dstExisting mapi.PropertyValues
-	if copyFlags&mapiNoReplace != 0 {
-		dstExisting, _ = s.objectAllProps(dst)
-	}
-
-	var toCopy mapi.PropertyValues
-	for _, pv := range srcProps {
-		if tagInSet(tags, pv.Tag) != !exclude {
-			// inclusive (CopyProperties): keep only listed; exclusive (CopyTo): drop listed.
-			continue
-		}
-		if tagInSet(copyMetaExcluded, pv.Tag) {
-			// Server-owned identity/versioning and computed props are never copied;
-			// the destination gets its own at save (see copyMetaExcluded).
-			continue
-		}
-		if copyFlags&mapiNoReplace != 0 {
-			if _, present := dstExisting.Get(pv.Tag); present {
-				continue
-			}
-		}
-		toCopy = append(toCopy, pv)
-	}
-	if !s.objectWriteProps(dst, toCopy) {
-		writeErr(out, ropID, hindex, ecAccessDenied)
-		return true
-	}
-
 	if copyRecips || copyAttachs {
-		recips, attachs, ok := s.objectSubObjects(src)
-		if !ok {
-			writeErr(out, ropID, hindex, ecError)
-			return true
-		}
-		if !s.objectWriteSubObjects(dst, copyRecips, recips, copyAttachs, attachs) {
-			writeErr(out, ropID, hindex, ecNotSupported)
+		if ec, done := s.copySubObjects(src, dst, copyRecips, copyAttachs); !done {
+			writeErr(out, ropID, hindex, ec)
 			return true
 		}
 	}
@@ -161,6 +98,109 @@ func (s *Session) copyProperties(ropID uint8, out *ext.Push, handles []uint32, h
 	out.Uint32(ecSuccess)
 	out.Uint16(0) // PropertyProblemCount
 	return true
+}
+
+// plannedSubObjects decides the sub-object copy up front, which is only
+// meaningful for a message source: a CopyTo with WantSubObjects copies each
+// collection unless its tag is excluded, and a CopyProperties copies one only
+// when its tag is explicitly listed. stageable is false when sub-objects are
+// requested but the destination cannot stage them (only a compose message can),
+// so the caller refuses before applying anything.
+func plannedSubObjects(src, dst *object, tags []mapi.PropTag, exclude, wantSub bool) (copyRecips, copyAttachs, stageable bool) {
+	if objectCategory(src) == catMessage {
+		copyRecips, copyAttachs = subObjectsToCopy(exclude, wantSub, tags)
+	}
+	if (copyRecips || copyAttachs) && !canWriteSubObjects(dst) {
+		return false, false, false
+	}
+	return copyRecips, copyAttachs, true
+}
+
+// copyPropertyBag reads the source's properties, filters them, and writes them
+// to the destination. done is false with the error code the response carries.
+func (s *Session) copyPropertyBag(src, dst *object, tags []mapi.PropTag, exclude bool, copyFlags uint8) (uint32, bool) {
+	srcProps, read := s.objectAllProps(src)
+	if !read {
+		return ecError, false
+	}
+	noReplace := copyFlags&mapiNoReplace != 0
+	var dstExisting mapi.PropertyValues
+	if noReplace {
+		dstExisting, _ = s.objectAllProps(dst)
+	}
+	if !s.objectWriteProps(dst, selectPropsToCopy(srcProps, dstExisting, tags, exclude, noReplace)) {
+		return ecAccessDenied, false
+	}
+	return ecSuccess, true
+}
+
+// copySubObjects copies the requested recipient and attachment collections.
+// done is false with the error code the response carries.
+func (s *Session) copySubObjects(src, dst *object, copyRecips, copyAttachs bool) (uint32, bool) {
+	recips, attachs, read := s.objectSubObjects(src)
+	if !read {
+		return ecError, false
+	}
+	if !s.objectWriteSubObjects(dst, copyRecips, recips, copyAttachs, attachs) {
+		return ecNotSupported, false
+	}
+	return ecSuccess, true
+}
+
+// copyEndpoints resolves a copy's source and destination handles and gates the
+// write. ok is false when the response was already written.
+//
+// A property copy writes the destination object, SetProperties reached through a
+// different entry, so it gates the same way: editing an existing stored message
+// requires EditAny on its folder. A compose message, a created attachment, and a
+// composed embedded message are gated at their own create chokepoints and
+// persist only through the parent message's gated save, so they take no
+// copy-time gate.
+func (s *Session) copyEndpoints(ropID uint8, out *ext.Push, handles []uint32, hindex, dhindex uint8) (src, dst *object, ok bool) {
+	src = s.get(handleAt(handles, hindex))
+	if src == nil {
+		writeErr(out, ropID, hindex, ecError)
+		return nil, nil, false
+	}
+	dst = s.get(handleAt(handles, dhindex))
+	if dst == nil {
+		out.Uint8(ropID)
+		out.Uint8(hindex)
+		out.Uint32(ecDstNullObject)
+		out.Uint32(uint32(dhindex)) // NULL_DST1: the destination handle index
+		return nil, nil, false
+	}
+	if objectCategory(src) == catNone || objectCategory(src) != objectCategory(dst) {
+		writeErr(out, ropID, hindex, ecDeclineCopy)
+		return nil, nil, false
+	}
+	if dst.kind == kindMessage && s.denyWrite(out, ropID, hindex, dst.store, dst.folderID, mapi.FrightsEditAny) {
+		return nil, nil, false
+	}
+	return src, dst, true
+}
+
+// selectPropsToCopy filters the source's properties down to the ones this copy
+// carries: the tag list decides membership (inclusive for CopyProperties,
+// exclusive for CopyTo), server-owned identity and versioning tags are always
+// dropped, and under NoReplace a tag the destination already has is left alone.
+func selectPropsToCopy(srcProps, dstExisting mapi.PropertyValues, tags []mapi.PropTag, exclude, noReplace bool) mapi.PropertyValues {
+	var toCopy mapi.PropertyValues
+	for _, pv := range srcProps {
+		if tagInSet(tags, pv.Tag) != !exclude {
+			continue
+		}
+		if tagInSet(copyMetaExcluded, pv.Tag) {
+			continue
+		}
+		if noReplace {
+			if _, present := dstExisting.Get(pv.Tag); present {
+				continue
+			}
+		}
+		toCopy = append(toCopy, pv)
+	}
+	return toCopy
 }
 
 // copyMetaExcluded are the server-owned identity/versioning and computed
