@@ -6,6 +6,7 @@ import (
 
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
 )
 
 // fillAndSaveAttachment fills a created attachment (handle attH) with a filename
@@ -72,19 +73,27 @@ func TestComposeMessageWithAttachment(t *testing.T) {
 	// Drop the first attachment before the message is ever saved; the second must
 	// keep its number rather than slide down to 0.
 	del, _ := sess.Dispatch(buildDeleteAttachment(0, num0), []uint32{msgH})
-	p := ext.NewPull(del, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("DeleteAttachment(pre-save) ReturnValue = %#x", ec)
-	}
+	ropOK(t, del, ropDeleteAttachment, "DeleteAttachment(pre-save)")
 
 	// Save the composed message: its one surviving attachment is written with it.
 	sc, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
 	savedID := int64(mapi.EID(saveChangesEID(t, sc)).GCValue())
 
-	// White-box: exactly the surviving attachment persisted, at its original number,
-	// with its filename and payload intact through the store's content offload.
+	assertSurvivingAttachment(t, store, savedID, num1)
+
+	// Black-box through the ROP read path: the saved message re-opens and the
+	// surviving attachment resolves at num1 while the deleted one is gone.
+	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(savedID)))), []uint32{logonH, 0xFFFFFFFF})
+	reH := h[1]
+	wantOpenAttachment(t, sess, reH, num1, ecSuccess, "saved compose message")
+	wantOpenAttachment(t, sess, reH, num0, ecNotFound, "the pre-save deleted attachment")
+}
+
+// assertSurvivingAttachment checks the one attachment a pre-save delete left
+// behind: it persisted at its original number, with its filename and payload
+// intact through the store's content offload.
+func assertSurvivingAttachment(t *testing.T, store *objectstore.Store, savedID int64, num1 uint32) {
+	t.Helper()
 	saved, err := store.OpenMessage(savedID)
 	if err != nil {
 		t.Fatal(err)
@@ -93,26 +102,13 @@ func TestComposeMessageWithAttachment(t *testing.T) {
 		t.Fatalf("composed message has %d attachments, want 1 (the pre-save delete)", len(saved.Attachments))
 	}
 	got := saved.Attachments[0].Props
-	if v, _ := got.Get(mapi.PrAttachNum); v != int32(num1) {
-		t.Errorf("surviving attach number = %v, want %d (pre-save delete must not renumber)", v, num1)
+	wantProp(t, got, mapi.PrAttachNum, int32(num1), "surviving attach number (a pre-save delete must not renumber)")
+	wantProp(t, got, mapi.PrAttachLongFilename, "second.bin", "surviving attachment filename")
+	v, ok := got.Get(mapi.PrAttachDataBin)
+	if !ok {
+		t.Fatal("surviving attachment lost its payload")
 	}
-	if v, _ := got.Get(mapi.PrAttachLongFilename); v != "second.bin" {
-		t.Errorf("surviving attachment filename = %v, want second.bin", v)
-	}
-	if v, ok := got.Get(mapi.PrAttachDataBin); !ok {
-		t.Error("surviving attachment lost its payload")
-	} else if vb, _ := v.([]byte); !bytes.Equal(vb, []byte("SECONDDATA")) {
+	if vb, _ := v.([]byte); !bytes.Equal(vb, []byte("SECONDDATA")) {
 		t.Errorf("surviving attachment data = %q, want SECONDDATA", vb)
-	}
-
-	// Black-box through the ROP read path: the saved message re-opens and the
-	// surviving attachment resolves at num1 while the deleted one is gone.
-	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, uint64(savedID)))), []uint32{logonH, 0xFFFFFFFF})
-	reH := h[1]
-	if ec := openAttachmentEC(t, sess, reH, num1); ec != ecSuccess {
-		t.Errorf("OpenAttachment(num1) on saved compose message = %#x, want success", ec)
-	}
-	if ec := openAttachmentEC(t, sess, reH, num0); ec != ecNotFound {
-		t.Errorf("OpenAttachment(num0=deleted) = %#x, want ecNotFound", ec)
 	}
 }

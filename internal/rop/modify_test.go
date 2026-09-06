@@ -68,25 +68,13 @@ func TestInPlaceModifyBumpsChangeNumber(t *testing.T) {
 
 	// Read the message's create change number via a sync with an empty Seen set:
 	// unacknowledged, the message is in the delta and LastCN is its create CN.
-	pre, err := store.GetContentSync(objectstore.ContentSyncRequest{
-		FolderID: inboxFID, Given: looseSet(mid), Seen: looseSet(),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	cn1 := pre.LastCN
+	cn1 := contentSync(t, store, inboxFID, mid).LastCN
 	if cn1 == 0 {
 		t.Fatal("create did not assign a change number")
 	}
 
 	// With the create CN acknowledged, the message is up to date, not in the delta.
-	base, err := store.GetContentSync(objectstore.ContentSyncRequest{
-		FolderID: inboxFID, Given: looseSet(mid), Seen: looseSet(cn1),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if containsMID(base.ChangedMIDs, mid) {
+	if base := contentSync(t, store, inboxFID, mid, cn1); containsMID(base.ChangedMIDs, mid) {
 		t.Fatalf("message reported changed before any edit (seen=cn1=%d)", cn1)
 	}
 
@@ -104,12 +92,7 @@ func TestInPlaceModifyBumpsChangeNumber(t *testing.T) {
 
 	// The edit must advance the change number and surface as an UPDATE against the
 	// pre-edit client state.
-	post, err := store.GetContentSync(objectstore.ContentSyncRequest{
-		FolderID: inboxFID, Given: looseSet(mid), Seen: looseSet(cn1),
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	post := contentSync(t, store, inboxFID, mid, cn1)
 	if post.LastCN <= cn1 {
 		t.Errorf("change number did not advance on in-place edit: was %d, now %d", cn1, post.LastCN)
 	}
@@ -117,7 +100,7 @@ func TestInPlaceModifyBumpsChangeNumber(t *testing.T) {
 		t.Errorf("edited message missing from ChangedMIDs: %v", post.ChangedMIDs)
 	}
 	if !containsMID(post.UpdatedMIDs, mid) {
-		t.Errorf("edited message missing from UpdatedMIDs (the B.Inc 4-defer-b unblock): %v", post.UpdatedMIDs)
+		t.Errorf("edited message missing from UpdatedMIDs: %v", post.UpdatedMIDs)
 	}
 
 	// The new property value persisted in place (not a duplicate insert).
@@ -125,9 +108,20 @@ func TestInPlaceModifyBumpsChangeNumber(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if v, _ := props.Get(mapi.PrSubject); v != "EDITED" {
-		t.Errorf("in-place subject = %v, want EDITED", v)
+	wantProp(t, props, mapi.PrSubject, "EDITED", "in-place subject")
+}
+
+// contentSync runs one content-sync request for a single message, with whatever
+// change numbers the caller has acknowledged.
+func contentSync(t *testing.T, store *objectstore.Store, folderID int64, mid uint64, seen ...uint64) objectstore.ContentSyncResult {
+	t.Helper()
+	res, err := store.GetContentSync(objectstore.ContentSyncRequest{
+		FolderID: folderID, Given: looseSet(mid), Seen: looseSet(seen...),
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
+	return res
 }
 
 // TestOpenSaveNoEditKeepsChangeNumber guards the no-spurious-bump rule: opening a
