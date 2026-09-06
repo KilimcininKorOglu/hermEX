@@ -213,9 +213,8 @@ func (s *Session) ropGetHierarchyTable(p *ext.Pull, out *ext.Push, handles []uin
 	if e1 != nil || e2 != nil {
 		return false
 	}
-	folder := s.get(handleAt(handles, hindex))
-	if folder == nil || folder.kind != kindFolder || folder.store == nil {
-		writeErr(out, ropGetHierarchyTable, ohindex, ecError)
+	folder, ok := s.openFolder(out, ropGetHierarchyTable, handles, hindex, ohindex)
+	if !ok {
 		return true
 	}
 	children, err := childFolders(folder.store, folder.folderID)

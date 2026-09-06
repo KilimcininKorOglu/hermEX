@@ -39,9 +39,8 @@ func (s *Session) ropCreateFolder(p *ext.Pull, out *ext.Push, handles []uint32, 
 	// Use comment string but v1 drops it (store doesn't store folder comments yet)
 	_ = comment
 
-	folder := s.get(handleAt(handles, hindex))
-	if folder == nil || folder.kind != kindFolder || folder.store == nil {
-		writeErr(out, ropCreateFolder, hindex, ecError)
+	folder, ok := s.openFolder(out, ropCreateFolder, handles, hindex, hindex)
+	if !ok {
 		return true
 	}
 	if s.denyWrite(out, ropCreateFolder, hindex, folder.store, folder.folderID, mapi.FrightsCreateSubfolder) {
@@ -71,9 +70,8 @@ func (s *Session) ropDeleteFolder(p *ext.Pull, out *ext.Push, handles []uint32, 
 	if e1 != nil || e2 != nil {
 		return false
 	}
-	folder := s.get(handleAt(handles, hindex))
-	if folder == nil || folder.kind != kindFolder || folder.store == nil {
-		writeErr(out, ropDeleteFolder, hindex, ecError)
+	folder, ok := s.openFolder(out, ropDeleteFolder, handles, hindex, hindex)
+	if !ok {
 		return true
 	}
 	// Deleting a folder requires owner rights on the folder being removed.
@@ -118,9 +116,8 @@ func (s *Session) ropMoveFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 		newName = n
 	}
 
-	folder := s.get(handleAt(handles, hindex))
-	if folder == nil || folder.kind != kindFolder || folder.store == nil {
-		writeErr(out, ropMoveFolder, hindex, ecError)
+	folder, ok := s.openFolder(out, ropMoveFolder, handles, hindex, hindex)
+	if !ok {
 		return true
 	}
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
@@ -187,9 +184,8 @@ func (s *Session) ropCopyFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 		newName = n
 	}
 
-	folder := s.get(handleAt(handles, hindex))
-	if folder == nil || folder.kind != kindFolder || folder.store == nil {
-		writeErr(out, ropCopyFolder, hindex, ecError)
+	folder, ok := s.openFolder(out, ropCopyFolder, handles, hindex, hindex)
+	if !ok {
 		return true
 	}
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
@@ -247,9 +243,8 @@ func (s *Session) ropHardDeleteMessagesAndSubfolders(p *ext.Pull, out *ext.Push,
 	if e1 != nil || e2 != nil {
 		return false
 	}
-	folder := s.get(handleAt(handles, hindex))
-	if folder == nil || folder.kind != kindFolder || folder.store == nil {
-		writeErr(out, ropHardDelMsgsAndSubfolders, hindex, ecError)
+	folder, ok := s.openFolder(out, ropHardDelMsgsAndSubfolders, handles, hindex, hindex)
+	if !ok {
 		return true
 	}
 	// Clearing a folder and dropping its subfolders deletes items: it requires
@@ -298,9 +293,8 @@ func (s *Session) ropEmptyFolder(p *ext.Pull, out *ext.Push, handles []uint32, h
 	if e1 != nil || e2 != nil {
 		return false
 	}
-	folder := s.get(handleAt(handles, hindex))
-	if folder == nil || folder.kind != kindFolder || folder.store == nil {
-		writeErr(out, ropEmptyFolder, hindex, ecError)
+	folder, ok := s.openFolder(out, ropEmptyFolder, handles, hindex, hindex)
+	if !ok {
 		return true
 	}
 	// Emptying a folder deletes its items: it requires DeleteAny on the folder.
@@ -347,9 +341,8 @@ func (s *Session) ropHardDeleteMessages(p *ext.Pull, out *ext.Push, handles []ui
 	if e1 != nil || e2 != nil || e3 != nil {
 		return false
 	}
-	folder := s.get(handleAt(handles, hindex))
-	if folder == nil || folder.kind != kindFolder || folder.store == nil {
-		writeErr(out, ropHardDeleteMessages, hindex, ecError)
+	folder, ok := s.openFolder(out, ropHardDeleteMessages, handles, hindex, hindex)
+	if !ok {
 		return true
 	}
 	// Deleting messages from the folder requires DeleteAny.

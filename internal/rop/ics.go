@@ -89,9 +89,8 @@ func (s *Session) ropSynchronizationConfigure(p *ext.Pull, out *ext.Push, handle
 	if e6 != nil || e7 != nil {
 		return false
 	}
-	folder := s.get(handleAt(handles, hindex))
-	if folder == nil || folder.kind != kindFolder || folder.store == nil {
-		writeErr(out, ropSynchronizationConfigure, ohindex, ecError)
+	folder, ok := s.openFolder(out, ropSynchronizationConfigure, handles, hindex, ohindex)
+	if !ok {
 		return true
 	}
 	// A contents download bulk-reads the folder's items, bypassing per-message open,
@@ -241,9 +240,8 @@ func (s *Session) ropSyncOpenCollector(p *ext.Pull, out *ext.Push, handles []uin
 	if e1 != nil || e2 != nil {
 		return false
 	}
-	folder := s.get(handleAt(handles, hindex))
-	if folder == nil || folder.kind != kindFolder || folder.store == nil {
-		writeErr(out, ropSyncOpenCollector, ohindex, ecError)
+	folder, ok := s.openFolder(out, ropSyncOpenCollector, handles, hindex, ohindex)
+	if !ok {
 		return true
 	}
 	// An upload collector imports message/hierarchy changes into the folder, a bulk

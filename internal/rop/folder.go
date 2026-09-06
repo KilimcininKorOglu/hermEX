@@ -196,9 +196,8 @@ func (s *Session) ropGetContentsTable(p *ext.Pull, out *ext.Push, handles []uint
 	if e1 != nil || e2 != nil {
 		return false
 	}
-	folder := s.get(handleAt(handles, hindex))
-	if folder == nil || folder.kind != kindFolder || folder.store == nil {
-		writeErr(out, ropGetContentsTable, ohindex, ecError)
+	folder, ok := s.openFolder(out, ropGetContentsTable, handles, hindex, ohindex)
+	if !ok {
 		return true
 	}
 	// Opening the folder required only Visible; reading its items requires ReadAny.

@@ -232,6 +232,22 @@ func (s *Session) alloc(o *object) uint32 {
 // (including the 0xFFFFFFFF null handle).
 func (s *Session) get(h uint32) *object { return s.handles[h] }
 
+// openFolder resolves a handle to a store-bound folder object, the check almost
+// every folder ROP opens with. ok is false when the handle names something else,
+// in which case the error response is written here rather than at each call
+// site.
+//
+// errIndex is the handle index the error response carries, which is hindex for
+// most ROPs but the output index for the ones that allocate a new handle.
+func (s *Session) openFolder(out *ext.Push, ropID uint8, handles []uint32, hindex, errIndex uint8) (*object, bool) {
+	folder := s.get(handleAt(handles, hindex))
+	if folder == nil || folder.kind != kindFolder || folder.store == nil {
+		writeErr(out, ropID, errIndex, ecError)
+		return nil, false
+	}
+	return folder, true
+}
+
 // persistedMessageID returns the store message id behind a message object when it
 // refers to a row that already exists, an opened message, or a compose message
 // after its first save, so attachment writes can target the real message. It

@@ -21,9 +21,8 @@ func (s *Session) ropGetRulesTable(p *ext.Pull, out *ext.Push, handles []uint32,
 	if e1 != nil || e2 != nil {
 		return false
 	}
-	folder := s.get(handleAt(handles, hindex))
-	if folder == nil || folder.kind != kindFolder || folder.store == nil {
-		writeErr(out, ropGetRulesTable, ohindex, ecError)
+	folder, ok := s.openFolder(out, ropGetRulesTable, handles, hindex, ohindex)
+	if !ok {
 		return true
 	}
 	// Opening the folder required only Visible; reading its rules requires ReadAny,
@@ -115,9 +114,8 @@ func (s *Session) ropModifyRules(p *ext.Pull, out *ext.Push, handles []uint32, h
 		rows = append(rows, ruleRow{flags: rowFlags, propvals: propvals})
 	}
 
-	folder := s.get(handleAt(handles, hindex))
-	if folder == nil || folder.kind != kindFolder || folder.store == nil {
-		writeErr(out, ropModifyRules, hindex, ecError)
+	folder, ok := s.openFolder(out, ropModifyRules, handles, hindex, hindex)
+	if !ok {
 		return true
 	}
 	// Editing a folder's rule table requires owner rights.

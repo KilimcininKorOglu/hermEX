@@ -108,9 +108,8 @@ func (s *Session) ropSetReadFlags(p *ext.Pull, out *ext.Push, handles []uint32, 
 	if e1 != nil || e2 != nil || e3 != nil {
 		return false
 	}
-	folder := s.get(handleAt(handles, hindex))
-	if folder == nil || folder.kind != kindFolder || folder.store == nil {
-		writeErr(out, ropSetReadFlags, hindex, ecError)
+	folder, ok := s.openFolder(out, ropSetReadFlags, handles, hindex, hindex)
+	if !ok {
 		return true
 	}
 	// Changing read state modifies the messages: a delegate needs EditAny on the
@@ -188,9 +187,8 @@ func (s *Session) ropDeleteMessages(p *ext.Pull, out *ext.Push, handles []uint32
 	if e1 != nil || e2 != nil || e3 != nil {
 		return false
 	}
-	folder := s.get(handleAt(handles, hindex))
-	if folder == nil || folder.kind != kindFolder || folder.store == nil {
-		writeErr(out, ropDeleteMessages, hindex, ecError)
+	folder, ok := s.openFolder(out, ropDeleteMessages, handles, hindex, hindex)
+	if !ok {
 		return true
 	}
 	// Deleting messages from the folder requires DeleteAny.

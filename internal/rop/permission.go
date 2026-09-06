@@ -31,9 +31,8 @@ func (s *Session) ropGetPermissionsTable(p *ext.Pull, out *ext.Push, handles []u
 	if e1 != nil || e2 != nil {
 		return false
 	}
-	folder := s.get(handleAt(handles, hindex))
-	if folder == nil || folder.kind != kindFolder || folder.store == nil {
-		writeErr(out, ropGetPermissionsTable, ohindex, ecError)
+	folder, ok := s.openFolder(out, ropGetPermissionsTable, handles, hindex, ohindex)
+	if !ok {
 		return true
 	}
 	bags, err := permissionBags(folder.store, folder.folderID, flags&permTableIncludeFreeBusy != 0)
@@ -149,9 +148,8 @@ func (s *Session) ropModifyPermissions(p *ext.Pull, out *ext.Push, handles []uin
 		rows = append(rows, permRow{flags: rowFlags, propvals: propvals})
 	}
 
-	folder := s.get(handleAt(handles, hindex))
-	if folder == nil || folder.kind != kindFolder || folder.store == nil {
-		writeErr(out, ropModifyPermissions, hindex, ecError)
+	folder, ok := s.openFolder(out, ropModifyPermissions, handles, hindex, hindex)
+	if !ok {
 		return true
 	}
 	// Editing a folder's permission table requires owner rights, the gate that
