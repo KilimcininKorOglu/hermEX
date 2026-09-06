@@ -27,62 +27,93 @@ const ruleFuzzyContains = flSubstring | flIgnoreCase
 // false, they are never silently treated as a match.
 func evalRestriction(r mapi.Restriction, props mapi.PropertyValues) bool {
 	switch r.Type {
-	case mapi.ResAnd:
-		kids, _ := r.Value.([]mapi.Restriction)
-		for _, k := range kids {
-			if !evalRestriction(k, props) {
-				return false
-			}
-		}
-		return true
-	case mapi.ResOr:
-		kids, _ := r.Value.([]mapi.Restriction)
-		for _, k := range kids {
-			if evalRestriction(k, props) {
-				return true
-			}
-		}
-		return false
-	case mapi.ResNot:
-		inner, ok := r.Value.(mapi.Restriction)
-		if !ok {
-			return false
-		}
-		return !evalRestriction(inner, props)
-	case mapi.ResContent:
-		c, ok := r.Value.(mapi.ContentRestriction)
-		return ok && evalContent(c, props)
-	case mapi.ResProperty:
-		pr, ok := r.Value.(mapi.PropertyRestriction)
-		return ok && evalProperty(pr, props)
-	case mapi.ResBitmask:
-		b, ok := r.Value.(mapi.BitmaskRestriction)
-		return ok && evalBitmask(b, props)
-	case mapi.ResSize:
-		sz, ok := r.Value.(mapi.SizeRestriction)
-		return ok && evalSize(sz, props)
-	case mapi.ResExist:
-		e, ok := r.Value.(mapi.ExistRestriction)
-		return ok && props.Has(e.PropTag)
-	case mapi.ResComment:
-		// A comment annotates an optional child restriction; the annotation
-		// itself imposes no constraint, so an absent child matches.
-		c, ok := r.Value.(mapi.CommentRestriction)
-		if !ok {
-			return false
-		}
-		if c.Res == nil {
-			return true
-		}
-		return evalRestriction(*c.Res, props)
+	case mapi.ResAnd, mapi.ResOr, mapi.ResNot, mapi.ResComment:
+		return evalLogical(r, props)
 	case mapi.ResNull:
 		// A null restriction is the absence of a constraint: it matches every
 		// message (MS-OXCDATA). The rule editor never emits this.
 		return true
-	default:
-		// ResSub, ResPropCompare, ResCount, ResAnnotation, unknown: unsupported.
-		return false
 	}
+	return evalPropertyTest(r, props)
+}
+
+// evalPropertyTest evaluates the restriction types that test one property. A
+// restriction whose value does not carry the shape its type promises fails,
+// rather than matching by accident.
+func evalPropertyTest(r mapi.Restriction, props mapi.PropertyValues) bool {
+	switch r.Type {
+	case mapi.ResContent:
+		return evalTyped(r.Value, props, evalContent)
+	case mapi.ResProperty:
+		return evalTyped(r.Value, props, evalProperty)
+	case mapi.ResBitmask:
+		return evalTyped(r.Value, props, evalBitmask)
+	case mapi.ResSize:
+		return evalTyped(r.Value, props, evalSize)
+	case mapi.ResExist:
+		return evalTyped(r.Value, props, evalExist)
+	}
+	// ResSub, ResPropCompare, ResCount, ResAnnotation, unknown: unsupported.
+	return false
+}
+
+// evalTyped applies one restriction evaluator to a restriction value, failing
+// when the value does not hold the shape its type promises.
+func evalTyped[T any](v any, props mapi.PropertyValues, eval func(T, mapi.PropertyValues) bool) bool {
+	t, ok := v.(T)
+	return ok && eval(t, props)
+}
+
+// evalExist matches when the message carries the property at all, whatever its
+// value.
+func evalExist(e mapi.ExistRestriction, props mapi.PropertyValues) bool {
+	return props.Has(e.PropTag)
+}
+
+// evalLogical evaluates the restriction types that combine other restrictions
+// rather than testing a property.
+func evalLogical(r mapi.Restriction, props mapi.PropertyValues) bool {
+	switch r.Type {
+	case mapi.ResAnd:
+		kids, _ := r.Value.([]mapi.Restriction)
+		return evalAll(kids, props)
+	case mapi.ResOr:
+		kids, _ := r.Value.([]mapi.Restriction)
+		return evalAny(kids, props)
+	case mapi.ResNot:
+		inner, ok := r.Value.(mapi.Restriction)
+		return ok && !evalRestriction(inner, props)
+	case mapi.ResComment:
+		// A comment annotates an optional child restriction; the annotation itself
+		// imposes no constraint, so an absent child matches.
+		c, ok := r.Value.(mapi.CommentRestriction)
+		if !ok {
+			return false
+		}
+		return c.Res == nil || evalRestriction(*c.Res, props)
+	}
+	return false
+}
+
+// evalAll is the AND node: every child must match. An empty AND matches.
+func evalAll(kids []mapi.Restriction, props mapi.PropertyValues) bool {
+	for _, k := range kids {
+		if !evalRestriction(k, props) {
+			return false
+		}
+	}
+	return true
+}
+
+// evalAny is the OR node: one matching child is enough. An empty OR matches
+// nothing.
+func evalAny(kids []mapi.Restriction, props mapi.PropertyValues) bool {
+	for _, k := range kids {
+		if evalRestriction(k, props) {
+			return true
+		}
+	}
+	return false
 }
 
 // evalContent matches a string property against the search value with the
@@ -398,98 +429,132 @@ func (s *Store) applyRulesToMessage(folderID int64, m MessageInfo, rules []Rule,
 func (s *Store) applyRuleActions(srcFolder int64, uid uint32, acts mapi.RuleActions) (bool, InboxRuleActions, error) {
 	var eff InboxRuleActions
 	for _, b := range acts.Blocks {
-		switch b.Type {
-		case mapi.OpMarkAsRead:
-			cur, err := s.MessageFlags(srcFolder, uid)
-			if err != nil {
-				return false, eff, err
-			}
-			if cur&FlagSeen == 0 {
-				if err := s.SetMessageFlags(srcFolder, uid, cur|FlagSeen); err != nil {
-					return false, eff, err
-				}
-			}
-		case mapi.OpTag:
-			// Set the property the action carries. The editor uses it to categorize
-			// (the named Keywords property), mark important (PR_IMPORTANCE), or flag
-			// (PR_FLAG_STATUS). Non-terminal.
-			tv, ok := b.Data.(mapi.TaggedPropVal)
-			if !ok {
-				continue
-			}
-			mi, err := s.MessageByUID(srcFolder, uid)
-			if err != nil {
-				return false, eff, err
-			}
-			var pv mapi.PropertyValues
-			pv.Set(tv.Tag, tv.Value)
-			if err := s.SetMessageProperties(mi.ID, pv); err != nil {
-				return false, eff, err
-			}
-		case mapi.OpForward:
-			// Forward is non-terminal: the message stays in srcFolder. The send
-			// itself is the delivery path's job (the store cannot send mail); it
-			// sends the original received bytes, so the store collects only the
-			// addresses here.
-			if addrs := forwardAddresses(b.Data); len(addrs) > 0 {
-				eff.Forwards = append(eff.Forwards, ForwardRequest{To: addrs})
-			}
-		case mapi.OpDeferAction:
-			// hermEX rides reject/vacation in the opaque deferred-action slot: a
-			// 1-byte kind tag + the reject reason or vacation body. The store only
-			// collects the request (it cannot send mail); the delivery path sends the
-			// bounce/auto-reply under its guards. Non-terminal.
-			payload, ok := b.Data.([]byte)
-			if !ok || len(payload) == 0 {
-				continue
-			}
-			text := string(payload[1:])
-			switch payload[0] {
-			case deferKindReject:
-				eff.Bounces = append(eff.Bounces, BounceRequest{Reason: text})
-			case deferKindVacation:
-				eff.AutoReplies = append(eff.AutoReplies, AutoReplyRequest{Message: text})
-			}
-		case mapi.OpCopy:
-			dst, ok := moveTargetFolder(b.Data)
-			if !ok || dst == srcFolder {
-				// Copying a message into the folder it is already in duplicates it,
-				// which a manual run over the rule's own destination folder would do
-				// to every message there.
-				continue
-			}
-			if err := s.copyMessage(srcFolder, uid, dst); err != nil {
-				return false, eff, err
-			}
-			// Copy is non-terminal: the message stays in srcFolder, so later
-			// blocks and rules still apply to the original.
-		case mapi.OpMove:
-			dst, ok := moveTargetFolder(b.Data)
-			if !ok || dst == srcFolder {
-				// A move onto the folder the message is already in is not a no-op
-				// here: it would re-append the message under a fresh UID and delete
-				// the original, invalidating every client's cache for nothing. A
-				// manual run over the rule's own destination folder does exactly
-				// that to every message in it.
-				continue
-			}
-			if err := s.moveMessage(srcFolder, uid, dst); err != nil {
-				return false, eff, err
-			}
-			return true, eff, nil
-		case mapi.OpDelete:
-			trash := int64(mapi.PrivateFIDDeletedItems)
-			if srcFolder == trash {
-				if err := s.DeleteMessage(srcFolder, uid); err != nil {
-					return false, eff, err
-				}
-			} else if err := s.moveMessage(srcFolder, uid, trash); err != nil {
-				return false, eff, err
-			}
+		terminal, err := s.applyRuleBlock(srcFolder, uid, b, &eff)
+		if err != nil {
+			return false, eff, err
+		}
+		if terminal {
 			return true, eff, nil
 		}
 	}
 	return false, eff, nil
+}
+
+// applyRuleBlock applies one action block. terminal is true when the block moved
+// the message out of srcFolder, which ends rule processing because every later
+// block and rule would act on a message that is no longer there.
+func (s *Store) applyRuleBlock(srcFolder int64, uid uint32, b mapi.ActionBlock, eff *InboxRuleActions) (terminal bool, err error) {
+	switch b.Type {
+	case mapi.OpMarkAsRead:
+		return false, s.markRuleMessageRead(srcFolder, uid)
+	case mapi.OpTag:
+		return false, s.tagRuleMessage(srcFolder, uid, b.Data)
+	case mapi.OpForward:
+		// Forward is non-terminal: the message stays in srcFolder. The send itself
+		// is the delivery path's job (the store cannot send mail); it sends the
+		// original received bytes, so the store collects only the addresses here.
+		if addrs := forwardAddresses(b.Data); len(addrs) > 0 {
+			eff.Forwards = append(eff.Forwards, ForwardRequest{To: addrs})
+		}
+		return false, nil
+	case mapi.OpDeferAction:
+		collectDeferredAction(b.Data, eff)
+		return false, nil
+	case mapi.OpCopy:
+		// Copy is non-terminal: the message stays in srcFolder, so later blocks and
+		// rules still apply to the original.
+		return false, s.copyRuleMessage(srcFolder, uid, b.Data)
+	case mapi.OpMove:
+		return s.moveRuleMessage(srcFolder, uid, b.Data)
+	case mapi.OpDelete:
+		return true, s.deleteRuleMessage(srcFolder, uid)
+	}
+	return false, nil
+}
+
+// markRuleMessageRead sets the seen flag, leaving an already-read message alone
+// so the rule does not bump its change number for nothing.
+func (s *Store) markRuleMessageRead(srcFolder int64, uid uint32) error {
+	cur, err := s.MessageFlags(srcFolder, uid)
+	if err != nil {
+		return err
+	}
+	if cur&FlagSeen != 0 {
+		return nil
+	}
+	return s.SetMessageFlags(srcFolder, uid, cur|FlagSeen)
+}
+
+// tagRuleMessage sets the property the action carries. The editor uses it to
+// categorize (the named Keywords property), mark important (PR_IMPORTANCE), or
+// flag (PR_FLAG_STATUS).
+func (s *Store) tagRuleMessage(srcFolder int64, uid uint32, data any) error {
+	tv, ok := data.(mapi.TaggedPropVal)
+	if !ok {
+		return nil
+	}
+	mi, err := s.MessageByUID(srcFolder, uid)
+	if err != nil {
+		return err
+	}
+	var pv mapi.PropertyValues
+	pv.Set(tv.Tag, tv.Value)
+	return s.SetMessageProperties(mi.ID, pv)
+}
+
+// collectDeferredAction reads the opaque deferred-action slot hermEX rides
+// reject and vacation in: a 1-byte kind tag followed by the reject reason or
+// vacation body. The store only collects the request, because it cannot send
+// mail; the delivery path sends the bounce or auto-reply under its own guards.
+func collectDeferredAction(data any, eff *InboxRuleActions) {
+	payload, ok := data.([]byte)
+	if !ok || len(payload) == 0 {
+		return
+	}
+	text := string(payload[1:])
+	switch payload[0] {
+	case deferKindReject:
+		eff.Bounces = append(eff.Bounces, BounceRequest{Reason: text})
+	case deferKindVacation:
+		eff.AutoReplies = append(eff.AutoReplies, AutoReplyRequest{Message: text})
+	}
+}
+
+// copyRuleMessage files a second copy into the action's destination. A copy onto
+// the folder the message is already in is skipped, because a manual run over the
+// rule's own destination folder would otherwise duplicate every message there.
+func (s *Store) copyRuleMessage(srcFolder int64, uid uint32, data any) error {
+	dst, ok := moveTargetFolder(data)
+	if !ok || dst == srcFolder {
+		return nil
+	}
+	return s.copyMessage(srcFolder, uid, dst)
+}
+
+// moveRuleMessage re-files the message into the action's destination. A move
+// onto the folder the message is already in is not a no-op here: it would
+// re-append the message under a fresh UID and delete the original, invalidating
+// every client's cache for nothing, which a manual run over the rule's own
+// destination folder would do to every message in it.
+func (s *Store) moveRuleMessage(srcFolder int64, uid uint32, data any) (terminal bool, err error) {
+	dst, ok := moveTargetFolder(data)
+	if !ok || dst == srcFolder {
+		return false, nil
+	}
+	if err := s.moveMessage(srcFolder, uid, dst); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// deleteRuleMessage routes the message to Deleted Items, or removes it outright
+// when it is already there.
+func (s *Store) deleteRuleMessage(srcFolder int64, uid uint32) error {
+	trash := int64(mapi.PrivateFIDDeletedItems)
+	if srcFolder == trash {
+		return s.DeleteMessage(srcFolder, uid)
+	}
+	return s.moveMessage(srcFolder, uid, trash)
 }
 
 // moveTargetFolder extracts the destination folder id from a same-store

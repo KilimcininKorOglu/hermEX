@@ -76,105 +76,26 @@ func (s *Store) GetContentSync(req ContentSyncRequest) (ContentSyncResult, error
 	}
 	defer rows.Close()
 
-	allMIDs := make(map[uint64]struct{})   // every live message in the folder
-	existence := make(map[uint64]struct{}) // those in scope (passed class gating)
-	type readChange struct {
-		mid  uint64
-		read bool
+	scan := contentScan{
+		allMIDs:   make(map[uint64]struct{}),
+		existence: make(map[uint64]struct{}),
 	}
-	var readChanges []readChange
-
 	for rows.Next() {
-		var (
-			mid, cn   int64
-			assoc     sql.NullInt64
-			readState int
-			readCN    sql.NullInt64
-		)
-		if err := rows.Scan(&mid, &cn, &assoc, &readState, &readCN); err != nil {
+		row, err := scanContentRow(rows)
+		if err != nil {
 			return res, err
 		}
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		umid, ucn := uint64(mid), uint64(cn)
-		allMIDs[umid] = struct{}{}
-
-		isFAI := assoc.Valid && assoc.Int64 != 0
-		if isFAI {
-			if req.SeenFAI == nil {
-				continue
-			}
-		} else if req.Seen == nil {
-			continue
-		}
-		existence[umid] = struct{}{}
-		if ucn > res.LastCN {
-			res.LastCN = ucn
-		}
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		if readCN.Valid && uint64(readCN.Int64) > res.LastReadCN {
-			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-			res.LastReadCN = uint64(readCN.Int64)
-		}
-
-		inGiven := req.Given != nil && req.Given.Contains(mapi.MakeEIDEx(homeReplID, umid))
-		cnEID := mapi.MakeEIDEx(homeReplID, ucn)
-		var seenCN bool
-		if isFAI {
-			seenCN = req.SeenFAI.Contains(cnEID)
-		} else {
-			seenCN = req.Seen.Contains(cnEID)
-		}
-
-		if inGiven && seenCN {
-			// Body up to date. For a normal message, a read_cn the client has not
-			// acknowledged is a read-state-only change.
-			if !isFAI && req.Read != nil && readCN.Valid && readCN.Int64 != 0 &&
-				// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-				!req.Read.Contains(mapi.MakeEIDEx(homeReplID, uint64(readCN.Int64))) {
-				readChanges = append(readChanges, readChange{umid, readState != 0})
-			}
-			continue
-		}
-		res.ChangedMIDs = append(res.ChangedMIDs, umid)
-		if inGiven {
-			res.UpdatedMIDs = append(res.UpdatedMIDs, umid)
-		}
+		scan.classify(row, req, &res)
 	}
 	if err := rows.Err(); err != nil {
 		return res, err
 	}
 
-	for mid := range existence {
+	for mid := range scan.existence {
 		res.GivenMIDs = append(res.GivenMIDs, mid)
 	}
-
-	// Deletions: walk the client's given set. A foreign-replica id (replid > 1)
-	// is unconditionally gone from this store; a home id absent from the in-scope
-	// set is either still stored but out of scope (no-longer) or truly gone.
-	if req.Given != nil {
-		req.Given.ForEachRange(func(replid uint16, lo, hi uint64) {
-			if replid != homeReplID {
-				if replid > homeReplID {
-					for v := lo; v <= hi; v++ {
-						res.DeletedMIDs = append(res.DeletedMIDs, v)
-					}
-				}
-				return
-			}
-			for v := lo; v <= hi; v++ {
-				if _, ok := existence[v]; ok {
-					continue
-				}
-				if _, ok := allMIDs[v]; ok {
-					res.NoLongerMIDs = append(res.NoLongerMIDs, v)
-				} else {
-					res.DeletedMIDs = append(res.DeletedMIDs, v)
-				}
-			}
-		})
-	}
-
-	for _, rc := range readChanges {
+	scan.appendDeletions(req.Given, &res)
+	for _, rc := range scan.readChanges {
 		if rc.read {
 			res.ReadMIDs = append(res.ReadMIDs, rc.mid)
 		} else {
@@ -189,6 +110,131 @@ func (s *Store) GetContentSync(req ContentSyncRequest) (ContentSyncResult, error
 		slices.Sort(set)
 	}
 	return res, nil
+}
+
+// contentRow is one message row the content-sync scan reads.
+type contentRow struct {
+	mid       uint64
+	cn        uint64
+	isFAI     bool
+	readState bool
+	readCN    uint64 // 0 when the message never had its read state flipped
+}
+
+func scanContentRow(rows *sql.Rows) (contentRow, error) {
+	var (
+		mid, cn   int64
+		assoc     sql.NullInt64
+		readState int
+		readCN    sql.NullInt64
+	)
+	if err := rows.Scan(&mid, &cn, &assoc, &readState, &readCN); err != nil {
+		return contentRow{}, err
+	}
+	row := contentRow{
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		mid: uint64(mid),
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		cn:        uint64(cn),
+		isFAI:     assoc.Valid && assoc.Int64 != 0,
+		readState: readState != 0,
+	}
+	if readCN.Valid {
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		row.readCN = uint64(readCN.Int64)
+	}
+	return row, nil
+}
+
+// contentScan accumulates what one pass over the folder's live messages needs to
+// remember: every message id seen, the subset in scope for the client's request,
+// and the read-state-only changes found along the way.
+type contentScan struct {
+	allMIDs     map[uint64]struct{}
+	existence   map[uint64]struct{}
+	readChanges []readChange
+}
+
+// readChange is a message whose read state moved without its body changing.
+type readChange struct {
+	mid  uint64
+	read bool
+}
+
+// classify places one row into the result: up to date, content-changed, or
+// read-state-changed. A row whose class the request did not ask for is recorded
+// as existing but left out of scope, so the deletion pass can tell "no longer in
+// scope" from "gone".
+func (sc *contentScan) classify(row contentRow, req ContentSyncRequest, res *ContentSyncResult) {
+	sc.allMIDs[row.mid] = struct{}{}
+	seen := req.Seen
+	if row.isFAI {
+		seen = req.SeenFAI
+	}
+	if seen == nil {
+		return // this class is out of scope for the request
+	}
+	sc.existence[row.mid] = struct{}{}
+	res.LastCN = max(res.LastCN, row.cn)
+	res.LastReadCN = max(res.LastReadCN, row.readCN)
+
+	inGiven := req.Given != nil && req.Given.Contains(mapi.MakeEIDEx(homeReplID, row.mid))
+	if inGiven && seen.Contains(mapi.MakeEIDEx(homeReplID, row.cn)) {
+		// Body up to date. For a normal message, a read_cn the client has not
+		// acknowledged is a read-state-only change.
+		if sc.readStateChanged(row, req.Read) {
+			sc.readChanges = append(sc.readChanges, readChange{row.mid, row.readState})
+		}
+		return
+	}
+	res.ChangedMIDs = append(res.ChangedMIDs, row.mid)
+	if inGiven {
+		res.UpdatedMIDs = append(res.UpdatedMIDs, row.mid)
+	}
+}
+
+// readStateChanged reports whether a body-current message carries a read_cn the
+// client has not acknowledged. An FAI message has no read state.
+func (sc *contentScan) readStateChanged(row contentRow, ack *ics.IDSet) bool {
+	if row.isFAI || ack == nil || row.readCN == 0 {
+		return false
+	}
+	return !ack.Contains(mapi.MakeEIDEx(homeReplID, row.readCN))
+}
+
+// appendDeletions walks the client's given set for ids this store no longer
+// serves. A foreign-replica id (replid > 1) is unconditionally gone from this
+// store; a home id absent from the in-scope set is either still stored but out
+// of scope (no-longer) or truly gone.
+func (sc *contentScan) appendDeletions(given *ics.IDSet, res *ContentSyncResult) {
+	if given == nil {
+		return
+	}
+	given.ForEachRange(func(replid uint16, lo, hi uint64) {
+		if replid != homeReplID {
+			if replid > homeReplID {
+				for v := lo; v <= hi; v++ {
+					res.DeletedMIDs = append(res.DeletedMIDs, v)
+				}
+			}
+			return
+		}
+		for v := lo; v <= hi; v++ {
+			sc.classifyMissing(v, res)
+		}
+	})
+}
+
+// classifyMissing sorts one given id the scan did not put in scope.
+func (sc *contentScan) classifyMissing(v uint64, res *ContentSyncResult) {
+	if _, ok := sc.existence[v]; ok {
+		return
+	}
+	if _, ok := sc.allMIDs[v]; ok {
+		res.NoLongerMIDs = append(res.NoLongerMIDs, v)
+		return
+	}
+	res.DeletedMIDs = append(res.DeletedMIDs, v)
 }
 
 // HierarchySyncRequest configures a folder-hierarchy synchronization diff
@@ -241,12 +287,8 @@ func (s *Store) GetHierarchySync(req HierarchySyncRequest) (HierarchySyncResult,
 		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		ufid, ucn := uint64(fid), uint64(cn)
 		existence[ufid] = struct{}{}
-		if ucn > res.LastCN {
-			res.LastCN = ucn
-		}
-		inGiven := req.Given != nil && req.Given.Contains(mapi.MakeEIDEx(homeReplID, ufid))
-		seenCN := req.Seen != nil && req.Seen.Contains(mapi.MakeEIDEx(homeReplID, ucn))
-		if !inGiven || !seenCN {
+		res.LastCN = max(res.LastCN, ucn)
+		if !folderUpToDate(req, ufid, ucn) {
 			res.ChangedFIDs = append(res.ChangedFIDs, ufid)
 		}
 	}
@@ -257,22 +299,38 @@ func (s *Store) GetHierarchySync(req HierarchySyncRequest) (HierarchySyncResult,
 	for fid := range existence {
 		res.GivenFIDs = append(res.GivenFIDs, fid)
 	}
-
-	if req.Given != nil {
-		req.Given.ForEachRange(func(replid uint16, lo, hi uint64) {
-			if replid != homeReplID && replid <= homeReplID {
-				return
-			}
-			for v := lo; v <= hi; v++ {
-				if _, ok := existence[v]; !ok {
-					res.DeletedFIDs = append(res.DeletedFIDs, v)
-				}
-			}
-		})
-	}
+	appendDeletedFolders(req.Given, existence, &res)
 
 	slices.Sort(res.ChangedFIDs)
 	slices.Sort(res.GivenFIDs)
 	slices.Sort(res.DeletedFIDs)
 	return res, nil
+}
+
+// folderUpToDate reports whether the client already holds this folder at this
+// change number, so it needs no update.
+func folderUpToDate(req HierarchySyncRequest, fid, cn uint64) bool {
+	if req.Given == nil || !req.Given.Contains(mapi.MakeEIDEx(homeReplID, fid)) {
+		return false
+	}
+	return req.Seen != nil && req.Seen.Contains(mapi.MakeEIDEx(homeReplID, cn))
+}
+
+// appendDeletedFolders walks the client's given set for folders the live subtree
+// no longer holds. A hierarchy has no out-of-scope class, so every missing id is
+// a deletion.
+func appendDeletedFolders(given *ics.IDSet, existence map[uint64]struct{}, res *HierarchySyncResult) {
+	if given == nil {
+		return
+	}
+	given.ForEachRange(func(replid uint16, lo, hi uint64) {
+		if replid != homeReplID && replid <= homeReplID {
+			return
+		}
+		for v := lo; v <= hi; v++ {
+			if _, ok := existence[v]; !ok {
+				res.DeletedFIDs = append(res.DeletedFIDs, v)
+			}
+		}
+	})
 }
