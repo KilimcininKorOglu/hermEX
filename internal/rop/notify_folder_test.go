@@ -206,42 +206,29 @@ func TestWholeStoreMessageEmitsFolderModifiedAndMessageCreated(t *testing.T) {
 	p := ext.NewPull(resp, ext.FlagUTF16)
 
 	// First: the folder-modified for the Inbox (the hierarchy pass precedes the sweep).
-	if id := mustU8(t, p, "RopId#1"); id != ropNotify {
-		t.Fatalf("first RopId = %#x, want RopNotify", id)
-	}
-	if got := mustU32(t, p, "handle#1"); got != subH {
-		t.Errorf("first NotificationHandle = %d, want %d", got, subH)
-	}
-	mustU8(t, p, "logon#1")
-	if nf := mustU16(t, p, "nflags#1"); nf != uint16(fnevObjectModified|nfHasTotal|nfHasUnread) {
-		t.Errorf("first event nflags = %#x, want folder-modified|hasTotal|hasUnread %#x", nf, fnevObjectModified|nfHasTotal|nfHasUnread)
-	}
-	if fid := mustU64(t, p, "folder#1"); fid != inboxEID {
-		t.Errorf("first event FolderId = %#x, want Inbox %#x", fid, inboxEID)
-	}
-	mustU16(t, p, "proptag count#1")
-	if total := mustU32(t, p, "total#1"); total != 1 {
-		t.Errorf("folder-modified total = %d, want 1", total)
-	}
-	mustU32(t, p, "unread#1")
+	nextNotify(t, p, subH, uint16(fnevObjectModified|nfHasTotal|nfHasUnread), "folder-modified")
+	wantU64(t, p, "folder-modified FolderId (Inbox)", inboxEID)
+	mustU16(t, p, "folder-modified proptag count")
+	wantU32(t, p, "folder-modified total", 1)
+	mustU32(t, p, "folder-modified unread")
 
 	// Second: the message-created for the delivered message.
-	if id := mustU8(t, p, "RopId#2"); id != ropNotify {
-		t.Fatalf("second RopId = %#x, want RopNotify (the message-created)", id)
+	nextNotify(t, p, subH, uint16(fnevObjectCreated|nfByMessage), "message-created")
+	wantU64(t, p, "message-created FolderId (Inbox)", inboxEID)
+	wantU64(t, p, "message-created MessageId (the delivered message)", uint64(mapi.MakeEIDEx(1, uint64(info.ID))))
+	mustU16(t, p, "message-created proptag count")
+	wantDrained(t, p, "the two notifications (want exactly folder-modified + message-created)")
+}
+
+// nextNotify reads the next RopNotify header out of the response stream and
+// asserts the subscription it belongs to and the event flags it carries, leaving
+// the reader at that notification's ids.
+func nextNotify(t *testing.T, p *ext.Pull, subH uint32, flags uint16, what string) {
+	t.Helper()
+	if id := mustU8(t, p, what+" RopId"); id != ropNotify {
+		t.Fatalf("%s RopId = %#x, want RopNotify", what, id)
 	}
-	mustU32(t, p, "handle#2")
-	mustU8(t, p, "logon#2")
-	if nf := mustU16(t, p, "nflags#2"); nf != uint16(fnevObjectCreated|nfByMessage) {
-		t.Errorf("second event nflags = %#x, want message-created|byMessage %#x", nf, fnevObjectCreated|nfByMessage)
-	}
-	if fid := mustU64(t, p, "folder#2"); fid != inboxEID {
-		t.Errorf("second event FolderId = %#x, want Inbox %#x", fid, inboxEID)
-	}
-	if mid := mustU64(t, p, "msg#2"); mid != uint64(mapi.MakeEIDEx(1, uint64(info.ID))) {
-		t.Errorf("second event MessageId = %#x, want the delivered message %#x", mid, uint64(mapi.MakeEIDEx(1, uint64(info.ID))))
-	}
-	mustU16(t, p, "proptag count#2")
-	if p.Remaining() != 0 {
-		t.Errorf("trailing bytes after the two notifications: %d (want exactly folder-modified + message-created)", p.Remaining())
-	}
+	wantU32(t, p, what+" NotificationHandle", subH)
+	mustU8(t, p, what+" LogonId")
+	wantU16(t, p, what+" NotificationFlags", flags)
 }

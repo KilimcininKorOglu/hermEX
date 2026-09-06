@@ -262,18 +262,6 @@ func nextROP(t *testing.T, p *ext.Pull, ropID uint8, want uint32, what string) {
 	}
 }
 
-// ropReturn reads a response's common header and returns its ReturnValue, for a
-// step whose refusal is what the test is checking.
-func ropReturn(t *testing.T, resp []byte, ropID uint8, what string) uint32 {
-	t.Helper()
-	p := ext.NewPull(resp, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropID {
-		t.Fatalf("%s RopId = %#x, want %#x", what, id, ropID)
-	}
-	mustU8(t, p, "hindex")
-	return mustU32(t, p, "ec")
-}
-
 // wantProp asserts a property bag carries the expected value for one tag. An
 // absent property compares against the zero value, which is what makes a missing
 // property fail rather than pass quietly.

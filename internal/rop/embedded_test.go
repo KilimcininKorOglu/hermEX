@@ -209,12 +209,7 @@ func TestComposeEmbeddedMessage(t *testing.T) {
 
 	oem, h := sess.Dispatch(buildOpenEmbeddedMessage(0, 1, mapiCreate), []uint32{attH, 0xFFFFFFFF})
 	embH := h[1]
-	p := ext.NewPull(oem, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "ohindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("OpenEmbeddedMessage(MAPI_CREATE) ReturnValue = %#x", ec)
-	}
+	ropOK(t, oem, ropOpenEmbeddedMessage, "OpenEmbeddedMessage(MAPI_CREATE)")
 
 	// Fill the embedded message and save it: that exports it into the parent attachment.
 	sess.Dispatch(buildSetProperties(0, mapi.PropertyValues{
@@ -222,37 +217,22 @@ func TestComposeEmbeddedMessage(t *testing.T) {
 		{Tag: mapi.PrBody, Value: "Composed body."},
 	}), []uint32{embH})
 	scm, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, embH})
-	p = ext.NewPull(scm, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropSaveChangesMessage {
-		t.Fatalf("SaveChangesMessage(embedded) RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("SaveChangesMessage(embedded) ReturnValue = %#x", ec)
-	}
+	ropOK(t, scm, ropSaveChangesMessage, "SaveChangesMessage(embedded)")
 
 	// Persist the attachment (flush the exported bytes), then save the carrier.
 	scA, _ := sess.Dispatch(buildSaveChangesAttachment(0, 1), []uint32{msgH, attH})
-	pa := ext.NewPull(scA, ext.FlagUTF16)
-	mustU8(t, pa, "RopId")
-	mustU8(t, pa, "hindex")
-	if ec := mustU32(t, pa, "ec"); ec != ecSuccess {
-		t.Fatalf("SaveChangesAttachment ReturnValue = %#x", ec)
-	}
+	ropOK(t, scA, ropSaveChangesAttachment, "SaveChangesAttachment")
 	sc, _ := sess.Dispatch(buildSaveChangesMessage(0, 1), []uint32{logonH, msgH})
 	saveChangesEID(t, sc)
 
 	// White-box: the parent attachment is now a method-5 embedded message.
+	assertAttachmentCount(t, store, mid, 1, "carrier")
 	saved, err := store.OpenMessage(int64(mid))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(saved.Attachments) != 1 {
-		t.Fatalf("carrier has %d attachments, want 1", len(saved.Attachments))
-	}
-	if m, _ := saved.Attachments[0].Props.Get(mapi.PrAttachMethod); m != int32(mapi.AttachEmbeddedMsg) {
-		t.Errorf("composed attachment method = %v, want %d (afEmbeddedMessage)", m, mapi.AttachEmbeddedMsg)
-	}
+	wantProp(t, saved.Attachments[0].Props, mapi.PrAttachMethod, int32(mapi.AttachEmbeddedMsg),
+		"composed attachment method (afEmbeddedMessage)")
 
 	// Read the composed embedded message back through the read path.
 	_, h = sess.Dispatch(buildOpenMessage(0, 1, inboxEID, uint64(mapi.MakeEIDEx(1, mid))), []uint32{logonH, 0xFFFFFFFF})
@@ -261,14 +241,9 @@ func TestComposeEmbeddedMessage(t *testing.T) {
 	reAttH := h[1]
 	oem2, h := sess.Dispatch(buildOpenEmbeddedMessage(0, 1, mapiModify), []uint32{reAttH, 0xFFFFFFFF})
 	reEmbH := h[1]
-	p = ext.NewPull(oem2, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "ohindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("OpenEmbeddedMessage(read-back) ReturnValue = %#x (composed embedded must round-trip)", ec)
-	}
+	p := ropOK(t, oem2, ropOpenEmbeddedMessage, "OpenEmbeddedMessage(read-back; a composed embedded must round-trip)")
 	mustU8(t, p, "Reserved")
-	_, _ = p.Uint64() // MessageId
+	mustU64(t, p, "MessageId")
 	mustU8(t, p, "HasNamedProperties")
 	readTypedString(t, p) // SubjectPrefix
 	if subj := readTypedString(t, p); subj != "Composed Inner" {
@@ -278,14 +253,8 @@ func TestComposeEmbeddedMessage(t *testing.T) {
 	// The body survived the export/import round-trip.
 	cols := []mapi.PropTag{mapi.PrBody}
 	gps, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{reEmbH})
-	p = ext.NewPull(gps, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("GetPropertiesSpecific(read-back embedded) = %#x", ec)
-	}
-	row := decodeRow(t, p, cols)
-	body, _ := row.Get(mapi.PrBody)
+	p = ropOK(t, gps, ropGetPropertiesSpecific, "GetPropertiesSpecific(read-back embedded)")
+	body, _ := decodeRow(t, p, cols).Get(mapi.PrBody)
 	if s, _ := body.(string); !strings.Contains(s, "Composed body.") {
 		t.Errorf("read-back embedded body = %q, want to contain %q", s, "Composed body.")
 	}

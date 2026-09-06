@@ -262,14 +262,7 @@ func TestCopyToSubObjects(t *testing.T) {
 		_, hh = sess.Dispatch(buildCreateMessage(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
 		dH := hh[1]
 		resp, _ := sess.Dispatch(buildCopyToWS(0, 1, wantSub, 0, excluded), []uint32{sH, dH})
-		p := ext.NewPull(resp, ext.FlagUTF16)
-		if id := mustU8(t, p, "RopId"); id != ropCopyTo {
-			t.Fatalf("CopyTo RopId = %#x", id)
-		}
-		mustU8(t, p, "hindex")
-		if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-			t.Fatalf("CopyTo ReturnValue = %#x", ec)
-		}
+		ropOK(t, resp, ropCopyTo, "CopyTo")
 		dstID := int64(mapi.EID(saveChangesEID(t, mustDispatch(sess, buildSaveChangesMessage(0, 1), logonH, dH))).GCValue())
 		m, err := store.OpenMessage(dstID)
 		if err != nil {
@@ -280,35 +273,28 @@ func TestCopyToSubObjects(t *testing.T) {
 
 	// WantSubObjects: recipient and attachment (with data) both copied.
 	full := copyInto(1, nil)
-	if len(full.Recipients) != 1 {
-		t.Fatalf("recipients copied = %d, want 1", len(full.Recipients))
-	}
-	if e, _ := full.Recipients[0].Get(mapi.PrSmtpAddress); e != "bob@hermex.test" {
-		t.Errorf("copied recipient smtp = %v, want bob@hermex.test", e)
-	}
-	if len(full.Attachments) != 1 {
-		t.Fatalf("attachments copied = %d, want 1", len(full.Attachments))
-	}
+	wantSubObjectCounts(t, full, 1, 1, "WantSubObjects")
+	wantProp(t, full.Recipients[0], mapi.PrSmtpAddress, "bob@hermex.test", "copied recipient smtp")
 	if data, _ := full.Attachments[0].Props.Get(mapi.PrAttachDataBin); !bytes.Equal(asBytes(data), []byte("attached-bytes")) {
 		t.Errorf("copied attachment data = %q, want attached-bytes", asBytes(data))
 	}
 
 	// Exclude PR_MESSAGE_ATTACHMENTS: recipient still copied, attachment suppressed.
 	noAtt := copyInto(1, []mapi.PropTag{mapi.PrMessageAttachments})
-	if len(noAtt.Recipients) != 1 {
-		t.Errorf("recipients with attachments excluded = %d, want 1", len(noAtt.Recipients))
-	}
-	if len(noAtt.Attachments) != 0 {
-		t.Errorf("attachment not suppressed by exclude = %d, want 0", len(noAtt.Attachments))
-	}
+	wantSubObjectCounts(t, noAtt, 1, 0, "attachments excluded")
 
 	// WantSubObjects FALSE: no sub-objects, but scalar properties still copied.
 	none := copyInto(0, nil)
-	if len(none.Recipients) != 0 || len(none.Attachments) != 0 {
-		t.Errorf("sub-objects copied without WantSubObjects: recips=%d attachs=%d", len(none.Recipients), len(none.Attachments))
-	}
-	if subj, _ := none.Props.Get(mapi.PrSubject); subj != "FWDSRC" {
-		t.Errorf("scalar subject not copied = %v, want FWDSRC", subj)
+	wantSubObjectCounts(t, none, 0, 0, "without WantSubObjects")
+	wantProp(t, none.Props, mapi.PrSubject, "FWDSRC", "scalar subject")
+}
+
+// wantSubObjectCounts asserts how many recipients and attachments a copy carried.
+func wantSubObjectCounts(t *testing.T, m *oxcmail.Message, recips, attachs int, what string) {
+	t.Helper()
+	if len(m.Recipients) != recips || len(m.Attachments) != attachs {
+		t.Fatalf("%s: copied recips=%d attachs=%d, want recips=%d attachs=%d",
+			what, len(m.Recipients), len(m.Attachments), recips, attachs)
 	}
 }
 
