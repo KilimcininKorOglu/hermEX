@@ -1,12 +1,10 @@
 package rop
 
 import (
-	"errors"
 	"strings"
 
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
-	"hermex/internal/objectstore"
 )
 
 // receiveFolderColumns are the fixed columns of a RopGetReceiveFolderTable row
@@ -54,9 +52,8 @@ func (s *Session) ropSetReceiveFolder(p *ext.Pull, out *ext.Push, handles []uint
 	if e1 != nil || e2 != nil {
 		return false
 	}
-	logon := s.get(handleAt(handles, hindex))
-	if logon == nil || logon.kind != kindLogon || logon.store == nil {
-		writeErr(out, ropSetReceiveFolder, hindex, ecError)
+	logon, ok := s.openLogon(out, ropSetReceiveFolder, handles, hindex, hindex)
+	if !ok {
 		return true
 	}
 	// Re-targeting a receive folder is a store-level configuration change reserved to
@@ -66,26 +63,31 @@ func (s *Session) ropSetReceiveFolder(p *ext.Pull, out *ext.Push, handles []uint
 	}
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	fid := int64(mapi.EID(fidRaw).GCValue())
-	if class == "" && fid == 0 {
-		writeErr(out, ropSetReceiveFolder, hindex, ecError) // cannot remove the default with a zero folder
-		return true
-	}
-	if strings.EqualFold(class, "IPM") || strings.EqualFold(class, "REPORT.IPM") {
-		writeErr(out, ropSetReceiveFolder, hindex, ecAccessDenied) // not settable
+	if ec, settable := receiveFolderSettable(class, fid); !settable {
+		writeErr(out, ropSetReceiveFolder, hindex, ec)
 		return true
 	}
 	if err := logon.store.SetReceiveFolder(class, fid); err != nil {
-		if errors.Is(err, objectstore.ErrNotFound) {
-			writeErr(out, ropSetReceiveFolder, hindex, ecNotFound)
-		} else {
-			writeErr(out, ropSetReceiveFolder, hindex, ecError)
-		}
+		writeErr(out, ropSetReceiveFolder, hindex, notFoundOrError(err))
 		return true
 	}
 	out.Uint8(ropSetReceiveFolder)
 	out.Uint8(hindex)
 	out.Uint32(ecSuccess)
 	return true
+}
+
+// receiveFolderSettable reports whether a receive-folder mapping may be written,
+// with the return code a refusal earns. The default (empty-class) mapping cannot
+// be removed by pointing it at folder zero, and the IPM classes are fixed.
+func receiveFolderSettable(class string, fid int64) (uint32, bool) {
+	if class == "" && fid == 0 {
+		return ecError, false // cannot remove the default with a zero folder
+	}
+	if strings.EqualFold(class, "IPM") || strings.EqualFold(class, "REPORT.IPM") {
+		return ecAccessDenied, false // not settable
+	}
+	return ecSuccess, true
 }
 
 // ropGetReceiveFolderTable handles RopGetReceiveFolderTable ([MS-OXCSTOR] 2.2.1.4):

@@ -100,20 +100,10 @@ func (s *Session) ropModifyRules(p *ext.Pull, out *ext.Push, handles []uint32, h
 	if e1 != nil || e2 != nil {
 		return false
 	}
-	type ruleRow struct {
-		flags    uint8
-		propvals mapi.PropertyValues
+	rows, framed := pullRuleRows(p, int(count))
+	if !framed {
+		return false
 	}
-	rows := make([]ruleRow, 0, count)
-	for i := 0; i < int(count); i++ {
-		rowFlags, e3 := p.Uint8()
-		propvals, e4 := p.PropertyValues()
-		if e3 != nil || e4 != nil {
-			return false
-		}
-		rows = append(rows, ruleRow{flags: rowFlags, propvals: propvals})
-	}
-
 	folder, ok := s.openFolder(out, ropModifyRules, handles, hindex, hindex)
 	if !ok {
 		return true
@@ -122,27 +112,7 @@ func (s *Session) ropModifyRules(p *ext.Pull, out *ext.Push, handles []uint32, h
 	if s.denyWrite(out, ropModifyRules, hindex, folder.store, folder.folderID, mapi.FrightsOwner) {
 		return true
 	}
-
-	changes := make([]objectstore.RuleChange, 0, len(rows))
-	for _, r := range rows {
-		switch r.flags {
-		case ruleRowAdd:
-			changes = append(changes, objectstore.RuleChange{Op: objectstore.RuleAdd, Patch: rulePatch(r.propvals)})
-		case ruleRowModify:
-			id, ok := ruleID(r.propvals)
-			if !ok {
-				continue // a modify without PR_RULE_ID cannot be keyed; skip it
-			}
-			changes = append(changes, objectstore.RuleChange{Op: objectstore.RuleModify, RuleID: id, Patch: rulePatch(r.propvals)})
-		case ruleRowRemove:
-			id, ok := ruleID(r.propvals)
-			if !ok {
-				continue
-			}
-			changes = append(changes, objectstore.RuleChange{Op: objectstore.RuleRemove, RuleID: id})
-		}
-	}
-
+	changes := ruleChanges(rows)
 	if err := folder.store.ModifyRules(folder.folderID, flags&modifyRulesReplace != 0, changes); err != nil {
 		writeErr(out, ropModifyRules, hindex, ecError)
 		return true
@@ -152,6 +122,62 @@ func (s *Session) ropModifyRules(p *ext.Pull, out *ext.Push, handles []uint32, h
 	out.Uint8(hindex) // echo the input handle
 	out.Uint32(ecSuccess)
 	return true
+}
+
+// ruleRow is one RuleData row: the operation it asks for and the properties
+// carrying the rule's columns.
+type ruleRow struct {
+	flags    uint8
+	propvals mapi.PropertyValues
+}
+
+// pullRuleRows reads the request's RuleData array. The rows are parsed before
+// the handle is resolved so the batch stays aligned even when the handle turns
+// out to be wrong.
+func pullRuleRows(p *ext.Pull, count int) ([]ruleRow, bool) {
+	rows := make([]ruleRow, 0, count)
+	for range count {
+		rowFlags, e1 := p.Uint8()
+		propvals, e2 := p.PropertyValues()
+		if e1 != nil || e2 != nil {
+			return nil, false
+		}
+		rows = append(rows, ruleRow{flags: rowFlags, propvals: propvals})
+	}
+	return rows, true
+}
+
+// ruleChanges turns the request rows into store operations. A modify or remove
+// without PR_RULE_ID cannot be keyed and is skipped rather than faulted.
+func ruleChanges(rows []ruleRow) []objectstore.RuleChange {
+	changes := make([]objectstore.RuleChange, 0, len(rows))
+	for _, r := range rows {
+		if c, ok := ruleChange(r); ok {
+			changes = append(changes, c)
+		}
+	}
+	return changes
+}
+
+// ruleChange maps one row to its store operation.
+func ruleChange(r ruleRow) (objectstore.RuleChange, bool) {
+	switch r.flags {
+	case ruleRowAdd:
+		return objectstore.RuleChange{Op: objectstore.RuleAdd, Patch: rulePatch(r.propvals)}, true
+	case ruleRowModify:
+		id, ok := ruleID(r.propvals)
+		if !ok {
+			return objectstore.RuleChange{}, false
+		}
+		return objectstore.RuleChange{Op: objectstore.RuleModify, RuleID: id, Patch: rulePatch(r.propvals)}, true
+	case ruleRowRemove:
+		id, ok := ruleID(r.propvals)
+		if !ok {
+			return objectstore.RuleChange{}, false
+		}
+		return objectstore.RuleChange{Op: objectstore.RuleRemove, RuleID: id}, true
+	}
+	return objectstore.RuleChange{}, false
 }
 
 // ruleID reads PR_RULE_ID (PtI8) from a rule row's property bag.
@@ -170,37 +196,30 @@ func ruleID(propvals mapi.PropertyValues) (int64, bool) {
 // PR_RULE_ID and any unmodeled property are ignored here.
 func rulePatch(propvals mapi.PropertyValues) objectstore.RulePatch {
 	var patch objectstore.RulePatch
-	if v, ok := propvals.Get(mapi.PrRuleName); ok {
-		if name, ok := v.(string); ok {
-			patch.Name = &name
-		}
-	}
-	if v, ok := propvals.Get(mapi.PrRuleProvider); ok {
-		if provider, ok := v.(string); ok {
-			patch.Provider = &provider
-		}
-	}
-	if v, ok := propvals.Get(mapi.PrRuleSequence); ok {
-		if seq, ok := v.(int32); ok {
-			patch.Sequence = &seq
-		}
-	}
-	if v, ok := propvals.Get(mapi.PrRuleState); ok {
-		if n, ok := v.(int32); ok {
-			// #nosec G115 -- the signed and unsigned views of the same 32 bits
-			state := uint32(n)
-			patch.State = &state
-		}
-	}
-	if v, ok := propvals.Get(mapi.PrRuleCondition); ok {
-		if cond, ok := v.(mapi.Restriction); ok {
-			patch.Condition = &cond
-		}
-	}
-	if v, ok := propvals.Get(mapi.PrRuleActions); ok {
-		if acts, ok := v.(mapi.RuleActions); ok {
-			patch.Actions = &acts
-		}
+	patch.Name = patchValue[string](propvals, mapi.PrRuleName)
+	patch.Provider = patchValue[string](propvals, mapi.PrRuleProvider)
+	patch.Sequence = patchValue[int32](propvals, mapi.PrRuleSequence)
+	patch.Condition = patchValue[mapi.Restriction](propvals, mapi.PrRuleCondition)
+	patch.Actions = patchValue[mapi.RuleActions](propvals, mapi.PrRuleActions)
+	if n := patchValue[int32](propvals, mapi.PrRuleState); n != nil {
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
+		state := uint32(*n)
+		patch.State = &state
 	}
 	return patch
+}
+
+// patchValue reads one property as the type the patch field holds, returning nil
+// when the row did not carry it or carried it as another type. A nil pointer is
+// what tells the store the column is absent, so a Modify leaves it alone.
+func patchValue[T any](propvals mapi.PropertyValues, tag mapi.PropTag) *T {
+	v, ok := propvals.Get(tag)
+	if !ok {
+		return nil
+	}
+	typed, ok := v.(T)
+	if !ok {
+		return nil
+	}
+	return &typed
 }

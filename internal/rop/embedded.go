@@ -49,33 +49,7 @@ func (s *Session) ropOpenEmbeddedMessage(p *ext.Pull, out *ext.Push, handles []u
 
 	switch att.kind {
 	case kindAttachment:
-		// Open an existing embedded message: import the encapsulated bytes. The
-		// embedded message lives behind a method-5 (afEmbeddedMessage) attachment.
-		// Anything else has no embedded message to open; creating one in place over an
-		// opened attachment is not supported in v1 (the compose path runs over a newly
-		// created attachment).
-		var data []byte
-		if v, ok := att.attachProps.Get(mapi.PrAttachDataBin); ok {
-			data, _ = v.([]byte)
-		}
-		var method int32
-		if v, ok := att.attachProps.Get(mapi.PrAttachMethod); ok {
-			method, _ = v.(int32)
-		}
-		if method != int32(mapi.AttachEmbeddedMsg) || len(data) == 0 {
-			if flags&mapiCreate == 0 {
-				writeErr(out, ropOpenEmbeddedMessage, ohindex, ecNotFound)
-			} else {
-				writeErr(out, ropOpenEmbeddedMessage, ohindex, ecNotSupported)
-			}
-			return true
-		}
-		emb, err := oxcmail.Import(data, oxcmail.Options{})
-		if err != nil {
-			writeErr(out, ropOpenEmbeddedMessage, ohindex, ecError)
-			return true
-		}
-		s.openEmbeddedResponse(out, handles, ohindex, att.store, &embeddedMessage{msg: emb})
+		s.openStoredEmbedded(out, handles, ohindex, att, flags)
 		return true
 
 	case kindAttachWrite:
@@ -93,6 +67,43 @@ func (s *Session) ropOpenEmbeddedMessage(p *ext.Pull, out *ext.Push, handles []u
 		writeErr(out, ropOpenEmbeddedMessage, ohindex, ecNotSupported)
 		return true
 	}
+}
+
+// openStoredEmbedded opens an existing embedded message by importing the
+// encapsulated bytes. An embedded message lives behind a method-5
+// (afEmbeddedMessage) attachment; anything else has none to open, and creating
+// one in place over an opened attachment is not supported in v1 (the compose
+// path runs over a newly created attachment instead).
+func (s *Session) openStoredEmbedded(out *ext.Push, handles []uint32, ohindex uint8, att *object, flags uint8) {
+	data, method := embeddedPayload(att.attachProps)
+	if method != int32(mapi.AttachEmbeddedMsg) || len(data) == 0 {
+		if flags&mapiCreate == 0 {
+			writeErr(out, ropOpenEmbeddedMessage, ohindex, ecNotFound)
+			return
+		}
+		writeErr(out, ropOpenEmbeddedMessage, ohindex, ecNotSupported)
+		return
+	}
+	emb, err := oxcmail.Import(data, oxcmail.Options{})
+	if err != nil {
+		writeErr(out, ropOpenEmbeddedMessage, ohindex, ecError)
+		return
+	}
+	s.openEmbeddedResponse(out, handles, ohindex, att.store, &embeddedMessage{msg: emb})
+}
+
+// embeddedPayload reads the attachment's encapsulated bytes and its method, the
+// two properties that decide whether an embedded message is there at all.
+func embeddedPayload(props mapi.PropertyValues) ([]byte, int32) {
+	var data []byte
+	if v, ok := props.Get(mapi.PrAttachDataBin); ok {
+		data, _ = v.([]byte)
+	}
+	var method int32
+	if v, ok := props.Get(mapi.PrAttachMethod); ok {
+		method, _ = v.(int32)
+	}
+	return data, method
 }
 
 // openEmbeddedResponse registers the embedded message object under the output

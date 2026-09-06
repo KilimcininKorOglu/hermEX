@@ -248,6 +248,17 @@ func (s *Session) openFolder(out *ext.Push, ropID uint8, handles []uint32, hinde
 	return folder, true
 }
 
+// openLogon resolves a handle to a store-bound logon object, which is what every
+// store-level ROP acts on.
+func (s *Session) openLogon(out *ext.Push, ropID uint8, handles []uint32, hindex, errIndex uint8) (*object, bool) {
+	logon := s.get(handleAt(handles, hindex))
+	if logon == nil || logon.kind != kindLogon || logon.store == nil {
+		writeErr(out, ropID, errIndex, ecError)
+		return nil, false
+	}
+	return logon, true
+}
+
 // openMessage resolves a handle to a store-bound message object, the counterpart
 // of openFolder for the ROPs that act on an opened (not composed) message.
 func (s *Session) openMessage(out *ext.Push, ropID uint8, handles []uint32, hindex, errIndex uint8) (*object, bool) {
