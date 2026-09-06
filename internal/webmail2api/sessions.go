@@ -156,32 +156,43 @@ func clientIPOnly(addr string) string {
 // list; it is a coarse best-effort, never parsed for anything load-bearing.
 func deviceLabel(ua string) string {
 	l := strings.ToLower(ua)
-	browser := "Browser"
-	switch {
-	case strings.Contains(l, "edg/"):
-		browser = "Edge"
-	case strings.Contains(l, "chrome/") && !strings.Contains(l, "chromium"):
-		browser = "Chrome"
-	case strings.Contains(l, "firefox/"):
-		browser = "Firefox"
-	case strings.Contains(l, "safari/") && !strings.Contains(l, "chrome"):
-		browser = "Safari"
-	}
-	os := ""
-	switch {
-	case strings.Contains(l, "iphone"), strings.Contains(l, "ipad"):
-		os = "iOS"
-	case strings.Contains(l, "android"):
-		os = "Android"
-	case strings.Contains(l, "mac os"), strings.Contains(l, "macintosh"):
-		os = "macOS"
-	case strings.Contains(l, "windows"):
-		os = "Windows"
-	case strings.Contains(l, "linux"):
-		os = "Linux"
-	}
-	if os != "" {
+	browser := browserName(l)
+	if os := osName(l); os != "" {
 		return browser + " on " + os
 	}
 	return browser
+}
+
+// browserName picks the browser out of a lowercased User-Agent. The order
+// matters: every one of these agents also claims the ones below it.
+func browserName(l string) string {
+	switch {
+	case strings.Contains(l, "edg/"):
+		return "Edge"
+	case strings.Contains(l, "chrome/") && !strings.Contains(l, "chromium"):
+		return "Chrome"
+	case strings.Contains(l, "firefox/"):
+		return "Firefox"
+	case strings.Contains(l, "safari/") && !strings.Contains(l, "chrome"):
+		return "Safari"
+	}
+	return "Browser"
+}
+
+// osName picks the operating system out of a lowercased User-Agent, reporting ""
+// when none is recognisable.
+func osName(l string) string {
+	switch {
+	case strings.Contains(l, "iphone"), strings.Contains(l, "ipad"):
+		return "iOS"
+	case strings.Contains(l, "android"):
+		return "Android"
+	case strings.Contains(l, "mac os"), strings.Contains(l, "macintosh"):
+		return "macOS"
+	case strings.Contains(l, "windows"):
+		return "Windows"
+	case strings.Contains(l, "linux"):
+		return "Linux"
+	}
+	return ""
 }

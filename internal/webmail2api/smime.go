@@ -137,34 +137,8 @@ func (s *Server) handleUploadSmimeCert(w http.ResponseWriter, r *http.Request) {
 	}
 	defer st.Close()
 
-	// Server mode: open the .p12 with the user's password, then re-encrypt it at
-	// rest under a server-derived password so the server can sign/decrypt for them.
 	if req.Mode == "server" || req.P12 != "" {
-		p12Bytes, derr := base64.StdEncoding.DecodeString(req.P12)
-		if derr != nil || len(p12Bytes) == 0 {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid .p12 file"})
-			return
-		}
-		key, cert, perr := smime.ParseIdentity(p12Bytes, req.Passphrase)
-		if perr != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "wrong password or unreadable .p12"})
-			return
-		}
-		password, perr := smimeStorePassword(st, s.secret)
-		if perr != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not store the identity"})
-			return
-		}
-		reP12, eerr := pkcs12.Modern.Encode(key, cert, nil, password)
-		if eerr != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not store the identity"})
-			return
-		}
-		if err := st.SetSmimeIdentity(objectstore.SmimeIdentity{Mode: "server", Cert: cert.Raw, P12: reP12}); err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not store the identity"})
-			return
-		}
-		writeJSON(w, http.StatusOK, certInfo(cert))
+		s.storeServerIdentity(w, st, req.P12, req.Passphrase)
 		return
 	}
 
@@ -184,6 +158,42 @@ func (s *Server) handleUploadSmimeCert(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, certInfo(cert))
+}
+
+// storeServerIdentity opens the uploaded .p12 with the user's password, then
+// re-encrypts it at rest under a server-derived password so the server can sign
+// and decrypt for them. It answers the client itself.
+func (s *Server) storeServerIdentity(w http.ResponseWriter, st *objectstore.Store, p12, passphrase string) {
+	p12Bytes, err := base64.StdEncoding.DecodeString(p12)
+	if err != nil || len(p12Bytes) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid .p12 file"})
+		return
+	}
+	key, cert, err := smime.ParseIdentity(p12Bytes, passphrase)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "wrong password or unreadable .p12"})
+		return
+	}
+	reP12, err := reEncryptIdentity(st, s.secret, key, cert)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not store the identity"})
+		return
+	}
+	if err := st.SetSmimeIdentity(objectstore.SmimeIdentity{Mode: "server", Cert: cert.Raw, P12: reP12}); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not store the identity"})
+		return
+	}
+	writeJSON(w, http.StatusOK, certInfo(cert))
+}
+
+// reEncryptIdentity re-encodes an identity under the mailbox's server-derived
+// storage password.
+func reEncryptIdentity(st *objectstore.Store, secret []byte, key any, cert *x509.Certificate) ([]byte, error) {
+	password, err := smimeStorePassword(st, secret)
+	if err != nil {
+		return nil, err
+	}
+	return pkcs12.Modern.Encode(key, cert, nil, password)
 }
 
 // handleDeleteSmimeCert removes the caller's published certificate.

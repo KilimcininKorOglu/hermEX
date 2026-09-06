@@ -128,28 +128,28 @@ func appointmentsOn(st *objectstore.Store, dayStart, dayEnd time.Time) []todayIt
 			continue
 		}
 		start := propTime(props, startTag)
-		if start.IsZero() {
+		if start.IsZero() || start.Before(dayStart) || !start.Before(dayEnd) {
 			continue
 		}
-		if start.Before(dayStart) || !start.Before(dayEnd) {
-			continue
-		}
-		item := todayItem{
-			ID:      strconv.FormatInt(o.ID, 10),
-			Subject: propString2(props, mapi.PrSubject),
-			Start:   start.UTC().Format(time.RFC3339),
-		}
-		if end := propTime(props, endTag); !end.IsZero() {
-			item.End = end.UTC().Format(time.RFC3339)
-		}
-		if v, ok := props.Get(subTag); ok {
-			if b, ok := v.(bool); ok {
-				item.AllDay = b
-			}
-		}
-		out = append(out, item)
+		out = append(out, todayAppointment(o.ID, props, start, endTag, subTag))
 	}
 	return out
+}
+
+// todayAppointment renders one appointment for the dashboard.
+func todayAppointment(id int64, props mapi.PropertyValues, start time.Time, endTag, subTag mapi.PropTag) todayItem {
+	item := todayItem{
+		ID:      strconv.FormatInt(id, 10),
+		Subject: propString2(props, mapi.PrSubject),
+		Start:   start.UTC().Format(time.RFC3339),
+	}
+	if end := propTime(props, endTag); !end.IsZero() {
+		item.End = end.UTC().Format(time.RFC3339)
+	}
+	if v, ok := props.Get(subTag); ok {
+		item.AllDay, _ = v.(bool)
+	}
+	return item
 }
 
 // tasksDueBy returns the incomplete tasks due on or before the cutoff (today's end,

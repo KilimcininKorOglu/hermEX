@@ -125,24 +125,31 @@ func icsFilename(ics []byte) string {
 // drops path separators, quotes, and control characters, collapses whitespace to
 // underscores, and bounds the length.
 func sanitizeICSName(s string) string {
-	s = strings.TrimSpace(s)
 	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r < 0x20 || r == 0x7f:
-			// skip control characters
-		case r == '/' || r == '\\' || r == '"' || r == ':':
-			// skip path and quoting characters
-		case r == ' ' || r == '\t':
-			b.WriteByte('_')
-		default:
-			b.WriteRune(r)
+	for _, r := range strings.TrimSpace(s) {
+		if repl, keep := icsNameRune(r); keep {
+			b.WriteRune(repl)
 		}
 		if b.Len() >= 80 {
 			break
 		}
 	}
 	return strings.Trim(b.String(), "_.")
+}
+
+// icsNameRune maps one rune to what the filename may carry: whitespace becomes
+// an underscore, control characters and the path/quoting characters are dropped,
+// everything else passes through.
+func icsNameRune(r rune) (rune, bool) {
+	switch {
+	case r < 0x20 || r == 0x7f:
+		return 0, false
+	case r == '/' || r == '\\' || r == '"' || r == ':':
+		return 0, false
+	case r == ' ' || r == '\t':
+		return '_', true
+	}
+	return r, true
 }
 
 // meetingResponseCode maps the SPA's response vocabulary to the stored response

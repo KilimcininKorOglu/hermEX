@@ -88,13 +88,8 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	if bad, found := firstUnusableAddress(req.To, req.Cc, req.Bcc); found {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a valid email address: " + bad})
-		return
-	}
-	recipients := collectRecipients(req.To, req.Cc, req.Bcc)
-	if len(recipients) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "at least one recipient is required"})
+	recipients, ok := validRecipients(w, req)
+	if !ok {
 		return
 	}
 
@@ -113,36 +108,15 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Server-mode S/MIME: sign/encrypt here with the server-held key. Browser-mode
-	// users do this in the browser and use /mail/send-raw, so they do not set these.
-	if req.SignMessage || req.EncryptMessage {
-		signed, aerr := s.applySmime(c.Mailbox, raw, recipients, req.SignMessage, req.EncryptMessage)
-		if aerr != nil {
-			// The wrapped error names the signing library's internals and, on the
-			// encrypt path, a recipient's certificate state. The caller is told what
-			// failed, not how.
-			logError("smime-apply", aerr, logging.Fields{"user": c.Email})
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not sign or encrypt the message"})
-			return
-		}
-		raw = signed
+	raw, ok = s.signOutgoing(w, c, raw, recipients, req)
+	if !ok {
+		return
 	}
 
 	// Scheduled (send-later): file the built message in the Outbox with a deferred
 	// send time; the release worker delivers it when due.
 	if req.SendAt != "" {
-		st, err := objectstore.Open(c.Mailbox)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
-			return
-		}
-		defer st.Close()
-		if err := scheduleOutbox(st, raw, req.SendAt); err != nil {
-			logError("schedule-send", err, logging.Fields{"user": c.Email})
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not schedule the message"})
-			return
-		}
-		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "scheduled": true})
+		s.scheduleSend(w, c, raw, req.SendAt)
 		return
 	}
 
@@ -160,6 +134,58 @@ func (s *Server) handleMailSend(w http.ResponseWriter, r *http.Request) {
 		_ = st.Close()
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// validRecipients collects the envelope recipients, refusing an unusable
+// address and a send with nobody to deliver to. It answers the client itself.
+func validRecipients(w http.ResponseWriter, req sendRequest) ([]string, bool) {
+	if bad, found := firstUnusableAddress(req.To, req.Cc, req.Bcc); found {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a valid email address: " + bad})
+		return nil, false
+	}
+	recipients := collectRecipients(req.To, req.Cc, req.Bcc)
+	if len(recipients) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "at least one recipient is required"})
+		return nil, false
+	}
+	return recipients, true
+}
+
+// signOutgoing applies server-mode S/MIME: sign and encrypt here with the
+// server-held key. Browser-mode users do this in the browser and use
+// /mail/send-raw, so they do not set these. It answers the client itself on
+// failure and reports false.
+func (s *Server) signOutgoing(w http.ResponseWriter, c sessionClaims, raw []byte, recipients []string, req sendRequest) ([]byte, bool) {
+	if !req.SignMessage && !req.EncryptMessage {
+		return raw, true
+	}
+	signed, err := s.applySmime(c.Mailbox, raw, recipients, req.SignMessage, req.EncryptMessage)
+	if err != nil {
+		// The wrapped error names the signing library's internals and, on the
+		// encrypt path, a recipient's certificate state. The caller is told what
+		// failed, not how.
+		logError("smime-apply", err, logging.Fields{"user": c.Email})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not sign or encrypt the message"})
+		return nil, false
+	}
+	return signed, true
+}
+
+// scheduleSend files a built message in the Outbox with a deferred send time;
+// the release worker delivers it when due. It answers the client itself.
+func (s *Server) scheduleSend(w http.ResponseWriter, c sessionClaims, raw []byte, sendAt string) {
+	st, err := objectstore.Open(c.Mailbox)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
+		return
+	}
+	defer st.Close()
+	if err := scheduleOutbox(st, raw, sendAt); err != nil {
+		logError("schedule-send", err, logging.Fields{"user": c.Email})
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not schedule the message"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "scheduled": true})
 }
 
 // firstUnusableAddress returns the first entry that cannot be parsed as an
@@ -271,13 +297,8 @@ func (s *Server) handleMailSendRaw(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusForbidden, map[string]string{"error": "you may not send as this address"})
 		return
 	}
-	if bad, found := firstUnusableAddress(req.To, req.Cc, req.Bcc); found {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a valid email address: " + bad})
-		return
-	}
-	recipients := collectRecipients(req.To, req.Cc, req.Bcc)
-	if len(recipients) == 0 {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "at least one recipient is required"})
+	recipients, ok := validRecipients(w, sendRequest{To: req.To, Cc: req.Cc, Bcc: req.Bcc})
+	if !ok {
 		return
 	}
 	if _, err := mta.DeliverAndRelay(s.accounts, s.spool, c.Email, recipients, raw, time.Now()); err != nil {
@@ -441,28 +462,7 @@ func (s *Server) buildOutgoing(representing, sender string, req sendRequest) ([]
 	props.Set(mapi.PrSubject, req.Subject)
 	props.Set(mapi.PrClientSubmitTime, mapi.UnixToNTTime(time.Now()))
 	props.Set(mapi.PrInternetMessageID, "<"+randomHex()+"@"+s.hostname+">")
-	switch req.Importance {
-	case "high":
-		props.Set(mapi.PrImportance, int32(mapi.ImportanceHigh))
-	case "low":
-		props.Set(mapi.PrImportance, int32(mapi.ImportanceLow))
-	}
-	// Sensitivity mirrors importance: only a non-normal value sets the property,
-	// which oxcmail.Export then emits as the RFC 2156 Sensitivity header.
-	switch req.Sensitivity {
-	case "personal":
-		props.Set(mapi.PrSensitivity, int32(mapi.SensitivityPersonal))
-	case "private":
-		props.Set(mapi.PrSensitivity, int32(mapi.SensitivityPrivate))
-	case "confidential":
-		props.Set(mapi.PrSensitivity, int32(mapi.SensitivityConfidential))
-	}
-	if req.RequestReadReceipt {
-		props.Set(mapi.PrReadReceiptRequested, true)
-	}
-	if req.RequestDeliveryReceipt {
-		props.Set(mapi.PrOriginatorDeliveryReportRequested, true)
-	}
+	setSendOptions(&props, req)
 	// The SPA sends a single body; is_html marks it HTML. Export needs the plain
 	// part too (the text/plain alternative), derived by stripping tags.
 	// A picture pasted into the composer arrives as a data: URI. It has to become
@@ -487,13 +487,51 @@ func (s *Server) buildOutgoing(representing, sender string, req sendRequest) ([]
 	msg := &oxcmail.Message{Props: props}
 	msg.Attachments = append(msg.Attachments, inlineImages...)
 	msg.Recipients = append(rcptBags(req.To, mapi.RecipTo), rcptBags(req.Cc, mapi.RecipCc)...)
-	for _, a := range req.Attachments {
+	attachments, err := sendAttachments(req.Attachments)
+	if err != nil {
+		return nil, err
+	}
+	msg.Attachments = append(msg.Attachments, attachments...)
+	return oxcmail.Export(msg, oxcmail.Options{})
+}
+
+// setSendOptions stamps the compose options that only set a property when they
+// leave the default. oxcmail.Export emits importance as the Importance header
+// and sensitivity as the RFC 2156 Sensitivity header.
+func setSendOptions(props *mapi.PropertyValues, req sendRequest) {
+	switch req.Importance {
+	case "high":
+		props.Set(mapi.PrImportance, int32(mapi.ImportanceHigh))
+	case "low":
+		props.Set(mapi.PrImportance, int32(mapi.ImportanceLow))
+	}
+	switch req.Sensitivity {
+	case "personal":
+		props.Set(mapi.PrSensitivity, int32(mapi.SensitivityPersonal))
+	case "private":
+		props.Set(mapi.PrSensitivity, int32(mapi.SensitivityPrivate))
+	case "confidential":
+		props.Set(mapi.PrSensitivity, int32(mapi.SensitivityConfidential))
+	}
+	if req.RequestReadReceipt {
+		props.Set(mapi.PrReadReceiptRequested, true)
+	}
+	if req.RequestDeliveryReceipt {
+		props.Set(mapi.PrOriginatorDeliveryReportRequested, true)
+	}
+}
+
+// sendAttachments builds the attachment bags for the composed message.
+//
+// A file that will not decode fails the whole send. The sender attached it on
+// purpose, so skipping it delivers a message the sender believes carries an
+// attachment it does not, and answers with success. Refuse instead and name the
+// file, so the failure is visible where it can be corrected.
+func sendAttachments(list []mailAttachment) ([]oxcmail.Attachment, error) {
+	var out []oxcmail.Attachment
+	for _, a := range list {
 		data, err := decodeAttachment(a.Content)
 		if err != nil {
-			// Never send the message without it. The sender attached this file on
-			// purpose, so skipping it delivers a message the sender believes carries
-			// an attachment it does not, and answers with success. Refuse instead and
-			// name the file, so the failure is visible where it can be corrected.
 			return nil, badAttachmentError{name: a.Filename}
 		}
 		var p mapi.PropertyValues
@@ -505,9 +543,9 @@ func (s *Server) buildOutgoing(representing, sender string, req sendRequest) ([]
 		if a.Filename != "" {
 			p.Set(mapi.PrAttachLongFilename, a.Filename)
 		}
-		msg.Attachments = append(msg.Attachments, oxcmail.Attachment{Props: p})
+		out = append(out, oxcmail.Attachment{Props: p})
 	}
-	return oxcmail.Export(msg, oxcmail.Options{})
+	return out, nil
 }
 
 // rcptBags builds the per-recipient MAPI property bags for a To/Cc field.

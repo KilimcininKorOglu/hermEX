@@ -320,39 +320,54 @@ func compileConds(cs []filterCondJSON) []mapi.Restriction {
 // matcher is used for text fields (mirroring the prior behavior); importance,
 // sensitivity, flag, and out-of-office are equality/existence tests.
 func compileCond(c filterCondJSON) (mapi.Restriction, bool) {
-	switch c.Field {
-	case "subject":
-		return objectstore.RuleSubjectContains(c.Value), true
-	case "from", "address":
-		return objectstore.RuleFromContains(c.Value), true
-	case "to":
-		return objectstore.RuleToContains(c.Value), true
-	case "cc":
-		return objectstore.RuleCcContains(c.Value), true
-	case "body":
-		return objectstore.RuleBodyContains(c.Value), true
-	case "header":
-		// PR_TRANSPORT_MESSAGE_HEADERS holds the raw headers, so a value substring
-		// (or the header name when no value is given) matches any header line.
-		v := c.Value
-		if v == "" {
-			v = c.HeaderName
-		}
-		return objectstore.RuleHeaderContains(v), true
-	case "flag":
-		return objectstore.RuleFlagged(), true
-	case "importance":
-		return objectstore.RuleImportanceIs(importanceLevel(c.Value)), true
-	case "sensitivity":
-		return objectstore.RuleSensitivityIs(sensitivityLevel(c.Value)), true
-	case "oof":
-		return objectstore.RuleOOFActive(), true
-	case "size":
-		if n, err := strconv.Atoi(strings.TrimSpace(c.Value)); err == nil {
-			return objectstore.RuleSizeAtLeast(n), true
-		}
+	build, ok := condBuilders[c.Field]
+	if !ok {
+		return mapi.Restriction{}, false
 	}
-	return mapi.Restriction{}, false
+	return build(c)
+}
+
+// condBuilders is the single source of the condition fields a filter accepts.
+// A field absent from this table is not a filter condition at all, which is what
+// makes compileCond reject it.
+var condBuilders = map[string]func(filterCondJSON) (mapi.Restriction, bool){
+	"subject": func(c filterCondJSON) (mapi.Restriction, bool) { return objectstore.RuleSubjectContains(c.Value), true },
+	"from":    func(c filterCondJSON) (mapi.Restriction, bool) { return objectstore.RuleFromContains(c.Value), true },
+	"address": func(c filterCondJSON) (mapi.Restriction, bool) { return objectstore.RuleFromContains(c.Value), true },
+	"to":      func(c filterCondJSON) (mapi.Restriction, bool) { return objectstore.RuleToContains(c.Value), true },
+	"cc":      func(c filterCondJSON) (mapi.Restriction, bool) { return objectstore.RuleCcContains(c.Value), true },
+	"body":    func(c filterCondJSON) (mapi.Restriction, bool) { return objectstore.RuleBodyContains(c.Value), true },
+	"header":  headerCond,
+	"flag":    func(filterCondJSON) (mapi.Restriction, bool) { return objectstore.RuleFlagged(), true },
+	"oof":     func(filterCondJSON) (mapi.Restriction, bool) { return objectstore.RuleOOFActive(), true },
+	"importance": func(c filterCondJSON) (mapi.Restriction, bool) {
+		return objectstore.RuleImportanceIs(importanceLevel(c.Value)), true
+	},
+	"sensitivity": func(c filterCondJSON) (mapi.Restriction, bool) {
+		return objectstore.RuleSensitivityIs(sensitivityLevel(c.Value)), true
+	},
+	"size": sizeCond,
+}
+
+// headerCond matches against the raw headers. PR_TRANSPORT_MESSAGE_HEADERS holds
+// them verbatim, so a value substring (or the header name when no value is
+// given) matches any header line.
+func headerCond(c filterCondJSON) (mapi.Restriction, bool) {
+	v := c.Value
+	if v == "" {
+		v = c.HeaderName
+	}
+	return objectstore.RuleHeaderContains(v), true
+}
+
+// sizeCond matches messages at least the given size; a non-numeric value is not
+// a condition at all.
+func sizeCond(c filterCondJSON) (mapi.Restriction, bool) {
+	n, err := strconv.Atoi(strings.TrimSpace(c.Value))
+	if err != nil {
+		return mapi.Restriction{}, false
+	}
+	return objectstore.RuleSizeAtLeast(n), true
 }
 
 // importanceLevel maps a filter's importance value (high/normal/low or 0-2) to a
@@ -387,48 +402,99 @@ func sensitivityLevel(v string) int {
 // stop-processing flag.
 func filterActions(st *objectstore.Store, f filterJSON) (blocks []mapi.ActionBlock, stop bool, ok bool) {
 	for _, a := range f.Actions {
-		switch a.Type {
-		case "moveToFolder":
-			if fid, found := resolveFilterFolder(st, a.Target); found {
-				blocks = append(blocks, objectstore.RuleMoveAction(fid))
-			}
-		case "copyToFolder":
-			if fid, found := resolveFilterFolder(st, a.Target); found {
-				blocks = append(blocks, objectstore.RuleCopyAction(fid))
-			}
-		case "delete":
-			blocks = append(blocks, objectstore.RuleDeleteAction())
-		case "markRead":
-			blocks = append(blocks, objectstore.RuleMarkReadAction())
-		case "forward", "redirect", "forwardAsAttachment":
-			// All three redirect the same bytes to the target; "as attachment" is a
-			// presentation flavor the store-level forward does not distinguish.
-			if a.ForwardTo != "" {
-				blocks = append(blocks, objectstore.RuleForwardAction(a.ForwardTo))
-			} else if a.Target != "" {
-				blocks = append(blocks, objectstore.RuleForwardAction(a.Target))
-			}
-		case "markImportant":
-			blocks = append(blocks, objectstore.RuleSetPropAction(mapi.PrImportance, int32(mapi.ImportanceHigh)))
-		case "flag":
-			blocks = append(blocks, objectstore.RuleSetPropAction(mapi.PrFlagStatus, int32(2)))
-		case "categorize":
-			if tag, err := st.KeywordsPropTag(); err == nil {
-				if cats := splitCategories(a.Target); len(cats) > 0 {
-					blocks = append(blocks, objectstore.RuleTagAction(tag, cats...))
-				}
-			}
-		case "reject":
-			blocks = append(blocks, objectstore.RuleRejectAction(rejectReason(a)))
-		case "vacation":
-			if msg := strings.TrimSpace(a.Message); msg != "" {
-				blocks = append(blocks, objectstore.RuleVacationAction(msg))
-			}
-		case "stop":
+		if a.Type == "stop" {
 			stop = true
+			continue
 		}
+		build, known := actionBuilders[a.Type]
+		if !known {
+			continue
+		}
+		blocks = append(blocks, build(st, a)...)
 	}
 	return blocks, stop, len(blocks) > 0 || stop
+}
+
+// actionBuilders is the single source of the actions a filter accepts. Each
+// builder returns the blocks its action contributes, or none when the action
+// carries nothing usable. "stop" is not here: it sets a flag rather than adding
+// a block.
+var actionBuilders = map[string]func(*objectstore.Store, filterActionJSON) []mapi.ActionBlock{
+	"moveToFolder": func(st *objectstore.Store, a filterActionJSON) []mapi.ActionBlock {
+		return folderAction(st, a.Target, objectstore.RuleMoveAction)
+	},
+	"copyToFolder": func(st *objectstore.Store, a filterActionJSON) []mapi.ActionBlock {
+		return folderAction(st, a.Target, objectstore.RuleCopyAction)
+	},
+	"delete": func(*objectstore.Store, filterActionJSON) []mapi.ActionBlock {
+		return []mapi.ActionBlock{objectstore.RuleDeleteAction()}
+	},
+	"markRead": func(*objectstore.Store, filterActionJSON) []mapi.ActionBlock {
+		return []mapi.ActionBlock{objectstore.RuleMarkReadAction()}
+	},
+	// All three forward flavors redirect the same bytes to the target; "as
+	// attachment" is a presentation flavor the store-level forward does not
+	// distinguish.
+	"forward":             forwardAction,
+	"redirect":            forwardAction,
+	"forwardAsAttachment": forwardAction,
+	"markImportant": func(*objectstore.Store, filterActionJSON) []mapi.ActionBlock {
+		return []mapi.ActionBlock{objectstore.RuleSetPropAction(mapi.PrImportance, int32(mapi.ImportanceHigh))}
+	},
+	"flag": func(*objectstore.Store, filterActionJSON) []mapi.ActionBlock {
+		return []mapi.ActionBlock{objectstore.RuleSetPropAction(mapi.PrFlagStatus, int32(2))}
+	},
+	"categorize": categorizeAction,
+	"reject": func(_ *objectstore.Store, a filterActionJSON) []mapi.ActionBlock {
+		return []mapi.ActionBlock{objectstore.RuleRejectAction(rejectReason(a))}
+	},
+	"vacation": vacationAction,
+}
+
+// folderAction resolves the target folder and builds the block, contributing
+// nothing when the folder does not resolve.
+func folderAction(st *objectstore.Store, target string, build func(int64) mapi.ActionBlock) []mapi.ActionBlock {
+	fid, found := resolveFilterFolder(st, target)
+	if !found {
+		return nil
+	}
+	return []mapi.ActionBlock{build(fid)}
+}
+
+// forwardAction redirects to the explicit forward address, falling back to the
+// generic target field the SPA also writes it into.
+func forwardAction(_ *objectstore.Store, a filterActionJSON) []mapi.ActionBlock {
+	to := a.ForwardTo
+	if to == "" {
+		to = a.Target
+	}
+	if to == "" {
+		return nil
+	}
+	return []mapi.ActionBlock{objectstore.RuleForwardAction(to)}
+}
+
+// categorizeAction tags the message with the shared keyword list.
+func categorizeAction(st *objectstore.Store, a filterActionJSON) []mapi.ActionBlock {
+	tag, err := st.KeywordsPropTag()
+	if err != nil {
+		return nil
+	}
+	cats := splitCategories(a.Target)
+	if len(cats) == 0 {
+		return nil
+	}
+	return []mapi.ActionBlock{objectstore.RuleTagAction(tag, cats...)}
+}
+
+// vacationAction replies with the auto-response text, contributing nothing when
+// the rule carries no message.
+func vacationAction(_ *objectstore.Store, a filterActionJSON) []mapi.ActionBlock {
+	msg := strings.TrimSpace(a.Message)
+	if msg == "" {
+		return nil
+	}
+	return []mapi.ActionBlock{objectstore.RuleVacationAction(msg)}
 }
 
 // splitCategories splits a comma-separated category target into trimmed,

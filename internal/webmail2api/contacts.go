@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -86,67 +87,97 @@ func buildVCard(c contactJSON) []byte {
 	// N is the structured name: Family ; Given ; Middle ; Prefix ; Suffix.
 	// oxvcard imports N's five components to PrSurname/GivenName/MiddleName/
 	// DisplayNamePrefix/Generation respectively.
-	if c.LastName != "" || c.FirstName != "" || c.MiddleName != "" || c.Prefix != "" || c.Suffix != "" {
-		fmt.Fprintf(&b, "N:%s;%s;%s;%s;%s\r\n", c.LastName, c.FirstName, c.MiddleName, c.Prefix, c.Suffix)
+	writeVCardGroup(&b, "N:%s;%s;%s;%s;%s\r\n", c.LastName, c.FirstName, c.MiddleName, c.Prefix, c.Suffix)
+	for _, line := range vcardSingleLines(c) {
+		writeVCardLine(&b, line.format, line.value)
 	}
-	if c.Email != "" {
-		fmt.Fprintf(&b, "EMAIL:%s\r\n", c.Email)
-	}
-	if c.Email2 != "" {
-		fmt.Fprintf(&b, "EMAIL:%s\r\n", c.Email2)
-	}
-	if c.Email3 != "" {
-		fmt.Fprintf(&b, "EMAIL:%s\r\n", c.Email3)
-	}
-	if c.Nickname != "" {
-		fmt.Fprintf(&b, "NICKNAME:%s\r\n", c.Nickname)
-	}
-	if c.Phone != "" {
-		fmt.Fprintf(&b, "TEL;TYPE=work:%s\r\n", c.Phone)
-	}
-	if c.MobilePhone != "" {
-		fmt.Fprintf(&b, "TEL;TYPE=CELL:%s\r\n", c.MobilePhone)
-	}
-	if c.HomePhone != "" {
-		fmt.Fprintf(&b, "TEL;TYPE=HOME:%s\r\n", c.HomePhone)
-	}
-	if c.BusinessFax != "" {
-		fmt.Fprintf(&b, "TEL;TYPE=fax,work:%s\r\n", c.BusinessFax)
-	}
-	if c.Company != "" || c.Department != "" {
-		// ORG is semicolon-delimited: company ; department. oxvcard maps ORG's
-		// second component to PrDepartmentName, distinct from ROLE (Profession).
-		fmt.Fprintf(&b, "ORG:%s;%s\r\n", c.Company, c.Department)
-	}
-	if c.JobTitle != "" {
-		fmt.Fprintf(&b, "TITLE:%s\r\n", c.JobTitle)
-	}
-	if c.Profession != "" {
-		// vCard ROLE maps to PrProfession (not department) in oxvcard.
-		fmt.Fprintf(&b, "ROLE:%s\r\n", c.Profession)
-	}
-	if c.Birthday != "" {
-		// vCard BDAY is YYYY-MM-DD; oxvcard's parseBirthday accepts it.
-		fmt.Fprintf(&b, "BDAY:%s\r\n", c.Birthday)
-	}
-	if c.HomeStreet != "" || c.HomeCity != "" || c.HomeState != "" || c.HomePostal != "" || c.HomeCountry != "" {
-		// ADR is semicolon-delimited: pobox ; ext ; street ; city ; state ; postal ; country
-		fmt.Fprintf(&b, "ADR;TYPE=HOME:;;%s;%s;%s;%s;%s\r\n", c.HomeStreet, c.HomeCity, c.HomeState, c.HomePostal, c.HomeCountry)
-	}
-	if c.WorkStreet != "" || c.WorkCity != "" || c.WorkState != "" || c.WorkPostal != "" || c.WorkCountry != "" {
-		fmt.Fprintf(&b, "ADR;TYPE=WORK:;;%s;%s;%s;%s;%s\r\n", c.WorkStreet, c.WorkCity, c.WorkState, c.WorkPostal, c.WorkCountry)
-	}
-	if c.OtherStreet != "" || c.OtherCity != "" || c.OtherState != "" || c.OtherPostal != "" || c.OtherCountry != "" {
-		fmt.Fprintf(&b, "ADR;TYPE=OTHER:;;%s;%s;%s;%s;%s\r\n", c.OtherStreet, c.OtherCity, c.OtherState, c.OtherPostal, c.OtherCountry)
-	}
-	if c.IMAddress != "" {
-		fmt.Fprintf(&b, "IMPP:%s\r\n", c.IMAddress)
-	}
-	if c.WebPage != "" {
-		fmt.Fprintf(&b, "URL:%s\r\n", c.WebPage)
-	}
+	writeVCardAddresses(&b, c)
+	writeVCardLine(&b, "IMPP:%s\r\n", c.IMAddress)
+	writeVCardLine(&b, "URL:%s\r\n", c.WebPage)
 	b.WriteString("END:VCARD\r\n")
 	return []byte(b.String())
+}
+
+// vcardLine pairs a vCard line format with the single value that fills it.
+type vcardLine struct {
+	format string
+	value  string
+}
+
+// vcardSingleLines lists the single-valued vCard properties in emission order.
+// The parameter spelling of each TEL and the ORG/TITLE/ROLE split are what
+// oxvcard reads to pick the MAPI property, so this order and these formats are
+// the wire contract.
+func vcardSingleLines(c contactJSON) []vcardLine {
+	return []vcardLine{
+		{"EMAIL:%s\r\n", c.Email},
+		{"EMAIL:%s\r\n", c.Email2},
+		{"EMAIL:%s\r\n", c.Email3},
+		{"NICKNAME:%s\r\n", c.Nickname},
+		{"TEL;TYPE=work:%s\r\n", c.Phone},
+		{"TEL;TYPE=CELL:%s\r\n", c.MobilePhone},
+		{"TEL;TYPE=HOME:%s\r\n", c.HomePhone},
+		{"TEL;TYPE=fax,work:%s\r\n", c.BusinessFax},
+		// ORG is semicolon-delimited: company ; department. oxvcard maps ORG's
+		// second component to PrDepartmentName, distinct from ROLE (Profession).
+		{"ORG:%s\r\n", vcardGroupValue(c.Company, c.Department)},
+		{"TITLE:%s\r\n", c.JobTitle},
+		// vCard ROLE maps to PrProfession (not department) in oxvcard.
+		{"ROLE:%s\r\n", c.Profession},
+		// vCard BDAY is YYYY-MM-DD; oxvcard's parseBirthday accepts it.
+		{"BDAY:%s\r\n", c.Birthday},
+	}
+}
+
+// writeVCardAddresses emits the three ADR groups. ADR is semicolon-delimited:
+// pobox ; ext ; street ; city ; state ; postal ; country, and the two leading
+// components are always empty here.
+func writeVCardAddresses(b *strings.Builder, c contactJSON) {
+	writeVCardGroup(b, "ADR;TYPE=HOME:;;%s;%s;%s;%s;%s\r\n",
+		c.HomeStreet, c.HomeCity, c.HomeState, c.HomePostal, c.HomeCountry)
+	writeVCardGroup(b, "ADR;TYPE=WORK:;;%s;%s;%s;%s;%s\r\n",
+		c.WorkStreet, c.WorkCity, c.WorkState, c.WorkPostal, c.WorkCountry)
+	writeVCardGroup(b, "ADR;TYPE=OTHER:;;%s;%s;%s;%s;%s\r\n",
+		c.OtherStreet, c.OtherCity, c.OtherState, c.OtherPostal, c.OtherCountry)
+}
+
+// writeVCardLine emits one line when its value is set. An empty value emits
+// nothing, so oxvcard never imports a blank MAPI property.
+func writeVCardLine(b *strings.Builder, format, value string) {
+	if value == "" {
+		return
+	}
+	fmt.Fprintf(b, format, value)
+}
+
+// writeVCardGroup emits a structured line when ANY component is set, leaving
+// the unset components empty in place. Dropping the line because its first
+// component is empty would move every later component into the wrong field on
+// import.
+func writeVCardGroup(b *strings.Builder, format string, parts ...string) {
+	if !anyNonEmpty(parts) {
+		return
+	}
+	args := make([]any, len(parts))
+	for i, p := range parts {
+		args[i] = p
+	}
+	fmt.Fprintf(b, format, args...)
+}
+
+// vcardGroupValue joins a structured value's components with the vCard
+// semicolon, reporting the empty string when every component is unset so
+// writeVCardLine drops the line.
+func vcardGroupValue(parts ...string) string {
+	if !anyNonEmpty(parts) {
+		return ""
+	}
+	return strings.Join(parts, ";")
+}
+
+// anyNonEmpty reports whether at least one component carries a value.
+func anyNonEmpty(parts []string) bool {
+	return slices.ContainsFunc(parts, func(s string) bool { return s != "" })
 }
 
 // vcardField extracts a property value from a vCard, ignoring any parameters.
@@ -243,105 +274,104 @@ func (s *Server) handleGetContacts(w http.ResponseWriter, r *http.Request) {
 		// A contact group is an IPM.DistList: its members live as JSON in the body,
 		// with the group name in PR_SUBJECT.
 		if propString(msg, mapi.PrMessageClass) == "IPM.DistList" {
-			var body distListBody
-			_ = json.Unmarshal([]byte(propString(msg, mapi.PrBody)), &body)
-			contacts = append(contacts, contactJSON{
-				ID:      strconv.FormatInt(o.ID, 10),
-				Name:    propString(msg, mapi.PrSubject),
-				IsGroup: true,
-				Members: body.Members,
-			})
+			contacts = append(contacts, distListContact(o.ID, msg))
 			continue
 		}
-		vcf, err := oxvcard.Export(msg, opt)
-		if err != nil {
+		c, ok := contactFromMessage(st, o.ID, msg, opt)
+		if !ok {
 			continue
 		}
-		// ORG is "company;department"; ROLE is Profession (not department).
-		orgFields := strings.Split(vcardField(vcf, "ORG"), ";")
-		orgAt := func(i int) string {
-			if i < len(orgFields) {
-				return orgFields[i]
-			}
-			return ""
-		}
-		// N is the structured name: Family ; Given ; Middle ; Prefix ; Suffix.
-		nameFields := strings.Split(vcardField(vcf, "N"), ";")
-		nameAt := func(i int) string {
-			if i < len(nameFields) {
-				return nameFields[i]
-			}
-			return ""
-		}
-		// Home and work addresses are separate ADR lines (TYPE=HOME/WORK), each
-		// semicolon-delimited: pobox ; ext ; street ; city ; state ; postal ; country
-		homeAdr := strings.Split(vcardTypedField(vcf, "ADR", "HOME"), ";")
-		workAdr := strings.Split(vcardTypedField(vcf, "ADR", "WORK"), ";")
-		otherAdr := strings.Split(vcardTypedField(vcf, "ADR", "OTHER"), ";")
-		adr := func(fields []string, i int) string {
-			if i < len(fields) {
-				return fields[i]
-			}
-			return ""
-		}
-		emails := vcardAll(vcf, "EMAIL")
-		emailAt := func(i int) string {
-			if i < len(emails) {
-				return emails[i]
-			}
-			return ""
-		}
-		contacts = append(contacts, contactJSON{
-			ID:           strconv.FormatInt(o.ID, 10),
-			Name:         vcardField(vcf, "FN"),
-			LastName:     nameAt(0),
-			FirstName:    nameAt(1),
-			MiddleName:   nameAt(2),
-			Prefix:       nameAt(3),
-			Suffix:       nameAt(4),
-			Email:        emailAt(0),
-			Email2:       emailAt(1),
-			Email3:       emailAt(2),
-			Phone:        vcardTypedField(vcf, "TEL", "WORK"), // business telephone
-			MobilePhone:  vcardTypedField(vcf, "TEL", "CELL"),
-			HomePhone:    vcardTypedField(vcf, "TEL", "HOME"),
-			BusinessFax:  vcardTypedField(vcf, "TEL", "FAX"),
-			Company:      orgAt(0),
-			JobTitle:     vcardField(vcf, "TITLE"),
-			Department:   orgAt(1),
-			Birthday:     vcardField(vcf, "BDAY"),
-			Nickname:     vcardField(vcf, "NICKNAME"),
-			FileAs:       fileAsOf(st, msg),
-			Profession:   vcardField(vcf, "ROLE"),
-			Spouse:       propString(msg, mapi.PrSpouseName),
-			HomeStreet:   adr(homeAdr, 2),
-			HomeCity:     adr(homeAdr, 3),
-			HomeState:    adr(homeAdr, 4),
-			HomePostal:   adr(homeAdr, 5),
-			HomeCountry:  adr(homeAdr, 6),
-			WorkStreet:   adr(workAdr, 2),
-			WorkCity:     adr(workAdr, 3),
-			WorkState:    adr(workAdr, 4),
-			WorkPostal:   adr(workAdr, 5),
-			WorkCountry:  adr(workAdr, 6),
-			OtherStreet:  adr(otherAdr, 2),
-			OtherCity:    adr(otherAdr, 3),
-			OtherState:   adr(otherAdr, 4),
-			OtherPostal:  adr(otherAdr, 5),
-			OtherCountry: adr(otherAdr, 6),
-			IMAddress:    vcardField(vcf, "IMPP"),
-			WebPage:      vcardField(vcf, "URL"),
-			Assistant:    propString(msg, mapi.PrAssistant),
-			Manager:      propString(msg, mapi.PrManagerName),
-			Office:       propString(msg, mapi.PrOfficeLocation),
-			Anniversary:  anniversaryOf(msg),
-			Billing:      billingOf(st, msg),
-		})
 		if cats, err := st.GetCategories(o.ID); err == nil && len(cats) > 0 {
-			contacts[len(contacts)-1].Categories = cats
+			c.Categories = cats
 		}
+		contacts = append(contacts, c)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"contacts": contacts, "total": len(contacts)})
+}
+
+// distListContact renders a contact group for the listing: its members live as
+// JSON in the body, with the group name in PR_SUBJECT.
+func distListContact(id int64, msg *oxcmail.Message) contactJSON {
+	var body distListBody
+	_ = json.Unmarshal([]byte(propString(msg, mapi.PrBody)), &body)
+	return contactJSON{
+		ID:      strconv.FormatInt(id, 10),
+		Name:    propString(msg, mapi.PrSubject),
+		IsGroup: true,
+		Members: body.Members,
+	}
+}
+
+// contactFromMessage renders one stored contact for the listing, through the
+// canonical vCard export so the SPA sees exactly what CardDAV does. It reports
+// false when the message cannot be exported.
+func contactFromMessage(st *objectstore.Store, id int64, msg *oxcmail.Message, opt oxvcard.Options) (contactJSON, bool) {
+	vcf, err := oxvcard.Export(msg, opt)
+	if err != nil {
+		return contactJSON{}, false
+	}
+	// ORG is "company;department"; ROLE is Profession (not department).
+	org := strings.Split(vcardField(vcf, "ORG"), ";")
+	// N is the structured name: Family ; Given ; Middle ; Prefix ; Suffix.
+	name := strings.Split(vcardField(vcf, "N"), ";")
+	emails := vcardAll(vcf, "EMAIL")
+	c := contactJSON{
+		ID:          strconv.FormatInt(id, 10),
+		Name:        vcardField(vcf, "FN"),
+		LastName:    fieldAt(name, 0),
+		FirstName:   fieldAt(name, 1),
+		MiddleName:  fieldAt(name, 2),
+		Prefix:      fieldAt(name, 3),
+		Suffix:      fieldAt(name, 4),
+		Email:       fieldAt(emails, 0),
+		Email2:      fieldAt(emails, 1),
+		Email3:      fieldAt(emails, 2),
+		Phone:       vcardTypedField(vcf, "TEL", "WORK"), // business telephone
+		MobilePhone: vcardTypedField(vcf, "TEL", "CELL"),
+		HomePhone:   vcardTypedField(vcf, "TEL", "HOME"),
+		BusinessFax: vcardTypedField(vcf, "TEL", "FAX"),
+		Company:     fieldAt(org, 0),
+		JobTitle:    vcardField(vcf, "TITLE"),
+		Department:  fieldAt(org, 1),
+		Birthday:    vcardField(vcf, "BDAY"),
+		Nickname:    vcardField(vcf, "NICKNAME"),
+		FileAs:      fileAsOf(st, msg),
+		Profession:  vcardField(vcf, "ROLE"),
+		Spouse:      propString(msg, mapi.PrSpouseName),
+		IMAddress:   vcardField(vcf, "IMPP"),
+		WebPage:     vcardField(vcf, "URL"),
+		Assistant:   propString(msg, mapi.PrAssistant),
+		Manager:     propString(msg, mapi.PrManagerName),
+		Office:      propString(msg, mapi.PrOfficeLocation),
+		Anniversary: anniversaryOf(msg),
+		Billing:     billingOf(st, msg),
+	}
+	setContactAddresses(&c, vcf)
+	return c, true
+}
+
+// setContactAddresses fills the three address blocks. Home, work and other
+// addresses are separate ADR lines (TYPE=HOME/WORK/OTHER), each semicolon-
+// delimited: pobox ; ext ; street ; city ; state ; postal ; country.
+func setContactAddresses(c *contactJSON, vcf []byte) {
+	home := strings.Split(vcardTypedField(vcf, "ADR", "HOME"), ";")
+	work := strings.Split(vcardTypedField(vcf, "ADR", "WORK"), ";")
+	other := strings.Split(vcardTypedField(vcf, "ADR", "OTHER"), ";")
+	c.HomeStreet, c.HomeCity, c.HomeState, c.HomePostal, c.HomeCountry =
+		fieldAt(home, 2), fieldAt(home, 3), fieldAt(home, 4), fieldAt(home, 5), fieldAt(home, 6)
+	c.WorkStreet, c.WorkCity, c.WorkState, c.WorkPostal, c.WorkCountry =
+		fieldAt(work, 2), fieldAt(work, 3), fieldAt(work, 4), fieldAt(work, 5), fieldAt(work, 6)
+	c.OtherStreet, c.OtherCity, c.OtherState, c.OtherPostal, c.OtherCountry =
+		fieldAt(other, 2), fieldAt(other, 3), fieldAt(other, 4), fieldAt(other, 5), fieldAt(other, 6)
+}
+
+// fieldAt returns one component of a split vCard value, or "" when the value
+// carried fewer components than the layout defines.
+func fieldAt(fields []string, i int) string {
+	if i < len(fields) {
+		return fields[i]
+	}
+	return ""
 }
 
 func (s *Server) handleCreateContact(w http.ResponseWriter, r *http.Request) {
@@ -522,39 +552,58 @@ func anniversaryOf(msg *oxcmail.Message) string {
 // a PSETID_Common named prop (PidLidBilling), resolved per-store.
 func setRichContactProps(st *objectstore.Store, id int64, c contactJSON) {
 	var props mapi.PropertyValues
-	if c.Assistant != "" {
-		props.Set(mapi.PrAssistant, c.Assistant)
+	for _, f := range []struct {
+		tag   mapi.PropTag
+		value string
+	}{
+		{mapi.PrAssistant, c.Assistant},
+		{mapi.PrManagerName, c.Manager},
+		{mapi.PrOfficeLocation, c.Office},
+		{mapi.PrProfession, c.Profession},
+		{mapi.PrSpouseName, c.Spouse},
+	} {
+		setIfPresent(&props, f.tag, f.value)
 	}
-	if c.Manager != "" {
-		props.Set(mapi.PrManagerName, c.Manager)
-	}
-	if c.Office != "" {
-		props.Set(mapi.PrOfficeLocation, c.Office)
-	}
-	if c.Anniversary != "" {
-		if t, err := time.Parse("2006-01-02", c.Anniversary); err == nil {
-			props.Set(mapi.PrWeddingAnniversary, mapi.UnixToNTTime(t))
-		}
-	}
-	if c.Billing != "" {
-		if tag, err := billingTag(st, true); err == nil && tag != 0 {
-			props.Set(tag, c.Billing)
-		}
-	}
-	if c.FileAs != "" {
-		if tag, err := fileAsTag(st, true); err == nil && tag != 0 {
-			props.Set(tag, c.FileAs)
-		}
-	}
-	if c.Profession != "" {
-		props.Set(mapi.PrProfession, c.Profession)
-	}
-	if c.Spouse != "" {
-		props.Set(mapi.PrSpouseName, c.Spouse)
-	}
+	setAnniversary(&props, c.Anniversary)
+	setNamedString(&props, st, billingTag, c.Billing)
+	setNamedString(&props, st, fileAsTag, c.FileAs)
 	if len(props) > 0 {
 		_ = st.SetMessageProperties(id, props)
 	}
+}
+
+// setIfPresent stamps a string property, skipping an empty value.
+func setIfPresent(props *mapi.PropertyValues, tag mapi.PropTag, value string) {
+	if value != "" {
+		props.Set(tag, value)
+	}
+}
+
+// setAnniversary stamps PrWeddingAnniversary, a PtSysTime, from a YYYY-MM-DD
+// date. An unparseable date is skipped rather than stored as a zero time.
+func setAnniversary(props *mapi.PropertyValues, date string) {
+	if date == "" {
+		return
+	}
+	t, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return
+	}
+	props.Set(mapi.PrWeddingAnniversary, mapi.UnixToNTTime(t))
+}
+
+// setNamedString stamps a value under a named property, allocating its id in
+// this store. An unresolvable name drops the value rather than failing the save.
+func setNamedString(props *mapi.PropertyValues, st *objectstore.Store,
+	resolve func(*objectstore.Store, bool) (mapi.PropTag, error), value string) {
+	if value == "" {
+		return
+	}
+	tag, err := resolve(st, true)
+	if err != nil || tag == 0 {
+		return
+	}
+	props.Set(tag, value)
 }
 
 // billingTag resolves PidLidBilling (NameBilling, PSETID_Common) to a PtUnicode
@@ -667,32 +716,8 @@ func (s *Server) handleSetContactPhoto(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad id"})
 		return
 	}
-	// #nosec G120 -- the request body is already capped by the API's MaxBytesReader, so the multipart parse is bounded before it starts
-	if err := r.ParseMultipartForm(8 << 20); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected multipart file upload"})
-		return
-	}
-	file, _, err := r.FormFile("file")
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing file field"})
-		return
-	}
-	defer file.Close()
-	data, err := io.ReadAll(file)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not read upload"})
-		return
-	}
-	c, ok := s.session(r)
+	data, ok := s.readScannedPhoto(w, r)
 	if !ok {
-		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
-		return
-	}
-	// The bytes are written straight into the mailbox as an attachment and never
-	// pass through delivery, so they are scanned here or not at all, like every
-	// other path that stores client-supplied attachment content.
-	if mta.ScanStored(s.accounts, c.Email, "contact-photo", data, time.Now()) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the photo was rejected: a virus was detected"})
 		return
 	}
 	st, _, ok := s.openStore(w, r)
@@ -725,6 +750,41 @@ func (s *Server) handleSetContactPhoto(w http.ResponseWriter, r *http.Request) {
 		_ = st.SetMessageProperties(id, mapi.PropertyValues{{Tag: tag, Value: true}})
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// readScannedPhoto reads the uploaded photo out of the multipart body and
+// virus-scans it, answering the client itself on every failure.
+//
+// The bytes are written straight into the mailbox as an attachment and never
+// pass through delivery, so they are scanned here or not at all, like every
+// other path that stores client-supplied attachment content.
+func (s *Server) readScannedPhoto(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+	// #nosec G120 -- the request body is already capped by the API's MaxBytesReader, so the multipart parse is bounded before it starts
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "expected multipart file upload"})
+		return nil, false
+	}
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "missing file field"})
+		return nil, false
+	}
+	defer file.Close()
+	data, err := io.ReadAll(file)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "could not read upload"})
+		return nil, false
+	}
+	c, ok := s.session(r)
+	if !ok {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+		return nil, false
+	}
+	if mta.ScanStored(s.accounts, c.Email, "contact-photo", data, time.Now()) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the photo was rejected: a virus was detected"})
+		return nil, false
+	}
+	return data, true
 }
 
 // handleDeleteContactPhoto removes the contact's photo attachment and clears
@@ -778,15 +838,7 @@ func (s *Server) handleExportContact(w http.ResponseWriter, r *http.Request) {
 	// member (FN + EMAIL), the shape Outlook saves for a personal DL.
 	var vcf []byte
 	if propString(msg, mapi.PrMessageClass) == "IPM.DistList" {
-		var body distListBody
-		_ = json.Unmarshal([]byte(propString(msg, mapi.PrBody)), &body)
-		var vb strings.Builder
-		for _, m := range body.Members {
-			vb.WriteString("BEGIN:VCARD\r\nVERSION:4.0\r\n")
-			fmt.Fprintf(&vb, "FN:%s\r\nEMAIL:%s\r\n", m, m)
-			vb.WriteString("END:VCARD\r\n")
-		}
-		vcf = []byte(vb.String())
+		vcf = distListVCards(msg)
 	} else {
 		vcf, err = oxvcard.Export(msg, oxvcard.Options{Resolver: st.GetNamedPropIDs})
 		if err != nil {
@@ -794,23 +846,51 @@ func (s *Server) handleExportContact(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// Filename: the contact's (or list's) name, sanitized to a safe filename.
+	w.Header().Set("Content-Type", "text/vcard; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+contactFilename(msg)+`.vcf"`)
+	// #nosec G705 -- the daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set explicitly, so the bytes are never interpreted as a document
+	_, _ = w.Write(vcf)
+}
+
+// distListVCards renders a distribution list as one minimal vCard per member.
+func distListVCards(msg *oxcmail.Message) []byte {
+	var body distListBody
+	_ = json.Unmarshal([]byte(propString(msg, mapi.PrBody)), &body)
+	var vb strings.Builder
+	for _, m := range body.Members {
+		vb.WriteString("BEGIN:VCARD\r\nVERSION:4.0\r\n")
+		fmt.Fprintf(&vb, "FN:%s\r\nEMAIL:%s\r\n", m, m)
+		vb.WriteString("END:VCARD\r\n")
+	}
+	return []byte(vb.String())
+}
+
+// contactFilename is the contact's (or list's) name reduced to the characters
+// that are safe in a Content-Disposition filename, falling back to "contact"
+// when nothing survives.
+func contactFilename(msg *oxcmail.Message) string {
 	name := propString(msg, mapi.PrDisplayName)
 	if name == "" {
 		name = propString(msg, mapi.PrSubject)
 	}
 	var fb strings.Builder
 	for _, r := range name {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
+		if isSafeFilenameRune(r) {
 			fb.WriteRune(r)
 		}
 	}
-	filename := fb.String()
-	if filename == "" {
-		filename = "contact"
+	if fb.Len() == 0 {
+		return "contact"
 	}
-	w.Header().Set("Content-Type", "text/vcard; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`.vcf"`)
-	// #nosec G705 -- the daemon stamps X-Content-Type-Options: nosniff and the Content-Type is set explicitly, so the bytes are never interpreted as a document
-	_, _ = w.Write(vcf)
+	return fb.String()
+}
+
+// isSafeFilenameRune reports whether a rune may appear in a download filename.
+func isSafeFilenameRune(r rune) bool {
+	switch {
+	case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		return true
+	default:
+		return r == '-' || r == '_'
+	}
 }

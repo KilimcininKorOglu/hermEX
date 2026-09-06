@@ -34,35 +34,56 @@ func (s *Server) handleGetPublicFolders(w http.ResponseWriter, r *http.Request) 
 	// is org-wide and intentionally never set on read, so the unread badge is
 	// computed against this user's read set, not the shared flag.
 	readSet := s.publicReadSet(c.Mailbox, publicOwner(c.Email))
+	writeJSON(w, http.StatusOK, map[string]any{
+		"owner":   publicOwner(c.Email),
+		"folders": s.visiblePublicFolders(c.Email, readSet),
+	})
+}
+
+// visiblePublicFolders lists the public folders the caller may see
+// (FrightsVisible), each with its live counts.
+func (s *Server) visiblePublicFolders(email string, readSet map[int64]bool) []publicFolderJSON {
 	folders := []publicFolderJSON{}
-	if s.Pub != nil {
-		if st, ok, err := s.Pub.OpenForCaller(c.Email); err == nil && ok {
-			defer st.Close()
-			user := strings.ToLower(c.Email)
-			if all, err := st.ListFolders(); err == nil {
-				for _, f := range all {
-					rights, err := st.ResolvePermission(f.ID, user)
-					if err != nil || rights&mapi.FrightsVisible == 0 {
-						continue
-					}
-					total, unread := 0, 0
-					if msgs, err := st.ListMessages(f.ID); err == nil {
-						total = len(msgs)
-						for _, m := range msgs {
-							if !readSet[m.ID] {
-								unread++
-							}
-						}
-					}
-					folders = append(folders, publicFolderJSON{
-						ID: f.ID, Name: f.DisplayName, Total: total, Unread: unread,
-						CanPost: rights&mapi.FrightsCreate != 0,
-					})
-				}
-			}
+	if s.Pub == nil {
+		return folders
+	}
+	st, ok, err := s.Pub.OpenForCaller(email)
+	if err != nil || !ok {
+		return folders
+	}
+	defer st.Close()
+	all, err := st.ListFolders()
+	if err != nil {
+		return folders
+	}
+	user := strings.ToLower(email)
+	for _, f := range all {
+		rights, err := st.ResolvePermission(f.ID, user)
+		if err != nil || rights&mapi.FrightsVisible == 0 {
+			continue
+		}
+		total, unread := publicFolderCounts(st, f.ID, readSet)
+		folders = append(folders, publicFolderJSON{
+			ID: f.ID, Name: f.DisplayName, Total: total, Unread: unread,
+			CanPost: rights&mapi.FrightsCreate != 0,
+		})
+	}
+	return folders
+}
+
+// publicFolderCounts counts one public folder against the caller's own read set,
+// since the shared public flag is org-wide and never set on read.
+func publicFolderCounts(st *objectstore.Store, fid int64, readSet map[int64]bool) (total, unread int) {
+	msgs, err := st.ListMessages(fid)
+	if err != nil {
+		return 0, 0
+	}
+	for _, m := range msgs {
+		if !readSet[m.ID] {
+			unread++
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"owner": publicOwner(c.Email), "folders": folders})
+	return len(msgs), unread
 }
 
 // handlePublicFolderMessages lists one public folder's messages, re-checking read

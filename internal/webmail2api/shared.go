@@ -38,34 +38,47 @@ func (s *Server) openMailbox(w http.ResponseWriter, r *http.Request) (*mailboxCt
 		}
 		return &mailboxCtx{st: st, user: c.Email}, true
 	}
+	return s.openShared(w, c.Email, want)
+}
+
+// openShared opens the shared mailbox the caller named. The store path comes
+// from the directory's own SharedMailboxes() listing, never from the request, so
+// a forged owner can only ever name a mailbox already shared with this caller.
+func (s *Server) openShared(w http.ResponseWriter, caller, want string) (*mailboxCtx, bool) {
 	lister, ok := s.auth.(directory.SharedMailboxLister)
 	if !ok {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return nil, false
 	}
-	boxes, err := lister.SharedMailboxes(c.Email)
+	boxes, err := lister.SharedMailboxes(caller)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "directory error"})
 		return nil, false
 	}
 	for _, b := range boxes {
-		if !strings.EqualFold(b.Address, want) {
-			continue
+		if strings.EqualFold(b.Address, want) {
+			return openSharedStore(w, b, caller)
 		}
-		st, err := objectstore.Open(b.StorePath)
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
-			return nil, false
-		}
-		if !callerMayOpenShared(st, c.Email) {
-			_ = st.Close()
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
-			return nil, false
-		}
-		return &mailboxCtx{st: st, owner: b.Address, shared: true, user: c.Email}, true
 	}
 	writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 	return nil, false
+}
+
+// openSharedStore opens one shared mailbox and re-checks the caller's folder
+// permission in the store itself, so a stale directory grant cannot open a
+// mailbox the store no longer shares.
+func openSharedStore(w http.ResponseWriter, b directory.SharedMailbox, caller string) (*mailboxCtx, bool) {
+	st, err := objectstore.Open(b.StorePath)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "mailbox unavailable"})
+		return nil, false
+	}
+	if !callerMayOpenShared(st, caller) {
+		_ = st.Close()
+		writeJSON(w, http.StatusForbidden, map[string]string{"error": "forbidden"})
+		return nil, false
+	}
+	return &mailboxCtx{st: st, owner: b.Address, shared: true, user: caller}, true
 }
 
 // callerMayOpenShared is the store-open gate: the caller is an additional store

@@ -127,19 +127,8 @@ func (s *Server) handleSetACL(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown folder"})
 		return
 	}
-	// Resolve to the canonical mailbox login so the grant matches the store's
-	// permission identity.
-	login := strings.TrimSpace(body.Grantee)
-	if res, ok := s.accounts.(directory.CanonicalResolver); ok {
-		l, ok := res.CanonicalLogin(login)
-		if !ok {
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no mailbox matches that address"})
-			return
-		}
-		login = l
-	}
-	if strings.EqualFold(login, c.Email) {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "you already own this folder"})
+	login, ok := s.granteeLogin(w, body.Grantee, c.Email)
+	if !ok {
 		return
 	}
 	change := []objectstore.PermissionChange{{Op: objectstore.PermAdd, Username: login, Rights: aclSanitizeRights(body.Rights)}}
@@ -147,21 +136,47 @@ func (s *Server) handleSetACL(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not grant access"})
 		return
 	}
-	// When recursive, copy the same grant to every subfolder ([MS-OXCPERM] apply
-	// permissions recursively); a subfolder that fails to take the grant is
-	// skipped rather than failing the whole operation. The user is told the grant
-	// succeeded either way, so a skipped subfolder is only visible here: without
-	// this line, an operator has no way to learn that a share is partial.
 	if body.Recursive {
-		if folders, err := st.ListFolders(); err == nil {
-			for _, sub := range folderDescendants(folders, fid) {
-				if err := st.ModifyPermissions(sub, false, change); err != nil {
-					logError("recursive-grant", err, logging.Fields{"grantee": logSafe(login), "folder": sub})
-				}
-			}
-		}
+		grantToDescendants(st, fid, login, change)
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+}
+
+// granteeLogin resolves a grantee address to the canonical mailbox login, so the
+// grant matches the store's permission identity. It answers the client itself
+// for an address that names no mailbox and for the owner's own address.
+func (s *Server) granteeLogin(w http.ResponseWriter, grantee, owner string) (string, bool) {
+	login := strings.TrimSpace(grantee)
+	if res, ok := s.accounts.(directory.CanonicalResolver); ok {
+		l, found := res.CanonicalLogin(login)
+		if !found {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no mailbox matches that address"})
+			return "", false
+		}
+		login = l
+	}
+	if strings.EqualFold(login, owner) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "you already own this folder"})
+		return "", false
+	}
+	return login, true
+}
+
+// grantToDescendants copies a grant to every subfolder ([MS-OXCPERM] apply
+// permissions recursively). A subfolder that fails to take the grant is skipped
+// rather than failing the whole operation. The user is told the grant succeeded
+// either way, so a skipped subfolder is only visible in the log: without that
+// line, an operator has no way to learn that a share is partial.
+func grantToDescendants(st *objectstore.Store, fid int64, login string, change []objectstore.PermissionChange) {
+	folders, err := st.ListFolders()
+	if err != nil {
+		return
+	}
+	for _, sub := range folderDescendants(folders, fid) {
+		if err := st.ModifyPermissions(sub, false, change); err != nil {
+			logError("recursive-grant", err, logging.Fields{"grantee": logSafe(login), "folder": sub})
+		}
+	}
 }
 
 func (s *Server) handleDeleteACL(w http.ResponseWriter, r *http.Request) {

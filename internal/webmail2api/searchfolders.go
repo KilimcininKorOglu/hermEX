@@ -151,10 +151,26 @@ scan:
 // matchSearchFolder reports whether a message satisfies every set criterion. The
 // raw message is fetched only when a body or attachment criterion needs it.
 func matchSearchFolder(st *objectstore.Store, fid int64, sf searchFolderJSON, m objectstore.MessageInfo) bool {
-	if sf.From != "" && !strings.Contains(strings.ToLower(m.Sender), strings.ToLower(sf.From)) {
+	if !matchesIndexCriteria(sf, m) {
 		return false
 	}
-	if sf.Subject != "" && !strings.Contains(strings.ToLower(m.Subject), strings.ToLower(sf.Subject)) {
+	if sf.Body == "" && !sf.HasAttachment {
+		return true
+	}
+	raw, err := st.GetMessageRaw(fid, m.UID)
+	if err != nil {
+		return false
+	}
+	return matchesBodyCriteria(sf, mime.ParseStructure(raw))
+}
+
+// matchesIndexCriteria applies the criteria the index row answers, so a message
+// they reject never costs a body read.
+func matchesIndexCriteria(sf searchFolderJSON, m objectstore.MessageInfo) bool {
+	if sf.From != "" && !containsFolded(m.Sender, sf.From) {
+		return false
+	}
+	if sf.Subject != "" && !containsFolded(m.Subject, sf.Subject) {
 		return false
 	}
 	if d := parseSearchDate(sf.DateFrom); !d.IsZero() && m.InternalDate.Before(d) {
@@ -163,20 +179,20 @@ func matchSearchFolder(st *objectstore.Store, fid int64, sf searchFolderJSON, m 
 	if d := parseSearchDate(sf.DateTo); !d.IsZero() && m.InternalDate.After(d.Add(24*time.Hour)) {
 		return false
 	}
-	if sf.Body != "" || sf.HasAttachment {
-		raw, err := st.GetMessageRaw(fid, m.UID)
-		if err != nil {
-			return false
-		}
-		root := mime.ParseStructure(raw)
-		if sf.Body != "" && !strings.Contains(strings.ToLower(bestBody(root)), strings.ToLower(sf.Body)) {
-			return false
-		}
-		if sf.HasAttachment && len(collectAttachments(root, nil)) == 0 {
-			return false
-		}
-	}
 	return true
+}
+
+// matchesBodyCriteria applies the criteria that need the parsed message.
+func matchesBodyCriteria(sf searchFolderJSON, root *mime.Part) bool {
+	if sf.Body != "" && !containsFolded(bestBody(root), sf.Body) {
+		return false
+	}
+	return !sf.HasAttachment || len(collectAttachments(root, nil)) > 0
+}
+
+// containsFolded is a case-insensitive substring test.
+func containsFolded(haystack, needle string) bool {
+	return strings.Contains(strings.ToLower(haystack), strings.ToLower(needle))
 }
 
 // parseSearchDate parses a YYYY-MM-DD or RFC3339 date, returning the zero time

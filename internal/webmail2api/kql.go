@@ -28,42 +28,58 @@ type kqlQuery struct {
 //	category:"VIP Friends"
 func parseKQL(q string) kqlQuery {
 	var out kqlQuery
-	tokens := tokenizeKQL(q)
-	for _, tok := range tokens {
+	for _, tok := range tokenizeKQL(q) {
 		key, val, found := strings.Cut(tok, ":")
 		if !found || val == "" {
 			out.General = append(out.General, strings.ToLower(tok))
 			continue
 		}
-		switch strings.ToLower(key) {
-		case "from", "sender":
-			out.From = append(out.From, strings.ToLower(val))
-		case "to", "recipient":
-			out.To = append(out.To, strings.ToLower(val))
-		case "subject":
-			out.Subject = append(out.Subject, strings.ToLower(val))
-		case "body":
-			out.Body = append(out.Body, strings.ToLower(val))
-		case "category", "categories":
-			out.Category = append(out.Category, strings.ToLower(val))
-		case "has":
-			b := kqlBool(val)
-			if strings.EqualFold(val, "attachment") || strings.EqualFold(val, "attachments") {
-				out.HasAtt = &b
-			}
-		case "is":
-			b := kqlBool(val)
-			if strings.EqualFold(val, "read") {
-				out.Read = &b
-			} else if strings.EqualFold(val, "unread") {
-				f := !b
-				out.Read = &f
-			}
-		default:
-			out.General = append(out.General, strings.ToLower(tok))
+		if apply, known := kqlFields[strings.ToLower(key)]; known {
+			apply(&out, val)
+			continue
 		}
+		// An unknown prefix is not a field, so the whole token searches the
+		// message as written.
+		out.General = append(out.General, strings.ToLower(tok))
 	}
 	return out
+}
+
+// kqlFields is the single source of the field names a query accepts. A name
+// absent from it falls through to a general term.
+var kqlFields = map[string]func(*kqlQuery, string){
+	"from":       func(q *kqlQuery, v string) { q.From = append(q.From, strings.ToLower(v)) },
+	"sender":     func(q *kqlQuery, v string) { q.From = append(q.From, strings.ToLower(v)) },
+	"to":         func(q *kqlQuery, v string) { q.To = append(q.To, strings.ToLower(v)) },
+	"recipient":  func(q *kqlQuery, v string) { q.To = append(q.To, strings.ToLower(v)) },
+	"subject":    func(q *kqlQuery, v string) { q.Subject = append(q.Subject, strings.ToLower(v)) },
+	"body":       func(q *kqlQuery, v string) { q.Body = append(q.Body, strings.ToLower(v)) },
+	"category":   func(q *kqlQuery, v string) { q.Category = append(q.Category, strings.ToLower(v)) },
+	"categories": func(q *kqlQuery, v string) { q.Category = append(q.Category, strings.ToLower(v)) },
+	"has":        applyHasFilter,
+	"is":         applyIsFilter,
+}
+
+// applyHasFilter sets the attachment filter. "has:" with any other value names
+// no filter this server implements, so it is ignored rather than guessed at.
+func applyHasFilter(q *kqlQuery, v string) {
+	if !strings.EqualFold(v, "attachment") && !strings.EqualFold(v, "attachments") {
+		return
+	}
+	b := kqlBool(v)
+	q.HasAtt = &b
+}
+
+// applyIsFilter sets the read filter from is:read / is:unread.
+func applyIsFilter(q *kqlQuery, v string) {
+	b := kqlBool(v)
+	switch {
+	case strings.EqualFold(v, "read"):
+		q.Read = &b
+	case strings.EqualFold(v, "unread"):
+		f := !b
+		q.Read = &f
+	}
 }
 
 // kqlBool maps yes/true/1/attachment (and bare field names) to true.

@@ -62,16 +62,7 @@ func bestBody(root *mime.Part) string {
 		if p == nil {
 			return
 		}
-		if p.Type == "text" && p.Disposition != "attachment" {
-			if c, err := p.DecodedContent(); err == nil {
-				switch {
-				case p.Subtype == "html" && html == "":
-					html = string(c)
-				case p.Subtype == "plain" && plain == "":
-					plain = string(c)
-				}
-			}
-		}
+		collectBodyPart(p, &plain, &html)
 		for _, ch := range p.Children {
 			walk(ch)
 		}
@@ -81,6 +72,24 @@ func bestBody(root *mime.Part) string {
 		return html
 	}
 	return plain
+}
+
+// collectBodyPart records the first displayable text part of each subtype. A
+// later part of the same subtype is an alternative rendering, not a replacement.
+func collectBodyPart(p *mime.Part, plain, html *string) {
+	if p.Type != "text" || p.Disposition == "attachment" {
+		return
+	}
+	c, err := p.DecodedContent()
+	if err != nil {
+		return
+	}
+	switch {
+	case p.Subtype == "html" && *html == "":
+		*html = string(c)
+	case p.Subtype == "plain" && *plain == "":
+		*plain = string(c)
+	}
 }
 
 // cidRef matches an <img> whose src is a cid: URL, capturing the tag text up to
@@ -233,10 +242,24 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	d := buildMailDetail(raw, folder, uid)
-	// S/MIME: signature verification needs no private key (only the message's
-	// embedded certificate), so the server always verifies signed mail. Decryption
-	// needs the key: a SERVER-mode reader's key is here (decrypt server-side); a
-	// browser-mode reader decrypts client-side, so the server only flags it.
+	s.applySmimeStatus(&d, st, raw)
+	markReadOnOpen(&d, mb, fid, uid)
+	// A safe-listed sender's remote images load automatically in the reader. The
+	// match is computed server-side (against the shared allowlist) so the
+	// security-relevant decision stays in tested Go, not client code.
+	d.SenderTrusted = isSafeSender(safeSenders(st), d.From)
+	addFollowupFlag(&d, st, fid, uid)
+	writeJSON(w, http.StatusOK, d)
+}
+
+// applySmimeStatus fills the S/MIME fields, decrypting in place for a
+// server-mode reader.
+//
+// Signature verification needs no private key (only the message's embedded
+// certificate), so the server always verifies signed mail. Decryption needs the
+// key: a SERVER-mode reader's key is here (decrypt server-side); a browser-mode
+// reader decrypts client-side, so the server only flags it.
+func (s *Server) applySmimeStatus(d *mailDetailJSON, st *objectstore.Store, raw []byte) {
 	d.SmimeSigned = smime.IsSigned(raw)
 	d.SmimeEncrypted = smime.IsEncrypted(raw)
 	switch {
@@ -251,32 +274,40 @@ func (s *Server) handleMailMessage(w http.ResponseWriter, r *http.Request) {
 	case d.SmimeSigned && !d.SmimeEncrypted:
 		d.SmimeVerified, d.SmimeSignedBy = s.smimeStatusFor(raw, d.From)
 	}
+}
 
-	// Reading marks the message \Seen, preserving its other flags.
-	if flags, err := st.MessageFlags(fid, uid); err == nil {
-		d.Read = flags&objectstore.FlagSeen != 0
-		d.Starred = flags&objectstore.FlagFlagged != 0
-		if flags&objectstore.FlagSeen == 0 && !mb.shared {
-			_ = st.SetMessageFlags(fid, uid, flags|objectstore.FlagSeen)
-			d.Read = true
-		}
+// markReadOnOpen reports the message's flags and marks it \Seen, preserving its
+// other flags. A shared mailbox is read without marking, so a delegate's read
+// does not change what the owner sees as unread.
+func markReadOnOpen(d *mailDetailJSON, mb *mailboxCtx, fid int64, uid uint32) {
+	flags, err := mb.st.MessageFlags(fid, uid)
+	if err != nil {
+		return
 	}
-	// A safe-listed sender's remote images load automatically in the reader. The
-	// match is computed server-side (against the shared allowlist) so the
-	// security-relevant decision stays in tested Go, not client code.
-	d.SenderTrusted = isSafeSender(safeSenders(st), d.From)
-	// Surface the rich follow-up flag (colour + due date + complete) so the reading
-	// view can show more than the plain \Flagged star.
-	if m, err := st.MessageByUID(fid, uid); err == nil {
-		if f, err := st.GetFollowupFlag(m.ID); err == nil {
-			d.FollowupStatus = f.Status
-			d.FollowupColor = f.Color
-			if !f.DueBy.IsZero() {
-				d.FollowupDue = f.DueBy.Format(time.RFC3339)
-			}
-		}
+	d.Read = flags&objectstore.FlagSeen != 0
+	d.Starred = flags&objectstore.FlagFlagged != 0
+	if flags&objectstore.FlagSeen == 0 && !mb.shared {
+		_ = mb.st.SetMessageFlags(fid, uid, flags|objectstore.FlagSeen)
+		d.Read = true
 	}
-	writeJSON(w, http.StatusOK, d)
+}
+
+// addFollowupFlag surfaces the rich follow-up flag (colour + due date +
+// complete) so the reading view can show more than the plain \Flagged star.
+func addFollowupFlag(d *mailDetailJSON, st *objectstore.Store, fid int64, uid uint32) {
+	m, err := st.MessageByUID(fid, uid)
+	if err != nil {
+		return
+	}
+	f, err := st.GetFollowupFlag(m.ID)
+	if err != nil {
+		return
+	}
+	d.FollowupStatus = f.Status
+	d.FollowupColor = f.Color
+	if !f.DueBy.IsZero() {
+		d.FollowupDue = f.DueBy.Format(time.RFC3339)
+	}
 }
 
 // buildMailDetail builds a message's full detail JSON from its raw bytes: the
@@ -412,24 +443,8 @@ func (s *Server) handleMailFollowup(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 		return
 	}
-	var f objectstore.FollowupFlag
-	switch req.Action {
-	case "flag":
-		color := req.Color
-		if color < objectstore.FlagColorPurple || color > objectstore.FlagColorRed {
-			color = objectstore.FlagColorRed
-		}
-		f = objectstore.FollowupFlag{Status: objectstore.FlagStatusFlagged, Color: color, Request: "Follow up"}
-		if req.Due != "" {
-			if t, err := time.Parse(time.RFC3339, req.Due); err == nil {
-				f.DueBy = t
-			}
-		}
-	case "complete":
-		f = objectstore.FollowupFlag{Status: objectstore.FlagStatusComplete}
-	case "clear":
-		f = objectstore.FollowupFlag{}
-	default:
+	f, ok := followupFlagFor(req.Action, req.Color, req.Due)
+	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "unknown action"})
 		return
 	}
@@ -438,6 +453,37 @@ func (s *Server) handleMailFollowup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// followupFlagFor builds the flag one action sets, reporting false for an
+// action this endpoint does not implement.
+func followupFlagFor(action string, color int32, due string) (objectstore.FollowupFlag, bool) {
+	switch action {
+	case "flag":
+		return flaggedFollowup(color, due), true
+	case "complete":
+		return objectstore.FollowupFlag{Status: objectstore.FlagStatusComplete}, true
+	case "clear":
+		return objectstore.FollowupFlag{}, true
+	}
+	return objectstore.FollowupFlag{}, false
+}
+
+// flaggedFollowup builds a set follow-up flag. A colour outside the palette
+// falls back to red, and an unparseable due date leaves the flag undated rather
+// than dated at the zero time.
+func flaggedFollowup(color int32, due string) objectstore.FollowupFlag {
+	if color < objectstore.FlagColorPurple || color > objectstore.FlagColorRed {
+		color = objectstore.FlagColorRed
+	}
+	f := objectstore.FollowupFlag{Status: objectstore.FlagStatusFlagged, Color: color, Request: "Follow up"}
+	if due == "" {
+		return f
+	}
+	if t, err := time.Parse(time.RFC3339, due); err == nil {
+		f.DueBy = t
+	}
+	return f
 }
 
 // handleMailMove moves a message to another folder.

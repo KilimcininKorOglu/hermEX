@@ -71,28 +71,44 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 			if _, ok := s.session(r); !ok {
 				return
 			}
-			event := ""
-			if c.Mailbox != "" {
-				// Open-count-close per tick (as the push poller does) so the stream
-				// never holds the mailbox open between samples.
-				if st, err := objectstore.Open(c.Mailbox); err == nil {
-					if total, unread, err := st.CountMessages(mapi.PrivateFIDInbox); err == nil {
-						event = inboxDelta(lastTotal, lastUnread, total, unread)
-						lastTotal, lastUnread = total, unread
-					}
-					_ = st.Close()
-				}
-			}
-			var err error
-			if event != "" {
-				_, err = fmt.Fprintf(w, "event: %s\ndata: {}\n\n", event)
-			} else {
-				_, err = fmt.Fprint(w, ": ping\n\n")
-			}
-			if err != nil {
+			event := sampleInbox(c.Mailbox, &lastTotal, &lastUnread)
+			if !writeSSE(w, event) {
 				return
 			}
 			flusher.Flush()
 		}
 	}
+}
+
+// sampleInbox counts the mailbox and reports the event the change calls for, or
+// "" when nothing moved. It opens, counts and closes per tick (as the push
+// poller does) so the stream never holds the mailbox open between samples.
+func sampleInbox(mailbox string, lastTotal, lastUnread *int) string {
+	if mailbox == "" {
+		return ""
+	}
+	st, err := objectstore.Open(mailbox)
+	if err != nil {
+		return ""
+	}
+	defer st.Close()
+	total, unread, err := st.CountMessages(mapi.PrivateFIDInbox)
+	if err != nil {
+		return ""
+	}
+	event := inboxDelta(*lastTotal, *lastUnread, total, unread)
+	*lastTotal, *lastUnread = total, unread
+	return event
+}
+
+// writeSSE emits one event, or a heartbeat comment when there is none, and
+// reports whether the client is still there.
+func writeSSE(w http.ResponseWriter, event string) bool {
+	var err error
+	if event != "" {
+		_, err = fmt.Fprintf(w, "event: %s\ndata: {}\n\n", event)
+	} else {
+		_, err = fmt.Fprint(w, ": ping\n\n")
+	}
+	return err == nil
 }

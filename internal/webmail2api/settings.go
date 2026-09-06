@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 
@@ -200,58 +201,18 @@ func readAppearanceSettings(m map[string]json.RawMessage) appearanceSettingsJSON
 	if raw, ok := m["webmail2AppearanceSettings"]; ok {
 		_ = json.Unmarshal(raw, &a)
 	}
-	switch a.Theme {
-	case "light", "dark", "system":
-	default:
-		a.Theme = "system"
-	}
-	switch a.Language {
-	case "en", "tr", "system":
-	default:
-		a.Language = "system"
-	}
-	switch a.DateFormat {
-	case "iso", "dmy", "mdy":
-	default:
-		a.DateFormat = "iso"
-	}
-	switch a.TimeFormat {
-	case "12", "24":
-	default:
-		a.TimeFormat = "24"
-	}
-	switch a.NameDisplay {
-	case "firstlast", "lastfirst":
-	default:
-		a.NameDisplay = "firstlast"
-	}
-	switch a.ShortcutMode {
-	case "off", "basic", "extended":
-	default:
-		a.ShortcutMode = "extended"
-	}
-	switch a.IconSet {
-	case "breeze", "classic":
-	default:
-		a.IconSet = "breeze"
-	}
-	switch a.PdfZoom {
-	case "auto", "page-actual", "page-width":
-	default:
-		a.PdfZoom = "page-width"
-	}
-	if a.InboxNavMode != "infinite" {
-		a.InboxNavMode = "pagination"
-	}
-	// A never-configured (zero) page size takes the default; otherwise clamp to
-	// the reference row-count bounds.
-	if a.InboxPageSize == 0 {
-		a.InboxPageSize = defaultInboxPageSize
-	} else if a.InboxPageSize < minInboxPageSize {
-		a.InboxPageSize = minInboxPageSize
-	} else if a.InboxPageSize > maxInboxPageSize {
-		a.InboxPageSize = maxInboxPageSize
-	}
+	// Every stored value is client-supplied, so each is narrowed back to the set
+	// the SPA renders; anything else takes the default rather than reaching the UI.
+	a.Theme = oneOf(a.Theme, "system", "light", "dark", "system")
+	a.Language = oneOf(a.Language, "system", "en", "tr", "system")
+	a.DateFormat = oneOf(a.DateFormat, "iso", "iso", "dmy", "mdy")
+	a.TimeFormat = oneOf(a.TimeFormat, "24", "12", "24")
+	a.NameDisplay = oneOf(a.NameDisplay, "firstlast", "firstlast", "lastfirst")
+	a.ShortcutMode = oneOf(a.ShortcutMode, "extended", "off", "basic", "extended")
+	a.IconSet = oneOf(a.IconSet, "breeze", "breeze", "classic")
+	a.PdfZoom = oneOf(a.PdfZoom, "page-width", "auto", "page-actual", "page-width")
+	a.InboxNavMode = oneOf(a.InboxNavMode, "pagination", "infinite", "pagination")
+	a.InboxPageSize = clampInboxPageSize(a.InboxPageSize)
 	// A never-configured message-list gets the default column set; once stored,
 	// the persisted per-column booleans are honored verbatim.
 	if a.MailListColumns == nil {
@@ -259,6 +220,24 @@ func readAppearanceSettings(m map[string]json.RawMessage) appearanceSettingsJSON
 		a.MailListColumns = &d
 	}
 	return a
+}
+
+// oneOf narrows a stored string to the values the SPA renders, falling back
+// when it carries anything else.
+func oneOf(v, fallback string, allowed ...string) string {
+	if slices.Contains(allowed, v) {
+		return v
+	}
+	return fallback
+}
+
+// clampInboxPageSize takes the default for a never-configured (zero) page size
+// and otherwise clamps to the reference row-count bounds.
+func clampInboxPageSize(n int) int {
+	if n == 0 {
+		return defaultInboxPageSize
+	}
+	return min(max(n, minInboxPageSize), maxInboxPageSize)
 }
 
 // appearanceResponseJSON is the appearance settings plus the operator's inline
@@ -394,9 +373,16 @@ func readCalendarSettings(m map[string]json.RawMessage) calendarSettingsJSON {
 	if raw, ok := m["webmail2CalendarSettings"]; ok {
 		_ = json.Unmarshal(raw, &cs)
 	}
-	if cs.FirstDayOfWeek < 0 || cs.FirstDayOfWeek > 6 {
-		cs.FirstDayOfWeek = 1
-	}
+	clampCalendarSettings(&cs)
+	return cs
+}
+
+// clampCalendarSettings returns every field to its valid range, so a stored blob
+// and a fresh PUT are narrowed the same way.
+func clampCalendarSettings(cs *calendarSettingsJSON) {
+	cs.FirstDayOfWeek = inRange(cs.FirstDayOfWeek, 0, 6, 1)
+	cs.WorkDayStart = inRange(cs.WorkDayStart, 0, 23, 9)
+	cs.WorkDayEnd = inRange(cs.WorkDayEnd, 0, 23, 18)
 	if len(cs.WorkDays) == 0 {
 		cs.WorkDays = []int{1, 2, 3, 4, 5}
 	}
@@ -409,13 +395,16 @@ func readCalendarSettings(m map[string]json.RawMessage) calendarSettingsJSON {
 	if !validResolution(cs.Resolution) {
 		cs.Resolution = 30
 	}
-	if cs.WorkDayStart < 0 || cs.WorkDayStart > 23 {
-		cs.WorkDayStart = 9
+}
+
+// inRange takes the default for a value outside [lo,hi]. A stored value is
+// client-supplied, so it is replaced rather than clamped to an edge the user
+// never chose.
+func inRange(v, lo, hi, fallback int) int {
+	if v < lo || v > hi {
+		return fallback
 	}
-	if cs.WorkDayEnd < 0 || cs.WorkDayEnd > 23 {
-		cs.WorkDayEnd = 18
-	}
-	return cs
+	return v
 }
 
 // validResolution reports whether n is one of the supported time-slot resolutions.
@@ -444,27 +433,7 @@ func (s *Server) handlePutCalendarSettings(w http.ResponseWriter, r *http.Reques
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
-	if in.FirstDayOfWeek < 0 || in.FirstDayOfWeek > 6 {
-		in.FirstDayOfWeek = 1
-	}
-	if !validResolution(in.Resolution) {
-		in.Resolution = 30
-	}
-	if in.WorkDayStart < 0 || in.WorkDayStart > 23 {
-		in.WorkDayStart = 9
-	}
-	if in.WorkDayEnd < 0 || in.WorkDayEnd > 23 {
-		in.WorkDayEnd = 18
-	}
-	if len(in.WorkDays) == 0 {
-		in.WorkDays = []int{1, 2, 3, 4, 5}
-	}
-	if in.DefaultDuration <= 0 {
-		in.DefaultDuration = 30
-	}
-	if in.DefaultReminder < 0 {
-		in.DefaultReminder = 15
-	}
+	clampCalendarSettings(&in)
 	s.withSettings(w, r, func(_ *objectstore.Store, m map[string]json.RawMessage) (any, bool) {
 		raw, _ := json.Marshal(in)
 		m["webmail2CalendarSettings"] = raw
@@ -876,40 +845,21 @@ func (s *Server) handlePutProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	props := map[uint32]string{}
-	if prof.DisplayName != nil {
-		props[uint32(mapi.PrDisplayName)] = *prof.DisplayName
-	}
-	if prof.Title != nil {
-		props[uint32(mapi.PrTitle)] = *prof.Title
-	}
-	if prof.Department != nil {
-		props[uint32(mapi.PrDepartmentName)] = *prof.Department
-	}
-	if prof.Phone != nil {
-		props[uint32(mapi.PrBusinessTelephoneNumber)] = *prof.Phone
-	}
-	if len(props) > 0 {
-		if setter, ok := s.auth.(interface {
-			SetUserProperties(string, map[uint32]string) (bool, error)
-		}); ok {
-			_, _ = setter.SetUserProperties(c.Email, props)
+	for _, f := range []struct {
+		tag   mapi.PropTag
+		value *string
+	}{
+		{mapi.PrDisplayName, prof.DisplayName},
+		{mapi.PrTitle, prof.Title},
+		{mapi.PrDepartmentName, prof.Department},
+		{mapi.PrBusinessTelephoneNumber, prof.Phone},
+	} {
+		if f.value != nil {
+			props[uint32(f.tag)] = *f.value
 		}
 	}
-	// Timezone + locale persist to the directory (users.timezone / users.lang) so
-	// they survive a reload and are available cross-protocol. Read-merge-write the
-	// pair: an absent field keeps its current value rather than clearing it.
-	if prof.Timezone != nil || prof.Locale != nil {
-		tz, locale := s.userLocale(c.Email)
-		if prof.Timezone != nil {
-			tz = *prof.Timezone
-		}
-		if prof.Locale != nil {
-			locale = *prof.Locale
-		}
-		if wr, ok := s.auth.(userLocaleWriter); ok {
-			_, _ = wr.SetUserLocale(c.Email, tz, locale)
-		}
-	}
+	s.writeUserProperties(c.Email, props)
+	s.writeUserLocale(c.Email, prof.Timezone, prof.Locale)
 	// The onboarded flag lives in the shared webmail settings blob (per-mailbox
 	// store), set true when the user finishes the first-run onboarding step.
 	if prof.Onboarded != nil {
@@ -917,6 +867,43 @@ func (s *Server) handlePutProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	// Return the re-read profile so the SPA reflects the persisted directory state.
 	s.handleGetProfile(w, r)
+}
+
+// writeUserProperties persists the directory-backed profile fields the request
+// carried, when the directory supports writing them at all.
+func (s *Server) writeUserProperties(email string, props map[uint32]string) {
+	if len(props) == 0 {
+		return
+	}
+	setter, ok := s.auth.(interface {
+		SetUserProperties(string, map[uint32]string) (bool, error)
+	})
+	if !ok {
+		return
+	}
+	_, _ = setter.SetUserProperties(email, props)
+}
+
+// writeUserLocale persists timezone and locale to the directory
+// (users.timezone / users.lang) so they survive a reload and are available
+// cross-protocol. The pair is read-merge-written: an absent field keeps its
+// current value rather than clearing it.
+func (s *Server) writeUserLocale(email string, timezone, locale *string) {
+	if timezone == nil && locale == nil {
+		return
+	}
+	wr, ok := s.auth.(userLocaleWriter)
+	if !ok {
+		return
+	}
+	tz, loc := s.userLocale(email)
+	if timezone != nil {
+		tz = *timezone
+	}
+	if locale != nil {
+		loc = *locale
+	}
+	_, _ = wr.SetUserLocale(email, tz, loc)
 }
 
 // ---- Mailboxes ----

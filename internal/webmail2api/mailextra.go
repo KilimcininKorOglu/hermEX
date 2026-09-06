@@ -3,6 +3,7 @@ package webmail2api
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/base64"
 	"fmt"
 	"net/http"
@@ -38,9 +39,25 @@ func safeAttachmentName(raw, fallback string) string {
 	// Senders send Windows paths too, and path.Base does not treat a backslash as
 	// a separator.
 	base := path.Base(strings.ReplaceAll(raw, "\\", "/"))
-	if base == "" || base == "." || base == ".." || base == "/" {
+	if isEmptyName(base) || base == "/" {
 		return fallback
 	}
+	name := strings.TrimSpace(sanitizeNameRunes(base))
+	if isEmptyName(name) {
+		return fallback
+	}
+	return name
+}
+
+// isEmptyName reports whether a name carries nothing usable: empty, or a dot
+// segment that names a directory rather than a file.
+func isEmptyName(name string) bool {
+	return name == "" || name == "." || name == ".."
+}
+
+// sanitizeNameRunes drops control characters, replaces the quote that would end
+// a Content-Disposition parameter early, and caps the length.
+func sanitizeNameRunes(base string) string {
 	var b strings.Builder
 	for _, r := range base {
 		switch {
@@ -55,11 +72,7 @@ func safeAttachmentName(raw, fallback string) string {
 			break
 		}
 	}
-	name := strings.TrimSpace(b.String())
-	if name == "" || name == "." || name == ".." {
-		return fallback
-	}
-	return name
+	return b.String()
 }
 
 // servedAttachmentType picks the Content-Type an attachment is served with.
@@ -120,30 +133,7 @@ func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-	root := mime.ParseStructure(raw)
-	var found *mime.Part
-	idx := 0
-	var walk func(p *mime.Part)
-	walk = func(p *mime.Part) {
-		if p == nil || found != nil {
-			return
-		}
-		name := p.DispParams["filename"]
-		if name == "" {
-			name = p.Params["name"]
-		}
-		if p.Type != "multipart" && (p.Disposition == "attachment" || name != "") {
-			if idx == index {
-				found = p
-				return
-			}
-			idx++
-		}
-		for _, ch := range p.Children {
-			walk(ch)
-		}
-	}
-	walk(root)
+	found := nthAttachment(mime.ParseStructure(raw), index)
 	if found == nil {
 		http.Error(w, "attachment not found", http.StatusNotFound)
 		return
@@ -157,7 +147,46 @@ func (s *Server) handleAttachment(w http.ResponseWriter, r *http.Request) {
 	served := servedAttachmentType(found.Type+"/"+found.Subtype, body)
 	w.Header().Set("Content-Type", served)
 	w.Header().Set("Content-Disposition", attachmentDisposition(served, r.URL.Query().Get("disposition"), filename))
+	// #nosec G705 -- servedAttachmentType serves anything but a sniffer-confirmed PDF or image as opaque octet-stream, the daemon stamps X-Content-Type-Options: nosniff, and the Content-Type is set explicitly, so the bytes are never interpreted as a document
 	_, _ = w.Write(body)
+}
+
+// nthAttachment walks a MIME tree in the order collectAttachments assigns and
+// returns the attachment at index, or nil when the message has fewer.
+func nthAttachment(root *mime.Part, index int) *mime.Part {
+	idx := 0
+	var walk func(p *mime.Part) *mime.Part
+	walk = func(p *mime.Part) *mime.Part {
+		if p == nil {
+			return nil
+		}
+		if isAttachmentPart(p) {
+			if idx == index {
+				return p
+			}
+			idx++
+		}
+		for _, ch := range p.Children {
+			if found := walk(ch); found != nil {
+				return found
+			}
+		}
+		return nil
+	}
+	return walk(root)
+}
+
+// isAttachmentPart reports whether a MIME part counts as an attachment: a leaf
+// part that either declares the disposition or carries a filename.
+func isAttachmentPart(p *mime.Part) bool {
+	if p.Type == "multipart" {
+		return false
+	}
+	name := p.DispParams["filename"]
+	if name == "" {
+		name = p.Params["name"]
+	}
+	return p.Disposition == "attachment" || name != ""
 }
 
 // handleExport serves a message as a downloadable .eml file.
@@ -215,24 +244,7 @@ func (s *Server) handleExportBulk(w http.ResponseWriter, r *http.Request) {
 	if len(ids) > maxBulkExport {
 		ids = ids[:maxBulkExport]
 	}
-	// Resolve each folder slug (and its read verdict) once: a 200-message export
-	// must not run 200 ListFolders queries.
-	type folderGate struct {
-		fid int64
-		ok  bool
-	}
-	gates := map[string]folderGate{}
-	resolve := func(folder string) (int64, bool) {
-		if g, seen := gates[folder]; seen {
-			return g.fid, g.ok
-		}
-		fid, ok := resolveFolder(mb.st, folder)
-		if ok {
-			ok = mb.readAllowed(fid)
-		}
-		gates[folder] = folderGate{fid, ok}
-		return fid, ok
-	}
+	gates := newFolderGates(mb)
 
 	w.Header().Set("Content-Type", "application/zip")
 	w.Header().Set("Content-Disposition", "attachment; filename=\"messages.zip\"")
@@ -244,7 +256,7 @@ func (s *Server) handleExportBulk(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			continue
 		}
-		fid, ok := resolve(folder)
+		fid, ok := gates.allowed(folder)
 		if !ok {
 			continue
 		}
@@ -252,19 +264,50 @@ func (s *Server) handleExportBulk(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			continue
 		}
-		// The same uid in two different folders would collide; disambiguate the
-		// zip entry name so neither message is silently overwritten.
-		name := "message-" + strconv.FormatUint(uint64(uid), 10) + ".eml"
-		for n := 2; used[name]; n++ {
-			name = "message-" + strconv.FormatUint(uint64(uid), 10) + "-" + strconv.Itoa(n) + ".eml"
-		}
-		used[name] = true
-		f, err := zw.Create(name)
+		f, err := zw.Create(uniqueEntryName(used, uid))
 		if err != nil {
 			return
 		}
 		_, _ = f.Write(raw)
 	}
+}
+
+// folderGates resolves each folder slug (and its read verdict) once: a
+// 200-message export must not run 200 ListFolders queries.
+type folderGates struct {
+	mb    *mailboxCtx
+	seen  map[string]int64
+	allow map[string]bool
+}
+
+func newFolderGates(mb *mailboxCtx) *folderGates {
+	return &folderGates{mb: mb, seen: map[string]int64{}, allow: map[string]bool{}}
+}
+
+// allowed reports the folder id the slug names and whether the caller may read
+// it.
+func (g *folderGates) allowed(folder string) (int64, bool) {
+	if fid, cached := g.seen[folder]; cached {
+		return fid, g.allow[folder]
+	}
+	fid, ok := resolveFolder(g.mb.st, folder)
+	if ok {
+		ok = g.mb.readAllowed(fid)
+	}
+	g.seen[folder], g.allow[folder] = fid, ok
+	return fid, ok
+}
+
+// uniqueEntryName names one zip entry. The same uid in two different folders
+// would collide; disambiguate so neither message is silently overwritten.
+func uniqueEntryName(used map[string]bool, uid uint32) string {
+	base := "message-" + strconv.FormatUint(uint64(uid), 10)
+	name := base + ".eml"
+	for n := 2; used[name]; n++ {
+		name = base + "-" + strconv.Itoa(n) + ".eml"
+	}
+	used[name] = true
+	return name
 }
 
 // handleSource serves a message's raw RFC822 source as inline text/plain, for the
@@ -465,18 +508,36 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	defer st.Close()
 	raw := strings.TrimSpace(r.URL.Query().Get("q"))
-	kql := parseKQL(raw)
-	results := []mailJSON{}
 	if raw == "" {
-		writeJSON(w, http.StatusOK, map[string]any{"emails": results, "total": 0, "query": raw})
+		writeJSON(w, http.StatusOK, map[string]any{"emails": []mailJSON{}, "total": 0, "query": raw})
 		return
 	}
-	bodyReads, truncated := 0, false
-	ctx := r.Context()
-scan:
+	sc := &mailScan{st: st, kql: parseKQL(raw), ctx: r.Context(), results: []mailJSON{}}
+	sc.run()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"emails": sc.results, "total": len(sc.results), "query": raw,
+		// The count is what was returned, not what exists: say plainly when the
+		// walk stopped early so the caller can narrow instead of trusting a
+		// partial answer.
+		"truncated": sc.truncated,
+	})
+}
+
+// mailScan is one bounded search pass over the mail folders.
+type mailScan struct {
+	st        *objectstore.Store
+	kql       kqlQuery
+	ctx       context.Context
+	results   []mailJSON
+	bodyReads int
+	truncated bool
+}
+
+// run walks every search folder newest-first until a match cap or the caller's
+// context stops it.
+func (sc *mailScan) run() {
 	for _, f := range searchFolders() {
-		slug, fid := f.slug, f.fid
-		msgs, err := st.ListMessages(fid)
+		msgs, err := sc.st.ListMessages(f.fid)
 		if err != nil {
 			continue
 		}
@@ -484,84 +545,84 @@ scan:
 		// forwards under a cap would keep the OLDEST matches, which is the wrong
 		// end of the mailbox for a search.
 		for _, m := range slices.Backward(msgs) {
-			// A caller who navigated away must not leave the walk running.
-			if ctx.Err() != nil {
-				truncated = true
-				break scan
+			if sc.exhausted() {
+				return
 			}
-			if len(results) >= maxSearchResults || bodyReads >= maxSearchBodyReads {
-				truncated = true
-				break scan
+			if sc.matches(f.fid, m) {
+				sc.results = append(sc.results, searchResult(f.slug, m))
 			}
-			sender := strings.ToLower(m.Sender)
-			subject := strings.ToLower(m.Subject)
-			// Field filters take precedence; each must hold for a match.
-			if !containsAny(sender, kql.From) {
-				continue
-			}
-			if !containsAny(subject, kql.Subject) {
-				continue
-			}
-			if kql.Read != nil {
-				isRead := m.Flags&objectstore.FlagSeen != 0
-				if isRead != *kql.Read {
-					continue
-				}
-			}
-			// General terms and body/to filters need the raw MIME. Fetch once and
-			// reuse for all of them.
-			needRaw := len(kql.General) > 0 || len(kql.Body) > 0 || len(kql.To) > 0 || kql.HasAtt != nil
-			var body, recipients string
-			hasAtt := false
-			if needRaw {
-				bodyReads++
-				rawMsg, err := st.GetMessageRaw(fid, m.UID)
-				if err != nil {
-					continue
-				}
-				root := mime.ParseStructure(rawMsg)
-				body = strings.ToLower(bestBody(root))
-				recipients = strings.ToLower(recipientsOf(root))
-				hasAtt = mimeHasAttachment(root)
-			}
-			if len(kql.To) > 0 && !containsAny(recipients, kql.To) {
-				continue
-			}
-			if len(kql.Body) > 0 && !containsAny(body, kql.Body) {
-				continue
-			}
-			if kql.HasAtt != nil && hasAtt != *kql.HasAtt {
-				continue
-			}
-			// General terms match against subject/sender/body together.
-			if len(kql.General) > 0 {
-				hay := subject + " " + sender + " " + body
-				matched := false
-				for _, term := range kql.General {
-					if strings.Contains(hay, term) {
-						matched = true
-						break
-					}
-				}
-				if !matched {
-					continue
-				}
-			}
-			results = append(results, mailJSON{
-				ID: messageID(slug, m.UID), From: m.Sender, FromName: m.Sender,
-				Subject: m.Subject, Date: m.InternalDate.Format("2006-01-02T15:04:05Z07:00"),
-				Read: m.Flags&objectstore.FlagSeen != 0, Starred: m.Flags&objectstore.FlagFlagged != 0,
-				Folder: slug, Size: int(m.Size),
-			})
 		}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"emails": results, "total": len(results), "query": raw,
-		// The count is what was returned, not what exists: say plainly when the
-		// walk stopped early so the caller can narrow instead of trusting a
-		// partial answer.
-		"truncated": truncated,
+}
+
+// exhausted reports whether the walk must stop, and records that the answer is
+// partial. A caller who navigated away must not leave the walk running.
+func (sc *mailScan) exhausted() bool {
+	if sc.ctx.Err() != nil || len(sc.results) >= maxSearchResults || sc.bodyReads >= maxSearchBodyReads {
+		sc.truncated = true
+		return true
+	}
+	return false
+}
+
+// matches applies every filter to one message. The index columns are tested
+// first so a message the cheap filters reject never costs a body read.
+func (sc *mailScan) matches(fid int64, m objectstore.MessageInfo) bool {
+	sender := strings.ToLower(m.Sender)
+	subject := strings.ToLower(m.Subject)
+	if !containsAny(sender, sc.kql.From) || !containsAny(subject, sc.kql.Subject) {
+		return false
+	}
+	if sc.kql.Read != nil && (m.Flags&objectstore.FlagSeen != 0) != *sc.kql.Read {
+		return false
+	}
+	if !sc.needsBody() {
+		return true
+	}
+	sc.bodyReads++
+	rawMsg, err := sc.st.GetMessageRaw(fid, m.UID)
+	if err != nil {
+		return false
+	}
+	root := mime.ParseStructure(rawMsg)
+	return sc.bodyMatches(subject, sender, root)
+}
+
+// needsBody reports whether any active filter has to read the raw MIME.
+func (sc *mailScan) needsBody() bool {
+	return len(sc.kql.General) > 0 || len(sc.kql.Body) > 0 || len(sc.kql.To) > 0 || sc.kql.HasAtt != nil
+}
+
+// bodyMatches applies the filters that need the parsed message.
+func (sc *mailScan) bodyMatches(subject, sender string, root *mime.Part) bool {
+	body := strings.ToLower(bestBody(root))
+	if len(sc.kql.To) > 0 && !containsAny(strings.ToLower(recipientsOf(root)), sc.kql.To) {
+		return false
+	}
+	if len(sc.kql.Body) > 0 && !containsAny(body, sc.kql.Body) {
+		return false
+	}
+	if sc.kql.HasAtt != nil && mimeHasAttachment(root) != *sc.kql.HasAtt {
+		return false
+	}
+	if len(sc.kql.General) == 0 {
+		return true
+	}
+	// General terms match against subject/sender/body together.
+	hay := subject + " " + sender + " " + body
+	return slices.ContainsFunc(sc.kql.General, func(term string) bool {
+		return strings.Contains(hay, term)
 	})
+}
+
+// searchResult renders one matched message for the SPA.
+func searchResult(slug string, m objectstore.MessageInfo) mailJSON {
+	return mailJSON{
+		ID: messageID(slug, m.UID), From: m.Sender, FromName: m.Sender,
+		Subject: m.Subject, Date: m.InternalDate.Format("2006-01-02T15:04:05Z07:00"),
+		Read: m.Flags&objectstore.FlagSeen != 0, Starred: m.Flags&objectstore.FlagFlagged != 0,
+		Folder: slug, Size: int(m.Size),
+	}
 }
 
 // recipientsOf collects To/Cc/Bcc display strings from a MIME tree so the KQL
@@ -629,8 +690,8 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "upload too large or malformed"})
 		return
 	}
-	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(req.File))
-	if err != nil || len(raw) == 0 {
+	raw, ok := decodeImportedEML(req.File)
+	if !ok {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "choose a valid .eml file"})
 		return
 	}
@@ -652,13 +713,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "unknown folder"})
 		return
 	}
-	// An imported .eml carries whatever the uploader put in it and never passes
-	// through delivery, so it is scanned here or not at all.
-	owner := ""
-	if c, ok := s.session(r); ok {
-		owner = c.Email
-	}
-	if mta.ScanStored(s.accounts, owner, "", raw, time.Now()) {
+	if !s.importPassesScan(r, raw) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "the message was rejected: a virus was detected"})
 		return
 	}
@@ -668,6 +723,27 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"uid": info.UID, "folder": folder})
+}
+
+// decodeImportedEML decodes the uploaded file, reporting false for anything
+// that is not a non-empty base64 body.
+func decodeImportedEML(file string) ([]byte, bool) {
+	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(file))
+	if err != nil || len(raw) == 0 {
+		return nil, false
+	}
+	return raw, true
+}
+
+// importPassesScan virus-scans an uploaded .eml. It carries whatever the
+// uploader put in it and never passes through delivery, so it is scanned here or
+// not at all.
+func (s *Server) importPassesScan(r *http.Request, raw []byte) bool {
+	owner := ""
+	if c, ok := s.session(r); ok {
+		owner = c.Email
+	}
+	return !mta.ScanStored(s.accounts, owner, "", raw, time.Now())
 }
 
 // importDate is the internal date an imported .eml is filed under. An import is a

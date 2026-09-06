@@ -83,33 +83,43 @@ func (s *Server) recallFromRecipient(addr, messageID, sender string) string {
 		return "unavailable"
 	}
 	for _, o := range objs {
-		props, err := rst.GetMessageProperties(o.ID, mapi.PrInternetMessageID,
-			mapi.PrSentRepresentingSmtpAddress, mapi.PrSenderSmtpAddress,
-			mapi.PrSentRepresentingEmailAddress, mapi.PrSenderEmailAddress)
-		if err != nil {
+		if !isRecallTarget(rst, o.ID, messageID, sender) {
 			continue
 		}
-		if !strings.EqualFold(propStr(props, mapi.PrInternetMessageID), messageID) {
-			continue
-		}
-		// Defence in depth: only the original author's copy is eligible.
-		copySender := senderOf(props)
-		if !strings.EqualFold(copySender, sender) {
-			continue
-		}
-		read, err := rst.GetMessageReadState(o.ID)
-		if err != nil {
-			return "unavailable"
-		}
-		if read {
-			return "read" // already seen: too late to recall
-		}
-		if err := rst.DeleteObject(o.ID); err != nil {
-			return "unavailable"
-		}
-		return "recalled"
+		return recallCopy(rst, o.ID)
 	}
 	return "unavailable" // no matching unread copy in the inbox (read, moved, or never local)
+}
+
+// isRecallTarget reports whether one stored object is the copy being recalled:
+// it carries the original message id AND, as defence in depth, was written by
+// the original author.
+func isRecallTarget(rst *objectstore.Store, id int64, messageID, sender string) bool {
+	props, err := rst.GetMessageProperties(id, mapi.PrInternetMessageID,
+		mapi.PrSentRepresentingSmtpAddress, mapi.PrSenderSmtpAddress,
+		mapi.PrSentRepresentingEmailAddress, mapi.PrSenderEmailAddress)
+	if err != nil {
+		return false
+	}
+	if !strings.EqualFold(propStr(props, mapi.PrInternetMessageID), messageID) {
+		return false
+	}
+	return strings.EqualFold(senderOf(props), sender)
+}
+
+// recallCopy deletes an unread copy, reporting what happened to it.
+func recallCopy(rst *objectstore.Store, id int64) string {
+	read, err := rst.GetMessageReadState(id)
+	if err != nil {
+		return "unavailable"
+	}
+	if read {
+		return "read" // already seen: too late to recall
+	}
+	if err := rst.DeleteObject(id); err != nil {
+		return "unavailable"
+	}
+	return "recalled"
 }
 
 // recipientAddrs returns the distinct SMTP recipient addresses of a message.

@@ -255,29 +255,47 @@ func buildICal(e eventJSON) []byte {
 	for _, a := range e.OptionalAttendees {
 		fmt.Fprintf(&b, "ATTENDEE;CN=%s;ROLE=OPT-PARTICIPANT:mailto:%s\r\n", a, a)
 	}
-	if e.Description != "" {
-		fmt.Fprintf(&b, "DESCRIPTION:%s\r\n", icalText(e.Description))
-	}
-	if e.Location != "" {
-		fmt.Fprintf(&b, "LOCATION:%s\r\n", icalText(e.Location))
-	}
-	if e.ReminderMinutes != nil && *e.ReminderMinutes > 0 {
-		b.WriteString("BEGIN:VALARM\r\nACTION:DISPLAY\r\n")
-		fmt.Fprintf(&b, "TRIGGER:-PT%dM\r\n", *e.ReminderMinutes)
-		b.WriteString("END:VALARM\r\n")
-	}
-	// Sensitivity maps to iCalendar CLASS (PRIVATE for private/personal, CONFIDENTIAL
-	// for confidential); oxcical's import maps CLASS back to PR_SENSITIVITY.
-	if e.Sensitivity != nil {
-		switch *e.Sensitivity {
-		case 1, 2:
-			b.WriteString("CLASS:PRIVATE\r\n")
-		case 3:
-			b.WriteString("CLASS:CONFIDENTIAL\r\n")
-		}
-	}
+	writeICalText(&b, "DESCRIPTION:%s\r\n", e.Description)
+	writeICalText(&b, "LOCATION:%s\r\n", e.Location)
+	writeICalAlarm(&b, e.ReminderMinutes)
+	b.WriteString(icalClass(e.Sensitivity))
 	b.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
 	return []byte(b.String())
+}
+
+// writeICalText emits one escaped text property, skipping an empty value.
+func writeICalText(b *strings.Builder, format, value string) {
+	if value == "" {
+		return
+	}
+	fmt.Fprintf(b, format, icalText(value))
+}
+
+// writeICalAlarm emits the display VALARM for a reminder set to a positive lead
+// time.
+func writeICalAlarm(b *strings.Builder, minutes *int) {
+	if minutes == nil || *minutes <= 0 {
+		return
+	}
+	b.WriteString("BEGIN:VALARM\r\nACTION:DISPLAY\r\n")
+	fmt.Fprintf(b, "TRIGGER:-PT%dM\r\n", *minutes)
+	b.WriteString("END:VALARM\r\n")
+}
+
+// icalClass maps sensitivity to the iCalendar CLASS line (PRIVATE for
+// private/personal, CONFIDENTIAL for confidential); oxcical's import maps CLASS
+// back to PR_SENSITIVITY.
+func icalClass(sensitivity *int) string {
+	if sensitivity == nil {
+		return ""
+	}
+	switch *sensitivity {
+	case 1, 2:
+		return "CLASS:PRIVATE\r\n"
+	case 3:
+		return "CLASS:CONFIDENTIAL\r\n"
+	}
+	return ""
 }
 
 // icalProp returns a property's value and the part of the key after its name
@@ -378,95 +396,157 @@ func (s *Server) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 	// its cheap start/end named props before the costly per-object iCal export
 	// (mirrors today.go's appointmentsOn). Absent or malformed params keep the
 	// full-calendar export so an unbounded client is never silently truncated.
-	winStart, winEnd, windowed := eventWindow(r)
-	var winStartTag, winEndTag mapi.PropTag
-	if windowed {
-		if ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole}); err == nil && len(ids) == 2 {
-			winStartTag = mapi.MakeTag(ids[0], mapi.PtSysTime)
-			winEndTag = mapi.MakeTag(ids[1], mapi.PtSysTime)
-		} else {
-			windowed = false // cannot resolve the time tags; fail open to full export
-		}
-	}
-	opt := oxcical.Options{Resolver: st.GetNamedPropIDs}
+	win := newEventWindowScan(st, r)
 	events := make([]eventJSON, 0)
-	// busyTag resolves PidLidBusyStatus once; an absent tag (fresh store) means the
-	// busy status is read from the iCal-derived default and stays nil.
-	busyTag, _ := busyStatusTag(st, false)
-	// respTag resolves PidLidResponseStatus once; the organizer's TrackingTab reads
-	// each attendee's response from its recipient row.
-	respTag, _ := responseStatusTag(st, false)
 	for _, cal := range listCalendars(st) {
-		fid := calendarFolderID(cal.ID)
-		var objs []objectstore.FolderObject
-		var err error
-		if windowed {
-			// The store applies the window, so the export below runs only for the
-			// objects that survive it. Reading each object's properties back to
-			// compare two times costs a query per object and grows with the calendar,
-			// not with the answer.
-			objs, err = st.ListFolderObjectsInWindow(fid, winStartTag, winEndTag, winStart, winEnd)
-		} else {
-			objs, err = st.ListFolderObjects(fid)
-		}
+		objs, err := win.list(calendarFolderID(cal.ID))
 		if err != nil {
 			continue
 		}
 		for _, o := range objs {
-			msg, err := st.OpenMessage(o.ID)
-			if err != nil {
+			e, ok := win.event(o.ID, cal.ID)
+			if !ok {
 				continue
-			}
-			ics, err := oxcical.Export(msg, opt)
-			if err != nil {
-				continue
-			}
-			e := icalToEvent(ics, o.ID)
-			// The SPA addresses an event by its message id (delete and update parse
-			// it back to a store id); the iCalendar UID is the meeting identity, not
-			// a store handle, so the message id - not icalToEvent's UID - is surfaced.
-			e.UID = strconv.FormatInt(o.ID, 10)
-			e.CalendarID = cal.ID
-			// BusyStatus is read directly from the named prop so every value
-			// survives the reload; the exported iCal can only say opaque or
-			// transparent, so tentative, oof and working-elsewhere are lost there.
-			// An appointment migrated from Exchange commonly carries 4.
-			if busyTag != 0 {
-				if pv, err := st.GetMessageProperties(o.ID, busyTag); err == nil {
-					if bs, ok := propInt32(pv, busyTag); ok {
-						n := int(bs)
-						e.BusyStatus = &n
-					}
-				}
-			}
-			// Categories are the shared PidNameKeywords list, read directly.
-			if cats, err := st.GetCategories(o.ID); err == nil && len(cats) > 0 {
-				e.Categories = cats
-			}
-			// Attendees + Tracking: each recipient's SMTP address is the attendee
-			// list (oxcical stores ATTENDEE as recipients), and its PidLidResponseStatus
-			// is the organizer's tracking view (populated by inbound REPLY).
-			if recips, err := st.ListRecipients(o.ID); err == nil {
-				for _, r := range recips {
-					if r.SmtpAddress == "" {
-						continue
-					}
-					e.Attendees = append(e.Attendees, r.SmtpAddress)
-					if respTag != 0 {
-						resp := 0
-						if pv, err := st.GetRecipientProperties(r.ID, respTag); err == nil {
-							if v, ok := propInt32(pv, respTag); ok {
-								resp = int(v)
-							}
-						}
-						e.Tracking = append(e.Tracking, attendeeStatusJSON{Email: r.SmtpAddress, Response: resp})
-					}
-				}
 			}
 			events = append(events, e)
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": events})
+}
+
+// eventScan renders one calendar listing. The named-property tags it needs are
+// resolved once for the whole request rather than per object.
+type eventScan struct {
+	st       *objectstore.Store
+	opt      oxcical.Options
+	busyTag  mapi.PropTag
+	respTag  mapi.PropTag
+	windowed bool
+	startTag mapi.PropTag
+	endTag   mapi.PropTag
+	start    time.Time
+	end      time.Time
+}
+
+// newEventWindowScan resolves the optional [start,end) window and the named
+// property tags the listing reads.
+//
+// When both window params parse, an object is pruned by its cheap start/end
+// named props before the costly per-object iCal export (mirrors today.go's
+// appointmentsOn). Absent or malformed params keep the full-calendar export so
+// an unbounded client is never silently truncated.
+func newEventWindowScan(st *objectstore.Store, r *http.Request) *eventScan {
+	sc := &eventScan{st: st, opt: oxcical.Options{Resolver: st.GetNamedPropIDs}}
+	// busyTag resolves PidLidBusyStatus once; an absent tag (fresh store) means
+	// the busy status is read from the iCal-derived default and stays nil.
+	sc.busyTag, _ = busyStatusTag(st, false)
+	// respTag resolves PidLidResponseStatus once; the organizer's TrackingTab
+	// reads each attendee's response from its recipient row.
+	sc.respTag, _ = responseStatusTag(st, false)
+	sc.start, sc.end, sc.windowed = eventWindow(r)
+	if !sc.windowed {
+		return sc
+	}
+	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameAppointmentStartWhole, mapi.NameAppointmentEndWhole})
+	if err != nil || len(ids) != 2 {
+		sc.windowed = false // cannot resolve the time tags; fail open to full export
+		return sc
+	}
+	sc.startTag = mapi.MakeTag(ids[0], mapi.PtSysTime)
+	sc.endTag = mapi.MakeTag(ids[1], mapi.PtSysTime)
+	return sc
+}
+
+// list enumerates one calendar folder, applying the window in the store when
+// there is one. Reading each object's properties back to compare two times
+// costs a query per object and grows with the calendar, not with the answer.
+func (sc *eventScan) list(fid int64) ([]objectstore.FolderObject, error) {
+	if sc.windowed {
+		return sc.st.ListFolderObjectsInWindow(fid, sc.startTag, sc.endTag, sc.start, sc.end)
+	}
+	return sc.st.ListFolderObjects(fid)
+}
+
+// event renders one stored appointment, reporting false when it cannot be
+// exported.
+func (sc *eventScan) event(id int64, calendarID string) (eventJSON, bool) {
+	msg, err := sc.st.OpenMessage(id)
+	if err != nil {
+		return eventJSON{}, false
+	}
+	ics, err := oxcical.Export(msg, sc.opt)
+	if err != nil {
+		return eventJSON{}, false
+	}
+	e := icalToEvent(ics, id)
+	// The SPA addresses an event by its message id (delete and update parse it
+	// back to a store id); the iCalendar UID is the meeting identity, not a store
+	// handle, so the message id - not icalToEvent's UID - is surfaced.
+	e.UID = strconv.FormatInt(id, 10)
+	e.CalendarID = calendarID
+	e.BusyStatus = sc.busyStatus(id)
+	// Categories are the shared PidNameKeywords list, read directly.
+	if cats, err := sc.st.GetCategories(id); err == nil && len(cats) > 0 {
+		e.Categories = cats
+	}
+	sc.addAttendees(&e, id)
+	return e, true
+}
+
+// busyStatus reads PidLidBusyStatus directly so every value survives the
+// reload: the exported iCal can only say opaque or transparent, so tentative,
+// oof and working-elsewhere are lost there. An appointment migrated from
+// Exchange commonly carries 4.
+func (sc *eventScan) busyStatus(id int64) *int {
+	if sc.busyTag == 0 {
+		return nil
+	}
+	pv, err := sc.st.GetMessageProperties(id, sc.busyTag)
+	if err != nil {
+		return nil
+	}
+	bs, ok := propInt32(pv, sc.busyTag)
+	if !ok {
+		return nil
+	}
+	n := int(bs)
+	return &n
+}
+
+// addAttendees fills the attendee list and the organizer's tracking view. Each
+// recipient's SMTP address is the attendee list (oxcical stores ATTENDEE as
+// recipients), and its PidLidResponseStatus is the tracking view an inbound
+// REPLY populates.
+func (sc *eventScan) addAttendees(e *eventJSON, id int64) {
+	recips, err := sc.st.ListRecipients(id)
+	if err != nil {
+		return
+	}
+	for _, r := range recips {
+		if r.SmtpAddress == "" {
+			continue
+		}
+		e.Attendees = append(e.Attendees, r.SmtpAddress)
+		if sc.respTag != 0 {
+			e.Tracking = append(e.Tracking, attendeeStatusJSON{
+				Email: r.SmtpAddress, Response: sc.responseStatus(r.ID),
+			})
+		}
+	}
+}
+
+// responseStatus reads one attendee's PidLidResponseStatus, reporting 0 (none)
+// when it is unset.
+func (sc *eventScan) responseStatus(recipientID int64) int {
+	pv, err := sc.st.GetRecipientProperties(recipientID, sc.respTag)
+	if err != nil {
+		return 0
+	}
+	v, ok := propInt32(pv, sc.respTag)
+	if !ok {
+		return 0
+	}
+	return int(v)
 }
 
 // eventWindow parses the optional start/end RFC3339 query params of the events
@@ -617,37 +697,53 @@ func (s *Server) handleDeleteEvent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer st.Close()
-	// If the event had attendees (the organizer is cancelling a meeting), email a
-	// METHOD:CANCEL iTIP notice before the delete so the recipients' clients drop
-	// it. Best-effort: a delivery failure still lets the organizer delete their
-	// own copy.
 	if c, ok := s.session(r); ok {
-		if recips, err := st.ListRecipients(id); err == nil {
-			var addrs []string
-			for _, rc := range recips {
-				if rc.SmtpAddress != "" {
-					addrs = append(addrs, rc.SmtpAddress)
-				}
-			}
-			if len(addrs) > 0 {
-				summary := ""
-				if pv, err := st.GetMessageProperties(id, mapi.PrSubject); err == nil {
-					summary = propStr(pv, mapi.PrSubject)
-				}
-				if raw, rec, berr := buildCancellationRequest(c.Email, eventJSON{UID: strconv.FormatInt(id, 10), Summary: summary, Attendees: addrs}); berr == nil {
-					if _, derr := mta.DeliverAndRelay(s.accounts, s.spool, c.Email, rec, raw, time.Now()); derr != nil {
-						logError("send-meeting-cancellation", derr, logging.Fields{"user": c.Email})
-					}
-					fileSentCopy(st, raw, c.Email, "meeting-cancellation")
-				}
-			}
-		}
+		s.cancelMeetingIfAttended(st, id, c.Email)
 	}
 	if err := st.DeleteObject(id); err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not delete event"})
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// cancelMeetingIfAttended emails a METHOD:CANCEL iTIP notice when the event
+// being deleted has attendees, so the recipients' clients drop it. It runs
+// before the delete and is best-effort: a delivery failure still lets the
+// organizer delete their own copy.
+func (s *Server) cancelMeetingIfAttended(st *objectstore.Store, id int64, organizer string) {
+	addrs := attendeeAddresses(st, id)
+	if len(addrs) == 0 {
+		return
+	}
+	summary := ""
+	if pv, err := st.GetMessageProperties(id, mapi.PrSubject); err == nil {
+		summary = propStr(pv, mapi.PrSubject)
+	}
+	raw, rec, err := buildCancellationRequest(organizer,
+		eventJSON{UID: strconv.FormatInt(id, 10), Summary: summary, Attendees: addrs})
+	if err != nil {
+		return
+	}
+	if _, err := mta.DeliverAndRelay(s.accounts, s.spool, organizer, rec, raw, time.Now()); err != nil {
+		logError("send-meeting-cancellation", err, logging.Fields{"user": organizer})
+	}
+	fileSentCopy(st, raw, organizer, "meeting-cancellation")
+}
+
+// attendeeAddresses lists the SMTP addresses an event's recipients carry.
+func attendeeAddresses(st *objectstore.Store, id int64) []string {
+	recips, err := st.ListRecipients(id)
+	if err != nil {
+		return nil
+	}
+	var addrs []string
+	for _, rc := range recips {
+		if rc.SmtpAddress != "" {
+			addrs = append(addrs, rc.SmtpAddress)
+		}
+	}
+	return addrs
 }
 
 // handleGetCalendars lists the mailbox's calendars.
@@ -755,18 +851,47 @@ func (s *Server) handleDeleteCalendar(w http.ResponseWriter, r *http.Request) {
 // serves). The organizer is the authenticated sender. It returns the raw MIME and
 // the deduplicated attendee address list (the recipients).
 func buildMeetingRequest(organizer string, e eventJSON) ([]byte, []string, error) {
-	// Recipients: dedup the attendee addresses (required + optional), parsed to
-	// bare smtp; optionalSet marks the OPT-PARTICIPANT roles.
+	recipients, optionalSet := inviteRecipients(organizer, e)
+	if len(recipients) == 0 {
+		return nil, nil, fmt.Errorf("no attendees")
+	}
+	cal := inviteCalendar(organizer, e, recipients, optionalSet)
+	textBody := inviteTextBody(e)
+
+	boundary := "hermex-invite-" + randomHex()
+	var b strings.Builder
+	fmt.Fprintf(&b, "From: %s\r\n", organizer)
+	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(recipients, ", "))
+	fmt.Fprintf(&b, "Subject: %s\r\n", headerSafe(e.Summary))
+	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))
+	fmt.Fprintf(&b, "Message-ID: <%s@hermex>\r\n", randomHex())
+	b.WriteString("MIME-Version: 1.0\r\n")
+	fmt.Fprintf(&b, "Content-Type: multipart/mixed; boundary=%q\r\n\r\n", boundary)
+	fmt.Fprintf(&b, "--%s\r\n", boundary)
+	b.WriteString("Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
+	b.WriteString(textBody)
+	b.WriteString("\r\n")
+	fmt.Fprintf(&b, "--%s\r\n", boundary)
+	b.WriteString("Content-Type: text/calendar; method=REQUEST; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
+	b.WriteString(cal)
+	fmt.Fprintf(&b, "\r\n--%s--\r\n", boundary)
+	return []byte(b.String()), recipients, nil
+}
+
+// inviteRecipients deduplicates the attendee addresses (required and optional)
+// down to bare SMTP, and reports which of them are OPT-PARTICIPANT.
+//
+// An address that does not parse is dropped rather than carried forward. It
+// reaches the invite's To header and the iCal ATTENDEE line, so an entry holding
+// a line break would splice headers of the organizer's choosing into a message
+// the server relays externally, or end the header block and push the rest into
+// the body.
+func inviteRecipients(organizer string, e eventJSON) ([]string, map[string]bool) {
 	recipients := make([]string, 0, len(e.Attendees)+len(e.OptionalAttendees))
 	optionalSet := map[string]bool{}
 	seen := map[string]bool{}
 	add := func(list []string, optional bool) {
 		for _, a := range list {
-			// Drop what does not parse rather than carrying the raw string forward.
-			// It reaches the invite's To header and the iCal ATTENDEE line, so an
-			// entry holding a line break would splice headers of the organizer's
-			// choosing into a message the server relays externally, or end the header
-			// block and push the rest into the body.
 			parsed, err := mail.ParseAddress(strings.TrimSpace(a))
 			if err != nil {
 				continue
@@ -784,11 +909,13 @@ func buildMeetingRequest(organizer string, e eventJSON) ([]byte, []string, error
 	}
 	add(e.Attendees, false)
 	add(e.OptionalAttendees, true)
-	if len(recipients) == 0 {
-		return nil, nil, fmt.Errorf("no attendees")
-	}
-	// The iCalendar: METHOD:REQUEST at the VCALENDAR level, ORGANIZER set, and an
-	// ATTENDEE per recipient (RSVP=TRUE so the invitee client offers a response).
+	return recipients, optionalSet
+}
+
+// inviteCalendar renders the iCalendar: METHOD:REQUEST at the VCALENDAR level,
+// ORGANIZER set, and an ATTENDEE per recipient (RSVP=TRUE so the invitee client
+// offers a response).
+func inviteCalendar(organizer string, e eventJSON, recipients []string, optionalSet map[string]bool) string {
 	var cal strings.Builder
 	cal.WriteString("BEGIN:VCALENDAR\r\nVERSION:2.0\r\nPRODID:-//hermEX//webmail2//EN\r\nMETHOD:REQUEST\r\nBEGIN:VEVENT\r\n")
 	fmt.Fprintf(&cal, "UID:%s\r\n", uidOrGenerated(e.UID))
@@ -797,9 +924,7 @@ func buildMeetingRequest(organizer string, e eventJSON) ([]byte, []string, error
 	if e.End != "" {
 		fmt.Fprintf(&cal, "DTEND%s\r\n", toICalTime(e.End, e.AllDay))
 	}
-	if e.Location != "" {
-		fmt.Fprintf(&cal, "LOCATION:%s\r\n", icalText(e.Location))
-	}
+	writeICalText(&cal, "LOCATION:%s\r\n", e.Location)
 	fmt.Fprintf(&cal, "ORGANIZER;CN=%s:mailto:%s\r\n", organizer, organizer)
 	for _, a := range recipients {
 		role := "REQ-PARTICIPANT"
@@ -809,43 +934,24 @@ func buildMeetingRequest(organizer string, e eventJSON) ([]byte, []string, error
 		fmt.Fprintf(&cal, "ATTENDEE;CN=%s;ROLE=%s;RSVP=TRUE:mailto:%s\r\n", a, role, a)
 	}
 	cal.WriteString("END:VEVENT\r\nEND:VCALENDAR\r\n")
+	return cal.String()
+}
 
-	// A plain-text body the invitee reads if their client does not render the
-	// calendar part.
-	parts := []string{
-		e.Summary,
-		"",
-		"When: " + e.Start,
-	}
+// inviteTextBody renders the plain-text body the invitee reads if their client
+// does not render the calendar part.
+func inviteTextBody(e eventJSON) string {
+	when := "When: " + e.Start
 	if e.End != "" {
-		parts[len(parts)-1] = "When: " + e.Start + " - " + e.End
+		when += " - " + e.End
 	}
+	parts := []string{e.Summary, "", when}
 	if e.Location != "" {
 		parts = append(parts, "Where: "+e.Location)
 	}
 	if e.Description != "" {
 		parts = append(parts, "", e.Description)
 	}
-	textBody := strings.Join(parts, "\r\n")
-
-	boundary := "hermex-invite-" + randomHex()
-	var b strings.Builder
-	fmt.Fprintf(&b, "From: %s\r\n", organizer)
-	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(recipients, ", "))
-	fmt.Fprintf(&b, "Subject: %s\r\n", headerSafe(e.Summary))
-	fmt.Fprintf(&b, "Date: %s\r\n", time.Now().UTC().Format(time.RFC1123Z))
-	fmt.Fprintf(&b, "Message-ID: <%s@hermex>\r\n", randomHex())
-	b.WriteString("MIME-Version: 1.0\r\n")
-	fmt.Fprintf(&b, "Content-Type: multipart/mixed; boundary=%q\r\n\r\n", boundary)
-	fmt.Fprintf(&b, "--%s\r\n", boundary)
-	b.WriteString("Content-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
-	b.WriteString(textBody)
-	b.WriteString("\r\n")
-	fmt.Fprintf(&b, "--%s\r\n", boundary)
-	b.WriteString("Content-Type: text/calendar; method=REQUEST; charset=utf-8\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
-	b.WriteString(cal.String())
-	fmt.Fprintf(&b, "\r\n--%s--\r\n", boundary)
-	return []byte(b.String()), recipients, nil
+	return strings.Join(parts, "\r\n")
 }
 
 // buildCancellationRequest renders a METHOD:CANCEL iTIP message (RFC 5546 §3.7):

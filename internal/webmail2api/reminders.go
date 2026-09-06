@@ -93,19 +93,27 @@ func appointmentReminder(st *objectstore.Store, msg *oxcmail.Message) (due time.
 	due = timeProp(msg.Props, timeTag)
 	startT := timeProp(msg.Props, startTag)
 	if due.IsZero() && !startT.IsZero() {
-		delta := 15 * time.Minute // Outlook default for calendar
-		if v, ok := msg.Props.Get(deltaTag); ok {
-			if n, ok := v.(int32); ok && n > 0 {
-				delta = time.Duration(n) * time.Minute
-			}
-		}
-		due = startT.Add(-delta)
+		due = startT.Add(-reminderDelta(msg.Props, deltaTag))
 	}
 	subject = strProp(msg.Props, mapi.PrSubject)
 	if !startT.IsZero() {
 		start = startT.UTC().Format(time.RFC3339)
 	}
 	return
+}
+
+// reminderDelta is the VALARM lead time oxcical stores, falling back to
+// Outlook's 15-minute calendar default when it is unset or not positive.
+func reminderDelta(props mapi.PropertyValues, deltaTag mapi.PropTag) time.Duration {
+	v, ok := props.Get(deltaTag)
+	if !ok {
+		return 15 * time.Minute
+	}
+	n, ok := v.(int32)
+	if !ok || n <= 0 {
+		return 15 * time.Minute
+	}
+	return time.Duration(n) * time.Minute
 }
 
 // taskReminder reads a task's reminder through the oxtask model. The fire instant is
@@ -217,15 +225,37 @@ func (s *Server) mutateReminder(w http.ResponseWriter, r *http.Request, build fu
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "reminder not found"})
 		return
 	}
-	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameReminderSet, mapi.NameReminderTime})
-	if err != nil || len(ids) < 2 || ids[0] == 0 || ids[1] == 0 {
+	setTag, timeTag, ok := reminderTags(st)
+	if !ok {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not resolve reminder props"})
 		return
 	}
-	setTag := mapi.MakeTag(ids[0], mapi.PtBoolean)
-	timeTag := mapi.MakeTag(ids[1], mapi.PtSysTime)
-	due := timeProp(msg.Props, timeTag)
-	props, deletes := build(due)
+	props, deletes := build(timeProp(msg.Props, timeTag))
+	out := substituteReminderTags(props, setTag, timeTag)
+	if !keepSet {
+		out.Set(setTag, false)
+	}
+	if err := st.ModifyMessageProperties(id, out, deletes...); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save reminder"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// reminderTags resolves the reminder named props in this store, allocating them
+// when the mailbox has not carried a reminder before.
+func reminderTags(st *objectstore.Store) (setTag, timeTag mapi.PropTag, ok bool) {
+	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameReminderSet, mapi.NameReminderTime})
+	if err != nil || len(ids) < 2 || ids[0] == 0 || ids[1] == 0 {
+		return 0, 0, false
+	}
+	return mapi.MakeTag(ids[0], mapi.PtBoolean), mapi.MakeTag(ids[1], mapi.PtSysTime), true
+}
+
+// substituteReminderTags replaces the builder's placeholder tags with this
+// store's real ones: the builder writes a bare PtBoolean for ReminderSet and a
+// bare PtSysTime for ReminderTime, since it cannot know the allocated ids.
+func substituteReminderTags(props mapi.PropertyValues, setTag, timeTag mapi.PropTag) mapi.PropertyValues {
 	var out mapi.PropertyValues
 	for _, tp := range props {
 		switch tp.Tag.Type() {
@@ -237,12 +267,5 @@ func (s *Server) mutateReminder(w http.ResponseWriter, r *http.Request, build fu
 			out.Set(tp.Tag, tp.Value)
 		}
 	}
-	if !keepSet {
-		out.Set(setTag, false)
-	}
-	if err := st.ModifyMessageProperties(id, out, deletes...); err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "could not save reminder"})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	return out
 }
