@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"time"
@@ -17,44 +18,14 @@ import (
 // disturbed; a newly indexed message receives a fresh monotonic UID and a
 // freshly re-synthesized eml.
 func (s *Store) ReindexFolder(folderID int64) error {
-	// Object messages currently in the folder (id -> read_state).
-	objState := map[int64]int{}
-	objRows, err := s.objdb.Query(
+	objState, err := scanInt64Map[int](s.objdb,
 		`SELECT message_id, read_state FROM messages WHERE parent_fid=? AND is_deleted=0`, folderID)
 	if err != nil {
 		return err
 	}
-	for objRows.Next() {
-		var id int64
-		var read int
-		if err := objRows.Scan(&id, &read); err != nil {
-			_ = objRows.Close()
-			return err
-		}
-		objState[id] = read
-	}
-	_ = objRows.Close()
-	if err := objRows.Err(); err != nil {
-		return err
-	}
-
-	// Index rows currently in the folder (id -> mid_string).
-	idxMid := map[int64]string{}
-	idxRows, err := s.idxdb.Query(`SELECT message_id, mid_string FROM messages WHERE folder_id=?`, folderID)
+	idxMid, err := scanInt64Map[string](s.idxdb,
+		`SELECT message_id, mid_string FROM messages WHERE folder_id=?`, folderID)
 	if err != nil {
-		return err
-	}
-	for idxRows.Next() {
-		var id int64
-		var mid string
-		if err := idxRows.Scan(&id, &mid); err != nil {
-			_ = idxRows.Close()
-			return err
-		}
-		idxMid[id] = mid
-	}
-	_ = idxRows.Close()
-	if err := idxRows.Err(); err != nil {
 		return err
 	}
 
@@ -63,13 +34,9 @@ func (s *Store) ReindexFolder(folderID int64) error {
 		if _, ok := objState[id]; ok {
 			continue
 		}
-		if _, err := s.idxdb.Exec(`DELETE FROM messages WHERE message_id=?`, id); err != nil {
+		if err := s.dropIndexRow(id, mid); err != nil {
 			return err
 		}
-		if _, err := s.idxdb.Exec(`DELETE FROM mapping WHERE message_id=?`, id); err != nil {
-			return err
-		}
-		_ = os.Remove(s.emlPath(mid))
 	}
 
 	// Index object messages missing from the index.
@@ -77,28 +44,67 @@ func (s *Store) ReindexFolder(folderID int64) error {
 		if _, ok := idxMid[id]; ok {
 			continue
 		}
-		msg, err := s.OpenMessage(id)
-		if err != nil {
-			return err
-		}
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		mid := midString(uint64(id))
-		eml, err := oxcmail.Export(msg, oxcmail.Options{Resolver: s.GetNamedPropIDs})
-		if err != nil {
-			return fmt.Errorf("objectstore: export: %w", err)
-		}
-		if err := s.writeEML(mid, eml); err != nil {
-			return err
-		}
-		var flags int64
-		if read != 0 {
-			flags |= FlagSeen
-		}
-		if _, err := s.indexMessage(folderID, id, mid, msg, int64(len(eml)), deliveryTime(msg.Props), flags); err != nil {
+		if err := s.indexExistingMessage(folderID, id, read != 0); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// scanInt64Map reads a two-column query into a map keyed by the first column.
+func scanInt64Map[V any](db *sql.DB, query string, args ...any) (map[int64]V, error) {
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[int64]V{}
+	for rows.Next() {
+		var k int64
+		var v V
+		if err := rows.Scan(&k, &v); err != nil {
+			return nil, err
+		}
+		out[k] = v
+	}
+	return out, rows.Err()
+}
+
+// dropIndexRow removes one index row and its cached eml, for a message the
+// object store no longer holds.
+func (s *Store) dropIndexRow(id int64, mid string) error {
+	if _, err := s.idxdb.Exec(`DELETE FROM messages WHERE message_id=?`, id); err != nil {
+		return err
+	}
+	if _, err := s.idxdb.Exec(`DELETE FROM mapping WHERE message_id=?`, id); err != nil {
+		return err
+	}
+	_ = os.Remove(s.emlPath(mid))
+	return nil
+}
+
+// indexExistingMessage re-derives a stored message's wire form and index row, for
+// a message the object store holds but the index has lost.
+func (s *Store) indexExistingMessage(folderID, id int64, read bool) error {
+	msg, err := s.OpenMessage(id)
+	if err != nil {
+		return err
+	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	mid := midString(uint64(id))
+	eml, err := oxcmail.Export(msg, oxcmail.Options{Resolver: s.GetNamedPropIDs})
+	if err != nil {
+		return fmt.Errorf("objectstore: export: %w", err)
+	}
+	if err := s.writeEML(mid, eml); err != nil {
+		return err
+	}
+	var flags int64
+	if read {
+		flags |= FlagSeen
+	}
+	_, err = s.indexMessage(folderID, id, mid, msg, int64(len(eml)), deliveryTime(msg.Props), flags)
+	return err
 }
 
 // deliveryTime reads a message's delivery time for the index, falling back to

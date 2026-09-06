@@ -45,58 +45,12 @@ func (s *Store) CreateMessage(folderID int64, msg *oxcmail.Message) (int64, erro
 		return 0, err
 	}
 
-	if err := s.insertProps(tx, "message_properties", "message_id", id, msg.Props); err != nil {
+	if err := s.insertMessageProps(tx, id, msg.Props); err != nil {
 		return 0, err
 	}
-
-	// Every message carries PidTagMessageStatus so the status ROPs can read and
-	// modify it; the reference forces it present at write time. Seed 0 when the
-	// caller did not supply one (status is otherwise managed via RopSetMessageStatus).
-	if _, ok := msg.Props.Get(mapi.PrMsgStatus); !ok {
-		if err := s.insertProps(tx, "message_properties", "message_id", id,
-			mapi.PropertyValues{{Tag: mapi.PrMsgStatus, Value: int32(0)}}); err != nil {
-			return 0, err
-		}
+	if err := s.insertMessageChildren(tx, id, msg); err != nil {
+		return 0, err
 	}
-
-	for _, rcpt := range msg.Recipients {
-		res, err := tx.Exec(`INSERT INTO recipients (message_id) VALUES (?)`, id)
-		if err != nil {
-			return 0, err
-		}
-		rid, err := res.LastInsertId()
-		if err != nil {
-			return 0, err
-		}
-		if err := s.insertProps(tx, "recipients_properties", "recipient_id", rid, rcpt); err != nil {
-			return 0, err
-		}
-	}
-
-	for i, att := range msg.Attachments {
-		res, err := tx.Exec(`INSERT INTO attachments (message_id) VALUES (?)`, id)
-		if err != nil {
-			return 0, err
-		}
-		aid, err := res.LastInsertId()
-		if err != nil {
-			return 0, err
-		}
-		// Assign a stable per-message attach number (PidTagAttachNumber) when the
-		// source did not carry one, mail import does not, an ICS upload does. The
-		// number is the ordinal here, matching the 0-based sequence CreateAttachment
-		// continues, so the read path can resolve an attachment by it rather than by
-		// a position that shifts on a sibling delete.
-		aprops := att.Props
-		if _, ok := aprops.Get(mapi.PrAttachNum); !ok {
-			aprops = append(mapi.PropertyValues(nil), att.Props...)
-			aprops.Set(mapi.PrAttachNum, int32(i))
-		}
-		if err := s.insertProps(tx, "attachment_properties", "attachment_id", aid, aprops); err != nil {
-			return 0, err
-		}
-	}
-
 	if err := insertMsgTime(tx, folderID, id, msg.Props); err != nil {
 		return 0, err
 	}
@@ -109,6 +63,50 @@ func (s *Store) CreateMessage(folderID int64, msg *oxcmail.Message) (int64, erro
 	// indexes, so an IMAP consumer is woken once the row it can see exists.
 	s.publishChange("create", cn, mid)
 	return id, nil
+}
+
+// insertMessageProps writes the message's property bag, seeding
+// PidTagMessageStatus when the caller supplied none. Every message carries that
+// property so the status ROPs can read and modify it; it is otherwise managed
+// through RopSetMessageStatus.
+func (s *Store) insertMessageProps(tx *sql.Tx, id int64, props mapi.PropertyValues) error {
+	if err := s.insertProps(tx, "message_properties", "message_id", id, props); err != nil {
+		return err
+	}
+	if _, ok := props.Get(mapi.PrMsgStatus); ok {
+		return nil
+	}
+	return s.insertProps(tx, "message_properties", "message_id", id,
+		mapi.PropertyValues{{Tag: mapi.PrMsgStatus, Value: int32(0)}})
+}
+
+// insertMessageChildren writes the message's recipients and attachments.
+func (s *Store) insertMessageChildren(tx *sql.Tx, id int64, msg *oxcmail.Message) error {
+	for _, rcpt := range msg.Recipients {
+		if err := s.insertChildProps(tx, "recipients", "recipients_properties", "recipient_id", id, rcpt); err != nil {
+			return err
+		}
+	}
+	for i, att := range msg.Attachments {
+		if err := s.insertChildProps(tx, "attachments", "attachment_properties", "attachment_id", id, numberedAttachProps(att.Props, i)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// numberedAttachProps assigns a stable per-message attach number
+// (PidTagAttachNumber) when the source did not carry one: mail import does not,
+// an ICS upload does. The number is the ordinal, matching the 0-based sequence
+// CreateAttachment continues, so the read path can resolve an attachment by it
+// rather than by a position that shifts on a sibling delete.
+func numberedAttachProps(props mapi.PropertyValues, ordinal int) mapi.PropertyValues {
+	if _, ok := props.Get(mapi.PrAttachNum); ok {
+		return props
+	}
+	out := append(mapi.PropertyValues(nil), props...)
+	out.Set(mapi.PrAttachNum, int32(ordinal))
+	return out
 }
 
 // midString derives a message's mid_string, its eml filename and the bridge
