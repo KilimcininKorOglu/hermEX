@@ -1,6 +1,7 @@
 package rop
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
@@ -283,24 +284,12 @@ func TestTableStatusOps(t *testing.T) {
 
 	// GetStatus: a synchronously-built table is always complete.
 	gs, _ := sess.Dispatch(toROPRequest(ropGetStatus, 0, nil), []uint32{tableH})
-	p := ext.NewPull(gs, ext.FlagUTF16)
-	mustU8(t, p, "GS.RopId")
-	mustU8(t, p, "GS.hindex")
-	if ec := mustU32(t, p, "GS.ec"); ec != ecSuccess {
-		t.Fatalf("GetStatus ec = %#x", ec)
-	}
-	if st := mustU8(t, p, "GS.status"); st != tableStatusComplete {
-		t.Errorf("GetStatus status = %#x, want %#x", st, tableStatusComplete)
-	}
+	p := ropOK(t, gs, ropGetStatus, "GetStatus")
+	wantU8(t, p, "GetStatus status", tableStatusComplete)
 
 	// QueryColumnsAll: the display column set (PR_SUBJECT).
 	qc, _ := sess.Dispatch(toROPRequest(ropQueryColumnsAll, 0, nil), []uint32{tableH})
-	p = ext.NewPull(qc, ext.FlagUTF16)
-	mustU8(t, p, "QC.RopId")
-	mustU8(t, p, "QC.hindex")
-	if ec := mustU32(t, p, "QC.ec"); ec != ecSuccess {
-		t.Fatalf("QueryColumnsAll ec = %#x", ec)
-	}
+	p = ropOK(t, qc, ropQueryColumnsAll, "QueryColumnsAll")
 	gotCols, err := p.PropTags()
 	if err != nil {
 		t.Fatalf("QueryColumnsAll PropTags: %v", err)
@@ -310,68 +299,64 @@ func TestTableStatusOps(t *testing.T) {
 	}
 
 	// QueryPosition: cursor at the start, denominator = row count.
-	assertPosition := func(label string, wantNum, wantDen uint32) {
-		t.Helper()
-		qp, _ := sess.Dispatch(toROPRequest(ropQueryPosition, 0, nil), []uint32{tableH})
-		pp := ext.NewPull(qp, ext.FlagUTF16)
-		mustU8(t, pp, "QP.RopId")
-		mustU8(t, pp, "QP.hindex")
-		if ec := mustU32(t, pp, "QP.ec"); ec != ecSuccess {
-			t.Fatalf("%s QueryPosition ec = %#x", label, ec)
-		}
-		if num := mustU32(t, pp, "QP.num"); num != wantNum {
-			t.Errorf("%s Numerator = %d, want %d", label, num, wantNum)
-		}
-		if den := mustU32(t, pp, "QP.den"); den != wantDen {
-			t.Errorf("%s Denominator = %d, want %d", label, den, wantDen)
-		}
-	}
-	assertPosition("initial", 0, 3)
+	assertTablePosition(t, sess, tableH, "initial", 0, 3)
 
 	// SeekRowFractional 1/2 of 3 rows lands the cursor on row 1.
-	srf := ext.NewPush(ext.FlagUTF16)
-	srf.Uint32(1) // Numerator
-	srf.Uint32(2) // Denominator
-	sr, _ := sess.Dispatch(toROPRequest(ropSeekRowFractional, 0, srf.Bytes()), []uint32{tableH})
-	if ec := readEC(t, sr, ropSeekRowFractional); ec != ecSuccess {
-		t.Fatalf("SeekRowFractional ec = %#x", ec)
-	}
-	assertPosition("after-seek", 1, 3)
+	wantSeekFractional(t, sess, tableH, 1, 2, ecSuccess)
+	assertTablePosition(t, sess, tableH, "after-seek", 1, 3)
 
 	// A zero denominator is an invalid bookmark.
-	srf0 := ext.NewPush(ext.FlagUTF16)
-	srf0.Uint32(1)
-	srf0.Uint32(0)
-	sr0, _ := sess.Dispatch(toROPRequest(ropSeekRowFractional, 0, srf0.Bytes()), []uint32{tableH})
-	if ec := readEC(t, sr0, ropSeekRowFractional); ec != ecInvalidBookmark {
-		t.Errorf("SeekRowFractional(den=0) ec = %#x, want ecInvalidBookmark", ec)
-	}
+	wantSeekFractional(t, sess, tableH, 1, 0, ecInvalidBookmark)
 
 	// Abort: there is no asynchronous build to abort.
 	ab, _ := sess.Dispatch(toROPRequest(ropAbort, 0, nil), []uint32{tableH})
-	if ec := readEC(t, ab, ropAbort); ec != ecUnableToAbort {
-		t.Errorf("Abort ec = %#x, want ecUnableToAbort", ec)
-	}
+	wantEC(t, ab, ropAbort, ecUnableToAbort, "Abort")
 
 	// GetCollapseState: unsupported on a flat (uncategorized) table.
 	gcs := ext.NewPush(ext.FlagUTF16)
 	gcs.Uint64(0) // RowId
 	gcs.Uint32(0) // RowInstanceNumber
 	gc, _ := sess.Dispatch(toROPRequest(ropGetCollapseState, 0, gcs.Bytes()), []uint32{tableH})
-	if ec := readEC(t, gc, ropGetCollapseState); ec != ecNotSupported {
-		t.Errorf("GetCollapseState ec = %#x, want ecNotSupported", ec)
-	}
+	wantEC(t, gc, ropGetCollapseState, ecNotSupported, "GetCollapseState")
 
-	// FreeBookmark must actually drop the bookmark: create one at the current cursor,
-	// free it, then a SeekRowBookmark on the freed blob reports ecNotFound.
-	cb, _ := sess.Dispatch(toROPRequest(ropCreateBookmark, 0, nil), []uint32{tableH})
-	pcb := ext.NewPull(cb, ext.FlagUTF16)
-	mustU8(t, pcb, "CB.RopId")
-	mustU8(t, pcb, "CB.hindex")
-	if ec := mustU32(t, pcb, "CB.ec"); ec != ecSuccess {
-		t.Fatalf("CreateBookmark ec = %#x", ec)
+	assertFreedBookmarkIsGone(t, sess, tableH)
+}
+
+// assertTablePosition reads RopQueryPosition and checks the cursor.
+func assertTablePosition(t *testing.T, sess *Session, tableH uint32, label string, wantNum, wantDen uint32) {
+	t.Helper()
+	qp, _ := sess.Dispatch(toROPRequest(ropQueryPosition, 0, nil), []uint32{tableH})
+	p := ropOK(t, qp, ropQueryPosition, label+" QueryPosition")
+	wantU32(t, p, label+" Numerator", wantNum)
+	wantU32(t, p, label+" Denominator", wantDen)
+}
+
+// wantSeekFractional runs RopSeekRowFractional and checks its return code.
+func wantSeekFractional(t *testing.T, sess *Session, tableH uint32, num, den uint32, want uint32) {
+	t.Helper()
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint32(num)
+	b.Uint32(den)
+	resp, _ := sess.Dispatch(toROPRequest(ropSeekRowFractional, 0, b.Bytes()), []uint32{tableH})
+	wantEC(t, resp, ropSeekRowFractional, want, fmt.Sprintf("SeekRowFractional(%d/%d)", num, den))
+}
+
+// wantEC asserts a response's return code.
+func wantEC(t *testing.T, resp []byte, ropID uint8, want uint32, label string) {
+	t.Helper()
+	if ec := readEC(t, resp, ropID); ec != want {
+		t.Errorf("%s ec = %#x, want %#x", label, ec, want)
 	}
-	bookmark, err := pcb.BinShort()
+}
+
+// assertFreedBookmarkIsGone proves FreeBookmark actually drops the bookmark:
+// one is created at the current cursor, freed, and a SeekRowBookmark on the
+// freed blob then reports ecNotFound rather than silently seeking.
+func assertFreedBookmarkIsGone(t *testing.T, sess *Session, tableH uint32) {
+	t.Helper()
+	cb, _ := sess.Dispatch(toROPRequest(ropCreateBookmark, 0, nil), []uint32{tableH})
+	p := ropOK(t, cb, ropCreateBookmark, "CreateBookmark")
+	bookmark, err := p.BinShort()
 	if err != nil {
 		t.Fatalf("CreateBookmark bookmark: %v", err)
 	}
@@ -379,18 +364,14 @@ func TestTableStatusOps(t *testing.T) {
 	fb := ext.NewPush(ext.FlagUTF16)
 	_ = fb.BinShort(bookmark)
 	free, _ := sess.Dispatch(toROPRequest(ropFreeBookmark, 0, fb.Bytes()), []uint32{tableH})
-	if ec := readEC(t, free, ropFreeBookmark); ec != ecSuccess {
-		t.Fatalf("FreeBookmark ec = %#x", ec)
-	}
+	wantEC(t, free, ropFreeBookmark, ecSuccess, "FreeBookmark")
 
 	srb := ext.NewPush(ext.FlagUTF16)
 	_ = srb.BinShort(bookmark)
 	srb.Uint32(0) // Offset
 	srb.Uint8(0)  // WantRowMovedCount
 	seek, _ := sess.Dispatch(toROPRequest(ropSeekRowBookmark, 0, srb.Bytes()), []uint32{tableH})
-	if ec := readEC(t, seek, ropSeekRowBookmark); ec != ecNotFound {
-		t.Errorf("SeekRowBookmark on freed bookmark ec = %#x, want ecNotFound", ec)
-	}
+	wantEC(t, seek, ropSeekRowBookmark, ecNotFound, "SeekRowBookmark on a freed bookmark")
 }
 
 // openInboxContentsTable walks Logon -> OpenFolder(Inbox) -> GetContentsTable and

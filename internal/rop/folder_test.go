@@ -62,16 +62,7 @@ func TestContentsTableBrowse(t *testing.T) {
 	// OpenFolder(Inbox): logon at input slot 0, folder output at slot 1.
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	openResp, h := sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
-	p := ext.NewPull(openResp, ext.FlagUTF16)
-	if id := mustU8(t, p, "OpenFolder.RopId"); id != ropOpenFolder {
-		t.Fatalf("OpenFolder RopId = %#x", id)
-	}
-	if oh := mustU8(t, p, "OpenFolder.ohindex"); oh != 1 {
-		t.Errorf("OpenFolder output index = %d, want 1", oh)
-	}
-	if ec := mustU32(t, p, "OpenFolder.ec"); ec != ecSuccess {
-		t.Fatalf("OpenFolder ReturnValue = %#x, want 0", ec)
-	}
+	p := ropOK(t, openResp, ropOpenFolder, "OpenFolder")
 	mustU8(t, p, "HasRules")
 	mustU8(t, p, "HasGhost")
 	folderH := h[1]
@@ -84,17 +75,8 @@ func TestContentsTableBrowse(t *testing.T) {
 
 	// GetContentsTable: folder at input slot 0, table output at slot 1.
 	gctResp, h := sess.Dispatch(buildGetContentsTable(0, 1), []uint32{folderH, 0xFFFFFFFF})
-	p = ext.NewPull(gctResp, ext.FlagUTF16)
-	if id := mustU8(t, p, "GCT.RopId"); id != ropGetContentsTable {
-		t.Fatalf("GetContentsTable RopId = %#x", id)
-	}
-	mustU8(t, p, "GCT.ohindex")
-	if ec := mustU32(t, p, "GCT.ec"); ec != ecSuccess {
-		t.Fatalf("GetContentsTable ReturnValue = %#x", ec)
-	}
-	if rc := mustU32(t, p, "GCT.RowCount"); rc != 0 {
-		t.Errorf("RowCount = %d, want 0 (freshly seeded Inbox is empty)", rc)
-	}
+	p = ropOK(t, gctResp, ropGetContentsTable, "GetContentsTable")
+	wantU32(t, p, "RowCount (freshly seeded Inbox is empty)", 0)
 	tableH := h[1]
 	if obj := sess.get(tableH); obj == nil || obj.kind != kindTable {
 		t.Fatalf("table object not created: %+v", obj)
@@ -103,17 +85,8 @@ func TestContentsTableBrowse(t *testing.T) {
 	// SetColumns on the table (in place; no output handle).
 	cols := []mapi.PropTag{mapi.PrSubject, mapi.PrSenderName, mapi.PrMessageDeliveryTime, mapi.PrMessageFlags}
 	scResp, _ := sess.Dispatch(buildSetColumns(0, cols), []uint32{tableH})
-	p = ext.NewPull(scResp, ext.FlagUTF16)
-	if id := mustU8(t, p, "SC.RopId"); id != ropSetColumns {
-		t.Fatalf("SetColumns RopId = %#x", id)
-	}
-	mustU8(t, p, "SC.hindex")
-	if ec := mustU32(t, p, "SC.ec"); ec != ecSuccess {
-		t.Fatalf("SetColumns ReturnValue = %#x", ec)
-	}
-	if st := mustU8(t, p, "SC.TableStatus"); st != tableStatusComplete {
-		t.Errorf("TableStatus = %#x, want %#x", st, tableStatusComplete)
-	}
+	p = ropOK(t, scResp, ropSetColumns, "SetColumns")
+	wantU8(t, p, "TableStatus", tableStatusComplete)
 	if got := sess.get(tableH).table.columns; !reflect.DeepEqual(got, cols) {
 		t.Errorf("stored columns = %v, want %v", got, cols)
 	}
