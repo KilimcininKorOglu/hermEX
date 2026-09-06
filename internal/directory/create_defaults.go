@@ -125,34 +125,23 @@ func (d *SQLDirectory) EffectiveUserDefaults(domainID int64) (ResolvedUserDefaul
 
 // overlayUserDefaults applies a layer's set (non-nil) fields onto the resolved set.
 func overlayUserDefaults(res *ResolvedUserDefaults, u UserCreateDefaults) {
-	if u.Lang != nil {
-		res.Lang = *u.Lang
-	}
-	if u.POP3IMAP != nil {
-		res.POP3IMAP = *u.POP3IMAP
-	}
-	if u.SMTP != nil {
-		res.SMTP = *u.SMTP
-	}
-	if u.ChgPasswd != nil {
-		res.ChgPasswd = *u.ChgPasswd
-	}
-	if u.Web != nil {
-		res.Web = *u.Web
-	}
-	if u.EAS != nil {
-		res.EAS = *u.EAS
-	}
-	if u.DAV != nil {
-		res.DAV = *u.DAV
-	}
-	if u.StorageKB != nil {
-		res.StorageKB = *u.StorageKB
-	}
-	if u.ReceiveKB != nil {
-		res.ReceiveKB = *u.ReceiveKB
-	}
-	if u.SendKB != nil {
-		res.SendKB = *u.SendKB
+	overlay(&res.Lang, u.Lang)
+	overlay(&res.POP3IMAP, u.POP3IMAP)
+	overlay(&res.SMTP, u.SMTP)
+	overlay(&res.ChgPasswd, u.ChgPasswd)
+	overlay(&res.Web, u.Web)
+	overlay(&res.EAS, u.EAS)
+	overlay(&res.DAV, u.DAV)
+	overlay(&res.StorageKB, u.StorageKB)
+	overlay(&res.ReceiveKB, u.ReceiveKB)
+	overlay(&res.SendKB, u.SendKB)
+}
+
+// overlay writes a layer's field onto the resolved value when the layer sets it.
+// A nil pointer means the layer is silent about that field, which is not the
+// same as setting it to its zero value.
+func overlay[T any](dst *T, src *T) {
+	if src != nil {
+		*dst = *src
 	}
 }

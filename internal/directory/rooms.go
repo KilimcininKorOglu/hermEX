@@ -88,19 +88,7 @@ func (d *SQLDirectory) scanRooms(q string, args ...any) ([]GALEntry, error) {
 // the caller derives the same way it does for a user. It reports the new user id.
 func (d *SQLDirectory) CreateRoom(email, displayName, maildir string, capacity int, equipment bool) (int64, error) {
 	email = strings.ToLower(strings.TrimSpace(email))
-	at := strings.LastIndexByte(email, '@')
-	if at <= 0 {
-		return 0, errors.New("directory: room address must be an email address")
-	}
-	if err := ValidateAddress(email); err != nil {
-		return 0, err
-	}
-	domain := email[at+1:]
-	var domainID int64
-	err := d.db.QueryRow(`SELECT id FROM domains WHERE domainname = ?`, domain).Scan(&domainID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, fmt.Errorf("directory: domain %q not found", domain)
-	}
+	domainID, err := d.resourceDomainID(email)
 	if err != nil {
 		return 0, err
 	}
@@ -125,19 +113,44 @@ func (d *SQLDirectory) CreateRoom(email, displayName, maildir string, capacity i
 	if err != nil {
 		return 0, err
 	}
+	if err := insertRoomProperties(tx, id, displayName, capacity); err != nil {
+		return 0, err
+	}
+	return id, tx.Commit()
+}
+
+// resourceDomainID validates a resource address and resolves the domain it must
+// be created in.
+func (d *SQLDirectory) resourceDomainID(email string) (int64, error) {
+	at := strings.LastIndexByte(email, '@')
+	if at <= 0 {
+		return 0, errors.New("directory: room address must be an email address")
+	}
+	if err := ValidateAddress(email); err != nil {
+		return 0, err
+	}
+	domain := email[at+1:]
+	var domainID int64
+	err := d.db.QueryRow(`SELECT id FROM domains WHERE domainname = ?`, domain).Scan(&domainID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("directory: domain %q not found", domain)
+	}
+	return domainID, err
+}
+
+// insertRoomProperties stamps the resource's display name and, when positive,
+// its seating capacity. An unset field writes no row at all.
+func insertRoomProperties(tx *sql.Tx, id int64, displayName string, capacity int) error {
+	const insert = `INSERT INTO user_properties (user_id, proptag, order_id, propval_str) VALUES (?, ?, 1, ?)`
 	if name := strings.TrimSpace(displayName); name != "" {
-		if _, err := tx.Exec(
-			`INSERT INTO user_properties (user_id, proptag, order_id, propval_str) VALUES (?, ?, 1, ?)`,
-			id, prDisplayName, name); err != nil {
-			return 0, err
+		if _, err := tx.Exec(insert, id, prDisplayName, name); err != nil {
+			return err
 		}
 	}
 	if capacity > 0 {
-		if _, err := tx.Exec(
-			`INSERT INTO user_properties (user_id, proptag, order_id, propval_str) VALUES (?, ?, 1, ?)`,
-			id, prRoomCapacity, strconv.Itoa(capacity)); err != nil {
-			return 0, err
+		if _, err := tx.Exec(insert, id, prRoomCapacity, strconv.Itoa(capacity)); err != nil {
+			return err
 		}
 	}
-	return id, tx.Commit()
+	return nil
 }

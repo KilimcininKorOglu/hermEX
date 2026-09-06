@@ -75,42 +75,80 @@ func (d *SQLDirectory) ExpandMList(listAddr, from string) ([]string, MListResult
 		return nil, MListNone, nil
 	}
 
-	var id int64
-	var listType, listPriv int
-	err := d.db.QueryRow(
-		`SELECT id, list_type, list_privilege FROM mlists WHERE listname = ?`, listAddr).
-		Scan(&id, &listType, &listPriv)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, MListNone, nil
-	}
-	if err != nil {
+	id, listType, listPriv, found, err := d.lookupMList(listAddr)
+	if err != nil || !found {
 		return nil, MListNone, err
 	}
 
-	// Posting privilege. chkIntl defers the "sender must be a member" test to the
-	// expansion, where the member set is already loaded.
-	chkIntl := false
+	chkIntl, res, err := d.checkPostingPrivilege(id, listPriv, listDomain, from, fromDomain)
+	if err != nil || res != MListOK {
+		return nil, res, err
+	}
+
+	members, res, err := d.listMembers(id, listType, listDomain)
+	if err != nil || res != MListOK {
+		return nil, res, err
+	}
+	return applyInternalOnly(members, from, chkIntl)
+}
+
+// applyInternalOnly enforces the internal-only privilege, which the expansion
+// resolves rather than the privilege check: the sender must appear in the list's
+// own member set.
+func applyInternalOnly(members []string, from string, chkIntl bool) ([]string, MListResult, error) {
+	if chkIntl && !slices.ContainsFunc(members, func(m string) bool { return strings.EqualFold(m, from) }) {
+		return nil, MListPrivilInternal, nil
+	}
+	return members, MListOK, nil
+}
+
+// lookupMList reads a list's identity and policy columns, reporting found=false
+// when the address names no list (the caller then resolves it as a normal
+// address).
+func (d *SQLDirectory) lookupMList(listAddr string) (id int64, listType, listPriv int, found bool, err error) {
+	err = d.db.QueryRow(
+		`SELECT id, list_type, list_privilege FROM mlists WHERE listname = ?`, listAddr).
+		Scan(&id, &listType, &listPriv)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, 0, false, nil
+	}
+	if err != nil {
+		return 0, 0, 0, false, err
+	}
+	return id, listType, listPriv, true, nil
+}
+
+// checkPostingPrivilege applies the list's posting privilege to the sender. It
+// reports chkIntl when the "sender must be a member" test has to run later, in
+// the expansion, where the member set is already loaded.
+func (d *SQLDirectory) checkPostingPrivilege(id int64, listPriv int, listDomain, from, fromDomain string) (chkIntl bool, res MListResult, err error) {
 	switch listPriv {
 	case mlistPrivAll, mlistPrivOutgoing:
+		return false, MListOK, nil
 	case mlistPrivInternal:
-		chkIntl = true
+		return true, MListOK, nil
 	case mlistPrivDomain:
 		if !strings.EqualFold(listDomain, fromDomain) {
-			return nil, MListPrivilDomain, nil
+			return false, MListPrivilDomain, nil
 		}
+		return false, MListOK, nil
 	case mlistPrivSpecified:
 		ok, err := d.senderIsSpecified(id, from, fromDomain)
 		if err != nil {
-			return nil, MListNone, err
+			return false, MListNone, err
 		}
 		if !ok {
-			return nil, MListPrivilSpecified, nil
+			return false, MListPrivilSpecified, nil
 		}
-	default:
-		return nil, MListNone, nil
+		return false, MListOK, nil
 	}
+	return false, MListNone, nil
+}
 
+// listMembers loads a list's direct members, by the kind of list it is.
+func (d *SQLDirectory) listMembers(id int64, listType int, listDomain string) ([]string, MListResult, error) {
 	var members []string
+	var err error
 	switch listType {
 	case mlistTypeNormal:
 		members, err = d.listAssociations(id)
@@ -121,9 +159,6 @@ func (d *SQLDirectory) ExpandMList(listAddr, from string) ([]string, MListResult
 	}
 	if err != nil {
 		return nil, MListNone, err
-	}
-	if chkIntl && !slices.ContainsFunc(members, func(m string) bool { return strings.EqualFold(m, from) }) {
-		return nil, MListPrivilInternal, nil
 	}
 	return members, MListOK, nil
 }

@@ -689,32 +689,9 @@ func (d *SQLDirectory) UpdateDomain(id int64, u DomainUpdate) (bool, error) {
 // on disk. The user's domain must already exist.
 func (d *SQLDirectory) CreateUser(username, password, maildir string) (int64, error) {
 	username = strings.ToLower(strings.TrimSpace(username))
-	at := strings.LastIndexByte(username, '@')
-	if at <= 0 {
-		return 0, errors.New("directory: username must be an email address")
-	}
-	if err := ValidateAddress(username); err != nil {
-		return 0, err
-	}
-	domain := username[at+1:]
-	var domainID, maxUser int64
-	err := d.db.QueryRow(`SELECT id, max_user FROM domains WHERE domainname = ?`, domain).Scan(&domainID, &maxUser)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, fmt.Errorf("directory: domain %q not found", domain)
-	}
+	domainID, err := d.domainWithRoom(username)
 	if err != nil {
 		return 0, err
-	}
-	// Enforce the domain's mailbox cap (0 = unlimited). The count is every user
-	// row in the domain, matching the reference, so distribution lists count too.
-	if maxUser > 0 {
-		var count int64
-		if err := d.db.QueryRow(`SELECT COUNT(*) FROM users WHERE domain_id = ?`, domainID).Scan(&count); err != nil {
-			return 0, err
-		}
-		if count >= maxUser {
-			return 0, fmt.Errorf("directory: domain %q has reached its user limit of %d", domain, maxUser)
-		}
 	}
 	hash, err := sqlCryptNewHash(password)
 	if err != nil {
@@ -734,6 +711,40 @@ func (d *SQLDirectory) CreateUser(username, password, maildir string) (int64, er
 		}
 	}
 	return res.LastInsertId()
+}
+
+// domainWithRoom validates an address and resolves the domain it belongs to,
+// refusing when that domain has reached its mailbox cap.
+func (d *SQLDirectory) domainWithRoom(username string) (int64, error) {
+	at := strings.LastIndexByte(username, '@')
+	if at <= 0 {
+		return 0, errors.New("directory: username must be an email address")
+	}
+	if err := ValidateAddress(username); err != nil {
+		return 0, err
+	}
+	domain := username[at+1:]
+	var domainID, maxUser int64
+	err := d.db.QueryRow(`SELECT id, max_user FROM domains WHERE domainname = ?`, domain).Scan(&domainID, &maxUser)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, fmt.Errorf("directory: domain %q not found", domain)
+	}
+	if err != nil {
+		return 0, err
+	}
+	// Enforce the domain's mailbox cap (0 = unlimited). The count is every user
+	// row in the domain, matching the reference, so distribution lists count too.
+	if maxUser <= 0 {
+		return domainID, nil
+	}
+	var count int64
+	if err := d.db.QueryRow(`SELECT COUNT(*) FROM users WHERE domain_id = ?`, domainID).Scan(&count); err != nil {
+		return 0, err
+	}
+	if count >= maxUser {
+		return 0, fmt.Errorf("directory: domain %q has reached its user limit of %d", domain, maxUser)
+	}
+	return domainID, nil
 }
 
 // SetPassword replaces a user's local password hash, reporting whether the user
@@ -983,33 +994,40 @@ func (d *SQLDirectory) DeleteUser(username string, deleteFiles bool) (bool, erro
 	if err != nil {
 		return false, err
 	}
-	tx, err := d.db.Begin()
-	if err != nil {
-		return false, err
-	}
-	defer tx.Rollback()
-	if _, err := tx.Exec(`DELETE FROM aliases WHERE mainname = ?`, username); err != nil {
-		return false, err
-	}
-	// forwards.username is a plain string with no FK, so the row is removed explicitly.
-	if _, err := tx.Exec(`DELETE FROM forwards WHERE username = ?`, username); err != nil {
-		return false, err
-	}
-	// fetchmail.mailbox is likewise a plain string; remove the entries (the cascade
-	// then clears their fetchmail_seen rows).
-	if _, err := tx.Exec(`DELETE FROM fetchmail WHERE mailbox = ?`, username); err != nil {
-		return false, err
-	}
-	if _, err := tx.Exec(`DELETE FROM users WHERE username = ?`, username); err != nil {
-		return false, err
-	}
-	if err := tx.Commit(); err != nil {
+	if err := d.deleteUserRows(username); err != nil {
 		return false, err
 	}
 	if deleteFiles && maildir != "" {
 		_ = os.RemoveAll(maildir) // best-effort: the row is gone; an orphaned maildir is harmless
 	}
 	return true, nil
+}
+
+// deleteUserRows removes, in one transaction, the user row and every row keyed
+// to it by address rather than by a foreign key.
+func (d *SQLDirectory) deleteUserRows(username string) error {
+	tx, err := d.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	statements := []string{
+		`DELETE FROM aliases WHERE mainname = ?`,
+		// forwards.username is a plain string with no FK, so the row is removed
+		// explicitly.
+		`DELETE FROM forwards WHERE username = ?`,
+		// fetchmail.mailbox is likewise a plain string; removing the entries
+		// cascades their fetchmail_seen rows.
+		`DELETE FROM fetchmail WHERE mailbox = ?`,
+		// Last: the user row, whose foreign keys carry away everything keyed to it.
+		`DELETE FROM users WHERE username = ?`,
+	}
+	for _, q := range statements {
+		if _, err := tx.Exec(q, username); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // ListAltnames returns a user's alternative login names, ordered, for the admin
@@ -1109,16 +1127,6 @@ func (d *SQLDirectory) SetAliasesFor(username string, aliases []string) (bool, e
 	if err != nil {
 		return false, err
 	}
-	seen := map[string]bool{}
-	var clean []string
-	for _, a := range aliases {
-		a = strings.ToLower(strings.TrimSpace(a))
-		if a == "" || seen[a] {
-			continue
-		}
-		seen[a] = true
-		clean = append(clean, a)
-	}
 	tx, err := d.db.Begin()
 	if err != nil {
 		return false, err
@@ -1129,7 +1137,7 @@ func (d *SQLDirectory) SetAliasesFor(username string, aliases []string) (bool, e
 	if _, err := tx.Exec(`DELETE FROM aliases WHERE mainname = ?`, username); err != nil {
 		return false, err
 	}
-	for _, a := range clean {
+	for _, a := range normalizedAliases(aliases) {
 		if err := checkAlias(tx, a, username); err != nil {
 			return false, err
 		}
@@ -1138,6 +1146,22 @@ func (d *SQLDirectory) SetAliasesFor(username string, aliases []string) (bool, e
 		}
 	}
 	return true, tx.Commit()
+}
+
+// normalizedAliases lowercases and trims the requested aliases, dropping empties
+// and repeats so one address is never inserted twice.
+func normalizedAliases(aliases []string) []string {
+	seen := map[string]bool{}
+	var clean []string
+	for _, a := range aliases {
+		a = strings.ToLower(strings.TrimSpace(a))
+		if a == "" || seen[a] {
+			continue
+		}
+		seen[a] = true
+		clean = append(clean, a)
+	}
+	return clean
 }
 
 // GetForward implements Forwarder: it returns the forward directive of the user the

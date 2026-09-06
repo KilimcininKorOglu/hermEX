@@ -133,37 +133,15 @@ func (d *SQLDirectory) GetRole(id int64) (RoleDetail, bool, error) {
 	if err != nil {
 		return RoleDetail{}, false, err
 	}
-	prows, err := d.db.Query(
-		`SELECT permission, params FROM role_permissions WHERE role_id = ? ORDER BY permission, params`, id)
+	rd.Permissions, err = queryRows(d.db,
+		`SELECT permission, params FROM role_permissions WHERE role_id = ? ORDER BY permission, params`,
+		[]any{id}, scanPermission)
 	if err != nil {
 		return RoleDetail{}, false, err
 	}
-	for prows.Next() {
-		var p Permission
-		if err := prows.Scan(&p.Name, &p.Params); err != nil {
-			_ = prows.Close()
-			return RoleDetail{}, false, err
-		}
-		rd.Permissions = append(rd.Permissions, p)
-	}
-	if err := prows.Err(); err != nil {
-		_ = prows.Close()
-		return RoleDetail{}, false, err
-	}
-	_ = prows.Close()
-	urows, err := d.db.Query(`SELECT user_id FROM user_roles WHERE role_id = ? ORDER BY user_id`, id)
+	rd.UserIDs, err = queryRows(d.db,
+		`SELECT user_id FROM user_roles WHERE role_id = ? ORDER BY user_id`, []any{id}, scanOne[int64])
 	if err != nil {
-		return RoleDetail{}, false, err
-	}
-	defer urows.Close()
-	for urows.Next() {
-		var uid int64
-		if err := urows.Scan(&uid); err != nil {
-			return RoleDetail{}, false, err
-		}
-		rd.UserIDs = append(rd.UserIDs, uid)
-	}
-	if err := urows.Err(); err != nil {
 		return RoleDetail{}, false, err
 	}
 	rd.PermCount = len(rd.Permissions)
@@ -171,18 +149,35 @@ func (d *SQLDirectory) GetRole(id int64) (RoleDetail, bool, error) {
 	return rd, true, nil
 }
 
+// validRole normalizes a role name and validates its whole permission set, the
+// checks a create and an update apply identically.
+func validRole(name string, perms []Permission) (string, error) {
+	name, err := validRoleName(name)
+	if err != nil {
+		return "", err
+	}
+	for _, p := range perms {
+		if err := validatePermission(p); err != nil {
+			return "", err
+		}
+	}
+	return name, nil
+}
+
+// scanPermission reads one permission row.
+func scanPermission(rows *sql.Rows) (Permission, error) {
+	var p Permission
+	err := rows.Scan(&p.Name, &p.Params)
+	return p, err
+}
+
 // CreateRole inserts a role with its permission set and user assignments in one
 // transaction, returning the new id. The name is required, at most
 // roleNameMaxLen characters, and unique; every permission must validate.
 func (d *SQLDirectory) CreateRole(name, description string, perms []Permission, userIDs []int64) (int64, error) {
-	name, err := validRoleName(name)
+	name, err := validRole(name, perms)
 	if err != nil {
 		return 0, err
-	}
-	for _, p := range perms {
-		if err := validatePermission(p); err != nil {
-			return 0, err
-		}
 	}
 	tx, err := d.db.Begin()
 	if err != nil {
@@ -209,14 +204,9 @@ func (d *SQLDirectory) CreateRole(name, description string, perms []Permission, 
 // UpdateRole replaces a role's name, description, permission set, and user
 // assignments in one transaction, reporting ok=false for an unknown id.
 func (d *SQLDirectory) UpdateRole(id int64, name, description string, perms []Permission, userIDs []int64) (bool, error) {
-	name, err := validRoleName(name)
+	name, err := validRole(name, perms)
 	if err != nil {
 		return false, err
-	}
-	for _, p := range perms {
-		if err := validatePermission(p); err != nil {
-			return false, err
-		}
 	}
 	tx, err := d.db.Begin()
 	if err != nil {
@@ -300,40 +290,39 @@ func (d *SQLDirectory) EffectivePermissions(userID int64) ([]Permission, error) 
 			out = append(out, p)
 		}
 	}
-	rows, err := d.db.Query(
+	named, err := queryRows(d.db,
 		`SELECT rp.permission, rp.params
 		   FROM role_permissions rp
 		   JOIN user_roles ur ON ur.role_id = rp.role_id
-		  WHERE ur.user_id = ?`, userID)
+		  WHERE ur.user_id = ?`, []any{userID}, scanPermission)
 	if err != nil {
 		return nil, err
 	}
-	for rows.Next() {
-		var p Permission
-		if err := rows.Scan(&p.Name, &p.Params); err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
+	for _, p := range named {
 		add(p)
 	}
-	if err := rows.Err(); err != nil {
-		_ = rows.Close()
-		return nil, err
-	}
-	_ = rows.Close()
 	legacy, err := d.AdminRoles(userID)
 	if err != nil {
 		return nil, err
 	}
 	for _, r := range legacy {
-		switch r.Role {
-		case AdminSystem:
-			add(Permission{Name: PermSystemAdmin})
-		case AdminOrg:
-			add(Permission{Name: PermOrgAdmin, Params: strconv.FormatInt(r.ScopeID, 10)})
-		case AdminDomain:
-			add(Permission{Name: PermDomainAdmin, Params: strconv.FormatInt(r.ScopeID, 10)})
+		if p, ok := legacyPermission(r); ok {
+			add(p)
 		}
 	}
 	return out, nil
+}
+
+// legacyPermission maps a direct admin_roles grant to the named permission it is
+// equivalent to.
+func legacyPermission(r AdminRole) (Permission, bool) {
+	switch r.Role {
+	case AdminSystem:
+		return Permission{Name: PermSystemAdmin}, true
+	case AdminOrg:
+		return Permission{Name: PermOrgAdmin, Params: strconv.FormatInt(r.ScopeID, 10)}, true
+	case AdminDomain:
+		return Permission{Name: PermDomainAdmin, Params: strconv.FormatInt(r.ScopeID, 10)}, true
+	}
+	return Permission{}, false
 }
