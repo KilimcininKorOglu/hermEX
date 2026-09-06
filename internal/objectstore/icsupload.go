@@ -179,27 +179,21 @@ func (c *MessageCollector) PutBuffer(chunk []byte) error {
 func (c *MessageCollector) recordMarker(m uint32) error {
 	switch m {
 	case ics.MarkerStartRecip:
-		if c.frame != nil {
-			return fmt.Errorf("objectstore: STARTRECIP nested inside marker %#x", c.frame.marker)
-		}
-		c.frame = &collectorFrame{marker: ics.MarkerStartRecip}
+		return c.openFrame(ics.MarkerStartRecip, "STARTRECIP")
 	case ics.MarkerEndToRecip:
-		if c.frame == nil || c.frame.marker != ics.MarkerStartRecip {
-			return fmt.Errorf("objectstore: ENDTORECIP without an open STARTRECIP")
+		bag, err := c.closeFrame(ics.MarkerStartRecip, "ENDTORECIP", "STARTRECIP")
+		if err != nil {
+			return err
 		}
-		c.um.msg.Recipients = append(c.um.msg.Recipients, c.frame.bag)
-		c.frame = nil
+		c.um.msg.Recipients = append(c.um.msg.Recipients, bag)
 	case ics.MarkerNewAttach:
-		if c.frame != nil {
-			return fmt.Errorf("objectstore: NEWATTACH nested inside marker %#x", c.frame.marker)
-		}
-		c.frame = &collectorFrame{marker: ics.MarkerNewAttach}
+		return c.openFrame(ics.MarkerNewAttach, "NEWATTACH")
 	case ics.MarkerEndAttach:
-		if c.frame == nil || c.frame.marker != ics.MarkerNewAttach {
-			return fmt.Errorf("objectstore: ENDATTACH without an open NEWATTACH")
+		bag, err := c.closeFrame(ics.MarkerNewAttach, "ENDATTACH", "NEWATTACH")
+		if err != nil {
+			return err
 		}
-		c.um.msg.Attachments = append(c.um.msg.Attachments, oxcmail.Attachment{Props: c.frame.bag})
-		c.frame = nil
+		c.um.msg.Attachments = append(c.um.msg.Attachments, oxcmail.Attachment{Props: bag})
 	case ics.MarkerStartEmbed, ics.MarkerEndEmbed:
 		return fmt.Errorf("objectstore: embedded-message upload is not supported in v1")
 	case ics.MarkerStartMessage, ics.MarkerEndMessage:
@@ -208,6 +202,28 @@ func (c *MessageCollector) recordMarker(m uint32) error {
 		return fmt.Errorf("objectstore: unexpected upload marker %#x", m)
 	}
 	return nil
+}
+
+// openFrame starts a child object. The stream is flat in v1, so a marker
+// arriving while another frame is open is a nesting the collector cannot model.
+func (c *MessageCollector) openFrame(marker uint32, name string) error {
+	if c.frame != nil {
+		return fmt.Errorf("objectstore: %s nested inside marker %#x", name, c.frame.marker)
+	}
+	c.frame = &collectorFrame{marker: marker}
+	return nil
+}
+
+// closeFrame ends the open child object and hands back its property bag. The
+// closing marker must match the one that opened the frame, or the stream is
+// misframed and the properties would land on the wrong collection.
+func (c *MessageCollector) closeFrame(marker uint32, closing, opening string) (mapi.PropertyValues, error) {
+	if c.frame == nil || c.frame.marker != marker {
+		return nil, fmt.Errorf("objectstore: %s without an open %s", closing, opening)
+	}
+	bag := c.frame.bag
+	c.frame = nil
+	return bag, nil
 }
 
 // recordProp routes one property to the open object. State meta-tags never travel
@@ -294,57 +310,16 @@ func (um *UploadMessage) Commit() (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if um.isNew {
-		if err := advanceFolderEID(tx, um.folderID, um.mid); err != nil {
-			return 0, err
-		}
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-	} else if _, err := tx.Exec(`DELETE FROM messages WHERE message_id=?`, int64(um.mid)); err != nil {
-		return 0, err
-	}
-
-	assoc := 0
-	if um.associated {
-		assoc = 1
-	}
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	id := int64(um.mid)
-	if _, err := tx.Exec(
-		`INSERT INTO messages
-		   (message_id, parent_fid, is_associated, change_number, read_state, message_size, mid_string)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		id, um.folderID, assoc, int64(cn), readState(um.msg.Props), messageSize(um.msg), midString(um.mid)); err != nil {
+	if err := um.clearTarget(tx, id); err != nil {
 		return 0, err
 	}
-	if err := um.store.insertProps(tx, "message_properties", "message_id", id, um.msg.Props); err != nil {
+	if err := um.insertRow(tx, id, cn); err != nil {
 		return 0, err
 	}
-	for _, rcpt := range um.msg.Recipients {
-		res, err := tx.Exec(`INSERT INTO recipients (message_id) VALUES (?)`, id)
-		if err != nil {
-			return 0, err
-		}
-		rid, err := res.LastInsertId()
-		if err != nil {
-			return 0, err
-		}
-		if err := um.store.insertProps(tx, "recipients_properties", "recipient_id", rid, rcpt); err != nil {
-			return 0, err
-		}
-	}
-	for _, att := range um.msg.Attachments {
-		res, err := tx.Exec(`INSERT INTO attachments (message_id) VALUES (?)`, id)
-		if err != nil {
-			return 0, err
-		}
-		aid, err := res.LastInsertId()
-		if err != nil {
-			return 0, err
-		}
-		if err := um.store.insertProps(tx, "attachment_properties", "attachment_id", aid, att.Props); err != nil {
-			return 0, err
-		}
+	if err := um.insertSubObjects(tx, id); err != nil {
+		return 0, err
 	}
 	if err := insertMsgTime(tx, um.folderID, id, um.msg.Props); err != nil {
 		return 0, err
@@ -364,6 +339,66 @@ func (um *UploadMessage) Commit() (uint64, error) {
 	}
 	um.store.publishChange(op, cn, midString(um.mid))
 	return um.mid, nil
+}
+
+// clearTarget prepares the id the upload writes to: a new id advances the
+// folder's allocation cursor past it, so a later server-side allocation never
+// reuses it, while a replace deletes the existing row and lets the foreign keys
+// take its properties, recipients and attachments with it.
+func (um *UploadMessage) clearTarget(tx *sql.Tx, id int64) error {
+	if um.isNew {
+		return advanceFolderEID(tx, um.folderID, um.mid)
+	}
+	_, err := tx.Exec(`DELETE FROM messages WHERE message_id=?`, id)
+	return err
+}
+
+// insertRow writes the messages row and its property bag.
+func (um *UploadMessage) insertRow(tx *sql.Tx, id int64, cn uint64) error {
+	assoc := 0
+	if um.associated {
+		assoc = 1
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO messages
+		   (message_id, parent_fid, is_associated, change_number, read_state, message_size, mid_string)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		id, um.folderID, assoc, int64(cn), readState(um.msg.Props), messageSize(um.msg), midString(um.mid)); err != nil {
+		return err
+	}
+	return um.store.insertProps(tx, "message_properties", "message_id", id, um.msg.Props)
+}
+
+// insertSubObjects writes the message's recipients and attachments, each as its
+// own row plus a property bag.
+func (um *UploadMessage) insertSubObjects(tx *sql.Tx, id int64) error {
+	for _, rcpt := range um.msg.Recipients {
+		if err := um.store.insertChildProps(tx, "recipients", "recipients_properties", "recipient_id", id, rcpt); err != nil {
+			return err
+		}
+	}
+	for _, att := range um.msg.Attachments {
+		if err := um.store.insertChildProps(tx, "attachments", "attachment_properties", "attachment_id", id, att.Props); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// insertChildProps inserts one child row owned by a message and writes its
+// property bag under the row's generated id.
+func (s *Store) insertChildProps(tx *sql.Tx, table, propTable, propKey string, messageID int64, props mapi.PropertyValues) error {
+	// #nosec G202 -- table and propTable are package constants naming this schema's own tables, never client input
+	res, err := tx.Exec(`INSERT INTO `+table+` (message_id) VALUES (?)`, messageID)
+	if err != nil {
+		return err
+	}
+	rowID, err := res.LastInsertId()
+	if err != nil {
+		return err
+	}
+	return s.insertProps(tx, propTable, propKey, rowID, props)
 }
 
 // advanceFolderEID bumps a folder's allocation cursor past an id imported into its
@@ -449,49 +484,63 @@ func (s *Store) MoveMessageImport(srcFolderID, srcMID, destFolderID, dstMID int6
 	if err != nil {
 		return false, err
 	}
+	if err := renameMovedMessage(tx, srcFolderID, srcMID, destFolderID, dstMID, cn); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	if err := s.dropMovedSourceIndex(srcMID); err != nil {
+		return assoc != 0, err
+	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	s.publishChange("create", cn, midString(uint64(dstMID)))
+	return assoc != 0, nil
+}
+
+// renameMovedMessage rewrites the message row to its destination id and folder.
+// A retried move that re-sends a committed destination id replaces it. The time
+// index is repointed explicitly because it keys on (folder_id, message_id) and
+// does not follow the message's parent; every other child table renames for free
+// through ON UPDATE CASCADE.
+func renameMovedMessage(tx *sql.Tx, srcFolderID, srcMID, destFolderID, dstMID int64, cn uint64) error {
 	if dstMID != srcMID {
 		if _, err := tx.Exec(`DELETE FROM messages WHERE message_id=?`, dstMID); err != nil {
-			return false, err
+			return err
 		}
 	}
 	if _, err := tx.Exec(
 		`UPDATE messages SET message_id=?, parent_fid=?, change_number=?, mid_string=? WHERE message_id=?`,
 		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 		dstMID, destFolderID, int64(cn), midString(uint64(dstMID)), srcMID); err != nil {
-		return false, err
+		return err
 	}
 	if _, err := tx.Exec(
 		`UPDATE msgtime_index SET folder_id=? WHERE message_id=? AND folder_id=?`,
 		destFolderID, dstMID, srcFolderID); err != nil {
-		return false, err
+		return err
 	}
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-	if err := advanceFolderEID(tx, destFolderID, uint64(dstMID)); err != nil {
-		return false, err
-	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
+	return advanceFolderEID(tx, destFolderID, uint64(dstMID))
+}
 
-	// The object store renamed and reparented the message; the IMAP index is a
-	// separate database with no cross-store cascade, so a source that was mail
-	// (indexed by AppendMessage) keeps a row pointing at the now-gone source id.
-	// Drop those rows so an IMAP view does not show a ghost in the source folder,
-	// and orphan its cached eml, exactly as DeleteObject does. The destination is
-	// not re-indexed: the ICS upload path indexes only mail, as ImportMessageChange.
-	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-	srcMidString := midString(uint64(srcMID))
+// dropMovedSourceIndex removes the IMAP index rows the moved message left
+// behind. The object store renamed and reparented the message, but the index is
+// a separate database with no cross-store cascade, so a source that was mail
+// (indexed by AppendMessage) keeps a row pointing at the now-gone source id. The
+// rows go, along with the cached eml, exactly as DeleteObject does. The
+// destination is not re-indexed: the ICS upload path indexes only mail, like
+// ImportMessageChange.
+func (s *Store) dropMovedSourceIndex(srcMID int64) error {
 	if _, err := s.idxdb.Exec(`DELETE FROM messages WHERE message_id=?`, srcMID); err != nil {
-		return assoc != 0, err
+		return err
 	}
 	if _, err := s.idxdb.Exec(`DELETE FROM mapping WHERE message_id=?`, srcMID); err != nil {
-		return assoc != 0, err
+		return err
 	}
-	_ = os.Remove(s.emlPath(srcMidString))
-
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-	s.publishChange("create", cn, midString(uint64(dstMID)))
-	return assoc != 0, nil
+	_ = os.Remove(s.emlPath(midString(uint64(srcMID))))
+	return nil
 }
 
 // ReadStateChange is one entry of a RopSynchronizationImportReadStateChanges
@@ -520,69 +569,101 @@ func (s *Store) ImportReadStateChanges(folderID int64, changes []ReadStateChange
 	}
 	defer tx.Rollback()
 
-	type applied struct {
-		mid  uint64
-		read int
-	}
-	var readCNs []uint64
-	var mirror []applied
-	for _, c := range changes {
-		mid, foreign, err := parseSourceKeyMID(c.SourceKey, home)
-		if err != nil {
-			return nil, err
-		}
-		if foreign {
-			continue
-		}
-		var cur, assoc int
-		err = tx.QueryRow(
-			`SELECT read_state, is_associated FROM messages WHERE message_id=? AND parent_fid=? AND is_deleted=0`,
-			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-			int64(mid), folderID).Scan(&cur, &assoc)
-		if errors.Is(err, sql.ErrNoRows) {
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
-		if assoc != 0 {
-			continue // associated messages carry no read state
-		}
-		want := 0
-		if c.MarkRead {
-			want = 1
-		}
-		if cur == want {
-			continue // already in the requested state
-		}
-		rcn, err := allocateCN(tx)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := tx.Exec(
-			`UPDATE messages SET read_state=?, read_cn=? WHERE message_id=?`,
-			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-			want, int64(rcn), int64(mid)); err != nil {
-			return nil, err
-		}
-		readCNs = append(readCNs, rcn)
-		mirror = append(mirror, applied{mid: mid, read: want})
+	readCNs, mirror, err := applyReadStateChanges(tx, folderID, changes, home)
+	if err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	for _, m := range mirror {
-		// The message need not be in the IMAP index (only mail is); a no-op update
-		// there is harmless.
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		if _, err := s.idxdb.Exec(`UPDATE messages SET read=? WHERE message_id=?`, m.read, int64(m.mid)); err != nil {
-			return nil, err
-		}
+	if err := s.mirrorReadState(mirror); err != nil {
+		return nil, err
 	}
 	if len(mirror) > 0 {
 		s.publishChange("flags", 0, "")
 	}
 	return readCNs, nil
+}
+
+// applyReadStateChanges walks the uploaded changes, skipping the ones that name
+// another store or land on nothing, and returns the allocated read change
+// numbers alongside the changes to mirror into the IMAP index.
+func applyReadStateChanges(tx *sql.Tx, folderID int64, changes []ReadStateChange, home mapi.GUID) ([]uint64, []appliedRead, error) {
+	var readCNs []uint64
+	var mirror []appliedRead
+	for _, c := range changes {
+		mid, foreign, err := parseSourceKeyMID(c.SourceKey, home)
+		if err != nil {
+			return nil, nil, err
+		}
+		if foreign {
+			continue
+		}
+		rcn, want, applied, err := applyReadStateChange(tx, folderID, mid, c.MarkRead)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !applied {
+			continue
+		}
+		readCNs = append(readCNs, rcn)
+		mirror = append(mirror, appliedRead{mid: mid, read: want})
+	}
+	return readCNs, mirror, nil
+}
+
+// mirrorReadState copies the applied read flags into the IMAP index. A message
+// need not be indexed there (only mail is), so a no-op update is expected.
+func (s *Store) mirrorReadState(mirror []appliedRead) error {
+	for _, m := range mirror {
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		if _, err := s.idxdb.Exec(`UPDATE messages SET read=? WHERE message_id=?`, m.read, int64(m.mid)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// appliedRead is one read-state change that actually landed, kept so the IMAP
+// index can be mirrored after the transaction commits.
+type appliedRead struct {
+	mid  uint64
+	read int
+}
+
+// applyReadStateChange records one message's new read flag and a freshly
+// allocated read change number. applied is false when nothing was written: the
+// message is absent from the folder, is associated (associated messages carry no
+// read state), or is already in the requested state.
+func applyReadStateChange(tx *sql.Tx, folderID int64, mid uint64, markRead bool) (rcn uint64, want int, applied bool, err error) {
+	var cur, assoc int
+	err = tx.QueryRow(
+		`SELECT read_state, is_associated FROM messages WHERE message_id=? AND parent_fid=? AND is_deleted=0`,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		int64(mid), folderID).Scan(&cur, &assoc)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, false, nil
+	}
+	if err != nil {
+		return 0, 0, false, err
+	}
+	if markRead {
+		want = 1
+	}
+	if assoc != 0 || cur == want {
+		return 0, 0, false, nil
+	}
+	rcn, err = allocateCN(tx)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	if _, err := tx.Exec(
+		`UPDATE messages SET read_state=?, read_cn=? WHERE message_id=?`,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		want, int64(rcn), int64(mid)); err != nil {
+		return 0, 0, false, err
+	}
+	return rcn, want, true, nil
 }
 
 // ImportHierarchyChange creates or updates a folder a client uploaded
@@ -603,37 +684,12 @@ func (s *Store) ImportHierarchyChange(rootFID int64, hichyvals, propvals mapi.Pr
 	if err != nil {
 		return 0, err
 	}
-	sk, ok := propBytes(hichyvals, mapi.PrSourceKey)
-	if !ok {
-		return 0, fmt.Errorf("objectstore: import hierarchy change missing PR_SOURCE_KEY")
-	}
-	fid, foreign, err := parseSourceKeyMID(sk, home)
+	imp, err := parseHierarchyImport(rootFID, hichyvals, home)
 	if err != nil {
 		return 0, err
 	}
-	if foreign {
-		return 0, fmt.Errorf("objectstore: cross-store folder import is not supported in v1")
-	}
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-	parent := uint64(rootFID)
-	if psk, ok := propBytes(hichyvals, mapi.PrParentSourceKey); ok && len(psk) > 0 {
-		p, pforeign, err := parseSourceKeyMID(psk, home)
-		if err != nil {
-			return 0, err
-		}
-		if pforeign {
-			return 0, fmt.Errorf("objectstore: cross-store folder parent is not supported in v1")
-		}
-		parent = p
-	}
-	dispName, hasName := "", false
-	if v, ok := hichyvals.Get(mapi.PrDisplayName); ok {
-		dispName, _ = v.(string)
-		hasName = true
-	}
-
-	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-	exists, err := s.FolderExists(int64(fid))
+	exists, err := s.FolderExists(int64(imp.fid))
 	if err != nil {
 		return 0, err
 	}
@@ -650,49 +706,100 @@ func (s *Store) ImportHierarchyChange(rootFID int64, hichyvals, propvals mapi.Pr
 	}
 	ntNow := mapi.UnixToNTTime(time.Now())
 
-	if exists {
-		if _, err := tx.Exec(
-			`UPDATE folders SET parent_id=?, change_number=? WHERE folder_id=?`,
-			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-			int64(parent), int64(cn), int64(fid)); err != nil {
-			return 0, err
-		}
-		bag, err := updatedFolderBag(home, cn, ntNow, dispName, hasName, propvals)
-		if err != nil {
-			return 0, err
-		}
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		if err := s.insertProps(tx, "folder_properties", "folder_id", int64(fid), bag); err != nil {
-			return 0, err
-		}
-	} else {
-		begin, end, err := allocateRange(tx)
-		if err != nil {
-			return 0, err
-		}
-		if _, err := tx.Exec(
-			`INSERT INTO folders (folder_id, parent_id, change_number, cur_eid, max_eid) VALUES (?, ?, ?, ?, ?)`,
-			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-			int64(fid), int64(parent), int64(cn), int64(begin), int64(end)); err != nil {
-			return 0, err
-		}
-		if err := advanceStoreEID(tx, fid); err != nil {
-			return 0, err
-		}
-		bag, err := newFolderBag(tx, home, cn, ntNow, dispName, propvals)
-		if err != nil {
-			return 0, err
-		}
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		if err := s.insertProps(tx, "folder_properties", "folder_id", int64(fid), bag); err != nil {
-			return 0, err
-		}
+	if err := s.writeImportedFolder(tx, imp, home, cn, ntNow, propvals, exists); err != nil {
+		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 	s.publishChange("folder", cn, "")
-	return fid, nil
+	return imp.fid, nil
+}
+
+// hierarchyImport is the decoded identity of one imported folder: which folder
+// it is, where it belongs, and the display name the client sent (hasName
+// distinguishes an absent name from an empty one, since only an absent one
+// leaves the stored name alone).
+type hierarchyImport struct {
+	fid      uint64
+	parent   uint64
+	dispName string
+	hasName  bool
+}
+
+// parseHierarchyImport reads the source keys naming the folder and its parent.
+// A key from another store is refused rather than mapped onto a local id, which
+// would silently overwrite an unrelated folder.
+func parseHierarchyImport(rootFID int64, hichyvals mapi.PropertyValues, home mapi.GUID) (hierarchyImport, error) {
+	var imp hierarchyImport
+	sk, ok := propBytes(hichyvals, mapi.PrSourceKey)
+	if !ok {
+		return imp, fmt.Errorf("objectstore: import hierarchy change missing PR_SOURCE_KEY")
+	}
+	fid, foreign, err := parseSourceKeyMID(sk, home)
+	if err != nil {
+		return imp, err
+	}
+	if foreign {
+		return imp, fmt.Errorf("objectstore: cross-store folder import is not supported in v1")
+	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	imp = hierarchyImport{fid: fid, parent: uint64(rootFID)}
+	if psk, ok := propBytes(hichyvals, mapi.PrParentSourceKey); ok && len(psk) > 0 {
+		p, pforeign, err := parseSourceKeyMID(psk, home)
+		if err != nil {
+			return imp, err
+		}
+		if pforeign {
+			return imp, fmt.Errorf("objectstore: cross-store folder parent is not supported in v1")
+		}
+		imp.parent = p
+	}
+	if v, ok := hichyvals.Get(mapi.PrDisplayName); ok {
+		imp.dispName, _ = v.(string)
+		imp.hasName = true
+	}
+	return imp, nil
+}
+
+// writeImportedFolder creates or updates the folder row and its property bag. An
+// existing folder is re-parented and re-stamped; a new one is allocated its own
+// message-id range first.
+func (s *Store) writeImportedFolder(tx *sql.Tx, imp hierarchyImport, home mapi.GUID, cn, ntNow uint64, propvals mapi.PropertyValues, exists bool) error {
+	bag, err := s.upsertFolderRow(tx, imp, home, cn, ntNow, propvals, exists)
+	if err != nil {
+		return err
+	}
+	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	return s.insertProps(tx, "folder_properties", "folder_id", int64(imp.fid), bag)
+}
+
+// upsertFolderRow writes the folders row and returns the property bag that goes
+// with it.
+func (s *Store) upsertFolderRow(tx *sql.Tx, imp hierarchyImport, home mapi.GUID, cn, ntNow uint64, propvals mapi.PropertyValues, exists bool) (mapi.PropertyValues, error) {
+	if exists {
+		if _, err := tx.Exec(
+			`UPDATE folders SET parent_id=?, change_number=? WHERE folder_id=?`,
+			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+			int64(imp.parent), int64(cn), int64(imp.fid)); err != nil {
+			return nil, err
+		}
+		return updatedFolderBag(home, cn, ntNow, imp.dispName, imp.hasName, propvals)
+	}
+	begin, end, err := allocateRange(tx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(
+		`INSERT INTO folders (folder_id, parent_id, change_number, cur_eid, max_eid) VALUES (?, ?, ?, ?, ?)`,
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		int64(imp.fid), int64(imp.parent), int64(cn), int64(begin), int64(end)); err != nil {
+		return nil, err
+	}
+	if err := advanceStoreEID(tx, imp.fid); err != nil {
+		return nil, err
+	}
+	return newFolderBag(tx, home, cn, ntNow, imp.dispName, propvals)
 }
 
 // newFolderBag builds the property bag for a freshly imported folder: the standard
