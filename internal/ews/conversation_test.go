@@ -80,12 +80,8 @@ func TestFindConversationGroups(t *testing.T) {
 		switch c.Count {
 		case 2:
 			thread = true
-			if c.Topic != "Re: Project plan" {
-				t.Errorf("thread topic = %q, want the latest subject", c.Topic)
-			}
-			if len(c.Senders) != 2 {
-				t.Errorf("thread unique senders = %v, want 2", c.Senders)
-			}
+			wantEq(t, "the thread topic (the latest subject)", c.Topic, "Re: Project plan")
+			wantEq(t, "the thread's unique sender count", len(c.Senders), 2)
 		case 1:
 			single = true
 		}

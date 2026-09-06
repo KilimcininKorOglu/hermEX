@@ -101,28 +101,28 @@ func TestMeetingResponseAccept(t *testing.T) {
 	}
 
 	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "open the store", err)
 	defer st.Close()
 	cal, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "list the calendar", err)
 	if len(cal) != 1 {
 		t.Fatalf("calendar = %d items, want 1 (accepted appointment)", len(cal))
 	}
-	if busy, ok := calendarLong(t, st, cal[0].ID, mapi.NameBusyStatus); !ok || busy != int32(2) {
-		t.Errorf("appointment busy = %d (ok=%v), want %d (busy)", busy, ok, int32(2))
-	}
-	if resp, ok := calendarLong(t, st, cal[0].ID, mapi.NameResponseStatus); !ok || resp != meeting.ResponseAccepted {
-		t.Errorf("appointment response = %d (ok=%v), want %d (accepted)", resp, ok, meeting.ResponseAccepted)
-	}
+	wantCalendarLong(t, st, "the appointment busy status", cal[0].ID, mapi.NameBusyStatus, 2)
+	wantCalendarLong(t, st, "the appointment response", cal[0].ID, mapi.NameResponseStatus, meeting.ResponseAccepted)
 	// the request itself is stamped responded
-	reqID := decodeMID(t, itemID)
-	if resp, ok := calendarLong(t, st, reqID, mapi.NameResponseStatus); !ok || resp != meeting.ResponseAccepted {
-		t.Errorf("request response stamp = %d (ok=%v), want %d (accepted)", resp, ok, meeting.ResponseAccepted)
+	wantCalendarLong(t, st, "the request response stamp", decodeMID(t, itemID), mapi.NameResponseStatus, meeting.ResponseAccepted)
+}
+
+// wantCalendarLong checks one calendar named property's integer value.
+func wantCalendarLong(t *testing.T, st *objectstore.Store, what string, id int64, name mapi.PropertyName, want int32) {
+	t.Helper()
+	got, ok := calendarLong(t, st, id, name)
+	if !ok {
+		t.Errorf("%s: the property is absent", what)
+		return
 	}
+	wantEq(t, what, got, want)
 }
 
 // TestMeetingResponseDecline proves declining stamps the request declined but files
@@ -191,33 +191,12 @@ func TestMeetingResponseTentativeDedup(t *testing.T) {
 // the attendee's ACCEPTED participation status.
 func TestMeetingResponseNotifiesOrganizer(t *testing.T) {
 	dir := t.TempDir()
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	const ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\n" +
-		"BEGIN:VEVENT\r\nUID:meeting-99\r\nSUMMARY:Budget\r\n" +
-		"DTSTART:20260701T140000Z\r\nDTEND:20260701T150000Z\r\n" +
-		`ORGANIZER;CN="The Boss":mailto:boss@external.test` + "\r\n" +
-		"ATTENDEE:mailto:alice@hermex.test\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
-	req, err := oxcical.Import([]byte(ics), oxcical.Options{Resolver: st.GetNamedPropIDs})
-	if err != nil {
-		st.Close()
-		t.Fatal(err)
-	}
-	reqID, err := st.CreateMessage(int64(mapi.PrivateFIDInbox), req)
-	if err != nil {
-		st.Close()
-		t.Fatal(err)
-	}
-	st.Close()
+	reqID := seedExternalMeetingRequest(t, dir)
 
 	accs := directory.StaticAccounts{testUser: {Password: testPass, MailboxPath: dir}}
 	srv := NewServer(accs, accs, "mail.hermex.test")
 	sp, err := relay.Open(filepath.Join(t.TempDir(), "relay.sqlite3"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "open the relay spool", err)
 	defer sp.Close()
 	srv.Spool = sp
 	ts := httptest.NewServer(srv.Handler())
@@ -225,23 +204,37 @@ func TestMeetingResponseNotifiesOrganizer(t *testing.T) {
 
 	itemID := oxews.EncodeItemID(oxews.ItemID{FolderID: int64(mapi.PrivateFIDInbox), MessageID: reqID})
 	_, out := soapPost(t, ts, meetingResponseReqDisp("AcceptItem", itemID, "SendAndSaveCopy"), true)
-	if !strings.Contains(out, `ResponseClass="Success"`) {
-		t.Fatalf("AcceptItem not success: %s", out)
-	}
+	wantContains(t, "the AcceptItem response class", out, `ResponseClass="Success"`)
 
 	due, err := sp.Claim(time.Now(), 10)
-	if err != nil {
-		t.Fatal(err)
+	mustNoErr(t, "claim the spooled reply", err)
+	if len(due) != 1 {
+		t.Fatalf("relay spool = %v, want one queued reply", due)
 	}
-	if len(due) != 1 || due[0].Recipient != "boss@external.test" {
-		t.Fatalf("relay spool = %v, want the reply queued to boss@external.test", due)
-	}
-	if due[0].From != testUser {
-		t.Errorf("reply envelope From = %q, want %q", due[0].From, testUser)
-	}
+	wantEq(t, "the reply recipient", due[0].Recipient, "boss@external.test")
+	wantEq(t, "the reply envelope From", due[0].From, testUser)
 	if !bytes.Contains(due[0].Body, []byte("METHOD:REPLY")) || !bytes.Contains(due[0].Body, []byte("PARTSTAT=ACCEPTED")) {
 		t.Errorf("reply body is not an iTIP REPLY accept:\n%s", due[0].Body)
 	}
+}
+
+// seedExternalMeetingRequest files a meeting request from an external organizer
+// in the mailbox's Inbox and returns its message id.
+func seedExternalMeetingRequest(t *testing.T, dir string) int64 {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open the store", err)
+	defer st.Close()
+	const ics = "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nMETHOD:REQUEST\r\n" +
+		"BEGIN:VEVENT\r\nUID:meeting-99\r\nSUMMARY:Budget\r\n" +
+		"DTSTART:20260701T140000Z\r\nDTEND:20260701T150000Z\r\n" +
+		`ORGANIZER;CN="The Boss":mailto:boss@external.test` + "\r\n" +
+		"ATTENDEE:mailto:alice@hermex.test\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n"
+	req, err := oxcical.Import([]byte(ics), oxcical.Options{Resolver: st.GetNamedPropIDs})
+	mustNoErr(t, "import the meeting request", err)
+	reqID, err := st.CreateMessage(int64(mapi.PrivateFIDInbox), req)
+	mustNoErr(t, "store the meeting request", err)
+	return reqID
 }
 
 // decodeMID extracts the message id encoded in an EWS ItemId.

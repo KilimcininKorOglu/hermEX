@@ -167,47 +167,25 @@ func TestPublicFolderItemTwoTierGate(t *testing.T) {
 // round-trips through GetFolder back to the same public store.
 func TestPublicFolderRootACLFiltered(t *testing.T) {
 	ts, pub := publicEWS(t)
-	if err := pub.Provision("hermex.test"); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "provision the public store", pub.Provision("hermex.test"))
 	st, err := pub.OpenForDomain("hermex.test")
-	if err != nil {
-		t.Fatal(err)
-	}
-	ann, err := st.CreateFolder(nil, "Announcements")
-	if err != nil {
-		t.Fatal(err)
-	}
-	staff, err := st.CreateFolder(nil, "Staff")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "open the public store", err)
 	// Announcements: anyone in the domain may see+read. Staff: only bob (not alice).
-	if err := st.ModifyPermissions(ann, false, []objectstore.PermissionChange{
-		{Op: objectstore.PermAdd, MemberID: mapi.MemberIDDefault, Rights: mapi.FrightsVisible | mapi.FrightsReadAny},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.ModifyPermissions(staff, false, []objectstore.PermissionChange{
-		{Op: objectstore.PermAdd, Username: "bob@hermex.test", Rights: mapi.FrightsVisible | mapi.FrightsReadAny},
-	}); err != nil {
-		t.Fatal(err)
-	}
+	seedGrantedFolder(t, st, "Announcements", objectstore.PermissionChange{
+		Op: objectstore.PermAdd, MemberID: mapi.MemberIDDefault,
+		Rights: mapi.FrightsVisible | mapi.FrightsReadAny,
+	})
+	seedGrantedFolder(t, st, "Staff", objectstore.PermissionChange{
+		Op: objectstore.PermAdd, Username: "bob@hermex.test",
+		Rights: mapi.FrightsVisible | mapi.FrightsReadAny,
+	})
 	st.Close()
 
 	resp, out := soapPost(t, ts, findFolderReq("publicfoldersroot", "Shallow"), true)
-	if resp.StatusCode != 200 {
-		t.Fatalf("status %d: %s", resp.StatusCode, out)
-	}
-	if !strings.Contains(out, `ResponseClass="Success"`) {
-		t.Fatalf("not a success: %s", out)
-	}
-	if !strings.Contains(out, "Announcements") {
-		t.Errorf("alice should see the anyone-granted Announcements:\n%s", out)
-	}
-	if strings.Contains(out, "Staff") {
-		t.Errorf("alice must not see Staff (granted only to bob):\n%s", out)
-	}
+	wantEq(t, "the FindFolder status", resp.StatusCode, 200)
+	wantContains(t, "the FindFolder response class", out, `ResponseClass="Success"`)
+	wantContains(t, "alice sees the anyone-granted Announcements", out, "Announcements")
+	wantNotContains(t, "alice sees Staff, which is granted only to bob", out, "Staff")
 
 	// The returned folder id round-trips: GetFolder on it reaches the same public
 	// store (not the caller's mailbox) and resolves the folder.
@@ -216,12 +194,19 @@ func TestPublicFolderRootACLFiltered(t *testing.T) {
 		t.Fatalf("no folder id in response:\n%s", out)
 	}
 	resp2, out2 := soapPost(t, ts, getFolderByID(m[1]), true)
-	if resp2.StatusCode != 200 || !strings.Contains(out2, `ResponseClass="Success"`) {
-		t.Fatalf("round-trip GetFolder failed (%d): %s", resp2.StatusCode, out2)
-	}
+	wantEq(t, "the round-trip GetFolder status", resp2.StatusCode, 200)
+	wantContains(t, "the round-trip GetFolder response class", out2, `ResponseClass="Success"`)
 	if !strings.Contains(out2, "Announcements") {
 		t.Errorf("round-trip GetFolder did not resolve the public folder:\n%s", out2)
 	}
+}
+
+// seedGrantedFolder creates a top-level public folder carrying one grant.
+func seedGrantedFolder(t *testing.T, st *objectstore.Store, name string, grant objectstore.PermissionChange) {
+	t.Helper()
+	fid, err := st.CreateFolder(nil, name)
+	mustNoErr(t, "create the public folder "+name, err)
+	mustNoErr(t, "grant on "+name, st.ModifyPermissions(fid, false, []objectstore.PermissionChange{grant}))
 }
 
 // TestPublicFolderRootEmptyWhenUnprovisioned proves a domain with no public store

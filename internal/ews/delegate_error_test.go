@@ -47,34 +47,28 @@ func TestDelegateWriteFailureIsSanitizedAndRecorded(t *testing.T) {
 	const secret = "objectstore: open /var/lib/hermex/alice/objects.sqlite3: permission denied"
 	msg := srv.delegateWriteFailed("bob@hermex.test", errors.New(secret))
 
-	if strings.Contains(msg.MessageText, secret) || strings.Contains(msg.MessageText, "sqlite3") {
-		t.Errorf("the response carries the raw error: %q", msg.MessageText)
-	}
+	wantNotContains(t, "the response text", msg.MessageText, secret)
+	wantNotContains(t, "the response text", msg.MessageText, "sqlite3")
 	if msg.MessageText == "" {
 		t.Error("the response says nothing at all about the failure")
 	}
-	if msg.ResponseCode != "ErrorInternalServerError" || msg.ResponseClass != "Error" {
-		t.Errorf("response = %s/%s, want Error/ErrorInternalServerError", msg.ResponseClass, msg.ResponseCode)
-	}
+	wantEq(t, "the response class", msg.ResponseClass, "Error")
+	wantEq(t, "the response code", msg.ResponseCode, "ErrorInternalServerError")
 	// The failure has to name which delegate it was, or a batch reports a failure
 	// with no way to tell whose.
-	if msg.DelegateUser == nil || msg.DelegateUser.UserId.PrimarySmtpAddress != "bob@hermex.test" {
-		t.Errorf("the failure does not name the delegate: %+v", msg.DelegateUser)
+	if msg.DelegateUser == nil {
+		t.Fatal("the failure does not name the delegate")
 	}
+	wantEq(t, "the named delegate", msg.DelegateUser.UserId.PrimarySmtpAddress, "bob@hermex.test")
 
 	e, ok := sink.find("operation.fail")
 	if !ok {
 		t.Fatal("the failure was not recorded, so the operator never learns of it")
 	}
-	if e.Err != secret {
-		t.Errorf("logged error = %q, want the full detail", e.Err)
-	}
-	if e.Fields["delegate"] != "bob@hermex.test" {
-		t.Errorf("the log line does not name the delegate: %v", e.Fields)
-	}
-	if e.Level != logging.LevelError || e.Subsystem != logging.EWS {
-		t.Errorf("event = %s/%s, want error/ews", e.Level, e.Subsystem)
-	}
+	wantEq(t, "the logged error (the full detail)", e.Err, secret)
+	wantEq(t, "the logged delegate", e.Fields["delegate"], "bob@hermex.test")
+	wantEq(t, "the event level", e.Level, logging.LevelError)
+	wantEq(t, "the event subsystem", e.Subsystem, logging.EWS)
 }
 
 // TestDelegateWriteFailureLoggingIsOptional proves a server with no logger still

@@ -2,6 +2,7 @@ package ews
 
 import (
 	"encoding/xml"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -126,12 +127,8 @@ func TestUserConfigCreateGetRoundTripTypes(t *testing.T) {
 	if p.Msg.Config.ItemID.ID == "" {
 		t.Error("response carries no ItemId")
 	}
-	if p.Msg.Config.XMLData != xmlBlob {
-		t.Errorf("XmlData = %q, want %q (verbatim)", p.Msg.Config.XMLData, xmlBlob)
-	}
-	if p.Msg.Config.BinData != binBlob {
-		t.Errorf("BinaryData = %q, want %q (verbatim)", p.Msg.Config.BinData, binBlob)
-	}
+	wantEq(t, "the XmlData (verbatim)", p.Msg.Config.XMLData, xmlBlob)
+	wantEq(t, "the BinaryData (verbatim)", p.Msg.Config.BinData, binBlob)
 
 	want := []struct {
 		key, valType string
@@ -149,15 +146,11 @@ func TestUserConfigCreateGetRoundTripTypes(t *testing.T) {
 	}
 	for i, w := range want {
 		e := p.Msg.Config.Entries[i]
-		if e.Key.Type != "String" || len(e.Key.Values) != 1 || e.Key.Values[0] != w.key {
-			t.Errorf("entry %d key = %v, want String/%q", i, e.Key, w.key)
-		}
-		if e.Value.Type != w.valType {
-			t.Errorf("entry %d (%s) value type = %q, want %q", i, w.key, e.Value.Type, w.valType)
-		}
-		if strings.Join(e.Value.Values, ",") != strings.Join(w.vals, ",") {
-			t.Errorf("entry %d (%s) values = %v, want %v", i, w.key, e.Value.Values, w.vals)
-		}
+		label := fmt.Sprintf("entry %d (%s)", i, w.key)
+		wantEq(t, label+" key type", e.Key.Type, "String")
+		wantEq(t, label+" key", strings.Join(e.Key.Values, ","), w.key)
+		wantEq(t, label+" value type", e.Value.Type, w.valType)
+		wantEq(t, label+" values", strings.Join(e.Value.Values, ","), strings.Join(w.vals, ","))
 	}
 }
 

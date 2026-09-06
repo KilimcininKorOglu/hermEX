@@ -91,15 +91,14 @@ func TestGetInboxRulesMapsCuratedRule(t *testing.T) {
 		t.Fatalf("got %d rules, want 1", len(rules))
 	}
 	r := rules[0]
-	if r.RuleID != itoa(id) || r.DisplayName != "Sale" || r.Priority != 1 || !r.IsEnabled || r.IsNotSupported {
-		t.Errorf("rule header wrong: %+v", r)
-	}
-	if len(r.Conditions.ContainsSubjectStrings) != 1 || r.Conditions.ContainsSubjectStrings[0] != "sale" {
-		t.Errorf("subject condition = %v, want [sale]", r.Conditions.ContainsSubjectStrings)
-	}
-	if r.Actions.MoveToFolder.FolderID.ID != oxews.EncodeFolderID(target) {
-		t.Errorf("move target = %q, want %q", r.Actions.MoveToFolder.FolderID.ID, oxews.EncodeFolderID(target))
-	}
+	wantEq(t, "the rule id", r.RuleID, itoa(id))
+	wantEq(t, "the rule display name", r.DisplayName, "Sale")
+	wantEq(t, "the rule priority", r.Priority, 1)
+	wantEq(t, "the rule enabled flag", r.IsEnabled, true)
+	wantEq(t, "the rule unsupported flag", r.IsNotSupported, false)
+	wantEq(t, "the subject condition",
+		strings.Join(r.Conditions.ContainsSubjectStrings, ","), "sale")
+	wantEq(t, "the move target", r.Actions.MoveToFolder.FolderID.ID, oxews.EncodeFolderID(target))
 }
 
 // TestGetInboxRulesRecognizesAndOr confirms the read side folds an AND of curated

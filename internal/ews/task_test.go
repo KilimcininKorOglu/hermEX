@@ -17,54 +17,36 @@ import (
 func TestFindItemAndGetItemTask(t *testing.T) {
 	ts, dir := seededWithMessage(t)
 	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	task := oxtask.Task{
+	mustNoErr(t, "open the store", err)
+	props, err := oxtask.ToProps(oxtask.Task{
 		Subject:     "Ship it",
 		Body:        "the notes",
 		Due:         time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
 		Importance:  2,
 		Sensitivity: -1,
 		Categories:  []string{"Work"},
-	}
-	props, err := oxtask.ToProps(task, st.GetNamedPropIDs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := st.CreateMessage(int64(mapi.PrivateFIDTasks), &oxcmail.Message{Props: props}); err != nil {
-		t.Fatal(err)
-	}
+	}, st.GetNamedPropIDs)
+	mustNoErr(t, "render the task properties", err)
+	_, err = st.CreateMessage(int64(mapi.PrivateFIDTasks), &oxcmail.Message{Props: props})
+	mustNoErr(t, "store the task", err)
 	st.Close()
 
 	resp, out := soapPost(t, ts, findItemReq("tasks"), true)
-	if resp.StatusCode != 200 {
-		t.Fatalf("FindItem status = %d: %s", resp.StatusCode, out)
-	}
-	if !strings.Contains(out, "Ship it") {
-		t.Errorf("FindItem missing task subject: %s", out)
-	}
-	if !strings.Contains(out, "DueDate") {
-		t.Errorf("FindItem task not serialized as a <t:Task> (no DueDate): %s", out)
-	}
+	wantEq(t, "the FindItem status", resp.StatusCode, 200)
+	wantContains(t, "the FindItem task subject", out, "Ship it")
+	// A DueDate element is what proves the task was serialized as a <t:Task>.
+	wantContains(t, "the FindItem task due date", out, "DueDate")
+
 	itemID := itemIDRE.FindStringSubmatch(out)
 	if len(itemID) != 2 {
 		t.Fatalf("FindItem returned no ItemId: %s", out)
 	}
 
 	_, out2 := soapPost(t, ts, getItemReq(itemID[1]), true)
-	if !strings.Contains(out2, `ResponseClass="Success"`) {
-		t.Errorf("GetItem not success: %s", out2)
-	}
-	if !strings.Contains(out2, "the notes") {
-		t.Errorf("GetItem task missing body: %s", out2)
-	}
-	if !strings.Contains(out2, "DueDate") {
-		t.Errorf("GetItem task missing DueDate: %s", out2)
-	}
-	if !strings.Contains(out2, "Work") {
-		t.Errorf("GetItem task missing category: %s", out2)
-	}
+	wantContains(t, "the GetItem response class", out2, `ResponseClass="Success"`)
+	wantContains(t, "the GetItem task body", out2, "the notes")
+	wantContains(t, "the GetItem task due date", out2, "DueDate")
+	wantContains(t, "the GetItem task category", out2, "Work")
 }
 
 // TestFindItemAndGetItemNote confirms a sticky note serializes as a base <t:Item>

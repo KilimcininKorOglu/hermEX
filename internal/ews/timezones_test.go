@@ -126,15 +126,8 @@ type tzDefTest struct {
 		Name string `xml:"Name,attr"`
 	} `xml:"Periods>Period"`
 	Groups []struct {
-		ID          string `xml:"Id,attr"`
-		Recurrences []struct {
-			To struct {
-				Kind  string `xml:"Kind,attr"`
-				Value string `xml:",chardata"`
-			} `xml:"To"`
-			Month      int `xml:"Month"`
-			Occurrence int `xml:"Occurrence"`
-		} `xml:"RecurringDayTransition"`
+		ID          string         `xml:"Id,attr"`
+		Recurrences []tzRecurrence `xml:"RecurringDayTransition"`
 	} `xml:"TransitionsGroups>TransitionsGroup"`
 	Transitions []struct {
 		To struct {
@@ -142,6 +135,16 @@ type tzDefTest struct {
 			Value string `xml:",chardata"`
 		} `xml:"To"`
 	} `xml:"Transitions>Transition"`
+}
+
+// tzRecurrence is one RecurringDayTransition inside a transitions group.
+type tzRecurrence struct {
+	To struct {
+		Kind  string `xml:"Kind,attr"`
+		Value string `xml:",chardata"`
+	} `xml:"To"`
+	Month      int `xml:"Month"`
+	Occurrence int `xml:"Occurrence"`
 }
 
 // parseTZDefs extracts the TimeZoneDefinition list from a GetServerTimeZones
@@ -208,25 +211,28 @@ func TestGetServerTimeZonesDSTStructure(t *testing.T) {
 	if len(d.Periods) != 2 {
 		t.Fatalf("DST zone must have 2 periods, got %d", len(d.Periods))
 	}
-	if d.Periods[0].Bias != "PT8H" || d.Periods[0].Name != "Standard" {
-		t.Errorf("standard period = {%s, %s}, want {PT8H, Standard}", d.Periods[0].Bias, d.Periods[0].Name)
-	}
-	if d.Periods[1].Bias != "PT7H" || d.Periods[1].Name != "Daylight" {
-		t.Errorf("daylight period = {%s, %s}, want {PT7H, Daylight}", d.Periods[1].Bias, d.Periods[1].Name)
-	}
+	wantEq(t, "the standard period bias", d.Periods[0].Bias, "PT8H")
+	wantEq(t, "the standard period name", d.Periods[0].Name, "Standard")
+	wantEq(t, "the daylight period bias", d.Periods[1].Bias, "PT7H")
+	wantEq(t, "the daylight period name", d.Periods[1].Name, "Daylight")
+
 	if len(d.Groups) != 1 || len(d.Groups[0].Recurrences) != 2 {
 		t.Fatalf("DST zone must have one group of two transitions, got %d groups", len(d.Groups))
 	}
-	start, end := d.Groups[0].Recurrences[0], d.Groups[0].Recurrences[1]
-	if start.Month != 3 || start.Occurrence != 2 || start.To.Kind != "Period" {
-		t.Errorf("US DST start = month %d occ %d kind %s, want 3/2/Period", start.Month, start.Occurrence, start.To.Kind)
-	}
-	if end.Month != 11 || end.Occurrence != 1 || end.To.Kind != "Period" {
-		t.Errorf("US DST end = month %d occ %d kind %s, want 11/1/Period", end.Month, end.Occurrence, end.To.Kind)
-	}
+	wantRecurrence(t, "the US DST start", d.Groups[0].Recurrences[0], 3, 2)
+	wantRecurrence(t, "the US DST end", d.Groups[0].Recurrences[1], 11, 1)
+
 	if len(d.Transitions) != 1 || d.Transitions[0].To.Kind != "Group" {
 		t.Errorf("DST zone top-level transition must target a Group, got %+v", d.Transitions)
 	}
+}
+
+// wantRecurrence checks one DST transition's month, occurrence and target kind.
+func wantRecurrence(t *testing.T, what string, r tzRecurrence, month, occurrence int) {
+	t.Helper()
+	wantEq(t, what+" month", r.Month, month)
+	wantEq(t, what+" occurrence", r.Occurrence, occurrence)
+	wantEq(t, what+" target kind", r.To.Kind, "Period")
 }
 
 // TestGetServerTimeZonesFixedStructure confirms a fixed-offset zone is a single
