@@ -2,6 +2,7 @@ package webmail2api
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -349,6 +350,10 @@ func (s *Server) handleCreateContact(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
 		return
 	}
+	if err := nameContact(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
 	st, _, ok := s.openStore(w, r)
 	if !ok {
 		return
@@ -367,6 +372,12 @@ func (s *Server) handleUpdateContact(w http.ResponseWriter, r *http.Request) {
 	var in contactJSON
 	if err := decodeJSON(r, &in); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "bad request"})
+		return
+	}
+	// Validated before the old object is deleted, so a rejected edit leaves the
+	// contact as it was rather than removing it.
+	if err := nameContact(&in); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	st, _, ok := s.openStore(w, r)
@@ -440,6 +451,37 @@ func (s *Server) handleExpandDistList(w http.ResponseWriter, r *http.Request) {
 
 // storeContact imports the contact as a vCard (the proven CardDAV path) and
 // creates it in the Contacts folder, returning the new object id.
+// nameContact fills in the contact's name and refuses one that has none to fill
+// in from. A contact stored with an empty name is not rejected anywhere further
+// down: vCard requires an FN, so the export substitutes a placeholder, and the
+// contact then reads back under that placeholder in every client. A caller whose
+// request named the wrong field sees a saved contact called "Unknown" and no
+// error at all.
+//
+// The name falls back to the structured first and last name, then to the first
+// e-mail address, which is what a mail client files a nameless address under.
+func nameContact(c *contactJSON) error {
+	c.Name = strings.TrimSpace(c.Name)
+	if c.Name == "" {
+		c.Name = strings.TrimSpace(strings.TrimSpace(c.FirstName) + " " + strings.TrimSpace(c.LastName))
+	}
+	if c.Name == "" && !c.IsGroup {
+		for _, addr := range []string{c.Email, c.Email2, c.Email3} {
+			if addr = strings.TrimSpace(addr); addr != "" {
+				c.Name = addr
+				break
+			}
+		}
+	}
+	if c.Name == "" {
+		if c.IsGroup {
+			return errors.New("a contact group needs a name")
+		}
+		return errors.New("a contact needs a name or an email address")
+	}
+	return nil
+}
+
 func storeContact(st *objectstore.Store, c contactJSON) (int64, error) {
 	// A contact group has no vCard contact shape; store it as an IPM.DistList with
 	// the members as a JSON body (the shape handleGetContacts reads back).
