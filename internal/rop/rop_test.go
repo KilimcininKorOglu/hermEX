@@ -6,6 +6,7 @@ import (
 
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
+	"hermex/internal/objectstore"
 )
 
 // logonRequest builds a well-formed RopLogon request ROP (header + private
@@ -44,65 +45,52 @@ func TestRopLogonResponse(t *testing.T) {
 	}
 
 	p := ext.NewPull(resp, ext.FlagUTF16)
-	if got := mustU8(t, p, "RopId"); got != ropLogon {
-		t.Errorf("RopId = %#x, want %#x", got, ropLogon)
+	wantU8(t, p, "RopId", ropLogon)
+	wantU8(t, p, "OutputHandleIndex", 0)
+	wantU32(t, p, "ReturnValue", ecSuccess)
+	wantU8(t, p, "LogonFlags", logonFlags)
+	for _, fid := range logonFolderFIDs {
+		wantU64(t, p, "FolderId", uint64(mapi.MakeEIDEx(1, fid)))
 	}
-	if got := mustU8(t, p, "OutputHandleIndex"); got != 0 {
-		t.Errorf("OutputHandleIndex = %d, want 0", got)
-	}
-	if got := mustU32(t, p, "ReturnValue"); got != ecSuccess {
-		t.Errorf("ReturnValue = %#x, want 0", got)
-	}
-	if got := mustU8(t, p, "LogonFlags"); got != logonFlags {
-		t.Errorf("LogonFlags = %#x, want %#x", got, logonFlags)
-	}
-	for i, fid := range logonFolderFIDs {
-		want := uint64(mapi.MakeEIDEx(1, fid))
-		if got := mustU64(t, p, "FolderId"); got != want {
-			t.Errorf("FolderId[%d] = %#x, want %#x", i, got, want)
-		}
-	}
-	if got := mustU8(t, p, "ResponseFlags"); got != ownerResponseFlags {
-		t.Errorf("ResponseFlags = %#x, want %#x (owner)", got, ownerResponseFlags)
-	}
-	// MailboxGuid is the store record key; ReplGuid is the mapping signature,
-	// both sourced from the store's persisted identity, not derived ad hoc.
-	wantMbg, err := obj.store.StoreGUID()
+	wantU8(t, p, "ResponseFlags", ownerResponseFlags)
+	assertLogonIdentity(t, p, obj.store)
+	assertLogonTime(t, p)
+	wantU64(t, p, "GwartTime", 0)
+	wantU32(t, p, "StoreState", 0)
+	wantDrained(t, p, "LOGON_PMB_RESPONSE")
+}
+
+// assertLogonIdentity checks the two GUIDs and the replica id the response
+// carries. MailboxGuid is the store record key and ReplGuid is the mapping
+// signature, both sourced from the store's persisted identity rather than
+// derived ad hoc, so they must match the store and must differ from each other.
+func assertLogonIdentity(t *testing.T, p *ext.Pull, store *objectstore.Store) {
+	t.Helper()
+	wantMbg, err := store.StoreGUID()
 	if err != nil {
 		t.Fatalf("StoreGUID: %v", err)
 	}
-	wantRg, err := obj.store.MappingSignature()
+	wantRg, err := store.MappingSignature()
 	if err != nil {
 		t.Fatalf("MappingSignature: %v", err)
 	}
-	if mbg := mustGUID(t, p, "MailboxGuid"); mbg != wantMbg {
-		t.Errorf("MailboxGuid = %s, want %s (store record key)", mbg, wantMbg)
-	}
-	if got := mustU16(t, p, "ReplId"); got != privateReplID {
-		t.Errorf("ReplId = %d, want %d", got, privateReplID)
-	}
-	if rg := mustGUID(t, p, "ReplGuid"); rg != wantRg {
-		t.Errorf("ReplGuid = %s, want %s (mapping signature)", rg, wantRg)
-	}
+	wantGUID(t, p, "MailboxGuid", wantMbg)
+	wantU16(t, p, "ReplId", privateReplID)
+	wantGUID(t, p, "ReplGuid", wantRg)
 	if wantMbg == wantRg {
 		t.Error("store record key and mapping signature must be distinct GUIDs")
 	}
-	// LogonTime: 6 bytes + a 16-bit year. The year must be a real decomposed
-	// time, not a zeroed field.
+}
+
+// assertLogonTime checks the decomposed LogonTime: six bytes and a 16-bit year.
+// The year proves the field carries a real time rather than zeros.
+func assertLogonTime(t *testing.T, p *ext.Pull) {
+	t.Helper()
 	for _, f := range []string{"Sec", "Min", "Hour", "DoW", "Day", "Month"} {
 		mustU8(t, p, "LogonTime."+f)
 	}
 	if year := mustU16(t, p, "LogonTime.Year"); year < 2020 {
 		t.Errorf("LogonTime year = %d, want a real current year", year)
-	}
-	if got := mustU64(t, p, "GwartTime"); got != 0 {
-		t.Errorf("GwartTime = %#x, want 0", got)
-	}
-	if got := mustU32(t, p, "StoreState"); got != 0 {
-		t.Errorf("StoreState = %#x, want 0", got)
-	}
-	if p.Remaining() != 0 {
-		t.Errorf("trailing bytes after LOGON_PMB_RESPONSE: %d", p.Remaining())
 	}
 }
 
@@ -197,4 +185,55 @@ func mustGUID(t *testing.T, p *ext.Pull, field string) mapi.GUID {
 		t.Fatalf("read %s: %v", field, err)
 	}
 	return v
+}
+
+// --- assertion helpers (read one field and compare it) ---
+//
+// A wire test reads a field and compares it, over and over. Writing that as a
+// read-then-if pair everywhere buries the one thing each line asserts, and every
+// pair charges the enclosing test another branch. These read and compare in one
+// call, so a test body reads as the field list it is checking.
+
+func wantU8(t *testing.T, p *ext.Pull, field string, want uint8) {
+	t.Helper()
+	if got := mustU8(t, p, field); got != want {
+		t.Errorf("%s = %#x, want %#x", field, got, want)
+	}
+}
+
+func wantU16(t *testing.T, p *ext.Pull, field string, want uint16) {
+	t.Helper()
+	if got := mustU16(t, p, field); got != want {
+		t.Errorf("%s = %d, want %d", field, got, want)
+	}
+}
+
+func wantU32(t *testing.T, p *ext.Pull, field string, want uint32) {
+	t.Helper()
+	if got := mustU32(t, p, field); got != want {
+		t.Errorf("%s = %#x, want %#x", field, got, want)
+	}
+}
+
+func wantU64(t *testing.T, p *ext.Pull, field string, want uint64) {
+	t.Helper()
+	if got := mustU64(t, p, field); got != want {
+		t.Errorf("%s = %#x, want %#x", field, got, want)
+	}
+}
+
+func wantGUID(t *testing.T, p *ext.Pull, field string, want mapi.GUID) {
+	t.Helper()
+	if got := mustGUID(t, p, field); got != want {
+		t.Errorf("%s = %s, want %s", field, got, want)
+	}
+}
+
+// wantDrained asserts the reader consumed the whole response, which is what
+// proves a layout test checked every field the server emitted.
+func wantDrained(t *testing.T, p *ext.Pull, what string) {
+	t.Helper()
+	if n := p.Remaining(); n != 0 {
+		t.Errorf("trailing bytes after %s: %d", what, n)
+	}
 }
