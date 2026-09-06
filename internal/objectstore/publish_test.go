@@ -71,57 +71,50 @@ func TestChangePublisher(t *testing.T) {
 
 	// Delivery: AppendMessage publishes a create for the object store, then a second
 	// create once the IMAP index row exists, both for this mailbox.
-	info, err := s.AppendMessage(inbox, publishTestMessage(), time.Unix(1700000000, 0), 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := cap.drain(); !hasOp(got, "create") {
-		t.Errorf("AppendMessage published %+v, want a create", got)
-	}
+	info := mustAppendMessage(t, s, inbox, publishTestMessage(), time.Unix(1700000000, 0), 0)
+	wantPublished(t, cap, "create", "AppendMessage")
 
 	// Flag change: SetMessageFlags writes the index and mirrors read state.
-	if err := s.SetMessageFlags(inbox, info.UID, FlagSeen); err != nil {
-		t.Fatal(err)
-	}
-	if got := cap.drain(); !hasOp(got, "flags") {
-		t.Errorf("SetMessageFlags published %+v, want a flags", got)
-	}
+	mustNoErr(t, "set message flags", s.SetMessageFlags(inbox, info.UID, FlagSeen))
+	wantPublished(t, cap, "flags", "SetMessageFlags")
 
 	// Edit: ModifyMessageProperties bumps the change number.
-	if err := s.ModifyMessageProperties(info.ID, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "edited"}}); err != nil {
-		t.Fatal(err)
-	}
-	if got := cap.drain(); !hasOp(got, "modify") {
-		t.Errorf("ModifyMessageProperties published %+v, want a modify", got)
-	}
+	mustNoErr(t, "modify message properties",
+		s.ModifyMessageProperties(info.ID, mapi.PropertyValues{{Tag: mapi.PrSubject, Value: "edited"}}))
+	wantPublished(t, cap, "modify", "ModifyMessageProperties")
 
 	// Folder create.
-	if _, err := s.CreateFolder(nil, "Notify Probe"); err != nil {
-		t.Fatal(err)
-	}
-	if got := cap.drain(); !hasOp(got, "folder") {
-		t.Errorf("CreateFolder published %+v, want a folder", got)
-	}
+	mustCreateFolder(t, s, nil, "Notify Probe")
+	wantPublished(t, cap, "folder", "CreateFolder")
 
 	// Hard delete: the event carries the message's mid since the delete bumps no
 	// change number.
 	mid := midString(uint64(info.ID))
-	if err := s.DeleteMessage(inbox, info.UID); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "delete message", s.DeleteMessage(inbox, info.UID))
 	del := cap.drain()
 	if !hasOp(del, "delete") {
 		t.Fatalf("DeleteMessage published %+v, want a delete", del)
 	}
-	carriedMid := false
-	for _, e := range del {
+	wantEq(t, "delete event carried the message mid", carriesMid(del, mid), true)
+}
+
+// wantPublished drains the captured events and checks the mutation published
+// the expected op.
+func wantPublished(t *testing.T, cap *capturedEvents, op, what string) {
+	t.Helper()
+	if got := cap.drain(); !hasOp(got, op) {
+		t.Errorf("%s published %+v, want a %s", what, got, op)
+	}
+}
+
+// carriesMid reports whether a delete event in the batch names the message.
+func carriesMid(events []ChangeEvent, mid string) bool {
+	for _, e := range events {
 		if e.Op == "delete" && e.Mid == mid {
-			carriedMid = true
+			return true
 		}
 	}
-	if !carriedMid {
-		t.Errorf("delete event did not carry mid %q: %+v", mid, del)
-	}
+	return false
 }
 
 // TestChangePublisherSoftDelete proves the soft-delete path (Recoverable Items)

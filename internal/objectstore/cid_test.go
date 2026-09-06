@@ -2,6 +2,7 @@ package objectstore
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"testing"
 
@@ -56,31 +57,15 @@ func TestContentRoundTripAndDedup(t *testing.T) {
 
 	seen := map[string]bool{}
 	for i, v := range vectors {
-		cid, err := s.putContent(v)
-		if err != nil {
-			t.Fatalf("vector %d put: %v", i, err)
-		}
-		if seen[cid] {
-			t.Errorf("vector %d produced a duplicate cid %q", i, cid)
-		}
+		cid := roundTripContent(t, s, i, v)
+		wantEq(t, fmt.Sprintf("vector %d cid is a duplicate", i), seen[cid], false)
 		seen[cid] = true
-
-		got, err := s.getContent(cid)
-		if err != nil {
-			t.Fatalf("vector %d get: %v", i, err)
-		}
-		// Empty content round-trips to empty (len 0), not nil-sensitive.
-		if !bytes.Equal(got, v) {
-			t.Errorf("vector %d round-trip mismatch: got %d bytes, want %d", i, len(got), len(v))
-		}
 	}
 
 	// Dedup: storing identical content twice yields the same cid and one file.
 	cid1, _ := s.putContent(allBytes)
 	cid2, _ := s.putContent(allBytes)
-	if cid1 != cid2 {
-		t.Errorf("dedup: cid mismatch %q vs %q", cid1, cid2)
-	}
+	wantEq(t, "dedup cid", cid2, cid1)
 	if fi, err := os.Stat(s.cidPath(cid1)); err != nil || fi.Size() == 0 {
 		t.Errorf("content file missing or empty for %q: %v", cid1, err)
 	}
@@ -89,6 +74,20 @@ func TestContentRoundTripAndDedup(t *testing.T) {
 	if len(cid1) != len("S-")+2+1+62 || cid1[:2] != "S-" || cid1[4] != '/' {
 		t.Errorf("unexpected cid format: %q", cid1)
 	}
+}
+
+// roundTripContent stores one vector and reads it back, returning its cid.
+// Empty content round-trips to empty (len 0), it is not nil-sensitive.
+func roundTripContent(t *testing.T, s *Store, i int, v []byte) string {
+	t.Helper()
+	cid, err := s.putContent(v)
+	mustNoErr(t, fmt.Sprintf("vector %d put", i), err)
+	got, err := s.getContent(cid)
+	mustNoErr(t, fmt.Sprintf("vector %d get", i), err)
+	if !bytes.Equal(got, v) {
+		t.Errorf("vector %d round-trip mismatch: got %d bytes, want %d", i, len(got), len(v))
+	}
+	return cid
 }
 
 // TestSweepOrphanContent proves the content sweep reclaims only unreferenced

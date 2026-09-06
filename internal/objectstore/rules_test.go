@@ -37,39 +37,43 @@ func TestRuleRoundTrip(t *testing.T) {
 	s := openSeededStore(t)
 	inbox := int64(mapi.PrivateFIDInbox)
 
-	id, err := s.AddRule(subjectContainsMarkRead("auto-read invoices", "invoice"))
-	if err != nil {
-		t.Fatalf("AddRule: %v", err)
-	}
+	id := mustAddRule(t, s, subjectContainsMarkRead("auto-read invoices", "invoice"))
 	if id <= 0 {
 		t.Fatalf("AddRule returned a non-positive id %d", id)
 	}
 
-	rules, err := s.ListRules(inbox)
-	if err != nil {
-		t.Fatalf("ListRules: %v", err)
-	}
+	rules := mustListRules(t, s, inbox)
 	if len(rules) != 1 {
 		t.Fatalf("ListRules returned %d rules, want 1", len(rules))
 	}
 	r := rules[0]
-	if r.ID != id {
-		t.Errorf("rule id = %d, want %d", r.ID, id)
-	}
-	if r.Name != "auto-read invoices" {
-		t.Errorf("name = %q, want %q", r.Name, "auto-read invoices")
-	}
-	if !r.Enabled() {
-		t.Errorf("rule should be enabled (state = %#x)", r.State)
-	}
-	if r.Sequence != 1 {
-		t.Errorf("first rule sequence = %d, want 1", r.Sequence)
-	}
-	if r.Provider != ruleProviderDefault {
-		t.Errorf("provider = %q, want default %q", r.Provider, ruleProviderDefault)
-	}
+	wantEq(t, "rule id", r.ID, id)
+	wantEq(t, "name", r.Name, "auto-read invoices")
+	wantEq(t, "enabled", r.Enabled(), true)
+	wantEq(t, "first rule sequence", r.Sequence, 1)
+	wantEq(t, "provider", r.Provider, ruleProviderDefault)
 
-	// Condition fidelity: ResContent on PR_SUBJECT carrying the search string.
+	wantConditionFidelity(t, r)
+
+	// Action fidelity: exactly one OpMarkAsRead block.
+	if len(r.Actions.Blocks) != 1 {
+		t.Fatalf("rule has %d action blocks, want 1", len(r.Actions.Blocks))
+	}
+	wantEq(t, "action type", r.Actions.Blocks[0].Type, mapi.OpMarkAsRead)
+}
+
+// mustListRules returns a folder's rules in sequence order.
+func mustListRules(t *testing.T, s *Store, folderID int64) []Rule {
+	t.Helper()
+	rules, err := s.ListRules(folderID)
+	mustNoErr(t, "list rules", err)
+	return rules
+}
+
+// wantConditionFidelity checks the stored condition came back as a ResContent
+// on PR_SUBJECT carrying the search string.
+func wantConditionFidelity(t *testing.T, r Rule) {
+	t.Helper()
 	if r.Condition.Type != mapi.ResContent {
 		t.Fatalf("condition type = %d, want ResContent", r.Condition.Type)
 	}
@@ -77,23 +81,10 @@ func TestRuleRoundTrip(t *testing.T) {
 	if !ok {
 		t.Fatalf("condition value is %T, want ContentRestriction", r.Condition.Value)
 	}
-	if cr.PropTag != mapi.PrSubject {
-		t.Errorf("condition proptag = %#x, want PR_SUBJECT %#x", cr.PropTag, mapi.PrSubject)
-	}
-	if cr.FuzzyLevel != 0x00010001 {
-		t.Errorf("fuzzy level = %#x, want 0x00010001", cr.FuzzyLevel)
-	}
-	if got, _ := cr.PropVal.Value.(string); got != "invoice" {
-		t.Errorf("condition search value = %q, want %q", got, "invoice")
-	}
-
-	// Action fidelity: exactly one OpMarkAsRead block.
-	if len(r.Actions.Blocks) != 1 {
-		t.Fatalf("rule has %d action blocks, want 1", len(r.Actions.Blocks))
-	}
-	if r.Actions.Blocks[0].Type != mapi.OpMarkAsRead {
-		t.Errorf("action type = %#x, want OpMarkAsRead %#x", r.Actions.Blocks[0].Type, mapi.OpMarkAsRead)
-	}
+	wantEq(t, "condition proptag", cr.PropTag, mapi.PrSubject)
+	wantEq(t, "fuzzy level", cr.FuzzyLevel, uint32(0x00010001))
+	got, _ := cr.PropVal.Value.(string)
+	wantEq(t, "condition search value", got, "invoice")
 }
 
 // TestRuleSequenceAutoAppend checks that rules added with a non-positive

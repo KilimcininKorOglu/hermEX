@@ -45,40 +45,18 @@ func streamPropBytes(items []ics.Item, tag mapi.PropTag) ([]byte, bool) {
 func TestUploadStateStreamRoundTrip(t *testing.T) {
 	s := openSeededStore(t)
 	m, err := s.ReplicaMapper()
-	if err != nil {
-		t.Fatal(err)
-	}
-	col, err := s.NewContentUpload(int64(mapi.PrivateFIDContacts))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "replica mapper", err)
+	col := mustContentUpload(t, s, int64(mapi.PrivateFIDContacts))
 
 	// The client uploads a prior seen set covering change numbers [1,20].
 	src := ics.NewIDSet(ics.FormGUIDLoose, m)
 	src.AppendRange(homeReplID, 1, 20)
 	b, err := src.Serialize()
-	if err != nil {
-		t.Fatal(err)
-	}
-	const cnsetSeen = 0x67960102
-	if err := col.BeginStateStream(cnsetSeen); err != nil {
-		t.Fatal(err)
-	}
-	// Tear the buffer so reassembly across ContinueStateStream calls is exercised.
-	if err := col.ContinueStateStream(b[:1]); err != nil {
-		t.Fatal(err)
-	}
-	if err := col.ContinueStateStream(b[1:]); err != nil {
-		t.Fatal(err)
-	}
-	if err := col.EndStateStream(); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "serialize seen set", err)
+	uploadStateStream(t, col, cnsetSeen, b[:1], b[1:])
 
 	stream, err := col.GetTransferState()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "get transfer state", err)
 	items := parseStream(t, stream)
 	if len(items) == 0 || !items[0].IsMarker || items[0].Marker != ics.MarkerIncrSyncStateBegin {
 		t.Fatalf("stream does not open with INCRSYNCSTATEBEGIN: %+v", items)
@@ -87,23 +65,58 @@ func TestUploadStateStreamRoundTrip(t *testing.T) {
 		t.Fatalf("stream does not end with INCRSYNCSTATEEND: %+v", last)
 	}
 
-	seenBytes, ok := streamPropBytes(items, mapi.PropTag(cnsetSeen))
+	got := roundTrippedSet(t, m, items, cnsetSeen)
+	wantEq(t, "round-tripped seen set holds a change number inside [1,20]",
+		got.Contains(mapi.MakeEIDEx(homeReplID, 10)), true)
+	wantEq(t, "round-tripped seen set holds a change number past [1,20]",
+		got.Contains(mapi.MakeEIDEx(homeReplID, 21)), false)
+}
+
+// cnsetSeen is MetaTagCnsetSeen, the state-stream property carrying the seen
+// change-number set.
+const cnsetSeen = 0x67960102
+
+// uploadStateStream replays a serialized id set as a state stream. Passing more
+// than one chunk tears the buffer, which exercises reassembly across
+// ContinueStateStream calls.
+func uploadStateStream(t *testing.T, col *UploadCollector, tag uint32, chunks ...[]byte) {
+	t.Helper()
+	mustNoErr(t, "begin state stream", col.BeginStateStream(tag))
+	for _, c := range chunks {
+		mustNoErr(t, "continue state stream", col.ContinueStateStream(c))
+	}
+	mustNoErr(t, "end state stream", col.EndStateStream())
+}
+
+// mustContentUpload and mustHierarchyUpload open an upload collector.
+func mustContentUpload(t *testing.T, s *Store, folderID int64) *UploadCollector {
+	t.Helper()
+	col, err := s.NewContentUpload(folderID)
+	mustNoErr(t, "new content upload", err)
+	return col
+}
+
+func mustHierarchyUpload(t *testing.T, s *Store, rootFID int64) *UploadCollector {
+	t.Helper()
+	col, err := s.NewHierarchyUpload(rootFID)
+	mustNoErr(t, "new hierarchy upload", err)
+	return col
+}
+
+// roundTrippedSet decodes an id set back out of a framed transfer state, through
+// the same GUID-packed deserialize/convert cycle the wire imposes.
+func roundTrippedSet(t *testing.T, m ics.ReplicaMapper, items []ics.Item, tag uint32) *ics.IDSet {
+	t.Helper()
+	raw, ok := streamPropBytes(items, mapi.PropTag(tag))
 	if !ok {
-		t.Fatal("transfer state missing the seen change-number set")
+		t.Fatalf("transfer state missing property %#x", tag)
 	}
 	got := ics.NewIDSet(ics.FormGUIDPacked, m)
-	if err := got.Deserialize(seenBytes); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "deserialize id set", got.Deserialize(raw))
 	if !got.Convert() {
-		t.Fatal("cannot resolve replicas for the round-tripped seen set")
+		t.Fatal("cannot resolve replicas for the round-tripped set")
 	}
-	if !got.Contains(mapi.MakeEIDEx(homeReplID, 10)) {
-		t.Error("round-tripped seen set lost a change number inside [1,20]")
-	}
-	if got.Contains(mapi.MakeEIDEx(homeReplID, 21)) {
-		t.Error("round-tripped seen set gained a change number past [1,20]")
-	}
+	return got
 }
 
 // TestUploadCollectorReadStateFeedsState asserts a read-state import folds its
@@ -176,55 +189,32 @@ func TestUploadCollectorHierarchyFeedsState(t *testing.T) {
 func TestUploadStateStreamDiscardsGiven(t *testing.T) {
 	s := openSeededStore(t)
 	m, err := s.ReplicaMapper()
-	if err != nil {
-		t.Fatal(err)
-	}
-	col, err := s.NewContentUpload(int64(mapi.PrivateFIDContacts))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "replica mapper", err)
+	col := mustContentUpload(t, s, int64(mapi.PrivateFIDContacts))
 
-	given := ics.NewIDSet(ics.FormGUIDLoose, m)
-	given.AppendRange(homeReplID, 100, 200)
-	gb, err := given.Serialize()
-	if err != nil {
-		t.Fatal(err)
-	}
-	const idsetGiven1 = 0x40170102
-	if err := col.BeginStateStream(idsetGiven1); err != nil {
-		t.Fatal(err)
-	}
-	if err := col.ContinueStateStream(gb); err != nil {
-		t.Fatal(err)
-	}
-	if err := col.EndStateStream(); err != nil {
-		t.Fatal(err)
-	}
-
-	seen := ics.NewIDSet(ics.FormGUIDLoose, m)
-	seen.AppendRange(homeReplID, 1, 20)
-	sb, err := seen.Serialize()
-	if err != nil {
-		t.Fatal(err)
-	}
-	const cnsetSeen = 0x67960102
-	if err := col.BeginStateStream(cnsetSeen); err != nil {
-		t.Fatal(err)
-	}
-	if err := col.ContinueStateStream(sb); err != nil {
-		t.Fatal(err)
-	}
-	if err := col.EndStateStream(); err != nil {
-		t.Fatal(err)
-	}
+	uploadStateStream(t, col, idsetGiven1, serializedRange(t, m, 100, 200))
+	uploadStateStream(t, col, cnsetSeen, serializedRange(t, m, 1, 20))
 
 	items := parseStream(t, mustTransferState(t, col))
-	if _, ok := streamPropBytes(items, mapi.PropTag(idsetGiven1)); ok {
-		t.Error("upload transfer state echoed the client given set; it must be discarded")
-	}
-	if _, ok := streamPropBytes(items, mapi.PropTag(cnsetSeen)); !ok {
-		t.Error("upload transfer state dropped the tracked seen set")
-	}
+	_, echoedGiven := streamPropBytes(items, mapi.PropTag(idsetGiven1))
+	wantEq(t, "upload transfer state echoed the client given set (it must be discarded)", echoedGiven, false)
+	_, keptSeen := streamPropBytes(items, mapi.PropTag(cnsetSeen))
+	wantEq(t, "upload transfer state kept the tracked seen set", keptSeen, true)
+}
+
+// idsetGiven1 is MetaTagIdsetGiven1, the state-stream property carrying the set
+// of ids the client already holds.
+const idsetGiven1 = 0x40170102
+
+// serializedRange builds a loose-form id set over one change-number range and
+// returns its wire bytes.
+func serializedRange(t *testing.T, m ics.ReplicaMapper, lo, hi uint64) []byte {
+	t.Helper()
+	set := ics.NewIDSet(ics.FormGUIDLoose, m)
+	set.AppendRange(homeReplID, lo, hi)
+	b, err := set.Serialize()
+	mustNoErr(t, "serialize id set", err)
+	return b
 }
 
 // TestUploadStateStreamHierarchyRejectsContentsOnly asserts a hierarchy upload
@@ -232,24 +222,14 @@ func TestUploadStateStreamDiscardsGiven(t *testing.T) {
 // accepting the seen set that applies to every sync type.
 func TestUploadStateStreamHierarchyRejectsContentsOnly(t *testing.T) {
 	s := openSeededStore(t)
-	hcol, err := s.NewHierarchyUpload(int64(mapi.PrivateFIDIPMSubtree))
-	if err != nil {
-		t.Fatal(err)
-	}
+	hcol := mustHierarchyUpload(t, s, int64(mapi.PrivateFIDIPMSubtree))
 	const (
 		cnsetSeenFAI = 0x67DA0102
 		cnsetRead    = 0x67D20102
-		cnsetSeen    = 0x67960102
 	)
-	if err := hcol.BeginStateStream(cnsetSeenFAI); err == nil {
-		t.Error("hierarchy upload accepted a contents-only FAI seen set")
-	}
-	if err := hcol.BeginStateStream(cnsetRead); err == nil {
-		t.Error("hierarchy upload accepted a contents-only read set")
-	}
-	if err := hcol.BeginStateStream(cnsetSeen); err != nil {
-		t.Errorf("hierarchy upload rejected the seen set valid for all sync types: %v", err)
-	}
+	wantErr(t, "hierarchy upload accepting a contents-only FAI seen set", hcol.BeginStateStream(cnsetSeenFAI))
+	wantErr(t, "hierarchy upload accepting a contents-only read set", hcol.BeginStateStream(cnsetRead))
+	mustNoErr(t, "hierarchy upload rejected the seen set valid for all sync types", hcol.BeginStateStream(cnsetSeen))
 }
 
 // mustTransferState renders the collector's transfer state or fails the test.
@@ -267,48 +247,28 @@ func mustTransferState(t *testing.T, col *UploadCollector) []byte {
 // a continue/end with no open stream is an error rather than a silent no-op.
 func TestUploadStateStreamGate(t *testing.T) {
 	s := openSeededStore(t)
-	col, err := s.NewContentUpload(int64(mapi.PrivateFIDContacts))
-	if err != nil {
-		t.Fatal(err)
-	}
+	col := mustContentUpload(t, s, int64(mapi.PrivateFIDContacts))
 
-	if err := col.BeginStateStream(uint32(mapi.PrDisplayName)); err == nil {
-		t.Error("BeginStateStream accepted a non-state meta-tag")
-	}
-	if err := col.ContinueStateStream([]byte{0}); err == nil {
-		t.Error("ContinueStateStream accepted bytes with no open stream")
-	}
-	if err := col.EndStateStream(); err == nil {
-		t.Error("EndStateStream accepted a close with no open stream")
-	}
+	wantErr(t, "BeginStateStream accepting a non-state meta-tag", col.BeginStateStream(uint32(mapi.PrDisplayName)))
+	wantErr(t, "ContinueStateStream accepting bytes with no open stream", col.ContinueStateStream([]byte{0}))
+	wantErr(t, "EndStateStream accepting a close with no open stream", col.EndStateStream())
 
 	// An import trips the mark-started gate: no further state may be replayed.
-	hcol, err := s.NewHierarchyUpload(int64(mapi.PrivateFIDIPMSubtree))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := hcol.ImportHierarchyChange(hierHeader(t, s, 0x200002, nil, "Gate"), nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := hcol.BeginStateStream(0x67960102); err == nil {
-		t.Error("BeginStateStream succeeded after an import (mark-started gate not enforced)")
-	}
+	hcol := mustHierarchyUpload(t, s, int64(mapi.PrivateFIDIPMSubtree))
+	mustImportHierarchyChange(t, s, hcol, 0x200002, "Gate")
+	wantErr(t, "BeginStateStream after an import (mark-started gate not enforced)", hcol.BeginStateStream(cnsetSeen))
 
 	// A stream still open when an import runs can no longer be continued or ended.
-	ocol, err := s.NewHierarchyUpload(int64(mapi.PrivateFIDIPMSubtree))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := ocol.BeginStateStream(0x67960102); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := ocol.ImportHierarchyChange(hierHeader(t, s, 0x200003, nil, "Open"), nil); err != nil {
-		t.Fatal(err)
-	}
-	if err := ocol.ContinueStateStream([]byte{0}); err == nil {
-		t.Error("ContinueStateStream succeeded after an import")
-	}
-	if err := ocol.EndStateStream(); err == nil {
-		t.Error("EndStateStream succeeded after an import")
-	}
+	ocol := mustHierarchyUpload(t, s, int64(mapi.PrivateFIDIPMSubtree))
+	mustNoErr(t, "begin state stream", ocol.BeginStateStream(cnsetSeen))
+	mustImportHierarchyChange(t, s, ocol, 0x200003, "Open")
+	wantErr(t, "ContinueStateStream after an import", ocol.ContinueStateStream([]byte{0}))
+	wantErr(t, "EndStateStream after an import", ocol.EndStateStream())
+}
+
+// mustImportHierarchyChange imports one folder into a hierarchy upload.
+func mustImportHierarchyChange(t *testing.T, s *Store, col *UploadCollector, fid uint64, name string) {
+	t.Helper()
+	_, err := col.ImportHierarchyChange(hierHeader(t, s, fid, nil, name), nil)
+	mustNoErr(t, "import hierarchy change", err)
 }

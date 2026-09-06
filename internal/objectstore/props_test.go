@@ -69,16 +69,30 @@ func openSeededStore(t *testing.T) *Store {
 func TestStorePropertiesRoundTrip(t *testing.T) {
 	s := openTestStore(t)
 	want := allTypeProps()
-	if err := s.SetStoreProperties(want); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "set store properties", s.SetStoreProperties(want))
 	got, err := s.GetStoreProperties()
-	if err != nil {
-		t.Fatal(err)
+	mustNoErr(t, "get store properties", err)
+	wantSameValues(t, want, asMap(got))
+
+	// Filtered read returns only the requested tags.
+	sub, err := s.GetStoreProperties(tag(0x1A, mapi.PtString8), tag(0x1C, mapi.PtBinary))
+	mustNoErr(t, "filtered get", err)
+	wantEq(t, "props returned by the filtered get", len(sub), 2)
+
+	// Overwrite replaces the value (upsert).
+	mustNoErr(t, "upsert store property",
+		s.SetStoreProperties(mapi.PropertyValues{{Tag: tag(0x12, mapi.PtLong), Value: int32(-1)}}))
+	again, _ := s.GetStoreProperties(tag(0x12, mapi.PtLong))
+	if len(again) != 1 || again[0].Value != int32(-1) {
+		t.Errorf("upsert: got %#v, want int32(-1)", again)
 	}
-	gm := asMap(got)
+}
+
+// wantSameValues checks every written property came back with its value intact.
+func wantSameValues(t *testing.T, want mapi.PropertyValues, got map[mapi.PropTag]any) {
+	t.Helper()
 	for _, w := range want {
-		g, ok := gm[w.Tag]
+		g, ok := got[w.Tag]
 		if !ok {
 			t.Errorf("%s missing after round-trip", w.Tag)
 			continue
@@ -86,24 +100,6 @@ func TestStorePropertiesRoundTrip(t *testing.T) {
 		if !reflect.DeepEqual(g, w.Value) {
 			t.Errorf("%s = %#v (%T), want %#v (%T)", w.Tag, g, g, w.Value, w.Value)
 		}
-	}
-
-	// Filtered read returns only the requested tags.
-	sub, err := s.GetStoreProperties(tag(0x1A, mapi.PtString8), tag(0x1C, mapi.PtBinary))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(sub) != 2 {
-		t.Errorf("filtered get returned %d props, want 2", len(sub))
-	}
-
-	// Overwrite replaces the value (upsert).
-	if err := s.SetStoreProperties(mapi.PropertyValues{{Tag: tag(0x12, mapi.PtLong), Value: int32(-1)}}); err != nil {
-		t.Fatal(err)
-	}
-	again, _ := s.GetStoreProperties(tag(0x12, mapi.PtLong))
-	if len(again) != 1 || again[0].Value != int32(-1) {
-		t.Errorf("upsert: got %#v, want int32(-1)", again)
 	}
 }
 

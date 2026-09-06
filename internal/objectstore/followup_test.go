@@ -44,44 +44,30 @@ func TestFollowupFlagRoundTrip(t *testing.T) {
 func TestFollowupFlagCompleteAndClear(t *testing.T) {
 	s := openSeededStore(t)
 	inbox := int64(mapi.PrivateFIDInbox)
-	info, err := s.AppendMessage(inbox, []byte("From: a@b.test\r\nSubject: y\r\n\r\nbody"), time.Unix(1700000000, 0), 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	info := mustAppendMessage(t, s, inbox, []byte("From: a@b.test\r\nSubject: y\r\n\r\nbody"), time.Unix(1700000000, 0), 0)
 
-	if err := s.SetFollowupFlag(info.ID, FollowupFlag{Status: FlagStatusFlagged, Color: FlagColorBlue}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.SetFollowupFlag(info.ID, FollowupFlag{Status: FlagStatusComplete}); err != nil {
-		t.Fatal(err)
-	}
-	got, err := s.GetFollowupFlag(info.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Status != FlagStatusComplete {
-		t.Errorf("status = %d, want complete", got.Status)
-	}
+	mustNoErr(t, "set followup flag",
+		s.SetFollowupFlag(info.ID, FollowupFlag{Status: FlagStatusFlagged, Color: FlagColorBlue}))
+	mustNoErr(t, "complete followup flag",
+		s.SetFollowupFlag(info.ID, FollowupFlag{Status: FlagStatusComplete}))
+	got := mustFollowupFlag(t, s, info.ID)
+	wantEq(t, "status", got.Status, FlagStatusComplete)
 	if got.Complete.IsZero() {
 		t.Error("complete time not recorded")
 	}
-	if messageFlagged(t, s, inbox, info.ID) {
-		t.Error("completing a flag must clear the IMAP \\Flagged bit")
-	}
+	wantEq(t, `\Flagged after completing a flag`, messageFlagged(t, s, inbox, info.ID), false)
 
-	if err := s.ClearFollowupFlag(info.ID); err != nil {
-		t.Fatal(err)
-	}
-	got, err = s.GetFollowupFlag(info.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Status != FlagStatusNone {
-		t.Errorf("status = %d, want none after clear", got.Status)
-	}
-	if messageFlagged(t, s, inbox, info.ID) {
-		t.Error("a cleared flag must not be \\Flagged")
-	}
+	mustNoErr(t, "clear followup flag", s.ClearFollowupFlag(info.ID))
+	wantEq(t, "status after clear", mustFollowupFlag(t, s, info.ID).Status, FlagStatusNone)
+	wantEq(t, `\Flagged after clearing a flag`, messageFlagged(t, s, inbox, info.ID), false)
+}
+
+// mustFollowupFlag reads a message's follow-up flag.
+func mustFollowupFlag(t *testing.T, s *Store, messageID int64) FollowupFlag {
+	t.Helper()
+	f, err := s.GetFollowupFlag(messageID)
+	mustNoErr(t, "get followup flag", err)
+	return f
 }
 
 // TestCategoriesRoundTrip checks the PidNameKeywords category list round-trips,

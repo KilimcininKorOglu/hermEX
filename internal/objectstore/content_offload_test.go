@@ -30,15 +30,11 @@ func TestContentPropertyOffload(t *testing.T) {
 		{Tag: mapi.PrTransportMessageHeaders, Value: headers},
 		{Tag: mapi.PrImportance, Value: int32(mapi.ImportanceHigh)}, // inline, alongside
 	}
-	if err := s.SetStoreProperties(want); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "set store properties", s.SetStoreProperties(want))
 
 	// Every value round-trips identically through the offload.
 	got, err := s.GetStoreProperties()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "get store properties", err)
 	gm := asMap(got)
 	for _, w := range want {
 		g, ok := gm[w.Tag]
@@ -47,41 +43,38 @@ func TestContentPropertyOffload(t *testing.T) {
 			continue
 		}
 		if !reflect.DeepEqual(g, w.Value) {
-			t.Errorf("%s did not round-trip: got %T len?, want %T", w.Tag, g, w.Value)
+			t.Errorf("%s did not round-trip: got %T, want %T", w.Tag, g, w.Value)
 		}
 	}
 
-	// A content property's column holds a content id, not the payload, and the
-	// content file exists on disk.
 	for _, tg := range []mapi.PropTag{mapi.PrBody, mapi.PrHTML, mapi.PrAttachDataBin, mapi.PrTransportMessageHeaders} {
-		var col any
-		if err := s.objdb.QueryRow(
-			`SELECT propval FROM store_properties WHERE proptag=?`, int64(uint32(tg))).Scan(&col); err != nil {
-			t.Fatalf("%s raw read: %v", tg, err)
-		}
-		cid, err := asString(col)
-		if err != nil {
-			t.Fatalf("%s: %v", tg, err)
-		}
-		if !strings.HasPrefix(cid, "S-") {
-			t.Errorf("%s column = %q, want a content id", tg, cid)
-		}
-		if len(cid) >= 200 {
-			t.Errorf("%s column holds %d bytes; payload was stored inline, not offloaded", tg, len(cid))
-		}
-		if _, err := os.Stat(s.cidPath(cid)); err != nil {
-			t.Errorf("%s content file missing: %v", tg, err)
-		}
+		wantOffloaded(t, s, tg)
 	}
 
 	// An inline (non-content) property is stored as its native value, not a
 	// content id.
 	var col any
-	if err := s.objdb.QueryRow(
-		`SELECT propval FROM store_properties WHERE proptag=?`, int64(uint32(mapi.PrImportance))).Scan(&col); err != nil {
-		t.Fatal(err)
+	mustScan(t, s.objdb.QueryRow(
+		`SELECT propval FROM store_properties WHERE proptag=?`, int64(uint32(mapi.PrImportance))), &col)
+	iv, _ := col.(int64)
+	wantEq(t, "inline PrImportance column", iv, int64(mapi.ImportanceHigh))
+}
+
+// wantOffloaded proves a content property's column holds a content id, not the
+// payload, and that the content file exists on disk.
+func wantOffloaded(t *testing.T, s *Store, tg mapi.PropTag) {
+	t.Helper()
+	var col any
+	mustScan(t, s.objdb.QueryRow(`SELECT propval FROM store_properties WHERE proptag=?`, int64(uint32(tg))), &col)
+	cid, err := asString(col)
+	mustNoErr(t, tg.String()+" column", err)
+	if !strings.HasPrefix(cid, "S-") {
+		t.Errorf("%s column = %q, want a content id", tg, cid)
 	}
-	if iv, ok := col.(int64); !ok || iv != int64(mapi.ImportanceHigh) {
-		t.Errorf("inline PrImportance column = %#v, want int64(%d)", col, mapi.ImportanceHigh)
+	if len(cid) >= 200 {
+		t.Errorf("%s column holds %d bytes; payload was stored inline, not offloaded", tg, len(cid))
+	}
+	if _, err := os.Stat(s.cidPath(cid)); err != nil {
+		t.Errorf("%s content file missing: %v", tg, err)
 	}
 }

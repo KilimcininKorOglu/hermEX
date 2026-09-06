@@ -21,65 +21,55 @@ func TestReindexFolder(t *testing.T) {
 		{Tag: mapi.PrBody, Value: "gövde A"},
 		{Tag: mapi.PrMessageDeliveryTime, Value: mapi.UnixToNTTime(time.Unix(1700000000, 0))},
 	}}
-	eidA, err := s.CreateMessage(mapi.PrivateFIDInbox, msgA)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n := idxCount(t, s, eidA); n != 0 {
-		t.Fatalf("A has %d index rows before reindex, want 0", n)
-	}
+	eidA := mustCreateMessage(t, s, mapi.PrivateFIDInbox, msgA)
+	wantEq(t, "A index rows before reindex", idxCount(t, s, eidA), 0)
 
 	// B: a delivered message whose object we remove directly, leaving an orphan
 	// index row + eml.
 	rawB := []byte("From: a@example.test\r\nTo: b@example.test\r\nSubject: yetim indeks\r\n" +
 		"Date: Wed, 15 Nov 2023 10:13:20 +0000\r\n\r\ngövde B.\r\n")
-	infoB, err := s.AppendMessage(mapi.PrivateFIDInbox, rawB, time.Unix(1700000000, 0), 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	infoB := mustAppendMessage(t, s, mapi.PrivateFIDInbox, rawB, time.Unix(1700000000, 0), 0)
 	bEML := s.emlPath(midString(uint64(infoB.ID)))
-	if _, err := s.objdb.Exec(`DELETE FROM messages WHERE message_id=?`, infoB.ID); err != nil {
-		t.Fatal(err)
-	}
+	_, err := s.objdb.Exec(`DELETE FROM messages WHERE message_id=?`, infoB.ID)
+	mustNoErr(t, "drop object B", err)
 
-	if err := s.ReindexFolder(mapi.PrivateFIDInbox); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "reindex folder", s.ReindexFolder(mapi.PrivateFIDInbox))
 
 	// A is now indexed; B is pruned.
-	list, err := s.ListMessages(mapi.PrivateFIDInbox)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var foundA *MessageInfo
-	for i := range list {
-		if list[i].ID == eidA {
-			foundA = &list[i]
-		}
-		if list[i].ID == infoB.ID {
-			t.Error("orphan index row B was not pruned")
-		}
-	}
-	if foundA == nil {
-		t.Fatal("orphan object A was not indexed")
-	}
+	foundA := indexedAfterReindex(t, s, eidA, infoB.ID)
 	if foundA.UID == 0 || foundA.Size == 0 {
 		t.Errorf("A indexed with uid=%d size=%d, want both nonzero", foundA.UID, foundA.Size)
 	}
 
 	// A's eml was generated and its index size matches the served bytes.
 	emlA, err := os.ReadFile(s.emlPath(midString(uint64(eidA))))
-	if err != nil {
-		t.Fatalf("A eml missing after reindex: %v", err)
-	}
-	if int64(len(emlA)) != foundA.Size {
-		t.Errorf("A index size %d != served eml %d", foundA.Size, len(emlA))
-	}
+	mustNoErr(t, "read A eml after reindex", err)
+	wantEq(t, "A index size against the served eml", foundA.Size, int64(len(emlA)))
 
 	// B's orphan eml was removed.
 	if _, err := os.Stat(bEML); !os.IsNotExist(err) {
 		t.Errorf("B orphan eml survived prune: stat err = %v", err)
 	}
+}
+
+// indexedAfterReindex returns the index row the reindex created for the orphan
+// object, failing when it is missing or when the orphan index row survived.
+func indexedAfterReindex(t *testing.T, s *Store, indexedID, prunedID int64) MessageInfo {
+	t.Helper()
+	var found *MessageInfo
+	list := mustListMessages(t, s, mapi.PrivateFIDInbox)
+	for i := range list {
+		if list[i].ID == indexedID {
+			found = &list[i]
+		}
+		if list[i].ID == prunedID {
+			t.Error("orphan index row was not pruned")
+		}
+	}
+	if found == nil {
+		t.Fatal("orphan object was not indexed")
+	}
+	return *found
 }
 
 // TestReindexPreservesExistingUID checks that reindexing leaves an

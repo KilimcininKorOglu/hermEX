@@ -84,50 +84,37 @@ func TestMailboxSizeExcludesSoftDeleted(t *testing.T) {
 	inbox := int64(mapi.PrivateFIDInbox)
 
 	live := []byte("From: a@hermex.test\r\nTo: u@hermex.test\r\nSubject: keep\r\n\r\nlive message body that counts toward quota\r\n")
-	if _, err := s.AppendMessage(inbox, live, when, 0); err != nil {
-		t.Fatalf("append live: %v", err)
-	}
-	liveSize, err := s.MailboxSize()
-	if err != nil {
-		t.Fatalf("mailbox size: %v", err)
-	}
+	mustAppendMessage(t, s, inbox, live, when, 0)
+	liveSize := mustMailboxSize(t, s)
 	if liveSize <= 0 {
 		t.Fatalf("live-only size = %d, want > 0", liveSize)
 	}
 
 	doomed := []byte("From: b@hermex.test\r\nTo: u@hermex.test\r\nSubject: trash\r\n\r\nthis message is soft-deleted into the dumpster and must not be charged to quota\r\n")
-	info, err := s.AppendMessage(inbox, doomed, when, 0)
-	if err != nil {
-		t.Fatalf("append doomed: %v", err)
-	}
-	withDoomed, err := s.MailboxSize()
-	if err != nil {
-		t.Fatalf("mailbox size: %v", err)
-	}
-	if withDoomed <= liveSize {
+	info := mustAppendMessage(t, s, inbox, doomed, when, 0)
+	if withDoomed := mustMailboxSize(t, s); withDoomed <= liveSize {
 		t.Fatalf("doomed message added no bytes (with=%d, live=%d); the test would be vacuous", withDoomed, liveSize)
 	}
 
 	// Soft-delete sends it to the dumpster (is_deleted=1), not a purge.
-	if err := s.SoftDeleteMessage(inbox, info.UID); err != nil {
-		t.Fatalf("soft-delete: %v", err)
-	}
+	mustNoErr(t, "soft-delete", s.SoftDeleteMessage(inbox, info.UID))
 
 	// It survives in the dumpster, still recoverable...
 	dump, err := s.ListAllSoftDeleted()
-	if err != nil {
-		t.Fatalf("list soft-deleted: %v", err)
-	}
+	mustNoErr(t, "list soft-deleted", err)
 	if len(dump) != 1 {
 		t.Fatalf("dumpster = %d, want 1 (the message must still exist, just soft-deleted)", len(dump))
 	}
 
 	// ...yet its bytes no longer count toward quota usage.
-	got, err := s.MailboxSize()
-	if err != nil {
-		t.Fatalf("mailbox size: %v", err)
-	}
-	if got != liveSize {
-		t.Errorf("MailboxSize after soft-delete = %d, want %d (soft-deleted bytes must be excluded from quota)", got, liveSize)
-	}
+	wantEq(t, "MailboxSize after soft-delete (soft-deleted bytes are excluded from quota)",
+		mustMailboxSize(t, s), liveSize)
+}
+
+// mustMailboxSize returns the mailbox usage the quota path reports.
+func mustMailboxSize(t *testing.T, s *Store) int64 {
+	t.Helper()
+	size, err := s.MailboxSize()
+	mustNoErr(t, "mailbox size", err)
+	return size
 }

@@ -24,56 +24,44 @@ func TestListFolderObjects(t *testing.T) {
 	s := openSeededStore(t)
 
 	// A fresh contacts folder enumerates nothing and has no change cursor.
-	if objs, err := s.ListFolderObjects(mapi.PrivateFIDContacts); err != nil {
-		t.Fatal(err)
-	} else if len(objs) != 0 {
-		t.Fatalf("empty contacts: got %d objects, want 0", len(objs))
-	}
-	if max, err := s.FolderMaxChangeNumber(mapi.PrivateFIDContacts); err != nil {
-		t.Fatal(err)
-	} else if max != 0 {
-		t.Fatalf("empty contacts: max change number %d, want 0", max)
-	}
+	wantEq(t, "empty contacts object count", len(mustListFolderObjects(t, s, mapi.PrivateFIDContacts)), 0)
+	wantEq(t, "empty contacts max change number", mustFolderMaxChangeNumber(t, s, mapi.PrivateFIDContacts), uint64(0))
 
-	eid1, err := s.CreateMessage(mapi.PrivateFIDContacts, contactMsg("Ada Lovelace"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	eid2, err := s.CreateMessage(mapi.PrivateFIDContacts, contactMsg("Grace Hopper"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	eid1 := mustCreateMessage(t, s, mapi.PrivateFIDContacts, contactMsg("Ada Lovelace"))
+	eid2 := mustCreateMessage(t, s, mapi.PrivateFIDContacts, contactMsg("Grace Hopper"))
 
-	objs, err := s.ListFolderObjects(mapi.PrivateFIDContacts)
-	if err != nil {
-		t.Fatal(err)
-	}
+	objs := mustListFolderObjects(t, s, mapi.PrivateFIDContacts)
 	if len(objs) != 2 {
 		t.Fatalf("got %d objects, want 2", len(objs))
 	}
-	if objs[0].ID != eid1 || objs[1].ID != eid2 {
-		t.Errorf("objects out of EID order: got %d,%d want %d,%d", objs[0].ID, objs[1].ID, eid1, eid2)
-	}
+	wantEq(t, "first object id (EID order)", objs[0].ID, eid1)
+	wantEq(t, "second object id (EID order)", objs[1].ID, eid2)
 	if objs[0].ChangeNumber == 0 || objs[1].ChangeNumber <= objs[0].ChangeNumber {
 		t.Errorf("change numbers not monotonic: %d, %d", objs[0].ChangeNumber, objs[1].ChangeNumber)
 	}
 
 	// The IMAP index never saw these objects, this is why DAV needs the object
 	// store primitive rather than ListMessages.
-	if idx, err := s.ListMessages(mapi.PrivateFIDContacts); err != nil {
-		t.Fatal(err)
-	} else if len(idx) != 0 {
-		t.Errorf("ListMessages saw %d contacts; objects must not be in the IMAP index", len(idx))
-	}
+	wantEq(t, "contacts in the IMAP index", len(mustListMessages(t, s, mapi.PrivateFIDContacts)), 0)
 
 	// The collection's sync cursor is the highest live change number.
-	max, err := s.FolderMaxChangeNumber(mapi.PrivateFIDContacts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if max != objs[1].ChangeNumber {
-		t.Errorf("max change number %d, want %d", max, objs[1].ChangeNumber)
-	}
+	wantEq(t, "max change number", mustFolderMaxChangeNumber(t, s, mapi.PrivateFIDContacts), objs[1].ChangeNumber)
+}
+
+// mustListFolderObjects enumerates a folder through the object store.
+func mustListFolderObjects(t *testing.T, s *Store, folderID int64) []FolderObject {
+	t.Helper()
+	objs, err := s.ListFolderObjects(folderID)
+	mustNoErr(t, "list folder objects", err)
+	return objs
+}
+
+// mustFolderMaxChangeNumber returns a folder's sync cursor.
+func mustFolderMaxChangeNumber(t *testing.T, s *Store, folderID int64) uint64 {
+	t.Helper()
+	max, err := s.FolderMaxChangeNumber(folderID)
+	mustNoErr(t, "folder max change number", err)
+	return max
 }
 
 // TestDeleteObject deletes an object-store-only object (a contact) by EID, the

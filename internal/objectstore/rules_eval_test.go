@@ -269,10 +269,7 @@ func TestRuleExitLevelStopsProcessing(t *testing.T) {
 func TestRunRulesEndToEnd(t *testing.T) {
 	s := openSeededStore(t)
 	inbox := int64(mapi.PrivateFIDInbox)
-	filed, err := s.CreateFolder(nil, "Filed")
-	if err != nil {
-		t.Fatalf("CreateFolder: %v", err)
-	}
+	filed := mustCreateFolder(t, s, nil, "Filed")
 
 	a := deliverTo(t, s, inbox, ruleMsg("Quarterly Invoice 12345", "billing@acme.com", ""))
 	b := deliverTo(t, s, inbox, ruleMsg("lunch?", "bob@example.com", ""))
@@ -280,72 +277,57 @@ func TestRunRulesEndToEnd(t *testing.T) {
 	d := deliverTo(t, s, inbox, ruleMsg("Invoice from promo", "promo@vendor.com", ""))
 
 	// rule 1 (sequence 1): subject contains "invoice" -> move to Filed (terminal)
-	if _, err := s.AddRule(Rule{
+	mustAddRule(t, s, Rule{
 		FolderID: inbox, Name: "file invoices", State: mapi.RuleStateEnabled,
 		Condition: RuleSubjectContains("invoice"),
 		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{RuleMoveAction(filed)}},
-	}); err != nil {
-		t.Fatalf("AddRule 1: %v", err)
-	}
+	})
 	// rule 2 (sequence 2): from contains "promo" -> mark read
-	if _, err := s.AddRule(Rule{
+	mustAddRule(t, s, Rule{
 		FolderID: inbox, Name: "read promos", State: mapi.RuleStateEnabled,
 		Condition: RuleFromContains("promo"),
 		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{RuleMarkReadAction()}},
-	}); err != nil {
-		t.Fatalf("AddRule 2: %v", err)
-	}
+	})
 
 	res, err := s.RunRules(inbox, 0)
-	if err != nil {
-		t.Fatalf("RunRules: %v", err)
-	}
-	if res.Evaluated != 4 {
-		t.Errorf("evaluated = %d, want 4", res.Evaluated)
-	}
+	mustNoErr(t, "run rules", err)
+	wantEq(t, "evaluated", res.Evaluated, 4)
 	// a (invoice) moved, c (promo) marked read, d (invoice+promo) moved -> 3 acted.
-	if res.Affected != 3 {
-		t.Errorf("affected = %d, want 3", res.Affected)
-	}
+	wantEq(t, "affected", res.Affected, 3)
 
 	// Filed now holds the two invoice messages (a and d); inbox holds b and c.
-	filedMsgs, err := s.ListMessages(filed)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(filedMsgs) != 2 {
-		t.Fatalf("Filed has %d messages, want 2 (the two invoices)", len(filedMsgs))
-	}
-	inboxMsgs, err := s.ListMessages(inbox)
-	if err != nil {
-		t.Fatal(err)
-	}
+	wantEq(t, "Filed message count (the two invoices)", len(mustListMessages(t, s, filed)), 2)
+	inboxMsgs := mustListMessages(t, s, inbox)
 	if len(inboxMsgs) != 2 {
 		t.Fatalf("inbox has %d messages, want 2 (lunch + newsletter)", len(inboxMsgs))
 	}
-
 	// a and d must be gone from the inbox (moved by the terminal move rule).
 	for _, m := range inboxMsgs {
 		if m.UID == a.UID || m.UID == d.UID {
-			t.Errorf("a moved/invoice message uid %d still in inbox", m.UID)
+			t.Errorf("moved invoice message uid %d still in inbox", m.UID)
 		}
 	}
 
 	// c (promo) stayed in the inbox and is now read; b is untouched and unread.
-	cInfo, err := s.MessageByUID(inbox, c.UID)
-	if err != nil {
-		t.Fatalf("newsletter (promo) message gone from inbox: %v", err)
-	}
-	if cInfo.Flags&FlagSeen == 0 {
-		t.Errorf("promo message was not marked read by the rule")
-	}
-	bInfo, err := s.MessageByUID(inbox, b.UID)
-	if err != nil {
-		t.Fatalf("lunch message gone from inbox: %v", err)
-	}
-	if bInfo.Flags&FlagSeen != 0 {
-		t.Errorf("unmatched lunch message was marked read")
-	}
+	wantSeen(t, s, inbox, c.UID, true, "promo message marked read by the rule")
+	wantSeen(t, s, inbox, b.UID, false, "unmatched lunch message marked read")
+}
+
+// mustAddRule stores one rule.
+func mustAddRule(t *testing.T, s *Store, r Rule) int64 {
+	t.Helper()
+	id, err := s.AddRule(r)
+	mustNoErr(t, "add rule "+r.Name, err)
+	return id
+}
+
+// wantSeen checks a message is still in the folder and carries (or does not
+// carry) the \Seen flag.
+func wantSeen(t *testing.T, s *Store, folderID int64, uid uint32, want bool, label string) {
+	t.Helper()
+	info, err := s.MessageByUID(folderID, uid)
+	mustNoErr(t, "message by uid", err)
+	wantEq(t, label, info.Flags&FlagSeen != 0, want)
 }
 
 // TestApplyInboxRulesMalformedBlobIsError verifies that a corrupt stored rule

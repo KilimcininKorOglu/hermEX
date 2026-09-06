@@ -25,6 +25,7 @@ func childIDs(t *testing.T, s *Store, query string, args ...any) []int64 {
 		}
 		ids = append(ids, id)
 	}
+	mustNoErr(t, "iterate ids", rows.Err())
 	return ids
 }
 
@@ -69,93 +70,104 @@ func TestCreateMessage(t *testing.T) {
 		},
 	}
 
-	eid, err := s.CreateMessage(mapi.PrivateFIDInbox, msg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	eid := mustCreateMessage(t, s, mapi.PrivateFIDInbox, msg)
 	if eid == 0 {
 		t.Fatal("CreateMessage returned eid 0")
 	}
 
-	// get fails the test on a property-read error and returns the values.
-	get := func(pv mapi.PropertyValues, err error) mapi.PropertyValues {
-		t.Helper()
-		if err != nil {
-			t.Fatal(err)
-		}
-		return pv
-	}
-
 	// Top-level properties, including the offloaded body, round-trip.
-	gm := asMap(get(s.GetMessageProperties(eid)))
-	if gm[mapi.PrSubject] != "deneme konusu" {
-		t.Errorf("subject = %v", gm[mapi.PrSubject])
-	}
-	if gm[mapi.PrBody] != string(bodyText) {
-		t.Error("body did not round-trip through the content offload")
-	}
-	if gm[mapi.PrImportance] != int32(mapi.ImportanceHigh) {
-		t.Errorf("importance = %v", gm[mapi.PrImportance])
-	}
+	gm := messageProps(t, s, eid)
+	wantEq(t, "subject", gm[mapi.PrSubject], any("deneme konusu"))
+	wantEq(t, "body through the content offload", gm[mapi.PrBody], any(string(bodyText)))
+	wantEq(t, "importance", gm[mapi.PrImportance], any(int32(mapi.ImportanceHigh)))
 
-	// The denormalized message row carries the hot columns.
+	wantMessageRow(t, s, eid, int64(len(bodyText)))
+	wantRecipientBags(t, s, eid)
+	wantAttachmentPayload(t, s, eid, attachData)
+
+	// The time-sort index recorded the received (delivery) time.
+	var rcv int64
+	mustScan(t, s.objdb.QueryRow(`SELECT rcvtime FROM msgtime_index WHERE message_id=?`, eid), &rcv)
+	wantEq(t, "rcvtime", uint64(rcv), deliveredNT)
+}
+
+// messageProps, recipientProps and attachmentProps read one object's property
+// bag as a map, failing the test on a read error.
+func messageProps(t *testing.T, s *Store, messageID int64, tags ...mapi.PropTag) map[mapi.PropTag]any {
+	t.Helper()
+	pv, err := s.GetMessageProperties(messageID, tags...)
+	mustNoErr(t, "read message properties", err)
+	return asMap(pv)
+}
+
+func folderProps(t *testing.T, s *Store, folderID int64, tags ...mapi.PropTag) map[mapi.PropTag]any {
+	t.Helper()
+	pv, err := s.GetFolderProperties(folderID, tags...)
+	mustNoErr(t, "read folder properties", err)
+	return asMap(pv)
+}
+
+func recipientProps(t *testing.T, s *Store, recipientID int64) map[mapi.PropTag]any {
+	t.Helper()
+	pv, err := s.GetRecipientProperties(recipientID)
+	mustNoErr(t, "read recipient properties", err)
+	return asMap(pv)
+}
+
+func attachmentProps(t *testing.T, s *Store, attachmentID int64) map[mapi.PropTag]any {
+	t.Helper()
+	pv, err := s.GetAttachmentProperties(attachmentID)
+	mustNoErr(t, "read attachment properties", err)
+	return asMap(pv)
+}
+
+// wantMessageRow checks the denormalized message row carries the hot columns.
+func wantMessageRow(t *testing.T, s *Store, eid, bodyLen int64) {
+	t.Helper()
 	var (
 		parentFID, msgSize int64
 		mid                string
 		readSt             int
 	)
-	if err := s.objdb.QueryRow(
-		`SELECT parent_fid, message_size, mid_string, read_state FROM messages WHERE message_id=?`, eid).
-		Scan(&parentFID, &msgSize, &mid, &readSt); err != nil {
-		t.Fatal(err)
+	mustScan(t, s.objdb.QueryRow(
+		`SELECT parent_fid, message_size, mid_string, read_state FROM messages WHERE message_id=?`, eid),
+		&parentFID, &msgSize, &mid, &readSt)
+	wantEq(t, "parent_fid", parentFID, int64(mapi.PrivateFIDInbox))
+	wantEq(t, "mid_string", mid, midString(uint64(eid)))
+	if msgSize <= bodyLen {
+		t.Errorf("message_size = %d, want > body length %d", msgSize, bodyLen)
 	}
-	if parentFID != mapi.PrivateFIDInbox {
-		t.Errorf("parent_fid = %d, want %d", parentFID, mapi.PrivateFIDInbox)
-	}
-	if mid != midString(uint64(eid)) {
-		t.Errorf("mid_string = %q, want %q", mid, midString(uint64(eid)))
-	}
-	if msgSize <= int64(len(bodyText)) {
-		t.Errorf("message_size = %d, want > body length %d", msgSize, len(bodyText))
-	}
-	if readSt != 0 {
-		t.Errorf("read_state = %d, want 0 (delivered unread)", readSt)
-	}
+	wantEq(t, "read_state (delivered unread)", readSt, 0)
+}
 
-	// Two recipients, carrying their type and address.
+// wantRecipientBags checks both recipients persisted with their type and
+// address.
+func wantRecipientBags(t *testing.T, s *Store, eid int64) {
+	t.Helper()
 	rids := childIDs(t, s, `SELECT recipient_id FROM recipients WHERE message_id=? ORDER BY recipient_id`, eid)
 	if len(rids) != 2 {
 		t.Fatalf("recipient count = %d, want 2", len(rids))
 	}
-	r0 := asMap(get(s.GetRecipientProperties(rids[0])))
-	if r0[mapi.PrRecipientType] != int32(mapi.RecipTo) || r0[mapi.PrSmtpAddress] != "bir@example.test" {
-		t.Errorf("recipient 0 = %#v", r0)
-	}
-	r1 := asMap(get(s.GetRecipientProperties(rids[1])))
-	if r1[mapi.PrRecipientType] != int32(mapi.RecipCc) || r1[mapi.PrSmtpAddress] != "iki@example.test" {
-		t.Errorf("recipient 1 = %#v", r1)
-	}
+	r0 := recipientProps(t, s, rids[0])
+	wantEq(t, "recipient 0 type", r0[mapi.PrRecipientType], any(int32(mapi.RecipTo)))
+	wantEq(t, "recipient 0 address", r0[mapi.PrSmtpAddress], any("bir@example.test"))
+	r1 := recipientProps(t, s, rids[1])
+	wantEq(t, "recipient 1 type", r1[mapi.PrRecipientType], any(int32(mapi.RecipCc)))
+	wantEq(t, "recipient 1 address", r1[mapi.PrSmtpAddress], any("iki@example.test"))
+}
 
-	// One attachment, with its payload reloaded from the content file.
+// wantAttachmentPayload checks the single attachment and its payload reloaded
+// from the content file.
+func wantAttachmentPayload(t *testing.T, s *Store, eid int64, attachData []byte) {
+	t.Helper()
 	aids := childIDs(t, s, `SELECT attachment_id FROM attachments WHERE message_id=? ORDER BY attachment_id`, eid)
 	if len(aids) != 1 {
 		t.Fatalf("attachment count = %d, want 1", len(aids))
 	}
-	ap := asMap(get(s.GetAttachmentProperties(aids[0])))
-	if ap[mapi.PrAttachLongFilename] != "rapor.pdf" {
-		t.Errorf("attachment filename = %v", ap[mapi.PrAttachLongFilename])
-	}
-	data, ok := ap[mapi.PrAttachDataBin].([]byte)
-	if !ok || !bytes.Equal(data, attachData) {
+	ap := attachmentProps(t, s, aids[0])
+	wantEq(t, "attachment filename", ap[mapi.PrAttachLongFilename], any("rapor.pdf"))
+	data, _ := ap[mapi.PrAttachDataBin].([]byte)
+	if !bytes.Equal(data, attachData) {
 		t.Error("attachment payload did not round-trip through the content offload")
-	}
-
-	// The time-sort index recorded the received (delivery) time.
-	var rcv int64
-	if err := s.objdb.QueryRow(`SELECT rcvtime FROM msgtime_index WHERE message_id=?`, eid).Scan(&rcv); err != nil {
-		t.Fatal(err)
-	}
-	if uint64(rcv) != deliveredNT {
-		t.Errorf("rcvtime = %d, want %d", rcv, deliveredNT)
 	}
 }

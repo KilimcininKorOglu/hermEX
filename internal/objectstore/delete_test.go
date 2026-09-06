@@ -17,61 +17,30 @@ func TestDeleteMessage(t *testing.T) {
 
 	raw := []byte("From: a@example.test\r\nTo: b@example.test\r\nSubject: sil\r\n" +
 		"Date: Wed, 15 Nov 2023 10:13:20 +0000\r\n\r\ngövde.\r\n")
-	info, err := s.AppendMessage(mapi.PrivateFIDInbox, raw, time.Unix(1700000000, 0), 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	info := mustAppendMessage(t, s, mapi.PrivateFIDInbox, raw, time.Unix(1700000000, 0), 0)
 	mid := midString(uint64(info.ID))
 
 	// Precondition: object, index row, and eml all exist.
-	if countRows(t, s, `SELECT COUNT(*) FROM messages WHERE message_id=?`, info.ID) != 1 {
-		t.Fatal("object message missing before delete")
-	}
+	wantRows(t, s, "object rows before delete", 1, `SELECT COUNT(*) FROM messages WHERE message_id=?`, info.ID)
 	if _, err := os.Stat(s.emlPath(mid)); err != nil {
 		t.Fatalf("eml missing before delete: %v", err)
 	}
 
-	if err := s.DeleteMessage(mapi.PrivateFIDInbox, info.UID); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "delete message", s.DeleteMessage(mapi.PrivateFIDInbox, info.UID))
 
 	// The object and its cascaded children are gone.
-	if countRows(t, s, `SELECT COUNT(*) FROM messages WHERE message_id=?`, info.ID) != 0 {
-		t.Error("object message survived delete")
-	}
-	if countRows(t, s, `SELECT COUNT(*) FROM message_properties WHERE message_id=?`, info.ID) != 0 {
-		t.Error("message properties survived delete (cascade failed)")
-	}
-	if countRows(t, s, `SELECT COUNT(*) FROM recipients WHERE message_id=?`, info.ID) != 0 {
-		t.Error("recipients survived delete (cascade failed)")
-	}
+	wantRows(t, s, "object rows after delete", 0, `SELECT COUNT(*) FROM messages WHERE message_id=?`, info.ID)
+	wantRows(t, s, "message properties after delete (cascade)", 0, `SELECT COUNT(*) FROM message_properties WHERE message_id=?`, info.ID)
+	wantRows(t, s, "recipients after delete (cascade)", 0, `SELECT COUNT(*) FROM recipients WHERE message_id=?`, info.ID)
 
 	// The index row, mapping, and eml cache are gone.
-	var idxCount int
-	if err := s.idxdb.QueryRow(`SELECT COUNT(*) FROM messages WHERE message_id=?`, info.ID).Scan(&idxCount); err != nil {
-		t.Fatal(err)
-	}
-	if idxCount != 0 {
-		t.Error("index row survived delete")
-	}
-	var mapCount int
-	if err := s.idxdb.QueryRow(`SELECT COUNT(*) FROM mapping WHERE message_id=?`, info.ID).Scan(&mapCount); err != nil {
-		t.Fatal(err)
-	}
-	if mapCount != 0 {
-		t.Error("mapping row survived delete")
-	}
+	wantIdxRows(t, s, "index rows after delete", 0, `SELECT COUNT(*) FROM messages WHERE message_id=?`, info.ID)
+	wantIdxRows(t, s, "mapping rows after delete", 0, `SELECT COUNT(*) FROM mapping WHERE message_id=?`, info.ID)
 	if _, err := os.Stat(s.emlPath(mid)); !os.IsNotExist(err) {
 		t.Errorf("eml cache survived delete: stat err = %v", err)
 	}
 
-	list, err := s.ListMessages(mapi.PrivateFIDInbox)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list) != 0 {
-		t.Errorf("folder lists %d messages after delete, want 0", len(list))
-	}
+	wantEq(t, "folder message count after delete", len(mustListMessages(t, s, mapi.PrivateFIDInbox)), 0)
 
 	// A repeat delete reports ErrNotFound.
 	if err := s.DeleteMessage(mapi.PrivateFIDInbox, info.UID); !errors.Is(err, ErrNotFound) {

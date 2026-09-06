@@ -12,43 +12,26 @@ import (
 func TestRunRulesInSweepsAnotherFolder(t *testing.T) {
 	s := openSeededStore(t)
 	inbox := int64(mapi.PrivateFIDInbox)
-	archive, err := s.CreateFolder(nil, "Archive")
-	if err != nil {
-		t.Fatal(err)
-	}
-	filed, err := s.CreateFolder(nil, "Filed")
-	if err != nil {
-		t.Fatal(err)
-	}
+	archive := mustCreateFolder(t, s, nil, "Archive")
+	filed := mustCreateFolder(t, s, nil, "Filed")
 	deliverTo(t, s, archive, ruleMsg("Project update", "lead@acme.com", ""))
 
-	if _, err := s.AddRule(Rule{
+	mustAddRule(t, s, Rule{
 		FolderID: inbox, Name: "file projects", State: mapi.RuleStateEnabled,
 		Condition: RuleSubjectContains("project"),
 		Actions:   mapi.RuleActions{Blocks: []mapi.ActionBlock{RuleMoveAction(filed)}},
-	}); err != nil {
-		t.Fatal(err)
-	}
+	})
 
 	// Running over the Inbox touches nothing: the message is not there.
-	if res, err := s.RunRules(inbox, 0); err != nil {
-		t.Fatal(err)
-	} else if res.Affected != 0 {
-		t.Fatalf("inbox run affected %d messages, want 0", res.Affected)
-	}
+	res, err := s.RunRules(inbox, 0)
+	mustNoErr(t, "run rules", err)
+	wantEq(t, "messages the inbox run affected", res.Affected, 0)
 
-	res, err := s.RunRulesIn(RunRulesOptions{RuleFolderID: inbox, TargetFolderID: archive}, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.Evaluated != 1 || res.Affected != 1 {
-		t.Fatalf("archive run evaluated %d affected %d, want 1 and 1", res.Evaluated, res.Affected)
-	}
-	if msgs, err := s.ListMessages(filed); err != nil {
-		t.Fatal(err)
-	} else if len(msgs) != 1 {
-		t.Errorf("Filed holds %d messages, want the swept one", len(msgs))
-	}
+	res, err = s.RunRulesIn(RunRulesOptions{RuleFolderID: inbox, TargetFolderID: archive}, 0)
+	mustNoErr(t, "run rules in", err)
+	wantEq(t, "archive run evaluated", res.Evaluated, 1)
+	wantEq(t, "archive run affected", res.Affected, 1)
+	wantEq(t, "messages in Filed", len(mustListMessages(t, s, filed)), 1)
 }
 
 // TestRunRulesInRunsOnlyTheNamedRule is the "run selected" case. A user who fixes

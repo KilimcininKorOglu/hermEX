@@ -3,7 +3,6 @@ package objectstore
 import (
 	"database/sql"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -24,85 +23,67 @@ func TestMessageListAndFlags(t *testing.T) {
 	d1 := time.Unix(1700000000, 0)
 	d2 := time.Unix(1700000100, 0)
 
-	i1, err := s.AppendMessage(mapi.PrivateFIDInbox, rawMsg("bir"), d1, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	i2, err := s.AppendMessage(mapi.PrivateFIDInbox, rawMsg("iki"), d2, FlagSeen)
-	if err != nil {
-		t.Fatal(err)
-	}
+	i1 := mustAppendMessage(t, s, mapi.PrivateFIDInbox, rawMsg("bir"), d1, 0)
+	i2 := mustAppendMessage(t, s, mapi.PrivateFIDInbox, rawMsg("iki"), d2, FlagSeen)
 
-	// Listing is ordered by UID and decodes flags + internal date.
-	list, err := s.ListMessages(mapi.PrivateFIDInbox)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list) != 2 {
-		t.Fatalf("list len = %d, want 2", len(list))
-	}
-	if list[0].UID != 1 || list[1].UID != 2 {
-		t.Errorf("UIDs = %d,%d, want 1,2", list[0].UID, list[1].UID)
-	}
-	if list[0].Flags != 0 {
-		t.Errorf("msg1 flags = %d, want 0", list[0].Flags)
-	}
-	if list[1].Flags != FlagSeen {
-		t.Errorf("msg2 flags = %d, want FlagSeen", list[1].Flags)
-	}
-	if !list[0].InternalDate.Equal(d1.UTC()) {
-		t.Errorf("msg1 internal date = %v, want %v", list[0].InternalDate, d1.UTC())
-	}
-	if list[0].Size != i1.Size || list[1].Size != i2.Size {
-		t.Errorf("sizes = %d,%d, want %d,%d", list[0].Size, list[1].Size, i1.Size, i2.Size)
-	}
-	// The index surfaces the envelope projections (subject and sender) so a
-	// listing needs no per-message wire-form read.
-	if list[0].Subject != "bir" || list[1].Subject != "iki" {
-		t.Errorf("subjects = %q,%q, want bir,iki", list[0].Subject, list[1].Subject)
-	}
-	if !strings.Contains(list[0].Sender, "a@example.test") {
-		t.Errorf("sender = %q, want it to carry a@example.test", list[0].Sender)
-	}
-	// AppendMessage returns the same projections it indexed.
-	if i1.Subject != "bir" || !strings.Contains(i1.Sender, "a@example.test") {
-		t.Errorf("AppendMessage projections = subject %q, sender %q", i1.Subject, i1.Sender)
-	}
-
-	// Single lookup by UID.
-	m, err := s.MessageByUID(mapi.PrivateFIDInbox, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m.ID != i1.ID {
-		t.Errorf("MessageByUID id = %d, want %d", m.ID, i1.ID)
-	}
-	if _, err := s.MessageByUID(mapi.PrivateFIDInbox, 999); !errors.Is(err, ErrNotFound) {
-		t.Errorf("MessageByUID(missing) err = %v, want ErrNotFound", err)
-	}
-
-	// Set flags, read them back, and confirm the object read_state mirror.
-	if err := s.SetMessageFlags(mapi.PrivateFIDInbox, 1, FlagSeen|FlagFlagged); err != nil {
-		t.Fatal(err)
-	}
-	f, err := s.MessageFlags(mapi.PrivateFIDInbox, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if f != FlagSeen|FlagFlagged {
-		t.Errorf("flags = %d, want FlagSeen|FlagFlagged", f)
-	}
-	var readState int
-	if err := s.objdb.QueryRow(`SELECT read_state FROM messages WHERE message_id=?`, i1.ID).Scan(&readState); err != nil {
-		t.Fatal(err)
-	}
-	if readState != 1 {
-		t.Errorf("object read_state = %d, want 1 (mirrored from \\Seen)", readState)
-	}
+	wantListing(t, s, i1, i2, d1)
+	wantUIDLookup(t, s, i1)
+	wantFlagWriteMirrorsReadState(t, s, i1)
 
 	if err := s.SetMessageFlags(mapi.PrivateFIDInbox, 999, FlagSeen); !errors.Is(err, ErrNotFound) {
 		t.Errorf("SetMessageFlags(missing) err = %v, want ErrNotFound", err)
 	}
+}
+
+// wantListing checks the folder listing is ordered by UID and carries the
+// decoded flags, internal dates, sizes and envelope projections.
+func wantListing(t *testing.T, s *Store, i1, i2 MessageInfo, d1 time.Time) {
+	t.Helper()
+	list := mustListMessages(t, s, mapi.PrivateFIDInbox)
+	if len(list) != 2 {
+		t.Fatalf("list len = %d, want 2", len(list))
+	}
+	wantEq(t, "first UID", list[0].UID, uint32(1))
+	wantEq(t, "second UID", list[1].UID, uint32(2))
+	wantEq(t, "msg1 flags", list[0].Flags, int64(0))
+	wantEq(t, "msg2 flags", list[1].Flags, int64(FlagSeen))
+	if !list[0].InternalDate.Equal(d1.UTC()) {
+		t.Errorf("msg1 internal date = %v, want %v", list[0].InternalDate, d1.UTC())
+	}
+	wantEq(t, "msg1 size", list[0].Size, i1.Size)
+	wantEq(t, "msg2 size", list[1].Size, i2.Size)
+	// The index surfaces the envelope projections (subject and sender) so a
+	// listing needs no per-message wire-form read.
+	wantEq(t, "msg1 subject", list[0].Subject, "bir")
+	wantEq(t, "msg2 subject", list[1].Subject, "iki")
+	wantContains(t, "msg1 sender", list[0].Sender, "a@example.test")
+	// AppendMessage returns the same projections it indexed.
+	wantEq(t, "AppendMessage subject projection", i1.Subject, "bir")
+	wantContains(t, "AppendMessage sender projection", i1.Sender, "a@example.test")
+}
+
+// wantUIDLookup checks the single-message lookup and its ErrNotFound path.
+func wantUIDLookup(t *testing.T, s *Store, i1 MessageInfo) {
+	t.Helper()
+	m, err := s.MessageByUID(mapi.PrivateFIDInbox, 1)
+	mustNoErr(t, "message by uid", err)
+	wantEq(t, "MessageByUID id", m.ID, i1.ID)
+	if _, err := s.MessageByUID(mapi.PrivateFIDInbox, 999); !errors.Is(err, ErrNotFound) {
+		t.Errorf("MessageByUID(missing) err = %v, want ErrNotFound", err)
+	}
+}
+
+// wantFlagWriteMirrorsReadState sets flags, reads them back, and confirms the
+// object store's read_state mirror followed.
+func wantFlagWriteMirrorsReadState(t *testing.T, s *Store, i1 MessageInfo) {
+	t.Helper()
+	mustNoErr(t, "set message flags", s.SetMessageFlags(mapi.PrivateFIDInbox, 1, FlagSeen|FlagFlagged))
+	f, err := s.MessageFlags(mapi.PrivateFIDInbox, 1)
+	mustNoErr(t, "message flags", err)
+	wantEq(t, "flags", f, int64(FlagSeen|FlagFlagged))
+	var readState int
+	mustScan(t, s.objdb.QueryRow(`SELECT read_state FROM messages WHERE message_id=?`, i1.ID), &readState)
+	wantEq(t, `object read_state mirrored from \Seen`, readState, 1)
 }
 
 // TestSetReadStateFeedsContentSync drives the real read-state write path on a

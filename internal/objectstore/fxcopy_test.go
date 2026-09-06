@@ -311,56 +311,26 @@ func reserializeMessageContent(t *testing.T, items []ics.Item) []byte {
 // Outlook-PENDING (producer and parser are both hermex code).
 func TestCopyFolderTopFolder(t *testing.T) {
 	s := openSeededStore(t)
-	parent, err := s.CreateFolder(nil, "CopyFolderParent")
-	if err != nil {
-		t.Fatal(err)
-	}
-	pmid, err := s.CreateMessage(parent, richMsg("parent message"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	sub, err := s.CreateFolder(&parent, "CopyFolderSub")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.CreateMessage(sub, richMsg("sub message")); err != nil {
-		t.Fatal(err)
-	}
+	parent := mustCreateFolder(t, s, nil, "CopyFolderParent")
+	pmid := mustCreateMessage(t, s, parent, richMsg("parent message"))
+	sub := mustCreateFolder(t, s, &parent, "CopyFolderSub")
+	mustCreateMessage(t, s, sub, richMsg("sub message"))
 
 	src, err := s.NewCopyFolderSource(parent, true)
-	if err != nil {
-		t.Fatalf("NewCopyFolderSource: %v", err)
-	}
+	mustNoErr(t, "new copy folder source", err)
 	items := parseCopyItems(t, drainCopy(t, src))
 
-	if n := countMarkers(items, ics.MarkerStartTopFld); n != 1 {
-		t.Errorf("StartTopFld count = %d, want 1", n)
-	}
-	if n := countMarkers(items, ics.MarkerStartSubFld); n != 1 {
-		t.Errorf("StartSubFld count = %d, want 1 (one subfolder)", n)
-	}
-	if n := countMarkers(items, ics.MarkerEndFolder); n != 2 {
-		t.Errorf("EndFolder count = %d, want 2 (topfolder + subfolder)", n)
-	}
-	if n := countMarkers(items, ics.MarkerStartMessage); n != 2 {
-		t.Errorf("StartMessage count = %d, want 2 (one per folder)", n)
-	}
-	if n := countMarkers(items, ics.MarkerEndMessage); n != 2 {
-		t.Errorf("EndMessage count = %d, want 2", n)
-	}
+	wantEq(t, "StartTopFld count", countMarkers(items, ics.MarkerStartTopFld), 1)
+	wantEq(t, "StartSubFld count (one subfolder)", countMarkers(items, ics.MarkerStartSubFld), 1)
+	wantEq(t, "EndFolder count (topfolder + subfolder)", countMarkers(items, ics.MarkerEndFolder), 2)
+	wantEq(t, "StartMessage count (one per folder)", countMarkers(items, ics.MarkerStartMessage), 2)
+	wantEq(t, "EndMessage count", countMarkers(items, ics.MarkerEndMessage), 2)
 
-	want, err := s.OpenMessage(pmid)
-	if err != nil {
-		t.Fatal(err)
-	}
+	want := mustOpenMessage(t, s, pmid)
 	content := reserializeMessageContent(t, firstMessageBody(t, items))
 	dst := openSeededStore(t)
 	id := reconstructMessage(t, dst, int64(mapi.PrivateFIDInbox), content)
-	got, err := dst.OpenMessage(int64(id))
-	if err != nil {
-		t.Fatalf("open reconstructed: %v", err)
-	}
-	assertMessageEqual(t, "CopyFolder", want, got)
+	assertMessageEqual(t, "CopyFolder", want, mustOpenMessage(t, dst, int64(id)))
 }
 
 // TestCopyFolderNoSubfolders checks the subfolders=false path (CopyFolder without

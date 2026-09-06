@@ -3,6 +3,7 @@ package objectstore
 import (
 	"bytes"
 	"database/sql"
+	"fmt"
 	"testing"
 
 	"hermex/internal/ext"
@@ -18,68 +19,54 @@ func TestSeedMailboxFolderTree(t *testing.T) {
 	// Every built-in id (0x01..0x1d) is present: the generic set plus the
 	// spooler-queue search folder.
 	var n int
-	if err := s.objdb.QueryRow(`SELECT COUNT(*) FROM folders`).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	if want := len(builtinFolders) + 1; n != want {
-		t.Errorf("folder count = %d, want %d", n, want)
-	}
+	mustScan(t, s.objdb.QueryRow(`SELECT COUNT(*) FROM folders`), &n)
+	wantEq(t, "folder count", n, len(builtinFolders)+1)
 
-	// The root has no parent; a child points at its parent.
-	var parent sql.NullInt64
-	if err := s.objdb.QueryRow(`SELECT parent_id FROM folders WHERE folder_id=?`, mapi.PrivateFIDRoot).Scan(&parent); err != nil {
-		t.Fatal(err)
-	}
-	if parent.Valid {
-		t.Errorf("root parent = %d, want NULL", parent.Int64)
-	}
-	if err := s.objdb.QueryRow(`SELECT parent_id FROM folders WHERE folder_id=?`, mapi.PrivateFIDInbox).Scan(&parent); err != nil {
-		t.Fatal(err)
-	}
-	if !parent.Valid || parent.Int64 != mapi.PrivateFIDIPMSubtree {
-		t.Errorf("inbox parent = %v, want %#x", parent, mapi.PrivateFIDIPMSubtree)
-	}
+	wantParentage(t, s)
 
 	// Inbox display name and container class.
-	inbox, err := s.GetFolderProperties(mapi.PrivateFIDInbox, mapi.PrDisplayName, mapi.PrContainerClass)
-	if err != nil {
-		t.Fatal(err)
-	}
-	im := asMap(inbox)
-	if im[mapi.PrDisplayName] != "Inbox" {
-		t.Errorf("inbox display name = %v, want Inbox", im[mapi.PrDisplayName])
-	}
-	if im[mapi.PrContainerClass] != mapi.ContainerClassNote {
-		t.Errorf("inbox container class = %v, want %s", im[mapi.PrContainerClass], mapi.ContainerClassNote)
-	}
+	im := folderProps(t, s, mapi.PrivateFIDInbox, mapi.PrDisplayName, mapi.PrContainerClass)
+	wantEq(t, "inbox display name", im[mapi.PrDisplayName], any("Inbox"))
+	wantEq(t, "inbox container class", im[mapi.PrContainerClass], any(mapi.ContainerClassNote))
 
-	// Hidden folders carry PR_ATTR_HIDDEN; visible ones do not.
-	for _, fid := range []int64{mapi.PrivateFIDQuickContacts, mapi.PrivateFIDIMContactList, mapi.PrivateFIDGALContacts, mapi.PrivateFIDConversationActionSettings} {
-		p, err := s.GetFolderProperties(fid, mapi.PrAttrHidden)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(p) != 1 || p[0].Value != true {
-			t.Errorf("folder %#x: PR_ATTR_HIDDEN = %v, want true", fid, p)
-		}
-	}
-	for _, fid := range []int64{mapi.PrivateFIDInbox, mapi.PrivateFIDSentItems, mapi.PrivateFIDCalendar} {
-		p, err := s.GetFolderProperties(fid, mapi.PrAttrHidden)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(p) != 0 {
-			t.Errorf("folder %#x: unexpectedly hidden (%v)", fid, p)
-		}
-	}
+	wantHiddenFlags(t, s)
 
 	// The spooler queue is a search folder with no message range.
 	var isSearch, curEID, maxEID int64
-	if err := s.objdb.QueryRow(`SELECT is_search, cur_eid, max_eid FROM folders WHERE folder_id=?`, mapi.PrivateFIDSpoolerQueue).Scan(&isSearch, &curEID, &maxEID); err != nil {
-		t.Fatal(err)
+	mustScan(t, s.objdb.QueryRow(`SELECT is_search, cur_eid, max_eid FROM folders WHERE folder_id=?`, mapi.PrivateFIDSpoolerQueue),
+		&isSearch, &curEID, &maxEID)
+	wantEq(t, "spooler queue is_search", isSearch, int64(1))
+	wantEq(t, "spooler queue cur_eid", curEID, int64(0))
+	wantEq(t, "spooler queue max_eid", maxEID, int64(0))
+}
+
+// wantParentage checks the root has no parent and a child points at its parent.
+func wantParentage(t *testing.T, s *Store) {
+	t.Helper()
+	var parent sql.NullInt64
+	mustScan(t, s.objdb.QueryRow(`SELECT parent_id FROM folders WHERE folder_id=?`, mapi.PrivateFIDRoot), &parent)
+	if parent.Valid {
+		t.Errorf("root parent = %d, want NULL", parent.Int64)
 	}
-	if isSearch != 1 || curEID != 0 || maxEID != 0 {
-		t.Errorf("spooler queue: is_search=%d cur_eid=%d max_eid=%d, want 1/0/0", isSearch, curEID, maxEID)
+	mustScan(t, s.objdb.QueryRow(`SELECT parent_id FROM folders WHERE folder_id=?`, mapi.PrivateFIDInbox), &parent)
+	if !parent.Valid {
+		t.Fatalf("inbox has no parent, want %#x", mapi.PrivateFIDIPMSubtree)
+	}
+	wantEq(t, "inbox parent", parent.Int64, int64(mapi.PrivateFIDIPMSubtree))
+}
+
+// wantHiddenFlags checks hidden folders carry PR_ATTR_HIDDEN and visible ones
+// do not.
+func wantHiddenFlags(t *testing.T, s *Store) {
+	t.Helper()
+	hidden := []int64{mapi.PrivateFIDQuickContacts, mapi.PrivateFIDIMContactList, mapi.PrivateFIDGALContacts, mapi.PrivateFIDConversationActionSettings}
+	for _, fid := range hidden {
+		p := folderProps(t, s, fid, mapi.PrAttrHidden)
+		wantEq(t, fmt.Sprintf("folder %#x PR_ATTR_HIDDEN", fid), p[mapi.PrAttrHidden], any(true))
+	}
+	for _, fid := range []int64{mapi.PrivateFIDInbox, mapi.PrivateFIDSentItems, mapi.PrivateFIDCalendar} {
+		p := folderProps(t, s, fid, mapi.PrAttrHidden)
+		wantEq(t, fmt.Sprintf("folder %#x PR_ATTR_HIDDEN entries", fid), len(p), 0)
 	}
 }
 
@@ -126,52 +113,50 @@ func TestSeedMailboxChangeKey(t *testing.T) {
 	s := openSeededStore(t)
 
 	guid, err := s.storeGUID()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "store guid", err)
 	var cn uint64
-	if err := s.objdb.QueryRow(`SELECT change_number FROM folders WHERE folder_id=?`, mapi.PrivateFIDInbox).Scan(&cn); err != nil {
-		t.Fatal(err)
-	}
+	mustScan(t, s.objdb.QueryRow(`SELECT change_number FROM folders WHERE folder_id=?`, mapi.PrivateFIDInbox), &cn)
 	gc := mapi.ValueToGC(cn)
 
-	props, err := s.GetFolderProperties(mapi.PrivateFIDInbox, mapi.PrChangeKey, mapi.PrPredecessorChangeList)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pm := asMap(props)
+	pm := folderProps(t, s, mapi.PrivateFIDInbox, mapi.PrChangeKey, mapi.PrPredecessorChangeList)
+	wantChangeKey(t, pm[mapi.PrChangeKey], guid, gc[:])
+	wantPCL(t, pm[mapi.PrPredecessorChangeList], guid, gc[:])
+}
 
-	ckBlob, ok := pm[mapi.PrChangeKey].([]byte)
+// wantChangeKey decodes PR_CHANGE_KEY and checks it is the store replica GUID
+// plus the change number's global counter.
+func wantChangeKey(t *testing.T, v any, guid string, gc []byte) {
+	t.Helper()
+	blob, ok := v.([]byte)
 	if !ok {
-		t.Fatalf("change key missing or wrong type: %T", pm[mapi.PrChangeKey])
+		t.Fatalf("change key missing or wrong type: %T", v)
 	}
-	if len(ckBlob) != 22 { // 16-byte GUID + 6-byte global counter
-		t.Errorf("change key length = %d, want 22", len(ckBlob))
+	wantEq(t, "change key length (16-byte GUID + 6-byte global counter)", len(blob), 22)
+	xid, err := ext.NewPull(blob, propExtFlags).XID(len(blob))
+	mustNoErr(t, "decode change key", err)
+	wantEq(t, "change key GUID", xid.GUID.String(), guid)
+	if !bytes.Equal(xid.LocalID, gc) {
+		t.Errorf("change key local id = %x, want %x", xid.LocalID, gc)
 	}
-	xid, err := ext.NewPull(ckBlob, propExtFlags).XID(len(ckBlob))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if xid.GUID.String() != guid {
-		t.Errorf("change key GUID = %s, want %s", xid.GUID.String(), guid)
-	}
-	if !bytes.Equal(xid.LocalID, gc[:]) {
-		t.Errorf("change key local id = %x, want %x", xid.LocalID, gc[:])
-	}
+}
 
-	pclBlob, ok := pm[mapi.PrPredecessorChangeList].([]byte)
+// wantPCL decodes PR_PREDECESSOR_CHANGE_LIST and checks it holds the one XID
+// the change key carries.
+func wantPCL(t *testing.T, v any, guid string, gc []byte) {
+	t.Helper()
+	blob, ok := v.([]byte)
 	if !ok {
-		t.Fatalf("PCL missing or wrong type: %T", pm[mapi.PrPredecessorChangeList])
+		t.Fatalf("PCL missing or wrong type: %T", v)
 	}
-	if len(pclBlob) != 23 { // one size byte + the 22-byte XID
-		t.Errorf("PCL length = %d, want 23", len(pclBlob))
+	wantEq(t, "PCL length (one size byte + the 22-byte XID)", len(blob), 23)
+	xids, err := ext.NewPull(blob, propExtFlags).PCL()
+	mustNoErr(t, "decode PCL", err)
+	if len(xids) != 1 {
+		t.Fatalf("PCL holds %d XIDs, want 1", len(xids))
 	}
-	xids, err := ext.NewPull(pclBlob, propExtFlags).PCL()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(xids) != 1 || xids[0].GUID.String() != guid || !bytes.Equal(xids[0].LocalID, gc[:]) {
-		t.Errorf("PCL = %+v, want one XID matching the change key", xids)
+	wantEq(t, "PCL XID GUID", xids[0].GUID.String(), guid)
+	if !bytes.Equal(xids[0].LocalID, gc) {
+		t.Errorf("PCL XID local id = %x, want %x", xids[0].LocalID, gc)
 	}
 }
 

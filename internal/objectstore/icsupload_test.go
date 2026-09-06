@@ -133,59 +133,107 @@ func importOne(t *testing.T, s *Store, folderID int64, mid uint64, flags uint8, 
 // reconstructed message ids.
 func uploadDownloadStream(t *testing.T, dst *Store, folderID int64, items []ics.Item, chunk int) []uint64 {
 	t.Helper()
+	r := &streamReplay{t: t, items: items}
 	var mids []uint64
-	for i := 0; i < len(items); {
-		if !items[i].IsMarker || items[i].Marker != ics.MarkerIncrSyncChg {
-			i++
-			continue
-		}
-		i++ // past INCRSYNCCHG
-		var header mapi.PropertyValues
-		for i < len(items) && (!items[i].IsMarker || items[i].Marker != ics.MarkerIncrSyncMessage) {
-			if items[i].IsMarker {
-				t.Fatalf("unexpected marker %#x in change header", items[i].Marker)
-			}
-			header = append(header, mapi.TaggedPropVal{Tag: items[i].Prop.Tag, Value: items[i].Prop.Value})
-			i++
-		}
-		if i >= len(items) {
-			t.Fatal("change header not terminated by INCRSYNCMESSAGE")
-		}
-		i++ // past INCRSYNCMESSAGE
-		var body ics.Producer
-		for i < len(items) && !sectionBoundary(items[i]) {
-			if items[i].IsMarker {
-				body.WriteMarker(items[i].Marker)
-			} else if err := body.WriteProp(*items[i].Prop); err != nil {
-				t.Fatalf("re-encode body prop: %v", err)
-			}
-			i++
-		}
-		var flags uint8
-		if v, ok := header.Get(mapi.PrAssociated); ok {
-			if b, _ := v.(bool); b {
-				flags |= ImportFlagAssociated
-			}
-		}
-		um, err := dst.ImportMessageChange(folderID, flags, header)
-		if err != nil {
-			t.Fatalf("ImportMessageChange: %v", err)
-		}
-		col := NewMessageCollector(um)
-		raw := drainProducer(&body)
-		for off := 0; off < len(raw); off += chunk {
-			end := min(off+chunk, len(raw))
-			if err := col.PutBuffer(raw[off:end]); err != nil {
-				t.Fatalf("PutBuffer: %v", err)
-			}
-		}
-		id, err := um.Commit()
-		if err != nil {
-			t.Fatalf("Commit: %v", err)
-		}
-		mids = append(mids, id)
+	for r.seekChange() {
+		header := r.readHeader()
+		raw := r.readBody()
+		mids = append(mids, uploadOneChange(t, dst, folderID, header, raw, chunk))
 	}
 	return mids
+}
+
+// streamReplay walks a download stream change by change.
+type streamReplay struct {
+	t     *testing.T
+	items []ics.Item
+	i     int
+}
+
+// seekChange advances to the next INCRSYNCCHG and consumes it, reporting false
+// at the end of the stream.
+func (r *streamReplay) seekChange() bool {
+	for ; r.i < len(r.items); r.i++ {
+		if r.items[r.i].IsMarker && r.items[r.i].Marker == ics.MarkerIncrSyncChg {
+			r.i++ // past INCRSYNCCHG
+			return true
+		}
+	}
+	return false
+}
+
+// readHeader collects the change header up to INCRSYNCMESSAGE, which it
+// consumes.
+func (r *streamReplay) readHeader() mapi.PropertyValues {
+	r.t.Helper()
+	var header mapi.PropertyValues
+	for r.i < len(r.items) && !isMarker(r.items[r.i], ics.MarkerIncrSyncMessage) {
+		if r.items[r.i].IsMarker {
+			r.t.Fatalf("unexpected marker %#x in change header", r.items[r.i].Marker)
+		}
+		header = append(header, mapi.TaggedPropVal{Tag: r.items[r.i].Prop.Tag, Value: r.items[r.i].Prop.Value})
+		r.i++
+	}
+	if r.i >= len(r.items) {
+		r.t.Fatal("change header not terminated by INCRSYNCMESSAGE")
+	}
+	r.i++ // past INCRSYNCMESSAGE
+	return header
+}
+
+// readBody re-frames the message body up to the next section boundary, with its
+// markers and properties unchanged.
+func (r *streamReplay) readBody() []byte {
+	r.t.Helper()
+	var body ics.Producer
+	for r.i < len(r.items) && !sectionBoundary(r.items[r.i]) {
+		if r.items[r.i].IsMarker {
+			body.WriteMarker(r.items[r.i].Marker)
+		} else if err := body.WriteProp(*r.items[r.i].Prop); err != nil {
+			r.t.Fatalf("re-encode body prop: %v", err)
+		}
+		r.i++
+	}
+	return drainProducer(&body)
+}
+
+// isMarker reports whether an item is the given marker.
+func isMarker(it ics.Item, marker uint32) bool {
+	return it.IsMarker && it.Marker == marker
+}
+
+// uploadOneChange imports one reconstructed change, feeding its body to the
+// collector in fixed-size chunks, and returns the committed message id.
+func uploadOneChange(t *testing.T, dst *Store, folderID int64, header mapi.PropertyValues, raw []byte, chunk int) uint64 {
+	t.Helper()
+	um, err := dst.ImportMessageChange(folderID, importFlagsFor(header), header)
+	if err != nil {
+		t.Fatalf("ImportMessageChange: %v", err)
+	}
+	col := NewMessageCollector(um)
+	for off := 0; off < len(raw); off += chunk {
+		end := min(off+chunk, len(raw))
+		if err := col.PutBuffer(raw[off:end]); err != nil {
+			t.Fatalf("PutBuffer: %v", err)
+		}
+	}
+	id, err := um.Commit()
+	if err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	return id
+}
+
+// importFlagsFor derives the import flags a change header asks for.
+func importFlagsFor(header mapi.PropertyValues) uint8 {
+	v, ok := header.Get(mapi.PrAssociated)
+	if !ok {
+		return 0
+	}
+	if b, _ := v.(bool); b {
+		return ImportFlagAssociated
+	}
+	return 0
 }
 
 // sectionBoundary reports the markers that end a message body in a download
@@ -270,34 +318,20 @@ func assertMessageEqual(t *testing.T, ctx string, want, got *oxcmail.Message) {
 func TestImportMessageFullLoop(t *testing.T) {
 	s := openSeededStore(t)
 	fld := int64(mapi.PrivateFIDContacts)
-	m1, err := s.CreateMessage(fld, richMsg("first"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	m2, err := s.CreateMessage(fld, richMsg("second"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	m1 := mustCreateMessage(t, s, fld, richMsg("first"))
+	m2 := mustCreateMessage(t, s, fld, richMsg("second"))
 
 	orig := map[uint64]*oxcmail.Message{}
 	for _, mid := range []int64{m1, m2} {
-		msg, err := s.OpenMessage(mid)
-		if err != nil {
-			t.Fatal(err)
-		}
-		orig[uint64(mid)] = msg
+		orig[uint64(mid)] = mustOpenMessage(t, s, mid)
 	}
 
 	dc, err := s.NewContentDownload(fld, downloadState(t, s), SyncNormal, 0, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "new content download", err)
 	items := drainDownload(t, dc, 64)
 
 	for _, mid := range []int64{m1, m2} {
-		if err := s.DeleteObject(mid); err != nil {
-			t.Fatal(err)
-		}
+		mustNoErr(t, "delete object", s.DeleteObject(mid))
 	}
 
 	mids := uploadDownloadStream(t, s, fld, items, 16)
@@ -309,11 +343,7 @@ func TestImportMessageFullLoop(t *testing.T) {
 		if !ok {
 			t.Fatalf("reconstructed unexpected mid %#x", mid)
 		}
-		got, err := s.OpenMessage(int64(mid))
-		if err != nil {
-			t.Fatalf("open reconstructed %#x: %v", mid, err)
-		}
-		assertMessageEqual(t, fmt.Sprintf("mid %#x", mid), want, got)
+		assertMessageEqual(t, fmt.Sprintf("mid %#x", mid), want, mustOpenMessage(t, s, int64(mid)))
 	}
 }
 
@@ -324,44 +354,25 @@ func TestImportMessageFullLoop(t *testing.T) {
 func TestImportMessageAssociatedRoundTrip(t *testing.T) {
 	s := openSeededStore(t)
 	fld := int64(mapi.PrivateFIDContacts)
-	mid, err := s.CreateMessage(fld, richMsg("fai"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.objdb.Exec(`UPDATE messages SET is_associated=1 WHERE message_id=?`, mid); err != nil {
-		t.Fatal(err)
-	}
-	orig, err := s.OpenMessage(mid)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mid := mustCreateMessage(t, s, fld, richMsg("fai"))
+	_, err := s.objdb.Exec(`UPDATE messages SET is_associated=1 WHERE message_id=?`, mid)
+	mustNoErr(t, "mark the message associated", err)
+	orig := mustOpenMessage(t, s, mid)
 
 	dc, err := s.NewContentDownload(fld, downloadState(t, s), SyncAssociated, 0, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "new content download", err)
 	items := drainDownload(t, dc, 64)
 
-	if err := s.DeleteObject(mid); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "delete object", s.DeleteObject(mid))
 	mids := uploadDownloadStream(t, s, fld, items, 16)
 	if len(mids) != 1 || mids[0] != uint64(mid) {
 		t.Fatalf("reconstructed %v, want [%d]", mids, mid)
 	}
 
 	var assoc int
-	if err := s.objdb.QueryRow(`SELECT is_associated FROM messages WHERE message_id=?`, mid).Scan(&assoc); err != nil {
-		t.Fatal(err)
-	}
-	if assoc != 1 {
-		t.Errorf("is_associated = %d after round trip, want 1 (FAI flag lost)", assoc)
-	}
-	got, err := s.OpenMessage(int64(mid))
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertMessageEqual(t, "fai message", orig, got)
+	mustScan(t, s.objdb.QueryRow(`SELECT is_associated FROM messages WHERE message_id=?`, mid), &assoc)
+	wantEq(t, "is_associated after the round trip (the FAI flag)", assoc, 1)
+	assertMessageEqual(t, "fai message", orig, mustOpenMessage(t, s, mid))
 }
 
 // TestImportAdvancesFolderCursor makes the folder-cursor advance load-bearing:
@@ -556,40 +567,24 @@ func TestImportRejectsStateMetaTag(t *testing.T) {
 func TestImportDeletes(t *testing.T) {
 	s := openSeededStore(t)
 	fld := int64(mapi.PrivateFIDContacts)
-	m1, err := s.CreateMessage(fld, richMsg("keep"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	m2, err := s.CreateMessage(fld, richMsg("drop"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	m1 := mustCreateMessage(t, s, fld, richMsg("keep"))
+	m2 := mustCreateMessage(t, s, fld, richMsg("drop"))
 	home, err := s.replicaGUID()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "replica guid", err)
 
 	deleted, err := s.ImportDeletes(fld, [][]byte{sourceKey(home, uint64(m2))})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "import deletes", err)
 	if len(deleted) != 1 || deleted[0] != uint64(m2) {
 		t.Fatalf("deleted = %v, want [%d]", deleted, m2)
 	}
 	if _, err := s.OpenMessage(m2); !errors.Is(err, ErrNotFound) {
 		t.Errorf("deleted message still present (err=%v)", err)
 	}
-	if _, err := s.OpenMessage(m1); err != nil {
-		t.Errorf("kept message vanished: %v", err)
-	}
+	mustOpenMessage(t, s, m1)
 
 	again, err := s.ImportDeletes(fld, [][]byte{sourceKey(home, uint64(m2))})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(again) != 0 {
-		t.Errorf("re-delete of an absent id reported %v, want none", again)
-	}
+	mustNoErr(t, "import deletes", err)
+	wantEq(t, "ids reported by a re-delete of an absent id", len(again), 0)
 }
 
 // TestImportReadStateChanges marks a message read by its source key and asserts the
@@ -600,36 +595,23 @@ func TestImportDeletes(t *testing.T) {
 func TestImportReadStateChanges(t *testing.T) {
 	s := openSeededStore(t)
 	fld := int64(mapi.PrivateFIDContacts)
-	mid, err := s.CreateMessage(fld, richMsg("unread"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mid := mustCreateMessage(t, s, fld, richMsg("unread"))
 	home, err := s.replicaGUID()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "replica guid", err)
 	cn := msgCN(t, s, mid)
 
-	readCNs, err := s.ImportReadStateChanges(fld, []ReadStateChange{
-		{SourceKey: sourceKey(home, uint64(mid)), MarkRead: true},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	readCNs := mustImportReadState(t, s, fld, sourceKey(home, uint64(mid)))
 	if len(readCNs) != 1 {
 		t.Fatalf("read change numbers = %v, want one", readCNs)
 	}
 	var read int
 	var rcn sql.NullInt64
-	if err := s.objdb.QueryRow(`SELECT read_state, read_cn FROM messages WHERE message_id=?`, mid).Scan(&read, &rcn); err != nil {
-		t.Fatal(err)
+	mustScan(t, s.objdb.QueryRow(`SELECT read_state, read_cn FROM messages WHERE message_id=?`, mid), &read, &rcn)
+	wantEq(t, "read_state", read, 1)
+	if !rcn.Valid {
+		t.Fatalf("stored read_cn is NULL, want %d", readCNs[0])
 	}
-	if read != 1 {
-		t.Errorf("read_state = %d, want 1", read)
-	}
-	if !rcn.Valid || uint64(rcn.Int64) != readCNs[0] {
-		t.Errorf("stored read_cn = %v, want %d", rcn, readCNs[0])
-	}
+	wantEq(t, "stored read_cn", uint64(rcn.Int64), readCNs[0])
 
 	seen := ics.NewIDSet(ics.FormIDLoose, nil)
 	seen.AppendRange(homeReplID, 1, cn)
@@ -639,22 +621,22 @@ func TestImportReadStateChanges(t *testing.T) {
 		Seen:     seen,
 		Read:     ics.NewIDSet(ics.FormIDLoose, nil), // read class enabled, the read change unseen
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "get content sync", err)
 	if !slices.Contains(res.ReadMIDs, uint64(mid)) {
 		t.Errorf("read-state change for %#x not reported (read=%v unread=%v)", mid, res.ReadMIDs, res.UnreadMIDs)
 	}
 
-	again, err := s.ImportReadStateChanges(fld, []ReadStateChange{
-		{SourceKey: sourceKey(home, uint64(mid)), MarkRead: true},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(again) != 0 {
-		t.Errorf("re-applying the same read flag reported %v, want none", again)
-	}
+	again := mustImportReadState(t, s, fld, sourceKey(home, uint64(mid)))
+	wantEq(t, "read change numbers from re-applying the same flag", len(again), 0)
+}
+
+// mustImportReadState marks one message read by its source key and returns the
+// read change numbers the import allocated.
+func mustImportReadState(t *testing.T, s *Store, folderID int64, sk []byte) []uint64 {
+	t.Helper()
+	readCNs, err := s.ImportReadStateChanges(folderID, []ReadStateChange{{SourceKey: sk, MarkRead: true}})
+	mustNoErr(t, "import read state changes", err)
+	return readCNs
 }
 
 // hierHeader builds the fixed-order hierarchy-change identity set for a home folder

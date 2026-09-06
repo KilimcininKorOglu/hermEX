@@ -38,26 +38,26 @@ func TestSmimeIdentityRoundTrip(t *testing.T) {
 func TestRecipientCertStore(t *testing.T) {
 	s := openSeededStore(t)
 
-	if err := s.PutRecipientCert("Bob@Hermex.Test", []byte("bob-der")); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.PutRecipientCert("carol@hermex.test", []byte("carol-der")); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "put bob certificate", s.PutRecipientCert("Bob@Hermex.Test", []byte("bob-der")))
+	mustNoErr(t, "put carol certificate", s.PutRecipientCert("carol@hermex.test", []byte("carol-der")))
+
 	der, ok, err := s.GetRecipientCert("bob@hermex.test") // case-insensitive
-	if err != nil || !ok || !bytes.Equal(der, []byte("bob-der")) {
-		t.Fatalf("get bob = %q ok=%v err=%v", der, ok, err)
+	mustNoErr(t, "get bob certificate", err)
+	if !ok || !bytes.Equal(der, []byte("bob-der")) {
+		t.Fatalf("get bob = %q ok=%v", der, ok)
 	}
-	if all, err := s.ListRecipientCerts(); err != nil || len(all) != 2 {
-		t.Fatalf("list = %v (err %v), want 2 entries", all, err)
-	}
-	if err := s.DeleteRecipientCert("bob@hermex.test"); err != nil {
-		t.Fatal(err)
-	}
-	if _, ok, _ := s.GetRecipientCert("bob@hermex.test"); ok {
-		t.Error("bob certificate still present after delete")
-	}
-	if all, _ := s.ListRecipientCerts(); len(all) != 1 {
-		t.Errorf("after delete, list has %d entries, want 1", len(all))
-	}
+	wantEq(t, "certificate count", len(mustListRecipientCerts(t, s)), 2)
+
+	mustNoErr(t, "delete bob certificate", s.DeleteRecipientCert("bob@hermex.test"))
+	_, ok, _ = s.GetRecipientCert("bob@hermex.test")
+	wantEq(t, "bob certificate present after delete", ok, false)
+	wantEq(t, "certificate count after delete", len(mustListRecipientCerts(t, s)), 1)
+}
+
+// mustListRecipientCerts lists the stored recipient certificates.
+func mustListRecipientCerts(t *testing.T, s *Store) map[string][]byte {
+	t.Helper()
+	all, err := s.ListRecipientCerts()
+	mustNoErr(t, "list recipient certificates", err)
+	return all
 }

@@ -60,53 +60,45 @@ func TestHasAttachments(t *testing.T) {
 // deleting a number that no longer exists reports ErrNotFound.
 func TestCreateDeleteAttachmentStableNumbers(t *testing.T) {
 	s := openSeededStore(t)
-	info, err := s.AppendMessage(int64(mapi.PrivateFIDInbox),
+	info := mustAppendMessage(t, s, int64(mapi.PrivateFIDInbox),
 		[]byte("From: a@example.test\r\nSubject: host\r\n\r\nbody"), time.Unix(1700000000, 0), 0)
-	if err != nil {
-		t.Fatal(err)
-	}
 	mid := info.ID
 
-	_, n0, err := s.CreateAttachment(mid, mapi.PropertyValues{{Tag: mapi.PrAttachLongFilename, Value: "a.txt"}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, n1, err := s.CreateAttachment(mid, mapi.PropertyValues{{Tag: mapi.PrAttachLongFilename, Value: "b.txt"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	n0 := mustCreateAttachment(t, s, mid, "a.txt")
+	n1 := mustCreateAttachment(t, s, mid, "b.txt")
 	if n0 != 0 || n1 != 1 {
 		t.Fatalf("attach numbers = %d,%d, want 0,1", n0, n1)
 	}
 
-	if err := s.DeleteAttachment(mid, n0); err != nil {
-		t.Fatal(err)
-	}
-	msg, err := s.OpenMessage(mid)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "delete attachment", s.DeleteAttachment(mid, n0))
+	msg := mustOpenMessage(t, s, mid)
 	if len(msg.Attachments) != 1 {
 		t.Fatalf("after delete: %d attachments, want 1", len(msg.Attachments))
 	}
-	if v, _ := msg.Attachments[0].Props.Get(mapi.PrAttachNum); v != int32(1) {
-		t.Errorf("surviving attach number = %v, want 1 (stable across sibling delete)", v)
-	}
-	if v, _ := msg.Attachments[0].Props.Get(mapi.PrAttachLongFilename); v != "b.txt" {
-		t.Errorf("surviving attachment = %v, want b.txt", v)
-	}
+	num, _ := msg.Attachments[0].Props.Get(mapi.PrAttachNum)
+	wantEq(t, "surviving attach number (stable across sibling delete)", num, any(int32(1)))
+	name, _ := msg.Attachments[0].Props.Get(mapi.PrAttachLongFilename)
+	wantEq(t, "surviving attachment", name, any("b.txt"))
 
 	if err := s.DeleteAttachment(mid, n0); !errors.Is(err, ErrNotFound) {
 		t.Errorf("re-delete of a gone number: err = %v, want ErrNotFound", err)
 	}
 
-	_, n2, err := s.CreateAttachment(mid, nil)
-	if err != nil {
-		t.Fatal(err)
+	n2 := mustCreateAttachment(t, s, mid, "")
+	wantEq(t, "next attach number (continues past max, no reuse of 0)", n2, uint32(2))
+}
+
+// mustCreateAttachment adds one attachment and returns the number it took. An
+// empty name creates the attachment with no properties at all.
+func mustCreateAttachment(t *testing.T, s *Store, messageID int64, name string) uint32 {
+	t.Helper()
+	var props mapi.PropertyValues
+	if name != "" {
+		props = mapi.PropertyValues{{Tag: mapi.PrAttachLongFilename, Value: name}}
 	}
-	if n2 != 2 {
-		t.Errorf("next attach number = %d, want 2 (continues past max, no reuse of 0)", n2)
-	}
+	_, num, err := s.CreateAttachment(messageID, props)
+	mustNoErr(t, "create attachment", err)
+	return num
 }
 
 // TestImportAssignsAttachNumber confirms the import path stamps a stable attach

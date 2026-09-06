@@ -54,41 +54,11 @@ func multipartRaw() []byte {
 func TestConcurrentRegenerationYieldsOneResult(t *testing.T) {
 	seed := openSeededStore(t)
 	dir := seed.Dir()
-	info, err := seed.AppendMessage(mapi.PrivateFIDInbox, multipartRaw(), time.Unix(1700000000, 0), 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	info := mustAppendMessage(t, seed, mapi.PrivateFIDInbox, multipartRaw(), time.Unix(1700000000, 0), 0)
 	mid := midString(uint64(info.ID))
-	if err := os.Remove(seed.emlPath(mid)); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "drop the eml cache", os.Remove(seed.emlPath(mid)))
 
-	const readers = 8
-	results := make([][]byte, readers)
-	var wg sync.WaitGroup
-	start := make(chan struct{})
-	for i := range readers {
-		wg.Go(func() {
-			st, err := Open(dir)
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			defer st.Close()
-			<-start
-			raw, err := st.GetMessageRaw(mapi.PrivateFIDInbox, info.UID)
-			if err != nil {
-				t.Error(err)
-				return
-			}
-			results[i] = raw
-		})
-	}
-	close(start)
-	wg.Wait()
-	if t.Failed() {
-		t.FailNow()
-	}
+	results := concurrentReads(t, dir, info.UID, 8)
 
 	// Every reader must have been served the same message. Independent
 	// regenerations differ in their boundary, so a mismatch here IS the duplicated
@@ -104,19 +74,46 @@ func TestConcurrentRegenerationYieldsOneResult(t *testing.T) {
 
 	// And the recorded size has to describe the bytes on disk, whichever pass won.
 	cached, err := os.ReadFile(seed.emlPath(mid))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "read the cached eml", err)
 	if !bytes.Equal(cached, results[0]) {
 		t.Error("the cached file is not the message the readers were served")
 	}
 	var idxSize int64
-	if err := seed.idxdb.QueryRow(`SELECT size FROM messages WHERE message_id=?`, info.ID).Scan(&idxSize); err != nil {
-		t.Fatal(err)
+	mustScan(t, seed.idxdb.QueryRow(`SELECT size FROM messages WHERE message_id=?`, info.ID), &idxSize)
+	wantEq(t, "index size against the cached bytes (RFC822.SIZE)", idxSize, int64(len(cached)))
+}
+
+// concurrentReads fetches one message's wire form from n independently opened
+// stores over the same directory, exactly as n concurrent requests do, and
+// returns what each reader was served.
+func concurrentReads(t *testing.T, dir string, uid uint32, readers int) [][]byte {
+	t.Helper()
+	results := make([][]byte, readers)
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	for i := range readers {
+		wg.Go(func() {
+			st, err := Open(dir)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			defer st.Close()
+			<-start
+			raw, err := st.GetMessageRaw(mapi.PrivateFIDInbox, uid)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			results[i] = raw
+		})
 	}
-	if idxSize != int64(len(cached)) {
-		t.Errorf("index size %d does not match the %d cached bytes, so RFC822.SIZE lies", idxSize, len(cached))
+	close(start)
+	wg.Wait()
+	if t.Failed() {
+		t.FailNow()
 	}
+	return results
 }
 
 // TestRegenerationGivesEachCallerItsOwnSlice proves the collapsed result is not
@@ -125,22 +122,11 @@ func TestConcurrentRegenerationYieldsOneResult(t *testing.T) {
 // caller that touches its bytes corrupts another's.
 func TestRegenerationGivesEachCallerItsOwnSlice(t *testing.T) {
 	s := openSeededStore(t)
-	info, err := s.AppendMessage(mapi.PrivateFIDInbox, multipartRaw(), time.Unix(1700000000, 0), 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(s.emlPath(midString(uint64(info.ID)))); err != nil {
-		t.Fatal(err)
-	}
-	first, err := s.GetMessageRaw(mapi.PrivateFIDInbox, info.UID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	info := mustAppendMessage(t, s, mapi.PrivateFIDInbox, multipartRaw(), time.Unix(1700000000, 0), 0)
+	mustNoErr(t, "drop the eml cache", os.Remove(s.emlPath(midString(uint64(info.ID)))))
+	first := mustGetMessageRaw(t, s, mapi.PrivateFIDInbox, info.UID)
 	first[0] = 'X'
-	second, err := s.GetMessageRaw(mapi.PrivateFIDInbox, info.UID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	second := mustGetMessageRaw(t, s, mapi.PrivateFIDInbox, info.UID)
 	if second[0] == 'X' {
 		t.Error("a caller's write reached another caller's copy")
 	}

@@ -13,52 +13,31 @@ import (
 func TestUIDFacade(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "mbox")
 	s, err := Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "open store", err)
 
 	// A never-touched folder reports the initial epoch and first UID.
 	uidnext, err := s.UIDNext(mapi.PrivateFIDInbox)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if uidnext != 1 {
-		t.Errorf("initial UIDNEXT = %d, want 1", uidnext)
-	}
+	mustNoErr(t, "uidnext", err)
+	wantEq(t, "initial UIDNEXT", uidnext, uint32(1))
 	validity, err := s.UIDValidity(mapi.PrivateFIDInbox)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if validity == 0 {
-		t.Error("UIDVALIDITY is 0; want a nonzero epoch")
-	}
+	mustNoErr(t, "uidvalidity", err)
+	wantNotEq(t, "UIDVALIDITY epoch", validity, uint32(0))
 
 	// Allocations are monotonic and advance UIDNEXT.
 	u1, err := s.AllocUID(mapi.PrivateFIDInbox)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "alloc uid", err)
 	u2, err := s.AllocUID(mapi.PrivateFIDInbox)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if u1 != 1 || u2 != 2 {
-		t.Errorf("allocated UIDs = %d,%d, want 1,2", u1, u2)
-	}
-	if uidnext, _ = s.UIDNext(mapi.PrivateFIDInbox); uidnext != 3 {
-		t.Errorf("UIDNEXT after two allocations = %d, want 3", uidnext)
-	}
+	mustNoErr(t, "alloc uid", err)
+	wantEq(t, "first allocated UID", u1, uint32(1))
+	wantEq(t, "second allocated UID", u2, uint32(2))
+	uidnext, _ = s.UIDNext(mapi.PrivateFIDInbox)
+	wantEq(t, "UIDNEXT after two allocations", uidnext, uint32(3))
 
 	// UIDVALIDITY is stable across reopen.
-	if err := s.Close(); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "close store", s.Close())
 	s2, err := Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "reopen store", err)
 	defer s2.Close()
-	if v2, _ := s2.UIDValidity(mapi.PrivateFIDInbox); v2 != validity {
-		t.Errorf("UIDVALIDITY changed across reopen: %d -> %d", validity, v2)
-	}
+	v2, _ := s2.UIDValidity(mapi.PrivateFIDInbox)
+	wantEq(t, "UIDVALIDITY across reopen", v2, validity)
 }

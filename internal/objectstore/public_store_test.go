@@ -1,6 +1,7 @@
 package objectstore
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -23,32 +24,11 @@ func TestOpenPublicStoreSeedsHierarchy(t *testing.T) {
 	}
 	defer s.Close()
 
-	// The four structural folders carry the public-store names and parents,
-	// faithful to the reference public store. A private mailbox's 0x09 node is
-	// instead "Top of Information Store", so these names prove the public seed ran.
-	for _, want := range []struct {
-		fid  int
-		name string
-	}{
-		{mapi.PublicFIDRoot, "Root Container"},
-		{mapi.PublicFIDIPMSubtree, "IPM_SUBTREE"},
-		{mapi.PublicFIDNonIPMSubtree, "NON_IPM_SUBTREE"},
-		{mapi.PublicFIDEFormsRegistry, "EFORMS REGISTRY"},
-	} {
-		props, err := s.GetFolderProperties(int64(want.fid), mapi.PrDisplayName)
-		if err != nil {
-			t.Fatalf("read folder %#x: %v", want.fid, err)
-		}
-		if got, _ := stringProp(props, mapi.PrDisplayName); got != want.name {
-			t.Errorf("folder %#x name = %q, want %q", want.fid, got, want.name)
-		}
-	}
+	wantPublicStructuralNames(t, s)
 
 	// It is NOT a private mailbox: the private Inbox id holds no folder here.
 	props, err := s.GetFolderProperties(int64(mapi.PrivateFIDInbox), mapi.PrDisplayName)
-	if err != nil {
-		t.Fatalf("probe private inbox: %v", err)
-	}
+	mustNoErr(t, "probe private inbox", err)
 	if got, ok := stringProp(props, mapi.PrDisplayName); ok {
 		t.Errorf("public store has a private Inbox folder named %q; seed used the wrong hierarchy", got)
 	}
@@ -57,17 +37,12 @@ func TestOpenPublicStoreSeedsHierarchy(t *testing.T) {
 	// (0x09): the new folder takes a user-range id and ListFolders, which walks
 	// the public subtree, enumerates exactly it. Wrong rooting would leave
 	// ListFolders empty.
-	annFID, err := s.CreateFolder(nil, "Announcements")
-	if err != nil {
-		t.Fatal(err)
-	}
+	annFID := mustCreateFolder(t, s, nil, "Announcements")
 	if annFID < int64(mapi.PublicFIDUnassignedStart) {
 		t.Errorf("new folder id = %#x, want >= %#x (user range)", annFID, mapi.PublicFIDUnassignedStart)
 	}
 	folders, err := s.ListFolders()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "list folders", err)
 	if len(folders) != 1 || folders[0].DisplayName != "Announcements" || folders[0].ParentID != nil {
 		t.Fatalf("ListFolders = %+v, want exactly [Announcements] directly under the public IPM subtree", folders)
 	}
@@ -83,11 +58,30 @@ func TestOpenPublicStoreSeedsHierarchy(t *testing.T) {
 		"hello public folder",
 		"",
 	}, "\r\n"))
-	info, err := s.AppendMessage(annFID, raw, time.Unix(1700043200, 0), 0)
-	if err != nil {
-		t.Fatalf("append to public folder: %v", err)
+	info := mustAppendMessage(t, s, annFID, raw, time.Unix(1700043200, 0), 0)
+	wantEq(t, "appended message uid", info.UID, uint32(1))
+	if info.Size <= 0 {
+		t.Errorf("appended message size = %d, want > 0", info.Size)
 	}
-	if info.UID != 1 || info.Size <= 0 {
-		t.Errorf("appended message info = %+v, want uid 1 and size > 0", info)
+}
+
+// wantPublicStructuralNames checks the four structural folders carry the
+// public-store names. A private mailbox's 0x09 node is instead "Top of
+// Information Store", so these names prove the public seed ran.
+func wantPublicStructuralNames(t *testing.T, s *Store) {
+	t.Helper()
+	for _, want := range []struct {
+		fid  int
+		name string
+	}{
+		{mapi.PublicFIDRoot, "Root Container"},
+		{mapi.PublicFIDIPMSubtree, "IPM_SUBTREE"},
+		{mapi.PublicFIDNonIPMSubtree, "NON_IPM_SUBTREE"},
+		{mapi.PublicFIDEFormsRegistry, "EFORMS REGISTRY"},
+	} {
+		props, err := s.GetFolderProperties(int64(want.fid), mapi.PrDisplayName)
+		mustNoErr(t, fmt.Sprintf("read folder %#x", want.fid), err)
+		got, _ := stringProp(props, mapi.PrDisplayName)
+		wantEq(t, fmt.Sprintf("folder %#x name", want.fid), got, want.name)
 	}
 }

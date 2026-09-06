@@ -43,13 +43,8 @@ func TestAppendMessage(t *testing.T) {
 
 	delivered := time.Unix(1700043200, 0)
 
-	info, err := s.AppendMessage(mapi.PrivateFIDInbox, raw, delivered, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.UID != 1 {
-		t.Errorf("uid = %d, want 1", info.UID)
-	}
+	info := mustAppendMessage(t, s, mapi.PrivateFIDInbox, raw, delivered, 0)
+	wantEq(t, "uid", info.UID, uint32(1))
 	if info.Size <= 0 {
 		t.Fatalf("size = %d, want > 0", info.Size)
 	}
@@ -58,72 +53,59 @@ func TestAppendMessage(t *testing.T) {
 	}
 
 	// The object was persisted with one recipient and one attachment.
-	if n := countRows(t, s, `SELECT COUNT(*) FROM recipients WHERE message_id=?`, info.ID); n != 1 {
-		t.Errorf("recipient rows = %d, want 1", n)
-	}
-	if n := countRows(t, s, `SELECT COUNT(*) FROM attachments WHERE message_id=?`, info.ID); n != 1 {
-		t.Errorf("attachment rows = %d, want 1", n)
-	}
+	wantRows(t, s, "recipient rows", 1, `SELECT COUNT(*) FROM recipients WHERE message_id=?`, info.ID)
+	wantRows(t, s, "attachment rows", 1, `SELECT COUNT(*) FROM attachments WHERE message_id=?`, info.ID)
 
-	// The served eml was cached, and its size matches the reported and indexed
-	// size (the RFC822.SIZE invariant: index size == served bytes).
+	wantCachedEMLSize(t, s, info)
+	wantServedContent(t, s, info)
+}
+
+// wantCachedEMLSize proves the served eml was cached and its length matches
+// both the reported and the indexed size (the RFC822.SIZE invariant: index size
+// == served bytes).
+func wantCachedEMLSize(t *testing.T, s *Store, info MessageInfo) {
+	t.Helper()
 	fi, err := os.Stat(s.emlPath(midString(uint64(info.ID))))
 	if err != nil {
 		t.Fatalf("eml cache missing: %v", err)
 	}
-	if fi.Size() != info.Size {
-		t.Errorf("eml file size %d != reported size %d", fi.Size(), info.Size)
-	}
+	wantEq(t, "eml file size", fi.Size(), info.Size)
 	var idxUID, idxSize int64
 	var idxSubject string
-	if err := s.idxdb.QueryRow(
-		`SELECT uid, size, subject FROM messages WHERE message_id=?`, info.ID).
-		Scan(&idxUID, &idxSize, &idxSubject); err != nil {
-		t.Fatal(err)
-	}
-	if idxUID != 1 || idxSize != info.Size {
-		t.Errorf("index uid=%d size=%d, want 1/%d", idxUID, idxSize, info.Size)
-	}
-	if idxSubject != "deneme konusu" {
-		t.Errorf("index subject = %q", idxSubject)
-	}
+	mustScan(t, s.idxdb.QueryRow(`SELECT uid, size, subject FROM messages WHERE message_id=?`, info.ID),
+		&idxUID, &idxSize, &idxSubject)
+	wantEq(t, "index uid", idxUID, int64(1))
+	wantEq(t, "index size", idxSize, info.Size)
+	wantEq(t, "index subject", idxSubject, "deneme konusu")
+}
 
-	// The served form re-imports to the same semantic content as delivered.
+// wantServedContent re-imports the served wire form and checks it carries the
+// same semantic content as delivered.
+func wantServedContent(t *testing.T, s *Store, info MessageInfo) {
+	t.Helper()
 	eml, err := os.ReadFile(s.emlPath(midString(uint64(info.ID))))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "read served eml", err)
 	served, err := oxcmail.Import(eml, oxcmail.Options{Resolver: s.GetNamedPropIDs})
-	if err != nil {
-		t.Fatalf("re-import served eml: %v", err)
-	}
+	mustNoErr(t, "re-import served eml", err)
+
 	sm := asMap(served.Props)
-	if sm[mapi.PrSubject] != "deneme konusu" {
-		t.Errorf("served subject = %v", sm[mapi.PrSubject])
-	}
-	if sm[mapi.PrSentRepresentingSmtpAddress] != "ali@example.test" {
-		t.Errorf("served from = %v", sm[mapi.PrSentRepresentingSmtpAddress])
-	}
+	wantEq(t, "served subject", sm[mapi.PrSubject], any("deneme konusu"))
+	wantEq(t, "served from", sm[mapi.PrSentRepresentingSmtpAddress], any("ali@example.test"))
 	body, _ := sm[mapi.PrBody].(string)
-	if !strings.Contains(body, "deneme mesajıdır") {
-		t.Errorf("served body lost its content: %q", body)
-	}
+	wantContains(t, "served body", body, "deneme mesajıdır")
+
 	if len(served.Recipients) != 1 {
 		t.Fatalf("served recipients = %d, want 1", len(served.Recipients))
 	}
-	if a := asMap(served.Recipients[0]); a[mapi.PrSmtpAddress] != "ayse@example.test" {
-		t.Errorf("served recipient = %v", a[mapi.PrSmtpAddress])
-	}
+	wantEq(t, "served recipient", asMap(served.Recipients[0])[mapi.PrSmtpAddress], any("ayse@example.test"))
+
 	if len(served.Attachments) != 1 {
 		t.Fatalf("served attachments = %d, want 1", len(served.Attachments))
 	}
 	att := asMap(served.Attachments[0].Props)
-	if att[mapi.PrAttachLongFilename] != "ek.bin" {
-		t.Errorf("served attachment filename = %v", att[mapi.PrAttachLongFilename])
-	}
-	if data, ok := att[mapi.PrAttachDataBin].([]byte); !ok || string(data) != "hello world" {
-		t.Errorf("served attachment payload = %q", data)
-	}
+	wantEq(t, "served attachment filename", att[mapi.PrAttachLongFilename], any("ek.bin"))
+	data, _ := att[mapi.PrAttachDataBin].([]byte)
+	wantEq(t, "served attachment payload", string(data), "hello world")
 }
 
 // countRows runs a COUNT(*) query against the object store.

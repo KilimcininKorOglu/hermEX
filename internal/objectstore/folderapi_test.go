@@ -31,29 +31,10 @@ func TestListFoldersScope(t *testing.T) {
 	s := openSeededStore(t)
 	folders := folderByName(t, s)
 
-	// Standard mail folders are present under their real built-in names and
-	// sit at the top level (parent is the IPM subtree -> reported as nil).
-	for _, name := range []string{
-		"Inbox", "Drafts", "Outbox", "Sent Items", "Deleted Items", "Junk Email",
-		"Contacts", "Calendar", "Tasks", "Notes", "Journal", "Sync Issues",
-	} {
-		f, ok := folders[name]
-		if !ok {
-			t.Errorf("ListFolders missing %q", name)
-			continue
-		}
-		if f.ParentID != nil {
-			t.Errorf("%q ParentID = %v, want nil (top level)", name, *f.ParentID)
-		}
-		if !f.Subscribed {
-			t.Errorf("%q Subscribed = false, want true by default", name)
-		}
-	}
+	wantTopLevelFolders(t, folders)
 
 	// Inbox carries its fixed built-in id.
-	if f := folders["Inbox"]; f.ID != int64(mapi.PrivateFIDInbox) {
-		t.Errorf("Inbox id = %d, want %d", f.ID, mapi.PrivateFIDInbox)
-	}
+	wantEq(t, "Inbox id", folders["Inbox"].ID, int64(mapi.PrivateFIDInbox))
 
 	// A deeper folder keeps its real parent rather than collapsing to nil.
 	if c, ok := folders["Conflicts"]; !ok {
@@ -75,46 +56,70 @@ func TestListFoldersScope(t *testing.T) {
 	}
 }
 
+// wantTopLevelFolders checks the standard mail folders are present under their
+// real built-in names, sit at the top level (their parent is the IPM subtree, so
+// it is reported as nil), and are subscribed by default.
+func wantTopLevelFolders(t *testing.T, folders map[string]FolderInfo) {
+	t.Helper()
+	for _, name := range []string{
+		"Inbox", "Drafts", "Outbox", "Sent Items", "Deleted Items", "Junk Email",
+		"Contacts", "Calendar", "Tasks", "Notes", "Journal", "Sync Issues",
+	} {
+		f, ok := folders[name]
+		if !ok {
+			t.Errorf("ListFolders missing %q", name)
+			continue
+		}
+		wantEq(t, name+" is top level (nil ParentID)", f.ParentID == nil, true)
+		wantEq(t, name+" Subscribed by default", f.Subscribed, true)
+	}
+}
+
 // TestCreateAndFindFolder creates a top-level user folder and a nested one,
 // then resolves both by name and confirms their placement in the tree.
 func TestCreateAndFindFolder(t *testing.T) {
 	s := openSeededStore(t)
 
-	top, err := s.CreateFolder(nil, "Projects")
-	if err != nil {
-		t.Fatal(err)
-	}
+	top := mustCreateFolder(t, s, nil, "Projects")
 	// A user folder id is allocated above the built-in range.
 	if top < int64(mapi.PrivateFIDUnassignedStart) {
 		t.Errorf("user folder id = %d, want >= %d", top, mapi.PrivateFIDUnassignedStart)
 	}
 
 	id, ok, err := s.FolderByName(nil, "Projects")
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "folder by name", err)
 	if !ok || id != top {
 		t.Fatalf("FolderByName(Projects) = (%d,%v), want (%d,true)", id, ok, top)
 	}
-	if _, ok, _ := s.FolderByName(nil, "Nope"); ok {
-		t.Error("FolderByName(Nope) reported found")
-	}
+	_, ok, _ = s.FolderByName(nil, "Nope")
+	wantEq(t, "FolderByName(Nope) found", ok, false)
 
 	// A nested folder reports its real parent.
-	sub, err := s.CreateFolder(&top, "2026")
-	if err != nil {
-		t.Fatal(err)
-	}
+	sub := mustCreateFolder(t, s, &top, "2026")
 	folders := folderByName(t, s)
-	if f, ok := folders["Projects"]; !ok || f.ParentID != nil {
-		t.Errorf("Projects = %+v, want present with nil parent", f)
-	}
-	if f, ok := folders["2026"]; !ok || f.ParentID == nil || *f.ParentID != top {
-		t.Errorf("2026 = %+v, want parent %d", f, top)
-	}
+	wantParent(t, folders, "Projects", nil)
+	wantParent(t, folders, "2026", &top)
 	if id, ok, _ := s.FolderByName(&top, "2026"); !ok || id != sub {
 		t.Errorf("FolderByName(under Projects, 2026) = (%d,%v), want (%d,true)", id, ok, sub)
 	}
+}
+
+// wantParent checks a listed folder is present and reports the expected parent
+// (nil for a top-level folder).
+func wantParent(t *testing.T, folders map[string]FolderInfo, name string, parent *int64) {
+	t.Helper()
+	f, ok := folders[name]
+	if !ok {
+		t.Fatalf("ListFolders missing %q", name)
+	}
+	if parent == nil {
+		wantEq(t, name+" is top level (nil parent)", f.ParentID == nil, true)
+		return
+	}
+	if f.ParentID == nil {
+		t.Fatalf("%s = %+v, want parent %d", name, f, *parent)
+	}
+	wantEq(t, name+" parent", *f.ParentID, *parent)
 }
 
 // TestSiblingFoldersShareName is the regression for the dropped index name
@@ -278,42 +283,25 @@ func TestSetSubscribed(t *testing.T) {
 func TestDeleteFolder(t *testing.T) {
 	s := openSeededStore(t)
 
-	id, err := s.CreateFolder(nil, "Temp")
-	if err != nil {
-		t.Fatal(err)
-	}
+	id := mustCreateFolder(t, s, nil, "Temp")
 	raw := []byte("From: a@example.test\r\nTo: b@example.test\r\nSubject: t\r\n" +
 		"Date: Wed, 15 Nov 2023 10:13:20 +0000\r\n\r\nbody.\r\n")
-	info, err := s.AppendMessage(id, raw, time.Unix(1700000000, 0), 0)
-	if err != nil {
-		t.Fatal(err)
-	}
+	info := mustAppendMessage(t, s, id, raw, time.Unix(1700000000, 0), 0)
 	eml := s.emlPath(midString(uint64(info.ID)))
 	if _, err := os.Stat(eml); err != nil {
 		t.Fatalf("eml missing before delete: %v", err)
 	}
 
-	if err := s.DeleteFolder(id); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "delete folder", s.DeleteFolder(id))
 
-	if countRows(t, s, `SELECT COUNT(*) FROM folders WHERE folder_id=?`, id) != 0 {
-		t.Error("object folder survived delete")
-	}
+	wantRows(t, s, "object folder rows after delete", 0, `SELECT COUNT(*) FROM folders WHERE folder_id=?`, id)
 	assertRecoverable(t, s, info.ID)
-	var idxFolders int
-	if err := s.idxdb.QueryRow(`SELECT COUNT(*) FROM folders WHERE folder_id=?`, id).Scan(&idxFolders); err != nil {
-		t.Fatal(err)
-	}
-	if idxFolders != 0 {
-		t.Error("index folder row survived delete")
-	}
+	wantIdxRows(t, s, "index folder rows after delete", 0, `SELECT COUNT(*) FROM folders WHERE folder_id=?`, id)
 	if _, err := os.Stat(eml); err != nil {
 		t.Errorf("the recoverable message lost its cached eml: %v", err)
 	}
-	if _, ok := folderByName(t, s)["Temp"]; ok {
-		t.Error("deleted folder still listed")
-	}
+	_, listed := folderByName(t, s)["Temp"]
+	wantEq(t, "deleted folder still listed", listed, false)
 	if err := s.DeleteFolder(id); !errors.Is(err, ErrNotFound) {
 		t.Errorf("repeat delete = %v, want ErrNotFound", err)
 	}
@@ -324,13 +312,10 @@ func TestDeleteFolder(t *testing.T) {
 // survives the folder row that used to hold it.
 func assertRecoverable(t *testing.T, s *Store, messageID int64) {
 	t.Helper()
-	if countRows(t, s, `SELECT COUNT(*) FROM messages WHERE message_id=? AND is_deleted=1`, messageID) != 1 {
-		t.Error("the folder's message was destroyed rather than moved to Recoverable Items")
-	}
-	if countRows(t, s, `SELECT COUNT(*) FROM messages WHERE message_id=? AND parent_fid=?`,
-		messageID, int64(mapi.PrivateFIDDeletedItems)) != 1 {
-		t.Error("the recoverable message was not filed under Deleted Items")
-	}
+	wantRows(t, s, "soft-deleted rows (the message must move to Recoverable Items)", 1,
+		`SELECT COUNT(*) FROM messages WHERE message_id=? AND is_deleted=1`, messageID)
+	wantRows(t, s, "rows filed under Deleted Items", 1,
+		`SELECT COUNT(*) FROM messages WHERE message_id=? AND parent_fid=?`, messageID, int64(mapi.PrivateFIDDeletedItems))
 }
 
 // TestBuiltinFolderCannotBeRemovedOrRenamed holds the invariant for every

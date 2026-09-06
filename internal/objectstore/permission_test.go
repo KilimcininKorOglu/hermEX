@@ -42,33 +42,39 @@ func TestListPermissionsTranslatesMemberIDs(t *testing.T) {
 		{"", int(mapi.FrightsFreeBusySimple)}, // anonymous
 		{"alice@test", int(mapi.RightsEditor)},
 	} {
-		if _, err := s.objdb.Exec(
+		_, err := s.objdb.Exec(
 			`INSERT INTO permissions (folder_id, username, permission) VALUES (?, ?, ?)`,
-			fid, r.username, r.perm); err != nil {
-			t.Fatal(err)
-		}
+			fid, r.username, r.perm)
+		mustNoErr(t, "insert permission row", err)
 	}
 
 	m := permByMember(t, s, fid)
 	if len(m) != 3 {
 		t.Fatalf("got %d rows, want 3", len(m))
 	}
-	if e := m[mapi.MemberIDDefault]; e.Name != "default" || e.Rights != mapi.RightsReviewer {
-		t.Errorf("default member = %+v, want id 0/name default/rights 0x%X", e, mapi.RightsReviewer)
-	}
-	if e := m[mapi.MemberIDAnonymous]; e.Name != "anonymous" || e.Rights != mapi.FrightsFreeBusySimple {
-		t.Errorf("anonymous member = %+v, want id -1/name anonymous/rights 0x%X", e, mapi.FrightsFreeBusySimple)
-	}
+	wantEq(t, "default member name", m[mapi.MemberIDDefault].Name, "default")
+	wantEq(t, "default member rights", m[mapi.MemberIDDefault].Rights, mapi.RightsReviewer)
+	wantEq(t, "anonymous member name", m[mapi.MemberIDAnonymous].Name, "anonymous")
+	wantEq(t, "anonymous member rights", m[mapi.MemberIDAnonymous].Rights, uint32(mapi.FrightsFreeBusySimple))
+
 	// The real member's id is its row id, some value that is neither 0 nor -1.
+	real := realMember(m)
+	if real.MemberID <= 0 {
+		t.Errorf("real member id = %d, want a positive row id", real.MemberID)
+	}
+	wantEq(t, "real member name", real.Name, "alice@test")
+	wantEq(t, "real member rights", real.Rights, mapi.RightsEditor)
+}
+
+// realMember returns the entry that is neither Default nor Anonymous.
+func realMember(m map[int64]PermissionEntry) PermissionEntry {
 	var real PermissionEntry
 	for id, e := range m {
 		if id != mapi.MemberIDDefault && id != mapi.MemberIDAnonymous {
 			real = e
 		}
 	}
-	if real.MemberID <= 0 || real.Name != "alice@test" || real.Rights != mapi.RightsEditor {
-		t.Errorf("real member = %+v, want a positive row id/name alice@test/rights 0x%X", real, mapi.RightsEditor)
-	}
+	return real
 }
 
 // TestModifyDefaultAddressesSeededRow guards the bug the central invariant exists to

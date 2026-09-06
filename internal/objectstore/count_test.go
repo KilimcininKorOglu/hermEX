@@ -20,43 +20,36 @@ func TestCountMessages(t *testing.T) {
 	}
 
 	// Empty folder: zero of each.
-	if total, unread, err := s.CountMessages(mapi.PrivateFIDInbox); err != nil {
-		t.Fatal(err)
-	} else if total != 0 || unread != 0 {
-		t.Fatalf("empty folder counts = (%d,%d), want (0,0)", total, unread)
-	}
+	total, unread := mustCountMessages(t, s, mapi.PrivateFIDInbox)
+	wantEq(t, "empty folder total", total, 0)
+	wantEq(t, "empty folder unread", unread, 0)
 
 	// Three messages: two unread, one already seen.
 	d := time.Unix(1700000000, 0)
 	for i, flags := range []int64{0, 0, FlagSeen} {
-		if _, err := s.AppendMessage(mapi.PrivateFIDInbox, raw(string(rune('a'+i))), d, flags); err != nil {
-			t.Fatal(err)
-		}
+		mustAppendMessage(t, s, mapi.PrivateFIDInbox, raw(string(rune('a'+i))), d, flags)
 	}
 
-	total, unread, err := s.CountMessages(mapi.PrivateFIDInbox)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if total != 3 || unread != 2 {
-		t.Errorf("counts = (%d,%d), want (3,2)", total, unread)
-	}
+	total, unread = mustCountMessages(t, s, mapi.PrivateFIDInbox)
+	wantEq(t, "total", total, 3)
+	wantEq(t, "unread", unread, 2)
 
 	// Invariant: counts must match what ListMessages enumerates.
-	list, err := s.ListMessages(mapi.PrivateFIDInbox)
-	if err != nil {
-		t.Fatal(err)
-	}
-	wantUnread := 0
+	list := mustListMessages(t, s, mapi.PrivateFIDInbox)
+	listedUnread := 0
 	for _, m := range list {
 		if m.Flags&FlagSeen == 0 {
-			wantUnread++
+			listedUnread++
 		}
 	}
-	if total != len(list) {
-		t.Errorf("total %d != len(ListMessages) %d", total, len(list))
-	}
-	if unread != wantUnread {
-		t.Errorf("unread %d != ListMessages unread tally %d", unread, wantUnread)
-	}
+	wantEq(t, "total against len(ListMessages)", total, len(list))
+	wantEq(t, "unread against the ListMessages tally", unread, listedUnread)
+}
+
+// mustCountMessages returns a folder's total and unread counters.
+func mustCountMessages(t *testing.T, s *Store, folderID int64) (total, unread int) {
+	t.Helper()
+	total, unread, err := s.CountMessages(folderID)
+	mustNoErr(t, "count messages", err)
+	return total, unread
 }

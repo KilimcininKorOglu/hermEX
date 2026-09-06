@@ -34,42 +34,26 @@ func TestOpenMessage(t *testing.T) {
 			}},
 		},
 	}
-	eid, err := s.CreateMessage(mapi.PrivateFIDInbox, msg)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := s.OpenMessage(eid)
-	if err != nil {
-		t.Fatal(err)
-	}
+	eid := mustCreateMessage(t, s, mapi.PrivateFIDInbox, msg)
+	got := mustOpenMessage(t, s, eid)
 
 	gp := asMap(got.Props)
-	if gp[mapi.PrSubject] != "açık konu" {
-		t.Errorf("subject = %v", gp[mapi.PrSubject])
-	}
-	if gp[mapi.PrBody] != bodyText {
-		t.Error("body did not reload from its content file")
-	}
+	wantEq(t, "subject", gp[mapi.PrSubject], any("açık konu"))
+	wantEq(t, "body reloaded from its content file", gp[mapi.PrBody], any(bodyText))
 
 	if len(got.Recipients) != 2 {
 		t.Fatalf("recipients = %d, want 2", len(got.Recipients))
 	}
-	if asMap(got.Recipients[0])[mapi.PrSmtpAddress] != "to@example.test" {
-		t.Error("recipient 0 lost or reordered")
-	}
-	if asMap(got.Recipients[1])[mapi.PrSmtpAddress] != "cc@example.test" {
-		t.Error("recipient 1 lost or reordered")
-	}
+	wantEq(t, "recipient 0 (insertion order)", asMap(got.Recipients[0])[mapi.PrSmtpAddress], any("to@example.test"))
+	wantEq(t, "recipient 1 (insertion order)", asMap(got.Recipients[1])[mapi.PrSmtpAddress], any("cc@example.test"))
 
 	if len(got.Attachments) != 1 {
 		t.Fatalf("attachments = %d, want 1", len(got.Attachments))
 	}
 	ap := asMap(got.Attachments[0].Props)
-	if ap[mapi.PrAttachLongFilename] != "a.pdf" {
-		t.Errorf("attachment filename = %v", ap[mapi.PrAttachLongFilename])
-	}
-	if data, ok := ap[mapi.PrAttachDataBin].([]byte); !ok || !bytes.Equal(data, attachData) {
+	wantEq(t, "attachment filename", ap[mapi.PrAttachLongFilename], any("a.pdf"))
+	data, _ := ap[mapi.PrAttachDataBin].([]byte)
+	if !bytes.Equal(data, attachData) {
 		t.Error("attachment payload did not reload from its content file")
 	}
 
