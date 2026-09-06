@@ -11,34 +11,40 @@ import (
 // ropCreateFolder handles RopCreateFolder ([MS-OXCFOLD] 2.2.1.1): it creates a new
 // subfolder under the folder identified by the input handle. openExisting and folder
 // comment are parsed but not yet acted on (v1 always creates, never reopens).
-func (s *Session) ropCreateFolder(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+// pullFolderString reads one string in the encoding the request's UseUnicode
+// byte selects. The folder ROPs carry that byte once and every string after it
+// follows the same encoding.
+func pullFolderString(p *ext.Pull, useUnicode uint8) (string, error) {
+	if useUnicode != 0 {
+		return p.Unicode()
+	}
+	return p.String8()
+}
+
+// pullCreateFolderRequest reads a RopCreateFolder request and returns the new
+// folder's name. The output handle index, folder type, OpenExisting flag and
+// reserved field are read to keep the stream framed and then dropped: v1 always
+// creates a generic folder and allocates no handle for it. The comment is read
+// for the same reason, since the store does not model folder comments yet.
+func pullCreateFolderRequest(p *ext.Pull) (name string, ok bool) {
 	_ /* ohindex */, eh := p.Uint8() // output handle index (v1 does not allocate)
 	_ /* ft */, e0 := p.Uint8()      // FolderType
 	uv, e1 := p.Uint8()              // UseUnicode
 	_ /* oe */, e2 := p.Uint8()      // OpenExisting
 	_ /* rs */, e3 := p.Uint32()     // Reserved
 	if eh != nil || e0 != nil || e1 != nil || e2 != nil || e3 != nil {
+		return "", false
+	}
+	name, e5 := pullFolderString(p, uv)
+	_ /* comment */, e6 := pullFolderString(p, uv)
+	return name, e5 == nil && e6 == nil
+}
+
+func (s *Session) ropCreateFolder(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	name, framed := pullCreateFolderRequest(p)
+	if !framed {
 		return false
 	}
-	var name, comment string
-	if uv != 0 {
-		n, e5 := p.Unicode()
-		c, e6 := p.Unicode()
-		if e5 != nil || e6 != nil {
-			return false
-		}
-		name, comment = n, c
-	} else {
-		n, e5 := p.String8()
-		c, e6 := p.String8()
-		if e5 != nil || e6 != nil {
-			return false
-		}
-		name, comment = n, c
-	}
-	// Use comment string but v1 drops it (store doesn't store folder comments yet)
-	_ = comment
-
 	folder, ok := s.openFolder(out, ropCreateFolder, handles, hindex, hindex)
 	if !ok {
 		return true
@@ -101,19 +107,9 @@ func (s *Session) ropMoveFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
 		return false
 	}
-	var newName string
-	if uv != 0 {
-		n, e5 := p.Unicode()
-		if e5 != nil {
-			return false
-		}
-		newName = n
-	} else {
-		n, e5 := p.String8()
-		if e5 != nil {
-			return false
-		}
-		newName = n
+	newName, e5 := pullFolderString(p, uv)
+	if e5 != nil {
+		return false
 	}
 
 	folder, ok := s.openFolder(out, ropMoveFolder, handles, hindex, hindex)
@@ -128,21 +124,9 @@ func (s *Session) ropMoveFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	if s.denyWrite(out, ropMoveFolder, hindex, folder.store, movedFID, mapi.FrightsOwner) {
 		return true
 	}
-	dest := s.get(handleAt(handles, dhindex))
-	var newParent *int64
-	if dest != nil && dest.kind == kindFolder {
-		// A reparent files the folder under a new parent. RenameFolder runs through
-		// the source store, so the new parent must be the same physical mailbox (a
-		// cross-mailbox reparent would collide on well-known ids); the caller then
-		// needs CreateSubfolder on that parent.
-		if dest.store == nil || folder.store.Dir() != dest.store.Dir() {
-			writeErr(out, ropMoveFolder, hindex, ecNotSupported)
-			return true
-		}
-		if s.denyWrite(out, ropMoveFolder, hindex, dest.store, dest.folderID, mapi.FrightsCreateSubfolder) {
-			return true
-		}
-		newParent = &dest.folderID
+	newParent, ok := s.moveFolderParent(out, folder, handles, hindex, dhindex)
+	if !ok {
+		return true
 	}
 	if err := folder.store.RenameFolder(movedFID, newParent, newName); err != nil {
 		writeErr(out, ropMoveFolder, hindex, ecError)
@@ -153,6 +137,57 @@ func (s *Session) ropMoveFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	out.Uint32(ecSuccess)
 	out.Uint8(0) // PartialCompletion
 	return true
+}
+
+// emptyFolderContents soft-deletes every message in the folder and removes every
+// subfolder subtree. The returned flag is the PartialCompletion the response
+// carries: 1 when any single removal failed. An error means the folder could not
+// be enumerated at all, which is a failed ROP rather than a partial one.
+func emptyFolderContents(folder *object) (uint8, error) {
+	var partial uint8
+	msgs, err := folder.store.ListMessages(folder.folderID)
+	if err != nil {
+		return 0, err
+	}
+	for _, m := range msgs {
+		if err := folder.store.SoftDeleteObject(m.ID); err != nil {
+			partial = 1
+		}
+	}
+	children, err := childFolders(folder.store, folder.folderID)
+	if err != nil {
+		return 0, err
+	}
+	for _, c := range children {
+		if err := folder.store.DeleteFolder(c.ID); err != nil {
+			partial = 1
+		}
+	}
+	return partial, nil
+}
+
+// moveFolderParent resolves the destination handle a move reparents under. A nil
+// parent means the request only renames, which is what a destination handle
+// naming something other than a folder asks for.
+//
+// A reparent files the folder under a new parent. RenameFolder runs through the
+// source store, so the new parent must be the same physical mailbox (a
+// cross-mailbox reparent would collide on well-known ids); the caller then needs
+// CreateSubfolder on that parent. ok is false when the response was already
+// written.
+func (s *Session) moveFolderParent(out *ext.Push, folder *object, handles []uint32, hindex, dhindex uint8) (*int64, bool) {
+	dest := s.get(handleAt(handles, dhindex))
+	if dest == nil || dest.kind != kindFolder {
+		return nil, true
+	}
+	if dest.store == nil || folder.store.Dir() != dest.store.Dir() {
+		writeErr(out, ropMoveFolder, hindex, ecNotSupported)
+		return nil, false
+	}
+	if s.denyWrite(out, ropMoveFolder, hindex, dest.store, dest.folderID, mapi.FrightsCreateSubfolder) {
+		return nil, false
+	}
+	return &dest.folderID, true
 }
 
 // ropCopyFolder handles RopCopyFolder ([MS-OXCFOLD] 2.2.1.4): it copies the folder
@@ -169,19 +204,9 @@ func (s *Session) ropCopyFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	if e0 != nil || e1 != nil || e2 != nil || e3 != nil || e4 != nil {
 		return false
 	}
-	var newName string
-	if uv != 0 {
-		n, e5 := p.Unicode()
-		if e5 != nil {
-			return false
-		}
-		newName = n
-	} else {
-		n, e5 := p.String8()
-		if e5 != nil {
-			return false
-		}
-		newName = n
+	newName, e5 := pullFolderString(p, uv)
+	if e5 != nil {
+		return false
 	}
 
 	folder, ok := s.openFolder(out, ropCopyFolder, handles, hindex, hindex)
@@ -190,36 +215,12 @@ func (s *Session) ropCopyFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	}
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	copiedFID := int64(mapi.EID(fid).GCValue())
-	// Copying a folder reads its contents: it requires ReadAny on the folder being
-	// copied (denyWrite gates an arbitrary right, not only writes). For an owner the
-	// authorize check short-circuits.
-	if s.denyWrite(out, ropCopyFolder, hindex, folder.store, copiedFID, mapi.FrightsReadAny) {
-		return true
-	}
-	dest := s.get(handleAt(handles, dhindex))
-	if dest == nil || dest.kind != kindFolder || dest.store == nil {
-		writeErr(out, ropCopyFolder, hindex, ecError)
-		return true
-	}
-	// CopyFolder runs through the source store, so the copy lands under a parent in
-	// the same physical mailbox (a cross-mailbox copy would collide on well-known
-	// ids); creating the new subfolder there needs CreateSubfolder.
-	if folder.store.Dir() != dest.store.Dir() {
-		writeErr(out, ropCopyFolder, hindex, ecNotSupported)
-		return true
-	}
-	if s.denyWrite(out, ropCopyFolder, hindex, dest.store, dest.folderID, mapi.FrightsCreateSubfolder) {
+	dest, ok := s.copyFolderDestination(out, folder, copiedFID, handles, hindex, dhindex)
+	if !ok {
 		return true
 	}
 	if _, err := folder.store.CopyFolder(copiedFID, dest.folderID, newName, wantRecursive != 0); err != nil {
-		switch {
-		case errors.Is(err, objectstore.ErrFolderCycle):
-			writeErr(out, ropCopyFolder, hindex, ecFolderCycle)
-		case errors.Is(err, objectstore.ErrNotFound):
-			writeErr(out, ropCopyFolder, hindex, ecNotFound)
-		default:
-			writeErr(out, ropCopyFolder, hindex, ecError)
-		}
+		writeErr(out, ropCopyFolder, hindex, folderCopyError(err))
 		return true
 	}
 	out.Uint8(ropCopyFolder)
@@ -227,6 +228,44 @@ func (s *Session) ropCopyFolder(p *ext.Pull, out *ext.Push, handles []uint32, hi
 	out.Uint32(ecSuccess)
 	out.Uint8(0) // PartialCompletion
 	return true
+}
+
+// copyFolderDestination gates both sides of a folder copy and resolves the
+// destination parent. ok is false when the response was already written.
+//
+// Copying a folder reads its contents, so it requires ReadAny on the folder
+// being copied (denyWrite gates an arbitrary right, not only writes). The copy
+// runs through the source store, so it lands under a parent in the same physical
+// mailbox (a cross-mailbox copy would collide on well-known ids), and creating
+// the new subfolder there needs CreateSubfolder. For an owner both authorize
+// checks short-circuit.
+func (s *Session) copyFolderDestination(out *ext.Push, folder *object, copiedFID int64, handles []uint32, hindex, dhindex uint8) (*object, bool) {
+	if s.denyWrite(out, ropCopyFolder, hindex, folder.store, copiedFID, mapi.FrightsReadAny) {
+		return nil, false
+	}
+	dest, ok := s.openFolder(out, ropCopyFolder, handles, dhindex, hindex)
+	if !ok {
+		return nil, false
+	}
+	if folder.store.Dir() != dest.store.Dir() {
+		writeErr(out, ropCopyFolder, hindex, ecNotSupported)
+		return nil, false
+	}
+	if s.denyWrite(out, ropCopyFolder, hindex, dest.store, dest.folderID, mapi.FrightsCreateSubfolder) {
+		return nil, false
+	}
+	return dest, true
+}
+
+// folderCopyError maps a store copy failure to its ROP return code.
+func folderCopyError(err error) uint32 {
+	switch {
+	case errors.Is(err, objectstore.ErrFolderCycle):
+		return ecFolderCycle
+	case errors.Is(err, objectstore.ErrNotFound):
+		return ecNotFound
+	}
+	return ecError
 }
 
 // ropHardDeleteMessagesAndSubfolders handles RopHardDeleteMessagesAndSubfolders
@@ -252,26 +291,10 @@ func (s *Session) ropHardDeleteMessagesAndSubfolders(p *ext.Pull, out *ext.Push,
 	if s.denyWrite(out, ropHardDelMsgsAndSubfolders, hindex, folder.store, folder.folderID, mapi.FrightsDeleteAny) {
 		return true
 	}
-	var partial uint8
-	msgs, err := folder.store.ListMessages(folder.folderID)
+	partial, err := emptyFolderContents(folder)
 	if err != nil {
 		writeErr(out, ropHardDelMsgsAndSubfolders, hindex, ecError)
 		return true
-	}
-	for _, m := range msgs {
-		if err := folder.store.SoftDeleteObject(m.ID); err != nil {
-			partial = 1
-		}
-	}
-	children, err := childFolders(folder.store, folder.folderID)
-	if err != nil {
-		writeErr(out, ropHardDelMsgsAndSubfolders, hindex, ecError)
-		return true
-	}
-	for _, c := range children {
-		if err := folder.store.DeleteFolder(c.ID); err != nil {
-			partial = 1
-		}
 	}
 	out.Uint8(ropHardDelMsgsAndSubfolders)
 	out.Uint8(hindex)
@@ -301,27 +324,12 @@ func (s *Session) ropEmptyFolder(p *ext.Pull, out *ext.Push, handles []uint32, h
 	if s.denyWrite(out, ropEmptyFolder, hindex, folder.store, folder.folderID, mapi.FrightsDeleteAny) {
 		return true
 	}
-	var partial uint8
-	msgs, err := folder.store.ListMessages(folder.folderID)
+	// EmptyFolder drops the folder's messages and its subfolders, each subfolder
+	// with its whole subtree.
+	partial, err := emptyFolderContents(folder)
 	if err != nil {
 		writeErr(out, ropEmptyFolder, hindex, ecError)
 		return true
-	}
-	for _, m := range msgs {
-		if err := folder.store.SoftDeleteObject(m.ID); err != nil {
-			partial = 1
-		}
-	}
-	// EmptyFolder also drops the folder's subfolders, each with its whole subtree.
-	children, err := childFolders(folder.store, folder.folderID)
-	if err != nil {
-		writeErr(out, ropEmptyFolder, hindex, ecError)
-		return true
-	}
-	for _, c := range children {
-		if err := folder.store.DeleteFolder(c.ID); err != nil {
-			partial = 1
-		}
 	}
 	out.Uint8(ropEmptyFolder)
 	out.Uint8(hindex)
