@@ -6,21 +6,30 @@ import "testing"
 // attachment booleans. Unknown prefixes fall back to general terms.
 func TestParseKQL(t *testing.T) {
 	q := parseKQL(`from:alice subject:"quarterly report" has:attachment is:unread leftover`)
-	if len(q.From) != 1 || q.From[0] != "alice" {
-		t.Errorf("From = %v, want [alice]", q.From)
+	wantOnly(t, "From", q.From, "alice")
+	wantOnly(t, "Subject", q.Subject, "quarterly report")
+	wantFlag(t, "HasAtt", q.HasAtt, true)
+	wantFlag(t, "Read (is:unread)", q.Read, false)
+	wantOnly(t, "General", q.General, "leftover")
+}
+
+// wantOnly checks a filter carries exactly the one value.
+func wantOnly(t *testing.T, label string, got []string, want string) {
+	t.Helper()
+	if len(got) != 1 {
+		t.Fatalf("%s = %v, want [%s]", label, got, want)
 	}
-	if len(q.Subject) != 1 || q.Subject[0] != "quarterly report" {
-		t.Errorf("Subject = %v, want [quarterly report]", q.Subject)
+	wantEq(t, label, got[0], want)
+}
+
+// wantFlag checks an optional boolean filter is set to the expected value. A nil
+// pointer means the filter is absent, which is not the same as false.
+func wantFlag(t *testing.T, label string, got *bool, want bool) {
+	t.Helper()
+	if got == nil {
+		t.Fatalf("%s is unset, want %v", label, want)
 	}
-	if q.HasAtt == nil || !*q.HasAtt {
-		t.Errorf("HasAtt = %v, want true", q.HasAtt)
-	}
-	if q.Read == nil || *q.Read {
-		t.Errorf("Read = %v, want false (unread)", q.Read)
-	}
-	if len(q.General) != 1 || q.General[0] != "leftover" {
-		t.Errorf("General = %v, want [leftover]", q.General)
-	}
+	wantEq(t, label, *got, want)
 }
 
 // TestParseKQLUnknownPrefixFallsBack proves an unrecognised "kindle:book" token

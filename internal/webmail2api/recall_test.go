@@ -1,7 +1,6 @@
 package webmail2api
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -26,37 +25,9 @@ func TestRecallRetractsUnreadLocalCopies(t *testing.T) {
 
 	senderDir, bobDir, carolDir := t.TempDir(), t.TempDir(), t.TempDir()
 
-	sst, err := objectstore.Open(senderDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sentInfo, err := sst.AppendMessage(int64(mapi.PrivateFIDSentItems), raw, time.Now(), objectstore.FlagSeen)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sst.Close()
-
-	bst, err := objectstore.Open(bobDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := bst.AppendMessage(int64(mapi.PrivateFIDInbox), raw, time.Now(), 0); err != nil {
-		t.Fatal(err)
-	}
-	bst.Close()
-
-	cst, err := objectstore.Open(carolDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cInfo, err := cst.AppendMessage(int64(mapi.PrivateFIDInbox), raw, time.Now(), 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := cst.SetMessageReadState(cInfo.ID, true); err != nil { // carol read her copy
-		t.Fatal(err)
-	}
-	cst.Close()
+	sentInfo := seedRecallCopy(t, senderDir, int64(mapi.PrivateFIDSentItems), raw, objectstore.FlagSeen, false)
+	seedRecallCopy(t, bobDir, int64(mapi.PrivateFIDInbox), raw, 0, false)
+	seedRecallCopy(t, carolDir, int64(mapi.PrivateFIDInbox), raw, 0, true) // carol read her copy
 
 	accounts := directory.StaticAccounts{
 		"bob@hermex.test":   {MailboxPath: bobDir},
@@ -81,38 +52,49 @@ func TestRecallRetractsUnreadLocalCopies(t *testing.T) {
 	}
 
 	// The author recalls.
-	rec := recall("alice@hermex.test", senderDir, sentID)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("author recall: status %d %s", rec.Code, rec.Body.String())
-	}
-	var res struct {
+	type recallResponse struct {
 		Recalled int            `json:"recalled"`
 		Total    int            `json:"total"`
 		Results  []recallResult `json:"results"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
-		t.Fatal(err)
-	}
+	res := okBody[recallResponse](t, "author recall", recall("alice@hermex.test", senderDir, sentID))
+	wantEq(t, "recalled count", res.Recalled, 1)
+	wantEq(t, "recipient total", res.Total, 3)
 	status := map[string]string{}
 	for _, r := range res.Results {
 		status[r.Recipient] = r.Status
 	}
-	if res.Recalled != 1 || res.Total != 3 ||
-		status["bob@hermex.test"] != "recalled" ||
-		status["carol@hermex.test"] != "read" ||
-		status["ghost@external.invalid"] != "unavailable" {
-		t.Fatalf("recall result = %+v (recalled=%d total=%d)", status, res.Recalled, res.Total)
-	}
+	wantEq(t, "bob (unread, local)", status["bob@hermex.test"], "recalled")
+	wantEq(t, "carol (read, local)", status["carol@hermex.test"], "read")
+	wantEq(t, "ghost (external)", status["ghost@external.invalid"], "unavailable")
 
 	// Bob's unread copy is gone; carol's read copy stays.
-	bst2, _ := objectstore.Open(bobDir)
-	defer bst2.Close()
-	if msgs, _ := bst2.ListMessages(int64(mapi.PrivateFIDInbox)); len(msgs) != 0 {
-		t.Errorf("bob inbox has %d messages, want 0 (recalled)", len(msgs))
+	wantInboxCount(t, bobDir, 0, "bob inbox (recalled)")
+	wantInboxCount(t, carolDir, 1, "carol inbox (read, kept)")
+}
+
+// seedRecallCopy files one copy of the message in a mailbox, optionally marking
+// it read, and returns its index row.
+func seedRecallCopy(t *testing.T, dir string, folderID int64, raw []byte, flags int64, read bool) objectstore.MessageInfo {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open mailbox", err)
+	defer st.Close()
+	info, err := st.AppendMessage(folderID, raw, time.Now(), flags)
+	mustNoErr(t, "append message", err)
+	if read {
+		mustNoErr(t, "set read state", st.SetMessageReadState(info.ID, true))
 	}
-	cst2, _ := objectstore.Open(carolDir)
-	defer cst2.Close()
-	if msgs, _ := cst2.ListMessages(int64(mapi.PrivateFIDInbox)); len(msgs) != 1 {
-		t.Errorf("carol inbox has %d messages, want 1 (read, kept)", len(msgs))
-	}
+	return info
+}
+
+// wantInboxCount checks how many messages a mailbox's inbox still holds.
+func wantInboxCount(t *testing.T, dir string, want int, label string) {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open mailbox", err)
+	defer st.Close()
+	msgs, err := st.ListMessages(int64(mapi.PrivateFIDInbox))
+	mustNoErr(t, "list messages", err)
+	wantEq(t, label, len(msgs), want)
 }

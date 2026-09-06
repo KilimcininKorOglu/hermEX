@@ -1,7 +1,6 @@
 package webmail2api
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -39,76 +38,66 @@ func TestRemindersListDismissSnooze(t *testing.T) {
 		return rec
 	}
 
+	listReminders := func(what string) []reminderJSON {
+		t.Helper()
+		type listing struct {
+			Reminders []reminderJSON `json:"reminders"`
+		}
+		return okBody[listing](t, what, do(http.MethodGet, "/api/v1/reminders", "")).Reminders
+	}
+
 	// An event whose start is in the past with a 15-minute reminder: its reminder
 	// (start - 15m) is due now, so the list must surface it.
 	past := time.Now().UTC().Add(-2 * time.Hour).Format(time.RFC3339)
-	if rec := do(http.MethodPost, "/api/v1/calendar/events", `{"summary":"Past standup","start":"`+past+`","reminderMinutes":15}`); rec.Code != http.StatusOK {
-		t.Fatalf("create event: %d %s", rec.Code, rec.Body.String())
-	}
+	wantStatus(t, "create event", do(http.MethodPost, "/api/v1/calendar/events",
+		`{"summary":"Past standup","start":"`+past+`","reminderMinutes":15}`), http.StatusOK)
 
 	// A future-dated event with a reminder must NOT appear (its reminder is not due yet).
 	future := time.Now().UTC().Add(2 * time.Hour).Format(time.RFC3339)
-	if rec := do(http.MethodPost, "/api/v1/calendar/events", `{"summary":"Future sync","start":"`+future+`","reminderMinutes":15}`); rec.Code != http.StatusOK {
-		t.Fatalf("create future event: %d %s", rec.Code, rec.Body.String())
-	}
+	wantStatus(t, "create future event", do(http.MethodPost, "/api/v1/calendar/events",
+		`{"summary":"Future sync","start":"`+future+`","reminderMinutes":15}`), http.StatusOK)
 
 	// A task with a reminder and a past due date appears too.
-	if rec := do(http.MethodPost, "/api/v1/tasks", `{"summary":"Overdue task","due":"`+past+`","reminder":true,"completed":false}`); rec.Code != http.StatusOK {
-		t.Fatalf("create task: %d %s", rec.Code, rec.Body.String())
-	}
+	wantStatus(t, "create task", do(http.MethodPost, "/api/v1/tasks",
+		`{"summary":"Overdue task","due":"`+past+`","reminder":true,"completed":false}`), http.StatusOK)
 
-	rec := do(http.MethodGet, "/api/v1/reminders", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("list reminders: %d %s", rec.Code, rec.Body.String())
+	listed := listReminders("list reminders")
+	if len(listed) != 2 {
+		t.Fatalf("got %d reminders, want 2 (past appointment + overdue task)", len(listed))
 	}
-	var listed struct {
-		Reminders []reminderJSON `json:"reminders"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(listed.Reminders) != 2 {
-		t.Fatalf("got %d reminders, want 2 (past appointment + overdue task)", len(listed.Reminders))
-	}
-	var apptID, taskID string
-	for i := range listed.Reminders {
-		switch listed.Reminders[i].Type {
-		case "appointment":
-			apptID = listed.Reminders[i].ID
-		case "task":
-			taskID = listed.Reminders[i].ID
-		}
-	}
-	if apptID == "" {
-		t.Fatal("no appointment reminder in the list")
-	}
-	if taskID == "" {
-		t.Fatal("no task reminder in the list")
-	}
+	apptID := reminderIDOfType(t, listed, "appointment")
+	taskID := reminderIDOfType(t, listed, "task")
 
 	// Dismiss the appointment reminder: it drops out of the next list, and the
 	// stored event no longer carries PidLidReminderSet.
-	if rec := do(http.MethodPost, "/api/v1/reminders/"+apptID+"/dismiss", ""); rec.Code != http.StatusOK {
-		t.Fatalf("dismiss: %d %s", rec.Code, rec.Body.String())
-	}
-	rec = do(http.MethodGet, "/api/v1/reminders", "")
-	_ = json.Unmarshal(rec.Body.Bytes(), &listed)
-	for _, rem := range listed.Reminders {
-		if rem.ID == apptID {
-			t.Error("dismissed appointment still in the reminder list")
-		}
-	}
+	wantStatus(t, "dismiss", do(http.MethodPost, "/api/v1/reminders/"+apptID+"/dismiss", ""), http.StatusOK)
+	wantReminderGone(t, listReminders("list after dismiss"), apptID, "dismissed appointment")
 
 	// Snooze the task reminder by 10 minutes: its due time moves past now, so it also
 	// drops out of the list until the snooze elapses.
-	if rec := do(http.MethodPost, "/api/v1/reminders/"+taskID+"/snooze", `{"minutes":10}`); rec.Code != http.StatusOK {
-		t.Fatalf("snooze: %d %s", rec.Code, rec.Body.String())
+	wantStatus(t, "snooze", do(http.MethodPost, "/api/v1/reminders/"+taskID+"/snooze", `{"minutes":10}`), http.StatusOK)
+	wantReminderGone(t, listReminders("list after snooze"), taskID, "snoozed task (due time did not advance)")
+}
+
+// reminderIDOfType returns the id of the one reminder of the given type,
+// failing when the list carries none.
+func reminderIDOfType(t *testing.T, list []reminderJSON, kind string) string {
+	t.Helper()
+	for _, r := range list {
+		if r.Type == kind {
+			return r.ID
+		}
 	}
-	rec = do(http.MethodGet, "/api/v1/reminders", "")
-	_ = json.Unmarshal(rec.Body.Bytes(), &listed)
-	for _, rem := range listed.Reminders {
-		if rem.ID == taskID {
-			t.Error("snoozed task still in the reminder list (due time did not advance)")
+	t.Fatalf("no %s reminder in the list", kind)
+	return ""
+}
+
+// wantReminderGone fails when a reminder is still listed.
+func wantReminderGone(t *testing.T, list []reminderJSON, id, what string) {
+	t.Helper()
+	for _, r := range list {
+		if r.ID == id {
+			t.Errorf("%s still in the reminder list", what)
 		}
 	}
 }

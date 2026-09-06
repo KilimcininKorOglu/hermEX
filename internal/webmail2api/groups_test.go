@@ -60,38 +60,29 @@ func TestGroupsAPI(t *testing.T) {
 	}
 
 	// GET /groups lists only the owned group.
-	rec := do(http.MethodGet, "/api/v1/groups", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("get groups: %d %s", rec.Code, rec.Body.String())
+	groups := okBody[[]map[string]any](t, "get groups", do(http.MethodGet, "/api/v1/groups", ""))
+	if len(groups) != 1 {
+		t.Fatalf("get groups = %+v, want [crew]", groups)
 	}
-	var groups []map[string]any
-	_ = json.Unmarshal(rec.Body.Bytes(), &groups)
-	if len(groups) != 1 || groups[0]["address"] != "crew@hermex.test" {
-		t.Errorf("get groups = %+v, want [crew]", groups)
-	}
+	wantEq(t, "listed group address", groups[0]["address"], any("crew@hermex.test"))
 
 	// Members of the owned group are readable.
-	if rec := do(http.MethodGet, "/api/v1/groups/members?address=crew@hermex.test", ""); rec.Code != http.StatusOK {
-		t.Fatalf("get members of owned group: %d %s", rec.Code, rec.Body.String())
-	}
+	wantStatus(t, "get members of owned group",
+		do(http.MethodGet, "/api/v1/groups/members?address=crew@hermex.test", ""), http.StatusOK)
 
 	// IDOR guard: members of a group the caller does NOT own are refused.
-	if rec := do(http.MethodGet, "/api/v1/groups/members?address=other@hermex.test", ""); rec.Code != http.StatusForbidden {
-		t.Errorf("get members of non-owned group = %d, want 403", rec.Code)
-	}
+	wantStatus(t, "get members of non-owned group",
+		do(http.MethodGet, "/api/v1/groups/members?address=other@hermex.test", ""), http.StatusForbidden)
 
 	// PUT replaces members of the owned group.
-	if rec := do(http.MethodPut, "/api/v1/groups/members", `{"address":"crew@hermex.test","members":["x@hermex.test","y@hermex.test"]}`); rec.Code != http.StatusOK {
-		t.Fatalf("put members: %d %s", rec.Code, rec.Body.String())
-	}
-	if auth.setUser != "crew@hermex.test" || len(auth.setMems) != 2 {
-		t.Errorf("SetMembers got (%q, %v), want crew with 2 members", auth.setUser, auth.setMems)
-	}
+	wantStatus(t, "put members", do(http.MethodPut, "/api/v1/groups/members",
+		`{"address":"crew@hermex.test","members":["x@hermex.test","y@hermex.test"]}`), http.StatusOK)
+	wantEq(t, "SetMembers list", auth.setUser, "crew@hermex.test")
+	wantEq(t, "SetMembers member count", len(auth.setMems), 2)
 
 	// IDOR guard on write: cannot set members of a non-owned group.
-	if rec := do(http.MethodPut, "/api/v1/groups/members", `{"address":"other@hermex.test","members":["z@hermex.test"]}`); rec.Code != http.StatusForbidden {
-		t.Errorf("put members of non-owned group = %d, want 403", rec.Code)
-	}
+	wantStatus(t, "put members of non-owned group", do(http.MethodPut, "/api/v1/groups/members",
+		`{"address":"other@hermex.test","members":["z@hermex.test"]}`), http.StatusForbidden)
 }
 
 // TestGroupsLDAPMastered proves an AD-synced (LDAP-mastered) group is flagged so the

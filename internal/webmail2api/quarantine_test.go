@@ -20,67 +20,56 @@ func TestQuarantineRelease(t *testing.T) {
 	const alice = "alice@hermex.test"
 	dir := t.TempDir()
 	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
+	mustNoErr(t, "open store", err)
 	raw := []byte("From: spammer@x.test\r\nTo: alice@hermex.test\r\nSubject: Spam\r\n\r\nbuy now\r\n")
 	info, err := st.AppendMessage(int64(mapi.PrivateFIDJunk), raw, time.Now(), 0)
-	if err != nil {
-		t.Fatalf("append to junk: %v", err)
-	}
+	mustNoErr(t, "append to junk", err)
 	st.Close()
 
 	secret := []byte("digest-test-secret")
 	accs := directory.StaticAccounts{alice: {Password: "x", MailboxPath: dir}}
 	srv := NewServer(accs, accs, nil, "mail.hermex.test", []byte("session-secret"), "", false)
 	srv.DigestSecret = secret
+	serve := func(req *http.Request) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(rec, req)
+		return rec
+	}
 
 	tok, err := quarantine.Mint(secret, quarantine.Claims{Mailbox: alice, UID: info.UID, Expiry: time.Now().Add(time.Hour).Unix()})
-	if err != nil {
-		t.Fatalf("mint: %v", err)
-	}
+	mustNoErr(t, "mint token", err)
 
 	// GET shows the confirmation form (not a release yet, prefetch-safe).
-	rec := httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/quarantine/release?t="+url.QueryEscape(tok), nil))
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "<form") {
-		t.Fatalf("confirm page = %d: %s", rec.Code, rec.Body.String())
-	}
+	rec := serve(httptest.NewRequest(http.MethodGet, "/quarantine/release?t="+url.QueryEscape(tok), nil))
+	wantStatus(t, "confirm page", rec, http.StatusOK)
+	wantContains(t, "confirm page", rec.Body.String(), "<form")
 	// The page body carries the release token, and this route is outside the API
 	// prefix the blanket no-store middleware covers, so the page must say so itself
 	// or the token can be recovered from a shared browser's cache and replayed.
-	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
-		t.Errorf("confirm page Cache-Control = %q, want no-store; it embeds the release token", cc)
-	}
+	wantEq(t, "confirm page Cache-Control (it embeds the release token)",
+		rec.Header().Get("Cache-Control"), "no-store")
 
 	// POST performs the release.
-	rec = httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/quarantine/release", strings.NewReader("t="+url.QueryEscape(tok)))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	srv.Handler().ServeHTTP(rec, req)
-	if rec.Code != 200 || !strings.Contains(rec.Body.String(), "moved back to your inbox") {
-		t.Fatalf("release = %d: %s", rec.Code, rec.Body.String())
-	}
+	rec = serve(req)
+	wantStatus(t, "release", rec, http.StatusOK)
+	wantContains(t, "release page", rec.Body.String(), "moved back to your inbox")
 
 	// The message is now in the Inbox and gone from Junk.
 	st2, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
+	mustNoErr(t, "reopen mailbox", err)
 	defer st2.Close()
-	if inbox, _ := st2.ListMessages(int64(mapi.PrivateFIDInbox)); len(inbox) != 1 {
-		t.Errorf("inbox has %d messages, want 1", len(inbox))
-	}
-	if junk, _ := st2.ListMessages(int64(mapi.PrivateFIDJunk)); len(junk) != 0 {
-		t.Errorf("junk has %d messages, want 0", len(junk))
-	}
+	inbox, err := st2.ListMessages(int64(mapi.PrivateFIDInbox))
+	mustNoErr(t, "list inbox", err)
+	wantEq(t, "inbox messages after release", len(inbox), 1)
+	junk, err := st2.ListMessages(int64(mapi.PrivateFIDJunk))
+	mustNoErr(t, "list junk", err)
+	wantEq(t, "junk messages after release", len(junk), 0)
 
 	// A garbage token is refused, never reaching a mailbox.
-	rec = httptest.NewRecorder()
-	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/quarantine/release?t=garbage", nil))
-	if !strings.Contains(rec.Body.String(), "invalid or has expired") {
-		t.Errorf("bad token should show the expired message: %s", rec.Body.String())
-	}
+	rec = serve(httptest.NewRequest(http.MethodGet, "/quarantine/release?t=garbage", nil))
+	wantContains(t, "bad token page", rec.Body.String(), "invalid or has expired")
 }
 
 // TestQuarantineDisabled proves the route 404s when no digest secret is set.

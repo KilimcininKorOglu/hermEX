@@ -6,7 +6,6 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -144,25 +143,13 @@ func TestPublicFolderReadStatePersists(t *testing.T) {
 	fid, uid := seedPublicFolder(t, svc, domain, "Announcements", alice)
 
 	// Grant bob the same read access, to prove read state is isolated per user.
-	pst, err := svc.OpenForDomain(domain)
-	if err != nil {
-		t.Fatalf("open domain store: %v", err)
-	}
-	if err := pst.ModifyPermissions(fid, false, []objectstore.PermissionChange{
-		{Op: objectstore.PermAdd, Username: bob, Rights: mapi.RightsReviewer},
-	}); err != nil {
-		pst.Close()
-		t.Fatalf("grant bob: %v", err)
-	}
-	pst.Close()
+	grantPublicRead(t, svc, domain, fid, bob)
 
 	// Each user needs a real own mailbox: their per-user read state lives there.
 	aliceBox, bobBox := t.TempDir(), t.TempDir()
 	for _, dir := range []string{aliceBox, bobBox} {
 		st, err := objectstore.Open(dir)
-		if err != nil {
-			t.Fatalf("create mailbox %s: %v", dir, err)
-		}
+		mustNoErr(t, "create mailbox "+dir, err)
 		st.Close()
 	}
 
@@ -174,44 +161,44 @@ func TestPublicFolderReadStatePersists(t *testing.T) {
 	openURL := "/api/v1/public-message?fid=" + strconv.FormatInt(fid, 10) + "&uid=" + strconv.FormatUint(uint64(uid), 10)
 
 	// Before reading, alice's badge shows the message unread.
-	if u := folderUnread(t, authedGetAs(t, srv, secret, alice, aliceBox, foldersURL)); u != 1 {
-		t.Fatalf("alice unread before read = %d, want 1", u)
-	}
+	wantEq(t, "alice unread before read",
+		folderUnread(t, authedGetAs(t, srv, secret, alice, aliceBox, foldersURL)), 1)
 
 	// Alice opens the message through the same handler the page uses.
-	if rec := authedGetAs(t, srv, secret, alice, aliceBox, openURL); rec.Code != 200 {
-		t.Fatalf("open message status %d: %s", rec.Code, rec.Body.String())
-	}
+	wantStatus(t, "open message", authedGetAs(t, srv, secret, alice, aliceBox, openURL), http.StatusOK)
 
 	// The read persists across a re-list: alice now sees it read, badge unread = 0.
-	if !messageRead(t, authedGetAs(t, srv, secret, alice, aliceBox, msgsURL), uid) {
-		t.Errorf("alice message Read = false after open, want true (read did not persist)")
-	}
-	if u := folderUnread(t, authedGetAs(t, srv, secret, alice, aliceBox, foldersURL)); u != 0 {
-		t.Errorf("alice unread after read = %d, want 0", u)
-	}
+	wantEq(t, "alice message Read after open (the read must persist)",
+		messageRead(t, authedGetAs(t, srv, secret, alice, aliceBox, msgsURL), uid), true)
+	wantEq(t, "alice unread after read",
+		folderUnread(t, authedGetAs(t, srv, secret, alice, aliceBox, foldersURL)), 0)
 
 	// Per-user isolation: bob still sees the same message unread.
-	if messageRead(t, authedGetAs(t, srv, secret, bob, bobBox, msgsURL), uid) {
-		t.Errorf("bob message Read = true, want false (read state must be per-user)")
-	}
-	if u := folderUnread(t, authedGetAs(t, srv, secret, bob, bobBox, foldersURL)); u != 1 {
-		t.Errorf("bob unread = %d, want 1 (per-user)", u)
-	}
+	wantEq(t, "bob message Read (read state must be per-user)",
+		messageRead(t, authedGetAs(t, srv, secret, bob, bobBox, msgsURL), uid), false)
+	wantEq(t, "bob unread (per-user)",
+		folderUnread(t, authedGetAs(t, srv, secret, bob, bobBox, foldersURL)), 1)
 
 	// The shared public store's flag was never written: reading stays per-user.
 	cst, err := svc.OpenForDomain(domain)
-	if err != nil {
-		t.Fatalf("reopen domain store: %v", err)
-	}
+	mustNoErr(t, "reopen domain store", err)
 	defer cst.Close()
 	info, err := cst.MessageByUID(fid, uid)
-	if err != nil {
-		t.Fatalf("message by uid: %v", err)
-	}
+	mustNoErr(t, "message by uid", err)
 	if info.Flags&objectstore.FlagSeen != 0 {
 		t.Errorf("public store flag = \\Seen, want unset (must never write to the public store)")
 	}
+}
+
+// grantPublicRead gives one user reviewer rights on a public folder.
+func grantPublicRead(t *testing.T, svc *publicfolder.Service, domain string, fid int64, user string) {
+	t.Helper()
+	pst, err := svc.OpenForDomain(domain)
+	mustNoErr(t, "open domain store", err)
+	defer pst.Close()
+	mustNoErr(t, "grant "+user, pst.ModifyPermissions(fid, false, []objectstore.PermissionChange{
+		{Op: objectstore.PermAdd, Username: user, Rights: mapi.RightsReviewer},
+	}))
 }
 
 // TestPublicFolders proves a granted caller sees the public folder with its
@@ -224,52 +211,40 @@ func TestPublicFolders(t *testing.T) {
 	srv, secret := newTestServer(t)
 	srv.Pub = svc
 
-	rec := authedGet(t, srv, secret, alice, "/api/v1/public-folders")
-	if rec.Code != 200 {
-		t.Fatalf("public-folders status %d: %s", rec.Code, rec.Body.String())
-	}
-	var list struct {
+	type folderList struct {
 		Owner   string             `json:"owner"`
 		Folders []publicFolderJSON `json:"folders"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
-		t.Fatalf("decode list: %v", err)
-	}
-	if list.Owner != domain {
-		t.Errorf("owner = %q, want %q", list.Owner, domain)
-	}
-	var found *publicFolderJSON
-	for i := range list.Folders {
-		if list.Folders[i].Name == "Announcements" {
-			found = &list.Folders[i]
-		}
-	}
-	if found == nil {
-		t.Fatalf("Announcements not in %+v", list.Folders)
-	}
-	if found.Total != 1 {
-		t.Errorf("Total = %d, want 1", found.Total)
-	}
+	list := okBody[folderList](t, "public-folders", authedGet(t, srv, secret, alice, "/api/v1/public-folders"))
+	wantEq(t, "owner", list.Owner, domain)
+	wantEq(t, "Announcements total", namedPublicFolder(t, list.Folders, "Announcements").Total, 1)
 
-	rec = authedGet(t, srv, secret, alice, "/api/v1/public-folders/"+strconv.FormatInt(fid, 10)+"/messages")
-	var msgs struct {
+	type messageList struct {
 		Emails []mailJSON `json:"emails"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &msgs); err != nil {
-		t.Fatalf("decode messages: %v", err)
-	}
-	if len(msgs.Emails) != 1 || msgs.Emails[0].Subject != "Welcome" {
+	msgs := okBody[messageList](t, "messages",
+		authedGet(t, srv, secret, alice, "/api/v1/public-folders/"+strconv.FormatInt(fid, 10)+"/messages"))
+	if len(msgs.Emails) != 1 {
 		t.Fatalf("messages = %+v, want one Welcome", msgs.Emails)
 	}
+	wantEq(t, "message subject", msgs.Emails[0].Subject, "Welcome")
 
-	rec = authedGet(t, srv, secret, alice,
+	rec := authedGet(t, srv, secret, alice,
 		"/api/v1/public-message?fid="+strconv.FormatInt(fid, 10)+"&uid="+strconv.FormatUint(uint64(uid), 10))
-	if rec.Code != 200 {
-		t.Fatalf("message status %d: %s", rec.Code, rec.Body.String())
+	wantStatus(t, "message", rec, http.StatusOK)
+	wantContains(t, "message detail", rec.Body.String(), "Hello everyone")
+}
+
+// namedPublicFolder returns the listed folder with that display name.
+func namedPublicFolder(t *testing.T, folders []publicFolderJSON, name string) publicFolderJSON {
+	t.Helper()
+	for _, f := range folders {
+		if f.Name == name {
+			return f
+		}
 	}
-	if !strings.Contains(rec.Body.String(), "Hello everyone") {
-		t.Errorf("detail missing body: %s", rec.Body.String())
-	}
+	t.Fatalf("%s not in %+v", name, folders)
+	return publicFolderJSON{}
 }
 
 // TestPublicFoldersAccessGate proves a same-domain caller WITHOUT a grant, and a

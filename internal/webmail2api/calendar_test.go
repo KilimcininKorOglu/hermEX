@@ -20,71 +20,44 @@ import (
 // surfacing the string iCalendar UID (the meeting identity) would make delete and
 // update fail to parse it, leaving the event uneditable after a refresh.
 func TestCalendarEventUIDIsMessageID(t *testing.T) {
-	dir := t.TempDir()
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	st.Close()
-
-	secret := []byte("calendar-uid-test-secret")
-	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
-	do := func(method, target, body string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
-		var req *http.Request
-		if body == "" {
-			req = httptest.NewRequest(method, target, nil)
-		} else {
-			req = httptest.NewRequest(method, target, strings.NewReader(body))
-		}
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		return rec
-	}
+	do, _ := apiHarness(t)
 
 	// Create an event with no client-supplied uid (the SPA's normal path, which
 	// makes the server mint an iCalendar UID).
-	if rec := do(http.MethodPost, "/api/v1/calendar/events", `{"summary":"Standup","start":"2026-08-02T09:00:00Z"}`); rec.Code != http.StatusOK {
-		t.Fatalf("create: status %d", rec.Code)
-	}
+	wantStatus(t, "create", do(http.MethodPost, "/api/v1/calendar/events",
+		`{"summary":"Standup","start":"2026-08-02T09:00:00Z"}`), http.StatusOK)
 
 	// Read it back the way the SPA does after a reload.
-	rec := do(http.MethodGet, "/api/v1/calendar/events", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("list: status %d", rec.Code)
-	}
-	var listed struct {
-		Events []eventJSON `json:"events"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
-		t.Fatalf("decode list: %v", err)
-	}
-	if len(listed.Events) != 1 {
-		t.Fatalf("got %d events, want 1", len(listed.Events))
-	}
-	uid := listed.Events[0].UID
+	uid := listOneEvent(t, do, "list").UID
 	if _, err := strconv.ParseInt(uid, 10, 64); err != nil {
 		t.Fatalf("listed event uid %q is not a numeric message id; delete/update would fail to parse it", uid)
 	}
 
 	// The delete handler parses that uid back to a store id; it must succeed (a
 	// string iCalendar uid would 400 here).
-	if rec := do(http.MethodDelete, "/api/v1/calendar/events/"+uid, ""); rec.Code != http.StatusOK {
-		t.Fatalf("delete by listed uid: status %d", rec.Code)
-	}
+	wantStatus(t, "delete by listed uid", do(http.MethodDelete, "/api/v1/calendar/events/"+uid, ""), http.StatusOK)
 
 	// The event is gone.
-	rec = do(http.MethodGet, "/api/v1/calendar/events", "")
-	var after struct {
+	wantEq(t, "events after delete", len(listEvents(t, do, "list after delete")), 0)
+}
+
+// listEvents reads the calendar listing the SPA reloads.
+func listEvents(t *testing.T, do requestFunc, what string) []eventJSON {
+	t.Helper()
+	type listing struct {
 		Events []eventJSON `json:"events"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &after); err != nil {
-		t.Fatalf("decode list after delete: %v", err)
+	return okBody[listing](t, what, do(http.MethodGet, "/api/v1/calendar/events", "")).Events
+}
+
+// listOneEvent reads the listing and requires it to hold exactly one event.
+func listOneEvent(t *testing.T, do requestFunc, what string) eventJSON {
+	t.Helper()
+	events := listEvents(t, do, what)
+	if len(events) != 1 {
+		t.Fatalf("%s: got %d events, want 1", what, len(events))
 	}
-	if len(after.Events) != 0 {
-		t.Fatalf("event still present after delete: %d", len(after.Events))
-	}
+	return events[0]
 }
 
 // TestCalendarEventReminderRoundTrip proves a reminder set in the SPA form
@@ -94,73 +67,25 @@ func TestCalendarEventUIDIsMessageID(t *testing.T) {
 // make the form's reminder select a no-op after a refresh, so the assertion is on
 // the exact minute value, not just presence.
 func TestCalendarEventReminderRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	st.Close()
-
-	secret := []byte("calendar-reminder-test-secret")
-	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
-	do := func(method, target, body string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
-		var req *http.Request
-		if body == "" {
-			req = httptest.NewRequest(method, target, nil)
-		} else {
-			req = httptest.NewRequest(method, target, strings.NewReader(body))
-		}
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		return rec
-	}
+	do, _ := apiHarness(t)
 
 	// Create a timed event with a 15-minute reminder.
-	if rec := do(http.MethodPost, "/api/v1/calendar/events", `{"summary":"Standup","start":"2026-08-02T09:00:00Z","reminderMinutes":15}`); rec.Code != http.StatusOK {
-		t.Fatalf("create with reminder: status %d", rec.Code)
-	}
+	wantStatus(t, "create with reminder", do(http.MethodPost, "/api/v1/calendar/events",
+		`{"summary":"Standup","start":"2026-08-02T09:00:00Z","reminderMinutes":15}`), http.StatusOK)
 
 	// Reload it the way the SPA does; the reminder must come back as 15.
-	rec := do(http.MethodGet, "/api/v1/calendar/events", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("list: status %d", rec.Code)
-	}
-	var listed struct {
-		Events []eventJSON `json:"events"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
-		t.Fatalf("decode list: %v", err)
-	}
-	if len(listed.Events) != 1 {
-		t.Fatalf("got %d events, want 1", len(listed.Events))
-	}
-	got := listed.Events[0].ReminderMinutes
-	if got == nil {
+	listed := listOneEvent(t, do, "list")
+	if listed.ReminderMinutes == nil {
 		t.Fatal("listed event has no reminderMinutes, want 15 (VALARM round-trip lost it)")
 	}
-	if *got != 15 {
-		t.Fatalf("reminderMinutes = %d, want 15", *got)
-	}
+	wantEq(t, "reminderMinutes", *listed.ReminderMinutes, 15)
 
 	// Clear the reminder by updating without one; the reloaded event must have none.
-	uid := listed.Events[0].UID
-	if rec := do(http.MethodPut, "/api/v1/calendar/events/"+uid, `{"summary":"Standup","start":"2026-08-02T09:00:00Z"}`); rec.Code != http.StatusOK {
-		t.Fatalf("update clearing reminder: status %d", rec.Code)
-	}
-	rec = do(http.MethodGet, "/api/v1/calendar/events", "")
-	var after struct {
-		Events []eventJSON `json:"events"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &after); err != nil {
-		t.Fatalf("decode list after update: %v", err)
-	}
-	if len(after.Events) != 1 {
-		t.Fatalf("got %d events after update, want 1", len(after.Events))
-	}
-	if after.Events[0].ReminderMinutes != nil {
-		t.Fatalf("reminderMinutes = %d after update without reminder, want nil", *after.Events[0].ReminderMinutes)
+	wantStatus(t, "update clearing reminder", do(http.MethodPut, "/api/v1/calendar/events/"+listed.UID,
+		`{"summary":"Standup","start":"2026-08-02T09:00:00Z"}`), http.StatusOK)
+	after := listOneEvent(t, do, "list after update")
+	if after.ReminderMinutes != nil {
+		t.Fatalf("reminderMinutes = %d after update without reminder, want nil", *after.ReminderMinutes)
 	}
 }
 
@@ -170,68 +95,24 @@ func TestCalendarEventReminderRoundTrip(t *testing.T) {
 // A silent loss here would regress to a client-only store that does not survive a
 // reload or apply cross-device, the shortcut the user rejected.
 func TestCalendarSettingsRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	st.Close()
-
-	secret := []byte("calendar-settings-test-secret")
-	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
-	do := func(method, target, body string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
-		var req *http.Request
-		if body == "" {
-			req = httptest.NewRequest(method, target, nil)
-		} else {
-			req = httptest.NewRequest(method, target, strings.NewReader(body))
-		}
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		return rec
+	do, _ := apiHarness(t)
+	readSettings := func(what string) calendarSettingsJSON {
+		t.Helper()
+		return okBody[calendarSettingsJSON](t, what, do(http.MethodGet, "/api/v1/calendar/settings", ""))
 	}
 
 	// A fresh account defaults to Monday (1) before any setting is stored.
-	rec := do(http.MethodGet, "/api/v1/calendar/settings", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("get default: status %d", rec.Code)
-	}
-	var got calendarSettingsJSON
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode default: %v", err)
-	}
-	if got.FirstDayOfWeek != 1 {
-		t.Fatalf("default firstDayOfWeek = %d, want 1 (Monday)", got.FirstDayOfWeek)
-	}
+	wantEq(t, "default firstDayOfWeek (Monday)", readSettings("get default").FirstDayOfWeek, 1)
 
 	// Persist Sunday (0) and read it back the way the SPA does after a reload.
-	if rec := do(http.MethodPut, "/api/v1/calendar/settings", `{"firstDayOfWeek":0}`); rec.Code != http.StatusOK {
-		t.Fatalf("put: status %d", rec.Code)
-	}
-	rec = do(http.MethodGet, "/api/v1/calendar/settings", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("get after put: status %d", rec.Code)
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode after put: %v", err)
-	}
-	if got.FirstDayOfWeek != 0 {
-		t.Fatalf("firstDayOfWeek after put = %d, want 0 (Sunday, persisted in the settings blob)", got.FirstDayOfWeek)
-	}
+	wantStatus(t, "put", do(http.MethodPut, "/api/v1/calendar/settings", `{"firstDayOfWeek":0}`), http.StatusOK)
+	wantEq(t, "firstDayOfWeek after put (Sunday, persisted in the settings blob)",
+		readSettings("get after put").FirstDayOfWeek, 0)
 
 	// An out-of-range value is clamped to the Monday default, never stored as-is.
-	if rec := do(http.MethodPut, "/api/v1/calendar/settings", `{"firstDayOfWeek":9}`); rec.Code != http.StatusOK {
-		t.Fatalf("put invalid: status %d", rec.Code)
-	}
-	rec = do(http.MethodGet, "/api/v1/calendar/settings", "")
-	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
-		t.Fatalf("decode after invalid: %v", err)
-	}
-	if got.FirstDayOfWeek != 1 {
-		t.Fatalf("firstDayOfWeek after invalid = %d, want 1 (clamped to Monday)", got.FirstDayOfWeek)
-	}
+	wantStatus(t, "put invalid", do(http.MethodPut, "/api/v1/calendar/settings", `{"firstDayOfWeek":9}`), http.StatusOK)
+	wantEq(t, "firstDayOfWeek after an invalid put (clamped to Monday)",
+		readSettings("get after invalid").FirstDayOfWeek, 1)
 }
 
 // TestCalendarEventBusyStatusRoundTrip proves the busy-status (free/tentative/busy/
@@ -246,53 +127,26 @@ func TestCalendarEventBusyStatusRoundTrip(t *testing.T) {
 	}
 	st.Close()
 
-	secret := []byte("calendar-busy-test-secret")
-	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
-	do := func(method, target, body string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
-		var req *http.Request
-		if body == "" {
-			req = httptest.NewRequest(method, target, nil)
-		} else {
-			req = httptest.NewRequest(method, target, strings.NewReader(body))
-		}
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		return rec
-	}
+	do := apiHarnessFor(t, dir)
 
 	for _, want := range []int{0, 1, 2, 3} {
 		// Create an event with this busy status, then reload and assert it survived.
-		if rec := do(http.MethodPost, "/api/v1/calendar/events", `{"summary":"Meeting","start":"2026-08-02T09:00:00Z","busyStatus":`+strconv.Itoa(want)+`}`); rec.Code != http.StatusOK {
-			t.Fatalf("create busyStatus=%d: status %d", want, rec.Code)
-		}
-		rec := do(http.MethodGet, "/api/v1/calendar/events", "")
-		if rec.Code != http.StatusOK {
-			t.Fatalf("list: status %d", rec.Code)
-		}
-		var listed struct {
-			Events []eventJSON `json:"events"`
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
-		if len(listed.Events) != 1 {
-			t.Fatalf("got %d events, want 1", len(listed.Events))
-		}
-		got := listed.Events[0].BusyStatus
-		if got == nil {
+		wantStatus(t, "create busyStatus", do(http.MethodPost, "/api/v1/calendar/events",
+			`{"summary":"Meeting","start":"2026-08-02T09:00:00Z","busyStatus":`+strconv.Itoa(want)+`}`), http.StatusOK)
+		listed := listOneEvent(t, do, "list")
+		if listed.BusyStatus == nil {
 			t.Fatalf("busyStatus=%d: listed event has no busyStatus (round-trip lost it)", want)
 		}
-		if *got != want {
-			t.Fatalf("busyStatus = %d, want %d (oof would be lost via the iCal path)", *got, want)
-		}
+		wantEq(t, "busyStatus (oof would be lost via the iCal path)", *listed.BusyStatus, want)
 		// Clear it for the next iteration so only one event is present.
-		uid := listed.Events[0].UID
-		if rec := do(http.MethodDelete, "/api/v1/calendar/events/"+uid, ""); rec.Code != http.StatusOK {
-			t.Fatalf("delete: status %d", rec.Code)
-		}
+		deleteEvent(t, do, listed.UID)
 	}
+}
+
+// deleteEvent removes one event by the uid the listing reported.
+func deleteEvent(t *testing.T, do requestFunc, uid string) {
+	t.Helper()
+	wantStatus(t, "delete", do(http.MethodDelete, "/api/v1/calendar/events/"+uid, ""), http.StatusOK)
 }
 
 // TestCalendarEventSensitivityRoundTrip proves the sensitivity (normal/private/
@@ -300,67 +154,24 @@ func TestCalendarEventBusyStatusRoundTrip(t *testing.T) {
 // confidential must survive a reload; normal stays unset (absent) so the form
 // shows the default.
 func TestCalendarEventSensitivityRoundTrip(t *testing.T) {
-	dir := t.TempDir()
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatalf("open: %v", err)
-	}
-	st.Close()
-
-	secret := []byte("calendar-sensitivity-test-secret")
-	srv := NewServer(directory.StaticAccounts{}, directory.StaticAccounts{}, nil, "mail.hermex.test", secret, "", false)
-	do := func(method, target, body string) *httptest.ResponseRecorder {
-		token, _ := mintToken(secret, sessionClaims{Email: "alice@hermex.test", Mailbox: dir, Exp: time.Now().Add(time.Hour).Unix()})
-		var req *http.Request
-		if body == "" {
-			req = httptest.NewRequest(method, target, nil)
-		} else {
-			req = httptest.NewRequest(method, target, strings.NewReader(body))
-		}
-		req.AddCookie(&http.Cookie{Name: sessionCookie, Value: token})
-		rec := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(rec, req)
-		return rec
-	}
+	do, _ := apiHarness(t)
 
 	for _, want := range []int{2, 3} {
-		if rec := do(http.MethodPost, "/api/v1/calendar/events", `{"summary":"Meeting","start":"2026-08-02T09:00:00Z","sensitivity":`+strconv.Itoa(want)+`}`); rec.Code != http.StatusOK {
-			t.Fatalf("create sensitivity=%d: status %d", want, rec.Code)
-		}
-		rec := do(http.MethodGet, "/api/v1/calendar/events", "")
-		var listed struct {
-			Events []eventJSON `json:"events"`
-		}
-		if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
-		if len(listed.Events) != 1 {
-			t.Fatalf("got %d events, want 1", len(listed.Events))
-		}
-		got := listed.Events[0].Sensitivity
-		if got == nil {
+		wantStatus(t, "create sensitivity", do(http.MethodPost, "/api/v1/calendar/events",
+			`{"summary":"Meeting","start":"2026-08-02T09:00:00Z","sensitivity":`+strconv.Itoa(want)+`}`), http.StatusOK)
+		listed := listOneEvent(t, do, "list")
+		if listed.Sensitivity == nil {
 			t.Fatalf("sensitivity=%d: listed event has no sensitivity (CLASS round-trip lost it)", want)
 		}
-		if *got != want {
-			t.Fatalf("sensitivity = %d, want %d", *got, want)
-		}
-		uid := listed.Events[0].UID
-		if rec := do(http.MethodDelete, "/api/v1/calendar/events/"+uid, ""); rec.Code != http.StatusOK {
-			t.Fatalf("delete: status %d", rec.Code)
-		}
+		wantEq(t, "sensitivity", *listed.Sensitivity, want)
+		deleteEvent(t, do, listed.UID)
 	}
 
 	// A normal (sensitivity unset) event must not surface a sensitivity after reload.
-	if rec := do(http.MethodPost, "/api/v1/calendar/events", `{"summary":"Open","start":"2026-08-02T09:00:00Z"}`); rec.Code != http.StatusOK {
-		t.Fatalf("create normal: status %d", rec.Code)
-	}
-	rec := do(http.MethodGet, "/api/v1/calendar/events", "")
-	var listed struct {
-		Events []eventJSON `json:"events"`
-	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &listed)
-	if len(listed.Events) != 1 || listed.Events[0].Sensitivity != nil {
-		t.Fatalf("normal event has sensitivity = %v, want nil", listed.Events[0].Sensitivity)
+	wantStatus(t, "create normal", do(http.MethodPost, "/api/v1/calendar/events",
+		`{"summary":"Open","start":"2026-08-02T09:00:00Z"}`), http.StatusOK)
+	if s := listOneEvent(t, do, "list normal").Sensitivity; s != nil {
+		t.Fatalf("normal event has sensitivity = %d, want nil", *s)
 	}
 }
 

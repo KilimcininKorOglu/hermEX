@@ -12,25 +12,24 @@ import (
 // secret-bound (a different secret yields a different key).
 func TestVapidKeysStableAndValid(t *testing.T) {
 	pub1, priv1, err := vapidKeys([]byte("secret-one"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "derive keys", err)
 	pub2, priv2, err := vapidKeys([]byte("secret-one"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "derive keys again", err)
 	if pub1 != pub2 || priv1 != priv2 {
 		t.Fatal("vapidKeys is not stable for the same secret; a restart would invalidate every subscription")
 	}
+
 	pubBytes, err := base64.RawURLEncoding.DecodeString(pub1)
-	if err != nil || len(pubBytes) != 65 || pubBytes[0] != 0x04 {
-		t.Fatalf("public key is not a 65-byte uncompressed P-256 point: %d bytes, err %v", len(pubBytes), err)
+	mustNoErr(t, "decode public key", err)
+	if len(pubBytes) != 65 || pubBytes[0] != 0x04 {
+		t.Fatalf("public key is not a 65-byte uncompressed P-256 point: %d bytes starting %#x", len(pubBytes), pubBytes[0])
 	}
 	privBytes, err := base64.RawURLEncoding.DecodeString(priv1)
-	if err != nil || len(privBytes) != 32 {
-		t.Fatalf("private key is not a 32-byte scalar: %d bytes, err %v", len(privBytes), err)
-	}
-	if pubOther, _, _ := vapidKeys([]byte("secret-two")); pubOther == pub1 {
+	mustNoErr(t, "decode private key", err)
+	wantEq(t, "private key length (a P-256 scalar)", len(privBytes), 32)
+
+	pubOther, _, _ := vapidKeys([]byte("secret-two"))
+	if pubOther == pub1 {
 		t.Fatal("different secrets produced the same public key")
 	}
 }

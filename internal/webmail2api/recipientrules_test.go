@@ -1,7 +1,6 @@
 package webmail2api
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -58,38 +57,31 @@ func TestRecipientRulesAPI(t *testing.T) {
 	}
 
 	// GET lists the existing rules.
-	rec := do(http.MethodGet, "/api/v1/recipient-rules", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("get rules: %d %s", rec.Code, rec.Body.String())
-	}
-	var got struct {
+	type listing struct {
 		Rules []recipientRuleJSON `json:"rules"`
 	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &got)
-	if len(got.Rules) != 1 || got.Rules[0].Pattern != "spam@x.test" || got.Rules[0].Action != "block" {
-		t.Errorf("get rules = %+v, want one block rule for spam@x.test", got.Rules)
+	got := okBody[listing](t, "get rules", do(http.MethodGet, "/api/v1/recipient-rules", ""))
+	if len(got.Rules) != 1 {
+		t.Fatalf("get rules = %+v, want one block rule for spam@x.test", got.Rules)
 	}
+	wantEq(t, "listed rule pattern", got.Rules[0].Pattern, "spam@x.test")
+	wantEq(t, "listed rule action", got.Rules[0].Action, "block")
 
 	// POST persists a valid rule for the session user.
-	if rec := do(http.MethodPost, "/api/v1/recipient-rules", `{"pattern":"friend@x.test","action":"allow"}`); rec.Code != http.StatusOK {
-		t.Fatalf("post rule: %d %s", rec.Code, rec.Body.String())
-	}
+	wantStatus(t, "post rule",
+		do(http.MethodPost, "/api/v1/recipient-rules", `{"pattern":"friend@x.test","action":"allow"}`), http.StatusOK)
 	if len(auth.setArgs) != 1 || auth.setArgs[0] != [3]string{"alice@hermex.test", "friend@x.test", "allow"} {
 		t.Errorf("SetRecipientRule args = %v, want alice/friend@x.test/allow", auth.setArgs)
 	}
 
 	// POST with an unknown action is rejected before touching the store.
-	if rec := do(http.MethodPost, "/api/v1/recipient-rules", `{"pattern":"x@x.test","action":"maybe"}`); rec.Code != http.StatusBadRequest {
-		t.Errorf("post bad action = %d, want 400", rec.Code)
-	}
-	if len(auth.setArgs) != 1 {
-		t.Errorf("a rejected action must not reach the store; setArgs = %v", auth.setArgs)
-	}
+	wantStatus(t, "post bad action",
+		do(http.MethodPost, "/api/v1/recipient-rules", `{"pattern":"x@x.test","action":"maybe"}`), http.StatusBadRequest)
+	wantEq(t, "store writes after a rejected action", len(auth.setArgs), 1)
 
 	// DELETE removes by pattern.
-	if rec := do(http.MethodDelete, "/api/v1/recipient-rules?pattern=spam@x.test", ""); rec.Code != http.StatusOK {
-		t.Fatalf("delete rule: %d %s", rec.Code, rec.Body.String())
-	}
+	wantStatus(t, "delete rule",
+		do(http.MethodDelete, "/api/v1/recipient-rules?pattern=spam@x.test", ""), http.StatusOK)
 	if len(auth.deleted) != 1 || auth.deleted[0] != "spam@x.test" {
 		t.Errorf("DeleteRecipientRule pattern = %v, want [spam@x.test]", auth.deleted)
 	}

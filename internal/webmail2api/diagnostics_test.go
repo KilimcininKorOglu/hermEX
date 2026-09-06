@@ -1,11 +1,9 @@
 package webmail2api
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -18,24 +16,16 @@ import (
 // and that naming a different mailbox returns nothing rather than exposing its queue.
 func TestDiagnosticsSurfacesOwnFailedDeliveries(t *testing.T) {
 	spool, err := relay.Open(filepath.Join(t.TempDir(), "spool.sqlite3"))
-	if err != nil {
-		t.Fatalf("open spool: %v", err)
-	}
+	mustNoErr(t, "open spool", err)
 	now := time.Now()
-	if err := spool.Enqueue("alice@hermex.test", []string{"nobody@external.test"}, []byte("Subject: x\r\n\r\nhi"), now); err != nil {
-		t.Fatal(err)
-	}
-	if err := spool.Enqueue("bob@hermex.test", []string{"other@external.test"}, []byte("Subject: y\r\n\r\nhi"), now); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "enqueue alice",
+		spool.Enqueue("alice@hermex.test", []string{"nobody@external.test"}, []byte("Subject: x\r\n\r\nhi"), now))
+	mustNoErr(t, "enqueue bob",
+		spool.Enqueue("bob@hermex.test", []string{"other@external.test"}, []byte("Subject: y\r\n\r\nhi"), now))
 	entries, err := spool.List()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "list spool", err)
 	for _, e := range entries {
-		if err := spool.Retry(e.RecipientID, now.Add(time.Hour), "550 mailbox unavailable"); err != nil {
-			t.Fatal(err)
-		}
+		mustNoErr(t, "record a failed attempt", spool.Retry(e.RecipientID, now.Add(time.Hour), "550 mailbox unavailable"))
 	}
 
 	secret := []byte("diagnostics-test-secret")
@@ -49,31 +39,20 @@ func TestDiagnosticsSurfacesOwnFailedDeliveries(t *testing.T) {
 		return rec
 	}
 
-	var resp struct {
+	type diagnostics struct {
 		Errors []diagnosticJSON `json:"errors"`
 	}
-	rec := do("/api/v1/mail/diagnostics")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("diagnostics: status %d", rec.Code)
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	resp := okBody[diagnostics](t, "diagnostics", do("/api/v1/mail/diagnostics"))
 	if len(resp.Errors) != 1 {
 		t.Fatalf("got %d diagnostics, want 1 (alice's own, not bob's)", len(resp.Errors))
 	}
 	d := resp.Errors[0]
-	if d.Category != "delivery" || !d.Retryable || !strings.Contains(d.Message, "nobody@external.test") || !strings.Contains(d.Message, "550") {
-		t.Fatalf("diagnostic = %+v, want a retryable delivery error naming nobody@external.test and 550", d)
-	}
+	wantEq(t, "category", d.Category, "delivery")
+	wantEq(t, "retryable", d.Retryable, true)
+	wantContains(t, "message", d.Message, "nobody@external.test")
+	wantContains(t, "message", d.Message, "550")
 
 	// A request naming another mailbox returns nothing (no cross-mailbox exposure).
-	resp.Errors = nil
-	rec = do("/api/v1/mail/diagnostics?mailbox=bob@hermex.test")
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode cross-mailbox: %v", err)
-	}
-	if len(resp.Errors) != 0 {
-		t.Fatalf("cross-mailbox diagnostics leaked %d entries", len(resp.Errors))
-	}
+	other := decodeBody[diagnostics](t, "cross-mailbox diagnostics", do("/api/v1/mail/diagnostics?mailbox=bob@hermex.test"))
+	wantEq(t, "cross-mailbox diagnostic entries", len(other.Errors), 0)
 }

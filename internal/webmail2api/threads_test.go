@@ -48,20 +48,16 @@ func TestGroupThreads(t *testing.T) {
 	}
 	// Longest conversation first: the "hello" bucket holds 3 messages.
 	hello := threads[0]
-	if hello.Key != "hello" || len(hello.Messages) != 3 {
-		t.Fatalf("first thread = %q with %d msgs, want hello/3", hello.Key, len(hello.Messages))
-	}
-	if hello.Subject != "Hello" {
-		t.Errorf("subject = %q, want Hello", hello.Subject)
-	}
-	if hello.Unread != 2 {
-		t.Errorf("unread = %d, want 2 (msg1 read, msg2+msg4 unread)", hello.Unread)
-	}
+	wantEq(t, "first thread key", hello.Key, "hello")
+	wantEq(t, "first thread message count", len(hello.Messages), 3)
+	wantEq(t, "first thread subject", hello.Subject, "Hello")
+	wantEq(t, "first thread unread (msg1 read, msg2+msg4 unread)", hello.Unread, 2)
 	// Participants unique and first-seen ordered: alice (msg1), bob (msg2); alice repeats.
-	if len(hello.Participants) != 2 || hello.Participants[0] != "alice@x" || hello.Participants[1] != "bob@x" {
-		t.Errorf("participants = %v, want [alice@x bob@x]", hello.Participants)
+	if len(hello.Participants) != 2 {
+		t.Fatalf("participants = %v, want [alice@x bob@x]", hello.Participants)
 	}
-	if threads[1].Key != "standalone" || len(threads[1].Messages) != 1 {
-		t.Errorf("second thread = %q/%d, want standalone/1", threads[1].Key, len(threads[1].Messages))
-	}
+	wantEq(t, "first participant", hello.Participants[0], "alice@x")
+	wantEq(t, "second participant", hello.Participants[1], "bob@x")
+	wantEq(t, "second thread key", threads[1].Key, "standalone")
+	wantEq(t, "second thread message count", len(threads[1].Messages), 1)
 }

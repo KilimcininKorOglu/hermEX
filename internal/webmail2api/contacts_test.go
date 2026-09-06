@@ -43,20 +43,12 @@ func TestContactRichFieldsRoundTrip(t *testing.T) {
 	}
 
 	body := `{"name":"Ada Lovelace","prefix":"Dr.","firstName":"Ada","middleName":"Augusta","lastName":"Lovelace","suffix":"Jr.","email":"ada@analytical.test","email2":"ada@home.test","email3":"ada@academy.test","phone":"+1 555 0100","mobilePhone":"+1 555 0101","homePhone":"+1 555 0102","businessFax":"+1 555 0199","company":"Analytical Engine","jobTitle":"Mathematician","department":"Science","birthday":"1815-12-10","nickname":"Ada","fileAs":"Lovelace, Ada","profession":"Mathematician","spouse":"Charles","billing":"Project X-1815","categories":["VIP","Pioneers"],"homeStreet":"221B Baker St","homeCity":"London","homeState":"","homePostal":"NW1","homeCountry":"UK","otherStreet":"10 Downing","otherCity":"Westminster","otherState":"Lon","otherPostal":"SW1","otherCountry":"GB","imAddress":"ada@im.test","webPage":"https://example.test/ada"}`
-	if rec := do(http.MethodPost, "/api/v1/contacts", body); rec.Code != http.StatusOK {
-		t.Fatalf("create: status %d body %s", rec.Code, rec.Body.String())
-	}
+	wantStatus(t, "create", do(http.MethodPost, "/api/v1/contacts", body), http.StatusOK)
 
-	rec := do(http.MethodGet, "/api/v1/contacts", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("list: status %d", rec.Code)
-	}
-	var listed struct {
+	type listing struct {
 		Contacts []contactJSON `json:"contacts"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	listed := okBody[listing](t, "list", do(http.MethodGet, "/api/v1/contacts", ""))
 	if len(listed.Contacts) != 1 {
 		t.Fatalf("got %d contacts, want 1", len(listed.Contacts))
 	}
@@ -89,14 +81,18 @@ func TestContactRichFieldsRoundTrip(t *testing.T) {
 		"otherCity": "Westminster", "otherPostal": "SW1", "otherCountry": "GB",
 		"imAddress": "ada@im.test", "webPage": "https://example.test/ada",
 	}
-	for k, w := range want {
-		if checks[k] != w {
-			t.Errorf("%s = %q, want %q", k, checks[k], w)
-		}
-	}
+	wantContactFields(t, checks, want)
 	// Categories ride the shared PidNameKeywords multi-value named prop.
 	if len(c.Categories) != 2 || c.Categories[0] != "VIP" || c.Categories[1] != "Pioneers" {
 		t.Errorf("categories = %v, want [VIP Pioneers]", c.Categories)
+	}
+}
+
+// wantContactFields compares each named field against what was stored.
+func wantContactFields(t *testing.T, got, want map[string]string) {
+	t.Helper()
+	for k, w := range want {
+		wantEq(t, k, got[k], w)
 	}
 }
 
@@ -132,58 +128,46 @@ func TestContactPhotoRoundTrip(t *testing.T) {
 	}
 
 	// Create a contact to attach the photo to.
-	rec := do(http.MethodPost, "/api/v1/contacts", `{"name":"Grace Hopper","email":"grace@navy.test"}`, "application/json")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("create: status %d body %s", rec.Code, rec.Body.String())
-	}
-	var created struct {
+	type createResponse struct {
 		Contact contactJSON `json:"contact"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("decode create: %v", err)
-	}
+	created := okBody[createResponse](t, "create",
+		do(http.MethodPost, "/api/v1/contacts", `{"name":"Grace Hopper","email":"grace@navy.test"}`, "application/json"))
 	photoTarget := "/api/v1/contacts/" + created.Contact.ID + "/photo"
 
 	// No photo yet: GET is 404.
-	if rec := do(http.MethodGet, photoTarget, "", ""); rec.Code != http.StatusNotFound {
-		t.Fatalf("empty photo GET: status %d, want 404", rec.Code)
-	}
+	wantStatus(t, "empty photo GET", do(http.MethodGet, photoTarget, "", ""), http.StatusNotFound)
 
 	// Upload a fake JPEG payload.
 	photo := bytes.Repeat([]byte{0xFF, 0xD8, 0xFF, 0xE0}, 64)
-	var buf bytes.Buffer
-	mw := multipart.NewWriter(&buf)
-	fw, err := mw.CreateFormFile("file", "ContactPicture.jpg")
-	if err != nil {
-		t.Fatalf("create form file: %v", err)
-	}
-	if _, err := fw.Write(photo); err != nil {
-		t.Fatalf("write photo: %v", err)
-	}
-	_ = mw.Close()
-	if rec := do(http.MethodPut, photoTarget, buf.String(), mw.FormDataContentType()); rec.Code != http.StatusOK {
-		t.Fatalf("put photo: status %d body %s", rec.Code, rec.Body.String())
-	}
+	body, contentType := photoUpload(t, photo)
+	wantStatus(t, "put photo", do(http.MethodPut, photoTarget, body, contentType), http.StatusOK)
 
 	// GET returns the same bytes we uploaded.
-	rec = do(http.MethodGet, photoTarget, "", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("get photo: status %d", rec.Code)
-	}
+	rec := do(http.MethodGet, photoTarget, "", "")
+	wantStatus(t, "get photo", rec, http.StatusOK)
 	if !bytes.Equal(rec.Body.Bytes(), photo) {
 		t.Fatalf("get photo: %d bytes, want %d (round-trip mismatch)", len(rec.Body.Bytes()), len(photo))
 	}
-	if ct := rec.Header().Get("Content-Type"); ct != "image/jpeg" {
-		t.Fatalf("get photo content-type = %q, want image/jpeg", ct)
-	}
+	wantEq(t, "get photo content-type", rec.Header().Get("Content-Type"), "image/jpeg")
 
 	// Delete the photo; a follow-up GET is 404.
-	if rec := do(http.MethodDelete, photoTarget, "", ""); rec.Code != http.StatusOK {
-		t.Fatalf("delete photo: status %d", rec.Code)
-	}
-	if rec := do(http.MethodGet, photoTarget, "", ""); rec.Code != http.StatusNotFound {
-		t.Fatalf("post-delete photo GET: status %d, want 404", rec.Code)
-	}
+	wantStatus(t, "delete photo", do(http.MethodDelete, photoTarget, "", ""), http.StatusOK)
+	wantStatus(t, "post-delete photo GET", do(http.MethodGet, photoTarget, "", ""), http.StatusNotFound)
+}
+
+// photoUpload builds the multipart body a photo PUT carries, returning it with
+// its Content-Type.
+func photoUpload(t *testing.T, photo []byte) (body, contentType string) {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", "ContactPicture.jpg")
+	mustNoErr(t, "create form file", err)
+	_, err = fw.Write(photo)
+	mustNoErr(t, "write photo", err)
+	mustNoErr(t, "close multipart writer", mw.Close())
+	return buf.String(), mw.FormDataContentType()
 }
 
 // TestContactExport proves a contact can be downloaded as a vCard (.vcf), the
@@ -269,62 +253,38 @@ func TestContactExportDistributionList(t *testing.T) {
 		return rec
 	}
 
-	rec := do(http.MethodPost, "/api/v1/contacts", `{"name":"Engineering","is_group":true,"members":["eng-a@hermex.test","eng-b@hermex.test"]}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("create: status %d body %s", rec.Code, rec.Body.String())
-	}
-	var created struct {
+	type createResponse struct {
 		Contact contactJSON `json:"contact"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	created := okBody[createResponse](t, "create",
+		do(http.MethodPost, "/api/v1/contacts", `{"name":"Engineering","is_group":true,"members":["eng-a@hermex.test","eng-b@hermex.test"]}`))
 
-	rec = do(http.MethodGet, "/api/v1/contacts/"+created.Contact.ID+"/vcard", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("export: status %d", rec.Code)
-	}
+	rec := do(http.MethodGet, "/api/v1/contacts/"+created.Contact.ID+"/vcard", "")
+	wantStatus(t, "export", rec, http.StatusOK)
 	body := rec.Body.String()
 	// One BEGIN:VCARD per member.
-	if got := strings.Count(body, "BEGIN:VCARD"); got != 2 {
-		t.Errorf("export has %d vCards, want 2", got)
-	}
-	if !strings.Contains(body, "EMAIL:eng-a@hermex.test") || !strings.Contains(body, "EMAIL:eng-b@hermex.test") {
-		t.Errorf("export body missing a member EMAIL: %s", body)
-	}
+	wantEq(t, "exported vCard count", strings.Count(body, "BEGIN:VCARD"), 2)
+	wantContains(t, "export body", body, "EMAIL:eng-a@hermex.test")
+	wantContains(t, "export body", body, "EMAIL:eng-b@hermex.test")
 
 	// Expand the distribution list into its member addresses, the compose
 	// recipient-picker path: a non-group id must be rejected, the group id returns
 	// the two members in order.
-	rec = do(http.MethodGet, "/api/v1/contacts/"+created.Contact.ID+"/expand", "")
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expand: status %d body %s", rec.Code, rec.Body.String())
-	}
-	var exp struct {
+	type expansion struct {
 		Name    string   `json:"name"`
 		Members []string `json:"members"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &exp); err != nil {
-		t.Fatalf("decode expand: %v", err)
+	exp := okBody[expansion](t, "expand", do(http.MethodGet, "/api/v1/contacts/"+created.Contact.ID+"/expand", ""))
+	wantEq(t, "expand name", exp.Name, "Engineering")
+	if len(exp.Members) != 2 {
+		t.Fatalf("expand members = %v, want two", exp.Members)
 	}
-	if exp.Name != "Engineering" {
-		t.Errorf("expand name = %q, want Engineering", exp.Name)
-	}
-	if len(exp.Members) != 2 || exp.Members[0] != "eng-a@hermex.test" || exp.Members[1] != "eng-b@hermex.test" {
-		t.Errorf("expand members = %v, want [eng-a@hermex.test eng-b@hermex.test]", exp.Members)
-	}
+	wantEq(t, "first member", exp.Members[0], "eng-a@hermex.test")
+	wantEq(t, "second member", exp.Members[1], "eng-b@hermex.test")
 
 	// A regular contact is not expandable.
-	rec = do(http.MethodPost, "/api/v1/contacts", `{"name":"Solo","email":"solo@hermex.test"}`)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("create contact: %d %s", rec.Code, rec.Body.String())
-	}
-	var solo struct {
-		Contact contactJSON `json:"contact"`
-	}
-	_ = json.Unmarshal(rec.Body.Bytes(), &solo)
-	rec = do(http.MethodGet, "/api/v1/contacts/"+solo.Contact.ID+"/expand", "")
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("expand a regular contact = %d, want 400", rec.Code)
-	}
+	solo := okBody[createResponse](t, "create contact",
+		do(http.MethodPost, "/api/v1/contacts", `{"name":"Solo","email":"solo@hermex.test"}`))
+	wantStatus(t, "expand a regular contact",
+		do(http.MethodGet, "/api/v1/contacts/"+solo.Contact.ID+"/expand", ""), http.StatusBadRequest)
 }
