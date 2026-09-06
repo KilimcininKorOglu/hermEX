@@ -94,41 +94,8 @@ func TestOpenMessageAndGetProps(t *testing.T) {
 
 	// OpenMessage off the logon: input slot 0, message output slot 1.
 	om, h := sess.Dispatch(buildOpenMessage(0, 1, inboxEID, msgEID), []uint32{logonH, 0xFFFFFFFF})
-	p := ext.NewPull(om, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropOpenMessage {
-		t.Fatalf("OpenMessage RopId = %#x", id)
-	}
-	mustU8(t, p, "ohindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("OpenMessage ReturnValue = %#x", ec)
-	}
-	mustU8(t, p, "hasNamedProperties")
-	pullTypedString(t, p) // SubjectPrefix (none for an unprefixed subject)
-	if got := pullTypedString(t, p); got != "READMSG" {
-		t.Errorf("NormalizedSubject = %q, want \"READMSG\"", got)
-	}
-	if rc := mustU16(t, p, "recipientCount"); rc != 1 {
-		t.Errorf("RecipientCount = %d, want 1 (the To recipient)", rc)
-	}
-	rcols, err := p.PropTags() // RecipientColumns (empty)
-	if err != nil {
-		t.Fatalf("RecipientColumns: %v", err)
-	}
-	if rows := mustU8(t, p, "rowCount"); rows != 1 {
-		t.Errorf("recipient RowCount = %d, want 1", rows)
-	}
-	if rt := mustU8(t, p, "recipientType"); rt != uint8(mapi.RecipTo) {
-		t.Errorf("RecipientType = %d, want %d (To)", rt, mapi.RecipTo)
-	}
-	mustU16(t, p, "codePageId")
-	mustU16(t, p, "reserved")
-	rbag, ok := pullRecipientRow(p, rcols)
-	if !ok {
-		t.Fatal("recipient row decode failed")
-	}
-	if got := stringProp(rbag, mapi.PrEmailAddress); got != "alice@hermex.test" {
-		t.Errorf("recipient email = %q, want alice@hermex.test", got)
-	}
+	p := ropOK(t, om, ropOpenMessage, "OpenMessage")
+	assertOpenMessageBody(t, p, "READMSG")
 	msgH := h[1]
 	if obj := sess.get(msgH); obj == nil || obj.kind != kindMessage || obj.messageID != msgID {
 		t.Fatalf("message object wrong: %+v", obj)
@@ -137,35 +104,44 @@ func TestOpenMessageAndGetProps(t *testing.T) {
 	// GetPropertiesSpecific: a single PROPERTY_ROW over PrSubject.
 	cols := []mapi.PropTag{mapi.PrSubject}
 	gps, _ := sess.Dispatch(buildGetProps(ropGetPropertiesSpecific, 0, cols), []uint32{msgH})
-	p = ext.NewPull(gps, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropGetPropertiesSpecific {
-		t.Fatalf("GetPropertiesSpecific RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("GetPropertiesSpecific ReturnValue = %#x", ec)
-	}
-	row := decodeRow(t, p, cols)
-	if subj, _ := row.Get(mapi.PrSubject); subj != "READMSG" {
-		t.Errorf("GetPropertiesSpecific subject = %v, want \"READMSG\"", subj)
-	}
+	p = ropOK(t, gps, ropGetPropertiesSpecific, "GetPropertiesSpecific")
+	wantProp(t, decodeRow(t, p, cols), mapi.PrSubject, "READMSG", "GetPropertiesSpecific subject")
 
 	// GetPropertiesAll: the full property bag as a TPROPVAL_ARRAY.
 	gpa, _ := sess.Dispatch(buildGetProps(ropGetPropertiesAll, 0, nil), []uint32{msgH})
-	p = ext.NewPull(gpa, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropGetPropertiesAll {
-		t.Fatalf("GetPropertiesAll RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("GetPropertiesAll ReturnValue = %#x", ec)
-	}
+	p = ropOK(t, gpa, ropGetPropertiesAll, "GetPropertiesAll")
 	all, err := p.PropertyValues()
 	if err != nil {
 		t.Fatalf("decode TPROPVAL_ARRAY: %v", err)
 	}
-	if subj, ok := all.Get(mapi.PrSubject); !ok || subj != "READMSG" {
-		t.Errorf("GetPropertiesAll missing/wrong subject: %v (present=%v)", subj, ok)
+	wantProp(t, all, mapi.PrSubject, "READMSG", "GetPropertiesAll subject")
+}
+
+// assertOpenMessageBody checks the RopOpenMessage response body: the named-
+// property flag, the split subject, and the single-recipient table that follows
+// it.
+func assertOpenMessageBody(t *testing.T, p *ext.Pull, subject string) {
+	t.Helper()
+	mustU8(t, p, "hasNamedProperties")
+	pullTypedString(t, p) // SubjectPrefix (none for an unprefixed subject)
+	if got := pullTypedString(t, p); got != subject {
+		t.Errorf("NormalizedSubject = %q, want %q", got, subject)
+	}
+	wantU16(t, p, "RecipientCount (the To recipient)", 1)
+	rcols, err := p.PropTags() // RecipientColumns (empty)
+	if err != nil {
+		t.Fatalf("RecipientColumns: %v", err)
+	}
+	wantU8(t, p, "recipient RowCount", 1)
+	wantU8(t, p, "RecipientType (To)", uint8(mapi.RecipTo))
+	mustU16(t, p, "codePageId")
+	mustU16(t, p, "reserved")
+	rbag, ok := pullRecipientRow(p, rcols)
+	if !ok {
+		t.Fatal("recipient row decode failed")
+	}
+	if got := stringProp(rbag, mapi.PrEmailAddress); got != "alice@hermex.test" {
+		t.Errorf("recipient email = %q, want alice@hermex.test", got)
 	}
 }
 

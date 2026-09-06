@@ -23,15 +23,10 @@ func TestDetectContentChanges(t *testing.T) {
 	wantFolder := uint64(mapi.MakeEIDEx(1, uint64(inbox)))
 
 	// Empty inbox: no changes, empty snapshot.
-	events, snap, err := detectContentChanges(st, inbox, nil)
-	if err != nil {
-		t.Fatalf("detect baseline: %v", err)
-	}
-	if len(events) != 0 {
-		t.Fatalf("baseline: got %d events, want 0", len(events))
-	}
+	events, snap := pollChanges(t, st, inbox, nil, "baseline")
+	wantNoEvents(t, events, "baseline")
 
-	// Append → one ObjectCreated for the new message, with wire EIDs.
+	// Append: one ObjectCreated for the new message, with wire EIDs.
 	raw := []byte("From: a@test\r\nTo: b@test\r\nSubject: x\r\n\r\nhi\r\n")
 	info, err := st.AppendMessage(inbox, raw, time.Unix(1700000000, 0), 0)
 	if err != nil {
@@ -39,16 +34,11 @@ func TestDetectContentChanges(t *testing.T) {
 	}
 	wantMsg := uint64(mapi.MakeEIDEx(1, uint64(info.ID)))
 
-	events, snap, err = detectContentChanges(st, inbox, snap)
-	if err != nil {
-		t.Fatalf("detect create: %v", err)
-	}
-	if len(events) != 1 || events[0].flags != fnevObjectCreated|nfByMessage {
-		t.Fatalf("create: got %+v, want one ObjectCreated|byMessage", events)
-	}
-	if events[0].folderID != wantFolder || events[0].messageID != wantMsg {
+	events, snap = pollChanges(t, st, inbox, snap, "create")
+	ev := wantOneEvent(t, events, fnevObjectCreated|nfByMessage, "create")
+	if ev.folderID != wantFolder || ev.messageID != wantMsg {
 		t.Errorf("create eids: folder=%#x msg=%#x, want folder=%#x msg=%#x",
-			events[0].folderID, events[0].messageID, wantFolder, wantMsg)
+			ev.folderID, ev.messageID, wantFolder, wantMsg)
 	}
 
 	// Read-state flip advances read_cn, not change_number, the MAX-based snapshot
@@ -56,35 +46,48 @@ func TestDetectContentChanges(t *testing.T) {
 	if err := st.SetMessageReadState(info.ID, true); err != nil {
 		t.Fatalf("set read state: %v", err)
 	}
-	events, snap, err = detectContentChanges(st, inbox, snap)
-	if err != nil {
-		t.Fatalf("detect modify: %v", err)
-	}
-	if len(events) != 1 || events[0].flags != fnevObjectModified|nfByMessage {
-		t.Fatalf("read-state modify: got %+v, want one ObjectModified|byMessage", events)
-	}
+	events, snap = pollChanges(t, st, inbox, snap, "modify")
+	wantOneEvent(t, events, fnevObjectModified|nfByMessage, "read-state modify")
 
 	// A poll with no further change emits nothing.
-	events, snap, err = detectContentChanges(st, inbox, snap)
-	if err != nil {
-		t.Fatalf("detect idle: %v", err)
-	}
-	if len(events) != 0 {
-		t.Fatalf("idle: got %d events, want 0", len(events))
-	}
+	events, snap = pollChanges(t, st, inbox, snap, "idle")
+	wantNoEvents(t, events, "idle")
 
-	// Delete → one ObjectDeleted carrying the gone message's id.
+	// Delete: one ObjectDeleted carrying the gone message's id.
 	if err := st.DeleteMessage(inbox, info.UID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	events, _, err = detectContentChanges(st, inbox, snap)
+	events, _ = pollChanges(t, st, inbox, snap, "delete")
+	ev = wantOneEvent(t, events, fnevObjectDeleted|nfByMessage, "delete")
+	if ev.messageID != wantMsg {
+		t.Errorf("delete msg eid = %#x, want %#x", ev.messageID, wantMsg)
+	}
+}
+
+// pollChanges runs one detection pass and fails the test when it errors.
+func pollChanges(t *testing.T, st *objectstore.Store, folderID int64, snap folderSnapshot, what string) ([]notification, folderSnapshot) {
+	t.Helper()
+	events, next, err := detectContentChanges(st, folderID, snap)
 	if err != nil {
-		t.Fatalf("detect delete: %v", err)
+		t.Fatalf("detect %s: %v", what, err)
 	}
-	if len(events) != 1 || events[0].flags != fnevObjectDeleted|nfByMessage {
-		t.Fatalf("delete: got %+v, want one ObjectDeleted|byMessage", events)
+	return events, next
+}
+
+// wantNoEvents asserts a poll reported nothing.
+func wantNoEvents(t *testing.T, events []notification, what string) {
+	t.Helper()
+	if len(events) != 0 {
+		t.Fatalf("%s: got %d events, want 0", what, len(events))
 	}
-	if events[0].messageID != wantMsg {
-		t.Errorf("delete msg eid = %#x, want %#x", events[0].messageID, wantMsg)
+}
+
+// wantOneEvent asserts a poll reported exactly one event with the given flags,
+// and returns it so the caller can check its ids.
+func wantOneEvent(t *testing.T, events []notification, flags uint16, what string) notification {
+	t.Helper()
+	if len(events) != 1 || events[0].flags != flags {
+		t.Fatalf("%s: got %+v, want one event with flags %#x", what, events, flags)
 	}
+	return events[0]
 }
