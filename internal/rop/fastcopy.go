@@ -91,17 +91,13 @@ func (s *Session) ropFastTransferSourceCopyMessages(p *ext.Pull, out *ext.Push, 
 		return false
 	}
 
-	src := s.get(handleAt(handles, hindex))
-	if src == nil || src.kind != kindFolder || src.store == nil {
-		writeErr(out, ropFastTransferSourceCopyMessages, ohindex, ecError)
+	src, ok := s.openFolder(out, ropFastTransferSourceCopyMessages, handles, hindex, ohindex)
+	if !ok {
 		return true
 	}
-	if ok, err := s.authorize(src.store, src.folderID, mapi.FrightsReadAny); err != nil {
-		writeErr(out, ropFastTransferSourceCopyMessages, ohindex, ecError)
-		return true
-	} else if !ok {
-		s.logAuthzDeny(ropFastTransferSourceCopyMessages, src.store, src.folderID, mapi.FrightsReadAny)
-		writeErr(out, ropFastTransferSourceCopyMessages, ohindex, ecAccessDenied)
+	// A generic copy bulk-reads the folder's messages, bypassing per-message open,
+	// so a delegate needs ReadAny.
+	if s.denyWrite(out, ropFastTransferSourceCopyMessages, ohindex, src.store, src.folderID, mapi.FrightsReadAny) {
 		return true
 	}
 

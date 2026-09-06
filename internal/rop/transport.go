@@ -1,8 +1,6 @@
 package rop
 
 import (
-	"errors"
-
 	"hermex/internal/ext"
 	"hermex/internal/mapi"
 )
@@ -64,29 +62,12 @@ func (s *Session) ropTransportSend(_ *ext.Pull, out *ext.Push, handles []uint32,
 		writeErr(out, ropTransportSend, hindex, ecNotFound)
 		return true
 	}
-	// Sending is governed by send-on-behalf: an owner sends as itself, a delegate only
-	// when designated on the mailbox's delegate list. The resolved identities are
-	// stamped into the transmitted copy.
-	representing, sender, allowed, err := s.delegateSendIdentity(obj.store)
-	if err != nil {
-		writeErr(out, ropTransportSend, hindex, ecError)
+	representing, sender, ok := s.authorizeSubmit(out, obj, ropTransportSend, hindex)
+	if !ok {
 		return true
 	}
-	if !allowed {
-		writeErr(out, ropTransportSend, hindex, ecAccessDenied)
-		return true
-	}
-	nm := obj.newMsg
-	if !nm.saved || nm.savedID == 0 || s.accounts == nil {
-		writeErr(out, ropTransportSend, hindex, ecNotSupported)
-		return true
-	}
-	if _, err = s.deliverComposed(nm, representing, sender); err != nil {
-		if errors.Is(err, errNoRecipient) {
-			writeErr(out, ropTransportSend, hindex, ecNotFound)
-		} else {
-			writeErr(out, ropTransportSend, hindex, ecError)
-		}
+	if _, err := s.deliverComposed(obj.newMsg, representing, sender); err != nil {
+		writeErr(out, ropTransportSend, hindex, noRecipientOrError(err))
 		return true
 	}
 	out.Uint8(ropTransportSend)

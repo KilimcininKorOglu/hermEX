@@ -92,6 +92,35 @@ func (s *Session) ropGetMessageStatus(p *ext.Pull, out *ext.Push, handles []uint
 // resolves a FOLDER handle and addresses the message by id, and it does not
 // advance the message's change number (status is a flag set directly, not a saved
 // edit).
+// mergeMessageStatus applies the masked status bits to the message's stored
+// status and writes the result back, returning what the status became. ok is
+// false with the return code the response carries.
+//
+// The mask selects which bits the request may touch; every other bit keeps its
+// stored value. The in-conflict bit is server-owned and a client may not set it.
+func mergeMessageStatus(folder *object, mid int64, newStatus, mask uint32) (merged, ec uint32, ok bool) {
+	props, err := folder.store.GetMessageProperties(mid, mapi.PrMsgStatus)
+	if err != nil {
+		return 0, ecError, false
+	}
+	original, found := messageStatus(props)
+	if !found {
+		return 0, ecNotFound, false
+	}
+	applied := newStatus & mask
+	if applied&msgStatusInConflict != 0 {
+		return 0, ecAccessDenied, false
+	}
+	// Keep the original bits the mask did not select: merged = applied | original
+	// with the masked-and-cleared bits removed from original.
+	merged = applied | (original &^ (mask &^ applied))
+	// #nosec G115 -- the signed and unsigned views of the same 32 bits
+	if err := folder.store.SetMessageProperties(mid, mapi.PropertyValues{{Tag: mapi.PrMsgStatus, Value: int32(merged)}}); err != nil {
+		return 0, ecError, false
+	}
+	return merged, ecSuccess, true
+}
+
 func (s *Session) ropSetMessageStatus(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	msgEID, e1 := p.Uint64()    // MessageId
 	newStatus, e2 := p.Uint32() // MessageStatusFlags
@@ -114,27 +143,9 @@ func (s *Session) ropSetMessageStatus(p *ext.Pull, out *ext.Push, handles []uint
 	}
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	mid := int64(mapi.EID(msgEID).GCValue())
-	props, err := folder.store.GetMessageProperties(mid, mapi.PrMsgStatus)
-	if err != nil {
-		writeErr(out, ropSetMessageStatus, hindex, ecError)
-		return true
-	}
-	original, ok := messageStatus(props)
+	merged, ec, ok := mergeMessageStatus(folder, mid, newStatus, mask)
 	if !ok {
-		writeErr(out, ropSetMessageStatus, hindex, ecNotFound)
-		return true
-	}
-	applied := newStatus & mask
-	if applied&msgStatusInConflict != 0 {
-		writeErr(out, ropSetMessageStatus, hindex, ecAccessDenied)
-		return true
-	}
-	// Keep the original bits the mask did not select: merged = applied | original
-	// with the masked-and-cleared bits removed from original.
-	merged := applied | (original &^ (mask &^ applied))
-	// #nosec G115 -- the signed and unsigned views of the same 32 bits
-	if err := folder.store.SetMessageProperties(mid, mapi.PropertyValues{{Tag: mapi.PrMsgStatus, Value: int32(merged)}}); err != nil {
-		writeErr(out, ropSetMessageStatus, hindex, ecError)
+		writeErr(out, ropSetMessageStatus, hindex, ec)
 		return true
 	}
 

@@ -86,41 +86,56 @@ func (t *tableState) baseIndex(idx int) int {
 // id to OpenMessage / OpenFolder the row it just found (the browse->open chain).
 func (t *tableState) rowProps(store *objectstore.Store, idx int) (mapi.PropertyValues, error) {
 	base := t.baseIndex(idx)
-	if t.kind == tableHierarchy {
-		fid := t.folders[base].ID
-		props, err := store.GetFolderProperties(fid, t.columns...)
-		if err != nil {
-			return nil, err
-		}
-		if slices.Contains(t.columns, mapi.PrFolderID) {
-			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-			props.Set(mapi.PrFolderID, int64(mapi.MakeEIDEx(1, uint64(fid))))
-		}
-		return props, nil
-	}
-	if t.kind == tablePermission {
+	switch t.kind {
+	case tableHierarchy:
+		return t.folderRow(store, base)
+	case tablePermission:
 		// The member bags are built complete at GetPermissionsTable time and never
 		// mutated, so the requested columns project straight from the snapshot.
 		return t.permissions[base], nil
-	}
-	if t.kind == tableRules {
+	case tableRules:
 		// The rule bags are built complete at GetRulesTable time and never mutated.
 		return t.rules[base], nil
+	case tableAttachment:
+		return t.attachmentRow(base), nil
 	}
-	if t.kind == tableAttachment {
-		// The bags are already in memory; copy before synthesizing PR_ATTACH_NUM
-		// so the stored snapshot is not mutated. A stored attach number is
-		// authoritative; only when one is absent (legacy data that predates stored
-		// numbers) is the base row index used as a fallback.
-		row := append(mapi.PropertyValues(nil), t.attachments[base]...)
-		if slices.Contains(t.columns, mapi.PrAttachNum) {
-			if _, ok := row.Get(mapi.PrAttachNum); !ok {
-				// #nosec G115 -- an index into the message's in-memory attachment list
-				row.Set(mapi.PrAttachNum, int32(base))
-			}
-		}
-		return row, nil
+	return t.messageRow(store, base)
+}
+
+// folderRow projects one hierarchy row, synthesizing the folder's EID when the
+// column set asks for it.
+func (t *tableState) folderRow(store *objectstore.Store, base int) (mapi.PropertyValues, error) {
+	fid := t.folders[base].ID
+	props, err := store.GetFolderProperties(fid, t.columns...)
+	if err != nil {
+		return nil, err
 	}
+	if slices.Contains(t.columns, mapi.PrFolderID) {
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		props.Set(mapi.PrFolderID, int64(mapi.MakeEIDEx(1, uint64(fid))))
+	}
+	return props, nil
+}
+
+// attachmentRow projects one attachment row. The bags are already in memory, so
+// it copies before synthesizing PR_ATTACH_NUM and the stored snapshot is not
+// mutated. A stored attach number is authoritative; only when one is absent
+// (legacy data predating stored numbers) is the base row index used instead.
+func (t *tableState) attachmentRow(base int) mapi.PropertyValues {
+	row := append(mapi.PropertyValues(nil), t.attachments[base]...)
+	if !slices.Contains(t.columns, mapi.PrAttachNum) {
+		return row
+	}
+	if _, ok := row.Get(mapi.PrAttachNum); !ok {
+		// #nosec G115 -- an index into the message's in-memory attachment list
+		row.Set(mapi.PrAttachNum, int32(base))
+	}
+	return row
+}
+
+// messageRow projects one contents row, synthesizing the message's EID when the
+// column set asks for it.
+func (t *tableState) messageRow(store *objectstore.Store, base int) (mapi.PropertyValues, error) {
 	mid := t.messages[base].ID
 	props, err := store.GetMessageProperties(mid, t.columns...)
 	if err != nil {

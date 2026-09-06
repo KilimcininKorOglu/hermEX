@@ -701,18 +701,14 @@ func (s *Session) ropSubmitMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 		writeErr(out, ropSubmitMessage, hindex, ecNotFound)
 		return true
 	}
-	representing, sender, ok := s.authorizeSubmit(out, obj, hindex)
+	representing, sender, ok := s.authorizeSubmit(out, obj, ropSubmitMessage, hindex)
 	if !ok {
 		return true
 	}
 	nm := obj.newMsg
 	raw, err := s.deliverComposed(nm, representing, sender)
 	if err != nil {
-		if errors.Is(err, errNoRecipient) {
-			writeErr(out, ropSubmitMessage, hindex, ecNotFound) // no routable recipient
-		} else {
-			writeErr(out, ropSubmitMessage, hindex, ecError)
-		}
+		writeErr(out, ropSubmitMessage, hindex, noRecipientOrError(err))
 		return true
 	}
 	// Delivery has succeeded. The Sent Items copy is filed in the mailbox the message
@@ -739,22 +735,31 @@ func (s *Session) ropSubmitMessage(p *ext.Pull, out *ext.Push, handles []uint32,
 // not confer it). The message must also be persisted (its assigned id is
 // non-zero) and the session must have an MTA bridge wired, which a read-only
 // session does not.
-func (s *Session) authorizeSubmit(out *ext.Push, obj *object, hindex uint8) (representing, sender string, ok bool) {
+func (s *Session) authorizeSubmit(out *ext.Push, obj *object, ropID, hindex uint8) (representing, sender string, ok bool) {
 	representing, sender, allowed, err := s.delegateSendIdentity(obj.store)
 	if err != nil {
-		writeErr(out, ropSubmitMessage, hindex, ecError)
+		writeErr(out, ropID, hindex, ecError)
 		return "", "", false
 	}
 	if !allowed {
-		writeErr(out, ropSubmitMessage, hindex, ecAccessDenied)
+		writeErr(out, ropID, hindex, ecAccessDenied)
 		return "", "", false
 	}
 	nm := obj.newMsg
 	if !nm.saved || nm.savedID == 0 || s.accounts == nil {
-		writeErr(out, ropSubmitMessage, hindex, ecNotSupported)
+		writeErr(out, ropID, hindex, ecNotSupported)
 		return "", "", false
 	}
 	return representing, sender, true
+}
+
+// noRecipientOrError maps a delivery failure to its ROP return code: a message
+// with nowhere to go reads as not-found, anything else as a generic error.
+func noRecipientOrError(err error) uint32 {
+	if errors.Is(err, errNoRecipient) {
+		return ecNotFound
+	}
+	return ecError
 }
 
 // errNoRecipient is returned by deliverComposed when a saved composed message

@@ -41,13 +41,49 @@ func stringProp(pv mapi.PropertyValues, tag mapi.PropTag) string {
 // the subject TYPED_STRINGs and (v1) an empty recipient table. The 64-bit
 // MessageId is an EID whose global-counter value is the objectstore id; the
 // FolderId is informational since message ids are store-global.
-func (s *Session) ropOpenMessage(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+// pullOpenMessageRequest reads a RopOpenMessage request. The code page, the
+// FolderId and the open-mode flags are discarded: the session speaks Unicode,
+// the real parent folder is resolved from the store, and v1 opens every message
+// the same way.
+func pullOpenMessageRequest(p *ext.Pull) (ohindex uint8, messageEID uint64, ok bool) {
 	ohindex, e1 := p.Uint8()     // OutputHandleIndex
 	_, e2 := p.Uint16()          // Cpid
 	_, e3 := p.Uint64()          // FolderId
 	_, e4 := p.Uint8()           // OpenModeFlags
 	messageEID, e5 := p.Uint64() // MessageId
-	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || e5 != nil {
+	return ohindex, messageEID, e1 == nil && e2 == nil && e3 == nil && e4 == nil && e5 == nil
+}
+
+// authorizeOpenMessage resolves the message's real parent folder and gates the
+// read on it, returning that folder id.
+//
+// A delegate may read a message only with ReadAny on its REAL parent folder,
+// resolved from the store, never the wire FolderId, which is informational and
+// could name a folder the caller can read to reach one they cannot. The lookup
+// also serves as the existence check, so an owner, who is unrestricted, sees
+// identical behaviour. ok is false when the response was already written.
+func (s *Session) authorizeOpenMessage(out *ext.Push, parent *object, ohindex uint8, msgID int64) (int64, bool) {
+	parentFID, err := parent.store.MessageFolder(msgID)
+	if err != nil {
+		writeErr(out, ropOpenMessage, ohindex, ecNotFound)
+		return 0, false
+	}
+	allowed, err := s.authorize(parent.store, parentFID, mapi.FrightsReadAny)
+	if err != nil {
+		writeErr(out, ropOpenMessage, ohindex, ecError)
+		return 0, false
+	}
+	if !allowed {
+		s.logAuthzDeny(ropOpenMessage, parent.store, parentFID, mapi.FrightsReadAny)
+		writeErr(out, ropOpenMessage, ohindex, ecAccessDenied)
+		return 0, false
+	}
+	return parentFID, true
+}
+
+func (s *Session) ropOpenMessage(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
+	ohindex, messageEID, framed := pullOpenMessageRequest(p)
+	if !framed {
 		return false
 	}
 	parent := s.get(handleAt(handles, hindex))
@@ -57,22 +93,8 @@ func (s *Session) ropOpenMessage(p *ext.Pull, out *ext.Push, handles []uint32, h
 	}
 	// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
 	msgID := int64(mapi.EID(messageEID).GCValue())
-	// A delegate may read a message only with ReadAny on its REAL parent folder,
-	// resolved from the store, never the wire FolderId, which is informational and
-	// could name a folder the caller can read to reach one they cannot. The lookup
-	// also serves as the existence check (ErrNotFound → ecNotFound), so an owner,
-	// who is unrestricted, sees identical behavior.
-	parentFID, err := parent.store.MessageFolder(msgID)
-	if err != nil {
-		writeErr(out, ropOpenMessage, ohindex, ecNotFound)
-		return true
-	}
-	if ok, err := s.authorize(parent.store, parentFID, mapi.FrightsReadAny); err != nil {
-		writeErr(out, ropOpenMessage, ohindex, ecError)
-		return true
-	} else if !ok {
-		s.logAuthzDeny(ropOpenMessage, parent.store, parentFID, mapi.FrightsReadAny)
-		writeErr(out, ropOpenMessage, ohindex, ecAccessDenied)
+	parentFID, ok := s.authorizeOpenMessage(out, parent, ohindex, msgID)
+	if !ok {
 		return true
 	}
 	msg, err := parent.store.OpenMessage(msgID)

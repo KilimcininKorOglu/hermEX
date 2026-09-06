@@ -34,36 +34,7 @@ func (s *Session) deleteProperties(ropID uint8, p *ext.Pull, out *ext.Push, hand
 		writeErr(out, ropID, hindex, ecError)
 		return true
 	}
-	switch obj.kind {
-	case kindMessage:
-		// Editing an existing message requires EditAny on its folder; compose and
-		// attachment writes are gated at their own create chokepoints.
-		if s.denyWrite(out, ropID, hindex, obj.store, obj.folderID, mapi.FrightsEditAny) {
-			return true
-		}
-		obj.pendingDeletes = append(obj.pendingDeletes, tags...)
-		for _, t := range tags {
-			obj.pendingProps = removeTag(obj.pendingProps, t)
-		}
-	case kindNewMessage:
-		for _, t := range tags {
-			obj.newMsg.props = removeTag(obj.newMsg.props, t)
-		}
-	case kindEmbedded:
-		for _, t := range tags {
-			obj.embedded.msg.Props = removeTag(obj.embedded.msg.Props, t)
-		}
-	case kindAttachWrite:
-		// Buffer the removals like an opened message: drop any buffered set for the
-		// tag, and stage the delete so SaveChangesAttachment removes it from the stored
-		// attachment row (a property persisted at CreateAttachment is otherwise only
-		// dropped from the pending bag, leaving the store row untouched).
-		obj.attachW.pendingDeletes = append(obj.attachW.pendingDeletes, tags...)
-		for _, t := range tags {
-			obj.attachW.pending = removeTag(obj.attachW.pending, t)
-		}
-	default:
-		writeErr(out, ropID, hindex, ecNotSupported)
+	if !s.applyDeleteProperties(out, obj, ropID, hindex, tags) {
 		return true
 	}
 
@@ -72,6 +43,45 @@ func (s *Session) deleteProperties(ropID uint8, p *ext.Pull, out *ext.Push, hand
 	out.Uint32(ecSuccess)
 	out.Uint16(0) // PropertyProblemCount
 	return true
+}
+
+// applyDeleteProperties removes the tags from whichever bag the open object
+// keeps its edits in. It reports false when the response was already written: an
+// object kind with no writable bag, or an edit the folder rights refuse.
+func (s *Session) applyDeleteProperties(out *ext.Push, obj *object, ropID, hindex uint8, tags []mapi.PropTag) bool {
+	switch obj.kind {
+	case kindMessage:
+		// Editing an existing message requires EditAny on its folder; compose and
+		// attachment writes are gated at their own create chokepoints.
+		if s.denyWrite(out, ropID, hindex, obj.store, obj.folderID, mapi.FrightsEditAny) {
+			return false
+		}
+		obj.pendingDeletes = append(obj.pendingDeletes, tags...)
+		obj.pendingProps = removeTags(obj.pendingProps, tags)
+	case kindNewMessage:
+		obj.newMsg.props = removeTags(obj.newMsg.props, tags)
+	case kindEmbedded:
+		obj.embedded.msg.Props = removeTags(obj.embedded.msg.Props, tags)
+	case kindAttachWrite:
+		// Buffer the removals like an opened message: drop any buffered set for the
+		// tag, and stage the delete so SaveChangesAttachment removes it from the stored
+		// attachment row (a property persisted at CreateAttachment is otherwise only
+		// dropped from the pending bag, leaving the store row untouched).
+		obj.attachW.pendingDeletes = append(obj.attachW.pendingDeletes, tags...)
+		obj.attachW.pending = removeTags(obj.attachW.pending, tags)
+	default:
+		writeErr(out, ropID, hindex, ecNotSupported)
+		return false
+	}
+	return true
+}
+
+// removeTags returns a copy of pv with every entry for any of the tags removed.
+func removeTags(pv mapi.PropertyValues, tags []mapi.PropTag) mapi.PropertyValues {
+	for _, t := range tags {
+		pv = removeTag(pv, t)
+	}
+	return pv
 }
 
 // removeTag returns a copy of pv with every entry for tag removed.

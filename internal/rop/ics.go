@@ -145,17 +145,7 @@ func (s *Session) authorizeSyncDownload(out *ext.Push, folder *object, req syncC
 	if req.syncType != objectstore.SyncTypeContents {
 		return true
 	}
-	allowed, err := s.authorize(folder.store, folder.folderID, mapi.FrightsReadAny)
-	if err != nil {
-		writeErr(out, ropSynchronizationConfigure, req.ohindex, ecError)
-		return false
-	}
-	if !allowed {
-		s.logAuthzDeny(ropSynchronizationConfigure, folder.store, folder.folderID, mapi.FrightsReadAny)
-		writeErr(out, ropSynchronizationConfigure, req.ohindex, ecAccessDenied)
-		return false
-	}
-	return true
+	return !s.denyWrite(out, ropSynchronizationConfigure, req.ohindex, folder.store, folder.folderID, mapi.FrightsReadAny)
 }
 
 // newDownloadCollector opens the collector the requested sync type needs.
