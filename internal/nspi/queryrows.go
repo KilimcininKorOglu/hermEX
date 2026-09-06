@@ -28,15 +28,11 @@ func pullQueryRows(body []byte) (queryRowsRequest, error) {
 	if _, err := p.Uint32(); err != nil { // flags (Ephemeral/Unicode; v1 emits permanent EIDs)
 		return r, err
 	}
-	hasStat, err := p.Uint8()
+	stat, err := pullOptionalStat(p)
 	if err != nil {
 		return r, err
 	}
-	if hasStat != 0 {
-		if r.stat, err = pullStat(p); err != nil {
-			return r, err
-		}
-	}
+	r.stat = stat
 	tags, err := p.PropTagsLong() // explicit MId list (LPROPTAG_ARRAY shape)
 	if err != nil {
 		return r, err
@@ -48,14 +44,8 @@ func pullQueryRows(body []byte) (queryRowsRequest, error) {
 	if r.count, err = p.Uint32(); err != nil {
 		return r, err
 	}
-	hasCols, err := p.Uint8()
-	if err != nil {
+	if r.columns, _, err = pullOptionalPropTags(p); err != nil {
 		return r, err
-	}
-	if hasCols != 0 {
-		if r.columns, err = p.PropTagsLong(); err != nil {
-			return r, err
-		}
 	}
 	return r, skipAuxIn(p)
 }

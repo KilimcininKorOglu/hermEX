@@ -125,26 +125,8 @@ func pushU32ArrayNDR(p *ndr.Push, vals []uint32) {
 // pullU32ArrayNDR reads a PropertyTagArray_r / MID array. It enforces the
 // reference's invariants: max_count == cValues+1, offset == 0, length == cValues.
 func pullU32ArrayNDR(p *ndr.Pull) ([]uint32, error) {
-	maxCount, err := p.Uint32()
+	cValues, err := pullU32ArrayHeaderNDR(p)
 	if err != nil {
-		return nil, err
-	}
-	cValues, err := p.Uint32()
-	if err != nil {
-		return nil, err
-	}
-	offset, err := p.Uint32()
-	if err != nil {
-		return nil, err
-	}
-	length, err := p.Uint32()
-	if err != nil {
-		return nil, err
-	}
-	if maxCount != cValues+1 || offset != 0 || length != cValues {
-		return nil, fmt.Errorf("%w: proptag array shape (max=%d cValues=%d off=%d len=%d)", ndr.ErrFormat, maxCount, cValues, offset, length)
-	}
-	if err := p.CheckCount(cValues); err != nil {
 		return nil, err
 	}
 	out := make([]uint32, cValues)
@@ -154,6 +136,27 @@ func pullU32ArrayNDR(p *ndr.Pull) ([]uint32, error) {
 		}
 	}
 	return out, nil
+}
+
+// pullU32ArrayHeaderNDR reads the four-word array header and returns the element
+// count the elements themselves follow.
+func pullU32ArrayHeaderNDR(p *ndr.Pull) (uint32, error) {
+	words := make([]uint32, 4)
+	for i := range words {
+		v, err := p.Uint32()
+		if err != nil {
+			return 0, err
+		}
+		words[i] = v
+	}
+	maxCount, cValues, offset, length := words[0], words[1], words[2], words[3]
+	if maxCount != cValues+1 || offset != 0 || length != cValues {
+		return 0, fmt.Errorf("%w: proptag array shape (max=%d cValues=%d off=%d len=%d)", ndr.ErrFormat, maxCount, cValues, offset, length)
+	}
+	if err := p.CheckCount(cValues); err != nil {
+		return 0, err
+	}
+	return cValues, nil
 }
 
 // pullInlineMIDArrayNDR reads the QueryRows-IN explicit MID array, the ONE NSPI
@@ -210,51 +213,71 @@ func pushPropValHeaderNDR(p *ndr.Push, tag mapi.PropTag, value any) error {
 	p.Uint32(0) // reserved
 	p.Uint32(uint32(tag.Type()))
 	switch tag.Type() {
+	case mapi.PtUnicode, mapi.PtString8:
+		p.UniquePtr(true) // string bytes follow in the content pass
+		return nil
+	case mapi.PtBinary:
+		v, ok := value.([]byte)
+		if !ok {
+			return propTypeError("PtBinary", value)
+		}
+		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
+		p.Uint32(uint32(len(v))) // cb
+		p.UniquePtr(true)        // bytes follow in the content pass
+		return nil
+	case mapi.PtMvBinary:
+		v, ok := value.([][]byte)
+		if !ok {
+			return propTypeError("PtMvBinary", value)
+		}
+		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
+		p.Uint32(uint32(len(v))) // count of entries
+		p.UniquePtr(true)        // the array follows in the content pass
+		return nil
+	}
+	return pushScalarPropNDR(p, tag.Type(), value)
+}
+
+// pushScalarPropNDR writes the property types whose value is laid out inline,
+// with no deferred pointer body.
+func pushScalarPropNDR(p *ndr.Push, pt mapi.PropType, value any) error {
+	switch pt {
 	case mapi.PtLong:
 		v, ok := value.(int32)
 		if !ok {
-			return fmt.Errorf("%w: PtLong value is %T", ndr.ErrFormat, value)
+			return propTypeError("PtLong", value)
 		}
 		// #nosec G115 -- the signed and unsigned views of the same 32 bits
 		p.Uint32(uint32(v))
 	case mapi.PtBoolean:
 		v, ok := value.(bool)
 		if !ok {
-			return fmt.Errorf("%w: PtBoolean value is %T", ndr.ErrFormat, value)
+			return propTypeError("PtBoolean", value)
 		}
-		if v {
-			p.Uint8(1)
-		} else {
-			p.Uint8(0)
-		}
+		p.Uint8(boolByte(v))
 	case mapi.PtError:
 		v, ok := value.(uint32)
 		if !ok {
-			return fmt.Errorf("%w: PtError value is %T", ndr.ErrFormat, value)
+			return propTypeError("PtError", value)
 		}
 		p.Uint32(v)
-	case mapi.PtUnicode, mapi.PtString8:
-		p.UniquePtr(true) // string bytes follow in the content pass
-	case mapi.PtBinary:
-		v, ok := value.([]byte)
-		if !ok {
-			return fmt.Errorf("%w: PtBinary value is %T", ndr.ErrFormat, value)
-		}
-		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
-		p.Uint32(uint32(len(v))) // cb
-		p.UniquePtr(true)        // bytes follow in the content pass
-	case mapi.PtMvBinary:
-		v, ok := value.([][]byte)
-		if !ok {
-			return fmt.Errorf("%w: PtMvBinary value is %T", ndr.ErrFormat, value)
-		}
-		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
-		p.Uint32(uint32(len(v))) // count of entries
-		p.UniquePtr(true)        // the array follows in the content pass
 	default:
-		return fmt.Errorf("%w: NDR cannot encode property type %#04x", ndr.ErrFormat, uint16(tag.Type()))
+		return fmt.Errorf("%w: NDR cannot encode property type %#04x", ndr.ErrFormat, uint16(pt))
 	}
 	return nil
+}
+
+// propTypeError reports a value whose Go type does not match its property type.
+func propTypeError(want string, value any) error {
+	return fmt.Errorf("%w: %s value is %T", ndr.ErrFormat, want, value)
+}
+
+// boolByte encodes a boolean as the single byte NDR carries it in.
+func boolByte(v bool) uint8 {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 // pushPropValContentNDR writes the content half of a PROPERTY_VALUE: the
@@ -327,55 +350,55 @@ func pullPropValNDR(p *ndr.Pull) (mapi.TaggedPropVal, error) {
 	if ptype != uint32(mapi.PropTag(tag).Type()) {
 		return tv, fmt.Errorf("%w: property value type %#x != tag type %#x", ndr.ErrFormat, ptype, uint32(mapi.PropTag(tag).Type()))
 	}
-	switch mapi.PropTag(tag).Type() {
+	tv.Value, err = pullPropContentNDR(p, mapi.PropTag(tag).Type())
+	if err != nil {
+		return tv, err
+	}
+	return tv, nil
+}
+
+// pullPropContentNDR reads the content that follows a property value's header,
+// laid out by the property's type.
+func pullPropContentNDR(p *ndr.Pull, pt mapi.PropType) (any, error) {
+	switch pt {
+	case mapi.PtUnicode:
+		return pullConfStringNDR(p, true)
+	case mapi.PtString8:
+		return pullConfStringNDR(p, false)
+	case mapi.PtBinary:
+		return pullConfBinaryNDR(p)
+	}
+	return pullScalarPropNDR(p, pt)
+}
+
+// pullScalarPropNDR reads the property types whose value is laid out inline,
+// with no deferred pointer body.
+func pullScalarPropNDR(p *ndr.Pull, pt mapi.PropType) (any, error) {
+	switch pt {
 	case mapi.PtShort:
 		v, err := p.Uint16()
 		if err != nil {
-			return tv, err
+			return nil, err
 		}
 		// #nosec G115 -- the signed and unsigned views of the same 16 bits
-		tv.Value = int16(v)
+		return int16(v), nil
 	case mapi.PtLong:
 		v, err := p.Uint32()
 		if err != nil {
-			return tv, err
+			return nil, err
 		}
 		// #nosec G115 -- the signed and unsigned views of the same 32 bits
-		tv.Value = int32(v)
+		return int32(v), nil
 	case mapi.PtBoolean:
 		v, err := p.Uint8()
 		if err != nil {
-			return tv, err
+			return nil, err
 		}
-		tv.Value = v != 0
+		return v != 0, nil
 	case mapi.PtError:
-		v, err := p.Uint32()
-		if err != nil {
-			return tv, err
-		}
-		tv.Value = v
-	case mapi.PtUnicode:
-		s, err := pullConfStringNDR(p, true)
-		if err != nil {
-			return tv, err
-		}
-		tv.Value = s
-	case mapi.PtString8:
-		s, err := pullConfStringNDR(p, false)
-		if err != nil {
-			return tv, err
-		}
-		tv.Value = s
-	case mapi.PtBinary:
-		b, err := pullConfBinaryNDR(p)
-		if err != nil {
-			return tv, err
-		}
-		tv.Value = b
-	default:
-		return tv, fmt.Errorf("%w: NDR cannot decode property type %#04x", ndr.ErrFormat, uint16(mapi.PropTag(tag).Type()))
+		return p.Uint32()
 	}
-	return tv, nil
+	return nil, fmt.Errorf("%w: NDR cannot decode property type %#04x", ndr.ErrFormat, uint16(pt))
 }
 
 // pullConfStringNDR reads a referent + (if non-null) a conformant-varying string
@@ -502,6 +525,26 @@ func pushPropertyRowNDR(p *ndr.Push, cols []mapi.PropTag, row mapi.PropertyValue
 // per-element referents, then each present element's conformant-varying string.
 // wide selects UTF-16 (ResolveNamesW) vs 8-bit (DNToMId / ResolveNames).
 func pullStringsArrayNDR(p *ndr.Pull, wide bool) ([]string, error) {
+	present, err := pullStringsArrayHeaderNDR(p)
+	if err != nil || present == nil {
+		return nil, err
+	}
+	out := make([]string, len(present))
+	for i := range out {
+		if !present[i] {
+			continue
+		}
+		if out[i], err = pullVaryingStringNDR(p, wide); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// pullStringsArrayHeaderNDR reads a strings array's count, its referent and the
+// per-element referents, answering one flag per element. A nil result is a null
+// array referent, which carries no elements at all.
+func pullStringsArrayHeaderNDR(p *ndr.Pull) ([]bool, error) {
 	count, err := p.Uint32()
 	if err != nil {
 		return nil, err
@@ -531,34 +574,33 @@ func pullStringsArrayNDR(p *ndr.Pull, wide bool) ([]string, error) {
 		}
 		present[i] = r != 0
 	}
-	out := make([]string, count)
-	for i := range out {
-		if !present[i] {
-			continue
-		}
-		if _, err = p.Uint32(); err != nil { // max_count
-			return nil, err
-		}
-		if _, err = p.Uint32(); err != nil { // offset
-			return nil, err
-		}
-		actual, err := p.Uint32()
-		if err != nil {
-			return nil, err
-		}
-		width := int(actual)
-		if wide {
-			width *= 2
-		}
-		raw, err := p.Raw(width)
-		if err != nil {
-			return nil, err
-		}
-		if wide {
-			out[i] = decodeUTF16LE(raw)
-		} else {
-			out[i] = trimNUL(raw)
-		}
+	return present, nil
+}
+
+// pullVaryingStringNDR reads one conformant-varying string body (max_count,
+// offset, actual_count, then the characters), which is what each present element
+// of a strings array carries.
+func pullVaryingStringNDR(p *ndr.Pull, wide bool) (string, error) {
+	if _, err := p.Uint32(); err != nil { // max_count
+		return "", err
 	}
-	return out, nil
+	if _, err := p.Uint32(); err != nil { // offset
+		return "", err
+	}
+	actual, err := p.Uint32()
+	if err != nil {
+		return "", err
+	}
+	width := int(actual)
+	if wide {
+		width *= 2
+	}
+	raw, err := p.Raw(width)
+	if err != nil {
+		return "", err
+	}
+	if wide {
+		return decodeUTF16LE(raw), nil
+	}
+	return trimNUL(raw), nil
 }

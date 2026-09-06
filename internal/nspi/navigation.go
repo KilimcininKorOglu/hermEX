@@ -125,14 +125,8 @@ func pullSeekEntries(body []byte) (seekEntriesRequest, error) {
 	if r.reserved, err = p.Uint32(); err != nil {
 		return r, err
 	}
-	hasStat, err := p.Uint8()
-	if err != nil {
+	if r.stat, err = pullOptionalStat(p); err != nil {
 		return r, err
-	}
-	if hasStat != 0 {
-		if r.stat, err = pullStat(p); err != nil {
-			return r, err
-		}
 	}
 	hasTarget, err := p.Uint8()
 	if err != nil {
@@ -143,29 +137,18 @@ func pullSeekEntries(body []byte) (seekEntriesRequest, error) {
 			return r, err
 		}
 	}
-	hasTable, err := p.Uint8()
+	tags, _, err := pullOptionalPropTags(p)
 	if err != nil {
 		return r, err
 	}
-	if hasTable != 0 {
-		tags, terr := p.PropTagsLong()
-		if terr != nil {
-			return r, terr
-		}
+	if tags != nil {
 		r.table = make([]uint32, len(tags))
 		for i, t := range tags {
 			r.table[i] = uint32(t)
 		}
 	}
-	hasCols, err := p.Uint8()
-	if err != nil {
+	if r.columns, r.hasCols, err = pullOptionalPropTags(p); err != nil {
 		return r, err
-	}
-	if hasCols != 0 {
-		r.hasCols = true
-		if r.columns, err = p.PropTagsLong(); err != nil {
-			return r, err
-		}
 	}
 	return r, skipAuxIn(p)
 }

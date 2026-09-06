@@ -29,136 +29,193 @@ func pullRestrictionNDR(p *ndr.Pull) (mapi.Restriction, error) {
 // matches the one the property-model restriction decoder applies.
 const maxRestrictionDepth = 100
 
+// pullPtrRestrictionNDR reads a unique-pointer restriction, answering nil when
+// the referent is null.
+func pullPtrRestrictionNDR(p *ndr.Pull) (*mapi.Restriction, error) {
+	ref, err := p.Uint32()
+	if err != nil {
+		return nil, err
+	}
+	if ref == 0 {
+		return nil, nil
+	}
+	r, err := pullRestrictionNDR(p)
+	if err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
 // pullRestrictionDepth carries the current nesting level so the recursion stays
 // bounded.
 func pullRestrictionDepth(p *ndr.Pull, depth int) (mapi.Restriction, error) {
 	if depth > maxRestrictionDepth {
 		return mapi.Restriction{}, fmt.Errorf("%w: restriction nested past the depth limit", ndr.ErrFormat)
 	}
-	resType, err := p.Uint32()
+	resType, err := pullRestrictionTypeNDR(p)
 	if err != nil {
 		return mapi.Restriction{}, err
 	}
-	resType2, err := p.Uint32() // the union re-emits the discriminant
-	if err != nil {
-		return mapi.Restriction{}, err
-	}
-	if resType2 != resType {
-		return mapi.Restriction{}, fmt.Errorf("%w: restriction type %d != union type %d", ndr.ErrFormat, resType, resType2)
-	}
-	// The wire carries the discriminant in 32 bits and RestrictionType is 8, so a
-	// value above the byte range would truncate into a structural kind the switch
-	// below accepts, and the node would then be parsed with the wrong layout.
-	if resType > math.MaxUint8 {
-		return mapi.Restriction{}, fmt.Errorf("%w: restriction type %#x out of range", ndr.ErrFormat, resType)
-	}
+	// #nosec G115 -- pullRestrictionTypeNDR refuses a discriminant above MaxUint8, so the value here always fits
 	r := mapi.Restriction{Type: mapi.RestrictionType(resType)}
 	switch r.Type {
 	case mapi.ResAnd, mapi.ResOr:
-		cres, err := p.Uint32()
-		if err != nil {
-			return r, err
-		}
-		ref, err := p.Uint32() // children referent
-		if err != nil {
-			return r, err
-		}
-		if ref == 0 {
-			return r, nil
-		}
-		count, err := p.Uint32() // conformant max_count, equals cres
-		if err != nil {
-			return r, err
-		}
-		if count != cres {
-			return r, fmt.Errorf("%w: restriction child count %d != %d", ndr.ErrFormat, count, cres)
-		}
-		// The count is a 32-bit field independent of the transport's body cap, so
-		// nothing upstream bounds it: reject one the remaining bytes cannot satisfy
-		// before it becomes a make() length, exactly as the sibling array decoders do.
-		if err := p.CheckCount(count); err != nil {
-			return r, err
-		}
-		kids := make([]mapi.Restriction, count)
-		for i := range kids {
-			if kids[i], err = pullRestrictionDepth(p, depth+1); err != nil {
-				return r, err
-			}
-		}
-		r.Value = kids
+		r.Value, err = pullSubRestrictions(p, depth)
 	case mapi.ResNot:
-		ref, err := p.Uint32()
-		if err != nil {
-			return r, err
-		}
-		if ref != 0 {
-			inner, err := pullRestrictionDepth(p, depth+1)
-			if err != nil {
-				return r, err
-			}
-			r.Value = inner
-		}
+		r.Value, err = pullNotRestriction(p, depth)
 	case mapi.ResContent:
-		var c mapi.ContentRestriction
-		if c.FuzzyLevel, err = p.Uint32(); err != nil {
-			return r, err
-		}
-		tag, err := p.Uint32()
-		if err != nil {
-			return r, err
-		}
-		c.PropTag = mapi.PropTag(tag)
-		ref, err := p.Uint32()
-		if err != nil {
-			return r, err
-		}
-		if ref != 0 {
-			if c.PropVal, err = pullPropValNDR(p); err != nil {
-				return r, err
-			}
-		}
-		r.Value = c
+		r.Value, err = pullContentRestriction(p)
 	case mapi.ResProperty:
-		var pr mapi.PropertyRestriction
-		relop, err := p.Uint32()
-		if err != nil {
-			return r, err
-		}
-		// Relop is 8 bits, so an out-of-range wire value would truncate into a
-		// different, valid comparison rather than being refused.
-		if relop > math.MaxUint8 {
-			return r, fmt.Errorf("%w: relational operator %#x out of range", ndr.ErrFormat, relop)
-		}
-		pr.Relop = mapi.Relop(relop)
-		tag, err := p.Uint32()
-		if err != nil {
-			return r, err
-		}
-		pr.PropTag = mapi.PropTag(tag)
-		ref, err := p.Uint32()
-		if err != nil {
-			return r, err
-		}
-		if ref != 0 {
-			if pr.PropVal, err = pullPropValNDR(p); err != nil {
-				return r, err
-			}
-		}
-		r.Value = pr
+		r.Value, err = pullPropertyRestriction(p)
 	case mapi.ResExist:
-		if _, err = p.Uint32(); err != nil { // reserved1
-			return r, err
-		}
-		tag, err := p.Uint32()
-		if err != nil {
-			return r, err
-		}
-		if _, err = p.Uint32(); err != nil { // reserved2
-			return r, err
-		}
-		r.Value = mapi.ExistRestriction{PropTag: mapi.PropTag(tag)}
+		r.Value, err = pullExistRestriction(p)
 	default:
 		return r, fmt.Errorf("%w: NSPI restriction type %#x unsupported", ndr.ErrFormat, resType)
 	}
+	if err != nil {
+		return r, err
+	}
 	return r, nil
+}
+
+// pullRestrictionTypeNDR reads a restriction node's discriminant, which the union
+// re-emits, and refuses a value the type cannot hold. The wire carries it in 32
+// bits and RestrictionType is 8, so a value above the byte range would truncate
+// into a structural kind the decoder accepts, and the node would then be parsed
+// with the wrong layout.
+func pullRestrictionTypeNDR(p *ndr.Pull) (uint32, error) {
+	resType, err := p.Uint32()
+	if err != nil {
+		return 0, err
+	}
+	resType2, err := p.Uint32()
+	if err != nil {
+		return 0, err
+	}
+	if resType2 != resType {
+		return 0, fmt.Errorf("%w: restriction type %d != union type %d", ndr.ErrFormat, resType, resType2)
+	}
+	if resType > math.MaxUint8 {
+		return 0, fmt.Errorf("%w: restriction type %#x out of range", ndr.ErrFormat, resType)
+	}
+	return resType, nil
+}
+
+// pullSubRestrictions decodes the child list of an AND or OR node. A nil value is
+// a null children referent, which is an empty node.
+func pullSubRestrictions(p *ndr.Pull, depth int) (any, error) {
+	cres, err := p.Uint32()
+	if err != nil {
+		return nil, err
+	}
+	ref, err := p.Uint32() // children referent
+	if err != nil {
+		return nil, err
+	}
+	if ref == 0 {
+		return nil, nil
+	}
+	count, err := p.Uint32() // conformant max_count, equals cres
+	if err != nil {
+		return nil, err
+	}
+	if count != cres {
+		return nil, fmt.Errorf("%w: restriction child count %d != %d", ndr.ErrFormat, count, cres)
+	}
+	// The count is a 32-bit field independent of the transport's body cap, so
+	// nothing upstream bounds it: reject one the remaining bytes cannot satisfy
+	// before it becomes a make() length, exactly as the sibling array decoders do.
+	if err := p.CheckCount(count); err != nil {
+		return nil, err
+	}
+	kids := make([]mapi.Restriction, count)
+	for i := range kids {
+		if kids[i], err = pullRestrictionDepth(p, depth+1); err != nil {
+			return nil, err
+		}
+	}
+	return kids, nil
+}
+
+// pullNotRestriction decodes the single child of a NOT node. A nil value is a
+// null referent, which negates nothing.
+func pullNotRestriction(p *ndr.Pull, depth int) (any, error) {
+	ref, err := p.Uint32()
+	if err != nil {
+		return nil, err
+	}
+	if ref == 0 {
+		return nil, nil
+	}
+	return pullRestrictionDepth(p, depth+1)
+}
+
+// pullContentRestriction decodes a content (substring match) node.
+func pullContentRestriction(p *ndr.Pull) (any, error) {
+	var c mapi.ContentRestriction
+	var err error
+	if c.FuzzyLevel, err = p.Uint32(); err != nil {
+		return nil, err
+	}
+	tag, err := p.Uint32()
+	if err != nil {
+		return nil, err
+	}
+	c.PropTag = mapi.PropTag(tag)
+	ref, err := p.Uint32()
+	if err != nil {
+		return nil, err
+	}
+	if ref != 0 {
+		if c.PropVal, err = pullPropValNDR(p); err != nil {
+			return nil, err
+		}
+	}
+	return c, nil
+}
+
+// pullPropertyRestriction decodes a property comparison node.
+func pullPropertyRestriction(p *ndr.Pull) (any, error) {
+	var pr mapi.PropertyRestriction
+	relop, err := p.Uint32()
+	if err != nil {
+		return nil, err
+	}
+	// Relop is 8 bits, so an out-of-range wire value would truncate into a
+	// different, valid comparison rather than being refused.
+	if relop > math.MaxUint8 {
+		return nil, fmt.Errorf("%w: relational operator %#x out of range", ndr.ErrFormat, relop)
+	}
+	pr.Relop = mapi.Relop(relop)
+	tag, err := p.Uint32()
+	if err != nil {
+		return nil, err
+	}
+	pr.PropTag = mapi.PropTag(tag)
+	ref, err := p.Uint32()
+	if err != nil {
+		return nil, err
+	}
+	if ref != 0 {
+		if pr.PropVal, err = pullPropValNDR(p); err != nil {
+			return nil, err
+		}
+	}
+	return pr, nil
+}
+
+// pullExistRestriction decodes a property-exists node, whose two reserved fields
+// are read and discarded.
+func pullExistRestriction(p *ndr.Pull) (any, error) {
+	if _, err := p.Uint32(); err != nil { // reserved1
+		return nil, err
+	}
+	tag, err := p.Uint32()
+	if err != nil {
+		return nil, err
+	}
+	if _, err := p.Uint32(); err != nil { // reserved2
+		return nil, err
+	}
+	return mapi.ExistRestriction{PropTag: mapi.PropTag(tag)}, nil
 }

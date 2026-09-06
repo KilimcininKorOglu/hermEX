@@ -2,49 +2,35 @@ package nspi
 
 import "strconv"
 
-// OperationName returns the NSPI operation name for an RPC opnum, for activity
-// logging (so the central log shows "ResolveNames" rather than an opaque number).
-// An unrecognized opnum yields a numeric fallback, keeping a new or malformed call
-// legible without masking it.
+// operationNames maps each NSPI opnum to its name, for activity logging.
+var operationNames = map[uint16]string{
+	opNspiBind:              "Bind",
+	opNspiUnbind:            "Unbind",
+	opNspiUpdateStat:        "UpdateStat",
+	opNspiQueryRows:         "QueryRows",
+	opNspiSeekEntries:       "SeekEntries",
+	opNspiGetMatches:        "GetMatches",
+	opNspiResortRestriction: "ResortRestriction",
+	opNspiDNToMId:           "DNToMId",
+	opNspiGetPropList:       "GetPropList",
+	opNspiGetProps:          "GetProps",
+	opNspiCompareMIds:       "CompareMIds",
+	opNspiModProps:          "ModProps",
+	opNspiGetSpecialTable:   "GetSpecialTable",
+	opNspiGetTemplateInfo:   "GetTemplateInfo",
+	opNspiModLinkAtt:        "ModLinkAtt",
+	opNspiQueryColumns:      "QueryColumns",
+	opNspiResolveNames:      "ResolveNames",
+	opNspiResolveNamesW:     "ResolveNamesW",
+}
+
+// OperationName returns the NSPI operation name for an RPC opnum, so the central
+// log shows "ResolveNames" rather than an opaque number. An unrecognized opnum
+// yields a numeric fallback, keeping a new or malformed call legible without
+// masking it.
 func OperationName(opnum uint16) string {
-	switch opnum {
-	case opNspiBind:
-		return "Bind"
-	case opNspiUnbind:
-		return "Unbind"
-	case opNspiUpdateStat:
-		return "UpdateStat"
-	case opNspiQueryRows:
-		return "QueryRows"
-	case opNspiSeekEntries:
-		return "SeekEntries"
-	case opNspiGetMatches:
-		return "GetMatches"
-	case opNspiResortRestriction:
-		return "ResortRestriction"
-	case opNspiDNToMId:
-		return "DNToMId"
-	case opNspiGetPropList:
-		return "GetPropList"
-	case opNspiGetProps:
-		return "GetProps"
-	case opNspiCompareMIds:
-		return "CompareMIds"
-	case opNspiModProps:
-		return "ModProps"
-	case opNspiGetSpecialTable:
-		return "GetSpecialTable"
-	case opNspiGetTemplateInfo:
-		return "GetTemplateInfo"
-	case opNspiModLinkAtt:
-		return "ModLinkAtt"
-	case opNspiQueryColumns:
-		return "QueryColumns"
-	case opNspiResolveNames:
-		return "ResolveNames"
-	case opNspiResolveNamesW:
-		return "ResolveNamesW"
-	default:
-		return "op" + strconv.Itoa(int(opnum))
+	if name, ok := operationNames[opnum]; ok {
+		return name
 	}
+	return "op" + strconv.Itoa(int(opnum))
 }

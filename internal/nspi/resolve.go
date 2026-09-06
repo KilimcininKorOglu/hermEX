@@ -128,23 +128,13 @@ func pullResolveNames(body []byte) (resolveNamesRequest, error) {
 	if _, err := p.Uint32(); err != nil { // reserved
 		return r, err
 	}
-	hasStat, err := p.Uint8()
+	stat, err := pullOptionalStat(p)
 	if err != nil {
 		return r, err
 	}
-	if hasStat != 0 {
-		if r.stat, err = pullStat(p); err != nil {
-			return r, err
-		}
-	}
-	hasCols, err := p.Uint8()
-	if err != nil {
+	r.stat = stat
+	if r.columns, _, err = pullOptionalPropTags(p); err != nil {
 		return r, err
-	}
-	if hasCols != 0 {
-		if r.columns, err = p.PropTagsLong(); err != nil {
-			return r, err
-		}
 	}
 	hasNames, err := p.Uint8()
 	if err != nil {

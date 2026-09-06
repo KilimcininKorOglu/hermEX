@@ -96,38 +96,54 @@ func (s *Server) getPropsCore(req getPropsRequest, caller string) getPropsResult
 	if !req.hasTags {
 		return getPropsResult{result: ecSuccess, codePage: req.stat.codePage, row: bag}
 	}
-	// Serve the portrait lazily, only when explicitly requested, never folded into
-	// a table walk, by reading the mailbox's cross-protocol user-photo property.
-	if u.storePath != "" && slices.Contains(req.proptags, mapi.PrEmsAbThumbnailPhoto) {
-		if photo := userPhoto(u.storePath); photo != nil {
-			bag = append(bag, mapi.TaggedPropVal{Tag: mapi.PrEmsAbThumbnailPhoto, Value: photo})
-		}
-	}
-	// Serve the published S/MIME certificate lazily too, so Outlook can encrypt to
-	// a GAL recipient. The value is a multi-value binary carrying the one cert DER.
-	if u.storePath != "" && slices.Contains(req.proptags, mapi.PrEmsAbX509Cert) {
-		if cert := userX509Cert(u.storePath); cert != nil {
-			bag = append(bag, mapi.TaggedPropVal{Tag: mapi.PrEmsAbX509Cert, Value: [][]byte{cert}})
-		}
-	}
-	// Serve the directory profile fields (title, department, phones, etc.) lazily
-	// from the user's properties when any is requested, so Outlook's GAL detail shows
-	// them. The optional reader is absent for the static directory.
-	if pr, ok := s.gal.(userPropertyReader); ok && anyTagRequested(req.proptags, galProfileProptags) {
-		if props, err := pr.GetUserProperties(u.smtp); err == nil {
-			for _, tag := range galProfileProptags {
-				if v := props[uint32(tag)]; v != "" && slices.Contains(req.proptags, tag) {
-					bag = append(bag, mapi.TaggedPropVal{Tag: tag, Value: v})
-				}
-			}
-		}
-	}
+	bag = append(bag, s.lazyProps(u, req.proptags)...)
 	row, hasErr := projectProps(bag, req.proptags)
 	result := ecSuccess
 	if hasErr {
 		result = ecWarnWithErrors
 	}
 	return getPropsResult{result: result, codePage: req.stat.codePage, row: row}
+}
+
+// lazyProps serves the properties that cost a read of their own, and only when
+// the client asked for them, so an ordinary table walk pays nothing for them.
+func (s *Server) lazyProps(u galUser, requested []mapi.PropTag) []mapi.TaggedPropVal {
+	var extra []mapi.TaggedPropVal
+	// The portrait comes from the mailbox's cross-protocol user-photo property.
+	if u.storePath != "" && slices.Contains(requested, mapi.PrEmsAbThumbnailPhoto) {
+		if photo := userPhoto(u.storePath); photo != nil {
+			extra = append(extra, mapi.TaggedPropVal{Tag: mapi.PrEmsAbThumbnailPhoto, Value: photo})
+		}
+	}
+	// The published S/MIME certificate lets Outlook encrypt to a GAL recipient.
+	// The value is a multi-value binary carrying the one cert DER.
+	if u.storePath != "" && slices.Contains(requested, mapi.PrEmsAbX509Cert) {
+		if cert := userX509Cert(u.storePath); cert != nil {
+			extra = append(extra, mapi.TaggedPropVal{Tag: mapi.PrEmsAbX509Cert, Value: [][]byte{cert}})
+		}
+	}
+	return append(extra, s.profileProps(u, requested)...)
+}
+
+// profileProps reads the directory profile fields (title, department, phones,
+// etc.) the client asked for, so Outlook's GAL detail shows them. The optional
+// reader is absent for the static directory.
+func (s *Server) profileProps(u galUser, requested []mapi.PropTag) []mapi.TaggedPropVal {
+	pr, ok := s.gal.(userPropertyReader)
+	if !ok || !anyTagRequested(requested, galProfileProptags) {
+		return nil
+	}
+	props, err := pr.GetUserProperties(u.smtp)
+	if err != nil {
+		return nil
+	}
+	var extra []mapi.TaggedPropVal
+	for _, tag := range galProfileProptags {
+		if v := props[uint32(tag)]; v != "" && slices.Contains(requested, tag) {
+			extra = append(extra, mapi.TaggedPropVal{Tag: tag, Value: v})
+		}
+	}
+	return extra
 }
 
 // userPropertyReader is the optional gal-source capability to read a user's MAPI

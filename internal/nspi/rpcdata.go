@@ -472,34 +472,9 @@ func (s *Server) rpcDNToMid(stub []byte, caller string) ([]byte, uint32) {
 // PROPROW_SET + result (two NULL referents on a non-success result).
 func (s *Server) rpcGetMatches(stub []byte, caller string) ([]byte, uint32) {
 	p := ndr.NewPull(stub)
-	if err := pullHandle(p); err != nil {
-		return nil, ndr.FaultNdr
-	}
-	reserved1, err := p.Uint32()
+	req, err := pullGetMatchesPreludeNDR(p)
 	if err != nil {
 		return nil, ndr.FaultNdr
-	}
-	st, err := pullStatNDR(p)
-	if err != nil {
-		return nil, ndr.FaultNdr
-	}
-	if _, err := pullPtrMIDs(p); err != nil { // reserved input-MID list, discarded
-		return nil, ndr.FaultNdr
-	}
-	if _, err := p.Uint32(); err != nil { // reserved
-		return nil, ndr.FaultNdr
-	}
-	req := getMatchesRequest{reserved1: reserved1, stat: st}
-	fref, err := p.Uint32() // restriction referent
-	if err != nil {
-		return nil, ndr.FaultNdr
-	}
-	if fref != 0 {
-		f, ferr := pullRestrictionNDR(p)
-		if ferr != nil {
-			return nil, ndr.FaultNdr
-		}
-		req.filter = &f
 	}
 	pnref, err := p.Uint32() // property-name referent
 	if err != nil {
@@ -523,6 +498,34 @@ func (s *Server) rpcGetMatches(stub []byte, caller string) ([]byte, uint32) {
 	req.columns = cols
 	req.hasCols = cols != nil
 	return s.encodeGetMatchesNDR(s.getMatchesCore(req, caller))
+}
+
+// pullGetMatchesPreludeNDR reads a GetMatches IN up to its property-name
+// referent: the handle, the reserved word, the STAT, the reserved input-MID list
+// (discarded, matching is driven by the filter only), a second reserved word, and
+// the optional restriction.
+func pullGetMatchesPreludeNDR(p *ndr.Pull) (getMatchesRequest, error) {
+	var req getMatchesRequest
+	if err := pullHandle(p); err != nil {
+		return req, err
+	}
+	reserved1, err := p.Uint32()
+	if err != nil {
+		return req, err
+	}
+	st, err := pullStatNDR(p)
+	if err != nil {
+		return req, err
+	}
+	if _, err := pullPtrMIDs(p); err != nil {
+		return req, err
+	}
+	if _, err := p.Uint32(); err != nil { // reserved
+		return req, err
+	}
+	req = getMatchesRequest{reserved1: reserved1, stat: st}
+	req.filter, err = pullPtrRestrictionNDR(p)
+	return req, err
 }
 
 // encodeGetMatchesNDR frames the GetMatches OUT: STAT, a unique-pointer matched

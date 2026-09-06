@@ -1,6 +1,7 @@
 package nspi
 
 import (
+	"cmp"
 	"strings"
 
 	"hermex/internal/ext"
@@ -45,39 +46,19 @@ func pullGetMatches(body []byte) (getMatchesRequest, error) {
 	if r.reserved1, err = p.Uint32(); err != nil {
 		return r, err
 	}
-	hasStat, err := p.Uint8()
-	if err != nil {
+	if r.stat, err = pullOptionalStat(p); err != nil {
 		return r, err
-	}
-	if hasStat != 0 {
-		if r.stat, err = pullStat(p); err != nil {
-			return r, err
-		}
 	}
 	// Explicit input-MId list: consumed and discarded (the interface handler
 	// takes no inmids, matching is driven by the filter only).
-	hasInMids, err := p.Uint8()
-	if err != nil {
+	if err := skipOptionalPropTags(p); err != nil {
 		return r, err
-	}
-	if hasInMids != 0 {
-		if _, err = p.PropTagsLong(); err != nil {
-			return r, err
-		}
 	}
 	if _, err = p.Uint32(); err != nil { // reserved
 		return r, err
 	}
-	hasFilter, err := p.Uint8()
-	if err != nil {
+	if r.filter, err = pullOptionalRestriction(p); err != nil {
 		return r, err
-	}
-	if hasFilter != 0 {
-		f, ferr := p.Restriction()
-		if ferr != nil {
-			return r, ferr
-		}
-		r.filter = &f
 	}
 	hasPropName, err := p.Uint8()
 	if err != nil {
@@ -92,17 +73,63 @@ func pullGetMatches(body []byte) (getMatchesRequest, error) {
 	if r.rowCount, err = p.Uint32(); err != nil {
 		return r, err
 	}
-	hasCols, err := p.Uint8()
-	if err != nil {
+	if r.columns, r.hasCols, err = pullOptionalPropTags(p); err != nil {
 		return r, err
 	}
-	if hasCols != 0 {
-		r.hasCols = true
-		if r.columns, err = p.PropTagsLong(); err != nil {
-			return r, err
-		}
-	}
 	return r, skipAuxIn(p)
+}
+
+// pullOptionalStat reads a present-flagged STAT block; an absent one leaves the
+// zero value, which is what every request decoder does with it.
+func pullOptionalStat(p *ext.Pull) (stat, error) {
+	present, err := p.Uint8()
+	if err != nil {
+		return stat{}, err
+	}
+	if present == 0 {
+		return stat{}, nil
+	}
+	return pullStat(p)
+}
+
+// skipOptionalPropTags consumes a present-flagged proptag array and discards it.
+func skipOptionalPropTags(p *ext.Pull) error {
+	_, _, err := pullOptionalPropTags(p)
+	return err
+}
+
+// pullOptionalPropTags reads a present-flagged proptag array, reporting whether
+// the client sent one.
+func pullOptionalPropTags(p *ext.Pull) ([]mapi.PropTag, bool, error) {
+	present, err := p.Uint8()
+	if err != nil {
+		return nil, false, err
+	}
+	if present == 0 {
+		return nil, false, nil
+	}
+	tags, err := p.PropTagsLong()
+	if err != nil {
+		return nil, false, err
+	}
+	return tags, true, nil
+}
+
+// pullOptionalRestriction reads a present-flagged restriction, answering nil when
+// the client sent none.
+func pullOptionalRestriction(p *ext.Pull) (*mapi.Restriction, error) {
+	present, err := p.Uint8()
+	if err != nil {
+		return nil, err
+	}
+	if present == 0 {
+		return nil, nil
+	}
+	f, err := p.Restriction()
+	if err != nil {
+		return nil, err
+	}
+	return &f, nil
 }
 
 // GetMatches handles the NSPI GetMatches request ([MS-OXNSPI] 2.2.4): it
@@ -152,35 +179,7 @@ func (s *Server) getMatchesCore(req getMatchesRequest, caller string) getMatches
 	}
 
 	g := s.snapshot(caller)
-	var mids []uint32
-	switch {
-	case st.containerID == uint32(mapi.PrEmsAbMember):
-		// Expand the distribution list at cur_rec into its members ([MS-OXNSPI]
-		// 3.1.4.1.10): the client selects the PR_EMS_AB_MEMBER container to read a
-		// list's membership. Members hidden from address lists are dropped.
-		if exp, ok := s.gal.(mlistExpander); ok {
-			mids = g.memberMIDs(st.curRec, exp, int(req.rowCount))
-		}
-	case st.containerID == uint32(mapi.PrEmsAbPublicDelegates):
-		// Read the public-delegate list of the mailbox at cur_rec ([MS-OXNSPI]
-		// 3.1.4.1.10): delegates hidden from the delegate list, and any the filter
-		// excludes, are dropped. Public delegates are world-readable, so this takes
-		// no caller identity.
-		if reader, ok := s.gal.(delegateReader); ok {
-			mids = g.delegateMIDs(st.curRec, reader, req.filter, int(req.rowCount))
-		}
-	case st.containerID == uint32(galContainerID):
-		// The GAL honors both the GAL-browse and the name-resolution hide bits.
-		mids = g.matchAll(req.filter, req.rowCount, st, abHideFromGAL|abHideResolve, nil)
-	default:
-		// A named address list: restrict to its recipient type and honor the
-		// address-list and name-resolution hide bits. An unknown container matches
-		// nothing.
-		// #nosec G115 -- the signed and unsigned views of the same 32 bits
-		if al, ok := addressListByID(int32(st.containerID)); ok {
-			mids = g.matchAll(req.filter, req.rowCount, st, abHideFromAL|abHideResolve, &al)
-		}
-	}
+	mids := s.containerMIDs(g, req, st)
 	rows := make([]mapi.PropertyValues, len(mids))
 	for i, mid := range mids {
 		if u, ok := g.byMID(mid); ok {
@@ -192,6 +191,41 @@ func (s *Server) getMatchesCore(req getMatchesRequest, caller string) getMatches
 	// [MS-OXNSPI] 3.1.4.1.10 point 16: the container bookmark becomes cur_rec.
 	st.containerID = st.curRec
 	return getMatchesResult{result: ecSuccess, stat: st, mids: mids, cols: cols, rows: rows}
+}
+
+// containerMIDs matches within the container the STAT selects. Each container is
+// a different source: a distribution list's membership, a mailbox's public
+// delegates, the GAL, or a named address list.
+func (s *Server) containerMIDs(g gal, req getMatchesRequest, st stat) []uint32 {
+	switch st.containerID {
+	case uint32(mapi.PrEmsAbMember):
+		// Expand the distribution list at cur_rec into its members ([MS-OXNSPI]
+		// 3.1.4.1.10): the client selects the PR_EMS_AB_MEMBER container to read a
+		// list's membership. Members hidden from address lists are dropped.
+		if exp, ok := s.gal.(mlistExpander); ok {
+			return g.memberMIDs(st.curRec, exp, int(req.rowCount))
+		}
+	case uint32(mapi.PrEmsAbPublicDelegates):
+		// Read the public-delegate list of the mailbox at cur_rec ([MS-OXNSPI]
+		// 3.1.4.1.10): delegates hidden from the delegate list, and any the filter
+		// excludes, are dropped. Public delegates are world-readable, so this takes
+		// no caller identity.
+		if reader, ok := s.gal.(delegateReader); ok {
+			return g.delegateMIDs(st.curRec, reader, req.filter, int(req.rowCount))
+		}
+	case uint32(galContainerID):
+		// The GAL honors both the GAL-browse and the name-resolution hide bits.
+		return g.matchAll(req.filter, req.rowCount, st, abHideFromGAL|abHideResolve, nil)
+	default:
+		// A named address list: restrict to its recipient type and honor the
+		// address-list and name-resolution hide bits. An unknown container matches
+		// nothing.
+		// #nosec G115 -- the signed and unsigned views of the same 32 bits
+		if al, ok := addressListByID(int32(st.containerID)); ok {
+			return g.matchAll(req.filter, req.rowCount, st, abHideFromAL|abHideResolve, &al)
+		}
+	}
+	return nil
 }
 
 // matchAll returns the MIds of a container's entries satisfying the filter,
@@ -237,21 +271,9 @@ func (g gal) matchAll(filter *mapi.Restriction, rowCount uint32, st stat, hideMa
 func matchNode(u galUser, res *mapi.Restriction) bool {
 	switch res.Type {
 	case mapi.ResAnd:
-		kids, _ := res.Value.([]mapi.Restriction)
-		for i := range kids {
-			if !matchNode(u, &kids[i]) {
-				return false
-			}
-		}
-		return true
+		return matchAllChildren(u, res)
 	case mapi.ResOr:
-		kids, _ := res.Value.([]mapi.Restriction)
-		for i := range kids {
-			if matchNode(u, &kids[i]) {
-				return true
-			}
-		}
-		return false
+		return matchAnyChild(u, res)
 	case mapi.ResNot:
 		inner, ok := res.Value.(mapi.Restriction)
 		if !ok {
@@ -275,6 +297,28 @@ func matchNode(u galUser, res *mapi.Restriction) bool {
 		// RES_CONTENT and the structural kinds are unevaluated for the GAL.
 		return false
 	}
+}
+
+// matchAllChildren evaluates an AND node: every child must match.
+func matchAllChildren(u galUser, res *mapi.Restriction) bool {
+	kids, _ := res.Value.([]mapi.Restriction)
+	for i := range kids {
+		if !matchNode(u, &kids[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// matchAnyChild evaluates an OR node: one matching child is enough.
+func matchAnyChild(u galUser, res *mapi.Restriction) bool {
+	kids, _ := res.Value.([]mapi.Restriction)
+	for i := range kids {
+		if matchNode(u, &kids[i]) {
+			return true
+		}
+	}
+	return false
 }
 
 // matchProperty evaluates a single property restriction. PR_ANR (and its ANSI
@@ -321,7 +365,7 @@ func threeWayEval(relop mapi.Relop, cmp int) bool {
 // compareProp three-way compares a stored value against a wanted value, typed by
 // the proptag. ok is false for types the address-book filter does not compare
 // (the reference handles short, long, boolean, and string).
-func compareProp(tag mapi.PropTag, got, want any) (cmp int, ok bool) {
+func compareProp(tag mapi.PropTag, got, want any) (order int, ok bool) {
 	switch tag.Type() {
 	case mapi.PtShort, mapi.PtLong:
 		a, ok1 := toInt64(got)
@@ -329,28 +373,14 @@ func compareProp(tag mapi.PropTag, got, want any) (cmp int, ok bool) {
 		if !ok1 || !ok2 {
 			return 0, false
 		}
-		switch {
-		case a < b:
-			return -1, true
-		case a > b:
-			return 1, true
-		default:
-			return 0, true
-		}
+		return cmp.Compare(a, b), true
 	case mapi.PtBoolean:
 		a, ok1 := got.(bool)
 		b, ok2 := want.(bool)
 		if !ok1 || !ok2 {
 			return 0, false
 		}
-		switch {
-		case a == b:
-			return 0, true
-		case !a:
-			return -1, true
-		default:
-			return 1, true
-		}
+		return cmp.Compare(boolRank(a), boolRank(b)), true
 	case mapi.PtString8, mapi.PtUnicode:
 		a, ok1 := got.(string)
 		b, ok2 := want.(string)
@@ -360,6 +390,14 @@ func compareProp(tag mapi.PropTag, got, want any) (cmp int, ok bool) {
 		return strings.Compare(strings.ToLower(a), strings.ToLower(b)), true
 	}
 	return 0, false
+}
+
+// boolRank orders booleans so false sorts before true.
+func boolRank(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // toInt64 widens the integer property types compareProp handles.

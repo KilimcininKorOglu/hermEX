@@ -111,22 +111,30 @@ func (s *Server) modLinkAttCore(req modLinkAttRequest, user string) uint32 {
 	if err != nil {
 		return ecError
 	}
-	del := req.flags&modFlagDelete != 0
-	for _, eid := range req.entryIDs {
-		addr, ok := g.entryIDToAddress(eid)
-		if !ok {
-			continue
-		}
-		if del {
-			list = removeAddr(list, addr)
-		} else if !containsAddr(list, addr) {
-			list = append(list, addr)
-		}
-	}
+	list = g.applyDelegateEdits(list, req.entryIDs, req.flags&modFlagDelete != 0)
 	if err := writer.SetDelegates(target.smtp, list); err != nil {
 		return ecError
 	}
 	return ecSuccess
+}
+
+// applyDelegateEdits adds or removes each named entry from the delegate list. An
+// EntryID that resolves to no address is skipped, so one malformed id does not
+// fail the whole edit.
+func (g gal) applyDelegateEdits(list []string, entryIDs [][]byte, remove bool) []string {
+	for _, eid := range entryIDs {
+		addr, ok := g.entryIDToAddress(eid)
+		if !ok {
+			continue
+		}
+		switch {
+		case remove:
+			list = removeAddr(list, addr)
+		case !containsAddr(list, addr):
+			list = append(list, addr)
+		}
+	}
+	return list
 }
 
 // entryIDToAddress reverses an address-book EntryID to its SMTP address. An

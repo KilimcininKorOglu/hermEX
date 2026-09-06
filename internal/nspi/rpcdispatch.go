@@ -65,49 +65,42 @@ const nspiUnbindSuccess uint32 = 1
 // so an empty caller yields an empty address book rather than the whole
 // deployment.
 func (s *Server) DispatchRPC(opnum uint16, stub []byte, caller string) (out []byte, fault uint32) {
-	switch opnum {
-	case opNspiBind:
-		return s.rpcBind(stub)
-	case opNspiUnbind:
-		return s.rpcUnbind(stub)
-	case opNspiUpdateStat:
-		return s.rpcUpdateStat(stub, caller)
-	case opNspiQueryRows:
-		return s.rpcQueryRows(stub, caller)
-	case opNspiSeekEntries:
-		return s.rpcSeekEntries(stub, caller)
-	case opNspiGetMatches:
-		return s.rpcGetMatches(stub, caller)
-	case opNspiResortRestriction:
-		return s.rpcResortRestriction(stub, caller)
-	case opNspiDNToMId:
-		return s.rpcDNToMid(stub, caller)
-	case opNspiGetPropList:
-		return s.rpcGetPropList(stub, caller)
-	case opNspiGetProps:
-		return s.rpcGetProps(stub, caller)
-	case opNspiCompareMIds:
-		return s.rpcCompareMids(stub, caller)
-	case opNspiModProps:
-		return s.rpcModProps(stub)
-	case opNspiGetSpecialTable:
-		return s.rpcGetSpecialTable(stub)
-	case opNspiGetTemplateInfo:
-		return s.rpcGetTemplateInfo(stub)
-	case opNspiModLinkAtt:
-		return s.rpcModLinkAtt(stub)
-	case opNspiQueryColumns:
-		return s.rpcQueryColumns(stub)
-	case opNspiResolveNames:
-		return s.rpcResolveNames(stub, false, caller)
-	case opNspiResolveNamesW:
-		return s.rpcResolveNames(stub, true, caller)
-	default:
+	handler, ok := rpcOperations[opnum]
+	if !ok {
 		// Opnums 15/17/18 are reserved/unused in the NSPI interface (the reference
 		// enum omits them too), and anything past 20 is out of range; none is a
 		// defined operation, so all fault.
 		return nil, ndr.FaultOpRngError
 	}
+	return handler(s, stub, caller)
+}
+
+// rpcOperations is the single routing source from an NSPI opnum to its handler.
+// The operations that do not read the caller's identity ignore the argument, and
+// the two ResolveNames forms share one handler with the wide-character flag.
+var rpcOperations = map[uint16]func(s *Server, stub []byte, caller string) ([]byte, uint32){
+	opNspiBind:              func(s *Server, stub []byte, _ string) ([]byte, uint32) { return s.rpcBind(stub) },
+	opNspiUnbind:            func(s *Server, stub []byte, _ string) ([]byte, uint32) { return s.rpcUnbind(stub) },
+	opNspiUpdateStat:        (*Server).rpcUpdateStat,
+	opNspiQueryRows:         (*Server).rpcQueryRows,
+	opNspiSeekEntries:       (*Server).rpcSeekEntries,
+	opNspiGetMatches:        (*Server).rpcGetMatches,
+	opNspiResortRestriction: (*Server).rpcResortRestriction,
+	opNspiDNToMId:           (*Server).rpcDNToMid,
+	opNspiGetPropList:       (*Server).rpcGetPropList,
+	opNspiGetProps:          (*Server).rpcGetProps,
+	opNspiCompareMIds:       (*Server).rpcCompareMids,
+	opNspiModProps:          func(s *Server, stub []byte, _ string) ([]byte, uint32) { return s.rpcModProps(stub) },
+	opNspiGetSpecialTable:   func(s *Server, stub []byte, _ string) ([]byte, uint32) { return s.rpcGetSpecialTable(stub) },
+	opNspiGetTemplateInfo:   func(s *Server, stub []byte, _ string) ([]byte, uint32) { return s.rpcGetTemplateInfo(stub) },
+	opNspiModLinkAtt:        func(s *Server, stub []byte, _ string) ([]byte, uint32) { return s.rpcModLinkAtt(stub) },
+	opNspiQueryColumns:      func(s *Server, stub []byte, _ string) ([]byte, uint32) { return s.rpcQueryColumns(stub) },
+	opNspiResolveNames: func(s *Server, stub []byte, caller string) ([]byte, uint32) {
+		return s.rpcResolveNames(stub, false, caller)
+	},
+	opNspiResolveNamesW: func(s *Server, stub []byte, caller string) ([]byte, uint32) {
+		return s.rpcResolveNames(stub, true, caller)
+	},
 }
 
 // mintRPCHandle allocates a fresh NSPI context-handle GUID from a per-server
