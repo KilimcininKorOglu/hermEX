@@ -392,6 +392,34 @@ func (w *Worker) retryDelay(attempts int) time.Duration {
 	return d
 }
 
+// mailFrom opens the transaction, refusing a host that cannot receive this
+// item's envelope. An item needs the SMTPUTF8 extension (RFC 6531 §3.2) as soon
+// as either address carries a byte outside ASCII; the message body is not
+// consulted, because an internationalized header travels as MIME-encoded ASCII
+// and the envelope is what a next hop must be able to read.
+//
+// net/smtp attaches the SMTPUTF8 keyword whenever the server advertises it, but
+// it never inspects the address, so without this check a UTF-8 envelope goes out
+// raw on a session that never negotiated the extension.
+func mailFrom(c *smtp.Client, it Item, host string) error {
+	if !isASCII(it.From) || !isASCII(it.Recipient) {
+		if ok, _ := c.Extension("SMTPUTF8"); !ok {
+			return fmt.Errorf("smtputf8: %s carries a non-ASCII envelope address but %s does not offer SMTPUTF8", it.Recipient, host)
+		}
+	}
+	return c.Mail(it.From)
+}
+
+// isASCII reports whether every byte of s is in the ASCII range.
+func isASCII(s string) bool {
+	for i := range len(s) {
+		if s[i] > 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
 // isPermanent reports whether err is a permanent SMTP rejection (a 5xx reply),
 // which must not be retried. Network and 4xx errors are transient.
 func isPermanent(err error) bool {
@@ -530,7 +558,13 @@ func (w *Worker) send(host string, it Item, requireTLS bool) error {
 		w.recordTLS(it, host, tlsrpt.PolicyTypeTLSA, tlsrpt.ResultStartTLSNotSupported)
 		return fmt.Errorf("dane: %s publishes TLSA records but %s does not offer STARTTLS", domainPart(it.Recipient), host)
 	}
-	if err := c.Mail(it.From); err != nil {
+	// RFC 6531 §3.5: an internationalized message MUST NOT be sent to a mail
+	// exchanger that does not offer SMTPUTF8. net/smtp adds the keyword whenever
+	// the server advertises it, but it never checks the address, so without this
+	// guard a UTF-8 envelope goes out raw on a session that never negotiated it.
+	// The host is refused rather than tried, so delivery falls through to the next
+	// mail exchanger, the way a required STARTTLS that is not offered does.
+	if err := mailFrom(c, it, host); err != nil {
 		return err
 	}
 	if err := c.Rcpt(it.Recipient); err != nil {
