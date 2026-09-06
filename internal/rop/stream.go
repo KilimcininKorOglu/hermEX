@@ -79,54 +79,54 @@ func (s *Session) streamData(parent *object, tag mapi.PropTag) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		v, ok := props.Get(tag)
-		if !ok {
-			return nil, errNoStreamProp
-		}
-		return streamBytes(tag.Type(), v), nil
+		return streamFrom(props, tag)
 	case parent.kind == kindEmbedded:
 		if parent.embedded == nil || parent.embedded.msg == nil {
 			return nil, errNoStreamProp
 		}
-		v, ok := parent.embedded.msg.Props.Get(tag)
-		if !ok {
-			return nil, errNoStreamProp
-		}
-		return streamBytes(tag.Type(), v), nil
+		return streamFrom(parent.embedded.msg.Props, tag)
 	case parent.kind == kindAttachment:
-		v, ok := parent.attachProps.Get(tag)
-		if !ok {
-			return nil, errNoStreamProp
-		}
-		return streamBytes(tag.Type(), v), nil
+		return streamFrom(parent.attachProps, tag)
 	case parent.kind == kindAttachWrite && parent.attachW != nil:
-		// A created attachment being filled: read its buffered write bag first, so a
-		// read-mode stream sees the client's own writes before SaveChangesAttachment
-		// (read-your-writes on a compose attachment). After the save the buffer is
-		// flushed, to the in-memory compose attachment, or to the store row for a
-		// persisted one, so fall back to those for a read on a saved write handle.
-		aw := parent.attachW
-		if v, ok := aw.pending.Get(tag); ok {
-			return streamBytes(tag.Type(), v), nil
-		}
-		if aw.inMem != nil {
-			if v, ok := aw.inMem.props.Get(tag); ok {
-				return streamBytes(tag.Type(), v), nil
-			}
-		}
-		if aw.attachmentID != 0 && parent.store != nil {
-			props, err := parent.store.GetAttachmentProperties(aw.attachmentID, tag)
-			if err != nil {
-				return nil, err
-			}
-			if v, ok := props.Get(tag); ok {
-				return streamBytes(tag.Type(), v), nil
-			}
-		}
-		return nil, errNoStreamProp
-	default:
+		return streamAttachWrite(parent, tag)
+	}
+	return nil, errNoStreamProp
+}
+
+// streamFrom reads one property out of a bag as stream bytes, reporting
+// errNoStreamProp when the bag does not carry it.
+func streamFrom(props mapi.PropertyValues, tag mapi.PropTag) ([]byte, error) {
+	v, ok := props.Get(tag)
+	if !ok {
 		return nil, errNoStreamProp
 	}
+	return streamBytes(tag.Type(), v), nil
+}
+
+// streamAttachWrite reads a created attachment being filled. Its buffered write
+// bag comes first, so a read-mode stream sees the client's own writes before
+// SaveChangesAttachment (read-your-writes on a compose attachment). After the
+// save the buffer is flushed, to the in-memory compose attachment, or to the
+// store row for a persisted one, so both are consulted for a read on a saved
+// write handle.
+func streamAttachWrite(parent *object, tag mapi.PropTag) ([]byte, error) {
+	aw := parent.attachW
+	if v, ok := aw.pending.Get(tag); ok {
+		return streamBytes(tag.Type(), v), nil
+	}
+	if aw.inMem != nil {
+		if v, ok := aw.inMem.props.Get(tag); ok {
+			return streamBytes(tag.Type(), v), nil
+		}
+	}
+	if aw.attachmentID == 0 || parent.store == nil {
+		return nil, errNoStreamProp
+	}
+	props, err := parent.store.GetAttachmentProperties(aw.attachmentID, tag)
+	if err != nil {
+		return nil, err
+	}
+	return streamFrom(props, tag)
 }
 
 // ropOpenStream handles RopOpenStream ([MS-OXCPRPT] 2.2.2.14): it snapshots the
@@ -365,6 +365,37 @@ func streamValue(typ mapi.PropType, data []byte) any {
 // cursor to Offset (a signed count) from the chosen origin and returns the new
 // position. Seeking past the end zero-extends a writable stream; a read-only stream
 // clamps to the end. A negative resulting position or an unknown origin is refused.
+// seekBase resolves a seek origin to the position it counts from. valid is
+// false for an origin the stream does not define.
+func (st *streamState) seekBase(origin uint8) (int64, bool) {
+	switch origin {
+	case streamSeekSet:
+		return 0, true
+	case streamSeekCur:
+		return int64(st.pos), true
+	case streamSeekEnd:
+		return int64(len(st.data)), true
+	}
+	return 0, false
+}
+
+// seekTo moves the cursor and returns where it landed. A writable stream grows
+// to reach a position past its end (the bytes in between read as zero); a
+// read-only one clamps to the end instead.
+func (st *streamState) seekTo(newpos int64) int64 {
+	if newpos > int64(len(st.data)) {
+		if st.writable {
+			grown := make([]byte, newpos)
+			copy(grown, st.data)
+			st.data = grown
+		} else {
+			newpos = int64(len(st.data))
+		}
+	}
+	st.pos = int(newpos)
+	return newpos
+}
+
 func (s *Session) ropSeekStream(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
 	origin, e1 := p.Uint8()
 	offRaw, e2 := p.Uint64()
@@ -377,15 +408,8 @@ func (s *Session) ropSeekStream(p *ext.Pull, out *ext.Push, handles []uint32, hi
 		return true
 	}
 	st := obj.stream
-	var base int64
-	switch origin {
-	case streamSeekSet:
-		base = 0
-	case streamSeekCur:
-		base = int64(st.pos)
-	case streamSeekEnd:
-		base = int64(len(st.data))
-	default:
+	base, valid := st.seekBase(origin)
+	if !valid {
 		writeErr(out, ropSeekStream, hindex, ecInvalidParam)
 		return true
 	}
@@ -395,16 +419,7 @@ func (s *Session) ropSeekStream(p *ext.Pull, out *ext.Push, handles []uint32, hi
 		writeErr(out, ropSeekStream, hindex, ecInvalidParam)
 		return true
 	}
-	if newpos > int64(len(st.data)) {
-		if st.writable {
-			grown := make([]byte, newpos)
-			copy(grown, st.data)
-			st.data = grown
-		} else {
-			newpos = int64(len(st.data))
-		}
-	}
-	st.pos = int(newpos)
+	newpos = st.seekTo(newpos)
 
 	out.Uint8(ropSeekStream)
 	out.Uint8(hindex)

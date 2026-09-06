@@ -44,60 +44,19 @@ const ownerResponseFlags = responseFlagReserved | responseFlagOwnerRight | respo
 // (dispatch then stops); a store-open failure is reported in band as an error
 // ReturnValue (a well-formed response), so dispatch can continue.
 func (s *Session) ropLogon(p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool {
-	logonFlags, e1 := p.Uint8()
-	_, e2 := p.Uint32() // OpenFlags
-	_, e3 := p.Uint32() // StoreState
-	essdnSize, e4 := p.Uint16()
-	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
+	logonFlags, essdn, framed := pullLogonRequest(p)
+	if !framed {
 		return false
 	}
-	essdn, err := p.Raw(int(essdnSize))
-	if err != nil {
-		return false
-	}
-
-	// Resolve which mailbox this logon opens. The Essdn names the target; only a
-	// positively-resolved DIFFERENT mailbox is a delegate open. An empty,
-	// unparseable, or self-resolving Essdn opens the caller's own mailbox, so an
-	// owner is never misrouted or locked out (even when logged in under an alias
-	// whose Essdn names the primary address).
-	maildir := s.mailbox
-	delegate := false
-	var ownerSMTP string // the delegated mailbox owner's address (the send-on-behalf From)
-	if essdnSize > 0 && s.accounts != nil {
-		if smtp, ok := essdnToSMTP(string(essdn)); ok {
-			if md, ok := s.accounts.Resolve(smtp); ok && md != s.mailbox {
-				maildir = md
-				delegate = true
-				ownerSMTP = smtp
-			}
-		}
-	}
-
+	maildir, delegate, ownerSMTP := s.logonTarget(essdn)
 	st, err := objectstore.Open(maildir)
 	if err != nil {
 		writeErr(out, ropLogon, hindex, ecError)
 		return true
 	}
-	sendsOnBehalf := false
-	if delegate {
-		// A delegate may open the mailbox only with some access to it, a designated
-		// delegate, or a grant on any folder. The per-folder gates then govern what
-		// they can actually read and change. Delegate-list membership additionally
-		// confers the send-on-behalf right, advertised in the response flags below.
-		ok, onList, err := s.mayOpenDelegate(st, s.owner)
-		if err != nil {
-			_ = st.Close()
-			writeErr(out, ropLogon, hindex, ecError)
-			return true
-		}
-		if !ok {
-			s.logAuthzDeny(ropLogon, st, 0, 0)
-			_ = st.Close()
-			writeErr(out, ropLogon, hindex, ecAccessDenied)
-			return true
-		}
-		sendsOnBehalf = onList
+	sendsOnBehalf, ok := s.authorizeLogon(out, st, hindex, delegate)
+	if !ok {
+		return true
 	}
 	// Mirror the reference logon's identity: MailboxGuid is the store record key
 	// (the mailbox GUID) and ReplGuid is the mapping signature, both persisted at
@@ -150,6 +109,73 @@ func (s *Session) ropLogon(p *ext.Pull, out *ext.Push, handles []uint32, hindex 
 	out.Uint64(0)                        // GwartTime
 	out.Uint32(0)                        // StoreState
 	return true
+}
+
+// pullLogonRequest reads a RopLogon request. OpenFlags and StoreState are
+// discarded: this server has one store mode and reports its own state in the
+// response.
+func pullLogonRequest(p *ext.Pull) (logonFlags uint8, essdn []byte, ok bool) {
+	logonFlags, e1 := p.Uint8()
+	_, e2 := p.Uint32() // OpenFlags
+	_, e3 := p.Uint32() // StoreState
+	essdnSize, e4 := p.Uint16()
+	if e1 != nil || e2 != nil || e3 != nil || e4 != nil {
+		return 0, nil, false
+	}
+	essdn, err := p.Raw(int(essdnSize))
+	if err != nil {
+		return 0, nil, false
+	}
+	return logonFlags, essdn, true
+}
+
+// logonTarget resolves which mailbox this logon opens. The Essdn names the
+// target; only a positively-resolved DIFFERENT mailbox is a delegate open. An
+// empty, unparseable, or self-resolving Essdn opens the caller's own mailbox, so
+// an owner is never misrouted or locked out (even when logged in under an alias
+// whose Essdn names the primary address). ownerSMTP is the delegated mailbox
+// owner's address, the send-on-behalf From.
+func (s *Session) logonTarget(essdn []byte) (maildir string, delegate bool, ownerSMTP string) {
+	if len(essdn) == 0 || s.accounts == nil {
+		return s.mailbox, false, ""
+	}
+	smtp, ok := essdnToSMTP(string(essdn))
+	if !ok {
+		return s.mailbox, false, ""
+	}
+	md, ok := s.accounts.Resolve(smtp)
+	if !ok || md == s.mailbox {
+		return s.mailbox, false, ""
+	}
+	return md, true, smtp
+}
+
+// authorizeLogon gates a delegate open and reports whether the caller may send
+// on the mailbox's behalf. An owner logon passes through untouched.
+//
+// A delegate may open the mailbox only with some access to it, a designated
+// delegate, or a grant on any folder. The per-folder gates then govern what they
+// can actually read and change. Delegate-list membership additionally confers
+// the send-on-behalf right, advertised in the response flags.
+//
+// ok=false means the store was closed and the error response written.
+func (s *Session) authorizeLogon(out *ext.Push, st *objectstore.Store, hindex uint8, delegate bool) (sendsOnBehalf, ok bool) {
+	if !delegate {
+		return false, true
+	}
+	allowed, onList, err := s.mayOpenDelegate(st, s.owner)
+	if err != nil {
+		_ = st.Close()
+		writeErr(out, ropLogon, hindex, ecError)
+		return false, false
+	}
+	if !allowed {
+		s.logAuthzDeny(ropLogon, st, 0, 0)
+		_ = st.Close()
+		writeErr(out, ropLogon, hindex, ecAccessDenied)
+		return false, false
+	}
+	return onList, true
 }
 
 // ropRelease handles RopRelease ([MS-OXCROPS] 2.2.15.3): it frees the referenced
