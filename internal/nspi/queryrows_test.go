@@ -21,41 +21,29 @@ func TestPushPropertyRowForms(t *testing.T) {
 	// NONE form: every column present.
 	none := []mapi.PropTag{mapi.PrDisplayName, mapi.PrObjectType}
 	p := ext.NewPush(abkFlags)
-	if err := pushPropertyRow(p, none, bag); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "push the NONE row", pushPropertyRow(p, none, bag))
 	b := p.Bytes()
-	if b[0] != propRowNone {
-		t.Fatalf("NONE flag = %#x, want 0x00", b[0])
-	}
+	wantEq(t, "the NONE row flag", b[0], uint8(propRowNone))
 	pull := ext.NewPull(b, abkFlags)
 	mustU8(t, pull, "flag")
-	if v, _ := pull.PropValue(mapi.PtUnicode); v != "Alice" {
-		t.Errorf("NONE display = %v, want Alice", v)
-	}
-	if v, _ := pull.PropValue(mapi.PtLong); v != int32(6) {
-		t.Errorf("NONE objtype = %v, want 6", v)
-	}
+	v, _ := pull.PropValue(mapi.PtUnicode)
+	wantEq(t, "the NONE row display name", v, any("Alice"))
+	v, _ = pull.PropValue(mapi.PtLong)
+	wantEq(t, "the NONE row object type", v, any(int32(6)))
 
 	// FLAGGED form: PrSmtpAddress is absent -> a PT_ERROR (ecNotFound) marker.
 	flagged := []mapi.PropTag{mapi.PrDisplayName, mapi.PrSmtpAddress}
 	p2 := ext.NewPush(abkFlags)
-	if err := pushPropertyRow(p2, flagged, bag); err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "push the FLAGGED row", pushPropertyRow(p2, flagged, bag))
 	b2 := p2.Bytes()
-	if b2[0] != propRowFlagged {
-		t.Fatalf("FLAGGED flag = %#x, want 0x01", b2[0])
-	}
+	wantEq(t, "the FLAGGED row flag", b2[0], uint8(propRowFlagged))
 	pull2 := ext.NewPull(b2, abkFlags)
 	mustU8(t, pull2, "flag")
-	if fpv, _ := pull2.FlaggedPropVal(mapi.PtUnicode); fpv.Flag != mapi.FlaggedAvailable || fpv.Value != "Alice" {
-		t.Errorf("present column = %+v, want available Alice", fpv)
-	}
+	present, _ := pull2.FlaggedPropVal(mapi.PtUnicode)
+	wantEq(t, "the present column's flag", present.Flag, mapi.FlaggedAvailable)
+	wantEq(t, "the present column's value", present.Value, any("Alice"))
 	fpv, _ := pull2.FlaggedPropVal(mapi.PtUnicode)
-	if fpv.Flag != mapi.FlaggedError {
-		t.Errorf("absent column flag = %#x, want FlaggedError 0xA", fpv.Flag)
-	}
+	wantEq(t, "the absent column's flag", fpv.Flag, mapi.FlaggedError)
 	if fpv.Value != ecNotFound {
 		t.Errorf("absent column ec = %v, want ecNotFound", fpv.Value)
 	}
@@ -123,33 +111,22 @@ func TestQueryRowsWalk(t *testing.T) {
 	}
 	mustU8(t, p, "STAT marker")
 	outStat, err := pullStat(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if outStat.curRec != midEndOfTable {
-		t.Errorf("cur_rec = %#x, want END_OF_TABLE (all rows fit count)", outStat.curRec)
-	}
-	if outStat.numPos != 3 || outStat.totalRec != 3 {
-		t.Errorf("STAT num_pos=%d total_rec=%d, want 3/3", outStat.numPos, outStat.totalRec)
-	}
+	mustNoErr(t, "decode the STAT", err)
+	wantEq(t, "cur_rec (all rows fit the count, so END_OF_TABLE)", outStat.curRec, uint32(midEndOfTable))
+	wantEq(t, "the STAT num_pos", outStat.numPos, uint32(3))
+	wantEq(t, "the STAT total_rec", outStat.totalRec, uint32(3))
+
 	mustU8(t, p, "rows marker")
 	cols, err := p.PropTagsLong()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(cols) != len(defaultColumns) {
-		t.Fatalf("columns = %d, want %d (default set)", len(cols), len(defaultColumns))
-	}
-	if n := mustU32(t, p, "row count"); n != 3 {
-		t.Fatalf("row count = %d, want 3", n)
-	}
+	mustNoErr(t, "decode the columns", err)
+	wantEq(t, "the column count (the default set)", len(cols), len(defaultColumns))
+	wantEq(t, "the row count", mustU32(t, p, "row count"), uint32(3))
+
 	row0 := decodeRow(t, p, cols)
-	if v, _ := row0.Get(mapi.PrSmtpAddress); v != "alice@hermex.test" {
-		t.Errorf("row[0] SMTP = %v, want alice (address-sorted first)", v)
-	}
-	if v, _ := row0.Get(mapi.PrAddrType); v != "SMTP" {
-		t.Errorf("row[0] ADDRTYPE = %v, want SMTP", v)
-	}
+	v, _ := row0.Get(mapi.PrSmtpAddress)
+	wantEq(t, "row[0] SMTP (address-sorted first)", v, any("alice@hermex.test"))
+	v, _ = row0.Get(mapi.PrAddrType)
+	wantEq(t, "row[0] ADDRTYPE", v, any("SMTP"))
 }
 
 // TestQueryRowsExplicit proves the explicit-MId mode returns one row per id (an

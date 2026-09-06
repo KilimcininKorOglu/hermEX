@@ -53,36 +53,31 @@ func bindResult(t *testing.T, out []byte) (uint32, mapi.GUID) {
 func TestRPCBindRoundTrip(t *testing.T) {
 	s := NewServer(nil, testServerGUID)
 	out, fault := s.DispatchRPC(opNspiBind, buildBindIN(0, 1252), testCaller)
-	if fault != 0 {
-		t.Fatalf("bind fault = %#x, want 0", fault)
-	}
+	wantEq(t, "the bind fault", fault, uint32(0))
+
 	q := ndr.NewPull(out)
 	ref, err := q.Uint32()
-	if err != nil || ref == 0 {
-		t.Fatalf("server GUID referent = %#x (err %v), want non-zero", ref, err)
+	mustNoErr(t, "read the server GUID referent", err)
+	if ref == 0 {
+		t.Fatal("server GUID referent is null, want a pointer")
 	}
 	gotGUID, err := q.Raw(16)
-	if err != nil {
-		t.Fatalf("read server GUID: %v", err)
-	}
+	mustNoErr(t, "read the server GUID", err)
 	wantGUID := testServerGUID.Flat()
 	if !bytes.Equal(gotGUID, wantGUID[:]) {
 		t.Errorf("server GUID = %x, want %x", gotGUID, wantGUID[:])
 	}
+
 	handleType, handleGUID, err := pullCtxHandleNDR(q)
-	if err != nil {
-		t.Fatalf("read ctx handle: %v", err)
+	mustNoErr(t, "read the context handle", err)
+	wantEq(t, "the handle type", handleType, uint32(0))
+	if handleGUID == (mapi.GUID{}) {
+		t.Error("the handle GUID is zero, want a minted value")
 	}
-	if handleType != 0 || handleGUID == (mapi.GUID{}) {
-		t.Errorf("handle = {type %d, guid %+v}, want type 0 + non-zero guid", handleType, handleGUID)
-	}
+
 	result, err := q.Uint32()
-	if err != nil {
-		t.Fatalf("read result: %v", err)
-	}
-	if result != ecSuccess {
-		t.Errorf("result = %#x, want ecSuccess", result)
-	}
+	mustNoErr(t, "read the result", err)
+	wantEq(t, "the result", result, uint32(ecSuccess))
 }
 
 // TestRPCBindMintsDistinctHandles proves two binds get different handle GUIDs, so

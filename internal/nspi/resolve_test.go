@@ -1,6 +1,7 @@
 package nspi
 
 import (
+	"fmt"
 	"testing"
 
 	"hermex/internal/ext"
@@ -81,40 +82,25 @@ func TestResolveNamesW(t *testing.T) {
 	)
 	p := ext.NewPull(s.ResolveNamesW(body, testCaller), abkFlags)
 	mustU32(t, p, "status")
-	if r := mustU32(t, p, "result"); r != ecSuccess {
-		t.Fatalf("result = %#x", r)
-	}
-	if cp := mustU32(t, p, "codepage"); cp != 1252 {
-		t.Errorf("codepage = %d, want 1252", cp)
-	}
-	if m := mustU8(t, p, "mids marker"); m != 0xFF {
-		t.Fatalf("mids marker = %#x, want 0xFF", m)
-	}
+	wantEq(t, "the result", mustU32(t, p, "result"), uint32(ecSuccess))
+	wantEq(t, "the echoed code page", mustU32(t, p, "codepage"), uint32(1252))
+	wantEq(t, "the mids marker", mustU8(t, p, "mids marker"), uint8(0xFF))
+
 	mids, err := p.PropTagsLong()
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "decode the mids", err)
 	want := []uint32{midResolved, midAmbiguous, midUnresolved, midResolved}
 	if len(mids) != len(want) {
 		t.Fatalf("mids = %d, want %d", len(mids), len(want))
 	}
 	for i, w := range want {
-		if uint32(mids[i]) != w {
-			t.Errorf("mids[%d] = %#x, want %#x", i, uint32(mids[i]), w)
-		}
+		wantEq(t, fmt.Sprintf("mids[%d]", i), uint32(mids[i]), w)
 	}
-	if m := mustU8(t, p, "rows marker"); m != 0xFF {
-		t.Fatalf("rows marker = %#x, want 0xFF", m)
-	}
+
+	wantEq(t, "the rows marker", mustU8(t, p, "rows marker"), uint8(0xFF))
 	cols, err := p.PropTagsLong()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n := mustU32(t, p, "row count"); n != 2 {
-		t.Fatalf("resolved rows = %d, want 2 (bob + carol)", n)
-	}
+	mustNoErr(t, "decode the columns", err)
+	wantEq(t, "resolved rows (bob + carol)", mustU32(t, p, "row count"), uint32(2))
 	row0 := decodeRow(t, p, cols)
-	if v, _ := row0.Get(mapi.PrSmtpAddress); v != "bob@hermex.test" {
-		t.Errorf("first resolved row SMTP = %v, want bob", v)
-	}
+	v, _ := row0.Get(mapi.PrSmtpAddress)
+	wantEq(t, "the first resolved row's SMTP address", v, any("bob@hermex.test"))
 }

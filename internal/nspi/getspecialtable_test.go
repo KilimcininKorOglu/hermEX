@@ -3,6 +3,7 @@ package nspi
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"testing"
 
 	"hermex/internal/ext"
@@ -51,36 +52,44 @@ func TestGetSpecialTable(t *testing.T) {
 	resp := s.GetSpecialTable(buildGetSpecialTable(1252))
 
 	p := ext.NewPull(resp, abkFlags)
-	status := mustU32(t, p, "status")
-	result := mustU32(t, p, "result")
-	if status != 0 || result != ecSuccess {
-		t.Fatalf("status=%#x result=%#x, want 0/0", status, result)
+	wantEq(t, "the status", mustU32(t, p, "status"), uint32(0))
+	wantEq(t, "the result", mustU32(t, p, "result"), uint32(ecSuccess))
+	wantEq(t, "the echoed code page", mustU32(t, p, "codepage"), uint32(1252))
+	wantEq(t, "the version marker (absent)", mustU8(t, p, "version marker"), uint8(0))
+	wantEq(t, "the HasRows flag", mustU8(t, p, "HasRows"), uint8(0xFF))
+
+	rows := readContainerRows(t, p, 1+len(addressLists))
+	wantGALRow(t, rows[0])
+	// Rows 1..N are the named address lists, in registry order, each carrying its
+	// own container id and display name and a distinct EntryID (not the GAL's).
+	for i, al := range addressLists {
+		wantNamedListRow(t, rows[i+1], al)
 	}
-	if cp := mustU32(t, p, "codepage"); cp != 1252 {
-		t.Errorf("CodePage = %d, want 1252 (echoed)", cp)
-	}
-	if v := mustU8(t, p, "version marker"); v != 0 {
-		t.Errorf("Version marker = %#x, want 0 (absent)", v)
-	}
-	if hr := mustU8(t, p, "HasRows"); hr != 0xFF {
-		t.Fatalf("HasRows = %#x, want 0xFF", hr)
-	}
-	wantRows := 1 + len(addressLists)
+
+	wantEq(t, "the AuxiliaryBufferSize", mustU32(t, p, "AuxiliaryBufferSize"), uint32(0))
+	wantEq(t, "the trailing bytes", p.Remaining(), 0)
+}
+
+// readContainerRows decodes the hierarchy table's rows, requiring the count.
+func readContainerRows(t *testing.T, p *ext.Pull, want int) []mapi.PropertyValues {
+	t.Helper()
 	n := mustU32(t, p, "row count")
-	if int(n) != wantRows {
-		t.Fatalf("row count = %d, want %d (GAL + %d named lists)", n, wantRows, len(addressLists))
+	if int(n) != want {
+		t.Fatalf("row count = %d, want %d (GAL + %d named lists)", n, want, len(addressLists))
 	}
 	rows := make([]mapi.PropertyValues, n)
 	for i := range rows {
 		row, err := p.PropertyValuesLong()
-		if err != nil {
-			t.Fatalf("decode container row %d: %v", i, err)
-		}
+		mustNoErr(t, "decode a container row", err)
 		rows[i] = row
 	}
+	return rows
+}
 
-	// Row 0 is the GAL: the six grounded properties, PR_ENTRYID a DT_CONTAINER
-	// PermanentEntryID with dn "/".
+// wantGALRow checks the GAL container row: its six grounded properties, with
+// PR_ENTRYID a DT_CONTAINER PermanentEntryID whose dn is "/".
+func wantGALRow(t *testing.T, row mapi.PropertyValues) {
+	t.Helper()
 	scalars := map[mapi.PropTag]any{
 		mapi.PrContainerFlags:   abRecipients | abUnmodifiable,
 		mapi.PrDepth:            int32(0),
@@ -89,43 +98,35 @@ func TestGetSpecialTable(t *testing.T) {
 		mapi.PrEmsAbIsMaster:    false,
 	}
 	for tag, exp := range scalars {
-		got, ok := rows[0].Get(tag)
+		got, ok := row.Get(tag)
 		if !ok {
 			t.Errorf("GAL row missing %#x", uint32(tag))
 			continue
 		}
-		if got != exp {
-			t.Errorf("%#x = %v (%T), want %v (%T)", uint32(tag), got, got, exp, exp)
-		}
+		wantEq(t, fmt.Sprintf("GAL property %#x", uint32(tag)), got, exp)
 	}
-	if galEID, ok := rows[0].Get(mapi.PrEntryID); !ok {
-		t.Error("GAL row missing PR_ENTRYID")
-	} else if b, isBin := galEID.([]byte); !isBin || !bytes.Equal(b, permanentEntryID(dtContainer, "/")) {
+	galEID, ok := row.Get(mapi.PrEntryID)
+	if !ok {
+		t.Fatal("GAL row missing PR_ENTRYID")
+	}
+	if b, isBin := galEID.([]byte); !isBin || !bytes.Equal(b, permanentEntryID(dtContainer, "/")) {
 		t.Errorf("GAL PR_ENTRYID = % x, want the container PermanentEntryID", galEID)
 	}
+}
 
-	// Rows 1..N are the named address lists, in registry order, each carrying its
-	// own container id and display name and a distinct EntryID (not the GAL's).
-	for i, al := range addressLists {
-		row := rows[i+1]
-		if id, _ := row.Get(mapi.PrEmsAbContainerID); id != al.id {
-			t.Errorf("%q container id = %v, want %#x", al.name, id, al.id)
-		}
-		if name, _ := row.Get(mapi.PrDisplayName); name != al.name {
-			t.Errorf("named list %d display name = %v, want %q", i, name, al.name)
-		}
-		if eid, ok := row.Get(mapi.PrEntryID); !ok {
-			t.Errorf("%q missing PR_ENTRYID", al.name)
-		} else if b, _ := eid.([]byte); bytes.Equal(b, permanentEntryID(dtContainer, "/")) {
-			t.Errorf("%q shares the GAL EntryID; each container needs a distinct one", al.name)
-		}
+// wantNamedListRow checks one named address list's container row.
+func wantNamedListRow(t *testing.T, row mapi.PropertyValues, al addressList) {
+	t.Helper()
+	id, _ := row.Get(mapi.PrEmsAbContainerID)
+	wantEq(t, al.name+" container id", id, any(al.id))
+	name, _ := row.Get(mapi.PrDisplayName)
+	wantEq(t, al.name+" display name", name, any(al.name))
+	eid, ok := row.Get(mapi.PrEntryID)
+	if !ok {
+		t.Fatalf("%q missing PR_ENTRYID", al.name)
 	}
-
-	if aux := mustU32(t, p, "AuxiliaryBufferSize"); aux != 0 {
-		t.Errorf("AuxiliaryBufferSize = %d, want 0", aux)
-	}
-	if p.Remaining() != 0 {
-		t.Errorf("response has %d trailing bytes", p.Remaining())
+	if b, _ := eid.([]byte); bytes.Equal(b, permanentEntryID(dtContainer, "/")) {
+		t.Errorf("%q shares the GAL EntryID; each container needs a distinct one", al.name)
 	}
 }
 
