@@ -37,58 +37,22 @@ func TestReceiveFolderROPs(t *testing.T) {
 	inboxEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDInbox))
 	sentEID := uint64(mapi.MakeEIDEx(1, mapi.PrivateFIDSentItems))
 
-	// GetReceiveFolder("IPM.Note") → seeded "IPM" prefix → Inbox.
-	resp, _ := sess.Dispatch(buildGetReceiveFolder(0, "IPM.Note"), []uint32{logonH})
-	p := ext.NewPull(resp, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropGetReceiveFolder {
-		t.Fatalf("GetReceiveFolder RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("GetReceiveFolder ec = %#x", ec)
-	}
-	if fid := mustU64(t, p, "FolderId"); fid != inboxEID {
-		t.Errorf("GetReceiveFolder FolderId = %#x, want Inbox EID %#x", fid, inboxEID)
-	}
-	if explicit, _ := p.String8(); explicit != "IPM" {
-		t.Errorf("GetReceiveFolder explicit class = %q, want IPM", explicit)
-	}
+	// GetReceiveFolder("IPM.Note") resolves through the seeded "IPM" prefix to the
+	// Inbox, and reports which class actually matched.
+	wantReceiveFolder(t, sess, logonH, "IPM.Note", inboxEID, "IPM")
 
-	// SetReceiveFolder: map IPM.Note.Custom → Sent Items, resolve a sub-class to it.
-	if ec := readEC(t, mustDispatch(sess, buildSetReceiveFolder(0, sentEID, "IPM.Note.Custom"), logonH, 0), ropSetReceiveFolder); ec != ecSuccess {
-		t.Fatalf("SetReceiveFolder ec = %#x", ec)
-	}
-	resp, _ = sess.Dispatch(buildGetReceiveFolder(0, "IPM.Note.Custom.Sub"), []uint32{logonH})
-	p = ext.NewPull(resp, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	mustU32(t, p, "ec")
-	if fid := mustU64(t, p, "FolderId"); fid != sentEID {
-		t.Errorf("custom-class FolderId = %#x, want Sent Items EID %#x", fid, sentEID)
-	}
-	if explicit, _ := p.String8(); explicit != "IPM.Note.Custom" {
-		t.Errorf("custom-class explicit = %q, want IPM.Note.Custom", explicit)
-	}
+	// SetReceiveFolder: map IPM.Note.Custom to Sent Items, resolve a sub-class to it.
+	wantSetReceiveFolder(t, sess, logonH, sentEID, "IPM.Note.Custom", ecSuccess)
+	wantReceiveFolder(t, sess, logonH, "IPM.Note.Custom.Sub", sentEID, "IPM.Note.Custom")
 
 	// IPM is not settable.
-	if ec := readEC(t, mustDispatch(sess, buildSetReceiveFolder(0, inboxEID, "IPM"), logonH, 0), ropSetReceiveFolder); ec != ecAccessDenied {
-		t.Errorf("SetReceiveFolder(IPM) ec = %#x, want ecAccessDenied", ec)
-	}
+	wantSetReceiveFolder(t, sess, logonH, inboxEID, "IPM", ecAccessDenied)
 	// The empty default cannot be removed with a zero folder.
-	if ec := readEC(t, mustDispatch(sess, buildSetReceiveFolder(0, 0, ""), logonH, 0), ropSetReceiveFolder); ec != ecError {
-		t.Errorf("SetReceiveFolder(remove default) ec = %#x, want ecError", ec)
-	}
+	wantSetReceiveFolder(t, sess, logonH, 0, "", ecError)
 
 	// GetReceiveFolderTable: the mappings (seeded 4 + the custom one), first row decodable.
 	tblResp, _ := sess.Dispatch(toROPRequest(ropGetReceiveFolderTable, 0, nil), []uint32{logonH})
-	p = ext.NewPull(tblResp, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropGetReceiveFolderTable {
-		t.Fatalf("GetReceiveFolderTable RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("GetReceiveFolderTable ec = %#x", ec)
-	}
+	p := ropOK(t, tblResp, ropGetReceiveFolderTable, "GetReceiveFolderTable")
 	if rc := mustU32(t, p, "RowCount"); rc < 5 {
 		t.Errorf("RowCount = %d, want >= 5 (4 seeded + custom)", rc)
 	}
@@ -98,7 +62,24 @@ func TestReceiveFolderROPs(t *testing.T) {
 	}
 
 	// GetStoreState is not implemented (Exchange 2010+).
-	if ec := readEC(t, mustDispatch(sess, toROPRequest(ropGetStoreState, 0, nil), logonH, 0), ropGetStoreState); ec != ecNotImplemented {
-		t.Errorf("GetStoreState ec = %#x, want ecNotImplemented", ec)
+	wantEC(t, mustDispatch(sess, toROPRequest(ropGetStoreState, 0, nil), logonH, 0), ropGetStoreState, ecNotImplemented, "GetStoreState")
+}
+
+// wantReceiveFolder resolves a message class and asserts both the folder it maps
+// to and the class that actually matched.
+func wantReceiveFolder(t *testing.T, sess *Session, logonH uint32, class string, wantEID uint64, wantExplicit string) {
+	t.Helper()
+	resp, _ := sess.Dispatch(buildGetReceiveFolder(0, class), []uint32{logonH})
+	p := ropOK(t, resp, ropGetReceiveFolder, "GetReceiveFolder("+class+")")
+	wantU64(t, p, "GetReceiveFolder("+class+") FolderId", wantEID)
+	if explicit, _ := p.String8(); explicit != wantExplicit {
+		t.Errorf("GetReceiveFolder(%s) explicit class = %q, want %q", class, explicit, wantExplicit)
 	}
+}
+
+// wantSetReceiveFolder maps a class to a folder and asserts the return code.
+func wantSetReceiveFolder(t *testing.T, sess *Session, logonH uint32, folderEID uint64, class string, want uint32) {
+	t.Helper()
+	resp := mustDispatch(sess, buildSetReceiveFolder(0, folderEID, class), logonH, 0)
+	wantEC(t, resp, ropSetReceiveFolder, want, "SetReceiveFolder("+class+")")
 }

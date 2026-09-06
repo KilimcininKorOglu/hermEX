@@ -247,6 +247,21 @@ func ropOK(t *testing.T, resp []byte, ropID uint8, what string) *ext.Pull {
 	return p
 }
 
+// nextROP reads the next response header out of a batch and asserts its opcode
+// and return code, leaving the reader at that response's body. A batch response
+// is one stream, so a step that over- or under-consumed shows up here as the
+// wrong opcode rather than as garbage further along.
+func nextROP(t *testing.T, p *ext.Pull, ropID uint8, want uint32, what string) {
+	t.Helper()
+	if id := mustU8(t, p, what+" RopId"); id != ropID {
+		t.Fatalf("%s RopId = %#x, want %#x (batch misframed)", what, id, ropID)
+	}
+	mustU8(t, p, what+" hindex")
+	if ec := mustU32(t, p, what+" ec"); ec != want {
+		t.Fatalf("%s ec = %#x, want %#x", what, ec, want)
+	}
+}
+
 // ropReturn reads a response's common header and returns its ReturnValue, for a
 // step whose refusal is what the test is checking.
 func ropReturn(t *testing.T, resp []byte, ropID uint8, what string) uint32 {
