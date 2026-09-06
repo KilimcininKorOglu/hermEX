@@ -272,28 +272,39 @@ func TestMoveCopyMessages(t *testing.T) {
 	mv, _ := sess.Dispatch(
 		buildMoveCopyMessages(1, 2, 0, uint64(mapi.MakeEIDEx(1, uint64(moveInfo.ID))), uint64(mapi.MakeEIDEx(1, 999999))),
 		[]uint32{logonH, inboxH, junkH})
-	p := ext.NewPull(mv, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropMoveCopyMessages {
-		t.Fatalf("MoveCopyMessages RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("MoveCopyMessages ReturnValue = %#x", ec)
-	}
-	if pc := mustU8(t, p, "partialCompletion"); pc != 1 {
-		t.Errorf("PartialCompletion = %d, want 1 (the bogus id could not be moved)", pc)
-	}
+	p := ropOK(t, mv, ropMoveCopyMessages, "MoveCopyMessages")
+	wantU8(t, p, "PartialCompletion (the bogus id could not be moved)", 1)
 	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), moveInfo.ID); f != -1 {
 		t.Errorf("moved message still in source folder")
 	}
-	// The moved copy lands in Junk under a fresh id; find it by subject + assert
-	// its read flag and received date survived the move.
+
 	st2, err := objectstore.Open(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer st2.Close()
-	junk, err := st2.ListMessages(int64(mapi.PrivateFIDJunk))
+	assertMovedCopyKeptState(t, st2, date)
+
+	// Copy COPYME (Inbox -> Junk): the source copy must remain.
+	cp, _ := sess.Dispatch(
+		buildMoveCopyMessages(1, 2, 1, uint64(mapi.MakeEIDEx(1, uint64(copyInfo.ID)))),
+		[]uint32{logonH, inboxH, junkH})
+	p = ropOK(t, cp, ropMoveCopyMessages, "MoveCopyMessages(copy)")
+	wantU8(t, p, "copy PartialCompletion", 0)
+	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), copyInfo.ID); f == -1 {
+		t.Errorf("copied message was removed from the source folder")
+	}
+	if junk, _ := st2.ListMessages(int64(mapi.PrivateFIDJunk)); len(junk) != 2 {
+		t.Errorf("Junk has %d messages after copy, want 2", len(junk))
+	}
+}
+
+// assertMovedCopyKeptState checks the message a move landed in Junk. It arrives
+// under a fresh id, so it is found by being the only one there, and its read
+// flag and received date must have survived the re-file.
+func assertMovedCopyKeptState(t *testing.T, st *objectstore.Store, date time.Time) {
+	t.Helper()
+	junk, err := st.ListMessages(int64(mapi.PrivateFIDJunk))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,25 +316,5 @@ func TestMoveCopyMessages(t *testing.T) {
 	}
 	if junk[0].InternalDate.Unix() != date.Unix() {
 		t.Errorf("moved message date = %v, want %v", junk[0].InternalDate.UTC(), date)
-	}
-
-	// Copy COPYME (Inbox -> Junk): the source copy must remain.
-	cp, _ := sess.Dispatch(
-		buildMoveCopyMessages(1, 2, 1, uint64(mapi.MakeEIDEx(1, uint64(copyInfo.ID)))),
-		[]uint32{logonH, inboxH, junkH})
-	p = ext.NewPull(cp, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("MoveCopyMessages(copy) ReturnValue = %#x", ec)
-	}
-	if pc := mustU8(t, p, "partialCompletion"); pc != 0 {
-		t.Errorf("copy PartialCompletion = %d, want 0", pc)
-	}
-	if f := messageFlags(t, dir, int64(mapi.PrivateFIDInbox), copyInfo.ID); f == -1 {
-		t.Errorf("copied message was removed from the source folder")
-	}
-	if junk, _ := st2.ListMessages(int64(mapi.PrivateFIDJunk)); len(junk) != 2 {
-		t.Errorf("Junk has %d messages after copy, want 2", len(junk))
 	}
 }

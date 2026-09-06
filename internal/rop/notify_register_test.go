@@ -55,32 +55,12 @@ func TestRegisterNotificationFolderScope(t *testing.T) {
 	resp, h := sess.Dispatch(buildRegisterNotification(0, 1, ntypes, 0, inboxEID, 0), []uint32{logonH, 0xFFFFFFFF})
 
 	// Response: the bare head only, RopId, OutputHandleIndex, ecSuccess, nothing more.
-	p := ext.NewPull(resp, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropRegisterNotification {
-		t.Fatalf("RopId = %#x, want %#x", id, ropRegisterNotification)
-	}
-	if oh := mustU8(t, p, "ohindex"); oh != 1 {
-		t.Errorf("OutputHandleIndex = %d, want 1", oh)
-	}
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("ReturnValue = %#x, want 0", ec)
-	}
-	if p.Remaining() != 0 {
-		t.Errorf("RopRegisterNotification has no response body; %d trailing bytes", p.Remaining())
-	}
+	p := ropOK(t, resp, ropRegisterNotification, "RegisterNotification")
+	wantDrained(t, p, "RopRegisterNotification (it has no response body)")
 
 	// The subscription object is registered at the output slot with the decoded scope.
 	subH := h[1]
-	if subH == 0xFFFFFFFF {
-		t.Fatal("subscription handle not set")
-	}
-	obj := sess.get(subH)
-	if obj == nil || obj.kind != kindSubscription {
-		t.Fatalf("output handle is not a subscription object: %+v", obj)
-	}
-	if obj.sub.handle != subH {
-		t.Errorf("sub.handle = %d, want %d (echoed as the RopNotify NotificationHandle)", obj.sub.handle, subH)
-	}
+	obj := subscriptionAt(t, sess, subH)
 	if obj.sub.wholeStore {
 		t.Error("folder subscription wrongly marked whole-store")
 	}
@@ -96,13 +76,26 @@ func TestRegisterNotificationFolderScope(t *testing.T) {
 	if _, ok := obj.subSnapshot[info.ID]; !ok {
 		t.Errorf("baseline snapshot missing pre-existing message %d: %v", info.ID, obj.subSnapshot)
 	}
-	events, _, err := detectContentChanges(st, inbox, obj.subSnapshot)
-	if err != nil {
-		t.Fatalf("detect: %v", err)
+	events, _ := pollChanges(t, st, inbox, obj.subSnapshot, "first poll after registration")
+	wantNoEvents(t, events, "first poll after registration (baseline must suppress pre-existing)")
+}
+
+// subscriptionAt resolves an output handle to the subscription object it should
+// carry, checking the handle was set and echoes back as the RopNotify
+// NotificationHandle.
+func subscriptionAt(t *testing.T, sess *Session, subH uint32) *object {
+	t.Helper()
+	if subH == 0xFFFFFFFF {
+		t.Fatal("subscription handle not set")
 	}
-	if len(events) != 0 {
-		t.Fatalf("first poll after registration: got %d events, want 0 (baseline must suppress pre-existing)", len(events))
+	obj := sess.get(subH)
+	if obj == nil || obj.kind != kindSubscription {
+		t.Fatalf("output handle is not a subscription object: %+v", obj)
 	}
+	if obj.sub.handle != subH {
+		t.Errorf("sub.handle = %d, want %d (echoed as the RopNotify NotificationHandle)", obj.sub.handle, subH)
+	}
+	return obj
 }
 
 // TestRegisterNotificationWholeStore confirms a whole-store subscription is accepted
@@ -126,18 +119,11 @@ func TestRegisterNotificationWholeStore(t *testing.T) {
 	const ntypes = uint8(fnevNewMail | fnevObjectCreated)
 	resp, h := sess.Dispatch(buildRegisterNotification(0, 1, ntypes, 1, 0, 0), []uint32{logonH, 0xFFFFFFFF})
 
-	p := ext.NewPull(resp, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropRegisterNotification {
-		t.Fatalf("RopId = %#x, want %#x", id, ropRegisterNotification)
-	}
-	mustU8(t, p, "ohindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("whole-store ReturnValue = %#x, want 0", ec)
-	}
+	ropOK(t, resp, ropRegisterNotification, "RegisterNotification(whole-store)")
 
-	obj := sess.get(h[1])
-	if obj == nil || obj.kind != kindSubscription || !obj.sub.wholeStore {
-		t.Fatalf("whole-store subscription not registered: %+v", obj)
+	obj := subscriptionAt(t, sess, h[1])
+	if !obj.sub.wholeStore {
+		t.Fatalf("whole-store subscription not marked as such: %+v", obj)
 	}
 	if obj.sub.folderID != 0 || obj.sub.messageID != 0 {
 		t.Errorf("whole-store scope = (folder %d, msg %d), want (0, 0)", obj.sub.folderID, obj.sub.messageID)
