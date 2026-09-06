@@ -1,6 +1,7 @@
 package activesync
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -254,53 +255,56 @@ func TestContactsCrossProtocolEASToCardDAV(t *testing.T) {
 func TestContactCategories(t *testing.T) {
 	_, dir := seededServer(t)
 	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "open the store", err)
 	defer st.Close()
 
 	kid, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameKeywords})
-	if err != nil {
-		t.Fatal(err)
-	}
-	props := mapi.PropertyValues{
+	mustNoErr(t, "resolve the keywords property", err)
+	keyTag := mapi.MakeTag(kid[0], mapi.PtMvUnicode)
+
+	id, err := st.CreateMessage(int64(mapi.PrivateFIDContacts), &oxcmail.Message{Props: mapi.PropertyValues{
 		{Tag: mapi.PrMessageClass, Value: "IPM.Contact"},
 		{Tag: mapi.PrGivenName, Value: "Kit"},
-		{Tag: mapi.MakeTag(kid[0], mapi.PtMvUnicode), Value: []string{"Work", "VIP"}},
-	}
-	id, err := st.CreateMessage(int64(mapi.PrivateFIDContacts), &oxcmail.Message{Props: props})
-	if err != nil {
-		t.Fatal(err)
-	}
+		{Tag: keyTag, Value: []string{"Work", "VIP"}},
+	}})
+	mustNoErr(t, "create the contact", err)
 
 	data, err := contactAppData(st, id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cats := data.Child(wbxml.CCategories)
-	if cats == nil || len(cats.Children) != 2 {
-		t.Fatalf("Categories not emitted as two Category elements: %+v", cats)
-	}
-	if cats.Children[0].Text != "Work" || cats.Children[1].Text != "VIP" {
-		t.Errorf("Category values = %q,%q want Work,VIP", cats.Children[0].Text, cats.Children[1].Text)
-	}
+	mustNoErr(t, "render the contact", err)
+	wantChildTexts(t, "the emitted categories", data.Child(wbxml.CCategories), "Work", "VIP")
 
 	// Decode the reverse direction.
-	easData := wbxml.Elem(wbxml.ASData,
+	parsed, err := parseContactItem(st, wbxml.Elem(wbxml.ASData,
 		wbxml.Str(wbxml.CFirstName, "Dana"),
-		wbxml.Elem(wbxml.CCategories, wbxml.Str(wbxml.CCategory, "Family"), wbxml.Str(wbxml.CCategory, "Lead")))
-	parsed, err := parseContactItem(st, easData)
-	if err != nil {
-		t.Fatal(err)
-	}
-	keyTag := mapi.MakeTag(kid[0], mapi.PtMvUnicode)
-	var got []string
-	for _, p := range parsed {
-		if p.Tag == keyTag {
-			got, _ = p.Value.([]string)
-		}
-	}
-	if len(got) != 2 || got[0] != "Family" || got[1] != "Lead" {
+		wbxml.Elem(wbxml.CCategories, wbxml.Str(wbxml.CCategory, "Family"), wbxml.Str(wbxml.CCategory, "Lead"))))
+	mustNoErr(t, "parse the device's contact", err)
+	got, _ := propValue(parsed, keyTag).([]string)
+	if !slices.Equal(got, []string{"Family", "Lead"}) {
 		t.Errorf("decoded keywords = %v, want [Family Lead]", got)
 	}
+}
+
+// wantChildTexts checks a container element holds exactly the item texts wanted.
+func wantChildTexts(t *testing.T, what string, container *wbxml.Node, want ...string) {
+	t.Helper()
+	if container == nil {
+		t.Fatalf("%s: the container element is missing", what)
+	}
+	got := make([]string, 0, len(container.Children))
+	for _, c := range container.Children {
+		got = append(got, c.Text)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("%s = %v, want %v", what, got, want)
+	}
+}
+
+// propValue returns the value one property carries, or nil when it is absent.
+func propValue(props mapi.PropertyValues, tag mapi.PropTag) any {
+	for _, p := range props {
+		if p.Tag == tag {
+			return p.Value
+		}
+	}
+	return nil
 }

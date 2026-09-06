@@ -156,18 +156,14 @@ func TestProvisionRemoteWipe(t *testing.T) {
 		t.Error("Provision response missing the RemoteWipe directive")
 	}
 	st, _ = objectstore.Open(dir)
-	if got := deviceWipe(t, st, "dev1"); got != WipeStatusRequested {
-		t.Errorf("after delivery status = %d, want requested(%d)", got, WipeStatusRequested)
-	}
+	wantDeviceWipe(t, st, "after the delivery", "dev1", WipeStatusRequested)
 	st.Close()
 
 	ack := wbxml.Elem(wbxml.PVProvision,
 		wbxml.Elem(wbxml.PVRemoteWipe, wbxml.Str(wbxml.PVStatus, "1")))
 	postCommand(t, ts, "Provision", ack)
 	st, _ = objectstore.Open(dir)
-	if got := deviceWipe(t, st, "dev1"); got != WipeStatusWiped {
-		t.Errorf("after ack status = %d, want wiped(%d)", got, WipeStatusWiped)
-	}
+	wantDeviceWipe(t, st, "after the acknowledgement", "dev1", WipeStatusWiped)
 	st.Close()
 
 	// A wiped device is terminal: it is no longer forced to re-provision, so an

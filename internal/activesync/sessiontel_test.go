@@ -61,12 +61,18 @@ func TestDispatchRecordsSession(t *testing.T) {
 		t.Fatalf("got %d telemetry writes, want at least begin+finish", len(recs))
 	}
 	begin, finish := recs[0], recs[len(recs)-1]
-	if begin.Command != "FolderSync" || begin.EndedAt != 0 || begin.Username != "alice@hermex.test" ||
-		begin.DeviceID != "dev1" || begin.DeviceType != "iPhone" || begin.UserAgent != "TestAgent/1.0" || begin.IP == "" {
-		t.Errorf("begin record = %+v, want running FolderSync row with metadata", begin)
+	wantEq(t, "the begin command", begin.Command, "FolderSync")
+	wantEq(t, "the begin end time (the row is still running)", begin.EndedAt, int64(0))
+	wantEq(t, "the begin username", begin.Username, "alice@hermex.test")
+	wantEq(t, "the begin device id", begin.DeviceID, "dev1")
+	wantEq(t, "the begin device type", begin.DeviceType, "iPhone")
+	wantEq(t, "the begin user agent", begin.UserAgent, "TestAgent/1.0")
+	if begin.IP == "" {
+		t.Error("the begin record carries no client address")
 	}
-	if finish.ID != begin.ID || finish.EndedAt == 0 {
-		t.Errorf("finish record = %+v, want same id %q and a non-zero ended", finish, begin.ID)
+	wantEq(t, "the finish session id", finish.ID, begin.ID)
+	if finish.EndedAt == 0 {
+		t.Errorf("the finish record did not stamp an end time: %+v", finish)
 	}
 }
 

@@ -1,6 +1,7 @@
 package activesync
 
 import (
+	"net/http/httptest"
 	"testing"
 
 	"hermex/internal/objectstore"
@@ -118,23 +119,16 @@ func TestSettingsOofExternalAudience(t *testing.T) {
 		oofMessageNode(wbxml.STAppliesToExternalUnknown, "0", "external")))
 	postCommand(t, ts, "Settings", settingsReq(known))
 
-	st, _ := objectstore.Open(dir)
-	cfg, _ := st.GetOOFSettings()
-	st.Close()
-	if !cfg.ExternalEnabled || cfg.ExternalAudience != objectstore.OOFExternalKnown {
-		t.Fatalf("known-only Set: ExternalEnabled=%v audience=%d, want enabled Known", cfg.ExternalEnabled, cfg.ExternalAudience)
-	}
+	cfg := storedOOF(t, dir)
+	wantEq(t, "external replies after the known-only Set", cfg.ExternalEnabled, true)
+	wantEq(t, "the audience after the known-only Set", cfg.ExternalAudience, objectstore.OOFExternalKnown)
 
-	_, root := postCommand(t, ts, "Settings", settingsReq(wbxml.Elem(wbxml.STOof, wbxml.Empty(wbxml.STGet))))
-	get := root.Child(wbxml.STOof).Child(wbxml.STGet)
-	kn := oofMessageFor(get, wbxml.STAppliesToExternalKnown)
-	un := oofMessageFor(get, wbxml.STAppliesToExternalUnknown)
-	if kn.ChildText(wbxml.STEnabled) != "1" || un.ChildText(wbxml.STEnabled) != "0" {
-		t.Errorf("known-only Get: known enabled=%q unknown enabled=%q, want 1/0", kn.ChildText(wbxml.STEnabled), un.ChildText(wbxml.STEnabled))
-	}
-	if kn.ChildText(wbxml.STReplyMessage) != "external" || un.ChildText(wbxml.STReplyMessage) != "external" {
-		t.Errorf("reply text must reach both buckets: known=%q unknown=%q", kn.ChildText(wbxml.STReplyMessage), un.ChildText(wbxml.STReplyMessage))
-	}
+	kn, un := oofBucketsOf(t, ts)
+	wantEq(t, "the known bucket after the known-only Set", kn.ChildText(wbxml.STEnabled), "1")
+	wantEq(t, "the unknown bucket after the known-only Set", un.ChildText(wbxml.STEnabled), "0")
+	// The single stored reply text reaches both buckets.
+	wantEq(t, "the known bucket's reply", kn.ChildText(wbxml.STReplyMessage), "external")
+	wantEq(t, "the unknown bucket's reply", un.ChildText(wbxml.STReplyMessage), "external")
 
 	// All: the client also enables ExternalUnknown.
 	all := wbxml.Elem(wbxml.STOof, wbxml.Elem(wbxml.STSet,
@@ -143,20 +137,32 @@ func TestSettingsOofExternalAudience(t *testing.T) {
 		oofMessageNode(wbxml.STAppliesToExternalUnknown, "1", "external")))
 	postCommand(t, ts, "Settings", settingsReq(all))
 
-	st, _ = objectstore.Open(dir)
-	cfg, _ = st.GetOOFSettings()
-	st.Close()
-	if !cfg.ExternalEnabled || cfg.ExternalAudience != objectstore.OOFExternalAll {
-		t.Fatalf("all Set: ExternalEnabled=%v audience=%d, want enabled All", cfg.ExternalEnabled, cfg.ExternalAudience)
-	}
+	cfg = storedOOF(t, dir)
+	wantEq(t, "external replies after the all Set", cfg.ExternalEnabled, true)
+	wantEq(t, "the audience after the all Set", cfg.ExternalAudience, objectstore.OOFExternalAll)
 
-	_, root = postCommand(t, ts, "Settings", settingsReq(wbxml.Elem(wbxml.STOof, wbxml.Empty(wbxml.STGet))))
-	get = root.Child(wbxml.STOof).Child(wbxml.STGet)
-	kn = oofMessageFor(get, wbxml.STAppliesToExternalKnown)
-	un = oofMessageFor(get, wbxml.STAppliesToExternalUnknown)
-	if kn.ChildText(wbxml.STEnabled) != "1" || un.ChildText(wbxml.STEnabled) != "1" {
-		t.Errorf("all Get: known enabled=%q unknown enabled=%q, want 1/1", kn.ChildText(wbxml.STEnabled), un.ChildText(wbxml.STEnabled))
-	}
+	kn, un = oofBucketsOf(t, ts)
+	wantEq(t, "the known bucket after the all Set", kn.ChildText(wbxml.STEnabled), "1")
+	wantEq(t, "the unknown bucket after the all Set", un.ChildText(wbxml.STEnabled), "1")
+}
+
+// storedOOF reads the mailbox's stored OOF settings.
+func storedOOF(t *testing.T, dir string) objectstore.OOFSettings {
+	t.Helper()
+	st, err := objectstore.Open(dir)
+	mustNoErr(t, "open the store", err)
+	defer st.Close()
+	cfg, err := st.GetOOFSettings()
+	mustNoErr(t, "read the OOF settings", err)
+	return cfg
+}
+
+// oofBucketsOf runs an Oof Get and returns its two external OofMessage blocks.
+func oofBucketsOf(t *testing.T, ts *httptest.Server) (known, unknown *wbxml.Node) {
+	t.Helper()
+	_, root := postCommand(t, ts, "Settings", settingsReq(wbxml.Elem(wbxml.STOof, wbxml.Empty(wbxml.STGet))))
+	get := root.Child(wbxml.STOof).Child(wbxml.STGet)
+	return oofMessageFor(get, wbxml.STAppliesToExternalKnown), oofMessageFor(get, wbxml.STAppliesToExternalUnknown)
 }
 
 // TestSettingsOofPreservesSubject confirms an Oof Set (which carries no subject and

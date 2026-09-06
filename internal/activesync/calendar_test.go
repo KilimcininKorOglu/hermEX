@@ -256,49 +256,33 @@ func seedAppointment(t *testing.T, dir, subject string, start, end time.Time) {
 // and an MS-ASCAL Recurrence subtree parsed from that iCal, rather than skipped.
 func TestCalendarAppDataRecurring(t *testing.T) {
 	st, err := objectstore.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "open the store", err)
 	defer st.Close()
 
 	ical := []byte("BEGIN:VCALENDAR\r\nBEGIN:VEVENT\r\nUID:rec-1\r\nDTSTART:20260601T090000Z\r\n" +
 		"DTEND:20260601T093000Z\r\nSUMMARY:Weekly Sync\r\nRRULE:FREQ=WEEKLY;BYDAY=MO;COUNT=5\r\n" +
 		"END:VEVENT\r\nEND:VCALENDAR\r\n")
 	msg, err := oxcical.Import(ical, oxcical.Options{Resolver: st.GetNamedPropIDs})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "import the iCal", err)
 	id, err := st.CreateMessage(int64(mapi.PrivateFIDCalendar), msg)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "store the appointment", err)
 
 	data, err := calendarAppData(st, id)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "render the appointment", err)
 	if data == nil {
 		t.Fatal("recurring appointment was skipped (calendarAppData returned nil)")
 	}
-	if got := data.ChildText(wbxml.CalStartTime); got != "20260601T090000Z" {
-		t.Errorf("CalStartTime = %q", got)
-	}
-	if got := data.ChildText(wbxml.CalEndTime); got != "20260601T093000Z" {
-		t.Errorf("CalEndTime = %q (end must come from the iCal for a recurring event)", got)
-	}
+	wantEq(t, "the start time", data.ChildText(wbxml.CalStartTime), "20260601T090000Z")
+	wantEq(t, "the end time (it must come from the iCal for a recurring event)",
+		data.ChildText(wbxml.CalEndTime), "20260601T093000Z")
+
 	rec := data.Child(wbxml.CalRecurrence)
 	if rec == nil {
 		t.Fatal("recurring appointment has no Recurrence element")
 	}
-	if got := rec.ChildText(wbxml.CalType); got != "1" {
-		t.Errorf("Recurrence Type = %q, want 1 (weekly)", got)
-	}
-	if got := rec.ChildText(wbxml.CalDayOfWeek); got != "2" {
-		t.Errorf("Recurrence DayOfWeek = %q, want 2 (Monday)", got)
-	}
-	if got := rec.ChildText(wbxml.CalOccurrences); got != "5" {
-		t.Errorf("Recurrence Occurrences = %q, want 5", got)
-	}
+	wantEq(t, "the recurrence type (weekly)", rec.ChildText(wbxml.CalType), "1")
+	wantEq(t, "the recurrence day of week (Monday)", rec.ChildText(wbxml.CalDayOfWeek), "2")
+	wantEq(t, "the recurrence occurrences", rec.ChildText(wbxml.CalOccurrences), "5")
 }
 
 // TestCalendarAppDataNoAppointment proves a calendar folder that has never stored

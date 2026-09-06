@@ -100,30 +100,26 @@ func TestSyncTasksClientAdd(t *testing.T) {
 	if adds, _, _ := countCmds(coll); adds != 0 {
 		t.Errorf("the client's add was echoed back (%d)", adds)
 	}
-	id, err := strconv.ParseInt(addResp.ChildText(wbxml.ASServerID), 10, 64)
-	if err != nil {
-		t.Fatal(err)
-	}
+	task, cleanup := storedTask(t, dir, addResp.ChildText(wbxml.ASServerID))
+	defer cleanup()
+	wantEq(t, "the stored subject", task.Subject, "Call dentist")
+	wantEq(t, "the stored complete flag", task.Complete, true)
+	wantEq(t, "the stored due date", task.Due.Format("2006-01-02"), "2026-07-05")
+}
 
+// storedTask reads back the task one server id names, through the shared task
+// model every protocol reads it with. The returned cleanup closes the store.
+func storedTask(t *testing.T, dir, serverID string) (oxtask.Task, func()) {
+	t.Helper()
+	id, err := strconv.ParseInt(serverID, 10, 64)
+	mustNoErr(t, "parse the server id "+serverID, err)
 	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
+	mustNoErr(t, "open the store", err)
 	msg, err := st.OpenMessage(id)
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, "open the stored task", err)
 	task, err := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if task.Subject != "Call dentist" || !task.Complete {
-		t.Errorf("stored task = %q complete=%v, want Call dentist / true", task.Subject, task.Complete)
-	}
-	if task.Due.Format("2006-01-02") != "2026-07-05" {
-		t.Errorf("stored due = %v, want 2026-07-05", task.Due)
-	}
+	mustNoErr(t, "read the task properties", err)
+	return task, func() { st.Close() }
 }
 
 // TestFolderSyncAdvertisesTasks confirms FolderSync exposes the Tasks collection with
@@ -227,24 +223,8 @@ func TestSyncTasksClientAddRecurrence(t *testing.T) {
 	if addResp == nil || addResp.ChildText(wbxml.ASClientID) != "cli-rec" {
 		t.Fatalf("no Add response for the recurring task: %+v", addResp)
 	}
-	id, err := strconv.ParseInt(addResp.ChildText(wbxml.ASServerID), 10, 64)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	st, err := objectstore.Open(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer st.Close()
-	msg, err := st.OpenMessage(id)
-	if err != nil {
-		t.Fatal(err)
-	}
-	task, err := oxtask.FromProps(msg.Props, st.GetNamedPropIDs)
-	if err != nil {
-		t.Fatal(err)
-	}
+	task, cleanup := storedTask(t, dir, addResp.ChildText(wbxml.ASServerID))
+	defer cleanup()
 	if task.RecurrenceRule == "" {
 		t.Fatal("stored recurring task has no RecurrenceRule")
 	}

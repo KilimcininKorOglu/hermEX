@@ -37,19 +37,12 @@ func TestSearchGAL(t *testing.T) {
 	ts, _ := seededServer(t)
 
 	_, root := postCommand(t, ts, "Search", searchReq("GAL", "alice"))
-	if s := root.ChildText(wbxml.SRStatus); s != "1" {
-		t.Fatalf("overall Status = %q, want 1", s)
-	}
+	wantEq(t, "the overall status", root.ChildText(wbxml.SRStatus), "1")
 	store := searchStore(t, root)
-	if s := store.ChildText(wbxml.SRStatus); s != "1" {
-		t.Errorf("store Status = %q, want 1", s)
-	}
-	if total := store.ChildText(wbxml.SRTotal); total != "1" {
-		t.Errorf("Total = %q, want 1", total)
-	}
-	if rng := store.ChildText(wbxml.SRRange); rng != "0-0" {
-		t.Errorf("Range = %q, want 0-0", rng)
-	}
+	wantEq(t, "the store status", store.ChildText(wbxml.SRStatus), "1")
+	wantEq(t, "the total", store.ChildText(wbxml.SRTotal), "1")
+	wantEq(t, "the range", store.ChildText(wbxml.SRRange), "0-0")
+
 	result := store.Child(wbxml.SRResult)
 	if result == nil {
 		t.Fatal("GAL search carried no Result")
@@ -58,15 +51,15 @@ func TestSearchGAL(t *testing.T) {
 	if props == nil {
 		t.Fatal("Result carried no Properties")
 	}
-	if addr := props.ChildText(wbxml.GALEmailAddress); addr != testUser {
-		t.Errorf("Result address = %q, want %q", addr, testUser)
-	}
+	wantEq(t, "the result address", props.ChildText(wbxml.GALEmailAddress), testUser)
 	if props.ChildText(wbxml.GALDisplayName) == "" {
 		t.Error("Result carried no display name")
 	}
 	// Some clients refuse to render a GAL entry without these elements present.
-	if props.Child(wbxml.GALFirstName) == nil || props.Child(wbxml.GALLastName) == nil {
-		t.Error("Result must carry FirstName and LastName elements")
+	for _, tag := range []wbxml.Tag{wbxml.GALFirstName, wbxml.GALLastName} {
+		if props.Child(tag) == nil {
+			t.Errorf("Result is missing the element %v, which some clients require", tag)
+		}
 	}
 }
 
