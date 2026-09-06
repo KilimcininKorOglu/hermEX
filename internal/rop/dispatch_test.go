@@ -72,6 +72,43 @@ func TestDispatchAnswersTheSameOpcodeSet(t *testing.T) {
 	}
 }
 
+// tableOnlyROPs are the wired opcodes a bodiless probe cannot see, because their
+// handler answers such a request with the same generic error an unknown opcode
+// gets. They are checked against the dispatch table directly, which is the only
+// place the difference is visible.
+var tableOnlyROPs = []uint8{
+	ropCreateBookmark, ropSetSpooler, ropExpandRow, ropCollapseRow,
+	ropCommitStream, ropGetStreamSize, ropGetReceiveFolderTable,
+	ropSetCollapseState, ropGetTransportFolder, ropSyncUploadStateStreamEnd,
+	ropResetTable,
+}
+
+// TestDispatchTableCoversEveryWiredOpcode is the companion to the wire probe: it
+// asserts the table holds exactly the opcodes the probe found plus the eleven it
+// cannot distinguish. Together the two cover every wiring.
+func TestDispatchTableCoversEveryWiredOpcode(t *testing.T) {
+	want := make(map[uint8]bool, len(wiredROPs)+len(tableOnlyROPs))
+	for _, op := range wiredROPs {
+		want[op] = true
+	}
+	for _, op := range tableOnlyROPs {
+		want[op] = true
+	}
+	if len(ropTable) != len(want) {
+		t.Errorf("the table holds %d opcodes, want %d", len(ropTable), len(want))
+	}
+	for op := range want {
+		if _, ok := ropTable[op]; !ok {
+			t.Errorf("opcode %#x is not in the dispatch table", op)
+		}
+	}
+	for op := range ropTable {
+		if !want[op] {
+			t.Errorf("the dispatch table holds %#x, which neither list names", op)
+		}
+	}
+}
+
 // TestDispatchStopsAtAnUnknownOpcode pins the batch-ending contract: a ROP list
 // is a stream with no per-ROP length, so an opcode Dispatch cannot parse leaves
 // the reader at an unknown offset and every following ROP is abandoned. A

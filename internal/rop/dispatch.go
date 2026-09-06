@@ -106,6 +106,132 @@ const (
 	ecSyncObjectDel   uint32 = 0x80040800 // SYNC_E_OBJECT_DELETED (ICS move source no longer exists)
 )
 
+// ropHandler processes one ROP: it reads the request body from p, appends the
+// response to out, and may rebind a server-handle-table slot. It returns false
+// when the request could not be parsed, which ends the batch, because a ROP list
+// carries no per-ROP length and the reader is then at an unknown offset.
+type ropHandler func(s *Session, p *ext.Pull, out *ext.Push, handles []uint32, hindex uint8) bool
+
+// ropTable is the single source of ROP dispatch: an opcode present here is
+// answered by its handler, and one absent falls through to the generic error.
+// Adding a ROP is one entry plus its handler.
+var ropTable = map[uint8]ropHandler{
+	ropRelease:                          releaseHandler,
+	ropLogon:                            (*Session).ropLogon,
+	ropOpenFolder:                       (*Session).ropOpenFolder,
+	ropOpenMessage:                      (*Session).ropOpenMessage,
+	ropGetPropertiesSpecific:            (*Session).ropGetPropertiesSpecific,
+	ropGetPropertiesAll:                 (*Session).ropGetPropertiesAll,
+	ropCreateMessage:                    (*Session).ropCreateMessage,
+	ropSetProperties:                    (*Session).ropSetProperties,
+	ropDeleteProperties:                 (*Session).ropDeleteProperties,
+	ropDeletePropertiesNoReplicate:      (*Session).ropDeletePropertiesNoReplicate,
+	ropGetPropertyIdsFromNames:          (*Session).ropGetPropertyIdsFromNames,
+	ropGetNamesFromPropertyIds:          (*Session).ropGetNamesFromPropertyIds,
+	ropCopyProperties:                   (*Session).ropCopyProperties,
+	ropCopyTo:                           (*Session).ropCopyTo,
+	ropGetReceiveFolder:                 (*Session).ropGetReceiveFolder,
+	ropLongTermIdFromId:                 (*Session).ropLongTermIdFromId,
+	ropIdFromLongTermId:                 (*Session).ropIdFromLongTermId,
+	ropSetReceiveFolder:                 (*Session).ropSetReceiveFolder,
+	ropGetReceiveFolderTable:            (*Session).ropGetReceiveFolderTable,
+	ropGetStoreState:                    (*Session).ropGetStoreState,
+	ropRegisterNotification:             (*Session).ropRegisterNotification,
+	ropModifyRecipients:                 (*Session).ropModifyRecipients,
+	ropReloadCachedInfo:                 (*Session).ropReloadCachedInformation,
+	ropGetMessageStatus:                 (*Session).ropGetMessageStatus,
+	ropSetMessageStatus:                 (*Session).ropSetMessageStatus,
+	ropSubmitMessage:                    (*Session).ropSubmitMessage,
+	ropSetMessageReadFlag:               (*Session).ropSetMessageReadFlag,
+	ropSetReadFlags:                     (*Session).ropSetReadFlags,
+	ropDeleteMessages:                   (*Session).ropDeleteMessages,
+	ropMoveCopyMessages:                 (*Session).ropMoveCopyMessages,
+	ropCreateFolder:                     (*Session).ropCreateFolder,
+	ropDeleteFolder:                     (*Session).ropDeleteFolder,
+	ropMoveFolder:                       (*Session).ropMoveFolder,
+	ropCopyFolder:                       (*Session).ropCopyFolder,
+	ropEmptyFolder:                      (*Session).ropEmptyFolder,
+	ropHardDeleteMessages:               (*Session).ropHardDeleteMessages,
+	ropHardDelMsgsAndSubfolders:         (*Session).ropHardDeleteMessagesAndSubfolders,
+	ropSetSearchCriteria:                (*Session).ropSetSearchCriteria,
+	ropGetSearchCriteria:                (*Session).ropGetSearchCriteria,
+	ropSaveChangesMessage:               (*Session).ropSaveChangesMessage,
+	ropGetAttachmentTable:               (*Session).ropGetAttachmentTable,
+	ropOpenAttachment:                   (*Session).ropOpenAttachment,
+	ropOpenEmbeddedMessage:              (*Session).ropOpenEmbeddedMessage,
+	ropCreateAttachment:                 (*Session).ropCreateAttachment,
+	ropSaveChangesAttachment:            (*Session).ropSaveChangesAttachment,
+	ropDeleteAttachment:                 (*Session).ropDeleteAttachment,
+	ropGetContentsTable:                 (*Session).ropGetContentsTable,
+	ropGetPermissionsTable:              (*Session).ropGetPermissionsTable,
+	ropModifyPermissions:                (*Session).ropModifyPermissions,
+	ropGetRulesTable:                    (*Session).ropGetRulesTable,
+	ropModifyRules:                      (*Session).ropModifyRules,
+	ropSetSpooler:                       (*Session).ropSetSpooler,
+	ropGetTransportFolder:               (*Session).ropGetTransportFolder,
+	ropTransportSend:                    (*Session).ropTransportSend,
+	ropSetColumns:                       (*Session).ropSetColumns,
+	ropGetHierarchyTable:                (*Session).ropGetHierarchyTable,
+	ropSortTable:                        (*Session).ropSortTable,
+	ropRestrict:                         (*Session).ropRestrict,
+	ropQueryRows:                        (*Session).ropQueryRows,
+	ropSeekRow:                          (*Session).ropSeekRow,
+	ropGetStatus:                        (*Session).ropGetStatus,
+	ropQueryPosition:                    (*Session).ropQueryPosition,
+	ropSeekRowFractional:                (*Session).ropSeekRowFractional,
+	ropQueryColumnsAll:                  (*Session).ropQueryColumnsAll,
+	ropAbort:                            (*Session).ropAbort,
+	ropGetCollapseState:                 (*Session).ropGetCollapseState,
+	ropFreeBookmark:                     (*Session).ropFreeBookmark,
+	ropSeekRowBookmark:                  (*Session).ropSeekRowBookmark,
+	ropCreateBookmark:                   (*Session).ropCreateBookmark,
+	ropFindRow:                          (*Session).ropFindRow,
+	ropExpandRow:                        (*Session).ropExpandRow,
+	ropCollapseRow:                      (*Session).ropCollapseRow,
+	ropSetCollapseState:                 (*Session).ropSetCollapseState,
+	ropResetTable:                       (*Session).ropResetTable,
+	ropOpenStream:                       (*Session).ropOpenStream,
+	ropReadStream:                       (*Session).ropReadStream,
+	ropWriteStream:                      (*Session).ropWriteStream,
+	ropCommitStream:                     (*Session).ropCommitStream,
+	ropSeekStream:                       (*Session).ropSeekStream,
+	ropSetStreamSize:                    (*Session).ropSetStreamSize,
+	ropGetStreamSize:                    (*Session).ropGetStreamSize,
+	ropSynchronizationConfigure:         (*Session).ropSynchronizationConfigure,
+	ropSyncUploadStateStreamBegin:       (*Session).ropSyncUploadStateStreamBegin,
+	ropSyncUploadStateStreamContinue:    (*Session).ropSyncUploadStateStreamContinue,
+	ropSyncUploadStateStreamEnd:         (*Session).ropSyncUploadStateStreamEnd,
+	ropFastTransferSourceGetBuffer:      (*Session).ropFastTransferSourceGetBuffer,
+	ropSyncOpenCollector:                (*Session).ropSyncOpenCollector,
+	ropSyncImportMessageChange:          (*Session).ropSyncImportMessageChange,
+	ropFastTransferDestConfigure:        (*Session).ropFastTransferDestConfigure,
+	ropFastTransferDestPutBuffer:        (*Session).ropFastTransferDestPutBuffer,
+	ropSyncImportHierarchyChange:        (*Session).ropSyncImportHierarchyChange,
+	ropSyncImportDeletes:                (*Session).ropSyncImportDeletes,
+	ropSyncImportReadStateChanges:       (*Session).ropSyncImportReadStateChanges,
+	ropSyncGetTransferState:             (*Session).ropSyncGetTransferState,
+	ropGetLocalReplicaIds:               (*Session).ropGetLocalReplicaIds,
+	ropSetLocalReplicaMidsetDeleted:     (*Session).ropSetLocalReplicaMidsetDeleted,
+	ropSynchronizationImportMessageMove: (*Session).ropSyncImportMessageMove,
+	ropGetPerUserLongTermIds:            (*Session).ropGetPerUserLongTermIds,
+	ropGetPerUserGuid:                   (*Session).ropGetPerUserGuid,
+	ropReadPerUserInformation:           (*Session).ropReadPerUserInformation,
+	ropWritePerUserInformation:          (*Session).ropWritePerUserInformation,
+	ropFastTransferSourceCopyMessages:   (*Session).ropFastTransferSourceCopyMessages,
+	ropFastTransferSourceCopyFolder:     (*Session).ropFastTransferSourceCopyFolder,
+	ropFastTransferSourceCopyTo:         (*Session).ropFastTransferSourceCopyTo,
+	ropFastTransferSourceCopyProperties: (*Session).ropFastTransferSourceCopyProperties,
+	ropProgress:                         (*Session).ropProgress,
+}
+
+// releaseHandler adapts RopRelease to the table's signature. It is the one ROP
+// that reads no request body and writes no response, so it can never end the
+// batch.
+func releaseHandler(s *Session, _ *ext.Pull, _ *ext.Push, handles []uint32, hindex uint8) bool {
+	s.ropRelease(handles, hindex)
+	return true
+}
+
 // Dispatch parses the request ROP list and returns the response ROP bytes plus
 // the updated server-handle table, which the RopBuffer codec re-frames. Each
 // ROP resolves its handle slot against the table, mutates the session's object
@@ -121,440 +247,18 @@ func (s *Session) Dispatch(ropList []byte, reqHandles []uint32) (respRops []byte
 	handles := append([]uint32(nil), reqHandles...)
 	p := ext.NewPull(ropList, ext.FlagUTF16)
 	out := ext.NewPush(ext.FlagUTF16)
-loop:
 	for p.Remaining() > 0 {
-		ropID, e1 := p.Uint8()
-		_, e2 := p.Uint8() // LogonId (a single logon in v1)
-		hindex, e3 := p.Uint8()
-		if e1 != nil || e2 != nil || e3 != nil {
-			break loop
+		ropID, hindex, ok := pullRopHeader(p)
+		if !ok {
+			break
 		}
-		switch ropID {
-		case ropLogon:
-			if !s.ropLogon(p, out, handles, hindex) {
-				break loop
-			}
-		case ropRelease:
-			s.ropRelease(handles, hindex)
-		case ropOpenFolder:
-			if !s.ropOpenFolder(p, out, handles, hindex) {
-				break loop
-			}
-		case ropOpenMessage:
-			if !s.ropOpenMessage(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetPropertiesSpecific:
-			if !s.ropGetPropertiesSpecific(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetPropertiesAll:
-			if !s.ropGetPropertiesAll(p, out, handles, hindex) {
-				break loop
-			}
-		case ropCreateMessage:
-			if !s.ropCreateMessage(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSetProperties:
-			if !s.ropSetProperties(p, out, handles, hindex) {
-				break loop
-			}
-		case ropDeleteProperties:
-			if !s.ropDeleteProperties(p, out, handles, hindex) {
-				break loop
-			}
-		case ropDeletePropertiesNoReplicate:
-			if !s.ropDeletePropertiesNoReplicate(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetPropertyIdsFromNames:
-			if !s.ropGetPropertyIdsFromNames(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetNamesFromPropertyIds:
-			if !s.ropGetNamesFromPropertyIds(p, out, handles, hindex) {
-				break loop
-			}
-		case ropCopyProperties:
-			if !s.ropCopyProperties(p, out, handles, hindex) {
-				break loop
-			}
-		case ropCopyTo:
-			if !s.ropCopyTo(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetReceiveFolder:
-			if !s.ropGetReceiveFolder(p, out, handles, hindex) {
-				break loop
-			}
-		case ropLongTermIdFromId:
-			if !s.ropLongTermIdFromId(p, out, handles, hindex) {
-				break loop
-			}
-		case ropIdFromLongTermId:
-			if !s.ropIdFromLongTermId(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSetReceiveFolder:
-			if !s.ropSetReceiveFolder(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetReceiveFolderTable:
-			if !s.ropGetReceiveFolderTable(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetStoreState:
-			if !s.ropGetStoreState(p, out, handles, hindex) {
-				break loop
-			}
-		case ropRegisterNotification:
-			if !s.ropRegisterNotification(p, out, handles, hindex) {
-				break loop
-			}
-		case ropModifyRecipients:
-			if !s.ropModifyRecipients(p, out, handles, hindex) {
-				break loop
-			}
-		case ropReloadCachedInfo:
-			if !s.ropReloadCachedInformation(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetMessageStatus:
-			if !s.ropGetMessageStatus(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSetMessageStatus:
-			if !s.ropSetMessageStatus(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSubmitMessage:
-			if !s.ropSubmitMessage(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSetMessageReadFlag:
-			if !s.ropSetMessageReadFlag(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSetReadFlags:
-			if !s.ropSetReadFlags(p, out, handles, hindex) {
-				break loop
-			}
-		case ropDeleteMessages:
-			if !s.ropDeleteMessages(p, out, handles, hindex) {
-				break loop
-			}
-		case ropMoveCopyMessages:
-			if !s.ropMoveCopyMessages(p, out, handles, hindex) {
-				break loop
-			}
-		case ropCreateFolder:
-			if !s.ropCreateFolder(p, out, handles, hindex) {
-				break loop
-			}
-		case ropDeleteFolder:
-			if !s.ropDeleteFolder(p, out, handles, hindex) {
-				break loop
-			}
-		case ropMoveFolder:
-			if !s.ropMoveFolder(p, out, handles, hindex) {
-				break loop
-			}
-		case ropCopyFolder:
-			if !s.ropCopyFolder(p, out, handles, hindex) {
-				break loop
-			}
-		case ropEmptyFolder:
-			if !s.ropEmptyFolder(p, out, handles, hindex) {
-				break loop
-			}
-		case ropHardDeleteMessages:
-			if !s.ropHardDeleteMessages(p, out, handles, hindex) {
-				break loop
-			}
-		case ropHardDelMsgsAndSubfolders:
-			if !s.ropHardDeleteMessagesAndSubfolders(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSetSearchCriteria:
-			if !s.ropSetSearchCriteria(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetSearchCriteria:
-			if !s.ropGetSearchCriteria(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSaveChangesMessage:
-			if !s.ropSaveChangesMessage(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetAttachmentTable:
-			if !s.ropGetAttachmentTable(p, out, handles, hindex) {
-				break loop
-			}
-		case ropOpenAttachment:
-			if !s.ropOpenAttachment(p, out, handles, hindex) {
-				break loop
-			}
-		case ropOpenEmbeddedMessage:
-			if !s.ropOpenEmbeddedMessage(p, out, handles, hindex) {
-				break loop
-			}
-		case ropCreateAttachment:
-			if !s.ropCreateAttachment(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSaveChangesAttachment:
-			if !s.ropSaveChangesAttachment(p, out, handles, hindex) {
-				break loop
-			}
-		case ropDeleteAttachment:
-			if !s.ropDeleteAttachment(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetContentsTable:
-			if !s.ropGetContentsTable(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetPermissionsTable:
-			if !s.ropGetPermissionsTable(p, out, handles, hindex) {
-				break loop
-			}
-		case ropModifyPermissions:
-			if !s.ropModifyPermissions(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetRulesTable:
-			if !s.ropGetRulesTable(p, out, handles, hindex) {
-				break loop
-			}
-		case ropModifyRules:
-			if !s.ropModifyRules(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSetSpooler:
-			if !s.ropSetSpooler(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetTransportFolder:
-			if !s.ropGetTransportFolder(p, out, handles, hindex) {
-				break loop
-			}
-		case ropTransportSend:
-			if !s.ropTransportSend(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSetColumns:
-			if !s.ropSetColumns(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetHierarchyTable:
-			if !s.ropGetHierarchyTable(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSortTable:
-			if !s.ropSortTable(p, out, handles, hindex) {
-				break loop
-			}
-		case ropRestrict:
-			if !s.ropRestrict(p, out, handles, hindex) {
-				break loop
-			}
-		case ropQueryRows:
-			if !s.ropQueryRows(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSeekRow:
-			if !s.ropSeekRow(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetStatus:
-			if !s.ropGetStatus(p, out, handles, hindex) {
-				break loop
-			}
-		case ropQueryPosition:
-			if !s.ropQueryPosition(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSeekRowFractional:
-			if !s.ropSeekRowFractional(p, out, handles, hindex) {
-				break loop
-			}
-		case ropQueryColumnsAll:
-			if !s.ropQueryColumnsAll(p, out, handles, hindex) {
-				break loop
-			}
-		case ropAbort:
-			if !s.ropAbort(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetCollapseState:
-			if !s.ropGetCollapseState(p, out, handles, hindex) {
-				break loop
-			}
-		case ropFreeBookmark:
-			if !s.ropFreeBookmark(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSeekRowBookmark:
-			if !s.ropSeekRowBookmark(p, out, handles, hindex) {
-				break loop
-			}
-		case ropCreateBookmark:
-			if !s.ropCreateBookmark(p, out, handles, hindex) {
-				break loop
-			}
-		case ropFindRow:
-			if !s.ropFindRow(p, out, handles, hindex) {
-				break loop
-			}
-		case ropExpandRow:
-			if !s.ropExpandRow(p, out, handles, hindex) {
-				break loop
-			}
-		case ropCollapseRow:
-			if !s.ropCollapseRow(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSetCollapseState:
-			if !s.ropSetCollapseState(p, out, handles, hindex) {
-				break loop
-			}
-		case ropResetTable:
-			if !s.ropResetTable(p, out, handles, hindex) {
-				break loop
-			}
-		case ropOpenStream:
-			if !s.ropOpenStream(p, out, handles, hindex) {
-				break loop
-			}
-		case ropReadStream:
-			if !s.ropReadStream(p, out, handles, hindex) {
-				break loop
-			}
-		case ropWriteStream:
-			if !s.ropWriteStream(p, out, handles, hindex) {
-				break loop
-			}
-		case ropCommitStream:
-			if !s.ropCommitStream(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSeekStream:
-			if !s.ropSeekStream(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSetStreamSize:
-			if !s.ropSetStreamSize(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetStreamSize:
-			if !s.ropGetStreamSize(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSynchronizationConfigure:
-			if !s.ropSynchronizationConfigure(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSyncUploadStateStreamBegin:
-			if !s.ropSyncUploadStateStreamBegin(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSyncUploadStateStreamContinue:
-			if !s.ropSyncUploadStateStreamContinue(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSyncUploadStateStreamEnd:
-			if !s.ropSyncUploadStateStreamEnd(p, out, handles, hindex) {
-				break loop
-			}
-		case ropFastTransferSourceGetBuffer:
-			if !s.ropFastTransferSourceGetBuffer(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSyncOpenCollector:
-			if !s.ropSyncOpenCollector(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSyncImportMessageChange:
-			if !s.ropSyncImportMessageChange(p, out, handles, hindex) {
-				break loop
-			}
-		case ropFastTransferDestConfigure:
-			if !s.ropFastTransferDestConfigure(p, out, handles, hindex) {
-				break loop
-			}
-		case ropFastTransferDestPutBuffer:
-			if !s.ropFastTransferDestPutBuffer(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSyncImportHierarchyChange:
-			if !s.ropSyncImportHierarchyChange(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSyncImportDeletes:
-			if !s.ropSyncImportDeletes(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSyncImportReadStateChanges:
-			if !s.ropSyncImportReadStateChanges(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSyncGetTransferState:
-			if !s.ropSyncGetTransferState(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetLocalReplicaIds:
-			if !s.ropGetLocalReplicaIds(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSetLocalReplicaMidsetDeleted:
-			if !s.ropSetLocalReplicaMidsetDeleted(p, out, handles, hindex) {
-				break loop
-			}
-		case ropSynchronizationImportMessageMove:
-			if !s.ropSyncImportMessageMove(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetPerUserLongTermIds:
-			if !s.ropGetPerUserLongTermIds(p, out, handles, hindex) {
-				break loop
-			}
-		case ropGetPerUserGuid:
-			if !s.ropGetPerUserGuid(p, out, handles, hindex) {
-				break loop
-			}
-		case ropReadPerUserInformation:
-			if !s.ropReadPerUserInformation(p, out, handles, hindex) {
-				break loop
-			}
-		case ropWritePerUserInformation:
-			if !s.ropWritePerUserInformation(p, out, handles, hindex) {
-				break loop
-			}
-		case ropFastTransferSourceCopyMessages:
-			if !s.ropFastTransferSourceCopyMessages(p, out, handles, hindex) {
-				break loop
-			}
-		case ropFastTransferSourceCopyFolder:
-			if !s.ropFastTransferSourceCopyFolder(p, out, handles, hindex) {
-				break loop
-			}
-		case ropFastTransferSourceCopyTo:
-			if !s.ropFastTransferSourceCopyTo(p, out, handles, hindex) {
-				break loop
-			}
-		case ropFastTransferSourceCopyProperties:
-			if !s.ropFastTransferSourceCopyProperties(p, out, handles, hindex) {
-				break loop
-			}
-		case ropProgress:
-			if !s.ropProgress(p, out, handles, hindex) {
-				break loop
-			}
-		default:
+		run, known := ropTable[ropID]
+		if !known {
 			writeErr(out, ropID, hindex, ecError)
-			break loop
+			break
+		}
+		if !run(s, p, out, handles, hindex) {
+			break
 		}
 	}
 	// After the ROP batch, drain notifications into the same response, mirroring
@@ -563,6 +267,16 @@ loop:
 	// notifications), and is a no-op when the session has no subscriptions.
 	s.poll(out)
 	return out.Bytes(), handles
+}
+
+// pullRopHeader reads the three-byte ROP header: RopId, LogonId (a single logon
+// in v1, so it is discarded) and the handle index. ok is false when the list
+// ends mid-header, which ends the batch with no response.
+func pullRopHeader(p *ext.Pull) (ropID, hindex uint8, ok bool) {
+	ropID, e1 := p.Uint8()
+	_, e2 := p.Uint8() // LogonId (a single logon in v1)
+	hindex, e3 := p.Uint8()
+	return ropID, hindex, e1 == nil && e2 == nil && e3 == nil
 }
 
 // writeErr appends the 6-byte generic ROP error response: RopId, HandleIndex, ec.
