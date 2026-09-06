@@ -93,26 +93,27 @@ func imapMatch(pattern, name string) bool {
 	}
 	switch pattern[0] {
 	case '*':
-		for i := 0; i <= len(name); i++ {
-			if imapMatch(pattern[1:], name[i:]) {
-				return true
-			}
-		}
-		return false
+		return matchWildcard(pattern[1:], name, false)
 	case '%':
-		for i := 0; i <= len(name); i++ {
-			if imapMatch(pattern[1:], name[i:]) {
-				return true
-			}
-			if i < len(name) && name[i] == hierarchySep[0] {
-				break // '%' cannot cross a hierarchy separator
-			}
-		}
-		return false
+		return matchWildcard(pattern[1:], name, true)
 	default:
 		if name == "" || name[0] != pattern[0] {
 			return false
 		}
 		return imapMatch(pattern[1:], name[1:])
 	}
+}
+
+// matchWildcard tries the rest of the pattern against every suffix of the name.
+// stopAtSep is set for '%', which cannot cross a hierarchy separator.
+func matchWildcard(rest, name string, stopAtSep bool) bool {
+	for i := 0; i <= len(name); i++ {
+		if imapMatch(rest, name[i:]) {
+			return true
+		}
+		if stopAtSep && i < len(name) && name[i] == hierarchySep[0] {
+			return false
+		}
+	}
+	return false
 }

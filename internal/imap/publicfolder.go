@@ -242,17 +242,7 @@ func (c *conn) listPublicFolders(verb, full string) {
 	if err != nil {
 		return
 	}
-	var visible []objectstore.FolderInfo
-	for _, f := range all {
-		if f.ParentID != nil {
-			continue
-		}
-		rights, err := st.ResolvePermission(f.ID, c.user)
-		if err != nil || rights&mapi.FrightsVisible == 0 {
-			continue
-		}
-		visible = append(visible, f)
-	}
+	visible := c.visiblePublicRoots(st, all)
 	if len(visible) == 0 {
 		return
 	}
@@ -265,6 +255,23 @@ func (c *conn) listPublicFolders(verb, full string) {
 			c.untagged(`%s (\HasNoChildren) "%s" %s`, verb, hierarchySep, safeQuoted(path))
 		}
 	}
+}
+
+// visiblePublicRoots narrows a public store's folders to the top-level ones the
+// caller holds visibility on.
+func (c *conn) visiblePublicRoots(st *objectstore.Store, all []objectstore.FolderInfo) []objectstore.FolderInfo {
+	var visible []objectstore.FolderInfo
+	for _, f := range all {
+		if f.ParentID != nil {
+			continue
+		}
+		rights, err := st.ResolvePermission(f.ID, c.user)
+		if err != nil || rights&mapi.FrightsVisible == 0 {
+			continue
+		}
+		visible = append(visible, f)
+	}
+	return visible
 }
 
 // cmdNamespace answers the NAMESPACE command (RFC 2342): a personal namespace at

@@ -46,26 +46,45 @@ func (c *conn) cmdFetch(tag string, args []token, byUID bool) {
 		c.bad(tag, "invalid FETCH items")
 		return
 	}
-	if byUID && !hasKind(items, "UID") {
-		items = append(items, fetchItem{kind: "UID"}) // UID FETCH always returns UID
+	items = c.completeFetchItems(items, byUID, changedSince)
+	var modseqs map[uint32]uint64
+	if changedSince > 0 || hasKind(items, "MODSEQ") {
+		modseqs = c.modseqMap()
 	}
-	// CHANGEDSINCE (RFC 7162) enables CONDSTORE and forces MODSEQ into the response.
+	c.writeFetches(set, byUID, items, modseqs, changedSince)
+
+	verb := "FETCH"
+	if byUID {
+		verb = "UID FETCH"
+	}
+	c.ok(tag, verb+" completed")
+}
+
+// completeFetchItems adds the items the protocol requires beyond what the client
+// listed: a UID FETCH always returns UID, and CHANGEDSINCE (RFC 7162) enables
+// CONDSTORE and forces MODSEQ into the response.
+func (c *conn) completeFetchItems(items []fetchItem, byUID bool, changedSince uint64) []fetchItem {
+	if byUID && !hasKind(items, "UID") {
+		items = append(items, fetchItem{kind: "UID"})
+	}
 	if changedSince > 0 {
 		c.condstore = true
 		if !hasKind(items, "MODSEQ") {
 			items = append(items, fetchItem{kind: "MODSEQ"})
 		}
 	}
-	var modseqs map[uint32]uint64
-	if changedSince > 0 || hasKind(items, "MODSEQ") {
-		modseqs = c.modseqMap()
-	}
+	return items
+}
 
+// writeFetches emits one FETCH response per message in the set, skipping the ones
+// a CHANGEDSINCE guard says the client already has.
+func (c *conn) writeFetches(set seqSet, byUID bool, items []fetchItem, modseqs map[uint32]uint64, changedSince uint64) {
 	max := c.sel.maxSeq()
 	if byUID {
 		max = c.sel.maxUID()
 	}
 	for i := range c.sel.msgs {
+		// #nosec G115 -- an IMAP sequence number, an index into the selected mailbox's in-memory message list
 		seq := uint32(i + 1)
 		key := seq
 		if byUID {
@@ -79,11 +98,6 @@ func (c *conn) cmdFetch(tag string, args []token, byUID bool) {
 		}
 		c.writeFetch(seq, i, items, modseqs)
 	}
-	verb := "FETCH"
-	if byUID {
-		verb = "UID FETCH"
-	}
-	c.ok(tag, verb+" completed")
 }
 
 // cmdUID dispatches the UID variant of a data command (RFC 3501 §6.4.8), where
@@ -98,26 +112,26 @@ func (c *conn) cmdUID(tag string, args []token) {
 		c.bad(tag, "UID requires a command")
 		return
 	}
-	switch strings.ToUpper(sub) {
-	case "FETCH":
-		c.cmdFetch(tag, args[1:], true)
-	case "STORE":
-		c.cmdStore(tag, args[1:], true)
-	case "SEARCH":
-		c.cmdSearch(tag, args[1:], true)
-	case "COPY":
-		c.cmdCopy(tag, args[1:], true)
-	case "EXPUNGE":
-		c.cmdUIDExpunge(tag, args[1:])
-	case "MOVE":
-		c.cmdMove(tag, args[1:], true)
-	case "SORT":
-		c.cmdSort(tag, args[1:], true)
-	case "THREAD":
-		c.cmdThread(tag, args[1:], true)
-	default:
+	handler, ok := uidSubcommands[strings.ToUpper(sub)]
+	if !ok {
 		c.bad(tag, "UID "+sub+" not supported")
+		return
 	}
+	handler(c, tag, args[1:])
+}
+
+// uidSubcommands routes the data commands that take a UID form. Each is the same
+// handler the non-UID form uses, with the flag that makes its sequence set name
+// UIDs; EXPUNGE has no non-UID form and is its own handler.
+var uidSubcommands = map[string]func(c *conn, tag string, args []token){
+	"FETCH":   func(c *conn, tag string, args []token) { c.cmdFetch(tag, args, true) },
+	"STORE":   func(c *conn, tag string, args []token) { c.cmdStore(tag, args, true) },
+	"SEARCH":  func(c *conn, tag string, args []token) { c.cmdSearch(tag, args, true) },
+	"COPY":    func(c *conn, tag string, args []token) { c.cmdCopy(tag, args, true) },
+	"EXPUNGE": (*conn).cmdUIDExpunge,
+	"MOVE":    func(c *conn, tag string, args []token) { c.cmdMove(tag, args, true) },
+	"SORT":    func(c *conn, tag string, args []token) { c.cmdSort(tag, args, true) },
+	"THREAD":  func(c *conn, tag string, args []token) { c.cmdThread(tag, args, true) },
 }
 
 func hasKind(items []fetchItem, kind string) bool {
@@ -134,71 +148,17 @@ func hasKind(items []fetchItem, kind string) bool {
 // and applies the \Seen side effect of a non-peek body fetch.
 func (c *conn) writeFetch(seq uint32, idx int, items []fetchItem, modseqs map[uint32]uint64) {
 	msg := c.sel.msgs[idx]
-	var raw []byte
-	var rawLoaded bool
-	var structure *mime.Part
-	loadRaw := func() []byte {
-		if !rawLoaded {
-			raw, _ = c.curStore().GetMessageRaw(c.sel.id, msg.UID)
-			rawLoaded = true
-		}
-		return raw
-	}
-	need := func() *mime.Part {
-		if structure == nil {
-			structure = mime.ParseStructure(loadRaw())
-		}
-		return structure
-	}
+	r := &fetchRenderer{c: c, msg: msg}
 
 	var fields []string
 	setSeen := false
 	for _, it := range items {
-		switch it.kind {
-		case "UID":
-			fields = append(fields, fmt.Sprintf("UID %d", msg.UID))
-		case "MODSEQ":
-			fields = append(fields, fmt.Sprintf("MODSEQ (%d)", modseqs[msg.UID]))
-		case "FLAGS":
-			fields = append(fields, fmt.Sprintf(`FLAGS (%s)`, formatFlags(msg.Flags, false)))
-		case "INTERNALDATE":
-			fields = append(fields, `INTERNALDATE `+quoteString(msg.InternalDate.Format("02-Jan-2006 15:04:05 -0700")))
-		case "RFC822.SIZE":
-			fields = append(fields, fmt.Sprintf("RFC822.SIZE %d", msg.Size))
-		case "ENVELOPE":
-			env, _ := mime.ParseEnvelope(loadRaw())
-			fields = append(fields, "ENVELOPE "+renderEnvelope(env))
-		case "BODY":
-			fields = append(fields, "BODY "+renderBodyStructure(need(), false))
-		case "BODYSTRUCTURE":
-			fields = append(fields, "BODYSTRUCTURE "+renderBodyStructure(need(), true))
-		case "SECTION":
-			data, ok := need().Extract(it.section)
-			if !ok {
-				data = []byte{}
-			}
-			data = applyPartial(data, it.partial)
-			fields = append(fields, it.name+" "+literalize(string(data)))
-			if !it.peek {
-				setSeen = true
-			}
-		case "BINARY":
-			data, ok := extractBinary(need(), it.section.Path)
-			if !ok {
-				data = []byte{}
-			}
-			data = applyPartial(data, it.partial)
-			fields = append(fields, it.name+" "+binaryLiteral(data))
-			if !it.peek {
-				setSeen = true
-			}
-		case "BINARY.SIZE":
-			sz := 0
-			if data, ok := extractBinary(need(), it.section.Path); ok {
-				sz = len(data)
-			}
-			fields = append(fields, fmt.Sprintf("%s %d", it.name, sz))
+		field, ok, reads := r.field(it, modseqs)
+		if !ok {
+			continue
 		}
+		fields = append(fields, field)
+		setSeen = setSeen || reads
 	}
 
 	// A read-only selection (EXAMINE, or a public folder the caller cannot post to)
@@ -214,6 +174,86 @@ func (c *conn) writeFetch(seq uint32, idx int, items []fetchItem, modseqs map[ui
 
 	c.wf("* %d FETCH (%s)\r\n", seq, strings.Join(fields, " "))
 	c.flush()
+}
+
+// fetchRenderer renders one message's FETCH fields, loading the raw message and
+// parsing its structure only when a requested item actually needs them.
+type fetchRenderer struct {
+	c         *conn
+	msg       objectstore.MessageInfo
+	raw       []byte
+	rawLoaded bool
+	structure *mime.Part
+}
+
+// loadRaw returns the message's wire form, reading it once.
+func (r *fetchRenderer) loadRaw() []byte {
+	if !r.rawLoaded {
+		r.raw, _ = r.c.curStore().GetMessageRaw(r.c.sel.id, r.msg.UID)
+		r.rawLoaded = true
+	}
+	return r.raw
+}
+
+// need returns the message's parsed MIME structure, parsing it once.
+func (r *fetchRenderer) need() *mime.Part {
+	if r.structure == nil {
+		r.structure = mime.ParseStructure(r.loadRaw())
+	}
+	return r.structure
+}
+
+// field renders one requested item. ok is false for an item this server does not
+// serve, and reads is true when the item read the body, which implicitly sets
+// \Seen unless the client asked with .PEEK.
+func (r *fetchRenderer) field(it fetchItem, modseqs map[uint32]uint64) (field string, ok, reads bool) {
+	switch it.kind {
+	case "SECTION":
+		data, found := r.need().Extract(it.section)
+		if !found {
+			data = []byte{}
+		}
+		return it.name + " " + literalize(string(applyPartial(data, it.partial))), true, !it.peek
+	case "BINARY":
+		data, found := extractBinary(r.need(), it.section.Path)
+		if !found {
+			data = []byte{}
+		}
+		return it.name + " " + binaryLiteral(applyPartial(data, it.partial)), true, !it.peek
+	case "BINARY.SIZE":
+		sz := 0
+		if data, found := extractBinary(r.need(), it.section.Path); found {
+			sz = len(data)
+		}
+		return fmt.Sprintf("%s %d", it.name, sz), true, false
+	}
+	field, ok = r.metaField(it, modseqs)
+	return field, ok, false
+}
+
+// metaField renders the items that describe the message rather than read a part
+// of its body.
+func (r *fetchRenderer) metaField(it fetchItem, modseqs map[uint32]uint64) (string, bool) {
+	switch it.kind {
+	case "UID":
+		return fmt.Sprintf("UID %d", r.msg.UID), true
+	case "MODSEQ":
+		return fmt.Sprintf("MODSEQ (%d)", modseqs[r.msg.UID]), true
+	case "FLAGS":
+		return fmt.Sprintf(`FLAGS (%s)`, formatFlags(r.msg.Flags, false)), true
+	case "INTERNALDATE":
+		return `INTERNALDATE ` + quoteString(r.msg.InternalDate.Format("02-Jan-2006 15:04:05 -0700")), true
+	case "RFC822.SIZE":
+		return fmt.Sprintf("RFC822.SIZE %d", r.msg.Size), true
+	case "ENVELOPE":
+		env, _ := mime.ParseEnvelope(r.loadRaw())
+		return "ENVELOPE " + renderEnvelope(env), true
+	case "BODY":
+		return "BODY " + renderBodyStructure(r.need(), false), true
+	case "BODYSTRUCTURE":
+		return "BODYSTRUCTURE " + renderBodyStructure(r.need(), true), true
+	}
+	return "", false
 }
 
 // markSeen sets \Seen on a message as the side effect of a body read, and reports
@@ -344,17 +384,13 @@ func parseOneItem(cur *tokenCursor) ([]fetchItem, error) {
 	}
 	upper := strings.ToUpper(name)
 
+	if item, ok := plainFetchItems[upper]; ok {
+		return []fetchItem{item}, nil
+	}
+	hasSection := sectionFollows(cur)
 	switch upper {
-	case "FLAGS", "INTERNALDATE", "RFC822.SIZE", "ENVELOPE", "BODYSTRUCTURE", "UID", "MODSEQ":
-		return []fetchItem{{kind: upper}}, nil
-	case "RFC822":
-		return []fetchItem{{kind: "SECTION", name: "RFC822", section: mime.Section{}}}, nil
-	case "RFC822.HEADER":
-		return []fetchItem{{kind: "SECTION", peek: true, name: "RFC822.HEADER", section: mime.Section{Specifier: "HEADER"}}}, nil
-	case "RFC822.TEXT":
-		return []fetchItem{{kind: "SECTION", name: "RFC822.TEXT", section: mime.Section{Specifier: "TEXT"}}}, nil
 	case "BODY", "BODY.PEEK":
-		if next, ok := cur.peek(); !ok || next.kind != tLBracket {
+		if !hasSection {
 			if upper == "BODY.PEEK" {
 				return nil, errProtocol // BODY.PEEK must carry a section
 			}
@@ -362,17 +398,40 @@ func parseOneItem(cur *tokenCursor) ([]fetchItem, error) {
 		}
 		return parseBodySection(cur, upper == "BODY.PEEK")
 	case "BINARY", "BINARY.PEEK":
-		if next, ok := cur.peek(); !ok || next.kind != tLBracket {
+		if !hasSection {
 			return nil, errProtocol // BINARY requires a section
 		}
 		return parseBinarySection(cur, upper == "BINARY.PEEK", false)
 	case "BINARY.SIZE":
-		if next, ok := cur.peek(); !ok || next.kind != tLBracket {
+		if !hasSection {
 			return nil, errProtocol
 		}
 		return parseBinarySection(cur, true, true) // SIZE is metadata; never sets \Seen
 	}
 	return nil, fmt.Errorf("%w: unknown FETCH item %q", errProtocol, name)
+}
+
+// sectionFollows reports whether the next token opens a section specifier.
+func sectionFollows(cur *tokenCursor) bool {
+	next, ok := cur.peek()
+	return ok && next.kind == tLBracket
+}
+
+// plainFetchItems are the items that carry no section and resolve to one fixed
+// item. The RFC822 family is the pre-IMAP4rev1 spelling of a whole-message or
+// header/text section fetch; RFC822.HEADER peeks, since reading headers alone
+// does not mark a message read.
+var plainFetchItems = map[string]fetchItem{
+	"FLAGS":         {kind: "FLAGS"},
+	"INTERNALDATE":  {kind: "INTERNALDATE"},
+	"RFC822.SIZE":   {kind: "RFC822.SIZE"},
+	"ENVELOPE":      {kind: "ENVELOPE"},
+	"BODYSTRUCTURE": {kind: "BODYSTRUCTURE"},
+	"UID":           {kind: "UID"},
+	"MODSEQ":        {kind: "MODSEQ"},
+	"RFC822":        {kind: "SECTION", name: "RFC822", section: mime.Section{}},
+	"RFC822.HEADER": {kind: "SECTION", peek: true, name: "RFC822.HEADER", section: mime.Section{Specifier: "HEADER"}},
+	"RFC822.TEXT":   {kind: "SECTION", name: "RFC822.TEXT", section: mime.Section{Specifier: "TEXT"}},
 }
 
 // parseBinarySection parses BINARY[part]/BINARY.PEEK[part]/BINARY.SIZE[part]
@@ -392,17 +451,13 @@ func parseBinarySection(cur *tokenCursor, peek, sizeOnly bool) ([]fetchItem, err
 		return nil, fmt.Errorf("%w: unterminated binary section", errProtocol)
 	}
 	label := "BINARY"
-	kind := "BINARY"
 	if sizeOnly {
-		label, kind = "BINARY.SIZE", "BINARY.SIZE"
+		label = "BINARY.SIZE"
 	}
-	item := fetchItem{kind: kind, peek: peek, section: sec}
+	item := fetchItem{kind: label, peek: peek, section: sec}
 	if !sizeOnly {
-		if p, ok := cur.peek(); ok && p.kind == tAtom && strings.HasPrefix(p.val, "<") {
-			cur.next()
-			if item.partial, err = parsePartial(p.val); err != nil {
-				return nil, err
-			}
+		if item.partial, err = parseTrailingPartial(cur); err != nil {
+			return nil, err
 		}
 	}
 	item.name = label + "[" + sectionString(sec) + "]"
@@ -424,17 +479,25 @@ func parseBodySection(cur *tokenCursor, peek bool) ([]fetchItem, error) {
 		return nil, fmt.Errorf("%w: unterminated body section", errProtocol)
 	}
 	item := fetchItem{kind: "SECTION", peek: peek, section: sec}
-	if p, ok := cur.peek(); ok && p.kind == tAtom && strings.HasPrefix(p.val, "<") {
-		cur.next()
-		if item.partial, err = parsePartial(p.val); err != nil {
-			return nil, err
-		}
+	if item.partial, err = parseTrailingPartial(cur); err != nil {
+		return nil, err
 	}
 	item.name = "BODY[" + sectionString(sec) + "]"
 	if item.partial != nil {
 		item.name += fmt.Sprintf("<%d>", item.partial[0])
 	}
 	return []fetchItem{item}, nil
+}
+
+// parseTrailingPartial consumes a <offset.count> partial specifier when one
+// follows the section, and answers nil when none does.
+func parseTrailingPartial(cur *tokenCursor) (*[2]int, error) {
+	p, ok := cur.peek()
+	if !ok || p.kind != tAtom || !strings.HasPrefix(p.val, "<") {
+		return nil, nil
+	}
+	cur.next()
+	return parsePartial(p.val)
 }
 
 // parseSectionSpec parses the tokens inside BODY[...] into a mime.Section.

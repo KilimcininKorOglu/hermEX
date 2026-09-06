@@ -110,33 +110,47 @@ func (r *commandReader) readCommand() ([]token, error) {
 			return toks, nil
 		case ' ':
 			// Field separator; collapse runs of spaces.
-		case '(':
-			toks = append(toks, token{kind: tLParen})
-		case ')':
-			toks = append(toks, token{kind: tRParen})
-		case '[':
-			toks = append(toks, token{kind: tLBracket})
-		case ']':
-			toks = append(toks, token{kind: tRBracket})
-		case '"':
-			s, err := r.readQuoted()
-			if err != nil {
-				return nil, err
-			}
-			toks = append(toks, token{kind: tString, val: s})
-		case '{':
-			s, err := r.readLiteral()
-			if err != nil {
-				return nil, err
-			}
-			toks = append(toks, token{kind: tString, val: s, literal: true})
 		default:
-			if err := r.br.UnreadByte(); err != nil {
+			t, err := r.readToken(b)
+			if err != nil {
 				return nil, err
 			}
-			toks = append(toks, token{kind: tAtom, val: r.readAtom()})
+			toks = append(toks, t)
 		}
 	}
+}
+
+// punctuationTokens are the single-byte structural tokens of the IMAP grammar.
+var punctuationTokens = map[byte]tokenKind{
+	'(': tLParen,
+	')': tRParen,
+	'[': tLBracket,
+	']': tRBracket,
+}
+
+// readToken reads one token whose first byte the caller already consumed.
+func (r *commandReader) readToken(b byte) (token, error) {
+	if kind, ok := punctuationTokens[b]; ok {
+		return token{kind: kind}, nil
+	}
+	switch b {
+	case '"':
+		s, err := r.readQuoted()
+		if err != nil {
+			return token{}, err
+		}
+		return token{kind: tString, val: s}, nil
+	case '{':
+		s, err := r.readLiteral()
+		if err != nil {
+			return token{}, err
+		}
+		return token{kind: tString, val: s, literal: true}, nil
+	}
+	if err := r.br.UnreadByte(); err != nil {
+		return token{}, err
+	}
+	return token{kind: tAtom, val: r.readAtom()}, nil
 }
 
 // readLine reads one raw CRLF-terminated line and returns it without the
@@ -220,49 +234,15 @@ func (r *commandReader) readQuoted() (string, error) {
 // then exactly count octets. For a synchronizing literal it first writes a
 // command-continuation request so the client knows to send the data.
 func (r *commandReader) readLiteral() (string, error) {
-	var numSb strings.Builder
-	nonSync := false
-	for {
-		b, err := r.br.ReadByte()
-		if err != nil {
-			return "", err
-		}
-		if b == '}' {
-			break
-		}
-		if b == '+' {
-			nonSync = true
-			continue
-		}
-		if b < '0' || b > '9' {
-			return "", fmt.Errorf("%w: bad literal length", errProtocol)
-		}
-		if nonSync {
-			return "", fmt.Errorf("%w: digit after '+' in literal", errProtocol)
-		}
-		numSb.WriteByte(b)
+	n, nonSync, err := r.readLiteralHeader()
+	if err != nil {
+		return "", err
 	}
-	n, err := strconv.Atoi(numSb.String())
-	if err != nil || n < 0 {
-		return "", fmt.Errorf("%w: bad literal length", errProtocol)
-	}
-	limit := int64(defaultMaxLiteralSize)
-	if r.maxLiteral != nil {
-		if v := r.maxLiteral.Load(); v > 0 {
-			limit = v
-		}
-	}
-	if int64(n) > limit {
+	if int64(n) > r.literalLimit() {
 		return "", fmt.Errorf("%w: literal of %d bytes exceeds limit", errProtocol, n)
 	}
-	if b, err := r.br.ReadByte(); err != nil {
+	if err := r.expectCRLF(); err != nil {
 		return "", err
-	} else if b == '\r' {
-		if err := r.expectLF(); err != nil {
-			return "", err
-		}
-	} else if b != '\n' {
-		return "", fmt.Errorf("%w: literal length not followed by CRLF", errProtocol)
 	}
 	if !nonSync && r.bw != nil {
 		if _, err := r.bw.WriteString("+ Ready for literal data\r\n"); err != nil {
@@ -277,4 +257,63 @@ func (r *commandReader) readLiteral() (string, error) {
 		return "", err
 	}
 	return string(buf), nil
+}
+
+// readLiteralHeader reads the byte count up to the closing brace and reports
+// whether the client marked the literal non-synchronizing (a trailing '+', which
+// means it will not wait for the continuation response).
+func (r *commandReader) readLiteralHeader() (n int, nonSync bool, err error) {
+	var digits strings.Builder
+	for {
+		b, err := r.br.ReadByte()
+		if err != nil {
+			return 0, false, err
+		}
+		if b == '}' {
+			break
+		}
+		if b == '+' {
+			nonSync = true
+			continue
+		}
+		if b < '0' || b > '9' {
+			return 0, false, fmt.Errorf("%w: bad literal length", errProtocol)
+		}
+		if nonSync {
+			return 0, false, fmt.Errorf("%w: digit after '+' in literal", errProtocol)
+		}
+		digits.WriteByte(b)
+	}
+	n, err = strconv.Atoi(digits.String())
+	if err != nil || n < 0 {
+		return 0, false, fmt.Errorf("%w: bad literal length", errProtocol)
+	}
+	return n, nonSync, nil
+}
+
+// literalLimit is the largest literal this connection accepts, the operator's
+// setting when one is configured and the built-in default otherwise.
+func (r *commandReader) literalLimit() int64 {
+	if r.maxLiteral != nil {
+		if v := r.maxLiteral.Load(); v > 0 {
+			return v
+		}
+	}
+	return int64(defaultMaxLiteralSize)
+}
+
+// expectCRLF consumes the line ending after a literal's length, tolerating a bare
+// LF as the readers around it do.
+func (r *commandReader) expectCRLF() error {
+	b, err := r.br.ReadByte()
+	if err != nil {
+		return err
+	}
+	if b == '\r' {
+		return r.expectLF()
+	}
+	if b != '\n' {
+		return fmt.Errorf("%w: literal length not followed by CRLF", errProtocol)
+	}
+	return nil
 }

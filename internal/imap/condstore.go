@@ -102,18 +102,7 @@ func (c *conn) emitQResync(sel *selectedMailbox) {
 // (RFC 7162) from the FETCH item tokens, returning the remaining item tokens and
 // the CHANGEDSINCE value (0 = none). ok=false marks a malformed modifier.
 func splitFetchModifiers(args []token) (items []token, changedSince uint64, ok bool) {
-	depth, lastOpen := 0, -1
-	for i, t := range args {
-		switch t.kind {
-		case tLParen:
-			if depth == 0 {
-				lastOpen = i
-			}
-			depth++
-		case tRParen:
-			depth--
-		}
-	}
+	lastOpen := lastTopLevelParen(args)
 	if lastOpen < 0 {
 		return args, 0, true
 	}
@@ -129,6 +118,24 @@ func splitFetchModifiers(args []token) (items []token, changedSince uint64, ok b
 		return nil, 0, false
 	}
 	return args[:lastOpen], n, true
+}
+
+// lastTopLevelParen returns the index of the last '(' at nesting depth zero, or
+// -1 when the tokens carry none. That group is where a FETCH modifier list sits.
+func lastTopLevelParen(args []token) int {
+	depth, lastOpen := 0, -1
+	for i, t := range args {
+		switch t.kind {
+		case tLParen:
+			if depth == 0 {
+				lastOpen = i
+			}
+			depth++
+		case tRParen:
+			depth--
+		}
+	}
+	return lastOpen
 }
 
 // parseUnchangedSince extracts the (UNCHANGEDSINCE n) STORE modifier (RFC 7162) if

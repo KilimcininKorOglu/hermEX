@@ -1,6 +1,7 @@
 package imap
 
 import (
+	"cmp"
 	"fmt"
 	"net/mail"
 	"slices"
@@ -140,28 +141,7 @@ func (c *conn) sortKeysFor(i int, needHdr bool) sortKeys {
 
 func lessSort(a, b sortKeys, crits []sortCrit) bool {
 	for _, cr := range crits {
-		cmp := 0
-		switch cr.key {
-		case "ARRIVAL":
-			cmp = a.arrival.Compare(b.arrival)
-		case "DATE":
-			cmp = a.date.Compare(b.date)
-		case "SIZE":
-			switch {
-			case a.size < b.size:
-				cmp = -1
-			case a.size > b.size:
-				cmp = 1
-			}
-		case "FROM":
-			cmp = strings.Compare(a.from, b.from)
-		case "TO":
-			cmp = strings.Compare(a.to, b.to)
-		case "CC":
-			cmp = strings.Compare(a.cc, b.cc)
-		case "SUBJECT":
-			cmp = strings.Compare(a.subject, b.subject)
-		}
+		cmp := compareSortKey(a, b, cr.key)
 		if cr.reverse {
 			cmp = -cmp
 		}
@@ -170,6 +150,28 @@ func lessSort(a, b sortKeys, crits []sortCrit) bool {
 		}
 	}
 	return a.idx < b.idx
+}
+
+// compareSortKey compares two messages on one SORT criterion. A criterion this
+// server does not implement compares equal, so the next one decides.
+func compareSortKey(a, b sortKeys, key string) int {
+	switch key {
+	case "ARRIVAL":
+		return a.arrival.Compare(b.arrival)
+	case "DATE":
+		return a.date.Compare(b.date)
+	case "SIZE":
+		return cmp.Compare(a.size, b.size)
+	case "FROM":
+		return strings.Compare(a.from, b.from)
+	case "TO":
+		return strings.Compare(a.to, b.to)
+	case "CC":
+		return strings.Compare(a.cc, b.cc)
+	case "SUBJECT":
+		return strings.Compare(a.subject, b.subject)
+	}
+	return 0
 }
 
 // sortAddr extracts the lowercased mailbox address used for FROM/TO/CC sorting,
@@ -352,28 +354,15 @@ func (c *conn) threadReferences(matched []int, byUID bool) string {
 	}
 	var roots []*tnode
 	for _, mm := range msgs {
-		parent := -1
-		for _, v := range slices.Backward(mm.refs) {
-			if pi, ok := byMsgID[v]; ok && pi != mm.idx {
-				parent = pi
-				break
-			}
-		}
+		parent := threadParent(mm, byMsgID)
 		if parent >= 0 {
 			nodes[parent].children = append(nodes[parent].children, nodes[mm.idx])
 		} else {
 			roots = append(roots, nodes[mm.idx])
 		}
 	}
-	var sortTree func(n *tnode)
-	sortTree = func(n *tnode) {
-		sort.SliceStable(n.children, func(a, b int) bool { return n.children[a].date.Before(n.children[b].date) })
-		for _, ch := range n.children {
-			sortTree(ch)
-		}
-	}
 	for _, r := range roots {
-		sortTree(r)
+		sortThreadTree(r)
 	}
 	sort.SliceStable(roots, func(a, b int) bool { return roots[a].date.Before(roots[b].date) })
 
@@ -384,6 +373,26 @@ func (c *conn) threadReferences(matched []int, byUID bool) string {
 		sb.WriteString(")")
 	}
 	return sb.String()
+}
+
+// threadParent picks a message's parent: the last of its References that names a
+// message in this result set, which is the nearest ancestor present. It answers
+// -1 for a message that starts a thread.
+func threadParent(mm threadMsg, byMsgID map[string]int) int {
+	for _, v := range slices.Backward(mm.refs) {
+		if pi, ok := byMsgID[v]; ok && pi != mm.idx {
+			return pi
+		}
+	}
+	return -1
+}
+
+// sortThreadTree orders every level of a thread by date, oldest first.
+func sortThreadTree(n *tnode) {
+	sort.SliceStable(n.children, func(a, b int) bool { return n.children[a].date.Before(n.children[b].date) })
+	for _, ch := range n.children {
+		sortThreadTree(ch)
+	}
 }
 
 // renderThread renders a thread-list body (RFC 5256): a linear chain of single

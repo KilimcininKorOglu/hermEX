@@ -256,103 +256,93 @@ func (c *conn) dispatch(toks []token) {
 	// arguments (LOGIN/AUTHENTICATE arguments carry credentials).
 	c.event(logging.LevelDebug, "command", logging.Fields{"cmd": strings.ToUpper(name)})
 
-	switch strings.ToUpper(name) {
-	case "CAPABILITY":
-		c.untagged("CAPABILITY %s", c.caps())
-		c.ok(tag, "CAPABILITY completed")
-	case "ID":
-		c.cmdID(tag)
-	case "COMPRESS":
-		c.cmdCompress(tag, args)
-	case "ENABLE":
-		c.cmdEnable(tag, args)
-	case "STARTTLS":
-		c.cmdStartTLS(tag)
-	case "NOOP":
-		c.poll()
-		c.ok(tag, "NOOP completed")
-	case "IDLE":
-		c.cmdIdle(tag)
-	case "LOGOUT":
-		c.untagged("BYE hermEX IMAP logging out")
-		c.state = stateLogout
-		c.ok(tag, "LOGOUT completed")
-	case "LOGIN":
-		c.cmdLogin(tag, args)
-	case "AUTHENTICATE":
-		c.cmdAuthenticate(tag, args)
-	case "SELECT":
-		c.cmdSelect(tag, args, false)
-	case "EXAMINE":
-		c.cmdSelect(tag, args, true)
-	case "LIST":
-		c.cmdList(tag, args, false)
-	case "LSUB":
-		c.cmdList(tag, args, true)
-	case "NAMESPACE":
-		c.cmdNamespace(tag)
-	case "STATUS":
-		c.cmdStatus(tag, args)
-	case "MYRIGHTS":
-		c.cmdMyRights(tag, args)
-	case "GETACL":
-		c.cmdGetACL(tag, args)
-	case "SETACL":
-		c.cmdSetACL(tag, args)
-	case "DELETEACL":
-		c.cmdDeleteACL(tag, args)
-	case "LISTRIGHTS":
-		c.cmdListRights(tag, args)
-	case "GETQUOTA":
-		c.cmdGetQuota(tag, args)
-	case "GETQUOTAROOT":
-		c.cmdGetQuotaRoot(tag, args)
-	case "SETQUOTA":
-		c.cmdSetQuota(tag)
-	case "CREATE":
-		c.cmdCreate(tag, args)
-	case "DELETE":
-		c.cmdDelete(tag, args)
-	case "RENAME":
-		c.cmdRename(tag, args)
-	case "SUBSCRIBE":
-		c.cmdSubscribe(tag, args, true)
-	case "UNSUBSCRIBE":
-		c.cmdSubscribe(tag, args, false)
-	case "CHECK":
-		if c.state != stateSelected {
-			c.no(tag, "no mailbox selected")
-			return
-		}
-		c.poll()
-		c.ok(tag, "CHECK completed")
-	case "FETCH":
-		c.cmdFetch(tag, args, false)
-	case "STORE":
-		c.cmdStore(tag, args, false)
-	case "SEARCH":
-		c.cmdSearch(tag, args, false)
-	case "SORT":
-		c.cmdSort(tag, args, false)
-	case "THREAD":
-		c.cmdThread(tag, args, false)
-	case "COPY":
-		c.cmdCopy(tag, args, false)
-	case "MOVE":
-		c.cmdMove(tag, args, false)
-	case "APPEND":
-		c.cmdAppend(tag, args)
-	case "EXPUNGE":
-		c.cmdExpunge(tag)
-	case "CLOSE":
-		c.cmdClose(tag)
-	case "UNSELECT":
-		c.cmdUnselect(tag)
-	case "UID":
-		c.cmdUID(tag, args)
-	default:
+	handler, ok := imapCommands[strings.ToUpper(name)]
+	if !ok {
 		c.bad(tag, "unknown or unimplemented command")
+		return
 	}
+	handler(c, tag, args)
+}
+
+// imapCommands is the single routing source from a command name to its handler.
+// A name absent here is a command this server does not implement. The commands
+// that come in pairs (SELECT/EXAMINE, LIST/LSUB, SUBSCRIBE/UNSUBSCRIBE) share one
+// handler and differ only in the flag the table passes it.
+var imapCommands = map[string]func(c *conn, tag string, args []token){
+	"CAPABILITY":   func(c *conn, tag string, _ []token) { c.cmdCapability(tag) },
+	"ID":           func(c *conn, tag string, _ []token) { c.cmdID(tag) },
+	"COMPRESS":     (*conn).cmdCompress,
+	"ENABLE":       (*conn).cmdEnable,
+	"STARTTLS":     func(c *conn, tag string, _ []token) { c.cmdStartTLS(tag) },
+	"NOOP":         func(c *conn, tag string, _ []token) { c.cmdNoop(tag) },
+	"IDLE":         func(c *conn, tag string, _ []token) { c.cmdIdle(tag) },
+	"LOGOUT":       func(c *conn, tag string, _ []token) { c.cmdLogout(tag) },
+	"LOGIN":        (*conn).cmdLogin,
+	"AUTHENTICATE": (*conn).cmdAuthenticate,
+	"SELECT":       func(c *conn, tag string, args []token) { c.cmdSelect(tag, args, false) },
+	"EXAMINE":      func(c *conn, tag string, args []token) { c.cmdSelect(tag, args, true) },
+	"LIST":         func(c *conn, tag string, args []token) { c.cmdList(tag, args, false) },
+	"LSUB":         func(c *conn, tag string, args []token) { c.cmdList(tag, args, true) },
+	"NAMESPACE":    func(c *conn, tag string, _ []token) { c.cmdNamespace(tag) },
+	"STATUS":       (*conn).cmdStatus,
+	"MYRIGHTS":     (*conn).cmdMyRights,
+	"GETACL":       (*conn).cmdGetACL,
+	"SETACL":       (*conn).cmdSetACL,
+	"DELETEACL":    (*conn).cmdDeleteACL,
+	"LISTRIGHTS":   (*conn).cmdListRights,
+	"GETQUOTA":     (*conn).cmdGetQuota,
+	"GETQUOTAROOT": (*conn).cmdGetQuotaRoot,
+	"SETQUOTA":     func(c *conn, tag string, _ []token) { c.cmdSetQuota(tag) },
+	"CREATE":       (*conn).cmdCreate,
+	"DELETE":       (*conn).cmdDelete,
+	"RENAME":       (*conn).cmdRename,
+	"SUBSCRIBE":    func(c *conn, tag string, args []token) { c.cmdSubscribe(tag, args, true) },
+	"UNSUBSCRIBE":  func(c *conn, tag string, args []token) { c.cmdSubscribe(tag, args, false) },
+	"CHECK":        func(c *conn, tag string, _ []token) { c.cmdCheck(tag) },
+	"FETCH":        func(c *conn, tag string, args []token) { c.cmdFetch(tag, args, false) },
+	"STORE":        func(c *conn, tag string, args []token) { c.cmdStore(tag, args, false) },
+	"SEARCH":       func(c *conn, tag string, args []token) { c.cmdSearch(tag, args, false) },
+	"SORT":         func(c *conn, tag string, args []token) { c.cmdSort(tag, args, false) },
+	"THREAD":       func(c *conn, tag string, args []token) { c.cmdThread(tag, args, false) },
+	"COPY":         func(c *conn, tag string, args []token) { c.cmdCopy(tag, args, false) },
+	"MOVE":         func(c *conn, tag string, args []token) { c.cmdMove(tag, args, false) },
+	"APPEND":       (*conn).cmdAppend,
+	"EXPUNGE":      func(c *conn, tag string, _ []token) { c.cmdExpunge(tag) },
+	"CLOSE":        func(c *conn, tag string, _ []token) { c.cmdClose(tag) },
+	"UNSELECT":     func(c *conn, tag string, _ []token) { c.cmdUnselect(tag) },
+	"UID":          (*conn).cmdUID,
+}
+
+// cmdCapability answers CAPABILITY with the capabilities this connection offers
+// in its current state.
+func (c *conn) cmdCapability(tag string) {
+	c.untagged("CAPABILITY %s", c.caps())
+	c.ok(tag, "CAPABILITY completed")
+}
+
+// cmdNoop answers NOOP, which is also the client's cue to receive any pending
+// mailbox updates.
+func (c *conn) cmdNoop(tag string) {
+	c.poll()
+	c.ok(tag, "NOOP completed")
+}
+
+// cmdLogout answers LOGOUT and moves the connection to its final state.
+func (c *conn) cmdLogout(tag string) {
+	c.untagged("BYE hermEX IMAP logging out")
+	c.state = stateLogout
+	c.ok(tag, "LOGOUT completed")
+}
+
+// cmdCheck answers CHECK, which for this server is a NOOP that requires a
+// selected mailbox.
+func (c *conn) cmdCheck(tag string) {
+	if c.state != stateSelected {
+		c.no(tag, "no mailbox selected")
+		return
+	}
+	c.poll()
+	c.ok(tag, "CHECK completed")
 }
 
 // --- authentication ---
@@ -636,24 +626,36 @@ func (c *conn) cmdList(tag string, args []token, lsub bool) {
 		return
 	}
 	full := ref + pat
+	c.listOwnFolders(verb, full, tree, lsub)
+	c.listPublicFolders(verb, full)
+	c.ok(tag, verb+" completed")
+}
+
+// listOwnFolders emits one LIST (or LSUB) line per matching folder of the
+// caller's own mailbox.
+func (c *conn) listOwnFolders(verb, pattern string, tree *folderTree, lsub bool) {
 	for _, n := range tree.nodes {
 		if lsub && !n.info.Subscribed {
 			continue
 		}
-		if !imapMatch(full, n.path) {
+		if !imapMatch(pattern, n.path) {
 			continue
 		}
-		attr := `\HasNoChildren`
-		if n.hasChildren {
-			attr = `\HasChildren`
-		}
-		if su := specialUse(n.info.ID); su != "" {
-			attr += " " + su
-		}
-		c.untagged(`%s (%s) "%s" %s`, verb, attr, hierarchySep, safeQuoted(n.path))
+		c.untagged(`%s (%s) "%s" %s`, verb, listAttributes(n), hierarchySep, safeQuoted(n.path))
 	}
-	c.listPublicFolders(verb, full)
-	c.ok(tag, verb+" completed")
+}
+
+// listAttributes renders one folder's LIST attributes: whether it has children,
+// plus its SPECIAL-USE attribute when it is a well-known folder.
+func listAttributes(n *folderNode) string {
+	attr := `\HasNoChildren`
+	if n.hasChildren {
+		attr = `\HasChildren`
+	}
+	if su := specialUse(n.info.ID); su != "" {
+		attr += " " + su
+	}
+	return attr
 }
 
 // specialUse returns the RFC 6154 SPECIAL-USE attribute for a well-known folder,
@@ -855,12 +857,8 @@ func (c *conn) cmdRename(tag string, args []token) {
 		c.bad(tag, "RENAME requires source and destination names")
 		return
 	}
-	if !mailboxSafe(to) {
-		c.no(tag, "mailbox name contains an illegal character")
-		return
-	}
-	if strings.EqualFold(from, inboxName) {
-		c.no(tag, "renaming INBOX is not supported")
+	if refusal := renameRefusal(from, to); refusal != "" {
+		c.no(tag, refusal)
 		return
 	}
 	tree, err := loadFolderTree(c.st)
@@ -868,26 +866,44 @@ func (c *conn) cmdRename(tag string, args []token) {
 		c.no(tag, "cannot read mailbox list")
 		return
 	}
-	node, found := tree.resolve(from)
-	if !found {
-		c.no(tag, "no such mailbox")
-		return
-	}
-	if _, exists := tree.resolve(to); exists {
-		c.no(tag, "destination already exists")
-		return
-	}
-	to = strings.TrimSuffix(to, hierarchySep)
-	parent, leaf, err := c.resolveParent(tree, to)
-	if err != nil {
-		c.no(tag, "cannot create destination parent")
-		return
-	}
-	if err := c.st.RenameFolder(node.info.ID, parent, leaf); err != nil {
-		c.no(tag, "cannot rename mailbox")
+	if refusal := c.renameFolder(tree, from, strings.TrimSuffix(to, hierarchySep)); refusal != "" {
+		c.no(tag, refusal)
 		return
 	}
 	c.ok(tag, "RENAME completed")
+}
+
+// renameFolder resolves both ends of a RENAME against the mailbox list and
+// performs it, creating any missing intermediate folders of the destination. A
+// non-empty return is the refusal to report.
+func (c *conn) renameFolder(tree *folderTree, from, to string) string {
+	node, found := tree.resolve(from)
+	if !found {
+		return "no such mailbox"
+	}
+	if _, exists := tree.resolve(to); exists {
+		return "destination already exists"
+	}
+	parent, leaf, err := c.resolveParent(tree, to)
+	if err != nil {
+		return "cannot create destination parent"
+	}
+	if err := c.st.RenameFolder(node.info.ID, parent, leaf); err != nil {
+		return "cannot rename mailbox"
+	}
+	return ""
+}
+
+// renameRefusal reports why a RENAME cannot be attempted, before the mailbox list
+// is even read. An empty string means it may proceed.
+func renameRefusal(from, to string) string {
+	if !mailboxSafe(to) {
+		return "mailbox name contains an illegal character"
+	}
+	if strings.EqualFold(from, inboxName) {
+		return "renaming INBOX is not supported"
+	}
+	return ""
 }
 
 // resolveParent splits a mailbox path into its parent folder id (nil for root)

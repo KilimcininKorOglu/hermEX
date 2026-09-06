@@ -34,64 +34,12 @@ func (c *conn) cmdStore(tag string, args []token, byUID bool) {
 		c.bad(tag, "invalid sequence set")
 		return
 	}
-	// An optional (UNCHANGEDSINCE n) modifier (RFC 7162) precedes the item.
-	rest, unchangedSince, condUsed, ok := parseUnchangedSince(args[1:])
-	if !ok {
-		c.bad(tag, "invalid STORE modifier")
+	req, problem := c.parseStoreRequest(args[1:])
+	if problem != "" {
+		c.bad(tag, problem)
 		return
 	}
-	if condUsed {
-		c.condstore = true
-	}
-	if len(rest) < 2 {
-		c.bad(tag, "STORE requires an item and flags")
-		return
-	}
-	itemText, _ := rest[0].str()
-	mode, silent, ok := parseStoreItem(itemText)
-	if !ok {
-		c.bad(tag, "invalid STORE item")
-		return
-	}
-	names := flagValue(rest[1:])
-
-	var preModseqs map[uint32]uint64
-	if condUsed {
-		preModseqs = c.modseqMap() // pre-store: the UNCHANGEDSINCE comparison basis
-	}
-
-	max := c.sel.maxSeq()
-	if byUID {
-		max = c.sel.maxUID()
-	}
-	var modified []uint32 // rejected by UNCHANGEDSINCE (their modseq moved on)
-	var reported []int    // message indices to report back via FETCH
-	for i := range c.sel.msgs {
-		seq := uint32(i + 1)
-		key := seq
-		if byUID {
-			key = c.sel.msgs[i].UID
-		}
-		if !set.contains(key, max) {
-			continue
-		}
-		if condUsed && preModseqs[c.sel.msgs[i].UID] > unchangedSince {
-			modified = append(modified, c.sel.msgs[i].UID)
-			continue // changed since the client's modseq; do not touch it
-		}
-		newFlags := applyFlagNames(c.sel.msgs[i].Flags, mode, names)
-		if newFlags != c.sel.msgs[i].Flags {
-			if err := c.curStore().SetMessageFlags(c.sel.id, c.sel.msgs[i].UID, newFlags); err != nil {
-				continue
-			}
-			c.sel.msgs[i].Flags = newFlags
-		}
-		// .SILENT suppresses the FETCH, except a conditional STORE still reports the
-		// new MODSEQ so the client can track it (RFC 7162).
-		if !silent || condUsed {
-			reported = append(reported, i)
-		}
-	}
+	modified, reported := c.applyStore(set, byUID, req)
 
 	// The new modseq is read fresh after the modifications, never the pre-store map.
 	var postModseqs map[uint32]uint64
@@ -112,6 +60,92 @@ func (c *conn) cmdStore(tag string, args []token, byUID bool) {
 		return
 	}
 	c.ok(tag, verb+" completed")
+}
+
+// parseStoreRequest reads the part of a STORE after its sequence set: an optional
+// (UNCHANGEDSINCE n) modifier (RFC 7162), the item, and the flag list. A non-empty
+// problem is the protocol error to report.
+func (c *conn) parseStoreRequest(args []token) (storeRequest, string) {
+	rest, unchangedSince, condUsed, ok := parseUnchangedSince(args)
+	if !ok {
+		return storeRequest{}, "invalid STORE modifier"
+	}
+	if condUsed {
+		c.condstore = true
+	}
+	if len(rest) < 2 {
+		return storeRequest{}, "STORE requires an item and flags"
+	}
+	itemText, _ := rest[0].str()
+	mode, silent, ok := parseStoreItem(itemText)
+	if !ok {
+		return storeRequest{}, "invalid STORE item"
+	}
+	return storeRequest{
+		mode:           mode,
+		silent:         silent,
+		names:          flagValue(rest[1:]),
+		condUsed:       condUsed,
+		unchangedSince: unchangedSince,
+	}, ""
+}
+
+// storeRequest is one parsed STORE: which flags to apply, how, whether the client
+// suppressed the FETCH replies, and the CONDSTORE guard it set.
+type storeRequest struct {
+	mode           byte
+	silent         bool
+	names          []string
+	condUsed       bool
+	unchangedSince uint64
+}
+
+// applyStore writes the requested flag change to every message in the set. It
+// returns the UIDs UNCHANGEDSINCE rejected (their modseq had moved on) and the
+// message indices to report back via FETCH.
+func (c *conn) applyStore(set seqSet, byUID bool, req storeRequest) (modified []uint32, reported []int) {
+	var preModseqs map[uint32]uint64
+	if req.condUsed {
+		preModseqs = c.modseqMap() // pre-store: the UNCHANGEDSINCE comparison basis
+	}
+	max := c.sel.maxSeq()
+	if byUID {
+		max = c.sel.maxUID()
+	}
+	for i := range c.sel.msgs {
+		// #nosec G115 -- an IMAP sequence number, an index into the selected mailbox's in-memory message list
+		key := uint32(i + 1)
+		if byUID {
+			key = c.sel.msgs[i].UID
+		}
+		if !set.contains(key, max) {
+			continue
+		}
+		if req.condUsed && preModseqs[c.sel.msgs[i].UID] > req.unchangedSince {
+			modified = append(modified, c.sel.msgs[i].UID)
+			continue // changed since the client's modseq; do not touch it
+		}
+		c.storeFlags(i, req)
+		// .SILENT suppresses the FETCH, except a conditional STORE still reports the
+		// new MODSEQ so the client can track it (RFC 7162).
+		if !req.silent || req.condUsed {
+			reported = append(reported, i)
+		}
+	}
+	return modified, reported
+}
+
+// storeFlags applies the flag change to one message, updating the session copy
+// only once the store took the write.
+func (c *conn) storeFlags(i int, req storeRequest) {
+	newFlags := applyFlagNames(c.sel.msgs[i].Flags, req.mode, req.names)
+	if newFlags == c.sel.msgs[i].Flags {
+		return
+	}
+	if err := c.curStore().SetMessageFlags(c.sel.id, c.sel.msgs[i].UID, newFlags); err != nil {
+		return
+	}
+	c.sel.msgs[i].Flags = newFlags
 }
 
 // storeFetchFields builds the FETCH data for a STORE reply: FLAGS, the UID for a
@@ -224,6 +258,18 @@ func (c *conn) cmdUIDExpunge(tag string, args []token) {
 		c.bad(tag, "invalid sequence set")
 		return
 	}
+	vanished := c.expungeDeleted(set)
+	if c.qresync && len(vanished) > 0 {
+		c.untagged("VANISHED %s", esearchSet(vanished))
+	}
+	c.flush()
+	c.ok(tag, "UID EXPUNGE completed")
+}
+
+// expungeDeleted soft-deletes every \Deleted message the set names, emitting an
+// EXPUNGE per message against the shrinking mailbox (QRESYNC clients get one
+// VANISHED from the caller instead), and returns the UIDs that went.
+func (c *conn) expungeDeleted(set seqSet) []uint32 {
 	max := c.sel.maxUID()
 	var survivors []objectstore.MessageInfo
 	var vanished []uint32
@@ -242,11 +288,7 @@ func (c *conn) cmdUIDExpunge(tag string, args []token) {
 		seq++
 	}
 	c.sel.msgs = survivors
-	if c.qresync && len(vanished) > 0 {
-		c.untagged("VANISHED %s", esearchSet(vanished))
-	}
-	c.flush()
-	c.ok(tag, "UID EXPUNGE completed")
+	return vanished
 }
 
 // uidList renders a comma-separated UID set for an APPENDUID/COPYUID response code.
@@ -311,32 +353,10 @@ func (c *conn) cmdCopy(tag string, args []token, byUID bool) {
 		return
 	}
 
-	max := c.sel.maxSeq()
-	if byUID {
-		max = c.sel.maxUID()
-	}
-	src := c.curStore()
-	var srcUIDs, dstUIDs []uint32
-	for i := range c.sel.msgs {
-		key := uint32(i + 1)
-		if byUID {
-			key = c.sel.msgs[i].UID
-		}
-		if !set.contains(key, max) {
-			continue
-		}
-		raw, err := src.GetMessageRaw(c.sel.id, c.sel.msgs[i].UID)
-		if err != nil {
-			c.no(tag, "copy failed")
-			return
-		}
-		info, err := destStore.AppendMessage(destFID, raw, c.sel.msgs[i].InternalDate, c.sel.msgs[i].Flags)
-		if err != nil {
-			c.no(tag, "copy failed")
-			return
-		}
-		srcUIDs = append(srcUIDs, c.sel.msgs[i].UID)
-		dstUIDs = append(dstUIDs, info.UID)
+	srcUIDs, dstUIDs, ok := c.copyToDest(set, byUID, destStore, destFID)
+	if !ok {
+		c.no(tag, "copy failed")
+		return
 	}
 	verb := "COPY"
 	if byUID {
@@ -387,16 +407,35 @@ func (c *conn) cmdMove(tag string, args []token, byUID bool) {
 	if byUID {
 		verb = "UID MOVE"
 	}
+	// First pass: copy each matching message to the destination.
+	srcUIDs, dstUIDs, ok := c.copyToDest(set, byUID, destStore, destFID)
+	if !ok {
+		c.no(tag, "move failed")
+		return
+	}
+	if len(srcUIDs) == 0 {
+		c.ok(tag, verb+" completed")
+		return
+	}
+
+	uidv, _ := destStore.UIDValidity(destFID)
+	c.untagged("OK [COPYUID %d %s %s]", uidv, uidList(srcUIDs), uidList(dstUIDs))
+	c.expungeMoved(srcUIDs)
+	c.flush()
+	c.ok(tag, verb+" completed")
+}
+
+// copyToDest copies every message in the set into the destination folder,
+// returning the source and destination UIDs in step. ok is false when any copy
+// failed, and the caller then reports the whole command failed.
+func (c *conn) copyToDest(set seqSet, byUID bool, destStore *objectstore.Store, destFID int64) (srcUIDs, dstUIDs []uint32, ok bool) {
 	max := c.sel.maxSeq()
 	if byUID {
 		max = c.sel.maxUID()
 	}
 	src := c.curStore()
-
-	// First pass: copy each matching message to the destination.
-	var srcUIDs, dstUIDs []uint32
-	moved := make(map[uint32]bool)
 	for i := range c.sel.msgs {
+		// #nosec G115 -- an IMAP sequence number, an index into the selected mailbox's in-memory message list
 		key := uint32(i + 1)
 		if byUID {
 			key = c.sel.msgs[i].UID
@@ -406,28 +445,26 @@ func (c *conn) cmdMove(tag string, args []token, byUID bool) {
 		}
 		raw, err := src.GetMessageRaw(c.sel.id, c.sel.msgs[i].UID)
 		if err != nil {
-			c.no(tag, "move failed")
-			return
+			return nil, nil, false
 		}
 		info, err := destStore.AppendMessage(destFID, raw, c.sel.msgs[i].InternalDate, c.sel.msgs[i].Flags)
 		if err != nil {
-			c.no(tag, "move failed")
-			return
+			return nil, nil, false
 		}
 		srcUIDs = append(srcUIDs, c.sel.msgs[i].UID)
 		dstUIDs = append(dstUIDs, info.UID)
-		moved[c.sel.msgs[i].UID] = true
 	}
-	if len(srcUIDs) == 0 {
-		c.ok(tag, verb+" completed")
-		return
+	return srcUIDs, dstUIDs, true
+}
+
+// expungeMoved soft-deletes each moved source message, emitting EXPUNGE against
+// the shrinking mailbox and leaving the session holding only the survivors.
+func (c *conn) expungeMoved(srcUIDs []uint32) {
+	moved := make(map[uint32]bool, len(srcUIDs))
+	for _, uid := range srcUIDs {
+		moved[uid] = true
 	}
-
-	uidv, _ := destStore.UIDValidity(destFID)
-	c.untagged("OK [COPYUID %d %s %s]", uidv, uidList(srcUIDs), uidList(dstUIDs))
-
-	// Second pass: soft-delete each moved source message, emitting EXPUNGE against
-	// the shrinking mailbox.
+	src := c.curStore()
 	var survivors []objectstore.MessageInfo
 	seq := uint32(1)
 	for _, m := range c.sel.msgs {
@@ -441,8 +478,6 @@ func (c *conn) cmdMove(tag string, args []token, byUID bool) {
 		seq++
 	}
 	c.sel.msgs = survivors
-	c.flush()
-	c.ok(tag, verb+" completed")
 }
 
 // cmdAppend handles APPEND: it stores a supplied message into a mailbox with
@@ -466,46 +501,13 @@ func (c *conn) cmdAppend(tag string, args []token) {
 	// MULTIAPPEND (RFC 3502): one APPEND may carry several (flags? date? message)
 	// groups. Append each; if any fails, roll back the ones already stored so the
 	// command is atomic.
-	rest := args[1:]
-	var uids []uint32
-	for len(rest) > 0 {
-		flags, r2 := appendFlags(rest)
-		date, r3 := appendDate(r2)
-		if len(r3) < 1 || !r3[0].literal {
-			c.bad(tag, "APPEND requires a message literal")
-			return
-		}
-		// An APPEND literal is client-supplied content that never passes through
-		// delivery, so this is the only point it can be scanned. A hit is
-		// quarantined and the whole command fails, rolling back anything a
-		// MULTIAPPEND already stored.
-		if mta.ScanStored(c.srv.Accounts, c.user, "", []byte(r3[0].val), time.Now()) {
-			c.rollbackAppend(destStore, destFID, uids)
-			c.no(tag, "APPEND rejected: a virus was detected")
-			return
-		}
-		info, err := destStore.AppendMessage(destFID, []byte(r3[0].val), date, flags)
-		if err != nil {
-			// Roll back what this MULTIAPPEND already stored. A failed rollback
-			// leaves the mailbox holding messages the client was told did not
-			// arrive, so it is recorded even though the command still fails.
-			for _, u := range uids {
-				if rerr := destStore.SoftDeleteMessage(destFID, u); rerr != nil {
-					c.event(logging.LevelError, "append.rollback.fail", logging.Fields{
-						"folder": destFID,
-						"uid":    u,
-						"error":  rerr.Error(),
-					})
-				}
-			}
-			c.no(tag, "APPEND failed")
-			return
-		}
-		uids = append(uids, info.UID)
-		rest = r3[1:]
-	}
-	if len(uids) == 0 {
-		c.bad(tag, "APPEND requires a message literal")
+	uids, failure, malformed := c.appendGroups(args[1:], destStore, destFID)
+	switch {
+	case malformed:
+		c.bad(tag, failure)
+		return
+	case failure != "":
+		c.no(tag, failure)
 		return
 	}
 
@@ -519,6 +521,39 @@ func (c *conn) cmdAppend(tag string, args []token) {
 	// for the messages it just uploaded.
 	uidv, _ := destStore.UIDValidity(destFID)
 	c.ok(tag, fmt.Sprintf("[APPENDUID %d %s] APPEND completed", uidv, uidList(uids)))
+}
+
+// appendGroups stores every (flags? date? message) group a MULTIAPPEND (RFC 3502)
+// carries. If any group fails, the ones already stored are rolled back so the
+// command is atomic. A non-empty failure is the text to report; malformed marks
+// it a protocol error rather than a refusal.
+func (c *conn) appendGroups(rest []token, destStore *objectstore.Store, destFID int64) (uids []uint32, failure string, malformed bool) {
+	for len(rest) > 0 {
+		flags, r2 := appendFlags(rest)
+		date, r3 := appendDate(r2)
+		if len(r3) < 1 || !r3[0].literal {
+			return nil, "APPEND requires a message literal", true
+		}
+		// An APPEND literal is client-supplied content that never passes through
+		// delivery, so this is the only point it can be scanned. A hit is
+		// quarantined and the whole command fails, rolling back anything a
+		// MULTIAPPEND already stored.
+		if mta.ScanStored(c.srv.Accounts, c.user, "", []byte(r3[0].val), time.Now()) {
+			c.rollbackAppend(destStore, destFID, uids)
+			return nil, "APPEND rejected: a virus was detected", false
+		}
+		info, err := destStore.AppendMessage(destFID, []byte(r3[0].val), date, flags)
+		if err != nil {
+			c.rollbackAppend(destStore, destFID, uids)
+			return nil, "APPEND failed", false
+		}
+		uids = append(uids, info.UID)
+		rest = r3[1:]
+	}
+	if len(uids) == 0 {
+		return nil, "APPEND requires a message literal", true
+	}
+	return uids, "", false
 }
 
 // appendFlags consumes an optional leading parenthesized flag list, returning
