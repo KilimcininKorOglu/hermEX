@@ -81,41 +81,52 @@ func TestHardDeleteMessagesAndSubfolders(t *testing.T) {
 	st := sess.get(inboxH).store
 
 	// Precondition: the inbox has a message and the subfolder.
+	assertInboxHasContent(t, st, inboxFID)
+
+	clear, _ := sess.Dispatch(toROPRequest(ropHardDelMsgsAndSubfolders, 0, clearFolderRequest()), []uint32{inboxH})
+	p := ropOK(t, clear, ropHardDelMsgsAndSubfolders, "HardDeleteMessagesAndSubfolders")
+	wantU8(t, p, "HardDeleteMessagesAndSubfolders PartialCompletion", 0)
+
+	assertFolderCleared(t, st, inboxFID, subID, 1, "HardDeleteMessagesAndSubfolders")
+}
+
+// clearFolderRequest builds the body RopEmptyFolder and
+// RopHardDeleteMessagesAndSubfolders share: WantAsynchronous, then
+// WantDeleteAssociated, both off.
+func clearFolderRequest() []byte {
+	b := ext.NewPush(ext.FlagUTF16)
+	b.Uint8(0) // WantAsynchronous
+	b.Uint8(0) // WantDeleteAssociated
+	return b.Bytes()
+}
+
+// assertInboxHasContent is the precondition both clear-the-folder tests need:
+// something to remove, so an empty result afterwards means something happened.
+func assertInboxHasContent(t *testing.T, st *objectstore.Store, inboxFID int64) {
+	t.Helper()
 	if msgs, _ := st.ListMessages(inboxFID); len(msgs) == 0 {
-		t.Fatal("expected a message in Inbox")
+		t.Fatal("expected messages in Inbox")
 	}
 	if kids, _ := childFolders(st, inboxFID); len(kids) == 0 {
 		t.Fatal("expected a subfolder under Inbox")
 	}
+}
 
-	body := ext.NewPush(ext.FlagUTF16)
-	body.Uint8(0) // WantAsynchronous
-	body.Uint8(0) // WantDeleteAssociated
-	resp, _ := sess.Dispatch(toROPRequest(ropHardDelMsgsAndSubfolders, 0, body.Bytes()), []uint32{inboxH})
-	p := ext.NewPull(resp, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropHardDelMsgsAndSubfolders {
-		t.Fatalf("HardDeleteMessagesAndSubfolders RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("HardDeleteMessagesAndSubfolders ReturnValue = %#x", ec)
-	}
-	if pc := mustU8(t, p, "partialCompletion"); pc != 0 {
-		t.Errorf("PartialCompletion = %d, want 0", pc)
-	}
-
-	// The folder's messages are cleared (to the dumpster).
+// assertFolderCleared checks what a clear-the-folder ROP left behind: no live
+// messages, the removed ones recoverable in the dumpster rather than purged, and
+// the subfolder gone.
+func assertFolderCleared(t *testing.T, st *objectstore.Store, inboxFID, subID int64, wantDumpster int, what string) {
+	t.Helper()
 	if after, _ := st.ListMessages(inboxFID); len(after) != 0 {
-		t.Errorf("%d messages remain after HardDeleteMessagesAndSubfolders", len(after))
+		t.Errorf("%d messages remain after %s", len(after), what)
 	}
-	if dump, _ := st.ListSoftDeleted(inboxFID); len(dump) != 1 {
-		t.Errorf("dumpster = %d, want 1 (cleared message recoverable)", len(dump))
+	if dump, _ := st.ListSoftDeleted(inboxFID); len(dump) != wantDumpster {
+		t.Errorf("dumpster = %d, want %d after %s (cleared messages stay recoverable)", len(dump), wantDumpster, what)
 	}
-	// The subfolder is removed.
 	kids, _ := childFolders(st, inboxFID)
 	for _, k := range kids {
 		if k.ID == subID {
-			t.Errorf("subfolder %d was not deleted", subID)
+			t.Errorf("subfolder %d was not deleted by %s", subID, what)
 		}
 	}
 }
@@ -145,46 +156,13 @@ func TestEmptyFolderDeletesMessages(t *testing.T) {
 	inboxH := h[1]
 
 	store := sess.get(inboxH).store
-	before, _ := store.ListMessages(mapi.PrivateFIDInbox)
-	if len(before) == 0 {
-		t.Fatal("expected messages in Inbox")
-	}
-	if kids, _ := childFolders(store, inboxFID); len(kids) == 0 {
-		t.Fatal("expected a subfolder under Inbox")
-	}
+	assertInboxHasContent(t, store, inboxFID)
 
-	body := ext.NewPush(ext.FlagUTF16)
-	body.Uint8(0)
-	body.Uint8(0)
+	resp, _ := sess.Dispatch(toROPRequest(ropEmptyFolder, 0, clearFolderRequest()), []uint32{inboxH})
+	p := ropOK(t, resp, ropEmptyFolder, "EmptyFolder")
+	wantU8(t, p, "EmptyFolder PartialCompletion", 0)
 
-	resp, _ := sess.Dispatch(toROPRequest(ropEmptyFolder, 0, body.Bytes()), []uint32{inboxH})
-	p := ext.NewPull(resp, ext.FlagUTF16)
-	if id := mustU8(t, p, "RopId"); id != ropEmptyFolder {
-		t.Fatalf("EmptyFolder RopId = %#x", id)
-	}
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecSuccess {
-		t.Fatalf("EmptyFolder ec = %#x", ec)
-	}
-	if pc := mustU8(t, p, "partialCompletion"); pc != 0 {
-		t.Errorf("PartialCompletion = %d, want 0", pc)
-	}
-
-	after, _ := store.ListMessages(mapi.PrivateFIDInbox)
-	if len(after) != 0 {
-		t.Errorf("%d messages remain after EmptyFolder", len(after))
-	}
-	// The emptied messages went to the dumpster, recoverable, not purged.
-	if dump, _ := store.ListSoftDeleted(mapi.PrivateFIDInbox); len(dump) != 2 {
-		t.Errorf("dumpster = %d, want 2 after EmptyFolder (recoverable)", len(dump))
-	}
-	// The subfolder is removed too.
-	kids, _ := childFolders(store, inboxFID)
-	for _, k := range kids {
-		if k.ID == subID {
-			t.Errorf("subfolder %d was not deleted by EmptyFolder", subID)
-		}
-	}
+	assertFolderCleared(t, store, inboxFID, subID, 2, "EmptyFolder")
 }
 
 func TestHardDeleteMessagesToDumpster(t *testing.T) {

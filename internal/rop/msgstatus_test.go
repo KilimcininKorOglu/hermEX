@@ -141,66 +141,44 @@ func TestMessageStatusViaFolder(t *testing.T) {
 	_, h = sess.Dispatch(buildOpenFolder(0, 1, inboxEID), []uint32{logonH, 0xFFFFFFFF})
 	folderH := h[1]
 
-	getStatus := func() (uint32, uint32) {
+	getStatus := func(label string) uint32 {
+		t.Helper()
 		resp, _ := sess.Dispatch(buildGetMessageStatus(0, msgEID), []uint32{folderH})
-		p := ext.NewPull(resp, ext.FlagUTF16)
-		mustU8(t, p, "RopId")
-		mustU8(t, p, "hindex")
-		ec := mustU32(t, p, "ec")
-		if ec != ecSuccess {
-			return 0, ec
-		}
-		return mustU32(t, p, "status"), ec
+		p := ropOK(t, resp, ropGetMessageStatus, label)
+		return mustU32(t, p, label+" status")
 	}
-	setStatus := func(status, mask uint32) (uint32, uint32) {
+	setStatus := func(label string, status, mask uint32) uint32 {
+		t.Helper()
 		resp, _ := sess.Dispatch(buildSetMessageStatus(0, msgEID, status, mask), []uint32{folderH})
-		p := ext.NewPull(resp, ext.FlagUTF16)
-		mustU8(t, p, "RopId")
-		mustU8(t, p, "hindex")
-		ec := mustU32(t, p, "ec")
-		if ec != ecSuccess {
-			return 0, ec
-		}
-		return mustU32(t, p, "status"), ec
+		p := ropOK(t, resp, ropSetMessageStatus, label)
+		return mustU32(t, p, label+" status")
 	}
 
 	// Create-seeded status is 0.
-	if s, ec := getStatus(); ec != ecSuccess || s != 0 {
-		t.Fatalf("initial GetMessageStatus = %#x (ec %#x), want 0", s, ec)
+	if s := getStatus("initial GetMessageStatus"); s != 0 {
+		t.Fatalf("initial GetMessageStatus = %#x, want 0", s)
 	}
-	// Set HIDDEN (0x4): merged with original 0 → 0x4.
-	if s, ec := setStatus(0x4, 0x4); ec != ecSuccess || s != 0x4 {
-		t.Fatalf("SetMessageStatus(HIDDEN) = %#x (ec %#x), want 0x4", s, ec)
+	// Set HIDDEN (0x4): merged with original 0 gives 0x4.
+	if s := setStatus("SetMessageStatus(HIDDEN)", 0x4, 0x4); s != 0x4 {
+		t.Fatalf("SetMessageStatus(HIDDEN) = %#x, want 0x4", s)
 	}
-	// Set ANSWERED (0x200) keeping HIDDEN: merged → 0x204.
-	if s, ec := setStatus(0x200, 0x200); ec != ecSuccess || s != 0x204 {
-		t.Fatalf("SetMessageStatus(ANSWERED) = %#x (ec %#x), want 0x204 (HIDDEN preserved)", s, ec)
+	// Set ANSWERED (0x200) keeping HIDDEN: merged gives 0x204.
+	if s := setStatus("SetMessageStatus(ANSWERED)", 0x200, 0x200); s != 0x204 {
+		t.Fatalf("SetMessageStatus(ANSWERED) = %#x, want 0x204 (HIDDEN preserved)", s)
 	}
-	if s, _ := getStatus(); s != 0x204 {
+	if s := getStatus("GetMessageStatus after merges"); s != 0x204 {
 		t.Errorf("GetMessageStatus after merges = %#x, want 0x204", s)
 	}
-	// Setting the in-conflict bit is refused.
-	if _, ec := setStatus(msgStatusInConflict, msgStatusInConflict); ec != ecAccessDenied {
-		t.Errorf("SetMessageStatus(IN_CONFLICT) ec = %#x, want ecAccessDenied", ec)
-	}
+
+	// Setting the in-conflict bit is refused: it is server-owned.
+	inConflict, _ := sess.Dispatch(buildSetMessageStatus(0, msgEID, msgStatusInConflict, msgStatusInConflict), []uint32{folderH})
+	wantEC(t, inConflict, ropSetMessageStatus, ecAccessDenied, "SetMessageStatus(IN_CONFLICT)")
 	// A non-existent message reports not-found.
-	if _, ec := func() (uint32, uint32) {
-		resp, _ := sess.Dispatch(buildGetMessageStatus(0, uint64(mapi.MakeEIDEx(1, 999999))), []uint32{folderH})
-		p := ext.NewPull(resp, ext.FlagUTF16)
-		mustU8(t, p, "RopId")
-		mustU8(t, p, "hindex")
-		return 0, mustU32(t, p, "ec")
-	}(); ec != ecNotFound {
-		t.Errorf("GetMessageStatus(missing) ec = %#x, want ecNotFound", ec)
-	}
+	missing, _ := sess.Dispatch(buildGetMessageStatus(0, uint64(mapi.MakeEIDEx(1, 999999))), []uint32{folderH})
+	wantEC(t, missing, ropGetMessageStatus, ecNotFound, "GetMessageStatus(missing)")
 	// A non-folder handle (the logon root) is refused.
-	resp, _ := sess.Dispatch(buildGetMessageStatus(0, msgEID), []uint32{logonH})
-	p := ext.NewPull(resp, ext.FlagUTF16)
-	mustU8(t, p, "RopId")
-	mustU8(t, p, "hindex")
-	if ec := mustU32(t, p, "ec"); ec != ecNotSupported {
-		t.Errorf("GetMessageStatus via non-folder handle ec = %#x, want ecNotSupported", ec)
-	}
+	viaLogon, _ := sess.Dispatch(buildGetMessageStatus(0, msgEID), []uint32{logonH})
+	wantEC(t, viaLogon, ropGetMessageStatus, ecNotSupported, "GetMessageStatus via a non-folder handle")
 }
 
 // TestCreateAssociatedMessage drives RopCreateMessage with the associated flag
