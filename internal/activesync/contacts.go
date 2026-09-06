@@ -1,12 +1,10 @@
 package activesync
 
 import (
-	"strconv"
 	"time"
 
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
-	"hermex/internal/oxcmail"
 	"hermex/internal/wbxml"
 )
 
@@ -78,34 +76,17 @@ const easContactDate = "2006-01-02T15:04:05.000Z"
 // contactAppData builds the AirSync ApplicationData for a stored contact: every
 // populated scalar, named (email/work-address), date, and multivalued field.
 func contactAppData(st *objectstore.Store, objectID int64) (*wbxml.Node, error) {
-	names := make([]mapi.PropertyName, len(contactNamedFields))
-	for i, f := range contactNamedFields {
-		names[i] = f.name
-	}
-	ids, err := st.GetNamedPropIDs(false, names)
+	namedTag, err := contactNamedTags(st, false)
 	if err != nil {
 		return nil, err
-	}
-
-	tags := []mapi.PropTag{mapi.PrBirthday, mapi.PrWeddingAnniversary, mapi.PrChildrensNames}
-	for _, f := range contactStringFields {
-		tags = append(tags, f.prop)
-	}
-	namedTag := make([]mapi.PropTag, len(contactNamedFields))
-	for i := range contactNamedFields {
-		if ids[i] != 0 {
-			namedTag[i] = mapi.MakeTag(ids[i], mapi.PtUnicode)
-			tags = append(tags, namedTag[i])
-		}
 	}
 	// Categories are the shared message keywords (a multivalue named property), the
 	// same store CATEGORIES vCard import/export uses.
 	var keywordsTag mapi.PropTag
 	if kid, err := st.GetNamedPropIDs(false, []mapi.PropertyName{mapi.NameKeywords}); err == nil && kid[0] != 0 {
 		keywordsTag = mapi.MakeTag(kid[0], mapi.PtMvUnicode)
-		tags = append(tags, keywordsTag)
 	}
-	pv, err := st.GetMessageProperties(objectID, tags...)
+	pv, err := st.GetMessageProperties(objectID, contactReadTags(namedTag, keywordsTag)...)
 	if err != nil {
 		return nil, err
 	}
@@ -117,52 +98,107 @@ func contactAppData(st *objectstore.Store, objectID int64) (*wbxml.Node, error) 
 		}
 	}
 	for i, f := range contactNamedFields {
-		if namedTag[i] != 0 {
-			if s := contactStr(pv, namedTag[i]); s != "" {
-				data.Children = append(data.Children, wbxml.Str(f.tag, s))
-			}
+		if s := contactStr(pv, namedTag[i]); namedTag[i] != 0 && s != "" {
+			data.Children = append(data.Children, wbxml.Str(f.tag, s))
 		}
 	}
-	if t, ok := ntTimeProp(pv, mapi.PrBirthday); ok {
-		data.Children = append(data.Children, wbxml.Str(wbxml.CBirthday, t.UTC().Format(easContactDate)))
-	}
-	if t, ok := ntTimeProp(pv, mapi.PrWeddingAnniversary); ok {
-		data.Children = append(data.Children, wbxml.Str(wbxml.CAnniversary, t.UTC().Format(easContactDate)))
-	}
-	if v, ok := pv.Get(mapi.PrChildrensNames); ok {
-		if kids, ok := v.([]string); ok && len(kids) > 0 {
-			var nodes []*wbxml.Node
-			for _, k := range kids {
-				nodes = append(nodes, wbxml.Str(wbxml.CChild, k))
-			}
-			data.Children = append(data.Children, wbxml.Elem(wbxml.CChildren, nodes...))
-		}
-	}
-	if keywordsTag != 0 {
-		if v, ok := pv.Get(keywordsTag); ok {
-			if cats, ok := v.([]string); ok && len(cats) > 0 {
-				var nodes []*wbxml.Node
-				for _, c := range cats {
-					nodes = append(nodes, wbxml.Str(wbxml.CCategory, c))
-				}
-				data.Children = append(data.Children, wbxml.Elem(wbxml.CCategories, nodes...))
-			}
-		}
-	}
+	appendContactDate(data, pv, mapi.PrBirthday, wbxml.CBirthday)
+	appendContactDate(data, pv, mapi.PrWeddingAnniversary, wbxml.CAnniversary)
+	appendContactList(data, pv, mapi.PrChildrensNames, wbxml.CChildren, wbxml.CChild)
+	appendContactList(data, pv, keywordsTag, wbxml.CCategories, wbxml.CCategory)
 	return data, nil
 }
 
-// parseContactItem decodes a client's contact ApplicationData into MAPI properties.
-func parseContactItem(st *objectstore.Store, data *wbxml.Node) (mapi.PropertyValues, error) {
+// contactNamedTags resolves the named-property tag of every contact field backed
+// by one, in contactNamedFields order. An unresolved field gets tag 0.
+func contactNamedTags(st *objectstore.Store, create bool) ([]mapi.PropTag, error) {
 	names := make([]mapi.PropertyName, len(contactNamedFields))
 	for i, f := range contactNamedFields {
 		names[i] = f.name
 	}
-	ids, err := st.GetNamedPropIDs(true, names)
+	ids, err := st.GetNamedPropIDs(create, names)
+	if err != nil {
+		return nil, err
+	}
+	tags := make([]mapi.PropTag, len(contactNamedFields))
+	for i, id := range ids {
+		if id != 0 {
+			tags[i] = mapi.MakeTag(id, mapi.PtUnicode)
+		}
+	}
+	return tags, nil
+}
+
+// contactReadTags lists every property contactAppData reads for one contact.
+func contactReadTags(namedTag []mapi.PropTag, keywordsTag mapi.PropTag) []mapi.PropTag {
+	tags := []mapi.PropTag{mapi.PrBirthday, mapi.PrWeddingAnniversary, mapi.PrChildrensNames}
+	for _, f := range contactStringFields {
+		tags = append(tags, f.prop)
+	}
+	for _, tag := range namedTag {
+		if tag != 0 {
+			tags = append(tags, tag)
+		}
+	}
+	if keywordsTag != 0 {
+		tags = append(tags, keywordsTag)
+	}
+	return tags
+}
+
+// appendContactDate emits one date field in the MS-ASCONTACTS format when the
+// property is present.
+func appendContactDate(data *wbxml.Node, pv mapi.PropertyValues, tag mapi.PropTag, elem wbxml.Tag) {
+	if t, ok := ntTimeProp(pv, tag); ok {
+		data.Children = append(data.Children, wbxml.Str(elem, t.UTC().Format(easContactDate)))
+	}
+}
+
+// appendContactList emits one multivalued field as a container of item elements
+// when the property holds at least one value.
+func appendContactList(data *wbxml.Node, pv mapi.PropertyValues, tag mapi.PropTag, container, item wbxml.Tag) {
+	if tag == 0 {
+		return
+	}
+	v, ok := pv.Get(tag)
+	if !ok {
+		return
+	}
+	vals, ok := v.([]string)
+	if !ok || len(vals) == 0 {
+		return
+	}
+	nodes := make([]*wbxml.Node, 0, len(vals))
+	for _, s := range vals {
+		nodes = append(nodes, wbxml.Str(item, s))
+	}
+	data.Children = append(data.Children, wbxml.Elem(container, nodes...))
+}
+
+// parseContactItem decodes a client's contact ApplicationData into MAPI properties.
+func parseContactItem(st *objectstore.Store, data *wbxml.Node) (mapi.PropertyValues, error) {
+	namedTag, err := contactNamedTags(st, true)
 	if err != nil {
 		return nil, err
 	}
 
+	props := contactScalarProps(data, namedTag)
+	emails, err := contactEmailProps(st, data)
+	if err != nil {
+		return nil, err
+	}
+	props = append(props, emails...)
+	props = appendParsedDate(props, data, wbxml.CBirthday, mapi.PrBirthday)
+	props = appendParsedDate(props, data, wbxml.CAnniversary, mapi.PrWeddingAnniversary)
+	if kids := listChildText(data, wbxml.CChildren, wbxml.CChild); len(kids) > 0 {
+		props = append(props, mapi.TaggedPropVal{Tag: mapi.PrChildrensNames, Value: kids})
+	}
+	return appendKeywords(st, props, listChildText(data, wbxml.CCategories, wbxml.CCategory)), nil
+}
+
+// contactScalarProps collects every populated single-valued contact field, both
+// the ones on a direct property and the ones on a named property.
+func contactScalarProps(data *wbxml.Node, namedTag []mapi.PropTag) mapi.PropertyValues {
 	var props mapi.PropertyValues
 	for _, f := range contactStringFields {
 		if s := data.ChildText(f.tag); s != "" {
@@ -170,18 +206,32 @@ func parseContactItem(st *objectstore.Store, data *wbxml.Node) (mapi.PropertyVal
 		}
 	}
 	for i, f := range contactNamedFields {
-		if ids[i] == 0 {
-			continue
-		}
-		if s := data.ChildText(f.tag); s != "" {
-			props = append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(ids[i], mapi.PtUnicode), Value: s})
+		if s := data.ChildText(f.tag); namedTag[i] != 0 && s != "" {
+			props = append(props, mapi.TaggedPropVal{Tag: namedTag[i], Value: s})
 		}
 	}
-	// Each email carries a display name and an SMTP address type alongside its
-	// address, matching the shape vCard import writes, so a contact created here is
-	// identical in the store to one created over CardDAV and stays recognizable to
-	// MAPI/EWS clients reading the same object.
-	emailDT, err := st.GetNamedPropIDs(true, []mapi.PropertyName{
+	return props
+}
+
+// appendKeywords appends the shared category keywords, the multivalue named
+// property every protocol reads a category list from.
+func appendKeywords(st *objectstore.Store, props mapi.PropertyValues, cats []string) mapi.PropertyValues {
+	if len(cats) == 0 {
+		return props
+	}
+	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameKeywords})
+	if err != nil || ids[0] == 0 {
+		return props
+	}
+	return append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(ids[0], mapi.PtMvUnicode), Value: cats})
+}
+
+// contactEmailProps builds the display-name and address-type properties that
+// accompany each populated email slot. They match the shape vCard import writes,
+// so a contact created here is identical in the store to one created over CardDAV
+// and stays recognizable to MAPI/EWS clients reading the same object.
+func contactEmailProps(st *objectstore.Store, data *wbxml.Node) (mapi.PropertyValues, error) {
+	ids, err := st.GetNamedPropIDs(true, []mapi.PropertyName{
 		mapi.NameEmail1DisplayName, mapi.NameEmail1AddressType,
 		mapi.NameEmail2DisplayName, mapi.NameEmail2AddressType,
 		mapi.NameEmail3DisplayName, mapi.NameEmail3AddressType,
@@ -189,127 +239,64 @@ func parseContactItem(st *objectstore.Store, data *wbxml.Node) (mapi.PropertyVal
 	if err != nil {
 		return nil, err
 	}
+	var props mapi.PropertyValues
 	for slot, tag := range []wbxml.Tag{wbxml.CEmail1Address, wbxml.CEmail2Address, wbxml.CEmail3Address} {
 		addr := data.ChildText(tag)
 		if addr == "" {
 			continue
 		}
-		if id := emailDT[slot*2]; id != 0 {
-			props = append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(id, mapi.PtUnicode), Value: addr})
-		}
-		if id := emailDT[slot*2+1]; id != 0 {
-			props = append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(id, mapi.PtUnicode), Value: "SMTP"})
-		}
-	}
-	if b := data.ChildText(wbxml.CBirthday); b != "" {
-		if t, err := time.Parse(easContactDate, b); err == nil {
-			props = append(props, mapi.TaggedPropVal{Tag: mapi.PrBirthday, Value: mapi.UnixToNTTime(t)})
-		}
-	}
-	if a := data.ChildText(wbxml.CAnniversary); a != "" {
-		if t, err := time.Parse(easContactDate, a); err == nil {
-			props = append(props, mapi.TaggedPropVal{Tag: mapi.PrWeddingAnniversary, Value: mapi.UnixToNTTime(t)})
-		}
-	}
-	if kids := data.Child(wbxml.CChildren); kids != nil {
-		var names []string
-		for _, c := range kids.Children {
-			if c.Tag == wbxml.CChild && c.Text != "" {
-				names = append(names, c.Text)
-			}
-		}
-		if len(names) > 0 {
-			props = append(props, mapi.TaggedPropVal{Tag: mapi.PrChildrensNames, Value: names})
-		}
-	}
-	if cats := data.Child(wbxml.CCategories); cats != nil {
-		var vals []string
-		for _, c := range cats.Children {
-			if c.Tag == wbxml.CCategory && c.Text != "" {
-				vals = append(vals, c.Text)
-			}
-		}
-		if len(vals) > 0 {
-			if kid, err := st.GetNamedPropIDs(true, []mapi.PropertyName{mapi.NameKeywords}); err == nil && kid[0] != 0 {
-				props = append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(kid[0], mapi.PtMvUnicode), Value: vals})
-			}
-		}
+		props = appendNamedString(props, ids[slot*2], addr)
+		props = appendNamedString(props, ids[slot*2+1], "SMTP")
 	}
 	return props, nil
 }
 
-// applyContactClientCommands applies a device's Add/Change/Delete commands to the
-// Contacts folder, mirroring the calendar path: an Add creates the contact and
-// returns the assigned server id, a Change rewrites scalar fields without bumping the
-// change number (so it is not echoed back), and a Delete removes the contact.
-func applyContactClientCommands(st *objectstore.Store, cstate *collectionState, c *wbxml.Node) []*wbxml.Node {
-	cmds := c.Child(wbxml.ASCommands)
-	if cmds == nil {
+// appendNamedString appends a unicode named property when its id resolved.
+func appendNamedString(props mapi.PropertyValues, id uint16, value string) mapi.PropertyValues {
+	if id == 0 {
+		return props
+	}
+	return append(props, mapi.TaggedPropVal{Tag: mapi.MakeTag(id, mapi.PtUnicode), Value: value})
+}
+
+// appendParsedDate appends a date field parsed from the MS-ASCONTACTS format,
+// skipping an absent or unparsable value.
+func appendParsedDate(props mapi.PropertyValues, data *wbxml.Node, elem wbxml.Tag, tag mapi.PropTag) mapi.PropertyValues {
+	s := data.ChildText(elem)
+	if s == "" {
+		return props
+	}
+	t, err := time.Parse(easContactDate, s)
+	if err != nil {
+		return props
+	}
+	return append(props, mapi.TaggedPropVal{Tag: tag, Value: mapi.UnixToNTTime(t)})
+}
+
+// listChildText collects the non-empty text of every item element inside one
+// container element.
+func listChildText(data *wbxml.Node, container, item wbxml.Tag) []string {
+	node := data.Child(container)
+	if node == nil {
 		return nil
 	}
-	var responses []*wbxml.Node
-	added := map[string]bool{}
-	for _, cmd := range cmds.Children {
-		switch cmd.Tag {
-		case wbxml.ASAdd:
-			clientID := cmd.ChildText(wbxml.ASClientID)
-			data := cmd.Child(wbxml.ASData)
-			if clientID == "" || data == nil {
-				continue
-			}
-			props, err := parseContactItem(st, data)
-			if err != nil {
-				continue
-			}
-			props = append(props, mapi.TaggedPropVal{Tag: mapi.PrMessageClass, Value: "IPM.Contact"})
-			id, err := st.CreateMessage(int64(mapi.PrivateFIDContacts), &oxcmail.Message{Props: props})
-			if err != nil {
-				continue
-			}
-			sid := strconv.FormatInt(id, 10)
-			added[sid] = true
-			responses = append(responses, wbxml.Elem(wbxml.ASAdd,
-				wbxml.Str(wbxml.ASClientID, clientID),
-				wbxml.Str(wbxml.ASServerID, sid),
-				wbxml.Str(wbxml.ASStatus, strconv.Itoa(syncStatusOK))))
-		case wbxml.ASChange:
-			id, err := strconv.ParseInt(cmd.ChildText(wbxml.ASServerID), 10, 64)
-			if err != nil {
-				continue
-			}
-			data := cmd.Child(wbxml.ASData)
-			if data == nil {
-				continue
-			}
-			props, err := parseContactItem(st, data)
-			if err != nil || len(props) == 0 {
-				continue
-			}
-			_ = st.SetMessageProperties(id, props)
-		case wbxml.ASDelete:
-			sid := cmd.ChildText(wbxml.ASServerID)
-			id, err := strconv.ParseInt(sid, 10, 64)
-			if err != nil {
-				continue
-			}
-			if st.SoftDeleteObject(id) == nil {
-				delete(cstate.Items, sid)
-			}
+	var out []string
+	for _, c := range node.Children {
+		if c.Tag == item && c.Text != "" {
+			out = append(out, c.Text)
 		}
 	}
-	// Fold the just-added contacts into the snapshot so objectChanges does not echo
-	// them back as server adds to the device that just created them.
-	if len(added) > 0 {
-		if objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDContacts)); err == nil {
-			for _, o := range objs {
-				if sid := strconv.FormatInt(o.ID, 10); added[sid] {
-					// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-					cstate.Items[sid] = int64(o.ChangeNumber)
-				}
-			}
-		}
+	return out
+}
+
+// parseContactProps decodes a device's contact ApplicationData and stamps the
+// message class the store files a contact under.
+func parseContactProps(st *objectstore.Store, data *wbxml.Node) (mapi.PropertyValues, error) {
+	props, err := parseContactItem(st, data)
+	if err != nil {
+		return nil, err
 	}
-	return responses
+	return append(props, mapi.TaggedPropVal{Tag: mapi.PrMessageClass, Value: "IPM.Contact"}), nil
 }
 
 // contactStr returns a property's value as a string, or "" when absent.
@@ -320,44 +307,4 @@ func contactStr(pv mapi.PropertyValues, tag mapi.PropTag) string {
 		}
 	}
 	return ""
-}
-
-// isObjectFolder reports whether a folder's items live in the object store and are
-// versioned by change number (calendar, contacts, tasks) rather than the IMAP index.
-func isObjectFolder(folderID int64) bool {
-	switch folderID {
-	case int64(mapi.PrivateFIDCalendar), int64(mapi.PrivateFIDContacts),
-		int64(mapi.PrivateFIDTasks), int64(mapi.PrivateFIDNotes):
-		return true
-	}
-	return false
-}
-
-// objectAppData returns the data-class renderer for an object folder's items.
-func objectAppData(folderID int64) func(*objectstore.Store, int64) (*wbxml.Node, error) {
-	switch folderID {
-	case int64(mapi.PrivateFIDContacts):
-		return contactAppData
-	case int64(mapi.PrivateFIDTasks):
-		return taskAppData
-	case int64(mapi.PrivateFIDNotes):
-		return noteAppData
-	default:
-		return calendarAppData
-	}
-}
-
-// applyObjectClientCommands dispatches a device's commands to the right object
-// folder's apply path.
-func applyObjectClientCommands(st *objectstore.Store, folderID int64, cstate *collectionState, c *wbxml.Node) []*wbxml.Node {
-	switch folderID {
-	case int64(mapi.PrivateFIDContacts):
-		return applyContactClientCommands(st, cstate, c)
-	case int64(mapi.PrivateFIDTasks):
-		return applyTaskClientCommands(st, cstate, c)
-	case int64(mapi.PrivateFIDNotes):
-		return applyNoteClientCommands(st, cstate, c)
-	default:
-		return applyCalendarClientCommands(st, cstate, c)
-	}
 }

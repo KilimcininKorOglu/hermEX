@@ -37,10 +37,6 @@ func (s *Server) handleFolderCreate(w http.ResponseWriter, r *http.Request, sess
 		s.failRequest(w, r, "wbxml.parse.fail", err, http.StatusBadRequest, "invalid WBXML")
 		return
 	}
-	syncKey := root.ChildText(wbxml.FHSyncKey)
-	parentID := root.ChildText(wbxml.FHParentID)
-	name := root.ChildText(wbxml.FHDisplayName)
-
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
 		s.failRequest(w, r, "folder.create.fail", err, http.StatusInternalServerError, "an internal error occurred")
@@ -55,32 +51,9 @@ func (s *Server) handleFolderCreate(w http.ResponseWriter, r *http.Request, sess
 	}
 	dev := state.device(sess.req.deviceID)
 
-	if name == "" {
-		writeWBXML(w, folderCreateStatus(fhStatusBadRequest))
-		return
-	}
-	if syncKey == "" || syncKey != dev.HierarchyKey {
-		writeWBXML(w, folderCreateStatus(fhStatusBadSyncKey))
-		return
-	}
-
-	parent, code := resolveFolderParent(st, parentID)
-	if code != 0 {
+	fid, code := createFolder(st, dev, root)
+	if code != fhStatusOK {
 		writeWBXML(w, folderCreateStatus(code))
-		return
-	}
-
-	if _, exists, ferr := st.FolderByName(parent, name); ferr != nil {
-		writeWBXML(w, folderCreateStatus(fhStatusServerError))
-		return
-	} else if exists {
-		writeWBXML(w, folderCreateStatus(fhStatusExists))
-		return
-	}
-
-	fid, err := st.CreateFolder(parent, name)
-	if err != nil {
-		writeWBXML(w, folderCreateStatus(fhStatusServerError))
 		return
 	}
 
@@ -90,6 +63,34 @@ func (s *Server) handleFolderCreate(w http.ResponseWriter, r *http.Request, sess
 		return
 	}
 	writeWBXML(w, folderCreateResponse(dev.HierarchyKey, strconv.FormatInt(fid, 10)))
+}
+
+// createFolder validates a FolderCreate request and creates the folder it asks
+// for, returning the new folder's id and the EAS status to report.
+func createFolder(st *objectstore.Store, dev *deviceState, root *wbxml.Node) (int64, int) {
+	name := root.ChildText(wbxml.FHDisplayName)
+	if name == "" {
+		return 0, fhStatusBadRequest
+	}
+	if syncKey := root.ChildText(wbxml.FHSyncKey); syncKey == "" || syncKey != dev.HierarchyKey {
+		return 0, fhStatusBadSyncKey
+	}
+	parent, code := resolveFolderParent(st, root.ChildText(wbxml.FHParentID))
+	if code != 0 {
+		return 0, code
+	}
+	_, exists, err := st.FolderByName(parent, name)
+	if err != nil {
+		return 0, fhStatusServerError
+	}
+	if exists {
+		return 0, fhStatusExists
+	}
+	fid, err := st.CreateFolder(parent, name)
+	if err != nil {
+		return 0, fhStatusServerError
+	}
+	return fid, fhStatusOK
 }
 
 // resolveFolderParent maps an EAS ParentId to a store parent: "0" (or empty) is

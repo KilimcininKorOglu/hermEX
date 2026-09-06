@@ -23,11 +23,6 @@ func (s *Server) handleFolderUpdate(w http.ResponseWriter, r *http.Request, sess
 		s.failRequest(w, r, "wbxml.parse.fail", err, http.StatusBadRequest, "invalid WBXML")
 		return
 	}
-	syncKey := root.ChildText(wbxml.FHSyncKey)
-	serverID := root.ChildText(wbxml.FHServerID)
-	parentID := root.ChildText(wbxml.FHParentID)
-	name := root.ChildText(wbxml.FHDisplayName)
-
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
 		s.failRequest(w, r, "folderupdate.fail", err, http.StatusInternalServerError, "an internal error occurred")
@@ -42,50 +37,8 @@ func (s *Server) handleFolderUpdate(w http.ResponseWriter, r *http.Request, sess
 	}
 	dev := state.device(sess.req.deviceID)
 
-	if serverID == "" || name == "" {
-		writeWBXML(w, folderUpdateStatus(fhStatusBadRequest))
-		return
-	}
-	if syncKey == "" || syncKey != dev.HierarchyKey {
-		writeWBXML(w, folderUpdateStatus(fhStatusBadSyncKey))
-		return
-	}
-
-	fid, err := strconv.ParseInt(serverID, 10, 64)
-	if err != nil {
-		writeWBXML(w, folderUpdateStatus(fhStatusNotFound))
-		return
-	}
-	if fid < mapi.PrivateFIDUnassignedStart {
-		writeWBXML(w, folderUpdateStatus(fhStatusSpecial))
-		return
-	}
-
-	parent, code := resolveFolderParent(st, parentID)
-	if code != 0 {
+	if code := updateFolder(st, dev, root); code != fhStatusOK {
 		writeWBXML(w, folderUpdateStatus(code))
-		return
-	}
-
-	// Reject a name already taken by a different sibling at the destination so
-	// name-based resolution stays unambiguous; renaming a folder to its own
-	// current name (existing == fid) is a no-op rename, not a collision.
-	if existing, exists, ferr := st.FolderByName(parent, name); ferr != nil {
-		writeWBXML(w, folderUpdateStatus(fhStatusServerError))
-		return
-	} else if exists && existing != fid {
-		writeWBXML(w, folderUpdateStatus(fhStatusExists))
-		return
-	}
-
-	if err := st.RenameFolder(fid, parent, name); err != nil {
-		if errors.Is(err, objectstore.ErrNotFound) {
-			writeWBXML(w, folderUpdateStatus(fhStatusNotFound))
-			return
-		}
-		// A cycle (re-parenting into the folder's own subtree) has no dedicated
-		// EAS status; report the generic server-error code.
-		writeWBXML(w, folderUpdateStatus(fhStatusServerError))
 		return
 	}
 
@@ -95,6 +48,75 @@ func (s *Server) handleFolderUpdate(w http.ResponseWriter, r *http.Request, sess
 		return
 	}
 	writeWBXML(w, folderUpdateResponse(dev.HierarchyKey))
+}
+
+// updateFolder validates a FolderUpdate request and performs the rename or
+// re-parent it asks for, returning the EAS status to report.
+func updateFolder(st *objectstore.Store, dev *deviceState, root *wbxml.Node) int {
+	name := root.ChildText(wbxml.FHDisplayName)
+	fid, code := folderUpdateTarget(dev, root, name)
+	if code != fhStatusOK {
+		return code
+	}
+	parent, code := folderUpdateParent(st, root.ChildText(wbxml.FHParentID), fid, name)
+	if code != fhStatusOK {
+		return code
+	}
+	return renameFolderStatus(st, fid, parent, name)
+}
+
+// folderUpdateTarget resolves the folder the request names, refusing an
+// incomplete request, a stale hierarchy sync key, and a built-in folder.
+func folderUpdateTarget(dev *deviceState, root *wbxml.Node, name string) (int64, int) {
+	serverID := root.ChildText(wbxml.FHServerID)
+	if serverID == "" || name == "" {
+		return 0, fhStatusBadRequest
+	}
+	if syncKey := root.ChildText(wbxml.FHSyncKey); syncKey == "" || syncKey != dev.HierarchyKey {
+		return 0, fhStatusBadSyncKey
+	}
+	fid, err := strconv.ParseInt(serverID, 10, 64)
+	if err != nil {
+		return 0, fhStatusNotFound
+	}
+	if fid < mapi.PrivateFIDUnassignedStart {
+		return 0, fhStatusSpecial
+	}
+	return fid, fhStatusOK
+}
+
+// folderUpdateParent resolves the destination parent and rejects a name already
+// taken by a different sibling there, so name-based resolution stays unambiguous.
+// Renaming a folder to its own current name (existing == fid) is a no-op rename,
+// not a collision.
+func folderUpdateParent(st *objectstore.Store, parentID string, fid int64, name string) (*int64, int) {
+	parent, code := resolveFolderParent(st, parentID)
+	if code != 0 {
+		return nil, code
+	}
+	existing, exists, err := st.FolderByName(parent, name)
+	if err != nil {
+		return nil, fhStatusServerError
+	}
+	if exists && existing != fid {
+		return nil, fhStatusExists
+	}
+	return parent, fhStatusOK
+}
+
+// renameFolderStatus performs the rename and maps its failure to an EAS status.
+func renameFolderStatus(st *objectstore.Store, fid int64, parent *int64, name string) int {
+	err := st.RenameFolder(fid, parent, name)
+	switch {
+	case err == nil:
+		return fhStatusOK
+	case errors.Is(err, objectstore.ErrNotFound):
+		return fhStatusNotFound
+	default:
+		// A cycle (re-parenting into the folder's own subtree) has no dedicated
+		// EAS status; report the generic server-error code.
+		return fhStatusServerError
+	}
 }
 
 // folderUpdateResponse builds a Status-1 FolderUpdate reply carrying the advanced

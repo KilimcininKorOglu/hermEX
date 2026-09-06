@@ -103,31 +103,28 @@ func syncFolders(st *objectstore.Store) ([]easFolder, error) {
 	return out, nil
 }
 
+// wellKnownFolderTypes maps each built-in folder to the EAS type a device expects
+// for it. A folder outside this table is classified by its container class.
+var wellKnownFolderTypes = map[int64]int{
+	mapi.PrivateFIDInbox:        folderTypeInbox,
+	mapi.PrivateFIDDraft:        folderTypeDrafts,
+	mapi.PrivateFIDDeletedItems: folderTypeDeleted,
+	mapi.PrivateFIDSentItems:    folderTypeSent,
+	mapi.PrivateFIDOutbox:       folderTypeOutbox,
+	mapi.PrivateFIDCalendar:     folderTypeCalendar,
+	mapi.PrivateFIDContacts:     folderTypeContact,
+	mapi.PrivateFIDTasks:        folderTypeTask,
+	mapi.PrivateFIDNotes:        folderTypeNote,
+}
+
 // easFolderType maps a store folder to its EAS type, reporting ok=false for a
 // folder Sync cannot serve. The standard mail folders and the well-known Calendar,
 // Contacts, Tasks, and Notes collections are mapped by their fixed ids; any other
 // folder is included as a generic mail folder only when its container class is a note
 // (mail) folder.
 func easFolderType(st *objectstore.Store, fid int64) (int, bool, error) {
-	switch fid {
-	case mapi.PrivateFIDInbox:
-		return folderTypeInbox, true, nil
-	case mapi.PrivateFIDDraft:
-		return folderTypeDrafts, true, nil
-	case mapi.PrivateFIDDeletedItems:
-		return folderTypeDeleted, true, nil
-	case mapi.PrivateFIDSentItems:
-		return folderTypeSent, true, nil
-	case mapi.PrivateFIDOutbox:
-		return folderTypeOutbox, true, nil
-	case mapi.PrivateFIDCalendar:
-		return folderTypeCalendar, true, nil
-	case mapi.PrivateFIDContacts:
-		return folderTypeContact, true, nil
-	case mapi.PrivateFIDTasks:
-		return folderTypeTask, true, nil
-	case mapi.PrivateFIDNotes:
-		return folderTypeNote, true, nil
+	if typ, ok := wellKnownFolderTypes[fid]; ok {
+		return typ, true, nil
 	}
 	props, err := st.GetFolderProperties(fid, mapi.PrContainerClass)
 	if err != nil {

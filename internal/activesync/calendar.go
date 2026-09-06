@@ -9,7 +9,6 @@ import (
 	"hermex/internal/mapi"
 	"hermex/internal/objectstore"
 	"hermex/internal/oxcical"
-	"hermex/internal/oxcmail"
 	"hermex/internal/wbxml"
 )
 
@@ -31,46 +30,17 @@ func easCalTime(t time.Time) string {
 // attendees are later increments. It returns nil when the object lacks the
 // start/end that make it an appointment (the calendar folder may hold none).
 func calendarAppData(st *objectstore.Store, objectID int64) (*wbxml.Node, error) {
-	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{
-		mapi.NameAppointmentStartWhole, // 0
-		mapi.NameAppointmentEndWhole,   // 1
-		mapi.NameBusyStatus,            // 2
-		mapi.NameAppointmentLocation,   // 3
-		mapi.NameAppointmentSubType,    // 4
-	})
-	if err != nil {
+	tags, ok, err := calendarTags(st)
+	if err != nil || !ok {
 		return nil, err
 	}
-	if ids[0] == 0 || ids[1] == 0 {
-		return nil, nil // the mailbox has never stored an appointment
-	}
-	startTag := mapi.MakeTag(ids[0], mapi.PtSysTime)
-	endTag := mapi.MakeTag(ids[1], mapi.PtSysTime)
-	busyTag := mapi.MakeTag(ids[2], mapi.PtLong)
-	locTag := mapi.MakeTag(ids[3], mapi.PtUnicode)
-	allDayTag := mapi.MakeTag(ids[4], mapi.PtBoolean)
-
-	pv, err := st.GetMessageProperties(objectID, startTag, endTag, busyTag, locTag, allDayTag,
+	pv, err := st.GetMessageProperties(objectID, tags.start, tags.end, tags.busy, tags.loc, tags.allDay,
 		mapi.PrSubject, mapi.PrLastModificationTime, mapi.PrIcalOriginal)
 	if err != nil {
 		return nil, err
 	}
-	start, ok := ntTimeProp(pv, startTag)
+	start, end, recurrence, ok := calendarSpan(pv, tags)
 	if !ok {
-		return nil, nil // no start: not an appointment
-	}
-	end, hasEnd := ntTimeProp(pv, endTag)
-
-	// A recurring appointment stores only its start named property plus the
-	// verbatim iCal; its end and recurrence pattern come from there.
-	var recurrence *wbxml.Node
-	if ical, ok := bytesProp(pv, mapi.PrIcalOriginal); ok && len(ical) > 0 {
-		if s, e, r, ok := oxcical.ParseRecurrence(ical); ok {
-			start, end, hasEnd = s, e, true
-			recurrence = easRecurrence(r)
-		}
-	}
-	if !hasEnd {
 		return nil, nil
 	}
 	stamp := start
@@ -84,18 +54,70 @@ func calendarAppData(st *objectstore.Store, objectID int64) (*wbxml.Node, error)
 		wbxml.Str(wbxml.CalStartTime, easCalTime(start)),
 		wbxml.Str(wbxml.CalSubject, stringProp(pv, mapi.PrSubject)),
 		wbxml.Str(wbxml.CalEndTime, easCalTime(end)),
-		wbxml.Str(wbxml.CalBusyStatus, strconv.Itoa(int(longProp(pv, busyTag)))),
-		wbxml.Str(wbxml.CalAllDayEvent, boolStr(boolProp(pv, allDayTag))),
+		wbxml.Str(wbxml.CalBusyStatus, strconv.Itoa(int(longProp(pv, tags.busy)))),
+		wbxml.Str(wbxml.CalAllDayEvent, boolStr(boolProp(pv, tags.allDay))),
 	)
 	if recurrence != nil {
 		data.Children = append(data.Children, recurrence)
 	}
 	// No attendees are emitted yet, so the appointment is not a meeting.
 	data.Children = append(data.Children, wbxml.Str(wbxml.CalMeetingStatus, "0"))
-	if loc := stringProp(pv, locTag); loc != "" {
+	if loc := stringProp(pv, tags.loc); loc != "" {
 		data.Children = append(data.Children, wbxml.Str(wbxml.CalLocation, loc))
 	}
 	return data, nil
+}
+
+// calendarTagSet holds the appointment named-property tags one mailbox resolved.
+type calendarTagSet struct {
+	start, end, busy, loc, allDay mapi.PropTag
+}
+
+// calendarTags resolves the appointment named properties. ok is false when the
+// mailbox has never stored an appointment, so nothing can be rendered from it.
+func calendarTags(st *objectstore.Store) (calendarTagSet, bool, error) {
+	ids, err := st.GetNamedPropIDs(false, []mapi.PropertyName{
+		mapi.NameAppointmentStartWhole, // 0
+		mapi.NameAppointmentEndWhole,   // 1
+		mapi.NameBusyStatus,            // 2
+		mapi.NameAppointmentLocation,   // 3
+		mapi.NameAppointmentSubType,    // 4
+	})
+	if err != nil {
+		return calendarTagSet{}, false, err
+	}
+	if ids[0] == 0 || ids[1] == 0 {
+		return calendarTagSet{}, false, nil
+	}
+	return calendarTagSet{
+		start:  mapi.MakeTag(ids[0], mapi.PtSysTime),
+		end:    mapi.MakeTag(ids[1], mapi.PtSysTime),
+		busy:   mapi.MakeTag(ids[2], mapi.PtLong),
+		loc:    mapi.MakeTag(ids[3], mapi.PtUnicode),
+		allDay: mapi.MakeTag(ids[4], mapi.PtBoolean),
+	}, true, nil
+}
+
+// calendarSpan resolves one object's start, end and recurrence. A recurring
+// appointment stores only its start named property plus the verbatim iCal, so its
+// end and recurrence pattern come from there. ok is false when the object carries
+// no start or end, which means it is not an appointment.
+func calendarSpan(pv mapi.PropertyValues, tags calendarTagSet) (start, end time.Time, recurrence *wbxml.Node, ok bool) {
+	start, ok = ntTimeProp(pv, tags.start)
+	if !ok {
+		return time.Time{}, time.Time{}, nil, false
+	}
+	end, hasEnd := ntTimeProp(pv, tags.end)
+	if ical, ok := bytesProp(pv, mapi.PrIcalOriginal); ok && len(ical) > 0 {
+		if s, e, r, ok := oxcical.ParseRecurrence(ical); ok {
+			start, end, hasEnd = s, e, true
+			recurrence = easRecurrence(r)
+		}
+	}
+	if !hasEnd {
+		return time.Time{}, time.Time{}, nil, false
+	}
+	return start, end, recurrence, true
 }
 
 // easRecurrence renders a parsed recurrence as the MS-ASCAL Recurrence element.
@@ -110,24 +132,12 @@ func easRecurrence(rec oxcical.Recurrence) *wbxml.Node {
 		n.Children = append(n.Children, wbxml.Str(wbxml.CalOccurrences, strconv.Itoa(rec.Count)))
 	}
 	n.Children = append(n.Children, wbxml.Str(wbxml.CalInterval, strconv.Itoa(rec.Interval)))
-	if dayOfWeek != 0 {
-		n.Children = append(n.Children, wbxml.Str(wbxml.CalDayOfWeek, strconv.Itoa(dayOfWeek)))
-	}
-	if rec.MonthDay != 0 {
-		n.Children = append(n.Children, wbxml.Str(wbxml.CalDayOfMonth, strconv.Itoa(rec.MonthDay)))
-	}
+	appendNonZero(n, wbxml.CalDayOfWeek, dayOfWeek)
+	appendNonZero(n, wbxml.CalDayOfMonth, rec.MonthDay)
 	if typ == 3 || typ == 6 { // nth-weekday of month/year
-		week := rec.SetPos
-		if week < 0 {
-			week = 5 // EAS encodes "last" as week 5
-		}
-		if week != 0 {
-			n.Children = append(n.Children, wbxml.Str(wbxml.CalWeekOfMonth, strconv.Itoa(week)))
-		}
+		appendNonZero(n, wbxml.CalWeekOfMonth, easWeekOfMonth(rec.SetPos))
 	}
-	if rec.Month != 0 {
-		n.Children = append(n.Children, wbxml.Str(wbxml.CalMonthOfYear, strconv.Itoa(rec.Month)))
-	}
+	appendNonZero(n, wbxml.CalMonthOfYear, rec.Month)
 	return n
 }
 
@@ -215,81 +225,14 @@ func parseCalendarItem(st *objectstore.Store, data *wbxml.Node) (mapi.PropertyVa
 	return props, nil
 }
 
-// applyCalendarClientCommands applies a device's Change and Delete commands to the
-// calendar folder. A Change rewrites the appointment's scalar fields without
-// bumping the change number (SetMessageProperties), so it is not echoed back to
-// the device that made it. Client-side adds (which need a server-id mapping) and
-// recurrence edits are later increments.
-func applyCalendarClientCommands(st *objectstore.Store, cstate *collectionState, c *wbxml.Node) []*wbxml.Node {
-	cmds := c.Child(wbxml.ASCommands)
-	if cmds == nil {
-		return nil
+// parseCalendarProps decodes a device's appointment ApplicationData and stamps
+// the message class the store files an appointment under.
+func parseCalendarProps(st *objectstore.Store, data *wbxml.Node) (mapi.PropertyValues, error) {
+	props, err := parseCalendarItem(st, data)
+	if err != nil {
+		return nil, err
 	}
-	var responses []*wbxml.Node
-	added := map[string]bool{}
-	for _, cmd := range cmds.Children {
-		switch cmd.Tag {
-		case wbxml.ASAdd:
-			// A device add carries a client id (not a server id); the server
-			// creates the appointment and returns the id it assigned.
-			clientID := cmd.ChildText(wbxml.ASClientID)
-			data := cmd.Child(wbxml.ASData)
-			if clientID == "" || data == nil {
-				continue
-			}
-			props, err := parseCalendarItem(st, data)
-			if err != nil {
-				continue
-			}
-			props = append(props, mapi.TaggedPropVal{Tag: mapi.PrMessageClass, Value: "IPM.Appointment"})
-			id, err := st.CreateMessage(int64(mapi.PrivateFIDCalendar), &oxcmail.Message{Props: props})
-			if err != nil {
-				continue
-			}
-			sid := strconv.FormatInt(id, 10)
-			added[sid] = true
-			responses = append(responses, wbxml.Elem(wbxml.ASAdd,
-				wbxml.Str(wbxml.ASClientID, clientID),
-				wbxml.Str(wbxml.ASServerID, sid),
-				wbxml.Str(wbxml.ASStatus, strconv.Itoa(syncStatusOK))))
-		case wbxml.ASChange:
-			id, err := strconv.ParseInt(cmd.ChildText(wbxml.ASServerID), 10, 64)
-			if err != nil {
-				continue
-			}
-			data := cmd.Child(wbxml.ASData)
-			if data == nil {
-				continue
-			}
-			props, err := parseCalendarItem(st, data)
-			if err != nil || len(props) == 0 {
-				continue
-			}
-			_ = st.SetMessageProperties(id, props)
-		case wbxml.ASDelete:
-			sid := cmd.ChildText(wbxml.ASServerID)
-			id, err := strconv.ParseInt(sid, 10, 64)
-			if err != nil {
-				continue
-			}
-			if st.SoftDeleteObject(id) == nil {
-				delete(cstate.Items, sid)
-			}
-		}
-	}
-	// Fold the just-added appointments into the snapshot so calendarChanges does
-	// not echo them back as server adds to the device that just created them.
-	if len(added) > 0 {
-		if objs, err := st.ListFolderObjects(int64(mapi.PrivateFIDCalendar)); err == nil {
-			for _, o := range objs {
-				if sid := strconv.FormatInt(o.ID, 10); added[sid] {
-					// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-					cstate.Items[sid] = int64(o.ChangeNumber)
-				}
-			}
-		}
-	}
-	return responses
+	return append(props, mapi.TaggedPropVal{Tag: mapi.PrMessageClass, Value: "IPM.Appointment"}), nil
 }
 
 // bytesProp reads a PtBinary property as raw bytes.
@@ -362,25 +305,50 @@ func objectChanges(st *objectstore.Store, folderID int64, cstate *collectionStat
 	if err != nil {
 		return nil, false, err
 	}
-	type change struct {
-		kind int
-		sid  string
-		id   int64
-		cn   int64
+	pending := pendingObjectChanges(objs, cstate)
+	more := false
+	if len(pending) > window {
+		pending = pending[:window]
+		more = true
 	}
-	var pending []change
+
+	var cmds []*wbxml.Node
+	for _, ch := range pending {
+		cmd, err := renderObjectChange(st, cstate, ch, appData)
+		if err != nil {
+			return nil, false, err
+		}
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	}
+	return cmds, more, nil
+}
+
+// objectChange is one pending Add, Change or Delete for an object folder's item.
+type objectChange struct {
+	kind int
+	sid  string
+	id   int64
+	cn   int64
+}
+
+// pendingObjectChanges diffs the folder's stored items against the device
+// snapshot: a new id is an Add, a bumped change number a Change, and an id the
+// snapshot holds but the folder no longer does a Delete.
+func pendingObjectChanges(objs []objectstore.FolderObject, cstate *collectionState) []objectChange {
+	var pending []objectChange
 	live := make(map[string]bool, len(objs))
 	for _, o := range objs {
 		sid := strconv.FormatInt(o.ID, 10)
 		live[sid] = true
+		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		cn := int64(o.ChangeNumber)
 		switch prev, ok := cstate.Items[sid]; {
 		case !ok:
-			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-			pending = append(pending, change{changeAdd, sid, o.ID, int64(o.ChangeNumber)})
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		case prev != int64(o.ChangeNumber):
-			// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-			pending = append(pending, change{changeChange, sid, o.ID, int64(o.ChangeNumber)})
+			pending = append(pending, objectChange{changeAdd, sid, o.ID, cn})
+		case prev != cn:
+			pending = append(pending, objectChange{changeChange, sid, o.ID, cn})
 		}
 	}
 	var deletes []string
@@ -391,36 +359,31 @@ func objectChanges(st *objectstore.Store, folderID int64, cstate *collectionStat
 	}
 	sort.Slice(deletes, func(i, j int) bool { return lessSID(deletes[i], deletes[j]) })
 	for _, sid := range deletes {
-		pending = append(pending, change{kind: changeDelete, sid: sid})
+		pending = append(pending, objectChange{kind: changeDelete, sid: sid})
 	}
+	return pending
+}
 
-	more := false
-	if len(pending) > window {
-		pending = pending[:window]
-		more = true
+// renderObjectChange builds one change's command and records it in the snapshot.
+// It answers a nil command for an item the data class cannot render, which is
+// nothing to stream.
+func renderObjectChange(st *objectstore.Store, cstate *collectionState, ch objectChange,
+	appData func(*objectstore.Store, int64) (*wbxml.Node, error)) (*wbxml.Node, error) {
+	if ch.kind == changeDelete {
+		delete(cstate.Items, ch.sid)
+		return wbxml.Elem(wbxml.ASDelete, wbxml.Str(wbxml.ASServerID, ch.sid)), nil
 	}
-
-	var cmds []*wbxml.Node
-	for _, ch := range pending {
-		switch ch.kind {
-		case changeAdd, changeChange:
-			data, err := appData(st, ch.id)
-			if err != nil {
-				return nil, false, err
-			}
-			if data == nil {
-				continue // not a renderable item of this data class; nothing to stream
-			}
-			tag := wbxml.ASAdd
-			if ch.kind == changeChange {
-				tag = wbxml.ASChange
-			}
-			cmds = append(cmds, wbxml.Elem(tag, wbxml.Str(wbxml.ASServerID, ch.sid), data))
-			cstate.Items[ch.sid] = ch.cn
-		case changeDelete:
-			cmds = append(cmds, wbxml.Elem(wbxml.ASDelete, wbxml.Str(wbxml.ASServerID, ch.sid)))
-			delete(cstate.Items, ch.sid)
-		}
+	data, err := appData(st, ch.id)
+	if err != nil {
+		return nil, err
 	}
-	return cmds, more, nil
+	if data == nil {
+		return nil, nil
+	}
+	tag := wbxml.ASAdd
+	if ch.kind == changeChange {
+		tag = wbxml.ASChange
+	}
+	cstate.Items[ch.sid] = ch.cn
+	return wbxml.Elem(tag, wbxml.Str(wbxml.ASServerID, ch.sid), data), nil
 }

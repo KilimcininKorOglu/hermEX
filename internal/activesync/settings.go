@@ -41,30 +41,16 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request, sess *se
 
 	var getNodes, setNodes []*wbxml.Node
 	for _, sub := range root.Children {
-		switch sub.Tag {
-		case wbxml.STOof:
-			if sub.Child(wbxml.STGet) != nil {
-				getNodes = append(getNodes, oofGetResponse(st))
-			} else if set := sub.Child(wbxml.STSet); set != nil {
-				if err := applyOofSet(st, set); err != nil {
-					s.failRequest(w, r, "settings.fail", err, http.StatusInternalServerError, "an internal error occurred")
-					return
-				}
-				setNodes = append(setNodes, wbxml.Elem(wbxml.STOof, wbxml.Str(wbxml.STStatus, "1")))
-			}
-		case wbxml.STUserInformation:
-			if sub.Child(wbxml.STGet) != nil {
-				getNodes = append(getNodes, userInformationResponse(sess))
-			}
-		case wbxml.STDeviceInformation:
-			if sub.Child(wbxml.STSet) != nil {
-				setNodes = append(setNodes, wbxml.Elem(wbxml.STDeviceInformation, wbxml.Str(wbxml.STStatus, "1")))
-			}
-		case wbxml.STDevicePassword:
-			if sub.Child(wbxml.STSet) != nil {
-				setNodes = append(setNodes, wbxml.Elem(wbxml.STDevicePassword,
-					wbxml.Elem(wbxml.STSet, wbxml.Str(wbxml.STStatus, "1"))))
-			}
+		get, set, err := settingsSubRequest(st, sess, sub)
+		if err != nil {
+			s.failRequest(w, r, "settings.fail", err, http.StatusInternalServerError, "an internal error occurred")
+			return
+		}
+		if get != nil {
+			getNodes = append(getNodes, get)
+		}
+		if set != nil {
+			setNodes = append(setNodes, set)
 		}
 	}
 
@@ -73,6 +59,45 @@ func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request, sess *se
 	resp = append(resp, getNodes...)
 	resp = append(resp, setNodes...)
 	writeWBXML(w, wbxml.Elem(wbxml.STSettings, resp...))
+}
+
+// settingsSubRequest serves one sub-request of a Settings document and returns
+// its Get response, its Set response, or neither. A sub-request this server does
+// not serve is ignored, which is what the protocol expects of an unknown one.
+func settingsSubRequest(st *objectstore.Store, sess *session, sub *wbxml.Node) (get, set *wbxml.Node, err error) {
+	switch sub.Tag {
+	case wbxml.STOof:
+		return oofSubRequest(st, sub)
+	case wbxml.STUserInformation:
+		if sub.Child(wbxml.STGet) != nil {
+			return userInformationResponse(sess), nil, nil
+		}
+	case wbxml.STDeviceInformation:
+		if sub.Child(wbxml.STSet) != nil {
+			return nil, wbxml.Elem(wbxml.STDeviceInformation, wbxml.Str(wbxml.STStatus, "1")), nil
+		}
+	case wbxml.STDevicePassword:
+		if sub.Child(wbxml.STSet) != nil {
+			return nil, wbxml.Elem(wbxml.STDevicePassword,
+				wbxml.Elem(wbxml.STSet, wbxml.Str(wbxml.STStatus, "1"))), nil
+		}
+	}
+	return nil, nil, nil
+}
+
+// oofSubRequest serves the Oof sub-request, which carries either a Get or a Set.
+func oofSubRequest(st *objectstore.Store, sub *wbxml.Node) (get, set *wbxml.Node, err error) {
+	if sub.Child(wbxml.STGet) != nil {
+		return oofGetResponse(st), nil, nil
+	}
+	node := sub.Child(wbxml.STSet)
+	if node == nil {
+		return nil, nil, nil
+	}
+	if err := applyOofSet(st, node); err != nil {
+		return nil, nil, err
+	}
+	return nil, wbxml.Elem(wbxml.STOof, wbxml.Str(wbxml.STStatus, "1")), nil
 }
 
 // oofGetResponse reads the mailbox OOF settings and renders the Oof Get response.
@@ -136,6 +161,14 @@ func applyOofSet(st *objectstore.Store, set *wbxml.Node) error {
 	if err != nil {
 		return err
 	}
+	applyOofState(&cfg, set)
+	known, unknown := readOofBuckets(&cfg, set)
+	applyOofExternal(&cfg, known, unknown)
+	return st.SetOOFSettings(cfg)
+}
+
+// applyOofState applies the Set's OofState: off, on globally, or on for a window.
+func applyOofState(cfg *objectstore.OOFSettings, set *wbxml.Node) {
 	switch set.ChildText(wbxml.STOofState) {
 	case oofDisabled:
 		cfg.Enabled = false
@@ -147,41 +180,55 @@ func applyOofSet(st *objectstore.Store, set *wbxml.Node) error {
 		cfg.Start = parseEASTime(set.ChildText(wbxml.STStartTime))
 		cfg.End = parseEASTime(set.ChildText(wbxml.STEndTime))
 	}
+}
 
-	var sawKnown, knownEnabled, sawUnknown, unknownEnabled bool
-	var knownReply, unknownReply string
+// oofBucket is one external OofMessage the client sent.
+type oofBucket struct {
+	sent    bool
+	enabled bool
+	reply   string
+}
+
+// readOofBuckets applies the internal reply directly and returns the two external
+// buckets, which only make sense read together.
+func readOofBuckets(cfg *objectstore.OOFSettings, set *wbxml.Node) (known, unknown oofBucket) {
 	for _, m := range set.Children {
 		if m.Tag != wbxml.STOofMessage {
 			continue
 		}
-		enabled := m.ChildText(wbxml.STEnabled) == "1"
-		reply := m.ChildText(wbxml.STReplyMessage)
+		b := oofBucket{sent: true, enabled: m.ChildText(wbxml.STEnabled) == "1", reply: m.ChildText(wbxml.STReplyMessage)}
 		switch {
 		case m.Child(wbxml.STAppliesToInternal) != nil:
-			cfg.InternalReply = reply
+			cfg.InternalReply = b.reply
 		case m.Child(wbxml.STAppliesToExternalKnown) != nil:
-			sawKnown, knownEnabled, knownReply = true, enabled, reply
+			known = b
 		case m.Child(wbxml.STAppliesToExternalUnknown) != nil:
-			sawUnknown, unknownEnabled, unknownReply = true, enabled, reply
+			unknown = b
 		}
 	}
-	if sawKnown || sawUnknown {
-		switch {
-		case unknownEnabled:
-			cfg.ExternalEnabled, cfg.ExternalAudience = true, objectstore.OOFExternalAll
-		case knownEnabled:
-			cfg.ExternalEnabled, cfg.ExternalAudience = true, objectstore.OOFExternalKnown
-		default:
-			cfg.ExternalEnabled = false
-		}
-		switch {
-		case sawKnown && knownReply != "":
-			cfg.ExternalReply = knownReply
-		case sawUnknown && unknownReply != "":
-			cfg.ExternalReply = unknownReply
-		}
+	return known, unknown
+}
+
+// applyOofExternal folds the two EAS external buckets onto the single external
+// reply plus its audience selector.
+func applyOofExternal(cfg *objectstore.OOFSettings, known, unknown oofBucket) {
+	if !known.sent && !unknown.sent {
+		return
 	}
-	return st.SetOOFSettings(cfg)
+	switch {
+	case unknown.enabled:
+		cfg.ExternalEnabled, cfg.ExternalAudience = true, objectstore.OOFExternalAll
+	case known.enabled:
+		cfg.ExternalEnabled, cfg.ExternalAudience = true, objectstore.OOFExternalKnown
+	default:
+		cfg.ExternalEnabled = false
+	}
+	switch {
+	case known.sent && known.reply != "":
+		cfg.ExternalReply = known.reply
+	case unknown.sent && unknown.reply != "":
+		cfg.ExternalReply = unknown.reply
+	}
 }
 
 // userInformationResponse renders the account's addresses in the shape the

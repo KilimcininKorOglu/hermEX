@@ -42,10 +42,14 @@ const (
 	syncMaxHeartbeat = 3540 * time.Second
 )
 
-// parseSyncHeartbeat parses a Sync HeartbeatInterval (seconds). ok is false when the
-// value is unparseable or outside [60, 3540]; bound is then the nearest acceptable
-// value for the Status-14 Limit element.
+// parseSyncHeartbeat parses a Sync HeartbeatInterval (seconds). An absent value is
+// a one-shot Sync, so it yields a zero duration and ok. ok is false when the value
+// is present but unparseable or outside [60, 3540]; bound is then the nearest
+// acceptable value for the Status-14 Limit element.
 func parseSyncHeartbeat(s string) (d, bound time.Duration, ok bool) {
+	if s == "" {
+		return 0, 0, true
+	}
 	n, err := strconv.Atoi(s)
 	if err != nil || n <= 0 {
 		return 0, syncMinHeartbeat, false
@@ -78,15 +82,10 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, sess *sessio
 	// A hanging Sync carries a HeartbeatInterval (seconds): the client asks the
 	// server to hold the response until a change lands. An out-of-range value is
 	// Status 14 with the nearest acceptable bound in a Limit element.
-	hbText := root.ChildText(wbxml.ASHeartbeatInt)
-	var heartbeat time.Duration
-	if hbText != "" {
-		hb, bound, ok := parseSyncHeartbeat(hbText)
-		if !ok {
-			writeWBXML(w, syncWaitLimit(bound))
-			return
-		}
-		heartbeat = hb
+	heartbeat, bound, ok := parseSyncHeartbeat(root.ChildText(wbxml.ASHeartbeatInt))
+	if !ok {
+		writeWBXML(w, syncWaitLimit(bound))
+		return
 	}
 
 	st, err := objectstore.Open(sess.mailbox)
@@ -103,21 +102,46 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, sess *sessio
 	}
 	dev := state.device(sess.req.deviceID)
 
-	// Hanging Sync: when a heartbeat is requested, the request carries no client
-	// commands, and there are no server changes yet, hold until a change lands
-	// (push wake, or the fallback cadence) or the heartbeat expires. On expiry with
-	// nothing new the reply is an empty body with Connection: close (MS-ASCMD); the
-	// client re-issues and the sync key does not advance.
-	if heartbeat > 0 && !syncHasCommands(collections) && !syncHasChanges(st, dev, collections) {
-		if !s.holdForSync(r.Context(), sess.mailbox, dev, collections, heartbeat) {
-			w.Header().Set("Connection", "close")
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-		// Woken with changes: fall through to the normal collect, which the open
-		// store observes via a fresh read.
+	if !s.waitForSyncChanges(w, r, sess, st, dev, collections, heartbeat) {
+		return
 	}
 
+	out, err := syncCollections(st, dev, collections)
+	if err != nil {
+		s.failRequest(w, r, "sync.fail", err, http.StatusInternalServerError, "an internal error occurred")
+		return
+	}
+	if err := saveState(st, state); err != nil {
+		s.failRequest(w, r, "sync.fail", err, http.StatusInternalServerError, "an internal error occurred")
+		return
+	}
+	writeWBXML(w, wbxml.Elem(wbxml.ASSync, wbxml.Elem(wbxml.ASCollections, out...)))
+}
+
+// waitForSyncChanges serves the hanging half of a Sync: when a heartbeat is
+// requested, the request carries no client commands, and there are no server
+// changes yet, it holds until a change lands (push wake, or the fallback cadence)
+// or the heartbeat expires. On expiry with nothing new it answers an empty body
+// with Connection: close (MS-ASCMD), the client re-issues and the sync key does
+// not advance. It reports whether the caller should go on to collect changes.
+func (s *Server) waitForSyncChanges(w http.ResponseWriter, r *http.Request, sess *session,
+	st *objectstore.Store, dev *deviceState, collections *wbxml.Node, heartbeat time.Duration) bool {
+	if heartbeat <= 0 || syncHasCommands(collections) || syncHasChanges(st, dev, collections) {
+		return true
+	}
+	if s.holdForSync(r.Context(), sess.mailbox, dev, collections, heartbeat) {
+		// Woken with changes: the caller collects, which the open store observes
+		// via a fresh read.
+		return true
+	}
+	w.Header().Set("Connection", "close")
+	w.WriteHeader(http.StatusOK)
+	return false
+}
+
+// syncCollections runs every collection in the request through syncCollection and
+// collects their responses in request order.
+func syncCollections(st *objectstore.Store, dev *deviceState, collections *wbxml.Node) ([]*wbxml.Node, error) {
 	var out []*wbxml.Node
 	for _, c := range collections.Children {
 		if c.Tag != wbxml.ASCollection {
@@ -125,16 +149,11 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request, sess *sessio
 		}
 		resp, err := syncCollection(st, dev, c)
 		if err != nil {
-			s.failRequest(w, r, "sync.fail", err, http.StatusInternalServerError, "an internal error occurred")
-			return
+			return nil, err
 		}
 		out = append(out, resp)
 	}
-	if err := saveState(st, state); err != nil {
-		s.failRequest(w, r, "sync.fail", err, http.StatusInternalServerError, "an internal error occurred")
-		return
-	}
-	writeWBXML(w, wbxml.Elem(wbxml.ASSync, wbxml.Elem(wbxml.ASCollections, out...)))
+	return out, nil
 }
 
 // syncWaitLimit builds the Status-14 reply for an out-of-range HeartbeatInterval,
@@ -314,20 +333,8 @@ func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node) (*wb
 		return syncStatus(collID, "0", syncStatusBadRequest), nil
 	}
 	cstate := dev.collection(collID)
-
-	// Prime: reset the snapshot and issue the first key, returning no items.
-	if clientKey == "0" {
-		cstate.SyncKey = nextSyncKey("0")
-		cstate.Items = map[string]int64{}
-		return syncResponse(collID, cstate.SyncKey, nil, nil, false), nil
-	}
-	// A key that is not the one we last issued forces a re-prime (Status 3). v1
-	// does not replay a dropped response; the client recovers by re-priming.
-	if clientKey == "" || clientKey != cstate.SyncKey {
-		return syncStatus(collID, "0", syncStatusInvalidKey), nil
-	}
-	if cstate.Items == nil {
-		cstate.Items = map[string]int64{}
+	if resp, done := syncKeyGate(collID, clientKey, cstate); done {
+		return resp, nil
 	}
 
 	// Object collections (calendar, contacts) take a separate path: their items are
@@ -349,8 +356,6 @@ func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node) (*wb
 	// diff below does not echo the client's own change back to it.
 	applyClientCommands(st, folderID, cstate, c)
 
-	pref := parseBodyPref(c)
-
 	live, err := st.ListMessages(folderID)
 	if err != nil {
 		return nil, err
@@ -363,6 +368,18 @@ func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node) (*wb
 		more = true
 	}
 
+	cmds, err := mailChangeCommands(st, folderID, collID, cstate, pending, parseBodyPref(c))
+	if err != nil {
+		return nil, err
+	}
+	cstate.SyncKey = nextSyncKey(clientKey)
+	return syncResponse(collID, cstate.SyncKey, cmds, nil, more), nil
+}
+
+// mailChangeCommands renders a mail folder's pending changes as Sync commands and
+// records each one in the device snapshot.
+func mailChangeCommands(st *objectstore.Store, folderID int64, collID string, cstate *collectionState,
+	pending []pendingChange, pref bodyPref) ([]*wbxml.Node, error) {
 	var cmds []*wbxml.Node
 	for _, ch := range pending {
 		switch ch.kind {
@@ -383,8 +400,27 @@ func syncCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node) (*wb
 			delete(cstate.Items, ch.sid)
 		}
 	}
-	cstate.SyncKey = nextSyncKey(clientKey)
-	return syncResponse(collID, cstate.SyncKey, cmds, nil, more), nil
+	return cmds, nil
+}
+
+// syncKeyGate handles the two sync-key cases that answer without collecting any
+// change: a prime (key 0) resets the snapshot and issues the first key, and a key
+// that is not the one last issued forces a re-prime with Status 3. v1 does not
+// replay a dropped response; the client recovers by re-priming. done is false when
+// the key is current, and the snapshot is then ready for the diff.
+func syncKeyGate(collID, clientKey string, cstate *collectionState) (*wbxml.Node, bool) {
+	if clientKey == "0" {
+		cstate.SyncKey = nextSyncKey("0")
+		cstate.Items = map[string]int64{}
+		return syncResponse(collID, cstate.SyncKey, nil, nil, false), true
+	}
+	if clientKey == "" || clientKey != cstate.SyncKey {
+		return syncStatus(collID, "0", syncStatusInvalidKey), true
+	}
+	if cstate.Items == nil {
+		cstate.Items = map[string]int64{}
+	}
+	return nil, false
 }
 
 // diffSnapshot compares the device's last-synced snapshot to the live folder and
@@ -433,28 +469,35 @@ func applyClientCommands(st *objectstore.Store, folderID int64, cstate *collecti
 		uid := uint32(uid64)
 		switch cmd.Tag {
 		case wbxml.ASChange:
-			data := cmd.Child(wbxml.ASData)
-			if data == nil {
-				continue
-			}
-			cur, err := st.MessageFlags(folderID, uid)
-			if err != nil {
-				continue
-			}
-			switch data.ChildText(wbxml.EMRead) {
-			case "1":
-				cur |= objectstore.FlagSeen
-			case "0":
-				cur &^= objectstore.FlagSeen
-			}
-			if st.SetMessageFlags(folderID, uid, cur) == nil {
-				cstate.Items[sid] = cur
-			}
+			applyReadFlag(st, folderID, uid, sid, cstate, cmd)
 		case wbxml.ASDelete:
 			if st.SoftDeleteMessage(folderID, uid) == nil {
 				delete(cstate.Items, sid)
 			}
 		}
+	}
+}
+
+// applyReadFlag applies one device Change command, which for a mail item carries
+// only the read flag, and records the resulting flags in the snapshot.
+func applyReadFlag(st *objectstore.Store, folderID int64, uid uint32, sid string,
+	cstate *collectionState, cmd *wbxml.Node) {
+	data := cmd.Child(wbxml.ASData)
+	if data == nil {
+		return
+	}
+	cur, err := st.MessageFlags(folderID, uid)
+	if err != nil {
+		return
+	}
+	switch data.ChildText(wbxml.EMRead) {
+	case "1":
+		cur |= objectstore.FlagSeen
+	case "0":
+		cur &^= objectstore.FlagSeen
+	}
+	if st.SetMessageFlags(folderID, uid, cur) == nil {
+		cstate.Items[sid] = cur
 	}
 }
 
@@ -568,30 +611,13 @@ func emailBody(raw []byte, pref bodyPref, forceMIME bool) *wbxml.Node {
 	if err != nil {
 		return mime()
 	}
-	var content []byte
-	if pref.typ == bodyTypeHTML {
-		if v, ok := msg.Props.Get(mapi.PrHTML); ok {
-			if b, ok := v.([]byte); ok {
-				content = b
-			}
-		}
-	}
-	if len(content) == 0 { // plain requested, or no HTML part
-		if v, ok := msg.Props.Get(mapi.PrBody); ok {
-			if s, ok := v.(string); ok {
-				content = []byte(s)
-			}
-		}
-		if pref.typ == bodyTypeHTML {
-			pref.typ = bodyTypePlain // downgraded: no HTML available
-		}
-	}
+	content, typ := extractedBody(msg, pref.typ)
 	if content == nil {
 		return mime()
 	}
 	full := len(content)
 	fields := []*wbxml.Node{
-		wbxml.Str(wbxml.ABType, strconv.Itoa(pref.typ)),
+		wbxml.Str(wbxml.ABType, strconv.Itoa(typ)),
 		wbxml.Str(wbxml.ABEstimatedDataSize, strconv.Itoa(full)),
 	}
 	if pref.truncation > 0 && full > pref.truncation {
@@ -600,6 +626,39 @@ func emailBody(raw []byte, pref bodyPref, forceMIME bool) *wbxml.Node {
 	}
 	fields = append(fields, wbxml.Opaque(wbxml.ABData, content))
 	return wbxml.Elem(wbxml.ABBody, fields...)
+}
+
+// extractedBody returns the message body in the requested representation and the
+// type actually served, which downgrades to plain when HTML was asked for and the
+// message carries none. A nil body means nothing could be extracted.
+func extractedBody(msg *oxcmail.Message, want int) ([]byte, int) {
+	if want == bodyTypeHTML {
+		if content := htmlBody(msg); len(content) > 0 {
+			return content, bodyTypeHTML
+		}
+		return plainBody(msg), bodyTypePlain
+	}
+	return plainBody(msg), want
+}
+
+// htmlBody returns the message's HTML part, or nil when it carries none.
+func htmlBody(msg *oxcmail.Message) []byte {
+	if v, ok := msg.Props.Get(mapi.PrHTML); ok {
+		if b, ok := v.([]byte); ok {
+			return b
+		}
+	}
+	return nil
+}
+
+// plainBody returns the message's plain-text part, or nil when it carries none.
+func plainBody(msg *oxcmail.Message) []byte {
+	if v, ok := msg.Props.Get(mapi.PrBody); ok {
+		if s, ok := v.(string); ok {
+			return []byte(s)
+		}
+	}
+	return nil
 }
 
 // readAppData builds the minimal ApplicationData for a flag change: just the

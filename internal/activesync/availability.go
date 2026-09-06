@@ -120,24 +120,30 @@ func quantizeFreeBusy(start, end time.Time, events []ews.CalendarEvent) string {
 		digits[i] = '0'
 	}
 	for _, ev := range events {
-		d := busyDigit(ev.BusyType)
-		if d == '0' {
-			continue
-		}
-		evStart, err1 := time.Parse(time.RFC3339, ev.StartTime)
-		evEnd, err2 := time.Parse(time.RFC3339, ev.EndTime)
-		if err1 != nil || err2 != nil {
-			continue
-		}
-		for i := 0; i < slots; i++ {
-			slotStart := start.Add(time.Duration(i) * mergedFreeBusySlot)
-			slotEnd := slotStart.Add(mergedFreeBusySlot)
-			if evStart.Before(slotEnd) && evEnd.After(slotStart) && d > digits[i] {
-				digits[i] = d
-			}
-		}
+		markBusySlots(digits, start, ev)
 	}
 	return string(digits)
+}
+
+// markBusySlots raises every slot one event overlaps to that event's digit. A free
+// event, or one whose times do not parse, marks nothing.
+func markBusySlots(digits []byte, start time.Time, ev ews.CalendarEvent) {
+	d := busyDigit(ev.BusyType)
+	if d == '0' {
+		return
+	}
+	evStart, err1 := time.Parse(time.RFC3339, ev.StartTime)
+	evEnd, err2 := time.Parse(time.RFC3339, ev.EndTime)
+	if err1 != nil || err2 != nil {
+		return
+	}
+	for i := range digits {
+		slotStart := start.Add(time.Duration(i) * mergedFreeBusySlot)
+		slotEnd := slotStart.Add(mergedFreeBusySlot)
+		if evStart.Before(slotEnd) && evEnd.After(slotStart) && d > digits[i] {
+			digits[i] = d
+		}
+	}
 }
 
 // busyDigit maps a CalendarFreeBusy BusyType to its MergedFreeBusy digit.

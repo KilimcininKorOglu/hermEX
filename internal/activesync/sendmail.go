@@ -56,6 +56,15 @@ func (s *Server) handleSendMail(w http.ResponseWriter, r *http.Request, sess *se
 		return
 	}
 
+	s.fileSentCopy(sess, r, cm)
+	w.WriteHeader(http.StatusOK)
+}
+
+// fileSentCopy saves the sent copy the device asked for and marks the source of a
+// reply or forward, so the icon survives across devices. Both are best-effort: the
+// message is already delivered, so a store that will not open is not a send
+// failure.
+func (s *Server) fileSentCopy(sess *session, r *http.Request, cm composeMail) {
 	// A reply or forward references a source message in the sender's own mailbox,
 	// in the WBXML Source or the URL query. Resolving it only against sess.mailbox
 	// keeps the mark scoped to the authenticated identity (OWASP A01).
@@ -65,20 +74,20 @@ func (s *Server) handleSendMail(w http.ResponseWriter, r *http.Request, sess *se
 		srcFolder, srcItem = resolveSource(cm, r)
 	}
 	needMark := srcFolder != "" && srcItem != ""
-
-	if cm.saveToSent || needMark {
-		st, err := objectstore.Open(sess.mailbox)
-		if err == nil {
-			if cm.saveToSent {
-				_, _ = st.AppendMessage(int64(mapi.PrivateFIDSentItems), cm.mime, time.Now(), objectstore.FlagSeen)
-			}
-			if needMark {
-				markReplyForwardSource(st, srcFolder, srcItem, forward)
-			}
-			_ = st.Close()
-		}
+	if !cm.saveToSent && !needMark {
+		return
 	}
-	w.WriteHeader(http.StatusOK)
+	st, err := objectstore.Open(sess.mailbox)
+	if err != nil {
+		return
+	}
+	defer func() { _ = st.Close() }()
+	if cm.saveToSent {
+		_, _ = st.AppendMessage(int64(mapi.PrivateFIDSentItems), cm.mime, time.Now(), objectstore.FlagSeen)
+	}
+	if needMark {
+		markReplyForwardSource(st, srcFolder, srcItem, forward)
+	}
 }
 
 // errUnauthorizedFrom is returned when a SendMail message carries a From header

@@ -188,32 +188,40 @@ func messageMatches(st *objectstore.Store, fid int64, m objectstore.MessageInfo,
 // messageBodyText returns the message's best text body (HTML preferred, then plain)
 // for a full-text match, mirroring the webmail search's body extraction.
 func messageBodyText(raw []byte) string {
-	root := mime.ParseStructure(raw)
 	var plain, html string
 	var walk func(p *mime.Part)
 	walk = func(p *mime.Part) {
 		if p == nil {
 			return
 		}
-		if p.Type == "text" && p.Disposition != "attachment" {
-			if c, err := p.DecodedContent(); err == nil {
-				switch {
-				case p.Subtype == "html" && html == "":
-					html = string(c)
-				case p.Subtype == "plain" && plain == "":
-					plain = string(c)
-				}
-			}
-		}
+		collectBodyPart(p, &plain, &html)
 		for _, ch := range p.Children {
 			walk(ch)
 		}
 	}
-	walk(root)
+	walk(mime.ParseStructure(raw))
 	if html != "" {
 		return html
 	}
 	return plain
+}
+
+// collectBodyPart records the first plain and the first HTML text part it sees,
+// skipping anything the message marks as an attachment.
+func collectBodyPart(p *mime.Part, plain, html *string) {
+	if p.Type != "text" || p.Disposition == "attachment" {
+		return
+	}
+	c, err := p.DecodedContent()
+	if err != nil {
+		return
+	}
+	switch {
+	case p.Subtype == "html" && *html == "":
+		*html = string(c)
+	case p.Subtype == "plain" && *plain == "":
+		*plain = string(c)
+	}
 }
 
 // parseSearchRange reads an Options>Range "lo-hi" (e.g. "0-49"). A missing or

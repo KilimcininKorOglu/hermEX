@@ -146,83 +146,91 @@ func (s *Server) dispatch(w http.ResponseWriter, r *http.Request, sess *session)
 		RemoteAddr: serve.ClientAddr(r),
 		Fields:     logging.Fields{"cmd": sess.req.cmd},
 	})
+	if s.forceProvision(w, r, sess) {
+		return
+	}
+	handler, ok := easCommands[sess.req.cmd]
+	if !ok {
+		http.Error(w, "command not implemented: "+sess.req.cmd, http.StatusNotImplemented)
+		return
+	}
+	handler(s, w, r, sess)
+}
+
+// easCommands is the single routing source from an ActiveSync command name to its
+// handler. A name absent here is a command this server does not implement.
+var easCommands = map[string]func(*Server, http.ResponseWriter, *http.Request, *session){
+	"Provision":         (*Server).handleProvision,
+	"FolderSync":        (*Server).handleFolderSync,
+	"Sync":              (*Server).handleSync,
+	"MeetingResponse":   (*Server).handleMeetingResponse,
+	"SendMail":          (*Server).handleSendMail,
+	"SmartReply":        (*Server).handleSendMail,
+	"SmartForward":      (*Server).handleSendMail,
+	"GetItemEstimate":   (*Server).handleGetItemEstimate,
+	"Ping":              (*Server).handlePing,
+	"Settings":          (*Server).handleSettings,
+	"ItemOperations":    (*Server).handleItemOperations,
+	"MoveItems":         (*Server).handleMoveItems,
+	"FolderCreate":      (*Server).handleFolderCreate,
+	"FolderDelete":      (*Server).handleFolderDelete,
+	"FolderUpdate":      (*Server).handleFolderUpdate,
+	"ResolveRecipients": (*Server).handleResolveRecipients,
+	"Search":            (*Server).handleSearch,
+	"Find":              (*Server).handleFind,
+	"ValidateCert":      (*Server).handleValidateCert,
+}
+
+// forceProvision stamps the calling device and answers HTTP 449 when the command
+// must not run until the device provisions again. It reports whether the response
+// is already written.
+func (s *Server) forceProvision(w http.ResponseWriter, r *http.Request, sess *session) bool {
 	var wipeStatus int
 	if sess.req.deviceID != "" {
 		wipeStatus = s.recordDevice(r, sess)
 	}
+	if sess.req.cmd == "Provision" {
+		return false
+	}
 	// A pending remote wipe is delivered only through a Provision exchange, so any
 	// other command from a device awaiting a wipe is answered with HTTP 449, which
 	// forces the device to re-provision and pick the wipe up immediately.
-	if sess.req.cmd != "Provision" && wipeOutstanding(wipeStatus) {
-		s.Logger.Emit(logging.Event{
-			Level:      logging.LevelInfo,
-			Subsystem:  logging.ActiveSync,
-			Name:       "provision.force",
-			User:       sess.user,
-			RemoteAddr: serve.ClientAddr(r),
-			Fields:     logging.Fields{"device": sess.req.deviceID, "cmd": sess.req.cmd},
-		})
-		w.WriteHeader(449)
-		return
+	if wipeOutstanding(wipeStatus) {
+		s.refuseUnprovisioned(w, r, sess, "")
+		return true
 	}
-	// A configured device policy must be acknowledged: a non-Provision command carrying a
-	// stale or missing policy key is answered with 449, forcing the device to re-provision
-	// and apply the current policy, this is how a policy change reaches an already-enrolled
+	// A configured device policy must be acknowledged: a command carrying a stale or
+	// missing policy key is answered with 449, forcing the device to re-provision and
+	// apply the current policy, this is how a policy change reaches an already-enrolled
 	// device. A mailbox with no policy resolves to the baseline key "1" and requires no
 	// provisioning, so unconfigured deployments never churn. (This resolves the policy per
 	// command; a generation cache is a future optimization if it ever matters.)
-	if sess.req.cmd != "Provision" && sess.req.deviceID != "" {
-		if want := easpolicy.Key(s.devicePolicy(sess)); want != "1" && sess.req.policyKey != want {
-			s.Logger.Emit(logging.Event{
-				Level:      logging.LevelInfo,
-				Subsystem:  logging.ActiveSync,
-				Name:       "provision.force",
-				User:       sess.user,
-				RemoteAddr: serve.ClientAddr(r),
-				Fields:     logging.Fields{"device": sess.req.deviceID, "cmd": sess.req.cmd, "reason": "stale-policy-key"},
-			})
-			w.WriteHeader(449)
-			return
-		}
+	if sess.req.deviceID == "" {
+		return false
 	}
-	switch sess.req.cmd {
-	case "Provision":
-		s.handleProvision(w, r, sess)
-	case "FolderSync":
-		s.handleFolderSync(w, r, sess)
-	case "Sync":
-		s.handleSync(w, r, sess)
-	case "MeetingResponse":
-		s.handleMeetingResponse(w, r, sess)
-	case "SendMail", "SmartReply", "SmartForward":
-		s.handleSendMail(w, r, sess)
-	case "GetItemEstimate":
-		s.handleGetItemEstimate(w, r, sess)
-	case "Ping":
-		s.handlePing(w, r, sess)
-	case "Settings":
-		s.handleSettings(w, r, sess)
-	case "ItemOperations":
-		s.handleItemOperations(w, r, sess)
-	case "MoveItems":
-		s.handleMoveItems(w, r, sess)
-	case "FolderCreate":
-		s.handleFolderCreate(w, r, sess)
-	case "FolderDelete":
-		s.handleFolderDelete(w, r, sess)
-	case "FolderUpdate":
-		s.handleFolderUpdate(w, r, sess)
-	case "ResolveRecipients":
-		s.handleResolveRecipients(w, r, sess)
-	case "Search":
-		s.handleSearch(w, r, sess)
-	case "Find":
-		s.handleFind(w, r, sess)
-	case "ValidateCert":
-		s.handleValidateCert(w, r, sess)
-	default:
-		http.Error(w, "command not implemented: "+sess.req.cmd, http.StatusNotImplemented)
+	want := easpolicy.Key(s.devicePolicy(sess))
+	if want == "1" || sess.req.policyKey == want {
+		return false
 	}
+	s.refuseUnprovisioned(w, r, sess, "stale-policy-key")
+	return true
+}
+
+// refuseUnprovisioned answers the 449 that sends a device back through Provision.
+func (s *Server) refuseUnprovisioned(w http.ResponseWriter, r *http.Request, sess *session, reason string) {
+	fields := logging.Fields{"device": sess.req.deviceID, "cmd": sess.req.cmd}
+	if reason != "" {
+		fields["reason"] = reason
+	}
+	s.Logger.Emit(logging.Event{
+		Level:      logging.LevelInfo,
+		Subsystem:  logging.ActiveSync,
+		Name:       "provision.force",
+		User:       sess.user,
+		RemoteAddr: serve.ClientAddr(r),
+		Fields:     fields,
+	})
+	w.WriteHeader(449)
 }
 
 // basicAuth validates HTTP Basic credentials against the directory and returns

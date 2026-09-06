@@ -53,18 +53,11 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request, sess *sessio
 		return
 	}
 
-	st, err := objectstore.Open(sess.mailbox)
+	dev, err := s.pingDevice(sess)
 	if err != nil {
 		s.failRequest(w, r, "ping.fail", err, http.StatusInternalServerError, "an internal error occurred")
 		return
 	}
-	state, err := loadState(st)
-	_ = st.Close()
-	if err != nil {
-		s.failRequest(w, r, "ping.fail", err, http.StatusInternalServerError, "an internal error occurred")
-		return
-	}
-	dev := state.device(sess.req.deviceID)
 
 	// Ping can only watch a folder the device has already synced (its snapshot is
 	// the change baseline). A watched folder with no snapshot means the device
@@ -75,7 +68,28 @@ func (s *Server) handlePing(w http.ResponseWriter, r *http.Request, sess *sessio
 			return
 		}
 	}
+	s.holdPing(w, r, sess, dev, folderIDs, heartbeat)
+}
 
+// pingDevice reads the calling device's sync state, closing the store again so a
+// held Ping does not keep the mailbox open for its whole heartbeat.
+func (s *Server) pingDevice(sess *session) (*deviceState, error) {
+	st, err := objectstore.Open(sess.mailbox)
+	if err != nil {
+		return nil, err
+	}
+	state, err := loadState(st)
+	_ = st.Close()
+	if err != nil {
+		return nil, err
+	}
+	return state.device(sess.req.deviceID), nil
+}
+
+// holdPing holds the request open until a watched folder changes (Status 2), the
+// heartbeat expires (Status 1), or the device disconnects.
+func (s *Server) holdPing(w http.ResponseWriter, r *http.Request, sess *session,
+	dev *deviceState, folderIDs []string, heartbeat time.Duration) {
 	deadline := time.Now().Add(heartbeat)
 	// Register the mailbox for a push wake before the first poll, so a change landing
 	// during the heartbeat wakes Ping at once. A nil waker (push disabled) leaves wake

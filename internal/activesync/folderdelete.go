@@ -22,9 +22,6 @@ func (s *Server) handleFolderDelete(w http.ResponseWriter, r *http.Request, sess
 		s.failRequest(w, r, "wbxml.parse.fail", err, http.StatusBadRequest, "invalid WBXML")
 		return
 	}
-	syncKey := root.ChildText(wbxml.FHSyncKey)
-	serverID := root.ChildText(wbxml.FHServerID)
-
 	st, err := objectstore.Open(sess.mailbox)
 	if err != nil {
 		s.failRequest(w, r, "folder.delete.fail", err, http.StatusInternalServerError, "an internal error occurred")
@@ -39,31 +36,8 @@ func (s *Server) handleFolderDelete(w http.ResponseWriter, r *http.Request, sess
 	}
 	dev := state.device(sess.req.deviceID)
 
-	if serverID == "" {
-		writeWBXML(w, folderDeleteStatus(fhStatusBadRequest))
-		return
-	}
-	if syncKey == "" || syncKey != dev.HierarchyKey {
-		writeWBXML(w, folderDeleteStatus(fhStatusBadSyncKey))
-		return
-	}
-
-	fid, err := strconv.ParseInt(serverID, 10, 64)
-	if err != nil {
-		writeWBXML(w, folderDeleteStatus(fhStatusNotFound))
-		return
-	}
-	if fid < mapi.PrivateFIDUnassignedStart {
-		writeWBXML(w, folderDeleteStatus(fhStatusSpecial))
-		return
-	}
-
-	if err := st.DeleteFolder(fid); err != nil {
-		if errors.Is(err, objectstore.ErrNotFound) {
-			writeWBXML(w, folderDeleteStatus(fhStatusNotFound))
-			return
-		}
-		writeWBXML(w, folderDeleteStatus(fhStatusServerError))
+	if code := deleteFolder(st, dev, root); code != fhStatusOK {
+		writeWBXML(w, folderDeleteStatus(code))
 		return
 	}
 
@@ -73,6 +47,33 @@ func (s *Server) handleFolderDelete(w http.ResponseWriter, r *http.Request, sess
 		return
 	}
 	writeWBXML(w, folderDeleteResponse(dev.HierarchyKey))
+}
+
+// deleteFolder validates a FolderDelete request and removes the folder it names,
+// returning the EAS status to report.
+func deleteFolder(st *objectstore.Store, dev *deviceState, root *wbxml.Node) int {
+	serverID := root.ChildText(wbxml.FHServerID)
+	if serverID == "" {
+		return fhStatusBadRequest
+	}
+	if syncKey := root.ChildText(wbxml.FHSyncKey); syncKey == "" || syncKey != dev.HierarchyKey {
+		return fhStatusBadSyncKey
+	}
+	fid, err := strconv.ParseInt(serverID, 10, 64)
+	if err != nil {
+		return fhStatusNotFound
+	}
+	if fid < mapi.PrivateFIDUnassignedStart {
+		return fhStatusSpecial
+	}
+	switch err := st.DeleteFolder(fid); {
+	case err == nil:
+		return fhStatusOK
+	case errors.Is(err, objectstore.ErrNotFound):
+		return fhStatusNotFound
+	default:
+		return fhStatusServerError
+	}
 }
 
 // folderDeleteResponse builds a Status-1 FolderDelete reply carrying the advanced

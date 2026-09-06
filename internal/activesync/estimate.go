@@ -48,40 +48,47 @@ func (s *Server) handleGetItemEstimate(w http.ResponseWriter, r *http.Request, s
 		if c.Tag != wbxml.GIECollection {
 			continue
 		}
-		// The collection id and sync key may arrive on either the GetItemEstimate
-		// or the AirSync code page depending on the client; accept both.
-		collID := c.ChildText(wbxml.ASCollectionID)
-		if collID == "" {
-			collID = c.ChildText(wbxml.GIECollectionID)
-		}
-		clientKey := c.ChildText(wbxml.ASSyncKey)
-		cstate := dev.collection(collID)
-
-		folderID, perr := strconv.ParseInt(collID, 10, 64)
-		if collID == "" || cstate.SyncKey == "" || clientKey != cstate.SyncKey || perr != nil {
-			responses = append(responses, estimateResponse(collID, estimateStatusNotPrimed, 0))
-			continue
-		}
-		// Object collections (calendar, contacts) are versioned by object change
-		// number, not the IMAP index, so their estimate must read the same object list
-		// Sync does.
-		if isObjectFolder(folderID) {
-			objs, err := st.ListFolderObjects(folderID)
-			if err != nil {
-				s.failRequest(w, r, "objects.list.fail", err, http.StatusInternalServerError, "an internal error occurred")
-				return
-			}
-			responses = append(responses, estimateResponse(collID, estimateStatusOK, objectChangeCount(cstate.Items, objs)))
-			continue
-		}
-		live, err := st.ListMessages(folderID)
+		resp, event, err := estimateCollection(st, dev, c)
 		if err != nil {
-			s.failRequest(w, r, "messages.list.fail", err, http.StatusInternalServerError, "an internal error occurred")
+			s.failRequest(w, r, event, err, http.StatusInternalServerError, "an internal error occurred")
 			return
 		}
-		responses = append(responses, estimateResponse(collID, estimateStatusOK, len(diffSnapshot(cstate.Items, live))))
+		responses = append(responses, resp)
 	}
 	writeWBXML(w, wbxml.Elem(wbxml.GIEGetItemEstimate, responses...))
+}
+
+// estimateCollection counts the changes the next Sync of one collection would
+// carry. A collection whose sync key is unprimed or stale reports Status 2, which
+// tells the device to Sync it first. On failure it also names the log event the
+// caller reports the failure under.
+func estimateCollection(st *objectstore.Store, dev *deviceState, c *wbxml.Node) (*wbxml.Node, string, error) {
+	// The collection id and sync key may arrive on either the GetItemEstimate
+	// or the AirSync code page depending on the client; accept both.
+	collID := c.ChildText(wbxml.ASCollectionID)
+	if collID == "" {
+		collID = c.ChildText(wbxml.GIECollectionID)
+	}
+	cstate := dev.collection(collID)
+	folderID, perr := strconv.ParseInt(collID, 10, 64)
+	if collID == "" || cstate.SyncKey == "" || c.ChildText(wbxml.ASSyncKey) != cstate.SyncKey || perr != nil {
+		return estimateResponse(collID, estimateStatusNotPrimed, 0), "", nil
+	}
+	// Object collections (calendar, contacts) are versioned by object change
+	// number, not the IMAP index, so their estimate must read the same object list
+	// Sync does.
+	if isObjectFolder(folderID) {
+		objs, err := st.ListFolderObjects(folderID)
+		if err != nil {
+			return nil, "objects.list.fail", err
+		}
+		return estimateResponse(collID, estimateStatusOK, objectChangeCount(cstate.Items, objs)), "", nil
+	}
+	live, err := st.ListMessages(folderID)
+	if err != nil {
+		return nil, "messages.list.fail", err
+	}
+	return estimateResponse(collID, estimateStatusOK, len(diffSnapshot(cstate.Items, live))), "", nil
 }
 
 // estimateResponse builds one GetItemEstimate Response element.
