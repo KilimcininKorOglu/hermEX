@@ -189,26 +189,7 @@ func TestExecuteRopSyncDownload(t *testing.T) {
 		t.Fatal("SyncConfigure did not return a sync-context handle over the transport")
 	}
 
-	// Drain the FastTransfer stream across separate Execute calls. The small
-	// buffer forces several chunks, so each GetBuffer Execute must re-resolve the
-	// sync handle the SyncConfigure Execute created. Stop at transfer_status DONE.
-	var stream []byte
-	done := false
-	for i := 0; i < 100 && !done; i++ {
-		rops, _ := execRops(t, ts, sid, &seq, ropGetBufferReq(0, 256), []uint32{syncH})
-		status, chunk := parseGetBuffer(t, rops)
-		stream = append(stream, chunk...)
-		switch status {
-		case 0x0003: // DONE
-			done = true
-		case 0x0001: // PARTIAL, keep draining
-		default:
-			t.Fatalf("GetBuffer transfer_status = %#x (error or unexpected)", status)
-		}
-	}
-	if !done {
-		t.Fatal("FastTransfer stream never reached DONE within 100 GetBuffer calls")
-	}
+	stream := drainSyncStream(t, ts, sid, &seq, syncH)
 	if len(stream) == 0 {
 		t.Fatal("FastTransfer stream was empty")
 	}
@@ -217,4 +198,27 @@ func TestExecuteRopSyncDownload(t *testing.T) {
 	if !bytes.Contains(stream, utf16le("SYNCME")) {
 		t.Errorf("downloaded stream (%d bytes) did not carry the seeded subject", len(stream))
 	}
+}
+
+// drainSyncStream drains the FastTransfer stream across separate Execute calls.
+// The small buffer forces several chunks, so each GetBuffer Execute must
+// re-resolve the sync handle the SyncConfigure Execute created. It stops at
+// transfer_status DONE, and fails the test if the stream never gets there.
+func drainSyncStream(t *testing.T, ts *httptest.Server, sid string, seq *string, syncH uint32) []byte {
+	t.Helper()
+	var stream []byte
+	for range 100 {
+		rops, _ := execRops(t, ts, sid, seq, ropGetBufferReq(0, 256), []uint32{syncH})
+		status, chunk := parseGetBuffer(t, rops)
+		stream = append(stream, chunk...)
+		switch status {
+		case 0x0003: // DONE
+			return stream
+		case 0x0001: // PARTIAL, keep draining
+		default:
+			t.Fatalf("GetBuffer transfer_status = %#x (error or unexpected)", status)
+		}
+	}
+	t.Fatal("FastTransfer stream never reached DONE within 100 GetBuffer calls")
+	return nil
 }

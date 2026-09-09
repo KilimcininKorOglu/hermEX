@@ -38,33 +38,57 @@ func fakeIMAP(t *testing.T, body string) (host string, port int, stored *[]strin
 			if len(f) < 2 {
 				continue
 			}
-			tag, verb := f[0], strings.ToUpper(f[1])
-			switch {
-			case verb == "LOGIN":
-				_, _ = io.WriteString(conn, tag+" OK\r\n")
-			case verb == "SELECT":
-				_, _ = io.WriteString(conn, "* 2 EXISTS\r\n"+tag+" OK [READ-WRITE]\r\n")
-			case verb == "UID" && strings.ToUpper(f[2]) == "SEARCH":
-				_, _ = io.WriteString(conn, "* SEARCH 101 102\r\n"+tag+" OK\r\n")
-			case verb == "UID" && strings.ToUpper(f[2]) == "FETCH":
-				_, _ = fmt.Fprintf(conn, "* 1 FETCH (UID %s BODY[] {%d}\r\n%s)\r\n%s OK\r\n", f[3], len(body), body, tag)
-			case verb == "UID" && strings.ToUpper(f[2]) == "STORE":
-				*rec = append(*rec, strings.TrimSpace(line))
-				_, _ = io.WriteString(conn, tag+" OK\r\n")
-			case verb == "EXPUNGE":
-				*rec = append(*rec, "EXPUNGE")
-				_, _ = io.WriteString(conn, tag+" OK\r\n")
-			case verb == "LOGOUT":
-				_, _ = io.WriteString(conn, "* BYE\r\n"+tag+" OK\r\n")
+			if done := serveIMAPCommand(conn, rec, line, f, body); done {
 				return
-			default:
-				_, _ = io.WriteString(conn, tag+" BAD unknown\r\n")
 			}
 		}
 	}()
 	h, p, _ := net.SplitHostPort(ln.Addr().String())
 	pn, _ := strconv.Atoi(p)
 	return h, pn, rec
+}
+
+// serveIMAPCommand answers one scripted command, reporting whether the session
+// ends here (LOGOUT). Each tagged reply echoes the request's tag.
+func serveIMAPCommand(conn net.Conn, rec *[]string, line string, f []string, body string) (done bool) {
+	tag := f[0]
+	switch strings.ToUpper(f[1]) {
+	case "LOGIN":
+		_, _ = io.WriteString(conn, tag+" OK\r\n")
+	case "SELECT":
+		_, _ = io.WriteString(conn, "* 2 EXISTS\r\n"+tag+" OK [READ-WRITE]\r\n")
+	case "UID":
+		serveIMAPUID(conn, rec, line, f, body)
+	case "EXPUNGE":
+		*rec = append(*rec, "EXPUNGE")
+		_, _ = io.WriteString(conn, tag+" OK\r\n")
+	case "LOGOUT":
+		_, _ = io.WriteString(conn, "* BYE\r\n"+tag+" OK\r\n")
+		return true
+	default:
+		_, _ = io.WriteString(conn, tag+" BAD unknown\r\n")
+	}
+	return false
+}
+
+// serveIMAPUID answers the UID sub-commands the client uses.
+func serveIMAPUID(conn net.Conn, rec *[]string, line string, f []string, body string) {
+	tag := f[0]
+	if len(f) < 3 {
+		_, _ = io.WriteString(conn, tag+" BAD unknown\r\n")
+		return
+	}
+	switch strings.ToUpper(f[2]) {
+	case "SEARCH":
+		_, _ = io.WriteString(conn, "* SEARCH 101 102\r\n"+tag+" OK\r\n")
+	case "FETCH":
+		_, _ = fmt.Fprintf(conn, "* 1 FETCH (UID %s BODY[] {%d}\r\n%s)\r\n%s OK\r\n", f[3], len(body), body, tag)
+	case "STORE":
+		*rec = append(*rec, strings.TrimSpace(line))
+		_, _ = io.WriteString(conn, tag+" OK\r\n")
+	default:
+		_, _ = io.WriteString(conn, tag+" BAD unknown\r\n")
+	}
 }
 
 // TestIMAPClient proves the client round-trips an IMAP session: login, select, UID search,
@@ -75,47 +99,27 @@ func TestIMAPClient(t *testing.T) {
 	host, port, recorded := fakeIMAP(t, msg)
 
 	c, err := dialIMAP(host, port, false, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := c.login("alice", "secret"); err != nil {
-		t.Fatalf("login: %v", err)
-	}
-	if err := c.selectFolder("INBOX"); err != nil {
-		t.Fatalf("select: %v", err)
-	}
+	mustNoErr(t, err, "dial")
+	mustNoErr(t, c.login("alice", "secret"), "login")
+	mustNoErr(t, c.selectFolder("INBOX"), "select")
 
 	uids, err := c.search("ALL")
-	if err != nil {
-		t.Fatalf("search: %v", err)
+	mustNoErr(t, err, "search")
+	if len(uids) != 2 {
+		t.Fatalf("search = %v, want two uids", uids)
 	}
-	if len(uids) != 2 || uids[0] != "101" || uids[1] != "102" {
-		t.Errorf("search = %v, want [101 102]", uids)
-	}
+	wantEq(t, uids[0], "101", "the first searched uid")
+	wantEq(t, uids[1], "102", "the second searched uid")
 
 	body, err := c.fetchBody("101")
-	if err != nil {
-		t.Fatalf("fetchBody: %v", err)
-	}
-	if string(body) != msg {
-		t.Errorf("fetchBody = %q, want %q", body, msg)
-	}
+	mustNoErr(t, err, "fetchBody")
+	wantEq(t, string(body), msg, "the fetched body")
 
-	if err := c.markSeen("101"); err != nil {
-		t.Fatalf("markSeen: %v", err)
-	}
-	if err := c.deleteMessage("102"); err != nil {
-		t.Fatalf("deleteMessage: %v", err)
-	}
-	if err := c.logout(); err != nil {
-		t.Fatalf("logout: %v", err)
-	}
+	mustNoErr(t, c.markSeen("101"), "markSeen")
+	mustNoErr(t, c.deleteMessage("102"), "deleteMessage")
+	mustNoErr(t, c.logout(), "logout")
 
-	joined := strings.Join(*recorded, " | ")
-	if !strings.Contains(joined, `STORE 101 +FLAGS (\Seen)`) {
-		t.Errorf("did not record the \\Seen store: %q", joined)
-	}
-	if !strings.Contains(joined, `STORE 102 +FLAGS (\Deleted)`) || !strings.Contains(joined, "EXPUNGE") {
-		t.Errorf("did not record the delete+expunge: %q", joined)
-	}
+	wantRecorded(t, *recorded, `STORE 101 +FLAGS (\Seen)`, "the \\Seen store")
+	wantRecorded(t, *recorded, `STORE 102 +FLAGS (\Deleted)`, "the delete flag")
+	wantRecorded(t, *recorded, "EXPUNGE", "the expunge")
 }

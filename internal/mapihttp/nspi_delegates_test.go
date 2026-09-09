@@ -77,19 +77,16 @@ func TestNspiModLinkAttWritesOwnDelegateList(t *testing.T) {
 
 	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
 	bind.Body.Close()
-	sid, seq := cookieByName(bind, "sid"), cookieByName(bind, "sequence")
-	if sid == "" || seq == "" {
-		t.Fatal("no cookies from Bind")
-	}
+	sid, seq := mustSession(t, bind, "Bind")
 	modLink := func(mid uint32, eid []byte) uint32 {
 		resp := mapiPost(t, ts, "/mapi/nspi", "ModLinkAtt", modLinkAttBody(0, uint32(mapi.PrEmsAbPublicDelegates), mid, [][]byte{eid}), func(r *http.Request) {
 			r.AddCookie(&http.Cookie{Name: "sid", Value: sid})
 			r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
 		})
 		defer resp.Body.Close()
-		if got := resp.Header.Get("X-ResponseCode"); got != "0" {
-			t.Fatalf("ModLinkAtt: X-ResponseCode = %q, want 0 (the op must be routed, not rejected)", got)
-		}
+		// The op must be routed, not rejected; the result inside the payload is
+		// what carries the access decision.
+		wantResponseCode(t, resp, "0", "ModLinkAtt")
 		if ns := cookieByName(resp, "sequence"); ns != "" {
 			seq = ns
 		}
@@ -101,18 +98,15 @@ func TestNspiModLinkAttWritesOwnDelegateList(t *testing.T) {
 	}
 
 	// alice (mid 0x10) adds bob (mid 0x11, ephemeral EID) to her own list.
-	if result := modLink(0x10, ephemeralEID(0x11)); result != 0 {
-		t.Fatalf("ModLinkAtt on own list = result %#x, want ecSuccess", result)
+	wantEq(t, modLink(0x10, ephemeralEID(0x11)), uint32(0), "ModLinkAtt on the caller's own list")
+	got := accs.delegates["alice@hermex.test"]
+	if len(got) != 1 {
+		t.Fatalf("alice's delegates = %v, want one", got)
 	}
-	if got := accs.delegates["alice@hermex.test"]; len(got) != 1 || got[0] != "bob@hermex.test" {
-		t.Fatalf("alice's delegates = %v, want [bob@hermex.test]", got)
-	}
+	wantEq(t, got[0], "bob@hermex.test", "the delegate alice added")
 
 	// alice tries to edit bob's list (mid 0x11), denied (0x80070005), no mutation.
-	if result := modLink(0x11, ephemeralEID(0x10)); result != 0x80070005 {
-		t.Errorf("ModLinkAtt on another user's list = result %#x, want ecAccessDenied", result)
-	}
-	if _, ok := accs.delegates["bob@hermex.test"]; ok {
-		t.Error("a denied ModLinkAtt mutated bob's delegate list")
-	}
+	wantEq(t, modLink(0x11, ephemeralEID(0x10)), uint32(0x80070005), "ModLinkAtt on another user's list")
+	_, mutated := accs.delegates["bob@hermex.test"]
+	wantEq(t, mutated, false, "a denied ModLinkAtt mutated bob's delegate list")
 }

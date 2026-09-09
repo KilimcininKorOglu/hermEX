@@ -39,35 +39,44 @@ func fakePOP3(t *testing.T, messages []string) (host string, port int, deleted *
 			if len(f) == 0 {
 				continue
 			}
-			switch strings.ToUpper(f[0]) {
-			case "USER", "PASS":
-				_, _ = io.WriteString(conn, "+OK\r\n")
-			case "UIDL":
-				var b strings.Builder
-				b.WriteString("+OK\r\n")
-				for i := range messages {
-					fmt.Fprintf(&b, "%d uid%d\r\n", i+1, i+1)
-				}
-				b.WriteString(".\r\n")
-				_, _ = io.WriteString(conn, b.String())
-			case "RETR":
-				n, _ := strconv.Atoi(f[1])
-				_, _ = io.WriteString(conn, "+OK\r\n"+messages[n-1]+"\r\n.\r\n")
-			case "DELE":
-				n, _ := strconv.Atoi(f[1])
-				*del = append(*del, n)
-				_, _ = io.WriteString(conn, "+OK\r\n")
-			case "QUIT":
-				_, _ = io.WriteString(conn, "+OK bye\r\n")
+			if done := servePOP3Command(conn, del, f, messages); done {
 				return
-			default:
-				_, _ = io.WriteString(conn, "-ERR unknown\r\n")
 			}
 		}
 	}()
 	h, p, _ := net.SplitHostPort(ln.Addr().String())
 	pn, _ := strconv.Atoi(p)
 	return h, pn, del
+}
+
+// servePOP3Command answers one scripted command, reporting whether the session
+// ends here (QUIT). Message n is messages[n-1].
+func servePOP3Command(conn net.Conn, del *[]int, f []string, messages []string) (done bool) {
+	switch strings.ToUpper(f[0]) {
+	case "USER", "PASS":
+		_, _ = io.WriteString(conn, "+OK\r\n")
+	case "UIDL":
+		var b strings.Builder
+		b.WriteString("+OK\r\n")
+		for i := range messages {
+			fmt.Fprintf(&b, "%d uid%d\r\n", i+1, i+1)
+		}
+		b.WriteString(".\r\n")
+		_, _ = io.WriteString(conn, b.String())
+	case "RETR":
+		n, _ := strconv.Atoi(f[1])
+		_, _ = io.WriteString(conn, "+OK\r\n"+messages[n-1]+"\r\n.\r\n")
+	case "DELE":
+		n, _ := strconv.Atoi(f[1])
+		*del = append(*del, n)
+		_, _ = io.WriteString(conn, "+OK\r\n")
+	case "QUIT":
+		_, _ = io.WriteString(conn, "+OK bye\r\n")
+		return true
+	default:
+		_, _ = io.WriteString(conn, "-ERR unknown\r\n")
+	}
+	return false
 }
 
 // TestPOP3Client proves the client round-trips a POP3 session: it authenticates, lists
@@ -82,38 +91,25 @@ func TestPOP3Client(t *testing.T) {
 	host, port, deleted := fakePOP3(t, msgs)
 
 	c, err := dialPOP3(host, port, false, false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := c.auth("alice", "secret"); err != nil {
-		t.Fatalf("auth: %v", err)
-	}
+	mustNoErr(t, err, "dial")
+	mustNoErr(t, c.auth("alice", "secret"), "auth")
 
 	uids, err := c.uidl()
-	if err != nil {
-		t.Fatalf("uidl: %v", err)
-	}
-	if len(uids) != 2 || uids[1] != "uid1" || uids[2] != "uid2" {
-		t.Errorf("uidl = %v, want {1:uid1, 2:uid2}", uids)
-	}
+	mustNoErr(t, err, "uidl")
+	wantEq(t, len(uids), 2, "listed unique ids")
+	wantEq(t, uids[1], "uid1", "the first unique id")
+	wantEq(t, uids[2], "uid2", "the second unique id")
 
 	body, err := c.retr(1)
-	if err != nil {
-		t.Fatalf("retr: %v", err)
-	}
-	if want := msgs[0] + "\r\n"; string(body) != want {
-		t.Errorf("retr(1) = %q, want %q", body, want)
-	}
+	mustNoErr(t, err, "retr")
+	wantEq(t, string(body), msgs[0]+"\r\n", "the retrieved message")
 
-	if err := c.dele(1); err != nil {
-		t.Fatalf("dele: %v", err)
+	mustNoErr(t, c.dele(1), "dele")
+	mustNoErr(t, c.quit(), "quit")
+	if len(*deleted) != 1 {
+		t.Fatalf("server saw deletions %v, want one", *deleted)
 	}
-	if err := c.quit(); err != nil {
-		t.Fatalf("quit: %v", err)
-	}
-	if len(*deleted) != 1 || (*deleted)[0] != 1 {
-		t.Errorf("server saw deletions %v, want [1]", *deleted)
-	}
+	wantEq(t, (*deleted)[0], 1, "the deleted message number")
 }
 
 // TestPOP3StallTimesOut proves the post-connect I/O deadline ends a session against a server

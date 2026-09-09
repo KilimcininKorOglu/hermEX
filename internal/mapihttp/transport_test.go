@@ -287,6 +287,25 @@ func TestExecuteRopLogon(t *testing.T) {
 		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
 	})
 	defer resp.Body.Close()
+	rops, handles := decodeExecuteResponse(t, resp)
+	if len(handles) != 1 {
+		t.Fatalf("logon handles = %v, want one", handles)
+	}
+	wantTrue(t, handles[0] != 0xFFFFFFFF, "logon sets the output handle")
+
+	// Response: RopId(0xFE), OutputHandleIndex(0), ReturnValue(0), LogonFlags,
+	// then 13 FolderId EIDs. Confirm the header and that all 13 EIDs fit.
+	if len(rops) < 3+1+13*8 {
+		t.Fatalf("logon response too short: %d bytes", len(rops))
+	}
+	wantEq(t, rops[0], byte(0xFE), "the response RopId")
+	wantEq(t, rops[1], byte(0x00), "the response OutputHandleIndex")
+	wantEq(t, binary.LittleEndian.Uint32(rops[2:]), uint32(0), "the response ReturnValue")
+}
+
+// decodeExecuteResponse reads an Execute reply body and decodes its ROP buffer.
+func decodeExecuteResponse(t *testing.T, resp *http.Response) (rops []byte, handles []uint32) {
+	t.Helper()
 	body, _ := io.ReadAll(resp.Body)
 	_, payload, found := bytes.Cut(body, []byte("\r\n\r\n"))
 	if !found || len(payload) < 16 {
@@ -298,20 +317,7 @@ func TestExecuteRopLogon(t *testing.T) {
 	}
 	rops, handles, err := oxmapihttp.DecodeExecute(payload[16 : 16+cbOut])
 	if err != nil {
-		t.Fatalf("decode logon response: %v", err)
+		t.Fatalf("decode the execute response: %v", err)
 	}
-	if len(handles) != 1 || handles[0] == 0xFFFFFFFF {
-		t.Fatalf("logon did not set the output handle: %v", handles)
-	}
-	// Response: RopId(0xFE), OutputHandleIndex(0), ReturnValue(0), LogonFlags,
-	// then 13 FolderId EIDs. Confirm the header and that all 13 EIDs fit.
-	if len(rops) < 3+1+13*8 {
-		t.Fatalf("logon response too short: %d bytes", len(rops))
-	}
-	if rops[0] != 0xFE || rops[1] != 0x00 {
-		t.Errorf("response header = % x, want FE 00", rops[0:2])
-	}
-	if ec := binary.LittleEndian.Uint32(rops[2:]); ec != 0 {
-		t.Errorf("ReturnValue = %#x, want 0", ec)
-	}
+	return rops, handles
 }

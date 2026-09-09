@@ -167,17 +167,12 @@ func TestNspiGetSpecialTable(t *testing.T) {
 	ts := newTestServer(t)
 	bind := mapiPost(t, ts, "/mapi/nspi", "Bind", bindBody(0), nil)
 	bind.Body.Close()
-	sid, seq := cookieByName(bind, "sid"), cookieByName(bind, "sequence")
-	if sid == "" || seq == "" {
-		t.Fatal("no cookies from Bind")
-	}
+	sid, seq := mustSession(t, bind, "Bind")
 
 	// Without cookies -> missing cookie (6).
 	noCookie := mapiPost(t, ts, "/mapi/nspi", "GetSpecialTable", specialTableBody(), nil)
 	noCookie.Body.Close()
-	if got := noCookie.Header.Get("X-ResponseCode"); got != "6" {
-		t.Errorf("GetSpecialTable without cookies: X-ResponseCode = %q, want 6", got)
-	}
+	wantResponseCode(t, noCookie, "6", "GetSpecialTable without cookies")
 
 	// With the bound session -> success, sequence rolled, the GAL + named-list rows.
 	gst := mapiPost(t, ts, "/mapi/nspi", "GetSpecialTable", specialTableBody(), func(r *http.Request) {
@@ -185,26 +180,18 @@ func TestNspiGetSpecialTable(t *testing.T) {
 		r.AddCookie(&http.Cookie{Name: "sequence", Value: seq})
 	})
 	defer gst.Body.Close()
-	if got := gst.Header.Get("X-ResponseCode"); got != "0" {
-		t.Fatalf("GetSpecialTable: X-ResponseCode = %q, want 0", got)
-	}
-	if newSeq := cookieByName(gst, "sequence"); newSeq == "" || newSeq == seq {
-		t.Errorf("GetSpecialTable did not roll the sequence (was %q, got %q)", seq, newSeq)
-	}
+	wantResponseCode(t, gst, "0", "GetSpecialTable")
+	newSeq := cookieByName(gst, "sequence")
+	wantTrue(t, newSeq != "" && newSeq != seq, "GetSpecialTable rolls the sequence")
+
 	p := nspiPayload(t, gst)
 	// status(0:4) + result(4:8) + codepage(8:12) + version-marker(12) + HasRows(13) + count(14:18)
 	if len(p) < 18 {
 		t.Fatalf("response too short: %d bytes", len(p))
 	}
-	if result := binary.LittleEndian.Uint32(p[4:]); result != 0 {
-		t.Errorf("result = %#x, want 0", result)
-	}
-	if p[13] != 0xFF {
-		t.Errorf("HasRows byte = %#x, want 0xFF", p[13])
-	}
-	if count := binary.LittleEndian.Uint32(p[14:]); count != 6 {
-		t.Errorf("container row count = %d, want 6 (GAL + 5 named address lists)", count)
-	}
+	wantEq(t, binary.LittleEndian.Uint32(p[4:]), uint32(0), "result")
+	wantEq(t, p[13], byte(0xFF), "the HasRows byte")
+	wantEq(t, binary.LittleEndian.Uint32(p[14:]), uint32(6), "container rows (GAL + 5 named address lists)")
 }
 
 // TestNspiQueryRows drives Bind then QueryRows within the session and confirms
