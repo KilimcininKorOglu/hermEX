@@ -1,7 +1,7 @@
 package oxcmail
 
 import (
-	"bytes"
+	"strconv"
 	"testing"
 	"time"
 
@@ -55,120 +55,104 @@ func TestImportPlainEnvelope(t *testing.T) {
 		"Hello,\r\nThis is the body.\r\n")
 
 	msg, err := Import(raw, Options{})
-	if err != nil {
-		t.Fatalf("Import: %v", err)
-	}
+	mustNoErr(t, err, "import")
 
-	if got := getString(t, msg.Props, mapi.PrMessageClass, "message class"); got != "IPM.Note" {
-		t.Errorf("message class = %q, want IPM.Note", got)
-	}
+	wantEq(t, getString(t, msg.Props, mapi.PrMessageClass, "message class"), "IPM.Note", "message class")
+	checkSubjectSplit(t, msg)
+	checkOriginatorIdentity(t, msg)
+	checkRecipientTable(t, msg)
+	checkEnvelopeIdentity(t, msg)
+	checkEnvelopeTimes(t, msg)
 
-	// Subject and its prefix/normalized split.
-	if got := getString(t, msg.Props, mapi.PrSubject, "subject"); got != "Re: Project status" {
-		t.Errorf("subject = %q", got)
-	}
-	if got := getString(t, msg.Props, mapi.PrSubjectPrefix, "subject prefix"); got != "Re: " {
-		t.Errorf("subject prefix = %q, want %q", got, "Re: ")
-	}
-	if got := getString(t, msg.Props, mapi.PrNormalizedSubject, "normalized subject"); got != "Project status" {
-		t.Errorf("normalized subject = %q", got)
-	}
+	// Importance from the header; sensitivity defaulted.
+	wantEq(t, getInt32(t, msg.Props, mapi.PrImportance, "importance"), int32(mapi.ImportanceHigh), "importance")
+	wantEq(t, getInt32(t, msg.Props, mapi.PrSensitivity, "sensitivity"), int32(mapi.SensitivityNone), "sensitivity")
 
-	// From populates the sent-representing identity.
-	if got := getString(t, msg.Props, mapi.PrSentRepresentingName, "representing name"); got != "Alice Example" {
-		t.Errorf("representing name = %q", got)
-	}
-	if got := getString(t, msg.Props, mapi.PrSentRepresentingSmtpAddress, "representing smtp"); got != "alice@example.com" {
-		t.Errorf("representing smtp = %q", got)
-	}
-	if got := getString(t, msg.Props, mapi.PrSentRepresentingAddrType, "representing addrtype"); got != "SMTP" {
-		t.Errorf("representing addrtype = %q", got)
-	}
+	// Transport headers captured verbatim.
+	th := getString(t, msg.Props, mapi.PrTransportMessageHeaders, "transport headers")
+	wantContains(t, th, "Message-ID: <msg123@example.com>", "the transport headers keep the original Message-ID line")
 
-	// With no Sender header, the sender identity is filled from representing.
-	if got := getString(t, msg.Props, mapi.PrSenderName, "sender name"); got != "Alice Example" {
-		t.Errorf("sender name = %q (fallback fill)", got)
-	}
-	if got := getString(t, msg.Props, mapi.PrSenderSmtpAddress, "sender smtp"); got != "alice@example.com" {
-		t.Errorf("sender smtp = %q (fallback fill)", got)
-	}
+	// Body decoded to text.
+	wantEq(t, getString(t, msg.Props, mapi.PrBody, "body"), "Hello,\r\nThis is the body.\r\n", "body")
+}
+
+// checkSubjectSplit asserts the subject and its prefix/normalized split.
+func checkSubjectSplit(t *testing.T, msg *Message) {
+	t.Helper()
+	wantEq(t, getString(t, msg.Props, mapi.PrSubject, "subject"), "Re: Project status", "subject")
+	wantEq(t, getString(t, msg.Props, mapi.PrSubjectPrefix, "subject prefix"), "Re: ", "subject prefix")
+	wantEq(t, getString(t, msg.Props, mapi.PrNormalizedSubject, "normalized subject"), "Project status", "normalized subject")
+}
+
+// checkOriginatorIdentity asserts that From populates the sent-representing
+// identity and that, with no Sender header, the sender identity is filled from it.
+func checkOriginatorIdentity(t *testing.T, msg *Message) {
+	t.Helper()
+	wantEq(t, getString(t, msg.Props, mapi.PrSentRepresentingName, "representing name"), "Alice Example", "representing name")
+	wantEq(t, getString(t, msg.Props, mapi.PrSentRepresentingSmtpAddress, "representing smtp"), "alice@example.com", "representing smtp")
+	wantEq(t, getString(t, msg.Props, mapi.PrSentRepresentingAddrType, "representing addrtype"), "SMTP", "representing addrtype")
+	wantEq(t, getString(t, msg.Props, mapi.PrSenderName, "sender name"), "Alice Example", "sender name, filled from representing")
+	wantEq(t, getString(t, msg.Props, mapi.PrSenderSmtpAddress, "sender smtp"), "alice@example.com", "sender smtp, filled from representing")
 
 	// Sender search key: "SMTP:" + uppercased address + trailing NUL.
-	if v, ok := msg.Props.Get(mapi.PrSenderSearchKey); !ok {
-		t.Error("sender search key missing")
-	} else if got, _ := v.([]byte); !bytes.Equal(got, []byte("SMTP:ALICE@EXAMPLE.COM\x00")) {
-		t.Errorf("sender search key = %q", got)
+	v, ok := msg.Props.Get(mapi.PrSenderSearchKey)
+	if !ok {
+		t.Fatal("sender search key missing")
 	}
+	key, _ := v.([]byte)
+	wantEq(t, string(key), "SMTP:ALICE@EXAMPLE.COM\x00", "sender search key")
+}
 
-	// Recipient table: two To, one Cc, in order.
+// checkRecipientTable asserts the recipient bags: two To, one Cc, in header order.
+func checkRecipientTable(t *testing.T, msg *Message) {
+	t.Helper()
 	if len(msg.Recipients) != 3 {
 		t.Fatalf("recipients = %d, want 3", len(msg.Recipients))
 	}
-	wantRcpt := []struct {
+	for i, w := range []struct {
 		name, smtp string
 		typ        int32
 	}{
 		{"Bob", "bob@example.org", mapi.RecipTo},
 		{"carol@example.net", "carol@example.net", mapi.RecipTo},
 		{"Dave", "dave@example.com", mapi.RecipCc},
-	}
-	for i, w := range wantRcpt {
+	} {
 		r := msg.Recipients[i]
-		if got := getString(t, r, mapi.PrDisplayName, "rcpt display name"); got != w.name {
-			t.Errorf("recipient %d name = %q, want %q", i, got, w.name)
-		}
-		if got := getString(t, r, mapi.PrSmtpAddress, "rcpt smtp"); got != w.smtp {
-			t.Errorf("recipient %d smtp = %q, want %q", i, got, w.smtp)
-		}
-		if got := getInt32(t, r, mapi.PrRecipientType, "rcpt type"); got != w.typ {
-			t.Errorf("recipient %d type = %d, want %d", i, got, w.typ)
-		}
-		if got := getInt32(t, r, mapi.PrObjectType, "rcpt object type"); got != mapi.ObjectTypeMailUser {
-			t.Errorf("recipient %d object type = %d", i, got)
-		}
+		label := "recipient " + strconv.Itoa(i)
+		wantEq(t, getString(t, r, mapi.PrDisplayName, "rcpt display name"), w.name, label+" name")
+		wantEq(t, getString(t, r, mapi.PrSmtpAddress, "rcpt smtp"), w.smtp, label+" smtp")
+		wantEq(t, getInt32(t, r, mapi.PrRecipientType, "rcpt type"), w.typ, label+" type")
+		wantEq(t, getInt32(t, r, mapi.PrObjectType, "rcpt object type"), int32(mapi.ObjectTypeMailUser), label+" object type")
 	}
+}
 
-	// Envelope ids and references, set verbatim.
-	if got := getString(t, msg.Props, mapi.PrInternetMessageID, "message id"); got != "<msg123@example.com>" {
-		t.Errorf("message id = %q", got)
-	}
-	if got := getString(t, msg.Props, mapi.PrInternetReferences, "references"); got != "<prev1@example.com> <prev2@example.com>" {
-		t.Errorf("references = %q", got)
-	}
-	if got := getString(t, msg.Props, mapi.PrInReplyToID, "in-reply-to"); got != "<prev2@example.com>" {
-		t.Errorf("in-reply-to = %q", got)
-	}
+// checkEnvelopeIdentity asserts the ids and references, which are set verbatim.
+func checkEnvelopeIdentity(t *testing.T, msg *Message) {
+	t.Helper()
+	wantEq(t, getString(t, msg.Props, mapi.PrInternetMessageID, "message id"), "<msg123@example.com>", "message id")
+	wantEq(t, getString(t, msg.Props, mapi.PrInternetReferences, "references"),
+		"<prev1@example.com> <prev2@example.com>", "references")
+	wantEq(t, getString(t, msg.Props, mapi.PrInReplyToID, "in-reply-to"), "<prev2@example.com>", "in-reply-to")
+}
 
-	// Submit time is the parsed Date converted to NT time.
-	wantTime := mapi.UnixToNTTime(time.Date(2006, 1, 2, 15, 4, 5, 0, time.UTC))
-	if v, ok := msg.Props.Get(mapi.PrClientSubmitTime); !ok {
-		t.Error("submit time missing")
-	} else if got, _ := v.(uint64); got != wantTime {
-		t.Errorf("submit time = %d, want %d", got, wantTime)
+// checkEnvelopeTimes asserts the submit time is the parsed Date converted to NT
+// time, and that the creation time mirrors it.
+func checkEnvelopeTimes(t *testing.T, msg *Message) {
+	t.Helper()
+	want := mapi.UnixToNTTime(time.Date(2006, 1, 2, 15, 4, 5, 0, time.UTC))
+	submit, ok := msg.Props.Get(mapi.PrClientSubmitTime)
+	if !ok {
+		t.Fatal("submit time missing")
 	}
-	// Creation time mirrors the submit time.
-	if v, ok := msg.Props.Get(mapi.PrCreationTime); !ok || v.(uint64) != wantTime {
-		t.Errorf("creation time = %v, want %d", v, wantTime)
-	}
+	got, _ := submit.(uint64)
+	wantEq(t, got, want, "submit time")
 
-	// Importance from the header; sensitivity defaulted.
-	if got := getInt32(t, msg.Props, mapi.PrImportance, "importance"); got != mapi.ImportanceHigh {
-		t.Errorf("importance = %d, want High", got)
+	created, ok := msg.Props.Get(mapi.PrCreationTime)
+	if !ok {
+		t.Fatal("creation time missing")
 	}
-	if got := getInt32(t, msg.Props, mapi.PrSensitivity, "sensitivity"); got != mapi.SensitivityNone {
-		t.Errorf("sensitivity = %d, want None (default)", got)
-	}
-
-	// Transport headers captured verbatim.
-	th := getString(t, msg.Props, mapi.PrTransportMessageHeaders, "transport headers")
-	if !bytes.Contains([]byte(th), []byte("Message-ID: <msg123@example.com>")) {
-		t.Errorf("transport headers missing original Message-ID line:\n%s", th)
-	}
-
-	// Body decoded to text.
-	if got := getString(t, msg.Props, mapi.PrBody, "body"); got != "Hello,\r\nThis is the body.\r\n" {
-		t.Errorf("body = %q", got)
-	}
+	gotCreated, _ := created.(uint64)
+	wantEq(t, gotCreated, want, "creation time")
 }
 
 // TestImportSenderAndRepresenting checks that an explicit Sender header

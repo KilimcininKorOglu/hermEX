@@ -37,18 +37,11 @@ func TestImportCalendarMerge(t *testing.T) {
 	}
 
 	msg, err := Import([]byte(meetingMail), Options{CalendarImporter: scheduling})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c, _ := msg.Props.Get(mapi.PrMessageClass); c != "IPM.Schedule.Meeting.Request" {
-		t.Errorf("class = %v, want IPM.Schedule.Meeting.Request (scheduling class overlaid)", c)
-	}
-	if !msg.Props.Has(startTag) {
-		t.Error("the named appointment property was not overlaid")
-	}
-	if s, _ := msg.Props.Get(mapi.PrSubject); s != "Email Subject" {
-		t.Errorf("subject = %v, want %q (the calendar's regular props must not clobber the email)", s, "Email Subject")
-	}
+	mustNoErr(t, err, "import with a scheduling importer")
+	wantEq(t, propString(msg.Props, mapi.PrMessageClass), "IPM.Schedule.Meeting.Request", "overlaid message class")
+	wantTrue(t, msg.Props.Has(startTag), "the named appointment property is overlaid")
+	wantEq(t, propString(msg.Props, mapi.PrSubject), "Email Subject",
+		"subject (the calendar's regular props must not clobber the email)")
 
 	// A calendar object that carries no message class is a plain VCALENDAR, not a
 	// scheduling message: nothing is overlaid.
@@ -56,26 +49,14 @@ func TestImportCalendarMerge(t *testing.T) {
 		return mapi.PropertyValues{{Tag: startTag, Value: uint64(123)}}, nil
 	}
 	msg2, err := Import([]byte(meetingMail), Options{CalendarImporter: plain})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if msg2.Props.Has(startTag) {
-		t.Error("a non-scheduling calendar object must not overlay appointment props")
-	}
-	if c, _ := msg2.Props.Get(mapi.PrMessageClass); c != "IPM.Note" {
-		t.Errorf("class = %v, want IPM.Note (unchanged for a non-scheduling calendar)", c)
-	}
+	mustNoErr(t, err, "import with a non-scheduling importer")
+	wantFalse(t, msg2.Props.Has(startTag), "a non-scheduling calendar object overlays appointment props")
+	wantEq(t, propString(msg2.Props, mapi.PrMessageClass), "IPM.Note", "class for a non-scheduling calendar")
 
 	// Without an importer, the calendar part stays unparsed and becomes an
 	// attachment, the message is plain mail.
 	msg3, err := Import([]byte(meetingMail), Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if c, _ := msg3.Props.Get(mapi.PrMessageClass); c != "IPM.Note" {
-		t.Errorf("class = %v, want IPM.Note (no importer, no overlay)", c)
-	}
-	if len(msg3.Attachments) != 1 {
-		t.Errorf("attachments = %d, want 1 (the unparsed text/calendar part)", len(msg3.Attachments))
-	}
+	mustNoErr(t, err, "import with no importer")
+	wantEq(t, propString(msg3.Props, mapi.PrMessageClass), "IPM.Note", "class with no importer")
+	wantEq(t, len(msg3.Attachments), 1, "attachments with no importer (the unparsed text/calendar part)")
 }

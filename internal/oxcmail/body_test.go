@@ -54,49 +54,42 @@ func TestImportAlternative(t *testing.T) {
 // the same body properties.
 func TestExportAlternativeRoundTrip(t *testing.T) {
 	msg1, err := Import(altVector, Options{})
-	if err != nil {
-		t.Fatalf("Import 1: %v", err)
-	}
+	mustNoErr(t, err, "first import")
 	wire, err := Export(msg1, Options{})
-	if err != nil {
-		t.Fatalf("Export: %v", err)
-	}
+	mustNoErr(t, err, "export")
 
 	// Structural check: the exported tree is multipart/alternative with a
 	// text/plain then a text/html part.
 	tree := mime.ParseStructure(wire)
-	if tree.Type != "multipart" || tree.Subtype != "alternative" {
-		t.Fatalf("exported top-level = %s/%s, want multipart/alternative", tree.Type, tree.Subtype)
-	}
+	wantPartType(t, tree, "multipart", "alternative", "exported top level")
 	if len(tree.Children) != 2 {
 		t.Fatalf("exported parts = %d, want 2", len(tree.Children))
 	}
-	if tree.Children[0].Type != "text" || tree.Children[0].Subtype != "plain" {
-		t.Errorf("part 0 = %s/%s, want text/plain", tree.Children[0].Type, tree.Children[0].Subtype)
-	}
-	if tree.Children[1].Type != "text" || tree.Children[1].Subtype != "html" {
-		t.Errorf("part 1 = %s/%s, want text/html", tree.Children[1].Type, tree.Children[1].Subtype)
-	}
+	wantPartType(t, tree.Children[0], "text", "plain", "part 0")
+	wantPartType(t, tree.Children[1], "text", "html", "part 1")
 
 	// Body properties survive the round-trip.
 	msg2, err := Import(wire, Options{})
-	if err != nil {
-		t.Fatalf("Import 2: %v", err)
-	}
-	if propString(msg1.Props, mapi.PrBody) != propString(msg2.Props, mapi.PrBody) {
-		t.Errorf("PR_BODY drifted: %q -> %q",
-			propString(msg1.Props, mapi.PrBody), propString(msg2.Props, mapi.PrBody))
-	}
+	mustNoErr(t, err, "re-import")
+	checkBodyPropsPreserved(t, msg1, msg2)
+}
+
+// wantPartType fails the test unless a MIME part carries the expected media type.
+func wantPartType(t *testing.T, part *mime.Part, typ, subtype, what string) {
+	t.Helper()
+	wantEq(t, part.Type+"/"+part.Subtype, typ+"/"+subtype, what)
+}
+
+// checkBodyPropsPreserved asserts the three body properties survive a round trip.
+func checkBodyPropsPreserved(t *testing.T, msg1, msg2 *Message) {
+	t.Helper()
+	wantEq(t, propString(msg2.Props, mapi.PrBody), propString(msg1.Props, mapi.PrBody), "PR_BODY after the round trip")
 	h1, _ := bytesProp(msg1.Props, mapi.PrHTML)
 	h2, _ := bytesProp(msg2.Props, mapi.PrHTML)
-	if !bytes.Equal(h1, h2) {
-		t.Errorf("PR_HTML drifted: %q -> %q", h1, h2)
-	}
+	wantEq(t, string(h2), string(h1), "PR_HTML after the round trip")
 	c1, _ := propInt32(msg1.Props, mapi.PrInternetCodepage)
 	c2, _ := propInt32(msg2.Props, mapi.PrInternetCodepage)
-	if c1 != c2 {
-		t.Errorf("PR_INTERNET_CPID drifted: %d -> %d", c1, c2)
-	}
+	wantEq(t, c2, c1, "PR_INTERNET_CPID after the round trip")
 }
 
 // mixedVector is a multipart/mixed message with a plain body and one attachment.
@@ -150,41 +143,27 @@ func TestImportMixedAttachment(t *testing.T) {
 // the same body and attachment data.
 func TestExportMixedRoundTrip(t *testing.T) {
 	msg1, err := Import(mixedVector, Options{})
-	if err != nil {
-		t.Fatalf("Import 1: %v", err)
-	}
+	mustNoErr(t, err, "first import")
 	wire, err := Export(msg1, Options{})
-	if err != nil {
-		t.Fatalf("Export: %v", err)
-	}
+	mustNoErr(t, err, "export")
 
 	tree := mime.ParseStructure(wire)
-	if tree.Type != "multipart" || tree.Subtype != "mixed" {
-		t.Fatalf("exported top-level = %s/%s, want multipart/mixed", tree.Type, tree.Subtype)
-	}
+	wantPartType(t, tree, "multipart", "mixed", "exported top level")
 	if len(tree.Children) != 2 {
 		t.Fatalf("exported parts = %d, want 2 (body + attachment)", len(tree.Children))
 	}
 
 	msg2, err := Import(wire, Options{})
-	if err != nil {
-		t.Fatalf("Import 2: %v", err)
-	}
-	if propString(msg1.Props, mapi.PrBody) != propString(msg2.Props, mapi.PrBody) {
-		t.Errorf("PR_BODY drifted")
-	}
+	mustNoErr(t, err, "re-import")
+	wantEq(t, propString(msg2.Props, mapi.PrBody), propString(msg1.Props, mapi.PrBody), "PR_BODY after the round trip")
 	if len(msg2.Attachments) != 1 {
 		t.Fatalf("re-imported attachments = %d, want 1", len(msg2.Attachments))
 	}
 	d1, _ := bytesProp(msg1.Attachments[0].Props, mapi.PrAttachDataBin)
 	d2, _ := bytesProp(msg2.Attachments[0].Props, mapi.PrAttachDataBin)
-	if !bytes.Equal(d1, d2) {
-		t.Errorf("attachment data drifted: %q -> %q", d1, d2)
-	}
-	if propString(msg1.Attachments[0].Props, mapi.PrAttachLongFilename) !=
-		propString(msg2.Attachments[0].Props, mapi.PrAttachLongFilename) {
-		t.Errorf("attachment filename drifted")
-	}
+	wantEq(t, string(d2), string(d1), "attachment data after the round trip")
+	wantEq(t, propString(msg2.Attachments[0].Props, mapi.PrAttachLongFilename),
+		propString(msg1.Attachments[0].Props, mapi.PrAttachLongFilename), "attachment filename after the round trip")
 }
 
 // relatedVector is a multipart/related message: an HTML body that references an
@@ -236,43 +215,29 @@ func TestImportRelatedInline(t *testing.T) {
 // multipart/related (HTML + image) and re-imports to the same inline attachment.
 func TestExportRelatedRoundTrip(t *testing.T) {
 	msg1, err := Import(relatedVector, Options{})
-	if err != nil {
-		t.Fatalf("Import 1: %v", err)
-	}
+	mustNoErr(t, err, "first import")
 	wire, err := Export(msg1, Options{})
-	if err != nil {
-		t.Fatalf("Export: %v", err)
-	}
+	mustNoErr(t, err, "export")
 
 	tree := mime.ParseStructure(wire)
-	if tree.Type != "multipart" || tree.Subtype != "related" {
-		t.Fatalf("exported top-level = %s/%s, want multipart/related", tree.Type, tree.Subtype)
-	}
+	wantPartType(t, tree, "multipart", "related", "exported top level")
 	if len(tree.Children) != 2 {
 		t.Fatalf("exported parts = %d, want 2 (html + image)", len(tree.Children))
 	}
 
 	msg2, err := Import(wire, Options{})
-	if err != nil {
-		t.Fatalf("Import 2: %v", err)
-	}
+	mustNoErr(t, err, "re-import")
 	if len(msg2.Attachments) != 1 {
 		t.Fatalf("re-imported attachments = %d, want 1", len(msg2.Attachments))
 	}
-	if propString(msg1.Attachments[0].Props, mapi.PrAttachContentID) !=
-		propString(msg2.Attachments[0].Props, mapi.PrAttachContentID) {
-		t.Errorf("Content-ID drifted")
-	}
+	wantEq(t, propString(msg2.Attachments[0].Props, mapi.PrAttachContentID),
+		propString(msg1.Attachments[0].Props, mapi.PrAttachContentID), "Content-ID after the round trip")
 	f1, _ := propInt32(msg1.Attachments[0].Props, mapi.PrAttachFlags)
 	f2, _ := propInt32(msg2.Attachments[0].Props, mapi.PrAttachFlags)
-	if f1 != f2 {
-		t.Errorf("attachment flags drifted: %d -> %d", f1, f2)
-	}
+	wantEq(t, f2, f1, "attachment flags after the round trip")
 	d1, _ := bytesProp(msg1.Attachments[0].Props, mapi.PrAttachDataBin)
 	d2, _ := bytesProp(msg2.Attachments[0].Props, mapi.PrAttachDataBin)
-	if !bytes.Equal(d1, d2) {
-		t.Errorf("inline image data drifted")
-	}
+	wantEq(t, string(d2), string(d1), "inline image data after the round trip")
 }
 
 // TestHTMLNonUTF8Charset checks that a non-UTF-8 HTML body keeps its raw bytes

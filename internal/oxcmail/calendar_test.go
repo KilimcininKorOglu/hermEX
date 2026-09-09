@@ -24,56 +24,54 @@ func TestExportCalendarAlternative(t *testing.T) {
 		"BEGIN:VEVENT\r\nUID:meeting-42\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")
 
 	wire, err := Export(msg, Options{CalendarBody: ical, CalendarMethod: "REPLY"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	mustNoErr(t, err, "export with a calendar body")
 	m, err := mail.ReadMessage(bytes.NewReader(wire))
 	if err != nil {
 		t.Fatalf("exported message not parseable: %v\n%s", err, wire)
 	}
 	mediaType, params, err := stdmime.ParseMediaType(m.Header.Get("Content-Type"))
-	if err != nil || mediaType != "multipart/alternative" {
-		t.Fatalf("top Content-Type = %q (%v), want multipart/alternative", mediaType, err)
-	}
+	mustNoErr(t, err, "parse the top Content-Type")
+	wantEq(t, mediaType, "multipart/alternative", "top media type")
 
-	mr := multipart.NewReader(m.Body, params["boundary"])
-	var sawCalendar, sawPlain bool
-	for {
-		p, err := mr.NextPart()
-		if err != nil {
-			break
-		}
-		mt, pp, _ := stdmime.ParseMediaType(p.Header.Get("Content-Type"))
-		body, _ := io.ReadAll(p)
-		switch mt {
-		case "text/calendar":
-			sawCalendar = true
-			if pp["method"] != "REPLY" {
-				t.Errorf("calendar part method = %q, want REPLY", pp["method"])
-			}
-			if !bytes.Contains(body, []byte("UID:meeting-42")) {
-				t.Errorf("calendar part missing the iCalendar body:\n%s", body)
-			}
-		case "text/plain":
-			sawPlain = true
-			if !bytes.Contains(body, []byte("Alice has accepted.")) {
-				t.Errorf("text/plain alternative = %q, want the body", body)
-			}
-		}
+	alternatives := readAlternatives(t, m.Body, params["boundary"])
+	calendar, ok := alternatives["text/calendar"]
+	if !ok {
+		t.Fatal("no text/calendar alternative in the exported message")
 	}
-	if !sawCalendar {
-		t.Error("no text/calendar alternative in the exported message")
+	wantEq(t, calendar.params["method"], "REPLY", "calendar part method")
+	wantContains(t, calendar.body, "UID:meeting-42", "the calendar part carries the iCalendar body")
+
+	plainPart, ok := alternatives["text/plain"]
+	if !ok {
+		t.Fatal("no text/plain alternative in the exported message")
 	}
-	if !sawPlain {
-		t.Error("no text/plain alternative in the exported message")
-	}
+	wantContains(t, plainPart.body, "Alice has accepted.", "the text alternative carries the body")
 
 	// Without a calendar body the message stays a plain leaf, no calendar part.
 	plain, err := Export(msg, Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if bytes.Contains(plain, []byte("text/calendar")) {
-		t.Error("Export without CalendarBody must not emit a calendar part")
+	mustNoErr(t, err, "export without a calendar body")
+	wantNotContains(t, string(plain), "text/calendar", "an export without CalendarBody emits no calendar part")
+}
+
+// alternativePart is one branch of a multipart/alternative: its Content-Type
+// parameters and its decoded body.
+type alternativePart struct {
+	params map[string]string
+	body   string
+}
+
+// readAlternatives reads a multipart body into its parts, keyed by media type.
+func readAlternatives(t *testing.T, body io.Reader, boundary string) map[string]alternativePart {
+	t.Helper()
+	out := map[string]alternativePart{}
+	mr := multipart.NewReader(body, boundary)
+	for {
+		p, err := mr.NextPart()
+		if err != nil {
+			return out
+		}
+		mt, pp, _ := stdmime.ParseMediaType(p.Header.Get("Content-Type"))
+		raw, _ := io.ReadAll(p)
+		out[mt] = alternativePart{params: pp, body: string(raw)}
 	}
 }

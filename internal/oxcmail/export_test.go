@@ -4,6 +4,7 @@ import (
 	"bytes"
 	stdmime "mime"
 	"net/mail"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -58,70 +59,67 @@ func TestExportPreservesXSpamHeaders(t *testing.T) {
 // expected values.
 func TestExportWellFormed(t *testing.T) {
 	msg, err := Import(plainVector, Options{})
-	if err != nil {
-		t.Fatalf("Import: %v", err)
-	}
+	mustNoErr(t, err, "import")
 	wire, err := Export(msg, Options{})
-	if err != nil {
-		t.Fatalf("Export: %v", err)
-	}
+	mustNoErr(t, err, "export")
 
 	m, err := mail.ReadMessage(bytes.NewReader(wire))
 	if err != nil {
 		t.Fatalf("exported message not parseable by net/mail: %v\n%s", err, wire)
 	}
 
-	from, err := mail.ParseAddress(m.Header.Get("From"))
-	if err != nil {
-		t.Fatalf("From not parseable: %v", err)
-	}
-	if from.Address != "alice@example.com" {
-		t.Errorf("From address = %q", from.Address)
-	}
-	if from.Name != "Alice Example" {
-		t.Errorf("From name = %q", from.Name)
-	}
-	// A message that named only From must not gain a Sender header.
-	if s := m.Header.Get("Sender"); s != "" {
-		t.Errorf("unexpected Sender header %q", s)
-	}
-
-	to, err := m.Header.AddressList("To")
-	if err != nil {
-		t.Fatalf("To not parseable: %v", err)
-	}
-	if len(to) != 2 || to[0].Address != "bob@example.org" || to[1].Address != "carol@example.net" {
-		t.Errorf("To = %+v", to)
-	}
-	cc, err := m.Header.AddressList("Cc")
-	if err != nil || len(cc) != 1 || cc[0].Address != "dave@example.com" {
-		t.Errorf("Cc = %+v (err %v)", cc, err)
-	}
-
-	subj, err := (&stdmime.WordDecoder{}).DecodeHeader(m.Header.Get("Subject"))
-	if err != nil {
-		t.Fatalf("Subject decode: %v", err)
-	}
-	if subj != "Re: Project status" {
-		t.Errorf("Subject = %q", subj)
-	}
-
-	if got := m.Header.Get("Message-ID"); got != "<msg123@example.com>" {
-		t.Errorf("Message-ID = %q", got)
-	}
-
-	d, err := m.Header.Date()
-	if err != nil {
-		t.Fatalf("Date parse: %v", err)
-	}
-	if want := time.Date(2006, 1, 2, 15, 4, 5, 0, time.UTC); !d.Equal(want) {
-		t.Errorf("Date = %v, want %v", d, want)
-	}
+	checkExportedOriginator(t, m)
+	checkExportedRecipients(t, m)
+	checkExportedEnvelope(t, m)
 
 	body := make([]byte, 1024)
 	n, _ := m.Body.Read(body)
-	if got := string(body[:n]); got != "Hello,\r\nThis is the body.\r\n" {
-		t.Errorf("body = %q", got)
+	wantEq(t, string(body[:n]), "Hello,\r\nThis is the body.\r\n", "body")
+}
+
+// checkExportedOriginator asserts the From identity survives the export, and that
+// a message that named only From did not gain a Sender header.
+func checkExportedOriginator(t *testing.T, m *mail.Message) {
+	t.Helper()
+	from, err := mail.ParseAddress(m.Header.Get("From"))
+	mustNoErr(t, err, "parse From")
+	wantEq(t, from.Address, "alice@example.com", "From address")
+	wantEq(t, from.Name, "Alice Example", "From name")
+	wantEq(t, m.Header.Get("Sender"), "", "Sender header")
+}
+
+// checkExportedRecipients asserts the two address lists survive the export.
+func checkExportedRecipients(t *testing.T, m *mail.Message) {
+	t.Helper()
+	to, err := m.Header.AddressList("To")
+	mustNoErr(t, err, "parse To")
+	if len(to) != 2 {
+		t.Fatalf("To = %+v, want two addresses", to)
+	}
+	wantEq(t, to[0].Address, "bob@example.org", "first To address")
+	wantEq(t, to[1].Address, "carol@example.net", "second To address")
+
+	cc, err := m.Header.AddressList("Cc")
+	mustNoErr(t, err, "parse Cc")
+	if len(cc) != 1 {
+		t.Fatalf("Cc = %+v, want one address", cc)
+	}
+	wantEq(t, cc[0].Address, "dave@example.com", "Cc address")
+}
+
+// checkExportedEnvelope asserts the subject, id and date survive the export.
+func checkExportedEnvelope(t *testing.T, m *mail.Message) {
+	t.Helper()
+	subj, err := (&stdmime.WordDecoder{}).DecodeHeader(m.Header.Get("Subject"))
+	mustNoErr(t, err, "decode Subject")
+	wantEq(t, subj, "Re: Project status", "Subject")
+	wantEq(t, m.Header.Get("Message-ID"), "<msg123@example.com>", "Message-ID")
+
+	d, err := m.Header.Date()
+	mustNoErr(t, err, "parse Date")
+	want := time.Date(2006, 1, 2, 15, 4, 5, 0, time.UTC)
+	if !d.Equal(want) {
+		t.Errorf("Date = %v, want %v", d, want)
 	}
 }
 
@@ -183,60 +181,48 @@ func TestEnsureMessageID(t *testing.T) {
 
 func TestExportImportRoundTrip(t *testing.T) {
 	msg1, err := Import(plainVector, Options{})
-	if err != nil {
-		t.Fatalf("Import 1: %v", err)
-	}
+	mustNoErr(t, err, "first import")
 	wire, err := Export(msg1, Options{})
-	if err != nil {
-		t.Fatalf("Export: %v", err)
-	}
+	mustNoErr(t, err, "export")
 	msg2, err := Import(wire, Options{})
-	if err != nil {
-		t.Fatalf("Import 2: %v", err)
-	}
+	mustNoErr(t, err, "re-import")
 
-	stringProps := []mapi.PropTag{
+	for _, tag := range []mapi.PropTag{
 		mapi.PrSubject, mapi.PrSubjectPrefix, mapi.PrNormalizedSubject,
 		mapi.PrSentRepresentingName, mapi.PrSentRepresentingSmtpAddress,
 		mapi.PrSenderSmtpAddress, mapi.PrInternetMessageID,
 		mapi.PrInternetReferences, mapi.PrInReplyToID, mapi.PrBody,
-	}
-	for _, tag := range stringProps {
-		v1 := propString(msg1.Props, tag)
-		v2 := propString(msg2.Props, tag)
-		if v1 != v2 {
-			t.Errorf("%s drifted: %q -> %q", tag, v1, v2)
-		}
+	} {
+		wantEq(t, propString(msg2.Props, tag), propString(msg1.Props, tag), tag.String()+" after the round trip")
 	}
 
-	int32Props := []mapi.PropTag{mapi.PrImportance, mapi.PrSensitivity}
-	for _, tag := range int32Props {
+	for _, tag := range []mapi.PropTag{mapi.PrImportance, mapi.PrSensitivity} {
 		v1, _ := propInt32(msg1.Props, tag)
 		v2, _ := propInt32(msg2.Props, tag)
-		if v1 != v2 {
-			t.Errorf("%s drifted: %d -> %d", tag, v1, v2)
-		}
+		wantEq(t, v2, v1, tag.String()+" after the round trip")
 	}
 
-	if v1, _ := propUint64(msg1.Props, mapi.PrClientSubmitTime); true {
-		v2, _ := propUint64(msg2.Props, mapi.PrClientSubmitTime)
-		if v1 != v2 {
-			t.Errorf("submit time drifted: %d -> %d", v1, v2)
-		}
-	}
+	t1, _ := propUint64(msg1.Props, mapi.PrClientSubmitTime)
+	t2, _ := propUint64(msg2.Props, mapi.PrClientSubmitTime)
+	wantEq(t, t2, t1, "submit time after the round trip")
 
-	// Recipient set (smtp + type) must be preserved, in order.
+	checkRecipientsPreserved(t, msg1, msg2)
+}
+
+// checkRecipientsPreserved asserts the recipient set (smtp + type) survives the
+// round trip, in order.
+func checkRecipientsPreserved(t *testing.T, msg1, msg2 *Message) {
+	t.Helper()
 	if len(msg1.Recipients) != len(msg2.Recipients) {
 		t.Fatalf("recipient count drifted: %d -> %d", len(msg1.Recipients), len(msg2.Recipients))
 	}
 	for i := range msg1.Recipients {
-		s1 := propString(msg1.Recipients[i], mapi.PrSmtpAddress)
-		s2 := propString(msg2.Recipients[i], mapi.PrSmtpAddress)
-		t1, _ := propInt32(msg1.Recipients[i], mapi.PrRecipientType)
-		t2, _ := propInt32(msg2.Recipients[i], mapi.PrRecipientType)
-		if s1 != s2 || t1 != t2 {
-			t.Errorf("recipient %d drifted: (%q,%d) -> (%q,%d)", i, s1, t1, s2, t2)
-		}
+		label := "recipient " + strconv.Itoa(i)
+		wantEq(t, propString(msg2.Recipients[i], mapi.PrSmtpAddress),
+			propString(msg1.Recipients[i], mapi.PrSmtpAddress), label+" smtp")
+		want, _ := propInt32(msg1.Recipients[i], mapi.PrRecipientType)
+		got, _ := propInt32(msg2.Recipients[i], mapi.PrRecipientType)
+		wantEq(t, got, want, label+" type")
 	}
 }
 
