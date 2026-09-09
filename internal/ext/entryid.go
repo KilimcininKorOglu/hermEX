@@ -155,6 +155,24 @@ func (p *Push) StoreEntryID(s mapi.StoreEntryID) {
 // name plus the full wrapped record; 1 carries only the wrapped provider uid
 // with the remaining fields defaulted. Any other value is malformed.
 func (p *Pull) StoreEntryID() (mapi.StoreEntryID, error) {
+	s, err := p.storeEntryIDWrapper()
+	if err != nil {
+		return s, err
+	}
+	switch s.IVFlag {
+	case 0:
+		err = p.storeEntryIDRecord(&s)
+	case 1:
+		s.WrappedProviderUID, err = p.FlatUID()
+	default:
+		err = ErrFormat
+	}
+	return s, err
+}
+
+// storeEntryIDWrapper reads and validates the wrapper: the flags, the wrap uid,
+// the version, and the inline flag that decides what follows.
+func (p *Pull) storeEntryIDWrapper() (mapi.StoreEntryID, error) {
 	var s mapi.StoreEntryID
 	var err error
 	if s.Flags, err = p.Uint32(); err != nil {
@@ -173,34 +191,31 @@ func (p *Pull) StoreEntryID() (mapi.StoreEntryID, error) {
 	if s.Version != 0 {
 		return s, ErrFormat
 	}
-	if s.IVFlag, err = p.Uint8(); err != nil {
-		return s, err
+	s.IVFlag, err = p.Uint8()
+	return s, err
+}
+
+// storeEntryIDRecord reads the full wrapped record an inline flag of 0 carries:
+// the DLL name (not retained) and the wrapped provider's own fields.
+func (p *Pull) storeEntryIDRecord(s *mapi.StoreEntryID) error {
+	if _, err := p.Raw(14); err != nil { // DLL name, not retained
+		return err
 	}
-	switch s.IVFlag {
-	case 0:
-		if _, err = p.Raw(14); err != nil { // DLL name, not retained
-			return s, err
-		}
-		if s.WrappedFlags, err = p.Uint32(); err != nil {
-			return s, err
-		}
-		if s.WrappedProviderUID, err = p.FlatUID(); err != nil {
-			return s, err
-		}
-		if s.WrappedType, err = p.Uint32(); err != nil {
-			return s, err
-		}
-		if s.ServerName, err = p.String8(); err != nil {
-			return s, err
-		}
-		s.MailboxDN, err = p.String8()
-		return s, err
-	case 1:
-		s.WrappedProviderUID, err = p.FlatUID()
-		return s, err
-	default:
-		return s, ErrFormat
+	var err error
+	if s.WrappedFlags, err = p.Uint32(); err != nil {
+		return err
 	}
+	if s.WrappedProviderUID, err = p.FlatUID(); err != nil {
+		return err
+	}
+	if s.WrappedType, err = p.Uint32(); err != nil {
+		return err
+	}
+	if s.ServerName, err = p.String8(); err != nil {
+		return err
+	}
+	s.MailboxDN, err = p.String8()
+	return err
 }
 
 // MessageEntryID writes a 70-byte message entry id.

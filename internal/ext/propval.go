@@ -72,149 +72,131 @@ func (p *Push) PropValue(typ mapi.PropType, v any) error {
 	} else if typ&mapi.MviFlag == mapi.MviFlag {
 		typ &^= mapi.MviFlag // a multivalue instance is written as a single value
 	}
-	switch typ {
-	case mapi.PtNull:
-		// Deliberate deviation: the standard property codec has no PT_NULL case
-		// and rejects it. PtypNull means "property present, no value",
-		// so we encode it as the empty payload it denotes rather than erroring.
+	write, ok := propWriters[typ]
+	if !ok {
+		return fmt.Errorf("%w: unsupported property type %s", ErrFormat, typ)
+	}
+	return write(p, v)
+}
+
+// propWriter writes one bare property value. The Go type it expects is the one
+// documented on mapi.TaggedPropVal for that property type.
+type propWriter func(p *Push, v any) error
+
+// pushTyped adapts a typed writer to an untyped table entry, refusing a value
+// that is not the Go type the entry calls for.
+func pushTyped[T any](write func(p *Push, x T) error) func(p *Push, v any) error {
+	return func(p *Push, v any) error {
+		x, err := asType[T](v)
+		if err != nil {
+			return err
+		}
+		return write(p, x)
+	}
+}
+
+// propWriters is the property-type vocabulary the encoder writes. A type absent
+// from it is refused rather than guessed at.
+var propWriters = map[mapi.PropType]propWriter{
+	// Deliberate deviation: the standard property codec has no PT_NULL case and
+	// rejects it. PtypNull means "property present, no value", so it is encoded as
+	// the empty payload it denotes rather than erroring.
+	mapi.PtNull:   func(*Push, any) error { return nil },
+	mapi.PtSvrEID: pushTyped((*Push).SVREID),
+	mapi.PtShort: pushTyped(func(p *Push, x int16) error {
+		p.Uint16(uint16(x)) // #nosec G115 -- the signed and unsigned views of the same 16 bits
 		return nil
-	case mapi.PtUnspecified:
-		x, err := asType[mapi.TypedPropVal](v)
-		if err != nil {
-			return err
-		}
-		return p.TypedPropVal(x)
-	case mapi.PtSvrEID:
-		x, err := asType[mapi.SVREID](v)
-		if err != nil {
-			return err
-		}
-		return p.SVREID(x)
-	case mapi.PtRestriction:
-		x, err := asType[mapi.Restriction](v)
-		if err != nil {
-			return err
-		}
-		return p.Restriction(x)
-	case mapi.PtActions:
-		x, err := asType[mapi.RuleActions](v)
-		if err != nil {
-			return err
-		}
-		return p.RuleActions(x)
-	case mapi.PtShort:
-		x, err := asType[int16](v)
-		if err != nil {
-			return err
-		}
-		// #nosec G115 -- the signed and unsigned views of the same 16 bits
-		p.Uint16(uint16(x))
-	case mapi.PtLong:
-		x, err := asType[int32](v)
-		if err != nil {
-			return err
-		}
-		// #nosec G115 -- the signed and unsigned views of the same 32 bits
-		p.Uint32(uint32(x))
-	case mapi.PtError:
-		x, err := asType[uint32](v)
-		if err != nil {
-			return err
-		}
-		p.Uint32(x)
-	case mapi.PtFloat:
-		x, err := asType[float32](v)
-		if err != nil {
-			return err
-		}
-		p.Float32(x)
-	case mapi.PtDouble, mapi.PtAppTime:
-		x, err := asType[float64](v)
-		if err != nil {
-			return err
-		}
-		p.Float64(x)
-	case mapi.PtCurrency, mapi.PtI8:
-		x, err := asType[int64](v)
-		if err != nil {
-			return err
-		}
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		p.Uint64(uint64(x))
-	case mapi.PtSysTime:
-		x, err := asType[uint64](v)
-		if err != nil {
-			return err
-		}
-		p.Uint64(x)
-	case mapi.PtBoolean:
-		x, err := asType[bool](v)
-		if err != nil {
-			return err
-		}
-		p.Bool(x)
-	case mapi.PtString8:
-		x, err := asType[string](v)
-		if err != nil {
-			return err
-		}
-		p.String8(x)
-	case mapi.PtUnicode:
-		x, err := asType[string](v)
-		if err != nil {
-			return err
-		}
-		p.Unicode(x)
-	case mapi.PtCLSID:
-		x, err := asType[mapi.GUID](v)
-		if err != nil {
-			return err
-		}
-		p.GUID(x)
-	case mapi.PtBinary:
-		x, err := asType[[]byte](v)
-		if err != nil {
-			return err
-		}
-		return p.Bin(x)
-	case mapi.PtObject:
-		// PT_OBJECT carries no data in address-book mode; elsewhere it is a
-		// binary (e.g. PR_ATTACH_DATA_OBJ during ICS).
+	}),
+	mapi.PtLong: pushTyped(func(p *Push, x int32) error {
+		p.Uint32(uint32(x)) // #nosec G115 -- the signed and unsigned views of the same 32 bits
+		return nil
+	}),
+	mapi.PtError:    pushTyped(func(p *Push, x uint32) error { p.Uint32(x); return nil }),
+	mapi.PtFloat:    pushTyped(func(p *Push, x float32) error { p.Float32(x); return nil }),
+	mapi.PtDouble:   pushDouble,
+	mapi.PtAppTime:  pushDouble,
+	mapi.PtCurrency: pushInt64,
+	mapi.PtI8:       pushInt64,
+	mapi.PtSysTime:  pushTyped(func(p *Push, x uint64) error { p.Uint64(x); return nil }),
+	mapi.PtBoolean:  pushTyped(func(p *Push, x bool) error { p.Bool(x); return nil }),
+	mapi.PtString8:  pushTyped(func(p *Push, x string) error { p.String8(x); return nil }),
+	mapi.PtUnicode:  pushTyped(func(p *Push, x string) error { p.Unicode(x); return nil }),
+	mapi.PtCLSID:    pushTyped(func(p *Push, x mapi.GUID) error { p.GUID(x); return nil }),
+	mapi.PtBinary:   pushTyped((*Push).Bin),
+	// PT_OBJECT carries no data in address-book mode; elsewhere it is a binary
+	// (e.g. PR_ATTACH_DATA_OBJ during ICS).
+	mapi.PtObject: func(p *Push, v any) error {
 		if p.flags&FlagABK != 0 {
 			return nil
 		}
-		x, err := asType[[]byte](v)
-		if err != nil {
-			return err
-		}
-		return p.Bin(x)
-	case mapi.PtMvShort:
-		// #nosec G115 -- the signed and unsigned views of the same 16 bits
-		return pushMV(p, v, func(p *Push, x int16) error { p.Uint16(uint16(x)); return nil })
-	case mapi.PtMvLong:
-		// #nosec G115 -- the signed and unsigned views of the same 32 bits
-		return pushMV(p, v, func(p *Push, x int32) error { p.Uint32(uint32(x)); return nil })
-	case mapi.PtMvCurrency, mapi.PtMvI8:
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		return pushMV(p, v, func(p *Push, x int64) error { p.Uint64(uint64(x)); return nil })
-	case mapi.PtMvSysTime:
+		return pushTyped((*Push).Bin)(p, v)
+	},
+	mapi.PtMvShort: func(p *Push, v any) error {
+		return pushMV(p, v, func(p *Push, x int16) error {
+			p.Uint16(uint16(x)) // #nosec G115 -- the signed and unsigned views of the same 16 bits
+			return nil
+		})
+	},
+	mapi.PtMvLong: func(p *Push, v any) error {
+		return pushMV(p, v, func(p *Push, x int32) error {
+			p.Uint32(uint32(x)) // #nosec G115 -- the signed and unsigned views of the same 32 bits
+			return nil
+		})
+	},
+	mapi.PtMvCurrency: pushMvInt64,
+	mapi.PtMvI8:       pushMvInt64,
+	mapi.PtMvDouble:   pushMvDouble,
+	mapi.PtMvAppTime:  pushMvDouble,
+	mapi.PtMvSysTime: func(p *Push, v any) error {
 		return pushMV(p, v, func(p *Push, x uint64) error { p.Uint64(x); return nil })
-	case mapi.PtMvFloat:
+	},
+	mapi.PtMvFloat: func(p *Push, v any) error {
 		return pushMV(p, v, func(p *Push, x float32) error { p.Float32(x); return nil })
-	case mapi.PtMvDouble, mapi.PtMvAppTime:
-		return pushMV(p, v, func(p *Push, x float64) error { p.Float64(x); return nil })
-	case mapi.PtMvString8:
+	},
+	mapi.PtMvString8: func(p *Push, v any) error {
 		return pushMV(p, v, func(p *Push, x string) error { p.String8(x); return nil })
-	case mapi.PtMvUnicode:
+	},
+	mapi.PtMvUnicode: func(p *Push, v any) error {
 		return pushMV(p, v, func(p *Push, x string) error { p.Unicode(x); return nil })
-	case mapi.PtMvCLSID:
+	},
+	mapi.PtMvCLSID: func(p *Push, v any) error {
 		return pushMV(p, v, func(p *Push, x mapi.GUID) error { p.GUID(x); return nil })
-	case mapi.PtMvBinary:
+	},
+	mapi.PtMvBinary: func(p *Push, v any) error {
 		return pushMV(p, v, func(p *Push, x []byte) error { return p.Bin(x) })
-	default:
-		return fmt.Errorf("%w: unsupported property type %s", ErrFormat, typ)
+	},
+}
+
+// pushDouble and pushInt64 back the property types that share one encoding:
+// PT_APPTIME is a double and PT_I8 is a currency on the wire.
+var (
+	pushDouble = pushTyped(func(p *Push, x float64) error { p.Float64(x); return nil })
+	pushInt64  = pushTyped(func(p *Push, x int64) error {
+		p.Uint64(uint64(x)) // #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		return nil
+	})
+	pushMvDouble propWriter = func(p *Push, v any) error {
+		return pushMV(p, v, func(p *Push, x float64) error { p.Float64(x); return nil })
 	}
-	return nil
+	pushMvInt64 propWriter = func(p *Push, v any) error {
+		return pushMV(p, v, func(p *Push, x int64) error {
+			p.Uint64(uint64(x)) // #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+			return nil
+		})
+	}
+)
+
+// init registers the writers whose own encoders read propWriters back (a
+// restriction and a rule action both carry property values), which a package-level
+// table entry cannot express.
+func init() {
+	propWriters[mapi.PtUnspecified] = pushTyped((*Push).TypedPropVal)
+	propWriters[mapi.PtRestriction] = pushTyped((*Push).Restriction)
+	propWriters[mapi.PtActions] = pushTyped((*Push).RuleActions)
+
+	propReaders[mapi.PtUnspecified] = pullTyped((*Pull).TypedPropVal)
+	propReaders[mapi.PtRestriction] = pullTyped((*Pull).Restriction)
+	propReaders[mapi.PtActions] = pullTyped((*Pull).RuleActions)
 }
 
 // PropValue reads a bare property value of the given type.
@@ -233,79 +215,107 @@ func (p *Pull) PropValue(typ mapi.PropType) (any, error) {
 	} else if typ&mapi.MviFlag == mapi.MviFlag {
 		typ &^= mapi.MviFlag
 	}
-	switch typ {
-	case mapi.PtNull:
-		return nil, nil // see Push.PropValue: deliberate deviation, no payload
-	case mapi.PtUnspecified:
-		return p.TypedPropVal()
-	case mapi.PtSvrEID:
-		return p.SVREID()
-	case mapi.PtRestriction:
-		return p.Restriction()
-	case mapi.PtActions:
-		return p.RuleActions()
-	case mapi.PtShort:
-		v, err := p.Uint16()
-		// #nosec G115 -- the signed and unsigned views of the same 16 bits
-		return int16(v), err
-	case mapi.PtLong:
-		v, err := p.Uint32()
-		// #nosec G115 -- the signed and unsigned views of the same 32 bits
-		return int32(v), err
-	case mapi.PtError:
-		v, err := p.Uint32()
-		return v, err
-	case mapi.PtFloat:
-		return p.Float32()
-	case mapi.PtDouble, mapi.PtAppTime:
-		return p.Float64()
-	case mapi.PtCurrency, mapi.PtI8:
+	read, ok := propReaders[typ]
+	if !ok {
+		return nil, fmt.Errorf("%w: unsupported property type %s", ErrFormat, typ)
+	}
+	return read(p)
+}
+
+// propReader reads one bare property value, returning the Go type documented on
+// mapi.TaggedPropVal for that property type.
+type propReader func(p *Pull) (any, error)
+
+// pullTyped adapts a typed reader to an untyped table entry.
+func pullTyped[T any](read func(p *Pull) (T, error)) func(p *Pull) (any, error) {
+	return func(p *Pull) (any, error) { return read(p) }
+}
+
+// pullDouble and pullInt64 back the property types that share one encoding:
+// PT_APPTIME is a double and PT_I8 is a currency on the wire.
+var (
+	pullDouble = pullTyped((*Pull).Float64)
+	pullInt64  = func(p *Pull) (any, error) {
 		v, err := p.Uint64()
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		return int64(v), err
-	case mapi.PtSysTime:
-		return p.Uint64()
-	case mapi.PtBoolean:
-		return p.Bool()
-	case mapi.PtString8:
-		return p.String8()
-	case mapi.PtUnicode:
-		return p.Unicode()
-	case mapi.PtCLSID:
-		return p.GUID()
-	case mapi.PtBinary:
-		return p.Bin()
-	case mapi.PtObject:
+		return int64(v), err // #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+	}
+	pullMvDouble propReader = func(p *Pull) (any, error) {
+		return pullMV(p, func(p *Pull) (float64, error) { return p.Float64() })
+	}
+	pullMvInt64 propReader = func(p *Pull) (any, error) {
+		return pullMV(p, func(p *Pull) (int64, error) {
+			v, err := p.Uint64()
+			return int64(v), err // #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
+		})
+	}
+)
+
+// propReaders is the property-type vocabulary the decoder reads. A type absent
+// from it is refused rather than guessed at.
+var propReaders = map[mapi.PropType]propReader{
+	// See Push.PropValue: a deliberate deviation, PT_NULL carries no payload.
+	mapi.PtNull:   func(*Pull) (any, error) { return nil, nil },
+	mapi.PtSvrEID: pullTyped((*Pull).SVREID),
+	mapi.PtShort: func(p *Pull) (any, error) {
+		v, err := p.Uint16()
+		return int16(v), err // #nosec G115 -- the signed and unsigned views of the same 16 bits
+	},
+	mapi.PtLong: func(p *Pull) (any, error) {
+		v, err := p.Uint32()
+		return int32(v), err // #nosec G115 -- the signed and unsigned views of the same 32 bits
+	},
+	mapi.PtError:    pullTyped((*Pull).Uint32),
+	mapi.PtFloat:    pullTyped((*Pull).Float32),
+	mapi.PtDouble:   pullDouble,
+	mapi.PtAppTime:  pullDouble,
+	mapi.PtCurrency: pullInt64,
+	mapi.PtI8:       pullInt64,
+	mapi.PtSysTime:  pullTyped((*Pull).Uint64),
+	mapi.PtBoolean:  pullTyped((*Pull).Bool),
+	mapi.PtString8:  pullTyped((*Pull).String8),
+	mapi.PtUnicode:  pullTyped((*Pull).Unicode),
+	mapi.PtCLSID:    pullTyped((*Pull).GUID),
+	mapi.PtBinary:   pullTyped((*Pull).Bin),
+	mapi.PtObject: func(p *Pull) (any, error) {
 		if p.flags&FlagABK != 0 {
 			return nil, nil
 		}
 		return p.Bin()
-	case mapi.PtMvShort:
-		// #nosec G115 -- the signed and unsigned views of the same 16 bits
-		return pullMV(p, func(p *Pull) (int16, error) { v, err := p.Uint16(); return int16(v), err })
-	case mapi.PtMvLong:
-		// #nosec G115 -- the signed and unsigned views of the same 32 bits
-		return pullMV(p, func(p *Pull) (int32, error) { v, err := p.Uint32(); return int32(v), err })
-	case mapi.PtMvCurrency, mapi.PtMvI8:
-		// #nosec G115 -- a store id crosses SQLite's signed 64-bit column; both widths hold the same bits and the value round-trips exactly
-		return pullMV(p, func(p *Pull) (int64, error) { v, err := p.Uint64(); return int64(v), err })
-	case mapi.PtMvSysTime:
+	},
+	mapi.PtMvShort: func(p *Pull) (any, error) {
+		return pullMV(p, func(p *Pull) (int16, error) {
+			v, err := p.Uint16()
+			return int16(v), err // #nosec G115 -- the signed and unsigned views of the same 16 bits
+		})
+	},
+	mapi.PtMvLong: func(p *Pull) (any, error) {
+		return pullMV(p, func(p *Pull) (int32, error) {
+			v, err := p.Uint32()
+			return int32(v), err // #nosec G115 -- the signed and unsigned views of the same 32 bits
+		})
+	},
+	mapi.PtMvCurrency: pullMvInt64,
+	mapi.PtMvI8:       pullMvInt64,
+	mapi.PtMvDouble:   pullMvDouble,
+	mapi.PtMvAppTime:  pullMvDouble,
+	mapi.PtMvSysTime: func(p *Pull) (any, error) {
 		return pullMV(p, func(p *Pull) (uint64, error) { return p.Uint64() })
-	case mapi.PtMvFloat:
+	},
+	mapi.PtMvFloat: func(p *Pull) (any, error) {
 		return pullMV(p, func(p *Pull) (float32, error) { return p.Float32() })
-	case mapi.PtMvDouble, mapi.PtMvAppTime:
-		return pullMV(p, func(p *Pull) (float64, error) { return p.Float64() })
-	case mapi.PtMvString8:
+	},
+	mapi.PtMvString8: func(p *Pull) (any, error) {
 		return pullMV(p, func(p *Pull) (string, error) { return p.String8() })
-	case mapi.PtMvUnicode:
+	},
+	mapi.PtMvUnicode: func(p *Pull) (any, error) {
 		return pullMV(p, func(p *Pull) (string, error) { return p.Unicode() })
-	case mapi.PtMvCLSID:
+	},
+	mapi.PtMvCLSID: func(p *Pull) (any, error) {
 		return pullMV(p, func(p *Pull) (mapi.GUID, error) { return p.GUID() })
-	case mapi.PtMvBinary:
+	},
+	mapi.PtMvBinary: func(p *Pull) (any, error) {
 		return pullMV(p, func(p *Pull) ([]byte, error) { return p.Bin() })
-	default:
-		return nil, fmt.Errorf("%w: unsupported property type %s", ErrFormat, typ)
-	}
+	},
 }
 
 // TaggedPropVal writes a property tag followed by its value (the value type is

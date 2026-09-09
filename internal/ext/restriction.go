@@ -22,124 +22,122 @@ var errRestrictionTooDeep = errors.New("restriction nested past the depth limit"
 // a u32. The recursion bottoms out at ResNull, which has no payload.
 func (p *Push) Restriction(r mapi.Restriction) error {
 	p.Uint8(uint8(r.Type))
-	switch r.Type {
-	case mapi.ResAnd, mapi.ResOr:
-		kids, err := asType[[]mapi.Restriction](r.Value)
-		if err != nil {
-			return err
-		}
-		if p.flags&FlagWCount != 0 {
-			// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
-			p.Uint32(uint32(len(kids)))
-		} else {
-			if len(kids) > 0xFFFF {
-				return ErrFormat
-			}
-			// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
-			p.Uint16(uint16(len(kids)))
-		}
-		for _, k := range kids {
-			if err := p.Restriction(k); err != nil {
-				return err
-			}
-		}
-		return nil
-	case mapi.ResNot:
-		inner, err := asType[mapi.Restriction](r.Value)
-		if err != nil {
-			return err
-		}
-		return p.Restriction(inner)
-	case mapi.ResContent:
-		c, err := asType[mapi.ContentRestriction](r.Value)
-		if err != nil {
-			return err
-		}
-		p.Uint32(c.FuzzyLevel)
-		p.Uint32(uint32(c.PropTag))
-		return p.TaggedPropVal(c.PropVal)
-	case mapi.ResProperty:
-		pr, err := asType[mapi.PropertyRestriction](r.Value)
-		if err != nil {
-			return err
-		}
-		p.Uint8(uint8(pr.Relop))
-		p.Uint32(uint32(pr.PropTag))
-		return p.TaggedPropVal(pr.PropVal)
-	case mapi.ResPropCompare:
-		pc, err := asType[mapi.ComparePropsRestriction](r.Value)
-		if err != nil {
-			return err
-		}
-		p.Uint8(uint8(pc.Relop))
-		p.Uint32(uint32(pc.PropTag1))
-		p.Uint32(uint32(pc.PropTag2))
-		return nil
-	case mapi.ResBitmask:
-		b, err := asType[mapi.BitmaskRestriction](r.Value)
-		if err != nil {
-			return err
-		}
-		p.Uint8(uint8(b.Relop))
-		p.Uint32(uint32(b.PropTag))
-		p.Uint32(b.Mask)
-		return nil
-	case mapi.ResSize:
-		s, err := asType[mapi.SizeRestriction](r.Value)
-		if err != nil {
-			return err
-		}
-		p.Uint8(uint8(s.Relop))
-		p.Uint32(uint32(s.PropTag))
-		p.Uint32(s.Size)
-		return nil
-	case mapi.ResExist:
-		e, err := asType[mapi.ExistRestriction](r.Value)
-		if err != nil {
-			return err
-		}
-		p.Uint32(uint32(e.PropTag))
-		return nil
-	case mapi.ResSub:
-		s, err := asType[mapi.SubRestriction](r.Value)
-		if err != nil {
-			return err
-		}
-		p.Uint32(s.SubObject)
-		return p.Restriction(s.Res)
-	case mapi.ResComment, mapi.ResAnnotation:
-		c, err := asType[mapi.CommentRestriction](r.Value)
-		if err != nil {
-			return err
-		}
-		if len(c.PropVals) == 0 || len(c.PropVals) > 0xFF {
-			return ErrFormat
-		}
-		// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
-		p.Uint8(uint8(len(c.PropVals)))
-		for _, pv := range c.PropVals {
-			if err := p.TaggedPropVal(pv); err != nil {
-				return err
-			}
-		}
-		if c.Res != nil {
-			p.Uint8(1)
-			return p.Restriction(*c.Res)
-		}
-		p.Uint8(0)
-		return nil
-	case mapi.ResCount:
-		c, err := asType[mapi.CountRestriction](r.Value)
-		if err != nil {
-			return err
-		}
-		p.Uint32(c.Count)
-		return p.Restriction(c.SubRes)
-	case mapi.ResNull:
-		return nil
-	default:
+	write, ok := restrictionWriters[r.Type]
+	if !ok {
 		return ErrFormat
 	}
+	return write(p, r.Value)
+}
+
+// restrictionWriter writes one restriction node's payload; the type tag is
+// already on the wire.
+type restrictionWriter func(p *Push, v any) error
+
+// restrictionWriters is the node vocabulary the encoder writes. It is populated
+// in init because every branching node writes its children back through
+// Push.Restriction, which reads this table.
+var restrictionWriters map[mapi.RestrictionType]restrictionWriter
+
+func init() {
+	restrictionWriters = map[mapi.RestrictionType]restrictionWriter{
+		mapi.ResAnd:        pushTyped(pushResChildren),
+		mapi.ResOr:         pushTyped(pushResChildren),
+		mapi.ResNot:        pushTyped((*Push).Restriction),
+		mapi.ResComment:    pushTyped(pushResComment),
+		mapi.ResAnnotation: pushTyped(pushResComment),
+		mapi.ResContent: pushTyped(func(p *Push, c mapi.ContentRestriction) error {
+			p.Uint32(c.FuzzyLevel)
+			p.Uint32(uint32(c.PropTag))
+			return p.TaggedPropVal(c.PropVal)
+		}),
+		mapi.ResProperty: pushTyped(func(p *Push, pr mapi.PropertyRestriction) error {
+			p.Uint8(uint8(pr.Relop))
+			p.Uint32(uint32(pr.PropTag))
+			return p.TaggedPropVal(pr.PropVal)
+		}),
+		mapi.ResPropCompare: pushTyped(func(p *Push, pc mapi.ComparePropsRestriction) error {
+			p.Uint8(uint8(pc.Relop))
+			p.Uint32(uint32(pc.PropTag1))
+			p.Uint32(uint32(pc.PropTag2))
+			return nil
+		}),
+		mapi.ResBitmask: pushTyped(func(p *Push, b mapi.BitmaskRestriction) error {
+			p.Uint8(uint8(b.Relop))
+			p.Uint32(uint32(b.PropTag))
+			p.Uint32(b.Mask)
+			return nil
+		}),
+		mapi.ResSize: pushTyped(func(p *Push, s mapi.SizeRestriction) error {
+			p.Uint8(uint8(s.Relop))
+			p.Uint32(uint32(s.PropTag))
+			p.Uint32(s.Size)
+			return nil
+		}),
+		mapi.ResExist: pushTyped(func(p *Push, e mapi.ExistRestriction) error {
+			p.Uint32(uint32(e.PropTag))
+			return nil
+		}),
+		mapi.ResSub: pushTyped(func(p *Push, s mapi.SubRestriction) error {
+			p.Uint32(s.SubObject)
+			return p.Restriction(s.Res)
+		}),
+		mapi.ResCount: pushTyped(func(p *Push, c mapi.CountRestriction) error {
+			p.Uint32(c.Count)
+			return p.Restriction(c.SubRes)
+		}),
+		// The recursion bottoms out here: ResNull has no payload.
+		mapi.ResNull: func(*Push, any) error { return nil },
+	}
+}
+
+// pushResChildren writes an AND/OR child list: the count, then each child.
+func pushResChildren(p *Push, kids []mapi.Restriction) error {
+	if err := pushResCount(p, len(kids)); err != nil {
+		return err
+	}
+	for _, k := range kids {
+		if err := p.Restriction(k); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// pushResCount writes an AND/OR child count, whose width follows FlagWCount
+// (u32 set, u16 clear).
+func pushResCount(p *Push, n int) error {
+	if p.flags&FlagWCount != 0 {
+		// #nosec G115 -- a Go slice length; the buffer it measures is orders of magnitude below the field
+		p.Uint32(uint32(n))
+		return nil
+	}
+	if n > 0xFFFF {
+		return ErrFormat
+	}
+	// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
+	p.Uint16(uint16(n))
+	return nil
+}
+
+// pushResComment writes a COMMENT/ANNOTATION node: a u8 count of property values
+// (at least one), those values, and an optional nested restriction.
+func pushResComment(p *Push, c mapi.CommentRestriction) error {
+	if len(c.PropVals) == 0 || len(c.PropVals) > 0xFF {
+		return ErrFormat
+	}
+	// #nosec G115 -- the length is bounded before it reaches the field, by the range check above it or by the 16-bit prefix the bytes were read with
+	p.Uint8(uint8(len(c.PropVals)))
+	for _, pv := range c.PropVals {
+		if err := p.TaggedPropVal(pv); err != nil {
+			return err
+		}
+	}
+	if c.Res == nil {
+		p.Uint8(0)
+		return nil
+	}
+	p.Uint8(1)
+	return p.Restriction(*c.Res)
 }
 
 // Restriction reads a search restriction, mirroring the type
@@ -155,182 +153,223 @@ func (p *Pull) Restriction() (mapi.Restriction, error) {
 		return mapi.Restriction{}, err
 	}
 	r := mapi.Restriction{Type: mapi.RestrictionType(rt)}
-	switch r.Type {
-	case mapi.ResAnd, mapi.ResOr:
-		var n int
-		if p.flags&FlagWCount != 0 {
-			v, err := p.Uint32()
-			if err != nil {
-				return r, err
-			}
-			n = int(v)
-		} else {
-			v, err := p.Uint16()
-			if err != nil {
-				return r, err
-			}
-			n = int(v)
-		}
-		// #nosec G115 -- n was just read as a uint32 or a uint16, so it fits back into one
-		if err := p.checkCount(uint32(n)); err != nil {
-			return r, err
-		}
-		kids := make([]mapi.Restriction, n)
-		for i := range kids {
-			if kids[i], err = p.Restriction(); err != nil {
-				return r, err
-			}
-		}
-		r.Value = kids
-		return r, nil
-	case mapi.ResNot:
-		inner, err := p.Restriction()
-		if err != nil {
-			return r, err
-		}
-		r.Value = inner
-		return r, nil
-	case mapi.ResContent:
-		var c mapi.ContentRestriction
-		if c.FuzzyLevel, err = p.Uint32(); err != nil {
-			return r, err
-		}
-		tag, err := p.Uint32()
-		if err != nil {
-			return r, err
-		}
-		c.PropTag = mapi.PropTag(tag)
-		if c.PropVal, err = p.TaggedPropVal(); err != nil {
-			return r, err
-		}
-		r.Value = c
-		return r, nil
-	case mapi.ResProperty:
-		var pr mapi.PropertyRestriction
-		relop, err := p.Uint8()
-		if err != nil {
-			return r, err
-		}
-		pr.Relop = mapi.Relop(relop)
-		tag, err := p.Uint32()
-		if err != nil {
-			return r, err
-		}
-		pr.PropTag = mapi.PropTag(tag)
-		if pr.PropVal, err = p.TaggedPropVal(); err != nil {
-			return r, err
-		}
-		r.Value = pr
-		return r, nil
-	case mapi.ResPropCompare:
-		var pc mapi.ComparePropsRestriction
-		relop, err := p.Uint8()
-		if err != nil {
-			return r, err
-		}
-		pc.Relop = mapi.Relop(relop)
-		t1, err := p.Uint32()
-		if err != nil {
-			return r, err
-		}
-		t2, err := p.Uint32()
-		if err != nil {
-			return r, err
-		}
-		pc.PropTag1, pc.PropTag2 = mapi.PropTag(t1), mapi.PropTag(t2)
-		r.Value = pc
-		return r, nil
-	case mapi.ResBitmask:
-		var b mapi.BitmaskRestriction
-		relop, err := p.Uint8()
-		if err != nil {
-			return r, err
-		}
-		b.Relop = mapi.BitmaskRelop(relop)
-		tag, err := p.Uint32()
-		if err != nil {
-			return r, err
-		}
-		b.PropTag = mapi.PropTag(tag)
-		if b.Mask, err = p.Uint32(); err != nil {
-			return r, err
-		}
-		r.Value = b
-		return r, nil
-	case mapi.ResSize:
-		var s mapi.SizeRestriction
-		relop, err := p.Uint8()
-		if err != nil {
-			return r, err
-		}
-		s.Relop = mapi.Relop(relop)
-		tag, err := p.Uint32()
-		if err != nil {
-			return r, err
-		}
-		s.PropTag = mapi.PropTag(tag)
-		if s.Size, err = p.Uint32(); err != nil {
-			return r, err
-		}
-		r.Value = s
-		return r, nil
-	case mapi.ResExist:
-		tag, err := p.Uint32()
-		if err != nil {
-			return r, err
-		}
-		r.Value = mapi.ExistRestriction{PropTag: mapi.PropTag(tag)}
-		return r, nil
-	case mapi.ResSub:
-		var s mapi.SubRestriction
-		if s.SubObject, err = p.Uint32(); err != nil {
-			return r, err
-		}
-		if s.Res, err = p.Restriction(); err != nil {
-			return r, err
-		}
-		r.Value = s
-		return r, nil
-	case mapi.ResComment, mapi.ResAnnotation:
-		count, err := p.Uint8()
-		if err != nil {
-			return r, err
-		}
-		if count == 0 {
-			return r, ErrFormat
-		}
-		c := mapi.CommentRestriction{PropVals: make([]mapi.TaggedPropVal, count)}
-		for i := range c.PropVals {
-			if c.PropVals[i], err = p.TaggedPropVal(); err != nil {
-				return r, err
-			}
-		}
-		present, err := p.Uint8()
-		if err != nil {
-			return r, err
-		}
-		if present != 0 {
-			inner, err := p.Restriction()
-			if err != nil {
-				return r, err
-			}
-			c.Res = &inner
-		}
-		r.Value = c
-		return r, nil
-	case mapi.ResCount:
-		var c mapi.CountRestriction
-		if c.Count, err = p.Uint32(); err != nil {
-			return r, err
-		}
-		if c.SubRes, err = p.Restriction(); err != nil {
-			return r, err
-		}
-		r.Value = c
-		return r, nil
-	case mapi.ResNull:
-		return r, nil
-	default:
+	read, ok := restrictionReaders[r.Type]
+	if !ok {
 		return r, ErrFormat
 	}
+	v, err := read(p)
+	if err != nil {
+		return r, err
+	}
+	r.Value = v
+	return r, nil
+}
+
+// restrictionReader reads one restriction node's payload, returning the Go type
+// that node carries in mapi.Restriction.Value.
+type restrictionReader func(p *Pull) (any, error)
+
+// restrictionReaders is the node vocabulary the decoder reads. Like the writer
+// table it is populated in init, because every branching node reads its children
+// back through Pull.Restriction.
+var restrictionReaders map[mapi.RestrictionType]restrictionReader
+
+func init() {
+	restrictionReaders = map[mapi.RestrictionType]restrictionReader{
+		mapi.ResAnd:         pullResChildren,
+		mapi.ResOr:          pullResChildren,
+		mapi.ResNot:         pullTyped((*Pull).Restriction),
+		mapi.ResComment:     pullResComment,
+		mapi.ResAnnotation:  pullResComment,
+		mapi.ResContent:     pullResContent,
+		mapi.ResProperty:    pullResProperty,
+		mapi.ResPropCompare: pullResPropCompare,
+		mapi.ResBitmask: func(p *Pull) (any, error) {
+			relop, tag, mask, err := pullResRelopTagValue(p)
+			if err != nil {
+				return nil, err
+			}
+			return mapi.BitmaskRestriction{Relop: mapi.BitmaskRelop(relop), PropTag: tag, Mask: mask}, nil
+		},
+		mapi.ResSize: func(p *Pull) (any, error) {
+			relop, tag, size, err := pullResRelopTagValue(p)
+			if err != nil {
+				return nil, err
+			}
+			return mapi.SizeRestriction{Relop: mapi.Relop(relop), PropTag: tag, Size: size}, nil
+		},
+		mapi.ResExist: func(p *Pull) (any, error) {
+			tag, err := p.Uint32()
+			if err != nil {
+				return nil, err
+			}
+			return mapi.ExistRestriction{PropTag: mapi.PropTag(tag)}, nil
+		},
+		mapi.ResSub:   pullResSub,
+		mapi.ResCount: pullResCountNode,
+		// The recursion bottoms out here: ResNull has no payload.
+		mapi.ResNull: func(*Pull) (any, error) { return nil, nil },
+	}
+}
+
+// pullResChildren reads an AND/OR child list: the count, then each child.
+func pullResChildren(p *Pull) (any, error) {
+	n, err := pullResCount(p)
+	if err != nil {
+		return nil, err
+	}
+	if err := p.checkCount(n); err != nil {
+		return nil, err
+	}
+	kids := make([]mapi.Restriction, n)
+	for i := range kids {
+		if kids[i], err = p.Restriction(); err != nil {
+			return nil, err
+		}
+	}
+	return kids, nil
+}
+
+// pullResCount reads an AND/OR child count, whose width follows FlagWCount
+// (u32 set, u16 clear).
+func pullResCount(p *Pull) (uint32, error) {
+	if p.flags&FlagWCount != 0 {
+		return p.Uint32()
+	}
+	v, err := p.Uint16()
+	return uint32(v), err
+}
+
+// pullResPropCompare reads a PROPCOMPARE node: an operator and the two property
+// tags it compares.
+func pullResPropCompare(p *Pull) (any, error) {
+	var pc mapi.ComparePropsRestriction
+	relop, err := p.Uint8()
+	if err != nil {
+		return nil, err
+	}
+	pc.Relop = mapi.Relop(relop)
+	t1, err := p.Uint32()
+	if err != nil {
+		return nil, err
+	}
+	t2, err := p.Uint32()
+	if err != nil {
+		return nil, err
+	}
+	pc.PropTag1, pc.PropTag2 = mapi.PropTag(t1), mapi.PropTag(t2)
+	return pc, nil
+}
+
+// pullResSub reads a SUB node: the sub-object it applies to and the restriction
+// evaluated against it.
+func pullResSub(p *Pull) (any, error) {
+	var s mapi.SubRestriction
+	var err error
+	if s.SubObject, err = p.Uint32(); err != nil {
+		return nil, err
+	}
+	if s.Res, err = p.Restriction(); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// pullResCountNode reads a COUNT node: the limit and the restriction it bounds.
+func pullResCountNode(p *Pull) (any, error) {
+	var c mapi.CountRestriction
+	var err error
+	if c.Count, err = p.Uint32(); err != nil {
+		return nil, err
+	}
+	if c.SubRes, err = p.Restriction(); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// pullResContent reads a CONTENT node: a fuzzy level, the tag it applies to, and
+// the value to match.
+func pullResContent(p *Pull) (any, error) {
+	var c mapi.ContentRestriction
+	var err error
+	if c.FuzzyLevel, err = p.Uint32(); err != nil {
+		return nil, err
+	}
+	tag, err := p.Uint32()
+	if err != nil {
+		return nil, err
+	}
+	c.PropTag = mapi.PropTag(tag)
+	if c.PropVal, err = p.TaggedPropVal(); err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// pullResProperty reads a PROPERTY node: a relational operator, the tag it
+// applies to, and the value to compare against.
+func pullResProperty(p *Pull) (any, error) {
+	var pr mapi.PropertyRestriction
+	relop, err := p.Uint8()
+	if err != nil {
+		return nil, err
+	}
+	pr.Relop = mapi.Relop(relop)
+	tag, err := p.Uint32()
+	if err != nil {
+		return nil, err
+	}
+	pr.PropTag = mapi.PropTag(tag)
+	if pr.PropVal, err = p.TaggedPropVal(); err != nil {
+		return nil, err
+	}
+	return pr, nil
+}
+
+// pullResRelopTagValue reads the shape BITMASK and SIZE share: a one-byte
+// operator, the property tag, and a 32-bit operand.
+func pullResRelopTagValue(p *Pull) (relop uint8, tag mapi.PropTag, value uint32, err error) {
+	if relop, err = p.Uint8(); err != nil {
+		return 0, 0, 0, err
+	}
+	raw, err := p.Uint32()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	if value, err = p.Uint32(); err != nil {
+		return 0, 0, 0, err
+	}
+	return relop, mapi.PropTag(raw), value, nil
+}
+
+// pullResComment reads a COMMENT/ANNOTATION node: a u8 count of property values
+// (at least one), those values, and an optional nested restriction.
+func pullResComment(p *Pull) (any, error) {
+	count, err := p.Uint8()
+	if err != nil {
+		return nil, err
+	}
+	if count == 0 {
+		return nil, ErrFormat
+	}
+	c := mapi.CommentRestriction{PropVals: make([]mapi.TaggedPropVal, count)}
+	for i := range c.PropVals {
+		if c.PropVals[i], err = p.TaggedPropVal(); err != nil {
+			return nil, err
+		}
+	}
+	present, err := p.Uint8()
+	if err != nil {
+		return nil, err
+	}
+	if present == 0 {
+		return c, nil
+	}
+	inner, err := p.Restriction()
+	if err != nil {
+		return nil, err
+	}
+	c.Res = &inner
+	return c, nil
 }

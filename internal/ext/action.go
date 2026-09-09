@@ -77,52 +77,42 @@ func (p *Push) actionBlock(a mapi.ActionBlock) error {
 }
 
 func (p *Push) actionData(a mapi.ActionBlock) error {
-	switch a.Type {
-	case mapi.OpMove, mapi.OpCopy:
-		m, err := asType[mapi.MoveCopyAction](a.Data)
-		if err != nil {
-			return err
-		}
-		return p.moveCopyAction(m)
-	case mapi.OpReply, mapi.OpOOFReply:
-		r, err := asType[mapi.ReplyAction](a.Data)
-		if err != nil {
-			return err
-		}
+	write, ok := actionWriters[a.Type]
+	if !ok {
+		return ErrFormat
+	}
+	return write(p, a.Data)
+}
+
+// actionWriters is the rule-action vocabulary the encoder writes, keyed by action
+// type. A type absent from it is refused rather than guessed at. It is populated
+// in init because a tag action writes a property value, whose encoder reads the
+// property table back.
+var actionWriters map[uint8]func(p *Push, v any) error
+
+func init() {
+	pushReply := pushTyped(func(p *Push, r mapi.ReplyAction) error {
 		p.Uint64(uint64(r.TemplateFolderID))
 		p.Uint64(uint64(r.TemplateMessageID))
 		p.GUID(r.TemplateGUID)
 		return nil
-	case mapi.OpDeferAction:
-		b, err := asType[[]byte](a.Data)
-		if err != nil {
-			return err
-		}
-		p.Raw(b)
-		return nil
-	case mapi.OpBounce:
-		code, err := asType[uint32](a.Data)
-		if err != nil {
-			return err
-		}
-		p.Uint32(code)
-		return nil
-	case mapi.OpForward, mapi.OpDelegate:
-		fd, err := asType[mapi.ForwardDelegateAction](a.Data)
-		if err != nil {
-			return err
-		}
-		return p.forwardDelegateAction(fd)
-	case mapi.OpTag:
-		tv, err := asType[mapi.TaggedPropVal](a.Data)
-		if err != nil {
-			return err
-		}
-		return p.TaggedPropVal(tv)
-	case mapi.OpDelete, mapi.OpMarkAsRead:
-		return nil
-	default:
-		return ErrFormat
+	})
+	pushMoveCopy := pushTyped((*Push).moveCopyAction)
+	pushForward := pushTyped((*Push).forwardDelegateAction)
+	noData := func(*Push, any) error { return nil }
+
+	actionWriters = map[uint8]func(p *Push, v any) error{
+		mapi.OpMove:        pushMoveCopy,
+		mapi.OpCopy:        pushMoveCopy,
+		mapi.OpReply:       pushReply,
+		mapi.OpOOFReply:    pushReply,
+		mapi.OpForward:     pushForward,
+		mapi.OpDelegate:    pushForward,
+		mapi.OpDeferAction: pushTyped(func(p *Push, b []byte) error { p.Raw(b); return nil }),
+		mapi.OpBounce:      pushTyped(func(p *Push, code uint32) error { p.Uint32(code); return nil }),
+		mapi.OpTag:         pushTyped((*Push).TaggedPropVal),
+		mapi.OpDelete:      noData,
+		mapi.OpMarkAsRead:  noData,
 	}
 }
 
@@ -141,48 +131,58 @@ func (p *Pull) actionBlock() (mapi.ActionBlock, error) {
 	if a.Flags, err = p.Uint32(); err != nil {
 		return a, err
 	}
-	switch a.Type {
-	case mapi.OpMove, mapi.OpCopy:
-		a.Data, err = p.moveCopyAction()
-		return a, err
-	case mapi.OpReply, mapi.OpOOFReply:
+	read, ok := actionReaders[a.Type]
+	if !ok {
+		return a, ErrFormat
+	}
+	a.Data, err = read(p, length)
+	return a, err
+}
+
+// actionReaders is the rule-action vocabulary the decoder reads. length is the
+// block length the header carried, which only the deferred-action payload needs.
+var actionReaders map[uint8]func(p *Pull, length uint16) (any, error)
+
+func init() {
+	pullMoveCopy := func(p *Pull, _ uint16) (any, error) { return p.moveCopyAction() }
+	pullForward := func(p *Pull, _ uint16) (any, error) { return p.forwardDelegateAction() }
+	pullReply := func(p *Pull, _ uint16) (any, error) {
 		var r mapi.ReplyAction
 		folder, err := p.Uint64()
 		if err != nil {
-			return a, err
+			return nil, err
 		}
 		msg, err := p.Uint64()
 		if err != nil {
-			return a, err
+			return nil, err
 		}
 		if r.TemplateGUID, err = p.GUID(); err != nil {
-			return a, err
+			return nil, err
 		}
 		r.TemplateFolderID, r.TemplateMessageID = mapi.EID(folder), mapi.EID(msg)
-		a.Data = r
-		return a, nil
-	case mapi.OpDeferAction:
-		// The payload occupies the block length minus the fixed type(1) +
-		// flavor(4) + flags(4) header that the length also counts.
-		if length < 9 {
-			return a, ErrFormat
-		}
-		a.Data, err = p.Raw(int(length) - 9)
-		return a, err
-	case mapi.OpBounce:
-		a.Data, err = p.Uint32()
-		return a, err
-	case mapi.OpForward, mapi.OpDelegate:
-		a.Data, err = p.forwardDelegateAction()
-		return a, err
-	case mapi.OpTag:
-		a.Data, err = p.TaggedPropVal()
-		return a, err
-	case mapi.OpDelete, mapi.OpMarkAsRead:
-		a.Data = nil
-		return a, nil
-	default:
-		return a, ErrFormat
+		return r, nil
+	}
+	noData := func(*Pull, uint16) (any, error) { return nil, nil }
+
+	actionReaders = map[uint8]func(p *Pull, length uint16) (any, error){
+		mapi.OpMove:     pullMoveCopy,
+		mapi.OpCopy:     pullMoveCopy,
+		mapi.OpReply:    pullReply,
+		mapi.OpOOFReply: pullReply,
+		mapi.OpForward:  pullForward,
+		mapi.OpDelegate: pullForward,
+		mapi.OpDeferAction: func(p *Pull, length uint16) (any, error) {
+			// The payload occupies the block length minus the fixed type(1) +
+			// flavor(4) + flags(4) header that the length also counts.
+			if length < 9 {
+				return nil, ErrFormat
+			}
+			return p.Raw(int(length) - 9)
+		},
+		mapi.OpBounce:     func(p *Pull, _ uint16) (any, error) { return p.Uint32() },
+		mapi.OpTag:        func(p *Pull, _ uint16) (any, error) { return p.TaggedPropVal() },
+		mapi.OpDelete:     noData,
+		mapi.OpMarkAsRead: noData,
 	}
 }
 
